@@ -800,22 +800,6 @@
         }
       }
     },
-    "src/app/api/internal/audit-emit/route.ts": {
-      "kind": "api-default",
-      "methods": [
-        "POST"
-      ],
-      "auth": [
-        "session"
-      ],
-      "handlerAuthReason": "checkAuth(request) is called with no scope option, so it takes the session-only branch requiring a valid Auth.js session; the proxy's internal self-fetch forwards the original blocked request's session cookie and sets Origin to self to pass the proxy's baseline CSRF gate, and the endpoint further restricts writes to a fixed ALLOWED_ACTIONS allowlist so it cannot become a generic audit-write proxy.",
-      "sessionPasskeyGate": {
-        "POST": {
-          "value": "tier-a",
-          "reason": "the page proxy's own audit self-fetch"
-        }
-      }
-    },
     "src/app/api/maintenance/audit-chain-verify/route.ts": {
       "kind": "api-default",
       "methods": [

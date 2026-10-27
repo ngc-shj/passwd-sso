@@ -81,7 +81,8 @@ export async function handleApiAuth(request: NextRequest) {
   // Baseline CSRF gate: request-attribute-based, path-independent.
   // Fires whenever a request carries a session cookie AND uses a
   // mutating method, regardless of route classification. This closes
-  // pre1 (audit-emit) and the R3 baseline gap structurally.
+  // pre1 (a mutating route without its own Origin check) and the R3
+  // baseline gap structurally.
   const cookieHeader = request.headers.get("cookie") ?? "";
   const cookiePresent = hasSessionCookie(cookieHeader);
   if (shouldEnforceCsrf(request, cookiePresent)) {
@@ -189,7 +190,9 @@ async function gateSession(
   if (session.passkeyStateDegraded) return noStoreError(API_ERROR.SERVICE_UNAVAILABLE);
 
   if (passkeyEnforcementBlocks(session)) {
-    if (session.userId) {
+    // A valid session with a userId always carries its tenant (getSessionInfo
+    // refuses one whose tenant does not resolve); the check narrows the type.
+    if (session.userId && session.tenantId) {
       await auditSessionPasskeyBlock({
         req: request,
         userId: session.userId,

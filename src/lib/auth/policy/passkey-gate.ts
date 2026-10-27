@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import {
@@ -62,8 +62,7 @@ export async function passkeyGateBlocks(args: {
   );
   if (limited.allowed) {
     await logAuditAsync({
-      ...personalAuditBase(req, userId),
-      tenantId,
+      ...tenantAuditBase(req, userId, tenantId),
       action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
       metadata: { blockedPath: credential, credentialId },
     });

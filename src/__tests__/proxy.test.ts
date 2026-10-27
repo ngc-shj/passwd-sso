@@ -1000,10 +1000,11 @@ describe("proxy — access restriction", () => {
 });
 
 // =============================================================================
-// CSRF gate integration tests (C4 step 6 — 11 cases).
+// CSRF gate integration tests (C4 step 6).
 //
 // These exercise the proxy CSRF gate end-to-end through the orchestrator.
-// They are the regression net for pre1 (audit-emit assertOrigin missing) and
+// They are the regression net for pre1 (an api-default mutating route with
+// no assertOrigin of its own) and
 // the R3 baseline (9 session-mutating routes lacked assertOrigin) — both
 // closed structurally by the gate. Without these tests, a refactor that
 // drops shouldEnforceCsrf or reorders the early-returns would pass the suite.
@@ -1057,8 +1058,8 @@ describe("proxy — CSRF gate", () => {
     expect(res.status).toBe(200);
   });
 
-  it("[3] /api/internal/audit-emit POST + session + mismatched Origin → 403 (pre1 closure)", async () => {
-    const req = new NextRequest(`${APP_ORIGIN}/api/internal/audit-emit`, {
+  it("[3] api-default POST + session + mismatched Origin → 403 (pre1 closure)", async () => {
+    const req = new NextRequest(`${APP_ORIGIN}/api/maintenance/purge-history`, {
       method: "POST",
       headers: {
         Cookie: "authjs.session-token=5e55-0018",
@@ -1069,8 +1070,8 @@ describe("proxy — CSRF gate", () => {
     expect(res.status).toBe(403);
   });
 
-  it("[4] /api/internal/audit-emit POST + session + matching Origin → pass-through (default branch, route handler authenticates)", async () => {
-    const req = new NextRequest(`${APP_ORIGIN}/api/internal/audit-emit`, {
+  it("[4] api-default POST + session + matching Origin → pass-through (default branch, route handler authenticates)", async () => {
+    const req = new NextRequest(`${APP_ORIGIN}/api/maintenance/purge-history`, {
       method: "POST",
       headers: {
         Cookie: "authjs.session-token=5e55-0019",
@@ -1078,7 +1079,7 @@ describe("proxy — CSRF gate", () => {
       },
     } as ConstructorParameters<typeof NextRequest>[1]);
     const res = await proxy(req, dummyOptions);
-    // /api/internal/* falls through to api-default — no proxy 401, route handles it
+    // /api/maintenance/* falls through to api-default — no proxy 401, route handles it
     expect(res.status).toBe(200);
   });
 
@@ -1145,26 +1146,8 @@ describe("proxy — CSRF gate", () => {
     expect(res.status).toBe(200);
   });
 
-  it("[10] internal-fetch shape (POST to audit-emit with explicit Origin matching APP_URL + session cookie) → pass-through", async () => {
-    // Simulates the proxy's own self-fetch at proxy.ts:153 with the Origin
-    // header set to selfOrigin. Validates that the C4 step 3 fix works:
-    // the proxy can call its own /api/internal/audit-emit without 403'ing.
-    const req = new NextRequest(`${APP_ORIGIN}/api/internal/audit-emit`, {
-      method: "POST",
-      headers: {
-        Cookie: "authjs.session-token=5e55-001d",
-        Origin: APP_ORIGIN, // explicit, matches APP_URL
-      },
-    } as ConstructorParameters<typeof NextRequest>[1]);
-    const res = await proxy(req, dummyOptions);
-    expect(res.status).toBe(200);
-  });
-
-  it("[11] internal-fetch counter-test: WITHOUT explicit Origin → 403 (locks T3 fix — proxy MUST set Origin on self-fetch)", async () => {
-    // If a future refactor removes "Origin: selfOrigin" from the internal
-    // fetch (proxy.ts:153), this counter-test catches it: a same-shape
-    // request with no Origin gets 403 from the CSRF gate.
-    const req = new NextRequest(`${APP_ORIGIN}/api/internal/audit-emit`, {
+  it("[10] api-default POST + session WITHOUT Origin → 403 (a missing Origin is refused, not waved through)", async () => {
+    const req = new NextRequest(`${APP_ORIGIN}/api/maintenance/purge-history`, {
       method: "POST",
       headers: {
         Cookie: "authjs.session-token=5e55-001e",
@@ -1216,6 +1199,7 @@ describe("proxy — session passkey gate", () => {
     expect(mockLogAuditAsync).toHaveBeenCalledTimes(1);
     expect(mockLogAuditAsync).toHaveBeenCalledWith(
       expect.objectContaining({
+        scope: "TENANT",
         action: "PASSKEY_ENFORCEMENT_BLOCKED",
         userId: "u-blocked",
         tenantId: "tenant1",
@@ -1240,13 +1224,9 @@ describe("proxy — session passkey gate", () => {
 
   // SEC-2: a page navigation's blocked row names the area, never the
   // caller-chosen path, and is written once.
-  it("redirects a blocked page navigation and audits it once, with a closed blockedPath", async () => {
-    _resetPasskeyAuditForTests();
+  it("redirects a blocked page navigation and audits it once, in-process, with a closed blockedPath", async () => {
     fetchSpy.mockImplementation(
-      dispatchFetch({
-        ...sessionRoute(sessionResponseBody("u-blocked-page", PASSKEY_BLOCKED)),
-        "/api/internal/audit-emit": () => new Response("{}", { status: 200 }),
-      }),
+      dispatchFetch(sessionRoute(sessionResponseBody("u-blocked-page", PASSKEY_BLOCKED))),
     );
 
     const res = await proxy(
@@ -1258,11 +1238,19 @@ describe("proxy — session passkey gate", () => {
     await new Promise((r) => setImmediate(r));
 
     expect(res.status).toBe(307);
-    const auditCalls = fetchCallsTo(fetchSpy, "/api/internal/audit-emit");
-    expect(auditCalls).toHaveLength(1);
-    expect(JSON.parse(String((auditCalls[0][1] as RequestInit).body)).metadata).toEqual({
-      blockedPath: "PAGE /dashboard",
-    });
+    expect(mockLogAuditAsync).toHaveBeenCalledTimes(1);
+    expect(mockLogAuditAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: "TENANT",
+        action: "PASSKEY_ENFORCEMENT_BLOCKED",
+        userId: "u-blocked-page",
+        tenantId: "tenant1",
+        metadata: { blockedPath: "PAGE /dashboard" },
+      }),
+    );
+    expect(fetchSpy.mock.calls.map((c: unknown[]) => new URL(String(c[0])).pathname)).toEqual([
+      "/api/auth/session",
+    ]);
   });
 
   it("passes the proxy's own session read (Tier A) without reading the session", async () => {

@@ -46,11 +46,7 @@
  *     src/lib/directory-sync/engine.ts, src/lib/webhook-dispatcher.ts)
  *   - Constants validation (src/lib/constants/audit/audit.ts)
  *   - TENANT-scope routes with no NextRequest-derived tenant to hand the
- *     helper. Two are here for DIFFERENT reasons, and the difference is the
- *     one this list gets asked about:
- *       src/app/api/internal/audit-emit/route.ts — leaves tenantId unset and
- *       lets resolveTenantId() derive it from userId, so using the helper
- *       would cost a redundant lookup.
+ *     helper:
  *       src/app/api/mcp/register/route.ts — DCR registration happens before
  *       tenant binding, so there is no tenant to derive. It does NOT rely on
  *       resolveTenantId: it states `tenantId: SYSTEM_TENANT_ID` outright,

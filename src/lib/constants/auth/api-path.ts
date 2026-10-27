@@ -103,7 +103,6 @@ export const API_PATH = {
   MOBILE_AUTHORIZE: "/api/mobile/authorize",
   MOBILE_FAVICON: "/api/mobile/favicon",
   MOBILE_FAVICON_PREF: "/api/mobile/favicon-pref",
-  INTERNAL_AUDIT_EMIT: "/api/internal/audit-emit",
 } as const;
 
 export const apiPath = {

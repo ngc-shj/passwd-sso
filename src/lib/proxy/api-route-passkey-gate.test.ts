@@ -460,7 +460,7 @@ describe("session passkey gate — audit", () => {
     expect(mockLogAuditAsync).toHaveBeenCalledTimes(1);
     expect(mockLogAuditAsync).toHaveBeenCalledWith(
       expect.objectContaining({
-        scope: "PERSONAL",
+        scope: "TENANT",
         action: "PASSKEY_ENFORCEMENT_BLOCKED",
         userId: "u-1",
         tenantId: "t-1",

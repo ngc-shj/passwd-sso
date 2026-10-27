@@ -1231,6 +1231,8 @@ describe("POST /api/mcp/token", () => {
       );
       expect(mockLogAudit).toHaveBeenCalledWith(
         expect.objectContaining({
+          scope: "TENANT",
+          tenantId: TENANT_ID,
           action: "PASSKEY_ENFORCEMENT_BLOCKED",
           metadata: { blockedPath: "/api/mcp/token" },
         }),
@@ -1305,6 +1307,8 @@ describe("POST /api/mcp/token", () => {
       );
       expect(mockLogAudit).toHaveBeenCalledWith(
         expect.objectContaining({
+          scope: "TENANT",
+          tenantId: TENANT_ID,
           action: "PASSKEY_ENFORCEMENT_BLOCKED",
           metadata: { blockedPath: "/api/mcp/token" },
         }),

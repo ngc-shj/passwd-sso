@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
-import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
+import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit/audit";
 import { MS_PER_DAY } from "@/lib/constants/time";
 import type { RateLimiterOptions } from "@/lib/security/rate-limit";
 
@@ -117,6 +117,7 @@ describe("passkeyGateBlocks", () => {
     expect(mockLogAuditAsync).toHaveBeenCalledTimes(1);
     expect(mockLogAuditAsync).toHaveBeenCalledWith(
       expect.objectContaining({
+        scope: AUDIT_SCOPE.TENANT,
         userId: USER_ID,
         tenantId: TENANT_ID,
         action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,

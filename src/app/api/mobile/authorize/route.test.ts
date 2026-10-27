@@ -82,7 +82,8 @@ vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: mockCreateRateLimiter,
 }));
 
-vi.mock("@/lib/audit/audit", () => ({
+vi.mock("@/lib/audit/audit", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
   extractRequestMeta: () => ({ ip: "1.2.3.4", userAgent: "test", acceptLanguage: null }),
   logAuditAsync: mockLogAuditAsync,
   personalAuditBase: (_req: unknown, userId: string) => ({
@@ -411,6 +412,8 @@ describe("GET /api/mobile/authorize", () => {
     // Exactly one PASSKEY_ENFORCEMENT_BLOCKED audit emit.
     expect(mockLogAuditAsync).toHaveBeenCalledWith(
       expect.objectContaining({
+        scope: "TENANT",
+        tenantId: "22222222-2222-2222-2222-222222222222",
         action: "PASSKEY_ENFORCEMENT_BLOCKED",
         metadata: { blockedPath: "/api/mobile/authorize" },
       }),

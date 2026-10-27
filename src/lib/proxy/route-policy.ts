@@ -167,8 +167,8 @@ export function classifyRoute(pathname: string): RoutePolicy {
     return { kind: ROUTE_POLICY_KIND.API_SESSION_REQUIRED };
   }
 
-  // Other /api/* routes (e.g., /api/internal/*, /api/maintenance/*,
-  // /api/admin/*, /api/scim/*, /api/auth/*). The proxy applies only
+  // Other /api/* routes (e.g., /api/maintenance/*, /api/admin/*,
+  // /api/scim/*, /api/auth/*). The proxy applies only
   // default cache-control headers; the route handler is responsible for
   // its own auth.
   return { kind: ROUTE_POLICY_KIND.API_DEFAULT };

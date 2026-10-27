@@ -44,7 +44,7 @@ import { checkAccessRestrictionWithAudit } from "@/lib/auth/policy/access-restri
 import { withBypassRls, advisoryXactLock } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { logAuditAsync, extractRequestMeta, personalAuditBase } from "@/lib/audit/audit";
+import { logAuditAsync, extractRequestMeta, personalAuditBase, tenantAuditBase } from "@/lib/audit/audit";
 import { emitBridgeCodeIssueFailure } from "@/lib/audit/bridge-code-failure";
 import { parseBody } from "@/lib/http/parse-body";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -223,9 +223,8 @@ async function handlePOST(req: NextRequest) {
   if (passkeyEnforcementBlocks(pkState)) {
     if (recordPasskeyAuditEmit(userId, "/api/extension/bridge-code", Date.now())) {
       await logAuditAsync({
-        ...personalAuditBase(req, userId),
+        ...tenantAuditBase(req, userId, userRecord.tenantId),
         action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
-        tenantId: userRecord.tenantId,
         metadata: { blockedPath: "/api/extension/bridge-code" },
       });
     }

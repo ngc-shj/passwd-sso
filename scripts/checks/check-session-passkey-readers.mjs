@@ -87,11 +87,6 @@ const READER_EXEMPTIONS = new Map([
       "which the proxy's own session read depends on. Classified by this entry (R5-4); its gated concretePaths " +
       "spellings reach the proxy gate and do not make it an API_DEFAULT_SESSION_READERS member.",
   ],
-  [
-    "src/app/api/internal/audit-emit/route.ts",
-    "the page proxy's own audit self-fetch: checkAuth attributes the forwarded audit row to the caller and " +
-      "returns no data (forged rows are the pre-existing SC3 follow-up).",
-  ],
 ]);
 
 const failures = [];

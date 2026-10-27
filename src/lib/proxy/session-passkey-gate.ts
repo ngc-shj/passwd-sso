@@ -2,13 +2,15 @@
  * Exemption lists and audit write for the proxy's session passkey gate
  * (api-route.ts). A blocked session's cookie-bearing `/api/*` request is
  * refused with PASSKEY_REQUIRED unless it matches one of the lists below.
+ * The page proxy (page-route.ts) writes its blocked-navigation row through the
+ * same audit write.
  *
  * Every list is literal and method-aware: an entry exempts one method on one
  * path, never a prefix, so a new route is gated until it is listed here.
  */
 
 import type { NextRequest } from "next/server";
-import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { PASSKEY_AUDIT_DEDUP_MS } from "@/lib/auth/policy/passkey-enforcement";
@@ -51,7 +53,6 @@ const EXACT_TIER_A: readonly SessionGateEntry[] = [
   { method: "POST", path: "/api/auth/passkey/options", reason: "pre-auth passkey sign-in challenge" },
   { method: "POST", path: "/api/auth/passkey/options/email", reason: "pre-auth passkey sign-in challenge (email)" },
   { method: "POST", path: "/api/auth/passkey/verify", reason: "pre-auth passkey sign-in verification" },
-  { method: "POST", path: "/api/internal/audit-emit", reason: "the page proxy's own audit self-fetch" },
 ];
 
 /**
@@ -152,7 +153,6 @@ export const API_ROUTE_KEYS = [
   "extension",
   "folders",
   "health",
-  "internal",
   "maintenance",
   "mcp",
   "mobile",
@@ -199,9 +199,9 @@ const AUDIT_LIMITER_OPTIONS = { windowMs: PASSKEY_AUDIT_DEDUP_MS, max: 1 } as co
 
 // Bounds the durable audit write on the refusal arm, not the refusal: every
 // blocked request is denied, but each user writes at most one row per
-// blockedPath per window. Redis-shared across processes, unlike the
-// per-process map the page proxy uses. Deliberately NOT failClosedOnRedisError:
-// a Redis outage falls back to memory and keeps writing rows instead of none.
+// blockedPath per window. Redis-shared across processes. Deliberately NOT
+// failClosedOnRedisError: a Redis outage falls back to memory and keeps
+// writing rows instead of none.
 let auditLimiter = createRateLimiter(AUDIT_LIMITER_OPTIONS);
 
 /**
@@ -217,7 +217,7 @@ export function _resetSessionPasskeyAuditForTests(): void {
 export async function auditSessionPasskeyBlock(args: {
   req: NextRequest;
   userId: string;
-  tenantId: string | undefined;
+  tenantId: string;
   blockedPath: string;
 }): Promise<void> {
   const { req, userId, tenantId } = args;
@@ -226,8 +226,7 @@ export async function auditSessionPasskeyBlock(args: {
   );
   if (!limited.allowed) return;
   await logAuditAsync({
-    ...personalAuditBase(req, userId),
-    tenantId,
+    ...tenantAuditBase(req, userId, tenantId),
     action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
     metadata: { blockedPath: args.blockedPath },
   });

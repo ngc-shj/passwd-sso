@@ -14,7 +14,7 @@ import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
-import { logAuditAsync, tenantAuditBase, personalAuditBase } from "@/lib/audit/audit";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { resolveAuditUserId } from "@/lib/constants/app";
 import {
@@ -168,10 +168,9 @@ async function handlePOST(req: NextRequest) {
       // exchangeCodeForToken AFTER code validation, BEFORE the access-token
       // create). Emit the block audit + 403.
       if (result.error === "access_denied" && result.userId) {
-        if (recordPasskeyAuditEmit(result.userId, "/api/mcp/token", Date.now())) {
+        if (result.tenantId && recordPasskeyAuditEmit(result.userId, "/api/mcp/token", Date.now())) {
           await logAuditAsync({
-            ...personalAuditBase(req, result.userId),
-            tenantId: result.tenantId,
+            ...tenantAuditBase(req, result.userId, result.tenantId),
             action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
             metadata: { blockedPath: "/api/mcp/token" },
           });
@@ -285,10 +284,9 @@ async function handlePOST(req: NextRequest) {
       // revoked/cap validation, BEFORE mint — so a replayed token still revokes
       // its family above). Emit the block audit + 403.
       if (result.error === "access_denied" && result.userId) {
-        if (recordPasskeyAuditEmit(result.userId, "/api/mcp/token", Date.now())) {
+        if (result.tenantId && recordPasskeyAuditEmit(result.userId, "/api/mcp/token", Date.now())) {
           await logAuditAsync({
-            ...personalAuditBase(req, result.userId),
-            tenantId: result.tenantId,
+            ...tenantAuditBase(req, result.userId, result.tenantId),
             action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
             metadata: { blockedPath: "/api/mcp/token" },
           });

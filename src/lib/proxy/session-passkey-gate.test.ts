@@ -54,7 +54,6 @@ describe("isSessionGateTierA", () => {
     ["POST", "/api/auth/passkey/options"],
     ["POST", "/api/auth/passkey/options/email"],
     ["POST", "/api/auth/passkey/verify"],
-    ["POST", "/api/internal/audit-emit"],
   ])("exempts %s %s", (method, path) => {
     expect(isSessionGateTierA(method, path)).toBe(true);
   });
@@ -82,8 +81,7 @@ describe("isSessionGateTierA", () => {
     ["POST", "/api/auth/passkey/reauth/verify", "passkey reauth is not exempt"],
     ["GET", "/api/auth/passkey/options", "pre-auth passkey routes are POST-only"],
     ["POST", "/api/auth/passkey/options/", "exact paths outside Auth.js are exact"],
-    ["GET", "/api/internal/audit-emit", "audit-emit is POST-only"],
-    ["POST", "/api/internal/audit-emit/x", "no prefix match"],
+    ["POST", "/api/internal/audit-emit", "the page proxy writes its audit row directly; no self-fetch to exempt"],
   ])("does not exempt %s %s (%s)", (method, path) => {
     expect(isSessionGateTierA(method, path)).toBe(false);
   });
@@ -196,7 +194,7 @@ describe("auditSessionPasskeyBlock", () => {
     expect(mockLimiterCheck).toHaveBeenCalledWith("rl:passkey_session_gate_audit:u-1:GET /api/passwords");
     expect(mockLogAuditAsync).toHaveBeenCalledWith(
       expect.objectContaining({
-        scope: "PERSONAL",
+        scope: "TENANT",
         userId: "u-1",
         tenantId: "t-1",
         action: "PASSKEY_ENFORCEMENT_BLOCKED",

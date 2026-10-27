@@ -1102,6 +1102,8 @@ describe("POST /api/mcp/authorize/consent", () => {
     );
     expect(blockedCalls).toHaveLength(1);
     expect(blockedCalls[0][0]).toMatchObject({
+      scope: "TENANT",
+      tenantId: "tenant-uuid-123",
       action: "PASSKEY_ENFORCEMENT_BLOCKED",
       metadata: { blockedPath: "/api/mcp/authorize/consent" },
     });

@@ -505,6 +505,7 @@ describe("POST /api/extension/bridge-code", () => {
     expect(mockLogAudit).toHaveBeenCalledTimes(1);
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
+        scope: "TENANT",
         action: "PASSKEY_ENFORCEMENT_BLOCKED",
         metadata: { blockedPath: "/api/extension/bridge-code" },
         tenantId: "tenant-1",

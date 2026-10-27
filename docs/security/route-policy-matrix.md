@@ -99,12 +99,6 @@ Routes are grouped by their top-level API area for readability (grouping is cosm
 | `src/app/api/health/live/route.ts` | api-default | GET | none | - | GET gated | - | Kubernetes liveness probe intentionally exposed without auth so orchestrators can check process health pre-authentication; it returns only a static {status:"alive"} with no internal state, so there is nothing sensitive to protect. |
 | `src/app/api/health/ready/route.ts` | api-default | GET | none | - | GET gated | - | Readiness probe deliberately left public for orchestrator polling; hardened to return only a minimal status field after detailed metrics like audit-outbox backlog were removed to avoid leaking operational data to unauthenticated callers -- detailed metrics moved to an operator-token-gated endpoint instead. |
 
-## internal
-
-| Path | Kind | Methods | Auth | Bearer bypass | Session passkey gate | Flags | Reason |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `src/app/api/internal/audit-emit/route.ts` | api-default | POST | session | - | POST tier-a | - | checkAuth(request) is called with no scope option, so it takes the session-only branch requiring a valid Auth.js session; the proxy's internal self-fetch forwards the original blocked request's session cookie and sets Origin to self to pass the proxy's baseline CSRF gate, and the endpoint further restricts writes to a fixed ALLOWED_ACTIONS allowlist so it cannot become a generic audit-write proxy. |
-
 ## maintenance
 
 | Path | Kind | Methods | Auth | Bearer bypass | Session passkey gate | Flags | Reason |
