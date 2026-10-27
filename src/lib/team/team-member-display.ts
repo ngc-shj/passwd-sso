@@ -50,23 +50,23 @@ export async function buildTeamMemberDisplayItems(
     return [];
   }
 
-  const [users, userTenants] = await withBypassRls(prisma, async (tx) =>
-    Promise.all([
-      tx.user.findMany({
-        where: { id: { in: userIds } },
-        select: { id: true, name: true, email: true, image: true },
-      }),
-      // The single-active-tenant invariant is enforced at the write boundary
-      // (`resolveUserTenantIdFromClient`) — order by `createdAt` to keep the
-      // chosen membership stable if the invariant is ever transiently violated.
-      tx.tenantMember.findMany({
-        where: { userId: { in: userIds }, deactivatedAt: null },
-        select: { userId: true, tenant: { select: { name: true } } },
-        // `createdAt` is not unique, so it alone does not make the choice
-        // stable — the `id` tiebreak is what does (owning-tenant-rule.ts).
-        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-      }),
-    ]),
+  const [users, userTenants] = await withBypassRls(prisma, async (tx) => {
+    const users = await tx.user.findMany({
+      where: { id: { in: userIds } },
+      select: { id: true, name: true, email: true, image: true },
+    });
+    // The single-active-tenant invariant is enforced at the write boundary
+    // (`resolveUserTenantIdFromClient`) — order by `createdAt` to keep the
+    // chosen membership stable if the invariant is ever transiently violated.
+    const userTenants = await tx.tenantMember.findMany({
+      where: { userId: { in: userIds }, deactivatedAt: null },
+      select: { userId: true, tenant: { select: { name: true } } },
+      // `createdAt` is not unique, so it alone does not make the choice
+      // stable — the `id` tiebreak is what does (owning-tenant-rule.ts).
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    });
+    return [users, userTenants] as const;
+  },
   BYPASS_GRANT.TEAM_MEMBER_DISPLAY_LOOKUP);
 
   const userById = new Map(users.map((u) => [u.id, u]));

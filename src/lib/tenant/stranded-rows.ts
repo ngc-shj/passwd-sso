@@ -81,7 +81,10 @@ export async function countStrandedRows(
   // into `TABLE[key](db)` as every member of the table, and into nothing
   // reached through a destructured entry.
   const models = Object.keys(STRANDED_COUNTERS) as (keyof typeof STRANDED_COUNTERS)[];
-  const counts = await Promise.all(models.map((model) => STRANDED_COUNTERS[model](db, userId, tenantId)));
+  const counts: number[] = [];
+  for (const model of models) {
+    counts.push(await STRANDED_COUNTERS[model](db, userId, tenantId));
+  }
   return Object.fromEntries(
     models.map((model, i) => [model, counts[i]] as const).filter(([, n]) => n > 0),
   );

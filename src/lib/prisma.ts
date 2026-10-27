@@ -176,7 +176,12 @@ export const prisma = new Proxy(baseClient, {
           if (typeof arg === "function") {
             return arg(active);
           }
-          return Promise.all(arg);
+          // In order, one at a time: the context's transaction holds a single
+          // connection, and Promise.all would issue every statement on it at
+          // once (pg: "client is already executing a query").
+          const results: unknown[] = [];
+          for (const query of arg) results.push(await query);
+          return results;
         };
       }
 

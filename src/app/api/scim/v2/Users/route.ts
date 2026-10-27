@@ -95,18 +95,16 @@ async function handleGET(req: NextRequest) {
     }
 
     const prismaWhere: Prisma.TenantMemberWhereInput = { AND: conditions };
-    const [members, totalResults] = await Promise.all([
-      tx.tenantMember.findMany({
-        where: prismaWhere,
-        include: {
-          user: { select: { id: true, email: true, name: true } },
-        },
-        skip: startIndex - 1,
-        take: count,
-        orderBy: { createdAt: "asc" },
-      }),
-      tx.tenantMember.count({ where: prismaWhere }),
-    ]);
+    const members = await tx.tenantMember.findMany({
+      where: prismaWhere,
+      include: {
+        user: { select: { id: true, email: true, name: true } },
+      },
+      skip: startIndex - 1,
+      take: count,
+      orderBy: { createdAt: "asc" },
+    });
+    const totalResults = await tx.tenantMember.count({ where: prismaWhere });
 
     const baseUrl = getScimBaseUrl();
 

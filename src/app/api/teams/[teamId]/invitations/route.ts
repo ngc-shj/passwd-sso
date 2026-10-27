@@ -82,17 +82,16 @@ async function handlePOST(req: NextRequest, { params }: Params) {
 
   const { email, role } = result.data;
 
-  const teamContextPromise = withTeamTenantRls(teamId, () =>
-    Promise.all([
-      prisma.teamInvitation.findFirst({
-        where: { teamId: teamId, email, status: INVITATION_STATUS.PENDING },
-      }),
-      prisma.team.findUnique({
-        where: { id: teamId },
-        select: { tenantId: true },
-      }),
-    ]),
-  );
+  const teamContextPromise = withTeamTenantRls(teamId, async () => {
+    const existingInv = await prisma.teamInvitation.findFirst({
+      where: { teamId: teamId, email, status: INVITATION_STATUS.PENDING },
+    });
+    const team = await prisma.team.findUnique({
+      where: { id: teamId },
+      select: { tenantId: true },
+    });
+    return [existingInv, team] as const;
+  });
 
   // Existing-user lookup must bypass team tenant RLS so guest users from a
   // different home tenant are still recognized as already-added team members.

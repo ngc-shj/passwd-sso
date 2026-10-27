@@ -78,34 +78,32 @@ export async function resolveEffectiveSessionTimeouts(
     async (tx) => {
       const tenantId = await resolveOwningTenantIdFromClient(tx, userId);
       if (!tenantId) return null;
-      const [tenant, memberships] = await Promise.all([
-        tx.tenant.findUnique({
-          where: { id: tenantId },
-          select: {
-            sessionIdleTimeoutMinutes: true,
-            sessionAbsoluteTimeoutMinutes: true,
-          },
-        }),
-        tx.user.findUnique({
-          where: { id: userId },
-          select: {
-            teamMemberships: {
+      const tenant = await tx.tenant.findUnique({
+        where: { id: tenantId },
+        select: {
+          sessionIdleTimeoutMinutes: true,
+          sessionAbsoluteTimeoutMinutes: true,
+        },
+      });
+      const memberships = await tx.user.findUnique({
+        where: { id: userId },
+        select: {
+          teamMemberships: {
             select: {
-                team: {
-                  select: {
-                    policy: {
-                      select: {
-                        sessionIdleTimeoutMinutes: true,
-                        sessionAbsoluteTimeoutMinutes: true,
-                      },
+              team: {
+                select: {
+                  policy: {
+                    select: {
+                      sessionIdleTimeoutMinutes: true,
+                      sessionAbsoluteTimeoutMinutes: true,
                     },
                   },
                 },
               },
             },
           },
-        }),
-      ]);
+        },
+      });
       // FAIL-CLOSED, same stance as the missing-user arm below: a null tenant row
       // on a successful query is corruption, not "no policy".
       if (!tenant || !memberships) return null;

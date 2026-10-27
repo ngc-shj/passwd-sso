@@ -316,42 +316,34 @@ export async function applyVaultRotation(
   }
 
   // ── Re-encrypt entries ──────────────────────────────────────────────────
-  const ENTRY_BATCH_SIZE = 100;
-  for (let i = 0; i < entries.length; i += ENTRY_BATCH_SIZE) {
-    const batch = entries.slice(i, i + ENTRY_BATCH_SIZE);
-    await Promise.all(batch.map(async (entry) => {
-      const updateResult = await tx.passwordEntry.updateMany({
-        where: { id: entry.id, userId },
-        data: {
-          ...toBlobColumns(entry.encryptedBlob),
-          ...toOverviewColumns(entry.encryptedOverview),
-          aadVersion: entry.aadVersion,
-          keyVersion: newKeyVersion,
-        },
-      });
-      if (updateResult.count !== 1) {
-        throw new Error("ENTRY_COUNT_MISMATCH");
-      }
-    }));
+  for (const entry of entries) {
+    const updateResult = await tx.passwordEntry.updateMany({
+      where: { id: entry.id, userId },
+      data: {
+        ...toBlobColumns(entry.encryptedBlob),
+        ...toOverviewColumns(entry.encryptedOverview),
+        aadVersion: entry.aadVersion,
+        keyVersion: newKeyVersion,
+      },
+    });
+    if (updateResult.count !== 1) {
+      throw new Error("ENTRY_COUNT_MISMATCH");
+    }
   }
 
   // ── Re-encrypt history blobs ────────────────────────────────────────────
-  const HISTORY_BATCH_SIZE = 100;
-  for (let i = 0; i < historyEntries.length; i += HISTORY_BATCH_SIZE) {
-    const batch = historyEntries.slice(i, i + HISTORY_BATCH_SIZE);
-    await Promise.all(batch.map(async (historyEntry) => {
-      const updateResult = await tx.passwordEntryHistory.updateMany({
-        where: { id: historyEntry.id, entry: { userId } },
-        data: {
-          ...toBlobColumns(historyEntry.encryptedBlob),
-          aadVersion: historyEntry.aadVersion,
-          keyVersion: newKeyVersion,
-        },
-      });
-      if (updateResult.count !== 1) {
-        throw new Error("HISTORY_COUNT_MISMATCH");
-      }
-    }));
+  for (const historyEntry of historyEntries) {
+    const updateResult = await tx.passwordEntryHistory.updateMany({
+      where: { id: historyEntry.id, entry: { userId } },
+      data: {
+        ...toBlobColumns(historyEntry.encryptedBlob),
+        aadVersion: historyEntry.aadVersion,
+        keyVersion: newKeyVersion,
+      },
+    });
+    if (updateResult.count !== 1) {
+      throw new Error("HISTORY_COUNT_MISMATCH");
+    }
   }
 
   // ── Per-row CEK rewrap ──────────────────────────────────────────────────

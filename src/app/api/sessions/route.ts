@@ -23,60 +23,59 @@ async function handleGET(request: NextRequest) {
   // H4: the DB stores the digest; look up the current session by digest.
   const currentTokenDigest = getSessionTokenDigest(request);
 
-  // Parallelize independent queries
   const [sessions, tenant, currentSessionId, extensionTokens] = await withUserTenantRls(
     session.user.id,
-    () =>
-      Promise.all([
-        prisma.session.findMany({
-          where: {
-            userId: session.user.id,
-            expires: { gt: new Date() },
-          },
-          select: {
-            id: true,
-            createdAt: true,
-            lastActiveAt: true,
-            ipAddress: true,
-            userAgent: true,
-          },
-          orderBy: { lastActiveAt: "desc" },
-        }),
-        prisma.user.findUnique({
-          where: { id: session.user.id },
-          select: { tenant: { select: { maxConcurrentSessions: true } } },
-        }),
-        currentTokenDigest
-          ? prisma.session
-              .findUnique({
-                where: { sessionToken: currentTokenDigest },
-                select: { id: true },
-              })
-              .then((r) => r?.id ?? null)
-          : Promise.resolve(null),
-        // iOS AutoFill MVP: surface non-cookie token sessions (browser
-        // extensions + iOS apps) alongside Auth.js sessions so users can
-        // identify and revoke a specific device. clientKind distinguishes
-        // BROWSER_EXTENSION from IOS_APP; lastUsedIp/UA are populated by
-        // the iOS DPoP path (browser rows leave them NULL).
-        prisma.extensionToken.findMany({
-          where: {
-            userId: session.user.id,
-            revokedAt: null,
-            expiresAt: { gt: new Date() },
-          },
-          select: {
-            id: true,
-            createdAt: true,
-            lastUsedAt: true,
-            expiresAt: true,
-            clientKind: true,
-            lastUsedIp: true,
-            lastUsedUserAgent: true,
-          },
-          orderBy: { createdAt: "desc" },
-        }),
-      ]),
+    async () => {
+      const sessions = await prisma.session.findMany({
+        where: {
+          userId: session.user.id,
+          expires: { gt: new Date() },
+        },
+        select: {
+          id: true,
+          createdAt: true,
+          lastActiveAt: true,
+          ipAddress: true,
+          userAgent: true,
+        },
+        orderBy: { lastActiveAt: "desc" },
+      });
+      const tenant = await prisma.user.findUnique({
+        where: { id: session.user.id },
+        select: { tenant: { select: { maxConcurrentSessions: true } } },
+      });
+      const currentSessionId = currentTokenDigest
+        ? await prisma.session
+            .findUnique({
+              where: { sessionToken: currentTokenDigest },
+              select: { id: true },
+            })
+            .then((r) => r?.id ?? null)
+        : null;
+      // iOS AutoFill MVP: surface non-cookie token sessions (browser
+      // extensions + iOS apps) alongside Auth.js sessions so users can
+      // identify and revoke a specific device. clientKind distinguishes
+      // BROWSER_EXTENSION from IOS_APP; lastUsedIp/UA are populated by
+      // the iOS DPoP path (browser rows leave them NULL).
+      const extensionTokens = await prisma.extensionToken.findMany({
+        where: {
+          userId: session.user.id,
+          revokedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+        select: {
+          id: true,
+          createdAt: true,
+          lastUsedAt: true,
+          expiresAt: true,
+          clientKind: true,
+          lastUsedIp: true,
+          lastUsedUserAgent: true,
+        },
+        orderBy: { createdAt: "desc" },
+      });
+      return [sessions, tenant, currentSessionId, extensionTokens] as const;
+    },
   );
 
   const items = sessions.map((s) => ({

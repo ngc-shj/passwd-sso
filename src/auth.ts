@@ -1138,14 +1138,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           // The active membership decides whose passkey enforcement applies.
           // `fetchFavicons` still comes off the user row; only the tenant is
           // re-sourced, because traversing `user.tenant` follows the stale column.
-          const [credCount, userRow, tenantId] = await Promise.all([
-            tx.webAuthnCredential.count({ where: { userId: user.id } }),
-            tx.user.findUnique({
-              where: { id: user.id },
-              select: { fetchFavicons: true },
-            }),
-            resolveOwningTenantIdFromClient(tx, user.id),
-          ]);
+          const credCount = await tx.webAuthnCredential.count({ where: { userId: user.id } });
+          const userRow = await tx.user.findUnique({
+            where: { id: user.id },
+            select: { fetchFavicons: true },
+          });
+          const tenantId = await resolveOwningTenantIdFromClient(tx, user.id);
           // Same fail-closed stance as the null-tenant throw below: a missing
           // user row on a successful query is corruption, not a default.
           if (!userRow) {

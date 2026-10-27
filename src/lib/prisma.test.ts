@@ -1,5 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 
+const { mockGetTenantRlsContext } = vi.hoisted(() => ({
+  mockGetTenantRlsContext: vi.fn<() => unknown>(() => undefined),
+}));
+
 // Avoid the singleton side effects (Pool creation, signal handler registration)
 // from running at import time. We only want to exercise the exported `envInt`.
 vi.mock("@prisma/client", () => ({
@@ -41,10 +45,10 @@ vi.mock("@/lib/logger", () => ({
 }));
 
 vi.mock("@/lib/tenant-rls", () => ({
-  getTenantRlsContext: () => undefined,
+  getTenantRlsContext: mockGetTenantRlsContext,
 }));
 
-import { envInt } from "./prisma";
+import { envInt, prisma } from "./prisma";
 
 describe("envInt", () => {
   it("returns the default when the env var is unset", () => {
@@ -107,5 +111,31 @@ describe("envInt", () => {
     expect(envInt("X_INT_BOUND_LOW", 0, { min: 1, max: 10 })).toBe(1);
     vi.stubEnv("X_INT_BOUND_HIGH", "10");
     expect(envInt("X_INT_BOUND_HIGH", 0, { min: 1, max: 10 })).toBe(10);
+  });
+});
+
+describe("prisma proxy inside an RLS context", () => {
+  it("runs an array $transaction one query at a time on the context's client", async () => {
+    mockGetTenantRlsContext.mockReturnValueOnce({ tx: {} });
+    const events: string[] = [];
+    // Prisma promises are lazy: a query starts when it is awaited. One that is
+    // started while another is still pending would share its connection.
+    const query = (name: string, value: number) => ({
+      then(resolve: (v: number) => void) {
+        events.push(`start:${name}`);
+        queueMicrotask(() => {
+          events.push(`end:${name}`);
+          resolve(value);
+        });
+      },
+    });
+
+    const results = await prisma.$transaction([
+      query("a", 1),
+      query("b", 2),
+    ] as unknown as Parameters<typeof prisma.$transaction>[0]);
+
+    expect(results).toEqual([1, 2]);
+    expect(events).toEqual(["start:a", "end:a", "start:b", "end:b"]);
   });
 });

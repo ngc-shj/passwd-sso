@@ -88,17 +88,15 @@ export async function derivePasskeyState(params: {
   passkeyGracePeriodDays: number | null;
 }> {
   const run = async (tx: Prisma.TransactionClient) => {
-    const [credCount, tenant] = await Promise.all([
-      tx.webAuthnCredential.count({ where: { userId: params.userId } }),
-      tx.tenant.findUnique({
-        where: { id: params.tenantId },
-        select: {
-          requirePasskey: true,
-          requirePasskeyEnabledAt: true,
-          passkeyGracePeriodDays: true,
-        },
-      }),
-    ]);
+    const credCount = await tx.webAuthnCredential.count({ where: { userId: params.userId } });
+    const tenant = await tx.tenant.findUnique({
+      where: { id: params.tenantId },
+      select: {
+        requirePasskey: true,
+        requirePasskeyEnabledAt: true,
+        passkeyGracePeriodDays: true,
+      },
+    });
     return { credCount, tenant };
   };
 

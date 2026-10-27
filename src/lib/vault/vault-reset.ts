@@ -72,20 +72,17 @@ async function countVaultRowsOutsideTenant(
   tenantId: string,
 ): Promise<Record<string, number>> {
   const outside = { not: tenantId };
-  const [passwordEntry, tag, folder, vaultKey, attachment, passwordShare, emergencyAccessGrant] =
-    await Promise.all([
-      tx.passwordEntry.count({ where: { userId, tenantId: outside } }),
-      tx.tag.count({ where: { userId, tenantId: outside } }),
-      tx.folder.count({ where: { userId, tenantId: outside } }),
-      tx.vaultKey.count({ where: { userId, tenantId: outside } }),
-      tx.attachment.count({
-        where: { createdById: userId, teamPasswordEntryId: null, tenantId: outside },
-      }),
-      tx.passwordShare.count({
-        where: { createdById: userId, teamPasswordEntryId: null, tenantId: outside },
-      }),
-      tx.emergencyAccessGrant.count({ where: { ownerId: userId, tenantId: outside } }),
-    ]);
+  const passwordEntry = await tx.passwordEntry.count({ where: { userId, tenantId: outside } });
+  const tag = await tx.tag.count({ where: { userId, tenantId: outside } });
+  const folder = await tx.folder.count({ where: { userId, tenantId: outside } });
+  const vaultKey = await tx.vaultKey.count({ where: { userId, tenantId: outside } });
+  const attachment = await tx.attachment.count({
+    where: { createdById: userId, teamPasswordEntryId: null, tenantId: outside },
+  });
+  const passwordShare = await tx.passwordShare.count({
+    where: { createdById: userId, teamPasswordEntryId: null, tenantId: outside },
+  });
+  const emergencyAccessGrant = await tx.emergencyAccessGrant.count({ where: { ownerId: userId, tenantId: outside } });
   return Object.fromEntries(
     Object.entries({
       passwordEntry,
@@ -159,11 +156,11 @@ export async function executeVaultReset(
   // Count data being deleted for audit metadata
   const [deletedEntries, deletedAttachments] = await withBypassRls(
     prisma,
-    async (tx) =>
-      Promise.all([
-        tx.passwordEntry.count({ where: { userId: targetUserId } }),
-        tx.attachment.count({ where: { createdById: targetUserId } }),
-      ]),
+    async (tx) => {
+      const deletedEntries = await tx.passwordEntry.count({ where: { userId: targetUserId } });
+      const deletedAttachments = await tx.attachment.count({ where: { createdById: targetUserId } });
+      return [deletedEntries, deletedAttachments] as const;
+    },
     BYPASS_GRANT.VAULT_RESET_COUNT,
   );
 

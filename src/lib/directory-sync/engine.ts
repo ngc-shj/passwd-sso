@@ -342,16 +342,14 @@ export async function runDirectorySync(
       prisma,
       tenantId,
       async (tx) => {
-        const [mappings, members] = await Promise.all([
-          tx.scimExternalMapping.findMany({
-            where: { tenantId, resourceType: "User" },
-            select: { externalId: true, internalId: true },
-          }),
-          tx.tenantMember.findMany({
-            where: { tenantId },
-            select: { id: true, userId: true, deactivatedAt: true, role: true },
-          }),
-        ]);
+        const mappings = await tx.scimExternalMapping.findMany({
+          where: { tenantId, resourceType: "User" },
+          select: { externalId: true, internalId: true },
+        });
+        const members = await tx.tenantMember.findMany({
+          where: { tenantId },
+          select: { id: true, userId: true, deactivatedAt: true, role: true },
+        });
         // The users this context can see, and so can write. Not a relation on the
         // member read: a member whose users row names another tenant came back
         // with `user: null` (measured: Prisma does not throw), and reading its

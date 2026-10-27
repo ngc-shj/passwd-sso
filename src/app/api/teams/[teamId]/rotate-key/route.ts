@@ -170,7 +170,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       // teamKeyVersion is NOT in where: entries restored from history may have
       // a stale version, but the ID set verification above guarantees completeness (F-29).
       // Note: Prisma interactive transaction auto-rolls back on any thrown error.
-        await Promise.all(entries.map(async (entry) => {
+        for (const entry of entries) {
           const data: Record<string, unknown> = {
             aadVersion: entry.aadVersion,
             teamKeyVersion: newTeamKeyVersion,
@@ -201,7 +201,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
           if (result.count !== 1) {
             throw new Error("ENTRY_COUNT_MISMATCH");
           }
-        }));
+        }
 
       // Create new TeamMemberKey for each member (old keys kept for history)
       // No filter needed: member validation above guarantees exact 1:1 match
