@@ -61,6 +61,9 @@ function pageBlockedPath(pathWithoutLocale: string): string {
   return pathWithoutLocale.startsWith("/admin") ? "PAGE /admin" : "PAGE /dashboard";
 }
 
+/** The CHIPS pair: the configured cookie, partitioned and unpartitioned. */
+const REFUSAL_REVOKE_LIMIT = 2;
+
 function clearAuthSessionCookies(
   response: NextResponse,
   basePath: string = "",
@@ -166,13 +169,22 @@ export async function handlePageRoute(
         ambiguousSessionCookieNames(cookieHeader),
       );
       // The refusal deletes the configured cookie in both CHIPS variants, so
-      // the sessions those cookies named would stay alive server-side with no
-      // browser holding them; revoke them. No ownership check: the browser
-      // holds each raw token, which already lets it sign that session out.
-      // Not awaited: the redirect waits on neither the write nor its failure,
-      // as with the passkey-block audit below.
+      // the sessions those two cookies named would stay alive server-side
+      // with no browser holding them; revoke them. Only the configured name:
+      // the legacy names are deleted as leftovers from before a configuration
+      // change and are never authenticated by the current one. At most two
+      // tokens, the CHIPS pair this exists for — this runs on any
+      // unauthenticated navigation, unthrottled, so it must not become a
+      // larger write per request. No ownership check: the browser holds each
+      // raw token, which already lets it sign that session out. Not awaited:
+      // the redirect waits on neither the write nor its failure, as with the
+      // passkey-block audit below. No audit row: a refusal is not a logout.
       void revokePresentedSessions(
-        presentedSessionTokens(cookieHeader, [configuredSessionCookieName()]),
+        presentedSessionTokens(
+          cookieHeader,
+          [configuredSessionCookieName()],
+          REFUSAL_REVOKE_LIMIT,
+        ),
       ).catch((err: unknown) => {
         getLogger().error({
           msg: "page-route: revoking the refused session cookies failed",

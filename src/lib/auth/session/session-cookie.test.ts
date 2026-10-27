@@ -212,6 +212,13 @@ describe("presentedSessionTokens", () => {
     expect(presentedSessionTokens(`${P}=${value}; ${P}=${TOKEN_B}`, [P])).toEqual([TOKEN_B]);
   });
 
+  it("stops at a lower limit when the caller gives one", () => {
+    expect(presentedSessionTokens(`${P}=${TOKEN_A}; ${P}=${TOKEN_B}; ${P}=0-${TOKEN_A}`, [P], 2)).toEqual([
+      TOKEN_A,
+      TOKEN_B,
+    ]);
+  });
+
   it("returns nothing for a missing header", () => {
     expect(presentedSessionTokens(null, [P])).toEqual([]);
   });

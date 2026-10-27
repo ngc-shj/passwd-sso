@@ -29,7 +29,7 @@ vi.mock("@/lib/redis", () => ({ getRedis: () => null }));
 // The page refusal's session revocation is a DB write; covered by
 // src/lib/proxy/page-route.test.ts and revoke-presented-sessions.integration.
 vi.mock("@/lib/auth/session/revoke-presented-sessions", () => ({
-  revokePresentedSessions: vi.fn().mockResolvedValue(undefined),
+  revokePresentedSessions: vi.fn().mockResolvedValue([]),
 }));
 vi.mock("@/lib/auth/session/session-cache", async () => {
   const actual = await vi.importActual<

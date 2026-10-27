@@ -20,7 +20,8 @@ import { sessionMetaStorage } from "@/lib/auth/session/session-meta";
 
 vi.mock("@/auth", () => ({ handlers: { GET: vi.fn(), POST: vi.fn() } }));
 vi.mock("@/lib/http/with-request-log", () => ({ withRequestLog: <T>(h: T) => h }));
-vi.mock("@/lib/audit/audit", () => ({ extractRequestMeta: () => ({}) }));
+const { mockLogAuditAsync } = vi.hoisted(() => ({ mockLogAuditAsync: vi.fn() }));
+vi.mock("@/lib/audit/audit", () => ({ extractRequestMeta: () => ({}), logAuditAsync: mockLogAuditAsync }));
 vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: vi.fn(async () => ({ allowed: true })) }),
 }));
@@ -29,11 +30,16 @@ vi.mock("@/lib/security/rate-limit", () => ({
 // like the real helper, it deletes each named session by token, whoever owns
 // it, and ignores a token that names none.
 const { fakeStore, mockRevokePresentedSessions } = vi.hoisted(() => {
-  const fakeStore: { sessions: Map<string, unknown> | null } = { sessions: null };
+  const fakeStore: { sessions: Map<string, { userId: string }> | null } = { sessions: null };
   return {
     fakeStore,
     mockRevokePresentedSessions: vi.fn(async (tokens: readonly string[]) => {
-      for (const token of tokens) fakeStore.sessions?.delete(token);
+      const deleted: { sessionToken: string; userId: string }[] = [];
+      for (const token of tokens) {
+        const row = fakeStore.sessions?.get(token);
+        if (row && fakeStore.sessions?.delete(token)) deleted.push({ sessionToken: token, userId: row.userId });
+      }
+      return deleted;
     }),
   };
 });
@@ -371,7 +377,11 @@ describe("both CHIPS variants through withSessionCookieVariants (@auth/core)", (
 
   beforeEach(() => {
     mockRevokePresentedSessions.mockClear();
+    mockLogAuditAsync.mockClear();
   });
+
+  const logoutAudits = () =>
+    mockLogAuditAsync.mock.calls.map(([arg]) => arg).filter((arg) => arg.action === "AUTH_LOGOUT");
 
   it("sign-out: both variants are deleted and the second cookie's session is revoked too", async () => {
     const { adapter, sessions } = fakeAdapter();
@@ -386,9 +396,10 @@ describe("both CHIPS variants through withSessionCookieVariants (@auth/core)", (
     expect(adapter.deleteSession).toHaveBeenCalledTimes(1);
     expect(adapter.deleteSession).toHaveBeenCalledWith(VICTIM_TOKEN);
     expect(signedOut).toEqual([expect.objectContaining({ userId: VICTIM.id })]);
-    // ...and the route revoked the rest.
+    // ...and the route revoked the rest, auditing the session it ended.
     expect(sessions.has(VICTIM_TOKEN)).toBe(false);
     expect(sessions.has(OTHER_TOKEN)).toBe(false);
+    expect(logoutAudits()).toEqual([expect.objectContaining({ userId: VICTIM.id })]);
     const sessionLines = response.headers.getSetCookie().filter(namesSession);
     expect(sessionLines).toHaveLength(2);
     expect(sessionLines.every(isDeletion)).toBe(true);
@@ -402,7 +413,7 @@ describe("both CHIPS variants through withSessionCookieVariants (@auth/core)", (
   it("sign-out: revokes the second cookie's live session when the first cookie's session is gone", async () => {
     const { adapter, sessions } = fakeAdapter();
     const GONE_TOKEN = "dddd";
-    sessions.set(OTHER_TOKEN, live(OTHER_TOKEN));
+    sessions.set(OTHER_TOKEN, { ...live(OTHER_TOKEN), userId: "second-user" });
     const { signedOut, events } = recordingEvents();
     const handler = await wrapped(secureConfig(adapter, events));
 
@@ -411,6 +422,10 @@ describe("both CHIPS variants through withSessionCookieVariants (@auth/core)", (
     await expect(adapter.deleteSession.mock.results[0].value).rejects.toThrow();
     expect(signedOut).toEqual([]);
     expect(sessions.has(OTHER_TOKEN)).toBe(false);
+    // The event did not fire, so the wrapper's audit is the only logout row.
+    expect(logoutAudits()).toEqual([
+      { scope: "PERSONAL", action: "AUTH_LOGOUT", userId: "second-user", ip: null, userAgent: null },
+    ]);
     expect(sessions.has(VICTIM_TOKEN)).toBe(true);
     expect(response.headers.getSetCookie().filter(namesSession).every(isDeletion)).toBe(true);
   });
@@ -461,6 +476,7 @@ describe("both CHIPS variants through withSessionCookieVariants (@auth/core)", (
 
       expect(adapter.deleteSession).not.toHaveBeenCalled();
       expect(mockRevokePresentedSessions).not.toHaveBeenCalled();
+      expect(mockLogAuditAsync).not.toHaveBeenCalled();
       expect(sessions.has(VICTIM_TOKEN)).toBe(true);
       expect(sessions.has(OTHER_TOKEN)).toBe(true);
       expect(response).toBe(inner[0]);

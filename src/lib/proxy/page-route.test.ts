@@ -129,7 +129,7 @@ beforeEach(() => {
   vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "");
   vi.stubEnv("COOKIE_PARTITIONED", "");
   mockRevokePresentedSessions.mockReset();
-  mockRevokePresentedSessions.mockResolvedValue(undefined);
+  mockRevokePresentedSessions.mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -348,6 +348,31 @@ describe("handlePageRoute — protected routes auth check", () => {
       expect(res.status).toBe(307);
       expect(mockRevokePresentedSessions).toHaveBeenCalledTimes(1);
       expect(mockRevokePresentedSessions).toHaveBeenCalledWith([TOKEN_A, TOKEN_B]);
+    });
+
+    // Any unauthenticated navigation reaches this, unthrottled: the write is
+    // bounded to the CHIPS pair, not the sign-out's larger cap.
+    it("revokes at most two tokens, the CHIPS pair", async () => {
+      const TOKEN_C = "9c0e5a7c-1f2b-4d4c-8e6f-0a1b3d5f7a9c";
+      fetchSpy.mockResolvedValue(new Response("null", { status: 200 }));
+      await handlePageRoute(
+        makePageRequest("/ja/dashboard/passwords", {
+          cookie: `${HOST}=${TOKEN_A}; ${HOST}=${TOKEN_B}; ${HOST}=${TOKEN_C}`,
+        }),
+        dummyOptions,
+      );
+      expect(mockRevokePresentedSessions).toHaveBeenCalledWith([TOKEN_A, TOKEN_B]);
+    });
+
+    it("writes no audit row: a refusal is not a logout", async () => {
+      mockRevokePresentedSessions.mockResolvedValue([{ sessionToken: "d", userId: "u-1" }]);
+      fetchSpy.mockResolvedValue(new Response("null", { status: 200 }));
+      await handlePageRoute(
+        makePageRequest("/ja/dashboard/passwords", { cookie: `${HOST}=${TOKEN_A}` }),
+        dummyOptions,
+      );
+      await vi.waitFor(() => expect(mockRevokePresentedSessions).toHaveBeenCalledTimes(1));
+      expect(mockLogAuditAsync).not.toHaveBeenCalled();
     });
 
     // An ambiguous refusal still deletes the configured cookie, so the

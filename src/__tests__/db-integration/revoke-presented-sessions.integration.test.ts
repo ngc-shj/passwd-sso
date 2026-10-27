@@ -7,7 +7,7 @@
  * that row is already gone (its deleteSession throws P2025 and Auth.js skips
  * events.signOut). The sign-out route therefore revokes every configured-name
  * session the request named once Auth.js's own deletion line shows the
- * sign-out went through.
+ * sign-out went through, and writes AUTH_LOGOUT for each session it ended.
  *
  * Run:
  *   npx vitest run --config vitest.integration.config.ts revoke-presented-sessions
@@ -55,6 +55,18 @@ async function seedSession(ctx: TestContext, userId: string, tenantId: string): 
     );
   });
   return raw;
+}
+
+async function logoutAuditUsers(ctx: TestContext, tenantId: string): Promise<string[]> {
+  const rows = await ctx.su.prisma.$transaction(async (tx) => {
+    await setBypassRlsGucs(tx);
+    return tx.$queryRawUnsafe<Array<{ user_id: string }>>(
+      `SELECT payload->>'userId' AS user_id FROM audit_outbox
+        WHERE tenant_id = $1::uuid AND payload->>'action' = 'AUTH_LOGOUT'`,
+      tenantId,
+    );
+  });
+  return rows.map((row) => row.user_id);
 }
 
 async function sessionExists(ctx: TestContext, raw: string): Promise<boolean> {
@@ -108,7 +120,9 @@ describe("revokePresentedSessions — real-DB integration", () => {
   it("sign-out revokes the second cookie's live session when the first cookie's session is gone", async () => {
     const name = configuredSessionCookieName();
     const gone = randomUUID();
-    const live = await seedSession(ctx, userId, tenantId);
+    // The second variant's session belongs to another user, so its logout
+    // row is told apart from anything written for the first.
+    const live = await seedSession(ctx, otherUserId, tenantId);
     const otherDevice = await seedSession(ctx, userId, tenantId);
 
     const route = await import("@/app/api/auth/[...nextauth]/route");
@@ -135,5 +149,10 @@ describe("revokePresentedSessions — real-DB integration", () => {
     expect(res.headers.getSetCookie().some((line) => line.startsWith(`${name}=;`))).toBe(true);
     expect(await sessionExists(ctx, live)).toBe(false);
     expect(await sessionExists(ctx, otherDevice)).toBe(true);
+    // Auth.js's event never fired (the first row was gone), so the only
+    // AUTH_LOGOUT is the route's, for the session it ended.
+    await vi.waitFor(async () => expect(await logoutAuditUsers(ctx, tenantId)).toEqual([otherUserId]), {
+      timeout: 5000,
+    });
   });
 });

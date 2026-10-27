@@ -21,9 +21,11 @@ vi.mock("@/auth", () => ({
 vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: <T>(h: T) => h,
 }));
+const mockLogAuditAsync = vi.fn();
 vi.mock("@/lib/audit/audit", () => ({
   extractRequestMeta: () => ({}),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
+  logAuditAsync: (...args: unknown[]) => mockLogAuditAsync(...args),
 }));
 
 // Controllable rate-limit mock used by the callback rate-limit tests.
@@ -54,7 +56,8 @@ vi.mock("@/lib/logger", () => ({
   getLogger: () => ({ warn: mockLoggerWarn, error: mockLoggerError, info: vi.fn() }),
 }));
 
-const mockRevokePresentedSessions = vi.fn<(tokens: readonly string[]) => Promise<void>>();
+type RevokedRow = { sessionToken: string; userId: string };
+const mockRevokePresentedSessions = vi.fn<(tokens: readonly string[]) => Promise<readonly RevokedRow[]>>();
 vi.mock("@/lib/auth/session/revoke-presented-sessions", () => ({
   revokePresentedSessions: (tokens: readonly string[]) => mockRevokePresentedSessions(tokens),
 }));
@@ -937,8 +940,9 @@ describe("withSessionCookieVariants (issue #962)", () => {
     vi.stubEnv("AUTH_URL", "https://app.example.test");
     vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "");
     mockRevokePresentedSessions.mockReset();
-    mockRevokePresentedSessions.mockResolvedValue(undefined);
+    mockRevokePresentedSessions.mockResolvedValue([]);
     mockLoggerError.mockClear();
+    mockLogAuditAsync.mockReset();
   });
 
   afterEach(() => {
@@ -1024,6 +1028,47 @@ describe("withSessionCookieVariants (issue #962)", () => {
     await run("/api/auth/signout", "POST", cookie, responseWith([authjsDeletion]));
     expect(mockRevokePresentedSessions).toHaveBeenCalledTimes(1);
     expect(mockRevokePresentedSessions).toHaveBeenCalledWith([TOKEN_A, TOKEN_B]);
+  });
+
+  // Each session the wrapper ended outlived Auth.js's own sign-out, so
+  // events.signOut audited none of them: one AUTH_LOGOUT per user, in the
+  // event's shape, with the request meta.
+  it("sign-out: audits AUTH_LOGOUT once per user whose session the wrapper revoked", async () => {
+    mockRevokePresentedSessions.mockResolvedValue([
+      { sessionToken: "d-a", userId: "user-1" },
+      { sessionToken: "d-b", userId: "user-2" },
+      { sessionToken: "d-c", userId: "user-1" },
+    ]);
+    const { _withSessionCookieVariants } = await import("@/app/api/auth/[...nextauth]/route");
+    const { sessionMetaStorage } = await import("@/lib/auth/session/session-meta");
+
+    await sessionMetaStorage.run({ ip: "203.0.113.9", userAgent: "ua-1", acceptLanguage: null }, () =>
+      _withSessionCookieVariants(vi.fn<RouteHandler>(async () => responseWith([authjsDeletion])))(
+        new NextRequest("https://app.example.test/api/auth/signout", {
+          method: "POST",
+          headers: { cookie: `${HOST}=${TOKEN_A}; ${HOST}=${TOKEN_B}` },
+        }),
+      ),
+    );
+
+    expect(mockLogAuditAsync.mock.calls.map(([arg]) => arg)).toEqual([
+      { scope: "PERSONAL", action: "AUTH_LOGOUT", userId: "user-1", ip: "203.0.113.9", userAgent: "ua-1" },
+      { scope: "PERSONAL", action: "AUTH_LOGOUT", userId: "user-2", ip: "203.0.113.9", userAgent: "ua-1" },
+    ]);
+  });
+
+  it("sign-out: writes no audit when the wrapper revoked nothing", async () => {
+    await run("/api/auth/signout", "POST", `${HOST}=${TOKEN_A}`, responseWith([authjsDeletion]));
+    expect(mockRevokePresentedSessions).toHaveBeenCalledTimes(1);
+    expect(mockLogAuditAsync).not.toHaveBeenCalled();
+  });
+
+  // Only a sign-out revokes: a callback carrying Auth.js's deletion of the
+  // session cookie (as a session read does when it finds none) is not one.
+  it("callback with a session-cookie deletion line revokes nothing", async () => {
+    await run("/api/auth/callback/google", "GET", `${HOST}=${TOKEN_A}`, responseWith([authjsDeletion]));
+    expect(mockRevokePresentedSessions).not.toHaveBeenCalled();
+    expect(mockLogAuditAsync).not.toHaveBeenCalled();
   });
 
   // A refused sign-out (Auth.js's CSRF check failed, or no session cookie):

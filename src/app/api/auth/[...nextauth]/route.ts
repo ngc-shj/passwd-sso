@@ -1,7 +1,8 @@
 import { NextRequest } from "next/server";
 import { handlers } from "@/auth";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { extractRequestMeta } from "@/lib/audit/audit";
+import { extractRequestMeta, logAuditAsync } from "@/lib/audit/audit";
+import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { sessionMetaStorage } from "@/lib/auth/session/session-meta";
 import { tenantClaimStorage } from "@/lib/tenant/tenant-claim-storage";
 import { createRateLimiter } from "@/lib/security/rate-limit";
@@ -295,8 +296,12 @@ function withoutSessionCookieOnCallback<H extends RouteHandler>(handler: H): H {
 // here, after the handler, not in events.signOut: Auth.js skips the event
 // whenever its own deleteSession throws — as it does when the first cookie's
 // session is already gone — and the second cookie's live session would be
-// orphaned. No ownership check: holding a raw token already lets the caller
-// sign that session out by sending it alone (the #966 reasoning). A failed
+// orphaned. Only the configured name, both variants: the legacy names are
+// deleted as leftovers from before a configuration change and are never
+// authenticated by the current one. No ownership check: holding a raw token
+// already lets the caller sign that session out by sending it alone (the
+// #966 reasoning). Each session revoked here is audited as AUTH_LOGOUT, as
+// events.signOut audits the one Auth.js revoked. A failed
 // revocation is logged and the sign-out response still goes out: the cookies
 // are deleted either way.
 function isSignOutRoute(pathname: string, method: string): boolean {
@@ -319,9 +324,25 @@ function withSessionCookieVariants<H extends RouteHandler>(handler: H): H {
     const lines = response.headers.getSetCookie();
     if (signOut && deletesSessionCookie(lines)) {
       try {
-        await revokePresentedSessions(
+        const revoked = await revokePresentedSessions(
           presentedSessionTokens(request.headers.get("cookie"), [configuredSessionCookieName()]),
         );
+        // Every row deleted here outlived Auth.js's own sign-out: Auth.js
+        // deletes the first cookie's session before events.signOut audits it,
+        // so that row is already gone when this runs. A row deleted here was
+        // therefore never audited — the first cookie's session was missing
+        // (the event did not fire) or this is another variant's session. One
+        // AUTH_LOGOUT per user, in events.signOut's shape.
+        const meta = sessionMetaStorage.getStore();
+        for (const userId of new Set(revoked.map((row) => row.userId))) {
+          await logAuditAsync({
+            scope: AUDIT_SCOPE.PERSONAL,
+            action: AUDIT_ACTION.AUTH_LOGOUT,
+            userId,
+            ip: meta?.ip ?? null,
+            userAgent: meta?.userAgent ?? null,
+          });
+        }
       } catch (err) {
         getLogger().error({
           msg: "auth.signout: revoking the presented sessions failed",

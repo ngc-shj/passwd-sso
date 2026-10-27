@@ -129,16 +129,19 @@ const MAX_PRESENTED_SESSION_TOKENS = 16;
  * For revoking the sessions a browser holds, never for deciding which session
  * a request is (that is readSessionCookie). Only an exact name counts (a
  * chunk `<name>.0` is not a token Auth.js ever wrote), and a value outside
- * the token alphabet is skipped rather than rewritten.
+ * the token alphabet is skipped rather than rewritten. `limit` lowers the
+ * bound for a caller that needs fewer.
  */
 export function presentedSessionTokens(
   header: string | null,
   names: readonly string[],
+  limit: number = MAX_PRESENTED_SESSION_TOKENS,
 ): string[] {
   if (!header) return [];
+  const max = Math.min(limit, MAX_PRESENTED_SESSION_TOKENS);
   const tokens = new Set<string>();
   for (const pair of parseCookiePairs(header)) {
-    if (tokens.size >= MAX_PRESENTED_SESSION_TOKENS) break;
+    if (tokens.size >= max) break;
     if (names.includes(pair.key) && SESSION_TOKEN_PATTERN.test(pair.value)) {
       tokens.add(pair.value);
     }
