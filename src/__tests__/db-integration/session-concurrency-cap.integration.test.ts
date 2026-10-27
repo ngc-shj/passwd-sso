@@ -47,6 +47,7 @@ import {
 } from "./helpers";
 import { createCappedSession } from "@/lib/auth/session/session-concurrency";
 import { hashSessionToken } from "@/lib/auth/session/session-cache";
+import { configuredSessionCookieName } from "@/lib/auth/session/cookie-name";
 
 // ── C2 mocks (route-level case only) ────────────────────────────
 
@@ -409,8 +410,7 @@ describe("POST /api/auth/passkey/verify — real-DB integration (C2, no cascade)
     return familyId;
   }
 
-  async function insertSecondWebSession(): Promise<{ raw: string }> {
-    const raw = `web-${randomUUID()}`;
+  async function insertSecondWebSession(raw = `web-${randomUUID()}`): Promise<{ raw: string }> {
     await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
       await tx.$executeRawUnsafe(
@@ -437,12 +437,13 @@ describe("POST /api/auth/passkey/verify — real-DB integration (C2, no cascade)
     return rows.length;
   }
 
-  function buildVerifyRequest(credentialId: string, challengeId: string): NextRequest {
+  function buildVerifyRequest(credentialId: string, challengeId: string, cookie?: string): NextRequest {
     return new NextRequest("http://localhost:3000/api/auth/passkey/verify", {
       method: "POST",
       headers: {
         "content-type": "application/json",
         origin: "http://localhost:3000",
+        ...(cookie ? { cookie } : {}),
       },
       body: JSON.stringify({
         credentialResponse: JSON.stringify({ id: credentialId, type: "public-key" }),
@@ -450,6 +451,47 @@ describe("POST /api/auth/passkey/verify — real-DB integration (C2, no cascade)
       }),
     });
   }
+
+  function stubSuccessfulAssertion(credentialId: string): string {
+    mockVerifyAuthenticationResponse.mockResolvedValue({
+      verified: true,
+      authenticationInfo: {
+        credentialID: credentialId,
+        newCounter: 1,
+        userVerified: true,
+        credentialDeviceType: "singleDevice",
+        credentialBackedUp: false,
+        origin: "http://localhost:3000",
+        rpID: "localhost",
+      },
+    } satisfies Awaited<ReturnType<typeof mockVerifyAuthenticationResponse>>);
+    const challengeId = randomBytes(16).toString("hex");
+    mockRedisStore.set(`webauthn:challenge:signin:${challengeId}`, "test-challenge");
+    return challengeId;
+  }
+
+  // Issue #962: the sign-in overwrites the browser's session cookie (and
+  // deletes its other CHIPS variant), so the session it named is replaced
+  // rather than left alive with no browser holding it. Another device's
+  // session is not named by this browser's cookie and stays.
+  it("a passkey sign-in replaces the browser's previous session and leaves another device's session", async () => {
+    const credentialId = `cred-${randomUUID()}`;
+    await insertCredential(credentialId);
+    const { raw: browserSession } = await insertSecondWebSession(randomUUID());
+    const { raw: otherDevice } = await insertSecondWebSession(randomUUID());
+    expect(await sessionDigestExists(ctx, hashSessionToken(browserSession))).toBe(true);
+
+    const challengeId = stubSuccessfulAssertion(credentialId);
+    const res = await passkeyVerifyPOST(
+      buildVerifyRequest(credentialId, challengeId, `${configuredSessionCookieName()}=${browserSession}`),
+    );
+    expect(res.status, JSON.stringify(await res.json())).toBe(200);
+
+    expect(await sessionDigestExists(ctx, hashSessionToken(browserSession))).toBe(false);
+    expect(await sessionDigestExists(ctx, hashSessionToken(otherDevice))).toBe(true);
+    // The other device plus the new passkey session.
+    expect(await liveSessionCount(ctx, userId)).toBe(2);
+  });
 
   it("a successful passkey sign-in leaves an active extension family, an active iOS family and a second Web session untouched", async () => {
     const credentialId = `cred-${randomUUID()}`;

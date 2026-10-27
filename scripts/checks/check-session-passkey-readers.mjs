@@ -87,6 +87,12 @@ const READER_EXEMPTIONS = new Map([
       "which the proxy's own session read depends on. Classified by this entry (R5-4); its gated concretePaths " +
       "spellings reach the proxy gate and do not make it an API_DEFAULT_SESSION_READERS member.",
   ],
+  [
+    "src/app/api/auth/passkey/verify/route.ts",
+    "Pre-auth passkey sign-in: it reads the session cookie only to name the sessions its new sign-in " +
+      "replaces (createCappedSession deletes them) and never authorizes on them; the caller is " +
+      "authenticated by the WebAuthn assertion, and a successful sign-in sets passkeyVerifiedAt itself.",
+  ],
 ]);
 
 const failures = [];

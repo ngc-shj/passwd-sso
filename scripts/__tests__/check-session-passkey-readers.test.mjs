@@ -81,6 +81,14 @@ export async function POST(req: Request) {
 }
 `;
 
+// Pre-auth passkey sign-in: reads the session cookie only to name the
+// sessions its sign-in replaces. Tier A, exempt by READER_EXEMPTIONS.
+const PASSKEY_VERIFY = `import { presentedSessionTokens } from "@/lib/auth/session/session-cookie";
+export async function POST(req: Request) {
+  return Response.json({ replaced: presentedSessionTokens(req.headers.get("cookie"), ["n"]) });
+}
+`;
+
 const SESSION_ROUTE = `import { checkAuth } from "@/lib/auth/session/check-auth";
 export async function GET(req: Request) {
   return Response.json(await checkAuth(req));
@@ -105,6 +113,7 @@ const BASE_FILES = {
   "src/app/api/v1/openapi.json/route.ts": OPENAPI,
   "src/app/api/v1/passwords/[id]/route.ts": V1_SHADOW,
   "src/app/api/auth/[...nextauth]/route.ts": NEXTAUTH,
+  "src/app/api/auth/passkey/verify/route.ts": PASSKEY_VERIFY,
   "src/app/api/passwords/route.ts": SESSION_ROUTE,
   "src/app/api/health/route.ts": NO_READER,
   [PROXY_LIST]: proxyList(BASE_LIST),
@@ -120,6 +129,7 @@ const BASE_MANIFEST = {
   "src/app/api/v1/openapi.json/route.ts": route("api-v1", { GET: "early-return" }),
   "src/app/api/v1/passwords/[id]/route.ts": route("api-v1", { GET: "early-return" }),
   "src/app/api/auth/[...nextauth]/route.ts": route("api-default", { GET: "tier-a", POST: "tier-a" }),
+  "src/app/api/auth/passkey/verify/route.ts": route("api-default", { POST: "tier-a" }),
   "src/app/api/passwords/route.ts": route("api-session-required", { GET: "gated" }),
   "src/app/api/health/route.ts": route("api-default", { GET: "gated" }),
 };
@@ -179,10 +189,10 @@ const UNCHECKED_BYPASS = /so the proxy never checks its passkey/;
 describe.concurrent("check-session-passkey-readers.mjs", { timeout: 60_000 }, () => {
   it("passes on the base fixture and counts what it examined", async () => {
     const out = await expectPass();
-    // reauth, own-gate, openapi, nextauth, passwords; NOT the v1 shadow or health.
+    // reauth, own-gate, openapi, nextauth, passkey verify, passwords; NOT the v1 shadow or health.
     // openapi.json is the early-return reader that adjudicates itself; its
     // FAIL counterpart (the call removed) is under Rule 1.
-    expect(out).toMatch(/routes=7 readers=5 api-default-readers=1 own-gate=1 exemptions=1/);
+    expect(out).toMatch(/routes=8 readers=6 api-default-readers=1 own-gate=1 exemptions=2/);
   });
 
   // ─── Inputs ───
@@ -318,6 +328,22 @@ describe.concurrent("check-session-passkey-readers.mjs", { timeout: 60_000 }, ()
   it("FAILS on a stale exemption (the exempt route no longer reads the session)", async () => {
     const noReader = `${NO_READER}export async function POST() {\n  return Response.json({ ok: true });\n}\n`;
     await expectFail({ files: { "src/app/api/auth/[...nextauth]/route.ts": noReader } }, /READER_EXEMPTIONS src\/app\/api\/auth\/\[\.\.\.nextauth\]\/route\.ts: stale/);
+  });
+
+  it("FAILS on a stale passkey-verify exemption (the route no longer reads the session cookie)", async () => {
+    await expectFail(
+      { files: { "src/app/api/auth/passkey/verify/route.ts": NO_READER.replace("GET", "POST") } },
+      /READER_EXEMPTIONS src\/app\/api\/auth\/passkey\/verify\/route\.ts: stale/,
+    );
+  });
+
+  // The exemption covers the bypassing (tier-a) declaration only: declared
+  // gated, the reader must be on the proxy's list like any other.
+  it("FAILS when passkey verify is declared a gated api-default reader without a proxy listing", async () => {
+    await expectFail(
+      { manifest: { "src/app/api/auth/passkey/verify/route.ts": route("api-default", { POST: "gated" }) } },
+      MISSING_FROM_LIST,
+    );
   });
 
   // ─── Rule 2: own-gate adjudicator ───
