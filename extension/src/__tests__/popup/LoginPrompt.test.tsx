@@ -55,6 +55,38 @@ describe("LoginPrompt", () => {
     ).toBeInTheDocument();
   });
 
+  it("explains the passkey requirement without the re-auth forewarning", async () => {
+    render(<LoginPrompt reason="passkey_required" />);
+
+    expect(await screen.findByText(/organization requires a passkey/i)).toBeInTheDocument();
+    expect(screen.queryByText(/may be asked to re-authenticate/i)).toBeNull();
+  });
+
+  it("opens the web app's passkey page under the configured server URL", async () => {
+    storageMocks.getSettings.mockResolvedValueOnce({ serverUrl: "https://vault.example.com/passwd-sso" });
+    render(<LoginPrompt reason="passkey_required" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Register a passkey" }));
+    expect(chrome.tabs.create).toHaveBeenCalledWith({
+      url: "https://vault.example.com/passwd-sso/dashboard/settings/auth/passkey",
+    });
+  });
+
+  it("control: no passkey button for other disconnect reasons", async () => {
+    render(<LoginPrompt reason="revoked" />);
+
+    await screen.findByText("https://vault.example.com");
+    expect(screen.queryByRole("button", { name: "Register a passkey" })).toBeNull();
+  });
+
+  it("offers no passkey link when the server URL is refused", async () => {
+    storageMocks.getSettings.mockResolvedValueOnce({ serverUrl: "http://server.example" });
+    render(<LoginPrompt reason="passkey_required" />);
+    await waitFor(() => expect(storageMocks.getSettings).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.queryByRole("button", { name: "Register a passkey" })).toBeNull();
+  });
+
   it("maps timeout_logout to the expired framing", async () => {
     render(<LoginPrompt reason="timeout_logout" />);
 

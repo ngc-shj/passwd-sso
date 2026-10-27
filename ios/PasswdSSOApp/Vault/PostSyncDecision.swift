@@ -97,6 +97,9 @@ public enum UnlockedResult: Equatable {
   case reachedVault
   case failedSessionExpired
   case failedOffline
+  /// The resync was refused because the tenant requires a passkey — neither the
+  /// passphrase nor a re-sign-in helps, so neither banner fits.
+  case failedPasskeyRequired
 }
 
 /// Classify an unlock-time `runSync` error: `true` only when the session is dead
@@ -105,6 +108,14 @@ public enum UnlockedResult: Equatable {
 /// (offline, transient server, decode) is `false` — a recoverable/offline failure.
 public func syncFailedSessionExpired(from error: Error) -> Bool {
   if case MobileAPIError.authenticationRequired = error { return true }
+  return false
+}
+
+/// Classify a `runSync` (or save) error: `true` only for the server's
+/// passkey-requirement refusal. Distinct from a dead session — the tokens are
+/// still valid, so this must not drive the "sign in again" banner.
+public func syncFailedPasskeyRequired(from error: Error) -> Bool {
+  if case MobileAPIError.passkeyRequired = error { return true }
   return false
 }
 
@@ -133,8 +144,9 @@ public func sessionBannerTransition(syncError error: Error?) -> SessionBannerTra
 /// Map a fail-closed unlock (sync failed with no trustworthy local cache) to the
 /// banner outcome: a dead session routes to "sign in again", a mere offline failure
 /// to "try again with your passphrase".
-public func failClosedResult(sessionExpired: Bool) -> UnlockedResult {
-  sessionExpired ? .failedSessionExpired : .failedOffline
+public func failClosedResult(sessionExpired: Bool, passkeyRequired: Bool = false) -> UnlockedResult {
+  if passkeyRequired { return .failedPasskeyRequired }
+  return sessionExpired ? .failedSessionExpired : .failedOffline
 }
 
 /// Why a vault view is read-only. The mutating-control affordance differs by

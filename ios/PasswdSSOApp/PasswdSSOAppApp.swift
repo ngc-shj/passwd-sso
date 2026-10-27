@@ -72,6 +72,9 @@ struct PasswdSSOAppApp: App {
           // Per plan §"Foreground sync (primary path)": drain flags then re-sync.
           Task {
             guard let vaultKey = currentVaultKey else { return }
+            // Refused for a missing passkey: every call below would be refused
+            // the same way. Wait for the user (passkey page / manual sync).
+            guard automaticServerCallsAllowed() else { return }
             // 0. Re-mint the short-lived AutoFill upload token (plan C6) so a
             // passkey registration started soon after foregrounding finds a
             // live token. Best-effort; independent of the sync result below.
@@ -91,6 +94,10 @@ struct PasswdSSOAppApp: App {
                 vaultKey: vaultKey, userId: userId, cacheKey: currentCacheKey)
             } catch MobileAPIError.authenticationRequired {
               // Refresh token dead — no recovery in background; just stop.
+              return
+            } catch MobileAPIError.passkeyRequired {
+              // Recorded by the client; the alert explains, the gate above
+              // stops the next automatic attempt.
               return
             } catch {
               // Transient error — keep using cached data; do nothing.

@@ -56,6 +56,10 @@ public enum EntryUploadError: Error, Equatable {
   case network
   /// 401 after the single nonce-retry — token expired/revoked or DPoP rejected.
   case unauthorized
+  /// 403 `PASSKEY_REQUIRED`: the tenant requires a passkey this member has not
+  /// registered, so the upload token is refused. The extension explains this
+  /// instead of cancelling silently.
+  case passkeyRequired
   case serverError(status: Int)
   /// 2xx without a decodable `{ id }` body.
   case invalidResponse
@@ -156,6 +160,9 @@ public struct EntryUploader: Sendable {
         }
         throw EntryUploadError.unauthorized
       default:
+        if isPasskeyRequiredResponse(status: http.statusCode, body: data) {
+          throw EntryUploadError.passkeyRequired
+        }
         throw EntryUploadError.serverError(status: http.statusCode)
       }
     }

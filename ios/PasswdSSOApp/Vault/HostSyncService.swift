@@ -73,7 +73,8 @@ public actor HostSyncService {
     let personal = try await personalEntries
     // A transient team-membership failure is tolerable (proceed with no teams),
     // but a dead refresh token (authenticationRequired) MUST surface so the caller
-    // routes to re-sign-in (C4) rather than silently syncing personal-only.
+    // routes to re-sign-in (C4) rather than silently syncing personal-only — and
+    // so must a passkey-requirement refusal, which no retry will get past.
     let teams: [TeamMembership]
     // Whether `teams` is an authoritative list from the server (vs. an empty
     // fallback after a transient fetch failure). A transient failure must NOT be
@@ -85,6 +86,8 @@ public actor HostSyncService {
       teamsAuthoritative = true
     } catch MobileAPIError.authenticationRequired {
       throw MobileAPIError.authenticationRequired
+    } catch MobileAPIError.passkeyRequired {
+      throw MobileAPIError.passkeyRequired
     } catch {
       teams = []
       teamsAuthoritative = false
@@ -210,6 +213,10 @@ public actor HostSyncService {
           teamId: team.id, teamKeyVersion: resp.keyVersion, issuedAt: now))
       } catch MobileAPIError.authenticationRequired {
         throw MobileAPIError.authenticationRequired
+      } catch MobileAPIError.passkeyRequired {
+        // Not "this team's key is missing": every team would be refused the
+        // same way, and the full rewrite below would drop still-valid keys.
+        throw MobileAPIError.passkeyRequired
       } catch {
         continue  // skip this team (not distributed, network blip, decode error)
       }

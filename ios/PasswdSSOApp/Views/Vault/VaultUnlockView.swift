@@ -159,6 +159,11 @@ struct VaultUnlockView: View {
       errorMessage = L10n.string("Your session has expired. Please sign in again.")
       passphrase = ""
       isLoading = false
+    } catch VaultUnlockError.passkeyRequired {
+      // The passphrase may well be right; the server refuses until a passkey is
+      // registered (the app-level alert offers the passkey page).
+      errorMessage = L10n.string("Your organization requires a passkey. Register one in your browser, then try again.")
+      isLoading = false
     } catch {
       errorMessage = L10n.string("Unable to unlock vault. Check your connection and try again.")
       isLoading = false

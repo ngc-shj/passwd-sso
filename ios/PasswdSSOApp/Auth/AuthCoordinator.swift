@@ -25,6 +25,9 @@ public enum AuthError: Error, Equatable {
   /// A plain retriable error — NOT an identity change.
   case serverUnavailable
   case storeFailed
+  /// The server refused sign-in because the tenant requires a passkey this
+  /// member has not registered (`passwd-sso://auth/callback?error=passkey_required`).
+  case passkeyRequired
 }
 
 // MARK: - Coordinator
@@ -134,7 +137,16 @@ public actor AuthCoordinator {
       presentationContext: presentationContext
     )
 
-    let (code, receivedState) = try parseCallback(url: callbackURL)
+    let code: String
+    let receivedState: String
+    do {
+      (code, receivedState) = try Self.parseCallback(url: callbackURL)
+    } catch AuthError.passkeyRequired {
+      // Same refusal as a bearer call's 403 — record it so the app-level
+      // notice offers the passkey page.
+      PasskeyRequirementStore().markRequired()
+      throw AuthError.passkeyRequired
+    }
     guard receivedState == state else { throw AuthError.stateMismatch }
 
     let signer = SecureEnclaveDPoPSigner(key: privateKey)
@@ -305,10 +317,17 @@ public actor AuthCoordinator {
     return url
   }
 
-  /// Parse `code` and `state` from the Universal Link redirect URL.
-  private func parseCallback(url: URL) throws -> (code: String, state: String) {
+  /// Parse `code` and `state` from the Universal Link redirect URL. The
+  /// authorize route's passkey gate redirects with `error=passkey_required`
+  /// instead of a code; that is surfaced as its own error, not a malformed
+  /// callback.
+  static func parseCallback(url: URL) throws -> (code: String, state: String) {
+    let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+    if components?.queryItems?.first(where: { $0.name == "error" })?.value == "passkey_required" {
+      throw AuthError.passkeyRequired
+    }
     guard
-      let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+      let components,
       let code = components.queryItems?.first(where: { $0.name == "code" })?.value,
       let state = components.queryItems?.first(where: { $0.name == "state" })?.value,
       !code.isEmpty, !state.isEmpty
@@ -335,6 +354,8 @@ extension AuthError: LocalizedError {
       return "The server identity could not be verified. Check the server URL or certificate."
     case .serverUnavailable:
       return "Could not reach the server. Check your connection and try again."
+    case .passkeyRequired:
+      return L10n.string("Your organization requires a passkey. Register one in your browser, then sign in again.")
     default:
       return "Sign-in could not be completed."
     }

@@ -18,6 +18,10 @@ public enum VaultUnlockError: Error, Equatable {
   /// recovery is re-sign-in. Distinct from `serverResponseInvalid` so the UI can
   /// route to "Sign in again" instead of looping on a misleading retry message.
   case sessionExpired
+  /// The tenant requires a passkey this member has not registered, so the
+  /// server refuses the unlock data. Neither the passphrase nor a re-sign-in
+  /// fixes this; registering a passkey on the web does.
+  case passkeyRequired
 }
 
 /// Result of a successful vault unlock; carries the in-memory vault key, the
@@ -106,6 +110,8 @@ public actor VaultUnlocker {
       // passphrase recovers this — surface as sessionExpired so the UI routes to
       // "Sign in again" instead of a misleading "check your connection" retry loop.
       throw VaultUnlockError.sessionExpired
+    } catch MobileAPIError.passkeyRequired {
+      throw VaultUnlockError.passkeyRequired
     } catch {
       throw VaultUnlockError.serverResponseInvalid
     }

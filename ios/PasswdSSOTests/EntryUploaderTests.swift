@@ -215,6 +215,36 @@ final class EntryUploaderTests: XCTestCase {
     }
   }
 
+  /// The AutoFill upload token is refused per use for a passkey-less member;
+  /// the extension explains that instead of cancelling silently.
+  func testCreateEntry_403PasskeyRequiredMapsToPasskeyRequired() async {
+    let createURL = serverURL.appending(path: "/api/passwords", directoryHint: .notDirectory)
+    MockURLProtocol.requestHandler = { _ in
+      (Data(#"{"error":"PASSKEY_REQUIRED"}"#.utf8), httpResponse(status: 403, url: createURL))
+    }
+
+    do {
+      _ = try await makeUploader().createEntry(body: makeBody())
+      XCTFail("expected passkeyRequired")
+    } catch {
+      XCTAssertEqual(error as? EntryUploadError, .passkeyRequired)
+    }
+  }
+
+  func testCreateEntry_403OtherCodeStaysServerError() async {
+    let createURL = serverURL.appending(path: "/api/passwords", directoryHint: .notDirectory)
+    MockURLProtocol.requestHandler = { _ in
+      (Data(#"{"error":"FORBIDDEN"}"#.utf8), httpResponse(status: 403, url: createURL))
+    }
+
+    do {
+      _ = try await makeUploader().createEntry(body: makeBody())
+      XCTFail("expected serverError")
+    } catch {
+      XCTAssertEqual(error as? EntryUploadError, .serverError(status: 403))
+    }
+  }
+
   func testCreateEntry_2xxWithoutIdBodyIsInvalidResponse() async {
     let createURL = serverURL.appending(path: "/api/passwords", directoryHint: .notDirectory)
     MockURLProtocol.requestHandler = { _ in

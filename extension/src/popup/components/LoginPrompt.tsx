@@ -4,6 +4,7 @@ import { t } from "../../lib/i18n";
 import { EXT_CONNECT_PARAM } from "../../lib/constants";
 import { isAllowedServerUrl } from "../../lib/server-url";
 import { DISCONNECT_REASON, type DisconnectReason } from "../../lib/disconnect-reason";
+import { PASSKEY_SETTINGS_PATH } from "../../lib/passkey-required";
 
 interface LoginPromptProps {
   /** Why the previous connection ended; drives the context line. */
@@ -18,6 +19,8 @@ function reasonMessageKey(reason: DisconnectReason | null | undefined): string |
       return "popup.disconnectedExpired";
     case DISCONNECT_REASON.REVOKED:
       return "popup.disconnectedRevoked";
+    case DISCONNECT_REASON.PASSKEY_REQUIRED:
+      return "popup.disconnectedPasskeyRequired";
     default:
       // MANUAL or no recorded reason — generic prompt, no forewarning.
       return null;
@@ -38,7 +41,13 @@ export function LoginPrompt({ reason }: LoginPromptProps) {
     chrome.tabs.create({ url: `${serverUrl}/dashboard?${EXT_CONNECT_PARAM}=1` });
   };
 
+  const handleRegisterPasskey = () => {
+    if (!serverUrl) return;
+    chrome.tabs.create({ url: `${serverUrl}${PASSKEY_SETTINGS_PATH}` });
+  };
+
   const contextKey = reasonMessageKey(reason);
+  const passkeyRequired = reason === DISCONNECT_REASON.PASSKEY_REQUIRED;
 
   return (
     <div className="flex flex-col items-center justify-center gap-4 py-8">
@@ -47,9 +56,11 @@ export function LoginPrompt({ reason }: LoginPromptProps) {
           <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
             {t(contextKey)}
           </p>
-          <p className="text-xs text-gray-500 dark:text-gray-400">
-            {t("popup.reauthHint")}
-          </p>
+          {!passkeyRequired && (
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              {t("popup.reauthHint")}
+            </p>
+          )}
         </div>
       ) : (
         <p className="text-sm text-gray-600 dark:text-gray-400 text-center">
@@ -61,9 +72,20 @@ export function LoginPrompt({ reason }: LoginPromptProps) {
           {serverUrl}
         </p>
       )}
+      {passkeyRequired && serverUrl && (
+        <button
+          type="button"
+          onClick={handleRegisterPasskey}
+          className="px-4 py-2 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-medium rounded-md hover:bg-gray-800 dark:hover:bg-gray-200 active:bg-gray-950 transition-colors"
+        >
+          {t("popup.registerPasskey")}
+        </button>
+      )}
       <button
         onClick={handleLogin}
-        className="px-4 py-2 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-medium rounded-md hover:bg-gray-800 dark:hover:bg-gray-200 active:bg-gray-950 transition-colors"
+        className={passkeyRequired
+          ? "px-4 py-2 text-sm font-medium rounded-md bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+          : "px-4 py-2 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-medium rounded-md hover:bg-gray-800 dark:hover:bg-gray-200 active:bg-gray-950 transition-colors"}
       >
         {t("popup.openApp")}
       </button>

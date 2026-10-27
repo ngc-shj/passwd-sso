@@ -52,6 +52,7 @@ import {
   resetInMemoryKeyCache,
 } from "../lib/dpop-key";
 import { swFetchAuthenticated } from "./dpop-fetch";
+import { isPasskeyRequiredResponse } from "../lib/passkey-required";
 import {
   injectContentBundleAndResend,
   injectFillBundleInto,
@@ -495,6 +496,26 @@ function clearToken(reason: DisconnectReason = DISCONNECT_REASON.MANUAL): void {
 }
 
 /**
+ * End the connection `generation` names because the server answered
+ * PASSKEY_REQUIRED. Every later call — refreshes included — would get the same
+ * refusal until the user registers a passkey, so keeping the token would only
+ * leave the extension looking connected while nothing works. The recorded
+ * reason makes the popup say why and link to the passkey page; reconnecting
+ * after registering clears it (applyToken). The token is revoked best-effort
+ * (self-revocation is exempt from the passkey gate), since it would otherwise
+ * come back to life, unheld, once a passkey is registered.
+ */
+function endConnectionForPasskeyRequirement(generation: number): void {
+  // A reconnect since the refused request belongs to a different connection.
+  if (connectionGeneration !== generation || currentToken === null) return;
+  const token = currentToken;
+  clearToken(DISCONNECT_REASON.PASSKEY_REQUIRED);
+  // A pending TTL alarm would later overwrite the reason with EXPIRED.
+  chrome.alarms.clear(ALARM_TOKEN_TTL);
+  void revokeTokenOnServerWith({ getCurrentToken: () => token });
+}
+
+/**
  * Install a freshly-issued token into the SW state. Single source of truth
  * for the post-issuance bookkeeping (vault relock on user/session switch,
  * alarm scheduling, persistence). The production caller is the START_CONNECT
@@ -839,6 +860,7 @@ function scheduleRefreshAlarm(expiresAt: number): void {
 }
 
 async function attemptTokenRefresh(): Promise<void> {
+  const generation = connectionGeneration;
   await attemptTokenRefreshWith({
     getCurrentToken: () => currentToken,
     getTokenExpiresAt: () => tokenExpiresAt,
@@ -854,6 +876,7 @@ async function attemptTokenRefresh(): Promise<void> {
     // A refresh that the server rejects (401/403/404) means the session is no
     // longer valid — record it as REVOKED, not the default MANUAL.
     clearToken: () => clearToken(DISCONNECT_REASON.REVOKED),
+    endForPasskeyRequirement: () => endConnectionForPasskeyRequirement(generation),
     scheduleRefreshAlarm,
     createTtlAlarm: (when) => {
       chrome.alarms.create(ALARM_TOKEN_TTL, { when });
@@ -1407,6 +1430,21 @@ async function swFetch(
   init?: RequestInit,
   opts: { epoch?: number } = {},
 ): Promise<Response> {
+  const generation = connectionGeneration;
+  const res = await swFetchWithExpiryRetry(path, init, opts);
+  // The caller still sees the 403 and fails its request as before; ending the
+  // connection is what stops the next ones.
+  if (await isPasskeyRequiredResponse(res)) {
+    endConnectionForPasskeyRequirement(generation);
+  }
+  return res;
+}
+
+async function swFetchWithExpiryRetry(
+  path: string,
+  init: RequestInit | undefined,
+  opts: { epoch?: number },
+): Promise<Response> {
   const assertFresh = () => {
     if (opts.epoch !== undefined) assertVaultEpoch(opts.epoch);
   };
@@ -1483,6 +1521,7 @@ async function swFetch(
  */
 async function recordUnlockPresence(authHash: string, epoch: number): Promise<void> {
   if (!currentToken) return;
+  const generation = connectionGeneration;
   try {
     const { serverUrl } = await getSettings();
     // The hash proves the unlock this epoch committed; after a lock or a
@@ -1511,6 +1550,8 @@ async function recordUnlockPresence(authHash: string, epoch: number): Promise<vo
       warnBackground("vault-unlock-verify-mismatch", "unknown");
     } else if (res.status === 401) {
       warnBackground("vault-unlock-verify-token-failure", "unknown");
+    } else if (await isPasskeyRequiredResponse(res)) {
+      endConnectionForPasskeyRequirement(generation);
     } else if (res.status === 403) {
       warnBackground("vault-unlock-verify-account-locked", "unknown");
     } else if (res.status === 429) {

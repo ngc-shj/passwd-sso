@@ -15,6 +15,11 @@ export const DISCONNECT_REASON = {
   EXPIRED: "expired",
   /** Server rejected refresh (401/403/404) — the session is no longer valid. */
   REVOKED: "revoked",
+  /**
+   * Server answered PASSKEY_REQUIRED: the tenant requires a passkey this
+   * member has not registered. Reconnecting works only after they register one.
+   */
+  PASSKEY_REQUIRED: "passkey_required",
   /** Vault auto-lock fired with the LOGOUT action. */
   TIMEOUT_LOGOUT: "timeout_logout",
   /** User clicked Disconnect. */
