@@ -57,6 +57,21 @@ function setCookieLineIsPartitioned(line: string): boolean {
 }
 
 /**
+ * True when one of `lines` deletes the configured session cookie (an empty
+ * value). On a sign-out response this is Auth.js's own deletion, which it
+ * writes only after its CSRF check passed and only when the request carried a
+ * session cookie — whether or not the session row was still there.
+ */
+export function deletesSessionCookie(lines: readonly string[]): boolean {
+  const name = configuredSessionCookieName();
+  return lines.some((line) => {
+    if (setCookieLineName(line) !== name) return false;
+    const value = line.slice(line.indexOf("=") + 1).split(";")[0];
+    return value.trim() === "";
+  });
+}
+
+/**
  * `lines` — a response's Set-Cookie lines, in order — with the configured
  * session cookie's other CHIPS variant deleted immediately before the first
  * line that writes or deletes that cookie. Unchanged when no line names it

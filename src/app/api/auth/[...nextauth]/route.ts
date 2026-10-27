@@ -19,7 +19,13 @@ import {
   readSessionCookie,
   SESSION_COOKIE_READ,
 } from "@/lib/auth/session/session-cookie";
-import { deleteOtherSessionCookieVariantFirst } from "@/lib/auth/session/session-cookie-variants";
+import {
+  deleteOtherSessionCookieVariantFirst,
+  deletesSessionCookie,
+} from "@/lib/auth/session/session-cookie-variants";
+import { revokePresentedSessions } from "@/lib/auth/session/revoke-presented-sessions";
+import { getLogger } from "@/lib/logger";
+import { errorLogFields } from "@/lib/logger/error-fields";
 
 export const runtime = "nodejs";
 
@@ -283,9 +289,16 @@ function withoutSessionCookieOnCallback<H extends RouteHandler>(handler: H): H {
 // wrote that line — a sign-in that succeeded, a sign-out that passed Auth.js's
 // CSRF check and found a session — so a refused request deletes nothing.
 //
-// A sign-out also hands every session token the request carried to
-// events.signOut (src/auth.ts), which revokes those that belong to the user
-// Auth.js signed out.
+// A sign-out also revokes the session of every configured-name cookie the
+// request carried, once Auth.js's own deletion line shows the sign-out went
+// through (after its CSRF check, with a session cookie present). That runs
+// here, after the handler, not in events.signOut: Auth.js skips the event
+// whenever its own deleteSession throws — as it does when the first cookie's
+// session is already gone — and the second cookie's live session would be
+// orphaned. No ownership check: holding a raw token already lets the caller
+// sign that session out by sending it alone (the #966 reasoning). A failed
+// revocation is logged and the sign-out response still goes out: the cookies
+// are deleted either way.
 function isSignOutRoute(pathname: string, method: string): boolean {
   return (
     method === "POST" &&
@@ -302,21 +315,20 @@ function withSessionCookieVariants<H extends RouteHandler>(handler: H): H {
     if (!signOut && !isCallbackRoute(request.nextUrl.pathname)) {
       return handler(request, ...rest);
     }
-    let response: Response;
-    if (signOut) {
-      const meta = sessionMetaStorage.getStore() ?? extractRequestMeta(request);
-      const tokens = presentedSessionTokens(
-        request.headers.get("cookie"),
-        ALL_KNOWN_SESSION_COOKIE_NAMES,
-      );
-      response = await sessionMetaStorage.run(
-        { ...meta, signOutSessionTokens: tokens },
-        () => handler(request, ...rest),
-      );
-    } else {
-      response = await handler(request, ...rest);
-    }
+    const response = await handler(request, ...rest);
     const lines = response.headers.getSetCookie();
+    if (signOut && deletesSessionCookie(lines)) {
+      try {
+        await revokePresentedSessions(
+          presentedSessionTokens(request.headers.get("cookie"), [configuredSessionCookieName()]),
+        );
+      } catch (err) {
+        getLogger().error({
+          msg: "auth.signout: revoking the presented sessions failed",
+          error: errorLogFields(err),
+        });
+      }
+    }
     const ordered = deleteOtherSessionCookieVariantFirst(
       lines,
       process.env.NEXT_PUBLIC_BASE_PATH || "",

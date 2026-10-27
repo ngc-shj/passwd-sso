@@ -219,9 +219,9 @@ const ALLOWED_USAGE = new Set([
   // The Web-session cap (both sign-in creators route here): the tenant's
   // maxConcurrentSessions, then evict + create sessions under the per-user lock.
   "src/lib/auth/session/session-concurrency.ts",
-  // Sign-out (events.signOut): deletes the other sessions the request's cookies
-  // named, each delete scoped to the signed-out user's id (issue #962).
-  "src/lib/auth/session/sign-out-sessions.ts",
+  // Sign-out and the proxy's refusal: deletes the sessions named by the session
+  // cookies the response deletes from the browser (issue #962).
+  "src/lib/auth/session/revoke-presented-sessions.ts",
   // Session callbacks and the sign-in realignment: tenant, user and membership
   // reads, the account/vault wipe on a tenant move ($transaction), the claim
   // registry (tenant-management), the stranded-row counts and the audit

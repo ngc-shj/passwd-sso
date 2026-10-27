@@ -204,14 +204,6 @@ vi.mock("@sentry/nextjs", () => ({
   captureMessage: mockSentryCaptureMessage,
 }));
 
-const { mockRevokeSignedOutUserSessions } = vi.hoisted(() => ({
-  mockRevokeSignedOutUserSessions: vi.fn(),
-}));
-
-vi.mock("@/lib/auth/session/sign-out-sessions", () => ({
-  revokeSignedOutUserSessions: mockRevokeSignedOutUserSessions,
-}));
-
 vi.mock("@/lib/prisma", () => ({
   prisma: mockPrisma,
 }));
@@ -2296,34 +2288,6 @@ describe("auth events", () => {
       await events.signOut({});
 
       expect(mockLogAudit).not.toHaveBeenCalled();
-    });
-
-    // Auth.js revoked the first cookie's session; the rest of the tokens the
-    // sign-out request carried go to the revoker, scoped to the signed-out user.
-    it("revokes the signed-out user's other sessions the request carried", async () => {
-      mockSessionMetaGetStore.mockReturnValue({
-        ip: null,
-        userAgent: null,
-        acceptLanguage: null,
-        signOutSessionTokens: ["tok-a", "tok-b"],
-      });
-
-      await events.signOut({ session: { userId: "user-2" } });
-
-      expect(mockRevokeSignedOutUserSessions).toHaveBeenCalledWith("user-2", ["tok-a", "tok-b"]);
-    });
-
-    it("revokes nothing more when Auth.js signed no one out", async () => {
-      mockSessionMetaGetStore.mockReturnValue({
-        ip: null,
-        userAgent: null,
-        acceptLanguage: null,
-        signOutSessionTokens: ["tok-a"],
-      });
-
-      await events.signOut({});
-
-      expect(mockRevokeSignedOutUserSessions).not.toHaveBeenCalled();
     });
   });
 });

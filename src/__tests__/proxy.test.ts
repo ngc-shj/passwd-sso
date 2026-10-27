@@ -26,6 +26,11 @@ vi.mock("@/lib/audit/audit", async (importOriginal) => ({
 // counter, which `_resetSessionPasskeyAuditForTests` clears. A real Redis
 // (REDIS_URL is set in app-ci) would keep the key across runs.
 vi.mock("@/lib/redis", () => ({ getRedis: () => null }));
+// The page refusal's session revocation is a DB write; covered by
+// src/lib/proxy/page-route.test.ts and revoke-presented-sessions.integration.
+vi.mock("@/lib/auth/session/revoke-presented-sessions", () => ({
+  revokePresentedSessions: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("@/lib/auth/session/session-cache", async () => {
   const actual = await vi.importActual<
     typeof import("@/lib/auth/session/session-cache")

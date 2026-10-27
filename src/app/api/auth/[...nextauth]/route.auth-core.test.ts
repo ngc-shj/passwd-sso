@@ -25,6 +25,22 @@ vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: vi.fn(async () => ({ allowed: true })) }),
 }));
 
+// The route's sign-out revocation, against the fake adapter's session store:
+// like the real helper, it deletes each named session by token, whoever owns
+// it, and ignores a token that names none.
+const { fakeStore, mockRevokePresentedSessions } = vi.hoisted(() => {
+  const fakeStore: { sessions: Map<string, unknown> | null } = { sessions: null };
+  return {
+    fakeStore,
+    mockRevokePresentedSessions: vi.fn(async (tokens: readonly string[]) => {
+      for (const token of tokens) fakeStore.sessions?.delete(token);
+    }),
+  };
+});
+vi.mock("@/lib/auth/session/revoke-presented-sessions", () => ({
+  revokePresentedSessions: mockRevokePresentedSessions,
+}));
+
 const APP = "http://app.test:3000";
 const IDP = "https://idp.test";
 const CLIENT_ID = "client-1";
@@ -131,12 +147,16 @@ function fakeAdapter() {
       return session && user ? { session, user } : null;
     }),
     updateSession: vi.fn(async () => null),
-    deleteSession: vi.fn(async (token: string) => {
-      const session = sessions.get(token) ?? null;
+    // The real adapter's tx.session.delete throws (Prisma P2025) when the row
+    // is gone; Auth.js then catches it and skips events.signOut.
+    deleteSession: vi.fn(async (token: string): Promise<AdapterSession> => {
+      const session = sessions.get(token);
+      if (!session) throw new Error("Record to delete does not exist.");
       sessions.delete(token);
       return session;
     }),
   } satisfies Adapter;
+  fakeStore.sessions = sessions;
   return { adapter, replaced, sessions };
 }
 
@@ -325,38 +345,144 @@ describe("both CHIPS variants through withSessionCookieVariants (@auth/core)", (
     expect(replaced).toEqual([[VICTIM_TOKEN, OTHER_TOKEN]]);
   });
 
-  it("sign-out: both variants are deleted and every session cookie reaches events.signOut", async () => {
-    const { adapter, sessions } = fakeAdapter();
-    sessions.set(OTHER_TOKEN, { sessionToken: OTHER_TOKEN, userId: VICTIM.id, expires: new Date(Date.now() + 60_000) });
-    const seen: unknown[] = [];
-    const config = secureConfig(adapter, {
-      signOut: () => {
-        seen.push(sessionMetaStorage.getStore()?.signOutSessionTokens);
-      },
+  const live = (token: string): AdapterSession => ({
+    sessionToken: token,
+    userId: VICTIM.id,
+    expires: new Date(Date.now() + 60_000),
+  });
+
+  function signOutRequest(cookie: string, body: Record<string, string> = {}): NextRequest {
+    return new NextRequest(`${SECURE_APP}/api/auth/signout`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", cookie },
+      body: new URLSearchParams({ callbackUrl: `${SECURE_APP}/`, ...body }),
     });
-    const handler = await wrapped(config);
+  }
 
-    const response = await sessionMetaStorage.run({ ip: null, userAgent: null, acceptLanguage: null }, () =>
-      handler(
-        new NextRequest(`${SECURE_APP}/api/auth/signout`, {
-          method: "POST",
-          headers: {
-            "content-type": "application/x-www-form-urlencoded",
-            cookie: `${NAME}=${VICTIM_TOKEN}; ${NAME}=${OTHER_TOKEN}`,
-          },
-          body: new URLSearchParams({ callbackUrl: `${SECURE_APP}/` }),
-        }),
-      ),
-    );
+  function recordingEvents() {
+    const signedOut: unknown[] = [];
+    const events: AuthConfig["events"] = {
+      signOut: (message) => {
+        signedOut.push("session" in message ? message.session : message);
+      },
+    };
+    return { signedOut, events };
+  }
 
-    // Auth.js revoked the first cookie's session only...
+  beforeEach(() => {
+    mockRevokePresentedSessions.mockClear();
+  });
+
+  it("sign-out: both variants are deleted and the second cookie's session is revoked too", async () => {
+    const { adapter, sessions } = fakeAdapter();
+    sessions.set(OTHER_TOKEN, live(OTHER_TOKEN));
+    const { signedOut, events } = recordingEvents();
+    const handler = await wrapped(secureConfig(adapter, events));
+
+    const response = await handler(signOutRequest(`${NAME}=${VICTIM_TOKEN}; ${NAME}=${OTHER_TOKEN}`));
+
+    // Auth.js revoked the first cookie's session only, and the event carries
+    // the signed-out user (AUTH_LOGOUT is audited from it)...
     expect(adapter.deleteSession).toHaveBeenCalledTimes(1);
     expect(adapter.deleteSession).toHaveBeenCalledWith(VICTIM_TOKEN);
-    // ...and events.signOut was handed both, for the owner-scoped revocation.
-    expect(seen).toEqual([[VICTIM_TOKEN, OTHER_TOKEN]]);
+    expect(signedOut).toEqual([expect.objectContaining({ userId: VICTIM.id })]);
+    // ...and the route revoked the rest.
+    expect(sessions.has(VICTIM_TOKEN)).toBe(false);
+    expect(sessions.has(OTHER_TOKEN)).toBe(false);
     const sessionLines = response.headers.getSetCookie().filter(namesSession);
     expect(sessionLines).toHaveLength(2);
     expect(sessionLines.every(isDeletion)).toBe(true);
     expect(sessionLines.map(isPartitioned).sort()).toEqual([false, true]);
+  });
+
+  // S1: the first cookie's session is gone. The adapter's deleteSession
+  // throws, Auth.js catches it and skips events.signOut, but still deletes the
+  // cookie — so revocation hung on the event would orphan the second, live
+  // session.
+  it("sign-out: revokes the second cookie's live session when the first cookie's session is gone", async () => {
+    const { adapter, sessions } = fakeAdapter();
+    const GONE_TOKEN = "dddd";
+    sessions.set(OTHER_TOKEN, live(OTHER_TOKEN));
+    const { signedOut, events } = recordingEvents();
+    const handler = await wrapped(secureConfig(adapter, events));
+
+    const response = await handler(signOutRequest(`${NAME}=${GONE_TOKEN}; ${NAME}=${OTHER_TOKEN}`));
+
+    await expect(adapter.deleteSession.mock.results[0].value).rejects.toThrow();
+    expect(signedOut).toEqual([]);
+    expect(sessions.has(OTHER_TOKEN)).toBe(false);
+    expect(sessions.has(VICTIM_TOKEN)).toBe(true);
+    expect(response.headers.getSetCookie().filter(namesSession).every(isDeletion)).toBe(true);
+  });
+
+  // T2: with Auth.js's CSRF check on, a sign-out without a valid csrfToken is
+  // refused before Auth.js reads the session: no deleteSession, no
+  // revocation, and the response is Auth.js's own, unmodified.
+  describe("with Auth.js's CSRF check", () => {
+    function csrfConfig(adapter: Adapter): AuthConfig {
+      const { skipCSRFCheck: _skip, ...rest } = secureConfig(adapter);
+      return rest;
+    }
+
+    async function wrappedCapturing(config: AuthConfig) {
+      const { _withSessionCookieVariants } = await import("@/app/api/auth/[...nextauth]/route");
+      const inner: Response[] = [];
+      const handler = _withSessionCookieVariants(async (req: NextRequest) => {
+        const res = await Auth(req, config);
+        inner.push(res);
+        return res;
+      });
+      return { handler, inner };
+    }
+
+    /** The CSRF cookie and token a browser gets from /api/auth/csrf. */
+    async function csrfPair(config: AuthConfig): Promise<{ cookie: string; token: string }> {
+      const res = await Auth(new Request(`${SECURE_APP}/api/auth/csrf`), config);
+      const { csrfToken } = (await res.json()) as { csrfToken: string };
+      return { cookie: setCookies(res).join("; "), token: csrfToken };
+    }
+
+    it.each([
+      ["missing", null],
+      ["wrong", "not-the-token"],
+    ])("refuses a sign-out with a %s csrfToken: nothing deleted, nothing revoked", async (_label, token) => {
+      const { adapter, sessions } = fakeAdapter();
+      sessions.set(OTHER_TOKEN, live(OTHER_TOKEN));
+      const config = csrfConfig(adapter);
+      const { cookie: csrfCookie } = await csrfPair(config);
+      const { handler, inner } = await wrappedCapturing(config);
+
+      const response = await handler(
+        signOutRequest(
+          `${NAME}=${VICTIM_TOKEN}; ${NAME}=${OTHER_TOKEN}; ${csrfCookie}`,
+          token === null ? {} : { csrfToken: token },
+        ),
+      );
+
+      expect(adapter.deleteSession).not.toHaveBeenCalled();
+      expect(mockRevokePresentedSessions).not.toHaveBeenCalled();
+      expect(sessions.has(VICTIM_TOKEN)).toBe(true);
+      expect(sessions.has(OTHER_TOKEN)).toBe(true);
+      expect(response).toBe(inner[0]);
+      expect(response.headers.getSetCookie().filter(namesSession)).toEqual([]);
+    });
+
+    it("allows a sign-out with the csrfToken from /api/auth/csrf", async () => {
+      const { adapter, sessions } = fakeAdapter();
+      sessions.set(OTHER_TOKEN, live(OTHER_TOKEN));
+      const config = csrfConfig(adapter);
+      const { cookie: csrfCookie, token } = await csrfPair(config);
+      const { handler } = await wrappedCapturing(config);
+
+      const response = await handler(
+        signOutRequest(`${NAME}=${VICTIM_TOKEN}; ${NAME}=${OTHER_TOKEN}; ${csrfCookie}`, { csrfToken: token }),
+      );
+
+      expect(adapter.deleteSession).toHaveBeenCalledWith(VICTIM_TOKEN);
+      expect(mockRevokePresentedSessions).toHaveBeenCalledWith([VICTIM_TOKEN, OTHER_TOKEN]);
+      expect(sessions.has(OTHER_TOKEN)).toBe(false);
+      const sessionLines = response.headers.getSetCookie().filter(namesSession);
+      expect(sessionLines.map(isPartitioned).sort()).toEqual([false, true]);
+    });
   });
 });

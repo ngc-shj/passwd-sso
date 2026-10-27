@@ -17,8 +17,10 @@ import {
   isSecureCookieFromAuthUrl,
 } from "../auth/session/cookie-name";
 import { sessionCookieDeletionLine } from "../auth/session/session-cookie-variants";
+import { revokePresentedSessions } from "../auth/session/revoke-presented-sessions";
 import {
   parseCookiePairs,
+  presentedSessionTokens,
   readSessionCookie,
   SESSION_COOKIE_READ,
 } from "../auth/session/session-cookie";
@@ -157,11 +159,26 @@ export async function handlePageRoute(
       signInUrl.pathname = `/${locale}/auth/signin`;
       signInUrl.searchParams.set("callbackUrl", `${basePath}${request.nextUrl.pathname}${request.nextUrl.search}`);
       const redirectResponse = NextResponse.redirect(signInUrl);
+      const cookieHeader = request.headers.get("cookie");
       const unpartitionedDeletions = clearAuthSessionCookies(
         redirectResponse,
         basePath,
-        ambiguousSessionCookieNames(request.headers.get("cookie")),
+        ambiguousSessionCookieNames(cookieHeader),
       );
+      // The refusal deletes the configured cookie in both CHIPS variants, so
+      // the sessions those cookies named would stay alive server-side with no
+      // browser holding them; revoke them. No ownership check: the browser
+      // holds each raw token, which already lets it sign that session out.
+      // Not awaited: the redirect waits on neither the write nor its failure,
+      // as with the passkey-block audit below.
+      void revokePresentedSessions(
+        presentedSessionTokens(cookieHeader, [configuredSessionCookieName()]),
+      ).catch((err: unknown) => {
+        getLogger().error({
+          msg: "page-route: revoking the refused session cookies failed",
+          error: errorLogFields(err),
+        });
+      });
       const securedResponse = applySecurityHeaders(redirectResponse, options, basePath);
       for (const line of unpartitionedDeletions) {
         securedResponse.headers.append("set-cookie", line);

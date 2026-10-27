@@ -27,12 +27,6 @@ export interface SessionMeta {
    * counts them.
    */
   replacesSessionTokens?: readonly string[];
-  /**
-   * Raw tokens of every session cookie a sign-out request carried, under any
-   * known name. `events.signOut` revokes those that belong to the user Auth.js
-   * signed out; Auth.js itself revokes only the first one it reads.
-   */
-  signOutSessionTokens?: readonly string[];
 }
 
 export const sessionMetaStorage = new AsyncLocalStorage<SessionMeta>();

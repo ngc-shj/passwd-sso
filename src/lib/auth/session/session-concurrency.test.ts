@@ -448,6 +448,26 @@ describe("createCappedSession", () => {
     expect(mockCheckNewDeviceAndNotify).not.toHaveBeenCalled();
   });
 
+  // Either order: one of the replaced sessions being the user's own live
+  // session proves a known device, whatever the other one was.
+  it.each([
+    ["own live, foreign live", ["u-1", "u-2"]],
+    ["foreign live, own live", ["u-2", "u-1"]],
+  ])("skips the new-device check when the replaced sessions are [%s]", async (_label, owners) => {
+    const tx = makeTx();
+    tx.tenant.findUnique.mockResolvedValue({ maxConcurrentSessions: null });
+    tx.session.create.mockResolvedValue({ userId: "u-1", expires });
+    for (const owner of owners) {
+      tx.session.findUnique.mockResolvedValueOnce({ userId: owner, expires: LIVE });
+    }
+    openTxAround(tx);
+
+    await createCappedSession({ ...input, replacesSessionTokens: ["prev-a", "prev-b"] });
+
+    expect(tx.session.deleteMany).toHaveBeenCalledTimes(2);
+    expect(mockCheckNewDeviceAndNotify).not.toHaveBeenCalled();
+  });
+
   it("still checks for a new device when the replaced own session had expired", async () => {
     const tx = makeTx();
     tx.tenant.findUnique.mockResolvedValue({ maxConcurrentSessions: null });

@@ -7,7 +7,6 @@ import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { prisma, type TxOrPrisma } from "@/lib/prisma";
 import { extractTenantClaimValue } from "@/lib/tenant/tenant-claim";
 import { sessionMetaStorage } from "@/lib/auth/session/session-meta";
-import { revokeSignedOutUserSessions } from "@/lib/auth/session/sign-out-sessions";
 import { SESSION_ABSOLUTE_TIMEOUT_MAX } from "@/lib/validations/common";
 import { tenantClaimStorage } from "@/lib/tenant/tenant-claim-storage";
 import {
@@ -1276,14 +1275,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           ip: meta?.ip ?? null,
           userAgent: meta?.userAgent ?? null,
         });
-        // Auth.js revoked the session of the first cookie it read; the sign-out
-        // route collected every session cookie the request carried, and the
-        // response deletes both CHIPS variants, so revoke the rest of this
-        // user's sessions among them rather than leave them alive.
-        await revokeSignedOutUserSessions(
-          message.session.userId,
-          meta?.signOutSessionTokens ?? [],
-        );
       }
     },
   },

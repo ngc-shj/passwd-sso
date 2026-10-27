@@ -8,6 +8,7 @@ const { mockDeleteMany, mockWithBypassRls, mockInvalidateCachedSessions } = vi.h
 
 vi.mock("@/lib/prisma", () => ({ prisma: {} }));
 vi.mock("@/lib/tenant-rls", () => ({ withBypassRls: mockWithBypassRls }));
+vi.mock("@/lib/tenant-rls-grants", () => ({ BYPASS_GRANT: { AUTH_SESSION_LIFECYCLE: "AUTH_SESSION_LIFECYCLE" } }));
 vi.mock("@/lib/auth/session/session-cache", () => ({
   hashSessionToken: (raw: string) => `hashed:${raw}`,
 }));
@@ -15,9 +16,9 @@ vi.mock("@/lib/auth/session/session-cache-helpers", () => ({
   invalidateCachedSessions: mockInvalidateCachedSessions,
 }));
 
-import { revokeSignedOutUserSessions } from "./sign-out-sessions";
+import { revokePresentedSessions } from "./revoke-presented-sessions";
 
-describe("revokeSignedOutUserSessions", () => {
+describe("revokePresentedSessions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockWithBypassRls.mockImplementation(async (_prisma: unknown, fn: (tx: unknown) => unknown) =>
@@ -25,31 +26,31 @@ describe("revokeSignedOutUserSessions", () => {
     );
   });
 
-  it("deletes each named session only where it belongs to the signed-out user", async () => {
+  it("deletes each named session by digest, in the lifecycle grant's bypass scope", async () => {
     mockDeleteMany.mockResolvedValue({ count: 1 });
 
-    await revokeSignedOutUserSessions("user-1", ["tok-a", "tok-b"]);
+    await revokePresentedSessions(["tok-a", "tok-b"]);
 
     expect(mockDeleteMany.mock.calls.map(([arg]) => arg)).toEqual([
-      { where: { sessionToken: "hashed:tok-a", userId: "user-1" } },
-      { where: { sessionToken: "hashed:tok-b", userId: "user-1" } },
+      { where: { sessionToken: "hashed:tok-a" } },
+      { where: { sessionToken: "hashed:tok-b" } },
     ]);
+    expect(mockWithBypassRls).toHaveBeenCalledWith(expect.anything(), expect.any(Function), "AUTH_SESSION_LIFECYCLE");
   });
 
-  // A tombstone would cut off a session left alive (another user's, or one
-  // already gone) for the tombstone's lifetime.
+  // A token that named no session gets no tombstone.
   it("invalidates the cache only for the sessions it deleted", async () => {
     mockDeleteMany.mockImplementation(async ({ where }: { where: { sessionToken: string } }) => ({
-      count: where.sessionToken === "hashed:own" ? 1 : 0,
+      count: where.sessionToken === "hashed:live" ? 1 : 0,
     }));
 
-    await revokeSignedOutUserSessions("user-1", ["own", "foreign"]);
+    await revokePresentedSessions(["live", "gone"]);
 
-    expect(mockInvalidateCachedSessions).toHaveBeenCalledWith(["hashed:own"]);
+    expect(mockInvalidateCachedSessions).toHaveBeenCalledWith(["hashed:live"]);
   });
 
   it("does nothing when the request named no session", async () => {
-    await revokeSignedOutUserSessions("user-1", []);
+    await revokePresentedSessions([]);
 
     expect(mockWithBypassRls).not.toHaveBeenCalled();
     expect(mockInvalidateCachedSessions).not.toHaveBeenCalled();

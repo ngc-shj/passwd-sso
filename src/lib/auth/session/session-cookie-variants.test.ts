@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   deleteOtherSessionCookieVariantFirst,
+  deletesSessionCookie,
   sessionCookieDeletionLine,
 } from "./session-cookie-variants";
 
@@ -101,5 +102,26 @@ describe("deleteOtherSessionCookieVariantFirst", () => {
     expect(nameOf(after[0])).toBe(SECURE);
     expect(after[0]).toMatch(/;\s*Path=\/passwd-sso\/(;|$)/);
     expect(isPartitioned(after[0])).toBe(true);
+  });
+});
+
+describe("deletesSessionCookie", () => {
+  beforeEach(() => {
+    vi.stubEnv("AUTH_URL", "https://app.example.test");
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("is true for Auth.js's deletion of the configured session cookie", () => {
+    expect(deletesSessionCookie([`${HOST}=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax`])).toBe(true);
+  });
+
+  it("is false for a write of the session cookie, a chunk deletion, or another name", () => {
+    expect(deletesSessionCookie([`${HOST}=${TOKEN}; Path=/; Secure`])).toBe(false);
+    expect(deletesSessionCookie([`${HOST}.0=; Max-Age=0; Path=/; Secure`])).toBe(false);
+    expect(deletesSessionCookie([`${SECURE}=; Max-Age=0; Path=/; Secure`, "authjs.csrf-token=; Max-Age=0"])).toBe(false);
+    expect(deletesSessionCookie([])).toBe(false);
   });
 });
