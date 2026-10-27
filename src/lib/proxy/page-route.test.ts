@@ -332,6 +332,7 @@ describe("handlePageRoute — protected routes auth check", () => {
     beforeEach(() => {
       vi.stubEnv("AUTH_URL", "https://example.com");
       mockLoggerError.mockClear();
+      mockLogAuditAsync.mockReset().mockResolvedValue(undefined);
     });
 
     // Both CHIPS variants; the lookup refuses the first one Auth.js reads.
@@ -364,15 +365,78 @@ describe("handlePageRoute — protected routes auth check", () => {
       expect(mockRevokePresentedSessions).toHaveBeenCalledWith([TOKEN_A, TOKEN_B]);
     });
 
-    it("writes no audit row: a refusal is not a logout", async () => {
-      mockRevokePresentedSessions.mockResolvedValue([{ sessionToken: "d", userId: "u-1" }]);
+    // A refusal is not a logout: each user whose session it ended gets one
+    // SESSION_REVOKE row, in the personal shape the session-list revoke and
+    // the adapter's absolute-timeout revoke use, with a closed reason and no
+    // token or digest.
+    it("audits SESSION_REVOKE once per user among the revoked rows", async () => {
+      mockRevokePresentedSessions.mockResolvedValue([
+        { sessionToken: "digest-a", userId: "u-1" },
+        { sessionToken: "digest-b", userId: "u-1" },
+      ]);
+      fetchSpy.mockResolvedValue(new Response("null", { status: 200 }));
+      await handlePageRoute(
+        makePageRequest("/ja/dashboard/passwords", {
+          cookie: `${HOST}=${TOKEN_A}; ${HOST}=${TOKEN_B}`,
+          "x-forwarded-for": "203.0.113.7",
+        }),
+        dummyOptions,
+      );
+      await vi.waitFor(() => expect(mockLogAuditAsync).toHaveBeenCalled());
+      // Let the fire-and-forget chain finish before counting.
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(mockLogAuditAsync).toHaveBeenCalledTimes(1);
+      const [row] = mockLogAuditAsync.mock.calls[0];
+      expect(row).toMatchObject({
+        scope: "PERSONAL",
+        action: "SESSION_REVOKE",
+        userId: "u-1",
+        metadata: { reason: "page_refusal" },
+      });
+      expect(JSON.stringify(row)).not.toMatch(/digest-|0b6f1c2e|5a7c9e1f/);
+      expect(mockLogAuditAsync.mock.calls.some(([arg]) => arg.action === "AUTH_LOGOUT")).toBe(false);
+    });
+
+    it("audits each distinct user once", async () => {
+      mockRevokePresentedSessions.mockResolvedValue([
+        { sessionToken: "digest-a", userId: "u-1" },
+        { sessionToken: "digest-b", userId: "u-2" },
+      ]);
+      fetchSpy.mockResolvedValue(new Response("null", { status: 200 }));
+      await handlePageRoute(
+        makePageRequest("/ja/dashboard/passwords", { cookie: `${HOST}=${TOKEN_A}; ${HOST}=${TOKEN_B}` }),
+        dummyOptions,
+      );
+      await vi.waitFor(() => expect(mockLogAuditAsync).toHaveBeenCalledTimes(2));
+      expect(mockLogAuditAsync.mock.calls.map(([arg]) => arg.userId)).toEqual(["u-1", "u-2"]);
+    });
+
+    it("writes no audit when nothing was revoked", async () => {
       fetchSpy.mockResolvedValue(new Response("null", { status: 200 }));
       await handlePageRoute(
         makePageRequest("/ja/dashboard/passwords", { cookie: `${HOST}=${TOKEN_A}` }),
         dummyOptions,
       );
       await vi.waitFor(() => expect(mockRevokePresentedSessions).toHaveBeenCalledTimes(1));
+      await new Promise((resolve) => setImmediate(resolve));
       expect(mockLogAuditAsync).not.toHaveBeenCalled();
+    });
+
+    it("still redirects, and logs by class, when the SESSION_REVOKE write rejects", async () => {
+      mockRevokePresentedSessions.mockResolvedValue([{ sessionToken: "digest-a", userId: "u-1" }]);
+      mockLogAuditAsync.mockRejectedValueOnce(Object.assign(new Error("outbox at 10.0.0.5"), { code: "P1001" }));
+      fetchSpy.mockResolvedValue(new Response("null", { status: 200 }));
+      const res = await handlePageRoute(
+        makePageRequest("/ja/dashboard/passwords", { cookie: `${HOST}=${TOKEN_A}` }),
+        dummyOptions,
+      );
+      expect(res.status).toBe(307);
+      await vi.waitFor(() =>
+        expect(mockLoggerError).toHaveBeenCalledWith({
+          msg: "page-route: revoking the refused session cookies failed",
+          error: { name: "Error", code: "P1001" },
+        }),
+      );
     });
 
     // An ambiguous refusal still deletes the configured cookie, so the

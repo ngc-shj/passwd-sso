@@ -71,6 +71,19 @@ describe("revokePresentedSessions", () => {
     expect(mockInvalidateCachedSessions).toHaveBeenCalledWith(["hashed:live"]);
   });
 
+  // A concurrent delete (another sign-out, the retention sweep) removed the
+  // row between the read and the delete: this call ended nothing, so it
+  // reports nothing and writes no tombstone.
+  it("returns nothing and invalidates nothing when the row vanished before its delete", async () => {
+    mockFindUnique.mockResolvedValue({ sessionToken: "hashed:raced", userId: "user-1" });
+    mockDeleteMany.mockResolvedValue({ count: 0 });
+
+    expect(await revokePresentedSessions(["raced"])).toEqual([]);
+
+    expect(mockDeleteMany).toHaveBeenCalledWith({ where: { sessionToken: "hashed:raced" } });
+    expect(mockInvalidateCachedSessions).not.toHaveBeenCalled();
+  });
+
   it("does nothing when the request named no session", async () => {
     expect(await revokePresentedSessions([])).toEqual([]);
 

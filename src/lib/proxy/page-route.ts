@@ -18,6 +18,8 @@ import {
 } from "../auth/session/cookie-name";
 import { sessionCookieDeletionLine } from "../auth/session/session-cookie-variants";
 import { revokePresentedSessions } from "../auth/session/revoke-presented-sessions";
+import { logAuditAsync, personalAuditBase } from "../audit/audit";
+import { AUDIT_ACTION } from "../constants/audit/audit";
 import {
   parseCookiePairs,
   presentedSessionTokens,
@@ -178,14 +180,25 @@ export async function handlePageRoute(
       // larger write per request. No ownership check: the browser holds each
       // raw token, which already lets it sign that session out. Not awaited:
       // the redirect waits on neither the write nor its failure, as with the
-      // passkey-block audit below. No audit row: a refusal is not a logout.
+      // passkey-block audit below. A refusal is not a logout, so a session it
+      // ended is audited as SESSION_REVOKE (not AUTH_LOGOUT), once per user
+      // among the rows actually deleted — at most the two above, so the
+      // writes are bounded by real sessions, not by the request.
       void revokePresentedSessions(
         presentedSessionTokens(
           cookieHeader,
           [configuredSessionCookieName()],
           REFUSAL_REVOKE_LIMIT,
         ),
-      ).catch((err: unknown) => {
+      ).then(async (revoked) => {
+        for (const userId of new Set(revoked.map((row) => row.userId))) {
+          await logAuditAsync({
+            ...personalAuditBase(request, userId),
+            action: AUDIT_ACTION.SESSION_REVOKE,
+            metadata: { reason: "page_refusal" },
+          });
+        }
+      }).catch((err: unknown) => {
         getLogger().error({
           msg: "page-route: revoking the refused session cookies failed",
           error: errorLogFields(err),

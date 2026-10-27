@@ -48,6 +48,8 @@ export async function revokePresentedSessions(
     },
     BYPASS_GRANT.AUTH_SESSION_LIFECYCLE,
   );
-  await invalidateCachedSessions(revoked.map((row) => row.sessionToken));
+  if (revoked.length > 0) {
+    await invalidateCachedSessions(revoked.map((row) => row.sessionToken));
+  }
   return revoked;
 }
