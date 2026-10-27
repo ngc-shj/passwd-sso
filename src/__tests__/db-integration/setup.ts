@@ -154,16 +154,19 @@ function failOnReports(when: string): void {
 // pg's own deprecation warning is not enough: pg@8 warns only when its queue is
 // already non-empty, so two queries at once (one active, one queued) pass
 // silently — it takes a third. Client.query is wrapped instead, and refuses to
-// run against a pg whose internals it can no longer read.
+// run against a pg whose internals it can no longer read. It sees statements
+// that actually overlap on the connection: Prisma itself serialises some
+// operation pairs inside an interactive transaction (measured: two `count()`s,
+// or `$executeRaw` + `count()`) and not others (`count()` + `findUnique()`), so
+// this backs the static gate up rather than replacing it.
 //
 // One source is exempt: Prisma's own query interpreter loads the children of a
 // relation join (`include` of two or more relations) with Promise.all on the
 // transaction's connection. That is inside one Prisma operation, out of this
-// codebase's reach, and recognised by the interpreter frame building
-// `childRecords`; if Prisma renames it, the exemption stops matching and these
-// tests fail loudly rather than go blind.
+// codebase's reach, and recognised by the exact interpreter frame that loads
+// `childRecords` (prisma-join-children.ts); if Prisma rewrites it, the
+// exemption stops matching and these tests fail loudly rather than go blind.
 const CONCURRENT_QUERY = "client is already executing a query";
-const PRISMA_JOIN_CHILDREN = "childRecords:";
 const concurrentQueryReports: string[] = [];
 type PgClientInternals = {
   _activeQuery?: unknown;
@@ -180,22 +183,20 @@ if (!("_activeQuery" in shape) || !Array.isArray(shape._queryQueue)) {
 }
 const { readFileSync } = await import("node:fs");
 const { fileURLToPath } = await import("node:url");
+const { fromPrismaJoinChildren } = await import("./prisma-join-children");
 const sourceLines = new Map<string, string[]>();
-/** True when a frame of `stack` sits in Prisma's runtime code that builds `childRecords`. */
-function fromPrismaJoinChildren(stack: string): boolean {
-  for (const match of stack.matchAll(/\(?((?:file:\/\/)?[^\s()]*@prisma[^\s():]*):(\d+):(\d+)\)?/g)) {
-    const [, location, line, column] = match;
-    const path = location.startsWith("file://") ? fileURLToPath(location) : location;
-    let lines = sourceLines.get(path);
-    if (!lines) {
+function readSourceLine(location: string, line: number): string | null {
+  const path = location.startsWith("file://") ? fileURLToPath(location) : location;
+  let lines = sourceLines.get(path);
+  if (!lines) {
+    try {
       lines = readFileSync(path, "utf8").split("\n");
-      sourceLines.set(path, lines);
+    } catch {
+      return null;
     }
-    const text = lines[Number(line) - 1] ?? "";
-    const col = Number(column) - 1;
-    if (text.slice(Math.max(0, col - 200), col).includes(PRISMA_JOIN_CHILDREN)) return true;
+    sourceLines.set(path, lines);
   }
-  return false;
+  return lines[line - 1] ?? null;
 }
 const originalQuery = clientProto.query;
 clientProto.query = function (this: PgClientInternals, ...args: unknown[]) {
@@ -204,10 +205,27 @@ clientProto.query = function (this: PgClientInternals, ...args: unknown[]) {
     Error.stackTraceLimit = 50;
     const stack = new Error(CONCURRENT_QUERY).stack ?? CONCURRENT_QUERY;
     Error.stackTraceLimit = limit;
-    if (!fromPrismaJoinChildren(stack)) concurrentQueryReports.push(stack);
+    if (!fromPrismaJoinChildren(stack, readSourceLine)) concurrentQueryReports.push(stack);
   }
   return originalQuery.apply(this, args);
 };
+// Positive control: two queries at once on one client must produce exactly one
+// report, or the wrapper above is not on the path pg actually takes.
+{
+  const control = new Client({ connectionString: databaseUrl });
+  await control.connect();
+  try {
+    await Promise.all([control.query("SELECT pg_sleep(0.05)"), control.query("SELECT 1")]);
+  } finally {
+    await control.end().catch(() => {});
+  }
+  const recorded = concurrentQueryReports.splice(0).length;
+  if (recorded !== 1) {
+    throw new Error(
+      `concurrent-query backstop is blind: a deliberate two-at-once pair recorded ${recorded} report(s), expected 1`,
+    );
+  }
+}
 function failOnConcurrentQueries(when: string): void {
   const warnings = concurrentQueryReports.splice(0);
   if (warnings.length > 0) {

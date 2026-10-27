@@ -151,7 +151,9 @@ export interface RotationEffects {
  * The caller is responsible for:
  *   - session auth + passphrase verification
  *   - advisory lock: `SELECT pg_advisory_xact_lock(hashtext(userId))`
- *   - wrapping this call in `prisma.$transaction(async (tx) => { ... })`
+ *   - running this call on the RLS context's transaction:
+ *     `withUserTenantRls(userId, (_tenantId, tx) => …, { timeout: VAULT_ROTATE_TX_TIMEOUT_MS })`
+ *     (a nested `prisma.$transaction(fn, options)` inside a context is refused)
  *   - mapping error classes to HTTP responses
  *
  * @param tx          - Prisma interactive transaction client (with RLS set)

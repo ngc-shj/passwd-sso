@@ -17,10 +17,11 @@
  *   - a local variable declared outside it, through its initializer AND every
  *     write to it in its scope — reassignment, element/property assignment and
  *     the arguments of any method called on it (`.push`, `.unshift`, `.splice`,
- *     `.set`, …). A value written under `await` is settled, not a lazy query,
- *     unless a function lies between (that body runs when called). Passing the
- *     variable to a call that is not a known reader is a write the gate cannot
- *     see, and is reported as such (fail closed);
+ *     `.set`, …). A value that IS an `await` expression is settled, not a lazy
+ *     query; an `await` nested inside a value settles only part of it. Passing a
+ *     variable that visibly holds a container (an array/object literal, a
+ *     `new …`, or no initializer) to a call that is not a known reader is a
+ *     write the gate cannot see, and is reported as such (fail closed);
  *   - a local function or closure it names: its body, recursively, for clients
  *     declared outside that body.
  *
@@ -60,7 +61,15 @@
  *     (`function run(ps: Promise<unknown>[]) { return Promise.all(ps); }`);
  *   - a client typed through a generic (`<C extends Prisma.TransactionClient>(
  *     db: C)`), `typeof tx`, or an inferred type with no annotation at all;
- *   - a client held in a class field or module-level mutable state.
+ *   - a client held in a class field or module-level mutable state;
+ *   - a container reached by aliasing (`const b = a; b.push(tx.x())`), a write
+ *     to a nested member (`holder.list.push(tx.x())`), or a mutable container a
+ *     call returned (`const ps = makeList(); fill(ps)`) — only a variable that is
+ *     visibly a container is followed into unknown calls;
+ *   - a value that is awaited and still holds lazy queries
+ *     (`const ps = await buildQueries(tx)`) — a top-level `await` is settled;
+ *   - a wrapper re-exported through another module (imports resolve to the
+ *     module named, and its own declarations).
  *
  * The array form `prisma.$transaction([...])` is not a combinator here: the
  * proxy in src/lib/prisma.ts runs it sequentially inside a context.
@@ -130,14 +139,6 @@ if (files.length === 0) fail("scanned 0 files — refusing to report OK");
 
 const sameNode = (a, b) => !!a && !!b && a.getStart() === b.getStart() && a.getEnd() === b.getEnd();
 const within = (node, outer) => outer.getStart() <= node.getStart() && node.getEnd() <= outer.getEnd();
-const FUNCTION_LIKE = new Set([
-  ...FN_KINDS,
-  SyntaxKind.FunctionDeclaration,
-  SyntaxKind.MethodDeclaration,
-  SyntaxKind.GetAccessor,
-  SyntaxKind.SetAccessor,
-  SyntaxKind.Constructor,
-]);
 
 // ── Pass 1: derive client types, wrappers, callback properties ──
 
@@ -275,23 +276,33 @@ const mergeSlots = (into, from) => {
   return into;
 };
 
-const wrappers = new Map(); // name -> Map<argIndex, Set<paramIndex>>, from every scanned declaration
+// Wrappers by the file that declares them — an import resolves to its module's
+// own declaration, so a same-named helper elsewhere cannot change it. Methods
+// are reached through a receiver this file-local gate cannot type, so they stay
+// keyed by name alone.
+const wrappersByFile = new Map(); // rel -> Map<name, Map<argIndex, Set<paramIndex>>>
+const methodWrappers = new Map(); // method name -> Map<argIndex, Set<paramIndex>>
 const callbackProps = new Map(); // object-type property name -> client parameter indices
 let ambientImports = 0;
 let ambientExportFound = false;
 for (const { sf, rel } of files) {
   const fns = [
     ...sf.getDescendantsOfKind(SyntaxKind.FunctionDeclaration).map((f) => [f.getName(), f]),
-    ...sf.getDescendantsOfKind(SyntaxKind.MethodDeclaration).map((m) => [m.getName(), m]),
     ...sf
       .getDescendantsOfKind(SyntaxKind.VariableDeclaration)
       .map((v) => [v.getName(), unwrapExpression(v.getInitializer())])
       .filter(([, init]) => init && FN_KINDS.has(init.getKind())),
   ];
+  const own = new Map();
   for (const [name, fn] of fns) {
     if (!name) continue;
     const slots = callbackSlots(fn);
-    if (slots.size > 0) wrappers.set(name, mergeSlots(wrappers.get(name) ?? new Map(), slots));
+    if (slots.size > 0) own.set(name, mergeSlots(own.get(name) ?? new Map(), slots));
+  }
+  if (own.size > 0) wrappersByFile.set(rel, own);
+  for (const method of sf.getDescendantsOfKind(SyntaxKind.MethodDeclaration)) {
+    const slots = callbackSlots(method);
+    if (slots.size > 0) methodWrappers.set(method.getName(), mergeSlots(methodWrappers.get(method.getName()) ?? new Map(), slots));
   }
   for (const kind of [SyntaxKind.PropertySignature, SyntaxKind.PropertyDeclaration]) {
     for (const prop of sf.getDescendantsOfKind(kind)) {
@@ -325,7 +336,7 @@ for (const [path, pins] of PINNED_WRAPPERS) {
     continue;
   }
   for (const [name, arg, param] of pins) {
-    if (!wrappers.get(name)?.get(arg)?.has(param)) {
+    if (!wrappersByFile.get(path)?.get(name)?.get(arg)?.has(param)) {
       fail(
         `derivation lost ${name} (callback argument ${arg}, client parameter ${param}) from ${path} — ` +
           `the signature match no longer sees a real opener, so its callbacks would read as plain functions`,
@@ -366,7 +377,7 @@ function slotsOf(call, ctx) {
   if (callee?.getKind() === SyntaxKind.PropertyAccessExpression) {
     const name = callee.getName();
     if (name === "$transaction") return new Map([[0, new Set([0])]]);
-    return wrappers.get(name) ?? new Map();
+    return methodWrappers.get(name) ?? new Map();
   }
   if (callee?.getKind() !== SyntaxKind.Identifier) return new Map();
   const name = callee.getText();
@@ -375,7 +386,16 @@ function slotsOf(call, ctx) {
     return fn ? callbackSlots(fn) : new Map();
   }
   const imported = importOf(name, ctx.sf, ctx.rel);
-  return wrappers.get(imported?.original ?? name) ?? new Map();
+  if (!imported || imported.namespace) return new Map();
+  return wrappersOfModule(imported.module)?.get(imported.original) ?? new Map();
+}
+
+/** The wrappers a module key (`src/lib/tenant-rls`) declares, when that module was scanned. */
+function wrappersOfModule(moduleId) {
+  for (const candidate of [`${moduleId}.ts`, `${moduleId}.tsx`, `${moduleId}/index.ts`]) {
+    if (wrappersByFile.has(candidate)) return wrappersByFile.get(candidate);
+  }
+  return null;
 }
 
 /** The position a function expression is written in, past type-level wrappers. */
@@ -495,16 +515,12 @@ function inOwnContext(id, scope, ctx) {
   return false;
 }
 
-/** True when `id`, walking up to `stop` inclusive, passes an `await` and no function boundary. */
-function settledUnderAwait(id, stop) {
-  let awaited = false;
-  for (let p = id.getParent(); p; p = p.getParent()) {
-    if (FUNCTION_LIKE.has(p.getKind())) return false;
-    if (p.getKind() === SyntaxKind.AwaitExpression) awaited = true;
-    if (sameNode(p, stop)) break;
-  }
-  return awaited;
-}
+/**
+ * True when a followed value is settled: the value expression itself is an
+ * `await`, so the variable holds its result. An `await` deeper inside
+ * (`(await getClient(tx)).user.count()`) settles only part of it.
+ */
+const isSettledValue = (value) => unwrapExpression(value)?.getKind() === SyntaxKind.AwaitExpression;
 
 /** True when `id` resolves to the ambient client: a named or namespace import of src/lib/prisma. */
 function isAmbient(id, ctx) {
@@ -524,9 +540,11 @@ const CONTAINER_KINDS = new Set([
 ]);
 
 /**
- * True when `decl` holds a container a callee could fill: initialized to an
- * array or object literal or a `new …`, or declared without a value. A callee
- * handed any other value cannot change what the variable holds.
+ * True when `decl` visibly holds a container a callee could fill: initialized
+ * to an array or object literal or a `new …`, or declared without a value. Only
+ * these are failed closed when handed to an unknown call. A value obtained any
+ * other way may be a mutable container too (a call's return value, an alias of
+ * another container); the header's "Not seen" lists those.
  */
 function isContainer(decl) {
   const init = unwrapExpression(decl.getInitializer());
@@ -575,15 +593,13 @@ function writesTo(decl, ctx) {
 /**
  * Why evaluating `node` reaches a client shared beyond `scope` — one entry per
  * offending reference. Declarations inside `scope` are its own; a local variable
- * or function declared outside it is followed. `settles` marks a followed
- * VALUE, where an awaited subexpression is already settled.
+ * or function declared outside it is followed.
  */
-function reach(node, scope, ctx, state, settles = false) {
+function reach(node, scope, ctx, state) {
   const reasons = [];
   const ids = node.getKind() === SyntaxKind.Identifier ? [node] : node.getDescendantsOfKind(SyntaxKind.Identifier);
   for (const id of ids) {
     if (isNamePosition(id) || inTypePosition(id, node)) continue;
-    if (settles && settledUnderAwait(id, node)) continue;
     if (isWrapperClientArgument(id, ctx)) continue;
     const name = id.getText();
     const decl = visibleBinding(name, id, ctx.bindingsFor);
@@ -617,10 +633,12 @@ function follow(decl, ctx, state) {
   const fnInit = unwrapExpression(init);
   if (fnInit && FN_KINDS.has(fnInit.getKind())) return reach(fnInit, fnInit, ctx, state);
   const reasons = [];
-  if (init) reasons.push(...reach(init, init, ctx, state, true));
+  if (init && !isSettledValue(init)) reasons.push(...reach(init, init, ctx, state));
   if (decl.getNameNode().getKind() !== SyntaxKind.Identifier) return reasons;
   const { values, opaque } = writesTo(decl, ctx);
-  for (const value of values) reasons.push(...reach(value, value, ctx, state, true));
+  for (const value of values) {
+    if (!isSettledValue(value)) reasons.push(...reach(value, value, ctx, state));
+  }
   reasons.push(...opaque.map((o) => `unanalysable write: ${o}`));
   return reasons;
 }
@@ -686,5 +704,5 @@ if (violations.length > 0) {
 }
 
 console.log(
-  `check-tx-concurrent-queries: OK (${files.length} files, ${examined} combinator calls, ${wrappers.size} derived client-callback wrappers, ${ambientImports} ambient imports)`,
+  `check-tx-concurrent-queries: OK (${files.length} files, ${examined} combinator calls, ${[...wrappersByFile.values()].reduce((n, m) => n + m.size, 0) + methodWrappers.size} derived client-callback wrappers, ${ambientImports} ambient imports)`,
 );

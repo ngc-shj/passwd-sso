@@ -398,6 +398,18 @@ describe("check-tx-concurrent-queries.mjs — refused: following what the argume
     expectRed("`one` → transaction client `tx`");
   });
 
+  it("refuses a value that only awaits part of itself — the rest is a lazy query", () => {
+    seed();
+    site(`export const f = () =>
+  withBypassRls(prisma, async (tx) => {
+    const a = (await load(tx)).user.count();
+    const b = (await load(tx)).team.count();
+    return Promise.all([a, b]);
+  }, "grant");
+`);
+    expectRed("`a` → transaction client `tx`");
+  });
+
   it("refuses a container handed to a call it cannot see into", () => {
     seed();
     site(`export const f = () =>
@@ -542,6 +554,28 @@ describe("check-tx-concurrent-queries.mjs — allowed", () => {
   const anywhere = withBypassRls(prisma, (tx) => tx.user.findUnique({ where: { email } }), "grant");
   return Promise.all([inTeam, anywhere, withUserTenantRls(email, async () => prisma.user.count())]);
 }
+`);
+    expectGreen();
+  });
+
+  it("resolves an imported wrapper to its own module, not a same-named helper elsewhere", () => {
+    seed();
+    // A helper of the same name, with its callback first, in another file. Keyed
+    // by name alone it made `prisma` (argument 0 of the real withTenantRls) read
+    // as a callback slot, so the client argument was reported as ambient use.
+    write(
+      "src/lib/other.ts",
+      `import type { Prisma } from "@prisma/client";
+export async function withTenantRls<T>(fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+  return fn({} as Prisma.TransactionClient);
+}
+`,
+    );
+    site(`export const f = (a: string, b: string) =>
+  Promise.all([
+    withTenantRls(prisma, a, async (tx) => tx.user.count()),
+    withTenantRls(prisma, b, async (tx) => tx.user.count()),
+  ]);
 `);
     expectGreen();
   });
