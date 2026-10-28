@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
+import { prisma } from "@/lib/prisma";
 import { logAuditAsync, logAuditBulkAsync, teamAuditBase } from "@/lib/audit/audit";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE, TEAM_PERMISSION } from "@/lib/constants";
@@ -12,6 +13,9 @@ import { FILENAME_MAX_LENGTH } from "@/lib/validations/common";
 import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 import { requireTeamPermission } from "@/lib/auth/access/team-auth";
 import * as teamPasswordService from "@/lib/services/team-password-service";
+import { attemptInSavepoint } from "@/lib/prisma/savepoint";
+import { pgErrorCode } from "@/lib/prisma/prisma-error";
+import { getLogger } from "@/lib/logger";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -54,8 +58,12 @@ async function handlePOST(req: NextRequest, { params }: Params) {
 
   await withTeamTenantRls(teamId, async () => {
     for (const entryData of entries) {
-      try {
-        const entry = await teamPasswordService.createTeamPassword(teamId, {
+      // Each entry under its own savepoint: a statement the database rejects
+      // (e.g. an id colliding with an existing entry) would otherwise abort
+      // the whole transaction and turn the final COMMIT into a silent
+      // ROLLBACK of every entry already counted as created.
+      const attempt = await attemptInSavepoint(prisma, () =>
+        teamPasswordService.createTeamPassword(teamId, {
           id: entryData.id,
           encryptedBlob: entryData.encryptedBlob,
           encryptedOverview: entryData.encryptedOverview,
@@ -69,12 +77,16 @@ async function handlePOST(req: NextRequest, { params }: Params) {
           teamFolderId: entryData.teamFolderId,
           requireReprompt: entryData.requireReprompt,
           expiresAt: entryData.expiresAt,
-        });
-
-        createdIds.push(entry.id);
-      } catch {
-        failedCount++;
+        }),
+      );
+      if (attempt.ok) {
+        createdIds.push(attempt.value.id);
+        continue;
       }
+      // The SQLSTATE only: a Prisma error's message carries the query and its
+      // bound parameters, i.e. this entry's ciphertext.
+      getLogger().warn({ teamId, code: pgErrorCode(attempt.error) }, "teams.bulk_import.entry_failed");
+      failedCount++;
     }
   });
 

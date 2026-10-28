@@ -31,6 +31,7 @@ import {
 } from "@/lib/crypto/account-token-crypto";
 import { assertBypassRlsActive } from "./lib/assert-bypass-rls-active";
 import { withBypassRls } from "@/lib/tenant-rls";
+import { attemptInSavepoint } from "@/lib/prisma/savepoint";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { createPool, createPrismaClient, registerBypassNoticeSink, stderrBypassNoticeSink } from "@/lib/db/pool-factory";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
@@ -217,15 +218,20 @@ async function main(): Promise<void> {
             // Single-row UPDATE, parameterized. Build the SET clause from the
             // fields that actually need rewriting.
             const params = [...updates.map((u) => u.value), row.id];
-            try {
-              await tx.$executeRawUnsafe(
+            // Under a savepoint: a rejected UPDATE would otherwise abort the
+            // batch transaction, and its COMMIT would silently roll back every
+            // row already counted as rewritten.
+            const attempt = await attemptInSavepoint(tx, () =>
+              tx.$executeRawUnsafe(
                 renderSql(buildAccountUpdateSql(updates.map((u) => u.col))),
                 ...params,
-              );
+              ),
+            );
+            if (attempt.ok) {
               rewritten += 1;
-            } catch (err) {
+            } else {
               failed += 1;
-              console.error(`UPDATE failed for account ${row.id}:`, err);
+              console.error(`UPDATE failed for account ${row.id}:`, attempt.error);
             }
           }
 

@@ -11,6 +11,7 @@ const {
   mockLogAudit,
   mockCreateTeamPassword,
   TeamPasswordServiceError,
+  mockExecuteRaw,
 } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
@@ -42,6 +43,8 @@ const {
     mockLogAudit: vi.fn(),
     mockCreateTeamPassword: vi.fn(),
     TeamPasswordServiceError: _TeamPasswordServiceError,
+    // SAVEPOINT / ROLLBACK TO / RELEASE around each entry (attemptInSavepoint).
+    mockExecuteRaw: vi.fn(),
   };
 });
 
@@ -49,6 +52,7 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     auditLog: { create: mockAuditLogCreate },
+    $executeRaw: mockExecuteRaw,
   },
 }));
 vi.mock("@/lib/auth/access/team-auth", () => ({
@@ -84,6 +88,7 @@ vi.mock("@/lib/logger", () => {
 });
 
 import { POST } from "./route";
+import { getLogger } from "@/lib/logger";
 import { AUDIT_ACTION, TEAM_ROLE } from "@/lib/constants";
 
 const TEAM_ID = "team-123";
@@ -106,6 +111,7 @@ describe("POST /api/teams/[teamId]/passwords/bulk-import", () => {
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
     mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.MEMBER });
     mockAuditLogCreate.mockResolvedValue({});
+    mockExecuteRaw.mockResolvedValue(0);
     mockCreateTeamPassword.mockImplementation((_teamId: string, input: { id: string }) =>
       Promise.resolve({ id: input.id, entryType: "LOGIN", tags: [], createdAt: new Date() }),
     );
@@ -226,6 +232,81 @@ describe("POST /api/teams/[teamId]/passwords/bulk-import", () => {
     expect(res.status).toBe(201);
     expect(json.importedCount).toBe(2);
     expect(json.failedCount).toBe(1);
+  });
+
+  it("rolls a DB-rejected entry back to its own savepoint and reports only the entries around it", async () => {
+    const order: string[] = [];
+    mockExecuteRaw.mockImplementation(async (strings: TemplateStringsArray) => {
+      order.push(strings.join(""));
+      return 0;
+    });
+    mockCreateTeamPassword.mockImplementation(async (_teamId: string, input: { id: string }) => {
+      order.push(`create ${input.id}`);
+      if (input.id.endsWith("2")) {
+        throw Object.assign(new Error("Unique constraint failed"), {
+          code: "P2002",
+          meta: { driverAdapterError: { cause: { originalCode: "23505" } } },
+        });
+      }
+      return { id: input.id, entryType: "LOGIN", tags: [], createdAt: new Date() };
+    });
+
+    const entries = [
+      makeEntry("660e8400-e29b-41d4-a716-000000000001"),
+      makeEntry("660e8400-e29b-41d4-a716-000000000002"),
+      makeEntry("660e8400-e29b-41d4-a716-000000000003"),
+    ];
+    const res = await POST(
+      createRequest("POST", URL, { body: { entries } }),
+      createParams({ teamId: TEAM_ID }),
+    );
+
+    expect(res.status).toBe(201);
+    expect(await res.json()).toEqual({ success: true, importedCount: 2, failedCount: 1 });
+    expect(order).toEqual([
+      "SAVEPOINT attempt_in_savepoint",
+      "create 660e8400-e29b-41d4-a716-000000000001",
+      "RELEASE SAVEPOINT attempt_in_savepoint",
+      "SAVEPOINT attempt_in_savepoint",
+      "create 660e8400-e29b-41d4-a716-000000000002",
+      "ROLLBACK TO SAVEPOINT attempt_in_savepoint",
+      "RELEASE SAVEPOINT attempt_in_savepoint",
+      "SAVEPOINT attempt_in_savepoint",
+      "create 660e8400-e29b-41d4-a716-000000000003",
+      "RELEASE SAVEPOINT attempt_in_savepoint",
+    ]);
+    const createdTargets = mockLogAudit.mock.calls
+      .map(([e]) => e as { action: string; targetId?: string })
+      .filter((e) => e.action === AUDIT_ACTION.ENTRY_CREATE)
+      .map((e) => e.targetId);
+    expect(createdTargets).toEqual([
+      "660e8400-e29b-41d4-a716-000000000001",
+      "660e8400-e29b-41d4-a716-000000000003",
+    ]);
+    // Only the SQLSTATE is logged — never the message, which carries the
+    // query's bound parameters.
+    expect(getLogger().warn).toHaveBeenCalledTimes(1);
+    expect(getLogger().warn).toHaveBeenCalledWith(
+      { teamId: TEAM_ID, code: "23505" },
+      "teams.bulk_import.entry_failed",
+    );
+  });
+
+  it("fails the whole import instead of reporting counts when a savepoint rollback fails", async () => {
+    mockExecuteRaw.mockImplementation(async (strings: TemplateStringsArray) => {
+      if (strings.join("").startsWith("ROLLBACK TO")) throw new Error("connection lost");
+      return 0;
+    });
+    mockCreateTeamPassword.mockRejectedValueOnce(new Error("Unique constraint failed"));
+
+    const entries = [
+      makeEntry("660e8400-e29b-41d4-a716-000000000001"),
+      makeEntry("660e8400-e29b-41d4-a716-000000000002"),
+    ];
+    await expect(
+      POST(createRequest("POST", URL, { body: { entries } }), createParams({ teamId: TEAM_ID })),
+    ).rejects.toThrow("savepoint rollback failed");
+    expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
   it("calls logAuditAsync with ENTRY_BULK_IMPORT and TEAM scope", async () => {
