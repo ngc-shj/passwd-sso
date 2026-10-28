@@ -36,10 +36,8 @@ async function handleGET(request: NextRequest) {
       // Traversing `user.tenant` follows the `User.tenantId` column instead — a
       // denormalized copy with no invalidation, uncorrected here because the read
       // is bypass-scoped.
-      const [credCount, tenantId] = await Promise.all([
-        tx.webAuthnCredential.count({ where: { userId } }),
-        resolveOwningTenantIdFromClient(tx, userId),
-      ]);
+      const credCount = await tx.webAuthnCredential.count({ where: { userId } });
+      const tenantId = await resolveOwningTenantIdFromClient(tx, userId);
       const tenant = tenantId
         ? await tx.tenant.findUnique({
             where: { id: tenantId },

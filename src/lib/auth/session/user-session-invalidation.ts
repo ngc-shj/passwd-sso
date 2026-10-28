@@ -126,50 +126,40 @@ export async function invalidateUserSessions(
       select: { sessionToken: true },
     });
 
-    const [
-      sessionsResult,
-      extensionTokensResult,
-      apiKeysResult,
-      mcpAccessTokensResult,
-      mcpRefreshTokensResult,
-      delegationSessionsResult,
-      operatorTokensResult,
-    ] = await Promise.all([
-      tx.session.deleteMany({
-        where: {
-          userId,
-          ...tenantFilter,
-          ...(excludeSessionDigest ? { sessionToken: { not: excludeSessionDigest } } : {}),
-        },
-      }),
-      tx.extensionToken.updateMany({
-        where: { userId, revokedAt: null, ...tenantFilter },
-        data: { revokedAt: now },
-      }),
-      tx.apiKey.updateMany({
-        where: { userId, revokedAt: null, ...tenantFilter },
-        data: { revokedAt: now },
-      }),
-      tx.mcpAccessToken.updateMany({
-        where: { userId, revokedAt: null, ...tenantFilter },
-        data: { revokedAt: now },
-      }),
-      tx.mcpRefreshToken.updateMany({
-        where: { userId, revokedAt: null, ...tenantFilter },
-        data: { revokedAt: now },
-      }),
-      tx.delegationSession.updateMany({
-        where: { userId, revokedAt: null, ...tenantFilter },
-        data: { revokedAt: now },
-      }),
-      // OperatorToken uses subjectUserId (not userId) as the "authenticates
-      // as" column. Same tenantFilter semantics — all-tenants for vault
-      // reset, single-tenant for member removal.
-      tx.operatorToken.updateMany({
-        where: { subjectUserId: userId, revokedAt: null, ...tenantFilter },
-        data: { revokedAt: now },
-      }),
-    ]);
+    const sessionsResult = await tx.session.deleteMany({
+      where: {
+        userId,
+        ...tenantFilter,
+        ...(excludeSessionDigest ? { sessionToken: { not: excludeSessionDigest } } : {}),
+      },
+    });
+    const extensionTokensResult = await tx.extensionToken.updateMany({
+      where: { userId, revokedAt: null, ...tenantFilter },
+      data: { revokedAt: now },
+    });
+    const apiKeysResult = await tx.apiKey.updateMany({
+      where: { userId, revokedAt: null, ...tenantFilter },
+      data: { revokedAt: now },
+    });
+    const mcpAccessTokensResult = await tx.mcpAccessToken.updateMany({
+      where: { userId, revokedAt: null, ...tenantFilter },
+      data: { revokedAt: now },
+    });
+    const mcpRefreshTokensResult = await tx.mcpRefreshToken.updateMany({
+      where: { userId, revokedAt: null, ...tenantFilter },
+      data: { revokedAt: now },
+    });
+    const delegationSessionsResult = await tx.delegationSession.updateMany({
+      where: { userId, revokedAt: null, ...tenantFilter },
+      data: { revokedAt: now },
+    });
+    // OperatorToken uses subjectUserId (not userId) as the "authenticates
+    // as" column. Same tenantFilter semantics — all-tenants for vault
+    // reset, single-tenant for member removal.
+    const operatorTokensResult = await tx.operatorToken.updateMany({
+      where: { subjectUserId: userId, revokedAt: null, ...tenantFilter },
+      data: { revokedAt: now },
+    });
 
     let cacheTombstoneFailures = 0;
     if (targetSessions.length > 0) {

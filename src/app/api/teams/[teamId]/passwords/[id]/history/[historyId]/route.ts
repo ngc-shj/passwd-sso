@@ -24,17 +24,16 @@ async function handleGET(req: NextRequest, { params }: Params) {
     return handleAuthError(e);
   }
 
-  const [entry, history] = await withTeamTenantRls(teamId, () =>
-    Promise.all([
-      prisma.teamPasswordEntry.findUnique({
-        where: { id },
-        select: { teamId: true, entryType: true },
-      }),
-      prisma.teamPasswordEntryHistory.findUnique({
-        where: { id: historyId },
-      }),
-    ]),
-  );
+  const [entry, history] = await withTeamTenantRls(teamId, async () => {
+    const entry = await prisma.teamPasswordEntry.findUnique({
+      where: { id },
+      select: { teamId: true, entryType: true },
+    });
+    const history = await prisma.teamPasswordEntryHistory.findUnique({
+      where: { id: historyId },
+    });
+    return [entry, history] as const;
+  });
 
   if (!entry || entry.teamId !== teamId) {
     return notFound();

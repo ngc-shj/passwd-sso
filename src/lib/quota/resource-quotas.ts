@@ -91,10 +91,8 @@ async function currentUsage(
           if (!scope.tenantId)
             throw new Error("webhooks quota requires tenantId");
           // Sum across both webhook types (tenant- and team-scoped).
-          const [tenant, team] = await Promise.all([
-            tx.tenantWebhook.count({ where: { tenantId: scope.tenantId } }),
-            tx.teamWebhook.count({ where: { tenantId: scope.tenantId } }),
-          ]);
+          const tenant = await tx.tenantWebhook.count({ where: { tenantId: scope.tenantId } });
+          const team = await tx.teamWebhook.count({ where: { tenantId: scope.tenantId } });
           return tenant + team;
         }
       }

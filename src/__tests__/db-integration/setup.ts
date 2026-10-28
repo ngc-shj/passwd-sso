@@ -145,6 +145,103 @@ function failOnReports(when: string): void {
     );
   }
 }
-afterEach(() => failOnReports("in this test"));
+
+// Runtime backstop for check-tx-concurrent-queries (issue #975): a query issued
+// on a pg client that is still executing one is two statements at once on one
+// interactive transaction, whatever spelling produced it. Fail the test that
+// caused it, so what the static gate cannot see still fails this suite.
+//
+// pg's own deprecation warning is not enough: pg@8 warns only when its queue is
+// already non-empty, so two queries at once (one active, one queued) pass
+// silently — it takes a third. Client.query is wrapped instead, and refuses to
+// run against a pg whose internals it can no longer read. It sees statements
+// that actually overlap on the connection: Prisma itself serialises some
+// operation pairs inside an interactive transaction (measured: two `count()`s,
+// or `$executeRaw` + `count()`) and not others (`count()` + `findUnique()`), so
+// this backs the static gate up rather than replacing it.
+//
+// One source is exempt: Prisma's own query interpreter loads the children of a
+// relation join (`include` of two or more relations) with Promise.all on the
+// transaction's connection. That is inside one Prisma operation, out of this
+// codebase's reach, and recognised by the exact interpreter frame that loads
+// `childRecords` (prisma-join-children.ts); if Prisma rewrites it, the
+// exemption stops matching and these tests fail loudly rather than go blind.
+const CONCURRENT_QUERY = "client is already executing a query";
+const concurrentQueryReports: string[] = [];
+type PgClientInternals = {
+  _activeQuery?: unknown;
+  _queryQueue?: unknown[];
+  pipeline?: boolean;
+  query: (...args: unknown[]) => unknown;
+};
+const clientProto = Client.prototype as unknown as PgClientInternals;
+const shape = new Client({ connectionString: databaseUrl }) as unknown as PgClientInternals;
+if (!("_activeQuery" in shape) || !Array.isArray(shape._queryQueue)) {
+  throw new Error(
+    "pg Client no longer exposes _activeQuery/_queryQueue; update the concurrent-query backstop in setup.ts",
+  );
+}
+const { readFileSync } = await import("node:fs");
+const { fileURLToPath } = await import("node:url");
+const { fromPrismaJoinChildren } = await import("./prisma-join-children");
+const sourceLines = new Map<string, string[]>();
+function readSourceLine(location: string, line: number): string | null {
+  const path = location.startsWith("file://") ? fileURLToPath(location) : location;
+  let lines = sourceLines.get(path);
+  if (!lines) {
+    try {
+      lines = readFileSync(path, "utf8").split("\n");
+    } catch {
+      return null;
+    }
+    sourceLines.set(path, lines);
+  }
+  return lines[line - 1] ?? null;
+}
+const originalQuery = clientProto.query;
+clientProto.query = function (this: PgClientInternals, ...args: unknown[]) {
+  if (!this.pipeline && (this._activeQuery != null || (this._queryQueue?.length ?? 0) > 0)) {
+    const limit = Error.stackTraceLimit;
+    Error.stackTraceLimit = 50;
+    const stack = new Error(CONCURRENT_QUERY).stack ?? CONCURRENT_QUERY;
+    Error.stackTraceLimit = limit;
+    if (!fromPrismaJoinChildren(stack, readSourceLine)) concurrentQueryReports.push(stack);
+  }
+  return originalQuery.apply(this, args);
+};
+// Positive control: two queries at once on one client must produce exactly one
+// report, or the wrapper above is not on the path pg actually takes.
+{
+  const control = new Client({ connectionString: databaseUrl });
+  await control.connect();
+  try {
+    await Promise.all([control.query("SELECT pg_sleep(0.05)"), control.query("SELECT 1")]);
+  } finally {
+    await control.end().catch(() => {});
+  }
+  const recorded = concurrentQueryReports.splice(0).length;
+  if (recorded !== 1) {
+    throw new Error(
+      `concurrent-query backstop is blind: a deliberate two-at-once pair recorded ${recorded} report(s), expected 1`,
+    );
+  }
+}
+function failOnConcurrentQueries(when: string): void {
+  const warnings = concurrentQueryReports.splice(0);
+  if (warnings.length > 0) {
+    throw new Error(
+      `pg ran two queries at once on one client ${when} — sequence them (await each in turn):\n` +
+        warnings.join("\n"),
+    );
+  }
+}
+
+afterEach(() => {
+  failOnReports("in this test");
+  failOnConcurrentQueries("in this test");
+});
 // Detached work can report after its test ended.
-afterAll(() => failOnReports("after this file's last test"));
+afterAll(() => {
+  failOnReports("after this file's last test");
+  failOnConcurrentQueries("after this file's last test");
+});

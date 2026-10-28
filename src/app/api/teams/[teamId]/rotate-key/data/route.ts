@@ -42,34 +42,33 @@ async function handleGET(req: NextRequest, { params }: Params) {
     return errorResponse(API_ERROR.TEAM_NOT_FOUND);
   }
 
-  const [entries, activeMembers] = await withTeamTenantRls(teamId, async () =>
-    Promise.all([
-      // All entries regardless of deletedAt / isArchived status
-      prisma.teamPasswordEntry.findMany({
-        where: { teamId },
-        select: {
-          id: true,
-          encryptedBlob: true,
-          blobIv: true,
-          blobAuthTag: true,
-          encryptedOverview: true,
-          overviewIv: true,
-          overviewAuthTag: true,
-          teamKeyVersion: true,
-          itemKeyVersion: true,
-          encryptedItemKey: true,
-          itemKeyIv: true,
-          itemKeyAuthTag: true,
-          aadVersion: true,
-        },
-      }),
-      // Active members whose key has been distributed
-      prisma.teamMember.findMany({
-        where: { teamId, deactivatedAt: null, keyDistributed: true },
-        select: { userId: true },
-      }),
-    ]),
-  );
+  const [entries, activeMembers] = await withTeamTenantRls(teamId, async () => {
+    // All entries regardless of deletedAt / isArchived status
+    const entries = await prisma.teamPasswordEntry.findMany({
+      where: { teamId },
+      select: {
+        id: true,
+        encryptedBlob: true,
+        blobIv: true,
+        blobAuthTag: true,
+        encryptedOverview: true,
+        overviewIv: true,
+        overviewAuthTag: true,
+        teamKeyVersion: true,
+        itemKeyVersion: true,
+        encryptedItemKey: true,
+        itemKeyIv: true,
+        itemKeyAuthTag: true,
+        aadVersion: true,
+      },
+    });
+    // Active members whose key has been distributed
+    const activeMembers = await prisma.teamMember.findMany({
+      where: { teamId, deactivatedAt: null, keyDistributed: true },
+      select: { userId: true },
+    });
+    return [entries, activeMembers] as const;
+  });
 
   // Fetch the latest TeamMemberKey for each active member to get their public key
   const activeMemberUserIds = activeMembers.map((m) => m.userId);

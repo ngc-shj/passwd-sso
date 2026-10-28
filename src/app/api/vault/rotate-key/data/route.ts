@@ -46,65 +46,65 @@ async function handleGET(request: NextRequest) {
   const [entries, historyEntries, user, mode2AttachmentRows, mode0CandidateRows] =
     await withUserTenantRls(
       userId,
-      async () =>
-        Promise.all([
-          prisma.passwordEntry.findMany({
-            where: { userId },
-            select: {
-              id: true,
-              encryptedBlob: true,
-              blobIv: true,
-              blobAuthTag: true,
-              encryptedOverview: true,
-              overviewIv: true,
-              overviewAuthTag: true,
-              keyVersion: true,
-              aadVersion: true,
-            },
-          }),
-          prisma.passwordEntryHistory.findMany({
-            where: { entry: { userId } },
-            select: {
-              id: true,
-              entryId: true,
-              encryptedBlob: true,
-              blobIv: true,
-              blobAuthTag: true,
-              keyVersion: true,
-              aadVersion: true,
-            },
-          }),
-          prisma.user.findUnique({
-            where: { id: userId },
-            select: {
-              encryptedEcdhPrivateKey: true,
-              ecdhPrivateKeyIv: true,
-              ecdhPrivateKeyAuthTag: true,
-            },
-          }),
-          // Mode-2 attachments: CEK data for rewrapping during rotation.
-          prisma.attachment.findMany({
-            where: { passwordEntry: { userId }, encryptionMode: 2 },
-            select: {
-              id: true,
-              passwordEntryId: true,
-              cekEncrypted: true,
-              cekIv: true,
-              cekAuthTag: true,
-              cekKeyVersion: true,
-              cekWrapAadVersion: true,
-            },
-          }),
-          // Mode-0 attachments: client must migrate these before rotation.
-          // entryId is required so the client can call /api/passwords/{entryId}/attachments/{id}
-          // and build the data AAD = buildAttachmentAAD(entryId, attachmentId).
-          // Over-fetch by 1 to detect overflow without a separate count query.
-          prisma.attachment.findMany({
-            where: { passwordEntry: { userId }, encryptionMode: 0 },
-            select: { id: true, passwordEntryId: true },
-            take: ATTACHMENT_MANIFEST_CAP + 1,
-          }),
-        ]),
+      async () => {
+        const entries = await prisma.passwordEntry.findMany({
+          where: { userId },
+          select: {
+            id: true,
+            encryptedBlob: true,
+            blobIv: true,
+            blobAuthTag: true,
+            encryptedOverview: true,
+            overviewIv: true,
+            overviewAuthTag: true,
+            keyVersion: true,
+            aadVersion: true,
+          },
+        });
+        const historyEntries = await prisma.passwordEntryHistory.findMany({
+          where: { entry: { userId } },
+          select: {
+            id: true,
+            entryId: true,
+            encryptedBlob: true,
+            blobIv: true,
+            blobAuthTag: true,
+            keyVersion: true,
+            aadVersion: true,
+          },
+        });
+        const user = await prisma.user.findUnique({
+          where: { id: userId },
+          select: {
+            encryptedEcdhPrivateKey: true,
+            ecdhPrivateKeyIv: true,
+            ecdhPrivateKeyAuthTag: true,
+          },
+        });
+        // Mode-2 attachments: CEK data for rewrapping during rotation.
+        const mode2AttachmentRows = await prisma.attachment.findMany({
+          where: { passwordEntry: { userId }, encryptionMode: 2 },
+          select: {
+            id: true,
+            passwordEntryId: true,
+            cekEncrypted: true,
+            cekIv: true,
+            cekAuthTag: true,
+            cekKeyVersion: true,
+            cekWrapAadVersion: true,
+          },
+        });
+        // Mode-0 attachments: client must migrate these before rotation.
+        // entryId is required so the client can call /api/passwords/{entryId}/attachments/{id}
+        // and build the data AAD = buildAttachmentAAD(entryId, attachmentId).
+        // Over-fetch by 1 to detect overflow without a separate count query.
+        const mode0CandidateRows = await prisma.attachment.findMany({
+          where: { passwordEntry: { userId }, encryptionMode: 0 },
+          select: { id: true, passwordEntryId: true },
+          take: ATTACHMENT_MANIFEST_CAP + 1,
+        });
+        return [entries, historyEntries, user, mode2AttachmentRows, mode0CandidateRows] as const;
+      },
     );
 
   const ecdhPrivateKey =

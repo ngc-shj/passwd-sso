@@ -244,19 +244,17 @@ export async function createTeamPassword(
     expiresAt,
   } = input;
 
-  // Validate teamKeyVersion and folder ownership — fetch in parallel when both are needed
-  const [team, folder] = await Promise.all([
-    prisma.team.findUnique({
-      where: { id: teamId },
-      select: { teamKeyVersion: true, tenantId: true },
-    }),
-    teamFolderId
-      ? prisma.teamFolder.findUnique({
-          where: { id: teamFolderId },
-          select: { teamId: true },
-        })
-      : Promise.resolve(null),
-  ]);
+  // Validate teamKeyVersion and folder ownership
+  const team = await prisma.team.findUnique({
+    where: { id: teamId },
+    select: { teamKeyVersion: true, tenantId: true },
+  });
+  const folder = teamFolderId
+    ? await prisma.teamFolder.findUnique({
+        where: { id: teamFolderId },
+        select: { teamId: true },
+      })
+    : null;
 
   if (!team || teamKeyVersion !== team.teamKeyVersion) {
     throw new TeamPasswordServiceError(API_ERROR.TEAM_KEY_VERSION_MISMATCH, 409);
@@ -419,21 +417,19 @@ export async function updateTeamPassword(
     throw new TeamPasswordServiceError(API_ERROR.ITEM_KEY_REQUIRED, 400);
   }
 
-  // Validate teamKeyVersion and folder ownership — fetch in parallel when both are needed
-  const [team, folder] = await Promise.all([
-    isFullUpdate
-      ? prisma.team.findUnique({
-          where: { id: teamId },
-          select: { teamKeyVersion: true },
-        })
-      : Promise.resolve(null),
-    teamFolderId
-      ? prisma.teamFolder.findUnique({
-          where: { id: teamFolderId },
-          select: { teamId: true },
-        })
-      : Promise.resolve(null),
-  ]);
+  // Validate teamKeyVersion and folder ownership
+  const team = isFullUpdate
+    ? await prisma.team.findUnique({
+        where: { id: teamId },
+        select: { teamKeyVersion: true },
+      })
+    : null;
+  const folder = teamFolderId
+    ? await prisma.teamFolder.findUnique({
+        where: { id: teamFolderId },
+        select: { teamId: true },
+      })
+    : null;
 
   if (isFullUpdate && (!team || teamKeyVersion !== team.teamKeyVersion)) {
     throw new TeamPasswordServiceError(API_ERROR.TEAM_KEY_VERSION_MISMATCH, 409);

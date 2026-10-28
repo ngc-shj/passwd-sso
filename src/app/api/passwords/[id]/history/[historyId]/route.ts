@@ -20,17 +20,16 @@ async function handleGET(
 
   const { id, historyId } = await params;
 
-  const [entry, history] = await withUserTenantRls(session.user.id, () =>
-    Promise.all([
-      prisma.passwordEntry.findUnique({
-        where: { id },
-        select: { userId: true },
-      }),
-      prisma.passwordEntryHistory.findUnique({
-        where: { id: historyId },
-      }),
-    ]),
-  );
+  const [entry, history] = await withUserTenantRls(session.user.id, async () => {
+    const entry = await prisma.passwordEntry.findUnique({
+      where: { id },
+      select: { userId: true },
+    });
+    const history = await prisma.passwordEntryHistory.findUnique({
+      where: { id: historyId },
+    });
+    return [entry, history] as const;
+  });
 
   if (!entry) {
     return notFound();

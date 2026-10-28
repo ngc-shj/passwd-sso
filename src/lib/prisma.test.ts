@@ -1,5 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 
+const { mockGetTenantRlsContext } = vi.hoisted(() => ({
+  mockGetTenantRlsContext: vi.fn<() => unknown>(() => undefined),
+}));
+
 // Avoid the singleton side effects (Pool creation, signal handler registration)
 // from running at import time. We only want to exercise the exported `envInt`.
 vi.mock("@prisma/client", () => ({
@@ -41,10 +45,10 @@ vi.mock("@/lib/logger", () => ({
 }));
 
 vi.mock("@/lib/tenant-rls", () => ({
-  getTenantRlsContext: () => undefined,
+  getTenantRlsContext: mockGetTenantRlsContext,
 }));
 
-import { envInt } from "./prisma";
+import { envInt, prisma, prismaBase } from "./prisma";
 
 describe("envInt", () => {
   it("returns the default when the env var is unset", () => {
@@ -107,5 +111,69 @@ describe("envInt", () => {
     expect(envInt("X_INT_BOUND_LOW", 0, { min: 1, max: 10 })).toBe(1);
     vi.stubEnv("X_INT_BOUND_HIGH", "10");
     expect(envInt("X_INT_BOUND_HIGH", 0, { min: 1, max: 10 })).toBe(10);
+  });
+});
+
+describe("prisma proxy inside an RLS context", () => {
+  it("runs an array $transaction one query at a time on the context's client", async () => {
+    mockGetTenantRlsContext.mockReturnValueOnce({ tx: {} });
+    const events: string[] = [];
+    // Prisma promises are lazy: a query starts when it is awaited. One that is
+    // started while another is still pending would share its connection.
+    const query = (name: string, value: number) => ({
+      then(resolve: (v: number) => void) {
+        events.push(`start:${name}`);
+        queueMicrotask(() => {
+          events.push(`end:${name}`);
+          resolve(value);
+        });
+      },
+    });
+
+    const results = await prisma.$transaction([
+      query("a", 1),
+      query("b", 2),
+    ] as unknown as Parameters<typeof prisma.$transaction>[0]);
+
+    expect(results).toEqual([1, 2]);
+    expect(events).toEqual(["start:a", "end:a", "start:b", "end:b"]);
+  });
+
+  it("runs the function form on the context's client", async () => {
+    const active = { marker: "tx" };
+    mockGetTenantRlsContext.mockReturnValueOnce({ tx: active });
+    const fn = vi.fn(async (tx: unknown) => tx);
+
+    await expect(prisma.$transaction(fn as never)).resolves.toBe(active);
+    expect(fn).toHaveBeenCalledWith(active);
+  });
+
+  it("refuses options for the function form, which the open transaction cannot apply", async () => {
+    mockGetTenantRlsContext.mockReturnValueOnce({ tx: {} });
+    const fn = vi.fn(async () => "never");
+
+    await expect(prisma.$transaction(fn, { timeout: 60_000 })).rejects.toThrow(
+      /options are not applied inside an RLS context/,
+    );
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it("refuses options for the array form too", async () => {
+    mockGetTenantRlsContext.mockReturnValueOnce({ tx: {} });
+
+    await expect(
+      prisma.$transaction([] as never, { isolationLevel: "Serializable" } as never),
+    ).rejects.toThrow(/options are not applied inside an RLS context/);
+  });
+});
+
+describe("prisma proxy outside an RLS context", () => {
+  it("forwards $transaction and its options to the base client unchanged", async () => {
+    const baseTransaction = vi.fn(async () => "base-result");
+    Object.assign(prismaBase, { $transaction: baseTransaction });
+    const fn = async () => "never-run-by-the-mock";
+
+    await expect(prisma.$transaction(fn, { timeout: 60_000 })).resolves.toBe("base-result");
+    expect(baseTransaction).toHaveBeenCalledWith(fn, { timeout: 60_000 });
   });
 });

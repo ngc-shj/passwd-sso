@@ -42,21 +42,19 @@ async function handleGET(req: NextRequest, { params }: Params) {
   let results: { id: string; name: string | null; email: string | null; image: string | null }[];
   try {
     results = await withTeamTenantRls(teamId, async (tenantId) => {
-      // Fetch active team members + non-expired pending invitations in parallel
-      const [activeMembers, pendingInvitations] = await Promise.all([
-        prisma.teamMember.findMany({
-          where: { teamId, deactivatedAt: null },
-          select: { userId: true },
-        }),
-        prisma.teamInvitation.findMany({
-          where: {
-            teamId,
-            status: INVITATION_STATUS.PENDING,
-            expiresAt: { gt: new Date() },
-          },
-          select: { email: true },
-        }),
-      ]);
+      // Fetch active team members + non-expired pending invitations
+      const activeMembers = await prisma.teamMember.findMany({
+        where: { teamId, deactivatedAt: null },
+        select: { userId: true },
+      });
+      const pendingInvitations = await prisma.teamInvitation.findMany({
+        where: {
+          teamId,
+          status: INVITATION_STATUS.PENDING,
+          expiresAt: { gt: new Date() },
+        },
+        select: { email: true },
+      });
       const activeMemberIds = new Set(activeMembers.map((m) => m.userId));
       const pendingEmails = pendingInvitations.map((inv) => inv.email);
 

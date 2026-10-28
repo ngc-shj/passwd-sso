@@ -57,13 +57,13 @@ describe("GET /api/passwords/[id]/history/[historyId]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: USER_ID } });
-    // Default: both entry and history found via Promise.all
+    // Default: both entry and history found
     mockWithUserTenantRls.mockImplementation(async (_userId: string, fn: () => unknown) => fn());
     mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
     mockPrismaPasswordEntryHistory.findUnique.mockResolvedValue(historyRecord);
   });
 
-  it("returns history record on success (entry + history fetched via Promise.all)", async () => {
+  it("returns history record on success (entry + history both fetched)", async () => {
     const res = await GET(createRequest("GET", makeUrl()), makeParams());
     const json = await res.json();
     expect(res.status).toBe(200);

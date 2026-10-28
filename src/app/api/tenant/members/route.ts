@@ -31,38 +31,37 @@ async function handleGET(req: NextRequest) {
     return handleAuthError(err);
   }
 
-  const [members, pendingCounts] = await withTenantRls(prisma, actor.tenantId, async (tx) =>
-    Promise.all([
-      tx.tenantMember.findMany({
-        where: { tenantId: actor.tenantId },
-        select: {
-          id: true,
-          userId: true,
-          role: true,
-          deactivatedAt: true,
-          scimManaged: true,
-          // Identity is NOT read through the relation. `users_tenant_isolation`
-          // filters a member whose `users` row lives in another tenant — an
-          // ordinary outcome of a realignment — and the REQUIRED relation comes
-          // back null for that row (measured: Prisma does not throw), so reading
-          // its name took the whole member list down. Hydrated below, outside
-          // this context.
-        },
-        orderBy: { createdAt: "asc" },
-      }),
-      // Includes pending_approval AND approved (not yet executed) per dual-approval plan
-      tx.adminVaultReset.groupBy({
-        by: ["targetUserId"],
-        where: {
-          tenantId: actor.tenantId,
-          executedAt: null,
-          revokedAt: null,
-          expiresAt: { gt: new Date() },
-        },
-        _count: true,
-      }),
-    ]),
-  );
+  const [members, pendingCounts] = await withTenantRls(prisma, actor.tenantId, async (tx) => {
+    const members = await tx.tenantMember.findMany({
+      where: { tenantId: actor.tenantId },
+      select: {
+        id: true,
+        userId: true,
+        role: true,
+        deactivatedAt: true,
+        scimManaged: true,
+        // Identity is NOT read through the relation. `users_tenant_isolation`
+        // filters a member whose `users` row lives in another tenant — an
+        // ordinary outcome of a realignment — and the REQUIRED relation comes
+        // back null for that row (measured: Prisma does not throw), so reading
+        // its name took the whole member list down. Hydrated below, outside
+        // this context.
+      },
+      orderBy: { createdAt: "asc" },
+    });
+    // Includes pending_approval AND approved (not yet executed) per dual-approval plan
+    const pendingCounts = await tx.adminVaultReset.groupBy({
+      by: ["targetUserId"],
+      where: {
+        tenantId: actor.tenantId,
+        executedAt: null,
+        revokedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      _count: true,
+    });
+    return [members, pendingCounts] as const;
+  });
 
   const pendingMap = new Map(
     pendingCounts.map((r) => [r.targetUserId, r._count]),

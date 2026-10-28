@@ -151,7 +151,9 @@ export interface RotationEffects {
  * The caller is responsible for:
  *   - session auth + passphrase verification
  *   - advisory lock: `SELECT pg_advisory_xact_lock(hashtext(userId))`
- *   - wrapping this call in `prisma.$transaction(async (tx) => { ... })`
+ *   - running this call on the RLS context's transaction:
+ *     `withUserTenantRls(userId, (_tenantId, tx) => …, { timeout: VAULT_ROTATE_TX_TIMEOUT_MS })`
+ *     (a nested `prisma.$transaction(fn, options)` inside a context is refused)
  *   - mapping error classes to HTTP responses
  *
  * @param tx          - Prisma interactive transaction client (with RLS set)
@@ -316,42 +318,34 @@ export async function applyVaultRotation(
   }
 
   // ── Re-encrypt entries ──────────────────────────────────────────────────
-  const ENTRY_BATCH_SIZE = 100;
-  for (let i = 0; i < entries.length; i += ENTRY_BATCH_SIZE) {
-    const batch = entries.slice(i, i + ENTRY_BATCH_SIZE);
-    await Promise.all(batch.map(async (entry) => {
-      const updateResult = await tx.passwordEntry.updateMany({
-        where: { id: entry.id, userId },
-        data: {
-          ...toBlobColumns(entry.encryptedBlob),
-          ...toOverviewColumns(entry.encryptedOverview),
-          aadVersion: entry.aadVersion,
-          keyVersion: newKeyVersion,
-        },
-      });
-      if (updateResult.count !== 1) {
-        throw new Error("ENTRY_COUNT_MISMATCH");
-      }
-    }));
+  for (const entry of entries) {
+    const updateResult = await tx.passwordEntry.updateMany({
+      where: { id: entry.id, userId },
+      data: {
+        ...toBlobColumns(entry.encryptedBlob),
+        ...toOverviewColumns(entry.encryptedOverview),
+        aadVersion: entry.aadVersion,
+        keyVersion: newKeyVersion,
+      },
+    });
+    if (updateResult.count !== 1) {
+      throw new Error("ENTRY_COUNT_MISMATCH");
+    }
   }
 
   // ── Re-encrypt history blobs ────────────────────────────────────────────
-  const HISTORY_BATCH_SIZE = 100;
-  for (let i = 0; i < historyEntries.length; i += HISTORY_BATCH_SIZE) {
-    const batch = historyEntries.slice(i, i + HISTORY_BATCH_SIZE);
-    await Promise.all(batch.map(async (historyEntry) => {
-      const updateResult = await tx.passwordEntryHistory.updateMany({
-        where: { id: historyEntry.id, entry: { userId } },
-        data: {
-          ...toBlobColumns(historyEntry.encryptedBlob),
-          aadVersion: historyEntry.aadVersion,
-          keyVersion: newKeyVersion,
-        },
-      });
-      if (updateResult.count !== 1) {
-        throw new Error("HISTORY_COUNT_MISMATCH");
-      }
-    }));
+  for (const historyEntry of historyEntries) {
+    const updateResult = await tx.passwordEntryHistory.updateMany({
+      where: { id: historyEntry.id, entry: { userId } },
+      data: {
+        ...toBlobColumns(historyEntry.encryptedBlob),
+        aadVersion: historyEntry.aadVersion,
+        keyVersion: newKeyVersion,
+      },
+    });
+    if (updateResult.count !== 1) {
+      throw new Error("HISTORY_COUNT_MISMATCH");
+    }
   }
 
   // ── Per-row CEK rewrap ──────────────────────────────────────────────────

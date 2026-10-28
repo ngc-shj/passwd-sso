@@ -12,7 +12,12 @@ const { mockAuth, mockPrismaUser, mockTransaction, mockApplyVaultRotation, mockW
     },
     mockTransaction: vi.fn(),
     mockApplyVaultRotation: vi.fn(),
-    mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+    // The rotation body runs on the context's transaction client, handed over
+    // as fn's second argument.
+    mockWithUserTenantRls: vi.fn(
+      async (_userId: string, fn: (tenantId: string, tx: unknown) => unknown, _options?: unknown) =>
+        fn("tenant-1", txMock),
+    ),
     mockRateLimiterCheck,
     // F: recording factory — assertRedisFailClosed's factory-attribution step
     // reads mockCreateRateLimiter.mock.{calls,results}.
@@ -123,6 +128,7 @@ vi.mock("@/lib/audit/audit", () => ({
 
 import { createHash } from "crypto";
 import { POST } from "./route";
+import { VAULT_ROTATE_TX_TIMEOUT_MS } from "@/lib/constants/vault/rotate-key";
 
 // Module-level `rotateLimiter = createRateLimiter(...)` runs at import time,
 // above. Snapshot the recorded factory call now (module scope, before any
@@ -178,8 +184,6 @@ describe("POST /api/vault/rotate-key", () => {
       keyVersion: 1,
       accountSalt: "e".repeat(64),
     });
-    // Interactive transaction mock: execute the callback with txMock
-    mockTransaction.mockImplementation(async (fn: (tx: typeof txMock) => unknown) => fn(txMock));
     // applyVaultRotation returns the RotationEffects object on success
     mockApplyVaultRotation.mockResolvedValue(defaultRotationEffects);
     txMock.$executeRaw.mockResolvedValue(undefined);
@@ -272,7 +276,7 @@ describe("POST /api/vault/rotate-key", () => {
     expect(res.status).toBe(200);
     expect(json.success).toBe(true);
     expect(json.keyVersion).toBe(2);
-    expect(mockTransaction).toHaveBeenCalledTimes(1);
+    expect(mockTransaction).not.toHaveBeenCalled();
     expect(txMock.$executeRaw).toHaveBeenCalled();
     expect(mockApplyVaultRotation).toHaveBeenCalledWith(
       txMock,
@@ -393,7 +397,11 @@ describe("POST /api/vault/rotate-key", () => {
     // Two calls: (1) user.findUnique, (2) the rotation transaction
     expect(mockWithUserTenantRls).toHaveBeenCalledTimes(2);
     expect(mockWithUserTenantRls).toHaveBeenNthCalledWith(1, "user-1", expect.any(Function));
-    expect(mockWithUserTenantRls).toHaveBeenNthCalledWith(2, "user-1", expect.any(Function));
+    // The rotation budget reaches the transaction the context opens; a nested
+    // prisma.$transaction(fn, { timeout }) would have dropped it.
+    expect(mockWithUserTenantRls).toHaveBeenNthCalledWith(2, "user-1", expect.any(Function), {
+      timeout: VAULT_ROTATE_TX_TIMEOUT_MS,
+    });
   });
 
   it("truncates error details when >10 validation issues", async () => {

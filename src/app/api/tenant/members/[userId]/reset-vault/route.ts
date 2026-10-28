@@ -302,31 +302,29 @@ async function handleGET(
     return handleAuthError(err);
   }
 
-  // Fetch reset rows + target's role under a single RLS transaction so the
-  // queries pipeline on one connection (vs. opening two separate tenants).
+  // Fetch reset rows + target's role under a single RLS transaction (vs.
+  // opening two separate tenant contexts).
   const { resets, targetMember } = await withTenantRls(
     prisma,
     actor.tenantId,
     async (tx) => {
-      const [resets, targetMember] = await Promise.all([
-        tx.adminVaultReset.findMany({
-          where: { targetUserId, tenantId: actor.tenantId },
-          // Initiator and approver are hydrated below, outside this tenant
-          // context: an admin who has since left this tenant has a users row RLS
-          // hides here; the REQUIRED initiator relation came back null (Prisma does
-          // not throw) and dereferencing it failed the whole history.
-          orderBy: { createdAt: "desc" },
-          take: VAULT_RESET_HISTORY_LIMIT,
-        }),
-        tx.tenantMember.findFirst({
-          where: {
-            tenantId: actor.tenantId,
-            userId: targetUserId,
-            deactivatedAt: null,
-          },
-          select: { role: true },
-        }),
-      ]);
+      const resets = await tx.adminVaultReset.findMany({
+        where: { targetUserId, tenantId: actor.tenantId },
+        // Initiator and approver are hydrated below, outside this tenant
+        // context: an admin who has since left this tenant has a users row RLS
+        // hides here; the REQUIRED initiator relation came back null (Prisma does
+        // not throw) and dereferencing it failed the whole history.
+        orderBy: { createdAt: "desc" },
+        take: VAULT_RESET_HISTORY_LIMIT,
+      });
+      const targetMember = await tx.tenantMember.findFirst({
+        where: {
+          tenantId: actor.tenantId,
+          userId: targetUserId,
+          deactivatedAt: null,
+        },
+        select: { role: true },
+      });
       return { resets, targetMember };
     },
   );

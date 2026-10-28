@@ -222,7 +222,7 @@ describe("createTeamPassword", () => {
     expect(err.code).toBe(API_ERROR.FOLDER_NOT_FOUND);
   });
 
-  it("calls both team and folder queries (confirms parallel fetch)", async () => {
+  it("calls both team and folder queries", async () => {
     mockTeamFindUnique.mockResolvedValue(DEFAULT_TEAM);
     mockTeamFolderFindUnique.mockResolvedValue(DEFAULT_FOLDER);
     mockTeamPasswordEntryCreate.mockResolvedValue({ id: "entry-1", tags: [] });
@@ -574,7 +574,7 @@ describe("updateTeamPassword", () => {
     expect(deleteCall.where.id.in).toContain("h-0");
   });
 
-  it("calls both team and folder queries in parallel during full update with folder", async () => {
+  it("calls both team and folder queries during full update with folder", async () => {
     mockTeamFindUnique.mockResolvedValue({ teamKeyVersion: 3 });
     mockTeamFolderFindUnique.mockResolvedValue(DEFAULT_FOLDER);
     mockTeamPasswordEntryHistoryCreate.mockResolvedValue({});

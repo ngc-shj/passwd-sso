@@ -435,6 +435,9 @@ queue_step "Static: caught-error-logging" node scripts/checks/check-caught-error
 queue_step "Static: audit-metadata-narrative" node scripts/checks/check-audit-metadata-narrative.mjs
 queue_step "Static: sentinel-tenant-literal-parity" node scripts/checks/check-sentinel-tenant-literal-parity.mjs
 queue_step "Static: count-then-create-lock" node scripts/checks/check-count-then-create-lock.mjs
+# Issue #975: a Promise combinator over one interactive transaction client
+# issues its statements concurrently on a single pg connection.
+queue_step "Static: tx-concurrent-queries" node scripts/checks/check-tx-concurrent-queries.mjs
 # long-lived-client-login plan §C3: every extension/iOS token expiry write
 # must go through computeClientTokenExpiry (presence/idle/absolute cap), not
 # an inlined now + idleMinutes * MS_PER_MINUTE that bypasses it.

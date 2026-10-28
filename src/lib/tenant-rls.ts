@@ -191,6 +191,9 @@ export function isBypassRlsActive(): boolean {
   return getTenantRlsContext()?.bypass === true;
 }
 
+/** Interactive-transaction budget an RLS context opens its transaction with. */
+export type RlsTxOptions = { timeout?: number; maxWait?: number };
+
 export async function withTenantRls<T>(
   prisma: PrismaClient,
   tenantId: string,
@@ -199,7 +202,7 @@ export async function withTenantRls<T>(
   // (5s timeout / 2s maxWait). Pass an explicit budget where the work inside
   // is bounded by something other than a single quick statement — a batch read
   // sized by an operator-tunable cap, for instance.
-  options?: { timeout?: number; maxWait?: number },
+  options?: RlsTxOptions,
 ): Promise<T> {
   assertNoActiveRlsContext("withTenantRls");
   // AFTER the nesting guard, so a nested call keeps reporting the nesting —
@@ -223,7 +226,7 @@ export async function withBypassRls<T>(
   // migrations that rewrite a batch inside a single bypass transaction need an
   // explicit budget — the work there is sized by a batch constant, not by a
   // single quick statement.
-  options?: { timeout?: number; maxWait?: number },
+  options?: RlsTxOptions,
 ): Promise<T> {
   assertNoActiveRlsContext("withBypassRls");
   return prisma.$transaction(async (tx) => {

@@ -47,23 +47,22 @@ async function handleGET(req: NextRequest, { params }: Params) {
     if (Number.isNaN(keyVersion) || keyVersion < 1 || keyVersion > 10000) {
       return validationError();
     }
-    const [resolvedKey, team] = await withTeamTenantRls(teamId, async () =>
-      Promise.all([
-        prisma.teamMemberKey.findUnique({
-          where: {
-            teamId_userId_keyVersion: {
-              teamId: teamId,
-              userId: userId,
-              keyVersion,
-            },
+    const [resolvedKey, team] = await withTeamTenantRls(teamId, async () => {
+      const resolvedKey = await prisma.teamMemberKey.findUnique({
+        where: {
+          teamId_userId_keyVersion: {
+            teamId: teamId,
+            userId: userId,
+            keyVersion,
           },
-        }),
-        prisma.team.findUnique({
-          where: { id: teamId },
-          select: { teamKeyVersion: true },
-        }),
-      ]),
-    );
+        },
+      });
+      const team = await prisma.team.findUnique({
+        where: { id: teamId },
+        select: { teamKeyVersion: true },
+      });
+      return [resolvedKey, team] as const;
+    });
     memberKey = resolvedKey;
 
     // Post-authorization forensic signal (C2): a post-rotation member fetching

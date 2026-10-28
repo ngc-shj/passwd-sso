@@ -114,8 +114,9 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   // Interactive transaction with optimistic lock on teamKeyVersion (S-17)
   // Member list verification is inside transaction to prevent TOCTOU (F-26)
   try {
-    await withTeamTenantRls(teamId, async () =>
-      prisma.$transaction(async (tx) => {
+    await withTeamTenantRls(
+      teamId,
+      async (_tenantId, tx) => {
         // Re-verify teamKeyVersion hasn't changed since pre-read
         const currentTeam = await tx.team.findUnique({
           where: { id: teamId },
@@ -170,7 +171,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       // teamKeyVersion is NOT in where: entries restored from history may have
       // a stale version, but the ID set verification above guarantees completeness (F-29).
       // Note: Prisma interactive transaction auto-rolls back on any thrown error.
-        await Promise.all(entries.map(async (entry) => {
+        for (const entry of entries) {
           const data: Record<string, unknown> = {
             aadVersion: entry.aadVersion,
             teamKeyVersion: newTeamKeyVersion,
@@ -201,7 +202,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
           if (result.count !== 1) {
             throw new Error("ENTRY_COUNT_MISMATCH");
           }
-        }));
+        }
 
       // Create new TeamMemberKey for each member (old keys kept for history)
       // No filter needed: member validation above guarantees exact 1:1 match
@@ -228,7 +229,8 @@ async function handlePOST(req: NextRequest, { params }: Params) {
           where: { id: teamId },
           data: { teamKeyVersion: newTeamKeyVersion },
         });
-      }, { timeout: TEAM_ROTATE_TX_TIMEOUT_MS }),
+      },
+      { timeout: TEAM_ROTATE_TX_TIMEOUT_MS },
     );
   } catch (e) {
     if (e instanceof Error && e.message === "TEAM_KEY_VERSION_CONFLICT") {

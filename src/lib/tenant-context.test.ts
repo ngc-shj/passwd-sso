@@ -10,8 +10,10 @@ const {
   mockUserUpdate,
   mockWithBypassRls,
   mockWithTenantRls,
+  mockBaseTransaction,
 } =
   vi.hoisted(() => ({
+    mockBaseTransaction: vi.fn(),
     mockFindMany: vi.fn(),
     mockFindUnique: vi.fn(),
     mockUserFindUnique: vi.fn(),
@@ -26,6 +28,7 @@ vi.mock("@/lib/prisma", () => ({
     tenantMember: { findMany: mockFindMany },
     team: { findUnique: mockFindUnique },
     user: { findUnique: mockUserFindUnique, findMany: mockUserFindMany, update: mockUserUpdate },
+    $transaction: mockBaseTransaction,
   },
 }));
 
@@ -52,6 +55,8 @@ import { prisma } from "@/lib/prisma";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 // ─── Tests ──────────────────────────────────────────────────
+
+const TENANT_UUID = "00000000-0000-4000-8000-0000000000a1";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -351,7 +356,32 @@ describe("withUserTenantRls", () => {
       prisma,
       "tenant-abc",
       expect.any(Function),
+      undefined,
     );
+  });
+
+  it("opens the context's transaction with the caller's options", async () => {
+    const actual = await vi.importActual<typeof import("@/lib/tenant-rls")>("@/lib/tenant-rls");
+    mockWithTenantRls.mockImplementationOnce(actual.withTenantRls);
+    mockFindMany.mockResolvedValue([{ tenantId: TENANT_UUID }]);
+    mockBaseTransaction.mockResolvedValueOnce("done");
+
+    await withUserTenantRls("user-1", async () => "x", { timeout: 120_000 });
+
+    expect(mockBaseTransaction).toHaveBeenCalledWith(expect.any(Function), { timeout: 120_000 });
+  });
+
+  it("hands fn the tenant id and the context's transaction client", async () => {
+    const tx = { marker: "tx" };
+    mockFindMany.mockResolvedValue([{ tenantId: "tenant-abc" }]);
+    mockWithTenantRls.mockImplementationOnce(
+      (_p: unknown, _t: string, fn: (tx: unknown) => unknown) => fn(tx),
+    );
+    const fn = vi.fn(async () => "ok");
+
+    await withUserTenantRls("user-1", fn);
+
+    expect(fn).toHaveBeenCalledWith("tenant-abc", tx);
   });
 
   // L2 — session-auth fail-open backstop. If SCIM deactivation's
@@ -402,7 +432,19 @@ describe("withTeamTenantRls", () => {
       prisma,
       "tenant-xyz",
       expect.any(Function),
+      undefined,
     );
+  });
+
+  it("opens the context's transaction with the caller's options", async () => {
+    const actual = await vi.importActual<typeof import("@/lib/tenant-rls")>("@/lib/tenant-rls");
+    mockWithTenantRls.mockImplementationOnce(actual.withTenantRls);
+    mockFindUnique.mockResolvedValue({ tenantId: TENANT_UUID });
+    mockBaseTransaction.mockResolvedValueOnce("done");
+
+    await withTeamTenantRls("team-1", async () => "x", { timeout: 60_000 });
+
+    expect(mockBaseTransaction).toHaveBeenCalledWith(expect.any(Function), { timeout: 60_000 });
   });
 });
 
