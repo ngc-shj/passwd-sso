@@ -741,6 +741,10 @@ async function hydrateFromSession(): Promise<void> {
     // still explains the disconnect.
     await clearSession();
     await recordDisconnectReason(DISCONNECT_REASON.EXPIRED);
+    // The TTL alarm that woke this SW no-ops without a token, so the badge left
+    // from before suspension would keep showing "connected".
+    chrome.alarms.clear(ALARM_TOKEN_REFRESH);
+    void updateBadge();
     return;
   }
 

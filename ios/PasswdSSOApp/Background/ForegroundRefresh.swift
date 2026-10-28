@@ -5,9 +5,10 @@ import Shared
 /// so its ordering against the passkey-requirement gate is testable (mirrors
 /// `BackgroundSyncRunner.attempt`).
 ///
-/// 1. Drain the AutoFill extension's rollback tamper reports. ALWAYS runs: the
-///    server exempts the report from the passkey gate, so a passkey-less member
-///    can still report tampering.
+/// 1. Drain the AutoFill extension's rollback tamper reports. Always attempted:
+///    the server exempts the report from the passkey gate, so a passkey-less
+///    member can still report tampering while the access token is live. Once it
+///    has expired, the refresh is gated and the report stays queued.
 /// 2. While a `PASSKEY_REQUIRED` refusal is recorded, stop — the token re-mint
 ///    and the sync would be refused the same way. Wait for the user.
 /// 3. Re-mint the short-lived AutoFill upload token (plan C6) so a passkey

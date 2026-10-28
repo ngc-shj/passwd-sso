@@ -3489,6 +3489,30 @@ describe("session hydration", () => {
     );
   });
 
+  it("shows the disconnected badge when hydration finds the session expired", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+
+    sessionStorageMocks.loadSession.mockResolvedValueOnce({
+      token: "old-tok",
+      expiresAt: Date.now() - 1000,
+      userId: "u-1",
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, json: async () => ({}) }))
+    );
+
+    await loadBackground();
+
+    await vi.waitFor(() => {
+      expect(chromeMock?.action.setBadgeText).toHaveBeenCalledWith({ text: "×" });
+    });
+    expect(chromeMock?.alarms.clear).toHaveBeenCalledWith(ALARM_TOKEN_REFRESH);
+  });
+
   it("fetches the tenant policy from vault/status when a restored session has none", async () => {
     vi.resetModules();
     vi.clearAllMocks();

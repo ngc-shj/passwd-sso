@@ -996,8 +996,10 @@ public actor MobileAPIClient: VaultUnlockDataSource {
   /// before any per-route status mapping can read it as something else.
   ///
   /// `clearsPasskeyRequirement`: whether a 2xx from this endpoint proves the
-  /// requirement is met. True only for passkey-gated endpoints — every caller
-  /// except the gate-exempt cache-rollback report (see `postCacheRollbackReport`).
+  /// requirement is met. True for endpoints whose 2xx implies the gate passed:
+  /// gated validators, the refresh mint gate, and the bridge-code exchange
+  /// (gated at `/api/mobile/authorize`). False for the gate-exempt
+  /// cache-rollback report (see `postCacheRollbackReport`).
   func performHTTP(
     _ request: URLRequest, clearsPasskeyRequirement: Bool = true
   ) async throws -> (Data, URLResponse) {
