@@ -24,6 +24,11 @@ public let serverConfigDefaultsKey = "serverConfig"
 
 public func saveServerConfig(_ config: ServerConfig, defaults: UserDefaults) {
   guard let data = try? JSONEncoder().encode(config) else { return }
+  // A recorded passkey refusal is the previous server's verdict — drop it when
+  // the server changes (a re-verify of the same URL keeps it).
+  if loadServerConfig(defaults: defaults)?.baseURL != config.baseURL {
+    PasskeyRequirementStore(defaults: defaults).clear()
+  }
   defaults.set(data, forKey: serverConfigDefaultsKey)
 }
 

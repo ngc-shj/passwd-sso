@@ -28,7 +28,10 @@ public enum RestoredSession: Sendable {
 /// `identityMismatch` is distinct from `dead`/`offline`: only a rejected TLS pin
 /// (genuine key rotation or MITM) routes to the re-verify affordance; a
 /// reachability failure keeps the cached vault usable offline.
-public enum SessionValidation: Sendable { case ok, offline, dead, identityMismatch }
+/// `passkeyRequired` is the server refusing the refresh until the member
+/// registers a passkey: the tokens are still valid, so it is neither dead nor
+/// an identity change.
+public enum SessionValidation: Sendable { case ok, offline, dead, identityMismatch, passkeyRequired }
 
 // MARK: - Session restorer
 
@@ -78,8 +81,10 @@ public struct SessionRestorer: Sendable {
       return .needsSignIn(config)
     }
     switch await validate(client) {
-    case .ok, .offline:
+    case .ok, .offline, .passkeyRequired:
       // Offline keeps the cached vault unlockable — the pin is presumed valid.
+      // A passkey refusal does the same: the local vault still unlocks, and
+      // re-sign-in would be refused too (the app-level alert explains it).
       return .needsUnlock(config, client)
     case .dead:
       return .needsReauth(config, client)
@@ -154,6 +159,8 @@ extension SessionRestorer {
           return .ok
         } catch MobileAPIError.networkError {
           return .offline
+        } catch MobileAPIError.passkeyRequired {
+          return .passkeyRequired
         } catch {
           return .dead
         }

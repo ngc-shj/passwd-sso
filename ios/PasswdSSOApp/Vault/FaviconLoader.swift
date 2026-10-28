@@ -106,6 +106,8 @@ public final class FaviconLoader {
     // No pinned session (sign-in incomplete) → no favicon. Never fall back to an
     // unpinned session: the request carries a live bearer token.
     guard let urlSession = await session() else { return nil }
+    // Every row render would otherwise send a request the server refuses.
+    guard automaticServerCallsAllowed() else { return nil }
 
     let result: (status: Int, contentType: String?, body: Data)
     do {

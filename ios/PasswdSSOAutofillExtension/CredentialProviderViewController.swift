@@ -322,6 +322,7 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
       var cryptoSucceeded = false
       var hasUploadToken = false
       var uploadedEntryId: String?
+      var uploadRefusedForPasskey = false
       var generated: GeneratedPasskey?
       var attestationObject = Data()
       var encryption: CredentialResolver.RegistrationEncryption?
@@ -398,6 +399,14 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
           )
           do {
             uploadedEntryId = try await uploader.createEntry(body: body)
+            // The server accepted this member's bearer token again.
+            PasskeyRequirementStore().clear()
+          } catch EntryUploadError.passkeyRequired {
+            uploadRefusedForPasskey = true
+            // Shared with the host app, which then stops its automatic calls
+            // and explains the same requirement.
+            PasskeyRequirementStore().markRequired()
+            Self.log.error("passkey registration: upload refused: passkeyRequired")
           } catch {
             Self.log.error("passkey registration: upload failed: \(String(describing: type(of: error)), privacy: .public)")
           }
@@ -407,17 +416,26 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
       }
 
       // THE single decision point (C3). Only `.complete` returns a credential.
+      // Without a token, the host's recorded mint refusal names the reason;
+      // with one, only this upload's own refusal does.
       let decision = passkeyRegistrationOutcome(
         algorithmSupported: input.algorithmSupported,
         vaultUnlocked: vaultUnlocked,
         cryptoSucceeded: cryptoSucceeded,
         hasUploadToken: hasUploadToken,
         uploadedEntryId: uploadedEntryId,
-        expectedEntryId: entryId
+        expectedEntryId: entryId,
+        passkeyRequired: hasUploadToken ? uploadRefusedForPasskey : PasskeyRequirementStore().isRequired
       )
       guard decision == .complete, let encryption, let passkey = generated else {
         Self.log.error("passkey registration cancelled: \(String(describing: decision), privacy: .public)")
-        cancel(with: nil)
+        if decision == .cancel(.passkeyRequired) {
+          // The only cancel with a reason the user can act on: explain it
+          // first (the system sheet shows none), cancel on dismiss.
+          presentPasskeyRequiredSheet()
+        } else {
+          cancel(with: nil)
+        }
         return
       }
 
@@ -586,6 +604,16 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
     foregroundWorkStarted = true
     pendingForegroundWork = nil
     work()
+  }
+
+  @MainActor
+  private func presentPasskeyRequiredSheet() {
+    let url = loadServerConfig().map {
+      passkeySettingsURL(serverURL: $0.baseURL, language: AppSettingsStore().appLanguage)
+    }
+    presentSwiftUI(PasskeyRequiredView(passkeySettingsURL: url) { [weak self] in
+      self?.cancel(with: nil)
+    })
   }
 
   @MainActor

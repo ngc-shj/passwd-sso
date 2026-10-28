@@ -776,6 +776,151 @@ final class HostSyncServiceTests: XCTestCase {
       "The surviving key must be the originally seeded team's key")
   }
 
+  // MARK: - PASSKEY_REQUIRED is not "no teams" / "key not distributed"
+
+  private func makePasskeyIsolatedStore() -> (PasskeyRequirementStore, () -> Void) {
+    let name = "com.test.host-sync.passkey.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: name)!
+    return (PasskeyRequirementStore(defaults: defaults), { defaults.removePersistentDomain(forName: name) })
+  }
+
+  /// A passkey refusal of /api/teams used to read as a transient failure
+  /// (proceed with no teams) and the sync "succeeded" personal-only.
+  func testRunSync_teamsRefusedForPasskey_throwsPasskeyRequired() async throws {
+    let keychain = MockKeychain()
+    seedBlobInKeychain(keychain, counter: 1, service: "com.passwd-sso.test.passkey-teams.bridge-key")
+    let bks = BridgeKeyStore(
+      accessGroup: "test", service: "com.passwd-sso.test.passkey-teams.bridge-key", keychain: keychain)
+    let tokenStore = HostTokenStore(service: "com.test.passkey-teams.tokens", keychain: FakeKeychain())
+    try? tokenStore.saveTokens(
+      access: "acc_pk", refresh: "ref_pk", expiresAt: Date().addingTimeInterval(3600))
+    let (store, cleanup) = makePasskeyIsolatedStore()
+    defer { cleanup() }
+
+    MockURLProtocol.requestHandler = { request in
+      let path = request.url?.path ?? ""
+      if path.hasSuffix("/api/teams") {
+        return (Data(#"{"error":"PASSKEY_REQUIRED"}"#.utf8), httpResponse(status: 403, url: request.url!))
+      }
+      return (Data("[]".utf8), httpResponse(status: 200, url: request.url!))
+    }
+
+    let apiClient = MobileAPIClient(
+      serverURL: URL(string: "https://test.passkey-teams.example")!,
+      signer: FakeSigner(),
+      jwk: ["kty": "EC", "crv": "P-256",
+            "x": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "y": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"],
+      tokenStore: tokenStore,
+      urlSession: makeSession(),
+      passkeyRequirement: store
+    )
+    let syncService = HostSyncService(
+      apiClient: apiClient,
+      entryFetcher: EntryFetcher(apiClient: apiClient),
+      bridgeKeyStore: bks,
+      wrappedKeyStore: TempDirWrappedKeyStore(baseDir: tmpDir),
+      cacheURL: tmpDir.appending(path: "passkey-teams.cache", directoryHint: .notDirectory),
+      teamDirectoryStore: NullTeamDirectoryStore()
+    )
+
+    do {
+      _ = try await syncService.runSync(vaultKey: SymmetricKey(size: .bits256), userId: "u-1")
+      XCTFail("expected passkeyRequired")
+    } catch {
+      XCTAssertEqual(error as? MobileAPIError, .passkeyRequired)
+    }
+  }
+
+  /// A passkey refusal of a member-key fetch used to be skipped as "key not
+  /// distributed", and the full rewrite then dropped the team's still-valid key.
+  func testRefreshTeamKeys_memberKeyRefusedForPasskey_throwsAndKeepsKeys() async throws {
+    let bundle = Bundle(for: type(of: self))
+    let fixtureURL = try XCTUnwrap(
+      bundle.url(forResource: "team-key-fixture", withExtension: "json")
+        ?? bundle.url(forResource: "team-key-fixture", withExtension: "json", subdirectory: "fixtures")
+    )
+    struct FixtureMin: Decodable {
+      struct EncData: Decodable { let ciphertext: String; let iv: String; let authTag: String }
+      let secretKeyHex: String
+      let encryptedEcdhPrivateKey: EncData
+      let teamId: String; let toUserId: String
+    }
+    let f = try JSONDecoder().decode(FixtureMin.self, from: Data(contentsOf: fixtureURL))
+    let cacheKey = SymmetricKey(size: .bits256)
+    let userId = f.toUserId
+
+    let ecdhWrappingKey = TeamKeyCrypto.deriveEcdhWrappingKey(
+      secretKey: SymmetricKey(data: try hexDecode(f.secretKeyHex)))
+    let memberKey = try TeamKeyCrypto.unwrapEcdhPrivateKey(
+      encrypted: EncryptedData(
+        ciphertext: f.encryptedEcdhPrivateKey.ciphertext,
+        iv: f.encryptedEcdhPrivateKey.iv,
+        authTag: f.encryptedEcdhPrivateKey.authTag),
+      wrappingKey: ecdhWrappingKey)
+    var pkcs8 = memberKey.derRepresentation
+    defer { pkcs8.resetBytes(in: 0..<pkcs8.count) }
+
+    let keychain = MockKeychain()
+    seedBlobInKeychain(keychain, counter: 1, service: "com.passwd-sso.test.passkey-member-key.bridge-key")
+    let bks = BridgeKeyStore(
+      accessGroup: "test", service: "com.passwd-sso.test.passkey-member-key.bridge-key",
+      keychain: keychain)
+    let wks = TempDirWrappedKeyStore(baseDir: tmpDir)
+    try wks.saveECDHPrivateKey(try TeamEntryDecryptor.wrapEcdhPrivateKey(
+      pkcs8: pkcs8, cacheKey: cacheKey, userId: userId, issuedAt: Date()))
+    try wks.saveTeamKeys([try TeamEntryDecryptor.wrapTeamKey(
+      teamEncKey: SymmetricKey(size: .bits256), cacheKey: cacheKey, userId: userId,
+      teamId: f.teamId, teamKeyVersion: 1, issuedAt: Date())])
+
+    let tokenStore = HostTokenStore(service: "com.test.passkey-member-key.tokens", keychain: FakeKeychain())
+    try? tokenStore.saveTokens(
+      access: "acc_pk_mk", refresh: "ref_pk_mk", expiresAt: Date().addingTimeInterval(3600))
+    let (store, cleanup) = makePasskeyIsolatedStore()
+    defer { cleanup() }
+    let teamsList = Data(#"[{"id":"\#(f.teamId)","name":"Team"}]"#.utf8)
+
+    MockURLProtocol.requestHandler = { request in
+      let path = request.url?.path ?? ""
+      if path.hasSuffix("/api/teams") {
+        return (teamsList, httpResponse(status: 200, url: request.url!))
+      }
+      if path.hasSuffix("/member-key") {
+        return (Data(#"{"error":"PASSKEY_REQUIRED"}"#.utf8), httpResponse(status: 403, url: request.url!))
+      }
+      return (Data("[]".utf8), httpResponse(status: 200, url: request.url!))
+    }
+
+    let apiClient = MobileAPIClient(
+      serverURL: URL(string: "https://test.passkey-member-key.example")!,
+      signer: FakeSigner(),
+      jwk: ["kty": "EC", "crv": "P-256",
+            "x": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "y": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"],
+      tokenStore: tokenStore,
+      urlSession: makeSession(),
+      passkeyRequirement: store
+    )
+    let syncService = HostSyncService(
+      apiClient: apiClient,
+      entryFetcher: EntryFetcher(apiClient: apiClient),
+      bridgeKeyStore: bks,
+      wrappedKeyStore: wks,
+      cacheURL: tmpDir.appending(path: "passkey-member-key.cache", directoryHint: .notDirectory),
+      teamDirectoryStore: NullTeamDirectoryStore()
+    )
+
+    do {
+      _ = try await syncService.runSync(
+        vaultKey: SymmetricKey(size: .bits256), userId: userId, cacheKey: cacheKey)
+      XCTFail("expected passkeyRequired")
+    } catch {
+      XCTAssertEqual(error as? MobileAPIError, .passkeyRequired)
+    }
+    XCTAssertEqual(try wks.loadTeamKeys().map(\.teamId), [f.teamId],
+      "a passkey refusal must not wipe the persisted team keys")
+  }
+
   // MARK: - F1 bonus: malformed ECDH + all-stale set → cleared
 
   /// Mirrors testRefreshTeamKeys_noECDH_allStaleSet_cleared but via the malformed-ECDH

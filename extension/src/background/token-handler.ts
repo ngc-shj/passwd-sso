@@ -11,6 +11,7 @@ import { getSettings } from "../lib/storage";
 import { isAllowedServerUrl } from "../lib/server-url";
 import { signDpopProof } from "../lib/dpop-key";
 import { DpopSignError, swFetchAuthenticated } from "./dpop-fetch";
+import { isPasskeyRequiredResponse } from "../lib/passkey-required";
 import { MS_PER_SECOND } from "../lib/time";
 
 // A failed refresh retries while any meaningful lifetime remains. Near a
@@ -39,6 +40,11 @@ export interface TokenRefreshCallbacks {
   /** Called when the refresh response includes a new cnfJkt (C10 binding propagation). */
   setCnfJkt?(cnfJkt: string): void;
   clearToken(): void;
+  /**
+   * Called instead of clearToken when the refusal is PASSKEY_REQUIRED, so the
+   * disconnect can say why and point the user at the passkey page.
+   */
+  endForPasskeyRequirement(): void;
   scheduleRefreshAlarm(expiresAt: number): void;
   createTtlAlarm(when: number): void;
 }
@@ -93,6 +99,8 @@ export async function attemptTokenRefreshWith(
       if (newExpiresAt > tokenExpiresAt) {
         callbacks.scheduleRefreshAlarm(newExpiresAt);
       }
+    } else if (await isPasskeyRequiredResponse(res)) {
+      callbacks.endForPasskeyRequirement();
     } else if (res.status === 401 || res.status === 403 || res.status === 404) {
       callbacks.clearToken();
     } else {

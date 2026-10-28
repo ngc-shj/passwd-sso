@@ -117,6 +117,7 @@ describe("attemptTokenRefreshWith (C8 — DPoP header on refresh)", () => {
       getTokenExpiresAt: () => Date.now() + 600_000,
       setToken,
       clearToken: vi.fn(),
+      endForPasskeyRequirement: vi.fn(),
       scheduleRefreshAlarm: vi.fn(),
       createTtlAlarm: vi.fn(),
     });
@@ -145,6 +146,7 @@ describe("attemptTokenRefreshWith (C8 — DPoP header on refresh)", () => {
       getTokenExpiresAt: () => cappedExpiry, // presence-capped: same expiry comes back
       setToken: vi.fn(),
       clearToken: vi.fn(),
+      endForPasskeyRequirement: vi.fn(),
       scheduleRefreshAlarm,
       createTtlAlarm,
     });
@@ -169,6 +171,7 @@ describe("attemptTokenRefreshWith (C8 — DPoP header on refresh)", () => {
       getTokenExpiresAt: () => Date.now() + 60_000,
       setToken: vi.fn(),
       clearToken: vi.fn(),
+      endForPasskeyRequirement: vi.fn(),
       scheduleRefreshAlarm,
       createTtlAlarm: vi.fn(),
     });
@@ -187,6 +190,7 @@ describe("attemptTokenRefreshWith (C8 — DPoP header on refresh)", () => {
       getTokenExpiresAt: () => expiry,
       setToken: vi.fn(),
       clearToken,
+      endForPasskeyRequirement: vi.fn(),
       scheduleRefreshAlarm,
       createTtlAlarm: vi.fn(),
     });
@@ -204,6 +208,7 @@ describe("attemptTokenRefreshWith (C8 — DPoP header on refresh)", () => {
       getTokenExpiresAt: () => Date.now() + 3_000,
       setToken: vi.fn(),
       clearToken: vi.fn(),
+      endForPasskeyRequirement: vi.fn(),
       scheduleRefreshAlarm,
       createTtlAlarm: vi.fn(),
     });
@@ -225,12 +230,58 @@ describe("attemptTokenRefreshWith (C8 — DPoP header on refresh)", () => {
       getTokenExpiresAt: () => Date.now() + 600_000,
       setToken: vi.fn(),
       clearToken,
+      endForPasskeyRequirement: vi.fn(),
       scheduleRefreshAlarm: vi.fn(),
       createTtlAlarm: vi.fn(),
     });
 
     expect(clearToken).not.toHaveBeenCalled();
     expect(mockFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("attemptTokenRefreshWith — PASSKEY_REQUIRED refusal", () => {
+  beforeEach(() => {
+    dpopKeyMocks.signDpopProof.mockReset();
+    dpopKeyMocks.signDpopProof.mockResolvedValue("fake.dpop.jws");
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  async function refreshAgainst(res: Response) {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(res));
+    const callbacks = {
+      getCurrentToken: () => TOKEN,
+      getTokenExpiresAt: () => Date.now() + 600_000,
+      setToken: vi.fn(),
+      clearToken: vi.fn(),
+      endForPasskeyRequirement: vi.fn(),
+      scheduleRefreshAlarm: vi.fn(),
+      createTtlAlarm: vi.fn(),
+    };
+    await attemptTokenRefreshWith(callbacks);
+    return callbacks;
+  }
+
+  it("ends the connection for the passkey requirement and schedules no retry", async () => {
+    const callbacks = await refreshAgainst(
+      new Response(JSON.stringify({ error: "PASSKEY_REQUIRED" }), { status: 403 }),
+    );
+
+    expect(callbacks.endForPasskeyRequirement).toHaveBeenCalledOnce();
+    expect(callbacks.clearToken).not.toHaveBeenCalled();
+    expect(callbacks.scheduleRefreshAlarm).not.toHaveBeenCalled();
+  });
+
+  it("control: a 403 with another error code still clears the token as revoked", async () => {
+    const callbacks = await refreshAgainst(
+      new Response(JSON.stringify({ error: "FORBIDDEN" }), { status: 403 }),
+    );
+
+    expect(callbacks.clearToken).toHaveBeenCalledOnce();
+    expect(callbacks.endForPasskeyRequirement).not.toHaveBeenCalled();
   });
 });
 

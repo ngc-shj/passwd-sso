@@ -141,6 +141,11 @@ public enum MobileAPIError: Error, Equatable {
   /// The refresh token is dead (no refresh token, or refresh endpoint returned 401/dpopInvalid).
   /// The only recovery is re-sign-in.
   case authenticationRequired
+  /// 403 `PASSKEY_REQUIRED`: the tenant requires a passkey this member has not
+  /// registered. The session is NOT dead (the server keeps the token family),
+  /// so this never maps to `authenticationRequired`; the recovery is
+  /// registering a passkey on the web, after which the same tokens work again.
+  case passkeyRequired
 }
 
 // CreateEntryRequest moved to Shared (ios/Shared/Network/EntryUploader.swift)
@@ -191,6 +196,10 @@ public actor MobileAPIClient: VaultUnlockDataSource {
   /// requests carry a live bearer token to the app's own server, so they use
   /// the same TLS pin as every other API call — never an unpinned session.
   private let faviconSessionFactory: (@Sendable (URLCache) async throws -> URLSession)?
+  /// Records every `PASSKEY_REQUIRED` refusal and clears it on any later 2xx,
+  /// so "clear on a later success" holds for every call without each caller
+  /// remembering to do it. Tests inject an isolated suite.
+  private let passkeyRequirement: PasskeyRequirementStore
 
   /// `urlSession` has no default: every authenticated call to the app's own
   /// server must run over the pinned session established at sign-in. A `.shared`
@@ -203,7 +212,8 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     urlSession: URLSession,
     faviconSessionFactory: (@Sendable (URLCache) async throws -> URLSession)? = nil,
     now: @Sendable @escaping () -> Date = { Date() },
-    refreshCoordinator: TokenRefreshCoordinator = .shared
+    refreshCoordinator: TokenRefreshCoordinator = .shared,
+    passkeyRequirement: PasskeyRequirementStore = PasskeyRequirementStore()
   ) {
     self.serverURL = serverURL
     self.signer = signer
@@ -213,6 +223,7 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     self.faviconSessionFactory = faviconSessionFactory
     self.now = now
     self.refreshCoordinator = refreshCoordinator
+    self.passkeyRequirement = passkeyRequirement
   }
 
   /// A pinned favicon session with the given isolated cache, or `nil` when this
@@ -374,6 +385,8 @@ public actor MobileAPIClient: VaultUnlockDataSource {
   /// Fetch this user's wrapped team key for a team (GET /api/teams/{id}/member-key).
   /// 403 (KEY_NOT_DISTRIBUTED) / 404 (MEMBER_KEY_NOT_FOUND) → `teamKeyNotDistributed`
   /// so the sync caller skips the team rather than failing the whole sync.
+  /// A 403 `PASSKEY_REQUIRED` is not one of them: `performAuthedGET` already
+  /// threw `.passkeyRequired` for it, which propagates past this catch.
   public func fetchTeamMemberKey(teamId: String) async throws -> TeamMemberKeyResponse {
     let url = serverURL.appending(path: APIPath.teamMemberKey(teamId: teamId), directoryHint: .notDirectory)
     do {
@@ -427,7 +440,11 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     request.setValue(proof.jws, forHTTPHeaderField: HTTPHeader.dpop)
     request.httpBody = bodyData
 
-    try await performVoidHTTP(request, staleToken: accessToken) { nonce, freshToken in
+    // The server exempts this tamper report from the passkey gate, so its 2xx
+    // says nothing about the requirement — it must not clear a recorded refusal.
+    try await performVoidHTTP(
+      request, staleToken: accessToken, clearsPasskeyRequirement: false
+    ) { nonce, freshToken in
       let token = freshToken ?? accessToken
       let retryProof = try await buildDPoPProof(
         htm: HTTPMethod.post,
@@ -644,6 +661,9 @@ public actor MobileAPIClient: VaultUnlockDataSource {
         throw MobileAPIError.networkError(urlError)
       }
       let http = response as! HTTPURLResponse
+      // A 200 here can be served from the favicon URLCache with no server
+      // round trip, so it proves nothing: mark only, never clear.
+      try observePasskeyRequirement(status: http.statusCode, body: data, clearsOnSuccess: false)
 
       let freshNonce = http.value(forHTTPHeaderField: HTTPHeader.dpopNonce)
       if let n = freshNonce {
@@ -758,6 +778,9 @@ public actor MobileAPIClient: VaultUnlockDataSource {
       return r.accessToken
     } catch let e as MobileAPIError {
       if case .networkError = e { throw e }
+      // The refresh gate refuses a passkey-less member without revoking the
+      // family; re-sign-in would be refused the same way, so do not route there.
+      if e == .passkeyRequired { throw e }
       throw MobileAPIError.authenticationRequired
     } catch {
       throw MobileAPIError.authenticationRequired
@@ -968,11 +991,44 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     return try decodeResponse(data, status: http.statusCode)
   }
 
-  func performHTTP(_ request: URLRequest) async throws -> (Data, URLResponse) {
+  /// Every request except favicons (which use the caller's session) goes
+  /// through here, so a `PASSKEY_REQUIRED` refusal throws `.passkeyRequired`
+  /// before any per-route status mapping can read it as something else.
+  ///
+  /// `clearsPasskeyRequirement`: whether a 2xx from this endpoint proves the
+  /// requirement is met. True for endpoints whose 2xx implies the gate passed:
+  /// gated validators, the refresh mint gate, and the bridge-code exchange
+  /// (gated at `/api/mobile/authorize`). False for the gate-exempt
+  /// cache-rollback report (see `postCacheRollbackReport`).
+  func performHTTP(
+    _ request: URLRequest, clearsPasskeyRequirement: Bool = true
+  ) async throws -> (Data, URLResponse) {
+    let result: (Data, URLResponse)
     do {
-      return try await urlSession.data(for: request)
+      result = try await urlSession.data(for: request)
     } catch let urlError as URLError {
       throw MobileAPIError.networkError(urlError)
+    }
+    if let http = result.1 as? HTTPURLResponse {
+      try observePasskeyRequirement(
+        status: http.statusCode, body: result.0, clearsOnSuccess: clearsPasskeyRequirement)
+    }
+    return result
+  }
+
+  /// Records the passkey requirement from one response: a 403
+  /// `PASSKEY_REQUIRED` marks it and throws `.passkeyRequired`; any 2xx clears
+  /// it (the server accepted this member's bearer token again) unless
+  /// `clearsOnSuccess` is false (gate-exempt endpoint, or a possibly cached
+  /// response). Other statuses leave it alone — a network blip or an unrelated
+  /// 4xx proves nothing.
+  private func observePasskeyRequirement(status: Int, body: Data, clearsOnSuccess: Bool) throws {
+    if isPasskeyRequiredResponse(status: status, body: body) {
+      passkeyRequirement.markRequired()
+      throw MobileAPIError.passkeyRequired
+    }
+    if clearsOnSuccess, (200..<300).contains(status) {
+      passkeyRequirement.clear()
     }
   }
 
@@ -1034,6 +1090,7 @@ public actor MobileAPIClient: VaultUnlockDataSource {
   private func performMutatingWithLadder(
     _ request: URLRequest,
     staleToken: String,
+    clearsPasskeyRequirement: Bool = true,
     makeRetry: MutatingRetryBuilder?
   ) async throws -> (Data, Int) {
     var current = request
@@ -1042,7 +1099,8 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     var token = staleToken
 
     while true {
-      let (data, response) = try await performHTTP(current)
+      let (data, response) = try await performHTTP(
+        current, clearsPasskeyRequirement: clearsPasskeyRequirement)
       let http = response as! HTTPURLResponse
       let freshNonce = http.value(forHTTPHeaderField: HTTPHeader.dpopNonce)
       if let freshNonce {
@@ -1077,10 +1135,12 @@ public actor MobileAPIClient: VaultUnlockDataSource {
   private func performVoidHTTP(
     _ request: URLRequest,
     staleToken: String,
+    clearsPasskeyRequirement: Bool = true,
     makeRetry: MutatingRetryBuilder? = nil
   ) async throws {
     let (_, status) = try await performMutatingWithLadder(
-      request, staleToken: staleToken, makeRetry: makeRetry)
+      request, staleToken: staleToken, clearsPasskeyRequirement: clearsPasskeyRequirement,
+      makeRetry: makeRetry)
     try decodeVoidResponse(status: status)
   }
 
@@ -1118,8 +1178,7 @@ public actor MobileAPIClient: VaultUnlockDataSource {
       // Map the server's quota-exhaustion envelope to a dedicated case so the UI
       // can show an actionable message. Keyed off the body `error` code (not the
       // HTTP status) so unrelated 403s still surface as .serverError.
-      if let envelope = try? JSONDecoder().decode(APIErrorEnvelope.self, from: data),
-         envelope.error == "QUOTA_EXCEEDED" {
+      if apiErrorCode(from: data) == APIErrorCode.quotaExceeded {
         throw MobileAPIError.quotaExceeded
       }
       throw MobileAPIError.serverError(status: status)
@@ -1143,12 +1202,6 @@ public actor MobileAPIClient: VaultUnlockDataSource {
 
 private struct CreateEntryResponse: Decodable {
   let id: String
-}
-
-/// Minimal error envelope used to detect server error codes on non-2xx
-/// responses. Extra fields (resource/current/max) are ignored by JSONDecoder.
-private struct APIErrorEnvelope: Decodable {
-  let error: String
 }
 
 /// Response shape for GET/PUT /api/mobile/favicon-pref.

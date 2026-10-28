@@ -25,6 +25,9 @@ public enum AuthError: Error, Equatable {
   /// A plain retriable error — NOT an identity change.
   case serverUnavailable
   case storeFailed
+  /// The server refused sign-in because the tenant requires a passkey this
+  /// member has not registered (`passwd-sso://auth/callback?error=passkey_required`).
+  case passkeyRequired
 }
 
 // MARK: - Coordinator
@@ -134,8 +137,15 @@ public actor AuthCoordinator {
       presentationContext: presentationContext
     )
 
-    let (code, receivedState) = try parseCallback(url: callbackURL)
-    guard receivedState == state else { throw AuthError.stateMismatch }
+    let code: String
+    do {
+      code = try Self.parseCallback(url: callbackURL, expectedState: state)
+    } catch AuthError.passkeyRequired {
+      // Same refusal as a bearer call's 403 — record it so the app-level
+      // notice offers the passkey page.
+      PasskeyRequirementStore().markRequired()
+      throw AuthError.passkeyRequired
+    }
 
     let signer = SecureEnclaveDPoPSigner(key: privateKey)
     let apiClient = MobileAPIClient(
@@ -305,17 +315,26 @@ public actor AuthCoordinator {
     return url
   }
 
-  /// Parse `code` and `state` from the Universal Link redirect URL.
-  private func parseCallback(url: URL) throws -> (code: String, state: String) {
-    guard
-      let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-      let code = components.queryItems?.first(where: { $0.name == "code" })?.value,
-      let state = components.queryItems?.first(where: { $0.name == "state" })?.value,
-      !code.isEmpty, !state.isEmpty
-    else {
-      throw AuthError.webAuthFailed("callback URL missing code or state")
+  /// Parse the bridge `code` from the callback URL, after checking its `state`
+  /// against the one this sign-in sent. The authorize route's passkey gate
+  /// redirects with `error=passkey_required` (and the echoed `state`) instead
+  /// of a code; that is surfaced as its own error, not a malformed callback —
+  /// but only once `state` matches, so a callback this app did not start
+  /// cannot plant the passkey notice.
+  static func parseCallback(url: URL, expectedState: String) throws -> String {
+    let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+    func value(_ name: String) -> String? { items.first(where: { $0.name == name })?.value }
+    guard let state = value("state"), !state.isEmpty else {
+      throw AuthError.webAuthFailed("callback URL missing state")
     }
-    return (code, state)
+    guard state == expectedState else { throw AuthError.stateMismatch }
+    if value("error") == "passkey_required" {
+      throw AuthError.passkeyRequired
+    }
+    guard let code = value("code"), !code.isEmpty else {
+      throw AuthError.webAuthFailed("callback URL missing code")
+    }
+    return code
   }
 
   private func secureRandom(count: Int) throws -> Data {
@@ -335,6 +354,8 @@ extension AuthError: LocalizedError {
       return "The server identity could not be verified. Check the server URL or certificate."
     case .serverUnavailable:
       return "Could not reach the server. Check your connection and try again."
+    case .passkeyRequired:
+      return L10n.string("Your organization requires a passkey. Register one in your browser, then sign in again.")
     default:
       return "Sign-in could not be completed."
     }

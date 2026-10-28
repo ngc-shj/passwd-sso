@@ -61,6 +61,12 @@ struct RootView: View {
   /// unlocked). A `bump()` re-runs `body`, which re-reads `languageLocale`.
   @ObservedObject private var languageRefresh = LanguageRefresh.shared
 
+  /// Whether the server refuses this member until they register a passkey.
+  /// Raises the alert below whenever it turns on, in any app state.
+  @ObservedObject private var passkeyRequirement = PasskeyRequirementMonitor.shared
+  @State private var isShowingPasskeyAlert = false
+  @Environment(\.openURL) private var openURL
+
   /// The override locale for the current preference. Reads `languageRefresh.token`
   /// so this value (and thus the `.environment(\.locale,)` it feeds) changes on a
   /// bump, forcing the subtree — including the presented sheet — to re-evaluate.
@@ -193,6 +199,22 @@ struct RootView: View {
     // `\.locale` environment propagates the invalidation into descendants
     // (including the presented sheet, which inherits the environment).
     .environment(\.locale, languageLocale)
+    .alert("Passkey required", isPresented: $isShowingPasskeyAlert) {
+      Button("Open passkey settings") {
+        passkeyRequirement.openPasskeySettings(using: openURL)
+      }
+      Button("Not now", role: .cancel) {}
+    } message: {
+      Text("Your organization requires a passkey. Until you register one in your browser, passwd-sso can't sync or save changes, and AutoFill can't save new passkeys.")
+    }
+    .onChange(of: passkeyRequirement.isRequired) { _, required in
+      if required { isShowingPasskeyAlert = true }
+    }
+    .onAppear {
+      // A refusal recorded in an earlier run (or by the AutoFill extension)
+      // still holds until a call succeeds — say so at launch too.
+      if passkeyRequirement.isRequired { isShowingPasskeyAlert = true }
+    }
     .task {
       // One-shot launch restoration. Guard on .launching so a later view
       // re-appear does not re-run it.
@@ -318,6 +340,9 @@ struct RootView: View {
           case .failedOffline:
             biometricErrorText = L10n.string(
               "Your session is out of date. Enter your passphrase to unlock.")
+          case .failedPasskeyRequired:
+            biometricErrorText = L10n.string(
+              "Your organization requires a passkey. Register one in your browser, then try again.")
           }
         } catch {
           // A biometric cancel / mismatch shows no banner (stays on passphrase
@@ -424,6 +449,7 @@ struct RootView: View {
     // Whether the sync failed specifically because the session is dead (refresh
     // token expired / replay-revoked). Drives the fail-closed banner choice.
     var sessionExpired = false
+    var passkeyRequired = false
     do {
       syncReport = try await syncService.runSync(
         vaultKey: vaultKey, userId: unlockResult.userId, cacheKey: unlockResult.cacheKey)
@@ -432,6 +458,7 @@ struct RootView: View {
       // cache exists we fall back to it (offline-tolerant); when it does not, the
       // caller fails closed and uses `sessionExpired` to pick the banner.
       sessionExpired = syncFailedSessionExpired(from: error)
+      passkeyRequired = syncFailedPasskeyRequired(from: error)
       // Log only the classified outcome, never the raw error: dumping an arbitrary
       // `Error` to a public log risks leaking a URL / response / internal state the
       // day `runSync` starts throwing a richer error type.
@@ -490,7 +517,7 @@ struct RootView: View {
       // empty vault as success) and let the caller surface an explicit error —
       // "sign in again" for a dead session, "try again" when merely offline.
       appState = .vaultLocked(serverConfig: serverConfig, apiClient: apiClient)
-      return failClosedResult(sessionExpired: sessionExpired)
+      return failClosedResult(sessionExpired: sessionExpired, passkeyRequired: passkeyRequired)
     }
 
     // Recover the authoritative keyVersion from the synced entries when a fresh sync

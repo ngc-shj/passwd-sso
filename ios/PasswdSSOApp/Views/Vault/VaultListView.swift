@@ -44,6 +44,10 @@ struct VaultListView: View {
   @FocusState private var searchFocused: Bool
   @State private var showFavicons: Bool = false
   @Environment(\.scenePhase) private var scenePhase
+  @Environment(\.openURL) private var openURL
+  /// Server refuses this member until a passkey is registered — drives the
+  /// persistent banner (the app-level alert can be dismissed; this cannot).
+  @ObservedObject private var passkeyRequirement = PasskeyRequirementMonitor.shared
 
   /// Why the vault is read-only right now, or `nil` when fully editable. A dead
   /// server session (offline read-only cache) suppresses create/edit affordances
@@ -55,7 +59,9 @@ struct VaultListView: View {
   var body: some View {
     NavigationStack {
       VStack(spacing: 0) {
-        if sessionExpired {
+        if passkeyRequirement.isRequired {
+          passkeyRequiredBanner
+        } else if sessionExpired {
           sessionExpiredBanner
         }
         vaultSwitcher
@@ -274,6 +280,37 @@ struct VaultListView: View {
     .accessibilityHint(Text("Signs out so you can sign in again"))
   }
 
+  /// Persistent banner while the server refuses this member for a missing
+  /// passkey. The vault stays readable from the local cache; tapping opens the
+  /// web passkey page (the same action as the app-level alert).
+  @ViewBuilder private var passkeyRequiredBanner: some View {
+    Button {
+      autoLockService.recordActivity()
+      passkeyRequirement.openPasskeySettings(using: openURL)
+    } label: {
+      HStack(spacing: 8) {
+        Image(systemName: "person.badge.key")
+        VStack(alignment: .leading, spacing: 1) {
+          Text("Passkey required")
+            .font(.subheadline.weight(.semibold))
+          Text("Showing saved items. Register a passkey in your browser to sync and make changes.")
+            .font(.caption)
+        }
+        Spacer(minLength: 0)
+        Image(systemName: "arrow.up.forward.app")
+          .font(.caption.weight(.semibold))
+          .opacity(0.6)
+      }
+      .foregroundStyle(.primary)
+      .padding(.horizontal)
+      .padding(.vertical, 10)
+      .frame(maxWidth: .infinity)
+      .background(.yellow.opacity(0.18))
+    }
+    .buttonStyle(.plain)
+    .accessibilityHint(Text("Opens the passkey settings page in your browser"))
+  }
+
   /// Decrypt + bind a fresh cache: use the unlock-time cacheKey (for team entries)
   /// and load the team directory (for switcher labels), then hand both to the VM.
   private func reload(_ data: CacheData) {
@@ -475,12 +512,21 @@ struct VaultListView: View {
     // queued foreground refresh.
     guard autoLockService.state == .unlocked else { return }
     guard !isSyncing else { return }
+    // The silent foreground refresh waits while a passkey refusal is recorded;
+    // a manual sync is the user acting, so it goes through (and clears the
+    // flag if the passkey has been registered meanwhile).
+    // Re-read first: the AutoFill extension (another process) may have
+    // recorded or cleared a refusal this process was not told about.
+    passkeyRequirement.refresh()
+    if !surfaceErrors, !automaticServerCallsAllowed() { return }
     isSyncing = true
     defer { isSyncing = false }
     // Manual sync is a user action → reset the idle-lock timer. The silent
     // foreground auto-refresh is NOT user interaction, so it must not extend the
     // auto-lock window just because the app returned to the foreground.
     if surfaceErrors { autoLockService.recordActivity() }
+    // From the store, not the monitor: the monitor republishes asynchronously.
+    let passkeyWasRequired = PasskeyRequirementStore().isRequired
     var caught: Error?
     do {
       let report = try await hostSyncService.runSync(
@@ -505,9 +551,7 @@ struct VaultListView: View {
     }
 
     if surfaceErrors, let caught {
-      syncError = (syncFailedSessionExpired(from: caught))
-        ? L10n.string("Your session expired. Lock and unlock to sign in again.")
-        : L10n.string("Couldn't sync. Check your connection and try again.")
+      syncError = manualSyncErrorMessage(error: caught, passkeyWasRequired: passkeyWasRequired)
     }
   }
 

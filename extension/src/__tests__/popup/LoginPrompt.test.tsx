@@ -3,7 +3,8 @@
  */
 import "@testing-library/jest-dom/vitest";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
+import { deferred } from "../helpers/deferred";
 
 const storageMocks = vi.hoisted(() => ({
   getSettings: vi.fn().mockResolvedValue({ serverUrl: "https://vault.example.com" }),
@@ -53,6 +54,44 @@ describe("LoginPrompt", () => {
     expect(
       screen.getByText(/may be asked to re-authenticate/i),
     ).toBeInTheDocument();
+  });
+
+  it("explains the passkey requirement without the re-auth forewarning", async () => {
+    render(<LoginPrompt reason="passkey_required" />);
+
+    expect(await screen.findByText(/organization requires a passkey/i)).toBeInTheDocument();
+    expect(screen.queryByText(/may be asked to re-authenticate/i)).toBeNull();
+  });
+
+  it("opens the web app's passkey page under the configured server URL", async () => {
+    storageMocks.getSettings.mockResolvedValueOnce({ serverUrl: "https://vault.example.com/passwd-sso" });
+    render(<LoginPrompt reason="passkey_required" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Register a passkey" }));
+    expect(chrome.tabs.create).toHaveBeenCalledWith({
+      url: "https://vault.example.com/passwd-sso/dashboard/settings/auth/passkey",
+    });
+  });
+
+  it("control: no passkey button for other disconnect reasons", async () => {
+    render(<LoginPrompt reason="revoked" />);
+
+    await screen.findByText("https://vault.example.com");
+    expect(screen.queryByRole("button", { name: "Register a passkey" })).toBeNull();
+  });
+
+  it("offers no passkey link when the server URL is refused", async () => {
+    // A refused URL leaves nothing new on screen, so wait on the settings read
+    // itself: the component's handler is attached before this test's await, so
+    // it has run once the act settles.
+    const settings = deferred<{ serverUrl: string }>();
+    storageMocks.getSettings.mockReturnValueOnce(settings.promise);
+    render(<LoginPrompt reason="passkey_required" />);
+    await act(async () => {
+      settings.resolve({ serverUrl: "http://server.example" });
+      await settings.promise;
+    });
+    expect(screen.queryByRole("button", { name: "Register a passkey" })).toBeNull();
   });
 
   it("maps timeout_logout to the expired framing", async () => {

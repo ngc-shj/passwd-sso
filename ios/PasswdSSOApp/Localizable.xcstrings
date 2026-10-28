@@ -338,6 +338,91 @@
         }
       }
     },
+    "Not now" : {
+      "comment" : "Alert button: dismiss without opening the passkey settings page.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not now"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "後で"
+          }
+        }
+      }
+    },
+    "Open passkey settings" : {
+      "comment" : "Alert button: opens the web app's passkey settings page in the browser.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open passkey settings"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "パスキー設定を開く"
+          }
+        }
+      }
+    },
+    "Opens the passkey settings page in your browser" : {
+      "comment" : "Accessibility hint for the passkey-required banner.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Opens the passkey settings page in your browser"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ブラウザでパスキー設定ページを開きます"
+          }
+        }
+      }
+    },
+    "Passkey required" : {
+      "comment" : "Alert and banner title: the organization requires a passkey for this account.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Passkey required"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "パスキーが必要です"
+          }
+        }
+      }
+    },
+    "Showing saved items. Register a passkey in your browser to sync and make changes." : {
+      "comment" : "Vault list banner while the server refuses this account until a passkey is registered.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Showing saved items. Register a passkey in your browser to sync and make changes."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存済みの項目を表示しています。同期や変更を行うには、ブラウザでパスキーを登録してください。"
+          }
+        }
+      }
+    },
     "Sign in again to create entries" : {
       "localizations" : {
         "en" : {
@@ -2901,6 +2986,74 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "保管庫の項目数が上限に達しました。不要な項目を削除してから、もう一度お試しください。"
+          }
+        }
+      }
+    },
+    "Your organization requires a passkey. Register one in your browser to save changes." : {
+      "comment" : "Save error when the server refuses this account until a passkey is registered on the web.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your organization requires a passkey. Register one in your browser to save changes."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "組織の設定によりパスキーが必要です。変更を保存するには、ブラウザでパスキーを登録してください。"
+          }
+        }
+      }
+    },
+    "Your organization requires a passkey. Register one in your browser, then sign in again." : {
+      "comment" : "Sign-in error when the server refuses sign-in until a passkey is registered on the web.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your organization requires a passkey. Register one in your browser, then sign in again."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "組織の設定によりパスキーが必要です。ブラウザでパスキーを登録してから、もう一度サインインしてください。"
+          }
+        }
+      }
+    },
+    "Your organization requires a passkey. Register one in your browser, then try again." : {
+      "comment" : "Unlock / sync error when the server refuses this account until a passkey is registered on the web.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your organization requires a passkey. Register one in your browser, then try again."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "組織の設定によりパスキーが必要です。ブラウザでパスキーを登録してから、もう一度お試しください。"
+          }
+        }
+      }
+    },
+    "Your organization requires a passkey. Until you register one in your browser, passwd-sso can't sync or save changes, and AutoFill can't save new passkeys." : {
+      "comment" : "Alert message explaining the passkey requirement.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your organization requires a passkey. Until you register one in your browser, passwd-sso can't sync or save changes, and AutoFill can't save new passkeys."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "組織の設定によりパスキーが必要です。ブラウザでパスキーを登録するまで、passwd-sso では同期や変更の保存ができず、AutoFill で新しいパスキーを保存することもできません。"
           }
         }
       }

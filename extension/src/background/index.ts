@@ -52,6 +52,7 @@ import {
   resetInMemoryKeyCache,
 } from "../lib/dpop-key";
 import { swFetchAuthenticated } from "./dpop-fetch";
+import { isPasskeyRequiredResponse } from "../lib/passkey-required";
 import {
   injectContentBundleAndResend,
   injectFillBundleInto,
@@ -489,9 +490,29 @@ function clearToken(reason: DisconnectReason = DISCONNECT_REASON.MANUAL): void {
   clearTenantPolicy();
   clearVault();
   chrome.alarms.clear(ALARM_TOKEN_REFRESH);
+  // A TTL alarm left armed would fire later and overwrite `reason` with EXPIRED.
+  chrome.alarms.clear(ALARM_TOKEN_TTL);
   clearSession().catch(() => {});
   void recordDisconnectReason(reason);
   void updateBadge();
+}
+
+/**
+ * End the connection `generation` names because the server answered
+ * PASSKEY_REQUIRED. Every later call — refreshes included — would get the same
+ * refusal until the user registers a passkey, so keeping the token would only
+ * leave the extension looking connected while nothing works. The recorded
+ * reason makes the popup say why and link to the passkey page; reconnecting
+ * after registering clears it (applyToken). The token is revoked best-effort
+ * (self-revocation is exempt from the passkey gate), since it would otherwise
+ * come back to life, unheld, once a passkey is registered.
+ */
+function endConnectionForPasskeyRequirement(generation: number): void {
+  // A reconnect since the refused request belongs to a different connection.
+  if (connectionGeneration !== generation || currentToken === null) return;
+  const token = currentToken;
+  clearToken(DISCONNECT_REASON.PASSKEY_REQUIRED);
+  void revokeTokenOnServerWith({ getCurrentToken: () => token });
 }
 
 /**
@@ -720,6 +741,10 @@ async function hydrateFromSession(): Promise<void> {
     // still explains the disconnect.
     await clearSession();
     await recordDisconnectReason(DISCONNECT_REASON.EXPIRED);
+    // The TTL alarm that woke this SW no-ops without a token, so the badge left
+    // from before suspension would keep showing "connected".
+    chrome.alarms.clear(ALARM_TOKEN_REFRESH);
+    void updateBadge();
     return;
   }
 
@@ -839,6 +864,7 @@ function scheduleRefreshAlarm(expiresAt: number): void {
 }
 
 async function attemptTokenRefresh(): Promise<void> {
+  const generation = connectionGeneration;
   await attemptTokenRefreshWith({
     getCurrentToken: () => currentToken,
     getTokenExpiresAt: () => tokenExpiresAt,
@@ -854,6 +880,7 @@ async function attemptTokenRefresh(): Promise<void> {
     // A refresh that the server rejects (401/403/404) means the session is no
     // longer valid — record it as REVOKED, not the default MANUAL.
     clearToken: () => clearToken(DISCONNECT_REASON.REVOKED),
+    endForPasskeyRequirement: () => endConnectionForPasskeyRequirement(generation),
     scheduleRefreshAlarm,
     createTtlAlarm: (when) => {
       chrome.alarms.create(ALARM_TOKEN_TTL, { when });
@@ -1159,7 +1186,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   // refresh entirely.
   (async () => {
     await hydrationPromise;
-    if (alarm.name === ALARM_TOKEN_TTL) {
+    // No token: the connection already ended and recorded its own reason (a
+    // clear that raced the alarm's removal); EXPIRED would overwrite it.
+    if (alarm.name === ALARM_TOKEN_TTL && currentToken !== null) {
       clearToken(DISCONNECT_REASON.EXPIRED);
     }
     if (alarm.name === ALARM_VAULT_LOCK) {
@@ -1407,6 +1436,21 @@ async function swFetch(
   init?: RequestInit,
   opts: { epoch?: number } = {},
 ): Promise<Response> {
+  const generation = connectionGeneration;
+  const res = await swFetchWithExpiryRetry(path, init, opts);
+  // The caller still sees the 403 and fails its request as before; ending the
+  // connection is what stops the next ones.
+  if (await isPasskeyRequiredResponse(res)) {
+    endConnectionForPasskeyRequirement(generation);
+  }
+  return res;
+}
+
+async function swFetchWithExpiryRetry(
+  path: string,
+  init: RequestInit | undefined,
+  opts: { epoch?: number },
+): Promise<Response> {
   const assertFresh = () => {
     if (opts.epoch !== undefined) assertVaultEpoch(opts.epoch);
   };
@@ -1483,6 +1527,7 @@ async function swFetch(
  */
 async function recordUnlockPresence(authHash: string, epoch: number): Promise<void> {
   if (!currentToken) return;
+  const generation = connectionGeneration;
   try {
     const { serverUrl } = await getSettings();
     // The hash proves the unlock this epoch committed; after a lock or a
@@ -1511,6 +1556,8 @@ async function recordUnlockPresence(authHash: string, epoch: number): Promise<vo
       warnBackground("vault-unlock-verify-mismatch", "unknown");
     } else if (res.status === 401) {
       warnBackground("vault-unlock-verify-token-failure", "unknown");
+    } else if (await isPasskeyRequiredResponse(res)) {
+      endConnectionForPasskeyRequirement(generation);
     } else if (res.status === 403) {
       warnBackground("vault-unlock-verify-account-locked", "unknown");
     } else if (res.status === 429) {
@@ -2670,7 +2717,6 @@ async function handleMessage(
     case EXT_MSG.CLEAR_TOKEN: {
       await revokeCurrentTokenOnServer();
       clearToken(DISCONNECT_REASON.MANUAL);
-      chrome.alarms.clear(ALARM_TOKEN_TTL);
       sendResponse({ type: EXT_MSG.CLEAR_TOKEN, ok: true });
       return;
     }

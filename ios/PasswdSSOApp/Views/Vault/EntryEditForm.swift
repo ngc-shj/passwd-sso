@@ -239,6 +239,9 @@ struct EntryForm: View {
     if syncFailedSessionExpired(from: error) {
       return L10n.string("Your session has expired. Sign in again to save your changes.")
     }
+    if syncFailedPasskeyRequired(from: error) {
+      return L10n.string("Your organization requires a passkey. Register one in your browser to save changes.")
+    }
     if (error as? MobileAPIError) == .quotaExceeded {
       return L10n.string("You've reached your vault's item limit. Remove unused items and try again.")
     }

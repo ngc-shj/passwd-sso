@@ -5,11 +5,13 @@ import Shared
 final class PasskeyRegistrationOutcomeTests: XCTestCase {
   private func outcome(
     alg: Bool = true, vault: Bool = true, crypto: Bool = true,
-    token: Bool = true, uploadedId: String? = "e1", expected: String = "e1"
+    token: Bool = true, uploadedId: String? = "e1", expected: String = "e1",
+    passkeyRequired: Bool = false
   ) -> PasskeyRegistrationDecision {
     passkeyRegistrationOutcome(
       algorithmSupported: alg, vaultUnlocked: vault, cryptoSucceeded: crypto,
-      hasUploadToken: token, uploadedEntryId: uploadedId, expectedEntryId: expected
+      hasUploadToken: token, uploadedEntryId: uploadedId, expectedEntryId: expected,
+      passkeyRequired: passkeyRequired
     )
   }
 
@@ -39,6 +41,26 @@ final class PasskeyRegistrationOutcomeTests: XCTestCase {
 
   func testIdMismatchCancels() {
     XCTAssertEqual(outcome(uploadedId: "other", expected: "e1"), .cancel(.idMismatch))
+  }
+
+  // MARK: - PASSKEY_REQUIRED (the only cancel the extension explains)
+
+  /// The host's token mint was refused → no token, and the reason is known.
+  func testNoTokenAfterPasskeyRefusalCancelsAsPasskeyRequired() {
+    XCTAssertEqual(outcome(token: false, passkeyRequired: true), .cancel(.passkeyRequired))
+  }
+
+  /// This upload was refused with PASSKEY_REQUIRED.
+  func testUploadRefusedForPasskeyCancelsAsPasskeyRequired() {
+    XCTAssertEqual(outcome(uploadedId: nil, passkeyRequired: true), .cancel(.passkeyRequired))
+  }
+
+  /// The reason never turns into a credential and never hides an earlier failure.
+  func testPasskeyReasonDoesNotOverrideOtherOutcomes() {
+    XCTAssertEqual(outcome(passkeyRequired: true), .complete)
+    XCTAssertEqual(outcome(vault: false, token: false, passkeyRequired: true), .cancel(.vaultLocked))
+    XCTAssertEqual(
+      outcome(uploadedId: "other", expected: "e1", passkeyRequired: true), .cancel(.idMismatch))
   }
 
   /// Precedence: an earlier failure wins even if a later input would also fail

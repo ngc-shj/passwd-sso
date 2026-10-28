@@ -134,7 +134,7 @@ final class BackgroundSyncRunner: @unchecked Sendable {
       return
     }
     let cacheKey = cacheKeyProvider()
-    do {
+    let attempt = await Self.attempt(passkeyRequirement: PasskeyRequirementStore()) {
       let report = try await service.runSync(vaultKey: key, userId: uid, cacheKey: cacheKey)
       // Re-register QuickType identities so team entries appear after a background
       // refresh (not only after returning to the foreground). Personal + team.
@@ -143,14 +143,42 @@ final class BackgroundSyncRunner: @unchecked Sendable {
           from: cacheData, vaultKey: key, userId: uid,
           cacheKey: cacheKey, wrappedKeyStore: AppGroupWrappedKeyStore())
       }
-      box.task.setTaskCompleted(success: true)
+    }
+    box.task.setTaskCompleted(success: attempt.success)
+    if attempt.reschedule {
       BackgroundSyncTask.scheduleNext()
+    }
+  }
+
+  /// Result of one background sync attempt: whether the BGTask succeeded and
+  /// whether to queue the next one.
+  struct Attempt: Equatable {
+    let success: Bool
+    let reschedule: Bool
+  }
+
+  /// One background sync, separated from BGTask so the retry decision is
+  /// testable. Neither a dead session (authenticationRequired) nor a passkey
+  /// refusal recovers by retrying, so neither reschedules; while a passkey
+  /// refusal is recorded the sync is not even attempted (no request). The
+  /// next foreground (`.background` → `scheduleNext`) queues a task again,
+  /// which skips the same way until the user acts or a call succeeds.
+  static func attempt(
+    passkeyRequirement: PasskeyRequirementStore,
+    sync: () async throws -> Void
+  ) async -> Attempt {
+    guard automaticServerCallsAllowed(store: passkeyRequirement) else {
+      return Attempt(success: false, reschedule: false)
+    }
+    do {
+      try await sync()
+      return Attempt(success: true, reschedule: true)
     } catch MobileAPIError.authenticationRequired {
-      // Refresh token is dead — do not reschedule; a dead token won't recover by retrying.
-      box.task.setTaskCompleted(success: false)
+      return Attempt(success: false, reschedule: false)
+    } catch MobileAPIError.passkeyRequired {
+      return Attempt(success: false, reschedule: false)
     } catch {
-      box.task.setTaskCompleted(success: false)
-      BackgroundSyncTask.scheduleNext()
+      return Attempt(success: false, reschedule: true)
     }
   }
 }

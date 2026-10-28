@@ -97,6 +97,9 @@ public enum UnlockedResult: Equatable {
   case reachedVault
   case failedSessionExpired
   case failedOffline
+  /// The resync was refused because the tenant requires a passkey — neither the
+  /// passphrase nor a re-sign-in helps, so neither banner fits.
+  case failedPasskeyRequired
 }
 
 /// Classify an unlock-time `runSync` error: `true` only when the session is dead
@@ -105,6 +108,14 @@ public enum UnlockedResult: Equatable {
 /// (offline, transient server, decode) is `false` — a recoverable/offline failure.
 public func syncFailedSessionExpired(from error: Error) -> Bool {
   if case MobileAPIError.authenticationRequired = error { return true }
+  return false
+}
+
+/// Classify a `runSync` (or save) error: `true` only for the server's
+/// passkey-requirement refusal. Distinct from a dead session — the tokens are
+/// still valid, so this must not drive the "sign in again" banner.
+public func syncFailedPasskeyRequired(from error: Error) -> Bool {
+  if case MobileAPIError.passkeyRequired = error { return true }
   return false
 }
 
@@ -133,8 +144,25 @@ public func sessionBannerTransition(syncError error: Error?) -> SessionBannerTra
 /// Map a fail-closed unlock (sync failed with no trustworthy local cache) to the
 /// banner outcome: a dead session routes to "sign in again", a mere offline failure
 /// to "try again with your passphrase".
-public func failClosedResult(sessionExpired: Bool) -> UnlockedResult {
-  sessionExpired ? .failedSessionExpired : .failedOffline
+public func failClosedResult(sessionExpired: Bool, passkeyRequired: Bool = false) -> UnlockedResult {
+  if passkeyRequired { return .failedPasskeyRequired }
+  return sessionExpired ? .failedSessionExpired : .failedOffline
+}
+
+/// The alert text for a failed MANUAL sync (button / pull-to-refresh), or nil
+/// for no alert. `passkeyWasRequired` is the recorded refusal read BEFORE the
+/// sync: a NEW passkey refusal raises the app-level alert instead (two alerts
+/// at once would drop one), while a repeated one changes nothing there, so the
+/// sync alert answers it.
+public func manualSyncErrorMessage(error: Error, passkeyWasRequired: Bool) -> String? {
+  if syncFailedPasskeyRequired(from: error) {
+    return passkeyWasRequired
+      ? L10n.string("Your organization requires a passkey. Register one in your browser, then try again.")
+      : nil
+  }
+  return syncFailedSessionExpired(from: error)
+    ? L10n.string("Your session expired. Lock and unlock to sign in again.")
+    : L10n.string("Couldn't sync. Check your connection and try again.")
 }
 
 /// Why a vault view is read-only. The mutating-control affordance differs by

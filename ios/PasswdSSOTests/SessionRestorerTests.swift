@@ -85,6 +85,16 @@ final class SessionRestorerTests: XCTestCase {
     guard case .needsUnlock = result else { return XCTFail("expected .needsUnlock, got \(result)") }
   }
 
+  // The refresh was refused for a missing passkey: the tokens are alive and the
+  // cached vault unlocks locally — NOT the dead-session re-sign-in screen (a
+  // re-sign-in would be refused the same way).
+  func testRestore_validatePasskeyRequired_needsUnlock() async {
+    let result = await makeRestorer(
+      loadConfig: { [config] in config }, validate: { _ in .passkeyRequired }
+    ).restore()
+    guard case .needsUnlock = result else { return XCTFail("expected .needsUnlock, got \(result)") }
+  }
+
   func testRestore_validateDead_needsReauth() async {
     let result = await makeRestorer(loadConfig: { [config] in config }, validate: { _ in .dead }).restore()
     guard case .needsReauth = result else { return XCTFail("expected .needsReauth, got \(result)") }

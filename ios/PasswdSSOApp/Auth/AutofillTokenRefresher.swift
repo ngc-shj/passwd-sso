@@ -77,6 +77,7 @@ public struct AutofillTokenRefresher: Sendable {
     case .serverError(let status): return "serverError(\(status))"
     case .networkError(let urlError): return "networkError(\(urlError.code.rawValue))"
     case .authenticationRequired: return "authenticationRequired"
+    case .passkeyRequired: return "passkeyRequired"
     }
   }
 

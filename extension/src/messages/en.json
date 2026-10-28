@@ -8,6 +8,8 @@
     "signIn": "Allow the connection in passwd-sso to use the extension.",
     "disconnectedExpired": "Your session timed out. Reconnect to continue.",
     "disconnectedRevoked": "You were signed out. Reconnect to continue.",
+    "disconnectedPasskeyRequired": "Your organization requires a passkey. Register one in passwd-sso, then reconnect.",
+    "registerPasskey": "Register a passkey",
     "reauthHint": "You may be asked to re-authenticate (e.g. a passkey) for security.",
     "openApp": "Connect",
     "unlockDescription": "Enter your passphrase to unlock the vault.",
