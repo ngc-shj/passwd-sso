@@ -17,14 +17,16 @@ export interface SessionMeta {
    */
   provider?: string | null;
   /**
-   * Raw token of the session the browser held when it reached an OAuth/OIDC
-   * callback. The callback route strips that cookie so Auth.js signs in fresh
-   * instead of linking to the signed-in user; the session it would have
-   * replaced is deleted inside the transaction that creates the new one
+   * Raw tokens of the sessions the browser held under the configured session
+   * cookie name when it reached an OAuth/OIDC callback — both CHIPS variants
+   * when it holds both. The callback route strips those cookies so Auth.js
+   * signs in fresh instead of linking to the signed-in user, and the sign-in
+   * response deletes both variants; the sessions they named are deleted
+   * inside the transaction that creates the new one
    * (`createSessionUnderConcurrencyCap`), before the concurrent-session cap
-   * counts it.
+   * counts them.
    */
-  replacesSessionToken?: string | null;
+  replacesSessionTokens?: readonly string[];
 }
 
 export const sessionMetaStorage = new AsyncLocalStorage<SessionMeta>();

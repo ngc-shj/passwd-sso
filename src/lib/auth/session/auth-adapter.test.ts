@@ -811,7 +811,7 @@ describe("createCustomAdapter", () => {
         mockSessionMetaGetStore.mockReturnValue({
           ip: null,
           userAgent: null,
-          replacesSessionToken: "prev-tok",
+          replacesSessionTokens: ["prev-tok"],
         });
         const rows = sessionRows();
 

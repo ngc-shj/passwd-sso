@@ -36,8 +36,8 @@ export type CappedSessionInput = {
   provider: string | null;
   passkeyVerifiedAt?: Date;
   authCredentialId?: string;
-  /** Raw token of a session this sign-in replaces; deleted before the cap counts. */
-  replacesSessionToken?: string;
+  /** Raw tokens of the sessions this sign-in replaces; deleted before the cap counts. */
+  replacesSessionTokens?: readonly string[];
 };
 
 export type SessionEviction = {
@@ -76,23 +76,23 @@ export async function createSessionUnderConcurrencyCap(
   // (attachments, vault rotate-key).
   await advisoryXactLock(tx, input.userId);
 
-  // The session this sign-in replaces is not one of the user's other devices:
-  // delete it before counting, or at the cap it would push out a session that
-  // is still in use. It may belong to another user (a sign-in that switches
-  // users), and may already be gone.
+  // The sessions this sign-in replaces are not the user's other devices:
+  // delete them before counting, or at the cap they would push out a session
+  // that is still in use. They may belong to another user (a sign-in that
+  // switches users), and may already be gone.
   let replacedOwnSession = false;
-  if (input.replacesSessionToken) {
-    const digest = hashSessionToken(input.replacesSessionToken);
+  for (const token of input.replacesSessionTokens ?? []) {
+    const digest = hashSessionToken(token);
     const replaced = await tx.session.findUnique({
       where: { sessionToken: digest },
       select: { userId: true, expires: true },
     });
-    if (replaced) {
-      await tx.session.deleteMany({ where: { sessionToken: digest } });
-      // Only a live session proves the browser is a known device; an expired
-      // row lingers until the retention sweep removes it.
-      replacedOwnSession =
-        replaced.userId === input.userId && replaced.expires > new Date();
+    if (!replaced) continue;
+    await tx.session.deleteMany({ where: { sessionToken: digest } });
+    // Only a live session proves the browser is a known device; an expired
+    // row lingers until the retention sweep removes it.
+    if (replaced.userId === input.userId && replaced.expires > new Date()) {
+      replacedOwnSession = true;
     }
   }
 
@@ -236,8 +236,9 @@ export async function createCappedSession(
     BYPASS_GRANT.AUTH_SESSION_CAPPING,
   );
 
-  if (input.replacesSessionToken) {
-    await invalidateCachedSessions([hashSessionToken(input.replacesSessionToken)]);
+  const replacedTokens = input.replacesSessionTokens ?? [];
+  if (replacedTokens.length > 0) {
+    await invalidateCachedSessions(replacedTokens.map((token) => hashSessionToken(token)));
   }
 
   // Fire-and-forget: check for new device and notify user. A browser that

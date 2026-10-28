@@ -560,7 +560,7 @@ export function createCustomAdapter(): Adapter {
         userAgent: meta?.userAgent ?? null,
         acceptLanguage: meta?.acceptLanguage ?? null,
         provider: meta?.provider ?? null,
-        replacesSessionToken: meta?.replacesSessionToken ?? undefined,
+        replacesSessionTokens: meta?.replacesSessionTokens,
       });
 
       return {

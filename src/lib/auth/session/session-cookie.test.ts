@@ -9,6 +9,7 @@ import { ALL_KNOWN_SESSION_COOKIE_NAMES } from "./cookie-name";
 import {
   hasAnySessionCookie,
   parseCookiePairs,
+  presentedSessionTokens,
   readSessionCookie,
   SESSION_COOKIE_READ,
 } from "./session-cookie";
@@ -171,6 +172,61 @@ describe("readSessionCookie", () => {
     expect(
       readSessionCookie(`__Host-authjs.session-token=${TOKEN_A}; __Secure-authjs.session-token=${TOKEN_B}`),
     ).toEqual(token(TOKEN_B));
+  });
+});
+
+describe("presentedSessionTokens", () => {
+  const P = "__Host-authjs.session-token";
+  const LEGACY = "next-auth.session-token";
+
+  it("returns every duplicate of a name in header order, not only the first", () => {
+    expect(presentedSessionTokens(`${P}=${TOKEN_A}; other=x; ${P}=${TOKEN_B}`, [P])).toEqual([
+      TOKEN_A,
+      TOKEN_B,
+    ]);
+  });
+
+  it("collects across the names it is given and ignores the rest", () => {
+    expect(
+      presentedSessionTokens(`${LEGACY}=${TOKEN_A}; ${N}=${TOKEN_B}`, ALL_KNOWN_SESSION_COOKIE_NAMES),
+    ).toEqual([TOKEN_A, TOKEN_B]);
+    expect(presentedSessionTokens(`${LEGACY}=${TOKEN_A}; ${N}=${TOKEN_B}`, [N])).toEqual([TOKEN_B]);
+  });
+
+  it("returns a token once when it repeats", () => {
+    expect(presentedSessionTokens(`${P}=${TOKEN_A}; ${P}=${TOKEN_A}`, [P])).toEqual([TOKEN_A]);
+  });
+
+  // A chunk was never written by Auth.js under the database strategy; it is
+  // what makes a header ambiguous, never a token to revoke.
+  it("skips a chunk or other prefixed key", () => {
+    expect(presentedSessionTokens(`${P}.0=${TOKEN_A}; ${P}X=${TOKEN_B}`, [P])).toEqual([]);
+  });
+
+  it.each([
+    ["%-encoded", `${encodeURIComponent(TOKEN_A).replaceAll("-", "%2D")}`],
+    ["quoted", `"${TOKEN_A}"`],
+    ["uppercase", TOKEN_A.toUpperCase()],
+    ["empty", ""],
+  ])("skips a value outside the token alphabet (%s)", (_label, value) => {
+    expect(presentedSessionTokens(`${P}=${value}; ${P}=${TOKEN_B}`, [P])).toEqual([TOKEN_B]);
+  });
+
+  it("stops at a lower limit when the caller gives one", () => {
+    expect(presentedSessionTokens(`${P}=${TOKEN_A}; ${P}=${TOKEN_B}; ${P}=0-${TOKEN_A}`, [P], 2)).toEqual([
+      TOKEN_A,
+      TOKEN_B,
+    ]);
+  });
+
+  it("returns nothing for a missing header", () => {
+    expect(presentedSessionTokens(null, [P])).toEqual([]);
+  });
+
+  it("stops at 16 distinct tokens", () => {
+    const tokens = Array.from({ length: 20 }, (_, i) => `${i.toString(16)}-${TOKEN_A}`);
+    const header = tokens.map((t) => `${P}=${t}`).join("; ");
+    expect(presentedSessionTokens(header, [P])).toEqual(tokens.slice(0, 16));
   });
 });
 

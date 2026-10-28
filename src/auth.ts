@@ -910,7 +910,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       // createSession can record Session.provider for AAL3 enforcement.
       // The meta object is the innermost sessionMetaStorage.run: the one
       // withSessionMeta establishes, or on a callback that carried a session
-      // cookie, the copy the callback wrapper makes with replacesSessionToken
+      // cookie, the copy the callback wrapper makes with replacesSessionTokens
       // (the outer store does not see this mutation). AsyncLocalStorage
       // returns the same reference throughout the handler, so mutating it is
       // the intended pattern.

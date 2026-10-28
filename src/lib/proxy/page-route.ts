@@ -16,8 +16,13 @@ import {
   configuredSessionCookieName,
   isSecureCookieFromAuthUrl,
 } from "../auth/session/cookie-name";
+import { sessionCookieDeletionLine } from "../auth/session/session-cookie-variants";
+import { revokePresentedSessions } from "../auth/session/revoke-presented-sessions";
+import { logAuditAsync, personalAuditBase } from "../audit/audit";
+import { AUDIT_ACTION } from "../constants/audit/audit";
 import {
   parseCookiePairs,
+  presentedSessionTokens,
   readSessionCookie,
   SESSION_COOKIE_READ,
 } from "../auth/session/session-cookie";
@@ -58,6 +63,9 @@ function pageBlockedPath(pathWithoutLocale: string): string {
   return pathWithoutLocale.startsWith("/admin") ? "PAGE /admin" : "PAGE /dashboard";
 }
 
+/** The CHIPS pair: the configured cookie, partitioned and unpartitioned. */
+const REFUSAL_REVOKE_LIMIT = 2;
+
 function clearAuthSessionCookies(
   response: NextResponse,
   basePath: string = "",
@@ -96,15 +104,7 @@ function clearAuthSessionCookies(
   // ResponseCookies holds one entry per name, so the unpartitioned deletion is
   // returned as a raw header for the caller to append after the last
   // `response.cookies` write, which would otherwise rewrite it away.
-  const unpartitioned = new NextResponse(null);
-  unpartitioned.cookies.delete({
-    name: configuredName,
-    path: cookiePath,
-    secure: useSecureCookies,
-    httpOnly: true,
-    sameSite: "lax",
-  });
-  return unpartitioned.headers.getSetCookie();
+  return [sessionCookieDeletionLine(configuredName, basePath, false)];
 }
 
 /**
@@ -164,11 +164,46 @@ export async function handlePageRoute(
       signInUrl.pathname = `/${locale}/auth/signin`;
       signInUrl.searchParams.set("callbackUrl", `${basePath}${request.nextUrl.pathname}${request.nextUrl.search}`);
       const redirectResponse = NextResponse.redirect(signInUrl);
+      const cookieHeader = request.headers.get("cookie");
       const unpartitionedDeletions = clearAuthSessionCookies(
         redirectResponse,
         basePath,
-        ambiguousSessionCookieNames(request.headers.get("cookie")),
+        ambiguousSessionCookieNames(cookieHeader),
       );
+      // The refusal deletes the configured cookie in both CHIPS variants, so
+      // the sessions those two cookies named would stay alive server-side
+      // with no browser holding them; revoke them. Only the configured name:
+      // the legacy names are deleted as leftovers from before a configuration
+      // change and are never authenticated by the current one. At most two
+      // tokens, the CHIPS pair this exists for — this runs on any
+      // unauthenticated navigation, unthrottled, so it must not become a
+      // larger write per request. No ownership check: the browser holds each
+      // raw token, which already lets it sign that session out. Not awaited:
+      // the redirect waits on neither the write nor its failure, as with the
+      // passkey-block audit below. A refusal is not a logout, so a session it
+      // ended is audited as SESSION_REVOKE (not AUTH_LOGOUT), once per user
+      // among the rows actually deleted — at most the two above, so the
+      // writes are bounded by real sessions, not by the request.
+      void revokePresentedSessions(
+        presentedSessionTokens(
+          cookieHeader,
+          [configuredSessionCookieName()],
+          REFUSAL_REVOKE_LIMIT,
+        ),
+      ).then(async (revoked) => {
+        for (const userId of new Set(revoked.map((row) => row.userId))) {
+          await logAuditAsync({
+            ...personalAuditBase(request, userId),
+            action: AUDIT_ACTION.SESSION_REVOKE,
+            metadata: { reason: "page_refusal" },
+          });
+        }
+      }).catch((err: unknown) => {
+        getLogger().error({
+          msg: "page-route: revoking or auditing the refused session cookies failed",
+          error: errorLogFields(err),
+        });
+      });
       const securedResponse = applySecurityHeaders(redirectResponse, options, basePath);
       for (const line of unpartitionedDeletions) {
         securedResponse.headers.append("set-cookie", line);

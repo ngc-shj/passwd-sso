@@ -1,7 +1,8 @@
 import { NextRequest } from "next/server";
 import { handlers } from "@/auth";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { extractRequestMeta } from "@/lib/audit/audit";
+import { extractRequestMeta, logAuditAsync } from "@/lib/audit/audit";
+import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { sessionMetaStorage } from "@/lib/auth/session/session-meta";
 import { tenantClaimStorage } from "@/lib/tenant/tenant-claim-storage";
 import { createRateLimiter } from "@/lib/security/rate-limit";
@@ -9,12 +10,23 @@ import { extractClientIp } from "@/lib/auth/policy/ip-access";
 import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
-import { ALL_KNOWN_SESSION_COOKIE_NAMES } from "@/lib/auth/session/cookie-name";
+import {
+  ALL_KNOWN_SESSION_COOKIE_NAMES,
+  configuredSessionCookieName,
+} from "@/lib/auth/session/cookie-name";
 import {
   parseCookiePairs,
+  presentedSessionTokens,
   readSessionCookie,
   SESSION_COOKIE_READ,
 } from "@/lib/auth/session/session-cookie";
+import {
+  deleteOtherSessionCookieVariantFirst,
+  deletesSessionCookie,
+} from "@/lib/auth/session/session-cookie-variants";
+import { revokePresentedSessions } from "@/lib/auth/session/revoke-presented-sessions";
+import { getLogger } from "@/lib/logger";
+import { errorLogFields } from "@/lib/logger/error-fields";
 
 export const runtime = "nodejs";
 
@@ -216,10 +228,12 @@ function withMagicLinkIpRateLimit<H extends RouteHandler>(handler: H): H {
 //
 // A fresh sign-in no longer replaces the session the browser held, as Auth.js
 // would have; it only overwrites the cookie, which would leave that session
-// alive server-side. So the token the request carried rides along in the
-// session meta, and the adapter's createSession deletes that session in the
-// transaction that creates the new one — only once a sign-in succeeds, and
-// before the concurrent-session cap counts it.
+// alive server-side. So the tokens the request carried under the configured
+// name ride along in the session meta — both CHIPS variants when the browser
+// holds both, since the sign-in response deletes the other variant too — and
+// the adapter's createSession deletes those sessions in the transaction that
+// creates the new one — only once a sign-in succeeds, and before the
+// concurrent-session cap counts them. An ambiguous header names none.
 function isSessionCookieKey(key: string): boolean {
   return ALL_KNOWN_SESSION_COOKIE_NAMES.some((name) => key.startsWith(name));
 }
@@ -235,8 +249,10 @@ function withoutSessionCookieOnCallback<H extends RouteHandler>(handler: H): H {
     if (kept.length === pairs.length) {
       return handler(request, ...rest);
     }
-    const read = readSessionCookie(cookie);
-    const previousToken = read.kind === SESSION_COOKIE_READ.TOKEN ? read.token : null;
+    const replacedTokens =
+      readSessionCookie(cookie).kind === SESSION_COOKIE_READ.TOKEN
+        ? presentedSessionTokens(cookie, [configuredSessionCookieName()])
+        : [];
     const headers = new Headers(request.headers);
     if (kept.length > 0) {
       headers.set("cookie", kept.map((pair) => `${pair.key}=${pair.value}`).join("; "));
@@ -251,9 +267,102 @@ function withoutSessionCookieOnCallback<H extends RouteHandler>(handler: H): H {
     });
     const meta = sessionMetaStorage.getStore() ?? extractRequestMeta(request);
     return sessionMetaStorage.run(
-      { ...meta, replacesSessionToken: previousToken },
+      { ...meta, replacesSessionTokens: replacedTokens },
       () => handler(stripped, ...rest),
     );
+  };
+  return wrapped as unknown as H;
+}
+
+// ─── Both CHIPS variants on sign-in and sign-out ─────────────
+//
+// A CHIPS browser can hold the session cookie both partitioned and
+// unpartitioned after a COOKIE_PARTITIONED flip, and sends both, older first.
+// Auth.js reads the first and writes or deletes only the variant its cookie
+// options name. Without help:
+//   - a sign-in's new cookie is shadowed by the older variant whenever that
+//     one still names a valid session, so the user stays on the old session;
+//   - a sign-out revokes the first cookie's session and leaves the other
+//     variant, and its session, alive.
+// So on a callback and on a sign-out, the other variant is deleted right
+// before Auth.js's line for the session cookie (see session-cookie-variants.ts
+// for why before, and why raw). The response is rewritten only when Auth.js
+// wrote that line — a sign-in that succeeded, a sign-out that passed Auth.js's
+// CSRF check and found a session — so a refused request deletes nothing.
+//
+// A sign-out also revokes the session of every configured-name cookie the
+// request carried, once Auth.js's own deletion line shows the sign-out went
+// through (after its CSRF check, with a session cookie present). That runs
+// here, after the handler, not in events.signOut: Auth.js skips the event
+// whenever its own deleteSession throws — as it does when the first cookie's
+// session is already gone — and the second cookie's live session would be
+// orphaned. Only the configured name, both variants: the legacy names are
+// deleted as leftovers from before a configuration change and are never
+// authenticated by the current one. No ownership check: holding a raw token
+// already lets the caller sign that session out by sending it alone (the
+// #966 reasoning). Each session revoked here is audited as AUTH_LOGOUT, as
+// events.signOut audits the one Auth.js revoked. A failed
+// revocation is logged and the sign-out response still goes out: the cookies
+// are deleted either way.
+function isSignOutRoute(pathname: string, method: string): boolean {
+  return (
+    method === "POST" &&
+    authPathReadings(pathname).some(
+      (segs) =>
+        segs.length === 3 && segs[0] === "api" && segs[1] === "auth" && segs[2] === "signout",
+    )
+  );
+}
+
+function withSessionCookieVariants<H extends RouteHandler>(handler: H): H {
+  const wrapped = async (request: NextRequest, ...rest: unknown[]) => {
+    const signOut = isSignOutRoute(request.nextUrl.pathname, request.method);
+    if (!signOut && !isCallbackRoute(request.nextUrl.pathname)) {
+      return handler(request, ...rest);
+    }
+    const response = await handler(request, ...rest);
+    const lines = response.headers.getSetCookie();
+    if (signOut && deletesSessionCookie(lines)) {
+      try {
+        const revoked = await revokePresentedSessions(
+          presentedSessionTokens(request.headers.get("cookie"), [configuredSessionCookieName()]),
+        );
+        // Every row deleted here outlived Auth.js's own sign-out: Auth.js
+        // deletes the first cookie's session before events.signOut audits it,
+        // so that row is already gone when this runs. A row deleted here was
+        // therefore never audited — the first cookie's session was missing
+        // (the event did not fire) or this is another variant's session. One
+        // AUTH_LOGOUT per user, in events.signOut's shape.
+        const meta = sessionMetaStorage.getStore();
+        for (const userId of new Set(revoked.map((row) => row.userId))) {
+          await logAuditAsync({
+            scope: AUDIT_SCOPE.PERSONAL,
+            action: AUDIT_ACTION.AUTH_LOGOUT,
+            userId,
+            ip: meta?.ip ?? null,
+            userAgent: meta?.userAgent ?? null,
+          });
+        }
+      } catch (err) {
+        getLogger().error({
+          msg: "auth.signout: revoking the presented sessions failed",
+          error: errorLogFields(err),
+        });
+      }
+    }
+    const ordered = deleteOtherSessionCookieVariantFirst(
+      lines,
+      process.env.NEXT_PUBLIC_BASE_PATH || "",
+    );
+    if (ordered.length === lines.length) return response;
+    const headers = new Headers(response.headers);
+    headers.delete("set-cookie");
+    for (const line of ordered) headers.append("set-cookie", line);
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
   };
   return wrapped as unknown as H;
 }
@@ -264,11 +373,14 @@ export { withCallbackRateLimit as _withCallbackRateLimit };
 export { withMagicLinkIpRateLimit as _withMagicLinkIpRateLimit };
 export { isCallbackRoute as _isCallbackRoute };
 export { withoutSessionCookieOnCallback as _withoutSessionCookieOnCallback };
+export { withSessionCookieVariants as _withSessionCookieVariants };
 
 export const GET = withRequestLog(
   withSessionMeta(
     withAuthBasePath(
-      withCallbackRateLimit(withoutSessionCookieOnCallback(handlers.GET)),
+      withCallbackRateLimit(
+        withSessionCookieVariants(withoutSessionCookieOnCallback(handlers.GET)),
+      ),
     ),
   ),
 );
@@ -276,7 +388,9 @@ export const POST = withRequestLog(
   withSessionMeta(
     withAuthBasePath(
       withCallbackRateLimit(
-        withMagicLinkIpRateLimit(withoutSessionCookieOnCallback(handlers.POST)),
+        withMagicLinkIpRateLimit(
+          withSessionCookieVariants(withoutSessionCookieOnCallback(handlers.POST)),
+        ),
       ),
     ),
   ),
