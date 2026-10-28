@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.4.78](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.77...passwd-sso-v0.4.78) (2026-10-28)
+
+
+### Features
+
+* **audit:** verify the __system__ audit chain under a named bypass ([#944](https://github.com/ngc-shj/passwd-sso/issues/944)) ([3383b3f](https://github.com/ngc-shj/passwd-sso/commit/3383b3fcb02895a01d59da6b9f5689d802bb5f42))
+* **auth:** bind SSO tenant claims to the provider that presents them ([#957](https://github.com/ngc-shj/passwd-sso/issues/957)) ([dd83368](https://github.com/ngc-shj/passwd-sso/commit/dd83368fbda778d8077b846cd4c62acc03f64ef2))
+* **checks:** read conditional and typed spreads in the bypass relation walk ([#930](https://github.com/ngc-shj/passwd-sso/issues/930)) ([0f4d57c](https://github.com/ngc-shj/passwd-sso/commit/0f4d57ce1f72656dc2fec1fc6a4977fbda630b40))
+* **checks:** reject RLS context nesting, follow bypassed clients across modules, and state the gates as limited aids ([#913](https://github.com/ngc-shj/passwd-sso/issues/913)) ([e6f268e](https://github.com/ngc-shj/passwd-sso/commit/e6f268e5474ddbdde6df7b937613428f2b953d9b))
+* **db:** converge the anchor publisher role on RDS and retire the DCR worker role ([#942](https://github.com/ngc-shj/passwd-sso/issues/942)) ([ec689fb](https://github.com/ngc-shj/passwd-sso/commit/ec689fb851b08b8adec993b03362cc65268f0f7b))
+* **db:** make the SECURITY DEFINER audit functions check the caller's grant ([#931](https://github.com/ngc-shj/passwd-sso/issues/931)) ([a55dfbe](https://github.com/ngc-shj/passwd-sso/commit/a55dfbe9e232a21f26a0d7da74ce86e09c2efb22))
+* **db:** send SCRAM verifiers instead of cleartext role passwords ([#945](https://github.com/ngc-shj/passwd-sso/issues/945)) ([022ca4e](https://github.com/ngc-shj/passwd-sso/commit/022ca4eac217234e8180e21894ab61f5acfba17d))
+* **rls:** name each bypass's tables and fail the outer transaction on refused nesting ([#928](https://github.com/ngc-shj/passwd-sso/issues/928)) ([54e5468](https://github.com/ngc-shj/passwd-sso/commit/54e5468c66740ca0fb872cbd4b706d1bcb55530a))
+* **rls:** put tenants under row level security ([#932](https://github.com/ngc-shj/passwd-sso/issues/932)) ([b7ad540](https://github.com/ngc-shj/passwd-sso/commit/b7ad5404cde7a2db5c8bba58a8905c7c1ec95813))
+* run the audit-anchor publisher and chain verifier on AWS ([#952](https://github.com/ngc-shj/passwd-sso/issues/952)) ([907f6fd](https://github.com/ngc-shj/passwd-sso/commit/907f6fdd4461e1af2421c889a41cbee2c26a29ce))
+
+
+### Bug Fixes
+
+* **audit:** write passkey-block audit rows in-process and tenant-scoped ([#977](https://github.com/ngc-shj/passwd-sso/issues/977)) ([6f19b66](https://github.com/ngc-shj/passwd-sso/commit/6f19b66f48bc28f37c114b231947688ad58b012c))
+* **auth:** clear both CHIPS variants of the session cookie on sign-in and sign-out ([#981](https://github.com/ngc-shj/passwd-sso/issues/981)) ([5c8c689](https://github.com/ngc-shj/passwd-sso/commit/5c8c6899f75c0e1273c940fdb29dfe1260f5da6c))
+* **auth:** enforce the tenant passkey requirement on every bearer use ([#965](https://github.com/ngc-shj/passwd-sso/issues/965)) ([11961e1](https://github.com/ngc-shj/passwd-sso/commit/11961e1174966668f3b0cb76a9d39f715d0f7ef1))
+* **auth:** enforce the tenant passkey requirement on session API calls ([#973](https://github.com/ngc-shj/passwd-sso/issues/973)) ([a1d8391](https://github.com/ngc-shj/passwd-sso/commit/a1d83915da540c8b932264eaf846a3f3a3775923))
+* **auth:** make every OAuth callback a fresh sign-in ([#967](https://github.com/ngc-shj/passwd-sso/issues/967)) ([d420e5b](https://github.com/ngc-shj/passwd-sso/commit/d420e5be296a3d645e1cf97e1300b6c4f203af0f))
+* **auth:** read the session cookie the way Auth.js reads it ([#961](https://github.com/ngc-shj/passwd-sso/issues/961)) ([153c8bd](https://github.com/ngc-shj/passwd-sso/commit/153c8bd47d958b33396f3686e4395191af5717ef))
+* **clients:** surface PASSKEY_REQUIRED in the extension and the iOS app ([#982](https://github.com/ngc-shj/passwd-sso/issues/982)) ([188b47c](https://github.com/ngc-shj/passwd-sso/commit/188b47cfc0759185fa580de29468241ab3989189))
+* count request 5xx on _stream, audit role session defaults, model GC bypass state ([#929](https://github.com/ngc-shj/passwd-sso/issues/929)) ([36103cd](https://github.com/ngc-shj/passwd-sso/commit/36103cd48c6507cfa8fab47d90fbdca854e08db4))
+* **db:** revoke DELETE on tenants from the application role ([#939](https://github.com/ngc-shj/passwd-sso/issues/939)) ([0838997](https://github.com/ngc-shj/passwd-sso/commit/083899746436aeb90421633e8d291e1799a01c11))
+* **db:** run queries on one transaction client sequentially ([#978](https://github.com/ngc-shj/passwd-sso/issues/978)) ([80584be](https://github.com/ngc-shj/passwd-sso/commit/80584be3a8bdb3a0aa9f5fddc1db698d6184d123))
+* **deps:** raise the qs override floor past GHSA-6pq8-jhm2-2vcw ([#983](https://github.com/ngc-shj/passwd-sso/issues/983)) ([880cdec](https://github.com/ngc-shj/passwd-sso/commit/880cdec8505e4b0e7557ffd8fde5cd147dad4d3d))
+* **import:** isolate each bulk-import entry in a savepoint ([#980](https://github.com/ngc-shj/passwd-sso/issues/980)) ([ac9e04a](https://github.com/ngc-shj/passwd-sso/commit/ac9e04a7bcaabc893a25bce8fcaff61ccd5f1364))
+* **rls:** keep a logger failure from replacing an RLS guard's refusal ([#915](https://github.com/ngc-shj/passwd-sso/issues/915)) ([63808a8](https://github.com/ngc-shj/passwd-sso/commit/63808a812fe0dd9de39bcd900948bc678a929514))
+* **security:** close the open code-scanning and Dependabot alerts ([#985](https://github.com/ngc-shj/passwd-sso/issues/985)) ([737d793](https://github.com/ngc-shj/passwd-sso/commit/737d793588a5ad0e4bc8b7d2f2c5c221031fecd7))
+
 ## [0.4.77](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.76...passwd-sso-v0.4.77) (2026-10-16)
 
 
