@@ -50,6 +50,16 @@ describe("getPasswordPath", () => {
     );
   });
 
+  it.each([".", ".."])("rejects the dot-segment entryId %j", (entryId) => {
+    expect(() => getPasswordPath(entryId, true)).toThrow("Invalid entry ID");
+    expect(() => getPasswordPath(entryId, false)).toThrow("Invalid entry ID");
+  });
+
+  it("keeps dotted IDs that are not dot segments under the entry route", () => {
+    const path = getPasswordPath("...", false);
+    expect(new URL(`https://example.test${path}`).pathname).toBe("/api/passwords/...");
+  });
+
   it("allows cuid-style IDs", () => {
     expect(getPasswordPath("cm1abc2def3gh4ijk5l", false)).toBe(
       "/api/passwords/cm1abc2def3gh4ijk5l",

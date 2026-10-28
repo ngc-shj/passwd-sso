@@ -120,7 +120,9 @@ export function getSecretsServerUrl(): string {
  * If apiKey is configured, use the public /api/v1/ path.
  */
 export function getPasswordPath(entryId: string, useV1: boolean): string {
-  if (/[\/\\]/.test(entryId)) {
+  // "." and ".." survive encodeURIComponent and are dot segments to the URL
+  // parser, so they would turn the request into the list or /api/ route.
+  if (/[\/\\]/.test(entryId) || entryId === "." || entryId === "..") {
     throw new Error(`Invalid entry ID: "${entryId}"`);
   }
   return useV1

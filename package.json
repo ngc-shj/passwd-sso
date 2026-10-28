@@ -126,7 +126,6 @@
     "patch-package": "8.0.1",
     "prisma": "^7.10.1",
     "semver": "^7.8.5",
-    "shadcn": "^4.22.1",
     "tailwindcss": "^4.1.18",
     "ts-morph": "^28.0.0",
     "tsx": "^4.23.15",
@@ -136,9 +135,6 @@
     "vitest": "^5.0.5"
   },
   "overrides": {
-    "qs": "^6.16.1",
-    "hono": "^4.13.11",
-    "@hono/node-server": "^2.0.10",
     "lodash": "^4.18.1",
     "cross-spawn": "7.0.6",
     "@babel/core": "^7.29.6",
@@ -157,7 +153,6 @@
     "esbuild": ">=0.28.1",
     "nanoid": "^3.3.18",
     "sharp": "^0.35.5",
-    "body-parser": "^2.4.0",
     "postcss-selector-parser@<7.1.6": "^7.1.6"
   }
 }

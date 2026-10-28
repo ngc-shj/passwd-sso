@@ -20,3 +20,11 @@ query-filters:
   # honored by this repo's code scanning, so exclude the query here.
   - exclude:
       id: js/http-to-file-access
+  # The reverse direction, for the same CLI: it reads the user's own
+  # credentials (credentials file, API key in the secrets config) from disk and
+  # sends them to the server the user configured — that is how every command
+  # authenticates. Every alert this query has raised in the repo was that flow
+  # in cli/, each dismissed as a false positive, and the dismissals reopen as
+  # new alerts whenever the flagged lines move.
+  - exclude:
+      id: js/file-access-to-http
