@@ -29,13 +29,14 @@ vi.mock("@/lib/http/with-request-log", () => ({
 // NextAuth's route handlers are `Auth(request, config)` from @auth/core with
 // env defaults filled in, so they are rebuilt here from the app's own config
 // (src/auth.ts: adapter, cookies, events) — Auth.js, the adapter and the
-// database stay real.
+// database stay real. The secret is fixed here: CI's integration job sets no
+// AUTH_SECRET, and it only signs this test's own CSRF cookie.
 vi.mock("next-auth", async () => {
   const { Auth } = await import("@auth/core");
   return {
     default: (config: import("@auth/core").AuthConfig) => {
       const handler = (req: Request) =>
-        Auth(req, { ...config, secret: process.env.AUTH_SECRET, trustHost: true });
+        Auth(req, { ...config, secret: "integration-test-auth-secret-0123456789", trustHost: true });
       return { handlers: { GET: handler, POST: handler }, auth: vi.fn(), signIn: vi.fn(), signOut: vi.fn() };
     },
   };

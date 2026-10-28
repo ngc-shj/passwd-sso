@@ -204,7 +204,7 @@ describe("presentedSessionTokens", () => {
   });
 
   it.each([
-    ["%-encoded", `${encodeURIComponent(TOKEN_A).replace("-", "%2D")}`],
+    ["%-encoded", `${encodeURIComponent(TOKEN_A).replaceAll("-", "%2D")}`],
     ["quoted", `"${TOKEN_A}"`],
     ["uppercase", TOKEN_A.toUpperCase()],
     ["empty", ""],
