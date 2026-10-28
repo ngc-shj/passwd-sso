@@ -308,17 +308,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # ─── Main App: Lint → Test → Build ────────────────────────
+  # ─── Main App: Lint → Test ─────────────────────────────────
   app-ci:
-    name: "App: Lint → Test → Build"
+    name: "App: Lint → Test"
     runs-on: ubuntu-latest
     needs: changes
     if: always() && (needs.changes.result != 'success' || needs.changes.outputs.app == 'true' || needs.changes.outputs.ci == 'true')
-    # test:coverage + build + basePath build already land at ~13–14m on a
-    # healthy runner; slower runners tipped several green dependency PRs over the
-    # old 15m cap mid-`build with basePath` (e.g. #701, #706). 20m keeps the same
-    # ceiling class as the iOS (25m) / refactor-verify (20m) jobs while absorbing
-    # runner variance instead of flaking.
+    # The two production builds run in app-build. With them here the job ran
+    # 18–20m against its 20m cap and timed out mid-build on healthy runs;
+    # raising the cap again (it was 15m before) would only chase the suite's
+    # growth.
     timeout-minutes: 20
     services:
       redis:
@@ -379,6 +378,44 @@ jobs:
           npm run test:coverage --
           --exclude scripts/__tests__/check-rls-nesting.test.mjs
           --exclude scripts/__tests__/check-bypass-rls.test.mjs
+
+  # ─── Main App: Build ──────────────────────────────────────
+  # Split from app-ci so the builds run in parallel with the test suite.
+  app-build:
+    name: "App: Build"
+    runs-on: ubuntu-latest
+    needs: changes
+    if: always() && (needs.changes.result != 'success' || needs.changes.outputs.app == 'true' || needs.changes.outputs.ci == 'true')
+    timeout-minutes: 15
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    env:
+      DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci"
+      SHARE_MASTER_KEY: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      AUTH_SECRET: "ci-secret-value-that-is-at-least-32-chars"
+      AUTH_URL: "http://localhost:3000"
+      VERIFIER_PEPPER_KEY: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      REDIS_URL: "redis://localhost:6379"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
       - run: npm run build
 
       - name: Build with basePath
@@ -574,7 +611,7 @@ jobs:
     name: "E2E: Playwright"
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: [changes, app-ci]
+    needs: [changes, app-ci, app-build]
     # `always()` defeats the skip-on-failed-dependency default; it does NOT
     # supply outputs. When `changes` fails or is skipped its outputs are empty
     # strings, every `== 'true'` comparison is false, and this job — which
@@ -586,7 +623,8 @@ jobs:
        needs.changes.outputs.app == 'true' ||
        needs.changes.outputs.e2e == 'true' ||
        needs.changes.outputs.ci == 'true') &&
-      needs.app-ci.result != 'failure'
+      needs.app-ci.result != 'failure' &&
+      needs.app-build.result != 'failure'
     services:
       postgres:
         image: postgres:16-alpine
