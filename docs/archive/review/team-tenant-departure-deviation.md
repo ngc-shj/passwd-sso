@@ -32,3 +32,16 @@ Plan (C5): "refuse (403 `INVITATION_EXPIRED`)". Implemented: the existing
 `API_ERROR.INVITATION_EXPIRED`, whose status is 410 — the code the expiry path
 of the same route already returns. A second status for the same error code
 would make clients branch on status rather than code.
+
+## D4 The create-deactivated vs guest-accept race has no admitting side through the routes
+
+Plan (A10): "create-deactivated (SCIM POST `active=false`) vs a guest's accept".
+A user with no `tenant_members` row in a tenant can accept an invitation only
+while active in another tenant (accept resolves the user's tenant; a user active
+nowhere is refused). An active membership elsewhere makes that tenant the
+owner, and SCIM POST and directory sync then refuse to create the row here
+(`SCIM_USER_NOT_PROVISIONABLE`, the declined-attachment arm). So no admission
+writer can run concurrently with a create-deactivated for the same user, and
+the advisory creation lock (N1) is a backstop for a future admission path. The
+integration cell holds that lock directly and witnesses the create waiting on
+it, instead of racing a route that cannot reach it.

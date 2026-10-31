@@ -667,6 +667,10 @@ export async function createTestContext(): Promise<TestContext> {
         tenantId,
       );
       await tx.$executeRawUnsafe(
+        `DELETE FROM tenant_member_departures WHERE tenant_id = $1::uuid`,
+        tenantId,
+      );
+      await tx.$executeRawUnsafe(
         `DELETE FROM tenant_members WHERE tenant_id = $1::uuid`,
         tenantId,
       );
