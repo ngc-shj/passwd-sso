@@ -15,6 +15,8 @@ import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-curren
 import { errorResponse, handleAuthError, rateLimited, unauthorized, validationError } from "@/lib/http/api-response";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { TEAM_ROTATE_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
+import { lockTeamForRotation } from "@/lib/team/team-key-rotation-lock";
+import { departedFromTenant } from "@/lib/team/team-departure";
 import {
   encryptedFieldSchema,
   hexIv,
@@ -125,29 +127,30 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   try {
     await withTeamTenantRls(
       teamId,
-      async (_tenantId, tx) => {
+      async (tenantId, tx) => {
         // Re-verify teamKeyVersion hasn't changed since pre-read, under a row
-        // lock taken as the FIRST statement (see team-key-rotation-lock.ts).
+        // lock taken as the FIRST statement (team-key-rotation-lock.ts).
         // Entry creates and full updates, key distribution, and member
         // removal hold this row FOR SHARE, so each has either committed
         // before the member and entry reads below (and is read) or waits for
-        // this rotation. NO KEY UPDATE, not UPDATE: it conflicts with those
-        // FOR SHARE holders without blocking unrelated inserts whose foreign
-        // key to teams takes KEY SHARE.
-        const [currentTeam] = await tx.$queryRaw<{ team_key_version: number }[]>`
-          SELECT team_key_version FROM teams WHERE id = ${teamId}::uuid FOR NO KEY UPDATE
-        `;
-        if (!currentTeam || currentTeam.team_key_version !== team.teamKeyVersion) {
+        // this rotation.
+        const currentVersion = await lockTeamForRotation(tx, teamId);
+        if (currentVersion !== team.teamKeyVersion) {
           throw new Error("TEAM_KEY_VERSION_CONFLICT");
         }
 
-        // Verify all active members have a key in the payload (F-26: inside
-        // tx, after the team lock that member removal also takes)
+        // Verify all key holders have a key in the payload (F-26: inside tx,
+        // after the team lock that member removal also takes). A member who
+        // departed the team's tenant is not one (team-departure.ts): the new
+        // key is not wrapped to them, and their distribution turns pending so
+        // a reactivation is distributed the new key rather than served an
+        // old one.
         const members = await tx.teamMember.findMany({
           where: { teamId: teamId, deactivatedAt: null, keyDistributed: true },
           select: { userId: true },
         });
-        const memberUserIds = new Set(members.map((m) => m.userId));
+        const departed = await departedFromTenant(tx, tenantId, members.map((m) => m.userId));
+        const memberUserIds = new Set(members.map((m) => m.userId).filter((id) => !departed.has(id)));
         for (const userId of memberUserIds) {
           if (!memberKeys.some((k) => k.userId === userId)) {
             throw new TxValidationError({ missingKeyFor: userId });
@@ -248,6 +251,13 @@ async function handlePOST(req: NextRequest, { params }: Params) {
         });
         if (createResult.count !== memberKeys.length) {
           throw new Error("ENTRY_COUNT_MISMATCH");
+        }
+
+        if (departed.size > 0) {
+          await tx.teamMember.updateMany({
+            where: { teamId, userId: { in: [...departed] }, keyDistributed: true },
+            data: { keyDistributed: false },
+          });
         }
 
       // Bump team key version

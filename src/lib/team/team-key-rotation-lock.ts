@@ -78,6 +78,24 @@ export async function lockTeamKeyVersion(
 }
 
 /**
+ * Rotation's own lock: `teams ... FOR NO KEY UPDATE`, the first statement of
+ * the rotation transaction. It conflicts with every `FOR SHARE` holder above
+ * without blocking unrelated inserts whose foreign key to teams takes KEY
+ * SHARE. Not bounded: rotation waits out the writers within its own
+ * transaction budget. Returns the team's current key version, or null when
+ * the row is not visible.
+ */
+export async function lockTeamForRotation(
+  tx: Pick<Prisma.TransactionClient, "$queryRaw">,
+  teamId: string,
+): Promise<number | null> {
+  const [team] = await tx.$queryRaw<{ team_key_version: number }[]>`
+    SELECT team_key_version FROM teams WHERE id = ${teamId}::uuid FOR NO KEY UPDATE
+  `;
+  return team ? team.team_key_version : null;
+}
+
+/**
  * Team rows a membership change needed locked but that were not: hidden by
  * the transaction's RLS context, or joined after the lock was taken.
  * Refusing beats changing the membership unserialised.

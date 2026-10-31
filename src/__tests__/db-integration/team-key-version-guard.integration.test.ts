@@ -58,6 +58,8 @@ import { POST as bulkImport } from "@/app/api/teams/[teamId]/passwords/bulk-impo
 import { DELETE as removeMember } from "@/app/api/teams/[teamId]/members/[memberId]/route";
 import { POST as confirmKey } from "@/app/api/teams/[teamId]/members/[memberId]/confirm-key/route";
 import { executeVaultReset } from "@/lib/vault/vault-reset";
+import { GET as getMemberKey } from "@/app/api/teams/[teamId]/member-key/route";
+import { GET as getPendingDistributions } from "@/app/api/teams/pending-key-distributions/route";
 import { prisma } from "@/lib/prisma";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { deactivateScimUser } from "@/lib/services/scim-user-service";
@@ -830,6 +832,135 @@ describe("team key rotation serialisation — real-DB integration", () => {
         keyDistributed: false,
         pendingKeys: [],
       });
+    });
+  });
+
+  describe("tenant departure", () => {
+    async function setTenantActive(userId: string, active: boolean) {
+      await ctx.su.pool.query(
+        `UPDATE tenant_members SET deactivated_at = ${active ? "NULL" : "now()"} WHERE tenant_id = $1::uuid AND user_id = $2::uuid`,
+        [tenantId, userId],
+      );
+    }
+
+    async function memberKeyAs(seed: Seed, userId: string) {
+      mockAuth.mockResolvedValue({ user: { id: userId } });
+      return getMemberKey(
+        jsonRequest(`http://localhost/api/teams/${seed.teamId}/member-key`, "GET"),
+        { params: Promise.resolve({ teamId: seed.teamId }) },
+      );
+    }
+
+    async function pendingFor(seed: Seed): Promise<string[]> {
+      mockAuth.mockResolvedValue({ user: { id: seed.ownerId } });
+      // The route's own signature takes no argument; withRequestLog reads the request.
+      const res = await (getPendingDistributions as (req: NextRequest) => Promise<Response>)(
+        jsonRequest("http://localhost/api/teams/pending-key-distributions", "GET"),
+      );
+      const rows = (await res.json()) as { userId: string }[];
+      return rows.map((row) => row.userId).sort();
+    }
+
+    function rotateHoldersOnly(seed: Seed, holders: string[]) {
+      mockAuth.mockResolvedValue({ user: { id: seed.ownerId } });
+      return rotateKey(
+        jsonRequest(`http://localhost/api/teams/${seed.teamId}/rotate-key`, "POST", {
+          newTeamKeyVersion: 2,
+          entries: [{
+            id: seed.existingEntryId,
+            itemKeyVersion: 0,
+            snapshotIv: seed.existingBlobIv,
+            encryptedBlob: encryptedField(),
+            encryptedOverview: encryptedField(),
+            aadVersion: 1,
+          }],
+          memberKeys: holders.map((userId) => memberKey(userId, 2)),
+        }),
+        { params: Promise.resolve({ teamId: seed.teamId }) },
+      );
+    }
+
+    it("a member who departed the team's tenant is served no key", async () => {
+      const seed = await seedTeam(ctx, tenantId, 1);
+      expect((await memberKeyAs(seed, seed.memberId)).status).toBe(200);
+
+      await setTenantActive(seed.memberId, false);
+
+      expect((await memberKeyAs(seed, seed.memberId)).status).toBe(404);
+    });
+
+    it("a pending member who departed is neither listed for distribution nor distributable", async () => {
+      const seed = await seedTeam(ctx, tenantId, 1);
+      expect(await pendingFor(seed)).toEqual([seed.pendingId]);
+
+      await setTenantActive(seed.pendingId, false);
+
+      expect(await pendingFor(seed)).toEqual([]);
+      const res = await confirmKey(
+        jsonRequest(
+          `http://localhost/api/teams/${seed.teamId}/members/${seed.pendingRowId}/confirm-key`,
+          "POST",
+          { ...memberKey(seed.pendingId, 1), userId: undefined },
+        ),
+        { params: Promise.resolve({ teamId: seed.teamId, memberId: seed.pendingRowId }) },
+      );
+      expect(res.status).toBe(404);
+      expect(await memberKeyVersions(ctx, seed.teamId, seed.pendingId)).toEqual([]);
+    });
+
+    it("a rotation neither requires nor accepts a departed member, and leaves them pending", async () => {
+      const seed = await seedTeam(ctx, tenantId, 1);
+      await setTenantActive(seed.memberId, false);
+
+      const refused = await rotateHoldersOnly(seed, [seed.ownerId, seed.memberId]);
+      expect({ status: refused.status, details: (await refused.json()).details })
+        .toEqual({ status: 400, details: { unknownUserId: seed.memberId } });
+
+      const rotated = await rotateHoldersOnly(seed, [seed.ownerId]);
+      const member = await ctx.su.pool.query<{ key_distributed: boolean }>(
+        `SELECT key_distributed FROM team_members WHERE id = $1::uuid`,
+        [seed.memberRowId],
+      );
+      expect({
+        status: rotated.status,
+        departedKeys: await memberKeyVersions(ctx, seed.teamId, seed.memberId),
+        keyDistributed: member.rows[0].key_distributed,
+      }).toEqual({ status: 200, departedKeys: [1], keyDistributed: false });
+    });
+
+    it("reactivated with no rotation in between, the member is served their key again", async () => {
+      const seed = await seedTeam(ctx, tenantId, 1);
+      await setTenantActive(seed.memberId, false);
+      await setTenantActive(seed.memberId, true);
+
+      expect((await memberKeyAs(seed, seed.memberId)).status).toBe(200);
+      expect(await pendingFor(seed)).toEqual([seed.pendingId]);
+    });
+
+    it("reactivated after a rotation, the member is listed for distribution of the new key", async () => {
+      const seed = await seedTeam(ctx, tenantId, 1);
+      // Distribution lists only members it can wrap a key to.
+      await ctx.su.pool.query(`UPDATE users SET ecdh_public_key = $2 WHERE id = $1::uuid`, [seed.memberId, hex(32)]);
+      await setTenantActive(seed.memberId, false);
+      expect((await rotateHoldersOnly(seed, [seed.ownerId])).status).toBe(200);
+      await setTenantActive(seed.memberId, true);
+
+      // A member again, but the new key is not theirs yet: pending, not served the old one.
+      const served = await memberKeyAs(seed, seed.memberId);
+      expect({ status: served.status, error: (await served.json()).error })
+        .toEqual({ status: 403, error: "KEY_NOT_DISTRIBUTED" });
+      expect(await pendingFor(seed)).toEqual([seed.memberId, seed.pendingId].sort());
+    });
+
+    it("a member with no row in the team's tenant has not departed", async () => {
+      // A member invited from another tenant: no tenant_members row here.
+      const seed = await seedTeam(ctx, tenantId, 1);
+      await ctx.su.pool.query(
+        `DELETE FROM tenant_members WHERE tenant_id = $1::uuid AND user_id = $2::uuid`,
+        [tenantId, seed.memberId],
+      );
+
+      expect((await memberKeyAs(seed, seed.memberId)).status).toBe(200);
     });
   });
 });

@@ -308,6 +308,29 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
     });
   });
 
+  it("refuses, distributing nothing, a member who departed the team's tenant", async () => {
+    mockPrismaTeamMember.findFirst.mockResolvedValueOnce({ role: "OWNER", teamId: "team-1" });
+    mockPrismaTeamMember.findUnique
+      .mockResolvedValueOnce({ id: "member-1", teamId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null })
+      .mockResolvedValueOnce({ keyDistributed: false, deactivatedAt: null });
+    mockTeamLockQuery.mockImplementation(teamLockQuery((sql) =>
+      sql.includes("FROM tenant_members") ? [{ departed: true }] : [{ team_key_version: 1, tenant_id: "tenant-1" }],
+    ));
+
+    const res = await POST(
+      createRequest("POST", URL, { body: validBody }),
+      { params: Promise.resolve({ teamId: "team-1", memberId: "member-1" }) },
+    );
+
+    expect(res.status).toBe(404);
+    const departure = lockQueryCalls(mockTeamLockQuery).find((c) => c.sql.includes("FROM tenant_members"));
+    // Read in the team's tenant, for the target, and locked against a concurrent deactivation.
+    expect(departure?.sql).toMatch(/FOR SHARE/);
+    expect(departure?.values).toEqual(["tenant-1", "target-user"]);
+    expect(mockPrismaTeamMemberKey.upsert).not.toHaveBeenCalled();
+    expect(mockPrismaTeamMember.updateMany).not.toHaveBeenCalled();
+  });
+
   it("returns 404 when the member was deactivated after the in-transaction check", async () => {
     mockPrismaTeamMember.findFirst.mockResolvedValueOnce({ role: "OWNER", teamId: "team-1" });
     mockPrismaTeamMember.findUnique

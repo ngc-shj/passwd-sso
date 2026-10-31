@@ -10,6 +10,7 @@ const {
   mockTeamFindUnique,
   mockTeamPasswordEntryFindMany,
   mockTeamMemberFindMany,
+  mockTenantMemberFindMany,
   mockTeamMemberKeyFindMany,
   mockUserFindMany,
 } = vi.hoisted(() => ({
@@ -28,6 +29,8 @@ const {
   mockTeamFindUnique: vi.fn(),
   mockTeamPasswordEntryFindMany: vi.fn(),
   mockTeamMemberFindMany: vi.fn(),
+  // Departure from the team's tenant (team-departure.ts).
+  mockTenantMemberFindMany: vi.fn(),
   mockTeamMemberKeyFindMany: vi.fn(),
   mockUserFindMany: vi.fn(),
 }));
@@ -42,6 +45,7 @@ vi.mock("@/lib/prisma", () => ({
     team: { findUnique: mockTeamFindUnique },
     teamPasswordEntry: { findMany: mockTeamPasswordEntryFindMany },
     teamMember: { findMany: mockTeamMemberFindMany },
+    tenantMember: { findMany: mockTenantMemberFindMany },
     teamMemberKey: { findMany: mockTeamMemberKeyFindMany },
     user: { findMany: mockUserFindMany },
   },
@@ -96,8 +100,25 @@ describe("GET /api/teams/[teamId]/rotate-key/data", () => {
     mockTeamMemberFindMany.mockResolvedValue([{ userId: "user-1" }]);
     mockTeamMemberKeyFindMany.mockResolvedValue([{ userId: "user-1" }]);
     mockUserFindMany.mockResolvedValue([{ id: "user-1", ecdhPublicKey: "public-key-data" }]);
+    mockTenantMemberFindMany.mockResolvedValue([]);
     // withTeamTenantRls is called 3 times: team, entries+members, member keys
-    mockWithTeamTenantRls.mockImplementation(async (_teamId: string, fn: () => unknown) => fn());
+    mockWithTeamTenantRls.mockImplementation(async (_teamId: string, fn: (tenantId: string) => unknown) => fn("tenant-1"));
+  });
+
+  it("leaves a member who departed the team's tenant out of the key holders", async () => {
+    mockTeamMemberFindMany.mockResolvedValue([{ userId: "user-1" }, { userId: "user-gone" }]);
+    mockTenantMemberFindMany.mockResolvedValue([{ userId: "user-gone" }]);
+
+    const res = await GET(createRequest("team-1"), createParams("team-1"));
+
+    expect(res.status).toBe(200);
+    expect(mockTenantMemberFindMany).toHaveBeenCalledWith({
+      where: { tenantId: "tenant-1", userId: { in: ["user-1", "user-gone"] }, deactivatedAt: { not: null } },
+      select: { userId: true },
+    });
+    // Only the remaining holder's key and public key are looked up.
+    expect(mockTeamMemberKeyFindMany.mock.calls[0][0].where.userId).toEqual({ in: ["user-1"] });
+    expect((await res.json()).members.map((m: { userId: string }) => m.userId)).toEqual(["user-1"]);
   });
 
   it("returns 401 when unauthenticated", async () => {

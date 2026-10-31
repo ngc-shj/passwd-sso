@@ -5,6 +5,7 @@ import { unauthorized } from "@/lib/http/api-response";
 import { TEAM_ROLE } from "@/lib/constants";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
+import { departedPairKey, departedPairs } from "@/lib/team/team-departure";
 import { withRequestLog } from "@/lib/http/with-request-log";
 
 // GET /api/teams/pending-key-distributions
@@ -49,6 +50,7 @@ async function handleGET() {
         id: true,
         teamId: true,
         userId: true,
+        tenantId: true,
         user: {
           select: {
             ecdhPublicKey: true,
@@ -63,7 +65,14 @@ async function handleGET() {
     }),
   BYPASS_GRANT.TEAM_PENDING_KEY_DISTRIBUTION);
 
-  const result = pendingMembers.map((m) => ({
+  // A member who departed the team's tenant is not distributed a key, though
+  // their distribution is pending (team-departure.ts); reactivation lists
+  // them again.
+  const departed = await withBypassRls(prisma, async (tx) =>
+    departedPairs(tx, pendingMembers),
+  BYPASS_GRANT.TEAM_PENDING_KEY_DISTRIBUTION);
+
+  const result = pendingMembers.filter((m) => !departed.has(departedPairKey(m))).map((m) => ({
     memberId: m.id,
     teamId: m.teamId,
     userId: m.userId,

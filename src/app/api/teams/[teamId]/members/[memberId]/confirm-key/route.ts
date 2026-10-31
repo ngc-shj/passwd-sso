@@ -13,6 +13,7 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
 import { lockTeamKeyVersion, TeamRotationInProgressError } from "@/lib/team/team-key-rotation-lock";
+import { lockDepartureState } from "@/lib/team/team-departure";
 
 type Params = { params: Promise<{ teamId: string; memberId: string }> };
 
@@ -100,6 +101,13 @@ async function handlePOST(req: NextRequest, { params }: Params) {
         });
         if (!member || member.deactivatedAt !== null) return "member_not_found" as const;
         if (member.keyDistributed) return "already_distributed" as const;
+        // A member who departed the team's tenant is not made a key holder
+        // (team-departure.ts). Read under FOR SHARE on their tenant
+        // membership row, so a deactivation is either seen or waits for this
+        // distribution — after which the predicate excludes them again.
+        if (team && (await lockDepartureState(tx, team.tenantId, targetMember.userId))) {
+          return "member_not_found" as const;
+        }
 
         if (!team || data.keyVersion !== team.teamKeyVersion) {
           return "version_mismatch" as const;

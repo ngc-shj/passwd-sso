@@ -5,6 +5,7 @@ import { requireTeamPermission } from "@/lib/auth/access/team-auth";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
+import { departedFromTenant } from "@/lib/team/team-departure";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -42,7 +43,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
     return errorResponse(API_ERROR.TEAM_NOT_FOUND);
   }
 
-  const [entries, activeMembers] = await withTeamTenantRls(teamId, async () => {
+  const [entries, activeMembers] = await withTeamTenantRls(teamId, async (tenantId) => {
     // All entries regardless of deletedAt / isArchived status
     const entries = await prisma.teamPasswordEntry.findMany({
       where: { teamId },
@@ -62,11 +63,15 @@ async function handleGET(req: NextRequest, { params }: Params) {
         aadVersion: true,
       },
     });
-    // Active members whose key has been distributed
-    const activeMembers = await prisma.teamMember.findMany({
+    // Key holders: active members whose key has been distributed, but those
+    // who departed the team's tenant (team-departure.ts) — the rotation
+    // refuses a key wrapped to them.
+    const distributed = await prisma.teamMember.findMany({
       where: { teamId, deactivatedAt: null, keyDistributed: true },
       select: { userId: true },
     });
+    const departed = await departedFromTenant(prisma, tenantId, distributed.map((m) => m.userId));
+    const activeMembers = distributed.filter((m) => !departed.has(m.userId));
     return [entries, activeMembers] as const;
   });
 
