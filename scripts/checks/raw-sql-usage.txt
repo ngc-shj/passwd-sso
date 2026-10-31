@@ -85,6 +85,7 @@ src/lib/directory-sync/engine.ts # conditional status-transition UPDATE guarding
 src/lib/health.ts # liveness/readiness probes: SELECT 1 and audit outbox depth/age metrics
 src/lib/prisma/raw-sql.ts # names $queryRawUnsafe/$executeRawUnsafe in its header comment describing the values Unsafe call sites elsewhere must use; mints/renders SqlIdentifier/SqlFragment but issues no raw-SQL call itself
 src/lib/prisma/savepoint.ts # SAVEPOINT / ROLLBACK TO / RELEASE around one item of a multi-item transaction so a rejected statement does not abort the rest
+src/lib/services/scim-user-service.ts # DELETE team_members ... RETURNING team_id, checking every left team was locked against key rotation
 src/lib/services/team-password-service.ts # row lock (FOR UPDATE) for atomic team entry blob snapshot+update
 src/lib/team/team-key-rotation-lock.ts # teams FOR SHARE locks (and lock_timeout) serialising entry, member-key and membership writers with team key rotation
 src/lib/tenant-rls-grants.ts # the single writer and reader of the bypass GUCs (set_config for app.bypass_rls / app.bypass_purpose / app.tenant_id / app.bypass_tables) and setLockTimeout
