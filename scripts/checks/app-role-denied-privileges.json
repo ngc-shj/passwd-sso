@@ -164,6 +164,12 @@
       "table": "public.tenant_claims",
       "privileges": ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"],
       "reason": "Claim routing must not be reachable from this role (#935); listed prescriptively for the same reason as the other worker roles' tenant_claims entries."
+    },
+    {
+      "role": "passwd_app",
+      "table": "public.tenant_member_departures",
+      "privileges": ["DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"],
+      "reason": "A departure record keeps invitations issued before a SCIM DELETE void after the membership is re-created (team-tenant-departure plan C1). The app reads and upserts records; only FK cascade, which runs with the owner's privileges, removes one."
     }
   ]
 }

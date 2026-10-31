@@ -30,25 +30,45 @@ export class TeamRotationInProgressError extends Error {
 }
 
 /**
- * Run one locking statement with lock_timeout bounded to
- * TEAM_KEY_LOCK_TIMEOUT_MS, so a wait on an in-flight rotation ends before the
- * caller's transaction (Prisma's 5s default) expires into a bare 500; past it
- * throws TeamRotationInProgressError. The previous lock_timeout is restored
- * afterwards, so the caller's later statements wait as they did before. (On a
- * failure the transaction is aborted, or rolled back to the caller's
- * savepoint, which reverts the setting itself.)
+ * One lock-wait deadline shared by every bounded wait of a transaction. A
+ * transaction that waits on a tenant row and then on a team row passes the
+ * same budget to both, so the two waits together end inside
+ * TEAM_KEY_LOCK_TIMEOUT_MS rather than each taking it in turn.
  */
-async function withBoundedLockWait<T>(
+export type LockBudget = { readonly deadline: number };
+
+export function createLockBudget(totalMs: number = TEAM_KEY_LOCK_TIMEOUT_MS): LockBudget {
+  return { deadline: Date.now() + totalMs };
+}
+
+/**
+ * Run one locking statement with lock_timeout bounded to what is left of
+ * `budget` (a fresh TEAM_KEY_LOCK_TIMEOUT_MS when none is passed), so a wait
+ * ends before the caller's transaction (Prisma's 5s default) expires into a
+ * bare 500; past it throws `timeoutError()` (TeamRotationInProgressError by
+ * default). A spent budget throws before waiting: `lock_timeout = 0` would
+ * mean no limit. The previous lock_timeout is restored afterwards, so the
+ * caller's later statements wait as they did before. (On a failure the
+ * transaction is aborted, or rolled back to the caller's savepoint, which
+ * reverts the setting itself.)
+ */
+export async function withBoundedLockWait<T>(
   tx: Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw">,
   lock: () => Promise<T>,
+  options: { budget?: LockBudget; timeoutError?: () => Error } = {},
 ): Promise<T> {
+  const timeoutError = options.timeoutError ?? (() => new TeamRotationInProgressError());
+  const waitMs = options.budget
+    ? Math.min(TEAM_KEY_LOCK_TIMEOUT_MS, options.budget.deadline - Date.now())
+    : TEAM_KEY_LOCK_TIMEOUT_MS;
+  if (waitMs < 1) throw timeoutError();
   const previous = await readLockTimeout(tx);
-  await setLockTimeout(tx, TEAM_KEY_LOCK_TIMEOUT_MS);
+  await setLockTimeout(tx, Math.floor(waitMs));
   let result: T;
   try {
     result = await lock();
   } catch (e) {
-    if (pgErrorCode(e) === LOCK_NOT_AVAILABLE) throw new TeamRotationInProgressError();
+    if (pgErrorCode(e) === LOCK_NOT_AVAILABLE) throw timeoutError();
     throw e;
   }
   await restoreLockTimeout(tx, previous);
@@ -92,6 +112,7 @@ export class TeamRotationLockError extends Error {
 async function lockTeamRows(
   tx: Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw">,
   teamIds: readonly string[],
+  budget?: LockBudget,
 ): Promise<Set<string>> {
   const ids = [...new Set(teamIds)];
   if (ids.length === 0) return new Set();
@@ -99,6 +120,7 @@ async function lockTeamRows(
     tx.$queryRaw<{ id: string }[]>`
       SELECT id FROM teams WHERE id = ANY(${ids}::uuid[]) ORDER BY id FOR SHARE
     `,
+    { budget },
   );
   return new Set(locked.map((row) => row.id));
 }
@@ -118,8 +140,9 @@ export function assertTeamsLocked(locked: ReadonlySet<string>, teamIds: readonly
 export async function lockTeamsAgainstRotation(
   tx: Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw">,
   teamIds: readonly string[],
+  budget?: LockBudget,
 ): Promise<void> {
-  assertTeamsLocked(await lockTeamRows(tx, teamIds), teamIds);
+  assertTeamsLocked(await lockTeamRows(tx, teamIds, budget), teamIds);
 }
 
 /** Ids of the teams the user is a member of (optionally within one tenant). */

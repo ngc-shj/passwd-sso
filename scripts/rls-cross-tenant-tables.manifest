@@ -21,7 +21,7 @@
 # was renamed in migration 20260321110000_convert_id_columns_to_uuid_type.
 # The discovery OR-branch for the bare name remains as defensive forward-compat.
 #
-# Total: 56 tenant-scoped tables (excludes `tenants` itself: it has no
+# Total: 57 tenant-scoped tables (excludes `tenants` itself: it has no
 # `tenant_id` column to key this tenant_id-keyed manifest by, but it carries
 # its own tenants_tenant_isolation policy (#923), verified separately by
 # rls-cross-tenant-verify.sql's Block 1b/1c).
@@ -75,6 +75,7 @@ team_tags
 team_webhooks
 teams
 tenant_claims
+tenant_member_departures
 tenant_members
 tenant_webhooks
 users

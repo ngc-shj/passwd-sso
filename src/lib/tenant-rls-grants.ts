@@ -23,6 +23,7 @@ export const MODEL_TABLE = {
   team: "teams",
   tenant: "tenants",
   tenantMember: "tenant_members",
+  tenantMemberDeparture: "tenant_member_departures",
   scimGroupMapping: "scim_group_mappings",
   teamMember: "team_members",
   teamMemberKey: "team_member_keys",

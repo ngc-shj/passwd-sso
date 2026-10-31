@@ -145,6 +145,7 @@ model User {
   // Team relations
   teamMemberships       TeamMember[]
   tenantMemberships     TenantMember[]
+  tenantMemberDepartures TenantMemberDeparture[]
   teamInvitations       TeamInvitation[]
   createdTeamPasswords  TeamPasswordEntry[]    @relation("teamPasswordCreator")
   updatedTeamPasswords  TeamPasswordEntry[]    @relation("teamPasswordUpdater")
@@ -536,6 +537,7 @@ model Tenant {
   passwordEntries            PasswordEntry[]
   teams                      Team[]
   members                    TenantMember[]
+  memberDepartures TenantMemberDeparture[]
   teamMembers                TeamMember[]
   teamMemberKeys             TeamMemberKey[]
   teamPasswordEntries        TeamPasswordEntry[]
@@ -652,6 +654,22 @@ model TenantMember {
   @@map("tenant_members")
 }
 
+/// A user's membership of the tenant was deleted (SCIM DELETE). Invitations
+/// to the tenant's teams issued at or before `departedAt` stay void even if
+/// the membership is re-created. Written only by deactivateScimUser.
+model TenantMemberDeparture {
+  tenantId   String   @map("tenant_id") @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  departedAt DateTime @map("departed_at") @db.Timestamptz(3)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([tenantId, userId])
+  @@index([userId])
+  @@map("tenant_member_departures")
+}
+
 model ScimGroupMapping {
   id              String   @id @default(uuid(4)) @db.Uuid
   tenantId        String   @map("tenant_id") @db.Uuid
@@ -679,6 +697,10 @@ model TeamMember {
   keyDistributed Boolean   @default(false) @map("key_distributed")
   deactivatedAt  DateTime? @map("deactivated_at") @db.Timestamptz(3)
   scimManaged    Boolean   @default(false) @map("scim_managed")
+  // Set by a tenant departure (team-departure.ts) so a return restores
+  // exactly the memberships the departure ended. CHECK: only on a
+  // deactivated row.
+  deactivatedByTenant Boolean @default(false) @map("deactivated_by_tenant")
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
@@ -819,7 +841,10 @@ model TeamInvitation {
 
   invitedById String @map("invited_by_id") @db.Uuid
 
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  // Filled by the database at insert time (after the issuing transaction's
+  // tenant-row locks), so it orders against a departure's clock_timestamp()
+  // stamp; accept compares the two (team-departure.ts).
+  createdAt DateTime @default(dbgenerated("clock_timestamp()")) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   team      Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
@@ -933,6 +958,9 @@ enum AuditAction {
   TEAM_MEMBER_INVITE
   TEAM_MEMBER_REMOVE
   TEAM_ROLE_UPDATE
+  TEAM_MEMBER_TENANT_DEACTIVATE
+  TEAM_MEMBER_TENANT_RESTORE
+  TEAM_OWNER_ASSIGNED_BY_TENANT_ADMIN
   SHARE_CREATE
   SHARE_REVOKE
   SEND_CREATE

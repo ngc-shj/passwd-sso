@@ -27,6 +27,8 @@ const NOT_STRANDED: Record<string, string> = {
     "the trail itself, moved by audit_log_tenant_migrate rather than owned by the user",
   TenantMember: "the membership, not data filed under one",
   TeamMember: "a membership in a team, same reason",
+  TenantMemberDeparture:
+    "the record that a membership was deleted; it belongs to the tenant that deleted it and must stay there",
   TeamPasswordEntry: "team-owned; createdById / updatedById are provenance, not ownership",
   TeamPasswordEntryHistory: "team-owned; changedById is provenance",
   TeamInvitation: "team-owned; invitedById is who sent it",
