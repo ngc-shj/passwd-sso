@@ -33,6 +33,11 @@ on:
       - 'src/lib/mcp/**'
       - 'src/lib/vault/**'
       - 'src/lib/services/**'
+      # Team membership, tenant departure and the rotation locks; the
+      # directory-sync engine and SCIM services departing users through them.
+      - 'src/lib/team/**'
+      - 'src/lib/directory-sync/**'
+      - 'src/lib/scim/**'
       - 'src/workers/**'
       - 'src/__tests__/db-integration/**'
       - 'prisma/schema.prisma'

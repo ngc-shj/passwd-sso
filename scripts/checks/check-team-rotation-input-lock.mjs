@@ -1,0 +1,389 @@
+#!/usr/bin/env node
+/**
+ * CI guard over the writes that decide who holds a team key
+ * (docs/archive/review/team-tenant-departure-plan.md C8; background in
+ * docs/archive/review/team-key-rotation-write-race-code-review.md).
+ *
+ * Team key rotation wraps the next key to the team's active members, read
+ * under its team lock; a tenant departure ends the user's memberships of the
+ * tenant's teams. Review found both decided by hand at each writer, so the
+ * writer classes are derived here from the code:
+ *
+ * 1. MEMBER-SET WRITES take a rotation lock first. A Prisma call (any
+ *    receiver) of `teamMemberKey.delete/deleteMany`, `teamMember.delete/
+ *    deleteMany`, `teamMember.update/updateMany` whose `data` names
+ *    `deactivatedAt`, `deactivatedByTenant` or `keyDistributed`, or an
+ *    `upsert` whose `update` does, and a raw `DELETE FROM` / `UPDATE` of
+ *    `team_members` / `team_member_keys`, must follow a call of LOCK_HELPERS
+ *    in its function, or in every same-file caller of that function.
+ *
+ * 2. TENANT ACTIVE STATE moves only in team-departure.ts. A `tenantMember`
+ *    update/updateMany/upsert-update naming `deactivatedAt`, or a raw write of
+ *    `tenant_members` naming `deactivated_at`, fails. A create naming it (a row
+ *    created deactivated) must follow the creation lock and be followed by
+ *    `departCreatedMembership` in the same function.
+ *
+ * 3. ADMISSIONS lock the users' tenant rows first. `teamMember.create/
+ *    createMany/upsert`, a nested `members: { create }`, `teamInvitation.
+ *    create/createMany`, and a `teamMember.update/updateMany` setting
+ *    `deactivatedAt` must follow `lockTenantRows` (or a TENANT_LOCK_WRAPPERS
+ *    call) in their function or every same-file caller.
+ *
+ * 4. LOCK ORDER. In one function, `lockTenantRows` / `lockTenantMemberCreation`
+ *    is called at most once, not inside a loop, and not after a LOCK_HELPERS
+ *    call; `departFromTenant` / `returnToTenant` called next to it pass
+ *    `alreadyLocked: true` (a second tenant-row lock after a team lock closes a
+ *    deadlock cycle with an admission holding that row).
+ *
+ * 5. Nothing calls the adapter's `deleteUser` (its cascade ends memberships
+ *    without a team lock or a departure record).
+ *
+ * 6. `tenant_member_departures` is written only by `deactivateScimUser` and
+ *    deleted by nothing (FK cascade aside): no Prisma write of
+ *    `tenantMemberDeparture`, no raw write elsewhere, no raw DELETE.
+ *
+ * A `data` / `update` that is not an object literal (an identifier, a spread)
+ * cannot be read, so it counts: the gate refuses rather than skips what it
+ * cannot see. Reviewed sites are listed in EXEMPTIONS; each key must match
+ * exactly one site.
+ *
+ * KNOWN LIMITS — names and positions, not identities or control flow:
+ * "before" is source order; callers are followed one level, in the same file;
+ * an alias of the model (`const tm = tx.teamMember`) or a `*Unsafe` raw call
+ * is not seen. The real-DB races in team-tenant-departure.integration.test.ts
+ * pin that the lock and the write share a transaction.
+ *
+ * Exit 0 = clean. Exit 1 = a violation, a stale exemption, or site counts that
+ * differ from the pinned ones (a scan that lost sites, or a site to review).
+ */
+import { Node, SyntaxKind } from "ts-morph";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { createAstProject, sourceFilesFrom, unresolvedTargets } from "./lib/ast-project.mjs";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = process.env.TEAM_ROTATION_INPUT_LOCK_ROOT ?? join(__dirname, "..", "..");
+const TARGETS = (process.env.TEAM_ROTATION_INPUT_LOCK_TARGETS ?? "src/app,src/lib,src/workers,src/auth.ts").split(",");
+
+/** The implementations: their raw SQL IS the lock, the departure and the return. */
+const IMPLEMENTATIONS = new Set([
+  "src/lib/team/team-key-rotation-lock.ts",
+  "src/lib/team/team-departure.ts",
+  "src/lib/team/tenant-row-lock.ts",
+]);
+
+const LOCK_HELPERS = new Set([
+  "lockTeamKeyVersion",
+  "lockTeamsAgainstRotation",
+  "lockMemberTeamsAgainstRotation",
+  // scim-group-service.ts: lockTenantRows then lockTeamsAgainstRotation.
+  "lockGroupWrite",
+]);
+const TENANT_LOCKS = new Set(["lockTenantRows", "lockTenantMemberCreation"]);
+const TENANT_LOCK_WRAPPERS = new Set(["lockGroupWrite"]);
+const TRANSITIONS = new Set(["departFromTenant", "returnToTenant"]);
+
+/** Pinned site counts of the real tree, per rule. A change is a site to review. */
+const EXPECTED = {
+  memberWrites: Number(process.env.TEAM_ROTATION_INPUT_LOCK_WRITES ?? 16),
+  tenantStateWrites: Number(process.env.TEAM_ROTATION_INPUT_LOCK_TENANT_WRITES ?? 2),
+  admissions: Number(process.env.TEAM_ROTATION_INPUT_LOCK_ADMISSIONS ?? 7),
+};
+
+/** Sites keyed `<rule>::<path>::<enclosing function>::<site>`, with the review's conclusion. */
+const EXEMPTIONS = new Map([
+  [
+    "member-write::src/app/api/teams/[teamId]/rotate-key/route.ts::<anonymous>::teamMember.updateMany",
+    "rotation itself: its transaction holds the team row FOR NO KEY UPDATE (inline), the lock every other writer waits on",
+  ],
+]);
+
+const RAW_MEMBER_WRITE = /\b(DELETE\s+FROM|UPDATE)\s+(?:"?\w+"?\.)?"?(team_members|team_member_keys)"?\b/i;
+const RAW_TENANT_STATE_WRITE = /\b(UPDATE|INSERT\s+INTO)\s+(?:"?\w+"?\.)?"?tenant_members"?\b[\s\S]*\bdeactivated_at\b/i;
+const RAW_DEPARTURE_WRITE = /\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(?:"?\w+"?\.)?"?tenant_member_departures"?\b/i;
+const LOOPS = new Set([
+  SyntaxKind.ForStatement,
+  SyntaxKind.ForOfStatement,
+  SyntaxKind.ForInStatement,
+  SyntaxKind.WhileStatement,
+  SyntaxKind.DoStatement,
+]);
+
+console.log(`check-team-rotation-input-lock: ROOT=${REPO_ROOT}`);
+
+const unresolved = unresolvedTargets(TARGETS, REPO_ROOT);
+if (unresolved.length > 0) {
+  console.error(`\nFAIL: scan target not found under ${REPO_ROOT}: ${unresolved.join(", ")}`);
+  process.exit(1);
+}
+
+/** The object literal of `prop` in an object, `undefined` when absent, `null` when unreadable. */
+function propOf(obj, prop) {
+  if (!obj || !Node.isObjectLiteralExpression(obj)) return null;
+  if (obj.getProperties().some((p) => Node.isSpreadAssignment(p))) return null;
+  const p = obj.getProperty(prop);
+  if (!p) return undefined;
+  if (Node.isShorthandPropertyAssignment(p)) return null;
+  if (!Node.isPropertyAssignment(p)) return null;
+  const init = p.getInitializer();
+  return init && Node.isObjectLiteralExpression(init) ? init : null;
+}
+
+function argProp(call, prop) {
+  return propOf(call.getArguments()[0], prop);
+}
+
+/** Whether an object literal (or an unreadable one) may name any of `keys`. */
+function mayName(literal, keys) {
+  if (literal === undefined) return false;
+  if (literal === null) return true;
+  if (literal.getProperties().some((p) => Node.isSpreadAssignment(p))) return true;
+  return keys.some((k) => literal.getProperty(k) !== undefined);
+}
+
+function modelAndMethod(call) {
+  const callee = call.getExpression();
+  if (!Node.isPropertyAccessExpression(callee)) return null;
+  const object = callee.getExpression();
+  if (!Node.isPropertyAccessExpression(object)) return null;
+  return { model: object.getName(), method: callee.getName() };
+}
+
+function calleeName(call) {
+  const callee = call.getExpression();
+  if (Node.isIdentifier(callee)) return callee.getText();
+  if (Node.isPropertyAccessExpression(callee)) return callee.getName();
+  return null;
+}
+
+const MEMBER_KEYS = ["deactivatedAt", "deactivatedByTenant", "keyDistributed"];
+
+function classifyMemberWrite(call, mm) {
+  const { model, method } = mm;
+  const site = `${model}.${method}`;
+  if (model === "teamMemberKey" && (method === "delete" || method === "deleteMany")) return site;
+  if (model !== "teamMember") return null;
+  if (method === "delete" || method === "deleteMany") return site;
+  if ((method === "update" || method === "updateMany") && mayName(argProp(call, "data"), MEMBER_KEYS)) return site;
+  if (method === "upsert" && mayName(argProp(call, "update"), MEMBER_KEYS)) return site;
+  return null;
+}
+
+/** `{ site, create }` when the call writes `tenant_members.deactivated_at`, else null. */
+function classifyTenantStateWrite(call, mm) {
+  if (mm.model !== "tenantMember") return null;
+  const site = `tenantMember.${mm.method}`;
+  if (mm.method === "update" || mm.method === "updateMany") {
+    return mayName(argProp(call, "data"), ["deactivatedAt"]) ? { site, create: false } : null;
+  }
+  if (mm.method === "upsert") {
+    if (mayName(argProp(call, "update"), ["deactivatedAt"])) return { site, create: false };
+    return mayName(argProp(call, "create"), ["deactivatedAt"]) ? { site, create: true } : null;
+  }
+  if (mm.method === "create" || mm.method === "createMany") {
+    return mayName(argProp(call, "data"), ["deactivatedAt"]) ? { site, create: true } : null;
+  }
+  return null;
+}
+
+/** Whether a `data` literal clears `deactivatedAt` (a reactivation), or cannot be read. */
+function reactivates(call) {
+  const data = argProp(call, "data");
+  if (data === undefined) return false;
+  if (data === null || data.getProperties().some((p) => Node.isSpreadAssignment(p))) return true;
+  const p = data.getProperty("deactivatedAt");
+  if (!p) return false;
+  return !Node.isPropertyAssignment(p) || p.getInitializer()?.getText() === "null";
+}
+
+function classifyAdmission(call, mm) {
+  const { model, method } = mm;
+  if (model === "teamMember" && ["create", "createMany", "upsert"].includes(method)) return `teamMember.${method}`;
+  if (model === "teamMember" && (method === "update" || method === "updateMany") && reactivates(call)) {
+    return `teamMember.${method}`;
+  }
+  if (model === "teamInvitation" && (method === "create" || method === "createMany")) return `teamInvitation.${method}`;
+  if (model === "team" && method === "create" && mayName(propOf(argProp(call, "data"), "members"), ["create", "createMany"])) {
+    return "team.create(members)";
+  }
+  return null;
+}
+
+function enclosingFunction(node) {
+  return node.getFirstAncestor((n) => Node.isFunctionLikeDeclaration(n)) ?? null;
+}
+
+function functionName(fn) {
+  if (!fn) return "<module>";
+  if (Node.isFunctionDeclaration(fn) || Node.isMethodDeclaration(fn)) return fn.getName() ?? "<anonymous>";
+  const parent = fn.getParent();
+  if (parent && Node.isVariableDeclaration(parent)) return parent.getName();
+  return "<anonymous>";
+}
+
+function callsIn(fn) {
+  return fn.getDescendantsOfKind(SyntaxKind.CallExpression).filter((c) => enclosingFunction(c) === fn);
+}
+
+function callsBefore(fn, names, pos) {
+  return fn.getDescendantsOfKind(SyntaxKind.CallExpression).some((c) => names.has(calleeName(c)) && c.getStart() < pos);
+}
+
+function callsAfter(fn, names, pos) {
+  return fn.getDescendantsOfKind(SyntaxKind.CallExpression).some((c) => names.has(calleeName(c)) && c.getStart() > pos);
+}
+
+/** One level up: every same-file call of `name` follows a `names` call in its own function. */
+function coveredByCallers(sourceFile, name, names) {
+  if (name === "<anonymous>" || name === "<module>") return false;
+  const calls = sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression).filter((c) => calleeName(c) === name);
+  return calls.length > 0 && calls.every((c) => {
+    const caller = enclosingFunction(c);
+    return caller !== null && callsBefore(caller, names, c.getStart());
+  });
+}
+
+function covered(sourceFile, node, names) {
+  const fn = enclosingFunction(node);
+  return fn !== null && (callsBefore(fn, names, node.getStart()) || coveredByCallers(sourceFile, functionName(fn), names));
+}
+
+function rawWrites(sourceFile) {
+  return sourceFile.getDescendantsOfKind(SyntaxKind.TaggedTemplateExpression)
+    .filter((t) => /\$(queryRaw|executeRaw)$/.test(t.getTag().getText()));
+}
+
+/**
+ * Whether an options argument is an object literal with `alreadyLocked: true`,
+ * or an identifier declared in `fn` with such an initializer.
+ */
+function passesAlreadyLocked(fn, options) {
+  let literal = options;
+  if (options && Node.isIdentifier(options)) {
+    const decl = fn.getDescendantsOfKind(SyntaxKind.VariableDeclaration).find((d) => d.getName() === options.getText());
+    literal = decl?.getInitializer();
+  }
+  if (!literal || !Node.isObjectLiteralExpression(literal)) return false;
+  const p = literal.getProperty("alreadyLocked");
+  return p !== undefined && Node.isPropertyAssignment(p) && p.getInitializer()?.getText() === "true";
+}
+
+const project = createAstProject();
+const sites = [];
+const violations = [];
+const keyOf = (rule, path, node, site) => `${rule}::${path}::${functionName(enclosingFunction(node))}::${site}`;
+const lineOf = (path, node) => `${path}:${node.getStartLineNumber()}`;
+const TENANT_LOCK_OR_WRAPPER = new Set([...TENANT_LOCKS, ...TENANT_LOCK_WRAPPERS]);
+
+for (const { rel: path, sf: sourceFile } of sourceFilesFrom(project, TARGETS, REPO_ROOT)) {
+  if (IMPLEMENTATIONS.has(path)) continue;
+
+  for (const call of sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    const name = calleeName(call);
+    if (name === "deleteUser") {
+      violations.push(`delete-user  ${lineOf(path, call)}  calls deleteUser (its cascade skips the team lock and the departure)`);
+    }
+    const mm = modelAndMethod(call);
+    if (!mm) continue;
+
+    if (mm.model === "tenantMemberDeparture" && !/^(find|count|aggregate|groupBy)/.test(mm.method)) {
+      violations.push(`departure-record  ${lineOf(path, call)}  tenantMemberDeparture.${mm.method} (only deactivateScimUser writes the record, raw, with the database clock)`);
+    }
+
+    const memberWrite = classifyMemberWrite(call, mm);
+    if (memberWrite) {
+      const key = keyOf("member-write", path, call, memberWrite);
+      sites.push({ rule: "memberWrites", key, line: lineOf(path, call), ok: covered(sourceFile, call, LOCK_HELPERS) });
+    }
+
+    const tenantWrite = classifyTenantStateWrite(call, mm);
+    if (tenantWrite) {
+      const key = keyOf("tenant-state", path, call, tenantWrite.site);
+      const fn = enclosingFunction(call);
+      const ok = tenantWrite.create && fn !== null
+        && callsBefore(fn, TENANT_LOCKS, call.getStart())
+        && callsAfter(fn, new Set(["departCreatedMembership"]), call.getStart());
+      sites.push({ rule: "tenantStateWrites", key, line: lineOf(path, call), ok });
+    }
+
+    const admission = classifyAdmission(call, mm);
+    if (admission) {
+      const key = keyOf("admission", path, call, admission);
+      sites.push({ rule: "admissions", key, line: lineOf(path, call), ok: covered(sourceFile, call, TENANT_LOCK_OR_WRAPPER) });
+    }
+  }
+
+  for (const raw of rawWrites(sourceFile)) {
+    const text = raw.getTemplate().getText();
+    const memberRaw = RAW_MEMBER_WRITE.exec(text);
+    if (memberRaw) {
+      const key = keyOf("member-write", path, raw, `${memberRaw[2]}.raw`);
+      sites.push({ rule: "memberWrites", key, line: lineOf(path, raw), ok: covered(sourceFile, raw, LOCK_HELPERS) });
+    }
+    if (RAW_TENANT_STATE_WRITE.test(text)) {
+      violations.push(`tenant-state  ${lineOf(path, raw)}  raw write of tenant_members.deactivated_at outside team-departure.ts`);
+    }
+    const departureRaw = RAW_DEPARTURE_WRITE.exec(text);
+    if (departureRaw) {
+      const fn = functionName(enclosingFunction(raw));
+      const inDeactivate = raw.getAncestors()
+        .some((a) => Node.isFunctionLikeDeclaration(a) && functionName(a) === "deactivateScimUser");
+      const isDelete = /^DELETE/i.test(departureRaw[1]);
+      if (isDelete || path !== "src/lib/services/scim-user-service.ts" || !inDeactivate) {
+        violations.push(`departure-record  ${lineOf(path, raw)}  ${departureRaw[1].toUpperCase()} tenant_member_departures in ${fn} (only deactivateScimUser writes it; nothing deletes it)`);
+      }
+    }
+  }
+
+  // Rule 4: per function, the tenant-row lock is one call, outside loops,
+  // before any team lock; the transitions next to it are told it is held.
+  const fns = sourceFile.getDescendants().filter((n) => Node.isFunctionLikeDeclaration(n));
+  for (const fn of fns) {
+    const calls = callsIn(fn);
+    const tenantLocks = calls.filter((c) => TENANT_LOCKS.has(calleeName(c)));
+    if (tenantLocks.length === 0) continue;
+    const where = `${path}::${functionName(fn)}`;
+    if (tenantLocks.length > 1) {
+      violations.push(`lock-order  ${where}  ${tenantLocks.length} tenant-row lock calls in one function (lock every user in one call)`);
+    }
+    for (const lock of tenantLocks) {
+      const loop = lock.getAncestors().find((a) => LOOPS.has(a.getKind()) && fn.containsRange(a.getPos(), a.getEnd()));
+      if (loop) violations.push(`lock-order  ${lineOf(path, lock)}  tenant-row lock inside a loop`);
+      const teamFirst = calls.find((c) => LOCK_HELPERS.has(calleeName(c)) && !TENANT_LOCK_WRAPPERS.has(calleeName(c)) && c.getStart() < lock.getStart());
+      if (teamFirst) violations.push(`lock-order  ${lineOf(path, lock)}  tenant-row lock after a team lock (${lineOf(path, teamFirst)})`);
+    }
+    for (const transition of calls.filter((c) => TRANSITIONS.has(calleeName(c)))) {
+      if (!passesAlreadyLocked(fn, transition.getArguments()[3])) {
+        violations.push(`lock-order  ${lineOf(path, transition)}  ${calleeName(transition)} next to a tenant-row lock without alreadyLocked: true`);
+      }
+    }
+  }
+}
+
+const problems = [];
+const counts = Object.fromEntries(Object.keys(EXPECTED).map((rule) => [rule, sites.filter((s) => s.rule === rule).length]));
+if (Object.keys(EXPECTED).some((rule) => counts[rule] !== EXPECTED[rule])) {
+  problems.push(
+    `site counts ${JSON.stringify(counts)} differ from the pinned ${JSON.stringify(EXPECTED)}. ` +
+      `Review the sites that appeared or disappeared, then update EXPECTED:\n` +
+      sites.map((s) => `  ${s.line}  ${s.key}`).join("\n"),
+  );
+}
+const uncovered = sites.filter((s) => !s.ok && !EXEMPTIONS.has(s.key));
+if (uncovered.length > 0) {
+  problems.push(
+    `sites without their lock (a member-set write needs a team lock before it; an admission a tenant-row lock; ` +
+      `a tenant active-state write belongs in team-departure.ts):\n` +
+      uncovered.map((s) => `  ${s.line}  ${s.key}`).join("\n"),
+  );
+}
+if (violations.length > 0) problems.push(`violations:\n${violations.map((v) => `  ${v}`).join("\n")}`);
+const badExemptions = [...EXEMPTIONS.keys()].filter((k) => sites.filter((s) => s.key === k).length !== 1);
+if (badExemptions.length > 0) {
+  problems.push(`exemption(s) matching no site, or several — make each match exactly one:\n${badExemptions.map((k) => `  ${k}`).join("\n")}`);
+}
+if (problems.length > 0) {
+  for (const p of problems) console.error(`\nFAIL: ${p}`);
+  process.exit(1);
+}
+console.log(`check-team-rotation-input-lock: OK ${JSON.stringify(counts)}`);
