@@ -3,7 +3,7 @@ import { createRequest, createParams } from "@/__tests__/helpers/request-builder
 import { API_ERROR } from "@/lib/http/api-error-codes";
 
 const {
-  mockAuth, mockPrismaTeamPasswordEntry, mockPrismaTeamFolder, mockPrismaTeam, mockPrismaTeamTag, mockAuditLogCreate,
+  mockAuth, mockPrismaTeamPasswordEntry, mockPrismaTeamFolder, mockTeamLockRow, mockPrismaTeamTag, mockAuditLogCreate,
   mockRequireTeamPermission,
   mockRequireTeamMember, mockHasTeamPermission, TeamAuthError,
   mockPrismaTransaction,
@@ -27,7 +27,8 @@ const {
       updateMany: vi.fn(),
     },
     mockPrismaTeamFolder: { findUnique: vi.fn() },
-    mockPrismaTeam: { findUnique: vi.fn() },
+    // Rows for the service's in-tx team key-version read (FROM teams ... FOR SHARE).
+    mockTeamLockRow: vi.fn(),
     mockPrismaTeamTag: { count: vi.fn().mockResolvedValue(0) },
     mockAuditLogCreate: vi.fn(),
     mockRequireTeamPermission: vi.fn(),
@@ -49,7 +50,6 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     teamPasswordEntry: mockPrismaTeamPasswordEntry,
     teamFolder: mockPrismaTeamFolder,
-    team: mockPrismaTeam,
     teamTag: mockPrismaTeamTag,
     auditLog: { create: mockAuditLogCreate },
     $transaction: mockPrismaTransaction,
@@ -292,7 +292,7 @@ const teamCurRow = {
 
 describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
   const txMock = {
-    $queryRaw: vi.fn().mockResolvedValue([teamCurRow]),
+    $queryRaw: vi.fn(),
     teamPasswordEntryHistory: {
       create: vi.fn().mockResolvedValue({}),
       findMany: vi.fn().mockResolvedValue([]),
@@ -309,8 +309,12 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
     mockRequireTeamMember.mockResolvedValue({ id: "member-1", role: TEAM_ROLE.ADMIN, userId: "test-user-id" });
     mockHasTeamPermission.mockReturnValue(true);
     mockAuditLogCreate.mockResolvedValue({});
-    mockPrismaTeam.findUnique.mockResolvedValue({ teamKeyVersion: 1 });
-    txMock.$queryRaw.mockResolvedValue([teamCurRow]);
+    mockTeamLockRow.mockResolvedValue([{ team_key_version: 1, tenant_id: "tenant-1" }]);
+    // The team key-version lock read gets the team row; the entry FOR UPDATE
+    // snapshot gets teamCurRow.
+    txMock.$queryRaw.mockImplementation(async (strings: TemplateStringsArray) =>
+      strings.join("?").includes("FROM teams") ? mockTeamLockRow() : [teamCurRow],
+    );
     txMock.teamPasswordEntryHistory.create.mockResolvedValue({});
     txMock.teamPasswordEntryHistory.findMany.mockResolvedValue([]);
     txMock.teamPasswordEntryHistory.deleteMany.mockResolvedValue({ count: 0 });
@@ -397,7 +401,7 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
 
   it("returns 409 when teamKeyVersion does not match team's current version (F-13)", async () => {
     mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
-    mockPrismaTeam.findUnique.mockResolvedValue({ teamKeyVersion: 2 }); // team is at v2
+    mockTeamLockRow.mockResolvedValue([{ team_key_version: 2, tenant_id: "tenant-1" }]); // team is at v2
 
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`, {

@@ -117,12 +117,16 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     await withTeamTenantRls(
       teamId,
       async (_tenantId, tx) => {
-        // Re-verify teamKeyVersion hasn't changed since pre-read
-        const currentTeam = await tx.team.findUnique({
-          where: { id: teamId },
-          select: { teamKeyVersion: true },
-        });
-        if (!currentTeam || currentTeam.teamKeyVersion !== team.teamKeyVersion) {
+        // Re-verify teamKeyVersion hasn't changed since pre-read, under a row
+        // lock taken as the FIRST statement (lock order teams →
+        // team_password_entries). Entry writers hold this row FOR SHARE while
+        // they check their teamKeyVersion, so a write that read the old
+        // version has committed before the entry listing below runs (and is
+        // listed), or waits and then sees the bumped version.
+        const [currentTeam] = await tx.$queryRaw<{ team_key_version: number }[]>`
+          SELECT team_key_version FROM teams WHERE id = ${teamId}::uuid FOR UPDATE
+        `;
+        if (!currentTeam || currentTeam.team_key_version !== team.teamKeyVersion) {
           throw new Error("TEAM_KEY_VERSION_CONFLICT");
         }
 
@@ -236,11 +240,11 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     if (e instanceof Error && e.message === "TEAM_KEY_VERSION_CONFLICT") {
       return errorResponse(API_ERROR.TEAM_KEY_VERSION_MISMATCH);
     }
-    // A concurrent rotation that lost the CAS race can still collide on the
-    // teamMemberKey @@unique([teamId, userId, keyVersion]) createMany before its
-    // non-locking findUnique re-read observes the winner's bump. Map that P2002
-    // to the same 409 conflict shape as the CAS, not a bare unhandled 500 —
-    // mirrors the personal VaultKey P2002 mapping in rotate-key-server.ts.
+    // Concurrent rotations serialise on the teams FOR UPDATE above, so the
+    // loser normally fails the CAS. A teamMemberKey
+    // @@unique([teamId, userId, keyVersion]) collision is still mapped to the
+    // same 409 conflict shape rather than a bare 500 — mirrors the personal
+    // VaultKey P2002 mapping in rotate-key-server.ts.
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
       return errorResponse(API_ERROR.TEAM_KEY_VERSION_MISMATCH);
     }

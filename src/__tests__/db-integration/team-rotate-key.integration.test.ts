@@ -372,12 +372,11 @@ describe("team key rotation — real-DB integration (C7)", () => {
       // committed against the same target version — a correctness violation.
       expect(successes).toBeLessThanOrEqual(1);
       // API-consistency invariant: the loser is ALWAYS a clean 409, never a
-      // bare 500. The team-rotate CAS re-read (`tx.team.findUnique`) is a
-      // non-locking SELECT, so two concurrent same-target rotations can both
-      // pass the pre-check and race to `teamMemberKey.createMany`; the loser
-      // hits the `@@unique([teamId, userId, keyVersion])` constraint (P2002),
-      // which the route now maps to TEAM_KEY_VERSION_MISMATCH (409) rather than
-      // surfacing as an unhandled 500 — mirrors the personal VaultKey P2002 fix.
+      // bare 500. Two concurrent same-target rotations serialise on the CAS
+      // re-read's `teams ... FOR UPDATE`, so the loser sees the bumped version;
+      // a `teamMemberKey` `@@unique([teamId, userId, keyVersion])` collision
+      // (P2002) is also mapped to TEAM_KEY_VERSION_MISMATCH (409) rather than
+      // an unhandled 500 — mirrors the personal VaultKey P2002 fix.
       expect(statuses.every((s) => s === 200 || s === 409)).toBe(true);
 
       if (statuses[0] === 200 && statuses[1] === 409) {

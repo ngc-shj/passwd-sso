@@ -34,7 +34,9 @@ const {
 }));
 
 const txMock = {
-  team: { findUnique: vi.fn(), update: vi.fn() },
+  // The in-tx CAS re-read (SELECT team_key_version FROM teams ... FOR UPDATE).
+  $queryRaw: vi.fn(),
+  team: { update: vi.fn() },
   teamMember: { findMany: vi.fn() },
   teamPasswordEntry: { updateMany: vi.fn(), findMany: vi.fn() },
   teamMemberKey: { createMany: vi.fn() },
@@ -115,7 +117,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     mockTeamFindUnique.mockResolvedValue({
       teamKeyVersion: 1,
     });
-    txMock.team.findUnique.mockResolvedValue({ teamKeyVersion: 1 });
+    txMock.$queryRaw.mockResolvedValue([{ team_key_version: 1 }]);
     txMock.team.update.mockResolvedValue({});
     txMock.teamMember.findMany.mockResolvedValue([{ userId: "660e8400-e29b-41d4-a716-446655440001" }]);
     txMock.teamPasswordEntry.updateMany.mockResolvedValue({ count: 1 });
@@ -255,7 +257,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
 
   it("returns 409 when teamKeyVersion changed concurrently (S-17 optimistic lock)", async () => {
     // Pre-read returns version 1, but inside tx it's already been bumped to 2
-    txMock.team.findUnique.mockResolvedValue({ teamKeyVersion: 2 });
+    txMock.$queryRaw.mockResolvedValue([{ team_key_version: 2 }]);
     const res = await POST(
       createRequest({
         newTeamKeyVersion: 2,
@@ -267,6 +269,24 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     const json = await res.json();
     expect(res.status).toBe(409);
     expect(json.error).toBe("TEAM_KEY_VERSION_MISMATCH");
+  });
+
+  it("locks the team row FOR UPDATE before listing the team's entries", async () => {
+    const res = await POST(
+      createRequest({
+        newTeamKeyVersion: 2,
+        entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
+        memberKeys: [validMemberKey("660e8400-e29b-41d4-a716-446655440001")],
+      }),
+      createParams("team-1"),
+    );
+    expect(res.status).toBe(200);
+    const [strings, teamId] = txMock.$queryRaw.mock.calls[0] as [TemplateStringsArray, string];
+    expect(strings.join("?")).toMatch(/FROM teams WHERE id = \?::uuid FOR UPDATE/);
+    expect(teamId).toBe("team-1");
+    expect(txMock.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      txMock.teamPasswordEntry.findMany.mock.invocationCallOrder[0],
+    );
   });
 
   it("rotates key successfully and logs audit (S-2)", async () => {

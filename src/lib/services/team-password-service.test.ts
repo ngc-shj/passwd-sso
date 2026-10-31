@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const {
-  mockTeamFindUnique,
+  mockTeamLockRead,
   mockTeamFolderFindUnique,
   mockTeamTagCount,
   mockTeamPasswordEntryCreate,
@@ -11,8 +11,9 @@ const {
   mockTeamPasswordEntryHistoryDeleteMany,
   mockTxQueryRaw,
   mockTransaction,
+  queryRawOn,
 } = vi.hoisted(() => {
-  const mockTeamFindUnique = vi.fn();
+  const mockTeamLockRead = vi.fn();
   const mockTeamFolderFindUnique = vi.fn();
   const mockTeamTagCount = vi.fn();
   const mockTeamPasswordEntryCreate = vi.fn();
@@ -36,8 +37,21 @@ const {
   };
   const mockTxQueryRaw = vi.fn().mockResolvedValue([teamCurRow]);
 
+  // $queryRaw dispatcher: the team key-version lock read (FROM teams) goes to
+  // mockTeamLockRead (with the client it ran on), every other raw query —
+  // the entry FOR UPDATE snapshot — to mockTxQueryRaw.
+  const queryRawOn = (via: "prisma" | "tx") =>
+    async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      const sql = strings.join("?");
+      if (/FROM teams\b/.test(sql)) {
+        const team = await mockTeamLockRead(values[0], sql, via);
+        return team ? [{ team_key_version: team.teamKeyVersion, tenant_id: team.tenantId }] : [];
+      }
+      return mockTxQueryRaw(strings, ...values);
+    };
+
   const txClient = {
-    $queryRaw: mockTxQueryRaw,
+    $queryRaw: queryRawOn("tx"),
     teamPasswordEntryHistory: {
       create: mockTeamPasswordEntryHistoryCreate,
       findMany: mockTeamPasswordEntryHistoryFindMany,
@@ -53,7 +67,7 @@ const {
   );
 
   return {
-    mockTeamFindUnique,
+    mockTeamLockRead,
     mockTeamFolderFindUnique,
     mockTeamTagCount,
     mockTeamPasswordEntryCreate,
@@ -63,14 +77,12 @@ const {
     mockTeamPasswordEntryHistoryDeleteMany,
     mockTxQueryRaw,
     mockTransaction,
+    queryRawOn,
   };
 });
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    team: {
-      findUnique: mockTeamFindUnique,
-    },
     teamFolder: {
       findUnique: mockTeamFolderFindUnique,
     },
@@ -81,6 +93,7 @@ vi.mock("@/lib/prisma", () => ({
       create: mockTeamPasswordEntryCreate,
       update: mockTeamPasswordEntryUpdate,
     },
+    $queryRaw: queryRawOn("prisma"),
     $transaction: mockTransaction,
   },
 }));
@@ -144,7 +157,7 @@ describe("createTeamPassword", () => {
   });
 
   it("creates entry successfully when both team and folder are valid", async () => {
-    mockTeamFindUnique.mockResolvedValue(DEFAULT_TEAM);
+    mockTeamLockRead.mockResolvedValue(DEFAULT_TEAM);
     mockTeamFolderFindUnique.mockResolvedValue(DEFAULT_FOLDER);
     const created = { id: "entry-1", tags: [] };
     mockTeamPasswordEntryCreate.mockResolvedValue(created);
@@ -155,27 +168,27 @@ describe("createTeamPassword", () => {
     });
 
     expect(result).toBe(created);
-    expect(mockTeamFindUnique).toHaveBeenCalledOnce();
+    expect(mockTeamLockRead).toHaveBeenCalledOnce();
     expect(mockTeamFolderFindUnique).toHaveBeenCalledOnce();
     expect(mockTeamPasswordEntryCreate).toHaveBeenCalledOnce();
   });
 
   it("creates entry successfully when no folderId is provided", async () => {
-    mockTeamFindUnique.mockResolvedValue(DEFAULT_TEAM);
+    mockTeamLockRead.mockResolvedValue(DEFAULT_TEAM);
     const created = { id: "entry-1", tags: [] };
     mockTeamPasswordEntryCreate.mockResolvedValue(created);
 
     const result = await createTeamPassword(TEAM_ID, BASE_CREATE_INPUT);
 
     expect(result).toBe(created);
-    expect(mockTeamFindUnique).toHaveBeenCalledOnce();
+    expect(mockTeamLockRead).toHaveBeenCalledOnce();
     // Folder query must not happen when no folderId given
     expect(mockTeamFolderFindUnique).not.toHaveBeenCalled();
     expect(mockTeamPasswordEntryCreate).toHaveBeenCalledOnce();
   });
 
   it("throws TeamPasswordServiceError (TEAM_KEY_VERSION_MISMATCH) when team is not found", async () => {
-    mockTeamFindUnique.mockResolvedValue(null);
+    mockTeamLockRead.mockResolvedValue(null);
 
     await expect(
       createTeamPassword(TEAM_ID, BASE_CREATE_INPUT),
@@ -188,7 +201,7 @@ describe("createTeamPassword", () => {
   });
 
   it("throws TeamPasswordServiceError (TEAM_KEY_VERSION_MISMATCH) when teamKeyVersion does not match", async () => {
-    mockTeamFindUnique.mockResolvedValue({ ...DEFAULT_TEAM, teamKeyVersion: 99 });
+    mockTeamLockRead.mockResolvedValue({ ...DEFAULT_TEAM, teamKeyVersion: 99 });
 
     const err = await createTeamPassword(TEAM_ID, BASE_CREATE_INPUT).catch((e) => e);
     expect(err).toBeInstanceOf(TeamPasswordServiceError);
@@ -196,7 +209,7 @@ describe("createTeamPassword", () => {
   });
 
   it("throws TeamPasswordServiceError (FOLDER_NOT_FOUND) when folder does not exist", async () => {
-    mockTeamFindUnique.mockResolvedValue(DEFAULT_TEAM);
+    mockTeamLockRead.mockResolvedValue(DEFAULT_TEAM);
     mockTeamFolderFindUnique.mockResolvedValue(null);
 
     const err = await createTeamPassword(TEAM_ID, {
@@ -210,7 +223,7 @@ describe("createTeamPassword", () => {
   });
 
   it("throws TeamPasswordServiceError (FOLDER_NOT_FOUND) when folder belongs to a different team", async () => {
-    mockTeamFindUnique.mockResolvedValue(DEFAULT_TEAM);
+    mockTeamLockRead.mockResolvedValue(DEFAULT_TEAM);
     mockTeamFolderFindUnique.mockResolvedValue({ teamId: "other-team" });
 
     const err = await createTeamPassword(TEAM_ID, {
@@ -223,7 +236,7 @@ describe("createTeamPassword", () => {
   });
 
   it("calls both team and folder queries", async () => {
-    mockTeamFindUnique.mockResolvedValue(DEFAULT_TEAM);
+    mockTeamLockRead.mockResolvedValue(DEFAULT_TEAM);
     mockTeamFolderFindUnique.mockResolvedValue(DEFAULT_FOLDER);
     mockTeamPasswordEntryCreate.mockResolvedValue({ id: "entry-1", tags: [] });
 
@@ -232,10 +245,11 @@ describe("createTeamPassword", () => {
       teamFolderId: FOLDER_ID,
     });
 
-    expect(mockTeamFindUnique).toHaveBeenCalledWith({
-      where: { id: TEAM_ID },
-      select: { teamKeyVersion: true, tenantId: true },
-    });
+    expect(mockTeamLockRead).toHaveBeenCalledWith(
+      TEAM_ID,
+      expect.stringMatching(/FROM teams WHERE id = \?::uuid FOR SHARE/),
+      "prisma",
+    );
     expect(mockTeamFolderFindUnique).toHaveBeenCalledWith({
       where: { id: FOLDER_ID },
       select: { teamId: true },
@@ -244,7 +258,7 @@ describe("createTeamPassword", () => {
 
   it("uses client-provided id when given", async () => {
     const clientId = "client-uuid-abc";
-    mockTeamFindUnique.mockResolvedValue(DEFAULT_TEAM);
+    mockTeamLockRead.mockResolvedValue(DEFAULT_TEAM);
     mockTeamPasswordEntryCreate.mockResolvedValue({ id: clientId, tags: [] });
 
     await createTeamPassword(TEAM_ID, { ...BASE_CREATE_INPUT, id: clientId });
@@ -254,7 +268,7 @@ describe("createTeamPassword", () => {
   });
 
   it("creates entry with UUID v4 teamId and entryId", async () => {
-    mockTeamFindUnique.mockResolvedValue(DEFAULT_TEAM);
+    mockTeamLockRead.mockResolvedValue(DEFAULT_TEAM);
     const created = { id: PASSWORD_ID_UUID, tags: [] };
     mockTeamPasswordEntryCreate.mockResolvedValue(created);
 
@@ -266,13 +280,11 @@ describe("createTeamPassword", () => {
     expect(result).toBe(created);
     const createCall = mockTeamPasswordEntryCreate.mock.calls[0][0];
     expect(createCall.data.id).toBe(PASSWORD_ID_UUID);
-    expect(mockTeamFindUnique).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: TEAM_ID_UUID } })
-    );
+    expect(mockTeamLockRead).toHaveBeenCalledWith(TEAM_ID_UUID, expect.any(String), "prisma");
   });
 
   it("accepts tagIds that belong to the same team", async () => {
-    mockTeamFindUnique.mockResolvedValue(DEFAULT_TEAM);
+    mockTeamLockRead.mockResolvedValue(DEFAULT_TEAM);
     mockTeamTagCount.mockResolvedValue(2);
     const created = { id: "entry-1", tags: [] };
     mockTeamPasswordEntryCreate.mockResolvedValue(created);
@@ -289,7 +301,7 @@ describe("createTeamPassword", () => {
   });
 
   it("accepts empty tagIds without calling teamTag.count", async () => {
-    mockTeamFindUnique.mockResolvedValue(DEFAULT_TEAM);
+    mockTeamLockRead.mockResolvedValue(DEFAULT_TEAM);
     const created = { id: "entry-1", tags: [] };
     mockTeamPasswordEntryCreate.mockResolvedValue(created);
 
@@ -299,7 +311,7 @@ describe("createTeamPassword", () => {
   });
 
   it("accepts undefined tagIds without calling teamTag.count", async () => {
-    mockTeamFindUnique.mockResolvedValue(DEFAULT_TEAM);
+    mockTeamLockRead.mockResolvedValue(DEFAULT_TEAM);
     const created = { id: "entry-1", tags: [] };
     mockTeamPasswordEntryCreate.mockResolvedValue(created);
 
@@ -309,7 +321,7 @@ describe("createTeamPassword", () => {
   });
 
   it("rejects tagIds from another team in same tenant on create", async () => {
-    mockTeamFindUnique.mockResolvedValue(DEFAULT_TEAM);
+    mockTeamLockRead.mockResolvedValue(DEFAULT_TEAM);
     mockTeamTagCount.mockResolvedValue(1); // only 1 of 2 tags belong to this team
 
     const err = await createTeamPassword(TEAM_ID, {
@@ -327,7 +339,7 @@ describe("createTeamPassword", () => {
     // A client may legitimately send ["tag-1","tag-1"] (e.g. UI bug); without
     // dedup the count check would fail spuriously because teamTag.count returns
     // distinct rows (1) while the raw input length is 2.
-    mockTeamFindUnique.mockResolvedValue(DEFAULT_TEAM);
+    mockTeamLockRead.mockResolvedValue(DEFAULT_TEAM);
     mockTeamTagCount.mockResolvedValue(1);
     const created = { id: "entry-1", tags: [] };
     mockTeamPasswordEntryCreate.mockResolvedValue(created);
@@ -373,7 +385,7 @@ describe("updateTeamPassword", () => {
     mockTxQueryRaw.mockResolvedValue([TEAM_CUR_ROW]);
     mockTransaction.mockImplementation(async (fn) =>
       fn({
-        $queryRaw: mockTxQueryRaw,
+        $queryRaw: queryRawOn("tx"),
         teamPasswordEntryHistory: {
           create: mockTeamPasswordEntryHistoryCreate,
           findMany: mockTeamPasswordEntryHistoryFindMany,
@@ -387,7 +399,7 @@ describe("updateTeamPassword", () => {
   });
 
   it("updates entry with full payload (team version check + folder validation)", async () => {
-    mockTeamFindUnique.mockResolvedValue({ teamKeyVersion: 3 });
+    mockTeamLockRead.mockResolvedValue({ teamKeyVersion: 3 });
     mockTeamFolderFindUnique.mockResolvedValue(DEFAULT_FOLDER);
     mockTeamPasswordEntryHistoryCreate.mockResolvedValue({});
     mockTeamPasswordEntryHistoryFindMany.mockResolvedValue([{ id: "h-1" }]);
@@ -408,7 +420,7 @@ describe("updateTeamPassword", () => {
     const result = await updateTeamPassword(TEAM_ID, PASSWORD_ID, input);
 
     expect(result).toBe(updated);
-    expect(mockTeamFindUnique).toHaveBeenCalledOnce();
+    expect(mockTeamLockRead).toHaveBeenCalledOnce();
     expect(mockTeamFolderFindUnique).toHaveBeenCalledOnce();
     expect(mockTeamPasswordEntryHistoryCreate).toHaveBeenCalledOnce();
     expect(mockTeamPasswordEntryUpdate).toHaveBeenCalledOnce();
@@ -429,7 +441,7 @@ describe("updateTeamPassword", () => {
     await updateTeamPassword(TEAM_ID, PASSWORD_ID, input);
 
     // Team must NOT be queried when encryptedBlob is absent
-    expect(mockTeamFindUnique).not.toHaveBeenCalled();
+    expect(mockTeamLockRead).not.toHaveBeenCalled();
     expect(mockTeamFolderFindUnique).toHaveBeenCalledOnce();
     // No history snapshot for metadata-only updates
     expect(mockTeamPasswordEntryHistoryCreate).not.toHaveBeenCalled();
@@ -454,7 +466,7 @@ describe("updateTeamPassword", () => {
   });
 
   it("throws TeamPasswordServiceError (TEAM_KEY_VERSION_MISMATCH) when team version differs", async () => {
-    mockTeamFindUnique.mockResolvedValue({ teamKeyVersion: 99 });
+    mockTeamLockRead.mockResolvedValue({ teamKeyVersion: 99 });
 
     const input: UpdateTeamPasswordInput = {
       encryptedBlob: ENCRYPTED_BLOB,
@@ -473,7 +485,7 @@ describe("updateTeamPassword", () => {
   });
 
   it("throws TeamPasswordServiceError (TEAM_KEY_VERSION_MISMATCH) when team is not found during full update", async () => {
-    mockTeamFindUnique.mockResolvedValue(null);
+    mockTeamLockRead.mockResolvedValue(null);
 
     const input: UpdateTeamPasswordInput = {
       encryptedBlob: ENCRYPTED_BLOB,
@@ -520,7 +532,7 @@ describe("updateTeamPassword", () => {
   });
 
   it("creates a history snapshot when encryptedBlob changes", async () => {
-    mockTeamFindUnique.mockResolvedValue({ teamKeyVersion: 3 });
+    mockTeamLockRead.mockResolvedValue({ teamKeyVersion: 3 });
     mockTeamPasswordEntryHistoryCreate.mockResolvedValue({});
     mockTeamPasswordEntryHistoryFindMany.mockResolvedValue([{ id: "h-1" }]);
     mockTeamPasswordEntryUpdate.mockResolvedValue({ id: PASSWORD_ID, tags: [] });
@@ -547,7 +559,7 @@ describe("updateTeamPassword", () => {
   });
 
   it("trims history to 20 entries when limit is exceeded", async () => {
-    mockTeamFindUnique.mockResolvedValue({ teamKeyVersion: 3 });
+    mockTeamLockRead.mockResolvedValue({ teamKeyVersion: 3 });
     mockTeamPasswordEntryHistoryCreate.mockResolvedValue({});
     // Simulate 21 history records (exceeds the 20-entry limit)
     const historyRecords = Array.from({ length: 21 }, (_, i) => ({ id: `h-${i}` }));
@@ -575,7 +587,7 @@ describe("updateTeamPassword", () => {
   });
 
   it("calls both team and folder queries during full update with folder", async () => {
-    mockTeamFindUnique.mockResolvedValue({ teamKeyVersion: 3 });
+    mockTeamLockRead.mockResolvedValue({ teamKeyVersion: 3 });
     mockTeamFolderFindUnique.mockResolvedValue(DEFAULT_FOLDER);
     mockTeamPasswordEntryHistoryCreate.mockResolvedValue({});
     mockTeamPasswordEntryHistoryFindMany.mockResolvedValue([{ id: "h-1" }]);
@@ -594,10 +606,16 @@ describe("updateTeamPassword", () => {
 
     await updateTeamPassword(TEAM_ID, PASSWORD_ID, input);
 
-    expect(mockTeamFindUnique).toHaveBeenCalledWith({
-      where: { id: TEAM_ID },
-      select: { teamKeyVersion: true },
-    });
+    // The version check runs on the transaction client, under FOR SHARE, and
+    // before the entry FOR UPDATE (lock order teams → team_password_entries).
+    expect(mockTeamLockRead).toHaveBeenCalledWith(
+      TEAM_ID,
+      expect.stringMatching(/FROM teams WHERE id = \?::uuid FOR SHARE/),
+      "tx",
+    );
+    expect(mockTeamLockRead.mock.invocationCallOrder[0]).toBeLessThan(
+      mockTxQueryRaw.mock.invocationCallOrder[0],
+    );
     expect(mockTeamFolderFindUnique).toHaveBeenCalledWith({
       where: { id: FOLDER_ID },
       select: { teamId: true },
@@ -654,7 +672,7 @@ describe("updateTeamPassword", () => {
       userId: USER_ID,
       existingEntry: { ...BASE_EXISTING_ENTRY, teamKeyVersion: 3, itemKeyVersion: 1 },
     };
-    mockTeamFindUnique.mockResolvedValue({ teamKeyVersion: 4 });
+    mockTeamLockRead.mockResolvedValue({ teamKeyVersion: 4 });
 
     const err = await updateTeamPassword(TEAM_ID, PASSWORD_ID, input).catch((e) => e);
     expect(err).toBeInstanceOf(TeamPasswordServiceError);
@@ -664,7 +682,7 @@ describe("updateTeamPassword", () => {
   });
 
   it("succeeds when teamKeyVersion change is paired with new encryptedItemKey re-wrap", async () => {
-    mockTeamFindUnique.mockResolvedValue({ teamKeyVersion: 4 });
+    mockTeamLockRead.mockResolvedValue({ teamKeyVersion: 4 });
     mockTeamPasswordEntryHistoryCreate.mockResolvedValue({});
     mockTeamPasswordEntryHistoryFindMany.mockResolvedValue([{ id: "h-1" }]);
     const updated = { id: PASSWORD_ID, tags: [] };
@@ -687,7 +705,7 @@ describe("updateTeamPassword", () => {
   });
 
   it("succeeds when upgrading v0→v1 and encryptedItemKey is provided", async () => {
-    mockTeamFindUnique.mockResolvedValue({ teamKeyVersion: 3 });
+    mockTeamLockRead.mockResolvedValue({ teamKeyVersion: 3 });
     mockTeamPasswordEntryHistoryCreate.mockResolvedValue({});
     mockTeamPasswordEntryHistoryFindMany.mockResolvedValue([{ id: "h-1" }]);
     const updated = { id: PASSWORD_ID, tags: [] };
@@ -814,7 +832,7 @@ describe("updateTeamPassword", () => {
 
   // C1: FOR UPDATE snapshot source and SQL text guard
   it("C1: $queryRaw is called before History.create on full (blob-changing) update", async () => {
-    mockTeamFindUnique.mockResolvedValue({ teamKeyVersion: 3 });
+    mockTeamLockRead.mockResolvedValue({ teamKeyVersion: 3 });
     mockTeamPasswordEntryHistoryFindMany.mockResolvedValue([]);
     mockTeamPasswordEntryUpdate.mockResolvedValue({ id: PASSWORD_ID, tags: [] });
 
@@ -844,7 +862,7 @@ describe("updateTeamPassword", () => {
   });
 
   it("C1: FOR UPDATE SQL contains table name, team_id predicate, and required crypto columns", async () => {
-    mockTeamFindUnique.mockResolvedValue({ teamKeyVersion: 3 });
+    mockTeamLockRead.mockResolvedValue({ teamKeyVersion: 3 });
     mockTeamPasswordEntryHistoryCreate.mockResolvedValue({});
     mockTeamPasswordEntryHistoryFindMany.mockResolvedValue([]);
     mockTeamPasswordEntryUpdate.mockResolvedValue({ id: PASSWORD_ID, tags: [] });
@@ -879,7 +897,7 @@ describe("updateTeamPassword", () => {
   });
 
   it("C1: all 9 crypto fields in History.create come from $queryRaw result, not from existingEntry", async () => {
-    mockTeamFindUnique.mockResolvedValue({ teamKeyVersion: 3 });
+    mockTeamLockRead.mockResolvedValue({ teamKeyVersion: 3 });
     mockTeamPasswordEntryHistoryCreate.mockResolvedValue({});
     mockTeamPasswordEntryHistoryFindMany.mockResolvedValue([]);
     mockTeamPasswordEntryUpdate.mockResolvedValue({ id: PASSWORD_ID, tags: [] });
@@ -931,7 +949,7 @@ describe("updateTeamPassword", () => {
 
   // F1: race — entry deleted between caller's read and FOR UPDATE lock
   it("F1: throws TeamPasswordServiceError (NOT_FOUND, 404) when $queryRaw FOR UPDATE returns empty (concurrent delete)", async () => {
-    mockTeamFindUnique.mockResolvedValue({ teamKeyVersion: 3 });
+    mockTeamLockRead.mockResolvedValue({ teamKeyVersion: 3 });
     mockTxQueryRaw.mockResolvedValue([]); // row gone by the time the lock fires
 
     const input: UpdateTeamPasswordInput = {
