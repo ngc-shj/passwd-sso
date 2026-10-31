@@ -41,6 +41,7 @@ vi.mock("@/lib/prisma", () => ({
     teamPasswordEntry: mockPrismaTeamPasswordEntry,
     teamFolder: mockPrismaTeamFolder,
     $queryRaw: mockTeamQueryRaw,
+    $executeRaw: vi.fn(),
     teamTag: mockPrismaTeamTag,
     auditLog: { create: mockAuditLogCreate },
     user: { findMany: mockUserFindMany },

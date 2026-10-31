@@ -224,7 +224,7 @@ export const BYPASS_GRANT = Object.freeze({
   USER_SESSION_INVALIDATION: defineGrant(BYPASS_PURPOSE.TOKEN_LIFECYCLE, ["apiKey", "delegationSession", "extensionToken", "mcpAccessToken", "mcpRefreshToken", "operatorToken", "session"]),
   VAULT_ENTRY_CROSS_TENANT_READ: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["passwordEntry"]),
   VAULT_RESET_COUNT: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["attachment", "passwordEntry"]),
-  VAULT_RESET_EXECUTE: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["attachment", "auditOutbox", "emergencyAccessGrant", "folder", "passwordEntry", "passwordShare", "tag", "teamMember", "teamMemberKey", "user", "vaultKey"]),
+  VAULT_RESET_EXECUTE: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["attachment", "auditOutbox", "emergencyAccessGrant", "folder", "passwordEntry", "passwordShare", "tag", "team", "teamMember", "teamMemberKey", "user", "vaultKey"]),
   VAULT_RESET_SCOPE_CHECK: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["attachment", "emergencyAccessGrant", "folder", "passwordEntry", "passwordShare", "tag", "vaultKey"]),
   WEBAUTHN_AUTHORIZE_CREDENTIAL: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["webAuthnCredential", "user"]),
   WEBHOOK_SECRET_MIGRATION: defineGrant(BYPASS_PURPOSE.SYSTEM_MAINTENANCE, ["teamWebhook", "tenantWebhook"]),

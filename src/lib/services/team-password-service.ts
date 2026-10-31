@@ -13,6 +13,7 @@ import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
 import { API_ERROR, type ApiErrorCode } from "@/lib/http/api-error-codes";
 import { toBlobColumns, toOverviewColumns } from "@/lib/crypto/crypto-blob";
 import { dedupeTagIds, tagConnect, tagSet } from "@/lib/services/tag-relation";
+import { lockTeamKeyVersion, TeamRotationInProgressError } from "@/lib/team/team-key-rotation-lock";
 import type { EntryType, Prisma } from "@prisma/client";
 
 // ---------------------------------------------------------------------------
@@ -130,31 +131,30 @@ async function assertTeamTagsOwnership(
 
 /**
  * Reject a team-entry write whose `teamKeyVersion` is not the team's current
- * one, and hold the team row `FOR SHARE` until the transaction ends — the team
- * twin of `assertCurrentKeyVersion`. Team rotation takes `teams ... FOR UPDATE`
- * as its first statement, so a write and a rotation serialise: the write either
- * commits before the rotation lists the team's entries (the rotation then sees
- * it), or reads the bumped version after the rotation commits. An unlocked read
- * lets a write that read the old version commit next to the rotation, leaving a
- * live entry under the key a just-removed member still holds.
- *
- * MUST run inside an open transaction (the ambient `withTeamTenantRls` one at
- * the service call sites); a bare client degrades it to an unlocked read.
- * Lock order: `teams` before any `team_password_entries` row lock.
+ * one, holding the team row FOR SHARE until the transaction ends so the
+ * write serialises with rotation (see team-key-rotation-lock.ts) — the team
+ * twin of `assertCurrentKeyVersion`. A rotation that holds the row past the
+ * lock timeout answers the same 409: the client refetches the team key.
  */
 async function assertCurrentTeamKeyVersion(
-  tx: Pick<Prisma.TransactionClient, "$queryRaw">,
+  tx: Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw">,
   teamId: string,
   // A full update whose caller omitted the version never matches.
   teamKeyVersion: number | undefined,
 ): Promise<{ tenantId: string }> {
-  const [team] = await tx.$queryRaw<{ team_key_version: number; tenant_id: string }[]>`
-    SELECT team_key_version, tenant_id FROM teams WHERE id = ${teamId}::uuid FOR SHARE
-  `;
-  if (!team || team.team_key_version !== teamKeyVersion) {
+  let team: Awaited<ReturnType<typeof lockTeamKeyVersion>>;
+  try {
+    team = await lockTeamKeyVersion(tx, teamId);
+  } catch (e) {
+    if (e instanceof TeamRotationInProgressError) {
+      throw new TeamPasswordServiceError(API_ERROR.TEAM_KEY_VERSION_MISMATCH, 409);
+    }
+    throw e;
+  }
+  if (!team || team.teamKeyVersion !== teamKeyVersion) {
     throw new TeamPasswordServiceError(API_ERROR.TEAM_KEY_VERSION_MISMATCH, 409);
   }
-  return { tenantId: team.tenant_id };
+  return { tenantId: team.tenantId };
 }
 
 // ---------------------------------------------------------------------------
@@ -274,6 +274,8 @@ export async function createTeamPassword(
   } = input;
 
   // Validate teamKeyVersion (locked against rotation) and folder ownership.
+  // `prisma` resolves to the caller's withTeamTenantRls transaction, which
+  // holds the FOR SHARE until the entry insert commits.
   // tenantId is resolved from the team record, not passed by caller.
   const { tenantId } = await assertCurrentTeamKeyVersion(prisma, teamId, teamKeyVersion);
   const folder = teamFolderId

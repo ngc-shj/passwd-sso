@@ -7,14 +7,18 @@ const {
   mockTenantMemberFindMany,
   mockScimGroupMappingFindUnique,
   mockTransaction,
+  mockTeamLockQuery,
 } = vi.hoisted(() => {
   const mockTeamMemberFindMany = vi.fn();
   const mockTeamMemberCreateMany = vi.fn();
   const mockTeamMemberUpdateMany = vi.fn();
   const mockTenantMemberFindMany = vi.fn();
   const mockScimGroupMappingFindUnique = vi.fn();
+  // The team lock against key rotation (SELECT id FROM teams ... FOR SHARE).
+  const mockTeamLockQuery = vi.fn();
 
   const txClient = {
+    $queryRaw: mockTeamLockQuery,
     teamMember: {
       findMany: mockTeamMemberFindMany,
       createMany: mockTeamMemberCreateMany,
@@ -36,6 +40,7 @@ const {
     mockTenantMemberFindMany,
     mockScimGroupMappingFindUnique,
     mockTransaction,
+    mockTeamLockQuery,
   };
 });
 
@@ -87,7 +92,9 @@ describe("replaceScimGroup", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     // Re-apply the transaction implementation after reset
+    mockTeamLockQuery.mockResolvedValue([{ id: TEAM_ID }]);
     mockTransaction.mockImplementation(async (fn) => fn({
+      $queryRaw: mockTeamLockQuery,
       teamMember: {
         findMany: mockTeamMemberFindMany,
         createMany: mockTeamMemberCreateMany,
@@ -174,6 +181,14 @@ describe("replaceScimGroup", () => {
     expect(updateCall.data.deactivatedAt).toBeInstanceOf(Date);
     expect(result.removed).toBe(2);
     expect(result.added).toBe(0);
+    // Deactivation is serialised with key rotation: the team lock is the
+    // transaction's first statement.
+    const [lockSql, lockedIds] = mockTeamLockQuery.mock.calls[0] as [TemplateStringsArray, string[]];
+    expect(lockSql.join("?")).toMatch(/FROM teams WHERE id = ANY\(\?::uuid\[\]\) ORDER BY id FOR SHARE/);
+    expect(lockedIds).toEqual([TEAM_ID]);
+    expect(mockTeamLockQuery.mock.invocationCallOrder[0]).toBeLessThan(
+      mockTeamMemberFindMany.mock.invocationCallOrder[0],
+    );
   });
 
   it("applies mixed add and remove in a replace operation", async () => {
@@ -374,7 +389,9 @@ describe("patchScimGroup", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     // Re-apply the transaction implementation after reset
+    mockTeamLockQuery.mockResolvedValue([{ id: TEAM_ID }]);
     mockTransaction.mockImplementation(async (fn) => fn({
+      $queryRaw: mockTeamLockQuery,
       teamMember: {
         findMany: mockTeamMemberFindMany,
         createMany: mockTeamMemberCreateMany,
@@ -442,6 +459,24 @@ describe("patchScimGroup", () => {
     const updateCall = mockTeamMemberUpdateMany.mock.calls[0][0];
     expect(updateCall.where.id.in).toEqual(expect.arrayContaining(["m-1", "m-2"]));
     expect(updateCall.data.deactivatedAt).toBeInstanceOf(Date);
+    // Deactivation is serialised with key rotation: the team lock is the
+    // transaction's first statement.
+    const [lockSql, lockedIds] = mockTeamLockQuery.mock.calls[0] as [TemplateStringsArray, string[]];
+    expect(lockSql.join("?")).toMatch(/FROM teams WHERE id = ANY\(\?::uuid\[\]\) ORDER BY id FOR SHARE/);
+    expect(lockedIds).toEqual([TEAM_ID]);
+    expect(mockTeamLockQuery.mock.invocationCallOrder[0]).toBeLessThan(
+      mockTeamMemberFindMany.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("refuses to deactivate members when the team row cannot be locked against rotation", async () => {
+    mockScimGroupMappingFindUnique.mockResolvedValue(DEFAULT_MAPPING);
+    mockTeamLockQuery.mockResolvedValue([]);
+
+    await expect(
+      patchScimGroup(TENANT_ID, SCIM_ID, [{ op: "remove", userId: "user-a" }], BASE_URL),
+    ).rejects.toThrow("Could not lock 1 team row(s) against key rotation");
+    expect(mockTeamMemberUpdateMany).not.toHaveBeenCalled();
   });
 
   it("throws ScimOwnerProtectedError when adding a user with OWNER role", async () => {
@@ -616,6 +651,7 @@ describe("replaceScimGroup — flatten branch (db has no $transaction)", () => {
     const tenantMemberFindMany = vi.fn().mockResolvedValue([]);
     const scimGroupMappingFindUnique = vi.fn();
     const db = {
+      $queryRaw: mockTeamLockQuery,
       scimGroupMapping: { findUnique: scimGroupMappingFindUnique },
       teamMember: { findMany, createMany, updateMany },
       tenantMember: { findMany: tenantMemberFindMany },
@@ -694,6 +730,7 @@ describe("patchScimGroup — flatten branch (db has no $transaction)", () => {
     const tenantMemberFindMany = vi.fn().mockResolvedValue([]);
     const scimGroupMappingFindUnique = vi.fn();
     const db = {
+      $queryRaw: mockTeamLockQuery,
       scimGroupMapping: { findUnique: scimGroupMappingFindUnique },
       teamMember: { findMany, createMany, updateMany },
       tenantMember: { findMany: tenantMemberFindMany },

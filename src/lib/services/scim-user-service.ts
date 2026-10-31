@@ -8,6 +8,7 @@
 
 import { Prisma } from "@prisma/client";
 import { prisma, type TxOrPrisma } from "@/lib/prisma";
+import { lockMemberTeamsAgainstRotation } from "@/lib/team/team-key-rotation-lock";
 import type { AuditAction } from "@prisma/client";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { userToScimUser, type ScimUserInput, type ScimUserResource } from "@/lib/scim/serializers";
@@ -349,16 +350,19 @@ export async function deactivateScimUser(
   if (member.role === TENANT_ROLE.OWNER) throw new ScimOwnerProtectedError();
 
   try {
-    await prisma.$transaction([
-      prisma.teamMemberKey.deleteMany({ where: { tenantId, userId } }),
-      prisma.scimExternalMapping.deleteMany({
+    await prisma.$transaction(async (tx) => {
+      // Serialise with key rotation of every team being left, before any
+      // member row or key is touched (team-key-rotation-lock.ts).
+      await lockMemberTeamsAgainstRotation(tx, userId, tenantId);
+      await tx.teamMemberKey.deleteMany({ where: { tenantId, userId } });
+      await tx.scimExternalMapping.deleteMany({
         where: { tenantId, internalId: userId, resourceType: "User" },
-      }),
-      prisma.teamMember.deleteMany({ where: { tenantId, userId } }),
-      prisma.tenantMember.delete({
+      });
+      await tx.teamMember.deleteMany({ where: { tenantId, userId } });
+      await tx.tenantMember.delete({
         where: { tenantId_userId: { tenantId, userId } },
-      }),
-    ]);
+      });
+    });
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2003") {
       throw new ScimDeleteConflictError();

@@ -9,6 +9,7 @@ const {
   mockScimExternalMappingFindFirst,
   mockScimExternalMappingDeleteMany,
   mockTransaction,
+  mockQueryRaw,
 } = vi.hoisted(() => ({
   mockTenantMemberFindUnique: vi.fn(),
   mockTenantMemberUpdate: vi.fn(),
@@ -18,6 +19,8 @@ const {
   mockScimExternalMappingFindFirst: vi.fn(),
   mockScimExternalMappingDeleteMany: vi.fn(),
   mockTransaction: vi.fn(),
+  // The team lock against key rotation: the membership read, then the FOR SHARE.
+  mockQueryRaw: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -165,8 +168,19 @@ describe("patchScimUser", () => {
 describe("deactivateScimUser", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    // Default: transaction resolves with the array of results
-    mockTransaction.mockResolvedValue([]);
+    mockQueryRaw.mockImplementation(async (strings: TemplateStringsArray) =>
+      strings.join("?").includes("FROM team_members") ? [{ team_id: "team-1" }] : [{ id: "team-1" }],
+    );
+    // Interactive transaction over the same model mocks.
+    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
+      fn({
+        $queryRaw: mockQueryRaw,
+        teamMemberKey: { deleteMany: mockTeamMemberKeyDeleteMany },
+        scimExternalMapping: { deleteMany: mockScimExternalMappingDeleteMany },
+        teamMember: { deleteMany: mockTeamMemberDeleteMany },
+        tenantMember: { delete: mockTenantMemberDelete },
+      }),
+    );
   });
 
   it("throws ScimUserNotFoundError when member does not exist", async () => {
@@ -203,6 +217,38 @@ describe("deactivateScimUser", () => {
 
     await deactivateScimUser(TENANT_ID, USER_ID);
 
-    expect(mockTransaction).toHaveBeenCalledWith(expect.any(Array));
+    expect(mockTransaction).toHaveBeenCalledWith(expect.any(Function));
+    expect(mockTeamMemberKeyDeleteMany).toHaveBeenCalledWith({ where: { tenantId: TENANT_ID, userId: USER_ID } });
+    expect(mockTeamMemberDeleteMany).toHaveBeenCalledWith({ where: { tenantId: TENANT_ID, userId: USER_ID } });
+    expect(mockTenantMemberDelete).toHaveBeenCalledOnce();
+  });
+
+  it("locks the user's teams in this tenant against key rotation before deleting member keys", async () => {
+    mockTenantMemberFindUnique.mockResolvedValueOnce({ id: "tm1", role: "MEMBER" });
+
+    await deactivateScimUser(TENANT_ID, USER_ID);
+
+    const [membershipSql, ...membershipArgs] = mockQueryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]];
+    expect(membershipSql.join("?")).toMatch(/FROM team_members\s+WHERE user_id = \?::uuid AND tenant_id = \?::uuid/);
+    expect(membershipArgs).toEqual([USER_ID, TENANT_ID]);
+    const [lockSql, lockedIds] = mockQueryRaw.mock.calls[1] as [TemplateStringsArray, string[]];
+    expect(lockSql.join("?")).toMatch(/FROM teams WHERE id = ANY\(\?::uuid\[\]\) ORDER BY id FOR SHARE/);
+    expect(lockedIds).toEqual(["team-1"]);
+    expect(mockQueryRaw.mock.invocationCallOrder[1]).toBeLessThan(
+      mockTeamMemberKeyDeleteMany.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("refuses the deletion when a team row cannot be locked against rotation", async () => {
+    mockTenantMemberFindUnique.mockResolvedValueOnce({ id: "tm1", role: "MEMBER" });
+    mockQueryRaw.mockImplementation(async (strings: TemplateStringsArray) =>
+      strings.join("?").includes("FROM team_members") ? [{ team_id: "team-1" }] : [],
+    );
+
+    await expect(deactivateScimUser(TENANT_ID, USER_ID)).rejects.toThrow(
+      "Could not lock 1 team row(s) against key rotation",
+    );
+    expect(mockTeamMemberKeyDeleteMany).not.toHaveBeenCalled();
+    expect(mockTenantMemberDelete).not.toHaveBeenCalled();
   });
 });

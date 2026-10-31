@@ -118,8 +118,28 @@ function routeParams(teamId: string) {
   return { params: Promise.resolve({ teamId }) };
 }
 
+// Superuser pool of the running describe's context, for callRotate's snapshot read.
+let snapshotPool: TestContext["su"]["pool"];
+
+/**
+ * Each submitted entry gets the `snapshotIv` the real client takes from
+ * rotate-key/data — the IV of the ciphertext it re-encrypted — read from the
+ * row as it stands now (blob IV for v0, wrapped ItemKey IV for v1+).
+ */
 async function callRotate(teamId: string, body: Record<string, unknown>) {
-  return POST(buildRequest(teamId, body), routeParams(teamId));
+  const entries = await Promise.all(
+    ((body.entries ?? []) as Record<string, unknown>[]).map(async (entry) => {
+      if ("snapshotIv" in entry) return entry;
+      const r = await snapshotPool.query<{ blob_iv: string; item_key_iv: string | null; item_key_version: number }>(
+        `SELECT blob_iv, item_key_iv, item_key_version FROM team_password_entries WHERE id = $1::uuid`,
+        [entry.id],
+      );
+      const row = r.rows[0];
+      const snapshotIv = row && (row.item_key_version >= 1 ? row.item_key_iv : row.blob_iv);
+      return snapshotIv ? { ...entry, snapshotIv } : entry;
+    }),
+  );
+  return POST(buildRequest(teamId, { ...body, entries }), routeParams(teamId));
 }
 
 function mockSession(userId: string): void {
@@ -281,6 +301,7 @@ describe("team key rotation — real-DB integration (C7)", () => {
 
   beforeAll(async () => {
     ctx = await createTestContext();
+    snapshotPool = ctx.su.pool;
   });
 
   afterAll(async () => {
@@ -575,6 +596,7 @@ describe("team history decryptability after rotation — real-DB integration (C8
 
   beforeAll(async () => {
     ctx = await createTestContext();
+    snapshotPool = ctx.su.pool;
   });
 
   afterAll(async () => {

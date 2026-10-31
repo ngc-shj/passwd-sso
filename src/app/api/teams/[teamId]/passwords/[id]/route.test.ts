@@ -293,6 +293,7 @@ const teamCurRow = {
 describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
   const txMock = {
     $queryRaw: vi.fn(),
+    $executeRaw: vi.fn(),
     teamPasswordEntryHistory: {
       create: vi.fn().mockResolvedValue({}),
       findMany: vi.fn().mockResolvedValue([]),

@@ -52,6 +52,8 @@ const {
 
   const txClient = {
     $queryRaw: queryRawOn("tx"),
+    // setLockTimeout before the team key-version FOR SHARE.
+    $executeRaw: vi.fn(),
     teamPasswordEntryHistory: {
       create: mockTeamPasswordEntryHistoryCreate,
       findMany: mockTeamPasswordEntryHistoryFindMany,
@@ -94,6 +96,7 @@ vi.mock("@/lib/prisma", () => ({
       update: mockTeamPasswordEntryUpdate,
     },
     $queryRaw: queryRawOn("prisma"),
+    $executeRaw: vi.fn(),
     $transaction: mockTransaction,
   },
 }));
@@ -206,6 +209,29 @@ describe("createTeamPassword", () => {
     const err = await createTeamPassword(TEAM_ID, BASE_CREATE_INPUT).catch((e) => e);
     expect(err).toBeInstanceOf(TeamPasswordServiceError);
     expect(err.code).toBe("TEAM_KEY_VERSION_MISMATCH");
+  });
+
+  it("answers TEAM_KEY_VERSION_MISMATCH (409) when a rotation holds the team past the lock timeout", async () => {
+    // lock_not_available, nested the way the pg driver adapter reports it.
+    mockTeamLockRead.mockRejectedValue(
+      Object.assign(new Error("canceling statement due to lock timeout"), {
+        meta: { driverAdapterError: { cause: { originalCode: "55P03" } } },
+      }),
+    );
+
+    const err = await createTeamPassword(TEAM_ID, BASE_CREATE_INPUT).catch((e) => e);
+    expect(err).toBeInstanceOf(TeamPasswordServiceError);
+    expect(err.code).toBe("TEAM_KEY_VERSION_MISMATCH");
+    expect(err.statusHint).toBe(409);
+    expect(mockTeamPasswordEntryCreate).not.toHaveBeenCalled();
+  });
+
+  it("propagates a lock-read failure other than a lock timeout unchanged", async () => {
+    const boom = new Error("connection reset");
+    mockTeamLockRead.mockRejectedValue(boom);
+
+    await expect(createTeamPassword(TEAM_ID, BASE_CREATE_INPUT)).rejects.toBe(boom);
+    expect(mockTeamPasswordEntryCreate).not.toHaveBeenCalled();
   });
 
   it("throws TeamPasswordServiceError (FOLDER_NOT_FOUND) when folder does not exist", async () => {
@@ -386,6 +412,7 @@ describe("updateTeamPassword", () => {
     mockTransaction.mockImplementation(async (fn) =>
       fn({
         $queryRaw: queryRawOn("tx"),
+        $executeRaw: vi.fn(),
         teamPasswordEntryHistory: {
           create: mockTeamPasswordEntryHistoryCreate,
           findMany: mockTeamPasswordEntryHistoryFindMany,
