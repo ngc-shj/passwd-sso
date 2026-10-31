@@ -5,7 +5,7 @@ import { logAuditAsync, logAuditBulkAsync, teamAuditBase } from "@/lib/audit/aud
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE, TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
-import { handleAuthError, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, handleAuthError, rateLimited, unauthorized } from "@/lib/http/api-response";
 import { parseBody } from "@/lib/http/parse-body";
 import { bulkTeamImportSchema } from "@/lib/validations";
 import { createRateLimiter } from "@/lib/security/rate-limit";
@@ -13,6 +13,8 @@ import { FILENAME_MAX_LENGTH } from "@/lib/validations/common";
 import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 import { requireTeamPermission } from "@/lib/auth/access/team-auth";
 import * as teamPasswordService from "@/lib/services/team-password-service";
+import { TeamPasswordServiceError } from "@/lib/services/team-password-service";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 import { attemptInSavepoint } from "@/lib/prisma/savepoint";
 import { pgErrorCode } from "@/lib/prisma/prisma-error";
 import { getLogger } from "@/lib/logger";
@@ -20,6 +22,10 @@ import { getLogger } from "@/lib/logger";
 type Params = { params: Promise<{ teamId: string }> };
 
 const teamBulkImportLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 30 });
+
+function isTeamKeyVersionMismatch(e: unknown): e is TeamPasswordServiceError {
+  return e instanceof TeamPasswordServiceError && e.code === API_ERROR.TEAM_KEY_VERSION_MISMATCH;
+}
 
 // POST /api/teams/[teamId]/passwords/bulk-import - Bulk create team password entries (E2E encrypted)
 async function handlePOST(req: NextRequest, { params }: Params) {
@@ -56,39 +62,50 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   const createdIds: string[] = [];
   let failedCount = 0;
 
-  await withTeamTenantRls(teamId, async () => {
-    for (const entryData of entries) {
-      // Each entry under its own savepoint: a statement the database rejects
-      // (e.g. an id colliding with an existing entry) would otherwise abort
-      // the whole transaction and turn the final COMMIT into a silent
-      // ROLLBACK of every entry already counted as created.
-      const attempt = await attemptInSavepoint(prisma, () =>
-        teamPasswordService.createTeamPassword(teamId, {
-          id: entryData.id,
-          encryptedBlob: entryData.encryptedBlob,
-          encryptedOverview: entryData.encryptedOverview,
-          aadVersion: entryData.aadVersion,
-          teamKeyVersion: entryData.teamKeyVersion,
-          itemKeyVersion: entryData.itemKeyVersion,
-          encryptedItemKey: entryData.encryptedItemKey,
-          entryType: entryData.entryType,
-          userId,
-          tagIds: entryData.tagIds,
-          teamFolderId: entryData.teamFolderId,
-          requireReprompt: entryData.requireReprompt,
-          expiresAt: entryData.expiresAt,
-        }),
-      );
-      if (attempt.ok) {
-        createdIds.push(attempt.value.id);
-        continue;
+  try {
+    await withTeamTenantRls(teamId, async () => {
+      for (const entryData of entries) {
+        // Each entry under its own savepoint: a statement the database rejects
+        // (e.g. an id colliding with an existing entry) would otherwise abort
+        // the whole transaction and turn the final COMMIT into a silent
+        // ROLLBACK of every entry already counted as created.
+        const attempt = await attemptInSavepoint(prisma, () =>
+          teamPasswordService.createTeamPassword(teamId, {
+            id: entryData.id,
+            encryptedBlob: entryData.encryptedBlob,
+            encryptedOverview: entryData.encryptedOverview,
+            aadVersion: entryData.aadVersion,
+            teamKeyVersion: entryData.teamKeyVersion,
+            itemKeyVersion: entryData.itemKeyVersion,
+            encryptedItemKey: entryData.encryptedItemKey,
+            entryType: entryData.entryType,
+            userId,
+            tagIds: entryData.tagIds,
+            teamFolderId: entryData.teamFolderId,
+            requireReprompt: entryData.requireReprompt,
+            expiresAt: entryData.expiresAt,
+          }),
+        );
+        if (attempt.ok) {
+          createdIds.push(attempt.value.id);
+          continue;
+        }
+        // A stale teamKeyVersion means the whole import is racing a rotation —
+        // rethrow out of the tx so it fully rolls back (no entries left under
+        // the pre-rotation key) instead of being counted as a per-entry failure.
+        if (isTeamKeyVersionMismatch(attempt.error)) throw attempt.error;
+        // The SQLSTATE only: a Prisma error's message carries the query and its
+        // bound parameters, i.e. this entry's ciphertext.
+        getLogger().warn({ teamId, code: pgErrorCode(attempt.error) }, "teams.bulk_import.entry_failed");
+        failedCount++;
       }
-      // The SQLSTATE only: a Prisma error's message carries the query and its
-      // bound parameters, i.e. this entry's ciphertext.
-      getLogger().warn({ teamId, code: pgErrorCode(attempt.error) }, "teams.bulk_import.entry_failed");
-      failedCount++;
+    });
+  } catch (e) {
+    if (isTeamKeyVersionMismatch(e)) {
+      return errorResponse(API_ERROR.TEAM_KEY_VERSION_MISMATCH);
     }
-  });
+    throw e;
+  }
 
   const requestMeta = teamAuditBase(req, userId, teamId);
 

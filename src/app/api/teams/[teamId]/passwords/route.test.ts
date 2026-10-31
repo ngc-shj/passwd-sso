@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 import { API_ERROR } from "@/lib/http/api-error-codes";
+import { teamLockQuery } from "@/__tests__/helpers/team-rotation-lock-mock";
 
-const { mockAuth, mockCheckAuth, mockPrismaTeamPasswordEntry, mockPrismaTeamFolder, mockPrismaTeam, mockPrismaTeamTag, mockAuditLogCreate, mockRequireTeamPermission, TeamAuthError, mockWithTeamTenantRls, mockWithBypassRls, mockLogAudit } = vi.hoisted(() => {
+const { mockAuth, mockCheckAuth, mockPrismaTeamPasswordEntry, mockPrismaTeamFolder, mockTeamQueryRaw, mockPrismaTeamTag, mockAuditLogCreate, mockRequireTeamPermission, TeamAuthError, mockWithTeamTenantRls, mockWithBypassRls, mockLogAudit } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -20,7 +21,8 @@ const { mockAuth, mockCheckAuth, mockPrismaTeamPasswordEntry, mockPrismaTeamFold
       deleteMany: vi.fn(),
     },
     mockPrismaTeamFolder: { findUnique: vi.fn() },
-    mockPrismaTeam: { findUnique: vi.fn() },
+    // The service's team key-version read (SELECT ... FROM teams ... FOR SHARE).
+    mockTeamQueryRaw: vi.fn(),
     mockPrismaTeamTag: { count: vi.fn().mockResolvedValue(0) },
     mockAuditLogCreate: vi.fn(),
     mockRequireTeamPermission: vi.fn(),
@@ -39,7 +41,8 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     teamPasswordEntry: mockPrismaTeamPasswordEntry,
     teamFolder: mockPrismaTeamFolder,
-    team: mockPrismaTeam,
+    $queryRaw: mockTeamQueryRaw,
+    $executeRaw: vi.fn(),
     teamTag: mockPrismaTeamTag,
     auditLog: { create: mockAuditLogCreate },
     user: { findMany: mockUserFindMany },
@@ -462,7 +465,7 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
     mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.MEMBER });
     mockAuditLogCreate.mockResolvedValue({});
-    mockPrismaTeam.findUnique.mockResolvedValue({ teamKeyVersion: 1 });
+    mockTeamQueryRaw.mockImplementation(teamLockQuery([{ team_key_version: 1, tenant_id: "tenant-1" }]));
   });
 
   const validE2EBody = {
@@ -528,7 +531,7 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
   });
 
   it("returns 409 when teamKeyVersion does not match team's current version (S-15)", async () => {
-    mockPrismaTeam.findUnique.mockResolvedValue({ teamKeyVersion: 2 });
+    mockTeamQueryRaw.mockImplementation(teamLockQuery([{ team_key_version: 2, tenant_id: "tenant-1" }]));
 
     const res = await POST(
       createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, {
@@ -542,7 +545,7 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
   });
 
   it("returns 409 when team not found (Q-9)", async () => {
-    mockPrismaTeam.findUnique.mockResolvedValue(null);
+    mockTeamQueryRaw.mockImplementation(teamLockQuery([]));
 
     const res = await POST(
       createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, { body: validE2EBody }),

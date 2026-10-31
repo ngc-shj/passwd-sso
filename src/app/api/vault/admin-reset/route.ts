@@ -13,6 +13,7 @@ import {
   VaultResetOutsideTenantError,
 } from "@/lib/vault/vault-reset";
 import { withBypassRls } from "@/lib/tenant-rls";
+import { isTeamRotationConflict } from "@/lib/team/team-key-rotation-lock";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -175,6 +176,9 @@ async function handlePOST(req: NextRequest) {
     if (err instanceof VaultResetOutsideTenantError) {
       return errorResponse(API_ERROR.VAULT_RESET_DATA_OUTSIDE_TENANT);
     }
+    // A rotation of one of the user's teams held it past the lock wait.
+    // Nothing was deleted; as above, the reset has to be initiated again.
+    if (isTeamRotationConflict(err)) return errorResponse(API_ERROR.CONFLICT);
     throw err;
   }
 

@@ -118,8 +118,31 @@ function routeParams(teamId: string) {
   return { params: Promise.resolve({ teamId }) };
 }
 
+// Superuser pool of the running describe's context, for callRotate's snapshot read.
+let snapshotPool: TestContext["su"]["pool"];
+
+/**
+ * Each submitted entry gets the `snapshotIv` the real client takes from
+ * rotate-key/data — the IV of the ciphertext it re-encrypted — read from the
+ * row as it stands now (blob IV for v0, wrapped ItemKey IV for v1+).
+ */
 async function callRotate(teamId: string, body: Record<string, unknown>) {
-  return POST(buildRequest(teamId, body), routeParams(teamId));
+  const entries = await Promise.all(
+    ((body.entries ?? []) as Record<string, unknown>[]).map(async (entry) => {
+      if ("snapshotIv" in entry) return entry;
+      const r = await snapshotPool.query<{ blob_iv: string; item_key_iv: string | null; item_key_version: number }>(
+        `SELECT blob_iv, item_key_iv, item_key_version FROM team_password_entries WHERE id = $1::uuid`,
+        [entry.id],
+      );
+      const row = r.rows[0];
+      const snapshotIv = row && (row.item_key_version >= 1 ? row.item_key_iv : row.blob_iv);
+      // A missing row would 400 as a schema error, indistinguishable from the
+      // rejection a test expects.
+      if (!snapshotIv) throw new Error(`snapshot row ${String(entry.id)} not found`);
+      return { ...entry, snapshotIv };
+    }),
+  );
+  return POST(buildRequest(teamId, { ...body, entries }), routeParams(teamId));
 }
 
 function mockSession(userId: string): void {
@@ -281,6 +304,7 @@ describe("team key rotation — real-DB integration (C7)", () => {
 
   beforeAll(async () => {
     ctx = await createTestContext();
+    snapshotPool = ctx.su.pool;
   });
 
   afterAll(async () => {
@@ -372,12 +396,11 @@ describe("team key rotation — real-DB integration (C7)", () => {
       // committed against the same target version — a correctness violation.
       expect(successes).toBeLessThanOrEqual(1);
       // API-consistency invariant: the loser is ALWAYS a clean 409, never a
-      // bare 500. The team-rotate CAS re-read (`tx.team.findUnique`) is a
-      // non-locking SELECT, so two concurrent same-target rotations can both
-      // pass the pre-check and race to `teamMemberKey.createMany`; the loser
-      // hits the `@@unique([teamId, userId, keyVersion])` constraint (P2002),
-      // which the route now maps to TEAM_KEY_VERSION_MISMATCH (409) rather than
-      // surfacing as an unhandled 500 — mirrors the personal VaultKey P2002 fix.
+      // bare 500. Two concurrent same-target rotations serialise on the CAS
+      // re-read's `teams ... FOR UPDATE`, so the loser sees the bumped version;
+      // a `teamMemberKey` `@@unique([teamId, userId, keyVersion])` collision
+      // (P2002) is also mapped to TEAM_KEY_VERSION_MISMATCH (409) rather than
+      // an unhandled 500 — mirrors the personal VaultKey P2002 fix.
       expect(statuses.every((s) => s === 200 || s === 409)).toBe(true);
 
       if (statuses[0] === 200 && statuses[1] === 409) {
@@ -434,6 +457,8 @@ describe("team key rotation — real-DB integration (C7)", () => {
     });
 
     expect(res.status).toBe(400);
+    // The in-tx member check, not a schema rejection of the payload.
+    expect((await res.json()).details).toEqual({ missingKeyFor: newMemberId });
     expect(await getTeamKeyVersion(ctx, teamId)).toBe(1);
   });
 
@@ -576,6 +601,7 @@ describe("team history decryptability after rotation — real-DB integration (C8
 
   beforeAll(async () => {
     ctx = await createTestContext();
+    snapshotPool = ctx.su.pool;
   });
 
   afterAll(async () => {

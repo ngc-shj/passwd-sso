@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaTeamMember, mockPrismaTeamMemberKey, mockPrismaScimExternalMapping, mockTransaction, mockRequireTeamPermission, mockIsRoleAbove, TeamAuthError, mockWithTeamTenantRls, mockInvalidateUserSessions, mockLogger, mockLogAudit, mockBuildTeamMemberDisplayItems, mockRequireRecentSession } = vi.hoisted(() => {
+const { mockAuth, mockPrismaTeamMember, mockPrismaTeamMemberKey, mockPrismaScimExternalMapping, mockTransaction, mockTeamLockQuery, mockRequireTeamPermission, mockIsRoleAbove, TeamAuthError, mockWithTeamTenantRls, mockInvalidateUserSessions, mockLogger, mockLogAudit, mockBuildTeamMemberDisplayItems, mockRequireRecentSession } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -24,10 +24,21 @@ const { mockAuth, mockPrismaTeamMember, mockPrismaTeamMemberKey, mockPrismaScimE
       deleteMany: vi.fn(),
     },
     mockTransaction: vi.fn(),
+    // The removal's team lock (SELECT id FROM teams ... FOR SHARE).
+    mockTeamLockQuery: vi.fn(),
     mockRequireTeamPermission: vi.fn(),
     mockIsRoleAbove: vi.fn(),
     TeamAuthError: _TeamAuthError,
-    mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
+    // The removal runs on the context's transaction client (fn's second argument).
+    mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: (tenantId: string, tx: unknown) => unknown) =>
+      fn("tenant-1", {
+        $queryRaw: mockTeamLockQuery,
+        // set / restore lock_timeout around the team lock.
+        $executeRaw: vi.fn(),
+        teamMember: mockPrismaTeamMember,
+        teamMemberKey: mockPrismaTeamMemberKey,
+      }),
+    ),
     mockInvalidateUserSessions: vi.fn().mockResolvedValue({ sessions: 1, extensionTokens: 0, apiKeys: 0 }),
     mockLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     mockLogAudit: vi.fn(),
@@ -73,6 +84,7 @@ vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
 }));
 
 import { PUT, DELETE } from "./route";
+import { teamLockQuery, lockQueryCalls } from "@/__tests__/helpers/team-rotation-lock-mock";
 import { TEAM_ROLE } from "@/lib/constants";
 
 const TEAM_ID = "team-123";
@@ -405,6 +417,7 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
 describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockTeamLockQuery.mockImplementation(teamLockQuery([{ id: TEAM_ID }]));
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
     mockRequireTeamPermission.mockResolvedValue(ownerMembership);
     mockIsRoleAbove.mockReturnValue(true);
@@ -442,7 +455,7 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
     const json = await res.json();
     expect(res.status).toBe(403);
     expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
-    expect(mockTransaction).not.toHaveBeenCalled();
+    expect(mockTeamLockQuery).not.toHaveBeenCalled();
     // Pins that step-up fires BEFORE the existence lookup.
     expect(mockPrismaTeamMember.findUnique).not.toHaveBeenCalled();
   });
@@ -518,7 +531,6 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
       role: TEAM_ROLE.MEMBER,
       deactivatedAt: null,
     });
-    mockTransaction.mockResolvedValue([]);
 
     const res = await DELETE(
       createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`),
@@ -527,13 +539,58 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.success).toBe(true);
-    expect(mockTransaction).toHaveBeenCalled();
     expect(mockPrismaTeamMemberKey.deleteMany).toHaveBeenCalledWith({
       where: { teamId: TEAM_ID, userId: "target-user" },
     });
     expect(mockPrismaTeamMember.delete).toHaveBeenCalledWith({
       where: { id: MEMBER_ID, teamId: TEAM_ID },
     });
+  });
+
+  it("locks the team against key rotation before deleting the member's keys", async () => {
+    mockPrismaTeamMember.findUnique.mockResolvedValue({
+      id: MEMBER_ID,
+      teamId: TEAM_ID,
+      tenantId: "tenant-1",
+      userId: "target-user",
+      role: TEAM_ROLE.MEMBER,
+      deactivatedAt: null,
+    });
+
+    const res = await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
+    );
+
+    expect(res.status).toBe(200);
+    const [lock] = lockQueryCalls(mockTeamLockQuery);
+    expect(lock.sql).toMatch(/FROM teams WHERE id = ANY\(\?::uuid\[\]\) ORDER BY id FOR SHARE/);
+    expect(lock.values).toEqual([[TEAM_ID]]);
+    expect(lock.order).toBeLessThan(
+      mockPrismaTeamMemberKey.deleteMany.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("refuses the removal when the team row cannot be locked", async () => {
+    mockPrismaTeamMember.findUnique.mockResolvedValue({
+      id: MEMBER_ID,
+      teamId: TEAM_ID,
+      tenantId: "tenant-1",
+      userId: "target-user",
+      role: TEAM_ROLE.MEMBER,
+      deactivatedAt: null,
+    });
+    mockTeamLockQuery.mockImplementation(teamLockQuery([]));
+
+    const res = await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
+    );
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("CONFLICT");
+    expect(mockPrismaTeamMemberKey.deleteMany).not.toHaveBeenCalled();
+    expect(mockPrismaTeamMember.delete).not.toHaveBeenCalled();
   });
 
   it("triggers invalidateUserSessions with tenantId on member removal", async () => {
@@ -545,7 +602,6 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
       role: TEAM_ROLE.MEMBER,
       deactivatedAt: null,
     });
-    mockTransaction.mockResolvedValue([]);
 
     await DELETE(
       createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`),
@@ -564,7 +620,6 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
       role: TEAM_ROLE.MEMBER,
       deactivatedAt: null,
     });
-    mockTransaction.mockResolvedValue([]);
     mockInvalidateUserSessions.mockRejectedValue(new Error("db error"));
 
     const res = await DELETE(
@@ -583,7 +638,6 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
       role: TEAM_ROLE.MEMBER,
       deactivatedAt: null,
     });
-    mockTransaction.mockResolvedValue([]);
     const dbError = new Error("db error");
     mockInvalidateUserSessions.mockRejectedValue(dbError);
 
@@ -607,7 +661,6 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
       role: TEAM_ROLE.MEMBER,
       deactivatedAt: null,
     });
-    mockTransaction.mockResolvedValue([]);
     mockInvalidateUserSessions.mockRejectedValue(new Error("db error"));
 
     await DELETE(
@@ -631,7 +684,6 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
       role: TEAM_ROLE.MEMBER,
       deactivatedAt: null,
     });
-    mockTransaction.mockResolvedValue([]);
     mockInvalidateUserSessions.mockResolvedValue({ sessions: 2, extensionTokens: 1, apiKeys: 0 });
 
     await DELETE(

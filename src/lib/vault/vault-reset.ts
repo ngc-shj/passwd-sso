@@ -12,6 +12,7 @@ import {
   deleteAttachmentBlobs,
 } from "@/lib/blob-store/cleanup";
 import { withBypassRls } from "@/lib/tenant-rls";
+import { assertTeamsLocked, lockMemberTeamsAgainstRotation, memberTeamIds } from "@/lib/team/team-key-rotation-lock";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { VERIFIER_VERSION } from "@/lib/crypto/verifier-version";
 import { bulkTransition } from "@/lib/emergency-access/emergency-access-state";
@@ -166,11 +167,21 @@ export async function executeVaultReset(
 
   // Single transaction: delete all vault data (callback form required for bulkTransition — S4).
   const attachmentRefs = await withBypassRls(prisma, async (tx) => {
-    // Lock order: users row FIRST, before any password_entries row lock —
+    // The member keys deleted below are an input of team key rotation: lock
+    // the user's teams against it before anything else (team-key-rotation-lock.ts)
+    // — a reset committing after a rotation read the member set would leave a
+    // key to the new team version wrapped to the ECDH key this reset retires.
+    // Teams precede users: rotation's member-key insert takes KEY SHARE on
+    // users while holding its team lock.
+    const lockedTeams = await lockMemberTeamsAgainstRotation(tx, targetUserId);
+    // Lock order: users row next, before any password_entries row lock —
     // mirrors the invariant in rotate-key-server.ts. Without this, a guarded
     // write holding the users FOR SHARE while waiting on an entry row here
     // (entries locked first, users updated last) would form a deadlock cycle.
     await tx.$queryRaw`SELECT id FROM users WHERE id = ${targetUserId}::uuid FOR UPDATE`;
+    // The users lock stops new memberships (their insert takes KEY SHARE on
+    // users), so the set is stable from here: every team it names must be locked.
+    assertTeamsLocked(lockedTeams, await memberTeamIds(tx, targetUserId));
 
     if (scopeTenantId) {
       const outside = await countVaultRowsOutsideTenant(tx, targetUserId, scopeTenantId);
