@@ -47,6 +47,7 @@ vi.mock("@/lib/prisma", () => ({
 
 import {
   patchScimUser,
+  replaceScimUser,
   deactivateScimUser,
   ScimUserNotFoundError,
   ScimOwnerProtectedError,
@@ -66,6 +67,43 @@ describe("patchScimUser", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mockTenantMemberUpdate.mockResolvedValue({});
+    // The user is in no team: the deactivation's team lock and revocation
+    // find nothing (pinned below and in replaceScimUser's tests).
+    mockQueryRaw.mockImplementation(teamLockQuery([]));
+    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
+      fn({
+        $queryRaw: mockQueryRaw,
+        $executeRaw: vi.fn(),
+        tenantMember: { update: mockTenantMemberUpdate },
+      }),
+    );
+  });
+
+  it("ends the user's team key distribution before deactivating them, under the team locks", async () => {
+    mockTenantMemberFindUnique.mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: null });
+    mockQueryRaw.mockImplementation(teamLockQuery((sql) =>
+      sql.includes("FROM teams") ? [{ id: "team-1" }] : [{ team_id: "team-1" }],
+    ));
+    mockSnapshotRead();
+
+    await patchScimUser(TENANT_ID, USER_ID, { active: false });
+
+    const calls = lockQueryCalls(mockQueryRaw);
+    const lock = calls.find((c) => c.sql.includes("FROM teams"));
+    const revoke = calls.find((c) => c.sql.includes("UPDATE team_members SET key_distributed = false"));
+    expect(lock?.values).toEqual([["team-1"]]);
+    expect(revoke?.values).toEqual([TENANT_ID, [USER_ID]]);
+    expect(revoke?.order).toBeLessThan(mockTenantMemberUpdate.mock.invocationCallOrder[0]);
+  });
+
+  it("leaves team key distribution alone on a reactivation", async () => {
+    mockTenantMemberFindUnique.mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: new Date() });
+    mockSnapshotRead();
+
+    await patchScimUser(TENANT_ID, USER_ID, { active: true });
+
+    expect(lockQueryCalls(mockQueryRaw)).toEqual([]);
+    expect(mockTenantMemberUpdate).toHaveBeenCalledOnce();
   });
 
   it("throws ScimUserNotFoundError when member does not exist", async () => {
@@ -163,6 +201,65 @@ describe("patchScimUser", () => {
     const snapshotRead = mockTenantMemberFindUnique.mock.calls[1][0];
     expect(snapshotRead).not.toHaveProperty("include");
     expect(snapshotRead.select).toEqual({ userId: true, deactivatedAt: true });
+  });
+});
+
+describe("replaceScimUser", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    mockTenantMemberUpdate.mockResolvedValue({});
+    mockQueryRaw.mockImplementation(teamLockQuery((sql) =>
+      sql.includes("FROM teams") ? [{ id: "team-1" }] : [{ team_id: "team-1" }],
+    ));
+    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
+      fn({
+        $queryRaw: mockQueryRaw,
+        $executeRaw: vi.fn(),
+        tenantMember: { update: mockTenantMemberUpdate },
+        scimExternalMapping: {
+          findFirst: mockScimExternalMappingFindFirst,
+          deleteMany: mockScimExternalMappingDeleteMany,
+        },
+      }),
+    );
+  });
+
+  it("ends the user's team key distribution before deactivating them, under the team locks", async () => {
+    mockTenantMemberFindUnique.mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: null });
+    mockSnapshotRead();
+
+    await replaceScimUser(TENANT_ID, USER_ID, { active: false });
+
+    const calls = lockQueryCalls(mockQueryRaw);
+    const lock = calls.find((c) => c.sql.includes("FROM teams"));
+    const revoke = calls.find((c) => c.sql.includes("UPDATE team_members SET key_distributed = false"));
+    expect(lock?.values).toEqual([["team-1"]]);
+    expect(revoke?.values).toEqual([TENANT_ID, [USER_ID]]);
+    expect(revoke?.order).toBeLessThan(mockTenantMemberUpdate.mock.invocationCallOrder[0]);
+  });
+
+  it("refuses the deactivation when the revocation touched a team the lock did not cover", async () => {
+    mockTenantMemberFindUnique.mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: null });
+    mockQueryRaw.mockImplementation(teamLockQuery((sql) => {
+      if (sql.includes("FROM teams")) return [{ id: "team-1" }];
+      if (sql.includes("UPDATE team_members")) return [{ team_id: "team-1" }, { team_id: "team-2" }];
+      return [{ team_id: "team-1" }];
+    }));
+
+    await expect(replaceScimUser(TENANT_ID, USER_ID, { active: false })).rejects.toThrow(
+      "Could not lock 1 team row(s) against key rotation",
+    );
+    expect(mockTenantMemberUpdate).not.toHaveBeenCalled();
+  });
+
+  it("leaves team key distribution alone for an active user", async () => {
+    mockTenantMemberFindUnique.mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: null });
+    mockSnapshotRead();
+
+    await replaceScimUser(TENANT_ID, USER_ID, { active: true });
+
+    expect(lockQueryCalls(mockQueryRaw)).toEqual([]);
+    expect(mockTenantMemberUpdate).toHaveBeenCalledOnce();
   });
 });
 

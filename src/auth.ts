@@ -22,6 +22,7 @@ import type { ClaimRefusalDiagnosis } from "@/lib/tenant/claim-refusal";
 import { classifySentinelTenantConstraint } from "@/lib/tenant/sentinel-tenant-constraint";
 import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
 import { withBypassRls } from "@/lib/tenant-rls";
+import { assertTeamsLocked, lockTenantMemberTeamsAgainstRotation, memberTeamIds } from "@/lib/team/team-key-rotation-lock";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import {
   resolveOwningTenantIdFromClient,
@@ -602,6 +603,18 @@ async function claimedTenantMembership(
     let migratedSessionTokens: string[] = [];
     await prisma.$transaction(async (tx) => {
       await assertBootstrapSingleMember(tx, existingTenantId); // row 6b throw
+
+      // The user leaves the bootstrap tenant's teams' key distribution: the
+      // memberships are not migrated, and a rotation there must not wrap the
+      // next key to a user no longer in the tenant. Locked first, before the
+      // users row is touched, and checked after: a membership joined since
+      // the lock refuses the move (team-key-rotation-lock.ts).
+      const leavingTeams = await lockTenantMemberTeamsAgainstRotation(tx, existingTenantId, [userId]);
+      await tx.teamMember.updateMany({
+        where: { userId, tenantId: existingTenantId, keyDistributed: true },
+        data: { keyDistributed: false },
+      });
+      assertTeamsLocked(leavingTeams, await memberTeamIds(tx, userId, existingTenantId));
 
       // Migrate user and account rows
       await tx.user.update({

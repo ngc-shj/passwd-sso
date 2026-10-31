@@ -719,10 +719,13 @@ describe("tenant claim binding (C3/C4/C5)", () => {
 
   /**
    * The migration's writes that are not counters (`NON_COUNTER_WRITES`), but
-   * the membership, which `placement` reads with its active flag. The three
-   * the migration moves by tenant alone are reached through their parent.
+   * the membership, which `placement` reads with its active flag, and the team
+   * membership, which is not moved at all — it stays in its team and only its
+   * key distribution ends (pinned by auth.bootstrap-migration.test.ts and
+   * auth.test.ts). The three the migration moves by tenant alone are reached
+   * through their parent.
    */
-  const NON_COUNTER_TABLES: Record<Exclude<NonCounterWriteHandle, "tenantMember">, OwnedTable> = {
+  const NON_COUNTER_TABLES: Record<Exclude<NonCounterWriteHandle, "tenantMember" | "teamMember">, OwnedTable> = {
     user: { select: `SELECT tenant_id FROM users WHERE id = $1::uuid`, seed: null },
     passwordEntryHistory: {
       select: `SELECT h.tenant_id FROM password_entry_histories h

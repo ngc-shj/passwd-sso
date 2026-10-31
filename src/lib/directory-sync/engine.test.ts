@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { teamLockQuery, lockQueryCalls } from "@/__tests__/helpers/team-rotation-lock-mock";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 
 // ─── Hoisted mocks ───────────────────────────────────────────
@@ -76,6 +77,10 @@ vi.mock("@/lib/prisma", () => ({
 // load, mapping/member load, log create, AND the apply phase — resolves the
 // methods it calls on tx.
 const mockGuardFindMany = vi.fn().mockResolvedValue([]);
+// Raw queries of the apply phase: the team locks and the key-distribution
+// revocation for leaving members (team-key-rotation-lock.ts). By default the
+// leaving members belong to no team.
+const mockApplyQueryRaw = vi.fn();
 // The email lookup `existingUserIdsByEmail` runs on the same bypass client.
 const mockGuardUserFindMany = vi.fn().mockResolvedValue([]);
 
@@ -99,6 +104,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
           : methods;
     }
     tx.$executeRaw = mockExecuteRaw;
+    tx.$queryRaw = mockApplyQueryRaw;
     return fn(tx);
   }),
   // The cross-tenant reactivation guard opens its own bypass BEFORE the tenant
@@ -275,6 +281,7 @@ describe("runDirectorySync", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     applyTxHolder.current = null;
+    mockApplyQueryRaw.mockImplementation(teamLockQuery([]));
     // `clearAllMocks` clears calls, not implementations, so a cell that makes the
     // cross-tenant guard fire would leak that state into every cell after it.
     mockGuardFindMany.mockResolvedValue([]);
@@ -709,6 +716,41 @@ describe("runDirectorySync", () => {
           role: { not: "OWNER" },
         }),
       });
+    });
+
+    it("ends the team key distribution of the members it deactivates, under team locks taken first", async () => {
+      setupAcquiredLock();
+      setupTransaction();
+      mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
+      mockFetchOktaUsers.mockResolvedValue([]);
+      const owner = makeMember({ id: "member-owner", userId: "user-owner", role: "OWNER" });
+      const regular = makeMember({ id: "member-regular", userId: "user-regular", role: "MEMBER" });
+      mockScimMapping.findMany.mockResolvedValue([
+        { externalId: "ext-owner", internalId: "user-owner" },
+        { externalId: "ext-regular", internalId: "user-regular" },
+      ]);
+      mockTenantMember.findMany.mockResolvedValue([owner, regular]);
+      const memberUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
+      setApplyTx(makeApplyTx({
+        tenantMember: { findMany: vi.fn().mockResolvedValue([]), create: vi.fn(), update: vi.fn(), updateMany: memberUpdateMany },
+      }));
+      mockApplyQueryRaw.mockImplementation(teamLockQuery((sql) => {
+        if (sql.includes("FROM teams")) return [{ id: "team-1" }];
+        return [{ team_id: "team-1" }];
+      }));
+
+      const result = await runDirectorySync({ ...BASE_OPTIONS, force: true });
+
+      expect(result.success).toBe(true);
+      const calls = lockQueryCalls(mockApplyQueryRaw);
+      const membership = calls.find((c) => c.sql.includes("SELECT DISTINCT team_id"));
+      const lock = calls.find((c) => c.sql.includes("FROM teams"));
+      const revoke = calls.find((c) => c.sql.includes("UPDATE team_members SET key_distributed = false"));
+      // Only the member leaving: the OWNER is never deactivated.
+      expect(membership?.values).toEqual([TENANT_ID, ["user-regular"]]);
+      expect(revoke?.values).toEqual([TENANT_ID, ["user-regular"]]);
+      expect(lock?.order).toBeLessThan(memberUpdateMany.mock.invocationCallOrder[0]);
+      expect(memberUpdateMany.mock.invocationCallOrder[0]).toBeLessThan(revoke?.order ?? -1);
     });
   });
 

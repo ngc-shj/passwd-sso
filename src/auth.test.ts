@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { teamLockQuery, lockQueryCalls } from "@/__tests__/helpers/team-rotation-lock-mock";
 
 const {
   mockPrisma,
@@ -114,6 +115,12 @@ const {
     team: {
       count: vi.fn(),
     },
+    teamMember: {
+      updateMany: vi.fn(),
+    },
+    // The migration's team locks against key rotation and its membership
+    // re-read (team-key-rotation-lock.ts); set per test in beforeEach.
+    $queryRaw: vi.fn(),
     $transaction: vi.fn(),
     // C13: audit_log_tenant_migrate is invoked via $executeRaw inside the
     // bootstrap-tenant merge. Default to a no-op so tests that don't
@@ -439,6 +446,9 @@ describe("ensureTenantMembershipForSignIn", () => {
     mockPrisma.tenantMember.count.mockResolvedValue(0);
     mockPrisma.tenant.delete.mockResolvedValue({});
     mockPrisma.$transaction.mockImplementation(async (fn: (tx: typeof mockPrisma) => unknown) => fn(mockPrisma));
+    mockPrisma.teamMember.updateMany.mockResolvedValue({ count: 0 });
+    // The user is in no team of the bootstrap tenant.
+    mockPrisma.$queryRaw.mockImplementation(teamLockQuery([]));
   });
 
   // Row 1: no claim, no existing membership -> allow.
@@ -808,6 +818,39 @@ describe("ensureTenantMembershipForSignIn", () => {
     expect(result.ok).toBe(true);
     expect(mockResolveTenantByClaim).toHaveBeenCalledWith("alias.example", SIGN_IN_ACCOUNT.provider, CLAIM_BINDING_MODE.OFF, mockPrisma);
     expect(mockPrisma.tenantMember.upsert).toHaveBeenCalledTimes(1);
+  });
+
+  it("row 6: ends the user's key distribution in the bootstrap tenant's teams, locked before the users row", async () => {
+    mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: TENANT_BOOTSTRAP }]);
+    mockPrisma.$queryRaw.mockImplementation(teamLockQuery((sql) =>
+      sql.includes("FROM teams") ? [{ id: "team-1" }] : [{ team_id: "team-1" }],
+    ));
+
+    const result = await ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {});
+
+    expect(result.ok).toBe(true);
+    const lock = lockQueryCalls(mockPrisma.$queryRaw).find((c) => c.sql.includes("FROM teams"));
+    expect(lock?.values).toEqual([["team-1"]]);
+    expect(lock?.order).toBeLessThan(mockPrisma.user.update.mock.invocationCallOrder[0]);
+    expect(mockPrisma.teamMember.updateMany).toHaveBeenCalledWith({
+      where: { userId: "user-1", tenantId: TENANT_BOOTSTRAP, keyDistributed: true },
+      data: { keyDistributed: false },
+    });
+  });
+
+  it("row 6: refuses the migration when a team membership joined after the lock", async () => {
+    mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: TENANT_BOOTSTRAP }]);
+    let membershipReads = 0;
+    mockPrisma.$queryRaw.mockImplementation(teamLockQuery((sql) => {
+      if (sql.includes("FROM teams")) return [{ id: "team-1" }];
+      // The re-read after the update finds a team the lock never covered.
+      membershipReads += 1;
+      return membershipReads === 1 ? [{ team_id: "team-1" }] : [{ team_id: "team-1" }, { team_id: "team-2" }];
+    }));
+
+    await expect(ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {})).rejects.toThrow(
+      "Could not lock 1 team row(s) against key rotation",
+    );
   });
 
   // Row 6: claim resolves to a tenant different from the user's existing

@@ -93,6 +93,8 @@ export const REVOKED_BY = {
  */
 export const NON_COUNTER_WRITES = {
   user: "the user's own tenant column",
+  teamMember:
+    "left in its team (teams are not migrated), but its key distribution ends: a rotation there must not wrap the next team key to a user who left the tenant",
   passwordEntryHistory: "moved by tenant alone; reached through its entry",
   emergencyAccessKeyPair: "moved by tenant alone; reached through its grant",
   shareAccessLog: "moved by tenant alone; reached through its share",
@@ -108,7 +110,6 @@ export type NonCounterWriteHandle = keyof typeof NON_COUNTER_WRITES;
  * A user-bound model must be a counter, a non-counter write, or named here.
  */
 export const TENANT_OWNED_LEFT = {
-  teamMember: "a team membership; teams are not migrated",
   teamPasswordEntry: "team-owned; teams are not migrated",
   teamPasswordEntryHistory: "team-owned; teams are not migrated",
   teamInvitation: "team-owned; teams are not migrated",

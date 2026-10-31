@@ -51,7 +51,14 @@ const WRITE_METHODS = new Set(["create", "createMany", "update", "updateMany", "
 const READ_METHODS = new Set(["findMany", "findUnique", "findFirst", "count"]);
 const AUDIT_MIGRATE_CALL = "CALL audit_log_tenant_migrate(";
 /** Helpers the transaction may hand `tx` to: each reads only. */
-const READ_ONLY_TX_HELPERS = new Set(["assertBootstrapSingleMember"]);
+// The team-key-rotation-lock helpers write no rows: they lock team rows (and
+// set the transaction's lock_timeout around that) and read memberships.
+const READ_ONLY_TX_HELPERS = new Set([
+  "assertBootstrapSingleMember",
+  "lockTenantMemberTeamsAgainstRotation",
+  "memberTeamIds",
+  "assertTeamsLocked",
+]);
 /**
  * Calls and constructors the transaction may make that are not the client, by
  * exact callee text: only what the real body needs. A pure call's arguments
@@ -61,6 +68,7 @@ const PURE_CALLS = new Set(["migratedSessions.map", "Date"]);
 /** Each non-counter write's `data` keys, by `<handle>.<method>`, read off the real body once and pinned. */
 const NON_COUNTER_DATA_KEYS: Record<string, readonly string[]> = {
   "user.update": ["tenantId"],
+  "teamMember.updateMany": ["keyDistributed"],
   "passwordEntryHistory.updateMany": ["tenantId"],
   "auditLog.$executeRaw": [],
   "emergencyAccessKeyPair.updateMany": ["tenantId"],
@@ -359,7 +367,7 @@ describe("bootstrap migration member set", () => {
     const check = auth
       .getFunctionOrThrow(FUNCTION_NAME)
       .getDescendantsOfKind(SyntaxKind.CallExpression)
-      .filter((c) => READ_ONLY_TX_HELPERS.has(c.getExpression().getText()));
+      .filter((c) => c.getExpression().getText() === "assertBootstrapSingleMember");
     expect(check.map((c) => c.getArguments()[1]?.getText())).toEqual([BOOTSTRAP_TENANT_ID]);
   });
 

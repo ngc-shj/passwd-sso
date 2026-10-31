@@ -8,7 +8,7 @@
 
 import { Prisma } from "@prisma/client";
 import { prisma, type TxOrPrisma } from "@/lib/prisma";
-import { assertTeamsLocked, lockMemberTeamsAgainstRotation } from "@/lib/team/team-key-rotation-lock";
+import { assertTeamsLocked, endTeamKeyDistribution, lockMemberTeamsAgainstRotation } from "@/lib/team/team-key-rotation-lock";
 import type { AuditAction } from "@prisma/client";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { userToScimUser, type ScimUserInput, type ScimUserResource } from "@/lib/scim/serializers";
@@ -218,6 +218,9 @@ export async function replaceScimUser(
 
   try {
     await prisma.$transaction(async (tx) => {
+      // A deactivated member leaves team key distribution, serialised with
+      // rotation, before the membership row is touched (team-key-rotation-lock.ts).
+      if (active === false) await endTeamKeyDistribution(tx, tenantId, [userId]);
       await tx.tenantMember.update({
         where: { id: member.id },
         data: {
@@ -313,9 +316,14 @@ export async function patchScimUser(
     }
   }
 
-  await prisma.tenantMember.update({
-    where: { id: member.id },
-    data: updateData,
+  await prisma.$transaction(async (tx) => {
+    // A deactivated member leaves team key distribution, serialised with
+    // rotation, before the membership row is touched (team-key-rotation-lock.ts).
+    if (operations.active === false) await endTeamKeyDistribution(tx, tenantId, [userId]);
+    await tx.tenantMember.update({
+      where: { id: member.id },
+      data: updateData,
+    });
   });
 
   const snapshot = await loadScimUserSnapshot(tenantId, userId);

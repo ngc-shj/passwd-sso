@@ -157,6 +157,61 @@ export async function lockMemberTeamsAgainstRotation(
 }
 
 /**
+ * `FOR SHARE` on every team in `tenantId` that any of `userIds` is a member
+ * of, for a transaction that will take those users out of the tenant
+ * (deactivation, a tenant move). Take it before the transaction's first
+ * users / team_members lock; pass the result to revokeTeamKeyDistribution.
+ */
+export async function lockTenantMemberTeamsAgainstRotation(
+  tx: Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw">,
+  tenantId: string,
+  userIds: readonly string[],
+): Promise<Set<string>> {
+  const ids = [...new Set(userIds)];
+  if (ids.length === 0) return new Set();
+  const rows = await tx.$queryRaw<{ team_id: string }[]>`
+    SELECT DISTINCT team_id FROM team_members
+     WHERE tenant_id = ${tenantId}::uuid AND user_id = ANY(${ids}::uuid[])
+  `;
+  return lockTeamRows(tx, rows.map((row) => row.team_id));
+}
+
+/**
+ * End team key distribution in `tenantId` for users leaving it: a member who
+ * is no longer in the tenant must not be wrapped the next team key by a
+ * rotation, nor be served one. Their memberships stay; a reactivated member
+ * is distributed the current key again (pending-key-distributions lists
+ * them). `locked` is lockTenantMemberTeamsAgainstRotation's result for the
+ * same users; a membership it did not cover (joined since) refuses the
+ * transaction with TeamRotationLockError.
+ */
+export async function revokeTeamKeyDistribution(
+  tx: Pick<Prisma.TransactionClient, "$queryRaw">,
+  tenantId: string,
+  userIds: readonly string[],
+  locked: ReadonlySet<string>,
+): Promise<void> {
+  const ids = [...new Set(userIds)];
+  if (ids.length === 0) return;
+  const revoked = await tx.$queryRaw<{ team_id: string }[]>`
+    UPDATE team_members SET key_distributed = false, updated_at = now()
+     WHERE tenant_id = ${tenantId}::uuid AND user_id = ANY(${ids}::uuid[]) AND key_distributed
+    RETURNING team_id
+  `;
+  assertTeamsLocked(locked, revoked.map((row) => row.team_id));
+}
+
+/** lockTenantMemberTeamsAgainstRotation then revokeTeamKeyDistribution. */
+export async function endTeamKeyDistribution(
+  tx: Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw">,
+  tenantId: string,
+  userIds: readonly string[],
+): Promise<void> {
+  const locked = await lockTenantMemberTeamsAgainstRotation(tx, tenantId, userIds);
+  await revokeTeamKeyDistribution(tx, tenantId, userIds, locked);
+}
+
+/**
  * The refusals a membership-changing transaction raises against rotation:
  * a wait past the bounded lock timeout, or a team it could not lock. Both
  * roll the transaction back and are safe to retry.

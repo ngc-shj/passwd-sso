@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { teamLockQuery } from "@/__tests__/helpers/team-rotation-lock-mock";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
@@ -249,6 +250,9 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
 
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
       fn({
+        // Team locks for a deactivation (pinned in scim-user-service.test.ts).
+        $queryRaw: vi.fn(teamLockQuery([])),
+        $executeRaw: vi.fn(),
         tenantMember: { update: mockTenantMember.update },
         scimExternalMapping: {
           findFirst: mockScimExternalMapping.findFirst,
@@ -358,6 +362,9 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
     // passed in file order and failed alone. Measured on both of these.
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
       fn({
+        // Team locks for a deactivation (pinned in scim-user-service.test.ts).
+        $queryRaw: vi.fn(teamLockQuery([])),
+        $executeRaw: vi.fn(),
         tenantMember: { update: mockTenantMember.update },
         scimExternalMapping: {
           findFirst: mockScimExternalMapping.findFirst,
@@ -395,6 +402,9 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
     mockScimExternalMapping.findFirst.mockResolvedValue(null);
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
       fn({
+        // Team locks for a deactivation (pinned in scim-user-service.test.ts).
+        $queryRaw: vi.fn(teamLockQuery([])),
+        $executeRaw: vi.fn(),
         tenantMember: { update: mockTenantMember.update },
         scimExternalMapping: {
           findFirst: mockScimExternalMapping.findFirst,
@@ -440,6 +450,9 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
     // passed in file order and failed alone. Measured on both of these.
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
       fn({
+        // Team locks for a deactivation (pinned in scim-user-service.test.ts).
+        $queryRaw: vi.fn(teamLockQuery([])),
+        $executeRaw: vi.fn(),
         tenantMember: { update: mockTenantMember.update },
         scimExternalMapping: {
           findFirst: mockScimExternalMapping.findFirst,
@@ -494,6 +507,9 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
 
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
       fn({
+        // Team locks for a deactivation (pinned in scim-user-service.test.ts).
+        $queryRaw: vi.fn(teamLockQuery([])),
+        $executeRaw: vi.fn(),
         tenantMember: { update: mockTenantMember.update },
         scimExternalMapping: {
           findFirst: mockScimExternalMapping.findFirst,
@@ -539,6 +555,9 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
 
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
       fn({
+        // Team locks for a deactivation (pinned in scim-user-service.test.ts).
+        $queryRaw: vi.fn(teamLockQuery([])),
+        $executeRaw: vi.fn(),
         tenantMember: { update: mockTenantMember.update },
         scimExternalMapping: {
           findFirst: mockScimExternalMapping.findFirst,
@@ -598,6 +617,9 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
 
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
       fn({
+        // Team locks for a deactivation (pinned in scim-user-service.test.ts).
+        $queryRaw: vi.fn(teamLockQuery([])),
+        $executeRaw: vi.fn(),
         tenantMember: { update: mockTenantMember.update },
         scimExternalMapping: {
           findFirst: mockScimExternalMapping.findFirst,
@@ -690,6 +712,9 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
       .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: null });
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
       fn({
+        // Team locks for a deactivation (pinned in scim-user-service.test.ts).
+        $queryRaw: vi.fn(teamLockQuery([])),
+        $executeRaw: vi.fn(),
         tenantMember: { update: mockTenantMember.update },
         scimExternalMapping: {
           findFirst: mockScimExternalMapping.findFirst,
@@ -733,6 +758,9 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
       });
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
       fn({
+        // Team locks for a deactivation (pinned in scim-user-service.test.ts).
+        $queryRaw: vi.fn(teamLockQuery([])),
+        $executeRaw: vi.fn(),
         tenantMember: { update: mockTenantMember.update },
         scimExternalMapping: {
           findFirst: mockScimExternalMapping.findFirst,
@@ -768,6 +796,9 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
       });
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
       fn({
+        // Team locks for a deactivation (pinned in scim-user-service.test.ts).
+        $queryRaw: vi.fn(teamLockQuery([])),
+        $executeRaw: vi.fn(),
         tenantMember: { update: mockTenantMember.update },
         scimExternalMapping: {
           findFirst: mockScimExternalMapping.findFirst,
@@ -813,6 +844,9 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
       });
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
       fn({
+        // Team locks for a deactivation (pinned in scim-user-service.test.ts).
+        $queryRaw: vi.fn(teamLockQuery([])),
+        $executeRaw: vi.fn(),
         tenantMember: { update: mockTenantMember.update },
         scimExternalMapping: {
           findFirst: mockScimExternalMapping.findFirst,
