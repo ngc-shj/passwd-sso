@@ -16,6 +16,8 @@ export interface TeamMemberDisplayRow {
   userId: string;
   role: string;
   createdAt: Date;
+  /** The membership ended with the user's departure from the tenant (members GET only). */
+  departed?: boolean;
 }
 
 export interface TeamMemberDisplayItem {
@@ -27,6 +29,7 @@ export interface TeamMemberDisplayItem {
   image: string | null;
   joinedAt: Date;
   tenantName: string | null;
+  departed: boolean;
 }
 
 /**
@@ -86,6 +89,7 @@ export async function buildTeamMemberDisplayItems(
       image: user.image,
       joinedAt: member.createdAt,
       tenantName: tenantByUserId.get(member.userId) ?? null,
+      departed: member.departed ?? false,
     }];
   });
 }

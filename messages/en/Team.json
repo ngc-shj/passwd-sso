@@ -69,6 +69,8 @@
   "expiresAt": "Expires {date}",
   "removeMember": "Remove",
   "removeMemberConfirm": "Remove this member from the team?",
+  "departedMember": "Left the organization",
+  "departedMemberHint": "Their membership ended when they left the organization. Remove them to keep it from coming back if they return.",
   "memberRemoved": "Member removed",
   "changeRole": "Change Role",
   "roleChanged": "Role changed",

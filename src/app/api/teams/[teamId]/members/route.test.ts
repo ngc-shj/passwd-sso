@@ -36,7 +36,9 @@ const {
     mockRequireTeamMember: vi.fn(),
     mockRequireTeamPermission: vi.fn(),
     TeamAuthError: _TeamAuthError,
-    mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: (tenantId: string) => unknown) => fn("tenant-1")),
+    // The admission transaction runs as fn(tenantId, tx); tx is the prisma mock.
+    mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: (tenantId: string, tx: unknown) => unknown) =>
+      fn("tenant-1", (await import("@/lib/prisma")).prisma)),
     mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
     mockLogAudit: vi.fn(),
     mockRequireRecentSession: vi.fn().mockResolvedValue(null),
@@ -54,10 +56,24 @@ vi.mock("@/lib/prisma", () => ({
     $transaction: mockPrismaTransaction,
   },
 }));
-vi.mock("@/lib/auth/access/team-auth", () => ({
+vi.mock("@/lib/auth/access/team-auth", async () => ({
   requireTeamMember: mockRequireTeamMember,
   requireTeamPermission: mockRequireTeamPermission,
+  // The real role → permission table: GET lists departed members only to roles that can remove them.
+  hasTeamPermission: (await vi.importActual<typeof import("@/lib/auth/access/team-auth")>("@/lib/auth/access/team-auth")).hasTeamPermission,
   TeamAuthError,
+}));
+const { mockLockTenantRows, mockLockTeamsAgainstRotation } = vi.hoisted(() => ({
+  mockLockTenantRows: vi.fn(),
+  mockLockTeamsAgainstRotation: vi.fn(),
+}));
+vi.mock("@/lib/team/tenant-row-lock", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
+  lockTenantRows: mockLockTenantRows,
+}));
+vi.mock("@/lib/team/team-key-rotation-lock", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
+  lockTeamsAgainstRotation: mockLockTeamsAgainstRotation,
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withTeamTenantRls: mockWithTeamTenantRls,
@@ -142,6 +158,42 @@ describe("GET /api/teams/[teamId]/members", () => {
     expect(json[0].tenantName).toBe("Acme Corp");
     expect(json[1].role).toBe(TEAM_ROLE.MEMBER);
     expect(json[1].tenantName).toBe("External Org");
+  });
+
+  it("lists members who left the tenant, flagged departed, to a role that can remove them", async () => {
+    mockPrismaTeamMember.findMany.mockResolvedValue([
+      { id: "m1", userId: "u1", role: TEAM_ROLE.OWNER, createdAt: now, deactivatedByTenant: false },
+      { id: "m2", userId: "u2", role: TEAM_ROLE.MEMBER, createdAt: now, deactivatedByTenant: true },
+    ]);
+    mockPrismaUser.findMany.mockResolvedValue([
+      { id: "u1", name: "Owner", email: "owner@test.com", image: null },
+      { id: "u2", name: "Left", email: "left@test.com", image: null },
+    ]);
+    mockPrismaTenantMember.findMany.mockResolvedValue([]);
+
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/members`),
+      createParams({ teamId: TEAM_ID }),
+    );
+    const json = await res.json();
+
+    expect(json.map((m: { id: string; departed: boolean }) => [m.id, m.departed])).toEqual([["m1", false], ["m2", true]]);
+    expect(mockPrismaTeamMember.findMany.mock.calls[0][0].where).toEqual({
+      teamId: TEAM_ID,
+      OR: [{ deactivatedAt: null }, { deactivatedByTenant: true }],
+    });
+  });
+
+  it("does not list members who left the tenant to a VIEWER", async () => {
+    mockRequireTeamMember.mockResolvedValue({ role: TEAM_ROLE.VIEWER });
+    mockPrismaTeamMember.findMany.mockResolvedValue([]);
+
+    await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/members`),
+      createParams({ teamId: TEAM_ID }),
+    );
+
+    expect(mockPrismaTeamMember.findMany.mock.calls[0][0].where).toEqual({ teamId: TEAM_ID, deactivatedAt: null });
   });
 
   it("returns tenantName null when member has no tenant", async () => {
@@ -274,6 +326,9 @@ describe("POST /api/teams/[teamId]/members", () => {
     mockPrismaUser.findFirst.mockResolvedValue({ id: TARGET_USER_ID });
     mockPrismaTenantMember.findFirst.mockResolvedValue({ id: "tm-1" });
     mockPrismaTeamMember.findFirst.mockResolvedValue(null);
+    // The target's tenant row, locked FOR SHARE: active by default.
+    mockLockTenantRows.mockResolvedValue(new Map([[TARGET_USER_ID, { hasRow: true, deactivatedAt: null, departedAt: null }]]));
+    mockLockTeamsAgainstRotation.mockResolvedValue(undefined);
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -363,10 +418,7 @@ describe("POST /api/teams/[teamId]/members", () => {
       deactivatedAt: new Date(),
       scimManaged: false,
     });
-    mockPrismaTransaction.mockResolvedValue([
-      {},
-      { id: "existing-m-1", userId: TARGET_USER_ID, role: TEAM_ROLE.MEMBER },
-    ]);
+    mockPrismaTeamMember.update.mockResolvedValue({ id: "existing-m-1", userId: TARGET_USER_ID, role: TEAM_ROLE.MEMBER });
 
     const res = await POST(
       createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/members`, {
@@ -380,6 +432,50 @@ describe("POST /api/teams/[teamId]/members", () => {
     expect(mockPrismaTeamMemberKey.deleteMany).toHaveBeenCalledWith({
       where: { teamId: TEAM_ID, userId: TARGET_USER_ID },
     });
+    expect(mockPrismaTeamMember.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ deactivatedAt: null, deactivatedByTenant: false, keyDistributed: false }),
+    }));
+  });
+
+  it("re-adds a SCIM-managed membership the tenant departure ended", async () => {
+    mockPrismaTeamMember.findFirst.mockResolvedValue({
+      id: "existing-m-1", userId: TARGET_USER_ID, deactivatedAt: new Date(), scimManaged: true, deactivatedByTenant: true,
+    });
+    mockPrismaTeamMember.update.mockResolvedValue({ id: "existing-m-1", userId: TARGET_USER_ID, role: TEAM_ROLE.MEMBER });
+
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/members`, { body: { userId: TARGET_USER_ID, role: TEAM_ROLE.MEMBER } }),
+      createParams({ teamId: TEAM_ID }),
+    );
+
+    expect(res.status).toBe(201);
+    expect((await res.json()).reactivated).toBe(true);
+  });
+
+  it("locks the target's tenant row, then the team, before reading the membership", async () => {
+    mockPrismaTeamMember.create.mockResolvedValue({ id: "new-m-1", userId: TARGET_USER_ID, role: TEAM_ROLE.MEMBER });
+
+    await POST(
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/members`, { body: { userId: TARGET_USER_ID, role: TEAM_ROLE.MEMBER } }),
+      createParams({ teamId: TEAM_ID }),
+    );
+
+    expect(mockLockTenantRows).toHaveBeenCalledWith(expect.anything(), "tenant-1", [TARGET_USER_ID], "share", expect.anything());
+    expect(mockLockTenantRows.mock.invocationCallOrder[0]).toBeLessThan(mockLockTeamsAgainstRotation.mock.invocationCallOrder[0]);
+    expect(mockLockTeamsAgainstRotation.mock.invocationCallOrder[0]).toBeLessThan(mockPrismaTeamMember.findFirst.mock.invocationCallOrder[0]);
+  });
+
+  it("answers 409 when the target's tenant row is held past the lock wait", async () => {
+    const { TenantMemberLockTimeoutError } = await vi.importActual<typeof import("@/lib/team/tenant-row-lock")>("@/lib/team/tenant-row-lock");
+    mockLockTenantRows.mockRejectedValue(new TenantMemberLockTimeoutError());
+
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/members`, { body: { userId: TARGET_USER_ID, role: TEAM_ROLE.MEMBER } }),
+      createParams({ teamId: TEAM_ID }),
+    );
+
+    expect(res.status).toBe(409);
+    expect(mockPrismaTeamMember.create).not.toHaveBeenCalled();
   });
 
   it("returns 409 for active member", async () => {
@@ -421,8 +517,8 @@ describe("POST /api/teams/[teamId]/members", () => {
   });
 
   it("returns 404 when target user not in tenant", async () => {
-    // New code uses a single tenantMember.findFirst query (no separate user.findFirst)
-    mockPrismaTenantMember.findFirst.mockResolvedValue(null);
+    // The target's tenant row, locked: absent.
+    mockLockTenantRows.mockResolvedValue(new Map([[TARGET_USER_ID, { hasRow: false, deactivatedAt: null, departedAt: null }]]));
 
     const res = await POST(
       createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/members`, {
@@ -434,7 +530,7 @@ describe("POST /api/teams/[teamId]/members", () => {
   });
 
   it("returns 404 when user exists but has no active tenant membership", async () => {
-    mockPrismaTenantMember.findFirst.mockResolvedValue(null);
+    mockLockTenantRows.mockResolvedValue(new Map([[TARGET_USER_ID, { hasRow: true, deactivatedAt: new Date(), departedAt: null }]]));
 
     const res = await POST(
       createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/members`, {

@@ -15,6 +15,15 @@ import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { getLogger } from "@/lib/logger";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { TEAM_MEMBERSHIP_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
+import { isMembershipLockConflict, lockTenantRows } from "@/lib/team/tenant-row-lock";
+
+/** The creator's tenant membership ended after the permission check. */
+class CreatorDepartedError extends Error {
+  constructor() {
+    super("CREATOR_DEPARTED");
+  }
+}
 
 // GET /api/teams — List teams the user belongs to
 async function handleGET(req: NextRequest) {
@@ -105,40 +114,53 @@ async function handlePOST(req: NextRequest) {
 
   let team;
   try {
-    team = await withUserTenantRls(session.user.id, async () =>
-      prisma.team.create({
-        data: {
-          id: clientId,
-          tenant: { connect: { id: tenantId } },
-          name,
-          slug,
-          description: description || null,
-          teamKeyVersion: 1,
-          members: {
-            create: {
-              userId: session.user.id,
-              tenantId,
-              role: TEAM_ROLE.OWNER,
-              keyDistributed: true,
+    team = await withUserTenantRls(
+      session.user.id,
+      async (_rlsTenantId, tx) => {
+        // The creator becomes the team's OWNER: an admission, so it runs under
+        // the creator's tenant row (FOR SHARE, tenant-row-lock.ts). A departure
+        // committed since requireTenantPermission is read here and refused;
+        // one that starts now waits for this commit and ends the membership.
+        const rows = await lockTenantRows(tx, tenantId, [session.user.id], "share");
+        const creator = rows.get(session.user.id);
+        if (!creator?.hasRow || creator.deactivatedAt !== null) throw new CreatorDepartedError();
+        return tx.team.create({
+          data: {
+            id: clientId,
+            tenant: { connect: { id: tenantId } },
+            name,
+            slug,
+            description: description || null,
+            teamKeyVersion: 1,
+            members: {
+              create: {
+                userId: session.user.id,
+                tenantId,
+                role: TEAM_ROLE.OWNER,
+                keyDistributed: true,
+              },
+            },
+            memberKeys: {
+              create: {
+                userId: session.user.id,
+                tenantId,
+                encryptedTeamKey: teamMemberKey.encryptedTeamKey,
+                teamKeyIv: teamMemberKey.teamKeyIv,
+                teamKeyAuthTag: teamMemberKey.teamKeyAuthTag,
+                ephemeralPublicKey: teamMemberKey.ephemeralPublicKey,
+                hkdfSalt: teamMemberKey.hkdfSalt,
+                keyVersion: teamMemberKey.keyVersion,
+                wrapVersion: teamMemberKey.wrapVersion,
+              },
             },
           },
-          memberKeys: {
-            create: {
-              userId: session.user.id,
-              tenantId,
-              encryptedTeamKey: teamMemberKey.encryptedTeamKey,
-              teamKeyIv: teamMemberKey.teamKeyIv,
-              teamKeyAuthTag: teamMemberKey.teamKeyAuthTag,
-              ephemeralPublicKey: teamMemberKey.ephemeralPublicKey,
-              hkdfSalt: teamMemberKey.hkdfSalt,
-              keyVersion: teamMemberKey.keyVersion,
-              wrapVersion: teamMemberKey.wrapVersion,
-            },
-          },
-        },
-      }),
+        });
+      },
+      { timeout: TEAM_MEMBERSHIP_TX_TIMEOUT_MS },
     );
   } catch (e) {
+    if (e instanceof CreatorDepartedError) return forbidden();
+    if (isMembershipLockConflict(e)) return errorResponse(API_ERROR.CONFLICT);
     if (
       e instanceof Error &&
       (e.message === "TENANT_NOT_RESOLVED" ||

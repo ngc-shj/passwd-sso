@@ -13,6 +13,16 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { parseBody } from "@/lib/http/parse-body";
 import { invitationAcceptSchema } from "@/lib/validations";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { TEAM_MEMBERSHIP_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
+import { createLockBudget, lockTeamsAgainstRotation } from "@/lib/team/team-key-rotation-lock";
+import { departedSince, isMembershipLockConflict, lockTenantRows } from "@/lib/team/tenant-row-lock";
+
+const ACCEPT_OUTCOME = {
+  ACCEPTED: "accepted",
+  ALREADY_MEMBER: "already_member",
+  ALREADY_USED: "already_used",
+  DEPARTED: "departed",
+} as const;
 
 const acceptLimiter = createRateLimiter({
   windowMs: 5 * MS_PER_MINUTE,
@@ -83,7 +93,7 @@ async function handlePOST(req: NextRequest) {
           userId: session.user.id,
         },
       },
-      select: { deactivatedAt: true, scimManaged: true },
+      select: { deactivatedAt: true, scimManaged: true, deactivatedByTenant: true },
     }),
   );
 
@@ -102,8 +112,10 @@ async function handlePOST(req: NextRequest) {
       });
     }
 
-    // Deactivated + scimManaged → reject, IdP should re-activate
-    if (existingMember.scimManaged) {
+    // Deactivated by the IdP's group removal (scimManaged, no tenant
+    // departure marker) → reject, the IdP should re-add. A membership ended
+    // by the user's departure from the tenant is re-invitable.
+    if (existingMember.scimManaged && !existingMember.deactivatedByTenant) {
       return errorResponse(API_ERROR.SCIM_MANAGED_MEMBER);
     }
 
@@ -123,49 +135,107 @@ async function handlePOST(req: NextRequest) {
   // Create membership (or re-activate if previously deactivated) and mark invitation as accepted.
   // keyDistributed starts as false (admin must distribute team key).
   // Use team tenant context: team_members and team_invitations belong to the team's tenant.
-  const accepted = await withTeamTenantRls(invitation.teamId, async () =>
-    prisma.$transaction(async (tx) => {
-      // Claim the invitation atomically: re-assert PENDING + not-expired in the
-      // write so two concurrent accepts (or an accept straddling expiry) cannot
-      // both succeed. The pre-checks above are the fast path; this is the guard.
-      const claim = await tx.teamInvitation.updateMany({
-        where: {
-          id: invitation.id,
-          teamId: invitation.teamId,
-          status: INVITATION_STATUS.PENDING,
-          expiresAt: { gt: new Date() },
-        },
-        data: { status: INVITATION_STATUS.ACCEPTED },
-      });
-      if (claim.count === 0) return false;
+  //
+  // Admission is decided here, under the lock order of tenant-row-lock.ts:
+  // the invitee's and the inviter's tenant rows (FOR SHARE), then the team,
+  // then the invitation. An invitation issued before either of them left the
+  // tenant (or before a SCIM DELETE of either) does not admit; the refusal
+  // commits the invitation as EXPIRED, so it is returned, not thrown.
+  let outcome: (typeof ACCEPT_OUTCOME)[keyof typeof ACCEPT_OUTCOME];
+  try {
+    outcome = await withTeamTenantRls(
+      invitation.teamId,
+      async (_tenantId, tx) => {
+        const budget = createLockBudget();
+        const rows = await lockTenantRows(
+          tx,
+          invitation.team.tenantId,
+          [session.user.id, invitation.invitedById],
+          "share",
+          budget,
+        );
+        await lockTeamsAgainstRotation(tx, [invitation.teamId], budget);
 
-      await tx.teamMember.upsert({
-        where: {
-          teamId_userId: {
+        // Claim the invitation atomically: re-assert PENDING + not-expired in the
+        // write so two concurrent accepts (or an accept straddling expiry) cannot
+        // both succeed. The pre-checks above are the fast path; this is the guard.
+        // A departure expires the invitations its user issued; the claim then
+        // matches nothing.
+        const claim = await tx.teamInvitation.updateMany({
+          where: {
+            id: invitation.id,
+            teamId: invitation.teamId,
+            invitedById: invitation.invitedById,
+            status: INVITATION_STATUS.PENDING,
+            expiresAt: { gt: new Date() },
+          },
+          data: { status: INVITATION_STATUS.ACCEPTED },
+        });
+        if (claim.count === 0) return ACCEPT_OUTCOME.ALREADY_USED;
+
+        if (
+          departedSince(rows.get(session.user.id), invitation.createdAt) ||
+          departedSince(rows.get(invitation.invitedById), invitation.createdAt)
+        ) {
+          await tx.teamInvitation.update({
+            where: { id: invitation.id },
+            data: { status: INVITATION_STATUS.EXPIRED },
+          });
+          return ACCEPT_OUTCOME.DEPARTED;
+        }
+
+        // Active since the pre-check (another accept, members POST): nothing
+        // to re-admit, and its keys must stay.
+        const current = await tx.teamMember.findUnique({
+          where: { teamId_userId: { teamId: invitation.teamId, userId: session.user.id } },
+          select: { deactivatedAt: true },
+        });
+        if (current && current.deactivatedAt === null) return ACCEPT_OUTCOME.ALREADY_MEMBER;
+
+        await tx.teamMember.upsert({
+          where: {
+            teamId_userId: {
+              teamId: invitation.teamId,
+              userId: session.user.id,
+            },
+          },
+          create: {
             teamId: invitation.teamId,
             userId: session.user.id,
+            tenantId: invitation.team.tenantId,
+            role: invitation.role,
+            keyDistributed: false,
           },
-        },
-        create: {
-          teamId: invitation.teamId,
-          userId: session.user.id,
-          tenantId: invitation.team.tenantId,
-          role: invitation.role,
-          keyDistributed: false,
-        },
-        update: {
-          role: invitation.role,
-          keyDistributed: false,
-          deactivatedAt: null,
-          scimManaged: false,
-        },
-      });
-      return true;
-    }),
-  );
+          update: {
+            role: invitation.role,
+            keyDistributed: false,
+            deactivatedAt: null,
+            deactivatedByTenant: false,
+            scimManaged: false,
+          },
+        });
+        // A re-admitted member starts without keys: whatever they held before
+        // is distributed again under the current version.
+        await tx.teamMemberKey.deleteMany({
+          where: { teamId: invitation.teamId, userId: session.user.id },
+        });
+        return ACCEPT_OUTCOME.ACCEPTED;
+      },
+      { timeout: TEAM_MEMBERSHIP_TX_TIMEOUT_MS },
+    );
+  } catch (e) {
+    if (isMembershipLockConflict(e)) return errorResponse(API_ERROR.CONFLICT);
+    throw e;
+  }
 
-  if (!accepted) {
+  if (outcome === ACCEPT_OUTCOME.ALREADY_USED) {
     return errorResponse(API_ERROR.INVITATION_ALREADY_USED);
+  }
+  if (outcome === ACCEPT_OUTCOME.DEPARTED) {
+    return errorResponse(API_ERROR.INVITATION_EXPIRED);
+  }
+  if (outcome === ACCEPT_OUTCOME.ALREADY_MEMBER) {
+    return NextResponse.json({ team: invitation.team, alreadyMember: true });
   }
 
   return NextResponse.json({

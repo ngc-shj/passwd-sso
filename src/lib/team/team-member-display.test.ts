@@ -52,7 +52,7 @@ describe("buildTeamMemberDisplayItems", () => {
 
     const result = await buildTeamMemberDisplayItems([
       { id: "m1", userId: "u1", role: "OWNER", createdAt: now },
-      { id: "m2", userId: "u2", role: "MEMBER", createdAt: now },
+      { id: "m2", userId: "u2", role: "MEMBER", createdAt: now, departed: true },
     ]);
 
     expect(result).toEqual([
@@ -65,6 +65,7 @@ describe("buildTeamMemberDisplayItems", () => {
         image: null,
         joinedAt: now,
         tenantName: "Home Tenant",
+        departed: false,
       },
       {
         id: "m2",
@@ -75,6 +76,7 @@ describe("buildTeamMemberDisplayItems", () => {
         image: "guest.png",
         joinedAt: now,
         tenantName: "Guest Tenant",
+        departed: true,
       },
     ]);
     expect(mockWithBypassRls).toHaveBeenCalledTimes(1);
@@ -113,6 +115,7 @@ describe("buildTeamMemberDisplayItems", () => {
         image: null,
         joinedAt: now,
         tenantName: "Home Tenant",
+        departed: false,
       },
     ]);
   });

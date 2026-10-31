@@ -25,6 +25,19 @@ import { errorLogFields } from "@/lib/logger/error-fields";
 
 type Params = { params: Promise<{ teamId: string; memberId: string }> };
 
+/**
+ * A row the change needed active (the target, or the acting member) was not,
+ * when re-read under the team lock: a departure from the tenant, or a removal,
+ * committed since the checks above.
+ */
+class MemberChangedError extends Error {
+  constructor() {
+    super("MEMBER_CHANGED");
+  }
+}
+
+const MEMBER_RESPONSE_SELECT = { id: true, userId: true, role: true, createdAt: true } as const;
+
 async function buildMemberRoleResponse(member: {
   id: string;
   userId: string;
@@ -88,25 +101,29 @@ async function handlePUT(req: NextRequest, { params }: Params) {
       return errorResponse(API_ERROR.OWNER_ONLY);
     }
 
-    // Transfer: promote target to OWNER, demote self to ADMIN (atomic)
-    const [, updated] = await withTeamTenantRls(teamId, async () =>
-      prisma.$transaction([
-        prisma.teamMember.update({
-          where: { id: actorMembership.id, teamId },
+    // Transfer: promote target to OWNER, demote self to ADMIN (atomic). Both
+    // rows must still be active under the team lock: transferring to a member
+    // who just left the tenant would leave the team without an active OWNER.
+    let updated;
+    try {
+      updated = await withTeamTenantRls(teamId, async (_tenantId, tx) => {
+        await lockTeamsAgainstRotation(tx, [teamId]);
+        const demoted = await tx.teamMember.updateMany({
+          where: { id: actorMembership.id, teamId, role: TEAM_ROLE.OWNER, deactivatedAt: null },
           data: { role: TEAM_ROLE.ADMIN },
-        }),
-        prisma.teamMember.update({
-          where: { id: memberId, teamId },
+        });
+        const promoted = await tx.teamMember.updateMany({
+          where: { id: memberId, teamId, deactivatedAt: null },
           data: { role: TEAM_ROLE.OWNER },
-          select: {
-            id: true,
-            userId: true,
-            role: true,
-            createdAt: true,
-          },
-        }),
-      ]),
-    );
+        });
+        if (demoted.count !== 1 || promoted.count !== 1) throw new MemberChangedError();
+        return tx.teamMember.findUniqueOrThrow({ where: { id: memberId }, select: MEMBER_RESPONSE_SELECT });
+      });
+    } catch (e) {
+      if (e instanceof MemberChangedError) return errorResponse(API_ERROR.MEMBER_NOT_FOUND);
+      if (isTeamRotationConflict(e)) return errorResponse(API_ERROR.CONFLICT);
+      throw e;
+    }
 
     await logAuditAsync({
       ...teamAuditBase(req, session.user.id, teamId),
@@ -132,18 +149,28 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     return errorResponse(API_ERROR.CANNOT_CHANGE_HIGHER_ROLE);
   }
 
-  const updated = await withTeamTenantRls(teamId, async () =>
-    prisma.teamMember.update({
-      where: { id: memberId, teamId },
-      data: { role: result.data.role },
-      select: {
-        id: true,
-        userId: true,
-        role: true,
-        createdAt: true,
-      },
-    }),
-  );
+  // The acting member and the target must both still be active under the
+  // team lock: a departure from the tenant committed since the checks above
+  // ends either membership.
+  let updated;
+  try {
+    updated = await withTeamTenantRls(teamId, async (_tenantId, tx) => {
+      await lockTeamsAgainstRotation(tx, [teamId]);
+      const actorActive = await tx.teamMember.count({
+        where: { id: actorMembership.id, teamId, deactivatedAt: null },
+      });
+      const changed = await tx.teamMember.updateMany({
+        where: { id: memberId, teamId, deactivatedAt: null, role: target.role },
+        data: { role: result.data.role },
+      });
+      if (actorActive !== 1 || changed.count !== 1) throw new MemberChangedError();
+      return tx.teamMember.findUniqueOrThrow({ where: { id: memberId }, select: MEMBER_RESPONSE_SELECT });
+    });
+  } catch (e) {
+    if (e instanceof MemberChangedError) return errorResponse(API_ERROR.MEMBER_NOT_FOUND);
+    if (isTeamRotationConflict(e)) return errorResponse(API_ERROR.CONFLICT);
+    throw e;
+  }
 
   await logAuditAsync({
     ...teamAuditBase(req, session.user.id, teamId),
@@ -184,11 +211,14 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
   const target = await withTeamTenantRls(teamId, async () =>
     prisma.teamMember.findUnique({
       where: { id: memberId },
-      select: { teamId: true, deactivatedAt: true, role: true, userId: true, tenantId: true },
+      select: { teamId: true, deactivatedAt: true, deactivatedByTenant: true, role: true, userId: true, tenantId: true },
     }),
   );
 
-  if (!target || target.teamId !== teamId || target.deactivatedAt !== null) {
+  // An active member, or one whose membership ended with their departure from
+  // the tenant: removing that one keeps a later return from restoring it.
+  const removable = target && (target.deactivatedAt === null || target.deactivatedByTenant);
+  if (!target || target.teamId !== teamId || !removable) {
     return errorResponse(API_ERROR.MEMBER_NOT_FOUND);
   }
 
@@ -209,10 +239,16 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
       // rotation read the member set would leave the removed member a key to
       // the new version (team-key-rotation-lock.ts).
       await lockTeamsAgainstRotation(tx, [teamId]);
+      // Re-read under the lock: the row is still active or departed (a return
+      // or a group removal since the check above changes what is removed).
+      const removed = await tx.teamMember.deleteMany({
+        where: { id: memberId, teamId, OR: [{ deactivatedAt: null }, { deactivatedByTenant: true }] },
+      });
+      if (removed.count !== 1) throw new MemberChangedError();
       await tx.teamMemberKey.deleteMany({ where: { teamId: teamId, userId: target.userId } });
-      await tx.teamMember.delete({ where: { id: memberId, teamId } });
     });
   } catch (e) {
+    if (e instanceof MemberChangedError) return errorResponse(API_ERROR.MEMBER_NOT_FOUND);
     // A rotation of this team held it past the lock wait; nothing was removed.
     if (isTeamRotationConflict(e)) return errorResponse(API_ERROR.CONFLICT);
     throw e;

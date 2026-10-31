@@ -22,12 +22,20 @@ const {
   mockPrismaTeam: { findUnique: vi.fn() },
   mockUserFindUnique: vi.fn(),
   mockTeamMemberFindUnique: vi.fn(),
-  mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
+  // The issuing transaction runs as fn(tenantId, tx); tx is the prisma mock.
+  mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: (tenantId: string, tx: unknown) => unknown) =>
+    fn("tenant-1", (await import("@/lib/prisma")).prisma)),
   mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
 }));
 
-const { mockUserFindMany } = vi.hoisted(() => ({
+const { mockUserFindMany, mockTeamMemberFindMany, mockLockTenantRows } = vi.hoisted(() => ({
   mockUserFindMany: vi.fn().mockResolvedValue([]),
+  mockTeamMemberFindMany: vi.fn(),
+  mockLockTenantRows: vi.fn(),
+}));
+vi.mock("@/lib/team/tenant-row-lock", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
+  lockTenantRows: mockLockTenantRows,
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -48,10 +56,11 @@ vi.mock("@/lib/prisma", () => ({
       findMany: mockInvitationFindMany,
       findFirst: mockInvitationFindFirst,
       create: mockInvitationCreate,
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
     team: mockPrismaTeam,
     user: { findUnique: mockUserFindUnique, findMany: mockUserFindMany },
-    teamMember: { findUnique: mockTeamMemberFindUnique },
+    teamMember: { findUnique: mockTeamMemberFindUnique, findMany: mockTeamMemberFindMany },
   },
 }));
 vi.mock("@/lib/audit/audit", () => ({
@@ -120,6 +129,12 @@ describe("POST /api/teams/[teamId]/invitations", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockPrismaTeam.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+    // The invitee lookup is case-insensitive (findMany); the pending check
+    // runs inside the issuing transaction (findMany), under the tenant rows.
+    mockUserFindMany.mockResolvedValue([]);
+    mockTeamMemberFindMany.mockResolvedValue([]);
+    mockInvitationFindMany.mockResolvedValue([]);
+    mockLockTenantRows.mockResolvedValue(new Map());
   });
 
   it("returns 401 when not authenticated", async () => {
@@ -167,8 +182,8 @@ describe("POST /api/teams/[teamId]/invitations", () => {
   it("returns 409 when user is already a member", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockUserFindUnique.mockResolvedValue({ id: "u2", email: "existing@test.com" });
-    mockTeamMemberFindUnique.mockResolvedValue({ id: "m1", deactivatedAt: null });
+    mockUserFindMany.mockResolvedValue([{ id: "u2" }]);
+    mockTeamMemberFindMany.mockResolvedValue([{ deactivatedAt: null, scimManaged: false, deactivatedByTenant: false }]);
     const req = createRequest("POST", undefined, { body: { email: "existing@test.com", role: "MEMBER" } });
     const res = await POST(req, createParams({ teamId: "o1" }));
     const { status, json } = await parseResponse(res);
@@ -179,8 +194,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
   it("returns 409 when pending invitation exists", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockUserFindUnique.mockResolvedValue(null);
-    mockInvitationFindFirst.mockResolvedValue({ id: "inv-existing" });
+    mockInvitationFindMany.mockResolvedValue([{ id: "inv-existing", createdAt: new Date() }]);
     const req = createRequest("POST", undefined, { body: { email: "new@test.com", role: "MEMBER" } });
     const res = await POST(req, createParams({ teamId: "o1" }));
     const { status, json } = await parseResponse(res);
@@ -191,8 +205,6 @@ describe("POST /api/teams/[teamId]/invitations", () => {
   it("creates invitation successfully", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockUserFindUnique.mockResolvedValue(null);
-    mockInvitationFindFirst.mockResolvedValue(null);
     const created = {
       id: "inv-1",
       email: "new@test.com",
@@ -212,9 +224,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
   it("allows inviting user who exists but is not a member", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockUserFindUnique.mockResolvedValue({ id: "u2", email: "nonmember@test.com" });
-    mockTeamMemberFindUnique.mockResolvedValue(null);
-    mockInvitationFindFirst.mockResolvedValue(null);
+    mockUserFindMany.mockResolvedValue([{ id: "u2" }]);
     const created = {
       id: "inv-2",
       email: "nonmember@test.com",

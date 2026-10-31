@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
 import { addMemberSchema } from "@/lib/validations";
-import { requireTeamMember, requireTeamPermission, TeamAuthError } from "@/lib/auth/access/team-auth";
+import { hasTeamPermission, requireTeamMember, requireTeamPermission, TeamAuthError } from "@/lib/auth/access/team-auth";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
@@ -12,6 +12,9 @@ import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, unauthorized, validationError } from "@/lib/http/api-response";
 import { buildTeamMemberDisplayItems } from "@/lib/team/team-member-display";
+import { TEAM_MEMBERSHIP_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
+import { createLockBudget, lockTeamsAgainstRotation } from "@/lib/team/team-key-rotation-lock";
+import { isMembershipLockConflict, lockTenantRows } from "@/lib/team/tenant-row-lock";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -24,26 +27,38 @@ async function handleGET(req: NextRequest, { params }: Params) {
 
   const { teamId } = await params;
 
+  let membership;
   try {
-    await requireTeamMember(session.user.id, teamId, req);
+    membership = await requireTeamMember(session.user.id, teamId, req);
   } catch (e) {
     return handleAuthError(e);
   }
 
+  // Members whose membership ended with their departure from the tenant are
+  // listed, flagged `departed`, to those who can remove them — the only
+  // action a team takes on them (a return restores them otherwise).
+  const canRemove = hasTeamPermission(membership.role, TEAM_PERMISSION.MEMBER_REMOVE);
   const members = await withTeamTenantRls(teamId, async () =>
     prisma.teamMember.findMany({
-      where: { teamId: teamId, deactivatedAt: null },
+      where: canRemove
+        ? { teamId: teamId, OR: [{ deactivatedAt: null }, { deactivatedByTenant: true }] }
+        : { teamId: teamId, deactivatedAt: null },
       select: {
         id: true,
         userId: true,
         role: true,
         createdAt: true,
+        deactivatedByTenant: true,
       },
       orderBy: [{ role: "asc" }, { createdAt: "asc" }],
     }),
   );
 
-  return NextResponse.json(await buildTeamMemberDisplayItems(members));
+  return NextResponse.json(
+    await buildTeamMemberDisplayItems(
+      members.map(({ deactivatedByTenant, ...member }) => ({ ...member, departed: deactivatedByTenant })),
+    ),
+  );
 }
 
 // POST /api/teams/[teamId]/members — Direct-add a tenant member
@@ -85,63 +100,74 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   let member: MemberResult;
 
   try {
-    member = await withTeamTenantRls(teamId, async (tenantId) => {
-      // Verify target user is an active tenant member (single query replaces user + tenantMember lookups)
-      const tenantMembership = await prisma.tenantMember.findFirst({
-        where: { tenantId, userId, deactivatedAt: null },
-        select: { id: true },
-      });
-      if (!tenantMembership) {
-        throw new TeamAuthError(API_ERROR.NOT_FOUND, 404);
-      }
-
-      // Check existing TeamMember record
-      const existing = await prisma.teamMember.findFirst({
-        where: { teamId, userId },
-      });
-
-      if (existing) {
-        if (existing.deactivatedAt === null) {
-          throw new AlreadyMemberError();
+    member = await withTeamTenantRls(
+      teamId,
+      async (tenantId, tx) => {
+        // Admission under the lock order of tenant-row-lock.ts: the target's
+        // tenant row (FOR SHARE) decides "active member of the tenant", and a
+        // departure of the target either commits first (and is read here) or
+        // waits for this commit and then ends the membership created here.
+        const budget = createLockBudget();
+        const rows = await lockTenantRows(tx, tenantId, [userId], "share", budget);
+        const target = rows.get(userId);
+        if (!target?.hasRow || target.deactivatedAt !== null) {
+          throw new TeamAuthError(API_ERROR.NOT_FOUND, 404);
         }
-        if (existing.scimManaged) {
-          throw new ScimManagedError();
-        }
+        await lockTeamsAgainstRotation(tx, [teamId], budget);
 
-        // Reactivate: delete stale keys + update member
-        const [, updated] = await prisma.$transaction([
-          prisma.teamMemberKey.deleteMany({ where: { teamId, userId } }),
-          prisma.teamMember.update({
+        // Check existing TeamMember record
+        const existing = await tx.teamMember.findFirst({
+          where: { teamId, userId },
+        });
+
+        if (existing) {
+          if (existing.deactivatedAt === null) {
+            throw new AlreadyMemberError();
+          }
+          // A membership the IdP's group removal ended stays the IdP's; one
+          // ended by the user's departure from the tenant can be re-added.
+          if (existing.scimManaged && !existing.deactivatedByTenant) {
+            throw new ScimManagedError();
+          }
+
+          // Reactivate: delete stale keys + update member
+          await tx.teamMemberKey.deleteMany({ where: { teamId, userId } });
+          const updated = await tx.teamMember.update({
             where: { id: existing.id },
             data: {
               deactivatedAt: null,
+              deactivatedByTenant: false,
               role,
               keyDistributed: false,
               scimManaged: false,
             },
-          }),
-        ]);
-        return { id: updated.id, userId: updated.userId, role: updated.role, reactivated: true };
-      }
+          });
+          return { id: updated.id, userId: updated.userId, role: updated.role, reactivated: true };
+        }
 
-      // Create new TeamMember
-      const created = await prisma.teamMember.create({
-        data: {
-          teamId,
-          userId,
-          tenantId,
-          role,
-          keyDistributed: false,
-        },
-      });
-      return { id: created.id, userId: created.userId, role: created.role, reactivated: false };
-    });
+        // Create new TeamMember
+        const created = await tx.teamMember.create({
+          data: {
+            teamId,
+            userId,
+            tenantId,
+            role,
+            keyDistributed: false,
+          },
+        });
+        return { id: created.id, userId: created.userId, role: created.role, reactivated: false };
+      },
+      { timeout: TEAM_MEMBERSHIP_TX_TIMEOUT_MS },
+    );
   } catch (e) {
     if (e instanceof AlreadyMemberError) {
       return errorResponse(API_ERROR.ALREADY_A_MEMBER);
     }
     if (e instanceof ScimManagedError) {
       return errorResponse(API_ERROR.SCIM_MANAGED_MEMBER);
+    }
+    if (isMembershipLockConflict(e)) {
+      return errorResponse(API_ERROR.CONFLICT);
     }
     // Prisma unique constraint violation (race condition)
     if (isPrismaUniqueConstraintError(e)) {

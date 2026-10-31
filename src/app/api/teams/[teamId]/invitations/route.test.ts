@@ -16,13 +16,16 @@ const { mockAuth, mockPrismaTeamInvitation, mockPrismaUser, mockPrismaTeam, mock
       findMany: vi.fn(),
       findFirst: vi.fn(),
       create: vi.fn(),
+      updateMany: vi.fn(),
     },
     mockPrismaUser: { findUnique: vi.fn(), findMany: vi.fn() },
     mockPrismaTeam: { findUnique: vi.fn() },
-    mockPrismaTeamMember: { findUnique: vi.fn() },
+    mockPrismaTeamMember: { findUnique: vi.fn(), findMany: vi.fn() },
     mockRequireTeamPermission: vi.fn(),
     TeamAuthError: _TeamAuthError,
-    mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
+    // The issuing transaction runs as fn(tenantId, tx); tx is the prisma mock.
+    mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: (tenantId: string, tx: unknown) => unknown) =>
+      fn("tenant-1", (await import("@/lib/prisma")).prisma)),
     mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
   };
 });
@@ -40,6 +43,11 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/auth/access/team-auth", () => ({
   requireTeamPermission: mockRequireTeamPermission,
   TeamAuthError,
+}));
+const { mockLockTenantRows } = vi.hoisted(() => ({ mockLockTenantRows: vi.fn() }));
+vi.mock("@/lib/team/tenant-row-lock", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
+  lockTenantRows: mockLockTenantRows,
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withTeamTenantRls: mockWithTeamTenantRls,
@@ -143,9 +151,12 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
     mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
-    mockPrismaUser.findUnique.mockResolvedValue(null);
+    mockPrismaUser.findMany.mockResolvedValue([]);
     mockPrismaTeam.findUnique.mockResolvedValue({ name: "Team", tenantId: "tenant-1" });
-    mockPrismaTeamInvitation.findFirst.mockResolvedValue(null);
+    mockPrismaTeamMember.findMany.mockResolvedValue([]);
+    mockPrismaTeamInvitation.findMany.mockResolvedValue([]);
+    mockPrismaTeamInvitation.updateMany.mockResolvedValue({ count: 0 });
+    mockLockTenantRows.mockResolvedValue(new Map());
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -170,8 +181,8 @@ describe("POST /api/teams/[teamId]/invitations", () => {
   });
 
   it("returns 409 when user is already a member", async () => {
-    mockPrismaUser.findUnique.mockResolvedValue({ id: "existing-user" });
-    mockPrismaTeamMember.findUnique.mockResolvedValue({ id: "existing-member", deactivatedAt: null });
+    mockPrismaUser.findMany.mockResolvedValue([{ id: "existing-user" }]);
+    mockPrismaTeamMember.findMany.mockResolvedValue([{ deactivatedAt: null, scimManaged: false, deactivatedByTenant: false }]);
 
     const res = await POST(
       createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/invitations`, {
@@ -185,12 +196,8 @@ describe("POST /api/teams/[teamId]/invitations", () => {
   });
 
   it("blocks re-inviting a guest member found via bypass user lookup", async () => {
-    mockPrismaUser.findUnique.mockResolvedValue({ id: "guest-user" });
-    mockPrismaTeamMember.findUnique.mockResolvedValue({
-      id: "guest-member",
-      deactivatedAt: null,
-      scimManaged: false,
-    });
+    mockPrismaUser.findMany.mockResolvedValue([{ id: "guest-user" }]);
+    mockPrismaTeamMember.findMany.mockResolvedValue([{ deactivatedAt: null, scimManaged: false, deactivatedByTenant: false }]);
 
     const res = await POST(
       createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/invitations`, {
@@ -203,15 +210,15 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     const json = await res.json();
     expect(json.error).toBe("ALREADY_A_MEMBER");
     expect(mockWithBypassRls).toHaveBeenCalledTimes(1);
-    expect(mockPrismaUser.findUnique).toHaveBeenCalledWith({
-      where: { email: "guest@test.com" },
+    expect(mockPrismaUser.findMany).toHaveBeenCalledWith({
+      where: { email: { equals: "guest@test.com", mode: "insensitive" } },
       select: { id: true },
     });
     expect(mockPrismaTeamInvitation.create).not.toHaveBeenCalled();
   });
 
   it("returns 409 when invitation already pending", async () => {
-    mockPrismaTeamInvitation.findFirst.mockResolvedValue({ id: "existing-inv" });
+    mockPrismaTeamInvitation.findMany.mockResolvedValue([{ id: "existing-inv", createdAt: now }]);
 
     const res = await POST(
       createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/invitations`, {
@@ -245,5 +252,77 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     expect(json.email).toBe("new@test.com");
     expect(json.token).toBeDefined();
     expect(res.headers.get("Cache-Control")).toBe("no-store");
+  });
+  describe("re-invitation after a tenant departure", () => {
+    const invite = (email = "left@test.com") =>
+      POST(
+        createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/invitations`, { body: { email, role: TEAM_ROLE.MEMBER } }),
+        createParams({ teamId: TEAM_ID }),
+      );
+    const departed = (deactivatedAt: Date) =>
+      new Map([["left-user", { hasRow: true, deactivatedAt, departedAt: null }]]);
+
+    beforeEach(() => {
+      mockPrismaUser.findMany.mockResolvedValue([{ id: "left-user" }]);
+      mockPrismaTeamInvitation.create.mockResolvedValue({ id: "new-inv", email: "left@test.com", role: TEAM_ROLE.MEMBER, token: "t", expiresAt: now, createdAt: now });
+    });
+
+    it("expires a pending invitation issued before the invitee left and issues a new one", async () => {
+      mockPrismaTeamInvitation.findMany.mockResolvedValue([{ id: "stale-inv", createdAt: now }]);
+      mockLockTenantRows.mockResolvedValue(departed(new Date(now.getTime() + 1)));
+
+      const res = await invite();
+
+      expect(res.status).toBe(201);
+      expect(mockPrismaTeamInvitation.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: ["stale-inv"] }, status: INVITATION_STATUS.PENDING },
+        data: { status: INVITATION_STATUS.EXPIRED },
+      });
+      expect(mockPrismaTeamInvitation.create).toHaveBeenCalledOnce();
+    });
+
+    it("treats a pending invitation issued at the instant of the departure as stale", async () => {
+      mockPrismaTeamInvitation.findMany.mockResolvedValue([{ id: "stale-inv", createdAt: now }]);
+      mockLockTenantRows.mockResolvedValue(departed(now));
+
+      expect((await invite()).status).toBe(201);
+    });
+
+    it("keeps refusing a pending invitation issued after the departure", async () => {
+      mockPrismaTeamInvitation.findMany.mockResolvedValue([{ id: "live-inv", createdAt: now }]);
+      mockLockTenantRows.mockResolvedValue(departed(new Date(now.getTime() - 1)));
+
+      const res = await invite();
+
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toBe("INVITATION_ALREADY_SENT");
+      expect(mockPrismaTeamInvitation.create).not.toHaveBeenCalled();
+    });
+
+    it("re-invites a SCIM-managed membership the tenant departure ended", async () => {
+      mockPrismaTeamMember.findMany.mockResolvedValue([{ deactivatedAt: now, scimManaged: true, deactivatedByTenant: true }]);
+
+      expect((await invite()).status).toBe(201);
+    });
+
+    it("still refuses a SCIM-managed membership the IdP's group removal ended", async () => {
+      mockPrismaTeamMember.findMany.mockResolvedValue([{ deactivatedAt: now, scimManaged: true, deactivatedByTenant: false }]);
+
+      const res = await invite();
+
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toBe("SCIM_MANAGED_MEMBER");
+    });
+
+    it("locks the inviter's and every case variant's tenant row before issuing", async () => {
+      mockPrismaUser.findMany.mockResolvedValue([{ id: "left-user" }, { id: "left-user-upper" }]);
+
+      await invite("Left@Test.com");
+
+      expect(mockLockTenantRows).toHaveBeenCalledWith(
+        expect.anything(), "tenant-1", ["test-user-id", "left-user", "left-user-upper"], "share", expect.anything(),
+      );
+      expect(mockLockTenantRows.mock.invocationCallOrder[0]).toBeLessThan(mockPrismaTeamInvitation.create.mock.invocationCallOrder[0]);
+    });
   });
 });

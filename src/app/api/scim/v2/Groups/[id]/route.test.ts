@@ -46,6 +46,24 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>, withTenantRls: mockWithTenantRls }));
+// The tenant-row lock has its own tests and real-DB cells; here it answers
+// from the `tenantMember.findMany` fixture of the client it is handed (the
+// cells' "active member of the tenant"). A plain function, so resets keep it.
+vi.mock("@/lib/team/tenant-row-lock", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
+  lockTenantRows: async (
+    tx: { tenantMember: { findMany: (args: unknown) => Promise<{ userId: string }[] | undefined> } },
+    tenantId: string,
+    userIds: string[],
+  ) => {
+    if (userIds.length === 0) return new Map();
+    const active = new Set(
+      ((await tx.tenantMember.findMany({ where: { tenantId, userId: { in: userIds }, deactivatedAt: null }, select: { userId: true } })) ?? [])
+        .map((m) => m.userId),
+    );
+    return new Map(userIds.map((id) => [id, { hasRow: active.has(id), deactivatedAt: null, departedAt: null }]));
+  },
+}));
 vi.mock("@/lib/auth/policy/access-restriction", () => ({
   enforceAccessRestriction: vi.fn().mockResolvedValue(null),
 }));
@@ -165,7 +183,7 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
   it("adds a member", async () => {
     // Existing member (role update path): findMany returns the member, updateMany is called
     mockTeamMember.findMany
-      .mockResolvedValueOnce([{ id: "tm1", userId: "user-1", role: "MEMBER" }]) // tx.teamMember.findMany (existing members)
+      .mockResolvedValueOnce([{ id: "tm1", userId: "user-1", role: "MEMBER", deactivatedAt: null }]) // tx.teamMember.findMany (existing members)
       .mockResolvedValueOnce([]); // loadGroupMembers after tx
     mockTeamMember.updateMany.mockResolvedValue({ count: 1 });
 
@@ -204,7 +222,7 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
 
   it("returns 403 when patch would modify an owner", async () => {
     // findMany returns an existing OWNER member
-    mockTeamMember.findMany.mockResolvedValueOnce([{ id: "tm1", userId: "user-1", role: "OWNER" }]);
+    mockTeamMember.findMany.mockResolvedValueOnce([{ id: "tm1", userId: "user-1", role: "OWNER", deactivatedAt: null }]);
 
     const res = await PATCH(
       makeReq({
@@ -257,7 +275,7 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
     // Remove op sequence: applyAddOperations with addOps=[] returns early (no findMany)
     // (1) tx.teamMember.findMany for validate existence, (2) tx.teamMember.findMany in applyRemoveOperations
     // (3) prisma.teamMember.findMany in loadGroupMembers after tx
-    const member = [{ id: "tm1", userId: "user-1", role: "ADMIN" }];
+    const member = [{ id: "tm1", userId: "user-1", role: "ADMIN", deactivatedAt: null }];
     mockTeamMember.findMany
       .mockResolvedValueOnce(member) // validate existence in removeOps
       .mockResolvedValueOnce(member) // freshMembers in applyRemoveOperations
@@ -397,9 +415,9 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
   it("replaces role members", async () => {
     // Pre-tx read: current ADMIN members (user-1 will be removed)
     mockTeamMember.findMany
-      .mockResolvedValueOnce([{ id: "tm1", userId: "user-1", role: "ADMIN" }]) // prisma.teamMember.findMany (current members)
-      .mockResolvedValueOnce([{ id: "tm2", userId: "user-2", role: "MEMBER" }]) // tx.teamMember.findMany (existing for toAdd)
-      .mockResolvedValueOnce([{ id: "tm1", userId: "user-1", role: "ADMIN" }]) // tx.teamMember.findMany (freshMembers for toRemove)
+      .mockResolvedValueOnce([{ id: "tm1", userId: "user-1", role: "ADMIN", deactivatedAt: null }]) // prisma.teamMember.findMany (current members)
+      .mockResolvedValueOnce([{ id: "tm2", userId: "user-2", role: "MEMBER", deactivatedAt: null }]) // tx.teamMember.findMany (existing for toAdd)
+      .mockResolvedValueOnce([{ id: "tm1", userId: "user-1", role: "ADMIN", deactivatedAt: null }]) // tx.teamMember.findMany (freshMembers for toRemove)
       .mockResolvedValueOnce([]); // loadGroupMembers after tx
     mockTenantMember.findMany.mockResolvedValue([]);
     mockTeamMember.updateMany.mockResolvedValue({ count: 1 });
