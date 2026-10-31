@@ -295,3 +295,61 @@ gaps (T-3–T-9).
 ### S-F4 Minor history / ItemKey re-key — Open (user decision)
 - Unchanged from round 1. Re-keying ItemKeys would also mean re-encrypting
   team attachments, which are encrypted under the ItemKey.
+
+---
+
+# Round 3
+
+## Changes from Previous Round
+Round 3 reviewed `61114a823` (S-R2-1: end team key distribution for members
+leaving a tenant). It found the design wrong, and the commit was reverted
+(`Revert "fix(teams): end team key distribution …"`); the tree is identical
+to the state after round 2.
+
+## Findings against the reverted commit
+- **F-R3-1 Critical / S-R3-1 Major** — departure was recorded only as
+  `keyDistributed=false`, the same state as "not yet distributed":
+  pending-key-distributions lists it and every OWNER/ADMIN browser's
+  background `distributePendingKeys` (on unlock and every 2 minutes) re-keys
+  the departed member through confirm-key, which checks team membership only.
+  The revoke also raced confirm-key (both take teams FOR SHARE).
+- **F-R3-2 Critical** — deactivate-then-reactivate of a team's only key holders
+  left the team undecryptable: nothing restored `keyDistributed`.
+- **F-R3-3 Critical / F-R3-A1** — a bootstrap tenant move revoked the sole
+  member's own teams, with no other rotator to protect against.
+- **F-R3-4 / S-R3-2 Major** — no backfill for members who departed before.
+- **F-R3-5 Major** — opposite tenant_members / team_members lock order between
+  SCIM PUT/PATCH and directory sync could deadlock.
+- F-R3-6/7/8, S-R3-3, T-R3-1–5 — directory-sync set and timeout, CI gate
+  precision and coverage, test gaps.
+
+## Resolution Status (round 3)
+
+### Fix-induced Criticals (F-R3-1/2/3, F-R3-5) — Resolved by revert
+- The commit that introduced them is reverted; none of them exists on the
+  branch.
+
+### S-R2-1 Major tenant departure and team key distribution — Out of scope (pending user decision)
+- **Anti-Deferral check**: security-class member (rule 7) — deferral requires
+  explicit user approval.
+- **Justification**: closing it is a design decision this branch cannot make
+  alone — how a tenant departure is represented on team memberships so every
+  distribution path reads it (deactivate the team membership vs a departure
+  predicate in pending-key-distributions and confirm-key), what reactivation
+  restores, what a bootstrap tenant move means for the mover's own teams, and
+  a backfill for members who already departed. Round 3 is the measured
+  evidence: the in-branch attempt seeded three Criticals.
+- **Worst case**: a member deactivated at the tenant level (SCIM
+  `active=false`, directory sync) stays a key holder: every later rotation
+  wraps the new team key to them, and member-key serves it to a session they
+  hold in any tenant (team membership is not tenant-scoped).
+- **Likelihood**: medium — tenant-level deactivation is the usual IdP
+  offboarding, but use requires the departed user to authenticate somewhere
+  or obtain database access.
+- **Cost to fix**: design + migration + changes across distribution,
+  reactivation and the tenant move; several days including review.
+- **Orchestrator note**: TODO(team-rotation-tenant-deactivation): follow-up
+  issue carrying the round-3 analysis (F-R3-1–8, S-R3-1–3, T-R3-1–5).
+
+### S-F4 Minor history / ItemKey re-key — Out of scope (pending user decision)
+- Unchanged; see round 1. TODO(team-rotation-history-rekey).
