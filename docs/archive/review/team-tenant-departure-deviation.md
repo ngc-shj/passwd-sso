@@ -25,3 +25,10 @@ Reason: one predicate with the runtime (R48). At runtime the record survives a
 re-creation (C1: "never deleted by a re-create"); restricting the backfill to
 row-less users would leave pre-delete invitations to a re-created user
 acceptable after this change, which the runtime rule refuses.
+
+## D3 Accept refuses a pre-departure invitation with 410, not 403
+
+Plan (C5): "refuse (403 `INVITATION_EXPIRED`)". Implemented: the existing
+`API_ERROR.INVITATION_EXPIRED`, whose status is 410 — the code the expiry path
+of the same route already returns. A second status for the same error code
+would make clients branch on status rather than code.

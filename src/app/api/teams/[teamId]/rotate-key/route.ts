@@ -250,6 +250,14 @@ async function handlePOST(req: NextRequest, { params }: Params) {
           throw new Error("ENTRY_COUNT_MISMATCH");
         }
 
+      // A deactivated member (left the tenant, or removed by the IdP) was not
+      // wrapped the new version: if they come back, they are listed for
+      // distribution of it rather than counted as holding it.
+        await tx.teamMember.updateMany({
+          where: { teamId: teamId, deactivatedAt: { not: null }, keyDistributed: true },
+          data: { keyDistributed: false },
+        });
+
       // Bump team key version
         await tx.team.update({
           where: { id: teamId },

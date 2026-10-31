@@ -94,6 +94,7 @@ src/app/api/tenant/members/[userId]/reset-vault/route.ts	2
 src/app/api/tenant/operator-tokens/route.ts	1
 src/app/api/tenant/scim-tokens/route.ts	1
 src/app/api/tenant/service-accounts/route.ts	1
+src/app/api/tenant/teams/[teamId]/owner/route.ts	1
 src/app/api/vault/admin-reset/route.ts	1
 src/app/api/vault/change-passphrase/route.ts	1
 src/app/api/vault/delegation/check/route.ts	1

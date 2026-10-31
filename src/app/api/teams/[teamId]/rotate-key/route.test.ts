@@ -37,7 +37,7 @@ const txMock = {
   // The in-tx CAS re-read (SELECT team_key_version FROM teams ... FOR UPDATE).
   $queryRaw: vi.fn(),
   team: { update: vi.fn() },
-  teamMember: { findMany: vi.fn() },
+  teamMember: { findMany: vi.fn(), updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
   teamPasswordEntry: { updateMany: vi.fn(), findMany: vi.fn() },
   teamMemberKey: { createMany: vi.fn() },
 };
@@ -473,6 +473,26 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
           expect.objectContaining({ wrapVersion: 1 }),
         ]),
       }),
+    );
+  });
+
+  it("lists deactivated members for distribution of the new version, in the rotation transaction", async () => {
+    const res = await POST(
+      createRequest({
+        newTeamKeyVersion: 2,
+        entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
+        memberKeys: [validMemberKey("660e8400-e29b-41d4-a716-446655440001")],
+      }),
+      createParams("team-1"),
+    );
+
+    expect(res.status).toBe(200);
+    expect(txMock.teamMember.updateMany).toHaveBeenCalledWith({
+      where: { teamId: "team-1", deactivatedAt: { not: null }, keyDistributed: true },
+      data: { keyDistributed: false },
+    });
+    expect(txMock.teamMember.updateMany.mock.invocationCallOrder[0]).toBeLessThan(
+      txMock.team.update.mock.invocationCallOrder[0],
     );
   });
 

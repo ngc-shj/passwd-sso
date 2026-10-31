@@ -2853,6 +2853,34 @@
         }
       }
     },
+    "src/app/api/tenant/teams/[teamId]/owner/route.ts": {
+      "kind": "api-session-required",
+      "methods": [
+        "POST"
+      ],
+      "auth": [
+        "session"
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
+    },
+    "src/app/api/tenant/teams/ownerless/route.ts": {
+      "kind": "api-session-required",
+      "methods": [
+        "GET"
+      ],
+      "auth": [
+        "session"
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
+    },
     "src/app/api/tenant/webhooks/[webhookId]/route.ts": {
       "kind": "api-session-required",
       "methods": [

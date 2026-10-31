@@ -2,6 +2,8 @@ export const TENANT_PERMISSION = {
   MEMBER_MANAGE: "tenant:member:manage",
   MEMBER_VAULT_RESET: "tenant:member:vaultReset",
   TEAM_CREATE: "tenant:team:create",
+  // Assign the OWNER of a team that has no active one (its owner left the tenant).
+  TEAM_OWNER_ASSIGN: "tenant:team:ownerAssign",
   SCIM_MANAGE: "tenant:scim:manage",
   AUDIT_LOG_VIEW: "tenant:auditLog:view",
   BREAKGLASS_REQUEST: "tenant:breakglass:request",
