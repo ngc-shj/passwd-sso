@@ -60,7 +60,7 @@ import { POST as confirmKey } from "@/app/api/teams/[teamId]/members/[memberId]/
 import { executeVaultReset } from "@/lib/vault/vault-reset";
 import { prisma } from "@/lib/prisma";
 import { withTenantRls } from "@/lib/tenant-rls";
-import { deactivateScimUser, patchScimUser } from "@/lib/services/scim-user-service";
+import { deactivateScimUser } from "@/lib/services/scim-user-service";
 import { patchScimGroup } from "@/lib/services/scim-group-service";
 
 const BLOCK_WAIT_MS = 10_000;
@@ -795,61 +795,6 @@ describe("team key rotation serialisation — real-DB integration", () => {
         rotation: res.rotation.status,
         deactivated: member.rows[0].deactivated,
       }).toEqual({ reached: "blocked-on-parked", rotation: 200, deactivated: true });
-    });
-
-    it("a SCIM deactivation while a rotation is in flight waits for it, then ends the member's key distribution", async () => {
-      const seed = await seedTeam(ctx, tenantId, 1);
-      await ctx.su.pool.query(
-        `UPDATE tenant_members SET role = 'MEMBER' WHERE tenant_id = $1::uuid AND user_id = $2::uuid`,
-        [tenantId, seed.memberId],
-      );
-
-      const res = await raceAgainstParkedRotation(seed, () =>
-        withTenantRls(prisma, tenantId, () => patchScimUser(tenantId, seed.memberId, { active: false })),
-      );
-
-      const member = await ctx.su.pool.query<{ key_distributed: boolean }>(
-        `SELECT key_distributed FROM team_members WHERE id = $1::uuid`,
-        [seed.memberRowId],
-      );
-      expect({
-        reached: res.reached,
-        rotation: res.rotation.status,
-        keyDistributed: member.rows[0].key_distributed,
-      }).toEqual({ reached: "blocked-on-parked", rotation: 200, keyDistributed: false });
-    });
-
-    it("after a SCIM deactivation the next rotation leaves the member out", async () => {
-      const seed = await seedTeam(ctx, tenantId, 1);
-      await ctx.su.pool.query(
-        `UPDATE tenant_members SET role = 'MEMBER' WHERE tenant_id = $1::uuid AND user_id = $2::uuid`,
-        [tenantId, seed.memberId],
-      );
-      await withTenantRls(prisma, tenantId, () => patchScimUser(tenantId, seed.memberId, { active: false }));
-      mockAuth.mockResolvedValue({ user: { id: seed.ownerId } });
-
-      // Built for the remaining key holders only: the deactivated member is
-      // neither required nor accepted.
-      const rotated = await rotateKey(
-        jsonRequest(`http://localhost/api/teams/${seed.teamId}/rotate-key`, "POST", {
-          newTeamKeyVersion: 2,
-          entries: [{
-            id: seed.existingEntryId,
-            itemKeyVersion: 0,
-            snapshotIv: seed.existingBlobIv,
-            encryptedBlob: encryptedField(),
-            encryptedOverview: encryptedField(),
-            aadVersion: 1,
-          }],
-          memberKeys: [memberKey(seed.ownerId, 2)],
-        }),
-        { params: Promise.resolve({ teamId: seed.teamId }) },
-      );
-
-      expect({
-        status: rotated.status,
-        deactivatedMemberKeys: await memberKeyVersions(ctx, seed.teamId, seed.memberId),
-      }).toEqual({ status: 200, deactivatedMemberKeys: [1] });
     });
 
     it("distributing the old key while a rotation is in flight is refused, leaving the member pending", async () => {

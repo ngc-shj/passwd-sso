@@ -169,8 +169,6 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
     if (e instanceof ScimExternalIdConflictError) {
       return scimError(409, "externalId is already mapped to a different resource", "uniqueness");
     }
-    // A rotation of an affected team held it past the lock wait; nothing changed.
-    if (isTeamRotationConflict(e)) return scimError(409, "Team key rotation in progress; retry later");
     throw e;
   }
 
@@ -278,8 +276,6 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
     }
     if (e instanceof ScimUserNotFoundError) return scimError(404, "User not found");
     if (e instanceof ScimOwnerProtectedError) return scimError(403, API_ERROR.SCIM_OWNER_PROTECTED);
-    // A rotation of an affected team held it past the lock wait; nothing changed.
-    if (isTeamRotationConflict(e)) return scimError(409, "Team key rotation in progress; retry later");
     throw e;
   }
 

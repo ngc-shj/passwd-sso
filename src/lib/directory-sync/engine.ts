@@ -12,7 +12,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { withTenantRls } from "@/lib/tenant-rls";
-import { lockTenantMemberTeamsAgainstRotation, revokeTeamKeyDistribution } from "@/lib/team/team-key-rotation-lock";
 import {
   resolveExistingUsersForTenant,
   usersActiveInAnotherTenant,
@@ -524,19 +523,7 @@ export async function runDirectorySync(
       // the commit. A race backstop since round 6: the ownership checks let through
       // only users this tenant owns, whose column already names it (round-7 F-R7-5).
       const activated: string[] = [];
-      // Members this run takes out of the tenant: those the provider marks
-      // inactive and those it no longer lists. Their team key distribution
-      // ends with the run, serialised with rotation through team locks taken
-      // before any other write (team-key-rotation-lock.ts).
-      const leaving = [
-        ...toUpdate
-          .filter(({ user: pu, internalId }) =>
-            !pu.active && memberByUserId.get(internalId)?.role !== TENANT_ROLE.OWNER)
-          .map(({ internalId }) => internalId),
-        ...toDeactivate,
-      ];
       await withTenantRls(prisma, tenantId, async (tx) => {
-        const leavingTeams = await lockTenantMemberTeamsAgainstRotation(tx, tenantId, leaving);
         const userByEmail = new Map<string, { id: string }>();
         for (const [email, resolution] of existingUsers) {
           if (resolution.kind !== "ambiguous") userByEmail.set(email, { id: resolution.userId });
@@ -756,8 +743,6 @@ export async function runDirectorySync(
             usersDeactivated = result.count;
           }
         }
-
-        await revokeTeamKeyDistribution(tx, tenantId, leaving, leavingTeams);
       });
       // After the commit, so a rolled-back run cannot leave a refusal in the
       // trail. Best-effort, like every other emit on this path — the durable

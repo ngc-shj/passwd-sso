@@ -286,39 +286,11 @@ gaps (T-3–T-9).
   `details.missingKeyFor`.
 - T-9: replace refusal test (red with the replace lock removed).
 
-### S-R2-1 Major tenant deactivation leaves team key distribution — Fixed
-- Fixed in this branch (same-class security member; no deferral was approved).
-- A member leaving a tenant leaves its teams' key distribution: under team
-  locks taken first, `keyDistributed` turns false for their memberships in
-  that tenant (`endTeamKeyDistribution` / `lockTenantMemberTeamsAgainstRotation`
-  + `revokeTeamKeyDistribution`, which checks the rows its `UPDATE ... RETURNING`
-  changed against the locked set). Rotation then neither requires nor accepts
-  them, and member-key stops serving them a key; their memberships and old
-  keys stay, and a reactivated member is distributed the current key again
-  (pending-key-distributions lists them). The authorization predicate
-  (`requireTeamMember`) is unchanged.
-- Paths: SCIM user PUT and PATCH `active=false`, directory sync (locks taken
-  at the start of the apply transaction for every member it may deactivate,
-  revocation at its end), the tenant move in `src/auth.ts` (inline
-  `teamMember.updateMany` so the bootstrap-migration gate reads the write;
-  `team`/`teamMember` added to `AUTH_TENANT_CLAIM_MEMBERSHIP`). SCIM Users
-  PUT/PATCH map the rotation refusals to 409.
-- Tests: integration (SCIM deactivation racing a parked rotation waits and
-  ends distribution; the next rotation leaves the member out); unit (PUT,
-  PATCH, directory sync, tenant move, each with lock order and the refusal
-  for an unlocked team). Red-proved: each of the seven clauses removed alone.
-
-### R42 class "rotation member-set writers": expanded 2× — closed by mutation-verified CI guard
-- `scripts/checks/check-team-rotation-input-lock.mjs` derives the class from the
-  write primitive (team member key deletes, team member deletes / deactivation /
-  keyDistributed updates, tenant member deletes / deactivation, raw writes to
-  those tables) on the AST and requires a team-key-rotation-lock helper call
-  before each write (in the enclosing function, or in every same-file caller),
-  with reviewed exemptions that fail when stale and a site floor of 12 (the
-  real tree has 18). Self-test: `scripts/__tests__/check-team-rotation-input-lock.test.mjs`
-  (11 cases, allow and deny). Red-proven on a copy of `src`: removing the member
-  DELETE lock, and removing the SCIM group patch lock, each fail it. Wired in
-  `scripts/pre-pr.sh` (run in CI by `PRE_PR_STATIC_ONLY=1`).
+### S-R2-1 Major tenant deactivation leaves team key distribution — Open (user decision)
+- Same class as S-F1, second expansion. Closing it touches SCIM user PUT/PATCH,
+  directory sync and the tenant move (`src/auth.ts`), and needs a decision on
+  what tenant deactivation does to team key distribution.
+- TODO(team-rotation-tenant-deactivation): pending the user's decision.
 
 ### S-F4 Minor history / ItemKey re-key — Open (user decision)
 - Unchanged from round 1. Re-keying ItemKeys would also mean re-encrypting
