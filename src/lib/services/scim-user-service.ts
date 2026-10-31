@@ -8,7 +8,13 @@
 
 import { Prisma } from "@prisma/client";
 import { prisma, type TxOrPrisma } from "@/lib/prisma";
-import { assertTeamsLocked, lockMemberTeamsAgainstRotation } from "@/lib/team/team-key-rotation-lock";
+import {
+  assertTeamsLocked,
+  createLockBudget,
+  lockMemberTeamsAgainstRotation,
+} from "@/lib/team/team-key-rotation-lock";
+import { lockTenantRows } from "@/lib/team/tenant-row-lock";
+import { type DepartureAuditActor, departFromTenant, returnToTenant } from "@/lib/team/team-departure";
 import type { AuditAction } from "@prisma/client";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { userToScimUser, type ScimUserInput, type ScimUserResource } from "@/lib/scim/serializers";
@@ -199,6 +205,7 @@ export async function replaceScimUser(
   tenantId: string,
   userId: string,
   data: ScimUserReplaceInput,
+  actor: DepartureAuditActor,
 ): Promise<ScimUserReplaceResult> {
   const { active, externalId } = data;
 
@@ -210,23 +217,30 @@ export async function replaceScimUser(
   if (member.role === TENANT_ROLE.OWNER && active === false) throw new ScimOwnerProtectedError();
 
   let auditAction: AuditAction = AUDIT_ACTION.SCIM_USER_UPDATE;
-  if (active === false && member.deactivatedAt === null) {
-    auditAction = AUDIT_ACTION.SCIM_USER_DEACTIVATE;
-  } else if (active !== false && member.deactivatedAt !== null) {
-    auditAction = AUDIT_ACTION.SCIM_USER_REACTIVATE;
-  }
-
   try {
-    await prisma.$transaction(async (tx) => {
+    auditAction = await prisma.$transaction(async (tx) => {
+      // The active state moves only through team-departure.ts, which ends or
+      // restores the user's memberships of the tenant's teams with it; the
+      // returned ids, not the pre-read above, decide the audit action.
+      const budget = createLockBudget();
+      await lockTenantRows(tx, tenantId, [userId], "update", budget);
       await tx.tenantMember.update({
         where: { id: member.id },
         data: {
-          deactivatedAt: active === false ? (member.deactivatedAt ?? new Date()) : null,
           scimManaged: true,
           provisioningSource: "SCIM",
           lastScimSyncedAt: new Date(),
         },
       });
+      const transition = { actor, budget, alreadyLocked: true };
+      let action: AuditAction = AUDIT_ACTION.SCIM_USER_UPDATE;
+      if (active === false) {
+        if ((await departFromTenant(tx, tenantId, [userId], transition)).length > 0) {
+          action = AUDIT_ACTION.SCIM_USER_DEACTIVATE;
+        }
+      } else if ((await returnToTenant(tx, tenantId, [userId], transition)).length > 0) {
+        action = AUDIT_ACTION.SCIM_USER_REACTIVATE;
+      }
 
       if (externalId) {
         const existingMapping = await tx.scimExternalMapping.findFirst({
@@ -248,6 +262,7 @@ export async function replaceScimUser(
           where: { tenantId, internalId: userId, resourceType: "User" },
         });
       }
+      return action;
     });
   } catch (e) {
     if (e instanceof Error && e.message === "SCIM_EXTERNAL_ID_CONFLICT") {
@@ -282,6 +297,7 @@ export async function patchScimUser(
   tenantId: string,
   userId: string,
   operations: UserPatchResult,
+  actor: DepartureAuditActor,
 ): Promise<ScimUserPatchResult> {
   const member = await prisma.tenantMember.findUnique({
     where: { tenantId_userId: { tenantId, userId } },
@@ -291,31 +307,23 @@ export async function patchScimUser(
 
   if (member.role === TENANT_ROLE.OWNER && operations.active === false) throw new ScimOwnerProtectedError();
 
-  const updateData: Prisma.TenantMemberUpdateInput = {
-    scimManaged: true,
-    provisioningSource: "SCIM",
-    lastScimSyncedAt: new Date(),
-  };
-
-  let auditAction: AuditAction = AUDIT_ACTION.SCIM_USER_UPDATE;
-
-  if (operations.active !== undefined) {
+  const auditAction = await prisma.$transaction(async (tx) => {
+    // As in replaceScimUser: the active state moves only through
+    // team-departure.ts, and its returned ids decide the audit action.
+    const budget = createLockBudget();
+    await lockTenantRows(tx, tenantId, [userId], "update", budget);
+    await tx.tenantMember.update({
+      where: { id: member.id },
+      data: { scimManaged: true, provisioningSource: "SCIM", lastScimSyncedAt: new Date() },
+    });
+    if (operations.active === undefined) return AUDIT_ACTION.SCIM_USER_UPDATE;
+    const transition = { actor, budget, alreadyLocked: true };
     if (operations.active) {
-      updateData.deactivatedAt = null;
-      if (member.deactivatedAt !== null) {
-        auditAction = AUDIT_ACTION.SCIM_USER_REACTIVATE;
-      }
-    } else {
-      updateData.deactivatedAt = member.deactivatedAt ?? new Date();
-      if (member.deactivatedAt === null) {
-        auditAction = AUDIT_ACTION.SCIM_USER_DEACTIVATE;
-      }
+      const returned = await returnToTenant(tx, tenantId, [userId], transition);
+      return returned.length > 0 ? AUDIT_ACTION.SCIM_USER_REACTIVATE : AUDIT_ACTION.SCIM_USER_UPDATE;
     }
-  }
-
-  await prisma.tenantMember.update({
-    where: { id: member.id },
-    data: updateData,
+    const departed = await departFromTenant(tx, tenantId, [userId], transition);
+    return departed.length > 0 ? AUDIT_ACTION.SCIM_USER_DEACTIVATE : AUDIT_ACTION.SCIM_USER_UPDATE;
   });
 
   const snapshot = await loadScimUserSnapshot(tenantId, userId);
@@ -351,9 +359,23 @@ export async function deactivateScimUser(
 
   try {
     await prisma.$transaction(async (tx) => {
-      // Serialise with key rotation of every team being left, before any
-      // member row or key is touched (team-key-rotation-lock.ts).
-      const lockedTeams = await lockMemberTeamsAgainstRotation(tx, userId, tenantId);
+      // Lock order (tenant-row-lock.ts): the tenant row, then the teams being
+      // left, before any invitation, member row or key is touched.
+      const budget = createLockBudget();
+      await lockTenantRows(tx, tenantId, [userId], "update", budget);
+      // The row is about to go, and with it the deactivation stamp admission
+      // reads; this record keeps invitations issued before now void even if
+      // the membership is re-created (SCIM POST, SSO sign-in).
+      await tx.$executeRaw`
+        INSERT INTO tenant_member_departures (tenant_id, user_id, departed_at)
+        VALUES (${tenantId}::uuid, ${userId}::uuid, clock_timestamp())
+        ON CONFLICT (tenant_id, user_id) DO UPDATE SET departed_at = EXCLUDED.departed_at
+      `;
+      const lockedTeams = await lockMemberTeamsAgainstRotation(tx, userId, tenantId, budget);
+      await tx.$executeRaw`
+        UPDATE team_invitations SET status = 'EXPIRED', updated_at = clock_timestamp()
+         WHERE tenant_id = ${tenantId}::uuid AND invited_by_id = ${userId}::uuid AND status = 'PENDING'
+      `;
       await tx.teamMemberKey.deleteMany({ where: { tenantId, userId } });
       await tx.scimExternalMapping.deleteMany({
         where: { tenantId, internalId: userId, resourceType: "User" },

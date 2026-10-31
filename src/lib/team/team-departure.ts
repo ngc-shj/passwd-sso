@@ -55,6 +55,53 @@ async function activeMembershipTeams(tx: Tx, tenantId: string, userIds: readonly
 }
 
 /**
+ * Steps 3–5 of a departure, for users whose tenant row was just stamped
+ * deactivated under its lock: lock their teams, expire the invitations they
+ * issued, and end their active memberships of the tenant's teams with the
+ * marker (stamped with the tenant row's value).
+ */
+async function endTeamMemberships(
+  tx: Tx,
+  tenantId: string,
+  transitioned: readonly string[],
+  options: TenantTransitionOptions,
+): Promise<void> {
+  // Every admission writer holds the user's tenant row (or its advisory
+  // lock) before inserting a membership, so this set cannot grow now.
+  const teamIds = await activeMembershipTeams(tx, tenantId, transitioned);
+  await lockTeamsAgainstRotation(tx, teamIds, options.budget);
+
+  await tx.$executeRaw`
+    UPDATE team_invitations SET status = 'EXPIRED', updated_at = clock_timestamp()
+     WHERE tenant_id = ${tenantId}::uuid AND invited_by_id = ANY(${[...transitioned]}::uuid[]) AND status = 'PENDING'
+  `;
+
+  const ended = await tx.$queryRaw<{ team_id: string; user_id: string }[]>`
+    UPDATE team_members tm
+       SET deactivated_at = tmb.deactivated_at, deactivated_by_tenant = true, updated_at = clock_timestamp()
+      FROM tenant_members tmb
+     WHERE tm.tenant_id = ${tenantId}::uuid AND tm.user_id = ANY(${[...transitioned]}::uuid[])
+       AND tm.deactivated_at IS NULL
+       AND tmb.tenant_id = tm.tenant_id AND tmb.user_id = tm.user_id
+    RETURNING tm.team_id, tm.user_id
+  `;
+  assertTeamsLocked(new Set(teamIds), ended.map((row) => row.team_id));
+
+  for (const row of ended) {
+    await logAuditInTx(tx, tenantId, {
+      ...options.actor,
+      scope: AUDIT_SCOPE.TEAM,
+      action: AUDIT_ACTION.TEAM_MEMBER_TENANT_DEACTIVATE,
+      tenantId,
+      teamId: row.team_id,
+      targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
+      targetId: row.user_id,
+      metadata: { source: TENANT_MEMBERSHIP_SOURCE.TENANT_DEACTIVATION },
+    });
+  }
+}
+
+/**
  * Deactivate the users' memberships of `tenantId` (tenant OWNER excepted)
  * and, with them, their memberships of the tenant's teams. Returns the users
  * that transitioned; callers derive audit, session invalidation and counters
@@ -86,40 +133,7 @@ export async function departFromTenant(
     `
   ).map((row) => row.user_id);
   if (transitioned.length === 0) return [];
-
-  // Every admission writer holds the user's tenant row (or its advisory
-  // lock) before inserting a membership, so this set cannot grow now.
-  const teamIds = await activeMembershipTeams(tx, tenantId, transitioned);
-  await lockTeamsAgainstRotation(tx, teamIds, options.budget);
-
-  await tx.$executeRaw`
-    UPDATE team_invitations SET status = 'EXPIRED', updated_at = clock_timestamp()
-     WHERE tenant_id = ${tenantId}::uuid AND invited_by_id = ANY(${transitioned}::uuid[]) AND status = 'PENDING'
-  `;
-
-  const ended = await tx.$queryRaw<{ team_id: string; user_id: string }[]>`
-    UPDATE team_members tm
-       SET deactivated_at = tmb.deactivated_at, deactivated_by_tenant = true, updated_at = clock_timestamp()
-      FROM tenant_members tmb
-     WHERE tm.tenant_id = ${tenantId}::uuid AND tm.user_id = ANY(${transitioned}::uuid[])
-       AND tm.deactivated_at IS NULL
-       AND tmb.tenant_id = tm.tenant_id AND tmb.user_id = tm.user_id
-    RETURNING tm.team_id, tm.user_id
-  `;
-  assertTeamsLocked(new Set(teamIds), ended.map((row) => row.team_id));
-
-  for (const row of ended) {
-    await logAuditInTx(tx, tenantId, {
-      ...options.actor,
-      scope: AUDIT_SCOPE.TEAM,
-      action: AUDIT_ACTION.TEAM_MEMBER_TENANT_DEACTIVATE,
-      tenantId,
-      teamId: row.team_id,
-      targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
-      targetId: row.user_id,
-      metadata: { source: TENANT_MEMBERSHIP_SOURCE.TENANT_DEACTIVATION },
-    });
-  }
+  await endTeamMemberships(tx, tenantId, transitioned, options);
   return transitioned;
 }
 
@@ -177,4 +191,27 @@ export async function returnToTenant(
     });
   }
   return transitioned;
+}
+
+/**
+ * A tenant membership row INSERTed deactivated (SCIM POST `active=false`,
+ * directory-sync create of a deactivated user): the user may already hold
+ * memberships of the tenant's teams as a guest, so this is a departure.
+ * The row cannot be created active first (`tenant_members_one_active_per_user`
+ * refuses a user active elsewhere), so the caller inserts it deactivated
+ * after lockTenantMemberCreation, and this restamps it with the database
+ * clock and ends the team memberships.
+ */
+export async function departCreatedMembership(
+  tx: Tx,
+  tenantId: string,
+  userId: string,
+  options: Omit<TenantTransitionOptions, "alreadyLocked">,
+): Promise<void> {
+  const stamped = await tx.$executeRaw`
+    UPDATE tenant_members SET deactivated_at = clock_timestamp(), updated_at = clock_timestamp()
+     WHERE tenant_id = ${tenantId}::uuid AND user_id = ${userId}::uuid AND deactivated_at IS NOT NULL
+  `;
+  if (stamped !== 1) throw new Error("departCreatedMembership: no deactivated row to stamp");
+  await endTeamMemberships(tx, tenantId, [userId], options);
 }

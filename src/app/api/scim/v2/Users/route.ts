@@ -1,7 +1,11 @@
 import type { NextRequest } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
+import { extractRequestMeta, logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
+import { createLockBudget } from "@/lib/team/team-key-rotation-lock";
+import { isMembershipLockConflict, lockTenantMemberCreation, membershipConflictMessage } from "@/lib/team/tenant-row-lock";
+import { departCreatedMembership } from "@/lib/team/team-departure";
+import { TEAM_MEMBERSHIP_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 import {
   scimResponse,
   scimError,
@@ -185,6 +189,14 @@ async function handlePOST(req: NextRequest) {
         throw new Error("SCIM_RESOURCE_EXISTS");
       }
 
+      // Created deactivated, the user may still hold memberships of this
+      // tenant's teams as a guest: that is a departure. The advisory lock
+      // serialises it with a guest admission of the same user, and
+      // departCreatedMembership restamps the row with the database clock
+      // (the placeholder below only satisfies the one-active-row index) and
+      // ends those memberships.
+      const budget = createLockBudget();
+      if (active === false) await lockTenantMemberCreation(tx, tenantId, user.id, budget);
       const member = await tx.tenantMember.create({
         data: {
           tenantId,
@@ -196,6 +208,13 @@ async function handlePOST(req: NextRequest) {
           lastScimSyncedAt: new Date(),
         },
       });
+      if (active === false) {
+        const { ip, userAgent } = extractRequestMeta(req);
+        await departCreatedMembership(tx, tenantId, user.id, {
+          actor: { userId: auditUserId, actorType, ip, userAgent },
+          budget,
+        });
+      }
 
       if (externalId) {
         const existing = await tx.scimExternalMapping.findFirst({
@@ -228,7 +247,7 @@ async function handlePOST(req: NextRequest) {
       }
 
       return { user, member, externalId };
-    });
+    }, { timeout: TEAM_MEMBERSHIP_TX_TIMEOUT_MS });
 
     await logAuditAsync({
       ...tenantAuditBase(req, auditUserId, tenantId),
@@ -266,6 +285,7 @@ async function handlePOST(req: NextRequest) {
     if (e instanceof Error && e.message === "SCIM_RESOURCE_EXISTS") {
       return scimError(409, "User already exists in this tenant", "uniqueness");
     }
+    if (isMembershipLockConflict(e)) return scimError(409, membershipConflictMessage(e));
     if (e instanceof Error && e.message === "SCIM_EXTERNAL_ID_CONFLICT") {
       return scimError(409, "externalId is already mapped to a different resource", "uniqueness");
     }

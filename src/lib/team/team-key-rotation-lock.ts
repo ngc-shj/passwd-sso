@@ -175,8 +175,9 @@ export async function lockMemberTeamsAgainstRotation(
   tx: Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw">,
   userId: string,
   tenantId?: string,
+  budget?: LockBudget,
 ): Promise<Set<string>> {
-  return lockTeamRows(tx, await memberTeamIds(tx, userId, tenantId));
+  return lockTeamRows(tx, await memberTeamIds(tx, userId, tenantId), budget);
 }
 
 /**

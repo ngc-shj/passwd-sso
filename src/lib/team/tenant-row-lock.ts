@@ -156,3 +156,10 @@ export function isMembershipLockConflict(e: unknown): boolean {
   if (pgErrorCode(e) === DEADLOCK_DETECTED) return true;
   return e instanceof Prisma.PrismaClientKnownRequestError && e.code === PRISMA_TX_EXPIRED;
 }
+
+/** The client-facing reason for a membership lock conflict (always a 409). */
+export function membershipConflictMessage(e: unknown): string {
+  return e instanceof TenantMemberLockTimeoutError
+    ? "The user's membership is being changed; retry later"
+    : "Team key rotation in progress; retry later";
+}

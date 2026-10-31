@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
+import { extractRequestMeta, logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { scimResponse, scimError, getScimBaseUrl } from "@/lib/scim/response";
 import { scimUserSchema, scimPatchOpSchema } from "@/lib/scim/validations";
 import { parseUserPatchOps, PatchParseError } from "@/lib/scim/patch-parser";
@@ -17,7 +17,9 @@ import { getLogger } from "@/lib/logger";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { scimParseBody } from "@/lib/scim/parse-body";
 import { prisma } from "@/lib/prisma";
-import { isTeamRotationConflict } from "@/lib/team/team-key-rotation-lock";
+import { isMembershipLockConflict, membershipConflictMessage } from "@/lib/team/tenant-row-lock";
+import type { DepartureAuditActor } from "@/lib/team/team-departure";
+import { TEAM_MEMBERSHIP_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 import { authorizeScim } from "@/lib/scim/with-scim-auth";
 import {
   resolveUserId,
@@ -153,8 +155,9 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
     serviceResult = await withTenantRls(prisma, tenantId, (tx) =>
       resolveUserId(tenantId, id, tx).then((userId) => {
         if (!userId) throw new ScimUserNotFoundError();
-        return replaceScimUser(tenantId, userId, { active, externalId, name });
+        return replaceScimUser(tenantId, userId, { active, externalId, name }, departureActor(req, auditUserId, putActorType));
       }),
+      { timeout: TEAM_MEMBERSHIP_TX_TIMEOUT_MS },
     );
   } catch (e) {
     // The one-active-membership index: another tenant activated the user between
@@ -166,6 +169,7 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
     }
     if (e instanceof ScimUserNotFoundError) return scimError(404, "User not found");
     if (e instanceof ScimOwnerProtectedError) return scimError(403, API_ERROR.SCIM_OWNER_PROTECTED);
+    if (isMembershipLockConflict(e)) return scimError(409, membershipConflictMessage(e));
     if (e instanceof ScimExternalIdConflictError) {
       return scimError(409, "externalId is already mapped to a different resource", "uniqueness");
     }
@@ -263,8 +267,9 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
     serviceResult = await withTenantRls(prisma, tenantId, (tx) =>
       resolveUserId(tenantId, id, tx).then((userId) => {
         if (!userId) throw new ScimUserNotFoundError();
-        return patchScimUser(tenantId, userId, patchOps);
+        return patchScimUser(tenantId, userId, patchOps, departureActor(req, auditUserId, patchActorType));
       }),
+      { timeout: TEAM_MEMBERSHIP_TX_TIMEOUT_MS },
     );
   } catch (e) {
     // The one-active-membership index: another tenant activated the user between
@@ -276,6 +281,7 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
     }
     if (e instanceof ScimUserNotFoundError) return scimError(404, "User not found");
     if (e instanceof ScimOwnerProtectedError) return scimError(403, API_ERROR.SCIM_OWNER_PROTECTED);
+    if (isMembershipLockConflict(e)) return scimError(409, membershipConflictMessage(e));
     throw e;
   }
 
@@ -330,6 +336,7 @@ async function handleDELETE(req: NextRequest, { params }: Params): Promise<Respo
         if (!userId) throw new ScimUserNotFoundError();
         return deactivateScimUser(tenantId, userId);
       }),
+      { timeout: TEAM_MEMBERSHIP_TX_TIMEOUT_MS },
     );
   } catch (e) {
     // The one-active-membership index: another tenant activated the user between
@@ -344,8 +351,9 @@ async function handleDELETE(req: NextRequest, { params }: Params): Promise<Respo
     if (e instanceof ScimDeleteConflictError) {
       return scimError(409, "Cannot delete user: related resources exist");
     }
-    // A rotation of an affected team held it past the lock wait; nothing changed.
-    if (isTeamRotationConflict(e)) return scimError(409, "Team key rotation in progress; retry later");
+    // A rotation of an affected team, or another change to the membership,
+    // held a row past the lock wait; nothing changed.
+    if (isMembershipLockConflict(e)) return scimError(409, membershipConflictMessage(e));
     throw e;
   }
 
@@ -388,6 +396,12 @@ async function handleDELETE(req: NextRequest, { params }: Params): Promise<Respo
   });
 
   return new Response(null, { status: 204 });
+}
+
+/** The SCIM token's actor, for the per-membership audit rows of a departure or return. */
+function departureActor(req: NextRequest, userId: string, actorType: DepartureAuditActor["actorType"]): DepartureAuditActor {
+  const { ip, userAgent } = extractRequestMeta(req);
+  return { userId, actorType, ip, userAgent };
 }
 
 export const GET = withRequestLog(handleGET);

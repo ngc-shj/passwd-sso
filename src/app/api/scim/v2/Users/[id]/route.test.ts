@@ -53,6 +53,7 @@ vi.mock("@/lib/auth/tokens/scim-token", () => ({ validateScimToken: mockValidate
 vi.mock("@/lib/scim/rate-limit", () => ({ checkScimRateLimit: mockCheckScimRateLimit }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
+  extractRequestMeta: () => ({ ip: null, userAgent: null, acceptLanguage: null }),
   personalAuditBase: (_req: unknown, userId: string) => ({ scope: "PERSONAL", userId, ip: null, userAgent: null, acceptLanguage: null }),
   teamAuditBase: (_req: unknown, userId: string, teamId: string) => ({ scope: "TEAM", userId, teamId, ip: null, userAgent: null, acceptLanguage: null }),
   tenantAuditBase: (_req: unknown, userId: string, tenantId: string) => ({ scope: "TENANT", userId, tenantId, ip: null, userAgent: null, acceptLanguage: null }),
@@ -67,6 +68,30 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>, withTenantRls: mockWithTenantRls, withBypassRls: mockWithBypassRls }));
+// The tenant-row lock and the departure helpers have their own tests and the
+// real-DB cells in team-tenant-departure.integration.test.ts. Here the helpers
+// answer as the database's conditional UPDATE does, from the membership
+// pre-read: a departure transitions an active member, a return an inactive one.
+const { mockDepartFromTenant, mockReturnToTenant, mockLockTenantRows } = vi.hoisted(() => ({
+  mockDepartFromTenant: vi.fn(),
+  mockReturnToTenant: vi.fn(),
+  mockLockTenantRows: vi.fn(),
+}));
+vi.mock("@/lib/team/team-departure", () => ({
+  departFromTenant: mockDepartFromTenant,
+  returnToTenant: mockReturnToTenant,
+}));
+vi.mock("@/lib/team/tenant-row-lock", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
+  lockTenantRows: mockLockTenantRows,
+}));
+async function memberPreRead(): Promise<{ deactivatedAt: Date | null } | null> {
+  const i = mockTenantMember.findUnique.mock.calls.findIndex(
+    (call) => (call[0] as { select?: { role?: boolean } })?.select?.role,
+  );
+  return i < 0 ? null : await mockTenantMember.findUnique.mock.results[i].value;
+}
+
 vi.mock("@/lib/auth/session/user-session-invalidation", () => ({
   invalidateUserSessions: mockInvalidateUserSessions,
 }));
@@ -82,6 +107,16 @@ vi.mock("@/lib/logger", () => ({
 }));
 
 import { GET, PUT, PATCH, DELETE } from "./route";
+
+beforeEach(() => {
+  mockLockTenantRows.mockResolvedValue(new Map());
+  mockDepartFromTenant.mockImplementation(async (_tx: unknown, _tenantId: string, ids: string[]) =>
+    (await memberPreRead())?.deactivatedAt == null ? ids : [],
+  );
+  mockReturnToTenant.mockImplementation(async (_tx: unknown, _tenantId: string, ids: string[]) =>
+    (await memberPreRead())?.deactivatedAt != null ? ids : [],
+  );
+});
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 /**
@@ -721,6 +756,54 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
     );
 
     expect(res!.status).toBe(409);
+  });
+
+  it("deactivates through team-departure, in the transaction that locked the tenant row", async () => {
+    mockTenantMember.findUnique
+      .mockResolvedValueOnce({ userId: "user-1" })
+      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: null })
+      .mockResolvedValueOnce({ userId: "user-1", deactivatedAt: new Date() });
+    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
+      fn({
+        tenantMember: { update: mockTenantMember.update },
+        scimExternalMapping: { findFirst: mockScimExternalMapping.findFirst, deleteMany: mockScimExternalMapping.deleteMany, create: mockScimExternalMapping.create },
+      }),
+    );
+    mockScimExternalMapping.deleteMany.mockResolvedValue({ count: 0 });
+
+    const res = await PUT(
+      makeReq({ method: "PUT", body: { schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"], userName: "u@example.com", active: false } }),
+      makeParams("user-1"),
+    );
+
+    expect(res!.status).toBe(200);
+    expect(mockLockTenantRows).toHaveBeenCalledWith(expect.anything(), "tenant-1", ["user-1"], "update", expect.anything());
+    expect(mockDepartFromTenant).toHaveBeenCalledWith(
+      expect.anything(),
+      "tenant-1",
+      ["user-1"],
+      expect.objectContaining({ alreadyLocked: true, actor: expect.objectContaining({ userId: "u1", actorType: "HUMAN" }) }),
+    );
+    expect(mockLockTenantRows.mock.invocationCallOrder[0]).toBeLessThan(mockDepartFromTenant.mock.invocationCallOrder[0]);
+    expect(mockTenantMember.update.mock.calls[0][0].data).not.toHaveProperty("deactivatedAt");
+  });
+
+  it("answers 409 when the tenant row is held past the lock wait on PUT", async () => {
+    const { TenantMemberLockTimeoutError } = await vi.importActual<typeof import("@/lib/team/tenant-row-lock")>("@/lib/team/tenant-row-lock");
+    mockTenantMember.findUnique
+      .mockResolvedValueOnce({ userId: "user-1" })
+      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: null });
+    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => fn({ tenantMember: { update: mockTenantMember.update } }));
+    mockLockTenantRows.mockRejectedValueOnce(new TenantMemberLockTimeoutError());
+
+    const res = await PUT(
+      makeReq({ method: "PUT", body: { schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"], userName: "u@example.com", active: false } }),
+      makeParams("user-1"),
+    );
+
+    expect(res!.status).toBe(409);
+    expect(mockDepartFromTenant).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
   it("triggers invalidateUserSessions on PUT deactivation", async () => {

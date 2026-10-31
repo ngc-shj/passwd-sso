@@ -118,6 +118,29 @@ vi.mock("@/lib/audit/audit", () => ({
   logAuditBulkAsync: mockLogAuditBulk,
 }));
 
+// The tenant-row lock and the tenant transitions have their own tests and
+// real-DB cells (team-tenant-departure.integration.test.ts); here they are
+// seams. A fake transition reports every user it was given as transitioned —
+// cells that need "already in that state" override it.
+const { mockLockTenantRows, mockDepartFromTenant, mockReturnToTenant, mockDepartCreatedMembership } = vi.hoisted(() => ({
+  mockLockTenantRows: vi.fn(),
+  mockDepartFromTenant: vi.fn(),
+  mockReturnToTenant: vi.fn(),
+  mockDepartCreatedMembership: vi.fn(),
+}));
+vi.mock("@/lib/team/tenant-row-lock", () => ({ lockTenantRows: mockLockTenantRows }));
+vi.mock("@/lib/team/team-departure", () => ({
+  departFromTenant: mockDepartFromTenant,
+  returnToTenant: mockReturnToTenant,
+  departCreatedMembership: mockDepartCreatedMembership,
+}));
+beforeEach(() => {
+  mockLockTenantRows.mockResolvedValue(new Map());
+  mockDepartFromTenant.mockImplementation(async (_tx: unknown, _tenantId: string, ids: string[]) => [...ids]);
+  mockReturnToTenant.mockImplementation(async (_tx: unknown, _tenantId: string, ids: string[]) => [...ids]);
+  mockDepartCreatedMembership.mockResolvedValue(undefined);
+});
+
 vi.mock("@/lib/webhook-dispatcher", () => ({
   dispatchTenantWebhook: mockDispatchWebhook,
 }));
@@ -710,6 +733,62 @@ describe("runDirectorySync", () => {
         }),
       });
     });
+
+    it("departs the vanished members in one batch and counts only the transitions", async () => {
+      setupAcquiredLock();
+      setupTransaction();
+      mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
+      mockFetchOktaUsers.mockResolvedValue([]);
+      mockScimMapping.findMany.mockResolvedValue([
+        { externalId: "ext-a", internalId: "user-a" },
+        { externalId: "ext-b", internalId: "user-b" },
+      ]);
+      mockTenantMember.findMany.mockResolvedValue([
+        makeMember({ id: "member-a", userId: "user-a" }),
+        makeMember({ id: "member-b", userId: "user-b" }),
+      ]);
+      setApplyTx(makeApplyTx({
+        tenantMember: { findMany: vi.fn().mockResolvedValue([]), create: vi.fn(), update: vi.fn(), updateMany: vi.fn().mockResolvedValue({ count: 2 }) },
+      }));
+      // user-b was already inactive: the departure transitions user-a only.
+      mockDepartFromTenant.mockImplementation(async (_tx: unknown, _t: string, ids: string[]) => ids.filter((id) => id !== "user-b"));
+
+      const result = await runDirectorySync({ ...BASE_OPTIONS, force: true });
+
+      expect(result.success).toBe(true);
+      expect(result.usersDeactivated).toBe(1);
+      const batchCall = mockDepartFromTenant.mock.calls.find((call) => (call[2] as string[]).length === 2);
+      expect(batchCall?.[3]).toMatchObject({ alreadyLocked: true });
+    });
+
+    it("locks every tenant row the run touches in one call, before any transition", async () => {
+      setupAcquiredLock();
+      setupTransaction();
+      mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
+      mockFetchOktaUsers.mockResolvedValue([]);
+      mockScimMapping.findMany.mockResolvedValue([
+        { externalId: "ext-a", internalId: "user-a" },
+        { externalId: "ext-b", internalId: "user-b" },
+      ]);
+      mockTenantMember.findMany.mockResolvedValue([
+        makeMember({ id: "member-a", userId: "user-a" }),
+        makeMember({ id: "member-b", userId: "user-b" }),
+      ]);
+      setApplyTx(makeApplyTx({
+        tenantMember: { findMany: vi.fn().mockResolvedValue([]), create: vi.fn(), update: vi.fn(), updateMany: vi.fn().mockResolvedValue({ count: 2 }) },
+      }));
+
+      await runDirectorySync({ ...BASE_OPTIONS, force: true });
+
+      expect(mockLockTenantRows).toHaveBeenCalledTimes(1);
+      expect(mockLockTenantRows).toHaveBeenCalledWith(
+        expect.anything(), TENANT_ID, expect.arrayContaining(["user-a", "user-b"]), "update", expect.anything(),
+      );
+      const lockOrder = mockLockTenantRows.mock.invocationCallOrder[0];
+      for (const order of [...mockDepartFromTenant.mock.invocationCallOrder, ...mockReturnToTenant.mock.invocationCallOrder]) {
+        expect(lockOrder).toBeLessThan(order);
+      }
+    });
   });
 
   // ── OWNER protection in toUpdate ──────────────────────────────
@@ -878,8 +957,10 @@ describe("runDirectorySync", () => {
       // never saw this user.
       expect(tenantMemberUpdateArgs).toMatchObject({
         where: { id: "member-1" },
-        data: { deactivatedAt: new Date("2025-01-01") },
+        data: { lastScimSyncedAt: expect.any(Date) },
       });
+      expect(tenantMemberUpdateArgs).not.toHaveProperty("data.deactivatedAt");
+      expect(mockReturnToTenant).not.toHaveBeenCalledWith(expect.anything(), TENANT_ID, ["user-1"], expect.anything());
       // A refused reactivation activated nothing, so there is nothing to realign.
       expect(mockRealignAfterActivation).not.toHaveBeenCalled();
     });
@@ -1128,8 +1209,11 @@ describe("runDirectorySync", () => {
       expect(result.usersRefused).toBe(0);
       expect(memberUpdate).toHaveBeenCalledWith({
         where: { id: "member-7" },
-        data: { deactivatedAt: null, lastScimSyncedAt: expect.any(Date) },
+        data: { lastScimSyncedAt: expect.any(Date) },
       });
+      expect(mockReturnToTenant).toHaveBeenCalledWith(
+        expect.anything(), TENANT_ID, ["user-7"], expect.objectContaining({ alreadyLocked: true }),
+      );
       expect(mockLogAuditBulk).toHaveBeenCalledWith([]);
       expect(mockRealignAfterActivation).toHaveBeenCalledWith("user-7", TENANT_ID, { source: "directory_sync", actorUserId: USER_ID, actorType: "HUMAN" });
     });
@@ -1286,6 +1370,10 @@ describe("runDirectorySync", () => {
         expect.objectContaining({ data: expect.objectContaining({ deactivatedAt: expect.any(Date) }) }),
       );
       expect(mockLogAuditBulk).toHaveBeenCalledWith([]);
+      // Created deactivated: a guest of this tenant's teams has left them.
+      expect(mockDepartCreatedMembership).toHaveBeenCalledWith(
+        expect.anything(), TENANT_ID, "user-9", expect.objectContaining({ actor: expect.anything() }),
+      );
     });
 
     it("reactivates a deactivated user who reappears as active in the provider", async () => {
@@ -1334,11 +1422,12 @@ describe("runDirectorySync", () => {
       expect(result.success).toBe(true);
       // usersUpdated increments when an existing user's status or name changed
       expect(result.usersUpdated).toBe(1);
-      // tenantMember.update must have been called with deactivatedAt: null to reactivate
-      expect(tenantMemberUpdateArgs).toMatchObject({
-        where: { id: "member-1" },
-        data: expect.objectContaining({ deactivatedAt: null }),
-      });
+      // The reactivation goes through returnToTenant, which restores the
+      // team memberships the departure ended.
+      expect(tenantMemberUpdateArgs).toMatchObject({ where: { id: "member-1" } });
+      expect(mockReturnToTenant).toHaveBeenCalledWith(
+        expect.anything(), TENANT_ID, ["user-1"], expect.objectContaining({ alreadyLocked: true }),
+      );
       // After the commit: the apply ran in this tenant's context, which cannot
       // write a users row filed under another tenant.
       expect(mockRealignAfterActivation).toHaveBeenCalledWith("user-1", TENANT_ID, { source: "directory_sync", actorUserId: USER_ID, actorType: "HUMAN" });
@@ -1381,8 +1470,9 @@ describe("runDirectorySync", () => {
       expect(result).toMatchObject({ success: true, usersRefused: 1 });
       expect(memberUpdateArgs()).toMatchObject({
         where: { id: "member-1" },
-        data: { deactivatedAt: new Date("2025-01-01") },
+        data: { lastScimSyncedAt: expect.any(Date) },
       });
+      expect(mockReturnToTenant).not.toHaveBeenCalledWith(expect.anything(), TENANT_ID, ["user-1"], expect.anything());
       expect(mockLogAuditBulk).toHaveBeenCalledWith([
         expect.objectContaining({
           targetId: "member-1",
@@ -1596,10 +1686,10 @@ describe("runDirectorySync", () => {
       expect(result.success).toBe(true);
       expect(applyTx.user.updateMany).not.toHaveBeenCalled();
       expect(applyTx.tenantMember.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: "member-2" },
-          data: expect.objectContaining({ deactivatedAt: expect.any(Date) }),
-        }),
+        expect.objectContaining({ where: { id: "member-2" } }),
+      );
+      expect(mockDepartFromTenant).toHaveBeenCalledWith(
+        expect.anything(), TENANT_ID, ["user-2"], expect.objectContaining({ alreadyLocked: true }),
       );
       expect(mockTenantMember.findMany.mock.calls[0][0].select).not.toHaveProperty("user");
     });
@@ -1639,10 +1729,10 @@ describe("runDirectorySync", () => {
         data: { name: "Renamed" },
       });
       expect(applyTx.tenantMember.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: "member-3" },
-          data: expect.objectContaining({ deactivatedAt: expect.any(Date) }),
-        }),
+        expect.objectContaining({ where: { id: "member-3" } }),
+      );
+      expect(mockDepartFromTenant).toHaveBeenCalledWith(
+        expect.anything(), TENANT_ID, ["user-3"], expect.objectContaining({ alreadyLocked: true }),
       );
     });
 

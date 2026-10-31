@@ -56,6 +56,7 @@ vi.mock("@/lib/auth/tokens/scim-token", () => ({ validateScimToken: mockValidate
 vi.mock("@/lib/scim/rate-limit", () => ({ checkScimRateLimit: mockCheckScimRateLimit }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
+  extractRequestMeta: () => ({ ip: null, userAgent: null, acceptLanguage: null }),
   personalAuditBase: (_req: unknown, userId: string) => ({ scope: "PERSONAL", userId, ip: null, userAgent: null, acceptLanguage: null }),
   teamAuditBase: (_req: unknown, userId: string, teamId: string) => ({ scope: "TEAM", userId, teamId, ip: null, userAgent: null, acceptLanguage: null }),
   tenantAuditBase: (_req: unknown, userId: string, tenantId: string) => ({ scope: "TENANT", userId, tenantId, ip: null, userAgent: null, acceptLanguage: null }),
@@ -78,6 +79,17 @@ vi.mock("@/lib/logger", async (importOriginal) => ({
 vi.mock("@/lib/tenant/tenant-realignment", async (importOriginal) => ({
   ...(await importOriginal()) as Record<string, unknown>,
   realignAfterActivation: mockRealignAfterActivation,
+}));
+// The creation lock and the departure of a row created deactivated have their
+// own tests and real-DB cells (team-tenant-departure.integration.test.ts).
+const { mockDepartCreatedMembership, mockLockTenantMemberCreation } = vi.hoisted(() => ({
+  mockDepartCreatedMembership: vi.fn(),
+  mockLockTenantMemberCreation: vi.fn(),
+}));
+vi.mock("@/lib/team/team-departure", () => ({ departCreatedMembership: mockDepartCreatedMembership }));
+vi.mock("@/lib/team/tenant-row-lock", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
+  lockTenantMemberCreation: mockLockTenantMemberCreation,
 }));
 vi.mock("@/lib/auth/policy/access-restriction", () => ({
   enforceAccessRestriction: vi.fn().mockResolvedValue(null),
@@ -601,6 +613,49 @@ describe("POST /api/scim/v2/Users", () => {
     expect(createdMemberData?.deactivatedAt).toBeInstanceOf(Date);
     // Nothing was activated, so nothing is realigned.
     expect(mockRealignAfterActivation).not.toHaveBeenCalled();
+  });
+
+  it("departs a member created deactivated, after the creation lock and the insert", async () => {
+    // A guest of this tenant's teams created deactivated here has left: the
+    // creation lock serialises it with the guest's admission, and the
+    // departure ends those team memberships.
+    existingUsers = [ownedUser("user-1", "inactive@example.com")];
+    const create = vi.fn().mockImplementation(({ data }) => ({ id: "tm1", deactivatedAt: data.deactivatedAt }));
+    applyTxHolder.current = {
+      user: { findUnique: vi.fn() },
+      tenantMember: { findUnique: vi.fn().mockResolvedValue(null), create },
+      scimExternalMapping: { findFirst: vi.fn(), deleteMany: vi.fn(), create: vi.fn() },
+    };
+
+    const res = await POST(
+      makeReq({ body: { schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"], userName: "inactive@example.com", active: false } }),
+    );
+
+    expect(res.status).toBe(201);
+    expect(mockLockTenantMemberCreation).toHaveBeenCalledWith(expect.anything(), "tenant-1", "user-1", expect.anything());
+    expect(mockDepartCreatedMembership).toHaveBeenCalledWith(expect.anything(), "tenant-1", "user-1", expect.objectContaining({ actor: expect.objectContaining({ userId: expect.any(String) }) }));
+    expect(mockLockTenantMemberCreation.mock.invocationCallOrder[0]).toBeLessThan(create.mock.invocationCallOrder[0]);
+    expect(create.mock.invocationCallOrder[0]).toBeLessThan(mockDepartCreatedMembership.mock.invocationCallOrder[0]);
+  });
+
+  it("does not depart or take the creation lock for a member created active", async () => {
+    existingUsers = [ownedUser("user-1", "active@example.com")];
+    applyTxHolder.current = {
+      user: { findUnique: vi.fn() },
+      tenantMember: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockImplementation(({ data }) => ({ id: "tm1", deactivatedAt: data.deactivatedAt })),
+      },
+      scimExternalMapping: { findFirst: vi.fn(), deleteMany: vi.fn(), create: vi.fn() },
+    };
+
+    const res = await POST(
+      makeReq({ body: { schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"], userName: "active@example.com", active: true } }),
+    );
+
+    expect(res.status).toBe(201);
+    expect(mockLockTenantMemberCreation).not.toHaveBeenCalled();
+    expect(mockDepartCreatedMembership).not.toHaveBeenCalled();
   });
 
   it("reuses an existing externalId mapping for the same user", async () => {
