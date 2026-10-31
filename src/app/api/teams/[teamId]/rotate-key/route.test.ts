@@ -37,9 +37,7 @@ const txMock = {
   // The in-tx CAS re-read (SELECT team_key_version FROM teams ... FOR UPDATE).
   $queryRaw: vi.fn(),
   team: { update: vi.fn() },
-  teamMember: { findMany: vi.fn(), updateMany: vi.fn() },
-  // Departure from the team's tenant (team-departure.ts).
-  tenantMember: { findMany: vi.fn() },
+  teamMember: { findMany: vi.fn() },
   teamPasswordEntry: { updateMany: vi.fn(), findMany: vi.fn() },
   teamMemberKey: { createMany: vi.fn() },
 };
@@ -128,67 +126,6 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     txMock.teamPasswordEntry.updateMany.mockResolvedValue({ count: 1 });
     txMock.teamPasswordEntry.findMany.mockResolvedValue([{ id: "660e8400-e29b-41d4-a716-446655440100" }]);
     txMock.teamMemberKey.createMany.mockResolvedValue({ count: 1 });
-    txMock.tenantMember.findMany.mockResolvedValue([]);
-    txMock.teamMember.updateMany.mockResolvedValue({ count: 0 });
-  });
-
-  it("leaves a member who departed the team's tenant out, and turns their distribution pending", async () => {
-    const holder = "660e8400-e29b-41d4-a716-446655440001";
-    const departed = "660e8400-e29b-41d4-a716-446655440002";
-    txMock.teamMember.findMany.mockResolvedValue([{ userId: holder }, { userId: departed }]);
-    txMock.tenantMember.findMany.mockResolvedValue([{ userId: departed }]);
-
-    const res = await POST(
-      createRequest({
-        newTeamKeyVersion: 2,
-        entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
-        memberKeys: [validMemberKey(holder)],
-      }),
-      createParams("team-1"),
-    );
-
-    expect(res.status).toBe(200);
-    expect(txMock.tenantMember.findMany).toHaveBeenCalledWith({
-      where: { tenantId: "tenant-1", userId: { in: [holder, departed] }, deactivatedAt: { not: null } },
-      select: { userId: true },
-    });
-    expect(txMock.teamMember.updateMany).toHaveBeenCalledWith({
-      where: { teamId: "team-1", userId: { in: [departed] }, keyDistributed: true },
-      data: { keyDistributed: false },
-    });
-  });
-
-  it("refuses a key wrapped to a member who departed the team's tenant", async () => {
-    const holder = "660e8400-e29b-41d4-a716-446655440001";
-    const departed = "660e8400-e29b-41d4-a716-446655440002";
-    txMock.teamMember.findMany.mockResolvedValue([{ userId: holder }, { userId: departed }]);
-    txMock.tenantMember.findMany.mockResolvedValue([{ userId: departed }]);
-
-    const res = await POST(
-      createRequest({
-        newTeamKeyVersion: 2,
-        entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
-        memberKeys: [validMemberKey(holder), validMemberKey(departed)],
-      }),
-      createParams("team-1"),
-    );
-
-    expect(res.status).toBe(400);
-    expect((await res.json()).details).toEqual({ unknownUserId: departed });
-    expect(txMock.teamMemberKey.createMany).not.toHaveBeenCalled();
-  });
-
-  it("touches no distribution when nobody departed", async () => {
-    const res = await POST(
-      createRequest({
-        newTeamKeyVersion: 2,
-        entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
-        memberKeys: [validMemberKey("660e8400-e29b-41d4-a716-446655440001")],
-      }),
-      createParams("team-1"),
-    );
-    expect(res.status).toBe(200);
-    expect(txMock.teamMember.updateMany).not.toHaveBeenCalled();
   });
 
   it("returns 401 when unauthenticated", async () => {

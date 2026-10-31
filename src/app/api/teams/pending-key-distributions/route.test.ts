@@ -1,10 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockAuth, mockPrismaTeamMember, mockPrismaTenantMember, mockWithBypassRls } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaTeamMember, mockWithBypassRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaTeamMember: { findMany: vi.fn() },
-  // Departure from the team's tenant (team-departure.ts).
-  mockPrismaTenantMember: { findMany: vi.fn() },
   mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
 }));
 
@@ -12,7 +10,6 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     teamMember: mockPrismaTeamMember,
-    tenantMember: mockPrismaTenantMember,
   },
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
@@ -25,21 +22,6 @@ describe("GET /api/teams/pending-key-distributions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "admin-user" } });
-    mockPrismaTenantMember.findMany.mockResolvedValue([]);
-  });
-
-  it("leaves out a pending member who departed the team's tenant, but not one departed elsewhere", async () => {
-    mockPrismaTeamMember.findMany.mockResolvedValueOnce([{ teamId: "team-1" }, { teamId: "team-2" }]);
-    mockPrismaTeamMember.findMany.mockResolvedValueOnce([
-      { id: "m-1", teamId: "team-1", tenantId: "tenant-a", userId: "gone", user: { ecdhPublicKey: "pk" }, team: { teamKeyVersion: 1 } },
-      { id: "m-2", teamId: "team-2", tenantId: "tenant-b", userId: "gone", user: { ecdhPublicKey: "pk" }, team: { teamKeyVersion: 1 } },
-    ]);
-    // The user's tenant-a membership is deactivated; their tenant-b one is not.
-    mockPrismaTenantMember.findMany.mockResolvedValue([{ tenantId: "tenant-a", userId: "gone" }]);
-
-    const json = await (await GET()).json();
-
-    expect(json.map((m: { memberId: string }) => m.memberId)).toEqual(["m-2"]);
   });
 
   it("returns 401 when unauthenticated", async () => {

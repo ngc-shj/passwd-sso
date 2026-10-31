@@ -135,11 +135,6 @@ describe("isRoleAbove", () => {
   });
 });
 
-// No member has departed the team's tenant unless a case says so.
-beforeEach(() => {
-  mockPrisma.tenantMember.findMany.mockResolvedValue([]);
-});
-
 describe("getTeamMembership", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -160,29 +155,6 @@ describe("getTeamMembership", () => {
     mockPrisma.teamMember.findFirst.mockResolvedValue(null);
     const result = await getTeamMembership("u-1", "team-1");
     expect(result).toBeNull();
-  });
-
-  it("returns null for a member who departed the team's tenant", async () => {
-    mockPrisma.teamMember.findFirst.mockResolvedValue({
-      id: "m-1", teamId: "team-1", userId: "u-1", tenantId: "tenant-t", role: TEAM_ROLE.MEMBER,
-    });
-    mockPrisma.tenantMember.findMany.mockResolvedValue([{ userId: "u-1" }]);
-
-    const result = await getTeamMembership("u-1", "team-1");
-
-    expect(result).toBeNull();
-    // Departure is judged in the TEAM's tenant, from the user's membership row there.
-    expect(mockPrisma.tenantMember.findMany).toHaveBeenCalledWith({
-      where: { tenantId: "tenant-t", userId: { in: ["u-1"] }, deactivatedAt: { not: null } },
-      select: { userId: true },
-    });
-  });
-
-  it("returns the membership of a member with no departed row in the team's tenant", async () => {
-    const membership = { id: "m-1", teamId: "team-1", userId: "u-1", tenantId: "tenant-t", role: TEAM_ROLE.MEMBER };
-    mockPrisma.teamMember.findFirst.mockResolvedValue(membership);
-
-    expect(await getTeamMembership("u-1", "team-1")).toEqual(membership);
   });
 });
 

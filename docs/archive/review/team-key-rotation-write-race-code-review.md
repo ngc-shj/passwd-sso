@@ -329,49 +329,27 @@ to the state after round 2.
 - The commit that introduced them is reverted; none of them exists on the
   branch.
 
-### S-R2-1 Major tenant departure and team key distribution — Fixed (redesigned)
-- The user asked for it to be fixed in this branch. Departure is no longer
-  written onto the team membership; it is read from tenant membership at
-  decision time (`src/lib/team/team-departure.ts`): a member whose
-  `tenant_members` row in the team's tenant is deactivated has departed; a
-  member with no row there (invited from another tenant, or moved out of a
-  bootstrap tenant) has not.
-- One predicate, every decision: `getTeamMembership` (so `requireTeamMember`,
-  member-key, confirm-key's actor and rotation's actor refuse a departed
-  user), rotation's key-holder set and rotate-key/data (a departed member is
-  neither required nor accepted), pending-key-distributions (not listed), and
-  confirm-key's target (refused, read `FOR SHARE` on their tenant membership
-  row so a concurrent deactivation is either seen or waits).
-- Rotation turns a departed key holder's distribution pending, so a
-  reactivation after a rotation is distributed the new key instead of served
-  an old one; with no rotation in between, reactivation restores access as it
-  was.
-- Round-3 findings answered by the design: F-R3-1/S-R3-1 (distribution reads
-  the same predicate), F-R3-2 (reactivation restores, no data loss), F-R3-3 /
-  F-R3-A1 (a bootstrap move deletes the tenant row, so the mover keeps their
-  teams; the tenant move is unchanged), F-R3-4/S-R3-2 (read live: no
-  backfill), F-R3-5/F-R3-7 (deactivation paths take no new locks), F-R3-6
-  (no planned set: the state itself is read).
-- Tests: integration "tenant departure" (no key served; not listed nor
-  distributable; rotation neither requires nor accepts, leaves pending;
-  reactivation restores; reactivation after rotation lists for distribution;
-  no tenant row is not departed); unit tests for each reader. Red-proved: each
-  of the six clauses removed alone.
-
-### R42 class "who holds a team key": closed by mutation-verified CI guard
-- `scripts/checks/check-team-rotation-input-lock.mjs` derives both halves on the
-  AST: member-set WRITES (team member key deletes; team member deletes,
-  deactivation and keyDistributed updates and upserts; raw writes to those
-  tables, schema-qualified too) need a rotation lock before them; key-holder
-  READS (a team member read filtering on or returning keyDistributed) need the
-  departure predicate in their handler. Exemptions match exactly one site;
-  site counts are pinned (12 writes, 6 reads); `src/workers` is scanned; the
-  header states its limits (source order, one same-file caller level, aliases).
-  Self-test: 18 cases, allow and deny per clause. Red-proved: each of 14 gate
-  clauses removed alone fails the self-test. Wired in `scripts/pre-pr.sh`.
-- Round-3 gate findings answered: T-R3-4, T-R3-5, S-R3-3, F-R3-8.
-- T-R3-1/2/3 (tests of the reverted directory-sync, tenant-move and SCIM
-  revocation code) no longer apply: that code is gone.
+### S-R2-1 Major tenant departure and team key distribution — Out of scope (pending user decision)
+- **Anti-Deferral check**: security-class member (rule 7) — deferral requires
+  explicit user approval.
+- **Justification**: closing it is a design decision this branch cannot make
+  alone — how a tenant departure is represented on team memberships so every
+  distribution path reads it (deactivate the team membership vs a departure
+  predicate in pending-key-distributions and confirm-key), what reactivation
+  restores, what a bootstrap tenant move means for the mover's own teams, and
+  a backfill for members who already departed. Round 3 is the measured
+  evidence: the in-branch attempt seeded three Criticals.
+- **Worst case**: a member deactivated at the tenant level (SCIM
+  `active=false`, directory sync) stays a key holder: every later rotation
+  wraps the new team key to them, and member-key serves it to a session they
+  hold in any tenant (team membership is not tenant-scoped).
+- **Likelihood**: medium — tenant-level deactivation is the usual IdP
+  offboarding, but use requires the departed user to authenticate somewhere
+  or obtain database access.
+- **Cost to fix**: design + migration + changes across distribution,
+  reactivation and the tenant move; several days including review.
+- **Orchestrator note**: TODO(team-rotation-tenant-deactivation): follow-up
+  issue carrying the round-3 analysis (F-R3-1–8, S-R3-1–3, T-R3-1–5).
 
 ### S-F4 Minor history / ItemKey re-key — Out of scope (pending user decision)
 - Unchanged; see round 1. TODO(team-rotation-history-rekey).

@@ -9,7 +9,6 @@
  */
 
 import { prisma } from "@/lib/prisma";
-import { departedFromTenant } from "@/lib/team/team-departure";
 import { API_ERROR, type ApiErrorCode } from "@/lib/http/api-error-codes";
 import { TEAM_PERMISSION, TEAM_ROLE } from "@/lib/constants";
 import { resolveUserTenantIdFromClient, withTeamTenantRls } from "@/lib/tenant-context";
@@ -75,21 +74,16 @@ export { isTeamAdminRole } from "@/lib/constants";
 
 /**
  * Get the membership record for a user in a team.
- * Returns null if the user is not a member, is deactivated in the team, or
- * has departed the team's tenant (team-departure.ts) — a member the tenant
- * deactivated keeps no team access through a session held elsewhere.
+ * Returns null if the user is not a member (or is deactivated).
  *
  * Uses findFirst instead of findUnique because Prisma's findUnique
  * cannot include non-unique-index fields (deactivatedAt) in the where clause.
  * The @@unique([teamId, userId]) constraint ensures at most one row per team+user.
  */
 async function getTeamMembershipInRlsContext(userId: string, teamId: string) {
-  const membership = await prisma.teamMember.findFirst({
+  return prisma.teamMember.findFirst({
     where: { teamId: teamId, userId, deactivatedAt: null },
   });
-  if (!membership) return null;
-  const departed = await departedFromTenant(prisma, membership.tenantId, [userId]);
-  return departed.has(userId) ? null : membership;
 }
 
 export async function getTeamMembership(userId: string, teamId: string) {
