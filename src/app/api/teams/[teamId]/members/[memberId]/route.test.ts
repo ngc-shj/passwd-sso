@@ -33,6 +33,8 @@ const { mockAuth, mockPrismaTeamMember, mockPrismaTeamMemberKey, mockPrismaScimE
     mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: (tenantId: string, tx: unknown) => unknown) =>
       fn("tenant-1", {
         $queryRaw: mockTeamLockQuery,
+        // set / restore lock_timeout around the team lock.
+        $executeRaw: vi.fn(),
         teamMember: mockPrismaTeamMember,
         teamMemberKey: mockPrismaTeamMemberKey,
       }),
@@ -82,6 +84,7 @@ vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
 }));
 
 import { PUT, DELETE } from "./route";
+import { teamLockQuery, lockQueryCalls } from "@/__tests__/helpers/team-rotation-lock-mock";
 import { TEAM_ROLE } from "@/lib/constants";
 
 const TEAM_ID = "team-123";
@@ -414,7 +417,7 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
 describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockTeamLockQuery.mockResolvedValue([{ id: TEAM_ID }]);
+    mockTeamLockQuery.mockImplementation(teamLockQuery([{ id: TEAM_ID }]));
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
     mockRequireTeamPermission.mockResolvedValue(ownerMembership);
     mockIsRoleAbove.mockReturnValue(true);
@@ -560,10 +563,10 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
     );
 
     expect(res.status).toBe(200);
-    const [strings, ids] = mockTeamLockQuery.mock.calls[0] as [TemplateStringsArray, string[]];
-    expect(strings.join("?")).toMatch(/FROM teams WHERE id = ANY\(\?::uuid\[\]\) ORDER BY id FOR SHARE/);
-    expect(ids).toEqual([TEAM_ID]);
-    expect(mockTeamLockQuery.mock.invocationCallOrder[0]).toBeLessThan(
+    const [lock] = lockQueryCalls(mockTeamLockQuery);
+    expect(lock.sql).toMatch(/FROM teams WHERE id = ANY\(\?::uuid\[\]\) ORDER BY id FOR SHARE/);
+    expect(lock.values).toEqual([[TEAM_ID]]);
+    expect(lock.order).toBeLessThan(
       mockPrismaTeamMemberKey.deleteMany.mock.invocationCallOrder[0],
     );
   });
@@ -577,14 +580,15 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
       role: TEAM_ROLE.MEMBER,
       deactivatedAt: null,
     });
-    mockTeamLockQuery.mockResolvedValue([]);
+    mockTeamLockQuery.mockImplementation(teamLockQuery([]));
 
-    await expect(
-      DELETE(
-        createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`),
-        createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
-      ),
-    ).rejects.toThrow("Could not lock 1 team row(s) against key rotation");
+    const res = await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
+    );
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("CONFLICT");
     expect(mockPrismaTeamMemberKey.deleteMany).not.toHaveBeenCalled();
     expect(mockPrismaTeamMember.delete).not.toHaveBeenCalled();
   });

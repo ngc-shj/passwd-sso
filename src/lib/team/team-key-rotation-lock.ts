@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { pgErrorCode } from "@/lib/prisma/prisma-error";
-import { setLockTimeout } from "@/lib/tenant-rls-grants";
+import { readLockTimeout, restoreLockTimeout, setLockTimeout } from "@/lib/tenant-rls-grants";
 import { TEAM_KEY_LOCK_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 
 /**
@@ -30,14 +30,37 @@ export class TeamRotationInProgressError extends Error {
 }
 
 /**
+ * Run one locking statement with lock_timeout bounded to
+ * TEAM_KEY_LOCK_TIMEOUT_MS, so a wait on an in-flight rotation ends before the
+ * caller's transaction (Prisma's 5s default) expires into a bare 500; past it
+ * throws TeamRotationInProgressError. The previous lock_timeout is restored
+ * afterwards, so the caller's later statements wait as they did before. (On a
+ * failure the transaction is aborted, or rolled back to the caller's
+ * savepoint, which reverts the setting itself.)
+ */
+async function withBoundedLockWait<T>(
+  tx: Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw">,
+  lock: () => Promise<T>,
+): Promise<T> {
+  const previous = await readLockTimeout(tx);
+  await setLockTimeout(tx, TEAM_KEY_LOCK_TIMEOUT_MS);
+  let result: T;
+  try {
+    result = await lock();
+  } catch (e) {
+    if (pgErrorCode(e) === LOCK_NOT_AVAILABLE) throw new TeamRotationInProgressError();
+    throw e;
+  }
+  await restoreLockTimeout(tx, previous);
+  return result;
+}
+
+/**
  * Read the team's current key version and tenant under `FOR SHARE`, held
  * until the transaction ends. Returns null when the team row is not
  * visible (deleted, or hidden by RLS) — callers treat that as a mismatch.
- *
- * Waits at most TEAM_KEY_LOCK_TIMEOUT_MS for an in-flight rotation, so the
- * caller's transaction (Prisma's 5s default) does not expire first and
- * surface as a bare 500; past it throws TeamRotationInProgressError. The
- * lock_timeout stays set for the rest of the transaction.
+ * Throws TeamRotationInProgressError when a rotation holds the row past the
+ * bounded wait.
  *
  * MUST run inside an open transaction; a bare client degrades it to an
  * unlocked read.
@@ -46,24 +69,18 @@ export async function lockTeamKeyVersion(
   tx: Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw">,
   teamId: string,
 ): Promise<{ teamKeyVersion: number; tenantId: string } | null> {
-  await setLockTimeout(tx, TEAM_KEY_LOCK_TIMEOUT_MS);
-  let rows: { team_key_version: number; tenant_id: string }[];
-  try {
-    rows = await tx.$queryRaw<{ team_key_version: number; tenant_id: string }[]>`
+  const [team] = await withBoundedLockWait(tx, () =>
+    tx.$queryRaw<{ team_key_version: number; tenant_id: string }[]>`
       SELECT team_key_version, tenant_id FROM teams WHERE id = ${teamId}::uuid FOR SHARE
-    `;
-  } catch (e) {
-    if (pgErrorCode(e) === LOCK_NOT_AVAILABLE) throw new TeamRotationInProgressError();
-    throw e;
-  }
-  const [team] = rows;
+    `,
+  );
   return team ? { teamKeyVersion: team.team_key_version, tenantId: team.tenant_id } : null;
 }
 
 /**
- * The team rows a member-removal lock expected but could not lock: hidden by
- * the transaction's RLS context or deleted meanwhile. Refusing beats
- * removing the member unserialised.
+ * Team rows a membership change needed locked but that were not: hidden by
+ * the transaction's RLS context, or joined after the lock was taken.
+ * Refusing beats changing the membership unserialised.
  */
 export class TeamRotationLockError extends Error {
   constructor(readonly missing: number) {
@@ -72,41 +89,78 @@ export class TeamRotationLockError extends Error {
   }
 }
 
+async function lockTeamRows(
+  tx: Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw">,
+  teamIds: readonly string[],
+): Promise<Set<string>> {
+  const ids = [...new Set(teamIds)];
+  if (ids.length === 0) return new Set();
+  const locked = await withBoundedLockWait(tx, () =>
+    tx.$queryRaw<{ id: string }[]>`
+      SELECT id FROM teams WHERE id = ANY(${ids}::uuid[]) ORDER BY id FOR SHARE
+    `,
+  );
+  return new Set(locked.map((row) => row.id));
+}
+
+/** Throw TeamRotationLockError unless every team in `teamIds` is in `locked`. */
+export function assertTeamsLocked(locked: ReadonlySet<string>, teamIds: readonly string[]): void {
+  const missing = new Set(teamIds.filter((id) => !locked.has(id))).size;
+  if (missing > 0) throw new TeamRotationLockError(missing);
+}
+
 /**
- * `FOR SHARE` on every team the user is a member of (optionally within one
- * tenant), in id order so two such writers cannot deadlock each other. For
- * transactions that remove or deactivate a member, or delete member keys:
- * a removal that commits after rotation read the member set would otherwise
- * leave the removed member a key to the new version. Run it before the
- * transaction's first users / team_members / team_member_keys lock.
- *
- * Fails closed: the teams are derived from the visible membership rows, and
- * fewer locked rows than memberships throws TeamRotationLockError — a
- * context whose RLS grant hides `teams` would otherwise lock nothing.
+ * `FOR SHARE` on the given team rows (id order, so two such writers cannot
+ * deadlock each other), for a transaction that removes or deactivates a
+ * member of those teams. Fails closed: a team row that cannot be locked
+ * throws TeamRotationLockError.
  */
-export async function lockMemberTeamsAgainstRotation(
+export async function lockTeamsAgainstRotation(
+  tx: Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw">,
+  teamIds: readonly string[],
+): Promise<void> {
+  assertTeamsLocked(await lockTeamRows(tx, teamIds), teamIds);
+}
+
+/** Ids of the teams the user is a member of (optionally within one tenant). */
+export async function memberTeamIds(
   tx: Pick<Prisma.TransactionClient, "$queryRaw">,
   userId: string,
   tenantId?: string,
-): Promise<void> {
-  const memberships = tenantId === undefined
-    ? await tx.$queryRaw<{ team_id: string }[]>`
-        SELECT DISTINCT team_id FROM team_members WHERE user_id = ${userId}::uuid`
-    : await tx.$queryRaw<{ team_id: string }[]>`
-        SELECT DISTINCT team_id FROM team_members
-         WHERE user_id = ${userId}::uuid AND tenant_id = ${tenantId}::uuid`;
-  await lockTeamsAgainstRotation(tx, memberships.map((m) => m.team_id));
+): Promise<string[]> {
+  const rows = await tx.$queryRaw<{ team_id: string }[]>`
+    SELECT DISTINCT team_id FROM team_members
+     WHERE user_id = ${userId}::uuid AND (${tenantId ?? null}::uuid IS NULL OR tenant_id = ${tenantId ?? null}::uuid)
+  `;
+  return rows.map((row) => row.team_id);
 }
 
-/** `FOR SHARE` on the given team rows; see lockMemberTeamsAgainstRotation. */
-export async function lockTeamsAgainstRotation(
-  tx: Pick<Prisma.TransactionClient, "$queryRaw">,
-  teamIds: readonly string[],
-): Promise<void> {
-  const ids = [...new Set(teamIds)];
-  if (ids.length === 0) return;
-  const locked = await tx.$queryRaw<{ id: string }[]>`
-    SELECT id FROM teams WHERE id = ANY(${ids}::uuid[]) ORDER BY id FOR SHARE
-  `;
-  if (locked.length !== ids.length) throw new TeamRotationLockError(ids.length - locked.length);
+/**
+ * `FOR SHARE` on every team the user is currently a member of, for a
+ * transaction that removes the user's memberships or member keys: a removal
+ * that commits after a rotation read the member set would otherwise leave
+ * the removed member a key to the new version. Run it before the
+ * transaction's first users / team_members / team_member_keys lock.
+ *
+ * Returns the locked set. A team deleted meanwhile is simply absent. The
+ * membership set read here can still grow before the caller's writes, so
+ * the caller MUST check the teams it actually changed against the returned
+ * set with assertTeamsLocked — after a lock that stops new memberships (the
+ * user's `users` row FOR UPDATE), or on the rows its delete returned.
+ */
+export async function lockMemberTeamsAgainstRotation(
+  tx: Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw">,
+  userId: string,
+  tenantId?: string,
+): Promise<Set<string>> {
+  return lockTeamRows(tx, await memberTeamIds(tx, userId, tenantId));
+}
+
+/**
+ * The refusals a membership-changing transaction raises against rotation:
+ * a wait past the bounded lock timeout, or a team it could not lock. Both
+ * roll the transaction back and are safe to retry.
+ */
+export function isTeamRotationConflict(e: unknown): boolean {
+  return e instanceof TeamRotationInProgressError || e instanceof TeamRotationLockError;
 }

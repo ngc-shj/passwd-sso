@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { teamLockQuery, lockQueryCalls } from "@/__tests__/helpers/team-rotation-lock-mock";
 
 const {
   mockPrismaUser, mockPrismaPasswordEntry, mockPrismaAttachment,
@@ -6,10 +7,10 @@ const {
   mockPrismaEmergencyGrant, mockPrismaTeamMemberKey, mockPrismaTeamMember,
   mockPrismaTransaction, mockWithBypassRls, mockQueryRaw, mockLogAuditInTx,
 } = vi.hoisted(() => {
-  // assertCurrentKeyVersion-style row lock — the early users FOR UPDATE
-  // added for lock-order consistency with rotation. Result value is
-  // irrelevant (the reset body doesn't read it), so any resolved value works.
-  const mockQueryRaw = vi.fn().mockResolvedValue([{ id: "user-1" }]);
+  // Raw queries of the deleting transaction: the membership read and team
+  // lock against key rotation, then the users FOR UPDATE. Answered per query
+  // in beforeEach (vaultResetRawQuery).
+  const mockQueryRaw = vi.fn();
 
   // Shared tx client mock — used inside the $transaction callback
   const txClient = {
@@ -24,6 +25,7 @@ const {
     teamMemberKey: { deleteMany: vi.fn() },
     teamMember: { updateMany: vi.fn() },
     $queryRaw: mockQueryRaw,
+    $executeRaw: vi.fn(),
   };
 
   return {
@@ -62,6 +64,7 @@ vi.mock("@/lib/prisma", () => ({
     teamMember: mockPrismaTeamMember,
     $transaction: mockPrismaTransaction,
     $queryRaw: mockQueryRaw,
+    $executeRaw: vi.fn(),
   },
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
@@ -79,6 +82,20 @@ vi.mock("@/lib/logger", () => ({
 import { executeVaultReset, type VaultResetAtomicAudit } from "./vault-reset";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 
+/**
+ * `memberships` answers the membership reads (both: before the team lock and
+ * after the users lock), `lockable` the team ids the FOR SHARE returns.
+ */
+function vaultResetRawQuery(memberships: string[], lockable: string[]) {
+  return teamLockQuery((sql) => {
+    if (sql.includes("FROM team_members")) return memberships.map((team_id) => ({ team_id }));
+    if (sql.includes("FROM teams")) return lockable.map((id) => ({ id }));
+    return [{ id: "user-1" }];
+  });
+}
+
+const usersLockCall = () => lockQueryCalls(mockQueryRaw).find((call) => call.sql.includes("FROM users"));
+
 describe("executeVaultReset", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -95,7 +112,7 @@ describe("executeVaultReset", () => {
     mockPrismaTeamMemberKey.deleteMany.mockResolvedValue({ count: 1 });
     mockPrismaTeamMember.updateMany.mockResolvedValue({ count: 1 });
     mockPrismaUser.update.mockResolvedValue({});
-    mockQueryRaw.mockResolvedValue([{ id: "user-1" }]);
+    mockQueryRaw.mockImplementation(vaultResetRawQuery(["team-1"], ["team-1"]));
     mockPrismaTag.count.mockResolvedValue(0);
     mockPrismaFolder.count.mockResolvedValue(0);
     mockPrismaVaultKey.count.mockResolvedValue(0);
@@ -119,6 +136,7 @@ describe("executeVaultReset", () => {
         teamMember: mockPrismaTeamMember,
         user: mockPrismaUser,
         $queryRaw: mockQueryRaw,
+        $executeRaw: vi.fn(),
       })
     );
   });
@@ -176,6 +194,34 @@ describe("executeVaultReset", () => {
         data: expect.objectContaining({ status: "REVOKED" }),
       }),
     );
+  });
+
+  it("locks the user's teams against key rotation before the users row", async () => {
+    await executeVaultReset("user-1");
+
+    const lock = lockQueryCalls(mockQueryRaw).find((call) => call.sql.includes("FROM teams"));
+    expect(lock?.sql).toMatch(/FROM teams WHERE id = ANY\(\?::uuid\[\]\) ORDER BY id FOR SHARE/);
+    expect(lock?.values).toEqual([["team-1"]]);
+    expect(lock?.order).toBeLessThan(usersLockCall()?.order ?? -Infinity);
+  });
+
+  it("refuses, deleting nothing, when a membership's team is not locked once the users row is", async () => {
+    // team-2 is visible as a membership but its row could not be locked
+    // (joined after the lock, or hidden from the grant).
+    mockQueryRaw.mockImplementation(vaultResetRawQuery(["team-1", "team-2"], ["team-1"]));
+
+    await expect(executeVaultReset("user-1")).rejects.toThrow("Could not lock 1 team row(s) against key rotation");
+    expect(mockPrismaTeamMemberKey.deleteMany).not.toHaveBeenCalled();
+    expect(mockPrismaPasswordEntry.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("takes no team lock when the user is in no team, and resets", async () => {
+    mockQueryRaw.mockImplementation(vaultResetRawQuery([], []));
+
+    await executeVaultReset("user-1");
+
+    expect(lockQueryCalls(mockQueryRaw).some((call) => call.sql.includes("FROM teams"))).toBe(false);
+    expect(mockPrismaTeamMemberKey.deleteMany).toHaveBeenCalledOnce();
   });
 
   it("deletes TeamMemberKey records", async () => {
@@ -345,7 +391,7 @@ describe("executeVaultReset", () => {
 
       await executeVaultReset("user-1", AUDIT, { scopeTenantId: "tenant-a" });
 
-      const lockOrder = mockQueryRaw.mock.invocationCallOrder[0];
+      const lockOrder = usersLockCall()?.order ?? Infinity;
       const scopedIndex = mockPrismaPasswordEntry.count.mock.calls.findIndex(
         ([args]) => (args as { where: { tenantId?: unknown } }).where.tenantId !== undefined,
       );

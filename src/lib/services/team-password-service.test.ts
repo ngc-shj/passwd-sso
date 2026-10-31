@@ -43,6 +43,8 @@ const {
   const queryRawOn = (via: "prisma" | "tx") =>
     async (strings: TemplateStringsArray, ...values: unknown[]) => {
       const sql = strings.join("?");
+      // The bounded lock wait reads the lock_timeout it later restores.
+      if (sql.includes("current_setting('lock_timeout')")) return [{ lock_timeout: "0" }];
       if (/FROM teams\b/.test(sql)) {
         const team = await mockTeamLockRead(values[0], sql, via);
         return team ? [{ team_key_version: team.teamKeyVersion, tenant_id: team.tenantId }] : [];

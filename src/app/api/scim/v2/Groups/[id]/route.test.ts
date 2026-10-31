@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { teamLockQuery } from "@/__tests__/helpers/team-rotation-lock-mock";
 import { NextRequest } from "next/server";
 
 const {
@@ -153,7 +154,8 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
       fn({
         // The team lock against key rotation (pinned in scim-group-service.test.ts).
-        $queryRaw: vi.fn().mockResolvedValue([{ id: mapping.teamId }]),
+        $queryRaw: vi.fn(teamLockQuery([{ id: mapping.teamId }])),
+        $executeRaw: vi.fn(),
         teamMember: mockTeamMember,
         tenantMember: mockTenantMember,
       }),
@@ -384,7 +386,8 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
       fn({
         // The team lock against key rotation (pinned in scim-group-service.test.ts).
-        $queryRaw: vi.fn().mockResolvedValue([{ id: mapping.teamId }]),
+        $queryRaw: vi.fn(teamLockQuery([{ id: mapping.teamId }])),
+        $executeRaw: vi.fn(),
         teamMember: mockTeamMember,
         tenantMember: mockTenantMember,
       }),

@@ -262,7 +262,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     if (e instanceof Error && e.message === "TEAM_KEY_VERSION_CONFLICT") {
       return errorResponse(API_ERROR.TEAM_KEY_VERSION_MISMATCH);
     }
-    // Concurrent rotations serialise on the teams FOR UPDATE above, so the
+    // Concurrent rotations serialise on the teams FOR NO KEY UPDATE above, so the
     // loser normally fails the CAS. A teamMemberKey
     // @@unique([teamId, userId, keyVersion]) collision is still mapped to the
     // same 409 conflict shape rather than a bare 500 — mirrors the personal

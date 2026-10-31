@@ -17,6 +17,9 @@ import { lockTeamKeyVersion, TeamRotationInProgressError } from "@/lib/team/team
 type Params = { params: Promise<{ teamId: string; memberId: string }> };
 
 // POST /api/teams/[teamId]/members/[memberId]/confirm-key
+/** The member row no longer matches what the distribution checked. */
+class MemberChangedError extends Error {}
+
 // Admin distributes the team key to a member by encrypting it with member's ECDH public key
 async function handlePOST(req: NextRequest, { params }: Params) {
   const session = await auth();
@@ -132,15 +135,21 @@ async function handlePOST(req: NextRequest, { params }: Params) {
           },
         });
 
-        await tx.teamMember.update({
-          where: { id: memberId, teamId },
+        // The check above is a plain read: re-assert it in the write, so a
+        // deactivation or distribution committed since then is not
+        // overwritten. A miss rolls the key upsert back.
+        const marked = await tx.teamMember.updateMany({
+          where: { id: memberId, teamId, deactivatedAt: null, keyDistributed: false },
           data: { keyDistributed: true },
         });
+        if (marked.count !== 1) throw new MemberChangedError();
 
         return "success" as const;
       }),
     );
   } catch (e) {
+    // The member was deactivated, or received a key, since the check.
+    if (e instanceof MemberChangedError) return errorResponse(API_ERROR.MEMBER_NOT_FOUND);
     // A rotation held the team past the lock timeout: the key being
     // distributed is about to be superseded.
     if (!(e instanceof TeamRotationInProgressError)) throw e;

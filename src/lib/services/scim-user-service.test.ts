@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { teamLockQuery, lockQueryCalls } from "@/__tests__/helpers/team-rotation-lock-mock";
 
 const {
   mockTenantMemberFindUnique,
@@ -168,13 +169,15 @@ describe("patchScimUser", () => {
 describe("deactivateScimUser", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    mockQueryRaw.mockImplementation(async (strings: TemplateStringsArray) =>
-      strings.join("?").includes("FROM team_members") ? [{ team_id: "team-1" }] : [{ id: "team-1" }],
-    );
+    // Membership read, the team lock, and the team_members delete's RETURNING.
+    mockQueryRaw.mockImplementation(teamLockQuery((sql) =>
+      sql.includes("FROM teams") ? [{ id: "team-1" }] : [{ team_id: "team-1" }],
+    ));
     // Interactive transaction over the same model mocks.
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
       fn({
         $queryRaw: mockQueryRaw,
+        $executeRaw: vi.fn(),
         teamMemberKey: { deleteMany: mockTeamMemberKeyDeleteMany },
         scimExternalMapping: { deleteMany: mockScimExternalMappingDeleteMany },
         teamMember: { deleteMany: mockTeamMemberDeleteMany },
@@ -219,7 +222,8 @@ describe("deactivateScimUser", () => {
 
     expect(mockTransaction).toHaveBeenCalledWith(expect.any(Function));
     expect(mockTeamMemberKeyDeleteMany).toHaveBeenCalledWith({ where: { tenantId: TENANT_ID, userId: USER_ID } });
-    expect(mockTeamMemberDeleteMany).toHaveBeenCalledWith({ where: { tenantId: TENANT_ID, userId: USER_ID } });
+    const removal = lockQueryCalls(mockQueryRaw).find((call) => call.sql.includes("DELETE FROM team_members"));
+    expect(removal?.values).toEqual([TENANT_ID, USER_ID]);
     expect(mockTenantMemberDelete).toHaveBeenCalledOnce();
   });
 
@@ -228,27 +232,42 @@ describe("deactivateScimUser", () => {
 
     await deactivateScimUser(TENANT_ID, USER_ID);
 
-    const [membershipSql, ...membershipArgs] = mockQueryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]];
-    expect(membershipSql.join("?")).toMatch(/FROM team_members\s+WHERE user_id = \?::uuid AND tenant_id = \?::uuid/);
-    expect(membershipArgs).toEqual([USER_ID, TENANT_ID]);
-    const [lockSql, lockedIds] = mockQueryRaw.mock.calls[1] as [TemplateStringsArray, string[]];
-    expect(lockSql.join("?")).toMatch(/FROM teams WHERE id = ANY\(\?::uuid\[\]\) ORDER BY id FOR SHARE/);
-    expect(lockedIds).toEqual(["team-1"]);
-    expect(mockQueryRaw.mock.invocationCallOrder[1]).toBeLessThan(
+    const [membership, lock] = lockQueryCalls(mockQueryRaw);
+    expect(membership.sql).toMatch(/FROM team_members\s+WHERE user_id = \?::uuid AND \(\?::uuid IS NULL OR tenant_id = \?::uuid\)/);
+    expect(membership.values).toEqual([USER_ID, TENANT_ID, TENANT_ID]);
+    expect(lock.sql).toMatch(/FROM teams WHERE id = ANY\(\?::uuid\[\]\) ORDER BY id FOR SHARE/);
+    expect(lock.values).toEqual([["team-1"]]);
+    expect(lock.order).toBeLessThan(
       mockTeamMemberKeyDeleteMany.mock.invocationCallOrder[0],
     );
   });
 
-  it("refuses the deletion when a team row cannot be locked against rotation", async () => {
+  it("refuses the deletion when a membership's team was not locked", async () => {
+    // The lock covered team-1, but the delete removed a team-2 membership
+    // too: one joined after the lock was taken (or one whose team RLS hid).
     mockTenantMemberFindUnique.mockResolvedValueOnce({ id: "tm1", role: "MEMBER" });
-    mockQueryRaw.mockImplementation(async (strings: TemplateStringsArray) =>
-      strings.join("?").includes("FROM team_members") ? [{ team_id: "team-1" }] : [],
-    );
+    mockQueryRaw.mockImplementation(teamLockQuery((sql) => {
+      if (sql.includes("FROM teams")) return [{ id: "team-1" }];
+      if (sql.includes("DELETE FROM team_members")) return [{ team_id: "team-1" }, { team_id: "team-2" }];
+      return [{ team_id: "team-1" }];
+    }));
 
     await expect(deactivateScimUser(TENANT_ID, USER_ID)).rejects.toThrow(
       "Could not lock 1 team row(s) against key rotation",
     );
-    expect(mockTeamMemberKeyDeleteMany).not.toHaveBeenCalled();
     expect(mockTenantMemberDelete).not.toHaveBeenCalled();
+  });
+
+  it("completes when a team was deleted between the membership read and the lock", async () => {
+    // The lock finds no row for team-2; its memberships went with it.
+    mockTenantMemberFindUnique.mockResolvedValueOnce({ id: "tm1", role: "MEMBER" });
+    mockQueryRaw.mockImplementation(teamLockQuery((sql) => {
+      if (sql.includes("FROM teams")) return [{ id: "team-1" }];
+      if (sql.includes("DELETE FROM team_members")) return [{ team_id: "team-1" }];
+      return [{ team_id: "team-1" }, { team_id: "team-2" }];
+    }));
+
+    await expect(deactivateScimUser(TENANT_ID, USER_ID)).resolves.toMatchObject({ userId: USER_ID });
+    expect(mockTenantMemberDelete).toHaveBeenCalledOnce();
   });
 });

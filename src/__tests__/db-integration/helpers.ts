@@ -633,6 +633,11 @@ export async function createTestContext(): Promise<TestContext> {
         `DELETE FROM tenant_webhooks WHERE tenant_id = $1::uuid`,
         tenantId,
       );
+      // SCIM group mappings FK to teams and tenants — delete before teams.
+      await tx.$executeRawUnsafe(
+        `DELETE FROM scim_group_mappings WHERE tenant_id = $1::uuid`,
+        tenantId,
+      );
       await tx.$executeRawUnsafe(
         `DELETE FROM teams WHERE tenant_id = $1::uuid`,
         tenantId,

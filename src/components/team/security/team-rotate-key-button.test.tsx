@@ -154,6 +154,7 @@ const ENTRIES = [
 const MEMBERS = [{ userId: "u1", ecdhPublicKey: "pk1" }];
 
 function setupRotateFetch(opts?: {
+  entries?: Record<string, unknown>[];
   rotateOk?: boolean;
   rotateStatus?: number;
   rotateBody?: Record<string, unknown>;
@@ -165,7 +166,7 @@ function setupRotateFetch(opts?: {
         json: () =>
           Promise.resolve({
             teamKeyVersion: 1,
-            entries: ENTRIES,
+            entries: opts?.entries ?? ENTRIES,
             members: MEMBERS,
           }),
       });
@@ -260,6 +261,34 @@ describe("TeamRotateKeyButton — §Sec-1 crypto invariants", () => {
     // Also ensure raw item-key sentinel hex is absent
     const itemKeySentinelHex = "cd".repeat(32);
     expect(body.toLowerCase()).not.toContain(itemKeySentinelHex);
+  });
+
+  it("sends each entry's snapshotIv as the IV of the ciphertext it re-encrypted", async () => {
+    // v1 re-wraps the ItemKey, so its snapshot is the wrap's IV; v0
+    // re-encrypts the blob, so its snapshot is the blob's IV.
+    const v0Entry = {
+      ...ENTRIES[1],
+      id: "entry-v0",
+      itemKeyVersion: 0,
+      encryptedItemKey: null,
+      itemKeyIv: null,
+      itemKeyAuthTag: null,
+    };
+    setupRotateFetch({ entries: [ENTRIES[0], v0Entry] });
+    render(<TeamRotateKeyButton teamId="team-1" />);
+    await openAndConfirm();
+
+    await waitFor(() => {
+      expect(mockFetch.mock.calls.some((c) => (c[1] as RequestInit | undefined)?.method === "POST")).toBe(true);
+    });
+    const postCall = mockFetch.mock.calls.find((c) => (c[1] as RequestInit | undefined)?.method === "POST")!;
+    const { entries } = JSON.parse((postCall[1] as RequestInit).body as string) as {
+      entries: { id: string; itemKeyVersion: number; snapshotIv: string }[];
+    };
+    expect(entries.map(({ id, itemKeyVersion, snapshotIv }) => ({ id, itemKeyVersion, snapshotIv }))).toEqual([
+      { id: "entry-1", itemKeyVersion: 1, snapshotIv: "iki" },
+      { id: "entry-v0", itemKeyVersion: 0, snapshotIv: "bi2" },
+    ]);
   });
 
   it("calls wrapItemKey with shape-checked args (Uint8Array key, AAD string)", async () => {

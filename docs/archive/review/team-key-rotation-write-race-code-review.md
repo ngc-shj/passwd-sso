@@ -187,3 +187,111 @@ Rotation reads two inputs under the team lock and writes the next version:
   30-minute threshold.
 - **Orchestrator note**: TODO(team-rotation-history-rekey): follow-up issue for
   re-keying ItemKeys and history rows on team rotation.
+
+---
+
+# Round 2
+
+## Changes from Previous Round
+Round 1's fixes verified (snapshot predicate, removal locks, confirm-key lock,
+`FOR NO KEY UPDATE`, bounded wait, T-1/T-2). New findings: one pre-existing
+Major growing the member-set class (S-R2-1), one pre-existing Major in a
+changed file (F6), defects in round 1's own lock helper (F7–F10), and test
+gaps (T-3–T-9).
+
+## Functionality Findings
+- **F6 Major [Adjacent]** — confirm-key's final `teamMember.update` matched only
+  `id`/`teamId`: a deactivation (or another distribution) committing after the
+  plain member read was overwritten, keying a deactivated member.
+- **F7 Minor** — removal locks had no bounded wait: a removal behind a long
+  rotation expired its 5s transaction into a 500; `TeamRotationLockError` was
+  unmapped (= Testing A-1).
+- **F8 Minor** — the bounded wait's `lock_timeout` stayed set for the rest of
+  the transaction, turning unrelated waits (FK checks, entry `FOR UPDATE`)
+  into unmapped 55P03.
+- **F9 Minor** — the membership set was read before it was locked; a
+  membership joined and keyed in between escaped the lock.
+- **F10 Minor** — the fail-closed check fired on a team deleted concurrently.
+- **F11 Minor** — a comment still said `FOR UPDATE`.
+
+## Security Findings
+- **S-R2-1 Major (pre-existing)** — tenant-level deactivation (SCIM user
+  PUT/PATCH `active=false`, directory sync) leaves `team_members` active and
+  `keyDistributed`, so every later rotation must wrap the new team key to the
+  departed user. Round 1's derivation missed tenant membership as an input.
+- Verified clean: the `team` grant widening (R43), `snapshotIv` abuse (it also
+  closes a v1 → v0 blob-path downgrade), other member-key inserts, error surfaces.
+
+## Testing Findings
+- **T-3 Major** — the lock-timeout test released its blocker only after the
+  blocked request returned; a timeout regression deadlocked it into later tests.
+- **T-4 Major** — `settledOrBlocked` did not report which stop condition fired.
+- **T-5 Major** — vault-reset unit mocks answered every raw query with `{ id }`;
+  the lock-order test anchored on the wrong query.
+- **T-6 Major** — SCIM user delete and group deactivation locks never ran on
+  real SQL under SCIM's RLS context.
+- **T-7 Major** — no client test pinned which IV the button sends as `snapshotIv`.
+- **T-8 Minor** — the snapshot auto-fill silently omitted a missing row; the
+  member-added test asserted status only.
+- **T-9 Minor** — no fail-closed test for `replaceScimGroup`.
+
+## Recurring Issue Check (round 2)
+- Functionality: R3 → F6; R5 → F9; R34 → F6; R42 → F7, F8; R43 OK; R48 OK; R49 → F11.
+- Security: R3/R5 OK on fixed paths; R34/R42 → S-R2-1; R43 OK; RS1–RS3 OK.
+- Testing: RT1 → T-5, T-7; RT4 → T-4; RT5 → T-6; RT7 → T-6, T-7; RT8 → T-8;
+  RT10 → T-9; RT11 → T-3; R19 → T-5.
+
+## Resolution Status (round 2)
+
+### F6 Major confirm-key check-and-set — Fixed
+- `updateMany` with `deactivatedAt: null, keyDistributed: false`; a miss
+  throws inside the transaction (the key upsert rolls back) → 404.
+- Red-proved: predicate removed, count check removed (unit, one each).
+
+### F7 / A-1 Minor removal waits — Fixed
+- Removal locks use the same bounded wait; `isTeamRotationConflict` maps both
+  refusals to 409 in member DELETE, SCIM Users DELETE, SCIM Groups PUT/PATCH,
+  `/api/vault/reset` and `/api/vault/admin-reset`.
+- Red-proved: 409 mapping removed; bounded wait removed (integration).
+
+### F8 Minor lock_timeout leak — Fixed
+- `readLockTimeout` / `restoreLockTimeout` (in `tenant-rls-grants.ts`, the
+  module `check-bypass-rls` sanctions for `set_config`) restore the previous
+  value right after the lock statement.
+- Red-proved: restore removed → "the write's other waits keep their own
+  timeout" fails.
+
+### F9 / F10 Minor membership set — Fixed
+- `lockMemberTeamsAgainstRotation` returns the locked set; callers check the
+  teams they actually changed with `assertTeamsLocked`: vault reset after its
+  `users FOR UPDATE` (which stops new memberships), SCIM user delete on its
+  `DELETE ... RETURNING team_id`. A team deleted meanwhile drops out of both.
+- Red-proved: each post-check removed (unit).
+
+### F11 Minor — Fixed.
+
+### T-3 – T-9 — Fixed
+- T-3: `withRotationStandIn` releases on its own deadline (below the 5s
+  transaction timeout) with an upper-bound assertion; under the bounded-wait
+  mutation the test now fails alone.
+- T-4: the harness returns `"settled" | "blocked-on-parked"` and throws on a
+  write that waited on the blocker; every race asserts `"blocked-on-parked"`.
+- T-5: SQL-aware mock; tests for teams-before-users, the fail-closed refusal
+  and the no-membership path.
+- T-6: real-DB races for SCIM user delete and group removal under
+  `withTenantRls` with `assertRlsApplies`; `scim_group_mappings` added to
+  `deleteTestData`. Red-proved: each lock removed.
+- T-7: client test pins `itemKeyIv` for v1 and `blobIv` for v0 (red when swapped).
+- T-8: auto-fill throws on a missing row; the member-added test asserts
+  `details.missingKeyFor`.
+- T-9: replace refusal test (red with the replace lock removed).
+
+### S-R2-1 Major tenant deactivation leaves team key distribution — Open (user decision)
+- Same class as S-F1, second expansion. Closing it touches SCIM user PUT/PATCH,
+  directory sync and the tenant move (`src/auth.ts`), and needs a decision on
+  what tenant deactivation does to team key distribution.
+- TODO(team-rotation-tenant-deactivation): pending the user's decision.
+
+### S-F4 Minor history / ItemKey re-key — Open (user decision)
+- Unchanged from round 1. Re-keying ItemKeys would also mean re-encrypting
+  team attachments, which are encrypted under the ItemKey.

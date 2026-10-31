@@ -12,7 +12,7 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import { TEAM_PERMISSION, TEAM_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
-import { lockTeamsAgainstRotation } from "@/lib/team/team-key-rotation-lock";
+import { isTeamRotationConflict, lockTeamsAgainstRotation } from "@/lib/team/team-key-rotation-lock";
 import {
   invalidateUserSessions,
   type InvalidateUserSessionsResult,
@@ -203,14 +203,20 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
     return errorResponse(API_ERROR.CANNOT_REMOVE_HIGHER_ROLE);
   }
 
-  await withTeamTenantRls(teamId, async (_tenantId, tx) => {
-    // Serialise with key rotation first: a removal committing after a
-    // rotation read the member set would leave the removed member a key to
-    // the new version (team-key-rotation-lock.ts).
-    await lockTeamsAgainstRotation(tx, [teamId]);
-    await tx.teamMemberKey.deleteMany({ where: { teamId: teamId, userId: target.userId } });
-    await tx.teamMember.delete({ where: { id: memberId, teamId } });
-  });
+  try {
+    await withTeamTenantRls(teamId, async (_tenantId, tx) => {
+      // Serialise with key rotation first: a removal committing after a
+      // rotation read the member set would leave the removed member a key to
+      // the new version (team-key-rotation-lock.ts).
+      await lockTeamsAgainstRotation(tx, [teamId]);
+      await tx.teamMemberKey.deleteMany({ where: { teamId: teamId, userId: target.userId } });
+      await tx.teamMember.delete({ where: { id: memberId, teamId } });
+    });
+  } catch (e) {
+    // A rotation of this team held it past the lock wait; nothing was removed.
+    if (isTeamRotationConflict(e)) return errorResponse(API_ERROR.CONFLICT);
+    throw e;
+  }
 
   // Session/token invalidation — outside transaction (fail-open)
   let invalidationCounts: InvalidateUserSessionsResult | undefined;

@@ -1,12 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
+import { teamLockQuery, lockQueryCalls } from "@/__tests__/helpers/team-rotation-lock-mock";
 
 const { mockAuth, mockPrismaTeamMember, mockPrismaUser,
   mockPrismaTeamMemberKey, mockTeamLockQuery, mockTransaction, mockWithTeamTenantRls,
   mockWithBypassRls, mockRequireTeamPermission, mockRequireRecentSession,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
-  mockPrismaTeamMember: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
+  mockPrismaTeamMember: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
   mockPrismaUser: { findUnique: vi.fn() },
   mockPrismaTeamMemberKey: { upsert: vi.fn() },
   // The in-tx team key-version read (SELECT ... FROM teams ... FOR SHARE).
@@ -75,8 +76,9 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "admin-user" } });
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockTeamLockQuery.mockResolvedValue([{ team_key_version: 1, tenant_id: "tenant-1" }]);
+    mockTeamLockQuery.mockImplementation(teamLockQuery([{ team_key_version: 1, tenant_id: "tenant-1" }]));
     mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key" });
+    mockPrismaTeamMember.updateMany.mockResolvedValue({ count: 1 });
     // Interactive transaction: call the callback with tx proxy
     mockTransaction.mockImplementation(async (fn: (tx: typeof txProxy) => unknown) => fn(txProxy));
   });
@@ -231,7 +233,7 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
     mockPrismaTeamMember.findUnique
       .mockResolvedValueOnce({ id: "member-1", teamId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null })
       .mockResolvedValueOnce({ keyDistributed: false, deactivatedAt: null }); // re-check passes
-    mockTeamLockQuery.mockResolvedValue([{ team_key_version: 2, tenant_id: "tenant-1" }]); // team rotated to v2
+    mockTeamLockQuery.mockImplementation(teamLockQuery([{ team_key_version: 2, tenant_id: "tenant-1" }])); // team rotated to v2
 
     const res = await POST(
       createRequest("POST", URL, { body: validBody }), // keyVersion: 1 (stale)
@@ -254,11 +256,11 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
     );
 
     expect(res.status).toBe(200);
-    const [strings, teamId] = mockTeamLockQuery.mock.calls[0] as [TemplateStringsArray, string];
-    expect(strings.join("?")).toMatch(/FROM teams WHERE id = \?::uuid FOR SHARE/);
-    expect(teamId).toBe("team-1");
+    const [lock] = lockQueryCalls(mockTeamLockQuery);
+    expect(lock.sql).toMatch(/FROM teams WHERE id = \?::uuid FOR SHARE/);
+    expect(lock.values).toEqual(["team-1"]);
     // The second findUnique is the in-tx member re-check.
-    expect(mockTeamLockQuery.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(lock.order).toBeLessThan(
       mockPrismaTeamMember.findUnique.mock.invocationCallOrder[1],
     );
     expect(mockPrismaTeamMemberKey.upsert).toHaveBeenCalledOnce();
@@ -271,11 +273,11 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
     mockPrismaTeamMember.findUnique
       .mockResolvedValueOnce({ id: "member-1", teamId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null });
     // lock_not_available, nested the way the pg driver adapter reports it.
-    mockTeamLockQuery.mockRejectedValue(
-      Object.assign(new Error("canceling statement due to lock timeout"), {
+    mockTeamLockQuery.mockImplementation(teamLockQuery(() => {
+      throw Object.assign(new Error("canceling statement due to lock timeout"), {
         meta: { driverAdapterError: { cause: { originalCode: "55P03" } } },
-      }),
-    );
+      });
+    }));
 
     const res = await POST(
       createRequest("POST", URL, { body: validBody }),
@@ -285,7 +287,42 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
     expect(res.status).toBe(409);
     expect((await res.json()).error).toBe("TEAM_KEY_VERSION_MISMATCH");
     expect(mockPrismaTeamMemberKey.upsert).not.toHaveBeenCalled();
-    expect(mockPrismaTeamMember.update).not.toHaveBeenCalled();
+    expect(mockPrismaTeamMember.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("marks the member distributed only while still active and undistributed", async () => {
+    mockPrismaTeamMember.findFirst.mockResolvedValueOnce({ role: "OWNER", teamId: "team-1" });
+    mockPrismaTeamMember.findUnique
+      .mockResolvedValueOnce({ id: "member-1", teamId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null })
+      .mockResolvedValueOnce({ keyDistributed: false, deactivatedAt: null });
+
+    const res = await POST(
+      createRequest("POST", URL, { body: validBody }),
+      { params: Promise.resolve({ teamId: "team-1", memberId: "member-1" }) },
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockPrismaTeamMember.updateMany).toHaveBeenCalledWith({
+      where: { id: "member-1", teamId: "team-1", deactivatedAt: null, keyDistributed: false },
+      data: { keyDistributed: true },
+    });
+  });
+
+  it("returns 404 when the member was deactivated after the in-transaction check", async () => {
+    mockPrismaTeamMember.findFirst.mockResolvedValueOnce({ role: "OWNER", teamId: "team-1" });
+    mockPrismaTeamMember.findUnique
+      .mockResolvedValueOnce({ id: "member-1", teamId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null })
+      .mockResolvedValueOnce({ keyDistributed: false, deactivatedAt: null });
+    // The guarded write matches nothing: the row changed since the read.
+    mockPrismaTeamMember.updateMany.mockResolvedValue({ count: 0 });
+
+    const res = await POST(
+      createRequest("POST", URL, { body: validBody }),
+      { params: Promise.resolve({ teamId: "team-1", memberId: "member-1" }) },
+    );
+
+    expect(res.status).toBe(404);
+    expect((await res.json()).error).toBe("MEMBER_NOT_FOUND");
   });
 
   it("returns 409 when key already distributed (TOCTOU race)", async () => {

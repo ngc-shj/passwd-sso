@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { teamLockQuery } from "@/__tests__/helpers/team-rotation-lock-mock";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 
@@ -313,9 +314,9 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
     mockTeamLockRow.mockResolvedValue([{ team_key_version: 1, tenant_id: "tenant-1" }]);
     // The team key-version lock read gets the team row; the entry FOR UPDATE
     // snapshot gets teamCurRow.
-    txMock.$queryRaw.mockImplementation(async (strings: TemplateStringsArray) =>
-      strings.join("?").includes("FROM teams") ? mockTeamLockRow() : [teamCurRow],
-    );
+    txMock.$queryRaw.mockImplementation(teamLockQuery((sql) =>
+      sql.includes("FROM teams") ? mockTeamLockRow() : [teamCurRow],
+    ));
     txMock.teamPasswordEntryHistory.create.mockResolvedValue({});
     txMock.teamPasswordEntryHistory.findMany.mockResolvedValue([]);
     txMock.teamPasswordEntryHistory.deleteMany.mockResolvedValue({ count: 0 });

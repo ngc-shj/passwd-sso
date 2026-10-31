@@ -136,7 +136,10 @@ async function callRotate(teamId: string, body: Record<string, unknown>) {
       );
       const row = r.rows[0];
       const snapshotIv = row && (row.item_key_version >= 1 ? row.item_key_iv : row.blob_iv);
-      return snapshotIv ? { ...entry, snapshotIv } : entry;
+      // A missing row would 400 as a schema error, indistinguishable from the
+      // rejection a test expects.
+      if (!snapshotIv) throw new Error(`snapshot row ${String(entry.id)} not found`);
+      return { ...entry, snapshotIv };
     }),
   );
   return POST(buildRequest(teamId, { ...body, entries }), routeParams(teamId));
@@ -454,6 +457,8 @@ describe("team key rotation — real-DB integration (C7)", () => {
     });
 
     expect(res.status).toBe(400);
+    // The in-tx member check, not a schema rejection of the payload.
+    expect((await res.json()).details).toEqual({ missingKeyFor: newMemberId });
     expect(await getTeamKeyVersion(ctx, teamId)).toBe(1);
   });
 

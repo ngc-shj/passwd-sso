@@ -31,6 +31,7 @@ import { randomUUID, randomBytes } from "node:crypto";
 import { NextRequest } from "next/server";
 import type { PoolClient } from "pg";
 import {
+  assertRlsApplies,
   createTestContext,
   createPrismaForRole,
   setBypassRlsGucs,
@@ -57,6 +58,10 @@ import { POST as bulkImport } from "@/app/api/teams/[teamId]/passwords/bulk-impo
 import { DELETE as removeMember } from "@/app/api/teams/[teamId]/members/[memberId]/route";
 import { POST as confirmKey } from "@/app/api/teams/[teamId]/members/[memberId]/confirm-key/route";
 import { executeVaultReset } from "@/lib/vault/vault-reset";
+import { prisma } from "@/lib/prisma";
+import { withTenantRls } from "@/lib/tenant-rls";
+import { deactivateScimUser } from "@/lib/services/scim-user-service";
+import { patchScimGroup } from "@/lib/services/scim-group-service";
 
 const BLOCK_WAIT_MS = 10_000;
 
@@ -239,6 +244,10 @@ describe("team key rotation serialisation — real-DB integration", () => {
   beforeAll(async () => {
     ctx = await createTestContext();
     side = createPrismaForRole("superuser");
+    // The SCIM cases run service code through the app client inside its
+    // tenant RLS context, as the routes do: the team lock must see `teams`
+    // there, which only a role RLS applies to can show.
+    await assertRlsApplies(prisma);
   });
 
   afterAll(async () => {
@@ -304,19 +313,31 @@ describe("team key rotation serialisation — real-DB integration", () => {
   }
 
   /**
-   * Wait until `work` settles, waits on `parkedPid`, or waits on the blocker
-   * next to the parked transaction (the blocker then blocks two backends).
-   * All are legitimate stopping points — the unguarded write runs through,
-   * the guarded one waits — and the test asserts which through final state.
+   * Wait until `work` settles or waits on `parkedPid`, and say which. The
+   * guarded write waits on the parked transaction; an unguarded one runs
+   * through ("settled"). A write that instead waits on the blocker (which then
+   * blocks two backends) never reached the race at all, so that throws,
+   * naming what it waited in.
    */
-  async function settledOrBlocked(work: Promise<unknown>, parkedPid: number, blockerPid: number): Promise<void> {
+  async function settledOrBlocked(
+    work: Promise<unknown>,
+    parkedPid: number,
+    blockerPid: number,
+  ): Promise<"settled" | "blocked-on-parked"> {
     let settled = false;
     void work.then(() => { settled = true; }, () => { settled = true; });
     const deadline = Date.now() + BLOCK_WAIT_MS;
     while (Date.now() < deadline) {
-      if (settled) return;
-      if ((await backendsBlockedBy(parkedPid)).length > 0) return;
-      if ((await backendsBlockedBy(blockerPid)).length > 1) return;
+      if (settled) return "settled";
+      if ((await backendsBlockedBy(parkedPid)).length > 0) return "blocked-on-parked";
+      const onBlocker = (await backendsBlockedBy(blockerPid)).filter((pid) => pid !== parkedPid);
+      if (onBlocker.length > 0) {
+        const r = await side.pool.query<{ query: string }>(
+          `SELECT query FROM pg_stat_activity WHERE pid = $1`,
+          [onBlocker[0]],
+        );
+        throw new Error(`write waited on the blocker, not the parked transaction: ${r.rows[0]?.query}`);
+      }
       await new Promise((res) => setTimeout(res, 20));
     }
     throw new Error(`work neither settled nor blocked on pid ${parkedPid} within ${BLOCK_WAIT_MS}ms`);
@@ -337,13 +358,33 @@ describe("team key rotation serialisation — real-DB integration", () => {
       rotation = callRotate(seed);
       const rotationPid = await waitForBackendBlockedBy(blocker.pid);
       writing = write();
-      await settledOrBlocked(writing, rotationPid, blocker.pid);
+      const reached = await settledOrBlocked(writing, rotationPid, blocker.pid);
       await blocker.release();
-      return { rotation: await rotation, write: await writing };
+      return { reached, rotation: await rotation, write: await writing };
     } finally {
       await blocker.release();
       // On a failure above, let both finish before afterEach deletes their rows.
       await Promise.allSettled([rotation, writing]);
+    }
+  }
+
+  /**
+   * Hold the lock rotation takes on the team for longer than a writer waits
+   * for it, run `request`, and time it. The stand-in releases on its own
+   * deadline (below Prisma's 5s transaction timeout), so a writer that does
+   * not give up still returns — reporting a status other than the refusal —
+   * rather than deadlocking the test against its own blocker.
+   */
+  async function withRotationStandIn(seed: Seed, request: () => Promise<Response>) {
+    const blocker = await holdRowLock(`SELECT id FROM teams WHERE id = $1::uuid FOR NO KEY UPDATE`, [seed.teamId]);
+    const releaseAfter = setTimeout(() => void blocker.release(), TEAM_KEY_LOCK_TIMEOUT_MS + 1_500);
+    try {
+      const started = Date.now();
+      const response = await request();
+      return { response, waitedMs: Date.now() - started };
+    } finally {
+      clearTimeout(releaseAfter);
+      await blocker.release();
     }
   }
 
@@ -359,12 +400,14 @@ describe("team key rotation serialisation — real-DB integration", () => {
       );
 
       expect({
+        reached: res.reached,
         rotation: res.rotation.status,
         write: res.write.status,
         writeError: (await res.write.json()).error,
         version: await teamKeyVersion(ctx, seed.teamId),
         offVersion: await entriesOffCurrentVersion(ctx, seed.teamId),
       }).toEqual({
+        reached: "blocked-on-parked",
         rotation: 200,
         write: 409,
         writeError: "TEAM_KEY_VERSION_MISMATCH",
@@ -388,12 +431,14 @@ describe("team key rotation serialisation — real-DB integration", () => {
       );
 
       expect({
+        reached: res.reached,
         rotation: res.rotation.status,
         write: res.write.status,
         writeError: (await res.write.json()).error,
         version: await teamKeyVersion(ctx, seed.teamId),
         offVersion: await entriesOffCurrentVersion(ctx, seed.teamId),
       }).toEqual({
+        reached: "blocked-on-parked",
         rotation: 200,
         write: 409,
         writeError: "TEAM_KEY_VERSION_MISMATCH",
@@ -423,12 +468,14 @@ describe("team key rotation serialisation — real-DB integration", () => {
       );
 
       expect({
+        reached: res.reached,
         rotation: res.rotation.status,
         write: res.write.status,
         writeError: (await res.write.json()).error,
         version: await teamKeyVersion(ctx, seed.teamId),
         offVersion: await entriesOffCurrentVersion(ctx, seed.teamId),
       }).toEqual({
+        reached: "blocked-on-parked",
         rotation: 200,
         write: 409,
         writeError: "TEAM_KEY_VERSION_MISMATCH",
@@ -445,6 +492,7 @@ describe("team key rotation serialisation — real-DB integration", () => {
       let rotating: Promise<Response> | undefined;
       let created: Response;
       let rotated: Response;
+      let reached: string;
       try {
         mockAuth.mockResolvedValue({ user: { id: seed.ownerId } });
         creating = createEntry(
@@ -458,7 +506,7 @@ describe("team key rotation serialisation — real-DB integration", () => {
         const createPid = await waitForBackendBlockedBy(blocker.pid);
 
         rotating = callRotate(seed);
-        await settledOrBlocked(rotating, createPid, blocker.pid);
+        reached = await settledOrBlocked(rotating, createPid, blocker.pid);
 
         await blocker.release();
         [created, rotated] = await Promise.all([creating, rotating]);
@@ -468,12 +516,14 @@ describe("team key rotation serialisation — real-DB integration", () => {
       }
 
       expect({
+        reached,
         create: created.status,
         rotation: rotated.status,
         rotationError: (await rotated.json()).error,
         version: await teamKeyVersion(ctx, seed.teamId),
         offVersion: await entriesOffCurrentVersion(ctx, seed.teamId),
       }).toEqual({
+        reached: "blocked-on-parked",
         create: 201,
         rotation: 400,
         rotationError: "ENTRY_COUNT_MISMATCH",
@@ -510,35 +560,47 @@ describe("team key rotation serialisation — real-DB integration", () => {
 
     it("a write that waits past the lock timeout on a rotation answers 409, not an expired transaction", async () => {
       const seed = await seedTeam(ctx, tenantId, 1);
-      // Stand in for a long rotation: hold the lock rotation takes, longer
-      // than a writer waits for it.
-      const blocker = await holdRowLock(
-        `SELECT id FROM teams WHERE id = $1::uuid FOR NO KEY UPDATE`,
-        [seed.teamId],
-      );
-      let res: Response;
-      let waitedMs: number;
-      try {
-        mockAuth.mockResolvedValue({ user: { id: seed.ownerId } });
-        const started = Date.now();
-        res = await createEntry(
+      mockAuth.mockResolvedValue({ user: { id: seed.ownerId } });
+
+      const res = await withRotationStandIn(seed, () =>
+        createEntry(
           jsonRequest(`http://localhost/api/teams/${seed.teamId}/passwords`, "POST", newEntryBody(randomUUID(), 1)),
           { params: Promise.resolve({ teamId: seed.teamId }) },
-        );
-        waitedMs = Date.now() - started;
-      } finally {
-        await blocker.release();
-      }
+        ),
+      );
 
-      expect({ status: res.status, error: (await res.json()).error }).toEqual({
+      expect({ status: res.response.status, error: (await res.response.json()).error }).toEqual({
         status: 409,
         error: "TEAM_KEY_VERSION_MISMATCH",
       });
-      expect(waitedMs).toBeGreaterThanOrEqual(TEAM_KEY_LOCK_TIMEOUT_MS);
+      expect(res.waitedMs).toBeGreaterThanOrEqual(TEAM_KEY_LOCK_TIMEOUT_MS);
+      expect(res.waitedMs).toBeLessThan(TEAM_KEY_LOCK_TIMEOUT_MS + 1_500);
       expect(await ctx.su.pool.query(
         `SELECT 1 FROM team_password_entries WHERE team_id = $1::uuid AND id <> $2::uuid`,
         [seed.teamId, seed.existingEntryId],
       ).then((r) => r.rowCount)).toBe(0);
+    }, 15_000);
+
+    it("past the rotation lock, the write's other waits keep their own timeout", async () => {
+      // The bounded wait covers the team lock only: an entry insert whose FK
+      // check waits on the creator's users row longer than that bound must
+      // still go through.
+      const seed = await seedTeam(ctx, tenantId, 1);
+      mockAuth.mockResolvedValue({ user: { id: seed.ownerId } });
+      const blocker = await holdRowLock(`SELECT id FROM users WHERE id = $1::uuid FOR UPDATE`, [seed.ownerId]);
+      const releaseAfter = setTimeout(() => void blocker.release(), TEAM_KEY_LOCK_TIMEOUT_MS + 500);
+      let res: Response;
+      try {
+        res = await createEntry(
+          jsonRequest(`http://localhost/api/teams/${seed.teamId}/passwords`, "POST", newEntryBody(randomUUID(), 1)),
+          { params: Promise.resolve({ teamId: seed.teamId }) },
+        );
+      } finally {
+        clearTimeout(releaseAfter);
+        await blocker.release();
+      }
+
+      expect(res.status).toBe(201);
     }, 15_000);
   });
 
@@ -618,11 +680,13 @@ describe("team key rotation serialisation — real-DB integration", () => {
       );
 
       expect({
+        reached: res.reached,
         rotation: res.rotation.status,
         removal: res.write.status,
         version: await teamKeyVersion(ctx, seed.teamId),
         removedMemberKeys: await memberKeyVersions(ctx, seed.teamId, seed.memberId),
       }).toEqual({
+        reached: "blocked-on-parked",
         rotation: 200,
         removal: 200,
         version: 2,
@@ -641,14 +705,96 @@ describe("team key rotation serialisation — real-DB integration", () => {
       );
 
       expect({
+        reached: res.reached,
         rotation: res.rotation.status,
         version: await teamKeyVersion(ctx, seed.teamId),
         resetUserKeys: await memberKeyVersions(ctx, seed.teamId, seed.memberId),
       }).toEqual({
+        reached: "blocked-on-parked",
         rotation: 200,
         version: 2,
         resetUserKeys: [],
       });
+    });
+
+    it("a removal that waits past the lock timeout on a rotation answers 409 and removes nothing", async () => {
+      const seed = await seedTeam(ctx, tenantId, 1);
+      mockAuth.mockResolvedValue({ user: { id: seed.ownerId } });
+
+      const res = await withRotationStandIn(seed, () =>
+        removeMember(
+          jsonRequest(`http://localhost/api/teams/${seed.teamId}/members/${seed.memberRowId}`, "DELETE"),
+          { params: Promise.resolve({ teamId: seed.teamId, memberId: seed.memberRowId }) },
+        ),
+      );
+
+      const member = await ctx.su.pool.query(`SELECT 1 FROM team_members WHERE id = $1::uuid`, [seed.memberRowId]);
+      expect({
+        status: res.response.status,
+        error: (await res.response.json()).error,
+        memberRows: member.rowCount,
+        memberKeys: await memberKeyVersions(ctx, seed.teamId, seed.memberId),
+      }).toEqual({ status: 409, error: "CONFLICT", memberRows: 1, memberKeys: [1] });
+    }, 15_000);
+
+    it("a SCIM user deletion while a rotation is in flight leaves the user no key to the new version", async () => {
+      const seed = await seedTeam(ctx, tenantId, 1);
+      await ctx.su.pool.query(
+        `UPDATE tenant_members SET role = 'MEMBER' WHERE tenant_id = $1::uuid AND user_id = $2::uuid`,
+        [tenantId, seed.memberId],
+      );
+
+      const res = await raceAgainstParkedRotation(seed, () =>
+        withTenantRls(prisma, tenantId, () => deactivateScimUser(tenantId, seed.memberId)),
+      );
+
+      const memberships = await ctx.su.pool.query(
+        `SELECT 1 FROM team_members WHERE team_id = $1::uuid AND user_id = $2::uuid`,
+        [seed.teamId, seed.memberId],
+      );
+      expect({
+        reached: res.reached,
+        rotation: res.rotation.status,
+        version: await teamKeyVersion(ctx, seed.teamId),
+        memberships: memberships.rowCount,
+        deletedUserKeys: await memberKeyVersions(ctx, seed.teamId, seed.memberId),
+      }).toEqual({
+        reached: "blocked-on-parked",
+        rotation: 200,
+        version: 2,
+        memberships: 0,
+        deletedUserKeys: [],
+      });
+    });
+
+    it("a SCIM group removal while a rotation is in flight waits for it, then deactivates the member", async () => {
+      const seed = await seedTeam(ctx, tenantId, 1);
+      const externalGroupId = `grp-${seed.teamId.slice(0, 8)}`;
+      await ctx.su.pool.query(
+        `INSERT INTO scim_group_mappings (id, tenant_id, team_id, external_group_id, role, created_at, updated_at)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'MEMBER', now(), now())`,
+        [randomUUID(), tenantId, seed.teamId, externalGroupId],
+      );
+
+      // Deactivation keeps keys by design, so what the lock buys is the order:
+      // the rotation that read this member as key-holding commits first, and
+      // the next rotation sees them deactivated — never a key issued to a
+      // member already deactivated.
+      const res = await raceAgainstParkedRotation(seed, () =>
+        withTenantRls(prisma, tenantId, (tx) =>
+          patchScimGroup(tenantId, externalGroupId, [{ op: "remove", userId: seed.memberId }], "http://localhost/scim/v2", tx),
+        ),
+      );
+
+      const member = await ctx.su.pool.query<{ deactivated: boolean }>(
+        `SELECT deactivated_at IS NOT NULL AS deactivated FROM team_members WHERE id = $1::uuid`,
+        [seed.memberRowId],
+      );
+      expect({
+        reached: res.reached,
+        rotation: res.rotation.status,
+        deactivated: member.rows[0].deactivated,
+      }).toEqual({ reached: "blocked-on-parked", rotation: 200, deactivated: true });
     });
 
     it("distributing the old key while a rotation is in flight is refused, leaving the member pending", async () => {
@@ -670,12 +816,14 @@ describe("team key rotation serialisation — real-DB integration", () => {
         [seed.pendingRowId],
       );
       expect({
+        reached: res.reached,
         rotation: res.rotation.status,
         distribution: res.write.status,
         distributionError: (await res.write.json()).error,
         keyDistributed: pending.rows[0].key_distributed,
         pendingKeys: await memberKeyVersions(ctx, seed.teamId, seed.pendingId),
       }).toEqual({
+        reached: "blocked-on-parked",
         rotation: 200,
         distribution: 409,
         distributionError: "TEAM_KEY_VERSION_MISMATCH",

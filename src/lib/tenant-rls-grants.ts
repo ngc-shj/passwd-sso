@@ -268,6 +268,27 @@ export async function setLockTimeout(
   await tx.$executeRaw`SELECT set_config('lock_timeout', ${`${ms}ms`}, true)`;
 }
 
+/**
+ * The transaction's current lock_timeout, as `current_setting` spells it
+ * ("0", "3s", "1500ms"), for restoring it after a bounded wait.
+ */
+export async function readLockTimeout(tx: Pick<Prisma.TransactionClient, "$queryRaw">): Promise<string> {
+  const [row] = await tx.$queryRaw<{ lock_timeout: string }[]>`
+    SELECT current_setting('lock_timeout') AS lock_timeout
+  `;
+  if (!row) throw new Error("lock_timeout read returned no row");
+  return row.lock_timeout;
+}
+
+/** `SET LOCAL lock_timeout` back to a value readLockTimeout returned. */
+export async function restoreLockTimeout(
+  tx: Pick<Prisma.TransactionClient, "$executeRaw">,
+  value: string,
+): Promise<void> {
+  if (!/^\d+(us|ms|s|min|h|d)?$/.test(value)) throw new Error("not a lock_timeout value");
+  await tx.$executeRaw`SELECT set_config('lock_timeout', ${value}, true)`;
+}
+
 export type BypassState = {
   bypassRls: string | null;
   purpose: string | null;

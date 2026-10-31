@@ -8,7 +8,7 @@
 
 import { Prisma } from "@prisma/client";
 import { prisma, type TxOrPrisma } from "@/lib/prisma";
-import { lockMemberTeamsAgainstRotation } from "@/lib/team/team-key-rotation-lock";
+import { assertTeamsLocked, lockMemberTeamsAgainstRotation } from "@/lib/team/team-key-rotation-lock";
 import type { AuditAction } from "@prisma/client";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { userToScimUser, type ScimUserInput, type ScimUserResource } from "@/lib/scim/serializers";
@@ -353,12 +353,18 @@ export async function deactivateScimUser(
     await prisma.$transaction(async (tx) => {
       // Serialise with key rotation of every team being left, before any
       // member row or key is touched (team-key-rotation-lock.ts).
-      await lockMemberTeamsAgainstRotation(tx, userId, tenantId);
+      const lockedTeams = await lockMemberTeamsAgainstRotation(tx, userId, tenantId);
       await tx.teamMemberKey.deleteMany({ where: { tenantId, userId } });
       await tx.scimExternalMapping.deleteMany({
         where: { tenantId, internalId: userId, resourceType: "User" },
       });
-      await tx.teamMember.deleteMany({ where: { tenantId, userId } });
+      // A membership that appeared after the lock was taken was never
+      // serialised with rotation: refuse rather than remove it.
+      const leftTeams = await tx.$queryRaw<{ team_id: string }[]>`
+        DELETE FROM team_members WHERE tenant_id = ${tenantId}::uuid AND user_id = ${userId}::uuid
+        RETURNING team_id
+      `;
+      assertTeamsLocked(lockedTeams, leftTeams.map((row) => row.team_id));
       await tx.tenantMember.delete({
         where: { tenantId_userId: { tenantId, userId } },
       });
