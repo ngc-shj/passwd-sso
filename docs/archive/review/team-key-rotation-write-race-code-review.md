@@ -353,3 +353,53 @@ to the state after round 2.
 
 ### S-F4 Minor history / ItemKey re-key — Out of scope (pending user decision)
 - Unchanged; see round 1. TODO(team-rotation-history-rekey).
+
+---
+
+# Round 4
+
+## Changes from Previous Round
+`cb02e4195` redesigned S-R2-1 as a departure predicate read from the tenant
+membership at every key decision. Round 4 found two Criticals in it and the
+commit was reverted; the tree is again the state after round 2.
+
+## Findings against the reverted commit
+- **F-R4-1 Critical** — a deactivated tenant row is permanent history, so a
+  user re-invited to a team of that tenant as a guest (from another tenant)
+  was locked out for good, with no recovery path.
+- **F-R4-2 Critical** — GET /api/teams and `getAdminTeamMemberships` did not
+  apply the predicate: departed teams were listed but 404 on open, which also
+  aborts the iOS host sync for the whole user.
+- S-R4-1/2, F-R4-3/4, T-R4-1–4 — departed admin listings, a confirm-key /
+  SCIM DELETE lock-order cycle, gate read-class gaps, test fixture shapes.
+
+A Phase 1 plan for the redesign (membership life scoped to the departure
+state it was admitted over) was then reviewed once; it surfaced the rest of
+the lifecycle the fix must design for: pre-departure invitations accepted
+after departure, email case variants, the accept route's already-a-member
+arm, SCIM-managed rows, SCIM DELETE after an IdP hard-delete, directory sync
+re-stamping `deactivated_at`, departed sole owners and ownership transfer,
+the backfill of existing rows, and clock ordering.
+
+## Resolution Status (round 4)
+
+### Fix-induced Criticals (F-R4-1/2) — Resolved by revert
+
+### S-R2-1 Major tenant departure and team key distribution — Out of scope (user-approved split)
+- **Anti-Deferral check**: security-class member (rule 7) — deferral approved
+  by the user (2026-11-01: split into its own plan and PR, "効率よく進めて").
+- **Justification**: two in-branch designs each seeded Criticals (rounds 3
+  and 4), and the plan review shows the fix is a redesign of the team
+  membership lifecycle with a schema change — a separate reviewable unit.
+- **Worst case**: a member deactivated at the tenant level stays a team key
+  holder: later rotations wrap the new key to them and member-key serves it
+  to a session they hold in another tenant.
+- **Likelihood**: medium (tenant-level deactivation is the usual IdP
+  offboarding; use needs a session elsewhere or database access).
+- **Cost to fix**: a planned PR (plan review, migration, invitations, SCIM,
+  directory sync, readers, gate).
+- **Orchestrator note**: TODO(team-rotation-tenant-deactivation) — follow-up
+  issue and branch carry the plan and the round-3/4 analysis.
+
+### S-F4 Minor history / ItemKey re-key — Out of scope (user-approved split)
+- Same approval; TODO(team-rotation-history-rekey) — follow-up issue.
