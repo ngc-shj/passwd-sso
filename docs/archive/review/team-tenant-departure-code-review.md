@@ -1,6 +1,6 @@
 # Code Review: team-tenant-departure
 Date: 2026-11-01
-Review round: 1
+Review round: 2
 
 Base: `a0ee2277c` (the head of PR #986, which this branch is stacked on).
 
@@ -129,3 +129,72 @@ N/A — no environment constraints declared in Phase 1.
 - Action: denies for a second write in the exempted function, the exempted
   shape in a sibling file, a partial caller, upsert-update, createMany and a raw
   key-table write; every deny asserts exit 1.
+
+## Round 2
+
+### Changes from Previous Round
+Round 1's fixes (`f6ff42ac0`, `bb6f61fd4`) reviewed incrementally. S1/F1, F3-F6,
+T1, T2 and T4-T12 resolved; F2 partly (F8); S2 incomplete (F9/S3/S5); T3
+continuing (N1).
+
+### Findings
+- F8 [Major] (= S4) The one-statement advisory lock was bounded per lock only:
+  `lock_timeout` applies to each acquisition, so N keys could wait N x budget
+  and expire the transaction (P2028).
+- F9 [Major] Members POST/PUT/DELETE re-checked the actor without locking the
+  actor's tenant row, so a concurrent departure was not serialised.
+- F10 [Minor] Advisory key order relied on the database collation; comment
+  cited the JS sort.
+- S3 [Minor] rotate-key and confirm-key decided the actor's authority before
+  the transaction only.
+- S5 [Minor] Re-checks covered departure but not team-level removal or
+  demotion; DELETE did not pin the target's role; accept did not re-check the
+  inviter.
+- N1 [Minor] The old reverse-order cell still claimed "do not deadlock".
+- N2 [Major] Directory sync's fresh transition budget had no test.
+- N3 [Major] The batched `departCreatedMembership` was untested beyond one user.
+- N4 [Minor] The A3 rename cell was vacuous if the first run did not stamp.
+- N5 [Major] S2 unit tests pinned neither the lock ordering nor the actor scope.
+- N6 [Minor] The acting-admin cell asserted no final state.
+- N7 [Minor] The engine race cell parked the accept inside its 3 s lock budget.
+
+### Recurring Issue Check
+- Functionality: R3 (F9 — actor lock not carried to the members routes), R45/R53 analogue (F8). Others re-checked clean.
+- Security: R3/R51 (S3, S5 — authority on a pre-transaction read); R43 boundary check of every round-1 fix: no widening.
+- Testing: RT4 (N1), RT7 (N2, N3, N5), RT10 (N6 positive state). Others clean.
+
+### Resolution Status
+#### F8 / S4 [Major] Lock wait bounded as a whole
+- Action: `withBoundedLockWait` sets `statement_timeout` with `lock_timeout`
+  (`setWaitTimeouts` / `restoreWaitTimeouts` in tenant-rls-grants.ts) and maps
+  57014 to the timeout error. Real-DB cell: two keys held 2 s then 4 s, taken
+  in key order, refuse within the budget. Red-proved (Q1).
+- Modified file: src/lib/team/team-key-rotation-lock.ts, src/lib/tenant-rls-grants.ts
+
+#### F9, S3, S5 [Major/Minor] Actor authority under the lock
+- Action: `activeTeamRole` (team-auth.ts) re-reads the actor's role under the
+  transaction's locks. Members POST locks `[target, actor]`, PUT/DELETE lock the
+  actor's row then the team (`lockActorThenTeam`), and each re-checks the role
+  and the rank against the target; DELETE pins `role: target.role`. Invitation
+  POST also takes the team lock; rotate-key and confirm-key re-check the actor
+  (403); accept refuses (EXPIRED, 410) when the inviter is no longer a member
+  entitled to invite. Real-DB cells: the actor's departure waits for each
+  members route. Red-proved: Q2, Q3, Q5, Q6, Q7.
+- Modified file: src/lib/auth/access/team-auth.ts, members/route.ts, members/[memberId]/route.ts,
+  invitations/route.ts, invitations/accept/route.ts, rotate-key/route.ts, confirm-key/route.ts
+
+#### F10 [Minor]
+- Action: `ORDER BY k COLLATE "C"`; comment corrected.
+
+#### N1-N7
+- N1: the cell is renamed to what it asserts and points to gate rule 4.
+- N2: engine unit cell — the transitions share a budget distinct from the
+  row-lock one, created after the loops' last write. Red-proved (Q4).
+- N3: engine unit cell (two users, one call); real-DB cells for a run creating
+  two users deactivated and for the batch refusal stamping nothing.
+- N4: the rename cell asserts the first run stamped and marked.
+- N5: unit cells assert the actor read's where-clause and that it follows the
+  team lock, plus a demotion refusal.
+- N6: the acting-admin cell asserts the final owner state and the stamp.
+- N7: the engine race parks the accept on the invitation row, outside its
+  lock budget.

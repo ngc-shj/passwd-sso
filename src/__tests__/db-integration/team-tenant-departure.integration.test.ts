@@ -965,7 +965,9 @@ describe("team membership across a tenant departure — real-DB integration", ()
   it("two advisory locks each held for less than the wait still refuse within the budget as a whole", async () => {
     // lock_timeout applies per lock: held 2s then 4s, each wait alone fits in
     // 3s but the statement would wait 4s. statement_timeout bounds it whole.
-    const [a, b] = [await member(), await member()];
+    // Sorted: the locks are taken in key order, so the shorter hold comes
+    // first and each single wait stays under lock_timeout.
+    const [a, b] = [await member(), await member()].sort((x, y) => x.id.localeCompare(y.id));
     const holdA = await race.holdRowLock(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [`tenant-member:${tenantId}:${a.id}`]);
     const holdB = await race.holdRowLock(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [`tenant-member:${tenantId}:${b.id}`]);
     const releaseA = setTimeout(() => void holdA.release(), 2_000);
