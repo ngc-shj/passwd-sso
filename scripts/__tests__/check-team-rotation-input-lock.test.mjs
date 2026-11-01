@@ -56,6 +56,12 @@ beforeEach(() => {
   for (const [rel, body] of Object.entries(EXEMPT_FILES)) write(rel, body);
 });
 
+/** A deny: the gate fails (exit 1) AND names the reason. */
+function expectDenied(result, pattern) {
+  expect(result.code).toBe(1);
+  expect(result.out).toMatch(pattern);
+}
+
 afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
@@ -67,7 +73,7 @@ describe("check-team-rotation-input-lock", () => {
 
   it("fails when a scan target is missing", () => {
     rmSync(join(root, "src/workers"), { recursive: true, force: true });
-    expect(run().out).toMatch(/scan target not found/);
+    expectDenied(run(), /scan target not found/);
   });
 
   describe("rule 1: member-set writes follow a team lock", () => {
@@ -104,6 +110,44 @@ async function inner(tx) { await tx.teamMember.updateMany({ where: { id }, data:
 export async function outer(tx) { await lockTeamsAgainstRotation(tx, [teamId]); await inner(tx); }
 `);
       expect(run({ writes: 2 }).code).toBe(0);
+    });
+
+    it("refuses an upsert whose update arm deactivates, with no lock", () => {
+      write(SUBJECT, `export async function up(tx) { await tx.teamMember.upsert({ where, create: {}, update: { deactivatedAt: new Date() } }); }`);
+      expectDenied(run({ writes: 2 }), /member-write::src\/lib\/team\/subject\.ts::up::teamMember\.upsert/);
+    });
+
+    it("refuses a raw UPDATE of team_member_keys with no lock", () => {
+      write(SUBJECT, "export async function bump(tx) { await tx.$executeRaw`UPDATE team_member_keys SET key_version = 2 WHERE team_id = ${teamId}::uuid`; }");
+      expectDenied(run({ writes: 2 }), /team_member_keys\.raw/);
+    });
+
+    it("refuses a writer one of whose two same-file callers takes no lock", () => {
+      write(SUBJECT, `
+async function inner(tx) { await tx.teamMember.updateMany({ where: { id }, data: { deactivatedAt: new Date() } }); }
+export async function locked(tx) { await lockTeamsAgainstRotation(tx, [teamId]); await inner(tx); }
+export async function unlocked(tx) { await inner(tx); }
+`);
+      expectDenied(run({ writes: 2 }), /member-write::src\/lib\/team\/subject\.ts::inner::teamMember\.updateMany/);
+    });
+
+    it("refuses a second matching write inside the exempted rotation function (the exemption must match one site)", () => {
+      write("src/app/api/teams/[teamId]/rotate-key/route.ts", `
+export const rotate = withTenantRls(prisma, tenantId, async (tx) => {
+  await tx.teamMember.updateMany({ where: { teamId }, data: { keyDistributed: false } });
+  await tx.teamMember.updateMany({ where: { teamId }, data: { deactivatedAt: new Date() } });
+});
+`);
+      expectDenied(run({ writes: 2 }), /exemption\(s\) matching no site, or several/);
+    });
+
+    it("refuses the exempted shape in a sibling file", () => {
+      write("src/app/api/teams/[teamId]/rotate-key/sibling.ts", `
+export const rotate = withTenantRls(prisma, tenantId, async (tx) => {
+  await tx.teamMember.updateMany({ where: { teamId }, data: { keyDistributed: false } });
+});
+`);
+      expectDenied(run({ writes: 2 }), /rotate-key\/sibling\.ts::<anonymous>::teamMember\.updateMany/);
     });
 
     it("refuses a raw DELETE FROM team_members with no lock", () => {
@@ -157,7 +201,7 @@ export async function outer(tx) { await lockTeamsAgainstRotation(tx, [teamId]); 
 
     it("refuses a raw UPDATE of tenant_members.deactivated_at", () => {
       write(SUBJECT, "export async function off(tx) { await tx.$executeRaw`UPDATE tenant_members SET deactivated_at = now() WHERE id = ${id}::uuid`; }");
-      expect(run().out).toMatch(/raw write of tenant_members\.deactivated_at/);
+      expectDenied(run(), /raw write of tenant_members\.deactivated_at/);
     });
   });
 
@@ -172,6 +216,11 @@ export async function outer(tx) { await lockTeamsAgainstRotation(tx, [teamId]); 
     it("accepts the same create after lockTenantRows", () => {
       write(SUBJECT, `export async function invite(tx) { await lockTenantRows(tx, t, [u], "share"); await tx.teamInvitation.create({ data: { teamId } }); }`);
       expect(run({ admissions: 1 }).code).toBe(0);
+    });
+
+    it("refuses a createMany of memberships with no tenant-row lock", () => {
+      write(SUBJECT, `export async function add(tx) { await tx.teamMember.createMany({ data: [{ teamId, userId }] }); }`);
+      expectDenied(run({ admissions: 1 }), /admission::src\/lib\/team\/subject\.ts::add::teamMember\.createMany/);
     });
 
     it("refuses a nested team membership create with no lock", () => {
@@ -197,22 +246,22 @@ export async function outer(tx) { await lockTeamsAgainstRotation(tx, [teamId]); 
   describe("rule 4: lock order", () => {
     it("refuses two tenant-row lock calls in one function", () => {
       write(SUBJECT, `export async function twice(tx) { await lockTenantRows(tx, t, [a], "update"); await lockTenantRows(tx, t, [b], "update"); }`);
-      expect(run().out).toMatch(/2 tenant-row lock calls in one function/);
+      expectDenied(run(), /2 tenant-row lock calls in one function/);
     });
 
     it("refuses a tenant-row lock inside a loop", () => {
       write(SUBJECT, `export async function each(tx) { for (const u of users) { await lockTenantRows(tx, t, [u], "update"); } }`);
-      expect(run().out).toMatch(/tenant-row lock inside a loop/);
+      expectDenied(run(), /tenant-row lock inside a loop/);
     });
 
     it("refuses a tenant-row lock after a team lock", () => {
       write(SUBJECT, `export async function late(tx) { await lockTeamsAgainstRotation(tx, [teamId]); await lockTenantRows(tx, t, [u], "share"); }`);
-      expect(run().out).toMatch(/tenant-row lock after a team lock/);
+      expectDenied(run(), /tenant-row lock after a team lock/);
     });
 
     it("refuses a transition next to a tenant-row lock without alreadyLocked", () => {
       write(SUBJECT, `export async function off(tx) { await lockTenantRows(tx, t, [u], "update"); await departFromTenant(tx, t, [u], { actor }); }`);
-      expect(run().out).toMatch(/departFromTenant next to a tenant-row lock without alreadyLocked: true/);
+      expectDenied(run(), /departFromTenant next to a tenant-row lock without alreadyLocked: true/);
     });
 
     it("accepts alreadyLocked: true through a same-function variable", () => {
@@ -228,17 +277,17 @@ export async function outer(tx) { await lockTeamsAgainstRotation(tx, [teamId]); 
   describe("rules 5 and 6", () => {
     it("refuses a call of deleteUser", () => {
       write(SUBJECT, `export async function purge() { await adapter.deleteUser(id); }`);
-      expect(run().out).toMatch(/calls deleteUser/);
+      expectDenied(run(), /calls deleteUser/);
     });
 
     it("refuses a Prisma write of tenantMemberDeparture", () => {
       write(SUBJECT, `export async function rec(tx) { await tx.tenantMemberDeparture.upsert({ where, create, update }); }`);
-      expect(run().out).toMatch(/tenantMemberDeparture\.upsert/);
+      expectDenied(run(), /tenantMemberDeparture\.upsert/);
     });
 
     it("refuses a raw DELETE of tenant_member_departures, even in deactivateScimUser", () => {
       write("src/lib/services/scim-user-service.ts", "export async function deactivateScimUser(tx) { await tx.$executeRaw`DELETE FROM tenant_member_departures WHERE user_id = ${u}::uuid`; }");
-      expect(run().out).toMatch(/DELETE FROM tenant_member_departures/);
+      expectDenied(run(), /DELETE FROM tenant_member_departures/);
     });
 
     it("accepts the record's INSERT inside deactivateScimUser's transaction callback", () => {
@@ -248,16 +297,16 @@ export async function outer(tx) { await lockTeamsAgainstRotation(tx, [teamId]); 
 
     it("refuses the same INSERT anywhere else", () => {
       write(SUBJECT, "export async function rec(tx) { await tx.$executeRaw`INSERT INTO tenant_member_departures (tenant_id, user_id, departed_at) VALUES (${t}::uuid, ${u}::uuid, clock_timestamp())`; }");
-      expect(run().out).toMatch(/INSERT INTO tenant_member_departures in rec/);
+      expectDenied(run(), /INSERT INTO tenant_member_departures in rec/);
     });
   });
 
   it("fails when an exemption matches no site", () => {
     rmSync(join(root, "src/app/api/teams/[teamId]/rotate-key/route.ts"));
-    expect(run({ writes: 0 }).out).toMatch(/exemption\(s\) matching no site/);
+    expectDenied(run({ writes: 0 }), /exemption\(s\) matching no site/);
   });
 
   it("fails when the site counts differ from the pinned ones", () => {
-    expect(run({ writes: 2 }).out).toMatch(/differ from the pinned/);
+    expectDenied(run({ writes: 2 }), /differ from the pinned/);
   });
 });

@@ -753,6 +753,11 @@ export async function runDirectorySync(
           }
         }
 
+        // The transitions take team locks after the loops above: a fresh
+        // deadline, so the waits stay bounded while the run's own work between
+        // the tenant-row lock and here does not count against them.
+        const transitionBudget = createLockBudget();
+
         // Deactivate users no longer in provider (batch, OWNER-safe)
         if (toDeactivate.length > 0) {
           const memberIds = toDeactivate
@@ -771,16 +776,14 @@ export async function runDirectorySync(
             const batch = toDeactivate.filter((userId) => memberByUserId.has(userId));
             // Counts transitions: a member already inactive is not deactivated again.
             usersDeactivated = (
-              await departFromTenant(tx, tenantId, batch, { actor, budget, alreadyLocked: true })
+              await departFromTenant(tx, tenantId, batch, { actor, budget: transitionBudget, alreadyLocked: true })
             ).length;
           }
         }
 
-        await departFromTenant(tx, tenantId, departIds, { actor, budget, alreadyLocked: true });
-        await returnToTenant(tx, tenantId, returnIds, { actor, budget, alreadyLocked: true });
-        for (const userId of createdDeactivated) {
-          await departCreatedMembership(tx, tenantId, userId, { actor, budget });
-        }
+        await departFromTenant(tx, tenantId, departIds, { actor, budget: transitionBudget, alreadyLocked: true });
+        await returnToTenant(tx, tenantId, returnIds, { actor, budget: transitionBudget, alreadyLocked: true });
+        await departCreatedMembership(tx, tenantId, createdDeactivated, { actor, budget: transitionBudget });
       }, { timeout: TEAM_MEMBERSHIP_TX_TIMEOUT_MS });
       // After the commit, so a rolled-back run cannot leave a refusal in the
       // trail. Best-effort, like every other emit on this path — the durable

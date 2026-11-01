@@ -237,6 +237,12 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
       // rotation read the member set would leave the removed member a key to
       // the new version (team-key-rotation-lock.ts).
       await lockTeamsAgainstRotation(tx, [teamId]);
+      // The acting member must still be active: a departure from the tenant
+      // committed since the permission check ended their membership.
+      const actorActive = await tx.teamMember.count({
+        where: { id: actorMembership.id, teamId, deactivatedAt: null },
+      });
+      if (actorActive !== 1) throw new MemberChangedError();
       // Re-read under the lock: the row is still active or departed (a return
       // or a group removal since the check above changes what is removed).
       const removed = await tx.teamMember.deleteMany({

@@ -210,7 +210,7 @@ async function handlePOST(req: NextRequest) {
       });
       if (active === false) {
         const { ip, userAgent } = extractRequestMeta(req);
-        await departCreatedMembership(tx, tenantId, user.id, {
+        await departCreatedMembership(tx, tenantId, [user.id], {
           actor: { userId: auditUserId, actorType, ip, userAgent },
           budget,
         });

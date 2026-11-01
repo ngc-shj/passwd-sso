@@ -5,7 +5,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
 import { inviteSchema } from "@/lib/validations";
-import { requireTeamPermission } from "@/lib/auth/access/team-auth";
+import { hasTeamPermission, requireTeamPermission } from "@/lib/auth/access/team-auth";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import { INVITATION_STATUS, TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
@@ -21,7 +21,7 @@ import { TEAM_MEMBERSHIP_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 import { createLockBudget } from "@/lib/team/team-key-rotation-lock";
 import { departedSince, isMembershipLockConflict, lockTenantRows } from "@/lib/team/tenant-row-lock";
 
-const ISSUE_OUTCOME = { ISSUED: "issued", ALREADY_SENT: "already_sent" } as const;
+const ISSUE_OUTCOME = { ISSUED: "issued", ALREADY_SENT: "already_sent", INVITER_GONE: "inviter_gone" } as const;
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -138,7 +138,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   // or after `created_at`, which the database stamps at insert. A PENDING
   // invitation issued before the invitee left no longer admits (accept
   // refuses it), so it is expired here rather than blocking a new one.
-  let issued: { outcome: typeof ISSUE_OUTCOME.ALREADY_SENT } | {
+  let issued: { outcome: typeof ISSUE_OUTCOME.ALREADY_SENT } | { outcome: typeof ISSUE_OUTCOME.INVITER_GONE } | {
     outcome: typeof ISSUE_OUTCOME.ISSUED;
     invitation: TeamInvitation;
   };
@@ -147,6 +147,17 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       teamId,
       async (_tenantId, tx) => {
         const rows = await lockTenantRows(tx, team.tenantId, [session.user.id, ...inviteeIds], "share", createLockBudget());
+        // The inviter's authority, re-read under their tenant row: a departure
+        // that committed after requireTeamPermission ended their membership
+        // and expired their invitations, and an invitation stamped after it
+        // would read as issued after the departure.
+        const inviter = await tx.teamMember.findFirst({
+          where: { teamId: teamId, userId: session.user.id, deactivatedAt: null },
+          select: { role: true },
+        });
+        if (!inviter || !hasTeamPermission(inviter.role, TEAM_PERMISSION.MEMBER_INVITE)) {
+          return { outcome: ISSUE_OUTCOME.INVITER_GONE };
+        }
         const pending = await tx.teamInvitation.findMany({
           where: { teamId: teamId, status: INVITATION_STATUS.PENDING, email: { equals: email, mode: "insensitive" } },
           select: { id: true, createdAt: true },
@@ -182,6 +193,9 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     throw e;
   }
 
+  if (issued.outcome === ISSUE_OUTCOME.INVITER_GONE) {
+    return errorResponse(API_ERROR.FORBIDDEN);
+  }
   if (issued.outcome === ISSUE_OUTCOME.ALREADY_SENT) {
     return errorResponse(API_ERROR.INVITATION_ALREADY_SENT);
   }

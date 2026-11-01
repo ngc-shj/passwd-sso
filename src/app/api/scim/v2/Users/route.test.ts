@@ -633,7 +633,7 @@ describe("POST /api/scim/v2/Users", () => {
 
     expect(res.status).toBe(201);
     expect(mockLockTenantMemberCreation).toHaveBeenCalledWith(expect.anything(), "tenant-1", "user-1", expect.anything());
-    expect(mockDepartCreatedMembership).toHaveBeenCalledWith(expect.anything(), "tenant-1", "user-1", expect.objectContaining({ actor: expect.objectContaining({ userId: expect.any(String) }) }));
+    expect(mockDepartCreatedMembership).toHaveBeenCalledWith(expect.anything(), "tenant-1", ["user-1"], expect.objectContaining({ actor: expect.objectContaining({ userId: expect.any(String) }) }));
     expect(mockLockTenantMemberCreation.mock.invocationCallOrder[0]).toBeLessThan(create.mock.invocationCallOrder[0]);
     expect(create.mock.invocationCallOrder[0]).toBeLessThan(mockDepartCreatedMembership.mock.invocationCallOrder[0]);
   });

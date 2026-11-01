@@ -20,7 +20,7 @@ const { mockAuth, mockPrismaTeamInvitation, mockPrismaUser, mockPrismaTeam, mock
     },
     mockPrismaUser: { findUnique: vi.fn(), findMany: vi.fn() },
     mockPrismaTeam: { findUnique: vi.fn() },
-    mockPrismaTeamMember: { findUnique: vi.fn(), findMany: vi.fn() },
+    mockPrismaTeamMember: { findUnique: vi.fn(), findMany: vi.fn(), findFirst: vi.fn() },
     mockRequireTeamPermission: vi.fn(),
     TeamAuthError: _TeamAuthError,
     // The issuing transaction runs as fn(tenantId, tx); tx is the prisma mock.
@@ -40,8 +40,10 @@ vi.mock("@/lib/prisma", () => ({
     auditLog: { create: vi.fn().mockResolvedValue({}) },
   },
 }));
-vi.mock("@/lib/auth/access/team-auth", () => ({
+vi.mock("@/lib/auth/access/team-auth", async () => ({
   requireTeamPermission: mockRequireTeamPermission,
+  // The real role → permission table: POST re-checks the inviter's role under the lock.
+  hasTeamPermission: (await vi.importActual<typeof import("@/lib/auth/access/team-auth")>("@/lib/auth/access/team-auth")).hasTeamPermission,
   TeamAuthError,
 }));
 const { mockLockTenantRows } = vi.hoisted(() => ({ mockLockTenantRows: vi.fn() }));
@@ -157,6 +159,8 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     mockPrismaTeamInvitation.findMany.mockResolvedValue([]);
     mockPrismaTeamInvitation.updateMany.mockResolvedValue({ count: 0 });
     mockLockTenantRows.mockResolvedValue(new Map());
+    // The inviter's membership, re-read under their tenant row: an active ADMIN.
+    mockPrismaTeamMember.findFirst.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -312,6 +316,29 @@ describe("POST /api/teams/[teamId]/invitations", () => {
 
       expect(res.status).toBe(409);
       expect((await res.json()).error).toBe("SCIM_MANAGED_MEMBER");
+    });
+
+    it("refuses, issuing nothing, when the inviter's membership ended after the permission check", async () => {
+      // A departure committed between requireTeamPermission and the lock: an
+      // invitation stamped now would read as issued after that departure.
+      mockPrismaTeamMember.findFirst.mockResolvedValue(null);
+
+      const res = await invite();
+
+      expect(res.status).toBe(403);
+      expect(mockPrismaTeamInvitation.create).not.toHaveBeenCalled();
+      expect(mockPrismaTeamMember.findFirst).toHaveBeenCalledWith({
+        where: { teamId: TEAM_ID, userId: "test-user-id", deactivatedAt: null },
+        select: { role: true },
+      });
+      expect(mockLockTenantRows.mock.invocationCallOrder[0]).toBeLessThan(mockPrismaTeamMember.findFirst.mock.invocationCallOrder[0]);
+    });
+
+    it("refuses when the inviter's role no longer allows inviting", async () => {
+      mockPrismaTeamMember.findFirst.mockResolvedValue({ role: TEAM_ROLE.VIEWER });
+
+      expect((await invite()).status).toBe(403);
+      expect(mockPrismaTeamInvitation.create).not.toHaveBeenCalled();
     });
 
     it("locks the inviter's and every case variant's tenant row before issuing", async () => {

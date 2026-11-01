@@ -28,9 +28,10 @@ const {
   mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
 }));
 
-const { mockUserFindMany, mockTeamMemberFindMany, mockLockTenantRows } = vi.hoisted(() => ({
+const { mockUserFindMany, mockTeamMemberFindMany, mockTeamMemberFindFirst, mockLockTenantRows } = vi.hoisted(() => ({
   mockUserFindMany: vi.fn().mockResolvedValue([]),
   mockTeamMemberFindMany: vi.fn(),
+  mockTeamMemberFindFirst: vi.fn(),
   mockLockTenantRows: vi.fn(),
 }));
 vi.mock("@/lib/team/tenant-row-lock", async (importOriginal) => ({
@@ -39,7 +40,8 @@ vi.mock("@/lib/team/tenant-row-lock", async (importOriginal) => ({
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/auth/access/team-auth", () => {
+vi.mock("@/lib/auth/access/team-auth", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/auth/access/team-auth")>("@/lib/auth/access/team-auth");
   class TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -48,7 +50,12 @@ vi.mock("@/lib/auth/access/team-auth", () => {
       this.status = status;
     }
   }
-  return { requireTeamPermission: mockRequireTeamPermission, TeamAuthError };
+  return {
+    requireTeamPermission: mockRequireTeamPermission,
+    // The real role → permission table: POST re-checks the inviter's role under the lock.
+    hasTeamPermission: actual.hasTeamPermission,
+    TeamAuthError,
+  };
 });
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -60,7 +67,7 @@ vi.mock("@/lib/prisma", () => ({
     },
     team: mockPrismaTeam,
     user: { findUnique: mockUserFindUnique, findMany: mockUserFindMany },
-    teamMember: { findUnique: mockTeamMemberFindUnique, findMany: mockTeamMemberFindMany },
+    teamMember: { findUnique: mockTeamMemberFindUnique, findMany: mockTeamMemberFindMany, findFirst: mockTeamMemberFindFirst },
   },
 }));
 vi.mock("@/lib/audit/audit", () => ({
@@ -135,6 +142,8 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     mockTeamMemberFindMany.mockResolvedValue([]);
     mockInvitationFindMany.mockResolvedValue([]);
     mockLockTenantRows.mockResolvedValue(new Map());
+    // The inviter's membership, re-read under their tenant row: an active ADMIN.
+    mockTeamMemberFindFirst.mockResolvedValue({ role: "ADMIN" });
   });
 
   it("returns 401 when not authenticated", async () => {

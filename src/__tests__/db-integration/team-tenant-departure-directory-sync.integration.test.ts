@@ -1,0 +1,245 @@
+/**
+ * Integration test (real DB): the directory-sync engine departs and returns
+ * users through team-departure.ts, locking every tenant row it touches in one
+ * call before any team lock (docs/archive/review/team-tenant-departure-plan.md
+ * A10/A11). The provider and the credential decryption are mocked; the engine,
+ * its transaction timeout and the locks run for real.
+ *
+ * Run: docker compose up -d db && npm run test:integration -- team-tenant-departure-directory-sync
+ */
+
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
+import { randomUUID, randomBytes } from "node:crypto";
+import { NextRequest } from "next/server";
+import type { Prisma } from "@prisma/client";
+import { assertRlsApplies, createPrismaForRole, createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
+import { createRaceHelpers } from "./race-helpers";
+import { TEAM_KEY_LOCK_TIMEOUT_MS, TEAM_MEMBERSHIP_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
+
+const { mockFetchOktaUsers } = vi.hoisted(() => ({ mockFetchOktaUsers: vi.fn() }));
+const mockAuth = vi.fn();
+vi.mock("@/auth", () => ({ auth: (...args: unknown[]) => mockAuth(...args) }));
+vi.mock("@/lib/directory-sync/okta", () => ({ fetchOktaUsers: mockFetchOktaUsers }));
+vi.mock("@/lib/directory-sync/credentials", () => ({
+  decryptCredentials: () => JSON.stringify({ orgUrl: "https://example.okta.com", apiToken: "token" }),
+}));
+vi.mock("@/lib/webhook-dispatcher", () => ({ dispatchTenantWebhook: vi.fn(), dispatchWebhook: vi.fn() }));
+vi.mock("@/lib/security/rate-limit", () => ({
+  createRateLimiter: () => ({ check: async () => ({ allowed: true, retryAfterMs: 0 }), clear: () => {} }),
+}));
+
+import { runDirectorySync } from "@/lib/directory-sync/engine";
+import { POST as acceptInvitation } from "@/app/api/teams/invitations/accept/route";
+import { prisma } from "@/lib/prisma";
+
+function oktaUser(id: string, email: string, displayName: string, active: boolean) {
+  return { id, profile: { email, displayName, firstName: "First", lastName: "Last" }, status: active ? "ACTIVE" : "SUSPENDED" };
+}
+
+describe("directory sync across a tenant departure — real-DB integration", () => {
+  let ctx: TestContext;
+  let side: ReturnType<typeof createPrismaForRole>;
+  let race: ReturnType<typeof createRaceHelpers>;
+  let tenantId: string;
+  let configId: string;
+
+  beforeAll(async () => {
+    await assertRlsApplies(prisma);
+    ctx = await createTestContext();
+    side = createPrismaForRole("superuser");
+    race = createRaceHelpers(side.pool);
+  });
+
+  afterAll(async () => {
+    await side.prisma.$disconnect();
+    await side.pool.end();
+    await ctx.cleanup();
+  });
+
+  beforeEach(async () => {
+    mockFetchOktaUsers.mockReset();
+    tenantId = await ctx.createTenant();
+    configId = randomUUID();
+    await sql(
+      `INSERT INTO directory_sync_configs
+         (id, tenant_id, provider, display_name, enabled, sync_interval_minutes,
+          encrypted_credentials, credentials_iv, credentials_auth_tag, status, created_at, updated_at)
+       VALUES ($1::uuid, $2::uuid, 'OKTA'::"DirectorySyncProvider", 'test-config', true, 60,
+          'cipher', 'iv', 'tag', 'IDLE'::"DirectorySyncStatus", now(), now())`,
+      configId, tenantId,
+    );
+  });
+
+  afterEach(async () => {
+    await ctx.deleteTestData(tenantId);
+  });
+
+  async function sql<T = Record<string, unknown>>(text: string, ...params: unknown[]): Promise<T[]> {
+    return ctx.su.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      await setBypassRlsGucs(tx);
+      return tx.$queryRawUnsafe<T[]>(text, ...params);
+    });
+  }
+
+  /** A mapped tenant MEMBER (the IdP's user `ext-<id>`). */
+  async function mapped(): Promise<{ id: string; email: string; ext: string }> {
+    const id = await ctx.createUser(tenantId);
+    await sql(`UPDATE tenant_members SET role = 'MEMBER', scim_managed = true WHERE user_id = $1::uuid`, id);
+    const ext = `ext-${id.slice(0, 8)}`;
+    await sql(
+      `INSERT INTO scim_external_mappings (id, tenant_id, external_id, resource_type, internal_id, created_at, updated_at)
+       VALUES ($1::uuid, $2::uuid, $3, 'User', $4, now(), now())`,
+      randomUUID(), tenantId, ext, id,
+    );
+    const [row] = await sql<{ email: string }>(`SELECT email FROM users WHERE id = $1::uuid`, id);
+    return { id, email: row.email, ext };
+  }
+
+  async function team(owner: string): Promise<string> {
+    const id = randomUUID();
+    await sql(
+      `INSERT INTO teams (id, tenant_id, name, slug, team_key_version, created_at, updated_at)
+       VALUES ($1::uuid, $2::uuid, $3, $3, 1, now(), now())`,
+      id, tenantId, `team-${id.slice(0, 8)}`,
+    );
+    await addTeamMember(id, owner, "OWNER");
+    return id;
+  }
+
+  async function addTeamMember(teamId: string, userId: string, role: string) {
+    await sql(
+      `INSERT INTO team_members (id, team_id, user_id, tenant_id, role, key_distributed, created_at, updated_at)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::"TeamRole", true, now(), now())`,
+      randomUUID(), teamId, userId, tenantId, role,
+    );
+  }
+
+  async function membership(teamId: string, userId: string) {
+    const [row] = await sql<{ deactivated_at: Date | null; deactivated_by_tenant: boolean }>(
+      `SELECT deactivated_at, deactivated_by_tenant FROM team_members WHERE team_id = $1::uuid AND user_id = $2::uuid`,
+      teamId, userId,
+    );
+    return row ?? null;
+  }
+
+  async function stampText(userId: string): Promise<string | null> {
+    const [row] = await sql<{ t: string | null }>(
+      `SELECT deactivated_at::text AS t FROM tenant_members WHERE tenant_id = $1::uuid AND user_id = $2::uuid`,
+      tenantId, userId,
+    );
+    return row.t;
+  }
+
+  it("A11: a run departs the users the IdP suspends, ending their memberships of the tenant's teams", async () => {
+    const owner = await ctx.createUser(tenantId);
+    const user = await mapped();
+    const teamId = await team(owner);
+    await addTeamMember(teamId, user.id, "MEMBER");
+    mockFetchOktaUsers.mockResolvedValue([oktaUser(user.ext, user.email, "User", false)]);
+
+    const result = await runDirectorySync({ configId, tenantId, force: true });
+
+    expect(result.success).toBe(true);
+    expect(await stampText(user.id)).not.toBeNull();
+    expect(await membership(teamId, user.id)).toMatchObject({ deactivated_by_tenant: true });
+  });
+
+  it("A11: a tenant row held past the lock wait fails the run with the tenant-row error inside the deadline, changing nothing", async () => {
+    const owner = await ctx.createUser(tenantId);
+    const user = await mapped();
+    const teamId = await team(owner);
+    await addTeamMember(teamId, user.id, "MEMBER");
+    mockFetchOktaUsers.mockResolvedValue([oktaUser(user.ext, user.email, "User", false)]);
+    const blocker = await race.holdRowLock(
+      `SELECT 1 FROM tenant_members WHERE tenant_id = $1::uuid AND user_id = $2::uuid FOR SHARE`,
+      [tenantId, user.id],
+    );
+    // Released on its own after the lock wait would have run out but before
+    // Prisma's transaction timeout: an unbounded wait would then succeed.
+    const releaseAfter = setTimeout(() => void blocker.release(), TEAM_KEY_LOCK_TIMEOUT_MS + 1_500);
+    try {
+      const started = Date.now();
+      const result = await runDirectorySync({ configId, tenantId, force: true });
+      const elapsed = Date.now() - started;
+
+      expect(result.success).toBe(false);
+      expect(result.errorMessage).toMatch(/membership is being changed/i);
+      expect(elapsed).toBeLessThan(TEAM_KEY_LOCK_TIMEOUT_MS + 1_500);
+      expect(elapsed).toBeLessThan(TEAM_MEMBERSHIP_TX_TIMEOUT_MS);
+    } finally {
+      clearTimeout(releaseAfter);
+      await blocker.release();
+    }
+    expect(await stampText(user.id)).toBeNull();
+    expect(await membership(teamId, user.id)).toMatchObject({ deactivated_at: null });
+    const [log] = await sql<{ status: string }>(
+      `SELECT status FROM directory_sync_logs WHERE config_id = $1::uuid ORDER BY started_at DESC LIMIT 1`,
+      configId,
+    );
+    expect(log.status).toBe("ERROR");
+  });
+
+  it("A3: a rename of a user who stays suspended keeps the stamp and a membership re-admitted since", async () => {
+    const owner = await ctx.createUser(tenantId);
+    const user = await mapped();
+    const teamId = await team(owner);
+    await addTeamMember(teamId, user.id, "MEMBER");
+    mockFetchOktaUsers.mockResolvedValue([oktaUser(user.ext, user.email, "User", false)]);
+    expect((await runDirectorySync({ configId, tenantId, force: true })).success).toBe(true);
+    const stamp = await stampText(user.id);
+    // Re-admitted on a post-departure invitation (as accept writes it).
+    await sql(
+      `UPDATE team_members SET deactivated_at = NULL, deactivated_by_tenant = false
+        WHERE team_id = $1::uuid AND user_id = $2::uuid`,
+      teamId, user.id,
+    );
+
+    mockFetchOktaUsers.mockResolvedValue([oktaUser(user.ext, user.email, "Renamed User", false)]);
+    expect((await runDirectorySync({ configId, tenantId, force: true })).success).toBe(true);
+
+    expect(await stampText(user.id)).toBe(stamp);
+    expect(await membership(teamId, user.id)).toMatchObject({ deactivated_at: null });
+  });
+
+  it("A10: a run departing two users and an accept locking the same two rows in reverse order do not deadlock", async () => {
+    // Accept locks [invitee, inviter]; the run locks its users together. With
+    // both sorted, the run waits on the accept's first lock and the accept on
+    // the blocker; unsorted, they would cross.
+    const owner = await ctx.createUser(tenantId);
+    const [inviter, invitee] = [await mapped(), await mapped()].sort((x, y) => x.id.localeCompare(y.id));
+    const teamId = await team(owner);
+    await addTeamMember(teamId, inviter.id, "ADMIN");
+    const invitationId = randomUUID();
+    const token = randomBytes(32).toString("hex");
+    await sql(
+      `INSERT INTO team_invitations (id, team_id, tenant_id, email, role, status, token, expires_at, invited_by_id, updated_at)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'MEMBER', 'PENDING', $5, now() + interval '1 day', $6::uuid, now())`,
+      invitationId, teamId, tenantId, invitee.email, token, inviter.id,
+    );
+    mockFetchOktaUsers.mockResolvedValue([
+      oktaUser(inviter.ext, inviter.email, "Inviter", false),
+      oktaUser(invitee.ext, invitee.email, "Invitee", false),
+    ]);
+    // Hold the larger id's advisory lock: the accept parks holding the smaller.
+    const blocker = await race.holdRowLock(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [`tenant-member:${tenantId}:${invitee.id}`]);
+    let accepting: Promise<Response> | undefined;
+    let syncing: ReturnType<typeof runDirectorySync> | undefined;
+    try {
+      mockAuth.mockResolvedValue({ user: { id: invitee.id, email: invitee.email } });
+      accepting = acceptInvitation(new NextRequest("http://localhost/api/teams/invitations/accept", {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ token }),
+      }));
+      const acceptPid = await race.waitForBackendBlockedBy(blocker.pid);
+      syncing = runDirectorySync({ configId, tenantId, force: true });
+      expect(await race.settledOrBlocked(syncing, acceptPid, blocker.pid)).toBe("blocked-on-parked");
+      await blocker.release();
+      expect((await accepting).status).toBe(200);
+      expect((await syncing).success).toBe(true);
+    } finally {
+      await blocker.release();
+      await Promise.allSettled([accepting, syncing]);
+    }
+    // Admitted before the run's departure, then ended by it.
+    expect(await membership(teamId, invitee.id)).toMatchObject({ deactivated_by_tenant: true });
+  });
+});

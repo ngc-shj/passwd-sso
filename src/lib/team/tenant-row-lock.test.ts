@@ -31,18 +31,20 @@ function recordingTx(rows: { user_id: string; deactivated_at: Date | null }[] = 
 }
 
 describe("lockTenantRows", () => {
-  it("takes the per-user advisory lock for every user, in id order, before the row lock", async () => {
+  it("takes every user's advisory lock in one ordered statement, in id order, before the row lock", async () => {
     // The advisory lock is what serialises a user with NO row yet with a
-    // writer about to create one deactivated (lockTenantMemberCreation).
+    // writer about to create one deactivated (lockTenantMemberCreation). One
+    // statement: a large write must not spend its deadline on round trips.
     const { tx, statements, values } = recordingTx();
 
     await lockTenantRows(tx, "tenant-1", ["user-b", "user-a"], "share");
 
-    const advisory = statements.flatMap((s, i) => (s.includes("pg_advisory_xact_lock") ? [values[i][0]] : []));
-    expect(advisory).toEqual(["tenant-member:tenant-1:user-a", "tenant-member:tenant-1:user-b"]);
-    const lastAdvisory = statements.map((s) => s.includes("pg_advisory_xact_lock")).lastIndexOf(true);
+    const advisory = statements.flatMap((s, i) => (s.includes("pg_advisory_xact_lock") ? [{ sql: s, keys: values[i][0], at: i }] : []));
+    expect(advisory).toHaveLength(1);
+    expect(advisory[0].keys).toEqual(["tenant-member:tenant-1:user-a", "tenant-member:tenant-1:user-b"]);
+    expect(advisory[0].sql).toMatch(/ORDER BY k/);
     const rowLock = statements.findIndex((s) => s.includes("FROM tenant_members"));
-    expect(lastAdvisory).toBeLessThan(rowLock);
+    expect(advisory[0].at).toBeLessThan(rowLock);
   });
 
   it("locks the rows in one ordered statement, FOR SHARE or FOR UPDATE by mode", async () => {

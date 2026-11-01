@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
-import { TEAM_ROLE } from "@/lib/constants";
+import { TEAM_ROLE, TENANT_ROLE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { handleAuthError, unauthorized } from "@/lib/http/api-response";
@@ -54,12 +54,14 @@ async function handleGET(_req: NextRequest) {
     return { teams, activeHere: new Set(rows.map((r) => r.userId)) };
   });
 
+  // The owner route refuses self-assignment unless the actor is tenant OWNER.
+  const selfExcluded = actor.role !== TENANT_ROLE.OWNER;
   const result = await Promise.all(
     teams.map(async (team) => ({
       id: team.id,
       name: team.name,
       slug: team.slug,
-      members: (await buildTeamMemberDisplayItems(team.members.filter((m) => activeHere.has(m.userId)))).map((m) => ({
+      members: (await buildTeamMemberDisplayItems(team.members.filter((m) => activeHere.has(m.userId) && !(selfExcluded && m.userId === session.user.id)))).map((m) => ({
         userId: m.userId,
         role: m.role,
         name: m.name,

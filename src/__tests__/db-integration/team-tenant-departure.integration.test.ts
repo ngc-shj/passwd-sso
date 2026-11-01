@@ -28,7 +28,20 @@ import {
 import { createRaceHelpers } from "./race-helpers";
 import { TEAM_KEY_LOCK_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 
-const { scimTenant } = vi.hoisted(() => ({ scimTenant: { id: "" } }));
+const { scimTenant, stalePermission } = vi.hoisted(() => ({
+  scimTenant: { id: "" },
+  // When set, requireTeamPermission answers as it did BEFORE a departure
+  // committed: the window between the route's permission check and its lock.
+  stalePermission: { membership: null as null | { id: string; role: string } },
+}));
+vi.mock("@/lib/auth/access/team-auth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/auth/access/team-auth")>();
+  return {
+    ...actual,
+    requireTeamPermission: async (...args: Parameters<typeof actual.requireTeamPermission>) =>
+      stalePermission.membership ?? actual.requireTeamPermission(...args),
+  };
+});
 const mockAuth = vi.fn();
 vi.mock("@/auth", () => ({ auth: (...args: unknown[]) => mockAuth(...args) }));
 vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
@@ -65,6 +78,10 @@ import { GET as listMembers, POST as addMember } from "@/app/api/teams/[teamId]/
 import { DELETE as removeMember, PUT as changeRole } from "@/app/api/teams/[teamId]/members/[memberId]/route";
 import { GET as getMemberKey } from "@/app/api/teams/[teamId]/member-key/route";
 import { POST as assignOwner } from "@/app/api/tenant/teams/[teamId]/owner/route";
+import { POST as rotateKey } from "@/app/api/teams/[teamId]/rotate-key/route";
+import { POST as confirmKey } from "@/app/api/teams/[teamId]/members/[memberId]/confirm-key/route";
+import { GET as pendingDistributions } from "@/app/api/teams/pending-key-distributions/route";
+import { POST as createTeam } from "@/app/api/teams/route";
 import { patchScimGroup } from "@/lib/services/scim-group-service";
 import { departFromTenant } from "@/lib/team/team-departure";
 import { lockTenantRows, TenantMemberLockTimeoutError } from "@/lib/team/tenant-row-lock";
@@ -108,6 +125,7 @@ describe("team membership across a tenant departure — real-DB integration", ()
     tenantId = await ctx.createTenant();
     otherTenantId = await ctx.createTenant();
     scimTenant.id = tenantId;
+    stalePermission.membership = null;
     vi.clearAllMocks();
   });
 
@@ -336,6 +354,7 @@ describe("team membership across a tenant departure — real-DB integration", ()
       const res = await accept(invitee, inv.token!);
 
       expect(res.status).toBe(410);
+      expect(await invitationStatus(inv.id!)).toBe("EXPIRED");
       expect(await membership(teamId, invitee.id)).toBeNull();
     });
 
@@ -353,6 +372,7 @@ describe("team membership across a tenant departure — real-DB integration", ()
       );
 
       expect((await accept(leaver, inv.token!)).status).toBe(410);
+      expect(await invitationStatus(inv.id!)).toBe("EXPIRED");
     });
 
     it("admits on an invitation issued after the departure, resetting the membership", async () => {
@@ -395,6 +415,7 @@ describe("team membership across a tenant departure — real-DB integration", ()
       await joinTenant(leaver.id, tenantId);
 
       expect((await accept(leaver, inv.token!)).status).toBe(410);
+      expect(await invitationStatus(inv.id!)).toBe("EXPIRED");
       expect(await membership(teamId, leaver.id)).toBeNull();
       const after = await invite(teamId, owner, leaver.email);
       expect((await accept(leaver, after.token!)).status).toBe(200);
@@ -417,14 +438,19 @@ describe("team membership across a tenant departure — real-DB integration", ()
     const teamId = await team(owner);
     await scimActive(leaver.id, false);
     await moveAway(leaver.id);
-    const stamp = (await tenantRow(tenantId, leaver.id))?.deactivated_at;
+    const stampText = async () =>
+      (await sql<{ t: string }>(`SELECT deactivated_at::text AS t FROM tenant_members WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, tenantId, leaver.id))[0].t;
+    const stamp = await stampText();
     const inv = await invite(teamId, owner, leaver.email);
     expect((await accept(leaver, inv.token!)).status).toBe(200);
+    const otherTeam = await team(owner);
+    const pendingAfter = await invite(otherTeam, owner, leaver.email);
     const auditsBefore = (await auditActions("TEAM_MEMBER_TENANT_DEACTIVATE")).length;
 
     expect((await scimActive(leaver.id, false)).status).toBe(200);
 
-    expect((await tenantRow(tenantId, leaver.id))?.deactivated_at?.getTime()).toBe(stamp?.getTime());
+    expect(await stampText()).toBe(stamp);
+    expect(await invitationStatus(pendingAfter.id!)).toBe("PENDING");
     expect(await membership(teamId, leaver.id)).toMatchObject({ deactivated_at: null });
     expect((await auditActions("TEAM_MEMBER_TENANT_DEACTIVATE")).length).toBe(auditsBefore);
   });
@@ -540,6 +566,9 @@ describe("team membership across a tenant departure — real-DB integration", ()
       teamId,
     );
     expect(owners).toEqual([{ user_id: successor.id }]);
+    expect(await auditActions("TEAM_OWNER_ASSIGNED_BY_TENANT_ADMIN", teamId)).toEqual([
+      { targetId: expect.any(String), metadata: { targetUserId: successor.id, demotedUserIds: [oldOwner.id], selfAssigned: false } },
+    ]);
   });
 
   it("A8: a tenant ADMIN of another tenant cannot assign (404), changing nothing", async () => {
@@ -651,21 +680,57 @@ describe("team membership across a tenant departure — real-DB integration", ()
 
   // ── A9: backfill ─────────────────────────────────────────────
 
-  it("A9: the backfill marks legacy departures, expires the invitations accept would refuse, and is idempotent", async () => {
+  it("A9: the backfill marks legacy departures, expires exactly the invitations accept would refuse, and is idempotent", async () => {
     const owner = await ctx.createUser(tenantId);
-    const leaver = await member();
-    const later = await member();
     const teamId = await team(owner);
+    const deactivate = (userId: string) =>
+      sql(`UPDATE tenant_members SET deactivated_at = clock_timestamp() WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, tenantId, userId);
+    const stampOf = async (userId: string) =>
+      (await sql<{ t: string }>(`SELECT deactivated_at::text AS t FROM tenant_members WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, tenantId, userId))[0].t;
+    const setCreatedAt = (invitationId: string, at: string) =>
+      sql(`UPDATE team_invitations SET created_at = $2::timestamptz WHERE id = $1::uuid`, invitationId, at);
+
+    // Arm 1: a legacy departure (row deactivated, membership left active),
+    // a membership created after the departure, and a membership elsewhere.
+    const leaver = await member();
+    const otherOwner = await ctx.createUser(otherTenantId);
+    const elsewhere = await team(otherOwner, otherTenantId);
+    await addTeamMember(elsewhere, leaver.id, "MEMBER", otherTenantId);
+    // Arm 2b: invitations to the leaver before (exact and other case), at, and after the departure.
     const before = await invite(teamId, owner, leaver.email);
-    expect(before.status).toBe(201);
+    const beforeUpper = await invite(await team(owner), owner, leaver.email.toUpperCase());
+    const atStamp = await invite(await team(owner), owner, leaver.email);
+    const after = await invite(await team(owner), owner, leaver.email);
+    // Arm 2a: an inviter who later departed, with one invitation before and one after.
+    const inviter = await member();
+    await addTeamMember(teamId, inviter.id, "ADMIN");
+    const byInviterBefore = await invite(teamId, inviter.id, `a-${randomUUID().slice(0, 6)}@example.com`);
+    const byInviterAfter = await invite(teamId, inviter.id, `b-${randomUUID().slice(0, 6)}@example.com`);
+    for (const inv of [before, beforeUpper, atStamp, after, byInviterBefore, byInviterAfter]) expect(inv.status).toBe(201);
     await addTeamMember(teamId, leaver.id, "MEMBER");
-    // Legacy state: the tenant row deactivated directly, the membership left active.
-    await sql(`UPDATE tenant_members SET deactivated_at = clock_timestamp() WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, tenantId, leaver.id);
-    const after = await invite(teamId, owner, `${later.email}`);
-    // A re-admission after the departure (membership created after it) stays.
-    await sql(`UPDATE team_invitations SET email = $2 WHERE id = $1::uuid`, after.id, leaver.email.toUpperCase());
-    await sql(`UPDATE tenant_members SET deactivated_at = clock_timestamp() WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, tenantId, later.id);
+    await deactivate(leaver.id);
+    await deactivate(inviter.id);
+    const later = await member();
+    await deactivate(later.id);
     await addTeamMember(teamId, later.id, "MEMBER");
+    await setCreatedAt(atStamp.id!, await stampOf(leaver.id));
+    await sql(`UPDATE team_invitations SET created_at = (SELECT deactivated_at + interval '1 second' FROM tenant_members
+      WHERE tenant_id = $2::uuid AND user_id = $3::uuid) WHERE id = $1::uuid`, after.id, tenantId, leaver.id);
+    await sql(`UPDATE team_invitations SET created_at = (SELECT deactivated_at + interval '1 second' FROM tenant_members
+      WHERE tenant_id = $2::uuid AND user_id = $3::uuid) WHERE id = $1::uuid`, byInviterAfter.id, tenantId, inviter.id);
+    // Arm 2c: users SCIM-deleted before this change (no row), with and without the audit row.
+    const deleted = await member();
+    const noAudit = await member();
+    const toDeleted = await invite(await team(owner), owner, deleted.email);
+    const toDeletedAfter = await invite(await team(owner), owner, deleted.email);
+    const toNoAudit = await invite(await team(owner), owner, noAudit.email);
+    await sql(`DELETE FROM tenant_members WHERE tenant_id = $1::uuid AND user_id = ANY($2::uuid[])`, tenantId, [deleted.id, noAudit.id]);
+    await sql(
+      `INSERT INTO audit_logs (id, tenant_id, scope, action, user_id, actor_type, target_id, created_at)
+       VALUES ($1::uuid, $2::uuid, 'TENANT', 'SCIM_USER_DELETE', $3::uuid, 'SYSTEM', $4, clock_timestamp())`,
+      randomUUID(), tenantId, SYSTEM_ACTOR_ID, deleted.id,
+    );
+    await sql(`UPDATE team_invitations SET created_at = clock_timestamp() + interval '1 second' WHERE id = $1::uuid`, toDeletedAfter.id);
 
     const migration = readFileSync(
       join(process.cwd(), "prisma/migrations/20261101000000_team_tenant_departure/migration.sql"),
@@ -675,27 +740,45 @@ describe("team membership across a tenant departure — real-DB integration", ()
     expect(block).toBeDefined();
 
     const client = await side.pool.connect();
+    const notices: string[] = [];
+    client.on("notice", (n) => notices.push(n.message ?? ""));
     try {
       await client.query("BEGIN");
       await client.query(block!);
-      const changedSecond = await client.query(`SELECT count(*)::int AS n FROM team_members WHERE deactivated_by_tenant`);
+      const memberships = await client.query<{ team_id: string; user_id: string; deactivated_by_tenant: boolean }>(
+        `SELECT team_id, user_id, deactivated_by_tenant FROM team_members WHERE user_id = ANY($1::uuid[])`,
+        [[leaver.id, later.id]],
+      );
+      const marked = (teamIdOf: string, userId: string) =>
+        memberships.rows.find((r) => r.team_id === teamIdOf && r.user_id === userId)?.deactivated_by_tenant;
+      expect(marked(teamId, leaver.id)).toBe(true);
+      expect(marked(elsewhere, leaver.id)).toBe(false);
+      expect(marked(teamId, later.id)).toBe(false);
+
+      const ids = [before, beforeUpper, atStamp, after, byInviterBefore, byInviterAfter, toDeleted, toDeletedAfter, toNoAudit].map((i) => i.id);
+      const inv = await client.query<{ id: string; status: string }>(`SELECT id, status FROM team_invitations WHERE id = ANY($1::uuid[])`, [ids]);
+      const status = Object.fromEntries(inv.rows.map((r) => [r.id, r.status]));
+      expect({
+        before: status[before.id!], beforeUpper: status[beforeUpper.id!], atStamp: status[atStamp.id!], after: status[after.id!],
+        byInviterBefore: status[byInviterBefore.id!], byInviterAfter: status[byInviterAfter.id!],
+        toDeleted: status[toDeleted.id!], toDeletedAfter: status[toDeletedAfter.id!], toNoAudit: status[toNoAudit.id!],
+      }).toEqual({
+        before: "EXPIRED", beforeUpper: "EXPIRED", atStamp: "EXPIRED", after: "PENDING",
+        byInviterBefore: "EXPIRED", byInviterAfter: "PENDING",
+        toDeleted: "EXPIRED", toDeletedAfter: "PENDING", toNoAudit: "PENDING",
+      });
+      const records = await client.query(`SELECT user_id FROM tenant_member_departures WHERE tenant_id = $1::uuid`, [tenantId]);
+      expect(records.rows.map((r) => r.user_id)).toEqual([deleted.id]);
+
+      // Second run: every change count is 0 (ownerless_teams is a census, not a change).
+      notices.length = 0;
       await client.query(block!);
-      const changedThird = await client.query(`SELECT count(*)::int AS n FROM team_members WHERE deactivated_by_tenant`);
-      expect(changedThird.rows[0].n).toBe(changedSecond.rows[0].n);
-      const rows = await client.query<{ user_id: string; deactivated_by_tenant: boolean }>(
-        `SELECT user_id, deactivated_by_tenant FROM team_members WHERE team_id = $1::uuid ORDER BY user_id`,
-        [teamId],
-      );
-      const byUser = Object.fromEntries(rows.rows.map((r) => [r.user_id, r.deactivated_by_tenant]));
-      expect(byUser[leaver.id]).toBe(true);
-      expect(byUser[later.id]).toBe(false);
-      const inv = await client.query<{ id: string; status: string }>(
-        `SELECT id, status FROM team_invitations WHERE id = ANY($1::uuid[])`,
-        [[before.id, after.id]],
-      );
-      const statusById = Object.fromEntries(inv.rows.map((r) => [r.id, r.status]));
-      expect(statusById[before.id!]).toBe("EXPIRED");
-      expect(statusById[after.id!]).toBe("PENDING");
+      const report = notices.find((n) => n.startsWith("team-tenant-departure backfill:"));
+      expect(report).toBeDefined();
+      const counts = Object.fromEntries([...report!.matchAll(/(\w+)=(\d+)/g)].map((m) => [m[1], Number(m[2])]));
+      const { ownerless_teams: _census, ...changes } = counts;
+      expect(Object.values(changes).every((n) => n === 0)).toBe(true);
+      expect(Object.keys(changes)).toHaveLength(5);
     } finally {
       await client.query("ROLLBACK");
       client.release();
@@ -749,7 +832,8 @@ describe("team membership across a tenant departure — real-DB integration", ()
         expect(await race.settledOrBlocked(accepting, departPid, standIn.pid)).toBe("blocked-on-parked");
         await standIn.release();
         expect((await departing).status).toBe(200);
-        expect([410]).toContain((await accepting).status);
+        expect((await accepting).status).toBe(410);
+        expect(await invitationStatus(inv.id!)).toBe("EXPIRED");
       } finally {
         await standIn.release();
         await Promise.allSettled([departing, accepting]);
@@ -780,6 +864,7 @@ describe("team membership across a tenant departure — real-DB integration", ()
         expect(await departing).toEqual([leaver.id]);
         await moveAway(leaver.id);
         expect((await accept(leaver, issued.token!)).status).toBe(410);
+        expect(await invitationStatus(issued.id!)).toBe("EXPIRED");
       } finally {
         await blocker.release();
         await Promise.allSettled([departing]);
@@ -864,6 +949,7 @@ describe("team membership across a tenant departure — real-DB integration", ()
         await standIn.release();
         expect(await departing).toEqual(expect.arrayContaining([a.id, b.id]));
         expect((await accepting).status).toBe(410);
+        expect(await invitationStatus(inv.id!)).toBe("EXPIRED");
       } finally {
         await standIn.release();
         await Promise.allSettled([departing, accepting]);
@@ -894,5 +980,285 @@ describe("team membership across a tenant departure — real-DB integration", ()
       await blocker.release();
     }
     expect((await tenantRow(tenantId, user.id))?.deactivated_at).toBeNull();
+  });
+  // ── Review round 1 ───────────────────────────────────────────
+
+  function memberKeyBody(userId: string, keyVersion: number) {
+    return {
+      userId,
+      encryptedTeamKey: hex(32),
+      teamKeyIv: hex(12),
+      teamKeyAuthTag: hex(16),
+      ephemeralPublicKey: hex(32),
+      hkdfSalt: hex(32),
+      keyVersion,
+      wrapVersion: 1,
+    };
+  }
+
+  it("an inviter whose departure committed after the permission check cannot issue an invitation", async () => {
+    const owner = await ctx.createUser(tenantId);
+    const inviter = await member();
+    const invitee = await member(otherTenantId);
+    const teamId = await team(owner);
+    const inviterRow = await addTeamMember(teamId, inviter.id, "ADMIN");
+    await scimActive(inviter.id, false);
+    // The route's pre-transaction check still sees the membership it had.
+    stalePermission.membership = { id: inviterRow, role: "ADMIN" };
+
+    const res = await invite(teamId, inviter.id, invitee.email);
+
+    expect(res.status).toBe(403);
+    expect(await sql(`SELECT 1 FROM team_invitations WHERE team_id = $1::uuid`, teamId)).toEqual([]);
+  });
+
+  it("an active guest ADMIN from another tenant still issues invitations", async () => {
+    const owner = await ctx.createUser(tenantId);
+    const guest = await member(otherTenantId);
+    const teamId = await team(owner);
+    await addTeamMember(teamId, guest.id, "ADMIN", tenantId);
+
+    expect((await invite(teamId, guest.id, `x-${randomUUID().slice(0, 6)}@example.com`)).status).toBe(201);
+  });
+
+  /** The GET is typed without arguments, but withRequestLog reads the request. */
+  const pendingFor = () =>
+    (pendingDistributions as unknown as (req: NextRequest) => Promise<Response>)(
+      new NextRequest("http://localhost/api/teams/pending-key-distributions"),
+    );
+
+  it("A1/A4: a rotation leaves a departed member out and pending; after a return confirm-key distributes the new version", async () => {
+    const owner = await ctx.createUser(tenantId);
+    const leaver = await member();
+    await sql(`UPDATE users SET ecdh_public_key = $2 WHERE id = $1::uuid`, leaver.id, hex(32));
+    const teamId = await team(owner);
+    const rowId = await addTeamMember(teamId, leaver.id, "MEMBER");
+    await scimActive(leaver.id, false);
+
+    mockAuth.mockResolvedValue({ user: { id: owner } });
+    const rotated = await rotateKey(
+      jsonRequest(`http://localhost/api/teams/${teamId}/rotate-key`, "POST", {
+        newTeamKeyVersion: 2, entries: [], memberKeys: [memberKeyBody(owner, 2)],
+      }),
+      { params: Promise.resolve({ teamId }) },
+    );
+    expect(rotated.status).toBe(200);
+    expect(await membership(teamId, leaver.id)).toMatchObject({ key_distributed: false });
+    const pendingWhileGone = await (await pendingFor()).json();
+    expect(JSON.stringify(pendingWhileGone)).not.toContain(rowId);
+
+    await scimActive(leaver.id, true);
+    const pendingAfterReturn = await (await pendingFor()).json();
+    expect(JSON.stringify(pendingAfterReturn)).toContain(rowId);
+    const confirmed = await confirmKey(
+      jsonRequest(`http://localhost/api/teams/${teamId}/members/${rowId}/confirm-key`, "POST", { ...memberKeyBody(leaver.id, 2), userId: undefined }),
+      { params: Promise.resolve({ teamId, memberId: rowId }) },
+    );
+    expect(confirmed.status).toBe(200);
+    expect(await membership(teamId, leaver.id)).toMatchObject({ key_distributed: true });
+    const versions = await sql<{ key_version: number }>(
+      `SELECT key_version FROM team_member_keys WHERE team_id = $1::uuid AND user_id = $2::uuid ORDER BY key_version`,
+      teamId, leaver.id,
+    );
+    expect(versions.map((v) => v.key_version)).toEqual([1, 2]);
+  });
+
+  it("A2/A6: mixed-case addresses — a stale lowercase invitation is replaced by an uppercase one, accepted under a third spelling", async () => {
+    const owner = await ctx.createUser(tenantId);
+    const leaver = await member();
+    const teamId = await team(owner);
+    const stale = await invite(teamId, owner, leaver.email.toLowerCase());
+    await scimActive(leaver.id, false);
+    await moveAway(leaver.id);
+
+    const fresh = await invite(teamId, owner, leaver.email.toUpperCase());
+
+    expect(fresh.status).toBe(201);
+    expect(await invitationStatus(stale.id!)).toBe("EXPIRED");
+    const mixed = leaver.email.charAt(0).toUpperCase() + leaver.email.slice(1);
+    expect((await accept({ id: leaver.id, email: mixed }, fresh.token!)).status).toBe(200);
+  });
+
+  it("A2: refuses a pre-departure invitation to a user filed under another tenant", async () => {
+    const owner = await ctx.createUser(tenantId);
+    const leaver = await member();
+    await sql(`UPDATE users SET tenant_id = $2::uuid WHERE id = $1::uuid`, leaver.id, otherTenantId);
+    const teamId = await team(owner);
+    const inv = await invite(teamId, owner, leaver.email);
+    await scimActive(leaver.id, false);
+    await moveAway(leaver.id);
+
+    expect((await accept(leaver, inv.token!)).status).toBe(410);
+    expect(await invitationStatus(inv.id!)).toBe("EXPIRED");
+  });
+
+  describe("A10: races (review round 1)", () => {
+    it("SCIM DELETE waits for an accept holding the invitee's row; the accepted membership is then removed", async () => {
+      const owner = await ctx.createUser(tenantId);
+      const user = await member();
+      const teamId = await team(owner);
+      const inv = await invite(teamId, owner, user.email);
+      const blocker = await race.holdRowLock(`SELECT id FROM team_invitations WHERE id = $1::uuid FOR UPDATE`, [inv.id]);
+      let accepting: Promise<Response> | undefined;
+      let deleting: Promise<Response> | undefined;
+      try {
+        accepting = accept(user, inv.token!);
+        const acceptPid = await race.waitForBackendBlockedBy(blocker.pid);
+        deleting = scimDelete(user.id);
+        expect(await race.settledOrBlocked(deleting, acceptPid, blocker.pid)).toBe("blocked-on-parked");
+        await blocker.release();
+        expect((await accepting).status).toBe(200);
+        expect((await deleting).status).toBe(204);
+      } finally {
+        await blocker.release();
+        await Promise.allSettled([accepting, deleting]);
+      }
+      expect(await membership(teamId, user.id)).toBeNull();
+      expect(await sql(`SELECT 1 FROM tenant_member_departures WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, tenantId, user.id)).toHaveLength(1);
+    });
+
+    it("SCIM DELETE first: an accept waiting on the deleted row is refused by the departure record", async () => {
+      // The user left this tenant for another (active there), keeping a marked
+      // membership here; a re-invitation is pending when the IdP deletes them.
+      const owner = await ctx.createUser(tenantId);
+      const user = await member();
+      const teamId = await team(owner);
+      await addTeamMember(teamId, user.id, "MEMBER");
+      await scimActive(user.id, false);
+      await moveAway(user.id);
+      const inv = await invite(teamId, owner, user.email);
+      expect(inv.status).toBe(201);
+      // Park the deletion at its team lock, holding the user's row FOR UPDATE.
+      const standIn = await race.holdRowLock(`SELECT id FROM teams WHERE id = $1::uuid FOR NO KEY UPDATE`, [teamId]);
+      let deleting: Promise<Response> | undefined;
+      let accepting: Promise<Response> | undefined;
+      try {
+        deleting = scimDelete(user.id);
+        const deletePid = await race.waitForBackendBlockedBy(standIn.pid);
+        accepting = accept(user, inv.token!);
+        expect(await race.settledOrBlocked(accepting, deletePid, standIn.pid)).toBe("blocked-on-parked");
+        await standIn.release();
+        expect((await deleting).status).toBe(204);
+        expect((await accepting).status).toBe(410);
+      } finally {
+        await standIn.release();
+        await Promise.allSettled([deleting, accepting]);
+      }
+      expect(await membership(teamId, user.id)).toBeNull();
+      expect(await invitationStatus(inv.id!)).toBe("EXPIRED");
+    });
+
+    it("a departure waits for a team create holding the creator's row, then ends the new ownership", async () => {
+      const creator = await ctx.createUser(tenantId);
+      await sql(`UPDATE tenant_members SET role = 'ADMIN' WHERE user_id = $1::uuid`, creator);
+      const teamId = randomUUID();
+      // Park the create at its teams INSERT (FK KEY SHARE on the tenant row).
+      const blocker = await race.holdRowLock(`SELECT id FROM tenants WHERE id = $1::uuid FOR UPDATE`, [tenantId]);
+      let creating: Promise<Response> | undefined;
+      let departing: Promise<Response> | undefined;
+      try {
+        mockAuth.mockResolvedValue({ user: { id: creator } });
+        creating = createTeam(jsonRequest("http://localhost/api/teams", "POST", {
+          id: teamId, name: "Raced", slug: `raced-${teamId.slice(0, 6)}`,
+          teamMemberKey: { ...memberKeyBody(creator, 1), userId: undefined },
+        }));
+        const createPid = await race.waitForBackendBlockedBy(blocker.pid);
+        departing = scimActive(creator, false);
+        expect(await race.settledOrBlocked(departing, createPid, blocker.pid)).toBe("blocked-on-parked");
+        await blocker.release();
+        expect((await creating).status).toBe(201);
+      } finally {
+        await blocker.release();
+        await Promise.allSettled([creating, departing]);
+      }
+      // The creator was tenant ADMIN, not OWNER: the departure applies.
+      expect((await departing!).status).toBe(200);
+      expect(await membership(teamId, creator)).toMatchObject({ role: "OWNER", deactivated_by_tenant: true });
+    });
+
+    it("a departure of the target waits for an owner assignment holding their row; the team is then ownerless again", async () => {
+      const admin = await ctx.createUser(tenantId);
+      await sql(`UPDATE tenant_members SET role = 'ADMIN' WHERE user_id = $1::uuid`, admin);
+      const oldOwner = await member();
+      const successor = await member();
+      const teamId = await team(oldOwner.id);
+      const successorRow = await addTeamMember(teamId, successor.id, "MEMBER");
+      await scimActive(oldOwner.id, false);
+      // Park the assignment at its promote, after its tenant-row locks.
+      const blocker = await race.holdRowLock(`SELECT id FROM team_members WHERE id = $1::uuid FOR UPDATE`, [successorRow]);
+      let assigning: Promise<Response> | undefined;
+      let departing: Promise<Response> | undefined;
+      try {
+        mockAuth.mockResolvedValue({ user: { id: admin } });
+        assigning = assignOwner(jsonRequest(`http://localhost/api/tenant/teams/${teamId}/owner`, "POST", { userId: successor.id }), {
+          params: Promise.resolve({ teamId }),
+        });
+        const assignPid = await race.waitForBackendBlockedBy(blocker.pid);
+        departing = scimActive(successor.id, false);
+        expect(await race.settledOrBlocked(departing, assignPid, blocker.pid)).toBe("blocked-on-parked");
+        await blocker.release();
+        expect((await assigning).status).toBe(200);
+        expect((await departing).status).toBe(200);
+      } finally {
+        await blocker.release();
+        await Promise.allSettled([assigning, departing]);
+      }
+      expect(await membership(teamId, successor.id)).toMatchObject({ role: "OWNER", deactivated_by_tenant: true });
+    });
+
+    it("an invitation POST to a departing user waits for the departure, then issues a post-departure invitation", async () => {
+      const owner = await ctx.createUser(tenantId);
+      const leaver = await member();
+      const teamId = await team(owner);
+      const otherTeam = await team(owner);
+      await addTeamMember(otherTeam, leaver.id, "MEMBER");
+      const standIn = await race.holdRowLock(`SELECT id FROM teams WHERE id = $1::uuid FOR NO KEY UPDATE`, [otherTeam]);
+      let departing: Promise<Response> | undefined;
+      let issuing: Promise<{ status: number; id?: string; token?: string }> | undefined;
+      try {
+        departing = scimActive(leaver.id, false);
+        const departPid = await race.waitForBackendBlockedBy(standIn.pid);
+        issuing = invite(teamId, owner, leaver.email);
+        expect(await race.settledOrBlocked(issuing, departPid, standIn.pid)).toBe("blocked-on-parked");
+        await standIn.release();
+        expect((await departing).status).toBe(200);
+        expect((await issuing).status).toBe(201);
+      } finally {
+        await standIn.release();
+        await Promise.allSettled([departing, issuing]);
+      }
+      await moveAway(leaver.id);
+      expect((await accept(leaver, (await issuing!).token!)).status).toBe(200);
+    });
+
+    it("a departure waits for an in-flight rotation of the user's team; the user ends deactivated", async () => {
+      const owner = await ctx.createUser(tenantId);
+      const leaver = await member();
+      const teamId = await team(owner);
+      await addTeamMember(teamId, leaver.id, "MEMBER");
+      // Park the rotation at its member-key insert (FK KEY SHARE on the owner's users row).
+      const blocker = await race.holdRowLock(`SELECT id FROM users WHERE id = $1::uuid FOR UPDATE`, [owner]);
+      let rotating: Promise<Response> | undefined;
+      let departing: Promise<Response> | undefined;
+      try {
+        mockAuth.mockResolvedValue({ user: { id: owner } });
+        rotating = rotateKey(
+          jsonRequest(`http://localhost/api/teams/${teamId}/rotate-key`, "POST", {
+            newTeamKeyVersion: 2, entries: [], memberKeys: [memberKeyBody(owner, 2), memberKeyBody(leaver.id, 2)],
+          }),
+          { params: Promise.resolve({ teamId }) },
+        );
+        const rotatePid = await race.waitForBackendBlockedBy(blocker.pid);
+        departing = scimActive(leaver.id, false);
+        expect(await race.settledOrBlocked(departing, rotatePid, blocker.pid)).toBe("blocked-on-parked");
+        await blocker.release();
+        expect((await rotating).status).toBe(200);
+        expect((await departing).status).toBe(200);
+      } finally {
+        await blocker.release();
+        await Promise.allSettled([rotating, departing]);
+      }
+      expect(await membership(teamId, leaver.id)).toMatchObject({ deactivated_by_tenant: true });
+    });
   });
 });

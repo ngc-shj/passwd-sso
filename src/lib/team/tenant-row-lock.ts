@@ -68,12 +68,18 @@ export async function lockTenantRows(
   if (ids.length === 0) return result;
 
   const timeoutError = () => new TenantMemberLockTimeoutError();
-  for (const userId of ids) {
-    await withBoundedLockWait(tx, () => advisoryXactLock(tx, advisoryKey(tenantId, userId)), {
-      budget,
-      timeoutError,
-    });
-  }
+  // Every user's advisory lock in ONE statement, in key order (ids are sorted,
+  // and the key is a fixed prefix plus the id): one bounded wait however many
+  // users a write admits, not four round trips per user against one deadline.
+  const keys = ids.map((userId) => advisoryKey(tenantId, userId));
+  await withBoundedLockWait(
+    tx,
+    // $executeRaw: the lock function returns void, which $queryRaw cannot read.
+    () => tx.$executeRaw`
+      SELECT pg_advisory_xact_lock(hashtext(k)) FROM (SELECT unnest(${keys}::text[]) AS k ORDER BY k) AS ordered
+    `,
+    { budget, timeoutError },
+  );
 
   const rows = await withBoundedLockWait(
     tx,

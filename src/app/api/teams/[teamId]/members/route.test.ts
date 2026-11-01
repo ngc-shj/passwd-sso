@@ -28,7 +28,7 @@ const {
   return {
     mockAuth: vi.fn(),
     mockPrismaTeam: { findUnique: vi.fn() },
-    mockPrismaTeamMember: { findMany: vi.fn(), findFirst: vi.fn(), create: vi.fn(), update: vi.fn() },
+    mockPrismaTeamMember: { findMany: vi.fn(), findFirst: vi.fn(), create: vi.fn(), update: vi.fn(), count: vi.fn() },
     mockPrismaTeamMemberKey: { deleteMany: vi.fn() },
     mockPrismaTenantMember: { findMany: vi.fn(), findFirst: vi.fn() },
     mockPrismaUser: { findFirst: vi.fn(), findMany: vi.fn() },
@@ -321,7 +321,9 @@ describe("POST /api/teams/[teamId]/members", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
-    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue({ id: "actor-row", role: TEAM_ROLE.ADMIN });
+    // The acting member, re-read under the team lock: still active.
+    mockPrismaTeamMember.count.mockResolvedValue(1);
     mockPrismaTeam.findUnique.mockResolvedValue({ tenantId: TENANT_ID });
     mockPrismaUser.findFirst.mockResolvedValue({ id: TARGET_USER_ID });
     mockPrismaTenantMember.findFirst.mockResolvedValue({ id: "tm-1" });
@@ -463,6 +465,19 @@ describe("POST /api/teams/[teamId]/members", () => {
     expect(mockLockTenantRows).toHaveBeenCalledWith(expect.anything(), "tenant-1", [TARGET_USER_ID], "share", expect.anything());
     expect(mockLockTenantRows.mock.invocationCallOrder[0]).toBeLessThan(mockLockTeamsAgainstRotation.mock.invocationCallOrder[0]);
     expect(mockLockTeamsAgainstRotation.mock.invocationCallOrder[0]).toBeLessThan(mockPrismaTeamMember.findFirst.mock.invocationCallOrder[0]);
+  });
+
+  it("refuses, adding nothing, when the acting member's membership ended after the permission check", async () => {
+    mockPrismaTeamMember.count.mockResolvedValue(0);
+
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/members`, { body: { userId: TARGET_USER_ID, role: TEAM_ROLE.MEMBER } }),
+      createParams({ teamId: TEAM_ID }),
+    );
+
+    expect(res.status).toBe(403);
+    expect(mockPrismaTeamMember.create).not.toHaveBeenCalled();
+    expect(mockPrismaTeamMember.count).toHaveBeenCalledWith({ where: { id: "actor-row", teamId: TEAM_ID, deactivatedAt: null } });
   });
 
   it("answers 409 when the target's tenant row is held past the lock wait", async () => {

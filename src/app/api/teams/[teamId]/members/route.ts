@@ -70,8 +70,9 @@ async function handlePOST(req: NextRequest, { params }: Params) {
 
   const { teamId } = await params;
 
+  let actorMembership;
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.MEMBER_INVITE, req);
+    actorMembership = await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.MEMBER_INVITE, req);
   } catch (e) {
     return handleAuthError(e);
   }
@@ -114,6 +115,12 @@ async function handlePOST(req: NextRequest, { params }: Params) {
           throw new TeamAuthError(API_ERROR.NOT_FOUND, 404);
         }
         await lockTeamsAgainstRotation(tx, [teamId], budget);
+        // The acting member must still be active: a departure from the tenant
+        // committed since the permission check ended their membership.
+        const actorActive = await tx.teamMember.count({
+          where: { id: actorMembership.id, teamId, deactivatedAt: null },
+        });
+        if (actorActive !== 1) throw new TeamAuthError(API_ERROR.FORBIDDEN, 403);
 
         // Check existing TeamMember record
         const existing = await tx.teamMember.findFirst({

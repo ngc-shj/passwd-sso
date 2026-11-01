@@ -1372,7 +1372,7 @@ describe("runDirectorySync", () => {
       expect(mockLogAuditBulk).toHaveBeenCalledWith([]);
       // Created deactivated: a guest of this tenant's teams has left them.
       expect(mockDepartCreatedMembership).toHaveBeenCalledWith(
-        expect.anything(), TENANT_ID, "user-9", expect.objectContaining({ actor: expect.anything() }),
+        expect.anything(), TENANT_ID, ["user-9"], expect.objectContaining({ actor: expect.anything() }),
       );
     });
 

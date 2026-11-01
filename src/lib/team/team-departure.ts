@@ -205,13 +205,14 @@ export async function returnToTenant(
 export async function departCreatedMembership(
   tx: Tx,
   tenantId: string,
-  userId: string,
+  userIds: readonly string[],
   options: Omit<TenantTransitionOptions, "alreadyLocked">,
 ): Promise<void> {
+  if (userIds.length === 0) return;
   const stamped = await tx.$executeRaw`
     UPDATE tenant_members SET deactivated_at = clock_timestamp(), updated_at = clock_timestamp()
-     WHERE tenant_id = ${tenantId}::uuid AND user_id = ${userId}::uuid AND deactivated_at IS NOT NULL
+     WHERE tenant_id = ${tenantId}::uuid AND user_id = ANY(${[...userIds]}::uuid[]) AND deactivated_at IS NOT NULL
   `;
-  if (stamped !== 1) throw new Error("departCreatedMembership: no deactivated row to stamp");
-  await endTeamMemberships(tx, tenantId, [userId], options);
+  if (stamped !== userIds.length) throw new Error("departCreatedMembership: a created row is not deactivated");
+  await endTeamMemberships(tx, tenantId, userIds, options);
 }

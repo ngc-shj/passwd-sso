@@ -82,4 +82,20 @@ describe("GET /api/tenant/teams/ownerless", () => {
       select: { userId: true },
     });
   });
+
+  it("does not offer a tenant ADMIN themselves (the owner route refuses it), but offers the tenant OWNER", async () => {
+    const teams = [{ id: "team-1", name: "Core", slug: "core", members: [
+      { id: "m1", userId: "admin-1", role: "ADMIN", createdAt: new Date() },
+      { id: "m2", userId: "other", role: "MEMBER", createdAt: new Date() },
+    ] }];
+    mockTeamFindMany.mockResolvedValue(teams);
+    mockTenantMemberFindMany.mockResolvedValue([{ userId: "admin-1" }, { userId: "other" }]);
+
+    const asAdmin = await (await GET(createRequest("GET", "http://localhost:3000/api/tenant/teams/ownerless"))).json();
+    expect(asAdmin.teams[0].members.map((m: { userId: string }) => m.userId)).toEqual(["other"]);
+
+    mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant-1", role: "OWNER" });
+    const asOwner = await (await GET(createRequest("GET", "http://localhost:3000/api/tenant/teams/ownerless"))).json();
+    expect(asOwner.teams[0].members.map((m: { userId: string }) => m.userId)).toEqual(["admin-1", "other"]);
+  });
 });

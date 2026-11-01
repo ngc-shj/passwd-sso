@@ -467,6 +467,7 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
     mockRequireTeamPermission.mockResolvedValue(ownerMembership);
     mockIsRoleAbove.mockReturnValue(true);
     mockPrismaTeamMember.deleteMany.mockResolvedValue({ count: 1 });
+    mockPrismaTeamMember.count.mockResolvedValue(1);
   });
 
   it("returns TeamAuthError status when DELETE permission denied", async () => {
@@ -621,6 +622,22 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
 
     expect(res.status).toBe(404);
     expect(mockPrismaTeamMember.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("answers 404, removing nothing, when the acting member left since the permission check", async () => {
+    mockPrismaTeamMember.findUnique.mockResolvedValue({
+      id: MEMBER_ID, teamId: TEAM_ID, tenantId: "tenant-1", userId: "u", role: TEAM_ROLE.MEMBER, deactivatedAt: null,
+    });
+    mockPrismaTeamMember.count.mockResolvedValue(0);
+
+    const res = await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
+    );
+
+    expect(res.status).toBe(404);
+    expect(mockPrismaTeamMember.deleteMany).not.toHaveBeenCalled();
+    expect(mockPrismaTeamMemberKey.deleteMany).not.toHaveBeenCalled();
   });
 
   it("answers 404, removing nothing, when the row changed between the check and the team lock", async () => {

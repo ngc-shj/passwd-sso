@@ -56,3 +56,20 @@ AND in the actor's tenant, the set the POST accepts (a guest from another tenant
 has no row there and would always be refused). A non-active actor or target
 answers `MEMBER_NOT_FOUND` (404), the code member PUT uses for the same state;
 409 stays for "the team has an active OWNER" and lock conflicts.
+
+## D6 Two A10 race cells are covered by other evidence
+
+Plan (A10) also lists "confirm-key vs departure" and "a directory-sync run vs
+owner assign". Neither has its own cell:
+
+- confirm-key vs departure: the plan already labels it a regression pin of the
+  conditional update #986 added (`deactivatedAt: null, keyDistributed: false` in
+  confirm-key's final write), and #986's `team-key-version-guard` cells race
+  confirm-key against rotation on the same team lock. The departure takes that
+  lock FOR SHARE, which does not conflict with confirm-key's, so the outcome is
+  decided by the conditional update alone — pinned by the confirm-key unit tests.
+- directory sync vs owner assign: the run departs through the same
+  `departFromTenant` as SCIM, after its one tenant-row lock call; the cells
+  "owner assign vs departure" (SCIM) and "a run vs an accept in reverse order"
+  (engine) cover the two halves — the assign side's lock order, and the run's
+  one-call lock against a writer holding a row it needs.
