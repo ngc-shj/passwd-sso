@@ -122,6 +122,8 @@ describe("team membership across a tenant departure — real-DB integration", ()
   });
 
   beforeEach(async () => {
+    // SCIM responses build their location from the app origin; CI sets none.
+    vi.stubEnv("AUTH_URL", "http://localhost:3000");
     tenantId = await ctx.createTenant();
     otherTenantId = await ctx.createTenant();
     scimTenant.id = tenantId;
@@ -132,6 +134,7 @@ describe("team membership across a tenant departure — real-DB integration", ()
   afterEach(async () => {
     await ctx.deleteTestData(tenantId);
     await ctx.deleteTestData(otherTenantId);
+    vi.unstubAllEnvs();
   });
 
   async function asSuperuser<T>(fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
