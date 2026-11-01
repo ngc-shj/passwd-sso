@@ -5,6 +5,17 @@ import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Crown } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Select,
@@ -17,6 +28,7 @@ import { SectionCardHeader } from "@/components/settings/account/section-card-he
 import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
 import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
 import { API_PATH, apiPath } from "@/lib/constants";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 import { fetchApi } from "@/lib/url-helpers";
 import { handleStepUpError } from "@/lib/http/handle-step-up-error";
 import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
@@ -68,7 +80,18 @@ export function OwnerlessTeamsCard() {
       });
       if (!res.ok) {
         if (await handleStepUpError(res, inlineReauth.triggerOnStaleError, { teamId, userId })) return;
-        throw new Error("Failed");
+        // States the admin can act on: the team got an owner meanwhile, the
+        // chosen member left, or a tenant ADMIN chose themselves.
+        const { error } = await res.json().catch(() => ({ error: null }));
+        const message =
+          error === API_ERROR.CONFLICT ? t("ownerAssignConflict")
+          : error === API_ERROR.MEMBER_NOT_FOUND ? t("ownerAssignMemberGone")
+          : error === API_ERROR.FORBIDDEN ? t("ownerAssignSelfForbidden")
+          : null;
+        if (!message) throw new Error("Failed");
+        toast.error(message);
+        fetchTeams();
+        return;
       }
       toast.success(t("ownerAssigned"));
       fetchTeams();
@@ -125,13 +148,27 @@ export function OwnerlessTeamsCard() {
                     ))}
                   </SelectContent>
                 </Select>
-                <Button
-                  size="sm"
-                  disabled={!selected[team.id] || submitting === team.id}
-                  onClick={() => assignOwner(team.id, selected[team.id])}
-                >
-                  {t("assignOwner")}
-                </Button>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button size="sm" disabled={!selected[team.id] || submitting === team.id}>
+                      {t("assignOwner")}
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>{t("assignOwner")}</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        {t("assignOwnerConfirm", { team: team.name })}
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>{tCommon("cancel")}</AlertDialogCancel>
+                      <AlertDialogAction onClick={() => assignOwner(team.id, selected[team.id])}>
+                        {t("assignOwner")}
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
               </div>
             )}
           </div>

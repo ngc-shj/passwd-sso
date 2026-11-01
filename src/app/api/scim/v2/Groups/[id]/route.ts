@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { isTeamRotationConflict } from "@/lib/team/team-key-rotation-lock";
+import { isMembershipLockConflict, membershipConflictMessage } from "@/lib/team/tenant-row-lock";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { scimResponse, scimError, getScimBaseUrl } from "@/lib/scim/response";
 import { scimPatchOpSchema, scimGroupSchema } from "@/lib/scim/validations";
@@ -72,8 +72,9 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
     if (e instanceof ScimNoSuchMemberError) {
       return scimError(400, "Referenced member does not exist in this team");
     }
-    // A rotation of an affected team held it past the lock wait; nothing changed.
-    if (isTeamRotationConflict(e)) return scimError(409, "Team key rotation in progress; retry later");
+    // A rotation of the team, or a change to an added user's tenant membership,
+    // held a row past the lock wait (or the transaction deadlocked); nothing changed.
+    if (isMembershipLockConflict(e)) return scimError(409, membershipConflictMessage(e));
     throw e;
   }
 
@@ -130,8 +131,9 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
     if (e instanceof ScimNoSuchMemberError) {
       return scimError(400, "Referenced member does not exist in this team");
     }
-    // A rotation of an affected team held it past the lock wait; nothing changed.
-    if (isTeamRotationConflict(e)) return scimError(409, "Team key rotation in progress; retry later");
+    // A rotation of the team, or a change to an added user's tenant membership,
+    // held a row past the lock wait (or the transaction deadlocked); nothing changed.
+    if (isMembershipLockConflict(e)) return scimError(409, membershipConflictMessage(e));
     throw e;
   }
 

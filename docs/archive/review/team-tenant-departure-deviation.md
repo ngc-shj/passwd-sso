@@ -45,3 +45,14 @@ writer can run concurrently with a create-deactivated for the same user, and
 the advisory creation lock (N1) is a backstop for a future admission path. The
 integration cell holds that lock directly and witnesses the create waiting on
 it, instead of racing a route that cannot reach it.
+
+## D5 Ownerless GET returns the candidates; an inactive target answers 404
+
+Plan (C7): GET returns "id, name, active member count"; the POST refuses a
+non-active target with 409. Implemented: GET returns each team's candidates
+(user id, role, name, email) — a tenant admin is not necessarily a member of the
+team, so no other endpoint lists them — limited to members active in the team
+AND in the actor's tenant, the set the POST accepts (a guest from another tenant
+has no row there and would always be refused). A non-active actor or target
+answers `MEMBER_NOT_FOUND` (404), the code member PUT uses for the same state;
+409 stays for "the team has an active OWNER" and lock conflicts.

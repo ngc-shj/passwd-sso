@@ -49,6 +49,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 // The tenant-row lock has its own tests and real-DB cells; here it answers
 // from the `tenantMember.findMany` fixture of the client it is handed (the
 // cells' "active member of the tenant"). A plain function, so resets keep it.
+const { tenantLockFailure } = vi.hoisted(() => ({ tenantLockFailure: { error: null as Error | null } }));
 vi.mock("@/lib/team/tenant-row-lock", async (importOriginal) => ({
   ...(await importOriginal()) as Record<string, unknown>,
   lockTenantRows: async (
@@ -56,6 +57,7 @@ vi.mock("@/lib/team/tenant-row-lock", async (importOriginal) => ({
     tenantId: string,
     userIds: string[],
   ) => {
+    if (tenantLockFailure.error) throw tenantLockFailure.error;
     if (userIds.length === 0) return new Map();
     const active = new Set(
       ((await tx.tenantMember.findMany({ where: { tenantId, userId: { in: userIds }, deactivatedAt: null }, select: { userId: true } })) ?? [])
@@ -178,6 +180,29 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
         tenantMember: mockTenantMember,
       }),
     );
+  });
+
+  it("answers 409, writing no membership, when an added user's tenant row is held past the lock wait", async () => {
+    const { TenantMemberLockTimeoutError } = await vi.importActual<typeof import("@/lib/team/tenant-row-lock")>("@/lib/team/tenant-row-lock");
+    tenantLockFailure.error = new TenantMemberLockTimeoutError();
+    try {
+      const res = await PATCH(
+        makeReq({
+          method: "PATCH",
+          body: {
+            schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+            Operations: [{ op: "add", path: "members", value: [{ value: "user-1" }] }],
+          },
+        }),
+        makeParams("grp-1"),
+      );
+
+      expect(res!.status).toBe(409);
+      expect(mockTeamMember.createMany).not.toHaveBeenCalled();
+      expect(mockTeamMember.updateMany).not.toHaveBeenCalled();
+    } finally {
+      tenantLockFailure.error = null;
+    }
   });
 
   it("adds a member", async () => {
