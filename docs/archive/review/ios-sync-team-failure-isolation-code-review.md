@@ -1,6 +1,6 @@
 # Code Review: ios-sync-team-failure-isolation
 Date: 2026-11-02
-Review round: 3
+Review round: 4 (final)
 
 Issue `#989`. No plan file: a bug fix scoped by the issue (out-of-scope item SC2 of
 `team-tenant-departure-plan.md`). Project: iOS app, XCTest on a macOS simulator host.
@@ -197,3 +197,47 @@ from functionality.
 - R5 refresh never reloads the list -> `testSaveEntry_syncSucceeds_reloadsListFromFreshCache`.
 
 Full suite: 878 tests, 0 failures.
+
+## Round 4
+
+### Changes from Previous Round
+Incremental review of `6b226cfa6`. Security: no findings (the prune deletes a superset
+of what the all-stale clear did; a corrupt store is handled as before; the AutoFill
+resolver's only production call site takes the shared default). Functionality: no
+Critical/Major. All remaining findings are Minor and in tests.
+
+### Findings
+- F-R4-1 / T19 [Minor] The malformed-ECDH test still named the removed function.
+- F-R4-2 [Minor] No test pinned the directory save without an ECDH key.
+- T20 [Minor] The cache-write test accepted any `EntryCacheError`, not the write step's.
+- T21 [Minor] The malformed-ECDH branch keeping fresh keys was unpinned.
+- T22 [Minor, optional] The prune's `<=` boundary and the resolver default's coupling
+  to the shared constant have no behavioural pin.
+- T23 [Minor] The save refresh-failure test did not assert the list keeps its state.
+
+### Resolution Status
+- F-R4-1, T19, T21: the malformed-ECDH test seeds a fresh and an expired key and asserts
+  only the fresh one remains; renamed `testRefreshTeamKeys_malformedECDH_keepsFreshKeysPrunesExpired`.
+  Red-proved: clearing the set in that branch reddens it.
+- F-R4-2: the no-ECDH fresh-set test records the directory (saved once, every team).
+- T20: `catch EntryCacheError.ioError`.
+- T23: asserts the list still shows the pre-write title.
+- T22: Accepted.
+  - Anti-Deferral check: pinning the exact boundary needs a clock injected into
+    `HostSyncService`, a production seam added only for a test.
+  - Worst case: a future edit flips `<=` to `<`, pruning a key exactly at 15:00 that a
+    reader would still accept for that instant. The next sync re-derives it.
+  - Likelihood: low; both sides read `TeamEntryDecryptor.teamKeyMaxAge`, so the values
+    cannot drift.
+  - Cost to fix: a clock parameter on `HostSyncService.init` and its call sites.
+
+### Tightening-only skip — Round 4
+Findings applied directly (no Round 5 review):
+- F-R4-1/T19, F-R4-2, T20, T21, T23 — `ios/PasswdSSOTests/HostSyncServiceTests.swift`,
+  `ios/PasswdSSOTests/VaultViewModelTests.swift` — test-only.
+Justification: every finding is within the round-3 fix scope, test code or wording
+only (no production change), and changes no security boundary.
+
+## Summary
+Four rounds. Full iOS suite on the simulator host: 878 tests, 0 failures. Every fix
+red-proved (P1-P6, Q1-Q5, R1-R5, and the round-4 T21 mutation).

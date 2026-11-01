@@ -200,6 +200,9 @@ final class VaultViewModelTests: XCTestCase {
 
     XCTAssertEqual(putCount, 1)
     XCTAssertGreaterThanOrEqual(teamListCount, 1)
+    // The list keeps its pre-write state until the next sync (accepted, F-R3-2).
+    let titles = await MainActor.run { vm.allSummaries.map(\.title) }
+    XCTAssertEqual(titles, ["Old"])
   }
 
   /// A confirmed edit whose refresh sync succeeds rebuilds the list from it.

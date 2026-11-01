@@ -442,13 +442,14 @@ final class HostSyncServiceTests: XCTestCase {
     )
     let fetcher = EntryFetcher(apiClient: apiClient)
     let cacheURL = tmpDir.appending(path: "noecdh-fresh.cache", directoryHint: .notDirectory)
+    let directory = RecordingTeamDirectoryStore()
     let syncService = HostSyncService(
       apiClient: apiClient,
       entryFetcher: fetcher,
       bridgeKeyStore: bks,
       wrappedKeyStore: wks,
       cacheURL: cacheURL,
-      teamDirectoryStore: NullTeamDirectoryStore()
+      teamDirectoryStore: directory
     )
 
     _ = try await syncService.runSync(vaultKey: vaultKey, userId: "no-ecdh-user", cacheKey: cacheKey)
@@ -458,6 +459,9 @@ final class HostSyncServiceTests: XCTestCase {
     XCTAssertEqual(remaining.count, 1,
       "Non-stale team key set must be left unchanged when ECDH key is absent")
     XCTAssertEqual(remaining.first?.teamId, "team-noecdh-fresh")
+    // Labels do not depend on key derivation: the directory is saved without ECDH too.
+    XCTAssertEqual(directory.savedTeamIds, ["team-noecdh-fresh"])
+    XCTAssertEqual(directory.saveCount, 1)
   }
 
   // MARK: - No ECDH key: all-stale set → cleared
@@ -1087,7 +1091,7 @@ final class HostSyncServiceTests: XCTestCase {
       _ = try await sync.runSync(
         vaultKey: SymmetricKey(size: .bits256), userId: "u-1", cacheKey: SymmetricKey(size: .bits256))
       XCTFail("expected the cache write to fail")
-    } catch is EntryCacheError {}
+    } catch EntryCacheError.ioError {}
 
     XCTAssertEqual(directory.saveCount, 0)
     XCTAssertEqual(try bks.readDirect().cacheVersionCounter, 1)
@@ -1272,11 +1276,12 @@ final class HostSyncServiceTests: XCTestCase {
       "a passkey refusal must not wipe the persisted team keys")
   }
 
-  // MARK: - F1 bonus: malformed ECDH + all-stale set → cleared
+  // MARK: - F1 bonus: malformed ECDH → keys kept, expired ones pruned
 
-  /// Mirrors testRefreshTeamKeys_noECDH_allStaleSet_cleared but via the malformed-ECDH
-  /// branch (importEcdhPrivateKey fails). Both code paths now route to clearTeamKeysIfAllStale.
-  func testRefreshTeamKeys_malformedECDH_allStaleSet_cleared() async throws {
+  /// Mirrors the no-ECDH tests but via the malformed-ECDH branch
+  /// (importEcdhPrivateKey fails): the branch keeps the set, and `performSync`'s
+  /// prune drops only the keys past the staleness window.
+  func testRefreshTeamKeys_malformedECDH_keepsFreshKeysPrunesExpired() async throws {
     let keychain = MockKeychain()
     seedBlobInKeychain(keychain, counter: 1,
                        service: "com.passwd-sso.test.malformed-ecdh.bridge-key")
@@ -1306,7 +1311,11 @@ final class HostSyncServiceTests: XCTestCase {
       teamEncKey: teamKey, cacheKey: cacheKey, userId: userId,
       teamId: "team-malformed-stale", teamKeyVersion: 1, issuedAt: staleIssuedAt
     )
-    try wks.saveTeamKeys([staleTeamKey])
+    let freshTeamKey = try TeamEntryDecryptor.wrapTeamKey(
+      teamEncKey: SymmetricKey(size: .bits256), cacheKey: cacheKey, userId: userId,
+      teamId: "team-malformed-fresh", teamKeyVersion: 1, issuedAt: Date()
+    )
+    try wks.saveTeamKeys([staleTeamKey, freshTeamKey])
 
     let fakeKeychain = FakeKeychain()
     let tokenStore = HostTokenStore(
@@ -1352,9 +1361,8 @@ final class HostSyncServiceTests: XCTestCase {
 
     _ = try await syncService.runSync(vaultKey: vaultKey, userId: userId, cacheKey: cacheKey)
 
-    let remaining = try wks.loadTeamKeys()
-    XCTAssertTrue(remaining.isEmpty,
-      "All-stale team key set must be cleared when ECDH key is malformed (F1 bonus regression)")
+    XCTAssertEqual(try wks.loadTeamKeys().map(\.teamId), ["team-malformed-fresh"],
+      "a malformed ECDH key keeps the fresh key and loses only the expired one")
   }
 
   // MARK: - T8: happy-path fixture sync stores correct teamKeyVersion
