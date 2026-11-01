@@ -76,6 +76,7 @@ export const API_PATH = {
   TENANT_AUDIT_LOGS: "/api/tenant/audit-logs",
   TENANT_BREAKGLASS: "/api/tenant/breakglass",
   TENANT_WEBHOOKS: "/api/tenant/webhooks",
+  TENANT_TEAMS_OWNERLESS: "/api/tenant/teams/ownerless",
   TENANT_AUDIT_DELIVERY_TARGETS: "/api/tenant/audit-delivery-targets",
   TRAVEL_MODE: "/api/travel-mode",
   WEBAUTHN: "/api/webauthn",
@@ -222,6 +223,7 @@ export const apiPath = {
   tenantBreakglassLogs: (grantId: string) =>
     `${API_PATH.TENANT_BREAKGLASS}/${grantId}/logs`,
   tenantWebhooks: () => API_PATH.TENANT_WEBHOOKS,
+  tenantTeamOwner: (teamId: string) => `/api/tenant/teams/${teamId}/owner`,
   tenantWebhookById: (webhookId: string) =>
     `${API_PATH.TENANT_WEBHOOKS}/${webhookId}`,
   tenantAuditDeliveryTargets: () => API_PATH.TENANT_AUDIT_DELIVERY_TARGETS,

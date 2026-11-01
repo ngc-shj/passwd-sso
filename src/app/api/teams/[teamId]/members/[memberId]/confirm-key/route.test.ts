@@ -20,8 +20,11 @@ const { mockAuth, mockPrismaTeamMember, mockPrismaUser,
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/auth/access/team-auth", () => ({
+vi.mock("@/lib/auth/access/team-auth", async () => ({
   requireTeamPermission: mockRequireTeamPermission,
+  // The real role reads and permission table: routes re-check the actor under their locks.
+  activeTeamRole: (await vi.importActual<typeof import("@/lib/auth/access/team-auth")>("@/lib/auth/access/team-auth")).activeTeamRole,
+  hasTeamPermission: (await vi.importActual<typeof import("@/lib/auth/access/team-auth")>("@/lib/auth/access/team-auth")).hasTeamPermission,
 }));
 vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
   requireRecentCurrentAuthMethod: mockRequireRecentSession,
@@ -74,6 +77,10 @@ const validBody = {
 describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // The distributing member's role, re-read under the team lock
+    // (requireTeamPermission is mocked, so this is the only findFirst).
+    mockPrismaTeamMember.findFirst.mockReset().mockResolvedValue({ role: "OWNER", teamId: "team-1" });
+    mockPrismaTeamMember.findUnique.mockReset();
     mockAuth.mockResolvedValue({ user: { id: "admin-user" } });
     mockRequireTeamPermission.mockResolvedValue(undefined);
     mockTeamLockQuery.mockImplementation(teamLockQuery([{ team_key_version: 1, tenant_id: "tenant-1" }]));
@@ -179,6 +186,42 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
     expect(res.status).toBe(200);
     expect(json.success).toBe(true);
     expect(mockTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses (403) without writing a key when the distributing member left or was demoted since the check", async () => {
+    mockPrismaTeamMember.findFirst.mockResolvedValueOnce(null); // activeTeamRole, under the team lock
+    // The pre-check only: the refusal comes before the in-transaction member read.
+    mockPrismaTeamMember.findUnique
+      .mockResolvedValueOnce({ id: "member-1", teamId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null });
+
+    const res = await POST(
+      createRequest("POST", URL, { body: validBody }),
+      { params: Promise.resolve({ teamId: "team-1", memberId: "member-1" }) },
+    );
+
+    expect(res.status).toBe(403);
+    expect(mockPrismaTeamMemberKey.upsert).not.toHaveBeenCalled();
+    expect(mockPrismaTeamMember.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("refuses (403) without writing a key when the distributing member was demoted to VIEWER", async () => {
+    mockPrismaTeamMember.findFirst.mockResolvedValueOnce({ role: "VIEWER" });
+    mockPrismaTeamMember.findUnique
+      .mockResolvedValueOnce({ id: "member-1", teamId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null });
+
+    const res = await POST(
+      createRequest("POST", URL, { body: validBody }),
+      { params: Promise.resolve({ teamId: "team-1", memberId: "member-1" }) },
+    );
+
+    expect(res.status).toBe(403);
+    expect(mockPrismaTeamMemberKey.upsert).not.toHaveBeenCalled();
+    expect(mockPrismaTeamMember.findFirst).toHaveBeenCalledWith({
+      where: { teamId: "team-1", userId: "admin-user", deactivatedAt: null },
+      select: { role: true },
+    });
+    const versionLock = lockQueryCalls(mockTeamLockQuery).find((c) => c.sql.includes("FROM teams"))!;
+    expect(versionLock.order).toBeLessThan(mockPrismaTeamMember.findFirst.mock.invocationCallOrder[0]);
   });
 
   it("returns 404 when target member belongs to a different team (Q-1 IDOR)", async () => {

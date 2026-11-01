@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { requireTeamPermission } from "@/lib/auth/access/team-auth";
+import { activeTeamRole, hasTeamPermission, requireTeamPermission } from "@/lib/auth/access/team-auth";
 import { teamMemberKeySchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
@@ -93,6 +93,11 @@ async function handlePOST(req: NextRequest, { params }: Params) {
         // before member rows): a distribution racing a rotation that missed
         // this member would otherwise mark them distributed with only the old key.
         const team = await lockTeamKeyVersion(tx, teamId);
+        // The distributing member's authority, under the same lock.
+        const actorRole = await activeTeamRole(tx, teamId, session.user.id);
+        if (!actorRole || !hasTeamPermission(actorRole, TEAM_PERMISSION.MEMBER_INVITE)) {
+          return "actor_not_permitted" as const;
+        }
 
         const member = await tx.teamMember.findUnique({
           where: { id: memberId },
@@ -156,6 +161,9 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     distributed = "version_mismatch" as const;
   }
 
+  if (distributed === "actor_not_permitted") {
+    return errorResponse(API_ERROR.FORBIDDEN);
+  }
   if (distributed === "member_not_found") {
     return errorResponse(API_ERROR.MEMBER_NOT_FOUND);
   }

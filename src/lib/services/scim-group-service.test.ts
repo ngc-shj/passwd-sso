@@ -62,6 +62,25 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 
+// The tenant-row lock has its own tests and real-DB cells; here it answers
+// from the `tenantMember.findMany` fixture of the client it is handed, which
+// the cells already configure for "active member of the tenant". A plain
+// function, not a vi.fn: the cells' resetAllMocks must not erase it.
+vi.mock("@/lib/team/tenant-row-lock", () => ({
+  lockTenantRows: async (
+    tx: { tenantMember: { findMany: (args: unknown) => Promise<{ userId: string }[] | undefined> } },
+    tenantId: string,
+    userIds: string[],
+  ) => {
+    if (userIds.length === 0) return new Map();
+    const active = new Set(
+      ((await tx.tenantMember.findMany({ where: { tenantId, userId: { in: userIds }, deactivatedAt: null }, select: { userId: true } })) ?? [])
+        .map((m) => m.userId),
+    );
+    return new Map(userIds.map((id) => [id, { hasRow: active.has(id), deactivatedAt: null, departedAt: null }]));
+  },
+}));
+
 import type { TxOrPrisma } from "@/lib/prisma";
 import { teamLockQuery, lockQueryCalls } from "@/__tests__/helpers/team-rotation-lock-mock";
 import {
@@ -159,8 +178,8 @@ describe("replaceScimGroup", () => {
   it("removes multiple users in a single batch", async () => {
     mockScimGroupMappingFindUnique.mockResolvedValue(DEFAULT_MAPPING);
     const currentMembers = [
-      { id: "m-1", userId: "user-a", role: "ADMIN" },
-      { id: "m-2", userId: "user-b", role: "ADMIN" },
+      { id: "m-1", userId: "user-a", role: "ADMIN", deactivatedAt: null },
+      { id: "m-2", userId: "user-b", role: "ADMIN", deactivatedAt: null },
     ];
     // Call sequence inside tx: (1) currentMembers, (2) freshMembers in applyRemoveOperations
     // applyAddOperations is called with toAdd=[] and returns early (no findMany)
@@ -208,8 +227,8 @@ describe("replaceScimGroup", () => {
   it("applies mixed add and remove in a replace operation", async () => {
     mockScimGroupMappingFindUnique.mockResolvedValue(DEFAULT_MAPPING);
     // user-a is currently in the group; user-b will be added
-    const currentMembers = [{ id: "m-1", userId: "user-a", role: "ADMIN" }];
-    const freshMembersForRemove = [{ id: "m-1", role: "ADMIN" }];
+    const currentMembers = [{ id: "m-1", userId: "user-a", role: "ADMIN", deactivatedAt: null }];
+    const freshMembersForRemove = [{ id: "m-1", role: "ADMIN", deactivatedAt: null }];
     mockTeamMemberFindMany
       .mockResolvedValueOnce(currentMembers) // currentMembers (outer)
       .mockResolvedValueOnce([]) // existingMembers in tx for toAdd (user-b not yet in team)
@@ -256,7 +275,7 @@ describe("replaceScimGroup", () => {
     // user-a is not in currentMembers so it goes into toAdd; tx finds it with OWNER role
     mockTeamMemberFindMany
       .mockResolvedValueOnce([]) // currentMembers (outer)
-      .mockResolvedValueOnce([{ id: "m-owner", userId: "user-a", role: "OWNER" }]); // existingMembers in tx
+      .mockResolvedValueOnce([{ id: "m-owner", userId: "user-a", role: "OWNER", deactivatedAt: null }]); // existingMembers in tx
 
     await expect(
       replaceScimGroup(
@@ -273,10 +292,10 @@ describe("replaceScimGroup", () => {
     // user-a is currently in the group (ADMIN role); requested list is empty so it goes to toRemove
     // freshMembers fetch reveals it was promoted to OWNER before the transaction
     // applyAddOperations is called with toAdd=[] and returns early (no findMany)
-    const currentMembers = [{ id: "m-1", userId: "user-a", role: "ADMIN" }];
+    const currentMembers = [{ id: "m-1", userId: "user-a", role: "ADMIN", deactivatedAt: null }];
     mockTeamMemberFindMany
       .mockResolvedValueOnce(currentMembers) // currentMembers (outer, inside tx)
-      .mockResolvedValueOnce([{ id: "m-1", role: "OWNER" }]); // freshMembers in applyRemoveOperations
+      .mockResolvedValueOnce([{ id: "m-1", role: "OWNER", deactivatedAt: null }]); // freshMembers in applyRemoveOperations
 
     await expect(
       replaceScimGroup(
@@ -377,7 +396,7 @@ describe("replaceScimGroup", () => {
     // currentMembers inside tx: user-a is NOT currently in the ADMIN role group
     mockTeamMemberFindMany
       .mockResolvedValueOnce([]) // currentMembers in tx (not in ADMIN group yet)
-      .mockResolvedValueOnce([{ id: "m-1", userId: "user-a", role: "MEMBER" }]) // existingMembers in tx (toAdd batch pre-fetch)
+      .mockResolvedValueOnce([{ id: "m-1", userId: "user-a", role: "MEMBER", deactivatedAt: null }]) // existingMembers in tx (toAdd batch pre-fetch)
       .mockResolvedValueOnce([]); // loadGroupMembers
     mockTeamMemberUpdateMany.mockResolvedValue({ count: 1 });
 
@@ -447,8 +466,8 @@ describe("patchScimGroup", () => {
   it("removes multiple users via remove operations in a single batch", async () => {
     mockScimGroupMappingFindUnique.mockResolvedValue(DEFAULT_MAPPING);
     const existingMembers = [
-      { id: "m-1", userId: "user-a", role: "ADMIN" },
-      { id: "m-2", userId: "user-b", role: "ADMIN" },
+      { id: "m-1", userId: "user-a", role: "ADMIN", deactivatedAt: null },
+      { id: "m-2", userId: "user-b", role: "ADMIN", deactivatedAt: null },
     ];
     // Call sequence: applyAddOperations with addOps=[] returns early (no findMany)
     // (1) tx.teamMember.findMany for validate existence (removeOps)
@@ -497,7 +516,7 @@ describe("patchScimGroup", () => {
   it("throws ScimOwnerProtectedError when adding a user with OWNER role", async () => {
     mockScimGroupMappingFindUnique.mockResolvedValue(DEFAULT_MAPPING);
     mockTeamMemberFindMany.mockResolvedValueOnce([
-      { id: "m-owner", userId: "user-a", role: "OWNER" },
+      { id: "m-owner", userId: "user-a", role: "OWNER", deactivatedAt: null },
     ]);
 
     await expect(
@@ -510,7 +529,7 @@ describe("patchScimGroup", () => {
     // Call sequence: applyAddOperations with addOps=[] returns early (no findMany)
     // (1) tx.teamMember.findMany for validate existence → returns member with OWNER role
     // (2) tx.teamMember.findMany in applyRemoveOperations (freshMembers) → same OWNER member
-    const ownerMember = [{ id: "m-owner", userId: "user-a", role: "OWNER" }];
+    const ownerMember = [{ id: "m-owner", userId: "user-a", role: "OWNER", deactivatedAt: null }];
     mockTeamMemberFindMany
       .mockResolvedValueOnce(ownerMember) // validate existence in removeOps
       .mockResolvedValueOnce(ownerMember); // freshMembers in applyRemoveOperations → throws OWNER_PROTECTED
@@ -575,7 +594,7 @@ describe("patchScimGroup", () => {
     mockScimGroupMappingFindUnique.mockResolvedValue(DEFAULT_MAPPING);
     // user-a is already a team member with MEMBER role; add op requests ADMIN
     mockTeamMemberFindMany
-      .mockResolvedValueOnce([{ id: "m-1", userId: "user-a", role: "MEMBER" }]) // existingMembers in tx for addOps
+      .mockResolvedValueOnce([{ id: "m-1", userId: "user-a", role: "MEMBER", deactivatedAt: null }]) // existingMembers in tx for addOps
       .mockResolvedValueOnce([]); // loadGroupMembers
     mockTeamMemberUpdateMany.mockResolvedValue({ count: 1 });
 
@@ -707,8 +726,8 @@ describe("replaceScimGroup — flatten branch (db has no $transaction)", () => {
     const { db, findMany, updateMany, scimGroupMappingFindUnique } = makeFlattenDb();
     scimGroupMappingFindUnique.mockResolvedValue(DEFAULT_MAPPING);
     const currentMembers = [
-      { id: "m-1", userId: "user-a", role: "ADMIN" },
-      { id: "m-2", userId: "user-b", role: "ADMIN" },
+      { id: "m-1", userId: "user-a", role: "ADMIN", deactivatedAt: null },
+      { id: "m-2", userId: "user-b", role: "ADMIN", deactivatedAt: null },
     ];
     findMany
       .mockResolvedValueOnce(currentMembers) // currentMembers (runReplace)
@@ -787,8 +806,8 @@ describe("patchScimGroup — flatten branch (db has no $transaction)", () => {
     const { db, findMany, updateMany, scimGroupMappingFindUnique } = makeFlattenDb();
     scimGroupMappingFindUnique.mockResolvedValue(DEFAULT_MAPPING);
     const existingMembers = [
-      { id: "m-1", userId: "user-a", role: "ADMIN" },
-      { id: "m-2", userId: "user-b", role: "ADMIN" },
+      { id: "m-1", userId: "user-a", role: "ADMIN", deactivatedAt: null },
+      { id: "m-2", userId: "user-b", role: "ADMIN", deactivatedAt: null },
     ];
     findMany
       .mockResolvedValueOnce(existingMembers) // validate existence (runPatch)
@@ -812,5 +831,88 @@ describe("patchScimGroup — flatten branch (db has no $transaction)", () => {
       expect.arrayContaining(["m-1", "m-2"]),
     );
     expect(mockTransaction).not.toHaveBeenCalled();
+  });
+});
+
+describe("group writes after a tenant departure", () => {
+  const keyDeleteMany = vi.fn();
+  beforeEach(() => {
+    vi.resetAllMocks();
+    mockTeamLockQuery.mockImplementation(teamLockQuery([{ id: TEAM_ID }]));
+    mockTransaction.mockImplementation(async (fn) => fn({
+      $queryRaw: mockTeamLockQuery,
+      $executeRaw: vi.fn(),
+      teamMember: {
+        findMany: mockTeamMemberFindMany,
+        createMany: mockTeamMemberCreateMany,
+        updateMany: mockTeamMemberUpdateMany,
+      },
+      tenantMember: { findMany: mockTenantMemberFindMany },
+      // Reactivating a deactivated membership deletes its stale keys; the
+      // shared tx type above has no key model.
+      ...{ teamMemberKey: { deleteMany: keyDeleteMany } },
+    }));
+    mockScimGroupMappingFindUnique.mockResolvedValue(DEFAULT_MAPPING);
+    mockTeamMemberUpdateMany.mockResolvedValue({ count: 1 });
+  });
+
+  it("keeps a departed member the IdP still lists as already present, marker and all", async () => {
+    // The departed member's marker row is part of the current set, so the
+    // IdP listing them is no change; their tenant row is inactive.
+    mockTeamMemberFindMany
+      .mockResolvedValueOnce([{ id: "m-left", userId: "user-left", role: "ADMIN", deactivatedAt: new Date() }]) // currentMembers
+      .mockResolvedValueOnce([]); // loadGroupMembers
+    mockTenantMemberFindMany.mockResolvedValue([]);
+
+    const result = await replaceScimGroup(TENANT_ID, SCIM_ID, { displayName: "core:ADMIN", memberUserIds: ["user-left"] }, BASE_URL);
+
+    expect(result).toMatchObject({ added: 0, removed: 0 });
+    expect(mockTeamMemberCreateMany).not.toHaveBeenCalled();
+    expect(mockTeamMemberUpdateMany).not.toHaveBeenCalled();
+    const currentRead = mockTeamMemberFindMany.mock.calls[0][0];
+    expect(currentRead.where.OR).toEqual([{ deactivatedAt: null }, { deactivatedByTenant: true }]);
+  });
+
+  it("clears only the marker of a departed member the IdP no longer lists", async () => {
+    const left = { id: "m-left", userId: "user-left", role: "ADMIN", deactivatedAt: new Date("2026-05-01"), deactivatedByTenant: true };
+    mockTeamMemberFindMany
+      .mockResolvedValueOnce([left]) // currentMembers
+      .mockResolvedValueOnce([left]) // freshMembers in applyRemoveOperations
+      .mockResolvedValueOnce([]); // loadGroupMembers
+
+    const result = await replaceScimGroup(TENANT_ID, SCIM_ID, { displayName: "core:ADMIN", memberUserIds: [] }, BASE_URL);
+
+    expect(result.removed).toBe(1);
+    expect(mockTeamMemberUpdateMany).toHaveBeenCalledOnce();
+    expect(mockTeamMemberUpdateMany).toHaveBeenCalledWith({ where: { id: { in: ["m-left"] } }, data: { deactivatedByTenant: false } });
+  });
+
+  it("reactivates a deactivated membership of an active tenant member in place, without its stale keys", async () => {
+    mockTeamMemberFindMany
+      .mockResolvedValueOnce([]) // currentMembers: not in the group
+      .mockResolvedValueOnce([{ id: "m-old", userId: "user-a", role: "ADMIN", deactivatedAt: new Date("2026-01-01"), deactivatedByTenant: false }])
+      .mockResolvedValueOnce([]); // loadGroupMembers
+    mockTenantMemberFindMany.mockResolvedValue([{ userId: "user-a" }]);
+
+    await replaceScimGroup(TENANT_ID, SCIM_ID, { displayName: "core:ADMIN", memberUserIds: ["user-a"] }, BASE_URL);
+
+    expect(mockTeamMemberCreateMany).not.toHaveBeenCalled();
+    expect(keyDeleteMany).toHaveBeenCalledWith({ where: { teamId: TEAM_ID, userId: { in: ["user-a"] } } });
+    expect(mockTeamMemberUpdateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["m-old"] } },
+      data: { deactivatedAt: null, deactivatedByTenant: false, keyDistributed: false, scimManaged: true, role: "ADMIN" },
+    });
+  });
+
+  it("refuses to add a user who left the tenant and holds no departure marker here", async () => {
+    mockTeamMemberFindMany
+      .mockResolvedValueOnce([]) // currentMembers
+      .mockResolvedValueOnce([]); // memberships of the added users
+    mockTenantMemberFindMany.mockResolvedValue([]);
+
+    await expect(
+      replaceScimGroup(TENANT_ID, SCIM_ID, { displayName: "core:ADMIN", memberUserIds: ["user-gone"] }, BASE_URL),
+    ).rejects.toThrow(ScimNoSuchMemberError);
+    expect(mockTeamMemberCreateMany).not.toHaveBeenCalled();
   });
 });

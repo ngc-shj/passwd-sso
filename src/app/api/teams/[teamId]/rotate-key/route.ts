@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { requireTeamPermission } from "@/lib/auth/access/team-auth";
+import { activeTeamRole, hasTeamPermission, requireTeamPermission } from "@/lib/auth/access/team-auth";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
@@ -140,6 +140,13 @@ async function handlePOST(req: NextRequest, { params }: Params) {
         if (!currentTeam || currentTeam.team_key_version !== team.teamKeyVersion) {
           throw new Error("TEAM_KEY_VERSION_CONFLICT");
         }
+        // The rotating member's authority, under the team lock: a departure,
+        // removal or demotion committed since requireTeamPermission would
+        // otherwise rotate the team to a key the actor generated and keeps.
+        const actorRole = await activeTeamRole(tx, teamId, session.user.id);
+        if (!actorRole || !hasTeamPermission(actorRole, TEAM_PERMISSION.TEAM_UPDATE)) {
+          throw new Error("ACTOR_NOT_PERMITTED");
+        }
 
         // Verify all active members have a key in the payload (F-26: inside
         // tx, after the team lock that member removal also takes)
@@ -250,6 +257,14 @@ async function handlePOST(req: NextRequest, { params }: Params) {
           throw new Error("ENTRY_COUNT_MISMATCH");
         }
 
+      // A deactivated member (left the tenant, or removed by the IdP) was not
+      // wrapped the new version: if they come back, they are listed for
+      // distribution of it rather than counted as holding it.
+        await tx.teamMember.updateMany({
+          where: { teamId: teamId, deactivatedAt: { not: null }, keyDistributed: true },
+          data: { keyDistributed: false },
+        });
+
       // Bump team key version
         await tx.team.update({
           where: { id: teamId },
@@ -261,6 +276,9 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   } catch (e) {
     if (e instanceof Error && e.message === "TEAM_KEY_VERSION_CONFLICT") {
       return errorResponse(API_ERROR.TEAM_KEY_VERSION_MISMATCH);
+    }
+    if (e instanceof Error && e.message === "ACTOR_NOT_PERMITTED") {
+      return errorResponse(API_ERROR.FORBIDDEN);
     }
     // Concurrent rotations serialise on the teams FOR NO KEY UPDATE above, so the
     // loser normally fails the CAS. A teamMemberKey

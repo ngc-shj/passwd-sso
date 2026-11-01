@@ -391,6 +391,7 @@ queue_step "Static: cosign-kms-uri" bash scripts/checks/check-cosign-kms-uri.sh
 queue_step "Smoke: worker-bundle-boot" bash scripts/checks/check-worker-bundle-smoke.sh
 queue_step "Static: critical-audit-atomic" node scripts/checks/check-critical-audit-atomic.mjs
 queue_step "Static: tenant-claim-event-coverage" node scripts/checks/check-tenant-claim-event-coverage.mjs
+queue_step "Static: team-rotation-input-lock" node scripts/checks/check-team-rotation-input-lock.mjs
 queue_step "Static: session-token-hashed" node scripts/checks/check-session-token-hashed.mjs
 queue_step "Static: bound-unknown-ip" node scripts/checks/check-bound-unknown-ip.mjs
 queue_step "Static: bearer-passkey-gate" node scripts/checks/check-bearer-passkey-gate.mjs

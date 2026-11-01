@@ -46,6 +46,7 @@
   "sa-token-id-delete": { "method": "DELETE", "pathTokens": ["apiPath.tenantServiceAccountTokenById", "/tokens/"] },
   "sa-token-post": { "method": "POST", "pathTokens": ["apiPath.tenantServiceAccountTokens", "/tokens"] },
   "tenant-webhook-delete": { "method": "DELETE", "pathTokens": ["apiPath.tenantWebhookById", "/api/tenant/webhooks/"] },
+  "tenant-team-owner-post": { "method": "POST", "pathTokens": ["apiPath.tenantTeamOwner", "/api/tenant/teams/"] },
   "tenant-webhook-post": { "method": "POST", "pathTokens": ["apiPath.tenantWebhooks", "API_PATH.TENANT_WEBHOOKS", "/api/tenant/webhooks"] },
   "vault-reset-post": { "method": "POST", "pathTokens": ["API_PATH.VAULT_RESET", "/api/vault/reset"] },
   "webauthn-credential-delete": { "method": "DELETE", "pathTokens": ["apiPath.webauthnCredentialById", "/api/webauthn/credentials/"] },

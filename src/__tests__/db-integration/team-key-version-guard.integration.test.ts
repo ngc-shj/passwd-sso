@@ -29,7 +29,6 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { randomUUID, randomBytes } from "node:crypto";
 import { NextRequest } from "next/server";
-import type { PoolClient } from "pg";
 import {
   assertRlsApplies,
   createTestContext,
@@ -37,6 +36,7 @@ import {
   setBypassRlsGucs,
   type TestContext,
 } from "./helpers";
+import { createRaceHelpers } from "./race-helpers";
 import { TEAM_KEY_LOCK_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 
 const mockAuth = vi.fn();
@@ -62,8 +62,6 @@ import { prisma } from "@/lib/prisma";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { deactivateScimUser } from "@/lib/services/scim-user-service";
 import { patchScimGroup } from "@/lib/services/scim-group-service";
-
-const BLOCK_WAIT_MS = 10_000;
 
 function hex(nBytes: number): string {
   return randomBytes(nBytes).toString("hex");
@@ -265,83 +263,12 @@ describe("team key rotation serialisation — real-DB integration", () => {
     await ctx.deleteTestData(tenantId);
   });
 
-  /** Open a transaction holding `lockSql` until `release()`; returns its backend pid. */
-  async function holdRowLock(lockSql: string, params: unknown[]) {
-    const client: PoolClient = await side.pool.connect();
-    let pid: number;
-    try {
-      await client.query("BEGIN");
-      await client.query(lockSql, params);
-      ({ rows: [{ pid }] } = await client.query<{ pid: number }>("SELECT pg_backend_pid() AS pid"));
-    } catch (e) {
-      await client.query("ROLLBACK").catch(() => {});
-      client.release();
-      throw e;
-    }
-    let released = false;
-    return {
-      pid,
-      async release() {
-        if (released) return;
-        released = true;
-        try {
-          await client.query("COMMIT");
-        } finally {
-          client.release();
-        }
-      },
-    };
-  }
-
-  async function backendsBlockedBy(pid: number): Promise<number[]> {
-    const r = await side.pool.query<{ pid: number }>(
-      `SELECT pid FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))`,
-      [pid],
-    );
-    return r.rows.map((row) => row.pid);
-  }
-
-  /** Resolve with the first backend observed waiting on `pid`'s locks. */
-  async function waitForBackendBlockedBy(pid: number): Promise<number> {
-    const deadline = Date.now() + BLOCK_WAIT_MS;
-    while (Date.now() < deadline) {
-      const [blocked] = await backendsBlockedBy(pid);
-      if (blocked !== undefined) return blocked;
-      await new Promise((res) => setTimeout(res, 20));
-    }
-    throw new Error(`no backend blocked on pid ${pid} within ${BLOCK_WAIT_MS}ms`);
-  }
-
-  /**
-   * Wait until `work` settles or waits on `parkedPid`, and say which. The
-   * guarded write waits on the parked transaction; an unguarded one runs
-   * through ("settled"). A write that instead waits on the blocker (which then
-   * blocks two backends) never reached the race at all, so that throws,
-   * naming what it waited in.
-   */
-  async function settledOrBlocked(
-    work: Promise<unknown>,
-    parkedPid: number,
-    blockerPid: number,
-  ): Promise<"settled" | "blocked-on-parked"> {
-    let settled = false;
-    void work.then(() => { settled = true; }, () => { settled = true; });
-    const deadline = Date.now() + BLOCK_WAIT_MS;
-    while (Date.now() < deadline) {
-      if (settled) return "settled";
-      if ((await backendsBlockedBy(parkedPid)).length > 0) return "blocked-on-parked";
-      const onBlocker = (await backendsBlockedBy(blockerPid)).filter((pid) => pid !== parkedPid);
-      if (onBlocker.length > 0) {
-        const r = await side.pool.query<{ query: string }>(
-          `SELECT query FROM pg_stat_activity WHERE pid = $1`,
-          [onBlocker[0]],
-        );
-        throw new Error(`write waited on the blocker, not the parked transaction: ${r.rows[0]?.query}`);
-      }
-      await new Promise((res) => setTimeout(res, 20));
-    }
-    throw new Error(`work neither settled nor blocked on pid ${parkedPid} within ${BLOCK_WAIT_MS}ms`);
-  }
+  const race = () => createRaceHelpers(side.pool);
+  const holdRowLock: ReturnType<typeof createRaceHelpers>["holdRowLock"] = (...args) => race().holdRowLock(...args);
+  const waitForBackendBlockedBy: ReturnType<typeof createRaceHelpers>["waitForBackendBlockedBy"] = (...args) =>
+    race().waitForBackendBlockedBy(...args);
+  const settledOrBlocked: ReturnType<typeof createRaceHelpers>["settledOrBlocked"] = (...args) =>
+    race().settledOrBlocked(...args);
 
   /**
    * Park a real rotation inside its transaction (after it has read the team's
@@ -744,8 +671,13 @@ describe("team key rotation serialisation — real-DB integration", () => {
         [tenantId, seed.memberId],
       );
 
-      const res = await raceAgainstParkedRotation(seed, () =>
-        withTenantRls(prisma, tenantId, () => deactivateScimUser(tenantId, seed.memberId)),
+      // Parked on the OWNER's users row: the deletion records the departure,
+      // whose FK check takes KEY SHARE on the deleted member's users row, and
+      // would otherwise wait on the blocker rather than on the rotation.
+      const res = await raceAgainstParkedRotation(
+        seed,
+        () => withTenantRls(prisma, tenantId, () => deactivateScimUser(tenantId, seed.memberId)),
+        seed.ownerId,
       );
 
       const memberships = await ctx.su.pool.query(

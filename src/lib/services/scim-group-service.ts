@@ -5,7 +5,8 @@
  */
 
 import { prisma, type TxOrPrisma } from "@/lib/prisma";
-import { lockTeamsAgainstRotation } from "@/lib/team/team-key-rotation-lock";
+import { type LockBudget, createLockBudget, lockTeamsAgainstRotation } from "@/lib/team/team-key-rotation-lock";
+import { type LockedTenantRow, lockTenantRows } from "@/lib/team/tenant-row-lock";
 import type { TeamRole } from "@prisma/client";
 import type { ScimGroupMemberInput, ScimGroupResource } from "@/lib/scim/serializers";
 import type { GroupMemberAction } from "@/lib/scim/patch-parser";
@@ -138,20 +139,40 @@ async function loadGroupMembers(
 
 type TxClient = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 
+/**
+ * Lock order for a group write (tenant-row-lock.ts): the tenant rows of the
+ * users it may admit, then the team. Returns the locked rows for
+ * applyAddOperations.
+ */
+async function lockGroupWrite(
+  tx: TxClient,
+  tenantId: string,
+  teamId: string,
+  admitUserIds: readonly string[],
+): Promise<Map<string, LockedTenantRow>> {
+  const budget: LockBudget = createLockBudget();
+  const rows = await lockTenantRows(tx, tenantId, admitUserIds, "share", budget);
+  // Deactivation serialises with key rotation (team-key-rotation-lock.ts).
+  await lockTeamsAgainstRotation(tx, [teamId], budget);
+  return rows;
+}
+
 async function applyAddOperations(
   tx: TxClient,
   teamId: string,
   tenantId: string,
   role: TeamRole,
   userIds: string[],
+  tenantRows: ReadonlyMap<string, LockedTenantRow>,
 ): Promise<void> {
   if (userIds.length === 0) return;
 
-  const existingMembers = await tx.teamMember.findMany({
-    where: { teamId, userId: { in: userIds }, deactivatedAt: null },
-    select: { id: true, userId: true, role: true },
+  const memberships = await tx.teamMember.findMany({
+    where: { teamId, userId: { in: userIds } },
+    select: { id: true, userId: true, role: true, deactivatedAt: true, deactivatedByTenant: true },
   });
-  const existingByUserId = new Map(existingMembers.map((m) => [m.userId, m]));
+  const existingMembers = memberships.filter((m) => m.deactivatedAt === null);
+  const membershipByUserId = new Map(memberships.map((m) => [m.userId, m]));
 
   for (const m of existingMembers) {
     if (m.role === TEAM_ROLE.OWNER) {
@@ -160,19 +181,23 @@ async function applyAddOperations(
   }
 
   const toUpdateRole = existingMembers.filter((m) => m.role !== role);
-  const toCreateUserIds = userIds.filter((uid) => !existingByUserId.has(uid));
+  const toCreateUserIds: string[] = [];
+  const toReactivate: { id: string; userId: string }[] = [];
+  for (const uid of userIds) {
+    const membership = membershipByUserId.get(uid);
+    if (membership?.deactivatedAt === null) continue;
+    const tenantRow = tenantRows.get(uid);
+    const activeInTenant = tenantRow?.hasRow === true && tenantRow.deactivatedAt === null;
+    // A user who left the tenant and whose membership the departure ended is
+    // still in the IdP's group: already present, and the marker stays so a
+    // return restores the membership.
+    if (!activeInTenant && membership?.deactivatedByTenant) continue;
+    if (!activeInTenant) throw new Error(`SCIM_NO_SUCH_MEMBER:${uid}`);
+    if (membership) toReactivate.push({ id: membership.id, userId: uid });
+    else toCreateUserIds.push(uid);
+  }
 
   if (toCreateUserIds.length > 0) {
-    const tenantMembers = await tx.tenantMember.findMany({
-      where: { tenantId, userId: { in: toCreateUserIds }, deactivatedAt: null },
-      select: { userId: true },
-    });
-    const activeTenantUserIds = new Set(tenantMembers.map((m) => m.userId));
-    for (const uid of toCreateUserIds) {
-      if (!activeTenantUserIds.has(uid)) {
-        throw new Error(`SCIM_NO_SUCH_MEMBER:${uid}`);
-      }
-    }
     await tx.teamMember.createMany({
       data: toCreateUserIds.map((uid) => ({
         teamId,
@@ -181,6 +206,19 @@ async function applyAddOperations(
         role,
         scimManaged: true,
       })),
+    });
+  }
+
+  // A deactivated membership of an active tenant member is reactivated in
+  // place (a create collided on the (team, user) key): without its stale keys,
+  // so the member is distributed the current one.
+  if (toReactivate.length > 0) {
+    await tx.teamMemberKey.deleteMany({
+      where: { teamId, userId: { in: toReactivate.map((m) => m.userId) } },
+    });
+    await tx.teamMember.updateMany({
+      where: { id: { in: toReactivate.map((m) => m.id) } },
+      data: { deactivatedAt: null, deactivatedByTenant: false, keyDistributed: false, scimManaged: true, role },
     });
   }
 
@@ -202,7 +240,7 @@ async function applyRemoveOperations(
 
   const freshMembers = await tx.teamMember.findMany({
     where: { id: { in: memberIds }, teamId },
-    select: { id: true, role: true },
+    select: { id: true, role: true, deactivatedAt: true, deactivatedByTenant: true },
   });
 
   for (const m of freshMembers) {
@@ -212,12 +250,22 @@ async function applyRemoveOperations(
   }
 
   const toRemove = freshMembers.filter((m) => m.role === role);
-  if (toRemove.length > 0) {
+  const active = toRemove.filter((m) => m.deactivatedAt === null);
+  if (active.length > 0) {
     // Deactivate members removed from the group (not downgrade to MEMBER,
     // which would be a privilege escalation for VIEWER role)
     await tx.teamMember.updateMany({
-      where: { id: { in: toRemove.map((m) => m.id) } },
+      where: { id: { in: active.map((m) => m.id) } },
       data: { deactivatedAt: new Date() },
+    });
+  }
+  // A membership the user's tenant departure ended, now also removed from
+  // the group: it stays deactivated, and a return no longer restores it.
+  const departed = toRemove.filter((m) => m.deactivatedAt !== null && m.deactivatedByTenant);
+  if (departed.length > 0) {
+    await tx.teamMember.updateMany({
+      where: { id: { in: departed.map((m) => m.id) } },
+      data: { deactivatedByTenant: false },
     });
   }
 }
@@ -328,12 +376,16 @@ export async function replaceScimGroup(
   let removedCount = 0;
 
   const runReplace = async (tx: TxClient) => {
-    // Deactivation serialises with key rotation (team-key-rotation-lock.ts);
-    // taken first, before the member reads and writes below.
-    await lockTeamsAgainstRotation(tx, [mapping.teamId]);
-    // Compute delta inside transaction to avoid TOCTOU race
+    const tenantRows = await lockGroupWrite(tx, tenantId, mapping.teamId, [...requestedUserIds]);
+    // Compute delta inside transaction to avoid TOCTOU race. A membership the
+    // user's tenant departure ended is still the group's: listed by the IdP it
+    // is kept as it is, omitted it is removed (applyRemoveOperations).
     const currentMembers = await tx.teamMember.findMany({
-      where: { teamId: mapping.teamId, role: mapping.role, deactivatedAt: null },
+      where: {
+        teamId: mapping.teamId,
+        role: mapping.role,
+        OR: [{ deactivatedAt: null }, { deactivatedByTenant: true }],
+      },
       select: { id: true, userId: true, role: true },
     });
     const currentUserIds = new Set(currentMembers.map((m) => m.userId));
@@ -341,7 +393,7 @@ export async function replaceScimGroup(
     const toAdd = [...requestedUserIds].filter((uid) => !currentUserIds.has(uid));
     const toRemove = currentMembers.filter((m) => !requestedUserIds.has(m.userId));
 
-    await applyAddOperations(tx, mapping.teamId, tenantId, mapping.role, toAdd);
+    await applyAddOperations(tx, mapping.teamId, tenantId, mapping.role, toAdd, tenantRows);
     await applyRemoveOperations(tx, mapping.teamId, mapping.role, toRemove.map((m) => m.id));
 
     return { added: toAdd.length, removed: toRemove.length };
@@ -410,13 +462,11 @@ export async function patchScimGroup(
   if (!mapping) throw new ScimGroupNotFoundError();
 
   const runPatch = async (tx: TxClient) => {
-    // Deactivation serialises with key rotation (team-key-rotation-lock.ts);
-    // taken first, before the member reads and writes below.
-    await lockTeamsAgainstRotation(tx, [mapping.teamId]);
     const addOps = operations.filter((a) => a.op === "add");
     const removeOps = operations.filter((a) => a.op === "remove");
+    const tenantRows = await lockGroupWrite(tx, tenantId, mapping.teamId, addOps.map((a) => a.userId));
 
-    await applyAddOperations(tx, mapping.teamId, tenantId, mapping.role, addOps.map((a) => a.userId));
+    await applyAddOperations(tx, mapping.teamId, tenantId, mapping.role, addOps.map((a) => a.userId), tenantRows);
 
     // Remove: validate existence before delegating
     if (removeOps.length > 0) {

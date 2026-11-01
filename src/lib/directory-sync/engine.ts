@@ -12,6 +12,10 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { withTenantRls } from "@/lib/tenant-rls";
+import { createLockBudget } from "@/lib/team/team-key-rotation-lock";
+import { lockTenantRows } from "@/lib/team/tenant-row-lock";
+import { departCreatedMembership, departFromTenant, returnToTenant } from "@/lib/team/team-departure";
+import { TEAM_MEMBERSHIP_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 import {
   resolveExistingUsersForTenant,
   usersActiveInAnotherTenant,
@@ -546,6 +550,28 @@ export async function runDirectorySync(
         const allUserIds = toCreate
           .map((pu) => userByEmail.get(pu.email.toLowerCase())?.id)
           .filter((id): id is string => id !== undefined);
+
+        // Every tenant membership row this run may create, depart or return,
+        // locked in ONE call before any team lock (tenant-row-lock.ts): a
+        // per-user lock taken after an earlier user's team locks closes a
+        // deadlock cycle with a writer holding the later user's row. The
+        // transitions themselves run once each, after the loops.
+        const budget = createLockBudget();
+        await lockTenantRows(
+          tx,
+          tenantId,
+          [...allUserIds, ...toUpdate.map(({ internalId }) => internalId), ...toDeactivate],
+          "update",
+          budget,
+        );
+        const departIds: string[] = [];
+        const returnIds: string[] = [];
+        const createdDeactivated: string[] = [];
+        const actor = {
+          userId: resolveAuditUserId(actorUserId, "system"),
+          actorType: actorUserId ? ACTOR_TYPE.HUMAN : ACTOR_TYPE.SYSTEM,
+        };
+
         const existingTenantMembers = await tx.tenantMember.findMany({
           where: { tenantId, userId: { in: allUserIds } },
           select: { id: true, userId: true, deactivatedAt: true },
@@ -586,17 +612,23 @@ export async function runDirectorySync(
             // deactivated, so the mapping lands and a later legitimate
             // reactivation has a row to flip.
             const activeInAnother = activeElsewhere.emails.has(pu.email.toLowerCase());
+            const createsDeactivated = !pu.active || activeInAnother;
+            // A row created deactivated is a departure for a user who holds
+            // memberships of this tenant's teams as a guest; the placeholder
+            // stamp only satisfies the one-active-row index and is replaced
+            // with the database clock by departCreatedMembership below.
             const created = await tx.tenantMember.create({
               data: {
                 tenantId,
                 userId: user.id,
                 role: TENANT_ROLE.MEMBER,
-                deactivatedAt: pu.active && !activeInAnother ? null : new Date(),
+                deactivatedAt: createsDeactivated ? new Date() : null,
                 scimManaged: true,
                 provisioningSource: "SCIM",
                 lastScimSyncedAt: new Date(),
               },
             });
+            if (createsDeactivated) createdDeactivated.push(user.id);
             // Only when the IdP asked for an ACTIVE member and the guard said no.
             // A member the IdP itself sent as inactive is not a refusal.
             if (pu.active && activeInAnother) {
@@ -631,11 +663,12 @@ export async function runDirectorySync(
                 reason: refusal,
               });
             } else {
-              // Reactivate
+              // Reactivate, through returnToTenant below.
               await tx.tenantMember.update({
                 where: { id: existing.id },
-                data: { deactivatedAt: null, lastScimSyncedAt: new Date() },
+                data: { lastScimSyncedAt: new Date() },
               });
+              returnIds.push(user.id);
               activated.push(user.id);
             }
           }
@@ -696,17 +729,15 @@ export async function runDirectorySync(
               : ownedElsewhere.has(internalId)
                 ? REFUSAL_REASON.OWNED_BY_ANOTHER_TENANT
                 : null;
+          // The active state moves through departFromTenant / returnToTenant
+          // below; departure stamps once, so a repeat of an inactive member
+          // (a rename, a re-run) leaves the stamp and any re-admitted team
+          // membership alone.
           await tx.tenantMember.update({
             where: { id: member.id },
-            data: {
-              deactivatedAt: refusal
-                ? member.deactivatedAt
-                : pu.active
-                  ? null
-                  : new Date(),
-              lastScimSyncedAt: new Date(),
-            },
+            data: { lastScimSyncedAt: new Date() },
           });
+          if (!refusal) (pu.active ? returnIds : departIds).push(internalId);
 
           usersUpdated++;
           if (refusal) {
@@ -722,6 +753,11 @@ export async function runDirectorySync(
           }
         }
 
+        // The transitions take team locks after the loops above: a fresh
+        // deadline, so the waits stay bounded while the run's own work between
+        // the tenant-row lock and here does not count against them.
+        const transitionBudget = createLockBudget();
+
         // Deactivate users no longer in provider (batch, OWNER-safe)
         if (toDeactivate.length > 0) {
           const memberIds = toDeactivate
@@ -729,21 +765,26 @@ export async function runDirectorySync(
             .filter((id): id is string => id != null);
 
           if (memberIds.length > 0) {
-            const result = await tx.tenantMember.updateMany({
+            await tx.tenantMember.updateMany({
               where: {
                 id: { in: memberIds },
                 tenantId,
                 role: { not: TENANT_ROLE.OWNER },
               },
-              data: {
-                deactivatedAt: new Date(),
-                lastScimSyncedAt: new Date(),
-              },
+              data: { lastScimSyncedAt: new Date() },
             });
-            usersDeactivated = result.count;
+            const batch = toDeactivate.filter((userId) => memberByUserId.has(userId));
+            // Counts transitions: a member already inactive is not deactivated again.
+            usersDeactivated = (
+              await departFromTenant(tx, tenantId, batch, { actor, budget: transitionBudget, alreadyLocked: true })
+            ).length;
           }
         }
-      });
+
+        await departFromTenant(tx, tenantId, departIds, { actor, budget: transitionBudget, alreadyLocked: true });
+        await returnToTenant(tx, tenantId, returnIds, { actor, budget: transitionBudget, alreadyLocked: true });
+        await departCreatedMembership(tx, tenantId, createdDeactivated, { actor, budget: transitionBudget });
+      }, { timeout: TEAM_MEMBERSHIP_TX_TIMEOUT_MS });
       // After the commit, so a rolled-back run cannot leave a refusal in the
       // trail. Best-effort, like every other emit on this path — the durable
       // record of the count is the sync log row written below.

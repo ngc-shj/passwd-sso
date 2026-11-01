@@ -109,6 +109,8 @@ export type NonCounterWriteHandle = keyof typeof NON_COUNTER_WRITES;
  */
 export const TENANT_OWNED_LEFT = {
   teamMember: "a team membership; teams are not migrated",
+  tenantMemberDeparture:
+    "the record that a SCIM DELETE ended a membership of a (non-bootstrap) tenant; it stays with that tenant",
   teamPasswordEntry: "team-owned; teams are not migrated",
   teamPasswordEntryHistory: "team-owned; teams are not migrated",
   teamInvitation: "team-owned; teams are not migrated",

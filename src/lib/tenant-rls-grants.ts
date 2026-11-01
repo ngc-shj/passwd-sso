@@ -23,6 +23,7 @@ export const MODEL_TABLE = {
   team: "teams",
   tenant: "tenants",
   tenantMember: "tenant_members",
+  tenantMemberDeparture: "tenant_member_departures",
   scimGroupMapping: "scim_group_mappings",
   teamMember: "team_members",
   teamMemberKey: "team_member_keys",
@@ -269,24 +270,37 @@ export async function setLockTimeout(
 }
 
 /**
- * The transaction's current lock_timeout, as `current_setting` spells it
- * ("0", "3s", "1500ms"), for restoring it after a bounded wait.
+ * The transaction's lock_timeout and statement_timeout, for restoring both
+ * after a bounded lock wait. lock_timeout bounds each lock acquisition, so a
+ * statement taking several locks needs statement_timeout to bound it whole.
  */
-export async function readLockTimeout(tx: Pick<Prisma.TransactionClient, "$queryRaw">): Promise<string> {
-  const [row] = await tx.$queryRaw<{ lock_timeout: string }[]>`
-    SELECT current_setting('lock_timeout') AS lock_timeout
+export type WaitTimeouts = { lockTimeout: string; statementTimeout: string };
+
+export async function readWaitTimeouts(tx: Pick<Prisma.TransactionClient, "$queryRaw">): Promise<WaitTimeouts> {
+  const [row] = await tx.$queryRaw<{ lock_timeout: string; statement_timeout: string }[]>`
+    SELECT current_setting('lock_timeout') AS lock_timeout, current_setting('statement_timeout') AS statement_timeout
   `;
-  if (!row) throw new Error("lock_timeout read returned no row");
-  return row.lock_timeout;
+  if (!row) throw new Error("wait timeout read returned no row");
+  return { lockTimeout: row.lock_timeout, statementTimeout: row.statement_timeout };
 }
 
-/** `SET LOCAL lock_timeout` back to a value readLockTimeout returned. */
-export async function restoreLockTimeout(
+/** `SET LOCAL` lock_timeout to `lockMs` and statement_timeout to `statementMs`. */
+export async function setWaitTimeouts(
   tx: Pick<Prisma.TransactionClient, "$executeRaw">,
-  value: string,
+  lockMs: number,
+  statementMs: number,
 ): Promise<void> {
-  if (!/^\d+(us|ms|s|min|h|d)?$/.test(value)) throw new Error("not a lock_timeout value");
-  await tx.$executeRaw`SELECT set_config('lock_timeout', ${value}, true)`;
+  for (const ms of [lockMs, statementMs]) {
+    if (!Number.isInteger(ms) || ms <= 0) throw new Error("wait timeout must be a positive integer of milliseconds");
+  }
+  await tx.$executeRaw`SELECT set_config('lock_timeout', ${`${lockMs}ms`}, true), set_config('statement_timeout', ${`${statementMs}ms`}, true)`;
+}
+
+/** `SET LOCAL` both back to values readWaitTimeouts returned. */
+export async function restoreWaitTimeouts(tx: Pick<Prisma.TransactionClient, "$executeRaw">, value: WaitTimeouts): Promise<void> {
+  const valid = /^\d+(us|ms|s|min|h|d)?$/;
+  if (!valid.test(value.lockTimeout) || !valid.test(value.statementTimeout)) throw new Error("not a timeout value");
+  await tx.$executeRaw`SELECT set_config('lock_timeout', ${value.lockTimeout}, true), set_config('statement_timeout', ${value.statementTimeout}, true)`;
 }
 
 export type BypassState = {

@@ -61,7 +61,8 @@ export default function TeamTransferOwnershipPage({
   const [transferSearch, setTransferSearch] = useState("");
   const viewerTenantName = members.find((m) => m.role === TEAM_ROLE.OWNER)?.tenantName ?? null;
   const transferCandidates = filterMembers(
-    members.filter((m) => m.role !== TEAM_ROLE.OWNER),
+    // A member who left the tenant cannot take ownership (PUT refuses them).
+    members.filter((m) => m.role !== TEAM_ROLE.OWNER && !m.departed),
     transferSearch,
   );
 

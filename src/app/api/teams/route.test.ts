@@ -34,6 +34,11 @@ vi.mock("@/lib/prisma", () => ({
     team: mockPrismaTeam,
   },
 }));
+const { mockLockTenantRows } = vi.hoisted(() => ({ mockLockTenantRows: vi.fn() }));
+vi.mock("@/lib/team/tenant-row-lock", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
+  lockTenantRows: mockLockTenantRows,
+}));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
   resolveUserTenantIdFromClient: mockResolveUserTenantIdFromClient,
@@ -244,7 +249,47 @@ describe("POST /api/teams (E2E-only)", () => {
     vi.resetAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
     mockRequireTenantPermission.mockResolvedValue({ id: "tm-1", tenantId: "tenant-1", role: "ADMIN" });
-    mockWithUserTenantRls.mockImplementation(async (_userId: string, fn: () => unknown) => fn());
+    // The create runs as fn(tenantId, tx); tx is the prisma mock.
+    mockWithUserTenantRls.mockImplementation(async (_userId: string, fn: (tenantId: string, tx: unknown) => unknown) =>
+      fn("tenant-1", (await import("@/lib/prisma")).prisma));
+    mockLockTenantRows.mockResolvedValue(new Map([["test-user-id", { hasRow: true, deactivatedAt: null, departedAt: null }]]));
+  });
+
+  describe("the creator's tenant membership", () => {
+    const body = {
+      id: "550e8400-e29b-41d4-a716-446655440000",
+      name: "E2E Team",
+      slug: "e2e-team",
+      teamMemberKey: {
+        encryptedTeamKey: "encrypted-team-key-data",
+        teamKeyIv: "a".repeat(24),
+        teamKeyAuthTag: "b".repeat(32),
+        ephemeralPublicKey: '{"kty":"EC","crv":"P-256","x":"test","y":"test"}',
+        hkdfSalt: "c".repeat(64),
+        keyVersion: 1,
+      },
+    };
+
+    it("refuses with 403, creating nothing, when the creator left the tenant after the permission check", async () => {
+      mockPrismaTeam.findUnique.mockResolvedValue(null);
+      mockLockTenantRows.mockResolvedValue(new Map([["test-user-id", { hasRow: true, deactivatedAt: new Date(), departedAt: null }]]));
+
+      const res = await POST(createRequest("POST", "http://localhost:3000/api/teams", { body }));
+
+      expect(res.status).toBe(403);
+      expect(mockPrismaTeam.create).not.toHaveBeenCalled();
+    });
+
+    it("locks the creator's tenant row before creating the team", async () => {
+      mockPrismaTeam.findUnique.mockResolvedValue(null);
+      mockPrismaTeam.create.mockResolvedValue({ id: "t", name: "n", slug: "s", description: null, createdAt: new Date() });
+
+      const res = await POST(createRequest("POST", "http://localhost:3000/api/teams", { body }));
+
+      expect(res.status).toBe(201);
+      expect(mockLockTenantRows).toHaveBeenCalledWith(expect.anything(), "tenant-1", ["test-user-id"], "share");
+      expect(mockLockTenantRows.mock.invocationCallOrder[0]).toBeLessThan(mockPrismaTeam.create.mock.invocationCallOrder[0]);
+    });
   });
 
   const validE2EBody = {

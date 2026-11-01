@@ -9,7 +9,7 @@ export function teamLockQuery(
 ) {
   return async (strings: TemplateStringsArray, ...values: unknown[]) => {
     const sql = strings.join("?");
-    if (sql.includes("current_setting('lock_timeout')")) return [{ lock_timeout: "0" }];
+    if (sql.includes("current_setting('lock_timeout')")) return [{ lock_timeout: "0", statement_timeout: "0" }];
     return typeof answer === "function" ? answer(sql, values) : answer;
   };
 }

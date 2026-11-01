@@ -160,6 +160,10 @@ INSERT INTO tenant_members (id, tenant_id, user_id, role, updated_at) VALUES
   (gen_random_uuid(), '00000000-0000-0000-0000-0000000000A0', '00000000-0000-0000-0000-0000000000A1', 'OWNER', NOW()),
   (gen_random_uuid(), '00000000-0000-0000-0000-0000000000B0', '00000000-0000-0000-0000-0000000000B1', 'OWNER', NOW());
 
+INSERT INTO tenant_member_departures (tenant_id, user_id, departed_at) VALUES
+  ('00000000-0000-0000-0000-0000000000A0', '00000000-0000-0000-0000-0000000000A1', NOW()),
+  ('00000000-0000-0000-0000-0000000000B0', '00000000-0000-0000-0000-0000000000B1', NOW());
+
 INSERT INTO tenant_webhooks (id, tenant_id, url, secret_encrypted, secret_iv, secret_auth_tag, updated_at) VALUES
   (gen_random_uuid(), '00000000-0000-0000-0000-0000000000A0', 'https://rls-x-a.test/hook', 'enc', 'aabbccddeeff00112233aabb', 'aabbccddeeff00112233aabbccddeeff', NOW()),
   (gen_random_uuid(), '00000000-0000-0000-0000-0000000000B0', 'https://rls-x-b.test/hook', 'enc', 'aabbccddeeff00112233aabb', 'aabbccddeeff00112233aabbccddeeff', NOW());

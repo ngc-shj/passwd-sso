@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { TeamInvitation } from "@prisma/client";
 import { randomBytes } from "node:crypto";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
 import { inviteSchema } from "@/lib/validations";
-import { requireTeamPermission } from "@/lib/auth/access/team-auth";
+import { activeTeamRole, hasTeamPermission, requireTeamPermission } from "@/lib/auth/access/team-auth";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import { INVITATION_STATUS, TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
@@ -16,6 +17,11 @@ import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/ht
 import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import { TEAM_INVITATION_TTL_MS } from "@/lib/constants/team/invitation";
 import { displayIdentityOf, fetchUserDisplayMap } from "@/lib/audit/audit-user-lookup";
+import { TEAM_MEMBERSHIP_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
+import { createLockBudget, lockTeamsAgainstRotation } from "@/lib/team/team-key-rotation-lock";
+import { departedSince, isMembershipLockConflict, lockTenantRows } from "@/lib/team/tenant-row-lock";
+
+const ISSUE_OUTCOME = { ISSUED: "issued", ALREADY_SENT: "already_sent", INVITER_GONE: "inviter_gone" } as const;
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -82,72 +88,119 @@ async function handlePOST(req: NextRequest, { params }: Params) {
 
   const { email, role } = result.data;
 
-  const teamContextPromise = withTeamTenantRls(teamId, async () => {
-    const existingInv = await prisma.teamInvitation.findFirst({
-      where: { teamId: teamId, email, status: INVITATION_STATUS.PENDING },
-    });
-    const team = await prisma.team.findUnique({
+  const teamContextPromise = withTeamTenantRls(teamId, async () =>
+    prisma.team.findUnique({
       where: { id: teamId },
       select: { tenantId: true },
-    });
-    return [existingInv, team] as const;
-  });
+    }),
+  );
 
   // Existing-user lookup must bypass team tenant RLS so guest users from a
   // different home tenant are still recognized as already-added team members.
-  // Only id is needed downstream — fetching the full row would expose
+  // Case-insensitive, as accept compares the address: `users.email` is unique
+  // only as typed, so every case variant is a candidate invitee. Only id is
+  // needed downstream — fetching the full row would expose
   // private-key-encryption material across tenants if the row leaks via logs.
-  const existingUserPromise = withBypassRls(prisma, (tx) =>
-    tx.user.findUnique({ where: { email }, select: { id: true } }),
+  const existingUsersPromise = withBypassRls(prisma, (tx) =>
+    tx.user.findMany({ where: { email: { equals: email, mode: "insensitive" } }, select: { id: true } }),
   BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP);
 
-  const [[existingInv, team], existingUser] = await Promise.all([
-    teamContextPromise,
-    existingUserPromise,
-  ]);
+  const [team, existingUsers] = await Promise.all([teamContextPromise, existingUsersPromise]);
 
   if (!team) {
     return notFound();
   }
 
-  if (existingInv) {
-    return errorResponse(API_ERROR.INVITATION_ALREADY_SENT);
-  }
-
-  if (existingUser) {
-    const existingMember = await withTeamTenantRls(teamId, async () =>
-      prisma.teamMember.findUnique({
-        where: {
-          teamId_userId: { teamId: teamId, userId: existingUser.id },
-        },
+  const inviteeIds = existingUsers.map((user) => user.id);
+  if (inviteeIds.length > 0) {
+    const existingMembers = await withTeamTenantRls(teamId, async () =>
+      prisma.teamMember.findMany({
+        where: { teamId: teamId, userId: { in: inviteeIds } },
+        select: { deactivatedAt: true, scimManaged: true, deactivatedByTenant: true },
       }),
     );
-    if (existingMember) {
-      if (existingMember.deactivatedAt === null) {
-        return errorResponse(API_ERROR.ALREADY_A_MEMBER);
-      }
-      if (existingMember.scimManaged) {
-        return errorResponse(API_ERROR.SCIM_MANAGED_MEMBER);
-      }
+    if (existingMembers.some((member) => member.deactivatedAt === null)) {
+      return errorResponse(API_ERROR.ALREADY_A_MEMBER);
+    }
+    // A membership the IdP's group removal ended stays the IdP's; one ended
+    // by the user's departure from the tenant is re-invitable.
+    if (existingMembers.some((member) => member.scimManaged && !member.deactivatedByTenant)) {
+      return errorResponse(API_ERROR.SCIM_MANAGED_MEMBER);
     }
   }
 
   const token = randomBytes(32).toString("hex");
   const expiresAt = new Date(Date.now() + TEAM_INVITATION_TTL_MS);
 
-  const invitation = await withTeamTenantRls(teamId, async () =>
-    prisma.teamInvitation.create({
-      data: {
-        teamId: teamId,
-        tenantId: team.tenantId,
-        email,
-        role,
-        token,
-        expiresAt,
-        invitedById: session.user.id,
+  // Issued under the inviter's and the invitees' tenant rows (FOR SHARE,
+  // tenant-row-lock.ts): a departure of the inviter waits for this commit and
+  // then expires the invitation, and a departure of an invitee orders before
+  // or after `created_at`, which the database stamps at insert. A PENDING
+  // invitation issued before the invitee left no longer admits (accept
+  // refuses it), so it is expired here rather than blocking a new one.
+  let issued: { outcome: typeof ISSUE_OUTCOME.ALREADY_SENT } | { outcome: typeof ISSUE_OUTCOME.INVITER_GONE } | {
+    outcome: typeof ISSUE_OUTCOME.ISSUED;
+    invitation: TeamInvitation;
+  };
+  try {
+    issued = await withTeamTenantRls(
+      teamId,
+      async (_tenantId, tx) => {
+        const budget = createLockBudget();
+        const rows = await lockTenantRows(tx, team.tenantId, [session.user.id, ...inviteeIds], "share", budget);
+        // The team too (after the tenant rows, as every writer orders them), so
+        // a removal or demotion of the inviter is serialised as well.
+        await lockTeamsAgainstRotation(tx, [teamId], budget);
+        // The inviter's authority, re-read under those locks: a departure that
+        // committed after requireTeamPermission ended their membership and
+        // expired their invitations, and an invitation stamped after it would
+        // read as issued after the departure.
+        const inviterRole = await activeTeamRole(tx, teamId, session.user.id);
+        if (!inviterRole || !hasTeamPermission(inviterRole, TEAM_PERMISSION.MEMBER_INVITE)) {
+          return { outcome: ISSUE_OUTCOME.INVITER_GONE };
+        }
+        const pending = await tx.teamInvitation.findMany({
+          where: { teamId: teamId, status: INVITATION_STATUS.PENDING, email: { equals: email, mode: "insensitive" } },
+          select: { id: true, createdAt: true },
+        });
+        for (const existing of pending) {
+          if (!inviteeIds.some((id) => departedSince(rows.get(id), existing.createdAt))) {
+            return { outcome: ISSUE_OUTCOME.ALREADY_SENT };
+          }
+        }
+        if (pending.length > 0) {
+          await tx.teamInvitation.updateMany({
+            where: { id: { in: pending.map((inv) => inv.id) }, status: INVITATION_STATUS.PENDING },
+            data: { status: INVITATION_STATUS.EXPIRED },
+          });
+        }
+        const invitation = await tx.teamInvitation.create({
+          data: {
+            teamId: teamId,
+            tenantId: team.tenantId,
+            email,
+            role,
+            token,
+            expiresAt,
+            invitedById: session.user.id,
+          },
+        });
+        return { outcome: ISSUE_OUTCOME.ISSUED, invitation };
       },
-    }),
-  );
+      { timeout: TEAM_MEMBERSHIP_TX_TIMEOUT_MS },
+    );
+  } catch (e) {
+    if (isMembershipLockConflict(e)) return errorResponse(API_ERROR.CONFLICT);
+    throw e;
+  }
+
+  if (issued.outcome === ISSUE_OUTCOME.INVITER_GONE) {
+    return errorResponse(API_ERROR.FORBIDDEN);
+  }
+  if (issued.outcome === ISSUE_OUTCOME.ALREADY_SENT) {
+    return errorResponse(API_ERROR.INVITATION_ALREADY_SENT);
+  }
+  const { invitation } = issued;
 
   await logAuditAsync({
     ...teamAuditBase(req, session.user.id, teamId),

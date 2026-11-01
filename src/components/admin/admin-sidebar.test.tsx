@@ -76,6 +76,7 @@ function makeAdminTeam(
     role: TEAM_ROLE.ADMIN,
     deactivatedAt: null,
     scimManaged: false,
+    deactivatedByTenant: false,
     teamId: id,
     keyDistributed: true,
     team: {

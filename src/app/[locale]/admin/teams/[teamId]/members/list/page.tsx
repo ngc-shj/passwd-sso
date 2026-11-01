@@ -3,6 +3,7 @@
 import { useEffect, useState, use, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { TeamRoleBadge } from "@/components/team/management/team-role-badge";
+import { Badge } from "@/components/ui/badge";
 import { TeamAddFromTenantSection } from "@/components/team/members/team-add-from-tenant-section";
 import { TeamInviteByEmailSection } from "@/components/team/members/team-invite-by-email-section";
 import { TeamPendingInvitationsList } from "@/components/team/members/team-pending-invitations-list";
@@ -267,18 +268,26 @@ export default function TeamMembersPage({
                     tenantName={m.tenantName}
                     viewerTenantName={viewerTenantName}
                   />
+                  {m.departed && (
+                    <Badge variant="outline" title={t("departedMemberHint")}>
+                      {t("departedMember")}
+                    </Badge>
+                  )}
                   {isAdmin && m.role !== TEAM_ROLE.OWNER && m.userId !== currentUserId ? (
                     <div className="flex items-center gap-2">
-                      <Select value={m.role} onValueChange={(v) => handleChangeRole(m.id, v)}>
-                        <SelectTrigger className="w-28 h-8">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value={TEAM_ROLE.ADMIN}>{t("roleAdmin")}</SelectItem>
-                          <SelectItem value={TEAM_ROLE.MEMBER}>{t("roleMember")}</SelectItem>
-                          <SelectItem value={TEAM_ROLE.VIEWER}>{t("roleViewer")}</SelectItem>
-                        </SelectContent>
-                      </Select>
+                      {/* A departed member's role cannot change; removal is the one action. */}
+                      {!m.departed && (
+                        <Select value={m.role} onValueChange={(v) => handleChangeRole(m.id, v)}>
+                          <SelectTrigger className="w-28 h-8">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={TEAM_ROLE.ADMIN}>{t("roleAdmin")}</SelectItem>
+                            <SelectItem value={TEAM_ROLE.MEMBER}>{t("roleMember")}</SelectItem>
+                            <SelectItem value={TEAM_ROLE.VIEWER}>{t("roleViewer")}</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      )}
                       <AlertDialog>
                         <AlertDialogTrigger asChild>
                           <Button variant="ghost" size="icon" className="h-8 w-8">

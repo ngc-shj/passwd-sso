@@ -14,8 +14,16 @@ const { mockAuth, mockPrismaTeamMember, mockPrismaTeamMemberKey, mockPrismaScimE
     mockAuth: vi.fn(),
     mockPrismaTeamMember: {
       findUnique: vi.fn(),
+      // The conditional writes under the team lock, and the re-read of the
+      // changed row for the response.
+      findUniqueOrThrow: vi.fn(),
+      // The acting member's role, re-read under the locks (activeTeamRole).
+      findFirst: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
+      count: vi.fn(),
       delete: vi.fn(),
+      deleteMany: vi.fn(),
     },
     mockPrismaTeamMemberKey: {
       deleteMany: vi.fn(),
@@ -57,9 +65,12 @@ vi.mock("@/lib/prisma", () => ({
     auditLog: { create: vi.fn().mockResolvedValue({}) },
   },
 }));
-vi.mock("@/lib/auth/access/team-auth", () => ({
+vi.mock("@/lib/auth/access/team-auth", async () => ({
   requireTeamPermission: mockRequireTeamPermission,
   isRoleAbove: mockIsRoleAbove,
+  // The real role reads and permission table: routes re-check the actor under their locks.
+  activeTeamRole: (await vi.importActual<typeof import("@/lib/auth/access/team-auth")>("@/lib/auth/access/team-auth")).activeTeamRole,
+  hasTeamPermission: (await vi.importActual<typeof import("@/lib/auth/access/team-auth")>("@/lib/auth/access/team-auth")).hasTeamPermission,
   TeamAuthError,
 }));
 vi.mock("@/lib/tenant-context", () => ({
@@ -98,6 +109,9 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
     mockRequireTeamPermission.mockResolvedValue(ownerMembership);
     mockIsRoleAbove.mockReturnValue(true);
+    mockTeamLockQuery.mockImplementation(teamLockQuery([{ id: TEAM_ID }]));
+    mockPrismaTeamMember.updateMany.mockResolvedValue({ count: 1 });
+    mockPrismaTeamMember.findFirst.mockResolvedValue({ role: TEAM_ROLE.OWNER });
     mockBuildTeamMemberDisplayItems.mockResolvedValue([
       {
         id: MEMBER_ID,
@@ -205,7 +219,7 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
       role: TEAM_ROLE.MEMBER,
       deactivatedAt: null,
     });
-    mockPrismaTeamMember.update.mockResolvedValue({
+    mockPrismaTeamMember.findUniqueOrThrow.mockResolvedValue({
       id: MEMBER_ID,
       userId: "target-user",
       role: TEAM_ROLE.ADMIN,
@@ -257,8 +271,7 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
         tenantName: "Guest Tenant",
       },
     ]);
-    mockPrismaTeamMember.update.mockResolvedValue(updatedOwner);
-    mockTransaction.mockResolvedValue([{}, updatedOwner]);
+    mockPrismaTeamMember.findUniqueOrThrow.mockResolvedValue(updatedOwner);
 
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`, {
@@ -269,10 +282,140 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.role).toBe(TEAM_ROLE.OWNER);
-    // Actor should be demoted to ADMIN
-    expect(mockPrismaTeamMember.update).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: ownerMembership.id, teamId: TEAM_ID }, data: { role: TEAM_ROLE.ADMIN } }),
+    // Actor should be demoted to ADMIN, the target promoted — each only
+    // while still an active member, under the team lock.
+    expect(mockPrismaTeamMember.updateMany).toHaveBeenCalledWith({
+      where: { id: ownerMembership.id, teamId: TEAM_ID, role: TEAM_ROLE.OWNER, deactivatedAt: null },
+      data: { role: TEAM_ROLE.ADMIN },
+    });
+    expect(mockPrismaTeamMember.updateMany).toHaveBeenCalledWith({
+      where: { id: MEMBER_ID, teamId: TEAM_ID, deactivatedAt: null },
+      data: { role: TEAM_ROLE.OWNER },
+    });
+  });
+
+  it("refuses the transfer, changing nothing, when the target left the tenant since the check", async () => {
+    mockPrismaTeamMember.findUnique.mockResolvedValue({
+      id: MEMBER_ID, teamId: TEAM_ID, userId: "target-user", role: TEAM_ROLE.ADMIN, deactivatedAt: null,
+    });
+    // Demoting the actor matches; promoting the target does not: their
+    // membership was deactivated by a departure committed in between.
+    mockPrismaTeamMember.updateMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 });
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`, { body: { role: TEAM_ROLE.OWNER } }),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
     );
+
+    expect(res.status).toBe(404);
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  it("refuses the transfer (403), changing nothing, when the acting OWNER was demoted since the check", async () => {
+    mockPrismaTeamMember.findUnique.mockResolvedValue({
+      id: MEMBER_ID, teamId: TEAM_ID, userId: "target-user", role: TEAM_ROLE.ADMIN, deactivatedAt: null,
+    });
+    mockPrismaTeamMember.findFirst.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`, { body: { role: TEAM_ROLE.OWNER } }),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
+    );
+
+    expect(res.status).toBe(403);
+    expect(mockPrismaTeamMember.updateMany).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  it("answers 409, changing nothing, when the transferring OWNER's tenant row is held past the lock wait", async () => {
+    mockPrismaTeamMember.findUnique.mockResolvedValue({
+      id: MEMBER_ID, teamId: TEAM_ID, userId: "target-user", role: TEAM_ROLE.ADMIN, deactivatedAt: null,
+    });
+    mockTeamLockQuery.mockImplementation(teamLockQuery((sql) => {
+      if (sql.includes("FROM tenant_members")) throw Object.assign(new Error("lock timeout"), { code: "55P03" });
+      return [{ id: TEAM_ID }];
+    }));
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`, { body: { role: TEAM_ROLE.OWNER } }),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
+    );
+
+    expect(res.status).toBe(409);
+    expect(mockPrismaTeamMember.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("refuses a role change when the acting member left the tenant since the permission check", async () => {
+    mockPrismaTeamMember.findUnique.mockResolvedValue({
+      id: MEMBER_ID, teamId: TEAM_ID, userId: "target-user", role: TEAM_ROLE.MEMBER, deactivatedAt: null,
+    });
+    mockPrismaTeamMember.findFirst.mockResolvedValue(null);
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`, { body: { role: TEAM_ROLE.ADMIN } }),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
+    );
+
+    expect(res.status).toBe(403);
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  it("refuses (403) a role change when the acting member was demoted to the target's rank since the check", async () => {
+    mockPrismaTeamMember.findUnique.mockResolvedValue({
+      id: MEMBER_ID, teamId: TEAM_ID, userId: "target-user", role: TEAM_ROLE.ADMIN, deactivatedAt: null,
+    });
+    mockPrismaTeamMember.findFirst.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
+    mockIsRoleAbove.mockImplementation((a: string, b: string) => a === "OWNER" && b !== "OWNER");
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`, { body: { role: TEAM_ROLE.MEMBER } }),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
+    );
+
+    expect(res.status).toBe(403);
+    expect(mockPrismaTeamMember.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("re-reads the acting member's role after their tenant row and the team are locked (PUT)", async () => {
+    mockPrismaTeamMember.findUnique.mockResolvedValue({
+      id: MEMBER_ID, teamId: TEAM_ID, userId: "target-user", role: TEAM_ROLE.MEMBER, deactivatedAt: null,
+    });
+    mockPrismaTeamMember.findUniqueOrThrow.mockResolvedValue({ id: MEMBER_ID, userId: "target-user", role: TEAM_ROLE.ADMIN, createdAt: new Date() });
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`, { body: { role: TEAM_ROLE.ADMIN } }),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockPrismaTeamMember.findFirst).toHaveBeenCalledWith({
+      where: { teamId: TEAM_ID, userId: "test-user-id", deactivatedAt: null },
+      select: { role: true },
+    });
+    const calls = lockQueryCalls(mockTeamLockQuery);
+    const actorRow = calls.find((c) => c.sql.includes("FROM tenant_members"))!;
+    const teamLock = calls.find((c) => c.sql.includes("FROM teams"))!;
+    expect(actorRow.values).toEqual(["tenant-1", ["test-user-id"]]);
+    expect(actorRow.order).toBeLessThan(teamLock.order);
+    expect(teamLock.order).toBeLessThan(mockPrismaTeamMember.findFirst.mock.invocationCallOrder[0]);
+  });
+
+  it("answers 409 when the acting member's tenant row is held past the lock wait (PUT)", async () => {
+    mockPrismaTeamMember.findUnique.mockResolvedValue({
+      id: MEMBER_ID, teamId: TEAM_ID, userId: "target-user", role: TEAM_ROLE.MEMBER, deactivatedAt: null,
+    });
+    mockTeamLockQuery.mockImplementation(teamLockQuery((sql) => {
+      if (sql.includes("FROM tenant_members")) throw Object.assign(new Error("lock timeout"), { code: "55P03" });
+      return [{ id: TEAM_ID }];
+    }));
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`, { body: { role: TEAM_ROLE.ADMIN } }),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
+    );
+
+    expect(res.status).toBe(409);
+    expect(mockPrismaTeamMember.updateMany).not.toHaveBeenCalled();
   });
 
   it("keeps a cross-tenant guest visible in the role update response", async () => {
@@ -284,7 +427,7 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
       role: TEAM_ROLE.MEMBER,
       deactivatedAt: null,
     });
-    mockPrismaTeamMember.update.mockResolvedValue({
+    mockPrismaTeamMember.findUniqueOrThrow.mockResolvedValue({
       id: MEMBER_ID,
       userId: "guest-user",
       role: TEAM_ROLE.ADMIN,
@@ -393,8 +536,7 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
     const json = await res.json();
     expect(res.status).toBe(403);
     expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
-    expect(mockPrismaTeamMember.update).not.toHaveBeenCalled();
-    expect(mockTransaction).not.toHaveBeenCalled();
+    expect(mockPrismaTeamMember.updateMany).not.toHaveBeenCalled();
     // Pins that step-up fires BEFORE the existence lookup — a future reorder
     // moving the gate after findUnique would reach this call and regress.
     expect(mockPrismaTeamMember.findUnique).not.toHaveBeenCalled();
@@ -421,6 +563,8 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
     mockRequireTeamPermission.mockResolvedValue(ownerMembership);
     mockIsRoleAbove.mockReturnValue(true);
+    mockPrismaTeamMember.deleteMany.mockResolvedValue({ count: 1 });
+    mockPrismaTeamMember.findFirst.mockResolvedValue({ role: TEAM_ROLE.OWNER });
   });
 
   it("returns TeamAuthError status when DELETE permission denied", async () => {
@@ -542,9 +686,126 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
     expect(mockPrismaTeamMemberKey.deleteMany).toHaveBeenCalledWith({
       where: { teamId: TEAM_ID, userId: "target-user" },
     });
-    expect(mockPrismaTeamMember.delete).toHaveBeenCalledWith({
-      where: { id: MEMBER_ID, teamId: TEAM_ID },
+    expect(mockPrismaTeamMember.deleteMany).toHaveBeenCalledWith({
+      // Pinned to the role the authorisation judged, so a promotion in between does not slip through.
+      where: { id: MEMBER_ID, teamId: TEAM_ID, role: TEAM_ROLE.MEMBER, OR: [{ deactivatedAt: null }, { deactivatedByTenant: true }] },
     });
+  });
+
+  it("removes a member whose membership ended with their departure from the tenant", async () => {
+    mockPrismaTeamMember.findUnique.mockResolvedValue({
+      id: MEMBER_ID, teamId: TEAM_ID, tenantId: "tenant-1", userId: "left-user", role: TEAM_ROLE.MEMBER,
+      deactivatedAt: new Date("2026-05-01"), deactivatedByTenant: true,
+    });
+
+    const res = await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockPrismaTeamMemberKey.deleteMany).toHaveBeenCalledWith({ where: { teamId: TEAM_ID, userId: "left-user" } });
+  });
+
+  it("does not remove a membership the IdP's group removal deactivated", async () => {
+    mockPrismaTeamMember.findUnique.mockResolvedValue({
+      id: MEMBER_ID, teamId: TEAM_ID, tenantId: "tenant-1", userId: "u", role: TEAM_ROLE.MEMBER,
+      deactivatedAt: new Date("2026-05-01"), deactivatedByTenant: false,
+    });
+
+    const res = await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
+    );
+
+    expect(res.status).toBe(404);
+    expect(mockPrismaTeamMember.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("answers 403, removing nothing, when the acting member left since the permission check", async () => {
+    mockPrismaTeamMember.findUnique.mockResolvedValue({
+      id: MEMBER_ID, teamId: TEAM_ID, tenantId: "tenant-1", userId: "u", role: TEAM_ROLE.MEMBER, deactivatedAt: null,
+    });
+    mockPrismaTeamMember.findFirst.mockResolvedValue(null);
+
+    const res = await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
+    );
+
+    expect(res.status).toBe(403);
+    expect(mockPrismaTeamMember.deleteMany).not.toHaveBeenCalled();
+    expect(mockPrismaTeamMemberKey.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("re-reads the acting member's role after the team lock, scoped to the actor", async () => {
+    mockPrismaTeamMember.findUnique.mockResolvedValue({
+      id: MEMBER_ID, teamId: TEAM_ID, tenantId: "tenant-1", userId: "target-user", role: TEAM_ROLE.MEMBER, deactivatedAt: null,
+    });
+
+    const res = await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockPrismaTeamMember.findFirst).toHaveBeenCalledWith({
+      where: { teamId: TEAM_ID, userId: "test-user-id", deactivatedAt: null },
+      select: { role: true },
+    });
+    const teamLock = lockQueryCalls(mockTeamLockQuery).find((c) => c.sql.includes("FROM teams"))!;
+    expect(teamLock.order).toBeLessThan(mockPrismaTeamMember.findFirst.mock.invocationCallOrder[0]);
+    expect(mockPrismaTeamMember.deleteMany).toHaveBeenCalled();
+  });
+
+  it("answers 403, removing nothing, when the acting member was demoted to the target's rank since the check", async () => {
+    mockPrismaTeamMember.findUnique.mockResolvedValue({
+      id: MEMBER_ID, teamId: TEAM_ID, tenantId: "tenant-1", userId: "target-user", role: TEAM_ROLE.ADMIN, deactivatedAt: null,
+    });
+    mockPrismaTeamMember.findFirst.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
+    mockIsRoleAbove.mockImplementation((a: string, b: string) => a === "OWNER" && b !== "OWNER");
+
+    const res = await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
+    );
+
+    expect(res.status).toBe(403);
+    expect(mockPrismaTeamMember.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("answers 409 when the acting member's tenant row is held past the lock wait (DELETE)", async () => {
+    mockPrismaTeamMember.findUnique.mockResolvedValue({
+      id: MEMBER_ID, teamId: TEAM_ID, tenantId: "tenant-1", userId: "u", role: TEAM_ROLE.MEMBER, deactivatedAt: null,
+    });
+    mockTeamLockQuery.mockImplementation(teamLockQuery((sql) => {
+      if (sql.includes("FROM tenant_members")) throw Object.assign(new Error("lock timeout"), { code: "55P03" });
+      return [{ id: TEAM_ID }];
+    }));
+
+    const res = await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
+    );
+
+    expect(res.status).toBe(409);
+    expect(mockPrismaTeamMember.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("answers 404, removing nothing, when the row changed between the check and the team lock", async () => {
+    mockPrismaTeamMember.findUnique.mockResolvedValue({
+      id: MEMBER_ID, teamId: TEAM_ID, tenantId: "tenant-1", userId: "u", role: TEAM_ROLE.MEMBER, deactivatedAt: null,
+    });
+    mockPrismaTeamMember.deleteMany.mockResolvedValue({ count: 0 });
+
+    const res = await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
+    );
+
+    expect(res.status).toBe(404);
+    expect(mockPrismaTeamMemberKey.deleteMany).not.toHaveBeenCalled();
+    expect(mockInvalidateUserSessions).not.toHaveBeenCalled();
   });
 
   it("locks the team against key rotation before deleting the member's keys", async () => {
@@ -563,11 +824,17 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
     );
 
     expect(res.status).toBe(200);
-    const [lock] = lockQueryCalls(mockTeamLockQuery);
+    const calls = lockQueryCalls(mockTeamLockQuery);
+    const actorRow = calls.find((c) => c.sql.includes("FROM tenant_members"))!;
+    const lock = calls.find((c) => c.sql.includes("FROM teams"))!;
+    // The acting member's tenant row first, then the team.
+    expect(actorRow.sql).toMatch(/FOR SHARE/);
+    expect(actorRow.values).toEqual(["tenant-1", ["test-user-id"]]);
+    expect(actorRow.order).toBeLessThan(lock.order);
     expect(lock.sql).toMatch(/FROM teams WHERE id = ANY\(\?::uuid\[\]\) ORDER BY id FOR SHARE/);
     expect(lock.values).toEqual([[TEAM_ID]]);
     expect(lock.order).toBeLessThan(
-      mockPrismaTeamMemberKey.deleteMany.mock.invocationCallOrder[0],
+      mockPrismaTeamMember.deleteMany.mock.invocationCallOrder[0],
     );
   });
 
@@ -590,7 +857,7 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
     expect(res.status).toBe(409);
     expect((await res.json()).error).toBe("CONFLICT");
     expect(mockPrismaTeamMemberKey.deleteMany).not.toHaveBeenCalled();
-    expect(mockPrismaTeamMember.delete).not.toHaveBeenCalled();
+    expect(mockPrismaTeamMember.deleteMany).not.toHaveBeenCalled();
   });
 
   it("triggers invalidateUserSessions with tenantId on member removal", async () => {

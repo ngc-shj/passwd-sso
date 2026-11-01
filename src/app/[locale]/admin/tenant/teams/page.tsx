@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { SectionCardHeader } from "@/components/settings/account/section-card-header";
 import { TeamCreateDialog } from "@/components/team/management/team-create-dialog";
 import { TeamRoleBadge } from "@/components/team/management/team-role-badge";
+import { OwnerlessTeamsCard } from "@/components/team/management/ownerless-teams-card";
 import { Plus, UsersRound, CalendarClock, Globe } from "lucide-react";
 import { API_PATH } from "@/lib/constants";
 import { formatDate } from "@/lib/format/format-datetime";
@@ -137,6 +138,7 @@ export default function AdminTenantTeamsPage() {
           )}
         </CardContent>
       </Card>
+      {isAdmin ? <OwnerlessTeamsCard /> : null}
     </SectionLayout>
   );
 }
