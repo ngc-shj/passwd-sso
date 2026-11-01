@@ -80,7 +80,7 @@
   "assignOwnerConfirm": "選択したメンバーを {team} のオーナーにしますか？チームの他のオーナーは管理者になります。",
   "ownerAssignConflict": "このチームにはすでにオーナーがいるか、変更中です。一覧を更新しました。",
   "ownerAssignMemberGone": "選択したメンバーは有効なメンバーではなくなりました。一覧を更新しました。",
-  "ownerAssignSelfForbidden": "自分自身を割り当てられるのは組織のオーナーだけです。",
+  "ownerAssignNotPermitted": "現在の組織ロールではこの割り当てはできません。一覧を更新しました。",
   "memberRemoved": "メンバーを削除しました",
   "changeRole": "ロール変更",
   "roleChanged": "ロールを変更しました",

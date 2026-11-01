@@ -80,7 +80,7 @@
   "assignOwnerConfirm": "Make the selected member the owner of {team}? Any other owner of the team becomes an admin.",
   "ownerAssignConflict": "This team already has an owner, or is being changed. The list has been refreshed.",
   "ownerAssignMemberGone": "The selected member is no longer an active member. The list has been refreshed.",
-  "ownerAssignSelfForbidden": "Only the organization owner can assign themselves.",
+  "ownerAssignNotPermitted": "Your organization role no longer allows this assignment. The list has been refreshed.",
   "memberRemoved": "Member removed",
   "changeRole": "Change Role",
   "roleChanged": "Role changed",

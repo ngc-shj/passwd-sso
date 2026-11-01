@@ -29,6 +29,7 @@ import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-re
 import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
 import { API_PATH, apiPath } from "@/lib/constants";
 import { API_ERROR } from "@/lib/http/api-error-codes";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { fetchApi } from "@/lib/url-helpers";
 import { handleStepUpError } from "@/lib/http/handle-step-up-error";
 import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
@@ -81,12 +82,13 @@ export function OwnerlessTeamsCard() {
       if (!res.ok) {
         if (await handleStepUpError(res, inlineReauth.triggerOnStaleError, { teamId, userId })) return;
         // States the admin can act on: the team got an owner meanwhile, the
-        // chosen member left, or a tenant ADMIN chose themselves.
-        const { error } = await res.json().catch(() => ({ error: null }));
+        // chosen member left, or the admin's own tenant role no longer allows
+        // this assignment (demoted, or no longer OWNER and chose themselves).
+        const error = (await readApiErrorBody(res))?.error;
         const message =
           error === API_ERROR.CONFLICT ? t("ownerAssignConflict")
           : error === API_ERROR.MEMBER_NOT_FOUND ? t("ownerAssignMemberGone")
-          : error === API_ERROR.FORBIDDEN ? t("ownerAssignSelfForbidden")
+          : error === API_ERROR.FORBIDDEN ? t("ownerAssignNotPermitted")
           : null;
         if (!message) throw new Error("Failed");
         toast.error(message);
