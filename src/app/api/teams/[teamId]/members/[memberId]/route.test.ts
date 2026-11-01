@@ -311,6 +311,40 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
     expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
+  it("refuses the transfer (403), changing nothing, when the acting OWNER was demoted since the check", async () => {
+    mockPrismaTeamMember.findUnique.mockResolvedValue({
+      id: MEMBER_ID, teamId: TEAM_ID, userId: "target-user", role: TEAM_ROLE.ADMIN, deactivatedAt: null,
+    });
+    mockPrismaTeamMember.findFirst.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`, { body: { role: TEAM_ROLE.OWNER } }),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
+    );
+
+    expect(res.status).toBe(403);
+    expect(mockPrismaTeamMember.updateMany).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  it("answers 409, changing nothing, when the transferring OWNER's tenant row is held past the lock wait", async () => {
+    mockPrismaTeamMember.findUnique.mockResolvedValue({
+      id: MEMBER_ID, teamId: TEAM_ID, userId: "target-user", role: TEAM_ROLE.ADMIN, deactivatedAt: null,
+    });
+    mockTeamLockQuery.mockImplementation(teamLockQuery((sql) => {
+      if (sql.includes("FROM tenant_members")) throw Object.assign(new Error("lock timeout"), { code: "55P03" });
+      return [{ id: TEAM_ID }];
+    }));
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`, { body: { role: TEAM_ROLE.OWNER } }),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
+    );
+
+    expect(res.status).toBe(409);
+    expect(mockPrismaTeamMember.updateMany).not.toHaveBeenCalled();
+  });
+
   it("refuses a role change when the acting member left the tenant since the permission check", async () => {
     mockPrismaTeamMember.findUnique.mockResolvedValue({
       id: MEMBER_ID, teamId: TEAM_ID, userId: "target-user", role: TEAM_ROLE.MEMBER, deactivatedAt: null,

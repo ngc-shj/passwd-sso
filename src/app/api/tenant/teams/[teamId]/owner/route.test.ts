@@ -129,6 +129,21 @@ describe("POST /api/tenant/teams/[teamId]/owner", () => {
     }));
   });
 
+  it("locks, records and answers the target by its canonical (lowercase) id when given in uppercase", async () => {
+    // Hex letters: an all-digit id reads the same in either case.
+    const target = "abcdef12-3456-4789-8abc-def123456789";
+    mockLockTenantRows.mockResolvedValue(new Map([[ACTOR_ID, active], [target, active]]));
+
+    const res = await assign(target.toUpperCase());
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).ownerUserId).toBe(target);
+    expect(mockLockTenantRows).toHaveBeenCalledWith(tx, "tenant-1", [ACTOR_ID, target], "share", expect.anything());
+    expect(mockLogAuditInTx).toHaveBeenCalledWith(tx, "tenant-1", expect.objectContaining({
+      metadata: expect.objectContaining({ targetUserId: target }),
+    }));
+  });
+
   it("locks both tenant rows, then the team FOR NO KEY UPDATE, before re-checking ownership", async () => {
     await assign();
 

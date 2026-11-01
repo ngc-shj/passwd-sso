@@ -145,6 +145,11 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     try {
       updated = await withTeamTenantRls(teamId, async (tenantId, tx) => {
         await lockActorThenTeam(tx, tenantId, teamId, session.user.id);
+        // Only the OWNER as it stands now may transfer: a demotion or a
+        // departure since the permission check refuses with 403, not 404.
+        if ((await activeTeamRole(tx, teamId, session.user.id)) !== TEAM_ROLE.OWNER) {
+          throw new ActorNotPermittedError();
+        }
         const demoted = await tx.teamMember.updateMany({
           where: { id: actorMembership.id, teamId, role: TEAM_ROLE.OWNER, deactivatedAt: null },
           data: { role: TEAM_ROLE.ADMIN },
@@ -159,7 +164,6 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     } catch (e) {
       if (e instanceof MemberChangedError) return errorResponse(API_ERROR.MEMBER_NOT_FOUND);
       if (e instanceof ActorNotPermittedError) return errorResponse(API_ERROR.FORBIDDEN);
-    if (e instanceof ActorNotPermittedError) return errorResponse(API_ERROR.FORBIDDEN);
       if (isMembershipLockConflict(e)) return errorResponse(API_ERROR.CONFLICT);
       throw e;
     }

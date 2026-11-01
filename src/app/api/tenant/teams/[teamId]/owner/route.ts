@@ -71,12 +71,13 @@ async function handlePOST(req: NextRequest, { params }: Params) {
 
   const result = await parseBody(req, assignOwnerSchema);
   if (!result.ok) return result.response;
-  const { userId: targetUserId } = result.data;
+  // Canonical (lowercase) from here on: the lock, the audit row and the response.
+  const targetUserId = result.data.userId.toLowerCase();
 
   // A guard against mistakes, not an authorization boundary: a tenant ADMIN
   // can already join any team through a SCIM group mapping. Assigning oneself
   // is left to the tenant OWNER (re-checked below on the role read under lock).
-  const selfAssigned = targetUserId.toLowerCase() === session.user.id.toLowerCase();
+  const selfAssigned = targetUserId === session.user.id;
   if (selfAssigned && actor.role !== TENANT_ROLE.OWNER) {
     return errorResponse(API_ERROR.FORBIDDEN);
   }

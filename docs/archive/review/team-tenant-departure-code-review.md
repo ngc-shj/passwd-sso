@@ -1,6 +1,6 @@
 # Code Review: team-tenant-departure
 Date: 2026-11-01
-Review round: 3
+Review round: 4
 
 Base: `a0ee2277c` (the head of PR #986, which this branch is stacked on).
 
@@ -249,3 +249,40 @@ Round 3:
 - P6 invitation POST without its team lock -> "re-reads the inviter's role after the tenant rows and then the team are locked".
 - P7 confirm-key checks only `!actorRole` -> "refuses (403) … demoted to VIEWER".
 - P8 members POST without lowercasing -> "refuses adding oneself under an uppercase spelling …".
+
+## Round 4
+
+### Changes from Previous Round
+Incremental review of `00c6c691d` (one combined reviewer: functionality,
+security, testing). No Critical or Major. Clean: two spellings of one id map
+to the same locked entry; every other lockTenantRows caller reads back with
+the spelling it passed; one budget's statements end well inside the 10 s
+transaction timeout; the 403/404 split tells an actor nothing new.
+
+### Findings
+- F14 [Minor] F12 was not applied to the ownership-transfer arm of members
+  PUT: an OWNER demoted or departed since the check got 404 from the
+  `demoted.count` miss, and the arm's catch carried a duplicated, unreachable
+  ActorNotPermittedError line.
+- F15 [Minor] The owner route compared ids case-insensitively but locked,
+  audited and answered with the caller's spelling.
+- T9 [Minor] The transfer arm's error mapping (403, 409) was untested.
+
+### Resolution Status
+- F14: the transfer arm re-reads the actor's role under the lock and refuses
+  (403) unless OWNER; the duplicate line is removed. MemberChangedError (404)
+  stays for a target that changed.
+- F15: the target id is lowercased at parse time, as in members POST.
+- T9: two cells added (demoted OWNER -> 403, nothing written; 55P03 -> 409).
+
+### Red-proofs
+- P9 transfer arm without the role re-read -> "refuses the transfer (403),
+  changing nothing, when the acting OWNER was demoted since the check".
+- P10 owner route without lowercasing -> "locks, records and answers the
+  target by its canonical (lowercase) id when given in uppercase". The first
+  version of this cell stayed green under the mutation: its fixture id was all
+  digits, the same in either case. It now uses an id with hex letters.
+
+### Termination
+All four rounds' findings are resolved; round 4 found Minors only, each in
+the previous round's fix, now fixed and red-proved. Review closed.
