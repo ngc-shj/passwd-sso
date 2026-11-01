@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { pgErrorCode } from "@/lib/prisma/prisma-error";
-import { readLockTimeout, restoreLockTimeout, setLockTimeout } from "@/lib/tenant-rls-grants";
+import { readWaitTimeouts, restoreWaitTimeouts, setWaitTimeouts } from "@/lib/tenant-rls-grants";
 import { TEAM_KEY_LOCK_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 
 /**
@@ -20,6 +20,7 @@ import { TEAM_KEY_LOCK_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
  */
 
 const LOCK_NOT_AVAILABLE = "55P03";
+const QUERY_CANCELED = "57014";
 
 /** A writer gave up waiting for an in-flight rotation of the team. */
 export class TeamRotationInProgressError extends Error {
@@ -48,7 +49,9 @@ export function createLockBudget(totalMs: number = TEAM_KEY_LOCK_TIMEOUT_MS): Lo
  * bare 500; past it throws `timeoutError()` (TeamRotationInProgressError by
  * default). A spent budget throws before waiting: `lock_timeout = 0` would
  * mean no limit. The previous lock_timeout is restored afterwards, so the
- * caller's later statements wait as they did before. (On a failure the
+ * caller's later statements wait as they did before. Both lock_timeout and
+ * statement_timeout are bounded: the first applies per lock, the second to the
+ * statement, so a statement taking N locks cannot wait N times the budget. (On a failure the
  * transaction is aborted, or rolled back to the caller's savepoint, which
  * reverts the setting itself.)
  */
@@ -62,16 +65,20 @@ export async function withBoundedLockWait<T>(
     ? Math.min(TEAM_KEY_LOCK_TIMEOUT_MS, options.budget.deadline - Date.now())
     : TEAM_KEY_LOCK_TIMEOUT_MS;
   if (waitMs < 1) throw timeoutError();
-  const previous = await readLockTimeout(tx);
-  await setLockTimeout(tx, Math.floor(waitMs));
+  // lock_timeout bounds each lock the statement acquires; statement_timeout
+  // bounds the statement as a whole, which matters for one taking several
+  // (all of a write's advisory locks, a multi-row FOR SHARE).
+  const previous = await readWaitTimeouts(tx);
+  await setWaitTimeouts(tx, Math.floor(waitMs));
   let result: T;
   try {
     result = await lock();
   } catch (e) {
-    if (pgErrorCode(e) === LOCK_NOT_AVAILABLE) throw timeoutError();
+    const code = pgErrorCode(e);
+    if (code === LOCK_NOT_AVAILABLE || code === QUERY_CANCELED) throw timeoutError();
     throw e;
   }
-  await restoreLockTimeout(tx, previous);
+  await restoreWaitTimeouts(tx, previous);
   return result;
 }
 

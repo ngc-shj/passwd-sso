@@ -61,6 +61,7 @@ vi.mock("@/lib/auth/access/team-auth", async () => ({
   requireTeamPermission: mockRequireTeamPermission,
   // The real role → permission table: GET lists departed members only to roles that can remove them.
   hasTeamPermission: (await vi.importActual<typeof import("@/lib/auth/access/team-auth")>("@/lib/auth/access/team-auth")).hasTeamPermission,
+  activeTeamRole: (await vi.importActual<typeof import("@/lib/auth/access/team-auth")>("@/lib/auth/access/team-auth")).activeTeamRole,
   TeamAuthError,
 }));
 const { mockLockTenantRows, mockLockTeamsAgainstRotation } = vi.hoisted(() => ({
@@ -315,6 +316,9 @@ describe("GET /api/teams/[teamId]/members", () => {
   });
 });
 
+const actorRole: { value: { role: string } | null } = { value: null };
+const existingTarget: { value: unknown } = { value: null };
+
 describe("POST /api/teams/[teamId]/members", () => {
   const TARGET_USER_ID = "00000000-0000-4000-a000-000000000001";
 
@@ -322,12 +326,15 @@ describe("POST /api/teams/[teamId]/members", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
     mockRequireTeamPermission.mockResolvedValue({ id: "actor-row", role: TEAM_ROLE.ADMIN });
-    // The acting member, re-read under the team lock: still active.
-    mockPrismaTeamMember.count.mockResolvedValue(1);
+    // findFirst serves two reads: the acting member's role under the locks
+    // (activeTeamRole selects `role`) and the target's existing membership.
+    actorRole.value = { role: TEAM_ROLE.ADMIN };
+    existingTarget.value = null;
+    mockPrismaTeamMember.findFirst.mockImplementation(async (args: { select?: { role?: boolean } }) =>
+      args?.select?.role ? actorRole.value : existingTarget.value);
     mockPrismaTeam.findUnique.mockResolvedValue({ tenantId: TENANT_ID });
     mockPrismaUser.findFirst.mockResolvedValue({ id: TARGET_USER_ID });
     mockPrismaTenantMember.findFirst.mockResolvedValue({ id: "tm-1" });
-    mockPrismaTeamMember.findFirst.mockResolvedValue(null);
     // The target's tenant row, locked FOR SHARE: active by default.
     mockLockTenantRows.mockResolvedValue(new Map([[TARGET_USER_ID, { hasRow: true, deactivatedAt: null, departedAt: null }]]));
     mockLockTeamsAgainstRotation.mockResolvedValue(undefined);
@@ -414,7 +421,7 @@ describe("POST /api/teams/[teamId]/members", () => {
   });
 
   it("reactivates a deactivated member", async () => {
-    mockPrismaTeamMember.findFirst.mockResolvedValue({
+    existingTarget.value = ({
       id: "existing-m-1",
       userId: TARGET_USER_ID,
       deactivatedAt: new Date(),
@@ -440,7 +447,7 @@ describe("POST /api/teams/[teamId]/members", () => {
   });
 
   it("re-adds a SCIM-managed membership the tenant departure ended", async () => {
-    mockPrismaTeamMember.findFirst.mockResolvedValue({
+    existingTarget.value = ({
       id: "existing-m-1", userId: TARGET_USER_ID, deactivatedAt: new Date(), scimManaged: true, deactivatedByTenant: true,
     });
     mockPrismaTeamMember.update.mockResolvedValue({ id: "existing-m-1", userId: TARGET_USER_ID, role: TEAM_ROLE.MEMBER });
@@ -462,13 +469,14 @@ describe("POST /api/teams/[teamId]/members", () => {
       createParams({ teamId: TEAM_ID }),
     );
 
-    expect(mockLockTenantRows).toHaveBeenCalledWith(expect.anything(), "tenant-1", [TARGET_USER_ID], "share", expect.anything());
+    // The target's row and the acting member's, in one call.
+    expect(mockLockTenantRows).toHaveBeenCalledWith(expect.anything(), "tenant-1", [TARGET_USER_ID, "test-user-id"], "share", expect.anything());
     expect(mockLockTenantRows.mock.invocationCallOrder[0]).toBeLessThan(mockLockTeamsAgainstRotation.mock.invocationCallOrder[0]);
     expect(mockLockTeamsAgainstRotation.mock.invocationCallOrder[0]).toBeLessThan(mockPrismaTeamMember.findFirst.mock.invocationCallOrder[0]);
   });
 
   it("refuses, adding nothing, when the acting member's membership ended after the permission check", async () => {
-    mockPrismaTeamMember.count.mockResolvedValue(0);
+    actorRole.value = null;
 
     const res = await POST(
       createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/members`, { body: { userId: TARGET_USER_ID, role: TEAM_ROLE.MEMBER } }),
@@ -477,7 +485,27 @@ describe("POST /api/teams/[teamId]/members", () => {
 
     expect(res.status).toBe(403);
     expect(mockPrismaTeamMember.create).not.toHaveBeenCalled();
-    expect(mockPrismaTeamMember.count).toHaveBeenCalledWith({ where: { id: "actor-row", teamId: TEAM_ID, deactivatedAt: null } });
+    const actorRead = mockPrismaTeamMember.findFirst.mock.calls.findIndex((c) => (c[0] as { select?: { role?: boolean } })?.select?.role);
+    expect(mockPrismaTeamMember.findFirst.mock.calls[actorRead][0]).toEqual({
+      where: { teamId: TEAM_ID, userId: "test-user-id", deactivatedAt: null },
+      select: { role: true },
+    });
+    // Read under the locks, not before them.
+    expect(mockLockTeamsAgainstRotation.mock.invocationCallOrder[0]).toBeLessThan(
+      mockPrismaTeamMember.findFirst.mock.invocationCallOrder[actorRead],
+    );
+  });
+
+  it("refuses when the acting member was demoted to a role that cannot add members", async () => {
+    actorRole.value = { role: TEAM_ROLE.VIEWER };
+
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/members`, { body: { userId: TARGET_USER_ID, role: TEAM_ROLE.MEMBER } }),
+      createParams({ teamId: TEAM_ID }),
+    );
+
+    expect(res.status).toBe(403);
+    expect(mockPrismaTeamMember.create).not.toHaveBeenCalled();
   });
 
   it("answers 409 when the target's tenant row is held past the lock wait", async () => {
@@ -494,7 +522,7 @@ describe("POST /api/teams/[teamId]/members", () => {
   });
 
   it("returns 409 for active member", async () => {
-    mockPrismaTeamMember.findFirst.mockResolvedValue({
+    existingTarget.value = ({
       id: "existing-m-1",
       userId: TARGET_USER_ID,
       deactivatedAt: null,
@@ -513,7 +541,7 @@ describe("POST /api/teams/[teamId]/members", () => {
   });
 
   it("returns 409 for SCIM-managed deactivated member", async () => {
-    mockPrismaTeamMember.findFirst.mockResolvedValue({
+    existingTarget.value = ({
       id: "existing-m-1",
       userId: TARGET_USER_ID,
       deactivatedAt: new Date(),

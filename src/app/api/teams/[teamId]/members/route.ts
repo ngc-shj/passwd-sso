@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
 import { addMemberSchema } from "@/lib/validations";
-import { hasTeamPermission, requireTeamMember, requireTeamPermission, TeamAuthError } from "@/lib/auth/access/team-auth";
+import { activeTeamRole, hasTeamPermission, requireTeamMember, requireTeamPermission, TeamAuthError } from "@/lib/auth/access/team-auth";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
@@ -70,9 +70,8 @@ async function handlePOST(req: NextRequest, { params }: Params) {
 
   const { teamId } = await params;
 
-  let actorMembership;
   try {
-    actorMembership = await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.MEMBER_INVITE, req);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.MEMBER_INVITE, req);
   } catch (e) {
     return handleAuthError(e);
   }
@@ -109,18 +108,20 @@ async function handlePOST(req: NextRequest, { params }: Params) {
         // departure of the target either commits first (and is read here) or
         // waits for this commit and then ends the membership created here.
         const budget = createLockBudget();
-        const rows = await lockTenantRows(tx, tenantId, [userId], "share", budget);
+        // The acting member's row too: their departure, holding it FOR UPDATE,
+        // then commits before the re-check below reads their membership.
+        const rows = await lockTenantRows(tx, tenantId, [userId, session.user.id], "share", budget);
         const target = rows.get(userId);
         if (!target?.hasRow || target.deactivatedAt !== null) {
           throw new TeamAuthError(API_ERROR.NOT_FOUND, 404);
         }
         await lockTeamsAgainstRotation(tx, [teamId], budget);
-        // The acting member must still be active: a departure from the tenant
-        // committed since the permission check ended their membership.
-        const actorActive = await tx.teamMember.count({
-          where: { id: actorMembership.id, teamId, deactivatedAt: null },
-        });
-        if (actorActive !== 1) throw new TeamAuthError(API_ERROR.FORBIDDEN, 403);
+        // The acting member's authority as it stands now: a departure,
+        // removal or demotion committed since the permission check.
+        const actorRole = await activeTeamRole(tx, teamId, session.user.id);
+        if (!actorRole || !hasTeamPermission(actorRole, TEAM_PERMISSION.MEMBER_INVITE)) {
+          throw new TeamAuthError(API_ERROR.FORBIDDEN, 403);
+        }
 
         // Check existing TeamMember record
         const existing = await tx.teamMember.findFirst({

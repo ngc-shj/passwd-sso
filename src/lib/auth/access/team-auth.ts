@@ -15,7 +15,7 @@ import { resolveUserTenantIdFromClient, withTeamTenantRls } from "@/lib/tenant-c
 import { withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { withTeamIpRestriction, PolicyViolationError } from "@/lib/team/team-policy";
-import type { TeamRole } from "@prisma/client";
+import type { Prisma, TeamRole } from "@prisma/client";
 import type { NextRequest } from "next/server";
 
 // ─── Permission Definitions ─────────────────────────────────────
@@ -64,6 +64,24 @@ export function hasTeamPermission(
   permission: TeamPermission
 ): boolean {
   return ROLE_PERMISSIONS[role]?.has(permission) ?? false;
+}
+
+/**
+ * The user's role in the team as the transaction sees it now, or null when
+ * they are not an active member. Call it after the transaction's locks:
+ * requireTeamPermission ran before them, and a departure, removal or demotion
+ * may have committed since.
+ */
+export async function activeTeamRole(
+  tx: Pick<Prisma.TransactionClient, "teamMember">,
+  teamId: string,
+  userId: string,
+): Promise<TeamRole | null> {
+  const membership = await tx.teamMember.findFirst({
+    where: { teamId, userId, deactivatedAt: null },
+    select: { role: true },
+  });
+  return membership?.role ?? null;
 }
 
 // Back-compat re-export — see team-role-hierarchy.ts for the pure module.

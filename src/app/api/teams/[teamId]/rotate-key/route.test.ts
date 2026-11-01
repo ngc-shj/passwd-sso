@@ -37,14 +37,19 @@ const txMock = {
   // The in-tx CAS re-read (SELECT team_key_version FROM teams ... FOR UPDATE).
   $queryRaw: vi.fn(),
   team: { update: vi.fn() },
-  teamMember: { findMany: vi.fn(), updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
+  teamMember: { findMany: vi.fn(), updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    // The rotating member's role, re-read under the team lock.
+    findFirst: vi.fn().mockResolvedValue({ role: "OWNER" }) },
   teamPasswordEntry: { updateMany: vi.fn(), findMany: vi.fn() },
   teamMemberKey: { createMany: vi.fn() },
 };
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/auth/access/team-auth", () => ({
+vi.mock("@/lib/auth/access/team-auth", async () => ({
   requireTeamPermission: mockRequireTeamPermission,
+  // The real role reads and permission table: routes re-check the actor under their locks.
+  activeTeamRole: (await vi.importActual<typeof import("@/lib/auth/access/team-auth")>("@/lib/auth/access/team-auth")).activeTeamRole,
+  hasTeamPermission: (await vi.importActual<typeof import("@/lib/auth/access/team-auth")>("@/lib/auth/access/team-auth")).hasTeamPermission,
   TeamAuthError: MockTeamAuthError,
 }));
 vi.mock("@/lib/prisma", () => ({
@@ -293,6 +298,29 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     expect(txMock.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
       txMock.teamPasswordEntry.findMany.mock.invocationCallOrder[0],
     );
+  });
+
+  it("refuses (403) without bumping the version when the rotating member no longer holds TEAM_UPDATE under the lock", async () => {
+    // Departed, removed or demoted since requireTeamPermission: the rotation
+    // would otherwise move the team to a key this actor generated and keeps.
+    txMock.teamMember.findFirst.mockResolvedValueOnce({ role: "MEMBER" });
+
+    const res = await POST(
+      createRequest({
+        newTeamKeyVersion: 2,
+        entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
+        memberKeys: [validMemberKey("660e8400-e29b-41d4-a716-446655440001")],
+      }),
+      createParams("team-1"),
+    );
+
+    expect(res.status).toBe(403);
+    expect(txMock.team.update).not.toHaveBeenCalled();
+    expect(txMock.teamMemberKey.createMany).not.toHaveBeenCalled();
+    expect(txMock.teamMember.findFirst).toHaveBeenCalledWith({
+      where: { teamId: "team-1", userId: expect.any(String), deactivatedAt: null },
+      select: { role: true },
+    });
   });
 
   it("rotates key successfully and logs audit (S-2)", async () => {

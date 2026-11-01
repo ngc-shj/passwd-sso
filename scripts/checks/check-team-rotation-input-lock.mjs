@@ -76,11 +76,13 @@ const LOCK_HELPERS = new Set([
   "lockTeamKeyVersion",
   "lockTeamsAgainstRotation",
   "lockMemberTeamsAgainstRotation",
-  // scim-group-service.ts: lockTenantRows then lockTeamsAgainstRotation.
+  // scim-group-service.ts and members/[memberId]/route.ts: lockTenantRows
+  // then lockTeamsAgainstRotation.
   "lockGroupWrite",
+  "lockActorThenTeam",
 ]);
 const TENANT_LOCKS = new Set(["lockTenantRows", "lockTenantMemberCreation"]);
-const TENANT_LOCK_WRAPPERS = new Set(["lockGroupWrite"]);
+const TENANT_LOCK_WRAPPERS = new Set(["lockGroupWrite", "lockActorThenTeam"]);
 const TRANSITIONS = new Set(["departFromTenant", "returnToTenant"]);
 
 /** Pinned site counts of the real tree, per rule. A change is a site to review. */

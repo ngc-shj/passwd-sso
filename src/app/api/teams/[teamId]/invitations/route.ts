@@ -5,7 +5,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
 import { inviteSchema } from "@/lib/validations";
-import { hasTeamPermission, requireTeamPermission } from "@/lib/auth/access/team-auth";
+import { activeTeamRole, hasTeamPermission, requireTeamPermission } from "@/lib/auth/access/team-auth";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import { INVITATION_STATUS, TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
@@ -18,7 +18,7 @@ import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import { TEAM_INVITATION_TTL_MS } from "@/lib/constants/team/invitation";
 import { displayIdentityOf, fetchUserDisplayMap } from "@/lib/audit/audit-user-lookup";
 import { TEAM_MEMBERSHIP_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
-import { createLockBudget } from "@/lib/team/team-key-rotation-lock";
+import { createLockBudget, lockTeamsAgainstRotation } from "@/lib/team/team-key-rotation-lock";
 import { departedSince, isMembershipLockConflict, lockTenantRows } from "@/lib/team/tenant-row-lock";
 
 const ISSUE_OUTCOME = { ISSUED: "issued", ALREADY_SENT: "already_sent", INVITER_GONE: "inviter_gone" } as const;
@@ -146,16 +146,17 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     issued = await withTeamTenantRls(
       teamId,
       async (_tenantId, tx) => {
-        const rows = await lockTenantRows(tx, team.tenantId, [session.user.id, ...inviteeIds], "share", createLockBudget());
-        // The inviter's authority, re-read under their tenant row: a departure
-        // that committed after requireTeamPermission ended their membership
-        // and expired their invitations, and an invitation stamped after it
-        // would read as issued after the departure.
-        const inviter = await tx.teamMember.findFirst({
-          where: { teamId: teamId, userId: session.user.id, deactivatedAt: null },
-          select: { role: true },
-        });
-        if (!inviter || !hasTeamPermission(inviter.role, TEAM_PERMISSION.MEMBER_INVITE)) {
+        const budget = createLockBudget();
+        const rows = await lockTenantRows(tx, team.tenantId, [session.user.id, ...inviteeIds], "share", budget);
+        // The team too (after the tenant rows, as every writer orders them), so
+        // a removal or demotion of the inviter is serialised as well.
+        await lockTeamsAgainstRotation(tx, [teamId], budget);
+        // The inviter's authority, re-read under those locks: a departure that
+        // committed after requireTeamPermission ended their membership and
+        // expired their invitations, and an invitation stamped after it would
+        // read as issued after the departure.
+        const inviterRole = await activeTeamRole(tx, teamId, session.user.id);
+        if (!inviterRole || !hasTeamPermission(inviterRole, TEAM_PERMISSION.MEMBER_INVITE)) {
           return { outcome: ISSUE_OUTCOME.INVITER_GONE };
         }
         const pending = await tx.teamInvitation.findMany({

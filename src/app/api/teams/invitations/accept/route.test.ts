@@ -5,7 +5,7 @@ import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail
 // The transaction the admission decision runs in (route.ts, withTeamTenantRls).
 const acceptTx = {
   teamInvitation: { updateMany: vi.fn(), update: vi.fn() },
-  teamMember: { findUnique: vi.fn(), upsert: vi.fn() },
+  teamMember: { findUnique: vi.fn(), findFirst: vi.fn(), upsert: vi.fn() },
   teamMemberKey: { deleteMany: vi.fn() },
 };
 const { mockLockTenantRows, mockLockTeamsAgainstRotation } = vi.hoisted(() => ({
@@ -125,6 +125,8 @@ describe("POST /api/teams/invitations/accept", () => {
     acceptTx.teamInvitation.updateMany.mockReset().mockResolvedValue({ count: 1 });
     acceptTx.teamInvitation.update.mockReset().mockResolvedValue({});
     acceptTx.teamMember.findUnique.mockReset().mockResolvedValue(null);
+    // The inviter, re-read under the team lock: an active ADMIN.
+    acceptTx.teamMember.findFirst.mockReset().mockResolvedValue({ role: TEAM_ROLE.ADMIN });
     acceptTx.teamMember.upsert.mockReset().mockResolvedValue({});
     acceptTx.teamMemberKey.deleteMany.mockReset().mockResolvedValue({ count: 0 });
     mockLockTenantRows.mockReset().mockResolvedValue(lockedRows());
@@ -367,6 +369,25 @@ describe("POST /api/teams/invitations/accept", () => {
 
       expect((await accept()).status).toBe(200);
       expect(acceptTx.teamMember.upsert).toHaveBeenCalledOnce();
+    });
+
+    it("refuses, and commits EXPIRED, when the inviter is no longer a member entitled to invite", async () => {
+      acceptTx.teamMember.findFirst.mockResolvedValue(null);
+
+      expect((await accept()).status).toBe(410);
+      expect(acceptTx.teamInvitation.update).toHaveBeenCalledWith({ where: { id: "inv-1" }, data: { status: INVITATION_STATUS.EXPIRED } });
+      expect(acceptTx.teamMember.findFirst).toHaveBeenCalledWith({
+        where: { teamId: "team-1", userId: "inviter-id", deactivatedAt: null },
+        select: { role: true },
+      });
+      expect(acceptTx.teamMember.upsert).not.toHaveBeenCalled();
+    });
+
+    it("refuses an invitation from an inviter demoted to VIEWER", async () => {
+      acceptTx.teamMember.findFirst.mockResolvedValue({ role: TEAM_ROLE.VIEWER });
+
+      expect((await accept()).status).toBe(410);
+      expect(acceptTx.teamMember.upsert).not.toHaveBeenCalled();
     });
 
     it("refuses an invitation issued before the inviter left", async () => {

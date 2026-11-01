@@ -129,12 +129,21 @@ const { mockLockTenantRows, mockDepartFromTenant, mockReturnToTenant, mockDepart
   mockDepartCreatedMembership: vi.fn(),
 }));
 vi.mock("@/lib/team/tenant-row-lock", () => ({ lockTenantRows: mockLockTenantRows }));
+// Distinct budget objects in creation order, so a cell can tell which deadline
+// each lock call was given.
+const { mockCreateLockBudget } = vi.hoisted(() => ({ mockCreateLockBudget: vi.fn() }));
+vi.mock("@/lib/team/team-key-rotation-lock", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
+  createLockBudget: mockCreateLockBudget,
+}));
 vi.mock("@/lib/team/team-departure", () => ({
   departFromTenant: mockDepartFromTenant,
   returnToTenant: mockReturnToTenant,
   departCreatedMembership: mockDepartCreatedMembership,
 }));
 beforeEach(() => {
+  let budgets = 0;
+  mockCreateLockBudget.mockImplementation(() => ({ deadline: Date.now() + 3_000, seq: ++budgets }));
   mockLockTenantRows.mockResolvedValue(new Map());
   mockDepartFromTenant.mockImplementation(async (_tx: unknown, _tenantId: string, ids: string[]) => [...ids]);
   mockReturnToTenant.mockImplementation(async (_tx: unknown, _tenantId: string, ids: string[]) => [...ids]);
@@ -1374,6 +1383,72 @@ describe("runDirectorySync", () => {
       expect(mockDepartCreatedMembership).toHaveBeenCalledWith(
         expect.anything(), TENANT_ID, ["user-9"], expect.objectContaining({ actor: expect.anything() }),
       );
+    });
+
+    it("departs every user created deactivated in one call, with both ids", async () => {
+      setupAcquiredLock();
+      const create = vi.fn()
+        .mockResolvedValueOnce({ id: "user-9", email: "carol@example.com" })
+        .mockResolvedValueOnce({ id: "user-10", email: "dave@example.com" });
+      setApplyTx(makeApplyTx({
+        user: { findMany: vi.fn(), create, update: vi.fn(), updateMany: vi.fn() },
+        tenantMember: {
+          findMany: vi.fn().mockResolvedValue([]),
+          create: vi.fn().mockResolvedValue({ id: "member-x" }),
+          update: vi.fn(),
+          updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        },
+      }));
+      mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
+      mockFetchOktaUsers.mockResolvedValue([
+        makeOktaUser({ id: "ext-9", email: "carol@example.com", displayName: "Carol", status: "SUSPENDED" }),
+        makeOktaUser({ id: "ext-10", email: "dave@example.com", displayName: "Dave", status: "SUSPENDED" }),
+      ]);
+      mockScimMapping.findMany.mockResolvedValue([]);
+      mockTenantMember.findMany.mockResolvedValue([]);
+
+      await runDirectorySync({ ...BASE_OPTIONS, force: true });
+
+      expect(mockDepartCreatedMembership).toHaveBeenCalledTimes(1);
+      expect(mockDepartCreatedMembership).toHaveBeenCalledWith(
+        expect.anything(), TENANT_ID, ["user-9", "user-10"], expect.anything(),
+      );
+    });
+
+    it("gives the transitions a deadline of their own, created after the run's writes", async () => {
+      setupAcquiredLock();
+      const applyTx = makeApplyTx({
+        tenantMember: {
+          findMany: vi.fn().mockResolvedValue([]),
+          create: vi.fn(),
+          update: vi.fn().mockResolvedValue({}),
+          updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        },
+      });
+      setApplyTx(applyTx);
+      mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
+      mockFetchOktaUsers.mockResolvedValue([
+        makeOktaUser({ id: "ext-a", email: "a@example.com", displayName: "A", status: "SUSPENDED" }),
+      ]);
+      mockScimMapping.findMany.mockResolvedValue([{ externalId: "ext-a", internalId: "user-a" }]);
+      mockTenantMember.findMany.mockResolvedValue([makeMember({ id: "member-a", userId: "user-a" })]);
+
+      await runDirectorySync({ ...BASE_OPTIONS, force: true });
+
+      const rowLockBudget = mockLockTenantRows.mock.calls[0][4];
+      const transitionBudgets = [
+        ...mockDepartFromTenant.mock.calls, ...mockReturnToTenant.mock.calls, ...mockDepartCreatedMembership.mock.calls,
+      ].map((call) => (call[3] as { budget: unknown }).budget);
+      expect(transitionBudgets.length).toBeGreaterThan(0);
+      for (const budget of transitionBudgets) {
+        expect(budget).not.toBe(rowLockBudget);
+        expect(budget).toBe(transitionBudgets[0]);
+      }
+      // Created after the run's last write in the loops, so the loops' time
+      // does not count against the transitions' lock waits.
+      const created = mockCreateLockBudget.mock.results.findIndex((r) => r.value === transitionBudgets[0]);
+      const lastLoopWrite = Math.max(...applyTx.tenantMember.update.mock.invocationCallOrder);
+      expect(mockCreateLockBudget.mock.invocationCallOrder[created]).toBeGreaterThan(lastLoopWrite);
     });
 
     it("reactivates a deactivated user who reappears as active in the provider", async () => {

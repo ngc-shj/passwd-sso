@@ -923,7 +923,10 @@ describe("team membership across a tenant departure — real-DB integration", ()
       expect(await membership(teamId, user.id)).toMatchObject({ deactivated_by_tenant: true });
     });
 
-    it("a two-user batch departure and an accept locking the same rows in reverse order do not deadlock", async () => {
+    // Outcome only: lockTenantRows sorts its ids, so the order passed here
+    // cannot cross; the no-deadlock rule (one tenant-row call before any team
+    // lock) is pinned by check-team-rotation-input-lock rule 4.
+    it("a two-user departure orders an accept of an invitation between them behind it; the accept is refused", async () => {
       const owner = await ctx.createUser(tenantId);
       const [a, b] = [await member(), await member()].sort((x, y) => x.id.localeCompare(y.id));
       const teamId = await team(owner);
@@ -958,6 +961,28 @@ describe("team membership across a tenant departure — real-DB integration", ()
   });
 
   // ── A11: lock wait ───────────────────────────────────────────
+
+  it("two advisory locks each held for less than the wait still refuse within the budget as a whole", async () => {
+    // lock_timeout applies per lock: held 2s then 4s, each wait alone fits in
+    // 3s but the statement would wait 4s. statement_timeout bounds it whole.
+    const [a, b] = [await member(), await member()];
+    const holdA = await race.holdRowLock(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [`tenant-member:${tenantId}:${a.id}`]);
+    const holdB = await race.holdRowLock(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [`tenant-member:${tenantId}:${b.id}`]);
+    const releaseA = setTimeout(() => void holdA.release(), 2_000);
+    const releaseB = setTimeout(() => void holdB.release(), 4_000);
+    try {
+      const started = Date.now();
+      await expect(
+        withTenantRls(prisma, tenantId, (tx) => lockTenantRows(tx, tenantId, [a.id, b.id], "share", createLockBudget()), { timeout: 15_000 }),
+      ).rejects.toBeInstanceOf(TenantMemberLockTimeoutError);
+      expect(Date.now() - started).toBeLessThan(TEAM_KEY_LOCK_TIMEOUT_MS + 500);
+    } finally {
+      clearTimeout(releaseA);
+      clearTimeout(releaseB);
+      await holdA.release();
+      await holdB.release();
+    }
+  });
 
   it("A11: a tenant row held past the lock wait fails the departure with the tenant-row error inside the deadline", async () => {
     const user = await member();
@@ -1204,6 +1229,10 @@ describe("team membership across a tenant departure — real-DB integration", ()
         await blocker.release();
         await Promise.allSettled([assigning, departing]);
       }
+      // The assignment committed before the actor's departure, and stands.
+      expect(await membership(teamId, successor.id)).toMatchObject({ role: "OWNER", deactivated_at: null });
+      expect(await membership(teamId, oldOwner.id)).toMatchObject({ role: "ADMIN" });
+      expect((await tenantRow(tenantId, admin))?.deactivated_at).not.toBeNull();
     });
 
     it("a departure of the target waits for an owner assignment holding the team; the team is then ownerless again", async () => {
@@ -1289,6 +1318,73 @@ describe("team membership across a tenant departure — real-DB integration", ()
         await Promise.allSettled([rotating, departing]);
       }
       expect(await membership(teamId, leaver.id)).toMatchObject({ deactivated_by_tenant: true });
+    });
+  });
+  describe("A10: the acting member's departure waits for their members request", () => {
+    /** An admin (team ADMIN, tenant MEMBER) acting on `target` in their team. */
+    async function setup() {
+      const owner = await ctx.createUser(tenantId);
+      const actor = await member();
+      const target = await member();
+      const teamId = await team(owner);
+      await addTeamMember(teamId, actor.id, "ADMIN");
+      return { teamId, actor, target };
+    }
+
+    async function raceActorDeparture(blockSql: string, params: unknown[], request: () => Promise<Response>, actorId: string) {
+      const blocker = await race.holdRowLock(blockSql, params);
+      let requesting: Promise<Response> | undefined;
+      let departing: Promise<Response> | undefined;
+      try {
+        mockAuth.mockResolvedValue({ user: { id: actorId } });
+        requesting = request();
+        const requestPid = await race.waitForBackendBlockedBy(blocker.pid);
+        departing = scimActive(actorId, false);
+        const reached = await race.settledOrBlocked(departing, requestPid, blocker.pid);
+        await blocker.release();
+        return { reached, request: await requesting, departure: await departing };
+      } finally {
+        await blocker.release();
+        await Promise.allSettled([requesting, departing]);
+      }
+    }
+
+    it("members POST", async () => {
+      const { teamId, actor, target } = await setup();
+      // Parked at the membership insert (FK KEY SHARE on the target's users row).
+      const res = await raceActorDeparture(`SELECT id FROM users WHERE id = $1::uuid FOR UPDATE`, [target.id], () =>
+        addMember(jsonRequest(`http://localhost/api/teams/${teamId}/members`, "POST", { userId: target.id, role: "MEMBER" }), {
+          params: Promise.resolve({ teamId }),
+        }), actor.id);
+      expect(res.reached).toBe("blocked-on-parked");
+      expect(res.request.status).toBe(201);
+      expect(res.departure.status).toBe(200);
+    });
+
+    it("members DELETE", async () => {
+      const { teamId, actor, target } = await setup();
+      const rowId = await addTeamMember(teamId, target.id, "MEMBER");
+      // Parked at the delete of the target's row.
+      const res = await raceActorDeparture(`SELECT id FROM team_members WHERE id = $1::uuid FOR UPDATE`, [rowId], () =>
+        removeMember(new NextRequest(`http://localhost/api/teams/${teamId}/members/${rowId}`, { method: "DELETE" }), {
+          params: Promise.resolve({ teamId, memberId: rowId }),
+        }), actor.id);
+      expect(res.reached).toBe("blocked-on-parked");
+      expect(res.request.status).toBe(200);
+      expect(await membership(teamId, target.id)).toBeNull();
+    });
+
+    it("members PUT (role change)", async () => {
+      const { teamId, actor, target } = await setup();
+      const rowId = await addTeamMember(teamId, target.id, "VIEWER");
+      // Parked at the role update of the target's row.
+      const res = await raceActorDeparture(`SELECT id FROM team_members WHERE id = $1::uuid FOR UPDATE`, [rowId], () =>
+        changeRole(jsonRequest(`http://localhost/api/teams/${teamId}/members/${rowId}`, "PUT", { role: "MEMBER" }), {
+          params: Promise.resolve({ teamId, memberId: rowId }),
+        }), actor.id);
+      expect(res.reached).toBe("blocked-on-parked");
+      expect(res.request.status).toBe(200);
+      expect(await membership(teamId, target.id)).toMatchObject({ role: "MEMBER" });
     });
   });
 });

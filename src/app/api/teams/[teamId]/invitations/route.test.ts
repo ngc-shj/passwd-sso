@@ -44,9 +44,14 @@ vi.mock("@/lib/auth/access/team-auth", async () => ({
   requireTeamPermission: mockRequireTeamPermission,
   // The real role → permission table: POST re-checks the inviter's role under the lock.
   hasTeamPermission: (await vi.importActual<typeof import("@/lib/auth/access/team-auth")>("@/lib/auth/access/team-auth")).hasTeamPermission,
+  activeTeamRole: (await vi.importActual<typeof import("@/lib/auth/access/team-auth")>("@/lib/auth/access/team-auth")).activeTeamRole,
   TeamAuthError,
 }));
 const { mockLockTenantRows } = vi.hoisted(() => ({ mockLockTenantRows: vi.fn() }));
+vi.mock("@/lib/team/team-key-rotation-lock", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
+  lockTeamsAgainstRotation: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("@/lib/team/tenant-row-lock", async (importOriginal) => ({
   ...(await importOriginal()) as Record<string, unknown>,
   lockTenantRows: mockLockTenantRows,

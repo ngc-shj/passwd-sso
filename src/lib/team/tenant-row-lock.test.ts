@@ -21,7 +21,7 @@ function recordingTx(rows: { user_id: string; deactivated_at: Date | null }[] = 
     $queryRaw: vi.fn(async (strings: TemplateStringsArray, ...vals: unknown[]) => {
       record(strings, ...vals);
       const sql = strings.join("?");
-      if (sql.includes("current_setting('lock_timeout')")) return [{ lock_timeout: "0" }];
+      if (sql.includes("current_setting('lock_timeout')")) return [{ lock_timeout: "0", statement_timeout: "0" }];
       if (sql.includes("FROM tenant_member_departures")) return records;
       if (sql.includes("FROM tenant_members")) return rows;
       return [];

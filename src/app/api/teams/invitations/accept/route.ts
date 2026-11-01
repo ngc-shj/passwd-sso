@@ -5,7 +5,7 @@ import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, unauthorized } from "@/lib/http/api-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
-import { INVITATION_STATUS } from "@/lib/constants";
+import { INVITATION_STATUS, TEAM_PERMISSION } from "@/lib/constants";
 import { withUserTenantRls, withTeamTenantRls } from "@/lib/tenant-context";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
@@ -16,6 +16,7 @@ import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { TEAM_MEMBERSHIP_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 import { createLockBudget, lockTeamsAgainstRotation } from "@/lib/team/team-key-rotation-lock";
 import { departedSince, isMembershipLockConflict, lockTenantRows } from "@/lib/team/tenant-row-lock";
+import { activeTeamRole, hasTeamPermission } from "@/lib/auth/access/team-auth";
 
 const ACCEPT_OUTCOME = {
   ACCEPTED: "accepted",
@@ -173,9 +174,15 @@ async function handlePOST(req: NextRequest) {
         });
         if (claim.count === 0) return ACCEPT_OUTCOME.ALREADY_USED;
 
+        // An invitation speaks for its inviter: refused when the invitee or
+        // the inviter left the tenant since it was issued, or the inviter is
+        // no longer a member entitled to invite (removed or demoted since).
+        const inviterRole = await activeTeamRole(tx, invitation.teamId, invitation.invitedById);
         if (
           departedSince(rows.get(session.user.id), invitation.createdAt) ||
-          departedSince(rows.get(invitation.invitedById), invitation.createdAt)
+          departedSince(rows.get(invitation.invitedById), invitation.createdAt) ||
+          !inviterRole ||
+          !hasTeamPermission(inviterRole, TEAM_PERMISSION.MEMBER_INVITE)
         ) {
           await tx.teamInvitation.update({
             where: { id: invitation.id },

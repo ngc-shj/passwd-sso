@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { Prisma, TeamRole } from "@prisma/client";
+import type { TeamPermission } from "@/lib/auth/access/team-auth";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
 import { updateMemberRoleSchema } from "@/lib/validations";
 import {
+  activeTeamRole,
+  hasTeamPermission,
   requireTeamPermission,
   isRoleAbove,
 } from "@/lib/auth/access/team-auth";
@@ -12,7 +16,8 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import { TEAM_PERMISSION, TEAM_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
-import { isTeamRotationConflict, lockTeamsAgainstRotation } from "@/lib/team/team-key-rotation-lock";
+import { createLockBudget, lockTeamsAgainstRotation } from "@/lib/team/team-key-rotation-lock";
+import { isMembershipLockConflict, lockTenantRows } from "@/lib/team/tenant-row-lock";
 import {
   invalidateUserSessions,
   type InvalidateUserSessionsResult,
@@ -53,6 +58,33 @@ async function buildMemberRoleResponse(member: {
     image: display?.image ?? null,
     tenantName: display?.tenantName ?? null,
   };
+}
+
+/**
+ * Whether a role read under the lock may act on a member of `targetRole`: it
+ * holds the permission and, below OWNER, ranks above the target (the same
+ * rule the handlers apply to the pre-transaction membership).
+ */
+function actorAuthorized(role: TeamRole | null, permission: TeamPermission, targetRole: TeamRole): boolean {
+  if (!role || !hasTeamPermission(role, permission)) return false;
+  return role === TEAM_ROLE.OWNER || isRoleAbove(role, targetRole);
+}
+
+/**
+ * The acting member's tenant row (FOR SHARE), then the team: the actor's
+ * departure holds that row FOR UPDATE, so the active-actor re-check after this
+ * reads a departure that committed meanwhile. A guest actor has no row here;
+ * the advisory lock still serialises them (tenant-row-lock.ts).
+ */
+async function lockActorThenTeam(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  teamId: string,
+  actorUserId: string,
+) {
+  const budget = createLockBudget();
+  await lockTenantRows(tx, tenantId, [actorUserId], "share", budget);
+  await lockTeamsAgainstRotation(tx, [teamId], budget);
 }
 
 // PUT /api/teams/[teamId]/members/[memberId] — Change member role
@@ -104,8 +136,8 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     // who just left the tenant would leave the team without an active OWNER.
     let updated;
     try {
-      updated = await withTeamTenantRls(teamId, async (_tenantId, tx) => {
-        await lockTeamsAgainstRotation(tx, [teamId]);
+      updated = await withTeamTenantRls(teamId, async (tenantId, tx) => {
+        await lockActorThenTeam(tx, tenantId, teamId, session.user.id);
         const demoted = await tx.teamMember.updateMany({
           where: { id: actorMembership.id, teamId, role: TEAM_ROLE.OWNER, deactivatedAt: null },
           data: { role: TEAM_ROLE.ADMIN },
@@ -119,7 +151,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
       });
     } catch (e) {
       if (e instanceof MemberChangedError) return errorResponse(API_ERROR.MEMBER_NOT_FOUND);
-      if (isTeamRotationConflict(e)) return errorResponse(API_ERROR.CONFLICT);
+      if (isMembershipLockConflict(e)) return errorResponse(API_ERROR.CONFLICT);
       throw e;
     }
 
@@ -152,21 +184,22 @@ async function handlePUT(req: NextRequest, { params }: Params) {
   // ends either membership.
   let updated;
   try {
-    updated = await withTeamTenantRls(teamId, async (_tenantId, tx) => {
-      await lockTeamsAgainstRotation(tx, [teamId]);
-      const actorActive = await tx.teamMember.count({
-        where: { id: actorMembership.id, teamId, deactivatedAt: null },
-      });
+    updated = await withTeamTenantRls(teamId, async (tenantId, tx) => {
+      await lockActorThenTeam(tx, tenantId, teamId, session.user.id);
+      // The acting member's authority as it stands now (departure, removal or
+      // demotion since the permission check), judged against the target.
+      const actorRole = await activeTeamRole(tx, teamId, session.user.id);
+      if (!actorAuthorized(actorRole, TEAM_PERMISSION.MEMBER_CHANGE_ROLE, target.role)) throw new MemberChangedError();
       const changed = await tx.teamMember.updateMany({
         where: { id: memberId, teamId, deactivatedAt: null, role: target.role },
         data: { role: result.data.role },
       });
-      if (actorActive !== 1 || changed.count !== 1) throw new MemberChangedError();
+      if (changed.count !== 1) throw new MemberChangedError();
       return tx.teamMember.findUniqueOrThrow({ where: { id: memberId }, select: { id: true, userId: true, role: true, createdAt: true } });
     });
   } catch (e) {
     if (e instanceof MemberChangedError) return errorResponse(API_ERROR.MEMBER_NOT_FOUND);
-    if (isTeamRotationConflict(e)) return errorResponse(API_ERROR.CONFLICT);
+    if (isMembershipLockConflict(e)) return errorResponse(API_ERROR.CONFLICT);
     throw e;
   }
 
@@ -232,21 +265,19 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
   }
 
   try {
-    await withTeamTenantRls(teamId, async (_tenantId, tx) => {
+    await withTeamTenantRls(teamId, async (tenantId, tx) => {
       // Serialise with key rotation first: a removal committing after a
       // rotation read the member set would leave the removed member a key to
       // the new version (team-key-rotation-lock.ts).
-      await lockTeamsAgainstRotation(tx, [teamId]);
-      // The acting member must still be active: a departure from the tenant
-      // committed since the permission check ended their membership.
-      const actorActive = await tx.teamMember.count({
-        where: { id: actorMembership.id, teamId, deactivatedAt: null },
-      });
-      if (actorActive !== 1) throw new MemberChangedError();
+      await lockActorThenTeam(tx, tenantId, teamId, session.user.id);
+      // The acting member's authority as it stands now (departure, removal or
+      // demotion since the permission check), judged against the target.
+      const actorRole = await activeTeamRole(tx, teamId, session.user.id);
+      if (!actorAuthorized(actorRole, TEAM_PERMISSION.MEMBER_REMOVE, target.role)) throw new MemberChangedError();
       // Re-read under the lock: the row is still active or departed (a return
       // or a group removal since the check above changes what is removed).
       const removed = await tx.teamMember.deleteMany({
-        where: { id: memberId, teamId, OR: [{ deactivatedAt: null }, { deactivatedByTenant: true }] },
+        where: { id: memberId, teamId, role: target.role, OR: [{ deactivatedAt: null }, { deactivatedByTenant: true }] },
       });
       if (removed.count !== 1) throw new MemberChangedError();
       await tx.teamMemberKey.deleteMany({ where: { teamId: teamId, userId: target.userId } });
@@ -254,7 +285,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
   } catch (e) {
     if (e instanceof MemberChangedError) return errorResponse(API_ERROR.MEMBER_NOT_FOUND);
     // A rotation of this team held it past the lock wait; nothing was removed.
-    if (isTeamRotationConflict(e)) return errorResponse(API_ERROR.CONFLICT);
+    if (isMembershipLockConflict(e)) return errorResponse(API_ERROR.CONFLICT);
     throw e;
   }
 

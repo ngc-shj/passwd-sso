@@ -29,6 +29,10 @@ vi.mock("@/lib/security/rate-limit", () => ({
 }));
 
 import { runDirectorySync } from "@/lib/directory-sync/engine";
+import { departCreatedMembership } from "@/lib/team/team-departure";
+import { withTenantRls } from "@/lib/tenant-rls";
+import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
+import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { POST as acceptInvitation } from "@/app/api/teams/invitations/accept/route";
 import { prisma } from "@/lib/prisma";
 
@@ -187,6 +191,8 @@ describe("directory sync across a tenant departure — real-DB integration", () 
     mockFetchOktaUsers.mockResolvedValue([oktaUser(user.ext, user.email, "User", false)]);
     expect((await runDirectorySync({ configId, tenantId, force: true })).success).toBe(true);
     const stamp = await stampText(user.id);
+    expect(stamp).not.toBeNull();
+    expect(await membership(teamId, user.id)).toMatchObject({ deactivated_by_tenant: true });
     // Re-admitted on a post-departure invitation (as accept writes it).
     await sql(
       `UPDATE team_members SET deactivated_at = NULL, deactivated_by_tenant = false
@@ -225,8 +231,9 @@ describe("directory sync across a tenant departure — real-DB integration", () 
       oktaUser(inviter.ext, inviter.email, "Inviter", false),
       oktaUser(invitee.ext, invitee.email, "Invitee", false),
     ]);
-    // Hold the larger id's advisory lock: the accept parks holding the smaller.
-    const blocker = await race.holdRowLock(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [`tenant-member:${tenantId}:${invitee.id}`]);
+    // Park the accept at its invitation claim — after its tenant-row locks, on
+    // a row lock outside its lock budget, so the run's setup time does not race it.
+    const blocker = await race.holdRowLock(`SELECT id FROM team_invitations WHERE id = $1::uuid FOR UPDATE`, [invitationId]);
     let accepting: Promise<Response> | undefined;
     let syncing: ReturnType<typeof runDirectorySync> | undefined;
     try {
@@ -246,5 +253,50 @@ describe("directory sync across a tenant departure — real-DB integration", () 
     }
     // Admitted before the run's departure, then ended by it.
     expect(await membership(teamId, invitee.id)).toMatchObject({ deactivated_by_tenant: true });
+  });
+  /** A user this tenant owns with no membership row (a guest of its teams, say). */
+  async function ownedWithoutRow(): Promise<{ id: string; email: string }> {
+    const id = await ctx.createUser(tenantId);
+    await sql(`DELETE FROM tenant_members WHERE user_id = $1::uuid`, id);
+    const [row] = await sql<{ email: string }>(`SELECT email FROM users WHERE id = $1::uuid`, id);
+    return { id, email: row.email };
+  }
+
+  it("a run creating two users deactivated departs both, ending their memberships of the tenant's teams", async () => {
+    const owner = await ctx.createUser(tenantId);
+    const [a, b] = [await ownedWithoutRow(), await ownedWithoutRow()];
+    const teamId = await team(owner);
+    await addTeamMember(teamId, a.id, "MEMBER");
+    await addTeamMember(teamId, b.id, "MEMBER");
+    mockFetchOktaUsers.mockResolvedValue([
+      oktaUser(`ext-${a.id.slice(0, 8)}`, a.email, "A", false),
+      oktaUser(`ext-${b.id.slice(0, 8)}`, b.email, "B", false),
+    ]);
+
+    const result = await runDirectorySync({ configId, tenantId, force: true });
+
+    expect(result.success).toBe(true);
+    expect(await membership(teamId, a.id)).toMatchObject({ deactivated_by_tenant: true });
+    expect(await membership(teamId, b.id)).toMatchObject({ deactivated_by_tenant: true });
+  });
+
+  it("departCreatedMembership refuses a batch with a row that is not deactivated, stamping nothing", async () => {
+    const owner = await ctx.createUser(tenantId);
+    const created = await mapped();
+    const active = await mapped();
+    const teamId = await team(owner);
+    await addTeamMember(teamId, created.id, "MEMBER");
+    await sql(`UPDATE tenant_members SET deactivated_at = now() WHERE user_id = $1::uuid`, created.id);
+    const before = await stampText(created.id);
+
+    await expect(
+      withTenantRls(prisma, tenantId, (tx) =>
+        departCreatedMembership(tx, tenantId, [created.id, active.id], { actor: { userId: SYSTEM_ACTOR_ID, actorType: ACTOR_TYPE.SYSTEM } }),
+      ),
+    ).rejects.toThrow(/a created row is not deactivated/);
+
+    expect(await stampText(created.id)).toBe(before);
+    expect(await stampText(active.id)).toBeNull();
+    expect(await membership(teamId, created.id)).toMatchObject({ deactivated_at: null });
   });
 });
