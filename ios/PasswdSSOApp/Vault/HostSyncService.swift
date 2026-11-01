@@ -97,10 +97,18 @@ public actor HostSyncService {
     // propagated via the single-source-of-truth mapping on EncryptedEntry).
     var allCacheEntries: [CacheEntry] = personal.map { $0.toPersonalCacheEntry() }
 
-    // Fetch team entries sequentially to avoid overwhelming the server
+    // Fetch team entries sequentially to avoid overwhelming the server.
+    // A failure scoped to one team (e.g. a 404 when the membership ended between
+    // the team list and this fetch, as a tenant departure does) leaves that team
+    // out of this cache and must not fail the personal vault or the other teams;
+    // the team comes back on the next sync if it is still a membership.
     for team in teams {
-      let teamCacheEntries = try await entryFetcher.fetchTeamAsCacheEntries(teamId: team.id)
-      allCacheEntries.append(contentsOf: teamCacheEntries)
+      do {
+        let teamCacheEntries = try await entryFetcher.fetchTeamAsCacheEntries(teamId: team.id)
+        allCacheEntries.append(contentsOf: teamCacheEntries)
+      } catch {
+        guard Self.isTeamScopedFailure(error) else { throw error }
+      }
     }
 
     // Populate per-team keys (best-effort; never fails the personal sync).
@@ -223,6 +231,22 @@ public actor HostSyncService {
     }
     // Full rewrite — revoked / no-longer-distributed teams drop out of the set.
     try? wrappedKeyStore.saveTeamKeys(blobs)
+  }
+
+  /// Whether a team-entry fetch failure concerns that team alone. A dead
+  /// session, a passkey refusal, rate limiting, the transport and cancellation
+  /// would refuse every remaining team the same way: those fail the sync, so the
+  /// previous cache stays whole instead of being rewritten without the teams.
+  static func isTeamScopedFailure(_ error: Error) -> Bool {
+    if error is CancellationError { return false }
+    switch error as? MobileAPIError {
+    case .authenticationRequired?, .passkeyRequired?, .rateLimited?, .networkError?:
+      return false
+    case .serverError(let status)? where status == 429:
+      return false
+    default:
+      return true
+    }
   }
 
   /// Clear the persisted team-key set only when every blob is already past the

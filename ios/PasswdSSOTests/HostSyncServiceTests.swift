@@ -832,6 +832,109 @@ final class HostSyncServiceTests: XCTestCase {
     }
   }
 
+  // MARK: - One team's entry fetch failing (#989)
+
+  private func makeTeamFetchSync(
+    _ name: String, bridgeKeyStore: BridgeKeyStore
+  ) -> HostSyncService {
+    let tokenStore = HostTokenStore(service: "com.test.\(name).tokens", keychain: FakeKeychain())
+    try? tokenStore.saveTokens(
+      access: "acc_\(name)", refresh: "ref_\(name)", expiresAt: Date().addingTimeInterval(3600))
+    let apiClient = MobileAPIClient(
+      serverURL: URL(string: "https://test.\(name).example")!,
+      signer: FakeSigner(),
+      jwk: ["kty": "EC", "crv": "P-256",
+            "x": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "y": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"],
+      tokenStore: tokenStore,
+      urlSession: makeSession()
+    )
+    return HostSyncService(
+      apiClient: apiClient,
+      entryFetcher: EntryFetcher(apiClient: apiClient),
+      bridgeKeyStore: bridgeKeyStore,
+      wrappedKeyStore: TempDirWrappedKeyStore(baseDir: tmpDir),
+      cacheURL: tmpDir.appending(path: "\(name).cache", directoryHint: .notDirectory),
+      teamDirectoryStore: NullTeamDirectoryStore()
+    )
+  }
+
+  private static let teamsGoneThenKept =
+    Data(#"[{"id":"team-gone","name":"Gone"},{"id":"team-kept","name":"Kept"}]"#.utf8)
+  private static let oneTeamEntry = Data(#"""
+    [{"id":"entry-kept","encryptedOverview":"aa","overviewIv":"bb","overviewAuthTag":"cc",
+      "encryptedBlob":"dd","blobIv":"ee","blobAuthTag":"ff","aadVersion":1,
+      "teamKeyVersion":1,"itemKeyVersion":0,"isFavorite":false,"isArchived":false}]
+    """#.utf8)
+
+  /// A membership ended between the team list and that team's fetch (a tenant
+  /// departure answers 404): the personal vault and the other teams still sync.
+  func testRunSync_oneTeamFetchNotFound_otherTeamsStillSync() async throws {
+    let keychain = MockKeychain()
+    seedBlobInKeychain(keychain, counter: 1, service: "com.passwd-sso.test.team-gone.bridge-key")
+    let bks = BridgeKeyStore(
+      accessGroup: "test", service: "com.passwd-sso.test.team-gone.bridge-key", keychain: keychain)
+
+    MockURLProtocol.requestHandler = { request in
+      let path = request.url?.path ?? ""
+      if path.hasSuffix("/api/teams") {
+        return (Self.teamsGoneThenKept, httpResponse(status: 200, url: request.url!))
+      }
+      if path.contains("/team-gone/") {
+        return (Data(#"{"error":"NOT_FOUND"}"#.utf8), httpResponse(status: 404, url: request.url!))
+      }
+      if path.contains("/team-kept/passwords") {
+        return (Self.oneTeamEntry, httpResponse(status: 200, url: request.url!))
+      }
+      return (Data("[]".utf8), httpResponse(status: 200, url: request.url!))
+    }
+
+    let report = try await makeTeamFetchSync("team-gone", bridgeKeyStore: bks)
+      .runSync(vaultKey: SymmetricKey(size: .bits256), userId: "u-1")
+
+    XCTAssertEqual(report.entriesFetched, 1, "the kept team's entry is cached; the gone team is left out")
+    XCTAssertEqual(try bks.readDirect().cacheVersionCounter, 2)
+  }
+
+  /// A transport failure is not one team's: the sync fails and the previous
+  /// cache (counter) is left as it was rather than rewritten without teams.
+  func testRunSync_teamFetchNetworkError_failsSync() async throws {
+    let keychain = MockKeychain()
+    seedBlobInKeychain(keychain, counter: 1, service: "com.passwd-sso.test.team-offline.bridge-key")
+    let bks = BridgeKeyStore(
+      accessGroup: "test", service: "com.passwd-sso.test.team-offline.bridge-key", keychain: keychain)
+
+    MockURLProtocol.requestHandler = { request in
+      let path = request.url?.path ?? ""
+      if path.hasSuffix("/api/teams") {
+        return (Self.teamsGoneThenKept, httpResponse(status: 200, url: request.url!))
+      }
+      if path.contains("/team-gone/") { throw URLError(.notConnectedToInternet) }
+      return (Data("[]".utf8), httpResponse(status: 200, url: request.url!))
+    }
+
+    do {
+      _ = try await makeTeamFetchSync("team-offline", bridgeKeyStore: bks)
+        .runSync(vaultKey: SymmetricKey(size: .bits256), userId: "u-1")
+      XCTFail("expected networkError")
+    } catch MobileAPIError.networkError {
+      XCTAssertEqual(try bks.readDirect().cacheVersionCounter, 1)
+    }
+  }
+
+  func testIsTeamScopedFailure_splitsTeamFromSessionAndTransport() {
+    XCTAssertTrue(HostSyncService.isTeamScopedFailure(MobileAPIError.serverError(status: 404)))
+    XCTAssertTrue(HostSyncService.isTeamScopedFailure(MobileAPIError.serverError(status: 500)))
+    XCTAssertTrue(HostSyncService.isTeamScopedFailure(
+      DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "bad"))))
+    XCTAssertFalse(HostSyncService.isTeamScopedFailure(MobileAPIError.serverError(status: 429)))
+    XCTAssertFalse(HostSyncService.isTeamScopedFailure(MobileAPIError.rateLimited(retryAfter: 60)))
+    XCTAssertFalse(HostSyncService.isTeamScopedFailure(MobileAPIError.authenticationRequired))
+    XCTAssertFalse(HostSyncService.isTeamScopedFailure(MobileAPIError.passkeyRequired))
+    XCTAssertFalse(HostSyncService.isTeamScopedFailure(MobileAPIError.networkError(URLError(.timedOut))))
+    XCTAssertFalse(HostSyncService.isTeamScopedFailure(CancellationError()))
+  }
+
   /// A passkey refusal of a member-key fetch used to be skipped as "key not
   /// distributed", and the full rewrite then dropped the team's still-valid key.
   func testRefreshTeamKeys_memberKeyRefusedForPasskey_throwsAndKeepsKeys() async throws {
