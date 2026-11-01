@@ -1176,7 +1176,37 @@ describe("team membership across a tenant departure — real-DB integration", ()
       expect(await membership(teamId, creator)).toMatchObject({ role: "OWNER", deactivated_by_tenant: true });
     });
 
-    it("a departure of the target waits for an owner assignment holding their row; the team is then ownerless again", async () => {
+    it("a departure of the acting tenant ADMIN waits for the owner assignment they are making", async () => {
+      // The actor need not be a member of the team, so the team lock does not
+      // see their departure: only the actor's tenant row, held FOR SHARE, does.
+      const admin = await ctx.createUser(tenantId);
+      await sql(`UPDATE tenant_members SET role = 'ADMIN' WHERE user_id = $1::uuid`, admin);
+      const oldOwner = await member();
+      const successor = await member();
+      const teamId = await team(oldOwner.id);
+      const successorRow = await addTeamMember(teamId, successor.id, "MEMBER");
+      await scimActive(oldOwner.id, false);
+      const blocker = await race.holdRowLock(`SELECT id FROM team_members WHERE id = $1::uuid FOR UPDATE`, [successorRow]);
+      let assigning: Promise<Response> | undefined;
+      let departing: Promise<Response> | undefined;
+      try {
+        mockAuth.mockResolvedValue({ user: { id: admin } });
+        assigning = assignOwner(jsonRequest(`http://localhost/api/tenant/teams/${teamId}/owner`, "POST", { userId: successor.id }), {
+          params: Promise.resolve({ teamId }),
+        });
+        const assignPid = await race.waitForBackendBlockedBy(blocker.pid);
+        departing = scimActive(admin, false);
+        expect(await race.settledOrBlocked(departing, assignPid, blocker.pid)).toBe("blocked-on-parked");
+        await blocker.release();
+        expect((await assigning).status).toBe(200);
+        expect((await departing).status).toBe(200);
+      } finally {
+        await blocker.release();
+        await Promise.allSettled([assigning, departing]);
+      }
+    });
+
+    it("a departure of the target waits for an owner assignment holding the team; the team is then ownerless again", async () => {
       const admin = await ctx.createUser(tenantId);
       await sql(`UPDATE tenant_members SET role = 'ADMIN' WHERE user_id = $1::uuid`, admin);
       const oldOwner = await member();

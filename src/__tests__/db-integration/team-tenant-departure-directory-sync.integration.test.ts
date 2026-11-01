@@ -201,10 +201,15 @@ describe("directory sync across a tenant departure — real-DB integration", () 
     expect(await membership(teamId, user.id)).toMatchObject({ deactivated_at: null });
   });
 
-  it("A10: a run departing two users and an accept locking the same two rows in reverse order do not deadlock", async () => {
-    // Accept locks [invitee, inviter]; the run locks its users together. With
-    // both sorted, the run waits on the accept's first lock and the accept on
-    // the blocker; unsorted, they would cross.
+  it("A10: a run departing two users waits for an accept holding one of their rows, then ends the admission", async () => {
+    // Accept locks [invitee, inviter]; the run departs both. The run waits on
+    // the accept (witnessed), the accept commits its admission, and the run then
+    // ends it — the outcome of a run racing an admission over the same rows.
+    // What keeps such a run from deadlocking with a writer that holds a later
+    // user's row and waits on a team (one tenant-row lock call, before any team
+    // lock) is pinned by check-team-rotation-input-lock rule 4, not by this cell:
+    // pg_blocking_pids also reports waiters queued ahead, so a lock-order
+    // mutation is not distinguishable here.
     const owner = await ctx.createUser(tenantId);
     const [inviter, invitee] = [await mapped(), await mapped()].sort((x, y) => x.id.localeCompare(y.id));
     const teamId = await team(owner);
