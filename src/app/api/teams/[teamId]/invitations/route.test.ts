@@ -48,9 +48,10 @@ vi.mock("@/lib/auth/access/team-auth", async () => ({
   TeamAuthError,
 }));
 const { mockLockTenantRows } = vi.hoisted(() => ({ mockLockTenantRows: vi.fn() }));
+const { mockLockTeamsAgainstRotation } = vi.hoisted(() => ({ mockLockTeamsAgainstRotation: vi.fn() }));
 vi.mock("@/lib/team/team-key-rotation-lock", async (importOriginal) => ({
   ...(await importOriginal()) as Record<string, unknown>,
-  lockTeamsAgainstRotation: vi.fn().mockResolvedValue(undefined),
+  lockTeamsAgainstRotation: mockLockTeamsAgainstRotation,
 }));
 vi.mock("@/lib/team/tenant-row-lock", async (importOriginal) => ({
   ...(await importOriginal()) as Record<string, unknown>,
@@ -166,6 +167,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     mockLockTenantRows.mockResolvedValue(new Map());
     // The inviter's membership, re-read under their tenant row: an active ADMIN.
     mockPrismaTeamMember.findFirst.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
+    mockLockTeamsAgainstRotation.mockResolvedValue(undefined);
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -337,6 +339,18 @@ describe("POST /api/teams/[teamId]/invitations", () => {
         select: { role: true },
       });
       expect(mockLockTenantRows.mock.invocationCallOrder[0]).toBeLessThan(mockPrismaTeamMember.findFirst.mock.invocationCallOrder[0]);
+    });
+
+    it("re-reads the inviter's role after the tenant rows and then the team are locked", async () => {
+      const res = await invite();
+
+      expect(res.status).toBe(201);
+      expect(mockLockTeamsAgainstRotation).toHaveBeenCalledWith(expect.anything(), [TEAM_ID], expect.anything());
+      const [tenantLock] = mockLockTenantRows.mock.invocationCallOrder;
+      const [teamLock] = mockLockTeamsAgainstRotation.mock.invocationCallOrder;
+      const [roleRead] = mockPrismaTeamMember.findFirst.mock.invocationCallOrder;
+      expect(tenantLock).toBeLessThan(teamLock);
+      expect(teamLock).toBeLessThan(roleRead);
     });
 
     it("refuses when the inviter's role no longer allows inviting", async () => {

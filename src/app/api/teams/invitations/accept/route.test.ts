@@ -383,6 +383,14 @@ describe("POST /api/teams/invitations/accept", () => {
       expect(acceptTx.teamMember.upsert).not.toHaveBeenCalled();
     });
 
+    it("admits on an invitation from a guest ADMIN, who has no tenant row here", async () => {
+      mockLockTenantRows.mockResolvedValue(lockedRows({ "inviter-id": { hasRow: false } }));
+      acceptTx.teamMember.findFirst.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
+
+      expect((await accept()).status).toBe(200);
+      expect(acceptTx.teamMember.upsert).toHaveBeenCalledOnce();
+    });
+
     it("refuses an invitation from an inviter demoted to VIEWER", async () => {
       acceptTx.teamMember.findFirst.mockResolvedValue({ role: TEAM_ROLE.VIEWER });
 

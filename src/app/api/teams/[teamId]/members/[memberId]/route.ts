@@ -41,6 +41,13 @@ class MemberChangedError extends Error {
   }
 }
 
+/** The acting member's authority, re-read under the lock, no longer covers the change. */
+class ActorNotPermittedError extends Error {
+  constructor() {
+    super("ACTOR_NOT_PERMITTED");
+  }
+}
+
 async function buildMemberRoleResponse(member: {
   id: string;
   userId: string;
@@ -151,6 +158,8 @@ async function handlePUT(req: NextRequest, { params }: Params) {
       });
     } catch (e) {
       if (e instanceof MemberChangedError) return errorResponse(API_ERROR.MEMBER_NOT_FOUND);
+      if (e instanceof ActorNotPermittedError) return errorResponse(API_ERROR.FORBIDDEN);
+    if (e instanceof ActorNotPermittedError) return errorResponse(API_ERROR.FORBIDDEN);
       if (isMembershipLockConflict(e)) return errorResponse(API_ERROR.CONFLICT);
       throw e;
     }
@@ -189,7 +198,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
       // The acting member's authority as it stands now (departure, removal or
       // demotion since the permission check), judged against the target.
       const actorRole = await activeTeamRole(tx, teamId, session.user.id);
-      if (!actorAuthorized(actorRole, TEAM_PERMISSION.MEMBER_CHANGE_ROLE, target.role)) throw new MemberChangedError();
+      if (!actorAuthorized(actorRole, TEAM_PERMISSION.MEMBER_CHANGE_ROLE, target.role)) throw new ActorNotPermittedError();
       const changed = await tx.teamMember.updateMany({
         where: { id: memberId, teamId, deactivatedAt: null, role: target.role },
         data: { role: result.data.role },
@@ -199,6 +208,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     });
   } catch (e) {
     if (e instanceof MemberChangedError) return errorResponse(API_ERROR.MEMBER_NOT_FOUND);
+    if (e instanceof ActorNotPermittedError) return errorResponse(API_ERROR.FORBIDDEN);
     if (isMembershipLockConflict(e)) return errorResponse(API_ERROR.CONFLICT);
     throw e;
   }
@@ -273,7 +283,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
       // The acting member's authority as it stands now (departure, removal or
       // demotion since the permission check), judged against the target.
       const actorRole = await activeTeamRole(tx, teamId, session.user.id);
-      if (!actorAuthorized(actorRole, TEAM_PERMISSION.MEMBER_REMOVE, target.role)) throw new MemberChangedError();
+      if (!actorAuthorized(actorRole, TEAM_PERMISSION.MEMBER_REMOVE, target.role)) throw new ActorNotPermittedError();
       // Re-read under the lock: the row is still active or departed (a return
       // or a group removal since the check above changes what is removed).
       const removed = await tx.teamMember.deleteMany({
@@ -284,6 +294,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
     });
   } catch (e) {
     if (e instanceof MemberChangedError) return errorResponse(API_ERROR.MEMBER_NOT_FOUND);
+    if (e instanceof ActorNotPermittedError) return errorResponse(API_ERROR.FORBIDDEN);
     // A rotation of this team held it past the lock wait; nothing was removed.
     if (isMembershipLockConflict(e)) return errorResponse(API_ERROR.CONFLICT);
     throw e;

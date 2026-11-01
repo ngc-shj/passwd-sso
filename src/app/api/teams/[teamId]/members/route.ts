@@ -83,7 +83,10 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   const result = await parseBody(req, addMemberSchema);
   if (!result.ok) return result.response;
 
-  const { userId, role } = result.data;
+  // Lowercase, as the database returns uuids: the self check below compares
+  // with the session's id, and an uppercase spelling would slip past it.
+  const userId = result.data.userId.toLowerCase();
+  const { role } = result.data;
 
   // Cannot add yourself
   if (userId === session.user.id) {

@@ -32,7 +32,11 @@ const {
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({ prisma: {} }));
-vi.mock("@/lib/auth/access/tenant-auth", () => ({ requireTenantPermission: mockRequireTenantPermission }));
+vi.mock("@/lib/auth/access/tenant-auth", async () => ({
+  requireTenantPermission: mockRequireTenantPermission,
+  // The real role → permission table: the route re-checks the actor's role under the lock.
+  hasTenantPermission: (await vi.importActual<typeof import("@/lib/auth/access/tenant-auth")>("@/lib/auth/access/tenant-auth")).hasTenantPermission,
+}));
 vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({ requireRecentCurrentAuthMethod: mockRequireRecent }));
 vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: mockCreateRateLimiter.mockImplementation((_opts: unknown) => ({ check: mockLimiterCheck })),
@@ -68,8 +72,10 @@ const TEAM_ID = "11111111-1111-4111-8111-111111111111";
 const ACTOR_ID = "22222222-2222-4222-8222-222222222222";
 const TARGET_ID = "33333333-3333-4333-8333-333333333333";
 
-const active: LockedTenantRow = { hasRow: true, deactivatedAt: null, departedAt: null };
-const left: LockedTenantRow = { hasRow: true, deactivatedAt: new Date(), departedAt: null };
+// The actor's row carries their tenant role as of the lock (ADMIN unless a cell says otherwise).
+const active: LockedTenantRow = { hasRow: true, role: "ADMIN", deactivatedAt: null, departedAt: null };
+const left: LockedTenantRow = { hasRow: true, role: "ADMIN", deactivatedAt: new Date(), departedAt: null };
+const activeOwner: LockedTenantRow = { ...active, role: "OWNER" };
 
 function assign(userId: string = TARGET_ID) {
   return POST(
@@ -198,9 +204,25 @@ describe("POST /api/tenant/teams/[teamId]/owner", () => {
     });
   });
 
-  it("allows self-assignment by the tenant OWNER, recorded as such", async () => {
+  it("refuses (403), changing nothing, when the actor was demoted to tenant MEMBER after the permission check", async () => {
+    mockLockTenantRows.mockResolvedValue(new Map([[ACTOR_ID, { ...active, role: "MEMBER" }], [TARGET_ID, active]]));
+
+    expect((await assign()).status).toBe(403);
+    expect(tx.teamMember.update).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
+  });
+
+  it("refuses self-assignment by an actor who was tenant OWNER at the check but is ADMIN under the lock", async () => {
     mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant-1", role: TENANT_ROLE.OWNER });
     mockLockTenantRows.mockResolvedValue(new Map([[ACTOR_ID, active]]));
+
+    expect((await assign(ACTOR_ID)).status).toBe(403);
+    expect(tx.teamMember.update).not.toHaveBeenCalled();
+  });
+
+  it("allows self-assignment by the tenant OWNER, recorded as such", async () => {
+    mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant-1", role: TENANT_ROLE.OWNER });
+    mockLockTenantRows.mockResolvedValue(new Map([[ACTOR_ID, activeOwner]]));
 
     const res = await assign(ACTOR_ID);
 

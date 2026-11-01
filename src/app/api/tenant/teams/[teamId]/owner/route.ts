@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
+import { hasTenantPermission, requireTenantPermission } from "@/lib/auth/access/tenant-auth";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE, TEAM_ROLE, TENANT_ROLE } from "@/lib/constants";
@@ -32,6 +32,7 @@ const ASSIGN_OUTCOME = {
   NOT_FOUND: "not_found",
   HAS_OWNER: "has_owner",
   NOT_ACTIVE: "not_active",
+  ACTOR_NOT_PERMITTED: "actor_not_permitted",
 } as const;
 
 type Params = { params: Promise<{ teamId: string }> };
@@ -74,8 +75,8 @@ async function handlePOST(req: NextRequest, { params }: Params) {
 
   // A guard against mistakes, not an authorization boundary: a tenant ADMIN
   // can already join any team through a SCIM group mapping. Assigning oneself
-  // is left to the tenant OWNER.
-  const selfAssigned = targetUserId === session.user.id;
+  // is left to the tenant OWNER (re-checked below on the role read under lock).
+  const selfAssigned = targetUserId.toLowerCase() === session.user.id.toLowerCase();
   if (selfAssigned && actor.role !== TENANT_ROLE.OWNER) {
     return errorResponse(API_ERROR.FORBIDDEN);
   }
@@ -100,6 +101,16 @@ async function handlePOST(req: NextRequest, { params }: Params) {
           const row = rows.get(id);
           return row?.hasRow === true && row.deactivatedAt === null;
         };
+        // The actor's tenant role as of the lock: a demotion committed since
+        // requireTenantPermission applies, here and to the self-assign rule.
+        const actorRole = rows.get(session.user.id)?.role ?? null;
+        if (
+          !actorRole ||
+          !hasTenantPermission(actorRole, TENANT_PERMISSION.TEAM_OWNER_ASSIGN) ||
+          (selfAssigned && actorRole !== TENANT_ROLE.OWNER)
+        ) {
+          return ASSIGN_OUTCOME.ACTOR_NOT_PERMITTED;
+        }
         if (!isActive(session.user.id) || !isActive(targetUserId)) return ASSIGN_OUTCOME.NOT_ACTIVE;
         await withBoundedLockWait(
           tx,
@@ -155,6 +166,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   }
 
   if (outcome === ASSIGN_OUTCOME.NOT_FOUND) return notFound();
+  if (outcome === ASSIGN_OUTCOME.ACTOR_NOT_PERMITTED) return errorResponse(API_ERROR.FORBIDDEN);
   if (outcome === ASSIGN_OUTCOME.HAS_OWNER) return errorResponse(API_ERROR.CONFLICT);
   if (outcome === ASSIGN_OUTCOME.NOT_ACTIVE) return errorResponse(API_ERROR.MEMBER_NOT_FOUND);
 

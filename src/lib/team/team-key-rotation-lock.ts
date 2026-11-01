@@ -21,6 +21,13 @@ import { TEAM_KEY_LOCK_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 
 const LOCK_NOT_AVAILABLE = "55P03";
 const QUERY_CANCELED = "57014";
+/**
+ * Added to statement_timeout over the lock wait: statement_timeout also counts
+ * planning and execution, so with only a few milliseconds of budget left it
+ * would cancel a statement that never waits. Small against the transaction's
+ * timeout (TEAM_MEMBERSHIP_TX_TIMEOUT_MS).
+ */
+const STATEMENT_SLACK_MS = 200;
 
 /** A writer gave up waiting for an in-flight rotation of the team. */
 export class TeamRotationInProgressError extends Error {
@@ -69,7 +76,7 @@ export async function withBoundedLockWait<T>(
   // bounds the statement as a whole, which matters for one taking several
   // (all of a write's advisory locks, a multi-row FOR SHARE).
   const previous = await readWaitTimeouts(tx);
-  await setWaitTimeouts(tx, Math.floor(waitMs));
+  await setWaitTimeouts(tx, Math.floor(waitMs), Math.floor(waitMs) + STATEMENT_SLACK_MS);
   let result: T;
   try {
     result = await lock();

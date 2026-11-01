@@ -559,6 +559,31 @@ describe("POST /api/teams/[teamId]/members", () => {
     expect(json.error).toBe("SCIM_MANAGED_MEMBER");
   });
 
+  it("accepts an uppercase spelling of the target's id, locking and adding the lowercase id", async () => {
+    mockPrismaTeamMember.create.mockResolvedValue({ id: "new-m-1", userId: TARGET_USER_ID, role: TEAM_ROLE.MEMBER });
+
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/members`, { body: { userId: TARGET_USER_ID.toUpperCase(), role: TEAM_ROLE.MEMBER } }),
+      createParams({ teamId: TEAM_ID }),
+    );
+
+    expect(res.status).toBe(201);
+    expect(mockLockTenantRows).toHaveBeenCalledWith(expect.anything(), "tenant-1", [TARGET_USER_ID, "test-user-id"], "share", expect.anything());
+  });
+
+  it("refuses adding oneself under an uppercase spelling of one's own id", async () => {
+    const self = "00000000-0000-4000-a000-0000000000ff";
+    mockAuth.mockResolvedValue({ user: { id: self } });
+
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/members`, { body: { userId: self.toUpperCase(), role: TEAM_ROLE.MEMBER } }),
+      createParams({ teamId: TEAM_ID }),
+    );
+
+    expect(res.status).toBe(400);
+    expect(mockPrismaTeamMember.create).not.toHaveBeenCalled();
+  });
+
   it("returns 404 when target user not in tenant", async () => {
     // The target's tenant row, locked: absent.
     mockLockTenantRows.mockResolvedValue(new Map([[TARGET_USER_ID, { hasRow: false, deactivatedAt: null, departedAt: null }]]));

@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import { Prisma, type TenantRole } from "@prisma/client";
 import { pgErrorCode } from "@/lib/prisma/prisma-error";
 import { advisoryXactLock } from "@/lib/tenant-rls";
 import {
@@ -30,6 +30,8 @@ export class TenantMemberLockTimeoutError extends Error {
 export type LockedTenantRow = {
   /** False when the user has no membership row in the tenant. */
   hasRow: boolean;
+  /** The tenant role as of the lock (null without a row). */
+  role: TenantRole | null;
   deactivatedAt: Date | null;
   /** When a SCIM DELETE removed the user's membership (tenant_member_departures). */
   departedAt: Date | null;
@@ -63,7 +65,9 @@ export async function lockTenantRows(
   mode: TenantRowLockMode,
   budget?: LockBudget,
 ): Promise<Map<string, LockedTenantRow>> {
-  const ids = [...new Set(userIds)].sort();
+  // The database returns uuids in lowercase; callers may pass any case a uuid
+  // validator accepts, so lock by the lowercase id and answer by the caller's.
+  const ids = [...new Set(userIds.map((id) => id.toLowerCase()))].sort();
   const result = new Map<string, LockedTenantRow>();
   if (ids.length === 0) return result;
 
@@ -86,12 +90,12 @@ export async function lockTenantRows(
     tx,
     () =>
       mode === LOCK_MODE.update
-        ? tx.$queryRaw<{ user_id: string; deactivated_at: Date | null }[]>`
-            SELECT user_id, deactivated_at FROM tenant_members
+        ? tx.$queryRaw<{ user_id: string; role: TenantRole; deactivated_at: Date | null }[]>`
+            SELECT user_id, role, deactivated_at FROM tenant_members
              WHERE tenant_id = ${tenantId}::uuid AND user_id = ANY(${ids}::uuid[])
              ORDER BY user_id FOR UPDATE`
-        : tx.$queryRaw<{ user_id: string; deactivated_at: Date | null }[]>`
-            SELECT user_id, deactivated_at FROM tenant_members
+        : tx.$queryRaw<{ user_id: string; role: TenantRole; deactivated_at: Date | null }[]>`
+            SELECT user_id, role, deactivated_at FROM tenant_members
              WHERE tenant_id = ${tenantId}::uuid AND user_id = ANY(${ids}::uuid[])
              ORDER BY user_id FOR SHARE`,
     { budget, timeoutError },
@@ -101,14 +105,16 @@ export async function lockTenantRows(
      WHERE tenant_id = ${tenantId}::uuid AND user_id = ANY(${ids}::uuid[])
   `;
 
-  for (const userId of ids) result.set(userId, { hasRow: false, deactivatedAt: null, departedAt: null });
+  const byId = new Map<string, LockedTenantRow>(ids.map((id) => [id, { hasRow: false, role: null, deactivatedAt: null, departedAt: null }]));
   for (const row of rows) {
-    result.set(row.user_id, { hasRow: true, deactivatedAt: row.deactivated_at, departedAt: null });
+    byId.set(row.user_id, { hasRow: true, role: row.role, deactivatedAt: row.deactivated_at, departedAt: null });
   }
   for (const row of departures) {
-    const entry = result.get(row.user_id);
-    if (entry) result.set(row.user_id, { ...entry, departedAt: row.departed_at });
+    const entry = byId.get(row.user_id);
+    if (entry) byId.set(row.user_id, { ...entry, departedAt: row.departed_at });
   }
+  const absent: LockedTenantRow = { hasRow: false, role: null, deactivatedAt: null, departedAt: null };
+  for (const userId of userIds) result.set(userId, byId.get(userId.toLowerCase()) ?? absent);
   return result;
 }
 

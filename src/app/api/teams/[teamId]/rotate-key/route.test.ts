@@ -318,7 +318,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     expect(txMock.team.update).not.toHaveBeenCalled();
     expect(txMock.teamMemberKey.createMany).not.toHaveBeenCalled();
     expect(txMock.teamMember.findFirst).toHaveBeenCalledWith({
-      where: { teamId: "team-1", userId: expect.any(String), deactivatedAt: null },
+      where: { teamId: "team-1", userId: "660e8400-e29b-41d4-a716-446655440001", deactivatedAt: null },
       select: { role: true },
     });
   });

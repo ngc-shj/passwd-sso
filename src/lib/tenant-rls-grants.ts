@@ -284,10 +284,16 @@ export async function readWaitTimeouts(tx: Pick<Prisma.TransactionClient, "$quer
   return { lockTimeout: row.lock_timeout, statementTimeout: row.statement_timeout };
 }
 
-/** `SET LOCAL` both lock_timeout and statement_timeout to `ms`. */
-export async function setWaitTimeouts(tx: Pick<Prisma.TransactionClient, "$executeRaw">, ms: number): Promise<void> {
-  if (!Number.isInteger(ms) || ms <= 0) throw new Error("wait timeout must be a positive integer of milliseconds");
-  await tx.$executeRaw`SELECT set_config('lock_timeout', ${`${ms}ms`}, true), set_config('statement_timeout', ${`${ms}ms`}, true)`;
+/** `SET LOCAL` lock_timeout to `lockMs` and statement_timeout to `statementMs`. */
+export async function setWaitTimeouts(
+  tx: Pick<Prisma.TransactionClient, "$executeRaw">,
+  lockMs: number,
+  statementMs: number,
+): Promise<void> {
+  for (const ms of [lockMs, statementMs]) {
+    if (!Number.isInteger(ms) || ms <= 0) throw new Error("wait timeout must be a positive integer of milliseconds");
+  }
+  await tx.$executeRaw`SELECT set_config('lock_timeout', ${`${lockMs}ms`}, true), set_config('statement_timeout', ${`${statementMs}ms`}, true)`;
 }
 
 /** `SET LOCAL` both back to values readWaitTimeouts returned. */

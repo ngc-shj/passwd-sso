@@ -962,6 +962,17 @@ describe("team membership across a tenant departure — real-DB integration", ()
 
   // ── A11: lock wait ───────────────────────────────────────────
 
+  it("restores the transaction's statement_timeout after a bounded wait", async () => {
+    const user = await member();
+    const [before, after] = await withTenantRls(prisma, tenantId, async (tx) => {
+      const [b] = await tx.$queryRaw<{ s: string }[]>`SELECT current_setting('statement_timeout') AS s`;
+      await lockTenantRows(tx, tenantId, [user.id], "share", createLockBudget());
+      const [a] = await tx.$queryRaw<{ s: string }[]>`SELECT current_setting('statement_timeout') AS s`;
+      return [b.s, a.s];
+    });
+    expect(after).toBe(before);
+  });
+
   it("two advisory locks each held for less than the wait still refuse within the budget as a whole", async () => {
     // lock_timeout applies per lock: held 2s then 4s, each wait alone fits in
     // 3s but the statement would wait 4s. statement_timeout bounds it whole.
@@ -1373,7 +1384,9 @@ describe("team membership across a tenant departure — real-DB integration", ()
         }), actor.id);
       expect(res.reached).toBe("blocked-on-parked");
       expect(res.request.status).toBe(200);
+      expect(res.departure.status).toBe(200);
       expect(await membership(teamId, target.id)).toBeNull();
+      expect(await membership(teamId, actor.id)).toMatchObject({ deactivated_by_tenant: true });
     });
 
     it("members PUT (role change)", async () => {
@@ -1386,7 +1399,9 @@ describe("team membership across a tenant departure — real-DB integration", ()
         }), actor.id);
       expect(res.reached).toBe("blocked-on-parked");
       expect(res.request.status).toBe(200);
+      expect(res.departure.status).toBe(200);
       expect(await membership(teamId, target.id)).toMatchObject({ role: "MEMBER" });
+      expect(await membership(teamId, actor.id)).toMatchObject({ deactivated_by_tenant: true });
     });
   });
 });

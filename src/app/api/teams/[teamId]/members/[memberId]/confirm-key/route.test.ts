@@ -204,6 +204,26 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
     expect(mockPrismaTeamMember.updateMany).not.toHaveBeenCalled();
   });
 
+  it("refuses (403) without writing a key when the distributing member was demoted to VIEWER", async () => {
+    mockPrismaTeamMember.findFirst.mockResolvedValueOnce({ role: "VIEWER" });
+    mockPrismaTeamMember.findUnique
+      .mockResolvedValueOnce({ id: "member-1", teamId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null });
+
+    const res = await POST(
+      createRequest("POST", URL, { body: validBody }),
+      { params: Promise.resolve({ teamId: "team-1", memberId: "member-1" }) },
+    );
+
+    expect(res.status).toBe(403);
+    expect(mockPrismaTeamMemberKey.upsert).not.toHaveBeenCalled();
+    expect(mockPrismaTeamMember.findFirst).toHaveBeenCalledWith({
+      where: { teamId: "team-1", userId: "admin-user", deactivatedAt: null },
+      select: { role: true },
+    });
+    const versionLock = lockQueryCalls(mockTeamLockQuery).find((c) => c.sql.includes("FROM teams"))!;
+    expect(versionLock.order).toBeLessThan(mockPrismaTeamMember.findFirst.mock.invocationCallOrder[0]);
+  });
+
   it("returns 404 when target member belongs to a different team (Q-1 IDOR)", async () => {
     mockPrismaTeamMember.findFirst.mockResolvedValueOnce({ role: "OWNER", teamId: "team-1" }); // admin (findFirst)
     mockPrismaTeamMember.findUnique.mockResolvedValueOnce({ teamId: "team-OTHER", userId: "target-user", keyDistributed: false, deactivatedAt: null }); // target belongs to different team

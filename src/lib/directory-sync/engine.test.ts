@@ -1447,6 +1447,7 @@ describe("runDirectorySync", () => {
       // Created after the run's last write in the loops, so the loops' time
       // does not count against the transitions' lock waits.
       const created = mockCreateLockBudget.mock.results.findIndex((r) => r.value === transitionBudgets[0]);
+      expect(applyTx.tenantMember.update).toHaveBeenCalled();
       const lastLoopWrite = Math.max(...applyTx.tenantMember.update.mock.invocationCallOrder);
       expect(mockCreateLockBudget.mock.invocationCallOrder[created]).toBeGreaterThan(lastLoopWrite);
     });

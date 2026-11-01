@@ -9,7 +9,7 @@ import {
 import { createLockBudget, TeamRotationInProgressError } from "./team-key-rotation-lock";
 
 /** A tx recording every raw statement in order, answering the row and record reads. */
-function recordingTx(rows: { user_id: string; deactivated_at: Date | null }[] = [], records: { user_id: string; departed_at: Date }[] = []) {
+function recordingTx(rows: { user_id: string; role?: string; deactivated_at: Date | null }[] = [], timeouts = { lock_timeout: "0", statement_timeout: "0" }, records: { user_id: string; departed_at: Date }[] = []) {
   const statements: string[] = [];
   const values: unknown[][] = [];
   const record = (strings: TemplateStringsArray, ...vals: unknown[]) => {
@@ -21,7 +21,7 @@ function recordingTx(rows: { user_id: string; deactivated_at: Date | null }[] = 
     $queryRaw: vi.fn(async (strings: TemplateStringsArray, ...vals: unknown[]) => {
       record(strings, ...vals);
       const sql = strings.join("?");
-      if (sql.includes("current_setting('lock_timeout')")) return [{ lock_timeout: "0", statement_timeout: "0" }];
+      if (sql.includes("current_setting('lock_timeout')")) return [timeouts];
       if (sql.includes("FROM tenant_member_departures")) return records;
       if (sql.includes("FROM tenant_members")) return rows;
       return [];
@@ -60,14 +60,15 @@ describe("lockTenantRows", () => {
   it("reports a user with no row, a deactivated row, and a departure record", async () => {
     const stamp = new Date("2026-06-01T00:00:00Z");
     const { tx } = recordingTx(
-      [{ user_id: "row", deactivated_at: stamp }],
+      [{ user_id: "row", role: "MEMBER", deactivated_at: stamp }],
+      undefined,
       [{ user_id: "gone", departed_at: stamp }],
     );
 
     const result = await lockTenantRows(tx, "t", ["row", "gone"], "share");
 
-    expect(result.get("row")).toEqual({ hasRow: true, deactivatedAt: stamp, departedAt: null });
-    expect(result.get("gone")).toEqual({ hasRow: false, deactivatedAt: null, departedAt: stamp });
+    expect(result.get("row")).toEqual({ hasRow: true, role: "MEMBER", deactivatedAt: stamp, departedAt: null });
+    expect(result.get("gone")).toEqual({ hasRow: false, role: null, deactivatedAt: null, departedAt: stamp });
   });
 
   it("fails with the tenant-row error, before waiting, when the shared budget is spent", async () => {
@@ -92,7 +93,7 @@ describe("lockTenantRows", () => {
 
 describe("departedSince", () => {
   const issued = new Date("2026-06-01T00:00:00.000Z");
-  const row = (deactivatedAt: Date | null, departedAt: Date | null = null) => ({ hasRow: true, deactivatedAt, departedAt });
+  const row = (deactivatedAt: Date | null, departedAt: Date | null = null) => ({ hasRow: true, role: null, deactivatedAt, departedAt });
 
   it("is true for a departure at or after the invitation (equal refuses)", () => {
     expect(departedSince(row(new Date(issued.getTime() + 1)), issued)).toBe(true);
@@ -123,5 +124,45 @@ describe("isMembershipLockConflict", () => {
   it("does not cover other errors", () => {
     expect(isMembershipLockConflict(new Error("boom"))).toBe(false);
     expect(isMembershipLockConflict(Object.assign(new Error("unique"), { code: "23505" }))).toBe(false);
+  });
+});
+
+describe("lockTenantRows — timeouts and id spelling", () => {
+  it("bounds lock_timeout by the wait, statement_timeout by the wait plus slack, and restores both", async () => {
+    const { tx, statements, values } = recordingTx([], { lock_timeout: "5s", statement_timeout: "30s" });
+
+    await lockTenantRows(tx, "t", ["u"], "share", createLockBudget(500));
+
+    const sets = statements.flatMap((s, i) => (s.includes("set_config('lock_timeout'") ? [values[i]] : []));
+    const bounded = sets.filter((v) => v[0] !== "5s");
+    const restored = sets.filter((v) => v[0] === "5s");
+    expect(bounded.length).toBeGreaterThan(0);
+    for (const [lockMs, statementMs] of bounded) {
+      const lock = Number(String(lockMs).replace("ms", ""));
+      const statement = Number(String(statementMs).replace("ms", ""));
+      expect(lock).toBeLessThanOrEqual(500);
+      // statement_timeout also counts execution: a little more than the wait.
+      expect(statement).toBeGreaterThan(lock);
+      expect(statement - lock).toBeLessThanOrEqual(250);
+    }
+    expect(restored.length).toBe(bounded.length);
+    for (const v of restored) expect(v).toEqual(["5s", "30s"]);
+  });
+
+  it("refuses to restore a malformed timeout", async () => {
+    const { tx } = recordingTx([], { lock_timeout: "5s; reset all", statement_timeout: "0" });
+
+    await expect(lockTenantRows(tx, "t", ["u"], "share")).rejects.toThrow(/not a timeout value/);
+  });
+
+  it("answers by the caller's spelling of an id, matching the database's lowercase", async () => {
+    const upper = "AAAAAAAA-0000-4000-8000-000000000001";
+    const { tx, values, statements } = recordingTx([{ user_id: upper.toLowerCase(), role: "MEMBER", deactivated_at: null }]);
+
+    const result = await lockTenantRows(tx, "t", [upper], "share");
+
+    expect(result.get(upper)).toMatchObject({ hasRow: true, deactivatedAt: null });
+    const rowLock = statements.findIndex((s) => s.includes("FROM tenant_members"));
+    expect(values[rowLock][1]).toEqual([upper.toLowerCase()]);
   });
 });
