@@ -141,6 +141,14 @@ public actor HostSyncService {
     // Step 2: ONLY after rename, update blob counter to N+1
     try bridgeKeyStore.incrementCounter(newCounter: newCounter)
 
+    // The team directory (id → name) for the in-app vault switcher labels moves
+    // with the cache it labels: only once the cache is written, so a failed sync
+    // leaves both as they were. Saved whether or not team keys could be derived.
+    if let cacheKey {
+      let directory = memberTeams.map { TeamDirectoryEntry(id: $0.id, name: $0.name) }
+      try? teamDirectoryStore.save(directory, cacheKey: cacheKey, userId: userId)
+    }
+
     // Compute written bytes (approximate)
     let cacheAttributes = try? FileManager.default.attributesOfItem(atPath: cacheURL.path)
     let bytesWritten = (cacheAttributes?[.size] as? Int) ?? entriesJSON.count
@@ -158,28 +166,18 @@ public actor HostSyncService {
   /// The AutoFill extension + host registrar read these to decrypt team entries.
   ///
   /// Resilience: when the persisted ECDH key is unavailable (e.g. background sync
-  /// before any passphrase unlock), do NOT wipe a possibly still-valid set — clear
-  /// it only if every blob is already past the 15-min staleness window. A failure
+  /// before any passphrase unlock), do NOT wipe a possibly still-valid set — leave
+  /// it to `performSync`'s prune of keys past the 15-min staleness window. A failure
   /// scoped to one team skips that team; any other failure throws (see
   /// `isTeamScopedFailure`).
   private func refreshTeamKeys(
     teams: [TeamMembership], cacheKey: SymmetricKey, userId: String, now: Date
   ) async throws {
-    // Persist the team directory (id → name) for the in-app vault switcher labels,
-    // whether or not team keys can be derived this round — but only once nothing
-    // below can fail the sync, so a failed sync leaves it with the cache and keys.
-    let directory = teams.map { TeamDirectoryEntry(id: $0.id, name: $0.name) }
-    let saveDirectory = { [teamDirectoryStore] in
-      try? teamDirectoryStore.save(directory, cacheKey: cacheKey, userId: userId)
-    }
-
     guard let wrappedEcdh = try? wrappedKeyStore.loadECDHPrivateKey(),
           var pkcs8 = TeamEntryDecryptor.unwrapEcdhPrivateKey(
             wrappedEcdh, cacheKey: cacheKey, userId: userId)
     else {
-      // No usable ECDH key: clear only if the whole set is already stale.
-      clearTeamKeysIfAllStale(now: now)
-      saveDirectory()
+      // No usable ECDH key: keep the set; `performSync` prunes expired keys.
       return
     }
     defer { pkcs8.resetBytes(in: 0..<pkcs8.count) }
@@ -189,9 +187,7 @@ public actor HostSyncService {
       memberKey = try TeamKeyCrypto.importEcdhPrivateKey(pkcs8: pkcs8)
     } catch {
       // Malformed ECDH key (e.g. storage corruption): same posture as "no ECDH" —
-      // cannot refresh, so clear only if the whole set is already stale.
-      clearTeamKeysIfAllStale(now: now)
-      saveDirectory()
+      // cannot refresh, so keep the set for the prune to age out.
       return
     }
 
@@ -226,7 +222,6 @@ public actor HostSyncService {
     }
     // Full rewrite — revoked / no-longer-distributed teams drop out of the set.
     try? wrappedKeyStore.saveTeamKeys(blobs)
-    saveDirectory()
   }
 
   /// Whether a failed team fetch (entries or member key) concerns that team
@@ -266,18 +261,6 @@ public actor HostSyncService {
     guard let existing = try? wrappedKeyStore.loadTeamKeys(), !existing.isEmpty else { return }
     let fresh = existing.filter { now.timeIntervalSince($0.issuedAt) <= TeamEntryDecryptor.teamKeyMaxAge }
     if fresh.count != existing.count { try? wrappedKeyStore.saveTeamKeys(fresh) }
-  }
-
-  /// Clear the persisted team-key set only when every blob is already past the
-  /// staleness window. Used when team keys cannot be refreshed this round (no /
-  /// malformed ECDH key) so revoked keys still expire, but a possibly-valid set
-  /// is never wiped.
-  private func clearTeamKeysIfAllStale(now: Date) {
-    let existing = (try? wrappedKeyStore.loadTeamKeys()) ?? []
-    if !existing.isEmpty,
-       existing.allSatisfy({ now.timeIntervalSince($0.issuedAt) > TeamEntryDecryptor.teamKeyMaxAge }) {
-      try? wrappedKeyStore.clearTeamKeys()
-    }
   }
 }
 

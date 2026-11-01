@@ -652,13 +652,14 @@ final class HostSyncServiceTests: XCTestCase {
     )
     let fetcher2 = EntryFetcher(apiClient: apiClient2)
     let cacheURL2 = tmpDir.appending(path: "two-teams.cache", directoryHint: .notDirectory)
+    let directory = RecordingTeamDirectoryStore()
     let syncService2 = HostSyncService(
       apiClient: apiClient2,
       entryFetcher: fetcher2,
       bridgeKeyStore: bks,
       wrappedKeyStore: wks,
       cacheURL: cacheURL2,
-      teamDirectoryStore: NullTeamDirectoryStore()
+      teamDirectoryStore: directory
     )
 
     _ = try await syncService2.runSync(vaultKey: vaultKey, userId: userId, cacheKey: cacheKey)
@@ -672,6 +673,9 @@ final class HostSyncServiceTests: XCTestCase {
       "Team with KEY_NOT_DISTRIBUTED must be absent from stored team keys")
     XCTAssertNil(stored.first(where: { $0.teamId == badKeyTeamId }),
       "Team whose key material does not unwrap must be skipped, not fail the sync")
+    // Every membership is labelled, keys or not — saved once, with the cache.
+    XCTAssertEqual(directory.savedTeamIds, [goodTeamId, badTeamId, badKeyTeamId])
+    XCTAssertEqual(directory.saveCount, 1)
   }
 
   func testPersonalCacheEntryPropagatesEntryType() {
@@ -688,7 +692,8 @@ final class HostSyncServiceTests: XCTestCase {
   // MARK: - F1 regression: transient /api/teams error must NOT wipe valid team keys
 
   /// Regression for F1: when fetchTeamMemberships() receives an HTTP 500 (transient,
-  /// non-auth error), the sync fails and leaves the team keys as they were.
+  /// non-auth error), the sync fails and keeps the fresh team keys (expired ones
+  /// are pruned).
   /// Originally the code called saveTeamKeys([]) wiping valid persisted keys; later
   /// it went on personal-only and wrote a cache without the user's teams (#989).
   func testRunSync_teamListError_failsSyncAndKeepsKeys() async throws {
@@ -1056,6 +1061,58 @@ final class HostSyncServiceTests: XCTestCase {
     for error in syncWide {
       XCTAssertFalse(HostSyncService.isTeamScopedFailure(error), "\(error)")
     }
+  }
+
+  /// The directory labels the cache: when writing the cache fails after every
+  /// fetch succeeded, the directory is not saved either.
+  func testRunSync_cacheWriteFails_directoryNotSaved() async throws {
+    let bks = makeBridgeKeyStore("cache-unwritable")
+    let directory = RecordingTeamDirectoryStore()
+    MockURLProtocol.requestHandler = { request in
+      let path = request.url?.path ?? ""
+      if path.hasSuffix("/api/teams") {
+        return (Self.twoTeams, httpResponse(status: 200, url: request.url!))
+      }
+      return (Data("[]".utf8), httpResponse(status: 200, url: request.url!))
+    }
+    let (sync, cacheURL) = makeTeamFetchSync(
+      "cache-unwritable", bridgeKeyStore: bks, teamDirectoryStore: directory)
+    // A non-empty directory where the cache's temp file goes: the write fails.
+    let blocker = cacheURL.deletingLastPathComponent()
+      .appending(path: cacheURL.lastPathComponent + ".tmp", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: blocker, withIntermediateDirectories: true)
+    try Data("x".utf8).write(to: blocker.appending(path: "keep", directoryHint: .notDirectory))
+
+    do {
+      _ = try await sync.runSync(
+        vaultKey: SymmetricKey(size: .bits256), userId: "u-1", cacheKey: SymmetricKey(size: .bits256))
+      XCTFail("expected the cache write to fail")
+    } catch is EntryCacheError {}
+
+    XCTAssertEqual(directory.saveCount, 0)
+    XCTAssertEqual(try bks.readDirect().cacheVersionCounter, 1)
+  }
+
+  /// A successful sync (personal-only here: no cacheKey) also drops team keys
+  /// past the staleness window and keeps the fresh ones.
+  func testRunSync_success_prunesOnlyExpiredTeamKeys() async throws {
+    let bks = makeBridgeKeyStore("prune-success")
+    let wks = TempDirWrappedKeyStore(baseDir: tmpDir)
+    let cacheKey = SymmetricKey(size: .bits256)
+    func key(_ teamId: String, age: TimeInterval) throws -> WrappedTeamKey {
+      try TeamEntryDecryptor.wrapTeamKey(
+        teamEncKey: SymmetricKey(size: .bits256), cacheKey: cacheKey, userId: "u-1",
+        teamId: teamId, teamKeyVersion: 1, issuedAt: Date().addingTimeInterval(-age))
+    }
+    try wks.saveTeamKeys([try key("team-fresh", age: 60), try key("team-expired", age: 20 * 60)])
+    MockURLProtocol.requestHandler = { request in
+      (Data("[]".utf8), httpResponse(status: 200, url: request.url!))
+    }
+
+    let (sync, _) = makeTeamFetchSync("prune-success", bridgeKeyStore: bks, wrappedKeyStore: wks)
+    _ = try await sync.runSync(vaultKey: SymmetricKey(size: .bits256), userId: "u-1")
+
+    XCTAssertEqual(try wks.loadTeamKeys().map(\.teamId), ["team-fresh"])
   }
 
   func testIsMembershipGone_onlyWhenNotAMember() {

@@ -1,6 +1,6 @@
 # Code Review: ios-sync-team-failure-isolation
 Date: 2026-11-02
-Review round: 2
+Review round: 3
 
 Issue `#989`. No plan file: a bug fix scoped by the issue (out-of-scope item SC2 of
 `team-tenant-departure-plan.md`). Project: iOS app, XCTest on a macOS simulator host.
@@ -87,7 +87,7 @@ HostSyncServiceTests 19/19 + VaultViewModelTests 20/20, full suite 874 tests, 0 
   (and the existing passkey cell).
 - P2 non-`MobileAPIError` classified team-scoped -> `testIsTeamScopedFailure_classifiesEveryError`.
 - P3 5xx team-scoped -> `testRunSync_teamFetchFailureNotScopedToTeam_failsSyncWithoutWriting`.
-- P4 team-list failure goes on personal-only -> `testRefreshTeamKeys_transientTeamsError_doesNotWipeExistingKeys`.
+- P4 team-list failure goes on personal-only -> the team-list failure cell (renamed in round 2, T11).
 - P5 directory built from the unfiltered list -> `testRunSync_oneTeamFetchNotFound_personalAndOtherTeamsStillSync`.
 - P6 entry loop throws on any error (the original bug) -> both 404 cells.
 
@@ -139,3 +139,61 @@ the sync on more errors does not extend a removed member's access (R43).
 - Q3 403 counted as departed -> `testIsMembershipGone_onlyWhenNotAMember`, the 404 sync test.
 - Q4 key material that does not unwrap fails the sync -> `testRefreshTeamKeys_oneTeamNotDistributed_otherTeamWritten`.
 - Q5 create surfaces the refresh sync's failure -> `testCreateEntry_syncFailsAfterConfirmedWrite_doesNotThrow`.
+
+## Round 3
+
+### Changes from Previous Round
+Incremental review of `6f83bff65`. Security: no findings (the prune keeps exactly
+what the read side accepts — same `<= teamKeyMaxAge` predicate; passkey state is
+recorded by `MobileAPIClient` before it throws and sessions are enforced server-side,
+so not surfacing the post-write refresh failure weakens nothing). No Critical/Major
+from functionality.
+
+### Findings
+- F-R3-1 [Minor] The directory could still land ahead of a cache whose write failed
+  after the key loop; the comment overclaimed (R49).
+- F-R3-2 [Minor] After a confirmed write whose refresh sync fails, the list keeps the
+  pre-write state with no notice.
+- A-R3-1 [Minor] `CredentialResolver` repeated the 15-minute literal; the prune's
+  safety relies on it equalling `TeamEntryDecryptor.teamKeyMaxAge` (R48).
+- T12 [Major] The directory save on the ECDH path was untested (three call sites).
+- T13 [Major] The post-write refresh's list reload was unpinned.
+- T14 [Minor] Pruning on a successful sync was untested.
+- T15 [Minor] `clearTeamKeysIfAllStale` was subsumed by the prune; its tests no
+  longer pinned it.
+- T16 / A-R3-2 [Minor] The create test had no control that the refresh sync failed.
+- T17 [Minor] `saveEntry`'s refresh-failure path was untested.
+- T18 [Minor] Stale docstring; the round-1 record cited a renamed test.
+
+### Resolution Status
+- F-R3-1, T12: the directory is saved in `performSync` after the cache is written and
+  the counter advanced — one site, with the cache it labels.
+  `testRunSync_cacheWriteFails_directoryNotSaved` pins it; the two-team ECDH test asserts
+  every membership is labelled, saved once.
+- A-R3-1: `CredentialResolver` defaults to `TeamEntryDecryptor.teamKeyMaxAge`.
+- T15: `clearTeamKeysIfAllStale` removed; the no-ECDH and malformed-ECDH returns leave
+  the set to the prune (their tests now pin the prune).
+- T13, T16, T17: save tests for the refresh failing and succeeding (list rebuilt);
+  the create test asserts the team list was asked for and no cache was written.
+- T14: `testRunSync_success_prunesOnlyExpiredTeamKeys`.
+- T18: docstring and round-1 record corrected.
+- F-R3-2: Accepted.
+  - Anti-Deferral check: the change needed is a new UI notice (product copy and UX),
+    not a fix of the refresh itself.
+  - Worst case: the list shows pre-write values until the next sync (foreground
+    return, pull-to-refresh, or background sync); the write is on the server.
+    Re-editing from the stale view overwrites the fields with the user's input.
+  - Likelihood: needs a confirmed write followed immediately by a sync failure.
+  - Cost to fix: low code, but it is a user-facing behaviour change outside `#989`.
+    Before this branch the same case showed "Could not save" and a retried create
+    duplicated the entry.
+
+### Red-proofs (scratch copy on the build host -> the cell that reddened)
+- R1 directory saved before the cache write -> `testRunSync_cacheWriteFails_directoryNotSaved`.
+- R2 directory never saved -> the two-team ECDH test and the 404 sync test.
+- R3 no prune -> `testRunSync_success_prunesOnlyExpiredTeamKeys`, the team-list failure
+  test, and both all-stale tests (no-ECDH, malformed ECDH).
+- R4 save surfaces the refresh failure -> both save tests.
+- R5 refresh never reloads the list -> `testSaveEntry_syncSucceeds_reloadsListFromFreshCache`.
+
+Full suite: 878 tests, 0 failures.
