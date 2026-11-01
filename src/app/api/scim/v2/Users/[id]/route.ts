@@ -17,6 +17,7 @@ import { getLogger } from "@/lib/logger";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { scimParseBody } from "@/lib/scim/parse-body";
 import { prisma } from "@/lib/prisma";
+import { isTeamRotationConflict } from "@/lib/team/team-key-rotation-lock";
 import { authorizeScim } from "@/lib/scim/with-scim-auth";
 import {
   resolveUserId,
@@ -343,6 +344,8 @@ async function handleDELETE(req: NextRequest, { params }: Params): Promise<Respo
     if (e instanceof ScimDeleteConflictError) {
       return scimError(409, "Cannot delete user: related resources exist");
     }
+    // A rotation of an affected team held it past the lock wait; nothing changed.
+    if (isTeamRotationConflict(e)) return scimError(409, "Team key rotation in progress; retry later");
     throw e;
   }
 

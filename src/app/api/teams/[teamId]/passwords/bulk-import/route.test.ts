@@ -214,7 +214,7 @@ describe("POST /api/teams/[teamId]/passwords/bulk-import", () => {
   it("handles partial failure when service throws TeamPasswordServiceError", async () => {
     mockCreateTeamPassword
       .mockResolvedValueOnce({ id: "660e8400-e29b-41d4-a716-000000000001", entryType: "LOGIN", tags: [], createdAt: new Date() })
-      .mockRejectedValueOnce(new TeamPasswordServiceError("TEAM_KEY_VERSION_MISMATCH", 409))
+      .mockRejectedValueOnce(new TeamPasswordServiceError("FOLDER_NOT_FOUND", 400))
       .mockResolvedValueOnce({ id: "660e8400-e29b-41d4-a716-000000000003", entryType: "LOGIN", tags: [], createdAt: new Date() });
 
     const entries = [
@@ -232,6 +232,30 @@ describe("POST /api/teams/[teamId]/passwords/bulk-import", () => {
     expect(res.status).toBe(201);
     expect(json.importedCount).toBe(2);
     expect(json.failedCount).toBe(1);
+  });
+
+  it("fails the whole import with 409 when an entry carries a stale teamKeyVersion", async () => {
+    mockCreateTeamPassword
+      .mockResolvedValueOnce({ id: "660e8400-e29b-41d4-a716-000000000001", entryType: "LOGIN", tags: [], createdAt: new Date() })
+      .mockRejectedValueOnce(new TeamPasswordServiceError("TEAM_KEY_VERSION_MISMATCH", 409));
+
+    const entries = [
+      makeEntry("660e8400-e29b-41d4-a716-000000000001"),
+      makeEntry("660e8400-e29b-41d4-a716-000000000002"),
+      makeEntry("660e8400-e29b-41d4-a716-000000000003"),
+    ];
+
+    const res = await POST(
+      createRequest("POST", URL, { body: { entries } }),
+      createParams({ teamId: TEAM_ID }),
+    );
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("TEAM_KEY_VERSION_MISMATCH");
+    // The rethrow leaves the tenant transaction, so nothing after the stale
+    // entry is attempted and no ENTRY_CREATE / ENTRY_BULK_IMPORT is emitted.
+    expect(mockCreateTeamPassword).toHaveBeenCalledTimes(2);
+    expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
   it("rolls a DB-rejected entry back to its own savepoint and reports only the entries around it", async () => {

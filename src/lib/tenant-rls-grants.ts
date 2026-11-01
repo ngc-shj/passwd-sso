@@ -224,7 +224,7 @@ export const BYPASS_GRANT = Object.freeze({
   USER_SESSION_INVALIDATION: defineGrant(BYPASS_PURPOSE.TOKEN_LIFECYCLE, ["apiKey", "delegationSession", "extensionToken", "mcpAccessToken", "mcpRefreshToken", "operatorToken", "session"]),
   VAULT_ENTRY_CROSS_TENANT_READ: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["passwordEntry"]),
   VAULT_RESET_COUNT: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["attachment", "passwordEntry"]),
-  VAULT_RESET_EXECUTE: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["attachment", "auditOutbox", "emergencyAccessGrant", "folder", "passwordEntry", "passwordShare", "tag", "teamMember", "teamMemberKey", "user", "vaultKey"]),
+  VAULT_RESET_EXECUTE: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["attachment", "auditOutbox", "emergencyAccessGrant", "folder", "passwordEntry", "passwordShare", "tag", "team", "teamMember", "teamMemberKey", "user", "vaultKey"]),
   VAULT_RESET_SCOPE_CHECK: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["attachment", "emergencyAccessGrant", "folder", "passwordEntry", "passwordShare", "tag", "vaultKey"]),
   WEBAUTHN_AUTHORIZE_CREDENTIAL: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["webAuthnCredential", "user"]),
   WEBHOOK_SECRET_MIGRATION: defineGrant(BYPASS_PURPOSE.SYSTEM_MAINTENANCE, ["teamWebhook", "tenantWebhook"]),
@@ -266,6 +266,27 @@ export async function setLockTimeout(
 ): Promise<void> {
   if (!Number.isInteger(ms) || ms <= 0) throw new Error("lock timeout must be a positive integer of milliseconds");
   await tx.$executeRaw`SELECT set_config('lock_timeout', ${`${ms}ms`}, true)`;
+}
+
+/**
+ * The transaction's current lock_timeout, as `current_setting` spells it
+ * ("0", "3s", "1500ms"), for restoring it after a bounded wait.
+ */
+export async function readLockTimeout(tx: Pick<Prisma.TransactionClient, "$queryRaw">): Promise<string> {
+  const [row] = await tx.$queryRaw<{ lock_timeout: string }[]>`
+    SELECT current_setting('lock_timeout') AS lock_timeout
+  `;
+  if (!row) throw new Error("lock_timeout read returned no row");
+  return row.lock_timeout;
+}
+
+/** `SET LOCAL lock_timeout` back to a value readLockTimeout returned. */
+export async function restoreLockTimeout(
+  tx: Pick<Prisma.TransactionClient, "$executeRaw">,
+  value: string,
+): Promise<void> {
+  if (!/^\d+(us|ms|s|min|h|d)?$/.test(value)) throw new Error("not a lock_timeout value");
+  await tx.$executeRaw`SELECT set_config('lock_timeout', ${value}, true)`;
 }
 
 export type BypassState = {

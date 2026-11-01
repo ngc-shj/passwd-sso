@@ -171,6 +171,8 @@ export function TeamRotateKeyButton({ teamId, onSuccess }: TeamRotateKeyButtonPr
           reencryptedEntries.push({
             id: entry.id,
             itemKeyVersion: entry.itemKeyVersion,
+            // The server applies the rewrap only while the row still holds this wrap.
+            snapshotIv: entry.itemKeyIv,
             encryptedItemKey: newEncryptedItemKey,
             aadVersion: entry.aadVersion,
           });
@@ -210,6 +212,8 @@ export function TeamRotateKeyButton({ teamId, onSuccess }: TeamRotateKeyButtonPr
           reencryptedEntries.push({
             id: entry.id,
             itemKeyVersion: 0,
+            // The server applies the re-encryption only while the row still holds this blob.
+            snapshotIv: entry.blobIv,
             encryptedBlob: newBlob,
             encryptedOverview: newOverview,
             aadVersion: newAadVersion,

@@ -13,7 +13,8 @@ import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
 import { API_ERROR, type ApiErrorCode } from "@/lib/http/api-error-codes";
 import { toBlobColumns, toOverviewColumns } from "@/lib/crypto/crypto-blob";
 import { dedupeTagIds, tagConnect, tagSet } from "@/lib/services/tag-relation";
-import type { EntryType } from "@prisma/client";
+import { lockTeamKeyVersion, TeamRotationInProgressError } from "@/lib/team/team-key-rotation-lock";
+import type { EntryType, Prisma } from "@prisma/client";
 
 // ---------------------------------------------------------------------------
 // Shared types
@@ -126,6 +127,34 @@ async function assertTeamTagsOwnership(
   if (count !== uniqueTagIds.length) {
     throw new TeamPasswordServiceError(API_ERROR.NOT_FOUND, 404);
   }
+}
+
+/**
+ * Reject a team-entry write whose `teamKeyVersion` is not the team's current
+ * one, holding the team row FOR SHARE until the transaction ends so the
+ * write serialises with rotation (see team-key-rotation-lock.ts) — the team
+ * twin of `assertCurrentKeyVersion`. A rotation that holds the row past the
+ * lock timeout answers the same 409: the client refetches the team key.
+ */
+async function assertCurrentTeamKeyVersion(
+  tx: Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw">,
+  teamId: string,
+  // A full update whose caller omitted the version never matches.
+  teamKeyVersion: number | undefined,
+): Promise<{ tenantId: string }> {
+  let team: Awaited<ReturnType<typeof lockTeamKeyVersion>>;
+  try {
+    team = await lockTeamKeyVersion(tx, teamId);
+  } catch (e) {
+    if (e instanceof TeamRotationInProgressError) {
+      throw new TeamPasswordServiceError(API_ERROR.TEAM_KEY_VERSION_MISMATCH, 409);
+    }
+    throw e;
+  }
+  if (!team || team.teamKeyVersion !== teamKeyVersion) {
+    throw new TeamPasswordServiceError(API_ERROR.TEAM_KEY_VERSION_MISMATCH, 409);
+  }
+  return { tenantId: team.tenantId };
 }
 
 // ---------------------------------------------------------------------------
@@ -244,24 +273,17 @@ export async function createTeamPassword(
     expiresAt,
   } = input;
 
-  // Validate teamKeyVersion and folder ownership
-  const team = await prisma.team.findUnique({
-    where: { id: teamId },
-    select: { teamKeyVersion: true, tenantId: true },
-  });
+  // Validate teamKeyVersion (locked against rotation) and folder ownership.
+  // `prisma` resolves to the caller's withTeamTenantRls transaction, which
+  // holds the FOR SHARE until the entry insert commits.
+  // tenantId is resolved from the team record, not passed by caller.
+  const { tenantId } = await assertCurrentTeamKeyVersion(prisma, teamId, teamKeyVersion);
   const folder = teamFolderId
     ? await prisma.teamFolder.findUnique({
         where: { id: teamFolderId },
         select: { teamId: true },
       })
     : null;
-
-  if (!team || teamKeyVersion !== team.teamKeyVersion) {
-    throw new TeamPasswordServiceError(API_ERROR.TEAM_KEY_VERSION_MISMATCH, 409);
-  }
-
-  // tenantId is resolved from the team record, not passed by caller
-  const tenantId = team.tenantId;
 
   assertTeamFolderOwnership(teamFolderId, folder, teamId);
   await assertTeamTagsOwnership(tagIds, teamId);
@@ -417,23 +439,13 @@ export async function updateTeamPassword(
     throw new TeamPasswordServiceError(API_ERROR.ITEM_KEY_REQUIRED, 400);
   }
 
-  // Validate teamKeyVersion and folder ownership
-  const team = isFullUpdate
-    ? await prisma.team.findUnique({
-        where: { id: teamId },
-        select: { teamKeyVersion: true },
-      })
-    : null;
+  // teamKeyVersion is validated inside the transaction below, under the lock.
   const folder = teamFolderId
     ? await prisma.teamFolder.findUnique({
         where: { id: teamFolderId },
         select: { teamId: true },
       })
     : null;
-
-  if (isFullUpdate && (!team || teamKeyVersion !== team.teamKeyVersion)) {
-    throw new TeamPasswordServiceError(API_ERROR.TEAM_KEY_VERSION_MISMATCH, 409);
-  }
 
   assertTeamFolderOwnership(teamFolderId, folder, teamId);
   await assertTeamTagsOwnership(tagIds, teamId);
@@ -484,6 +496,8 @@ export async function updateTeamPassword(
   // from outside the transaction, which may be stale under contention).
   return prisma.$transaction(async (tx) => {
     if (isFullUpdate) {
+      // Lock order: teams FOR SHARE first, then the entry FOR UPDATE.
+      await assertCurrentTeamKeyVersion(tx, teamId, teamKeyVersion);
       const [cur] = await tx.$queryRaw<TeamBlobRow[]>`
         SELECT encrypted_blob, blob_iv, blob_auth_tag,
                aad_version, team_key_version, item_key_version,

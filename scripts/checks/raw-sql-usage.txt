@@ -72,6 +72,7 @@ src/app/api/passwords/[id]/history/[historyId]/restore/route.ts # row lock (FOR 
 src/app/api/passwords/[id]/route.ts # row lock (FOR UPDATE) for atomic blob snapshot+update on concurrent PUT
 src/app/api/share-links/[id]/content/route.ts # atomic view_count increment + revocation/expiry recheck (TOCTOU close)
 src/app/api/teams/[teamId]/passwords/[id]/history/[historyId]/restore/route.ts # row lock (FOR UPDATE) so the pre-restore snapshot sources the committed row, serialising with concurrent PUTs
+src/app/api/teams/[teamId]/rotate-key/route.ts # teams FOR NO KEY UPDATE CAS as the first statement, serialising rotation with the writers of its inputs
 src/app/api/v1/passwords/[id]/route.ts # row lock (FOR UPDATE) for atomic blob snapshot+update on concurrent PUT
 src/app/s/[token]/download/route.ts # atomic view_count increment + revocation/expiry recheck on file download (TOCTOU close)
 src/app/s/[token]/page.tsx # atomic view_count increment + revocation/expiry recheck on share view (TOCTOU close)
@@ -84,7 +85,9 @@ src/lib/directory-sync/engine.ts # conditional status-transition UPDATE guarding
 src/lib/health.ts # liveness/readiness probes: SELECT 1 and audit outbox depth/age metrics
 src/lib/prisma/raw-sql.ts # names $queryRawUnsafe/$executeRawUnsafe in its header comment describing the values Unsafe call sites elsewhere must use; mints/renders SqlIdentifier/SqlFragment but issues no raw-SQL call itself
 src/lib/prisma/savepoint.ts # SAVEPOINT / ROLLBACK TO / RELEASE around one item of a multi-item transaction so a rejected statement does not abort the rest
+src/lib/services/scim-user-service.ts # DELETE team_members ... RETURNING team_id, checking every left team was locked against key rotation
 src/lib/services/team-password-service.ts # row lock (FOR UPDATE) for atomic team entry blob snapshot+update
+src/lib/team/team-key-rotation-lock.ts # teams FOR SHARE locks (and lock_timeout) serialising entry, member-key and membership writers with team key rotation
 src/lib/tenant-rls-grants.ts # the single writer and reader of the bypass GUCs (set_config for app.bypass_rls / app.bypass_purpose / app.tenant_id / app.bypass_tables) and setLockTimeout
 src/lib/tenant-rls.ts # defines the RLS context helpers: set_config for app.tenant_id, and the shared pg_advisory_xact_lock helper
 src/lib/tenant/tenant-claim-event.ts # append-only routing-history INSERT with no RETURNING (passwd_app holds INSERT but not SELECT)

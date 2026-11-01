@@ -1244,7 +1244,9 @@ describe("DELETE /api/scim/v2/Users/[id]", () => {
 
     const res = await DELETE(makeReq({ method: "DELETE" }), makeParams("user-1"));
     expect(res!.status).toBe(204);
-    expect(mockTransaction).toHaveBeenCalledWith(expect.any(Array));
+    // Interactive: the team lock against key rotation runs first inside it
+    // (pinned in scim-user-service.test.ts).
+    expect(mockTransaction).toHaveBeenCalledWith(expect.any(Function));
   });
 
   it("returns 403 when deleting OWNER via DELETE", async () => {

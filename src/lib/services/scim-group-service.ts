@@ -5,6 +5,7 @@
  */
 
 import { prisma, type TxOrPrisma } from "@/lib/prisma";
+import { lockTeamsAgainstRotation } from "@/lib/team/team-key-rotation-lock";
 import type { TeamRole } from "@prisma/client";
 import type { ScimGroupMemberInput, ScimGroupResource } from "@/lib/scim/serializers";
 import type { GroupMemberAction } from "@/lib/scim/patch-parser";
@@ -327,6 +328,9 @@ export async function replaceScimGroup(
   let removedCount = 0;
 
   const runReplace = async (tx: TxClient) => {
+    // Deactivation serialises with key rotation (team-key-rotation-lock.ts);
+    // taken first, before the member reads and writes below.
+    await lockTeamsAgainstRotation(tx, [mapping.teamId]);
     // Compute delta inside transaction to avoid TOCTOU race
     const currentMembers = await tx.teamMember.findMany({
       where: { teamId: mapping.teamId, role: mapping.role, deactivatedAt: null },
@@ -406,6 +410,9 @@ export async function patchScimGroup(
   if (!mapping) throw new ScimGroupNotFoundError();
 
   const runPatch = async (tx: TxClient) => {
+    // Deactivation serialises with key rotation (team-key-rotation-lock.ts);
+    // taken first, before the member reads and writes below.
+    await lockTeamsAgainstRotation(tx, [mapping.teamId]);
     const addOps = operations.filter((a) => a.op === "add");
     const removeOps = operations.filter((a) => a.op === "remove");
 

@@ -12,10 +12,14 @@ import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
+import { lockTeamKeyVersion, TeamRotationInProgressError } from "@/lib/team/team-key-rotation-lock";
 
 type Params = { params: Promise<{ teamId: string; memberId: string }> };
 
 // POST /api/teams/[teamId]/members/[memberId]/confirm-key
+/** The member row no longer matches what the distribution checked. */
+class MemberChangedError extends Error {}
+
 // Admin distributes the team key to a member by encrypting it with member's ECDH public key
 async function handlePOST(req: NextRequest, { params }: Params) {
   const session = await auth();
@@ -80,62 +84,77 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   const data = result.data;
 
   // Atomic check-and-set: re-verify keyDistributed + deactivatedAt + teamKeyVersion inside transaction (S-12/F-16/S-24)
-  const distributed = await withTeamTenantRls(teamId, async () =>
-    prisma.$transaction(async (tx) => {
-      const member = await tx.teamMember.findUnique({
-        where: { id: memberId },
-        select: { keyDistributed: true, deactivatedAt: true },
-      });
-      if (!member || member.deactivatedAt !== null) return "member_not_found" as const;
-      if (member.keyDistributed) return "already_distributed" as const;
+  let distributed;
+  try {
+    distributed = await withTeamTenantRls(teamId, async () =>
+      prisma.$transaction(async (tx) => {
+        // Verify keyVersion matches current team key version (F-16), under the
+        // team lock rotation serialises on, taken first (lock order: teams
+        // before member rows): a distribution racing a rotation that missed
+        // this member would otherwise mark them distributed with only the old key.
+        const team = await lockTeamKeyVersion(tx, teamId);
 
-      // Verify keyVersion matches current team key version (F-16)
-      const team = await tx.team.findUnique({
-        where: { id: teamId },
-        select: { teamKeyVersion: true, tenantId: true },
-      });
-      if (!team || data.keyVersion !== team.teamKeyVersion) {
-        return "version_mismatch" as const;
-      }
+        const member = await tx.teamMember.findUnique({
+          where: { id: memberId },
+          select: { keyDistributed: true, deactivatedAt: true },
+        });
+        if (!member || member.deactivatedAt !== null) return "member_not_found" as const;
+        if (member.keyDistributed) return "already_distributed" as const;
 
-      await tx.teamMemberKey.upsert({
-        where: {
-          teamId_userId_keyVersion: {
-            teamId: teamId,
-            userId: targetMember.userId,
-            keyVersion: data.keyVersion,
+        if (!team || data.keyVersion !== team.teamKeyVersion) {
+          return "version_mismatch" as const;
+        }
+
+        await tx.teamMemberKey.upsert({
+          where: {
+            teamId_userId_keyVersion: {
+              teamId: teamId,
+              userId: targetMember.userId,
+              keyVersion: data.keyVersion,
+            },
           },
-        },
-        create: {
-          teamId: teamId,
-          tenantId: team.tenantId,
-          userId: targetMember.userId,
-          encryptedTeamKey: data.encryptedTeamKey,
-          teamKeyIv: data.teamKeyIv,
-          teamKeyAuthTag: data.teamKeyAuthTag,
-          ephemeralPublicKey: data.ephemeralPublicKey,
-          hkdfSalt: data.hkdfSalt,
-          keyVersion: data.keyVersion,
-          wrapVersion: data.wrapVersion,
-        },
-        update: {
-          encryptedTeamKey: data.encryptedTeamKey,
-          teamKeyIv: data.teamKeyIv,
-          teamKeyAuthTag: data.teamKeyAuthTag,
-          ephemeralPublicKey: data.ephemeralPublicKey,
-          hkdfSalt: data.hkdfSalt,
-          wrapVersion: data.wrapVersion,
-        },
-      });
+          create: {
+            teamId: teamId,
+            tenantId: team.tenantId,
+            userId: targetMember.userId,
+            encryptedTeamKey: data.encryptedTeamKey,
+            teamKeyIv: data.teamKeyIv,
+            teamKeyAuthTag: data.teamKeyAuthTag,
+            ephemeralPublicKey: data.ephemeralPublicKey,
+            hkdfSalt: data.hkdfSalt,
+            keyVersion: data.keyVersion,
+            wrapVersion: data.wrapVersion,
+          },
+          update: {
+            encryptedTeamKey: data.encryptedTeamKey,
+            teamKeyIv: data.teamKeyIv,
+            teamKeyAuthTag: data.teamKeyAuthTag,
+            ephemeralPublicKey: data.ephemeralPublicKey,
+            hkdfSalt: data.hkdfSalt,
+            wrapVersion: data.wrapVersion,
+          },
+        });
 
-      await tx.teamMember.update({
-        where: { id: memberId, teamId },
-        data: { keyDistributed: true },
-      });
+        // The check above is a plain read: re-assert it in the write, so a
+        // deactivation or distribution committed since then is not
+        // overwritten. A miss rolls the key upsert back.
+        const marked = await tx.teamMember.updateMany({
+          where: { id: memberId, teamId, deactivatedAt: null, keyDistributed: false },
+          data: { keyDistributed: true },
+        });
+        if (marked.count !== 1) throw new MemberChangedError();
 
-      return "success" as const;
-    }),
-  );
+        return "success" as const;
+      }),
+    );
+  } catch (e) {
+    // The member was deactivated, or received a key, since the check.
+    if (e instanceof MemberChangedError) return errorResponse(API_ERROR.MEMBER_NOT_FOUND);
+    // A rotation held the team past the lock timeout: the key being
+    // distributed is about to be superseded.
+    if (!(e instanceof TeamRotationInProgressError)) throw e;
+    distributed = "version_mismatch" as const;
+  }
 
   if (distributed === "member_not_found") {
     return errorResponse(API_ERROR.MEMBER_NOT_FOUND);

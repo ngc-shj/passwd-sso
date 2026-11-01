@@ -17,6 +17,7 @@ import { createRateLimiter } from "@/lib/security/rate-limit";
 import { TEAM_ROTATE_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 import {
   encryptedFieldSchema,
+  hexIv,
   TEAM_KEY_VERSION_MIN,
   TEAM_KEY_VERSION_MAX,
   TEAM_ROTATE_ENTRIES_MAX,
@@ -37,10 +38,17 @@ class TxValidationError extends Error {
   }
 }
 
+// Each entry carries `snapshotIv`: the IV of the ciphertext the client
+// re-encrypted from (the blob's for v0, the wrapped ItemKey's for v1+), taken
+// from GET rotate-key/data. The update only applies while the row still holds
+// that ciphertext, so a write committed between the snapshot and this
+// rotation is not overwritten with re-encryption of stale data.
+
 // v0 (legacy): full re-encrypt of blob + overview
 const rotateEntryV0Schema = z.object({
   id: z.string().uuid(),
   itemKeyVersion: z.literal(0).default(0),
+  snapshotIv: hexIv,
   encryptedBlob: encryptedFieldSchema,
   encryptedOverview: encryptedFieldSchema,
   aadVersion: z.number().int().min(1),
@@ -50,6 +58,7 @@ const rotateEntryV0Schema = z.object({
 const rotateEntryV1Schema = z.object({
   id: z.string().uuid(),
   itemKeyVersion: z.number().int().min(1),
+  snapshotIv: hexIv,
   encryptedItemKey: encryptedFieldSchema,
   aadVersion: z.number().int().min(1),
 });
@@ -117,16 +126,23 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     await withTeamTenantRls(
       teamId,
       async (_tenantId, tx) => {
-        // Re-verify teamKeyVersion hasn't changed since pre-read
-        const currentTeam = await tx.team.findUnique({
-          where: { id: teamId },
-          select: { teamKeyVersion: true },
-        });
-        if (!currentTeam || currentTeam.teamKeyVersion !== team.teamKeyVersion) {
+        // Re-verify teamKeyVersion hasn't changed since pre-read, under a row
+        // lock taken as the FIRST statement (see team-key-rotation-lock.ts).
+        // Entry creates and full updates, key distribution, and member
+        // removal hold this row FOR SHARE, so each has either committed
+        // before the member and entry reads below (and is read) or waits for
+        // this rotation. NO KEY UPDATE, not UPDATE: it conflicts with those
+        // FOR SHARE holders without blocking unrelated inserts whose foreign
+        // key to teams takes KEY SHARE.
+        const [currentTeam] = await tx.$queryRaw<{ team_key_version: number }[]>`
+          SELECT team_key_version FROM teams WHERE id = ${teamId}::uuid FOR NO KEY UPDATE
+        `;
+        if (!currentTeam || currentTeam.team_key_version !== team.teamKeyVersion) {
           throw new Error("TEAM_KEY_VERSION_CONFLICT");
         }
 
-        // Verify all active members have a key in the payload (F-26: inside tx)
+        // Verify all active members have a key in the payload (F-26: inside
+        // tx, after the team lock that member removal also takes)
         const members = await tx.teamMember.findMany({
           where: { teamId: teamId, deactivatedAt: null, keyDistributed: true },
           select: { userId: true },
@@ -170,19 +186,26 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       // updateMany + teamId scope prevents out-of-team updates.
       // teamKeyVersion is NOT in where: entries restored from history may have
       // a stale version, but the ID set verification above guarantees completeness (F-29).
+      // The snapshot predicate (itemKeyVersion + the re-encrypted ciphertext's
+      // IV) rejects an entry changed since the client's snapshot — a history
+      // restore takes no team lock and can land after it. IVs are random per
+      // encryption, so an equal IV means the same ciphertext.
       // Note: Prisma interactive transaction auto-rolls back on any thrown error.
         for (const entry of entries) {
           const data: Record<string, unknown> = {
             aadVersion: entry.aadVersion,
             teamKeyVersion: newTeamKeyVersion,
           };
+          let snapshot: Record<string, unknown>;
 
           if (entry.itemKeyVersion >= 1 && "encryptedItemKey" in entry) {
             // ItemKey entry: rewrap ItemKey only
+            snapshot = { itemKeyVersion: entry.itemKeyVersion, itemKeyIv: entry.snapshotIv };
             data.encryptedItemKey = entry.encryptedItemKey.ciphertext;
             data.itemKeyIv = entry.encryptedItemKey.iv;
             data.itemKeyAuthTag = entry.encryptedItemKey.authTag;
           } else if ("encryptedBlob" in entry) {
+            snapshot = { itemKeyVersion: 0, blobIv: entry.snapshotIv };
             // Legacy entry: full re-encrypt
             data.encryptedBlob = entry.encryptedBlob.ciphertext;
             data.blobIv = entry.encryptedBlob.iv;
@@ -190,12 +213,15 @@ async function handlePOST(req: NextRequest, { params }: Params) {
             data.encryptedOverview = entry.encryptedOverview.ciphertext;
             data.overviewIv = entry.encryptedOverview.iv;
             data.overviewAuthTag = entry.encryptedOverview.authTag;
+          } else {
+            throw new Error("ENTRY_COUNT_MISMATCH");
           }
 
           const result = await tx.teamPasswordEntry.updateMany({
             where: {
               id: entry.id,
               teamId: teamId,
+              ...snapshot,
             },
             data,
           });
@@ -236,11 +262,11 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     if (e instanceof Error && e.message === "TEAM_KEY_VERSION_CONFLICT") {
       return errorResponse(API_ERROR.TEAM_KEY_VERSION_MISMATCH);
     }
-    // A concurrent rotation that lost the CAS race can still collide on the
-    // teamMemberKey @@unique([teamId, userId, keyVersion]) createMany before its
-    // non-locking findUnique re-read observes the winner's bump. Map that P2002
-    // to the same 409 conflict shape as the CAS, not a bare unhandled 500 —
-    // mirrors the personal VaultKey P2002 mapping in rotate-key-server.ts.
+    // Concurrent rotations serialise on the teams FOR NO KEY UPDATE above, so the
+    // loser normally fails the CAS. A teamMemberKey
+    // @@unique([teamId, userId, keyVersion]) collision is still mapped to the
+    // same 409 conflict shape rather than a bare 500 — mirrors the personal
+    // VaultKey P2002 mapping in rotate-key-server.ts.
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
       return errorResponse(API_ERROR.TEAM_KEY_VERSION_MISMATCH);
     }

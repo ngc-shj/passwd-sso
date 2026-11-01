@@ -12,6 +12,7 @@ import { VAULT_CONFIRMATION_PHRASE } from "@/lib/constants/vault";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { executeVaultReset } from "@/lib/vault/vault-reset";
+import { isTeamRotationConflict } from "@/lib/team/team-key-rotation-lock";
 import { invalidateUserSessions } from "@/lib/auth/session/user-session-invalidation";
 import { resolveUserTenantId } from "@/lib/tenant-context";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
@@ -80,17 +81,26 @@ async function handlePOST(request: NextRequest) {
   // as a best-effort completion event (they are only known post-transaction).
   // Unscoped: the owner's authority covers all of their vault rows, under every
   // tenant. Only an admin-authorized reset is limited to one.
-  const { deletedEntries, deletedAttachments } = await executeVaultReset(
-    userId,
-    {
-      tenantId,
-      params: {
-        ...personalAuditBase(request, userId),
-        action: AUDIT_ACTION.VAULT_RESET_EXECUTED,
-        metadata: { phase: "committed" },
+  let deletedEntries: number;
+  let deletedAttachments: number;
+  try {
+    ({ deletedEntries, deletedAttachments } = await executeVaultReset(
+      userId,
+      {
+        tenantId,
+        params: {
+          ...personalAuditBase(request, userId),
+          action: AUDIT_ACTION.VAULT_RESET_EXECUTED,
+          metadata: { phase: "committed" },
+        },
       },
-    },
-  );
+    ));
+  } catch (e) {
+    // A rotation of one of the user's teams held it past the lock wait.
+    // Nothing was deleted; the reset can be retried.
+    if (isTeamRotationConflict(e)) return errorResponse(API_ERROR.CONFLICT);
+    throw e;
+  }
 
   // Mirror admin-reset semantics: a self-reset wipes the vault, but the
   // existing Session / ExtensionToken / ApiKey / McpAccessToken /

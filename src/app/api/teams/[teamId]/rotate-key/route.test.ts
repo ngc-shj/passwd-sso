@@ -34,7 +34,9 @@ const {
 }));
 
 const txMock = {
-  team: { findUnique: vi.fn(), update: vi.fn() },
+  // The in-tx CAS re-read (SELECT team_key_version FROM teams ... FOR UPDATE).
+  $queryRaw: vi.fn(),
+  team: { update: vi.fn() },
   teamMember: { findMany: vi.fn() },
   teamPasswordEntry: { updateMany: vi.fn(), findMany: vi.fn() },
   teamMemberKey: { createMany: vi.fn() },
@@ -85,9 +87,12 @@ function createParams(teamId: string) {
   return { params: Promise.resolve({ teamId }) };
 }
 
+const SNAPSHOT_IV = "e".repeat(24);
+
 function validEntry(id: string) {
   return {
     id,
+    snapshotIv: SNAPSHOT_IV,
     encryptedBlob: { ciphertext: "blob", iv: "a".repeat(24), authTag: "b".repeat(32) },
     encryptedOverview: { ciphertext: "ov", iv: "c".repeat(24), authTag: "d".repeat(32) },
     aadVersion: 1,
@@ -115,7 +120,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     mockTeamFindUnique.mockResolvedValue({
       teamKeyVersion: 1,
     });
-    txMock.team.findUnique.mockResolvedValue({ teamKeyVersion: 1 });
+    txMock.$queryRaw.mockResolvedValue([{ team_key_version: 1 }]);
     txMock.team.update.mockResolvedValue({});
     txMock.teamMember.findMany.mockResolvedValue([{ userId: "660e8400-e29b-41d4-a716-446655440001" }]);
     txMock.teamPasswordEntry.updateMany.mockResolvedValue({ count: 1 });
@@ -255,7 +260,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
 
   it("returns 409 when teamKeyVersion changed concurrently (S-17 optimistic lock)", async () => {
     // Pre-read returns version 1, but inside tx it's already been bumped to 2
-    txMock.team.findUnique.mockResolvedValue({ teamKeyVersion: 2 });
+    txMock.$queryRaw.mockResolvedValue([{ team_key_version: 2 }]);
     const res = await POST(
       createRequest({
         newTeamKeyVersion: 2,
@@ -267,6 +272,27 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     const json = await res.json();
     expect(res.status).toBe(409);
     expect(json.error).toBe("TEAM_KEY_VERSION_MISMATCH");
+  });
+
+  it("locks the team row FOR NO KEY UPDATE before reading the team's members and entries", async () => {
+    const res = await POST(
+      createRequest({
+        newTeamKeyVersion: 2,
+        entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
+        memberKeys: [validMemberKey("660e8400-e29b-41d4-a716-446655440001")],
+      }),
+      createParams("team-1"),
+    );
+    expect(res.status).toBe(200);
+    const [strings, teamId] = txMock.$queryRaw.mock.calls[0] as [TemplateStringsArray, string];
+    expect(strings.join("?")).toMatch(/FROM teams WHERE id = \?::uuid FOR NO KEY UPDATE/);
+    expect(teamId).toBe("team-1");
+    expect(txMock.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      txMock.teamMember.findMany.mock.invocationCallOrder[0],
+    );
+    expect(txMock.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      txMock.teamPasswordEntry.findMany.mock.invocationCallOrder[0],
+    );
   });
 
   it("rotates key successfully and logs audit (S-2)", async () => {
@@ -321,6 +347,79 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
         where: expect.objectContaining({ id: uuidEntry }),
       })
     );
+  });
+
+  it("applies a v0 entry only while the row still holds the snapshotted blob", async () => {
+    const res = await POST(
+      createRequest({
+        newTeamKeyVersion: 2,
+        entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
+        memberKeys: [validMemberKey("660e8400-e29b-41d4-a716-446655440001")],
+      }),
+      createParams("team-1"),
+    );
+    expect(res.status).toBe(200);
+    expect(txMock.teamPasswordEntry.updateMany.mock.calls[0][0].where).toEqual({
+      id: "660e8400-e29b-41d4-a716-446655440100",
+      teamId: "team-1",
+      itemKeyVersion: 0,
+      blobIv: SNAPSHOT_IV,
+    });
+  });
+
+  it("applies a v1 entry only while the row still holds the snapshotted ItemKey wrap", async () => {
+    const res = await POST(
+      createRequest({
+        newTeamKeyVersion: 2,
+        entries: [{
+          id: "660e8400-e29b-41d4-a716-446655440100",
+          itemKeyVersion: 1,
+          snapshotIv: SNAPSHOT_IV,
+          encryptedItemKey: { ciphertext: "wrapped", iv: "f".repeat(24), authTag: "b".repeat(32) },
+          aadVersion: 1,
+        }],
+        memberKeys: [validMemberKey("660e8400-e29b-41d4-a716-446655440001")],
+      }),
+      createParams("team-1"),
+    );
+    expect(res.status).toBe(200);
+    expect(txMock.teamPasswordEntry.updateMany.mock.calls[0][0].where).toEqual({
+      id: "660e8400-e29b-41d4-a716-446655440100",
+      teamId: "team-1",
+      itemKeyVersion: 1,
+      itemKeyIv: SNAPSHOT_IV,
+    });
+  });
+
+  it("rejects the rotation without bumping the version when an entry changed since the snapshot", async () => {
+    // The snapshot predicate matches no row: the entry was edited or restored.
+    txMock.teamPasswordEntry.updateMany.mockResolvedValue({ count: 0 });
+    const res = await POST(
+      createRequest({
+        newTeamKeyVersion: 2,
+        entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
+        memberKeys: [validMemberKey("660e8400-e29b-41d4-a716-446655440001")],
+      }),
+      createParams("team-1"),
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("ENTRY_COUNT_MISMATCH");
+    expect(txMock.teamMemberKey.createMany).not.toHaveBeenCalled();
+    expect(txMock.team.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects an entry without snapshotIv", async () => {
+    const { snapshotIv: _omitted, ...entry } = validEntry("660e8400-e29b-41d4-a716-446655440100");
+    const res = await POST(
+      createRequest({
+        newTeamKeyVersion: 2,
+        entries: [entry],
+        memberKeys: [validMemberKey("660e8400-e29b-41d4-a716-446655440001")],
+      }),
+      createParams("team-1"),
+    );
+    expect(res.status).toBe(400);
+    expect(txMock.teamPasswordEntry.updateMany).not.toHaveBeenCalled();
   });
 
   it("returns 400 when entry count does not match team entries (F-17)", async () => {
