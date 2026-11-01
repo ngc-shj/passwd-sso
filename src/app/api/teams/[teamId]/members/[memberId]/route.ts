@@ -36,8 +36,6 @@ class MemberChangedError extends Error {
   }
 }
 
-const MEMBER_RESPONSE_SELECT = { id: true, userId: true, role: true, createdAt: true } as const;
-
 async function buildMemberRoleResponse(member: {
   id: string;
   userId: string;
@@ -117,7 +115,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
           data: { role: TEAM_ROLE.OWNER },
         });
         if (demoted.count !== 1 || promoted.count !== 1) throw new MemberChangedError();
-        return tx.teamMember.findUniqueOrThrow({ where: { id: memberId }, select: MEMBER_RESPONSE_SELECT });
+        return tx.teamMember.findUniqueOrThrow({ where: { id: memberId }, select: { id: true, userId: true, role: true, createdAt: true } });
       });
     } catch (e) {
       if (e instanceof MemberChangedError) return errorResponse(API_ERROR.MEMBER_NOT_FOUND);
@@ -164,7 +162,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
         data: { role: result.data.role },
       });
       if (actorActive !== 1 || changed.count !== 1) throw new MemberChangedError();
-      return tx.teamMember.findUniqueOrThrow({ where: { id: memberId }, select: MEMBER_RESPONSE_SELECT });
+      return tx.teamMember.findUniqueOrThrow({ where: { id: memberId }, select: { id: true, userId: true, role: true, createdAt: true } });
     });
   } catch (e) {
     if (e instanceof MemberChangedError) return errorResponse(API_ERROR.MEMBER_NOT_FOUND);

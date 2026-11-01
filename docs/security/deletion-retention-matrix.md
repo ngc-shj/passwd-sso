@@ -50,6 +50,7 @@ Every remaining Prisma model, i.e. models with no row in the registry above. Wha
 | `Team` | `teams` |
 | `Tenant` | `tenants` |
 | `TenantMember` | `tenant_members` |
+| `TenantMemberDeparture` | `tenant_member_departures` |
 | `ScimGroupMapping` | `scim_group_mappings` |
 | `TeamMember` | `team_members` |
 | `TeamMemberKey` | `team_member_keys` |

@@ -27,7 +27,7 @@ function recordingTx(rows: { user_id: string; deactivated_at: Date | null }[] = 
       return [];
     }),
   };
-  return { tx, statements, values };
+  return { tx: tx as unknown as Pick<Prisma.TransactionClient, "$executeRaw" | "$queryRaw">, raw: tx, statements, values };
 }
 
 describe("lockTenantRows", () => {
@@ -69,12 +69,12 @@ describe("lockTenantRows", () => {
   });
 
   it("fails with the tenant-row error, before waiting, when the shared budget is spent", async () => {
-    const { tx } = recordingTx();
+    const { tx, raw } = recordingTx();
     const spent = { deadline: Date.now() - 1 };
 
     await expect(lockTenantRows(tx, "t", ["u"], "share", spent)).rejects.toBeInstanceOf(TenantMemberLockTimeoutError);
     // lock_timeout = 0 would mean "no limit": nothing was set.
-    expect(tx.$executeRaw).not.toHaveBeenCalled();
+    expect(raw.$executeRaw).not.toHaveBeenCalled();
   });
 
   it("bounds each wait by what is left of the shared budget", async () => {

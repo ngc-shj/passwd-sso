@@ -31,19 +31,14 @@ CREATE INDEX "tenant_member_departures_user_id_idx" ON "tenant_member_departures
 ALTER TABLE "tenant_member_departures" ADD CONSTRAINT "tenant_member_departures_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "tenants"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 ALTER TABLE "tenant_member_departures" ADD CONSTRAINT "tenant_member_departures_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
--- Tenant-RLS isolation, as on tenant_members. No `DROP POLICY IF EXISTS`
--- prefix: the table is new in this migration.
+-- Tenant-RLS isolation in the form 20261019000000 requires of every policy:
+-- the bypass branch names its own table, the tenant cast sits in a sub-SELECT.
+-- No `DROP POLICY IF EXISTS` prefix: the table is new in this migration.
 ALTER TABLE "tenant_member_departures" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "tenant_member_departures" FORCE ROW LEVEL SECURITY;
 CREATE POLICY tenant_member_departures_tenant_isolation ON "tenant_member_departures"
-  USING (
-    COALESCE(current_setting('app.bypass_rls', true), '') = 'on'
-    OR "tenant_id" = current_setting('app.tenant_id', true)::uuid
-  )
-  WITH CHECK (
-    COALESCE(current_setting('app.bypass_rls', true), '') = 'on'
-    OR "tenant_id" = current_setting('app.tenant_id', true)::uuid
-  );
+  USING ((SELECT public.rls_bypass_admits('tenant_member_departures')) OR "tenant_id" = (SELECT (current_setting('app.tenant_id', true))::uuid))
+  WITH CHECK ((SELECT public.rls_bypass_admits('tenant_member_departures')) OR "tenant_id" = (SELECT (current_setting('app.tenant_id', true))::uuid));
 
 -- The app reads and upserts records; nothing deletes one but FK cascade.
 DO $$ BEGIN

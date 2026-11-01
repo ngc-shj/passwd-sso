@@ -284,6 +284,8 @@ Routes are grouped by their top-level API area for readability (grouping is cosm
 | `src/app/api/tenant/service-accounts/[id]/tokens/[tokenId]/route.ts` | api-session-required | DELETE | session | - | DELETE gated | - | - |
 | `src/app/api/tenant/service-accounts/[id]/tokens/route.ts` | api-session-required | GET, POST | session | - | GET gated, POST gated | - | - |
 | `src/app/api/tenant/service-accounts/route.ts` | api-session-required | GET, POST | session | - | GET gated, POST gated | - | - |
+| `src/app/api/tenant/teams/[teamId]/owner/route.ts` | api-session-required | POST | session | - | POST gated | - | - |
+| `src/app/api/tenant/teams/ownerless/route.ts` | api-session-required | GET | session | - | GET gated | - | - |
 | `src/app/api/tenant/webhooks/[webhookId]/route.ts` | api-session-required | DELETE | session | - | DELETE gated | - | - |
 | `src/app/api/tenant/webhooks/route.ts` | api-session-required | GET, POST | session | - | GET gated, POST gated | - | - |
 
