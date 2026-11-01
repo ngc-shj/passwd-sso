@@ -332,6 +332,8 @@ All password data is encrypted **client-side** before reaching the server. The s
 | `/api/tenant/breakglass/[id]/logs` | GET | Break Glass personal logs |
 | `/api/tenant/webhooks` | GET, POST | Tenant webhooks |
 | `/api/tenant/webhooks/[webhookId]` | PUT, DELETE | Update/delete tenant webhook |
+| `/api/tenant/teams/ownerless` | GET | Teams whose OWNER left the tenant, with assignable members |
+| `/api/tenant/teams/[teamId]/owner` | POST | Assign the OWNER of an ownerless team (step-up; self-assign tenant OWNER only) |
 
 #### Sessions & Notifications
 
