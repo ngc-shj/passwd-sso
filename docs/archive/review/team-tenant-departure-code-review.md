@@ -1,6 +1,6 @@
 # Code Review: team-tenant-departure
 Date: 2026-11-01
-Review round: 2
+Review round: 3
 
 Base: `a0ee2277c` (the head of PR #986, which this branch is stacked on).
 
@@ -198,3 +198,54 @@ continuing (N1).
 - N6: the acting-admin cell asserts the final owner state and the stamp.
 - N7: the engine race parks the accept on the invitation row, outside its
   lock budget.
+
+## Round 3
+
+### Changes from Previous Round
+Round 2's fixes (`d7cb2c9b7`, `6a9371c99`) reviewed. All held. No Critical;
+functionality and security raised Minors only; testing raised five Majors, all
+about tests not yet pinning round-2 fixes.
+
+### Findings
+- F11 [Minor] statement_timeout = remaining budget could cancel a statement that
+  never waits when the shared budget is nearly spent.
+- F12 [Minor] PUT/DELETE answered 404 when the actor (not the target) lost authority.
+- F13 [Minor] An uppercase target id missed lockTenantRows' lowercase map; it
+  also slipped past members POST's self check.
+- S6 [Minor] The owner assignment re-checked the actor's departure under its
+  lock but not their tenant role (nor the self-assignment rule on it).
+- T1 [Major] Invitation POST's new team lock was unasserted.
+- T2 [Major] PUT's role/rank re-check, its order, and the 409 arm of PUT/DELETE untested.
+- T3 [Major] confirm-key's demotion clause untested.
+- T4 [Major] No allow-side cell for a guest inviter's invitation.
+- T5 [Major] The restore of statement_timeout unpinned.
+- T6-T8 [Minor] A vacuous `Math.max(...[])` bound; rotate-key's actor scope;
+  the members race cells did not assert the departure; Q1-Q7 not described.
+
+### Resolution Status
+- S6: lockTenantRows returns the tenant role; the owner route checks
+  TEAM_OWNER_ASSIGN and the self-assignment rule on it (403).
+- F11: statement_timeout = wait + 200 ms (STATEMENT_SLACK_MS); lock_timeout = wait.
+- F12: ActorNotPermittedError -> 403; MemberChangedError -> 404 stays for a changed target.
+- F13: lockTenantRows locks by the lowercase id and answers by the caller's
+  spelling; members POST lowercases before its self check.
+- T1-T8: cells added as described in the commit `00c6c691d`.
+
+### Red-proofs (mutation in a scratch worktree -> the cell that reddened)
+Round 2:
+- Q1 setWaitTimeouts without statement_timeout -> "two advisory locks each held for less than the wait …" (integration).
+- Q2 members POST locks only the target -> "A10: the acting member's departure waits … members POST".
+- Q3 lockActorThenTeam without the actor's tenant row -> "… members DELETE".
+- Q4 engine transitions on the row-lock budget -> "gives the transitions a deadline of their own …" (engine unit).
+- Q5 accept without the inviter role clause -> "refuses, and commits EXPIRED, when the inviter is no longer a member entitled to invite".
+- Q6 rotate-key without the actor re-check -> "refuses (403) without bumping the version …".
+- Q7 DELETE without `role: target.role` -> "removes member successfully and deletes TeamMemberKeys".
+Round 3:
+- P1 owner route reads `actor.role` instead of the locked row -> "refuses (403) … demoted to tenant MEMBER …".
+- P2 no statement slack -> "bounds lock_timeout by the wait, statement_timeout by the wait plus slack …".
+- P3 statement_timeout restored to a constant -> same cell ("… and restores both").
+- P4 actor loss mapped to MemberChangedError -> "answers 403 … acting member left since …".
+- P5 result keyed by the raw id -> "answers by the caller's spelling of an id …".
+- P6 invitation POST without its team lock -> "re-reads the inviter's role after the tenant rows and then the team are locked".
+- P7 confirm-key checks only `!actorRole` -> "refuses (403) … demoted to VIEWER".
+- P8 members POST without lowercasing -> "refuses adding oneself under an uppercase spelling …".
