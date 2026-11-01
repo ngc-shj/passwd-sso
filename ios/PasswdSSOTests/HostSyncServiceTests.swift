@@ -17,9 +17,11 @@ private struct NullTeamDirectoryStore: TeamDirectoryStoring {
 private final class RecordingTeamDirectoryStore: TeamDirectoryStoring, @unchecked Sendable {
   private let lock = NSLock()
   private var saved: [String] = []
+  private var saves = 0
   var savedTeamIds: [String] { lock.withLock { saved } }
+  var saveCount: Int { lock.withLock { saves } }
   func save(_ entries: [TeamDirectoryEntry], cacheKey: SymmetricKey, userId: String) throws {
-    lock.withLock { saved = entries.map(\.id) }
+    lock.withLock { saved = entries.map(\.id); saves += 1 }
   }
   func load(cacheKey: SymmetricKey, userId: String) -> [TeamDirectoryEntry] { [] }
   func clear() throws {}
@@ -578,6 +580,9 @@ final class HostSyncServiceTests: XCTestCase {
 
     let goodTeamId = f.teamId
     let badTeamId = "team-not-distributed"
+    // Answered with the good team's key material, which is bound to the good
+    // team's id and so does not unwrap for this one: skipped, not fatal.
+    let badKeyTeamId = "team-bad-key-material"
 
     let fakeKeychain2 = FakeKeychain()
     let tokenStore2 = HostTokenStore(service: "com.test.two-teams.tokens", keychain: fakeKeychain2)
@@ -603,7 +608,8 @@ final class HostSyncServiceTests: XCTestCase {
       wrapVersion: f.wrapVersion
     ))
     let twoTeamsListData = Data("""
-    [{"id":"\(goodTeamId)","name":"Good Team"},{"id":"\(badTeamId)","name":"Bad Team"}]
+    [{"id":"\(goodTeamId)","name":"Good Team"},{"id":"\(badTeamId)","name":"Bad Team"},
+     {"id":"\(badKeyTeamId)","name":"Bad Key Team"}]
     """.utf8)
 
     MockURLProtocol.requestHandler = { request in
@@ -620,6 +626,9 @@ final class HostSyncServiceTests: XCTestCase {
       }
       // member-key: good team → real fixture data; bad team → 403.
       if path.hasSuffix("/member-key") {
+        if path.contains(badKeyTeamId) {
+          return (goodMemberKeyData, httpResponse(status: 200, url: request.url!))
+        }
         if path.contains(goodTeamId) {
           return (goodMemberKeyData, httpResponse(status: 200, url: request.url!))
         } else {
@@ -661,6 +670,8 @@ final class HostSyncServiceTests: XCTestCase {
     // Bad team must be absent.
     XCTAssertNil(stored.first(where: { $0.teamId == badTeamId }),
       "Team with KEY_NOT_DISTRIBUTED must be absent from stored team keys")
+    XCTAssertNil(stored.first(where: { $0.teamId == badKeyTeamId }),
+      "Team whose key material does not unwrap must be skipped, not fail the sync")
   }
 
   func testPersonalCacheEntryPropagatesEntryType() {
@@ -680,7 +691,7 @@ final class HostSyncServiceTests: XCTestCase {
   /// non-auth error), the sync fails and leaves the team keys as they were.
   /// Originally the code called saveTeamKeys([]) wiping valid persisted keys; later
   /// it went on personal-only and wrote a cache without the user's teams (#989).
-  func testRefreshTeamKeys_transientTeamsError_doesNotWipeExistingKeys() async throws {
+  func testRunSync_teamListError_failsSyncAndKeepsKeys() async throws {
     let bundle = Bundle(for: type(of: self))
     let fixtureURL = try XCTUnwrap(
       bundle.url(forResource: "team-key-fixture", withExtension: "json")
@@ -731,7 +742,12 @@ final class HostSyncServiceTests: XCTestCase {
       teamEncKey: existingTeamKey, cacheKey: cacheKey, userId: userId,
       teamId: f.teamId, teamKeyVersion: 1, issuedAt: Date()
     )
-    try wks.saveTeamKeys([existingWrapped])
+    // A key past the staleness window decrypts nothing: a failed sync drops it.
+    let expiredWrapped = try TeamEntryDecryptor.wrapTeamKey(
+      teamEncKey: SymmetricKey(size: .bits256), cacheKey: cacheKey, userId: userId,
+      teamId: "team-expired", teamKeyVersion: 1, issuedAt: Date().addingTimeInterval(-20 * 60)
+    )
+    try wks.saveTeamKeys([existingWrapped, expiredWrapped])
 
     let fakeKeychain = FakeKeychain()
     let tokenStore = HostTokenStore(
@@ -785,12 +801,9 @@ final class HostSyncServiceTests: XCTestCase {
         "no cache is written without the user's teams")
     }
 
-    // The existing fresh team key must still be present, NOT wiped.
-    let remaining = try wks.loadTeamKeys()
-    XCTAssertEqual(remaining.count, 1,
-      "Transient /api/teams failure must NOT wipe valid persisted team keys (F1 regression)")
-    XCTAssertEqual(remaining.first?.teamId, f.teamId,
-      "The surviving key must be the originally seeded team's key")
+    // The fresh team key must still be present, NOT wiped (F1 regression);
+    // only the expired one is gone.
+    XCTAssertEqual(try wks.loadTeamKeys().map(\.teamId), [f.teamId])
   }
 
   // MARK: - PASSKEY_REQUIRED is not "no teams" / "key not distributed"
@@ -914,13 +927,19 @@ final class HostSyncServiceTests: XCTestCase {
   func testRunSync_oneTeamFetchNotFound_personalAndOtherTeamsStillSync() async throws {
     let bks = makeBridgeKeyStore("team-gone")
     let directory = RecordingTeamDirectoryStore()
+    let threeTeams = Data(
+      #"[{"id":"team-a","name":"A"},{"id":"team-b","name":"B"},{"id":"team-c","name":"C"}]"#.utf8)
     MockURLProtocol.requestHandler = { request in
       let path = request.url?.path ?? ""
       if path.hasSuffix("/api/passwords") {
         return (Self.onePersonalEntry, httpResponse(status: 200, url: request.url!))
       }
       if path.hasSuffix("/api/teams") {
-        return (Self.twoTeams, httpResponse(status: 200, url: request.url!))
+        return (threeTeams, httpResponse(status: 200, url: request.url!))
+      }
+      // team-c: refused by that team's IP policy — still a membership.
+      if path.contains("/team-c/") {
+        return (Data(#"{"error":"FORBIDDEN"}"#.utf8), httpResponse(status: 403, url: request.url!))
       }
       if path.contains("/team-a/") {
         return (Self.notFoundBody, httpResponse(status: 404, url: request.url!))
@@ -931,12 +950,15 @@ final class HostSyncServiceTests: XCTestCase {
       return (Data("[]".utf8), httpResponse(status: 200, url: request.url!))
     }
 
-    let (sync, _) = makeTeamFetchSync("team-gone", bridgeKeyStore: bks, teamDirectoryStore: directory)
+    let (sync, cacheURL) = makeTeamFetchSync(
+      "team-gone", bridgeKeyStore: bks, teamDirectoryStore: directory)
     let report = try await sync.runSync(
       vaultKey: SymmetricKey(size: .bits256), userId: "u-1", cacheKey: SymmetricKey(size: .bits256))
 
     XCTAssertEqual(try cachedEntries(report), ["personal/entry-personal", "team-b/entry-team-b"])
-    XCTAssertEqual(directory.savedTeamIds, ["team-b"])
+    XCTAssertEqual(directory.savedTeamIds, ["team-b", "team-c"],
+      "the departed team (404) leaves the directory; the refused one (403) stays")
+    XCTAssertTrue(FileManager.default.fileExists(atPath: cacheURL.path))
     XCTAssertEqual(try bks.readDirect().cacheVersionCounter, 2)
   }
 
@@ -965,21 +987,27 @@ final class HostSyncServiceTests: XCTestCase {
   /// Failures that are not one team's fail the sync: no cache is written and the
   /// counter stays, so the previous cache is left whole.
   func testRunSync_teamFetchFailureNotScopedToTeam_failsSyncWithoutWriting() async throws {
-    let cases: [(String, @Sendable () throws -> (Data, HTTPURLResponse))] = [
-      ("offline", { throw URLError(.notConnectedToInternet) }),
-      ("gateway", {
-        (Data(#"{"error":"SERVICE_UNAVAILABLE"}"#.utf8),
-         httpResponse(status: 503, url: URL(string: "https://test.gateway.example/api/teams/team-b/passwords")!))
+    // The expected error, matched by case and code (a URLError carries the
+    // session's userInfo, so it is not Equatable to a fresh one).
+    let cases: [(String, @Sendable (Error) -> Bool, @Sendable (URLRequest) throws -> (Data, HTTPURLResponse))] = [
+      ("offline", { error in
+        guard case .networkError(let urlError)? = error as? MobileAPIError else { return false }
+        return urlError.code == .notConnectedToInternet
+      }, { _ in
+        throw URLError(.notConnectedToInternet)
+      }),
+      ("gateway", { ($0 as? MobileAPIError) == .serverError(status: 503) }, { request in
+        (Data(#"{"error":"SERVICE_UNAVAILABLE"}"#.utf8), httpResponse(status: 503, url: request.url!))
       }),
     ]
-    for (name, teamBResponse) in cases {
+    for (name, expected, teamBResponse) in cases {
       let bks = makeBridgeKeyStore("team-\(name)")
       MockURLProtocol.requestHandler = { request in
         let path = request.url?.path ?? ""
         if path.hasSuffix("/api/teams") {
           return (Self.twoTeams, httpResponse(status: 200, url: request.url!))
         }
-        if path.contains("/team-b/") { return try teamBResponse() }
+        if path.contains("/team-b/") { return try teamBResponse(request) }
         return (Data("[]".utf8), httpResponse(status: 200, url: request.url!))
       }
 
@@ -988,7 +1016,7 @@ final class HostSyncServiceTests: XCTestCase {
         _ = try await sync.runSync(vaultKey: SymmetricKey(size: .bits256), userId: "u-1")
         XCTFail("\(name): expected the sync to fail")
       } catch {
-        XCTAssertFalse(HostSyncService.isTeamScopedFailure(error), "\(name): \(error)")
+        XCTAssertTrue(expected(error), "\(name): \(error)")
       }
       XCTAssertFalse(FileManager.default.fileExists(atPath: cacheURL.path), "\(name): no cache written")
       XCTAssertEqual(try bks.readDirect().cacheVersionCounter, 1, name)
@@ -1028,6 +1056,16 @@ final class HostSyncServiceTests: XCTestCase {
     for error in syncWide {
       XCTAssertFalse(HostSyncService.isTeamScopedFailure(error), "\(error)")
     }
+  }
+
+  func testIsMembershipGone_onlyWhenNotAMember() {
+    XCTAssertTrue(HostSyncService.isMembershipGone(MobileAPIError.serverError(status: 404)))
+    XCTAssertTrue(HostSyncService.isMembershipGone(MobileAPIError.notFound))
+    XCTAssertFalse(HostSyncService.isMembershipGone(MobileAPIError.serverError(status: 403)))
+    XCTAssertFalse(HostSyncService.isMembershipGone(MobileAPIError.teamKeyNotDistributed))
+    XCTAssertFalse(HostSyncService.isMembershipGone(MobileAPIError.serverError(status: 503)))
+    XCTAssertFalse(HostSyncService.isMembershipGone(
+      DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "bad"))))
   }
 
   /// A transport failure on a member-key fetch fails the sync rather than being
@@ -1075,13 +1113,16 @@ final class HostSyncServiceTests: XCTestCase {
       return (Data("[]".utf8), httpResponse(status: 200, url: request.url!))
     }
 
-    let (sync, _) = makeTeamFetchSync("member-key-offline", bridgeKeyStore: bks, wrappedKeyStore: wks)
+    let directory = RecordingTeamDirectoryStore()
+    let (sync, _) = makeTeamFetchSync(
+      "member-key-offline", bridgeKeyStore: bks, wrappedKeyStore: wks, teamDirectoryStore: directory)
     do {
       _ = try await sync.runSync(vaultKey: SymmetricKey(size: .bits256), userId: f.toUserId, cacheKey: cacheKey)
       XCTFail("expected networkError")
     } catch MobileAPIError.networkError {}
 
     XCTAssertEqual(try wks.loadTeamKeys().map(\.teamId), [teamId], "the team key is not dropped")
+    XCTAssertEqual(directory.saveCount, 0, "the directory stays with the unwritten cache")
     XCTAssertEqual(try bks.readDirect().cacheVersionCounter, 1)
   }
 

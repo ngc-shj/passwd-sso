@@ -123,6 +123,42 @@ final class VaultViewModelTests: XCTestCase {
     XCTAssertEqual(obj["password"] as? String, "newpassword")
   }
 
+  // MARK: - A sync failing after a confirmed write (#989)
+
+  /// The server accepted the create; the refresh sync after it fails on a
+  /// transient team-list error. The save must not be reported as failed — the
+  /// form would stay open over a saved entry and a retry would duplicate it.
+  func testCreateEntry_syncFailsAfterConfirmedWrite_doesNotThrow() async throws {
+    var postCount = 0
+    MockURLProtocol.requestHandler = { request in
+      let path = request.url?.path ?? ""
+      if request.httpMethod == "POST", path.hasSuffix("/api/passwords") {
+        postCount += 1
+        let body = try XCTUnwrap(request.httpBody ?? readStream(request.httpBodyStream))
+        let id = try XCTUnwrap(
+          (JSONSerialization.jsonObject(with: body) as? [String: Any])?["id"] as? String)
+        return (Data(#"{"id":"\#(id)"}"#.utf8), httpResponse(status: 201, url: request.url!))
+      }
+      if path.hasSuffix("/api/teams") {
+        return (Data(#"{"error":"SERVICE_UNAVAILABLE"}"#.utf8), httpResponse(status: 503, url: request.url!))
+      }
+      return (Data("[]".utf8), httpResponse(status: 200, url: request.url!))
+    }
+
+    let vm = await VaultViewModel.makeEphemeral()
+    let (apiClient, syncService) = makeClientAndSyncService()
+    try await vm.createEntry(
+      userId: userId,
+      fields: EditableEntryFields(title: "New", username: "u", password: "p", url: "https://example.com"),
+      vaultKey: vaultKey,
+      keyVersion: liveKeyVersion,
+      apiClient: apiClient,
+      hostSyncService: syncService
+    )
+
+    XCTAssertEqual(postCount, 1)
+  }
+
   // MARK: - saveEntry legacy aadVersion-0 upgrade
 
   func testSaveEntry_legacyAadVersion0_upgradesTo1() async throws {

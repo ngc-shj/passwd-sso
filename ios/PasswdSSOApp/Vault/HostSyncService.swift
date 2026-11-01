@@ -66,6 +66,10 @@ public actor HostSyncService {
     // Read current blob to get counter and UUID
     let blob = try bridgeKeyStore.readDirect()
 
+    // A failed sync leaves the persisted team keys as they were; keys past the
+    // staleness window no longer decrypt anything, so they are not kept at rest.
+    defer { pruneExpiredTeamKeys(now: now) }
+
     // Fetch personal entries and team memberships in parallel
     async let personalEntries = entryFetcher.fetchPersonal()
     async let teamMemberships = apiClient.fetchTeamMemberships()
@@ -84,8 +88,9 @@ public actor HostSyncService {
     // A failure scoped to one team leaves that team out of this cache and must
     // not fail the personal vault or the other teams — e.g. a 404 when the
     // membership ended between the team list and this fetch, as a tenant
-    // departure does. A 404 also drops the team from the directory and key set
-    // below; the team comes back on the next sync if it is a membership again.
+    // departure does. A 404 also drops the team from the directory, and from the
+    // key set when the keys are refreshed below; the team comes back on the next
+    // sync if it is a membership again.
     var departedTeamIds: Set<String> = []
     for team in teams {
       do {
@@ -161,9 +166,12 @@ public actor HostSyncService {
     teams: [TeamMembership], cacheKey: SymmetricKey, userId: String, now: Date
   ) async throws {
     // Persist the team directory (id → name) for the in-app vault switcher labels,
-    // regardless of whether team keys can be derived this round.
+    // whether or not team keys can be derived this round — but only once nothing
+    // below can fail the sync, so a failed sync leaves it with the cache and keys.
     let directory = teams.map { TeamDirectoryEntry(id: $0.id, name: $0.name) }
-    try? teamDirectoryStore.save(directory, cacheKey: cacheKey, userId: userId)
+    let saveDirectory = { [teamDirectoryStore] in
+      try? teamDirectoryStore.save(directory, cacheKey: cacheKey, userId: userId)
+    }
 
     guard let wrappedEcdh = try? wrappedKeyStore.loadECDHPrivateKey(),
           var pkcs8 = TeamEntryDecryptor.unwrapEcdhPrivateKey(
@@ -171,6 +179,7 @@ public actor HostSyncService {
     else {
       // No usable ECDH key: clear only if the whole set is already stale.
       clearTeamKeysIfAllStale(now: now)
+      saveDirectory()
       return
     }
     defer { pkcs8.resetBytes(in: 0..<pkcs8.count) }
@@ -182,6 +191,7 @@ public actor HostSyncService {
       // Malformed ECDH key (e.g. storage corruption): same posture as "no ECDH" —
       // cannot refresh, so clear only if the whole set is already stale.
       clearTeamKeysIfAllStale(now: now)
+      saveDirectory()
       return
     }
 
@@ -216,6 +226,7 @@ public actor HostSyncService {
     }
     // Full rewrite — revoked / no-longer-distributed teams drop out of the set.
     try? wrappedKeyStore.saveTeamKeys(blobs)
+    saveDirectory()
   }
 
   /// Whether a failed team fetch (entries or member key) concerns that team
@@ -248,6 +259,13 @@ public actor HostSyncService {
     case .serverError(status: 404)?, .notFound?: return true
     default: return false
     }
+  }
+
+  /// Remove the persisted team keys past the staleness window, keeping fresh ones.
+  private func pruneExpiredTeamKeys(now: Date) {
+    guard let existing = try? wrappedKeyStore.loadTeamKeys(), !existing.isEmpty else { return }
+    let fresh = existing.filter { now.timeIntervalSince($0.issuedAt) <= TeamEntryDecryptor.teamKeyMaxAge }
+    if fresh.count != existing.count { try? wrappedKeyStore.saveTeamKeys(fresh) }
   }
 
   /// Clear the persisted team-key set only when every blob is already past the

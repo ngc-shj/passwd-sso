@@ -1,6 +1,6 @@
 # Code Review: ios-sync-team-failure-isolation
 Date: 2026-11-02
-Review round: 1
+Review round: 2
 
 Issue `#989`. No plan file: a bug fix scoped by the issue (out-of-scope item SC2 of
 `team-tenant-departure-plan.md`). Project: iOS app, XCTest on a macOS simulator host.
@@ -62,7 +62,8 @@ None.
 
 ## Environment Verification Report
 `verified-local`: `xcodebuild test` on z1mn-island (iPhone 15 Pro simulator) —
-HostSyncServiceTests 18/18, full suite 872 tests, 0 failures.
+HostSyncServiceTests 19/19 + VaultViewModelTests 20/20, full suite 874 tests, 0 failures
+(round 2).
 
 ## Resolution Status
 - F1, F2, T1: `isTeamScopedFailure` is an allowlist with an exhaustive switch over
@@ -89,3 +90,52 @@ HostSyncServiceTests 18/18, full suite 872 tests, 0 failures.
 - P4 team-list failure goes on personal-only -> `testRefreshTeamKeys_transientTeamsError_doesNotWipeExistingKeys`.
 - P5 directory built from the unfiltered list -> `testRunSync_oneTeamFetchNotFound_personalAndOtherTeamsStillSync`.
 - P6 entry loop throws on any error (the original bug) -> both 404 cells.
+
+## Round 2
+
+### Changes from Previous Round
+Incremental review of `f010e4a2c`. F1-F5 and T1-T6 resolved. No Critical; Security
+confirmed usable access to a kept team key stays capped at 15 minutes after the last
+successful sync on every read path (`TeamEntryDecryptor.teamKeyMaxAge`), so failing
+the sync on more errors does not extend a removed member's access (R43).
+
+### Findings
+- S1 [Minor] Expired wrapped team keys stayed at rest across failed syncs (unusable,
+  but kept on disk longer than main did).
+- FUNC-R2-1 [Minor] The team directory was saved before the key loop could fail the
+  sync, leaving it ahead of the unwritten cache and keys.
+- FUNC-R2-2 [Minor] A comment claimed a 404 always drops the team's key; not on the
+  no-ECDH path (R49).
+- FUNC-R2-3 [Minor, widened by this branch] A sync failing after a confirmed create or
+  save was reported as "Could not save"; a retried create duplicated the entry. This
+  branch added triggers (team-list, 5xx, member-key transport failures).
+- T7 [Major] The 403-vs-404 split of `isMembershipGone` was untested.
+- T8 [Major] The key loop's skip on key material that does not unwrap was untested.
+- T9 [Minor] The not-scoped test accepted any non-team-scoped error.
+- T10 [Minor] No positive control for the cache file on the success path.
+- T11 [Minor] A renamed behaviour kept its old test name.
+
+### Resolution Status
+- S1: `performSync` prunes team keys past the staleness window on every exit
+  (`pruneExpiredTeamKeys`), keeping fresh ones.
+- FUNC-R2-1: the directory is persisted after the key loop (and on the no-ECDH /
+  malformed-ECDH returns), so a failed sync leaves it as it was.
+- FUNC-R2-2: comment states the key set drops the team when keys are refreshed.
+- FUNC-R2-3: `VaultViewModel.refreshAfterConfirmedWrite` (shared by create and save)
+  does not report the refresh sync's failure; the next sync surfaces session or
+  passkey problems. No other write path syncs after a confirmed write.
+- T7: `testIsMembershipGone_onlyWhenNotAMember`; the 404 sync test adds a team
+  answering 403 that keeps its directory entry and has no cached entries.
+- T8: the two-team key test adds a team whose key material is bound to another team
+  and is skipped.
+- T9: each case asserts its own error (by case and URL error code).
+- T10: the 404 test asserts the cache file exists.
+- T11: renamed to `testRunSync_teamListError_failsSyncAndKeepsKeys`; it also seeds an
+  expired key and asserts only the fresh one remains (S1).
+
+### Red-proofs (scratch copy on the build host -> the cell that reddened)
+- Q1 directory saved before the key loop -> `testRefreshTeamKeys_memberKeyNetworkError_failsSyncAndKeepsKeys`.
+- Q2 expired keys kept unless all are expired -> `testRunSync_teamListError_failsSyncAndKeepsKeys`.
+- Q3 403 counted as departed -> `testIsMembershipGone_onlyWhenNotAMember`, the 404 sync test.
+- Q4 key material that does not unwrap fails the sync -> `testRefreshTeamKeys_oneTeamNotDistributed_otherTeamWritten`.
+- Q5 create surfaces the refresh sync's failure -> `testCreateEntry_syncFailsAfterConfirmedWrite_doesNotThrow`.
