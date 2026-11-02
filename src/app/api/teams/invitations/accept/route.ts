@@ -33,6 +33,7 @@ const acceptLimiter = createRateLimiter({
 
 /** SCIM admitted the invitee, pending approval, inside the locked transaction (C6). */
 class ScimApprovalPendingRaceError extends Error {}
+class ScimManagedMemberRaceError extends Error {}
 
 // POST /api/teams/invitations/accept — Accept an invitation by token
 async function handlePOST(req: NextRequest) {
@@ -207,7 +208,7 @@ async function handlePOST(req: NextRequest) {
         // to re-admit, and its keys must stay.
         const current = await tx.teamMember.findUnique({
           where: { teamId_userId: { teamId: invitation.teamId, userId: session.user.id } },
-          select: { deactivatedAt: true, scimApprovalPending: true },
+          select: { deactivatedAt: true, scimApprovalPending: true, scimManaged: true, deactivatedByTenant: true },
         });
         if (current && current.deactivatedAt === null) return ACCEPT_OUTCOME.ALREADY_MEMBER;
         // SCIM admitted this user, pending approval, after the pre-check above
@@ -215,6 +216,10 @@ async function handlePOST(req: NextRequest) {
         // returned: the claim above must roll back too, so the invitation
         // stays PENDING rather than being spent on a refusal.
         if (current?.scimApprovalPending) throw new ScimApprovalPendingRaceError();
+        // Likewise a SCIM group removal since the pre-check (it unmarks a
+        // departed row): the IdP removed this membership, so an invitation
+        // must not bring it back.
+        if (current?.scimManaged && !current.deactivatedByTenant) throw new ScimManagedMemberRaceError();
 
         await tx.teamMember.upsert({
           where: {
@@ -249,6 +254,7 @@ async function handlePOST(req: NextRequest) {
     );
   } catch (e) {
     if (e instanceof ScimApprovalPendingRaceError) return errorResponse(API_ERROR.SCIM_APPROVAL_PENDING);
+    if (e instanceof ScimManagedMemberRaceError) return errorResponse(API_ERROR.SCIM_MANAGED_MEMBER);
     if (isMembershipLockConflict(e)) return errorResponse(API_ERROR.CONFLICT);
     throw e;
   }

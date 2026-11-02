@@ -442,7 +442,7 @@ describe("POST /api/teams/invitations/accept", () => {
 
     it("re-admits with the departure marker cleared and the old member keys deleted", async () => {
       mockPrismaTeamMember.findUnique.mockResolvedValue({ deactivatedAt: new Date("2026-05-01"), scimManaged: true, deactivatedByTenant: true });
-      acceptTx.teamMember.findUnique.mockResolvedValue({ deactivatedAt: new Date("2026-05-01") });
+      acceptTx.teamMember.findUnique.mockResolvedValue({ deactivatedAt: new Date("2026-05-01"), scimManaged: true, deactivatedByTenant: true });
 
       expect((await accept()).status).toBe(200);
       expect(acceptTx.teamMember.upsert).toHaveBeenCalledWith(expect.objectContaining({
@@ -473,6 +473,18 @@ describe("POST /api/teams/invitations/accept", () => {
       // a thrown error against the real database); the membership must not.
       expect(acceptTx.teamInvitation.updateMany).toHaveBeenCalled();
       expect(acceptTx.teamMember.upsert).not.toHaveBeenCalled();
+    });
+
+    it("throws inside the locked transaction when a SCIM group removal unmarked the departed row after the pre-check", async () => {
+      mockPrismaTeamMember.findUnique.mockResolvedValue({ deactivatedAt: new Date("2026-05-01"), scimManaged: true, deactivatedByTenant: true });
+      acceptTx.teamMember.findUnique.mockResolvedValue({ deactivatedAt: new Date("2026-05-01"), scimManaged: true, deactivatedByTenant: false });
+
+      const res = await accept();
+
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toBe("SCIM_MANAGED_MEMBER");
+      expect(acceptTx.teamMember.upsert).not.toHaveBeenCalled();
+      expect(acceptTx.teamMemberKey.deleteMany).not.toHaveBeenCalled();
     });
 
     it("answers 409 when a tenant row is held past the lock wait", async () => {
