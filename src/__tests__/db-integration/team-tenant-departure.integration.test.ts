@@ -209,8 +209,8 @@ describe("team membership across a tenant departure — real-DB integration", ()
   }
 
   async function membership(teamId: string, userId: string) {
-    const [row] = await sql<{ id: string; deactivated_at: Date | null; deactivated_by_tenant: boolean; key_distributed: boolean; scim_managed: boolean; role: string }>(
-      `SELECT id, deactivated_at, deactivated_by_tenant, key_distributed, scim_managed, role
+    const [row] = await sql<{ id: string; deactivated_at: Date | null; deactivated_by_tenant: boolean; key_distributed: boolean; scim_managed: boolean; scim_approval_pending: boolean; role: string }>(
+      `SELECT id, deactivated_at, deactivated_by_tenant, key_distributed, scim_managed, scim_approval_pending, role
          FROM team_members WHERE team_id = $1::uuid AND user_id = $2::uuid`,
       teamId, userId,
     );
@@ -526,7 +526,7 @@ describe("team membership across a tenant departure — real-DB integration", ()
 
   // ── A7: SCIM group add ────────────────────────────────────────
 
-  it("A7: a SCIM group add reactivates a deactivated membership in place, without stale keys", async () => {
+  it("A7: a SCIM group add leaves a deactivated membership PENDING team approval, without stale keys (scim-team-admission-approval)", async () => {
     const owner = await ctx.createUser(tenantId);
     const user = await member();
     const teamId = await team(owner);
@@ -542,7 +542,11 @@ describe("team membership across a tenant departure — real-DB integration", ()
       patchScimGroup(tenantId, `grp-${teamId.slice(0, 6)}`, [{ op: "add", userId: user.id }], "http://localhost/api/scim/v2", tx),
     );
 
-    expect(await membership(teamId, user.id)).toMatchObject({ deactivated_at: null, deactivated_by_tenant: false, key_distributed: false });
+    // No longer reactivated in place: pending team approval (scim-team-admission-approval, C2).
+    expect(await membership(teamId, user.id)).toMatchObject({
+      deactivated_by_tenant: false, key_distributed: false, scim_approval_pending: true,
+    });
+    expect((await membership(teamId, user.id))?.deactivated_at).not.toBeNull();
     expect(await keyCount(teamId, user.id)).toBe(0);
   });
 

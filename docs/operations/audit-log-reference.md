@@ -436,6 +436,59 @@ These user-meaningful fields should be rendered in `getTargetLabel()` with i18n 
 
 ---
 
+## Operator Listing: Pre-existing SCIM Admissions (C7)
+
+`scim-team-admission-approval` leaves memberships SCIM admitted before this
+change active (SC1 — no retroactive backfill). The query below lists them, so
+an operator can review memberships that gained team access without going
+through the new approval step.
+
+```sql
+SELECT tm.team_id, tm.user_id, tm.role, tm.created_at
+  FROM team_members tm
+ WHERE tm.scim_managed = true
+   AND tm.deactivated_at IS NULL
+   AND NOT EXISTS (
+     SELECT 1 FROM audit_logs al
+      WHERE al.action = 'TEAM_MEMBER_SCIM_APPROVE'
+        AND al.team_id = tm.team_id
+        AND al.target_id = tm.user_id::text
+   )
+ ORDER BY tm.team_id, tm.user_id;
+```
+
+Read-only. Run it as the table owner (`passwd_user`, the role
+`MIGRATION_DATABASE_URL` points at in dev) — under `passwd_app` with FORCE RLS
+it returns an empty set regardless of the real answer, because every row
+belongs to some other tenant's RLS-scoped view:
+
+```bash
+psql "$MIGRATION_DATABASE_URL" -c "
+  SELECT tm.team_id, tm.user_id, tm.role, tm.created_at
+    FROM team_members tm
+   WHERE tm.scim_managed = true
+     AND tm.deactivated_at IS NULL
+     AND NOT EXISTS (
+       SELECT 1 FROM audit_logs al
+        WHERE al.action = 'TEAM_MEMBER_SCIM_APPROVE'
+          AND al.team_id = tm.team_id
+          AND al.target_id = tm.user_id::text
+     )
+   ORDER BY tm.team_id, tm.user_id;
+"
+```
+
+Run against the dev database (2026-11-03): 0 rows — no pre-existing
+`scim_managed` active membership lacked a `TEAM_MEMBER_SCIM_APPROVE` row at
+the time this query was written and verified (seeded and rolled back a
+matching row first to confirm the query returns a non-empty result when one
+exists). A non-empty result in a real deployment means the listed
+memberships were admitted by a SCIM group sync before this change and never
+went through team approval — review them manually; a UI listing is a
+follow-up issue.
+
+---
+
 ## AUDIT_TARGET_TYPE Constants (18)
 
 | Constant | Value |

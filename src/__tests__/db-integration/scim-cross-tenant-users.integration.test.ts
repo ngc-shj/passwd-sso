@@ -47,9 +47,8 @@ vi.mock("@/lib/scim/with-scim-auth", async () => {
 
 import { GET, POST } from "@/app/api/scim/v2/Users/route";
 import { PATCH } from "@/app/api/scim/v2/Users/[id]/route";
-import { fetchScimGroup } from "@/lib/services/scim-group-service";
+import { GET as getScimGroup } from "@/app/api/scim/v2/Groups/[id]/route";
 import { prisma } from "@/lib/prisma";
-import { withTenantRls } from "@/lib/tenant-rls";
 
 const BASE_URL = "http://localhost:3000/api/scim/v2";
 
@@ -168,11 +167,17 @@ describe("SCIM — users filed under another tenant (real DB)", () => {
       );
     });
 
+    // Driven through the route (not fetchScimGroup directly): this is the new
+    // shared reader (src/lib/scim/scim-group-members.ts,
+    // scim-team-admission-approval C2) as production actually reaches it.
     // Without the filter the guest's REQUIRED user relation comes back null here,
     // and reading its email failed the whole group.
-    const group = await withTenantRls(prisma, here, (tx) => fetchScimGroup(here, "grp-core", BASE_URL, tx));
+    const res = await getScimGroup(new NextRequest(`${BASE_URL}/Groups/grp-core`), {
+      params: Promise.resolve({ id: "grp-core" }),
+    });
+    const group = (await res.json()) as { members?: { value: string }[] };
 
-    expect(group?.members?.map((m) => m.value)).toEqual([member]);
+    expect(group.members?.map((m) => m.value)).toEqual([member]);
   });
 
   it("lists this tenant's departed member, filed under another tenant, in the page and the count", async () => {
