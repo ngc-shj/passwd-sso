@@ -165,14 +165,26 @@ export async function other(tx, id) { return isShareCreatorAdmitted(tx, id); }
       expectDenied(run(), /is not read as BYPASS_GRANT\.<grant>/);
     });
 
+    it("refuses a grant passed to something other than withBypassRls", () => {
+      write(ROUTE, COMPLIANT.replace("return withBypassRls(prisma,", "return otherWrapper(prisma,"));
+      expectDenied(run(), /is not the grant argument of a withBypassRls call/);
+    });
+  });
+
+  describe("rule 3: a serving file issues raw SQL only as tagged templates", () => {
     it("refuses an untagged raw call in a serving file", () => {
       write(ROUTE, COMPLIANT.replace(UPDATE_OK, "await prisma.$executeRawUnsafe(sqlText);"));
       expectDenied(run({ statements: 1 }), /\$executeRawUnsafe\(\.\.\.\) called with arguments in a serving file/);
     });
 
-    it("refuses a grant passed to something other than withBypassRls", () => {
-      write(ROUTE, COMPLIANT.replace("return withBypassRls(prisma,", "return otherWrapper(prisma,"));
-      expectDenied(run(), /is not the grant argument of a withBypassRls call/);
+    it("refuses an untagged raw call through element access", () => {
+      write(ROUTE, COMPLIANT.replace(UPDATE_OK, 'await prisma["$executeRawUnsafe"](sqlText);'));
+      expectDenied(run({ statements: 1 }), /\$executeRawUnsafe\(\.\.\.\) called with arguments in a serving file/);
+    });
+
+    it("leaves an untagged raw call alone in a file that serves under no share grant", () => {
+      write("src/lib/other/raw.ts", "export async function f(prisma) { await prisma.$executeRawUnsafe(sqlText); }");
+      expect(run().code).toBe(0);
     });
   });
 });

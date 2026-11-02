@@ -22,7 +22,7 @@
 ## D3 Share dialog keeps its existing inactive labels
 
 - Plan: the dialog shows the status through `shareLinkStatus`.
-- Implemented: the dialog shows `creatorNotInTeam` when `shareLinkStatus` says so and
+- Implemented: the dialog shows `notAdmitted` (renamed in D8) when `shareLinkStatus` says so and
   otherwise keeps its existing revoked / expired labels (it has no maxViewsReached
   label today); the dashboard page uses every arm.
 - Why: adding a maxViewsReached label to the dialog is a UI change outside `#990`.

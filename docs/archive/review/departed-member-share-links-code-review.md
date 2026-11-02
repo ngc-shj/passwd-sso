@@ -1,6 +1,6 @@
 # Code Review: departed-member-share-links
 Date: 2026-11-02
-Review round: 1
+Review round: 2 (final)
 
 ## Changes from Previous Round
 Initial review of `02ccdc266..5f8efaed9` (implementation, A7 page cell, Phase 2
@@ -66,3 +66,45 @@ stopped), lint, tsc, build. The plan declared no blocked environment.
 - T3: A6 serves a protected personal entry share and a protected Send through the page
   (gate) and verify-access (token) after the creator's removal; A10 gains a personal
   entry share row.
+
+## Round 2
+
+### Changes from Previous Round
+Incremental review of `abc0a37bb`. F1-F3, S1, T1-T3 resolved; no regression; no
+widening (R43). Nothing above Minor.
+
+### Findings
+- S2 / M1 / F-R2-N1 [Minor] (converged) The two-write check did not pin the second
+  write to the restore: a widened restore, or a widened grant with the list copied
+  into a comment, passed.
+- S3 / F-R2-N2 [Minor] Gate rule 3 saw property-access callees only.
+- M2 [Minor] Rule 3 had no negative control; its cells sat under rule 2.
+- M3 [Minor] Dialog test name kept the old wording.
+- F-R2-N3 [Minor] Deviation D3 named the renamed key.
+
+### Resolution Status
+- S2 / M1 / F-R2-N1: both writes are pinned with their `set_config(` prefix — the
+  three-table grant and the `COALESCE(v_prev_tables, '')` restore — alongside the
+  count of two. Red-proved without touching the database (the check evaluated over
+  edited copies of the function body): original passes; a third widening call, a
+  widened restore, and a widened grant with the list in a comment each fail.
+- S3 / F-R2-N2: rule 3 also reads string / template element access; KNOWN LIMITS names
+  an aliased raw method and a raw call in an imported helper module.
+- M2: a rule-3 describe with an element-access cell and a negative control (an
+  untagged raw call in a file serving under no share grant passes).
+- M3, F-R2-N3: renamed.
+
+## Tightening-only skip — Round 2
+Findings applied directly (no Round 3 review):
+- S2/M1/F-R2-N1 — `scripts/rls-cross-tenant-verify.sql` — the allowlist tripwire pinned
+- S3/F-R2-N2 — `scripts/checks/check-share-serve-admission.mjs` — rule 3 element access + KNOWN LIMITS
+- M2 — `scripts/__tests__/check-share-serve-admission.test.mjs` — cells
+- M3, F-R2-N3 — test name, deviation wording
+Justification: every finding is within round 1's fix scope and Minor; none changes
+runtime behaviour. The two files touched are CI-side detection — the plan declares
+`[E-RLS-BYPASS-ROUTINE]` a review tripwire, not a boundary, and the gate a regression
+check — so no serving, authorization or RLS decision changed.
+
+## Summary
+Two rounds. Unit, integration (share-departure 22/22), gate self-test, lint, tsc and
+build pass; every fix red-proved.

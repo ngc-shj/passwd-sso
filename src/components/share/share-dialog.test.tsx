@@ -270,7 +270,7 @@ describe("ShareDialog — §Sec-1 share-flow crypto invariants", () => {
     });
   });
 
-  it("labels a link whose creator is no longer in the team, and only that one", async () => {
+  it("labels a not-admitted link, and only that one", async () => {
     const link = {
       expiresAt: "2099-01-01T00:00:00Z",
       maxViews: null,

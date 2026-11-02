@@ -24,7 +24,8 @@
  *
  * 3. RAW FORMS. A file that references a serve grant issues raw SQL only as a
  *    tagged template: a call of $executeRaw / $queryRaw (or their Unsafe forms)
- *    with an argument list fails, since rule 1 reads literal text only.
+ *    with an argument list fails — by property or by string/template element
+ *    access — since rule 1 reads literal text only.
  *
  * Bindings are resolved through the file's own symbols (scope-aware, no
  * Program), so a shadowing local of the same name does not count.
@@ -33,7 +34,10 @@
  * the password check) is pinned by the integration cells, not here; a call whose
  * result is discarded still counts; an ORM write of view_count
  * (passwordShare.update with viewCount) is not recognised as a serving statement
- * — no serve path uses one, and the integration cells A12 pin the UPDATEs.
+ * — no serve path uses one, and the integration cells A12 pin the UPDATEs; rule 3
+ * does not follow an aliased raw method (`const run = tx.$executeRawUnsafe`) or
+ * an untagged raw call in a helper module the serving file imports (moving an
+ * existing statement there drops the pinned count; a new one is not seen).
  *
  * Exit 0 = clean. Exit 1 = a violation, a missing target, or site counts that
  * differ from the pinned ones.
@@ -144,7 +148,12 @@ for (const { rel, sf } of sourceFilesFrom(project, TARGETS, REPO_ROOT)) {
   if (mentions.length > 0) {
     for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
       const callee = call.getExpression();
-      const name = Node.isPropertyAccessExpression(callee) ? callee.getName() : "";
+      let name = "";
+      if (Node.isPropertyAccessExpression(callee)) name = callee.getName();
+      else if (Node.isElementAccessExpression(callee)) {
+        const key = callee.getArgumentExpression();
+        if (key && (Node.isStringLiteral(key) || Node.isNoSubstitutionTemplateLiteral(key))) name = key.getLiteralText();
+      }
       if (/^\$(executeRaw|queryRaw)(Unsafe)?$/.test(name)) {
         violations.push(`${rel}:${call.getStartLineNumber()}: ${name}(...) called with arguments in a serving file — use a tagged template`);
       }
