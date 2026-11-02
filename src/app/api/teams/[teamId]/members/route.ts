@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import type { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
@@ -43,12 +42,15 @@ async function handleGET(req: NextRequest, { params }: Params) {
   // else sees no pending rows at all.
   const canRemove = hasTeamPermission(membership.role, TEAM_PERMISSION.MEMBER_REMOVE);
   const canInvite = hasTeamPermission(membership.role, TEAM_PERMISSION.MEMBER_INVITE);
-  const or: Prisma.TeamMemberWhereInput[] = [{ deactivatedAt: null }];
-  if (canRemove) or.push({ deactivatedByTenant: true });
-  if (canInvite) or.push({ scimApprovalPending: true });
   const members = await withTeamTenantRls(teamId, async () =>
     prisma.teamMember.findMany({
-      where: or.length > 1 ? { teamId: teamId, OR: or } : { teamId: teamId, deactivatedAt: null },
+      where: canRemove && canInvite
+        ? { teamId: teamId, OR: [{ deactivatedAt: null }, { deactivatedByTenant: true }, { scimApprovalPending: true }] }
+        : canRemove
+          ? { teamId: teamId, OR: [{ deactivatedAt: null }, { deactivatedByTenant: true }] }
+          : canInvite
+            ? { teamId: teamId, OR: [{ deactivatedAt: null }, { scimApprovalPending: true }] }
+            : { teamId: teamId, deactivatedAt: null },
       select: {
         id: true,
         userId: true,

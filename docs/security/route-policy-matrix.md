@@ -220,7 +220,9 @@ Routes are grouped by their top-level API area for readability (grouping is cosm
 | `src/app/api/teams/[teamId]/invitations/[invId]/route.ts` | api-session-required | DELETE | session | - | DELETE gated | - | - |
 | `src/app/api/teams/[teamId]/invitations/route.ts` | api-session-required | GET, POST | session | - | GET gated, POST gated | - | - |
 | `src/app/api/teams/[teamId]/member-key/route.ts` | api-session-required | GET | session, extension-token | GET | GET gated | - | - |
+| `src/app/api/teams/[teamId]/members/[memberId]/approve/route.ts` | api-session-required | POST | session | - | POST gated | - | - |
 | `src/app/api/teams/[teamId]/members/[memberId]/confirm-key/route.ts` | api-session-required | POST | session | - | POST gated | - | - |
+| `src/app/api/teams/[teamId]/members/[memberId]/reject/route.ts` | api-session-required | POST | session | - | POST gated | - | - |
 | `src/app/api/teams/[teamId]/members/[memberId]/route.ts` | api-session-required | PUT, DELETE | session | - | PUT gated, DELETE gated | - | - |
 | `src/app/api/teams/[teamId]/members/route.ts` | api-session-required | GET, POST | session | - | GET gated, POST gated | - | - |
 | `src/app/api/teams/[teamId]/members/search/route.ts` | api-session-required | GET | session | - | GET gated | - | - |
