@@ -222,6 +222,23 @@ describe("POST /api/teams/invitations/accept", () => {
     expect(json.alreadyMember).toBe(true);
   });
 
+  it("returns 409 SCIM_APPROVAL_PENDING for a pending member (pre-check)", async () => {
+    mockPrismaTeamInvitation.findUnique.mockResolvedValue(validInvitation);
+    mockPrismaTeamMember.findUnique.mockResolvedValue({
+      id: "pending-member",
+      deactivatedAt: new Date("2024-01-01"),
+      scimManaged: true,
+      scimApprovalPending: true,
+    });
+
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/teams/invitations/accept", {
+      body: { token: "valid-token" },
+    }));
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error).toBe("SCIM_APPROVAL_PENDING");
+  });
+
   it("returns 409 for deactivated scimManaged member", async () => {
     mockPrismaTeamInvitation.findUnique.mockResolvedValue(validInvitation);
     mockPrismaTeamMember.findUnique.mockResolvedValue({
@@ -443,6 +460,19 @@ describe("POST /api/teams/invitations/accept", () => {
       expect((await res.json()).alreadyMember).toBe(true);
       expect(acceptTx.teamMember.upsert).not.toHaveBeenCalled();
       expect(acceptTx.teamMemberKey.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it("throws inside the locked transaction when SCIM admits the invitee pending after the pre-check, so the claim rolls back instead of admitting (A14)", async () => {
+      acceptTx.teamMember.findUnique.mockResolvedValue({ deactivatedAt: new Date("2026-06-02"), scimApprovalPending: true });
+
+      const res = await accept();
+
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toBe("SCIM_APPROVAL_PENDING");
+      // The claim ran (and would roll back with the rest of the transaction on
+      // a thrown error against the real database); the membership must not.
+      expect(acceptTx.teamInvitation.updateMany).toHaveBeenCalled();
+      expect(acceptTx.teamMember.upsert).not.toHaveBeenCalled();
     });
 
     it("answers 409 when a tenant row is held past the lock wait", async () => {

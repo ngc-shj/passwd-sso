@@ -18,6 +18,12 @@ export interface TeamMemberDisplayRow {
   createdAt: Date;
   /** The membership ended with the user's departure from the tenant (members GET only). */
   departed?: boolean;
+  /**
+   * A SCIM admission waiting for a key-holding team OWNER/ADMIN to approve or
+   * reject it (scim-team-admission-approval, C5). Listed to MEMBER_INVITE
+   * holders only — members GET.
+   */
+  pendingApproval?: boolean;
 }
 
 export interface TeamMemberDisplayItem {
@@ -30,6 +36,7 @@ export interface TeamMemberDisplayItem {
   joinedAt: Date;
   tenantName: string | null;
   departed: boolean;
+  pendingApproval: boolean;
 }
 
 /**
@@ -90,6 +97,7 @@ export async function buildTeamMemberDisplayItems(
       joinedAt: member.createdAt,
       tenantName: tenantByUserId.get(member.userId) ?? null,
       departed: member.departed ?? false,
+      pendingApproval: member.pendingApproval ?? false,
     }];
   });
 }

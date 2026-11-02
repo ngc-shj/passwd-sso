@@ -140,6 +140,10 @@ export const apiPath = {
       : `${API_PATH.TEAMS}/${teamId}/member-key`,
   teamMemberConfirmKey: (teamId: string, memberId: string) =>
     `${API_PATH.TEAMS}/${teamId}/members/${memberId}/confirm-key`,
+  teamMemberApprove: (teamId: string, memberId: string) =>
+    `${API_PATH.TEAMS}/${teamId}/members/${memberId}/approve`,
+  teamMemberReject: (teamId: string, memberId: string) =>
+    `${API_PATH.TEAMS}/${teamId}/members/${memberId}/reject`,
   teamTags: (teamId: string) => `${API_PATH.TEAMS}/${teamId}/tags`,
   teamAuditLogs: (teamId: string) => `${API_PATH.TEAMS}/${teamId}/audit-logs`,
   teamPolicy: (teamId: string) => `${API_PATH.TEAMS}/${teamId}/policy`,

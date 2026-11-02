@@ -116,11 +116,17 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     const existingMembers = await withTeamTenantRls(teamId, async () =>
       prisma.teamMember.findMany({
         where: { teamId: teamId, userId: { in: inviteeIds } },
-        select: { deactivatedAt: true, scimManaged: true, deactivatedByTenant: true },
+        select: { deactivatedAt: true, scimManaged: true, deactivatedByTenant: true, scimApprovalPending: true },
       }),
     );
     if (existingMembers.some((member) => member.deactivatedAt === null)) {
       return errorResponse(API_ERROR.ALREADY_A_MEMBER);
+    }
+    // Waiting on a team OWNER/ADMIN's approval (scim-team-admission-approval,
+    // C6) — checked before SCIM_MANAGED_MEMBER below, which a pending row
+    // would otherwise also trip (it is always scimManaged too).
+    if (existingMembers.some((member) => member.scimApprovalPending)) {
+      return errorResponse(API_ERROR.SCIM_APPROVAL_PENDING);
     }
     // A membership the IdP's group removal ended stays the IdP's; one ended
     // by the user's departure from the tenant is re-invitable.

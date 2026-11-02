@@ -13,6 +13,8 @@
   "passwords-bulk-purge": { "method": "POST", "pathTokens": ["apiPath.passwordsBulkPurge", "API_PATH.PASSWORDS_BULK_PURGE", "/api/passwords/bulk-purge"] },
   "passwords-empty-trash": { "method": "POST", "pathTokens": ["API_PATH.PASSWORDS_EMPTY_TRASH", "/api/passwords/empty-trash"] },
   "team-confirm-key-post": { "method": "POST", "pathTokens": ["apiPath.teamMemberConfirmKey", "/confirm-key"] },
+  "team-member-approve-post": { "method": "POST", "pathTokens": ["apiPath.teamMemberApprove", "/approve"] },
+  "team-member-reject-post": { "method": "POST", "pathTokens": ["apiPath.teamMemberReject", "/reject"] },
   "team-member-delete": { "method": "DELETE", "pathTokens": ["apiPath.teamMemberById"] },
   "team-member-put": { "method": "PUT", "pathTokens": ["apiPath.teamMemberById"] },
   "team-members-post": { "method": "POST", "pathTokens": ["apiPath.teamMembers"] },

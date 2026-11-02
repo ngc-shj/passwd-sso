@@ -158,6 +158,12 @@ export const updateMemberRoleSchema = z.object({
   role: z.enum(TEAM_ROLE_VALUES),
 });
 
+// The role the caller saw on the pending row before approving it (C3) — never
+// OWNER, matching the roles a SCIM mapping can request.
+export const approveMemberSchema = z.object({
+  expectedRole: z.enum(TEAM_INVITE_ROLE_VALUES),
+});
+
 export const updateTenantMemberRoleSchema = z.object({
   role: z.enum(TENANT_ROLE_VALUES),
 });
@@ -206,6 +212,7 @@ export type UpdateTeamInput = z.infer<typeof updateTeamSchema>;
 export type InviteInput = z.infer<typeof inviteSchema>;
 export type AddMemberInput = z.infer<typeof addMemberSchema>;
 export type UpdateMemberRoleInput = z.infer<typeof updateMemberRoleSchema>;
+export type ApproveMemberInput = z.infer<typeof approveMemberSchema>;
 export type UpdateTenantMemberRoleInput = z.infer<typeof updateTenantMemberRoleSchema>;
 export type CreateTeamTagInput = z.infer<typeof createTeamTagSchema>;
 export type UpdateTeamTagInput = z.infer<typeof updateTeamTagSchema>;

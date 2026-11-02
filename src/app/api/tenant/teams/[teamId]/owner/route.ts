@@ -75,7 +75,8 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   const targetUserId = result.data.userId.toLowerCase();
 
   // A guard against mistakes, not an authorization boundary: a tenant ADMIN
-  // can already join any team through a SCIM group mapping. Assigning oneself
+  // can already join any team through a SCIM group mapping (pending the
+  // team's approval since scim-team-admission-approval). Assigning oneself
   // is left to the tenant OWNER (re-checked below on the role read under lock).
   const selfAssigned = targetUserId === session.user.id;
   if (selfAssigned && actor.role !== TENANT_ROLE.OWNER) {

@@ -66,6 +66,7 @@ describe("buildTeamMemberDisplayItems", () => {
         joinedAt: now,
         tenantName: "Home Tenant",
         departed: false,
+        pendingApproval: false,
       },
       {
         id: "m2",
@@ -77,6 +78,7 @@ describe("buildTeamMemberDisplayItems", () => {
         joinedAt: now,
         tenantName: "Guest Tenant",
         departed: true,
+        pendingApproval: false,
       },
     ]);
     expect(mockWithBypassRls).toHaveBeenCalledTimes(1);
@@ -116,6 +118,7 @@ describe("buildTeamMemberDisplayItems", () => {
         joinedAt: now,
         tenantName: "Home Tenant",
         departed: false,
+        pendingApproval: false,
       },
     ]);
   });

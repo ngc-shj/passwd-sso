@@ -31,6 +31,9 @@ const acceptLimiter = createRateLimiter({
   failClosedOnRedisError: true,
 });
 
+/** SCIM admitted the invitee, pending approval, inside the locked transaction (C6). */
+class ScimApprovalPendingRaceError extends Error {}
+
 // POST /api/teams/invitations/accept — Accept an invitation by token
 async function handlePOST(req: NextRequest) {
   const session = await auth();
@@ -94,7 +97,7 @@ async function handlePOST(req: NextRequest) {
           userId: session.user.id,
         },
       },
-      select: { deactivatedAt: true, scimManaged: true, deactivatedByTenant: true },
+      select: { deactivatedAt: true, scimManaged: true, deactivatedByTenant: true, scimApprovalPending: true },
     }),
   );
 
@@ -111,6 +114,15 @@ async function handlePOST(req: NextRequest) {
         team: invitation.team,
         alreadyMember: true,
       });
+    }
+
+    // Waiting on a team OWNER/ADMIN's approval (scim-team-admission-approval,
+    // C6) — checked before SCIM_MANAGED_MEMBER below, which a pending row
+    // would otherwise also trip (it is always scimManaged too). The race
+    // where SCIM creates the pending row after this read is re-checked inside
+    // the locked transaction below.
+    if (existingMember.scimApprovalPending) {
+      return errorResponse(API_ERROR.SCIM_APPROVAL_PENDING);
     }
 
     // Deactivated by the IdP's group removal (scimManaged, no tenant
@@ -195,9 +207,14 @@ async function handlePOST(req: NextRequest) {
         // to re-admit, and its keys must stay.
         const current = await tx.teamMember.findUnique({
           where: { teamId_userId: { teamId: invitation.teamId, userId: session.user.id } },
-          select: { deactivatedAt: true },
+          select: { deactivatedAt: true, scimApprovalPending: true },
         });
         if (current && current.deactivatedAt === null) return ACCEPT_OUTCOME.ALREADY_MEMBER;
+        // SCIM admitted this user, pending approval, after the pre-check above
+        // read no row (scim-team-admission-approval, C6). Thrown, not
+        // returned: the claim above must roll back too, so the invitation
+        // stays PENDING rather than being spent on a refusal.
+        if (current?.scimApprovalPending) throw new ScimApprovalPendingRaceError();
 
         await tx.teamMember.upsert({
           where: {
@@ -231,6 +248,7 @@ async function handlePOST(req: NextRequest) {
       { timeout: TEAM_MEMBERSHIP_TX_TIMEOUT_MS },
     );
   } catch (e) {
+    if (e instanceof ScimApprovalPendingRaceError) return errorResponse(API_ERROR.SCIM_APPROVAL_PENDING);
     if (isMembershipLockConflict(e)) return errorResponse(API_ERROR.CONFLICT);
     throw e;
   }

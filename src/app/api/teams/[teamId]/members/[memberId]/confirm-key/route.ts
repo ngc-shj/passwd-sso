@@ -5,7 +5,8 @@ import { activeTeamRole, hasTeamPermission, requireTeamPermission } from "@/lib/
 import { teamMemberKeySchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
-import { TEAM_PERMISSION } from "@/lib/constants";
+import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE, TEAM_PERMISSION } from "@/lib/constants";
+import { extractRequestMeta, logAuditInTx } from "@/lib/audit/audit";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
@@ -82,6 +83,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   if (!result.ok) return result.response;
 
   const data = result.data;
+  const { ip, userAgent } = extractRequestMeta(req);
 
   // Atomic check-and-set: re-verify keyDistributed + deactivatedAt + teamKeyVersion inside transaction (S-12/F-16/S-24)
   let distributed;
@@ -148,6 +150,21 @@ async function handlePOST(req: NextRequest, { params }: Params) {
           data: { keyDistributed: true },
         });
         if (marked.count !== 1) throw new MemberChangedError();
+
+        // Only on a successful CAS — every refused branch above (actor,
+        // member, version mismatch) returns before this and emits nothing.
+        await logAuditInTx(tx, team.tenantId, {
+          scope: AUDIT_SCOPE.TEAM,
+          action: AUDIT_ACTION.TEAM_MEMBER_KEY_DISTRIBUTE,
+          userId: session.user.id,
+          tenantId: team.tenantId,
+          teamId,
+          targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
+          targetId: targetMember.userId,
+          metadata: { memberId, keyVersion: data.keyVersion },
+          ip,
+          userAgent,
+        });
 
         return "success" as const;
       }),

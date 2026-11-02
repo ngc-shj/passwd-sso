@@ -11,6 +11,7 @@ import {
   inviteSchema,
   addMemberSchema,
   updateMemberRoleSchema,
+  approveMemberSchema,
   updateTenantMemberRoleSchema,
   createTeamTagSchema,
   updateTeamTagSchema,
@@ -635,6 +636,28 @@ describe("addMemberSchema", () => {
       role: TEAM_ROLE.OWNER,
     });
     expect(result.success).toBe(false);
+  });
+});
+
+// ─── approveMemberSchema ─────────────────────────────────────
+
+describe("approveMemberSchema", () => {
+  it("accepts every invite-eligible role", () => {
+    for (const expectedRole of TEAM_INVITE_ROLE_VALUES) {
+      expect(approveMemberSchema.safeParse({ expectedRole }).success).toBe(true);
+    }
+  });
+
+  it("rejects OWNER (a pending row is never OWNER)", () => {
+    expect(approveMemberSchema.safeParse({ expectedRole: TEAM_ROLE.OWNER }).success).toBe(false);
+  });
+
+  it("rejects an unknown role", () => {
+    expect(approveMemberSchema.safeParse({ expectedRole: "GOD" }).success).toBe(false);
+  });
+
+  it("rejects when expectedRole is missing (no default — the caller must echo what it saw)", () => {
+    expect(approveMemberSchema.safeParse({}).success).toBe(false);
   });
 });
 
