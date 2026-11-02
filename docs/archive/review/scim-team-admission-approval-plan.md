@@ -449,3 +449,42 @@ Denials assert the state unchanged (row still pending/deactivated, no approve au
 | C6 | Team-side add, distinct pending code, invitation accept re-check | locked |
 | C6b | SCIM spec doc and 400 message | locked |
 | C7 | Operator listing of existing SCIM memberships | locked |
+
+## Implementation Checklist
+
+Batches (orchestrator commits after each; sub-agents make no git state changes):
+
+- B0 Foundation: `prisma/schema.prisma` (`scimApprovalPending`), migration
+  `20261103000000_scim_team_admission_approval` (column + 4 named CHECKs) and
+  `20261103000100_scim_team_admission_audit_actions` (`ALTER TYPE` per action);
+  `src/lib/constants/audit/audit.ts` (`AUDIT_ACTION`, `AUDIT_ACTION_VALUES`,
+  `AUDIT_ACTION_GROUPS_TEAM`), `audit-action-icons.tsx`, `messages/{en,ja}/AuditLog.json`,
+  `docs/operations/audit-log-reference.md`; `logAuditBulkInTx` in
+  `src/lib/audit/audit.ts` + `audit-outbox-in-tx.ts` (reuse `readBypassState`,
+  `buildOutboxPayload`); `src/lib/http/api-error-codes.ts` (`SCIM_APPROVAL_PENDING`,
+  `SCIM_APPROVAL_ROLE_CHANGED`, status + i18n key tables), `messages/{en,ja}` error strings.
+- B1 SCIM (C2, C4, C6b): `src/lib/scim/scim-group-members.ts` (new),
+  `src/lib/services/scim-group-service.ts`, `src/app/api/scim/v2/Groups/route.ts`,
+  `src/app/api/scim/v2/Groups/[id]/route.ts` (emitter, `ScimMembershipChangedError` arm,
+  message), `docs/architecture/tenant-team-scim-spec.md`; tests:
+  `scim-group-service.test.ts`, `Groups/route.test.ts`, `Groups/[id]/route.test.ts`.
+- B2 Team side (C3, C5 API, C6, C4 confirm-key): new
+  `src/app/api/teams/[teamId]/members/[memberId]/{approve,reject}/route.ts` (+ tests,
+  `stepup-route-paths.json`, rate limiter reuse), members GET/POST, invitations create,
+  invitation accept, confirm-key, `src/lib/team/team-member-display.ts`, owner route comment.
+- B3 UI (C5, C6): members list page, transfer-ownership page, add-from-tenant section,
+  `messages/{en,ja}/Team.json`; component tests.
+- B4 Gates: rule 7 + `*AndReturn` in `scripts/checks/check-team-rotation-input-lock.mjs`
+  (+ self-test), bulk extraction in `check-critical-audit-atomic.mjs` (+ self-test).
+- B5 Real-DB: `src/__tests__/db-integration/scim-team-admission-approval.integration.test.ts`,
+  rewrites in `team-tenant-departure`, `scim-cross-tenant-users`,
+  `team-key-version-guard` integration tests; C7 query run + doc.
+
+Reuse: `lockTenantRows`, `createLockBudget`, `lockTeamsAgainstRotation`,
+`requireTeamPermission`, step-up helper, `withTenantRls`, `logAuditInTx`,
+`teamAuditBase`, `parseBody`, `errorResponse`/`API_ERROR`, `scimError`,
+`race-helpers.ts` (`holdRowLock`, `settledOrBlocked`, `waitForBackendBlockedBy`).
+
+CI parity: `check-npm-audit.mjs` (network advisory DB) and
+`check-terraform-test-count.mjs` (no terraform change) are CI-only — recorded in the
+deviation log.
