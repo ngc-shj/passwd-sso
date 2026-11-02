@@ -123,6 +123,131 @@ final class VaultViewModelTests: XCTestCase {
     XCTAssertEqual(obj["password"] as? String, "newpassword")
   }
 
+  // MARK: - A sync failing after a confirmed write (#989)
+
+  /// The server accepted the create; the refresh sync after it fails on a
+  /// transient team-list error. The save must not be reported as failed — the
+  /// form would stay open over a saved entry and a retry would duplicate it.
+  func testCreateEntry_syncFailsAfterConfirmedWrite_doesNotThrow() async throws {
+    var postCount = 0
+    var teamListCount = 0
+    MockURLProtocol.requestHandler = { request in
+      let path = request.url?.path ?? ""
+      if request.httpMethod == "POST", path.hasSuffix("/api/passwords") {
+        postCount += 1
+        let body = try XCTUnwrap(request.httpBody ?? readStream(request.httpBodyStream))
+        let id = try XCTUnwrap(
+          (JSONSerialization.jsonObject(with: body) as? [String: Any])?["id"] as? String)
+        return (Data(#"{"id":"\#(id)"}"#.utf8), httpResponse(status: 201, url: request.url!))
+      }
+      if path.hasSuffix("/api/teams") {
+        teamListCount += 1
+        return (Data(#"{"error":"SERVICE_UNAVAILABLE"}"#.utf8), httpResponse(status: 503, url: request.url!))
+      }
+      return (Data("[]".utf8), httpResponse(status: 200, url: request.url!))
+    }
+
+    let vm = await VaultViewModel.makeEphemeral()
+    let (apiClient, syncService) = makeClientAndSyncService()
+    try await vm.createEntry(
+      userId: userId,
+      fields: EditableEntryFields(title: "New", username: "u", password: "p", url: "https://example.com"),
+      vaultKey: vaultKey,
+      keyVersion: liveKeyVersion,
+      apiClient: apiClient,
+      hostSyncService: syncService
+    )
+
+    XCTAssertEqual(postCount, 1)
+    // The refresh sync did run and fail: the team list was asked for, no cache written.
+    XCTAssertGreaterThanOrEqual(teamListCount, 1)
+    XCTAssertFalse(FileManager.default.fileExists(
+      atPath: tmpDir.appending(path: "vm-test.cache", directoryHint: .notDirectory).path))
+  }
+
+  /// Same for an edit: the PUT is confirmed, the refresh sync fails, the save
+  /// is not reported as failed.
+  func testSaveEntry_syncFailsAfterConfirmedWrite_doesNotThrow() async throws {
+    let vm = await VaultViewModel.makeEphemeral()
+    let localVaultKey = vaultKey
+    let localUserId = userId
+    let seedData = try makeCacheData(
+      entryId: entryId, userId: userId, vaultKey: vaultKey,
+      blobJSON: #"{"title":"Old","password":"p"}"#, overviewJSON: #"{"title":"Old"}"#, aadVersion: 1)
+    await MainActor.run { vm.loadFromCache(cacheData: seedData, vaultKey: localVaultKey, userId: localUserId) }
+
+    var putCount = 0
+    var teamListCount = 0
+    MockURLProtocol.requestHandler = { request in
+      let path = request.url?.path ?? ""
+      if request.httpMethod == "PUT" {
+        putCount += 1
+        return (Data(), httpResponse(status: 200, url: request.url!))
+      }
+      if path.hasSuffix("/api/teams") {
+        teamListCount += 1
+        return (Data(#"{"error":"SERVICE_UNAVAILABLE"}"#.utf8), httpResponse(status: 503, url: request.url!))
+      }
+      return (Data("[]".utf8), httpResponse(status: 200, url: request.url!))
+    }
+
+    let (apiClient, syncService) = makeClientAndSyncService()
+    try await vm.saveEntry(
+      entryId: entryId, userId: userId,
+      fields: EditableEntryFields(title: "New", username: "", password: "p", url: ""),
+      vaultKey: vaultKey, keyVersion: liveKeyVersion,
+      apiClient: apiClient, hostSyncService: syncService)
+
+    XCTAssertEqual(putCount, 1)
+    XCTAssertGreaterThanOrEqual(teamListCount, 1)
+    // The list keeps its pre-write state until the next sync (accepted, F-R3-2).
+    let titles = await MainActor.run { vm.allSummaries.map(\.title) }
+    XCTAssertEqual(titles, ["Old"])
+  }
+
+  /// A confirmed edit whose refresh sync succeeds rebuilds the list from it.
+  func testSaveEntry_syncSucceeds_reloadsListFromFreshCache() async throws {
+    let vm = await VaultViewModel.makeEphemeral()
+    let localVaultKey = vaultKey
+    let localUserId = userId
+    let seedData = try makeCacheData(
+      entryId: entryId, userId: userId, vaultKey: vaultKey,
+      blobJSON: #"{"title":"Old","password":"p"}"#, overviewJSON: #"{"title":"Old"}"#, aadVersion: 1)
+    await MainActor.run { vm.loadFromCache(cacheData: seedData, vaultKey: localVaultKey, userId: localUserId) }
+
+    // What the server holds after the edit, as GET /api/passwords returns it.
+    let overviewAAD = try buildPersonalEntryAAD(userId: userId, entryId: entryId, vaultType: VaultType.overview)
+    let blobAAD = try buildPersonalEntryAAD(userId: userId, entryId: entryId, vaultType: VaultType.blob)
+    let serverEntry = EncryptedEntry(
+      id: entryId,
+      encryptedOverview: try encryptAESGCMEncoded(
+        plaintext: Data(#"{"title":"Fresh"}"#.utf8), key: vaultKey, aad: overviewAAD),
+      encryptedBlob: try encryptAESGCMEncoded(
+        plaintext: Data(#"{"title":"Fresh","password":"p"}"#.utf8), key: vaultKey, aad: blobAAD))
+    let listData = try JSONEncoder().encode([serverEntry])
+
+    MockURLProtocol.requestHandler = { request in
+      let path = request.url?.path ?? ""
+      if request.httpMethod == "PUT" {
+        return (Data(), httpResponse(status: 200, url: request.url!))
+      }
+      if path.hasSuffix("/api/passwords") {
+        return (listData, httpResponse(status: 200, url: request.url!))
+      }
+      return (Data("[]".utf8), httpResponse(status: 200, url: request.url!))
+    }
+
+    let (apiClient, syncService) = makeClientAndSyncService()
+    try await vm.saveEntry(
+      entryId: entryId, userId: userId,
+      fields: EditableEntryFields(title: "Fresh", username: "", password: "p", url: ""),
+      vaultKey: vaultKey, keyVersion: liveKeyVersion,
+      apiClient: apiClient, hostSyncService: syncService)
+
+    let titles = await MainActor.run { vm.allSummaries.map(\.title) }
+    XCTAssertEqual(titles, ["Fresh"], "the list is rebuilt from the refresh sync's cache")
+  }
+
   // MARK: - saveEntry legacy aadVersion-0 upgrade
 
   func testSaveEntry_legacyAadVersion0_upgradesTo1() async throws {

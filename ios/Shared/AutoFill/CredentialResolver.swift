@@ -111,7 +111,7 @@ public actor CredentialResolver {
     bridgeKeyStore: BridgeKeyStore,
     wrappedKeyStore: any WrappedKeyStore,
     cacheURL: URL,
-    teamKeyMaxAge: TimeInterval = 15 * 60,
+    teamKeyMaxAge: TimeInterval = TeamEntryDecryptor.teamKeyMaxAge,
     rollbackFlagWriter: (any RollbackFlagWriter)? = nil,
     now: @escaping @Sendable () -> Date = { Date() }
   ) {

@@ -330,20 +330,33 @@ extension VaultViewModel {
     }
 
     // Refresh from sync — no optimistic prepend; allSummaries rebuilt from the cache.
-    let report = try await hostSyncService.runSync(
-      vaultKey: vaultKey, userId: userId, cacheKey: cacheKey)
-    if let freshCache = report.cacheData {
-      // Preserve team visibility (pass cacheKey + current directory) so team
-      // entries don't vanish from the in-app list after a personal create.
-      loadFromCache(
-        cacheData: freshCache, vaultKey: vaultKey, userId: userId,
-        cacheKey: cacheKey, teamDirectory: teamDirectory)
-      // Keep QuickType identities in step with the mutation — without this the
-      // new/edited entry is missing from AutoFill until the next foreground sync.
-      await refreshCredentialIdentities(
-        from: freshCache, vaultKey: vaultKey, userId: userId,
-        cacheKey: cacheKey, wrappedKeyStore: AppGroupWrappedKeyStore())
-    }
+    await refreshAfterConfirmedWrite(
+      vaultKey: vaultKey, userId: userId, cacheKey: cacheKey, hostSyncService: hostSyncService)
+  }
+
+  /// Rebuild the list from a sync after the server confirmed a write. The write
+  /// stands whatever this sync does, so its failure is not the save's: reporting
+  /// it would keep the form open over a saved entry, and a retried create would
+  /// duplicate it. The list catches up on the next sync, which also surfaces a
+  /// dead session or a passkey requirement.
+  func refreshAfterConfirmedWrite(
+    vaultKey: SymmetricKey, userId: String, cacheKey: SymmetricKey?,
+    hostSyncService: HostSyncService
+  ) async {
+    guard let report = try? await hostSyncService.runSync(
+      vaultKey: vaultKey, userId: userId, cacheKey: cacheKey),
+      let freshCache = report.cacheData
+    else { return }
+    // Preserve team visibility (pass cacheKey + current directory) so team
+    // entries don't vanish from the in-app list after a personal write.
+    loadFromCache(
+      cacheData: freshCache, vaultKey: vaultKey, userId: userId,
+      cacheKey: cacheKey, teamDirectory: teamDirectory)
+    // Keep QuickType identities in step with the mutation — without this the
+    // new/edited entry is missing from AutoFill until the next foreground sync.
+    await refreshCredentialIdentities(
+      from: freshCache, vaultKey: vaultKey, userId: userId,
+      cacheKey: cacheKey, wrappedKeyStore: AppGroupWrappedKeyStore())
   }
 
   /// Save an edited personal entry: decrypt existing blobs using stored aadVersion,
@@ -396,17 +409,7 @@ extension VaultViewModel {
     try await apiClient.updateEntry(entryId: entryId, body: updateReq)
 
     // Refresh cache after server confirms success.
-    let report = try await hostSyncService.runSync(
-      vaultKey: vaultKey, userId: userId, cacheKey: cacheKey)
-    if let freshCache = report.cacheData {
-      loadFromCache(
-        cacheData: freshCache, vaultKey: vaultKey, userId: userId,
-        cacheKey: cacheKey, teamDirectory: teamDirectory)
-      // Keep QuickType identities in step with the mutation — without this the
-      // new/edited entry is missing from AutoFill until the next foreground sync.
-      await refreshCredentialIdentities(
-        from: freshCache, vaultKey: vaultKey, userId: userId,
-        cacheKey: cacheKey, wrappedKeyStore: AppGroupWrappedKeyStore())
-    }
+    await refreshAfterConfirmedWrite(
+      vaultKey: vaultKey, userId: userId, cacheKey: cacheKey, hostSyncService: hostSyncService)
   }
 }
