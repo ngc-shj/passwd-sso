@@ -18,6 +18,7 @@ import {
   createThrottledErrorLogger,
   REDIS_FALLBACK_LOG_THROTTLE_MS,
 } from "@/lib/logger/throttled";
+import { isShareCreatorAdmitted } from "@/lib/share/share-admission";
 
 // M5: Share access logging is best-effort (fire-and-forget) so a DB blip
 // can't deny the recipient their content, but silent failures used to be
@@ -108,6 +109,12 @@ async function handleGET(req: NextRequest, { params }: Params) {
       return notFound();
     }
 
+    // A team-entry share whose creator left the entry's team (or whose entry is
+    // trashed or gone) answers as a revoked one.
+    if (!(await isShareCreatorAdmitted(tx, share.id))) {
+      return notFound();
+    }
+
     // Atomically check revocation/expiry/maxViews and increment viewCount.
     // The revoked_at/expires_at predicates are re-asserted here (in addition
     // to the JS check above) to close a TOCTOU window: between findUnique
@@ -123,7 +130,8 @@ async function handleGET(req: NextRequest, { params }: Params) {
         WHERE "id" = ${share.id}
           AND "revoked_at" IS NULL
           AND "expires_at" > NOW()
-          AND ("max_views" IS NULL OR "view_count" < "max_views")`;
+          AND ("max_views" IS NULL OR "view_count" < "max_views")
+          AND share_creator_admitted("id")`;
 
       if (updated === 0) {
         return errorResponse(API_ERROR.SHARE_GONE);
@@ -140,7 +148,8 @@ async function handleGET(req: NextRequest, { params }: Params) {
         WHERE "id" = ${share.id}
           AND "revoked_at" IS NULL
           AND "expires_at" > NOW()
-          AND ("max_views" IS NULL OR "view_count" < "max_views")`;
+          AND ("max_views" IS NULL OR "view_count" < "max_views")
+          AND share_creator_admitted("id")`;
 
       if (stillValid === 0) {
         return errorResponse(API_ERROR.SHARE_GONE);

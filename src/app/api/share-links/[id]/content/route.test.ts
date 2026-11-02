@@ -29,6 +29,17 @@ const {
   };
 });
 
+// Creator admission (#990) at the module boundary: admitted unless a test says otherwise.
+const { mockIsShareCreatorAdmitted, mockCreatorAdmittedByShareId } = vi.hoisted(() => ({
+  mockIsShareCreatorAdmitted: vi.fn(async (_tx: unknown, _shareId: string) => true),
+  mockCreatorAdmittedByShareId: vi.fn(
+    async (_tx: unknown, ids: readonly string[]) => new Map(ids.map((id) => [id, true] as [string, boolean])),
+  ),
+}));
+vi.mock("@/lib/share/share-admission", () => ({
+  isShareCreatorAdmitted: mockIsShareCreatorAdmitted,
+  creatorAdmittedByShareId: mockCreatorAdmittedByShareId,
+}));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordShare: mockPrismaPasswordShare,
@@ -173,6 +184,15 @@ describe("GET /api/share-links/[id]/content", () => {
     });
     const res = await GET(createContentRequest(), createParams({ id: SHARE_ID }));
     expect(res.status).toBe(404);
+  });
+
+  it("returns 404, serving nothing, when the share's creator is no longer admitted", async () => {
+    mockIsShareCreatorAdmitted.mockResolvedValueOnce(false);
+    const res = await GET(createContentRequest(), createParams({ id: SHARE_ID }));
+    expect(res.status).toBe(404);
+    expect(mockIsShareCreatorAdmitted).toHaveBeenCalledWith(expect.anything(), SHARE_ID);
+    expect(mockPrismaExecuteRaw).not.toHaveBeenCalled();
+    expect(mockPrismaShareAccessLog.create).not.toHaveBeenCalled();
   });
 
   it("returns 404 when share is expired", async () => {

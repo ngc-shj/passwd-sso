@@ -214,6 +214,7 @@ jobs:
           GRANT EXECUTE ON FUNCTION public.rls_bypass_admits(text) TO passwd_app;
           GRANT EXECUTE ON FUNCTION public.audit_log_purge(uuid, timestamptz) TO passwd_app;
           GRANT EXECUTE ON PROCEDURE public.audit_log_tenant_migrate(uuid, uuid, uuid) TO passwd_app;
+          GRANT EXECUTE ON FUNCTION public.share_creator_admitted(uuid) TO passwd_app;
           EOF
 
       # The GRANT above is table-blind and runs AFTER `prisma migrate deploy`, so

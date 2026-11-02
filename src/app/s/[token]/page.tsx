@@ -16,6 +16,7 @@ import {
   REDIS_FALLBACK_LOG_THROTTLE_MS,
 } from "@/lib/logger/throttled";
 import { SHARE_TYPE } from "@/lib/constants";
+import { isShareCreatorAdmitted } from "@/lib/share/share-admission";
 
 const logShareAccessLogFailure = createThrottledErrorLogger(
   REDIS_FALLBACK_LOG_THROTTLE_MS,
@@ -78,6 +79,12 @@ export default async function SharePage({ params }: Props) {
       return <ShareError reason="revoked" />;
     }
 
+    // A team-entry share whose creator left the entry's team (or whose entry is
+    // trashed or gone) answers exactly as a revoked one, before the password gate.
+    if (!(await isShareCreatorAdmitted(tx, share.id))) {
+      return <ShareError reason="revoked" />;
+    }
+
     if (share.expiresAt < new Date()) {
       return <ShareError reason="expired" />;
     }
@@ -110,7 +117,8 @@ export default async function SharePage({ params }: Props) {
         WHERE "id" = ${share.id}
           AND "revoked_at" IS NULL
           AND "expires_at" > NOW()
-          AND ("max_views" IS NULL OR "view_count" < "max_views")`;
+          AND ("max_views" IS NULL OR "view_count" < "max_views")
+          AND share_creator_admitted("id")`;
 
       if (updated === 0) {
         return <ShareError reason="maxViews" />;
@@ -125,7 +133,8 @@ export default async function SharePage({ params }: Props) {
         WHERE "id" = ${share.id}
           AND "revoked_at" IS NULL
           AND "expires_at" > NOW()
-          AND ("max_views" IS NULL OR "view_count" < "max_views")`;
+          AND ("max_views" IS NULL OR "view_count" < "max_views")
+          AND share_creator_admitted("id")`;
 
       if (stillValid === 0) {
         return <ShareError reason="maxViews" />;

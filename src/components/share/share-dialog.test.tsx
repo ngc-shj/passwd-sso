@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
 const { mockFetch } = vi.hoisted(() => ({
@@ -268,6 +268,42 @@ describe("ShareDialog — §Sec-1 share-flow crypto invariants", () => {
       expect(capturedShareKey).not.toBeNull();
       expect(capturedShareKey!.every((b) => b === 0)).toBe(true);
     });
+  });
+
+  it("labels a not-admitted link, and only that one", async () => {
+    const link = {
+      expiresAt: "2099-01-01T00:00:00Z",
+      maxViews: null,
+      viewCount: 0,
+      revokedAt: null,
+      createdAt: "2026-01-01T00:00:00Z",
+      isActive: true,
+    };
+    mockFetch.mockResolvedValue(
+      okJson({
+        items: [
+          { ...link, id: "dead", viewCount: 7, creatorAdmitted: false },
+          { ...link, id: "live", viewCount: 0, creatorAdmitted: true },
+        ],
+      }),
+    );
+
+    render(
+      <ShareDialog
+        open={true}
+        onOpenChange={vi.fn()}
+        passwordEntryId="p1"
+        entryType="LOGIN"
+        decryptedData={{ title: "x" }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByText("notAdmitted")).toHaveLength(1);
+    });
+    // On the dead link's row, not the live one's.
+    expect(within(screen.getByText("7 views").parentElement!).getByText("notAdmitted")).toBeInTheDocument();
+    expect(within(screen.getByText("0 views").parentElement!).queryByText("notAdmitted")).toBeNull();
   });
 
   it("renders 'sharing disabled by policy' when team policy disallows sharing", async () => {

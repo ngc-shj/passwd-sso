@@ -55,6 +55,9 @@ SET app.expected_tables TO :'expected_tables';
 --   10. [E-RLS-SECDEF]            no SECURITY DEFINER functions in public —
 --                                 a passwd_user-owned secdef function callable
 --                                 by passwd_app is an RLS-bypass surface
+--   10b. [E-RLS-BYPASS-ROUTINE]   no routine sets an app.bypass_* setting in
+--                                 its body or its SET clause, except the
+--                                 allowlisted share_creator_admitted (#990)
 -- =====================================================================
 DO $$
 DECLARE
@@ -346,6 +349,48 @@ BEGIN
         AND pr.prosecdef = true
         AND pr.proname NOT IN ('audit_log_tenant_migrate', 'audit_log_purge')
     ));
+
+  -- 10b. Routines that grant themselves an RLS bypass. A SECURITY INVOKER
+  -- routine that sets app.bypass_rls / app.bypass_tables reads past RLS as any
+  -- caller, so it is reviewed like a definer. Allowlist:
+  --   - share_creator_admitted(uuid) (#990, 20261102000000)
+  --       Read-only; returns one boolean for one share id. Grants itself exactly
+  --       password_shares, team_password_entries, team_members for the call,
+  --       saves and restores the caller's settings, EXECUTE to passwd_app only.
+  -- A review tripwire for accidents, not a boundary — any role may set these
+  -- settings itself. Known bypasses: dynamic names (EXECUTE, variables), a
+  -- double-quoted setting name, E'' / dollar-quoted literals, concatenation.
+  -- The allowlist is a ::regprocedure cast, which errors if the function is
+  -- missing (to_regprocedure in a NOT IN would turn a typo into a silent pass).
+  ASSERT NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_proc pr
+    JOIN pg_catalog.pg_namespace n ON n.oid = pr.pronamespace
+    WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+      AND (pr.prosrc ~* $re$set_config\s*\(\s*'app\.bypass_$re$
+           OR pr.prosrc ~* $re$\mSET\s+((LOCAL|SESSION)\s+)?app\.bypass_$re$
+           OR EXISTS (SELECT 1 FROM unnest(pr.proconfig) c WHERE c LIKE 'app.bypass\_%'))
+      AND pr.oid <> 'public.share_creator_admitted(uuid)'::regprocedure
+  ),
+    format('[E-RLS-BYPASS-ROUTINE] routines set an app.bypass_* setting: %s — each reads past RLS for every caller. Add an allowlist entry + justification next to this ASSERT before merging.', (
+      SELECT string_agg(pr.oid::regprocedure::text, ',')
+      FROM pg_catalog.pg_proc pr
+      JOIN pg_catalog.pg_namespace n ON n.oid = pr.pronamespace
+      WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+        AND (pr.prosrc ~* $re$set_config\s*\(\s*'app\.bypass_$re$
+             OR pr.prosrc ~* $re$\mSET\s+((LOCAL|SESSION)\s+)?app\.bypass_$re$
+             OR EXISTS (SELECT 1 FROM unnest(pr.proconfig) c WHERE c LIKE 'app.bypass\_%'))
+        AND pr.oid <> 'public.share_creator_admitted(uuid)'::regprocedure
+    ));
+  -- The allowlisted routine's bypass stays exactly its three tables: it writes
+  -- app.bypass_tables exactly twice, and those two writes are the grant of this
+  -- list and the restore of the caller's value (a widened restore would carry the
+  -- wider grant into the caller's transaction).
+  ASSERT (SELECT regexp_count(pr.prosrc, $re$set_config\s*\(\s*'app\.bypass_tables'$re$, 1, 'i') = 2
+                 AND strpos(pr.prosrc, $t$set_config('app.bypass_tables', 'password_shares,team_password_entries,team_members', true)$t$) > 0
+                 AND strpos(pr.prosrc, $t$set_config('app.bypass_tables', COALESCE(v_prev_tables, ''), true)$t$) > 0
+            FROM pg_catalog.pg_proc pr
+           WHERE pr.oid = 'public.share_creator_admitted(uuid)'::regprocedure),
+    '[E-RLS-BYPASS-ROUTINE] share_creator_admitted no longer sets exactly password_shares,team_password_entries,team_members';
 END $$;
 
 -- =====================================================================

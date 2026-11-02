@@ -30,6 +30,17 @@ vi.mock("@/lib/auth/access/team-auth", () => ({
     }
   },
 }));
+// Creator admission (#990) at the module boundary: admitted unless a test says otherwise.
+const { mockIsShareCreatorAdmitted, mockCreatorAdmittedByShareId } = vi.hoisted(() => ({
+  mockIsShareCreatorAdmitted: vi.fn(async (_tx: unknown, _shareId: string) => true),
+  mockCreatorAdmittedByShareId: vi.fn(
+    async (_tx: unknown, ids: readonly string[]) => new Map(ids.map((id) => [id, true] as [string, boolean])),
+  ),
+}));
+vi.mock("@/lib/share/share-admission", () => ({
+  isShareCreatorAdmitted: mockIsShareCreatorAdmitted,
+  creatorAdmittedByShareId: mockCreatorAdmittedByShareId,
+}));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordShare: { findMany: mockPasswordShareFindMany },
@@ -122,6 +133,25 @@ describe("GET /api/share-links/mine", () => {
     expect(item.isActive).toBe(true);
     expect(item.hasPersonalEntry).toBe(true);
     expect(item.teamName).toBeNull();
+  });
+
+  it("reports creatorAdmitted per item from the admission query", async () => {
+    mockPasswordShareFindMany.mockResolvedValue([makeShare({ id: "share-1" }), makeShare({ id: "share-2" })]);
+    mockCreatorAdmittedByShareId.mockResolvedValueOnce(new Map([["share-1", true], ["share-2", false]]));
+    const res = await GET(createRequest("GET", "http://localhost/api/share-links/mine"));
+    const { json } = await parseResponse(res);
+    expect(json.items.map((i: { id: string; creatorAdmitted: boolean }) => [i.id, i.creatorAdmitted])).toEqual([
+      ["share-1", true],
+      ["share-2", false],
+    ]);
+    expect(mockCreatorAdmittedByShareId).toHaveBeenCalledWith(expect.anything(), ["share-1", "share-2"]);
+  });
+
+  it("sends no admission query for an empty page", async () => {
+    mockPasswordShareFindMany.mockResolvedValue([]);
+    const res = await GET(createRequest("GET", "http://localhost/api/share-links/mine"));
+    expect((await parseResponse(res)).json.items).toEqual([]);
+    expect(mockCreatorAdmittedByShareId).not.toHaveBeenCalled();
   });
 
   it("returns nextCursor=null when results fit within limit", async () => {

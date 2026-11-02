@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
+import { isShareCreatorAdmitted } from "@/lib/share/share-admission";
 import { verifyShareAccessSchema } from "@/lib/validations";
 import { hashToken, verifyAccessPassword } from "@/lib/crypto/crypto-server";
 import { createShareAccessToken } from "@/lib/auth/tokens/share-access-token";
@@ -87,6 +88,15 @@ async function handlePOST(req: NextRequest) {
   }
 
   if (share.revokedAt || share.expiresAt < new Date()) {
+    return notFound();
+  }
+
+  // A team-entry share whose creator left the entry's team (or whose entry is
+  // trashed or gone) answers as a revoked one — before the password check, so a
+  // wrong password on it writes no audit row and is not told apart either.
+  const admitted = await withBypassRls(prisma, (tx) => isShareCreatorAdmitted(tx, share.id),
+    BYPASS_GRANT.SHARE_LINK_VERIFY_ACCESS);
+  if (!admitted) {
     return notFound();
   }
 

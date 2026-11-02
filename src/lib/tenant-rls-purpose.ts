@@ -13,3 +13,8 @@ export const BYPASS_PURPOSE = {
 } as const;
 
 export type BypassPurpose = (typeof BYPASS_PURPOSE)[keyof typeof BYPASS_PURPOSE];
+
+// Database-side purpose, not a BypassPurpose: "share_admission" is set inside
+// public.share_creator_admitted(uuid) for the duration of its call (migration
+// 20261102000000), never by TypeScript. Recorded here so the full set of
+// purposes that can appear in an rls_bypass_not_granted report stays in one place.
