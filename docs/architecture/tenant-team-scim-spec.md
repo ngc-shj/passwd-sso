@@ -88,8 +88,19 @@ Rules:
 - all group operations are validated within tenant boundary
 - one token can manage groups across multiple teams within the same tenant
 - owner-protected constraints apply (cannot demote/remove OWNER by SCIM, 403)
-- member add: if user exists in tenant but not in team, auto-creates `TeamMember` with `scimManaged: true`
-- member remove: downgrades role to `MEMBER` (does not remove from team)
+- member add: creates `TeamMember` with `scimManaged: true`, deactivated and
+  `scimApprovalPending: true` — a SCIM admission is pending until an active
+  team OWNER/ADMIN holding the team key approves it
+  (`POST /api/teams/[teamId]/members/[memberId]/approve`) or rejects it
+  (`.../reject`); a pending member has no team access and receives no key.
+  A pending row already at or above the group's role is a no-op (repeated
+  add, or a lower-role add); a user not active in the tenant is
+  `Referenced user is not an active member of this tenant` (400) unless the
+  row is already departure-marked or pending, which is left untouched
+- member remove: withdraws (deletes) a pending row, deactivates an active
+  one, unmarks a departure-marked one (so a tenant return no longer restores
+  it) — never downgrades a role; removing a user with no row in the team at
+  all is a no-op (idempotent on an IdP retry, not a 400)
 - DELETE is not supported (405) — role-based groups are configuration, not ephemeral resources
 
 ## Identity and Authorization Boundaries
@@ -161,9 +172,23 @@ Rules:
 
 ## Audit
 
-- All SCIM operations are logged with `scope: AUDIT_SCOPE.TENANT`
-- Actions: `SCIM_TOKEN_CREATE`, `SCIM_TOKEN_REVOKE`, `SCIM_USER_CREATE`, `SCIM_USER_UPDATE`, `SCIM_USER_DEACTIVATE`, `SCIM_USER_REACTIVATE`, `SCIM_USER_DELETE`, `SCIM_GROUP_UPDATE`
-- `AUDIT_ACTION_GROUPS_TEAM` retains SCIM group for backward compatibility (historical log display + team webhook delivery)
+- SCIM token/user operations and `SCIM_GROUP_UPDATE` are TENANT scope;
+  per-member group transitions are TEAM scope (scim-team-admission-approval
+  plan, C4)
+- TENANT-scope actions: `SCIM_TOKEN_CREATE`, `SCIM_TOKEN_REVOKE`,
+  `SCIM_USER_CREATE`, `SCIM_USER_UPDATE`, `SCIM_USER_DEACTIVATE`,
+  `SCIM_USER_REACTIVATE`, `SCIM_USER_DELETE`, `SCIM_GROUP_UPDATE`
+- TEAM-scope actions, written inside the group-write transaction via
+  `logAuditBulkInTx` and delivered to team webhooks
+  (`AUDIT_ACTION_GROUPS_TEAM`, `TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS`):
+  `SCIM_GROUP_MAPPING_CREATE` (a new IdP group mapping), `TEAM_MEMBER_SCIM_PENDING`
+  (a row becomes pending, or a pending role is raised), `TEAM_MEMBER_SCIM_PENDING_WITHDRAW`
+  (a pending row removed), `TEAM_MEMBER_SCIM_REMOVE` (an active member
+  deactivated, or a departure-marked row unmarked — `metadata.departed: true`),
+  `TEAM_MEMBER_SCIM_ROLE_UPDATE` (an active member's role changed)
+- `AUDIT_ACTION_GROUPS_TEAM` also carries the `group:scim` category
+  (`SCIM_GROUP_UPDATE`) for historical team-log display; `TEAM_WEBHOOK_EXCLUDED_GROUPS`
+  excludes it from team webhook delivery
 - Audit user: token creator's ID, with `SCIM_SYSTEM_USER_ID` fallback if creator no longer exists
 
 ## Migration Status

@@ -104,9 +104,14 @@ const TENANT_LOCKS = new Set(["lockTenantRows", "lockTenantMemberCreation"]);
 const TENANT_LOCK_WRAPPERS = new Set(["lockGroupWrite", "lockActorThenTeam"]);
 const TRANSITIONS = new Set(["departFromTenant", "returnToTenant"]);
 
-/** Pinned site counts of the real tree, per rule. A change is a site to review. */
+/**
+ * Pinned site counts of the real tree, per rule. A change is a site to review.
+ * scim-team-admission-approval: member writes +3 (approve CAS, reject delete,
+ * SCIM withdraw delete); admissions unchanged (the SCIM reactivation left, the
+ * approve CAS joined).
+ */
 const EXPECTED = {
-  memberWrites: Number(process.env.TEAM_ROTATION_INPUT_LOCK_WRITES ?? 16),
+  memberWrites: Number(process.env.TEAM_ROTATION_INPUT_LOCK_WRITES ?? 19),
   tenantStateWrites: Number(process.env.TEAM_ROTATION_INPUT_LOCK_TENANT_WRITES ?? 2),
   admissions: Number(process.env.TEAM_ROTATION_INPUT_LOCK_ADMISSIONS ?? 7),
 };
@@ -444,6 +449,13 @@ function propertyKeyName(prop) {
   return null;
 }
 
+function isInsideWhereFilter(node) {
+  for (let cur = node.getParent(); cur; cur = cur.getParent()) {
+    if (Node.isPropertyAssignment(cur) && propertyKeyName(cur) === "where") return true;
+  }
+  return false;
+}
+
 function checkPendingMarkerRepoWide(sourceFile, path, violations) {
   const props = [
     ...sourceFile.getDescendantsOfKind(SyntaxKind.PropertyAssignment),
@@ -452,6 +464,9 @@ function checkPendingMarkerRepoWide(sourceFile, path, violations) {
   for (const prop of props) {
     if (propertyKeyName(prop) !== "scimApprovalPending") continue;
     if (path === SCIM_APPROVE_ROUTE_FILE) continue;
+    // A query filter writes nothing; anything not under a `where` — a write
+    // payload, or an object a payload may be built from — is checked.
+    if (isInsideWhereFilter(prop)) continue;
     const isTrueLiteral = Node.isPropertyAssignment(prop) && prop.getInitializer()?.getText() === "true";
     if (isTrueLiteral) continue;
     violations.push(`admission-marker  ${lineOf(path, prop)}  scimApprovalPending set to something other than the literal true outside the approve route`);

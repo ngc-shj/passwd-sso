@@ -388,6 +388,11 @@ export const rotate = withTenantRls(prisma, tenantId, async (tx) => {
       expectDenied(run(), /scimApprovalPending set to something other than the literal true outside the approve route/);
     });
 
+    it("passes scimApprovalPending: false in a where filter outside the approve route", () => {
+      write(SUBJECT, "export async function list(tx, teamId) { return tx.teamMember.findMany({ where: { teamId, scimApprovalPending: false } }); }");
+      expect(run().code).toBe(0);
+    });
+
     it("refuses a variable value for scimApprovalPending outside the approve route", () => {
       write(SUBJECT, "export async function off(tx, id, pending) { await tx.teamMember.update({ where: { id }, data: { scimApprovalPending: pending } }); }");
       expectDenied(run(), /scimApprovalPending set to something other than the literal true outside the approve route/);

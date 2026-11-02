@@ -6,6 +6,7 @@ const {
   mockValidateScimToken,
   mockCheckScimRateLimit,
   mockLogAudit,
+  mockLogAuditBulkInTx,
   mockScimGroupMapping,
   mockTeamMember,
   mockTenantMember,
@@ -15,24 +16,33 @@ const {
   mockValidateScimToken: vi.fn(),
   mockCheckScimRateLimit: vi.fn(),
   mockLogAudit: vi.fn(),
+  mockLogAuditBulkInTx: vi.fn(),
   mockScimGroupMapping: { findUnique: vi.fn() },
   mockTeamMember: {
     findMany: vi.fn(),
     findUnique: vi.fn(),
     update: vi.fn(),
     updateMany: vi.fn(),
+    updateManyAndReturn: vi.fn(),
+    deleteMany: vi.fn(),
     create: vi.fn(),
     createMany: vi.fn(),
   },
   mockTenantMember: { findUnique: vi.fn(), findMany: vi.fn() },
   mockTransaction: vi.fn(),
-  mockWithTenantRls: vi.fn(async (prisma: unknown, _tenantId: string, fn: (tx: unknown) => unknown) => fn(prisma)),
+  // replaceScimGroup/patchScimGroup now take a Prisma.TransactionClient
+  // directly (no more flatten branch) — route through the mocked prisma's
+  // $transaction so each describe's beforeEach can hand the write path a
+  // raw-capable tx ($queryRaw/$executeRaw/teamMemberKey), same as production.
+  mockWithTenantRls: vi.fn(async (prismaArg: { $transaction?: (fn: (tx: unknown) => unknown) => unknown }, _tenantId: string, fn: (tx: unknown) => unknown) =>
+    prismaArg.$transaction ? prismaArg.$transaction(fn) : fn(prismaArg)),
 }));
 
 vi.mock("@/lib/auth/tokens/scim-token", () => ({ validateScimToken: mockValidateScimToken }));
 vi.mock("@/lib/scim/rate-limit", () => ({ checkScimRateLimit: mockCheckScimRateLimit }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
+  logAuditBulkInTx: mockLogAuditBulkInTx,
   personalAuditBase: (_req: unknown, userId: string) => ({ scope: "PERSONAL", userId, ip: null, userAgent: null, acceptLanguage: null }),
   teamAuditBase: (_req: unknown, userId: string, teamId: string) => ({ scope: "TEAM", userId, teamId, ip: null, userAgent: null, acceptLanguage: null }),
   tenantAuditBase: (_req: unknown, userId: string, tenantId: string) => ({ scope: "TENANT", userId, tenantId, ip: null, userAgent: null, acceptLanguage: null }),
@@ -74,7 +84,7 @@ import { GET, PUT, PATCH, DELETE } from "./route";
 
 const SCIM_TOKEN_DATA = {
   ok: true as const,
-  data: { tokenId: "t1", tenantId: "tenant-1", createdById: "u1", auditUserId: "u1" },
+  data: { tokenId: "t1", tenantId: "tenant-1", createdById: "u1", auditUserId: "u1", actorType: "HUMAN" as const },
 };
 
 const mapping = {
@@ -104,6 +114,11 @@ describe("GET /api/scim/v2/Groups/[id]", () => {
     vi.stubEnv("AUTH_URL", "http://localhost:3000");
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue({ allowed: true });
+    // GET's read path needs no raw lock calls — the mocked prisma's own
+    // scimGroupMapping/teamMember are enough.
+    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
+      fn({ scimGroupMapping: mockScimGroupMapping, teamMember: mockTeamMember, tenantMember: mockTenantMember }),
+    );
   });
 
   it("returns 404 when mapping not found", async () => {
@@ -151,13 +166,23 @@ describe("GET /api/scim/v2/Groups/[id]", () => {
     ]);
   });
 
-  it("reports only members with an active membership in this tenant", async () => {
+  it("lists a pending member and still excludes a cross-tenant guest (A13)", async () => {
     mockScimGroupMapping.findUnique.mockResolvedValue(mapping);
-    mockTeamMember.findMany.mockResolvedValue([]);
+    mockTeamMember.findMany.mockResolvedValue([
+      { userId: "user-pending", user: { id: "user-pending", email: "pending@example.com" } },
+    ]);
 
     const res = await GET(makeReq(), makeParams("grp-1"));
     expect(res.status).toBe(200);
-    expect(mockTeamMember.findMany.mock.calls[0][0].where.user).toEqual({
+    const [{ where }] = mockTeamMember.findMany.mock.calls[0];
+    // scimGroupResponseMemberWhere: active OR departed OR pending, AND an
+    // active tenant membership — the guest-exclusion guard the DB answers.
+    expect(where.OR).toEqual([
+      { deactivatedAt: null },
+      { deactivatedByTenant: true },
+      { scimApprovalPending: true },
+    ]);
+    expect(where.user).toEqual({
       tenantMemberships: { some: { tenantId: "tenant-1", deactivatedAt: null } },
     });
   });
@@ -170,6 +195,8 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue({ allowed: true });
     mockScimGroupMapping.findUnique.mockResolvedValue(mapping);
+    mockTeamMember.updateManyAndReturn.mockResolvedValue([]);
+    mockTeamMember.deleteMany.mockResolvedValue({ count: 0 });
     // Default transaction: pass tx with batch-capable mocks
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
       fn({
@@ -178,6 +205,8 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
         $executeRaw: vi.fn(),
         teamMember: mockTeamMember,
         tenantMember: mockTenantMember,
+        teamMemberKey: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+        scimGroupMapping: mockScimGroupMapping,
       }),
     );
   });
@@ -205,12 +234,12 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
     }
   });
 
-  it("adds a member", async () => {
-    // Existing member (role update path): findMany returns the member, updateMany is called
+  it("raises a pending member's role and audits TEAM_MEMBER_SCIM_PENDING", async () => {
     mockTeamMember.findMany
-      .mockResolvedValueOnce([{ id: "tm1", userId: "user-1", role: "MEMBER", deactivatedAt: null }]) // tx.teamMember.findMany (existing members)
+      .mockResolvedValueOnce([{ id: "tm1", userId: "user-1", role: "MEMBER", deactivatedAt: new Date(), deactivatedByTenant: false, scimApprovalPending: true }])
       .mockResolvedValueOnce([]); // loadGroupMembers after tx
-    mockTeamMember.updateMany.mockResolvedValue({ count: 1 });
+    mockTenantMember.findMany.mockResolvedValue([{ userId: "user-1" }]);
+    mockTeamMember.updateManyAndReturn.mockResolvedValue([{ id: "tm1", userId: "user-1" }]);
 
     const res = await PATCH(
       makeReq({
@@ -224,12 +253,26 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
     );
 
     expect(res!.status).toBe(200);
-    expect(mockTeamMember.updateMany).toHaveBeenCalled();
+    expect(mockLogAuditBulkInTx).toHaveBeenCalledWith(
+      expect.anything(),
+      "tenant-1",
+      [
+        expect.objectContaining({
+          scope: "TEAM",
+          teamId: "team-1",
+          action: "TEAM_MEMBER_SCIM_PENDING",
+          targetId: "user-1",
+          metadata: expect.objectContaining({ scimTokenId: "t1", role: "ADMIN", previousRole: "MEMBER" }),
+        }),
+      ],
+    );
   });
 
-  it("returns 400 when removing a missing member", async () => {
-    // Remove op: findMany returns empty (user not in team)
-    mockTeamMember.findMany.mockResolvedValueOnce([]);
+  it("is a no-op (200) when removing a missing member (idempotent on IdP retry)", async () => {
+    // Remove op: findMany returns empty (user has no row in the team)
+    mockTeamMember.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]); // loadGroupMembers
 
     const res = await PATCH(
       makeReq({
@@ -242,12 +285,14 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
       makeParams("grp-1"),
     );
 
-    expect(res!.status).toBe(400);
+    expect(res!.status).toBe(200);
+    expect(mockTeamMember.deleteMany).not.toHaveBeenCalled();
+    expect(mockTeamMember.updateManyAndReturn).not.toHaveBeenCalled();
   });
 
   it("returns 403 when patch would modify an owner", async () => {
     // findMany returns an existing OWNER member
-    mockTeamMember.findMany.mockResolvedValueOnce([{ id: "tm1", userId: "user-1", role: "OWNER", deactivatedAt: null }]);
+    mockTeamMember.findMany.mockResolvedValueOnce([{ id: "tm1", userId: "user-1", role: "OWNER", deactivatedAt: null, deactivatedByTenant: false, scimApprovalPending: false }]);
 
     const res = await PATCH(
       makeReq({
@@ -263,8 +308,7 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
     expect(res!.status).toBe(403);
   });
 
-  it("creates a team member when adding a tenant user who is not yet in the team", async () => {
-    // User not yet in team (toCreate path): findMany returns empty, tenantMember.findMany confirms active
+  it("creates a pending team member when adding a tenant user who is not yet in the team", async () => {
     mockTeamMember.findMany
       .mockResolvedValueOnce([]) // tx.teamMember.findMany (no existing team member)
       .mockResolvedValueOnce([]); // loadGroupMembers after tx
@@ -291,21 +335,25 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
           tenantId: "tenant-1",
           role: "ADMIN",
           scimManaged: true,
+          scimApprovalPending: true,
+          deactivatedAt: expect.any(Date),
+          keyDistributed: false,
         },
       ],
     });
+    expect(mockLogAuditBulkInTx).toHaveBeenCalledWith(
+      expect.anything(),
+      "tenant-1",
+      [expect.objectContaining({ action: "TEAM_MEMBER_SCIM_PENDING", targetId: "user-1" })],
+    );
   });
 
-  it("downgrades a member to MEMBER when removing the mapped role", async () => {
-    // Remove op sequence: applyAddOperations with addOps=[] returns early (no findMany)
-    // (1) tx.teamMember.findMany for validate existence, (2) tx.teamMember.findMany in applyRemoveOperations
-    // (3) prisma.teamMember.findMany in loadGroupMembers after tx
-    const member = [{ id: "tm1", userId: "user-1", role: "ADMIN", deactivatedAt: null }];
+  it("withdraws a pending member when removing the mapped role", async () => {
+    const member = [{ id: "tm1", userId: "user-1", role: "ADMIN", deactivatedAt: new Date(), deactivatedByTenant: false, scimApprovalPending: true }];
     mockTeamMember.findMany
-      .mockResolvedValueOnce(member) // validate existence in removeOps
-      .mockResolvedValueOnce(member) // freshMembers in applyRemoveOperations
+      .mockResolvedValueOnce(member) // locked re-read in applyRemoveOperations
       .mockResolvedValueOnce([]); // loadGroupMembers after tx
-    mockTeamMember.updateMany.mockResolvedValue({ count: 1 });
+    mockTeamMember.deleteMany.mockResolvedValue({ count: 1 });
 
     const res = await PATCH(
       makeReq({
@@ -319,9 +367,8 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
     );
 
     expect(res!.status).toBe(200);
-    expect(mockTeamMember.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["tm1"] } },
-      data: { deactivatedAt: expect.any(Date) },
+    expect(mockTeamMember.deleteMany).toHaveBeenCalledWith({
+      where: { id: { in: ["tm1"] }, teamId: "team-1", role: "ADMIN", scimApprovalPending: true },
     });
   });
 
@@ -343,7 +390,7 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
 
     expect(res!.status).toBe(400);
     const body = await res!.json();
-    expect(body.detail).toContain("Referenced member");
+    expect(body.detail).toContain("not an active member of this tenant");
   });
 
   it("returns 400 for invalid JSON on PATCH", async () => {
@@ -416,6 +463,187 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
       ),
     ).rejects.toThrow("boom");
   });
+
+  describe("A7e: statement counts are independent of N", () => {
+    // One member per transition group, each with a distinct previous role so
+    // the CAS writes do not collapse into one updateManyAndReturn call:
+    // becamePending (create), becamePending (reactivate), pendingRoleRaised,
+    // activeRoleChanged, pendingWithdrawn, activeRemoved, departedUnmarked.
+    function buildFixture(usersPerGroup: number) {
+      const addUserIds: string[] = [];
+      const removeUserIds: string[] = [];
+      const existingMemberships: { id: string; userId: string; role: string; deactivatedAt: Date | null; deactivatedByTenant: boolean; scimApprovalPending: boolean }[] = [];
+      const removeMemberships: typeof existingMemberships = [];
+
+      for (let i = 0; i < usersPerGroup; i++) {
+        // becamePending via create: no row at all.
+        addUserIds.push(`create-${i}`);
+        // becamePending via reactivate: a deactivated, non-pending row.
+        const reactivateId = `reactivate-${i}`;
+        addUserIds.push(reactivateId);
+        existingMemberships.push({ id: `m-reactivate-${i}`, userId: reactivateId, role: "ADMIN", deactivatedAt: new Date(), deactivatedByTenant: false, scimApprovalPending: false });
+        // pendingRoleRaised: a pending row at a lower role (MEMBER < ADMIN).
+        const raiseId = `raise-${i}`;
+        addUserIds.push(raiseId);
+        existingMemberships.push({ id: `m-raise-${i}`, userId: raiseId, role: "MEMBER", deactivatedAt: new Date(), deactivatedByTenant: false, scimApprovalPending: true });
+        // activeRoleChanged: an active row at a different role.
+        const roleChangeId = `role-${i}`;
+        addUserIds.push(roleChangeId);
+        existingMemberships.push({ id: `m-role-${i}`, userId: roleChangeId, role: "MEMBER", deactivatedAt: null, deactivatedByTenant: false, scimApprovalPending: false });
+        // pendingWithdrawn: a pending row removed.
+        const withdrawId = `withdraw-${i}`;
+        removeUserIds.push(withdrawId);
+        removeMemberships.push({ id: `m-withdraw-${i}`, userId: withdrawId, role: "ADMIN", deactivatedAt: new Date(), deactivatedByTenant: false, scimApprovalPending: true });
+        // activeRemoved: an active row removed.
+        const removeId = `remove-${i}`;
+        removeUserIds.push(removeId);
+        removeMemberships.push({ id: `m-remove-${i}`, userId: removeId, role: "ADMIN", deactivatedAt: null, deactivatedByTenant: false, scimApprovalPending: false });
+        // departedUnmarked: a departure-marked row removed.
+        const departedId = `departed-${i}`;
+        removeUserIds.push(departedId);
+        removeMemberships.push({ id: `m-departed-${i}`, userId: departedId, role: "ADMIN", deactivatedAt: new Date(), deactivatedByTenant: true, scimApprovalPending: false });
+      }
+      return { addUserIds, removeUserIds, existingMemberships, removeMemberships };
+    }
+
+    it.each([
+      { usersPerGroup: 2, totalRows: 14 },
+      { usersPerGroup: 10, totalRows: 70 },
+    ])("gives the same call-shape counts at N = $totalRows", async ({ usersPerGroup }) => {
+      const { addUserIds, removeUserIds, existingMemberships, removeMemberships } = buildFixture(usersPerGroup);
+
+      mockTeamMember.findMany
+        .mockResolvedValueOnce(existingMemberships) // applyAddOperations' membership read
+        .mockResolvedValueOnce(removeMemberships) // applyRemoveOperations' locked re-read
+        .mockResolvedValueOnce([]); // loadGroupMembers after tx
+
+      mockTenantMember.findMany.mockResolvedValue(
+        addUserIds.filter((id) => id.startsWith("create-")).map((userId) => ({ userId })),
+      );
+      // Every add candidate is active in the tenant: the mocked lockTenantRows
+      // reads tenantMember.findMany for ALL add ids, not only "create-*", so
+      // the fixture must answer "active" for every one of them.
+      mockTenantMember.findMany.mockResolvedValue(addUserIds.map((userId) => ({ userId })));
+
+      mockTeamMember.createMany.mockResolvedValue({ count: usersPerGroup });
+      mockTeamMember.deleteMany.mockResolvedValue({ count: usersPerGroup });
+      const keyDeleteMany = vi.fn().mockResolvedValue({ count: 0 });
+      mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
+        fn({
+          $queryRaw: vi.fn(teamLockQuery([{ id: mapping.teamId }])),
+          $executeRaw: vi.fn(),
+          teamMember: mockTeamMember,
+          tenantMember: mockTenantMember,
+          teamMemberKey: { deleteMany: keyDeleteMany },
+          scimGroupMapping: mockScimGroupMapping,
+        }),
+      );
+      mockTeamMember.updateManyAndReturn.mockImplementation(
+        async ({ where }: { where: { id: { in: string[] } } }) => where.id.in.map((id: string) => ({ id, userId: id.replace(/^m-/, "") })),
+      );
+
+      const res = await PATCH(
+        makeReq({
+          method: "PATCH",
+          body: {
+            schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+            Operations: [
+              ...addUserIds.map((userId) => ({ op: "add", path: "members", value: [{ value: userId }] })),
+              ...removeUserIds.map((userId) => ({ op: "remove", path: `members[value eq "${userId}"]` })),
+            ],
+          },
+        }),
+        makeParams("grp-1"),
+      );
+
+      expect(res!.status).toBe(200);
+      // One createMany for the whole "create" group, whatever N.
+      expect(mockTeamMember.createMany).toHaveBeenCalledTimes(1);
+      expect(mockTeamMember.create).not.toHaveBeenCalled();
+      // One teamMember write per (kind, write shape, previous role): reactivate,
+      // raise, role-change, remove, departed-unmark (updateManyAndReturn each)
+      // and withdraw (deleteMany), independent of usersPerGroup.
+      expect(mockTeamMember.updateMany).not.toHaveBeenCalled();
+      expect(mockTeamMember.updateManyAndReturn).toHaveBeenCalledTimes(5);
+      expect(mockTeamMember.deleteMany).toHaveBeenCalledTimes(1);
+      expect(keyDeleteMany).toHaveBeenCalledTimes(1);
+      // One bulk audit call per action present (PENDING, WITHDRAW, REMOVE,
+      // ROLE_UPDATE), together carrying one row per transition.
+      expect(mockLogAuditBulkInTx).toHaveBeenCalledTimes(4);
+      const auditRows = mockLogAuditBulkInTx.mock.calls.reduce(
+        (sum: number, call: unknown[]) => sum + (call[2] as unknown[]).length,
+        0,
+      );
+      expect(auditRows).toBe(7 * usersPerGroup);
+    });
+  });
+
+  describe("withdraw shortfall (silent-loss red-proof)", () => {
+    it("PATCH: a withdraw shortfall rolls back with 409, no WITHDRAW audit", async () => {
+      const pending = [
+        { id: "m-1", userId: "user-1", role: "ADMIN", deactivatedAt: new Date(), deactivatedByTenant: false, scimApprovalPending: true },
+        { id: "m-2", userId: "user-2", role: "ADMIN", deactivatedAt: new Date(), deactivatedByTenant: false, scimApprovalPending: true },
+      ];
+      mockTeamMember.findMany.mockResolvedValueOnce(pending);
+      // findMany found 2 rows; deleteMany only removes 1 (an unlocked writer
+      // raced it) — the shortfall must roll the whole PATCH back.
+      mockTeamMember.deleteMany.mockResolvedValue({ count: 1 });
+
+      const res = await PATCH(
+        makeReq({
+          method: "PATCH",
+          body: {
+            schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+            Operations: [
+              { op: "remove", path: 'members[value eq "user-1"]' },
+              { op: "remove", path: 'members[value eq "user-2"]' },
+            ],
+          },
+        }),
+        makeParams("grp-1"),
+      );
+
+      expect(res!.status).toBe(409);
+      const body = await res!.json();
+      expect(body.detail).toContain("membership changed");
+      expect(mockLogAuditBulkInTx).not.toHaveBeenCalled();
+    });
+
+    it("positive control: equal counts commit 200 with one WITHDRAW audit covering both rows", async () => {
+      const pending = [
+        { id: "m-1", userId: "user-1", role: "ADMIN", deactivatedAt: new Date(), deactivatedByTenant: false, scimApprovalPending: true },
+        { id: "m-2", userId: "user-2", role: "ADMIN", deactivatedAt: new Date(), deactivatedByTenant: false, scimApprovalPending: true },
+      ];
+      mockTeamMember.findMany
+        .mockResolvedValueOnce(pending)
+        .mockResolvedValueOnce([]); // loadGroupMembers
+      mockTeamMember.deleteMany.mockResolvedValue({ count: 2 });
+
+      const res = await PATCH(
+        makeReq({
+          method: "PATCH",
+          body: {
+            schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+            Operations: [
+              { op: "remove", path: 'members[value eq "user-1"]' },
+              { op: "remove", path: 'members[value eq "user-2"]' },
+            ],
+          },
+        }),
+        makeParams("grp-1"),
+      );
+
+      expect(res!.status).toBe(200);
+      expect(mockLogAuditBulkInTx).toHaveBeenCalledWith(
+        expect.anything(),
+        "tenant-1",
+        [
+          expect.objectContaining({ action: "TEAM_MEMBER_SCIM_PENDING_WITHDRAW", targetId: "user-1" }),
+          expect.objectContaining({ action: "TEAM_MEMBER_SCIM_PENDING_WITHDRAW", targetId: "user-2" }),
+        ],
+      );
+    });
+  });
 });
 
 describe("PUT /api/scim/v2/Groups/[id]", () => {
@@ -425,6 +653,8 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue({ allowed: true });
     mockScimGroupMapping.findUnique.mockResolvedValue(mapping);
+    mockTeamMember.updateManyAndReturn.mockResolvedValue([]);
+    mockTeamMember.deleteMany.mockResolvedValue({ count: 0 });
     // Default transaction: pass tx with batch-capable mocks
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
       fn({
@@ -433,19 +663,22 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
         $executeRaw: vi.fn(),
         teamMember: mockTeamMember,
         tenantMember: mockTenantMember,
+        teamMemberKey: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+        scimGroupMapping: mockScimGroupMapping,
       }),
     );
   });
 
   it("replaces role members", async () => {
-    // Pre-tx read: current ADMIN members (user-1 will be removed)
     mockTeamMember.findMany
-      .mockResolvedValueOnce([{ id: "tm1", userId: "user-1", role: "ADMIN", deactivatedAt: null }]) // prisma.teamMember.findMany (current members)
-      .mockResolvedValueOnce([{ id: "tm2", userId: "user-2", role: "MEMBER", deactivatedAt: null }]) // tx.teamMember.findMany (existing for toAdd)
-      .mockResolvedValueOnce([{ id: "tm1", userId: "user-1", role: "ADMIN", deactivatedAt: null }]) // tx.teamMember.findMany (freshMembers for toRemove)
+      .mockResolvedValueOnce([{ userId: "user-1" }]) // unlocked pre-read
+      .mockResolvedValueOnce([{ id: "tm1", userId: "user-1", role: "ADMIN" }]) // locked re-read (current)
+      .mockResolvedValueOnce([]) // applyAddOperations' membership read for user-2
+      .mockResolvedValueOnce([{ id: "tm1", userId: "user-1", role: "ADMIN", deactivatedAt: null, deactivatedByTenant: false, scimApprovalPending: false }]) // applyRemoveOperations' locked re-read for user-1
       .mockResolvedValueOnce([]); // loadGroupMembers after tx
-    mockTenantMember.findMany.mockResolvedValue([]);
-    mockTeamMember.updateMany.mockResolvedValue({ count: 1 });
+    mockTenantMember.findMany.mockResolvedValue([{ userId: "user-2" }]);
+    mockTeamMember.createMany.mockResolvedValue({ count: 1 });
+    mockTeamMember.updateManyAndReturn.mockResolvedValue([{ id: "tm1", userId: "user-1" }]);
 
     const res = await PUT(
       makeReq({
@@ -462,12 +695,12 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
     expect(res!.status).toBe(200);
   });
 
-  it("creates team member when user exists in tenant but not in team", async () => {
-    // Pre-tx read: no current ADMIN members
+  it("creates a pending team member when user exists in tenant but not in team", async () => {
     mockTeamMember.findMany
-      .mockResolvedValueOnce([]) // prisma.teamMember.findMany (current members)
-      .mockResolvedValueOnce([]) // tx.teamMember.findMany (no existing for toAdd)
-      .mockResolvedValueOnce([{ id: "tm-created", userId: "user-2", role: "ADMIN", user: { id: "user-2", email: "u2@example.com" } }]); // loadGroupMembers after tx
+      .mockResolvedValueOnce([]) // unlocked pre-read
+      .mockResolvedValueOnce([]) // locked re-read (current)
+      .mockResolvedValueOnce([]) // applyAddOperations' membership read
+      .mockResolvedValueOnce([{ id: "tm-created", userId: "user-2", user: { id: "user-2", email: "u2@example.com" } }]); // loadGroupMembers after tx
     mockTenantMember.findMany.mockResolvedValueOnce([{ userId: "user-2" }]);
     mockTeamMember.createMany.mockResolvedValue({ count: 1 });
 
@@ -492,6 +725,9 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
           tenantId: "tenant-1",
           role: "ADMIN",
           scimManaged: true,
+          scimApprovalPending: true,
+          deactivatedAt: expect.any(Date),
+          keyDistributed: false,
         },
       ],
     });
@@ -514,10 +750,10 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
   });
 
   it("returns 400 when requested member is not active in the tenant", async () => {
-    // No current members; user-2 is not a team member and not in tenant
     mockTeamMember.findMany
-      .mockResolvedValueOnce([]) // prisma.teamMember.findMany (current members)
-      .mockResolvedValueOnce([]); // tx.teamMember.findMany (no existing for toAdd)
+      .mockResolvedValueOnce([]) // unlocked pre-read
+      .mockResolvedValueOnce([]) // locked re-read
+      .mockResolvedValueOnce([]); // applyAddOperations' membership read
     mockTenantMember.findMany.mockResolvedValueOnce([]);
 
     const res = await PUT(
@@ -534,7 +770,7 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
 
     expect(res!.status).toBe(400);
     const body = await res!.json();
-    expect(body.detail).toContain("Referenced member");
+    expect(body.detail).toContain("not an active member of this tenant");
   });
 
   it("returns 403 when PUT targets an owner-mapped group", async () => {
@@ -598,6 +834,65 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
       makeParams("grp-1"),
     );
     expect(res!.status).toBe(429);
+  });
+
+  it("is a no-op (200, 200 again) when removing a withdrawn-shortfall-free pending member twice via retry", async () => {
+    // A4: PUT omitting a pending user withdraws it; a repeated PUT listing it
+    // is a no-op. Here: current member set has the pending row; PUT lists no
+    // members, so the row is withdrawn via the remove path.
+    mockTeamMember.findMany
+      .mockResolvedValueOnce([{ userId: "user-1" }]) // unlocked pre-read — user-1 must be in the locked set
+      .mockResolvedValueOnce([{ id: "tm1", userId: "user-1", role: "ADMIN" }]) // locked re-read
+      .mockResolvedValueOnce([{ id: "tm1", userId: "user-1", role: "ADMIN", deactivatedAt: new Date(), deactivatedByTenant: false, scimApprovalPending: true }]) // applyRemoveOperations' locked re-read
+      .mockResolvedValueOnce([]); // loadGroupMembers
+    mockTeamMember.deleteMany.mockResolvedValue({ count: 1 });
+
+    const res = await PUT(
+      makeReq({
+        method: "PUT",
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+          displayName: "core:ADMIN",
+          members: [],
+        },
+      }),
+      makeParams("grp-1"),
+    );
+
+    expect(res!.status).toBe(200);
+    expect(mockTeamMember.deleteMany).toHaveBeenCalledWith({
+      where: { id: { in: ["tm1"] }, teamId: "team-1", role: "ADMIN", scimApprovalPending: true },
+    });
+  });
+
+  describe("withdraw shortfall (silent-loss red-proof)", () => {
+    it("PUT: a withdraw shortfall rolls back with 409, no WITHDRAW audit", async () => {
+      const pending = [
+        { id: "m-1", userId: "user-1", role: "ADMIN" },
+      ];
+      mockTeamMember.findMany
+        .mockResolvedValueOnce([{ userId: "user-1" }]) // unlocked pre-read
+        .mockResolvedValueOnce(pending) // locked re-read (current members)
+        .mockResolvedValueOnce([
+          { id: "m-1", userId: "user-1", role: "ADMIN", deactivatedAt: new Date(), deactivatedByTenant: false, scimApprovalPending: true },
+        ]); // applyRemoveOperations' locked re-read
+      mockTeamMember.deleteMany.mockResolvedValue({ count: 0 });
+
+      const res = await PUT(
+        makeReq({
+          method: "PUT",
+          body: {
+            schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+            displayName: "core:ADMIN",
+            members: [],
+          },
+        }),
+        makeParams("grp-1"),
+      );
+
+      expect(res!.status).toBe(409);
+      expect(mockLogAuditBulkInTx).not.toHaveBeenCalled();
+    });
   });
 });
 
