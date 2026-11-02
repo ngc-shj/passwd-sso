@@ -407,4 +407,47 @@ describe("TeamMembersPage (SCIM pending admission, C5)", () => {
     ).length;
     expect(membersCallsAfter).toBeGreaterThan(membersCallsBefore);
   });
+
+  it.each([
+    { button: "approveButton", path: "approve", status: 403, error: "FORBIDDEN", message: "approveNeedsKey" },
+    { button: "approveButton", path: "approve", status: 404, error: "MEMBER_NOT_FOUND", message: "requestAlreadyHandled" },
+    { button: "rejectButton", path: "reject", status: 404, error: "MEMBER_NOT_FOUND", message: "requestAlreadyHandled" },
+  ])("$path $status $error shows $message, not a network error", async ({ button, path, status, error, message }) => {
+    const pending = makeMember({ id: "mem-pending", userId: "user-pending", role: "ADMIN", pendingApproval: true });
+    setupFetchReady({ members: [pending] });
+
+    const baseImpl = mockFetch.getMockImplementation()!;
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === `/api/teams/team-1/members/mem-pending/${path}`) {
+        return Promise.resolve({ ok: false, status, json: () => Promise.resolve({ error }) });
+      }
+      return baseImpl(url, init);
+    });
+
+    await act(async () => {
+      render(<TeamMembersPage params={Promise.resolve({ teamId: "team-1" })} />);
+    });
+    // The confirm dialog's action shares the reject label; the first match is
+    // the row's trigger.
+    await waitFor(() => {
+      expect(screen.getAllByRole("button", { name: button })[0]).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getAllByRole("button", { name: button })[0]);
+    });
+    if (path === "reject") {
+      await waitFor(() => {
+        expect(screen.getAllByTestId("alert-action").length).toBeGreaterThanOrEqual(1);
+      });
+      await act(async () => {
+        fireEvent.click(screen.getAllByTestId("alert-action")[0]);
+      });
+    }
+
+    await waitFor(() => {
+      expect(mockToast.error).toHaveBeenCalledWith(message);
+    });
+    expect(mockToast.error).not.toHaveBeenCalledWith("networkError");
+  });
 });

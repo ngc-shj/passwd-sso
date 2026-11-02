@@ -215,6 +215,18 @@ export default function TeamMembersPage({
           fetchAll();
           return;
         }
+        // Designed refusals, not transport failures: approving needs the
+        // current team key (a keyless admin can still reject), and another
+        // admin may have handled the request already.
+        if (error === API_ERROR.FORBIDDEN) {
+          toast.error(t("approveNeedsKey"));
+          return;
+        }
+        if (error === API_ERROR.MEMBER_NOT_FOUND) {
+          toast.error(t("requestAlreadyHandled"));
+          fetchAll();
+          return;
+        }
         throw new Error("Failed");
       }
       toast.success(t("memberApproved"));
@@ -232,6 +244,11 @@ export default function TeamMembersPage({
       });
       if (!res.ok) {
         if (await handleStepUpError(res, inlineReauth.triggerOnStaleError, { type: "reject", memberId })) return;
+        if ((await readApiErrorBody(res))?.error === API_ERROR.MEMBER_NOT_FOUND) {
+          toast.error(t("requestAlreadyHandled"));
+          fetchAll();
+          return;
+        }
         throw new Error("Failed");
       }
       toast.success(t("memberRejected"));
