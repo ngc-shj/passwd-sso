@@ -45,6 +45,15 @@ const ALL = [
   "VAULT_RESET_EXECUTED",
   "ADMIN_VAULT_RESET_EXECUTE",
   "EMERGENCY_ACCESS_ACTIVATE",
+  // scim-team-admission-approval-plan.md C4.
+  "TEAM_MEMBER_SCIM_APPROVE",
+  "TEAM_MEMBER_SCIM_REJECT",
+  "TEAM_MEMBER_SCIM_PENDING",
+  "TEAM_MEMBER_SCIM_PENDING_WITHDRAW",
+  "TEAM_MEMBER_SCIM_REMOVE",
+  "TEAM_MEMBER_SCIM_ROLE_UPDATE",
+  "TEAM_MEMBER_KEY_DISTRIBUTE",
+  "SCIM_GROUP_MAPPING_CREATE",
 ];
 
 const inTx = (a) =>
@@ -54,6 +63,18 @@ const descriptor = (a) =>
   `await executeVaultReset(userId, {\n  tenantId,\n  params: {\n    action: AUDIT_ACTION.${a},\n    metadata: { phase: "committed" },\n  },\n});\n`;
 const asyncCall = (a) =>
   `await logAuditAsync({\n  action: AUDIT_ACTION.${a},\n});\n`;
+// logAuditBulkInTx forms (C4): an array literal of object literals, or a
+// `.map` call whose arrow callback returns one (parenthesised body).
+const bulkArray = (a) =>
+  `await logAuditBulkInTx(tx, tenantId, [\n  { ...base, action: AUDIT_ACTION.${a} },\n]);\n`;
+const bulkMap = (a) =>
+  `await logAuditBulkInTx(tx, tenantId, items.map((item) => ({\n  ...base,\n  action: AUDIT_ACTION.${a},\n})));\n`;
+const bulkAsync = (a) =>
+  `await logAuditBulkAsync(tx, tenantId, [\n  { ...base, action: AUDIT_ACTION.${a} },\n]);\n`;
+const bulkTernary = (a, b) =>
+  `await logAuditBulkInTx(tx, tenantId, items.map((item) => ({\n  ...base,\n  action: item.flag ? AUDIT_ACTION.${a} : AUDIT_ACTION.${b},\n})));\n`;
+const bulkSpreadOfMap = (a) =>
+  `await logAuditBulkInTx(tx, tenantId, [\n  ...items.map((item) => ({ ...base, action: AUDIT_ACTION.${a} })),\n]);\n`;
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "critical-audit-atomic-"));
@@ -67,7 +88,7 @@ describe("check-critical-audit-atomic.mjs", () => {
     ALL.forEach((a, i) => writeRoute(`crit-${i}/route.ts`, inTx(a)));
     const { exitCode, stdout } = runGuard();
     expect(exitCode, stdout).toBe(0);
-    expect(stdout).toContain("all 8 security-critical actions");
+    expect(stdout).toContain("all 16 security-critical actions");
   });
 
   it("recognizes an action written via an atomic-audit descriptor (delegated to a helper)", () => {
@@ -100,6 +121,69 @@ describe("check-critical-audit-atomic.mjs", () => {
     );
     const { exitCode } = runGuard();
     expect(exitCode).toBe(1);
+  });
+
+  describe("logAuditBulkInTx (C4: SCIM team admission approval)", () => {
+    it("passes with the last critical action via a bulk array literal", () => {
+      ALL.slice(0, -1).forEach((a, i) => writeRoute(`crit-${i}/route.ts`, inTx(a)));
+      writeRoute("scim/bulk-array/route.ts", bulkArray(ALL[ALL.length - 1]));
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode, stdout).toBe(0);
+    });
+
+    it("passes with the last critical action via a bulk .map call", () => {
+      ALL.slice(0, -1).forEach((a, i) => writeRoute(`crit-${i}/route.ts`, inTx(a)));
+      writeRoute("scim/bulk-map/route.ts", bulkMap(ALL[ALL.length - 1]));
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode, stdout).toBe(0);
+    });
+
+    it("FAILS (missing-action) when the last critical action has no bulk call either", () => {
+      ALL.slice(0, -1).forEach((a, i) => writeRoute(`crit-${i}/route.ts`, inTx(a)));
+      const { exitCode, stdout, stderr } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stdout + stderr).toContain(ALL[ALL.length - 1]);
+    });
+
+    it("FAILS (missing-action) when the bulk array literal writes an already-present action instead", () => {
+      ALL.slice(0, -1).forEach((a, i) => writeRoute(`crit-${i}/route.ts`, inTx(a)));
+      writeRoute("scim/bulk-array/route.ts", bulkArray(ALL[0]));
+      const { exitCode, stdout, stderr } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stdout + stderr).toContain(ALL[ALL.length - 1]);
+    });
+
+    it("FAILS (missing-action) when the bulk .map writes an already-present action instead", () => {
+      ALL.slice(0, -1).forEach((a, i) => writeRoute(`crit-${i}/route.ts`, inTx(a)));
+      writeRoute("scim/bulk-map/route.ts", bulkMap(ALL[0]));
+      const { exitCode, stdout, stderr } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stdout + stderr).toContain(ALL[ALL.length - 1]);
+    });
+
+    it("FAILS with the refusal message on a ternary action in a bulk .map, even when every critical action is otherwise present", () => {
+      ALL.forEach((a, i) => writeRoute(`crit-${i}/route.ts`, inTx(a)));
+      writeRoute("scim/bulk-ternary/route.ts", bulkTernary(ALL[0], ALL[1]));
+      const { exitCode, stdout, stderr } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stdout + stderr).toMatch(/REFUSED.*not a literal AUDIT_ACTION/);
+    });
+
+    it("refuses a spread of .map() inside a bulk array literal", () => {
+      ALL.forEach((a, i) => writeRoute(`crit-${i}/route.ts`, inTx(a)));
+      writeRoute("scim/bulk-spread/route.ts", bulkSpreadOfMap(ALL[0]));
+      const { exitCode, stdout, stderr } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stdout + stderr).toMatch(/REFUSED.*spread of a \.map\(\)/);
+    });
+
+    it("does not count logAuditBulkAsync toward the atomic action set", () => {
+      ALL.slice(0, -1).forEach((a, i) => writeRoute(`crit-${i}/route.ts`, inTx(a)));
+      writeRoute("scim/bulk-async/route.ts", bulkAsync(ALL[ALL.length - 1]));
+      const { exitCode, stdout, stderr } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stdout + stderr).toContain(ALL[ALL.length - 1]);
+    });
   });
 
   it("passes against the real repo", () => {

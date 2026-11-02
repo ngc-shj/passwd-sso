@@ -24,6 +24,19 @@
  * _EXECUTE → deleted-entry / invalidated-session counts). Forcing those into the
  * CAS tx drops the outcome data. Rejection audits (no mutation) also stay async.
  *
+ * `logAuditBulkInTx(tx, tenantId, params[])` (scim-team-admission-approval-plan.md
+ * C4) is a second in-tx helper: one call enqueues several rows for one SCIM
+ * sync, so its `action:` lives per-element, not on the call itself. Its last
+ * argument is read as EITHER an array literal of object literals, OR a `.map`
+ * call whose arrow callback returns an object literal (a parenthesised/concise
+ * body only — a block body is unreadable). Each element's `action:` must be a
+ * literal `AUDIT_ACTION.<NAME>`; a computed or conditional one (a ternary, a
+ * ReferenceExpression, anything but `AUDIT_ACTION.X`) is REFUSED outright —
+ * printed and FAILED — even when every critical action is otherwise present,
+ * because the gate cannot tell which action such a call writes. A spread of a
+ * `.map()` inside the array literal is refused the same way. `logAuditBulkAsync`
+ * is a different helper (post-commit, best-effort) and does not count here.
+ *
  * Runs without a Program (in-memory project).
  */
 import { SyntaxKind } from "ts-morph";
@@ -59,6 +72,17 @@ const CRITICAL_ACTIONS = new Set([
   // check-emergency-activate-atomic.mjs is the site-scoped companion that covers
   // both — verified by mutation: reverting one emitter leaves THIS gate green.
   "EMERGENCY_ACCESS_ACTIVATE",
+  // scim-team-admission-approval-plan.md C3/C4: approve/reject are single-mutation
+  // CAS routes; the SCIM PUT/PATCH transitions and confirm-key's distribution are
+  // enqueued in bulk (logAuditBulkInTx) inside the same SCIM transaction.
+  "TEAM_MEMBER_SCIM_APPROVE",
+  "TEAM_MEMBER_SCIM_REJECT",
+  "TEAM_MEMBER_SCIM_PENDING",
+  "TEAM_MEMBER_SCIM_PENDING_WITHDRAW",
+  "TEAM_MEMBER_SCIM_REMOVE",
+  "TEAM_MEMBER_SCIM_ROLE_UPDATE",
+  "TEAM_MEMBER_KEY_DISTRIBUTE",
+  "SCIM_GROUP_MAPPING_CREATE",
 ]);
 
 const project = createAstProject();
@@ -99,6 +123,106 @@ function actionFromDescriptor(objLiteral) {
   return actionNameFromObject(init);
 }
 
+// A readable per-element `action:` of a logAuditBulkInTx array element (or
+// `.map` return value): `{ kind: "literal", name }` when it is
+// `AUDIT_ACTION.<NAME>`, `{ kind: "refused", reason }` when present but not a
+// literal we can attribute to one action, `null` when the element carries no
+// `action:` property at all (not every element need name one here — only a
+// present-but-unreadable one is refused).
+function bulkElementAction(objLiteral) {
+  if (!objLiteral || objLiteral.getKind() !== SyntaxKind.ObjectLiteralExpression) {
+    return { kind: "refused", reason: "not an object literal" };
+  }
+  const prop = objLiteral.getProperty?.("action");
+  if (!prop) return null;
+  if (prop.getKind() !== SyntaxKind.PropertyAssignment) {
+    return { kind: "refused", reason: "action is not a plain property" };
+  }
+  const init = prop.getInitializer();
+  if (init && init.getKind() === SyntaxKind.PropertyAccessExpression) {
+    const recv = init.getExpression();
+    if (recv.getKind() === SyntaxKind.Identifier && recv.getText() === "AUDIT_ACTION") {
+      return { kind: "literal", name: init.getName() };
+    }
+  }
+  return { kind: "refused", reason: `action is ${init ? init.getKindName() : "absent"}, not a literal AUDIT_ACTION.<NAME>` };
+}
+
+/** A `.map` call whose last argument is an arrow function, else null. */
+function mapArrowCallback(call) {
+  const callee = call.getExpression();
+  if (callee.getKind() !== SyntaxKind.PropertyAccessExpression || callee.getName() !== "map") return null;
+  const args = call.getArguments();
+  const cb = args[args.length - 1];
+  return cb && cb.getKind() === SyntaxKind.ArrowFunction ? cb : null;
+}
+
+/** The object literal a `.map` arrow callback returns (parenthesised/concise body only), else null. */
+function mapReturnedObject(cb) {
+  const body = cb.getBody();
+  const expr = body.getKind() === SyntaxKind.ParenthesizedExpression ? body.getExpression() : body;
+  return expr.getKind() === SyntaxKind.ObjectLiteralExpression ? expr : null;
+}
+
+// `logAuditBulkInTx` call sites whose action cannot be attributed to one
+// AUDIT_ACTION member. Reported and FAILED regardless of CRITICAL_ACTIONS
+// coverage — the gate cannot tell which action such a call writes, so it
+// cannot vouch for it being the critical one even when every critical name
+// happens to appear elsewhere.
+const refusedBulkSites = [];
+
+function siteOf(sf, node) {
+  return `${sf.getFilePath()}:${node.getStartLineNumber()}`;
+}
+
+function recordBulkAction(result, sf, node) {
+  if (!result) return;
+  if (result.kind === "literal") {
+    seenInTxActions.add(result.name);
+    return;
+  }
+  refusedBulkSites.push(`${siteOf(sf, node)}: ${result.reason}`);
+}
+
+// Classify the last argument of a `logAuditBulkInTx(tx, tenantId, params)`
+// call: an array literal of object literals, or a `.map` call returning one.
+// `call` is the logAuditBulkInTx CallExpression itself, used to report a
+// missing params argument (there is no argument node to point at).
+function classifyBulkParams(paramsArg, sf, call) {
+  if (!paramsArg) {
+    refusedBulkSites.push(`${siteOf(sf, call)}: logAuditBulkInTx called with no params argument`);
+    return;
+  }
+  if (paramsArg.getKind() === SyntaxKind.ArrayLiteralExpression) {
+    for (const el of paramsArg.getElements()) {
+      if (el.getKind() === SyntaxKind.SpreadElement) {
+        const inner = el.getExpression();
+        if (inner.getKind() === SyntaxKind.CallExpression && mapArrowCallback(inner)) {
+          refusedBulkSites.push(`${siteOf(sf, el)}: a spread of a .map() inside the bulk array literal is refused (cannot verify each action)`);
+          continue;
+        }
+        refusedBulkSites.push(`${siteOf(sf, el)}: a spread element inside the bulk array literal is refused`);
+        continue;
+      }
+      recordBulkAction(bulkElementAction(el), sf, el);
+    }
+    return;
+  }
+  if (paramsArg.getKind() === SyntaxKind.CallExpression) {
+    const cb = mapArrowCallback(paramsArg);
+    if (cb) {
+      const returned = mapReturnedObject(cb);
+      if (returned) {
+        recordBulkAction(bulkElementAction(returned), sf, returned);
+        return;
+      }
+      refusedBulkSites.push(`${siteOf(sf, paramsArg)}: .map callback does not return an object literal directly (a block body is refused)`);
+      return;
+    }
+  }
+  refusedBulkSites.push(`${siteOf(sf, paramsArg)}: logAuditBulkInTx params is not a readable array literal or .map call`);
+}
+
 for (const { sf } of sourceFilesFrom(project, SEARCH_DIRS, REPO_ROOT)) {
   for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
     const callee = call.getExpression();
@@ -111,6 +235,12 @@ for (const { sf } of sourceFilesFrom(project, SEARCH_DIRS, REPO_ROOT)) {
       const args = call.getArguments();
       const action = actionNameFromObject(args[args.length - 1]);
       if (action) seenInTxActions.add(action);
+      continue;
+    }
+
+    if (name === "logAuditBulkInTx") {
+      const args = call.getArguments();
+      classifyBulkParams(args[args.length - 1], sf, call);
       continue;
     }
 
@@ -134,6 +264,17 @@ if (missing.length > 0) {
   console.error("");
   console.error(`FAIL: ${missing.length} security-critical action(s) lost their atomic audit path.`);
   console.error("The success audit must live INSIDE the mutation transaction, not a post-commit logAuditAsync.");
+}
+
+if (refusedBulkSites.length > 0) {
+  for (const site of refusedBulkSites) {
+    console.error(`REFUSED: ${site} (logAuditBulkInTx action must be a literal AUDIT_ACTION.<NAME> the gate can verify).`);
+  }
+  console.error("");
+  console.error(`FAIL: ${refusedBulkSites.length} logAuditBulkInTx call(s) have an unreadable, computed, or conditional action.`);
+}
+
+if (missing.length > 0 || refusedBulkSites.length > 0) {
   process.exit(1);
 }
 

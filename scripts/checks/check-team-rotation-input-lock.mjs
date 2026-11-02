@@ -42,6 +42,25 @@
  *    deleted by nothing (FK cascade aside): no Prisma write of
  *    `tenantMemberDeparture`, no raw write elsewhere, no raw DELETE.
  *
+ * 7. SCIM ADMISSION MARKER (docs/archive/review/scim-team-admission-approval-plan.md
+ *    C2/C4, Forbidden patterns). In scim-group-service.ts: every `teamMember`
+ *    write payload (`data`, an `upsert`'s `create`/`update`, a nested
+ *    `members: { create/createMany/connectOrCreate }`) must be readable as an
+ *    object literal (a `createMany*` array element, or a `.map` whose arrow
+ *    callback returns one in a parenthesised/concise body — a block body is
+ *    refused); none may name `deactivatedAt: null`; every creating payload
+ *    must name `scimApprovalPending: true` and a non-null `deactivatedAt`; no
+ *    raw template in that file writes `team_members`. Repo-wide, OUTSIDE
+ *    migrations and BEFORE the IMPLEMENTATIONS skip (so team-departure.ts and
+ *    the lock modules are covered too): a `scimApprovalPending` property
+ *    (identifier, quoted, or shorthand key) whose value is not the literal
+ *    `true` is refused unless the file is the approve route; any string or
+ *    template literal naming `scim_approval_pending` is refused everywhere (no
+ *    code needs raw access to the column).
+ *
+ *    KNOWN LIMIT (rule 7): a column name assembled from fragments at runtime
+ *    is not seen.
+ *
  * A `data` / `update` that is not an object literal (an identifier, a spread)
  * cannot be read, so it counts: the gate refuses rather than skips what it
  * cannot see. Reviewed sites are listed in EXEMPTIONS; each key must match
@@ -166,7 +185,7 @@ function classifyMemberWrite(call, mm) {
   if (model === "teamMemberKey" && (method === "delete" || method === "deleteMany")) return site;
   if (model !== "teamMember") return null;
   if (method === "delete" || method === "deleteMany") return site;
-  if ((method === "update" || method === "updateMany") && mayName(argProp(call, "data"), MEMBER_KEYS)) return site;
+  if ((method === "update" || method === "updateMany" || method === "updateManyAndReturn") && mayName(argProp(call, "data"), MEMBER_KEYS)) return site;
   if (method === "upsert" && mayName(argProp(call, "update"), MEMBER_KEYS)) return site;
   return null;
 }
@@ -175,14 +194,14 @@ function classifyMemberWrite(call, mm) {
 function classifyTenantStateWrite(call, mm) {
   if (mm.model !== "tenantMember") return null;
   const site = `tenantMember.${mm.method}`;
-  if (mm.method === "update" || mm.method === "updateMany") {
+  if (mm.method === "update" || mm.method === "updateMany" || mm.method === "updateManyAndReturn") {
     return mayName(argProp(call, "data"), ["deactivatedAt"]) ? { site, create: false } : null;
   }
   if (mm.method === "upsert") {
     if (mayName(argProp(call, "update"), ["deactivatedAt"])) return { site, create: false };
     return mayName(argProp(call, "create"), ["deactivatedAt"]) ? { site, create: true } : null;
   }
-  if (mm.method === "create" || mm.method === "createMany") {
+  if (mm.method === "create" || mm.method === "createMany" || mm.method === "createManyAndReturn") {
     return mayName(argProp(call, "data"), ["deactivatedAt"]) ? { site, create: true } : null;
   }
   return null;
@@ -200,12 +219,12 @@ function reactivates(call) {
 
 function classifyAdmission(call, mm) {
   const { model, method } = mm;
-  if (model === "teamMember" && ["create", "createMany", "upsert"].includes(method)) return `teamMember.${method}`;
-  if (model === "teamMember" && (method === "update" || method === "updateMany") && reactivates(call)) {
+  if (model === "teamMember" && ["create", "createMany", "createManyAndReturn", "upsert"].includes(method)) return `teamMember.${method}`;
+  if (model === "teamMember" && (method === "update" || method === "updateMany" || method === "updateManyAndReturn") && reactivates(call)) {
     return `teamMember.${method}`;
   }
-  if (model === "teamInvitation" && (method === "create" || method === "createMany")) return `teamInvitation.${method}`;
-  if (model === "team" && method === "create" && mayName(propOf(argProp(call, "data"), "members"), ["create", "createMany"])) {
+  if (model === "teamInvitation" && (method === "create" || method === "createMany" || method === "createManyAndReturn")) return `teamInvitation.${method}`;
+  if (model === "team" && method === "create" && mayName(propOf(argProp(call, "data"), "members"), ["create", "createMany", "createManyAndReturn"])) {
     return "team.create(members)";
   }
   return null;
@@ -270,6 +289,191 @@ function passesAlreadyLocked(fn, options) {
   return p !== undefined && Node.isPropertyAssignment(p) && p.getInitializer()?.getText() === "true";
 }
 
+// ── Rule 7: SCIM admission marker (scim-team-admission-approval-plan.md, Forbidden patterns) ──
+
+const SCIM_GROUP_SERVICE_FILE = "src/lib/services/scim-group-service.ts";
+const SCIM_APPROVE_ROUTE_FILE = "src/app/api/teams/[teamId]/members/[memberId]/approve/route.ts";
+const NON_CREATING_TEAM_MEMBER_METHODS = new Set(["update", "updateMany", "updateManyAndReturn"]);
+const RAW_TEAM_MEMBERS_WRITE = /\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(?:"?\w+"?\.)?"?team_members"?\b/i;
+
+/** An object literal readable as a write payload (no spread), else `null`; `undefined` passes through. */
+function asObject(node) {
+  if (node === undefined) return undefined;
+  if (node === null) return null;
+  return Node.isObjectLiteralExpression(node) && !node.getProperties().some((p) => Node.isSpreadAssignment(p))
+    ? node
+    : null;
+}
+
+/** The raw initializer of `prop` on object literal `obj`: `undefined` absent, `null` unreadable. */
+function rawProp(obj, prop) {
+  if (!obj || !Node.isObjectLiteralExpression(obj)) return null;
+  if (obj.getProperties().some((p) => Node.isSpreadAssignment(p))) return null;
+  const p = obj.getProperty(prop);
+  if (!p) return undefined;
+  if (Node.isShorthandPropertyAssignment(p)) return null;
+  if (!Node.isPropertyAssignment(p)) return null;
+  return p.getInitializer() ?? null;
+}
+
+/**
+ * A `createMany*` `data` node as a list of element object literals, `null`
+ * standing in for an unreadable element (a non-literal array entry, or a
+ * `.map` whose callback is anything but a concise arrow returning an object
+ * literal — a block body is refused, not inspected for its `return`).
+ */
+function createElements(node) {
+  if (node === null || node === undefined) return [null];
+  if (Node.isArrayLiteralExpression(node)) {
+    return node.getElements().map((el) => asObject(el) ?? null);
+  }
+  if (Node.isCallExpression(node) && calleeName(node) === "map") {
+    const cb = node.getArguments()[node.getArguments().length - 1];
+    if (!cb || !Node.isArrowFunction(cb)) return [null];
+    const body = cb.getBody();
+    const expr = Node.isParenthesizedExpression(body) ? body.getExpression() : body;
+    return [Node.isObjectLiteralExpression(expr) ? asObject(expr) : null];
+  }
+  return [null];
+}
+
+/** `{ literal, creating }` payloads a `teamMember` write call carries, for rule 7. */
+function teamMemberWritePayloads(call, mm) {
+  if (mm.model !== "teamMember") return [];
+  const obj = call.getArguments()[0];
+  if (mm.method === "create") {
+    return [{ literal: asObject(rawProp(obj, "data")) ?? null, creating: true }];
+  }
+  if (mm.method === "createMany" || mm.method === "createManyAndReturn") {
+    const data = rawProp(obj, "data");
+    return createElements(data).map((literal) => ({ literal, creating: true }));
+  }
+  if (mm.method === "upsert") {
+    const out = [];
+    const createLit = rawProp(obj, "create");
+    if (createLit !== undefined) out.push({ literal: asObject(createLit) ?? null, creating: true });
+    const updateLit = rawProp(obj, "update");
+    if (updateLit !== undefined) out.push({ literal: asObject(updateLit) ?? null, creating: false });
+    return out;
+  }
+  if (NON_CREATING_TEAM_MEMBER_METHODS.has(mm.method)) {
+    const data = rawProp(obj, "data");
+    if (data === undefined) return [];
+    return [{ literal: asObject(data) ?? null, creating: false }];
+  }
+  return [];
+}
+
+/**
+ * A `members: { create / createMany / connectOrCreate }` relation payload
+ * nested in a `team` write call's `data` (or an `upsert`'s `create`/`update`
+ * arm) — mirrors classifyAdmission's own `team.create(members)` scope, so a
+ * `members` property elsewhere (e.g. a SCIM Group resource's response list)
+ * is never mistaken for a Prisma relation write.
+ */
+function nestedMemberPayloads(call, mm) {
+  if (mm.model !== "team") return [];
+  const out = [];
+  const scan = (container) => {
+    const literal = asObject(container);
+    if (!literal) return;
+    const membersProp = literal.getProperty("members");
+    if (!membersProp || !Node.isPropertyAssignment(membersProp)) return;
+    const init = membersProp.getInitializer();
+    if (!init || !Node.isObjectLiteralExpression(init)) {
+      out.push({ literal: null, creating: true, node: membersProp });
+      return;
+    }
+    const createProp = init.getProperty("create");
+    if (createProp && Node.isPropertyAssignment(createProp)) {
+      out.push({ literal: asObject(createProp.getInitializer()) ?? null, creating: true, node: createProp });
+    }
+    const createManyProp = init.getProperty("createMany");
+    if (createManyProp && Node.isPropertyAssignment(createManyProp)) {
+      const data = rawProp(createManyProp.getInitializer(), "data");
+      for (const literal of createElements(data)) out.push({ literal, creating: true, node: createManyProp });
+    }
+    const connectOrCreateProp = init.getProperty("connectOrCreate");
+    if (connectOrCreateProp && Node.isPropertyAssignment(connectOrCreateProp)) {
+      const coc = connectOrCreateProp.getInitializer();
+      const items = coc && Node.isArrayLiteralExpression(coc) ? coc.getElements() : [coc];
+      for (const item of items) {
+        const createLit = item ? rawProp(item, "create") : null;
+        out.push({ literal: asObject(createLit) ?? null, creating: true, node: connectOrCreateProp });
+      }
+    }
+  };
+  const obj = call.getArguments()[0];
+  if (mm.method === "upsert") {
+    scan(rawProp(obj, "create"));
+    scan(rawProp(obj, "update"));
+  } else if (["create", "update", "updateMany", "createMany"].includes(mm.method)) {
+    scan(rawProp(obj, "data"));
+  }
+  return out;
+}
+
+/** Rule 7, bullet 1: one payload's readability / no-null-deactivatedAt / creating-marker checks. */
+function checkAdmissionPayload(path, node, { literal, creating }, violations) {
+  if (literal === null) {
+    violations.push(`admission-marker  ${lineOf(path, node)}  unreadable team_members write payload (cannot verify the pending marker)`);
+    return;
+  }
+  const deactivatedAt = literal.getProperty("deactivatedAt");
+  const namesNull = deactivatedAt !== undefined
+    && Node.isPropertyAssignment(deactivatedAt)
+    && deactivatedAt.getInitializer()?.getText() === "null";
+  if (namesNull) {
+    violations.push(`admission-marker  ${lineOf(path, node)}  team_members payload names deactivatedAt: null`);
+  }
+  if (creating) {
+    const marker = literal.getProperty("scimApprovalPending");
+    const markerTrue = marker !== undefined && Node.isPropertyAssignment(marker) && marker.getInitializer()?.getText() === "true";
+    const hasDeactivatedAt = deactivatedAt !== undefined && !namesNull;
+    if (!markerTrue || !hasDeactivatedAt) {
+      violations.push(`admission-marker  ${lineOf(path, node)}  creating team_members payload missing scimApprovalPending: true and a non-null deactivatedAt`);
+    }
+  }
+}
+
+/** Rule 7, bullet 2 (repo-wide, run for EVERY file before the IMPLEMENTATIONS skip). */
+function propertyKeyName(prop) {
+  const nameNode = prop.getNameNode();
+  if (Node.isIdentifier(nameNode)) return nameNode.getText();
+  if (Node.isStringLiteral(nameNode)) return nameNode.getLiteralText();
+  return null;
+}
+
+function checkPendingMarkerRepoWide(sourceFile, path, violations) {
+  const props = [
+    ...sourceFile.getDescendantsOfKind(SyntaxKind.PropertyAssignment),
+    ...sourceFile.getDescendantsOfKind(SyntaxKind.ShorthandPropertyAssignment),
+  ];
+  for (const prop of props) {
+    if (propertyKeyName(prop) !== "scimApprovalPending") continue;
+    if (path === SCIM_APPROVE_ROUTE_FILE) continue;
+    const isTrueLiteral = Node.isPropertyAssignment(prop) && prop.getInitializer()?.getText() === "true";
+    if (isTrueLiteral) continue;
+    violations.push(`admission-marker  ${lineOf(path, prop)}  scimApprovalPending set to something other than the literal true outside the approve route`);
+  }
+}
+
+function checkRawColumnNameRepoWide(sourceFile, path, violations) {
+  const literalNodes = [
+    ...sourceFile.getDescendantsOfKind(SyntaxKind.StringLiteral),
+    ...sourceFile.getDescendantsOfKind(SyntaxKind.NoSubstitutionTemplateLiteral),
+    ...sourceFile.getDescendantsOfKind(SyntaxKind.TemplateHead),
+    ...sourceFile.getDescendantsOfKind(SyntaxKind.TemplateMiddle),
+    ...sourceFile.getDescendantsOfKind(SyntaxKind.TemplateTail),
+  ];
+  for (const lit of literalNodes) {
+    const text = Node.isStringLiteral(lit) || Node.isNoSubstitutionTemplateLiteral(lit) ? lit.getLiteralText() : lit.getText();
+    if (text.includes("scim_approval_pending")) {
+      violations.push(`admission-marker  ${lineOf(path, lit)}  raw access to scim_approval_pending by column name (no code needs it)`);
+    }
+  }
+}
+
 const project = createAstProject();
 const sites = [];
 const violations = [];
@@ -278,6 +482,11 @@ const lineOf = (path, node) => `${path}:${node.getStartLineNumber()}`;
 const TENANT_LOCK_OR_WRAPPER = new Set([...TENANT_LOCKS, ...TENANT_LOCK_WRAPPERS]);
 
 for (const { rel: path, sf: sourceFile } of sourceFilesFrom(project, TARGETS, REPO_ROOT)) {
+  // Rule 7, bullet 2: repo-wide, runs for every file BEFORE the IMPLEMENTATIONS
+  // skip below, so team-departure.ts and the lock modules stay covered.
+  checkPendingMarkerRepoWide(sourceFile, path, violations);
+  checkRawColumnNameRepoWide(sourceFile, path, violations);
+
   if (IMPLEMENTATIONS.has(path)) continue;
 
   for (const call of sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
@@ -313,6 +522,15 @@ for (const { rel: path, sf: sourceFile } of sourceFilesFrom(project, TARGETS, RE
       const key = keyOf("admission", path, call, admission);
       sites.push({ rule: "admissions", key, line: lineOf(path, call), ok: covered(sourceFile, call, TENANT_LOCK_OR_WRAPPER) });
     }
+
+    if (path === SCIM_GROUP_SERVICE_FILE) {
+      for (const payload of teamMemberWritePayloads(call, mm)) {
+        checkAdmissionPayload(path, call, payload, violations);
+      }
+      for (const { literal, creating, node } of nestedMemberPayloads(call, mm)) {
+        checkAdmissionPayload(path, node, { literal, creating }, violations);
+      }
+    }
   }
 
   for (const raw of rawWrites(sourceFile)) {
@@ -324,6 +542,9 @@ for (const { rel: path, sf: sourceFile } of sourceFilesFrom(project, TARGETS, RE
     }
     if (RAW_TENANT_STATE_WRITE.test(text)) {
       violations.push(`tenant-state  ${lineOf(path, raw)}  raw write of tenant_members.deactivated_at outside team-departure.ts`);
+    }
+    if (path === SCIM_GROUP_SERVICE_FILE && RAW_TEAM_MEMBERS_WRITE.test(text)) {
+      violations.push(`admission-marker  ${lineOf(path, raw)}  raw write of team_members in scim-group-service.ts (the payload marker cannot be verified)`);
     }
     const departureRaw = RAW_DEPARTURE_WRITE.exec(text);
     if (departureRaw) {

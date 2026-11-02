@@ -309,4 +309,125 @@ export const rotate = withTenantRls(prisma, tenantId, async (tx) => {
   it("fails when the site counts differ from the pinned ones", () => {
     expectDenied(run({ writes: 2 }), /differ from the pinned/);
   });
+
+  describe("rule 7: SCIM admission marker", () => {
+    const SERVICE = "src/lib/services/scim-group-service.ts";
+    const APPROVE = "src/app/api/teams/[teamId]/members/[memberId]/approve/route.ts";
+
+    it("refuses a raw INSERT of team_members in the service", () => {
+      write(SERVICE, "export async function add(tx, t, u) { await tx.$executeRaw`INSERT INTO team_members (team_id, user_id) VALUES (${t}::uuid, ${u}::uuid)`; }");
+      expectDenied(run(), /raw write of team_members in scim-group-service\.ts/);
+    });
+
+    it("refuses a raw UPDATE of team_members in the service", () => {
+      write(SERVICE, "export async function bump(tx, id) { await tx.$executeRaw`UPDATE team_members SET role = 'ADMIN' WHERE id = ${id}::uuid`; }");
+      expectDenied(run({ writes: 2 }), /raw write of team_members in scim-group-service\.ts/);
+    });
+
+    it("refuses an unreadable data on a teamMember.update", () => {
+      write(SERVICE, "export async function upd(tx, id, payload) { await tx.teamMember.update({ where: { id }, data: payload }); }");
+      expectDenied(run({ writes: 2, admissions: 1 }), /unreadable team_members write payload/);
+    });
+
+    it("refuses a createMany .map with a block-body callback", () => {
+      write(SERVICE, `export async function add(tx, ids) {
+  await tx.teamMember.createMany({ data: ids.map((uid) => { return { userId: uid }; }) });
+}`);
+      expectDenied(run({ admissions: 1 }), /unreadable team_members write payload/);
+    });
+
+    it("refuses a create without the pending marker", () => {
+      write(SERVICE, "export async function add(tx, teamId, userId, role) { await tx.teamMember.create({ data: { teamId, userId, role } }); }");
+      expectDenied(run({ admissions: 1 }), /creating team_members payload missing scimApprovalPending: true and a non-null deactivatedAt/);
+    });
+
+    it("refuses an upsert.create without the pending marker", () => {
+      write(SERVICE, `export async function add(tx, where, teamId, userId, role) {
+  await tx.teamMember.upsert({ where, create: { teamId, userId, role }, update: { role } });
+}`);
+      expectDenied(run({ admissions: 1 }), /creating team_members payload missing scimApprovalPending: true and a non-null deactivatedAt/);
+    });
+
+    it("refuses a nested members.create without the pending marker", () => {
+      write(SERVICE, `export async function build(tx, name, userId, role) {
+  await tx.team.create({ data: { name, members: { create: { userId, role } } } });
+}`);
+      expectDenied(run({ admissions: 1 }), /creating team_members payload missing scimApprovalPending: true and a non-null deactivatedAt/);
+    });
+
+    it("refuses a create naming deactivatedAt: null", () => {
+      write(SERVICE, `export async function add(tx, teamId, userId, role) {
+  await tx.teamMember.create({ data: { teamId, userId, role, scimApprovalPending: true, deactivatedAt: null } });
+}`);
+      expectDenied(run({ admissions: 1 }), /team_members payload names deactivatedAt: null/);
+    });
+
+    it("refuses an upsert update arm naming deactivatedAt: null", () => {
+      write(SERVICE, `export async function add(tx, where, teamId, userId, role) {
+  await tx.teamMember.upsert({
+    where,
+    create: { teamId, userId, role, scimApprovalPending: true, deactivatedAt: new Date() },
+    update: { deactivatedAt: null },
+  });
+}`);
+      expectDenied(run({ writes: 2, admissions: 1 }), /team_members payload names deactivatedAt: null/);
+    });
+
+    it("refuses a createManyAndReturn without the pending marker", () => {
+      write(SERVICE, "export async function add(tx, teamId, userId, role) { await tx.teamMember.createManyAndReturn({ data: [{ teamId, userId, role }] }); }");
+      expectDenied(run({ admissions: 1 }), /creating team_members payload missing scimApprovalPending: true and a non-null deactivatedAt/);
+    });
+
+    it("refuses an updateManyAndReturn naming deactivatedAt: null", () => {
+      write(SERVICE, "export async function back(tx, ids) { await tx.teamMember.updateManyAndReturn({ where: { id: { in: ids } }, data: { deactivatedAt: null } }); }");
+      expectDenied(run({ writes: 2, admissions: 1 }), /team_members payload names deactivatedAt: null/);
+    });
+
+    it("refuses scimApprovalPending: false outside the approve route", () => {
+      write(SUBJECT, "export async function off(tx, id) { await tx.teamMember.update({ where: { id }, data: { scimApprovalPending: false } }); }");
+      expectDenied(run(), /scimApprovalPending set to something other than the literal true outside the approve route/);
+    });
+
+    it("refuses a variable value for scimApprovalPending outside the approve route", () => {
+      write(SUBJECT, "export async function off(tx, id, pending) { await tx.teamMember.update({ where: { id }, data: { scimApprovalPending: pending } }); }");
+      expectDenied(run(), /scimApprovalPending set to something other than the literal true outside the approve route/);
+    });
+
+    it("refuses a shorthand scimApprovalPending outside the approve route", () => {
+      write(SUBJECT, "export async function off(tx, id, scimApprovalPending) { await tx.teamMember.update({ where: { id }, data: { scimApprovalPending } }); }");
+      expectDenied(run(), /scimApprovalPending set to something other than the literal true outside the approve route/);
+    });
+
+    it("refuses a quoted scimApprovalPending key outside the approve route", () => {
+      write(SUBJECT, 'export async function off(tx, id) { await tx.teamMember.update({ where: { id }, data: { "scimApprovalPending": false } }); }');
+      expectDenied(run(), /scimApprovalPending set to something other than the literal true outside the approve route/);
+    });
+
+    it("refuses a parameterised raw template naming scim_approval_pending", () => {
+      write(SUBJECT, "export function clause(v) { return `scim_approval_pending = ${v}`; }");
+      expectDenied(run(), /raw access to scim_approval_pending by column name/);
+    });
+
+    it("refuses a Prisma.sql fragment naming scim_approval_pending", () => {
+      write(SUBJECT, "export function frag() { return Prisma.sql`scim_approval_pending`; }");
+      expectDenied(run(), /raw access to scim_approval_pending by column name/);
+    });
+
+    it("refuses the same raw template in team-departure.ts, ahead of the IMPLEMENTATIONS skip", () => {
+      write("src/lib/team/team-departure.ts", "export function clause(v) { return `scim_approval_pending = ${v}`; }");
+      expectDenied(run(), /raw access to scim_approval_pending by column name/);
+    });
+
+    it("passes the approve route's CAS (literal true in the where, literal false in the data)", () => {
+      write(APPROVE, `export const approve = withTenantRls(prisma, tenantId, async (tx) => {
+  await lockTenantRows(tx, tenantId, [approverId, targetId], "share");
+  await lockTeamsAgainstRotation(tx, [teamId]);
+  await tx.teamMember.updateMany({
+    where: { id, teamId, role: expectedRole, scimApprovalPending: true, deactivatedAt: { not: null } },
+    data: { deactivatedAt: null, scimApprovalPending: false, keyDistributed: false },
+  });
+});`);
+      expect(run({ writes: 2, admissions: 1 }).code).toBe(0);
+    });
+  });
 });
