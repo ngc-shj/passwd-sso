@@ -777,10 +777,12 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO pa
 -- exist when they run, so a role created after migrating needs them here (run
 -- after `prisma migrate deploy`; the routines must exist). Every RLS policy
 -- calls the rls_bypass_* functions; the SECURITY DEFINER audit routines are the
--- app role's only path to purge or re-tenant audit_logs.
+-- app role's only path to purge or re-tenant audit_logs; every share serve path
+-- and share list calls share_creator_admitted (without it, every share is refused).
 GRANT EXECUTE ON FUNCTION public.rls_bypass_admits(text), public.rls_bypass_enforced() TO passwd_app;
 GRANT EXECUTE ON FUNCTION public.audit_log_purge(uuid, timestamptz) TO passwd_app;
 GRANT EXECUTE ON PROCEDURE public.audit_log_tenant_migrate(uuid, uuid, uuid) TO passwd_app;
+GRANT EXECUTE ON FUNCTION public.share_creator_admitted(uuid) TO passwd_app;
 ```
 
 **Environment variables:**

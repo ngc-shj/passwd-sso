@@ -9,6 +9,11 @@ describe("shareLinkStatus", () => {
   });
 
   it("treats an absent creatorAdmitted as admitted", () => {
+    expect("creatorAdmitted" in active).toBe(false);
+    expect(shareLinkStatus(active)).toBe(SHARE_LINK_STATUS.ACTIVE);
+  });
+
+  it("is active for an admitted creator", () => {
     expect(shareLinkStatus({ ...active, creatorAdmitted: true })).toBe(SHARE_LINK_STATUS.ACTIVE);
   });
 

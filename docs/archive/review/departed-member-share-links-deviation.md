@@ -42,6 +42,14 @@
 - The control proves the sink sees a report on this connection; the no-context and
   tenant contexts cannot raise one (no bypass is on), so a control there would not fire.
 
+## D7 No integration cell for the absent verify-access audit row
+
+- Plan: a refusal asserts audit absent among the effects.
+- Implemented: `verify-access/route.test.ts` asserts `logAuditAsync` is not called on
+  the refused path (the pre-check returns before the password check that writes it).
+- Why: `logAuditAsync` enqueues to `audit_outbox` after the request returns, so a
+  real-DB "no row" check would pass whether or not the write was merely late.
+
 ## Red-proofs (Phase 2)
 
 Destructive ones ran in a scratch worktree against an isolated database

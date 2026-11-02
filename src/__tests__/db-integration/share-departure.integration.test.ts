@@ -87,7 +87,7 @@ import { ShareError } from "@/components/share/share-error";
 import { ShareProtectedContent } from "@/components/share/share-protected-content";
 import { POST as verifyAccess } from "@/app/api/share-links/verify-access/route";
 import { GET as shareContent } from "@/app/api/share-links/[id]/content/route";
-import { POST as createShareLink } from "@/app/api/share-links/route";
+import { POST as createShareLink, GET as listShareLinks } from "@/app/api/share-links/route";
 import { GET as listMine } from "@/app/api/share-links/mine/route";
 import { PATCH as scimPatchUser, DELETE as scimDeleteUser } from "@/app/api/scim/v2/Users/[id]/route";
 import { DELETE as removeMember } from "@/app/api/teams/[teamId]/members/[memberId]/route";
@@ -328,7 +328,11 @@ describe("share links across a creator's departure — real-DB integration", () 
   ])("A2: refused after %s", async (_label, path) => {
     const t = await teamWithCreator();
     const s = await share({ creatorId: t.creator, teamEntryId: t.entryId });
+    const locked = await share({ creatorId: t.creator, teamEntryId: t.entryId, protect: true });
+    const revokedControl = await share({ creatorId: t.creator, teamEntryId: t.entryId, protect: true });
+    await sql(`UPDATE password_shares SET revoked_at = now() WHERE id = $1::uuid`, revokedControl.id);
     expect(await page(s)).toBe("served");
+    expect((await verify(locked)).status).toBe(200);
 
     if (path === "scim-delete") {
       const res = await scimDeleteUser(new NextRequest(`http://localhost/api/scim/v2/Users/${t.creator}`, { method: "DELETE" }), {
@@ -347,6 +351,10 @@ describe("share links across a creator's departure — real-DB integration", () 
 
     expect(await page(s)).toBe("error:revoked");
     expect((await state(s.id)).view_count).toBe(1);
+    expect(await page(locked)).toBe("error:revoked");
+    expect(await verify(locked)).toEqual(await verify(revokedControl));
+    expect(await content(locked)).toEqual(await content(revokedControl));
+    expect((await state(locked.id)).view_count).toBe(0);
   });
 
   it("A3: restoring the entry from the trash serves the link again", async () => {
@@ -421,23 +429,52 @@ describe("share links across a creator's departure — real-DB integration", () 
     expect(await page({ id, token })).toBe(removed ? "error:revoked" : "served");
   });
 
+  it("A7: a share row inserted after the creator's tenant departure is refused", async () => {
+    const t = await teamWithCreator();
+    expect((await scimActive(t.creator, false)).status).toBe(200);
+    const late = await share({ creatorId: t.creator, teamEntryId: t.entryId });
+    expect(await page(late)).toBe("error:revoked");
+  });
+
   // ── A8: lists ──
 
-  it("A8: /mine?team= reports creatorAdmitted=false to an admin; a VIEWER does not list another member's link", async () => {
+  it("A8: /mine?team= reports creatorAdmitted=false to an admin and a member; a VIEWER does not list another member's link", async () => {
     const t = await teamWithCreator();
     const viewer = await member();
     await addTeamMember(t.teamId, viewer, "VIEWER");
+    const otherMember = await member();
+    await addTeamMember(t.teamId, otherMember, "MEMBER");
     await share({ creatorId: t.creator, teamEntryId: t.entryId });
     await remove(t.teamId, t.owner, t.creatorRow);
 
-    mockAuth.mockResolvedValue({ user: { id: t.owner } });
-    const asOwner = await listMine(new NextRequest(`http://localhost/api/share-links/mine?team=${t.teamId}`));
-    const items = ((await asOwner.json()) as { items: { creatorAdmitted: boolean }[] }).items;
-    expect(items.map((i) => i.creatorAdmitted)).toEqual([false]);
+    for (const who of [t.owner, otherMember]) {
+      mockAuth.mockResolvedValue({ user: { id: who } });
+      const res = await listMine(new NextRequest(`http://localhost/api/share-links/mine?team=${t.teamId}`));
+      const items = ((await res.json()) as { items: { creatorAdmitted: boolean }[] }).items;
+      expect(items.map((i) => i.creatorAdmitted)).toEqual([false]);
+    }
 
     mockAuth.mockResolvedValue({ user: { id: viewer } });
     const asViewer = await listMine(new NextRequest(`http://localhost/api/share-links/mine?team=${t.teamId}`));
     expect(((await asViewer.json()) as { items: unknown[] }).items).toEqual([]);
+  });
+
+  it("A8: GET /api/share-links as the creator re-admitted on a new membership reports their old link as not admitted", async () => {
+    const t = await teamWithCreator();
+    const old = await share({ creatorId: t.creator, teamEntryId: t.entryId, createdAt: "now() - interval '1 minute'" });
+    await remove(t.teamId, t.owner, t.creatorRow);
+    await addTeamMember(t.teamId, t.creator, "MEMBER");
+    const fresh = await share({ creatorId: t.creator, teamEntryId: t.entryId });
+
+    mockAuth.mockResolvedValue({ user: { id: t.creator } });
+    const res = await listShareLinks(
+      new NextRequest(`http://localhost/api/share-links?teamPasswordEntryId=${t.entryId}`),
+    );
+    const items = ((await res.json()) as { items: { id: string; creatorAdmitted: boolean }[] }).items;
+    expect(Object.fromEntries(items.map((i) => [i.id, i.creatorAdmitted]))).toEqual({
+      [old.id]: false,
+      [fresh.id]: true,
+    });
   });
 
   // ── A9: the team-share CHECK ──
@@ -599,6 +636,7 @@ describe("share links across a creator's departure — real-DB integration", () 
     const deadLocked = await share({ creatorId: t.creator, teamEntryId: t.entryId, shareType, maxViews, protect: true });
     const owner = t.owner;
     const liveOpen = await share({ creatorId: owner, teamEntryId: t.entryId, shareType, maxViews });
+    const liveLocked = await share({ creatorId: owner, teamEntryId: t.entryId, shareType, maxViews, protect: true });
     await remove(t.teamId, t.owner, t.creatorRow);
 
     forceAdmitted.on = true;
@@ -610,5 +648,6 @@ describe("share links across a creator's departure — real-DB integration", () 
       expect(after.logs).toBe(0);
     }
     expect(await page(liveOpen)).toBe("served");
+    expect((await content(liveLocked)).status).toBe(200);
   });
 });
