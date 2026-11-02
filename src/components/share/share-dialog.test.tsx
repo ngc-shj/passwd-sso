@@ -270,6 +270,39 @@ describe("ShareDialog — §Sec-1 share-flow crypto invariants", () => {
     });
   });
 
+  it("labels a link whose creator is no longer in the team, and only that one", async () => {
+    const link = {
+      expiresAt: "2099-01-01T00:00:00Z",
+      maxViews: null,
+      viewCount: 0,
+      revokedAt: null,
+      createdAt: "2026-01-01T00:00:00Z",
+      isActive: true,
+    };
+    mockFetch.mockResolvedValue(
+      okJson({
+        items: [
+          { ...link, id: "dead", creatorAdmitted: false },
+          { ...link, id: "live", creatorAdmitted: true },
+        ],
+      }),
+    );
+
+    render(
+      <ShareDialog
+        open={true}
+        onOpenChange={vi.fn()}
+        passwordEntryId="p1"
+        entryType="LOGIN"
+        decryptedData={{ title: "x" }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByText("creatorNotInTeam")).toHaveLength(1);
+    });
+  });
+
   it("renders 'sharing disabled by policy' when team policy disallows sharing", async () => {
     mockFetch
       .mockResolvedValueOnce(okJson({ items: [] }))

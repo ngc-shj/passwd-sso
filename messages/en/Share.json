@@ -19,6 +19,7 @@
   "viewCount": "{current} / {max} views",
   "revoked": "Revoked",
   "expired": "Expired",
+  "creatorNotInTeam": "Unavailable: creator is no longer in the team",
   "revokeSuccess": "Share link revoked",
   "revokeError": "Failed to revoke",
   "sharedEntry": "Shared Entry",

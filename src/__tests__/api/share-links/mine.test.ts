@@ -18,6 +18,17 @@ const { mockUserFindMany, mockWithBypassRls } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+// Creator admission (#990) at the module boundary: admitted unless a test says otherwise.
+const { mockIsShareCreatorAdmitted, mockCreatorAdmittedByShareId } = vi.hoisted(() => ({
+  mockIsShareCreatorAdmitted: vi.fn(async (_tx: unknown, _shareId: string) => true),
+  mockCreatorAdmittedByShareId: vi.fn(
+    async (_tx: unknown, ids: readonly string[]) => new Map(ids.map((id) => [id, true] as [string, boolean])),
+  ),
+}));
+vi.mock("@/lib/share/share-admission", () => ({
+  isShareCreatorAdmitted: mockIsShareCreatorAdmitted,
+  creatorAdmittedByShareId: mockCreatorAdmittedByShareId,
+}));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordShare: { findMany: mockFindMany },
@@ -106,6 +117,18 @@ describe("GET /api/share-links/mine", () => {
     expect(json.items[0].sharedBy).toBe("Alice");
     expect(json.items[0].canRevoke).toBe(true);
     expect(json.nextCursor).toBeNull();
+  });
+
+  it("reports creatorAdmitted=false for a link whose creator left the entry's team", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockFindMany.mockResolvedValue([makeShare()]);
+    mockCreatorAdmittedByShareId.mockResolvedValueOnce(new Map([["share-1", false]]));
+
+    const res = await GET(createRequest("GET", "http://localhost/api/share-links/mine") as never);
+    const { json } = await parseResponse(res);
+
+    expect(json.items[0].creatorAdmitted).toBe(false);
+    expect(json.items[0].isActive).toBe(true);
   });
 
   it("computes isActive=false when revoked", async () => {

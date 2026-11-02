@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { SHARE_LINK_STATUS, shareLinkStatus } from "@/lib/share/share-link-status";
 import {
   Select,
   SelectContent,
@@ -62,6 +63,8 @@ interface ShareLinkItem {
   sharedBy: string | null;
   canRevoke: boolean;
   isActive: boolean;
+  /** False when the link no longer serves because its creator left the entry's team. */
+  creatorAdmitted?: boolean;
 }
 
 const ENTRY_TYPE_ICONS: Record<string, React.ReactNode> = {
@@ -209,35 +212,41 @@ export default function ShareLinksPage() {
   const formatDate = (iso: string) => formatDateTime(iso, locale);
 
   const getStatusBadge = (link: ShareLinkItem) => {
-    if (link.isActive) {
-      return (
-        <Badge
-          variant="outline"
-          className="text-xs border-green-500 text-green-600 dark:text-green-400"
-        >
-          {t("active")}
-        </Badge>
-      );
+    switch (shareLinkStatus(link)) {
+      case SHARE_LINK_STATUS.CREATOR_NOT_IN_TEAM:
+        return (
+          <Badge variant="secondary" className="text-xs">
+            {tShare("creatorNotInTeam")}
+          </Badge>
+        );
+      case SHARE_LINK_STATUS.ACTIVE:
+        return (
+          <Badge
+            variant="outline"
+            className="text-xs border-green-500 text-green-600 dark:text-green-400"
+          >
+            {t("active")}
+          </Badge>
+        );
+      case SHARE_LINK_STATUS.REVOKED:
+        return (
+          <Badge variant="destructive" className="text-xs">
+            {tShare("revoked")}
+          </Badge>
+        );
+      case SHARE_LINK_STATUS.MAX_VIEWS_REACHED:
+        return (
+          <Badge variant="secondary" className="text-xs">
+            {t("maxViewsReached")}
+          </Badge>
+        );
+      case SHARE_LINK_STATUS.EXPIRED:
+        return (
+          <Badge variant="secondary" className="text-xs">
+            {tShare("expired")}
+          </Badge>
+        );
     }
-    if (link.revokedAt) {
-      return (
-        <Badge variant="destructive" className="text-xs">
-          {tShare("revoked")}
-        </Badge>
-      );
-    }
-    if (link.maxViews !== null && link.viewCount >= link.maxViews) {
-      return (
-        <Badge variant="secondary" className="text-xs">
-          {t("maxViewsReached")}
-        </Badge>
-      );
-    }
-    return (
-      <Badge variant="secondary" className="text-xs">
-        {tShare("expired")}
-      </Badge>
-    );
   };
 
   return (
@@ -325,7 +334,7 @@ export default function ShareLinksPage() {
               <div key={link.id} className="transition-colors hover:bg-accent/30 dark:hover:bg-accent/50">
                 <div className="px-4 py-3 flex items-start gap-3">
                   <div className="shrink-0 mt-0.5">
-                    {link.isActive ? (
+                    {shareLinkStatus(link) === SHARE_LINK_STATUS.ACTIVE ? (
                       <LinkIcon className="h-5 w-5 text-green-500" />
                     ) : (
                       <Link2Off className="h-5 w-5 text-muted-foreground" />

@@ -48,6 +48,7 @@ import { MS_PER_SECOND } from "@/lib/constants/time";
 import { copySecretToClipboard } from "@/lib/clipboard/copy-secret";
 import { reportCopyOutcome } from "@/lib/clipboard/report-copy-outcome";
 import { safeRecord } from "@/lib/safe-keys";
+import { SHARE_LINK_STATUS, shareLinkStatus } from "@/lib/share/share-link-status";
 
 interface ShareLink {
   id: string;
@@ -57,6 +58,8 @@ interface ShareLink {
   revokedAt: string | null;
   createdAt: string;
   isActive: boolean;
+  /** False when the link no longer serves because its creator left the entry's team. */
+  creatorAdmitted?: boolean;
 }
 
 interface ShareDialogProps {
@@ -648,10 +651,16 @@ export function ShareDialog({
                             })
                           : `${link.viewCount} ${t("views")}`}
                       </p>
-                      {!link.isActive && (
+                      {shareLinkStatus(link) === SHARE_LINK_STATUS.CREATOR_NOT_IN_TEAM ? (
                         <p className="inline-flex rounded-full bg-destructive/10 px-2 py-0.5 text-destructive font-medium">
-                          {link.revokedAt ? t("revoked") : t("expired")}
+                          {t("creatorNotInTeam")}
                         </p>
+                      ) : (
+                        !link.isActive && (
+                          <p className="inline-flex rounded-full bg-destructive/10 px-2 py-0.5 text-destructive font-medium">
+                            {link.revokedAt ? t("revoked") : t("expired")}
+                          </p>
+                        )
                       )}
                     </div>
                     <div className="flex items-center gap-1">

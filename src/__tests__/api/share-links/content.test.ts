@@ -17,6 +17,17 @@ const {
   mockDecryptShareData: vi.fn().mockReturnValue('{"title":"Test","password":"secret"}'),
 }));
 
+// Creator admission (#990) at the module boundary: admitted unless a test says otherwise.
+const { mockIsShareCreatorAdmitted, mockCreatorAdmittedByShareId } = vi.hoisted(() => ({
+  mockIsShareCreatorAdmitted: vi.fn(async (_tx: unknown, _shareId: string) => true),
+  mockCreatorAdmittedByShareId: vi.fn(
+    async (_tx: unknown, ids: readonly string[]) => new Map(ids.map((id) => [id, true] as [string, boolean])),
+  ),
+}));
+vi.mock("@/lib/share/share-admission", () => ({
+  isShareCreatorAdmitted: mockIsShareCreatorAdmitted,
+  creatorAdmittedByShareId: mockCreatorAdmittedByShareId,
+}));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordShare: { findUnique: mockFindUnique },
@@ -140,6 +151,20 @@ describe("GET /api/share-links/[id]/content", () => {
     const res = await GET(req, createParams({ id: "share-1" }));
 
     expect(res.status).toBe(404);
+  });
+
+  it("answers a share whose creator is no longer admitted as revoked (404), serving nothing", async () => {
+    mockFindUnique.mockResolvedValue(makeShare({ revokedAt: new Date() }));
+    const revoked = await GET(createContentRequest("share-1", "valid-token"), createParams({ id: "share-1" }));
+
+    mockFindUnique.mockResolvedValue(makeShare());
+    mockIsShareCreatorAdmitted.mockResolvedValueOnce(false);
+    const res = await GET(createContentRequest("share-1", "valid-token"), createParams({ id: "share-1" }));
+
+    expect(res.status).toBe(revoked.status);
+    expect(await res.json()).toEqual(await revoked.json());
+    expect(mockExecuteRaw).not.toHaveBeenCalled();
+    expect(mockAccessLogCreate).not.toHaveBeenCalled();
   });
 
   it("returns 410 SHARE_GONE when maxViews reached (atomic check)", async () => {

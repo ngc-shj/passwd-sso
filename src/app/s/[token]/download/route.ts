@@ -15,6 +15,7 @@ import {
   REDIS_FALLBACK_LOG_THROTTLE_MS,
 } from "@/lib/logger/throttled";
 import { SHARE_TYPE } from "@/lib/constants";
+import { isShareCreatorAdmitted } from "@/lib/share/share-admission";
 
 const downloadLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 20 });
 
@@ -79,6 +80,12 @@ export async function GET(req: NextRequest, { params }: Params) {
       return new NextResponse(null, { status: 410 });
     }
 
+    // Same admission as the other serve paths (#990). Downloads serve personal
+    // FILE Sends, which are always admitted; applied so no serve path is exempt.
+    if (!(await isShareCreatorAdmitted(tx, share.id))) {
+      return new NextResponse(null, { status: 410 });
+    }
+
     if (share.shareType !== SHARE_TYPE.FILE) {
       return new NextResponse(null, { status: 400 });
     }
@@ -109,7 +116,8 @@ export async function GET(req: NextRequest, { params }: Params) {
         WHERE "id" = ${share.id}
           AND "revoked_at" IS NULL
           AND "expires_at" > NOW()
-          AND ("max_views" IS NULL OR "view_count" < "max_views")`;
+          AND ("max_views" IS NULL OR "view_count" < "max_views")
+          AND share_creator_admitted("id")`;
 
       if (updated === 0) {
         // Binary download route — return bare 410 (no JSON envelope) to keep
@@ -128,7 +136,8 @@ export async function GET(req: NextRequest, { params }: Params) {
         WHERE "id" = ${share.id}
           AND "revoked_at" IS NULL
           AND "expires_at" > NOW()
-          AND ("max_views" IS NULL OR "view_count" < "max_views")`;
+          AND ("max_views" IS NULL OR "view_count" < "max_views")
+          AND share_creator_admitted("id")`;
 
       if (updated === 0) {
         // Bare 410 by design — see comment on the password-protected branch above.

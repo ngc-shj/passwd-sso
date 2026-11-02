@@ -16,6 +16,17 @@ const { mockAuth, mockCreate, mockFindMany, mockFindUnique, mockWithUserTenantRl
 );
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+// Creator admission (#990) at the module boundary: admitted unless a test says otherwise.
+const { mockIsShareCreatorAdmitted, mockCreatorAdmittedByShareId } = vi.hoisted(() => ({
+  mockIsShareCreatorAdmitted: vi.fn(async (_tx: unknown, _shareId: string) => true),
+  mockCreatorAdmittedByShareId: vi.fn(
+    async (_tx: unknown, ids: readonly string[]) => new Map(ids.map((id) => [id, true] as [string, boolean])),
+  ),
+}));
+vi.mock("@/lib/share/share-admission", () => ({
+  isShareCreatorAdmitted: mockIsShareCreatorAdmitted,
+  creatorAdmittedByShareId: mockCreatorAdmittedByShareId,
+}));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordEntry: { findUnique: mockFindUnique },
@@ -639,5 +650,22 @@ describe("GET /api/share-links", () => {
     expect(json.items[0].isActive).toBe(true); // active
     expect(json.items[1].isActive).toBe(false); // expired
     expect(json.items[2].isActive).toBe(false); // maxViews reached
+  });
+
+  it("reports creatorAdmitted per item", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    const future = new Date(Date.now() + 86400000);
+    mockFindMany.mockResolvedValue([
+      { id: "s1", expiresAt: future, maxViews: null, viewCount: 0, revokedAt: null, createdAt: new Date() },
+      { id: "s2", expiresAt: future, maxViews: null, viewCount: 0, revokedAt: null, createdAt: new Date() },
+    ]);
+    mockCreatorAdmittedByShareId.mockResolvedValueOnce(new Map([["s1", true], ["s2", false]]));
+
+    const res = await GET(
+      createRequest("GET", "http://localhost/api/share-links", { searchParams: { passwordEntryId: VALID_ENTRY_ID } }) as never,
+    );
+    const { json } = await parseResponse(res);
+
+    expect(json.items.map((i: { creatorAdmitted: boolean }) => i.creatorAdmitted)).toEqual([true, false]);
   });
 });

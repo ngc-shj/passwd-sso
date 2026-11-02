@@ -11,6 +11,17 @@ const { mockFindUnique, mockCheck, mockAccessLogCreate, mockDecryptShareBinary, 
   mockExecuteRaw: vi.fn().mockResolvedValue(1),
 }));
 
+// Creator admission (#990) at the module boundary: admitted unless a test says otherwise.
+const { mockIsShareCreatorAdmitted, mockCreatorAdmittedByShareId } = vi.hoisted(() => ({
+  mockIsShareCreatorAdmitted: vi.fn(async (_tx: unknown, _shareId: string) => true),
+  mockCreatorAdmittedByShareId: vi.fn(
+    async (_tx: unknown, ids: readonly string[]) => new Map(ids.map((id) => [id, true] as [string, boolean])),
+  ),
+}));
+vi.mock("@/lib/share/share-admission", () => ({
+  isShareCreatorAdmitted: mockIsShareCreatorAdmitted,
+  creatorAdmittedByShareId: mockCreatorAdmittedByShareId,
+}));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordShare: { findUnique: mockFindUnique },
@@ -112,6 +123,19 @@ describe("GET /s/[token]/download", () => {
     const res = await GET(req as never, createParams({ token: VALID_TOKEN }));
 
     expect(res.status).toBe(410);
+  });
+
+  it("answers a share whose creator is no longer admitted as revoked (410), serving nothing", async () => {
+    mockFindUnique.mockResolvedValue(makeFileShare());
+    mockIsShareCreatorAdmitted.mockResolvedValueOnce(false);
+
+    const req = createDownloadRequest(VALID_TOKEN);
+    const res = await GET(req as never, createParams({ token: VALID_TOKEN }));
+
+    expect(res.status).toBe(410);
+    expect(await res.text()).toBe("");
+    expect(mockExecuteRaw).not.toHaveBeenCalled();
+    expect(mockAccessLogCreate).not.toHaveBeenCalled();
   });
 
   it("returns 400 when shareType is TEXT", async () => {

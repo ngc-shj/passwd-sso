@@ -32,6 +32,7 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import { MS_PER_DAY, MS_PER_HOUR } from "@/lib/constants/time";
 import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
+import { creatorAdmittedByShareId } from "@/lib/share/share-admission";
 
 const shareLinkLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 20 });
 
@@ -247,8 +248,8 @@ async function handleGET(req: NextRequest) {
   if (passwordEntryId) where.passwordEntryId = passwordEntryId;
   if (teamPasswordEntryId) where.teamPasswordEntryId = teamPasswordEntryId;
 
-  const shares = await withUserTenantRls(session.user.id, async () =>
-    prisma.passwordShare.findMany({
+  const { shares, admitted } = await withUserTenantRls(session.user.id, async () => {
+    const shares = await prisma.passwordShare.findMany({
       where,
       orderBy: { createdAt: "desc" },
       select: {
@@ -259,13 +260,15 @@ async function handleGET(req: NextRequest) {
         revokedAt: true,
         createdAt: true,
       },
-    }),
-  );
+    });
+    return { shares, admitted: await creatorAdmittedByShareId(prisma, shares.map((s) => s.id)) };
+  });
 
   const now = new Date();
   return NextResponse.json({
     items: shares.map((s) => ({
       ...s,
+      creatorAdmitted: admitted.get(s.id) === true,
       isActive:
         !s.revokedAt &&
         s.expiresAt > now &&

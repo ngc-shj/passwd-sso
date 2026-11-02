@@ -10,6 +10,7 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { isValidCursorId } from "@/lib/audit/audit-query";
 import { displayUserOf, fetchUserDisplayMap } from "@/lib/audit/audit-user-lookup";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
+import { creatorAdmittedByShareId } from "@/lib/share/share-admission";
 
 // GET /api/share-links/mine
 // - Personal context (no `team`): links created by current user, personal entries only
@@ -105,6 +106,12 @@ async function handleGET(req: NextRequest) {
   const hasMore = shares.length > limit;
   const items = hasMore ? shares.slice(0, limit) : shares;
   const nextCursor = hasMore ? items[items.length - 1].id : null;
+  const admitted =
+    items.length === 0
+      ? new Map<string, boolean>()
+      : await withUserTenantRls(session.user.id, async () =>
+          creatorAdmittedByShareId(prisma, items.map((s) => s.id)),
+        );
   const creators = await fetchUserDisplayMap(
     items.map((s) => s.createdById),
     BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP,
@@ -133,6 +140,7 @@ async function handleGET(req: NextRequest) {
       hasPersonalEntry: !!s.passwordEntry,
       sharedBy: sharedByOf(s.createdById),
       canRevoke: s.createdById === session.user.id,
+      creatorAdmitted: admitted.get(s.id) === true,
       isActive:
         !s.revokedAt &&
         s.expiresAt > now &&

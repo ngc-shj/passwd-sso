@@ -54,6 +54,7 @@
     "FUNCTION:passwd_app\tpublic.resolve_tenant_id_from_row(p_table text, p_row jsonb)\tEXECUTE",
     "FUNCTION:passwd_app\tpublic.rls_bypass_admits(table_name text)\tEXECUTE",
     "FUNCTION:passwd_app\tpublic.rls_bypass_enforced()\tEXECUTE",
+    "FUNCTION:passwd_app\tpublic.share_creator_admitted(p_share_id uuid)\tEXECUTE",
     "FUNCTION:passwd_dcr_cleanup_worker\tpublic.audit_outbox_before_delete_guard()\tEXECUTE",
     "FUNCTION:passwd_dcr_cleanup_worker\tpublic.enforce_tenant_id_from_context()\tEXECUTE",
     "FUNCTION:passwd_dcr_cleanup_worker\tpublic.ensure_tenant_owner_membership_after_user_insert()\tEXECUTE",

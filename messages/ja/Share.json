@@ -19,6 +19,7 @@
   "viewCount": "{current} / {max} 回閲覧",
   "revoked": "取り消し済み",
   "expired": "期限切れ",
+  "creatorNotInTeam": "利用不可：作成者がチームに所属していません",
   "revokeSuccess": "共有リンクを取り消しました",
   "revokeError": "取り消しに失敗しました",
   "sharedEntry": "共有エントリー",

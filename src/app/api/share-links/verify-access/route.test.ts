@@ -32,6 +32,17 @@ const {
   };
 });
 
+// Creator admission (#990) at the module boundary: admitted unless a test says otherwise.
+const { mockIsShareCreatorAdmitted, mockCreatorAdmittedByShareId } = vi.hoisted(() => ({
+  mockIsShareCreatorAdmitted: vi.fn(async (_tx: unknown, _shareId: string) => true),
+  mockCreatorAdmittedByShareId: vi.fn(
+    async (_tx: unknown, ids: readonly string[]) => new Map(ids.map((id) => [id, true] as [string, boolean])),
+  ),
+}));
+vi.mock("@/lib/share/share-admission", () => ({
+  isShareCreatorAdmitted: mockIsShareCreatorAdmitted,
+  creatorAdmittedByShareId: mockCreatorAdmittedByShareId,
+}));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordShare: { findUnique: mockPasswordShareFindUnique },
@@ -229,6 +240,29 @@ describe("POST /api/share-links/verify-access", () => {
     );
     const { status } = await parseResponse(res);
     expect(status).toBe(404);
+  });
+
+  it("answers a share whose creator is no longer admitted as revoked, before the password check", async () => {
+    mockPasswordShareFindUnique.mockResolvedValue(makeShare({ revokedAt: new Date("2025-01-01") }));
+    const revoked = await parseResponse(
+      await POST(createRequest("POST", "http://localhost/api/share-links/verify-access", { body: validBody })),
+    );
+
+    mockPasswordShareFindUnique.mockResolvedValue(makeShare());
+    mockIsShareCreatorAdmitted.mockResolvedValueOnce(false);
+    mockVerifyAccessPassword.mockReturnValue({ ok: false, reason: "MISMATCH" });
+    const refused = await parseResponse(
+      await POST(
+        createRequest("POST", "http://localhost/api/share-links/verify-access", {
+          body: { ...validBody, password: "wrong-password" },
+        }),
+      ),
+    );
+
+    expect(refused).toEqual(revoked);
+    expect(mockVerifyAccessPassword).not.toHaveBeenCalled();
+    expect(mockCreateShareAccessToken).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
   it("returns 404 when share is expired", async () => {
