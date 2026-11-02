@@ -107,6 +107,8 @@
   "scimTokenRevoked": "SCIM token has been revoked.",
   "scimOwnerProtected": "Cannot modify the organization owner via SCIM.",
   "scimManagedMember": "This member is managed by SCIM. Please re-activate from your identity provider.",
+  "scimApprovalPending": "This member is awaiting team approval. Approve or reject the request in the member list.",
+  "scimApprovalRoleChanged": "The requested role changed. Reload the list and review the request again.",
   "scimFilterInvalid": "Invalid SCIM filter expression.",
   "scimUnsupportedOperation": "Unsupported SCIM operation.",
   "scimResourceExists": "Resource already exists.",

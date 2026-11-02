@@ -205,9 +205,17 @@ These user-meaningful fields should be rendered in `getTargetLabel()` with i18n 
 | `TEAM_MEMBER_INVITE` | TEAM | TeamInvitation | `{ inviteeEmail }` | inviteeEmail |
 | `TEAM_MEMBER_REMOVE` | TEAM | TeamMember | `{ removedUserId, removedRole }` | removedRole |
 | `TEAM_ROLE_UPDATE` | TEAM | TeamMember | `{ newRole, previousRole, transfer }` | roleChange template |
+| `SCIM_GROUP_MAPPING_CREATE` | TEAM | Team | `{ displayName }` | displayName |
+| `TEAM_MEMBER_SCIM_PENDING` | TEAM | TeamMember | `{ userId, role, previousRole? }` | role |
+| `TEAM_MEMBER_SCIM_PENDING_WITHDRAW` | TEAM | TeamMember | `{ userId, role }` | role |
+| `TEAM_MEMBER_SCIM_REMOVE` | TEAM | TeamMember | `{ userId, role, departed? }` | role |
+| `TEAM_MEMBER_SCIM_ROLE_UPDATE` | TEAM | TeamMember | `{ userId, newRole, previousRole }` | roleChange template |
+| `TEAM_MEMBER_SCIM_APPROVE` | TEAM | TeamMember | `{ memberId, role }` | role |
+| `TEAM_MEMBER_SCIM_REJECT` | TEAM | TeamMember | `{ memberId, role }` | role |
 
 **Notes:**
 - TEAM_MEMBER_ADD: Logged when a member is directly added (not via invitation). `reactivated` is true when a previously removed member is re-added.
+- SCIM_GROUP_MAPPING_CREATE and the TEAM_MEMBER_SCIM_* actions (scim-team-admission-approval plan) are TEAM-scoped, in `group:team` rather than `group:scim` below, so team webhooks (which exclude `group:scim`) still deliver them. A SCIM group add now leaves an admitted member PENDING — deactivated, no key — until a team OWNER/ADMIN approves (TEAM_MEMBER_SCIM_APPROVE) or rejects (TEAM_MEMBER_SCIM_REJECT) it; `metadata.scimTokenId` is also present on all of these.
 
 ### Emergency Access (`group:emergency`)
 
@@ -407,7 +415,7 @@ These user-meaningful fields should be rendered in `getTargetLabel()` with i18n 
 | `group:attachment` | ATTACHMENT_UPLOAD, ATTACHMENT_DELETE |
 | `group:folder` | FOLDER_CREATE, FOLDER_UPDATE, FOLDER_DELETE |
 | `group:history` | ENTRY_HISTORY_RESTORE, HISTORY_PURGE |
-| `group:team` | TEAM_MEMBER_ADD, TEAM_MEMBER_INVITE, TEAM_MEMBER_REMOVE, TEAM_ROLE_UPDATE |
+| `group:team` | TEAM_MEMBER_ADD, TEAM_MEMBER_INVITE, TEAM_MEMBER_REMOVE, TEAM_ROLE_UPDATE, TEAM_MEMBER_TENANT_DEACTIVATE, TEAM_MEMBER_TENANT_RESTORE, TEAM_OWNER_ASSIGNED_BY_TENANT_ADMIN, SCIM_GROUP_MAPPING_CREATE, TEAM_MEMBER_SCIM_PENDING, TEAM_MEMBER_SCIM_PENDING_WITHDRAW, TEAM_MEMBER_SCIM_REMOVE, TEAM_MEMBER_SCIM_ROLE_UPDATE, TEAM_MEMBER_SCIM_APPROVE, TEAM_MEMBER_SCIM_REJECT |
 | `group:share` | SHARE_CREATE, SHARE_REVOKE, SHARE_ACCESS_VERIFY_SUCCESS, SHARE_ACCESS_VERIFY_FAILED |
 | `group:admin` | MASTER_KEY_ROTATION, TEAM_E2E_MIGRATION, TEAM_KEY_ROTATION, TEAM_MEMBER_KEY_DISTRIBUTE, POLICY_UPDATE, AUDIT_LOG_DOWNLOAD, WATCHTOWER_ALERT_SENT, ADMIN_VAULT_RESET_INITIATE, ADMIN_VAULT_RESET_EXECUTE |
 | `group:scim` | SCIM_TOKEN_CREATE, SCIM_TOKEN_REVOKE, SCIM_USER_CREATE, SCIM_USER_UPDATE, SCIM_USER_DEACTIVATE, SCIM_USER_REACTIVATE, SCIM_USER_DELETE, SCIM_GROUP_UPDATE |

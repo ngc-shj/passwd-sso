@@ -63,7 +63,12 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
   BYPASS_PURPOSE: { AUDIT_WRITE: "audit_write" },
 }));
 
-import { enqueueAuditInTx, enqueueAudit, enqueueAuditBulk } from "@/lib/audit/audit-outbox";
+import {
+  enqueueAuditInTx,
+  enqueueAuditBulkInTx,
+  enqueueAudit,
+  enqueueAuditBulk,
+} from "@/lib/audit/audit-outbox";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -190,6 +195,48 @@ describe("enqueueAuditInTx", () => {
         }),
       }),
     });
+  });
+});
+
+// ─── enqueueAuditBulkInTx ───────────────────────────────────────────────────
+
+describe("enqueueAuditBulkInTx", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("does one scope read and one createMany with N rows", async () => {
+    mockQueryRaw.mockResolvedValueOnce([bypassStateRow({ bypass_rls: "on", tenant_id: "" })]);
+
+    const payloads = [SAMPLE_PAYLOAD, SAMPLE_PAYLOAD, SAMPLE_PAYLOAD];
+    await enqueueAuditBulkInTx(TX_CLIENT as never, "tenant-1", payloads);
+
+    expect(mockQueryRaw).toHaveBeenCalledTimes(1);
+    expect(mockAuditOutboxCreateMany).toHaveBeenCalledTimes(1);
+    expect(mockAuditOutboxCreateMany).toHaveBeenCalledWith({
+      data: payloads.map(() =>
+        expect.objectContaining({
+          tenantId: "tenant-1",
+          payload: expect.objectContaining({ userId: "user-1" }),
+        }),
+      ),
+    });
+  });
+
+  it("throws when bypass_rls is not 'on' and tenant_id does not match", async () => {
+    mockQueryRaw.mockResolvedValueOnce([{ bypass_rls: "off", tenant_id: "different-tenant" }]);
+
+    await expect(
+      enqueueAuditBulkInTx(TX_CLIENT as never, "tenant-1", [SAMPLE_PAYLOAD]),
+    ).rejects.toThrow(/bypass_rls/);
+    expect(mockAuditOutboxCreateMany).not.toHaveBeenCalled();
+  });
+
+  it("issues no query for an empty list", async () => {
+    await enqueueAuditBulkInTx(TX_CLIENT as never, "tenant-1", []);
+
+    expect(mockQueryRaw).not.toHaveBeenCalled();
+    expect(mockAuditOutboxCreateMany).not.toHaveBeenCalled();
   });
 });
 

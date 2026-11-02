@@ -126,7 +126,9 @@ describe("API_ERROR structural invariants", () => {
     // 173 = 172 + VAULT_RESET_DATA_OUTSIDE_TENANT (audit-tenant-adjudicator round 4 S1).
     // 174 = 173 + AUTH_HASH_MISMATCH (long-lived-client-login C2).
     // 175 = 174 + CANNOT_DELETE_LAST_PASSKEY (session-api-passkey-gate FN-2).
-    expect(Object.keys(API_ERROR).length).toBe(175);
+    // 177 = 175 + SCIM_APPROVAL_PENDING + SCIM_APPROVAL_ROLE_CHANGED
+    // (scim-team-admission-approval C3/C6).
+    expect(Object.keys(API_ERROR).length).toBe(177);
   });
 });
 

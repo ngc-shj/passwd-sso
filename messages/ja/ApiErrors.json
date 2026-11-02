@@ -107,6 +107,8 @@
   "scimTokenRevoked": "SCIM トークンは取り消されています。",
   "scimOwnerProtected": "SCIM 経由で組織オーナーを変更することはできません。",
   "scimManagedMember": "このメンバーは SCIM で管理されています。ID プロバイダーから再有効化してください。",
+  "scimApprovalPending": "このメンバーはチームの承認待ちです。メンバー一覧で承認または拒否してください。",
+  "scimApprovalRoleChanged": "リクエストされたロールが変更されました。一覧を更新してリクエストを再確認してください。",
   "scimFilterInvalid": "無効な SCIM フィルタ式です。",
   "scimUnsupportedOperation": "サポートされていない SCIM 操作です。",
   "scimResourceExists": "リソースは既に存在します。",

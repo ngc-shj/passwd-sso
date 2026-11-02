@@ -88,6 +88,7 @@ function membership(
     deactivatedAt: null,
     scimManaged: false,
     deactivatedByTenant: false,
+    scimApprovalPending: false,
     createdAt: new Date(0),
     updatedAt: new Date(0),
     team,
