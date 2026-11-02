@@ -108,6 +108,8 @@ export function TeamAddFromTenantSection({ teamId, onSuccess, teamTenantName }: 
         toast.error(
           body?.error === API_ERROR.SCIM_MANAGED_MEMBER
             ? t("scimManagedCannotAdd")
+            : body?.error === API_ERROR.SCIM_APPROVAL_PENDING
+            ? t("scimApprovalPendingCannotAdd")
             : t("alreadyMember"),
         );
         setAdding(null);

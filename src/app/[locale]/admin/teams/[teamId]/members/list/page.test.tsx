@@ -121,6 +121,7 @@ function makeMember(overrides: Partial<{
   email: string | null;
   image: string | null;
   tenantName: string | null;
+  pendingApproval: boolean;
 }> = {}) {
   return {
     id: "mem-1",
@@ -236,5 +237,174 @@ describe("TeamMembersPage (admin full-page, step-up denial)", () => {
       expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
     });
     expect(mockToast.error).not.toHaveBeenCalled();
+  });
+});
+
+describe("TeamMembersPage (SCIM pending admission, C5)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockCanUsePasskeyRecovery.mockResolvedValue(false);
+    mockReauthenticateWithPasskey.mockResolvedValue({ ok: true, verifiedAt: "2026-05-10T00:00:00Z" });
+  });
+
+  it("renders Approve/Reject for a pending row and not for an active one", async () => {
+    const pending = makeMember({ id: "mem-pending", userId: "user-pending", role: "ADMIN", pendingApproval: true });
+    const active = makeMember({ id: "mem-active", userId: "user-active", role: "MEMBER" });
+    setupFetchReady({ members: [pending, active] });
+
+    await act(async () => {
+      render(<TeamMembersPage params={Promise.resolve({ teamId: "team-1" })} />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("awaitingApprovalBadge")).toBeInTheDocument();
+    });
+
+    // Exactly one pending row — Approve appears once, Reject's trigger +
+    // confirm-action share the same label so it appears twice.
+    expect(screen.getAllByRole("button", { name: "approveButton" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "rejectButton" })).toHaveLength(2);
+
+    // The active row keeps its role select + remove button, not approve/reject.
+    expect(screen.getByTestId("select-change-MEMBER")).toBeInTheDocument();
+  });
+
+  it("Approve posts expectedRole equal to the shown role", async () => {
+    const pending = makeMember({ id: "mem-pending", userId: "user-pending", role: "ADMIN", pendingApproval: true });
+    setupFetchReady({ members: [pending] });
+
+    await act(async () => {
+      render(<TeamMembersPage params={Promise.resolve({ teamId: "team-1" })} />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "approveButton" })).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "approveButton" }));
+    });
+
+    await waitFor(() => {
+      const postCall = mockFetch.mock.calls.find(
+        (c) => c[0] === "/api/teams/team-1/members/mem-pending/approve",
+      );
+      expect(postCall).toBeDefined();
+      const body = JSON.parse((postCall![1] as RequestInit).body as string);
+      expect(body).toEqual({ expectedRole: "ADMIN" });
+    });
+  });
+
+  it("approve — opens RecentSessionRequiredDialog when SESSION_STEP_UP_REQUIRED is returned", async () => {
+    const pending = makeMember({ id: "mem-pending", userId: "user-pending", role: "ADMIN", pendingApproval: true });
+    setupFetchReady({ members: [pending] });
+
+    const baseImpl = mockFetch.getMockImplementation()!;
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === "/api/teams/team-1/members/mem-pending/approve") {
+        return Promise.resolve({
+          ok: false,
+          status: 403,
+          json: () => Promise.resolve({ error: "SESSION_STEP_UP_REQUIRED" }),
+        });
+      }
+      return baseImpl(url, init);
+    });
+
+    await act(async () => {
+      render(<TeamMembersPage params={Promise.resolve({ teamId: "team-1" })} />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "approveButton" })).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "approveButton" }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
+    });
+    expect(mockToast.error).not.toHaveBeenCalled();
+  });
+
+  it("reject — opens RecentSessionRequiredDialog when SESSION_STEP_UP_REQUIRED is returned", async () => {
+    const pending = makeMember({ id: "mem-pending", userId: "user-pending", role: "ADMIN", pendingApproval: true });
+    setupFetchReady({ members: [pending] });
+
+    const baseImpl = mockFetch.getMockImplementation()!;
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === "/api/teams/team-1/members/mem-pending/reject") {
+        return Promise.resolve({
+          ok: false,
+          status: 403,
+          json: () => Promise.resolve({ error: "SESSION_STEP_UP_REQUIRED" }),
+        });
+      }
+      return baseImpl(url, init);
+    });
+
+    await act(async () => {
+      render(<TeamMembersPage params={Promise.resolve({ teamId: "team-1" })} />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId("alert-action").length).toBeGreaterThanOrEqual(1);
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getAllByTestId("alert-action")[0]);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
+    });
+    expect(mockToast.error).not.toHaveBeenCalled();
+  });
+
+  it("role-changed 409 reloads the list and shows a message", async () => {
+    const pending = makeMember({ id: "mem-pending", userId: "user-pending", role: "ADMIN", pendingApproval: true });
+    setupFetchReady({ members: [pending] });
+
+    const baseImpl = mockFetch.getMockImplementation()!;
+    let approveCalls = 0;
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === "/api/teams/team-1/members/mem-pending/approve") {
+        approveCalls += 1;
+        return Promise.resolve({
+          ok: false,
+          status: 409,
+          json: () => Promise.resolve({ error: "SCIM_APPROVAL_ROLE_CHANGED" }),
+        });
+      }
+      return baseImpl(url, init);
+    });
+
+    await act(async () => {
+      render(<TeamMembersPage params={Promise.resolve({ teamId: "team-1" })} />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "approveButton" })).toBeInTheDocument();
+    });
+
+    const membersCallsBefore = mockFetch.mock.calls.filter(
+      (c) => c[0] === "/api/teams/team-1/members",
+    ).length;
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "approveButton" }));
+    });
+
+    await waitFor(() => {
+      expect(approveCalls).toBe(1);
+      expect(mockToast.error).toHaveBeenCalledWith("approveRoleChanged");
+    });
+
+    const membersCallsAfter = mockFetch.mock.calls.filter(
+      (c) => c[0] === "/api/teams/team-1/members",
+    ).length;
+    expect(membersCallsAfter).toBeGreaterThan(membersCallsBefore);
   });
 });
