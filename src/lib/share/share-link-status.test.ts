@@ -17,14 +17,16 @@ describe("shareLinkStatus", () => {
     expect(shareLinkStatus({ ...active, creatorAdmitted: true })).toBe(SHARE_LINK_STATUS.ACTIVE);
   });
 
-  it("reports creatorNotInTeam ahead of an otherwise active state", () => {
-    expect(shareLinkStatus({ ...active, creatorAdmitted: false })).toBe(SHARE_LINK_STATUS.CREATOR_NOT_IN_TEAM);
+  it("reports notAdmitted on an otherwise active link", () => {
+    expect(shareLinkStatus({ ...active, creatorAdmitted: false })).toBe(SHARE_LINK_STATUS.NOT_ADMITTED);
   });
 
-  it("reports creatorNotInTeam ahead of revoked", () => {
-    expect(
-      shareLinkStatus({ ...active, isActive: false, revokedAt: "2026-01-01T00:00:00Z", creatorAdmitted: false }),
-    ).toBe(SHARE_LINK_STATUS.CREATOR_NOT_IN_TEAM);
+  it.each([
+    ["revoked", { revokedAt: "2026-01-01T00:00:00Z" }, SHARE_LINK_STATUS.REVOKED],
+    ["used up", { maxViews: 3, viewCount: 3 }, SHARE_LINK_STATUS.MAX_VIEWS_REACHED],
+    ["expired", {}, SHARE_LINK_STATUS.EXPIRED],
+  ] as const)("keeps a final state (%s) over notAdmitted", (_label, fields, want) => {
+    expect(shareLinkStatus({ ...active, isActive: false, ...fields, creatorAdmitted: false })).toBe(want);
   });
 
   it("is revoked when revoked", () => {

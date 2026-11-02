@@ -651,9 +651,9 @@ export function ShareDialog({
                             })
                           : `${link.viewCount} ${t("views")}`}
                       </p>
-                      {shareLinkStatus(link) === SHARE_LINK_STATUS.CREATOR_NOT_IN_TEAM ? (
+                      {shareLinkStatus(link) === SHARE_LINK_STATUS.NOT_ADMITTED ? (
                         <p className="inline-flex rounded-full bg-destructive/10 px-2 py-0.5 text-destructive font-medium">
-                          {t("creatorNotInTeam")}
+                          {t("notAdmitted")}
                         </p>
                       ) : (
                         !link.isActive && (

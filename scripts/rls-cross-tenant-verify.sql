@@ -381,10 +381,12 @@ BEGIN
              OR EXISTS (SELECT 1 FROM unnest(pr.proconfig) c WHERE c LIKE 'app.bypass\_%'))
         AND pr.oid <> 'public.share_creator_admitted(uuid)'::regprocedure
     ));
-  -- The allowlisted routine's bypass stays exactly its three tables.
-  ASSERT (SELECT pr.prosrc FROM pg_catalog.pg_proc pr
-           WHERE pr.oid = 'public.share_creator_admitted(uuid)'::regprocedure)
-         LIKE $t$%'app.bypass_tables', 'password_shares,team_password_entries,team_members'%$t$,
+  -- The allowlisted routine's bypass stays exactly its three tables: it writes
+  -- app.bypass_tables twice (the grant and the restore), and the grant is this list.
+  ASSERT (SELECT regexp_count(pr.prosrc, $re$set_config\s*\(\s*'app\.bypass_tables'$re$, 1, 'i') = 2
+                 AND strpos(pr.prosrc, $t$'app.bypass_tables', 'password_shares,team_password_entries,team_members', true)$t$) > 0
+            FROM pg_catalog.pg_proc pr
+           WHERE pr.oid = 'public.share_creator_admitted(uuid)'::regprocedure),
     '[E-RLS-BYPASS-ROUTINE] share_creator_admitted no longer sets exactly password_shares,team_password_entries,team_members';
 END $$;
 

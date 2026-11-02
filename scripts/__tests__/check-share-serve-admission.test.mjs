@@ -160,6 +160,16 @@ export async function other(tx, id) { return isShareCreatorAdmitted(tx, id); }
       expectDenied(run({ grantRefs: 2 }), /is not read as BYPASS_GRANT\.<grant>/);
     });
 
+    it("counts a grant named by a template-string key (and refuses it)", () => {
+      write(ROUTE, COMPLIANT.replace("}, BYPASS_GRANT.SHARE_LINK_PUBLIC_ACCESS);", "}, BYPASS_GRANT[`SHARE_LINK_PUBLIC_ACCESS`]);"));
+      expectDenied(run(), /is not read as BYPASS_GRANT\.<grant>/);
+    });
+
+    it("refuses an untagged raw call in a serving file", () => {
+      write(ROUTE, COMPLIANT.replace(UPDATE_OK, "await prisma.$executeRawUnsafe(sqlText);"));
+      expectDenied(run({ statements: 1 }), /\$executeRawUnsafe\(\.\.\.\) called with arguments in a serving file/);
+    });
+
     it("refuses a grant passed to something other than withBypassRls", () => {
       write(ROUTE, COMPLIANT.replace("return withBypassRls(prisma,", "return otherWrapper(prisma,"));
       expectDenied(run(), /is not the grant argument of a withBypassRls call/);

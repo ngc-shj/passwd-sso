@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
 const { mockFetch } = vi.hoisted(() => ({
@@ -282,8 +282,8 @@ describe("ShareDialog — §Sec-1 share-flow crypto invariants", () => {
     mockFetch.mockResolvedValue(
       okJson({
         items: [
-          { ...link, id: "dead", creatorAdmitted: false },
-          { ...link, id: "live", creatorAdmitted: true },
+          { ...link, id: "dead", viewCount: 7, creatorAdmitted: false },
+          { ...link, id: "live", viewCount: 0, creatorAdmitted: true },
         ],
       }),
     );
@@ -299,8 +299,11 @@ describe("ShareDialog — §Sec-1 share-flow crypto invariants", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getAllByText("creatorNotInTeam")).toHaveLength(1);
+      expect(screen.getAllByText("notAdmitted")).toHaveLength(1);
     });
+    // On the dead link's row, not the live one's.
+    expect(within(screen.getByText("7 views").parentElement!).getByText("notAdmitted")).toBeInTheDocument();
+    expect(within(screen.getByText("0 views").parentElement!).queryByText("notAdmitted")).toBeNull();
   });
 
   it("renders 'sharing disabled by policy' when team policy disallows sharing", async () => {

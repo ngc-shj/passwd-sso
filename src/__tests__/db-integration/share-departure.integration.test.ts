@@ -188,6 +188,17 @@ describe("share links across a creator's departure — real-DB integration", () 
     return id;
   }
 
+  async function personalEntry(userId: string): Promise<string> {
+    const id = randomUUID();
+    await sql(
+      `INSERT INTO password_entries (id, user_id, tenant_id, encrypted_blob, blob_iv, blob_auth_tag,
+         encrypted_overview, overview_iv, overview_auth_tag, key_version, aad_version, entry_type, created_at, updated_at)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, 1, 1, 'LOGIN', now(), now())`,
+      id, userId, tenantId, hex(32), hex(12), hex(16), hex(32), hex(12), hex(16),
+    );
+    return id;
+  }
+
   interface SeededShare {
     id: string;
     token: string;
@@ -197,6 +208,7 @@ describe("share links across a creator's departure — real-DB integration", () 
   async function share(o: {
     creatorId: string;
     teamEntryId?: string | null;
+    personalEntryId?: string | null;
     version?: number;
     shareType?: "ENTRY_SHARE" | "TEXT" | "FILE";
     protect?: boolean;
@@ -210,12 +222,12 @@ describe("share links across a creator's departure — real-DB integration", () 
     await sql(
       `INSERT INTO password_shares (id, tenant_id, token_hash, share_type, entry_type, encrypted_data, data_iv,
          data_auth_tag, expires_at, max_views, created_by_id, team_password_entry_id, master_key_version,
-         access_password_hash, access_password_hash_version, created_at)
+         access_password_hash, access_password_hash_version, password_entry_id, created_at)
        VALUES ($1::uuid, $2::uuid, $3, $4::"ShareType", 'LOGIN', $5, $6, $7, now() + interval '1 day', $8,
-         $9::uuid, $10::uuid, $11, $12, $13, ${o.createdAt ?? "now()"})`,
+         $9::uuid, $10::uuid, $11, $12, $13, $14::uuid, ${o.createdAt ?? "now()"})`,
       id, tenantId, hashToken(token), o.shareType ?? "ENTRY_SHARE", hex(32), hex(12), hex(16),
       o.maxViews ?? null, o.creatorId, o.teamEntryId ?? null, o.version ?? 0,
-      hashed?.hash ?? null, hashed?.version ?? 1,
+      hashed?.hash ?? null, hashed?.version ?? 1, o.personalEntryId ?? null,
     );
     return { id, token, password };
   }
@@ -397,12 +409,19 @@ describe("share links across a creator's departure — real-DB integration", () 
     expect(await page(y)).toBe("served");
   });
 
-  it("A6: personal shares and Sends serve regardless of the creator's team state", async () => {
+  it("A6: personal entry shares and Sends serve regardless of the creator's team state", async () => {
     const t = await teamWithCreator();
-    const send = await share({ creatorId: t.creator, version: 1, shareType: "TEXT" });
+    const entry = await personalEntry(t.creator);
+    // Protected, so the page answers with the password gate and verify-access
+    // issues a token without decrypting anything.
+    const personal = await share({ creatorId: t.creator, personalEntryId: entry, version: 1, protect: true });
+    const send = await share({ creatorId: t.creator, version: 1, shareType: "TEXT", protect: true });
     await remove(t.teamId, t.owner, t.creatorRow);
-    const [row] = await sql<{ ok: boolean }>(`SELECT share_creator_admitted($1::uuid) AS ok`, send.id);
-    expect(row.ok).toBe(true);
+
+    for (const s of [personal, send]) {
+      expect(await page(s)).toBe("gate");
+      expect((await verify(s)).status).toBe(200);
+    }
   });
 
   // ── A7: a share inserted after the creator lost the membership ──
@@ -444,18 +463,20 @@ describe("share links across a creator's departure — real-DB integration", () 
     await addTeamMember(t.teamId, viewer, "VIEWER");
     const otherMember = await member();
     await addTeamMember(t.teamId, otherMember, "MEMBER");
-    await share({ creatorId: t.creator, teamEntryId: t.entryId });
+    const dead = await share({ creatorId: t.creator, teamEntryId: t.entryId });
+    const live = await share({ creatorId: otherMember, teamEntryId: t.entryId });
     await remove(t.teamId, t.owner, t.creatorRow);
 
     for (const who of [t.owner, otherMember]) {
       mockAuth.mockResolvedValue({ user: { id: who } });
       const res = await listMine(new NextRequest(`http://localhost/api/share-links/mine?team=${t.teamId}`));
-      const items = ((await res.json()) as { items: { creatorAdmitted: boolean }[] }).items;
-      expect(items.map((i) => i.creatorAdmitted)).toEqual([false]);
+      const items = ((await res.json()) as { items: { id: string; creatorAdmitted: boolean }[] }).items;
+      expect(Object.fromEntries(items.map((i) => [i.id, i.creatorAdmitted]))).toEqual({ [dead.id]: false, [live.id]: true });
     }
 
     mockAuth.mockResolvedValue({ user: { id: viewer } });
     const asViewer = await listMine(new NextRequest(`http://localhost/api/share-links/mine?team=${t.teamId}`));
+    // A VIEWER lists only their own links: neither of these.
     expect(((await asViewer.json()) as { items: unknown[] }).items).toEqual([]);
   });
 
@@ -516,6 +537,12 @@ describe("share links across a creator's departure — real-DB integration", () 
       return (await share({ creatorId: user, teamEntryId: opts.entry === undefined ? entryId : opts.entry, version: opts.version ?? 0, createdAt: base })).id;
     }
 
+    async function personalCase() {
+      const user = await member();
+      const entry = await personalEntry(user);
+      return (await share({ creatorId: user, personalEntryId: entry, version: 1, createdAt: base })).id;
+    }
+
     const cases: [string, string, boolean][] = [
       ["membership 1s before the share", await caseShare("-1 second"), true],
       ["membership at the share's instant", await caseShare("0 second"), true],
@@ -526,6 +553,7 @@ describe("share links across a creator's departure — real-DB integration", () 
       ["creator a member of another team only", await caseShare("-1 second", { inTeam: otherTeamId }), false],
       ["team share whose entry is gone (version 0, no entry)", await caseShare("-1 second", { entry: null }), false],
       ["Send (version 1, no entry)", await caseShare(null, { entry: null, version: 1 }), true],
+      ["personal entry share (version 1)", await personalCase(), true],
       ["unknown id", randomUUID(), false],
     ];
     const legacyCreator = await member();

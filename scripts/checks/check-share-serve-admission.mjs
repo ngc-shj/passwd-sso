@@ -22,12 +22,18 @@
  *    other reference (a variable, a destructuring, a string) fails: the gate
  *    refuses what it cannot follow.
  *
+ * 3. RAW FORMS. A file that references a serve grant issues raw SQL only as a
+ *    tagged template: a call of $executeRaw / $queryRaw (or their Unsafe forms)
+ *    with an argument list fails, since rule 1 reads literal text only.
+ *
  * Bindings are resolved through the file's own symbols (scope-aware, no
  * Program), so a shadowing local of the same name does not count.
  *
  * KNOWN LIMITS: ordering (the pre-check before the password-protected branch or
  * the password check) is pinned by the integration cells, not here; a call whose
- * result is discarded still counts.
+ * result is discarded still counts; an ORM write of view_count
+ * (passwordShare.update with viewCount) is not recognised as a serving statement
+ * — no serve path uses one, and the integration cells A12 pin the UPDATEs.
  *
  * Exit 0 = clean. Exit 1 = a violation, a missing target, or site counts that
  * differ from the pinned ones.
@@ -130,7 +136,20 @@ for (const { rel, sf } of sourceFilesFrom(project, TARGETS, REPO_ROOT)) {
   const mentions = [
     ...sf.getDescendantsOfKind(SyntaxKind.Identifier).filter((id) => SERVE_GRANTS.has(id.getText())),
     ...sf.getDescendantsOfKind(SyntaxKind.StringLiteral).filter((s) => SERVE_GRANTS.has(s.getLiteralText())),
+    ...sf
+      .getDescendantsOfKind(SyntaxKind.NoSubstitutionTemplateLiteral)
+      .filter((s) => SERVE_GRANTS.has(s.getLiteralText())),
   ];
+  // 3. A serving file issues raw SQL only through tagged templates rule 1 can read.
+  if (mentions.length > 0) {
+    for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+      const callee = call.getExpression();
+      const name = Node.isPropertyAccessExpression(callee) ? callee.getName() : "";
+      if (/^\$(executeRaw|queryRaw)(Unsafe)?$/.test(name)) {
+        violations.push(`${rel}:${call.getStartLineNumber()}: ${name}(...) called with arguments in a serving file — use a tagged template`);
+      }
+    }
+  }
   for (const mention of mentions) {
     grantReferences++;
     const where = `${rel}:${mention.getStartLineNumber()}`;

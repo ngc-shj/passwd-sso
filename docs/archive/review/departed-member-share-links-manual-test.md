@@ -24,8 +24,8 @@ team they held when they created it, or the entry is trashed or gone.
    - Expected: both show "This link has been revoked" — the same screen as a link the
      creator revoked. The protected link does not show its password prompt.
 3. As the OWNER, open Share links (team view).
-   - Expected: both links carry "Unavailable: creator is no longer in the team"
-     ("利用不可：作成者がチームに所属していません" in Japanese).
+   - Expected: both links carry "Unavailable: the creator left the team or the entry was
+     removed" ("利用不可：作成者がチームを離れたか、エントリが削除されました").
 4. Reactivate the creator through SCIM (`active=true`). Reload both links.
    - Expected: both serve again.
 5. Remove the creator from the team (Members → Remove). Reload the links.

@@ -50,6 +50,13 @@
 - Why: `logAuditAsync` enqueues to `audit_outbox` after the request returns, so a
   real-DB "no row" check would pass whether or not the write was merely late.
 
+## D8 C4 precedence: "not admitted" only on an otherwise active link
+
+- Plan C4: `creatorNotInTeam` first, then active / revoked / maxViewsReached / expired.
+- Implemented (code review round 1, F1): the label is decided inside the active arm;
+  revoked, used up and expired are final and win. Renamed `notAdmitted` with a
+  cause-neutral string (F2): the function also refuses trashed and deleted entries.
+
 ## Red-proofs (Phase 2)
 
 Destructive ones ran in a scratch worktree against an isolated database

@@ -213,10 +213,10 @@ export default function ShareLinksPage() {
 
   const getStatusBadge = (link: ShareLinkItem) => {
     switch (shareLinkStatus(link)) {
-      case SHARE_LINK_STATUS.CREATOR_NOT_IN_TEAM:
+      case SHARE_LINK_STATUS.NOT_ADMITTED:
         return (
           <Badge variant="secondary" className="text-xs">
-            {tShare("creatorNotInTeam")}
+            {tShare("notAdmitted")}
           </Badge>
         );
       case SHARE_LINK_STATUS.ACTIVE:
