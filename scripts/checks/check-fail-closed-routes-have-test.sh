@@ -824,7 +824,10 @@ fi
 #   the same as every other passphrase-verification path.
 # 73 incl. the tenant team-owner assignment limiter (team-tenant-departure
 #   plan, C7) — a privileged role change on a team the actor may not belong to.
-EXPECTED_LIMITER_COUNT=73
+# 75 incl. the SCIM team admission approve and reject limiters
+#   (scim-team-admission-approval plan, C3) — each admits or discards a
+#   pending membership.
+EXPECTED_LIMITER_COUNT=75
 limiter_count=$(grep -rh 'failClosedOnRedisError: true' "$REPO_ROOT/src/app/api" | wc -l)
 if [ "$limiter_count" -ne "$EXPECTED_LIMITER_COUNT" ]; then
   echo "AC4.4 FAIL: expected $EXPECTED_LIMITER_COUNT 'failClosedOnRedisError: true' instantiations; found $limiter_count"
