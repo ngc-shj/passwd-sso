@@ -416,10 +416,9 @@ describe("share links across a creator's departure — real-DB integration", () 
       }),
     );
     expect(res.status).toBe(201);
-    const { id, token } = (await res.json()) as { id: string; token?: string; url?: string };
-    const [row] = await sql<{ ok: boolean }>(`SELECT share_creator_admitted($1::uuid) AS ok`, id);
-    expect(row.ok).toBe(!removed);
-    void token;
+    const { id, token } = (await res.json()) as { id: string; token: string };
+    stalePermission.membership = null;
+    expect(await page({ id, token })).toBe(removed ? "error:revoked" : "served");
   });
 
   // ── A8: lists ──
