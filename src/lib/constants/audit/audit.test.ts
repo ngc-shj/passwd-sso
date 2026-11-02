@@ -213,6 +213,22 @@ describe("audit constants", () => {
     );
   });
 
+  it("delivers SCIM's per-team effects to team webhooks (not the excluded SCIM group)", () => {
+    const scimTeamActions = [
+      AUDIT_ACTION.SCIM_GROUP_MAPPING_CREATE,
+      AUDIT_ACTION.TEAM_MEMBER_SCIM_PENDING,
+      AUDIT_ACTION.TEAM_MEMBER_SCIM_PENDING_WITHDRAW,
+      AUDIT_ACTION.TEAM_MEMBER_SCIM_REMOVE,
+      AUDIT_ACTION.TEAM_MEMBER_SCIM_ROLE_UPDATE,
+      AUDIT_ACTION.TEAM_MEMBER_SCIM_APPROVE,
+      AUDIT_ACTION.TEAM_MEMBER_SCIM_REJECT,
+    ];
+    for (const action of scimTeamActions) {
+      expect(TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS).toContain(action);
+      expect(AUDIT_ACTION_GROUPS_TEAM[AUDIT_ACTION_GROUP.TEAM]).toContain(action);
+    }
+  });
+
   it("every action belongs to at least one scope group (PERSONAL, TEAM, or TENANT)", () => {
     const allGrouped = new Set([
       ...Object.values(AUDIT_ACTION_GROUPS_PERSONAL).flat(),

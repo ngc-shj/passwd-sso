@@ -130,11 +130,22 @@ describe("POST /api/teams/[teamId]/members/[memberId]/reject", () => {
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     expect((await reject()).status).toBe(401);
+    expect(tx.teamMember.deleteMany).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 
   it("returns 404 for a pending member calling reject on their own row (no active team row)", async () => {
     mockRequireTeamPermission.mockRejectedValue(new TeamAuthError("NOT_FOUND", 404));
     expect((await reject()).status).toBe(404);
+    expect(tx.teamMember.deleteMany).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 for a tenant ADMIN outside the team", async () => {
+    mockRequireTeamPermission.mockRejectedValue(new TeamAuthError("NOT_FOUND", 404));
+    expect((await reject()).status).toBe(404);
+    expect(tx.teamMember.deleteMany).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 
   it("returns 403 when step-up reauth is required", async () => {
@@ -156,11 +167,15 @@ describe("POST /api/teams/[teamId]/members/[memberId]/reject", () => {
   it("returns 404 when the pre-read target is absent", async () => {
     mockPrismaTeamMember.findUnique.mockResolvedValue(null);
     expect((await reject()).status).toBe(404);
+    expect(tx.teamMember.deleteMany).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 
   it("returns 404 when the pre-read target belongs to a different team", async () => {
     mockPrismaTeamMember.findUnique.mockResolvedValue({ teamId: "other-team", userId: TARGET_USER_ID });
     expect((await reject()).status).toBe(404);
+    expect(tx.teamMember.deleteMany).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 
   it("rejects: deletes the pending row, audits in the transaction", async () => {

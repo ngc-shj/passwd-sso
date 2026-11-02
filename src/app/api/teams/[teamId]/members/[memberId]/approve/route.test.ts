@@ -129,16 +129,22 @@ describe("POST /api/teams/[teamId]/members/[memberId]/approve", () => {
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     expect((await approve()).status).toBe(401);
+    expect(tx.teamMember.updateMany).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 
   it("returns 404 for a pending member calling approve on their own row (no active team row)", async () => {
     mockRequireTeamPermission.mockRejectedValue(new TeamAuthError("NOT_FOUND", 404));
     expect((await approve()).status).toBe(404);
+    expect(tx.teamMember.updateMany).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 
   it("returns 404 for a tenant ADMIN outside the team", async () => {
     mockRequireTeamPermission.mockRejectedValue(new TeamAuthError("NOT_FOUND", 404));
     expect((await approve()).status).toBe(404);
+    expect(tx.teamMember.updateMany).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 
   it("returns 403 when step-up reauth is required", async () => {
@@ -162,16 +168,22 @@ describe("POST /api/teams/[teamId]/members/[memberId]/approve", () => {
   it("returns 400 for an invalid body (expectedRole: OWNER)", async () => {
     const res = await approve({ expectedRole: TEAM_ROLE.OWNER });
     expect(res.status).toBe(400);
+    expect(tx.teamMember.updateMany).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 
   it("returns 404 when the pre-read target is absent", async () => {
     mockPrismaTeamMember.findUnique.mockResolvedValue(null);
     expect((await approve()).status).toBe(404);
+    expect(tx.teamMember.updateMany).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 
   it("returns 404 when the pre-read target belongs to a different team", async () => {
     mockPrismaTeamMember.findUnique.mockResolvedValue({ teamId: "other-team", userId: TARGET_USER_ID });
     expect((await approve()).status).toBe(404);
+    expect(tx.teamMember.updateMany).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 
   it("approves: CAS to active, audits in the transaction", async () => {

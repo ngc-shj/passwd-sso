@@ -457,16 +457,20 @@ describe("scim-team-admission-approval — real-DB integration", () => {
   // ── A3 ───────────────────────────────────────────────────────
 
   describe("A3: approver checks", () => {
-    it("the pending member calling approve on their own row gets 404", async () => {
+    it("the pending member calling approve or reject on their own row gets 404, changing nothing", async () => {
       const owner = await ctx.createUser(tenantId);
       const teamId = await team(owner);
       const target = await member();
       const rowId = await pendingMember(teamId, target.id, "MEMBER");
 
       expect((await approve(teamId, rowId, target.id, "MEMBER")).status).toBe(404);
+      expect((await reject(teamId, rowId, target.id)).status).toBe(404);
+      expect(await membership(teamId, target.id)).toMatchObject({ scim_approval_pending: true });
+      expect(await auditRows("TEAM_MEMBER_SCIM_APPROVE", { teamId })).toEqual([]);
+      expect(await auditRows("TEAM_MEMBER_SCIM_REJECT", { teamId })).toEqual([]);
     });
 
-    it("a tenant ADMIN outside the team gets 404", async () => {
+    it("a tenant ADMIN outside the team gets 404 on approve and reject, changing nothing", async () => {
       const owner = await ctx.createUser(tenantId);
       const teamId = await team(owner);
       const target = await member();
@@ -475,6 +479,10 @@ describe("scim-team-admission-approval — real-DB integration", () => {
       await setTenantRole(outsider.id, "ADMIN");
 
       expect((await approve(teamId, rowId, outsider.id, "MEMBER")).status).toBe(404);
+      expect((await reject(teamId, rowId, outsider.id)).status).toBe(404);
+      expect(await membership(teamId, target.id)).toMatchObject({ scim_approval_pending: true });
+      expect(await auditRows("TEAM_MEMBER_SCIM_APPROVE", { teamId })).toEqual([]);
+      expect(await auditRows("TEAM_MEMBER_SCIM_REJECT", { teamId })).toEqual([]);
     });
 
     it("an active team ADMIN without the key gets 403; the same caller's reject gets 200", async () => {
@@ -487,6 +495,7 @@ describe("scim-team-admission-approval — real-DB integration", () => {
 
       expect((await approve(teamId, rowId, keylessAdmin, "MEMBER")).status).toBe(403);
       expect(await membership(teamId, target.id)).toMatchObject({ scim_approval_pending: true });
+      expect(await auditRows("TEAM_MEMBER_SCIM_APPROVE", { teamId })).toEqual([]);
 
       expect((await reject(teamId, rowId, keylessAdmin)).status).toBe(200);
       expect(await membership(teamId, target.id)).toBeNull();
