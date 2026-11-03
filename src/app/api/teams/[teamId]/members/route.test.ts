@@ -223,6 +223,37 @@ describe("GET /api/teams/[teamId]/members", () => {
     ]);
   });
 
+  // S-R2-1/F-N5/T-N1 (review round 2): a user can hold an active tenantMember
+  // row in the team's own tenant AND a second tenant at once — pending must
+  // read as active-in-team regardless of which row a last-wins Map would
+  // have kept, so both createdAt orderings are exercised.
+  it.each([
+    ["the team-tenant row listed first", [
+      { userId: "u1", tenantId: "tenant-1", tenant: { name: "Team Tenant" } },
+      { userId: "u1", tenantId: "tenant-other", tenant: { name: "Other Tenant" } },
+    ]],
+    ["the other-tenant row listed first", [
+      { userId: "u1", tenantId: "tenant-other", tenant: { name: "Other Tenant" } },
+      { userId: "u1", tenantId: "tenant-1", tenant: { name: "Team Tenant" } },
+    ]],
+  ])("does not flag pendingTenantInactive for a pending user active in both the team tenant and another tenant, %s", async (_label, userTenants) => {
+    mockPrismaTeamMember.findMany.mockResolvedValue([
+      { id: "m1", userId: "u1", role: TEAM_ROLE.VIEWER, createdAt: now, deactivatedByTenant: false, scimApprovalPending: true },
+    ]);
+    mockPrismaUser.findMany.mockResolvedValue([
+      { id: "u1", name: "Dual tenant", email: "u1@test.com", image: null },
+    ]);
+    mockPrismaTenantMember.findMany.mockResolvedValue(userTenants);
+
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/members`),
+      createParams({ teamId: TEAM_ID }),
+    );
+    const json = await res.json();
+
+    expect(json[0].pendingTenantInactive).toBe(false);
+  });
+
   it("does not list members who left the tenant, or pending ones, to a VIEWER", async () => {
     mockRequireTeamMember.mockResolvedValue({ role: TEAM_ROLE.VIEWER });
     mockPrismaTeamMember.findMany.mockResolvedValue([]);

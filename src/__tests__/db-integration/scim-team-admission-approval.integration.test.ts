@@ -701,6 +701,7 @@ describe("scim-team-admission-approval — real-DB integration", () => {
 
       const res = await approve(teamId, rowId, owner, "MEMBER");
       expect(res.status).toBe(409);
+      expect((await res.json()).error).toBe("SCIM_APPROVAL_TARGET_INACTIVE");
       expect(await membership(teamId, target.id)).toMatchObject({ scim_approval_pending: true });
       // (T4) The refusal writes no approval.
       expect(await auditRows("TEAM_MEMBER_SCIM_APPROVE", { teamId })).toEqual([]);
@@ -724,7 +725,9 @@ describe("scim-team-admission-approval — real-DB integration", () => {
         expect(await race.settledOrBlocked(approving, departPid, blocker.pid)).toBe("blocked-on-parked");
         await blocker.release();
         expect((await departing).status).toBe(200);
-        expect((await approving).status).toBe(409);
+        const approvingRes = await approving;
+        expect(approvingRes.status).toBe(409);
+        expect((await approvingRes.json()).error).toBe("SCIM_APPROVAL_TARGET_INACTIVE");
       } finally {
         await blocker.release();
         await Promise.allSettled([departing, approving]);
@@ -934,9 +937,13 @@ describe("scim-team-admission-approval — real-DB integration", () => {
       expect((await approve(otherTeamId, rowId, owner, "MEMBER")).status).toBe(404);
       expect((await reject(otherTeamId, rowId, owner)).status).toBe(404);
       expect(await membership(teamId, target.id)).toMatchObject({ scim_approval_pending: true });
-      // (T4) Neither mismatched call writes anything.
+      // (T4) Neither mismatched call writes anything — checked under both
+      // teamIds, since a bug could write the audit row scoped to the team the
+      // (wrong) route param named rather than to no team at all.
       expect(await auditRows("TEAM_MEMBER_SCIM_APPROVE", { teamId })).toEqual([]);
       expect(await auditRows("TEAM_MEMBER_SCIM_REJECT", { teamId })).toEqual([]);
+      expect(await auditRows("TEAM_MEMBER_SCIM_APPROVE", { teamId: otherTeamId })).toEqual([]);
+      expect(await auditRows("TEAM_MEMBER_SCIM_REJECT", { teamId: otherTeamId })).toEqual([]);
     });
   });
 

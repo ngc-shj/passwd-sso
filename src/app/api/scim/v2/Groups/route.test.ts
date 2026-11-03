@@ -338,6 +338,26 @@ describe("POST /api/scim/v2/Groups", () => {
     expect(res.status).toBe(400);
   });
 
+  // C/F2/S-F3 (review round 2, F-N3/T-N3/T-N4): POST never reads `members`
+  // for mapping creation, but the body is still schema-validated whole —
+  // a malformed member value 400s here too, a behavior change from when the
+  // field went unvalidated (noted in the deviation log).
+  it("returns 400 for a non-uuid member value, although POST never reads members for the mapping it creates", async () => {
+    const res = await POST(
+      makeReq({
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+          displayName: "core:ADMIN",
+          externalId: "grp-1",
+          members: [{ value: "not-a-uuid" }],
+        },
+      }),
+    );
+
+    expect(res.status).toBe(400);
+    expect(mockScimGroupMapping.create).not.toHaveBeenCalled();
+  });
+
   it("treats blank externalId as invalid", async () => {
     const res = await POST(
       makeReq({

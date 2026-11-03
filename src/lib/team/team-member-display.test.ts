@@ -168,4 +168,46 @@ describe("buildTeamMemberDisplayItems", () => {
 
     expect(result[0]?.pendingTenantInactive).toBe(false);
   });
+
+  // S-R2-1/F-N5/T-N1 (review round 2): a user can hold an active tenantMember
+  // row in the team's own tenant AND in another tenant at once (the
+  // single-active-tenant invariant only momentarily violated). A last-wins
+  // Map keyed by userId collapses that to whichever row sorted last — wrong
+  // either way it happens to land. Both createdAt orderings must answer
+  // "active in the team tenant" correctly regardless.
+  it.each([
+    ["the team-tenant row created first", [
+      { userId: "u1", tenantId: "team-tenant", tenant: { name: "Team Tenant" } },
+      { userId: "u1", tenantId: "other-tenant", tenant: { name: "Other Tenant" } },
+    ]],
+    ["the other-tenant row created first", [
+      { userId: "u1", tenantId: "other-tenant", tenant: { name: "Other Tenant" } },
+      { userId: "u1", tenantId: "team-tenant", tenant: { name: "Team Tenant" } },
+    ]],
+  ])("flags pendingTenantInactive false for a pending user active in both the team tenant and another tenant, %s", async (_label, userTenants) => {
+    mockPrismaUserFindMany.mockResolvedValue([
+      { id: "u1", name: "Dual tenant", email: "u1@test.com", image: null },
+    ]);
+    mockPrismaTenantMemberFindMany.mockResolvedValue(userTenants);
+
+    const result = await buildTeamMemberDisplayItems(
+      [{ id: "m1", userId: "u1", role: "ADMIN", createdAt: now, pendingApproval: true }],
+      "team-tenant",
+    );
+
+    expect(result[0]?.pendingTenantInactive).toBe(false);
+  });
+
+  it("throws when a pending row is given without the team's tenantId", async () => {
+    mockPrismaUserFindMany.mockResolvedValue([
+      { id: "u1", name: "Pending", email: "u1@test.com", image: null },
+    ]);
+    mockPrismaTenantMemberFindMany.mockResolvedValue([]);
+
+    await expect(
+      buildTeamMemberDisplayItems([
+        { id: "m1", userId: "u1", role: "ADMIN", createdAt: now, pendingApproval: true },
+      ]),
+    ).rejects.toThrow();
+  });
 });

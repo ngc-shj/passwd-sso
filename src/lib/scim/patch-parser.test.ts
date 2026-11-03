@@ -4,6 +4,7 @@ import {
   parseGroupPatchOps,
   PatchParseError,
 } from "./patch-parser";
+import { scimGroupSchema } from "./validations";
 
 describe("parseUserPatchOps", () => {
   it("parses active=false replace", () => {
@@ -174,6 +175,10 @@ describe("parseGroupPatchOps", () => {
     expect(result).toEqual([{ op: "add", userId: USER_1 }]);
   });
 
+  // The service (patchScimGroup, D) folds this array to one action per
+  // userId, last op wins — the parser must preserve order in both
+  // directions, not just the one example that happens to match the old
+  // (buggy) always-add-then-remove processing order.
   it("keeps add-then-remove order for the same id across op kinds", () => {
     const result = parseGroupPatchOps([
       { op: "add", path: "members", value: [{ value: USER_1 }] },
@@ -183,5 +188,59 @@ describe("parseGroupPatchOps", () => {
       { op: "add", userId: USER_1 },
       { op: "remove", userId: USER_1 },
     ]);
+  });
+
+  it("keeps remove-then-add order for the same id across op kinds", () => {
+    const result = parseGroupPatchOps([
+      { op: "remove", path: "members", value: [{ value: USER_1 }] },
+      { op: "add", path: "members", value: [{ value: USER_1 }] },
+    ]);
+    expect(result).toEqual([
+      { op: "remove", userId: USER_1 },
+      { op: "add", userId: USER_1 },
+    ]);
+  });
+
+  it("de-duplicates the same id given in both its lowercase and uppercase form within one add op", () => {
+    const result = parseGroupPatchOps([
+      { op: "add", path: "members", value: [{ value: USER_1 }, { value: USER_1.toUpperCase() }] },
+    ]);
+    expect(result).toEqual([{ op: "add", userId: USER_1 }]);
+  });
+});
+
+// C/F2/S-F3 (review round 2, F-N3/T-N3/T-N4): PATCH's member-value check
+// (patch-parser.ts) and PUT/POST's (validations.ts's scimGroupSchema) must
+// agree on what counts as a user id — both now run the same zod `.uuid()`
+// validator. A hand-rolled regex previously disagreed with it on the nil and
+// max uuids (no version/variant nibble to check against).
+describe("PATCH/PUT member-value validation parity", () => {
+  const NIL_UUID = "00000000-0000-0000-0000-000000000000";
+  const MAX_UUID = "ffffffff-ffff-ffff-ffff-ffffffffffff";
+
+  function parserAccepts(value: string): boolean {
+    try {
+      parseGroupPatchOps([{ op: "add", path: "members", value: [{ value }] }]);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function schemaAccepts(value: string): boolean {
+    return scimGroupSchema.safeParse({
+      schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+      displayName: "ADMIN",
+      members: [{ value }],
+    }).success;
+  }
+
+  it.each([
+    ["nil uuid", NIL_UUID],
+    ["max uuid", MAX_UUID],
+    ["upper-case uuid", USER_1.toUpperCase()],
+    ["non-uuid", "not-a-uuid"],
+  ])("agree on %s", (_label, value) => {
+    expect(parserAccepts(value)).toBe(schemaAccepts(value));
   });
 });

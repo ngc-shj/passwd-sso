@@ -7,6 +7,9 @@
 - D2 (C3) Approve answers the generic `CONFLICT` code (409) for a target inactive in the
   tenant and for a CAS miss; the plan fixed the status, not the code. Members POST
   answers 404 for the same tenant state; approve follows the plan's 409 (A6).
+  Superseded by the Round 2 review (S-R2-2): the tenant-inactive outcome now answers
+  its own `SCIM_APPROVAL_TARGET_INACTIVE` code; `CONFLICT` is left for the CAS miss and
+  lock conflicts only.
 - D3 (C3) The approve/reject rate limit is 30 per hour per user, fail-closed on a Redis
   error (the plan named no number); only `memberId` is uuid-validated, as on every
   other team route `teamId` reaches `requireTeamPermission` unvalidated.
@@ -45,3 +48,14 @@
   takes — a drift between them does not silently pass, it fails loudly as
   `waitForBackendBlockedBy` timing out (the blocker never sees a waiter), so
   the hard-coded literal is left as is.
+- D12 (Round 2 review, F-N3/T-N3/T-N4) `POST /api/scim/v2/Groups` already
+  schema-validates the whole body, `members` included, although the handler
+  never reads `members` for the mapping it creates — a malformed member
+  value now 400s where it previously went unvalidated and unused. Kept as is
+  (rejecting a request the IdP sent in error is the right answer even for a
+  field this route ignores); a test pins it.
+- D13 (Round 2 review, F-N4/T-N7) `patchScimGroup`'s add/remove split ran
+  adds before removes regardless of request order — a pre-existing defect
+  (not introduced by this plan's own PATCH changes), fixed here by folding
+  same-userId add/remove ops to the last one in request order before the
+  split (RFC 7644 §3.5.2).

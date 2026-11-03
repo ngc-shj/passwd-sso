@@ -128,7 +128,10 @@ describe("API_ERROR structural invariants", () => {
     // 175 = 174 + CANNOT_DELETE_LAST_PASSKEY (session-api-passkey-gate FN-2).
     // 177 = 175 + SCIM_APPROVAL_PENDING + SCIM_APPROVAL_ROLE_CHANGED
     // (scim-team-admission-approval C3/C6).
-    expect(Object.keys(API_ERROR).length).toBe(177);
+    // 178 = 177 + SCIM_APPROVAL_TARGET_INACTIVE (scim-team-admission-approval
+    // review round 2, S-R2-2/F-N1/F-N2/T-N2: split out of the generic CONFLICT
+    // approve used for a target who left the tenant).
+    expect(Object.keys(API_ERROR).length).toBe(178);
   });
 });
 

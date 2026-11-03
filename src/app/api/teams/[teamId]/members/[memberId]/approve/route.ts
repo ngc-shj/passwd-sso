@@ -172,14 +172,14 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   if (outcome === APPROVE_OUTCOME.ACTOR_NOT_PERMITTED) return errorResponse(API_ERROR.FORBIDDEN);
   if (outcome === APPROVE_OUTCOME.NOT_FOUND) return errorResponse(API_ERROR.MEMBER_NOT_FOUND);
   if (outcome === APPROVE_OUTCOME.ROLE_CHANGED) return errorResponse(API_ERROR.SCIM_APPROVAL_ROLE_CHANGED);
-  // CONFLICT (409): the generic code for a state conflict re-read under the
-  // lock. Covers the target's tenant row going inactive (plan C3; A6 pins
-  // this outcome to 409) and the CAS itself finding 0 rows — the latter is
-  // unreachable in practice once the checks above pass under the same lock,
-  // kept only as the defensive 409 the plan's CAS literally asks for.
-  if (outcome === APPROVE_OUTCOME.TENANT_INACTIVE || outcome === APPROVE_OUTCOME.CAS_FAILED) {
-    return errorResponse(API_ERROR.CONFLICT);
-  }
+  // The target left the tenant (plan C3; A6 pins this outcome to 409) — a
+  // distinct code from the generic CONFLICT below, so the UI can tell "reject
+  // instead" apart from "retry" (review round 2, S-R2-2/F-N1/F-N2/T-N2).
+  if (outcome === APPROVE_OUTCOME.TENANT_INACTIVE) return errorResponse(API_ERROR.SCIM_APPROVAL_TARGET_INACTIVE);
+  // CONFLICT (409): the CAS itself finding 0 rows — unreachable in practice
+  // once the checks above pass under the same lock, kept only as the
+  // defensive 409 the plan's CAS literally asks for.
+  if (outcome === APPROVE_OUTCOME.CAS_FAILED) return errorResponse(API_ERROR.CONFLICT);
 
   return NextResponse.json({ success: true });
 }

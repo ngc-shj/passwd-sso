@@ -223,9 +223,13 @@ export default function TeamMembersPage({
           toast.error(t("approveNeedsKey"));
           return;
         }
-        if (error === API_ERROR.CONFLICT) {
+        if (error === API_ERROR.SCIM_APPROVAL_TARGET_INACTIVE) {
           toast.error(t("approveTargetLeftTenant"));
           fetchAll();
+          return;
+        }
+        if (error === API_ERROR.CONFLICT) {
+          toast.error(t("approvalBusyRetry"));
           return;
         }
         if (error === API_ERROR.RATE_LIMIT_EXCEEDED) {
@@ -262,6 +266,10 @@ export default function TeamMembersPage({
         }
         if (error === API_ERROR.FORBIDDEN) {
           toast.error(t("forbidden"));
+          return;
+        }
+        if (error === API_ERROR.CONFLICT) {
+          toast.error(t("approvalBusyRetry"));
           return;
         }
         if (error === API_ERROR.RATE_LIMIT_EXCEEDED) {

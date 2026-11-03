@@ -109,6 +109,7 @@
   "scimManagedMember": "This member is managed by SCIM. Please re-activate from your identity provider.",
   "scimApprovalPending": "This member is awaiting team approval. Approve or reject the request in the member list.",
   "scimApprovalRoleChanged": "The requested role changed. Reload the list and review the request again.",
+  "scimApprovalTargetInactive": "This user is no longer active in the organization. Reject the request instead.",
   "scimFilterInvalid": "Invalid SCIM filter expression.",
   "scimUnsupportedOperation": "Unsupported SCIM operation.",
   "scimResourceExists": "Resource already exists.",

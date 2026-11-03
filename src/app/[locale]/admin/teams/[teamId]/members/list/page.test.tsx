@@ -455,10 +455,16 @@ describe("TeamMembersPage (SCIM pending admission, C5)", () => {
   it.each([
     { button: "approveButton", path: "approve", status: 403, error: "FORBIDDEN", message: "approveNeedsKey" },
     { button: "approveButton", path: "approve", status: 404, error: "MEMBER_NOT_FOUND", message: "requestAlreadyHandled" },
-    { button: "approveButton", path: "approve", status: 409, error: "CONFLICT", message: "approveTargetLeftTenant" },
+    { button: "approveButton", path: "approve", status: 409, error: "SCIM_APPROVAL_TARGET_INACTIVE", message: "approveTargetLeftTenant" },
+    // The target leaving the tenant (above) and a lock/CAS conflict (below)
+    // are now distinct codes (review round 2, S-R2-2/F-N1/F-N2/T-N2) — the
+    // generic CONFLICT must not reuse the "reject instead" wording, since
+    // nothing here says the target is actually gone.
+    { button: "approveButton", path: "approve", status: 409, error: "CONFLICT", message: "approvalBusyRetry" },
     { button: "approveButton", path: "approve", status: 429, error: "RATE_LIMIT_EXCEEDED", message: "rateLimitExceeded" },
     { button: "rejectButton", path: "reject", status: 404, error: "MEMBER_NOT_FOUND", message: "requestAlreadyHandled" },
     { button: "rejectButton", path: "reject", status: 403, error: "FORBIDDEN", message: "forbidden" },
+    { button: "rejectButton", path: "reject", status: 409, error: "CONFLICT", message: "approvalBusyRetry" },
     { button: "rejectButton", path: "reject", status: 429, error: "RATE_LIMIT_EXCEEDED", message: "rateLimitExceeded" },
   ])("$path $status $error shows $message, not a network error", async ({ button, path, status, error, message }) => {
     const pending = makeMember({ id: "mem-pending", userId: "user-pending", role: "ADMIN", pendingApproval: true });
@@ -497,5 +503,32 @@ describe("TeamMembersPage (SCIM pending admission, C5)", () => {
       expect(mockToast.error).toHaveBeenCalledWith(message);
     });
     expect(mockToast.error).not.toHaveBeenCalledWith("networkError");
+  });
+
+  it("an unrecognised 409 on approve falls to the generic network error", async () => {
+    const pending = makeMember({ id: "mem-pending", userId: "user-pending", role: "ADMIN", pendingApproval: true });
+    setupFetchReady({ members: [pending] });
+
+    const baseImpl = mockFetch.getMockImplementation()!;
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === "/api/teams/team-1/members/mem-pending/approve") {
+        return Promise.resolve({ ok: false, status: 409, json: () => Promise.resolve({ error: "SOME_OTHER_CODE" }) });
+      }
+      return baseImpl(url, init);
+    });
+
+    await act(async () => {
+      render(<TeamMembersPage params={Promise.resolve({ teamId: "team-1" })} />);
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "approveButton" })).toBeInTheDocument();
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "approveButton" }));
+    });
+
+    await waitFor(() => {
+      expect(mockToast.error).toHaveBeenCalledWith("networkError");
+    });
   });
 });

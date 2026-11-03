@@ -209,6 +209,28 @@ function higherRole(a: TeamRole, b: TeamRole): TeamRole {
 }
 
 /**
+ * RFC 7644 §3.5.2: PATCH operations apply in the order given. `actions`
+ * preserves that order (patch-parser.ts) across op kinds, so a userId named
+ * by both an add and a remove op resolves to whichever one appears last —
+ * `[remove X, add X]` leaves X added, `[add X, remove X]` leaves X removed.
+ * Splitting into independent add/remove lists without this fold (the
+ * pre-fix behaviour) always ran adds before removes regardless of request
+ * order (review round 2, F-N4/T-N7).
+ */
+function foldPatchOperations(actions: GroupMemberAction[]): { addUserIds: string[]; removeUserIds: string[] } {
+  const lastOpByUserId = new Map<string, GroupMemberAction["op"]>();
+  for (const { op, userId } of actions) {
+    lastOpByUserId.set(userId, op);
+  }
+  const addUserIds: string[] = [];
+  const removeUserIds: string[] = [];
+  for (const [userId, op] of lastOpByUserId) {
+    (op === "add" ? addUserIds : removeUserIds).push(userId);
+  }
+  return { addUserIds, removeUserIds };
+}
+
+/**
  * Lock order for a group write (tenant-row-lock.ts): the tenant rows of the
  * users it may admit or remove, then the team. Returns the locked rows for
  * applyAddOperations.
@@ -658,8 +680,10 @@ export async function replaceScimGroup(
 /**
  * Partial-update a SCIM Group's members (PATCH semantics).
  *
- * Applies a list of add/remove actions parsed from the SCIM PATCH Operations array.
- * Owner-role members are always protected from modification.
+ * Applies a list of add/remove actions parsed from the SCIM PATCH Operations
+ * array, folded per userId to the last op in request order (RFC 7644
+ * §3.5.2 — `foldPatchOperations`). Owner-role members are always protected
+ * from modification.
  *
  * Throws:
  * - `ScimGroupNotFoundError` — no mapping found for tenantId + scimId
@@ -694,11 +718,10 @@ export async function patchScimGroup(
   let transitions: ScimMemberTransition[] = [];
 
   try {
-    const addOps = operations.filter((a) => a.op === "add");
-    const removeOps = operations.filter((a) => a.op === "remove");
+    const { addUserIds, removeUserIds } = foldPatchOperations(operations);
     const tenantRows = await lockGroupWrite(tx, tenantId, mapping.teamId, [
-      ...addOps.map((a) => a.userId),
-      ...removeOps.map((a) => a.userId),
+      ...addUserIds,
+      ...removeUserIds,
     ]);
 
     const addTransitions = await applyAddOperations(
@@ -706,14 +729,14 @@ export async function patchScimGroup(
       mapping.teamId,
       tenantId,
       mapping.role,
-      addOps.map((a) => a.userId),
+      addUserIds,
       tenantRows,
     );
     const removeTransitions = await applyRemoveOperations(
       tx,
       mapping.teamId,
       mapping.role,
-      removeOps.map((a) => a.userId),
+      removeUserIds,
     );
     transitions = [...addTransitions, ...removeTransitions];
   } catch (e) {

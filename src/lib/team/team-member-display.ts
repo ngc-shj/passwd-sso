@@ -92,7 +92,15 @@ export async function buildTeamMemberDisplayItems(
 
   const userById = new Map(users.map((u) => [u.id, u]));
   const tenantByUserId = new Map(userTenants.map((t) => [t.userId, t.tenant.name]));
-  const activeTenantIdByUserId = new Map(userTenants.map((t) => [t.userId, t.tenantId]));
+  // The same question approve asks: does this user hold an active
+  // tenantMember row specifically in the TEAM's own tenant? A last-wins Map
+  // keyed only by userId would answer a different question — "which one
+  // active tenant does this user have" — and silently pick the wrong one
+  // for a user active in two tenants at once (the single-active-tenant
+  // invariant only momentarily violated, same caveat as the ordering above).
+  const activeInTeamTenantUserIds = new Set(
+    userTenants.filter((t) => t.tenantId === teamTenantId).map((t) => t.userId),
+  );
 
   return members.flatMap((member) => {
     const user = userById.get(member.userId);
@@ -100,6 +108,12 @@ export async function buildTeamMemberDisplayItems(
       return [];
     }
     const pendingApproval = member.pendingApproval ?? false;
+    if (pendingApproval && teamTenantId === undefined) {
+      // Every caller that can hand back a pending row also knows its own
+      // tenantId (members GET) — an omission here is a caller bug, not a
+      // state this predictor should guess at.
+      throw new Error("buildTeamMemberDisplayItems: a pending row needs teamTenantId");
+    }
     return [{
       id: member.id,
       userId: member.userId,
@@ -112,7 +126,7 @@ export async function buildTeamMemberDisplayItems(
       departed: member.departed ?? false,
       pendingApproval,
       pendingTenantInactive: pendingApproval
-        ? activeTenantIdByUserId.get(member.userId) !== teamTenantId
+        ? !activeInTeamTenantUserIds.has(member.userId)
         : false,
     }];
   });

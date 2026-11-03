@@ -2,8 +2,11 @@
  * SCIM PATCH operation parser (RFC 7644 §3.5.2).
  *
  * Pure function — no Prisma / DB dependencies.
- * Depends only on TEAM_ROLE_VALUES constant for group membership validation.
+ * Depends only on TEAM_ROLE_VALUES constant for group membership validation,
+ * and on zod for the member-value uuid check below.
  */
+
+import { z } from "zod";
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -36,17 +39,19 @@ export interface GroupMemberAction {
 // lowercasing here, at the boundary, keeps a mixed-case or malformed id from
 // reaching `::uuid[]` (22P02) or a same-batch `createMany` (P2002) as the
 // service's own `Set`/CAS dedup would not catch it (F2/S-F3).
-// Same shape zod's `.uuid()` accepts (version nibble 1-8, variant nibble
-// 8/9/a/b) — scimGroupSchema validates PUT/POST member values with that
-// validator, so a value this regex passes and that one rejects (or the
-// reverse) would make PATCH and PUT disagree on what a user id looks like.
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+// The same validator `scimGroupSchema` uses for PUT/POST member values
+// (src/lib/scim/validations.ts) — a hand-rolled regex here previously
+// disagreed with it on the nil (`00000000-…`) and max (`ffffffff-…`) uuids,
+// which zod's `.uuid()` accepts as special cases and the regex's version/
+// variant nibble ranges did not (review round 2, F-N3/T-N3/T-N4).
+const memberValueSchema = z.string().uuid();
 
 function normalizeMemberValue(value: string): string {
-  if (!UUID_REGEX.test(value)) {
+  const parsed = memberValueSchema.safeParse(value);
+  if (!parsed.success) {
     throw new PatchParseError("Member value must be a valid UUID", "invalidValue");
   }
-  return value.toLowerCase();
+  return parsed.data.toLowerCase();
 }
 
 // ── User PATCH ────────────────────────────────────────────────
@@ -132,8 +137,11 @@ export function parseGroupPatchOps(
   const actions: GroupMemberAction[] = [];
   // De-duplicated per op kind, not across kinds: a ("remove", id) entry does
   // not suppress a later ("add", id) in the same request (or vice versa), so
-  // an IdP that sends add-then-remove for the same id keeps that order —
-  // only a repeated id within the same op kind collapses to one action.
+  // an IdP that sends add-then-remove for the same id keeps both actions, in
+  // that order — only a repeated id within the same op kind collapses to one
+  // action. The service folds this array to one action per userId, last op
+  // wins (RFC 7644 §3.5.2, review round 2 F-N4/T-N7), so the order here is
+  // not cosmetic: scrambling it would scramble that fold.
   const seenAdd = new Set<string>();
   const seenRemove = new Set<string>();
 

@@ -375,6 +375,59 @@ describe("patchScimGroup — remove operations (C2)", () => {
   });
 });
 
+// D (RFC 7644 §3.5.2, review round 2 F-N4/T-N7): operations for the same
+// userId apply in request order, last op wins. Same starting membership
+// (active, role already at the mapping's role) in both tests — only the
+// order of the two ops differs — so a fold bug (always add-before-remove,
+// independent of request order) is caught by the opposite-order case.
+describe("patchScimGroup — operation order (D)", () => {
+  const ACTIVE_ROW = { id: "m-1", userId: "user-a", role: "ADMIN", deactivatedAt: null, deactivatedByTenant: false, scimApprovalPending: false };
+
+  it("[remove X, add X] leaves X active (add wins, nothing removed)", async () => {
+    const { tx, teamMember, tenantMember } = makeTx();
+    teamMember.findMany
+      .mockResolvedValueOnce([ACTIVE_ROW]) // applyAddOperations' membership read
+      .mockResolvedValueOnce([]); // loadGroupMembers
+    tenantMember.findMany.mockResolvedValue([{ userId: "user-a" }]);
+
+    const result = await patchScimGroup(
+      TENANT_ID, SCIM_ID,
+      [{ op: "remove", userId: "user-a" }, { op: "add", userId: "user-a" }],
+      BASE_URL, tx,
+    );
+
+    // Already active at the mapping's role: the fold-to-add is a true no-op.
+    expect(teamMember.createMany).not.toHaveBeenCalled();
+    expect(teamMember.updateManyAndReturn).not.toHaveBeenCalled();
+    expect(teamMember.deleteMany).not.toHaveBeenCalled();
+    expect(result.transitions).toEqual([]);
+  });
+
+  it("[add X, remove X] leaves X removed (remove wins)", async () => {
+    const { tx, teamMember } = makeTx();
+    teamMember.findMany
+      .mockResolvedValueOnce([ACTIVE_ROW]) // applyRemoveOperations' fresh read
+      .mockResolvedValueOnce([]); // loadGroupMembers
+    teamMember.updateManyAndReturn.mockResolvedValue([{ id: "m-1", userId: "user-a" }]);
+
+    const result = await patchScimGroup(
+      TENANT_ID, SCIM_ID,
+      [{ op: "add", userId: "user-a" }, { op: "remove", userId: "user-a" }],
+      BASE_URL, tx,
+    );
+
+    expect(teamMember.createMany).not.toHaveBeenCalled();
+    expect(teamMember.updateManyAndReturn).toHaveBeenCalledWith({
+      where: { id: { in: ["m-1"] }, teamId: TEAM_ID, role: "ADMIN", deactivatedAt: null },
+      data: { deactivatedAt: expect.any(Date) },
+      select: { id: true, userId: true },
+    });
+    expect(result.transitions).toEqual([
+      { kind: SCIM_TRANSITION_KIND.ACTIVE_REMOVED, userId: "user-a", role: "ADMIN", memberId: "m-1" },
+    ]);
+  });
+});
+
 describe("patchScimGroup — group lookup and lock failures", () => {
   it("throws ScimGroupNotFoundError when mapping does not exist", async () => {
     const { tx, scimGroupMapping } = makeTx();

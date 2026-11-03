@@ -251,7 +251,7 @@ describe("POST /api/teams/[teamId]/members/[memberId]/approve", () => {
     expect(tx.teamMember.updateMany).not.toHaveBeenCalled();
   });
 
-  it("returns 409 when the target's tenant row is inactive (A6)", async () => {
+  it("returns 409 SCIM_APPROVAL_TARGET_INACTIVE when the target's tenant row is inactive (A6)", async () => {
     mockLockTenantRows.mockResolvedValue(new Map([
       [APPROVER_ID, { hasRow: true, deactivatedAt: null, departedAt: null }],
       [TARGET_USER_ID, { hasRow: true, deactivatedAt: new Date(), departedAt: null }],
@@ -260,26 +260,29 @@ describe("POST /api/teams/[teamId]/members/[memberId]/approve", () => {
     const res = await approve();
 
     expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("SCIM_APPROVAL_TARGET_INACTIVE");
     expect(tx.teamMember.updateMany).not.toHaveBeenCalled();
     expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 
-  it("returns 409 when the CAS matches no row", async () => {
+  it("returns the generic 409 CONFLICT when the CAS matches no row (not SCIM_APPROVAL_TARGET_INACTIVE)", async () => {
     tx.teamMember.updateMany.mockResolvedValue({ count: 0 });
 
     const res = await approve();
 
     expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("CONFLICT");
     expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 
-  it("returns 409 when a rotation holds the team past the lock wait", async () => {
+  it("returns the generic 409 CONFLICT, not SCIM_APPROVAL_TARGET_INACTIVE, when a rotation holds the team past the lock wait", async () => {
     const { TeamRotationLockError } = await vi.importActual<typeof import("@/lib/team/team-key-rotation-lock")>("@/lib/team/team-key-rotation-lock");
     mockLockTeamsAgainstRotation.mockRejectedValue(new TeamRotationLockError(1));
 
     const res = await approve();
 
     expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("CONFLICT");
     expect(tx.teamMember.updateMany).not.toHaveBeenCalled();
   });
 });

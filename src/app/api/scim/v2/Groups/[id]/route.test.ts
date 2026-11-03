@@ -416,6 +416,26 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
     expect(body.detail).toContain("not an active member of this tenant");
   });
 
+  // C/F2/S-F3 (review round 2, F-N3/T-N3/T-N4): a malformed member value is
+  // a parse-time rejection (patch-parser.ts), distinct from the 400 above
+  // (a well-formed uuid that is not an active tenant member).
+  it("returns 400 with scimType invalidValue for a non-uuid member value", async () => {
+    const res = await PATCH(
+      makeReq({
+        method: "PATCH",
+        body: {
+          schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          Operations: [{ op: "add", path: "members", value: [{ value: "not-a-uuid" }] }],
+        },
+      }),
+      makeParams("grp-1"),
+    );
+
+    expect(res!.status).toBe(400);
+    const body = await res!.json();
+    expect(body.scimType).toBe("invalidValue");
+  });
+
   it("returns 400 for invalid JSON on PATCH", async () => {
     const req = new NextRequest("http://localhost/api/scim/v2/Groups/grp-1", {
       method: "PATCH",
@@ -685,6 +705,12 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
 describe("PUT /api/scim/v2/Groups/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Same reset as the PATCH describe above (T6): clearAllMocks keeps a
+    // previously set mockResolvedValue/mockImplementation alive, which would
+    // otherwise leak a fixture-sized answer into whichever cell runs next.
+    mockTeamMember.findMany.mockReset();
+    mockTeamMember.createMany.mockReset();
+    mockTenantMember.findMany.mockReset();
     vi.stubEnv("AUTH_URL", "http://localhost:3000");
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue({ allowed: true });
@@ -767,6 +793,57 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
         },
       ],
     });
+  });
+
+  // C/F2/S-F3 (review round 2, F-N3/T-N3/T-N4): the same id given in both its
+  // lowercase and uppercase form collapses to one createMany row — the body
+  // schema (validations.ts) lowercases each value, and the service's own Set
+  // dedup takes it from there.
+  it("creates one row for the same id given in both its lowercase and uppercase form", async () => {
+    mockTeamMember.findMany
+      .mockResolvedValueOnce([]) // unlocked pre-read
+      .mockResolvedValueOnce([]) // locked re-read (current)
+      .mockResolvedValueOnce([]) // applyAddOperations' membership read
+      .mockResolvedValueOnce([]); // loadGroupMembers after tx
+    mockTenantMember.findMany.mockResolvedValue([{ userId: USER_1 }]);
+    mockTeamMember.createMany.mockResolvedValue({ count: 1 });
+
+    const res = await PUT(
+      makeReq({
+        method: "PUT",
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+          displayName: "core:ADMIN",
+          members: [{ value: USER_1 }, { value: USER_1.toUpperCase() }],
+        },
+      }),
+      makeParams("grp-1"),
+    );
+
+    expect(res!.status).toBe(200);
+    expect(mockTeamMember.createMany).toHaveBeenCalledTimes(1);
+    expect(mockTeamMember.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({ userId: USER_1 }),
+      ],
+    });
+  });
+
+  it("returns 400 for a non-uuid member value on PUT", async () => {
+    const res = await PUT(
+      makeReq({
+        method: "PUT",
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+          displayName: "core:ADMIN",
+          members: [{ value: "not-a-uuid" }],
+        },
+      }),
+      makeParams("grp-1"),
+    );
+
+    expect(res!.status).toBe(400);
+    expect(mockTeamMember.createMany).not.toHaveBeenCalled();
   });
 
   it("returns 400 when displayName does not match the mapped role", async () => {
