@@ -37,7 +37,7 @@ team key approves it, or the team rejects it.
    - Expected: removal deactivates the member (team audit: SCIM removal); the re-add
      makes them pending again, not active.
 7. As the OWNER, click Reject and confirm.
-   - Expected: "Member rejected"; the row disappears. The confirmation says the
+   - Expected: "Membership rejected"; the row disappears. The confirmation says the
      request returns if the IdP still lists the user — send the same PATCH add again
      and confirm a new pending row appears.
 8. As the OWNER, try to add the pending joiner from "Add from tenant".
