@@ -393,12 +393,18 @@ describe("patchScimGroup — operation order (D)", () => {
    * group-members read gets none.
    */
   function serveRows(teamMember: ReturnType<typeof makeTx>["teamMember"], rows: Row[]) {
-    teamMember.findMany.mockImplementation(async (args: { where?: { userId?: { in?: string[] }; OR?: unknown[] } }) => {
-      const ids = args.where?.userId?.in;
-      if (!ids) return [];
-      const matched = rows.filter((r) => ids.includes(r.userId));
-      return args.where?.OR ? matched.filter((r) => r.deactivatedByTenant || r.scimApprovalPending) : matched;
-    });
+    teamMember.findMany.mockImplementation(
+      async (args: { where?: { userId?: { in?: string[] }; OR?: Record<string, unknown>[] } }) => {
+        const ids = args.where?.userId?.in;
+        if (!ids) return [];
+        const matched = rows.filter((r) => ids.includes(r.userId));
+        const or = args.where?.OR;
+        // Evaluates the OR the service sent, so a changed filter changes the answer.
+        return or
+          ? matched.filter((r) => or.some((c) => Object.entries(c).every(([k, v]) => r[k as keyof Row] === v)))
+          : matched;
+      },
+    );
     teamMember.updateManyAndReturn.mockImplementation(async (args: { where: { id: { in: string[] } } }) =>
       rows.filter((r) => args.where.id.in.includes(r.id)).map((r) => ({ id: r.id, userId: r.userId })),
     );
@@ -476,6 +482,48 @@ describe("patchScimGroup — operation order (D)", () => {
 
     await expect(patch(tx, [{ op: "add", userId: Y }, { op: "remove", userId: Y }])).rejects.toThrow(ScimNoSuchMemberError);
     expect(teamMember.deleteMany).not.toHaveBeenCalled();
+    expect(teamMember.updateManyAndReturn).not.toHaveBeenCalled();
+  });
+
+  it("refuses a cancelled add of a user whose row is only deactivated (not departed, not pending)", async () => {
+    const { tx, teamMember, tenantMember } = makeTx();
+    const deactivated: Row = { id: "m-3", userId: Y, role: "ADMIN", deactivatedAt: new Date(), deactivatedByTenant: false, scimApprovalPending: false };
+    serveRows(teamMember, [deactivated]);
+    tenantMember.findMany.mockResolvedValue([]);
+
+    await expect(patch(tx, [{ op: "add", userId: Y }, { op: "remove", userId: Y }])).rejects.toThrow(ScimNoSuchMemberError);
+    expect(teamMember.findMany).toHaveBeenCalledWith({
+      where: { teamId: TEAM_ID, userId: { in: [Y] }, OR: [{ deactivatedByTenant: true }, { scimApprovalPending: true }] },
+      select: { userId: true },
+    });
+  });
+
+  it("accepts a cancelled add of a user who left the tenant with a pending row, withdrawing it", async () => {
+    const { tx, teamMember, tenantMember } = makeTx();
+    const pending: Row = { id: "m-4", userId: Y, role: "ADMIN", deactivatedAt: new Date(), deactivatedByTenant: false, scimApprovalPending: true };
+    serveRows(teamMember, [pending]);
+    tenantMember.findMany.mockResolvedValue([]);
+    teamMember.deleteMany.mockResolvedValue({ count: 1 });
+
+    const result = await patch(tx, [{ op: "add", userId: Y }, { op: "remove", userId: Y }]);
+
+    expect(result.transitions).toEqual([
+      { kind: SCIM_TRANSITION_KIND.PENDING_WITHDRAWN, userId: Y, role: "ADMIN", memberId: "m-4" },
+    ]);
+  });
+
+  // Every add is checked against the state before the request, not the state
+  // earlier ops in it leave (foldPatchOperations): removing and re-adding a
+  // departed user in one request keeps the row, as its last op asks.
+  it("[remove X, add X] keeps a departure-marked row of a user who left the tenant", async () => {
+    const { tx, teamMember, tenantMember } = makeTx();
+    const departed: Row = { id: "m-5", userId: Y, role: "ADMIN", deactivatedAt: new Date(), deactivatedByTenant: true, scimApprovalPending: false };
+    serveRows(teamMember, [departed]);
+    tenantMember.findMany.mockResolvedValue([]);
+
+    const result = await patch(tx, [{ op: "remove", userId: Y }, { op: "add", userId: Y }]);
+
+    expect(result.transitions).toEqual([]);
     expect(teamMember.updateManyAndReturn).not.toHaveBeenCalled();
   });
 
