@@ -515,7 +515,7 @@ describe("patchScimGroup — operation order (D)", () => {
   // Every add is checked against the state before the request, not the state
   // earlier ops in it leave (foldPatchOperations): removing and re-adding a
   // departed user in one request keeps the row, as its last op asks.
-  it("[remove X, add X] keeps a departure-marked row of a user who left the tenant", async () => {
+  it("[remove Y, add Y] keeps a departure-marked row of a user who left the tenant", async () => {
     const { tx, teamMember, tenantMember } = makeTx();
     const departed: Row = { id: "m-5", userId: Y, role: "ADMIN", deactivatedAt: new Date(), deactivatedByTenant: true, scimApprovalPending: false };
     serveRows(teamMember, [departed]);

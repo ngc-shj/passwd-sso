@@ -219,9 +219,10 @@ function higherRole(a: TeamRole, b: TeamRole): TeamRole {
  *
  * Every add is checked against the state before the request, not the state
  * the earlier ops in it leave: `[remove X, add X]` for a user who left the
- * tenant but holds a departure-marked or pending row keeps that row, where
- * running the ops one by one would have refused the add. The end state is
- * the one the last op asks for.
+ * tenant but holds a departure-marked or pending row at this group's role
+ * keeps that row, where running the ops one by one would have unmarked or
+ * withdrawn it and then refused the add. The end state is the one the last
+ * op asks for.
  */
 function foldPatchOperations(actions: GroupMemberAction[]): {
   addUserIds: string[];

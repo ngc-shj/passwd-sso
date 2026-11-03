@@ -221,3 +221,46 @@ N/A — no environment constraints declared in Phase 1.
 - T-N6 (PUT reset): fixed — the PUT describe's `beforeEach` resets the same
   three mocks the PATCH describe resets. `src/app/api/scim/v2/Groups/[id]/route.test.ts`.
 - S-R2-3 (resolution-status gap): fixed — this section.
+
+---
+
+Review round: 3 (`6ad756659`)
+- S-R3-1 / F-R3-1 [Major] The parser's per-kind first-wins dedup defeated the
+  last-op-wins fold: `[remove X, add X, remove X]` resolved as add (a regression
+  introduced by round 2). F-R3-2 [Minor] a fold-cancelled add skipped the
+  not-in-tenant refusal. F-R3-3 [Minor] stale `teamTenantId` comment.
+  T-R3-1 [Major] the operation-order cells passed on the pre-fix add-before-remove
+  order through a positional mock queue. T-R3-2 [Minor] bare `rejects.toThrow()`.
+- Resolution (`68517a3b9`): the parser keeps every action and the fold is the only
+  de-duplication; `assertCancelledAddsValid` applies the add refusal to cancelled
+  adds; the order cells answer reads by the rows asked for; the throw message is
+  asserted. Red-proven: parser dedup restored, cancelled-add check dropped,
+  add-before-remove split restored — each reds its cells.
+
+Review round: 4 (`68517a3b9`)
+- Security: no findings (every written user still locked; request bounds
+  unchanged; no new disclosure).
+- F-R4-1 [Minor] adds are checked against the pre-request state, so
+  `[remove X, add X]` for a departed user keeps the row. T-R4-1 [Major] the test
+  double applied its own kept-row filter instead of the service's OR.
+- Resolution (`1cbcd8662`): leniency documented on `foldPatchOperations` and pinned
+  by a cell (end state = last op; no access, key or removal bypass — confirmed by the
+  round 5 security review); the double evaluates the OR it is sent, the exact where
+  is asserted, plain-deactivated (refused) and pending (withdrawn) cells added.
+  Red-proven: dropping the OR, and dropping its pending arm, each red cells.
+
+Review round: 5 (`1cbcd8662`)
+- Security: no findings. F-R5-1 [Minor] JSDoc claim applies only at the group's
+  role. T-R5-1 [Minor] cell named X drives Y.
+
+## Tightening-only skip — Round 5
+Findings applied directly (no Round 6 review):
+- F-R5-1 [Minor] `foldPatchOperations` JSDoc qualified to rows at this group's role —
+  `src/lib/services/scim-group-service.ts` — applied verbatim.
+- T-R5-1 [Minor] cell renamed `[remove Y, add Y] …` —
+  `src/lib/services/scim-group-service.test.ts` — applied verbatim.
+Justification: every finding scoped within the Round 4 fix range, inline minor
+(comment wording, test name), no security-boundary touch.
+
+Follow-ups to file with the PR: approval-gated SCIM role raises (S-F1, user
+decision); bulk approve (F6 / D11).
