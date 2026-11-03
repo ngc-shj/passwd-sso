@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   encodeObjectRef,
   decodeObjectRef,
@@ -141,20 +141,20 @@ describe("buildObjectKey", () => {
   });
 
   it("prepends BLOB_OBJECT_PREFIX when set", () => {
-    process.env.BLOB_OBJECT_PREFIX = "my-prefix";
+    vi.stubEnv("BLOB_OBJECT_PREFIX", "my-prefix");
     const key = buildObjectKey({ attachmentId: "att-3", entryId: "entry-3", generation: GEN });
     expect(key).toBe(`my-prefix/${BLOB_OBJECT_SCOPE.PERSONAL}/entry-3/att-3/${GEN}.bin`);
   });
 
   it("strips trailing slashes from BLOB_OBJECT_PREFIX", () => {
-    process.env.BLOB_OBJECT_PREFIX = "my-prefix///";
+    vi.stubEnv("BLOB_OBJECT_PREFIX", "my-prefix///");
     const key = buildObjectKey({ attachmentId: "att-4", entryId: "entry-4", generation: GEN });
     expect(key).toBe(`my-prefix/${BLOB_OBJECT_SCOPE.PERSONAL}/entry-4/att-4/${GEN}.bin`);
   });
 
   it("handles empty and whitespace-only BLOB_OBJECT_PREFIX as no prefix", () => {
     for (const prefix of ["", "   "]) {
-      process.env.BLOB_OBJECT_PREFIX = prefix;
+      vi.stubEnv("BLOB_OBJECT_PREFIX", prefix);
       const key = buildObjectKey({ attachmentId: "att-5", entryId: "entry-5", generation: GEN });
       expect(key).toBe(`${BLOB_OBJECT_SCOPE.PERSONAL}/entry-5/att-5/${GEN}.bin`);
     }
@@ -168,7 +168,7 @@ describe("buildObjectKey", () => {
   );
 
   it("a built key validates against its own context", () => {
-    process.env.BLOB_OBJECT_PREFIX = "pfx/sub";
+    vi.stubEnv("BLOB_OBJECT_PREFIX", "pfx/sub");
     const context = { attachmentId: "a1", entryId: "e1", teamId: "t1" };
     expect(validateObjectRefKey(buildObjectKey({ ...context, generation: GEN }), context)).toBe(true);
   });

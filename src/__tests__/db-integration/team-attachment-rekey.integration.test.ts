@@ -803,11 +803,6 @@ describe("team attachments under the entry ItemKey — real-DB integration", () 
   describe("MinIO", () => {
     const ENDPOINT_ENV = "ANCHOR_TEST_S3_ENDPOINT";
     const BUCKET = "attachment-rekey-test";
-    const ENV_KEYS = [
-      "BLOB_BACKEND", "AWS_REGION", "S3_ATTACHMENTS_BUCKET", "AWS_ENDPOINT_URL_S3",
-      "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "BLOB_OBJECT_PREFIX",
-    ] as const;
-    const savedEnv: Partial<Record<(typeof ENV_KEYS)[number], string | undefined>> = {};
     const prefix = `rekey-${randomUUID()}`;
     let s3: S3Client;
 
@@ -816,17 +811,12 @@ describe("team attachments under the entry ItemKey — real-DB integration", () 
       if (!endpoint) {
         throw new Error(`${ENDPOINT_ENV} is required (a MinIO, e.g. http://127.0.0.1:9000; docker compose up -d minio)`);
       }
-      for (const key of ENV_KEYS) savedEnv[key] = process.env[key];
-      Object.assign(process.env, {
-        BLOB_BACKEND: "s3",
-        AWS_REGION: "us-east-1",
-        S3_ATTACHMENTS_BUCKET: BUCKET,
-        AWS_ENDPOINT_URL_S3: endpoint,
-        AWS_ACCESS_KEY_ID: "minioadmin",
-        AWS_SECRET_ACCESS_KEY: "minioadmin",
-        BLOB_OBJECT_PREFIX: prefix,
+      s3 = new S3Client({
+        region: "us-east-1",
+        endpoint,
+        forcePathStyle: true,
+        credentials: { accessKeyId: "minioadmin", secretAccessKey: "minioadmin" },
       });
-      s3 = new S3Client({ region: "us-east-1", endpoint, forcePathStyle: true });
       try {
         await s3.send(new HeadBucketCommand({ Bucket: BUCKET }));
       } catch {
@@ -838,10 +828,23 @@ describe("team attachments under the entry ItemKey — real-DB integration", () 
       const listed = await s3.send(new ListObjectsV2Command({ Bucket: BUCKET, Prefix: `${prefix}/` }));
       const keys = (listed.Contents ?? []).map((o) => ({ Key: o.Key ?? "" }));
       if (keys.length > 0) await s3.send(new DeleteObjectsCommand({ Bucket: BUCKET, Delete: { Objects: keys } }));
-      for (const key of ENV_KEYS) {
-        if (savedEnv[key] === undefined) delete process.env[key];
-        else process.env[key] = savedEnv[key];
-      }
+    });
+
+    // Per test: stubs are undone after each test, so a beforeAll stub would
+    // reach only the first one.
+    beforeEach(() => {
+      const endpoint = process.env[ENDPOINT_ENV] ?? "";
+      vi.stubEnv("BLOB_BACKEND", "s3");
+      vi.stubEnv("AWS_REGION", "us-east-1");
+      vi.stubEnv("S3_ATTACHMENTS_BUCKET", BUCKET);
+      vi.stubEnv("AWS_ENDPOINT_URL_S3", endpoint);
+      vi.stubEnv("AWS_ACCESS_KEY_ID", "minioadmin");
+      vi.stubEnv("AWS_SECRET_ACCESS_KEY", "minioadmin");
+      vi.stubEnv("BLOB_OBJECT_PREFIX", prefix);
+    });
+
+    afterEach(() => {
+      vi.unstubAllEnvs();
     });
 
     async function objectsUnder(keyPrefix: string): Promise<string[]> {

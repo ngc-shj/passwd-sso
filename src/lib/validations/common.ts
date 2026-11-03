@@ -79,6 +79,10 @@ export const aadVersionSchema = z.number().int().min(1).max(AAD_VERSION_CURRENT)
 export const TEAM_KEY_VERSION_MIN = 2;
 export const TEAM_KEY_VERSION_MAX = 10_000;
 export const TEAM_ROTATE_ENTRIES_MAX = 1000;
+// History rows one team entry re-key POST names (re-keyed + retained). Writers
+// trim an entry's history to 20; the rest is margin for rows a trim has not
+// yet reached.
+export const REKEY_HISTORY_MAX = 40;
 export const TEAM_ROTATE_MEMBER_KEYS_MIN = 1;
 export const TEAM_ROTATE_MEMBER_KEYS_MAX = 1000;
 

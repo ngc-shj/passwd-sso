@@ -233,6 +233,7 @@ Routes are grouped by their top-level API area for readability (grouping is cosm
 | `src/app/api/teams/[teamId]/passwords/[id]/history/[historyId]/restore/route.ts` | api-session-required | POST | session | - | POST gated | - | - |
 | `src/app/api/teams/[teamId]/passwords/[id]/history/[historyId]/route.ts` | api-session-required | GET | session | - | GET gated | - | - |
 | `src/app/api/teams/[teamId]/passwords/[id]/history/route.ts` | api-session-required | GET | session | - | GET gated | - | - |
+| `src/app/api/teams/[teamId]/passwords/[id]/rekey/route.ts` | api-session-required | GET, POST | session | - | GET gated, POST gated | - | - |
 | `src/app/api/teams/[teamId]/passwords/[id]/restore/route.ts` | api-session-required | POST | session | - | POST gated | - | - |
 | `src/app/api/teams/[teamId]/passwords/[id]/route.ts` | api-session-required | GET, PUT, DELETE | session, extension-token | GET | GET gated, PUT gated, DELETE gated | destructive | - |
 | `src/app/api/teams/[teamId]/passwords/bulk-archive/route.ts` | api-session-required | POST | session | - | POST gated | - | - |
@@ -243,6 +244,7 @@ Routes are grouped by their top-level API area for readability (grouping is cosm
 | `src/app/api/teams/[teamId]/passwords/empty-trash/route.ts` | api-session-required | POST | session | - | POST gated | destructive | - |
 | `src/app/api/teams/[teamId]/passwords/route.ts` | api-session-required | GET, POST | session, extension-token | GET | GET gated, POST gated | - | - |
 | `src/app/api/teams/[teamId]/policy/route.ts` | api-session-required | GET, PUT | session | - | GET gated, PUT gated | - | - |
+| `src/app/api/teams/[teamId]/rekey/route.ts` | api-session-required | GET | session | - | GET gated | - | - |
 | `src/app/api/teams/[teamId]/rotate-key/data/route.ts` | api-session-required | GET | session | - | GET gated | - | - |
 | `src/app/api/teams/[teamId]/rotate-key/route.ts` | api-session-required | POST | session | - | POST gated | - | - |
 | `src/app/api/teams/[teamId]/route.ts` | api-session-required | GET, PUT, DELETE | session | - | GET gated, PUT gated, DELETE gated | destructive | - |

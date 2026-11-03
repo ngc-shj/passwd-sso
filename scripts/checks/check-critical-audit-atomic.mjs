@@ -91,6 +91,9 @@ const CRITICAL_ACTIONS = new Set([
   // team-key-rotation-rekey C4: a migrate rewrites an attachment's ciphertext
   // and key wrap; its audit row commits with the rewrite (logAuditInTx).
   "TEAM_ATTACHMENT_MIGRATE",
+  // team-key-rotation-rekey C2 (D2): a re-key replaces an entry's ItemKey and
+  // rewrites its history and CEK wraps; its audit row commits with the rewrite.
+  "TEAM_ENTRY_REKEY",
 ]);
 
 const project = createAstProject();

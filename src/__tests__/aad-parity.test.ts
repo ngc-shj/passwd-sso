@@ -18,6 +18,7 @@ import {
   buildTeamEntryAAD as extBuildTeamEntryAAD,
   buildItemKeyWrapAAD as extBuildItemKeyWrapAAD,
   buildTeamKeyWrapAAD as extBuildTeamKeyWrapAAD,
+  buildTeamAttachmentCekWrapAAD as extBuildTeamAttachmentCekWrapAAD,
 } from "../../extension/src/lib/crypto-team";
 
 // Recurrence guard for the cross-codebase AAD desync class (#503: the app
@@ -25,7 +26,7 @@ import {
 // silently breaking decryption). Each scope shared between app and extension
 // is pinned here: app and extension MUST emit byte-identical AAD, and a frozen
 // golden vector additionally catches a change that breaks BOTH sides
-// identically. Covers PV (personal) + OV/IK/OK (team). (iOS pins the same
+// identically. Covers PV (personal) + OV/IK/OK/TW (team). (iOS pins the same
 // vectors in ios/PasswdSSOTests/AADParityTests.swift.)
 
 const toHex = (b: Uint8Array) =>
@@ -158,13 +159,19 @@ describe("attachment AAD golden vector (app, iOS-shared scope)", () => {
   });
 });
 
-describe("team attachment CEK wrap AAD golden vector (app; extension and iOS share the scope)", () => {
-  // TW is implemented by the app, the extension and iOS (all three decrypt
-  // team attachments). The frozen golden vector locks the byte shape; iOS
-  // pins the same bytes in AADParityTests.swift.
+describe("team attachment CEK wrap AAD parity (app ↔ extension; iOS shares the scope)", () => {
+  // TW is implemented by the app, the extension and iOS. The frozen golden
+  // vector locks the byte shape; iOS pins the same bytes in AADParityTests.swift.
   const GOLDEN_TW = "54570105000174000165000161000132000131";
 
-  it("TW (team attachment CEK wrap) AAD matches the frozen golden vector", () => {
+  it("TW (team attachment CEK wrap) AAD: app === extension === golden", () => {
     expect(toHex(appBuildTeamAttachmentCekWrapAAD("t", "e", "a", 2, 1))).toBe(GOLDEN_TW);
+    expect(toHex(extBuildTeamAttachmentCekWrapAAD("t", "e", "a", 2, 1))).toBe(GOLDEN_TW);
+  });
+
+  it("produces identical bytes for non-ASCII (UTF-8) identifiers", () => {
+    expect(toHex(extBuildTeamAttachmentCekWrapAAD("チーム", "エントリ", "添付", 3, 1))).toBe(
+      toHex(appBuildTeamAttachmentCekWrapAAD("チーム", "エントリ", "添付", 3, 1)),
+    );
   });
 });

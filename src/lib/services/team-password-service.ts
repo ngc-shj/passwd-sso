@@ -14,7 +14,7 @@ import { API_ERROR, type ApiErrorCode } from "@/lib/http/api-error-codes";
 import { toBlobColumns, toOverviewColumns } from "@/lib/crypto/crypto-blob";
 import { dedupeTagIds, tagConnect, tagSet } from "@/lib/services/tag-relation";
 import { lockTeamKeyVersion, TeamRotationInProgressError } from "@/lib/team/team-key-rotation-lock";
-import { itemKeyIdsMatch, normalizeTeamKeyVersion } from "@/lib/team/team-item-key";
+import { itemKeyIdsMatch, itemKeyIvReused, normalizeTeamKeyVersion } from "@/lib/team/team-item-key";
 import type { EntryType, Prisma } from "@prisma/client";
 
 // ---------------------------------------------------------------------------
@@ -448,15 +448,7 @@ async function resolveFullUpdateItemKey(
     if (requested !== cur.item_key_version_high_water + 1) {
       throw new TeamPasswordServiceError(API_ERROR.ITEM_KEY_VERSION_INVALID, 409);
     }
-    const newIv = body.encryptedItemKey.iv.toLowerCase();
-    const history = await tx.teamPasswordEntryHistory.findMany({
-      where: { entryId: passwordId },
-      select: { itemKeyIv: true },
-    });
-    if (
-      cur.item_key_iv?.toLowerCase() === newIv ||
-      history.some((h) => h.itemKeyIv?.toLowerCase() === newIv)
-    ) {
+    if (await itemKeyIvReused(tx, passwordId, cur.item_key_iv, body.encryptedItemKey.iv)) {
       throw new TeamPasswordServiceError(API_ERROR.ITEM_KEY_IV_REUSED, 400);
     }
     return {

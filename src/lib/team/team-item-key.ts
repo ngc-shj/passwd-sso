@@ -19,6 +19,27 @@ export function itemKeyIdsMatch(
   return a.toLowerCase() === b.toLowerCase();
 }
 
+/**
+ * A new ItemKey wrap whose IV equals the locked entry's wrap IV or any of the
+ * entry's history wraps' (C1): random 96-bit IVs make that a client echoing a
+ * snapshot back, not a collision. Shared by the v0→v1 upgrade PUT and the
+ * re-key POST; MUST run under the entry's FOR UPDATE lock.
+ */
+export async function itemKeyIvReused(
+  tx: Pick<Prisma.TransactionClient, "teamPasswordEntryHistory">,
+  entryId: string,
+  lockedItemKeyIv: string | null,
+  newItemKeyIv: string,
+): Promise<boolean> {
+  const newIv = newItemKeyIv.toLowerCase();
+  if (lockedItemKeyIv?.toLowerCase() === newIv) return true;
+  const history = await tx.teamPasswordEntryHistory.findMany({
+    where: { entryId },
+    select: { itemKeyIv: true },
+  });
+  return history.some((h) => h.itemKeyIv?.toLowerCase() === newIv);
+}
+
 /** Team key versions below 1 are version 1 everywhere (as clients treat them). */
 export function normalizeTeamKeyVersion(version: number): number {
   return version < 1 ? 1 : version;

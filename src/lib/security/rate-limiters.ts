@@ -34,3 +34,22 @@ export const teamAttachmentMigrateLimiter = createRateLimiter({
   windowMs: 15 * MS_PER_MINUTE,
   max: VAULT_ROTATE_ATTACHMENT_CEK_MAX + 1000,
 });
+
+/**
+ * Per-(team, user) limiter for `POST /api/teams/[teamId]/passwords/[id]/rekey`
+ * — the re-key pass re-keys a team's entries one request each.
+ */
+export const teamEntryRekeyLimiter = createRateLimiter({
+  windowMs: 15 * MS_PER_MINUTE,
+  max: VAULT_ROTATE_ATTACHMENT_CEK_MAX + 1000,
+});
+
+/**
+ * Per-(team, user) limiter for the re-key pass reads: `GET
+ * /api/teams/[teamId]/rekey` and `GET /api/teams/[teamId]/passwords/[id]/rekey`
+ * (one entry read per re-key, plus the page reads).
+ */
+export const teamRekeyReadLimiter = createRateLimiter({
+  windowMs: 15 * MS_PER_MINUTE,
+  max: 2 * (VAULT_ROTATE_ATTACHMENT_CEK_MAX + 1000),
+});

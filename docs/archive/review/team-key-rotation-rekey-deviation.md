@@ -64,3 +64,31 @@
   history wrap. `ITEM_KEY_REQUIRED` is no longer emitted (code kept registered).
 - D21 (C4 crypto) — `TW` manifest/golden vector set to the post-PR truth (`crossCodebase`, iOS);
   the iOS builder and parity test were added in this batch, verified on the macOS host in Batch 5.
+- D22 (C8 fixture) — the committed fixture JSON is extended, not regenerated: the generator now
+  loads the committed base and appends deterministic v2 / `TW` vectors (seeded from labelled
+  SHA-256), so existing vectors stay byte-identical; `--fresh` regenerates everything. The
+  extension's `unwrapTeamAttachmentCek` takes hex `EncryptedData` like its other unwraps.
+- D23 (C2 POST) — `REKEY_NOT_PENDING`, `ENTRY_UPGRADE_REQUIRED` and `REKEY_ATTACHMENTS_UNMIGRATED`
+  are refused before the body is read and re-checked under the locks. A v0 entry gets 409
+  `ENTRY_UPGRADE_REQUIRED` (not in C2's list) instead of falling into `REKEY_SNAPSHOT_MISMATCH`,
+  which the runner would retry; the runner table already maps it to "upgrade, retry".
+- D24 (C2 order) — inside the transaction: history exact set → `REKEY_ATTACHMENTS_UNMIGRATED` →
+  attachment exact set; a legacy attachment has no CEK to re-wrap, so checking the set first would
+  turn every unmigrated case into a set mismatch.
+- D25 (C2 list) — `retainedHistoryCount` = the team's history rows whose `item_key_id IS DISTINCT
+  FROM` their entry's (no team-key-version clause; one would count every re-keyed row after the
+  next rotation). The list also returns `holders` (≤ 10 per version) for "needs re-keyer holder";
+  state names `ready` / `needs_rekeyer_holder` / `holder_cannot_rekey` / `unrecoverable`.
+- D26 (C2 body/response) — one top-level `aadVersion` (= current) for the entry and every
+  re-keyed history row; attachment rewraps set `cekWrapAadVersion` to current. Response
+  `{ success, itemKeyVersion }`; the client re-GETs.
+- D27 (C2 post-check) — `assertEntryRekeyConsistent` additionally requires marker = team key
+  version, high-water = item key version and every retained id to exist; its error carries a token
+  code (no free text, per `check-caught-error-logging`). The 500 mapping is unit-tested only.
+- D28 (C2 tx) — 15 s transaction timeout; only the team lock uses the bounded wait. The entry
+  write bumps `updatedAt` (as rotation does), `updatedById` unchanged. High-water read from the
+  locked column, as in the PUT.
+- D29 (test hygiene) — `object-ref.test.ts` assigned `process.env` directly (pre-existing on
+  main; the file changed in this branch, so the gate scans it) — moved to `vi.stubEnv`; the MinIO
+  block of `team-attachment-rekey.integration.test.ts` stubs per test and passes explicit S3
+  credentials to its own client.

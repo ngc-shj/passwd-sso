@@ -33,6 +33,24 @@ final class TeamKeyCryptoTests: XCTestCase {
     let itemEncKeyHex: String
     let encryptedOverviewV1: EncryptedData
     let overviewPlaintextV1: String
+    // itemKeyVersion 2 (re-keyed ItemKey) + team attachment CEK wrap ("TW")
+    let entryIdV2: String
+    let itemKeyVersionV2: Int
+    let encryptedItemKeyV2: EncryptedData
+    let itemKeyV2Hex: String
+    let itemEncKeyV2Hex: String
+    let encryptedOverviewV2: EncryptedData
+    let overviewPlaintextV2: String
+    let overviewAADV2Hex: String
+    let attachmentId: String
+    let cekWrapAadVersion: Int
+    let cekWrapKeyHex: String
+    let cekHex: String
+    let encryptedCek: EncryptedData
+    let cekWrapAADHex: String
+    let encryptedAttachmentBody: EncryptedData
+    let attachmentBodyPlaintext: String
+    let attachmentAADHex: String
   }
 
   private func loadFixture() throws -> Fixture {
@@ -128,6 +146,84 @@ final class TeamKeyCryptoTests: XCTestCase {
     let summary = try XCTUnwrap(TeamEntryDecryptor.decryptTeamSummary(
       entry: entry, teamKeys: [wrapped], cacheKey: cacheKey, userId: f.toUserId, now: { Date() }))
     XCTAssertEqual(summary.title, "Team Login v1")
+  }
+
+  // (f) itemKeyVersion 2 (re-keyed entry): the latest team key unwraps the new
+  // ItemKey and the overview decrypts under the OV AAD carrying version 2.
+  func testTeamEntry_itemKeyVersion2_decrypts() throws {
+    let f = try loadFixture()
+    let (_, rawTeamKey) = try recover(f)
+    let teamEncKey = TeamKeyCrypto.deriveTeamEncryptionKey(rawTeamKey: rawTeamKey)
+
+    let entry = CacheEntry(
+      id: f.entryIdV2, teamId: f.teamId, aadVersion: 1, keyVersion: 0,
+      teamKeyVersion: f.teamKeyVersion, itemKeyVersion: f.itemKeyVersionV2,
+      encryptedItemKey: f.encryptedItemKeyV2,
+      encryptedBlob: f.encryptedOverviewV2,
+      encryptedOverview: f.encryptedOverviewV2)
+
+    let entryKey = try XCTUnwrap(TeamEntryDecryptor.resolveTeamEntryKey(entry: entry, teamKey: teamEncKey))
+    XCTAssertEqual(hex(entryKey), f.itemEncKeyV2Hex)
+
+    let aad = try buildTeamEntryAAD(
+      teamId: f.teamId, entryId: f.entryIdV2, vaultType: VaultType.overview, itemKeyVersion: f.itemKeyVersionV2)
+    XCTAssertEqual(hexEncode(aad), f.overviewAADV2Hex)
+    let plain = try decryptAESGCMEncoded(encrypted: f.encryptedOverviewV2, key: entryKey, aad: aad)
+    XCTAssertEqual(String(data: plain, encoding: .utf8), f.overviewPlaintextV2)
+  }
+
+  // Negative: the same itemKeyVersion 2 ciphertext under the version-1 AAD fails.
+  func testTeamEntry_itemKeyVersion2_underVersion1AAD_throws() throws {
+    let f = try loadFixture()
+    let entryKey = TeamKeyCrypto.deriveItemEncryptionKey(itemKey: SymmetricKey(data: try hexDecode(f.itemKeyV2Hex)))
+    let v1AAD = try buildTeamEntryAAD(
+      teamId: f.teamId, entryId: f.entryIdV2, vaultType: VaultType.overview, itemKeyVersion: 1)
+    XCTAssertThrowsError(try decryptAESGCMEncoded(encrypted: f.encryptedOverviewV2, key: entryKey, aad: v1AAD))
+  }
+
+  // (g) Team attachment CEK wrap ("TW"): the ItemKey derives the same CEK-wrap key
+  // as the extension, unwraps the CEK, and the CEK decrypts the body (AAD "AT").
+  func testTeamAttachmentCek_unwrapsAndDecryptsBody() throws {
+    let f = try loadFixture()
+    let itemKey = SymmetricKey(data: try hexDecode(f.itemKeyV2Hex))
+    let cekWrapKey = TeamKeyCrypto.deriveItemCekWrapKey(itemKey: itemKey)
+    XCTAssertEqual(hex(cekWrapKey), f.cekWrapKeyHex)
+
+    let twAAD = try buildTeamAttachmentCekWrapAAD(
+      teamId: f.teamId, entryId: f.entryIdV2, attachmentId: f.attachmentId,
+      itemKeyVersion: f.itemKeyVersionV2, cekWrapAadVersion: f.cekWrapAadVersion)
+    XCTAssertEqual(hexEncode(twAAD), f.cekWrapAADHex)
+
+    let cek = try TeamKeyCrypto.unwrapTeamAttachmentCek(
+      encrypted: f.encryptedCek, cekWrapKey: cekWrapKey,
+      teamId: f.teamId, entryId: f.entryIdV2, attachmentId: f.attachmentId,
+      itemKeyVersion: f.itemKeyVersionV2, cekWrapAadVersion: f.cekWrapAadVersion)
+    XCTAssertEqual(hex(cek), f.cekHex)
+
+    let atAAD = try buildAttachmentAAD(entryId: f.entryIdV2, attachmentId: f.attachmentId)
+    XCTAssertEqual(hexEncode(atAAD), f.attachmentAADHex)
+    let body = try decryptAESGCMEncoded(encrypted: f.encryptedAttachmentBody, key: cek, aad: atAAD)
+    XCTAssertEqual(String(data: body, encoding: .utf8), f.attachmentBodyPlaintext)
+  }
+
+  // Negative: the TW-wrapped CEK under the version-1 AAD fails.
+  func testTeamAttachmentCek_underVersion1AAD_throws() throws {
+    let f = try loadFixture()
+    let cekWrapKey = TeamKeyCrypto.deriveItemCekWrapKey(itemKey: SymmetricKey(data: try hexDecode(f.itemKeyV2Hex)))
+    XCTAssertThrowsError(try TeamKeyCrypto.unwrapTeamAttachmentCek(
+      encrypted: f.encryptedCek, cekWrapKey: cekWrapKey,
+      teamId: f.teamId, entryId: f.entryIdV2, attachmentId: f.attachmentId,
+      itemKeyVersion: 1, cekWrapAadVersion: f.cekWrapAadVersion))
+  }
+
+  // Negative: the item ENC key (same ItemKey, other HKDF domain) cannot unwrap the CEK.
+  func testTeamAttachmentCek_itemEncKey_throws() throws {
+    let f = try loadFixture()
+    let itemEncKey = TeamKeyCrypto.deriveItemEncryptionKey(itemKey: SymmetricKey(data: try hexDecode(f.itemKeyV2Hex)))
+    XCTAssertThrowsError(try TeamKeyCrypto.unwrapTeamAttachmentCek(
+      encrypted: f.encryptedCek, cekWrapKey: itemEncKey,
+      teamId: f.teamId, entryId: f.entryIdV2, attachmentId: f.attachmentId,
+      itemKeyVersion: f.itemKeyVersionV2, cekWrapAadVersion: f.cekWrapAadVersion))
   }
 
   // AAD byte-parity with the extension.

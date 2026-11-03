@@ -4,6 +4,7 @@ import {
   heldTeamKeyVersions,
   isRekeyerHolder,
   itemKeyIdsMatch,
+  itemKeyIvReused,
   normalizeTeamKeyVersion,
   teamKeyVersionHolders,
 } from "./team-item-key";
@@ -33,6 +34,32 @@ describe("itemKeyIdsMatch", () => {
     expect(itemKeyIdsMatch(null, ID_A)).toBe(false);
     expect(itemKeyIdsMatch(ID_A, null)).toBe(false);
     expect(itemKeyIdsMatch(undefined, ID_A)).toBe(false);
+  });
+});
+
+describe("itemKeyIvReused", () => {
+  const IV_LOCKED = "a".repeat(24);
+  const IV_HISTORY = "b".repeat(24);
+  const IV_FRESH = "c".repeat(24);
+  const tx = (ivs: (string | null)[]) => ({
+    teamPasswordEntryHistory: { findMany: vi.fn().mockResolvedValue(ivs.map((itemKeyIv) => ({ itemKeyIv }))) },
+  });
+
+  it("is false for an IV neither the entry nor its history used", async () => {
+    const client = tx([IV_HISTORY, null]);
+    expect(await itemKeyIvReused(client as never, ID_A, IV_LOCKED, IV_FRESH)).toBe(false);
+    expect(client.teamPasswordEntryHistory.findMany).toHaveBeenCalledWith({
+      where: { entryId: ID_A },
+      select: { itemKeyIv: true },
+    });
+  });
+
+  it("is true for the locked entry's IV, in any hex case", async () => {
+    expect(await itemKeyIvReused(tx([]) as never, ID_A, IV_LOCKED, IV_LOCKED.toUpperCase())).toBe(true);
+  });
+
+  it("is true for a history row's IV, in any hex case", async () => {
+    expect(await itemKeyIvReused(tx([IV_HISTORY.toUpperCase()]) as never, ID_A, null, IV_HISTORY)).toBe(true);
   });
 });
 
