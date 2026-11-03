@@ -282,6 +282,8 @@ All password data is encrypted **client-side** before reaching the server. The s
 | `/api/teams/[teamId]/members/search` | GET | Search users for invitation |
 | `/api/teams/[teamId]/members/[memberId]` | PUT, DELETE | Update role/remove member |
 | `/api/teams/[teamId]/members/[memberId]/confirm-key` | POST | Confirm member key distribution |
+| `/api/teams/[teamId]/members/[memberId]/approve` | POST | Approve a SCIM-pending membership (step-up; key-holding OWNER/ADMIN) |
+| `/api/teams/[teamId]/members/[memberId]/reject` | POST | Reject a SCIM-pending membership (step-up) |
 | `/api/teams/[teamId]/member-key` | GET, POST | Get/submit member encryption key |
 | `/api/teams/[teamId]/rotate-key` | POST | Rotate team encryption key |
 | `/api/teams/[teamId]/rotate-key/data` | GET | Bulk fetch entries for team key rotation |
