@@ -4,6 +4,7 @@ import {
   buildTeamEntryAAD as appBuildTeamEntryAAD,
   buildItemKeyWrapAAD as appBuildItemKeyWrapAAD,
   buildAttachmentAAD as appBuildAttachmentAAD,
+  buildTeamAttachmentCekWrapAAD as appBuildTeamAttachmentCekWrapAAD,
   VAULT_TYPE as APP_VAULT_TYPE,
 } from "@/lib/crypto/crypto-aad";
 import { buildTeamKeyWrapAAD as appBuildTeamKeyWrapAAD } from "@/lib/crypto/crypto-team";
@@ -154,5 +155,16 @@ describe("attachment AAD golden vector (app, iOS-shared scope)", () => {
 
   it("AT (attachment) AAD matches the frozen golden vector", () => {
     expect(toHex(appBuildAttachmentAAD("e", "a"))).toBe(GOLDEN_AT);
+  });
+});
+
+describe("team attachment CEK wrap AAD golden vector (app; extension and iOS share the scope)", () => {
+  // TW is implemented by the app, the extension and iOS (all three decrypt
+  // team attachments). The frozen golden vector locks the byte shape; iOS
+  // pins the same bytes in AADParityTests.swift.
+  const GOLDEN_TW = "54570105000174000165000161000132000131";
+
+  it("TW (team attachment CEK wrap) AAD matches the frozen golden vector", () => {
+    expect(toHex(appBuildTeamAttachmentCekWrapAAD("t", "e", "a", 2, 1))).toBe(GOLDEN_TW);
   });
 });

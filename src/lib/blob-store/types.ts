@@ -11,7 +11,16 @@ export interface AttachmentBlobContext {
   attachmentId: string;
   entryId: string;
   teamId?: string;
+  /**
+   * Object-key generation (32 lowercase hex from the server CSPRNG, see
+   * newBlobGeneration). Every write gets a fresh one, so a new body never
+   * overwrites the object a committed row still references.
+   */
+  generation?: string;
 }
+
+/** A write always names its generation (fixed keys would allow overwrite). */
+export type AttachmentBlobPutContext = AttachmentBlobContext & { generation: string };
 
 /**
  * Minimal storage boundary for attachment binary payloads.
@@ -25,7 +34,7 @@ export interface AttachmentBlobStore {
   validateConfig(): void;
   putObject(
     data: Uint8Array | Buffer,
-    context: AttachmentBlobContext,
+    context: AttachmentBlobPutContext,
   ): Promise<Uint8Array>;
   getObject(
     stored: Uint8Array,

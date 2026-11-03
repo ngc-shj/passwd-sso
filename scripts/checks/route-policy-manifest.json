@@ -1986,6 +1986,20 @@
         }
       }
     },
+    "src/app/api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]/migrate/route.ts": {
+      "kind": "api-session-required",
+      "methods": [
+        "PUT"
+      ],
+      "auth": [
+        "session"
+      ],
+      "sessionPasskeyGate": {
+        "PUT": {
+          "value": "gated"
+        }
+      }
+    },
     "src/app/api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]/route.ts": {
       "kind": "api-session-required",
       "methods": [

@@ -88,6 +88,9 @@ const CRITICAL_ACTIONS = new Set([
   // team-key-rotation-rekey D3: one row per entry a rotation carries
   // unchanged, enqueued (logAuditBulkInTx) in the rotation's transaction.
   "TEAM_KEY_ROTATION_CARRY",
+  // team-key-rotation-rekey C4: a migrate rewrites an attachment's ciphertext
+  // and key wrap; its audit row commits with the rewrite (logAuditInTx).
+  "TEAM_ATTACHMENT_MIGRATE",
 ]);
 
 const project = createAstProject();

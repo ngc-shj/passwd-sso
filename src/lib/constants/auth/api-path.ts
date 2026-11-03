@@ -134,6 +134,8 @@ export const apiPath = {
     `${API_PATH.TEAMS}/${teamId}/passwords/${entryId}/attachments`,
   teamPasswordAttachmentById: (teamId: string, entryId: string, attachmentId: string) =>
     `${API_PATH.TEAMS}/${teamId}/passwords/${entryId}/attachments/${attachmentId}`,
+  teamPasswordAttachmentMigrate: (teamId: string, entryId: string, attachmentId: string) =>
+    `${API_PATH.TEAMS}/${teamId}/passwords/${entryId}/attachments/${attachmentId}/migrate`,
   teamMemberKey: (teamId: string, keyVersion?: number) =>
     keyVersion !== undefined
       ? `${API_PATH.TEAMS}/${teamId}/member-key?keyVersion=${keyVersion}`

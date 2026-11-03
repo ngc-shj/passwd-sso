@@ -11,11 +11,12 @@ import {
   FILENAME_MAX_LENGTH,
   isValidSendFilename,
 } from "@/lib/validations";
-import { BASE64_RE, CEK_WRAP_BASE64_MAX } from "@/lib/validations/common";
+import { ATTACHMENT_UPLOAD_MULTIPART_MAX, BASE64_RE, CEK_WRAP_BASE64_MAX } from "@/lib/validations/common";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { rejectOversizedMultipart } from "@/lib/http/parse-body";
 import { assertQuotaAvailable, QuotaExceededError } from "@/lib/quota/resource-quotas";
 import { getAttachmentBlobStore } from "@/lib/blob-store";
+import { newBlobGeneration } from "@/lib/blob-store/object-ref";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { getLogger } from "@/lib/logger";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
@@ -122,7 +123,7 @@ async function handlePOST(
   // declared Content-Length and caps it — fail-closed on a missing header so a
   // chunked / no-Content-Length body cannot bypass the cap (req.formData() has
   // no streaming cap of its own).
-  const oversized = rejectOversizedMultipart(req, MAX_FILE_SIZE * 2);
+  const oversized = rejectOversizedMultipart(req, ATTACHMENT_UPLOAD_MULTIPART_MAX);
   if (oversized) return oversized;
 
   // Parse FormData
@@ -259,7 +260,9 @@ async function handlePOST(
   const blobStore = getAttachmentBlobStore();
   const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   const attachmentId = (clientId && UUID_V4_RE.test(clientId)) ? clientId.toLowerCase() : crypto.randomUUID();
-  const blobContext = { attachmentId, entryId: id };
+  // A fresh object key per write, deleted if the transaction does not commit
+  // the row that references it.
+  const blobContext = { attachmentId, entryId: id, generation: newBlobGeneration() };
   // Validate aadVersion BEFORE blob storage to avoid leaking a stored blob
   // when the request is rejected.
   const aadVersion = aadVersionStr ? parseInt(aadVersionStr, 10) : AAD_VERSION;

@@ -24,3 +24,13 @@ export const migrateLimiter = createRateLimiter({
   windowMs: 15 * MS_PER_MINUTE,
   max: VAULT_ROTATE_ATTACHMENT_CEK_MAX + 1000, // 5000 work + 1000 retry headroom
 });
+
+/**
+ * Per-(team, user) limiter for
+ * `PUT /api/teams/[teamId]/passwords/[id]/attachments/[id]/migrate` — the
+ * re-key pass migrates a team's legacy attachments one request each.
+ */
+export const teamAttachmentMigrateLimiter = createRateLimiter({
+  windowMs: 15 * MS_PER_MINUTE,
+  max: VAULT_ROTATE_ATTACHMENT_CEK_MAX + 1000,
+});

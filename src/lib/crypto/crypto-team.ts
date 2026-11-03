@@ -28,6 +28,7 @@ import {
 } from "./crypto-emergency";
 import { toArrayBuffer, textEncode } from "./crypto-utils";
 import {
+  buildTeamAttachmentCekWrapAAD,
   buildTeamKeyWrapAAD,
   type TeamKeyWrapContext,
 } from "./crypto-aad";
@@ -406,6 +407,101 @@ export async function deriveItemEncryptionKey(
     { name: "AES-GCM", length: AES_KEY_LENGTH },
     false,
     ["encrypt", "decrypt"]
+  );
+}
+
+/** HKDF info for ItemKey → team attachment CEK-wrap key */
+export const HKDF_ITEM_CEKWRAP_INFO = "passwd-sso-item-cekwrap-v1";
+
+/**
+ * Derive the AES-256-GCM key that wraps team attachment CEKs (mode-2).
+ * HKDF(itemKey, info="passwd-sso-item-cekwrap-v1", salt=empty) — a separate
+ * domain from the entry content key, so a CEK wrap never shares a key with
+ * entry ciphertext.
+ */
+export async function deriveItemCekWrapKey(
+  itemKey: Uint8Array
+): Promise<CryptoKey> {
+  const hkdfKey = await crypto.subtle.importKey(
+    "raw",
+    toArrayBuffer(itemKey),
+    "HKDF",
+    false,
+    ["deriveKey"]
+  );
+
+  return crypto.subtle.deriveKey(
+    {
+      name: "HKDF",
+      hash: "SHA-256",
+      salt: new Uint8Array(32),
+      info: textEncode(HKDF_ITEM_CEKWRAP_INFO),
+    },
+    hkdfKey,
+    { name: "AES-GCM", length: AES_KEY_LENGTH },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+
+/** Where a team attachment CEK wrap is bound (scope "TW"). */
+export interface TeamAttachmentCekWrapContext {
+  teamId: string;
+  entryId: string;
+  attachmentId: string;
+  itemKeyVersion: number;
+  cekWrapAadVersion: number;
+}
+
+function teamAttachmentCekWrapAAD(ctx: TeamAttachmentCekWrapContext): Uint8Array {
+  return buildTeamAttachmentCekWrapAAD(
+    ctx.teamId,
+    ctx.entryId,
+    ctx.attachmentId,
+    ctx.itemKeyVersion,
+    ctx.cekWrapAadVersion,
+  );
+}
+
+/**
+ * Wrap a raw attachment CEK with the ItemKey's CEK-wrap key
+ * (deriveItemCekWrapKey) under the "TW" AAD.
+ */
+export async function wrapTeamAttachmentCek(
+  cekRaw: Uint8Array,
+  cekWrapKey: CryptoKey,
+  ctx: TeamAttachmentCekWrapContext
+): Promise<EncryptedBinary> {
+  const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
+  const encrypted = new Uint8Array(
+    await crypto.subtle.encrypt(
+      {
+        name: "AES-GCM",
+        iv: toArrayBuffer(iv),
+        additionalData: toArrayBuffer(teamAttachmentCekWrapAAD(ctx)),
+      },
+      cekWrapKey,
+      toArrayBuffer(cekRaw)
+    )
+  );
+  return {
+    ciphertext: encrypted.slice(0, encrypted.length - AUTH_TAG_LENGTH),
+    iv: hexEncode(iv),
+    authTag: hexEncode(encrypted.slice(encrypted.length - AUTH_TAG_LENGTH)),
+  };
+}
+
+/**
+ * Unwrap a team attachment CEK, verifying the "TW" AAD. Returns the raw CEK
+ * bytes; the caller zeroes them after import.
+ */
+export async function unwrapTeamAttachmentCek(
+  wrapped: EncryptedBinary,
+  cekWrapKey: CryptoKey,
+  ctx: TeamAttachmentCekWrapContext
+): Promise<Uint8Array> {
+  return new Uint8Array(
+    await decryptBinary(wrapped, cekWrapKey, teamAttachmentCekWrapAAD(ctx))
   );
 }
 

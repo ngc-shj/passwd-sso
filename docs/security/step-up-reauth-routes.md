@@ -98,6 +98,7 @@ recoverable soft-delete/trash path is friction-free.
 | `/api/teams/[teamId]/members` | POST | identity (add member → grants key access) |
 | `/api/teams/[teamId]/members/[memberId]/confirm-key` | POST | key custody (key distribution) |
 | `/api/teams/[teamId]/rotate-key` | POST | key custody (key rotation) |
+| `/api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]/migrate` | PUT | key custody (re-wraps a legacy attachment under the entry ItemKey; rewrites its ciphertext) |
 | `/api/teams/[teamId]` | DELETE | lifecycle destruction (deletes team = all vault data + key material) |
 
 ## Vault-data permanent-delete routes (gated — class 7)

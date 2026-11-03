@@ -226,6 +226,7 @@ Routes are grouped by their top-level API area for readability (grouping is cosm
 | `src/app/api/teams/[teamId]/members/[memberId]/route.ts` | api-session-required | PUT, DELETE | session | - | PUT gated, DELETE gated | - | - |
 | `src/app/api/teams/[teamId]/members/route.ts` | api-session-required | GET, POST | session | - | GET gated, POST gated | - | - |
 | `src/app/api/teams/[teamId]/members/search/route.ts` | api-session-required | GET | session | - | GET gated | - | - |
+| `src/app/api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]/migrate/route.ts` | api-session-required | PUT | session | - | PUT gated | - | - |
 | `src/app/api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]/route.ts` | api-session-required | GET, DELETE | session | - | GET gated, DELETE gated | - | - |
 | `src/app/api/teams/[teamId]/passwords/[id]/attachments/route.ts` | api-session-required | GET, POST | session | - | GET gated, POST gated | - | - |
 | `src/app/api/teams/[teamId]/passwords/[id]/favorite/route.ts` | api-session-required | POST | session | - | POST gated | - | - |

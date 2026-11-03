@@ -435,6 +435,11 @@ describe("POST /api/passwords/[id]/attachments", () => {
     expect(status).toBe(201);
     expect(json.filename).toBe("test.pdf");
     expectAdvisoryLockAcquired(mockExecuteRaw);
+    // A fresh object key per write (generation from the server CSPRNG).
+    expect(mockPutObject).toHaveBeenCalledWith(
+      expect.any(Buffer),
+      expect.objectContaining({ entryId: "e1", generation: expect.stringMatching(/^[0-9a-f]{32}$/) }),
+    );
   });
 
   it("rejects upload with malformed base64 in cekEncrypted (R19 mirror of route.test.ts) → 400", async () => {

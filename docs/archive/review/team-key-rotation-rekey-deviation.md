@@ -42,3 +42,25 @@
   deletes (permanent, purge, empty-trash, team delete, retention GC), vault reset's
   creator-scoped attachment delete and the sign-in tenant move of attachments — the latter groups
   are covered by the re-key exact sets / CAS (count ≠ 1 → 409).
+- D15 (C4 cleanup, D4 follow-on) — `collectAttachmentRefsByCreator` records the team id of team
+  attachments so their refs validate; this reads `teamPasswordEntry.teamId` inside vault reset's
+  existing bypass transaction, so `VAULT_RESET_EXECUTE` gains `teamPasswordEntry` (read of the
+  target's own attachments' entries only). Without it every team attachment object would be
+  skipped and orphaned on external backends.
+- D16 (C4 upload) — refusal order: `ENTRY_UPGRADE_REQUIRED` → `ITEM_KEY_CHANGED` →
+  `CEK_KEY_VERSION_MISMATCH` → attachment cap (advisory lock still before the count). The team
+  upload requires the client attachment id (bound into both AADs); missing → 400.
+- D17 (C4) — a rotation lock-wait timeout in upload, migrate and delete maps to 409
+  `TEAM_KEY_VERSION_MISMATCH` (as D12).
+- D18 (C4 migrate) — the stored body is read and hashed before the transaction (no storage I/O
+  in transactions in this codebase); under the locks the route re-checks that the row still holds
+  the same ref, iv and authTag (else `MIGRATE_CAS_FAILED`). The role re-check runs after all three
+  locks. The migrated row's `keyVersion` = locked team key version.
+- D19 (C4 personal migrate) — CAS failure → 409 `MIGRATE_CAS_FAILED`; `applyAttachmentMigration`
+  now scopes by the route's entry id (it ignored it before — side-fix); personal DELETE takes the
+  per-user advisory lock upload and migrate take.
+- D20 (C4 GET) — mode 2 with several history rows holding the ItemKey returns the one at the
+  highest team key version, then the latest; mode 1 returns the entry wrap first, then every v1+
+  history wrap. `ITEM_KEY_REQUIRED` is no longer emitted (code kept registered).
+- D21 (C4 crypto) — `TW` manifest/golden vector set to the post-PR truth (`crossCodebase`, iOS);
+  the iOS builder and parity test were added in this batch, verified on the macOS host in Batch 5.

@@ -6,7 +6,7 @@ import { loadCloudBlobConfig } from "@/lib/blob-store/config";
 import {
   BLOB_CONTENT_TYPE,
 } from "@/lib/blob-store/constants";
-import { buildObjectKey, decodeObjectRef, encodeObjectRef } from "@/lib/blob-store/object-ref";
+import { buildObjectKey, encodeObjectRef, resolveObjectRefKey } from "@/lib/blob-store/object-ref";
 import { streamBodyToBuffer } from "@/lib/blob-store/stream";
 import { requireOptionalModule } from "@/lib/blob-store/runtime-module";
 
@@ -72,8 +72,7 @@ export const s3BlobStore: AttachmentBlobStore = {
   },
   async getObject(stored, context) {
     const { bucket, region } = loadCloudBlobConfig(BLOB_STORAGE.S3);
-    const ref = decodeObjectRef(stored);
-    const key = ref?.key ?? buildObjectKey(context);
+    const key = resolveObjectRefKey(stored, context);
     const { client, GetObjectCommand } = await getS3Client(region);
 
     const response = await client.send(
@@ -88,8 +87,7 @@ export const s3BlobStore: AttachmentBlobStore = {
   },
   async deleteObject(stored, context) {
     const { bucket, region } = loadCloudBlobConfig(BLOB_STORAGE.S3);
-    const ref = decodeObjectRef(stored);
-    const key = ref?.key ?? buildObjectKey(context);
+    const key = resolveObjectRefKey(stored, context);
     const { client, DeleteObjectCommand } = await getS3Client(region);
 
     await client.send(

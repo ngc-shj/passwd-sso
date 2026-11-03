@@ -135,6 +135,27 @@ final class AADParityTests: XCTestCase {
     ])
   }
 
+  // MARK: - Team attachment CEK wrap
+
+  func testTeamAttachmentCekWrapAADByteIdentical() throws {
+    // Full-byte golden vector (byte-identical to crypto-aad.ts):
+    // scope="TW"(2) + version=1(1) + nFields=5(1)
+    //   + len="t"(2)+"t"(1) + len="e"(2)+"e"(1) + len="a"(2)+"a"(1)
+    //   + len("2")(2)+"2"(1) + len("1")(2)+"1"(1)
+    let result = try buildTeamAttachmentCekWrapAAD(
+      teamId: "t", entryId: "e", attachmentId: "a", itemKeyVersion: 2, cekWrapAadVersion: 1)
+    XCTAssertEqual([UInt8](result), [
+      0x54, 0x57,             // "TW"
+      0x01,                   // aadVersion = 1
+      0x05,                   // nFields = 5
+      0x00, 0x01, 0x74,       // len("t")=1, "t"
+      0x00, 0x01, 0x65,       // len("e")=1, "e"
+      0x00, 0x01, 0x61,       // len("a")=1, "a"
+      0x00, 0x01, 0x32,       // len("2")=1, "2"
+      0x00, 0x01, 0x31,       // len("1")=1, "1"
+    ])
+  }
+
   // MARK: - Big-endian field lengths
 
   func testFieldLengthIsBigEndian() throws {
