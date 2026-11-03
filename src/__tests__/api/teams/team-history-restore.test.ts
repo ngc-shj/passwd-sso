@@ -20,7 +20,7 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/auth/access/team-auth", () => {
+vi.mock("@/lib/auth/access/team-auth", async (importOriginal) => {
   class TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -29,8 +29,10 @@ vi.mock("@/lib/auth/access/team-auth", () => {
       this.status = status;
     }
   }
+  const actual = await importOriginal<typeof import("@/lib/auth/access/team-auth")>();
   return {
     requireTeamPermission: mockRequireTeamPermission,
+    hasTeamPermission: actual.hasTeamPermission,
     TeamAuthError,
   };
 });
@@ -118,58 +120,109 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
     expect(status).toBe(404);
   });
 
-  it("restores history version successfully", async () => {
-    mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockEntryFindUnique.mockResolvedValue({
-      id: "p1",
-      teamId: "o1",
-      encryptedBlob: "cur",
-      blobIv: "curIv",
-      blobAuthTag: "curTag",
-      aadVersion: 1,
-      teamKeyVersion: 3,
-    });
-    mockHistoryFindUnique.mockResolvedValue({
-      id: "h1",
-      entryId: "p1",
-      encryptedBlob: "old",
-      blobIv: "oldIv",
-      blobAuthTag: "oldTag",
-      aadVersion: 0,
-      teamKeyVersion: 2,
-      changedAt: new Date("2025-01-01"),
-    });
+  const OVERVIEW = { ciphertext: "restored-overview", iv: "a".repeat(24), authTag: "b".repeat(32) };
+
+  function setupRestoreTx(holderKeys: { userId: string }[]) {
+    const entryUpdate = vi.fn();
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) =>
       fn({
-        // In-tx FOR UPDATE row lock (TOCTOU fix): the snapshot sources from
-        // this locked row, not the outside-tx read.
-        $queryRaw: vi.fn().mockResolvedValue([
-          {
-            encrypted_blob: "cur",
-            blob_iv: "curIv",
-            blob_auth_tag: "curTag",
-            aad_version: 1,
-            team_key_version: 3,
-            item_key_version: 0,
-            encrypted_item_key: null,
-            item_key_iv: null,
-            item_key_auth_tag: null,
-          },
-        ]),
+        $queryRaw: vi.fn(async (strings: TemplateStringsArray) => {
+          const sql = strings.join("?");
+          if (sql.includes("current_setting('lock_timeout')")) return [{ lock_timeout: "0", statement_timeout: "0" }];
+          // The team row FOR SHARE (lockTeamKeyVersion).
+          if (/FROM teams\b/.test(sql)) return [{ team_key_version: 3, tenant_id: "t1" }];
+          // In-tx FOR UPDATE row lock (TOCTOU fix): the snapshot sources from
+          // this locked row, not the outside-tx read.
+          return [
+            {
+              encrypted_blob: "cur",
+              blob_iv: "curIv",
+              blob_auth_tag: "curTag",
+              aad_version: 1,
+              team_key_version: 3,
+              item_key_version: 0,
+              encrypted_item_key: null,
+              item_key_iv: null,
+              item_key_auth_tag: null,
+              item_key_id: null,
+              item_key_team_key_version: 3,
+              item_key_version_high_water: 0,
+            },
+          ];
+        }),
+        $executeRaw: vi.fn(),
         teamPasswordEntryHistory: {
+          // The restore source, re-read under the entry lock.
+          findUnique: vi.fn().mockResolvedValue({
+            id: "h1",
+            entryId: "p1",
+            encryptedBlob: "old",
+            blobIv: "oldIv",
+            blobAuthTag: "oldTag",
+            aadVersion: 0,
+            teamKeyVersion: 2,
+            itemKeyVersion: 0,
+            encryptedItemKey: null,
+            itemKeyIv: null,
+            itemKeyAuthTag: null,
+            itemKeyId: null,
+            changedAt: new Date("2025-01-01"),
+          }),
           create: vi.fn(),
           findMany: vi.fn().mockResolvedValue([]),
           deleteMany: vi.fn(),
         },
-        teamPasswordEntry: { update: vi.fn() },
+        teamMemberKey: { findMany: vi.fn().mockResolvedValue(holderKeys) },
+        teamMember: { findMany: vi.fn().mockResolvedValue(holderKeys.map(({ userId }) => ({ userId, role: "ADMIN" }))) },
+        teamPasswordEntry: { update: entryUpdate },
       }),
     );
+    return entryUpdate;
+  }
 
-    const req = createRequest("POST");
+  function preChecksPass() {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockEntryFindUnique.mockResolvedValue({ id: "p1", teamId: "o1", tenantId: "t1" });
+    mockHistoryFindUnique.mockResolvedValue({ entryId: "p1" });
+  }
+
+  it("restores history version successfully", async () => {
+    preChecksPass();
+    const entryUpdate = setupRestoreTx([{ userId: "u-holder" }]);
+
+    const req = createRequest("POST", undefined, { body: { encryptedOverview: OVERVIEW } });
     const res = await POST(req, createParams({ teamId: "o1", id: "p1", historyId: "h1" }));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(200);
     expect(json.success).toBe(true);
+    expect(entryUpdate.mock.calls[0][0].data).toMatchObject({
+      encryptedBlob: "old",
+      encryptedOverview: OVERVIEW.ciphertext,
+      itemKeyId: null,
+      itemKeyTeamKeyVersion: 0,
+    });
+  });
+
+  it("refuses a version no active member holds the key for (409 HISTORY_KEY_UNAVAILABLE)", async () => {
+    preChecksPass();
+    const entryUpdate = setupRestoreTx([]);
+
+    const req = createRequest("POST", undefined, { body: { encryptedOverview: OVERVIEW } });
+    const res = await POST(req, createParams({ teamId: "o1", id: "p1", historyId: "h1" }));
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(409);
+    expect(json.error).toBe(API_ERROR.HISTORY_KEY_UNAVAILABLE);
+    expect(entryUpdate).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when the re-encrypted overview is missing", async () => {
+    preChecksPass();
+    const entryUpdate = setupRestoreTx([{ userId: "u-holder" }]);
+
+    const res = await POST(createRequest("POST"), createParams({ teamId: "o1", id: "p1", historyId: "h1" }));
+    expect(res.status).toBe(400);
+    expect(mockTransaction).not.toHaveBeenCalled();
+    expect(entryUpdate).not.toHaveBeenCalled();
   });
 });

@@ -9,6 +9,7 @@ const {
   MockTeamAuthError,
   mockWithTeamTenantRls,
   mockRateLimitCheck,
+  mockRateLimitClear,
   mockRequireRecentSession,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
@@ -30,6 +31,7 @@ const {
     }
   },
   mockRateLimitCheck: vi.fn().mockResolvedValue({ allowed: true }),
+  mockRateLimitClear: vi.fn(),
   mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
@@ -41,7 +43,8 @@ const txMock = {
     // The rotating member's role, re-read under the team lock.
     findFirst: vi.fn().mockResolvedValue({ role: "OWNER" }) },
   teamPasswordEntry: { updateMany: vi.fn(), findMany: vi.fn() },
-  teamMemberKey: { createMany: vi.fn() },
+  // createMany: the new version's rows; findMany: the actor's held versions (carry checks).
+  teamMemberKey: { createMany: vi.fn(), findMany: vi.fn() },
 };
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -60,6 +63,7 @@ vi.mock("@/lib/prisma", () => ({
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: vi.fn(),
+  logAuditBulkInTx: vi.fn(),
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "Test" }),
   teamAuditBase: vi.fn((_, userId, teamId) => ({ scope: "TEAM", userId, teamId })),
 }));
@@ -69,7 +73,7 @@ vi.mock("@/lib/tenant-context", () => ({
 vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: vi.fn(() => ({
     check: mockRateLimitCheck,
-    clear: vi.fn(),
+    clear: mockRateLimitClear,
   })),
 }));
 vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
@@ -77,7 +81,7 @@ vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
 }));
 
 import { POST } from "./route";
-import { logAuditAsync } from "@/lib/audit/audit";
+import { logAuditAsync, logAuditBulkInTx } from "@/lib/audit/audit";
 import { TEAM_ROTATE_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 
 function createRequest(body: unknown) {
@@ -93,11 +97,13 @@ function createParams(teamId: string) {
 }
 
 const SNAPSHOT_IV = "e".repeat(24);
+const SNAPSHOT_OVERVIEW_IV = "9".repeat(24);
 
 function validEntry(id: string) {
   return {
     id,
     snapshotIv: SNAPSHOT_IV,
+    snapshotOverviewIv: SNAPSHOT_OVERVIEW_IV,
     encryptedBlob: { ciphertext: "blob", iv: "a".repeat(24), authTag: "b".repeat(32) },
     encryptedOverview: { ciphertext: "ov", iv: "c".repeat(24), authTag: "d".repeat(32) },
     aadVersion: 1,
@@ -129,8 +135,9 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     txMock.team.update.mockResolvedValue({});
     txMock.teamMember.findMany.mockResolvedValue([{ userId: "660e8400-e29b-41d4-a716-446655440001" }]);
     txMock.teamPasswordEntry.updateMany.mockResolvedValue({ count: 1 });
-    txMock.teamPasswordEntry.findMany.mockResolvedValue([{ id: "660e8400-e29b-41d4-a716-446655440100" }]);
+    txMock.teamPasswordEntry.findMany.mockResolvedValue([{ id: "660e8400-e29b-41d4-a716-446655440100", teamKeyVersion: 1 }]);
     txMock.teamMemberKey.createMany.mockResolvedValue({ count: 1 });
+    txMock.teamMemberKey.findMany.mockResolvedValue([{ keyVersion: 1 }]);
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -315,6 +322,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     );
 
     expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe("ACTOR_NOT_PERMITTED");
     expect(txMock.team.update).not.toHaveBeenCalled();
     expect(txMock.teamMemberKey.createMany).not.toHaveBeenCalled();
     expect(txMock.teamMember.findFirst).toHaveBeenCalledWith({
@@ -348,6 +356,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
           fromVersion: 1,
           toVersion: 2,
           entriesRotated: 1,
+          entriesCarried: 0,
           membersUpdated: 1,
         }),
       }),
@@ -392,6 +401,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
       teamId: "team-1",
       itemKeyVersion: 0,
       blobIv: SNAPSHOT_IV,
+      overviewIv: SNAPSHOT_OVERVIEW_IV,
     });
   });
 
@@ -571,7 +581,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     // Verify findMany was called without deletedAt filter
     expect(txMock.teamPasswordEntry.findMany).toHaveBeenCalledWith({
       where: { teamId: "team-1" },
-      select: { id: true },
+      select: { id: true, teamKeyVersion: true },
     });
   });
 
@@ -611,5 +621,180 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     );
     expect(res.status).toBe(200);
     expect(txMock.teamPasswordEntry.updateMany).toHaveBeenCalledTimes(2);
+  });
+  it("rejects a v0 entry without snapshotOverviewIv (the overview is replaced too)", async () => {
+    const { snapshotOverviewIv: _omitted, ...entry } = validEntry("660e8400-e29b-41d4-a716-446655440100");
+    const res = await POST(
+      createRequest({
+        newTeamKeyVersion: 2,
+        entries: [entry],
+        memberKeys: [validMemberKey("660e8400-e29b-41d4-a716-446655440001")],
+      }),
+      createParams("team-1"),
+    );
+    expect(res.status).toBe(400);
+    expect(txMock.teamPasswordEntry.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("releases the limiter slot when the rotation is refused", async () => {
+    txMock.teamPasswordEntry.updateMany.mockResolvedValue({ count: 0 });
+    const res = await POST(
+      createRequest({
+        newTeamKeyVersion: 2,
+        entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
+        memberKeys: [validMemberKey("660e8400-e29b-41d4-a716-446655440001")],
+      }),
+      createParams("team-1"),
+    );
+    expect(res.status).toBe(400);
+    expect(mockRateLimitClear).toHaveBeenCalledWith("rl:team_rotate_key:team-1");
+  });
+
+  it("keeps the limiter slot taken after a committed rotation", async () => {
+    const res = await POST(
+      createRequest({
+        newTeamKeyVersion: 2,
+        entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
+        memberKeys: [validMemberKey("660e8400-e29b-41d4-a716-446655440001")],
+      }),
+      createParams("team-1"),
+    );
+    expect(res.status).toBe(200);
+    expect(mockRateLimitCheck).toHaveBeenCalledWith("rl:team_rotate_key:team-1");
+    expect(mockRateLimitClear).not.toHaveBeenCalled();
+  });
+
+  it("does not release the slot of a request it refused as rate limited", async () => {
+    mockRateLimitCheck.mockResolvedValueOnce({ allowed: false, retryAfterMs: 1000 });
+    const res = await POST(
+      createRequest({
+        newTeamKeyVersion: 2,
+        entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
+        memberKeys: [validMemberKey("660e8400-e29b-41d4-a716-446655440001")],
+      }),
+      createParams("team-1"),
+    );
+    expect(res.status).toBe(429);
+    expect(mockRateLimitClear).not.toHaveBeenCalled();
+  });
+
+  describe("carry (plan C3)", () => {
+    const ROTATED = "660e8400-e29b-41d4-a716-446655440100";
+    const CARRIED = "660e8400-e29b-41d4-a716-446655440200";
+
+    beforeEach(() => {
+      mockTeamFindUnique.mockResolvedValue({ teamKeyVersion: 1, tenantId: "tenant-1" });
+      txMock.teamPasswordEntry.findMany.mockResolvedValue([
+        { id: ROTATED, teamKeyVersion: 1 },
+        { id: CARRIED, teamKeyVersion: 1 },
+      ]);
+    });
+
+    function rotateWithCarry(carry: unknown[]) {
+      return POST(
+        createRequest({
+          newTeamKeyVersion: 2,
+          entries: [validEntry(ROTATED)],
+          carry,
+          memberKeys: [validMemberKey("660e8400-e29b-41d4-a716-446655440001")],
+        }),
+        createParams("team-1"),
+      );
+    }
+
+    it("accepts a not_held carry when the actor holds no key at the entry's version, writing nothing to the entry", async () => {
+      txMock.teamMemberKey.findMany.mockResolvedValue([]);
+      const res = await rotateWithCarry([{ id: CARRIED, teamKeyVersion: 1, reason: "not_held" }]);
+      expect(res.status).toBe(200);
+      expect(txMock.teamPasswordEntry.updateMany).toHaveBeenCalledTimes(1);
+      expect(txMock.teamPasswordEntry.updateMany.mock.calls[0][0].where.id).toBe(ROTATED);
+      expect(txMock.teamMemberKey.findMany).toHaveBeenCalledWith({
+        where: { teamId: "team-1", userId: "660e8400-e29b-41d4-a716-446655440001" },
+        select: { keyVersion: true },
+        orderBy: { keyVersion: "asc" },
+      });
+    });
+
+    it("refuses a not_held carry by an actor who holds the entry's version (TEAM_ROTATE_KEY_UNAVAILABLE)", async () => {
+      const res = await rotateWithCarry([{ id: CARRIED, reason: "not_held" }]);
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toBe("TEAM_ROTATE_KEY_UNAVAILABLE");
+      expect(txMock.team.update).not.toHaveBeenCalled();
+      expect(txMock.teamPasswordEntry.updateMany).not.toHaveBeenCalled();
+    });
+
+    it("normalises a team key version below 1 to 1 for the holder check", async () => {
+      txMock.teamPasswordEntry.findMany.mockResolvedValue([
+        { id: ROTATED, teamKeyVersion: 1 },
+        { id: CARRIED, teamKeyVersion: 0 },
+      ]);
+      const res = await rotateWithCarry([{ id: CARRIED, reason: "not_held" }]);
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toBe("TEAM_ROTATE_KEY_UNAVAILABLE");
+    });
+
+    it.each(["undecryptable", "key_invalid"])(
+      "accepts a %s carry from a holder of the entry's version",
+      async (reason) => {
+        const res = await rotateWithCarry([{ id: CARRIED, reason }]);
+        expect(res.status).toBe(200);
+        expect(txMock.teamPasswordEntry.updateMany).toHaveBeenCalledTimes(1);
+      },
+    );
+
+    it.each(["undecryptable", "key_invalid"])(
+      "refuses a %s carry from an actor not holding the entry's version (TEAM_ROTATE_CARRY_INVALID)",
+      async (reason) => {
+        txMock.teamMemberKey.findMany.mockResolvedValue([{ keyVersion: 2 }]);
+        const res = await rotateWithCarry([{ id: CARRIED, reason }]);
+        expect(res.status).toBe(409);
+        expect((await res.json()).error).toBe("TEAM_ROTATE_CARRY_INVALID");
+        expect(txMock.team.update).not.toHaveBeenCalled();
+      },
+    );
+
+    it("refuses a carry whose stated version is not the entry's (TEAM_ROTATE_CARRY_INVALID)", async () => {
+      txMock.teamMemberKey.findMany.mockResolvedValue([]);
+      const res = await rotateWithCarry([{ id: CARRIED, teamKeyVersion: 3, reason: "not_held" }]);
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toBe("TEAM_ROTATE_CARRY_INVALID");
+    });
+
+    it("refuses when entries plus carry miss an entry (ENTRY_COUNT_MISMATCH)", async () => {
+      const res = await rotateWithCarry([]);
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe("ENTRY_COUNT_MISMATCH");
+    });
+
+    it("refuses an entry both rotated and carried (ENTRY_COUNT_MISMATCH)", async () => {
+      txMock.teamPasswordEntry.findMany.mockResolvedValue([{ id: ROTATED, teamKeyVersion: 1 }]);
+      const res = await rotateWithCarry([{ id: ROTATED, reason: "undecryptable" }]);
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe("ENTRY_COUNT_MISMATCH");
+    });
+
+    it("writes one in-transaction audit row per carried entry and counts carries in the summary", async () => {
+      const res = await rotateWithCarry([{ id: CARRIED, reason: "undecryptable" }]);
+      expect(res.status).toBe(200);
+      expect(vi.mocked(logAuditBulkInTx)).toHaveBeenCalledWith(txMock, "tenant-1", [
+        expect.objectContaining({
+          action: "TEAM_KEY_ROTATION_CARRY",
+          userId: "660e8400-e29b-41d4-a716-446655440001",
+          teamId: "team-1",
+          targetType: "TeamPasswordEntry",
+          targetId: CARRIED,
+          metadata: { reason: "undecryptable", teamKeyVersion: 1 },
+        }),
+      ]);
+      expect(vi.mocked(logAuditBulkInTx).mock.invocationCallOrder[0]).toBeGreaterThan(
+        txMock.team.update.mock.invocationCallOrder[0],
+      );
+      expect(vi.mocked(logAuditAsync)).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "TEAM_KEY_ROTATION",
+          metadata: expect.objectContaining({ entriesRotated: 1, entriesCarried: 1 }),
+        }),
+      );
+    });
   });
 });

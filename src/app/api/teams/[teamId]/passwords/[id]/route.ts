@@ -76,6 +76,10 @@ async function handleGET(req: NextRequest, { params }: Params) {
       itemKeyIv: entry.itemKeyIv,
       itemKeyAuthTag: entry.itemKeyAuthTag,
     } : {}),
+    itemKeyId: entry.itemKeyId,
+    // The version a new ItemKey (v0→v1 upgrade) must take; the server
+    // recomputes it under the entry lock.
+    nextItemKeyVersion: entry.itemKeyVersionHighWater + 1,
     requireReprompt: entry.requireReprompt,
     expiresAt: entry.expiresAt,
   });
@@ -119,7 +123,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
   const result = await parseBody(req, updateTeamE2EPasswordSchema);
   if (!result.ok) return result.response;
 
-  const { encryptedBlob, encryptedOverview, aadVersion, teamKeyVersion, itemKeyVersion, encryptedItemKey, tagIds, teamFolderId, isArchived, requireReprompt, expiresAt } = result.data;
+  const { encryptedBlob, encryptedOverview, aadVersion, teamKeyVersion, itemKeyVersion, encryptedItemKey, itemKeyId, snapshotBlobIv, tagIds, teamFolderId, isArchived, requireReprompt, expiresAt } = result.data;
 
   let updated;
   try {
@@ -131,6 +135,8 @@ async function handlePUT(req: NextRequest, { params }: Params) {
         teamKeyVersion,
         itemKeyVersion,
         encryptedItemKey,
+        itemKeyId,
+        snapshotBlobIv,
         tagIds,
         teamFolderId,
         isArchived,

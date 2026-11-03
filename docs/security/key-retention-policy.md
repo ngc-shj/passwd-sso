@@ -10,17 +10,25 @@ deleted. It applies to both automated systems and manual maintenance operations.
 ### Active member keys
 
 - **Current version**: Always retained while member is active.
-- **Old versions**: Retained while any `TeamPasswordEntryHistory` or
-  `TeamPasswordEntry` references that `teamKeyVersion`.
+- **Old versions**: Retained while any row of the team references that
+  version: a `TeamPasswordEntry` or `TeamPasswordEntryHistory` with
+  `teamKeyVersion = N`, or a legacy (`encryptionMode = 0`) attachment with
+  `keyVersion = N`.
 
 ### Cleanup rules
 
 - Safe to delete a `TeamMemberKey` at version N when:
-  - No `TeamPasswordEntry.teamKeyVersion = N` exists for that team
-  - No `TeamPasswordEntryHistory.teamKeyVersion = N` exists for that team
+  - No row of the team references version N (the three references above;
+    a NULL or 0 version counts as 1)
   - The team's current `teamKeyVersion > N`
-- Until lazy re-encryption (P3 roadmap) is implemented, old keys must be
-  retained indefinitely.
+- The condition is keyed on references, **not** on the re-key marker
+  (`item_key_team_key_version`). A re-keyed entry can still hold history rows
+  retained under version N (rows the re-keyer could not open), and a carried
+  entry stays at N; deleting N on the strength of "no entry is pending" would
+  make those rows unreadable to everyone.
+- No automated pruning exists yet (follow-up); old keys are retained
+  indefinitely. The re-key pass (whitepaper §6.2) is what lets version N reach
+  zero references.
 
 ---
 
@@ -37,6 +45,19 @@ A `TeamMemberKey` version must be retained as long as any
 - Oldest entries are deleted first when the limit is exceeded.
 - Deletion of history entries may allow cleanup of old key versions.
 
+### Under the re-key pass
+
+- The pass re-encrypts every history row it can open under the entry's new
+  ItemKey and current team key version, so those rows stop referencing the
+  old version.
+- Rows it cannot open are **retained** under their old wrap and old
+  `teamKeyVersion` and keep that version alive. They stay readable to holders
+  of that version, including departed members who kept the key. They are
+  revisited only when the entry is pending again after the next rotation and a
+  holder of their version re-keys it first.
+- The v0→v1 upgrade the pass performs adds a history row and trims history to
+  20, which may itself drop old-version rows.
+
 ### Personal vault history
 
 - `PasswordEntryHistory` uses `keyVersion` from the User model.
@@ -52,15 +73,28 @@ A `TeamMemberKey` version must be retained as long as any
 1. `TeamMemberKey` for the revoked user: **mark as deactivated, do not delete**.
    - Audit trail: the key record proves the user had access during a period.
    - Dispute resolution: may be needed to verify what data was accessible.
-2. Team key rotation is **mandatory** after member removal.
-   - All active `ItemKey` (future) or entry data must be re-encrypted with
-     the new `TeamKey` version.
+2. Team key rotation followed by the re-key pass is **mandatory** after member
+   removal.
+   - Rotation re-wraps each entry's `ItemKey` under the new `TeamKey`; the
+     re-key pass then replaces each `ItemKey` and re-encrypts the entry's
+     blob, overview and history and re-wraps its attachment CEKs.
    - New `TeamMemberKey` envelopes issued only for remaining active members.
 3. Revoked user **cannot obtain** new `TeamMemberKeyEnvelope`.
 
 ### Forward secrecy guarantee
 
-- After rotation, the revoked member cannot decrypt new data (no new key).
+- Once an entry is re-keyed, content written to it afterwards is unreadable
+  with the old team key or the old `ItemKey`.
+- Rotation alone does not provide this: until an entry is re-keyed, edits to
+  it still use the old `ItemKey`. The pending count shows how many remain.
+- Stated limits (each leaves material readable to a departed member who kept
+  the old keys):
+  - history rows the re-keyer could not open (retained, above);
+  - entries carried as unrecoverable (no active holder) or on a holder's
+    `undecryptable` / `key_invalid` claim, until another holder re-keys them;
+  - attachment CEKs, which are re-wrapped, not replaced, and any CEK or
+    plaintext the member already downloaded;
+  - backups, WAL and versioned buckets (section 4).
 - **Backward secrecy is NOT guaranteed** (E2E limitation): if the member
   cached the old team key locally, they could still decrypt historical data
   encrypted with that key version.
@@ -94,6 +128,16 @@ A `TeamMemberKey` version must be retained as long as any
 - If a backup references a `keyVersion` that no longer exists in `VaultKey`,
   the entry cannot be decrypted. This is an expected limitation — users should
   maintain current vault access before restoring old backups.
+
+### Old ciphertext outside the live rows
+
+Rotation and the re-key pass rewrite live rows only. Database backups, WAL
+archives, versioned object-storage buckets, and attachment objects orphaned by a
+crash between a rewrite's commit and its post-commit delete keep the
+pre-rotation wraps and ciphertext. Anyone holding the old keys and such a copy
+reads the content as it was then. Their retention is bounded only by the
+operator's backup, WAL and bucket-versioning retention; set those with that in
+mind. A sweep of unreferenced attachment objects is a follow-up.
 
 ---
 
@@ -154,7 +198,7 @@ The `ADMIN_API_TOKEN` env var name is reused by the scripts as the transport var
 | Key Material | Retention Policy | Deletion Condition |
 |---|---|---|
 | TeamMemberKey (current) | Retain while member is active | Member permanently removed + no history references |
-| TeamMemberKey (old version) | Retain while history references exist | All referencing history entries deleted or re-encrypted |
+| TeamMemberKey (old version) | Retain while any entry, history row or mode-0 attachment references the version | No row of the team references it (not keyed on the re-key marker) |
 | TeamMemberKey (revoked member) | Mark deactivated, do not delete | Manual cleanup after audit period (org policy) |
 | VaultKey (personal) | Retain while history references exist | All referencing history entries deleted |
 | User.encryptedSecretKey | Single active copy, overwritten on change | N/A (always current) |

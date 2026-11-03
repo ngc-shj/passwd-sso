@@ -38,6 +38,10 @@ on:
       - 'src/lib/team/**'
       - 'src/lib/directory-sync/**'
       - 'src/lib/scim/**'
+      # Attachment object keys / ref validation (MinIO cells) and the AAD and
+      # CEK-wrap derivations the team re-key integration cells decrypt with.
+      - 'src/lib/blob-store/**'
+      - 'src/lib/crypto/**'
       - 'src/workers/**'
       - 'src/__tests__/db-integration/**'
       - 'prisma/schema.prisma'

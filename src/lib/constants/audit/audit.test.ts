@@ -229,6 +229,19 @@ describe("audit constants", () => {
     }
   });
 
+  it("delivers the team re-key actions in the team admin group and to team webhooks", () => {
+    const rekeyActions = [
+      AUDIT_ACTION.TEAM_KEY_ROTATION_CARRY,
+      AUDIT_ACTION.TEAM_ENTRY_REKEY,
+      AUDIT_ACTION.TEAM_ATTACHMENT_MIGRATE,
+    ];
+    for (const action of rekeyActions) {
+      expect(AUDIT_ACTION_VALUES).toContain(action);
+      expect(AUDIT_ACTION_GROUPS_TEAM[AUDIT_ACTION_GROUP.ADMIN]).toContain(action);
+      expect(TEAM_WEBHOOK_EVENT_GROUPS[AUDIT_ACTION_GROUP.ADMIN]).toContain(action);
+    }
+  });
+
   it("every action belongs to at least one scope group (PERSONAL, TEAM, or TENANT)", () => {
     const allGrouped = new Set([
       ...Object.values(AUDIT_ACTION_GROUPS_PERSONAL).flat(),

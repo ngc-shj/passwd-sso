@@ -17,3 +17,19 @@ export const TEAM_KEY_LOCK_TIMEOUT_MS = 3 * MS_PER_SECOND;
  * the work after them, so the transaction does not expire first.
  */
 export const TEAM_MEMBERSHIP_TX_TIMEOUT_MS = 10 * MS_PER_SECOND;
+
+/**
+ * Why a rotation carries an entry unchanged instead of re-wrapping it
+ * (team-key-rotation-rekey plan C3). The entry keeps its old team key version
+ * and stays pending re-key.
+ */
+export const ROTATE_CARRY_REASON = {
+  /** The rotating member holds no member key at the entry's team key version. */
+  NOT_HELD: "not_held",
+  /** The entry failed AES-GCM authentication under a key the member holds. */
+  UNDECRYPTABLE: "undecryptable",
+  /** The member's own member-key row at that version failed to unwrap. */
+  KEY_INVALID: "key_invalid",
+} as const;
+
+export type RotateCarryReason = (typeof ROTATE_CARRY_REASON)[keyof typeof ROTATE_CARRY_REASON];

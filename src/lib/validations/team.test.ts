@@ -6,6 +6,7 @@ import {
   createTeamE2ESchema,
   createTeamE2EPasswordSchema,
   updateTeamE2EPasswordSchema,
+  restoreTeamHistorySchema,
   updateTeamSchema,
   upsertTeamPolicySchema,
   inviteSchema,
@@ -431,6 +432,60 @@ describe("updateTeamE2EPasswordSchema", () => {
   it("accepts itemKeyVersion>=1 without encryptedItemKey (reuse existing)", () => {
     const result = updateTeamE2EPasswordSchema.safeParse({ itemKeyVersion: 1 });
     expect(result.success).toBe(true);
+  });
+
+  it("accepts the reused ItemKey's id", () => {
+    const result = updateTeamE2EPasswordSchema.safeParse({
+      itemKeyVersion: 1,
+      itemKeyId: "11111111-1111-4111-8111-111111111111",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects an itemKeyId that is not a UUID", () => {
+    const result = updateTeamE2EPasswordSchema.safeParse({ itemKeyVersion: 1, itemKeyId: "not-a-uuid" });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a new wrap without the blobIv snapshot that marks the v0→v1 upgrade", () => {
+    const result = updateTeamE2EPasswordSchema.safeParse({
+      itemKeyVersion: 1,
+      encryptedItemKey: validEncryptedField(),
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts a new wrap with the blobIv snapshot", () => {
+    const result = updateTeamE2EPasswordSchema.safeParse({
+      itemKeyVersion: 1,
+      encryptedItemKey: validEncryptedField(),
+      snapshotBlobIv: "d".repeat(24),
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a malformed blobIv snapshot", () => {
+    const result = updateTeamE2EPasswordSchema.safeParse({ snapshotBlobIv: "xyz" });
+    expect(result.success).toBe(false);
+  });
+});
+
+// ─── restoreTeamHistorySchema ───────────────────────────────
+
+describe("restoreTeamHistorySchema", () => {
+  it("accepts the re-encrypted overview", () => {
+    expect(restoreTeamHistorySchema.safeParse({ encryptedOverview: validEncryptedField() }).success).toBe(true);
+  });
+
+  it("rejects a body without the overview", () => {
+    expect(restoreTeamHistorySchema.safeParse({}).success).toBe(false);
+  });
+
+  it("rejects a malformed overview", () => {
+    const result = restoreTeamHistorySchema.safeParse({
+      encryptedOverview: { ...validEncryptedField(), iv: "short" },
+    });
+    expect(result.success).toBe(false);
   });
 
   it("rejects expiresAt without offset", () => {

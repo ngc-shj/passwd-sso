@@ -492,3 +492,68 @@ red-proved directly on seeded inconsistent rows.
 | C6 | Writers | locked |
 | C7 | Platform limits | locked |
 | C8 | Docs and clients | locked |
+
+## Implementation Checklist
+
+Derived in Phase 2 Step 2-1 (writer member set by grep of the terminal mutating primitives).
+
+### Batch 1 — schema, codes, server writers (C1, C3 server, C6)
+- `prisma/schema.prisma` (`TeamPasswordEntry`, `TeamPasswordEntryHistory`, `Attachment`, `AuditAction`)
+  + migrations: columns + backfill block + CHECK; audit enum values in their own migration
+- `src/lib/http/api-error-codes.ts` (+ `api-error-codes.test.ts` count, `messages/{en,ja}/ApiErrors.json`)
+- `src/lib/constants/audit/audit.ts` (+ test, `messages/{en,ja}/AuditLog.json`,
+  `docs/operations/audit-log-reference.md`)
+- `src/lib/services/team-password-service.ts` (`createTeamPassword` mints id/marker/high-water;
+  `updateTeamPassword` checks moved under the locked row; history snapshot copies `item_key_id`)
+- `src/app/api/teams/[teamId]/passwords/[id]/route.ts` (GET `itemKeyId`, `nextItemKeyVersion`)
+- `src/app/api/teams/[teamId]/passwords/[id]/history/route.ts`, `.../history/[historyId]/route.ts`
+  (return `itemKeyId`)
+- `src/app/api/teams/[teamId]/passwords/[id]/history/[historyId]/restore/route.ts` (team lock,
+  in-tx re-read, marker/id rule, `HISTORY_KEY_UNAVAILABLE`, overview — D1)
+- `src/app/api/teams/[teamId]/rotate-key/route.ts` + `data/route.ts` (carry, holder rules,
+  limiter on success, v0 `overviewIv` snapshot, per-entry carry audit — D3)
+- `src/lib/validations/team.ts`, `src/lib/validations/common.ts`
+- `src/lib/team/team-key-rotation-lock.ts` header writer list
+- raw-SQL seeders: `team-rotate-key`, `team-key-version-guard`, `share-departure`,
+  `bulk-import-entry-isolation`, `passwords-history-lost-update`, `tenant-swap.adversarial`,
+  `vault-rotate-key-attachments` integration tests; `scripts/rls-cross-tenant-seed.sql`
+- both test trees for every touched route (`src/app/api/**/route.test.ts`, `src/__tests__/api/teams/*`)
+
+### Batch 2 — blob store, team attachments, migrate (C4)
+- `src/lib/blob-store/{types,object-ref,s3-blob-store,azure-blob-store,gcs-blob-store,db-blob-store,cleanup}.ts` + tests
+- `src/lib/crypto/crypto-aad.ts` (`TW`), `src/lib/crypto/crypto-team.ts` (CEK-wrap HKDF);
+  `docs/security/crypto-domain-ledger.md`, `scripts/checks/aad-scope-manifest.json`,
+  `scripts/checks/aad-golden-vectors.json`, `src/__tests__/aad-parity.test.ts`
+- `src/app/api/teams/[teamId]/passwords/[id]/attachments/route.ts`, `.../[attachmentId]/route.ts`,
+  new `.../[attachmentId]/migrate/route.ts`
+- `src/app/api/passwords/[id]/attachments/route.ts`, `.../[attachmentId]/route.ts`,
+  `.../[attachmentId]/migrate/route.ts`, `src/lib/vault/rotate-key-server.ts` (`applyAttachmentMigration`)
+- manifests: `route-policy-manifest.json`, `stepup-route-paths.json`, `raw-sql-usage.txt`,
+  generated security matrices, `docs/security/step-up-reauth-routes.md`, `api-path.ts`
+
+### Batch 3 — re-key endpoints (C2)
+- new `src/app/api/teams/[teamId]/rekey/route.ts`, `.../passwords/[id]/rekey/route.ts`,
+  `src/lib/team/rekey-consistency.ts` (`assertEntryRekeyConsistent`), same manifests
+
+### Batch 4 — web client (C3 client, C5)
+- `src/lib/team/team-vault-core.tsx` (+ context re-export, tests), new
+  `src/lib/team/{rotation-payload,rekey-payload,rekey-runner}.ts`
+- `src/components/team/security/team-rotate-key-button.tsx` (+ finish control),
+  `src/components/team/forms/{team-entry-submit.ts,team-attachment-section.tsx}`,
+  `src/lib/team/team-entry-save.ts`, `src/components/passwords/entry/entry-history-section.tsx`,
+  history restore caller, `src/hooks/use-watchtower.ts`,
+  `src/app/[locale]/admin/teams/[teamId]/audit-logs/page.tsx` (version-aware key — D5), i18n
+
+### Batch 5 — other clients, config, docs (C7, C8)
+- `extension/src/lib/crypto-team.ts` + tests; `scripts/generate-team-key-fixture.ts` + fixture JSON;
+  `ios/Shared/Crypto/AAD.swift`, `TeamKeyCrypto.swift`, `ios/PasswdSSOTests/{TeamKeyCryptoTests,AADParityTests}.swift`
+- `next.config.ts` + unit test; `.github/workflows/ci-integration.yml` path filter
+- `docs/security/{cryptography-whitepaper,key-retention-policy,threat-model}.md`,
+  `docs/operations/deployment.md`, CLAUDE.md API table (with user approval)
+
+### Batch 6 — integration and E2E (A1–A13)
+- `src/__tests__/db-integration/team-key-rekey*.integration.test.ts`, E2E spec + helpers in `e2e/helpers/`
+
+### CI parity
+- CI-only, not in pre-pr: `check-state-mutation-centralization.sh` (run by hand in 2-4);
+  license, npm-audit and terraform-count gates are diff-independent.

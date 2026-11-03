@@ -547,6 +547,35 @@ Browsers send the cookie with the longer path first, and Auth.js and the app bot
 
 Prefer a dedicated host with no basePath. If you need a sub-path, every subdomain that can set cookies on the parent domain is inside the trust boundary as well.
 
+## Request Body Size Limit (ingress requirement)
+
+The ingress in front of the app (reverse proxy, load balancer or WAF) **must** limit request body size: a low default, with 20 MB allowed only on the paths that need it.
+
+Why: the Next.js proxy reads every matched request body into memory, up to `experimental.proxyClientMaxBodySize` in `next.config.ts`, before any route code or session check runs. That limit is 20 MB, the largest route body cap (`PROXY_CLIENT_MAX_BODY_SIZE`); a lower value would silently truncate the bodies below instead of rejecting them. Each route still enforces its own cap on the bytes it reads, but without an ingress limit an unauthenticated client can make the app hold up to 20 MB per concurrent request on any route. Every other route caps its JSON body at 1 MB or less.
+
+Allow up to 20 MB on these paths only (prefix with your basePath):
+
+| Path | Method | Body |
+|------|--------|------|
+| `/api/teams/*/passwords/*/rekey` | POST | Team entry re-key (≤ 16 MiB) |
+| `/api/teams/*/passwords/*/attachments/*/migrate` | PUT | Team attachment migrate (≤ 20 MB) |
+| `/api/passwords/*/attachments/*/migrate` | PUT | Personal attachment migrate (≤ 20 MB) |
+| `/api/teams/*/passwords/*/attachments` | POST | Team attachment upload (multipart, ≤ 20 MB) |
+| `/api/passwords/*/attachments` | POST | Personal attachment upload (multipart, ≤ 20 MB) |
+| `/api/sends/file` | POST | File Send upload (multipart, ≤ 20 MB) |
+| `/api/vault/rotate-key` | POST | Personal vault key rotation (≤ 16 MiB) |
+
+A default of 1 MB fits every other route. For example, with nginx:
+
+```nginx
+client_max_body_size 1m;
+
+location ~ ^/api/(teams/[^/]+/passwords/[^/]+/(rekey|attachments(/[^/]+/migrate)?)|passwords/[^/]+/attachments(/[^/]+/migrate)?|sends/file|vault/rotate-key)$ {
+    client_max_body_size 20m;
+    proxy_pass http://app;
+}
+```
+
 ## Deploy Checklist
 
 - [ ] All tests pass (`npm test`)
@@ -554,6 +583,7 @@ Prefer a dedicated host with no basePath. If you need a sub-path, every subdomai
 - [ ] Worktree clean (no uncommitted OR untracked files — `deploy.sh` rejects both)
 - [ ] `AWS_REGION`, `ECR_URL`, `TF_VAR_FILE` exported
 - [ ] `deploy.sh` completed successfully (apply → migrate → roll services → services-stable)
+- [ ] Ingress limits request bodies (low default; 20 MB only on the paths in [Request Body Size Limit](#request-body-size-limit-ingress-requirement))
 - [ ] Health check passes after deployment
 - [ ] Verify app functionality in production
 
@@ -611,6 +641,8 @@ Personal vault and team encryption key rotation are performed via the web UI:
 - **Team vault**: Team Settings → Security → Key Rotation
 
 These operations re-encrypt all entries client-side and submit the results atomically. No admin script is needed.
+
+A team key rotation is followed by a per-entry re-key pass (new ItemKey per entry; see [cryptography whitepaper §6.2](../security/cryptography-whitepaper.md)). Its requests go to `/api/teams/*/passwords/*/rekey` and the attachment migrate paths, which need the 20 MB ingress allowance above.
 
 ## Environment Variables
 

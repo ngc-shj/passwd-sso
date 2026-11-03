@@ -108,6 +108,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history", () => {
         blobAuthTag: "tag",
         aadVersion: 1,
         teamKeyVersion: 2,
+        itemKeyId: null,
         changedAt,
         changedById: "u1",
       },
@@ -121,6 +122,8 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history", () => {
     expect(json).toHaveLength(1);
     expect(json[0].encryptedBlob).toEqual({ ciphertext: "cipher", iv: "iv", authTag: "tag" });
     expect(json[0].teamKeyVersion).toBe(2);
+    // A legacy row of unknown ItemKey identity reports null.
+    expect(json[0].itemKeyId).toBeNull();
     expect(json[0].changedBy).toEqual({ id: "u1", name: "Admin", email: "admin@test.com" });
   });
 });

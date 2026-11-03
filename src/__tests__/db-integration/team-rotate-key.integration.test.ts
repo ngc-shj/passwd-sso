@@ -124,14 +124,17 @@ let snapshotPool: TestContext["su"]["pool"];
 /**
  * Each submitted entry gets the `snapshotIv` the real client takes from
  * rotate-key/data — the IV of the ciphertext it re-encrypted — read from the
- * row as it stands now (blob IV for v0, wrapped ItemKey IV for v1+).
+ * row as it stands now (blob IV for v0, wrapped ItemKey IV for v1+), and a v0
+ * entry also its `snapshotOverviewIv` (its overview is re-encrypted too).
  */
 async function callRotate(teamId: string, body: Record<string, unknown>) {
   const entries = await Promise.all(
     ((body.entries ?? []) as Record<string, unknown>[]).map(async (entry) => {
       if ("snapshotIv" in entry) return entry;
-      const r = await snapshotPool.query<{ blob_iv: string; item_key_iv: string | null; item_key_version: number }>(
-        `SELECT blob_iv, item_key_iv, item_key_version FROM team_password_entries WHERE id = $1::uuid`,
+      const r = await snapshotPool.query<{
+        blob_iv: string; overview_iv: string; item_key_iv: string | null; item_key_version: number;
+      }>(
+        `SELECT blob_iv, overview_iv, item_key_iv, item_key_version FROM team_password_entries WHERE id = $1::uuid`,
         [entry.id],
       );
       const row = r.rows[0];
@@ -139,7 +142,9 @@ async function callRotate(teamId: string, body: Record<string, unknown>) {
       // A missing row would 400 as a schema error, indistinguishable from the
       // rejection a test expects.
       if (!snapshotIv) throw new Error(`snapshot row ${String(entry.id)} not found`);
-      return { ...entry, snapshotIv };
+      return row.item_key_version >= 1
+        ? { ...entry, snapshotIv }
+        : { ...entry, snapshotIv, snapshotOverviewIv: row.overview_iv };
     }),
   );
   return POST(buildRequest(teamId, { ...body, entries }), routeParams(teamId));
@@ -225,11 +230,11 @@ async function seedV0Entry(
          encrypted_blob, blob_iv, blob_auth_tag,
          encrypted_overview, overview_iv, overview_auth_tag,
          aad_version, team_key_version, item_key_version, entry_type,
-         created_at, updated_at
+         item_key_team_key_version, created_at, updated_at
        ) VALUES (
          $1::uuid, $2::uuid, $3::uuid, $4::uuid, $4::uuid,
          $5, $6, $7, $8, $9, $10,
-         1, $11, 0, 'LOGIN', $12, $12
+         1, $11, 0, 'LOGIN', $11, $12, $12
        )`,
       entryId, opts.teamId, opts.tenantId, opts.userId,
       blob.ciphertext, blob.iv, blob.authTag,
@@ -271,12 +276,14 @@ async function seedV1Entry(
          encrypted_overview, overview_iv, overview_auth_tag,
          aad_version, team_key_version, item_key_version,
          encrypted_item_key, item_key_iv, item_key_auth_tag,
+         item_key_id, item_key_team_key_version, item_key_version_high_water,
          entry_type, created_at, updated_at
        ) VALUES (
          $1::uuid, $2::uuid, $3::uuid, $4::uuid, $4::uuid,
          $5, $6, $7, $8, $9, $10,
          1, $11, $12,
          $13, $14, $15,
+         $17::uuid, $11, $12,
          'LOGIN', $16, $16
        )`,
       entryId, opts.teamId, opts.tenantId, opts.userId,
@@ -284,7 +291,7 @@ async function seedV1Entry(
       overview.ciphertext, overview.iv, overview.authTag,
       opts.teamKeyVersion, opts.itemKeyVersion,
       wrappedItemKey.ciphertext, wrappedItemKey.iv, wrappedItemKey.authTag,
-      now,
+      now, randomUUID(),
     );
   });
   return { entryId, itemKeyRaw };

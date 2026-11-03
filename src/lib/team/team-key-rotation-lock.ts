@@ -13,6 +13,17 @@ import { TEAM_KEY_LOCK_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
  * writer then either commits before rotation reads its inputs (and is
  * read), or waits and runs against the committed rotation.
  *
+ * Writers holding `teams ... FOR SHARE`: entry create and full update
+ * (incl. bulk import and the v0→v1 ItemKey upgrade,
+ * team-password-service.ts); history restore (which also reads the
+ * team-key holder set under it); member admission, invitation accept,
+ * SCIM approve/reject and member-key distribution (confirm-key); and member
+ * removal, role change, tenant departure, vault reset and SCIM
+ * deprovisioning (lockTeamsAgainstRotation and
+ * lockMemberTeamsAgainstRotation below). Rotation itself never replaces an
+ * ItemKey: item_key_id, the re-key marker and the high-water are written only
+ * by create, the upgrade, restore and the re-key pass.
+ *
  * Lock order: `teams` before `users`, `team_members`, `team_member_keys`
  * and `team_password_entries` — rotation's own member-key insert takes
  * KEY SHARE on `users`, so a writer holding a `users` lock while waiting

@@ -85,6 +85,9 @@ const CRITICAL_ACTIONS = new Set([
   "TEAM_MEMBER_SCIM_ROLE_UPDATE",
   "TEAM_MEMBER_KEY_DISTRIBUTE",
   "SCIM_GROUP_MAPPING_CREATE",
+  // team-key-rotation-rekey D3: one row per entry a rotation carries
+  // unchanged, enqueued (logAuditBulkInTx) in the rotation's transaction.
+  "TEAM_KEY_ROTATION_CARRY",
 ]);
 
 const project = createAstProject();

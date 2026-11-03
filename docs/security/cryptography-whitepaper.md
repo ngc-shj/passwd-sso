@@ -70,12 +70,26 @@ Entry encryption:
         └── wraps ItemKey (per entry, itemKeyVersion>=1)
             (AAD scope "IK": teamId, entryId, teamKeyVersion)
 
-    ItemKey (random 256-bit, per TeamPasswordEntry):
+    ItemKey (random 256-bit, per TeamPasswordEntry; identified by a
+             server-minted item_key_id, replaced by the re-key pass — §6.2):
         │
-        └── HKDF("passwd-sso-item-enc-v1") ──► itemEncryptionKey
-                └── encrypts entry blob + overview + attachments
-                    (AAD scope "OV": teamId, entryId, vaultType, itemKeyVersion)
+        ├── HKDF("passwd-sso-item-enc-v1") ──► itemEncryptionKey
+        │       └── encrypts entry blob + overview + history rows
+        │           (AAD scope "OV": teamId, entryId, vaultType, itemKeyVersion)
+        │
+        └── HKDF("passwd-sso-item-cekwrap-v1", salt=32 zero bytes) ──► cekWrapKey
+                └── wraps each attachment CEK (encryptionMode=2)
+                    (AAD scope "TW": teamId, entryId, attachmentId,
+                     itemKeyVersion, cekWrapAadVersion)
+
+    CEK (random 256-bit, per team attachment, encryptionMode=2):
+        └── encrypts the attachment body (AAD scope "AT": entryId, attachmentId)
 ```
+
+Legacy team attachments are `encryptionMode = 1` (body encrypted directly under
+`itemEncryptionKey`) or `encryptionMode = 0` (body under the team encryption key
+at the attachment's `keyVersion`). New uploads are mode 2 only; the re-key pass
+migrates modes 0/1 to mode 2 before it re-keys the entry (§6.2).
 
 ### 2.3 Recovery Key
 
@@ -195,6 +209,8 @@ Every ciphertext is bound to its context via AAD. This prevents:
 | `OV` | Team vault entry | teamId, entryId, vaultType, itemKeyVersion |
 | `AT` | Attachment | entryId, attachmentId |
 | `IK` | ItemKey wrapping | teamId, entryId, teamKeyVersion |
+| `AW` | Personal attachment CEK wrap | entryId, attachmentId, cekKeyVersion, cekWrapAadVersion |
+| `TW` | Team attachment CEK wrap (CEK wrapped with HKDF-SHA256(ItemKey, salt = 32 zero bytes, info `passwd-sso-item-cekwrap-v1`)) | teamId, entryId, attachmentId, itemKeyVersion, cekWrapAadVersion |
 | `OK` | Team member key wrapping | teamId, toUserId, keyVersion, wrapVersion |
 
 The scopes above use the structured E2E AAD format. Separately, the **server-side**
@@ -277,6 +293,21 @@ Content Encryption Key (CEK):
    OLD-key trust posture; the next rotation cycle clears them. Backup tape
    retains the OLD-key wrap forever — rotation freshness is bound to backup
    hygiene.
+6. **Object keys and the migrate write**: on an external blob backend
+   (S3/Azure/GCS) every object key carries a generation the server draws from
+   its CSPRNG (`<prefix>personal/<entryId>/<attachmentId>/<generation>.bin`;
+   team attachments use the same form under `team/<teamId>/`; the pre-generation
+   form without `/<generation>` is still read). A rewrite never
+   overwrites an existing object in place: upload and migrate write a fresh key
+   before their transaction, delete it if the transaction fails, and delete the
+   superseded object after commit. A stored ref is accepted only when every id
+   segment equals the row's own (no `..`, percent-encoding or empty segment); an
+   undecodable ref fails closed. The personal migrate verifies the client's hash
+   against the stored body read through the blob store and writes the new
+   ciphertext through it (previously it hashed and overwrote the DB column
+   directly, which on an external backend holds the object ref, not the body).
+   Objects orphaned by a crash between commit and the post-commit delete
+   keep old ciphertext until removed by hand.
 
 #### 6.1.e Known limitation: ECDH identity is NOT rotated (cross-domain attack surface)
 
@@ -295,18 +326,67 @@ your tenant admin.
 
 ### 6.2 Team Key Rotation
 
-For entries with `itemKeyVersion >= 1` (ItemKey present):
-1. Generate new TeamKey
-2. Re-wrap each entry's ItemKey with new TeamKey (update AAD with new teamKeyVersion)
-3. Re-wrap new TeamKey for each member via ECDH
-4. Entry data and attachments are NOT re-encrypted (ItemKey unchanged)
+A rotation replaces the team key; a **re-key pass** that follows it replaces
+each entry's ItemKey. Rotation alone leaves an entry's live blob, history and
+attachments under one ItemKey forever, so a departed member holding that ItemKey
+(or an old team key plus an old wrap) would read the entry's later edits from any
+ciphertext obtained later.
 
-For entries with `itemKeyVersion = 0` (legacy, no ItemKey):
-1. Generate new TeamKey
-2. Decrypt entry data with old TeamKey
-3. Re-encrypt entry data with new TeamKey
-4. Re-encrypt attachments with new TeamKey
-5. Re-wrap new TeamKey for each member via ECDH
+**Rotation** (one atomic POST, team row locked):
+
+1. Generate new TeamKey; re-wrap it for each active member via ECDH.
+2. For each entry with `itemKeyVersion >= 1`, open its ItemKey with the team key
+   at the entry's own `teamKeyVersion` and re-wrap it under the new TeamKey (`IK`
+   AAD with the new `teamKeyVersion`). The ItemKey, its `item_key_id`, the
+   entry data, history and attachments are unchanged.
+3. Entries with `itemKeyVersion = 0` (legacy, no ItemKey) are decrypted with the
+   old TeamKey and re-encrypted under the new one.
+4. An entry the rotating admin cannot open is **carried** unchanged with a
+   reason: `not_held` (the server verifies the actor holds no key at that
+   version), `undecryptable` (AES-GCM fails under a key the actor's own member-key
+   wrap authenticated) or `key_invalid` (the actor's member-key row at that
+   version fails to unwrap); the last two are accepted only from a holder of that
+   version. Each carried entry is audited with its reason and the actor, and
+   stays pending.
+
+**Entry key state**: `item_key_team_key_version` (the "marker") is the team key
+version at which the entry's current ItemKey was created; an entry is *pending*
+while it is below the team's `teamKeyVersion` (trashed and archived entries
+included). Only entry creation and the re-key POST raise it; an edit, a v0→v1
+upgrade or a rotation never does. `item_key_version_high_water` is never
+lowered; every new ItemKey takes `high_water + 1`, recomputed by the server under
+the entry lock, so an `itemKeyVersion` (and therefore an `OV`/`TW` AAD) is never
+reused for a different ItemKey. A new wrap whose IV equals the locked row's or a
+history row's is refused. The marker records the client's claim to have re-keyed
+the entry; the server checks set completeness and snapshots, not that the new
+ItemKey differs from the old.
+
+**Re-key pass** (client-driven, per entry, after rotation; any member with
+`TEAM_UPDATE` who holds the needed keys can run or resume it):
+
+1. A v0 entry is first upgraded to v1 by an ordinary entry update; legacy team
+   attachments (`encryptionMode` 0/1) are migrated to mode 2 (body re-encrypted
+   under a fresh CEK, CEK wrapped under the entry's ItemKey with `TW`).
+2. The client generates a new ItemKey, re-encrypts the blob, overview and every
+   history row it can open under it (a history row is opened by its own wrap,
+   else by AES-GCM trial with every ItemKey the client holds for the entry), and
+   re-wraps every attachment CEK under it. CEKs are re-wrapped, not replaced.
+   An entry whose live row or an attachment no available key opens is skipped
+   and reported, not posted.
+3. The POST is refused unless the submitted history and attachment sets exactly
+   match the locked rows, every snapshot (`blobIv`, `cekIv`, ItemKey IV) matches,
+   the team key version is still current and no mode 0/1 attachment remains. It
+   writes the new `item_key_id` into the entry, every re-keyed history row and
+   every attachment, sets the marker to the current version, checks the result
+   for consistency before commit, and writes a `TEAM_ENTRY_REKEY` audit row in
+   the same transaction.
+4. History rows the client cannot open are **retained** under their old wrap
+   and old `item_key_id` (listed in the audit row). They are revisited only when
+   the entry becomes pending again at the next rotation and a holder of their
+   version re-keys it first.
+
+After an entry is re-keyed, content written to it is unreadable with its
+previous ItemKey. The stated limits are listed in §7.6.
 
 ## 7. Threat Analysis (What-If Scenarios)
 
@@ -356,4 +436,14 @@ For entries with `itemKeyVersion = 0` (legacy, no ItemKey):
 
 **Attacker has**: Previously decrypted team data, potentially cached keys.
 
-**Mitigations**: Team key rotation re-wraps all ItemKeys with new TeamKey. Removed member's TeamMemberKey is deleted. New entries use new TeamKey. Previously accessed plaintext cannot be retroactively protected (inherent limitation of shared secrets).
+**Mitigations**: Team key rotation issues a new TeamKey to the remaining members only, and the re-key pass that follows gives every entry a new ItemKey, re-encrypting its blob, overview and history and re-wrapping its attachment CEKs (§6.2). After an entry is re-keyed, content written to it is unreadable with the old team key or the old ItemKey. Previously accessed plaintext cannot be retroactively protected (inherent limitation of shared secrets).
+
+**Stated limits** of the re-key pass:
+
+- Until an entry is re-keyed, edits to it still use its old ItemKey. Admins see the pending count; the pass starts right after rotation.
+- History rows the re-keyer cannot open are retained under their old wrap and stay readable to holders of the old key (no worse than before the pass).
+- Entries no active member can open are carried unchanged and counted as unrecoverable.
+- An entry carried on a holder's `undecryptable` or `key_invalid` claim stays readable by every holder of its old version, departed members included, until another holder re-keys it. The claim is unverifiable by the server; it is shown in the pending count and audited per entry with the reason and the actor.
+- Attachment CEKs are re-wrapped, not replaced: a CEK the departed member already unwrapped, and any downloaded material, stay readable to them.
+- Backups, WAL, versioned buckets and objects orphaned by a crash between commit and the post-commit delete keep the old ciphertext and wraps.
+- Re-keyed history rows and migrated attachments keep their original attribution although an admin rewrote the ciphertext; the rewrite is attributed only in the audit log.

@@ -4,8 +4,8 @@ import { z } from "zod";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { activeTeamRole, hasTeamPermission, requireTeamPermission } from "@/lib/auth/access/team-auth";
-import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
-import { API_ERROR } from "@/lib/http/api-error-codes";
+import { logAuditAsync, logAuditBulkInTx, teamAuditBase } from "@/lib/audit/audit";
+import { API_ERROR, type ApiErrorCode } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { teamMemberKeySchema } from "@/lib/validations";
@@ -14,7 +14,7 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { errorResponse, handleAuthError, rateLimited, unauthorized, validationError } from "@/lib/http/api-response";
 import { createRateLimiter } from "@/lib/security/rate-limit";
-import { TEAM_ROTATE_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
+import { ROTATE_CARRY_REASON, TEAM_ROTATE_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 import {
   encryptedFieldSchema,
   hexIv,
@@ -25,10 +25,21 @@ import {
   TEAM_ROTATE_MEMBER_KEYS_MAX,
 } from "@/lib/validations/common";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { heldTeamKeyVersions, normalizeTeamKeyVersion } from "@/lib/team/team-item-key";
 
+// Counts successful rotations only: the slot check() takes is released by
+// clear() when the request ends in anything but a committed rotation (one
+// slot per window, so the only counter clear() can reset is this request's).
 const teamRotateKeyLimiter = createRateLimiter({ windowMs: 5 * MS_PER_MINUTE, max: 1 });
 
 type Params = { params: Promise<{ teamId: string }> };
+
+/** A rotation refusal raised inside the transaction, answered with its code. */
+class RotationRefusal extends Error {
+  constructor(readonly code: ApiErrorCode) {
+    super(code);
+  }
+}
 
 class TxValidationError extends Error {
   details: Record<string, unknown>;
@@ -44,11 +55,13 @@ class TxValidationError extends Error {
 // that ciphertext, so a write committed between the snapshot and this
 // rotation is not overwritten with re-encryption of stale data.
 
-// v0 (legacy): full re-encrypt of blob + overview
+// v0 (legacy): full re-encrypt of blob + overview. Both ciphertexts are
+// replaced, so the snapshot names both IVs.
 const rotateEntryV0Schema = z.object({
   id: z.string().uuid(),
   itemKeyVersion: z.literal(0).default(0),
   snapshotIv: hexIv,
+  snapshotOverviewIv: hexIv,
   encryptedBlob: encryptedFieldSchema,
   encryptedOverview: encryptedFieldSchema,
   aadVersion: z.number().int().min(1),
@@ -65,9 +78,22 @@ const rotateEntryV1Schema = z.object({
 
 const rotateEntrySchema = z.union([rotateEntryV1Schema, rotateEntryV0Schema]);
 
+// An entry the actor cannot open is carried unchanged: it keeps its
+// ciphertext and old team key version and stays pending re-key (plan C3).
+const rotateCarrySchema = z.object({
+  id: z.string().uuid(),
+  teamKeyVersion: z.number().int().min(0).max(TEAM_KEY_VERSION_MAX).optional(),
+  reason: z.enum([
+    ROTATE_CARRY_REASON.NOT_HELD,
+    ROTATE_CARRY_REASON.UNDECRYPTABLE,
+    ROTATE_CARRY_REASON.KEY_INVALID,
+  ]),
+});
+
 const rotateKeySchema = z.object({
   newTeamKeyVersion: z.number().int().min(TEAM_KEY_VERSION_MIN).max(TEAM_KEY_VERSION_MAX),
   entries: z.array(rotateEntrySchema).max(TEAM_ROTATE_ENTRIES_MAX),
+  carry: z.array(rotateCarrySchema).max(TEAM_ROTATE_ENTRIES_MAX).default([]),
   memberKeys: z.array(
     z.object({
       userId: z.string().uuid(),
@@ -94,9 +120,21 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   const stepUpError = await requireRecentCurrentAuthMethod(req, session.user.id);
   if (stepUpError) return stepUpError;
 
-  const rl = await teamRotateKeyLimiter.check(`rl:team_rotate_key:${teamId}`);
+  const rateKey = `rl:team_rotate_key:${teamId}`;
+  const rl = await teamRotateKeyLimiter.check(rateKey);
   if (!rl.allowed) return rateLimited(rl.retryAfterMs);
 
+  let response: NextResponse | undefined;
+  try {
+    response = await rotateTeamKey(req, teamId, session.user.id);
+    return response;
+  } finally {
+    // A refusal (or a throw) rotated nothing: release the slot it took.
+    if (response?.status !== 200) await teamRotateKeyLimiter.clear(rateKey);
+  }
+}
+
+async function rotateTeamKey(req: NextRequest, teamId: string, userId: string): Promise<NextResponse> {
   const team = await withTeamTenantRls(teamId, async () =>
     prisma.team.findUnique({
       where: { id: teamId },
@@ -111,7 +149,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   const result = await parseBody(req, rotateKeySchema);
   if (!result.ok) return result.response;
 
-  const { newTeamKeyVersion, entries, memberKeys } = result.data;
+  const { newTeamKeyVersion, entries, carry, memberKeys } = result.data;
 
   // Validate version increment
   if (newTeamKeyVersion !== team.teamKeyVersion + 1) {
@@ -128,12 +166,12 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       async (_tenantId, tx) => {
         // Re-verify teamKeyVersion hasn't changed since pre-read, under a row
         // lock taken as the FIRST statement (see team-key-rotation-lock.ts).
-        // Entry creates and full updates, key distribution, and member
-        // removal hold this row FOR SHARE, so each has either committed
-        // before the member and entry reads below (and is read) or waits for
-        // this rotation. NO KEY UPDATE, not UPDATE: it conflicts with those
-        // FOR SHARE holders without blocking unrelated inserts whose foreign
-        // key to teams takes KEY SHARE.
+        // Entry creates and full updates, history restores, key distribution,
+        // and member removal hold this row FOR SHARE, so each has either
+        // committed before the member and entry reads below (and is read) or
+        // waits for this rotation. NO KEY UPDATE, not UPDATE: it conflicts
+        // with those FOR SHARE holders without blocking unrelated inserts
+        // whose foreign key to teams takes KEY SHARE.
         const [currentTeam] = await tx.$queryRaw<{ team_key_version: number }[]>`
           SELECT team_key_version FROM teams WHERE id = ${teamId}::uuid FOR NO KEY UPDATE
         `;
@@ -143,9 +181,9 @@ async function handlePOST(req: NextRequest, { params }: Params) {
         // The rotating member's authority, under the team lock: a departure,
         // removal or demotion committed since requireTeamPermission would
         // otherwise rotate the team to a key the actor generated and keeps.
-        const actorRole = await activeTeamRole(tx, teamId, session.user.id);
+        const actorRole = await activeTeamRole(tx, teamId, userId);
         if (!actorRole || !hasTeamPermission(actorRole, TEAM_PERMISSION.TEAM_UPDATE)) {
-          throw new Error("ACTOR_NOT_PERMITTED");
+          throw new RotationRefusal(API_ERROR.ACTOR_NOT_PERMITTED);
         }
 
         // Verify all active members have a key in the payload (F-26: inside
@@ -155,9 +193,9 @@ async function handlePOST(req: NextRequest, { params }: Params) {
           select: { userId: true },
         });
         const memberUserIds = new Set(members.map((m) => m.userId));
-        for (const userId of memberUserIds) {
-          if (!memberKeys.some((k) => k.userId === userId)) {
-            throw new TxValidationError({ missingKeyFor: userId });
+        for (const memberUserId of memberUserIds) {
+          if (!memberKeys.some((k) => k.userId === memberUserId)) {
+            throw new TxValidationError({ missingKeyFor: memberUserId });
           }
         }
         // Reject extra memberKeys for non-members (F-18/S-22)
@@ -167,25 +205,46 @@ async function handlePOST(req: NextRequest, { params }: Params) {
           }
         }
 
-        // Verify submitted entries exactly match ALL team entries (including trash)
+        // Verify submitted entries plus carried entries exactly match ALL
+        // team entries (including trash), each id once.
         const allEntries = await tx.teamPasswordEntry.findMany({
           where: { teamId: teamId },
-          select: { id: true },
+          select: { id: true, teamKeyVersion: true },
         });
-        if (entries.length !== allEntries.length) {
-          throw new Error("ENTRY_COUNT_MISMATCH");
-        }
-        const allEntryIdSet = new Set(allEntries.map((e) => e.id));
-        const submittedEntryIdSet = new Set(entries.map((e) => e.id));
+        const submittedIds = [...entries.map((e) => e.id), ...carry.map((c) => c.id)];
+        const submittedEntryIdSet = new Set(submittedIds);
         if (
-          submittedEntryIdSet.size !== entries.length ||
-          submittedEntryIdSet.size !== allEntryIdSet.size
+          submittedEntryIdSet.size !== submittedIds.length ||
+          submittedEntryIdSet.size !== allEntries.length ||
+          allEntries.some((e) => !submittedEntryIdSet.has(e.id))
         ) {
           throw new Error("ENTRY_COUNT_MISMATCH");
         }
-        for (const entryId of submittedEntryIdSet) {
-          if (!allEntryIdSet.has(entryId)) {
-            throw new Error("ENTRY_COUNT_MISMATCH");
+
+        // A carry is checked against the entry's own team key version and
+        // the actor's member keys: `not_held` only when the actor holds no
+        // key at that version, `undecryptable` / `key_invalid` only when it
+        // does — so neither stands in for a refused `not_held`.
+        const carriedVersions = new Map<string, number>();
+        if (carry.length > 0) {
+          const entryVersionById = new Map(
+            allEntries.map((e) => [e.id, normalizeTeamKeyVersion(e.teamKeyVersion)]),
+          );
+          const held = new Set(
+            (await heldTeamKeyVersions(tx, teamId, userId)).map(normalizeTeamKeyVersion),
+          );
+          for (const c of carry) {
+            const version = entryVersionById.get(c.id);
+            if (version === undefined) throw new Error("ENTRY_COUNT_MISMATCH");
+            if (c.teamKeyVersion !== undefined && normalizeTeamKeyVersion(c.teamKeyVersion) !== version) {
+              throw new RotationRefusal(API_ERROR.TEAM_ROTATE_CARRY_INVALID);
+            }
+            if (c.reason === ROTATE_CARRY_REASON.NOT_HELD) {
+              if (held.has(version)) throw new RotationRefusal(API_ERROR.TEAM_ROTATE_KEY_UNAVAILABLE);
+            } else if (!held.has(version)) {
+              throw new RotationRefusal(API_ERROR.TEAM_ROTATE_CARRY_INVALID);
+            }
+            carriedVersions.set(c.id, version);
           }
         }
 
@@ -194,9 +253,11 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       // teamKeyVersion is NOT in where: entries restored from history may have
       // a stale version, but the ID set verification above guarantees completeness (F-29).
       // The snapshot predicate (itemKeyVersion + the re-encrypted ciphertext's
-      // IV) rejects an entry changed since the client's snapshot — a history
-      // restore takes no team lock and can land after it. IVs are random per
+      // IV — the wrap's for v1+, the blob's and the overview's for v0) rejects
+      // an entry changed since the client's snapshot. IVs are random per
       // encryption, so an equal IV means the same ciphertext.
+      // Rotation re-wraps the ItemKey and never replaces it: item_key_id, the
+      // re-key marker and the high-water are not written here.
       // Note: Prisma interactive transaction auto-rolls back on any thrown error.
         for (const entry of entries) {
           const data: Record<string, unknown> = {
@@ -212,7 +273,11 @@ async function handlePOST(req: NextRequest, { params }: Params) {
             data.itemKeyIv = entry.encryptedItemKey.iv;
             data.itemKeyAuthTag = entry.encryptedItemKey.authTag;
           } else if ("encryptedBlob" in entry) {
-            snapshot = { itemKeyVersion: 0, blobIv: entry.snapshotIv };
+            snapshot = {
+              itemKeyVersion: 0,
+              blobIv: entry.snapshotIv,
+              overviewIv: entry.snapshotOverviewIv,
+            };
             // Legacy entry: full re-encrypt
             data.encryptedBlob = entry.encryptedBlob.ciphertext;
             data.blobIv = entry.encryptedBlob.iv;
@@ -270,6 +335,21 @@ async function handlePOST(req: NextRequest, { params }: Params) {
           where: { id: teamId },
           data: { teamKeyVersion: newTeamKeyVersion },
         });
+
+      // One row per carried entry, committed with the rotation: the carry
+      // list can exceed the summary row's metadata cap, and each carry is the
+      // actor's own claim about that entry.
+        await logAuditBulkInTx(
+          tx,
+          team.tenantId,
+          carry.map((c) => ({
+            ...teamAuditBase(req, userId, teamId),
+            action: AUDIT_ACTION.TEAM_KEY_ROTATION_CARRY,
+            targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
+            targetId: c.id,
+            metadata: { reason: c.reason, teamKeyVersion: carriedVersions.get(c.id) },
+          })),
+        );
       },
       { timeout: TEAM_ROTATE_TX_TIMEOUT_MS },
     );
@@ -277,8 +357,8 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     if (e instanceof Error && e.message === "TEAM_KEY_VERSION_CONFLICT") {
       return errorResponse(API_ERROR.TEAM_KEY_VERSION_MISMATCH);
     }
-    if (e instanceof Error && e.message === "ACTOR_NOT_PERMITTED") {
-      return errorResponse(API_ERROR.FORBIDDEN);
+    if (e instanceof RotationRefusal) {
+      return errorResponse(e.code);
     }
     // Concurrent rotations serialise on the teams FOR NO KEY UPDATE above, so the
     // loser normally fails the CAS. A teamMemberKey
@@ -298,7 +378,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   }
 
   await logAuditAsync({
-    ...teamAuditBase(req, session.user.id, teamId),
+    ...teamAuditBase(req, userId, teamId),
     action: AUDIT_ACTION.TEAM_KEY_ROTATION,
     targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
     targetId: teamId,
@@ -306,6 +386,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       fromVersion: team.teamKeyVersion,
       toVersion: newTeamKeyVersion,
       entriesRotated: entries.length,
+      entriesCarried: carry.length,
       membersUpdated: memberKeys.length,
     },
   });
