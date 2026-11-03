@@ -262,5 +262,5 @@ Findings applied directly (no Round 6 review):
 Justification: every finding scoped within the Round 4 fix range, inline minor
 (comment wording, test name), no security-boundary touch.
 
-Follow-ups to file with the PR: approval-gated SCIM role raises (S-F1, user
-decision); bulk approve (F6 / D11).
+Follow-ups filed: approval-gated SCIM role raises (S-F1, user decision) — issue
+`#1004`; bulk approve (F6 / D11) — issue `#1005`.
