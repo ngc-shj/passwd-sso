@@ -208,6 +208,6 @@ describe("buildTeamMemberDisplayItems", () => {
       buildTeamMemberDisplayItems([
         { id: "m1", userId: "u1", role: "ADMIN", createdAt: now, pendingApproval: true },
       ]),
-    ).rejects.toThrow();
+    ).rejects.toThrow("a pending row needs teamTenantId");
   });
 });

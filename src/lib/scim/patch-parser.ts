@@ -135,15 +135,10 @@ export function parseGroupPatchOps(
   operations: ScimPatchOperation[],
 ): GroupMemberAction[] {
   const actions: GroupMemberAction[] = [];
-  // De-duplicated per op kind, not across kinds: a ("remove", id) entry does
-  // not suppress a later ("add", id) in the same request (or vice versa), so
-  // an IdP that sends add-then-remove for the same id keeps both actions, in
-  // that order — only a repeated id within the same op kind collapses to one
-  // action. The service folds this array to one action per userId, last op
-  // wins (RFC 7644 §3.5.2, review round 2 F-N4/T-N7), so the order here is
-  // not cosmetic: scrambling it would scramble that fold.
-  const seenAdd = new Set<string>();
-  const seenRemove = new Set<string>();
+  // Every action is kept, in request order: the service folds them to one
+  // action per userId, last op wins (RFC 7644 §3.5.2). De-duplicating here
+  // would change which op is last — [remove X, add X, remove X] would lose
+  // its final remove.
 
   for (const operation of operations) {
     const { op, path, value } = operation;
@@ -151,8 +146,6 @@ export function parseGroupPatchOps(
     if (op === "add" && path === "members") {
       const members = parseMemberValues(value);
       for (const userId of members) {
-        if (seenAdd.has(userId)) continue;
-        seenAdd.add(userId);
         actions.push({ op: "add", userId });
       }
       continue;
@@ -161,8 +154,6 @@ export function parseGroupPatchOps(
     if (op === "remove" && path === "members") {
       const members = parseMemberValues(value);
       for (const userId of members) {
-        if (seenRemove.has(userId)) continue;
-        seenRemove.add(userId);
         actions.push({ op: "remove", userId });
       }
       continue;
@@ -178,11 +169,7 @@ export function parseGroupPatchOps(
           `Invalid members filter syntax: ${path}`,
         );
       }
-      const userId = normalizeMemberValue(match[1]);
-      if (!seenRemove.has(userId)) {
-        seenRemove.add(userId);
-        actions.push({ op: "remove", userId });
-      }
+      actions.push({ op: "remove", userId: normalizeMemberValue(match[1]) });
       continue;
     }
 

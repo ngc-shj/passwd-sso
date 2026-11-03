@@ -160,19 +160,27 @@ describe("parseGroupPatchOps", () => {
     expect(result).toEqual([{ op: "remove", userId: USER_1 }]);
   });
 
-  it("de-duplicates a repeated id within the same op kind", () => {
+  // The parser keeps every action: the service folds them to one per userId,
+  // last op wins, and an earlier copy dropped here would change which op is
+  // last ([remove X, add X, remove X] would lose its final remove).
+  it("keeps a repeated id within one op", () => {
     const result = parseGroupPatchOps([
       { op: "add", path: "members", value: [{ value: USER_1 }, { value: USER_1 }] },
     ]);
-    expect(result).toEqual([{ op: "add", userId: USER_1 }]);
+    expect(result).toEqual([{ op: "add", userId: USER_1 }, { op: "add", userId: USER_1 }]);
   });
 
-  it("de-duplicates the same id repeated across add op entries, keeping the first", () => {
+  it("keeps every op of a remove-add-remove sequence, in order", () => {
     const result = parseGroupPatchOps([
+      { op: "remove", path: "members", value: [{ value: USER_1 }] },
       { op: "add", path: "members", value: [{ value: USER_1 }] },
-      { op: "add", path: "members", value: [{ value: USER_1 }] },
+      { op: "remove", path: `members[value eq "${USER_1}"]` },
     ]);
-    expect(result).toEqual([{ op: "add", userId: USER_1 }]);
+    expect(result).toEqual([
+      { op: "remove", userId: USER_1 },
+      { op: "add", userId: USER_1 },
+      { op: "remove", userId: USER_1 },
+    ]);
   });
 
   // The service (patchScimGroup, D) folds this array to one action per
@@ -201,11 +209,11 @@ describe("parseGroupPatchOps", () => {
     ]);
   });
 
-  it("de-duplicates the same id given in both its lowercase and uppercase form within one add op", () => {
+  it("normalises an upper-case spelling to the same lowercase id", () => {
     const result = parseGroupPatchOps([
       { op: "add", path: "members", value: [{ value: USER_1 }, { value: USER_1.toUpperCase() }] },
     ]);
-    expect(result).toEqual([{ op: "add", userId: USER_1 }]);
+    expect(result).toEqual([{ op: "add", userId: USER_1 }, { op: "add", userId: USER_1 }]);
   });
 });
 

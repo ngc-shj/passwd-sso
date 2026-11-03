@@ -381,49 +381,114 @@ describe("patchScimGroup — remove operations (C2)", () => {
 // order of the two ops differs — so a fold bug (always add-before-remove,
 // independent of request order) is caught by the opposite-order case.
 describe("patchScimGroup — operation order (D)", () => {
-  const ACTIVE_ROW = { id: "m-1", userId: "user-a", role: "ADMIN", deactivatedAt: null, deactivatedByTenant: false, scimApprovalPending: false };
+  type Row = { id: string; userId: string; role: string; deactivatedAt: Date | null; deactivatedByTenant: boolean; scimApprovalPending: boolean };
+  const X = "user-a";
+  const Y = "user-b";
+  const ACTIVE_X: Row = { id: "m-1", userId: X, role: "ADMIN", deactivatedAt: null, deactivatedByTenant: false, scimApprovalPending: false };
 
-  it("[remove X, add X] leaves X active (add wins, nothing removed)", async () => {
-    const { tx, teamMember, tenantMember } = makeTx();
-    teamMember.findMany
-      .mockResolvedValueOnce([ACTIVE_ROW]) // applyAddOperations' membership read
-      .mockResolvedValueOnce([]); // loadGroupMembers
-    tenantMember.findMany.mockResolvedValue([{ userId: "user-a" }]);
-
-    const result = await patchScimGroup(
-      TENANT_ID, SCIM_ID,
-      [{ op: "remove", userId: "user-a" }, { op: "add", userId: "user-a" }],
-      BASE_URL, tx,
+  /**
+   * Answers each teamMember.findMany by the rows it asks for, not by call
+   * position, so the cells hold whichever order the service reads in: a
+   * membership read (`where.userId.in`) gets the matching fixture rows, the
+   * group-members read gets none.
+   */
+  function serveRows(teamMember: ReturnType<typeof makeTx>["teamMember"], rows: Row[]) {
+    teamMember.findMany.mockImplementation(async (args: { where?: { userId?: { in?: string[] }; OR?: unknown[] } }) => {
+      const ids = args.where?.userId?.in;
+      if (!ids) return [];
+      const matched = rows.filter((r) => ids.includes(r.userId));
+      return args.where?.OR ? matched.filter((r) => r.deactivatedByTenant || r.scimApprovalPending) : matched;
+    });
+    teamMember.updateManyAndReturn.mockImplementation(async (args: { where: { id: { in: string[] } } }) =>
+      rows.filter((r) => args.where.id.in.includes(r.id)).map((r) => ({ id: r.id, userId: r.userId })),
     );
+  }
 
-    // Already active at the mapping's role: the fold-to-add is a true no-op.
-    expect(teamMember.createMany).not.toHaveBeenCalled();
+  function patch(tx: Prisma.TransactionClient, ops: { op: "add" | "remove"; userId: string }[]) {
+    return patchScimGroup(TENANT_ID, SCIM_ID, ops, BASE_URL, tx);
+  }
+
+  it.each([
+    { label: "[remove X, add X]", ops: ["remove", "add"] as const },
+    { label: "[add X, remove X, add X]", ops: ["add", "remove", "add"] as const },
+  ])("$label leaves an active X untouched (the last op is add)", async ({ ops }) => {
+    const { tx, teamMember, tenantMember } = makeTx();
+    serveRows(teamMember, [ACTIVE_X]);
+    tenantMember.findMany.mockResolvedValue([{ userId: X }]);
+
+    const result = await patch(tx, ops.map((op) => ({ op, userId: X })));
+
     expect(teamMember.updateManyAndReturn).not.toHaveBeenCalled();
     expect(teamMember.deleteMany).not.toHaveBeenCalled();
     expect(result.transitions).toEqual([]);
   });
 
-  it("[add X, remove X] leaves X removed (remove wins)", async () => {
-    const { tx, teamMember } = makeTx();
-    teamMember.findMany
-      .mockResolvedValueOnce([ACTIVE_ROW]) // applyRemoveOperations' fresh read
-      .mockResolvedValueOnce([]); // loadGroupMembers
-    teamMember.updateManyAndReturn.mockResolvedValue([{ id: "m-1", userId: "user-a" }]);
+  it.each([
+    { label: "[add X, remove X]", ops: ["add", "remove"] as const },
+    { label: "[remove X, add X, remove X]", ops: ["remove", "add", "remove"] as const },
+  ])("$label deactivates an active X (the last op is remove)", async ({ ops }) => {
+    const { tx, teamMember, tenantMember } = makeTx();
+    serveRows(teamMember, [ACTIVE_X]);
+    tenantMember.findMany.mockResolvedValue([{ userId: X }]);
 
-    const result = await patchScimGroup(
-      TENANT_ID, SCIM_ID,
-      [{ op: "add", userId: "user-a" }, { op: "remove", userId: "user-a" }],
-      BASE_URL, tx,
-    );
+    const result = await patch(tx, ops.map((op) => ({ op, userId: X })));
 
-    expect(teamMember.createMany).not.toHaveBeenCalled();
-    expect(teamMember.updateManyAndReturn).toHaveBeenCalledWith({
-      where: { id: { in: ["m-1"] }, teamId: TEAM_ID, role: "ADMIN", deactivatedAt: null },
-      data: { deactivatedAt: expect.any(Date) },
-      select: { id: true, userId: true },
-    });
     expect(result.transitions).toEqual([
-      { kind: SCIM_TRANSITION_KIND.ACTIVE_REMOVED, userId: "user-a", role: "ADMIN", memberId: "m-1" },
+      { kind: SCIM_TRANSITION_KIND.ACTIVE_REMOVED, userId: X, role: "ADMIN", memberId: "m-1" },
+    ]);
+  });
+
+  it("folds per user: [add X, add Y, remove X] adds Y and removes X", async () => {
+    const { tx, teamMember, tenantMember } = makeTx();
+    serveRows(teamMember, [ACTIVE_X]);
+    tenantMember.findMany.mockResolvedValue([{ userId: X }, { userId: Y }]);
+
+    const result = await patch(tx, [
+      { op: "add", userId: X },
+      { op: "add", userId: Y },
+      { op: "remove", userId: X },
+    ]);
+
+    expect(teamMember.createMany).toHaveBeenCalledTimes(1);
+    expect(teamMember.createMany.mock.calls[0][0].data.map((d: { userId: string }) => d.userId)).toEqual([Y]);
+    expect(result.transitions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: SCIM_TRANSITION_KIND.BECAME_PENDING, userId: Y }),
+        expect.objectContaining({ kind: SCIM_TRANSITION_KIND.ACTIVE_REMOVED, userId: X }),
+      ]),
+    );
+  });
+
+  it("writes a repeated add once", async () => {
+    const { tx, teamMember, tenantMember } = makeTx();
+    serveRows(teamMember, []);
+    tenantMember.findMany.mockResolvedValue([{ userId: Y }]);
+
+    await patch(tx, [{ op: "add", userId: Y }, { op: "add", userId: Y }]);
+
+    expect(teamMember.createMany.mock.calls[0][0].data).toHaveLength(1);
+  });
+
+  it("refuses a cancelled add of a user who is neither active in the tenant nor holds a kept row", async () => {
+    const { tx, teamMember, tenantMember } = makeTx();
+    serveRows(teamMember, []);
+    tenantMember.findMany.mockResolvedValue([]);
+
+    await expect(patch(tx, [{ op: "add", userId: Y }, { op: "remove", userId: Y }])).rejects.toThrow(ScimNoSuchMemberError);
+    expect(teamMember.deleteMany).not.toHaveBeenCalled();
+    expect(teamMember.updateManyAndReturn).not.toHaveBeenCalled();
+  });
+
+  it("accepts a cancelled add of a departed user whose row is departure-marked", async () => {
+    const { tx, teamMember, tenantMember } = makeTx();
+    const departed: Row = { id: "m-2", userId: Y, role: "ADMIN", deactivatedAt: new Date(), deactivatedByTenant: true, scimApprovalPending: false };
+    serveRows(teamMember, [departed]);
+    tenantMember.findMany.mockResolvedValue([]);
+
+    const result = await patch(tx, [{ op: "add", userId: Y }, { op: "remove", userId: Y }]);
+
+    expect(result.transitions).toEqual([
+      { kind: SCIM_TRANSITION_KIND.DEPARTED_UNMARKED, userId: Y, role: "ADMIN", memberId: "m-2" },
     ]);
   });
 });

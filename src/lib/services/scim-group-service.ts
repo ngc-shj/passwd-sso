@@ -217,17 +217,55 @@ function higherRole(a: TeamRole, b: TeamRole): TeamRole {
  * pre-fix behaviour) always ran adds before removes regardless of request
  * order (review round 2, F-N4/T-N7).
  */
-function foldPatchOperations(actions: GroupMemberAction[]): { addUserIds: string[]; removeUserIds: string[] } {
+function foldPatchOperations(actions: GroupMemberAction[]): {
+  addUserIds: string[];
+  removeUserIds: string[];
+  /** Named by an add op that a later remove op cancelled. */
+  cancelledAddUserIds: string[];
+} {
   const lastOpByUserId = new Map<string, GroupMemberAction["op"]>();
+  const namedByAdd = new Set<string>();
   for (const { op, userId } of actions) {
     lastOpByUserId.set(userId, op);
+    if (op === "add") namedByAdd.add(userId);
   }
   const addUserIds: string[] = [];
   const removeUserIds: string[] = [];
   for (const [userId, op] of lastOpByUserId) {
     (op === "add" ? addUserIds : removeUserIds).push(userId);
   }
-  return { addUserIds, removeUserIds };
+  const cancelledAddUserIds = removeUserIds.filter((userId) => namedByAdd.has(userId));
+  return { addUserIds, removeUserIds, cancelledAddUserIds };
+}
+
+/**
+ * An add the fold cancelled still had to be valid when it ran (RFC 7644
+ * §3.5.2: an operation that fails fails the whole PATCH): a user who is not
+ * active in the tenant, and holds no departure-marked or pending row, is
+ * refused exactly as applyAddOperations refuses them.
+ */
+async function assertCancelledAddsValid(
+  tx: Prisma.TransactionClient,
+  teamId: string,
+  userIds: string[],
+  tenantRows: ReadonlyMap<string, LockedTenantRow>,
+): Promise<void> {
+  const inactive = userIds.filter((userId) => {
+    const row = tenantRows.get(userId);
+    return !(row?.hasRow === true && row.deactivatedAt === null);
+  });
+  if (inactive.length === 0) return;
+  const kept = await tx.teamMember.findMany({
+    where: {
+      teamId,
+      userId: { in: inactive },
+      OR: [{ deactivatedByTenant: true }, { scimApprovalPending: true }],
+    },
+    select: { userId: true },
+  });
+  const keptUserIds = new Set(kept.map((m) => m.userId));
+  const missing = inactive.find((userId) => !keptUserIds.has(userId));
+  if (missing) throw new Error(`SCIM_NO_SUCH_MEMBER:${missing}`);
 }
 
 /**
@@ -718,11 +756,12 @@ export async function patchScimGroup(
   let transitions: ScimMemberTransition[] = [];
 
   try {
-    const { addUserIds, removeUserIds } = foldPatchOperations(operations);
+    const { addUserIds, removeUserIds, cancelledAddUserIds } = foldPatchOperations(operations);
     const tenantRows = await lockGroupWrite(tx, tenantId, mapping.teamId, [
       ...addUserIds,
       ...removeUserIds,
     ]);
+    await assertCancelledAddsValid(tx, mapping.teamId, cancelledAddUserIds, tenantRows);
 
     const addTransitions = await applyAddOperations(
       tx,

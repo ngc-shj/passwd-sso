@@ -60,10 +60,9 @@ export type TeamMemberDisplayApiItem = Omit<TeamMemberDisplayItem, "joinedAt"> &
  */
 export async function buildTeamMemberDisplayItems(
   members: TeamMemberDisplayRow[],
-  // The team's own tenant, for `pendingTenantInactive` below. Omitted by
-  // callers that never pass a pending row (the single-member and ownerless
-  // routes) — `pendingTenantInactive` is then always false, which is correct
-  // since those rows are never pending.
+  // The team's own tenant, for `pendingTenantInactive` below. Only callers
+  // that never pass a pending row may omit it (the single-member and ownerless
+  // routes); a pending row without it throws.
   teamTenantId?: string,
 ): Promise<TeamMemberDisplayItem[]> {
   const userIds = members.map((m) => m.userId);
