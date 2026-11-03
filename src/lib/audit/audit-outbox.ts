@@ -10,7 +10,11 @@ import type { Prisma } from "@prisma/client";
 import { prismaBase } from "@/lib/prisma";
 import { BYPASS_GRANT, readBypassState, setBypassGucs } from "@/lib/tenant-rls-grants";
 
-import { enqueueAuditInTx as enqueueAuditRowInTx, type AuditOutboxPayload } from "@/lib/audit/audit-outbox-in-tx";
+import {
+  enqueueAuditInTx as enqueueAuditRowInTx,
+  enqueueAuditBulkInTx as enqueueAuditRowsBulkInTx,
+  type AuditOutboxPayload,
+} from "@/lib/audit/audit-outbox-in-tx";
 
 export type { AuditOutboxPayload };
 
@@ -26,6 +30,18 @@ export async function enqueueAuditInTx(
   payload: AuditOutboxPayload,
 ): Promise<void> {
   await enqueueAuditRowInTx(tx, tenantId, payload);
+}
+
+/**
+ * Enqueue many audit outbox rows on the caller's transaction in one
+ * `createMany`. Same re-export rationale as `enqueueAuditInTx` above.
+ */
+export async function enqueueAuditBulkInTx(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  payloads: AuditOutboxPayload[],
+): Promise<void> {
+  await enqueueAuditRowsBulkInTx(tx, tenantId, payloads);
 }
 
 export async function enqueueAudit(

@@ -73,7 +73,11 @@ export const scimGroupSchema = z.object({
   members: z
     .array(
       z.object({
-        value: z.string().min(1).max(SCIM_FIELD_MAX_LENGTH),
+        // Stored ids are lowercase (Postgres returns uuids that way) — a
+        // mixed-case match here would otherwise slip past the service's
+        // `Set`/CAS dedup and reach `::uuid[]` or `createMany` as if it were
+        // a different user (F2/S-F3).
+        value: z.string().uuid().transform((v) => v.toLowerCase()),
       }),
     )
     .max(SCIM_GROUP_MEMBERS_MAX)

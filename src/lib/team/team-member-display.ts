@@ -18,6 +18,12 @@ export interface TeamMemberDisplayRow {
   createdAt: Date;
   /** The membership ended with the user's departure from the tenant (members GET only). */
   departed?: boolean;
+  /**
+   * A SCIM admission waiting for a key-holding team OWNER/ADMIN to approve or
+   * reject it (scim-team-admission-approval, C5). Listed to MEMBER_INVITE
+   * holders only — members GET.
+   */
+  pendingApproval?: boolean;
 }
 
 export interface TeamMemberDisplayItem {
@@ -30,6 +36,13 @@ export interface TeamMemberDisplayItem {
   joinedAt: Date;
   tenantName: string | null;
   departed: boolean;
+  pendingApproval: boolean;
+  /**
+   * A pending row whose user is no longer an active member of the team's own
+   * tenant (inactive or absent there) — approve always 409s on it, so the UI
+   * hides Approve and offers only Reject. Meaningless off a pending row.
+   */
+  pendingTenantInactive: boolean;
 }
 
 /**
@@ -47,6 +60,10 @@ export type TeamMemberDisplayApiItem = Omit<TeamMemberDisplayItem, "joinedAt"> &
  */
 export async function buildTeamMemberDisplayItems(
   members: TeamMemberDisplayRow[],
+  // The team's own tenant, for `pendingTenantInactive` below. Only callers
+  // that never pass a pending row may omit it (the single-member and ownerless
+  // routes); a pending row without it throws.
+  teamTenantId?: string,
 ): Promise<TeamMemberDisplayItem[]> {
   const userIds = members.map((m) => m.userId);
   if (userIds.length === 0) {
@@ -63,7 +80,7 @@ export async function buildTeamMemberDisplayItems(
     // chosen membership stable if the invariant is ever transiently violated.
     const userTenants = await tx.tenantMember.findMany({
       where: { userId: { in: userIds }, deactivatedAt: null },
-      select: { userId: true, tenant: { select: { name: true } } },
+      select: { userId: true, tenantId: true, tenant: { select: { name: true } } },
       // `createdAt` is not unique, so it alone does not make the choice
       // stable — the `id` tiebreak is what does (owning-tenant-rule.ts).
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
@@ -74,11 +91,27 @@ export async function buildTeamMemberDisplayItems(
 
   const userById = new Map(users.map((u) => [u.id, u]));
   const tenantByUserId = new Map(userTenants.map((t) => [t.userId, t.tenant.name]));
+  // The same question approve asks: does this user hold an active
+  // tenantMember row specifically in the TEAM's own tenant? A last-wins Map
+  // keyed only by userId would answer a different question — "which one
+  // active tenant does this user have" — and silently pick the wrong one
+  // for a user active in two tenants at once (the single-active-tenant
+  // invariant only momentarily violated, same caveat as the ordering above).
+  const activeInTeamTenantUserIds = new Set(
+    userTenants.filter((t) => t.tenantId === teamTenantId).map((t) => t.userId),
+  );
 
   return members.flatMap((member) => {
     const user = userById.get(member.userId);
     if (!user) {
       return [];
+    }
+    const pendingApproval = member.pendingApproval ?? false;
+    if (pendingApproval && teamTenantId === undefined) {
+      // Every caller that can hand back a pending row also knows its own
+      // tenantId (members GET) — an omission here is a caller bug, not a
+      // state this predictor should guess at.
+      throw new Error("buildTeamMemberDisplayItems: a pending row needs teamTenantId");
     }
     return [{
       id: member.id,
@@ -90,6 +123,10 @@ export async function buildTeamMemberDisplayItems(
       joinedAt: member.createdAt,
       tenantName: tenantByUserId.get(member.userId) ?? null,
       departed: member.departed ?? false,
+      pendingApproval,
+      pendingTenantInactive: pendingApproval
+        ? !activeInTeamTenantUserIds.has(member.userId)
+        : false,
     }];
   });
 }

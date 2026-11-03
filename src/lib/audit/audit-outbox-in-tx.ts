@@ -52,3 +52,33 @@ export async function enqueueAuditInTx(
     },
   });
 }
+
+/**
+ * Enqueue many audit outbox rows on the caller's transaction in one
+ * `createMany`, so a bulk operation's audit trail is one round-trip rather
+ * than N (a 1000-user SCIM sync must fit TEAM_MEMBERSHIP_TX_TIMEOUT_MS).
+ * Same scope check as `enqueueAuditInTx`, run once for the whole batch; a
+ * no-op for an empty list issues no query at all.
+ */
+export async function enqueueAuditBulkInTx(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  payloads: AuditOutboxPayload[],
+): Promise<void> {
+  if (payloads.length === 0) return;
+  const ctx = await readBypassState(tx);
+  if (!ctx || (ctx.bypassRls !== "on" && ctx.tenantId !== tenantId)) {
+    throw new Error(
+      `enqueueAuditBulkInTx called outside withBypassRls/withTenantRls scope; ` +
+      `bypass_rls=${ctx?.bypassRls}, tenant_id=${ctx?.tenantId}, expected=${tenantId}`,
+    );
+  }
+  // Same no-probe rationale as enqueueAuditInTx: the FK rejects an unknown
+  // tenantId at this INSERT, under any grant.
+  await tx.auditOutbox.createMany({
+    data: payloads.map((payload) => ({
+      tenantId,
+      payload: payload as unknown as Prisma.InputJsonValue,
+    })),
+  });
+}

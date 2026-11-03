@@ -9,7 +9,9 @@ import {
 } from "@/lib/scim/response";
 import type { ScimGroupMemberInput, ScimGroupResource } from "@/lib/scim/serializers";
 import { scimGroupSchema } from "@/lib/scim/validations";
-import { TEAM_ROLE } from "@/lib/constants";
+import { AUDIT_ACTION, AUDIT_TARGET_TYPE, TEAM_ROLE } from "@/lib/constants";
+import { logAuditInTx, teamAuditBase } from "@/lib/audit/audit";
+import { scimGroupResponseMemberWhere } from "@/lib/scim/scim-group-members";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { scimParseBody } from "@/lib/scim/parse-body";
@@ -64,14 +66,10 @@ async function loadGroupMembers(
   role: TeamRole,
 ): Promise<ScimGroupMemberInput[]> {
   const members = await prisma.teamMember.findMany({
-    // Only users with an active membership in this tenant; see `loadGroupMembers`
-    // in scim-group-service for why the filter, not a null check, is what holds.
-    where: {
-      teamId,
-      role,
-      deactivatedAt: null,
-      user: { tenantMemberships: { some: { tenantId, deactivatedAt: null } } },
-    },
+    // Active, departed or pending (scim-group-members.ts) — see
+    // `loadGroupMembers` in scim-group-service.ts for why the tenant-active
+    // filter, not a null check, is what holds.
+    where: { teamId, role, ...scimGroupResponseMemberWhere(tenantId) },
     include: { user: { select: { id: true, email: true } } },
   });
 
@@ -104,12 +102,7 @@ async function handleGET(req: NextRequest) {
     const teamIds = Array.from(new Set(mappings.map((m) => m.teamId)));
     const roles = Array.from(new Set(mappings.map((m) => m.role)));
     const allMembers = teamIds.length === 0 ? [] : await tx.teamMember.findMany({
-      where: {
-        teamId: { in: teamIds },
-        role: { in: roles },
-        deactivatedAt: null,
-        user: { tenantMemberships: { some: { tenantId, deactivatedAt: null } } },
-      },
+      where: { teamId: { in: teamIds }, role: { in: roles }, ...scimGroupResponseMemberWhere(tenantId) },
       include: { user: { select: { id: true, email: true } } },
     });
     const membersByTeamRole = new Map<string, ScimGroupMemberInput[]>();
@@ -153,7 +146,7 @@ async function handleGET(req: NextRequest) {
 async function handlePOST(req: NextRequest) {
   const auth = await authorizeScim(req);
   if (!auth.ok) return auth.response;
-  const { tenantId } = auth.data;
+  const { tenantId, auditUserId, actorType, tokenId } = auth.data;
 
   const bodyResult = await scimParseBody(req, scimGroupSchema);
   if (!bodyResult.ok) return bodyResult.response;
@@ -209,6 +202,16 @@ async function handlePOST(req: NextRequest) {
           externalGroupId: externalId,
           role: matchedRole,
         },
+      });
+      // TEAM scope (C4): mapping creation never touches a member row, but the
+      // team owner should still see a new IdP mapping targeting their team.
+      await logAuditInTx(tx, tenantId, {
+        ...teamAuditBase(req, auditUserId, team.id),
+        actorType,
+        action: AUDIT_ACTION.SCIM_GROUP_MAPPING_CREATE,
+        targetType: AUDIT_TARGET_TYPE.TEAM,
+        targetId: team.id,
+        metadata: { scimTokenId: tokenId, externalGroupId: externalId, role: matchedRole },
       });
     }
 

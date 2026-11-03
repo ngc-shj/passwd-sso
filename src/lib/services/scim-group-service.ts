@@ -1,16 +1,19 @@
 /**
  * SCIM Group service — Prisma queries and data transformation for SCIM Group operations.
  *
- * All functions must be called within a `withTenantRls()` context.
+ * All functions must be called within a `withTenantRls()` context, passing its
+ * transaction: the add/remove writes, the tenant-row and team locks they run
+ * under, and the route's audit emission all share that one transaction.
  */
 
 import { prisma, type TxOrPrisma } from "@/lib/prisma";
 import { type LockBudget, createLockBudget, lockTeamsAgainstRotation } from "@/lib/team/team-key-rotation-lock";
 import { type LockedTenantRow, lockTenantRows } from "@/lib/team/tenant-row-lock";
-import type { TeamRole } from "@prisma/client";
+import type { Prisma, TeamRole } from "@prisma/client";
 import type { ScimGroupMemberInput, ScimGroupResource } from "@/lib/scim/serializers";
 import type { GroupMemberAction } from "@/lib/scim/patch-parser";
 import { TEAM_ROLE } from "@/lib/constants";
+import { SCIM_GROUP_ROW_STATE, scimGroupResponseMemberWhere } from "@/lib/scim/scim-group-members";
 
 // ── Input types ───────────────────────────────────────────────
 
@@ -24,6 +27,35 @@ export interface ScimGroupReplaceInput {
   memberUserIds: string[];
 }
 
+// ── Transitions ───────────────────────────────────────────────
+
+/**
+ * Per-user outcomes of a SCIM Group write (C2/C4). The route maps these to
+ * TEAM-scope audit actions through an exhaustive `Record<ScimTransitionKind,
+ * AuditAction>` — a new kind here is a compile error there.
+ */
+export const SCIM_TRANSITION_KIND = {
+  BECAME_PENDING: "becamePending",
+  PENDING_ROLE_RAISED: "pendingRoleRaised",
+  PENDING_WITHDRAWN: "pendingWithdrawn",
+  ACTIVE_REMOVED: "activeRemoved",
+  DEPARTED_UNMARKED: "departedUnmarked",
+  ACTIVE_ROLE_CHANGED: "activeRoleChanged",
+} as const;
+
+export type ScimTransitionKind = (typeof SCIM_TRANSITION_KIND)[keyof typeof SCIM_TRANSITION_KIND];
+
+export interface ScimMemberTransition {
+  kind: ScimTransitionKind;
+  userId: string;
+  /** The role the transition leaves the row at (the group's role). */
+  role: TeamRole;
+  /** Known only when the write returned it (updateManyAndReturn); createMany does not. */
+  memberId?: string;
+  /** The row's role before a pendingRoleRaised / activeRoleChanged transition. */
+  previousRole?: TeamRole;
+}
+
 // ── Result types ──────────────────────────────────────────────
 
 export interface ScimGroupReplaceResult {
@@ -32,12 +64,31 @@ export interface ScimGroupReplaceResult {
   role: TeamRole;
   added: number;
   removed: number;
+  transitions: ScimMemberTransition[];
 }
 
 export interface ScimGroupPatchResult {
   resource: ScimGroupResource;
   teamId: string;
   role: TeamRole;
+  added: number;
+  removed: number;
+  transitions: ScimMemberTransition[];
+}
+
+/**
+ * `added`/`removed` for `SCIM_GROUP_UPDATE` metadata, from the transitions a
+ * write actually produced rather than the requested lists (so a no-op add or
+ * remove — a repeated PUT, a withdraw whose row the lock already covers —
+ * does not count). Shared by PUT and PATCH (F3).
+ */
+function countAddedRemoved(transitions: ScimMemberTransition[]): { added: number; removed: number } {
+  const added = transitions.filter((t) =>
+    t.kind === SCIM_TRANSITION_KIND.BECAME_PENDING ||
+    t.kind === SCIM_TRANSITION_KIND.PENDING_ROLE_RAISED ||
+    t.kind === SCIM_TRANSITION_KIND.ACTIVE_ROLE_CHANGED,
+  ).length;
+  return { added, removed: transitions.length - added };
 }
 
 // ── Error classes ─────────────────────────────────────────────
@@ -67,6 +118,20 @@ export class ScimDisplayNameMismatchError extends Error {
     super(`displayName must be '${expectedDisplayName}'`);
     this.name = "ScimDisplayNameMismatchError";
     this.expectedDisplayName = expectedDisplayName;
+  }
+}
+
+/**
+ * A remove candidate's pending row was gone by the time the locked re-read's
+ * own delete ran (only an unlocked writer — the Auth.js `deleteUser` cascade
+ * — can cause this, since every other writer of this row takes the same
+ * tenant advisory lock `lockGroupWrite` already holds). Rolls the whole
+ * request back so the IdP's retry emits exact transitions.
+ */
+export class ScimMembershipChangedError extends Error {
+  constructor() {
+    super("A member's membership changed during the update");
+    this.name = "ScimMembershipChangedError";
   }
 }
 
@@ -118,18 +183,7 @@ async function loadGroupMembers(
   role: TeamRole,
 ): Promise<ScimGroupMemberInput[]> {
   const members = await db.teamMember.findMany({
-    where: {
-      teamId,
-      role,
-      deactivatedAt: null,
-      // Only users with an ACTIVE membership in this tenant. A team guest from
-      // another primary tenant is not this IdP's user to report, and their users
-      // row is one RLS hides in this context: the REQUIRED relation came back null
-      // for them (measured: Prisma does not throw) and reading its email failed
-      // the whole group. The filter is itself evaluated through that relation, so
-      // a hidden user is excluded here rather than dereferenced below.
-      user: { tenantMemberships: { some: { tenantId, deactivatedAt: null } } },
-    },
+    where: { teamId, role, ...scimGroupResponseMemberWhere(tenantId) },
     include: { user: { select: { id: true, email: true } } },
   });
   return members
@@ -137,65 +191,192 @@ async function loadGroupMembers(
     .map((m) => ({ userId: m.userId, email: m.user.email! }));
 }
 
-type TxClient = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
+/**
+ * SCIM group membership role order: a pending row is raised to the HIGHER of
+ * its current role and an incoming mapping's role, never lowered by an add.
+ * OWNER never reaches here (SCIM groups exclude it), kept only so the map is
+ * exhaustive over `TeamRole`.
+ */
+const SCIM_ROLE_RANK: Record<TeamRole, number> = {
+  OWNER: 3,
+  ADMIN: 2,
+  MEMBER: 1,
+  VIEWER: 0,
+};
+
+function higherRole(a: TeamRole, b: TeamRole): TeamRole {
+  return SCIM_ROLE_RANK[a] >= SCIM_ROLE_RANK[b] ? a : b;
+}
+
+/**
+ * RFC 7644 §3.5.2: PATCH operations apply in the order given. `actions`
+ * preserves that order (patch-parser.ts) across op kinds, so a userId named
+ * by both an add and a remove op resolves to whichever one appears last —
+ * `[remove X, add X]` leaves X added, `[add X, remove X]` leaves X removed.
+ * Splitting into independent add/remove lists without this fold (the
+ * pre-fix behaviour) always ran adds before removes regardless of request
+ * order (review round 2, F-N4/T-N7).
+ *
+ * Every add is checked against the state before the request, not the state
+ * the earlier ops in it leave: `[remove X, add X]` for a user who left the
+ * tenant but holds a departure-marked or pending row at this group's role
+ * keeps that row, where running the ops one by one would have unmarked or
+ * withdrawn it and then refused the add. The end state is the one the last
+ * op asks for.
+ */
+function foldPatchOperations(actions: GroupMemberAction[]): {
+  addUserIds: string[];
+  removeUserIds: string[];
+  /** Named by an add op that a later remove op cancelled. */
+  cancelledAddUserIds: string[];
+} {
+  const lastOpByUserId = new Map<string, GroupMemberAction["op"]>();
+  const namedByAdd = new Set<string>();
+  for (const { op, userId } of actions) {
+    lastOpByUserId.set(userId, op);
+    if (op === "add") namedByAdd.add(userId);
+  }
+  const addUserIds: string[] = [];
+  const removeUserIds: string[] = [];
+  for (const [userId, op] of lastOpByUserId) {
+    (op === "add" ? addUserIds : removeUserIds).push(userId);
+  }
+  const cancelledAddUserIds = removeUserIds.filter((userId) => namedByAdd.has(userId));
+  return { addUserIds, removeUserIds, cancelledAddUserIds };
+}
+
+/**
+ * An add the fold cancelled still had to be valid when it ran (RFC 7644
+ * §3.5.2: an operation that fails fails the whole PATCH): a user who is not
+ * active in the tenant, and holds no departure-marked or pending row, is
+ * refused exactly as applyAddOperations refuses them.
+ */
+async function assertCancelledAddsValid(
+  tx: Prisma.TransactionClient,
+  teamId: string,
+  userIds: string[],
+  tenantRows: ReadonlyMap<string, LockedTenantRow>,
+): Promise<void> {
+  const inactive = userIds.filter((userId) => {
+    const row = tenantRows.get(userId);
+    return !(row?.hasRow === true && row.deactivatedAt === null);
+  });
+  if (inactive.length === 0) return;
+  const kept = await tx.teamMember.findMany({
+    where: {
+      teamId,
+      userId: { in: inactive },
+      OR: [{ deactivatedByTenant: true }, { scimApprovalPending: true }],
+    },
+    select: { userId: true },
+  });
+  const keptUserIds = new Set(kept.map((m) => m.userId));
+  const missing = inactive.find((userId) => !keptUserIds.has(userId));
+  if (missing) throw new Error(`SCIM_NO_SUCH_MEMBER:${missing}`);
+}
 
 /**
  * Lock order for a group write (tenant-row-lock.ts): the tenant rows of the
- * users it may admit, then the team. Returns the locked rows for
+ * users it may admit or remove, then the team. Returns the locked rows for
  * applyAddOperations.
  */
 async function lockGroupWrite(
-  tx: TxClient,
+  tx: Prisma.TransactionClient,
   tenantId: string,
   teamId: string,
-  admitUserIds: readonly string[],
+  candidateUserIds: readonly string[],
 ): Promise<Map<string, LockedTenantRow>> {
   const budget: LockBudget = createLockBudget();
-  const rows = await lockTenantRows(tx, tenantId, admitUserIds, "share", budget);
+  const rows = await lockTenantRows(tx, tenantId, candidateUserIds, "share", budget);
   // Deactivation serialises with key rotation (team-key-rotation-lock.ts).
   await lockTeamsAgainstRotation(tx, [teamId], budget);
   return rows;
 }
 
+/**
+ * Apply SCIM Group member additions (C2). A user active in the tenant always
+ * ends up with a row at `role` — created pending, raised from a lower
+ * pending role, moved from deactivated to pending, or (already active)
+ * role-changed in place. A user inactive in the tenant leaves a
+ * departure-marked or pending row untouched; anything else is
+ * `ScimNoSuchMemberError`.
+ */
 async function applyAddOperations(
-  tx: TxClient,
+  tx: Prisma.TransactionClient,
   teamId: string,
   tenantId: string,
   role: TeamRole,
   userIds: string[],
   tenantRows: ReadonlyMap<string, LockedTenantRow>,
-): Promise<void> {
-  if (userIds.length === 0) return;
+): Promise<ScimMemberTransition[]> {
+  if (userIds.length === 0) return [];
 
   const memberships = await tx.teamMember.findMany({
     where: { teamId, userId: { in: userIds } },
-    select: { id: true, userId: true, role: true, deactivatedAt: true, deactivatedByTenant: true },
+    select: {
+      id: true,
+      userId: true,
+      role: true,
+      deactivatedAt: true,
+      deactivatedByTenant: true,
+      scimApprovalPending: true,
+    },
   });
-  const existingMembers = memberships.filter((m) => m.deactivatedAt === null);
   const membershipByUserId = new Map(memberships.map((m) => [m.userId, m]));
 
-  for (const m of existingMembers) {
-    if (m.role === TEAM_ROLE.OWNER) {
+  for (const m of memberships) {
+    if (m.deactivatedAt === null && m.role === TEAM_ROLE.OWNER) {
       throw new Error("SCIM_OWNER_PROTECTED");
     }
   }
 
-  const toUpdateRole = existingMembers.filter((m) => m.role !== role);
   const toCreateUserIds: string[] = [];
-  const toReactivate: { id: string; userId: string }[] = [];
+  const toBecomePending: { id: string; userId: string }[] = [];
+  const toRaiseByPreviousRole = new Map<TeamRole, string[]>();
+  const toUpdateRoleByPreviousRole = new Map<TeamRole, string[]>();
+
   for (const uid of userIds) {
     const membership = membershipByUserId.get(uid);
-    if (membership?.deactivatedAt === null) continue;
     const tenantRow = tenantRows.get(uid);
     const activeInTenant = tenantRow?.hasRow === true && tenantRow.deactivatedAt === null;
-    // A user who left the tenant and whose membership the departure ended is
-    // still in the IdP's group: already present, and the marker stays so a
-    // return restores the membership.
-    if (!activeInTenant && membership?.deactivatedByTenant) continue;
-    if (!activeInTenant) throw new Error(`SCIM_NO_SUCH_MEMBER:${uid}`);
-    if (membership) toReactivate.push({ id: membership.id, userId: uid });
-    else toCreateUserIds.push(uid);
+
+    if (!activeInTenant) {
+      // A departure-marked or a pending row of a user who left the tenant is
+      // already present as far as the IdP's group is concerned: left as-is,
+      // not re-thrown as missing (a return, or an approval, is what
+      // reactivates it).
+      if (membership?.deactivatedByTenant || membership?.scimApprovalPending) continue;
+      throw new Error(`SCIM_NO_SUCH_MEMBER:${uid}`);
+    }
+
+    if (!membership) {
+      toCreateUserIds.push(uid);
+      continue;
+    }
+
+    if (membership.scimApprovalPending) {
+      const raised = higherRole(membership.role, role);
+      if (raised !== membership.role) {
+        const ids = toRaiseByPreviousRole.get(membership.role) ?? [];
+        ids.push(membership.id);
+        toRaiseByPreviousRole.set(membership.role, ids);
+      }
+      continue;
+    }
+
+    if (membership.deactivatedAt !== null) {
+      toBecomePending.push({ id: membership.id, userId: uid });
+      continue;
+    }
+
+    if (membership.role !== role) {
+      const ids = toUpdateRoleByPreviousRole.get(membership.role) ?? [];
+      ids.push(membership.id);
+      toUpdateRoleByPreviousRole.set(membership.role, ids);
+    }
   }
+
+  const transitions: ScimMemberTransition[] = [];
 
   if (toCreateUserIds.length > 0) {
     await tx.teamMember.createMany({
@@ -205,42 +386,114 @@ async function applyAddOperations(
         tenantId,
         role,
         scimManaged: true,
+        scimApprovalPending: true,
+        deactivatedAt: new Date(),
+        keyDistributed: false,
       })),
     });
+    for (const uid of toCreateUserIds) {
+      transitions.push({ kind: SCIM_TRANSITION_KIND.BECAME_PENDING, userId: uid, role });
+    }
   }
 
-  // A deactivated membership of an active tenant member is reactivated in
-  // place (a create collided on the (team, user) key): without its stale keys,
-  // so the member is distributed the current one.
-  if (toReactivate.length > 0) {
+  if (toBecomePending.length > 0) {
+    // A deactivated non-pending membership of an active tenant member
+    // becomes pending: stale keys are cleared so an eventual approval
+    // distributes the current team key, not one wrapped for a membership
+    // that already ended.
     await tx.teamMemberKey.deleteMany({
-      where: { teamId, userId: { in: toReactivate.map((m) => m.userId) } },
+      where: { teamId, userId: { in: toBecomePending.map((m) => m.userId) } },
     });
-    await tx.teamMember.updateMany({
-      where: { id: { in: toReactivate.map((m) => m.id) } },
-      data: { deactivatedAt: null, deactivatedByTenant: false, keyDistributed: false, scimManaged: true, role },
+    // CAS on the state the pre-read saw: a team-side DELETE does not take the
+    // user's advisory lock, so the transitions come from the rows written.
+    const rows = await tx.teamMember.updateManyAndReturn({
+      where: {
+        id: { in: toBecomePending.map((m) => m.id) },
+        teamId,
+        deactivatedAt: { not: null },
+        scimApprovalPending: false,
+      },
+      data: {
+        scimManaged: true,
+        scimApprovalPending: true,
+        deactivatedByTenant: false,
+        keyDistributed: false,
+        role,
+      },
+      select: { id: true, userId: true },
     });
+    for (const row of rows) {
+      transitions.push({ kind: SCIM_TRANSITION_KIND.BECAME_PENDING, userId: row.userId, role, memberId: row.id });
+    }
   }
 
-  if (toUpdateRole.length > 0) {
-    await tx.teamMember.updateMany({
-      where: { id: { in: toUpdateRole.map((m) => m.id) } },
+  for (const [previousRole, ids] of toRaiseByPreviousRole) {
+    const rows = await tx.teamMember.updateManyAndReturn({
+      where: { id: { in: ids }, teamId, role: previousRole, scimApprovalPending: true },
       data: { role },
+      select: { id: true, userId: true },
     });
+    for (const row of rows) {
+      transitions.push({
+        kind: SCIM_TRANSITION_KIND.PENDING_ROLE_RAISED,
+        userId: row.userId,
+        role,
+        previousRole,
+        memberId: row.id,
+      });
+    }
   }
+
+  for (const [previousRole, ids] of toUpdateRoleByPreviousRole) {
+    const rows = await tx.teamMember.updateManyAndReturn({
+      where: { id: { in: ids }, teamId, role: previousRole, deactivatedAt: null },
+      data: { role },
+      select: { id: true, userId: true },
+    });
+    for (const row of rows) {
+      transitions.push({
+        kind: SCIM_TRANSITION_KIND.ACTIVE_ROLE_CHANGED,
+        userId: row.userId,
+        role,
+        previousRole,
+        memberId: row.id,
+      });
+    }
+  }
+
+  return transitions;
 }
 
+/**
+ * Apply SCIM Group member removals (C2): set-based CAS writes, one statement
+ * per row kind, with transitions derived from what each write returned —
+ * never from the pre-read. `removeUserIds`' tenant rows are already locked by
+ * `lockGroupWrite`, so the `findMany` below is a locked re-read, not a race
+ * with a concurrent departure or approval.
+ *
+ * A user with no row in the team at all is a no-op (not `ScimNoSuchMemberError`
+ * — an absent member is idempotent on an IdP retry). A row whose role does not
+ * match this group's role is also left alone (it belongs to a different
+ * role-group, or none).
+ */
 async function applyRemoveOperations(
-  tx: TxClient,
+  tx: Prisma.TransactionClient,
   teamId: string,
   role: TeamRole,
-  memberIds: string[],
-): Promise<void> {
-  if (memberIds.length === 0) return;
+  removeUserIds: string[],
+): Promise<ScimMemberTransition[]> {
+  if (removeUserIds.length === 0) return [];
 
   const freshMembers = await tx.teamMember.findMany({
-    where: { id: { in: memberIds }, teamId },
-    select: { id: true, role: true, deactivatedAt: true, deactivatedByTenant: true },
+    where: { teamId, userId: { in: removeUserIds } },
+    select: {
+      id: true,
+      userId: true,
+      role: true,
+      deactivatedAt: true,
+      deactivatedByTenant: true,
+      scimApprovalPending: true,
+    },
   });
 
   for (const m of freshMembers) {
@@ -249,25 +502,51 @@ async function applyRemoveOperations(
     }
   }
 
-  const toRemove = freshMembers.filter((m) => m.role === role);
-  const active = toRemove.filter((m) => m.deactivatedAt === null);
+  const candidates = freshMembers.filter((m) => m.role === role);
+  const pending = candidates.filter((m) => m.scimApprovalPending);
+  const active = candidates.filter((m) => m.deactivatedAt === null);
+  const departed = candidates.filter(
+    (m) => m.deactivatedAt !== null && m.deactivatedByTenant && !m.scimApprovalPending,
+  );
+
+  const transitions: ScimMemberTransition[] = [];
+
+  if (pending.length > 0) {
+    const pendingIds = pending.map((m) => m.id);
+    const { count } = await tx.teamMember.deleteMany({
+      where: { id: { in: pendingIds }, teamId, role, scimApprovalPending: true },
+    });
+    if (count !== pendingIds.length) {
+      throw new ScimMembershipChangedError();
+    }
+    for (const m of pending) {
+      transitions.push({ kind: SCIM_TRANSITION_KIND.PENDING_WITHDRAWN, userId: m.userId, role, memberId: m.id });
+    }
+  }
+
   if (active.length > 0) {
-    // Deactivate members removed from the group (not downgrade to MEMBER,
-    // which would be a privilege escalation for VIEWER role)
-    await tx.teamMember.updateMany({
-      where: { id: { in: active.map((m) => m.id) } },
+    const rows = await tx.teamMember.updateManyAndReturn({
+      where: { id: { in: active.map((m) => m.id) }, teamId, role, deactivatedAt: null },
       data: { deactivatedAt: new Date() },
+      select: { id: true, userId: true },
     });
+    for (const row of rows) {
+      transitions.push({ kind: SCIM_TRANSITION_KIND.ACTIVE_REMOVED, userId: row.userId, role, memberId: row.id });
+    }
   }
-  // A membership the user's tenant departure ended, now also removed from
-  // the group: it stays deactivated, and a return no longer restores it.
-  const departed = toRemove.filter((m) => m.deactivatedAt !== null && m.deactivatedByTenant);
+
   if (departed.length > 0) {
-    await tx.teamMember.updateMany({
-      where: { id: { in: departed.map((m) => m.id) } },
+    const rows = await tx.teamMember.updateManyAndReturn({
+      where: { id: { in: departed.map((m) => m.id) }, teamId, role, deactivatedByTenant: true },
       data: { deactivatedByTenant: false },
+      select: { id: true, userId: true },
     });
+    for (const row of rows) {
+      transitions.push({ kind: SCIM_TRANSITION_KIND.DEPARTED_UNMARKED, userId: row.userId, role, memberId: row.id });
+    }
   }
+
+  return transitions;
 }
 
 // ── Service functions ─────────────────────────────────────────
@@ -330,22 +609,24 @@ export async function fetchScimGroup(
  * Full-replace a SCIM Group's member list (PUT semantics).
  *
  * Computes add/remove deltas against the current role membership, then applies
- * them in a single transaction. Owner-role groups and OWNER-role members are
- * always protected from modification.
+ * them in the caller's transaction. Owner-role groups and OWNER-role members
+ * are always protected from modification.
  *
  * Throws:
  * - `ScimGroupNotFoundError` — no mapping found for tenantId + scimId
  * - `ScimOwnerProtectedError` — attempted to modify an OWNER-role group or an OWNER member
  * - `ScimNoSuchMemberError` — a referenced userId is not an active tenant member
+ * - `ScimMembershipChangedError` — a pending row removed here vanished between
+ *   the locked re-read and its delete
  */
 export async function replaceScimGroup(
   tenantId: string,
   scimId: string,
   data: ScimGroupReplaceInput,
   baseUrl: string,
-  db: TxOrPrisma = prisma,
+  tx: Prisma.TransactionClient,
 ): Promise<ScimGroupReplaceResult> {
-  const mapping = await db.scimGroupMapping.findUnique({
+  const mapping = await tx.scimGroupMapping.findUnique({
     where: {
       tenantId_externalGroupId: {
         tenantId,
@@ -372,44 +653,56 @@ export async function replaceScimGroup(
 
   const requestedUserIds = new Set(data.memberUserIds);
 
-  let addedCount = 0;
-  let removedCount = 0;
+  let transitions: ScimMemberTransition[] = [];
 
-  const runReplace = async (tx: TxClient) => {
-    const tenantRows = await lockGroupWrite(tx, tenantId, mapping.teamId, [...requestedUserIds]);
-    // Compute delta inside transaction to avoid TOCTOU race. A membership the
-    // user's tenant departure ended is still the group's: listed by the IdP it
-    // is kept as it is, omitted it is removed (applyRemoveOperations).
+  try {
+    // Unlocked pre-read: only used to decide which users' tenant rows need
+    // locking (requested users ∪ the group's pre-lock members) before the
+    // delta is computed again under that lock.
+    const preReadMembers = await tx.teamMember.findMany({
+      where: { teamId: mapping.teamId, role: mapping.role, ...SCIM_GROUP_ROW_STATE },
+      select: { userId: true },
+    });
+    const lockCandidates = new Set([...requestedUserIds, ...preReadMembers.map((m) => m.userId)]);
+    const tenantRows = await lockGroupWrite(tx, tenantId, mapping.teamId, [...lockCandidates]);
+
+    // Locked re-read: a membership the user's tenant departure ended is still
+    // the group's — listed by the IdP it is kept as it is, omitted it is
+    // removed (applyRemoveOperations).
     const currentMembers = await tx.teamMember.findMany({
-      where: {
-        teamId: mapping.teamId,
-        role: mapping.role,
-        OR: [{ deactivatedAt: null }, { deactivatedByTenant: true }],
-      },
+      where: { teamId: mapping.teamId, role: mapping.role, ...SCIM_GROUP_ROW_STATE },
       select: { id: true, userId: true, role: true },
     });
     const currentUserIds = new Set(currentMembers.map((m) => m.userId));
 
     const toAdd = [...requestedUserIds].filter((uid) => !currentUserIds.has(uid));
-    const toRemove = currentMembers.filter((m) => !requestedUserIds.has(m.userId));
+    // A member the locked re-read found whose user is outside the locked set
+    // joined after the pre-read; this PUT does not hold their tenant-row
+    // lock and leaves them for the next sync.
+    const toRemove = currentMembers.filter(
+      (m) => !requestedUserIds.has(m.userId) && tenantRows.has(m.userId),
+    );
 
-    await applyAddOperations(tx, mapping.teamId, tenantId, mapping.role, toAdd, tenantRows);
-    await applyRemoveOperations(tx, mapping.teamId, mapping.role, toRemove.map((m) => m.id));
-
-    return { added: toAdd.length, removed: toRemove.length };
-  };
-
-  try {
-    // Already inside a tenant tx → reuse it (flatten). Given a plain client →
-    // open a real transaction so the add/remove writes stay atomic.
-    const counts = "$transaction" in db ? await db.$transaction(runReplace) : await runReplace(db);
-    addedCount = counts.added;
-    removedCount = counts.removed;
+    const addTransitions = await applyAddOperations(
+      tx,
+      mapping.teamId,
+      tenantId,
+      mapping.role,
+      toAdd,
+      tenantRows,
+    );
+    const removeTransitions = await applyRemoveOperations(
+      tx,
+      mapping.teamId,
+      mapping.role,
+      toRemove.map((m) => m.userId),
+    );
+    transitions = [...addTransitions, ...removeTransitions];
   } catch (e) {
     rethrowScimGroupErrors(e);
   }
 
-  const members = await loadGroupMembers(db, tenantId, mapping.teamId, mapping.role);
+  const members = await loadGroupMembers(tx, tenantId, mapping.teamId, mapping.role);
   const resource = buildGroupResource(
     mapping.externalGroupId,
     toDisplayName(mapping.team.slug, mapping.role),
@@ -417,35 +710,41 @@ export async function replaceScimGroup(
     baseUrl,
   );
 
+  const { added, removed } = countAddedRemoved(transitions);
+
   return {
     resource,
     teamId: mapping.teamId,
     role: mapping.role,
-    added: addedCount,
-    removed: removedCount,
+    added,
+    removed,
+    transitions,
   };
 }
 
 /**
  * Partial-update a SCIM Group's members (PATCH semantics).
  *
- * Applies a list of add/remove actions parsed from the SCIM PATCH Operations array.
- * Owner-role members are always protected from modification.
+ * Applies a list of add/remove actions parsed from the SCIM PATCH Operations
+ * array, folded per userId to the last op in request order (RFC 7644
+ * §3.5.2 — `foldPatchOperations`). Owner-role members are always protected
+ * from modification.
  *
  * Throws:
  * - `ScimGroupNotFoundError` — no mapping found for tenantId + scimId
  * - `ScimOwnerProtectedError` — attempted to modify an OWNER member
- * - `ScimNoSuchMemberError` — a referenced userId is not an active tenant member (add op),
- *   or does not exist as a team member (remove op)
+ * - `ScimNoSuchMemberError` — a referenced userId is not an active tenant member (add op)
+ * - `ScimMembershipChangedError` — a pending row removed here vanished between
+ *   the locked re-read and its delete
  */
 export async function patchScimGroup(
   tenantId: string,
   scimId: string,
   operations: GroupMemberAction[],
   baseUrl: string,
-  db: TxOrPrisma = prisma,
+  tx: Prisma.TransactionClient,
 ): Promise<ScimGroupPatchResult> {
-  const mapping = await db.scimGroupMapping.findUnique({
+  const mapping = await tx.scimGroupMapping.findUnique({
     where: {
       tenantId_externalGroupId: {
         tenantId,
@@ -461,45 +760,36 @@ export async function patchScimGroup(
   });
   if (!mapping) throw new ScimGroupNotFoundError();
 
-  const runPatch = async (tx: TxClient) => {
-    const addOps = operations.filter((a) => a.op === "add");
-    const removeOps = operations.filter((a) => a.op === "remove");
-    const tenantRows = await lockGroupWrite(tx, tenantId, mapping.teamId, addOps.map((a) => a.userId));
-
-    await applyAddOperations(tx, mapping.teamId, tenantId, mapping.role, addOps.map((a) => a.userId), tenantRows);
-
-    // Remove: validate existence before delegating
-    if (removeOps.length > 0) {
-      const removeUserIds = removeOps.map((a) => a.userId);
-      const members = await tx.teamMember.findMany({
-        where: { teamId: mapping.teamId, userId: { in: removeUserIds } },
-        select: { id: true, userId: true, role: true },
-      });
-      const memberByUserId = new Map(members.map((m) => [m.userId, m]));
-
-      for (const uid of removeUserIds) {
-        if (!memberByUserId.has(uid)) {
-          throw new Error(`SCIM_NO_SUCH_MEMBER:${uid}`);
-        }
-      }
-
-      await applyRemoveOperations(tx, mapping.teamId, mapping.role, members.map((m) => m.id));
-    }
-  };
+  let transitions: ScimMemberTransition[] = [];
 
   try {
-    // Already inside a tenant tx → reuse it (flatten). Given a plain client →
-    // open a real transaction so the add/remove writes stay atomic.
-    if ("$transaction" in db) {
-      await db.$transaction(runPatch);
-    } else {
-      await runPatch(db);
-    }
+    const { addUserIds, removeUserIds, cancelledAddUserIds } = foldPatchOperations(operations);
+    const tenantRows = await lockGroupWrite(tx, tenantId, mapping.teamId, [
+      ...addUserIds,
+      ...removeUserIds,
+    ]);
+    await assertCancelledAddsValid(tx, mapping.teamId, cancelledAddUserIds, tenantRows);
+
+    const addTransitions = await applyAddOperations(
+      tx,
+      mapping.teamId,
+      tenantId,
+      mapping.role,
+      addUserIds,
+      tenantRows,
+    );
+    const removeTransitions = await applyRemoveOperations(
+      tx,
+      mapping.teamId,
+      mapping.role,
+      removeUserIds,
+    );
+    transitions = [...addTransitions, ...removeTransitions];
   } catch (e) {
     rethrowScimGroupErrors(e);
   }
 
-  const members = await loadGroupMembers(db, tenantId, mapping.teamId, mapping.role);
+  const members = await loadGroupMembers(tx, tenantId, mapping.teamId, mapping.role);
   const resource = buildGroupResource(
     mapping.externalGroupId,
     toDisplayName(mapping.team.slug, mapping.role),
@@ -507,10 +797,15 @@ export async function patchScimGroup(
     baseUrl,
   );
 
+  const { added, removed } = countAddedRemoved(transitions);
+
   return {
     resource,
     teamId: mapping.teamId,
     role: mapping.role,
+    added,
+    removed,
+    transitions,
   };
 }
 

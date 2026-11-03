@@ -4,7 +4,7 @@ import { teamLockQuery, lockQueryCalls } from "@/__tests__/helpers/team-rotation
 
 const { mockAuth, mockPrismaTeamMember, mockPrismaUser,
   mockPrismaTeamMemberKey, mockTeamLockQuery, mockTransaction, mockWithTeamTenantRls,
-  mockWithBypassRls, mockRequireTeamPermission, mockRequireRecentSession,
+  mockWithBypassRls, mockRequireTeamPermission, mockRequireRecentSession, mockLogAuditInTx,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaTeamMember: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
@@ -17,6 +17,7 @@ const { mockAuth, mockPrismaTeamMember, mockPrismaUser,
   mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
   mockRequireTeamPermission: vi.fn().mockResolvedValue(undefined),
   mockRequireRecentSession: vi.fn().mockResolvedValue(null),
+  mockLogAuditInTx: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -28,6 +29,10 @@ vi.mock("@/lib/auth/access/team-auth", async () => ({
 }));
 vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
   requireRecentCurrentAuthMethod: mockRequireRecentSession,
+}));
+vi.mock("@/lib/audit/audit", () => ({
+  logAuditInTx: mockLogAuditInTx,
+  extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
 }));
 
 // Build a tx proxy that delegates to the same mocks
@@ -186,6 +191,19 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
     expect(res.status).toBe(200);
     expect(json.success).toBe(true);
     expect(mockTransaction).toHaveBeenCalledTimes(1);
+    // TEAM_MEMBER_KEY_DISTRIBUTE, in the same transaction as the CAS (C4).
+    expect(mockLogAuditInTx).toHaveBeenCalledTimes(1);
+    expect(mockLogAuditInTx).toHaveBeenCalledWith(
+      txProxy,
+      "tenant-1",
+      expect.objectContaining({
+        scope: "TEAM",
+        action: "TEAM_MEMBER_KEY_DISTRIBUTE",
+        teamId: "team-1",
+        targetId: "target-user",
+        metadata: expect.objectContaining({ memberId: "member-1", keyVersion: 1 }),
+      }),
+    );
   });
 
   it("refuses (403) without writing a key when the distributing member left or was demoted since the check", async () => {
@@ -331,6 +349,8 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
     expect((await res.json()).error).toBe("TEAM_KEY_VERSION_MISMATCH");
     expect(mockPrismaTeamMemberKey.upsert).not.toHaveBeenCalled();
     expect(mockPrismaTeamMember.updateMany).not.toHaveBeenCalled();
+    // In-flight rotation (C4): no TEAM_MEMBER_KEY_DISTRIBUTE.
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 
   it("marks the member distributed only while still active and undistributed", async () => {
@@ -366,6 +386,8 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
 
     expect(res.status).toBe(404);
     expect((await res.json()).error).toBe("MEMBER_NOT_FOUND");
+    // CAS count 0 (C4): no TEAM_MEMBER_KEY_DISTRIBUTE.
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 
   it("returns 409 when key already distributed (TOCTOU race)", async () => {
@@ -381,6 +403,8 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
     const json = await res.json();
     expect(res.status).toBe(409);
     expect(json.error).toBe("KEY_ALREADY_DISTRIBUTED");
+    // Already distributed (C4): no TEAM_MEMBER_KEY_DISTRIBUTE.
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 
   it("uses bypass user lookup so a cross-tenant guest can receive a key", async () => {

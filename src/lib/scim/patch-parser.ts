@@ -2,8 +2,11 @@
  * SCIM PATCH operation parser (RFC 7644 §3.5.2).
  *
  * Pure function — no Prisma / DB dependencies.
- * Depends only on TEAM_ROLE_VALUES constant for group membership validation.
+ * Depends only on TEAM_ROLE_VALUES constant for group membership validation,
+ * and on zod for the member-value uuid check below.
  */
+
+import { z } from "zod";
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -30,6 +33,25 @@ export interface UserPatchResult {
 export interface GroupMemberAction {
   op: "add" | "remove";
   userId: string;
+}
+
+// Stored ids are lowercase (Postgres returns uuids that way); validating and
+// lowercasing here, at the boundary, keeps a mixed-case or malformed id from
+// reaching `::uuid[]` (22P02) or a same-batch `createMany` (P2002) as the
+// service's own `Set`/CAS dedup would not catch it (F2/S-F3).
+// The same validator `scimGroupSchema` uses for PUT/POST member values
+// (src/lib/scim/validations.ts) — a hand-rolled regex here previously
+// disagreed with it on the nil (`00000000-…`) and max (`ffffffff-…`) uuids,
+// which zod's `.uuid()` accepts as special cases and the regex's version/
+// variant nibble ranges did not (review round 2, F-N3/T-N3/T-N4).
+const memberValueSchema = z.string().uuid();
+
+function normalizeMemberValue(value: string): string {
+  const parsed = memberValueSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new PatchParseError("Member value must be a valid UUID", "invalidValue");
+  }
+  return parsed.data.toLowerCase();
 }
 
 // ── User PATCH ────────────────────────────────────────────────
@@ -113,6 +135,10 @@ export function parseGroupPatchOps(
   operations: ScimPatchOperation[],
 ): GroupMemberAction[] {
   const actions: GroupMemberAction[] = [];
+  // Every action is kept, in request order: the service folds them to one
+  // action per userId, last op wins (RFC 7644 §3.5.2). De-duplicating here
+  // would change which op is last — [remove X, add X, remove X] would lose
+  // its final remove.
 
   for (const operation of operations) {
     const { op, path, value } = operation;
@@ -143,7 +169,7 @@ export function parseGroupPatchOps(
           `Invalid members filter syntax: ${path}`,
         );
       }
-      actions.push({ op: "remove", userId: match[1] });
+      actions.push({ op: "remove", userId: normalizeMemberValue(match[1]) });
       continue;
     }
 
@@ -181,13 +207,15 @@ function parseMemberValues(value: unknown): string[] {
         "Member value must be between 1 and 255 characters",
       );
     }
-    return v;
+    return normalizeMemberValue(v);
   });
 }
 
 export class PatchParseError extends Error {
-  constructor(message: string) {
+  readonly scimType?: string;
+  constructor(message: string, scimType?: string) {
     super(message);
     this.name = "PatchParseError";
+    this.scimType = scimType;
   }
 }

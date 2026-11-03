@@ -17,9 +17,16 @@ const {
   mockWithTenantRls: vi.fn(async (prisma: unknown, _tenantId: string, fn: (tx: unknown) => unknown) => fn(prisma)),
 }));
 
+const { mockLogAuditInTx } = vi.hoisted(() => ({ mockLogAuditInTx: vi.fn() }));
+
 vi.mock("@/lib/auth/tokens/scim-token", () => ({ validateScimToken: mockValidateScimToken }));
 vi.mock("@/lib/scim/rate-limit", () => ({ checkScimRateLimit: mockCheckScimRateLimit }));
-vi.mock("@/lib/audit/audit", () => ({ logAuditAsync: vi.fn(), extractRequestMeta: () => ({ ip: null, userAgent: null }) }));
+vi.mock("@/lib/audit/audit", () => ({
+  logAuditAsync: vi.fn(),
+  logAuditInTx: mockLogAuditInTx,
+  extractRequestMeta: () => ({ ip: null, userAgent: null }),
+  teamAuditBase: (_req: unknown, userId: string, teamId: string) => ({ scope: "TEAM", userId, teamId, ip: null, userAgent: null, acceptLanguage: null }),
+}));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     scimGroupMapping: mockScimGroupMapping,
@@ -36,7 +43,7 @@ import { GET, POST } from "./route";
 
 const SCIM_TOKEN_DATA = {
   ok: true as const,
-  data: { tokenId: "t1", tenantId: "tenant-1", createdById: "u1", auditUserId: "u1" },
+  data: { tokenId: "t1", tenantId: "tenant-1", createdById: "u1", auditUserId: "u1", actorType: "HUMAN" as const },
 };
 
 function makeReq(options: { searchParams?: Record<string, string>; body?: unknown } = {}) {
@@ -172,6 +179,38 @@ describe("POST /api/scim/v2/Groups", () => {
     );
     expect(res.status).toBe(201);
     expect(mockScimGroupMapping.create).toHaveBeenCalled();
+    // TEAM scope (C4): the team owner sees a new IdP mapping, even though
+    // mapping creation itself touches no member row.
+    expect(mockLogAuditInTx).toHaveBeenCalledWith(
+      expect.anything(),
+      "tenant-1",
+      expect.objectContaining({
+        scope: "TEAM",
+        teamId: "team-1",
+        action: "SCIM_GROUP_MAPPING_CREATE",
+        metadata: expect.objectContaining({ scimTokenId: "t1", externalGroupId: "grp-1", role: "ADMIN" }),
+      }),
+    );
+  });
+
+  it("does not audit mapping creation when reusing an existing mapping", async () => {
+    mockTeam.findFirst.mockResolvedValue({ id: "team-1", slug: "core" });
+    mockScimGroupMapping.findUnique.mockResolvedValue({ id: "mapping-1", teamId: "team-1", role: "ADMIN" });
+    mockTeamMember.findMany.mockResolvedValue([]);
+
+    const res = await POST(
+      makeReq({
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+          displayName: "core:admin",
+          externalId: "grp-1",
+        },
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockScimGroupMapping.create).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 
   it("reports only members with an active membership in this tenant in the created group", async () => {
@@ -297,6 +336,26 @@ describe("POST /api/scim/v2/Groups", () => {
     );
 
     expect(res.status).toBe(400);
+  });
+
+  // C/F2/S-F3 (review round 2, F-N3/T-N3/T-N4): POST never reads `members`
+  // for mapping creation, but the body is still schema-validated whole —
+  // a malformed member value 400s here too, a behavior change from when the
+  // field went unvalidated (noted in the deviation log).
+  it("returns 400 for a non-uuid member value, although POST never reads members for the mapping it creates", async () => {
+    const res = await POST(
+      makeReq({
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+          displayName: "core:ADMIN",
+          externalId: "grp-1",
+          members: [{ value: "not-a-uuid" }],
+        },
+      }),
+    );
+
+    expect(res.status).toBe(400);
+    expect(mockScimGroupMapping.create).not.toHaveBeenCalled();
   });
 
   it("treats blank externalId as invalid", async () => {

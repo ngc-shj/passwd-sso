@@ -47,6 +47,8 @@ import { TEAM_ROLE, API_PATH, apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import { filterMembers } from "@/lib/filter-members";
 import { handleStepUpError } from "@/lib/http/handle-step-up-error";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
 import type { TeamMemberDisplayApiItem as Member } from "@/lib/team/team-member-display";
 
@@ -68,6 +70,7 @@ export default function TeamMembersPage({
   const t = useTranslations("Team");
   const tAdmin = useTranslations("AdminConsole");
   const tCommon = useTranslations("Common");
+  const tApi = useTranslations("ApiErrors");
 
   const [team, setTeam] = useState<TeamInfo | null>(null);
   const [loadError, setLoadError] = useState(false);
@@ -146,12 +149,14 @@ export default function TeamMembersPage({
   const isOwner = team?.role === TEAM_ROLE.OWNER;
   const isAdmin = team?.role === TEAM_ROLE.ADMIN || isOwner;
 
-  // Inline step-up reauth — both role change and member removal are
-  // server-side step-up-gated. The retry arg records which mutation was in
-  // flight so the post-reauth retry replays the same one.
+  // Inline step-up reauth — role change, member removal, and SCIM admission
+  // approve/reject are all server-side step-up-gated. The retry arg records
+  // which mutation was in flight so the post-reauth retry replays the same one.
   type ReauthRetry =
     | { type: "role"; memberId: string; role: string }
-    | { type: "remove"; memberId: string };
+    | { type: "remove"; memberId: string }
+    | { type: "approve"; memberId: string; role: string }
+    | { type: "reject"; memberId: string };
   const handleRetryRef = useRef<(arg: ReauthRetry) => Promise<void>>(async () => {});
   const inlineReauth = useInlineReauth<ReauthRetry>((arg) => handleRetryRef.current(arg));
 
@@ -191,10 +196,101 @@ export default function TeamMembersPage({
     }
   };
 
+  // SCIM-pending admission (scim-team-admission-approval, C5). Approve sends
+  // back the role shown to the approver as `expectedRole`, so a raise since
+  // (another SCIM group add) is caught as SCIM_APPROVAL_ROLE_CHANGED rather
+  // than silently admitted.
+  const handleApprove = async (memberId: string, role: string) => {
+    try {
+      // @stepup id:team-member-approve-post
+      const res = await fetchApi(apiPath.teamMemberApprove(teamId, memberId), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expectedRole: role }),
+      });
+      if (!res.ok) {
+        if (await handleStepUpError(res, inlineReauth.triggerOnStaleError, { type: "approve", memberId, role })) return;
+        const error = (await readApiErrorBody(res))?.error;
+        if (error === API_ERROR.SCIM_APPROVAL_ROLE_CHANGED) {
+          toast.error(t("approveRoleChanged"));
+          fetchAll();
+          return;
+        }
+        // Designed refusals, not transport failures: approving needs the
+        // current team key (a keyless admin can still reject), and another
+        // admin may have handled the request already.
+        if (error === API_ERROR.FORBIDDEN) {
+          toast.error(t("approveNeedsKey"));
+          return;
+        }
+        if (error === API_ERROR.SCIM_APPROVAL_TARGET_INACTIVE) {
+          toast.error(t("approveTargetLeftTenant"));
+          fetchAll();
+          return;
+        }
+        if (error === API_ERROR.CONFLICT) {
+          toast.error(t("approvalBusyRetry"));
+          return;
+        }
+        if (error === API_ERROR.RATE_LIMIT_EXCEEDED) {
+          toast.error(tApi("rateLimitExceeded"));
+          return;
+        }
+        if (error === API_ERROR.MEMBER_NOT_FOUND) {
+          toast.error(t("requestAlreadyHandled"));
+          fetchAll();
+          return;
+        }
+        throw new Error("Failed");
+      }
+      toast.success(t("memberApproved"));
+      fetchAll();
+    } catch {
+      toast.error(t("networkError"));
+    }
+  };
+
+  const handleReject = async (memberId: string) => {
+    try {
+      // @stepup id:team-member-reject-post
+      const res = await fetchApi(apiPath.teamMemberReject(teamId, memberId), {
+        method: "POST",
+      });
+      if (!res.ok) {
+        if (await handleStepUpError(res, inlineReauth.triggerOnStaleError, { type: "reject", memberId })) return;
+        const error = (await readApiErrorBody(res))?.error;
+        if (error === API_ERROR.MEMBER_NOT_FOUND) {
+          toast.error(t("requestAlreadyHandled"));
+          fetchAll();
+          return;
+        }
+        if (error === API_ERROR.FORBIDDEN) {
+          toast.error(t("forbidden"));
+          return;
+        }
+        if (error === API_ERROR.CONFLICT) {
+          toast.error(t("approvalBusyRetry"));
+          return;
+        }
+        if (error === API_ERROR.RATE_LIMIT_EXCEEDED) {
+          toast.error(tApi("rateLimitExceeded"));
+          return;
+        }
+        throw new Error("Failed");
+      }
+      toast.success(t("memberRejected"));
+      fetchAll();
+    } catch {
+      toast.error(t("networkError"));
+    }
+  };
+
   useEffect(() => {
     handleRetryRef.current = async (retry) => {
       if (retry.type === "role") await handleChangeRole(retry.memberId, retry.role);
       else if (retry.type === "remove") await handleRemoveMember(retry.memberId);
+      else if (retry.type === "approve") await handleApprove(retry.memberId, retry.role);
+      else if (retry.type === "reject") await handleReject(retry.memberId);
     };
   });
 
@@ -249,6 +345,9 @@ export default function TeamMembersPage({
               />
             </div>
           )}
+          {isAdmin && members.some((m) => m.pendingApproval) && (
+            <p className="mb-2 text-xs text-muted-foreground">{t("approveRoleNote")}</p>
+          )}
           {members.length > 0 && filteredMembers.length === 0 ? (
             <p className="py-4 text-center text-sm text-muted-foreground">
               {t("noMatchingMembers")}
@@ -273,7 +372,45 @@ export default function TeamMembersPage({
                       {t("departedMember")}
                     </Badge>
                   )}
-                  {isAdmin && m.role !== TEAM_ROLE.OWNER && m.userId !== currentUserId ? (
+                  {m.pendingApproval ? (
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline">{t("awaitingApprovalBadge")}</Badge>
+                      {m.pendingTenantInactive && (
+                        <Badge variant="outline" title={t("pendingTenantInactiveHint")}>
+                          {t("pendingTenantInactive")}
+                        </Badge>
+                      )}
+                      <TeamRoleBadge role={m.role} />
+                      {isAdmin && (
+                        <>
+                          {!m.pendingTenantInactive && (
+                            <Button size="sm" onClick={() => handleApprove(m.id, m.role)}>
+                              {t("approveButton")}
+                            </Button>
+                          )}
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button variant="outline" size="sm">
+                                {t("rejectButton")}
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>{t("rejectButton")}</AlertDialogTitle>
+                                <AlertDialogDescription>{t("rejectConfirm")}</AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => handleReject(m.id)}>
+                                  {t("rejectButton")}
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </>
+                      )}
+                    </div>
+                  ) : isAdmin && m.role !== TEAM_ROLE.OWNER && m.userId !== currentUserId ? (
                     <div className="flex items-center gap-2">
                       {/* A departed member's role cannot change; removal is the one action. */}
                       {!m.departed && (
@@ -300,7 +437,7 @@ export default function TeamMembersPage({
                             <AlertDialogDescription>{t("removeMemberConfirm")}</AlertDialogDescription>
                           </AlertDialogHeader>
                           <AlertDialogFooter>
-                            <AlertDialogCancel>{t("cancelInvitation")}</AlertDialogCancel>
+                            <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
                             <AlertDialogAction onClick={() => handleRemoveMember(m.id)}>
                               {t("removeMember")}
                             </AlertDialogAction>

@@ -69,7 +69,12 @@ import { ACTOR_TYPE, AUDIT_SCOPE } from "@/lib/constants/audit/audit";
 import type { ActorType, Prisma } from "@prisma/client";
 import type { NextRequest } from "next/server";
 import type { AuthResult } from "@/lib/auth/session/auth-or-token";
-import { enqueueAudit, enqueueAuditBulk, enqueueAuditInTx } from "@/lib/audit/audit-outbox";
+import {
+  enqueueAudit,
+  enqueueAuditBulk,
+  enqueueAuditInTx,
+  enqueueAuditBulkInTx,
+} from "@/lib/audit/audit-outbox";
 import { buildOutboxPayload, type AuditLogParams } from "@/lib/audit/audit-payload";
 
 // The payload builder lives in a module the offline operator CLI can import
@@ -224,6 +229,20 @@ export async function logAuditInTx(
   params: AuditLogParams,
 ): Promise<void> {
   await enqueueAuditInTx(tx, tenantId, buildOutboxPayload(params));
+}
+
+/**
+ * Write many audit log entries inside an existing Prisma transaction in one
+ * enqueue, for a bulk mutation whose per-row audit writes would otherwise be
+ * a per-row logAuditInTx loop. All params must share the given tenantId.
+ */
+export async function logAuditBulkInTx(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  paramsList: AuditLogParams[],
+): Promise<void> {
+  if (paramsList.length === 0) return;
+  await enqueueAuditBulkInTx(tx, tenantId, paramsList.map(buildOutboxPayload));
 }
 
 // ─── logAuditAsync ──────────────────────────────────────────────

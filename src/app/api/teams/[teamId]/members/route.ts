@@ -36,27 +36,42 @@ async function handleGET(req: NextRequest, { params }: Params) {
 
   // Members whose membership ended with their departure from the tenant are
   // listed, flagged `departed`, to those who can remove them — the only
-  // action a team takes on them (a return restores them otherwise).
+  // action a team takes on them (a return restores them otherwise). A SCIM
+  // admission waiting on approval is listed, flagged `pendingApproval`, only
+  // to those who can act on it (scim-team-admission-approval, C5) — anyone
+  // else sees no pending rows at all.
   const canRemove = hasTeamPermission(membership.role, TEAM_PERMISSION.MEMBER_REMOVE);
-  const members = await withTeamTenantRls(teamId, async () =>
-    prisma.teamMember.findMany({
-      where: canRemove
-        ? { teamId: teamId, OR: [{ deactivatedAt: null }, { deactivatedByTenant: true }] }
-        : { teamId: teamId, deactivatedAt: null },
+  const canInvite = hasTeamPermission(membership.role, TEAM_PERMISSION.MEMBER_INVITE);
+  const [teamTenantId, members] = await withTeamTenantRls(teamId, async (tenantId) => [
+    tenantId,
+    await prisma.teamMember.findMany({
+      where: canRemove && canInvite
+        ? { teamId: teamId, OR: [{ deactivatedAt: null }, { deactivatedByTenant: true }, { scimApprovalPending: true }] }
+        : canRemove
+          ? { teamId: teamId, OR: [{ deactivatedAt: null }, { deactivatedByTenant: true }] }
+          : canInvite
+            ? { teamId: teamId, OR: [{ deactivatedAt: null }, { scimApprovalPending: true }] }
+            : { teamId: teamId, deactivatedAt: null },
       select: {
         id: true,
         userId: true,
         role: true,
         createdAt: true,
         deactivatedByTenant: true,
+        scimApprovalPending: true,
       },
       orderBy: [{ role: "asc" }, { createdAt: "asc" }],
     }),
-  );
+  ] as const);
 
   return NextResponse.json(
     await buildTeamMemberDisplayItems(
-      members.map(({ deactivatedByTenant, ...member }) => ({ ...member, departed: deactivatedByTenant })),
+      members.map(({ deactivatedByTenant, scimApprovalPending, ...member }) => ({
+        ...member,
+        departed: deactivatedByTenant,
+        pendingApproval: scimApprovalPending,
+      })),
+      teamTenantId,
     ),
   );
 }
@@ -135,6 +150,12 @@ async function handlePOST(req: NextRequest, { params }: Params) {
           if (existing.deactivatedAt === null) {
             throw new AlreadyMemberError();
           }
+          // Waiting on a team OWNER/ADMIN's approval (scim-team-admission-approval,
+          // C6) — distinct from the SCIM_MANAGED_MEMBER refusal below, which a
+          // pending row would otherwise also trip (it is always scimManaged too).
+          if (existing.scimApprovalPending) {
+            throw new ScimApprovalPendingError();
+          }
           // A membership the IdP's group removal ended stays the IdP's; one
           // ended by the user's departure from the tenant can be re-added.
           if (existing.scimManaged && !existing.deactivatedByTenant) {
@@ -177,6 +198,9 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     if (e instanceof ScimManagedError) {
       return errorResponse(API_ERROR.SCIM_MANAGED_MEMBER);
     }
+    if (e instanceof ScimApprovalPendingError) {
+      return errorResponse(API_ERROR.SCIM_APPROVAL_PENDING);
+    }
     if (isMembershipLockConflict(e)) {
       return errorResponse(API_ERROR.CONFLICT);
     }
@@ -204,6 +228,10 @@ class AlreadyMemberError extends Error {
 
 class ScimManagedError extends Error {
   constructor() { super("SCIM_MANAGED_MEMBER"); }
+}
+
+class ScimApprovalPendingError extends Error {
+  constructor() { super("SCIM_APPROVAL_PENDING"); }
 }
 
 function isPrismaUniqueConstraintError(e: unknown): boolean {

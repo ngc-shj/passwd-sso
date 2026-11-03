@@ -325,6 +325,17 @@ describe("POST /api/teams/[teamId]/invitations", () => {
       expect((await res.json()).error).toBe("SCIM_MANAGED_MEMBER");
     });
 
+    it("refuses SCIM_APPROVAL_PENDING for a pending member, ahead of SCIM_MANAGED_MEMBER (a pending row is always scimManaged too)", async () => {
+      mockPrismaTeamMember.findMany.mockResolvedValue([
+        { deactivatedAt: now, scimManaged: true, deactivatedByTenant: false, scimApprovalPending: true },
+      ]);
+
+      const res = await invite();
+
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toBe("SCIM_APPROVAL_PENDING");
+    });
+
     it("refuses, issuing nothing, when the inviter's membership ended after the permission check", async () => {
       // A departure committed between requireTeamPermission and the lock: an
       // invitation stamped now would read as issued after that departure.

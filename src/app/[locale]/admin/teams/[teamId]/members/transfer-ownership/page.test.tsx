@@ -82,6 +82,7 @@ function makeMember(overrides: Partial<{
   email: string | null;
   image: string | null;
   tenantName: string | null;
+  pendingApproval: boolean;
 }> = {}) {
   return {
     id: "mem-1",
@@ -152,5 +153,30 @@ describe("TeamTransferOwnershipPage (admin full-page, step-up denial)", () => {
       expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
     });
     expect(mockToast.error).not.toHaveBeenCalled();
+  });
+});
+
+describe("TeamTransferOwnershipPage (SCIM pending admission, C5)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockCanUsePasskeyRecovery.mockResolvedValue(false);
+    mockReauthenticateWithPasskey.mockResolvedValue({ ok: true, verifiedAt: "2026-05-10T00:00:00Z" });
+  });
+
+  it("excludes a pending row from transfer candidates", async () => {
+    const pending = makeMember({ id: "mem-pending", userId: "user-pending", name: "Pending Pat", role: "ADMIN", pendingApproval: true });
+    const active = makeMember({ id: "mem-active", userId: "user-active", name: "Active Alice", role: "MEMBER" });
+    setupFetchReady({ members: [pending, active] });
+
+    await act(async () => {
+      render(<TeamTransferOwnershipPage params={Promise.resolve({ teamId: "team-1" })} />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId("alert-trigger").length).toBeGreaterThanOrEqual(1);
+    });
+
+    // Only the active member is offered as a transfer target.
+    expect(screen.getAllByTestId("alert-trigger")).toHaveLength(1);
   });
 });

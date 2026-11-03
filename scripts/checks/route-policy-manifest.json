@@ -1894,7 +1894,35 @@
         }
       }
     },
+    "src/app/api/teams/[teamId]/members/[memberId]/approve/route.ts": {
+      "kind": "api-session-required",
+      "methods": [
+        "POST"
+      ],
+      "auth": [
+        "session"
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
+    },
     "src/app/api/teams/[teamId]/members/[memberId]/confirm-key/route.ts": {
+      "kind": "api-session-required",
+      "methods": [
+        "POST"
+      ],
+      "auth": [
+        "session"
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
+    },
+    "src/app/api/teams/[teamId]/members/[memberId]/reject/route.ts": {
       "kind": "api-session-required",
       "methods": [
         "POST"

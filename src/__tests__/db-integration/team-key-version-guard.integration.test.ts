@@ -234,6 +234,14 @@ async function memberKeyVersions(ctx: TestContext, teamId: string, userId: strin
   return r.rows.map((row) => row.key_version);
 }
 
+/** TEAM_MEMBER_KEY_DISTRIBUTE audit rows for this team (workers stopped, read from audit_outbox). */
+async function keyDistributeAudits(ctx: TestContext, teamId: string): Promise<unknown[]> {
+  const r = await ctx.su.pool.query<{ payload: { teamId?: string } }>(
+    `SELECT payload FROM audit_outbox WHERE payload->>'action' = 'TEAM_MEMBER_KEY_DISTRIBUTE'`,
+  );
+  return r.rows.map((row) => row.payload).filter((p) => p.teamId === teamId);
+}
+
 describe("team key rotation serialisation — real-DB integration", () => {
   let ctx: TestContext;
   let tenantId: string;
@@ -762,6 +770,9 @@ describe("team key rotation serialisation — real-DB integration", () => {
         keyDistributed: false,
         pendingKeys: [],
       });
+      // The refused distribution (in-flight rotation) emits no
+      // TEAM_MEMBER_KEY_DISTRIBUTE (scim-team-admission-approval, A10).
+      expect(await keyDistributeAudits(ctx, seed.teamId)).toEqual([]);
     });
   });
 });

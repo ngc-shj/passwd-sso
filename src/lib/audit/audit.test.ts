@@ -23,6 +23,7 @@ vi.mock("@/lib/audit/audit-outbox", () => ({
   enqueueAudit: vi.fn(async () => undefined),
   enqueueAuditInTx: vi.fn(async () => undefined),
   enqueueAuditBulk: vi.fn(async () => undefined),
+  enqueueAuditBulkInTx: vi.fn(async () => undefined),
 }));
 
 const { auditLoggerInfoSpy, deadLetterWarnSpy } = vi.hoisted(() => ({
@@ -67,6 +68,7 @@ import {
   logAuditAsyncBothScopes,
   logAuditBulkAsync,
   logAuditInTx,
+  logAuditBulkInTx,
   extractRequestMeta,
   personalAuditBase,
   teamAuditBase,
@@ -75,7 +77,12 @@ import {
 } from "./audit";
 import { ACTOR_TYPE, AUDIT_SCOPE } from "@/lib/constants/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants";
-import { enqueueAudit, enqueueAuditBulk, enqueueAuditInTx } from "@/lib/audit/audit-outbox";
+import {
+  enqueueAudit,
+  enqueueAuditBulk,
+  enqueueAuditInTx,
+  enqueueAuditBulkInTx,
+} from "@/lib/audit/audit-outbox";
 // From the REAL module, not re-typed: an expectation that spells the sentinel
 // itself agrees with the test rather than with production.
 import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
@@ -91,6 +98,7 @@ const TEAM_A = "770e8400-e29b-41d4-a716-446655440002";
 const mockedEnqueue = vi.mocked(enqueueAudit);
 const mockedEnqueueBulk = vi.mocked(enqueueAuditBulk);
 const mockedEnqueueInTx = vi.mocked(enqueueAuditInTx);
+const mockedEnqueueBulkInTx = vi.mocked(enqueueAuditBulkInTx);
 const mockedFindUser = vi.mocked(prisma.user.findUnique);
 const mockedFindTeam = vi.mocked(prisma.team.findUnique);
 
@@ -100,6 +108,7 @@ beforeEach(() => {
   mockedEnqueue.mockReset().mockResolvedValue(undefined);
   mockedEnqueueBulk.mockReset().mockResolvedValue(undefined);
   mockedEnqueueInTx.mockReset().mockResolvedValue(undefined);
+  mockedEnqueueBulkInTx.mockReset().mockResolvedValue(undefined);
   mockedFindUser.mockReset();
   mockedFindTeam.mockReset();
 });
@@ -479,6 +488,29 @@ describe("logAuditInTx", () => {
     await logAuditInTx(tx, TENANT_A, { ...baseParams, metadata: { keep: 1 } });
 
     expect(mockedEnqueueInTx.mock.calls[0][2]).toMatchObject({ metadata: { keep: 1 } });
+  });
+});
+
+describe("logAuditBulkInTx", () => {
+  it("delegates to enqueueAuditBulkInTx with mapped payloads", async () => {
+    const tx = {} as Parameters<typeof logAuditBulkInTx>[0];
+    const second: AuditLogParams = { ...baseParams, userId: TEAM_A, action: AUDIT_ACTION.AUTH_LOGOUT };
+    await logAuditBulkInTx(tx, TENANT_A, [baseParams, second]);
+
+    expect(mockedEnqueueBulkInTx).toHaveBeenCalledOnce();
+    const [calledTx, calledTenant, calledPayloads] = mockedEnqueueBulkInTx.mock.calls[0];
+    expect(calledTx).toBe(tx);
+    expect(calledTenant).toBe(TENANT_A);
+    expect(calledPayloads).toHaveLength(2);
+    expect(calledPayloads[0]).toMatchObject({ action: AUDIT_ACTION.AUTH_LOGIN, userId: USER_A });
+    expect(calledPayloads[1]).toMatchObject({ action: AUDIT_ACTION.AUTH_LOGOUT, userId: TEAM_A });
+  });
+
+  it("does not enqueue for an empty list", async () => {
+    const tx = {} as Parameters<typeof logAuditBulkInTx>[0];
+    await logAuditBulkInTx(tx, TENANT_A, []);
+
+    expect(mockedEnqueueBulkInTx).not.toHaveBeenCalled();
   });
 });
 

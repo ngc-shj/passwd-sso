@@ -40,7 +40,7 @@
 # (MAPPING_MOCKED_CONTRACT_TEST), or leaving a stale legacy entry after
 # migration (STALE_LEGACY_ENTRY) all fail the gate, not just an edit to the
 # manifest count. Sum of all counts here
-# is 74 (71 across the 63 route files, matching AC4.4's
+# is 78 (75 across the 67 route files, matching AC4.4's
 # EXPECTED_LIMITER_COUNT, + 3 for the lib members) — the gate cross-checks
 # the src/app/api subset sum against EXPECTED_LIMITER_COUNT so the two
 # primitives cannot drift apart silently.
@@ -83,6 +83,8 @@ src/app/api/mobile/token/refresh/route.ts	1
 src/app/api/mobile/token/route.ts	1
 src/app/api/share-links/[id]/content/route.ts	1
 src/app/api/share-links/verify-access/route.ts	2
+src/app/api/teams/[teamId]/members/[memberId]/approve/route.ts	1
+src/app/api/teams/[teamId]/members/[memberId]/reject/route.ts	1
 src/app/api/teams/invitations/accept/route.ts	1
 src/app/api/tenant/access-requests/[id]/approve/route.ts	1
 src/app/api/tenant/access-requests/[id]/deny/route.ts	1

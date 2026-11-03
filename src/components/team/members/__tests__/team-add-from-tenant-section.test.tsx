@@ -12,11 +12,12 @@ if (typeof globalThis.ResizeObserver === "undefined") {
   } as unknown as typeof ResizeObserver;
 }
 
-const { mockFetchApi, mockCanUsePasskeyRecovery, mockReauthenticateWithPasskey } = vi.hoisted(
+const { mockFetchApi, mockCanUsePasskeyRecovery, mockReauthenticateWithPasskey, mockToast } = vi.hoisted(
   () => ({
     mockFetchApi: vi.fn(),
     mockCanUsePasskeyRecovery: vi.fn(),
     mockReauthenticateWithPasskey: vi.fn(),
+    mockToast: { error: vi.fn(), success: vi.fn() },
   }),
 );
 
@@ -29,7 +30,7 @@ vi.mock("next-intl", () => ({
 }));
 
 vi.mock("sonner", () => ({
-  toast: { error: vi.fn(), success: vi.fn() },
+  toast: mockToast,
 }));
 
 vi.mock("@/lib/url-helpers", () => ({
@@ -219,5 +220,84 @@ describe("TeamAddFromTenantSection", () => {
       expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
     });
     expect(onSuccess).not.toHaveBeenCalled();
+  });
+
+  // C6: members POST answers a distinct 409 for a SCIM-pending row (awaiting
+  // team approval) vs. a SCIM-removed, non-pending row — each must render its
+  // own message rather than the generic "already a member" fallback.
+  it("maps a SCIM_APPROVAL_PENDING 409 to the awaiting-approval message", async () => {
+    mockFetchApi
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [{ userId: "user-1", name: "Alice", email: "alice@example.com", image: null }],
+        signal: { aborted: false },
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 409,
+        json: async () => ({ error: "SCIM_APPROVAL_PENDING" }),
+      });
+
+    render(<TeamAddFromTenantSection teamId="team-1" onSuccess={vi.fn()} />);
+
+    fireEvent.change(screen.getByPlaceholderText("searchTenantMembers"), {
+      target: { value: "alice" },
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(350);
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("member-info")).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("addButton"));
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(mockToast.error).toHaveBeenCalledWith("scimApprovalPendingCannotAdd");
+    });
+  });
+
+  it("maps a SCIM_MANAGED_MEMBER 409 to the reactivate-via-IdP message", async () => {
+    mockFetchApi
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [{ userId: "user-1", name: "Alice", email: "alice@example.com", image: null }],
+        signal: { aborted: false },
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 409,
+        json: async () => ({ error: "SCIM_MANAGED_MEMBER" }),
+      });
+
+    render(<TeamAddFromTenantSection teamId="team-1" onSuccess={vi.fn()} />);
+
+    fireEvent.change(screen.getByPlaceholderText("searchTenantMembers"), {
+      target: { value: "alice" },
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(350);
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("member-info")).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("addButton"));
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(mockToast.error).toHaveBeenCalledWith("scimManagedCannotAdd");
+    });
   });
 });

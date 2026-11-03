@@ -158,11 +158,34 @@ describe("scimGroupSchema", () => {
     const result = scimGroupSchema.safeParse({
       schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
       displayName: "ADMIN",
-      members: [{ value: "user-1" }],
+      members: [{ value: "11111111-1111-4111-8111-111111111111" }],
     });
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.members).toHaveLength(1);
+    }
+  });
+
+  // F2/S-F3: a non-uuid member value is rejected; a mixed-case uuid is
+  // lowercased, as the database returns uuids that way.
+  it("rejects a non-uuid member value", () => {
+    const result = scimGroupSchema.safeParse({
+      schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+      displayName: "ADMIN",
+      members: [{ value: "not-a-uuid" }],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("lowercases a mixed-case member uuid", () => {
+    const result = scimGroupSchema.safeParse({
+      schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+      displayName: "ADMIN",
+      members: [{ value: "11111111-1111-4111-8111-111111111111".toUpperCase() }],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.members[0]?.value).toBe("11111111-1111-4111-8111-111111111111");
     }
   });
 

@@ -161,14 +161,16 @@ describe("GET /api/teams/[teamId]/members", () => {
     expect(json[1].tenantName).toBe("External Org");
   });
 
-  it("lists members who left the tenant, flagged departed, to a role that can remove them", async () => {
+  it("lists members who left the tenant, flagged departed, and SCIM-pending members, flagged pendingApproval, to a role that can invite and remove", async () => {
     mockPrismaTeamMember.findMany.mockResolvedValue([
-      { id: "m1", userId: "u1", role: TEAM_ROLE.OWNER, createdAt: now, deactivatedByTenant: false },
-      { id: "m2", userId: "u2", role: TEAM_ROLE.MEMBER, createdAt: now, deactivatedByTenant: true },
+      { id: "m1", userId: "u1", role: TEAM_ROLE.OWNER, createdAt: now, deactivatedByTenant: false, scimApprovalPending: false },
+      { id: "m2", userId: "u2", role: TEAM_ROLE.MEMBER, createdAt: now, deactivatedByTenant: true, scimApprovalPending: false },
+      { id: "m3", userId: "u3", role: TEAM_ROLE.VIEWER, createdAt: now, deactivatedByTenant: false, scimApprovalPending: true },
     ]);
     mockPrismaUser.findMany.mockResolvedValue([
       { id: "u1", name: "Owner", email: "owner@test.com", image: null },
       { id: "u2", name: "Left", email: "left@test.com", image: null },
+      { id: "u3", name: "Pending", email: "pending@test.com", image: null },
     ]);
     mockPrismaTenantMember.findMany.mockResolvedValue([]);
 
@@ -178,14 +180,81 @@ describe("GET /api/teams/[teamId]/members", () => {
     );
     const json = await res.json();
 
-    expect(json.map((m: { id: string; departed: boolean }) => [m.id, m.departed])).toEqual([["m1", false], ["m2", true]]);
+    expect(json.map((m: { id: string; departed: boolean; pendingApproval: boolean }) => [m.id, m.departed, m.pendingApproval])).toEqual([
+      ["m1", false, false],
+      ["m2", true, false],
+      ["m3", false, true],
+    ]);
     expect(mockPrismaTeamMember.findMany.mock.calls[0][0].where).toEqual({
       teamId: TEAM_ID,
-      OR: [{ deactivatedAt: null }, { deactivatedByTenant: true }],
+      OR: [{ deactivatedAt: null }, { deactivatedByTenant: true }, { scimApprovalPending: true }],
     });
   });
 
-  it("does not list members who left the tenant to a VIEWER", async () => {
+  it("flags a pending row pendingTenantInactive when the user's active tenant isn't the team's own (absent or elsewhere)", async () => {
+    mockPrismaTeamMember.findMany.mockResolvedValue([
+      { id: "m1", userId: "u1", role: TEAM_ROLE.VIEWER, createdAt: now, deactivatedByTenant: false, scimApprovalPending: true },
+      { id: "m2", userId: "u2", role: TEAM_ROLE.VIEWER, createdAt: now, deactivatedByTenant: false, scimApprovalPending: true },
+      { id: "m3", userId: "u3", role: TEAM_ROLE.VIEWER, createdAt: now, deactivatedByTenant: false, scimApprovalPending: true },
+    ]);
+    mockPrismaUser.findMany.mockResolvedValue([
+      { id: "u1", name: "In team's tenant", email: "u1@test.com", image: null },
+      { id: "u2", name: "In another tenant", email: "u2@test.com", image: null },
+      { id: "u3", name: "No active tenant", email: "u3@test.com", image: null },
+    ]);
+    // mockWithTeamTenantRls above hands the route "tenant-1" as the team's
+    // own tenantId. u1 is active there; u2 is active in a different tenant;
+    // u3 has no active tenantMember row at all (departed/absent).
+    mockPrismaTenantMember.findMany.mockResolvedValue([
+      { userId: "u1", tenantId: "tenant-1", tenant: { name: "Team Tenant" } },
+      { userId: "u2", tenantId: "tenant-other", tenant: { name: "Other Tenant" } },
+    ]);
+
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/members`),
+      createParams({ teamId: TEAM_ID }),
+    );
+    const json = await res.json();
+
+    expect(json.map((m: { id: string; pendingTenantInactive: boolean }) => [m.id, m.pendingTenantInactive])).toEqual([
+      ["m1", false],
+      ["m2", true],
+      ["m3", true],
+    ]);
+  });
+
+  // S-R2-1/F-N5/T-N1 (review round 2): a user can hold an active tenantMember
+  // row in the team's own tenant AND a second tenant at once — pending must
+  // read as active-in-team regardless of which row a last-wins Map would
+  // have kept, so both createdAt orderings are exercised.
+  it.each([
+    ["the team-tenant row listed first", [
+      { userId: "u1", tenantId: "tenant-1", tenant: { name: "Team Tenant" } },
+      { userId: "u1", tenantId: "tenant-other", tenant: { name: "Other Tenant" } },
+    ]],
+    ["the other-tenant row listed first", [
+      { userId: "u1", tenantId: "tenant-other", tenant: { name: "Other Tenant" } },
+      { userId: "u1", tenantId: "tenant-1", tenant: { name: "Team Tenant" } },
+    ]],
+  ])("does not flag pendingTenantInactive for a pending user active in both the team tenant and another tenant, %s", async (_label, userTenants) => {
+    mockPrismaTeamMember.findMany.mockResolvedValue([
+      { id: "m1", userId: "u1", role: TEAM_ROLE.VIEWER, createdAt: now, deactivatedByTenant: false, scimApprovalPending: true },
+    ]);
+    mockPrismaUser.findMany.mockResolvedValue([
+      { id: "u1", name: "Dual tenant", email: "u1@test.com", image: null },
+    ]);
+    mockPrismaTenantMember.findMany.mockResolvedValue(userTenants);
+
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/members`),
+      createParams({ teamId: TEAM_ID }),
+    );
+    const json = await res.json();
+
+    expect(json[0].pendingTenantInactive).toBe(false);
+  });
+
+  it("does not list members who left the tenant, or pending ones, to a VIEWER", async () => {
     mockRequireTeamMember.mockResolvedValue({ role: TEAM_ROLE.VIEWER });
     mockPrismaTeamMember.findMany.mockResolvedValue([]);
 
@@ -557,6 +626,27 @@ describe("POST /api/teams/[teamId]/members", () => {
     expect(res.status).toBe(409);
     const json = await res.json();
     expect(json.error).toBe("SCIM_MANAGED_MEMBER");
+  });
+
+  it("returns 409 SCIM_APPROVAL_PENDING for a pending member, ahead of SCIM_MANAGED_MEMBER (a pending row is always scimManaged too)", async () => {
+    existingTarget.value = ({
+      id: "existing-m-1",
+      userId: TARGET_USER_ID,
+      deactivatedAt: new Date(),
+      scimManaged: true,
+      scimApprovalPending: true,
+    });
+
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/members`, {
+        body: { userId: TARGET_USER_ID, role: TEAM_ROLE.MEMBER },
+      }),
+      createParams({ teamId: TEAM_ID }),
+    );
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error).toBe("SCIM_APPROVAL_PENDING");
+    expect(mockPrismaTeamMember.update).not.toHaveBeenCalled();
   });
 
   it("accepts an uppercase spelling of the target's id, locking and adding the lowercase id", async () => {

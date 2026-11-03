@@ -205,9 +205,17 @@ These user-meaningful fields should be rendered in `getTargetLabel()` with i18n 
 | `TEAM_MEMBER_INVITE` | TEAM | TeamInvitation | `{ inviteeEmail }` | inviteeEmail |
 | `TEAM_MEMBER_REMOVE` | TEAM | TeamMember | `{ removedUserId, removedRole }` | removedRole |
 | `TEAM_ROLE_UPDATE` | TEAM | TeamMember | `{ newRole, previousRole, transfer }` | roleChange template |
+| `SCIM_GROUP_MAPPING_CREATE` | TEAM | Team | `{ displayName }` | displayName |
+| `TEAM_MEMBER_SCIM_PENDING` | TEAM | TeamMember | `{ userId, role, previousRole? }` | role |
+| `TEAM_MEMBER_SCIM_PENDING_WITHDRAW` | TEAM | TeamMember | `{ userId, role }` | role |
+| `TEAM_MEMBER_SCIM_REMOVE` | TEAM | TeamMember | `{ userId, role, departed? }` | role |
+| `TEAM_MEMBER_SCIM_ROLE_UPDATE` | TEAM | TeamMember | `{ userId, newRole, previousRole }` | roleChange template |
+| `TEAM_MEMBER_SCIM_APPROVE` | TEAM | TeamMember | `{ memberId, role }` | role |
+| `TEAM_MEMBER_SCIM_REJECT` | TEAM | TeamMember | `{ memberId, role }` | role |
 
 **Notes:**
 - TEAM_MEMBER_ADD: Logged when a member is directly added (not via invitation). `reactivated` is true when a previously removed member is re-added.
+- SCIM_GROUP_MAPPING_CREATE and the TEAM_MEMBER_SCIM_* actions (scim-team-admission-approval plan) are TEAM-scoped, in `group:team` rather than `group:scim` below, so team webhooks (which exclude `group:scim`) still deliver them. A SCIM group add now leaves an admitted member PENDING — deactivated, no key — until a team OWNER/ADMIN approves (TEAM_MEMBER_SCIM_APPROVE) or rejects (TEAM_MEMBER_SCIM_REJECT) it; `metadata.scimTokenId` is also present on all of these.
 
 ### Emergency Access (`group:emergency`)
 
@@ -407,7 +415,7 @@ These user-meaningful fields should be rendered in `getTargetLabel()` with i18n 
 | `group:attachment` | ATTACHMENT_UPLOAD, ATTACHMENT_DELETE |
 | `group:folder` | FOLDER_CREATE, FOLDER_UPDATE, FOLDER_DELETE |
 | `group:history` | ENTRY_HISTORY_RESTORE, HISTORY_PURGE |
-| `group:team` | TEAM_MEMBER_ADD, TEAM_MEMBER_INVITE, TEAM_MEMBER_REMOVE, TEAM_ROLE_UPDATE |
+| `group:team` | TEAM_MEMBER_ADD, TEAM_MEMBER_INVITE, TEAM_MEMBER_REMOVE, TEAM_ROLE_UPDATE, TEAM_MEMBER_TENANT_DEACTIVATE, TEAM_MEMBER_TENANT_RESTORE, TEAM_OWNER_ASSIGNED_BY_TENANT_ADMIN, SCIM_GROUP_MAPPING_CREATE, TEAM_MEMBER_SCIM_PENDING, TEAM_MEMBER_SCIM_PENDING_WITHDRAW, TEAM_MEMBER_SCIM_REMOVE, TEAM_MEMBER_SCIM_ROLE_UPDATE, TEAM_MEMBER_SCIM_APPROVE, TEAM_MEMBER_SCIM_REJECT |
 | `group:share` | SHARE_CREATE, SHARE_REVOKE, SHARE_ACCESS_VERIFY_SUCCESS, SHARE_ACCESS_VERIFY_FAILED |
 | `group:admin` | MASTER_KEY_ROTATION, TEAM_E2E_MIGRATION, TEAM_KEY_ROTATION, TEAM_MEMBER_KEY_DISTRIBUTE, POLICY_UPDATE, AUDIT_LOG_DOWNLOAD, WATCHTOWER_ALERT_SENT, ADMIN_VAULT_RESET_INITIATE, ADMIN_VAULT_RESET_EXECUTE |
 | `group:scim` | SCIM_TOKEN_CREATE, SCIM_TOKEN_REVOKE, SCIM_USER_CREATE, SCIM_USER_UPDATE, SCIM_USER_DEACTIVATE, SCIM_USER_REACTIVATE, SCIM_USER_DELETE, SCIM_GROUP_UPDATE |
@@ -425,6 +433,59 @@ These user-meaningful fields should be rendered in `getTargetLabel()` with i18n 
 | `group:serviceAccount` | SERVICE_ACCOUNT_CREATE, SERVICE_ACCOUNT_UPDATE, SERVICE_ACCOUNT_DELETE, SERVICE_ACCOUNT_TOKEN_CREATE, SERVICE_ACCOUNT_TOKEN_REVOKE, ACCESS_REQUEST_CREATE, ACCESS_REQUEST_APPROVE, ACCESS_REQUEST_DENY |
 | `group:mcpClient` | MCP_CLIENT_CREATE, MCP_CLIENT_UPDATE, MCP_CLIENT_DELETE, MCP_CLIENT_DCR_REGISTER, MCP_CLIENT_DCR_CLAIM, MCP_CLIENT_DCR_CLEANUP, MCP_CONSENT_GRANT, MCP_CONSENT_DENY, MCP_REFRESH_TOKEN_ROTATE, MCP_REFRESH_TOKEN_REPLAY |
 | `group:delegation` | DELEGATION_CREATE, DELEGATION_REVOKE, DELEGATION_EXPIRE, DELEGATION_READ, DELEGATION_CHECK |
+
+---
+
+## Operator Listing: Pre-existing SCIM Admissions (C7)
+
+`scim-team-admission-approval` leaves memberships SCIM admitted before this
+change active (SC1 — no retroactive backfill). The query below lists them, so
+an operator can review memberships that gained team access without going
+through the new approval step.
+
+```sql
+SELECT tm.team_id, tm.user_id, tm.role, tm.created_at
+  FROM team_members tm
+ WHERE tm.scim_managed = true
+   AND tm.deactivated_at IS NULL
+   AND NOT EXISTS (
+     SELECT 1 FROM audit_logs al
+      WHERE al.action = 'TEAM_MEMBER_SCIM_APPROVE'
+        AND al.team_id = tm.team_id
+        AND al.target_id = tm.user_id::text
+   )
+ ORDER BY tm.team_id, tm.user_id;
+```
+
+Read-only. Run it as the table owner (`passwd_user`, the role
+`MIGRATION_DATABASE_URL` points at in dev) — under `passwd_app` with FORCE RLS
+it returns an empty set regardless of the real answer, because every row
+belongs to some other tenant's RLS-scoped view:
+
+```bash
+psql "$MIGRATION_DATABASE_URL" -c "
+  SELECT tm.team_id, tm.user_id, tm.role, tm.created_at
+    FROM team_members tm
+   WHERE tm.scim_managed = true
+     AND tm.deactivated_at IS NULL
+     AND NOT EXISTS (
+       SELECT 1 FROM audit_logs al
+        WHERE al.action = 'TEAM_MEMBER_SCIM_APPROVE'
+          AND al.team_id = tm.team_id
+          AND al.target_id = tm.user_id::text
+     )
+   ORDER BY tm.team_id, tm.user_id;
+"
+```
+
+Run against the dev database (2026-11-03): 0 rows — no pre-existing
+`scim_managed` active membership lacked a `TEAM_MEMBER_SCIM_APPROVE` row at
+the time this query was written and verified (seeded and rolled back a
+matching row first to confirm the query returns a non-empty result when one
+exists). A non-empty result in a real deployment means the listed
+memberships were admitted by a SCIM group sync before this change and never
+went through team approval — review them manually; a UI listing is a
+follow-up issue.
 
 ---
 

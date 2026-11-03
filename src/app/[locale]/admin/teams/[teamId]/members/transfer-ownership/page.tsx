@@ -61,8 +61,9 @@ export default function TeamTransferOwnershipPage({
   const [transferSearch, setTransferSearch] = useState("");
   const viewerTenantName = members.find((m) => m.role === TEAM_ROLE.OWNER)?.tenantName ?? null;
   const transferCandidates = filterMembers(
-    // A member who left the tenant cannot take ownership (PUT refuses them).
-    members.filter((m) => m.role !== TEAM_ROLE.OWNER && !m.departed),
+    // A member who left the tenant cannot take ownership (PUT refuses them),
+    // nor can a SCIM admission still awaiting team approval.
+    members.filter((m) => m.role !== TEAM_ROLE.OWNER && !m.departed && !m.pendingApproval),
     transferSearch,
   );
 
