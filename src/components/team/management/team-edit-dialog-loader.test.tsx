@@ -166,6 +166,8 @@ describe("TeamEditDialogLoader", () => {
         encryptedItemKey: "ek-ct",
         itemKeyIv: "ek-iv",
         itemKeyAuthTag: "ek-at",
+        itemKeyId: "ik-1",
+        nextItemKeyVersion: 3,
       }),
     });
     mockDecryptData.mockResolvedValue(
@@ -191,6 +193,7 @@ describe("TeamEditDialogLoader", () => {
       encryptedItemKey: "ek-ct",
       itemKeyIv: "ek-iv",
       itemKeyAuthTag: "ek-at",
+      itemKeyId: "ik-1",
       teamKeyVersion: 2,
     });
     expect(mockBuildTeamEntryAAD).toHaveBeenCalledWith("team-1", "entry-1", "blob", 1);

@@ -96,6 +96,7 @@ function TeamExportPanelContent({ teamId: scopedTeamId }: TeamExportPanelContent
             encryptedItemKey: raw.encryptedItemKey,
             itemKeyIv: raw.itemKeyIv,
             itemKeyAuthTag: raw.itemKeyAuthTag,
+            itemKeyId: raw.itemKeyId ?? null,
             teamKeyVersion: raw.teamKeyVersion ?? 1,
           });
           const aad = buildTeamEntryAAD(scopedTeamId, raw.id, "blob", itemKeyVersion);

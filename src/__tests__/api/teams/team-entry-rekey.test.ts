@@ -29,9 +29,20 @@ const {
 }));
 
 const txMock = {
-  teamPasswordEntry: { findUnique: mockEntryFindUnique },
+  teamPasswordEntry: {
+    findUnique: mockEntryFindUnique,
+    count: vi.fn(async () => 0),
+    findMany: vi.fn(async () => [] as { id: string }[]),
+    groupBy: vi.fn(async () => [] as { teamKeyVersion: number; _count: { _all: number } }[]),
+  },
   team: { findUnique: mockTeamFindUnique },
   attachment: { count: vi.fn(async () => 0) },
+  teamMemberKey: { findMany: vi.fn(async () => [] as { userId: string }[]) },
+  teamMember: {
+    findMany: vi.fn(async () => [] as { userId: string; role: string }[]),
+    count: vi.fn(async () => 0),
+  },
+  $queryRaw: vi.fn(async () => [{ count: BigInt(0) }]),
 };
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -64,6 +75,12 @@ vi.mock("@/lib/tenant-context", () => ({
 vi.mock("@/lib/team/team-key-rotation-lock", () => ({
   lockTeamKeyVersion: mockLockTeamKeyVersion,
   TeamRotationInProgressError: class extends Error {},
+}));
+vi.mock("@/lib/audit/audit-user-lookup", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/audit/audit-user-lookup")>()),
+  fetchUserDisplayMap: vi.fn(async (ids: string[]) =>
+    new Map(ids.map((id) => [id, { id, name: `n-${id}`, email: `${id}@example.com`, image: null }])),
+  ),
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditInTx: vi.fn(),
@@ -169,5 +186,47 @@ describe("re-key pass routes — gates", () => {
     expect((await post()).status).toBe(404);
     expect((await getEntry()).status).toBe(404);
     expect(mockLockTeamKeyVersion).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET …/rekey holders per pending version (D36)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockReadCheck.mockResolvedValue({ allowed: true });
+    mockTeamFindUnique.mockResolvedValue({ teamKeyVersion: 3 });
+    mockWithTeamTenantRls.mockImplementation(
+      async (_teamId: string, fn: (tenantId: string, tx: typeof txMock) => unknown) => fn("tenant-1", txMock),
+    );
+    txMock.teamPasswordEntry.groupBy.mockResolvedValue([{ teamKeyVersion: 2, _count: { _all: 1 } }]);
+  });
+
+  it("returns 200 with the other active holders and the deactivated count", async () => {
+    const me = DEFAULT_SESSION.user.id;
+    txMock.teamMemberKey.findMany.mockResolvedValue([{ userId: me }, { userId: "y" }, { userId: "gone" }]);
+    txMock.teamMember.findMany.mockResolvedValue([{ userId: me, role: "ADMIN" }, { userId: "y", role: "ADMIN" }]);
+    txMock.teamMember.count.mockResolvedValue(1);
+
+    const { status, json } = await getList();
+
+    expect(status).toBe(200);
+    expect(json.versionHolders[2]).toMatchObject({
+      callerHolds: true,
+      activeHolderCount: 2,
+      deactivatedHolderCount: 1,
+      holders: [{ id: "y", name: "n-y", email: "y@example.com" }],
+    });
+  });
+
+  it("bounds the listed holders", async () => {
+    const many = Array.from({ length: 25 }, (_, i) => ({ userId: `u${String(i).padStart(2, "0")}`, role: "MEMBER" }));
+    txMock.teamMemberKey.findMany.mockResolvedValue(many.map((m) => ({ userId: m.userId })));
+    txMock.teamMember.findMany.mockResolvedValue(many);
+
+    const { json } = await getList();
+
+    expect(json.versionHolders[2].holders.length).toBeLessThan(many.length);
+    expect(json.versionHolders[2].activeHolderCount).toBe(many.length);
   });
 });

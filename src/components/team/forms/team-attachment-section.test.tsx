@@ -40,7 +40,10 @@ vi.mock("@/lib/url-helpers", () => ({
 
 vi.mock("@/lib/team/team-vault-context", () => ({
   useTeamVault: () => ({
-    getItemEncryptionKey: vi.fn(async () => ({} as CryptoKey)),
+    getItemEncryptionKey: vi.fn(),
+    getTeamKeyInfo: vi.fn(async () => null),
+    // No key is available to this member at any version.
+    resolveTeamKey: vi.fn(async () => ({ reason: "not_available" })),
   }),
 }));
 
@@ -60,6 +63,8 @@ vi.mock("@/lib/http/toast-api-error", () => ({
 }));
 
 import { TeamAttachmentSection } from "./team-attachment-section";
+import { fireEvent, waitFor } from "@testing-library/react";
+import { toastApiError } from "@/lib/http/toast-api-error";
 
 describe("TeamAttachmentSection", () => {
   beforeEach(() => {
@@ -167,5 +172,32 @@ describe("TeamAttachmentSection", () => {
     expect(screen.getByText("noAttachments")).toBeInTheDocument();
     // No leaked attachment data
     expect(screen.queryByText(/test\.pdf/)).toBeNull();
+  });
+
+  describe("download", () => {
+    const ATT = { id: "a1", filename: "x.png", contentType: "image/png", sizeBytes: 100, createdAt: new Date().toISOString() };
+
+    it("surfaces ATTACHMENT_KEY_UNAVAILABLE from the server with its exit", async () => {
+      const res = new Response(JSON.stringify({ error: "ATTACHMENT_KEY_UNAVAILABLE" }), { status: 409 });
+      mockFetch.mockResolvedValue(res);
+      render(<TeamAttachmentSection teamId="team-1" entryId="entry-1" attachments={[ATT]} onAttachmentsChange={vi.fn()} />);
+
+      fireEvent.click(screen.getByTitle("download"));
+
+      await waitFor(() => expect(toastApiError).toHaveBeenCalledWith(res, expect.any(Function)));
+    });
+
+    it("says the attachment key is unavailable when no key this member holds opens it", async () => {
+      mockFetch.mockResolvedValue(new Response(JSON.stringify({
+        id: "a1", filename: "x.png", contentType: "image/png", sizeBytes: 100,
+        encryptedData: "AAAA", iv: "0".repeat(24), authTag: "0".repeat(32), aadVersion: 1,
+        encryptionMode: 0, keyVersion: 1,
+      }), { status: 200 }));
+      render(<TeamAttachmentSection teamId="team-1" entryId="entry-1" attachments={[ATT]} onAttachmentsChange={vi.fn()} />);
+
+      fireEvent.click(screen.getByTitle("download"));
+
+      await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith("attachmentKeyUnavailable"));
+    });
   });
 });

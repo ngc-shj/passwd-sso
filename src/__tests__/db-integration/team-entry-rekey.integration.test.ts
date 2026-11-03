@@ -680,6 +680,44 @@ describe("team entry re-key — real-DB integration", () => {
 
   // ── A1 (server half), A10 ────────────────────────────────────────────────
 
+  async function versionHolders(s: Seeded) {
+    const res = await rekeyListGET(
+      new NextRequest(`http://localhost/api/teams/${s.team.teamId}/rekey`),
+      { params: Promise.resolve({ teamId: s.team.teamId }) },
+    );
+    expect(res.status).toBe(200);
+    return ((await res.json()) as {
+      versionHolders: Record<string, {
+        callerHolds: boolean;
+        activeHolderCount: number;
+        holders: { id: string; canRekey: boolean }[];
+        deactivatedHolderCount: number;
+      }>;
+    }).versionHolders;
+  }
+
+  it("D36: the list names the other active holders of a pending version and counts a tenant-deactivated holder (control: none deactivated → 0)", async () => {
+    const s = await seedEntry();
+    const otherAdmin = await seedMember(s.team.teamId, "ADMIN", [3]);
+
+    const before = (await versionHolders(s))[3];
+    expect(before).toMatchObject({ callerHolds: true, activeHolderCount: 3, deactivatedHolderCount: 0 });
+    expect(new Set(before.holders.map((h) => `${h.id}:${h.canRekey}`))).toEqual(
+      new Set([`${otherAdmin}:true`, `${s.team.member}:false`]),
+    );
+
+    // The MEMBER leaves the tenant: their membership is deactivated, their key row stays.
+    await sql(
+      `UPDATE team_members SET deactivated_at = now(), deactivated_by_tenant = true
+        WHERE team_id = $1::uuid AND user_id = $2::uuid`,
+      s.team.teamId, s.team.member,
+    );
+
+    const after = (await versionHolders(s))[3];
+    expect(after).toMatchObject({ callerHolds: true, activeHolderCount: 2, deactivatedHolderCount: 1 });
+    expect(after.holders.map((h) => h.id)).toEqual([otherAdmin]);
+  });
+
   it("A1: after a re-key the new ItemKey (from the current team key) opens the blob, overview, every history row and the CEK; the old ItemKey opens none; nothing is off-version; pending 0", async () => {
     const s = await seedEntry();
     expect((await rekeyList(s)).pendingCount).toBe(1);

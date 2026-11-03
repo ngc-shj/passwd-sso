@@ -17,7 +17,12 @@ import { handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/http
 import { teamRekeyReadLimiter } from "@/lib/security/rate-limiters";
 import { displayIdentityOf, fetchUserDisplayMap } from "@/lib/audit/audit-user-lookup";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
-import { isRekeyerHolder, normalizeTeamKeyVersion, teamKeyVersionHolders } from "@/lib/team/team-item-key";
+import {
+  deactivatedTeamKeyVersionHolderCount,
+  isRekeyerHolder,
+  normalizeTeamKeyVersion,
+  teamKeyVersionHolders,
+} from "@/lib/team/team-item-key";
 
 type RouteContext = { params: Promise<{ teamId: string }> };
 
@@ -26,11 +31,24 @@ const rekeyPageQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(REKEY_PAGE_LIMIT_MAX).default(REKEY_PAGE_LIMIT_DEFAULT),
 });
 
+/** Holders of one pending team key version, as the pass reports name them (C1). */
+type VersionHolders = {
+  /** The caller holds this version. */
+  callerHolds: boolean;
+  /** Active holders, the caller included. */
+  activeHolderCount: number;
+  /** Active holders other than the caller (re-keyers first), at most REKEY_HOLDERS_LISTED_MAX. */
+  otherHolderIds: { userId: string; canRekey: boolean }[];
+  /** Key holders whose team membership is deactivated (e.g. left the tenant). */
+  deactivatedHolderCount: number;
+};
+
 // GET /api/teams/[teamId]/rekey?after=<entryId>&limit=<n>
 // The re-key pass's work list (plan C2): entries whose ItemKey predates the
 // team's current key version (trashed and archived included), one keyset page
-// of their ids, how many are in each C1 state for the caller, and the history
-// rows left under an old ItemKey.
+// of their ids, how many are in each C1 state for the caller, who holds each
+// pending version (deviation D36), and the history rows left under an old
+// ItemKey.
 async function handleGET(req: NextRequest, { params }: RouteContext) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -84,9 +102,20 @@ async function handleGET(req: NextRequest, { params }: RouteContext) {
       [REKEY_ENTRY_STATE.UNRECOVERABLE]: 0,
     };
     const rekeyersByVersion: Record<number, string[]> = {};
+    const holdersByVersion: Record<number, VersionHolders> = {};
     for (const [version, count] of [...pendingPerVersion].sort(([a], [b]) => a - b)) {
       const holders = await teamKeyVersionHolders(tx, teamId, version);
       const rekeyers = holders.filter(isRekeyerHolder);
+      holdersByVersion[version] = {
+        callerHolds: holders.some((h) => h.userId === userId),
+        activeHolderCount: holders.length,
+        otherHolderIds: holders
+          .filter((h) => h.userId !== userId)
+          .map((h) => ({ userId: h.userId, canRekey: isRekeyerHolder(h) }))
+          .sort((a, b) => Number(b.canRekey) - Number(a.canRekey) || a.userId.localeCompare(b.userId))
+          .slice(0, REKEY_HOLDERS_LISTED_MAX),
+        deactivatedHolderCount: await deactivatedTeamKeyVersionHolderCount(tx, teamId, version),
+      };
       let state: RekeyEntryState;
       if (holders.some((h) => h.userId === userId)) {
         state = REKEY_ENTRY_STATE.READY;
@@ -121,6 +150,7 @@ async function handleGET(req: NextRequest, { params }: RouteContext) {
       pendingCount,
       stateCounts,
       rekeyersByVersion,
+      holdersByVersion,
       retainedHistoryCount: Number(retained?.count ?? 0),
       entryIds: page.map((e) => e.id),
     };
@@ -133,7 +163,10 @@ async function handleGET(req: NextRequest, { params }: RouteContext) {
   // Identity is hydrated after the team context closes (a holder who belongs
   // to another primary tenant has a users row RLS hides inside it).
   const users = await fetchUserDisplayMap(
-    Object.values(result.rekeyersByVersion).flat(),
+    [
+      ...Object.values(result.rekeyersByVersion).flat(),
+      ...Object.values(result.holdersByVersion).flatMap((v) => v.otherHolderIds.map((h) => h.userId)),
+    ],
     BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP,
   );
   const holders = Object.fromEntries(
@@ -143,10 +176,23 @@ async function handleGET(req: NextRequest, { params }: RouteContext) {
     ]),
   );
 
+  const versionHolders = Object.fromEntries(
+    Object.entries(result.holdersByVersion).map(([version, v]) => [
+      version,
+      {
+        callerHolds: v.callerHolds,
+        activeHolderCount: v.activeHolderCount,
+        holders: v.otherHolderIds.map((h) => ({ ...displayIdentityOf(users, h.userId), canRekey: h.canRekey })),
+        deactivatedHolderCount: v.deactivatedHolderCount,
+      },
+    ]),
+  );
+
   return NextResponse.json({
     pendingCount: result.pendingCount,
     stateCounts: result.stateCounts,
     holders,
+    versionHolders,
     retainedHistoryCount: result.retainedHistoryCount,
     entryIds: result.entryIds,
   });

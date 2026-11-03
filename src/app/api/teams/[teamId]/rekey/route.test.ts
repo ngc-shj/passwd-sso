@@ -31,7 +31,7 @@ const txMock = {
   team: { findUnique: vi.fn() },
   teamPasswordEntry: { count: vi.fn(), findMany: vi.fn(), groupBy: vi.fn() },
   teamMemberKey: { findMany: vi.fn() },
-  teamMember: { findMany: vi.fn() },
+  teamMember: { findMany: vi.fn(), count: vi.fn() },
 };
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -102,6 +102,7 @@ describe("GET /api/teams/[teamId]/rekey", () => {
         where.userId.in.includes(h.userId) && all.findIndex((o) => o.userId === h.userId) === i,
       ),
     );
+    txMock.teamMember.count.mockResolvedValue(0);
     txMock.$queryRaw.mockResolvedValue([{ count: BigInt(0) }]);
     mockFetchUserDisplayMap.mockImplementation(async (ids: string[]) =>
       new Map(ids.map((id) => [id, { id, name: `name-${id.slice(-2)}`, email: `${id.slice(-2)}@example.com`, image: null }])),
@@ -232,6 +233,55 @@ describe("GET /api/teams/[teamId]/rekey", () => {
     );
     const { json } = await list();
     expect(json.holders[2]).toHaveLength(REKEY_HOLDERS_LISTED_MAX);
+  });
+
+  // ── Holders per pending version (D36) ────────────────────────────────────
+
+  it("names the other active holders of every pending version, the caller's own included, with deactivated holders counted", async () => {
+    txMock.teamPasswordEntry.groupBy.mockResolvedValue([
+      { teamKeyVersion: 2, _count: { _all: 1 } },
+      { teamKeyVersion: 3, _count: { _all: 1 } },
+    ]);
+    holdersByVersion.set(2, [{ userId: ME, role: "ADMIN" }, { userId: MEMBER, role: "MEMBER" }, { userId: ADMIN, role: "ADMIN" }]);
+    holdersByVersion.set(3, [{ userId: ME, role: "ADMIN" }]);
+    txMock.teamMember.count.mockImplementation(async ({ where }: { where: { userId: { in: string[] } } }) =>
+      where.userId.in.length === 3 ? 0 : 2,
+    );
+
+    const { res, json } = await list();
+
+    expect(res.status).toBe(200);
+    expect(json.versionHolders).toEqual({
+      2: {
+        callerHolds: true,
+        activeHolderCount: 3,
+        // Re-keyers first; the caller is not listed.
+        holders: [
+          { id: ADMIN, name: "name-a1", email: "a1@example.com", canRekey: true },
+          { id: MEMBER, name: "name-b1", email: "b1@example.com", canRekey: false },
+        ],
+        deactivatedHolderCount: 0,
+      },
+      // The caller is the only active holder.
+      3: { callerHolds: true, activeHolderCount: 1, holders: [], deactivatedHolderCount: 2 },
+    });
+    expect(txMock.teamMember.count).toHaveBeenCalledWith({
+      where: { teamId: TEAM, userId: { in: [ME] }, deactivatedAt: { not: null } },
+    });
+  });
+
+  it(`lists at most ${REKEY_HOLDERS_LISTED_MAX} other holders per version but counts them all`, async () => {
+    txMock.teamPasswordEntry.groupBy.mockResolvedValue([{ teamKeyVersion: 2, _count: { _all: 1 } }]);
+    holdersByVersion.set(
+      2,
+      Array.from({ length: REKEY_HOLDERS_LISTED_MAX + 5 }, (_, i) => ({
+        userId: `00000000-0000-4000-8000-0000000002${String(i).padStart(2, "0")}`,
+        role: "MEMBER",
+      })),
+    );
+    const { json } = await list();
+    expect(json.versionHolders[2].holders).toHaveLength(REKEY_HOLDERS_LISTED_MAX);
+    expect(json.versionHolders[2].activeHolderCount).toBe(REKEY_HOLDERS_LISTED_MAX + 5);
   });
 
   // ── Retained history ─────────────────────────────────────────────────────

@@ -7,6 +7,7 @@ import {
   itemKeyIvReused,
   normalizeTeamKeyVersion,
   teamKeyVersionHolders,
+  deactivatedTeamKeyVersionHolderCount,
 } from "./team-item-key";
 
 const ID_A = "11111111-1111-4111-8111-111111111111";
@@ -112,6 +113,26 @@ describe("teamKeyVersionHolders", () => {
     const tx = fakeTx([], [{ userId: "u1", role: "OWNER" }]);
     expect(await teamKeyVersionHolders(tx as never, "team-1", 2)).toEqual([]);
     expect(tx.teamMember.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("deactivatedTeamKeyVersionHolderCount", () => {
+  it("counts key holders at the version whose membership is deactivated", async () => {
+    const tx = {
+      teamMemberKey: { findMany: vi.fn().mockResolvedValue([{ userId: "u1" }, { userId: "u2" }]) },
+      teamMember: { count: vi.fn().mockResolvedValue(1) },
+    };
+    expect(await deactivatedTeamKeyVersionHolderCount(tx as never, "team-1", 0)).toBe(1);
+    expect(tx.teamMemberKey.findMany).toHaveBeenCalledWith({ where: { teamId: "team-1", keyVersion: 1 }, select: { userId: true } });
+    expect(tx.teamMember.count).toHaveBeenCalledWith({
+      where: { teamId: "team-1", userId: { in: ["u1", "u2"] }, deactivatedAt: { not: null } },
+    });
+  });
+
+  it("is 0 without reading memberships when no key row exists", async () => {
+    const tx = { teamMemberKey: { findMany: vi.fn().mockResolvedValue([]) }, teamMember: { count: vi.fn() } };
+    expect(await deactivatedTeamKeyVersionHolderCount(tx as never, "team-1", 2)).toBe(0);
+    expect(tx.teamMember.count).not.toHaveBeenCalled();
   });
 });
 

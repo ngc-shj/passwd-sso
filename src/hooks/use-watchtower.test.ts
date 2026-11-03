@@ -21,9 +21,6 @@ const {
   mockDecryptData,
   mockBuildPersonalEntryAAD,
   mockBuildTeamEntryAAD,
-  mockBuildItemKeyWrapAAD,
-  mockUnwrapItemKey,
-  mockDeriveItemEncryptionKey,
   mockAnalyzeStrength,
   mockCheckHIBP,
   mockDelay,
@@ -34,9 +31,6 @@ const {
   mockDecryptData: vi.fn(),
   mockBuildPersonalEntryAAD: vi.fn(),
   mockBuildTeamEntryAAD: vi.fn(),
-  mockBuildItemKeyWrapAAD: vi.fn(),
-  mockUnwrapItemKey: vi.fn(),
-  mockDeriveItemEncryptionKey: vi.fn(),
   mockAnalyzeStrength: vi.fn(),
   mockCheckHIBP: vi.fn(),
   mockDelay: vi.fn().mockResolvedValue(undefined),
@@ -55,14 +49,8 @@ vi.mock("@/lib/crypto/crypto-client", () => ({
 vi.mock("@/lib/crypto/crypto-aad", () => ({
   buildPersonalEntryAAD: mockBuildPersonalEntryAAD,
   buildTeamEntryAAD: mockBuildTeamEntryAAD,
-  buildItemKeyWrapAAD: mockBuildItemKeyWrapAAD,
   // C1 const-object: real source exports VAULT_TYPE; mock must mirror.
   VAULT_TYPE: { BLOB: "blob", OVERVIEW: "overview" },
-}));
-
-vi.mock("@/lib/crypto/crypto-team", () => ({
-  unwrapItemKey: mockUnwrapItemKey,
-  deriveItemEncryptionKey: mockDeriveItemEncryptionKey,
 }));
 
 vi.mock("@/lib/security/password-analyzer", () => ({
@@ -1388,9 +1376,57 @@ describe("useWatchtower", () => {
     expect(result.current.loading).toBe(false);
   });
 
+  // D5: an entry carried through a rotation stays at an older team key
+  // version; it is opened with the key at ITS version, not the latest.
+  it("resolves each team entry's own team key version and wrap", async () => {
+    const getEntryDecryptionKey = vi.fn().mockResolvedValue(fakeKey);
+    mockUseTeamVaultOptional.mockReturnValue({
+      getTeamEncryptionKey: vi.fn().mockResolvedValue(fakeKey),
+      getEntryDecryptionKey,
+    });
+    const carried = {
+      id: "team-entry-old",
+      entryType: "LOGIN",
+      encryptedBlob: "cipher",
+      blobIv: "iv",
+      blobAuthTag: "tag",
+      teamKeyVersion: 2,
+      itemKeyVersion: 1,
+      encryptedItemKey: "eik",
+      itemKeyIv: "iki",
+      itemKeyAuthTag: "ika",
+      itemKeyId: "ik-old",
+      updatedAt: new Date().toISOString(),
+      expiresAt: null,
+    };
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse([carried]));
+    mockAnalyzeStrength.mockReturnValueOnce(strongResult);
+    mockDecryptData.mockResolvedValueOnce(JSON.stringify({ title: "T", password: "TeamStr0ng!42" }));
+
+    const { result } = renderHook(() =>
+      useWatchtower({ type: "team", teamId: "team-1" }, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 })
+    );
+    await act(async () => {
+      await result.current.analyze();
+    });
+
+    expect(getEntryDecryptionKey).toHaveBeenCalledWith("team-1", "team-entry-old", {
+      itemKeyVersion: 1,
+      encryptedItemKey: "eik",
+      itemKeyIv: "iki",
+      itemKeyAuthTag: "ika",
+      itemKeyId: "ik-old",
+      teamKeyVersion: 2,
+    });
+    expect(mockDecryptData).toHaveBeenCalledWith(expect.anything(), fakeKey, expect.anything());
+  });
+
   it("analyzes only the selected team vault and preserves team scope in findings", async () => {
     mockUseTeamVaultOptional.mockReturnValue({
       getTeamEncryptionKey: vi.fn().mockResolvedValue(fakeKey),
+      getEntryDecryptionKey: vi.fn().mockResolvedValue(fakeKey),
     });
 
     const teamListEntry = {
@@ -1545,6 +1581,7 @@ describe("useWatchtower", () => {
   it("flags team entry older than passwordMaxAgeDays as policy-expired (medium)", async () => {
     mockUseTeamVaultOptional.mockReturnValue({
       getTeamEncryptionKey: vi.fn().mockResolvedValue(fakeKey),
+      getEntryDecryptionKey: vi.fn().mockResolvedValue(fakeKey),
     });
 
     // Entry updated 95 days ago; max age is 90 days
@@ -1590,6 +1627,7 @@ describe("useWatchtower", () => {
   it("flags team entry within warning window as policy-expiring (low)", async () => {
     mockUseTeamVaultOptional.mockReturnValue({
       getTeamEncryptionKey: vi.fn().mockResolvedValue(fakeKey),
+      getEntryDecryptionKey: vi.fn().mockResolvedValue(fakeKey),
     });
 
     // Entry updated 80 days ago; max age is 90 days, warning is 14 days
@@ -1636,6 +1674,7 @@ describe("useWatchtower", () => {
   it("team scope: passwordMaxAgeDays=null has no policy effect", async () => {
     mockUseTeamVaultOptional.mockReturnValue({
       getTeamEncryptionKey: vi.fn().mockResolvedValue(fakeKey),
+      getEntryDecryptionKey: vi.fn().mockResolvedValue(fakeKey),
     });
 
     // Entry updated 200 days ago, but no max age policy

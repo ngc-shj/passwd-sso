@@ -59,6 +59,7 @@ export function buildTeamGetDetail(
       encryptedItemKey: raw.encryptedItemKey as string | undefined,
       itemKeyIv: raw.itemKeyIv as string | undefined,
       itemKeyAuthTag: raw.itemKeyAuthTag as string | undefined,
+      itemKeyId: (raw.itemKeyId as string | null | undefined) ?? null,
       teamKeyVersion: (raw.teamKeyVersion as number) ?? 1,
     });
 

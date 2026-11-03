@@ -233,6 +233,8 @@ export async function listTeamPasswords(
           itemKeyAuthTag: entry.itemKeyAuthTag,
         }
       : {}),
+    // Keys the client ItemKey cache (C5); null never caches.
+    itemKeyId: entry.itemKeyId,
     isFavorite: entry.favorites.length > 0,
     isArchived: entry.isArchived,
     tags: entry.tags,

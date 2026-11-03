@@ -27,12 +27,15 @@ import {
 import { toast } from "sonner";
 import { toastApiError } from "@/lib/http/toast-api-error";
 import { useTeamVault } from "@/lib/team/team-vault-context";
-import {
-  encryptBinary,
-  decryptBinary,
-} from "@/lib/crypto/crypto-client";
-import { buildAttachmentAAD, AAD_VERSION } from "@/lib/crypto/crypto-aad";
+import { ItemKeyUpgradeRequiredError } from "@/lib/team/team-vault-core";
 import { apiPath } from "@/lib/constants";
+import {
+  TeamAttachmentKeyError,
+  ATTACHMENT_KEY_FAILURE,
+  decryptTeamAttachmentDownload,
+  type TeamAttachmentDownload,
+} from "@/lib/team/team-attachment-crypto";
+import { TeamEntryUpgradeError, uploadTeamAttachment } from "@/lib/team/team-attachment-upload";
 import {
   ALLOWED_EXTENSIONS,
   ALLOWED_CONTENT_TYPES,
@@ -82,7 +85,7 @@ export function TeamAttachmentSection({
   const t = useTranslations("Attachments");
   const tApi = useTranslations("ApiErrors");
   const tc = useTranslations("Common");
-  const { getItemEncryptionKey } = useTeamVault();
+  const { getItemEncryptionKey, getTeamKeyInfo, resolveTeamKey } = useTeamVault();
   const [uploading, setUploading] = useState(false);
   const [downloading, setDownloading] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<TeamAttachmentMeta | null>(null);
@@ -123,34 +126,18 @@ export function TeamAttachmentSection({
 
     setUploading(true);
     try {
-      // Get ItemKey-derived encryption key
-      const itemKey = await getItemEncryptionKey(scopedId, entryId);
-
-      // Read file as ArrayBuffer
-      const arrayBuffer = await file.arrayBuffer();
-
-      // Pre-generate attachment ID for AAD binding
-      const attachmentId = crypto.randomUUID();
-      const aad = buildAttachmentAAD(entryId, attachmentId);
-
-      // Encrypt client-side with ItemKey + AAD
-      const encrypted = await encryptBinary(arrayBuffer, itemKey, aad);
-
-      // Build FormData with encrypted blob
-      const formData = new FormData();
-      formData.append("id", attachmentId);
-      formData.append("file", new Blob([encrypted.ciphertext.buffer.slice(0) as ArrayBuffer]));
-      formData.append("iv", encrypted.iv);
-      formData.append("authTag", encrypted.authTag);
-      formData.append("filename", file.name);
-      formData.append("contentType", file.type);
-      formData.append("sizeBytes", file.size.toString());
-      formData.append("aadVersion", String(AAD_VERSION));
-      formData.append("encryptionMode", "1");
-
-      const res = await fetchApi(
-        apiPath.teamPasswordAttachments(scopedId, entryId),
-        { method: "POST", body: formData }
+      // Mode 2 under the entry's live ItemKey; a v0 entry is upgraded first.
+      const res = await uploadTeamAttachment(
+        {
+          teamId: scopedId,
+          entryId,
+          fetchApi,
+          getItemEncryptionKey,
+          isUpgradeRequired: (e) => e instanceof ItemKeyUpgradeRequiredError,
+          resolveKey: (version) => resolveTeamKey(scopedId, version),
+          currentTeamKeyVersion: async () => (await getTeamKeyInfo(scopedId))?.keyVersion ?? null,
+        },
+        file,
       );
 
       if (!res.ok) {
@@ -161,8 +148,12 @@ export function TeamAttachmentSection({
       const newAttachment: TeamAttachmentMeta = await res.json();
       onAttachmentsChange([newAttachment, ...attachments]);
       toast.success(t("uploaded"));
-    } catch {
-      toast.error(t("uploadError"));
+    } catch (e) {
+      if (e instanceof TeamEntryUpgradeError && e.response) {
+        await toastApiError(e.response, tApi);
+      } else {
+        toast.error(t("uploadError"));
+      }
     } finally {
       setUploading(false);
     }
@@ -175,35 +166,17 @@ export function TeamAttachmentSection({
         apiPath.teamPasswordAttachmentById(scopedId, entryId, attachment.id)
       );
       if (!res.ok) {
-        throw new Error("Download failed");
-      }
-
-      const data = await res.json();
-
-      // Reject legacy encryptionMode=0 attachments
-      if (data.encryptionMode !== 1) {
-        toast.error(t("legacyEncryption"));
+        // ATTACHMENT_KEY_UNAVAILABLE names its exit (run the re-key pass).
+        await toastApiError(res, tApi);
         return;
       }
 
-      // Get ItemKey-derived encryption key
-      const itemKey = await getItemEncryptionKey(scopedId, entryId);
-
-      // Decode base64 encrypted data
-      const binaryStr = atob(data.encryptedData);
-      const ciphertext = new Uint8Array(binaryStr.length);
-      for (let i = 0; i < binaryStr.length; i++) {
-        ciphertext[i] = binaryStr.charCodeAt(i);
-      }
-
-      // Decrypt client-side with ItemKey + AAD
-      const aad = data.aadVersion >= 1
-        ? buildAttachmentAAD(entryId, attachment.id)
-        : undefined;
-      const decrypted = await decryptBinary(
-        { ciphertext, iv: data.iv, authTag: data.authTag },
-        itemKey,
-        aad,
+      const data = (await res.json()) as TeamAttachmentDownload;
+      const decrypted = await decryptTeamAttachmentDownload(
+        scopedId,
+        entryId,
+        data,
+        (version) => resolveTeamKey(scopedId, version),
       );
 
       // Trigger download
@@ -216,8 +189,12 @@ export function TeamAttachmentSection({
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-    } catch {
-      toast.error(t("downloadError"));
+    } catch (e) {
+      toast.error(
+        e instanceof TeamAttachmentKeyError && e.reason === ATTACHMENT_KEY_FAILURE.UNOPENABLE
+          ? tApi("attachmentKeyUnavailable")
+          : t("downloadError"),
+      );
     } finally {
       setDownloading(null);
     }

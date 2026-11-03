@@ -291,3 +291,45 @@ export function buildTeamEntryPayload(
 
   return { fullBlob, overviewBlob };
 }
+
+/**
+ * The overview a team entry's full blob implies, built the same way the save
+ * path builds it (buildTeamEntryPayload). History rows hold no overview, so a
+ * history restore rebuilds it from the restored blob (deviation D1).
+ */
+export function buildTeamOverviewFromBlob(
+  blob: Record<string, unknown>,
+  fallbackEntryType: EntryTypeValue,
+): string {
+  const str = (key: string): string | undefined =>
+    typeof blob[key] === "string" ? (blob[key] as string) : undefined;
+  const tags = Array.isArray(blob.tags) ? (blob.tags as BuildTeamEntryPayloadInput["tagNames"]) : [];
+  return buildTeamEntryPayload({
+    entryType: typeof blob.entryType === "string" ? (blob.entryType as EntryTypeValue) : fallbackEntryType,
+    title: str("title") ?? "",
+    notes: str("notes") ?? "",
+    tagNames: tags,
+    username: str("username"),
+    password: str("password"),
+    url: str("url"),
+    content: str("content"),
+    cardholderName: str("cardholderName"),
+    cardNumber: str("cardNumber"),
+    brand: str("brand"),
+    fullName: str("fullName"),
+    givenName: str("givenName"),
+    familyName: str("familyName"),
+    email: str("email"),
+    idNumber: str("idNumber"),
+    relyingPartyId: str("relyingPartyId"),
+    bankName: str("bankName"),
+    accountNumber: str("accountNumber"),
+    softwareName: str("softwareName"),
+    licensee: str("licensee"),
+    keyType: str("keyType"),
+    fingerprint: str("fingerprint"),
+    publicKey: str("publicKey"),
+    sshComment: str("comment"),
+    ...(typeof blob.travelSafe === "boolean" ? { travelSafe: blob.travelSafe } : {}),
+  }).overviewBlob;
+}

@@ -9,6 +9,13 @@ import { apiPath } from "@/lib/constants";
 import { useVault } from "@/lib/vault/vault-context";
 import { useTeamVault } from "@/lib/team/team-vault-context";
 import { TeamKeyVersionUnavailableError } from "@/lib/team/team-vault-core";
+import { TEAM_KEY_FAILURE } from "@/lib/team/team-key-resolution";
+import {
+  buildTeamHistoryRestoreBody,
+  historyRowKeyData,
+  type TeamHistoryRowDto,
+} from "@/lib/team/team-history-restore";
+import { toastApiError } from "@/lib/http/toast-api-error";
 import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
 import { buildPersonalEntryAAD, buildTeamEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import {
@@ -132,6 +139,7 @@ export function EntryHistorySection({
   onRestore,
 }: EntryHistorySectionProps) {
   const t = useTranslations("PasswordDetail");
+  const tApi = useTranslations("ApiErrors");
   const locale = useLocale();
   const { encryptionKey, userId } = useVault();
   const { getEntryDecryptionKey, invalidateTeamKey } = useTeamVault();
@@ -168,27 +176,64 @@ export function EntryHistorySection({
     fetchHistory();
   }, [fetchHistory]);
 
+  const keyErrorMessage = (e: unknown) =>
+    e instanceof TeamKeyVersionUnavailableError
+      ? t(e.reason === TEAM_KEY_FAILURE.KEY_INVALID ? "historyKeyInvalid" : "historyKeyUnavailable")
+      : t("historyDecryptFailed");
+
+  // History rows hold no overview: a team restore sends the overview rebuilt
+  // from the row's blob, sealed under the row's own key (D1).
+  const teamRestoreInit = async (teamId: string, historyId: string): Promise<RequestInit | null> => {
+    const rowRes = await fetchApi(apiPath.teamPasswordHistoryById(teamId, entryId, historyId));
+    if (!rowRes.ok) {
+      await toastApiError(rowRes, tApi);
+      return null;
+    }
+    const row = (await rowRes.json()) as TeamHistoryRowDto;
+    const body = await buildTeamHistoryRestoreBody(teamId, entryId, row, getEntryDecryptionKey);
+    return {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    };
+  };
+
   const handleRestore = async () => {
     if (!restoreTarget) return;
     setRestoring(true);
     try {
+      let init: RequestInit | null = { method: "POST" };
+      if (scopedTeamId) {
+        try {
+          init = await teamRestoreInit(scopedTeamId, restoreTarget.id);
+        } catch (e) {
+          const message = keyErrorMessage(e);
+          toast.error(message);
+          return;
+        }
+        if (!init) return;
+      }
       const url = scopedTeamId
         ? apiPath.teamPasswordHistoryRestore(scopedTeamId, entryId, restoreTarget.id)
         : apiPath.passwordHistoryRestore(entryId, restoreTarget.id);
-      const res = await fetchApi(url, { method: "POST" });
-      if (res.ok) {
-        // Restore writes back the history row's ItemKey metadata, which may
-        // point at an older TeamKey version. Drop the cached ItemKey so the
-        // next decrypt refetches and unwraps against the restored version.
-        if (scopedTeamId) {
-          invalidateTeamKey(scopedTeamId);
-        }
-        toast.success(t("restoreVersion"));
-        setRestoreTarget(null);
-        setLoading(true);
-        fetchHistory();
-        onRestore?.();
+      const res = await fetchApi(url, init);
+      if (!res.ok) {
+        // A team refusal names its exits (HISTORY_KEY_UNAVAILABLE: restore a
+        // more recent version, or delete the entry).
+        if (scopedTeamId) await toastApiError(res, tApi);
+        return;
       }
+      // Restore writes back the history row's ItemKey metadata, which may
+      // point at an older TeamKey version. Drop the cached keys so the next
+      // decrypt refetches and unwraps against the restored version.
+      if (scopedTeamId) {
+        invalidateTeamKey(scopedTeamId);
+      }
+      toast.success(t("restoreVersion"));
+      setRestoreTarget(null);
+      setLoading(true);
+      fetchHistory();
+      onRestore?.();
     } finally {
       setRestoring(false);
     }
@@ -206,13 +251,11 @@ export function EntryHistorySection({
         const data = await res.json();
         // Use the history record's own itemKeyVersion for AAD and key selection
         const historyItemKeyVersion = (data.itemKeyVersion as number) ?? 0;
-        const decryptKey = await getEntryDecryptionKey(scopedTeamId, entryId, {
-          itemKeyVersion: historyItemKeyVersion,
-          encryptedItemKey: data.encryptedItemKey,
-          itemKeyIv: data.itemKeyIv,
-          itemKeyAuthTag: data.itemKeyAuthTag,
-          teamKeyVersion: data.teamKeyVersion ?? 1,
-        });
+        const decryptKey = await getEntryDecryptionKey(
+          scopedTeamId,
+          entryId,
+          historyRowKeyData(data as TeamHistoryRowDto),
+        );
         const aad = data.aadVersion >= 1
           ? buildTeamEntryAAD(scopedTeamId, entryId, "blob", historyItemKeyVersion)
           : undefined;
@@ -239,11 +282,8 @@ export function EntryHistorySection({
         setViewData(JSON.parse(plaintext));
       }
     } catch (e) {
-      if (e instanceof TeamKeyVersionUnavailableError) {
-        toast.error(t("historyKeyUnavailable"));
-      } else {
-        toast.error(t("historyDecryptFailed"));
-      }
+      const message = keyErrorMessage(e);
+      toast.error(message);
     } finally {
       setViewLoading(false);
     }

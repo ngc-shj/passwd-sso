@@ -92,3 +92,47 @@
   main; the file changed in this branch, so the gate scans it) — moved to `vi.stubEnv`; the MinIO
   block of `team-attachment-rekey.integration.test.ts` stubs per test and passes explicit S3
   credentials to its own client.
+- D30 (C3 signatures) — the React-free builders take the context the plan's two-argument form
+  leaves implicit: `buildRotationEntryPayload(entry, resolveKey, ctx)` (team id, new team key and
+  version, the actor's held versions from `actorKeyVersions`) and
+  `buildEntryRekeyPayload(teamId, data, resolveKey)`. The v0→v1 upgrade and legacy-attachment
+  migrate payloads live beside the latter (`rekey-payload.ts`); team attachment crypto shared by
+  the UI and the pass is `team-attachment-crypto.ts`; key resolution types are the React-free
+  `team-key-resolution.ts`, re-exported from `team-vault-core`.
+- D31 (C1 reports, open) — the server names other holders only for versions the caller does not
+  hold (rekey GET `holders`, `needs_rekeyer_holder`) and never names tenant-deactivated holders.
+  The report model takes both as optional data: with other holders of v it names them; with an
+  empty list (sole holder) it gives restore / compare-with-admin; when unknown (every live call
+  site today) it lists another holder re-keying, restore and compare — never delete. The
+  unrecoverable delete shows a "check whether a member who left held this key" caution instead of
+  a yes/no deactivated-holder warning.
+- D32 (C3 runner) — a rotation in flight and a committed one are handled alike: invalidate the
+  team key cache, pause 3 s, re-read, and restart paging from the first page (a rotation re-opens
+  every entry). Budgets: 5 key changes, 10 rate-limit waits, 20 steps per entry. A retry-once code
+  that recurs after its one retry is skipped and reported with that code. A v1 entry with a
+  missing wrap field aborts the rotation (only an AES-GCM `OperationError` is `undecryptable`).
+- D33 (C5) — `getItemEncryptionKey` always re-reads the entry (a writer must send the live id)
+  and serves both keys from the `(entryId, itemKeyId)` slot; a slot is valid across team key
+  versions (rotation re-wraps, never replaces). `listTeamPasswords` now returns `itemKeyId`
+  (side-fix) so list decryption hits the cache.
+- D34 (writers) — `ENTRY_REKEY_REQUIRED` on save explains that an owner or admin finishes the
+  re-key on the Key Rotation page (the submit path has no role to offer the pass inline);
+  `ITEM_KEY_CHANGED` asks the user to reopen and retry (the form's edit snapshot is not
+  refetched in place). An attachment upload on a v0 entry upgrades it by PUT first (history row,
+  editor = uploader); a still-open edit form then holds the pre-upgrade snapshot and its save is
+  refused `ITEM_KEY_CHANGED` with the same message.
+- D35 (side-fix) — the team login form's password-reuse check decrypted every history row with
+  the live entry's key; each row now opens with its own wrap (read from the row endpoint when its
+  id differs from the live one), at its own `aadVersion`.
+- D36 (C1 reports, closes D31) — `GET /api/teams/[teamId]/rekey` also returns `versionHolders`:
+  for every team key version among pending entries, `{ callerHolds, activeHolderCount (caller
+  included), holders: [{ id, name, email, canRekey }] (active holders other than the caller,
+  re-keyers first, at most REKEY_HOLDERS_LISTED_MAX), deactivatedHolderCount }`. `holders` and
+  `stateCounts` keep their meaning. The deactivated count reads `team_member_keys` and
+  `team_members.deactivated_at IS NOT NULL` inside the team's RLS context (no bypass); display
+  identities are hydrated as for `holders`. The rotation report reads the same list right after
+  the rotation (every entry is then pending), so `rotate-key/data` is unchanged. The
+  `undecryptable` / `key_invalid` exits name the other holders, the sole active holder gets
+  restore / compare-with-admin, and the unrecoverable delete warns only when a version no active
+  member holds has a deactivated holder (the hedged caution of D31 is removed; the unnamed exits
+  remain only as the fallback when the list cannot be read).

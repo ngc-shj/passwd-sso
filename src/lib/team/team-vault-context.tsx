@@ -10,4 +10,7 @@ export type {
   TeamKeyInfo,
   TeamVaultContextValue,
   EntryItemKeyData,
+  ItemKeys,
+  ItemEncryptionKeyInfo,
+  TeamKeyResolution,
 } from "./team-vault-core";

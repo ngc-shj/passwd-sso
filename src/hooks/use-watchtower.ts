@@ -3,10 +3,9 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useClientSnapshot } from "@/hooks/use-client-snapshot";
 import { useVault } from "@/lib/vault/vault-context";
-import { useTeamVaultOptional } from "@/lib/team/team-vault-context";
+import { useTeamVaultOptional, type TeamVaultContextValue } from "@/lib/team/team-vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
-import { buildPersonalEntryAAD, buildTeamEntryAAD, buildItemKeyWrapAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
-import { unwrapItemKey, deriveItemEncryptionKey } from "@/lib/crypto/crypto-team";
+import { buildPersonalEntryAAD, buildTeamEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import { API_PATH, ENTRY_TYPE, LOCAL_STORAGE_KEY, apiPath } from "@/lib/constants";
 import { MS_PER_DAY, MS_PER_SECOND } from "@/lib/constants/time";
 import { WATCHTOWER_COOLDOWN_MS } from "@/lib/constants/timing";
@@ -306,6 +305,7 @@ export function useWatchtower(
         teamEncryptionKey,
         userId: userId ?? undefined,
         getTeamEncryptionKey,
+        getEntryDecryptionKey: teamVault?.getEntryDecryptionKey,
       });
 
       if (entryResult.status === "unavailable") {
@@ -685,27 +685,32 @@ function normalizeHostname(url: string): string | null {
   }
 }
 
+type GetEntryDecryptionKey = TeamVaultContextValue["getEntryDecryptionKey"];
+
 async function fetchWatchtowerEntries({
   scope,
   encryptionKey,
   teamEncryptionKey,
   userId,
   getTeamEncryptionKey,
+  getEntryDecryptionKey,
 }: {
   scope: WatchtowerScope;
   encryptionKey?: CryptoKey;
   teamEncryptionKey?: CryptoKey;
   userId?: string;
   getTeamEncryptionKey?: (teamId: string) => Promise<CryptoKey | null>;
+  getEntryDecryptionKey?: GetEntryDecryptionKey;
 }): Promise<FetchWatchtowerEntriesResult> {
   if (scope.type === "team") {
-    if (!getTeamEncryptionKey) {
+    if (!getTeamEncryptionKey || !getEntryDecryptionKey) {
       return { status: "unavailable", reason: "teamKeyUnavailable" };
     }
     return fetchTeamWatchtowerEntries({
       teamId: scope.teamId,
       teamEncryptionKey,
       getTeamEncryptionKey,
+      getEntryDecryptionKey,
     });
   }
 
@@ -768,10 +773,12 @@ async function fetchTeamWatchtowerEntries({
   teamId,
   teamEncryptionKey,
   getTeamEncryptionKey,
+  getEntryDecryptionKey,
 }: {
   teamId: string;
   teamEncryptionKey?: CryptoKey;
   getTeamEncryptionKey: (teamId: string) => Promise<CryptoKey | null>;
+  getEntryDecryptionKey: GetEntryDecryptionKey;
 }): Promise<FetchWatchtowerEntriesResult> {
   const entries: DecryptedEntry[] = [];
 
@@ -802,22 +809,16 @@ async function fetchTeamWatchtowerEntries({
       const itemKeyVersion = typeof raw.itemKeyVersion === "number" ? raw.itemKeyVersion : 0;
       const aad = buildTeamEntryAAD(teamId, raw.id, "blob", itemKeyVersion);
 
-      let decryptKey: CryptoKey = teamKey;
-      if (
-        itemKeyVersion >= 1 &&
-        typeof raw.encryptedItemKey === "string" &&
-        typeof raw.itemKeyIv === "string" &&
-        typeof raw.itemKeyAuthTag === "string" &&
-        typeof raw.teamKeyVersion === "number"
-      ) {
-        const ikAad = buildItemKeyWrapAAD(teamId, raw.id, raw.teamKeyVersion);
-        const rawItemKey = await unwrapItemKey(
-          { ciphertext: raw.encryptedItemKey, iv: raw.itemKeyIv, authTag: raw.itemKeyAuthTag },
-          teamKey,
-          ikAad,
-        );
-        decryptKey = await deriveItemEncryptionKey(rawItemKey);
-      }
+      // Each entry at its OWN team key version: an entry carried through a
+      // rotation stays at an older version than the latest key (D5).
+      const decryptKey = await getEntryDecryptionKey(teamId, raw.id, {
+        itemKeyVersion,
+        encryptedItemKey: typeof raw.encryptedItemKey === "string" ? raw.encryptedItemKey : undefined,
+        itemKeyIv: typeof raw.itemKeyIv === "string" ? raw.itemKeyIv : undefined,
+        itemKeyAuthTag: typeof raw.itemKeyAuthTag === "string" ? raw.itemKeyAuthTag : undefined,
+        itemKeyId: typeof raw.itemKeyId === "string" ? raw.itemKeyId : null,
+        teamKeyVersion: typeof raw.teamKeyVersion === "number" ? raw.teamKeyVersion : 1,
+      });
 
       const plaintext = await decryptData(
         {

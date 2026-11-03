@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import { useTranslations } from "next-intl";
-import { useTeamVault } from "@/lib/team/team-vault-context";
+import { useTeamVault, type EntryItemKeyData } from "@/lib/team/team-vault-context";
 import { decryptData } from "@/lib/crypto/crypto-client";
 import { buildTeamEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import { buildTeamGetDetail } from "@/lib/vault/build-team-get-detail";
@@ -20,13 +20,7 @@ import type { TeamDisplayEntry } from "@/types/team-display-entry";
 type GetEntryDecryptionKey = (
   teamId: string,
   entryId: string,
-  entry: {
-    itemKeyVersion?: number;
-    encryptedItemKey?: string;
-    itemKeyIv?: string;
-    itemKeyAuthTag?: string;
-    teamKeyVersion: number;
-  },
+  entry: EntryItemKeyData,
 ) => Promise<CryptoKey>;
 
 /**
@@ -77,6 +71,7 @@ export async function decryptTeamOverview(
       encryptedItemKey: rawEntry.encryptedItemKey as string | undefined,
       itemKeyIv: rawEntry.itemKeyIv as string | undefined,
       itemKeyAuthTag: rawEntry.itemKeyAuthTag as string | undefined,
+      itemKeyId: (rawEntry.itemKeyId as string | null | undefined) ?? null,
       teamKeyVersion: (rawEntry.teamKeyVersion as number) ?? 1,
     });
     // INV-C6.2: the ONLY team "overview"-scope AAD derivation site.

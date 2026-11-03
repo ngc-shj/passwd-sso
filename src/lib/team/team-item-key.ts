@@ -69,6 +69,27 @@ export async function teamKeyVersionHolders(
   });
 }
 
+/**
+ * Members holding a key at team key version `version` (normalised) whose
+ * team membership is deactivated (tenant departure, IdP removal): not
+ * holders, but they would hold the version again if reactivated. Read in the
+ * team's own RLS context, like teamKeyVersionHolders.
+ */
+export async function deactivatedTeamKeyVersionHolderCount(
+  tx: Pick<Prisma.TransactionClient, "teamMemberKey" | "teamMember">,
+  teamId: string,
+  version: number,
+): Promise<number> {
+  const keys = await tx.teamMemberKey.findMany({
+    where: { teamId, keyVersion: normalizeTeamKeyVersion(version) },
+    select: { userId: true },
+  });
+  if (keys.length === 0) return 0;
+  return tx.teamMember.count({
+    where: { teamId, userId: { in: keys.map((k) => k.userId) }, deactivatedAt: { not: null } },
+  });
+}
+
 /** A holder who may re-key: their role carries TEAM_UPDATE. */
 export function isRekeyerHolder(holder: TeamKeyVersionHolder): boolean {
   return hasTeamPermission(holder.role, TEAM_PERMISSION.TEAM_UPDATE);

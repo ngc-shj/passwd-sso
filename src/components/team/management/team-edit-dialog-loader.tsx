@@ -66,6 +66,7 @@ export function TeamEditDialogLoader({
           encryptedItemKey: raw.encryptedItemKey as string | undefined,
           itemKeyIv: raw.itemKeyIv as string | undefined,
           itemKeyAuthTag: raw.itemKeyAuthTag as string | undefined,
+          itemKeyId: (raw.itemKeyId as string | null | undefined) ?? null,
           teamKeyVersion: (raw.teamKeyVersion as number) ?? 1,
         });
 
@@ -156,6 +157,9 @@ export function TeamEditDialogLoader({
           encryptedItemKey: raw.encryptedItemKey as string | undefined,
           itemKeyIv: raw.itemKeyIv as string | undefined,
           itemKeyAuthTag: raw.itemKeyAuthTag as string | undefined,
+          itemKeyId: (raw.itemKeyId as string | null | undefined) ?? null,
+          nextItemKeyVersion: raw.nextItemKeyVersion as number | undefined,
+          blobIv: raw.blobIv as string | undefined,
         });
         setError(null);
       } catch (e) {
