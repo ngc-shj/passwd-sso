@@ -95,6 +95,22 @@ const mapping = {
   team: { slug: "core" },
 };
 
+// F2/S-F3: a PATCH/PUT member value is now validated as a uuid at the
+// boundary (src/lib/scim/patch-parser.ts, src/lib/scim/validations.ts) —
+// these fixtures must be real uuid-shaped strings, not the old "user-1"
+// style labels, or the request itself 400s before the mock ever sees it.
+const USER_1 = "11111111-1111-4111-8111-111111111111";
+const USER_2 = "22222222-2222-4222-8222-222222222222";
+const USER_9 = "99999999-9999-4999-8999-999999999999";
+// Not a uuid format problem — a uuid-shaped id the tenant lookup finds no row for.
+const NONEXISTENT_USER = "00000000-0000-4000-8000-000000000099";
+
+/** A distinct, valid-shaped id per (category, index) for the A7e fixture. */
+function fixtureUserId(category: number, i: number): string {
+  const idx = i.toString(16).padStart(4, "0");
+  return `a000000${category}-0000-4000-8000-${idx}00000000`;
+}
+
 function makeParams(id: string) {
   return { params: Promise.resolve({ id }) };
 }
@@ -191,6 +207,13 @@ describe("GET /api/scim/v2/Groups/[id]", () => {
 describe("PATCH /api/scim/v2/Groups/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // clearAllMocks keeps a previously set mockResolvedValue/mockImplementation
+    // alive — A7e's fixture-sized findMany/createMany answers would otherwise
+    // leak into whichever cell runs next in file order (T6). Reset them so
+    // every cell that reaches these mocks must set up its own answer.
+    mockTeamMember.findMany.mockReset();
+    mockTeamMember.createMany.mockReset();
+    mockTenantMember.findMany.mockReset();
     vi.stubEnv("AUTH_URL", "http://localhost:3000");
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue({ allowed: true });
@@ -220,7 +243,7 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
           method: "PATCH",
           body: {
             schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
-            Operations: [{ op: "add", path: "members", value: [{ value: "user-1" }] }],
+            Operations: [{ op: "add", path: "members", value: [{ value: USER_1 }] }],
           },
         }),
         makeParams("grp-1"),
@@ -236,17 +259,17 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
 
   it("raises a pending member's role and audits TEAM_MEMBER_SCIM_PENDING", async () => {
     mockTeamMember.findMany
-      .mockResolvedValueOnce([{ id: "tm1", userId: "user-1", role: "MEMBER", deactivatedAt: new Date(), deactivatedByTenant: false, scimApprovalPending: true }])
+      .mockResolvedValueOnce([{ id: "tm1", userId: USER_1, role: "MEMBER", deactivatedAt: new Date(), deactivatedByTenant: false, scimApprovalPending: true }])
       .mockResolvedValueOnce([]); // loadGroupMembers after tx
-    mockTenantMember.findMany.mockResolvedValue([{ userId: "user-1" }]);
-    mockTeamMember.updateManyAndReturn.mockResolvedValue([{ id: "tm1", userId: "user-1" }]);
+    mockTenantMember.findMany.mockResolvedValue([{ userId: USER_1 }]);
+    mockTeamMember.updateManyAndReturn.mockResolvedValue([{ id: "tm1", userId: USER_1 }]);
 
     const res = await PATCH(
       makeReq({
         method: "PATCH",
         body: {
           schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
-          Operations: [{ op: "add", path: "members", value: [{ value: "user-1" }] }],
+          Operations: [{ op: "add", path: "members", value: [{ value: USER_1 }] }],
         },
       }),
       makeParams("grp-1"),
@@ -261,7 +284,7 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
           scope: "TEAM",
           teamId: "team-1",
           action: "TEAM_MEMBER_SCIM_PENDING",
-          targetId: "user-1",
+          targetId: USER_1,
           metadata: expect.objectContaining({ scimTokenId: "t1", role: "ADMIN", previousRole: "MEMBER" }),
         }),
       ],
@@ -279,7 +302,7 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
         method: "PATCH",
         body: {
           schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
-          Operations: [{ op: "remove", path: 'members[value eq "user-9"]' }],
+          Operations: [{ op: "remove", path: `members[value eq "${USER_9}"]` }],
         },
       }),
       makeParams("grp-1"),
@@ -292,14 +315,14 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
 
   it("returns 403 when patch would modify an owner", async () => {
     // findMany returns an existing OWNER member
-    mockTeamMember.findMany.mockResolvedValueOnce([{ id: "tm1", userId: "user-1", role: "OWNER", deactivatedAt: null, deactivatedByTenant: false, scimApprovalPending: false }]);
+    mockTeamMember.findMany.mockResolvedValueOnce([{ id: "tm1", userId: USER_1, role: "OWNER", deactivatedAt: null, deactivatedByTenant: false, scimApprovalPending: false }]);
 
     const res = await PATCH(
       makeReq({
         method: "PATCH",
         body: {
           schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
-          Operations: [{ op: "add", path: "members", value: [{ value: "user-1" }] }],
+          Operations: [{ op: "add", path: "members", value: [{ value: USER_1 }] }],
         },
       }),
       makeParams("grp-1"),
@@ -312,7 +335,7 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
     mockTeamMember.findMany
       .mockResolvedValueOnce([]) // tx.teamMember.findMany (no existing team member)
       .mockResolvedValueOnce([]); // loadGroupMembers after tx
-    mockTenantMember.findMany.mockResolvedValueOnce([{ userId: "user-1" }]);
+    mockTenantMember.findMany.mockResolvedValueOnce([{ userId: USER_1 }]);
     mockTeamMember.createMany.mockResolvedValue({ count: 1 });
 
     const res = await PATCH(
@@ -320,7 +343,7 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
         method: "PATCH",
         body: {
           schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
-          Operations: [{ op: "add", path: "members", value: [{ value: "user-1" }] }],
+          Operations: [{ op: "add", path: "members", value: [{ value: USER_1 }] }],
         },
       }),
       makeParams("grp-1"),
@@ -331,7 +354,7 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
       data: [
         {
           teamId: "team-1",
-          userId: "user-1",
+          userId: USER_1,
           tenantId: "tenant-1",
           role: "ADMIN",
           scimManaged: true,
@@ -344,12 +367,12 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
     expect(mockLogAuditBulkInTx).toHaveBeenCalledWith(
       expect.anything(),
       "tenant-1",
-      [expect.objectContaining({ action: "TEAM_MEMBER_SCIM_PENDING", targetId: "user-1" })],
+      [expect.objectContaining({ action: "TEAM_MEMBER_SCIM_PENDING", targetId: USER_1 })],
     );
   });
 
   it("withdraws a pending member when removing the mapped role", async () => {
-    const member = [{ id: "tm1", userId: "user-1", role: "ADMIN", deactivatedAt: new Date(), deactivatedByTenant: false, scimApprovalPending: true }];
+    const member = [{ id: "tm1", userId: USER_1, role: "ADMIN", deactivatedAt: new Date(), deactivatedByTenant: false, scimApprovalPending: true }];
     mockTeamMember.findMany
       .mockResolvedValueOnce(member) // locked re-read in applyRemoveOperations
       .mockResolvedValueOnce([]); // loadGroupMembers after tx
@@ -360,7 +383,7 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
         method: "PATCH",
         body: {
           schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
-          Operations: [{ op: "remove", path: 'members[value eq "user-1"]' }],
+          Operations: [{ op: "remove", path: `members[value eq "${USER_1}"]` }],
         },
       }),
       makeParams("grp-1"),
@@ -382,7 +405,7 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
         method: "PATCH",
         body: {
           schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
-          Operations: [{ op: "add", path: "members", value: [{ value: "nonexistent-user" }] }],
+          Operations: [{ op: "add", path: "members", value: [{ value: NONEXISTENT_USER }] }],
         },
       }),
       makeParams("grp-1"),
@@ -412,7 +435,7 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
         method: "PATCH",
         body: {
           schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
-          Operations: [{ op: "add", path: "members", value: [{ value: "user-1" }] }],
+          Operations: [{ op: "add", path: "members", value: [{ value: USER_1 }] }],
         },
       }),
       makeParams("missing"),
@@ -439,7 +462,7 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
         method: "PATCH",
         body: {
           schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
-          Operations: [{ op: "add", path: "members", value: [{ value: "user-1" }] }],
+          Operations: [{ op: "add", path: "members", value: [{ value: USER_1 }] }],
         },
       }),
       makeParams("grp-1"),
@@ -456,7 +479,7 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
           method: "PATCH",
           body: {
             schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
-            Operations: [{ op: "add", path: "members", value: [{ value: "user-1" }] }],
+            Operations: [{ op: "add", path: "members", value: [{ value: USER_1 }] }],
           },
         }),
         makeParams("grp-1"),
@@ -474,55 +497,67 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
       const removeUserIds: string[] = [];
       const existingMemberships: { id: string; userId: string; role: string; deactivatedAt: Date | null; deactivatedByTenant: boolean; scimApprovalPending: boolean }[] = [];
       const removeMemberships: typeof existingMemberships = [];
+      // id -> userId, since a fixture userId is no longer derivable from its
+      // member id by stripping an "m-" prefix (F2/S-F3 — userId must be a
+      // real uuid now).
+      const userIdByMemberId = new Map<string, string>();
 
       for (let i = 0; i < usersPerGroup; i++) {
         // becamePending via create: no row at all.
-        addUserIds.push(`create-${i}`);
+        addUserIds.push(fixtureUserId(1, i));
         // becamePending via reactivate: a deactivated, non-pending row.
-        const reactivateId = `reactivate-${i}`;
+        const reactivateId = fixtureUserId(2, i);
         addUserIds.push(reactivateId);
         existingMemberships.push({ id: `m-reactivate-${i}`, userId: reactivateId, role: "ADMIN", deactivatedAt: new Date(), deactivatedByTenant: false, scimApprovalPending: false });
+        userIdByMemberId.set(`m-reactivate-${i}`, reactivateId);
         // pendingRoleRaised: a pending row at a lower role (MEMBER < ADMIN).
-        const raiseId = `raise-${i}`;
+        const raiseId = fixtureUserId(3, i);
         addUserIds.push(raiseId);
         existingMemberships.push({ id: `m-raise-${i}`, userId: raiseId, role: "MEMBER", deactivatedAt: new Date(), deactivatedByTenant: false, scimApprovalPending: true });
+        userIdByMemberId.set(`m-raise-${i}`, raiseId);
         // activeRoleChanged: an active row at a different role.
-        const roleChangeId = `role-${i}`;
+        const roleChangeId = fixtureUserId(4, i);
         addUserIds.push(roleChangeId);
         existingMemberships.push({ id: `m-role-${i}`, userId: roleChangeId, role: "MEMBER", deactivatedAt: null, deactivatedByTenant: false, scimApprovalPending: false });
+        userIdByMemberId.set(`m-role-${i}`, roleChangeId);
         // pendingWithdrawn: a pending row removed.
-        const withdrawId = `withdraw-${i}`;
+        const withdrawId = fixtureUserId(5, i);
         removeUserIds.push(withdrawId);
         removeMemberships.push({ id: `m-withdraw-${i}`, userId: withdrawId, role: "ADMIN", deactivatedAt: new Date(), deactivatedByTenant: false, scimApprovalPending: true });
+        userIdByMemberId.set(`m-withdraw-${i}`, withdrawId);
         // activeRemoved: an active row removed.
-        const removeId = `remove-${i}`;
+        const removeId = fixtureUserId(6, i);
         removeUserIds.push(removeId);
         removeMemberships.push({ id: `m-remove-${i}`, userId: removeId, role: "ADMIN", deactivatedAt: null, deactivatedByTenant: false, scimApprovalPending: false });
+        userIdByMemberId.set(`m-remove-${i}`, removeId);
         // departedUnmarked: a departure-marked row removed.
-        const departedId = `departed-${i}`;
+        const departedId = fixtureUserId(7, i);
         removeUserIds.push(departedId);
         removeMemberships.push({ id: `m-departed-${i}`, userId: departedId, role: "ADMIN", deactivatedAt: new Date(), deactivatedByTenant: true, scimApprovalPending: false });
+        userIdByMemberId.set(`m-departed-${i}`, departedId);
       }
-      return { addUserIds, removeUserIds, existingMemberships, removeMemberships };
+      return { addUserIds, removeUserIds, existingMemberships, removeMemberships, userIdByMemberId };
     }
 
     it.each([
       { usersPerGroup: 2, totalRows: 14 },
       { usersPerGroup: 10, totalRows: 70 },
-    ])("gives the same call-shape counts at N = $totalRows", async ({ usersPerGroup }) => {
-      const { addUserIds, removeUserIds, existingMemberships, removeMemberships } = buildFixture(usersPerGroup);
+    ])("gives the same call-shape counts at N = $totalRows", async ({ usersPerGroup, totalRows }) => {
+      const { addUserIds, removeUserIds, existingMemberships, removeMemberships, userIdByMemberId } = buildFixture(usersPerGroup);
+      // (T6) The fixture builder is the source of truth for "how many rows";
+      // pin it against the N the it.each table names so a miscounted group
+      // in buildFixture fails loudly here instead of only showing up as a
+      // wrong auditRows total below.
+      expect(addUserIds.length + removeUserIds.length).toBe(totalRows);
 
       mockTeamMember.findMany
         .mockResolvedValueOnce(existingMemberships) // applyAddOperations' membership read
         .mockResolvedValueOnce(removeMemberships) // applyRemoveOperations' locked re-read
         .mockResolvedValueOnce([]); // loadGroupMembers after tx
 
-      mockTenantMember.findMany.mockResolvedValue(
-        addUserIds.filter((id) => id.startsWith("create-")).map((userId) => ({ userId })),
-      );
       // Every add candidate is active in the tenant: the mocked lockTenantRows
-      // reads tenantMember.findMany for ALL add ids, not only "create-*", so
-      // the fixture must answer "active" for every one of them.
+      // reads tenantMember.findMany for ALL add ids, so the fixture must
+      // answer "active" for every one of them.
       mockTenantMember.findMany.mockResolvedValue(addUserIds.map((userId) => ({ userId })));
 
       mockTeamMember.createMany.mockResolvedValue({ count: usersPerGroup });
@@ -539,7 +574,8 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
         }),
       );
       mockTeamMember.updateManyAndReturn.mockImplementation(
-        async ({ where }: { where: { id: { in: string[] } } }) => where.id.in.map((id: string) => ({ id, userId: id.replace(/^m-/, "") })),
+        async ({ where }: { where: { id: { in: string[] } } }) =>
+          where.id.in.map((id: string) => ({ id, userId: userIdByMemberId.get(id) })),
       );
 
       const res = await PATCH(
@@ -581,8 +617,8 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
   describe("withdraw shortfall (silent-loss red-proof)", () => {
     it("PATCH: a withdraw shortfall rolls back with 409, no WITHDRAW audit", async () => {
       const pending = [
-        { id: "m-1", userId: "user-1", role: "ADMIN", deactivatedAt: new Date(), deactivatedByTenant: false, scimApprovalPending: true },
-        { id: "m-2", userId: "user-2", role: "ADMIN", deactivatedAt: new Date(), deactivatedByTenant: false, scimApprovalPending: true },
+        { id: "m-1", userId: USER_1, role: "ADMIN", deactivatedAt: new Date(), deactivatedByTenant: false, scimApprovalPending: true },
+        { id: "m-2", userId: USER_2, role: "ADMIN", deactivatedAt: new Date(), deactivatedByTenant: false, scimApprovalPending: true },
       ];
       mockTeamMember.findMany.mockResolvedValueOnce(pending);
       // findMany found 2 rows; deleteMany only removes 1 (an unlocked writer
@@ -595,8 +631,8 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
           body: {
             schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
             Operations: [
-              { op: "remove", path: 'members[value eq "user-1"]' },
-              { op: "remove", path: 'members[value eq "user-2"]' },
+              { op: "remove", path: `members[value eq "${USER_1}"]` },
+              { op: "remove", path: `members[value eq "${USER_2}"]` },
             ],
           },
         }),
@@ -611,8 +647,8 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
 
     it("positive control: equal counts commit 200 with one WITHDRAW audit covering both rows", async () => {
       const pending = [
-        { id: "m-1", userId: "user-1", role: "ADMIN", deactivatedAt: new Date(), deactivatedByTenant: false, scimApprovalPending: true },
-        { id: "m-2", userId: "user-2", role: "ADMIN", deactivatedAt: new Date(), deactivatedByTenant: false, scimApprovalPending: true },
+        { id: "m-1", userId: USER_1, role: "ADMIN", deactivatedAt: new Date(), deactivatedByTenant: false, scimApprovalPending: true },
+        { id: "m-2", userId: USER_2, role: "ADMIN", deactivatedAt: new Date(), deactivatedByTenant: false, scimApprovalPending: true },
       ];
       mockTeamMember.findMany
         .mockResolvedValueOnce(pending)
@@ -625,8 +661,8 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
           body: {
             schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
             Operations: [
-              { op: "remove", path: 'members[value eq "user-1"]' },
-              { op: "remove", path: 'members[value eq "user-2"]' },
+              { op: "remove", path: `members[value eq "${USER_1}"]` },
+              { op: "remove", path: `members[value eq "${USER_2}"]` },
             ],
           },
         }),
@@ -638,8 +674,8 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
         expect.anything(),
         "tenant-1",
         [
-          expect.objectContaining({ action: "TEAM_MEMBER_SCIM_PENDING_WITHDRAW", targetId: "user-1" }),
-          expect.objectContaining({ action: "TEAM_MEMBER_SCIM_PENDING_WITHDRAW", targetId: "user-2" }),
+          expect.objectContaining({ action: "TEAM_MEMBER_SCIM_PENDING_WITHDRAW", targetId: USER_1 }),
+          expect.objectContaining({ action: "TEAM_MEMBER_SCIM_PENDING_WITHDRAW", targetId: USER_2 }),
         ],
       );
     });
@@ -671,14 +707,14 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
 
   it("replaces role members", async () => {
     mockTeamMember.findMany
-      .mockResolvedValueOnce([{ userId: "user-1" }]) // unlocked pre-read
-      .mockResolvedValueOnce([{ id: "tm1", userId: "user-1", role: "ADMIN" }]) // locked re-read (current)
+      .mockResolvedValueOnce([{ userId: USER_1 }]) // unlocked pre-read
+      .mockResolvedValueOnce([{ id: "tm1", userId: USER_1, role: "ADMIN" }]) // locked re-read (current)
       .mockResolvedValueOnce([]) // applyAddOperations' membership read for user-2
-      .mockResolvedValueOnce([{ id: "tm1", userId: "user-1", role: "ADMIN", deactivatedAt: null, deactivatedByTenant: false, scimApprovalPending: false }]) // applyRemoveOperations' locked re-read for user-1
+      .mockResolvedValueOnce([{ id: "tm1", userId: USER_1, role: "ADMIN", deactivatedAt: null, deactivatedByTenant: false, scimApprovalPending: false }]) // applyRemoveOperations' locked re-read for user-1
       .mockResolvedValueOnce([]); // loadGroupMembers after tx
-    mockTenantMember.findMany.mockResolvedValue([{ userId: "user-2" }]);
+    mockTenantMember.findMany.mockResolvedValue([{ userId: USER_2 }]);
     mockTeamMember.createMany.mockResolvedValue({ count: 1 });
-    mockTeamMember.updateManyAndReturn.mockResolvedValue([{ id: "tm1", userId: "user-1" }]);
+    mockTeamMember.updateManyAndReturn.mockResolvedValue([{ id: "tm1", userId: USER_1 }]);
 
     const res = await PUT(
       makeReq({
@@ -686,7 +722,7 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
         body: {
           schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
           displayName: "core:ADMIN",
-          members: [{ value: "user-2" }],
+          members: [{ value: USER_2 }],
         },
       }),
       makeParams("grp-1"),
@@ -700,8 +736,8 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
       .mockResolvedValueOnce([]) // unlocked pre-read
       .mockResolvedValueOnce([]) // locked re-read (current)
       .mockResolvedValueOnce([]) // applyAddOperations' membership read
-      .mockResolvedValueOnce([{ id: "tm-created", userId: "user-2", user: { id: "user-2", email: "u2@example.com" } }]); // loadGroupMembers after tx
-    mockTenantMember.findMany.mockResolvedValueOnce([{ userId: "user-2" }]);
+      .mockResolvedValueOnce([{ id: "tm-created", userId: USER_2, user: { id: USER_2, email: "u2@example.com" } }]); // loadGroupMembers after tx
+    mockTenantMember.findMany.mockResolvedValueOnce([{ userId: USER_2 }]);
     mockTeamMember.createMany.mockResolvedValue({ count: 1 });
 
     const res = await PUT(
@@ -710,7 +746,7 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
         body: {
           schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
           displayName: "core:ADMIN",
-          members: [{ value: "user-2" }],
+          members: [{ value: USER_2 }],
         },
       }),
       makeParams("grp-1"),
@@ -721,7 +757,7 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
       data: [
         {
           teamId: "team-1",
-          userId: "user-2",
+          userId: USER_2,
           tenantId: "tenant-1",
           role: "ADMIN",
           scimManaged: true,
@@ -740,7 +776,7 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
         body: {
           schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
           displayName: "core:VIEWER",
-          members: [{ value: "user-2" }],
+          members: [{ value: USER_2 }],
         },
       }),
       makeParams("grp-1"),
@@ -762,7 +798,7 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
         body: {
           schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
           displayName: "core:ADMIN",
-          members: [{ value: "user-2" }],
+          members: [{ value: USER_2 }],
         },
       }),
       makeParams("grp-1"),
@@ -841,9 +877,9 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
     // is a no-op. Here: current member set has the pending row; PUT lists no
     // members, so the row is withdrawn via the remove path.
     mockTeamMember.findMany
-      .mockResolvedValueOnce([{ userId: "user-1" }]) // unlocked pre-read — user-1 must be in the locked set
-      .mockResolvedValueOnce([{ id: "tm1", userId: "user-1", role: "ADMIN" }]) // locked re-read
-      .mockResolvedValueOnce([{ id: "tm1", userId: "user-1", role: "ADMIN", deactivatedAt: new Date(), deactivatedByTenant: false, scimApprovalPending: true }]) // applyRemoveOperations' locked re-read
+      .mockResolvedValueOnce([{ userId: USER_1 }]) // unlocked pre-read — user-1 must be in the locked set
+      .mockResolvedValueOnce([{ id: "tm1", userId: USER_1, role: "ADMIN" }]) // locked re-read
+      .mockResolvedValueOnce([{ id: "tm1", userId: USER_1, role: "ADMIN", deactivatedAt: new Date(), deactivatedByTenant: false, scimApprovalPending: true }]) // applyRemoveOperations' locked re-read
       .mockResolvedValueOnce([]); // loadGroupMembers
     mockTeamMember.deleteMany.mockResolvedValue({ count: 1 });
 
@@ -868,13 +904,13 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
   describe("withdraw shortfall (silent-loss red-proof)", () => {
     it("PUT: a withdraw shortfall rolls back with 409, no WITHDRAW audit", async () => {
       const pending = [
-        { id: "m-1", userId: "user-1", role: "ADMIN" },
+        { id: "m-1", userId: USER_1, role: "ADMIN" },
       ];
       mockTeamMember.findMany
-        .mockResolvedValueOnce([{ userId: "user-1" }]) // unlocked pre-read
+        .mockResolvedValueOnce([{ userId: USER_1 }]) // unlocked pre-read
         .mockResolvedValueOnce(pending) // locked re-read (current members)
         .mockResolvedValueOnce([
-          { id: "m-1", userId: "user-1", role: "ADMIN", deactivatedAt: new Date(), deactivatedByTenant: false, scimApprovalPending: true },
+          { id: "m-1", userId: USER_1, role: "ADMIN", deactivatedAt: new Date(), deactivatedByTenant: false, scimApprovalPending: true },
         ]); // applyRemoveOperations' locked re-read
       mockTeamMember.deleteMany.mockResolvedValue({ count: 0 });
 

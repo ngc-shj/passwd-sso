@@ -191,6 +191,38 @@ describe("GET /api/teams/[teamId]/members", () => {
     });
   });
 
+  it("flags a pending row pendingTenantInactive when the user's active tenant isn't the team's own (absent or elsewhere)", async () => {
+    mockPrismaTeamMember.findMany.mockResolvedValue([
+      { id: "m1", userId: "u1", role: TEAM_ROLE.VIEWER, createdAt: now, deactivatedByTenant: false, scimApprovalPending: true },
+      { id: "m2", userId: "u2", role: TEAM_ROLE.VIEWER, createdAt: now, deactivatedByTenant: false, scimApprovalPending: true },
+      { id: "m3", userId: "u3", role: TEAM_ROLE.VIEWER, createdAt: now, deactivatedByTenant: false, scimApprovalPending: true },
+    ]);
+    mockPrismaUser.findMany.mockResolvedValue([
+      { id: "u1", name: "In team's tenant", email: "u1@test.com", image: null },
+      { id: "u2", name: "In another tenant", email: "u2@test.com", image: null },
+      { id: "u3", name: "No active tenant", email: "u3@test.com", image: null },
+    ]);
+    // mockWithTeamTenantRls above hands the route "tenant-1" as the team's
+    // own tenantId. u1 is active there; u2 is active in a different tenant;
+    // u3 has no active tenantMember row at all (departed/absent).
+    mockPrismaTenantMember.findMany.mockResolvedValue([
+      { userId: "u1", tenantId: "tenant-1", tenant: { name: "Team Tenant" } },
+      { userId: "u2", tenantId: "tenant-other", tenant: { name: "Other Tenant" } },
+    ]);
+
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/members`),
+      createParams({ teamId: TEAM_ID }),
+    );
+    const json = await res.json();
+
+    expect(json.map((m: { id: string; pendingTenantInactive: boolean }) => [m.id, m.pendingTenantInactive])).toEqual([
+      ["m1", false],
+      ["m2", true],
+      ["m3", true],
+    ]);
+  });
+
   it("does not list members who left the tenant, or pending ones, to a VIEWER", async () => {
     mockRequireTeamMember.mockResolvedValue({ role: TEAM_ROLE.VIEWER });
     mockPrismaTeamMember.findMany.mockResolvedValue([]);

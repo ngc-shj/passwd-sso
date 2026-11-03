@@ -122,6 +122,7 @@ function makeMember(overrides: Partial<{
   image: string | null;
   tenantName: string | null;
   pendingApproval: boolean;
+  pendingTenantInactive: boolean;
 }> = {}) {
   return {
     id: "mem-1",
@@ -269,6 +270,49 @@ describe("TeamMembersPage (SCIM pending admission, C5)", () => {
     expect(screen.getByTestId("select-change-MEMBER")).toBeInTheDocument();
   });
 
+  it("states that an approved member's role can still change through SCIM, only while a request is pending", async () => {
+    setupFetchReady({
+      members: [makeMember({ id: "mem-pending", userId: "user-pending", role: "MEMBER", pendingApproval: true })],
+    });
+    await act(async () => {
+      render(<TeamMembersPage params={Promise.resolve({ teamId: "team-1" })} />);
+    });
+    await waitFor(() => {
+      expect(screen.getByText("approveRoleNote")).toBeInTheDocument();
+    });
+  });
+
+  it("shows no role-change note when nothing is pending", async () => {
+    setupFetchReady({ members: [makeMember({ id: "mem-active", userId: "user-active", role: "MEMBER" })] });
+    await act(async () => {
+      render(<TeamMembersPage params={Promise.resolve({ teamId: "team-1" })} />);
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("select-change-MEMBER")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("approveRoleNote")).not.toBeInTheDocument();
+  });
+
+  it("a pendingTenantInactive row renders Reject but not Approve", async () => {
+    const pending = makeMember({
+      id: "mem-pending", userId: "user-pending", role: "ADMIN",
+      pendingApproval: true, pendingTenantInactive: true,
+    });
+    setupFetchReady({ members: [pending] });
+
+    await act(async () => {
+      render(<TeamMembersPage params={Promise.resolve({ teamId: "team-1" })} />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("awaitingApprovalBadge")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("pendingTenantInactive")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "approveButton" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "rejectButton" })).toHaveLength(2);
+  });
+
   it("Approve posts expectedRole equal to the shown role", async () => {
     const pending = makeMember({ id: "mem-pending", userId: "user-pending", role: "ADMIN", pendingApproval: true });
     setupFetchReady({ members: [pending] });
@@ -411,7 +455,11 @@ describe("TeamMembersPage (SCIM pending admission, C5)", () => {
   it.each([
     { button: "approveButton", path: "approve", status: 403, error: "FORBIDDEN", message: "approveNeedsKey" },
     { button: "approveButton", path: "approve", status: 404, error: "MEMBER_NOT_FOUND", message: "requestAlreadyHandled" },
+    { button: "approveButton", path: "approve", status: 409, error: "CONFLICT", message: "approveTargetLeftTenant" },
+    { button: "approveButton", path: "approve", status: 429, error: "RATE_LIMIT_EXCEEDED", message: "rateLimitExceeded" },
     { button: "rejectButton", path: "reject", status: 404, error: "MEMBER_NOT_FOUND", message: "requestAlreadyHandled" },
+    { button: "rejectButton", path: "reject", status: 403, error: "FORBIDDEN", message: "forbidden" },
+    { button: "rejectButton", path: "reject", status: 429, error: "RATE_LIMIT_EXCEEDED", message: "rateLimitExceeded" },
   ])("$path $status $error shows $message, not a network error", async ({ button, path, status, error, message }) => {
     const pending = makeMember({ id: "mem-pending", userId: "user-pending", role: "ADMIN", pendingApproval: true });
     setupFetchReady({ members: [pending] });

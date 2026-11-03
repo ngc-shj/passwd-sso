@@ -36,3 +36,12 @@
 - Deferred parity gap: `scripts/checks/check-npm-audit.mjs` — needs the network
   advisory database CI queries; `scripts/checks/check-terraform-test-count.mjs` — no
   terraform change on this branch.
+- D11 (Round 1 review) F6: approval stays one-by-one, bounded by the 30/hour
+  rate limit (D3); a large IdP group forces its admins through that many
+  individual approve calls. Bulk approve (one request approving every pending
+  row a caller can act on) is a follow-up issue if that turns out to matter in
+  practice, not added here. T12: A7c's advisory-lock key is a literal string
+  (`tenant-member:${tenantId}:${r.id}`) matched against the real lock key SCIM
+  takes — a drift between them does not silently pass, it fails loudly as
+  `waitForBackendBlockedBy` timing out (the blocker never sees a waiter), so
+  the hard-coded literal is left as is.

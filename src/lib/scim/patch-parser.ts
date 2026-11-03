@@ -32,6 +32,23 @@ export interface GroupMemberAction {
   userId: string;
 }
 
+// Stored ids are lowercase (Postgres returns uuids that way); validating and
+// lowercasing here, at the boundary, keeps a mixed-case or malformed id from
+// reaching `::uuid[]` (22P02) or a same-batch `createMany` (P2002) as the
+// service's own `Set`/CAS dedup would not catch it (F2/S-F3).
+// Same shape zod's `.uuid()` accepts (version nibble 1-8, variant nibble
+// 8/9/a/b) — scimGroupSchema validates PUT/POST member values with that
+// validator, so a value this regex passes and that one rejects (or the
+// reverse) would make PATCH and PUT disagree on what a user id looks like.
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function normalizeMemberValue(value: string): string {
+  if (!UUID_REGEX.test(value)) {
+    throw new PatchParseError("Member value must be a valid UUID", "invalidValue");
+  }
+  return value.toLowerCase();
+}
+
 // ── User PATCH ────────────────────────────────────────────────
 
 /**
@@ -113,6 +130,12 @@ export function parseGroupPatchOps(
   operations: ScimPatchOperation[],
 ): GroupMemberAction[] {
   const actions: GroupMemberAction[] = [];
+  // De-duplicated per op kind, not across kinds: a ("remove", id) entry does
+  // not suppress a later ("add", id) in the same request (or vice versa), so
+  // an IdP that sends add-then-remove for the same id keeps that order —
+  // only a repeated id within the same op kind collapses to one action.
+  const seenAdd = new Set<string>();
+  const seenRemove = new Set<string>();
 
   for (const operation of operations) {
     const { op, path, value } = operation;
@@ -120,6 +143,8 @@ export function parseGroupPatchOps(
     if (op === "add" && path === "members") {
       const members = parseMemberValues(value);
       for (const userId of members) {
+        if (seenAdd.has(userId)) continue;
+        seenAdd.add(userId);
         actions.push({ op: "add", userId });
       }
       continue;
@@ -128,6 +153,8 @@ export function parseGroupPatchOps(
     if (op === "remove" && path === "members") {
       const members = parseMemberValues(value);
       for (const userId of members) {
+        if (seenRemove.has(userId)) continue;
+        seenRemove.add(userId);
         actions.push({ op: "remove", userId });
       }
       continue;
@@ -143,7 +170,11 @@ export function parseGroupPatchOps(
           `Invalid members filter syntax: ${path}`,
         );
       }
-      actions.push({ op: "remove", userId: match[1] });
+      const userId = normalizeMemberValue(match[1]);
+      if (!seenRemove.has(userId)) {
+        seenRemove.add(userId);
+        actions.push({ op: "remove", userId });
+      }
       continue;
     }
 
@@ -181,13 +212,15 @@ function parseMemberValues(value: unknown): string[] {
         "Member value must be between 1 and 255 characters",
       );
     }
-    return v;
+    return normalizeMemberValue(v);
   });
 }
 
 export class PatchParseError extends Error {
-  constructor(message: string) {
+  readonly scimType?: string;
+  constructor(message: string, scimType?: string) {
     super(message);
     this.name = "PatchParseError";
+    this.scimType = scimType;
   }
 }

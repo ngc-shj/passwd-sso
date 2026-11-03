@@ -232,6 +232,18 @@ describe("enqueueAuditBulkInTx", () => {
     expect(mockAuditOutboxCreateMany).not.toHaveBeenCalled();
   });
 
+  // (T11) The matching-tenant mirror of the mismatch cell above: a caller
+  // outside bypass, writing its own tenant, still proceeds with one createMany.
+  it("proceeds with one createMany when bypass_rls is not 'on' but tenant_id matches", async () => {
+    mockQueryRaw.mockResolvedValueOnce([{ bypass_rls: "off", tenant_id: "tenant-1" }]);
+
+    const payloads = [SAMPLE_PAYLOAD, SAMPLE_PAYLOAD];
+    await expect(
+      enqueueAuditBulkInTx(TX_CLIENT as never, "tenant-1", payloads),
+    ).resolves.toBeUndefined();
+    expect(mockAuditOutboxCreateMany).toHaveBeenCalledTimes(1);
+  });
+
   it("issues no query for an empty list", async () => {
     await enqueueAuditBulkInTx(TX_CLIENT as never, "tenant-1", []);
 

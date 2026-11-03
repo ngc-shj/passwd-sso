@@ -71,7 +71,24 @@ export interface ScimGroupPatchResult {
   resource: ScimGroupResource;
   teamId: string;
   role: TeamRole;
+  added: number;
+  removed: number;
   transitions: ScimMemberTransition[];
+}
+
+/**
+ * `added`/`removed` for `SCIM_GROUP_UPDATE` metadata, from the transitions a
+ * write actually produced rather than the requested lists (so a no-op add or
+ * remove — a repeated PUT, a withdraw whose row the lock already covers —
+ * does not count). Shared by PUT and PATCH (F3).
+ */
+function countAddedRemoved(transitions: ScimMemberTransition[]): { added: number; removed: number } {
+  const added = transitions.filter((t) =>
+    t.kind === SCIM_TRANSITION_KIND.BECAME_PENDING ||
+    t.kind === SCIM_TRANSITION_KIND.PENDING_ROLE_RAISED ||
+    t.kind === SCIM_TRANSITION_KIND.ACTIVE_ROLE_CHANGED,
+  ).length;
+  return { added, removed: transitions.length - added };
 }
 
 // ── Error classes ─────────────────────────────────────────────
@@ -626,12 +643,7 @@ export async function replaceScimGroup(
     baseUrl,
   );
 
-  const added = transitions.filter((t) =>
-    t.kind === SCIM_TRANSITION_KIND.BECAME_PENDING ||
-    t.kind === SCIM_TRANSITION_KIND.PENDING_ROLE_RAISED ||
-    t.kind === SCIM_TRANSITION_KIND.ACTIVE_ROLE_CHANGED,
-  ).length;
-  const removed = transitions.length - added;
+  const { added, removed } = countAddedRemoved(transitions);
 
   return {
     resource,
@@ -716,10 +728,14 @@ export async function patchScimGroup(
     baseUrl,
   );
 
+  const { added, removed } = countAddedRemoved(transitions);
+
   return {
     resource,
     teamId: mapping.teamId,
     role: mapping.role,
+    added,
+    removed,
     transitions,
   };
 }

@@ -349,6 +349,30 @@ describe("patchScimGroup — remove operations (C2)", () => {
       patchScimGroup(TENANT_ID, SCIM_ID, [{ op: "remove", userId: "user-a" }], BASE_URL, tx),
     ).rejects.toThrow(ScimOwnerProtectedError);
   });
+
+  // F3: SCIM_GROUP_UPDATE's added/removed are derived from the transitions a
+  // write actually produced — one withdraw (delete) plus one active removal
+  // (CAS) both count toward `removed`.
+  it("counts a withdraw and an active removal together as removed=2, added=0", async () => {
+    const { tx, teamMember } = makeTx();
+    teamMember.findMany
+      .mockResolvedValueOnce([
+        { id: "m-1", userId: "user-a", role: "ADMIN", deactivatedAt: new Date(), deactivatedByTenant: false, scimApprovalPending: true },
+        { id: "m-2", userId: "user-b", role: "ADMIN", deactivatedAt: null, deactivatedByTenant: false, scimApprovalPending: false },
+      ])
+      .mockResolvedValueOnce([]); // loadGroupMembers
+    teamMember.deleteMany.mockResolvedValue({ count: 1 });
+    teamMember.updateManyAndReturn.mockResolvedValue([{ id: "m-2", userId: "user-b" }]);
+
+    const result = await patchScimGroup(
+      TENANT_ID, SCIM_ID,
+      [{ op: "remove", userId: "user-a" }, { op: "remove", userId: "user-b" }],
+      BASE_URL, tx,
+    );
+
+    expect(result.added).toBe(0);
+    expect(result.removed).toBe(2);
+  });
 });
 
 describe("patchScimGroup — group lookup and lock failures", () => {

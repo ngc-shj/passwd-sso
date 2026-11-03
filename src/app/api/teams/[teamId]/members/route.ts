@@ -42,8 +42,9 @@ async function handleGET(req: NextRequest, { params }: Params) {
   // else sees no pending rows at all.
   const canRemove = hasTeamPermission(membership.role, TEAM_PERMISSION.MEMBER_REMOVE);
   const canInvite = hasTeamPermission(membership.role, TEAM_PERMISSION.MEMBER_INVITE);
-  const members = await withTeamTenantRls(teamId, async () =>
-    prisma.teamMember.findMany({
+  const [teamTenantId, members] = await withTeamTenantRls(teamId, async (tenantId) => [
+    tenantId,
+    await prisma.teamMember.findMany({
       where: canRemove && canInvite
         ? { teamId: teamId, OR: [{ deactivatedAt: null }, { deactivatedByTenant: true }, { scimApprovalPending: true }] }
         : canRemove
@@ -61,7 +62,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
       },
       orderBy: [{ role: "asc" }, { createdAt: "asc" }],
     }),
-  );
+  ] as const);
 
   return NextResponse.json(
     await buildTeamMemberDisplayItems(
@@ -70,6 +71,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
         departed: deactivatedByTenant,
         pendingApproval: scimApprovalPending,
       })),
+      teamTenantId,
     ),
   );
 }

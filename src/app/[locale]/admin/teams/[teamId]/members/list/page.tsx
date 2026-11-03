@@ -70,6 +70,7 @@ export default function TeamMembersPage({
   const t = useTranslations("Team");
   const tAdmin = useTranslations("AdminConsole");
   const tCommon = useTranslations("Common");
+  const tApi = useTranslations("ApiErrors");
 
   const [team, setTeam] = useState<TeamInfo | null>(null);
   const [loadError, setLoadError] = useState(false);
@@ -222,6 +223,15 @@ export default function TeamMembersPage({
           toast.error(t("approveNeedsKey"));
           return;
         }
+        if (error === API_ERROR.CONFLICT) {
+          toast.error(t("approveTargetLeftTenant"));
+          fetchAll();
+          return;
+        }
+        if (error === API_ERROR.RATE_LIMIT_EXCEEDED) {
+          toast.error(tApi("rateLimitExceeded"));
+          return;
+        }
         if (error === API_ERROR.MEMBER_NOT_FOUND) {
           toast.error(t("requestAlreadyHandled"));
           fetchAll();
@@ -244,9 +254,18 @@ export default function TeamMembersPage({
       });
       if (!res.ok) {
         if (await handleStepUpError(res, inlineReauth.triggerOnStaleError, { type: "reject", memberId })) return;
-        if ((await readApiErrorBody(res))?.error === API_ERROR.MEMBER_NOT_FOUND) {
+        const error = (await readApiErrorBody(res))?.error;
+        if (error === API_ERROR.MEMBER_NOT_FOUND) {
           toast.error(t("requestAlreadyHandled"));
           fetchAll();
+          return;
+        }
+        if (error === API_ERROR.FORBIDDEN) {
+          toast.error(t("forbidden"));
+          return;
+        }
+        if (error === API_ERROR.RATE_LIMIT_EXCEEDED) {
+          toast.error(tApi("rateLimitExceeded"));
           return;
         }
         throw new Error("Failed");
@@ -318,6 +337,9 @@ export default function TeamMembersPage({
               />
             </div>
           )}
+          {isAdmin && members.some((m) => m.pendingApproval) && (
+            <p className="mb-2 text-xs text-muted-foreground">{t("approveRoleNote")}</p>
+          )}
           {members.length > 0 && filteredMembers.length === 0 ? (
             <p className="py-4 text-center text-sm text-muted-foreground">
               {t("noMatchingMembers")}
@@ -345,12 +367,19 @@ export default function TeamMembersPage({
                   {m.pendingApproval ? (
                     <div className="flex items-center gap-2">
                       <Badge variant="outline">{t("awaitingApprovalBadge")}</Badge>
+                      {m.pendingTenantInactive && (
+                        <Badge variant="outline" title={t("pendingTenantInactiveHint")}>
+                          {t("pendingTenantInactive")}
+                        </Badge>
+                      )}
                       <TeamRoleBadge role={m.role} />
                       {isAdmin && (
                         <>
-                          <Button size="sm" onClick={() => handleApprove(m.id, m.role)}>
-                            {t("approveButton")}
-                          </Button>
+                          {!m.pendingTenantInactive && (
+                            <Button size="sm" onClick={() => handleApprove(m.id, m.role)}>
+                              {t("approveButton")}
+                            </Button>
+                          )}
                           <AlertDialog>
                             <AlertDialogTrigger asChild>
                               <Button variant="outline" size="sm">
@@ -363,7 +392,7 @@ export default function TeamMembersPage({
                                 <AlertDialogDescription>{t("rejectConfirm")}</AlertDialogDescription>
                               </AlertDialogHeader>
                               <AlertDialogFooter>
-                                <AlertDialogCancel>{t("cancelInvitation")}</AlertDialogCancel>
+                                <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
                                 <AlertDialogAction onClick={() => handleReject(m.id)}>
                                   {t("rejectButton")}
                                 </AlertDialogAction>
@@ -400,7 +429,7 @@ export default function TeamMembersPage({
                             <AlertDialogDescription>{t("removeMemberConfirm")}</AlertDialogDescription>
                           </AlertDialogHeader>
                           <AlertDialogFooter>
-                            <AlertDialogCancel>{t("cancelInvitation")}</AlertDialogCancel>
+                            <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
                             <AlertDialogAction onClick={() => handleRemoveMember(m.id)}>
                               {t("removeMember")}
                             </AlertDialogAction>

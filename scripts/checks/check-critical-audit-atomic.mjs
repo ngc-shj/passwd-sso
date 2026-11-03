@@ -72,9 +72,11 @@ const CRITICAL_ACTIONS = new Set([
   // check-emergency-activate-atomic.mjs is the site-scoped companion that covers
   // both — verified by mutation: reverting one emitter leaves THIS gate green.
   "EMERGENCY_ACCESS_ACTIVATE",
-  // scim-team-admission-approval-plan.md C3/C4: approve/reject are single-mutation
-  // CAS routes; the SCIM PUT/PATCH transitions and confirm-key's distribution are
-  // enqueued in bulk (logAuditBulkInTx) inside the same SCIM transaction.
+  // scim-team-admission-approval-plan.md C3/C4: only the SCIM PUT/PATCH
+  // per-member transitions are enqueued in bulk (logAuditBulkInTx), inside the
+  // same SCIM transaction. Approve, reject, confirm-key's distribution and
+  // mapping creation are each a single-mutation CAS/create site and use
+  // logAuditInTx.
   "TEAM_MEMBER_SCIM_APPROVE",
   "TEAM_MEMBER_SCIM_REJECT",
   "TEAM_MEMBER_SCIM_PENDING",

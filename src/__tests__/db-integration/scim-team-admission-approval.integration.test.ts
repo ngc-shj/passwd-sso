@@ -24,6 +24,8 @@ import {
   type TestContext,
 } from "./helpers";
 import { createRaceHelpers } from "./race-helpers";
+import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
+import { ACTOR_TYPE, AUDIT_SCOPE } from "@/lib/constants/audit/audit";
 import type { Prisma } from "@prisma/client";
 
 const { scimTenant } = vi.hoisted(() => ({ scimTenant: { id: "" } }));
@@ -250,15 +252,33 @@ describe("scim-team-admission-approval — real-DB integration", () => {
     return row?.deactivated_at ?? null;
   }
 
-  async function auditRows(action: string, opts: { teamId?: string } = {}): Promise<{ targetId: string; metadata: Record<string, unknown> }[]> {
-    const rows = await sql<{ payload: { targetId: string; metadata: Record<string, unknown>; teamId?: string } }>(
-      `SELECT payload FROM audit_outbox WHERE tenant_id = ANY($1::uuid[]) AND payload->>'action' = $2`,
+  async function auditRows(action: string, opts: { teamId?: string } = {}): Promise<{ targetId: string; scope: string; actorType: string; userId: string; metadata: Record<string, unknown> }[]> {
+    const rows = await sql<{ payload: {
+      targetId: string; metadata: Record<string, unknown>; teamId?: string;
+      scope: string; actorType: string; userId: string;
+    } }>(
+      `SELECT payload FROM audit_outbox WHERE tenant_id = ANY($1::uuid[]) AND payload->>'action' = $2 ORDER BY created_at ASC`,
       [tenantId, otherTenantId], action,
     );
     return rows
       .map((r) => r.payload)
       .filter((p) => opts.teamId === undefined || p.teamId === opts.teamId)
-      .map((p) => ({ targetId: p.targetId, metadata: p.metadata }));
+      .map((p) => ({ targetId: p.targetId, scope: p.scope, actorType: p.actorType, userId: p.userId, metadata: p.metadata }));
+  }
+
+  /**
+   * (T2) Every SCIM-emitted audit row shares the same actor: the SCIM token
+   * under test, mocked to act as SYSTEM, scoped to TEAM (never the SCIM
+   * group's own TENANT scope — C4). Checked on every row, not just the first.
+   */
+  function expectScimTeamAuditRows(rows: { scope: string; actorType: string; userId: string; metadata: Record<string, unknown> }[]) {
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row.scope).toBe(AUDIT_SCOPE.TEAM);
+      expect(row.actorType).toBe(ACTOR_TYPE.SYSTEM);
+      expect(row.userId).toBe(SYSTEM_ACTOR_ID);
+      expect(row.metadata).toMatchObject({ scimTokenId: "token-under-test" });
+    }
   }
 
   // ── Entry points ─────────────────────────────────────────────
@@ -520,6 +540,10 @@ describe("scim-team-admission-approval — real-DB integration", () => {
     expect((await noop.json()).members).toBeDefined();
     expect(await membership(teamId, target.id)).toMatchObject({ scim_approval_pending: true });
     expect(await auditRows("TEAM_MEMBER_SCIM_PENDING", { teamId })).toHaveLength(1);
+    // (T3) The no-op's own SCIM_GROUP_UPDATE row (the most recent one so
+    // far) carries added: 0 — no transition, so nothing to count.
+    const noopUpdate = await auditRows("SCIM_GROUP_UPDATE", { teamId });
+    expect(noopUpdate.at(-1)?.metadata).toMatchObject({ added: 0 });
 
     // A PUT omitting the user withdraws the pending row.
     const withdrawn = await scimPut(groupId, `${teamSlug}:MEMBER`, []);
@@ -592,6 +616,10 @@ describe("scim-team-admission-approval — real-DB integration", () => {
     expect(await auditRows("TEAM_MEMBER_SCIM_REMOVE", { teamId })).toEqual([
       expect.objectContaining({ targetId: active.id }),
     ]);
+    // (T3) The absent user is a no-op, not a transition: SCIM_GROUP_UPDATE
+    // counts only the active member actually removed.
+    const scimUpdate = await auditRows("SCIM_GROUP_UPDATE", { teamId });
+    expect(scimUpdate.at(-1)?.metadata).toMatchObject({ removed: 1 });
   });
 
   it("A5b: SCIM DELETE /Users of a pending user removes tenant and team rows; a later PATCH remove is a no-op for them", async () => {
@@ -614,6 +642,9 @@ describe("scim-team-admission-approval — real-DB integration", () => {
     expect(await membership(teamId, active.id)).toMatchObject({ deactivated_at: expect.any(Date) });
     const removeAudits = await auditRows("TEAM_MEMBER_SCIM_REMOVE", { teamId });
     expect(removeAudits.map((a) => a.targetId)).toEqual([active.id]);
+    // (T3) Same as above: the already-deleted user is a no-op, not a removal.
+    const scimUpdate = await auditRows("SCIM_GROUP_UPDATE", { teamId });
+    expect(scimUpdate.at(-1)?.metadata).toMatchObject({ removed: 1 });
   });
 
   // ── A5c: departure vs SCIM remove (race) ──────────────────────
@@ -663,11 +694,16 @@ describe("scim-team-admission-approval — real-DB integration", () => {
       const teamId = await team(owner);
       const target = await member();
       const rowId = await pendingMember(teamId, target.id, "MEMBER");
-      await scimUserActive(target.id, false);
+      // (T8) The precondition this test refuses on: the departure itself
+      // committed, and the tenant row actually shows it.
+      expect((await scimUserActive(target.id, false)).status).toBe(200);
+      expect(await tenantDeactivatedAt(tenantId, target.id)).not.toBeNull();
 
       const res = await approve(teamId, rowId, owner, "MEMBER");
       expect(res.status).toBe(409);
       expect(await membership(teamId, target.id)).toMatchObject({ scim_approval_pending: true });
+      // (T4) The refusal writes no approval.
+      expect(await auditRows("TEAM_MEMBER_SCIM_APPROVE", { teamId })).toEqual([]);
     });
 
     it("races a departure parked on a second team's lock while holding the target's advisory lock", async () => {
@@ -694,6 +730,8 @@ describe("scim-team-admission-approval — real-DB integration", () => {
         await Promise.allSettled([departing, approving]);
       }
       expect(await membership(teamId, target.id)).toMatchObject({ scim_approval_pending: true });
+      // (T4) The raced-out approval writes no approval.
+      expect(await auditRows("TEAM_MEMBER_SCIM_APPROVE", { teamId })).toEqual([]);
     });
   });
 
@@ -896,6 +934,9 @@ describe("scim-team-admission-approval — real-DB integration", () => {
       expect((await approve(otherTeamId, rowId, owner, "MEMBER")).status).toBe(404);
       expect((await reject(otherTeamId, rowId, owner)).status).toBe(404);
       expect(await membership(teamId, target.id)).toMatchObject({ scim_approval_pending: true });
+      // (T4) Neither mismatched call writes anything.
+      expect(await auditRows("TEAM_MEMBER_SCIM_APPROVE", { teamId })).toEqual([]);
+      expect(await auditRows("TEAM_MEMBER_SCIM_REJECT", { teamId })).toEqual([]);
     });
   });
 
@@ -1009,19 +1050,27 @@ describe("scim-team-admission-approval — real-DB integration", () => {
       expect.objectContaining({ targetId: b.id, metadata: expect.objectContaining({ role: "MEMBER", previousRole: "VIEWER" }) }),
     ]));
     expect(pending).toHaveLength(2);
+    expectScimTeamAuditRows(pending);
 
-    expect(await auditRows("TEAM_MEMBER_SCIM_ROLE_UPDATE", { teamId })).toEqual([
+    const roleUpdated = await auditRows("TEAM_MEMBER_SCIM_ROLE_UPDATE", { teamId });
+    expect(roleUpdated).toEqual([
       expect.objectContaining({ targetId: c.id, metadata: expect.objectContaining({ role: "MEMBER", previousRole: "VIEWER" }) }),
     ]);
-    expect(await auditRows("TEAM_MEMBER_SCIM_PENDING_WITHDRAW", { teamId })).toEqual([
+    expectScimTeamAuditRows(roleUpdated);
+
+    const withdrawn = await auditRows("TEAM_MEMBER_SCIM_PENDING_WITHDRAW", { teamId });
+    expect(withdrawn).toEqual([
       expect.objectContaining({ targetId: d.id, metadata: expect.objectContaining({ role: "MEMBER" }) }),
     ]);
+    expectScimTeamAuditRows(withdrawn);
+
     const removed = await auditRows("TEAM_MEMBER_SCIM_REMOVE", { teamId });
     expect(removed).toEqual(expect.arrayContaining([
       expect.objectContaining({ targetId: e.id, metadata: expect.not.objectContaining({ departed: true }) }),
       expect.objectContaining({ targetId: f.id, metadata: expect.objectContaining({ departed: true }) }),
     ]));
     expect(removed).toHaveLength(2);
+    expectScimTeamAuditRows(removed);
   });
 
   it("A10: SCIM POST /Groups mapping creation is audited at TEAM scope", async () => {
@@ -1033,9 +1082,11 @@ describe("scim-team-admission-approval — real-DB integration", () => {
     const res = await scimGroupsPost(`${teamSlug}:MEMBER`, externalId);
     expect(res.status).toBe(201);
 
-    expect(await auditRows("SCIM_GROUP_MAPPING_CREATE", { teamId })).toEqual([
+    const mappingCreate = await auditRows("SCIM_GROUP_MAPPING_CREATE", { teamId });
+    expect(mappingCreate).toEqual([
       expect.objectContaining({ targetId: teamId }),
     ]);
+    expectScimTeamAuditRows(mappingCreate);
   });
 
   it("A10: confirm-key's refused branches (already distributed, member gone) emit no TEAM_MEMBER_KEY_DISTRIBUTE", async () => {
@@ -1053,7 +1104,8 @@ describe("scim-team-admission-approval — real-DB integration", () => {
     expect((await confirmKeyCall(teamId, rowId, owner, 1)).status).toBe(409);
     expect(await auditRows("TEAM_MEMBER_KEY_DISTRIBUTE", { teamId })).toHaveLength(1);
 
-    // CAS count 0: the member row is gone by the time confirm-key runs.
+    // Member gone: confirm-key's pre-read finds no row at all (not a CAS
+    // count 0 — the CAS never runs), so it 404s before touching the key.
     const gone = await member();
     const goneRowId = await pendingMember(teamId, gone.id, "MEMBER");
     await setEcdhKey(gone.id);
@@ -1081,7 +1133,13 @@ describe("scim-team-admission-approval — real-DB integration", () => {
     expect(asAdmin.find((m) => m.userId === pending.id)).toMatchObject({ pendingApproval: true });
 
     for (const caller of [plainMember, viewer]) {
-      const body = (await (await membersGet(teamId, caller)).json()) as { userId: string }[];
+      const res = await membersGet(teamId, caller);
+      // (T7) 200 with the owner's row present is the positive control: the
+      // pending row is absent because the list filters it, not because the
+      // whole call failed (which would also leave it out of an error body).
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { userId: string }[];
+      expect(body.some((m) => m.userId === owner)).toBe(true);
       expect(body.some((m) => m.userId === pending.id)).toBe(false);
     }
   });
@@ -1103,6 +1161,8 @@ describe("scim-team-admission-approval — real-DB integration", () => {
     const res = await approve(teamId, row!.id, owner, "MEMBER");
     expect(res.status).toBe(409);
     expect(await membership(teamId, target.id)).toMatchObject({ scim_approval_pending: true, role: "ADMIN" });
+    // (T4) The stale-role refusal writes no approval.
+    expect(await auditRows("TEAM_MEMBER_SCIM_APPROVE", { teamId })).toEqual([]);
   });
 
   // ── A13 ──────────────────────────────────────────────────────

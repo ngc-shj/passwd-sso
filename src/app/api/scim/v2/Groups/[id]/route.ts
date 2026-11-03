@@ -222,7 +222,7 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
     actions = parseGroupPatchOps(bodyResult.data.Operations);
   } catch (e) {
     if (e instanceof PatchParseError) {
-      return scimError(400, e.message);
+      return scimError(400, e.message, e.scimType);
     }
     throw e;
   }
@@ -272,6 +272,8 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
     targetId: id,
     metadata: {
       role: serviceResult.role,
+      added: serviceResult.added,
+      removed: serviceResult.removed,
       operations: actions.map((a) => ({ op: a.op, userId: a.userId })),
     },
   });

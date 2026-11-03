@@ -21,8 +21,15 @@ vi.mock("@/lib/team/team-key-rotation-lock", async (importOriginal) => ({
   lockTeamsAgainstRotation: mockLockTeamsAgainstRotation,
 }));
 
-const { mockAuth, mockPrismaTeamInvitation, mockPrismaTeamMember, mockPrismaUser, mockTransaction, mockRateLimiter, mockCreateRateLimiter, mockWithUserTenantRls, mockWithTeamTenantRls, mockWithBypassRls } = vi.hoisted(() => {
+const { mockAuth, mockPrismaTeamInvitation, mockPrismaTeamMember, mockPrismaUser, mockTransaction, mockRateLimiter, mockCreateRateLimiter, mockWithUserTenantRls, mockWithTeamTenantRls, mockWithBypassRls, teamTenantRlsCallbackPromises } = vi.hoisted(() => {
   const mockRateLimiter = { check: vi.fn() };
+  // Every withTeamTenantRls call's callback promise, in call order (T1): the
+  // admission transaction is always the last one on a path that reaches it,
+  // so a race cell can assert on its settlement independently of how POST's
+  // own try/catch turns that settlement into a response — a regression that
+  // swallowed the throw and returned a refusal value instead would still
+  // produce the same response, but would resolve here instead of reject.
+  const teamTenantRlsCallbackPromises: Promise<unknown>[] = [];
   return {
   mockAuth: vi.fn(),
   mockPrismaTeamInvitation: {
@@ -43,9 +50,13 @@ const { mockAuth, mockPrismaTeamInvitation, mockPrismaTeamMember, mockPrismaUser
   mockCreateRateLimiter: vi.fn((_opts: unknown) => mockRateLimiter),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   // The accept transaction runs as fn(tenantId, tx); the pre-checks as fn().
-  mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: (tenantId: string, tx: unknown) => unknown) =>
-    fn("tenant-1", acceptTx)),
+  mockWithTeamTenantRls: vi.fn((_teamId: string, fn: (tenantId: string, tx: unknown) => unknown) => {
+    const callbackResult = Promise.resolve().then(() => fn("tenant-1", acceptTx));
+    teamTenantRlsCallbackPromises.push(callbackResult);
+    return callbackResult;
+  }),
   mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
+  teamTenantRlsCallbackPromises,
   };
 });
 
@@ -131,6 +142,7 @@ describe("POST /api/teams/invitations/accept", () => {
     acceptTx.teamMemberKey.deleteMany.mockReset().mockResolvedValue({ count: 0 });
     mockLockTenantRows.mockReset().mockResolvedValue(lockedRows());
     mockLockTeamsAgainstRotation.mockReset().mockResolvedValue(undefined);
+    teamTenantRlsCallbackPromises.length = 0;
   });
 
   it("fails closed (503, no mutation) when Redis is unavailable", async () => {
@@ -449,6 +461,9 @@ describe("POST /api/teams/invitations/accept", () => {
         update: expect.objectContaining({ deactivatedAt: null, deactivatedByTenant: false, keyDistributed: false, scimManaged: false }),
       }));
       expect(acceptTx.teamMemberKey.deleteMany).toHaveBeenCalledWith({ where: { teamId: "team-1", userId: "test-user-id" } });
+      // (T1) An admission commits: the transaction callback resolved, it did
+      // not reject and get its refusal response fabricated some other way.
+      await expect(teamTenantRlsCallbackPromises.at(-1)).resolves.not.toBeUndefined();
     });
 
     it("keeps the keys of a membership that became active since the pre-check", async () => {
@@ -460,6 +475,9 @@ describe("POST /api/teams/invitations/accept", () => {
       expect((await res.json()).alreadyMember).toBe(true);
       expect(acceptTx.teamMember.upsert).not.toHaveBeenCalled();
       expect(acceptTx.teamMemberKey.deleteMany).not.toHaveBeenCalled();
+      // (T1) ALREADY_MEMBER is a returned outcome, not a thrown refusal: the
+      // claim commits along with the rest of the transaction.
+      await expect(teamTenantRlsCallbackPromises.at(-1)).resolves.not.toBeUndefined();
     });
 
     it("throws inside the locked transaction when SCIM admits the invitee pending after the pre-check, so the claim rolls back instead of admitting (A14)", async () => {
@@ -473,6 +491,11 @@ describe("POST /api/teams/invitations/accept", () => {
       // a thrown error against the real database); the membership must not.
       expect(acceptTx.teamInvitation.updateMany).toHaveBeenCalled();
       expect(acceptTx.teamMember.upsert).not.toHaveBeenCalled();
+      // (T1) The 409 must come from the transaction callback itself REJECTING
+      // (so the real database rolls the claim back too) — not from the route
+      // catching something inside the callback and returning a refusal value,
+      // which would commit the claim it just made.
+      await expect(teamTenantRlsCallbackPromises.at(-1)).rejects.toThrow();
     });
 
     it("throws inside the locked transaction when a SCIM group removal unmarked the departed row after the pre-check", async () => {
@@ -485,6 +508,8 @@ describe("POST /api/teams/invitations/accept", () => {
       expect((await res.json()).error).toBe("SCIM_MANAGED_MEMBER");
       expect(acceptTx.teamMember.upsert).not.toHaveBeenCalled();
       expect(acceptTx.teamMemberKey.deleteMany).not.toHaveBeenCalled();
+      // (T1) Same requirement as the SCIM_APPROVAL_PENDING race above.
+      await expect(teamTenantRlsCallbackPromises.at(-1)).rejects.toThrow();
     });
 
     it("answers 409 when a tenant row is held past the lock wait", async () => {

@@ -134,14 +134,10 @@ describe("POST /api/teams/[teamId]/members/[memberId]/reject", () => {
     expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 
-  it("returns 404 for a pending member calling reject on their own row (no active team row)", async () => {
-    mockRequireTeamPermission.mockRejectedValue(new TeamAuthError("NOT_FOUND", 404));
-    expect((await reject()).status).toBe(404);
-    expect(tx.teamMember.deleteMany).not.toHaveBeenCalled();
-    expect(mockLogAuditInTx).not.toHaveBeenCalled();
-  });
-
-  it("returns 404 for a tenant ADMIN outside the team", async () => {
+  // Same fixture either way requireTeamPermission answers 404 — a pending
+  // member calling on their own row (no active team row), or a tenant ADMIN
+  // outside the team: the route does not distinguish them, it just propagates.
+  it("propagates requireTeamPermission's 404, changing nothing", async () => {
     mockRequireTeamPermission.mockRejectedValue(new TeamAuthError("NOT_FOUND", 404));
     expect((await reject()).status).toBe(404);
     expect(tx.teamMember.deleteMany).not.toHaveBeenCalled();

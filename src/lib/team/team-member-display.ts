@@ -37,6 +37,12 @@ export interface TeamMemberDisplayItem {
   tenantName: string | null;
   departed: boolean;
   pendingApproval: boolean;
+  /**
+   * A pending row whose user is no longer an active member of the team's own
+   * tenant (inactive or absent there) — approve always 409s on it, so the UI
+   * hides Approve and offers only Reject. Meaningless off a pending row.
+   */
+  pendingTenantInactive: boolean;
 }
 
 /**
@@ -54,6 +60,11 @@ export type TeamMemberDisplayApiItem = Omit<TeamMemberDisplayItem, "joinedAt"> &
  */
 export async function buildTeamMemberDisplayItems(
   members: TeamMemberDisplayRow[],
+  // The team's own tenant, for `pendingTenantInactive` below. Omitted by
+  // callers that never pass a pending row (the single-member and ownerless
+  // routes) — `pendingTenantInactive` is then always false, which is correct
+  // since those rows are never pending.
+  teamTenantId?: string,
 ): Promise<TeamMemberDisplayItem[]> {
   const userIds = members.map((m) => m.userId);
   if (userIds.length === 0) {
@@ -70,7 +81,7 @@ export async function buildTeamMemberDisplayItems(
     // chosen membership stable if the invariant is ever transiently violated.
     const userTenants = await tx.tenantMember.findMany({
       where: { userId: { in: userIds }, deactivatedAt: null },
-      select: { userId: true, tenant: { select: { name: true } } },
+      select: { userId: true, tenantId: true, tenant: { select: { name: true } } },
       // `createdAt` is not unique, so it alone does not make the choice
       // stable — the `id` tiebreak is what does (owning-tenant-rule.ts).
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
@@ -81,12 +92,14 @@ export async function buildTeamMemberDisplayItems(
 
   const userById = new Map(users.map((u) => [u.id, u]));
   const tenantByUserId = new Map(userTenants.map((t) => [t.userId, t.tenant.name]));
+  const activeTenantIdByUserId = new Map(userTenants.map((t) => [t.userId, t.tenantId]));
 
   return members.flatMap((member) => {
     const user = userById.get(member.userId);
     if (!user) {
       return [];
     }
+    const pendingApproval = member.pendingApproval ?? false;
     return [{
       id: member.id,
       userId: member.userId,
@@ -97,7 +110,10 @@ export async function buildTeamMemberDisplayItems(
       joinedAt: member.createdAt,
       tenantName: tenantByUserId.get(member.userId) ?? null,
       departed: member.departed ?? false,
-      pendingApproval: member.pendingApproval ?? false,
+      pendingApproval,
+      pendingTenantInactive: pendingApproval
+        ? activeTenantIdByUserId.get(member.userId) !== teamTenantId
+        : false,
     }];
   });
 }

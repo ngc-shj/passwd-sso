@@ -68,18 +68,21 @@ describe("parseUserPatchOps", () => {
   });
 });
 
+const USER_1 = "11111111-1111-4111-8111-111111111111";
+const USER_2 = "22222222-2222-4222-8222-222222222222";
+
 describe("parseGroupPatchOps", () => {
   it("parses add members", () => {
     const result = parseGroupPatchOps([
       {
         op: "add",
         path: "members",
-        value: [{ value: "user-1" }, { value: "user-2" }],
+        value: [{ value: USER_1 }, { value: USER_2 }],
       },
     ]);
     expect(result).toEqual([
-      { op: "add", userId: "user-1" },
-      { op: "add", userId: "user-2" },
+      { op: "add", userId: USER_1 },
+      { op: "add", userId: USER_2 },
     ]);
   });
 
@@ -88,20 +91,20 @@ describe("parseGroupPatchOps", () => {
       {
         op: "remove",
         path: "members",
-        value: [{ value: "user-1" }],
+        value: [{ value: USER_1 }],
       },
     ]);
-    expect(result).toEqual([{ op: "remove", userId: "user-1" }]);
+    expect(result).toEqual([{ op: "remove", userId: USER_1 }]);
   });
 
   it("parses Azure AD style remove (path filter)", () => {
     const result = parseGroupPatchOps([
       {
         op: "remove",
-        path: 'members[value eq "user-1"]',
+        path: `members[value eq "${USER_1}"]`,
       },
     ]);
-    expect(result).toEqual([{ op: "remove", userId: "user-1" }]);
+    expect(result).toEqual([{ op: "remove", userId: USER_1 }]);
   });
 
   it("rejects invalid members value", () => {
@@ -118,5 +121,67 @@ describe("parseGroupPatchOps", () => {
         { op: "replace", path: "displayName", value: "NEW" },
       ]),
     ).toThrow(PatchParseError);
+  });
+
+  // F2/S-F3: member values are validated as uuids, lowercased, and
+  // de-duplicated per op kind at this boundary.
+  it("rejects a non-uuid member value with scimType invalidValue", () => {
+    expect.assertions(2);
+    try {
+      parseGroupPatchOps([
+        { op: "add", path: "members", value: [{ value: "not-a-uuid" }] },
+      ]);
+    } catch (e) {
+      expect(e).toBeInstanceOf(PatchParseError);
+      expect((e as PatchParseError).scimType).toBe("invalidValue");
+    }
+  });
+
+  it("rejects a non-uuid member value from the Azure filter path", () => {
+    expect(() =>
+      parseGroupPatchOps([
+        { op: "remove", path: 'members[value eq "not-a-uuid"]' },
+      ]),
+    ).toThrow(PatchParseError);
+  });
+
+  it("lowercases a mixed-case uuid member value", () => {
+    const result = parseGroupPatchOps([
+      { op: "add", path: "members", value: [{ value: USER_1.toUpperCase() }] },
+    ]);
+    expect(result).toEqual([{ op: "add", userId: USER_1 }]);
+  });
+
+  it("lowercases a mixed-case uuid from the Azure filter path", () => {
+    const result = parseGroupPatchOps([
+      { op: "remove", path: `members[value eq "${USER_1.toUpperCase()}"]` },
+    ]);
+    expect(result).toEqual([{ op: "remove", userId: USER_1 }]);
+  });
+
+  it("de-duplicates a repeated id within the same op kind", () => {
+    const result = parseGroupPatchOps([
+      { op: "add", path: "members", value: [{ value: USER_1 }, { value: USER_1 }] },
+    ]);
+    expect(result).toEqual([{ op: "add", userId: USER_1 }]);
+  });
+
+  it("de-duplicates the same id repeated across add op entries, keeping the first", () => {
+    const result = parseGroupPatchOps([
+      { op: "add", path: "members", value: [{ value: USER_1 }] },
+      { op: "add", path: "members", value: [{ value: USER_1 }] },
+    ]);
+    expect(result).toEqual([{ op: "add", userId: USER_1 }]);
+  });
+
+  it("keeps add-then-remove order for the same id across op kinds", () => {
+    const result = parseGroupPatchOps([
+      { op: "add", path: "members", value: [{ value: USER_1 }] },
+      { op: "remove", path: "members", value: [{ value: USER_1 }] },
+    ]);
+    expect(result).toEqual([
+      { op: "add", userId: USER_1 },
+      { op: "remove", userId: USER_1 },
+    ]);
   });
 });

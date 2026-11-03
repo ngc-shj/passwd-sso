@@ -97,10 +97,21 @@ Rules:
   add, or a lower-role add); a user not active in the tenant is
   `Referenced user is not an active member of this tenant` (400) unless the
   row is already departure-marked or pending, which is left untouched
+- approval pins the role shown to the approver, but only for the admission
+  itself: once a member is active, the IdP can raise their role further (up
+  to `ADMIN`, never `OWNER`) through a later group sync without another team
+  approval — the approver's pin does not follow the member past admission.
+  Every such raise is a `TEAM_MEMBER_SCIM_ROLE_UPDATE` in the team audit log
+  and a team webhook delivery, so the team sees it even though it did not
+  approve it
 - member remove: withdraws (deletes) a pending row, deactivates an active
   one, unmarks a departure-marked one (so a tenant return no longer restores
   it) — never downgrades a role; removing a user with no row in the team at
   all is a no-op (idempotent on an IdP retry, not a 400)
+- a team's rejection (or a team-side removal) of a SCIM-managed member is not
+  sticky: if the IdP's group still lists the user at the next sync, the add
+  is re-applied and a new pending row is created — the team rejects again,
+  or the IdP's group mapping is changed to stop sending them
 - DELETE is not supported (405) — role-based groups are configuration, not ephemeral resources
 
 ## Identity and Authorization Boundaries

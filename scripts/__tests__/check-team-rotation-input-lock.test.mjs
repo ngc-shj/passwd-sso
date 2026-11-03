@@ -423,6 +423,25 @@ export const rotate = withTenantRls(prisma, tenantId, async (tx) => {
       expectDenied(run(), /raw access to scim_approval_pending by column name/);
     });
 
+    // T10: the gate's negative cells above all withhold the marker; these
+    // positive controls prove a correctly-marked create/createMany passes
+    // rather than the gate accepting everything regardless of the marker.
+    it("passes a create naming the pending marker", () => {
+      write(SERVICE, `export async function add(tx, tenantId, teamId, userId, role) {
+  await lockGroupWrite(tx, tenantId, teamId, [userId]);
+  await tx.teamMember.create({ data: { teamId, userId, role, scimApprovalPending: true, deactivatedAt: new Date() } });
+}`);
+      expect(run({ admissions: 1 }).code).toBe(0);
+    });
+
+    it("passes a createMany .map naming the pending marker", () => {
+      write(SERVICE, `export async function add(tx, tenantId, teamId, ids) {
+  await lockGroupWrite(tx, tenantId, teamId, ids);
+  await tx.teamMember.createMany({ data: ids.map((uid) => ({ userId: uid, scimApprovalPending: true, deactivatedAt: new Date() })) });
+}`);
+      expect(run({ admissions: 1 }).code).toBe(0);
+    });
+
     it("passes the approve route's CAS (literal true in the where, literal false in the data)", () => {
       write(APPROVE, `export const approve = withTenantRls(prisma, tenantId, async (tx) => {
   await lockTenantRows(tx, tenantId, [approverId, targetId], "share");
