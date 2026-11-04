@@ -209,4 +209,41 @@ describe("TeamRekeyFinishControl", () => {
     expect(await screen.findByTestId("recent-session-dialog")).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("rekeyRunning");
   });
+
+  it("unmounting mid-pass (a remount after a rotation) aborts the runner's signal, settles a pending re-authentication, and reports the pass ended", async () => {
+    mockFetch.mockImplementation(async () => listResponse());
+    let seen: RekeyRunnerDeps | undefined;
+    let reauth: Promise<boolean> | undefined;
+    mockRunRekeyPass.mockImplementation(async (deps: RekeyRunnerDeps) => {
+      seen = deps;
+      reauth = deps.reauthenticate();
+      return new Promise(() => {});
+    });
+    const onRunningChange = vi.fn();
+    const { unmount } = render(<TeamRekeyFinishControl teamId="team-1" autoStart onRunningChange={onRunningChange} />);
+    expect(await screen.findByRole("status")).toHaveTextContent("rekeyRunning");
+    expect(onRunningChange).toHaveBeenLastCalledWith(true);
+    expect(seen?.signal?.aborted).toBe(false);
+
+    unmount();
+
+    expect(seen?.signal?.aborted).toBe(true);
+    await expect(reauth).resolves.toBe(false);
+    expect(onRunningChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it("control: a pass that finishes while mounted is not aborted and reports running true then false", async () => {
+    mockFetch.mockImplementation(async () => listResponse());
+    let seen: RekeyRunnerDeps | undefined;
+    mockRunRekeyPass.mockImplementation(async (deps: RekeyRunnerDeps) => {
+      seen = deps;
+      return passResult();
+    });
+    const onRunningChange = vi.fn();
+    render(<TeamRekeyFinishControl teamId="team-1" autoStart onRunningChange={onRunningChange} />);
+
+    expect(await screen.findByText('rekeyCompleted:{"count":2}')).toBeInTheDocument();
+    expect(seen?.signal?.aborted).toBe(false);
+    expect(onRunningChange.mock.calls.map((c) => c[0])).toEqual([true, false]);
+  });
 });

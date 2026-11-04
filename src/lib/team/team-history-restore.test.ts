@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { decryptData } from "@/lib/crypto/crypto-client";
+import { decryptData, encryptData } from "@/lib/crypto/crypto-client";
 import { buildTeamEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import { deriveItemEncryptionKey } from "@/lib/crypto/crypto-team";
 import { ENTRY_TYPE } from "@/lib/constants";
@@ -39,6 +39,28 @@ describe("buildTeamHistoryRestoreBody", () => {
     expect(getEntryDecryptionKey).toHaveBeenCalledWith(TEAM_ID, ENTRY, expect.objectContaining({ itemKeyId: "row-ik", itemKeyVersion: 3, teamKeyVersion: 2 }));
     const overview = await decryptData(body.encryptedOverview, rowKey, buildTeamEntryAAD(TEAM_ID, ENTRY, VAULT_TYPE.OVERVIEW, 3));
     expect(JSON.parse(overview)).toEqual(JSON.parse(overviewBlob));
+  });
+
+  it("seals an aadVersion-0 row's overview without AAD (the restored entry takes the row's aadVersion) and names the row's blobIv", async () => {
+    const teamKey = await makeTeamKey();
+    const { fullBlob, overviewBlob } = buildTeamEntryPayload({
+      entryType: ENTRY_TYPE.LOGIN, title: "Legacy", notes: "", tagNames: [], username: "u", password: "p", url: "",
+    });
+    const blob = await encryptData(fullBlob, teamKey);
+    const row = {
+      id: "h0", entryType: ENTRY_TYPE.LOGIN,
+      encryptedBlob: blob.ciphertext, blobIv: blob.iv, blobAuthTag: blob.authTag,
+      aadVersion: 0, teamKeyVersion: 1, itemKeyVersion: 0,
+      encryptedItemKey: null, itemKeyIv: null, itemKeyAuthTag: null, itemKeyId: null,
+    };
+
+    const body = await buildTeamHistoryRestoreBody(TEAM_ID, ENTRY, row, async () => teamKey);
+
+    expect(body.snapshotBlobIv).toBe(blob.iv);
+    expect(JSON.parse(await decryptData(body.encryptedOverview, teamKey))).toEqual(JSON.parse(overviewBlob));
+    await expect(
+      decryptData(body.encryptedOverview, teamKey, buildTeamEntryAAD(TEAM_ID, ENTRY, VAULT_TYPE.OVERVIEW, 0)),
+    ).rejects.toThrow();
   });
 
   it("does not echo plaintext when the blob is not JSON", async () => {

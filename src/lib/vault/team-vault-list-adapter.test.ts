@@ -83,6 +83,21 @@ describe("decryptTeamOverview", () => {
     expect(result.tags).toEqual([{ id: "t1", name: "work", color: null }]);
   });
 
+  it("opens an aadVersion-0 overview without AAD (as a restore of such a row writes it); aadVersion 1 keeps the AAD", async () => {
+    mockDecryptData.mockResolvedValue(JSON.stringify({ title: "Legacy" }));
+
+    const legacy = await decryptTeamOverview(TEAM_ID, rawEntry({ aadVersion: 0, itemKeyVersion: 0 }), {
+      getEntryDecryptionKey: mockGetEntryKey,
+    });
+    expect(legacy.title).toBe("Legacy");
+    expect(mockBuildTeamAAD).not.toHaveBeenCalled();
+    expect(mockDecryptData).toHaveBeenLastCalledWith(expect.anything(), STABLE_KEY, undefined);
+
+    await decryptTeamOverview(TEAM_ID, rawEntry({ aadVersion: 1 }), { getEntryDecryptionKey: mockGetEntryKey });
+    expect(mockBuildTeamAAD).toHaveBeenCalledWith(TEAM_ID, "e1", "overview", 2);
+    expect(mockDecryptData).toHaveBeenLastCalledWith(expect.anything(), STABLE_KEY, "aad-bytes");
+  });
+
   it("includes deletedAt only when present (trash rows — INV-C1.5)", async () => {
     mockDecryptData.mockResolvedValue(JSON.stringify({ title: "X" }));
 

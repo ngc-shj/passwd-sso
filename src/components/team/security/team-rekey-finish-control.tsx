@@ -25,6 +25,8 @@ interface TeamRekeyFinishControlProps {
   teamId: string;
   /** Start the pass as soon as the status is loaded (after a committed rotation). */
   autoStart?: boolean;
+  /** Told when a pass starts and ends (the page holds rotation while one runs). */
+  onRunningChange?: (running: boolean) => void;
 }
 
 type Status =
@@ -62,7 +64,7 @@ function holderNames(
  * "Finish re-key (N)": the re-key pass control for TEAM_UPDATE holders on the
  * key-rotation page (docs/archive/review/team-key-rotation-rekey-plan.md C3).
  */
-export function TeamRekeyFinishControl({ teamId, autoStart = false }: TeamRekeyFinishControlProps) {
+export function TeamRekeyFinishControl({ teamId, autoStart = false, onRunningChange }: TeamRekeyFinishControlProps) {
   const t = useTranslations("Teams");
   const { resolveTeamKey, invalidateTeamKey } = useTeamVault();
   const [status, setStatus] = useState<Status>({ kind: "loading" });
@@ -84,13 +86,25 @@ export function TeamRekeyFinishControl({ teamId, autoStart = false }: TeamRekeyF
       void inlineReauth.triggerOnStaleError();
     });
 
+  // The running pass's controller: aborted when the control unmounts (a
+  // remount after a rotation must not leave the old pass racing the new one).
+  const abortRef = useRef<AbortController | null>(null);
+  const onRunningChangeRef = useRef(onRunningChange);
+  useEffect(() => {
+    onRunningChangeRef.current = onRunningChange;
+  });
+
   const runPass = async (total: number) => {
+    const controller = new AbortController();
+    abortRef.current = controller;
     setRunning(true);
+    onRunningChangeRef.current?.(true);
     setResult(null);
     setProgress({ processed: 0, total });
     try {
       const passResult = await runRekeyPass({
         teamId,
+        signal: controller.signal,
         fetch: fetchApi,
         resolveKey: (version) => resolveTeamKey(teamId, version),
         invalidateTeamKeys: () => invalidateTeamKey(teamId),
@@ -98,8 +112,10 @@ export function TeamRekeyFinishControl({ teamId, autoStart = false }: TeamRekeyF
         sleep,
         onProgress: (p) => setProgress({ processed: p.processed, total: Math.max(total, p.pendingCount) }),
       });
+      if (controller.signal.aborted) return;
       setResult(passResult);
     } catch (e) {
+      if (controller.signal.aborted) return;
       clientLogError(CLIENT_LOG_EVENT.TEAM_KEY_ROTATION_FAILED, { code: toClientErrorCode(e) });
       setResult({
         status: "stopped",
@@ -113,8 +129,13 @@ export function TeamRekeyFinishControl({ teamId, autoStart = false }: TeamRekeyF
         attemptedByVersion: new Map(),
       });
     } finally {
-      setRunning(false);
-      setStatus(await fetchStatus(teamId));
+      if (abortRef.current === controller) abortRef.current = null;
+      // An aborted pass was already reported stopped by the cleanup.
+      if (!controller.signal.aborted) {
+        onRunningChangeRef.current?.(false);
+        setRunning(false);
+        setStatus(await fetchStatus(teamId));
+      }
     }
   };
   const runPassRef = useRef(runPass);
@@ -135,6 +156,13 @@ export function TeamRekeyFinishControl({ teamId, autoStart = false }: TeamRekeyF
     })();
     return () => {
       cancelled = true;
+      if (abortRef.current) {
+        abortRef.current.abort();
+        onRunningChangeRef.current?.(false);
+      }
+      // A pass parked on re-authentication resumes, sees the abort and stops.
+      reauthWaiterRef.current?.(false);
+      reauthWaiterRef.current = null;
     };
   }, [teamId, autoStart]);
 

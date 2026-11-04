@@ -536,7 +536,52 @@ describe("EntryHistorySection", () => {
       const post = fetchMock.mock.calls.find((c) => String(c[0]).endsWith("/restore"));
       expect(JSON.parse(String((post?.[1] as RequestInit).body))).toEqual({
         encryptedOverview: { ciphertext: "ov-ct", iv: "ov-iv", authTag: "ov-tag" },
+        snapshotBlobIv: ROW.blobIv,
       });
+    });
+
+    it("HISTORY_ROW_CHANGED → re-fetches the row and retries once with the rebuilt body", async () => {
+      mockDecryptData.mockResolvedValue(JSON.stringify({ title: "Old" }));
+      const rows = [ROW, { ...ROW, blobIv: "i2" }];
+      let rowReads = 0;
+      let restores = 0;
+      const fetchMock = vi.fn((url: string) => {
+        if (url.endsWith("/restore")) {
+          restores++;
+          const ok = restores > 1;
+          return Promise.resolve({
+            ok,
+            status: ok ? 200 : 409,
+            json: () => Promise.resolve(ok ? { success: true } : { error: "HISTORY_ROW_CHANGED" }),
+          });
+        }
+        if (url.includes("/history/h1")) {
+          const row = rows[Math.min(rowReads++, rows.length - 1)];
+          return Promise.resolve({ ok: true, json: () => Promise.resolve(row) });
+        }
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(HISTORY_ITEMS) });
+      });
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+      await confirmRestore();
+
+      await waitFor(() => expect(toast.success).toHaveBeenCalled());
+      const posts = fetchMock.mock.calls.filter((c) => String(c[0]).endsWith("/restore"));
+      expect(posts.map((c) => JSON.parse(String((c as unknown as [string, RequestInit])[1].body)).snapshotBlobIv)).toEqual(["i", "i2"]);
+      expect(rowReads).toBe(2);
+      expect(toast.error).not.toHaveBeenCalled();
+    });
+
+    it("HISTORY_ROW_CHANGED twice → one retry only, then the refusal is shown", async () => {
+      mockDecryptData.mockResolvedValue(JSON.stringify({ title: "Old" }));
+      const fetchMock = restoreFetch(409, { error: "HISTORY_ROW_CHANGED" });
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+      await confirmRestore();
+
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith("historyRowChanged"));
+      expect(fetchMock.mock.calls.filter((c) => String(c[0]).endsWith("/restore"))).toHaveLength(2);
+      expect(toast.success).not.toHaveBeenCalled();
     });
 
     it("surfaces HISTORY_KEY_UNAVAILABLE with its exits", async () => {

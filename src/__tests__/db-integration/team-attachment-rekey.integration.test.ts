@@ -151,6 +151,15 @@ describe("team attachments under the entry ItemKey — real-DB integration", () 
     await ctx.deleteTestData(tenantId);
   });
 
+  /** The blobIv of a history row, as the client reads it before a restore. */
+  async function historyBlobIv(historyId: string): Promise<string> {
+    const r = await ctx.su.pool.query<{ blob_iv: string }>(
+      `SELECT blob_iv FROM team_password_entry_histories WHERE id = $1::uuid`,
+      [historyId],
+    );
+    return r.rows[0].blob_iv;
+  }
+
   async function sql(text: string, ...params: unknown[]): Promise<void> {
     await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
@@ -506,6 +515,90 @@ describe("team attachments under the entry ItemKey — real-DB integration", () 
     });
   });
 
+  // ── Upload after a restore: the re-key rule and the own-entry rule ───────
+
+  async function restoreRow(entry: Entry, historyId: string) {
+    return restoreRoute(
+      jsonRequest(`http://localhost/api/teams/${entry.teamId}/passwords/${entry.entryId}/history/${historyId}/restore`, "POST", {
+        encryptedOverview: { ciphertext: hex(32), iv: hex(12), authTag: hex(16) },
+        snapshotBlobIv: await historyBlobIv(historyId),
+      }),
+      { params: Promise.resolve({ teamId: entry.teamId, id: entry.entryId, historyId }) },
+    );
+  }
+
+  describe("upload after a restore (ENTRY_REKEY_REQUIRED)", () => {
+    it("a restored row whose ItemKey is wrapped under an older team key → 409 ENTRY_REKEY_REQUIRED, nothing stored", async () => {
+      const team = await seedTeam(2);
+      const entry = await seedEntry(team, { teamKeyVersion: 2, itemKeyVersion: 1 });
+      const old = await seedHistoryItemKey(team, entry, 1, 2);
+      expect((await restoreRow(entry, old.historyId)).status).toBe(200);
+      const restored = { ...entry, itemKey: old.itemKey, itemKeyId: old.itemKeyId, itemKeyVersion: 2 };
+
+      const { res, attId } = await upload(restored);
+
+      expect(await errorOf(res)).toEqual({ status: 409, error: "ENTRY_REKEY_REQUIRED" });
+      expect(await attachmentRow(attId)).toBeUndefined();
+    });
+
+    it("control: a restored row at the current team key version → 201", async () => {
+      const team = await seedTeam(2);
+      const entry = await seedEntry(team, { teamKeyVersion: 2, itemKeyVersion: 1 });
+      const current = await seedHistoryItemKey(team, entry, 2, 2);
+      expect((await restoreRow(entry, current.historyId)).status).toBe(200);
+      const restored = { ...entry, itemKey: current.itemKey, itemKeyId: current.itemKeyId, itemKeyVersion: 2 };
+
+      expect((await upload(restored)).res.status).toBe(201);
+    });
+  });
+
+  describe("own-entry rule on restore and upload (MEMBER: own entries only)", () => {
+    async function memberOf(team: Team) {
+      return seedMember(team.teamId, "MEMBER", [1]);
+    }
+
+    it("a MEMBER on another member's entry → restore and upload refused 403 ONLY_OWN_ENTRIES, nothing written", async () => {
+      const team = await seedTeam(1);
+      const entry = await seedEntry(team, { teamKeyVersion: 1, itemKeyVersion: 1 });
+      const row = await seedHistoryItemKey(team, entry, 1, 2);
+      const member = await memberOf(team);
+      mockAuth.mockResolvedValue({ user: { id: member } });
+      const before = await ctx.su.pool.query(`SELECT * FROM team_password_entries WHERE id = $1::uuid`, [entry.entryId]);
+
+      expect(await errorOf(await restoreRow(entry, row.historyId))).toEqual({ status: 403, error: "ONLY_OWN_ENTRIES" });
+      const { res, attId } = await upload(entry);
+      expect(await errorOf(res)).toEqual({ status: 403, error: "ONLY_OWN_ENTRIES" });
+
+      expect(await attachmentRow(attId)).toBeUndefined();
+      const after = await ctx.su.pool.query(`SELECT * FROM team_password_entries WHERE id = $1::uuid`, [entry.entryId]);
+      expect(after.rows).toEqual(before.rows);
+    });
+
+    it("control: a MEMBER on an entry they created → restore 200, upload 201", async () => {
+      const team = await seedTeam(1);
+      const entry = await seedEntry(team, { teamKeyVersion: 1, itemKeyVersion: 1 });
+      const member = await memberOf(team);
+      await sql(`UPDATE team_password_entries SET created_by_id = $2::uuid WHERE id = $1::uuid`, entry.entryId, member);
+      mockAuth.mockResolvedValue({ user: { id: member } });
+
+      expect((await upload(entry)).res.status).toBe(201);
+      const row = await seedHistoryItemKey(team, entry, 1, 2);
+      expect((await restoreRow(entry, row.historyId)).status).toBe(200);
+    });
+
+    it("control: an ADMIN on another member's entry → upload 201, restore 200", async () => {
+      const team = await seedTeam(1);
+      const entry = await seedEntry(team, { teamKeyVersion: 1, itemKeyVersion: 1 });
+      const member = await memberOf(team);
+      await sql(`UPDATE team_password_entries SET created_by_id = $2::uuid WHERE id = $1::uuid`, entry.entryId, member);
+      mockAuth.mockResolvedValue({ user: { id: team.admin } });
+
+      expect((await upload(entry)).res.status).toBe(201);
+      const row = await seedHistoryItemKey(team, entry, 1, 2);
+      expect((await restoreRow(entry, row.historyId)).status).toBe(200);
+    });
+  });
+
   // ── Upload and delete: the actor's role under the team lock ──────────────
 
   describe("ACTOR_NOT_PERMITTED on upload and delete: the actor's role, re-read under the team lock", () => {
@@ -514,29 +607,16 @@ describe("team attachments under the entry ItemKey — real-DB integration", () 
      * row; the blocker optionally changes the actor's role, then commits.
      */
     async function parkedBehindTeamRow(team: Team, send: () => Promise<Response>, demoteTo: "MEMBER" | "VIEWER" | null) {
-      const blocker = await ctx.su.pool.connect();
-      try {
-        await blocker.query("BEGIN");
-        await blocker.query(`SELECT id FROM teams WHERE id = $1::uuid FOR NO KEY UPDATE`, [team.teamId]);
-        const { rows: [{ pid: blockerPid }] } = await blocker.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
-        const pending = send();
-        const parkedPid = await race().waitForBackendBlockedBy(blockerPid);
-        const waits = await ctx.su.pool.query<{ query: string }>(
-          `SELECT a.query FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid WHERE l.pid = $1 AND NOT l.granted`,
-          [parkedPid],
-        );
-        expect(waits.rows[0].query).toMatch(/FROM teams WHERE id = .* FOR SHARE/s);
+      const r = race();
+      return r.parkBehind(`SELECT id FROM teams WHERE id = $1::uuid FOR NO KEY UPDATE`, [team.teamId], send, async (blocker, parkedPid) => {
+        expect(await r.waitingQueryOf(parkedPid)).toMatch(/FROM teams WHERE id = .* FOR SHARE/s);
         if (demoteTo) {
           await blocker.query(
             `UPDATE team_members SET role = $3::"TeamRole" WHERE team_id = $1::uuid AND user_id = $2::uuid`,
             [team.teamId, team.admin, demoteTo],
           );
         }
-        await blocker.query("COMMIT");
-        return await pending;
-      } finally {
-        blocker.release();
-      }
+      });
     }
 
     const attachmentCount = async (entryId: string) =>
@@ -632,6 +712,7 @@ describe("team attachments under the entry ItemKey — real-DB integration", () 
       const restored = await restoreRoute(
         jsonRequest(`http://localhost/api/teams/${team.teamId}/passwords/${entry.entryId}/history/${other.historyId}/restore`, "POST", {
           encryptedOverview: { ciphertext: hex(32), iv: hex(12), authTag: hex(16) },
+          snapshotBlobIv: await historyBlobIv(other.historyId),
         }),
         { params: Promise.resolve({ teamId: team.teamId, id: entry.entryId, historyId: other.historyId }) },
       );
@@ -657,6 +738,7 @@ describe("team attachments under the entry ItemKey — real-DB integration", () 
       const restored = await restoreRoute(
         jsonRequest(`http://localhost/api/teams/${team.teamId}/passwords/${entry.entryId}/history/${other.historyId}/restore`, "POST", {
           encryptedOverview: { ciphertext: hex(32), iv: hex(12), authTag: hex(16) },
+          snapshotBlobIv: await historyBlobIv(other.historyId),
         }),
         { params: Promise.resolve({ teamId: team.teamId, id: entry.entryId, historyId: other.historyId }) },
       );
@@ -737,31 +819,22 @@ describe("team attachments under the entry ItemKey — real-DB integration", () 
       async function migrateParkedBehind(revoke: boolean) {
         const { team, entry, legacy } = await seedMigratable();
         const body = await migrateBody(entry, legacy);
-        const blocker = await ctx.su.pool.connect();
-        try {
-          await blocker.query("BEGIN");
-          await blocker.query(`SELECT id FROM teams WHERE id = $1::uuid FOR NO KEY UPDATE`, [team.teamId]);
-          const { rows: [{ pid: blockerPid }] } = await blocker.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
-          const pending = migrate(entry, legacy.attId, body);
-          const parkedPid = await race().waitForBackendBlockedBy(blockerPid);
-          const waits = await ctx.su.pool.query<{ locktype: string; query: string }>(
-            `SELECT l.locktype, a.query FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
-              WHERE l.pid = $1 AND NOT l.granted`,
-            [parkedPid],
-          );
-          expect(waits.rows.length).toBeGreaterThan(0);
-          expect(waits.rows[0].query).toMatch(/FROM teams WHERE id = .* FOR SHARE/s);
-          if (revoke) {
-            await blocker.query(
-              `UPDATE team_members SET role = 'MEMBER' WHERE team_id = $1::uuid AND user_id = $2::uuid`,
-              [team.teamId, team.admin],
-            );
-          }
-          await blocker.query("COMMIT");
-          return { res: await pending, legacy };
-        } finally {
-          blocker.release();
-        }
+        const r = race();
+        const res = await r.parkBehind(
+          `SELECT id FROM teams WHERE id = $1::uuid FOR NO KEY UPDATE`,
+          [team.teamId],
+          () => migrate(entry, legacy.attId, body),
+          async (blocker, parkedPid) => {
+            expect(await r.waitingQueryOf(parkedPid)).toMatch(/FROM teams WHERE id = .* FOR SHARE/s);
+            if (revoke) {
+              await blocker.query(
+                `UPDATE team_members SET role = 'MEMBER' WHERE team_id = $1::uuid AND user_id = $2::uuid`,
+                [team.teamId, team.admin],
+              );
+            }
+          },
+        );
+        return { res, legacy };
       }
 
       it("revoked while parked → 403 ACTOR_NOT_PERMITTED, row unchanged", async () => {

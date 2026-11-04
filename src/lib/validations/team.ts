@@ -133,10 +133,13 @@ export const updateTeamE2EPasswordSchema = z.object({
 /**
  * History restore body. History rows hold no overview, so the client sends
  * the overview re-encrypted under the restored row's ItemKey (or team key for
- * a v0 row) at that row's AAD.
+ * a v0 row) at that row's AAD, and the `blobIv` of the row it decrypted: a
+ * row a re-key rewrote since is refused rather than restored beside an
+ * overview sealed under the row's previous key.
  */
 export const restoreTeamHistorySchema = z.object({
   encryptedOverview: encryptedFieldSchema,
+  snapshotBlobIv: hexIv,
 });
 
 export const updateTeamSchema = z.object({

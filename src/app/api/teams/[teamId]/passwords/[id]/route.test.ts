@@ -65,6 +65,7 @@ vi.mock("@/lib/auth/access/team-auth", async () => ({
   hasTeamPermission: mockHasTeamPermission,
   // The real role read: the service re-checks the actor under the team lock.
   activeTeamRole: (await vi.importActual<typeof import("@/lib/auth/access/team-auth")>("@/lib/auth/access/team-auth")).activeTeamRole,
+  canWriteTeamEntry: (await vi.importActual<typeof import("@/lib/auth/access/team-auth")>("@/lib/auth/access/team-auth")).canWriteTeamEntry,
   TeamAuthError,
 }));
 vi.mock("@/lib/tenant-context", () => ({
@@ -748,6 +749,12 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
     expect(res.status).toBe(409);
     expect((await res.json()).error).toBe(API_ERROR.ENTRY_REKEY_REQUIRED);
     expect(txMock.teamPasswordEntry.update).not.toHaveBeenCalled();
+
+    // Minus-step control: the same body on the entry at the current version → 200.
+    mockEntryLockRow.mockResolvedValue([teamCurRow]);
+    const ok = await putBody(validE2EBody);
+    expect(ok.status).toBe(200);
+    expect(txMock.teamPasswordEntry.update).toHaveBeenCalledTimes(1);
   });
 
   it("answers ITEM_KEY_CHANGED, not ENTRY_REKEY_REQUIRED, for a stale id on a stale entry (check order)", async () => {

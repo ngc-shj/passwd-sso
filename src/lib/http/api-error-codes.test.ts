@@ -132,7 +132,8 @@ describe("API_ERROR structural invariants", () => {
     // review round 2, S-R2-2/F-N1/F-N2/T-N2: split out of the generic CONFLICT
     // approve used for a target who left the tenant).
     // 201 = 178 + 23 team entry re-key codes (team-key-rotation-rekey C1-C4).
-    expect(Object.keys(API_ERROR).length).toBe(201);
+    // 202 = 201 + HISTORY_ROW_CHANGED (team-key-rotation-rekey review round 1 F1).
+    expect(Object.keys(API_ERROR).length).toBe(202);
   });
 });
 

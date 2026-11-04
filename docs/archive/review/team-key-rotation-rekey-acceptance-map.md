@@ -21,9 +21,13 @@ Files (all under `src/__tests__/db-integration/` unless a path is given):
 | Code / emitting route | Refusal cell → control |
 |---|---|
 | re-key POST: ACTOR_NOT_PERMITTED, REKEY_NOT_PENDING, TEAM_KEY_VERSION_CHANGED, REKEY_SNAPSHOT_MISMATCH, REKEY_SET_MISMATCH, ITEM_KEY_VERSION_INVALID, ITEM_KEY_IV_REUSED, REKEY_ATTACHMENTS_UNMIGRATED | ER (A4 rows below), each with its 200 control |
+| re-key POST: ENTRY_UPGRADE_REQUIRED (a v0 entry; not in C2's list, D23) | U:`src/app/api/teams/[teamId]/passwords/[id]/rekey/route.test.ts` "409 ENTRY_UPGRADE_REQUIRED for a v0 entry, without reading the body" and "409 ENTRY_UPGRADE_REQUIRED when a restore turned the entry back to v0 since the pre-check"; through the runner: TP A2 / A3 / T7 (the pass upgrades first, then re-keys → 200) |
 | re-key POST: REKEY_POSTCHECK_FAILED | ER `assertEntryRekeyConsistent` block (direct red-proof on seeded rows); 500 mapping U:`src/app/api/teams/[teamId]/passwords/[id]/rekey/route.test.ts` "500 REKEY_POSTCHECK_FAILED…" (D27) |
-| entry PUT: ITEM_KEY_CHANGED, ITEM_KEY_VERSION_INVALID, ENTRY_REKEY_REQUIRED, ITEM_KEY_IV_REUSED | KW A7 / A5 rows below |
+| entry PUT: ITEM_KEY_CHANGED, ITEM_KEY_VERSION_INVALID, ENTRY_REKEY_REQUIRED, ITEM_KEY_IV_REUSED | KW A7 / A5 rows below; ENTRY_REKEY_REQUIRED's minus-step 200 control in the same cell of U:`src/lib/services/team-password-service.test.ts` and U:`…/passwords/[id]/route.test.ts` (round 1 T2) |
 | upload: ITEM_KEY_CHANGED, CEK_KEY_VERSION_MISMATCH, ENTRY_UPGRADE_REQUIRED | AR `upload` block |
+| upload: ENTRY_REKEY_REQUIRED (D53) | AR "upload after a restore (ENTRY_REKEY_REQUIRED)" → control "a restored row at the current team key version → 201"; U: both upload test trees |
+| restore / upload: ONLY_OWN_ENTRIES (pre-check), ACTOR_NOT_PERMITTED (under the lock) for a MEMBER on another member's entry (D54) | AR "own-entry rule on restore and upload" (refusal + MEMBER-own and ADMIN controls); U: both restore and both upload test trees (under-lock arm) |
+| restore: HISTORY_ROW_CHANGED (D55) | ER "A5: a restore built before a re-key and parked behind it…" → ER "A5 control: a restore of an unchanged row…"; U: both restore test trees |
 | migrate: all ten codes | AR `migrate` + `MinIO` blocks (A13) |
 | attachment GET: ATTACHMENT_KEY_UNAVAILABLE | AR "an attachment uploaded under a previous ItemKey…" |
 | rotation: TEAM_ROTATE_KEY_UNAVAILABLE, TEAM_ROTATE_CARRY_INVALID | KW "A12: rotation carry" block |
@@ -45,7 +49,7 @@ Files (all under `src/__tests__/db-integration/` unless a path is given):
 | **A3** v0 entry with a mode-0 attachment: upgrade → migrate → re-key | TP "A3: the pass upgrades a v0 entry, migrates its mode-0 attachment…" (DB backend), TP MinIO "A3: …exactly one object…" |
 | A3 MinIO: a successful migrate leaves exactly one object under the attachment prefix | AR MinIO "A3: a migrate leaves exactly one object…"; TP MinIO A3 (through the runner) |
 | A3 concurrent second migrate → MIGRATE_NOT_LEGACY; after either refusal the listing holds exactly the surviving object and it decrypts | AR MinIO "A3: of two concurrent migrates…", AR MinIO "MIGRATE_CAS_FAILED on a stale %s…" |
-| A3 personal migrate on MinIO red before its fix | AR MinIO "personal migrate: hashes the stored body…" (red-proof is Batch 2's record; not re-run in Batch 6) |
+| A3 personal migrate on MinIO red before its fix | AR MinIO "personal migrate: hashes the stored body…" (re-run in round 1 on MinIO, D63: red with the pre-fix hash source, green without) |
 | **A4** wrong newItemKeyVersion → ITEM_KEY_VERSION_INVALID | ER "ITEM_KEY_VERSION_INVALID…" |
 | A4 rotation committed after the GET → TEAM_KEY_VERSION_CHANGED | ER "TEAM_KEY_VERSION_CHANGED…" |
 | A4 edit between GET and POST → REKEY_SNAPSHOT_MISMATCH | ER "REKEY_SNAPSHOT_MISMATCH: an edit between…" |
@@ -54,7 +58,7 @@ Files (all under `src/__tests__/db-integration/` unless a path is given):
 | A4 not pending → REKEY_NOT_PENDING | ER "REKEY_NOT_PENDING…" |
 | A4 mode-1 attachment → REKEY_ATTACHMENTS_UNMIGRATED (control: migrate, re-key → 200) | ER "REKEY_ATTACHMENTS_UNMIGRATED…" (order per D24) |
 | A4 role revoked while parked → ACTOR_NOT_PERMITTED; controls 200 / FORBIDDEN | ER "ACTOR_NOT_PERMITTED…" block |
-| **A5** restore parked behind re-key ends on-version | ER "A5: a restore parked behind a re-key ends on-version…" |
+| **A5** restore parked behind re-key ends on-version | ER "A5: a restore built before a re-key and parked behind it…" — the restore body is built the way the client builds it (row GET, the row's pre-re-key key), so the parked restore is refused HISTORY_ROW_CHANGED and the entry stays as the re-key left it (on-version, pending 0); the client's retry from the re-read row → 200 (D55, supersedes the earlier cell that sealed the overview under the post-re-key key) |
 | A5 client cache: same `(entryId, itemKeyId)` cached, never for another id | U:`src/lib/team/team-vault-core.crypto.test.tsx` (h), (i) (D33) |
 | A5 stale itemKeyId PUT / upload → ITEM_KEY_CHANGED | KW A7 cells; AR upload "ITEM_KEY_CHANGED…" |
 | A5 rotate, post-rotation member downloads a mode-2 attachment before re-key → 200 | AR download "after a rotation, a member holding only the new team key…" |
@@ -73,6 +77,8 @@ Files (all under `src/__tests__/db-integration/` unless a path is given):
 | A7 v1 row restore → ENTRY_REKEY_REQUIRED; metadata-only PUT 200; stale id first (check order) | KW "A7: restore of a v1 row at an old team key version…" |
 | A7 upgrade with high-water + 2 → ITEM_KEY_VERSION_INVALID (control + 1) | KW A7 cells (D9) |
 | A7 NULL-id rows A then B mint distinct ids; stale PUT with A's id → ITEM_KEY_CHANGED; control | KW "A7: on a team at version 1, restoring NULL-id rows A then B…" |
+| A7 restore(v0) at an old version → upgrade → re-key, end to end through the runner → pending 0, nothing off-version | TP "T7: restore a v0 row at an old team key version → the v0→v1 upgrade edit → the pass…" (round 1 T7) |
+| A7 restore of an aadVersion-0 row: the list opens it, rotation re-encrypts it (no carry), the pass upgrades and re-keys it; aadVersion-1 control | TP "F2: restoring an aadVersion-0 v0 row…" / "control: an aadVersion-1…" (D56) |
 | A7 v0 restore leaves the id NULL; re-key then restore of a re-keyed row keeps marker and id | KW "A7: restoring a row that holds the live ItemKey…"; ER "A7: re-key, then restore a re-keyed row…" (D13) |
 | A7 unit: comparison helper (null,null) mismatch, (x,x) match; null id re-resolves, non-null hits cache | U:`src/lib/team/team-item-key.test.ts` `itemKeyIdsMatch`; U:`team-vault-core.crypto.test.tsx` (h), (j) |
 | **A8** >10 MiB valid re-key body (≥ 21 blobs at CIPHERTEXT_MAX, stale snapshot) → 409 REKEY_SNAPSHOT_MISMATCH | E2E "a valid re-key POST above 10 MiB…" |
@@ -82,7 +88,7 @@ Files (all under `src/__tests__/db-integration/` unless a path is given):
 | **A9** pending > page size completes | TP "A9: with page size 2, five pending entries…" |
 | A9 a page full of skipped entries does not starve; final pending = skipped | TP "A9: a first page full of entries the runner skips…" (red-proved: a runner stopping on an all-skipped page) |
 | A9 admin A then admin B finish | TP same cell; scenario 3 cell |
-| **A10** marker / high-water writers on a team at ≥ 2; backfill block (all listed seeds, constraint, SAVEPOINT pairs) | KW "A10: the backfill block…", "A10: entry create on a team at version 2…" |
+| **A10** marker / high-water writers on a team at ≥ 2; backfill block | KW "A10: the backfill block sets the marker, the high-water and the item_key_id, and adds no CHECK…" — asserts the marker on teams at versions 0, 1 and 3 (0 → 1: the `<= 1` normalisation, round 1 T6), the high-water terms, the minted / matched ids, that no `team_password_entries_item_key_id_iff_item_key` constraint exists and that a NULL-id v1 row is accepted. The plan's constraint and SAVEPOINT pairs were removed with the CHECK (D41); they move to the follow-up that adds it. KW "A10: entry create on a team at version 2…" |
 | A10 after re-key the id differs and is carried by non-retained rows and attachments; retained keep theirs; after rotation ids unchanged | ER "A10: the re-key gives the entry a new ItemKey id…" |
 | **A11** `itemKeyVersion = 2` and TW vectors decrypt in web, extension, iOS; version-1 AAD fails | U:`src/__tests__/team-key-fixture.test.ts`; `extension/src/__tests__/lib/crypto-team.test.ts` "team-key fixture: itemKeyVersion 2 entry and TW attachment"; iOS `TeamKeyCryptoTests` (macOS host, VE2 — not run in Batch 6) |
 | **A12** v1 keys held only by a tenant-deactivated member → carried, unrecoverable | TP "A12: v1 keys held only by a tenant-deactivated member…" |

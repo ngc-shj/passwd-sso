@@ -215,10 +215,20 @@ describe("team entry key identity writers — real-DB integration", () => {
     return r.rows[0].team_key_version;
   }
 
-  function restore(teamId: string, entryId: string, historyId: string) {
+  /** The blobIv of a history row, as the client reads it before a restore. */
+  async function historyBlobIv(historyId: string): Promise<string> {
+    const r = await ctx.su.pool.query<{ blob_iv: string }>(
+      `SELECT blob_iv FROM team_password_entry_histories WHERE id = $1::uuid`,
+      [historyId],
+    );
+    return r.rows[0]?.blob_iv ?? hex(12);
+  }
+
+  async function restore(teamId: string, entryId: string, historyId: string) {
     return restoreHistory(
       jsonRequest(`http://localhost/api/teams/${teamId}/passwords/${entryId}/history/${historyId}/restore`, "POST", {
         encryptedOverview: encryptedField(),
+        snapshotBlobIv: await historyBlobIv(historyId),
       }),
       { params: Promise.resolve({ teamId, id: entryId, historyId }) },
     );
@@ -268,8 +278,11 @@ describe("team entry key identity writers — real-DB integration", () => {
 
   it("A10: the backfill block sets the marker, the high-water and the item_key_id, and adds no CHECK (it ships in the next release)", async () => {
     const owner1 = await ctx.createUser(tenantId);
+    const teamV0 = await seedTeam(0);
     const teamV1 = await seedTeam(1);
     const teamV3 = await seedTeam(3);
+    // A team still at version 0 counts as its first version (`<= 1`).
+    const atV0 = await seedEntry(teamV0, owner1, { teamKeyVersion: 0, itemKeyVersion: 1 });
     const atV1 = await seedEntry(teamV1, owner1, { teamKeyVersion: 1, itemKeyVersion: 1 });
     const atV3 = await seedEntry(teamV3, owner1, { teamKeyVersion: 3, itemKeyVersion: 1 });
 
@@ -328,7 +341,7 @@ describe("team entry key identity writers — real-DB integration", () => {
     const block = /-- BEGIN BACKFILL team-key-rotation-rekey\n([\s\S]*?)-- END BACKFILL team-key-rotation-rekey/.exec(migration)?.[1];
     expect(block).toBeDefined();
 
-    const seeded = [atV1, atV3, hwHistory, hwAttachment, mode0Only, neither, idEntry, other, v0];
+    const seeded = [atV0, atV1, atV3, hwHistory, hwAttachment, mode0Only, neither, idEntry, other, v0];
     const client = await ctx.su.pool.connect();
     try {
       await client.query("BEGIN");
@@ -352,7 +365,7 @@ describe("team entry key identity writers — real-DB integration", () => {
         if (!row) throw new Error(`seeded entry ${id} not found`);
         return row;
       };
-      expect({ v1Team: at(atV1).m, v3Team: at(atV3).m }).toEqual({ v1Team: 1, v3Team: 0 });
+      expect({ v0Team: at(atV0).m, v1Team: at(atV1).m, v3Team: at(atV3).m }).toEqual({ v0Team: 1, v1Team: 1, v3Team: 0 });
       expect({
         history: at(hwHistory).hw,
         attachment: at(hwAttachment).hw,
@@ -360,7 +373,7 @@ describe("team entry key identity writers — real-DB integration", () => {
         neither: at(neither).hw,
       }).toEqual({ history: 3, attachment: 4, mode0Only: 2, neither: 1 });
 
-      const v1Ids = [atV1, atV3, hwHistory, hwAttachment, mode0Only, neither, idEntry, other].map((id) => at(id).ik);
+      const v1Ids = [atV0, atV1, atV3, hwHistory, hwAttachment, mode0Only, neither, idEntry, other].map((id) => at(id).ik);
       expect(v1Ids.every((ik) => ik !== null)).toBe(true);
       expect(new Set(v1Ids).size).toBe(v1Ids.length);
       expect(at(v0).ik).toBeNull();
@@ -682,29 +695,16 @@ describe("team entry key identity writers — real-DB integration", () => {
       send: () => Promise<Response>,
       demoteTo: "MEMBER" | "VIEWER" | null,
     ) {
-      const blocker = await ctx.su.pool.connect();
-      try {
-        await blocker.query("BEGIN");
-        await blocker.query(`SELECT id FROM teams WHERE id = $1::uuid FOR NO KEY UPDATE`, [teamId]);
-        const { rows: [{ pid: blockerPid }] } = await blocker.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
-        const pending = send();
-        const parkedPid = await race().waitForBackendBlockedBy(blockerPid);
-        const waits = await ctx.su.pool.query<{ query: string }>(
-          `SELECT a.query FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid WHERE l.pid = $1 AND NOT l.granted`,
-          [parkedPid],
-        );
-        expect(waits.rows[0].query).toMatch(/FROM teams WHERE id = .* FOR SHARE/s);
+      const r = race();
+      return r.parkBehind(`SELECT id FROM teams WHERE id = $1::uuid FOR NO KEY UPDATE`, [teamId], send, async (blocker, parkedPid) => {
+        expect(await r.waitingQueryOf(parkedPid)).toMatch(/FROM teams WHERE id = .* FOR SHARE/s);
         if (demoteTo) {
           await blocker.query(
             `UPDATE team_members SET role = $3::"TeamRole" WHERE team_id = $1::uuid AND user_id = $2::uuid`,
             [teamId, actor, demoteTo],
           );
         }
-        await blocker.query("COMMIT");
-        return await pending;
-      } finally {
-        blocker.release();
-      }
+      });
     }
 
     /** An ADMIN editing an entry another member created. */

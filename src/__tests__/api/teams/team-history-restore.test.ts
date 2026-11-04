@@ -34,6 +34,7 @@ vi.mock("@/lib/auth/access/team-auth", async (importOriginal) => {
     requireTeamPermission: mockRequireTeamPermission,
     hasTeamPermission: actual.hasTeamPermission,
     activeTeamRole: actual.activeTeamRole,
+    canWriteTeamEntry: actual.canWriteTeamEntry,
     TeamAuthError,
   };
 });
@@ -79,7 +80,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
 
   it("returns 404 when entry not found", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue({ role: "MEMBER" });
     mockEntryFindUnique.mockResolvedValue(null);
     const req = createRequest("POST");
     const res = await POST(req, createParams({ teamId: "o1", id: "p1", historyId: "h1" }));
@@ -90,7 +91,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
 
   it("returns 404 when entry belongs to different team", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue({ role: "MEMBER" });
     mockEntryFindUnique.mockResolvedValue({ id: "p1", teamId: "other-team" });
     const req = createRequest("POST");
     const res = await POST(req, createParams({ teamId: "o1", id: "p1", historyId: "h1" }));
@@ -100,8 +101,8 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
 
   it("returns 404 when history not found", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockEntryFindUnique.mockResolvedValue({ id: "p1", teamId: "o1" });
+    mockRequireTeamPermission.mockResolvedValue({ role: "MEMBER" });
+    mockEntryFindUnique.mockResolvedValue({ id: "p1", teamId: "o1", createdById: DEFAULT_SESSION.user.id });
     mockHistoryFindUnique.mockResolvedValue(null);
     const req = createRequest("POST");
     const res = await POST(req, createParams({ teamId: "o1", id: "p1", historyId: "h1" }));
@@ -112,8 +113,8 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
 
   it("returns 404 when history belongs to different entry", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockEntryFindUnique.mockResolvedValue({ id: "p1", teamId: "o1" });
+    mockRequireTeamPermission.mockResolvedValue({ role: "MEMBER" });
+    mockEntryFindUnique.mockResolvedValue({ id: "p1", teamId: "o1", createdById: DEFAULT_SESSION.user.id });
     mockHistoryFindUnique.mockResolvedValue({ id: "h1", entryId: "other-entry" });
     const req = createRequest("POST");
     const res = await POST(req, createParams({ teamId: "o1", id: "p1", historyId: "h1" }));
@@ -122,8 +123,14 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
   });
 
   const OVERVIEW = { ciphertext: "restored-overview", iv: "a".repeat(24), authTag: "b".repeat(32) };
+  const ROW_BLOB_IV = "c".repeat(24);
+  const BODY = { encryptedOverview: OVERVIEW, snapshotBlobIv: ROW_BLOB_IV };
 
-  function setupRestoreTx(holderKeys: { userId: string }[], actor: { role: string } | null = { role: "MEMBER" }) {
+  function setupRestoreTx(
+    holderKeys: { userId: string }[],
+    actor: { role: string } | null = { role: "MEMBER" },
+    over: { createdById?: string; rowBlobIv?: string } = {},
+  ) {
     const entryUpdate = vi.fn();
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) =>
       fn({
@@ -148,6 +155,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
               item_key_id: null,
               item_key_team_key_version: 3,
               item_key_version_high_water: 0,
+              created_by_id: over.createdById ?? DEFAULT_SESSION.user.id,
             },
           ];
         }),
@@ -158,7 +166,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
             id: "h1",
             entryId: "p1",
             encryptedBlob: "old",
-            blobIv: "oldIv",
+            blobIv: over.rowBlobIv ?? ROW_BLOB_IV,
             blobAuthTag: "oldTag",
             aadVersion: 0,
             teamKeyVersion: 2,
@@ -187,8 +195,8 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
 
   function preChecksPass() {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockEntryFindUnique.mockResolvedValue({ id: "p1", teamId: "o1", tenantId: "t1" });
+    mockRequireTeamPermission.mockResolvedValue({ role: "MEMBER" });
+    mockEntryFindUnique.mockResolvedValue({ id: "p1", teamId: "o1", tenantId: "t1", createdById: DEFAULT_SESSION.user.id });
     mockHistoryFindUnique.mockResolvedValue({ entryId: "p1" });
   }
 
@@ -196,7 +204,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
     preChecksPass();
     const entryUpdate = setupRestoreTx([{ userId: "u-holder" }]);
 
-    const req = createRequest("POST", undefined, { body: { encryptedOverview: OVERVIEW } });
+    const req = createRequest("POST", undefined, { body: BODY });
     const res = await POST(req, createParams({ teamId: "o1", id: "p1", historyId: "h1" }));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(200);
@@ -213,7 +221,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
     preChecksPass();
     const entryUpdate = setupRestoreTx([]);
 
-    const req = createRequest("POST", undefined, { body: { encryptedOverview: OVERVIEW } });
+    const req = createRequest("POST", undefined, { body: BODY });
     const res = await POST(req, createParams({ teamId: "o1", id: "p1", historyId: "h1" }));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(409);
@@ -225,12 +233,59 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
     preChecksPass();
     const entryUpdate = setupRestoreTx([{ userId: "u-holder" }], null);
 
-    const req = createRequest("POST", undefined, { body: { encryptedOverview: OVERVIEW } });
+    const req = createRequest("POST", undefined, { body: BODY });
     const res = await POST(req, createParams({ teamId: "o1", id: "p1", historyId: "h1" }));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(403);
     expect(json.error).toBe(API_ERROR.ACTOR_NOT_PERMITTED);
     expect(entryUpdate).not.toHaveBeenCalled();
+  });
+
+  it("refuses 409 HISTORY_ROW_CHANGED when the row was rewritten since the client read it (control: the same blobIv → 200)", async () => {
+    preChecksPass();
+    const changed = setupRestoreTx([{ userId: "u-holder" }], { role: "MEMBER" }, { rowBlobIv: "d".repeat(24) });
+    const refused = await parseResponse(
+      await POST(createRequest("POST", undefined, { body: BODY }), createParams({ teamId: "o1", id: "p1", historyId: "h1" })),
+    );
+    expect(refused.status).toBe(409);
+    expect(refused.json.error).toBe(API_ERROR.HISTORY_ROW_CHANGED);
+    expect(changed).not.toHaveBeenCalled();
+
+    const same = setupRestoreTx([{ userId: "u-holder" }]);
+    const res = await POST(createRequest("POST", undefined, { body: BODY }), createParams({ teamId: "o1", id: "p1", historyId: "h1" }));
+    expect(res.status).toBe(200);
+    expect(same).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a MEMBER on another member's entry: ONLY_OWN_ENTRIES before the transaction, ACTOR_NOT_PERMITTED under the lock", async () => {
+    preChecksPass();
+    mockEntryFindUnique.mockResolvedValue({ id: "p1", teamId: "o1", tenantId: "t1", createdById: "someone-else" });
+    setupRestoreTx([{ userId: "u-holder" }]);
+    const pre = await parseResponse(
+      await POST(createRequest("POST", undefined, { body: BODY }), createParams({ teamId: "o1", id: "p1", historyId: "h1" })),
+    );
+    expect(pre.status).toBe(403);
+    expect(pre.json.error).toBe(API_ERROR.ONLY_OWN_ENTRIES);
+    expect(mockTransaction).not.toHaveBeenCalled();
+
+    preChecksPass();
+    const locked = setupRestoreTx([{ userId: "u-holder" }], { role: "MEMBER" }, { createdById: "someone-else" });
+    const underLock = await parseResponse(
+      await POST(createRequest("POST", undefined, { body: BODY }), createParams({ teamId: "o1", id: "p1", historyId: "h1" })),
+    );
+    expect(underLock.status).toBe(403);
+    expect(underLock.json.error).toBe(API_ERROR.ACTOR_NOT_PERMITTED);
+    expect(locked).not.toHaveBeenCalled();
+  });
+
+  it("control: an ADMIN restores another member's entry → 200", async () => {
+    preChecksPass();
+    mockRequireTeamPermission.mockResolvedValue({ role: "ADMIN" });
+    mockEntryFindUnique.mockResolvedValue({ id: "p1", teamId: "o1", tenantId: "t1", createdById: "someone-else" });
+    const entryUpdate = setupRestoreTx([{ userId: "u-holder" }], { role: "ADMIN" }, { createdById: "someone-else" });
+    const res = await POST(createRequest("POST", undefined, { body: BODY }), createParams({ teamId: "o1", id: "p1", historyId: "h1" }));
+    expect(res.status).toBe(200);
+    expect(entryUpdate).toHaveBeenCalledTimes(1);
   });
 
   it("returns 400 when the re-encrypted overview is missing", async () => {

@@ -75,6 +75,7 @@ const teamCryptoMocks = vi.hoisted(() => ({
   unwrapItemKey: vi.fn().mockResolvedValue(new Uint8Array([70, 80, 90])),
   deriveItemEncryptionKey: vi.fn().mockResolvedValue("item-enc-key"),
   buildTeamEntryAAD: vi.fn().mockReturnValue(new Uint8Array([3, 4])),
+  teamEntryAadFor: vi.fn().mockReturnValue(new Uint8Array([3, 4])),
   buildItemKeyWrapAAD: vi.fn().mockReturnValue(new Uint8Array([5, 6])),
 }));
 

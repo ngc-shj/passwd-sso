@@ -764,8 +764,10 @@ model TeamPasswordEntry {
   entryType         EntryType @default(LOGIN) @map("entry_type")
 
   // Identity of the current ItemKey: minted when an ItemKey is created,
-  // unchanged by rotation's re-wrap. NULL exactly when itemKeyVersion = 0
-  // (CHECK in migration 20261104000000).
+  // unchanged by rotation's re-wrap. Every writer of this release sets it for
+  // an ItemKey; NULL for a v0 entry, and for a v1+ row an instance of the
+  // previous release wrote during rollout (counted as pending re-key). No
+  // CHECK this release: it ships after a backfill of such rows.
   itemKeyId               String? @map("item_key_id") @db.Uuid
   // Team key version at which the current ItemKey was created; the entry
   // awaits re-key while this is below teams.team_key_version.

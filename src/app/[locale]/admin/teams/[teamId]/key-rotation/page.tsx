@@ -18,15 +18,26 @@ export default function TeamKeyRotationPage({
   const t = useTranslations("Team");
   // Bumped by a committed rotation: the finish control then starts the pass.
   const [rekeyStartToken, setRekeyStartToken] = useState(0);
+  // A rotation while a pass runs would remount the control mid-pass.
+  const [rekeyRunning, setRekeyRunning] = useState(false);
 
   return (
     <Card>
       <SectionCardHeader icon={KeyRound} title={t("rotateKeyTitle")} description={t("rotateKeyDesc")} />
       <CardContent className="space-y-6">
-        <TeamRotateKeyButton teamId={teamId} onSuccess={() => setRekeyStartToken((n) => n + 1)} />
+        <TeamRotateKeyButton
+          teamId={teamId}
+          disabled={rekeyRunning}
+          onSuccess={() => setRekeyStartToken((n) => n + 1)}
+        />
         <Separator />
         {/* Remounted after a committed rotation so it reloads and starts the pass. */}
-        <TeamRekeyFinishControl key={rekeyStartToken} teamId={teamId} autoStart={rekeyStartToken > 0} />
+        <TeamRekeyFinishControl
+          key={rekeyStartToken}
+          teamId={teamId}
+          autoStart={rekeyStartToken > 0}
+          onRunningChange={setRekeyRunning}
+        />
       </CardContent>
     </Card>
   );

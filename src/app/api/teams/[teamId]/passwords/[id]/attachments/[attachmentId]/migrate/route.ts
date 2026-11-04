@@ -128,16 +128,19 @@ async function handlePUT(req: NextRequest, { params }: RouteContext) {
   if (!current) {
     return errorResponse(API_ERROR.ATTACHMENT_NOT_FOUND);
   }
+  // Refusals the pre-read already decides are answered before the new body
+  // is uploaded; both are re-checked under the locks below.
+  if (current.encryptionMode === ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED) {
+    return errorResponse(API_ERROR.MIGRATE_NOT_LEGACY);
+  }
   const blobStore = getAttachmentBlobStore();
-  let stored: { hash: string; length: number } | null = null;
-  if (current.encryptionMode !== ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED) {
-    try {
-      const bytes = await blobStore.getObject(current.encryptedData, blobContext);
-      stored = { hash: createHash("sha256").update(bytes).digest("hex"), length: bytes.length };
-    } catch (e) {
-      // Reported in the refusal order below (after MIGRATE_NOT_LEGACY).
-      if (!(e instanceof BlobRefInvalidError)) throw e;
-    }
+  let stored: { hash: string; length: number };
+  try {
+    const bytes = await blobStore.getObject(current.encryptedData, blobContext);
+    stored = { hash: createHash("sha256").update(bytes).digest("hex"), length: bytes.length };
+  } catch (e) {
+    if (e instanceof BlobRefInvalidError) return errorResponse(API_ERROR.BLOB_REF_INVALID);
+    throw e;
   }
 
   // The new body goes to a fresh object before the transaction; it is deleted
@@ -208,7 +211,6 @@ async function handlePUT(req: NextRequest, { params }: RouteContext) {
       // The hash below is over what was read before the transaction: valid
       // only while the locked row is the row that was read.
       if (
-        !stored ||
         row.iv !== current.iv ||
         row.authTag !== current.authTag ||
         !Buffer.from(row.encryptedData).equals(Buffer.from(current.encryptedData))

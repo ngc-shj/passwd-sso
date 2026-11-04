@@ -25,6 +25,7 @@ vi.mock("@/lib/crypto/crypto-client", () => ({
 
 vi.mock("@/lib/crypto/crypto-aad", () => ({
   buildTeamEntryAAD: (...args: unknown[]) => mockBuildTeamEntryAAD(...args),
+  VAULT_TYPE: { BLOB: "blob", OVERVIEW: "overview" },
 }));
 
 import { buildTeamGetDetail } from "./build-team-get-detail";
@@ -89,6 +90,19 @@ describe("buildTeamGetDetail", () => {
       STABLE_KEY,
       "mock-team-aad",
     );
+  });
+
+  it("decrypts an aadVersion-0 row without AAD (a restored legacy row), and an aadVersion-1 row with it", async () => {
+    mockFetchApi.mockResolvedValueOnce({ ok: true, json: async () => makeRawRow({ aadVersion: 0, itemKeyVersion: 0 }) });
+    mockDecryptData.mockResolvedValueOnce(makeBlob());
+    await buildTeamGetDetail(TEAM_ID, { id: ENTRY_ID, entryType: "LOGIN" }, { getEntryDecryptionKey })();
+    expect(mockBuildTeamEntryAAD).not.toHaveBeenCalled();
+    expect(mockDecryptData).toHaveBeenLastCalledWith(expect.anything(), STABLE_KEY, undefined);
+
+    mockFetchApi.mockResolvedValueOnce({ ok: true, json: async () => makeRawRow({ aadVersion: 1 }) });
+    mockDecryptData.mockResolvedValueOnce(makeBlob());
+    await buildTeamGetDetail(TEAM_ID, { id: ENTRY_ID, entryType: "LOGIN" }, { getEntryDecryptionKey })();
+    expect(mockDecryptData).toHaveBeenLastCalledWith(expect.anything(), STABLE_KEY, "mock-team-aad");
   });
 
   it("throws when the fetch fails", async () => {

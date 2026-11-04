@@ -99,8 +99,9 @@ async function handleGET(
       : await tx.teamPasswordEntryHistory.findMany({
           where: {
             entryId: id,
-            ...(attachment.encryptionMode === ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED
-              ? { itemKeyId: attachment.cekItemKeyId ?? undefined }
+            ...(attachment.encryptionMode === ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED &&
+            attachment.cekItemKeyId !== null
+              ? { itemKeyId: attachment.cekItemKeyId }
               : {}),
           },
           select: {
@@ -128,11 +129,39 @@ async function handleGET(
   }
 
   // Key material per mode. Mode 2: the one wrap holding the ItemKey the CEK
-  // is wrapped under (by item_key_id); none left → 409. Mode 1 (legacy): the
-  // entry wrap and every history wrap — the client finds the right ItemKey by
-  // trial decryption. Mode 0 (legacy): the team key at keyVersion.
+  // is wrapped under (by item_key_id); none left → 409. Mode 2 bound to no id
+  // (migrated on an entry of unknown identity during rollout, D41) and mode 1
+  // (legacy): the entry wrap and every history wrap — the client finds the
+  // right ItemKey by trial decryption. Mode 0 (legacy): the team key at
+  // keyVersion.
+  const allWraps = () => {
+    const entryWrap = toWrap(entry, "entry", null);
+    return [
+      ...(entryWrap ? [entryWrap] : []),
+      ...history.map((h) => toWrap(h, "history", h.id)).filter((w) => w !== null),
+    ];
+  };
+  const cekWrapFields = () => ({
+    keyVersion: attachment.keyVersion,
+    cekEncrypted: attachment.cekEncrypted
+      ? Buffer.from(attachment.cekEncrypted).toString("base64")
+      : null,
+    cekIv: attachment.cekIv,
+    cekAuthTag: attachment.cekAuthTag,
+    cekKeyVersion: attachment.cekKeyVersion,
+    cekWrapAadVersion: attachment.cekWrapAadVersion,
+  });
   let keyMaterial: Record<string, unknown>;
-  if (attachment.encryptionMode === ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED) {
+  if (
+    attachment.encryptionMode === ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED &&
+    attachment.cekItemKeyId === null
+  ) {
+    const itemKeyWraps = allWraps();
+    if (itemKeyWraps.length === 0) {
+      return errorResponse(API_ERROR.ATTACHMENT_KEY_UNAVAILABLE);
+    }
+    keyMaterial = { ...cekWrapFields(), itemKeyWraps };
+  } else if (attachment.encryptionMode === ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED) {
     const wrap = itemKeyIdsMatch(entry.itemKeyId, attachment.cekItemKeyId)
       ? toWrap(entry, "entry", null)
       : history
@@ -142,26 +171,9 @@ async function handleGET(
     if (!wrap) {
       return errorResponse(API_ERROR.ATTACHMENT_KEY_UNAVAILABLE);
     }
-    keyMaterial = {
-      keyVersion: attachment.keyVersion,
-      cekEncrypted: attachment.cekEncrypted
-        ? Buffer.from(attachment.cekEncrypted).toString("base64")
-        : null,
-      cekIv: attachment.cekIv,
-      cekAuthTag: attachment.cekAuthTag,
-      cekKeyVersion: attachment.cekKeyVersion,
-      cekWrapAadVersion: attachment.cekWrapAadVersion,
-      itemKeyWrap: wrap,
-    };
+    keyMaterial = { ...cekWrapFields(), itemKeyWrap: wrap };
   } else if (attachment.encryptionMode === ATTACHMENT_ENCRYPTION_MODE.ITEM_KEY) {
-    const entryWrap = toWrap(entry, "entry", null);
-    keyMaterial = {
-      keyVersion: attachment.keyVersion,
-      itemKeyWraps: [
-        ...(entryWrap ? [entryWrap] : []),
-        ...history.map((h) => toWrap(h, "history", h.id)).filter((w) => w !== null),
-      ],
-    };
+    keyMaterial = { keyVersion: attachment.keyVersion, itemKeyWraps: allWraps() };
   } else {
     keyMaterial = { keyVersion: normalizeTeamKeyVersion(attachment.keyVersion ?? 0) };
   }

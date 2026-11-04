@@ -1,7 +1,8 @@
 "use client";
 
 import { decryptData } from "@/lib/crypto/crypto-client";
-import { buildTeamEntryAAD } from "@/lib/crypto/crypto-aad";
+import { VAULT_TYPE } from "@/lib/crypto/crypto-aad";
+import { teamEntryAadFor } from "@/lib/team/team-key-resolution";
 import { readRequireReprompt } from "@/lib/vault/read-require-reprompt";
 import { apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
@@ -63,7 +64,7 @@ export function buildTeamGetDetail(
       teamKeyVersion: (raw.teamKeyVersion as number) ?? 1,
     });
 
-    const aad = buildTeamEntryAAD(teamId, entry.id, "blob", itemKeyVersion);
+    const aad = teamEntryAadFor(teamId, entry.id, VAULT_TYPE.BLOB, itemKeyVersion, (raw.aadVersion as number | undefined) ?? 1);
     const plaintext = await decryptData(
       {
         ciphertext: raw.encryptedBlob as string,

@@ -473,8 +473,17 @@ describe("updateTeamE2EPasswordSchema", () => {
 // ─── restoreTeamHistorySchema ───────────────────────────────
 
 describe("restoreTeamHistorySchema", () => {
-  it("accepts the re-encrypted overview", () => {
-    expect(restoreTeamHistorySchema.safeParse({ encryptedOverview: validEncryptedField() }).success).toBe(true);
+  it("accepts the re-encrypted overview with the decrypted row's blobIv", () => {
+    expect(
+      restoreTeamHistorySchema.safeParse({ encryptedOverview: validEncryptedField(), snapshotBlobIv: "a".repeat(24) }).success,
+    ).toBe(true);
+  });
+
+  it("rejects a body without snapshotBlobIv, or with a malformed one", () => {
+    expect(restoreTeamHistorySchema.safeParse({ encryptedOverview: validEncryptedField() }).success).toBe(false);
+    expect(
+      restoreTeamHistorySchema.safeParse({ encryptedOverview: validEncryptedField(), snapshotBlobIv: "zz" }).success,
+    ).toBe(false);
   });
 
   it("rejects a body without the overview", () => {

@@ -56,6 +56,7 @@ vi.mock("@/lib/auth/access/team-auth", async () => {
   return {
     requireTeamPermission: mockRequireTeamPermission,
     activeTeamRole: actual.activeTeamRole,
+    canWriteTeamEntry: actual.canWriteTeamEntry,
     hasTeamPermission: actual.hasTeamPermission,
     TeamAuthError: MockTeamAuthError,
   };
@@ -211,7 +212,14 @@ const ATTACHMENT_ID = "11111111-2222-4333-8444-555555555555";
 const ITEM_KEY_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 const OTHER_ITEM_KEY_ID = "99999999-8888-4777-8666-555555555555";
 const STORED = new Uint8Array([7, 7, 7]);
-const LOCKED_ENTRY = { teamKeyVersion: 3, tenantId: "t1", itemKeyVersion: 2, itemKeyId: ITEM_KEY_ID };
+const LOCKED_ENTRY = {
+  teamKeyVersion: 3,
+  tenantId: "t1",
+  itemKeyVersion: 2,
+  itemKeyId: ITEM_KEY_ID,
+  entryTeamKeyVersion: 3,
+  createdById: "user-1",
+};
 
 // A complete mode-2 upload: body under a fresh CEK, the CEK wrapped under the
 // entry's ItemKey (version 2, id ITEM_KEY_ID).
@@ -249,8 +257,8 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
-    mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ teamId: "team-1" });
+    mockRequireTeamPermission.mockResolvedValue({ role: "MEMBER" });
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ teamId: "team-1", createdById: "user-1" });
     mockPrismaAttachment.count.mockResolvedValue(0);
     mockPrismaAttachment.create.mockResolvedValue({
       id: ATTACHMENT_ID,
@@ -476,6 +484,54 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     expect(json.error).toBe("CEK_KEY_VERSION_MISMATCH");
     expect(mockPrismaAttachment.create).not.toHaveBeenCalled();
     expect(mockDeleteObject).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns 409 ENTRY_REKEY_REQUIRED when the locked entry's ItemKey is wrapped under an older team key, writing nothing", async () => {
+    mockLockEntry.mockResolvedValue({ ...LOCKED_ENTRY, entryTeamKeyVersion: 2 });
+    const { res, json } = await upload();
+    expect(res.status).toBe(409);
+    expect(json.error).toBe("ENTRY_REKEY_REQUIRED");
+    expect(mockPrismaAttachment.create).not.toHaveBeenCalled();
+    expect(mockDeleteObject).toHaveBeenCalledTimes(1);
+  });
+
+  it("checks cekKeyVersion before the re-key rule (wrong version on an off-version entry → CEK_KEY_VERSION_MISMATCH)", async () => {
+    mockLockEntry.mockResolvedValue({ ...LOCKED_ENTRY, entryTeamKeyVersion: 2 });
+    const { json } = await upload(validFields({ cekKeyVersion: "1" }));
+    expect(json.error).toBe("CEK_KEY_VERSION_MISMATCH");
+  });
+
+  it("control: an entry at team key version 0 on a team at version 1 is current (normalised) → 201", async () => {
+    mockLockEntry.mockResolvedValue({ ...LOCKED_ENTRY, teamKeyVersion: 1, entryTeamKeyVersion: 0 });
+    const { res } = await upload();
+    expect(res.status).toBe(201);
+  });
+
+  it("returns 403 ONLY_OWN_ENTRIES for a MEMBER on another member's entry before anything is stored", async () => {
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ teamId: "team-1", createdById: "other-user" });
+    const { res, json } = await upload();
+    expect(res.status).toBe(403);
+    expect(json.error).toBe("ONLY_OWN_ENTRIES");
+    expect(mockPutObject).not.toHaveBeenCalled();
+    expect(mockLockEntry).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 ACTOR_NOT_PERMITTED for a MEMBER when the locked entry's creator is another member, and deletes the written object", async () => {
+    mockLockEntry.mockResolvedValue({ ...LOCKED_ENTRY, createdById: "other-user" });
+    const { res, json } = await upload();
+    expect(res.status).toBe(403);
+    expect(json.error).toBe("ACTOR_NOT_PERMITTED");
+    expect(mockPrismaAttachment.create).not.toHaveBeenCalled();
+    expect(mockDeleteObject).toHaveBeenCalledTimes(1);
+  });
+
+  it("control: an ADMIN uploads to another member's entry → 201", async () => {
+    mockRequireTeamPermission.mockResolvedValue({ role: "ADMIN" });
+    mockTeamMemberFindFirst.mockResolvedValue({ role: "ADMIN" });
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ teamId: "team-1", createdById: "other-user" });
+    mockLockEntry.mockResolvedValue({ ...LOCKED_ENTRY, createdById: "other-user" });
+    const { res } = await upload();
+    expect(res.status).toBe(201);
   });
 
   it("returns 400 ATTACHMENT_LIMIT_EXCEEDED under the advisory lock and deletes the written object", async () => {

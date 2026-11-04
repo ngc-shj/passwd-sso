@@ -37,6 +37,8 @@ import {
 import { buildAttachmentAAD, buildItemKeyWrapAAD, buildTeamEntryAAD } from "@/lib/crypto/crypto-aad";
 import { decryptBinary, decryptData, encryptBinary, encryptData } from "@/lib/crypto/crypto-client";
 import { assertEntryRekeyConsistent, REKEY_INCONSISTENCY, RekeyConsistencyError } from "@/lib/team/rekey-consistency";
+import { buildTeamHistoryRestoreBody, type TeamHistoryRowDto } from "@/lib/team/team-history-restore";
+import type { EntryItemKeyData } from "@/lib/team/team-vault-core";
 
 const mockAuth = vi.fn();
 vi.mock("@/auth", () => ({ auth: (...args: unknown[]) => mockAuth(...args) }));
@@ -54,6 +56,7 @@ import { GET as entryRekeyGET, POST as entryRekeyPOST } from "@/app/api/teams/[t
 import { GET as rekeyListGET } from "@/app/api/teams/[teamId]/rekey/route";
 import { PUT as updateEntry } from "@/app/api/teams/[teamId]/passwords/[id]/route";
 import { POST as restoreRoute } from "@/app/api/teams/[teamId]/passwords/[id]/history/[historyId]/restore/route";
+import { GET as historyRowGET } from "@/app/api/teams/[teamId]/passwords/[id]/history/[historyId]/route";
 import { POST as rotateRoute } from "@/app/api/teams/[teamId]/rotate-key/route";
 import { GET as downloadRoute } from "@/app/api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]/route";
 import { PUT as migrateRoute } from "@/app/api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]/migrate/route";
@@ -560,10 +563,21 @@ describe("team entry re-key — real-DB integration", () => {
     s.team.held.add(to);
   }
 
-  function restore(s: Seeded, historyId: string, overview: { ciphertext: string; iv: string; authTag: string }) {
+  /** The restore POST; `snapshotBlobIv` is the blobIv of the row the client decrypted (default: as stored now). */
+  async function restore(
+    s: Seeded,
+    historyId: string,
+    overview: { ciphertext: string; iv: string; authTag: string },
+    snapshotBlobIv?: string,
+  ) {
+    const blobIv = snapshotBlobIv ?? (await ctx.su.pool.query<{ blob_iv: string }>(
+      `SELECT blob_iv FROM team_password_entry_histories WHERE id = $1::uuid`,
+      [historyId],
+    )).rows[0].blob_iv;
     return restoreRoute(
       jsonRequest(`http://localhost/api/teams/${s.team.teamId}/passwords/${s.entryId}/history/${historyId}/restore`, "POST", {
         encryptedOverview: overview,
+        snapshotBlobIv: blobIv,
       }),
       { params: Promise.resolve({ teamId: s.team.teamId, id: s.entryId, historyId }) },
     );
@@ -893,28 +907,19 @@ describe("team entry re-key — real-DB integration", () => {
       const s = await seedEntry();
       const { body } = await buildRekey(s);
       const target = s.history.v0;
-      const blocker = await ctx.su.pool.connect();
-      try {
-        await blocker.query("BEGIN");
-        await blocker.query(`SELECT id FROM team_password_entry_histories WHERE id = $1::uuid FOR UPDATE`, [target]);
-        const { rows: [{ pid: blockerPid }] } = await blocker.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
-        const pending = rekey(s, body);
-        const parkedPid = await race().waitForBackendBlockedBy(blockerPid);
-        const waits = await ctx.su.pool.query<{ locktype: string; query: string }>(
-          `SELECT l.locktype, a.query FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
-            WHERE l.pid = $1 AND NOT l.granted`,
-          [parkedPid],
-        );
-        expect(waits.rows.length).toBeGreaterThan(0);
-        expect(waits.rows[0].query).toMatch(/FROM team_password_entry_histories[\s\S]*FOR UPDATE/);
-        if (deleteRow) {
-          await blocker.query(`DELETE FROM team_password_entry_histories WHERE id = $1::uuid`, [target]);
-        }
-        await blocker.query("COMMIT");
-        return { s, res: await pending };
-      } finally {
-        blocker.release();
-      }
+      const r = race();
+      const res = await r.parkBehind(
+        `SELECT id FROM team_password_entry_histories WHERE id = $1::uuid FOR UPDATE`,
+        [target],
+        () => rekey(s, body),
+        async (blocker, parkedPid) => {
+          expect(await r.waitingQueryOf(parkedPid)).toMatch(/FROM team_password_entry_histories[\s\S]*FOR UPDATE/);
+          if (deleteRow) {
+            await blocker.query(`DELETE FROM team_password_entry_histories WHERE id = $1::uuid`, [target]);
+          }
+        },
+      );
+      return { s, res };
     }
 
     it("deleted while parked → 409 REKEY_SET_MISMATCH, nothing written", async () => {
@@ -934,29 +939,22 @@ describe("team entry re-key — real-DB integration", () => {
     async function rekeyParkedBehindTeamRow(revoke: boolean) {
       const s = await seedEntry();
       const { body } = await buildRekey(s);
-      const blocker = await ctx.su.pool.connect();
-      try {
-        await blocker.query("BEGIN");
-        await blocker.query(`SELECT id FROM teams WHERE id = $1::uuid FOR NO KEY UPDATE`, [s.team.teamId]);
-        const { rows: [{ pid: blockerPid }] } = await blocker.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
-        const pending = rekey(s, body);
-        const parkedPid = await race().waitForBackendBlockedBy(blockerPid);
-        const waits = await ctx.su.pool.query<{ query: string }>(
-          `SELECT a.query FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid WHERE l.pid = $1 AND NOT l.granted`,
-          [parkedPid],
-        );
-        expect(waits.rows[0].query).toMatch(/FROM teams WHERE id = .* FOR SHARE/s);
-        if (revoke) {
-          await blocker.query(
-            `UPDATE team_members SET role = 'MEMBER' WHERE team_id = $1::uuid AND user_id = $2::uuid`,
-            [s.team.teamId, s.team.admin],
-          );
-        }
-        await blocker.query("COMMIT");
-        return { s, res: await pending };
-      } finally {
-        blocker.release();
-      }
+      const r = race();
+      const res = await r.parkBehind(
+        `SELECT id FROM teams WHERE id = $1::uuid FOR NO KEY UPDATE`,
+        [s.team.teamId],
+        () => rekey(s, body),
+        async (blocker, parkedPid) => {
+          expect(await r.waitingQueryOf(parkedPid)).toMatch(/FROM teams WHERE id = .* FOR SHARE/s);
+          if (revoke) {
+            await blocker.query(
+              `UPDATE team_members SET role = 'MEMBER' WHERE team_id = $1::uuid AND user_id = $2::uuid`,
+              [s.team.teamId, s.team.admin],
+            );
+          }
+        },
+      );
+      return { s, res };
     }
 
     it("revoked while parked → 403 ACTOR_NOT_PERMITTED, nothing written", async () => {
@@ -1063,15 +1061,52 @@ describe("team entry re-key — real-DB integration", () => {
 
   // ── A5 / A7: restore and re-key ──────────────────────────────────────────
 
-  it("A5: a restore parked behind a re-key ends on-version (marker current, the re-keyed row's id)", async () => {
-    const s = await seedEntry();
-    const { body, newItemKey } = await buildRekey(s);
-    // The restore's overview, re-encrypted (D1) under the ItemKey the restored row holds after the re-key.
-    const overview = await encryptData(
-      s.plaintext.overview,
-      await deriveItemEncryptionKey(newItemKey),
-      buildTeamEntryAAD(s.team.teamId, s.entryId, "overview", body.newItemKeyVersion),
+  // ── A5 / F1: a restore built from a row a re-key then rewrote ───────────
+
+  /** Give the sameKey row a JSON blob (the restore rebuilds the overview from it), under its own key. */
+  async function jsonSameKeyRow(s: Seeded): Promise<string> {
+    const text = JSON.stringify({ title: `restored ${randomUUID()}`, username: "u", password: randomUUID() });
+    const sealed = await encryptData(text, await deriveItemEncryptionKey(s.itemKey), buildTeamEntryAAD(s.team.teamId, s.entryId, "blob", 1));
+    await sql(
+      `UPDATE team_password_entry_histories SET encrypted_blob = $2, blob_iv = $3, blob_auth_tag = $4 WHERE id = $1::uuid`,
+      s.history.sameKey, sealed.ciphertext, sealed.iv, sealed.authTag,
     );
+    s.historyPlain.set(s.history.sameKey, text);
+    return text;
+  }
+
+  /** What the client does: GET the row, then build the body under the row's own key (D1). */
+  async function clientRestoreBody(s: Seeded, historyId: string) {
+    const got = await historyRowGET(
+      new NextRequest(`http://localhost/api/teams/${s.team.teamId}/passwords/${s.entryId}/history/${historyId}`),
+      { params: Promise.resolve({ teamId: s.team.teamId, id: s.entryId, historyId }) },
+    );
+    expect(got.status).toBe(200);
+    const row = (await got.json()) as TeamHistoryRowDto;
+    const rowKey = async (_teamId: string, entryId: string, keyData: EntryItemKeyData) =>
+      deriveItemEncryptionKey(await unwrapItemKey(
+        { ciphertext: keyData.encryptedItemKey ?? "", iv: keyData.itemKeyIv ?? "", authTag: keyData.itemKeyAuthTag ?? "" },
+        await teamKeyOf(s.team, keyData.teamKeyVersion ?? 1),
+        buildItemKeyWrapAAD(s.team.teamId, entryId, keyData.teamKeyVersion ?? 1),
+      ));
+    return { row, body: await buildTeamHistoryRestoreBody(s.team.teamId, s.entryId, row, rowKey) };
+  }
+
+  function restoreWith(s: Seeded, historyId: string, body: unknown) {
+    return restoreRoute(
+      jsonRequest(`http://localhost/api/teams/${s.team.teamId}/passwords/${s.entryId}/history/${historyId}/restore`, "POST", body),
+      { params: Promise.resolve({ teamId: s.team.teamId, id: s.entryId, historyId }) },
+    );
+  }
+
+  it("A5: a restore built before a re-key and parked behind it → 409 HISTORY_ROW_CHANGED, the entry stays as the re-key left it; the client's retry from the re-read row → 200", async () => {
+    const s = await seedEntry();
+    await jsonSameKeyRow(s);
+    // The client read the row and sealed its overview under the row's
+    // pre-re-key ItemKey before the re-key committed.
+    const stale = await clientRestoreBody(s, s.history.sameKey);
+    const { body, newItemKey } = await buildRekey(s);
+
     // Park the re-key (holding the entry FOR UPDATE) at its history read.
     const blocker = await race().holdRowLock(
       `SELECT id FROM team_password_entry_histories WHERE id = $1::uuid FOR UPDATE`,
@@ -1081,20 +1116,47 @@ describe("team entry re-key — real-DB integration", () => {
     let restoreRes: Promise<Response>;
     try {
       const rekeyPid = await race().waitForBackendBlockedBy(blocker.pid);
-      restoreRes = restore(s, s.history.sameKey, overview);
+      restoreRes = restoreWith(s, s.history.sameKey, stale.body);
       expect(await race().settledOrBlocked(restoreRes, rekeyPid, blocker.pid)).toBe("blocked-on-parked");
     } finally {
       await blocker.release();
     }
     expect((await rekeyRes).status).toBe(200);
-    expect((await restoreRes).status).toBe(200);
+    const afterRekey = await entryRow(s.entryId);
+    expect(await errorOf(await restoreRes)).toEqual({ status: 409, error: "HISTORY_ROW_CHANGED" });
+    expect(await entryRow(s.entryId)).toEqual(afterRekey);
+    expect((await rekeyList(s)).pendingCount).toBe(0);
 
+    // The client re-fetches the row and retries once.
+    const fresh = await clientRestoreBody(s, s.history.sameKey);
+    expect(fresh.body.snapshotBlobIv).not.toBe(stale.body.snapshotBlobIv);
+    expect((await restoreWith(s, s.history.sameKey, fresh.body)).status).toBe(200);
     const row = await entryRow(s.entryId);
     expect(row.item_key_team_key_version).toBe(3);
-    expect(row.team_key_version).toBe(3);
     expect(row.item_key_version).toBe(body.newItemKeyVersion);
-    expect((await historyIds(s.entryId)).get(s.history.sameKey)).toBe(row.item_key_id);
+    const data = await rekeyData(s);
+    const newKey = await deriveItemEncryptionKey(newItemKey);
+    expect(JSON.parse(await decryptData(
+      { ciphertext: data.entry.encryptedOverview, iv: data.entry.overviewIv, authTag: data.entry.overviewAuthTag },
+      newKey,
+      buildTeamEntryAAD(s.team.teamId, s.entryId, "overview", body.newItemKeyVersion),
+    ))).toMatchObject({ title: JSON.parse(s.historyPlain.get(s.history.sameKey) ?? "{}").title });
     expect(await rowsOffCurrentVersion(s.team.teamId)).toEqual([]);
+  });
+
+  it("A5 control: a restore of an unchanged row → 200, and the overview opens under the row's key", async () => {
+    const s = await seedEntry();
+    const text = await jsonSameKeyRow(s);
+    const { body } = await clientRestoreBody(s, s.history.sameKey);
+
+    expect((await restoreWith(s, s.history.sameKey, body)).status).toBe(200);
+
+    const data = await rekeyData(s);
+    expect(JSON.parse(await decryptData(
+      { ciphertext: data.entry.encryptedOverview, iv: data.entry.overviewIv, authTag: data.entry.overviewAuthTag },
+      await deriveItemEncryptionKey(s.itemKey),
+      buildTeamEntryAAD(s.team.teamId, s.entryId, "overview", 1),
+    ))).toMatchObject({ title: JSON.parse(text).title });
   });
 
   it("A7: re-key, then restore a re-keyed row → the marker stays current and the ids are equal", async () => {

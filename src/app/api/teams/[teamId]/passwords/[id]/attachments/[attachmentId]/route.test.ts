@@ -253,13 +253,44 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]", ()
     expect(mockGetObject).not.toHaveBeenCalled();
   });
 
-  it("mode 2: a NULL cek_item_key_id matches nothing (409 ATTACHMENT_KEY_UNAVAILABLE)", async () => {
+  it("mode 2 bound to no ItemKey id (D41 rollout migrate): returns the CEK fields with the entry and every history wrap for trial", async () => {
     mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ ...ENTRY, itemKeyId: null });
     mockPrismaAttachment.findUnique.mockResolvedValue(attachment({ cekItemKeyId: null }));
-    mockPrismaHistory.findMany.mockResolvedValue([historyRow("h-null", null, 3)]);
+    mockPrismaHistory.findMany.mockResolvedValue([historyRow("h-null", null, 3), historyRow("h-b", KEY_B, 2)]);
+    const { res, json } = await get();
+    expect(res.status).toBe(200);
+    // No id filter: every history row is a candidate.
+    expect(mockPrismaHistory.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { entryId: "pw-1" } }));
+    expect(json.itemKeyWrap).toBeUndefined();
+    expect(json.itemKeyWraps.map((w: { source: string; historyId: string | null }) => [w.source, w.historyId])).toEqual([
+      ["entry", null],
+      ["history", "h-null"],
+      ["history", "h-b"],
+    ]);
+    expect(json.cekIv).toBe("c".repeat(24));
+    expect(json.cekEncrypted).toBe(Buffer.from([9, 9]).toString("base64"));
+  });
+
+  it("mode 2 bound to no ItemKey id with no wrap anywhere → 409 ATTACHMENT_KEY_UNAVAILABLE", async () => {
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ ...ENTRY, itemKeyId: null, encryptedItemKey: null });
+    mockPrismaAttachment.findUnique.mockResolvedValue(attachment({ cekItemKeyId: null }));
+    mockPrismaHistory.findMany.mockResolvedValue([]);
     const { res, json } = await get();
     expect(res.status).toBe(409);
     expect(json.error).toBe("ATTACHMENT_KEY_UNAVAILABLE");
+  });
+
+  it("control: mode 2 with an id keeps the strict match (history filtered by that id, one wrap)", async () => {
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ ...ENTRY, itemKeyId: KEY_A });
+    mockPrismaAttachment.findUnique.mockResolvedValue(attachment({ cekItemKeyId: KEY_B }));
+    mockPrismaHistory.findMany.mockResolvedValue([historyRow("h-b", KEY_B, 2)]);
+    const { res, json } = await get();
+    expect(res.status).toBe(200);
+    expect(mockPrismaHistory.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { entryId: "pw-1", itemKeyId: KEY_B } }),
+    );
+    expect(json.itemKeyWraps).toBeUndefined();
+    expect(json.itemKeyWrap.historyId).toBe("h-b");
   });
 
   it("mode 1: returns the entry wrap and every history wrap for trial decryption", async () => {

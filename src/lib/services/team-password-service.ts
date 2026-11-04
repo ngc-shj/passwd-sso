@@ -15,8 +15,7 @@ import { toBlobColumns, toOverviewColumns } from "@/lib/crypto/crypto-blob";
 import { dedupeTagIds, tagConnect, tagSet } from "@/lib/services/tag-relation";
 import { lockTeamKeyVersion, TeamRotationInProgressError } from "@/lib/team/team-key-rotation-lock";
 import { itemKeyIdsMatch, itemKeyIvReused, nextItemKeyVersion, normalizeTeamKeyVersion } from "@/lib/team/team-item-key";
-import { activeTeamRole, hasTeamPermission } from "@/lib/auth/access/team-auth";
-import { TEAM_PERMISSION, TEAM_ROLE } from "@/lib/constants";
+import { activeTeamRole, canWriteTeamEntry } from "@/lib/auth/access/team-auth";
 import type { EntryType, Prisma } from "@prisma/client";
 
 // ---------------------------------------------------------------------------
@@ -569,11 +568,7 @@ export async function updateTeamPassword(
       // removal, departure or demotion committed since would otherwise write
       // key material the actor no longer may.
       const role = await activeTeamRole(tx, teamId, userId);
-      if (
-        !role ||
-        !hasTeamPermission(role, TEAM_PERMISSION.PASSWORD_UPDATE) ||
-        (role === TEAM_ROLE.MEMBER && cur.created_by_id !== userId)
-      ) {
+      if (!role || !canWriteTeamEntry(role, cur.created_by_id, userId)) {
         throw new TeamPasswordServiceError(API_ERROR.ACTOR_NOT_PERMITTED, 403);
       }
       Object.assign(

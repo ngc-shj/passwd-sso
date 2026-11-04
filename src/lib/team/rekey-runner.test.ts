@@ -543,6 +543,92 @@ describe("runRekeyPass status table", () => {
   });
 });
 
+describe("runRekeyPass: an entry holding a legacy attachment whose live wrap does not open (F3)", () => {
+  /** e2 at version 1 with a legacy attachment; e1 (version 2) is openable. */
+  async function setupLegacyOnVersion1(failures: Record<number, TeamKeyFailureReason> = {}, tamper = false) {
+    const { server, deps, keys } = await setup({ ids: ["e1", "e2"] });
+    const fake = server.entries.get("e2")!;
+    const itemKey = generateItemKey();
+    fake.itemKey = itemKey;
+    fake.data.entry = await sealEntryV1({
+      entryId: "e2", teamKey: keys.get(1)!, teamKeyVersion: 1, itemKey, itemKeyVersion: 1,
+      itemKeyId: crypto.randomUUID(), blob: "b", overview: "o",
+    });
+    if (tamper) {
+      // The wrap fails authentication under the held version-1 key.
+      fake.data.entry = { ...fake.data.entry, itemKeyAuthTag: "0".repeat(32) };
+    }
+    await addLegacyAttachment(server, "e2");
+    await addLegacyAttachment(server, "e1");
+    deps.resolveKey = makeResolver(keys, failures);
+    return { server, deps };
+  }
+
+  it.each([
+    ["not held", { 1: "not_available" as const }, false, "notHeld"],
+    ["key row broken", { 1: "key_invalid" as const }, false, "keyInvalid"],
+    ["wrap undecryptable", {}, true, "undecryptable"],
+  ] as const)("%s → its own report bucket, nothing downloaded or migrated for it", async (_label, failures, tamper, bucket) => {
+    const { server, deps } = await setupLegacyOnVersion1(failures, tamper);
+
+    const result = await runRekeyPass(deps);
+
+    expect(result[bucket]).toEqual([{ entryId: "e2", teamKeyVersion: 1 }]);
+    expect(result.skipped.filter((s) => s.entryId === "e2")).toEqual([]);
+    expect(server.calls).not.toContain("GET attachment:e2");
+    expect(server.calls).not.toContain("PUT migrate:e2");
+    expect(server.posts("e2")).toBe(0);
+    // Control: the openable entry still migrates and re-keys.
+    expect(server.calls).toContain("PUT migrate:e1");
+    expect(result.rekeyed).toEqual(["e1"]);
+    expect(result.status).toBe("completed");
+  });
+});
+
+describe("runRekeyPass cancellation (F4)", () => {
+  it("an aborted signal sends nothing more: the pass stops CANCELLED before its next request", async () => {
+    const { server, deps } = await setup({ ids: ["e1", "e2"] });
+    const controller = new AbortController();
+    const fetch = deps.fetch;
+    deps.fetch = async (path: string, init?: RequestInit) => {
+      const res = await fetch(path, init);
+      // Abort as soon as the first re-key POST answered.
+      if (init?.method === "POST") controller.abort();
+      return res;
+    };
+
+    const result = await runRekeyPass({ ...deps, signal: controller.signal });
+
+    expect(result.status).toBe("stopped");
+    expect(result.stop?.reason).toBe(REKEY_STOP_REASON.CANCELLED);
+    expect(result.rekeyed).toEqual(["e1"]);
+    expect(server.calls.filter((c) => c.endsWith(":e2"))).toEqual([]);
+  });
+
+  it("aborted while parked on re-authentication → stops CANCELLED (not STEP_UP_DECLINED) and sends nothing more", async () => {
+    const { server, deps } = await setup();
+    const controller = new AbortController();
+    server.queue("POST rekey:e1", { status: 403, code: API_ERROR.SESSION_STEP_UP_REQUIRED });
+    deps.reauthenticate = vi.fn(async () => {
+      controller.abort();
+      return false;
+    });
+    const result = await runRekeyPass({ ...deps, signal: controller.signal });
+
+    expect(result.stop?.reason).toBe(REKEY_STOP_REASON.CANCELLED);
+    expect(server.posts("e1")).toBe(1);
+    // Nothing after the refused POST: no re-GET, no list.
+    expect(server.calls.at(-1)).toBe("POST rekey:e1");
+  });
+
+  it("control: a signal that is never aborted lets the pass complete", async () => {
+    const { deps } = await setup({ ids: ["e1", "e2"] });
+    const result = await runRekeyPass({ ...deps, signal: new AbortController().signal });
+    expect(result.status).toBe("completed");
+    expect(result.rekeyed).toEqual(["e1", "e2"]);
+  });
+});
+
 describe("runRekeyPass paging", () => {
   it("a page full of skipped entries does not starve the next page", async () => {
     const { server, deps, keys } = await setup({ ids: ["a1", "a2", "b3"] });

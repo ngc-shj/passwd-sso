@@ -851,6 +851,11 @@ describe("updateTeamPassword", () => {
       const err = await refusal(FULL_REUSE);
       expect(err.code).toBe(API_ERROR.ENTRY_REKEY_REQUIRED);
       expect(err.statusHint).toBe(409);
+
+      // Minus-step control: the same reuse on the row at the current version is written.
+      lockedRow(TEAM_CUR_ROW);
+      await updateTeamPassword(TEAM_ID, PASSWORD_ID, FULL_REUSE);
+      expect(mockTeamPasswordEntryUpdate).toHaveBeenCalledOnce();
     });
 
     it("checks itemKeyId before the team key version (stale id on a stale entry → ITEM_KEY_CHANGED)", async () => {

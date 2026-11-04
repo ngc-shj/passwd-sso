@@ -412,12 +412,32 @@ describe("PUT /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]/migr
     await expectRefused(validBody({ snapshot: { iv: locked.iv, authTag: ROW.authTag } }), 409, "MIGRATE_CAS_FAILED");
   });
 
-  it("409 BLOB_REF_INVALID when the locked row's ref names another row's object", async () => {
+  it("409 BLOB_REF_INVALID before uploading the new body when the pre-read ref names another row's object", async () => {
     const foreign = Buffer.from(JSON.stringify({ key: `team/${TEAM}/${ENTRY}/${OTHER_ITEM_KEY_ID}.bin` }));
     mockAttachmentFindUnique.mockResolvedValue({ ...ROW, encryptedData: foreign });
     mockGetObject.mockRejectedValue(new BlobRefInvalidError());
+    const { res, json } = await migrate(validBody());
+    expect(res.status).toBe(409);
+    expect(json.error).toBe("BLOB_REF_INVALID");
+    expect(mockPutObject).not.toHaveBeenCalled();
+    expect(mockDeleteObject).not.toHaveBeenCalled();
+    expect(mockLockEntry).not.toHaveBeenCalled();
+  });
+
+  it("409 BLOB_REF_INVALID under the lock when the locked row's ref changed to another row's object since the pre-read", async () => {
+    const foreign = Buffer.from(JSON.stringify({ key: `team/${TEAM}/${ENTRY}/${OTHER_ITEM_KEY_ID}.bin` }));
     mockLockRow.mockResolvedValue({ ...ROW, encryptedData: foreign });
     await expectRefused(validBody(), 409, "BLOB_REF_INVALID");
+  });
+
+  it("409 MIGRATE_NOT_LEGACY before uploading the new body when the pre-read row is already mode 2", async () => {
+    mockAttachmentFindUnique.mockResolvedValue({ ...ROW, encryptionMode: 2 });
+    const { res, json } = await migrate(validBody());
+    expect(res.status).toBe(409);
+    expect(json.error).toBe("MIGRATE_NOT_LEGACY");
+    expect(mockGetObject).not.toHaveBeenCalled();
+    expect(mockPutObject).not.toHaveBeenCalled();
+    expect(mockLockEntry).not.toHaveBeenCalled();
   });
 
   it("does not check refs on the DB backend (the column is the body)", async () => {

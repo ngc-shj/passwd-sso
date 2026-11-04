@@ -7,10 +7,11 @@ import {
   requireTeamPermission,
   requireTeamMember,
   hasTeamPermission,
+  canWriteTeamEntry,
 } from "@/lib/auth/access/team-auth";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
-import { TEAM_PERMISSION, TEAM_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION, EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
+import { TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { displayIdentityOf, displayUserOf, fetchUserDisplayMap } from "@/lib/audit/audit-user-lookup";
 import { deleteAttachmentBlobs } from "@/lib/blob-store/cleanup";
@@ -114,10 +115,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
   if (!hasTeamPermission(membership.role, TEAM_PERMISSION.PASSWORD_UPDATE)) {
     return forbidden();
   }
-  if (
-    membership.role === TEAM_ROLE.MEMBER &&
-    existingEntry.createdById !== session.user.id
-  ) {
+  if (!canWriteTeamEntry(membership.role, existingEntry.createdById, session.user.id)) {
     return errorResponse(API_ERROR.ONLY_OWN_ENTRIES);
   }
 

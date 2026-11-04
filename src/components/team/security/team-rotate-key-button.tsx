@@ -66,6 +66,8 @@ interface TeamRotateKeyButtonProps {
   teamId: string;
   /** Called after a committed rotation (the page starts the re-key pass). */
   onSuccess?: () => void;
+  /** Held while a re-key pass runs. */
+  disabled?: boolean;
 }
 
 // ─── Progress tracking ────────────────────────────────────────
@@ -109,7 +111,7 @@ function carryReport(
 
 // ─── Component ───────────────────────────────────────────────
 
-export function TeamRotateKeyButton({ teamId, onSuccess }: TeamRotateKeyButtonProps) {
+export function TeamRotateKeyButton({ teamId, onSuccess, disabled = false }: TeamRotateKeyButtonProps) {
   const t = useTranslations("Teams");
   const tApi = useTranslations("ApiErrors");
   const { resolveTeamKey, invalidateTeamKey } = useTeamVault();
@@ -309,7 +311,7 @@ export function TeamRotateKeyButton({ teamId, onSuccess }: TeamRotateKeyButtonPr
     <>
     <AlertDialog open={open} onOpenChange={(v) => { if (!loading) { setOpen(v); if (!v) setConfirmInput(""); } }}>
       <AlertDialogTrigger asChild>
-        <Button variant="destructive" size="sm">
+        <Button variant="destructive" size="sm" disabled={disabled}>
           <RotateCcw className="h-4 w-4 mr-2" />
           {t("rotateKeyButton")}
         </Button>

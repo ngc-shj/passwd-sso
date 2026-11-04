@@ -4,7 +4,8 @@ import { useEffect, useMemo, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { useTeamVault, type EntryItemKeyData } from "@/lib/team/team-vault-context";
 import { decryptData } from "@/lib/crypto/crypto-client";
-import { buildTeamEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
+import { VAULT_TYPE } from "@/lib/crypto/crypto-aad";
+import { teamEntryAadFor } from "@/lib/team/team-key-resolution";
 import { buildTeamGetDetail } from "@/lib/vault/build-team-get-detail";
 import { fetchApi } from "@/lib/url-helpers";
 import { readRequireReprompt } from "@/lib/vault/read-require-reprompt";
@@ -75,7 +76,13 @@ export async function decryptTeamOverview(
       teamKeyVersion: (rawEntry.teamKeyVersion as number) ?? 1,
     });
     // INV-C6.2: the ONLY team "overview"-scope AAD derivation site.
-    const aad = buildTeamEntryAAD(teamId, entryId, VAULT_TYPE.OVERVIEW, itemKeyVersion);
+    const aad = teamEntryAadFor(
+      teamId,
+      entryId,
+      VAULT_TYPE.OVERVIEW,
+      itemKeyVersion,
+      (rawEntry.aadVersion as number | undefined) ?? 1,
+    );
     const overview = JSON.parse(
       await decryptData(
         {

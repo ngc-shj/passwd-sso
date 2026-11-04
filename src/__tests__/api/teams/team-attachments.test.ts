@@ -48,6 +48,7 @@ vi.mock("@/lib/auth/access/team-auth", async () => {
     requireTeamPermission: mockRequireTeamPermission,
     // The real role read and permission table: the upload re-checks the actor under the team lock.
     activeTeamRole: actual.activeTeamRole,
+    canWriteTeamEntry: actual.canWriteTeamEntry,
     hasTeamPermission: actual.hasTeamPermission,
     TeamAuthError,
   };
@@ -146,8 +147,15 @@ function validFormFields(): Record<string, string | Blob> {
   };
 }
 
-const TEAM_ENTRY = { teamId: "o1" };
-const LOCKED_ENTRY = { teamKeyVersion: 1, tenantId: "t1", itemKeyVersion: 1, itemKeyId: ITEM_KEY_ID };
+const TEAM_ENTRY = { teamId: "o1", createdById: DEFAULT_SESSION.user.id };
+const LOCKED_ENTRY = {
+  teamKeyVersion: 1,
+  tenantId: "t1",
+  itemKeyVersion: 1,
+  itemKeyId: ITEM_KEY_ID,
+  entryTeamKeyVersion: 1,
+  createdById: DEFAULT_SESSION.user.id,
+};
 const tx = {
   attachment: { count: mockAttachmentCount, create: mockAttachmentCreate },
   $executeRaw: mockExecuteRaw,
@@ -251,7 +259,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
 
   it("returns 404 when entry not found", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue({ role: "MEMBER" });
     mockEntryFindUnique.mockResolvedValue(null);
     const req = await createFormDataRequest(validFormFields());
     const res = await POST(req, makeParams("o1", "e1"));
@@ -261,7 +269,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
 
   it("returns 400 when attachment limit exceeded", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue({ role: "MEMBER" });
     mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(20);
     const req = await createFormDataRequest(validFormFields());
@@ -273,7 +281,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
 
   it("returns 413 when content-length too large", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue({ role: "MEMBER" });
     mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
     const req = await createFormDataRequest(validFormFields(), {
@@ -287,7 +295,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
 
   it("returns 400 when required fields are missing", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue({ role: "MEMBER" });
     mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
     const req = await createFormDataRequest({ file: new Blob(["x"]) });
@@ -299,7 +307,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
 
   it("returns 400 for extension not allowed", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue({ role: "MEMBER" });
     mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
     const fields = validFormFields();
@@ -313,7 +321,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
 
   it("returns 400 for content type not allowed", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue({ role: "MEMBER" });
     mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
     const fields = validFormFields();
@@ -327,7 +335,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
 
   it("returns 400 for invalid iv format", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue({ role: "MEMBER" });
     mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
     const fields = { ...validFormFields(), iv: "bad-iv" };
@@ -340,7 +348,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
 
   it("returns 400 for invalid authTag format", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue({ role: "MEMBER" });
     mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
     const fields = { ...validFormFields(), authTag: "bad-tag" };
@@ -353,7 +361,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
 
   it("returns 400 for filename with path traversal characters", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue({ role: "MEMBER" });
     mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
     const fields = validFormFields();
@@ -367,7 +375,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
 
   it("returns 400 for filename with CRLF characters", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue({ role: "MEMBER" });
     mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
     const fields = validFormFields();
@@ -381,7 +389,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
 
   it("returns 400 for Windows reserved device name", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue({ role: "MEMBER" });
     mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
     const fields = validFormFields();
@@ -395,7 +403,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
 
   it("uploads a client-encrypted mode-2 attachment bound to the locked entry's ItemKey", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue({ role: "MEMBER" });
     mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
     mockPutObject.mockResolvedValue(Buffer.from("stored"));
@@ -434,7 +442,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
 
   it("rejects encryptionMode=0", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue({ role: "MEMBER" });
     mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
     const fields = { ...validFormFields(), encryptionMode: "0" };
@@ -447,7 +455,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
 
   it("rejects invalid encryptionMode", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue({ role: "MEMBER" });
     mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
     const fields = { ...validFormFields(), encryptionMode: "1" };
@@ -460,7 +468,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
 
   it("rejects missing encryptionMode", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue({ role: "MEMBER" });
     mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
     const fields = validFormFields();
@@ -474,7 +482,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
 
   it("rejects upload when the locked entry has itemKeyVersion=0 (409 ENTRY_UPGRADE_REQUIRED)", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue({ role: "MEMBER" });
     mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockLockEntry.mockResolvedValue({ ...LOCKED_ENTRY, itemKeyVersion: 0, itemKeyId: null });
     const req = await createFormDataRequest(validFormFields());
@@ -488,7 +496,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
 
   it("refuses with 403 ACTOR_NOT_PERMITTED when the actor's membership is gone under the team lock", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue({ role: "MEMBER" });
     mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
     mockTeamMemberFindFirst.mockResolvedValue(null);
@@ -502,7 +510,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
 
   it("rejects a stale itemKeyId with 409 ITEM_KEY_CHANGED", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue({ role: "MEMBER" });
     mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
     mockLockEntry.mockResolvedValue({ ...LOCKED_ENTRY, itemKeyId: "99999999-8888-4777-8666-555555555555" });
@@ -515,7 +523,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
 
   it("rejects a cekKeyVersion other than the locked itemKeyVersion with 409 CEK_KEY_VERSION_MISMATCH", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue({ role: "MEMBER" });
     mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
     mockLockEntry.mockResolvedValue({ ...LOCKED_ENTRY, itemKeyVersion: 2 });
@@ -526,9 +534,56 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     expect(json.error).toBe("CEK_KEY_VERSION_MISMATCH");
   });
 
+  it("rejects an entry whose ItemKey is wrapped under an older team key with 409 ENTRY_REKEY_REQUIRED (control: on-version → 201)", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTeamPermission.mockResolvedValue({ role: "MEMBER" });
+    mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
+    mockAttachmentCount.mockResolvedValue(0);
+    mockAttachmentCreate.mockResolvedValue({ id: "att-1", filename: "test.pdf", contentType: "application/pdf", sizeBytes: 4, createdAt: new Date() });
+    mockLockEntry.mockResolvedValue({ ...LOCKED_ENTRY, teamKeyVersion: 2 });
+    const refused = await parseResponse(await POST(await createFormDataRequest(validFormFields()), makeParams("o1", "e1")));
+    expect(refused.status).toBe(409);
+    expect(refused.json.error).toBe("ENTRY_REKEY_REQUIRED");
+    expect(mockAttachmentCreate).not.toHaveBeenCalled();
+
+    mockLockEntry.mockResolvedValue({ ...LOCKED_ENTRY, teamKeyVersion: 2, entryTeamKeyVersion: 2 });
+    const accepted = await parseResponse(await POST(await createFormDataRequest(validFormFields()), makeParams("o1", "e1")));
+    expect(accepted.status).toBe(201);
+  });
+
+  it("refuses a MEMBER on another member's entry: 403 ONLY_OWN_ENTRIES before storing, ACTOR_NOT_PERMITTED under the lock", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTeamPermission.mockResolvedValue({ role: "MEMBER" });
+    mockAttachmentCount.mockResolvedValue(0);
+    mockEntryFindUnique.mockResolvedValue({ ...TEAM_ENTRY, createdById: "someone-else" });
+    const pre = await parseResponse(await POST(await createFormDataRequest(validFormFields()), makeParams("o1", "e1")));
+    expect(pre.status).toBe(403);
+    expect(pre.json.error).toBe("ONLY_OWN_ENTRIES");
+    expect(mockPutObject).not.toHaveBeenCalled();
+
+    mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
+    mockLockEntry.mockResolvedValue({ ...LOCKED_ENTRY, createdById: "someone-else" });
+    const locked = await parseResponse(await POST(await createFormDataRequest(validFormFields()), makeParams("o1", "e1")));
+    expect(locked.status).toBe(403);
+    expect(locked.json.error).toBe("ACTOR_NOT_PERMITTED");
+    expect(mockAttachmentCreate).not.toHaveBeenCalled();
+  });
+
+  it("control: an ADMIN uploads to another member's entry → 201", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTeamPermission.mockResolvedValue({ role: "ADMIN" });
+    mockTeamMemberFindFirst.mockResolvedValue({ role: "ADMIN" });
+    mockAttachmentCount.mockResolvedValue(0);
+    mockAttachmentCreate.mockResolvedValue({ id: "att-1", filename: "test.pdf", contentType: "application/pdf", sizeBytes: 4, createdAt: new Date() });
+    mockEntryFindUnique.mockResolvedValue({ ...TEAM_ENTRY, createdById: "someone-else" });
+    mockLockEntry.mockResolvedValue({ ...LOCKED_ENTRY, createdById: "someone-else" });
+    const { status } = await parseResponse(await POST(await createFormDataRequest(validFormFields()), makeParams("o1", "e1")));
+    expect(status).toBe(201);
+  });
+
   it("rejects invalid client-provided attachmentId (non-UUID)", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue({ role: "MEMBER" });
     mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
     const fields = { ...validFormFields(), id: "not-a-uuid" };
@@ -541,7 +596,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
 
   it("accepts valid UUID v4 as client-provided attachmentId", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue({ role: "MEMBER" });
     mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
     mockPutObject.mockResolvedValue(Buffer.from("stored"));
@@ -561,7 +616,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
 
   it("normalizes uppercase UUID clientId to lowercase for AAD consistency", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue({ role: "MEMBER" });
     mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
     mockPutObject.mockResolvedValue(Buffer.from("stored"));
@@ -591,7 +646,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
 
   it("rejects invalid aadVersion", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue({ role: "MEMBER" });
     mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
     const fields = { ...validFormFields(), aadVersion: "2" };
@@ -604,7 +659,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
 
   it("rejects an upload without a client attachment id (it is bound into the AAD)", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockRequireTeamPermission.mockResolvedValue({ role: "MEMBER" });
     mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     const fields = validFormFields();
     delete fields.id;

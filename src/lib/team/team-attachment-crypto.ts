@@ -181,8 +181,12 @@ export async function decryptTeamAttachmentDownload(
     throw new TeamAttachmentKeyError(ATTACHMENT_KEY_FAILURE.UNOPENABLE);
   }
 
+  // Mode 2: the one wrap holding the ItemKey the CEK is bound to, or — a CEK
+  // bound to no ItemKey id (migrated on an entry of unknown identity during
+  // rollout, D41) — the entry and history wraps, tried in turn.
+  const wraps = data.itemKeyWrap ? [data.itemKeyWrap] : (data.itemKeyWraps ?? []);
   if (
-    !data.itemKeyWrap ||
+    wraps.length === 0 ||
     !data.cekEncrypted ||
     !data.cekIv ||
     !data.cekAuthTag ||
@@ -191,27 +195,29 @@ export async function decryptTeamAttachmentDownload(
   ) {
     throw new TeamAttachmentKeyError(ATTACHMENT_KEY_FAILURE.UNOPENABLE);
   }
-  const itemKey = await unwrapItemKeyFromWrap(teamId, entryId, data.itemKeyWrap, resolveKey);
-  if (!itemKey) throw new TeamAttachmentKeyError(ATTACHMENT_KEY_FAILURE.UNOPENABLE);
-  let cekWrapKey: CryptoKey;
-  try {
-    cekWrapKey = await deriveItemCekWrapKey(itemKey);
-  } finally {
-    itemKey.fill(0);
+  for (const wrap of wraps) {
+    const itemKey = await unwrapItemKeyFromWrap(teamId, entryId, wrap, resolveKey);
+    if (!itemKey) continue;
+    let cekWrapKey: CryptoKey;
+    try {
+      cekWrapKey = await deriveItemCekWrapKey(itemKey);
+    } finally {
+      itemKey.fill(0);
+    }
+    const cek = await unwrapCek(
+      { ciphertext: base64ToBytes(data.cekEncrypted), iv: data.cekIv, authTag: data.cekAuthTag },
+      cekWrapKey,
+      {
+        teamId,
+        entryId,
+        attachmentId: data.id,
+        itemKeyVersion: data.cekKeyVersion,
+        cekWrapAadVersion: data.cekWrapAadVersion,
+      },
+    );
+    if (cek) return decryptOrUnopenable(() => decryptBinary(body, cek, aad));
   }
-  const cek = await unwrapCek(
-    { ciphertext: base64ToBytes(data.cekEncrypted), iv: data.cekIv, authTag: data.cekAuthTag },
-    cekWrapKey,
-    {
-      teamId,
-      entryId,
-      attachmentId: data.id,
-      itemKeyVersion: data.cekKeyVersion,
-      cekWrapAadVersion: data.cekWrapAadVersion,
-    },
-  );
-  if (!cek) throw new TeamAttachmentKeyError(ATTACHMENT_KEY_FAILURE.UNOPENABLE);
-  return decryptOrUnopenable(() => decryptBinary(body, cek, aad));
+  throw new TeamAttachmentKeyError(ATTACHMENT_KEY_FAILURE.UNOPENABLE);
 }
 
 async function decryptOrUnopenable(run: () => Promise<ArrayBuffer>): Promise<ArrayBuffer> {

@@ -128,6 +128,21 @@ export function buildTeamEntryAAD(
   ]);
 }
 
+/**
+ * The AAD a team entry's blob or overview was sealed with: none for a legacy
+ * aadVersion-0 row (a restore of such a history row writes the entry at
+ * aadVersion 0), else buildTeamEntryAAD. The web client's teamEntryAadFor.
+ */
+export function teamEntryAadFor(
+  teamId: string,
+  entryId: string,
+  vaultType: "blob" | "overview",
+  itemKeyVersion: number,
+  aadVersion: number,
+): Uint8Array | undefined {
+  return aadVersion >= 1 ? buildTeamEntryAAD(teamId, entryId, vaultType, itemKeyVersion) : undefined;
+}
+
 /** Build AAD for ItemKey wrapping (scope "IK") */
 export function buildItemKeyWrapAAD(
   teamId: string,

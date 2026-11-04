@@ -104,6 +104,8 @@ export const REKEY_STOP_REASON = {
   CURRENT_KEY_UNAVAILABLE: "current_key_unavailable",
   /** Rate limited, or rotations kept interrupting, past the retry budget. */
   RETRY_BUDGET_EXHAUSTED: "retry_budget_exhausted",
+  /** The caller aborted the pass (its control unmounted); nothing more is sent. */
+  CANCELLED: "cancelled",
 } as const;
 
 export type RekeyStopReason = (typeof REKEY_STOP_REASON)[keyof typeof REKEY_STOP_REASON];
@@ -149,6 +151,8 @@ export interface RekeyRunnerDeps {
   /** Open step-up re-authentication; true once the session is fresh. */
   reauthenticate: () => Promise<boolean>;
   sleep: (ms: number) => Promise<void>;
+  /** Checked between steps: once aborted, the pass sends nothing more. */
+  signal?: AbortSignal;
   pageLimit?: number;
   onProgress?: (progress: RekeyProgress) => void;
 }
@@ -201,6 +205,9 @@ export async function runRekeyPass(deps: RekeyRunnerDeps): Promise<RekeyPassResu
   let teamKeyChanged = false;
   let processed = 0;
 
+  const throwIfCancelled = () => {
+    if (deps.signal?.aborted) throw new StopPass(REKEY_STOP_REASON.CANCELLED);
+  };
   const waitRateLimit = async (res: Response) => {
     if (++rateWaits > MAX_RATE_LIMIT_WAITS) {
       throw new StopPass(REKEY_STOP_REASON.RETRY_BUDGET_EXHAUSTED, API_ERROR.RATE_LIMIT_EXCEEDED);
@@ -217,9 +224,14 @@ export async function runRekeyPass(deps: RekeyRunnerDeps): Promise<RekeyPassResu
     await deps.sleep(REKEY_ROTATION_PAUSE_MS);
   };
   const reauthenticate = async () => {
-    if (!(await deps.reauthenticate())) throw new StopPass(REKEY_STOP_REASON.STEP_UP_DECLINED);
+    const ok = await deps.reauthenticate();
+    throwIfCancelled();
+    if (!ok) throw new StopPass(REKEY_STOP_REASON.STEP_UP_DECLINED);
   };
+  // Every request goes through here, so an aborted pass stops before its next
+  // request — after a sleep or a re-authentication as well.
   const fetchOrStop = async (path: string, init?: RequestInit): Promise<Response> => {
+    throwIfCancelled();
     try {
       return await deps.fetch(path, init);
     } catch {
@@ -252,6 +264,15 @@ export async function runRekeyPass(deps: RekeyRunnerDeps): Promise<RekeyPassResu
     attachmentId: string,
   ): Promise<MigrateStep> => {
     const { entry } = data;
+    // The live wrap first: an entry the actor cannot open goes to its own
+    // report bucket (not held, broken key, undecryptable) before anything is
+    // downloaded.
+    const live = await liveCekWrapKey(teamId, entry, deps.resolveKey);
+    if (!live.ok) {
+      recordBlock(entry.id, live.block, normalizeTeamKeyVersion(entry.teamKeyVersion));
+      return SKIP;
+    }
+    const { cekWrapKey } = live;
     const dl = await fetchOrStop(apiPath.teamPasswordAttachmentById(teamId, entry.id, attachmentId));
     if (!dl.ok) {
       const err = await readApiErrorBody(dl);
@@ -272,11 +293,6 @@ export async function runRekeyPass(deps: RekeyRunnerDeps): Promise<RekeyPassResu
       throw new StopPass(REKEY_STOP_REASON.REFUSED, err?.error ?? String(dl.status));
     }
     const download = (await dl.json()) as TeamAttachmentDownload;
-    const cekWrapKey = await liveCekWrapKey(teamId, entry, deps.resolveKey);
-    if (!cekWrapKey) {
-      recordSkip(entry.id, REKEY_ENTRY_BLOCK.UNDECRYPTABLE);
-      return SKIP;
-    }
     let body;
     try {
       body = await buildAttachmentMigratePayload(

@@ -205,8 +205,15 @@
   pairing is `ITEM_KEY_CHANGED`), binding the CEK to no id; the re-key opens it by trial. Every
   writer of this release mints an id, so this only lets through an ItemKey change an older
   instance made between the client's read and the migrate — and the re-key's trial over the
-  history wraps still opens that CEK. Restore and upload need no change (restore mints an id for
-  a NULL-id v1+ row; upload refuses `ITEM_KEY_CHANGED` until the pass ran). Not detectable: the previous release replacing the wrap
+  history wraps still opens that CEK. This release's restore and upload need no change (restore
+  mints an id for a NULL-id v1+ row; upload refuses `ITEM_KEY_CHANGED` until the pass ran).
+  **Corrected in round 1 (F5):** the previous release's *history restore* is a second writer this
+  analysis missed — it writes back the row's wrap and itemKeyVersion but keeps the entry's
+  `item_key_id`, marker and high-water (and its overview), so the entry names an ItemKey it no
+  longer holds and is not pending; nothing in this release detects or repairs it. deployment.md
+  now states the mitigation as a rollout requirement (drain previous-release instances before
+  team traffic reaches the migrated database, or no team edits/restores during the rollout; the
+  rollout window's `ENTRY_HISTORY_RESTORE` audit rows name the entries to check). Not detectable: the previous release replacing the wrap
   of an entry marked current while keeping its id (no web-client path does this; an API caller
   could) — the entry is not pending and its id names the new ItemKey; mode-2 CEKs still open by
   trial in the next pass. Integration (team-rekey-pass, "rollout"): a raw create (re-keyed to
@@ -282,3 +289,147 @@
   preserved; a known-answer cell (SHA-256 of "abc") guards it — not red-provable as a refactor.
 - D52 (Phase 2 self-check, R29) — the team-key-rotation-lock.ts writer list names the re-key
   POST and the attachment upload, migrate and delete (`lockTeamAttachmentEntry`). Comment only.
+- D53 (round 1 S1, R42 writer member set) — the team attachment upload refuses 409
+  `ENTRY_REKEY_REQUIRED` when the locked entry's normalised team key version differs from the
+  team's, after `ITEM_KEY_CHANGED` and `CEK_KEY_VERSION_MISMATCH` (the full-update PUT's order):
+  a restored retained row or a carried entry holds an ItemKey wrapped under an older team key,
+  and a CEK wrapped under it is readable by a departed holder of that key. `lockTeamAttachmentEntry`
+  returns the entry's `team_key_version` (and `created_by_id`, D54); migrate stays exempt (it
+  is part of the pass). The upload form maps the code to the save path's message (an owner or
+  admin finishes the re-key on the Key Rotation page; `Attachments.uploadRekeyRequired`).
+  Integration (AR "upload after a restore"): restore of a row at team key version 1 on a team at
+  2 → upload 409, nothing stored; control: a row at version 2 → 201. Unit cells in both upload
+  trees (incl. the version-0 normalisation control); red on the scratch copy for each.
+- D54 (round 1 S2, user decision 2026-11-04: own entries only) — `canWriteTeamEntry(role,
+  createdById, userId)` (team-auth.ts): PASSWORD_UPDATE, and a MEMBER only on an entry they
+  created. One rule for the full-update PUT (route pre-check, service under-lock check), history
+  restore (pre-check on the outside-tx read; under the lock on `created_by_id` from the locked
+  row, after the role re-read) and attachment upload (pre-check where the route reads the entry;
+  under the lock from `lockTeamAttachmentEntry`). Pre-check → 403 `ONLY_OWN_ENTRIES` (as the PUT);
+  under the lock → 403 `ACTOR_NOT_PERMITTED`. Restore and upload previously let a MEMBER switch
+  another member's ItemKey or add a CEK under it. The restore keeps its role re-read before the
+  entry lock (D42's order) and adds the creator check after it. The client shows the existing
+  `onlyOwnEntries` message through the ApiErrors mapping. Integration (AR "own-entry rule"):
+  MEMBER on another's entry → restore and upload 403, entry and attachments unchanged; MEMBER on
+  own entry → 201 / 200; ADMIN on another's → 201 / 200. Unit: pre-check and under-lock arms in
+  both restore and both upload trees, the helper's table; red per arm.
+- D55 (round 1 F1) — the restore body carries `snapshotBlobIv` (hex IV), the `blobIv` of the row
+  the client decrypted; under the entry lock, after reading the row, a case-insensitive mismatch
+  is 409 `HISTORY_ROW_CHANGED` (new code: API_ERROR, status, i18n key, en/ja ApiErrors, count 201
+  → 202), entry unchanged. A re-key committing between the client's row GET and the restore
+  POST rewrote the row under a new ItemKey; restoring it beside an overview sealed under the
+  old one left the list view unopenable and the entry not pending. entry-history-section
+  re-fetches the row and retries once on that code (a second refusal shows the message); it now
+  reads the refusal body once instead of through `toastApiError`. The schema requires the field
+  (400 without it). The A5 cell (ER) is rebuilt as the client builds it — row GET, overview under
+  the row's pre-re-key key, built before the re-key — and asserts 409, the entry equal to the
+  post-re-key row, pending 0, then the client's retry → 200 with the overview opening under the
+  new ItemKey; control: an unchanged row → 200, overview opens under the row's key. Every
+  integration restore helper now sends the row's stored `blob_iv`.
+- D56 (round 1 F2, one adjudicator) — the restore builder seals the overview with
+  `teamEntryAadFor(…, OVERVIEW, itemKeyVersion, row.aadVersion)` (the restored entry takes the
+  row's aadVersion; an aadVersion-0 row's overview was sealed with AAD and nothing could open
+  it). Every web-client reader of a team entry's blob or overview now goes through
+  `teamEntryAadFor` with the entry's aadVersion (default 1 when absent, as before): the list
+  adapter, `build-team-get-detail`, watchtower, team export, the edit-dialog loader, the
+  history view, the audit-log page (which had its own inline copy). The extension gets the same
+  helper (`teamEntryAadFor` in `extension/src/lib/crypto-team.ts`) for its overview and detail
+  readers. **Not changed:** iOS (`TeamEntryDecryptor.swift`, `VaultViewModel.swift` always use
+  `buildTeamEntryAAD`) — a Swift change needs the macOS build host to verify; follow-up.
+  Writers (save, import, re-key, rotation) always write aadVersion 1 and keep the builder.
+  Integration (TP "F2"): an aadVersion-0 v0 row restored through the client builder → the list
+  (list GET → `decryptTeamOverview`) opens it, rotation 200 with no carry, the pass upgrades and
+  re-keys it (`expectOnCurrentKey`), the list opens it again, pending 0; aadVersion-1 control.
+  Red on the scratch copy separately: the restore builder at AAD 1 (unit + TP aadVersion-0
+  cell), the list adapter at AAD 1 (unit + TP aadVersion-0 cell), get-detail (unit).
+- D57 (round 1 T1, RT11) — `parkBehind(lockSql, params, send, whileParked)` in race-helpers.ts:
+  the blocker transaction commits only at the end; on any throw it rolls back in `finally`, is
+  released (destroyed if the ROLLBACK itself failed), the parked request is awaited to settle,
+  and the original error propagates. `waitingQueryOf(pid)` replaces the inline pg_locks query.
+  The five hand-rolled blockers (KW ACTOR_NOT_PERMITTED, ER REKEY_SET_MISMATCH and
+  ACTOR_NOT_PERMITTED, AR upload/delete ACTOR_NOT_PERMITTED and migrate ACTOR_NOT_PERMITTED)
+  use it; `holdRowLock` users (ER A5, AR MinIO) already released in `finally` after commit and
+  are unchanged; TP has none. Red on the scratch copy: the KW helper's regex broken for the
+  MEMBER demotion only → exactly "PUT: demoted to MEMBER…" fails, the VIEWER, control and
+  restore cells after it pass. The same break on HEAD's hand-rolled helper did not reproduce a
+  cascade in that run (its restore cells fail on HEAD for the missing `snapshotBlobIv`, so it is
+  not a clean comparison); the fix is recorded as failure-safe by construction, not as a
+  reproduced cascade.
+- D58 (round 1 S3) — team migrate answers `MIGRATE_NOT_LEGACY` (pre-read row already mode 2) and
+  `BLOB_REF_INVALID` (the pre-read `getObject` rejects the ref) before `putObject`; both are still
+  re-checked under the locks (the under-lock ref check now has its own cell: a locked row whose
+  ref changed since the pre-read). Unit: no `putObject`, no lock on either early refusal; the
+  legacy-row 200 cells unchanged; red per arm. This moves those two refusals ahead of the
+  under-lock `ACTOR_NOT_PERMITTED` / ItemKey checks for a request that is refused anyway.
+- D59 (round 1 F3) — the runner resolves the live wrap (`liveCekWrapKey` now returns
+  `{ ok: true, cekWrapKey } | { ok: false, block }`) before downloading a legacy attachment;
+  `not_held`, `key_invalid` and `undecryptable` go to their report buckets through `recordBlock`
+  (previously all three were a skipped "undecryptable", the retry-pass exit) and nothing is
+  downloaded or migrated for the entry. Unit: one row per reason (no attachment GET, no migrate
+  PUT, no POST for it) with the openable entry beside it still migrated and re-keyed; red with
+  the previous order.
+- D60 (round 1 F4) — `RekeyRunnerDeps.signal` (AbortSignal): checked before every request and
+  after a re-authentication; once aborted the pass stops with `REKEY_STOP_REASON.CANCELLED`
+  (a new stop reason; the control discards that result). The finish control aborts its pass in
+  the mount effect's cleanup (a remount after a rotation) and settles a pending
+  re-authentication waiter with false; it reports `onRunningChange(true/false)` and the
+  Key Rotation page disables the rotate button while a pass runs. Unit: runner (abort after the
+  first POST → no request for the next entry; abort while parked on re-authentication →
+  CANCELLED, nothing after; control: never-aborted signal completes), control (unmount mid-pass
+  aborts the signal, settles the waiter, reports false; control: a finished pass is not aborted,
+  reports true then false), rotate button (`disabled`); red per mutation.
+- D61 (round 1 F6) — attachment GET: a mode-2 row with NULL `cek_item_key_id` (migrated on a
+  NULL-id entry during rollout, D41) returns the CEK fields with the entry wrap and every history
+  wrap (`itemKeyWraps`, no id filter) for trial, as mode 1 does; none → 409
+  `ATTACHMENT_KEY_UNAVAILABLE`. A non-null id keeps the strict match (`itemKeyWrap`).
+  `decryptTeamAttachmentDownload` tries each served wrap until one opens the CEK. Unit: the
+  route (all wraps, unfiltered; none → 409; strict control) and the client (opens through the
+  second wrap; without it unopenable); red for both.
+- D62 (round 1 F7 / T3 / T5 / F8, docs) — checklist items with no diff, and why:
+  - v0-only raw-SQL seeders unchanged (`share-departure`, `bulk-import-entry-isolation`,
+    `passwords-history-lost-update`, `tenant-swap.adversarial`, `scripts/rls-cross-tenant-seed.sql`):
+    they insert only `item_key_version = 0` rows (or none), which carry no `item_key_id`, and no
+    cell of theirs reads the re-key marker, the high-water or the pending list, so the column
+    defaults (NULL, 0, 0) are the correct state for them.
+  - `src/lib/blob-store/db-blob-store.ts` unchanged: the DB backend stores the body in the column
+    and has no object key, so generation-based addressing does not apply; only its test's context
+    gained the now-required `generation` field.
+  - CLAUDE.md Teams API table: rows for `GET /api/teams/[teamId]/rekey`, `GET, POST
+    /api/teams/[teamId]/passwords/[id]/rekey` and `PUT …/attachments/[attachmentId]/migrate`
+    added in round 1 (user-approved).
+  - `schema.prisma` `item_key_id` comment reworded to the rollout state (no CHECK this release,
+    D41).
+  - Existing cells whose meaning changed in this branch: rotation payload snapshots — the rotate
+    route test, `rotation-payload.test.ts` and `team-rotate-key.integration.test.ts` now send
+    `snapshotIv` per entry and, for v0 entries, `snapshotOverviewIv` (both ciphertexts are
+    replaced); raw-SQL seeders in `team-rotate-key`, `team-key-version-guard` and
+    `vault-rotate-key-attachments` gained the marker (`item_key_team_key_version`), the
+    high-water and, for v1+ rows, `item_key_id`; both attachment test trees
+    (`src/__tests__/api/teams/team-attachments.test.ts` / `team-attachment-download.test.ts` and
+    the `route.test.ts` files beside the routes) moved to mode-2-only uploads, the locked
+    identity, and the D20 wrap selection; restore tests in both trees (`team-history-restore.test.ts`,
+    `restore/route.test.ts`) gained the overview body (D1), the in-lock holder rule, the
+    marker/id rule and, in round 1, `snapshotBlobIv` and the creator rule; PUT tests in both trees
+    (`…/passwords/[id]/route.test.ts`, `team-password-service.test.ts`) gained the ItemKey
+    identity rules and the under-lock role/creator re-read; the A10 CHECK cells (four 23514
+    SAVEPOINT inserts and "re-adds the CHECK") were removed per D41 and the A10 cell asserts the
+    absence of the constraint instead; the A5 cell was rebuilt (D55).
+  - Acceptance map: A10 row names D41 and what the cell asserts; the inventory gains the re-key
+    POST `ENTRY_UPGRADE_REQUIRED` (D23) and the round-1 codes (D53–D55).
+- D63 (round 1 T4) — the personal-migrate MinIO red proof, re-run and recorded: on the scratch
+  copy, `applyAttachmentMigration` (rotate-key-server.ts) hashing the column as `main` did
+  (`createHash("sha256").update(row.encryptedData as Buffer)`) instead of the body read through
+  the blob store; AR MinIO "personal migrate: hashes the stored body read through the blob store…"
+  with `ANCHOR_TEST_S3_ENDPOINT=http://127.0.0.1:9000` failed with
+  `expected { status: 409, … } to deeply equal { status: 200, error: undefined }` (the route's
+  `LEGACY_INTEGRITY_MISMATCH` refusal: on S3 the column holds the ref, so the client's hash of
+  the body never matches); unmutated → passes.
+- D64 (round 1 T2 / T6 / T7 / T8, tests and CI) — `ENTRY_REKEY_REQUIRED` PUT cells (service and
+  route) gain the minus-step 200 control in the same cell (red: a comparison refusing every
+  reuse); the A10 backfill cell seeds a version-0 team (marker 1; red with the predicate
+  `= 1`); TP "T7" runs restore(v0 at version 1) → upgrade PUT → `runRekeyPass` → pending 0,
+  `rowsOffCurrentVersion` empty, `expectOnCurrentKey` (red: a restore keeping the marker for a
+  v0 row leaves the upgraded entry not pending); `ci-integration.yml` path filter adds
+  `src/lib/validations/**`, `src/lib/http/**`, `src/lib/security/**`.
+- D65 (round 1 A1, not changed) — `s3-blob-store.ts` sets no `forcePathStyle`; the MinIO cells
+  pass only with an IP-literal endpoint. Out of this branch's goal; the user files a follow-up.

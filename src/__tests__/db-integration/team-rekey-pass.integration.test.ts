@@ -54,6 +54,10 @@ import { buildEntryRekeyPayload, buildEntryUpgradePayload, type RekeyEntryData }
 import { runRekeyPass, type RekeyListResponse, type RekeyPassResult } from "@/lib/team/rekey-runner";
 import { buildRekeyReport, holderInputsFrom, REKEY_EXIT, REKEY_ISSUE } from "@/lib/team/rekey-report";
 import { buildTeamHistoryRestoreBody, type TeamHistoryRowDto } from "@/lib/team/team-history-restore";
+import { buildTeamOverviewFromBlob } from "@/lib/team/team-entry-payload";
+import { decryptTeamOverview } from "@/lib/vault/team-vault-list-adapter";
+import type { EntryItemKeyData } from "@/lib/team/team-vault-core";
+import { ENTRY_TYPE } from "@/lib/constants";
 
 const mockAuth = vi.fn();
 vi.mock("@/auth", () => ({ auth: (...args: unknown[]) => mockAuth(...args) }));
@@ -76,6 +80,7 @@ import { GET as rotateDataGET } from "@/app/api/teams/[teamId]/rotate-key/data/r
 import { POST as rotatePOST } from "@/app/api/teams/[teamId]/rotate-key/route";
 import { GET as historyRowGET } from "@/app/api/teams/[teamId]/passwords/[id]/history/[historyId]/route";
 import { POST as restorePOST } from "@/app/api/teams/[teamId]/passwords/[id]/history/[historyId]/restore/route";
+import { GET as teamPasswordsGET } from "@/app/api/teams/[teamId]/passwords/route";
 
 const bytesOf = (text: string) => new TextEncoder().encode(text);
 const textOf = (buf: ArrayBuffer) => new TextDecoder().decode(buf);
@@ -1321,7 +1326,7 @@ describe("team re-key pass — real-DB integration", () => {
               await teamKey(team, keyData.teamKeyVersion ?? 1),
               buildItemKeyWrapAAD(team.teamId, entryId, keyData.teamKeyVersion ?? 1),
             )))
-        : { encryptedOverview: await encryptData("{}", await deriveItemEncryptionKey(generateItemKey())) };
+        : { encryptedOverview: await encryptData("{}", await deriveItemEncryptionKey(generateItemKey())), snapshotBlobIv: row.blobIv };
       return restorePOST(
         jsonRequest(`http://localhost/api/teams/${team.teamId}/passwords/${e.entryId}/history/${historyId}/restore`, "POST", body),
         params,
@@ -1422,6 +1427,117 @@ describe("team re-key pass — real-DB integration", () => {
     });
     return { plain };
   }
+
+  // ── Restores of legacy rows, end to end (F2, T7) ─────────────────────────
+
+  /** The entry's key for a row or entry, as the client resolves it (v0: the team key at its version). */
+  function clientKeyFor(team: Team) {
+    return async (_teamId: string, entryId: string, keyData: EntryItemKeyData): Promise<CryptoKey> => {
+      const version = normalizeTeamKeyVersion(keyData.teamKeyVersion ?? 1);
+      if ((keyData.itemKeyVersion ?? 0) < 1) return teamKey(team, version);
+      return deriveItemEncryptionKey(await unwrapItemKey(
+        { ciphertext: keyData.encryptedItemKey ?? "", iv: keyData.itemKeyIv ?? "", authTag: keyData.itemKeyAuthTag ?? "" },
+        await teamKey(team, version),
+        buildItemKeyWrapAAD(team.teamId, entryId, version),
+      ));
+    };
+  }
+
+  /** History row GET → buildTeamHistoryRestoreBody → restore POST, as entry-history-section does. */
+  async function clientRestore(team: Team, actor: string, entryId: string, historyId: string) {
+    mockAuth.mockResolvedValue({ user: { id: actor } });
+    const params = { params: Promise.resolve({ teamId: team.teamId, id: entryId, historyId }) };
+    const got = await historyRowGET(
+      new NextRequest(`http://localhost/api/teams/${team.teamId}/passwords/${entryId}/history/${historyId}`),
+      params,
+    );
+    expect(got.status).toBe(200);
+    const row = (await got.json()) as TeamHistoryRowDto;
+    const body = await buildTeamHistoryRestoreBody(team.teamId, entryId, row, clientKeyFor(team));
+    return restorePOST(
+      jsonRequest(`http://localhost/api/teams/${team.teamId}/passwords/${entryId}/history/${historyId}/restore`, "POST", body),
+      params,
+    );
+  }
+
+  /** The list view's title for an entry: the list GET → decryptTeamOverview (the list adapter). */
+  async function listTitle(team: Team, actor: string, entryId: string): Promise<string> {
+    mockAuth.mockResolvedValue({ user: { id: actor } });
+    const res = await teamPasswordsGET(
+      new NextRequest(`http://localhost/api/teams/${team.teamId}/passwords`),
+      { params: Promise.resolve({ teamId: team.teamId }) },
+    );
+    expect(res.status).toBe(200);
+    const raw = ((await res.json()) as Record<string, unknown>[]).find((e) => e.id === entryId);
+    if (!raw) throw new Error(`entry ${entryId} not listed`);
+    return (await decryptTeamOverview(team.teamId, raw, { getEntryDecryptionKey: clientKeyFor(team) })).title;
+  }
+
+  /** The overview a restore of `blob` writes (the client rebuilds it from the row's blob). */
+  const restoredOverview = (blob: string) => buildTeamOverviewFromBlob(JSON.parse(blob) as Record<string, unknown>, ENTRY_TYPE.LOGIN);
+
+  it.each([
+    ["an aadVersion-0", 0],
+    ["control: an aadVersion-1", 1],
+  ] as const)("F2: restoring %s v0 row → the list opens it, the rotation re-encrypts it (no carry), the pass upgrades and re-keys it", async (_label, aadVersion) => {
+    const team = await seedTeam(1);
+    const admin = await seedMember(team, "OWNER", [1]);
+    const ik = newItemKey(1);
+    const e = await seedEntry(team, { teamKeyVersion: 1, itemKey: ik, marker: 1 });
+    const rowPlain = plainFor("legacy row");
+    const rowId = await seedHistory(team, e.entryId, {
+      plaintext: rowPlain.blob,
+      seal: { ...(await v0Seal(team, 1)), aadVersion },
+      teamKeyVersion: 1,
+      wrap: null,
+      itemKeyId: null,
+    });
+
+    expect((await clientRestore(team, admin, e.entryId, rowId)).status).toBe(200);
+    expect(await entryRow(e.entryId)).toMatchObject({ aad_version: aadVersion, item_key_version: 0 });
+    const title = (JSON.parse(rowPlain.blob) as { title: string }).title;
+    expect(await listTitle(team, admin, e.entryId)).toBe(title);
+
+    const rotated = await rotate(team, admin);
+    expect(rotated).toMatchObject({ status: 200, carry: [] });
+    expect(await entryRow(e.entryId)).toMatchObject({ team_key_version: 2, item_key_version: 0 });
+
+    const { result } = await runPass(team, admin);
+    expect(result).toMatchObject({ status: "completed", rekeyed: [e.entryId], undecryptable: [], skipped: [] });
+    await expectOnCurrentKey(team, e.entryId, { plain: { blob: rowPlain.blob, overview: restoredOverview(rowPlain.blob) } });
+    expect(await listTitle(team, admin, e.entryId)).toBe(title);
+    expect((await rekeyList(team, admin)).pendingCount).toBe(0);
+  });
+
+  it("T7: restore a v0 row at an old team key version → the v0→v1 upgrade edit → the pass → pending 0, nothing off-version", async () => {
+    const team = await seedTeam(2);
+    const admin = await seedMember(team, "OWNER", [1, 2]);
+    const ik = newItemKey(1);
+    const e = await seedEntry(team, { teamKeyVersion: 2, itemKey: ik, marker: 2 });
+    const rowPlain = plainFor("old v0 row");
+    const rowId = await seedHistory(team, e.entryId, {
+      plaintext: rowPlain.blob, seal: await v0Seal(team, 1), teamKeyVersion: 1, wrap: null, itemKeyId: null,
+    });
+
+    expect((await clientRestore(team, admin, e.entryId, rowId)).status).toBe(200);
+    expect(await entryRow(e.entryId)).toMatchObject({ team_key_version: 1, item_key_version: 0, item_key_id: null });
+
+    const data = await rekeyData(team, admin, e.entryId);
+    const upgrade = await buildEntryUpgradePayload(team.teamId, data.entry, data.nextItemKeyVersion, data.teamKeyVersion, resolverFor(team, admin));
+    if (upgrade.kind !== "payload") throw new Error(`upgrade blocked: ${upgrade.block}`);
+    const res = await entryPUT(
+      jsonRequest(`http://localhost/api/teams/${team.teamId}/passwords/${e.entryId}`, "PUT", upgrade.body),
+      { params: Promise.resolve({ teamId: team.teamId, id: e.entryId }) },
+    );
+    expect(res.status).toBe(200);
+    expect((await rekeyList(team, admin)).pendingCount).toBe(1);
+
+    const { result } = await runPass(team, admin);
+    expect(result).toMatchObject({ status: "completed", rekeyed: [e.entryId] });
+    expect((await rekeyList(team, admin)).pendingCount).toBe(0);
+    expect(await rowsOffCurrentVersion(team.teamId)).toEqual([]);
+    await expectOnCurrentKey(team, e.entryId, { plain: { blob: rowPlain.blob, overview: restoredOverview(rowPlain.blob) } });
+  });
 
   it("rollout: a v1 entry the previous release created (NULL id, marker 0, high-water 0) is pending; the pass re-keys it past its own version and mints the id", async () => {
     const team = await seedTeam(2);

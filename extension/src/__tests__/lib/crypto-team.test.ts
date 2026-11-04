@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { hexDecode, hexEncode, type EncryptedData } from "../../lib/crypto";
 import {
   buildTeamEntryAAD,
+  teamEntryAadFor,
   buildItemKeyWrapAAD,
   buildTeamKeyWrapAAD,
   buildTeamAttachmentCekWrapAAD,
@@ -57,6 +58,19 @@ async function makeEcdhKeyPair(): Promise<CryptoKeyPair> {
 // ─── AAD Builders ────────────────────────────────────────────
 
 describe("crypto-team AAD builders", () => {
+  describe("teamEntryAadFor", () => {
+    it("is undefined for an aadVersion-0 row (a restored legacy row is sealed without AAD)", () => {
+      expect(teamEntryAadFor("team-1", "entry-1", "overview", 0, 0)).toBeUndefined();
+      expect(teamEntryAadFor("team-1", "entry-1", "blob", 2, 0)).toBeUndefined();
+    });
+
+    it("is buildTeamEntryAAD for aadVersion 1", () => {
+      expect(teamEntryAadFor("team-1", "entry-1", "overview", 2, 1)).toEqual(
+        buildTeamEntryAAD("team-1", "entry-1", "overview", 2),
+      );
+    });
+  });
+
   describe("buildTeamEntryAAD", () => {
     it("produces correct binary format for blob scope", () => {
       const aad = buildTeamEntryAAD("team-1", "entry-1", "blob", 0);

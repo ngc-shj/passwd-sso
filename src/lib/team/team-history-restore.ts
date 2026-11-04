@@ -1,5 +1,5 @@
 import { decryptData, encryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
-import { buildTeamEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
+import { VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import type { EntryTypeValue } from "@/lib/constants";
 import { buildTeamOverviewFromBlob } from "@/lib/team/team-entry-payload";
 import { teamEntryAadFor } from "@/lib/team/team-key-resolution";
@@ -37,15 +37,17 @@ export function historyRowKeyData(row: TeamHistoryRowDto): EntryItemKeyData {
  * The history restore POST body (deviation D1): the row decrypted with its
  * own key, its overview rebuilt from the blob as the save path builds it and
  * encrypted under the restored row's key at the row's overview AAD
- * (itemKeyVersion of the row), so the restored entry's list view opens with
- * the key the entry will then hold.
+ * (itemKeyVersion and aadVersion of the row — the restored entry takes the
+ * row's aadVersion), so the restored entry's list view opens with the key the
+ * entry will then hold. `snapshotBlobIv` names the row decrypted: the server
+ * refuses HISTORY_ROW_CHANGED when a re-key rewrote it since.
  */
 export async function buildTeamHistoryRestoreBody(
   teamId: string,
   entryId: string,
   row: TeamHistoryRowDto,
   getEntryDecryptionKey: (teamId: string, entryId: string, entry: EntryItemKeyData) => Promise<CryptoKey>,
-): Promise<{ encryptedOverview: EncryptedData }> {
+): Promise<{ encryptedOverview: EncryptedData; snapshotBlobIv: string }> {
   const keyData = historyRowKeyData(row);
   const itemKeyVersion = keyData.itemKeyVersion ?? 0;
   const key = await getEntryDecryptionKey(teamId, entryId, keyData);
@@ -66,7 +68,8 @@ export async function buildTeamHistoryRestoreBody(
     encryptedOverview: await encryptData(
       overview,
       key,
-      buildTeamEntryAAD(teamId, entryId, VAULT_TYPE.OVERVIEW, itemKeyVersion),
+      teamEntryAadFor(teamId, entryId, VAULT_TYPE.OVERVIEW, itemKeyVersion, row.aadVersion),
     ),
+    snapshotBlobIv: row.blobIv,
   };
 }

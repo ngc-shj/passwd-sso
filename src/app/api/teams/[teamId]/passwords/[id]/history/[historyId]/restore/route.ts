@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
-import { activeTeamRole, hasTeamPermission, requireTeamPermission } from "@/lib/auth/access/team-auth";
+import { activeTeamRole, canWriteTeamEntry, hasTeamPermission, requireTeamPermission } from "@/lib/auth/access/team-auth";
 import { API_ERROR, type ApiErrorCode } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_METADATA_KEY, TEAM_PERMISSION } from "@/lib/constants";
@@ -28,27 +28,32 @@ async function handlePOST(req: NextRequest, { params }: Params) {
 
   const { teamId, id, historyId } = await params;
 
+  let membership;
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_UPDATE, req);
+    membership = await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_UPDATE, req);
   } catch (e) {
     return handleAuthError(e);
   }
 
-  // Pre-check only (existence + tenant). The entry and the history row are
-  // re-read INSIDE the transaction below, under the locks — these outside-tx
-  // rows may be stale under concurrent writers.
+  // Pre-check only (existence, tenant, own-entry rule). The entry and the
+  // history row are re-read INSIDE the transaction below, under the locks —
+  // these outside-tx rows may be stale under concurrent writers.
   const entry = await withTeamTenantRls(teamId, async () =>
     prisma.teamPasswordEntry.findUnique({
       where: { id },
       select: {
         teamId: true,
         tenantId: true,
+        createdById: true,
       },
     }),
   );
 
   if (!entry || entry.teamId !== teamId) {
     return notFound();
+  }
+  if (!canWriteTeamEntry(membership.role, entry.createdById, session.user.id)) {
+    return errorResponse(API_ERROR.ONLY_OWN_ENTRIES);
   }
 
   const history = await withTeamTenantRls(teamId, async () =>
@@ -64,7 +69,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
 
   const body = await parseBody(req, restoreTeamHistorySchema);
   if (!body.ok) return body.response;
-  const { encryptedOverview } = body.data;
+  const { encryptedOverview, snapshotBlobIv } = body.data;
 
   const outcome = await withTeamTenantRls(teamId, async () =>
     prisma.$transaction(async (tx): Promise<RestoreOutcome> => {
@@ -106,23 +111,36 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       item_key_id: string | null;
       item_key_team_key_version: number;
       item_key_version_high_water: number;
+      created_by_id: string;
     };
     const [cur] = await tx.$queryRaw<LockedRow[]>`
       SELECT encrypted_blob, blob_iv, blob_auth_tag,
              aad_version, team_key_version, item_key_version,
              encrypted_item_key, item_key_iv, item_key_auth_tag,
-             item_key_id, item_key_team_key_version, item_key_version_high_water
+             item_key_id, item_key_team_key_version, item_key_version_high_water,
+             created_by_id
       FROM team_password_entries
       WHERE id = ${id}::uuid AND team_id = ${teamId}::uuid
       FOR UPDATE
     `;
     // Entry may be concurrently deleted between the pre-check and this lock.
     if (!cur) return { ok: false, code: API_ERROR.NOT_FOUND };
+    // A MEMBER restores only an entry they created (as the full-update PUT),
+    // read from the locked row.
+    if (!canWriteTeamEntry(role, cur.created_by_id, session.user.id)) {
+      return { ok: false, code: API_ERROR.ACTOR_NOT_PERMITTED };
+    }
 
     // The restore source, read under the entry lock (a re-key or trim
     // committed since the pre-check is seen here).
     const row = await tx.teamPasswordEntryHistory.findUnique({ where: { id: historyId } });
     if (!row || row.entryId !== id) return { ok: false, code: API_ERROR.HISTORY_NOT_FOUND };
+    // The client sealed the overview under the key of the row it decrypted;
+    // a re-key committed since rewrote the row under a new ItemKey, and
+    // restoring it beside that overview would leave the list view unopenable.
+    if (row.blobIv.toLowerCase() !== snapshotBlobIv.toLowerCase()) {
+      return { ok: false, code: API_ERROR.HISTORY_ROW_CHANGED };
+    }
 
     // A row whose team key version no active member holds cannot be opened
     // by anyone: restoring it would leave the entry unreadable.

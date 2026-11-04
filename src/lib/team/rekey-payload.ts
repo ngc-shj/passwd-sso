@@ -671,16 +671,26 @@ export async function buildAttachmentMigratePayload(
   };
 }
 
-/** Unwrap the live entry wrap into its CEK-wrap key (for migrate). Null when not openable. */
+export type LiveCekWrapKeyResult =
+  | { ok: true; cekWrapKey: CryptoKey }
+  | {
+      ok: false;
+      block: typeof REKEY_ENTRY_BLOCK.NOT_HELD | typeof REKEY_ENTRY_BLOCK.KEY_INVALID | typeof REKEY_ENTRY_BLOCK.UNDECRYPTABLE;
+    };
+
+/**
+ * Unwrap the live entry wrap into its CEK-wrap key (for migrate), or say why
+ * it does not open — the same reasons the re-key payload reports for it.
+ */
 export async function liveCekWrapKey(
   teamId: string,
   entry: RekeySourceEntry,
   resolveKey: ResolveTeamKey,
-): Promise<CryptoKey | null> {
+): Promise<LiveCekWrapKeyResult> {
   const unwrapped = await unwrapRow(teamId, entry.id, entry, resolveKey);
-  if (!unwrapped.ok) return null;
+  if (!unwrapped.ok) return { ok: false, block: unwrapped.reason };
   try {
-    return await deriveItemCekWrapKey(unwrapped.raw);
+    return { ok: true, cekWrapKey: await deriveItemCekWrapKey(unwrapped.raw) };
   } finally {
     unwrapped.raw.fill(0);
   }

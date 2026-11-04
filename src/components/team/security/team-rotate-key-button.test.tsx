@@ -162,6 +162,13 @@ describe("TeamRotateKeyButton", () => {
     expect(screen.getByRole("button", { name: "rotateKeyButton" })).toBeInTheDocument();
   });
 
+  it("holds the trigger while a re-key pass runs (disabled), and enables it otherwise", () => {
+    const { rerender } = render(<TeamRotateKeyButton teamId={TEAM_ID} disabled />);
+    expect(screen.getByRole("button", { name: "rotateKeyButton" })).toBeDisabled();
+    rerender(<TeamRotateKeyButton teamId={TEAM_ID} />);
+    expect(screen.getByRole("button", { name: "rotateKeyButton" })).toBeEnabled();
+  });
+
   it("disables confirm until 'rotate' is typed", async () => {
     render(<TeamRotateKeyButton teamId={TEAM_ID} />);
     fireEvent.click(screen.getByRole("button", { name: "rotateKeyButton" }));

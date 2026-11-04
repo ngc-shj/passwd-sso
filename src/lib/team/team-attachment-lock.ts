@@ -17,6 +17,9 @@ export type LockedTeamAttachmentEntry = {
   tenantId: string;
   itemKeyVersion: number;
   itemKeyId: string | null;
+  /** The entry's own team key version (its ItemKey wrap's), not the team's. */
+  entryTeamKeyVersion: number;
+  createdById: string;
 };
 
 /**
@@ -34,8 +37,10 @@ export async function lockTeamAttachmentEntry(
 ): Promise<LockedTeamAttachmentEntry | null> {
   const team = await lockTeamKeyVersion(tx, teamId);
   if (!team) return null;
-  const [entry] = await tx.$queryRaw<{ item_key_version: number; item_key_id: string | null }[]>`
-    SELECT item_key_version, item_key_id
+  const [entry] = await tx.$queryRaw<
+    { item_key_version: number; item_key_id: string | null; team_key_version: number; created_by_id: string }[]
+  >`
+    SELECT item_key_version, item_key_id, team_key_version, created_by_id
       FROM team_password_entries
      WHERE id = ${entryId}::uuid AND team_id = ${teamId}::uuid
      FOR SHARE
@@ -46,6 +51,8 @@ export async function lockTeamAttachmentEntry(
     tenantId: team.tenantId,
     itemKeyVersion: entry.item_key_version,
     itemKeyId: entry.item_key_id,
+    entryTeamKeyVersion: entry.team_key_version,
+    createdById: entry.created_by_id,
   };
 }
 

@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { advisoryXactLock } from "@/lib/tenant-rls";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
-import { activeTeamRole, hasTeamPermission, requireTeamPermission } from "@/lib/auth/access/team-auth";
+import { activeTeamRole, canWriteTeamEntry, requireTeamPermission } from "@/lib/auth/access/team-auth";
 import { API_ERROR, type ApiErrorCode } from "@/lib/http/api-error-codes";
 import { getAttachmentBlobStore } from "@/lib/blob-store";
 import { newBlobGeneration } from "@/lib/blob-store/object-ref";
@@ -30,7 +30,7 @@ import { createRateLimiter } from "@/lib/security/rate-limit";
 import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 import { TeamRotationInProgressError } from "@/lib/team/team-key-rotation-lock";
 import { lockTeamAttachmentEntry } from "@/lib/team/team-attachment-lock";
-import { itemKeyIdsMatch } from "@/lib/team/team-item-key";
+import { itemKeyIdsMatch, normalizeTeamKeyVersion } from "@/lib/team/team-item-key";
 
 type RouteContext = { params: Promise<{ teamId: string; id: string }> };
 
@@ -114,8 +114,9 @@ async function handlePOST(
 
   const { teamId, id } = await params;
 
+  let membership;
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_UPDATE, req);
+    membership = await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_UPDATE, req);
   } catch (e) {
     return handleAuthError(e);
   }
@@ -123,17 +124,20 @@ async function handlePOST(
   const rl = await teamAttachmentUploadLimiter.check(`rl:team_attachment_upload:${session.user.id}`);
   if (!rl.allowed) return rateLimited(rl.retryAfterMs);
 
-  // Pre-check only (existence). The entry's ItemKey identity is read again
-  // under the locks in the transaction below.
+  // Pre-check only (existence, own-entry rule). The entry's ItemKey identity
+  // and creator are read again under the locks in the transaction below.
   const entry = await withTeamTenantRls(teamId, async () =>
     prisma.teamPasswordEntry.findUnique({
       where: { id },
-      select: { teamId: true },
+      select: { teamId: true, createdById: true },
     }),
   );
 
   if (!entry || entry.teamId !== teamId) {
     return notFound();
+  }
+  if (!canWriteTeamEntry(membership.role, entry.createdById, session.user.id)) {
+    return errorResponse(API_ERROR.ONLY_OWN_ENTRIES);
   }
 
   // Early rejection before buffering the multipart body into memory. Requires a
@@ -275,7 +279,7 @@ async function handlePOST(
       // The actor's authority, under the team lock: a removal, departure or
       // demotion committed since requireTeamPermission is seen here.
       const role = await activeTeamRole(tx, teamId, session.user.id);
-      if (!role || !hasTeamPermission(role, TEAM_PERMISSION.PASSWORD_UPDATE)) {
+      if (!role || !canWriteTeamEntry(role, locked.createdById, session.user.id)) {
         return { ok: false, code: API_ERROR.ACTOR_NOT_PERMITTED };
       }
 
@@ -288,6 +292,13 @@ async function handlePOST(
       }
       if (cekKeyVersion !== locked.itemKeyVersion) {
         return { ok: false, code: API_ERROR.CEK_KEY_VERSION_MISMATCH };
+      }
+      // An ItemKey wrapped under an older team key (a restored retained row,
+      // a carried entry) is re-keyed before a new CEK is wrapped under it, as
+      // the full-update PUT refuses: a departed holder of that team key could
+      // otherwise open the new attachment.
+      if (normalizeTeamKeyVersion(locked.entryTeamKeyVersion) !== normalizeTeamKeyVersion(locked.teamKeyVersion)) {
+        return { ok: false, code: API_ERROR.ENTRY_REKEY_REQUIRED };
       }
 
       // The per-entry cap, re-checked under a per-entry advisory lock so two

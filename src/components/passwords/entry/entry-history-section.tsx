@@ -9,15 +9,16 @@ import { apiPath } from "@/lib/constants";
 import { useVault } from "@/lib/vault/vault-context";
 import { useTeamVault } from "@/lib/team/team-vault-context";
 import { TeamKeyVersionUnavailableError } from "@/lib/team/team-vault-core";
-import { TEAM_KEY_FAILURE } from "@/lib/team/team-key-resolution";
+import { TEAM_KEY_FAILURE, teamEntryAadFor } from "@/lib/team/team-key-resolution";
 import {
   buildTeamHistoryRestoreBody,
   historyRowKeyData,
   type TeamHistoryRowDto,
 } from "@/lib/team/team-history-restore";
 import { toastApiError } from "@/lib/http/toast-api-error";
+import { API_ERROR, apiErrorToI18nKey } from "@/lib/http/api-error-codes";
 import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
-import { buildPersonalEntryAAD, buildTeamEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
+import { buildPersonalEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -202,27 +203,38 @@ export function EntryHistorySection({
     if (!restoreTarget) return;
     setRestoring(true);
     try {
-      let init: RequestInit | null = { method: "POST" };
-      if (scopedTeamId) {
-        try {
-          init = await teamRestoreInit(scopedTeamId, restoreTarget.id);
-        } catch (e) {
-          const message = keyErrorMessage(e);
-          toast.error(message);
-          return;
-        }
-        if (!init) return;
-      }
       const url = scopedTeamId
         ? apiPath.teamPasswordHistoryRestore(scopedTeamId, entryId, restoreTarget.id)
         : apiPath.passwordHistoryRestore(entryId, restoreTarget.id);
-      const res = await fetchApi(url, init);
-      if (!res.ok) {
+      let restored = false;
+      // A team restore whose row a re-key rewrote after it was read
+      // (HISTORY_ROW_CHANGED) is rebuilt from the re-fetched row once.
+      for (let attempt = 0; attempt < 2; attempt++) {
+        let init: RequestInit | null = { method: "POST" };
+        if (scopedTeamId) {
+          try {
+            init = await teamRestoreInit(scopedTeamId, restoreTarget.id);
+          } catch (e) {
+            const message = keyErrorMessage(e);
+            toast.error(message);
+            return;
+          }
+          if (!init) return;
+        }
+        const res = await fetchApi(url, init);
+        if (res.ok) {
+          restored = true;
+          break;
+        }
+        if (!scopedTeamId) return;
+        const code = ((await res.json().catch(() => ({}))) as { error?: unknown }).error;
+        if (code === API_ERROR.HISTORY_ROW_CHANGED && attempt === 0) continue;
         // A team refusal names its exits (HISTORY_KEY_UNAVAILABLE: restore a
         // more recent version, or delete the entry).
-        if (scopedTeamId) await toastApiError(res, tApi);
+        toast.error(tApi(apiErrorToI18nKey(code)));
         return;
       }
+      if (!restored) return;
       // Restore writes back the history row's ItemKey metadata, which may
       // point at an older TeamKey version. Drop the cached keys so the next
       // decrypt refetches and unwraps against the restored version.
@@ -256,9 +268,7 @@ export function EntryHistorySection({
           entryId,
           historyRowKeyData(data as TeamHistoryRowDto),
         );
-        const aad = data.aadVersion >= 1
-          ? buildTeamEntryAAD(scopedTeamId, entryId, "blob", historyItemKeyVersion)
-          : undefined;
+        const aad = teamEntryAadFor(scopedTeamId, entryId, VAULT_TYPE.BLOB, historyItemKeyVersion, data.aadVersion);
         const plaintext = await decryptData(
           {
             ciphertext: data.encryptedBlob,

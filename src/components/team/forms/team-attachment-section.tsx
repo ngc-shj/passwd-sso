@@ -26,6 +26,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { toastApiError } from "@/lib/http/toast-api-error";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 import { useTeamVault } from "@/lib/team/team-vault-context";
 import { ItemKeyUpgradeRequiredError } from "@/lib/team/team-vault-core";
 import { apiPath } from "@/lib/constants";
@@ -141,7 +143,14 @@ export function TeamAttachmentSection({
       );
 
       if (!res.ok) {
-        await toastApiError(res, tApi);
+        // As the entry save: an ItemKey under an older team key needs the
+        // re-key pass, which only an owner or admin can run.
+        const err = await readApiErrorBody(res.clone());
+        if (err?.error === API_ERROR.ENTRY_REKEY_REQUIRED) {
+          toast.error(t("uploadRekeyRequired"));
+        } else {
+          await toastApiError(res, tApi);
+        }
         return;
       }
 
