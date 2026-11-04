@@ -485,7 +485,7 @@ describe("EntryHistorySection", () => {
       itemKeyId: "row-ik",
     };
 
-    function restoreFetch(restoreStatus: number, restoreBody: unknown) {
+    function restoreFetch(restoreStatus: number, restoreBody: unknown, row: typeof ROW = ROW) {
       return vi.fn((url: string, init?: RequestInit) => {
         if (url.endsWith("/restore")) {
           return Promise.resolve({
@@ -495,7 +495,7 @@ describe("EntryHistorySection", () => {
           });
         }
         if (url.includes("/history/h1")) {
-          return Promise.resolve({ ok: true, json: () => Promise.resolve(ROW) });
+          return Promise.resolve({ ok: true, json: () => Promise.resolve(row) });
         }
         void init;
         return Promise.resolve({ ok: true, json: () => Promise.resolve(HISTORY_ITEMS) });
@@ -583,6 +583,31 @@ describe("EntryHistorySection", () => {
       await waitFor(() => expect(toast.error).toHaveBeenCalledWith("historyRowChanged"));
       expect(fetchMock.mock.calls.filter((c) => String(c[0]).endsWith("/restore"))).toHaveLength(2);
       expect(toast.success).not.toHaveBeenCalled();
+    });
+
+    it("refuses an aadVersion-0 row before decrypting: no POST, the too-old message is shown (S-R3-2)", async () => {
+      mockDecryptData.mockResolvedValue(JSON.stringify({ title: "Old" }));
+      const fetchMock = restoreFetch(200, { success: true }, { ...ROW, aadVersion: 0 });
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+      await confirmRestore();
+
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith("historyRowLegacy"));
+      expect(fetchMock.mock.calls.some((c) => String(c[0]).endsWith("/restore"))).toBe(false);
+      expect(mockDecryptData).not.toHaveBeenCalled();
+      expect(toast.success).not.toHaveBeenCalled();
+    });
+
+    it("control: the same row at aadVersion 1 is decrypted and POSTed", async () => {
+      mockDecryptData.mockResolvedValue(JSON.stringify({ title: "Old" }));
+      const fetchMock = restoreFetch(200, { success: true }, { ...ROW, aadVersion: 1 });
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+      await confirmRestore();
+
+      await waitFor(() => expect(toast.success).toHaveBeenCalled());
+      expect(fetchMock.mock.calls.some((c) => String(c[0]).endsWith("/restore"))).toBe(true);
+      expect(toast.error).not.toHaveBeenCalledWith("historyRowLegacy");
     });
 
     it("surfaces HISTORY_KEY_UNAVAILABLE with its exits", async () => {

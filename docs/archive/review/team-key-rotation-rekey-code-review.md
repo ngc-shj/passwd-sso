@@ -163,3 +163,45 @@ three Minors.
   Restore/Upload and gets "You can only modify your own entries." — no state change. Likelihood:
   medium (MEMBERs browsing others' entries). Cost to fix: small UI change across the edit,
   restore and upload controls together — follow-up.
+
+---
+
+# Review round: 3
+Date: 2026-11-04
+Scope: `e85519dea..HEAD` (commit 7acbe0dd5: strict readers, restore re-seal, T9, finish control).
+
+## Changes from Previous Round
+Security N1 and T10 (strict readers) verified resolved by all three experts; T9 and
+functionality N1 resolved. New: the AST guard matches spellings (T11/S-R3-1), and the restore
+re-seal launders a substituted legacy ciphertext (S-R3-2).
+
+## Functionality Findings
+- F-R3-1 [Minor, continuing] teamId change leaves the prior team's result/status shown; a late
+  post-pass status fetch can overwrite the new team's.
+
+## Security Findings
+- S-R3-1 [Minor, new] AST guard bypass via alias, re-export, early-return, element access,
+  hoisted conditional; strict-reader set hand-listed. escalate: n/a.
+- S-R3-2 [Minor, new, R43 vs main] Restore decrypts a server-presented aadVersion-0 row without
+  AAD and re-seals it bound to the entry; on main the same restore failed closed.
+
+## Testing Findings
+- T11 [Major, new, RT7/R42] Same guard defect as S-R3-1, red-proved against the guard's own
+  functions (alias helper, alias build, early-return wrapper escape).
+- T12 [Minor, new, RT1] Export and login-form refusal cells do not pin the AAD bytes.
+
+## Recurring Issue Check
+- Functionality: R1, R2, R42, R43 clean.
+- Security: R42 partial (S-R3-1); R43 → S-R3-2; spelling-bound gate recurrence noted.
+- Testing: RT7/R42 → T11; RT1 → T12; RT10, RT11 clean.
+
+## Resolution Status (round 3)
+- S-R3-2: cross-perspective tradeoff — security wins by default. Alternatives searched: (a) accept
+  and document (rejected: a widening vs main); (b) show the decrypted content in the confirm
+  dialog (rejected: still launders, approval of plausible substituted content); (c) refuse
+  restoring aadVersion-0 rows client-side (real control) and server-side (defense in depth) —
+  chosen; on main such a restore produced an entry whose detail did not decrypt, so no working
+  behaviour is lost.
+- T11 + S-R3-1: guard rewritten to resolve bindings and to require a positive strict-AAD form at
+  every team decrypt, reader set derived from code.
+- T12, F-R3-1: fixed as recommended.

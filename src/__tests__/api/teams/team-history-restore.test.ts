@@ -130,7 +130,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
   function setupRestoreTx(
     holderKeys: { userId: string }[],
     actor: { role: string } | null = { role: "MEMBER" },
-    over: { createdById?: string; rowBlobIv?: string } = {},
+    over: { createdById?: string; rowBlobIv?: string; rowAadVersion?: number } = {},
   ) {
     const entryUpdate = vi.fn();
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) =>
@@ -169,7 +169,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
             encryptedBlob: "old",
             blobIv: over.rowBlobIv ?? ROW_BLOB_IV,
             blobAuthTag: "oldTag",
-            aadVersion: 0,
+            aadVersion: over.rowAadVersion ?? 1,
             teamKeyVersion: 2,
             itemKeyVersion: 0,
             encryptedItemKey: null,
@@ -211,7 +211,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
     expect(status).toBe(200);
     expect(json.success).toBe(true);
     // The client's re-sealed blob at the current AAD version, never the
-    // aadVersion-0 row's blob or aadVersion (D67).
+    // row's own blob (D67).
     expect(entryUpdate.mock.calls[0][0].data).toMatchObject({
       encryptedBlob: BLOB.ciphertext,
       blobIv: BLOB.iv,
@@ -261,6 +261,22 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
     const res = await POST(createRequest("POST", undefined, { body: BODY }), createParams({ teamId: "o1", id: "p1", historyId: "h1" }));
     expect(res.status).toBe(200);
     expect(same).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses 409 HISTORY_ROW_LEGACY for an aadVersion-0 row (control: the same row at aadVersion 1 → 200)", async () => {
+    preChecksPass();
+    const legacy = setupRestoreTx([{ userId: "u-holder" }], { role: "MEMBER" }, { rowAadVersion: 0 });
+    const refused = await parseResponse(
+      await POST(createRequest("POST", undefined, { body: BODY }), createParams({ teamId: "o1", id: "p1", historyId: "h1" })),
+    );
+    expect(refused.status).toBe(409);
+    expect(refused.json.error).toBe(API_ERROR.HISTORY_ROW_LEGACY);
+    expect(legacy).not.toHaveBeenCalled();
+
+    const current = setupRestoreTx([{ userId: "u-holder" }], { role: "MEMBER" }, { rowAadVersion: 1 });
+    const res = await POST(createRequest("POST", undefined, { body: BODY }), createParams({ teamId: "o1", id: "p1", historyId: "h1" }));
+    expect(res.status).toBe(200);
+    expect(current).toHaveBeenCalledTimes(1);
   });
 
   it("refuses a MEMBER on another member's entry: ONLY_OWN_ENTRIES before the transaction, ACTOR_NOT_PERMITTED under the lock", async () => {

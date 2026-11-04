@@ -127,6 +127,7 @@ vi.mock("@/lib/format/export-format-common", () => ({
 
 import { TeamExportPagePanel } from "./team-export";
 import { decryptData } from "@/lib/crypto/crypto-client";
+import { buildTeamEntryAAD } from "@/lib/crypto/crypto-aad";
 import { formatExportContent } from "@/lib/format/export-format-common";
 import { aadModelDecrypt } from "@/__tests__/helpers/aad-model-decrypt";
 
@@ -217,6 +218,9 @@ describe("TeamExportPagePanel", () => {
       fireEvent.click(screen.getByTestId("export-json"));
     });
 
+    // The entry AAD at its own ItemKey version (0 here), never chosen by aadVersion.
+    expect(vi.mocked(buildTeamEntryAAD)).toHaveBeenCalledWith("team-1", "e1", "blob", 0);
+    expect(vi.mocked(buildTeamEntryAAD)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(decryptData)).toHaveBeenCalledWith(expect.objectContaining({ ciphertext }), expect.anything(), "aad");
     expect(vi.mocked(formatExportContent).mock.calls[0]?.[0]).toHaveLength(exported);
   });

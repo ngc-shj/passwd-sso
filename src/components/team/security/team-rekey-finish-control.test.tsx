@@ -272,4 +272,64 @@ describe("TeamRekeyFinishControl", () => {
     // The aborted pass reports no result for the new team.
     expect(screen.queryByText(/rekeyCompleted|rekeyStopped/)).not.toBeInTheDocument();
   });
+  describe("another team on the same instance (round-3 F-R3-1)", () => {
+    /** The status list per team; a team's Nth status fetch may be held back. */
+    function statusFetch(lists: Record<string, unknown[]>) {
+      const seen: Record<string, number> = {};
+      mockFetch.mockImplementation(async (url: string) => {
+        const team = Object.keys(lists).find((id) => String(url).includes(`/teams/${id}/`));
+        if (!team) throw new Error(`unexpected fetch ${url}`);
+        const n = seen[team] ?? 0;
+        seen[team] = n + 1;
+        const list = lists[team][Math.min(n, lists[team].length - 1)];
+        return list instanceof Promise ? list : listResponse(list);
+      });
+    }
+
+    it("a completed pass for team-1 is not shown after a re-render for team-2", async () => {
+      statusFetch({ "team-1": [LIST], "team-2": [{ ...LIST, pendingCount: 3 }] });
+      mockRunRekeyPass.mockResolvedValue(passResult());
+      const { rerender } = render(<TeamRekeyFinishControl teamId="team-1" autoStart />);
+      expect(await screen.findByText('rekeyCompleted:{"count":2}')).toBeInTheDocument();
+
+      await act(async () => {
+        rerender(<TeamRekeyFinishControl teamId="team-2" />);
+      });
+
+      expect(await screen.findByRole("button", { name: 'rekeyFinishButton:{"count":3}' })).toBeInTheDocument();
+      expect(screen.queryByText(/rekeyCompleted|rekeyStopped/)).not.toBeInTheDocument();
+    });
+
+    it("team-1's post-pass status resolving after team-2's does not overwrite team-2", async () => {
+      let releaseTeam1: (r: Response) => void = () => {};
+      const lateTeam1 = new Promise<Response>((resolve) => {
+        releaseTeam1 = resolve;
+      });
+      statusFetch({ "team-1": [LIST, lateTeam1], "team-2": [{ ...LIST, pendingCount: 3 }] });
+      mockRunRekeyPass.mockResolvedValue(passResult());
+      const { rerender } = render(<TeamRekeyFinishControl teamId="team-1" autoStart />);
+      expect(await screen.findByText('rekeyCompleted:{"count":2}')).toBeInTheDocument();
+
+      await act(async () => {
+        rerender(<TeamRekeyFinishControl teamId="team-2" />);
+      });
+      expect(await screen.findByRole("button", { name: 'rekeyFinishButton:{"count":3}' })).toBeInTheDocument();
+
+      await act(async () => {
+        releaseTeam1(listResponse({ ...LIST, pendingCount: 9 }));
+      });
+
+      expect(screen.getByRole("button", { name: 'rekeyFinishButton:{"count":3}' })).toBeInTheDocument();
+      expect(screen.queryByText('rekeyPendingCount:{"count":9}')).not.toBeInTheDocument();
+    });
+
+    it("control: a pass for the current team refreshes its status from the post-pass fetch", async () => {
+      statusFetch({ "team-1": [LIST, { ...LIST, pendingCount: 0, entryIds: [] }] });
+      mockRunRekeyPass.mockResolvedValue(passResult());
+      render(<TeamRekeyFinishControl teamId="team-1" autoStart />);
+
+      expect(await screen.findByText("rekeyNothingPending")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: 'rekeyFinishButton:{"count":0}' })).toBeDisabled();
+    });
+  });
 });

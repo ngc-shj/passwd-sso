@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { KeyRound, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -72,6 +72,21 @@ export function TeamRekeyFinishControl({ teamId, autoStart = false, onRunningCha
   const [progress, setProgress] = useState({ processed: 0, total: 0 });
   const [result, setResult] = useState<RekeyPassResult | null>(null);
 
+  // Another team (same instance): drop the old team's status and report so
+  // they are never shown under the new team (round-3 F-R3-1).
+  const [prevTeamId, setPrevTeamId] = useState(teamId);
+  if (prevTeamId !== teamId) {
+    setPrevTeamId(teamId);
+    setResult(null);
+    setStatus({ kind: "loading" });
+  }
+  // Bumped at commit on a team change; a pass's closing status fetch applies
+  // only if no change happened while it was in flight.
+  const teamGenerationRef = useRef(0);
+  useLayoutEffect(() => {
+    teamGenerationRef.current += 1;
+  }, [teamId]);
+
   // Step-up from inside the pass: the runner awaits this promise, resolved by
   // a completed re-authentication (true) or a dismissed dialog (false).
   const reauthWaiterRef = useRef<((ok: boolean) => void) | null>(null);
@@ -95,6 +110,7 @@ export function TeamRekeyFinishControl({ teamId, autoStart = false, onRunningCha
   });
 
   const runPass = async (total: number) => {
+    const generation = teamGenerationRef.current;
     const controller = new AbortController();
     abortRef.current = controller;
     setRunning(true);
@@ -134,7 +150,8 @@ export function TeamRekeyFinishControl({ teamId, autoStart = false, onRunningCha
       if (!controller.signal.aborted) {
         onRunningChangeRef.current?.(false);
         setRunning(false);
-        setStatus(await fetchStatus(teamId));
+        const next = await fetchStatus(teamId);
+        if (teamGenerationRef.current === generation) setStatus(next);
       }
     }
   };

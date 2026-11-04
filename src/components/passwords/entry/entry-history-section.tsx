@@ -13,6 +13,7 @@ import { TEAM_KEY_FAILURE, teamEntryAadFor } from "@/lib/team/team-key-resolutio
 import {
   buildTeamHistoryRestoreBody,
   historyRowKeyData,
+  isRestorableHistoryRow,
   type TeamHistoryRowDto,
 } from "@/lib/team/team-history-restore";
 import { toastApiError } from "@/lib/http/toast-api-error";
@@ -184,7 +185,8 @@ export function EntryHistorySection({
 
   // History rows hold no overview: a team restore sends the row's blob and the
   // overview rebuilt from it, both re-sealed under the row's own key at the
-  // current AAD version (D1, D67).
+  // current AAD version (D1, D67). Only a row already at AAD 1 is restorable
+  // (D72).
   const teamRestoreInit = async (teamId: string, historyId: string): Promise<RequestInit | null> => {
     const rowRes = await fetchApi(apiPath.teamPasswordHistoryById(teamId, entryId, historyId));
     if (!rowRes.ok) {
@@ -192,6 +194,11 @@ export function EntryHistorySection({
       return null;
     }
     const row = (await rowRes.json()) as TeamHistoryRowDto;
+    // A row sealed without AAD is refused before it is decrypted (S-R3-2).
+    if (!isRestorableHistoryRow(row)) {
+      toast.error(tApi(apiErrorToI18nKey(API_ERROR.HISTORY_ROW_LEGACY)));
+      return null;
+    }
     const body = await buildTeamHistoryRestoreBody(teamId, entryId, row, getEntryDecryptionKey);
     return {
       method: "POST",

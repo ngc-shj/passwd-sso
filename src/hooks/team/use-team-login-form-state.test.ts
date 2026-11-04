@@ -4,6 +4,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { useTeamLoginFormState } from "@/hooks/team/use-team-login-form-state";
 import { aadModelDecrypt } from "@/__tests__/helpers/aad-model-decrypt";
+import { buildTeamEntryAAD } from "@/lib/crypto/crypto-aad";
 
 const { mockFetchApi, mockDecryptData } = vi.hoisted(() => ({
   mockFetchApi: vi.fn(),
@@ -241,7 +242,7 @@ describe("useTeamLoginFormState password-reuse history (strict team entry AAD)",
 
     const last = setPolicyViolations.mock.calls.at(-1)?.[0] as { key: string }[];
     expect(last.some((v) => v.key === "policyPasswordReuse")).toBe(flagsReuse);
-    expect(mockDecryptData.mock.calls[0][2]).toBeInstanceOf(Uint8Array);
+    expect(mockDecryptData.mock.calls[0][2]).toEqual(buildTeamEntryAAD("team-1", "entry-1", "blob", 1));
   });
 });
 

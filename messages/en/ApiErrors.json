@@ -177,6 +177,7 @@
   "teamRotateKeyUnavailable": "You hold the key for an entry that was skipped. Please refresh and try again.",
   "historyKeyUnavailable": "No active team member holds the key this version was saved with, so it cannot be restored. Restore a more recent version, or delete the entry.",
   "historyRowChanged": "This version changed while it was being restored. Try again.",
+  "historyRowLegacy": "This version is too old to restore. Restore a more recent version instead.",
   "entryUpgradeRequired": "This entry must be updated to the current encryption format first. Open and save the entry, then try again.",
   "attachmentKeyUnavailable": "This attachment cannot be opened with the entry's current key. Ask a team admin to finish re-encrypting the team's entries; if that does not help, ask another admin who had access before the key change to do it.",
   "migrateHashMismatch": "The attachment's stored content did not match. Nothing was changed.",

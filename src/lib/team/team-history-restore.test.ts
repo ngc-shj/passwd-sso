@@ -10,9 +10,20 @@ import {
   sealHistoryRow,
 } from "@/__tests__/helpers/team-key-fixtures";
 import { buildTeamEntryPayload } from "@/lib/team/team-entry-payload";
-import { buildTeamHistoryRestoreBody } from "./team-history-restore";
+import { buildTeamHistoryRestoreBody, HistoryRowLegacyError } from "./team-history-restore";
+import type { EncryptedData } from "@/lib/crypto/crypto-client";
 
 const ENTRY = "e1";
+
+/** An itemKeyVersion-0 row (TeamKey-sealed) carrying `blob` under the given aadVersion label. */
+function legacyRow(blob: EncryptedData, aadVersion: number) {
+  return {
+    id: "h0", entryType: ENTRY_TYPE.LOGIN,
+    encryptedBlob: blob.ciphertext, blobIv: blob.iv, blobAuthTag: blob.authTag,
+    aadVersion, teamKeyVersion: 1, itemKeyVersion: 0,
+    encryptedItemKey: null, itemKeyIv: null, itemKeyAuthTag: null, itemKeyId: null,
+  };
+}
 
 describe("buildTeamHistoryRestoreBody", () => {
   it("rebuilds the overview from the row's blob as the save path does and seals it under the row's key at the row's ItemKey version", async () => {
@@ -44,29 +55,43 @@ describe("buildTeamHistoryRestoreBody", () => {
     expect(await decryptData(body.encryptedBlob, rowKey, buildTeamEntryAAD(TEAM_ID, ENTRY, VAULT_TYPE.BLOB, 3))).toBe(fullBlob);
   });
 
-  it("upgrades an aadVersion-0 row: opens its no-AAD blob and re-seals blob and overview at AAD 1 under the row's key, naming the row's blobIv", async () => {
+  it("refuses an aadVersion-0 row before obtaining a key or decrypting (S-R3-2)", async () => {
     const teamKey = await makeTeamKey();
-    const { fullBlob, overviewBlob } = buildTeamEntryPayload({
+    const { fullBlob } = buildTeamEntryPayload({
       entryType: ENTRY_TYPE.LOGIN, title: "Legacy", notes: "", tagNames: [], username: "u", password: "p", url: "",
     });
     const blob = await encryptData(fullBlob, teamKey);
-    const row = {
-      id: "h0", entryType: ENTRY_TYPE.LOGIN,
-      encryptedBlob: blob.ciphertext, blobIv: blob.iv, blobAuthTag: blob.authTag,
-      aadVersion: 0, teamKeyVersion: 1, itemKeyVersion: 0,
-      encryptedItemKey: null, itemKeyIv: null, itemKeyAuthTag: null, itemKeyId: null,
-    };
+    const getEntryDecryptionKey = vi.fn(async () => teamKey);
 
-    const body = await buildTeamHistoryRestoreBody(TEAM_ID, ENTRY, row, async () => teamKey);
+    await expect(
+      buildTeamHistoryRestoreBody(TEAM_ID, ENTRY, legacyRow(blob, 0), getEntryDecryptionKey),
+    ).rejects.toBeInstanceOf(HistoryRowLegacyError);
+    expect(getEntryDecryptionKey).not.toHaveBeenCalled();
+  });
+
+  it("opens the row at strict AAD: a no-AAD ciphertext relabelled aadVersion 1 is not re-sealed", async () => {
+    const teamKey = await makeTeamKey();
+    const { fullBlob } = buildTeamEntryPayload({
+      entryType: ENTRY_TYPE.LOGIN, title: "Substituted", notes: "", tagNames: [], username: "u", password: "p", url: "",
+    });
+    const blob = await encryptData(fullBlob, teamKey);
+
+    await expect(
+      buildTeamHistoryRestoreBody(TEAM_ID, ENTRY, legacyRow(blob, 1), async () => teamKey),
+    ).rejects.toThrow();
+  });
+
+  it("control: the same content sealed at AAD 1 on an itemKeyVersion-0 row restores", async () => {
+    const teamKey = await makeTeamKey();
+    const { fullBlob } = buildTeamEntryPayload({
+      entryType: ENTRY_TYPE.LOGIN, title: "Current", notes: "", tagNames: [], username: "u", password: "p", url: "",
+    });
+    const blob = await encryptData(fullBlob, teamKey, buildTeamEntryAAD(TEAM_ID, ENTRY, VAULT_TYPE.BLOB, 0));
+
+    const body = await buildTeamHistoryRestoreBody(TEAM_ID, ENTRY, legacyRow(blob, 1), async () => teamKey);
 
     expect(body.snapshotBlobIv).toBe(blob.iv);
-    const blobAad = buildTeamEntryAAD(TEAM_ID, ENTRY, VAULT_TYPE.BLOB, 0);
-    const overviewAad = buildTeamEntryAAD(TEAM_ID, ENTRY, VAULT_TYPE.OVERVIEW, 0);
-    expect(await decryptData(body.encryptedBlob, teamKey, blobAad)).toBe(fullBlob);
-    expect(JSON.parse(await decryptData(body.encryptedOverview, teamKey, overviewAad))).toEqual(JSON.parse(overviewBlob));
-    // Neither is left without AAD (a strict reader would refuse it).
-    await expect(decryptData(body.encryptedBlob, teamKey)).rejects.toThrow();
-    await expect(decryptData(body.encryptedOverview, teamKey)).rejects.toThrow();
+    expect(await decryptData(body.encryptedBlob, teamKey, buildTeamEntryAAD(TEAM_ID, ENTRY, VAULT_TYPE.BLOB, 0))).toBe(fullBlob);
   });
 
   it("does not echo plaintext when the blob is not JSON", async () => {

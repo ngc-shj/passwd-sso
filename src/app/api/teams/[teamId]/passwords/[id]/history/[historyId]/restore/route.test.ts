@@ -91,7 +91,7 @@ const baseHistory = {
   encryptedBlob: "old",
   blobIv: ROW_BLOB_IV,
   blobAuthTag: "oldTag",
-  aadVersion: 0,
+  aadVersion: 1,
   teamKeyVersion: 2,
   itemKeyVersion: 1,
   encryptedItemKey: "oldItemKey",
@@ -288,8 +288,8 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
       expect.objectContaining({
         where: { id: ENTRY_ID, teamId: TEAM_ID },
         data: expect.objectContaining({
-          // The client's blob, re-sealed at the current AAD version: the
-          // row's aadVersion (0 here) is never copied into the live entry.
+          // The client's blob, re-sealed at the current AAD version (a row
+          // below it is refused: HISTORY_ROW_LEGACY).
           encryptedBlob: BLOB.ciphertext,
           blobIv: BLOB.iv,
           blobAuthTag: BLOB.authTag,
@@ -344,6 +344,33 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
     expect(tx.teamPasswordEntryHistory.create).not.toHaveBeenCalled();
     expect(tx.teamPasswordEntry.update).not.toHaveBeenCalled();
     expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  describe("HISTORY_ROW_LEGACY: a row sealed without AAD (S-R3-2)", () => {
+    it("refuses 409 an aadVersion-0 row under the lock, writing nothing", async () => {
+      preChecksPass();
+      const { tx, calls } = setupTx({ history: { ...baseHistory, aadVersion: 0 } });
+
+      const res = await POST(restoreRequest(), makeParams());
+      const { status, json } = await parseResponse(res);
+
+      expect(status).toBe(409);
+      expect(json.error).toBe("HISTORY_ROW_LEGACY");
+      expect(calls).toEqual(["teamLock", "actorRole", "entryLock", "historyRead"]);
+      expect(tx.teamPasswordEntryHistory.create).not.toHaveBeenCalled();
+      expect(tx.teamPasswordEntry.update).not.toHaveBeenCalled();
+      expect(mockLogAudit).not.toHaveBeenCalled();
+    });
+
+    it("control: the same row at aadVersion 1 → 200", async () => {
+      preChecksPass();
+      const { tx } = setupTx({ history: { ...baseHistory, aadVersion: 1 } });
+
+      const res = await POST(restoreRequest(), makeParams());
+
+      expect(res.status).toBe(200);
+      expect(tx.teamPasswordEntry.update).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe("HISTORY_ROW_CHANGED: the row the client decrypted (snapshotBlobIv)", () => {

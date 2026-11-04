@@ -53,7 +53,7 @@ import { buildRotationPayload, type RotateCarry, type RotationSourceEntry } from
 import { buildEntryRekeyPayload, buildEntryUpgradePayload, type RekeyEntryData } from "@/lib/team/rekey-payload";
 import { runRekeyPass, type RekeyListResponse, type RekeyPassResult } from "@/lib/team/rekey-runner";
 import { buildRekeyReport, holderInputsFrom, REKEY_EXIT, REKEY_ISSUE } from "@/lib/team/rekey-report";
-import { buildTeamHistoryRestoreBody, type TeamHistoryRowDto } from "@/lib/team/team-history-restore";
+import { buildTeamHistoryRestoreBody, HistoryRowLegacyError, type TeamHistoryRowDto } from "@/lib/team/team-history-restore";
 import { buildTeamOverviewFromBlob } from "@/lib/team/team-entry-payload";
 import { decryptTeamOverview } from "@/lib/vault/team-vault-list-adapter";
 import type { EntryItemKeyData } from "@/lib/team/team-vault-core";
@@ -1480,25 +1480,71 @@ describe("team re-key pass — real-DB integration", () => {
   /** The overview a restore of `blob` writes (the client rebuilds it from the row's blob). */
   const restoredOverview = (blob: string) => buildTeamOverviewFromBlob(JSON.parse(blob) as Record<string, unknown>, ENTRY_TYPE.LOGIN);
 
-  it.each([
-    ["an aadVersion-0", 0],
-    ["control: an aadVersion-1", 1],
-  ] as const)("F2: restoring %s v0 row → the live entry is at aadVersion 1 (D67), the strict list opens it, the rotation re-encrypts it (no carry), the pass upgrades and re-keys it", async (_label, aadVersion) => {
+  /** History row GET, as the client reads it before building a restore. */
+  async function historyRow(team: Team, actor: string, entryId: string, historyId: string): Promise<TeamHistoryRowDto> {
+    mockAuth.mockResolvedValue({ user: { id: actor } });
+    const got = await historyRowGET(
+      new NextRequest(`http://localhost/api/teams/${team.teamId}/passwords/${entryId}/history/${historyId}`),
+      { params: Promise.resolve({ teamId: team.teamId, id: entryId, historyId }) },
+    );
+    expect(got.status).toBe(200);
+    return (await got.json()) as TeamHistoryRowDto;
+  }
+
+  it("F2 (S-R3-2): an aadVersion-0 history row is not restorable — the client refuses before decrypting, the server refuses 409 HISTORY_ROW_LEGACY, the entry and its history are unchanged", async () => {
+    const team = await seedTeam(1);
+    const admin = await seedMember(team, "OWNER", [1]);
+    const e = await seedEntry(team, { teamKeyVersion: 1, itemKey: newItemKey(1), marker: 1 });
+    const rowPlain = plainFor("legacy row");
+    const rowId = await seedHistory(team, e.entryId, {
+      plaintext: rowPlain.blob,
+      seal: { ...(await v0Seal(team, 1)), aadVersion: 0 },
+      teamKeyVersion: 1,
+      wrap: null,
+      itemKeyId: null,
+    });
+    const entryBefore = await entryRow(e.entryId);
+    const historyBefore = await historyRows(e.entryId);
+
+    const row = await historyRow(team, admin, e.entryId, rowId);
+    expect(row.aadVersion).toBe(0);
+    await expect(buildTeamHistoryRestoreBody(team.teamId, e.entryId, row, clientKeyFor(team)))
+      .rejects.toBeInstanceOf(HistoryRowLegacyError);
+
+    // A client that skipped the refusal and re-sealed the row at AAD 1 anyway.
+    const key = await teamKey(team, 1);
+    const body = {
+      encryptedBlob: await encryptData(rowPlain.blob, key, buildTeamEntryAAD(team.teamId, e.entryId, "blob", 0)),
+      encryptedOverview: await encryptData(restoredOverview(rowPlain.blob), key, buildTeamEntryAAD(team.teamId, e.entryId, "overview", 0)),
+      snapshotBlobIv: row.blobIv,
+    };
+    mockAuth.mockResolvedValue({ user: { id: admin } });
+    const res = await restorePOST(
+      jsonRequest(`http://localhost/api/teams/${team.teamId}/passwords/${e.entryId}/history/${rowId}/restore`, "POST", body),
+      { params: Promise.resolve({ teamId: team.teamId, id: e.entryId, historyId: rowId }) },
+    );
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error?: string }).error).toBe("HISTORY_ROW_LEGACY");
+    expect(await entryRow(e.entryId)).toEqual(entryBefore);
+    expect(await historyRows(e.entryId)).toEqual(historyBefore);
+  });
+
+  it("F2 control: restoring an aadVersion-1 v0 row → the live entry is at aadVersion 1, the strict list opens it, the rotation re-encrypts it (no carry), the pass upgrades and re-keys it", async () => {
     const team = await seedTeam(1);
     const admin = await seedMember(team, "OWNER", [1]);
     const ik = newItemKey(1);
     const e = await seedEntry(team, { teamKeyVersion: 1, itemKey: ik, marker: 1 });
-    const rowPlain = plainFor("legacy row");
+    const rowPlain = plainFor("current row");
     const rowId = await seedHistory(team, e.entryId, {
       plaintext: rowPlain.blob,
-      seal: { ...(await v0Seal(team, 1)), aadVersion },
+      seal: await v0Seal(team, 1),
       teamKeyVersion: 1,
       wrap: null,
       itemKeyId: null,
     });
 
+    expect((await historyRow(team, admin, e.entryId, rowId)).aadVersion).toBe(1);
     expect((await clientRestore(team, admin, e.entryId, rowId)).status).toBe(200);
-    // The row's aadVersion is never copied: blob and overview are re-sealed at AAD 1.
     expect(await entryRow(e.entryId)).toMatchObject({ aad_version: 1, item_key_version: 0 });
     const title = (JSON.parse(rowPlain.blob) as { title: string }).title;
     expect(await listTitle(team, admin, e.entryId)).toBe(title);

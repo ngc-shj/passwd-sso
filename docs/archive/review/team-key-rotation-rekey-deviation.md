@@ -450,7 +450,9 @@
   Red on the remote scratch copy (HEAD's `TeamEntryDecryptor.swift` and
   `CredentialResolver.swift`): exactly the two aadVersion-0 cells fail, the refusals and fixture
   cells pass.
-- D67 (round 2 security N1 + testing T10, R43; supersedes D56's reader change and D66) — a live
+- D67 (round 2 security N1 + testing T10, R43; supersedes D56's reader change and D66; **the
+  restore decrypt at the row's AAD is superseded by D72** — restore now refuses aadVersion < 1
+  and opens the row strictly) — a live
   team entry is read strictly at AAD 1 again, everywhere: `buildTeamEntryAAD` at the entry's
   ItemKey version in the list adapter, `build-team-get-detail`, watchtower, team export, the
   edit-dialog loader, the team audit-log page (now strict; on main it was the one
@@ -458,8 +460,9 @@
   (strict, as on main: they feed a policy decision, not a display); the extension's three
   sites; iOS `TeamEntryDecryptor` ×2, `CredentialResolver.buildEntryAAD`,
   `VaultViewModel.buildEntryAAD` (iOS sources back to their pre-D66 text).
-  **Restore**: the client decrypts the row at the row's AAD (`teamEntryAadFor`, the only
-  aadVersion-aware step), rebuilds the overview and re-seals BOTH blob and overview under the
+  **Restore** (as of D72: an aadVersion-0 row is refused, client and server, and the row is
+  opened at strict AAD; the rest of this paragraph stands): the client decrypts the row at the
+  row's AAD (`teamEntryAadFor`, the only aadVersion-aware step), rebuilds the overview and re-seals BOTH blob and overview under the
   row's key (team key at the row's version for v0, the row's ItemKey for v1+) at AAD 1 and the
   row's `itemKeyVersion`. The body always carries `encryptedBlob` (decision: every restore, one
   code path — the server never copies a row's blob or aadVersion into a live entry; the cost is
@@ -468,8 +471,8 @@
   `snapshotBlobIv` CAS (D55) and the key metadata from the row are unchanged. Validation:
   `encryptedFieldSchema` (`CIPHERTEXT_MAX`) under `parseBody`'s default 1 MB cap, as the PUT.
   **Kept aadVersion-aware** (allow-list): rotation v0 reseal, the v0→v1 upgrade payload, the
-  re-key payload (live-entry decrypt side and history rows), the restore builder's row decrypt,
-  and the history VIEW (`entry-history-section` `handleView`): a history row is server-held
+  re-key payload (live-entry decrypt side and history rows), the restore builder's row decrypt
+  (**removed by D72**), and the history VIEW (`entry-history-section` `handleView`): a history row is server-held
   legacy data that is only displayed, never treated as the live entry, and legitimately
   aadVersion 0 for pre-AAD rows — refusing it there would hide old versions without protecting
   any live read. A pre-existing live aadVersion-0 entry is fixed by rotation / the pass as
@@ -483,7 +486,8 @@
   aadVersion 0 for v1 and v0, at aadVersion 1; AAD-sealed opens under both labels) and
   `CredentialResolverTests` (v1 and v0 refused at aadVersion 0; AAD-sealed label-0 control).
   The audit-log page has no unit harness (a Next page cannot export its helper); it is covered
-  by the D68 guard only. Integration: TP "F2" now asserts the restored entry at `aad_version 1`
+  by the D68 guard only (D73 since). Integration (TP "F2" replaced by D72's refusal cell and
+  control): TP "F2" now asserts the restored entry at `aad_version 1`
   (both labels), the strict list opens it, rotation 200 no carry, the pass re-keys it; new TP
   "D67: a pre-existing live aadVersion-0 v0 entry…" (strict list refuses it → rotation re-seals
   at AAD 1, no carry → list opens it → pass re-keys). Restore helpers in ER/AR/KW send the row's
@@ -496,7 +500,8 @@
   (D66) `TeamEntryDecryptor` / `CredentialResolver` / `AAD.swift` / `VaultViewModel` on a remote
   scratch copy → the six label-0 cells fail (four refusals, two AAD-sealed controls), the
   label-1 refusals pass; full `PasswdSSOTests` with the fix: 892 tests, 0 failures.
-- D68 (round 2 security N1 (e), R42 member set) — guard `src/__tests__/team-entry-aad-strictness.test.ts`
+- D68 (round 2 security N1 (e), R42 member set; **superseded by D73** — the rules below matched
+  spellings without a Program and were rewritten to resolve bindings) — guard `src/__tests__/team-entry-aad-strictness.test.ts`
   (vitest + ts-morph AST, chosen over a scripts/checks gate: no CI/pre-pr registration needed,
   runs in the unit suite). Member set derived: every non-test .ts/.tsx module under `src/` and
   `extension/src/`. Fails if `teamEntryAadFor` is declared outside team-key-resolution.ts,
@@ -526,3 +531,91 @@
   visible to a MEMBER on another member's entry; the server refuses with ONLY_OWN_ENTRIES (D54)
   and the client shows that message. This matches the existing edit button, which is shown and
   refused the same way; gating all three controls client-side is a UI change outside this PR.
+- D72 (round 3 security S-R3-2, R43 widening vs main; supersedes D67's restore decrypt) — a
+  history restore refuses a row below `aadVersion` 1 instead of opening it without AAD and
+  re-sealing it at AAD 1: nothing binds such a row to the entry, so re-sealing it laundered a
+  server-substituted legacy ciphertext into an AAD-bound live entry. On main such a restore
+  wrote an entry whose detail did not decrypt, so refusing loses no working behaviour; the
+  exit is restoring a more recent version. Client (the control under a malicious server):
+  `isRestorableHistoryRow` (`typeof aadVersion === "number" && aadVersion >= 1`, so a
+  malformed label is refused too); `entry-history-section` `teamRestoreInit` refuses before
+  `buildTeamHistoryRestoreBody` and toasts `ApiErrors.historyRowLegacy` ("This version is too
+  old to restore. Restore a more recent version instead." / ja 「このバージョンは古すぎるため
+  復元できません。より新しいバージョンを復元してください。」); the builder throws
+  `HistoryRowLegacyError` before obtaining a key, and opens the row with `buildTeamEntryAAD`
+  only — `teamEntryAadFor` is removed from it (allow-list: rotation-payload, rekey-payload,
+  `handleView`). Server (defense in depth for an honest server): the restore route returns 409
+  `HISTORY_ROW_LEGACY` for `row.aadVersion < 1`, read under the entry lock after the existing
+  checks (CAS, key holder); nothing is written. `HISTORY_ROW_LEGACY` registered in API_ERROR,
+  API_ERROR_STATUS (409), the i18n map and messages en/ja; the count test is 203. Tests: unit
+  builder (aadVersion-0 → `HistoryRowLegacyError`, no key lookup; a no-AAD ciphertext labelled
+  1 → rejects; control: AAD-1 v0 row restores), section (aadVersion-0 row → no POST, no
+  decrypt, `historyRowLegacy` shown; control aadVersion 1 → POST), both route test files
+  (refusal under the lock, nothing written; control → 200; their default row is now
+  aadVersion 1). Integration TP "F2 (S-R3-2)": an aadVersion-0 row → the client builder throws,
+  a body re-sealed at AAD 1 anyway → 409 `HISTORY_ROW_LEGACY`, entry and history rows equal
+  before/after; "F2 control": the aadVersion-1 v0 row restores and the old chain (strict list,
+  rotation no carry, pass re-keys) holds. Docs: threat-model T2 and whitepaper §6.2 (restore no
+  longer an upgrade path; legacy acceptance left: rotation, upgrade, re-key and the history
+  view). Red on the scratch copy: builder refusal removed → its unit cell; section refusal
+  removed → its cell; route refusal removed → both route cells and the TP "F2 (S-R3-2)" cell
+  (200 instead of 409; control green); builder refusal removed → the TP cell fails with the
+  strict decrypt's `OperationError` instead of `HistoryRowLegacyError` (the strict AAD alone
+  already refuses the legacy row);
+  the builder's AAD made `aadVersion`-conditional → the D73 guard (the strict-AAD unit cell
+  stays green under that mutation because the refusal precedes it: the guard is what pins it).
+  iOS: no change (its readers are strict and identical to main; iOS has no history restore
+  builder).
+- D73 (round 3 testing T11 Major + security S-R3-1; supersedes D68) — the strictness guard
+  resolves bindings, not spellings. Each tree is loaded into a ts-morph Project built from its
+  tsconfig (`tsconfig.json` over `src/`, `extension/tsconfig.json` over `extension/src/`,
+  non-test files; `skipAddingFilesFromTsConfig`, the type checker resolves `@/` and relative
+  imports); ~10 s in the unit suite. (a) outside rotation-payload, rekey-payload,
+  team-key-resolution and the history view: any import/export specifier whose imported name is
+  `teamEntryAadFor`, any reference `findReferences` resolves to its declaration (renamed
+  re-exports, `export *` namespace access), any `["teamEntryAadFor"]` element access, and any
+  second declaration of it; an import of it that resolves to nothing fails loudly; the history
+  view's call sites must be `handleView` only; it never supplies an `encryptData` AAD.
+  (b) a team decrypt is a `decryptData` call (callee resolved through aliases and const
+  bindings to a decryptData declaration) whose key argument flows from a team key getter call —
+  through const/let initializers, assignments to the same symbol, destructuring, and the
+  callers of a local function's parameter, following only key-material values (CryptoKey-
+  carrying, `Uint8Array`, `ArrayBuffer`) so a key looked up by a team-derived user id is not
+  "team". The getter set is derived: `TeamVaultContextValue` members whose awaited return
+  carries a CryptoKey within two property levels (getTeamEncryptionKey, getTeamKeyInfo,
+  getTeamEncryptionKeyForVersion, resolveTeamKey, getItemEncryptionKey, getEntryDecryptionKey,
+  getEntryItemKeys), plus `extension/src` function declarations with a `teamId` parameter
+  returning one (the background `getTeamEncryptionKey`); a getter call matches by resolved
+  declaration name or by its spelled name (the spelling only widens the team set, fail-closed).
+  Every team decrypt outside the allow-list must have an AAD argument that is a direct
+  `buildTeamEntryAAD(...)` call (resolved through aliases) or an identifier with one `const`
+  declaration bound to one, whose arguments never read `aadVersion`. (c) the strict-reader set
+  is derived from (b) and must contain the nine known readers (the seven web readers, the
+  restore builder, the extension background); personal decrypts in watchtower, the history
+  view, the extension background, login-save and passkey-provider are asserted examined and
+  classified non-team. (d) fixtures through the same `analyze()`: aliased import, barrel rename,
+  `export *` namespace, unresolved import, redeclaration, aliased builder in a ternary,
+  early-return wrapper, element-access conditional, builder argument from element access,
+  hoisted conditional at the decrypt site, `let` binding, missing AAD through an aliased decrypt
+  and a destructuring-renamed getter, a team key through a local helper's parameter, a getter
+  that stops resolving (drops out of the derived set); controls: a strict reader, a personal
+  decrypt with a conditional personal AAD in a team-reading module. Red on the scratch copy:
+  each rule's line removed or neutralised → exactly its fixture cells red (alias following
+  removed → 14 cells, incl. the tree cells; one getter dropped from the derivation → 10 cells,
+  incl. the getter and reader-set cells); tree mutations: login-form AAD made
+  `aadVersion`-conditional → (b) red; team-export importing `teamEntryAadFor as strictAad` → (a)
+  and (b) red. iOS (Swift) stays outside it.
+- D74 (round 3 testing T12 Minor) — team-export.test.tsx asserts `buildTeamEntryAAD` called once
+  with `("team-1", "e1", "blob", 0)`; use-team-login-form-state.test.ts asserts the AAD equals
+  the real `buildTeamEntryAAD("team-1", "entry-1", "blob", 1)` bytes. Label-0 refusal assertions
+  kept. Red on the scratch copy: export at ItemKey version 1, login-form at the overview scope →
+  both cells of each file red.
+- D75 (round 3 functionality F-R3-1 Minor) — `team-rekey-finish-control.tsx`: on a `teamId`
+  change (render-time previous-prop check, the pattern `entry-history-section` uses) `result`
+  is cleared and `status` set to loading; a `useLayoutEffect` bumps a team generation ref at
+  commit, and the post-pass `fetchStatus` in the `finally` applies its result only if the
+  generation is unchanged. Unit: completed team-1 pass then re-render for team-2 → no
+  completed/stopped panel, team-2's count shown; team-1's delayed post-pass fetch resolving
+  after team-2's → team-2's count stays; control: a pass for the current team shows the
+  post-pass status. Red on the scratch copy: reset removed → the first cell; generation check
+  removed → the second.

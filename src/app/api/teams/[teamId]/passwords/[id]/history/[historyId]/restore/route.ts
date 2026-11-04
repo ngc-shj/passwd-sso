@@ -149,6 +149,14 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       return { ok: false, code: API_ERROR.HISTORY_KEY_UNAVAILABLE };
     }
 
+    // A legacy (aadVersion 0) row is sealed without AAD, so nothing binds it
+    // to this entry: restoring it would launder a substituted ciphertext into
+    // an AAD-bound live entry (S-R3-2). The client refuses it before
+    // decrypting; this is the honest server's half.
+    if (row.aadVersion < 1) {
+      return { ok: false, code: API_ERROR.HISTORY_ROW_LEGACY };
+    }
+
     // ItemKey identity and re-key marker (plan C1): restoring the live
     // ItemKey keeps the marker; any other ItemKey leaves the entry pending.
     // A v0 row has no ItemKey; a v1+ row of unknown identity gets a new one.

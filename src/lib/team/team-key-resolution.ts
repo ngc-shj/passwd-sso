@@ -57,9 +57,10 @@ export function isAesGcmAuthFailure(e: unknown): boolean {
  * Trusting the server's `aadVersion` lets a server label an entry 0 and
  * substitute a no-AAD ciphertext, so only the paths that UPGRADE such a row
  * to AAD 1 may use it (rotation v0 reseal, the v0→v1 upgrade and re-key
- * payloads, the history restore builder) plus the history VIEW, which only
- * displays a server-held row. Every live-entry reader uses buildTeamEntryAAD;
- * team-entry-aad-strictness.test.ts holds the allow-list (D67).
+ * payloads) plus the history VIEW, which only displays a server-held row.
+ * History restore refuses a legacy row instead (D72). Every live-entry
+ * reader uses buildTeamEntryAAD; team-entry-aad-strictness.test.ts holds the
+ * allow-list (D67, D73).
  */
 export function teamEntryAadFor(
   teamId: string,

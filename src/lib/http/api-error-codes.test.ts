@@ -133,7 +133,8 @@ describe("API_ERROR structural invariants", () => {
     // approve used for a target who left the tenant).
     // 201 = 178 + 23 team entry re-key codes (team-key-rotation-rekey C1-C4).
     // 202 = 201 + HISTORY_ROW_CHANGED (team-key-rotation-rekey review round 1 F1).
-    expect(Object.keys(API_ERROR).length).toBe(202);
+    // 203 = 202 + HISTORY_ROW_LEGACY (team-key-rotation-rekey review round 3 S-R3-2).
+    expect(Object.keys(API_ERROR).length).toBe(203);
   });
 });
 

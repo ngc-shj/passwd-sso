@@ -2,7 +2,6 @@ import { decryptData, encryptData, type EncryptedData } from "@/lib/crypto/crypt
 import { buildTeamEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import type { EntryTypeValue } from "@/lib/constants";
 import { buildTeamOverviewFromBlob } from "@/lib/team/team-entry-payload";
-import { teamEntryAadFor } from "@/lib/team/team-key-resolution";
 import type { EntryItemKeyData } from "@/lib/team/team-vault-core";
 
 /** GET /api/teams/[teamId]/passwords/[id]/history/[historyId] */
@@ -34,14 +33,33 @@ export function historyRowKeyData(row: TeamHistoryRowDto): EntryItemKeyData {
 }
 
 /**
- * The history restore POST body (deviations D1, D67): the row decrypted with
- * its own key at the row's AAD (a legacy aadVersion-0 row has none — this is
- * an upgrade path, the only kind of reader that accepts aadVersion 0), its
- * overview rebuilt from the blob as the save path builds it, and BOTH re-sealed
- * under the restored row's key at the current AAD version and the row's
- * ItemKey version. The server writes them with aadVersion = AAD_VERSION, so a
- * live entry is never at aadVersion 0 and every live-entry reader stays
- * strict. `snapshotBlobIv` names the row decrypted: the server refuses
+ * Thrown before any decrypt for a history row sealed without AAD
+ * (aadVersion < 1): nothing binds such a row to this entry, so re-sealing it
+ * would launder a substituted ciphertext into an AAD-bound live entry
+ * (S-R3-2). The exit is restoring a more recent version.
+ */
+export class HistoryRowLegacyError extends Error {
+  constructor() {
+    super("History row predates entry AAD and cannot be restored");
+    this.name = "HistoryRowLegacyError";
+  }
+}
+
+/** True when a history row carries entry AAD and so may be restored. */
+export function isRestorableHistoryRow(row: Pick<TeamHistoryRowDto, "aadVersion">): boolean {
+  // A non-numeric aadVersion (a malformed response) is refused too.
+  return typeof row.aadVersion === "number" && row.aadVersion >= 1;
+}
+
+/**
+ * The history restore POST body (deviations D1, D67, D72): the row decrypted
+ * with its own key at STRICT entry AAD (a legacy aadVersion-0 row is refused
+ * before decrypting — HistoryRowLegacyError), its overview rebuilt from the
+ * blob as the save path builds it, and BOTH re-sealed under the restored
+ * row's key at the current AAD version and the row's ItemKey version. The
+ * server writes them with aadVersion = AAD_VERSION, so a live entry is never
+ * at aadVersion 0 and every live-entry reader stays strict.
+ * `snapshotBlobIv` names the row decrypted: the server refuses
  * HISTORY_ROW_CHANGED when a re-key rewrote it since.
  */
 export async function buildTeamHistoryRestoreBody(
@@ -50,13 +68,14 @@ export async function buildTeamHistoryRestoreBody(
   row: TeamHistoryRowDto,
   getEntryDecryptionKey: (teamId: string, entryId: string, entry: EntryItemKeyData) => Promise<CryptoKey>,
 ): Promise<{ encryptedBlob: EncryptedData; encryptedOverview: EncryptedData; snapshotBlobIv: string }> {
+  if (!isRestorableHistoryRow(row)) throw new HistoryRowLegacyError();
   const keyData = historyRowKeyData(row);
   const itemKeyVersion = keyData.itemKeyVersion ?? 0;
   const key = await getEntryDecryptionKey(teamId, entryId, keyData);
   const plaintext = await decryptData(
     { ciphertext: row.encryptedBlob, iv: row.blobIv, authTag: row.blobAuthTag },
     key,
-    teamEntryAadFor(teamId, entryId, VAULT_TYPE.BLOB, itemKeyVersion, row.aadVersion),
+    buildTeamEntryAAD(teamId, entryId, VAULT_TYPE.BLOB, itemKeyVersion),
   );
   let blob: Record<string, unknown>;
   try {
