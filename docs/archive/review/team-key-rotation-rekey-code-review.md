@@ -84,4 +84,34 @@ Findings: R29 (T3, T4), RT7 partial (T4), RT10 (T2), RT11 (T1). Checked clean: R
   AADParityTests, then the full PasswdSSOTests suite, 884 tests, 0 failures); `ios-ci` runs in CI.
 
 ## Resolution Status
-(pending — round 1 fixes)
+Round 1 fixes: commit "fix(teams): address round-1 review of the re-key branch".
+### S1 Major upload accepts a stale-team-key entry
+- Action: upload refuses 409 `ENTRY_REKEY_REQUIRED` after the id/CEK-version checks (D53).
+- Modified file: team attachments upload route, `src/lib/team/team-attachment-lock.ts`
+### S2 Major MEMBER own-entry rule only on PUT
+- Action: `canWriteTeamEntry` applied to PUT, restore and upload, pre-check and under the lock
+  (D54). User decision: own entries only.
+- Modified file: `src/lib/auth/access/team-auth.ts`, restore and upload routes, entry service
+### F1 Major restore racing a re-key
+- Action: restore snapshot `snapshotBlobIv`, 409 `HISTORY_ROW_CHANGED`, client retries once (D55).
+- Modified file: restore route, `src/lib/team/team-history-restore.ts`, entry-history-section
+### F2 Major overview AAD ignores aadVersion
+- Action: one adjudicator `teamEntryAadFor` for the restore writer and every web/extension reader
+  (D56); iOS in a separate commit.
+- Modified file: `src/lib/team/team-history-restore.ts`, list adapter, detail, watchtower,
+  export, edit loader, history view, audit-log page, extension background
+### T1 Major blocker clients left in open transactions
+- Action: failure-safe `parkBehind` in `race-helpers.ts`; all five blockers moved (D57).
+- Modified file: `src/__tests__/db-integration/race-helpers.ts` and the three rekey files
+### Minors
+- S3 early migrate refusals (D58); F3 runner buckets before download (D59); F4 runner
+  cancellation + rotate disabled during a pass (D60); F6 NULL-id mode-2 trial wraps (D61); F5 D41
+  corrected + rollout requirement in deployment.md; F8 schema comment; F7/T3/T4/T5 deviation and
+  acceptance-map entries (D62, D63); CLAUDE.md endpoint rows (user-approved); T2, T6, T7 cells;
+  T8 path filter (D64).
+- A1 [Minor] `s3-blob-store.ts` has no `forcePathStyle` — Skipped (D65). Anti-Deferral: out of
+  this PR's goal (pre-existing addressing behaviour, unchanged by this branch's object-key work).
+  Worst case: an operator pointing `AWS_ENDPOINT_URL_S3` at a hostname-based S3-compatible store
+  gets virtual-hosted requests that fail loudly at upload. Likelihood: low (AWS S3 and IP-literal
+  MinIO work). Cost to fix: small code change plus an operator-facing config decision — follow-up
+  issue.

@@ -334,8 +334,7 @@
   adapter, `build-team-get-detail`, watchtower, team export, the edit-dialog loader, the
   history view, the audit-log page (which had its own inline copy). The extension gets the same
   helper (`teamEntryAadFor` in `extension/src/lib/crypto-team.ts`) for its overview and detail
-  readers. **Not changed:** iOS (`TeamEntryDecryptor.swift`, `VaultViewModel.swift` always use
-  `buildTeamEntryAAD`) — a Swift change needs the macOS build host to verify; follow-up.
+  readers. iOS was left on `buildTeamEntryAAD` here; D66 moves it to the same helper.
   Writers (save, import, re-key, rotation) always write aadVersion 1 and keep the builder.
   Integration (TP "F2"): an aadVersion-0 v0 row restored through the client builder → the list
   (list GET → `decryptTeamOverview`) opens it, rotation 200 with no carry, the pass upgrades and
@@ -433,3 +432,19 @@
   `src/lib/validations/**`, `src/lib/http/**`, `src/lib/security/**`.
 - D65 (round 1 A1, not changed) — `s3-blob-store.ts` sets no `forcePathStyle`; the MinIO cells
   pass only with an IP-literal endpoint. Out of this branch's goal; the user files a follow-up.
+- D66 (D56 follow-up, iOS) — `teamEntryAadFor(teamId:entryId:vaultType:itemKeyVersion:aadVersion:)`
+  in `ios/Shared/Crypto/AAD.swift`: aadVersion ≥ 1 → `buildTeamEntryAAD` at the entry's ItemKey
+  version, else `nil`, which `decryptAESGCM` opens with no AAD (the web helper's `undefined`).
+  Every iOS team blob/overview reader goes through it with `CacheEntry.aadVersion`:
+  `TeamEntryDecryptor.decryptTeamSummary` / `decryptTeamDetail` (in-app list and detail,
+  QuickType registration) and `CredentialResolver.buildEntryAAD` (AutoFill); the team branch of
+  `VaultViewModel.buildEntryAAD` too (only personal entries reach it today). `aadVersion` was
+  already decoded from the team list response (`TeamEncryptedEntry`, a required field the server
+  always sends) and carried into the cache; no default is added. Tests: TeamKeyCryptoTests
+  re-seals the fixture's ItemKey-v1 overview and a blob with no AAD (fixture unchanged) →
+  aadVersion 0 opens both, the same ciphertext labelled aadVersion 1 is refused, the helper's
+  aadVersion-1 bytes equal the fixture's OV AADs (v0 and v2); CredentialResolverTests the same
+  pair through `resolveCandidates`. Full `PasswdSSOTests` on z1mn-island: 889 tests, 0 failures.
+  Red on the remote scratch copy (HEAD's `TeamEntryDecryptor.swift` and
+  `CredentialResolver.swift`): exactly the two aadVersion-0 cells fail, the refusals and fixture
+  cells pass.

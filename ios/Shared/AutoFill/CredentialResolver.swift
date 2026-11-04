@@ -704,18 +704,19 @@ public actor CredentialResolver {
 
   /// Build the AAD for a cache entry at decrypt time.
   /// - Personal: AAD only when aadVersion >= 1.
-  /// - Team: AAD always (no aadVersion gate; vaultType distinguishes blob/overview).
+  /// - Team: teamEntryAadFor (AAD only when aadVersion >= 1; vaultType distinguishes blob/overview).
   private func buildEntryAAD(
     entry: CacheEntry,
     vaultType: String,
     userId: String
   ) -> Data? {
     if let teamId = entry.teamId {
-      return try? buildTeamEntryAAD(
+      return try? teamEntryAadFor(
         teamId: teamId,
         entryId: entry.id,
         vaultType: vaultType,
-        itemKeyVersion: entry.itemKeyVersion ?? 0
+        itemKeyVersion: entry.itemKeyVersion ?? 0,
+        aadVersion: entry.aadVersion
       )
     } else {
       guard entry.aadVersion >= 1 else { return nil }
@@ -759,7 +760,7 @@ public struct CacheEntry: Codable, Sendable {
   public let id: String
   /// nil for personal entries; non-nil for team entries.
   public let teamId: String?
-  /// 0 = no AAD; >= 1 = AAD-bound (personal entries only).
+  /// 0 = no AAD; >= 1 = AAD-bound (personal and team entries).
   public let aadVersion: Int
   /// Personal entry key version (forward-compat).
   public let keyVersion: Int

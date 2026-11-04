@@ -197,18 +197,19 @@ public enum VaultScope: Hashable, Sendable {
 
   /// Construct AAD per scope, matching CredentialResolver's logic.
   /// Personal `aadVersion >= 1` → buildPersonalEntryAAD;
-  /// team always → buildTeamEntryAAD.
+  /// team → teamEntryAadFor (AAD only when aadVersion >= 1).
   private func buildEntryAAD(
     entry: CacheEntry,
     userId: String,
     vaultType: String
   ) throws -> Data? {
     if let teamId = entry.teamId {
-      return try buildTeamEntryAAD(
+      return try teamEntryAadFor(
         teamId: teamId,
         entryId: entry.id,
         vaultType: vaultType,
-        itemKeyVersion: entry.itemKeyVersion ?? 0
+        itemKeyVersion: entry.itemKeyVersion ?? 0,
+        aadVersion: entry.aadVersion
       )
     }
     if entry.aadVersion >= 1 {

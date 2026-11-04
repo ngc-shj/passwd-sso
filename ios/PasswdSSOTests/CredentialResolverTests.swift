@@ -308,15 +308,18 @@ private func makeTeamCacheEntry(
   teamKey: SymmetricKey,
   teamId: String,
   teamKeyVersion: Int = 1,
-  itemKeyVersion: Int = 0
+  itemKeyVersion: Int = 0,
+  sealedWithAAD: Bool = true,
+  aadVersion: Int = 1
 ) throws -> CacheEntry {
   let entryId = summary.id
-  let overviewAAD = try buildTeamEntryAAD(
+  // sealedWithAAD false: the pre-AAD (aadVersion 0) seal — no AAD at all.
+  let overviewAAD: Data? = try sealedWithAAD ? buildTeamEntryAAD(
     teamId: teamId, entryId: entryId, vaultType: VaultType.overview, itemKeyVersion: itemKeyVersion
-  )
-  let blobAAD = try buildTeamEntryAAD(
+  ) : nil
+  let blobAAD: Data? = try sealedWithAAD ? buildTeamEntryAAD(
     teamId: teamId, entryId: entryId, vaultType: VaultType.blob, itemKeyVersion: itemKeyVersion
-  )
+  ) : nil
 
   let (entryKey, encryptedItemKey): (SymmetricKey, EncryptedData?)
   if itemKeyVersion >= 1 {
@@ -339,7 +342,7 @@ private func makeTeamCacheEntry(
   return CacheEntry(
     id: entryId,
     teamId: teamId,
-    aadVersion: 1,
+    aadVersion: aadVersion,
     keyVersion: 0,
     teamKeyVersion: teamKeyVersion,
     itemKeyVersion: itemKeyVersion,
@@ -1074,6 +1077,59 @@ final class CredentialResolverTests: XCTestCase {
     let candidates = try await resolver.resolveCandidates(for: []).all
     XCTAssertEqual(candidates.count, 1, "Team entry itemKeyVersion=1 must unwrap ItemKey")
     XCTAssertEqual(candidates[0].id, "te-1")
+  }
+
+  /// A team entry sealed with no AAD (an aadVersion-0 history row restored),
+  /// at the given aadVersion label; returns its resolved candidates.
+  private func resolveNoAADTeamEntry(aadVersion: Int) async throws -> [VaultEntrySummary] {
+    let keychain = MockKeychainAccessor()
+    let (bridgeKeyStore, blob) = try makeBridgeKeyBlob(keychain: keychain)
+    let cacheKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let vaultKey = SymmetricKey(size: .bits256)
+
+    let mockWKS = MockWrappedKeyStore()
+    try wrapAndSaveVaultKey(vaultKey: vaultKey, cacheKey: cacheKey, store: mockWKS)
+
+    let teamId = "team-aad0"
+    let teamKey = SymmetricKey(size: .bits256)
+    let wrappedTeamKey = try wrapTeamKey(teamKey, teamId: teamId, teamKeyVersion: 2, cacheKey: cacheKey, userId: "u-1")
+
+    let summary = VaultEntrySummary(
+      id: "te-aad0", title: "T", username: "u", urlHost: "a0.com", teamId: teamId
+    )
+    let detail = VaultEntryDetail(
+      id: "te-aad0", title: "T", username: "u", urlHost: "a0.com",
+      teamId: teamId, password: "tpw0", url: "https://a0.com"
+    )
+    let entry = try makeTeamCacheEntry(
+      summary: summary, detail: detail, teamKey: teamKey,
+      teamId: teamId, teamKeyVersion: 2, itemKeyVersion: 1,
+      sealedWithAAD: false, aadVersion: aadVersion
+    )
+    try buildCacheFile(
+      at: cacheURL, entries: [entry], vaultKey: vaultKey,
+      hostInstallUUID: blob.hostInstallUUID, counter: blob.cacheVersionCounter,
+      userId: "u-1"
+    )
+    try mockWKS.saveTeamKeys([wrappedTeamKey])
+    let resolver = CredentialResolver(
+      bridgeKeyStore: bridgeKeyStore, wrappedKeyStore: mockWKS, cacheURL: cacheURL
+    )
+    do {
+      return try await resolver.resolveCandidates(for: []).all
+    } catch CredentialResolver.Error.noEntries {
+      return []
+    }
+  }
+
+  func testResolveCandidates_teamEntry_aadVersion0_decryptsWithoutAAD() async throws {
+    let candidates = try await resolveNoAADTeamEntry(aadVersion: 0)
+    XCTAssertEqual(candidates.map(\.id), ["te-aad0"], "aadVersion-0 team entry must open with no AAD")
+  }
+
+  func testResolveCandidates_teamEntry_noAADCiphertext_labelledAadVersion1_filtered() async throws {
+    let candidates = try await resolveNoAADTeamEntry(aadVersion: 1)
+    XCTAssertTrue(candidates.isEmpty, "No-AAD ciphertext must not open under the aadVersion-1 AAD")
   }
 
   func testResolveCandidates_teamEntry_itemKeyVersion1_missingItemKey_filtered() async throws {
