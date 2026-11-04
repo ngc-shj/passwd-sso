@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 import { clearMigrateLimitForUser } from "@/__tests__/helpers/rate-limiters";
-import { ATTACHMENT_MIGRATE_PAYLOAD_MAX } from "@/lib/validations/common";
+import { ATTACHMENT_BODY_BASE64_MAX, ATTACHMENT_MIGRATE_PAYLOAD_MAX } from "@/lib/validations/common";
 
 const {
   mockAuth,
@@ -323,6 +323,19 @@ describe("PUT /api/passwords/[id]/attachments/[attachmentId]/migrate", () => {
     expect(res.status).toBe(400);
     const json = await res.json();
     expect(json.error).toBe("FILE_TOO_LARGE");
+  });
+
+  it("checks a well-formed encryptedData near ATTACHMENT_BODY_BASE64_MAX (no regex stack overflow) and reaches the lookup → 404 when absent", async () => {
+    mockPrisma.attachment.findFirst.mockResolvedValue(null);
+    const large = "A".repeat(ATTACHMENT_BODY_BASE64_MAX - (ATTACHMENT_BODY_BASE64_MAX % 4));
+    const res = await PUT(
+      createRequest("PUT", "http://localhost/api/passwords/entry-1/attachments/att-1/migrate", {
+        body: { ...validMigrateBody, encryptedData: large },
+      }),
+      createParams("entry-1", "att-1"),
+    );
+    expect(res.status).toBe(404);
+    expect(mockPrisma.attachment.findFirst).toHaveBeenCalled();
   });
 
   it("rejects oversized cekEncrypted base64 string → 400", async () => {

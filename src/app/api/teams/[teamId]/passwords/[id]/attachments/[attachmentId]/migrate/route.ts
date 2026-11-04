@@ -23,6 +23,7 @@ import {
   hexAuthTag,
   hexHash,
   hexIv,
+  isBase64,
 } from "@/lib/validations/common";
 import { AAD_VERSION, CURRENT_CEK_WRAP_AAD_VERSION } from "@/lib/crypto/crypto-aad";
 import { getAttachmentBlobStore } from "@/lib/blob-store";
@@ -53,7 +54,7 @@ const teamAttachmentMigrateSchema = z.object({
   cekKeyVersion: z.number().int().min(1),
   snapshot: z.object({ iv: hexIv, authTag: hexAuthTag }).strict(),
   clientHash: hexHash,
-  encryptedData: z.string().min(1).max(ATTACHMENT_BODY_BASE64_MAX).regex(BASE64_RE),
+  encryptedData: z.string().min(1).max(ATTACHMENT_BODY_BASE64_MAX).refine(isBase64, "Invalid base64"),
   iv: hexIv,
   authTag: hexAuthTag,
   cekEncrypted: z.string().min(1).max(CEK_WRAP_BASE64_MAX).regex(BASE64_RE),

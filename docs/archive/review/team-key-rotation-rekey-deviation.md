@@ -136,3 +136,23 @@
   restore / compare-with-admin, and the unrecoverable delete warns only when a version no active
   member holds has a deactivated holder (the hedged caution of D31 is removed; the unnamed exits
   remain only as the fallback when the list cannot be read).
+- D37 (A8) — the E2E spec drives the two requests through a browserless Playwright request
+  context (session cookie and Origin as headers): it needs no page, and a browser download is
+  not a precondition of the limit. Red, run once on a production build of a scratch copy with
+  `experimental.proxyClientMaxBodySize` removed from `next.config.ts`: Next logged "Request
+  body exceeded 10MB … Only the first 10MB will be available" for both paths, and both answered
+  **400 `INVALID_JSON`** (the re-key POST instead of 409 `REKEY_SNAPSHOT_MISMATCH`, the personal
+  migrate instead of 404). With the setting: 409 and 404. Locally the spec ran on :3100 through
+  a scratch Playwright config (the developer's servers held :3000 and :3001; the repo config's
+  `reuseExistingServer: !CI` would otherwise have reused the :3000 one) with the CI e2e job's
+  dummy production env (`SESSION_TOKEN_HMAC_KEY`, `AUDIT_ANCHOR_*`), `NEXT_PUBLIC_BASE_PATH=""`,
+  an http `AUTH_URL`, and the throwaway `passwd_sso_e2e` database migrated to this branch.
+- D38 (side-fix, C4 migrate) — `BASE64_RE` repeats a group per 4 characters and V8 throws
+  `RangeError: Maximum call stack size exceeded` from about 6M characters, so a migrate of an
+  attachment above roughly 4.5 MB answered 500 (team migrate via the schema's `.regex`,
+  personal migrate via `.test`; the personal route had it on main). Found by the A8 spec.
+  `isBase64()` in `validations/common.ts` checks the same grammar linearly; both migrate
+  routes use it for `encryptedData`. `BASE64_RE` stays for the CEK-wrap fields (capped at
+  `CEK_WRAP_BASE64_MAX`), the only other users. Red → green: a body at
+  `ATTACHMENT_BODY_BASE64_MAX` in each migrate route's unit test (RangeError under the old
+  check), and the `isBase64` table in `common.test.ts`.

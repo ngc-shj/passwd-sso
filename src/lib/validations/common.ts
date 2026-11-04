@@ -335,6 +335,19 @@ export const ALLOWED_CONTENT_TYPES = [
  */
 export const BASE64_RE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)$/;
 
+const BASE64_CHARS_RE = /^[A-Za-z0-9+/]*={0,2}$/;
+
+/**
+ * The BASE64_RE grammar for a string of any length. BASE64_RE backtracks once
+ * per 4-character group, and V8 overflows its stack (RangeError) on a few
+ * million characters — an attachment body near ATTACHMENT_BODY_BASE64_MAX
+ * crashed its route with a 500. Use this for body-sized fields; BASE64_RE
+ * stays for the small ones (CEK wraps).
+ */
+export function isBase64(value: string): boolean {
+  return value.length > 0 && value.length % 4 === 0 && BASE64_CHARS_RE.test(value);
+}
+
 /** Validates a hex string of the given byte length (e.g. 12 bytes = 24 hex chars). */
 export const hexString = (bytes: number) =>
   z.string().length(bytes * 2).regex(/^[0-9a-f]+$/i);

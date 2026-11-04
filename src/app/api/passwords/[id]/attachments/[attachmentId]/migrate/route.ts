@@ -14,6 +14,7 @@ import {
   ATTACHMENT_MIGRATE_PAYLOAD_MAX,
   BASE64_RE,
   CEK_WRAP_BASE64_MAX,
+  isBase64,
 } from "@/lib/validations/common";
 import { readJsonWithCap } from "@/lib/http/parse-body";
 import { CURRENT_CEK_WRAP_AAD_VERSION } from "@/lib/crypto/crypto-aad";
@@ -130,7 +131,7 @@ async function handlePUT(
   // drops invalid bytes — both blobs are persisted verbatim into BYTEA
   // columns, so a malformed input would corrupt the row instead of failing
   // fast.
-  if (!BASE64_RE.test(encryptedData) || !BASE64_RE.test(cekEncrypted)) {
+  if (!isBase64(encryptedData) || !BASE64_RE.test(cekEncrypted)) {
     return validationError();
   }
 

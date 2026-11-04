@@ -20,6 +20,9 @@ import {
   NOTIFICATION_TITLE_MAX,
   NOTIFICATION_BELL_LIMIT,
   ENTRY_NAME_MAX,
+  ATTACHMENT_BODY_BASE64_MAX,
+  BASE64_RE,
+  isBase64,
 } from "@/lib/validations/common";
 
 // ─── Crypto hex length constants ─────────────────────────────
@@ -317,5 +320,29 @@ describe("Constant relationships", () => {
   it("NOTIFICATION_BELL_LIMIT is a positive integer", () => {
     expect(Number.isInteger(NOTIFICATION_BELL_LIMIT)).toBe(true);
     expect(NOTIFICATION_BELL_LIMIT).toBeGreaterThan(0);
+  });
+});
+
+describe("isBase64", () => {
+  it.each([
+    ["a full quartet", "QUJD", true],
+    ["two quartets", "QUJDREVG", true],
+    ["one padding character", "QUI=", true],
+    ["two padding characters", "QQ==", true],
+    ["the empty string", "", false],
+    ["a length that is not a multiple of 4", "QUJ", false],
+    ["three padding characters", "Q===", false],
+    ["padding mid-string", "QQ==QUJD", false],
+    ["base64url characters", "QU-_", false],
+    ["an embedded newline", "QUJD\nQUJD", false],
+  ])("agrees with BASE64_RE on %s", (_label, value, expected) => {
+    expect(isBase64(value)).toBe(expected);
+    expect(BASE64_RE.test(value)).toBe(expected);
+  });
+
+  it("checks a body at ATTACHMENT_BODY_BASE64_MAX without overflowing the stack", () => {
+    const length = ATTACHMENT_BODY_BASE64_MAX - (ATTACHMENT_BODY_BASE64_MAX % 4);
+    expect(isBase64("A".repeat(length))).toBe(true);
+    expect(isBase64(`${"A".repeat(length - 4)}A=A=`)).toBe(false);
   });
 });

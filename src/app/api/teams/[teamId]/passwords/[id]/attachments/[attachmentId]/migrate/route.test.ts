@@ -107,6 +107,7 @@ vi.mock("@/lib/http/with-request-log", () => ({
 import { PUT } from "./route";
 import { BlobRefInvalidError } from "@/lib/blob-store/object-ref";
 import { TeamRotationInProgressError } from "@/lib/team/team-key-rotation-lock";
+import { ATTACHMENT_BODY_BASE64_MAX } from "@/lib/validations/common";
 
 const TEAM = "11111111-1111-4111-8111-111111111111";
 const ENTRY = "22222222-2222-4222-8222-222222222222";
@@ -251,6 +252,14 @@ describe("PUT /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]/migr
     const { res } = await migrate(validBody(change));
     expect(res.status).toBe(400);
     expect(mockPutObject).not.toHaveBeenCalled();
+  });
+
+  it("checks a well-formed body near ATTACHMENT_BODY_BASE64_MAX (no regex stack overflow) and reaches the attachment lookup", async () => {
+    mockAttachmentFindUnique.mockResolvedValue(null);
+    const large = "A".repeat(ATTACHMENT_BODY_BASE64_MAX - (ATTACHMENT_BODY_BASE64_MAX % 4));
+    const { res, json } = await migrate(validBody({ encryptedData: large }));
+    expect(res.status).toBe(404);
+    expect(json.error).toBe("ATTACHMENT_NOT_FOUND");
   });
 
   // ── Success ──────────────────────────────────────────────────────────────
