@@ -19,7 +19,7 @@ import { getAttachmentBlobStore } from "@/lib/blob-store";
 import { newBlobGeneration } from "@/lib/blob-store/object-ref";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { getLogger } from "@/lib/logger";
-import { AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
+import { AUDIT_TARGET_TYPE, AUDIT_ACTION, ATTACHMENT_ENCRYPTION_MODE } from "@/lib/constants";
 import { AAD_VERSION, CURRENT_CEK_WRAP_AAD_VERSION } from "@/lib/crypto/crypto-aad";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { errorResponse, notFound, unauthorized, rateLimited, validationError } from "@/lib/http/api-response";
@@ -312,7 +312,7 @@ async function handlePOST(
             authTag,
             // keyVersion from request is intentionally omitted (I3.3): server sets encryptionMode: 2
             aadVersion,
-            encryptionMode: 2,
+            encryptionMode: ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED,
             cekEncrypted: Buffer.from(cekEncrypted, "base64"),
             cekIv,
             cekAuthTag,

@@ -19,6 +19,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { NextRequest } from "next/server";
 import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
+import { createRaceHelpers } from "./race-helpers";
 
 const mockAuth = vi.fn();
 vi.mock("@/auth", () => ({ auth: (...args: unknown[]) => mockAuth(...args) }));
@@ -76,6 +77,7 @@ type EntryRow = {
 describe("team entry key identity writers — real-DB integration", () => {
   let ctx: TestContext;
   let tenantId: string;
+  const race = () => createRaceHelpers(ctx.su.pool);
 
   beforeAll(async () => {
     ctx = await createTestContext();
@@ -264,7 +266,7 @@ describe("team entry key identity writers — real-DB integration", () => {
 
   // ── A10: the backfill block ──────────────────────────────────────────────
 
-  it("A10: the backfill block sets the marker, the high-water and the item_key_id, and re-adds the CHECK", async () => {
+  it("A10: the backfill block sets the marker, the high-water and the item_key_id, and adds no CHECK (it ships in the next release)", async () => {
     const owner1 = await ctx.createUser(tenantId);
     const teamV1 = await seedTeam(1);
     const teamV3 = await seedTeam(3);
@@ -330,7 +332,6 @@ describe("team entry key identity writers — real-DB integration", () => {
     const client = await ctx.su.pool.connect();
     try {
       await client.query("BEGIN");
-      await client.query(`ALTER TABLE team_password_entries DROP CONSTRAINT team_password_entries_item_key_id_iff_item_key`);
       await client.query(
         `UPDATE team_password_entries
             SET item_key_team_key_version = 0, item_key_version_high_water = 0, item_key_id = NULL
@@ -375,35 +376,20 @@ describe("team entry key identity writers — real-DB integration", () => {
       });
       expect(nullVariants.map((id) => histId.get(id))).toEqual([null, null, null]);
 
+      // A previous-release instance writes a v1 entry without an id during
+      // rollout; this release accepts the row (and treats it as pending).
       const constraint = await client.query(
         `SELECT 1 FROM pg_constraint WHERE conname = 'team_password_entries_item_key_id_iff_item_key'`,
       );
-      expect(constraint.rowCount).toBe(1);
-
-      async function insertState(itemKeyVersion: number, itemKeyId: string | null): Promise<string | undefined> {
-        await client.query("SAVEPOINT cell");
-        try {
-          await client.query(
-            `INSERT INTO team_password_entries (
-               id, team_id, tenant_id, created_by_id, updated_by_id,
-               encrypted_blob, blob_iv, blob_auth_tag, encrypted_overview, overview_iv, overview_auth_tag,
-               item_key_version, item_key_id, created_at, updated_at
-             ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $4::uuid, 'b', $5, $6, 'o', $5, $6, $7, $8::uuid, now(), now())`,
-            [randomUUID(), teamV3, tenantId, owner1, hex(12), hex(16), itemKeyVersion, itemKeyId],
-          );
-          await client.query("RELEASE SAVEPOINT cell");
-          return undefined;
-        } catch (e) {
-          await client.query("ROLLBACK TO SAVEPOINT cell");
-          return (e as { code?: string }).code;
-        }
-      }
-      expect({
-        v1NullId: await insertState(1, null),
-        v1WithId: await insertState(1, randomUUID()),
-        v0WithId: await insertState(0, randomUUID()),
-        v0NullId: await insertState(0, null),
-      }).toEqual({ v1NullId: "23514", v1WithId: undefined, v0WithId: "23514", v0NullId: undefined });
+      expect(constraint.rowCount).toBe(0);
+      await client.query(
+        `INSERT INTO team_password_entries (
+           id, team_id, tenant_id, created_by_id, updated_by_id,
+           encrypted_blob, blob_iv, blob_auth_tag, encrypted_overview, overview_iv, overview_auth_tag,
+           item_key_version, created_at, updated_at
+         ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $4::uuid, 'b', $5, $6, 'o', $5, $6, 1, now(), now())`,
+        [randomUUID(), teamV3, tenantId, owner1, hex(12), hex(16)],
+      );
     } finally {
       await client.query("ROLLBACK");
       client.release();
@@ -681,5 +667,95 @@ describe("team entry key identity writers — real-DB integration", () => {
         ]);
       },
     );
+  });
+
+  // ── The actor's role, re-read under the team lock (PUT, restore) ─────────
+
+  describe("ACTOR_NOT_PERMITTED: entry PUT and history restore re-read the actor's role under the team lock", () => {
+    /**
+     * Park `send` on the team FOR SHARE behind a blocker holding the team
+     * row; the blocker optionally changes the actor's role, then commits.
+     */
+    async function parkedBehindTeamRow(
+      teamId: string,
+      actor: string,
+      send: () => Promise<Response>,
+      demoteTo: "MEMBER" | "VIEWER" | null,
+    ) {
+      const blocker = await ctx.su.pool.connect();
+      try {
+        await blocker.query("BEGIN");
+        await blocker.query(`SELECT id FROM teams WHERE id = $1::uuid FOR NO KEY UPDATE`, [teamId]);
+        const { rows: [{ pid: blockerPid }] } = await blocker.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+        const pending = send();
+        const parkedPid = await race().waitForBackendBlockedBy(blockerPid);
+        const waits = await ctx.su.pool.query<{ query: string }>(
+          `SELECT a.query FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid WHERE l.pid = $1 AND NOT l.granted`,
+          [parkedPid],
+        );
+        expect(waits.rows[0].query).toMatch(/FROM teams WHERE id = .* FOR SHARE/s);
+        if (demoteTo) {
+          await blocker.query(
+            `UPDATE team_members SET role = $3::"TeamRole" WHERE team_id = $1::uuid AND user_id = $2::uuid`,
+            [teamId, actor, demoteTo],
+          );
+        }
+        await blocker.query("COMMIT");
+        return await pending;
+      } finally {
+        blocker.release();
+      }
+    }
+
+    /** An ADMIN editing an entry another member created. */
+    async function seedAdminEdit() {
+      const teamId = await seedTeam(1);
+      const owner = await seedMember(teamId, "OWNER", [1]);
+      const admin = await seedMember(teamId, "ADMIN", [1]);
+      const itemKeyId = randomUUID();
+      const entryId = await seedEntry(teamId, owner, { teamKeyVersion: 1, itemKeyVersion: 1, itemKeyId });
+      mockAuth.mockResolvedValue({ user: { id: admin } });
+      return { teamId, admin, entryId, itemKeyId };
+    }
+
+    it("PUT: demoted to MEMBER while parked (the entry is another member's) → 403 ACTOR_NOT_PERMITTED, nothing written", async () => {
+      const s = await seedAdminEdit();
+      const before = await entry(s.entryId);
+      const res = await parkedBehindTeamRow(s.teamId, s.admin, () => reusePut(s.teamId, s.entryId, 1, 1, s.itemKeyId), "MEMBER");
+      expect(await errorOf(res)).toEqual({ status: 403, error: "ACTOR_NOT_PERMITTED" });
+      expect(await entry(s.entryId)).toEqual(before);
+    });
+
+    it("PUT: demoted to VIEWER while parked → 403 ACTOR_NOT_PERMITTED", async () => {
+      const s = await seedAdminEdit();
+      const res = await parkedBehindTeamRow(s.teamId, s.admin, () => reusePut(s.teamId, s.entryId, 1, 1, s.itemKeyId), "VIEWER");
+      expect(await errorOf(res)).toEqual({ status: 403, error: "ACTOR_NOT_PERMITTED" });
+    });
+
+    it("PUT control: the blocker commits without a role change → 200", async () => {
+      const s = await seedAdminEdit();
+      const res = await parkedBehindTeamRow(s.teamId, s.admin, () => reusePut(s.teamId, s.entryId, 1, 1, s.itemKeyId), null);
+      expect(res.status).toBe(200);
+    });
+
+    async function seedAdminRestore() {
+      const s = await seedAdminEdit();
+      const historyId = await seedHistory(s.entryId, s.admin, { teamKeyVersion: 1, itemKeyVersion: 1, itemKeyId: s.itemKeyId });
+      return { ...s, historyId };
+    }
+
+    it("restore: demoted to VIEWER while parked → 403 ACTOR_NOT_PERMITTED, nothing written", async () => {
+      const s = await seedAdminRestore();
+      const before = await entry(s.entryId);
+      const res = await parkedBehindTeamRow(s.teamId, s.admin, () => restore(s.teamId, s.entryId, s.historyId), "VIEWER");
+      expect(await errorOf(res)).toEqual({ status: 403, error: "ACTOR_NOT_PERMITTED" });
+      expect(await entry(s.entryId)).toEqual(before);
+    });
+
+    it("restore control: the blocker commits without a role change → 200", async () => {
+      const s = await seedAdminRestore();
+      const res = await parkedBehindTeamRow(s.teamId, s.admin, () => restore(s.teamId, s.entryId, s.historyId), null);
+      expect(res.status).toBe(200);
+    });
   });
 });

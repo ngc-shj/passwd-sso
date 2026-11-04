@@ -108,6 +108,7 @@ import { PUT } from "./route";
 import { BlobRefInvalidError } from "@/lib/blob-store/object-ref";
 import { TeamRotationInProgressError } from "@/lib/team/team-key-rotation-lock";
 import { ATTACHMENT_BODY_BASE64_MAX } from "@/lib/validations/common";
+import { documentedMetadataKeys } from "@/__tests__/helpers/audit-log-reference";
 
 const TEAM = "11111111-1111-4111-8111-111111111111";
 const ENTRY = "22222222-2222-4222-8222-222222222222";
@@ -297,6 +298,9 @@ describe("PUT /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]/migr
         metadata: { entryId: ENTRY, fromEncryptionMode: 1, toItemKeyVersion: 2 },
       }),
     );
+    // The keys docs/operations/audit-log-reference.md documents for the action.
+    const migrateAudit = mockLogAuditInTx.mock.calls.find((c) => c[2].action === "TEAM_ATTACHMENT_MIGRATE");
+    expect(Object.keys(migrateAudit?.[2].metadata ?? {}).sort()).toEqual(documentedMetadataKeys("TEAM_ATTACHMENT_MIGRATE"));
     expect(mockDeleteBlobs).toHaveBeenCalledWith([
       { stored: OLD_REF, context: { attachmentId: ATT, entryId: ENTRY, teamId: TEAM } },
     ]);
@@ -363,6 +367,24 @@ describe("PUT /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]/migr
   it("409 ITEM_KEY_CHANGED for a stale itemKeyId", async () => {
     mockLockEntry.mockResolvedValue({ ...LOCKED_ENTRY, itemKeyId: OTHER_ITEM_KEY_ID });
     await expectRefused(validBody(), 409, "ITEM_KEY_CHANGED");
+  });
+
+  describe("an entry whose ItemKey has no id (written by a previous release during rollout)", () => {
+    beforeEach(() => mockLockEntry.mockResolvedValue({ ...LOCKED_ENTRY, itemKeyId: null }));
+
+    it("migrates for a client that read the id as unknown, binding the CEK to no id", async () => {
+      const { res } = await migrate(validBody({ itemKeyId: null }));
+      expect(res.status).toBe(200);
+      expect(txMock.attachment.update.mock.calls[0][0].data.cekItemKeyId).toBeNull();
+    });
+
+    it("409 ITEM_KEY_CHANGED for a client that names an id", async () => {
+      await expectRefused(validBody(), 409, "ITEM_KEY_CHANGED");
+    });
+  });
+
+  it("409 ITEM_KEY_CHANGED for a client that read no id when the locked entry has one", async () => {
+    await expectRefused(validBody({ itemKeyId: null }), 409, "ITEM_KEY_CHANGED");
   });
 
   it("409 ITEM_KEY_CHANGED for a stale itemKeyId with a wrong cekKeyVersion (check order)", async () => {

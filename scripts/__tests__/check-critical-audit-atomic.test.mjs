@@ -56,6 +56,7 @@ const ALL = [
   "SCIM_GROUP_MAPPING_CREATE",
   // team-key-rotation-rekey D3.
   "TEAM_KEY_ROTATION_CARRY",
+  "TEAM_KEY_ROTATION",
   // team-key-rotation-rekey C4.
   "TEAM_ATTACHMENT_MIGRATE",
   // team-key-rotation-rekey C2.
@@ -94,7 +95,7 @@ describe("check-critical-audit-atomic.mjs", () => {
     ALL.forEach((a, i) => writeRoute(`crit-${i}/route.ts`, inTx(a)));
     const { exitCode, stdout } = runGuard();
     expect(exitCode, stdout).toBe(0);
-    expect(stdout).toContain("all 19 security-critical actions");
+    expect(stdout).toContain("all 20 security-critical actions");
   });
 
   it("recognizes an action written via an atomic-audit descriptor (delegated to a helper)", () => {

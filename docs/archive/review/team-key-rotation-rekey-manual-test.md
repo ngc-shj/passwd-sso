@@ -53,7 +53,8 @@ port) with two browsers signed in as different team admins, plus a MinIO-backed 
 
 ## Rollback
 
-The schema change is additive (new nullable / defaulted columns, one CHECK, new enum values).
+The schema change is additive (new nullable / defaulted columns, new enum values; the CHECK on
+`item_key_id` ships in the next release, deviation D41).
 To roll back the application, deploy the previous image: old code ignores the new columns, but
 entries re-keyed by this version stay readable only if the old client handles ItemKey versions
 above 1 (it does — it reads `itemKeyVersion` from the row) and mode-2 team attachments are NOT

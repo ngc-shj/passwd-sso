@@ -8,6 +8,7 @@ import {
 import { toBlobColumns, toOverviewColumns } from "@/lib/crypto/crypto-blob";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { CURRENT_CEK_WRAP_AAD_VERSION } from "@/lib/crypto/crypto-aad";
+import { ATTACHMENT_ENCRYPTION_MODE } from "@/lib/constants/vault/attachment-encryption-mode";
 
 // ── Error classes ────────────────────────────────────────────────────────────
 
@@ -217,7 +218,7 @@ export async function applyVaultRotation(
 
   // ── Defensive guard A: no mode-0 residual ───────────────────────────────
   const mode0Residual = await tx.attachment.count({
-    where: { passwordEntry: { userId }, encryptionMode: 0 },
+    where: { passwordEntry: { userId }, encryptionMode: ATTACHMENT_ENCRYPTION_MODE.VAULT_KEY },
   });
   if (mode0Residual > 0) {
     throw new LegacyAttachmentsResidualError();
@@ -232,7 +233,7 @@ export async function applyVaultRotation(
   const mode2InvariantViolations = await tx.attachment.count({
     where: {
       passwordEntry: { userId },
-      encryptionMode: 2,
+      encryptionMode: ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED,
       OR: [
         { cekEncrypted: null },
         { cekIv: null },
@@ -251,7 +252,7 @@ export async function applyVaultRotation(
   // Extra mode-2 rows in the DB (not in manifest) are allowed — concurrent-
   // upload tolerance.
   const mode2Rows = await tx.attachment.findMany({
-    where: { passwordEntry: { userId }, encryptionMode: 2 },
+    where: { passwordEntry: { userId }, encryptionMode: ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED },
     select: { id: true, cekKeyVersion: true },
   });
   const mode2IdSet = new Set(mode2Rows.map((r) => r.id));
@@ -366,7 +367,7 @@ export async function applyVaultRotation(
       where: {
         id: rewrap.id,
         passwordEntry: { userId, tenantId },
-        encryptionMode: 2,
+        encryptionMode: ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED,
       },
       data: {
         cekEncrypted: Buffer.from(rewrap.cekEncrypted, "base64"),
@@ -461,7 +462,7 @@ export async function applyVaultRotation(
   const staleMode2Count = await tx.attachment.count({
     where: {
       passwordEntry: { userId },
-      encryptionMode: 2,
+      encryptionMode: ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED,
       cekKeyVersion: { not: newKeyVersion },
     },
   });
@@ -575,7 +576,7 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
 export async function applyAttachmentMigration(
   tx: Prisma.TransactionClient,
   opts: AttachmentMigrationOptions,
-): Promise<{ encryptionMode: 2; fromKeyVersion: number | null; oldStored: Uint8Array }> {
+): Promise<{ encryptionMode: typeof ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED; fromKeyVersion: number | null; oldStored: Uint8Array }> {
   const { createHash } = await import("node:crypto");
   const { userId, tenantId, entryId, attachmentId, payload, snapshot, newStored } = opts;
 
@@ -601,7 +602,7 @@ export async function applyAttachmentMigration(
   }
 
   // Mode check (I5.3): only mode-0 rows are eligible
-  if (row.encryptionMode !== 0) {
+  if (row.encryptionMode !== ATTACHMENT_ENCRYPTION_MODE.VAULT_KEY) {
     throw new LegacyMigrationNotApplicableError();
   }
 
@@ -628,7 +629,7 @@ export async function applyAttachmentMigration(
     where: {
       id: attachmentId,
       passwordEntry: { userId, tenantId },
-      encryptionMode: 0,
+      encryptionMode: ATTACHMENT_ENCRYPTION_MODE.VAULT_KEY,
       iv: snapshot.iv,
       authTag: snapshot.authTag,
       passwordEntryId: entryId,
@@ -643,12 +644,12 @@ export async function applyAttachmentMigration(
       cekAuthTag: payload.cekAuthTag,
       cekKeyVersion: payload.cekKeyVersion,
       cekWrapAadVersion: payload.cekWrapAadVersion,
-      encryptionMode: 2,
+      encryptionMode: ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED,
     },
   });
   if (updateResult.count !== 1) {
     throw new AttachmentMigrationCasError();
   }
 
-  return { encryptionMode: 2 as const, fromKeyVersion: row.keyVersion, oldStored: row.encryptedData };
+  return { encryptionMode: ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED, fromKeyVersion: row.keyVersion, oldStored: row.encryptedData };
 }

@@ -1348,6 +1348,191 @@ describe("team re-key pass — real-DB integration", () => {
     )).toBe(currentText);
   });
 
+  // ── Rollout window: rows written by an instance of the previous release ──
+  //
+  // Deploy migrates before the services roll, so for a while instances of the
+  // previous release (main) write to the migrated schema. They never write
+  // item_key_id, the re-key marker or the high-water: create leaves them at
+  // their defaults (NULL, 0, 0), and the full-update PUT replaces the wrap it
+  // is sent while keeping all three, writing a history row without an id.
+
+  /** The previous release's entry create: the three columns at their defaults. */
+  async function seedPreviousReleaseEntry(team: Team, itemKey: ItemKey): Promise<{ entryId: string; plain: Plain }> {
+    const entryId = randomUUID();
+    const plain = plainFor("previous-release create");
+    const contentKey = await deriveItemEncryptionKey(itemKey.raw);
+    const blob = await encryptData(plain.blob, contentKey, buildTeamEntryAAD(team.teamId, entryId, "blob", itemKey.version));
+    const overview = await encryptData(plain.overview, contentKey, buildTeamEntryAAD(team.teamId, entryId, "overview", itemKey.version));
+    const wrap = await wrapUnder(team, entryId, team.version, itemKey.raw);
+    await sql(
+      `INSERT INTO team_password_entries (
+         id, team_id, tenant_id, created_by_id, updated_by_id,
+         encrypted_blob, blob_iv, blob_auth_tag, encrypted_overview, overview_iv, overview_auth_tag,
+         aad_version, team_key_version, item_key_version,
+         encrypted_item_key, item_key_iv, item_key_auth_tag,
+         entry_type, created_at, updated_at
+       ) VALUES (
+         $1::uuid, $2::uuid, $3::uuid, $4::uuid, $4::uuid,
+         $5, $6, $7, $8, $9, $10, 1, $11, $12, $13, $14, $15, 'LOGIN', now(), now()
+       )`,
+      entryId, team.teamId, tenantId, firstMember(team),
+      blob.ciphertext, blob.iv, blob.authTag, overview.ciphertext, overview.iv, overview.authTag,
+      team.version, itemKey.version, wrap.ciphertext, wrap.iv, wrap.authTag,
+    );
+    return { entryId, plain };
+  }
+
+  /**
+   * The previous release's full-update PUT carrying a new wrap (the v0→v1
+   * upgrade, or any client sending `encryptedItemKey`): the locked row goes
+   * to a history row WITHOUT item_key_id, and the entry takes the new blob,
+   * overview and wrap of `itemKey` at the team's current version, keeping its
+   * item_key_id, marker and high-water.
+   */
+  async function previousReleasePut(team: Team, entryId: string, itemKey: ItemKey): Promise<{ plain: Plain }> {
+    const plain = plainFor("previous-release update");
+    const contentKey = await deriveItemEncryptionKey(itemKey.raw);
+    const blob = await encryptData(plain.blob, contentKey, buildTeamEntryAAD(team.teamId, entryId, "blob", itemKey.version));
+    const overview = await encryptData(plain.overview, contentKey, buildTeamEntryAAD(team.teamId, entryId, "overview", itemKey.version));
+    const wrap = await wrapUnder(team, entryId, team.version, itemKey.raw);
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await tx.$executeRawUnsafe(
+        `INSERT INTO team_password_entry_histories (
+           id, entry_id, tenant_id, encrypted_blob, blob_iv, blob_auth_tag,
+           aad_version, team_key_version, item_key_version,
+           encrypted_item_key, item_key_iv, item_key_auth_tag, changed_by_id, changed_at
+         )
+         SELECT gen_random_uuid(), id, tenant_id, encrypted_blob, blob_iv, blob_auth_tag,
+                aad_version, team_key_version, item_key_version,
+                encrypted_item_key, item_key_iv, item_key_auth_tag, $2::uuid, now()
+           FROM team_password_entries WHERE id = $1::uuid`,
+        entryId, firstMember(team),
+      );
+      await tx.$executeRawUnsafe(
+        `UPDATE team_password_entries
+            SET encrypted_blob = $2, blob_iv = $3, blob_auth_tag = $4,
+                encrypted_overview = $5, overview_iv = $6, overview_auth_tag = $7,
+                aad_version = 1, team_key_version = $8, item_key_version = $9,
+                encrypted_item_key = $10, item_key_iv = $11, item_key_auth_tag = $12, updated_at = now()
+          WHERE id = $1::uuid`,
+        entryId, blob.ciphertext, blob.iv, blob.authTag, overview.ciphertext, overview.iv, overview.authTag,
+        team.version, itemKey.version, wrap.ciphertext, wrap.iv, wrap.authTag,
+      );
+    });
+    return { plain };
+  }
+
+  it("rollout: a v1 entry the previous release created (NULL id, marker 0, high-water 0) is pending; the pass re-keys it past its own version and mints the id", async () => {
+    const team = await seedTeam(2);
+    const admin = await seedMember(team, "OWNER", [1, 2]);
+    const created = newItemKey(1);
+    const e = await seedPreviousReleaseEntry(team, created);
+    expect(await entryRow(e.entryId)).toMatchObject({ item_key_version: 1, item_key_id: null, item_key_team_key_version: 0 });
+    expect(await rekeyList(team, admin)).toMatchObject({ pendingCount: 1, entryIds: [e.entryId] });
+    expect((await rekeyData(team, admin, e.entryId)).nextItemKeyVersion).toBe(2);
+
+    const { result } = await runPass(team, admin);
+    expect(result).toMatchObject({ status: "completed", rekeyed: [e.entryId], skipped: [] });
+    await expectOnCurrentKey(team, e.entryId, { plain: e.plain, oldItemKeys: [created.raw] });
+    const row = await entryRow(e.entryId);
+    expect(row.item_key_version).toBe(2);
+    expect(row.item_key_id).not.toBeNull();
+    expect(await rowsOffCurrentVersion(team.teamId)).toEqual([]);
+    expect((await rekeyList(team, admin)).pendingCount).toBe(0);
+  });
+
+  it("rollout: the previous release's v0→v1 upgrade of an entry marked current leaves a NULL id; a reuse PUT is refused ITEM_KEY_CHANGED, the entry is pending, the pass re-keys it and edits work again", async () => {
+    const team = await seedTeam(1);
+    const admin = await seedMember(team, "OWNER", [1]);
+    const v0 = await seedEntry(team, { teamKeyVersion: 1, marker: 1 });
+    const upgraded = newItemKey(1);
+    const put = await previousReleasePut(team, v0.entryId, upgraded);
+    expect(await entryRow(v0.entryId)).toMatchObject({ item_key_version: 1, item_key_id: null, item_key_team_key_version: 1 });
+    const [historyId] = [...(await historyRows(v0.entryId)).keys()];
+
+    mockAuth.mockResolvedValue({ user: { id: admin } });
+    const reuse = await entryPUT(
+      jsonRequest(`http://localhost/api/teams/${team.teamId}/passwords/${v0.entryId}`, "PUT", {
+        encryptedBlob: { ciphertext: hex(32), iv: hex(12), authTag: hex(16) },
+        encryptedOverview: { ciphertext: hex(32), iv: hex(12), authTag: hex(16) },
+        aadVersion: 1, teamKeyVersion: 1, itemKeyVersion: 1, itemKeyId: null,
+      }),
+      { params: Promise.resolve({ teamId: team.teamId, id: v0.entryId }) },
+    );
+    expect(await errorOf(reuse)).toEqual({ status: 409, error: "ITEM_KEY_CHANGED" });
+    expect(await rekeyList(team, admin)).toMatchObject({ pendingCount: 1, entryIds: [v0.entryId] });
+
+    const { result } = await runPass(team, admin);
+    expect(result).toMatchObject({ status: "completed", rekeyed: [v0.entryId], retained: [], skipped: [] });
+    await expectOnCurrentKey(team, v0.entryId, {
+      plain: put.plain,
+      history: new Map([[historyId, v0.plain.blob]]),
+      oldItemKeys: [upgraded.raw],
+    });
+    expect(await rowsOffCurrentVersion(team.teamId)).toEqual([]);
+    expect((await rekeyList(team, admin)).pendingCount).toBe(0);
+
+    // The minted id is the one a writer sends back: a reuse PUT now goes through.
+    const live = await entryRow(v0.entryId);
+    const again = await entryPUT(
+      jsonRequest(`http://localhost/api/teams/${team.teamId}/passwords/${v0.entryId}`, "PUT", {
+        encryptedBlob: { ciphertext: hex(32), iv: hex(12), authTag: hex(16) },
+        encryptedOverview: { ciphertext: hex(32), iv: hex(12), authTag: hex(16) },
+        aadVersion: 1, teamKeyVersion: 1, itemKeyVersion: live.item_key_version, itemKeyId: live.item_key_id,
+      }),
+      { params: Promise.resolve({ teamId: team.teamId, id: v0.entryId }) },
+    );
+    expect(again.status).toBe(200);
+  });
+
+  it("rollout: a previous-release upgrade of a v0 entry holding a mode-0 attachment → the pass migrates it under the unknown ItemKey, then re-keys; the attachment ends under the new ItemKey", async () => {
+    const team = await seedTeam(1);
+    const admin = await seedMember(team, "OWNER", [1]);
+    const v0 = await seedEntry(team, { teamKeyVersion: 1, marker: 1 });
+    const legacy = await seedMode0Attachment(team, v0.entryId, 1);
+    const upgraded = newItemKey(1);
+    const put = await previousReleasePut(team, v0.entryId, upgraded);
+    const [historyId] = [...(await historyRows(v0.entryId)).keys()];
+
+    const { result, requests } = await runPass(team, admin);
+    expect(result).toMatchObject({ status: "completed", rekeyed: [v0.entryId], retained: [], skipped: [] });
+    expect(requests.filter((r) => r.method === "PUT").map((r) => r.status)).toEqual([200]);
+    await expectOnCurrentKey(team, v0.entryId, {
+      plain: put.plain,
+      history: new Map([[historyId, v0.plain.blob]]),
+      attachments: new Map([[legacy.attId, legacy.plaintext]]),
+      oldItemKeys: [upgraded.raw],
+    });
+    expect(await rowsOffCurrentVersion(team.teamId)).toEqual([]);
+  });
+
+  it("rollout: the previous release replacing a pending entry's wrap while keeping its id → the pass opens the CEK bound to the old ItemKey by trial and the history row by its own wrap; everything ends on one new ItemKey", async () => {
+    const team = await seedTeam(2);
+    const admin = await seedMember(team, "OWNER", [1, 2]);
+    const original = newItemKey(1);
+    const e = await seedEntry(team, { teamKeyVersion: 1, itemKey: original, marker: 1 });
+    const att = await seedMode2Attachment(team, e.entryId, original);
+    const replacement = { ...newItemKey(1), id: original.id };
+    const put = await previousReleasePut(team, e.entryId, replacement);
+    expect(await entryRow(e.entryId)).toMatchObject({ team_key_version: 2, item_key_version: 1, item_key_id: original.id, item_key_team_key_version: 1 });
+    const [historyId] = [...(await historyRows(e.entryId)).keys()];
+    expect((await historyRows(e.entryId)).get(historyId)).toMatchObject({ item_key_id: null, team_key_version: 1 });
+
+    const { result } = await runPass(team, admin);
+    expect(result).toMatchObject({ status: "completed", rekeyed: [e.entryId], retained: [], skipped: [] });
+    await expectOnCurrentKey(team, e.entryId, {
+      plain: put.plain,
+      history: new Map([[historyId, e.plain.blob]]),
+      attachments: new Map([[att.attId, att.plaintext]]),
+      oldItemKeys: [original.raw, replacement.raw],
+    });
+    const row = await entryRow(e.entryId);
+    expect(row.item_key_id).not.toBe(original.id);
+    expect(row.item_key_version).toBe(2);
+    expect(await rowsOffCurrentVersion(team.teamId)).toEqual([]);
+  });
+
   // ── MinIO: A3 through the runner ─────────────────────────────────────────
 
   describe("MinIO", () => {

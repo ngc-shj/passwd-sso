@@ -16,6 +16,7 @@ import {
   bytesToBase64,
   decryptTeamAttachmentDownload,
   encryptTeamAttachmentMode2,
+  sha256Hex,
   type TeamAttachmentDownload,
 } from "./team-attachment-crypto";
 
@@ -110,5 +111,13 @@ describe("decryptTeamAttachmentDownload", () => {
     const error = await decryptTeamAttachmentDownload(TEAM_ID, ENTRY, data, makeResolver(keys, { 1: "transient" })).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(TeamAttachmentKeyError);
     expect((error as TeamAttachmentKeyError).reason).toBe(ATTACHMENT_KEY_FAILURE.TRANSIENT);
+  });
+});
+
+describe("sha256Hex", () => {
+  it("returns the lowercase hex SHA-256 the migrate route compares clientHash with", async () => {
+    expect(await sha256Hex(new TextEncoder().encode("abc"))).toBe(
+      "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+    );
   });
 });

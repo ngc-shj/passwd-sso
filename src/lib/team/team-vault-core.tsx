@@ -257,13 +257,19 @@ export function TeamVaultProvider({
   // Rotation re-wraps an ItemKey without changing it or its id, so the slot
   // stays valid across team key versions; a different id is a different key.
   const itemKeyCacheRef = useRef<Map<string, Map<string, CachedItemKeys>>>(new Map());
+  // Bumped by every clear. A populate site captures it before its first await
+  // and writes only if it is unchanged, so an unwrap in flight when the vault
+  // locks (or a team key is invalidated) cannot repopulate the cleared cache.
+  const cacheGenerationRef = useRef(0);
 
   const clearAll = useCallback(() => {
+    cacheGenerationRef.current += 1;
     cacheRef.current.clear();
     itemKeyCacheRef.current.clear();
   }, []);
 
   const invalidateTeamKey = useCallback((teamId: string) => {
+    cacheGenerationRef.current += 1;
     const prefix = `${teamId}:`;
     for (const key of cacheRef.current.keys()) {
       if (key.startsWith(prefix)) {
@@ -436,8 +442,10 @@ export function TeamVaultProvider({
         }
       }
 
+      const generation = cacheGenerationRef.current;
       const resolved = await fetchAndUnwrapTeamKey(teamId);
       if ("failure" in resolved) return null;
+      if (generation !== cacheGenerationRef.current) return resolved.key;
 
       const cachedAt = Date.now();
       // Non-latest fetches never reach here (no requestedVersion passed above),
@@ -473,8 +481,10 @@ export function TeamVaultProvider({
         return { key: cached.key };
       }
 
+      const generation = cacheGenerationRef.current;
       const resolved = await fetchAndUnwrapTeamKey(teamId, keyVersion);
       if ("failure" in resolved) return resolved;
+      if (generation !== cacheGenerationRef.current) return { key: resolved.key };
 
       // Versioned (non-latest) fetches never write the latest pointer slot.
       cacheRef.current.set(cacheKey, {
@@ -558,6 +568,7 @@ export function TeamVaultProvider({
         }
       }
 
+      const generation = cacheGenerationRef.current;
       if (
         typeof entry.encryptedItemKey !== "string" ||
         typeof entry.itemKeyIv !== "string" ||
@@ -598,7 +609,7 @@ export function TeamVaultProvider({
         rawItemKey.fill(0);
       }
 
-      if (itemKeyId !== null) {
+      if (itemKeyId !== null && generation === cacheGenerationRef.current) {
         let teamCache = itemKeyCacheRef.current.get(teamId);
         if (!teamCache) {
           teamCache = new Map();
@@ -773,6 +784,12 @@ export function TeamVaultProvider({
       ecdhPrivateKeyBytes.fill(0);
     }
   }, [getEcdhPrivateKeyBytes, getUserId]);
+
+  // Locking the vault drops every unwrapped key: the provider stays mounted
+  // across lock, so nothing else would release them.
+  useEffect(() => {
+    if (!vaultUnlocked) clearAll();
+  }, [vaultUnlocked, clearAll]);
 
   // ─── Periodic auto key distribution (same pattern as EA auto-confirm) ──
   useEffect(() => {

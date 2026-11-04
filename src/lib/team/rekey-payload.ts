@@ -34,6 +34,7 @@ import {
   sha256Hex,
   type TeamAttachmentDownload,
 } from "@/lib/team/team-attachment-crypto";
+import { ATTACHMENT_ENCRYPTION_MODE } from "@/lib/constants/vault/attachment-encryption-mode";
 
 /**
  * Client payloads of the re-key pass
@@ -295,12 +296,15 @@ export async function buildEntryRekeyPayload(
   });
 
   if (entry.itemKeyVersion < 1) return blocked(REKEY_ENTRY_BLOCK.NEEDS_UPGRADE);
-  if (data.attachments.some((a) => a.encryptionMode !== 2)) {
+  if (data.attachments.some((a) => a.encryptionMode !== ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED)) {
     return blocked(REKEY_ENTRY_BLOCK.NEEDS_MIGRATION);
   }
 
   const currentKey = await requireCurrentKey(resolve, data.teamKeyVersion);
   const held: HeldItemKey[] = [];
+  // Every raw ItemKey unwrapped here, registered before anything derived from
+  // it can throw, so the finally zero-fills it whatever happens next.
+  const raws: Uint8Array[] = [];
   const newItemKey = generateItemKey();
   try {
     const live = await unwrapRow(teamId, entryId, entry, resolve);
@@ -313,6 +317,7 @@ export async function buildEntryRekeyPayload(
             : REKEY_ENTRY_BLOCK.UNDECRYPTABLE,
       );
     }
+    raws.push(live.raw);
     const liveHeld = await toHeld(entry.itemKeyId ?? null, live.raw);
     held.push(liveHeld);
 
@@ -335,6 +340,7 @@ export async function buildEntryRekeyPayload(
       if (row.itemKeyVersion < 1) continue;
       const unwrapped = await unwrapRow(teamId, entryId, row, resolve);
       if (!unwrapped.ok) continue;
+      raws.push(unwrapped.raw);
       const existing = held.find((h) => sameBytes(h.raw, unwrapped.raw));
       if (existing) {
         unwrapped.raw.fill(0);
@@ -408,7 +414,7 @@ export async function buildEntryRekeyPayload(
     return { kind: "payload", body, retained };
   } finally {
     newItemKey.fill(0);
-    for (const h of held) h.raw.fill(0);
+    for (const raw of raws) raw.fill(0);
   }
 }
 
@@ -607,7 +613,8 @@ export async function encryptUpgrade(
 
 /** PUT /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]/migrate body. */
 export interface AttachmentMigrateBody {
-  itemKeyId: string;
+  /** null for an entry whose ItemKey has no id yet (written by a previous release). */
+  itemKeyId: string | null;
   cekKeyVersion: number;
   snapshot: { iv: string; authTag: string };
   clientHash: string;
@@ -634,7 +641,7 @@ export async function buildAttachmentMigratePayload(
   teamId: string,
   entryId: string,
   download: TeamAttachmentDownload,
-  live: { itemKeyId: string; itemKeyVersion: number; cekWrapKey: CryptoKey },
+  live: { itemKeyId: string | null; itemKeyVersion: number; cekWrapKey: CryptoKey },
   resolveKey: ResolveTeamKey,
 ): Promise<AttachmentMigrateBody> {
   const plaintext = await decryptTeamAttachmentDownload(teamId, entryId, download, resolveKey);

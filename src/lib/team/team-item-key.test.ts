@@ -5,36 +5,19 @@ import {
   isRekeyerHolder,
   itemKeyIdsMatch,
   itemKeyIvReused,
+  nextItemKeyVersion,
   normalizeTeamKeyVersion,
   teamKeyVersionHolders,
   deactivatedTeamKeyVersionHolderCount,
 } from "./team-item-key";
+import * as resolution from "./team-key-resolution";
 
 const ID_A = "11111111-1111-4111-8111-111111111111";
-const ID_B = "22222222-2222-4222-8222-222222222222";
 
-describe("itemKeyIdsMatch", () => {
-  it("matches the same id", () => {
-    expect(itemKeyIdsMatch(ID_A, ID_A)).toBe(true);
-  });
-
-  it("matches the same id regardless of hex case", () => {
-    expect(itemKeyIdsMatch(ID_A, ID_A.toUpperCase())).toBe(true);
-  });
-
-  it("does not match different ids", () => {
-    expect(itemKeyIdsMatch(ID_A, ID_B)).toBe(false);
-  });
-
-  it("never matches null against null", () => {
-    expect(itemKeyIdsMatch(null, null)).toBe(false);
-    expect(itemKeyIdsMatch(undefined, undefined)).toBe(false);
-  });
-
-  it("never matches a null on either side", () => {
-    expect(itemKeyIdsMatch(null, ID_A)).toBe(false);
-    expect(itemKeyIdsMatch(ID_A, null)).toBe(false);
-    expect(itemKeyIdsMatch(undefined, ID_A)).toBe(false);
+describe("shared ItemKey helpers", () => {
+  it("re-exports the single client-safe definitions", () => {
+    expect(itemKeyIdsMatch).toBe(resolution.itemKeyIdsMatch);
+    expect(normalizeTeamKeyVersion).toBe(resolution.normalizeTeamKeyVersion);
   });
 });
 
@@ -61,18 +44,6 @@ describe("itemKeyIvReused", () => {
 
   it("is true for a history row's IV, in any hex case", async () => {
     expect(await itemKeyIvReused(tx([IV_HISTORY.toUpperCase()]) as never, ID_A, null, IV_HISTORY)).toBe(true);
-  });
-});
-
-describe("normalizeTeamKeyVersion", () => {
-  it.each([
-    [-1, 1],
-    [0, 1],
-    [1, 1],
-    [2, 2],
-    [7, 7],
-  ])("maps %i to %i", (input, expected) => {
-    expect(normalizeTeamKeyVersion(input)).toBe(expected);
   });
 });
 
@@ -156,5 +127,15 @@ describe("heldTeamKeyVersions", () => {
       select: { keyVersion: true },
       orderBy: { keyVersion: "asc" },
     });
+  });
+});
+
+describe("nextItemKeyVersion", () => {
+  it("is the high-water + 1 when the high-water covers the entry's version", () => {
+    expect(nextItemKeyVersion(3, 1)).toBe(4);
+  });
+
+  it("is the entry's version + 1 when the high-water lags it (a previous-release v1 write left it at 0)", () => {
+    expect(nextItemKeyVersion(0, 1)).toBe(2);
   });
 });

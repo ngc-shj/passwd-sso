@@ -1,4 +1,5 @@
 import { decryptBinary, encryptBinary, type EncryptedBinary } from "@/lib/crypto/crypto-client";
+import { hexEncode } from "@/lib/crypto/crypto-utils";
 import {
   deriveItemCekWrapKey,
   deriveItemEncryptionKey,
@@ -17,6 +18,7 @@ import {
   normalizeTeamKeyVersion,
   type ResolveTeamKey,
 } from "@/lib/team/team-key-resolution";
+import { ATTACHMENT_ENCRYPTION_MODE } from "@/lib/constants/vault/attachment-encryption-mode";
 
 /**
  * Team attachment crypto (docs/archive/review/team-key-rotation-rekey-plan.md
@@ -95,8 +97,7 @@ export function bytesToBase64(bytes: Uint8Array): string {
 
 /** SHA-256 of bytes, lowercase hex (the migrate route's `clientHash`). */
 export async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes as Uint8Array<ArrayBuffer>));
-  return Array.from(digest, (b) => b.toString(16).padStart(2, "0")).join("");
+  return hexEncode(await crypto.subtle.digest("SHA-256", bytes as Uint8Array<ArrayBuffer>));
 }
 
 function bodyAad(entryId: string, attachmentId: string, aadVersion: number): Uint8Array | undefined {
@@ -149,7 +150,7 @@ export async function decryptTeamAttachmentDownload(
   };
   const aad = bodyAad(entryId, data.id, data.aadVersion);
 
-  if (data.encryptionMode === 0) {
+  if (data.encryptionMode === ATTACHMENT_ENCRYPTION_MODE.VAULT_KEY) {
     const resolved = await resolveKey(normalizeTeamKeyVersion(data.keyVersion ?? 0));
     if (!("key" in resolved)) {
       throw new TeamAttachmentKeyError(
@@ -161,7 +162,7 @@ export async function decryptTeamAttachmentDownload(
     return decryptOrUnopenable(() => decryptBinary(body, resolved.key, aad));
   }
 
-  if (data.encryptionMode === 1) {
+  if (data.encryptionMode === ATTACHMENT_ENCRYPTION_MODE.ITEM_KEY) {
     for (const wrap of data.itemKeyWraps ?? []) {
       const itemKey = await unwrapItemKeyFromWrap(teamId, entryId, wrap, resolveKey);
       if (!itemKey) continue;

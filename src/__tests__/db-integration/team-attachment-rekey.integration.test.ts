@@ -64,7 +64,10 @@ vi.mock("@/lib/security/rate-limit", () => ({
 }));
 
 import { POST as uploadRoute } from "@/app/api/teams/[teamId]/passwords/[id]/attachments/route";
-import { GET as downloadRoute } from "@/app/api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]/route";
+import {
+  DELETE as deleteRoute,
+  GET as downloadRoute,
+} from "@/app/api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]/route";
 import { PUT as migrateRoute } from "@/app/api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]/migrate/route";
 import { POST as restoreRoute } from "@/app/api/teams/[teamId]/passwords/[id]/history/[historyId]/restore/route";
 import { POST as rotateRoute } from "@/app/api/teams/[teamId]/rotate-key/route";
@@ -500,6 +503,87 @@ describe("team attachments under the entry ItemKey — real-DB integration", () 
         error: "ITEM_KEY_CHANGED",
       });
       expect((await upload(entry)).res.status).toBe(201);
+    });
+  });
+
+  // ── Upload and delete: the actor's role under the team lock ──────────────
+
+  describe("ACTOR_NOT_PERMITTED on upload and delete: the actor's role, re-read under the team lock", () => {
+    /**
+     * Park `send` on the team FOR SHARE behind a blocker holding the team
+     * row; the blocker optionally changes the actor's role, then commits.
+     */
+    async function parkedBehindTeamRow(team: Team, send: () => Promise<Response>, demoteTo: "MEMBER" | "VIEWER" | null) {
+      const blocker = await ctx.su.pool.connect();
+      try {
+        await blocker.query("BEGIN");
+        await blocker.query(`SELECT id FROM teams WHERE id = $1::uuid FOR NO KEY UPDATE`, [team.teamId]);
+        const { rows: [{ pid: blockerPid }] } = await blocker.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+        const pending = send();
+        const parkedPid = await race().waitForBackendBlockedBy(blockerPid);
+        const waits = await ctx.su.pool.query<{ query: string }>(
+          `SELECT a.query FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid WHERE l.pid = $1 AND NOT l.granted`,
+          [parkedPid],
+        );
+        expect(waits.rows[0].query).toMatch(/FROM teams WHERE id = .* FOR SHARE/s);
+        if (demoteTo) {
+          await blocker.query(
+            `UPDATE team_members SET role = $3::"TeamRole" WHERE team_id = $1::uuid AND user_id = $2::uuid`,
+            [team.teamId, team.admin, demoteTo],
+          );
+        }
+        await blocker.query("COMMIT");
+        return await pending;
+      } finally {
+        blocker.release();
+      }
+    }
+
+    const attachmentCount = async (entryId: string) =>
+      Number((await ctx.su.pool.query<{ n: string }>(
+        `SELECT count(*) AS n FROM attachments WHERE team_password_entry_id = $1::uuid`,
+        [entryId],
+      )).rows[0].n);
+
+    function remove(entry: Entry, attId: string) {
+      return deleteRoute(
+        new NextRequest(`http://localhost/api/teams/${entry.teamId}/passwords/${entry.entryId}/attachments/${attId}`, { method: "DELETE" }),
+        { params: Promise.resolve({ teamId: entry.teamId, id: entry.entryId, attachmentId: attId }) },
+      );
+    }
+
+    it("upload: demoted to VIEWER while parked → 403 ACTOR_NOT_PERMITTED, nothing stored", async () => {
+      const team = await seedTeam(1);
+      const entry = await seedEntry(team, { teamKeyVersion: 1, itemKeyVersion: 1 });
+      const res = await parkedBehindTeamRow(team, async () => (await upload(entry)).res, "VIEWER");
+      expect(await errorOf(res)).toEqual({ status: 403, error: "ACTOR_NOT_PERMITTED" });
+      expect(await attachmentCount(entry.entryId)).toBe(0);
+    });
+
+    it("upload control: the blocker commits without a role change → 201", async () => {
+      const team = await seedTeam(1);
+      const entry = await seedEntry(team, { teamKeyVersion: 1, itemKeyVersion: 1 });
+      const res = await parkedBehindTeamRow(team, async () => (await upload(entry)).res, null);
+      expect(res.status).toBe(201);
+      expect(await attachmentCount(entry.entryId)).toBe(1);
+    });
+
+    it("delete: demoted to MEMBER (no PASSWORD_DELETE) while parked → 403 ACTOR_NOT_PERMITTED, the row stays", async () => {
+      const team = await seedTeam(1);
+      const entry = await seedEntry(team, { teamKeyVersion: 1, itemKeyVersion: 1 });
+      const { attId } = await upload(entry);
+      const res = await parkedBehindTeamRow(team, () => remove(entry, attId), "MEMBER");
+      expect(await errorOf(res)).toEqual({ status: 403, error: "ACTOR_NOT_PERMITTED" });
+      expect(await attachmentRow(attId)).toBeDefined();
+    });
+
+    it("delete control: the blocker commits without a role change → 200, the row is gone", async () => {
+      const team = await seedTeam(1);
+      const entry = await seedEntry(team, { teamKeyVersion: 1, itemKeyVersion: 1 });
+      const { attId } = await upload(entry);
+      const res = await parkedBehindTeamRow(team, () => remove(entry, attId), null);
+      expect(res.status).toBe(200);
+      expect(await attachmentRow(attId)).toBeUndefined();
     });
   });
 

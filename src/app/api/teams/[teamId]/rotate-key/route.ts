@@ -4,7 +4,7 @@ import { z } from "zod";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { activeTeamRole, hasTeamPermission, requireTeamPermission } from "@/lib/auth/access/team-auth";
-import { logAuditAsync, logAuditBulkInTx, teamAuditBase } from "@/lib/audit/audit";
+import { logAuditBulkInTx, logAuditInTx, teamAuditBase } from "@/lib/audit/audit";
 import { API_ERROR, type ApiErrorCode } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
@@ -14,6 +14,7 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { errorResponse, handleAuthError, rateLimited, unauthorized, validationError } from "@/lib/http/api-response";
 import { createRateLimiter } from "@/lib/security/rate-limit";
+import { teamRotateKeyFailureLimiter } from "@/lib/security/rate-limiters";
 import { ROTATE_CARRY_REASON, TEAM_ROTATE_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 import {
   encryptedFieldSchema,
@@ -123,14 +124,23 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   const rateKey = `rl:team_rotate_key:${teamId}`;
   const rl = await teamRotateKeyLimiter.check(rateKey);
   if (!rl.allowed) return rateLimited(rl.retryAfterMs);
+  // Every attempt takes a failure slot; a committed rotation releases them.
+  const failureKey = `rl:team_rotate_key_failure:${teamId}:${session.user.id}`;
+  const failures = await teamRotateKeyFailureLimiter.check(failureKey);
+  if (!failures.allowed) {
+    await teamRotateKeyLimiter.clear(rateKey);
+    return rateLimited(failures.retryAfterMs);
+  }
 
   let response: NextResponse | undefined;
   try {
     response = await rotateTeamKey(req, teamId, session.user.id);
     return response;
   } finally {
-    // A refusal (or a throw) rotated nothing: release the slot it took.
-    if (response?.status !== 200) await teamRotateKeyLimiter.clear(rateKey);
+    // A refusal (or a throw) rotated nothing: release the success slot it
+    // took and keep the failure slot.
+    if (response?.status === 200) await teamRotateKeyFailureLimiter.clear(failureKey);
+    else await teamRotateKeyLimiter.clear(rateKey);
   }
 }
 
@@ -338,7 +348,7 @@ async function rotateTeamKey(req: NextRequest, teamId: string, userId: string): 
 
       // One row per carried entry, committed with the rotation: the carry
       // list can exceed the summary row's metadata cap, and each carry is the
-      // actor's own claim about that entry.
+      // actor's own claim about that entry. The summary commits with them.
         await logAuditBulkInTx(
           tx,
           team.tenantId,
@@ -350,6 +360,19 @@ async function rotateTeamKey(req: NextRequest, teamId: string, userId: string): 
             metadata: { reason: c.reason, teamKeyVersion: carriedVersions.get(c.id) },
           })),
         );
+        await logAuditInTx(tx, team.tenantId, {
+          ...teamAuditBase(req, userId, teamId),
+          action: AUDIT_ACTION.TEAM_KEY_ROTATION,
+          targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
+          targetId: teamId,
+          metadata: {
+            fromVersion: team.teamKeyVersion,
+            toVersion: newTeamKeyVersion,
+            entriesRotated: entries.length,
+            entriesCarried: carry.length,
+            membersUpdated: memberKeys.length,
+          },
+        });
       },
       { timeout: TEAM_ROTATE_TX_TIMEOUT_MS },
     );
@@ -376,20 +399,6 @@ async function rotateTeamKey(req: NextRequest, teamId: string, userId: string): 
     }
     throw e;
   }
-
-  await logAuditAsync({
-    ...teamAuditBase(req, userId, teamId),
-    action: AUDIT_ACTION.TEAM_KEY_ROTATION,
-    targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
-    targetId: teamId,
-    metadata: {
-      fromVersion: team.teamKeyVersion,
-      toVersion: newTeamKeyVersion,
-      entriesRotated: entries.length,
-      entriesCarried: carry.length,
-      membersUpdated: memberKeys.length,
-    },
-  });
 
   return NextResponse.json({
     success: true,

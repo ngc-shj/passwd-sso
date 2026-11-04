@@ -63,6 +63,7 @@ vi.mock("@/lib/prisma", () => ({
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: vi.fn(),
+  logAuditInTx: vi.fn(),
   logAuditBulkInTx: vi.fn(),
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "Test" }),
   teamAuditBase: vi.fn((_, userId, teamId) => ({ scope: "TEAM", userId, teamId })),
@@ -70,19 +71,30 @@ vi.mock("@/lib/audit/audit", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   withTeamTenantRls: mockWithTeamTenantRls,
 }));
-vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: vi.fn(() => ({
-    check: mockRateLimitCheck,
-    clear: mockRateLimitClear,
-  })),
-}));
+// The route's success limiter (max 1) is stubbed; the other limiters —
+// among them the failed-attempt limiter from rate-limiters.ts — are the real
+// in-memory ones, so their bound is what production configures.
+vi.mock("@/lib/redis", () => ({ getRedis: () => null }));
+vi.mock("@/lib/security/rate-limit", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/security/rate-limit")>();
+  return {
+    ...actual,
+    createRateLimiter: vi.fn((options: Parameters<typeof actual.createRateLimiter>[0]) =>
+      options.max === 1
+        ? { check: mockRateLimitCheck, clear: mockRateLimitClear }
+        : actual.createRateLimiter(options),
+    ),
+  };
+});
 vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
   requireRecentCurrentAuthMethod: mockRequireRecentSession,
 }));
 
 import { POST } from "./route";
-import { logAuditAsync, logAuditBulkInTx } from "@/lib/audit/audit";
+import { logAuditAsync, logAuditBulkInTx, logAuditInTx } from "@/lib/audit/audit";
+import { TEAM_ROTATE_KEY_FAILURE_LIMIT } from "@/lib/security/rate-limiters";
 import { TEAM_ROTATE_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
+import { documentedMetadataKeys } from "@/__tests__/helpers/audit-log-reference";
 
 function createRequest(body: unknown) {
   return new NextRequest("http://localhost/api/teams/team-1/rotate-key", {
@@ -130,6 +142,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     mockRateLimitCheck.mockResolvedValue({ allowed: true });
     mockTeamFindUnique.mockResolvedValue({
       teamKeyVersion: 1,
+      tenantId: "tenant-1",
     });
     txMock.$queryRaw.mockResolvedValue([{ team_key_version: 1 }]);
     txMock.team.update.mockResolvedValue({});
@@ -348,7 +361,10 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     expect(mockWithTeamTenantRls).toHaveBeenCalledWith("team-1", expect.any(Function), {
       timeout: TEAM_ROTATE_TX_TIMEOUT_MS,
     });
-    expect(vi.mocked(logAuditAsync)).toHaveBeenCalledWith(
+    // The summary commits with the rotation, after the version bump.
+    expect(vi.mocked(logAuditInTx)).toHaveBeenCalledWith(
+      txMock,
+      "tenant-1",
       expect.objectContaining({
         action: "TEAM_KEY_ROTATION",
         teamId: "team-1",
@@ -361,6 +377,28 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
         }),
       }),
     );
+    expect(vi.mocked(logAuditInTx).mock.invocationCallOrder[0]).toBeGreaterThan(
+      txMock.team.update.mock.invocationCallOrder[0],
+    );
+    expect(vi.mocked(logAuditAsync)).not.toHaveBeenCalled();
+    // The keys docs/operations/audit-log-reference.md documents for the action.
+    expect(Object.keys(vi.mocked(logAuditInTx).mock.calls[0][2].metadata ?? {}).sort())
+      .toEqual(documentedMetadataKeys("TEAM_KEY_ROTATION"));
+  });
+
+  it("writes no rotation summary when the rotation is refused", async () => {
+    txMock.teamPasswordEntry.updateMany.mockResolvedValue({ count: 0 });
+    const res = await POST(
+      createRequest({
+        newTeamKeyVersion: 2,
+        entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
+        memberKeys: [validMemberKey("660e8400-e29b-41d4-a716-446655440001")],
+      }),
+      createParams("team-1"),
+    );
+    expect(res.status).toBe(400);
+    expect(vi.mocked(logAuditInTx)).not.toHaveBeenCalled();
+    expect(vi.mocked(logAuditAsync)).not.toHaveBeenCalled();
   });
 
   it("rotates key successfully with UUID v4 entry IDs", async () => {
@@ -664,6 +702,58 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     expect(mockRateLimitClear).not.toHaveBeenCalled();
   });
 
+  describe("failed-attempt limit", () => {
+    const ACTOR = "660e8400-e29b-41d4-a716-446655440001";
+    // A team id per test: the real in-memory limiter keeps its count per key
+    // for the whole file.
+    let teamSeq = 0;
+    let teamId = "";
+    beforeEach(() => {
+      teamSeq += 1;
+      teamId = `team-fail-${teamSeq}`;
+    });
+    const rotate = () =>
+      POST(
+        createRequest({
+          newTeamKeyVersion: 2,
+          entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
+          memberKeys: [validMemberKey(ACTOR)],
+        }),
+        createParams(teamId),
+      );
+    const refuse = () => txMock.teamPasswordEntry.updateMany.mockResolvedValue({ count: 0 });
+    const commit = () => txMock.teamPasswordEntry.updateMany.mockResolvedValue({ count: 1 });
+
+    it("refuses with 429 once the failed rotations reach the limit, without opening the transaction", async () => {
+      refuse();
+      for (let i = 0; i < TEAM_ROTATE_KEY_FAILURE_LIMIT; i++) {
+        expect((await rotate()).status).toBe(400);
+      }
+      mockWithTeamTenantRls.mockClear();
+      mockRateLimitClear.mockClear();
+
+      const res = await rotate();
+      expect(res.status).toBe(429);
+      expect(res.headers.get("Retry-After")).not.toBeNull();
+      expect(mockWithTeamTenantRls).not.toHaveBeenCalled();
+      // The success slot it took is released: nothing was rotated.
+      expect(mockRateLimitClear).toHaveBeenCalledWith(`rl:team_rotate_key:${teamId}`);
+    });
+
+    it("lets a rotation through below the limit, and a committed one resets the count", async () => {
+      refuse();
+      for (let i = 0; i < TEAM_ROTATE_KEY_FAILURE_LIMIT - 1; i++) {
+        expect((await rotate()).status).toBe(400);
+      }
+      commit();
+      expect((await rotate()).status).toBe(200);
+      refuse();
+      for (let i = 0; i < TEAM_ROTATE_KEY_FAILURE_LIMIT; i++) {
+        expect((await rotate()).status).toBe(400);
+      }
+    });
+  });
+
   it("does not release the slot of a request it refused as rate limited", async () => {
     mockRateLimitCheck.mockResolvedValueOnce({ allowed: false, retryAfterMs: 1000 });
     const res = await POST(
@@ -786,10 +876,14 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
           metadata: { reason: "undecryptable", teamKeyVersion: 1 },
         }),
       ]);
+      expect(Object.keys(vi.mocked(logAuditBulkInTx).mock.calls[0][2][0].metadata ?? {}).sort())
+        .toEqual(documentedMetadataKeys("TEAM_KEY_ROTATION_CARRY"));
       expect(vi.mocked(logAuditBulkInTx).mock.invocationCallOrder[0]).toBeGreaterThan(
         txMock.team.update.mock.invocationCallOrder[0],
       );
-      expect(vi.mocked(logAuditAsync)).toHaveBeenCalledWith(
+      expect(vi.mocked(logAuditInTx)).toHaveBeenCalledWith(
+        txMock,
+        "tenant-1",
         expect.objectContaining({
           action: "TEAM_KEY_ROTATION",
           metadata: expect.objectContaining({ entriesRotated: 1, entriesCarried: 1 }),

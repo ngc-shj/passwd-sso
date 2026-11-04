@@ -1,4 +1,4 @@
-import { apiPath } from "@/lib/constants";
+import { apiPath, ATTACHMENT_ENCRYPTION_MODE } from "@/lib/constants";
 import { AAD_VERSION } from "@/lib/crypto/crypto-aad";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { readApiErrorBody } from "@/lib/http/read-api-error-body";
@@ -116,7 +116,7 @@ export async function uploadTeamAttachment(
     form.append("contentType", file.type);
     form.append("sizeBytes", String(file.size));
     form.append("aadVersion", String(AAD_VERSION));
-    form.append("encryptionMode", "2");
+    form.append("encryptionMode", String(ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED));
     form.append("itemKeyId", info.itemKeyId);
     form.append("cekKeyVersion", String(info.itemKeyVersion));
     form.append("cekEncrypted", sealed.cekEncrypted);

@@ -31,8 +31,14 @@ vi.mock("@/lib/auth/access/team-auth", async (importOriginal) => {
     }
   }
   const actual = await importOriginal<typeof import("@/lib/auth/access/team-auth")>();
-  // The real permission table: the holder predicate reads it.
-  return { requireTeamPermission: mockRequireTeamPermission, hasTeamPermission: actual.hasTeamPermission, TeamAuthError };
+  // The real permission table and role read: the holder predicate and the
+  // in-lock actor re-check use them.
+  return {
+    requireTeamPermission: mockRequireTeamPermission,
+    hasTeamPermission: actual.hasTeamPermission,
+    activeTeamRole: actual.activeTeamRole,
+    TeamAuthError,
+  };
 });
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -117,6 +123,8 @@ type TxOptions = {
   history?: Record<string, unknown> | null;
   holderKeys?: { userId: string }[];
   holderMembers?: { userId: string; role: string }[];
+  /** The actor's membership re-read under the team lock (null: gone). */
+  actor?: { role: string } | null;
 };
 
 function setupTx(options: TxOptions = {}) {
@@ -148,6 +156,10 @@ function setupTx(options: TxOptions = {}) {
     teamMemberKey: { findMany: vi.fn().mockResolvedValue(options.holderKeys ?? [{ userId: "holder-1" }]) },
     teamMember: {
       findMany: vi.fn().mockResolvedValue(options.holderMembers ?? [{ userId: "holder-1", role: "MEMBER" }]),
+      findFirst: vi.fn(async () => {
+        calls.push("actorRole");
+        return "actor" in options ? options.actor : { role: "MEMBER" };
+      }),
     },
     teamPasswordEntry: { update: vi.fn() },
   };
@@ -240,7 +252,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
     expect(status).toBe(200);
     expect(json.success).toBe(true);
     // Lock order: team FOR SHARE, then the entry FOR UPDATE, then the history re-read.
-    expect(calls).toEqual(["teamLock", "entryLock", "historyRead"]);
+    expect(calls).toEqual(["teamLock", "actorRole", "entryLock", "historyRead"]);
     const teamSql = (tx.$queryRaw.mock.calls as unknown as [TemplateStringsArray][])
       .map(([s]) => s.join("?"))
       .find((sql) => /FROM teams\b/.test(sql));
@@ -301,6 +313,24 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
     const { status } = await parseResponse(res);
 
     expect(status).toBe(404);
+    expect(tx.teamPasswordEntryHistory.create).not.toHaveBeenCalled();
+    expect(tx.teamPasswordEntry.update).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["no longer an active member", null],
+    ["demoted to VIEWER", { role: "VIEWER" }],
+  ])("returns 403 ACTOR_NOT_PERMITTED when the actor is %s under the team lock, writing nothing", async (_label, actor) => {
+    preChecksPass();
+    const { tx, calls } = setupTx({ actor });
+
+    const res = await POST(restoreRequest(), makeParams());
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(403);
+    expect(json.error).toBe("ACTOR_NOT_PERMITTED");
+    expect(calls).toEqual(["teamLock", "actorRole"]);
     expect(tx.teamPasswordEntryHistory.create).not.toHaveBeenCalled();
     expect(tx.teamPasswordEntry.update).not.toHaveBeenCalled();
     expect(mockLogAudit).not.toHaveBeenCalled();

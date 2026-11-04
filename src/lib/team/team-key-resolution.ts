@@ -67,8 +67,22 @@ export function teamEntryAadFor(
 }
 
 /**
- * The single client comparison of two ItemKey ids (mirrors the server's
- * itemKeyIdsMatch). NULL never matches — not even NULL against NULL.
+ * Whether an entry awaits the re-key pass: its ItemKey was created under an
+ * older team key, or it holds an ItemKey of unknown identity (v1+ with a
+ * NULL id — written by an instance of the previous release during rollout,
+ * which neither mints the id nor sets the marker). The re-key mints the id.
+ */
+export function isRekeyPending(
+  entry: { itemKeyVersion: number; itemKeyId?: string | null; itemKeyTeamKeyVersion: number },
+  teamKeyVersion: number,
+): boolean {
+  return entry.itemKeyTeamKeyVersion < teamKeyVersion || (entry.itemKeyVersion >= 1 && entry.itemKeyId == null);
+}
+
+/**
+ * The single comparison of two ItemKey ids, client and server (team-item-key.ts
+ * re-exports it). NULL never matches — not even NULL against NULL: an unknown
+ * ItemKey is never "the same" as another one.
  */
 export function itemKeyIdsMatch(
   a: string | null | undefined,

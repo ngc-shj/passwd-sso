@@ -297,6 +297,18 @@ async function seedV1Entry(
   return { entryId, itemKeyRaw };
 }
 
+async function rotationSummaryRows(
+  ctx: TestContext,
+  teamId: string,
+): Promise<{ xmin: string; metadata: Record<string, unknown> }[]> {
+  const r = await ctx.su.pool.query<{ xmin: string; metadata: Record<string, unknown> }>(
+    `SELECT xmin::text, payload->'metadata' AS metadata FROM audit_outbox
+      WHERE payload->>'action' = 'TEAM_KEY_ROTATION' AND payload->>'targetId' = $1`,
+    [teamId],
+  );
+  return r.rows;
+}
+
 async function getTeamKeyVersion(ctx: TestContext, teamId: string): Promise<number> {
   const r = await ctx.su.pool.query<{ team_key_version: number }>(
     `SELECT team_key_version FROM teams WHERE id = $1::uuid`,
@@ -558,6 +570,39 @@ describe("team key rotation — real-DB integration (C7)", () => {
     const body = await res.json();
     expect(body.error).toBe("ENTRY_COUNT_MISMATCH");
     expect(await getTeamKeyVersion(ctx, teamId)).toBe(1);
+    // The rotation rolled back after its member reads: no summary row.
+    expect(await rotationSummaryRows(ctx, teamId)).toEqual([]);
+  });
+
+  // ── Summary audit row commits with the rotation ──────────────────────────
+
+  it("the TEAM_KEY_ROTATION summary row is enqueued by the rotation's own transaction", async () => {
+    const ownerId = await ctx.createUser(tenantId);
+    const teamId = await seedTeam(ctx, tenantId, 1);
+    await seedTeamMember(ctx, tenantId, teamId, ownerId, "OWNER", true);
+
+    mockSession(ownerId);
+    const res = await callRotate(teamId, {
+      newTeamKeyVersion: 2,
+      entries: [],
+      memberKeys: [{
+        userId: ownerId,
+        encryptedTeamKey: hex(32), teamKeyIv: hex(12), teamKeyAuthTag: hex(16),
+        ephemeralPublicKey: hex(32), hkdfSalt: hex(32), keyVersion: 2,
+      }],
+    });
+    expect(res.status).toBe(200);
+
+    // xmin is the inserting transaction: the summary row and the version
+    // bump share it only when the summary is written inside the rotation.
+    const rows = await rotationSummaryRows(ctx, teamId);
+    expect(rows).toHaveLength(1);
+    const team = await ctx.su.pool.query<{ xmin: string }>(
+      `SELECT xmin::text FROM teams WHERE id = $1::uuid`,
+      [teamId],
+    );
+    expect(rows[0].xmin).toBe(team.rows[0].xmin);
+    expect(rows[0].metadata).toMatchObject({ fromVersion: 1, toVersion: 2, entriesRotated: 0 });
   });
 
   // ── Old TeamMemberKey rows retained after success ─────────────────────────

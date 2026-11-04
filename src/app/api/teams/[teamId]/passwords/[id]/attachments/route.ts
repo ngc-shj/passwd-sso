@@ -3,11 +3,11 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { advisoryXactLock } from "@/lib/tenant-rls";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
-import { requireTeamPermission } from "@/lib/auth/access/team-auth";
+import { activeTeamRole, hasTeamPermission, requireTeamPermission } from "@/lib/auth/access/team-auth";
 import { API_ERROR, type ApiErrorCode } from "@/lib/http/api-error-codes";
 import { getAttachmentBlobStore } from "@/lib/blob-store";
 import { newBlobGeneration } from "@/lib/blob-store/object-ref";
-import { AUDIT_TARGET_TYPE, TEAM_PERMISSION, AUDIT_ACTION } from "@/lib/constants";
+import { AUDIT_TARGET_TYPE, TEAM_PERMISSION, AUDIT_ACTION, ATTACHMENT_ENCRYPTION_MODE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import {
   ALLOWED_EXTENSIONS,
@@ -218,7 +218,7 @@ async function handlePOST(
   if (!encryptionModeStr) {
     return errorResponse(API_ERROR.MISSING_REQUIRED_FIELDS);
   }
-  if (parseInt(encryptionModeStr, 10) !== 2) {
+  if (parseInt(encryptionModeStr, 10) !== ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED) {
     return validationError();
   }
   if (!clientId || !itemKeyId || !cekKeyVersionStr || !cekEncrypted || !cekIv || !cekAuthTag || !cekWrapAadVersionStr) {
@@ -272,6 +272,12 @@ async function handlePOST(
         throw e;
       }
       if (!locked) return { ok: false, code: API_ERROR.NOT_FOUND };
+      // The actor's authority, under the team lock: a removal, departure or
+      // demotion committed since requireTeamPermission is seen here.
+      const role = await activeTeamRole(tx, teamId, session.user.id);
+      if (!role || !hasTeamPermission(role, TEAM_PERMISSION.PASSWORD_UPDATE)) {
+        return { ok: false, code: API_ERROR.ACTOR_NOT_PERMITTED };
+      }
 
       // A v0 entry has no ItemKey to wrap under: the client upgrades it first.
       if (locked.itemKeyVersion === 0) {
@@ -305,7 +311,7 @@ async function handlePOST(
           authTag,
           aadVersion,
           keyVersion: locked.teamKeyVersion,
-          encryptionMode: 2,
+          encryptionMode: ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED,
           cekEncrypted: Buffer.from(cekEncrypted, "base64"),
           cekIv,
           cekAuthTag,

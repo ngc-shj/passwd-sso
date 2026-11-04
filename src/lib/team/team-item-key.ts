@@ -1,22 +1,35 @@
 import type { Prisma, TeamRole } from "@prisma/client";
 import { hasTeamPermission } from "@/lib/auth/access/team-auth";
 import { TEAM_PERMISSION } from "@/lib/constants";
+import { normalizeTeamKeyVersion } from "./team-key-resolution";
 
 /**
  * Server-side ItemKey identity and team-key holder rules
  * (docs/archive/review/team-key-rotation-rekey-plan.md C1).
  */
 
+// One definition each, shared with the client (team-key-resolution.ts has no
+// server imports).
+export { isRekeyPending, itemKeyIdsMatch, normalizeTeamKeyVersion } from "./team-key-resolution";
+
+/** The Prisma form of isRekeyPending, for the entries of one team. */
+export function rekeyPendingWhere(teamKeyVersion: number): Prisma.TeamPasswordEntryWhereInput {
+  return {
+    OR: [
+      { itemKeyTeamKeyVersion: { lt: teamKeyVersion } },
+      { itemKeyVersion: { gte: 1 }, itemKeyId: null },
+    ],
+  };
+}
+
 /**
- * The single comparison of two ItemKey ids. NULL never matches — not even
- * NULL against NULL: an unknown ItemKey is never "the same" as another one.
+ * The version a new ItemKey of the entry takes. The high-water covers every
+ * version this release wrote; the entry's own version also covers a v1 entry
+ * an instance of the previous release created or upgraded during rollout,
+ * which left the high-water at 0.
  */
-export function itemKeyIdsMatch(
-  a: string | null | undefined,
-  b: string | null | undefined,
-): boolean {
-  if (a == null || b == null) return false;
-  return a.toLowerCase() === b.toLowerCase();
+export function nextItemKeyVersion(highWater: number, itemKeyVersion: number): number {
+  return Math.max(highWater, itemKeyVersion) + 1;
 }
 
 /**
@@ -38,11 +51,6 @@ export async function itemKeyIvReused(
     select: { itemKeyIv: true },
   });
   return history.some((h) => h.itemKeyIv?.toLowerCase() === newIv);
-}
-
-/** Team key versions below 1 are version 1 everywhere (as clients treat them). */
-export function normalizeTeamKeyVersion(version: number): number {
-  return version < 1 ? 1 : version;
 }
 
 export type TeamKeyVersionHolder = { userId: string; role: TeamRole };

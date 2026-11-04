@@ -9,7 +9,7 @@ import { API_ERROR, type ApiErrorCode } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
-import { AUDIT_ACTION, AUDIT_TARGET_TYPE, TEAM_PERMISSION } from "@/lib/constants";
+import { AUDIT_ACTION, AUDIT_TARGET_TYPE, TEAM_PERMISSION, ATTACHMENT_ENCRYPTION_MODE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { errorResponse, handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/http/api-response";
 import { teamAttachmentMigrateLimiter } from "@/lib/security/rate-limiters";
@@ -50,7 +50,8 @@ type RouteContext = {
 // ciphertext it decrypted; filename, contentType and sizeBytes must be the
 // row's own (a migrate re-encrypts, it does not edit).
 const teamAttachmentMigrateSchema = z.object({
-  itemKeyId: z.string().uuid(),
+  // null only for an entry whose ItemKey has no id yet (see the lock below).
+  itemKeyId: z.string().uuid().nullable(),
   cekKeyVersion: z.number().int().min(1),
   snapshot: z.object({ iv: hexIv, authTag: hexAuthTag }).strict(),
   clientHash: hexHash,
@@ -129,7 +130,7 @@ async function handlePUT(req: NextRequest, { params }: RouteContext) {
   }
   const blobStore = getAttachmentBlobStore();
   let stored: { hash: string; length: number } | null = null;
-  if (current.encryptionMode !== 2) {
+  if (current.encryptionMode !== ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED) {
     try {
       const bytes = await blobStore.getObject(current.encryptedData, blobContext);
       stored = { hash: createHash("sha256").update(bytes).digest("hex"), length: bytes.length };
@@ -170,13 +171,22 @@ async function handlePUT(req: NextRequest, { params }: RouteContext) {
         return { ok: false, code: API_ERROR.ACTOR_NOT_PERMITTED };
       }
 
-      if (row.encryptionMode === 2) {
+      if (row.encryptionMode === ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED) {
         return { ok: false, code: API_ERROR.MIGRATE_NOT_LEGACY };
       }
       if (locked.itemKeyVersion === 0) {
         return { ok: false, code: API_ERROR.ENTRY_UPGRADE_REQUIRED };
       }
-      if (!itemKeyIdsMatch(body.itemKeyId, locked.itemKeyId)) {
+      // A v1+ entry with no id was written by an instance of the previous
+      // release during rollout (D41) and is pending re-key, which needs its
+      // legacy attachments migrated first. Its unknown ItemKey is accepted
+      // only from a client that read it as unknown too; the CEK is then bound
+      // to no id, and the re-key opens it by trial. Every writer of this
+      // release mints an id, so a change of the entry's ItemKey since the
+      // client's read is still refused unless an older instance made it.
+      const sameItemKey =
+        locked.itemKeyId === null ? body.itemKeyId === null : itemKeyIdsMatch(body.itemKeyId, locked.itemKeyId);
+      if (!sameItemKey) {
         return { ok: false, code: API_ERROR.ITEM_KEY_CHANGED };
       }
       if (body.cekKeyVersion !== locked.itemKeyVersion) {
@@ -229,7 +239,7 @@ async function handlePUT(req: NextRequest, { params }: RouteContext) {
           authTag: body.authTag,
           aadVersion: body.aadVersion,
           keyVersion: locked.teamKeyVersion,
-          encryptionMode: 2,
+          encryptionMode: ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED,
           cekEncrypted: Buffer.from(body.cekEncrypted, "base64"),
           cekIv: body.cekIv,
           cekAuthTag: body.cekAuthTag,
@@ -265,7 +275,7 @@ async function handlePUT(req: NextRequest, { params }: RouteContext) {
   // The old object is unreferenced once the row commits.
   await deleteAttachmentBlobs([{ stored: outcome.oldStored, context: blobContext }]);
 
-  return NextResponse.json({ success: true, attachmentId, encryptionMode: 2 });
+  return NextResponse.json({ success: true, attachmentId, encryptionMode: ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED });
 }
 
 export const PUT = withRequestLog(handlePUT);

@@ -86,7 +86,7 @@ describe("TeamRekeyFinishControl", () => {
     expect(await screen.findByRole("button", { name: 'rekeyFinishButton:{"count":7}' })).toBeEnabled();
     expect(screen.getByText('rekeyPendingCount:{"count":7}')).toBeInTheDocument();
     expect(screen.getByText('rekeyStateReady:{"count":3}')).toBeInTheDocument();
-    expect(screen.getByText('rekeyHoldersVersion:{"version":"2","holders":"Yamada"}')).toBeInTheDocument();
+    expect(screen.getByText('rekeyOlderKeyHolders:{"holders":"Yamada"}')).toBeInTheDocument();
     expect(screen.getByText('rekeyStateHolderCannotRekey:{"count":1}')).toBeInTheDocument();
     expect(screen.getByText('rekeyStateUnrecoverable:{"count":1}')).toBeInTheDocument();
     expect(screen.getByText('rekeyRetainedHistory:{"count":4}')).toBeInTheDocument();
@@ -136,8 +136,9 @@ describe("TeamRekeyFinishControl", () => {
     const items = Array.from(report.querySelectorAll(":scope > ul > li"));
     const keyInvalid = items.find((li) => li.textContent?.includes("rekeyIssueKeyInvalid"));
     const unrecoverable = items.find((li) => li.textContent?.includes("rekeyIssueUnrecoverable"));
-    expect(keyInvalid).toHaveTextContent('rekeyIssueKeyInvalid:{"count":1,"version":1}');
-    expect(keyInvalid).toHaveTextContent('rekeyExitAnotherHolderNamed:{"holders":"rekeyHoldersVersion:{\\"version\\":\\"1\\",\\"holders\\":\\"Yamada\\"}"}');
+    // No raw team key version in the issue or the holder list (only the key suspicion names one).
+    expect(keyInvalid).toHaveTextContent('rekeyIssueKeyInvalid:{"count":1}');
+    expect(keyInvalid).toHaveTextContent('rekeyExitAnotherHolderNamed:{"holders":"Yamada"}');
     expect(keyInvalid).not.toHaveTextContent("rekeyExitDelete");
     expect(unrecoverable).toHaveTextContent("rekeyExitDelete");
     expect(unrecoverable).toHaveTextContent("rekeyExitDeleteDeactivatedHolder");

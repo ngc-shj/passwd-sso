@@ -644,6 +644,8 @@ These operations re-encrypt all entries client-side and submit the results atomi
 
 A team key rotation is followed by a per-entry re-key pass (new ItemKey per entry; see [cryptography whitepaper §6.2](../security/cryptography-whitepaper.md)). Its requests go to `/api/teams/*/passwords/*/rekey` and the attachment migrate paths, which need the 20 MB ingress allowance above.
 
+**Upgrading to the release that adds the re-key pass** (migration `20261104000000_team_key_rotation_rekey`): `deploy.sh` migrates before the services roll, so instances of the previous release keep serving against the new columns for the length of the rollout. Those instances do not write the new ItemKey identity: a team entry they create with an ItemKey, or upgrade from a legacy (v0) entry to one, carries no ItemKey id until it is re-keyed. This release counts such an entry as pending re-key, so it shows in the team's re-key count and an owner or admin running the re-key pass gives it an id. Until then, editing it or adding an attachment to it is refused with "the entry's key changed". No operator action is needed beyond running the pass. The database constraint that every ItemKey has an id is added in the next release.
+
 ## Environment Variables
 
 `scripts/deploy.sh` uses these environment variables (cluster / subnets / SG /

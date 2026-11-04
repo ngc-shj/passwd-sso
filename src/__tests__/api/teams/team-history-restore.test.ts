@@ -33,6 +33,7 @@ vi.mock("@/lib/auth/access/team-auth", async (importOriginal) => {
   return {
     requireTeamPermission: mockRequireTeamPermission,
     hasTeamPermission: actual.hasTeamPermission,
+    activeTeamRole: actual.activeTeamRole,
     TeamAuthError,
   };
 });
@@ -122,7 +123,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
 
   const OVERVIEW = { ciphertext: "restored-overview", iv: "a".repeat(24), authTag: "b".repeat(32) };
 
-  function setupRestoreTx(holderKeys: { userId: string }[]) {
+  function setupRestoreTx(holderKeys: { userId: string }[], actor: { role: string } | null = { role: "MEMBER" }) {
     const entryUpdate = vi.fn();
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) =>
       fn({
@@ -173,7 +174,11 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
           deleteMany: vi.fn(),
         },
         teamMemberKey: { findMany: vi.fn().mockResolvedValue(holderKeys) },
-        teamMember: { findMany: vi.fn().mockResolvedValue(holderKeys.map(({ userId }) => ({ userId, role: "ADMIN" }))) },
+        teamMember: {
+          findMany: vi.fn().mockResolvedValue(holderKeys.map(({ userId }) => ({ userId, role: "ADMIN" }))),
+          // The actor's membership, re-read under the team lock.
+          findFirst: vi.fn().mockResolvedValue(actor),
+        },
         teamPasswordEntry: { update: entryUpdate },
       }),
     );
@@ -213,6 +218,18 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
     const { status, json } = await parseResponse(res);
     expect(status).toBe(409);
     expect(json.error).toBe(API_ERROR.HISTORY_KEY_UNAVAILABLE);
+    expect(entryUpdate).not.toHaveBeenCalled();
+  });
+
+  it("refuses with 403 ACTOR_NOT_PERMITTED when the actor's membership is gone under the team lock", async () => {
+    preChecksPass();
+    const entryUpdate = setupRestoreTx([{ userId: "u-holder" }], null);
+
+    const req = createRequest("POST", undefined, { body: { encryptedOverview: OVERVIEW } });
+    const res = await POST(req, createParams({ teamId: "o1", id: "p1", historyId: "h1" }));
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(403);
+    expect(json.error).toBe(API_ERROR.ACTOR_NOT_PERMITTED);
     expect(entryUpdate).not.toHaveBeenCalled();
   });
 

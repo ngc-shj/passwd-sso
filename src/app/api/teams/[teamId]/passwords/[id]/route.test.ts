@@ -59,10 +59,12 @@ vi.mock("@/lib/prisma", () => ({
     user: { findMany: mockUserFindMany },
   },
 }));
-vi.mock("@/lib/auth/access/team-auth", () => ({
+vi.mock("@/lib/auth/access/team-auth", async () => ({
   requireTeamPermission: mockRequireTeamPermission,
   requireTeamMember: mockRequireTeamMember,
   hasTeamPermission: mockHasTeamPermission,
+  // The real role read: the service re-checks the actor under the team lock.
+  activeTeamRole: (await vi.importActual<typeof import("@/lib/auth/access/team-auth")>("@/lib/auth/access/team-auth")).activeTeamRole,
   TeamAuthError,
 }));
 vi.mock("@/lib/tenant-context", () => ({
@@ -312,6 +314,7 @@ const teamCurRow = {
   item_key_id: CUR_ITEM_KEY_ID,
   item_key_team_key_version: 5,
   item_key_version_high_water: 2,
+  created_by_id: "test-user-id",
 };
 
 describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
@@ -326,11 +329,14 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
     teamPasswordEntry: {
       update: vi.fn(),
     },
+    // The actor's membership, re-read under the team lock.
+    teamMember: { findFirst: vi.fn() },
   };
 
   beforeEach(() => {
     vi.resetAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
+    txMock.teamMember.findFirst.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
     mockRequireTeamMember.mockResolvedValue({ id: "member-1", role: TEAM_ROLE.ADMIN, userId: "test-user-id" });
     mockHasTeamPermission.mockReturnValue(true);
     mockAuditLogCreate.mockResolvedValue({});
@@ -452,6 +458,21 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
       createParams({ teamId: TEAM_ID, id: PW_ID }),
     );
     expect(res.status).toBe(403);
+  });
+
+  it("returns 403 ACTOR_NOT_PERMITTED when the actor's membership is gone under the team lock, writing nothing", async () => {
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
+    txMock.teamMember.findFirst.mockResolvedValue(null);
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`, {
+        body: validE2EBody,
+      }),
+      createParams({ teamId: TEAM_ID, id: PW_ID }),
+    );
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe(API_ERROR.ACTOR_NOT_PERMITTED);
+    expect(txMock.teamPasswordEntry.update).not.toHaveBeenCalled();
+    expect(txMock.teamPasswordEntryHistory.create).not.toHaveBeenCalled();
   });
 
   it("returns 400 on malformed JSON for PUT", async () => {

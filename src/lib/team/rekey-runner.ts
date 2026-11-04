@@ -1,9 +1,9 @@
-import { apiPath } from "@/lib/constants";
+import { apiPath, ATTACHMENT_ENCRYPTION_MODE } from "@/lib/constants";
 import { MS_PER_SECOND } from "@/lib/constants/time";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import type { RekeyEntryState } from "@/lib/constants/team/rotate-key";
-import { normalizeTeamKeyVersion, type ResolveTeamKey } from "@/lib/team/team-key-resolution";
+import { isRekeyPending, normalizeTeamKeyVersion, type ResolveTeamKey } from "@/lib/team/team-key-resolution";
 import {
   REKEY_ENTRY_BLOCK,
   RekeyCurrentKeyUnavailableError,
@@ -273,7 +273,7 @@ export async function runRekeyPass(deps: RekeyRunnerDeps): Promise<RekeyPassResu
     }
     const download = (await dl.json()) as TeamAttachmentDownload;
     const cekWrapKey = await liveCekWrapKey(teamId, entry, deps.resolveKey);
-    if (!cekWrapKey || !entry.itemKeyId) {
+    if (!cekWrapKey) {
       recordSkip(entry.id, REKEY_ENTRY_BLOCK.UNDECRYPTABLE);
       return SKIP;
     }
@@ -283,7 +283,7 @@ export async function runRekeyPass(deps: RekeyRunnerDeps): Promise<RekeyPassResu
         teamId,
         entry.id,
         download,
-        { itemKeyId: entry.itemKeyId, itemKeyVersion: entry.itemKeyVersion, cekWrapKey },
+        { itemKeyId: entry.itemKeyId ?? null, itemKeyVersion: entry.itemKeyVersion, cekWrapKey },
         deps.resolveKey,
       );
     } catch (e) {
@@ -365,7 +365,10 @@ export async function runRekeyPass(deps: RekeyRunnerDeps): Promise<RekeyPassResu
       }
       const data = (await got.json()) as RekeyEntryData;
       const { entry } = data;
-      if (entry.itemKeyTeamKeyVersion !== undefined && entry.itemKeyTeamKeyVersion >= data.teamKeyVersion) {
+      if (
+        entry.itemKeyTeamKeyVersion !== undefined &&
+        !isRekeyPending({ ...entry, itemKeyTeamKeyVersion: entry.itemKeyTeamKeyVersion }, data.teamKeyVersion)
+      ) {
         return { kind: "done" };
       }
       const version = normalizeTeamKeyVersion(entry.teamKeyVersion);
@@ -413,7 +416,7 @@ export async function runRekeyPass(deps: RekeyRunnerDeps): Promise<RekeyPassResu
       }
 
       // Legacy attachments next (D24), each re-read after.
-      const legacy = data.attachments.find((a) => a.encryptionMode !== 2);
+      const legacy = data.attachments.find((a) => a.encryptionMode !== ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED);
       if (legacy) {
         const migrated = await migrateAttachment(data, legacy.id);
         if (migrated.kind === "skip") return { kind: "skipped" };

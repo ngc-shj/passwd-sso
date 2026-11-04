@@ -22,7 +22,12 @@ import { base64ToBytes } from "@/lib/team/team-attachment-crypto";
 
 // Real Web Crypto; the spy records each raw key buffer handed out so the
 // zeroization cell sees the real bytes.
-const rawRefs = vi.hoisted(() => ({ refs: [] as Uint8Array[] }));
+// `failDeriveAt` makes the n-th deriveItemEncryptionKey call (1-based) throw.
+const rawRefs = vi.hoisted(() => ({
+  refs: [] as Uint8Array[],
+  deriveCalls: 0,
+  failDeriveAt: null as number | null,
+}));
 vi.mock("@/lib/crypto/crypto-team", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/lib/crypto/crypto-team")>();
   const record = <A extends unknown[]>(fn: (...a: A) => Promise<Uint8Array>) =>
@@ -35,6 +40,11 @@ vi.mock("@/lib/crypto/crypto-team", async (importOriginal) => {
     ...real,
     unwrapItemKey: record(real.unwrapItemKey),
     unwrapTeamAttachmentCek: record(real.unwrapTeamAttachmentCek),
+    deriveItemEncryptionKey: async (raw: Uint8Array) => {
+      rawRefs.deriveCalls += 1;
+      if (rawRefs.deriveCalls === rawRefs.failDeriveAt) throw new Error("derive failed");
+      return real.deriveItemEncryptionKey(raw);
+    },
     generateItemKey: () => {
       const raw = real.generateItemKey();
       rawRefs.refs.push(raw);
@@ -282,6 +292,28 @@ describe("buildEntryRekeyPayload", () => {
 
     // live ItemKey unwrap, new ItemKey, the CEK unwrap
     expect(rawRefs.refs.length).toBe(3);
+    for (const raw of rawRefs.refs) expect(raw.every((b) => b === 0)).toBe(true);
+  });
+
+  it.each([
+    ["the live ItemKey", 1],
+    ["a history row's own ItemKey", 2],
+  ])("zeroes %s when deriving from it throws", async (_label, failAt) => {
+    const f = await baseFixture();
+    f.data.history = [
+      await sealHistoryRow({ id: "h-own", entryId: ENTRY, teamKey: f.keys.get(2)!, teamKeyVersion: 2, itemKey: generateItemKey(), itemKeyVersion: 1, itemKeyId: crypto.randomUUID(), blob: "own" }),
+    ];
+    rawRefs.refs.length = 0;
+    rawRefs.deriveCalls = 0;
+    rawRefs.failDeriveAt = failAt;
+    try {
+      await expect(buildEntryRekeyPayload(TEAM_ID, f.data, makeResolver(f.keys))).rejects.toThrow("derive failed");
+    } finally {
+      rawRefs.failDeriveAt = null;
+    }
+
+    // new ItemKey, the live unwrap, and (when reached) the history unwrap
+    expect(rawRefs.refs.length).toBe(failAt + 1);
     for (const raw of rawRefs.refs) expect(raw.every((b) => b === 0)).toBe(true);
   });
 });

@@ -293,7 +293,7 @@ describe("TeamRotateKeyButton", () => {
     await openAndConfirm();
 
     const report = await screen.findByRole("region", { name: "rekeyReportTitle" });
-    expect(report).toHaveTextContent('rekeyIssueUndecryptable:{"count":2,"version":2}');
+    expect(report).toHaveTextContent('rekeyIssueUndecryptable:{"count":2}');
     expect(report).toHaveTextContent('rekeyKeySuspicion:{"version":2}');
     // Holder Y is named as the exit.
     expect(report).toHaveTextContent("rekeyExitAnotherHolderNamed");

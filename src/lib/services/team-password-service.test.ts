@@ -11,8 +11,11 @@ const {
   mockTeamPasswordEntryHistoryDeleteMany,
   mockTxQueryRaw,
   mockTransaction,
+  mockTeamMemberFindFirst,
   queryRawOn,
 } = vi.hoisted(() => {
+  // The actor's role, re-read under the team lock (activeTeamRole).
+  const mockTeamMemberFindFirst = vi.fn();
   const mockTeamLockRead = vi.fn();
   const mockTeamFolderFindUnique = vi.fn();
   const mockTeamTagCount = vi.fn();
@@ -67,6 +70,7 @@ const {
     teamPasswordEntry: {
       update: mockTeamPasswordEntryUpdate,
     },
+    teamMember: { findFirst: mockTeamMemberFindFirst },
   };
 
   const mockTransaction = vi.fn(async (fn: (tx: typeof txClient) => Promise<unknown>) =>
@@ -84,6 +88,7 @@ const {
     mockTeamPasswordEntryHistoryDeleteMany,
     mockTxQueryRaw,
     mockTransaction,
+    mockTeamMemberFindFirst,
     queryRawOn,
   };
 });
@@ -450,6 +455,7 @@ const TEAM_CUR_ROW = {
   item_key_id: "11111111-1111-4111-8111-111111111111",
   item_key_team_key_version: 5,
   item_key_version_high_water: 2,
+  created_by_id: "user-1",
 };
 const CUR_ITEM_KEY_ID = TEAM_CUR_ROW.item_key_id;
 
@@ -469,6 +475,7 @@ describe("updateTeamPassword", () => {
     vi.resetAllMocks();
     // Re-apply $queryRaw and transaction implementation after reset
     mockTxQueryRaw.mockResolvedValue([TEAM_CUR_ROW]);
+    mockTeamMemberFindFirst.mockResolvedValue({ role: "ADMIN" });
     mockTransaction.mockImplementation(async (fn) =>
       fn({
         $queryRaw: queryRawOn("tx"),
@@ -481,6 +488,7 @@ describe("updateTeamPassword", () => {
         teamPasswordEntry: {
           update: mockTeamPasswordEntryUpdate,
         },
+        teamMember: { findFirst: mockTeamMemberFindFirst },
       }),
     );
   });
@@ -761,6 +769,47 @@ describe("updateTeamPassword", () => {
     expect(mockTeamPasswordEntryHistoryCreate).not.toHaveBeenCalled();
     return err as TeamPasswordServiceError;
   }
+
+  describe("the actor's role, re-read under the team lock", () => {
+    beforeEach(() => {
+      mockTeamLockRead.mockResolvedValue({ teamKeyVersion: 5 });
+      mockTeamPasswordEntryHistoryCreate.mockResolvedValue({});
+      historyRows([]);
+      mockTeamPasswordEntryUpdate.mockResolvedValue({ id: PASSWORD_ID, tags: [] });
+    });
+
+    it.each([
+      ["no longer an active member", null],
+      ["demoted to VIEWER", { role: "VIEWER" }],
+    ])("refuses a full update when the actor is %s (403 ACTOR_NOT_PERMITTED)", async (_label, membership) => {
+      mockTeamMemberFindFirst.mockResolvedValue(membership);
+      const err = await refusal(FULL_REUSE);
+      expect(err.code).toBe(API_ERROR.ACTOR_NOT_PERMITTED);
+      expect(err.statusHint).toBe(403);
+      expect(mockTeamMemberFindFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { teamId: TEAM_ID, userId: USER_ID, deactivatedAt: null } }),
+      );
+    });
+
+    it("refuses a MEMBER's full update of an entry another user created (403 ACTOR_NOT_PERMITTED)", async () => {
+      mockTeamMemberFindFirst.mockResolvedValue({ role: "MEMBER" });
+      lockedRow({ ...TEAM_CUR_ROW, created_by_id: "someone-else" });
+      const err = await refusal(FULL_REUSE);
+      expect(err.code).toBe(API_ERROR.ACTOR_NOT_PERMITTED);
+    });
+
+    it("control: a MEMBER updates their own entry", async () => {
+      mockTeamMemberFindFirst.mockResolvedValue({ role: "MEMBER" });
+      await updateTeamPassword(TEAM_ID, PASSWORD_ID, FULL_REUSE);
+      expect(mockTeamPasswordEntryUpdate).toHaveBeenCalledOnce();
+    });
+
+    it("control: an ADMIN updates another user's entry", async () => {
+      lockedRow({ ...TEAM_CUR_ROW, created_by_id: "someone-else" });
+      await updateTeamPassword(TEAM_ID, PASSWORD_ID, FULL_REUSE);
+      expect(mockTeamPasswordEntryUpdate).toHaveBeenCalledOnce();
+    });
+  });
 
   describe("ItemKey rules under the entry lock", () => {
     beforeEach(() => {

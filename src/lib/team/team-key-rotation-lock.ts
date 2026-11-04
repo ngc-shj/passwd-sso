@@ -16,7 +16,9 @@ import { TEAM_KEY_LOCK_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
  * Writers holding `teams ... FOR SHARE`: entry create and full update
  * (incl. bulk import and the v0→v1 ItemKey upgrade,
  * team-password-service.ts); history restore (which also reads the
- * team-key holder set under it); member admission, invitation accept,
+ * team-key holder set under it); the per-entry re-key POST
+ * (passwords/[id]/rekey); attachment upload, migrate and delete
+ * (lockTeamAttachmentEntry, team-attachment-lock.ts); member admission, invitation accept,
  * SCIM approve/reject and member-key distribution (confirm-key); and member
  * removal, role change, tenant departure, vault reset and SCIM
  * deprovisioning (lockTeamsAgainstRotation and

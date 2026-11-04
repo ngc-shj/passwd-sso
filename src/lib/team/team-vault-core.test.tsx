@@ -516,6 +516,168 @@ describe("team-vault-core", () => {
     });
   });
 
+  describe("vault lock", () => {
+    const memberKeyResponse = {
+      encryptedTeamKey: "cipher",
+      teamKeyIv: "iv",
+      teamKeyAuthTag: "tag",
+      ephemeralPublicKey: "epk",
+      hkdfSalt: "salt",
+      keyVersion: 3,
+      wrapVersion: 1,
+    };
+    const entryData = {
+      itemKeyVersion: 1,
+      encryptedItemKey: "enc-ik",
+      itemKeyIv: "ik-iv",
+      itemKeyAuthTag: "ik-tag",
+      itemKeyId: "ik-1",
+      teamKeyVersion: 3,
+    };
+
+    function renderWithLock() {
+      let unlocked = true;
+      function Wrapper({ children }: { children: ReactNode }) {
+        return (
+          <TeamVaultProvider
+            getEcdhPrivateKeyBytes={() => new Uint8Array([1, 2, 3, 4])}
+            getUserId={() => "user-1"}
+            vaultUnlocked={unlocked}
+            pollingSuspended={true}
+          >
+            {children}
+          </TeamVaultProvider>
+        );
+      }
+      const hook = renderHook(() => useTeamVault(), { wrapper: Wrapper });
+      return {
+        ...hook,
+        setUnlocked(next: boolean) {
+          unlocked = next;
+          hook.rerender();
+        },
+      };
+    }
+
+    function setupFetch() {
+      const fetchMock = vi.fn(async (url: string) => {
+        if (url.includes("/passwords/entry-1")) {
+          return { ok: true, json: async () => entryData };
+        }
+        return { ok: true, json: async () => memberKeyResponse };
+      });
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+      return fetchMock;
+    }
+
+    const memberKeyFetches = (fetchMock: ReturnType<typeof setupFetch>) =>
+      fetchMock.mock.calls.filter((c) => (c[0] as string).includes("/member-key")).length;
+
+    beforeEach(() => {
+      mockUnwrapTeamKey.mockImplementation(async () => new Uint8Array([7, 7, 7, 7]));
+      mockDeriveTeamEncryptionKey.mockResolvedValue({ type: "secret" } as CryptoKey);
+      mockUnwrapItemKey.mockImplementation(async () => new Uint8Array([1, 2, 3, 4]));
+      mockDeriveItemEncryptionKey.mockResolvedValue({ type: "secret" } as CryptoKey);
+      mockDeriveItemCekWrapKey.mockResolvedValue({ type: "secret" } as CryptoKey);
+    });
+
+    it("drops the team key and ItemKey caches when the vault locks", async () => {
+      const fetchMock = setupFetch();
+      const view = renderWithLock();
+
+      await act(async () => {
+        await view.result.current.getItemEncryptionKey("team-1", "entry-1");
+        await view.result.current.getItemEncryptionKey("team-1", "entry-1");
+      });
+      // Served from both caches the second time.
+      expect(memberKeyFetches(fetchMock)).toBe(1);
+      expect(mockUnwrapItemKey).toHaveBeenCalledTimes(1);
+
+      act(() => view.setUnlocked(false));
+      act(() => view.setUnlocked(true));
+
+      await act(async () => {
+        await view.result.current.getItemEncryptionKey("team-1", "entry-1");
+      });
+      expect(memberKeyFetches(fetchMock)).toBe(2);
+      expect(mockUnwrapItemKey).toHaveBeenCalledTimes(2);
+    });
+
+    it("keeps both caches while the vault stays unlocked across a re-render", async () => {
+      const fetchMock = setupFetch();
+      const view = renderWithLock();
+
+      await act(async () => {
+        await view.result.current.getItemEncryptionKey("team-1", "entry-1");
+      });
+      act(() => view.setUnlocked(true));
+      await act(async () => {
+        await view.result.current.getItemEncryptionKey("team-1", "entry-1");
+      });
+
+      expect(memberKeyFetches(fetchMock)).toBe(1);
+      expect(mockUnwrapItemKey).toHaveBeenCalledTimes(1);
+    });
+
+    it("an ItemKey unwrap that resolves after the lock does not repopulate the caches", async () => {
+      const fetchMock = setupFetch();
+      let releaseUnwrap: (raw: Uint8Array) => void = () => {};
+      mockUnwrapItemKey.mockImplementationOnce(
+        () => new Promise<Uint8Array>((resolve) => { releaseUnwrap = resolve; }),
+      );
+      const view = renderWithLock();
+
+      let inFlight: Promise<unknown> = Promise.resolve();
+      await act(async () => {
+        inFlight = view.result.current.getItemEncryptionKey("team-1", "entry-1");
+        // Let the entry and member-key fetches settle so the unwrap is parked.
+        await vi.waitFor(() => expect(mockUnwrapItemKey).toHaveBeenCalledTimes(1));
+      });
+
+      act(() => view.setUnlocked(false));
+      await act(async () => {
+        releaseUnwrap(new Uint8Array([1, 2, 3, 4]));
+        await inFlight;
+      });
+      act(() => view.setUnlocked(true));
+
+      await act(async () => {
+        await view.result.current.getItemEncryptionKey("team-1", "entry-1");
+      });
+      expect(mockUnwrapItemKey).toHaveBeenCalledTimes(2);
+      // The team key cache was populated before the lock and then cleared.
+      expect(memberKeyFetches(fetchMock)).toBe(2);
+    });
+
+    it("a team key unwrap that resolves after the lock does not repopulate the team key cache", async () => {
+      const fetchMock = setupFetch();
+      let releaseTeamUnwrap: (raw: Uint8Array) => void = () => {};
+      mockUnwrapTeamKey.mockImplementationOnce(
+        () => new Promise<Uint8Array>((resolve) => { releaseTeamUnwrap = resolve; }),
+      );
+      const view = renderWithLock();
+
+      let inFlight: Promise<unknown> = Promise.resolve();
+      await act(async () => {
+        inFlight = view.result.current.getTeamEncryptionKey("team-1");
+        await vi.waitFor(() => expect(mockUnwrapTeamKey).toHaveBeenCalledTimes(1));
+      });
+
+      act(() => view.setUnlocked(false));
+      await act(async () => {
+        releaseTeamUnwrap(new Uint8Array([7, 7, 7, 7]));
+        await inFlight;
+      });
+      act(() => view.setUnlocked(true));
+
+      await act(async () => {
+        await view.result.current.getTeamEncryptionKey("team-1");
+      });
+      expect(memberKeyFetches(fetchMock)).toBe(2);
+      expect(mockUnwrapTeamKey).toHaveBeenCalledTimes(2);
+    });
+  });
+
   it("distributes pending keys on unlock, skips missing public keys, and cleans up listeners", async () => {
     const rawKeyBytes = new Uint8Array([5, 6, 7, 8]);
     const ownTeamKeyBytes = new Uint8Array([3, 3, 3, 3]);

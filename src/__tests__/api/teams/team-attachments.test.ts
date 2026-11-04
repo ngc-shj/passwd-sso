@@ -15,7 +15,9 @@ const {
   mockWithTeamTenantRls,
   mockRateLimitCheck,
   mockLockEntry,
+  mockTeamMemberFindFirst,
 } = vi.hoisted(() => ({
+  mockTeamMemberFindFirst: vi.fn(),
   mockAuth: vi.fn(),
   mockRequireTeamPermission: vi.fn(),
   mockEntryFindUnique: vi.fn(),
@@ -32,7 +34,8 @@ const {
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/security/rate-limit", () => ({ createRateLimiter: vi.fn(() => ({ check: mockRateLimitCheck, clear: vi.fn() })) }));
-vi.mock("@/lib/auth/access/team-auth", () => {
+vi.mock("@/lib/auth/access/team-auth", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/auth/access/team-auth")>("@/lib/auth/access/team-auth");
   class TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -41,7 +44,13 @@ vi.mock("@/lib/auth/access/team-auth", () => {
       this.status = status;
     }
   }
-  return { requireTeamPermission: mockRequireTeamPermission, TeamAuthError };
+  return {
+    requireTeamPermission: mockRequireTeamPermission,
+    // The real role read and permission table: the upload re-checks the actor under the team lock.
+    activeTeamRole: actual.activeTeamRole,
+    hasTeamPermission: actual.hasTeamPermission,
+    TeamAuthError,
+  };
 });
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -142,6 +151,7 @@ const LOCKED_ENTRY = { teamKeyVersion: 1, tenantId: "t1", itemKeyVersion: 1, ite
 const tx = {
   attachment: { count: mockAttachmentCount, create: mockAttachmentCreate },
   $executeRaw: mockExecuteRaw,
+  teamMember: { findFirst: mockTeamMemberFindFirst },
 };
 
 // Asserts the per-entry advisory lock ($executeRaw with pg_advisory_xact_lock)
@@ -216,6 +226,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     mockPutObject.mockResolvedValue(Buffer.from("stored"));
     mockDeleteObject.mockResolvedValue(undefined);
     mockLockEntry.mockResolvedValue(LOCKED_ENTRY);
+    mockTeamMemberFindFirst.mockResolvedValue({ role: "MEMBER" });
     mockWithTeamTenantRls.mockImplementation(
       async (_teamId: string, fn: (tenantId: string, client: typeof tx) => unknown) => fn("t1", tx),
     );
@@ -473,6 +484,20 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     expect(json.error).toBe("ENTRY_UPGRADE_REQUIRED");
     expect(mockAttachmentCreate).not.toHaveBeenCalled();
     expect(mockDeleteObject).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses with 403 ACTOR_NOT_PERMITTED when the actor's membership is gone under the team lock", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
+    mockAttachmentCount.mockResolvedValue(0);
+    mockTeamMemberFindFirst.mockResolvedValue(null);
+    const req = await createFormDataRequest(validFormFields());
+    const res = await POST(req, makeParams("o1", "e1"));
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(403);
+    expect(json.error).toBe("ACTOR_NOT_PERMITTED");
+    expect(mockAttachmentCreate).not.toHaveBeenCalled();
   });
 
   it("rejects a stale itemKeyId with 409 ITEM_KEY_CHANGED", async () => {

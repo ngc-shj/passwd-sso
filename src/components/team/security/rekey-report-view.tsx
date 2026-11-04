@@ -25,8 +25,8 @@ export function RekeyReportView({ report }: RekeyReportViewProps) {
   if (report.items.length === 0 && report.keySuspectVersions.length === 0) return null;
 
   const holdersText = (item: RekeyReportItem) =>
-    Object.entries(item.holdersByVersion ?? {})
-      .map(([version, names]) => t("rekeyHoldersVersion", { version, holders: names.join(", ") }))
+    Object.values(item.holdersByVersion ?? {})
+      .map((names) => names.join(", "))
       .join("; ");
 
   const skipReason = (reason: string | undefined) => {
@@ -45,12 +45,11 @@ export function RekeyReportView({ report }: RekeyReportViewProps) {
 
   const issueText = (item: RekeyReportItem) => {
     const count = item.count;
-    const version = item.teamKeyVersion ?? 0;
     switch (item.issue) {
       case REKEY_ISSUE.UNDECRYPTABLE:
-        return t("rekeyIssueUndecryptable", { count, version });
+        return t("rekeyIssueUndecryptable", { count });
       case REKEY_ISSUE.KEY_INVALID:
-        return t("rekeyIssueKeyInvalid", { count, version });
+        return t("rekeyIssueKeyInvalid", { count });
       case REKEY_ISSUE.NEEDS_REKEYER_HOLDER:
         return t("rekeyIssueNeedsRekeyerHolder", { count });
       case REKEY_ISSUE.HOLDER_CANNOT_REKEY:

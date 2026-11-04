@@ -154,14 +154,23 @@ describe("GET /api/teams/[teamId]/rekey", () => {
 
   // ── Paging ───────────────────────────────────────────────────────────────
 
-  it("counts and pages pending entries (marker below the team's version, trash and archive included) by id", async () => {
+  // Pending: the marker below the team's version, or a v1+ ItemKey of unknown
+  // identity (written by a previous-release instance during rollout).
+  const PENDING = {
+    OR: [
+      { itemKeyTeamKeyVersion: { lt: 5 } },
+      { itemKeyVersion: { gte: 1 }, itemKeyId: null },
+    ],
+  };
+
+  it("counts and pages pending entries (marker below the team's version or a NULL v1+ id, trash and archive included) by id", async () => {
     txMock.teamPasswordEntry.count.mockResolvedValue(7);
     txMock.teamPasswordEntry.findMany.mockResolvedValue([{ id: "e1" }, { id: "e2" }]);
     const { res, json } = await list();
     expect(res.status).toBe(200);
     expect(json.pendingCount).toBe(7);
     expect(json.entryIds).toEqual(["e1", "e2"]);
-    const pendingWhere = { teamId: TEAM, itemKeyTeamKeyVersion: { lt: 5 } };
+    const pendingWhere = { teamId: TEAM, ...PENDING };
     expect(txMock.teamPasswordEntry.count).toHaveBeenCalledWith({ where: pendingWhere });
     expect(txMock.teamPasswordEntry.findMany).toHaveBeenCalledWith({
       where: pendingWhere,
@@ -175,7 +184,7 @@ describe("GET /api/teams/[teamId]/rekey", () => {
     await list(`?after=${AFTER}&limit=100`);
     expect(txMock.teamPasswordEntry.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { teamId: TEAM, itemKeyTeamKeyVersion: { lt: 5 }, id: { gt: AFTER } },
+        where: { teamId: TEAM, ...PENDING, id: { gt: AFTER } },
         take: 100,
       }),
     );

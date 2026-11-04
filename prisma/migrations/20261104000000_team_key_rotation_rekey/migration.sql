@@ -87,8 +87,12 @@ BEGIN
 END
 $backfill$;
 
-ALTER TABLE "team_password_entries" ADD CONSTRAINT "team_password_entries_item_key_id_iff_item_key"
-  CHECK (("item_key_version" = 0) = ("item_key_id" IS NULL));
+-- No CHECK ((item_key_version = 0) = (item_key_id IS NULL)) in this release:
+-- deploy runs this migration before the services roll, and an instance still
+-- on the previous release creates or upgrades a v1 entry without an id. The
+-- application treats a v1+ entry with a NULL id as pending re-key, and the
+-- pass mints its id. The CHECK ships in the next release, after a backfill of
+-- such rows (follow-up).
 -- END BACKFILL team-key-rotation-rekey
 
 COMMIT;

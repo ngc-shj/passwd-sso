@@ -89,6 +89,7 @@ import { TeamRotationInProgressError } from "@/lib/team/team-key-rotation-lock";
 import { REKEY_INCONSISTENCY, RekeyConsistencyError } from "@/lib/team/rekey-consistency";
 import { REKEY_HISTORY_MAX } from "@/lib/validations/common";
 import { METADATA_MAX_BYTES } from "@/lib/validations/common.server";
+import { documentedMetadataKeys } from "@/__tests__/helpers/audit-log-reference";
 
 const TEAM = "11111111-1111-4111-8111-111111111111";
 const ENTRY = "22222222-2222-4222-8222-222222222222";
@@ -107,6 +108,7 @@ const LOCKED = {
   overview_iv: iv("b"),
   item_key_iv: iv("c"),
   item_key_version: 1,
+  item_key_id: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee" as string | null,
   item_key_team_key_version: 1,
   item_key_version_high_water: 3,
 };
@@ -174,7 +176,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/rekey", () => {
       async (_teamId: string, fn: (tenantId: string, tx: typeof txMock) => unknown) => fn("tenant-1", txMock),
     );
     // Pre-check context.
-    txMock.teamPasswordEntry.findUnique.mockResolvedValue({ teamId: TEAM, itemKeyVersion: 1, itemKeyTeamKeyVersion: 1 });
+    txMock.teamPasswordEntry.findUnique.mockResolvedValue({ teamId: TEAM, itemKeyVersion: 1, itemKeyId: LOCKED.item_key_id, itemKeyTeamKeyVersion: 1 });
     txMock.team.findUnique.mockResolvedValue({ teamKeyVersion: 2 });
     txMock.attachment.count.mockResolvedValue(0);
     // Transaction.
@@ -253,7 +255,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/rekey", () => {
     ["REKEY_ATTACHMENTS_UNMIGRATED for an entry holding a legacy attachment", {}, 1, "REKEY_ATTACHMENTS_UNMIGRATED"],
   ])("409 %s, without reading the body", async (_label, entryChange, legacy, code) => {
     txMock.teamPasswordEntry.findUnique.mockResolvedValue({
-      teamId: TEAM, itemKeyVersion: 1, itemKeyTeamKeyVersion: 1, ...entryChange,
+      teamId: TEAM, itemKeyVersion: 1, itemKeyId: LOCKED.item_key_id, itemKeyTeamKeyVersion: 1, ...entryChange,
     });
     txMock.attachment.count.mockResolvedValue(legacy);
     // An unparseable body: refusing first proves the body was not read.
@@ -372,6 +374,8 @@ describe("POST /api/teams/[teamId]/passwords/[id]/rekey", () => {
       }),
     );
     expect(mockLogAuditInTx.mock.invocationCallOrder[0]).toBeGreaterThan(mockPostcheck.mock.invocationCallOrder[0]);
+    // The keys docs/operations/audit-log-reference.md documents for the action.
+    expect(Object.keys(mockLogAuditInTx.mock.calls[0][2].metadata).sort()).toEqual(documentedMetadataKeys("TEAM_ENTRY_REKEY"));
   });
 
   it("takes the team lock, then the entry, then its history and attachment rows FOR UPDATE", async () => {
@@ -455,6 +459,29 @@ describe("POST /api/teams/[teamId]/passwords/[id]/rekey", () => {
   it("409 REKEY_NOT_PENDING when a re-key committed since the pre-check", async () => {
     lockedEntry = { ...LOCKED, item_key_team_key_version: 2 };
     await expectRefused(validBody(), 409, "REKEY_NOT_PENDING");
+  });
+
+  describe("a v1+ entry with a NULL item_key_id (written by a previous-release instance during rollout)", () => {
+    beforeEach(() => {
+      // Marked current: only the unknown identity makes it pending.
+      txMock.teamPasswordEntry.findUnique.mockResolvedValue({ teamId: TEAM, itemKeyVersion: 1, itemKeyId: null, itemKeyTeamKeyVersion: 2 });
+      lockedEntry = { ...LOCKED, item_key_id: null, item_key_team_key_version: 2 };
+    });
+
+    it("is pending: the re-key is accepted and mints the id", async () => {
+      const res = await POST(request("POST", validBody()), ctx());
+      expect(res.status).toBe(200);
+      const data = txMock.teamPasswordEntry.update.mock.calls[0][0].data;
+      expect(data.itemKeyId).toMatch(/^[0-9a-f-]{36}$/);
+      expect(data.itemKeyTeamKeyVersion).toBe(2);
+    });
+
+    it("takes the version after the entry's own when the high-water lags it", async () => {
+      lockedEntry = { ...LOCKED, item_key_id: null, item_key_version: 1, item_key_version_high_water: 0 };
+      await expectRefused(validBody({ newItemKeyVersion: 1 }), 409, "ITEM_KEY_VERSION_INVALID");
+      const res = await POST(request("POST", validBody({ newItemKeyVersion: 2 })), ctx());
+      expect(res.status).toBe(200);
+    });
   });
 
   it("409 TEAM_KEY_VERSION_CHANGED when the body names another team key version, before the snapshot", async () => {

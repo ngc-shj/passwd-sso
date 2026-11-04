@@ -14,7 +14,9 @@ const {
   mockHistoryFindMany,
   mockLockEntry,
   mockLockRow,
+  mockTeamMemberFindFirst,
 } = vi.hoisted(() => ({
+  mockTeamMemberFindFirst: vi.fn(),
   mockAuth: vi.fn(),
   mockRequireTeamPermission: vi.fn(),
   mockEntryFindUnique: vi.fn(),
@@ -29,7 +31,8 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/auth/access/team-auth", () => {
+vi.mock("@/lib/auth/access/team-auth", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/auth/access/team-auth")>("@/lib/auth/access/team-auth");
   class TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -38,7 +41,13 @@ vi.mock("@/lib/auth/access/team-auth", () => {
       this.status = status;
     }
   }
-  return { requireTeamPermission: mockRequireTeamPermission, TeamAuthError };
+  return {
+    requireTeamPermission: mockRequireTeamPermission,
+    // The real role read and permission table: the delete re-checks the actor under the team lock.
+    activeTeamRole: actual.activeTeamRole,
+    hasTeamPermission: actual.hasTeamPermission,
+    TeamAuthError,
+  };
 });
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -108,6 +117,7 @@ const tx = {
   teamPasswordEntry: { findUnique: mockEntryFindUnique },
   attachment: { findUnique: mockAttachmentFindUnique, delete: mockAttachmentDelete },
   teamPasswordEntryHistory: { findMany: mockHistoryFindMany },
+  teamMember: { findFirst: mockTeamMemberFindFirst },
 };
 const withTx = async (_teamId: string, fn: (tenantId: string, client: typeof tx) => unknown) => fn("t1", tx);
 
@@ -249,6 +259,7 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]",
     vi.clearAllMocks();
     mockWithTeamTenantRls.mockImplementation(withTx);
     mockLockEntry.mockResolvedValue({ teamKeyVersion: 1, tenantId: "t1", itemKeyVersion: 1, itemKeyId: ITEM_KEY_ID });
+    mockTeamMemberFindFirst.mockResolvedValue({ role: "ADMIN" });
   });
 
   it("returns 401 when not authenticated", async () => {
@@ -288,6 +299,18 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]",
     const res = await DELETE(createDeleteRequest(), makeParams("o1", "e1", "a1"));
     expect(res.status).toBe(404);
     expect(mockAttachmentDelete).not.toHaveBeenCalled();
+  });
+
+  it("refuses with 403 ACTOR_NOT_PERMITTED when the actor's membership is gone under the team lock", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockEntryFindUnique.mockResolvedValue({ teamId: "o1" });
+    mockTeamMemberFindFirst.mockResolvedValue(null);
+    const res = await DELETE(createDeleteRequest(), makeParams("o1", "e1", "a1"));
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe("ACTOR_NOT_PERMITTED");
+    expect(mockAttachmentDelete).not.toHaveBeenCalled();
+    expect(mockDeleteObject).not.toHaveBeenCalled();
   });
 
   it("deletes attachment successfully", async () => {

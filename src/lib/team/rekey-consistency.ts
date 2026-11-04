@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { itemKeyIdsMatch } from "@/lib/team/team-item-key";
+import { ATTACHMENT_ENCRYPTION_MODE } from "@/lib/constants/vault/attachment-encryption-mode";
 
 /**
  * Post-write verification of a team entry re-key
@@ -116,7 +117,7 @@ export async function assertEntryRekeyConsistent(
   });
   for (const a of attachments) {
     if (
-      a.encryptionMode !== 2 ||
+      a.encryptionMode !== ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED ||
       !itemKeyIdsMatch(a.cekItemKeyId, entry.itemKeyId) ||
       a.cekKeyVersion !== entry.itemKeyVersion ||
       a.keyVersion !== entry.teamKeyVersion

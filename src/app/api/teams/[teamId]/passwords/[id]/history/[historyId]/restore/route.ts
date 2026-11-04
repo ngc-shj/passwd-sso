@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
-import { requireTeamPermission } from "@/lib/auth/access/team-auth";
+import { activeTeamRole, hasTeamPermission, requireTeamPermission } from "@/lib/auth/access/team-auth";
 import { API_ERROR, type ApiErrorCode } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_METADATA_KEY, TEAM_PERMISSION } from "@/lib/constants";
@@ -78,6 +78,12 @@ async function handlePOST(req: NextRequest, { params }: Params) {
         return { ok: false, code: API_ERROR.TEAM_KEY_VERSION_MISMATCH };
       }
       throw e;
+    }
+    // The actor's authority, under the team lock: a removal, departure or
+    // demotion committed since requireTeamPermission is seen here.
+    const role = await activeTeamRole(tx, teamId, session.user.id);
+    if (!role || !hasTeamPermission(role, TEAM_PERMISSION.PASSWORD_UPDATE)) {
+      return { ok: false, code: API_ERROR.ACTOR_NOT_PERMITTED };
     }
 
     // Row-lock the entry and snapshot from the LOCKED row, not the

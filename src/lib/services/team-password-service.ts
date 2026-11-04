@@ -14,7 +14,9 @@ import { API_ERROR, type ApiErrorCode } from "@/lib/http/api-error-codes";
 import { toBlobColumns, toOverviewColumns } from "@/lib/crypto/crypto-blob";
 import { dedupeTagIds, tagConnect, tagSet } from "@/lib/services/tag-relation";
 import { lockTeamKeyVersion, TeamRotationInProgressError } from "@/lib/team/team-key-rotation-lock";
-import { itemKeyIdsMatch, itemKeyIvReused, normalizeTeamKeyVersion } from "@/lib/team/team-item-key";
+import { itemKeyIdsMatch, itemKeyIvReused, nextItemKeyVersion, normalizeTeamKeyVersion } from "@/lib/team/team-item-key";
+import { activeTeamRole, hasTeamPermission } from "@/lib/auth/access/team-auth";
+import { TEAM_PERMISSION, TEAM_ROLE } from "@/lib/constants";
 import type { EntryType, Prisma } from "@prisma/client";
 
 // ---------------------------------------------------------------------------
@@ -406,6 +408,7 @@ type LockedTeamEntryRow = {
   item_key_id: string | null;
   item_key_team_key_version: number;
   item_key_version_high_water: number;
+  created_by_id: string;
 };
 
 /**
@@ -447,7 +450,7 @@ async function resolveFullUpdateItemKey(
     ) {
       throw new TeamPasswordServiceError(API_ERROR.ITEM_KEY_CHANGED, 409);
     }
-    if (requested !== cur.item_key_version_high_water + 1) {
+    if (requested !== nextItemKeyVersion(cur.item_key_version_high_water, cur.item_key_version)) {
       throw new TeamPasswordServiceError(API_ERROR.ITEM_KEY_VERSION_INVALID, 409);
     }
     if (await itemKeyIvReused(tx, passwordId, cur.item_key_iv, body.encryptedItemKey.iv)) {
@@ -554,13 +557,25 @@ export async function updateTeamPassword(
         SELECT encrypted_blob, blob_iv, blob_auth_tag,
                aad_version, team_key_version, item_key_version,
                encrypted_item_key, item_key_iv, item_key_auth_tag,
-               item_key_id, item_key_team_key_version, item_key_version_high_water
+               item_key_id, item_key_team_key_version, item_key_version_high_water,
+               created_by_id
         FROM team_password_entries
         WHERE id = ${passwordId}::uuid AND team_id = ${teamId}::uuid
         FOR UPDATE
       `;
       // Entry may be concurrently deleted between the caller's read and this lock.
       if (!cur) throw new TeamPasswordServiceError(API_ERROR.NOT_FOUND, 404);
+      // The route's permission and own-entry checks ran before the locks; a
+      // removal, departure or demotion committed since would otherwise write
+      // key material the actor no longer may.
+      const role = await activeTeamRole(tx, teamId, userId);
+      if (
+        !role ||
+        !hasTeamPermission(role, TEAM_PERMISSION.PASSWORD_UPDATE) ||
+        (role === TEAM_ROLE.MEMBER && cur.created_by_id !== userId)
+      ) {
+        throw new TeamPasswordServiceError(API_ERROR.ACTOR_NOT_PERMITTED, 403);
+      }
       Object.assign(
         updateData,
         await resolveFullUpdateItemKey(tx, passwordId, cur, team.teamKeyVersion, {

@@ -161,3 +161,124 @@
   each follows an exact positive assertion on a non-empty `rekeyed` list, which fails if nothing
   ran. Dismissed. Orphaned-check, hardcoded-reuse and propagation hits are vitest-run test files
   and incidental numeric literals.
+- D40 (Phase 2 self-check, R39) — `TeamVaultProvider` stays mounted across vault lock and
+  `clearAll()` had no production caller, so unwrapped team keys and ItemKey-derived keys outlived
+  the lock. An effect now clears both caches whenever `vaultUnlocked` is false (the true→false
+  edge in practice), and a generation counter — bumped by `clearAll` and `invalidateTeamKey` — is
+  captured before each populate site's first await (`getTeamEncryptionKey`, the versioned team
+  key resolve, `getEntryItemKeys`, which `getItemEncryptionKey` goes through); a site whose
+  generation moved returns its key to the in-flight caller but does not write the cache. Red on a
+  scratch copy: without the effect, the lock and both in-flight cells fail; with the effect but
+  no generation check, the two in-flight cells fail. Control: a re-render that stays unlocked
+  keeps both caches.
+- D41 (Phase 2 self-check, R24; supersedes the CHECK in plan A10) — deploy migrates before the
+  services roll, so an instance of the previous release creating or upgrading a v1 entry without
+  an id hit the CHECK `team_password_entries_item_key_id_iff_item_key` (23514 → 500). The CHECK is
+  removed from `20261104000000_team_key_rotation_rekey` (unreleased, so the file was edited
+  rather than adding a drop migration); the backfill block says the CHECK ships in the next
+  release after a backfill of such rows (follow-up). Dev DB: `ALTER TABLE team_password_entries
+  DROP CONSTRAINT IF EXISTS team_password_entries_item_key_id_iff_item_key` and the recorded
+  checksum re-synced (`9d22c9b4…` → `a40df35a…`, scoped by name and old checksum, precedent
+  bind-stepup-to-session-credential D12); `prisma migrate status` is clean. **Any other database
+  that applied the previous file needs the same two statements** (the throwaway `passwd_sso_e2e`
+  of D37 was not touched):
+
+  ```sql
+  ALTER TABLE team_password_entries DROP CONSTRAINT IF EXISTS team_password_entries_item_key_id_iff_item_key;
+  UPDATE _prisma_migrations SET checksum = 'a40df35a85cf67ad6cf64bac56f1d04ee6369cbbb4186ee69a27c300ff1f994f'
+   WHERE migration_name = '20261104000000_team_key_rotation_rekey';
+  ```
+
+  Mixed window. What the previous release writes (read from `main`'s service): create leaves
+  `item_key_id` NULL, marker 0, high-water 0; a full-update PUT carrying `encryptedItemKey` (the
+  v0→v1 upgrade of its web client, or any API caller) replaces the wrap and keeps id, marker and
+  high-water, writing a history row without an id. Two server rules make that tolerable:
+  `isRekeyPending` (team-key-resolution.ts; Prisma form `rekeyPendingWhere`) counts a v1+ entry
+  with a NULL id as pending whatever its marker — used by the list, the re-key GET/POST and the
+  runner — so an upgraded entry marked current is re-keyed instead of refusing every PUT
+  (`ITEM_KEY_CHANGED`, NULL never matches) until the next rotation; and `nextItemKeyVersion` =
+  max(high-water, item_key_version) + 1 (entry GET, re-key GET/POST, upgrade PUT) so a created
+  entry at version 1 with high-water 0 is not re-keyed into version 1 again. The pass migrates
+  legacy attachments before it re-keys, and the migrate PUT compared ids with NULL never
+  matching, so a NULL-id entry holding a legacy attachment could never finish: the migrate body's
+  `itemKeyId` is now nullable, and a NULL locked id accepts exactly a NULL body id (any other
+  pairing is `ITEM_KEY_CHANGED`), binding the CEK to no id; the re-key opens it by trial. Every
+  writer of this release mints an id, so this only lets through an ItemKey change an older
+  instance made between the client's read and the migrate — and the re-key's trial over the
+  history wraps still opens that CEK. Restore and upload need no change (restore mints an id for
+  a NULL-id v1+ row; upload refuses `ITEM_KEY_CHANGED` until the pass ran). Not detectable: the previous release replacing the wrap
+  of an entry marked current while keeping its id (no web-client path does this; an API caller
+  could) — the entry is not pending and its id names the new ItemKey; mode-2 CEKs still open by
+  trial in the next pass. Integration (team-rekey-pass, "rollout"): a raw create (re-keyed to
+  version 2, id minted), an upgrade of an entry marked current (PUT refused, pending, re-keyed,
+  PUT accepted after), the same upgrade over a mode-0 attachment (migrated with NULL ids, then
+  re-keyed; the attachment decrypts under the new ItemKey), and a wrap replacement on a pending
+  entry with a mode-2 attachment bound to the old ItemKey (CEK opened by trial, history by its
+  own wrap). Red on the scratch copy: with the previous route/runner code the create and upgrade
+  cells fail (version 1 kept; pending 0); with the previous migrate route the mode-0 cell fails
+  (the pass does not complete). The wrap-replacement cell passes either way (confirmation). The A10 CHECK
+  cells (four 23514 SAVEPOINT inserts and the "re-adds the CHECK" assertion) cannot pass without
+  the constraint and are deleted — moved to the follow-up that adds the CHECK; the A10 cell now
+  asserts the block adds no CHECK and accepts a NULL-id v1 row. deployment.md describes the
+  rollout state; the plan's A10 text is left as written.
+- D42 (Phase 2 self-check, R3) — the entry full-update PUT (PASSWORD_UPDATE, and MEMBER only on
+  an entry they created — read from the locked row's `created_by_id`), history restore
+  (PASSWORD_UPDATE), attachment upload (PASSWORD_UPDATE) and attachment delete (PASSWORD_DELETE)
+  re-read the actor's role with `activeTeamRole` under the team lock and answer 403
+  `ACTOR_NOT_PERMITTED`, as the re-key POST does. A metadata-only PUT takes no team lock and is
+  unchanged. Integration: a blocker holds the team row FOR NO KEY UPDATE, the request parks on
+  its FOR SHARE (asserted in pg_locks), the blocker demotes the actor and commits → 403 for PUT
+  (to MEMBER on another's entry, and to VIEWER), restore (VIEWER), upload (VIEWER), delete
+  (MEMBER); each control (commit without a change) → 200/201. Unit cells in both test trees;
+  red on the scratch copy for every new cell.
+- D43 (Phase 2 self-check, R3/audit) — the rotation summary `TEAM_KEY_ROTATION` is written with
+  `logAuditInTx` in the rotation transaction after the carry rows (it was `logAuditAsync` after
+  commit), and is in `CRITICAL_ACTIONS` (gate count 19 → 20). Integration: the summary row's
+  `xmin` equals the teams row's after the rotation (red with the previous route: a different
+  transaction); a rotation rolled back by `ENTRY_COUNT_MISMATCH` leaves no summary row (this cell
+  also holds for the previous post-commit write; the rollback after the enqueue has no fault
+  point to inject without schema changes).
+- D44 (Phase 2 self-check, R29) — audit-log-reference.md: `TEAM_ENTRY_REKEY` metadata key is
+  `retained` (with its element shape), `TEAM_ATTACHMENT_MIGRATE` includes `toItemKeyVersion`, the
+  summary row is in-tx. The four rows (TEAM_KEY_ROTATION, TEAM_KEY_ROTATION_CARRY,
+  TEAM_ENTRY_REKEY, TEAM_ATTACHMENT_MIGRATE) are now held to the code: each route test compares
+  its audit call's metadata keys with the doc row (`documentedMetadataKeys`); red against the
+  previous doc for the re-key and migrate rows.
+- D45 (Phase 2 self-check, R1) — `itemKeyIdsMatch` and `normalizeTeamKeyVersion` are defined
+  only in team-key-resolution.ts (client-safe) and re-exported from team-item-key.ts; their
+  tests moved to team-key-resolution.test.ts, and team-item-key.test.ts pins the re-export
+  identity (red with two definitions).
+- D46 (Phase 2 self-check, R2) — `ATTACHMENT_ENCRYPTION_MODE = { VAULT_KEY: 0, ITEM_KEY: 1,
+  CEK_WRAPPED: 2 }` (constants/vault/attachment-encryption-mode.ts): 0 is the body under the
+  owner's key (personal vault key or team key) at keyVersion, 1 the team-only legacy body under
+  the ItemKey, 2 the CEK wrapped by the vault key or the ItemKey's CEK-wrap key. Used at every
+  production comparison, Prisma filter/value and form field in the team and personal attachment
+  routes, rotate-key-server.ts, rotate-key/data, vault-context, the attachment section and the
+  team re-key modules. A behaviour-preserving rename: the only red-provable cell is the
+  wire-value pin of the constant itself.
+- D47 (Phase 2 self-check, R2) — the team re-key limiters have their own budgets derived from
+  team quantities (TEAM_ROTATE_ENTRIES_MAX entries × MAX_ATTACHMENTS_PER_ENTRY, one retry per
+  entry): migrate 21 000, re-key POST 2 000, reads 24 000 per 15 minutes. The previous shared
+  6 000 / 12 000 could not cover a full team's legacy attachments. Unit: each limiter allows its
+  budget and refuses budget + 1 (red against the previous values).
+- D48 (Phase 2 self-check, R43) — `teamRotateKeyFailureLimiter` (rate-limiters.ts): every
+  rotation attempt takes a slot per (team, user), a committed rotation clears it, 10 per 15
+  minutes; refused with 429 before the rotation transaction, releasing the success-limiter slot.
+  Unit (the real in-memory limiter): the 11th consecutive refused rotation → 429 without opening
+  the transaction (red without the limiter); control: 9 refusals, a commit, then 10 more refusals
+  all reach the route.
+- D49 (Phase 2 self-check, R39) — `buildEntryRekeyPayload` registers every unwrapped raw ItemKey
+  (live and history) before deriving from it, and zero-fills that list in `finally`; a derive
+  that threw used to leave the raw buffer unregistered. Unit: a derive failing on the live and on
+  a history ItemKey leaves every raw buffer zeroed (red before).
+- D50 (Phase 2 self-check, R37) — Teams copy: "item key" / アイテムキー replaced by "encryption
+  key" / 暗号化キー; the undecryptable and key-invalid issues and the holder lists say "an older
+  team key" / 古いチームキー without the number (holders per version are listed without it;
+  the issue already names who to ask). The version stays only in `rekeyKeySuspicion`: comparing a
+  distributed copy with another holder is done for one specific version, which the member must
+  name. `rekeyHoldersVersion` is renamed `rekeyOlderKeyHolders`. A copy test pins both rules
+  (red before). ApiErrors `itemKeyRequired` ("ItemKey") predates the branch and is unchanged.
+- D51 (Phase 2 self-check, R1) — `sha256Hex` uses `hexEncode` from crypto-utils. Behaviour
+  preserved; a known-answer cell (SHA-256 of "abc") guards it — not red-provable as a refactor.
+- D52 (Phase 2 self-check, R29) — the team-key-rotation-lock.ts writer list names the re-key
+  POST and the attachment upload, migrate and delete (`lockTeamAttachmentEntry`). Comment only.

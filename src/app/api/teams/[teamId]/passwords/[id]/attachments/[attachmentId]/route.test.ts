@@ -14,7 +14,10 @@ const {
   mockGetObject,
   mockDeleteBlobs,
   mockLogAuditAsync,
+  mockTeamMemberFindFirst,
 } = vi.hoisted(() => ({
+  // The actor's membership, re-read under the team lock (activeTeamRole).
+  mockTeamMemberFindFirst: vi.fn(),
   mockAuth: vi.fn(),
   mockRequireTeamPermission: vi.fn(),
   mockPrismaTeamPasswordEntry: {
@@ -44,10 +47,15 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/auth/access/team-auth", () => ({
-  requireTeamPermission: mockRequireTeamPermission,
-  TeamAuthError: MockTeamAuthError,
-}));
+vi.mock("@/lib/auth/access/team-auth", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/auth/access/team-auth")>("@/lib/auth/access/team-auth");
+  return {
+    requireTeamPermission: mockRequireTeamPermission,
+    activeTeamRole: actual.activeTeamRole,
+    hasTeamPermission: actual.hasTeamPermission,
+    TeamAuthError: MockTeamAuthError,
+  };
+});
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     teamPasswordEntry: mockPrismaTeamPasswordEntry,
@@ -83,6 +91,7 @@ const tx = {
   teamPasswordEntry: mockPrismaTeamPasswordEntry,
   attachment: mockPrismaAttachment,
   teamPasswordEntryHistory: mockPrismaHistory,
+  teamMember: { findFirst: mockTeamMemberFindFirst },
 };
 
 const KEY_A = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
@@ -324,6 +333,7 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]",
     mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ teamId: "team-1" });
     mockLockEntry.mockResolvedValue({ teamKeyVersion: 3, tenantId: "t1", itemKeyVersion: 2, itemKeyId: KEY_A });
     mockLockRow.mockResolvedValue({ filename: "doc.pdf", encryptedData: STORED });
+    mockTeamMemberFindFirst.mockResolvedValue({ role: "ADMIN" });
     mockPrismaAttachment.delete.mockResolvedValue({});
     mockDeleteBlobs.mockResolvedValue(undefined);
     mockWithTeamTenantRls.mockImplementation(
@@ -358,6 +368,23 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]",
     const { res } = await del();
     expect(res.status).toBe(404);
     expect(mockPrismaAttachment.delete).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["no longer an active member", null],
+    // MEMBER holds PASSWORD_UPDATE but not PASSWORD_DELETE.
+    ["demoted to MEMBER", { role: "MEMBER" }],
+  ])("returns 403 ACTOR_NOT_PERMITTED when the actor is %s under the team lock, deleting nothing", async (_label, membership) => {
+    mockTeamMemberFindFirst.mockResolvedValue(membership);
+    const { res, json } = await del();
+    expect(res.status).toBe(403);
+    expect(json.error).toBe("ACTOR_NOT_PERMITTED");
+    expect(mockTeamMemberFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { teamId: "team-1", userId: "user-1", deactivatedAt: null } }),
+    );
+    expect(mockLockRow).not.toHaveBeenCalled();
+    expect(mockPrismaAttachment.delete).not.toHaveBeenCalled();
+    expect(mockDeleteBlobs).not.toHaveBeenCalled();
   });
 
   it("returns 404 ATTACHMENT_NOT_FOUND when the locked row is gone", async () => {

@@ -14,7 +14,10 @@ const {
   mockLockEntry,
   mockPutObject,
   mockDeleteObject,
+  mockTeamMemberFindFirst,
 } = vi.hoisted(() => ({
+  // The actor's membership, re-read under the team lock (activeTeamRole).
+  mockTeamMemberFindFirst: vi.fn(),
   mockAuth: vi.fn(),
   mockRequireTeamPermission: vi.fn(),
   mockPrismaTeamPasswordEntry: {
@@ -48,10 +51,15 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: vi.fn().mockReturnValue({ check: mockRateLimitCheck, clear: vi.fn() }),
 }));
-vi.mock("@/lib/auth/access/team-auth", () => ({
-  requireTeamPermission: mockRequireTeamPermission,
-  TeamAuthError: MockTeamAuthError,
-}));
+vi.mock("@/lib/auth/access/team-auth", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/auth/access/team-auth")>("@/lib/auth/access/team-auth");
+  return {
+    requireTeamPermission: mockRequireTeamPermission,
+    activeTeamRole: actual.activeTeamRole,
+    hasTeamPermission: actual.hasTeamPermission,
+    TeamAuthError: MockTeamAuthError,
+  };
+});
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     teamPasswordEntry: mockPrismaTeamPasswordEntry,
@@ -85,7 +93,11 @@ import { GET, POST } from "./route";
 import { TeamRotationInProgressError } from "@/lib/team/team-key-rotation-lock";
 
 // The transaction client withTeamTenantRls hands the upload callback.
-const tx = { attachment: mockPrismaAttachment, $executeRaw: mockExecuteRaw };
+const tx = {
+  attachment: mockPrismaAttachment,
+  $executeRaw: mockExecuteRaw,
+  teamMember: { findFirst: mockTeamMemberFindFirst },
+};
 
 function createParams(teamId: string, id: string) {
   return { params: Promise.resolve({ teamId: teamId, id }) };
@@ -249,6 +261,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     });
     mockRateLimitCheck.mockResolvedValue({ allowed: true });
     mockLockEntry.mockResolvedValue(LOCKED_ENTRY);
+    mockTeamMemberFindFirst.mockResolvedValue({ role: "MEMBER" });
     mockPutObject.mockResolvedValue(STORED);
     mockDeleteObject.mockResolvedValue(undefined);
     mockWithTeamTenantRls.mockImplementation(
@@ -471,6 +484,21 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     expect(res.status).toBe(400);
     expect(json.error).toBe("ATTACHMENT_LIMIT_EXCEEDED");
     expectAdvisoryLockAcquired(mockExecuteRaw);
+    expect(mockDeleteObject).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["no longer an active member", null],
+    ["demoted to VIEWER", { role: "VIEWER" }],
+  ])("returns 403 ACTOR_NOT_PERMITTED when the actor is %s under the team lock, and deletes the written object", async (_label, membership) => {
+    mockTeamMemberFindFirst.mockResolvedValue(membership);
+    const { res, json } = await upload();
+    expect(res.status).toBe(403);
+    expect(json.error).toBe("ACTOR_NOT_PERMITTED");
+    expect(mockTeamMemberFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { teamId: "team-1", userId: "user-1", deactivatedAt: null } }),
+    );
+    expect(mockPrismaAttachment.create).not.toHaveBeenCalled();
     expect(mockDeleteObject).toHaveBeenCalledTimes(1);
   });
 

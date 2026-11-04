@@ -21,6 +21,7 @@ import {
   deactivatedTeamKeyVersionHolderCount,
   isRekeyerHolder,
   normalizeTeamKeyVersion,
+  rekeyPendingWhere,
   teamKeyVersionHolders,
 } from "@/lib/team/team-item-key";
 
@@ -73,7 +74,7 @@ async function handleGET(req: NextRequest, { params }: RouteContext) {
   const result = await withTeamTenantRls(teamId, async (_tenantId, tx) => {
     const team = await tx.team.findUnique({ where: { id: teamId }, select: { teamKeyVersion: true } });
     if (!team) return null;
-    const pendingWhere = { teamId, itemKeyTeamKeyVersion: { lt: team.teamKeyVersion } };
+    const pendingWhere = { teamId, ...rekeyPendingWhere(team.teamKeyVersion) };
 
     const pendingCount = await tx.teamPasswordEntry.count({ where: pendingWhere });
     const page = await tx.teamPasswordEntry.findMany({

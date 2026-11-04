@@ -8,7 +8,7 @@ import { getAttachmentBlobStore } from "@/lib/blob-store";
 import { deleteAttachmentBlobs } from "@/lib/blob-store/cleanup";
 import { BlobRefInvalidError } from "@/lib/blob-store/object-ref";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
+import { AUDIT_TARGET_TYPE, AUDIT_ACTION, ATTACHMENT_ENCRYPTION_MODE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { errorResponse, notFound, unauthorized } from "@/lib/http/api-response";
 
@@ -65,7 +65,7 @@ async function handleGET(
     if (e instanceof BlobRefInvalidError) return errorResponse(API_ERROR.BLOB_REF_INVALID);
     throw e;
   }
-  const isMode2 = attachment.encryptionMode === 2;
+  const isMode2 = attachment.encryptionMode === ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED;
   // Return encrypted data + crypto metadata for client-side decryption
   return NextResponse.json({
     id: attachment.id,

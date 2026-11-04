@@ -187,7 +187,7 @@ export function TeamRekeyFinishControl({ teamId, autoStart = false }: TeamRekeyF
                 {t("rekeyStateNeedsRekeyerHolder", { count: counts[REKEY_ENTRY_STATE.NEEDS_REKEYER_HOLDER] })}
                 {Object.entries(holderNames(list.holders, t("rekeyUnknownHolder"))).map(([version, names]) => (
                   <span key={version} className="block">
-                    {t("rekeyHoldersVersion", { version, holders: names.join(", ") })}
+                    {t("rekeyOlderKeyHolders", { holders: names.join(", ") })}
                   </span>
                 ))}
               </li>

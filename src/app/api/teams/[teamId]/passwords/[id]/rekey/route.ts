@@ -9,7 +9,7 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { getLogger } from "@/lib/logger";
 import { errorLogFields } from "@/lib/logger/error-fields";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
-import { AUDIT_ACTION, AUDIT_TARGET_TYPE, TEAM_PERMISSION } from "@/lib/constants";
+import { AUDIT_ACTION, AUDIT_TARGET_TYPE, TEAM_PERMISSION, ATTACHMENT_ENCRYPTION_MODE } from "@/lib/constants";
 import { TEAM_ENTRY_REKEY_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { errorResponse, handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/http/api-response";
@@ -26,7 +26,7 @@ import {
 } from "@/lib/validations/common";
 import { AAD_VERSION, CURRENT_CEK_WRAP_AAD_VERSION } from "@/lib/crypto/crypto-aad";
 import { lockTeamKeyVersion, TeamRotationInProgressError } from "@/lib/team/team-key-rotation-lock";
-import { itemKeyIvReused } from "@/lib/team/team-item-key";
+import { isRekeyPending, itemKeyIvReused, nextItemKeyVersion } from "@/lib/team/team-item-key";
 import { assertEntryRekeyConsistent, RekeyConsistencyError } from "@/lib/team/rekey-consistency";
 
 type RouteContext = { params: Promise<{ teamId: string; id: string }> };
@@ -145,7 +145,7 @@ async function handleGET(req: NextRequest, { params }: RouteContext) {
       cekEncrypted: a.cekEncrypted ? Buffer.from(a.cekEncrypted).toString("base64") : null,
     })),
     // The version the new ItemKey must take; recomputed under the entry lock.
-    nextItemKeyVersion: entry.itemKeyVersionHighWater + 1,
+    nextItemKeyVersion: nextItemKeyVersion(entry.itemKeyVersionHighWater, entry.itemKeyVersion),
     teamKeyVersion,
   });
 }
@@ -216,6 +216,7 @@ type LockedEntryRow = {
   overview_iv: string;
   item_key_iv: string | null;
   item_key_version: number;
+  item_key_id: string | null;
   item_key_team_key_version: number;
   item_key_version_high_water: number;
 };
@@ -249,20 +250,20 @@ async function handlePOST(req: NextRequest, { params }: RouteContext) {
   const pre = await withTeamTenantRls(teamId, async (_tenantId, tx) => {
     const entry = await tx.teamPasswordEntry.findUnique({
       where: { id: entryId },
-      select: { teamId: true, itemKeyVersion: true, itemKeyTeamKeyVersion: true },
+      select: { teamId: true, itemKeyVersion: true, itemKeyId: true, itemKeyTeamKeyVersion: true },
     });
     if (!entry || entry.teamId !== teamId) return null;
     const team = await tx.team.findUnique({ where: { id: teamId }, select: { teamKeyVersion: true } });
     if (!team) return null;
     const legacyAttachments = await tx.attachment.count({
-      where: { teamPasswordEntryId: entryId, encryptionMode: { not: 2 } },
+      where: { teamPasswordEntryId: entryId, encryptionMode: { not: ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED } },
     });
     return { entry, teamKeyVersion: team.teamKeyVersion, legacyAttachments };
   });
   if (!pre) {
     return notFound();
   }
-  if (pre.entry.itemKeyTeamKeyVersion >= pre.teamKeyVersion) {
+  if (!isRekeyPending(pre.entry, pre.teamKeyVersion)) {
     return errorResponse(API_ERROR.REKEY_NOT_PENDING);
   }
   if (pre.entry.itemKeyVersion === 0) {
@@ -297,7 +298,7 @@ async function handlePOST(req: NextRequest, { params }: RouteContext) {
         if (!team) throw new RekeyRefusal(API_ERROR.NOT_FOUND);
 
         const [cur] = await tx.$queryRaw<LockedEntryRow[]>`
-          SELECT blob_iv, overview_iv, item_key_iv, item_key_version,
+          SELECT blob_iv, overview_iv, item_key_iv, item_key_version, item_key_id,
                  item_key_team_key_version, item_key_version_high_water
             FROM team_password_entries
            WHERE id = ${entryId}::uuid AND team_id = ${teamId}::uuid
@@ -313,7 +314,16 @@ async function handlePOST(req: NextRequest, { params }: RouteContext) {
           throw new RekeyRefusal(API_ERROR.ACTOR_NOT_PERMITTED);
         }
 
-        if (cur.item_key_team_key_version >= team.teamKeyVersion) {
+        if (
+          !isRekeyPending(
+            {
+              itemKeyVersion: cur.item_key_version,
+              itemKeyId: cur.item_key_id,
+              itemKeyTeamKeyVersion: cur.item_key_team_key_version,
+            },
+            team.teamKeyVersion,
+          )
+        ) {
           throw new RekeyRefusal(API_ERROR.REKEY_NOT_PENDING);
         }
         if (body.teamKeyVersion !== team.teamKeyVersion) {
@@ -331,7 +341,7 @@ async function handlePOST(req: NextRequest, { params }: RouteContext) {
         ) {
           throw new RekeyRefusal(API_ERROR.REKEY_SNAPSHOT_MISMATCH);
         }
-        const newItemKeyVersion = cur.item_key_version_high_water + 1;
+        const newItemKeyVersion = nextItemKeyVersion(cur.item_key_version_high_water, cur.item_key_version);
         if (body.newItemKeyVersion !== newItemKeyVersion) {
           throw new RekeyRefusal(API_ERROR.ITEM_KEY_VERSION_INVALID);
         }
@@ -363,7 +373,7 @@ async function handlePOST(req: NextRequest, { params }: RouteContext) {
         }
         // Checked before the attachment set: a legacy attachment has no CEK
         // the client could have re-wrapped, so it is never in the body's set.
-        if (lockedAttachments.some((a) => a.encryption_mode !== 2)) {
+        if (lockedAttachments.some((a) => a.encryption_mode !== ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED)) {
           throw new RekeyRefusal(API_ERROR.REKEY_ATTACHMENTS_UNMIGRATED);
         }
         if (!sameIdSet(lockedAttachments.map((a) => a.id), body.attachmentCekRewraps.map((a) => a.id))) {
@@ -398,7 +408,7 @@ async function handlePOST(req: NextRequest, { params }: RouteContext) {
 
         for (const a of body.attachmentCekRewraps) {
           const updated = await tx.attachment.updateMany({
-            where: { id: a.id, teamPasswordEntryId: entryId, encryptionMode: 2, cekIv: a.snapshotCekIv },
+            where: { id: a.id, teamPasswordEntryId: entryId, encryptionMode: ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED, cekIv: a.snapshotCekIv },
             data: {
               cekEncrypted: Buffer.from(a.cekEncrypted, "base64"),
               cekIv: a.cekIv,

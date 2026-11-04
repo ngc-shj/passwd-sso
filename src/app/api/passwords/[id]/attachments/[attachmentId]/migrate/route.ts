@@ -5,7 +5,7 @@ import { advisoryXactLock } from "@/lib/tenant-rls";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
+import { AUDIT_TARGET_TYPE, AUDIT_ACTION, ATTACHMENT_ENCRYPTION_MODE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { errorResponse, notFound, unauthorized, rateLimited, validationError } from "@/lib/http/api-response";
 import { migrateLimiter } from "@/lib/security/rate-limiters";
@@ -153,7 +153,7 @@ async function handlePUT(
   if (!current) {
     return notFound();
   }
-  if (current.encryptionMode !== 0) {
+  if (current.encryptionMode !== ATTACHMENT_ENCRYPTION_MODE.VAULT_KEY) {
     return errorResponse(API_ERROR.LEGACY_MIGRATION_NOT_APPLICABLE);
   }
   const blobStore = getAttachmentBlobStore();
@@ -170,7 +170,7 @@ async function handlePUT(
   const newContext = { attachmentId, entryId, generation: newBlobGeneration() };
   const newStored = await blobStore.putObject(Buffer.from(encryptedData, "base64"), newContext);
 
-  let result: { encryptionMode: 2; fromKeyVersion: number | null; oldStored: Uint8Array };
+  let result: { encryptionMode: typeof ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED; fromKeyVersion: number | null; oldStored: Uint8Array };
   try {
     result = await withUserTenantRls(userId, async () => {
       // withUserTenantRls opens the transaction, and `prisma` resolves to it

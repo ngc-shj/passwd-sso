@@ -2,12 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
-import { requireTeamPermission } from "@/lib/auth/access/team-auth";
+import { activeTeamRole, hasTeamPermission, requireTeamPermission } from "@/lib/auth/access/team-auth";
 import { API_ERROR, type ApiErrorCode } from "@/lib/http/api-error-codes";
 import { getAttachmentBlobStore } from "@/lib/blob-store";
 import { deleteAttachmentBlobs } from "@/lib/blob-store/cleanup";
 import { BlobRefInvalidError } from "@/lib/blob-store/object-ref";
-import { AUDIT_TARGET_TYPE, TEAM_PERMISSION, AUDIT_ACTION } from "@/lib/constants";
+import { AUDIT_TARGET_TYPE, TEAM_PERMISSION, AUDIT_ACTION, ATTACHMENT_ENCRYPTION_MODE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
@@ -94,12 +94,12 @@ async function handleGET(
       where: { id: attachmentId, teamPasswordEntryId: id },
     });
     if (!attachment) return { entry, attachment: null, history: [] };
-    const history = attachment.encryptionMode === 0
+    const history = attachment.encryptionMode === ATTACHMENT_ENCRYPTION_MODE.VAULT_KEY
       ? []
       : await tx.teamPasswordEntryHistory.findMany({
           where: {
             entryId: id,
-            ...(attachment.encryptionMode === 2
+            ...(attachment.encryptionMode === ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED
               ? { itemKeyId: attachment.cekItemKeyId ?? undefined }
               : {}),
           },
@@ -132,7 +132,7 @@ async function handleGET(
   // entry wrap and every history wrap — the client finds the right ItemKey by
   // trial decryption. Mode 0 (legacy): the team key at keyVersion.
   let keyMaterial: Record<string, unknown>;
-  if (attachment.encryptionMode === 2) {
+  if (attachment.encryptionMode === ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED) {
     const wrap = itemKeyIdsMatch(entry.itemKeyId, attachment.cekItemKeyId)
       ? toWrap(entry, "entry", null)
       : history
@@ -153,7 +153,7 @@ async function handleGET(
       cekWrapAadVersion: attachment.cekWrapAadVersion,
       itemKeyWrap: wrap,
     };
-  } else if (attachment.encryptionMode === 1) {
+  } else if (attachment.encryptionMode === ATTACHMENT_ENCRYPTION_MODE.ITEM_KEY) {
     const entryWrap = toWrap(entry, "entry", null);
     keyMaterial = {
       keyVersion: attachment.keyVersion,
@@ -242,6 +242,12 @@ async function handleDELETE(
         return { ok: false, code: API_ERROR.TEAM_KEY_VERSION_MISMATCH };
       }
       throw e;
+    }
+    // The actor's authority, under the team lock: a removal, departure or
+    // demotion committed since requireTeamPermission is seen here.
+    const role = await activeTeamRole(tx, teamId, session.user.id);
+    if (!role || !hasTeamPermission(role, TEAM_PERMISSION.PASSWORD_DELETE)) {
+      return { ok: false, code: API_ERROR.ACTOR_NOT_PERMITTED };
     }
     const row = await lockTeamAttachmentRow(tx, id, attachmentId);
     if (!row) return { ok: false, code: API_ERROR.ATTACHMENT_NOT_FOUND };

@@ -20,6 +20,7 @@ import * as teamPasswordService from "@/lib/services/team-password-service";
 import { TeamPasswordServiceError } from "@/lib/services/team-password-service";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
+import { nextItemKeyVersion } from "@/lib/team/team-item-key";
 
 type Params = { params: Promise<{ teamId: string; id: string }> };
 
@@ -79,7 +80,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
     itemKeyId: entry.itemKeyId,
     // The version a new ItemKey (v0→v1 upgrade) must take; the server
     // recomputes it under the entry lock.
-    nextItemKeyVersion: entry.itemKeyVersionHighWater + 1,
+    nextItemKeyVersion: nextItemKeyVersion(entry.itemKeyVersionHighWater, entry.itemKeyVersion),
     requireReprompt: entry.requireReprompt,
     expiresAt: entry.expiresAt,
   });
