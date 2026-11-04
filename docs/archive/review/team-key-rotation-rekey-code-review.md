@@ -298,3 +298,30 @@ No findings.
 - S-R5-2: the pass re-keys legacy history rows under the new ItemKey keeping aadVersion 0; the
   route requires each row's label unchanged.
 - T18: output-visible discrimination.
+
+---
+
+# Review round: 6 (paused)
+Date: 2026-11-04
+Scope: `a5a98abec..HEAD` (commit 775cf7118). Paused at the user's request (usage limit) after
+the security and functionality reports; the testing report was stopped before it finished.
+
+## Findings so far
+- S-R6-1 [Minor, security] `resealLegacyHistoryRow` JSDoc and the guard header overstate the
+  guard: only the helper's NAME is confined; "no other team encrypt omits AAD" is not gated —
+  state the write-side residual beside the decrypt-side one.
+- F-R6-1 [Major, functionality] `e2e/tests/rekey-body-limit.spec.ts` history items lack the now
+  required `aadVersion` (strict schema) → 400 instead of the asserted 409
+  `REKEY_SNAPSHOT_MISMATCH`. Fix: add `aadVersion: 1` per item; grep e2e/ and scripts/ for other
+  hand-built re-key bodies; run the spec on a production build.
+- F-R6-2 [Minor, functionality] No cell for a transient team-key failure on a legacy v0 history
+  row (now reachable); add the transient cell + the unavailable→retained control.
+- Resolved this round: S-R5-2, T18; S-R5-1/T16/T17 by D80 (accepted residual).
+
+## Resume
+1. Re-run the Round 6 testing review (`a5a98abec..HEAD`).
+2. Fix F-R6-1, F-R6-2, S-R6-1 and any testing findings; run the E2E spec, full vitest,
+   integration, build; commit.
+3. Round 7 review; then Step 3-9 final commit, pre-pr, push, PR (Closes #988), follow-up
+   issues (SC2 key pruning, SC5 orphan sweep, item_key_id CHECK next release, single strict
+   team decrypt helper, s3 forcePathStyle (D65), MEMBER control gating (N2)).
