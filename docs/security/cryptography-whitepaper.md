@@ -383,7 +383,15 @@ ItemKey differs from the old.
 4. History rows the client cannot open are **retained** under their old wrap
    and old `item_key_id` (listed in the audit row). They are revisited only when
    the entry becomes pending again at the next rotation and a holder of their
-   version re-keys it first.
+   version re-keys it first. A legacy history row (`aadVersion` 0) is re-keyed
+   like any other, but stays unbound: the client opens it without AAD and
+   re-seals it without AAD under the new ItemKey, and it keeps `aadVersion` 0,
+   so it stays a row the history restore refuses. The server refuses a body that
+   changes any history row's `aadVersion` label, upgrade or downgrade
+   (`REKEY_HISTORY_LEGACY`). Opening unbound ciphertext here is the accepted
+   risk the history view already takes: a server presenting a substituted no-AAD
+   ciphertext under a key the client holds has it re-sealed, still unbound and
+   still unrestorable.
 
 After an entry is re-keyed, content written to it is unreadable with its
 previous ItemKey. The stated limits are listed in §7.6.
@@ -399,10 +407,10 @@ of them: the client refuses a history row below `aadVersion` 1 before
 decrypting it (nothing binds such a row to the entry, so re-sealing it would
 turn a substituted ciphertext into an AAD-bound live entry), and the server
 refuses it too (`HISTORY_ROW_LEGACY`). The refusal is binding because nothing
-else turns such a row into one the restore accepts: the re-key pass retains a
-history row below `aadVersion` 1 without opening it (listed in
-`retainHistoryIds`, left byte-identical) and opens every other history row at
-strict AAD, and the server refuses a re-key body that re-seals one
+else turns such a row into one the restore accepts: the re-key pass re-seals a
+history row below `aadVersion` 1 without AAD under the new ItemKey and keeps
+its label 0 (step 4), opens every other history row at strict AAD, and the
+server refuses a re-key body that changes a history row's label
 (`REKEY_HISTORY_LEGACY`). The exit is restoring a more recent version. A restorable row is opened at
 strict AAD and sent as the blob and the overview rebuilt from it, both re-sealed
 under the row's key at AAD 1; the server writes them with `aadVersion = 1` (the
@@ -463,6 +471,7 @@ history row itself is unchanged), so no live entry is ever written at
 
 - Until an entry is re-keyed, edits to it still use its old ItemKey. Admins see the pending count; the pass starts right after rotation.
 - History rows the re-keyer cannot open are retained under their old wrap and stay readable to holders of the old key (no worse than before the pass).
+- Legacy history rows (`aadVersion` 0) are re-keyed under the new ItemKey, so holders of the old key lose them, but they stay unbound to the entry and unrestorable: the pass opens and re-seals them without AAD, the accepted risk the history view takes.
 - Entries no active member can open are carried unchanged and counted as unrecoverable.
 - An entry carried on a holder's `undecryptable` or `key_invalid` claim stays readable by every holder of its old version, departed members included, until another holder re-keys it. The claim is unverifiable by the server; it is shown in the pending count and audited per entry with the reason and the actor.
 - Attachment CEKs are re-wrapped, not replaced: a CEK the departed member already unwrapped, and any downloaded material, stay readable to them.

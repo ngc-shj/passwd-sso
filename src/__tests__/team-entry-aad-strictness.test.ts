@@ -1,6 +1,6 @@
 /**
- * Strict team entry AAD (deviations D67, D72, D73, D77; review rounds 3-4:
- * T11 / S-R3-1, T13 / S-R4-1).
+ * Strict team entry AAD (deviations D67, D72, D73, D77, D80; review rounds
+ * 3-5: T11 / S-R3-1, T13 / S-R4-1, T16 / T17 / S-R5-1).
  *
  * A live team entry is always read at AAD 1 (`buildTeamEntryAAD` at the
  * entry's ItemKey version). Choosing the AAD by the server-supplied
@@ -8,66 +8,50 @@
  * legacy no-AAD ciphertext, so the aadVersion-aware `teamEntryAadFor` is
  * confined to the paths that UPGRADE such a live entry to AAD 1 (rotation,
  * re-key) and the history VIEW (a server-held row that is only displayed).
- * History RESTORE is not among them: it refuses a legacy row (S-R3-2), and
- * the re-key pass retains legacy history rows unopened (N-R4-1).
+ * History RESTORE refuses a legacy row (S-R3-2); the re-key pass re-seals a
+ * legacy history row under the new ItemKey still without AAD, through the one
+ * confined `resealLegacyHistoryRow` (S-R5-2), so the row stays unrestorable.
  *
- * The rules resolve BINDINGS, not spellings: each scanned tree is loaded into
- * a ts-morph Project built from its tsconfig (`@/` aliases, re-exports and
- * renamed imports resolve through the type checker's symbols). Where a
- * binding cannot be followed, the guard FAILS CLOSED.
+ * What this guard PROVES. Each rule resolves bindings through a ts-morph
+ * Program built from the tree's tsconfig (`@/` aliases, re-exports, renamed
+ * imports), not spellings:
+ *  (a) Confinement. `teamEntryAadFor` and `resealLegacyHistoryRow` are each
+ *      declared once, in their home, and named only in their allow-listed
+ *      files: no import / export specifier by its imported name (`as` renames
+ *      count), no reference `findReferences` resolves to the declaration
+ *      (renamed re-exports, `export *` namespace access), no element access
+ *      spelling it, no redeclaration. An import of one that resolves to
+ *      nothing fails loudly. `teamEntryAadFor` never supplies an encryptData
+ *      AAD; in the history view it is called from handleView only.
+ *  (b) Key-independent AAD shape. The decrypt set is every `decryptData`
+ *      declaration plus every named function forwarding its own key and AAD
+ *      parameters to a member (fixed point: `decryptTeamEntry`, local
+ *      `tryDecrypt`s; a forwarding call is checked at its callers). Every
+ *      decrypt call whose AAD argument names `buildTeamEntryAAD` — through
+ *      aliases, const/let bindings and their assignments, ternary/logical
+ *      branches, a local helper's body — must pass either a direct
+ *      `buildTeamEntryAAD(...)` call or an identifier bound by `const` to
+ *      one, whose arguments never read `aadVersion`. Exempt: the upgrade
+ *      functions in EXEMPT_DECRYPT_FUNCTIONS.
+ *  (c) Declaration-side reference enumeration of the decrypt set: every
+ *      reference is an import / export specifier, a `typeof`, or the direct
+ *      callee of a call with no spread argument. A destructuring rename
+ *      (incl. of a namespace or a dynamic import), `.call` / `.apply`,
+ *      element access, the function passed or bound as a value are
+ *      violations — so every decrypt in the tree is a call (b) sees.
+ *  (d) A FLOOR, not a derivation: each module in KNOWN_TEAM_READERS (a hand
+ *      list) still makes at least one decrypt call whose AAD names
+ *      `buildTeamEntryAAD`. A known reader that stops passing the team AAD
+ *      fails here.
  *
- *  (a) Outside ALLOWED_HELPER_FILES no import / export specifier names
- *      `teamEntryAadFor` (its imported name, so `as` renames count), no
- *      reference resolves to its declaration (findReferences follows renamed
- *      re-exports and namespace access), and no element access spells it. An
- *      import of it that does not resolve fails loudly.
- *  (b) Declaration-side enumeration. The decrypt set is DERIVED: every
- *      `decryptData` declaration, plus every named function whose body
- *      forwards its own key and AAD parameters to a member of the set
- *      (`decryptTeamEntry`, local `tryDecrypt`s; fixed point). Every
- *      reference `findReferences` returns for a member must be an import /
- *      export specifier, a `typeof`, or the direct callee of a call with no
- *      spread argument. Anything else — a destructuring rename (incl. of a
- *      namespace or a dynamic import), `.call` / `.apply`, element access,
- *      the function passed or bound as a value — is a violation, so every
- *      decrypt in the tree is a call the analysis below sees.
- *  (c) Classification of each decrypt call (forwarding calls inside a member
- *      are classified at their callers):
- *      - TEAM when its AAD names `buildTeamEntryAAD` (aliases, const/let
- *        bindings, either branch of a ternary/logical, a local helper's body,
- *        a parameter's arguments), whatever the key — or when its key flows
- *        from a team key getter call. The key trace follows key-material
- *        values only (CryptoKey-carrying, raw bytes, containers of them):
- *        const/let bindings and assignments, destructuring (a parameter
- *        binding by its property), `for...of`, the call sites of a named
- *        function's parameter, what a called function returns (its return
- *        expressions; an interface member's object-literal implementations),
- *        writes into raw bytes, and React stores (`useState` setter calls,
- *        `useRef` `.current` writes, `<Ctx.Provider value>`). A byte
- *        transformation's body is not entered (its arguments are traced).
- *        A team decrypt's AAD argument must be present and be either a direct
- *        `buildTeamEntryAAD(...)` call or an identifier bound by `const` to
- *        one; the builder's arguments never read `aadVersion`. Exempt:
- *        ALLOWED_DECRYPT_FILES and handleView in the history view.
- *      - UNCLASSIFIABLE when the key trace reaches something it cannot follow:
- *        a parameter of a function with no enumerable call sites (a callback,
- *        an object / class method, a property-assigned arrow), a value
- *        written through a property or a mutating method call (a holder
- *        object, a Map cache), a key-returning call through a parameter, a
- *        library call that yields a key from no key material (other than
- *        WebCrypto), `this`, a declaration kind it does not model. Such a site
- *        fails unless it is in NON_TEAM_DECRYPT_SITES, a reviewed list that
- *        must EQUAL the derived set (stale entries fail too).
- *      - NON-TEAM otherwise (a key traced to its sources, none a getter).
- *      The team key getter set is DERIVED: the members of TeamVaultContextValue
- *      whose (awaited) return type carries a CryptoKey within two property
- *      levels, plus every function under extension/src with a `teamId`
- *      parameter returning one.
- *  (d) The strict-reader set is the set of modules (c) found a team decrypt
- *      in; it must contain every KNOWN_READER (an over-narrow derivation —
- *      a getter or decrypt that stopped resolving — fails here).
- *  (e) Each clause is red-proved below by fixture sources run through the
- *      same functions.
+ * What it does NOT prove. It cannot tell whether a decrypt uses a TEAM key:
+ * static key-provenance tracing is undecidable, and the classifier that tried
+ * it (D73, D77) escaped four review rounds running, its arms becoming the
+ * defect surface; it was removed (D80). A NEW team reader that passes NO AAD,
+ * or a non-team builder's AAD, is therefore not detected — the same as main.
+ * That residual is covered by each reader's own refusal cells (a no-AAD
+ * ciphertext labelled aadVersion 0 is refused) and is the subject of a
+ * follow-up: route every team entry decrypt through one strict helper.
  * iOS (Swift) is outside this gate; its refusal cells pin the same rule.
  */
 import { beforeAll, describe, expect, it } from "vitest";
@@ -79,23 +63,31 @@ import type { CallExpression, Identifier, SourceFile, Symbol as MorphSymbol, Typ
 const REPO_ROOT = path.resolve(__dirname, "../..");
 
 const HELPER = "teamEntryAadFor";
+const RESEAL = "resealLegacyHistoryRow";
 const BUILDER = "buildTeamEntryAAD";
 const DECRYPT = "decryptData";
-const GETTER_INTERFACE = "TeamVaultContextValue";
 const HISTORY_VIEW = "src/components/passwords/entry/entry-history-section.tsx";
 const HISTORY_VIEW_FN = "handleView";
+const REKEY_PAYLOAD = "src/lib/team/rekey-payload.ts";
+const ROTATION_PAYLOAD = "src/lib/team/rotation-payload.ts";
 
-const ALLOWED_DECRYPT_FILES = new Set([
-  // Rotation: v0 entries re-sealed at AAD 1 under the new team key.
-  "src/lib/team/rotation-payload.ts",
-  // Re-key of the live entry and the v0→v1 upgrade payload (history rows are
-  // opened at strict AAD; a legacy one is retained unopened).
-  "src/lib/team/rekey-payload.ts",
+/** Each confined name: its one home, and the files that may name it. */
+const CONFINED: readonly { name: string; home: string; allowed: ReadonlySet<string> }[] = [
+  // Rotation (v0 re-seal), re-key (live entry, v0→v1 upgrade), the history view.
+  { name: HELPER, home: "src/lib/team/team-key-resolution.ts", allowed: new Set(["src/lib/team/team-key-resolution.ts", ROTATION_PAYLOAD, REKEY_PAYLOAD, HISTORY_VIEW]) },
+  // The re-key pass's no-AAD re-seal of a legacy history row (D80).
+  { name: RESEAL, home: REKEY_PAYLOAD, allowed: new Set([REKEY_PAYLOAD]) },
+];
+
+/** The functions whose decrypts open a legacy live entry by its aadVersion (rule (b) exempt). */
+const EXEMPT_DECRYPT_FUNCTIONS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  [ROTATION_PAYLOAD, new Set(["reencryptV0"])],
+  [REKEY_PAYLOAD, new Set(["buildEntryRekeyPayload", "buildEntryUpgradePayload"])],
+  [HISTORY_VIEW, new Set([HISTORY_VIEW_FN])],
 ]);
-const HELPER_HOME = "src/lib/team/team-key-resolution.ts";
-const ALLOWED_HELPER_FILES = new Set([HELPER_HOME, ...ALLOWED_DECRYPT_FILES, HISTORY_VIEW]);
 
-const KNOWN_READERS = [
+/** Floor (d): a hand list of the known team reader modules, not a derivation. */
+const KNOWN_TEAM_READERS = [
   "src/lib/vault/team-vault-list-adapter.ts",
   "src/lib/vault/build-team-get-detail.ts",
   "src/hooks/use-watchtower.ts",
@@ -104,40 +96,25 @@ const KNOWN_READERS = [
   "src/app/[locale]/admin/teams/[teamId]/audit-logs/page.tsx",
   "src/hooks/team/use-team-login-form-state.ts",
   "src/lib/team/team-history-restore.ts",
+  REKEY_PAYLOAD,
   "extension/src/background/index.ts",
 ];
-const KNOWN_GETTERS = ["getEntryDecryptionKey", "getTeamEncryptionKey", "getItemEncryptionKey", "getEntryItemKeys"];
-
-/**
- * Decrypt sites whose key the analysis cannot trace, each reviewed by hand as
- * a NON-team key (file:line of the call). Must equal the derived set exactly:
- * a new untraceable site, or a reviewed one that moved or became traceable,
- * fails the tree cell below. Empty today: every decrypt key in the tree is
- * traced to its sources.
- */
-const NON_TEAM_DECRYPT_SITES: readonly string[] = [];
 
 interface Tree {
   project: Project;
   /** Scanned (non-test) source files, keyed by repo-relative POSIX path. */
   files: Map<string, SourceFile>;
-  /** Files whose `function` declarations with a `teamId` parameter count as team key getters. */
-  getterFunctionRoots: string[];
 }
 
 interface Analysis {
-  getters: Set<string>;
   /** Derived decrypt set, as `file#name` (the decryptData declarations and the forwarding wrappers). */
   decryptFns: string[];
-  helperViolations: string[];
+  confinementViolations: string[];
+  shapeViolations: string[];
   referenceViolations: string[];
-  decryptViolations: string[];
-  /** Decrypt calls whose key could not be traced, as `file:line` (with the reason). */
-  unclassified: { site: string; why: string }[];
-  teamDecryptFiles: Set<string>;
-  /** Modules with a decryptData call classified NOT team (its key traced, no getter reached). */
-  nonTeamDecryptFiles: Set<string>;
-  /** handleView sites of the helper in the history view (for its own check). */
+  /** Modules with a non-exempt decrypt call whose AAD names the builder. */
+  teamAadFiles: string[];
+  /** handleView sites of the helper in the history view. */
   historyViewHelperSites: string[];
 }
 
@@ -157,7 +134,7 @@ function walk(dir: string, out: string[]): void {
 }
 
 /** A Program-backed project over `scanRoot`'s non-test files, compiled with `tsconfig`. */
-function loadRepoTree(tsconfig: string, scanRoot: string): { project: Project; files: Map<string, SourceFile> } {
+function loadRepoTree(tsconfig: string, scanRoot: string): Tree {
   const project = new Project({ tsConfigFilePath: path.join(REPO_ROOT, tsconfig), skipAddingFilesFromTsConfig: true });
   const abs: string[] = [];
   walk(path.join(REPO_ROOT, scanRoot), abs);
@@ -221,17 +198,6 @@ function declarationsOf(expr: Node, depth = 0): Node[] {
   return out;
 }
 
-/** The name a declaration binds, as the getter set spells it (a destructuring rename counts by its property). */
-function declaredName(d: Node): string | undefined {
-  if (Node.isBindingElement(d)) return (d.getPropertyNameNode() ?? d.getNameNode()).getText();
-  if (Node.isPropertySignature(d) || Node.isMethodSignature(d) || Node.isPropertyAssignment(d)
-    || Node.isShorthandPropertyAssignment(d) || Node.isPropertyDeclaration(d) || Node.isMethodDeclaration(d)
-    || Node.isFunctionDeclaration(d) || Node.isParameterDeclaration(d) || Node.isVariableDeclaration(d)) {
-    return d.getName();
-  }
-  return undefined;
-}
-
 function terminalName(expr: Node): string | undefined {
   const e = unwrap(expr);
   if (Node.isIdentifier(e)) return e.getText();
@@ -267,12 +233,7 @@ function enclosingFunction(node: Node): Node | undefined {
     || Node.isGetAccessorDeclaration(a) || Node.isSetAccessorDeclaration(a));
 }
 
-/**
- * A function's binding, when its call sites can be enumerated: a named
- * `function` declaration, or an arrow / function expression bound by a
- * variable declaration. A callback, an object or class method and a
- * property-assigned arrow have none.
- */
+/** A named function's binding: a `function` declaration, or a function bound by a variable declaration. */
 function functionBinding(fn: Node): { decl: Node; nameNode: Identifier } | undefined {
   if (Node.isFunctionDeclaration(fn)) {
     const nameNode = fn.getNameNode();
@@ -309,77 +270,16 @@ const ASSIGNMENT_OPERATORS = new Set([
   SyntaxKind.AmpersandAmpersandEqualsToken,
 ]);
 
-// ── Getter set derivation ──────────────────────────────────────────────
+const BYTE_TYPES = new Set(["Uint8Array", "ArrayBuffer", "ArrayBufferView"]);
 
-function carriesCryptoKey(type: Type, depth = 0): boolean {
-  if (type.isUnion()) return type.getUnionTypes().some((t) => carriesCryptoKey(t, depth));
-  if (type.getSymbol()?.getName() === "CryptoKey") return true;
-  if (depth >= 2 || !type.isObject()) return false;
-  return type.getProperties().some((p) => {
-    const decl = p.getValueDeclaration();
-    return decl ? carriesCryptoKey(p.getTypeAtLocation(decl), depth + 1) : false;
-  });
-}
-
-const BYTE_TYPES = new Set(["Uint8Array", "ArrayBuffer", "ArrayBufferView", "SharedArrayBuffer", "DataView"]);
-
-/** Key material: a CryptoKey-carrying value, raw key bytes, or a container of them (Map, array, Promise). */
-function isKeyMaterial(type: Type, depth = 0): boolean {
+/** A value an AAD can be built from: bytes, or something callable (a builder alias, a local helper). */
+function isAadLike(type: Type): boolean {
   const t = type.getNonNullableType();
-  if (t.isUnion()) return t.getUnionTypes().some((u) => isKeyMaterial(u, depth));
-  if (BYTE_TYPES.has(t.getSymbol()?.getName() ?? "") || carriesCryptoKey(t)) return true;
-  if (depth >= 2) return false;
-  if (t.isArray()) return isKeyMaterial(t.getArrayElementTypeOrThrow(), depth + 1);
-  return t.getTypeArguments().some((a) => isKeyMaterial(a, depth + 1));
+  if (t.isUnion()) return t.getUnionTypes().some(isAadLike);
+  return BYTE_TYPES.has(t.getSymbol()?.getName() ?? "") || t.getCallSignatures().length > 0;
 }
 
-function isRawBytes(type: Type): boolean {
-  const t = type.getNonNullableType();
-  if (t.isUnion()) return t.getUnionTypes().every(isRawBytes);
-  return BYTE_TYPES.has(t.getSymbol()?.getName() ?? "");
-}
-
-function returnsCryptoKey(type: Type): boolean {
-  return type.getCallSignatures().some((sig) => {
-    const ret = sig.getReturnType();
-    const awaited = ret.getSymbol()?.getName() === "Promise" ? ret.getTypeArguments()[0] : ret;
-    return awaited ? carriesCryptoKey(awaited) : false;
-  });
-}
-
-function deriveGetters(trees: Tree[]): Set<string> {
-  const getters = new Set<string>();
-  for (const tree of trees) {
-    for (const sf of tree.files.values()) {
-      for (const iface of sf.getInterfaces().filter((i) => i.getName() === GETTER_INTERFACE)) {
-        for (const member of iface.getProperties()) {
-          if (returnsCryptoKey(member.getType())) getters.add(member.getName());
-        }
-      }
-    }
-    for (const [rel, sf] of tree.files) {
-      if (!tree.getterFunctionRoots.some((root) => rel.startsWith(root))) continue;
-      for (const fn of sf.getDescendantsOfKind(SyntaxKind.FunctionDeclaration)) {
-        const name = fn.getName();
-        if (name && fn.getParameters().some((p) => p.getName() === "teamId") && returnsCryptoKey(fn.getType())) {
-          getters.add(name);
-        }
-      }
-    }
-  }
-  return getters;
-}
-
-function isGetterCall(call: CallExpression, getters: ReadonlySet<string>): boolean {
-  const name = terminalName(call.getExpression());
-  if (name && getters.has(name)) return true;
-  return declarationsOf(call.getExpression()).some((d) => {
-    const n = declaredName(d);
-    return n !== undefined && getters.has(n);
-  });
-}
-
-// ── The AAD shape of a team decrypt ────────────────────────────────────
+// ── (b) The strict AAD shape ───────────────────────────────────────────
 
 function aadShapeViolation(arg: Node | undefined, builders: ReadonlySet<Node>): string | null {
   if (!arg) return "missing AAD argument";
@@ -415,51 +315,23 @@ interface DecryptFn {
   aadIndex: number;
 }
 
-/** Why a key trace stopped; null when it was followed to its sources. */
-type Trace = { team: boolean; untraceable: string | null; via?: string };
-const TRACED: Trace = { team: false, untraceable: null };
-const untraceable = (why: string): Trace => ({ team: false, untraceable: why });
 const MAX_DEPTH = 40;
-/** WebCrypto makes a fresh key from no key material. */
-const WEBCRYPTO_CALLEE = /^(globalThis\.|self\.|window\.)?crypto\.(subtle\.\w+|getRandomValues)$/;
-
-/** A function's return expressions (an arrow's expression body counts). */
-function returnExpressions(fn: Node): Node[] {
-  if (Node.isArrowFunction(fn)) {
-    const body = fn.getBody();
-    if (!Node.isBlock(body)) return [body];
-  }
-  return fn.getDescendantsOfKind(SyntaxKind.ReturnStatement)
-    .filter((r) => enclosingFunction(r) === fn)
-    .flatMap((r) => {
-      const e = r.getExpression();
-      return e ? [e] : [];
-    });
-}
 
 function analyze(trees: Tree[]): Analysis {
-  const getters = deriveGetters(trees);
-  const helpers = new Set(findFunctionDeclarations(trees, HELPER));
   const builders = new Set(findFunctionDeclarations(trees, BUILDER));
   const baseDecrypts = findFunctionDeclarations(trees, DECRYPT);
-  if (helpers.size === 0 || builders.size === 0 || baseDecrypts.length === 0) {
-    throw new Error(`guard targets did not resolve: ${HELPER}=${helpers.size} ${BUILDER}=${builders.size} ${DECRYPT}=${baseDecrypts.length}`);
+  const confinedDecls = new Map(CONFINED.map((c) => [c.name, new Set(findFunctionDeclarations(trees, c.name))]));
+  if (builders.size === 0 || baseDecrypts.length === 0 || [...confinedDecls.values()].some((s) => s.size === 0)) {
+    throw new Error(`guard targets did not resolve: ${BUILDER}=${builders.size} ${DECRYPT}=${baseDecrypts.length} `
+      + [...confinedDecls].map(([n, s]) => `${n}=${s.size}`).join(" "));
   }
 
   const relOf = new Map<SourceFile, string>();
   for (const tree of trees) for (const [rel, sf] of tree.files) relOf.set(sf, rel);
   const where = (n: Node) => `${relOf.get(n.getSourceFile()) ?? n.getSourceFile().getFilePath()}:${n.getStartLineNumber()}`;
   const scanned = (n: Node) => relOf.has(n.getSourceFile());
-
-  const refCache = new Map<Node, Node[]>();
-  const referencesOf = (nameNode: Identifier): Node[] => {
-    let refs = refCache.get(nameNode);
-    if (!refs) {
-      refs = nameNode.findReferencesAsNodes().filter((r) => r !== nameNode && scanned(r));
-      refCache.set(nameNode, refs);
-    }
-    return refs;
-  };
+  const referencesOf = (nameNode: Identifier): Node[] =>
+    nameNode.findReferencesAsNodes().filter((r) => r !== nameNode && scanned(r));
 
   // ── The decrypt set (fixed point over forwarding wrappers).
   const decryptFns = new Map<Node, DecryptFn>();
@@ -502,7 +374,7 @@ function analyze(trees: Tree[]): Analysis {
     }
   }
 
-  // ── (b) Every reference to a decrypt function is a direct call.
+  // ── (c) Every reference to a decrypt function is a direct call.
   const referenceViolations: string[] = [];
   const decryptNames = new Set([...decryptFns.values()].map((f) => f.nameNode.getText()));
   for (const tree of trees) {
@@ -529,305 +401,31 @@ function analyze(trees: Tree[]): Analysis {
     }
   }
 
-  // ── Parameter sources: the arguments at every enumerable call site.
-  const paramSources = (param: Node): { args: Node[] } | { why: string } => {
-    if (!Node.isParameterDeclaration(param)) return { why: "not a parameter" };
-    if (param.isRestParameter()) return { why: `rest parameter ${param.getName()}` };
-    const fn = param.getParentOrThrow();
-    const binding = functionBinding(fn);
-    if (!binding) return { why: `parameter ${param.getName()} of a ${fn.getKindName()} with no enumerable call sites` };
-    const index = (fn as Node & { getParameters(): Node[] }).getParameters().indexOf(param);
-    const refs = referencesOf(binding.nameNode).filter((r) => !isBindingOnlyReference(r));
-    if (refs.length === 0) return { why: `${binding.nameNode.getText()} has no call sites` };
-    const args: Node[] = [];
-    for (const ref of refs) {
-      const call = directCallOf(ref);
-      if (!call) return { why: `${binding.nameNode.getText()} is passed as a value` };
-      const callArgs = call.getArguments();
-      if (callArgs.slice(0, index + 1).some((a) => Node.isSpreadElement(a))) return { why: "a spread argument" };
-      if (callArgs[index]) args.push(callArgs[index]);
-    }
-    return { args };
-  };
-
-  /** The values a variable takes, or why they cannot be enumerated (property writes, mutating calls, destructuring writes). */
-  const variableSources = (decl: Node, nameNode: Identifier | undefined, isConst: boolean): { sources: Node[] } | { why: string } => {
-    const sources: Node[] = [];
-    if (Node.isVariableDeclaration(decl)) {
-      const init = decl.getInitializer();
-      const react = init ? reactStoreSources(decl, nameNode) : undefined;
-      if (react) {
-        if ("why" in react) return react;
-        sources.push(...react.sources);
-      } else if (init) {
-        sources.push(init);
-      }
-      const loop = decl.getParentOrThrow().getParent();
-      if (Node.isForOfStatement(loop) || Node.isForInStatement(loop)) sources.push(loop.getExpression());
-    }
-    if (!nameNode) return { sources };
-    for (const ref of referencesOf(nameNode)) {
-      const parent = ref.getParentOrThrow();
-      if (Node.isBinaryExpression(parent) && parent.getLeft() === ref && ASSIGNMENT_OPERATORS.has(parent.getOperatorToken().getKind())) {
-        if (isConst) return { why: "assigned" };
-        sources.push(parent.getRight());
-        continue;
-      }
-      if ((Node.isPropertyAccessExpression(parent) || Node.isElementAccessExpression(parent)) && parent.getExpression() === ref) {
-        const grand = parent.getParent();
-        if (Node.isBinaryExpression(grand) && grand.getLeft() === parent && ASSIGNMENT_OPERATORS.has(grand.getOperatorToken().getKind())) {
-          // Raw bytes take what is written into them (`bytes[i] = ...`); a
-          // holder object or container may take any key.
-          if (isRawBytes(ref.getType()) || (isReactRef(decl) && Node.isPropertyAccessExpression(parent) && parent.getName() === "current")) {
-            sources.push(grand.getRight());
-            continue;
-          }
-          return { why: `${nameNode.getText()} holds a key written through a property` };
-        }
-        if (Node.isCallExpression(grand) && grand.getExpression() === parent && grand.getArguments().length > 0) {
-          // Raw bytes take what their methods write (`fill(0)`, `set(bytes)`);
-          // a container (Map, array, holder object) may take any key.
-          if (isRawBytes(ref.getType())) {
-            sources.push(...grand.getArguments());
-            continue;
-          }
-          return { why: `${nameNode.getText()} is filled by a method call (${parent.getText()})` };
-        }
-      }
-      const destructuringWrite = ref.getAncestors().some((a) => Node.isBinaryExpression(a)
-        && a.getOperatorToken().getKind() === SyntaxKind.EqualsToken
-        && (Node.isArrayLiteralExpression(a.getLeft()) || Node.isObjectLiteralExpression(a.getLeft()))
-        && a.getLeft().getDescendants().includes(ref));
-      if (destructuringWrite) return { why: `${nameNode.getText()} is written by a destructuring assignment` };
-    }
-    if (sources.length === 0) return { why: `${nameNode.getText()} has no traceable value` };
-    return { sources };
-  };
-
-  /**
-   * The part of an argument a destructured parameter binding takes: the
-   * matching property of an object literal (a top-level `{ a, b: c }`
-   * pattern); the whole argument otherwise.
-   */
-  const bindingValue = (binding: Node, param: Node, arg: Node): Node => {
-    const a = unwrap(arg);
-    if (!Node.isBindingElement(binding) || !Node.isObjectLiteralExpression(a)) return arg;
-    const pattern = binding.getParent();
-    if (!Node.isObjectBindingPattern(pattern) || pattern.getParent() !== param) return arg;
-    if (a.getProperties().some((p) => Node.isSpreadAssignment(p))) return arg;
-    const name = (binding.getPropertyNameNode() ?? binding.getNameNode()).getText();
-    for (const p of a.getProperties()) {
-      if (Node.isPropertyAssignment(p) && p.getName() === name) return p.getInitializer() ?? arg;
-      if (Node.isShorthandPropertyAssignment(p) && p.getName() === name) return p.getNameNode();
-    }
-    return arg;
-  };
-
-  /** `const ref = useRef(init)`: its value is `init` and every `ref.current = ...`. */
-  const isReactRef = (decl: Node): boolean => {
-    const init = Node.isVariableDeclaration(decl) ? decl.getInitializer() : undefined;
-    return !!init && Node.isCallExpression(unwrap(init)) && terminalName((unwrap(init) as CallExpression).getExpression()) === "useRef";
-  };
-
-  /**
-   * React stores, whose value is set away from the declaration: the state of
-   * `const [value, setValue] = useState(init)` takes `init` and every argument
-   * passed to `setValue`; a `createContext(default)` takes `default` and every
-   * `<Ctx.Provider value={...}>`; a `useRef(init)` takes `init` (and its
-   * `.current` writes). undefined when `decl` is none of them.
-   */
-  const reactStoreSources = (decl: Node, nameNode: Identifier | undefined): { sources: Node[] } | { why: string } | undefined => {
-    if (!Node.isVariableDeclaration(decl)) return undefined;
-    const init = decl.getInitializer();
-    const call = init ? unwrap(init) : undefined;
-    if (!call || !Node.isCallExpression(call)) return undefined;
-    const hook = terminalName(call.getExpression());
-    // useRef: the initial value here; `ref.current = ...` writes are added by variableSources.
-    if (hook === "useRef") return { sources: [...call.getArguments()] };
-    if (hook === "useState" && Node.isArrayBindingPattern(decl.getNameNode())) {
-      const [valueEl, setterEl] = (decl.getNameNode() as Node & { getElements(): Node[] }).getElements();
-      if (!nameNode || !Node.isBindingElement(valueEl) || valueEl.getNameNode() !== nameNode) return undefined;
-      const sources: Node[] = [...call.getArguments()];
-      const setterName = Node.isBindingElement(setterEl) ? setterEl.getNameNode() : undefined;
-      if (!setterName || !Node.isIdentifier(setterName)) return { sources };
-      for (const ref of referencesOf(setterName)) {
-        const setCall = directCallOf(ref);
-        if (!setCall) return { why: `the state setter ${setterName.getText()} is passed as a value` };
-        sources.push(...setCall.getArguments());
-      }
-      return { sources };
-    }
-    if (hook === "createContext" && nameNode) {
-      const sources: Node[] = [...call.getArguments()];
-      for (const ref of referencesOf(nameNode)) {
-        const access = ref.getParent();
-        if (!Node.isPropertyAccessExpression(access) || access.getName() !== "Provider") continue;
-        const opening = access.getParent();
-        if (Node.isJsxClosingElement(opening)) continue;
-        if (!Node.isJsxOpeningElement(opening) && !Node.isJsxSelfClosingElement(opening)) {
-          return { why: `${nameNode.getText()}.Provider is used other than as a JSX element` };
-        }
-        for (const attr of opening.getAttributes()) {
-          if (Node.isJsxSpreadAttribute(attr)) return { why: `${nameNode.getText()}.Provider takes a spread` };
-          if (attr.getNameNode().getText() !== "value") continue;
-          const value = attr.getInitializer();
-          if (Node.isJsxExpression(value) && value.getExpression()) sources.push(value.getExpression() as Node);
-        }
-      }
-      return { sources };
-    }
-    return undefined;
-  };
-
-  const isConstDecl = (d: Node): boolean => {
-    const v = Node.isBindingElement(d) ? d.getFirstAncestorByKind(SyntaxKind.VariableDeclaration) : d;
-    const list = v?.getParent();
-    return !!list && Node.isVariableDeclarationList(list) && (list.getFlags() & ts.NodeFlags.Const) !== 0;
-  };
-
-  const traceKey = (expr: Node, seen: Set<Node>, depth: number): Trace => {
-    const e = unwrap(expr);
-    if (depth > MAX_DEPTH) return untraceable("the key trace is too deep");
-    if (seen.has(e)) return TRACED;
-    seen.add(e);
-    const nodes = [e, ...e.getDescendants()];
-    const calls = nodes.filter(Node.isCallExpression);
-    const getterCall = calls.find((c) => isGetterCall(c, getters));
-    if (getterCall) return { team: true, untraceable: null, via: where(getterCall) };
-    if (nodes.some((n) => n.getKind() === SyntaxKind.ThisKeyword)) return untraceable("a key read through `this`");
-    let out = TRACED;
-    // A key-returning call: what the callee returns (its return expressions,
-    // or the implementations of an interface member), unless it is a callback
-    // or a library call that makes a key from no key material.
-    for (const c of calls) {
-      if (!isKeyMaterial(c.getType())) continue;
-      const t = traceCall(c, seen, depth);
-      if (t.team) return t;
-      if (!out.untraceable && t.untraceable) out = t;
-    }
-    for (const id of nodes.filter(Node.isIdentifier)) {
-      const parent = id.getParent();
-      if ((Node.isPropertyAccessExpression(parent) || Node.isPropertyAssignment(parent)) && parent.getNameNode() === id) continue;
-      if (id.getAncestors().some((a) => Node.isTypeNode(a))) continue;
-      if (!isKeyMaterial(id.getType())) continue;
-      const t = traceIdentifier(id, seen, depth);
-      if (t.team) return t;
-      if (!out.untraceable && t.untraceable) out = t;
-    }
-    return out;
-  };
-
-  const traceCall = (c: CallExpression, seen: Set<Node>, depth: number): Trace => {
-    const callee = c.getExpression();
-    const decls = declarationsOf(callee);
-    if (decls.length === 0) return untraceable(`the key comes from an unresolved call (${callee.getText()})`);
-    let out = TRACED;
-    for (const d of decls) {
-      let t: Trace;
-      if (Node.isParameterDeclaration(d) || Node.isBindingElement(d)) {
-        t = untraceable(`the key comes from a call through a ${d.getKindName()} (${callee.getText()})`);
-      } else if (!scanned(d)) {
-        // A library call: a key made from key material in its arguments (traced
-        // with the identifiers below), or WebCrypto making a fresh one.
-        const fromKeys = c.getArguments().some((a) => [a, ...a.getDescendants()].some((n) => Node.isIdentifier(n) && isKeyMaterial(n.getType())));
-        t = fromKeys || WEBCRYPTO_CALLEE.test(callee.getText()) || isRawBytes(c.getType())
-          ? TRACED
-          : untraceable(`the key comes from a library call that holds it (${callee.getText()})`);
-      } else if (isRawBytes(c.getType())) {
-        // A byte transformation (hexDecode, toArrayBuffer): its key material is
-        // in its arguments, traced with the identifiers below. Tracing its body
-        // would follow its parameter to every caller in the tree.
-        t = TRACED;
-      } else {
-        const values = implementationValues(d);
-        t = "why" in values ? untraceable(values.why) : traceSources(values.values, seen, depth);
-      }
-      if (t.team) return t;
-      if (!out.untraceable && t.untraceable) out = t;
-    }
-    return out;
-  };
-
-  /** The values a scanned callee returns: a function's return expressions, an interface member's implementations. */
-  const implementationValues = (d: Node): { values: Node[] } | { why: string } => {
-    const fn = Node.isVariableDeclaration(d) ? d.getInitializer() : d;
-    if (fn && (Node.isFunctionDeclaration(fn) || Node.isArrowFunction(fn) || Node.isFunctionExpression(fn) || Node.isMethodDeclaration(fn))) {
-      return { values: returnExpressions(fn) };
-    }
-    if (Node.isPropertyAssignment(d)) {
+  /** The expressions a scanned declaration binds: an initializer and its assignments, a function body. */
+  const bindingSources = (d: Node): Node[] => {
+    if (Node.isVariableDeclaration(d)) {
+      const sources: Node[] = [];
       const init = d.getInitializer();
-      return init ? implementationValues(init) : { why: `${d.getName()} has no value` };
-    }
-    if (Node.isArrowFunction(d) || Node.isFunctionExpression(d)) return { values: returnExpressions(d) };
-    if (Node.isPropertySignature(d) || Node.isMethodSignature(d)) {
+      if (init) sources.push(init);
       const nameNode = d.getNameNode();
-      if (!Node.isIdentifier(nameNode)) return { why: `${d.getKindName()} with a computed name` };
-      const values: Node[] = [];
+      if (!Node.isIdentifier(nameNode)) return sources;
       for (const ref of referencesOf(nameNode)) {
         const parent = ref.getParentOrThrow();
-        if (directCallOf(ref) || (Node.isPropertyAccessExpression(parent) && parent.getNameNode() === ref)) continue;
-        if (Node.isPropertySignature(parent) || Node.isMethodSignature(parent)) continue;
-        if (Node.isPropertyAssignment(parent) && parent.getNameNode() === ref) {
-          const impl = implementationValues(parent);
-          if ("why" in impl) return impl;
-          values.push(...impl.values);
-        } else if (Node.isMethodDeclaration(parent) && parent.getNameNode() === ref && Node.isObjectLiteralExpression(parent.getParent())) {
-          values.push(...returnExpressions(parent));
-        } else if (Node.isShorthandPropertyAssignment(parent)) {
-          values.push(ref);
-        } else {
-          return { why: `${nameNode.getText()} is implemented by a ${parent.getKindName()} the trace does not follow` };
+        if (Node.isBinaryExpression(parent) && parent.getLeft() === ref && ASSIGNMENT_OPERATORS.has(parent.getOperatorToken().getKind())) {
+          sources.push(parent.getRight());
         }
       }
-      return values.length > 0 ? { values } : { why: `${nameNode.getText()} has no implementation the trace can enumerate` };
+      return sources;
     }
-    return { why: `the key comes from a call to a ${d.getKindName()}` };
-  };
-
-  const traceSources = (sources: Node[], seen: Set<Node>, depth: number): Trace => {
-    let out = TRACED;
-    for (const s of sources) {
-      const t = traceKey(s, seen, depth + 1);
-      if (t.team) return t;
-      if (!out.untraceable && t.untraceable) out = t;
+    if (Node.isBindingElement(d)) {
+      const init = d.getFirstAncestorByKind(SyntaxKind.VariableDeclaration)?.getInitializer();
+      return init ? [init] : [];
     }
-    return out;
-  };
-
-  const traceIdentifier = (id: Identifier, seen: Set<Node>, depth: number): Trace => {
-    const symbol = symbolOf(id);
-    if (!symbol) return untraceable(`${id.getText()} has no symbol`);
-    const decls = aliased(symbol).getDeclarations();
-    if (decls.length === 0) return untraceable(`${id.getText()} has no declaration`);
-    let out = TRACED;
-    for (const d of decls) {
-      let t: Trace;
-      if (Node.isVariableDeclaration(d) || Node.isBindingElement(d)) {
-        // A destructured binding takes its value from the nearest declaration
-        // or parameter it is bound in.
-        const owner = Node.isBindingElement(d)
-          ? d.getFirstAncestor((a) => Node.isVariableDeclaration(a) || Node.isParameterDeclaration(a))
-          : d;
-        const nameNode = d.getNameNode();
-        if (owner && Node.isParameterDeclaration(owner)) {
-          const p = paramSources(owner);
-          t = "why" in p ? untraceable(p.why) : traceSources(p.args.map((a) => bindingValue(d, owner, a)), seen, depth);
-        } else if (owner) {
-          const v = variableSources(owner, Node.isIdentifier(nameNode) ? nameNode : undefined, isConstDecl(d));
-          t = "why" in v ? untraceable(v.why) : traceSources(v.sources, seen, depth);
-        } else {
-          t = untraceable(`${id.getText()} is a binding outside a declaration`);
-        }
-      } else if (Node.isParameterDeclaration(d)) {
-        const p = paramSources(d);
-        t = "why" in p ? untraceable(p.why) : traceSources(p.args, seen, depth);
-      } else {
-        t = untraceable(`${id.getText()} is a ${d.getKindName()}`);
-      }
-      if (t.team) return t;
-      if (!out.untraceable && t.untraceable) out = t;
+    if (Node.isFunctionDeclaration(d)) {
+      const body = d.getBody();
+      return body ? [body] : [];
     }
-    return out;
+    return [];
   };
 
   /** True when an AAD expression names the team builder, however bound. */
@@ -840,136 +438,104 @@ function analyze(trees: Tree[]): Analysis {
       if (!symbol) continue;
       const decls = aliased(symbol).getDeclarations();
       if (decls.some((d) => builders.has(d))) return true;
-      const t = n.getType();
-      if (!isKeyMaterial(t) && t.getCallSignatures().length === 0) continue;
+      if (!isAadLike(n.getType())) continue;
       for (const d of decls) {
-        let sources: Node[] = [];
-        if (Node.isVariableDeclaration(d)) {
-          const nameNode = d.getNameNode();
-          const v = variableSources(d, Node.isIdentifier(nameNode) ? nameNode : undefined, false);
-          sources = "sources" in v ? v.sources : (d.getInitializer() ? [d.getInitializer() as Node] : []);
-        } else if (Node.isBindingElement(d)) {
-          const init = d.getFirstAncestorByKind(SyntaxKind.VariableDeclaration)?.getInitializer();
-          if (init) sources = [init];
-        } else if (Node.isParameterDeclaration(d)) {
-          const p = paramSources(d);
-          if ("args" in p) sources = p.args;
-        } else if (Node.isFunctionDeclaration(d) && scanned(d)) {
-          const body = d.getBody();
-          if (body) sources = [body];
-        }
-        if (sources.some((s) => namesBuilder(s, seen, depth + 1))) return true;
+        if (scanned(d) && bindingSources(d).some((s) => namesBuilder(s, seen, depth + 1))) return true;
       }
     }
     return false;
   };
 
-  const helperViolations: string[] = [];
-  const decryptViolations: string[] = [];
-  const unclassified: { site: string; why: string }[] = [];
-  const teamDecryptFiles = new Set<string>();
-  const nonTeamDecryptFiles = new Set<string>();
+  const confinementViolations: string[] = [];
+  const shapeViolations: string[] = [];
+  const teamAadFiles = new Set<string>();
   const historyViewHelperSites: string[] = [];
 
   for (const tree of trees) {
     for (const [rel, sf] of tree.files) {
-      // (a) spellings of the helper's imported/exported name, and element access.
-      for (const spec of [...sf.getDescendantsOfKind(SyntaxKind.ImportSpecifier), ...sf.getDescendantsOfKind(SyntaxKind.ExportSpecifier)]) {
-        // getNameNode() is the IMPORTED / re-exported name in both specifier kinds (the `as` name is the alias node).
-        if (spec.getNameNode().getText() !== HELPER) continue;
-        const symbol = spec.getSymbol();
-        const resolved = symbol ? aliased(symbol).getDeclarations() : [];
-        if (!resolved.some((d) => helpers.has(d))) helperViolations.push(`${where(spec)} unresolved import of ${HELPER}`);
-        else if (!ALLOWED_HELPER_FILES.has(rel)) helperViolations.push(`${where(spec)} names ${HELPER}`);
-      }
-      for (const ea of sf.getDescendantsOfKind(SyntaxKind.ElementAccessExpression)) {
-        if (/^["'`]teamEntryAadFor["'`]$/.test(ea.getArgumentExpression()?.getText() ?? "") && !ALLOWED_HELPER_FILES.has(rel)) {
-          helperViolations.push(`${where(ea)} element access to ${HELPER}`);
+      // (a) spellings of each confined name: imported / exported names, element access.
+      for (const c of CONFINED) {
+        const decls = confinedDecls.get(c.name) as Set<Node>;
+        for (const spec of [...sf.getDescendantsOfKind(SyntaxKind.ImportSpecifier), ...sf.getDescendantsOfKind(SyntaxKind.ExportSpecifier)]) {
+          // getNameNode() is the IMPORTED / re-exported name in both specifier kinds (the `as` name is the alias node).
+          if (spec.getNameNode().getText() !== c.name) continue;
+          const symbol = spec.getSymbol();
+          const resolved = symbol ? aliased(symbol).getDeclarations() : [];
+          if (!resolved.some((d) => decls.has(d))) confinementViolations.push(`${where(spec)} unresolved import of ${c.name}`);
+          else if (!c.allowed.has(rel)) confinementViolations.push(`${where(spec)} names ${c.name}`);
+        }
+        for (const ea of sf.getDescendantsOfKind(SyntaxKind.ElementAccessExpression)) {
+          const arg = ea.getArgumentExpression();
+          if (arg && Node.isStringLiteral(arg) && arg.getLiteralText() === c.name && !c.allowed.has(rel)) {
+            confinementViolations.push(`${where(ea)} element access to ${c.name}`);
+          }
         }
       }
 
-      // (c) classify every decrypt call.
+      // (b) the strict shape of every decrypt whose AAD names the builder.
       for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
         const fn = decryptFnOf(call);
         if (!fn || forwardCalls.has(call)) continue;
-        const args = call.getArguments();
-        const key = args[fn.keyIndex];
-        const aad = args[fn.aadIndex];
-        const teamByAad = aad !== undefined && namesBuilder(aad, new Set(), 0);
-        const trace = key ? traceKey(key, new Set(), 0) : untraceable("missing key argument");
-        const exempt = ALLOWED_DECRYPT_FILES.has(rel) || (rel === HISTORY_VIEW && enclosingFunctionName(call) === HISTORY_VIEW_FN);
-        if (!trace.team && !teamByAad) {
-          if (!trace.untraceable) nonTeamDecryptFiles.add(rel);
-          else if (!exempt) unclassified.push({ site: where(call), why: trace.untraceable });
-          continue;
-        }
-        if (exempt) continue;
-        teamDecryptFiles.add(rel);
+        if (EXEMPT_DECRYPT_FUNCTIONS.get(rel)?.has(enclosingFunctionName(call) ?? "")) continue;
+        const aad = call.getArguments()[fn.aadIndex];
+        if (aad === undefined || !namesBuilder(aad, new Set(), 0)) continue;
+        teamAadFiles.add(rel);
         const why = aadShapeViolation(aad, builders);
-        if (why) decryptViolations.push(`${where(call)} ${why}${trace.team ? ` (team key via ${trace.via})` : " (team AAD)"}`);
+        if (why) shapeViolations.push(`${where(call)} ${why}`);
       }
     }
 
-    // (a) every reference to the helper's declaration, however spelled.
-    for (const helper of helpers) {
-      const home = relOf.get(helper.getSourceFile());
-      if (home !== undefined && home !== HELPER_HOME) helperViolations.push(`${where(helper)} declares ${HELPER} outside ${HELPER_HOME}`);
-      if (!Node.isFunctionDeclaration(helper) || !tree.project.getSourceFile(helper.getSourceFile().getFilePath())) continue;
-      for (const ref of referencesOf(helper.getNameNodeOrThrow())) {
-        const rel = relOf.get(ref.getSourceFile());
-        if (rel === undefined || !tree.files.has(rel)) continue;
-        if (rel === HISTORY_VIEW && Node.isCallExpression(ref.getParent())) {
-          historyViewHelperSites.push(enclosingFunctionName(ref) ?? "<top level>");
+    // (a) every reference to each confined declaration, however spelled.
+    for (const c of CONFINED) {
+      for (const decl of confinedDecls.get(c.name) as Set<Node>) {
+        const home = relOf.get(decl.getSourceFile());
+        if (home !== undefined && home !== c.home) confinementViolations.push(`${where(decl)} declares ${c.name} outside ${c.home}`);
+        if (!Node.isFunctionDeclaration(decl) || !tree.project.getSourceFile(decl.getSourceFile().getFilePath())) continue;
+        for (const ref of referencesOf(decl.getNameNodeOrThrow())) {
+          const rel = relOf.get(ref.getSourceFile());
+          if (rel === undefined || !tree.files.has(rel)) continue;
+          // Specifiers and element access are reported above, by their spelling.
+          const spelled = Node.isImportSpecifier(ref.getParent()) || Node.isExportSpecifier(ref.getParent())
+            || Node.isElementAccessExpression(ref.getParent());
+          if (!c.allowed.has(rel) && !spelled) confinementViolations.push(`${where(ref)} references ${c.name}`);
+          if (c.name !== HELPER) continue;
+          if (rel === HISTORY_VIEW && Node.isCallExpression(ref.getParent())) {
+            historyViewHelperSites.push(enclosingFunctionName(ref) ?? "<top level>");
+          }
+          const inEncrypt = ref.getAncestors().some((a) => Node.isCallExpression(a) && terminalName(a.getExpression()) === "encryptData");
+          if (inEncrypt) confinementViolations.push(`${where(ref)} ${HELPER} supplies an encryptData AAD`);
         }
-        if (!ALLOWED_HELPER_FILES.has(rel)) helperViolations.push(`${where(ref)} references ${HELPER}`);
-        const inEncrypt = ref.getAncestors().some((a) => Node.isCallExpression(a) && terminalName(a.getExpression()) === "encryptData");
-        if (inEncrypt) helperViolations.push(`${where(ref)} ${HELPER} supplies an encryptData AAD`);
       }
     }
   }
   const decryptFnNames = [...decryptFns.values()].map((f) => `${relOf.get(f.decl.getSourceFile()) ?? f.decl.getSourceFile().getFilePath()}#${f.nameNode.getText()}`);
   return {
-    getters, decryptFns: decryptFnNames.sort(), helperViolations, referenceViolations, decryptViolations,
-    unclassified, teamDecryptFiles, nonTeamDecryptFiles, historyViewHelperSites,
+    decryptFns: decryptFnNames.sort(), confinementViolations, shapeViolations, referenceViolations,
+    teamAadFiles: [...teamAadFiles].sort(), historyViewHelperSites,
   };
 }
 
-/** Drift between the derived unclassifiable sites and the reviewed list (both directions). */
-function reviewedSiteDrift(unclassified: Analysis["unclassified"], reviewed: readonly string[]): string[] {
-  const derived = new Set(unclassified.map((u) => u.site));
-  const listed = new Set(reviewed);
-  return [
-    ...unclassified.filter((u) => !listed.has(u.site)).map((u) => `${u.site} unclassifiable decrypt key (${u.why}); trace it to its source or review it into NON_TEAM_DECRYPT_SITES`),
-    ...reviewed.filter((s) => !derived.has(s)).map((s) => `${s} stale NON_TEAM_DECRYPT_SITES entry: no unclassifiable decrypt there`),
-  ];
+/** (d) The known readers that no longer make a decrypt call at a team AAD. */
+function floorViolations(teamAadFiles: readonly string[], known: readonly string[]): string[] {
+  const found = new Set(teamAadFiles);
+  return known.filter((rel) => !found.has(rel)).map((rel) => `${rel} makes no decrypt call at a ${BUILDER} AAD`);
 }
 
 // ── The repository ─────────────────────────────────────────────────────
 
-describe("team entry AAD strictness (D67, D73, D77)", () => {
+describe("team entry AAD strictness (D67, D73, D80)", () => {
   let result: Analysis;
-  let extensionGetters: Set<string>;
-  let scanned = 0;
+  let scannedCount = 0;
 
   beforeAll(() => {
     const app = loadRepoTree("tsconfig.json", "src");
     const ext = loadRepoTree("extension/tsconfig.json", "extension/src");
-    scanned = app.files.size + ext.files.size;
-    const extTree = { ...ext, getterFunctionRoots: ["extension/src/"] };
-    result = analyze([{ ...app, getterFunctionRoots: [] }, extTree]);
-    extensionGetters = deriveGetters([extTree]);
+    scannedCount = app.files.size + ext.files.size;
+    result = analyze([app, ext]);
   }, 180_000);
 
   it("scans every module under src/ and extension/src/ (non-vacuous)", () => {
-    expect(scanned).toBeGreaterThan(500);
-  });
-
-  it("derives the team key getter set from TeamVaultContextValue and the extension's teamId key functions", () => {
-    for (const name of KNOWN_GETTERS) expect(result.getters).toContain(name);
-    // The extension's own team key function (it has no TeamVaultContextValue).
-    expect(extensionGetters).toContain("getTeamEncryptionKey");
-    // Not a key getter: a void member stays out.
-    expect(result.getters).not.toContain("invalidateTeamKey");
+    expect(scannedCount).toBeGreaterThan(500);
   });
 
   it("derives the decrypt set: both decryptData declarations and the forwarding wrappers", () => {
@@ -980,46 +546,28 @@ describe("team entry AAD strictness (D67, D73, D77)", () => {
     ]));
   });
 
-  it(`(a) ${HELPER} is reached only from the upgrade paths and the history view`, () => {
-    expect(result.helperViolations).toEqual([]);
+  it(`(a) ${HELPER} and ${RESEAL} are named only in their allow-listed files`, () => {
+    expect(result.confinementViolations).toEqual([]);
   });
 
-  it("(a) the history view uses it only to display a history row (handleView)", () => {
+  it(`(a) the history view calls ${HELPER} only to display a history row (handleView)`, () => {
     expect(result.historyViewHelperSites).toEqual([HISTORY_VIEW_FN]);
   });
 
-  it("(b) every reference to a decrypt function is a direct call with no spread", () => {
+  it(`(b) every decrypt whose AAD names ${BUILDER} opens at a direct call (or a const bound to one)`, () => {
+    expect(result.shapeViolations).toEqual([]);
+  });
+
+  it("(c) every reference to a decrypt function is a direct call with no spread", () => {
     expect(result.referenceViolations).toEqual([]);
   });
 
-  it("(c) every team decrypt opens at a direct buildTeamEntryAAD (or a const bound to one)", () => {
-    expect(result.decryptViolations).toEqual([]);
-  });
-
-  it("(c) every decrypt key is traced, or its site is in the reviewed NON_TEAM_DECRYPT_SITES (exactly)", () => {
-    expect(reviewedSiteDrift(result.unclassified, NON_TEAM_DECRYPT_SITES)).toEqual([]);
-  });
-
-  it("(d) the derived strict-reader set contains every known reader", () => {
-    expect(result.teamDecryptFiles.size).toBeGreaterThan(0);
-    for (const rel of KNOWN_READERS) expect([...result.teamDecryptFiles]).toContain(rel);
-    for (const rel of [...ALLOWED_DECRYPT_FILES]) expect([...result.teamDecryptFiles]).not.toContain(rel);
-  });
-
-  it("(d) personal-entry decrypts are examined and classified non-team (not flagged)", () => {
-    for (const rel of [
-      "src/hooks/use-watchtower.ts",
-      "src/components/passwords/entry/entry-history-section.tsx",
-      "extension/src/background/index.ts",
-      "extension/src/background/login-save.ts",
-      "extension/src/background/passkey-provider.ts",
-    ]) {
-      expect([...result.nonTeamDecryptFiles]).toContain(rel);
-    }
+  it("(d) floor: every known team reader still decrypts at a team AAD", () => {
+    expect(floorViolations(result.teamAadFiles, KNOWN_TEAM_READERS)).toEqual([]);
   });
 });
 
-// ── (e) Red proofs on fixture sources ──────────────────────────────────
+// ── Red proofs on fixture sources ──────────────────────────────────────
 
 const FIXTURE_BASE: Record<string, string> = {
   "src/lib/crypto/crypto-client.ts": `
@@ -1037,43 +585,33 @@ const FIXTURE_BASE: Record<string, string> = {
     export function teamEntryAadFor(t: string, e: string, s: string, v: number, a: number): Uint8Array | undefined {
       return a >= 1 ? buildTeamEntryAAD(t, e, s, v) : undefined;
     }`,
+  [REKEY_PAYLOAD]: `
+    export async function resealLegacyHistoryRow(): Promise<null> { return null; }`,
   "src/lib/team/team-vault-core.tsx": `
     import type { CryptoKey } from "@/lib/crypto/crypto-client";
-    export interface TeamVaultContextValue {
-      getEntryDecryptionKey: (teamId: string, entryId: string, entry: unknown) => Promise<CryptoKey>;
-      getTeamEncryptionKey: (teamId: string) => Promise<CryptoKey | null>;
-      getItemEncryptionKey: (teamId: string, entryId: string) => Promise<{ keys: { encryptionKey: CryptoKey } }>;
-      getEntryItemKeys: (teamId: string, entryId: string, entry: unknown) => Promise<{ encryptionKey: CryptoKey }>;
-      invalidateTeamKey: (teamId: string) => void;
-    }
-    export function useTeamVault(): TeamVaultContextValue { throw new Error("fixture"); }
     export function useVault(): { encryptionKey: CryptoKey } { throw new Error("fixture"); }`,
 };
 
 const STRICT_READER = `
   import { decryptData } from "@/lib/crypto/crypto-client";
   import { buildTeamEntryAAD } from "@/lib/crypto/crypto-aad";
-  import { useTeamVault } from "@/lib/team/team-vault-core";
+  import { useVault } from "@/lib/team/team-vault-core";
   export async function read(row: { aadVersion: number; itemKeyVersion: number }) {
-    const { getEntryDecryptionKey } = useTeamVault();
-    const key = await getEntryDecryptionKey("t", "e", row);
+    const { encryptionKey: key } = useVault();
     const aad = buildTeamEntryAAD("t", "e", "blob", row.itemKeyVersion);
     return decryptData({}, key, aad);
   }`;
 
-/** Imports for the one-line fixtures below; their decrypt is on the line after it (line 6). */
+/** Imports for the one-line fixtures below; their code starts on line 6. */
 const H = `import { decryptData } from "@/lib/crypto/crypto-client";
 import type { CryptoKey } from "@/lib/crypto/crypto-client";
 import { buildTeamEntryAAD, buildPersonalEntryAAD } from "@/lib/crypto/crypto-aad";
-import { useTeamVault, useVault } from "@/lib/team/team-vault-core";
+import { useVault } from "@/lib/team/team-vault-core";
 void buildTeamEntryAAD; void buildPersonalEntryAAD; void useVault;
 `;
 
-/**
- * A fixture reader (plus extra files) analysed with the same functions as the
- * tree. `library` files are in the project but not scanned, as node_modules is.
- */
-function analyzeFixture(files: Record<string, string>, library: Record<string, string> = {}): Analysis {
+/** A fixture reader (plus extra files) analysed with the same function as the tree. */
+function analyzeFixture(files: Record<string, string>): Analysis {
   const project = new Project({
     useInMemoryFileSystem: true,
     compilerOptions: { strict: true, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, baseUrl: "/", paths: { "@/*": ["src/*"] } },
@@ -1082,284 +620,151 @@ function analyzeFixture(files: Record<string, string>, library: Record<string, s
   for (const [rel, text] of Object.entries({ ...FIXTURE_BASE, ...files })) {
     map.set(rel, project.createSourceFile(`/${rel}`, text));
   }
-  for (const [rel, text] of Object.entries(library)) project.createSourceFile(`/${rel}`, text);
-  return analyze([{ project, files: map, getterFunctionRoots: ["extension/src/"] }]);
+  return analyze([{ project, files: map }]);
 }
 
 const READER = "src/fixture/reader.ts";
-const sites = (r: Analysis) => r.unclassified.map((u) => u.site);
+
+/** Every rule's outcome for a fixture, so each cell is one exact assertion. */
+function outcome(r: Analysis) {
+  return {
+    confinement: r.confinementViolations,
+    shape: r.shapeViolations,
+    reference: r.referenceViolations,
+    teamAad: r.teamAadFiles.filter((f) => f.startsWith("src/fixture/")),
+  };
+}
+const CLEAN = { confinement: [], shape: [], reference: [] };
 
 describe("team entry AAD strictness guard (red proofs)", () => {
-  // ── Allow side ──
+  // ── Controls ──
 
-  it("control: a strict reader passes and is derived as a strict reader", () => {
-    const r = analyzeFixture({ [READER]: STRICT_READER });
-    expect(r.helperViolations).toEqual([]);
-    expect(r.referenceViolations).toEqual([]);
-    expect(r.decryptViolations).toEqual([]);
-    expect(r.unclassified).toEqual([]);
-    expect([...r.teamDecryptFiles]).toEqual([READER]);
+  it("control: a strict reader passes every rule and counts as a team-AAD module", () => {
+    expect(outcome(analyzeFixture({ [READER]: STRICT_READER }))).toEqual({ ...CLEAN, teamAad: [READER] });
   });
 
-  it("control: a personal decrypt with a conditional personal AAD in a team-reading module is not flagged", () => {
+  it("control: a decrypt with a conditional personal AAD is outside rule (b)", () => {
     const r = analyzeFixture({
-      [READER]: `${STRICT_READER}
-        import { buildPersonalEntryAAD } from "@/lib/crypto/crypto-aad";
-        import { useVault } from "@/lib/team/team-vault-core";
-        export async function personal(raw: { aadVersion: number }) {
-          const { encryptionKey } = useVault();
-          const aad = raw.aadVersion >= 1 ? buildPersonalEntryAAD("u", "e", "blob") : undefined;
-          return decryptData({}, encryptionKey, aad);
-        }`,
+      [READER]: `${H}export async function personal(raw: { aadVersion: number }) {
+        const { encryptionKey } = useVault();
+        const aad = raw.aadVersion >= 1 ? buildPersonalEntryAAD("u", "e", "blob") : undefined;
+        return decryptData({}, encryptionKey, aad); }`,
     });
-    expect(r.decryptViolations).toEqual([]);
-    expect(r.unclassified).toEqual([]);
-    expect([...r.nonTeamDecryptFiles]).toEqual([READER]);
+    expect(outcome(r)).toEqual({ ...CLEAN, teamAad: [] });
   });
 
-  it("control (T15): alias following — a strict reader through an import-renamed builder and a const-aliased builder passes", () => {
+  it("control (T15): an import-renamed builder behind a const alias is followed and passes", () => {
     const r = analyzeFixture({
       [READER]: STRICT_READER
         .replace(`import { buildTeamEntryAAD } from "@/lib/crypto/crypto-aad";`, `import { buildTeamEntryAAD as b } from "@/lib/crypto/crypto-aad";\n  const bb = b;`)
         .replace(`const aad = buildTeamEntryAAD("t", "e", "blob", row.itemKeyVersion);`, `const aad = bb("t", "e", "blob", row.itemKeyVersion);`),
     });
-    expect(r.decryptViolations).toEqual([]);
-    expect([...r.teamDecryptFiles]).toEqual([READER]);
+    expect(outcome(r)).toEqual({ ...CLEAN, teamAad: [READER] });
   });
 
-  it("control: a team key through the derived decryptTeamEntry wrapper at strict AAD passes and counts as a team decrypt", () => {
+  it("control: the derived decryptTeamEntry wrapper at strict AAD passes and counts as a team-AAD module", () => {
     const r = analyzeFixture({
       [READER]: STRICT_READER
         .replace(`import { decryptData } from "@/lib/crypto/crypto-client";`, `import { decryptTeamEntry } from "@/lib/crypto/crypto-team";`)
         .replace("return decryptData({}, key, aad);", "return decryptTeamEntry({}, key, aad);"),
     });
-    expect(r.decryptFns).toEqual(["src/lib/crypto/crypto-client.ts#decryptData", "src/lib/crypto/crypto-team.ts#decryptTeamEntry"]);
-    expect(r.decryptViolations).toEqual([]);
-    expect([...r.teamDecryptFiles]).toEqual([READER]);
+    expect(outcome(r)).toEqual({ ...CLEAN, teamAad: [READER] });
   });
 
-  it("control: a reviewed unclassifiable site is not drift; an unreviewed one and a stale entry are", () => {
-    const r = analyzeFixture({ [READER]: `${H}export const open = (k: CryptoKey) => [k].map((x) => decryptData({}, x));` });
-    expect(sites(r)).toEqual([`${READER}:6`]);
-    expect(reviewedSiteDrift(r.unclassified, [`${READER}:6`])).toEqual([]);
-    expect(reviewedSiteDrift(r.unclassified, [])).toEqual([expect.stringMatching(/reader\.ts:6 unclassifiable decrypt key/)]);
-    expect(reviewedSiteDrift([], [`${READER}:6`])).toEqual([expect.stringMatching(/reader\.ts:6 stale NON_TEAM_DECRYPT_SITES entry/)]);
-  });
+  // ── (a) confinement ──
 
-  // ── (a) the helper ──
-
-  it("(a) an aliased import of the helper is a violation", () => {
-    const r = analyzeFixture({
-      [READER]: `import { teamEntryAadFor as strictAad } from "@/lib/team/team-key-resolution";
-        export const f = strictAad;`,
-    });
-    expect(r.helperViolations).toEqual(expect.arrayContaining([expect.stringMatching(/reader\.ts:1 names teamEntryAadFor/)]));
-  });
-
-  it("(a) a barrel re-export under another name is a violation in the barrel and at the use site", () => {
-    const r = analyzeFixture({
+  it.each([
+    ["an aliased import of the helper", {
+      [READER]: `import { teamEntryAadFor as strictAad } from "@/lib/team/team-key-resolution";\nexport const f = strictAad;`,
+    }, [/^src\/fixture\/reader\.ts:1 names teamEntryAadFor$/, /^src\/fixture\/reader\.ts:2 references teamEntryAadFor$/]],
+    ["a barrel re-export under another name", {
       "src/fixture/barrel.ts": `export { teamEntryAadFor as strictAad } from "@/lib/team/team-key-resolution";`,
-      [READER]: `import { strictAad } from "@/fixture/barrel";
-        export const aad = strictAad("t", "e", "blob", 1, 0);`,
-    });
-    expect(r.helperViolations).toEqual(expect.arrayContaining([
-      expect.stringMatching(/barrel\.ts:1 names teamEntryAadFor/),
-      expect.stringMatching(/reader\.ts:2 references teamEntryAadFor/),
-    ]));
-  });
-
-  it("(a) namespace access through an `export *` barrel is a violation", () => {
-    const r = analyzeFixture({
+      [READER]: `import { strictAad } from "@/fixture/barrel";\nexport const aad = strictAad("t", "e", "blob", 1, 0);`,
+    }, [/^src\/fixture\/barrel\.ts:1 names teamEntryAadFor$/, /^src\/fixture\/reader\.ts:2 references teamEntryAadFor$/]],
+    ["namespace access through an `export *` barrel", {
       "src/fixture/barrel.ts": `export * from "@/lib/team/team-key-resolution";`,
-      [READER]: `import * as keys from "@/fixture/barrel";
-        export const aad = keys.teamEntryAadFor("t", "e", "blob", 1, 0);`,
-    });
-    expect(r.helperViolations).toEqual([expect.stringMatching(/reader\.ts:2 references teamEntryAadFor/)]);
-  });
-
-  it("(a) a second declaration of the helper outside its home is a violation", () => {
-    const r = analyzeFixture({
+      [READER]: `import * as keys from "@/fixture/barrel";\nexport const aad = keys.teamEntryAadFor("t", "e", "blob", 1, 0);`,
+    }, [/^src\/fixture\/reader\.ts:2 references teamEntryAadFor$/]],
+    ["element access spelling the helper", {
+      [READER]: `import * as keys from "@/lib/team/team-key-resolution";\nexport const aad = keys["teamEntryAadFor"]("t", "e", "blob", 1, 0);`,
+    }, [/^src\/fixture\/reader\.ts:2 element access to teamEntryAadFor$/]],
+    ["a second declaration of the helper outside its home", {
       [READER]: `export function teamEntryAadFor(): undefined { return undefined; }`,
-    });
-    expect(r.helperViolations).toEqual([expect.stringMatching(/reader\.ts:1 declares teamEntryAadFor outside/)]);
+    }, [/^src\/fixture\/reader\.ts:1 declares teamEntryAadFor outside src\/lib\/team\/team-key-resolution\.ts$/]],
+    ["an unresolvable import of the helper", {
+      [READER]: `import { teamEntryAadFor } from "@/lib/team/no-such-module";\nexport const f = teamEntryAadFor;`,
+    }, [/^src\/fixture\/reader\.ts:1 unresolved import of teamEntryAadFor$/]],
+    ["the helper supplying an encryptData AAD in an allowed file", {
+      [REKEY_PAYLOAD]: `import { encryptData, type CryptoKey } from "@/lib/crypto/crypto-client";
+import { teamEntryAadFor } from "@/lib/team/team-key-resolution";
+export async function resealLegacyHistoryRow(): Promise<null> { return null; }
+export const seal = (k: CryptoKey) => encryptData("p", k, teamEntryAadFor("t", "e", "blob", 1, 0));`,
+    }, [/^src\/lib\/team\/rekey-payload\.ts:4 teamEntryAadFor supplies an encryptData AAD$/]],
+    ["an import of the legacy re-seal outside the re-key payload", {
+      [READER]: `import { resealLegacyHistoryRow } from "@/lib/team/rekey-payload";\nexport const f = resealLegacyHistoryRow();`,
+    }, [/^src\/fixture\/reader\.ts:1 names resealLegacyHistoryRow$/, /^src\/fixture\/reader\.ts:2 references resealLegacyHistoryRow$/]],
+    ["a second declaration of the legacy re-seal", {
+      [READER]: `export async function resealLegacyHistoryRow(): Promise<null> { return null; }`,
+    }, [/^src\/fixture\/reader\.ts:1 declares resealLegacyHistoryRow outside src\/lib\/team\/rekey-payload\.ts$/]],
+  ])("(a) %s is a confinement violation", (_name, files, patterns) => {
+    const r = analyzeFixture(files);
+    expect(outcome(r)).toEqual({ ...CLEAN, teamAad: [], confinement: patterns.map((p) => expect.stringMatching(p)) });
   });
 
-  it("(a) an unresolvable import of the helper fails loudly", () => {
-    const r = analyzeFixture({
-      [READER]: `import { teamEntryAadFor } from "@/lib/team/no-such-module";
-        export const f = teamEntryAadFor;`,
-    });
-    expect(r.helperViolations).toEqual([expect.stringMatching(/unresolved import of teamEntryAadFor/)]);
-  });
-
-  // ── (b) declaration-side enumeration: every decrypt reference is a direct call ──
+  // ── (b) the strict AAD shape, whatever the key ──
 
   it.each([
-    ["dynamic_import_destructure", `export async function r() { const { decryptData: d } = await import("@/lib/crypto/crypto-client"); return d; }`, /reader\.ts:6 decryptData is used as a value \(BindingElement\)/],
-    ["ns_destructure", `import * as cc from "@/lib/crypto/crypto-client";\nconst { decryptData: d } = cc; export const f = d;`, /reader\.ts:7 decryptData is used as a value \(BindingElement\)/],
-    ["dot_call", `export async function r(k: CryptoKey) { return decryptData.call(null, {}, k); }`, /reader\.ts:6 decryptData is used as a value \(PropertyAccessExpression\)/],
-    ["apply_call", `export async function r(k: CryptoKey) { return decryptData.apply(null, [{}, k]); }`, /reader\.ts:6 decryptData is used as a value \(PropertyAccessExpression\)/],
-    ["element_access", `import * as cc from "@/lib/crypto/crypto-client";\nexport async function r(k: CryptoKey) { return cc["decryptData"]({}, k); }`, /reader\.ts:7 decryptData is used as a value/],
-    ["passed_as_value", `export async function r(ks: CryptoKey[]) { return ks.map(decryptData.bind(null, {})); }`, /reader\.ts:6 decryptData is used as a value/],
-    ["const_alias", `const open = decryptData; export const f = open;`, /reader\.ts:6 decryptData is used as a value \(VariableDeclaration\)/],
-    ["spread_args", `export async function r(k: CryptoKey) { const a = [{}, k] as const; return decryptData(...a); }`, /reader\.ts:6 decryptData is called with a spread argument/],
-    ["wrapper_as_value", `import { decryptTeamEntry } from "@/lib/crypto/crypto-team";\nexport const f = [decryptTeamEntry];`, /reader\.ts:7 decryptTeamEntry is used as a value/],
-  ])("(b) %s is a reference violation", (_name, body, pattern) => {
+    ["a ternary over the builder at the decrypt site", `export async function r(row: { aadVersion: number }) { const { encryptionKey } = useVault(); return decryptData({}, encryptionKey, row.aadVersion >= 1 ? buildTeamEntryAAD("t", "e", "blob", 0) : undefined); }`, /^src\/fixture\/reader\.ts:6 AAD is a ConditionalExpression/],
+    ["a const bound to `&&` over an aliased builder", `import { buildTeamEntryAAD as b } from "@/lib/crypto/crypto-aad";\nexport async function r(row: { aadVersion: number }) { const { encryptionKey } = useVault(); const aad = row.aadVersion && b("t", "e", "blob", 0); return decryptData({}, encryptionKey, aad || undefined); }`, /^src\/fixture\/reader\.ts:7 AAD is a BinaryExpression/],
+    ["a team builder in one branch, a personal builder in the other", `export async function r(row: { aadVersion: number }) { const { encryptionKey } = useVault(); return decryptData({}, encryptionKey, row.aadVersion ? buildTeamEntryAAD("t", "e", "blob", 0) : buildPersonalEntryAAD("u", "e", "blob")); }`, /^src\/fixture\/reader\.ts:6 AAD is a ConditionalExpression/],
+    ["a local function declaration choosing the builder", `function pick(v: number) { return v >= 1 ? buildTeamEntryAAD("t", "e", "blob", 0) : undefined; }\nexport async function r(row: { aadVersion: number }) { const { encryptionKey } = useVault(); return decryptData({}, encryptionKey, pick(row.aadVersion)); }`, /^src\/fixture\/reader\.ts:7 AAD is a CallExpression/],
+    ["an early-return arrow choosing the builder", `export async function r(row: { aadVersion: number }) { const { encryptionKey } = useVault(); const pick = (v: number) => { if (v < 1) return undefined; return buildTeamEntryAAD("t", "e", "blob", 0); }; const aad = pick(row.aadVersion); return decryptData({}, encryptionKey, aad); }`, /^src\/fixture\/reader\.ts:6 AAD const is bound to CallExpression, not a direct buildTeamEntryAAD call/],
+    ["element access on \"aadVersion\" choosing the builder", `export async function r(row: { aadVersion: number }) { const { encryptionKey } = useVault(); const aad = row["aadVersion"] ? buildTeamEntryAAD("t", "e", "blob", 0) : undefined; return decryptData({}, encryptionKey, aad); }`, /^src\/fixture\/reader\.ts:6 AAD const is bound to ConditionalExpression/],
+    ["a builder argument read from element access on \"aadVersion\"", `export async function r(row: { aadVersion: number }) { const { encryptionKey } = useVault(); const aad = buildTeamEntryAAD("t", "e", "blob", row["aadVersion"]); return decryptData({}, encryptionKey, aad); }`, /^src\/fixture\/reader\.ts:6 the builder's arguments read aadVersion$/],
+    ["a hoisted conditional at the decrypt site over a const-bound builder", `export async function r(row: { aadVersion: number }) { const { encryptionKey } = useVault(); const aad = buildTeamEntryAAD("t", "e", "blob", 1); return decryptData({}, encryptionKey, row.aadVersion < 1 ? undefined : aad); }`, /^src\/fixture\/reader\.ts:6 AAD is a ConditionalExpression/],
+    ["a let binding (reassignable)", `export async function r() { const { encryptionKey } = useVault(); let aad = buildTeamEntryAAD("t", "e", "blob", 1); return decryptData({}, encryptionKey, aad); }`, /^src\/fixture\/reader\.ts:6 AAD binding is not const$/],
+    ["a let assigned the builder after its declaration", `export async function r(row: { aadVersion: number }) { const { encryptionKey } = useVault(); let aad: Uint8Array | undefined; if (row.aadVersion) aad = buildTeamEntryAAD("t", "e", "blob", 1); return decryptData({}, encryptionKey, aad); }`, /^src\/fixture\/reader\.ts:6 AAD binding is not const$/],
+    ["a conditional AAD through a named local wrapper forwarding key and AAD", `async function openWith(k: CryptoKey, aad?: Uint8Array) { return decryptData({}, k, aad); }\nexport async function r(row: { aadVersion: number }) { const { encryptionKey } = useVault(); return openWith(encryptionKey, row.aadVersion ? buildTeamEntryAAD("t", "e", "blob", 1) : undefined); }`, /^src\/fixture\/reader\.ts:7 AAD is a ConditionalExpression/],
+  ])("(b) %s is a strict-shape violation", (_name, body, pattern) => {
     const r = analyzeFixture({ [READER]: `${H}${body}` });
-    expect(r.referenceViolations).toEqual([expect.stringMatching(pattern)]);
+    expect(outcome(r)).toEqual({ ...CLEAN, teamAad: [READER], shape: [expect.stringMatching(pattern)] });
   });
 
-  // ── (c) key-independent strict-AAD clause ──
+  it("(b) the exemption is per function: a ternary AAD elsewhere in an exempt file is a violation", () => {
+    const r = analyzeFixture({
+      [REKEY_PAYLOAD]: `${H}export async function resealLegacyHistoryRow(): Promise<null> { return null; }
+export async function openHistoryRow(row: { aadVersion: number }) { const { encryptionKey } = useVault(); return decryptData({}, encryptionKey, row.aadVersion ? buildTeamEntryAAD("t", "e", "blob", 1) : undefined); }
+export async function buildEntryRekeyPayload(row: { aadVersion: number }) { const { encryptionKey } = useVault(); return decryptData({}, encryptionKey, row.aadVersion ? buildTeamEntryAAD("t", "e", "blob", 1) : undefined); }`,
+    });
+    expect(outcome(r)).toEqual({ ...CLEAN, teamAad: [], shape: [expect.stringMatching(/^src\/lib\/team\/rekey-payload\.ts:7 AAD is a ConditionalExpression/)] });
+  });
+
+  // ── (c) declaration-side enumeration: every decrypt reference is a direct call ──
 
   it.each([
-    ["a ternary over the builder at the decrypt site", `export async function r(row: { aadVersion: number }) { const { encryptionKey } = useVault(); return decryptData({}, encryptionKey, row.aadVersion >= 1 ? buildTeamEntryAAD("t", "e", "blob", 0) : undefined); }`, /reader\.ts:6 AAD is a ConditionalExpression/],
-    ["a const bound to a ternary over an aliased builder", `import { buildTeamEntryAAD as b } from "@/lib/crypto/crypto-aad";\nexport async function r(row: { aadVersion: number }) { const { encryptionKey } = useVault(); const aad = row.aadVersion && b("t", "e", "blob", 0); return decryptData({}, encryptionKey, aad || undefined); }`, /reader\.ts:7 AAD is a BinaryExpression/],
-    ["a team builder in one branch, a personal builder in the other", `export async function r(row: { aadVersion: number }) { const { encryptionKey } = useVault(); return decryptData({}, encryptionKey, row.aadVersion ? buildTeamEntryAAD("t", "e", "blob", 0) : buildPersonalEntryAAD("u", "e", "blob")); }`, /reader\.ts:6 AAD is a ConditionalExpression/],
-    ["a local helper choosing the builder", `function pick(v: number) { return v >= 1 ? buildTeamEntryAAD("t", "e", "blob", 0) : undefined; }\nexport async function r(row: { aadVersion: number }) { const { encryptionKey } = useVault(); return decryptData({}, encryptionKey, pick(row.aadVersion)); }`, /reader\.ts:7 AAD is a CallExpression/],
-  ])("(c) %s is held to the strict shape whatever the key", (_name, body, pattern) => {
+    ["a destructured dynamic import", `export async function r() { const { decryptData: d } = await import("@/lib/crypto/crypto-client"); return d; }`, /^src\/fixture\/reader\.ts:6 decryptData is used as a value \(BindingElement\)/],
+    ["a namespace destructure", `import * as cc from "@/lib/crypto/crypto-client";\nconst { decryptData: d } = cc; export const f = d;`, /^src\/fixture\/reader\.ts:7 decryptData is used as a value \(BindingElement\)/],
+    ["`.call`", `export async function r(k: CryptoKey) { return decryptData.call(null, {}, k); }`, /^src\/fixture\/reader\.ts:6 decryptData is used as a value \(PropertyAccessExpression\)/],
+    ["`.apply`", `export async function r(k: CryptoKey) { return decryptData.apply(null, [{}, k]); }`, /^src\/fixture\/reader\.ts:6 decryptData is used as a value \(PropertyAccessExpression\)/],
+    ["element access", `import * as cc from "@/lib/crypto/crypto-client";\nexport async function r(k: CryptoKey) { return cc["decryptData"]({}, k); }`, /^src\/fixture\/reader\.ts:7 decryptData is used as a value \(ElementAccessExpression\)/],
+    ["`.bind` passed as a value", `export async function r(ks: CryptoKey[]) { return ks.map(decryptData.bind(null, {})); }`, /^src\/fixture\/reader\.ts:6 decryptData is used as a value \(PropertyAccessExpression\)/],
+    ["a const alias", `const open = decryptData; export const f = open;`, /^src\/fixture\/reader\.ts:6 decryptData is used as a value \(VariableDeclaration\)/],
+    ["a spread argument", `export async function r(k: CryptoKey) { const a = [{}, k] as const; return decryptData(...a); }`, /^src\/fixture\/reader\.ts:6 decryptData is called with a spread argument$/],
+    ["a derived wrapper held as a value", `import { decryptTeamEntry } from "@/lib/crypto/crypto-team";\nexport const f = [decryptTeamEntry];`, /^src\/fixture\/reader\.ts:7 decryptTeamEntry is used as a value \(ArrayLiteralExpression\)/],
+  ])("(c) %s is a reference violation", (_name, body, pattern) => {
     const r = analyzeFixture({ [READER]: `${H}${body}` });
-    expect(r.decryptViolations).toEqual([expect.stringMatching(pattern)]);
+    expect(outcome(r)).toEqual({ ...CLEAN, teamAad: [], reference: [expect.stringMatching(pattern)] });
   });
 
-  // ── (c) fail closed on untraceable keys (no AAD: only this rule can catch them) ──
+  // ── (d) the floor ──
 
-  it.each([
-    ["then_callback", `export async function r() { const { getEntryDecryptionKey } = useTeamVault(); return getEntryDecryptionKey("t", "e", {}).then((k) => decryptData({}, k)); }`],
-    ["map_callback", `export async function r() { const { getEntryDecryptionKey } = useTeamVault(); const ks = [await getEntryDecryptionKey("t", "e", {})]; return Promise.all(ks.map((k) => decryptData({}, k))); }`],
-    ["object_method_wrapper", `const c = { open(k: CryptoKey) { return decryptData({}, k); } };\nexport async function r() { const { getEntryDecryptionKey } = useTeamVault(); return c.open(await getEntryDecryptionKey("t", "e", {})); }`],
-    ["object_arrow_wrapper", `const c = { open: (k: CryptoKey) => decryptData({}, k) };\nexport async function r() { const { getEntryDecryptionKey } = useTeamVault(); return c.open(await getEntryDecryptionKey("t", "e", {})); }`],
-    ["class_method_wrapper", `class C { open(k: CryptoKey) { return decryptData({}, k); } }\nexport async function r() { const { getEntryDecryptionKey } = useTeamVault(); return new C().open(await getEntryDecryptionKey("t", "e", {})); }`],
-    ["property-held key", `export async function r() { const box: { k?: CryptoKey } = {}; box.k = await useTeamVault().getEntryDecryptionKey("t", "e", {});\n  return decryptData({}, box.k as CryptoKey); }`],
-    ["callback-param key", `async function openRow(getKey: () => Promise<CryptoKey>) { const k = await getKey(); return decryptData({}, k); }\nexport async function r() { const v = useTeamVault(); return openRow(() => v.getEntryDecryptionKey("t", "e", {})); }`],
-    ["array holder filled by push", `export async function r() { const ks: CryptoKey[] = []; ks.push(await useTeamVault().getEntryDecryptionKey("t", "e", {}));
-  return decryptData({}, ks[0]); }`],
-    ["Map-cache key", `const cache = new Map<string, CryptoKey>();\nexport async function warm() { cache.set("t", await useTeamVault().getEntryDecryptionKey("t", "e", {})); }\nexport async function r() { return decryptData({}, cache.get("t") as CryptoKey); }`],
-    ["class field key", `class Holder { key?: CryptoKey; async read() { return decryptData({}, this.key as CryptoKey); } }\nexport const h = new Holder();`],
-  ])("(c) %s is unclassifiable (fails unless reviewed)", (name, body) => {
-    const r = analyzeFixture({ [READER]: `${H}${body}` });
-    const line = `${H}${body}`.split("\n").findIndex((l) => l.includes("decryptData({}")) + 1;
-    expect(sites(r), name).toEqual([`${READER}:${line}`]);
+  it("(d) a known reader that stops passing the team AAD falls below the floor", () => {
+    const r = analyzeFixture({ [READER]: STRICT_READER.replace("return decryptData({}, key, aad);", "void aad; return decryptData({}, key);") });
+    expect(floorViolations(r.teamAadFiles, [READER])).toEqual([`${READER} makes no decrypt call at a ${BUILDER} AAD`]);
   });
 
-  // ── (c) the strict shape at a team decrypt (key from a getter) ──
-
-  it("(c) a ternary at the decrypt site over an aliased builder is a violation", () => {
-    const r = analyzeFixture({
-      [READER]: STRICT_READER.replace(
-        "return decryptData({}, key, aad);",
-        "return decryptData({}, key, row.aadVersion >= 1 ? b(\"t\", \"e\", \"blob\", 0) : undefined);",
-      ).replace(`import { buildTeamEntryAAD } from "@/lib/crypto/crypto-aad";`,
-        `import { buildTeamEntryAAD, buildTeamEntryAAD as b } from "@/lib/crypto/crypto-aad";`),
-    });
-    expect(r.decryptViolations).toEqual([expect.stringMatching(/AAD is a ConditionalExpression/)]);
-  });
-
-  it("(c) an early-return wrapper choosing the AAD is a violation", () => {
-    const r = analyzeFixture({
-      [READER]: STRICT_READER.replace(
-        `const aad = buildTeamEntryAAD("t", "e", "blob", row.itemKeyVersion);`,
-        `const pick = (v: number) => { if (v < 1) return undefined; return buildTeamEntryAAD("t", "e", "blob", 0); };
-         const aad = pick(row.aadVersion);`,
-      ),
-    });
-    expect(r.decryptViolations).toEqual([expect.stringMatching(/AAD const is bound to CallExpression, not a direct buildTeamEntryAAD call/)]);
-  });
-
-  it("(c) element access on \"aadVersion\" choosing the AAD is a violation", () => {
-    const r = analyzeFixture({
-      [READER]: STRICT_READER.replace(
-        `const aad = buildTeamEntryAAD("t", "e", "blob", row.itemKeyVersion);`,
-        `const aad = row["aadVersion"] ? buildTeamEntryAAD("t", "e", "blob", 0) : undefined;`,
-      ),
-    });
-    expect(r.decryptViolations).toEqual([expect.stringMatching(/AAD const is bound to ConditionalExpression/)]);
-  });
-
-  it("(c) a builder argument read from element access on \"aadVersion\" is a violation", () => {
-    const r = analyzeFixture({
-      [READER]: STRICT_READER.replace(
-        `buildTeamEntryAAD("t", "e", "blob", row.itemKeyVersion)`,
-        `buildTeamEntryAAD("t", "e", "blob", row["aadVersion"])`,
-      ),
-    });
-    expect(r.decryptViolations).toEqual([expect.stringMatching(/the builder's arguments read aadVersion/)]);
-  });
-
-  it("(c) a hoisted conditional at the decrypt site over a const-bound builder is a violation", () => {
-    const r = analyzeFixture({
-      [READER]: STRICT_READER.replace("return decryptData({}, key, aad);", "return decryptData({}, key, row.aadVersion < 1 ? undefined : aad);"),
-    });
-    expect(r.decryptViolations).toEqual([expect.stringMatching(/AAD is a ConditionalExpression/)]);
-  });
-
-  it("(c) a let binding (reassignable) is a violation", () => {
-    const r = analyzeFixture({
-      [READER]: STRICT_READER.replace(`const aad = buildTeamEntryAAD`, `let aad = buildTeamEntryAAD`),
-    });
-    expect(r.decryptViolations).toEqual([expect.stringMatching(/AAD binding is not const/)]);
-  });
-
-  it("(c) a missing AAD through an import-renamed decrypt and a destructuring-renamed getter is a violation", () => {
-    const r = analyzeFixture({
-      [READER]: `
-        import { decryptData as open } from "@/lib/crypto/crypto-client";
-        import { useTeamVault } from "@/lib/team/team-vault-core";
-        export async function read() {
-          const { getEntryDecryptionKey: entryKey } = useTeamVault();
-          const k = await entryKey("t", "e", {});
-          return open({}, k);
-        }`,
-    });
-    expect(r.decryptViolations).toEqual([expect.stringMatching(/missing AAD argument/)]);
-  });
-
-  it("(c) a key from a library store (a library call with no key-material argument) is unclassifiable", () => {
-    const r = analyzeFixture(
-      { [READER]: `${H}import { readKey } from "@/vendor/keystore";\nexport async function r() { return decryptData({}, readKey("t")); }` },
-      { "src/vendor/keystore.d.ts": `import type { CryptoKey } from "@/lib/crypto/crypto-client";\nexport declare function readKey(name: string): CryptoKey;` },
-    );
-    expect(r.unclassified).toEqual([{ site: `${READER}:7`, why: expect.stringMatching(/library call that holds it \(readKey\)/) }]);
-  });
-
-  it("(c) a team key put in React state through its setter is a team decrypt", () => {
-    const r = analyzeFixture(
-      { [READER]: `${H}import { useState } from "@/vendor/react";\nexport function useR() { const [k, setK] = useState<CryptoKey | null>(null);\n  const load = async () => setK(await useTeamVault().getEntryDecryptionKey("t", "e", {}));\n  return { load, read: () => decryptData({}, k as CryptoKey) }; }` },
-      { "src/vendor/react.d.ts": `export declare function useState<T>(init: T): [T, (v: T) => void];` },
-    );
-    expect(r.decryptViolations).toEqual([expect.stringMatching(/reader\.ts:9 missing AAD argument \(team key via/)]);
-  });
-
-  it("(c) a team key through a named local wrapper forwarding key and AAD is checked at the wrapper's call site", () => {
-    const r = analyzeFixture({
-      [READER]: `
-        import { decryptData } from "@/lib/crypto/crypto-client";
-        import type { CryptoKey } from "@/lib/crypto/crypto-client";
-        import { useTeamVault } from "@/lib/team/team-vault-core";
-        async function openWith(k: CryptoKey, aad?: Uint8Array) { return decryptData({}, k, aad); }
-        export async function read() {
-          const vault = useTeamVault();
-          return openWith(await vault.getTeamEncryptionKey("t") as CryptoKey);
-        }`,
-    });
-    expect(r.decryptFns).toContain(`${READER}#openWith`);
-    expect(r.decryptViolations).toEqual([expect.stringMatching(/reader\.ts:8 missing AAD argument/)]);
-  });
-
-  it("(c) a team key through a function parameter (enumerated call sites) is still a team decrypt", () => {
-    const r = analyzeFixture({
-      [READER]: `${H}export function useX(props: { k: CryptoKey }) { return decryptData({}, props.k); }
-export async function r() { const { getEntryDecryptionKey } = useTeamVault(); return useX({ k: await getEntryDecryptionKey("t", "e", {}) }); }`,
-    });
-    expect(r.decryptViolations).toEqual([expect.stringMatching(/reader\.ts:6 missing AAD argument/)]);
-  });
-
-  it("(d) a decrypt that no longer resolves to a team key getter drops out of the derived reader set", () => {
-    const r = analyzeFixture({
-      [READER]: STRICT_READER.replace(`const { getEntryDecryptionKey } = useTeamVault();`, `const localKey = async (..._a: unknown[]) => ({ algorithm: 0 });`)
-        .replace(`await getEntryDecryptionKey(`, `await localKey(`)
-        // No team AAD either: the AAD alone would classify it team.
-        .replace("return decryptData({}, key, aad);", "void aad; return decryptData({}, key);"),
-    });
-    expect([...r.teamDecryptFiles]).not.toContain(READER);
+  it("(d) control: a strict reader meets the floor", () => {
+    const r = analyzeFixture({ [READER]: STRICT_READER });
+    expect(floorViolations(r.teamAadFiles, [READER])).toEqual([]);
   });
 });

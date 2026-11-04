@@ -129,8 +129,8 @@ function validBody(overrides: Record<string, unknown> = {}) {
     encryptedOverview: field("f"),
     aadVersion: 1,
     history: [
-      { id: H1, snapshotBlobIv: iv("1"), encryptedBlob: field("2") },
-      { id: H2, snapshotBlobIv: iv("3"), encryptedBlob: field("4") },
+      { id: H1, snapshotBlobIv: iv("1"), aadVersion: 1, encryptedBlob: field("2") },
+      { id: H2, snapshotBlobIv: iv("3"), aadVersion: 1, encryptedBlob: field("4") },
     ],
     retainHistoryIds: [H_RETAINED],
     attachmentCekRewraps: [
@@ -275,8 +275,8 @@ describe("POST /api/teams/[teamId]/passwords/[id]/rekey", () => {
     ["a history id both re-keyed and retained", { retainHistoryIds: [H1, H_RETAINED] }],
     ["a history id re-keyed twice (case-insensitively)", {
       history: [
-        { id: H1, snapshotBlobIv: iv("1"), encryptedBlob: field("2") },
-        { id: H1.toUpperCase(), snapshotBlobIv: iv("1"), encryptedBlob: field("2") },
+        { id: H1, snapshotBlobIv: iv("1"), aadVersion: 1, encryptedBlob: field("2") },
+        { id: H1.toUpperCase(), snapshotBlobIv: iv("1"), aadVersion: 1, encryptedBlob: field("2") },
       ],
     }],
     ["a duplicate attachment id", {
@@ -551,27 +551,40 @@ describe("POST /api/teams/[teamId]/passwords/[id]/rekey", () => {
     expect(txMock.teamPasswordEntryHistory.updateMany).not.toHaveBeenCalled();
   });
 
-  describe("REKEY_HISTORY_LEGACY: a history row sealed without AAD (N-R4-1)", () => {
-    const legacyH2 = () => {
-      lockedHistory = LOCKED_HISTORY.map((h) => (h.id === H2 ? { ...h, aad_version: 0 } : { ...h }));
+  describe("REKEY_HISTORY_LEGACY: a history row's AAD label never changes (N-R4-1, S-R5-2)", () => {
+    const lockH2At = (aadVersion: number) => {
+      lockedHistory = LOCKED_HISTORY.map((h) => (h.id === H2 ? { ...h, aad_version: aadVersion } : { ...h }));
     };
-
-    it("409 when the body re-keys an aadVersion-0 row, nothing written", async () => {
-      legacyH2();
-      await expectRefused(validBody(), 409, "REKEY_HISTORY_LEGACY");
-      expect(txMock.teamPasswordEntryHistory.updateMany).not.toHaveBeenCalled();
-      expect(txMock.attachment.updateMany).not.toHaveBeenCalled();
+    const bodyWithH2At = (aadVersion: number) => validBody({
+      history: [
+        { id: H1, snapshotBlobIv: iv("1"), aadVersion: 1, encryptedBlob: field("2") },
+        { id: H2, snapshotBlobIv: iv("3"), aadVersion, encryptedBlob: field("4") },
+      ],
     });
 
-    it("control: the same row named in retainHistoryIds re-keys the rest (200)", async () => {
-      legacyH2();
-      const { res } = await rekey(validBody({
-        history: [{ id: H1, snapshotBlobIv: iv("1"), encryptedBlob: field("2") }],
-        retainHistoryIds: [H2, H_RETAINED],
-      }));
-      expect(res.status).toBe(200);
-      expect(txMock.teamPasswordEntryHistory.updateMany).toHaveBeenCalledTimes(1);
-      expect(txMock.teamPasswordEntryHistory.updateMany.mock.calls[0][0].where.id).toBe(H1);
+    it("409 when the body upgrades an aadVersion-0 row to 1, nothing written", async () => {
+      lockH2At(0);
+      await expectRefused(bodyWithH2At(1), 409, "REKEY_HISTORY_LEGACY");
+      expect(txMock.teamPasswordEntryHistory.updateMany).not.toHaveBeenCalled();
+    });
+
+    it("409 when the body downgrades an aadVersion-1 row to 0, nothing written", async () => {
+      lockH2At(1);
+      await expectRefused(bodyWithH2At(0), 409, "REKEY_HISTORY_LEGACY");
+      expect(txMock.teamPasswordEntryHistory.updateMany).not.toHaveBeenCalled();
+    });
+
+    it("control: an aadVersion-0 row re-keyed at label 0 is written at aadVersion 0 (200)", async () => {
+      lockH2At(0);
+      const { res } = await rekey(bodyWithH2At(0));
+      expect({
+        status: res.status,
+        written: txMock.teamPasswordEntryHistory.updateMany.mock.calls.map((c) => [c[0].where.id, c[0].data.aadVersion]),
+      }).toEqual({ status: 200, written: [[H1, 1], [H2, 0]] });
+    });
+
+    it("400 for a history item label other than 0 or the current AAD version", async () => {
+      await expectRefused(bodyWithH2At(2), 400, "VALIDATION_ERROR");
     });
   });
 

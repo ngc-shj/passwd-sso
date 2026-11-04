@@ -250,3 +250,51 @@ legacy history rows, making the restore refusal transient.
   decrypt reference, key-independent strict-AAD clause, untraceable keys unclassifiable unless
   in an exact reviewed list.
 - T14, T15, N-R4-2: fixed.
+
+---
+
+# Review round: 5
+Date: 2026-11-04
+Scope: `94e6a6f30..HEAD` (commit a5a98abec).
+
+## Changes from Previous Round
+N-R4-1, N-R4-2, S-R4-2, T14, T15 resolved. The guard's key-provenance classification escaped a
+fourth time (S-R5-1, T16) and its arms are not mutation-pinned (T17). Retaining legacy history
+rows narrowed the pass's confidentiality coverage (S-R5-2).
+
+## Functionality Findings
+No findings.
+
+## Security Findings
+- S-R5-1 [Minor, continuing S-R4-1] 8 no-AAD team-key fixtures escape (unknown/any/Record/object
+  launders, generators, `arguments`, `useContext`, direct `subtle.decrypt`, `.js` wrapper); no
+  production instance.
+- S-R5-2 [Minor, new, R43] aadVersion-0 history rows are retained under their old wrap forever,
+  readable to departed old-key holders; stated limits omit it.
+
+## Testing Findings
+- T16 [Major, new, RT7/R42] Opaque-typed team keys classified non-team silently (5 probes).
+- T17 [Major, new, RT7] 20 of 26 single-rule guard mutations stay green.
+- T18 [Minor, new, RT10] Retention cells discriminate only by decrypt-call count.
+
+## Recurring Issue Check
+- Functionality: clean.
+- Security: R42 continuing (S-R5-1, fourth escape); R43 → S-R5-2.
+- Testing: RT7/R42 → T16, T17; RT10 → T18.
+
+## Resolution Status (round 5)
+- S-R5-1 / T16 / T17 — orchestrator decision (stopping rule: rounds seeding their own defects
+  mean the scope is wrong; a gate escaped twice needs a different mechanism or the undecidable
+  class refused outright): the key-provenance classification is removed. Static key-provenance
+  tracing is undecidable, and its arms became the defect surface for four rounds. The guard keeps
+  only decidable, binding-resolved rules (helper confinement, key-independent strict AAD shape,
+  declaration-side reference enumeration, known-reader floor), each mutation-pinned, and its
+  header states the limit. Anti-Deferral for the residual: a NEW team reader that passes no AAD
+  is not detected by the guard. Worst case: a future reader decrypts a team entry without AAD
+  binding. Likelihood: low (every existing reader is strict with refusal cells; the shared
+  decrypt helpers make AAD the norm; review). Cost to fix: a structural refactor routing every
+  team entry decrypt through one strict helper — follow-up issue. Same as main, which had no
+  guard.
+- S-R5-2: the pass re-keys legacy history rows under the new ItemKey keeping aadVersion 0; the
+  route requires each row's label unchanged.
+- T18: output-visible discrimination.

@@ -7,7 +7,7 @@ import {
   unwrapItemKey,
   unwrapTeamAttachmentCek,
 } from "@/lib/crypto/crypto-team";
-import { buildItemKeyWrapAAD, buildTeamEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
+import { AAD_VERSION, buildItemKeyWrapAAD, buildTeamEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import {
   FIXTURE_TEAM_ID as TEAM_ID,
   generateItemKey,
@@ -28,7 +28,6 @@ const rawRefs = vi.hoisted(() => ({
   refs: [] as Uint8Array[],
   deriveCalls: 0,
   failDeriveAt: null as number | null,
-  decryptCalls: 0,
 }));
 vi.mock("@/lib/crypto/crypto-team", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/lib/crypto/crypto-team")>();
@@ -40,10 +39,6 @@ vi.mock("@/lib/crypto/crypto-team", async (importOriginal) => {
     };
   return {
     ...real,
-    decryptTeamEntry: (...args: Parameters<typeof real.decryptTeamEntry>) => {
-      rawRefs.decryptCalls += 1;
-      return real.decryptTeamEntry(...args);
-    },
     unwrapItemKey: record(real.unwrapItemKey),
     unwrapTeamAttachmentCek: record(real.unwrapTeamAttachmentCek),
     deriveItemEncryptionKey: async (raw: Uint8Array) => {
@@ -188,15 +183,16 @@ describe("buildEntryRekeyPayload", () => {
     expect(result.body.history.map((h) => h.id)).toEqual(["h-v0"]);
   });
 
-  // N-R4-1: re-sealing a row sealed without AAD at AAD 1 would make it a row
-  // the history restore accepts. The row below is a no-AAD ciphertext under
-  // the live ItemKey, so any decrypt that drops the AAD would open it.
+  // S-R5-2 (D80): a legacy row (one the history restore refuses) is re-keyed
+  // under the new ItemKey still WITHOUT AAD and labelled 0, so departed holders
+  // of the old ItemKey lose it while it stays unrestorable. The row below is a
+  // no-AAD ciphertext under the live ItemKey.
   it.each([
     ["0", 0],
     ["undefined", undefined],
     ["null", null],
     ['"1" (a string)', "1"],
-  ])("retains a history row labelled aadVersion %s without decrypting it", async (_label, aadVersion) => {
+  ])("re-keys a history row labelled aadVersion %s without AAD at label 0", async (_label, aadVersion) => {
     const f = await baseFixture();
     const sealed = await sealHistoryRow({ id: "h-legacy", entryId: ENTRY, teamKey: f.keys.get(2)!, teamKeyVersion: 2, itemKey: f.liveItemKey, itemKeyVersion: 2, itemKeyId: f.liveId, blob: "x" });
     const noAad = await encryptTeamEntry("legacy", await deriveItemEncryptionKey(f.liveItemKey));
@@ -207,29 +203,70 @@ describe("buildEntryRekeyPayload", () => {
       blobAuthTag: noAad.authTag,
       aadVersion: aadVersion as number,
     }];
-    rawRefs.decryptCalls = 0;
+
+    const result = payloadOf(await buildEntryRekeyPayload(TEAM_ID, f.data, makeResolver(f.keys)));
+    const next = await newContentKey(f.keys.get(CURRENT)!, result.body.encryptedItemKey);
+    const [row] = result.body.history;
+
+    expect({
+      ids: result.body.history.map((h) => ({ id: h.id, aadVersion: h.aadVersion })),
+      retained: result.body.retainHistoryIds,
+      openedWithoutAad: await decryptTeamEntry(row.encryptedBlob, next.content),
+    }).toEqual({ ids: [{ id: "h-legacy", aadVersion: 0 }], retained: [], openedWithoutAad: "legacy" });
+  });
+
+  it("re-keys a legacy v0 history row (no AAD, under the team key) without AAD at label 0", async () => {
+    const f = await baseFixture();
+    const noAad = await encryptTeamEntry("legacy-v0", f.keys.get(2)!);
+    f.data.history = [{
+      id: "h-legacy-v0",
+      encryptedBlob: noAad.ciphertext,
+      blobIv: noAad.iv,
+      blobAuthTag: noAad.authTag,
+      aadVersion: 0,
+      teamKeyVersion: 2,
+      itemKeyVersion: 0,
+      encryptedItemKey: null,
+      itemKeyIv: null,
+      itemKeyAuthTag: null,
+      itemKeyId: null,
+    }];
+
+    const result = payloadOf(await buildEntryRekeyPayload(TEAM_ID, f.data, makeResolver(f.keys)));
+    const next = await newContentKey(f.keys.get(CURRENT)!, result.body.encryptedItemKey);
+
+    expect({
+      ids: result.body.history.map((h) => ({ id: h.id, aadVersion: h.aadVersion })),
+      openedWithoutAad: await decryptTeamEntry(result.body.history[0].encryptedBlob, next.content),
+    }).toEqual({ ids: [{ id: "h-legacy-v0", aadVersion: 0 }], openedWithoutAad: "legacy-v0" });
+  });
+
+  // T18: an AAD-bound ciphertext labelled 0 is still treated as legacy — opened
+  // without AAD, which fails, so it is retained — never opened strictly and
+  // upgraded to label 1.
+  it("retains (not upgrades) an AAD-bound ciphertext labelled aadVersion 0", async () => {
+    const f = await baseFixture();
+    const bound = await sealHistoryRow({ id: "h-bound-0", entryId: ENTRY, teamKey: f.keys.get(2)!, teamKeyVersion: 2, itemKey: f.liveItemKey, itemKeyVersion: 2, itemKeyId: f.liveId, blob: "bound" });
+    f.data.history = [{ ...bound, aadVersion: 0 }];
 
     const result = payloadOf(await buildEntryRekeyPayload(TEAM_ID, f.data, makeResolver(f.keys)));
 
-    expect(result.body.history).toEqual([]);
-    expect(result.body.retainHistoryIds).toEqual(["h-legacy"]);
-    expect(result.retained).toEqual([{ id: "h-legacy", teamKeyVersion: 2 }]);
-    // The live blob and overview only.
-    expect(rawRefs.decryptCalls).toBe(2);
+    expect({ history: result.body.history, retained: result.body.retainHistoryIds }).toEqual({ history: [], retained: ["h-bound-0"] });
   });
 
-  it("control: the same row at aadVersion 1, sealed at entry AAD, is re-keyed", async () => {
+  it("control: the same row at aadVersion 1, sealed at entry AAD, is re-keyed at strict AAD and label 1", async () => {
     const f = await baseFixture();
     f.data.history = [
       await sealHistoryRow({ id: "h-bound", entryId: ENTRY, teamKey: f.keys.get(2)!, teamKeyVersion: 2, itemKey: f.liveItemKey, itemKeyVersion: 2, itemKeyId: f.liveId, blob: "bound" }),
     ];
-    rawRefs.decryptCalls = 0;
 
     const result = payloadOf(await buildEntryRekeyPayload(TEAM_ID, f.data, makeResolver(f.keys)));
+    const next = await newContentKey(f.keys.get(CURRENT)!, result.body.encryptedItemKey);
 
-    expect(result.body.history.map((h) => h.id)).toEqual(["h-bound"]);
-    expect(result.body.retainHistoryIds).toEqual([]);
-    expect(rawRefs.decryptCalls).toBe(3);
+    expect({
+      ids: result.body.history.map((h) => ({ id: h.id, aadVersion: h.aadVersion })),
+      openedStrict: await decryptTeamEntry(result.body.history[0].encryptedBlob, next.content, buildTeamEntryAAD(TEAM_ID, ENTRY, VAULT_TYPE.BLOB, 3)),
+    }).toEqual({ ids: [{ id: "h-bound", aadVersion: AAD_VERSION }], openedStrict: "bound" });
   });
 
   it("retains (not re-keys) a no-AAD ciphertext labelled aadVersion 1: history rows open at strict AAD", async () => {

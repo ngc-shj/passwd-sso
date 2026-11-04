@@ -156,12 +156,13 @@ async function handleGET(req: NextRequest, { params }: RouteContext) {
 // with the ItemKeys it holds and re-encrypted them under a new ItemKey,
 // wrapped under the current team key (plan C2). `snapshot` names the entry
 // state it read; each history row and attachment names the ciphertext IV it
-// read. History rows it could not open, and rows sealed without AAD
-// (aadVersion below 1, never re-keyed), are listed in `retainHistoryIds` and left as
-// they are.
+// read. History rows it could not open are listed in `retainHistoryIds` and
+// left as they are. Each re-keyed history row keeps its AAD label: a legacy
+// row (aadVersion 0) is re-sealed without AAD and stays 0 (D80).
 const rekeyHistorySchema = z.object({
   id: z.string().uuid(),
   snapshotBlobIv: hexIv,
+  aadVersion: z.union([z.literal(0), z.literal(AAD_VERSION)]),
   encryptedBlob: encryptedFieldSchema,
 }).strict();
 
@@ -372,13 +373,12 @@ async function handlePOST(req: NextRequest, { params }: RouteContext) {
         if (!sameIdSet(lockedHistory.map((h) => h.id), namedHistory)) {
           throw new RekeyRefusal(API_ERROR.REKEY_SET_MISMATCH);
         }
-        // A row sealed without AAD is retained, never re-keyed: nothing binds
-        // it to this entry, so re-sealing it at AAD 1 would make a substituted
-        // ciphertext one the history restore accepts (HISTORY_ROW_LEGACY).
-        const legacyHistoryIds = new Set(
-          lockedHistory.filter((h) => !(h.aad_version >= 1)).map((h) => h.id.toLowerCase()),
-        );
-        if (body.history.some((h) => legacyHistoryIds.has(h.id.toLowerCase()))) {
+        // A history row's AAD label never changes. Upgrading a row sealed
+        // without AAD to 1 would make a substituted ciphertext one the history
+        // restore accepts (HISTORY_ROW_LEGACY); a downgrade would drop a bound
+        // row's binding.
+        const lockedAadVersion = new Map(lockedHistory.map((h) => [h.id.toLowerCase(), h.aad_version]));
+        if (body.history.some((h) => lockedAadVersion.get(h.id.toLowerCase()) !== h.aadVersion)) {
           throw new RekeyRefusal(API_ERROR.REKEY_HISTORY_LEGACY);
         }
         // Checked before the attachment set: a legacy attachment has no CEK
@@ -406,7 +406,7 @@ async function handlePOST(req: NextRequest, { params }: RouteContext) {
               encryptedBlob: h.encryptedBlob.ciphertext,
               blobIv: h.encryptedBlob.iv,
               blobAuthTag: h.encryptedBlob.authTag,
-              aadVersion: body.aadVersion,
+              aadVersion: h.aadVersion,
               teamKeyVersion: team.teamKeyVersion,
               itemKeyVersion: newItemKeyVersion,
               ...wrap,

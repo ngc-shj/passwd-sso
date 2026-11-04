@@ -710,7 +710,7 @@ describe("team re-key pass — real-DB integration", () => {
 
   // ── A1: rotation, then the pass ──────────────────────────────────────────
 
-  it("A1 / scenario 1: after a departure, rotation then the pass leave every AAD-bound row under a new ItemKey only the current team key opens; the aadVersion-0 row is retained unopened and stays unrestorable; pending 0", async () => {
+  it("A1 / scenario 1: after a departure, rotation then the pass leave every AAD-bound row under a new ItemKey only the current team key opens; the aadVersion-0 row is re-keyed still unbound (label 0) and stays unrestorable; pending 0", async () => {
     const team = await seedTeam(1);
     const admin = await seedMember(team, "OWNER", [1]);
     const leaver = await seedMember(team, "MEMBER", [1]);
@@ -719,6 +719,7 @@ describe("team re-key pass — real-DB integration", () => {
     const { entryId, plain } = await seedEntry(team, { teamKeyVersion: 1, itemKey: live, marker: 1 });
     const history = new Map<string, string>();
     let legacyId = "";
+    let legacyPlain = "";
     for (const [label, seal, wrap, itemKeyId] of [
       ["own wrap", await sealOf(live), live.raw, live.id],
       ["aadVersion 0", await sealOf(live, 0), live.raw, live.id],
@@ -727,10 +728,14 @@ describe("team re-key pass — real-DB integration", () => {
     ] as const) {
       const text = JSON.stringify({ title: `${label} ${randomUUID()}` });
       const id = await seedHistory(team, entryId, { plaintext: text, seal, teamKeyVersion: 1, wrap, itemKeyId });
-      // N-R4-1: the pass retains the aadVersion-0 row unopened (it opens under the
-      // live ItemKey without AAD, so a pass that dropped the AAD would re-key it).
-      if (seal.aadVersion === 0) legacyId = id;
-      else history.set(id, text);
+      // S-R5-2: the aadVersion-0 row is re-keyed under the new ItemKey still
+      // without AAD (label 0), not retained under the old one.
+      if (seal.aadVersion === 0) {
+        legacyId = id;
+        legacyPlain = text;
+      } else {
+        history.set(id, text);
+      }
     }
     const attachments = new Map<string, string>();
     for (const ik of [live, previous]) {
@@ -742,21 +747,28 @@ describe("team re-key pass — real-DB integration", () => {
     const rotated = await rotate(team, admin);
     expect(rotated).toMatchObject({ status: 200, carry: [] });
     expect((await rekeyList(team, admin)).pendingCount).toBe(1);
-    const legacyBefore = (await historyRows(entryId)).get(legacyId);
 
     const { result, requests } = await runPass(team, admin);
     expect(result).toMatchObject({
       status: "completed",
       rekeyed: [entryId],
-      retained: [{ entryId, historyId: legacyId, teamKeyVersion: 1 }],
+      retained: [],
       skipped: [],
     });
     expect(posts(requests)).toEqual([{ method: "POST", path: `/api/teams/${team.teamId}/passwords/${entryId}/rekey`, status: 200 }]);
 
-    await expectOnCurrentKey(team, entryId, { plain, history, attachments, oldItemKeys: [live.raw, previous.raw] });
-    expect((await historyRows(entryId)).get(legacyId)).toEqual(legacyBefore);
-    expect(await rowsOffCurrentVersion(team.teamId)).toEqual([legacyId]);
-    expect(await rekeyList(team, admin)).toMatchObject({ pendingCount: 0, retainedHistoryCount: 1, entryIds: [] });
+    const rekeyedItemKey = await expectOnCurrentKey(team, entryId, { plain, history, attachments, oldItemKeys: [live.raw, previous.raw] });
+    // The legacy row: under the new ItemKey and id, label 0, sealed without AAD;
+    // the old ItemKey no longer opens it.
+    const e = await entryRow(entryId);
+    const legacy = (await historyRows(entryId)).get(legacyId);
+    if (!legacy) throw new Error("legacy history row is gone");
+    expect(legacy).toMatchObject({ team_key_version: team.version, item_key_version: e.item_key_version, aad_version: 0, item_key_id: e.item_key_id });
+    const legacyCt = { ciphertext: legacy.encrypted_blob, iv: legacy.blob_iv, authTag: legacy.blob_auth_tag };
+    expect(await decryptData(legacyCt, await deriveItemEncryptionKey(rekeyedItemKey))).toBe(legacyPlain);
+    await expect(decryptData(legacyCt, await deriveItemEncryptionKey(live.raw))).rejects.toThrow();
+    expect(await rowsOffCurrentVersion(team.teamId)).toEqual([]);
+    expect(await rekeyList(team, admin)).toMatchObject({ pendingCount: 0, retainedHistoryCount: 0, entryIds: [] });
     // The leaver got no key to the new version.
     const leaverKeys = await ctx.su.pool.query(`SELECT key_version FROM team_member_keys WHERE user_id = $1::uuid ORDER BY key_version`, [leaver]);
     expect(leaverKeys.rows).toEqual([{ key_version: 1 }]);
@@ -769,7 +781,7 @@ describe("team re-key pass — real-DB integration", () => {
       .rejects.toBeInstanceOf(HistoryRowLegacyError);
     const entryBefore = await entryRow(entryId);
     const legacyText = JSON.stringify({ title: "laundered" });
-    const liveKey = await deriveItemEncryptionKey(live.raw);
+    const liveKey = await deriveItemEncryptionKey(rekeyedItemKey);
     mockAuth.mockResolvedValue({ user: { id: admin } });
     const res = await restorePOST(
       jsonRequest(`http://localhost/api/teams/${team.teamId}/passwords/${entryId}/history/${legacyId}/restore`, "POST", {

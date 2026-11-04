@@ -110,7 +110,8 @@ export interface RekeyPostBody {
   encryptedBlob: EncryptedData;
   encryptedOverview: EncryptedData;
   aadVersion: number;
-  history: { id: string; snapshotBlobIv: string; encryptedBlob: EncryptedData }[];
+  /** Each re-keyed history row at its own, unchanged AAD label (0 for a legacy row, D80). */
+  history: { id: string; snapshotBlobIv: string; aadVersion: number; encryptedBlob: EncryptedData }[];
   retainHistoryIds: string[];
   attachmentCekRewraps: {
     id: string;
@@ -276,9 +277,12 @@ async function tryDecrypt(
  * open with the live ItemKey; each history row with its own wrap, else by
  * trial with every ItemKey the runner holds for the entry (the live one and
  * every history wrap it could open), at strict entry AAD; rows it cannot open
- * are retained. A row sealed without AAD (aadVersion < 1) is retained without
- * being opened: re-sealing it at AAD 1 would make it a row the history restore
- * accepts, so the pass keeps exactly the rows the restore refuses (D76). Each
+ * are retained. A legacy row (the rows the history restore refuses: aadVersion
+ * below 1 or non-numeric) is opened and re-sealed WITHOUT AAD and labelled 0
+ * (resealLegacyHistoryRow, D80): the new ItemKey takes it away from departed
+ * holders of the old one, while it stays a row the restore refuses — re-sealing
+ * it at AAD 1 would launder a substituted ciphertext into a restorable row
+ * (D76). Each
  * mode-2 CEK opens with the ItemKey whose id matches, else by trial. A new
  * random ItemKey takes `nextItemKeyVersion` and is wrapped with a fresh IV
  * under the CURRENT team key. The entry is blocked (skip and report) when the
@@ -363,21 +367,20 @@ export async function buildEntryRekeyPayload(
     const history: RekeyPostBody["history"] = [];
     const retained: { id: string; teamKeyVersion: number }[] = [];
     for (const row of data.history) {
-      const plaintext = isRestorableHistoryRow(row)
-        ? await openHistoryRow(teamId, entryId, row, ownKeyByRow.get(row.id), held, resolve)
-        : null;
-      if (plaintext === null) {
+      const keys = await historyRowKeys(row, ownKeyByRow.get(row.id), held, resolve);
+      const encrypted = { ciphertext: row.encryptedBlob, iv: row.blobIv, authTag: row.blobAuthTag };
+      const resealed = isRestorableHistoryRow(row)
+        ? await resealHistoryRow(teamId, entryId, row.itemKeyVersion, encrypted, keys, newContentKey, newItemKeyVersion)
+        : await resealLegacyHistoryRow(encrypted, keys, newContentKey);
+      if (resealed === null) {
         retained.push({ id: row.id, teamKeyVersion: normalizeTeamKeyVersion(row.teamKeyVersion) });
         continue;
       }
       history.push({
         id: row.id,
         snapshotBlobIv: row.blobIv,
-        encryptedBlob: await encryptTeamEntry(
-          plaintext,
-          newContentKey,
-          buildTeamEntryAAD(teamId, entryId, VAULT_TYPE.BLOB, newItemKeyVersion),
-        ),
+        aadVersion: isRestorableHistoryRow(row) ? AAD_VERSION : 0,
+        encryptedBlob: resealed,
       });
     }
 
@@ -424,33 +427,67 @@ export async function buildEntryRekeyPayload(
   }
 }
 
-async function openHistoryRow(
-  teamId: string,
-  entryId: string,
+/**
+ * The keys a history row may open with: a v0 row (sealed directly under the
+ * team key) the team key at its own version; any other its own ItemKey first,
+ * then every ItemKey held for the entry.
+ */
+async function historyRowKeys(
   row: RekeySourceHistory,
   ownKey: HeldItemKey | undefined,
   held: readonly HeldItemKey[],
   resolve: ResolveTeamKey,
-): Promise<string | null> {
-  const encrypted = { ciphertext: row.encryptedBlob, iv: row.blobIv, authTag: row.blobAuthTag };
-  const aad = buildTeamEntryAAD(teamId, entryId, VAULT_TYPE.BLOB, row.itemKeyVersion);
-
+): Promise<CryptoKey[]> {
   if (row.itemKeyVersion < 1) {
-    // v0 row: sealed directly under the team key at its own version.
     const resolved = await resolve(normalizeTeamKeyVersion(row.teamKeyVersion));
     if (!("key" in resolved)) {
       if (resolved.reason === TEAM_KEY_FAILURE.TRANSIENT) {
         throw new RekeyTransientError(normalizeTeamKeyVersion(row.teamKeyVersion));
       }
-      return null;
+      return [];
     }
-    return tryDecrypt(encrypted, resolved.key, aad);
+    return [resolved.key];
   }
-
   const candidates = ownKey ? [ownKey, ...held.filter((h) => h !== ownKey)] : held;
-  for (const candidate of candidates) {
-    const plaintext = await tryDecrypt(encrypted, candidate.contentKey, aad);
-    if (plaintext !== null) return plaintext;
+  return candidates.map((h) => h.contentKey);
+}
+
+/** A history row opened at strict entry AAD and re-sealed at the new ItemKey's; null if no key opens it. */
+async function resealHistoryRow(
+  teamId: string,
+  entryId: string,
+  itemKeyVersion: number,
+  encrypted: EncryptedData,
+  keys: readonly CryptoKey[],
+  newContentKey: CryptoKey,
+  newItemKeyVersion: number,
+): Promise<EncryptedData | null> {
+  const aad = buildTeamEntryAAD(teamId, entryId, VAULT_TYPE.BLOB, itemKeyVersion);
+  for (const key of keys) {
+    const plaintext = await tryDecrypt(encrypted, key, aad);
+    if (plaintext !== null) {
+      return encryptTeamEntry(plaintext, newContentKey, buildTeamEntryAAD(teamId, entryId, VAULT_TYPE.BLOB, newItemKeyVersion));
+    }
+  }
+  return null;
+}
+
+/**
+ * The ONE team entry re-seal without AAD (D80; confined to this module by
+ * team-entry-aad-strictness.test.ts): a legacy history row, which carries no
+ * entry binding, opened without AAD and re-sealed without AAD under the new
+ * ItemKey, so it stays a row the history restore refuses. null if no key
+ * opens it (the row is retained). Opening unbound ciphertext here is the
+ * accepted risk the history view already takes (threat model T2).
+ */
+async function resealLegacyHistoryRow(
+  encrypted: EncryptedData,
+  keys: readonly CryptoKey[],
+  newContentKey: CryptoKey,
+): Promise<EncryptedData | null> {
+  for (const key of keys) {
+    const plaintext = await tryDecrypt(encrypted, key, undefined);
+    if (plaintext !== null) return encryptTeamEntry(plaintext, newContentKey);
   }
   return null;
 }
