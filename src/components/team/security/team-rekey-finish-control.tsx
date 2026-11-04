@@ -158,7 +158,12 @@ export function TeamRekeyFinishControl({ teamId, autoStart = false, onRunningCha
       cancelled = true;
       if (abortRef.current) {
         abortRef.current.abort();
+        abortRef.current = null;
         onRunningChangeRef.current?.(false);
+        // The aborted pass's finally skips these: a re-run for another team
+        // (same instance, new teamId) must not stay "running" (round-2 F N1).
+        setRunning(false);
+        setProgress({ processed: 0, total: 0 });
       }
       // A pass parked on re-authentication resumes, sees the abort and stops.
       reauthWaiterRef.current?.(false);

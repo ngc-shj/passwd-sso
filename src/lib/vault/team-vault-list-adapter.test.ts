@@ -37,6 +37,7 @@ import { renderHook } from "@testing-library/react";
 import { decryptTeamOverview, useTeamVaultListAdapter } from "./team-vault-list-adapter";
 import { isStepUpRequiredError } from "@/lib/http/handle-step-up-error";
 import type { TeamDisplayEntry } from "@/types/team-display-entry";
+import { aadModelDecrypt } from "@/__tests__/helpers/aad-model-decrypt";
 
 const TEAM_ID = "team-1";
 const STABLE_KEY = {} as CryptoKey;
@@ -83,19 +84,25 @@ describe("decryptTeamOverview", () => {
     expect(result.tags).toEqual([{ id: "t1", name: "work", color: null }]);
   });
 
-  it("opens an aadVersion-0 overview without AAD (as a restore of such a row writes it); aadVersion 1 keeps the AAD", async () => {
-    mockDecryptData.mockResolvedValue(JSON.stringify({ title: "Legacy" }));
+  it("refuses a no-AAD overview the server labels aadVersion 0 (strict AAD, D67)", async () => {
+    mockDecryptData.mockImplementation(aadModelDecrypt(JSON.stringify({ title: "Legacy" })));
 
-    const legacy = await decryptTeamOverview(TEAM_ID, rawEntry({ aadVersion: 0, itemKeyVersion: 0 }), {
-      getEntryDecryptionKey: mockGetEntryKey,
-    });
-    expect(legacy.title).toBe("Legacy");
-    expect(mockBuildTeamAAD).not.toHaveBeenCalled();
-    expect(mockDecryptData).toHaveBeenLastCalledWith(expect.anything(), STABLE_KEY, undefined);
-
-    await decryptTeamOverview(TEAM_ID, rawEntry({ aadVersion: 1 }), { getEntryDecryptionKey: mockGetEntryKey });
-    expect(mockBuildTeamAAD).toHaveBeenCalledWith(TEAM_ID, "e1", "overview", 2);
+    const legacy = await decryptTeamOverview(
+      TEAM_ID,
+      rawEntry({ aadVersion: 0, itemKeyVersion: 0, encryptedOverview: "noaad-ov" }),
+      { getEntryDecryptionKey: mockGetEntryKey },
+    );
+    expect(legacy.title).toBe("(decryption failed)");
+    expect(mockBuildTeamAAD).toHaveBeenCalledWith(TEAM_ID, "e1", "overview", 0);
     expect(mockDecryptData).toHaveBeenLastCalledWith(expect.anything(), STABLE_KEY, "aad-bytes");
+  });
+
+  it("control: opens an aadVersion-1 overview sealed with the entry AAD", async () => {
+    mockDecryptData.mockImplementation(aadModelDecrypt(JSON.stringify({ title: "Current" })));
+
+    const current = await decryptTeamOverview(TEAM_ID, rawEntry({ aadVersion: 1 }), { getEntryDecryptionKey: mockGetEntryKey });
+    expect(current.title).toBe("Current");
+    expect(mockBuildTeamAAD).toHaveBeenCalledWith(TEAM_ID, "e1", "overview", 2);
   });
 
   it("includes deletedAt only when present (trash rows — INV-C1.5)", async () => {

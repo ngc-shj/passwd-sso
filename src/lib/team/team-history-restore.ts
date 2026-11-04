@@ -1,5 +1,5 @@
 import { decryptData, encryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
-import { VAULT_TYPE } from "@/lib/crypto/crypto-aad";
+import { buildTeamEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import type { EntryTypeValue } from "@/lib/constants";
 import { buildTeamOverviewFromBlob } from "@/lib/team/team-entry-payload";
 import { teamEntryAadFor } from "@/lib/team/team-key-resolution";
@@ -34,20 +34,22 @@ export function historyRowKeyData(row: TeamHistoryRowDto): EntryItemKeyData {
 }
 
 /**
- * The history restore POST body (deviation D1): the row decrypted with its
- * own key, its overview rebuilt from the blob as the save path builds it and
- * encrypted under the restored row's key at the row's overview AAD
- * (itemKeyVersion and aadVersion of the row — the restored entry takes the
- * row's aadVersion), so the restored entry's list view opens with the key the
- * entry will then hold. `snapshotBlobIv` names the row decrypted: the server
- * refuses HISTORY_ROW_CHANGED when a re-key rewrote it since.
+ * The history restore POST body (deviations D1, D67): the row decrypted with
+ * its own key at the row's AAD (a legacy aadVersion-0 row has none — this is
+ * an upgrade path, the only kind of reader that accepts aadVersion 0), its
+ * overview rebuilt from the blob as the save path builds it, and BOTH re-sealed
+ * under the restored row's key at the current AAD version and the row's
+ * ItemKey version. The server writes them with aadVersion = AAD_VERSION, so a
+ * live entry is never at aadVersion 0 and every live-entry reader stays
+ * strict. `snapshotBlobIv` names the row decrypted: the server refuses
+ * HISTORY_ROW_CHANGED when a re-key rewrote it since.
  */
 export async function buildTeamHistoryRestoreBody(
   teamId: string,
   entryId: string,
   row: TeamHistoryRowDto,
   getEntryDecryptionKey: (teamId: string, entryId: string, entry: EntryItemKeyData) => Promise<CryptoKey>,
-): Promise<{ encryptedOverview: EncryptedData; snapshotBlobIv: string }> {
+): Promise<{ encryptedBlob: EncryptedData; encryptedOverview: EncryptedData; snapshotBlobIv: string }> {
   const keyData = historyRowKeyData(row);
   const itemKeyVersion = keyData.itemKeyVersion ?? 0;
   const key = await getEntryDecryptionKey(teamId, entryId, keyData);
@@ -65,10 +67,15 @@ export async function buildTeamHistoryRestoreBody(
   }
   const overview = buildTeamOverviewFromBlob(blob, row.entryType);
   return {
+    encryptedBlob: await encryptData(
+      plaintext,
+      key,
+      buildTeamEntryAAD(teamId, entryId, VAULT_TYPE.BLOB, itemKeyVersion),
+    ),
     encryptedOverview: await encryptData(
       overview,
       key,
-      teamEntryAadFor(teamId, entryId, VAULT_TYPE.OVERVIEW, itemKeyVersion, row.aadVersion),
+      buildTeamEntryAAD(teamId, entryId, VAULT_TYPE.OVERVIEW, itemKeyVersion),
     ),
     snapshotBlobIv: row.blobIv,
   };

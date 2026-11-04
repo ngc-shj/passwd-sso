@@ -160,6 +160,15 @@ describe("team attachments under the entry ItemKey — real-DB integration", () 
     return r.rows[0].blob_iv;
   }
 
+  /** The row's own blob as the restore body's `encryptedBlob` (the client re-seals it; same AAD for aadVersion-1 rows). */
+  async function historyBlob(historyId: string): Promise<{ ciphertext: string; iv: string; authTag: string }> {
+    const r = await ctx.su.pool.query<{ encrypted_blob: string; blob_iv: string; blob_auth_tag: string }>(
+      `SELECT encrypted_blob, blob_iv, blob_auth_tag FROM team_password_entry_histories WHERE id = $1::uuid`,
+      [historyId],
+    );
+    return { ciphertext: r.rows[0].encrypted_blob, iv: r.rows[0].blob_iv, authTag: r.rows[0].blob_auth_tag };
+  }
+
   async function sql(text: string, ...params: unknown[]): Promise<void> {
     await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
@@ -520,6 +529,7 @@ describe("team attachments under the entry ItemKey — real-DB integration", () 
   async function restoreRow(entry: Entry, historyId: string) {
     return restoreRoute(
       jsonRequest(`http://localhost/api/teams/${entry.teamId}/passwords/${entry.entryId}/history/${historyId}/restore`, "POST", {
+        encryptedBlob: await historyBlob(historyId),
         encryptedOverview: { ciphertext: hex(32), iv: hex(12), authTag: hex(16) },
         snapshotBlobIv: await historyBlobIv(historyId),
       }),
@@ -711,6 +721,7 @@ describe("team attachments under the entry ItemKey — real-DB integration", () 
       const other = await seedHistoryItemKey(team, entry, 1, 2);
       const restored = await restoreRoute(
         jsonRequest(`http://localhost/api/teams/${team.teamId}/passwords/${entry.entryId}/history/${other.historyId}/restore`, "POST", {
+          encryptedBlob: await historyBlob(other.historyId),
           encryptedOverview: { ciphertext: hex(32), iv: hex(12), authTag: hex(16) },
           snapshotBlobIv: await historyBlobIv(other.historyId),
         }),
@@ -737,6 +748,7 @@ describe("team attachments under the entry ItemKey — real-DB integration", () 
       const other = await seedHistoryItemKey(team, entry, 1, 2);
       const restored = await restoreRoute(
         jsonRequest(`http://localhost/api/teams/${team.teamId}/passwords/${entry.entryId}/history/${other.historyId}/restore`, "POST", {
+          encryptedBlob: await historyBlob(other.historyId),
           encryptedOverview: { ciphertext: hex(32), iv: hex(12), authTag: hex(16) },
           snapshotBlobIv: await historyBlobIv(other.historyId),
         }),
@@ -1044,14 +1056,18 @@ describe("team attachments under the entry ItemKey — real-DB integration", () 
       // Both park on the team row (after writing their objects) until released together.
       const blocker = await race().holdRowLock(`SELECT id FROM teams WHERE id = $1::uuid FOR NO KEY UPDATE`, [team.teamId]);
       let results: Response[];
+      const pending: Promise<Response>[] = [];
       try {
-        const pending = [migrate(entry, legacy.attId, bodyA), migrate(entry, legacy.attId, bodyB)];
+        pending.push(migrate(entry, legacy.attId, bodyA), migrate(entry, legacy.attId, bodyB));
         const first = await race().waitForBackendBlockedBy(blocker.pid);
         await race().waitForBackendBlockedBy(blocker.pid, [first]);
         await blocker.release();
         results = await Promise.all(pending);
       } finally {
         await blocker.release();
+        // On a failed park wait the requests are still in flight: settle them
+        // before the cell ends, so none writes after it (round-2 T9).
+        await Promise.allSettled(pending);
       }
       const outcomes = await Promise.all(results.map(errorOf));
       expect(outcomes.map((o) => o.status).sort()).toEqual([200, 409]);

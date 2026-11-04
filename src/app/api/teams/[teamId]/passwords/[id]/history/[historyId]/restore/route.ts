@@ -6,6 +6,7 @@ import { activeTeamRole, canWriteTeamEntry, hasTeamPermission, requireTeamPermis
 import { API_ERROR, type ApiErrorCode } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_METADATA_KEY, TEAM_PERMISSION } from "@/lib/constants";
+import { AAD_VERSION } from "@/lib/crypto/crypto-aad";
 import { restoreTeamHistorySchema } from "@/lib/validations";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -69,7 +70,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
 
   const body = await parseBody(req, restoreTeamHistorySchema);
   if (!body.ok) return body.response;
-  const { encryptedOverview, snapshotBlobIv } = body.data;
+  const { encryptedBlob, encryptedOverview, snapshotBlobIv } = body.data;
 
   const outcome = await withTeamTenantRls(teamId, async () =>
     prisma.$transaction(async (tx): Promise<RestoreOutcome> => {
@@ -135,9 +136,9 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     // committed since the pre-check is seen here).
     const row = await tx.teamPasswordEntryHistory.findUnique({ where: { id: historyId } });
     if (!row || row.entryId !== id) return { ok: false, code: API_ERROR.HISTORY_NOT_FOUND };
-    // The client sealed the overview under the key of the row it decrypted;
-    // a re-key committed since rewrote the row under a new ItemKey, and
-    // restoring it beside that overview would leave the list view unopenable.
+    // The client sealed the blob and overview under the key of the row it
+    // decrypted; a re-key committed since rewrote the row under a new ItemKey,
+    // and restoring those ciphertexts would leave the entry unopenable.
     if (row.blobIv.toLowerCase() !== snapshotBlobIv.toLowerCase()) {
       return { ok: false, code: API_ERROR.HISTORY_ROW_CHANGED };
     }
@@ -190,24 +191,25 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       });
     }
 
-    // Restore: writes back the history row's blob together with the
-    // ItemKey metadata (itemKeyVersion/encryptedItemKey/itemKeyIv/
-    // itemKeyAuthTag) it was originally wrapped with, so the restored
-    // entry stays internally consistent (old teamKeyVersion <-> the
-    // old-TeamKey-wrapped ItemKey). The version-aware client
-    // (getEntryDecryptionKey / getItemEncryptionKey) then selects the
-    // matching TeamKey version and decrypts directly. The overview is the
-    // client's, re-encrypted under the restored row's key.
+    // Restore: writes the client's blob and overview — the row's content
+    // re-sealed under the row's key at the current AAD version — together
+    // with the ItemKey metadata (itemKeyVersion/encryptedItemKey/itemKeyIv/
+    // itemKeyAuthTag) the row was wrapped with, so the restored entry stays
+    // internally consistent (old teamKeyVersion <-> the old-TeamKey-wrapped
+    // ItemKey). The version-aware client (getEntryDecryptionKey /
+    // getItemEncryptionKey) then selects the matching TeamKey version. The
+    // row's aadVersion is never copied: a live entry is always at
+    // AAD_VERSION, and every live-entry reader is strict (D67).
     await tx.teamPasswordEntry.update({
       where: { id, teamId },
       data: {
-        encryptedBlob: row.encryptedBlob,
-        blobIv: row.blobIv,
-        blobAuthTag: row.blobAuthTag,
+        encryptedBlob: encryptedBlob.ciphertext,
+        blobIv: encryptedBlob.iv,
+        blobAuthTag: encryptedBlob.authTag,
         encryptedOverview: encryptedOverview.ciphertext,
         overviewIv: encryptedOverview.iv,
         overviewAuthTag: encryptedOverview.authTag,
-        aadVersion: row.aadVersion,
+        aadVersion: AAD_VERSION,
         teamKeyVersion: row.teamKeyVersion,
         itemKeyVersion: row.itemKeyVersion,
         encryptedItemKey: row.encryptedItemKey,

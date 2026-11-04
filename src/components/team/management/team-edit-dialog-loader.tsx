@@ -9,8 +9,7 @@ import type { TeamEntryFormEditData } from "@/components/team/forms/team-entry-f
 import type { TeamTagData } from "@/components/team/forms/team-tag-input";
 import { apiPath } from "@/lib/constants";
 import type { EntryCustomField, EntryTotp } from "@/lib/vault/entry-form-types";
-import { VAULT_TYPE } from "@/lib/crypto/crypto-aad";
-import { teamEntryAadFor } from "@/lib/team/team-key-resolution";
+import { buildTeamEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import { decryptData } from "@/lib/crypto/crypto-client";
 import { useTeamVault } from "@/lib/team/team-vault-context";
 import { fetchApi } from "@/lib/url-helpers";
@@ -71,7 +70,7 @@ export function TeamEditDialogLoader({
           teamKeyVersion: (raw.teamKeyVersion as number) ?? 1,
         });
 
-        const aad = teamEntryAadFor(teamId, id, VAULT_TYPE.BLOB, itemKeyVersion, (raw.aadVersion as number | undefined) ?? 1);
+        const aad = buildTeamEntryAAD(teamId, id, VAULT_TYPE.BLOB, itemKeyVersion);
         const json = await decryptData(
           {
             ciphertext: raw.encryptedBlob as string,

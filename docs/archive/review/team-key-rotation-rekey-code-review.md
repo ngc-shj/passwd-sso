@@ -115,3 +115,51 @@ Round 1 fixes: commit "fix(teams): address round-1 review of the re-key branch".
   gets virtual-hosted requests that fail loudly at upload. Likelihood: low (AWS S3 and IP-literal
   MinIO work). Cost to fix: small code change plus an operator-facing config decision — follow-up
   issue.
+
+---
+
+# Review round: 2
+Date: 2026-11-04
+Scope: `84b9bc10c..HEAD` (round-1 fixes + iOS aadVersion commit).
+
+## Changes from Previous Round
+All round-1 findings verified resolved by their owning experts (S1, S2, S3, F1–F8, T1–T8).
+New: one fix-induced widening (security N1) from the F2 change, a reader-coverage gap (T10), and
+three Minors.
+
+## Functionality Findings
+- N1 [Minor, new] Aborted re-key pass leaves the finish control's running/progress state set
+  when the effect re-runs without an unmount (`team-rekey-finish-control.tsx`).
+- N2 [Minor, new] Restore and upload controls stay visible to a MEMBER on another member's entry;
+  the server now refuses them (`ONLY_OWN_ENTRIES`).
+
+## Security Findings
+- N1 [Minor, new, R43] Round 1 made every team reader honour a server-labelled `aadVersion` 0
+  (drop AAD); main was strict. A DB-write attacker or malicious server can substitute a legacy
+  no-AAD ciphertext under a held key. escalate: false.
+
+## Testing Findings
+- T9 [Minor, new, RT11] Two `holdRowLock` race cells leave their parked requests running on the
+  failure path.
+- T10 [Major, new, RT1/R42] Only 3 of ~10 `teamEntryAadFor` readers have a cell distinguishing
+  aadVersion 0 from 1; the extension mocks return a fixed value.
+
+## Adjacent Findings
+- (testing → functionality) iOS aadVersion-0 cells use itemKeyVersion 1, not the v0 shape.
+
+## Recurring Issue Check
+- Functionality: R3, R42, R51 resolved; R43 no widening in its scope; others clean / N/A.
+- Security: R43 → N1; R3, R42 (S1/S2 member sets re-derived) complete; RS2–RS4 OK.
+- Testing: RT1 + R42 → T10; RT11 → T9; others clean.
+
+## Resolution Status (round 2)
+- Security N1 + T10: restore re-seals blob and overview at the current AAD; every reader back to
+  strict AAD; aadVersion 0 accepted only on the upgrade paths; per-reader refusal cells + guard.
+- T9: race cells settle their requests in `finally`.
+- Functionality N1: cleanup resets running/progress.
+- Functionality N2 [Minor] — Accepted. Anti-Deferral: consistent with the existing edit button,
+  which already shows to a MEMBER on another member's entry and is refused by the server; gating
+  the controls client-side is a UI change outside this PR's goal. Worst case: a MEMBER clicks
+  Restore/Upload and gets "You can only modify your own entries." — no state change. Likelihood:
+  medium (MEMBERs browsing others' entries). Cost to fix: small UI change across the edit,
+  restore and upload controls together — follow-up.

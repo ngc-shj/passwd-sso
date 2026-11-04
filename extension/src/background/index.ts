@@ -27,7 +27,7 @@ import {
   deriveTeamEncryptionKey,
   unwrapItemKey,
   deriveItemEncryptionKey,
-  teamEntryAadFor,
+  buildTeamEntryAAD,
   buildItemKeyWrapAAD,
   type TeamKeyWrapContext,
 } from "../lib/crypto-team";
@@ -1792,7 +1792,7 @@ async function decryptTeamOverviews(
     }
 
     if (!decryptionKey) return null;
-    const aad = teamEntryAadFor(teamId, item.id, "overview", itemKeyVersion, item.aadVersion ?? 1);
+    const aad = buildTeamEntryAAD(teamId, item.id, "overview", itemKeyVersion);
     const plaintext = await decryptData(
       { ciphertext: item.encryptedOverview, iv: item.overviewIv, authTag: item.overviewAuthTag },
       decryptionKey,
@@ -1939,14 +1939,14 @@ async function fetchAndDecryptTeamBlob(
   assertVaultEpoch(epoch);
   if (!decryptionKey) return null;
 
-  const blobAAD = teamEntryAadFor(teamId, data.id, "blob", itemKeyVersion, data.aadVersion ?? 1);
+  const blobAAD = buildTeamEntryAAD(teamId, data.id, "blob", itemKeyVersion);
   const blobPlain = await decryptData(
     { ciphertext: data.encryptedBlob, iv: data.blobIv, authTag: data.blobAuthTag },
     decryptionKey,
     blobAAD,
   );
 
-  const overviewAAD = teamEntryAadFor(teamId, data.id, "overview", itemKeyVersion, data.aadVersion ?? 1);
+  const overviewAAD = buildTeamEntryAAD(teamId, data.id, "overview", itemKeyVersion);
   const overviewPlain = await decryptData(
     { ciphertext: data.encryptedOverview, iv: data.overviewIv, authTag: data.overviewAuthTag },
     decryptionKey,

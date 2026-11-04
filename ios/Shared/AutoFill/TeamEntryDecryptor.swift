@@ -137,12 +137,9 @@ public enum TeamEntryDecryptor {
       let teamId = entry.teamId,
       let entryKey = teamEntryKey(
         entry: entry, teamKeys: teamKeys, cacheKey: cacheKey, userId: userId, now: now),
-      // nil (aadVersion 0) is a valid AAD, so a throw is told apart by Result.
-      case .success(let aad) = Result(catching: {
-        try teamEntryAadFor(
-          teamId: teamId, entryId: entry.id, vaultType: VaultType.overview,
-          itemKeyVersion: entry.itemKeyVersion ?? 0, aadVersion: entry.aadVersion)
-      }),
+      let aad = try? buildTeamEntryAAD(
+        teamId: teamId, entryId: entry.id, vaultType: VaultType.overview,
+        itemKeyVersion: entry.itemKeyVersion ?? 0),
       let iv = try? hexDecode(entry.encryptedOverview.iv),
       let cipher = try? hexDecode(entry.encryptedOverview.ciphertext),
       let tag = try? hexDecode(entry.encryptedOverview.authTag),
@@ -162,12 +159,9 @@ public enum TeamEntryDecryptor {
       let teamId = entry.teamId,
       let entryKey = teamEntryKey(
         entry: entry, teamKeys: teamKeys, cacheKey: cacheKey, userId: userId, now: now),
-      // nil (aadVersion 0) is a valid AAD, so a throw is told apart by Result.
-      case .success(let aad) = Result(catching: {
-        try teamEntryAadFor(
-          teamId: teamId, entryId: entry.id, vaultType: VaultType.blob,
-          itemKeyVersion: entry.itemKeyVersion ?? 0, aadVersion: entry.aadVersion)
-      }),
+      let aad = try? buildTeamEntryAAD(
+        teamId: teamId, entryId: entry.id, vaultType: VaultType.blob,
+        itemKeyVersion: entry.itemKeyVersion ?? 0),
       let iv = try? hexDecode(entry.encryptedBlob.iv),
       let cipher = try? hexDecode(entry.encryptedBlob.ciphertext),
       let tag = try? hexDecode(entry.encryptedBlob.authTag),

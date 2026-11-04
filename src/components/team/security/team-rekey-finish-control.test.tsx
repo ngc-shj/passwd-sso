@@ -245,5 +245,31 @@ describe("TeamRekeyFinishControl", () => {
     expect(await screen.findByText('rekeyCompleted:{"count":2}')).toBeInTheDocument();
     expect(seen?.signal?.aborted).toBe(false);
     expect(onRunningChange.mock.calls.map((c) => c[0])).toEqual([true, false]);
+    // The finished pass refreshes the status (mount load + post-pass reload).
+    expect(mockFetch.mock.calls.filter(([url]) => String(url).includes("/rekey?limit=1"))).toHaveLength(2);
+  });
+
+  it("re-rendered for another team mid-pass (no unmount): the old pass is aborted and the control is no longer running", async () => {
+    mockFetch.mockImplementation(async () => listResponse());
+    let seen: RekeyRunnerDeps | undefined;
+    mockRunRekeyPass.mockImplementation(async (deps: RekeyRunnerDeps) => {
+      seen = deps;
+      return new Promise(() => {});
+    });
+    const onRunningChange = vi.fn();
+    const { rerender } = render(<TeamRekeyFinishControl teamId="team-1" autoStart onRunningChange={onRunningChange} />);
+    expect(await screen.findByRole("status")).toHaveTextContent("rekeyRunning");
+
+    await act(async () => {
+      rerender(<TeamRekeyFinishControl teamId="team-2" onRunningChange={onRunningChange} />);
+    });
+
+    expect(seen?.signal?.aborted).toBe(true);
+    expect(onRunningChange).toHaveBeenLastCalledWith(false);
+    const button = await screen.findByRole("button", { name: 'rekeyFinishButton:{"count":7}' });
+    expect(button).not.toBeDisabled();
+    expect(screen.queryByText(/rekeyRunning/)).not.toBeInTheDocument();
+    // The aborted pass reports no result for the new team.
+    expect(screen.queryByText(/rekeyCompleted|rekeyStopped/)).not.toBeInTheDocument();
   });
 });

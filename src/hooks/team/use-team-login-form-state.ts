@@ -13,8 +13,8 @@ import {
 import { getPolicyViolations, checkPasswordReuse, type PolicyViolation } from "@/lib/security/password-policy-validation";
 import { useTeamVault, type EntryItemKeyData } from "@/lib/team/team-vault-context";
 import { decryptData } from "@/lib/crypto/crypto-client";
-import { VAULT_TYPE } from "@/lib/crypto/crypto-aad";
-import { itemKeyIdsMatch, teamEntryAadFor } from "@/lib/team/team-key-resolution";
+import { buildTeamEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
+import { itemKeyIdsMatch } from "@/lib/team/team-key-resolution";
 import { historyRowKeyData, type TeamHistoryRowDto } from "@/lib/team/team-history-restore";
 import { apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
@@ -75,7 +75,7 @@ async function fetchDecryptedHistoryPasswords(
           }
         : await fetchHistoryRowKeyData(teamId, entryId, record.id);
       const decryptKey = await getEntryDecryptionKey(teamId, entryId, keyData);
-      const aad = teamEntryAadFor(teamId, entryId, VAULT_TYPE.BLOB, itemKeyVersion, record.aadVersion);
+      const aad = buildTeamEntryAAD(teamId, entryId, VAULT_TYPE.BLOB, itemKeyVersion);
       const plaintext = await decryptData(record.encryptedBlob, decryptKey, aad);
       const parsed: { password?: string } = JSON.parse(plaintext);
       if (typeof parsed.password === "string") {

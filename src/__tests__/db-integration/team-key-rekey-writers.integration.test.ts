@@ -224,9 +224,20 @@ describe("team entry key identity writers — real-DB integration", () => {
     return r.rows[0]?.blob_iv ?? hex(12);
   }
 
+  /** The row's own blob as the restore body's `encryptedBlob` (the client re-seals it; same AAD for aadVersion-1 rows). */
+  async function historyBlob(historyId: string): Promise<{ ciphertext: string; iv: string; authTag: string }> {
+    const r = await ctx.su.pool.query<{ encrypted_blob: string; blob_iv: string; blob_auth_tag: string }>(
+      `SELECT encrypted_blob, blob_iv, blob_auth_tag FROM team_password_entry_histories WHERE id = $1::uuid`,
+      [historyId],
+    );
+    const row = r.rows[0];
+    return row ? { ciphertext: row.encrypted_blob, iv: row.blob_iv, authTag: row.blob_auth_tag } : encryptedField();
+  }
+
   async function restore(teamId: string, entryId: string, historyId: string) {
     return restoreHistory(
       jsonRequest(`http://localhost/api/teams/${teamId}/passwords/${entryId}/history/${historyId}/restore`, "POST", {
+        encryptedBlob: await historyBlob(historyId),
         encryptedOverview: encryptedField(),
         snapshotBlobIv: await historyBlobIv(historyId),
       }),

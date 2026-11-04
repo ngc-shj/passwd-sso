@@ -388,6 +388,18 @@ ItemKey differs from the old.
 After an entry is re-keyed, content written to it is unreadable with its
 previous ItemKey. The stated limits are listed in §7.6.
 
+**Legacy `aadVersion` 0 and history restore**: every client reader of a live
+team entry (web, extension, iOS) verifies the `OV` AAD at the entry's
+`itemKeyVersion`, whatever `aadVersion` the server reports, so a server cannot
+drop the AAD by labelling an entry 0. The stored `aadVersion` is consulted only
+by the paths that re-seal a legacy row at AAD 1 (the rotation's v0 re-encryption,
+the v0→v1 upgrade, the re-key pass and the history restore) and by the history
+view, which only displays a history row. A history restore decrypts the row with
+its own key at the row's AAD and sends the blob and the overview rebuilt from it,
+both re-sealed under that key at AAD 1; the server writes them with
+`aadVersion = 1` (the history row itself is unchanged), so no live entry is ever
+written at `aadVersion` 0.
+
 ## 7. Threat Analysis (What-If Scenarios)
 
 ### 7.1 Server database compromised

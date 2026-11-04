@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
+import { aadModelDecrypt } from "@/__tests__/helpers/aad-model-decrypt";
 
 // ─── Minimal localStorage mock for Node/jsdom environment ────
 
@@ -1472,6 +1473,44 @@ describe("useWatchtower", () => {
     expect(fetchSpy).not.toHaveBeenCalledWith("/api/passwords?include=blob");
     expect(fetchSpy).toHaveBeenCalledWith("/api/teams/team-1/passwords?type=LOGIN&include=blob");
     expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  // D67: a live team entry is read at AAD 1 whatever aadVersion the server
+  // reports. An old entry that opened would be listed in `old`.
+  it.each([
+    ["refuses a no-AAD blob the server labels aadVersion 0", 0, "noaad-cipher", false],
+    ["control: opens an aadVersion-1 blob sealed with the entry AAD", 1, "cipher", true],
+  ])("%s (strict team entry AAD)", async (_label, aadVersion, ciphertext, analyzed) => {
+    mockUseTeamVaultOptional.mockReturnValue({
+      getTeamEncryptionKey: vi.fn().mockResolvedValue(fakeKey),
+      getEntryDecryptionKey: vi.fn().mockResolvedValue(fakeKey),
+    });
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse([{
+        id: "team-entry-1",
+        entryType: "LOGIN",
+        encryptedBlob: ciphertext,
+        blobIv: "iv",
+        blobAuthTag: "tag",
+        aadVersion,
+        updatedAt: new Date(Date.now() - (OLD_THRESHOLD_DAYS + 5) * MS_PER_DAY).toISOString(),
+        expiresAt: null,
+      }]));
+    mockAnalyzeStrength.mockReturnValue(strongResult);
+    mockDecryptData.mockImplementation(
+      aadModelDecrypt(JSON.stringify({ title: "T", password: "TeamStr0ng!42", url: "https://team.example.com" })),
+    );
+
+    const { result } = renderHook(() =>
+      useWatchtower({ type: "team", teamId: "team-1" }, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 })
+    );
+    await act(async () => {
+      await result.current.analyze();
+    });
+
+    expect(mockDecryptData).toHaveBeenCalledWith(expect.objectContaining({ ciphertext }), fakeKey, "team-aad");
+    expect((result.current.report?.old ?? []).some((f: { id: string }) => f.id === "team-entry-1")).toBe(analyzed);
   });
 
   it("reports team key unavailability without starting cooldown", async () => {

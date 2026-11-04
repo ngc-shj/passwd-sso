@@ -69,12 +69,13 @@ const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f
 
 const ROW_BLOB_IV = "c".repeat(24);
 const OVERVIEW = { ciphertext: "restored-overview", iv: "a".repeat(24), authTag: "b".repeat(32) };
+const BLOB = { ciphertext: "resealed-blob", iv: "e".repeat(24), authTag: "f".repeat(32) };
 
 function makeParams() {
   return createParams({ teamId: TEAM_ID, id: ENTRY_ID, historyId: HISTORY_ID });
 }
 
-function restoreRequest(body: unknown = { encryptedOverview: OVERVIEW, snapshotBlobIv: ROW_BLOB_IV }) {
+function restoreRequest(body: unknown = { encryptedBlob: BLOB, encryptedOverview: OVERVIEW, snapshotBlobIv: ROW_BLOB_IV }) {
   return createRequest("POST", "http://localhost/api/teams/team-1/passwords/entry-1/history/hist-1/restore", { body });
 }
 
@@ -287,7 +288,12 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
       expect.objectContaining({
         where: { id: ENTRY_ID, teamId: TEAM_ID },
         data: expect.objectContaining({
-          encryptedBlob: baseHistory.encryptedBlob,
+          // The client's blob, re-sealed at the current AAD version: the
+          // row's aadVersion (0 here) is never copied into the live entry.
+          encryptedBlob: BLOB.ciphertext,
+          blobIv: BLOB.iv,
+          blobAuthTag: BLOB.authTag,
+          aadVersion: 1,
           teamKeyVersion: baseHistory.teamKeyVersion,
           itemKeyVersion: baseHistory.itemKeyVersion,
           encryptedItemKey: baseHistory.encryptedItemKey,
@@ -360,7 +366,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
       const { tx } = setupTx();
 
       const res = await POST(
-        restoreRequest({ encryptedOverview: OVERVIEW, snapshotBlobIv: ROW_BLOB_IV.toUpperCase() }),
+        restoreRequest({ encryptedBlob: BLOB, encryptedOverview: OVERVIEW, snapshotBlobIv: ROW_BLOB_IV.toUpperCase() }),
         makeParams(),
       );
 
@@ -371,7 +377,15 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
     it("rejects a body without snapshotBlobIv (400, no transaction)", async () => {
       preChecksPass();
       setupTx();
-      const res = await POST(restoreRequest({ encryptedOverview: OVERVIEW }), makeParams());
+      const res = await POST(restoreRequest({ encryptedBlob: BLOB, encryptedOverview: OVERVIEW }), makeParams());
+      expect(res.status).toBe(400);
+      expect(mockTransaction).not.toHaveBeenCalled();
+    });
+
+    it("rejects a body without the re-sealed blob (400, no transaction)", async () => {
+      preChecksPass();
+      setupTx();
+      const res = await POST(restoreRequest({ encryptedOverview: OVERVIEW, snapshotBlobIv: ROW_BLOB_IV }), makeParams());
       expect(res.status).toBe(400);
       expect(mockTransaction).not.toHaveBeenCalled();
     });

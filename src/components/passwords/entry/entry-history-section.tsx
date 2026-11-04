@@ -182,8 +182,9 @@ export function EntryHistorySection({
       ? t(e.reason === TEAM_KEY_FAILURE.KEY_INVALID ? "historyKeyInvalid" : "historyKeyUnavailable")
       : t("historyDecryptFailed");
 
-  // History rows hold no overview: a team restore sends the overview rebuilt
-  // from the row's blob, sealed under the row's own key (D1).
+  // History rows hold no overview: a team restore sends the row's blob and the
+  // overview rebuilt from it, both re-sealed under the row's own key at the
+  // current AAD version (D1, D67).
   const teamRestoreInit = async (teamId: string, historyId: string): Promise<RequestInit | null> => {
     const rowRes = await fetchApi(apiPath.teamPasswordHistoryById(teamId, entryId, historyId));
     if (!rowRes.ok) {

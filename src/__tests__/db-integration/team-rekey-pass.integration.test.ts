@@ -1326,7 +1326,11 @@ describe("team re-key pass — real-DB integration", () => {
               await teamKey(team, keyData.teamKeyVersion ?? 1),
               buildItemKeyWrapAAD(team.teamId, entryId, keyData.teamKeyVersion ?? 1),
             )))
-        : { encryptedOverview: await encryptData("{}", await deriveItemEncryptionKey(generateItemKey())), snapshotBlobIv: row.blobIv };
+        : {
+            encryptedBlob: await encryptData("{}", await deriveItemEncryptionKey(generateItemKey())),
+            encryptedOverview: await encryptData("{}", await deriveItemEncryptionKey(generateItemKey())),
+            snapshotBlobIv: row.blobIv,
+          };
       return restorePOST(
         jsonRequest(`http://localhost/api/teams/${team.teamId}/passwords/${e.entryId}/history/${historyId}/restore`, "POST", body),
         params,
@@ -1479,7 +1483,7 @@ describe("team re-key pass — real-DB integration", () => {
   it.each([
     ["an aadVersion-0", 0],
     ["control: an aadVersion-1", 1],
-  ] as const)("F2: restoring %s v0 row → the list opens it, the rotation re-encrypts it (no carry), the pass upgrades and re-keys it", async (_label, aadVersion) => {
+  ] as const)("F2: restoring %s v0 row → the live entry is at aadVersion 1 (D67), the strict list opens it, the rotation re-encrypts it (no carry), the pass upgrades and re-keys it", async (_label, aadVersion) => {
     const team = await seedTeam(1);
     const admin = await seedMember(team, "OWNER", [1]);
     const ik = newItemKey(1);
@@ -1494,7 +1498,8 @@ describe("team re-key pass — real-DB integration", () => {
     });
 
     expect((await clientRestore(team, admin, e.entryId, rowId)).status).toBe(200);
-    expect(await entryRow(e.entryId)).toMatchObject({ aad_version: aadVersion, item_key_version: 0 });
+    // The row's aadVersion is never copied: blob and overview are re-sealed at AAD 1.
+    expect(await entryRow(e.entryId)).toMatchObject({ aad_version: 1, item_key_version: 0 });
     const title = (JSON.parse(rowPlain.blob) as { title: string }).title;
     expect(await listTitle(team, admin, e.entryId)).toBe(title);
 
@@ -1506,6 +1511,36 @@ describe("team re-key pass — real-DB integration", () => {
     expect(result).toMatchObject({ status: "completed", rekeyed: [e.entryId], undecryptable: [], skipped: [] });
     await expectOnCurrentKey(team, e.entryId, { plain: { blob: rowPlain.blob, overview: restoredOverview(rowPlain.blob) } });
     expect(await listTitle(team, admin, e.entryId)).toBe(title);
+    expect((await rekeyList(team, admin)).pendingCount).toBe(0);
+  });
+
+  it("D67: a pre-existing live aadVersion-0 v0 entry → the strict list refuses it; the rotation re-seals it at AAD 1 (no carry); the list then opens it and the pass upgrades and re-keys it", async () => {
+    const team = await seedTeam(1);
+    const admin = await seedMember(team, "OWNER", [1]);
+    const plain = plainFor("pre-AAD entry");
+    const e = await seedEntry(team, { teamKeyVersion: 1, marker: 1, plain });
+    // Rewrite it as a pre-AAD entry: both ciphertexts sealed with no AAD.
+    const key = await teamKey(team, 1);
+    const blob = await encryptData(plain.blob, key);
+    const overview = await encryptData(plain.overview, key);
+    await sql(
+      `UPDATE team_password_entries SET aad_version = 0,
+         encrypted_blob = $2, blob_iv = $3, blob_auth_tag = $4,
+         encrypted_overview = $5, overview_iv = $6, overview_auth_tag = $7
+       WHERE id = $1::uuid`,
+      e.entryId, blob.ciphertext, blob.iv, blob.authTag, overview.ciphertext, overview.iv, overview.authTag,
+    );
+    const title = (JSON.parse(plain.overview) as { title: string }).title;
+    expect(await listTitle(team, admin, e.entryId)).toBe("(decryption failed)");
+
+    const rotated = await rotate(team, admin);
+    expect(rotated).toMatchObject({ status: 200, carry: [] });
+    expect(await entryRow(e.entryId)).toMatchObject({ aad_version: 1, team_key_version: 2, item_key_version: 0 });
+    expect(await listTitle(team, admin, e.entryId)).toBe(title);
+
+    const { result } = await runPass(team, admin);
+    expect(result).toMatchObject({ status: "completed", rekeyed: [e.entryId], undecryptable: [], skipped: [] });
+    await expectOnCurrentKey(team, e.entryId, { plain });
     expect((await rekeyList(team, admin)).pendingCount).toBe(0);
   });
 

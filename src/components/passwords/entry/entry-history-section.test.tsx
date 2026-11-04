@@ -520,7 +520,7 @@ describe("EntryHistorySection", () => {
       });
     }
 
-    it("sends the overview rebuilt from the row's blob, sealed with the row's own key", async () => {
+    it("sends the row's blob and the overview rebuilt from it, re-sealed with the row's own key", async () => {
       mockDecryptData.mockResolvedValue(JSON.stringify({ title: "Old", username: "u", url: "https://a.example/x" }));
       const fetchMock = restoreFetch(200, { success: true });
       globalThis.fetch = fetchMock as unknown as typeof fetch;
@@ -535,6 +535,7 @@ describe("EntryHistorySection", () => {
       );
       const post = fetchMock.mock.calls.find((c) => String(c[0]).endsWith("/restore"));
       expect(JSON.parse(String((post?.[1] as RequestInit).body))).toEqual({
+        encryptedBlob: { ciphertext: "ov-ct", iv: "ov-iv", authTag: "ov-tag" },
         encryptedOverview: { ciphertext: "ov-ct", iv: "ov-iv", authTag: "ov-tag" },
         snapshotBlobIv: ROW.blobIv,
       });

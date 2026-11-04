@@ -124,7 +124,8 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
 
   const OVERVIEW = { ciphertext: "restored-overview", iv: "a".repeat(24), authTag: "b".repeat(32) };
   const ROW_BLOB_IV = "c".repeat(24);
-  const BODY = { encryptedOverview: OVERVIEW, snapshotBlobIv: ROW_BLOB_IV };
+  const BLOB = { ciphertext: "resealed-blob", iv: "e".repeat(24), authTag: "f".repeat(32) };
+  const BODY = { encryptedBlob: BLOB, encryptedOverview: OVERVIEW, snapshotBlobIv: ROW_BLOB_IV };
 
   function setupRestoreTx(
     holderKeys: { userId: string }[],
@@ -209,9 +210,14 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
     const { status, json } = await parseResponse(res);
     expect(status).toBe(200);
     expect(json.success).toBe(true);
+    // The client's re-sealed blob at the current AAD version, never the
+    // aadVersion-0 row's blob or aadVersion (D67).
     expect(entryUpdate.mock.calls[0][0].data).toMatchObject({
-      encryptedBlob: "old",
+      encryptedBlob: BLOB.ciphertext,
+      blobIv: BLOB.iv,
+      blobAuthTag: BLOB.authTag,
       encryptedOverview: OVERVIEW.ciphertext,
+      aadVersion: 1,
       itemKeyId: null,
       itemKeyTeamKeyVersion: 0,
     });

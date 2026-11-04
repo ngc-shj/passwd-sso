@@ -181,20 +181,25 @@ final class TeamKeyCryptoTests: XCTestCase {
     XCTAssertThrowsError(try decryptAESGCMEncoded(encrypted: f.encryptedOverviewV2, key: entryKey, aad: v1AAD))
   }
 
-  // (h) aadVersion 0 (an entry restored from a pre-AAD history row): blob and
-  // overview are sealed with NO AAD. Derived from the fixture's ItemKey v1 entry,
-  // re-sealed without AAD — the fixture itself stays unchanged.
-  private func aadVersion0Entry(_ f: Fixture, aadVersion: Int) throws -> (CacheEntry, [WrappedTeamKey], SymmetricKey) {
+  // (h) Strict team entry AAD (D67): a live team entry is always read at AAD 1,
+  // whatever aadVersion the server reports. A server labelling an entry
+  // aadVersion 0 and substituting a no-AAD ciphertext is refused. Derived from
+  // the fixture's ItemKey v1 entry (and, for v0, its team key), re-sealed
+  // without AAD — the fixture itself stays unchanged.
+  private func noAADTeamEntry(
+    _ f: Fixture, aadVersion: Int, itemKeyVersion: Int
+  ) throws -> (CacheEntry, [WrappedTeamKey], SymmetricKey) {
     let (_, rawTeamKey) = try recover(f)
     let teamEncKey = TeamKeyCrypto.deriveTeamEncryptionKey(rawTeamKey: rawTeamKey)
-    let itemEncKey = SymmetricKey(data: try hexDecode(f.itemEncKeyHex))
-    let overview = try encryptAESGCMEncoded(plaintext: Data(f.overviewPlaintextV1.utf8), key: itemEncKey, aad: nil)
+    // v0 entries are sealed under the team encryption key; v1+ under the ItemKey.
+    let entryKey = itemKeyVersion >= 1 ? SymmetricKey(data: try hexDecode(f.itemEncKeyHex)) : teamEncKey
+    let overview = try encryptAESGCMEncoded(plaintext: Data(f.overviewPlaintextV1.utf8), key: entryKey, aad: nil)
     let blob = try encryptAESGCMEncoded(
-      plaintext: Data(#"{"title":"Team Login v1","password":"pw-0"}"#.utf8), key: itemEncKey, aad: nil)
+      plaintext: Data(#"{"title":"Team Login v1","password":"pw-0"}"#.utf8), key: entryKey, aad: nil)
     let entry = CacheEntry(
       id: f.entryIdV1, teamId: f.teamId, aadVersion: aadVersion, keyVersion: 0,
-      teamKeyVersion: f.teamKeyVersion, itemKeyVersion: 1,
-      encryptedItemKey: f.encryptedItemKey,
+      teamKeyVersion: f.teamKeyVersion, itemKeyVersion: itemKeyVersion,
+      encryptedItemKey: itemKeyVersion >= 1 ? f.encryptedItemKey : nil,
       encryptedBlob: blob, encryptedOverview: overview)
     let cacheKey = SymmetricKey(size: .bits256)
     let wrapped = try TeamEntryDecryptor.wrapTeamKey(
@@ -203,39 +208,49 @@ final class TeamKeyCryptoTests: XCTestCase {
     return (entry, [wrapped], cacheKey)
   }
 
-  func testTeamEntry_aadVersion0_overviewAndBlobDecryptWithoutAAD() throws {
-    let f = try loadFixture()
-    let (entry, teamKeys, cacheKey) = try aadVersion0Entry(f, aadVersion: 0)
-    let summary = try XCTUnwrap(TeamEntryDecryptor.decryptTeamSummary(
-      entry: entry, teamKeys: teamKeys, cacheKey: cacheKey, userId: f.toUserId, now: { Date() }))
-    XCTAssertEqual(summary.title, "Team Login v1")
-    let detail = try XCTUnwrap(TeamEntryDecryptor.decryptTeamDetail(
-      entry: entry, teamKeys: teamKeys, cacheKey: cacheKey, userId: f.toUserId, now: { Date() }))
-    XCTAssertEqual(detail.password, "pw-0")
-  }
-
-  // Negative: the same no-AAD ciphertext labelled aadVersion 1 is refused.
-  func testTeamEntry_noAADCiphertext_labelledAadVersion1_refused() throws {
-    let f = try loadFixture()
-    let (entry, teamKeys, cacheKey) = try aadVersion0Entry(f, aadVersion: 1)
+  private func assertRefused(_ f: Fixture, aadVersion: Int, itemKeyVersion: Int, file: StaticString = #filePath, line: UInt = #line) throws {
+    let (entry, teamKeys, cacheKey) = try noAADTeamEntry(f, aadVersion: aadVersion, itemKeyVersion: itemKeyVersion)
     XCTAssertNil(TeamEntryDecryptor.decryptTeamSummary(
-      entry: entry, teamKeys: teamKeys, cacheKey: cacheKey, userId: f.toUserId, now: { Date() }))
+      entry: entry, teamKeys: teamKeys, cacheKey: cacheKey, userId: f.toUserId, now: { Date() }),
+      "no-AAD overview must not open (aadVersion \(aadVersion), itemKeyVersion \(itemKeyVersion))", file: file, line: line)
     XCTAssertNil(TeamEntryDecryptor.decryptTeamDetail(
-      entry: entry, teamKeys: teamKeys, cacheKey: cacheKey, userId: f.toUserId, now: { Date() }))
+      entry: entry, teamKeys: teamKeys, cacheKey: cacheKey, userId: f.toUserId, now: { Date() }),
+      "no-AAD blob must not open (aadVersion \(aadVersion), itemKeyVersion \(itemKeyVersion))", file: file, line: line)
   }
 
-  // teamEntryAadFor: aadVersion >= 1 is the extension's OV AAD byte for byte; 0 is no AAD.
-  func testTeamEntryAadFor_matchesExtensionAndGatesOnAadVersion() throws {
+  func testTeamEntry_noAADCiphertext_labelledAadVersion0_v1_refused() throws {
+    try assertRefused(try loadFixture(), aadVersion: 0, itemKeyVersion: 1)
+  }
+
+  func testTeamEntry_noAADCiphertext_labelledAadVersion0_v0_refused() throws {
+    try assertRefused(try loadFixture(), aadVersion: 0, itemKeyVersion: 0)
+  }
+
+  func testTeamEntry_noAADCiphertext_labelledAadVersion1_refused() throws {
+    try assertRefused(try loadFixture(), aadVersion: 1, itemKeyVersion: 1)
+  }
+
+  // Control: the fixture's AAD-sealed ItemKey v1 entry opens, both labels — the
+  // label never selects the AAD.
+  func testTeamEntry_aadSealed_opensWhateverTheLabel() throws {
     let f = try loadFixture()
-    let v1 = try teamEntryAadFor(
-      teamId: f.teamId, entryId: f.entryId, vaultType: VaultType.overview, itemKeyVersion: 0, aadVersion: 1)
-    XCTAssertEqual(v1.map(hexEncode), f.overviewAADHex)
-    let v2 = try teamEntryAadFor(
-      teamId: f.teamId, entryId: f.entryIdV2, vaultType: VaultType.overview,
-      itemKeyVersion: f.itemKeyVersionV2, aadVersion: 1)
-    XCTAssertEqual(v2.map(hexEncode), f.overviewAADV2Hex)
-    XCTAssertNil(try teamEntryAadFor(
-      teamId: f.teamId, entryId: f.entryId, vaultType: VaultType.overview, itemKeyVersion: 0, aadVersion: 0))
+    let (_, rawTeamKey) = try recover(f)
+    let teamEncKey = TeamKeyCrypto.deriveTeamEncryptionKey(rawTeamKey: rawTeamKey)
+    let cacheKey = SymmetricKey(size: .bits256)
+    let wrapped = try TeamEntryDecryptor.wrapTeamKey(
+      teamEncKey: teamEncKey, cacheKey: cacheKey, userId: f.toUserId,
+      teamId: f.teamId, teamKeyVersion: f.teamKeyVersion, issuedAt: Date())
+    for aadVersion in [0, 1] {
+      let entry = CacheEntry(
+        id: f.entryIdV1, teamId: f.teamId, aadVersion: aadVersion, keyVersion: 0,
+        teamKeyVersion: f.teamKeyVersion, itemKeyVersion: 1,
+        encryptedItemKey: f.encryptedItemKey,
+        encryptedBlob: f.encryptedOverviewV1,
+        encryptedOverview: f.encryptedOverviewV1)
+      let summary = try XCTUnwrap(TeamEntryDecryptor.decryptTeamSummary(
+        entry: entry, teamKeys: [wrapped], cacheKey: cacheKey, userId: f.toUserId, now: { Date() }))
+      XCTAssertEqual(summary.title, "Team Login v1")
+    }
   }
 
   // (g) Team attachment CEK wrap ("TW"): the ItemKey derives the same CEK-wrap key

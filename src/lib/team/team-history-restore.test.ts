@@ -39,9 +39,12 @@ describe("buildTeamHistoryRestoreBody", () => {
     expect(getEntryDecryptionKey).toHaveBeenCalledWith(TEAM_ID, ENTRY, expect.objectContaining({ itemKeyId: "row-ik", itemKeyVersion: 3, teamKeyVersion: 2 }));
     const overview = await decryptData(body.encryptedOverview, rowKey, buildTeamEntryAAD(TEAM_ID, ENTRY, VAULT_TYPE.OVERVIEW, 3));
     expect(JSON.parse(overview)).toEqual(JSON.parse(overviewBlob));
+    // The blob is re-sealed too (fresh IV), at the row's ItemKey version.
+    expect(body.encryptedBlob.iv).not.toBe(row.blobIv);
+    expect(await decryptData(body.encryptedBlob, rowKey, buildTeamEntryAAD(TEAM_ID, ENTRY, VAULT_TYPE.BLOB, 3))).toBe(fullBlob);
   });
 
-  it("seals an aadVersion-0 row's overview without AAD (the restored entry takes the row's aadVersion) and names the row's blobIv", async () => {
+  it("upgrades an aadVersion-0 row: opens its no-AAD blob and re-seals blob and overview at AAD 1 under the row's key, naming the row's blobIv", async () => {
     const teamKey = await makeTeamKey();
     const { fullBlob, overviewBlob } = buildTeamEntryPayload({
       entryType: ENTRY_TYPE.LOGIN, title: "Legacy", notes: "", tagNames: [], username: "u", password: "p", url: "",
@@ -57,10 +60,13 @@ describe("buildTeamHistoryRestoreBody", () => {
     const body = await buildTeamHistoryRestoreBody(TEAM_ID, ENTRY, row, async () => teamKey);
 
     expect(body.snapshotBlobIv).toBe(blob.iv);
-    expect(JSON.parse(await decryptData(body.encryptedOverview, teamKey))).toEqual(JSON.parse(overviewBlob));
-    await expect(
-      decryptData(body.encryptedOverview, teamKey, buildTeamEntryAAD(TEAM_ID, ENTRY, VAULT_TYPE.OVERVIEW, 0)),
-    ).rejects.toThrow();
+    const blobAad = buildTeamEntryAAD(TEAM_ID, ENTRY, VAULT_TYPE.BLOB, 0);
+    const overviewAad = buildTeamEntryAAD(TEAM_ID, ENTRY, VAULT_TYPE.OVERVIEW, 0);
+    expect(await decryptData(body.encryptedBlob, teamKey, blobAad)).toBe(fullBlob);
+    expect(JSON.parse(await decryptData(body.encryptedOverview, teamKey, overviewAad))).toEqual(JSON.parse(overviewBlob));
+    // Neither is left without AAD (a strict reader would refuse it).
+    await expect(decryptData(body.encryptedBlob, teamKey)).rejects.toThrow();
+    await expect(decryptData(body.encryptedOverview, teamKey)).rejects.toThrow();
   });
 
   it("does not echo plaintext when the blob is not JSON", async () => {

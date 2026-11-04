@@ -126,6 +126,9 @@ vi.mock("@/lib/format/export-format-common", () => ({
 }));
 
 import { TeamExportPagePanel } from "./team-export";
+import { decryptData } from "@/lib/crypto/crypto-client";
+import { formatExportContent } from "@/lib/format/export-format-common";
+import { aadModelDecrypt } from "@/__tests__/helpers/aad-model-decrypt";
 
 describe("TeamExportPagePanel", () => {
   beforeEach(() => {
@@ -184,6 +187,38 @@ describe("TeamExportPagePanel", () => {
     const allText = document.body.textContent ?? "";
     // Input values aren't part of textContent, so the sentinel should be absent.
     expect(allText).not.toContain(SENTINEL_NOT_A_SECRET_ZJYK);
+  });
+
+  // D67: a live team entry is read at AAD 1 whatever aadVersion the server
+  // reports; an entry that does not open is skipped, not exported.
+  it.each([
+    ["refuses a no-AAD blob the server labels aadVersion 0", 0, "noaad-blob", 0],
+    ["control: exports an aadVersion-1 blob sealed with the entry AAD", 1, "blob", 1],
+  ])("%s (strict team entry AAD)", async (_label, aadVersion, ciphertext, exported) => {
+    // jsdom has no object URLs; the download step needs both.
+    URL.createObjectURL = vi.fn(() => "blob:x");
+    URL.revokeObjectURL = vi.fn();
+    mockFetch.mockImplementation(async (url: string) => {
+      if (url.endsWith("/passwords/e1")) {
+        return {
+          ok: true,
+          json: async () => ({ id: "e1", entryType: "LOGIN", encryptedBlob: ciphertext, blobIv: "iv", blobAuthTag: "tag", aadVersion, itemKeyVersion: 0 }),
+        };
+      }
+      if (url.includes("/passwords")) return { ok: true, json: async () => [{ id: "e1", entryType: "LOGIN" }] };
+      return { ok: true, json: async () => [] };
+    });
+    vi.mocked(decryptData).mockImplementationOnce(aadModelDecrypt(JSON.stringify({ title: "t", password: "p" })));
+
+    render(<TeamExportPagePanel teamId="team-1" />);
+    fireEvent.change(screen.getByTestId("exp-pw"), { target: { value: "longpassword1" } });
+    fireEvent.change(screen.getByTestId("exp-confirm"), { target: { value: "longpassword1" } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("export-json"));
+    });
+
+    expect(vi.mocked(decryptData)).toHaveBeenCalledWith(expect.objectContaining({ ciphertext }), expect.anything(), "aad");
+    expect(vi.mocked(formatExportContent).mock.calls[0]?.[0]).toHaveLength(exported);
   });
 
   // §Sec-3: cross-tenant rendering does not crash

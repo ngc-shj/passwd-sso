@@ -53,6 +53,13 @@ export function isAesGcmAuthFailure(e: unknown): boolean {
  * The AAD a team entry blob / overview is sealed with: none for rows written
  * before AAD binding (`aadVersion` 0), else the team entry AAD at the row's
  * ItemKey version.
+ *
+ * Trusting the server's `aadVersion` lets a server label an entry 0 and
+ * substitute a no-AAD ciphertext, so only the paths that UPGRADE such a row
+ * to AAD 1 may use it (rotation v0 reseal, the v0→v1 upgrade and re-key
+ * payloads, the history restore builder) plus the history VIEW, which only
+ * displays a server-held row. Every live-entry reader uses buildTeamEntryAAD;
+ * team-entry-aad-strictness.test.ts holds the allow-list (D67).
  */
 export function teamEntryAadFor(
   teamId: string,

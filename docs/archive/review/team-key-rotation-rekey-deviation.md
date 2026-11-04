@@ -326,15 +326,16 @@
   post-re-key row, pending 0, then the client's retry → 200 with the overview opening under the
   new ItemKey; control: an unchanged row → 200, overview opens under the row's key. Every
   integration restore helper now sends the row's stored `blob_iv`.
-- D56 (round 1 F2, one adjudicator) — the restore builder seals the overview with
-  `teamEntryAadFor(…, OVERVIEW, itemKeyVersion, row.aadVersion)` (the restored entry takes the
-  row's aadVersion; an aadVersion-0 row's overview was sealed with AAD and nothing could open
-  it). Every web-client reader of a team entry's blob or overview now goes through
-  `teamEntryAadFor` with the entry's aadVersion (default 1 when absent, as before): the list
-  adapter, `build-team-get-detail`, watchtower, team export, the edit-dialog loader, the
-  history view, the audit-log page (which had its own inline copy). The extension gets the same
-  helper (`teamEntryAadFor` in `extension/src/lib/crypto-team.ts`) for its overview and detail
-  readers. iOS was left on `buildTeamEntryAAD` here; D66 moves it to the same helper.
+- D56 (round 1 F2, one adjudicator; **reader change superseded by D67**) — the restore builder
+  sealed the overview with `teamEntryAadFor(…, OVERVIEW, itemKeyVersion, row.aadVersion)` (the
+  restored entry took the row's aadVersion; an aadVersion-0 row's overview was sealed with AAD
+  and nothing could open it), and every web and extension reader of a team entry's blob or
+  overview went through `teamEntryAadFor` with the entry's aadVersion. Round 2 (security N1,
+  R43) found that a fix-induced widening: on main every live-entry reader was strict, and a
+  server labelling an entry aadVersion 0 could substitute a no-AAD ciphertext. D67 reverses it —
+  the restore now writes aadVersion 1 and every live-entry reader is strict again; the
+  extension helper is removed. The rest of this entry (writers, the TP "F2" cell) stands as
+  amended by D67.
   Writers (save, import, re-key, rotation) always write aadVersion 1 and keep the builder.
   Integration (TP "F2"): an aadVersion-0 v0 row restored through the client builder → the list
   (list GET → `decryptTeamOverview`) opens it, rotation 200 with no carry, the pass upgrades and
@@ -432,7 +433,8 @@
   `src/lib/validations/**`, `src/lib/http/**`, `src/lib/security/**`.
 - D65 (round 1 A1, not changed) — `s3-blob-store.ts` sets no `forcePathStyle`; the MinIO cells
   pass only with an IP-literal endpoint. Out of this branch's goal; the user files a follow-up.
-- D66 (D56 follow-up, iOS) — `teamEntryAadFor(teamId:entryId:vaultType:itemKeyVersion:aadVersion:)`
+- D66 (D56 follow-up, iOS; **reverted by D67** — the helper and its callers are gone, iOS
+  readers are strict again; the cells below became refusal cells) — `teamEntryAadFor(teamId:entryId:vaultType:itemKeyVersion:aadVersion:)`
   in `ios/Shared/Crypto/AAD.swift`: aadVersion ≥ 1 → `buildTeamEntryAAD` at the entry's ItemKey
   version, else `nil`, which `decryptAESGCM` opens with no AAD (the web helper's `undefined`).
   Every iOS team blob/overview reader goes through it with `CacheEntry.aadVersion`:
@@ -448,3 +450,79 @@
   Red on the remote scratch copy (HEAD's `TeamEntryDecryptor.swift` and
   `CredentialResolver.swift`): exactly the two aadVersion-0 cells fail, the refusals and fixture
   cells pass.
+- D67 (round 2 security N1 + testing T10, R43; supersedes D56's reader change and D66) — a live
+  team entry is read strictly at AAD 1 again, everywhere: `buildTeamEntryAAD` at the entry's
+  ItemKey version in the list adapter, `build-team-get-detail`, watchtower, team export, the
+  edit-dialog loader, the team audit-log page (now strict; on main it was the one
+  aadVersion-conditional live reader) and `use-team-login-form-state`'s history passwords
+  (strict, as on main: they feed a policy decision, not a display); the extension's three
+  sites; iOS `TeamEntryDecryptor` ×2, `CredentialResolver.buildEntryAAD`,
+  `VaultViewModel.buildEntryAAD` (iOS sources back to their pre-D66 text).
+  **Restore**: the client decrypts the row at the row's AAD (`teamEntryAadFor`, the only
+  aadVersion-aware step), rebuilds the overview and re-seals BOTH blob and overview under the
+  row's key (team key at the row's version for v0, the row's ItemKey for v1+) at AAD 1 and the
+  row's `itemKeyVersion`. The body always carries `encryptedBlob` (decision: every restore, one
+  code path — the server never copies a row's blob or aadVersion into a live entry; the cost is
+  a re-encryption of an aadVersion-1 row the server could have copied). The route writes the
+  client blob + overview with `aadVersion = AAD_VERSION`; the history row is unchanged;
+  `snapshotBlobIv` CAS (D55) and the key metadata from the row are unchanged. Validation:
+  `encryptedFieldSchema` (`CIPHERTEXT_MAX`) under `parseBody`'s default 1 MB cap, as the PUT.
+  **Kept aadVersion-aware** (allow-list): rotation v0 reseal, the v0→v1 upgrade payload, the
+  re-key payload (live-entry decrypt side and history rows), the restore builder's row decrypt,
+  and the history VIEW (`entry-history-section` `handleView`): a history row is server-held
+  legacy data that is only displayed, never treated as the live entry, and legitimately
+  aadVersion 0 for pre-AAD rows — refusing it there would hide old versions without protecting
+  any live read. A pre-existing live aadVersion-0 entry is fixed by rotation / the pass as
+  before this branch (and unreadable to the strict readers until then, as on main).
+  Tests: refusal + aadVersion-1 control per reader, with a `decryptData` stand-in modelling
+  the AAD check (`src/__tests__/helpers/aad-model-decrypt.ts`): list adapter, get-detail,
+  watchtower, export, edit loader, login-form state; extension `team-entries.test.ts`
+  "strict team entry AAD" (list; by id blob+overview; overview only; control asserts the real
+  AAD bytes) with the fixed-value `buildTeamEntryAAD` / `teamEntryAadFor` mocks removed from it
+  and `http-auth-wiring.test.ts` (the real builder); iOS `TeamKeyCryptoTests` (no-AAD at
+  aadVersion 0 for v1 and v0, at aadVersion 1; AAD-sealed opens under both labels) and
+  `CredentialResolverTests` (v1 and v0 refused at aadVersion 0; AAD-sealed label-0 control).
+  The audit-log page has no unit harness (a Next page cannot export its helper); it is covered
+  by the D68 guard only. Integration: TP "F2" now asserts the restored entry at `aad_version 1`
+  (both labels), the strict list opens it, rotation 200 no carry, the pass re-keys it; new TP
+  "D67: a pre-existing live aadVersion-0 v0 entry…" (strict list refuses it → rotation re-seals
+  at AAD 1, no carry → list opens it → pass re-keys). Restore helpers in ER/AR/KW send the row's
+  stored blob as `encryptedBlob` (the same AAD for the aadVersion-1 rows they restore); TP's
+  placeholder body gains one. Red on the scratch copy: each web reader honouring aadVersion 0 →
+  its refusal cell red (control green) and the guard red; each extension site → its cell red
+  (the overview-only mutation → exactly the overview-only cell); the builder sealing the
+  overview by `row.aadVersion` → its unit cell and the guard red; a restore route copying the
+  row's aadVersion → TP "F2" aadVersion-0 cell red, its aadVersion-1 control green. iOS: HEAD's
+  (D66) `TeamEntryDecryptor` / `CredentialResolver` / `AAD.swift` / `VaultViewModel` on a remote
+  scratch copy → the six label-0 cells fail (four refusals, two AAD-sealed controls), the
+  label-1 refusals pass; full `PasswdSSOTests` with the fix: 892 tests, 0 failures.
+- D68 (round 2 security N1 (e), R42 member set) — guard `src/__tests__/team-entry-aad-strictness.test.ts`
+  (vitest + ts-morph AST, chosen over a scripts/checks gate: no CI/pre-pr registration needed,
+  runs in the unit suite). Member set derived: every non-test .ts/.tsx module under `src/` and
+  `extension/src/`. Fails if `teamEntryAadFor` is declared outside team-key-resolution.ts,
+  referenced outside the allow-list (D67), called in the history view outside `handleView`, or
+  used as the AAD of an `encryptData` call; or if, outside the allow-list, a
+  `buildTeamEntryAAD(...)` call is a branch of a ternary / logical / if on `aadVersion`, or of a
+  ternary whose other branch is undefined/null (an inline re-implementation under another
+  spelling); and asserts each known reader still calls `buildTeamEntryAAD`. iOS (Swift) is
+  outside it; its refusal cells pin the rule. Red on the scratch copy: `teamEntryAadFor`
+  reintroduced in `build-team-get-detail` → the reference and reader cells red; each reader's
+  inline aadVersion ternary (incl. the audit-log page) → the conditional cell red.
+- D69 (round 2 testing T9, RT11) — AR "A3: of two concurrent migrates…" and ER "A5: a restore
+  built before a re-key…": the `finally` awaits `Promise.allSettled` over the started requests
+  after releasing the blocker (AR collects them before the park waits; ER the re-key and, once
+  sent, the restore), so a failed park wait no longer leaves a request writing after the cell.
+  Parking assertions unchanged. Red on the scratch copy (the second park wait made to throw,
+  timestamps logged when each request settles and when the `finally` ends): with the fix both
+  cells fail with "park wait broke" and every request settles before the cell ends; HEAD's cells
+  under the same break end first and their requests settle after (AR ~20 ms, ER ~30–90 ms).
+- D70 (round 2 functionality N1) — `team-rekey-finish-control.tsx`: the effect cleanup, after
+  `abort()`, clears `abortRef`, sets `running` false and resets progress; the aborted pass's
+  `finally` still skips `setResult` / `fetchStatus`. Unit: re-render with another `teamId`
+  mid-pass (no unmount) → signal aborted, `onRunningChange(false)`, button enabled, no running
+  status, no result; the un-aborted control now also asserts the post-pass status refresh.
+  Red: HEAD's control → the re-render cell fails.
+- D71 (round 2 functionality N2, accepted, no code change) — restore and upload controls stay
+  visible to a MEMBER on another member's entry; the server refuses with ONLY_OWN_ENTRIES (D54)
+  and the client shows that message. This matches the existing edit button, which is shown and
+  refused the same way; gating all three controls client-side is a UI change outside this PR.

@@ -88,23 +88,6 @@ public func buildTeamEntryAAD(
   try buildAADBytes(scope: .team, fields: [teamId, entryId, vaultType, String(itemKeyVersion)])
 }
 
-/// The AAD a team entry's blob or overview was sealed with: none for an entry
-/// written before AAD binding (aadVersion 0) — or restored from such a history
-/// row — else buildTeamEntryAAD at the entry's ItemKey version. Mirrors the web
-/// client's teamEntryAadFor (src/lib/team/team-key-resolution.ts): nil here
-/// opens with no AAD, as `undefined` does there.
-public func teamEntryAadFor(
-  teamId: String,
-  entryId: String,
-  vaultType: String,
-  itemKeyVersion: Int,
-  aadVersion: Int
-) throws -> Data? {
-  guard aadVersion >= 1 else { return nil }
-  return try buildTeamEntryAAD(
-    teamId: teamId, entryId: entryId, vaultType: vaultType, itemKeyVersion: itemKeyVersion)
-}
-
 /// Build AAD for item-key wrapping (teamId, entryId, teamKeyVersion).
 public func buildItemKeyWrapAAD(
   teamId: String,

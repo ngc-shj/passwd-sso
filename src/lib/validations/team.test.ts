@@ -38,6 +38,7 @@ import {
   HEX_IV_LENGTH,
   HEX_AUTH_TAG_LENGTH,
   HEX_SALT_LENGTH,
+  CIPHERTEXT_MAX,
 } from "@/lib/validations/common";
 import {
   TEAM_ROLE,
@@ -473,25 +474,44 @@ describe("updateTeamE2EPasswordSchema", () => {
 // ─── restoreTeamHistorySchema ───────────────────────────────
 
 describe("restoreTeamHistorySchema", () => {
-  it("accepts the re-encrypted overview with the decrypted row's blobIv", () => {
-    expect(
-      restoreTeamHistorySchema.safeParse({ encryptedOverview: validEncryptedField(), snapshotBlobIv: "a".repeat(24) }).success,
-    ).toBe(true);
+  const restoreBody = () => ({
+    encryptedBlob: validEncryptedField(),
+    encryptedOverview: validEncryptedField(),
+    snapshotBlobIv: "a".repeat(24),
+  });
+
+  it("accepts the re-sealed blob and overview with the decrypted row's blobIv", () => {
+    expect(restoreTeamHistorySchema.safeParse(restoreBody()).success).toBe(true);
   });
 
   it("rejects a body without snapshotBlobIv, or with a malformed one", () => {
-    expect(restoreTeamHistorySchema.safeParse({ encryptedOverview: validEncryptedField() }).success).toBe(false);
-    expect(
-      restoreTeamHistorySchema.safeParse({ encryptedOverview: validEncryptedField(), snapshotBlobIv: "zz" }).success,
-    ).toBe(false);
+    const { snapshotBlobIv: _omit, ...withoutIv } = restoreBody();
+    expect(restoreTeamHistorySchema.safeParse(withoutIv).success).toBe(false);
+    expect(restoreTeamHistorySchema.safeParse({ ...restoreBody(), snapshotBlobIv: "zz" }).success).toBe(false);
   });
 
   it("rejects a body without the overview", () => {
-    expect(restoreTeamHistorySchema.safeParse({}).success).toBe(false);
+    const { encryptedOverview: _omit, ...withoutOverview } = restoreBody();
+    expect(restoreTeamHistorySchema.safeParse(withoutOverview).success).toBe(false);
+  });
+
+  it("rejects a body without the blob (the server never copies the row's blob)", () => {
+    const { encryptedBlob: _omit, ...withoutBlob } = restoreBody();
+    expect(restoreTeamHistorySchema.safeParse(withoutBlob).success).toBe(false);
+  });
+
+  it("rejects a blob over the ciphertext cap", () => {
+    expect(
+      restoreTeamHistorySchema.safeParse({
+        ...restoreBody(),
+        encryptedBlob: { ...validEncryptedField(), ciphertext: "a".repeat(CIPHERTEXT_MAX + 1) },
+      }).success,
+    ).toBe(false);
   });
 
   it("rejects a malformed overview", () => {
     const result = restoreTeamHistorySchema.safeParse({
+      ...restoreBody(),
       encryptedOverview: { ...validEncryptedField(), iv: "short" },
     });
     expect(result.success).toBe(false);

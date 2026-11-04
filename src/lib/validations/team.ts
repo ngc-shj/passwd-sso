@@ -132,12 +132,15 @@ export const updateTeamE2EPasswordSchema = z.object({
 
 /**
  * History restore body. History rows hold no overview, so the client sends
- * the overview re-encrypted under the restored row's ItemKey (or team key for
- * a v0 row) at that row's AAD, and the `blobIv` of the row it decrypted: a
- * row a re-key rewrote since is refused rather than restored beside an
- * overview sealed under the row's previous key.
+ * the row's blob and the overview rebuilt from it, both re-encrypted under the
+ * restored row's ItemKey (or team key for a v0 row) at the current AAD version
+ * and the row's ItemKey version — every restore, so the server never copies a
+ * row's aadVersion 0 into a live entry — and the `blobIv` of the row it
+ * decrypted: a row a re-key rewrote since is refused rather than restored
+ * beside ciphertexts sealed under the row's previous key.
  */
 export const restoreTeamHistorySchema = z.object({
+  encryptedBlob: encryptedFieldSchema,
   encryptedOverview: encryptedFieldSchema,
   snapshotBlobIv: hexIv,
 });

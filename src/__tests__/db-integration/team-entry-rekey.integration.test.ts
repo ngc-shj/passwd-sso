@@ -570,14 +570,17 @@ describe("team entry re-key — real-DB integration", () => {
     overview: { ciphertext: string; iv: string; authTag: string },
     snapshotBlobIv?: string,
   ) {
-    const blobIv = snapshotBlobIv ?? (await ctx.su.pool.query<{ blob_iv: string }>(
-      `SELECT blob_iv FROM team_password_entry_histories WHERE id = $1::uuid`,
+    // The row's own blob stands in for the client's re-seal (the same AAD for
+    // the aadVersion-1 rows these cells restore).
+    const stored = (await ctx.su.pool.query<{ encrypted_blob: string; blob_iv: string; blob_auth_tag: string }>(
+      `SELECT encrypted_blob, blob_iv, blob_auth_tag FROM team_password_entry_histories WHERE id = $1::uuid`,
       [historyId],
-    )).rows[0].blob_iv;
+    )).rows[0];
     return restoreRoute(
       jsonRequest(`http://localhost/api/teams/${s.team.teamId}/passwords/${s.entryId}/history/${historyId}/restore`, "POST", {
+        encryptedBlob: { ciphertext: stored.encrypted_blob, iv: stored.blob_iv, authTag: stored.blob_auth_tag },
         encryptedOverview: overview,
-        snapshotBlobIv: blobIv,
+        snapshotBlobIv: snapshotBlobIv ?? stored.blob_iv,
       }),
       { params: Promise.resolve({ teamId: s.team.teamId, id: s.entryId, historyId }) },
     );
@@ -1113,14 +1116,18 @@ describe("team entry re-key — real-DB integration", () => {
       [s.history.v0],
     );
     const rekeyRes = rekey(s, body);
-    let restoreRes: Promise<Response>;
+    let restoreRes: Promise<Response> | undefined;
     try {
       const rekeyPid = await race().waitForBackendBlockedBy(blocker.pid);
       restoreRes = restoreWith(s, s.history.sameKey, stale.body);
       expect(await race().settledOrBlocked(restoreRes, rekeyPid, blocker.pid)).toBe("blocked-on-parked");
     } finally {
       await blocker.release();
+      // On a failed park wait the requests are still in flight: settle them
+      // before the cell ends, so none writes after it (round-2 T9).
+      await Promise.allSettled([rekeyRes, ...(restoreRes ? [restoreRes] : [])]);
     }
+    if (!restoreRes) throw new Error("restore was never sent");
     expect((await rekeyRes).status).toBe(200);
     const afterRekey = await entryRow(s.entryId);
     expect(await errorOf(await restoreRes)).toEqual({ status: 409, error: "HISTORY_ROW_CHANGED" });
