@@ -156,3 +156,8 @@
   `CEK_WRAP_BASE64_MAX`), the only other users. Red → green: a body at
   `ATTACHMENT_BODY_BASE64_MAX` in each migrate route's unit test (RangeError under the old
   check), and the `isBase64` table in `common.test.ts`.
+- D39 (Step 2-5 hooks) — `check-race-vacuous-guard` flagged three zero-pending assertions in
+  `team-rekey-pass.integration.test.ts` (A9, scenario 3). Not race blocks (no concurrent calls);
+  each follows an exact positive assertion on a non-empty `rekeyed` list, which fails if nothing
+  ran. Dismissed. Orphaned-check, hardcoded-reuse and propagation hits are vitest-run test files
+  and incidental numeric literals.
