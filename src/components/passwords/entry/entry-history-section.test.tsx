@@ -585,7 +585,53 @@ describe("EntryHistorySection", () => {
       expect(toast.success).not.toHaveBeenCalled();
     });
 
-    it("refuses an aadVersion-0 row before decrypting: no POST, the too-old message is shown (S-R3-2)", async () => {
+    // N-R4-2: the list already carries each row's aadVersion, so a team row the
+    // restore refuses is not offered (the teamRestoreInit refusal below stays for
+    // a row GET that disagrees with the list).
+    async function renderExpanded(items: unknown[], teamId?: string) {
+      globalThis.fetch = mockFetchHistoryList(items as typeof HISTORY_ITEMS);
+      await act(async () => {
+        render(<EntryHistorySection entryId="entry-1" teamId={teamId} />);
+      });
+      await waitFor(() => {
+        expect(screen.getByText(/entryHistory/)).toHaveTextContent("(1)");
+      });
+      fireEvent.click(screen.getByText(/entryHistory/));
+      return screen.getByRole("button", { name: "restoreVersion" });
+    }
+
+    it.each([
+      ["0", 0],
+      ["undefined", undefined],
+    ])("a team row listed at aadVersion %s: Restore is disabled and described by the too-old label", async (_label, aadVersion) => {
+      const restore = await renderExpanded([{ ...HISTORY_ITEMS[0], aadVersion }], "team-1");
+
+      expect(restore).toBeDisabled();
+      expect(restore).toHaveAccessibleDescription("restoreVersionTooOld");
+      expect(screen.getByText("restoreVersionTooOld")).toBeVisible();
+      fireEvent.click(restore);
+      expect(mockRequireVerification).not.toHaveBeenCalled();
+      expect(screen.queryByTestId("restore-dialog")).toBeNull();
+    });
+
+    it("control: a team row listed at aadVersion 1 offers Restore with no too-old label", async () => {
+      const restore = await renderExpanded([HISTORY_ITEMS[0]], "team-1");
+
+      expect(restore).toBeEnabled();
+      expect(restore).not.toHaveAccessibleDescription();
+      expect(screen.queryByText("restoreVersionTooOld")).toBeNull();
+      fireEvent.click(restore);
+      expect(screen.getByTestId("restore-dialog")).toBeInTheDocument();
+    });
+
+    it("control: a personal row at aadVersion 0 still offers Restore (only team restores refuse it)", async () => {
+      const restore = await renderExpanded([{ ...HISTORY_ITEMS[0], aadVersion: 0 }]);
+
+      expect(restore).toBeEnabled();
+      expect(screen.queryByText("restoreVersionTooOld")).toBeNull();
+    });
+
+    it("refuses an aadVersion-0 row GET (listed at 1) before decrypting: no POST, the too-old message is shown (S-R3-2)", async () => {
       mockDecryptData.mockResolvedValue(JSON.stringify({ title: "Old" }));
       const fetchMock = restoreFetch(200, { success: true }, { ...ROW, aadVersion: 0 });
       globalThis.fetch = fetchMock as unknown as typeof fetch;

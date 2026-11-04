@@ -34,6 +34,7 @@ import {
   sha256Hex,
   type TeamAttachmentDownload,
 } from "@/lib/team/team-attachment-crypto";
+import { isRestorableHistoryRow } from "@/lib/team/team-history-restore";
 import { ATTACHMENT_ENCRYPTION_MODE } from "@/lib/constants/vault/attachment-encryption-mode";
 
 /**
@@ -274,7 +275,10 @@ async function tryDecrypt(
  * Build the re-key POST for one entry (C2, D23–D26). The live blob/overview
  * open with the live ItemKey; each history row with its own wrap, else by
  * trial with every ItemKey the runner holds for the entry (the live one and
- * every history wrap it could open); rows it cannot open are retained. Each
+ * every history wrap it could open), at strict entry AAD; rows it cannot open
+ * are retained. A row sealed without AAD (aadVersion < 1) is retained without
+ * being opened: re-sealing it at AAD 1 would make it a row the history restore
+ * accepts, so the pass keeps exactly the rows the restore refuses (D76). Each
  * mode-2 CEK opens with the ItemKey whose id matches, else by trial. A new
  * random ItemKey takes `nextItemKeyVersion` and is wrapped with a fresh IV
  * under the CURRENT team key. The entry is blocked (skip and report) when the
@@ -359,7 +363,9 @@ export async function buildEntryRekeyPayload(
     const history: RekeyPostBody["history"] = [];
     const retained: { id: string; teamKeyVersion: number }[] = [];
     for (const row of data.history) {
-      const plaintext = await openHistoryRow(teamId, entryId, row, ownKeyByRow.get(row.id), held, resolve);
+      const plaintext = isRestorableHistoryRow(row)
+        ? await openHistoryRow(teamId, entryId, row, ownKeyByRow.get(row.id), held, resolve)
+        : null;
       if (plaintext === null) {
         retained.push({ id: row.id, teamKeyVersion: normalizeTeamKeyVersion(row.teamKeyVersion) });
         continue;
@@ -427,7 +433,7 @@ async function openHistoryRow(
   resolve: ResolveTeamKey,
 ): Promise<string | null> {
   const encrypted = { ciphertext: row.encryptedBlob, iv: row.blobIv, authTag: row.blobAuthTag };
-  const aad = teamEntryAadFor(teamId, entryId, VAULT_TYPE.BLOB, row.itemKeyVersion, row.aadVersion);
+  const aad = buildTeamEntryAAD(teamId, entryId, VAULT_TYPE.BLOB, row.itemKeyVersion);
 
   if (row.itemKeyVersion < 1) {
     // v0 row: sealed directly under the team key at its own version.

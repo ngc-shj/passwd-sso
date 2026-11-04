@@ -333,44 +333,57 @@ export function EntryHistorySection({
                 {t("entryHistoryEmpty")}
               </p>
             )}
-            {histories.map((h) => (
-              <div
-                key={h.id}
-                className="flex items-center gap-2 rounded-lg border bg-muted/30 p-2"
-              >
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs text-muted-foreground">
-                    {t("versionFrom", { date: formatDateTime(h.changedAt, locale) })}
-                  </p>
-                  {h.changedBy && (
+            {histories.map((h) => {
+              // A team row sealed without AAD is refused by the restore (S-R3-2):
+              // say so up front instead of after reprompt and confirm.
+              const restoreBlocked = !!scopedTeamId && !isRestorableHistoryRow(h);
+              const blockedHintId = `history-restore-blocked-${h.id}`;
+              return (
+                <div
+                  key={h.id}
+                  className="flex items-center gap-2 rounded-lg border bg-muted/30 p-2"
+                >
+                  <div className="flex-1 min-w-0">
                     <p className="text-xs text-muted-foreground">
-                      {h.changedBy.name || h.changedBy.email}
+                      {t("versionFrom", { date: formatDateTime(h.changedAt, locale) })}
                     </p>
-                  )}
+                    {h.changedBy && (
+                      <p className="text-xs text-muted-foreground">
+                        {h.changedBy.name || h.changedBy.email}
+                      </p>
+                    )}
+                    {restoreBlocked && (
+                      <p id={blockedHintId} className="text-xs text-muted-foreground">
+                        {t("restoreVersionTooOld")}
+                      </p>
+                    )}
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 shrink-0 text-xs"
+                    disabled={viewLoading}
+                    onClick={() => requireVerification(entryId, requireReprompt ?? false, () => handleView(h))}
+                  >
+                    <Eye className="h-3 w-3 mr-1" />
+                    {t("viewVersion")}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 shrink-0 text-xs"
+                    disabled={restoreBlocked}
+                    aria-describedby={restoreBlocked ? blockedHintId : undefined}
+                    onClick={() => requireVerification(entryId, requireReprompt ?? false, () => setRestoreTarget(h))}
+                  >
+                    <RotateCcw className="h-3 w-3 mr-1" />
+                    {t("restoreVersion")}
+                  </Button>
                 </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 shrink-0 text-xs"
-                  disabled={viewLoading}
-                  onClick={() => requireVerification(entryId, requireReprompt ?? false, () => handleView(h))}
-                >
-                  <Eye className="h-3 w-3 mr-1" />
-                  {t("viewVersion")}
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 shrink-0 text-xs"
-                  onClick={() => requireVerification(entryId, requireReprompt ?? false, () => setRestoreTarget(h))}
-                >
-                  <RotateCcw className="h-3 w-3 mr-1" />
-                  {t("restoreVersion")}
-                </Button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

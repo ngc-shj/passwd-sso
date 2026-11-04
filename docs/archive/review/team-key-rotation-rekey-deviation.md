@@ -557,7 +557,9 @@
   before/after; "F2 control": the aadVersion-1 v0 row restores and the old chain (strict list,
   rotation no carry, pass re-keys) holds. Docs: threat-model T2 and whitepaper §6.2 (restore no
   longer an upgrade path; legacy acceptance left: rotation, upgrade, re-key and the history
-  view). Red on the scratch copy: builder refusal removed → its unit cell; section refusal
+  view — narrowed by D76: the re-key pass no longer re-seals a legacy history row, so the
+  refusal here is binding; legacy acceptance is the rotation's v0 re-seal, the re-key of the
+  LIVE entry, the v0→v1 upgrade and the history view). Red on the scratch copy: builder refusal removed → its unit cell; section refusal
   removed → its cell; route refusal removed → both route cells and the TP "F2 (S-R3-2)" cell
   (200 instead of 409; control green); builder refusal removed → the TP cell fails with the
   strict decrypt's `OperationError` instead of `HistoryRowLegacyError` (the strict AAD alone
@@ -566,8 +568,9 @@
   stays green under that mutation because the refusal precedes it: the guard is what pins it).
   iOS: no change (its readers are strict and identical to main; iOS has no history restore
   builder).
-- D73 (round 3 testing T11 Major + security S-R3-1; supersedes D68) — the strictness guard
-  resolves bindings, not spellings. Each tree is loaded into a ts-morph Project built from its
+- D73 (round 3 testing T11 Major + security S-R3-1; supersedes D68; its team-decrypt
+  classification (b) is superseded by D77, which fails closed where (b) failed open) — the
+  strictness guard resolves bindings, not spellings. Each tree is loaded into a ts-morph Project built from its
   tsconfig (`tsconfig.json` over `src/`, `extension/tsconfig.json` over `extension/src/`,
   non-test files; `skipAddingFilesFromTsConfig`, the type checker resolves `@/` and relative
   imports); ~10 s in the unit suite. (a) outside rotation-payload, rekey-payload,
@@ -619,3 +622,104 @@
   after team-2's → team-2's count stays; control: a pass for the current team shows the
   post-pass status. Red on the scratch copy: reset removed → the first cell; generation check
   removed → the second.
+- D76 (round 4 functionality N-R4-1 Major + security S-R4-2; completes D72) — the re-key pass
+  no longer re-seals a history row below `aadVersion` 1: it re-sealed such a row at AAD 1, after
+  which the D72 restore refusal accepted it (two-step laundering of a substituted no-AAD
+  ciphertext). Client (`rekey-payload` `buildEntryRekeyPayload`): a history row failing
+  `isRestorableHistoryRow` (the restore's own predicate, so the pass retains exactly the rows
+  the restore refuses: aadVersion < 1 or non-numeric) goes to `retainHistoryIds` without being
+  decrypted; every other history row is opened with strict `buildTeamEntryAAD` at its ItemKey
+  version (`teamEntryAadFor` removed from the history-row path; it stays for the live entry,
+  the v0→v1 upgrade and rotation, the accepted T2 risk). Server (rekey POST, defense in depth):
+  the locked history read now selects `aad_version`; a `history[]` item naming a locked row
+  below 1 → 409 `REKEY_HISTORY_LEGACY` after the set check, before any write. New code
+  registered in API_ERROR, API_ERROR_STATUS (409), the i18n map and ApiErrors en/ja ("A history
+  version of this entry is too old to re-encrypt. Reload the page and try again." /
+  「このエントリの履歴バージョンが古すぎるため再暗号化できません。ページを再読み込みしてから再度お試しください。」);
+  unmapped in the runner, so the pass stops and reports (a non-conforming or stale client);
+  count test 204. Tests: unit `rekey-payload` (rows labelled 0 / undefined / null / "1", each a
+  no-AAD ciphertext under the live ItemKey → retained, `history` empty, two decrypts only (the
+  live blob and overview); control: the same row at aadVersion 1 sealed at AAD → re-keyed,
+  three decrypts; a no-AAD ciphertext labelled 1 → retained); route unit (locked row at
+  aad_version 0 named in `history` → 409, no history/attachment/entry write, no audit; control:
+  the row in `retainHistoryIds` → 200, only H1 written). Integration: TP "A1 / scenario 1" —
+  the aadVersion-0 row is retained by the real pass (`retained` names it, byte-identical,
+  `rowsOffCurrentVersion` = it, `retainedHistoryCount` 1), and after the pass the client
+  restore builder throws `HistoryRowLegacyError` and a body re-sealed at AAD 1 anyway → 409
+  `HISTORY_ROW_LEGACY`, entry unchanged; team-entry-rekey: the aadVersion-0 row is opt-in in
+  `seedEntry({ legacy })` and the local builder mirrors the client (retain below 1, strict
+  AAD); new cells "N-R4-1" (retained byte-identical, counted, restore after the pass → 409
+  `HISTORY_ROW_LEGACY`) and "REKEY_HISTORY_LEGACY" (a laundering body → 409, rows unchanged;
+  control → 200); A1/A10 no longer seed the legacy row, A7 restores the re-keyed sameKey row
+  (it restored the aadVersion-0 row after a re-key and expected 200 — the laundering this
+  closes). Docs: whitepaper §6.2 and threat-model T2 (the refusal is binding because the pass
+  retains such rows unopened and the server refuses re-sealing one; legacy acceptance only on
+  the rotation v0 re-seal, the live-entry re-key, the v0→v1 upgrade and the history view). Red
+  on the scratch copy: client retention removed → the four unit cells (3 decrypts, not 2); the
+  HEAD client (retention removed, `teamEntryAadFor` restored) → the same four; route refusal
+  removed → its unit cell; HEAD client + HEAD route → TP A1 and the REKEY_HISTORY_LEGACY cell;
+  HEAD client with the new route → TP A1 (the pass stops on 409). The strict-AAD swap alone is
+  not observable once the retention gate runs first (`teamEntryAadFor` equals the strict
+  builder for a numeric aadVersion ≥ 1); the mislabelled-row unit cell pins the behaviour.
+- D77 (round 4 testing T13 Major + security S-R4-1, third escape of the guard; supersedes D73's
+  (b)) — the strictness guard's mechanism changed to fail closed. (b) declaration-side
+  enumeration: the decrypt set is derived — both `decryptData` declarations plus every named
+  function forwarding its own key and AAD parameters to a member (fixed point;
+  `decryptTeamEntry`, rekey-payload's `tryDecrypt`, fixture `openWith`); every
+  `findReferences` hit of a member must be an import/export specifier, a `typeof`, or the
+  direct callee of a call with no spread argument; a string element access naming a member is
+  reported by spelling. (c) classification of every non-forwarding decrypt call: TEAM when its
+  AAD names `buildTeamEntryAAD` (aliases, const/let bindings, ternary/logical branches, a local
+  helper's body, a parameter's arguments) whatever the key, or when its key traces to a getter
+  call; UNCLASSIFIABLE when the key trace reaches a parameter with no enumerable call sites
+  (callbacks, object/class methods, property-assigned arrows), a container written through a
+  property or a mutating method call, a key-returning call through a parameter, a library call
+  yielding a key from no key material (WebCrypto excepted), `this`, or an unmodelled
+  declaration; such a site fails unless in `NON_TEAM_DECRYPT_SITES`, which must equal the
+  derived set (both directions; empty today — every decrypt key in `src/` and
+  `extension/src/` traces to its sources). The key trace follows key-material values only
+  (CryptoKey-carrying, byte buffers incl. `ArrayBufferView`, containers of them), a
+  destructured parameter by its property, `for...of`, a scanned callee's return expressions and
+  an interface member's object-literal implementations, byte-buffer writes, and React stores
+  (`useState` setter arguments, `useRef` `.current` writes, `createContext` default plus
+  `<Ctx.Provider value>`); a byte transformation's body is not entered (its arguments are
+  traced), which keeps `toArrayBuffer`'s parameter from joining every caller in the tree.
+  Runtime ~15 s for the file (was ~10 s). Fixtures: reference violations (dynamic-import
+  destructure, namespace destructure, `.call`, `.apply`, element access, `.bind` as a value,
+  const alias, spread, a wrapper as a value); key-independent clause (ternary, const over an
+  aliased builder in `&&`, team/personal builders in two branches, a local helper choosing the
+  builder — each with a personal key); unclassifiable (then/map callbacks, object method,
+  object arrow, class method, property-held key, callback-param key, array holder filled by
+  push, Map cache, class field via `this`, a library store); React state setter → team;
+  controls: strict reader, personal-AAD reader, T15 alias following (import-renamed + const
+  alias builder passes), the `decryptTeamEntry` wrapper at strict AAD, the reviewed-list drift
+  in both directions. T15: the ternary cell renamed for what it tests ("a ternary at the
+  decrypt site over an aliased builder"), the missing-AAD cell for its spellings
+  ("import-renamed decrypt and a destructuring-renamed getter"), plus the alias-following
+  control. All 18 reviewer harness cases and the 4 probe2 cases caught (scratch run). Red on
+  the scratch copy, one rule at a time (cells red): value-reference rule → the 7 value cells;
+  spread → spread; element access → element access; key-independent clause → its 4 cells;
+  unclassified reporting off → the 10 unclassifiable cells + drift control; callback params
+  traced as no-arg → the 5 callback/method cells + drift control; property write → property-held;
+  mutating method → array holder; callback-call → callback-param; `this` → class field;
+  library-call → library store; React setter → React state; const-alias following → T15
+  control; stale / unreviewed drift → drift control; wrapper derivation and alias resolution
+  are foundational (17 / 35 cells incl. the tree cells). Tree mutations: a team reader's decrypt
+  moved into a `.then` callback → the traced-or-reviewed cell and the reader-set cell; a
+  personal reader given a team-builder ternary AAD → the strict-shape cell.
+- D78 (round 4 testing T14 Minor) — `team-history-restore.test.ts`: aadVersion undefined / null /
+  "1" on a row sealed at entry AAD → `HistoryRowLegacyError`, no key lookup; control: numeric 1
+  on the same row restores (one key lookup). Red on the scratch copy: the typeof check dropped →
+  the "1" cell (undefined and null are refused by `>= 1` alone); the predicate as
+  `aadVersion !== 0` → all three.
+- D79 (round 4 functionality N-R4-2 Minor) — `entry-history-section`: a team history row failing
+  `isRestorableHistoryRow` (from the list response's `aadVersion`) shows a disabled Restore
+  button described (`aria-describedby`) by a visible muted label `restoreVersionTooOld` ("Too
+  old to restore." / 「古すぎるため復元できません。」); the disabled style is the Button
+  base class (`disabled:opacity-50 disabled:pointer-events-none`). Personal rows are unchanged
+  (their restore does not refuse legacy rows). The `teamRestoreInit` refusal stays for a row GET
+  that disagrees with the list. Tests (role/label queries): team rows at aadVersion 0 and
+  undefined → disabled, accessible description, label visible, click → no reprompt, no
+  dialog; control aadVersion 1 → enabled, no description, dialog opens; control: a personal row
+  at 0 stays enabled. Red on the scratch copy: gate removed → the two disabled cells; gate not
+  scoped to teams → the personal control.

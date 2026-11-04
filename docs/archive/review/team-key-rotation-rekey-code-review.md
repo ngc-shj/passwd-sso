@@ -205,3 +205,48 @@ re-seal launders a substituted legacy ciphertext (S-R3-2).
 - T11 + S-R3-1: guard rewritten to resolve bindings and to require a positive strict-AAD form at
   every team decrypt, reader set derived from code.
 - T12, F-R3-1: fixed as recommended.
+
+---
+
+# Review round: 4
+Date: 2026-11-04
+Scope: `7acbe0dd5..HEAD` (commit 94e6a6f30).
+
+## Changes from Previous Round
+S-R3-2 (restore refusal), T12 and F-R3-1 resolved. The guard's AAD-shape clauses are resolved;
+its team-decrypt classification fails open (third escape of this gate). The re-key pass re-seals
+legacy history rows, making the restore refusal transient.
+
+## Functionality Findings
+- N-R4-1 [Major, new] The re-key pass opens aadVersion-0 history rows without AAD and writes them
+  at aadVersion 1; a row restore refused becomes restorable (two-step laundering).
+- N-R4-2 [Minor, new] Restore is offered for aadVersion<1 team rows; the refusal comes after
+  reprompt and confirm.
+
+## Security Findings
+- S-R4-1 [Minor, continuing from S-R3-1] Guard classification fails open on untraced keys and
+  callees (10 of 18 no-AAD fixtures uncaught: then/map callbacks, method/class/property-arrow
+  wrappers, destructured dynamic import, namespace destructure, `.call`, spread). Third escape:
+  change the mechanism to fail closed.
+- S-R4-2 [Minor, new] Docs present the restore refusal as binding without the pass caveat (same
+  root as N-R4-1).
+
+## Testing Findings
+- T13 [Major, new, RT7/R42] Same fail-open classification as S-R4-1 (property-held key, callback
+  parameter, Map cache).
+- T14 [Minor, new, RT1] Malformed `aadVersion` labels not tested in the restore refusal.
+- T15 [Minor, new, RT7] Two guard cells named for mechanisms they do not test.
+
+## Recurring Issue Check
+- Functionality: partial fix of a bypass class (restore closed, pass not) → N-R4-1.
+- Security: R42 continuing (S-R4-1); R43: no widening vs round 3.
+- Testing: RT7/R42 → T13; RT1 → T14; RT7 → T15.
+
+## Resolution Status (round 4)
+- N-R4-1 + S-R4-2: the pass retains aadVersion-0 history rows (client) and the route refuses
+  re-keying them (server); docs updated. Chosen over a docs-only fix so the restore refusal is
+  binding.
+- T13 + S-R4-1: mechanism changed to fail closed — declaration-side enumeration of every
+  decrypt reference, key-independent strict-AAD clause, untraceable keys unclassifiable unless
+  in an exact reviewed list.
+- T14, T15, N-R4-2: fixed.

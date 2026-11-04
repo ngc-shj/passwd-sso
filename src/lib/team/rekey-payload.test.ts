@@ -3,6 +3,7 @@ import {
   decryptTeamEntry,
   deriveItemCekWrapKey,
   deriveItemEncryptionKey,
+  encryptTeamEntry,
   unwrapItemKey,
   unwrapTeamAttachmentCek,
 } from "@/lib/crypto/crypto-team";
@@ -27,6 +28,7 @@ const rawRefs = vi.hoisted(() => ({
   refs: [] as Uint8Array[],
   deriveCalls: 0,
   failDeriveAt: null as number | null,
+  decryptCalls: 0,
 }));
 vi.mock("@/lib/crypto/crypto-team", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/lib/crypto/crypto-team")>();
@@ -38,6 +40,10 @@ vi.mock("@/lib/crypto/crypto-team", async (importOriginal) => {
     };
   return {
     ...real,
+    decryptTeamEntry: (...args: Parameters<typeof real.decryptTeamEntry>) => {
+      rawRefs.decryptCalls += 1;
+      return real.decryptTeamEntry(...args);
+    },
     unwrapItemKey: record(real.unwrapItemKey),
     unwrapTeamAttachmentCek: record(real.unwrapTeamAttachmentCek),
     deriveItemEncryptionKey: async (raw: Uint8Array) => {
@@ -180,6 +186,61 @@ describe("buildEntryRekeyPayload", () => {
     const result = payloadOf(await buildEntryRekeyPayload(TEAM_ID, f.data, makeResolver(f.keys)));
 
     expect(result.body.history.map((h) => h.id)).toEqual(["h-v0"]);
+  });
+
+  // N-R4-1: re-sealing a row sealed without AAD at AAD 1 would make it a row
+  // the history restore accepts. The row below is a no-AAD ciphertext under
+  // the live ItemKey, so any decrypt that drops the AAD would open it.
+  it.each([
+    ["0", 0],
+    ["undefined", undefined],
+    ["null", null],
+    ['"1" (a string)', "1"],
+  ])("retains a history row labelled aadVersion %s without decrypting it", async (_label, aadVersion) => {
+    const f = await baseFixture();
+    const sealed = await sealHistoryRow({ id: "h-legacy", entryId: ENTRY, teamKey: f.keys.get(2)!, teamKeyVersion: 2, itemKey: f.liveItemKey, itemKeyVersion: 2, itemKeyId: f.liveId, blob: "x" });
+    const noAad = await encryptTeamEntry("legacy", await deriveItemEncryptionKey(f.liveItemKey));
+    f.data.history = [{
+      ...sealed,
+      encryptedBlob: noAad.ciphertext,
+      blobIv: noAad.iv,
+      blobAuthTag: noAad.authTag,
+      aadVersion: aadVersion as number,
+    }];
+    rawRefs.decryptCalls = 0;
+
+    const result = payloadOf(await buildEntryRekeyPayload(TEAM_ID, f.data, makeResolver(f.keys)));
+
+    expect(result.body.history).toEqual([]);
+    expect(result.body.retainHistoryIds).toEqual(["h-legacy"]);
+    expect(result.retained).toEqual([{ id: "h-legacy", teamKeyVersion: 2 }]);
+    // The live blob and overview only.
+    expect(rawRefs.decryptCalls).toBe(2);
+  });
+
+  it("control: the same row at aadVersion 1, sealed at entry AAD, is re-keyed", async () => {
+    const f = await baseFixture();
+    f.data.history = [
+      await sealHistoryRow({ id: "h-bound", entryId: ENTRY, teamKey: f.keys.get(2)!, teamKeyVersion: 2, itemKey: f.liveItemKey, itemKeyVersion: 2, itemKeyId: f.liveId, blob: "bound" }),
+    ];
+    rawRefs.decryptCalls = 0;
+
+    const result = payloadOf(await buildEntryRekeyPayload(TEAM_ID, f.data, makeResolver(f.keys)));
+
+    expect(result.body.history.map((h) => h.id)).toEqual(["h-bound"]);
+    expect(result.body.retainHistoryIds).toEqual([]);
+    expect(rawRefs.decryptCalls).toBe(3);
+  });
+
+  it("retains (not re-keys) a no-AAD ciphertext labelled aadVersion 1: history rows open at strict AAD", async () => {
+    const f = await baseFixture();
+    const sealed = await sealHistoryRow({ id: "h-mislabelled", entryId: ENTRY, teamKey: f.keys.get(2)!, teamKeyVersion: 2, itemKey: f.liveItemKey, itemKeyVersion: 2, itemKeyId: f.liveId, blob: "x" });
+    const noAad = await encryptTeamEntry("legacy", await deriveItemEncryptionKey(f.liveItemKey));
+    f.data.history = [{ ...sealed, encryptedBlob: noAad.ciphertext, blobIv: noAad.iv, blobAuthTag: noAad.authTag }];
+
+    const result = payloadOf(await buildEntryRekeyPayload(TEAM_ID, f.data, makeResolver(f.keys)));
+
+    expect(result.body.retainHistoryIds).toEqual(["h-mislabelled"]);
   });
 
   it("retains history rows at a key_invalid version and still re-keys the entry", async () => {

@@ -97,7 +97,7 @@ type Seeded = {
   itemKeyId: string;
   plaintext: { blob: string; overview: string };
   /** History rows by role, with the plaintext each holds. */
-  history: { sameKey: string; aad0: string; v0: string; retained: string | null };
+  history: { sameKey: string; aad0: string | null; v0: string; retained: string | null };
   historyPlain: Map<string, string>;
   attachment: { attId: string; plaintext: string };
 };
@@ -264,11 +264,12 @@ describe("team entry re-key — real-DB integration", () => {
   /**
    * One pending entry (ItemKey created at team key 2, wrapped under 3) with
    * history the admin can open — a row under its own wrap of the live
-   * ItemKey, the same at aadVersion 0, a v0 row under team key 2 — and,
-   * optionally, a row under another ItemKey wrapped with team key 1, which the
-   * admin does not hold (retained). One mode-2 attachment under the ItemKey.
+   * ItemKey, a v0 row under team key 2 — and, optionally, a row under another
+   * ItemKey wrapped with team key 1, which the admin does not hold (retained),
+   * and a row under the live ItemKey sealed without AAD (aadVersion 0, which
+   * the pass retains unopened: N-R4-1). One mode-2 attachment under the ItemKey.
    */
-  async function seedEntry(opts: { retained?: boolean } = {}): Promise<Seeded> {
+  async function seedEntry(opts: { retained?: boolean; legacy?: boolean } = {}): Promise<Seeded> {
     const team = await seedTeam();
     const entryId = randomUUID();
     const itemKey = generateItemKey();
@@ -303,11 +304,14 @@ describe("team entry re-key — real-DB integration", () => {
       plaintext: sameText, contentKey, aadVersion: 1, teamKeyVersion: 2, itemKeyVersion: 1, wrap: oldWrap, itemKeyId,
     });
     historyPlain.set(sameKey, sameText);
-    const aad0Text = `history aad0 ${randomUUID()}`;
-    const aad0 = await insertHistory(team, entryId, {
-      plaintext: aad0Text, contentKey, aadVersion: 0, teamKeyVersion: 2, itemKeyVersion: 1, wrap: oldWrap, itemKeyId,
-    });
-    historyPlain.set(aad0, aad0Text);
+    let aad0: string | null = null;
+    if (opts.legacy) {
+      const aad0Text = `history aad0 ${randomUUID()}`;
+      aad0 = await insertHistory(team, entryId, {
+        plaintext: aad0Text, contentKey, aadVersion: 0, teamKeyVersion: 2, itemKeyVersion: 1, wrap: oldWrap, itemKeyId,
+      });
+      historyPlain.set(aad0, aad0Text);
+    }
     const v0Text = `history v0 ${randomUUID()}`;
     const v0 = await insertHistory(team, entryId, {
       plaintext: v0Text, contentKey: await teamKeyOf(team, 2), aadVersion: 1, teamKeyVersion: 2, itemKeyVersion: 0, wrap: null, itemKeyId: null,
@@ -393,10 +397,16 @@ describe("team entry re-key — real-DB integration", () => {
   /**
    * Build the re-key POST as the pass does: GET, open every row with the
    * ItemKeys the actor holds (own wrap, else trial with the live ItemKey;
-   * a v0 row with the team key), re-encrypt under a new ItemKey wrapped
-   * under the current team key; rows nothing opens are retained.
+   * a v0 row with the team key) at strict entry AAD, re-encrypt under a new
+   * ItemKey wrapped under the current team key; rows nothing opens, and rows
+   * below aadVersion 1 (never opened), are retained. `rekeyLegacy` is a
+   * non-conforming client that opens an aadVersion-0 row without AAD and
+   * re-keys it anyway.
    */
-  async function buildRekey(s: Seeded): Promise<{ body: RekeyBody; newItemKey: Uint8Array; data: RekeyData }> {
+  async function buildRekey(
+    s: Seeded,
+    opts: { rekeyLegacy?: boolean } = {},
+  ): Promise<{ body: RekeyBody; newItemKey: Uint8Array; data: RekeyData }> {
     const data = await rekeyData(s);
     const { entry } = data;
     const live = await openWrap(s, entry);
@@ -420,6 +430,11 @@ describe("team entry re-key — real-DB integration", () => {
     const history: RekeyBody["history"] = [];
     const retainHistoryIds: string[] = [];
     for (const h of data.history) {
+      const legacy = !(typeof h.aadVersion === "number" && h.aadVersion >= 1);
+      if (legacy && !opts.rekeyLegacy) {
+        retainHistoryIds.push(h.id);
+        continue;
+      }
       const keys: CryptoKey[] = [];
       if (h.itemKeyVersion === 0) {
         if (s.team.held.has(Math.max(1, h.teamKeyVersion))) keys.push(await teamKeyOf(s.team, Math.max(1, h.teamKeyVersion)));
@@ -436,7 +451,7 @@ describe("team entry re-key — real-DB integration", () => {
         try {
           plain = await decryptData(
             { ciphertext: h.encryptedBlob, iv: h.blobIv, authTag: h.blobAuthTag },
-            key, entryAad(teamId, s.entryId, "blob", h.aadVersion, h.itemKeyVersion),
+            key, legacy ? undefined : buildTeamEntryAAD(teamId, s.entryId, "blob", h.itemKeyVersion),
           );
           break;
         } catch {
@@ -763,8 +778,8 @@ describe("team entry re-key — real-DB integration", () => {
     expect(await decryptData(overviewCt, newKey, overviewAad)).toBe(s.plaintext.overview);
     await expect(decryptData(overviewCt, oldKey, overviewAad)).rejects.toThrow();
 
-    // Every history row — incl. the one seeded at aadVersion 0 and the v0 row — is under the new ItemKey now.
-    expect(after.history).toHaveLength(3);
+    // Every history row — incl. the v0 row — is under the new ItemKey now.
+    expect(after.history).toHaveLength(2);
     for (const h of after.history) {
       expect(h).toMatchObject({ aadVersion: 1, teamKeyVersion: 3, itemKeyVersion: 2, itemKeyId: after.entry.itemKeyId });
       const own = await unwrapItemKey(
@@ -798,7 +813,7 @@ describe("team entry re-key — real-DB integration", () => {
     expect(newId).not.toBeNull();
     expect(newId).not.toBe(s.itemKeyId);
     const after = await historyIds(s.entryId);
-    for (const id of [s.history.sameKey, s.history.aad0, s.history.v0]) expect(after.get(id)).toBe(newId);
+    for (const id of [s.history.sameKey, s.history.v0]) expect(after.get(id)).toBe(newId);
     expect(after.get(retainedId)).toBe(before.get(retainedId));
     expect(await attachmentKeyId(s.attachment.attId)).toBe(newId);
 
@@ -1176,7 +1191,7 @@ describe("team entry re-key — real-DB integration", () => {
     const overview = await encryptData(
       s.plaintext.overview, newKey, buildTeamEntryAAD(s.team.teamId, s.entryId, "overview", body.newItemKeyVersion),
     );
-    expect((await restore(s, s.history.aad0, overview)).status).toBe(200);
+    expect((await restore(s, s.history.sameKey, overview)).status).toBe(200);
 
     const row = await entryRow(s.entryId);
     expect(row.item_key_team_key_version).toBe(3);
@@ -1186,8 +1201,51 @@ describe("team entry re-key — real-DB integration", () => {
       { ciphertext: data.entry.encryptedBlob, iv: data.entry.blobIv, authTag: data.entry.blobAuthTag },
       newKey,
       buildTeamEntryAAD(s.team.teamId, s.entryId, "blob", body.newItemKeyVersion),
-    )).toBe(s.historyPlain.get(s.history.aad0));
+    )).toBe(s.historyPlain.get(s.history.sameKey));
     expect((await rekeyList(s)).pendingCount).toBe(0);
+  });
+
+  // ── N-R4-1: an aadVersion-0 history row stays unrestorable across the pass ──
+
+  it("N-R4-1: the pass retains an aadVersion-0 history row unopened (byte-identical, counted in retainedHistoryCount), and restoring it after the pass still → 409 HISTORY_ROW_LEGACY", async () => {
+    const s = await seedEntry({ legacy: true });
+    const aad0 = s.history.aad0 ?? "";
+    const before = await ctx.su.pool.query(`SELECT * FROM team_password_entry_histories WHERE id = $1::uuid`, [aad0]);
+    const { body, newItemKey } = await buildRekey(s);
+    expect(body.retainHistoryIds).toEqual([aad0]);
+    expect(body.history.map((h) => h.id).sort()).toEqual([s.history.sameKey, s.history.v0].sort());
+    expect((await rekey(s, body)).status).toBe(200);
+
+    const after = await ctx.su.pool.query(`SELECT * FROM team_password_entry_histories WHERE id = $1::uuid`, [aad0]);
+    expect(after.rows).toEqual(before.rows);
+    expect(after.rows[0].aad_version).toBe(0);
+    expect(await rekeyList(s)).toMatchObject({ pendingCount: 0, retainedHistoryCount: 1 });
+    expect(await rowsOffCurrentVersion(s.team.teamId)).toEqual([aad0]);
+
+    // The restore the pass would have made acceptable, re-sealed at AAD 1 under the new ItemKey.
+    const newKey = await deriveItemEncryptionKey(newItemKey);
+    const v = body.newItemKeyVersion;
+    const entryBefore = await snapshotRows(s.entryId);
+    const res = await restoreRoute(
+      jsonRequest(`http://localhost/api/teams/${s.team.teamId}/passwords/${s.entryId}/history/${aad0}/restore`, "POST", {
+        encryptedBlob: await encryptData(s.historyPlain.get(aad0) ?? "", newKey, buildTeamEntryAAD(s.team.teamId, s.entryId, "blob", v)),
+        encryptedOverview: await encryptData(s.plaintext.overview, newKey, buildTeamEntryAAD(s.team.teamId, s.entryId, "overview", v)),
+        snapshotBlobIv: after.rows[0].blob_iv,
+      }),
+      { params: Promise.resolve({ teamId: s.team.teamId, id: s.entryId, historyId: aad0 }) },
+    );
+    expect(await errorOf(res)).toEqual({ status: 409, error: "HISTORY_ROW_LEGACY" });
+    expect(await snapshotRows(s.entryId)).toEqual(entryBefore);
+  });
+
+  it("REKEY_HISTORY_LEGACY: a body re-keying an aadVersion-0 history row → 409, nothing written (control: the row retained → 200)", async () => {
+    const s = await seedEntry({ legacy: true });
+    const { body: laundering } = await buildRekey(s, { rekeyLegacy: true });
+    expect(laundering.history.map((h) => h.id)).toContain(s.history.aad0);
+    expect(laundering.retainHistoryIds).toEqual([]);
+    await expectRefusedUnchanged(s, laundering, { status: 409, error: "REKEY_HISTORY_LEGACY" });
+    const { body } = await buildRekey(s);
+    expect((await rekey(s, body)).status).toBe(200);
   });
 
   // ── assertEntryRekeyConsistent, red-proved on seeded inconsistent rows ───

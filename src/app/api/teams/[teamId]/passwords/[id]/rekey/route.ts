@@ -156,8 +156,9 @@ async function handleGET(req: NextRequest, { params }: RouteContext) {
 // with the ItemKeys it holds and re-encrypted them under a new ItemKey,
 // wrapped under the current team key (plan C2). `snapshot` names the entry
 // state it read; each history row and attachment names the ciphertext IV it
-// read. History rows it could not open are listed in `retainHistoryIds` and
-// left as they are.
+// read. History rows it could not open, and rows sealed without AAD
+// (aadVersion below 1, never re-keyed), are listed in `retainHistoryIds` and left as
+// they are.
 const rekeyHistorySchema = z.object({
   id: z.string().uuid(),
   snapshotBlobIv: hexIv,
@@ -352,9 +353,9 @@ async function handlePOST(req: NextRequest, { params }: RouteContext) {
         // The rows the body must name exactly, locked so a trim, purge or
         // upload cannot change the set between this check and the writes.
         const lockedHistory = await tx.$queryRaw<
-          { id: string; team_key_version: number; item_key_version: number }[]
+          { id: string; team_key_version: number; item_key_version: number; aad_version: number }[]
         >`
-          SELECT id, team_key_version, item_key_version
+          SELECT id, team_key_version, item_key_version, aad_version
             FROM team_password_entry_histories
            WHERE entry_id = ${entryId}::uuid
            ORDER BY id
@@ -370,6 +371,15 @@ async function handlePOST(req: NextRequest, { params }: RouteContext) {
         const namedHistory = [...body.history.map((h) => h.id), ...retainHistoryIds];
         if (!sameIdSet(lockedHistory.map((h) => h.id), namedHistory)) {
           throw new RekeyRefusal(API_ERROR.REKEY_SET_MISMATCH);
+        }
+        // A row sealed without AAD is retained, never re-keyed: nothing binds
+        // it to this entry, so re-sealing it at AAD 1 would make a substituted
+        // ciphertext one the history restore accepts (HISTORY_ROW_LEGACY).
+        const legacyHistoryIds = new Set(
+          lockedHistory.filter((h) => !(h.aad_version >= 1)).map((h) => h.id.toLowerCase()),
+        );
+        if (body.history.some((h) => legacyHistoryIds.has(h.id.toLowerCase()))) {
+          throw new RekeyRefusal(API_ERROR.REKEY_HISTORY_LEGACY);
         }
         // Checked before the attachment set: a legacy attachment has no CEK
         // the client could have re-wrapped, so it is never in the body's set.

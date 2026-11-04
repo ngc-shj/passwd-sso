@@ -113,9 +113,9 @@ const LOCKED = {
   item_key_version_high_water: 3,
 };
 const LOCKED_HISTORY = [
-  { id: H1, team_key_version: 1, item_key_version: 1 },
-  { id: H2, team_key_version: 1, item_key_version: 1 },
-  { id: H_RETAINED, team_key_version: 0, item_key_version: 0 },
+  { id: H1, team_key_version: 1, item_key_version: 1, aad_version: 1 },
+  { id: H2, team_key_version: 1, item_key_version: 1, aad_version: 1 },
+  { id: H_RETAINED, team_key_version: 0, item_key_version: 0, aad_version: 1 },
 ];
 const LOCKED_ATTACHMENTS = [{ id: ATT, encryption_mode: 2 }];
 
@@ -406,7 +406,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/rekey", () => {
 
   it(`keeps the audit metadata under METADATA_MAX_BYTES with ${REKEY_HISTORY_MAX} retained rows`, async () => {
     const ids = Array.from({ length: REKEY_HISTORY_MAX }, (_, i) => `55555555-5555-4555-8555-${String(i).padStart(12, "0")}`);
-    lockedHistory = ids.map((id) => ({ id, team_key_version: 10_000, item_key_version: 10_000 }));
+    lockedHistory = ids.map((id) => ({ id, team_key_version: 10_000, item_key_version: 10_000, aad_version: 1 }));
     const { res } = await rekey(validBody({ history: [], retainHistoryIds: ids }));
     expect(res.status).toBe(200);
     const metadata = mockLogAuditInTx.mock.calls[0][2].metadata;
@@ -549,6 +549,30 @@ describe("POST /api/teams/[teamId]/passwords/[id]/rekey", () => {
   ])("409 REKEY_SET_MISMATCH when the body %s", async (_label, change) => {
     await expectRefused(validBody(change), 409, "REKEY_SET_MISMATCH");
     expect(txMock.teamPasswordEntryHistory.updateMany).not.toHaveBeenCalled();
+  });
+
+  describe("REKEY_HISTORY_LEGACY: a history row sealed without AAD (N-R4-1)", () => {
+    const legacyH2 = () => {
+      lockedHistory = LOCKED_HISTORY.map((h) => (h.id === H2 ? { ...h, aad_version: 0 } : { ...h }));
+    };
+
+    it("409 when the body re-keys an aadVersion-0 row, nothing written", async () => {
+      legacyH2();
+      await expectRefused(validBody(), 409, "REKEY_HISTORY_LEGACY");
+      expect(txMock.teamPasswordEntryHistory.updateMany).not.toHaveBeenCalled();
+      expect(txMock.attachment.updateMany).not.toHaveBeenCalled();
+    });
+
+    it("control: the same row named in retainHistoryIds re-keys the rest (200)", async () => {
+      legacyH2();
+      const { res } = await rekey(validBody({
+        history: [{ id: H1, snapshotBlobIv: iv("1"), encryptedBlob: field("2") }],
+        retainHistoryIds: [H2, H_RETAINED],
+      }));
+      expect(res.status).toBe(200);
+      expect(txMock.teamPasswordEntryHistory.updateMany).toHaveBeenCalledTimes(1);
+      expect(txMock.teamPasswordEntryHistory.updateMany.mock.calls[0][0].where.id).toBe(H1);
+    });
   });
 
   it.each([

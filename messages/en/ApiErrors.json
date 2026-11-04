@@ -171,6 +171,7 @@
   "teamKeyVersionChanged": "The team key changed while this was in progress. Please refresh and try again.",
   "rekeySnapshotMismatch": "The entry changed since it was loaded. Please refresh and try again.",
   "rekeySetMismatch": "The entry's history or attachments changed since they were loaded. Please refresh and try again.",
+  "rekeyHistoryLegacy": "A history version of this entry is too old to re-encrypt. Reload the page and try again.",
   "rekeyAttachmentsUnmigrated": "This entry has attachments in an older format that must be converted first.",
   "rekeyPostcheckFailed": "The entry could not be re-encrypted consistently. Nothing was changed.",
   "teamRotateCarryInvalid": "An entry was reported as unreadable with a key you do not hold. Please refresh and try again.",

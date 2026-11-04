@@ -16,11 +16,11 @@ import type { EncryptedData } from "@/lib/crypto/crypto-client";
 const ENTRY = "e1";
 
 /** An itemKeyVersion-0 row (TeamKey-sealed) carrying `blob` under the given aadVersion label. */
-function legacyRow(blob: EncryptedData, aadVersion: number) {
+function legacyRow(blob: EncryptedData, aadVersion: unknown) {
   return {
     id: "h0", entryType: ENTRY_TYPE.LOGIN,
     encryptedBlob: blob.ciphertext, blobIv: blob.iv, blobAuthTag: blob.authTag,
-    aadVersion, teamKeyVersion: 1, itemKeyVersion: 0,
+    aadVersion: aadVersion as number, teamKeyVersion: 1, itemKeyVersion: 0,
     encryptedItemKey: null, itemKeyIv: null, itemKeyAuthTag: null, itemKeyId: null,
   };
 }
@@ -67,6 +67,41 @@ describe("buildTeamHistoryRestoreBody", () => {
       buildTeamHistoryRestoreBody(TEAM_ID, ENTRY, legacyRow(blob, 0), getEntryDecryptionKey),
     ).rejects.toBeInstanceOf(HistoryRowLegacyError);
     expect(getEntryDecryptionKey).not.toHaveBeenCalled();
+  });
+
+  // T14: a malformed label (a malicious or broken server) is refused like 0.
+  // The blob is sealed at entry AAD, so without the refusal each would restore.
+  describe("a malformed aadVersion label", () => {
+    async function aadBoundBlob(teamKey: CryptoKey) {
+      const { fullBlob } = buildTeamEntryPayload({
+        entryType: ENTRY_TYPE.LOGIN, title: "Bound", notes: "", tagNames: [], username: "u", password: "p", url: "",
+      });
+      return encryptData(fullBlob, teamKey, buildTeamEntryAAD(TEAM_ID, ENTRY, VAULT_TYPE.BLOB, 0));
+    }
+
+    it.each([
+      ["undefined", undefined],
+      ["null", null],
+      ['"1" (a string)', "1"],
+    ])("aadVersion %s → HistoryRowLegacyError with no key lookup", async (_label, aadVersion) => {
+      const teamKey = await makeTeamKey();
+      const getEntryDecryptionKey = vi.fn(async () => teamKey);
+
+      await expect(
+        buildTeamHistoryRestoreBody(TEAM_ID, ENTRY, legacyRow(await aadBoundBlob(teamKey), aadVersion), getEntryDecryptionKey),
+      ).rejects.toBeInstanceOf(HistoryRowLegacyError);
+      expect(getEntryDecryptionKey).not.toHaveBeenCalled();
+    });
+
+    it("control: numeric aadVersion 1 on the same row restores", async () => {
+      const teamKey = await makeTeamKey();
+      const getEntryDecryptionKey = vi.fn(async () => teamKey);
+
+      const body = await buildTeamHistoryRestoreBody(TEAM_ID, ENTRY, legacyRow(await aadBoundBlob(teamKey), 1), getEntryDecryptionKey);
+
+      expect(getEntryDecryptionKey).toHaveBeenCalledTimes(1);
+      expect(body.encryptedBlob.ciphertext).not.toBe("");
+    });
   });
 
   it("opens the row at strict AAD: a no-AAD ciphertext relabelled aadVersion 1 is not re-sealed", async () => {
