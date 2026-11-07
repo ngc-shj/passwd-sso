@@ -801,3 +801,23 @@
   AAD, which fails, so `history` is empty and it is retained — never opened strictly and
   re-keyed. Red on the scratch copy: legacy path given a strict-AAD fallback → exactly this
   cell; predicate dropped → this cell with the legacy cells.
+- D83 (round 6) — F-R6-1: the A8 E2E re-key body's history items carry `aadVersion: 1`, the
+  field D81 made required in the strict schema. F-R6-2: unit cells pin that a transient team-key
+  failure on a legacy v0 history row stops the pass (control: not_available → retained);
+  red-proved on a scratch copy by mapping transient to an empty key list. S-R6-1: the
+  `resealLegacyHistoryRow` JSDoc and the guard header say only the helper's NAME is confined, and
+  the header states the write-side residual (a new team writer sealing without AAD is not
+  detected) under the same strict-helper follow-up.
+- D84 (round 6 testing) — T19: four exact fixture cells pin the surviving rule-(b)/(a)
+  sub-checks — destructured AAD (b1, b11), `||=` / `??=` on a `let` AAD (b10), a two-level
+  forwarding wrapper that joins the decrypt set only on the fixed point's second pass (b9), and a
+  history-view fixture calling `teamEntryAadFor` from `handleRestore` as well as `handleView`
+  (handleView-only rule). Red-proved on scratch mutants: each mutant fails only its own cell.
+  T20: the guard header states that the `encryptData` check for `teamEntryAadFor` and the
+  `aadVersion`-read check match spellings, that rule (b)'s trigger follows only its listed forms,
+  and that untraced AAD flows (an AAD-only forwarding parameter, an object / array / Map member)
+  fall into the same residual and follow-up. F-R6-1 verification: the local production-build E2E
+  re-run was blocked (a scratch build could not resolve Next.js through a symlinked
+  `node_modules`, and a read-only inspection of the earlier D37 build was refused by the
+  permission system, so it was not repeated); the spec change adds one field the strict schema
+  requires, and the CI e2e job runs this spec on a production build.

@@ -108,6 +108,7 @@ test.describe("request bodies above the proxy's 10 MiB default reach the route w
         id: randomUUID(),
         snapshotBlobIv: hex(12),
         encryptedBlob: field("a".repeat(CIPHERTEXT_MAX)),
+        aadVersion: 1,
       })),
       retainHistoryIds: [],
       attachmentCekRewraps: [],

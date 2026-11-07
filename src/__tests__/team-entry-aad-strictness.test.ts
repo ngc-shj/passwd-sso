@@ -9,8 +9,9 @@
  * confined to the paths that UPGRADE such a live entry to AAD 1 (rotation,
  * re-key) and the history VIEW (a server-held row that is only displayed).
  * History RESTORE refuses a legacy row (S-R3-2); the re-key pass re-seals a
- * legacy history row under the new ItemKey still without AAD, through the one
- * confined `resealLegacyHistoryRow` (S-R5-2), so the row stays unrestorable.
+ * legacy history row under the new ItemKey still without AAD, through
+ * `resealLegacyHistoryRow` (S-R5-2; its name is confined, see below), so the
+ * row stays unrestorable.
  *
  * What this guard PROVES. Each rule resolves bindings through a ts-morph
  * Program built from the tree's tsconfig (`@/` aliases, re-exports, renamed
@@ -52,6 +53,19 @@
  * That residual is covered by each reader's own refusal cells (a no-AAD
  * ciphertext labelled aadVersion 0 is refused) and is the subject of a
  * follow-up: route every team entry decrypt through one strict helper.
+ * Three checks match SPELLINGS, not bindings: "`teamEntryAadFor` never
+ * supplies an encryptData AAD" looks for a call whose callee is spelled
+ * `encryptData`, and "the builder's arguments never read `aadVersion`" looks
+ * for an identifier or string element access spelled `aadVersion`. Rule (b)'s
+ * trigger ("the AAD names the builder") follows only the forms listed under
+ * (b); an AAD that flows through anything else — a parameter that forwards
+ * only the AAD (not key and AAD), an object / array / Map member — is not
+ * traced. Those untraced flows fall into the same residual as above and the
+ * same strict-helper follow-up.
+ * The write side has the matching residual: rule (a) confines the NAME of
+ * `resealLegacyHistoryRow` and keeps `teamEntryAadFor` out of `encryptData`,
+ * but a new team writer that seals with NO AAD is not detected either (strict
+ * readers would then refuse its entry); the same follow-up covers it.
  * iOS (Swift) is outside this gate; its refusal cells pin the same rule.
  */
 import { beforeAll, describe, expect, it } from "vitest";
@@ -711,6 +725,19 @@ export const seal = (k: CryptoKey) => encryptData("p", k, teamEntryAadFor("t", "
     expect(outcome(r)).toEqual({ ...CLEAN, teamAad: [], confinement: patterns.map((p) => expect.stringMatching(p)) });
   });
 
+  it(`(a) a history view calling ${HELPER} from handleRestore as well as handleView reports the handleRestore site`, () => {
+    const r = analyzeFixture({
+      [HISTORY_VIEW]: `import { teamEntryAadFor } from "@/lib/team/team-key-resolution";
+export function EntryHistorySection() {
+  const handleView = async () => teamEntryAadFor("t", "e", "blob", 1, 1);
+  const handleRestore = async () => teamEntryAadFor("t", "e", "blob", 1, 0);
+  return [handleView, handleRestore];
+}`,
+    });
+    expect({ ...outcome(r), sites: r.historyViewHelperSites })
+      .toEqual({ ...CLEAN, teamAad: [], sites: [HISTORY_VIEW_FN, "handleRestore"] });
+  });
+
   // ── (b) the strict AAD shape, whatever the key ──
 
   it.each([
@@ -724,10 +751,26 @@ export const seal = (k: CryptoKey) => encryptData("p", k, teamEntryAadFor("t", "
     ["a hoisted conditional at the decrypt site over a const-bound builder", `export async function r(row: { aadVersion: number }) { const { encryptionKey } = useVault(); const aad = buildTeamEntryAAD("t", "e", "blob", 1); return decryptData({}, encryptionKey, row.aadVersion < 1 ? undefined : aad); }`, /^src\/fixture\/reader\.ts:6 AAD is a ConditionalExpression/],
     ["a let binding (reassignable)", `export async function r() { const { encryptionKey } = useVault(); let aad = buildTeamEntryAAD("t", "e", "blob", 1); return decryptData({}, encryptionKey, aad); }`, /^src\/fixture\/reader\.ts:6 AAD binding is not const$/],
     ["a let assigned the builder after its declaration", `export async function r(row: { aadVersion: number }) { const { encryptionKey } = useVault(); let aad: Uint8Array | undefined; if (row.aadVersion) aad = buildTeamEntryAAD("t", "e", "blob", 1); return decryptData({}, encryptionKey, aad); }`, /^src\/fixture\/reader\.ts:6 AAD binding is not const$/],
-    ["a conditional AAD through a named local wrapper forwarding key and AAD", `async function openWith(k: CryptoKey, aad?: Uint8Array) { return decryptData({}, k, aad); }\nexport async function r(row: { aadVersion: number }) { const { encryptionKey } = useVault(); return openWith(encryptionKey, row.aadVersion ? buildTeamEntryAAD("t", "e", "blob", 1) : undefined); }`, /^src\/fixture\/reader\.ts:7 AAD is a ConditionalExpression/],
+    ["a destructured AAD bound to a conditional builder", `export async function r(row: { aadVersion: number }) { const { encryptionKey } = useVault(); const { aad } = { aad: row.aadVersion ? buildTeamEntryAAD("t", "e", "blob", 1) : undefined }; return decryptData({}, encryptionKey, aad); }`, /^src\/fixture\/reader\.ts:6 AAD identifier is not a variable bound to the builder$/],
+    ["a let given the builder by `||=`", `export async function r() { const { encryptionKey } = useVault(); let aad: Uint8Array | undefined; aad ||= buildTeamEntryAAD("t", "e", "blob", 1); return decryptData({}, encryptionKey, aad); }`, /^src\/fixture\/reader\.ts:6 AAD binding is not const$/],
+    ["a let given the builder by `??=`", `export async function r() { const { encryptionKey } = useVault(); let aad: Uint8Array | undefined; aad ??= buildTeamEntryAAD("t", "e", "blob", 1); return decryptData({}, encryptionKey, aad); }`, /^src\/fixture\/reader\.ts:6 AAD binding is not const$/],
+    ["a conditional AAD through a named local wrapper forwarding key and AAD",`async function openWith(k: CryptoKey, aad?: Uint8Array) { return decryptData({}, k, aad); }\nexport async function r(row: { aadVersion: number }) { const { encryptionKey } = useVault(); return openWith(encryptionKey, row.aadVersion ? buildTeamEntryAAD("t", "e", "blob", 1) : undefined); }`, /^src\/fixture\/reader\.ts:7 AAD is a ConditionalExpression/],
   ])("(b) %s is a strict-shape violation", (_name, body, pattern) => {
     const r = analyzeFixture({ [READER]: `${H}${body}` });
     expect(outcome(r)).toEqual({ ...CLEAN, teamAad: [READER], shape: [expect.stringMatching(pattern)] });
+  });
+
+  it("(b) a conditional AAD through a two-level wrapper is a violation, and the outer wrapper is in the decrypt set", () => {
+    // `outer` precedes `openWith`, so it joins the decrypt set only on a second pass of the fixed point.
+    const r = analyzeFixture({
+      [READER]: `${H}async function outer(k: CryptoKey, aad?: Uint8Array) { return openWith(k, aad); }
+async function openWith(k: CryptoKey, aad?: Uint8Array) { return decryptData({}, k, aad); }
+export async function r(row: { aadVersion: number }) { const { encryptionKey } = useVault(); return outer(encryptionKey, row.aadVersion ? buildTeamEntryAAD("t", "e", "blob", 1) : undefined); }`,
+    });
+    expect({ ...outcome(r), decryptFns: r.decryptFns }).toEqual({
+      ...CLEAN, teamAad: [READER], shape: [expect.stringMatching(/^src\/fixture\/reader\.ts:8 AAD is a ConditionalExpression/)],
+      decryptFns: [`${READER}#openWith`, `${READER}#outer`, "src/lib/crypto/crypto-client.ts#decryptData", "src/lib/crypto/crypto-team.ts#decryptTeamEntry"],
+    });
   });
 
   it("(b) the exemption is per function: a ternary AAD elsewhere in an exempt file is a violation", () => {

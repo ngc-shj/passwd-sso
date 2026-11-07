@@ -241,6 +241,38 @@ describe("buildEntryRekeyPayload", () => {
     }).toEqual({ ids: [{ id: "h-legacy-v0", aadVersion: 0 }], openedWithoutAad: "legacy-v0" });
   });
 
+  // F-R6-2: the legacy v0 row resolves the team key at its own version, so a
+  // transient failure there stops the pass (as for any row) rather than
+  // retaining it under the old key by timing.
+  it.each([
+    { reason: "transient", outcome: "throws RekeyTransientError" },
+    { reason: "not_available", outcome: "retains the row" },
+  ] as const)("legacy v0 history row whose team key version is $reason → $outcome", async ({ reason }) => {
+    const f = await baseFixture();
+    const noAad = await encryptTeamEntry("legacy-v0", f.keys.get(2)!);
+    f.data.history = [{
+      id: "h-legacy-v0",
+      encryptedBlob: noAad.ciphertext,
+      blobIv: noAad.iv,
+      blobAuthTag: noAad.authTag,
+      aadVersion: 0,
+      teamKeyVersion: 1,
+      itemKeyVersion: 0,
+      encryptedItemKey: null,
+      itemKeyIv: null,
+      itemKeyAuthTag: null,
+      itemKeyId: null,
+    }];
+
+    const built = buildEntryRekeyPayload(TEAM_ID, f.data, makeResolver(f.keys, { 1: reason }));
+    if (reason === "transient") {
+      await expect(built).rejects.toBeInstanceOf(RekeyTransientError);
+      return;
+    }
+    const result = payloadOf(await built);
+    expect({ history: result.body.history, retained: result.body.retainHistoryIds }).toEqual({ history: [], retained: ["h-legacy-v0"] });
+  });
+
   // T18: an AAD-bound ciphertext labelled 0 is still treated as legacy — opened
   // without AAD, which fails, so it is retained — never opened strictly and
   // upgraded to label 1.

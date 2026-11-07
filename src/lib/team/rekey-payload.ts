@@ -473,8 +473,9 @@ async function resealHistoryRow(
 }
 
 /**
- * The ONE team entry re-seal without AAD (D80; confined to this module by
- * team-entry-aad-strictness.test.ts): a legacy history row, which carries no
+ * The team entry re-seal without AAD (D80; its NAME is confined to this module
+ * by team-entry-aad-strictness.test.ts — that no other team encrypt omits AAD
+ * is not gated): a legacy history row, which carries no
  * entry binding, opened without AAD and re-sealed without AAD under the new
  * ItemKey, so it stays a row the history restore refuses. null if no key
  * opens it (the row is retained). Opening unbound ciphertext here is the
