@@ -850,7 +850,7 @@ describe("team entries in background", () => {
     }
 
     function serveTeamEntry(overview: string, blob: string, aadVersion: number): void {
-      const base = fetchMock.getMockImplementation();
+      const base = fetchMock.getMockImplementation() as ((url: string) => Promise<unknown>) | undefined;
       fetchMock.mockImplementation(async (url: string) => {
         if (url.includes(EXT_API_PATH.TEAMS) && LIST_URL.test(url)) {
           return {
