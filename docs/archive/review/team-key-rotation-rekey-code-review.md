@@ -325,3 +325,50 @@ the security and functionality reports; the testing report was stopped before it
 3. Round 7 review; then Step 3-9 final commit, pre-pr, push, PR (Closes #988), follow-up
    issues (SC2 key pruning, SC5 orphan sweep, item_key_id CHECK next release, single strict
    team decrypt helper, s3 forcePathStyle (D65), MEMBER control gating (N2)).
+
+## Round 6 (resumed) — testing findings and resolution
+- T19 [Major] four rule-(b) sub-checks and the (a) handleView rule had no red-proving fixture —
+  fixed with four exact cells, each red-proved against its mutant (D84).
+- T20 [Minor] header overstated binding resolution — documented as spelling-matched; untraced
+  AAD flows named as part of the accepted residual (D84).
+- F-R6-1, F-R6-2, S-R6-1 fixed (D83). Commit "fix(teams): address round-6 review of the re-key
+  branch".
+
+---
+
+# Review round: 7
+Date: 2026-11-08
+Scope: `775cf7118..HEAD` (commits 678a54bb5, c709ab363).
+
+## Changes from Previous Round
+F-R6-1, F-R6-2, S-R6-1, T19 resolved (all three experts). T20 mostly accurate.
+
+## Functionality Findings
+No findings. (Note: the A8 E2E spec is verified by schema comparison; it executes in the CI e2e
+job — local production-build run blocked, D84.)
+
+## Security Findings
+No findings.
+
+## Testing Findings
+- T21 [Minor, new] Header counts three spelling-matched checks, names two, omits two more.
+- T22 [Minor, new] `&&=` member of `ASSIGNMENT_OPERATORS` unpinned.
+
+## Recurring Issue Check
+- Functionality: strict-schema drift class swept (no other hand-built re-key body); transient
+  handling consistent across all four resolution sites.
+- Security: R43 none; doc-overstating-enforcement class fixed in both places.
+- Testing: RT7 → T21, T22; RT10, async clean.
+
+## Tightening-only skip — Round 7
+Findings applied directly (no Round 8 review):
+- T21 [Minor] header lists all four spelling-matched checks — `src/__tests__/team-entry-aad-strictness.test.ts` header — applied verbatim
+- T22 [Minor] `&&=` row added and red-proved — same file, rule (b) table — applied verbatim
+Justification: both scoped within the round-6 fix range (the guard file), inline minor (a comment
+and one test row), no production code and no security-boundary behaviour changed.
+
+## Final status
+All Critical and Major findings across rounds 1–7 resolved. Accepted residuals with Anti-Deferral
+entries: A1 s3 `forcePathStyle` (D65), N2 MEMBER control gating (D71), the guard's
+key-provenance residual on both decrypt and write sides (D80, D84) — each tracked as a follow-up
+issue.

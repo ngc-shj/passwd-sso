@@ -821,3 +821,7 @@
   `node_modules`, and a read-only inspection of the earlier D37 build was refused by the
   permission system, so it was not repeated); the spec change adds one field the strict schema
   requires, and the CI e2e job runs this spec on a production build.
+- D85 (round 7, tightening-only) — T21: the guard header names all four spelling-matched checks
+  (the `encryptData` callee, the `aadVersion` read, the history view's enclosing-function name,
+  rule (b)'s per-function exemption names). T22: an `&&=` row pins the third member of
+  `ASSIGNMENT_OPERATORS`; red-proved on a scratch copy by dropping the token (only that row fails).
