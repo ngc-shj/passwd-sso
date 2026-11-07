@@ -3,10 +3,11 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { advisoryXactLock } from "@/lib/tenant-rls";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
-import { requireTeamPermission } from "@/lib/auth/access/team-auth";
-import { API_ERROR } from "@/lib/http/api-error-codes";
+import { activeTeamRole, canWriteTeamEntry, requireTeamPermission } from "@/lib/auth/access/team-auth";
+import { API_ERROR, type ApiErrorCode } from "@/lib/http/api-error-codes";
 import { getAttachmentBlobStore } from "@/lib/blob-store";
-import { AUDIT_TARGET_TYPE, TEAM_PERMISSION, AUDIT_ACTION } from "@/lib/constants";
+import { newBlobGeneration } from "@/lib/blob-store/object-ref";
+import { AUDIT_TARGET_TYPE, TEAM_PERMISSION, AUDIT_ACTION, ATTACHMENT_ENCRYPTION_MODE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import {
   ALLOWED_EXTENSIONS,
@@ -16,18 +17,37 @@ import {
   FILENAME_MAX_LENGTH,
   isValidSendFilename,
 } from "@/lib/validations";
+import {
+  ATTACHMENT_UPLOAD_MULTIPART_MAX,
+  BASE64_RE,
+  CEK_WRAP_BASE64_MAX,
+} from "@/lib/validations/common";
+import { CURRENT_CEK_WRAP_AAD_VERSION } from "@/lib/crypto/crypto-aad";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { rejectOversizedMultipart } from "@/lib/http/parse-body";
 import { errorResponse, handleAuthError, notFound, rateLimited, unauthorized, validationError } from "@/lib/http/api-response";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
+import { TeamRotationInProgressError } from "@/lib/team/team-key-rotation-lock";
+import { lockTeamAttachmentEntry } from "@/lib/team/team-attachment-lock";
+import { itemKeyIdsMatch, normalizeTeamKeyVersion } from "@/lib/team/team-item-key";
 
 type RouteContext = { params: Promise<{ teamId: string; id: string }> };
 
-// Sentinel thrown inside the locked transaction when the re-checked per-entry
-// attachment count is at the cap. Mapped to ATTACHMENT_LIMIT_EXCEEDED outside
-// the tx.
-class AttachmentLimitError extends Error {}
+const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+type CreatedAttachment = {
+  id: string;
+  filename: string;
+  contentType: string;
+  sizeBytes: number;
+  createdAt: Date;
+};
+
+type UploadOutcome =
+  | { ok: true; attachment: CreatedAttachment }
+  | { ok: false; code: ApiErrorCode };
 
 const teamAttachmentUploadLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 30 });
 
@@ -94,8 +114,9 @@ async function handlePOST(
 
   const { teamId, id } = await params;
 
+  let membership;
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_UPDATE, req);
+    membership = await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_UPDATE, req);
   } catch (e) {
     return handleAuthError(e);
   }
@@ -103,32 +124,27 @@ async function handlePOST(
   const rl = await teamAttachmentUploadLimiter.check(`rl:team_attachment_upload:${session.user.id}`);
   if (!rl.allowed) return rateLimited(rl.retryAfterMs);
 
+  // Pre-check only (existence, own-entry rule). The entry's ItemKey identity
+  // and creator are read again under the locks in the transaction below.
   const entry = await withTeamTenantRls(teamId, async () =>
     prisma.teamPasswordEntry.findUnique({
       where: { id },
-      select: { teamId: true, tenantId: true, itemKeyVersion: true, teamKeyVersion: true },
+      select: { teamId: true, createdById: true },
     }),
   );
 
   if (!entry || entry.teamId !== teamId) {
     return notFound();
   }
-
-  // Require ItemKey (itemKeyVersion >= 1) for attachment upload
-  if ((entry.itemKeyVersion ?? 0) < 1) {
-    return errorResponse(API_ERROR.ITEM_KEY_REQUIRED);
+  if (!canWriteTeamEntry(membership.role, entry.createdById, session.user.id)) {
+    return errorResponse(API_ERROR.ONLY_OWN_ENTRIES);
   }
-
-  // The per-entry attachment cap is re-checked INSIDE the advisory-locked tx
-  // below (keyed on the entry id), so two concurrent uploads to the same entry
-  // cannot both read count < MAX and both create, blowing past
-  // MAX_ATTACHMENTS_PER_ENTRY (TOCTOU).
 
   // Early rejection before buffering the multipart body into memory. Requires a
   // declared Content-Length and caps it — fail-closed on a missing header so a
   // chunked / no-Content-Length body cannot bypass the cap (req.formData() has
   // no streaming cap of its own).
-  const oversized = rejectOversizedMultipart(req, MAX_FILE_SIZE * 2);
+  const oversized = rejectOversizedMultipart(req, ATTACHMENT_UPLOAD_MULTIPART_MAX);
   if (oversized) return oversized;
 
   // Parse FormData
@@ -148,6 +164,12 @@ async function handlePOST(
   const sizeBytes = formData.get("sizeBytes") as string | null;
   const aadVersionStr = formData.get("aadVersion") as string | null;
   const encryptionModeStr = formData.get("encryptionMode") as string | null;
+  const itemKeyId = formData.get("itemKeyId") as string | null;
+  const cekKeyVersionStr = formData.get("cekKeyVersion") as string | null;
+  const cekEncrypted = formData.get("cekEncrypted") as string | null;
+  const cekIv = formData.get("cekIv") as string | null;
+  const cekAuthTag = formData.get("cekAuthTag") as string | null;
+  const cekWrapAadVersionStr = formData.get("cekWrapAadVersion") as string | null;
 
   if (!file || !iv || !authTag || !filename || !contentType || !sizeBytes) {
     return errorResponse(API_ERROR.MISSING_REQUIRED_FIELDS);
@@ -191,50 +213,105 @@ async function handlePOST(
   }
 
   const aadVersion = aadVersionStr ? parseInt(aadVersionStr, 10) : 1;
-  if (Number.isNaN(aadVersion) || aadVersion < 1 || aadVersion > 1) {
+  if (Number.isNaN(aadVersion) || aadVersion !== 1) {
     return validationError();
   }
 
-  // encryptionMode is required and must be 1 (ItemKey)
+  // Every new team upload is mode 2 (plan C4): a random CEK encrypts the
+  // body and is wrapped under the entry's ItemKey (scope "TW").
   if (!encryptionModeStr) {
     return errorResponse(API_ERROR.MISSING_REQUIRED_FIELDS);
   }
-  const encryptionMode = parseInt(encryptionModeStr, 10);
-  if (encryptionMode !== 1) {
+  if (parseInt(encryptionModeStr, 10) !== ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED) {
     return validationError();
   }
-
-  // Validate aadVersion (must be 1)
-  if (aadVersion !== 1) {
+  if (!clientId || !itemKeyId || !cekKeyVersionStr || !cekEncrypted || !cekIv || !cekAuthTag || !cekWrapAadVersionStr) {
+    return errorResponse(API_ERROR.MISSING_REQUIRED_FIELDS);
+  }
+  // The attachment id is bound into the body and CEK-wrap AAD, so the client
+  // names it (UUID v4).
+  if (!UUID_V4_RE.test(clientId) || !UUID_RE.test(itemKeyId)) {
     return validationError();
   }
-
-  // Validate client-provided attachmentId format (UUID v4)
-  if (clientId && !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(clientId)) {
+  if (!/^[0-9a-f]{24}$/.test(cekIv) || !/^[0-9a-f]{32}$/.test(cekAuthTag)) {
+    return validationError();
+  }
+  if (!/^[1-9][0-9]{0,8}$/.test(cekKeyVersionStr)) {
+    return validationError();
+  }
+  const cekKeyVersion = parseInt(cekKeyVersionStr, 10);
+  // Pinned to exactly the current format (see the personal upload route).
+  const cekWrapAadVersion = parseInt(cekWrapAadVersionStr, 10);
+  if (Number.isNaN(cekWrapAadVersion) || cekWrapAadVersion !== CURRENT_CEK_WRAP_AAD_VERSION) {
+    return validationError();
+  }
+  if (cekEncrypted.length > CEK_WRAP_BASE64_MAX || !BASE64_RE.test(cekEncrypted)) {
     return validationError();
   }
 
   const blobStore = getAttachmentBlobStore();
-  // clientId already validated as UUID v4 above (line 209); normalize to lowercase for AAD consistency
-  const attachmentId = clientId ? clientId.toLowerCase() : crypto.randomUUID();
-  const blobContext = { attachmentId, entryId: id, teamId };
+  // Normalize to lowercase for AAD consistency.
+  const attachmentId = clientId.toLowerCase();
+  // A fresh object key per write, written before the transaction and deleted
+  // if the transaction does not commit the row that references it.
+  const blobContext = { attachmentId, entryId: id, teamId, generation: newBlobGeneration() };
   const storedBlob = await blobStore.putObject(buffer, blobContext);
 
-  // Serialize the cap check with the create under a per-entry advisory lock
-  // (keyed on the entry id) so concurrent uploads to the same entry cannot both
-  // read count < MAX and both create. Blob storage above stays OUTSIDE the lock;
-  // over-limit throws a sentinel mapped to ATTACHMENT_LIMIT_EXCEEDED outside.
-  let attachment;
+  // Lock order: team FOR SHARE → entry FOR SHARE → per-entry advisory lock
+  // (attachment cap). The entry's ItemKey identity is compared on the locked
+  // row, so an upgrade, restore or re-key committed since the client read the
+  // entry is refused rather than leaving a CEK wrapped under a key the entry
+  // no longer holds. Over-limit and refusals return an outcome; the blob is
+  // deleted outside the transaction.
+  let outcome: UploadOutcome;
   try {
-    attachment = await withTeamTenantRls(teamId, async () => {
-      await advisoryXactLock(prisma, id);
-      const count = await prisma.attachment.count({
+    outcome = await withTeamTenantRls(teamId, async (_tenantId, tx): Promise<UploadOutcome> => {
+      let locked;
+      try {
+        locked = await lockTeamAttachmentEntry(tx, teamId, id);
+      } catch (e) {
+        if (e instanceof TeamRotationInProgressError) {
+          return { ok: false, code: API_ERROR.TEAM_KEY_VERSION_MISMATCH };
+        }
+        throw e;
+      }
+      if (!locked) return { ok: false, code: API_ERROR.NOT_FOUND };
+      // The actor's authority, under the team lock: a removal, departure or
+      // demotion committed since requireTeamPermission is seen here.
+      const role = await activeTeamRole(tx, teamId, session.user.id);
+      if (!role || !canWriteTeamEntry(role, locked.createdById, session.user.id)) {
+        return { ok: false, code: API_ERROR.ACTOR_NOT_PERMITTED };
+      }
+
+      // A v0 entry has no ItemKey to wrap under: the client upgrades it first.
+      if (locked.itemKeyVersion === 0) {
+        return { ok: false, code: API_ERROR.ENTRY_UPGRADE_REQUIRED };
+      }
+      if (!itemKeyIdsMatch(itemKeyId, locked.itemKeyId)) {
+        return { ok: false, code: API_ERROR.ITEM_KEY_CHANGED };
+      }
+      if (cekKeyVersion !== locked.itemKeyVersion) {
+        return { ok: false, code: API_ERROR.CEK_KEY_VERSION_MISMATCH };
+      }
+      // An ItemKey wrapped under an older team key (a restored retained row,
+      // a carried entry) is re-keyed before a new CEK is wrapped under it, as
+      // the full-update PUT refuses: a departed holder of that team key could
+      // otherwise open the new attachment.
+      if (normalizeTeamKeyVersion(locked.entryTeamKeyVersion) !== normalizeTeamKeyVersion(locked.teamKeyVersion)) {
+        return { ok: false, code: API_ERROR.ENTRY_REKEY_REQUIRED };
+      }
+
+      // The per-entry cap, re-checked under a per-entry advisory lock so two
+      // concurrent uploads cannot both read count < MAX and both create.
+      await advisoryXactLock(tx, id);
+      const count = await tx.attachment.count({
         where: { teamPasswordEntryId: id },
       });
       if (count >= MAX_ATTACHMENTS_PER_ENTRY) {
-        throw new AttachmentLimitError();
+        return { ok: false, code: API_ERROR.ATTACHMENT_LIMIT_EXCEEDED };
       }
-      return prisma.attachment.create({
+
+      const attachment = await tx.attachment.create({
         data: {
           id: attachmentId,
           filename: sanitizedFilename,
@@ -244,9 +321,16 @@ async function handlePOST(
           iv,
           authTag,
           aadVersion,
-          keyVersion: entry.teamKeyVersion,
-          encryptionMode,
-          tenantId: entry.tenantId,
+          keyVersion: locked.teamKeyVersion,
+          encryptionMode: ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED,
+          cekEncrypted: Buffer.from(cekEncrypted, "base64"),
+          cekIv,
+          cekAuthTag,
+          cekKeyVersion,
+          cekWrapAadVersion,
+          // From the locked row, never from the client.
+          cekItemKeyId: locked.itemKeyId,
+          tenantId: locked.tenantId,
           teamPasswordEntryId: id,
           createdById: session.user.id,
         },
@@ -258,14 +342,18 @@ async function handlePOST(
           createdAt: true,
         },
       });
+      return { ok: true, attachment };
     });
   } catch (error) {
     await blobStore.deleteObject(storedBlob, blobContext).catch(() => {});
-    if (error instanceof AttachmentLimitError) {
-      return errorResponse(API_ERROR.ATTACHMENT_LIMIT_EXCEEDED);
-    }
     throw error;
   }
+
+  if (!outcome.ok) {
+    await blobStore.deleteObject(storedBlob, blobContext).catch(() => {});
+    return outcome.code === API_ERROR.NOT_FOUND ? notFound() : errorResponse(outcome.code);
+  }
+  const { attachment } = outcome;
 
   await logAuditAsync({
     ...teamAuditBase(req, session.user.id, teamId),

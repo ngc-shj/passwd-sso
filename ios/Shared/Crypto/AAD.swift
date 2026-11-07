@@ -13,6 +13,8 @@ public enum AADScope: String {
   case team = "OV"
   case attachment = "AT"
   case itemKey = "IK"
+  /// Team attachment CEK wrap under the entry ItemKey (mode-2).
+  case teamAttachmentWrap = "TW"
   /// TeamMemberKey wrapping (server-compat, mirrors extension crypto-team.ts).
   case teamKey = "OK"
   /// iOS-local cacheKey wraps (ECDH key + team enc keys) — NOT shared with server.
@@ -98,6 +100,22 @@ public func buildItemKeyWrapAAD(
 /// Build AAD for an attachment (entryId, attachmentId).
 public func buildAttachmentAAD(entryId: String, attachmentId: String) throws -> Data {
   try buildAADBytes(scope: .attachment, fields: [entryId, attachmentId])
+}
+
+/// Build AAD for a team attachment CEK wrapped under the entry's ItemKey
+/// (teamId, entryId, attachmentId, itemKeyVersion, cekWrapAadVersion).
+/// Byte-identical to crypto-aad.ts buildTeamAttachmentCekWrapAAD (scope "TW").
+public func buildTeamAttachmentCekWrapAAD(
+  teamId: String,
+  entryId: String,
+  attachmentId: String,
+  itemKeyVersion: Int,
+  cekWrapAadVersion: Int
+) throws -> Data {
+  try buildAADBytes(
+    scope: .teamAttachmentWrap,
+    fields: [teamId, entryId, attachmentId, String(itemKeyVersion), String(cekWrapAadVersion)]
+  )
 }
 
 /// Build AAD for the server-side TeamMemberKey wrap (teamId, toUserId, keyVersion,

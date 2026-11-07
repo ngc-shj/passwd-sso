@@ -159,8 +159,12 @@ describe("GET /api/teams/[teamId]/rotate-key/data", () => {
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.members).toHaveLength(0);
-    // teamMemberKey.findMany should not be called when no active members
-    expect(mockTeamMemberKeyFindMany).not.toHaveBeenCalled();
+    // The per-member key read is skipped when no active members; the only
+    // member-key read is the caller's own held versions.
+    expect(mockTeamMemberKeyFindMany).toHaveBeenCalledTimes(1);
+    expect(mockTeamMemberKeyFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { teamId: "team-1", userId: "user-1" } }),
+    );
     expect(mockUserFindMany).not.toHaveBeenCalled();
     // Only 2 withTeamTenantRls calls: team + entries/members (no memberKeys call)
     expect(mockWithTeamTenantRls).toHaveBeenCalledTimes(2);
@@ -207,5 +211,33 @@ describe("GET /api/teams/[teamId]/rotate-key/data", () => {
   it("re-throws non-TeamAuthError permission errors", async () => {
     mockRequireTeamPermission.mockRejectedValue(new Error("DB_CONNECTION_LOST"));
     await expect(GET(createRequest("team-1"), createParams("team-1"))).rejects.toThrow("DB_CONNECTION_LOST");
+  });
+  it("returns the caller's held team key versions and each entry's version, overview IV and ItemKey id", async () => {
+    // Two member-key reads: the caller's held versions (where.userId is the
+    // caller) and the latest key per active member.
+    mockTeamMemberKeyFindMany.mockImplementation(async (args: { where: { userId: unknown } }) =>
+      args.where.userId === "user-1" ? [{ keyVersion: 1 }, { keyVersion: 3 }] : [{ userId: "user-1" }],
+    );
+    mockTeamPasswordEntryFindMany.mockResolvedValue([{ ...sampleEntry, itemKeyId: "item-key-id-1" }]);
+
+    const res = await GET(createRequest("team-1"), createParams("team-1"));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.actorKeyVersions).toEqual([1, 3]);
+    expect(json.entries[0]).toMatchObject({
+      teamKeyVersion: 1,
+      overviewIv: "c".repeat(24),
+      itemKeyId: "item-key-id-1",
+    });
+    expect(mockTeamMemberKeyFindMany).toHaveBeenCalledWith({
+      where: { teamId: "team-1", userId: "user-1" },
+      select: { keyVersion: true },
+      orderBy: { keyVersion: "asc" },
+    });
+    expect(mockTeamPasswordEntryFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({ teamKeyVersion: true, overviewIv: true, itemKeyId: true }),
+      }),
+    );
   });
 });

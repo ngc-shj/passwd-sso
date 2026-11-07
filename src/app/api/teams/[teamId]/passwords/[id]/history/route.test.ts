@@ -114,6 +114,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history", () => {
         aadVersion: 1,
         teamKeyVersion: 2,
         itemKeyVersion: null,
+        itemKeyId: "11111111-1111-4111-8111-111111111111",
         changedAt,
         changedById: "u1",
       },
@@ -126,6 +127,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history", () => {
     expect(json).toHaveLength(1);
     expect(json[0].encryptedBlob).toEqual({ ciphertext: "cipher", iv: "iv", authTag: "tag" });
     expect(json[0].teamKeyVersion).toBe(2);
+    expect(json[0].itemKeyId).toBe("11111111-1111-4111-8111-111111111111");
     expect(json[0].changedBy).toEqual({ id: "u1", name: "Admin", email: "admin@test.com" });
 
     // Verify take:20 is passed to findMany

@@ -11,47 +11,71 @@ import {
   buildPolicyAwareGeneratorSettings,
 } from "@/hooks/team/team-login-form-initial-values";
 import { getPolicyViolations, checkPasswordReuse, type PolicyViolation } from "@/lib/security/password-policy-validation";
-import { useTeamVault } from "@/lib/team/team-vault-context";
+import { useTeamVault, type EntryItemKeyData } from "@/lib/team/team-vault-context";
 import { decryptData } from "@/lib/crypto/crypto-client";
-import { buildTeamEntryAAD } from "@/lib/crypto/crypto-aad";
+import { buildTeamEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
+import { itemKeyIdsMatch } from "@/lib/team/team-key-resolution";
+import { historyRowKeyData, type TeamHistoryRowDto } from "@/lib/team/team-history-restore";
 import { apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 
 type TeamPolicy = ReturnType<typeof useTeamPolicy>["policy"];
+
+interface TeamHistoryListRow {
+  id: string;
+  encryptedBlob: { ciphertext: string; iv: string; authTag: string };
+  aadVersion: number;
+  teamKeyVersion: number;
+  itemKeyVersion: number | null;
+  itemKeyId: string | null;
+}
+
+async function fetchHistoryRowKeyData(
+  teamId: string,
+  entryId: string,
+  historyId: string,
+): Promise<EntryItemKeyData> {
+  const res = await fetchApi(apiPath.teamPasswordHistoryById(teamId, entryId, historyId));
+  if (!res.ok) throw new Error("Failed to fetch history row");
+  return historyRowKeyData((await res.json()) as TeamHistoryRowDto);
+}
 
 /** Fetch and decrypt the last N history blobs for a team entry, returning plaintext passwords. */
 async function fetchDecryptedHistoryPasswords(
   teamId: string,
   entryId: string,
   editData: TeamEntryFormEditData,
-  getEntryDecryptionKey: (teamId: string, entryId: string, entry: import("@/lib/team/team-vault-core").EntryItemKeyData) => Promise<CryptoKey>,
+  getEntryDecryptionKey: (teamId: string, entryId: string, entry: EntryItemKeyData) => Promise<CryptoKey>,
   count: number,
 ): Promise<string[]> {
   const res = await fetchApi(apiPath.teamPasswordHistory(teamId, entryId));
   if (!res.ok) {
     return [];
   }
-  const records: Array<{
-    encryptedBlob: { ciphertext: string; iv: string; authTag: string };
-    aadVersion: number;
-    teamKeyVersion: number;
-    itemKeyVersion: number | null;
-  }> = await res.json();
+  const records: TeamHistoryListRow[] = await res.json();
 
   const passwords: string[] = [];
   const limited = records.slice(0, count);
-  const decryptKey = await getEntryDecryptionKey(teamId, entryId, {
-    itemKeyVersion: editData.itemKeyVersion,
-    encryptedItemKey: editData.encryptedItemKey,
-    itemKeyIv: editData.itemKeyIv,
-    itemKeyAuthTag: editData.itemKeyAuthTag,
-    teamKeyVersion: editData.teamKeyVersion ?? 1,
-  });
 
+  // Each history row is decrypted with its OWN wrap (a row saved before a
+  // re-key or restore is under a different ItemKey than the live entry); a
+  // list row carries no wrap, so it is read from the row's own endpoint
+  // unless it shares the live ItemKey (same id → served from the cache).
   for (const record of limited) {
     try {
       const itemKeyVersion = record.itemKeyVersion ?? 0;
-      const aad = buildTeamEntryAAD(teamId, entryId, "blob", itemKeyVersion);
+      const keyData: EntryItemKeyData = itemKeyIdsMatch(record.itemKeyId, editData.itemKeyId)
+        ? {
+            itemKeyVersion: editData.itemKeyVersion,
+            encryptedItemKey: editData.encryptedItemKey,
+            itemKeyIv: editData.itemKeyIv,
+            itemKeyAuthTag: editData.itemKeyAuthTag,
+            itemKeyId: editData.itemKeyId,
+            teamKeyVersion: editData.teamKeyVersion ?? 1,
+          }
+        : await fetchHistoryRowKeyData(teamId, entryId, record.id);
+      const decryptKey = await getEntryDecryptionKey(teamId, entryId, keyData);
+      const aad = buildTeamEntryAAD(teamId, entryId, VAULT_TYPE.BLOB, itemKeyVersion);
       const plaintext = await decryptData(record.encryptedBlob, decryptKey, aad);
       const parsed: { password?: string } = JSON.parse(plaintext);
       if (typeof parsed.password === "string") {

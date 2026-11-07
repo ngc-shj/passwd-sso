@@ -78,6 +78,7 @@ vi.mock("@/components/team/management/team-edit-dialog", () => ({
 }));
 
 import { TeamEditDialogLoader } from "@/components/team/management/team-edit-dialog-loader";
+import { aadModelDecrypt } from "@/__tests__/helpers/aad-model-decrypt";
 
 describe("TeamEditDialogLoader", () => {
   beforeEach(() => {
@@ -166,6 +167,8 @@ describe("TeamEditDialogLoader", () => {
         encryptedItemKey: "ek-ct",
         itemKeyIv: "ek-iv",
         itemKeyAuthTag: "ek-at",
+        itemKeyId: "ik-1",
+        nextItemKeyVersion: 3,
       }),
     });
     mockDecryptData.mockResolvedValue(
@@ -191,9 +194,45 @@ describe("TeamEditDialogLoader", () => {
       encryptedItemKey: "ek-ct",
       itemKeyIv: "ek-iv",
       itemKeyAuthTag: "ek-at",
+      itemKeyId: "ik-1",
       teamKeyVersion: 2,
     });
     expect(mockBuildTeamEntryAAD).toHaveBeenCalledWith("team-1", "entry-1", "blob", 1);
+  });
+
+  // D67: a live team entry is read at AAD 1 whatever aadVersion the server reports.
+  it.each([
+    ["refuses a no-AAD blob the server labels aadVersion 0", 0, "noaad-blob", false],
+    ["control: opens an aadVersion-1 blob sealed with the entry AAD", 1, "cipher", true],
+  ])("%s (strict team entry AAD)", async (_label, aadVersion, ciphertext, opens) => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        id: "entry-1",
+        entryType: "LOGIN",
+        encryptedBlob: ciphertext,
+        blobIv: "iv",
+        blobAuthTag: "tag",
+        aadVersion,
+        tags: [],
+      }),
+    });
+    mockDecryptData.mockImplementation(aadModelDecrypt(JSON.stringify({ title: "Entry", username: "u" })));
+
+    render(
+      <TeamEditDialogLoader teamId="team-1" id="entry-1" open={true} onOpenChange={vi.fn()} onSaved={vi.fn()} />,
+    );
+
+    await waitFor(() => {
+      expect(mockDecryptData).toHaveBeenCalledWith(expect.objectContaining({ ciphertext }), expect.any(Object), "aad-token");
+    });
+    if (opens) {
+      expect(await screen.findByTestId("edit-dialog")).toBeInTheDocument();
+    } else {
+      // The decrypt failure is the error state (no edit dialog over a refused entry).
+      expect(await screen.findByText(/operation failed|notFound/)).toBeInTheDocument();
+      expect(screen.queryByTestId("edit-dialog")).not.toBeInTheDocument();
+    }
   });
 
   it("shows an error state when the team key is unavailable", async () => {

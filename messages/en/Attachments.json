@@ -6,6 +6,7 @@
   "uploaded": "Attachment uploaded",
   "deleted": "Attachment deleted",
   "uploadError": "Failed to upload",
+  "uploadRekeyRequired": "Files cannot be added to this entry until it is re-encrypted with the current team key. A team owner or admin can do this with Finish re-key on the team's Key Rotation page.",
   "downloadError": "Failed to download",
   "deleteError": "Failed to delete",
   "confirmDeleteTitle": "Delete Attachment",

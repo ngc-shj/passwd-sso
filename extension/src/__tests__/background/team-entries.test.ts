@@ -74,11 +74,15 @@ const teamCryptoMocks = vi.hoisted(() => ({
   deriveTeamEncryptionKey: vi.fn().mockResolvedValue("team-enc-key"),
   unwrapItemKey: vi.fn().mockResolvedValue(new Uint8Array([70, 80, 90])),
   deriveItemEncryptionKey: vi.fn().mockResolvedValue("item-enc-key"),
-  buildTeamEntryAAD: vi.fn().mockReturnValue(new Uint8Array([3, 4])),
   buildItemKeyWrapAAD: vi.fn().mockReturnValue(new Uint8Array([5, 6])),
 }));
 
-vi.mock("../../lib/crypto-team", () => teamCryptoMocks);
+// buildTeamEntryAAD stays real: the strict-AAD cells assert the bytes each
+// reader passes to decryptData.
+vi.mock("../../lib/crypto-team", async (importOriginal) => ({
+  ...teamCryptoMocks,
+  buildTeamEntryAAD: (await importOriginal<typeof import("../../lib/crypto-team")>()).buildTeamEntryAAD,
+}));
 
 type MessageHandler = (
   message: unknown,
@@ -820,6 +824,125 @@ describe("team entries in background", () => {
 
       expect(res.type).toBe("AUTOFILL");
       expect(res.ok).toBe(true);
+    });
+  });
+
+  // A live team entry is always read at AAD 1: a server labelling an entry
+  // aadVersion 0 must not get a no-AAD ciphertext accepted (D67). The
+  // decryptData stand-in models AES-GCM: "noaad-*" ciphertexts open only
+  // without AAD, every other ciphertext only with the team entry AAD bytes.
+  describe("strict team entry AAD (aadVersion is not honoured)", () => {
+    const BY_ID_URL = /\/teams\/[^/]+\/passwords\/[^/]+$/;
+    const LIST_URL = /\/teams\/[^/]+\/passwords$/;
+
+    function installAadAwareDecrypt(plaintexts: Record<string, string>): void {
+      cryptoMocks.decryptData.mockImplementation(
+        async (enc: { ciphertext: string }, _key: unknown, aad?: Uint8Array) => {
+          const legacy = enc.ciphertext.startsWith("noaad-");
+          if (legacy ? aad !== undefined : aad === undefined) {
+            throw new DOMException("auth tag mismatch", "OperationError");
+          }
+          const plaintext = plaintexts[enc.ciphertext];
+          if (plaintext === undefined) throw new Error(`no plaintext for ${enc.ciphertext}`);
+          return plaintext;
+        },
+      );
+    }
+
+    function serveTeamEntry(overview: string, blob: string, aadVersion: number): void {
+      const base = fetchMock.getMockImplementation() as ((url: string) => Promise<unknown>) | undefined;
+      fetchMock.mockImplementation(async (url: string) => {
+        if (url.includes(EXT_API_PATH.TEAMS) && LIST_URL.test(url)) {
+          return {
+            ok: true,
+            json: async () => [
+              { ...makeTeamEntry("team-pw-1", EXT_ENTRY_TYPE.LOGIN), encryptedOverview: overview, aadVersion },
+            ],
+          };
+        }
+        if (url.includes(EXT_API_PATH.TEAMS) && BY_ID_URL.test(url)) {
+          return {
+            ok: true,
+            json: async () => ({
+              id: "team-pw-1",
+              entryType: EXT_ENTRY_TYPE.LOGIN,
+              encryptedBlob: blob,
+              blobIv: "blob-iv",
+              blobAuthTag: "blob-tag",
+              encryptedOverview: overview,
+              overviewIv: "ov-iv",
+              overviewAuthTag: "ov-tag",
+              teamKeyVersion: 1,
+              aadVersion,
+            }),
+          };
+        }
+        return base?.(url);
+      });
+    }
+
+    const PLAINTEXTS = {
+      "11": PERSONAL_OVERVIEW_PLAINTEXT,
+      "noaad-ov": TEAM_OVERVIEW_PLAINTEXT,
+      "noaad-blob": JSON.stringify({ password: "legacy-secret" }),
+      "ov-aad": TEAM_OVERVIEW_PLAINTEXT,
+      "blob-aad": JSON.stringify({ password: "team-secret" }),
+    };
+
+    async function teamEntriesListed(): Promise<number> {
+      const res = (await sendMessage({ type: "FETCH_PASSWORDS" })) as {
+        entries: Array<{ teamId?: string }>;
+      };
+      return res.entries.filter((e) => e.teamId).length;
+    }
+
+    it("list: refuses a no-AAD overview labelled aadVersion 0", async () => {
+      installAadAwareDecrypt(PLAINTEXTS);
+      serveTeamEntry("noaad-ov", "noaad-blob", 0);
+      await unlockVault();
+      expect(await teamEntriesListed()).toBe(0);
+    });
+
+    it("list: opens an aadVersion-1 overview sealed with the entry AAD (control)", async () => {
+      installAadAwareDecrypt(PLAINTEXTS);
+      serveTeamEntry("ov-aad", "blob-aad", 1);
+      await unlockVault();
+      expect(await teamEntriesListed()).toBe(1);
+    });
+
+    it("by id: refuses a no-AAD blob and overview labelled aadVersion 0", async () => {
+      installAadAwareDecrypt(PLAINTEXTS);
+      serveTeamEntry("noaad-ov", "noaad-blob", 0);
+      await unlockVault();
+      const res = (await sendMessage({ type: "COPY_PASSWORD", entryId: "team-pw-1", teamId: "team-1" })) as {
+        password: string | null;
+      };
+      expect(res.password).toBeNull();
+    });
+
+    it("by id: refuses a no-AAD overview beside an AAD blob labelled aadVersion 0", async () => {
+      installAadAwareDecrypt(PLAINTEXTS);
+      serveTeamEntry("noaad-ov", "blob-aad", 0);
+      await unlockVault();
+      const res = (await sendMessage({ type: "COPY_PASSWORD", entryId: "team-pw-1", teamId: "team-1" })) as {
+        password: string | null;
+      };
+      expect(res.password).toBeNull();
+    });
+
+    it("by id: opens an aadVersion-1 entry and passes the entry AAD bytes (control)", async () => {
+      installAadAwareDecrypt(PLAINTEXTS);
+      serveTeamEntry("ov-aad", "blob-aad", 1);
+      await unlockVault();
+      const res = (await sendMessage({ type: "COPY_PASSWORD", entryId: "team-pw-1", teamId: "team-1" })) as {
+        password: string | null;
+      };
+      expect(res.password).toBe("team-secret");
+      const { buildTeamEntryAAD } = await vi.importActual<typeof import("../../lib/crypto-team")>(
+        "../../lib/crypto-team",
+      );
+      const blobCall = cryptoMocks.decryptData.mock.calls.find(([enc]) => enc.ciphertext === "blob-aad");
+      expect(blobCall?.[2]).toEqual(buildTeamEntryAAD("team-1", "team-pw-1", "blob", 0));
     });
   });
 

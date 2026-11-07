@@ -51,10 +51,14 @@ const teamCryptoMocks = vi.hoisted(() => ({
   deriveTeamEncryptionKey: vi.fn().mockResolvedValue("team-enc-key"),
   unwrapItemKey: vi.fn().mockResolvedValue(new Uint8Array([70, 80, 90])),
   deriveItemEncryptionKey: vi.fn().mockResolvedValue("item-enc-key"),
-  buildTeamEntryAAD: vi.fn().mockReturnValue(new Uint8Array([3, 4])),
   buildItemKeyWrapAAD: vi.fn().mockReturnValue(new Uint8Array([5, 6])),
 }));
-vi.mock("../../lib/crypto-team", () => teamCryptoMocks);
+// buildTeamEntryAAD stays real: AAD bytes are computed from the arguments,
+// never a fixed value that would match any reader.
+vi.mock("../../lib/crypto-team", async (importOriginal) => ({
+  ...teamCryptoMocks,
+  buildTeamEntryAAD: (await importOriginal<typeof import("../../lib/crypto-team")>()).buildTeamEntryAAD,
+}));
 
 const ORIGIN = "http://router.example:8080";
 const OVERVIEW = JSON.stringify({ title: "Router", username: "admin", urlHost: "router.example" });

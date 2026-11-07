@@ -20,12 +20,14 @@ const {
   mockCreateTeamKeyEscrow,
   mockUnwrapItemKey,
   mockDeriveItemEncryptionKey,
+  mockDeriveItemCekWrapKey,
 } = vi.hoisted(() => ({
   mockUnwrapTeamKey: vi.fn(),
   mockDeriveTeamEncryptionKey: vi.fn(),
   mockCreateTeamKeyEscrow: vi.fn(),
   mockUnwrapItemKey: vi.fn(),
   mockDeriveItemEncryptionKey: vi.fn(),
+  mockDeriveItemCekWrapKey: vi.fn(),
 }));
 
 const { mockBuildItemKeyWrapAAD } = vi.hoisted(() => ({
@@ -38,6 +40,7 @@ vi.mock("@/lib/crypto/crypto-team", () => ({
   createTeamKeyEscrow: (...args: unknown[]) => mockCreateTeamKeyEscrow(...args),
   unwrapItemKey: (...args: unknown[]) => mockUnwrapItemKey(...args),
   deriveItemEncryptionKey: (...args: unknown[]) => mockDeriveItemEncryptionKey(...args),
+  deriveItemCekWrapKey: (...args: unknown[]) => mockDeriveItemCekWrapKey(...args),
 }));
 
 vi.mock("@/lib/crypto/crypto-aad", () => ({
@@ -46,6 +49,7 @@ vi.mock("@/lib/crypto/crypto-aad", () => ({
 }));
 
 import {
+  ItemKeyUpgradeRequiredError,
   TeamVaultProvider,
   useTeamVault,
   useTeamVaultOptional,
@@ -398,56 +402,64 @@ describe("team-vault-core", () => {
       return fetchMock;
     }
 
-    it("fetches entry, unwraps ItemKey, derives encryption key, and caches", async () => {
+    it("fetches the entry, unwraps its ItemKey, derives both keys and returns the identity a writer sends", async () => {
       setupTeamKeyMocks();
       const rawItemKey = new Uint8Array([1, 2, 3, 4]);
       const itemEncKey = { type: "secret", usage: "item" } as unknown as CryptoKey;
+      const cekWrapKey = { type: "secret", usage: "cekwrap" } as unknown as CryptoKey;
       mockUnwrapItemKey.mockResolvedValue(rawItemKey);
       mockDeriveItemEncryptionKey.mockResolvedValue(itemEncKey);
+      mockDeriveItemCekWrapKey.mockResolvedValue(cekWrapKey);
       mockBuildItemKeyWrapAAD.mockReturnValue(new Uint8Array([99]));
 
-      const entryData = setupEntryFetch();
-      const fetchMock = setupFetchMock(entryData);
+      setupFetchMock(setupEntryFetch({ itemKeyId: "ik-1" }));
 
       const { result } = renderHook(() => useTeamVault(), {
         wrapper: makeWrapper(),
       });
 
-      let key: CryptoKey | null = null;
+      let info: Awaited<ReturnType<typeof result.current.getItemEncryptionKey>> | null = null;
       await act(async () => {
-        key = await result.current.getItemEncryptionKey("team-1", "entry-1");
+        info = await result.current.getItemEncryptionKey("team-1", "entry-1");
       });
 
-      expect(key).toBe(itemEncKey);
+      expect(info).toEqual({
+        keys: { encryptionKey: itemEncKey, cekWrapKey },
+        itemKeyVersion: 1,
+        itemKeyId: "ik-1",
+        teamKeyVersion: 3,
+      });
       expect(mockBuildItemKeyWrapAAD).toHaveBeenCalledWith("team-1", "entry-1", 3);
       expect(mockUnwrapItemKey).toHaveBeenCalledWith(
         { ciphertext: "enc-ik", iv: "ik-iv", authTag: "ik-tag" },
         expect.anything(),
         new Uint8Array([99]),
       );
-      expect(mockDeriveItemEncryptionKey).toHaveBeenCalledWith(rawItemKey);
       expect(Array.from(rawItemKey)).toEqual([0, 0, 0, 0]); // zeroed
-
-      // Second call should use cache (no additional fetch)
-      const entryFetchCount = fetchMock.mock.calls.filter(
-        (c) => (c[0] as string).includes("/passwords/entry-1"),
-      ).length;
-
-      await act(async () => {
-        key = await result.current.getItemEncryptionKey("team-1", "entry-1");
-      });
-
-      const entryFetchCountAfter = fetchMock.mock.calls.filter(
-        (c) => (c[0] as string).includes("/passwords/entry-1"),
-      ).length;
-      expect(entryFetchCountAfter).toBe(entryFetchCount); // no new fetch
-      expect(key).toBe(itemEncKey);
     });
 
-    it("throws when itemKeyVersion < 1", async () => {
+    it("re-reads the entry each call but serves the same (entryId, itemKeyId) from the cache", async () => {
       setupTeamKeyMocks();
-      const entryData = setupEntryFetch({ itemKeyVersion: 0 });
-      setupFetchMock(entryData);
+      mockUnwrapItemKey.mockImplementation(async () => new Uint8Array([1, 2, 3, 4]));
+      mockDeriveItemEncryptionKey.mockResolvedValue({ type: "secret" } as CryptoKey);
+      mockDeriveItemCekWrapKey.mockResolvedValue({ type: "secret" } as CryptoKey);
+
+      const fetchMock = setupFetchMock(setupEntryFetch({ itemKeyId: "ik-1" }));
+      const { result } = renderHook(() => useTeamVault(), { wrapper: makeWrapper() });
+
+      await act(async () => {
+        await result.current.getItemEncryptionKey("team-1", "entry-1");
+        await result.current.getItemEncryptionKey("team-1", "entry-1");
+      });
+
+      const entryFetches = fetchMock.mock.calls.filter((c) => (c[0] as string).includes("/passwords/entry-1"));
+      expect(entryFetches).toHaveLength(2);
+      expect(mockUnwrapItemKey).toHaveBeenCalledTimes(1);
+    });
+
+    it("throws ItemKeyUpgradeRequiredError when itemKeyVersion < 1", async () => {
+      setupTeamKeyMocks();
+      setupFetchMock(setupEntryFetch({ itemKeyVersion: 0 }));
 
       const { result } = renderHook(() => useTeamVault(), {
         wrapper: makeWrapper(),
@@ -457,7 +469,7 @@ describe("team-vault-core", () => {
         act(async () => {
           await result.current.getItemEncryptionKey("team-1", "entry-1");
         }),
-      ).rejects.toThrow("Entry does not have ItemKey");
+      ).rejects.toBeInstanceOf(ItemKeyUpgradeRequiredError);
     });
 
     it("throws when entry fetch fails", async () => {
@@ -478,15 +490,12 @@ describe("team-vault-core", () => {
       ).rejects.toThrow("Failed to fetch entry ItemKey data");
     });
 
-    it("invalidateTeamKey clears ItemKey cache", async () => {
+    it.each(["invalidateTeamKey", "clearAll"] as const)("%s clears the ItemKey cache", async (clear) => {
       setupTeamKeyMocks();
-      const itemEncKey = { type: "secret", usage: "item" } as unknown as CryptoKey;
-      mockUnwrapItemKey.mockResolvedValue(new Uint8Array([1, 2, 3, 4]));
-      mockDeriveItemEncryptionKey.mockResolvedValue(itemEncKey);
-      mockBuildItemKeyWrapAAD.mockReturnValue(new Uint8Array([99]));
-
-      const entryData = setupEntryFetch();
-      const fetchMock = setupFetchMock(entryData);
+      mockUnwrapItemKey.mockImplementation(async () => new Uint8Array([1, 2, 3, 4]));
+      mockDeriveItemEncryptionKey.mockResolvedValue({ type: "secret" } as CryptoKey);
+      mockDeriveItemCekWrapKey.mockResolvedValue({ type: "secret" } as CryptoKey);
+      setupFetchMock(setupEntryFetch({ itemKeyId: "ik-1" }));
 
       const { result } = renderHook(() => useTeamVault(), {
         wrapper: makeWrapper(),
@@ -495,57 +504,177 @@ describe("team-vault-core", () => {
       await act(async () => {
         await result.current.getItemEncryptionKey("team-1", "entry-1");
       });
+      expect(mockUnwrapItemKey).toHaveBeenCalledTimes(1);
 
-      const fetchesBefore = fetchMock.mock.calls.filter(
-        (c) => (c[0] as string).includes("/passwords/entry-1"),
-      ).length;
-
-      // Invalidate and re-fetch
       await act(async () => {
-        result.current.invalidateTeamKey("team-1");
-        mockUnwrapItemKey.mockResolvedValue(new Uint8Array([5, 6, 7, 8]));
+        if (clear === "invalidateTeamKey") result.current.invalidateTeamKey("team-1");
+        else result.current.clearAll();
         await result.current.getItemEncryptionKey("team-1", "entry-1");
       });
 
-      const fetchesAfter = fetchMock.mock.calls.filter(
-        (c) => (c[0] as string).includes("/passwords/entry-1"),
-      ).length;
-      expect(fetchesAfter).toBeGreaterThan(fetchesBefore);
+      expect(mockUnwrapItemKey).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe("vault lock", () => {
+    const memberKeyResponse = {
+      encryptedTeamKey: "cipher",
+      teamKeyIv: "iv",
+      teamKeyAuthTag: "tag",
+      ephemeralPublicKey: "epk",
+      hkdfSalt: "salt",
+      keyVersion: 3,
+      wrapVersion: 1,
+    };
+    const entryData = {
+      itemKeyVersion: 1,
+      encryptedItemKey: "enc-ik",
+      itemKeyIv: "ik-iv",
+      itemKeyAuthTag: "ik-tag",
+      itemKeyId: "ik-1",
+      teamKeyVersion: 3,
+    };
+
+    function renderWithLock() {
+      let unlocked = true;
+      function Wrapper({ children }: { children: ReactNode }) {
+        return (
+          <TeamVaultProvider
+            getEcdhPrivateKeyBytes={() => new Uint8Array([1, 2, 3, 4])}
+            getUserId={() => "user-1"}
+            vaultUnlocked={unlocked}
+            pollingSuspended={true}
+          >
+            {children}
+          </TeamVaultProvider>
+        );
+      }
+      const hook = renderHook(() => useTeamVault(), { wrapper: Wrapper });
+      return {
+        ...hook,
+        setUnlocked(next: boolean) {
+          unlocked = next;
+          hook.rerender();
+        },
+      };
+    }
+
+    function setupFetch() {
+      const fetchMock = vi.fn(async (url: string) => {
+        if (url.includes("/passwords/entry-1")) {
+          return { ok: true, json: async () => entryData };
+        }
+        return { ok: true, json: async () => memberKeyResponse };
+      });
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+      return fetchMock;
+    }
+
+    const memberKeyFetches = (fetchMock: ReturnType<typeof setupFetch>) =>
+      fetchMock.mock.calls.filter((c) => (c[0] as string).includes("/member-key")).length;
+
+    beforeEach(() => {
+      mockUnwrapTeamKey.mockImplementation(async () => new Uint8Array([7, 7, 7, 7]));
+      mockDeriveTeamEncryptionKey.mockResolvedValue({ type: "secret" } as CryptoKey);
+      mockUnwrapItemKey.mockImplementation(async () => new Uint8Array([1, 2, 3, 4]));
+      mockDeriveItemEncryptionKey.mockResolvedValue({ type: "secret" } as CryptoKey);
+      mockDeriveItemCekWrapKey.mockResolvedValue({ type: "secret" } as CryptoKey);
     });
 
-    it("clearAll clears ItemKey cache", async () => {
-      setupTeamKeyMocks();
-      const itemEncKey = { type: "secret", usage: "item" } as unknown as CryptoKey;
-      mockUnwrapItemKey.mockResolvedValue(new Uint8Array([1, 2, 3, 4]));
-      mockDeriveItemEncryptionKey.mockResolvedValue(itemEncKey);
-      mockBuildItemKeyWrapAAD.mockReturnValue(new Uint8Array([99]));
-
-      const entryData = setupEntryFetch();
-      const fetchMock = setupFetchMock(entryData);
-
-      const { result } = renderHook(() => useTeamVault(), {
-        wrapper: makeWrapper(),
-      });
+    it("drops the team key and ItemKey caches when the vault locks", async () => {
+      const fetchMock = setupFetch();
+      const view = renderWithLock();
 
       await act(async () => {
-        await result.current.getItemEncryptionKey("team-1", "entry-1");
+        await view.result.current.getItemEncryptionKey("team-1", "entry-1");
+        await view.result.current.getItemEncryptionKey("team-1", "entry-1");
       });
+      // Served from both caches the second time.
+      expect(memberKeyFetches(fetchMock)).toBe(1);
+      expect(mockUnwrapItemKey).toHaveBeenCalledTimes(1);
 
-      const fetchesBefore = fetchMock.mock.calls.filter(
-        (c) => (c[0] as string).includes("/passwords/entry-1"),
-      ).length;
+      act(() => view.setUnlocked(false));
+      act(() => view.setUnlocked(true));
 
-      // Clear all and re-fetch
       await act(async () => {
-        result.current.clearAll();
-        mockUnwrapItemKey.mockResolvedValue(new Uint8Array([5, 6, 7, 8]));
-        await result.current.getItemEncryptionKey("team-1", "entry-1");
+        await view.result.current.getItemEncryptionKey("team-1", "entry-1");
+      });
+      expect(memberKeyFetches(fetchMock)).toBe(2);
+      expect(mockUnwrapItemKey).toHaveBeenCalledTimes(2);
+    });
+
+    it("keeps both caches while the vault stays unlocked across a re-render", async () => {
+      const fetchMock = setupFetch();
+      const view = renderWithLock();
+
+      await act(async () => {
+        await view.result.current.getItemEncryptionKey("team-1", "entry-1");
+      });
+      act(() => view.setUnlocked(true));
+      await act(async () => {
+        await view.result.current.getItemEncryptionKey("team-1", "entry-1");
       });
 
-      const fetchesAfter = fetchMock.mock.calls.filter(
-        (c) => (c[0] as string).includes("/passwords/entry-1"),
-      ).length;
-      expect(fetchesAfter).toBeGreaterThan(fetchesBefore);
+      expect(memberKeyFetches(fetchMock)).toBe(1);
+      expect(mockUnwrapItemKey).toHaveBeenCalledTimes(1);
+    });
+
+    it("an ItemKey unwrap that resolves after the lock does not repopulate the caches", async () => {
+      const fetchMock = setupFetch();
+      let releaseUnwrap: (raw: Uint8Array) => void = () => {};
+      mockUnwrapItemKey.mockImplementationOnce(
+        () => new Promise<Uint8Array>((resolve) => { releaseUnwrap = resolve; }),
+      );
+      const view = renderWithLock();
+
+      let inFlight: Promise<unknown> = Promise.resolve();
+      await act(async () => {
+        inFlight = view.result.current.getItemEncryptionKey("team-1", "entry-1");
+        // Let the entry and member-key fetches settle so the unwrap is parked.
+        await vi.waitFor(() => expect(mockUnwrapItemKey).toHaveBeenCalledTimes(1));
+      });
+
+      act(() => view.setUnlocked(false));
+      await act(async () => {
+        releaseUnwrap(new Uint8Array([1, 2, 3, 4]));
+        await inFlight;
+      });
+      act(() => view.setUnlocked(true));
+
+      await act(async () => {
+        await view.result.current.getItemEncryptionKey("team-1", "entry-1");
+      });
+      expect(mockUnwrapItemKey).toHaveBeenCalledTimes(2);
+      // The team key cache was populated before the lock and then cleared.
+      expect(memberKeyFetches(fetchMock)).toBe(2);
+    });
+
+    it("a team key unwrap that resolves after the lock does not repopulate the team key cache", async () => {
+      const fetchMock = setupFetch();
+      let releaseTeamUnwrap: (raw: Uint8Array) => void = () => {};
+      mockUnwrapTeamKey.mockImplementationOnce(
+        () => new Promise<Uint8Array>((resolve) => { releaseTeamUnwrap = resolve; }),
+      );
+      const view = renderWithLock();
+
+      let inFlight: Promise<unknown> = Promise.resolve();
+      await act(async () => {
+        inFlight = view.result.current.getTeamEncryptionKey("team-1");
+        await vi.waitFor(() => expect(mockUnwrapTeamKey).toHaveBeenCalledTimes(1));
+      });
+
+      act(() => view.setUnlocked(false));
+      await act(async () => {
+        releaseTeamUnwrap(new Uint8Array([7, 7, 7, 7]));
+        await inFlight;
+      });
+      act(() => view.setUnlocked(true));
+
+      await act(async () => {
+        await view.result.current.getTeamEncryptionKey("team-1");
+      });
+      expect(memberKeyFetches(fetchMock)).toBe(2);
+      expect(mockUnwrapTeamKey).toHaveBeenCalledTimes(2);
     });
   });
 

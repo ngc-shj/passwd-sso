@@ -21,6 +21,7 @@ Last verified: 2026-05-31
 | Recovery key wrap | `passwd-sso-recovery-wrap-v1` | Derive AES key from recovery key for secret key wrapping | Random (32 bytes per wrap) | crypto-recovery.ts | `HKDF_RECOVERY_WRAP_INFO` |
 | Recovery verifier | `passwd-sso-recovery-verifier-v1` | Derive verification hash from recovery key | Empty (32 bytes) | crypto-recovery.ts | `HKDF_RECOVERY_VERIFIER_INFO` |
 | Item entry enc | `passwd-sso-item-enc-v1` | Derive AES key from ItemKey for entry/attachment encryption | Empty (32 bytes) | crypto-team.ts | `HKDF_ITEM_ENC_INFO` |
+| Item CEK wrap | `passwd-sso-item-cekwrap-v1` | Derive AES key from ItemKey for wrapping team attachment CEKs (mode-2) | Empty (32 bytes) | crypto-team.ts | `HKDF_ITEM_CEKWRAP_INFO` |
 
 ---
 
@@ -34,6 +35,7 @@ Last verified: 2026-05-31
 | `OK` | `SCOPE_TEAM_KEY` | Team member key wrapping | teamId, toUserId, keyVersion, wrapVersion | crypto-aad.ts |
 | `IK` | `SCOPE_ITEM_KEY` | ItemKey wrapping | teamId, entryId, teamKeyVersion | crypto-aad.ts |
 | `AW` | `SCOPE_ATTACHMENT_WRAP` | Attachment CEK wrapping (mode-2) | entryId, attachmentId, cekKeyVersion, cekWrapAadVersion | crypto-aad.ts |
+| `TW` | `SCOPE_TEAM_ATTACHMENT_WRAP` | Team attachment CEK wrapping under the entry ItemKey (mode-2) | teamId, entryId, attachmentId, itemKeyVersion, cekWrapAadVersion | crypto-aad.ts |
 | `AR` | `SCOPE_ADMIN_RESET` | Admin-vault-reset email-link token | tenantId, resetId, targetEmailAtInitiate | crypto-aad.ts |
 | `EM` | `SCOPE_EMERGENCY` | Emergency-access ECDH secret-key escrow wrap | grantId, ownerId, granteeId, keyVersion, wrapVersion | crypto-aad.ts |
 | `WH` | `SCOPE_WEBHOOK` | Webhook secret encryption | tableName, vN, webhookId, tenantId, [teamId] | crypto-aad.ts |

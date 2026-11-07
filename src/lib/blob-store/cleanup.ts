@@ -1,5 +1,7 @@
 import { getAttachmentBlobStore, BLOB_STORAGE } from "@/lib/blob-store";
+import { decodeObjectRef, validateObjectRefKey } from "@/lib/blob-store/object-ref";
 import type { AttachmentBlobContext } from "@/lib/blob-store/types";
+import { getLogger } from "@/lib/logger";
 import type { TxOrPrisma } from "@/lib/prisma";
 
 export interface AttachmentBlobRef {
@@ -54,8 +56,8 @@ export async function collectEntryAttachmentRefs(
 /**
  * Collect external blob refs for every attachment created by a user, BEFORE a
  * full vault reset deletes them by `createdById`. Returns [] on the DB backend.
- * Relies on the object key encoded in the stored payload (the normal case); the
- * context is only a legacy fallback.
+ * The context names the row (its team for a team attachment), against which
+ * deleteAttachmentBlobs validates the stored object key.
  */
 export async function collectAttachmentRefsByCreator(
   client: TxOrPrisma,
@@ -71,6 +73,7 @@ export async function collectAttachmentRefsByCreator(
       encryptedData: true,
       passwordEntryId: true,
       teamPasswordEntryId: true,
+      teamPasswordEntry: { select: { teamId: true } },
     },
   });
 
@@ -79,6 +82,7 @@ export async function collectAttachmentRefsByCreator(
     context: {
       attachmentId: a.id,
       entryId: (a.passwordEntryId ?? a.teamPasswordEntryId)!,
+      ...(a.teamPasswordEntry ? { teamId: a.teamPasswordEntry.teamId } : {}),
     },
   }));
 }
@@ -87,13 +91,29 @@ export async function collectAttachmentRefsByCreator(
  * Best-effort deletion of external blob-store objects. Storage failures are
  * swallowed (Promise.allSettled): the DB delete has already happened, and an
  * orphaned object is preferable to surfacing a failed user-facing delete.
+ *
+ * A ref that does not decode, or names an object other than its row's own,
+ * is skipped and logged rather than deleted: refs are not trusted to point
+ * where they should, and a computed key would be a guess. The log names the
+ * attachment only, never the ref.
  */
 export async function deleteAttachmentBlobs(
   refs: AttachmentBlobRef[],
 ): Promise<void> {
   if (refs.length === 0) return;
   const blobStore = getAttachmentBlobStore();
+  // The DB backend keeps bytes, not refs: there is no external object.
+  if (blobStore.backend === BLOB_STORAGE.DB) return;
+  const valid = refs.filter((r) => {
+    const ref = decodeObjectRef(r.stored);
+    if (ref && validateObjectRefKey(ref.key, r.context)) return true;
+    getLogger().warn(
+      { attachmentId: r.context.attachmentId },
+      "blob-store.cleanup.invalid_ref_skipped",
+    );
+    return false;
+  });
   await Promise.allSettled(
-    refs.map((r) => blobStore.deleteObject(r.stored, r.context)),
+    valid.map((r) => blobStore.deleteObject(r.stored, r.context)),
   );
 }

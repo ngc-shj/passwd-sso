@@ -46,6 +46,7 @@ const FIXTURE_SOURCES = [
   "src/lib/auth/jackson-providers.ts",
   "src/lib/security/unsafe-display-chars.ts",
   "src/lib/validations/common.ts",
+  "src/lib/validations/body-limits.ts",
   "src/lib/constants/time.ts",
 ];
 

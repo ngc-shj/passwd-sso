@@ -39,12 +39,14 @@ vi.mock("@/hooks/vault/use-reprompt", () => ({
 
 vi.mock("@/lib/crypto/crypto-client", () => ({
   decryptData: mockDecryptData,
+  encryptData: vi.fn().mockResolvedValue({ ciphertext: "ov-ct", iv: "ov-iv", authTag: "ov-tag" }),
 }));
 
 vi.mock("@/lib/team/team-vault-context", () => ({
   useTeamVault: () => ({
     getTeamEncryptionKey: mockGetTeamEncryptionKey,
     getEntryDecryptionKey: mockGetTeamEncryptionKey,
+    invalidateTeamKey: vi.fn(),
   }),
 }));
 
@@ -433,6 +435,236 @@ describe("EntryHistorySection", () => {
     });
     // Distinguish from the generic decrypt-failure message.
     expect(toast.error).not.toHaveBeenCalledWith("historyDecryptFailed");
+  });
+
+  it("shows the broken-key message when the member's key row at the version fails to unwrap", async () => {
+    mockGetTeamEncryptionKey.mockRejectedValueOnce(
+      new TeamKeyVersionUnavailableError("team-1", 2, "key_invalid"),
+    );
+    globalThis.fetch = vi.fn((url: string) =>
+      Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve(
+            url.includes("/history/h1")
+              ? { encryptedBlob: "c", blobIv: "i", blobAuthTag: "t", aadVersion: 1, teamKeyVersion: 2 }
+              : HISTORY_ITEMS,
+          ),
+      }),
+    ) as unknown as typeof fetch;
+
+    await act(async () => {
+      render(<EntryHistorySection entryId="entry-1" teamId="team-1" />);
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/entryHistory/)).toHaveTextContent("(1)");
+    });
+    fireEvent.click(screen.getByText(/entryHistory/));
+    await act(async () => {
+      fireEvent.click(screen.getAllByText(/viewVersion/)[0]);
+    });
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("historyKeyInvalid");
+    });
+  });
+
+  describe("team restore", () => {
+    const ROW = {
+      id: "h1",
+      entryType: "LOGIN",
+      encryptedBlob: "c",
+      blobIv: "i",
+      blobAuthTag: "t",
+      aadVersion: 1,
+      teamKeyVersion: 2,
+      itemKeyVersion: 1,
+      encryptedItemKey: "eik",
+      itemKeyIv: "iki",
+      itemKeyAuthTag: "ika",
+      itemKeyId: "row-ik",
+    };
+
+    function restoreFetch(restoreStatus: number, restoreBody: unknown, row: typeof ROW = ROW) {
+      return vi.fn((url: string, init?: RequestInit) => {
+        if (url.endsWith("/restore")) {
+          return Promise.resolve({
+            ok: restoreStatus === 200,
+            status: restoreStatus,
+            json: () => Promise.resolve(restoreBody),
+          });
+        }
+        if (url.includes("/history/h1")) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve(row) });
+        }
+        void init;
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(HISTORY_ITEMS) });
+      });
+    }
+
+    async function confirmRestore() {
+      await act(async () => {
+        render(<EntryHistorySection entryId="entry-1" teamId="team-1" />);
+      });
+      await waitFor(() => {
+        expect(screen.getByText(/entryHistory/)).toHaveTextContent("(1)");
+      });
+      fireEvent.click(screen.getByText(/entryHistory/));
+      await act(async () => {
+        fireEvent.click(screen.getAllByText(/restoreVersion/)[0]);
+      });
+      const dialog = screen.getByTestId("restore-dialog");
+      const confirm = Array.from(dialog.querySelectorAll("button")).find((b) => b.textContent === "restoreVersion");
+      await act(async () => {
+        fireEvent.click(confirm as HTMLButtonElement);
+      });
+    }
+
+    it("sends the row's blob and the overview rebuilt from it, re-sealed with the row's own key", async () => {
+      mockDecryptData.mockResolvedValue(JSON.stringify({ title: "Old", username: "u", url: "https://a.example/x" }));
+      const fetchMock = restoreFetch(200, { success: true });
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+      await confirmRestore();
+
+      await waitFor(() => expect(toast.success).toHaveBeenCalled());
+      expect(mockGetTeamEncryptionKey).toHaveBeenCalledWith(
+        "team-1",
+        "entry-1",
+        expect.objectContaining({ itemKeyId: "row-ik", teamKeyVersion: 2, itemKeyVersion: 1 }),
+      );
+      const post = fetchMock.mock.calls.find((c) => String(c[0]).endsWith("/restore"));
+      expect(JSON.parse(String((post?.[1] as RequestInit).body))).toEqual({
+        encryptedBlob: { ciphertext: "ov-ct", iv: "ov-iv", authTag: "ov-tag" },
+        encryptedOverview: { ciphertext: "ov-ct", iv: "ov-iv", authTag: "ov-tag" },
+        snapshotBlobIv: ROW.blobIv,
+      });
+    });
+
+    it("HISTORY_ROW_CHANGED → re-fetches the row and retries once with the rebuilt body", async () => {
+      mockDecryptData.mockResolvedValue(JSON.stringify({ title: "Old" }));
+      const rows = [ROW, { ...ROW, blobIv: "i2" }];
+      let rowReads = 0;
+      let restores = 0;
+      const fetchMock = vi.fn((url: string) => {
+        if (url.endsWith("/restore")) {
+          restores++;
+          const ok = restores > 1;
+          return Promise.resolve({
+            ok,
+            status: ok ? 200 : 409,
+            json: () => Promise.resolve(ok ? { success: true } : { error: "HISTORY_ROW_CHANGED" }),
+          });
+        }
+        if (url.includes("/history/h1")) {
+          const row = rows[Math.min(rowReads++, rows.length - 1)];
+          return Promise.resolve({ ok: true, json: () => Promise.resolve(row) });
+        }
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(HISTORY_ITEMS) });
+      });
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+      await confirmRestore();
+
+      await waitFor(() => expect(toast.success).toHaveBeenCalled());
+      const posts = fetchMock.mock.calls.filter((c) => String(c[0]).endsWith("/restore"));
+      expect(posts.map((c) => JSON.parse(String((c as unknown as [string, RequestInit])[1].body)).snapshotBlobIv)).toEqual(["i", "i2"]);
+      expect(rowReads).toBe(2);
+      expect(toast.error).not.toHaveBeenCalled();
+    });
+
+    it("HISTORY_ROW_CHANGED twice → one retry only, then the refusal is shown", async () => {
+      mockDecryptData.mockResolvedValue(JSON.stringify({ title: "Old" }));
+      const fetchMock = restoreFetch(409, { error: "HISTORY_ROW_CHANGED" });
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+      await confirmRestore();
+
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith("historyRowChanged"));
+      expect(fetchMock.mock.calls.filter((c) => String(c[0]).endsWith("/restore"))).toHaveLength(2);
+      expect(toast.success).not.toHaveBeenCalled();
+    });
+
+    // N-R4-2: the list already carries each row's aadVersion, so a team row the
+    // restore refuses is not offered (the teamRestoreInit refusal below stays for
+    // a row GET that disagrees with the list).
+    async function renderExpanded(items: unknown[], teamId?: string) {
+      globalThis.fetch = mockFetchHistoryList(items as typeof HISTORY_ITEMS);
+      await act(async () => {
+        render(<EntryHistorySection entryId="entry-1" teamId={teamId} />);
+      });
+      await waitFor(() => {
+        expect(screen.getByText(/entryHistory/)).toHaveTextContent("(1)");
+      });
+      fireEvent.click(screen.getByText(/entryHistory/));
+      return screen.getByRole("button", { name: "restoreVersion" });
+    }
+
+    it.each([
+      ["0", 0],
+      ["undefined", undefined],
+    ])("a team row listed at aadVersion %s: Restore is disabled and described by the too-old label", async (_label, aadVersion) => {
+      const restore = await renderExpanded([{ ...HISTORY_ITEMS[0], aadVersion }], "team-1");
+
+      expect(restore).toBeDisabled();
+      expect(restore).toHaveAccessibleDescription("restoreVersionTooOld");
+      expect(screen.getByText("restoreVersionTooOld")).toBeVisible();
+      fireEvent.click(restore);
+      expect(mockRequireVerification).not.toHaveBeenCalled();
+      expect(screen.queryByTestId("restore-dialog")).toBeNull();
+    });
+
+    it("control: a team row listed at aadVersion 1 offers Restore with no too-old label", async () => {
+      const restore = await renderExpanded([HISTORY_ITEMS[0]], "team-1");
+
+      expect(restore).toBeEnabled();
+      expect(restore).not.toHaveAccessibleDescription();
+      expect(screen.queryByText("restoreVersionTooOld")).toBeNull();
+      fireEvent.click(restore);
+      expect(screen.getByTestId("restore-dialog")).toBeInTheDocument();
+    });
+
+    it("control: a personal row at aadVersion 0 still offers Restore (only team restores refuse it)", async () => {
+      const restore = await renderExpanded([{ ...HISTORY_ITEMS[0], aadVersion: 0 }]);
+
+      expect(restore).toBeEnabled();
+      expect(screen.queryByText("restoreVersionTooOld")).toBeNull();
+    });
+
+    it("refuses an aadVersion-0 row GET (listed at 1) before decrypting: no POST, the too-old message is shown (S-R3-2)", async () => {
+      mockDecryptData.mockResolvedValue(JSON.stringify({ title: "Old" }));
+      const fetchMock = restoreFetch(200, { success: true }, { ...ROW, aadVersion: 0 });
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+      await confirmRestore();
+
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith("historyRowLegacy"));
+      expect(fetchMock.mock.calls.some((c) => String(c[0]).endsWith("/restore"))).toBe(false);
+      expect(mockDecryptData).not.toHaveBeenCalled();
+      expect(toast.success).not.toHaveBeenCalled();
+    });
+
+    it("control: the same row at aadVersion 1 is decrypted and POSTed", async () => {
+      mockDecryptData.mockResolvedValue(JSON.stringify({ title: "Old" }));
+      const fetchMock = restoreFetch(200, { success: true }, { ...ROW, aadVersion: 1 });
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+      await confirmRestore();
+
+      await waitFor(() => expect(toast.success).toHaveBeenCalled());
+      expect(fetchMock.mock.calls.some((c) => String(c[0]).endsWith("/restore"))).toBe(true);
+      expect(toast.error).not.toHaveBeenCalledWith("historyRowLegacy");
+    });
+
+    it("surfaces HISTORY_KEY_UNAVAILABLE with its exits", async () => {
+      mockDecryptData.mockResolvedValue(JSON.stringify({ title: "Old" }));
+      globalThis.fetch = restoreFetch(409, { error: "HISTORY_KEY_UNAVAILABLE" }) as unknown as typeof fetch;
+
+      await confirmRestore();
+
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith("historyKeyUnavailable"));
+      expect(toast.success).not.toHaveBeenCalled();
+    });
   });
 
   // F3: a transient failure (network/5xx/unwrap) must NOT be mistaken for

@@ -92,6 +92,12 @@ export interface TeamEntryFormEditData {
   encryptedItemKey?: string;
   itemKeyIv?: string;
   itemKeyAuthTag?: string;
+  /** Identity of the live ItemKey; an edit reusing it sends it back. */
+  itemKeyId?: string | null;
+  /** The version a new ItemKey (v0→v1 upgrade) must take, from the server. */
+  nextItemKeyVersion?: number;
+  /** The blob IV read, named by a v0→v1 upgrade as the blob it replaces. */
+  blobIv?: string;
 }
 
 export interface TeamEntryFormProps {

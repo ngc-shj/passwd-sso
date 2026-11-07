@@ -9,12 +9,15 @@ import { withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
+import { heldTeamKeyVersions } from "@/lib/team/team-item-key";
 
 type Params = { params: Promise<{ teamId: string }> };
 
 /**
  * GET /api/teams/[teamId]/rotate-key/data
- * Bulk-fetch all team entries and active member public keys needed for key rotation.
+ * Bulk-fetch all team entries and active member public keys needed for key rotation,
+ * plus the team key versions the caller holds a member key for (an entry at a
+ * version outside that list is carried as `not_held`).
  * Requires TEAM_UPDATE permission (admin or owner).
  */
 async function handleGET(req: NextRequest, { params }: Params) {
@@ -42,7 +45,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
     return errorResponse(API_ERROR.TEAM_NOT_FOUND);
   }
 
-  const [entries, activeMembers] = await withTeamTenantRls(teamId, async () => {
+  const [entries, activeMembers, actorKeyVersions] = await withTeamTenantRls(teamId, async () => {
     // All entries regardless of deletedAt / isArchived status
     const entries = await prisma.teamPasswordEntry.findMany({
       where: { teamId },
@@ -59,6 +62,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
         encryptedItemKey: true,
         itemKeyIv: true,
         itemKeyAuthTag: true,
+        itemKeyId: true,
         aadVersion: true,
       },
     });
@@ -67,7 +71,8 @@ async function handleGET(req: NextRequest, { params }: Params) {
       where: { teamId, deactivatedAt: null, keyDistributed: true },
       select: { userId: true },
     });
-    return [entries, activeMembers] as const;
+    const actorKeyVersions = await heldTeamKeyVersions(prisma, teamId, session.user.id);
+    return [entries, activeMembers, actorKeyVersions] as const;
   });
 
   // Fetch the latest TeamMemberKey for each active member to get their public key
@@ -108,6 +113,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
     teamKeyVersion: team.teamKeyVersion,
     entries,
     members,
+    actorKeyVersions,
   });
 }
 

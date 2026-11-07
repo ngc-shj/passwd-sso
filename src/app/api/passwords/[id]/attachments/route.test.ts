@@ -441,6 +441,11 @@ describe("POST /api/passwords/[id]/attachments", () => {
         }),
       }),
     );
+    // The body is written to a fresh generation key before the transaction.
+    expect(mockPutObject).toHaveBeenCalledWith(
+      expect.any(Buffer),
+      { attachmentId: clientId, entryId: "pw-1", generation: expect.stringMatching(/^[0-9a-f]{32}$/) },
+    );
   });
 
   it("request keyVersion field is ignored — server unconditionally sets encryptionMode: 2", async () => {

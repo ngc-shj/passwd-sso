@@ -118,4 +118,46 @@ describe("saveTeamEntry", () => {
     const body = JSON.parse(String(init.body)) as Record<string, unknown>;
     expect(body.itemKeyVersion).toBe(0);
   });
+
+  it("sends the reused ItemKey's id on an edit (C1)", async () => {
+    const fetchMock = vi.spyOn(global, "fetch").mockResolvedValue(new Response(null, { status: 200 }));
+
+    await saveTeamEntry({
+      mode: "edit",
+      teamId: "team-1",
+      entryId: "entry-existing",
+      encryptionKey: {} as CryptoKey,
+      teamKeyVersion: 2,
+      itemKeyVersion: 1,
+      itemKeyId: "ik-1",
+      fullBlob: "{}",
+      overviewBlob: "{}",
+      tagIds: [],
+    });
+
+    const body = JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body)) as Record<string, unknown>;
+    expect(body.itemKeyId).toBe("ik-1");
+    expect(body.snapshotBlobIv).toBeUndefined();
+  });
+
+  it("sends snapshotBlobIv with the new wrap of a v0→v1 upgrade", async () => {
+    const fetchMock = vi.spyOn(global, "fetch").mockResolvedValue(new Response(null, { status: 200 }));
+
+    await saveTeamEntry({
+      mode: "edit",
+      teamId: "team-1",
+      entryId: "entry-existing",
+      encryptionKey: {} as CryptoKey,
+      teamKeyVersion: 2,
+      itemKeyVersion: 4,
+      encryptedItemKey: { ciphertext: "c", iv: "i", authTag: "a" },
+      snapshotBlobIv: "b-iv",
+      fullBlob: "{}",
+      overviewBlob: "{}",
+      tagIds: [],
+    });
+
+    const body = JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body)) as Record<string, unknown>;
+    expect(body).toMatchObject({ itemKeyVersion: 4, snapshotBlobIv: "b-iv", encryptedItemKey: { ciphertext: "c", iv: "i", authTag: "a" } });
+  });
 });

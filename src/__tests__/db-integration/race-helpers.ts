@@ -43,6 +43,60 @@ export function createRaceHelpers(pool: Pool) {
     };
   }
 
+  /**
+   * Hold `lockSql` in a blocker transaction, start `send`, wait until it parks
+   * on the blocker, run `whileParked` (assertions on the parked backend, the
+   * blocker's own writes), then commit and return what `send` resolved to.
+   *
+   * Failure-safe: when anything throws before the commit, the blocker rolls
+   * back and is released, the parked request is let run to completion, and
+   * the original error is rethrown — a failing cell leaves no open
+   * transaction for the next cells to time out on.
+   */
+  async function parkBehind<T>(
+    lockSql: string,
+    params: unknown[],
+    send: () => Promise<T>,
+    whileParked: (blocker: PoolClient, parkedPid: number) => Promise<void> = async () => {},
+  ): Promise<T> {
+    const client: PoolClient = await pool.connect();
+    let committed = false;
+    let pending: Promise<T> | undefined;
+    let broken: Error | undefined;
+    try {
+      await client.query("BEGIN");
+      await client.query(lockSql, params);
+      const { rows: [{ pid }] } = await client.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+      pending = send();
+      // Handled here so a rejection while parked is not reported as
+      // unhandled; awaiting `pending` below still rejects.
+      pending.catch(() => {});
+      const parkedPid = await waitForBackendBlockedBy(pid);
+      await whileParked(client, parkedPid);
+      await client.query("COMMIT");
+      committed = true;
+      return await pending;
+    } finally {
+      if (!committed) {
+        await client.query("ROLLBACK").catch((e: unknown) => {
+          broken = e instanceof Error ? e : new Error(String(e));
+        });
+      }
+      // A connection whose ROLLBACK failed is destroyed, not reused.
+      client.release(broken);
+      if (!committed && pending) await pending.catch(() => {});
+    }
+  }
+
+  /** The query a backend is waiting in (its first ungranted lock). */
+  async function waitingQueryOf(pid: number): Promise<string | undefined> {
+    const r = await pool.query<{ query: string }>(
+      `SELECT a.query FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid WHERE l.pid = $1 AND NOT l.granted`,
+      [pid],
+    );
+    return r.rows[0]?.query;
+  }
+
   async function backendsBlockedBy(pid: number): Promise<number[]> {
     const r = await pool.query<{ pid: number }>(
       `SELECT pid FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))`,
@@ -93,5 +147,5 @@ export function createRaceHelpers(pool: Pool) {
     throw new Error(`work neither settled nor blocked on pid ${parkedPid} within ${BLOCK_WAIT_MS}ms`);
   }
 
-  return { holdRowLock, backendsBlockedBy, waitForBackendBlockedBy, settledOrBlocked };
+  return { holdRowLock, parkBehind, waitingQueryOf, backendsBlockedBy, waitForBackendBlockedBy, settledOrBlocked };
 }

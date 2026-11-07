@@ -127,6 +127,13 @@ describe("API_PATH", () => {
     expect(apiPath.teamPasswordAttachmentById("team-1", "pw-1", "att-1")).toBe(
       "/api/teams/team-1/passwords/pw-1/attachments/att-1"
     );
+    expect(apiPath.teamPasswordAttachmentMigrate("team-1", "pw-1", "att-1")).toBe(
+      "/api/teams/team-1/passwords/pw-1/attachments/att-1/migrate"
+    );
+    expect(apiPath.teamPasswordRekey("team-1", "pw-1")).toBe(
+      "/api/teams/team-1/passwords/pw-1/rekey"
+    );
+    expect(apiPath.teamRekey("team-1")).toBe("/api/teams/team-1/rekey");
     expect(apiPath.teamTags("team-1")).toBe("/api/teams/team-1/tags");
     expect(apiPath.teamAuditLogs("team-1")).toBe("/api/teams/team-1/audit-logs");
     expect(apiPath.emergencyGrantById("gr-1")).toBe("/api/emergency-access/gr-1");

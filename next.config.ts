@@ -3,6 +3,7 @@ import { execSync } from "node:child_process";
 import createNextIntlPlugin from "next-intl/plugin";
 import { withSentryConfig } from "@sentry/nextjs/config";
 import { PERMISSIONS_POLICY } from "./src/lib/security/security-headers";
+import { PROXY_CLIENT_MAX_BODY_SIZE } from "./src/lib/validations/body-limits";
 
 // Build metadata for reproducible build tracking
 function getGitSha(): string {
@@ -35,6 +36,16 @@ const nextConfig: NextConfig = {
   output: "standalone",
   allowedDevOrigins: devAllowedOrigins.length > 0 ? devAllowedOrigins : undefined,
   serverExternalPackages: ["file-type", "@aws-sdk/client-secrets-manager", "@azure/keyvault-secrets", "@azure/identity", "@google-cloud/secret-manager"],
+
+  experimental: {
+    // The proxy buffers every matched request body up to this size before the
+    // route runs (and before authentication); beyond it the route receives a
+    // truncated body. The default 10 MB truncates the re-key, attachment
+    // migrate, maximum-size upload and large vault rotation bodies.
+    // Deployments cap bodies at the
+    // ingress (docs/operations/deployment.md).
+    proxyClientMaxBodySize: PROXY_CLIENT_MAX_BODY_SIZE,
+  },
 
   env: {
     NEXT_PUBLIC_BUILD_SHA: getGitSha(),

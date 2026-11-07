@@ -9,7 +9,7 @@ import type { TeamEntryFormEditData } from "@/components/team/forms/team-entry-f
 import type { TeamTagData } from "@/components/team/forms/team-tag-input";
 import { apiPath } from "@/lib/constants";
 import type { EntryCustomField, EntryTotp } from "@/lib/vault/entry-form-types";
-import { buildTeamEntryAAD } from "@/lib/crypto/crypto-aad";
+import { buildTeamEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import { decryptData } from "@/lib/crypto/crypto-client";
 import { useTeamVault } from "@/lib/team/team-vault-context";
 import { fetchApi } from "@/lib/url-helpers";
@@ -66,10 +66,11 @@ export function TeamEditDialogLoader({
           encryptedItemKey: raw.encryptedItemKey as string | undefined,
           itemKeyIv: raw.itemKeyIv as string | undefined,
           itemKeyAuthTag: raw.itemKeyAuthTag as string | undefined,
+          itemKeyId: (raw.itemKeyId as string | null | undefined) ?? null,
           teamKeyVersion: (raw.teamKeyVersion as number) ?? 1,
         });
 
-        const aad = buildTeamEntryAAD(teamId, id, "blob", itemKeyVersion);
+        const aad = buildTeamEntryAAD(teamId, id, VAULT_TYPE.BLOB, itemKeyVersion);
         const json = await decryptData(
           {
             ciphertext: raw.encryptedBlob as string,
@@ -156,6 +157,9 @@ export function TeamEditDialogLoader({
           encryptedItemKey: raw.encryptedItemKey as string | undefined,
           itemKeyIv: raw.itemKeyIv as string | undefined,
           itemKeyAuthTag: raw.itemKeyAuthTag as string | undefined,
+          itemKeyId: (raw.itemKeyId as string | null | undefined) ?? null,
+          nextItemKeyVersion: raw.nextItemKeyVersion as number | undefined,
+          blobIv: raw.blobIv as string | undefined,
         });
         setError(null);
       } catch (e) {

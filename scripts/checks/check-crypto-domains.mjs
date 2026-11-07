@@ -44,7 +44,7 @@ const LEDGER_EXEMPT = new Set([
 //   crypto-aad.ts       — the single app-side AAD registry; buildAADBytes lives here.
 //   extension/crypto.ts — extension bundle (separate JS heap); byte-parity guarded
 //                         by aad-parity.test.ts (PV scope).
-//   extension/crypto-team.ts — extension bundle; byte-parity guarded for OV/IK/OK.
+//   extension/crypto-team.ts — extension bundle; byte-parity guarded for OV/IK/OK/TW.
 const AAD_ENCODER_ALLOWLIST = new Set([
   "src/lib/crypto/crypto-aad.ts",
   "extension/src/lib/crypto.ts",
@@ -64,7 +64,7 @@ const AAD_ENCODER_ALLOWLIST = new Set([
 //                           (webhook, account-token); uses setAAD.
 //   envelope.ts           — shared server-side encryption envelope; uses setAAD.
 //   extension/crypto.ts   — extension primitive (additionalData, PV scope).
-//   extension/crypto-team.ts — extension primitive (additionalData, OV/IK/OK).
+//   extension/crypto-team.ts — extension primitive (additionalData, OV/IK/OK/TW).
 const AEAD_AAD_ALLOWLIST = new Set([
   "src/lib/crypto/crypto-client.ts",
   "src/lib/crypto/crypto-team.ts",

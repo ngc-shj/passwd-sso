@@ -7,10 +7,11 @@ import {
   requireTeamPermission,
   requireTeamMember,
   hasTeamPermission,
+  canWriteTeamEntry,
 } from "@/lib/auth/access/team-auth";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
-import { TEAM_PERMISSION, TEAM_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION, EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
+import { TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { displayIdentityOf, displayUserOf, fetchUserDisplayMap } from "@/lib/audit/audit-user-lookup";
 import { deleteAttachmentBlobs } from "@/lib/blob-store/cleanup";
@@ -20,6 +21,7 @@ import * as teamPasswordService from "@/lib/services/team-password-service";
 import { TeamPasswordServiceError } from "@/lib/services/team-password-service";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
+import { nextItemKeyVersion } from "@/lib/team/team-item-key";
 
 type Params = { params: Promise<{ teamId: string; id: string }> };
 
@@ -76,6 +78,10 @@ async function handleGET(req: NextRequest, { params }: Params) {
       itemKeyIv: entry.itemKeyIv,
       itemKeyAuthTag: entry.itemKeyAuthTag,
     } : {}),
+    itemKeyId: entry.itemKeyId,
+    // The version a new ItemKey (v0→v1 upgrade) must take; the server
+    // recomputes it under the entry lock.
+    nextItemKeyVersion: nextItemKeyVersion(entry.itemKeyVersionHighWater, entry.itemKeyVersion),
     requireReprompt: entry.requireReprompt,
     expiresAt: entry.expiresAt,
   });
@@ -109,17 +115,14 @@ async function handlePUT(req: NextRequest, { params }: Params) {
   if (!hasTeamPermission(membership.role, TEAM_PERMISSION.PASSWORD_UPDATE)) {
     return forbidden();
   }
-  if (
-    membership.role === TEAM_ROLE.MEMBER &&
-    existingEntry.createdById !== session.user.id
-  ) {
+  if (!canWriteTeamEntry(membership.role, existingEntry.createdById, session.user.id)) {
     return errorResponse(API_ERROR.ONLY_OWN_ENTRIES);
   }
 
   const result = await parseBody(req, updateTeamE2EPasswordSchema);
   if (!result.ok) return result.response;
 
-  const { encryptedBlob, encryptedOverview, aadVersion, teamKeyVersion, itemKeyVersion, encryptedItemKey, tagIds, teamFolderId, isArchived, requireReprompt, expiresAt } = result.data;
+  const { encryptedBlob, encryptedOverview, aadVersion, teamKeyVersion, itemKeyVersion, encryptedItemKey, itemKeyId, snapshotBlobIv, tagIds, teamFolderId, isArchived, requireReprompt, expiresAt } = result.data;
 
   let updated;
   try {
@@ -131,6 +134,8 @@ async function handlePUT(req: NextRequest, { params }: Params) {
         teamKeyVersion,
         itemKeyVersion,
         encryptedItemKey,
+        itemKeyId,
+        snapshotBlobIv,
         tagIds,
         teamFolderId,
         isArchived,

@@ -6,6 +6,7 @@ import {
   createTeamE2ESchema,
   createTeamE2EPasswordSchema,
   updateTeamE2EPasswordSchema,
+  restoreTeamHistorySchema,
   updateTeamSchema,
   upsertTeamPolicySchema,
   inviteSchema,
@@ -37,6 +38,7 @@ import {
   HEX_IV_LENGTH,
   HEX_AUTH_TAG_LENGTH,
   HEX_SALT_LENGTH,
+  CIPHERTEXT_MAX,
 } from "@/lib/validations/common";
 import {
   TEAM_ROLE,
@@ -431,6 +433,88 @@ describe("updateTeamE2EPasswordSchema", () => {
   it("accepts itemKeyVersion>=1 without encryptedItemKey (reuse existing)", () => {
     const result = updateTeamE2EPasswordSchema.safeParse({ itemKeyVersion: 1 });
     expect(result.success).toBe(true);
+  });
+
+  it("accepts the reused ItemKey's id", () => {
+    const result = updateTeamE2EPasswordSchema.safeParse({
+      itemKeyVersion: 1,
+      itemKeyId: "11111111-1111-4111-8111-111111111111",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects an itemKeyId that is not a UUID", () => {
+    const result = updateTeamE2EPasswordSchema.safeParse({ itemKeyVersion: 1, itemKeyId: "not-a-uuid" });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a new wrap without the blobIv snapshot that marks the v0→v1 upgrade", () => {
+    const result = updateTeamE2EPasswordSchema.safeParse({
+      itemKeyVersion: 1,
+      encryptedItemKey: validEncryptedField(),
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts a new wrap with the blobIv snapshot", () => {
+    const result = updateTeamE2EPasswordSchema.safeParse({
+      itemKeyVersion: 1,
+      encryptedItemKey: validEncryptedField(),
+      snapshotBlobIv: "d".repeat(24),
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a malformed blobIv snapshot", () => {
+    const result = updateTeamE2EPasswordSchema.safeParse({ snapshotBlobIv: "xyz" });
+    expect(result.success).toBe(false);
+  });
+});
+
+// ─── restoreTeamHistorySchema ───────────────────────────────
+
+describe("restoreTeamHistorySchema", () => {
+  const restoreBody = () => ({
+    encryptedBlob: validEncryptedField(),
+    encryptedOverview: validEncryptedField(),
+    snapshotBlobIv: "a".repeat(24),
+  });
+
+  it("accepts the re-sealed blob and overview with the decrypted row's blobIv", () => {
+    expect(restoreTeamHistorySchema.safeParse(restoreBody()).success).toBe(true);
+  });
+
+  it("rejects a body without snapshotBlobIv, or with a malformed one", () => {
+    const { snapshotBlobIv: _omit, ...withoutIv } = restoreBody();
+    expect(restoreTeamHistorySchema.safeParse(withoutIv).success).toBe(false);
+    expect(restoreTeamHistorySchema.safeParse({ ...restoreBody(), snapshotBlobIv: "zz" }).success).toBe(false);
+  });
+
+  it("rejects a body without the overview", () => {
+    const { encryptedOverview: _omit, ...withoutOverview } = restoreBody();
+    expect(restoreTeamHistorySchema.safeParse(withoutOverview).success).toBe(false);
+  });
+
+  it("rejects a body without the blob (the server never copies the row's blob)", () => {
+    const { encryptedBlob: _omit, ...withoutBlob } = restoreBody();
+    expect(restoreTeamHistorySchema.safeParse(withoutBlob).success).toBe(false);
+  });
+
+  it("rejects a blob over the ciphertext cap", () => {
+    expect(
+      restoreTeamHistorySchema.safeParse({
+        ...restoreBody(),
+        encryptedBlob: { ...validEncryptedField(), ciphertext: "a".repeat(CIPHERTEXT_MAX + 1) },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects a malformed overview", () => {
+    const result = restoreTeamHistorySchema.safeParse({
+      ...restoreBody(),
+      encryptedOverview: { ...validEncryptedField(), iv: "short" },
+    });
+    expect(result.success).toBe(false);
   });
 
   it("rejects expiresAt without offset", () => {

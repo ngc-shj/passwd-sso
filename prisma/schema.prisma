@@ -763,6 +763,19 @@ model TeamPasswordEntry {
   itemKeyAuthTag    String?   @map("item_key_auth_tag") @db.VarChar(32)
   entryType         EntryType @default(LOGIN) @map("entry_type")
 
+  // Identity of the current ItemKey: minted when an ItemKey is created,
+  // unchanged by rotation's re-wrap. Every writer of this release sets it for
+  // an ItemKey; NULL for a v0 entry, and for a v1+ row an instance of the
+  // previous release wrote during rollout (counted as pending re-key). No
+  // CHECK this release: it ships after a backfill of such rows.
+  itemKeyId               String? @map("item_key_id") @db.Uuid
+  // Team key version at which the current ItemKey was created; the entry
+  // awaits re-key while this is below teams.team_key_version.
+  itemKeyTeamKeyVersion   Int     @default(0) @map("item_key_team_key_version")
+  // Highest itemKeyVersion the entry, its history or its attachments ever
+  // used; a new ItemKey takes highWater + 1. Never lowered.
+  itemKeyVersionHighWater Int     @default(0) @map("item_key_version_high_water")
+
   // Metadata (unencrypted)
   isArchived      Boolean   @default(false) @map("is_archived")
   requireReprompt Boolean   @default(false) @map("require_reprompt")
@@ -1016,6 +1029,9 @@ enum AuditAction {
   SESSION_REVOKE_ALL
   TEAM_E2E_MIGRATION
   TEAM_KEY_ROTATION
+  TEAM_KEY_ROTATION_CARRY
+  TEAM_ENTRY_REKEY
+  TEAM_ATTACHMENT_MIGRATE
   TEAM_MEMBER_KEY_DISTRIBUTE
   TEAM_MEMBER_KEY_OLD_VERSION_READ
   SCIM_TOKEN_CREATE
@@ -1377,6 +1393,9 @@ model Attachment {
   cekAuthTag        String? @map("cek_auth_tag") @db.VarChar(32)
   cekKeyVersion     Int?    @map("cek_key_version")
   cekWrapAadVersion Int?    @default(1) @map("cek_wrap_aad_version")
+  // Team mode-2 rows only: the item_key_id of the ItemKey the CEK is wrapped
+  // under (NULL for personal rows and team mode 0/1 rows).
+  cekItemKeyId      String? @map("cek_item_key_id") @db.Uuid
 
   tenantId            String   @map("tenant_id") @db.Uuid
   passwordEntryId     String?  @map("password_entry_id") @db.Uuid
@@ -1535,6 +1554,7 @@ model TeamPasswordEntryHistory {
   encryptedItemKey String?  @map("encrypted_item_key") @db.Text
   itemKeyIv        String?  @map("item_key_iv") @db.VarChar(24)
   itemKeyAuthTag   String?  @map("item_key_auth_tag") @db.VarChar(32)
+  itemKeyId        String?  @map("item_key_id") @db.Uuid
   changedById      String   @map("changed_by_id") @db.Uuid
   changedAt        DateTime @default(now()) @map("changed_at") @db.Timestamptz(3)
 

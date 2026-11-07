@@ -9,6 +9,8 @@ import {
   buildEmergencyWrapAAD,
   buildWebhookSecretAAD,
   buildAccountTokenAAD,
+  buildAttachmentCekWrapAAD,
+  buildTeamAttachmentCekWrapAAD,
   AAD_VERSION,
 } from "./crypto-aad";
 
@@ -286,6 +288,22 @@ describe("crypto-aad", () => {
       expect(aad[2]).toBe(AAD_VERSION);
       expect(aad[3]).toBe(4); // nFields
       expect(hex(aad)).toBe("4f4b0104000174000175000132000131");
+    });
+  });
+
+  describe("buildTeamAttachmentCekWrapAAD (TW)", () => {
+    it("produces the frozen TW golden vector", () => {
+      const aad = buildTeamAttachmentCekWrapAAD("t", "e", "a", 2, 1);
+      expect(String.fromCharCode(aad[0], aad[1])).toBe("TW");
+      expect(aad[2]).toBe(AAD_VERSION);
+      expect(aad[3]).toBe(5); // nFields
+      expect(hex(aad)).toBe("54570105000174000165000161000132000131");
+    });
+
+    it("differs from the personal CEK wrap (AW) for the same attachment", () => {
+      expect(hex(buildTeamAttachmentCekWrapAAD("t", "e", "a", 2, 1))).not.toBe(
+        hex(buildAttachmentCekWrapAAD("e", "a", 2, 1)),
+      );
     });
   });
 

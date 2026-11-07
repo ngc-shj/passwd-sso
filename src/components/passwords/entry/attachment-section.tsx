@@ -38,7 +38,7 @@ import {
   MIN_ACCEPTED_CEK_WRAP_AAD_VERSION,
   CURRENT_CEK_WRAP_AAD_VERSION,
 } from "@/lib/crypto/crypto-aad";
-import { apiPath } from "@/lib/constants";
+import { apiPath, ATTACHMENT_ENCRYPTION_MODE } from "@/lib/constants";
 import {
   ALLOWED_EXTENSIONS,
   ALLOWED_CONTENT_TYPES,
@@ -82,7 +82,7 @@ function getExtension(filename: string): string {
 
 /** Download response shape from GET /api/passwords/[id]/attachments/[attachmentId] */
 interface Mode0AttachmentDownload {
-  encryptionMode: 0;
+  encryptionMode: typeof ATTACHMENT_ENCRYPTION_MODE.VAULT_KEY;
   encryptedData: string; // base64
   iv: string;
   authTag: string;
@@ -95,7 +95,7 @@ interface Mode0AttachmentDownload {
 }
 
 interface Mode2AttachmentDownload {
-  encryptionMode: 2;
+  encryptionMode: typeof ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED;
   encryptedData: string; // base64
   iv: string;
   authTag: string;
@@ -224,7 +224,7 @@ export function AttachmentSection({
       formData.append("contentType", file.type);
       formData.append("sizeBytes", file.size.toString());
       formData.append("aadVersion", String(AAD_VERSION));
-      formData.append("encryptionMode", "2");
+      formData.append("encryptionMode", String(ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED));
       formData.append("cekEncrypted", bytesToBase64(wrappedCek.ciphertext));
       formData.append("cekIv", wrappedCek.iv);
       formData.append("cekAuthTag", wrappedCek.authTag);
@@ -274,7 +274,7 @@ export function AttachmentSection({
 
       let decrypted: ArrayBuffer;
 
-      if (data.encryptionMode === 0) {
+      if (data.encryptionMode === ATTACHMENT_ENCRYPTION_MODE.VAULT_KEY) {
         // Legacy: body encrypted directly with vault encryptionKey
         decrypted = await decryptBinary(
           { ciphertext, iv: data.iv, authTag: data.authTag },
@@ -409,7 +409,7 @@ export function AttachmentSection({
                   <p className="text-xs text-muted-foreground">
                     {formatFileSize(att.sizeBytes)}
                   </p>
-                  {att.encryptionMode === 0 && (
+                  {att.encryptionMode === ATTACHMENT_ENCRYPTION_MODE.VAULT_KEY && (
                     <p className="text-xs text-muted-foreground/70 italic">
                       {tVault("legacyAttachmentHint")}
                     </p>

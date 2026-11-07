@@ -11,8 +11,11 @@ const {
   mockTeamPasswordEntryHistoryDeleteMany,
   mockTxQueryRaw,
   mockTransaction,
+  mockTeamMemberFindFirst,
   queryRawOn,
 } = vi.hoisted(() => {
+  // The actor's role, re-read under the team lock (activeTeamRole).
+  const mockTeamMemberFindFirst = vi.fn();
   const mockTeamLockRead = vi.fn();
   const mockTeamFolderFindUnique = vi.fn();
   const mockTeamTagCount = vi.fn();
@@ -34,6 +37,9 @@ const {
     encrypted_item_key: "cur-ik-cipher",
     item_key_iv: "cur-ik-iv",
     item_key_auth_tag: "cur-ik-tag",
+    item_key_id: "11111111-1111-4111-8111-111111111111",
+    item_key_team_key_version: 5,
+    item_key_version_high_water: 2,
   };
   const mockTxQueryRaw = vi.fn().mockResolvedValue([teamCurRow]);
 
@@ -64,6 +70,7 @@ const {
     teamPasswordEntry: {
       update: mockTeamPasswordEntryUpdate,
     },
+    teamMember: { findFirst: mockTeamMemberFindFirst },
   };
 
   const mockTransaction = vi.fn(async (fn: (tx: typeof txClient) => Promise<unknown>) =>
@@ -81,6 +88,7 @@ const {
     mockTeamPasswordEntryHistoryDeleteMany,
     mockTxQueryRaw,
     mockTransaction,
+    mockTeamMemberFindFirst,
     queryRawOn,
   };
 });
@@ -295,6 +303,46 @@ describe("createTeamPassword", () => {
     expect(createCall.data.id).toBe(clientId);
   });
 
+  it("mints the ItemKey id server-side and marks a v1 entry created under the current team key", async () => {
+    mockTeamLockRead.mockResolvedValue(DEFAULT_TEAM);
+    mockTeamPasswordEntryCreate.mockResolvedValue({ id: "entry-1", tags: [] });
+
+    await createTeamPassword(TEAM_ID, {
+      ...BASE_CREATE_INPUT,
+      itemKeyVersion: 1,
+      encryptedItemKey: ENCRYPTED_ITEM_KEY,
+    });
+
+    const data = mockTeamPasswordEntryCreate.mock.calls[0][0].data;
+    expect(data.itemKeyId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(data.itemKeyTeamKeyVersion).toBe(DEFAULT_TEAM.teamKeyVersion);
+    expect(data.itemKeyVersionHighWater).toBe(1);
+  });
+
+  it("mints a different ItemKey id for each created entry", async () => {
+    mockTeamLockRead.mockResolvedValue(DEFAULT_TEAM);
+    mockTeamPasswordEntryCreate.mockResolvedValue({ id: "entry-1", tags: [] });
+    const v1 = { ...BASE_CREATE_INPUT, itemKeyVersion: 1, encryptedItemKey: ENCRYPTED_ITEM_KEY };
+
+    await createTeamPassword(TEAM_ID, v1);
+    await createTeamPassword(TEAM_ID, v1);
+
+    const [a, b] = mockTeamPasswordEntryCreate.mock.calls.map((c) => c[0].data.itemKeyId);
+    expect(a).not.toBe(b);
+  });
+
+  it("creates a v0 entry with no ItemKey id, marked at the current team key version", async () => {
+    mockTeamLockRead.mockResolvedValue(DEFAULT_TEAM);
+    mockTeamPasswordEntryCreate.mockResolvedValue({ id: "entry-1", tags: [] });
+
+    await createTeamPassword(TEAM_ID, BASE_CREATE_INPUT);
+
+    const data = mockTeamPasswordEntryCreate.mock.calls[0][0].data;
+    expect(data).not.toHaveProperty("itemKeyId");
+    expect(data.itemKeyTeamKeyVersion).toBe(DEFAULT_TEAM.teamKeyVersion);
+    expect(data.itemKeyVersionHighWater).toBe(0);
+  });
+
   it("creates entry with UUID v4 teamId and entryId", async () => {
     mockTeamLockRead.mockResolvedValue(DEFAULT_TEAM);
     const created = { id: PASSWORD_ID_UUID, tags: [] };
@@ -404,6 +452,22 @@ const TEAM_CUR_ROW = {
   encrypted_item_key: "cur-ik-cipher",
   item_key_iv: "cur-ik-iv",
   item_key_auth_tag: "cur-ik-tag",
+  item_key_id: "11111111-1111-4111-8111-111111111111",
+  item_key_team_key_version: 5,
+  item_key_version_high_water: 2,
+  created_by_id: "user-1",
+};
+const CUR_ITEM_KEY_ID = TEAM_CUR_ROW.item_key_id;
+
+// A v0 entry: no ItemKey, the blob sealed under the team key directly.
+const TEAM_CUR_ROW_V0 = {
+  ...TEAM_CUR_ROW,
+  item_key_version: 0,
+  encrypted_item_key: null,
+  item_key_iv: null,
+  item_key_auth_tag: null,
+  item_key_id: null,
+  item_key_version_high_water: 1,
 };
 
 describe("updateTeamPassword", () => {
@@ -411,6 +475,7 @@ describe("updateTeamPassword", () => {
     vi.resetAllMocks();
     // Re-apply $queryRaw and transaction implementation after reset
     mockTxQueryRaw.mockResolvedValue([TEAM_CUR_ROW]);
+    mockTeamMemberFindFirst.mockResolvedValue({ role: "ADMIN" });
     mockTransaction.mockImplementation(async (fn) =>
       fn({
         $queryRaw: queryRawOn("tx"),
@@ -423,12 +488,13 @@ describe("updateTeamPassword", () => {
         teamPasswordEntry: {
           update: mockTeamPasswordEntryUpdate,
         },
+        teamMember: { findFirst: mockTeamMemberFindFirst },
       }),
     );
   });
 
   it("updates entry with full payload (team version check + folder validation)", async () => {
-    mockTeamLockRead.mockResolvedValue({ teamKeyVersion: 3 });
+    mockTeamLockRead.mockResolvedValue({ teamKeyVersion: 5 });
     mockTeamFolderFindUnique.mockResolvedValue(DEFAULT_FOLDER);
     mockTeamPasswordEntryHistoryCreate.mockResolvedValue({});
     mockTeamPasswordEntryHistoryFindMany.mockResolvedValue([{ id: "h-1" }]);
@@ -439,8 +505,9 @@ describe("updateTeamPassword", () => {
       encryptedBlob: ENCRYPTED_BLOB,
       encryptedOverview: ENCRYPTED_OVERVIEW,
       aadVersion: 1,
-      teamKeyVersion: 3,
-      itemKeyVersion: 0,
+      teamKeyVersion: 5,
+      itemKeyVersion: 2,
+      itemKeyId: CUR_ITEM_KEY_ID,
       teamFolderId: FOLDER_ID,
       userId: USER_ID,
       existingEntry: BASE_EXISTING_ENTRY,
@@ -501,8 +568,9 @@ describe("updateTeamPassword", () => {
       encryptedBlob: ENCRYPTED_BLOB,
       encryptedOverview: ENCRYPTED_OVERVIEW,
       aadVersion: 1,
-      teamKeyVersion: 3,
-      itemKeyVersion: 0,
+      teamKeyVersion: 5,
+      itemKeyVersion: 2,
+      itemKeyId: CUR_ITEM_KEY_ID,
       userId: USER_ID,
       existingEntry: BASE_EXISTING_ENTRY,
     };
@@ -520,8 +588,9 @@ describe("updateTeamPassword", () => {
       encryptedBlob: ENCRYPTED_BLOB,
       encryptedOverview: ENCRYPTED_OVERVIEW,
       aadVersion: 1,
-      teamKeyVersion: 3,
-      itemKeyVersion: 0,
+      teamKeyVersion: 5,
+      itemKeyVersion: 2,
+      itemKeyId: CUR_ITEM_KEY_ID,
       userId: USER_ID,
       existingEntry: BASE_EXISTING_ENTRY,
     };
@@ -561,7 +630,7 @@ describe("updateTeamPassword", () => {
   });
 
   it("creates a history snapshot when encryptedBlob changes", async () => {
-    mockTeamLockRead.mockResolvedValue({ teamKeyVersion: 3 });
+    mockTeamLockRead.mockResolvedValue({ teamKeyVersion: 5 });
     mockTeamPasswordEntryHistoryCreate.mockResolvedValue({});
     mockTeamPasswordEntryHistoryFindMany.mockResolvedValue([{ id: "h-1" }]);
     mockTeamPasswordEntryUpdate.mockResolvedValue({ id: PASSWORD_ID, tags: [] });
@@ -570,8 +639,9 @@ describe("updateTeamPassword", () => {
       encryptedBlob: ENCRYPTED_BLOB,
       encryptedOverview: ENCRYPTED_OVERVIEW,
       aadVersion: 1,
-      teamKeyVersion: 3,
-      itemKeyVersion: 0,
+      teamKeyVersion: 5,
+      itemKeyVersion: 2,
+      itemKeyId: CUR_ITEM_KEY_ID,
       userId: USER_ID,
       existingEntry: BASE_EXISTING_ENTRY,
     };
@@ -588,7 +658,7 @@ describe("updateTeamPassword", () => {
   });
 
   it("trims history to 20 entries when limit is exceeded", async () => {
-    mockTeamLockRead.mockResolvedValue({ teamKeyVersion: 3 });
+    mockTeamLockRead.mockResolvedValue({ teamKeyVersion: 5 });
     mockTeamPasswordEntryHistoryCreate.mockResolvedValue({});
     // Simulate 21 history records (exceeds the 20-entry limit)
     const historyRecords = Array.from({ length: 21 }, (_, i) => ({ id: `h-${i}` }));
@@ -600,8 +670,9 @@ describe("updateTeamPassword", () => {
       encryptedBlob: ENCRYPTED_BLOB,
       encryptedOverview: ENCRYPTED_OVERVIEW,
       aadVersion: 1,
-      teamKeyVersion: 3,
-      itemKeyVersion: 0,
+      teamKeyVersion: 5,
+      itemKeyVersion: 2,
+      itemKeyId: CUR_ITEM_KEY_ID,
       userId: USER_ID,
       existingEntry: BASE_EXISTING_ENTRY,
     };
@@ -616,7 +687,7 @@ describe("updateTeamPassword", () => {
   });
 
   it("calls both team and folder queries during full update with folder", async () => {
-    mockTeamLockRead.mockResolvedValue({ teamKeyVersion: 3 });
+    mockTeamLockRead.mockResolvedValue({ teamKeyVersion: 5 });
     mockTeamFolderFindUnique.mockResolvedValue(DEFAULT_FOLDER);
     mockTeamPasswordEntryHistoryCreate.mockResolvedValue({});
     mockTeamPasswordEntryHistoryFindMany.mockResolvedValue([{ id: "h-1" }]);
@@ -626,8 +697,9 @@ describe("updateTeamPassword", () => {
       encryptedBlob: ENCRYPTED_BLOB,
       encryptedOverview: ENCRYPTED_OVERVIEW,
       aadVersion: 1,
-      teamKeyVersion: 3,
-      itemKeyVersion: 0,
+      teamKeyVersion: 5,
+      itemKeyVersion: 2,
+      itemKeyId: CUR_ITEM_KEY_ID,
       teamFolderId: FOLDER_ID,
       userId: USER_ID,
       existingEntry: BASE_EXISTING_ENTRY,
@@ -651,109 +723,252 @@ describe("updateTeamPassword", () => {
     });
   });
 
-  it("throws TeamPasswordServiceError (ITEM_KEY_VERSION_DOWNGRADE) when itemKeyVersion decreases", async () => {
-    const input: UpdateTeamPasswordInput = {
-      encryptedBlob: ENCRYPTED_BLOB,
-      encryptedOverview: ENCRYPTED_OVERVIEW,
-      aadVersion: 1,
-      teamKeyVersion: 3,
-      itemKeyVersion: 0, // downgrading from v1 to v0
-      userId: USER_ID,
-      existingEntry: { ...BASE_EXISTING_ENTRY, itemKeyVersion: 1 },
-    };
+  // ── ItemKey identity and re-key rules, decided against the locked row (plan C1/C6) ──
 
+  const FULL_REUSE: UpdateTeamPasswordInput = {
+    encryptedBlob: ENCRYPTED_BLOB,
+    encryptedOverview: ENCRYPTED_OVERVIEW,
+    aadVersion: 1,
+    teamKeyVersion: 5,
+    itemKeyVersion: 2,
+    itemKeyId: CUR_ITEM_KEY_ID,
+    userId: USER_ID,
+    existingEntry: BASE_EXISTING_ENTRY,
+  };
+
+  // v0→v1 upgrade of TEAM_CUR_ROW_V0 (high-water 1 → the new ItemKey is v2).
+  const UPGRADE: UpdateTeamPasswordInput = {
+    encryptedBlob: ENCRYPTED_BLOB,
+    encryptedOverview: ENCRYPTED_OVERVIEW,
+    aadVersion: 1,
+    teamKeyVersion: 5,
+    itemKeyVersion: 2,
+    encryptedItemKey: ENCRYPTED_ITEM_KEY,
+    snapshotBlobIv: TEAM_CUR_ROW_V0.blob_iv,
+    userId: USER_ID,
+    existingEntry: BASE_EXISTING_ENTRY,
+  };
+
+  function lockedRow(row: Record<string, unknown>) {
+    mockTxQueryRaw.mockResolvedValue([row]);
+  }
+
+  // History reads: the IV-reuse check selects itemKeyIv, the trim selects id.
+  function historyRows(itemKeyIvs: (string | null)[]) {
+    mockTeamPasswordEntryHistoryFindMany.mockImplementation(async (args: { select: Record<string, boolean> }) =>
+      args.select.itemKeyIv
+        ? itemKeyIvs.map((itemKeyIv) => ({ itemKeyIv }))
+        : [{ id: "h-1" }],
+    );
+  }
+
+  async function refusal(input: UpdateTeamPasswordInput) {
     const err = await updateTeamPassword(TEAM_ID, PASSWORD_ID, input).catch((e) => e);
     expect(err).toBeInstanceOf(TeamPasswordServiceError);
-    expect(err.code).toBe("ITEM_KEY_VERSION_DOWNGRADE");
-    expect(err.statusHint).toBe(400);
-  });
-
-  it("throws TeamPasswordServiceError (ITEM_KEY_REQUIRED) when upgrading v0→v1 without encryptedItemKey", async () => {
-    const input: UpdateTeamPasswordInput = {
-      encryptedBlob: ENCRYPTED_BLOB,
-      encryptedOverview: ENCRYPTED_OVERVIEW,
-      aadVersion: 1,
-      teamKeyVersion: 3,
-      itemKeyVersion: 1, // upgrading from v0 to v1
-      // no encryptedItemKey provided
-      userId: USER_ID,
-      existingEntry: { ...BASE_EXISTING_ENTRY, itemKeyVersion: 0 },
-    };
-
-    const err = await updateTeamPassword(TEAM_ID, PASSWORD_ID, input).catch((e) => e);
-    expect(err).toBeInstanceOf(TeamPasswordServiceError);
-    expect(err.code).toBe(API_ERROR.ITEM_KEY_REQUIRED);
-    expect(err.statusHint).toBe(400);
-  });
-
-  it("throws ITEM_KEY_REQUIRED when teamKeyVersion changes with itemKeyVersion>=1 but no encryptedItemKey (re-wrap required)", async () => {
-    // buildItemKeyWrapAAD binds the wrapped item key to teamKeyVersion. When
-    // teamKeyVersion rotates from 3 → 4 and the entry holds an item key
-    // (itemKeyVersion=1), the wrapped key MUST be re-wrapped with the new
-    // team key — otherwise the AAD no longer matches and the entry breaks.
-    const input: UpdateTeamPasswordInput = {
-      encryptedBlob: ENCRYPTED_BLOB,
-      encryptedOverview: ENCRYPTED_OVERVIEW,
-      aadVersion: 1,
-      teamKeyVersion: 4, // rotated from existing 3
-      itemKeyVersion: 1, // unchanged from existing
-      // encryptedItemKey deliberately absent
-      userId: USER_ID,
-      existingEntry: { ...BASE_EXISTING_ENTRY, teamKeyVersion: 3, itemKeyVersion: 1 },
-    };
-    mockTeamLockRead.mockResolvedValue({ teamKeyVersion: 4 });
-
-    const err = await updateTeamPassword(TEAM_ID, PASSWORD_ID, input).catch((e) => e);
-    expect(err).toBeInstanceOf(TeamPasswordServiceError);
-    expect(err.code).toBe(API_ERROR.ITEM_KEY_REQUIRED);
-    expect(err.statusHint).toBe(400);
     expect(mockTeamPasswordEntryUpdate).not.toHaveBeenCalled();
+    expect(mockTeamPasswordEntryHistoryCreate).not.toHaveBeenCalled();
+    return err as TeamPasswordServiceError;
+  }
+
+  describe("the actor's role, re-read under the team lock", () => {
+    beforeEach(() => {
+      mockTeamLockRead.mockResolvedValue({ teamKeyVersion: 5 });
+      mockTeamPasswordEntryHistoryCreate.mockResolvedValue({});
+      historyRows([]);
+      mockTeamPasswordEntryUpdate.mockResolvedValue({ id: PASSWORD_ID, tags: [] });
+    });
+
+    it.each([
+      ["no longer an active member", null],
+      ["demoted to VIEWER", { role: "VIEWER" }],
+    ])("refuses a full update when the actor is %s (403 ACTOR_NOT_PERMITTED)", async (_label, membership) => {
+      mockTeamMemberFindFirst.mockResolvedValue(membership);
+      const err = await refusal(FULL_REUSE);
+      expect(err.code).toBe(API_ERROR.ACTOR_NOT_PERMITTED);
+      expect(err.statusHint).toBe(403);
+      expect(mockTeamMemberFindFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { teamId: TEAM_ID, userId: USER_ID, deactivatedAt: null } }),
+      );
+    });
+
+    it("refuses a MEMBER's full update of an entry another user created (403 ACTOR_NOT_PERMITTED)", async () => {
+      mockTeamMemberFindFirst.mockResolvedValue({ role: "MEMBER" });
+      lockedRow({ ...TEAM_CUR_ROW, created_by_id: "someone-else" });
+      const err = await refusal(FULL_REUSE);
+      expect(err.code).toBe(API_ERROR.ACTOR_NOT_PERMITTED);
+    });
+
+    it("control: a MEMBER updates their own entry", async () => {
+      mockTeamMemberFindFirst.mockResolvedValue({ role: "MEMBER" });
+      await updateTeamPassword(TEAM_ID, PASSWORD_ID, FULL_REUSE);
+      expect(mockTeamPasswordEntryUpdate).toHaveBeenCalledOnce();
+    });
+
+    it("control: an ADMIN updates another user's entry", async () => {
+      lockedRow({ ...TEAM_CUR_ROW, created_by_id: "someone-else" });
+      await updateTeamPassword(TEAM_ID, PASSWORD_ID, FULL_REUSE);
+      expect(mockTeamPasswordEntryUpdate).toHaveBeenCalledOnce();
+    });
   });
 
-  it("succeeds when teamKeyVersion change is paired with new encryptedItemKey re-wrap", async () => {
-    mockTeamLockRead.mockResolvedValue({ teamKeyVersion: 4 });
-    mockTeamPasswordEntryHistoryCreate.mockResolvedValue({});
-    mockTeamPasswordEntryHistoryFindMany.mockResolvedValue([{ id: "h-1" }]);
-    const updated = { id: PASSWORD_ID, tags: [] };
-    mockTeamPasswordEntryUpdate.mockResolvedValue(updated);
+  describe("ItemKey rules under the entry lock", () => {
+    beforeEach(() => {
+      mockTeamLockRead.mockResolvedValue({ teamKeyVersion: 5 });
+      mockTeamPasswordEntryHistoryCreate.mockResolvedValue({});
+      historyRows([]);
+      mockTeamPasswordEntryUpdate.mockResolvedValue({ id: PASSWORD_ID, tags: [] });
+    });
 
-    const input: UpdateTeamPasswordInput = {
-      encryptedBlob: ENCRYPTED_BLOB,
-      encryptedOverview: ENCRYPTED_OVERVIEW,
-      aadVersion: 1,
-      teamKeyVersion: 4,
-      itemKeyVersion: 1,
-      encryptedItemKey: ENCRYPTED_ITEM_KEY, // re-wrap supplied
-      userId: USER_ID,
-      existingEntry: { ...BASE_EXISTING_ENTRY, teamKeyVersion: 3, itemKeyVersion: 1 },
-    };
+    it("reuses the locked ItemKey when itemKeyId matches (control): no new id, marker untouched", async () => {
+      await updateTeamPassword(TEAM_ID, PASSWORD_ID, FULL_REUSE);
 
-    const result = await updateTeamPassword(TEAM_ID, PASSWORD_ID, input);
-    expect(result).toBe(updated);
-    expect(mockTeamPasswordEntryUpdate).toHaveBeenCalledOnce();
-  });
+      const data = mockTeamPasswordEntryUpdate.mock.calls[0][0].data;
+      expect(data.itemKeyVersion).toBe(2);
+      expect(data).not.toHaveProperty("itemKeyId");
+      expect(data).not.toHaveProperty("encryptedItemKey");
+      expect(data).not.toHaveProperty("itemKeyTeamKeyVersion");
+      expect(data).not.toHaveProperty("itemKeyVersionHighWater");
+    });
 
-  it("succeeds when upgrading v0→v1 and encryptedItemKey is provided", async () => {
-    mockTeamLockRead.mockResolvedValue({ teamKeyVersion: 3 });
-    mockTeamPasswordEntryHistoryCreate.mockResolvedValue({});
-    mockTeamPasswordEntryHistoryFindMany.mockResolvedValue([{ id: "h-1" }]);
-    const updated = { id: PASSWORD_ID, tags: [] };
-    mockTeamPasswordEntryUpdate.mockResolvedValue(updated);
+    it("compares itemKeyId case-insensitively", async () => {
+      await updateTeamPassword(TEAM_ID, PASSWORD_ID, { ...FULL_REUSE, itemKeyId: CUR_ITEM_KEY_ID.toUpperCase() });
+      expect(mockTeamPasswordEntryUpdate).toHaveBeenCalledOnce();
+    });
 
-    const input: UpdateTeamPasswordInput = {
-      encryptedBlob: ENCRYPTED_BLOB,
-      encryptedOverview: ENCRYPTED_OVERVIEW,
-      aadVersion: 1,
-      teamKeyVersion: 3,
-      itemKeyVersion: 1,
-      encryptedItemKey: ENCRYPTED_ITEM_KEY,
-      userId: USER_ID,
-      existingEntry: { ...BASE_EXISTING_ENTRY, itemKeyVersion: 0 },
-    };
+    it("refuses a full update whose itemKeyId is not the locked one (409 ITEM_KEY_CHANGED)", async () => {
+      const err = await refusal({ ...FULL_REUSE, itemKeyId: "22222222-2222-4222-8222-222222222222" });
+      expect(err.code).toBe(API_ERROR.ITEM_KEY_CHANGED);
+      expect(err.statusHint).toBe(409);
+    });
 
-    const result = await updateTeamPassword(TEAM_ID, PASSWORD_ID, input);
-    expect(result).toBe(updated);
-    expect(mockTeamPasswordEntryUpdate).toHaveBeenCalledOnce();
+    it("refuses a full update that sends no itemKeyId (null never matches)", async () => {
+      const err = await refusal({ ...FULL_REUSE, itemKeyId: undefined });
+      expect(err.code).toBe(API_ERROR.ITEM_KEY_CHANGED);
+    });
+
+    it("refuses a reuse of an ItemKey wrapped under an older team key (409 ENTRY_REKEY_REQUIRED)", async () => {
+      lockedRow({ ...TEAM_CUR_ROW, team_key_version: 4 });
+      const err = await refusal(FULL_REUSE);
+      expect(err.code).toBe(API_ERROR.ENTRY_REKEY_REQUIRED);
+      expect(err.statusHint).toBe(409);
+
+      // Minus-step control: the same reuse on the row at the current version is written.
+      lockedRow(TEAM_CUR_ROW);
+      await updateTeamPassword(TEAM_ID, PASSWORD_ID, FULL_REUSE);
+      expect(mockTeamPasswordEntryUpdate).toHaveBeenCalledOnce();
+    });
+
+    it("checks itemKeyId before the team key version (stale id on a stale entry → ITEM_KEY_CHANGED)", async () => {
+      lockedRow({ ...TEAM_CUR_ROW, team_key_version: 4 });
+      const err = await refusal({ ...FULL_REUSE, itemKeyId: "22222222-2222-4222-8222-222222222222" });
+      expect(err.code).toBe(API_ERROR.ITEM_KEY_CHANGED);
+    });
+
+    it("treats an entry team key version below 1 as 1", async () => {
+      mockTeamLockRead.mockResolvedValue({ teamKeyVersion: 1 });
+      lockedRow({ ...TEAM_CUR_ROW, team_key_version: 0 });
+      await updateTeamPassword(TEAM_ID, PASSWORD_ID, { ...FULL_REUSE, teamKeyVersion: 1 });
+      expect(mockTeamPasswordEntryUpdate).toHaveBeenCalledOnce();
+    });
+
+    it("refuses an itemKeyVersion that is not the locked one when reusing (409 ITEM_KEY_VERSION_INVALID)", async () => {
+      const err = await refusal({ ...FULL_REUSE, itemKeyVersion: 3 });
+      expect(err.code).toBe(API_ERROR.ITEM_KEY_VERSION_INVALID);
+    });
+
+    it("refuses an itemKeyVersion below the locked one (400 ITEM_KEY_VERSION_DOWNGRADE)", async () => {
+      const err = await refusal({ ...FULL_REUSE, itemKeyVersion: 0, itemKeyId: undefined });
+      expect(err.code).toBe(API_ERROR.ITEM_KEY_VERSION_DOWNGRADE);
+      expect(err.statusHint).toBe(400);
+    });
+
+    it("refuses a new wrap for an entry that already holds an ItemKey (409 ITEM_KEY_CHANGED)", async () => {
+      const err = await refusal({ ...UPGRADE, itemKeyVersion: 3, snapshotBlobIv: TEAM_CUR_ROW.blob_iv });
+      expect(err.code).toBe(API_ERROR.ITEM_KEY_CHANGED);
+    });
+
+    it("refuses a reuse on an entry a restore turned back to v0 (stale v1 client → ITEM_KEY_CHANGED)", async () => {
+      lockedRow(TEAM_CUR_ROW_V0);
+      const err = await refusal({ ...FULL_REUSE, itemKeyVersion: 2 });
+      expect(err.code).toBe(API_ERROR.ITEM_KEY_CHANGED);
+    });
+
+    it("accepts a legacy v0 edit of a v0 entry without writing an ItemKey", async () => {
+      lockedRow(TEAM_CUR_ROW_V0);
+      await updateTeamPassword(TEAM_ID, PASSWORD_ID, { ...FULL_REUSE, itemKeyVersion: 0, itemKeyId: undefined });
+      const data = mockTeamPasswordEntryUpdate.mock.calls[0][0].data;
+      expect(data.itemKeyVersion).toBe(0);
+      expect(data).not.toHaveProperty("itemKeyId");
+    });
+
+    describe("v0→v1 upgrade", () => {
+      beforeEach(() => lockedRow(TEAM_CUR_ROW_V0));
+
+      it("writes the new wrap, mints a fresh id and raises the high-water; the marker is left as it was", async () => {
+        await updateTeamPassword(TEAM_ID, PASSWORD_ID, UPGRADE);
+
+        const data = mockTeamPasswordEntryUpdate.mock.calls[0][0].data;
+        expect(data).toMatchObject({
+          itemKeyVersion: 2,
+          encryptedItemKey: ENCRYPTED_ITEM_KEY.ciphertext,
+          itemKeyIv: ENCRYPTED_ITEM_KEY.iv,
+          itemKeyAuthTag: ENCRYPTED_ITEM_KEY.authTag,
+          itemKeyVersionHighWater: 2,
+        });
+        expect(data.itemKeyId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+        expect(data).not.toHaveProperty("itemKeyTeamKeyVersion");
+      });
+
+      it("is exempt from the stale team key version rule (it wraps under the current key)", async () => {
+        lockedRow({ ...TEAM_CUR_ROW_V0, team_key_version: 1 });
+        await updateTeamPassword(TEAM_ID, PASSWORD_ID, UPGRADE);
+        expect(mockTeamPasswordEntryUpdate).toHaveBeenCalledOnce();
+      });
+
+      it("refuses a version other than high-water + 1 (409 ITEM_KEY_VERSION_INVALID)", async () => {
+        const err = await refusal({ ...UPGRADE, itemKeyVersion: 3 });
+        expect(err.code).toBe(API_ERROR.ITEM_KEY_VERSION_INVALID);
+        expect(err.statusHint).toBe(409);
+      });
+
+      it("refuses when the blob changed since the client read it (409 ITEM_KEY_CHANGED)", async () => {
+        const err = await refusal({ ...UPGRADE, snapshotBlobIv: "f".repeat(24) });
+        expect(err.code).toBe(API_ERROR.ITEM_KEY_CHANGED);
+      });
+
+      it("refuses a wrap IV a history row already used (400 ITEM_KEY_IV_REUSED)", async () => {
+        historyRows([null, ENCRYPTED_ITEM_KEY.iv.toUpperCase()]);
+        const err = await refusal(UPGRADE);
+        expect(err.code).toBe(API_ERROR.ITEM_KEY_IV_REUSED);
+        expect(err.statusHint).toBe(400);
+        expect(mockTeamPasswordEntryHistoryFindMany).toHaveBeenCalledWith({
+          where: { entryId: PASSWORD_ID },
+          select: { itemKeyIv: true },
+        });
+      });
+
+      it("accepts a wrap IV no history row used (control)", async () => {
+        historyRows([null, "a".repeat(24)]);
+        await updateTeamPassword(TEAM_ID, PASSWORD_ID, UPGRADE);
+        expect(mockTeamPasswordEntryUpdate).toHaveBeenCalledOnce();
+      });
+    });
+
+    it("copies the locked row's item_key_id into the history snapshot", async () => {
+      await updateTeamPassword(TEAM_ID, PASSWORD_ID, FULL_REUSE);
+      expect(mockTeamPasswordEntryHistoryCreate.mock.calls[0][0].data.itemKeyId).toBe(CUR_ITEM_KEY_ID);
+    });
+
+    it("runs no ItemKey check for a metadata-only update of a stale entry", async () => {
+      lockedRow({ ...TEAM_CUR_ROW, team_key_version: 1 });
+      await updateTeamPassword(TEAM_ID, PASSWORD_ID, {
+        isArchived: true,
+        userId: USER_ID,
+        existingEntry: { ...BASE_EXISTING_ENTRY, itemKeyVersion: 2 },
+      });
+      expect(mockTxQueryRaw).not.toHaveBeenCalled();
+      expect(mockTeamPasswordEntryUpdate).toHaveBeenCalledOnce();
+    });
   });
 
   it("rejects tagIds from another team on update", async () => {
@@ -861,7 +1076,7 @@ describe("updateTeamPassword", () => {
 
   // C1: FOR UPDATE snapshot source and SQL text guard
   it("C1: $queryRaw is called before History.create on full (blob-changing) update", async () => {
-    mockTeamLockRead.mockResolvedValue({ teamKeyVersion: 3 });
+    mockTeamLockRead.mockResolvedValue({ teamKeyVersion: 5 });
     mockTeamPasswordEntryHistoryFindMany.mockResolvedValue([]);
     mockTeamPasswordEntryUpdate.mockResolvedValue({ id: PASSWORD_ID, tags: [] });
 
@@ -879,8 +1094,9 @@ describe("updateTeamPassword", () => {
       encryptedBlob: ENCRYPTED_BLOB,
       encryptedOverview: ENCRYPTED_OVERVIEW,
       aadVersion: 1,
-      teamKeyVersion: 3,
-      itemKeyVersion: 0,
+      teamKeyVersion: 5,
+      itemKeyVersion: 2,
+      itemKeyId: CUR_ITEM_KEY_ID,
       userId: USER_ID,
       existingEntry: BASE_EXISTING_ENTRY,
     };
@@ -891,7 +1107,7 @@ describe("updateTeamPassword", () => {
   });
 
   it("C1: FOR UPDATE SQL contains table name, team_id predicate, and required crypto columns", async () => {
-    mockTeamLockRead.mockResolvedValue({ teamKeyVersion: 3 });
+    mockTeamLockRead.mockResolvedValue({ teamKeyVersion: 5 });
     mockTeamPasswordEntryHistoryCreate.mockResolvedValue({});
     mockTeamPasswordEntryHistoryFindMany.mockResolvedValue([]);
     mockTeamPasswordEntryUpdate.mockResolvedValue({ id: PASSWORD_ID, tags: [] });
@@ -900,8 +1116,9 @@ describe("updateTeamPassword", () => {
       encryptedBlob: ENCRYPTED_BLOB,
       encryptedOverview: ENCRYPTED_OVERVIEW,
       aadVersion: 1,
-      teamKeyVersion: 3,
-      itemKeyVersion: 0,
+      teamKeyVersion: 5,
+      itemKeyVersion: 2,
+      itemKeyId: CUR_ITEM_KEY_ID,
       userId: USER_ID,
       existingEntry: BASE_EXISTING_ENTRY,
     };
@@ -923,10 +1140,13 @@ describe("updateTeamPassword", () => {
     expect(sql).toMatch(/encrypted_item_key/i);
     expect(sql).toMatch(/item_key_iv/i);
     expect(sql).toMatch(/item_key_auth_tag/i);
+    expect(sql).toMatch(/item_key_id/i);
+    expect(sql).toMatch(/item_key_team_key_version/i);
+    expect(sql).toMatch(/item_key_version_high_water/i);
   });
 
   it("C1: all 9 crypto fields in History.create come from $queryRaw result, not from existingEntry", async () => {
-    mockTeamLockRead.mockResolvedValue({ teamKeyVersion: 3 });
+    mockTeamLockRead.mockResolvedValue({ teamKeyVersion: 5 });
     mockTeamPasswordEntryHistoryCreate.mockResolvedValue({});
     mockTeamPasswordEntryHistoryFindMany.mockResolvedValue([]);
     mockTeamPasswordEntryUpdate.mockResolvedValue({ id: PASSWORD_ID, tags: [] });
@@ -935,8 +1155,9 @@ describe("updateTeamPassword", () => {
       encryptedBlob: ENCRYPTED_BLOB,
       encryptedOverview: ENCRYPTED_OVERVIEW,
       aadVersion: 1,
-      teamKeyVersion: 3,
-      itemKeyVersion: 0,
+      teamKeyVersion: 5,
+      itemKeyVersion: 2,
+      itemKeyId: CUR_ITEM_KEY_ID,
       userId: USER_ID,
       existingEntry: BASE_EXISTING_ENTRY,
     };
@@ -978,15 +1199,16 @@ describe("updateTeamPassword", () => {
 
   // F1: race — entry deleted between caller's read and FOR UPDATE lock
   it("F1: throws TeamPasswordServiceError (NOT_FOUND, 404) when $queryRaw FOR UPDATE returns empty (concurrent delete)", async () => {
-    mockTeamLockRead.mockResolvedValue({ teamKeyVersion: 3 });
+    mockTeamLockRead.mockResolvedValue({ teamKeyVersion: 5 });
     mockTxQueryRaw.mockResolvedValue([]); // row gone by the time the lock fires
 
     const input: UpdateTeamPasswordInput = {
       encryptedBlob: ENCRYPTED_BLOB,
       encryptedOverview: ENCRYPTED_OVERVIEW,
       aadVersion: 1,
-      teamKeyVersion: 3,
-      itemKeyVersion: 0,
+      teamKeyVersion: 5,
+      itemKeyVersion: 2,
+      itemKeyId: CUR_ITEM_KEY_ID,
       userId: USER_ID,
       existingEntry: BASE_EXISTING_ENTRY,
     };

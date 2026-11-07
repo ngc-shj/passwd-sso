@@ -14,6 +14,7 @@
  *   "AT" — Attachment             (entryId, attachmentId)
  *   "IK" — ItemKey wrapping       (teamId, entryId, teamKeyVersion)
  *   "AW" — Attachment CEK Wrap (entryId, attachmentId, cekKeyVersion, cekWrapAadVersion)
+ *   "TW" — Team attachment CEK wrap (teamId, entryId, attachmentId, itemKeyVersion, cekWrapAadVersion)
  *   "OK" — Team member key wrap   (teamId, toUserId, keyVersion, wrapVersion)
  *   "AR" — Admin reset token      (tenantId, resetId, targetEmailAtInitiate)
  *   "EM" — Emergency escrow wrap  (grantId, ownerId, granteeId, keyVersion, wrapVersion)
@@ -33,6 +34,7 @@ const SCOPE_TEAM = "OV";
 const SCOPE_ATTACHMENT = "AT";
 const SCOPE_ITEM_KEY = "IK";
 const SCOPE_ATTACHMENT_WRAP = "AW";
+const SCOPE_TEAM_ATTACHMENT_WRAP = "TW";
 const SCOPE_TEAM_KEY = "OK";
 const SCOPE_ADMIN_RESET = "AR";
 const SCOPE_EMERGENCY = "EM";
@@ -205,6 +207,30 @@ export function buildAttachmentCekWrapAAD(
     entryId,
     attachmentId,
     String(cekKeyVersion),
+    String(cekWrapAadVersion),
+  ]);
+}
+
+/**
+ * Build AAD for a team attachment CEK wrapped under the entry's ItemKey
+ * (mode-2, key derived with HKDF_ITEM_CEKWRAP_INFO).
+ *
+ * Binds the wrapped CEK to its team, entry, attachment and the ItemKey
+ * version it was wrapped under, so a CEK cannot be transplanted between
+ * attachments, entries or ItemKeys.
+ */
+export function buildTeamAttachmentCekWrapAAD(
+  teamId: string,
+  entryId: string,
+  attachmentId: string,
+  itemKeyVersion: number,
+  cekWrapAadVersion: number,
+): Uint8Array {
+  return buildAADBytes(SCOPE_TEAM_ATTACHMENT_WRAP, 5, [
+    teamId,
+    entryId,
+    attachmentId,
+    String(itemKeyVersion),
     String(cekWrapAadVersion),
   ]);
 }

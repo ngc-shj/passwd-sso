@@ -34,5 +34,10 @@
     "input": "teamId=t, toUserId=u, keyVersion=2, wrapVersion=1",
     "hex": "4f4b0104000174000175000132000131",
     "ios": false
+  },
+  "TW": {
+    "input": "teamId=t, entryId=e, attachmentId=a, itemKeyVersion=2, cekWrapAadVersion=1",
+    "hex": "54570105000174000165000161000132000131",
+    "ios": true
   }
 }

@@ -4,6 +4,8 @@ export type { VaultStatus } from "./vault/vault";
 
 export { ENTRY_TYPE, ENTRY_TYPE_VALUES } from "./vault/entry-type";
 export type { EntryTypeValue } from "./vault/entry-type";
+export { ATTACHMENT_ENCRYPTION_MODE } from "./vault/attachment-encryption-mode";
+export type { AttachmentEncryptionMode } from "./vault/attachment-encryption-mode";
 
 export { TOTP_ALGORITHM, TOTP_ALGORITHM_VALUES } from "./auth/totp";
 export type { TotpAlgorithm } from "./auth/totp";

@@ -8,6 +8,7 @@ import { unauthorized } from "@/lib/http/api-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { ATTACHMENT_MANIFEST_CAP } from "@/lib/validations/common";
+import { ATTACHMENT_ENCRYPTION_MODE } from "@/lib/constants/vault/attachment-encryption-mode";
 
 export const runtime = "nodejs";
 
@@ -83,7 +84,7 @@ async function handleGET(request: NextRequest) {
         });
         // Mode-2 attachments: CEK data for rewrapping during rotation.
         const mode2AttachmentRows = await prisma.attachment.findMany({
-          where: { passwordEntry: { userId }, encryptionMode: 2 },
+          where: { passwordEntry: { userId }, encryptionMode: ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED },
           select: {
             id: true,
             passwordEntryId: true,
@@ -99,7 +100,7 @@ async function handleGET(request: NextRequest) {
         // and build the data AAD = buildAttachmentAAD(entryId, attachmentId).
         // Over-fetch by 1 to detect overflow without a separate count query.
         const mode0CandidateRows = await prisma.attachment.findMany({
-          where: { passwordEntry: { userId }, encryptionMode: 0 },
+          where: { passwordEntry: { userId }, encryptionMode: ATTACHMENT_ENCRYPTION_MODE.VAULT_KEY },
           select: { id: true, passwordEntryId: true },
           take: ATTACHMENT_MANIFEST_CAP + 1,
         });

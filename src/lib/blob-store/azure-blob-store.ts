@@ -7,7 +7,7 @@ import {
   BLOB_CONFIG_ERROR,
   BLOB_CONTENT_TYPE,
 } from "@/lib/blob-store/constants";
-import { buildObjectKey, decodeObjectRef, encodeObjectRef } from "@/lib/blob-store/object-ref";
+import { buildObjectKey, encodeObjectRef, resolveObjectRefKey } from "@/lib/blob-store/object-ref";
 import { streamBodyToBuffer } from "@/lib/blob-store/stream";
 import { requireOptionalModule } from "@/lib/blob-store/runtime-module";
 
@@ -85,16 +85,14 @@ export const azureBlobStore: AttachmentBlobStore = {
     return encodeObjectRef({ key });
   },
   async getObject(stored, context) {
-    const ref = decodeObjectRef(stored);
-    const key = ref?.key ?? buildObjectKey(context);
+    const key = resolveObjectRefKey(stored, context);
     const containerClient = await getAzureContainerClient();
     const blobClient = containerClient.getBlockBlobClient(key);
     const download = await blobClient.download();
     return streamBodyToBuffer(download.readableStreamBody);
   },
   async deleteObject(stored, context) {
-    const ref = decodeObjectRef(stored);
-    const key = ref?.key ?? buildObjectKey(context);
+    const key = resolveObjectRefKey(stored, context);
     const containerClient = await getAzureContainerClient();
     const blobClient = containerClient.getBlockBlobClient(key);
     await blobClient.deleteIfExists();

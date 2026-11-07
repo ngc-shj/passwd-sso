@@ -8,12 +8,14 @@ import Foundation
 ///   secretKey → HKDF("passwd-sso-ecdh-v1", salt=zero32) → ecdhWrappingKey → AES-GCM → ECDH private key
 ///   ECDH(member, ephemeral) → HKDF("passwd-sso-team-v1", salt=memberKey.hkdfSalt) → AES-GCM(AAD "OK") → rawTeamKey
 ///   rawTeamKey → HKDF("passwd-sso-team-enc-v1", salt=zero32) → teamEncKey (entry decryption key)
+///   itemKey → HKDF("passwd-sso-item-cekwrap-v1", salt=zero32) → AES-GCM(AAD "TW") → attachment CEK
 public enum TeamKeyCrypto {
   private static let zeroSalt = Data(repeating: 0, count: CryptoParams.symmetricKeyByteCount)
   private static let ecdhWrapInfo = "passwd-sso-ecdh-v1"
   private static let teamWrapInfo = "passwd-sso-team-v1"
   private static let teamEncInfo = "passwd-sso-team-enc-v1"
   private static let itemEncInfo = "passwd-sso-item-enc-v1"
+  private static let itemCekWrapInfo = "passwd-sso-item-cekwrap-v1"
 
   public enum TeamKeyCryptoError: Error, Equatable {
     case unsupportedKeyType
@@ -130,6 +132,39 @@ public enum TeamKeyCrypto {
       info: Data(itemEncInfo.utf8),
       outputByteCount: CryptoParams.symmetricKeyByteCount
     )
+  }
+
+  /// HKDF(itemKey, salt=zero32, info="passwd-sso-item-cekwrap-v1") → the key that
+  /// wraps a team attachment's CEK (mode-2). A separate domain from the entry
+  /// content key (mirrors the extension's deriveItemCekWrapKey).
+  public static func deriveItemCekWrapKey(itemKey: SymmetricKey) -> SymmetricKey {
+    HKDF<SHA256>.deriveKey(
+      inputKeyMaterial: itemKey,
+      salt: zeroSalt,
+      info: Data(itemCekWrapInfo.utf8),
+      outputByteCount: CryptoParams.symmetricKeyByteCount
+    )
+  }
+
+  /// AES-GCM decrypt a team attachment CEK under the CEK-wrap key, verifying the
+  /// "TW" AAD (teamId, entryId, attachmentId, itemKeyVersion, cekWrapAadVersion).
+  /// The intermediate raw CEK bytes are zeroized.
+  public static func unwrapTeamAttachmentCek(
+    encrypted: EncryptedData,
+    cekWrapKey: SymmetricKey,
+    teamId: String,
+    entryId: String,
+    attachmentId: String,
+    itemKeyVersion: Int,
+    cekWrapAadVersion: Int
+  ) throws -> SymmetricKey {
+    let aad = try buildTeamAttachmentCekWrapAAD(
+      teamId: teamId, entryId: entryId, attachmentId: attachmentId,
+      itemKeyVersion: itemKeyVersion, cekWrapAadVersion: cekWrapAadVersion
+    )
+    var raw = try decryptAESGCMEncoded(encrypted: encrypted, key: cekWrapKey, aad: aad)
+    defer { raw.resetBytes(in: 0..<raw.count) }
+    return SymmetricKey(data: raw)
   }
 
   private static func base64URLDecode(_ s: String) -> Data? {

@@ -19,40 +19,35 @@ import { toast } from "sonner";
 import {
   generateTeamSymmetricKey,
   createTeamKeyEscrow,
-  encryptTeamEntry,
-  decryptTeamEntry,
-  wrapItemKey,
-  unwrapItemKey,
   deriveTeamEncryptionKey,
 } from "@/lib/crypto/crypto-team";
-import { buildTeamEntryAAD, buildItemKeyWrapAAD } from "@/lib/crypto/crypto-aad";
 import { fetchApi } from "@/lib/url-helpers";
 import { apiPath } from "@/lib/constants";
 import { useTeamVault } from "@/lib/team/team-vault-core";
 import { readApiErrorBody } from "@/lib/http/read-api-error-body";
-import { API_ERROR } from "@/lib/http/api-error-codes";
+import { API_ERROR, apiErrorToI18nKey } from "@/lib/http/api-error-codes";
 import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
 import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
 import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
 import { clientLogError, CLIENT_LOG_EVENT, toClientErrorCode } from "@/lib/logger/client";
+import { ROTATE_CARRY_REASON } from "@/lib/constants/team/rotate-key";
+import { normalizeTeamKeyVersion } from "@/lib/team/team-key-resolution";
+import {
+  RotationAbortedError,
+  buildRotationPayload,
+  type RotateCarry,
+  type RotationSourceEntry,
+} from "@/lib/team/rotation-payload";
+import {
+  buildRekeyReport,
+  holderInputsFrom,
+  type RekeyReport,
+  type RekeyReportInput,
+} from "@/lib/team/rekey-report";
+import type { RekeyListResponse } from "@/lib/team/rekey-runner";
+import { RekeyReportView } from "@/components/team/security/rekey-report-view";
 
 // ─── Types ────────────────────────────────────────────────────
-
-interface RotateKeyDataEntry {
-  id: string;
-  encryptedBlob: string;
-  blobIv: string;
-  blobAuthTag: string;
-  encryptedOverview: string;
-  overviewIv: string;
-  overviewAuthTag: string;
-  teamKeyVersion: number;
-  itemKeyVersion: number;
-  encryptedItemKey: string | null;
-  itemKeyIv: string | null;
-  itemKeyAuthTag: string | null;
-  aadVersion: number;
-}
 
 interface RotateKeyDataMember {
   userId: string;
@@ -61,13 +56,18 @@ interface RotateKeyDataMember {
 
 interface RotateKeyData {
   teamKeyVersion: number;
-  entries: RotateKeyDataEntry[];
+  entries: RotationSourceEntry[];
   members: RotateKeyDataMember[];
+  /** Team key versions the caller holds a member key for. */
+  actorKeyVersions: number[];
 }
 
 interface TeamRotateKeyButtonProps {
   teamId: string;
+  /** Called after a committed rotation (the page starts the re-key pass). */
   onSuccess?: () => void;
+  /** Held while a re-key pass runs. */
+  disabled?: boolean;
 }
 
 // ─── Progress tracking ────────────────────────────────────────
@@ -87,16 +87,40 @@ function describeProgress(phase: RotatePhase, current: number, total: number): s
   }
 }
 
+/** The holder-claim carries (undecryptable / key_invalid) as a report. */
+function carryReport(
+  carry: readonly RotateCarry[],
+  entries: readonly RotationSourceEntry[],
+  held: ReadonlySet<number>,
+  holders: Pick<RekeyReportInput, "otherHoldersByVersion">,
+): RekeyReport {
+  const attemptedByVersion = new Map<number, number>();
+  for (const e of entries) {
+    const v = normalizeTeamKeyVersion(e.teamKeyVersion);
+    if (held.has(v)) attemptedByVersion.set(v, (attemptedByVersion.get(v) ?? 0) + 1);
+  }
+  const at = (reason: string) =>
+    carry.filter((c) => c.reason === reason).map((c) => ({ entryId: c.id, teamKeyVersion: c.teamKeyVersion }));
+  return buildRekeyReport({
+    undecryptable: at(ROTATE_CARRY_REASON.UNDECRYPTABLE),
+    keyInvalid: at(ROTATE_CARRY_REASON.KEY_INVALID),
+    attemptedByVersion,
+    ...holders,
+  });
+}
+
 // ─── Component ───────────────────────────────────────────────
 
-export function TeamRotateKeyButton({ teamId, onSuccess }: TeamRotateKeyButtonProps) {
+export function TeamRotateKeyButton({ teamId, onSuccess, disabled = false }: TeamRotateKeyButtonProps) {
   const t = useTranslations("Teams");
-  const { getTeamKeyInfo, invalidateTeamKey } = useTeamVault();
+  const tApi = useTranslations("ApiErrors");
+  const { resolveTeamKey, invalidateTeamKey } = useTeamVault();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [phase, setPhase] = useState<RotatePhase>("idle");
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [confirmInput, setConfirmInput] = useState("");
+  const [report, setReport] = useState<RekeyReport | null>(null);
 
   // Inline step-up reauth — rotate-key is server-side step-up-gated. On a stale
   // session the confirm dialog stays open and the hook replays the rotation
@@ -104,19 +128,51 @@ export function TeamRotateKeyButton({ teamId, onSuccess }: TeamRotateKeyButtonPr
   const rotateRetryRef = useRef<() => Promise<void>>(async () => {});
   const inlineReauth = useInlineReauth(() => rotateRetryRef.current());
 
+  const rotationErrorMessage = (status: number, code: string | undefined): string => {
+    if (status === 429) return t("rotateKeyRateLimited");
+    switch (code) {
+      case API_ERROR.TEAM_KEY_VERSION_MISMATCH:
+        return t("rotateKeyVersionConflict");
+      case API_ERROR.ENTRY_COUNT_MISMATCH:
+        return t("rotateKeyEntryMismatch");
+      case API_ERROR.VALIDATION_ERROR:
+        return t("rotateKeyMembersChanged");
+      case undefined:
+        return t("rotateKeyFailed");
+      default: {
+        const key = apiErrorToI18nKey(code);
+        return key === "unknownError" ? t("rotateKeyFailed") : tApi(key);
+      }
+    }
+  };
+
+  // Who else holds the carried entries' versions, so the report can name
+  // another holder (every entry is pending right after the rotation). Without
+  // it the report falls back to exits that need no names.
+  const carriedVersionHolders = async (
+    carry: readonly RotateCarry[],
+  ): Promise<Pick<RekeyReportInput, "otherHoldersByVersion">> => {
+    if (!carry.some((c) => c.reason !== ROTATE_CARRY_REASON.NOT_HELD)) return {};
+    try {
+      const res = await fetchApi(`${apiPath.teamRekey(teamId)}?limit=1`);
+      if (!res.ok) return {};
+      const list = (await res.json()) as RekeyListResponse;
+      return {
+        otherHoldersByVersion: holderInputsFrom(list.versionHolders ?? {}, t("rekeyUnknownHolder")).otherHoldersByVersion,
+      };
+    } catch {
+      return {};
+    }
+  };
+
   const handleRotate = async () => {
     setLoading(true);
     setPhase("fetching");
+    setReport(null);
 
+    let newTeamKeyBytes: Uint8Array | null = null;
     try {
-      // 1. Get current team key info (to unwrap old entry data)
-      const teamKeyInfo = await getTeamKeyInfo(teamId);
-      if (!teamKeyInfo) {
-        toast.error(t("rotateKeyVaultRequired"));
-        return;
-      }
-
-      // 2. Fetch all entries + member public keys
+      // 1. Fetch all entries, member public keys and the versions the caller holds
       const dataRes = await fetchApi(apiPath.teamRotateKeyData(teamId));
       if (!dataRes.ok) {
         if (dataRes.status === 429) {
@@ -133,101 +189,45 @@ export function TeamRotateKeyButton({ teamId, onSuccess }: TeamRotateKeyButtonPr
         return;
       }
 
-      const currentTeamKey = teamKeyInfo.key;
       const currentTeamKeyVersion = data.teamKeyVersion;
       const newTeamKeyVersion = currentTeamKeyVersion + 1;
 
-      // 3. Generate new team symmetric key
-      const newTeamKeyBytes = generateTeamSymmetricKey();
-      const newTeamEncryptionKey = await deriveTeamEncryptionKey(newTeamKeyBytes);
-
-      // 4. Re-encrypt entries
-      setPhase("encrypting");
-      setProgress({ current: 0, total: data.entries.length });
-
-      const reencryptedEntries = [];
-
-      for (let i = 0; i < data.entries.length; i++) {
-        const entry = data.entries[i];
-        setProgress({ current: i, total: data.entries.length });
-
-        if (entry.itemKeyVersion >= 1 && entry.encryptedItemKey && entry.itemKeyIv && entry.itemKeyAuthTag) {
-          // v1+: unwrap ItemKey with old TeamKey, re-wrap with new TeamKey
-          const oldItemKeyAad = buildItemKeyWrapAAD(teamId, entry.id, entry.teamKeyVersion);
-          const rawItemKey = await unwrapItemKey(
-            {
-              ciphertext: entry.encryptedItemKey,
-              iv: entry.itemKeyIv,
-              authTag: entry.itemKeyAuthTag,
-            },
-            currentTeamKey,
-            oldItemKeyAad,
-          );
-
-          const newItemKeyAad = buildItemKeyWrapAAD(teamId, entry.id, newTeamKeyVersion);
-          const newEncryptedItemKey = await wrapItemKey(rawItemKey, newTeamEncryptionKey, newItemKeyAad);
-          rawItemKey.fill(0);
-
-          reencryptedEntries.push({
-            id: entry.id,
-            itemKeyVersion: entry.itemKeyVersion,
-            // The server applies the rewrap only while the row still holds this wrap.
-            snapshotIv: entry.itemKeyIv,
-            encryptedItemKey: newEncryptedItemKey,
-            aadVersion: entry.aadVersion,
-          });
-        } else {
-          // v0: decrypt blob+overview with old TeamKey, re-encrypt with new TeamKey
-          const oldBlobAad = buildTeamEntryAAD(teamId, entry.id, "blob", entry.itemKeyVersion);
-          const oldOverviewAad = buildTeamEntryAAD(teamId, entry.id, "overview", entry.itemKeyVersion);
-
-          const decryptedBlob = await decryptTeamEntry(
-            {
-              ciphertext: entry.encryptedBlob,
-              iv: entry.blobIv,
-              authTag: entry.blobAuthTag,
-            },
-            currentTeamKey,
-            oldBlobAad,
-          );
-
-          const decryptedOverview = await decryptTeamEntry(
-            {
-              ciphertext: entry.encryptedOverview,
-              iv: entry.overviewIv,
-              authTag: entry.overviewAuthTag,
-            },
-            currentTeamKey,
-            oldOverviewAad,
-          );
-
-          // Re-encrypt with new key; aadVersion bumped to 1 (uses team entry AAD)
-          const newAadVersion = 1;
-          const newBlobAad = buildTeamEntryAAD(teamId, entry.id, "blob", 0);
-          const newOverviewAad = buildTeamEntryAAD(teamId, entry.id, "overview", 0);
-
-          const newBlob = await encryptTeamEntry(decryptedBlob, newTeamEncryptionKey, newBlobAad);
-          const newOverview = await encryptTeamEntry(decryptedOverview, newTeamEncryptionKey, newOverviewAad);
-
-          reencryptedEntries.push({
-            id: entry.id,
-            itemKeyVersion: 0,
-            // The server applies the re-encryption only while the row still holds this blob.
-            snapshotIv: entry.blobIv,
-            encryptedBlob: newBlob,
-            encryptedOverview: newOverview,
-            aadVersion: newAadVersion,
-          });
-        }
+      // The caller must hold the current key: the new one is distributed from it.
+      const current = await resolveTeamKey(teamId, currentTeamKeyVersion);
+      if (!("key" in current)) {
+        toast.error(t("rotateKeyVaultRequired"));
+        return;
       }
 
-      setProgress({ current: data.entries.length, total: data.entries.length });
+      // 2. Generate new team symmetric key
+      newTeamKeyBytes = generateTeamSymmetricKey();
+      const newTeamEncryptionKey = await deriveTeamEncryptionKey(newTeamKeyBytes);
 
-      // 5. Re-wrap new TeamKey for each active member
+      // 3. Each entry with the key at its own version; entries the caller
+      // cannot open are carried with a reason.
+      setPhase("encrypting");
+      const heldVersions = new Set(data.actorKeyVersions.map(normalizeTeamKeyVersion));
+      let payload: Awaited<ReturnType<typeof buildRotationPayload>>;
+      try {
+        payload = await buildRotationPayload(
+          data.entries,
+          (version) => resolveTeamKey(teamId, version),
+          { teamId, newTeamKeyVersion, newTeamEncryptionKey, heldVersions },
+          (current, total) => setProgress({ current, total }),
+        );
+      } catch (e) {
+        if (e instanceof RotationAbortedError) {
+          toast.error(t("rotateKeyAborted"));
+          return;
+        }
+        throw e;
+      }
+
+      // 4. Re-wrap new TeamKey for each active member
       const memberKeys = await Promise.all(
         data.members.map(async (member) => {
           const escrow = await createTeamKeyEscrow(
-            newTeamKeyBytes,
+            newTeamKeyBytes as Uint8Array,
             member.ecdhPublicKey,
             teamId,
             member.userId,
@@ -249,7 +249,7 @@ export function TeamRotateKeyButton({ teamId, onSuccess }: TeamRotateKeyButtonPr
       // Zero-clear raw team key bytes
       newTeamKeyBytes.fill(0);
 
-      // 6. POST rotation to server
+      // 5. POST rotation to server
       setPhase("submitting");
 
       // @stepup id:team-rotate-key-post
@@ -258,29 +258,33 @@ export function TeamRotateKeyButton({ teamId, onSuccess }: TeamRotateKeyButtonPr
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           newTeamKeyVersion,
-          entries: reencryptedEntries,
+          entries: payload.entries,
+          carry: payload.carry,
           memberKeys,
         }),
       });
 
       if (!res.ok) {
         const body = await readApiErrorBody(res);
-        if (res.status === 409) {
-          toast.error(t("rotateKeyVersionConflict"));
-        } else if (body?.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
+        if (body?.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
           await inlineReauth.triggerOnStaleError();
-        } else if (body?.error === API_ERROR.ENTRY_COUNT_MISMATCH) {
-          toast.error(t("rotateKeyEntryMismatch"));
         } else {
-          toast.error(t("rotateKeyFailed"));
+          toast.error(rotationErrorMessage(res.status, body?.error));
         }
         return;
       }
 
-      // 7. Invalidate cached team key so next access fetches the new one
+      // 6. Invalidate cached team key so next access fetches the new one
       invalidateTeamKey(teamId);
 
-      toast.success(t("rotateKeySuccess"));
+      toast.success(
+        payload.carry.length > 0
+          ? t("rotateKeySuccessWithCarry", { count: payload.carry.length })
+          : t("rotateKeySuccess"),
+      );
+      setReport(
+        carryReport(payload.carry, data.entries, heldVersions, await carriedVersionHolders(payload.carry)),
+      );
       setOpen(false);
       setConfirmInput("");
       onSuccess?.();
@@ -290,6 +294,7 @@ export function TeamRotateKeyButton({ teamId, onSuccess }: TeamRotateKeyButtonPr
       });
       toast.error(t("rotateKeyFailed"));
     } finally {
+      newTeamKeyBytes?.fill(0);
       setLoading(false);
       setPhase("idle");
       setProgress({ current: 0, total: 0 });
@@ -306,7 +311,7 @@ export function TeamRotateKeyButton({ teamId, onSuccess }: TeamRotateKeyButtonPr
     <>
     <AlertDialog open={open} onOpenChange={(v) => { if (!loading) { setOpen(v); if (!v) setConfirmInput(""); } }}>
       <AlertDialogTrigger asChild>
-        <Button variant="destructive" size="sm">
+        <Button variant="destructive" size="sm" disabled={disabled}>
           <RotateCcw className="h-4 w-4 mr-2" />
           {t("rotateKeyButton")}
         </Button>
@@ -356,6 +361,8 @@ export function TeamRotateKeyButton({ teamId, onSuccess }: TeamRotateKeyButtonPr
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+
+      {report && <div className="mt-4"><RekeyReportView report={report} /></div>}
 
       <RecentSessionRequiredDialog
         {...inlineReauth.recentSessionDialogProps}

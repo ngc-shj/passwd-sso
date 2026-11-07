@@ -14,8 +14,9 @@ import { render, screen } from "@testing-library/react";
 import { mockTeamMismatch } from "@/__tests__/helpers/mock-app-navigation";
 import type { encryptBinary, decryptBinary } from "@/lib/crypto/crypto-client";
 
-const { mockFetch, mockToast, encryptBinaryMock, decryptBinaryMock } = vi.hoisted(() => ({
+const { mockFetch, mockToast, encryptBinaryMock, decryptBinaryMock, mockUpload } = vi.hoisted(() => ({
   mockFetch: vi.fn(),
+  mockUpload: vi.fn(),
   mockToast: { error: vi.fn(), success: vi.fn() },
   encryptBinaryMock: vi.fn<typeof encryptBinary>(async () => ({
     ciphertext: new Uint8Array([1, 2, 3]),
@@ -40,7 +41,10 @@ vi.mock("@/lib/url-helpers", () => ({
 
 vi.mock("@/lib/team/team-vault-context", () => ({
   useTeamVault: () => ({
-    getItemEncryptionKey: vi.fn(async () => ({} as CryptoKey)),
+    getItemEncryptionKey: vi.fn(),
+    getTeamKeyInfo: vi.fn(async () => null),
+    // No key is available to this member at any version.
+    resolveTeamKey: vi.fn(async () => ({ reason: "not_available" })),
   }),
 }));
 
@@ -59,7 +63,14 @@ vi.mock("@/lib/http/toast-api-error", () => ({
   toastApiError: vi.fn(),
 }));
 
+vi.mock("@/lib/team/team-attachment-upload", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/team/team-attachment-upload")>()),
+  uploadTeamAttachment: (...args: unknown[]) => mockUpload(...args),
+}));
+
 import { TeamAttachmentSection } from "./team-attachment-section";
+import { fireEvent, waitFor } from "@testing-library/react";
+import { toastApiError } from "@/lib/http/toast-api-error";
 
 describe("TeamAttachmentSection", () => {
   beforeEach(() => {
@@ -167,5 +178,58 @@ describe("TeamAttachmentSection", () => {
     expect(screen.getByText("noAttachments")).toBeInTheDocument();
     // No leaked attachment data
     expect(screen.queryByText(/test\.pdf/)).toBeNull();
+  });
+
+  describe("download", () => {
+    const ATT = { id: "a1", filename: "x.png", contentType: "image/png", sizeBytes: 100, createdAt: new Date().toISOString() };
+
+    it("surfaces ATTACHMENT_KEY_UNAVAILABLE from the server with its exit", async () => {
+      const res = new Response(JSON.stringify({ error: "ATTACHMENT_KEY_UNAVAILABLE" }), { status: 409 });
+      mockFetch.mockResolvedValue(res);
+      render(<TeamAttachmentSection teamId="team-1" entryId="entry-1" attachments={[ATT]} onAttachmentsChange={vi.fn()} />);
+
+      fireEvent.click(screen.getByTitle("download"));
+
+      await waitFor(() => expect(toastApiError).toHaveBeenCalledWith(res, expect.any(Function)));
+    });
+
+    it("says the attachment key is unavailable when no key this member holds opens it", async () => {
+      mockFetch.mockResolvedValue(new Response(JSON.stringify({
+        id: "a1", filename: "x.png", contentType: "image/png", sizeBytes: 100,
+        encryptedData: "AAAA", iv: "0".repeat(24), authTag: "0".repeat(32), aadVersion: 1,
+        encryptionMode: 0, keyVersion: 1,
+      }), { status: 200 }));
+      render(<TeamAttachmentSection teamId="team-1" entryId="entry-1" attachments={[ATT]} onAttachmentsChange={vi.fn()} />);
+
+      fireEvent.click(screen.getByTitle("download"));
+
+      await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith("attachmentKeyUnavailable"));
+    });
+  });
+
+  describe("upload refusals", () => {
+    async function uploadOne() {
+      const { container } = render(
+        <TeamAttachmentSection teamId="team-1" entryId="entry-1" attachments={[]} onAttachmentsChange={vi.fn()} />,
+      );
+      const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+      const file = new File(["abc"], "doc.pdf", { type: "application/pdf" });
+      fireEvent.change(input, { target: { files: [file] } });
+    }
+
+    it("ENTRY_REKEY_REQUIRED says an owner or admin must finish the re-key (as the entry save does)", async () => {
+      mockUpload.mockResolvedValue(new Response(JSON.stringify({ error: "ENTRY_REKEY_REQUIRED" }), { status: 409 }));
+      await uploadOne();
+      await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith("uploadRekeyRequired"));
+      expect(toastApiError).not.toHaveBeenCalled();
+    });
+
+    it("control: another refusal (ONLY_OWN_ENTRIES) shows the server's own message", async () => {
+      const res = new Response(JSON.stringify({ error: "ONLY_OWN_ENTRIES" }), { status: 403 });
+      mockUpload.mockResolvedValue(res);
+      await uploadOne();
+      await waitFor(() => expect(toastApiError).toHaveBeenCalledWith(res, expect.any(Function)));
+      expect(mockToast.error).not.toHaveBeenCalledWith("uploadRekeyRequired");
+    });
   });
 });

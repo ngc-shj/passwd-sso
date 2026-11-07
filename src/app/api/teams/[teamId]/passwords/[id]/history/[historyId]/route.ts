@@ -57,6 +57,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
     encryptedItemKey: history.encryptedItemKey,
     itemKeyIv: history.itemKeyIv,
     itemKeyAuthTag: history.itemKeyAuthTag,
+    itemKeyId: history.itemKeyId,
   });
 }
 

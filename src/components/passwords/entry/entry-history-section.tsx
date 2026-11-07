@@ -9,8 +9,17 @@ import { apiPath } from "@/lib/constants";
 import { useVault } from "@/lib/vault/vault-context";
 import { useTeamVault } from "@/lib/team/team-vault-context";
 import { TeamKeyVersionUnavailableError } from "@/lib/team/team-vault-core";
+import { TEAM_KEY_FAILURE, teamEntryAadFor } from "@/lib/team/team-key-resolution";
+import {
+  buildTeamHistoryRestoreBody,
+  historyRowKeyData,
+  isRestorableHistoryRow,
+  type TeamHistoryRowDto,
+} from "@/lib/team/team-history-restore";
+import { toastApiError } from "@/lib/http/toast-api-error";
+import { API_ERROR, apiErrorToI18nKey } from "@/lib/http/api-error-codes";
 import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
-import { buildPersonalEntryAAD, buildTeamEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
+import { buildPersonalEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -132,6 +141,7 @@ export function EntryHistorySection({
   onRestore,
 }: EntryHistorySectionProps) {
   const t = useTranslations("PasswordDetail");
+  const tApi = useTranslations("ApiErrors");
   const locale = useLocale();
   const { encryptionKey, userId } = useVault();
   const { getEntryDecryptionKey, invalidateTeamKey } = useTeamVault();
@@ -168,6 +178,35 @@ export function EntryHistorySection({
     fetchHistory();
   }, [fetchHistory]);
 
+  const keyErrorMessage = (e: unknown) =>
+    e instanceof TeamKeyVersionUnavailableError
+      ? t(e.reason === TEAM_KEY_FAILURE.KEY_INVALID ? "historyKeyInvalid" : "historyKeyUnavailable")
+      : t("historyDecryptFailed");
+
+  // History rows hold no overview: a team restore sends the row's blob and the
+  // overview rebuilt from it, both re-sealed under the row's own key at the
+  // current AAD version (D1, D67). Only a row already at AAD 1 is restorable
+  // (D72).
+  const teamRestoreInit = async (teamId: string, historyId: string): Promise<RequestInit | null> => {
+    const rowRes = await fetchApi(apiPath.teamPasswordHistoryById(teamId, entryId, historyId));
+    if (!rowRes.ok) {
+      await toastApiError(rowRes, tApi);
+      return null;
+    }
+    const row = (await rowRes.json()) as TeamHistoryRowDto;
+    // A row sealed without AAD is refused before it is decrypted (S-R3-2).
+    if (!isRestorableHistoryRow(row)) {
+      toast.error(tApi(apiErrorToI18nKey(API_ERROR.HISTORY_ROW_LEGACY)));
+      return null;
+    }
+    const body = await buildTeamHistoryRestoreBody(teamId, entryId, row, getEntryDecryptionKey);
+    return {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    };
+  };
+
   const handleRestore = async () => {
     if (!restoreTarget) return;
     setRestoring(true);
@@ -175,20 +214,46 @@ export function EntryHistorySection({
       const url = scopedTeamId
         ? apiPath.teamPasswordHistoryRestore(scopedTeamId, entryId, restoreTarget.id)
         : apiPath.passwordHistoryRestore(entryId, restoreTarget.id);
-      const res = await fetchApi(url, { method: "POST" });
-      if (res.ok) {
-        // Restore writes back the history row's ItemKey metadata, which may
-        // point at an older TeamKey version. Drop the cached ItemKey so the
-        // next decrypt refetches and unwraps against the restored version.
+      let restored = false;
+      // A team restore whose row a re-key rewrote after it was read
+      // (HISTORY_ROW_CHANGED) is rebuilt from the re-fetched row once.
+      for (let attempt = 0; attempt < 2; attempt++) {
+        let init: RequestInit | null = { method: "POST" };
         if (scopedTeamId) {
-          invalidateTeamKey(scopedTeamId);
+          try {
+            init = await teamRestoreInit(scopedTeamId, restoreTarget.id);
+          } catch (e) {
+            const message = keyErrorMessage(e);
+            toast.error(message);
+            return;
+          }
+          if (!init) return;
         }
-        toast.success(t("restoreVersion"));
-        setRestoreTarget(null);
-        setLoading(true);
-        fetchHistory();
-        onRestore?.();
+        const res = await fetchApi(url, init);
+        if (res.ok) {
+          restored = true;
+          break;
+        }
+        if (!scopedTeamId) return;
+        const code = ((await res.json().catch(() => ({}))) as { error?: unknown }).error;
+        if (code === API_ERROR.HISTORY_ROW_CHANGED && attempt === 0) continue;
+        // A team refusal names its exits (HISTORY_KEY_UNAVAILABLE: restore a
+        // more recent version, or delete the entry).
+        toast.error(tApi(apiErrorToI18nKey(code)));
+        return;
       }
+      if (!restored) return;
+      // Restore writes back the history row's ItemKey metadata, which may
+      // point at an older TeamKey version. Drop the cached keys so the next
+      // decrypt refetches and unwraps against the restored version.
+      if (scopedTeamId) {
+        invalidateTeamKey(scopedTeamId);
+      }
+      toast.success(t("restoreVersion"));
+      setRestoreTarget(null);
+      setLoading(true);
+      fetchHistory();
+      onRestore?.();
     } finally {
       setRestoring(false);
     }
@@ -206,16 +271,12 @@ export function EntryHistorySection({
         const data = await res.json();
         // Use the history record's own itemKeyVersion for AAD and key selection
         const historyItemKeyVersion = (data.itemKeyVersion as number) ?? 0;
-        const decryptKey = await getEntryDecryptionKey(scopedTeamId, entryId, {
-          itemKeyVersion: historyItemKeyVersion,
-          encryptedItemKey: data.encryptedItemKey,
-          itemKeyIv: data.itemKeyIv,
-          itemKeyAuthTag: data.itemKeyAuthTag,
-          teamKeyVersion: data.teamKeyVersion ?? 1,
-        });
-        const aad = data.aadVersion >= 1
-          ? buildTeamEntryAAD(scopedTeamId, entryId, "blob", historyItemKeyVersion)
-          : undefined;
+        const decryptKey = await getEntryDecryptionKey(
+          scopedTeamId,
+          entryId,
+          historyRowKeyData(data as TeamHistoryRowDto),
+        );
+        const aad = teamEntryAadFor(scopedTeamId, entryId, VAULT_TYPE.BLOB, historyItemKeyVersion, data.aadVersion);
         const plaintext = await decryptData(
           {
             ciphertext: data.encryptedBlob,
@@ -239,11 +300,8 @@ export function EntryHistorySection({
         setViewData(JSON.parse(plaintext));
       }
     } catch (e) {
-      if (e instanceof TeamKeyVersionUnavailableError) {
-        toast.error(t("historyKeyUnavailable"));
-      } else {
-        toast.error(t("historyDecryptFailed"));
-      }
+      const message = keyErrorMessage(e);
+      toast.error(message);
     } finally {
       setViewLoading(false);
     }
@@ -275,44 +333,57 @@ export function EntryHistorySection({
                 {t("entryHistoryEmpty")}
               </p>
             )}
-            {histories.map((h) => (
-              <div
-                key={h.id}
-                className="flex items-center gap-2 rounded-lg border bg-muted/30 p-2"
-              >
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs text-muted-foreground">
-                    {t("versionFrom", { date: formatDateTime(h.changedAt, locale) })}
-                  </p>
-                  {h.changedBy && (
+            {histories.map((h) => {
+              // A team row sealed without AAD is refused by the restore (S-R3-2):
+              // say so up front instead of after reprompt and confirm.
+              const restoreBlocked = !!scopedTeamId && !isRestorableHistoryRow(h);
+              const blockedHintId = `history-restore-blocked-${h.id}`;
+              return (
+                <div
+                  key={h.id}
+                  className="flex items-center gap-2 rounded-lg border bg-muted/30 p-2"
+                >
+                  <div className="flex-1 min-w-0">
                     <p className="text-xs text-muted-foreground">
-                      {h.changedBy.name || h.changedBy.email}
+                      {t("versionFrom", { date: formatDateTime(h.changedAt, locale) })}
                     </p>
-                  )}
+                    {h.changedBy && (
+                      <p className="text-xs text-muted-foreground">
+                        {h.changedBy.name || h.changedBy.email}
+                      </p>
+                    )}
+                    {restoreBlocked && (
+                      <p id={blockedHintId} className="text-xs text-muted-foreground">
+                        {t("restoreVersionTooOld")}
+                      </p>
+                    )}
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 shrink-0 text-xs"
+                    disabled={viewLoading}
+                    onClick={() => requireVerification(entryId, requireReprompt ?? false, () => handleView(h))}
+                  >
+                    <Eye className="h-3 w-3 mr-1" />
+                    {t("viewVersion")}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 shrink-0 text-xs"
+                    disabled={restoreBlocked}
+                    aria-describedby={restoreBlocked ? blockedHintId : undefined}
+                    onClick={() => requireVerification(entryId, requireReprompt ?? false, () => setRestoreTarget(h))}
+                  >
+                    <RotateCcw className="h-3 w-3 mr-1" />
+                    {t("restoreVersion")}
+                  </Button>
                 </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 shrink-0 text-xs"
-                  disabled={viewLoading}
-                  onClick={() => requireVerification(entryId, requireReprompt ?? false, () => handleView(h))}
-                >
-                  <Eye className="h-3 w-3 mr-1" />
-                  {t("viewVersion")}
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 shrink-0 text-xs"
-                  onClick={() => requireVerification(entryId, requireReprompt ?? false, () => setRestoreTarget(h))}
-                >
-                  <RotateCcw className="h-3 w-3 mr-1" />
-                  {t("restoreVersion")}
-                </Button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

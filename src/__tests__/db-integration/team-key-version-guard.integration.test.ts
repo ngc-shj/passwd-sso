@@ -101,6 +101,7 @@ type Seed = {
   pendingRowId: string;
   existingEntryId: string;
   existingBlobIv: string;
+  existingOverviewIv: string;
   tagId: string;
 };
 
@@ -113,6 +114,7 @@ async function seedTeam(ctx: TestContext, tenantId: string, teamKeyVersion: numb
   const pendingRowId = randomUUID();
   const existingEntryId = randomUUID();
   const existingBlobIv = hex(12);
+  const existingOverviewIv = hex(12);
   const tagId = randomUUID();
   await ctx.su.prisma.$transaction(async (tx) => {
     await setBypassRlsGucs(tx);
@@ -158,7 +160,7 @@ async function seedTeam(ctx: TestContext, tenantId: string, teamKeyVersion: numb
          $5, $6, $7, $5, $8, $7,
          1, $9, 0, 'LOGIN', now(), now()
        )`,
-      existingEntryId, teamId, tenantId, ownerId, hex(32), existingBlobIv, hex(16), hex(12), teamKeyVersion,
+      existingEntryId, teamId, tenantId, ownerId, hex(32), existingBlobIv, hex(16), existingOverviewIv, teamKeyVersion,
     );
     await tx.$executeRawUnsafe(
       `INSERT INTO team_tags (id, name, team_id, tenant_id, created_at, updated_at)
@@ -168,7 +170,7 @@ async function seedTeam(ctx: TestContext, tenantId: string, teamKeyVersion: numb
   });
   return {
     teamId, ownerId, memberId, memberRowId, pendingId, pendingRowId,
-    existingEntryId, existingBlobIv, tagId,
+    existingEntryId, existingBlobIv, existingOverviewIv, tagId,
   };
 }
 
@@ -197,6 +199,7 @@ function callRotate(seed: Seed, snapshotIv = seed.existingBlobIv) {
         id: seed.existingEntryId,
         itemKeyVersion: 0,
         snapshotIv,
+        snapshotOverviewIv: seed.existingOverviewIv,
         encryptedBlob: encryptedField(),
         encryptedOverview: encryptedField(),
         aadVersion: 1,
@@ -558,6 +561,7 @@ describe("team key rotation serialisation — real-DB integration", () => {
             teamKeyVersion: 1,
             itemKeyVersion: 1,
             encryptedItemKey: encryptedField(),
+            snapshotBlobIv: seed.existingBlobIv,
           },
         ),
         { params: Promise.resolve({ teamId: seed.teamId, id: seed.existingEntryId }) },

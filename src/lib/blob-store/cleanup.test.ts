@@ -7,15 +7,24 @@ import {
   deleteAttachmentBlobs,
   type AttachmentBlobRef,
 } from "./cleanup";
+import { encodeObjectRef } from "./object-ref";
 
-const { mockGetAttachmentBlobStore } = vi.hoisted(() => ({
+const { mockGetAttachmentBlobStore, mockWarn } = vi.hoisted(() => ({
   mockGetAttachmentBlobStore: vi.fn(),
+  mockWarn: vi.fn(),
 }));
 
 vi.mock("@/lib/blob-store", () => ({
   getAttachmentBlobStore: mockGetAttachmentBlobStore,
   BLOB_STORAGE,
 }));
+
+vi.mock("@/lib/logger", () => ({
+  getLogger: () => ({ warn: mockWarn }),
+}));
+
+const GEN = "0123456789abcdef0123456789abcdef";
+const refBytes = (key: string) => encodeObjectRef({ key });
 
 const mockDeleteObject = vi.fn();
 const mockFindMany = vi.fn();
@@ -36,6 +45,7 @@ beforeEach(() => {
   mockGetAttachmentBlobStore.mockReset();
   mockDeleteObject.mockReset();
   mockFindMany.mockReset();
+  mockWarn.mockReset();
   mockDeleteObject.mockResolvedValue(undefined);
 });
 
@@ -141,7 +151,7 @@ describe("collectAttachmentRefsByCreator", () => {
     expect(mockFindMany).not.toHaveBeenCalled();
   });
 
-  it("non-DB backend: queries by createdById, entryId falls back to teamPasswordEntryId", async () => {
+  it("non-DB backend: queries by createdById; a team row's context names its entry and team", async () => {
     mockGetAttachmentBlobStore.mockReturnValue(fakeStore(BLOB_STORAGE.GCS));
     const personalBytes = new Uint8Array([1]);
     const teamBytes = new Uint8Array([2]);
@@ -151,12 +161,14 @@ describe("collectAttachmentRefsByCreator", () => {
         encryptedData: personalBytes,
         passwordEntryId: "pe1",
         teamPasswordEntryId: null,
+        teamPasswordEntry: null,
       },
       {
         id: "a-team",
         encryptedData: teamBytes,
         passwordEntryId: null,
         teamPasswordEntryId: "tpe1",
+        teamPasswordEntry: { teamId: "team1" },
       },
     ]);
 
@@ -169,6 +181,7 @@ describe("collectAttachmentRefsByCreator", () => {
         encryptedData: true,
         passwordEntryId: true,
         teamPasswordEntryId: true,
+        teamPasswordEntry: { select: { teamId: true } },
       },
     });
     expect(refs).toEqual([
@@ -178,7 +191,7 @@ describe("collectAttachmentRefsByCreator", () => {
       },
       {
         stored: teamBytes,
-        context: { attachmentId: "a-team", entryId: "tpe1" },
+        context: { attachmentId: "a-team", entryId: "tpe1", teamId: "team1" },
       },
     ]);
   });
@@ -192,11 +205,22 @@ describe("deleteAttachmentBlobs", () => {
     expect(mockDeleteObject).not.toHaveBeenCalled();
   });
 
+  it("is a no-op on the DB backend (bytes, not refs; nothing logged)", async () => {
+    mockGetAttachmentBlobStore.mockReturnValue(fakeStore(BLOB_STORAGE.DB));
+
+    await deleteAttachmentBlobs([
+      { stored: new Uint8Array([1, 2, 3]), context: { attachmentId: "a1", entryId: "e1" } },
+    ]);
+
+    expect(mockDeleteObject).not.toHaveBeenCalled();
+    expect(mockWarn).not.toHaveBeenCalled();
+  });
+
   it("calls deleteObject once per ref with (stored, context)", async () => {
     mockGetAttachmentBlobStore.mockReturnValue(fakeStore(BLOB_STORAGE.S3));
     const refs: AttachmentBlobRef[] = [
-      { stored: new Uint8Array([1]), context: { attachmentId: "a1", entryId: "e1" } },
-      { stored: new Uint8Array([2]), context: { attachmentId: "a2", entryId: "e2" } },
+      { stored: refBytes(`personal/e1/a1/${GEN}.bin`), context: { attachmentId: "a1", entryId: "e1" } },
+      { stored: refBytes("personal/e2/a2.bin"), context: { attachmentId: "a2", entryId: "e2" } },
     ];
 
     await deleteAttachmentBlobs(refs);
@@ -212,11 +236,32 @@ describe("deleteAttachmentBlobs", () => {
       .mockRejectedValueOnce(new Error("storage down"))
       .mockResolvedValueOnce(undefined);
     const refs: AttachmentBlobRef[] = [
-      { stored: new Uint8Array([1]), context: { attachmentId: "a1", entryId: "e1" } },
-      { stored: new Uint8Array([2]), context: { attachmentId: "a2", entryId: "e2" } },
+      { stored: refBytes(`personal/e1/a1/${GEN}.bin`), context: { attachmentId: "a1", entryId: "e1" } },
+      { stored: refBytes("personal/e2/a2.bin"), context: { attachmentId: "a2", entryId: "e2" } },
     ];
 
     await expect(deleteAttachmentBlobs(refs)).resolves.toBeUndefined();
     expect(mockDeleteObject).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ["an undecodable ref", new Uint8Array([1, 2, 3])],
+    ["another row's ref", encodeObjectRef({ key: `personal/e1/other/${GEN}.bin` })],
+  ])("skips and logs %s instead of deleting a guessed key", async (_label, stored) => {
+    mockGetAttachmentBlobStore.mockReturnValue(fakeStore(BLOB_STORAGE.S3));
+    const good: AttachmentBlobRef = {
+      stored: refBytes(`team/t1/e2/a2/${GEN}.bin`),
+      context: { attachmentId: "a2", entryId: "e2", teamId: "t1" },
+    };
+    const bad: AttachmentBlobRef = { stored, context: { attachmentId: "a1", entryId: "e1" } };
+
+    await deleteAttachmentBlobs([bad, good]);
+
+    expect(mockDeleteObject).toHaveBeenCalledTimes(1);
+    expect(mockDeleteObject).toHaveBeenCalledWith(good.stored, good.context);
+    expect(mockWarn).toHaveBeenCalledTimes(1);
+    // The log names the attachment, never the ref content.
+    expect(mockWarn.mock.calls[0][0]).toEqual({ attachmentId: "a1" });
+    expect(JSON.stringify(mockWarn.mock.calls[0])).not.toContain("personal/");
   });
 });

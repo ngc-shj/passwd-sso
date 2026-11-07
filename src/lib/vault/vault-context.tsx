@@ -42,7 +42,7 @@ import {
   MIN_ACCEPTED_CEK_WRAP_AAD_VERSION,
   CURRENT_CEK_WRAP_AAD_VERSION,
 } from "@/lib/crypto/crypto-aad";
-import { API_PATH, apiPath, VAULT_STATUS } from "@/lib/constants";
+import { API_PATH, apiPath, VAULT_STATUS, ATTACHMENT_ENCRYPTION_MODE } from "@/lib/constants";
 import type { VaultStatus } from "@/lib/constants";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { fetchApi } from "@/lib/url-helpers";
@@ -980,7 +980,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
             authTag: string;
             encryptionMode: number;
           };
-          if (att.encryptionMode !== 0) {
+          if (att.encryptionMode !== ATTACHMENT_ENCRYPTION_MODE.VAULT_KEY) {
             // Concurrent migration — skip; next iteration will pick up the
             // updated mode0Attachments list.
             continue;
