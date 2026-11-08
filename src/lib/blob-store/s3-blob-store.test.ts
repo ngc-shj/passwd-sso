@@ -62,6 +62,41 @@ describe("s3BlobStore lazy SDK loading", () => {
   });
 });
 
+describe("s3BlobStore client options", () => {
+  it.each([
+    ["true", true],
+    [undefined, false],
+  ])("S3_FORCE_PATH_STYLE=%s constructs the client with forcePathStyle %s", async (value, want) => {
+    vi.resetModules();
+    vi.stubEnv("AWS_REGION", "ap-northeast-1");
+    vi.stubEnv("S3_ATTACHMENTS_BUCKET", "attachments-bucket");
+    if (value !== undefined) vi.stubEnv("S3_FORCE_PATH_STYLE", value);
+    const constructed: unknown[] = [];
+    vi.doMock("./runtime-module", () => ({
+      requireOptionalModule: vi.fn().mockReturnValue({
+        S3Client: class {
+          constructor(options: unknown) {
+            constructed.push(options);
+          }
+          send = vi.fn().mockResolvedValue({});
+        },
+        PutObjectCommand: class {},
+        GetObjectCommand: class {},
+        DeleteObjectCommand: class {},
+      }),
+    }));
+    const { s3BlobStore: store } = await import("./s3-blob-store");
+
+    await store.putObject(new Uint8Array([1]), {
+      attachmentId: "att-1",
+      entryId: "entry-1",
+      generation: "0123456789abcdef0123456789abcdef",
+    });
+
+    expect(constructed).toEqual([{ region: "ap-northeast-1", forcePathStyle: want }]);
+  });
+});
+
 describe("s3BlobStore object keys", () => {
   const GEN = "0123456789abcdef0123456789abcdef";
   const context = { attachmentId: "att-1", entryId: "entry-1", teamId: "team-1" };

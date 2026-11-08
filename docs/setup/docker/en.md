@@ -165,6 +165,7 @@ Set the following values:
 >
 | `BLOB_BACKEND` | Attachment storage backend | `db`, `s3`, `azure`, or `gcs` |
 | `AWS_REGION`, `S3_ATTACHMENTS_BUCKET` | Required if `BLOB_BACKEND=s3` | e.g., `ap-northeast-1`, bucket name |
+| `S3_FORCE_PATH_STYLE` | Optional (`BLOB_BACKEND=s3`) | `true` for an S3-compatible store such as MinIO behind `AWS_ENDPOINT_URL_S3` without per-bucket DNS |
 | `AZURE_STORAGE_ACCOUNT`, `AZURE_BLOB_CONTAINER` | Required if `BLOB_BACKEND=azure` | Azure Storage account / container |
 | `GCS_ATTACHMENTS_BUCKET` | Required if `BLOB_BACKEND=gcs` | GCS bucket name |
 

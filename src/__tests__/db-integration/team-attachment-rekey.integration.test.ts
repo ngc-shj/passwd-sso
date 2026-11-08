@@ -1038,6 +1038,34 @@ describe("team attachments under the entry ItemKey — real-DB integration", () 
       return { team, entry, legacy, attPrefix };
     }
 
+    // #1013: a hostname endpoint gets virtual-hosted requests (bucket.host)
+    // unless S3_FORCE_PATH_STYLE is set. The store caches its client per module,
+    // so each cell imports a fresh one.
+    it.each([
+      ["true", "round-trips"],
+      ["false", "is refused"],
+    ] as const)("S3_FORCE_PATH_STYLE=%s through a hostname endpoint %s (#1013)", async (flag, outcome) => {
+      const endpoint = new URL(process.env[ENDPOINT_ENV] ?? "");
+      endpoint.hostname = "localhost";
+      vi.stubEnv("AWS_ENDPOINT_URL_S3", endpoint.origin);
+      vi.stubEnv("S3_FORCE_PATH_STYLE", flag);
+      vi.resetModules();
+      const { s3BlobStore: store } = await import("@/lib/blob-store/s3-blob-store");
+      const context = { attachmentId: randomUUID(), entryId: randomUUID(), teamId: randomUUID(), generation: randomBytes(16).toString("hex") };
+      const data = new Uint8Array(randomBytes(32));
+
+      const put = store.putObject(data, context);
+      if (outcome === "is refused") {
+        await expect(put).rejects.toThrow();
+        expect(await objectsUnder(`${prefix}/team/${context.teamId}/`)).toEqual([]);
+        return;
+      }
+      const ref = await put;
+      expect(new Uint8Array(await store.getObject(ref, context))).toEqual(data);
+      await store.deleteObject(ref, context);
+      expect(await objectsUnder(`${prefix}/team/${context.teamId}/`)).toEqual([]);
+    });
+
     it("A3: a migrate leaves exactly one object under the attachment prefix — a fresh generation — and it decrypts", async () => {
       const { team, entry, legacy, attPrefix } = await seedOnMinio();
       expect(await objectsUnder(attPrefix)).toEqual([`${attPrefix}.bin`]);

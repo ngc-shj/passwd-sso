@@ -5,6 +5,11 @@ export interface S3BlobConfig {
   backend: typeof BLOB_STORAGE.S3;
   region: string;
   bucket: string;
+  /**
+   * Path-style requests (`https://host/bucket/key`) for an S3-compatible store
+   * behind a custom endpoint (AWS_ENDPOINT_URL_S3) that has no per-bucket DNS.
+   */
+  forcePathStyle: boolean;
 }
 
 export interface AzureBlobConfig {
@@ -37,7 +42,8 @@ export function loadCloudBlobConfig(backend: BlobBackend): CloudBlobConfig {
     if (!region || !bucket) {
       throw new Error(BLOB_CONFIG_ERROR.S3_REQUIRED);
     }
-    return { backend, region, bucket };
+    const forcePathStyle = process.env.S3_FORCE_PATH_STYLE?.trim() === "true";
+    return { backend, region, bucket, forcePathStyle };
   }
 
   if (backend === BLOB_STORAGE.AZURE) {

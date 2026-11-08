@@ -247,6 +247,7 @@ Key variables:
 | `REDIS_URL` | Redis URL for rate limiting (**required in prod**) |
 | `BLOB_BACKEND` | Attachment backend (`db` / `s3` / `azure` / `gcs`) |
 | `AWS_REGION`, `S3_ATTACHMENTS_BUCKET` | Required when `BLOB_BACKEND=s3` |
+| `S3_FORCE_PATH_STYLE` | `true` for an S3-compatible store (e.g. MinIO) behind `AWS_ENDPOINT_URL_S3` without per-bucket DNS |
 | `AZURE_STORAGE_ACCOUNT`, `AZURE_BLOB_CONTAINER` | Required when `BLOB_BACKEND=azure` |
 | `AZURE_STORAGE_CONNECTION_STRING` or `AZURE_STORAGE_SAS_TOKEN` | Required when `BLOB_BACKEND=azure` |
 | `GCS_ATTACHMENTS_BUCKET` | Required when `BLOB_BACKEND=gcs` |
