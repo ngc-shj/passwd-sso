@@ -377,17 +377,23 @@ export async function handlePage(request: Request, p: string) {
     );
   });
 
-  it.each([
-    ["a route handler", "src/app/[locale]/admin/export/route.ts"],
-    ["a .jsx page", "src/app/[locale]/admin/export/page.jsx"],
-    ["a metadata image route", "src/app/[locale]/admin/opengraph-image.tsx"],
-  ])("FAILS for %s under a gated prefix that reads data without the session", async (_label, rel) => {
+  // Every segment name the gate treats as rendered or served, each extension at
+  // least once: dropping a name or an extension from the gate turns its row red.
+  const SEGMENT_NAMES = [
+    "page", "layout", "template", "default", "loading", "not-found", "forbidden", "unauthorized",
+    "route", "opengraph-image", "twitter-image", "icon", "apple-icon", "sitemap",
+  ];
+  const SEGMENT_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx"];
+  it.each(
+    SEGMENT_NAMES.map((name, i) => [`${name}${SEGMENT_EXTENSIONS[i % SEGMENT_EXTENSIONS.length]}`, `src/app/[locale]/admin/seg/${name}${SEGMENT_EXTENSIONS[i % SEGMENT_EXTENSIONS.length]}`]),
+  )("FAILS for %s under a gated prefix that reads data without the session", async (_label, rel) => {
     await expectFail({ files: { [rel]: DATA_PAGE } }, new RegExp(`${rel.replace(/[[\].]/g, "\\$&")} {2}is a server component`));
   });
 
   it.each([
     ["a route handler reading the session", "src/app/[locale]/admin/export/route.ts", `${AUTH_IMPORT}\n${DATA_PAGE.replace("const rows", "await auth();\n  const rows")}`],
     ["a .jsx client page", "src/app/[locale]/admin/export/page.jsx", `"use client";\n${DATA_PAGE}`],
+    ["a .js client page", "src/app/[locale]/admin/export/page.js", `"use client";\n${DATA_PAGE}`],
   ])("passes %s", async (_label, rel, body) => {
     await expectPass({ files: { [rel]: body } });
   });

@@ -434,3 +434,28 @@ production-code findings; gate and test findings only.
 - Mutation red proof (scratch copy): copying the request base into the
   other-tenant row, reverting the segment set, dropping the literal-import
   branch and dropping the then-branch check each turn their cells red.
+
+# Round 6
+
+Incremental review of 2c8405112 (gate and tests only). Functionality: no
+findings (the then-branch check and widened segment set match no current file
+wrongly; the prefixes still read /dashboard and /admin). Security: no findings;
+no production code changed and no earlier refusal weakened (R43). Testing and
+security converged on one Minor.
+
+## Tightening-only skip — Round 6
+Findings applied directly (no Round 7 review):
+- R6-T1 [Minor] Only `opengraph-image` of the seven segment names added in
+  Round 5, and no `.js` file, had a FAIL cell — scripts/__tests__/
+  check-session-passkey-readers.test.mjs — the FAIL `it.each` now runs every
+  segment name, each extension at least once, plus a `.js` client allow cell.
+  Dropping `sitemap` from the gate's name set, or `.js` from its extensions,
+  turns the suite red (scratch-copy mutation).
+Justification: the finding is inside Round 5's fix range, test-only (an inline
+addition of cells), and touches no security boundary in production code.
+
+## Termination
+All three experts returned no further findings beyond R6-T1, applied above.
+Accepted floors and decisions recorded in earlier rounds stand: R3-F5
+(membership re-check at sign-in), the rule-4 floors (`@/components` not
+followed, per-file reading), and `#1016` (non-token footholds after revoke-all).
