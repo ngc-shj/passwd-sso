@@ -75,7 +75,15 @@ vi.mock("@/lib/auth/session/session-cache-helpers", () => ({
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditInTx: mockLogAuditInTx,
-  tenantAuditBase: vi.fn((_req: unknown, userId: string, tenantId: string) => ({ scope: "TENANT", userId, tenantId })),
+  // The admin's request metadata is present, so the other-tenant row's lack of
+  // it is the code's doing.
+  tenantAuditBase: vi.fn((_req: unknown, userId: string, tenantId: string) => ({
+    scope: "TENANT",
+    userId,
+    tenantId,
+    ip: "203.0.113.9",
+    userAgent: "admin-ua",
+  })),
 }));
 vi.mock("@/lib/notification", () => ({ createNotification: mockCreateNotification }));
 vi.mock("@/lib/email", () => ({ sendEmail: mockSendEmail }));
@@ -193,8 +201,9 @@ describe("DELETE /api/tenant/members/[userId]/passkeys", () => {
         revokedFromTenantId: "tenant-1",
       },
     });
-    // The originating tenant's row carries no such marker.
+    // The originating tenant's row carries no such marker, and does carry the admin's request.
     expect(mockLogAuditInTx.mock.calls[0][2].metadata.revokedFromTenantId).toBeUndefined();
+    expect(mockLogAuditInTx.mock.calls[0][2]).toMatchObject({ userId: ADMIN, ip: "203.0.113.9", userAgent: "admin-ua" });
   });
 
   it("writes one row per other tenant, however many of its passkeys were revoked", async () => {

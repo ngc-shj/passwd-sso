@@ -325,7 +325,7 @@ describe.concurrent("check-session-passkey-readers.mjs", { timeout: 60_000 }, ()
 
   it("FAILS for a gated layout that reads only the session cookie, not the row", async () => {
     await expectFail(
-      { files: { [ADMIN_LAYOUT]: COOKIE_ONLY_ROUTE.replace("export async function GET(req: Request)", "export default async function Layout(req: Request)") } },
+      { files: { [ADMIN_LAYOUT]: swap(COOKIE_ONLY_ROUTE, "export async function GET(req: Request)", "export default async function Layout(req: Request)") } },
       /admin\/layout\.tsx {2}reads no session/,
     );
   });
@@ -349,6 +349,69 @@ describe.concurrent("check-session-passkey-readers.mjs", { timeout: 60_000 }, ()
       { files: { "src/app/[locale]/admin/loading.tsx": DATA_PAGE } },
       /admin\/loading\.tsx {2}is a server component/,
     );
+  });
+
+  it("FAILS closed when page-route.ts calls getSessionInfo outside any if", async () => {
+    await expectFail(
+      { files: { [PAGE_ROUTE]: `import { getSessionInfo } from "./auth-gate";\nexport async function handlePage(request: Request) {\n  return getSessionInfo(request);\n}\n` } },
+      /no getSessionInfo call inside an if statement/,
+    );
+  });
+
+  it("FAILS closed when the getSessionInfo call is in the guard's else-branch", async () => {
+    await expectFail(
+      {
+        files: {
+          [PAGE_ROUTE]: `import { getSessionInfo } from "./auth-gate";
+export async function handlePage(request: Request, p: string) {
+  if (p.startsWith("/public")) {
+    return null;
+  } else {
+    return getSessionInfo(request);
+  }
+}
+`,
+        },
+      },
+      /not in its if statement's then-branch/,
+    );
+  });
+
+  it.each([
+    ["a route handler", "src/app/[locale]/admin/export/route.ts"],
+    ["a .jsx page", "src/app/[locale]/admin/export/page.jsx"],
+    ["a metadata image route", "src/app/[locale]/admin/opengraph-image.tsx"],
+  ])("FAILS for %s under a gated prefix that reads data without the session", async (_label, rel) => {
+    await expectFail({ files: { [rel]: DATA_PAGE } }, new RegExp(`${rel.replace(/[[\].]/g, "\\$&")} {2}is a server component`));
+  });
+
+  it.each([
+    ["a route handler reading the session", "src/app/[locale]/admin/export/route.ts", `${AUTH_IMPORT}\n${DATA_PAGE.replace("const rows", "await auth();\n  const rows")}`],
+    ["a .jsx client page", "src/app/[locale]/admin/export/page.jsx", `"use client";\n${DATA_PAGE}`],
+  ])("passes %s", async (_label, rel, body) => {
+    await expectPass({ files: { [rel]: body } });
+  });
+
+  it("FAILS for a gated page whose literal import() loads a data module, naming it", async () => {
+    await expectFail(
+      { files: { "src/app/[locale]/admin/export/page.tsx": `export default async function Page() {\n  const m = await import("@/lib/pages/export");\n  return m;\n}\n` } },
+      /admin\/export\/page\.tsx {2}is a server component .* imports @\/lib\/pages\/export/,
+    );
+  });
+
+  it("FAILS for a gated page that require()s a data module", async () => {
+    await expectFail(
+      { files: { "src/app/[locale]/admin/export/page.tsx": `export default function Page() {\n  return require("@/lib/x");\n}\n` } },
+      /admin\/export\/page\.tsx {2}is a server component .* imports @\/lib\/x/,
+    );
+  });
+
+  it("passes a gated page whose literal import() is an allowed module", async () => {
+    await expectPass({ files: { "src/app/[locale]/admin/export/page.tsx": `export default async function Page() {\n  const { redirect } = await import("next/navigation");\n  redirect("/x");\n}\n` } });
+  });
+
+  it("passes a gated page with a type-only re-export", async () => {
+    await expectPass({ files: { "src/app/[locale]/admin/export/page.tsx": `export type { Row } from "@/lib/types";\n${WRAPPER_PAGE}` } });
   });
 
   it("passes a gated page whose only outside import is type-only", async () => {

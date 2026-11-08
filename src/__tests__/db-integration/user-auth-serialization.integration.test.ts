@@ -388,6 +388,8 @@ describe("credential revocation vs. mint — real-DB integration", () => {
       }
     } finally {
       await vaultLock.release();
+      // Let a revocation released by a failing cell finish before teardown.
+      await pending.catch(() => {});
     }
     expect((await pending).sessions).toBe(1);
   });

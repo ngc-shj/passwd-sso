@@ -204,7 +204,11 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
 
     mockAuth.mockResolvedValue({ user: { id: owner } });
     const res = await revokeAllPasskeys(
-      new NextRequest(`http://localhost/api/tenant/members/${target}/passkeys`, { method: "DELETE" }),
+      new NextRequest(`http://localhost/api/tenant/members/${target}/passkeys`, {
+        method: "DELETE",
+        // The admin's request metadata, which the other tenant's row must not carry.
+        headers: { "user-agent": "admin-agent/1.0" },
+      }),
       { params: Promise.resolve({ userId: target }) },
     );
     expect(res.status).toBe(200);
@@ -222,6 +226,7 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
       tenantId,
     );
     expect(audits).toHaveLength(1);
+    expect(JSON.parse(audits[0].payload)).toMatchObject({ userId: owner, userAgent: "admin-agent/1.0" });
     expect(JSON.parse(audits[0].payload)).toMatchObject({
       action: "TENANT_MEMBER_PASSKEY_REVOKE_ALL",
       userId: owner,
@@ -242,6 +247,7 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
       userId: SYSTEM_ACTOR_ID,
       actorType: "SYSTEM",
       ip: null,
+      userAgent: null,
       metadata: { targetUserId: target, passkeys: 1, revokedFromTenantId: tenantId },
     });
     // None of the revoking tenant's view: not its admin, not counts across tenants.

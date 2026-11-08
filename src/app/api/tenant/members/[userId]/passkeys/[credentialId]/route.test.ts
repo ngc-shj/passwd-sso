@@ -75,7 +75,15 @@ vi.mock("@/lib/auth/session/session-cache-helpers", () => ({
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditInTx: mockLogAuditInTx,
-  tenantAuditBase: vi.fn((_req: unknown, userId: string, tenantId: string) => ({ scope: "TENANT", userId, tenantId })),
+  // The admin's request metadata is present, so the other-tenant row's lack of
+  // it is the code's doing.
+  tenantAuditBase: vi.fn((_req: unknown, userId: string, tenantId: string) => ({
+    scope: "TENANT",
+    userId,
+    tenantId,
+    ip: "203.0.113.9",
+    userAgent: "admin-ua",
+  })),
 }));
 vi.mock("@/lib/notification", () => ({ createNotification: mockCreateNotification }));
 vi.mock("@/lib/email", () => ({ sendEmail: mockSendEmail }));
@@ -203,6 +211,7 @@ describe("DELETE /api/tenant/members/[userId]/passkeys/[credentialId]", () => {
     expect(mockLogAuditInTx.mock.calls[0][2].metadata).toMatchObject({ registeredInTenant: false });
     // The tenant it was registered under sees the revocation in its own log.
     expect(mockLogAuditInTx).toHaveBeenCalledTimes(2);
+    expect(mockLogAuditInTx.mock.calls[0][2]).toMatchObject({ userId: ADMIN, ip: "203.0.113.9", userAgent: "admin-ua" });
     expect(mockLogAuditInTx.mock.calls[1][1]).toBe("previous-tenant");
     // Attributed to the system, with no request metadata and none of the
     // revoking tenant's counts: only what concerns that tenant.

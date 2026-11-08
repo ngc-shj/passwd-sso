@@ -399,3 +399,38 @@ one Major on the new cross-tenant audit row. Testing: two Majors, six Minors.
   the per-tenant passkey filter and the per-tenant de-duplication each turn
   their cell red (the de-duplication cell first survived — keyed by tenant it
   collapsed duplicates — and now also pins the row count).
+
+# Round 5
+
+## Changes from Previous Round
+Incremental review of ad3388a30. Security: R4-S1 closed (row, webhooks/SIEM
+fan-out, audit-log view hydration, notification and email checked). No
+production-code findings; gate and test findings only.
+
+## Findings
+- R5-F1 [Minor] Rule 4 did not require the getSessionInfo call to be in its
+  `if`'s then-branch (an else-branch call would gate the complement).
+- R5-S1 [Minor] Rule 4's segment set omitted the metadata routes and boundaries
+  that render outside the layout (opengraph/twitter image, icon, apple-icon,
+  sitemap, forbidden, unauthorized).
+- R5-T1 [Major] The other-tenant row's "no IP / user agent" was asserted where
+  the request carried none (unit base mock, header-less integration request).
+- R5-T2 [Major] The new route / .js / .jsx segment coverage had no cell.
+- R5-T3..T6 [Minor] literal import()/require branch unpinned; the "not inside
+  an if" fatal lost its cell; the vault-lock cell did not await the released
+  revocation; a variant built without `swap`.
+
+## Resolution Status
+- R5-F1: the call must be inside the guard's then-branch, or the gate refuses
+  to run; else-branch and no-if cells.
+- R5-S1: those file names are segment files; a metadata image route cell.
+- R5-T1: the unit base mocks carry an IP and user agent and the originating row
+  is asserted to keep them while the other-tenant row is null; the integration
+  request sends a user agent, kept on the originating row, null on the other.
+- R5-T2: route, .jsx and metadata-route FAIL cells with route / client allow
+  sides. R5-T3: literal import() and require FAIL cells, an allowed import()
+  and a type-only re-export PASS cell. R5-T4: no-if cell. R5-T5: the pending
+  revocation is awaited in `finally`. R5-T6: `swap`.
+- Mutation red proof (scratch copy): copying the request base into the
+  other-tenant row, reverting the segment set, dropping the literal-import
+  branch and dropping the then-branch check each turn their cells red.

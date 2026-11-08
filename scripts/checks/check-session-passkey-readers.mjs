@@ -149,7 +149,10 @@ const DB_READER_EXPORTS = new Map([
 // renders (rule 4).
 const PAGE_ROUTE_PATH = "src/lib/proxy/page-route.ts";
 const PAGE_APP_ROOT = "src/app/[locale]";
-const PAGE_SEGMENT_FILE_RE = /\/(page|layout|template|default|loading|not-found|route)\.(tsx?|jsx?)$/;
+// Every file Next renders or serves under a route segment, including the
+// metadata routes and boundaries that render outside the layout.
+const PAGE_SEGMENT_FILE_RE =
+  /\/(page|layout|template|default|loading|not-found|forbidden|unauthorized|route|opengraph-image|twitter-image|icon|apple-icon|sitemap)\.(tsx?|jsx?)$/;
 const PAGE_SEGMENT_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx"];
 // What a server-component segment file that reads no session may import: it
 // can redirect, translate, or hand off to a client component, and nothing else.
@@ -433,6 +436,11 @@ function sessionGatedPagePrefixes() {
   }
   const guard = calls[0].getFirstAncestorByKind(SyntaxKind.IfStatement);
   if (!guard) fatal(`${PAGE_ROUTE_PATH}: no getSessionInfo call inside an if statement — rule 4 cannot read the gated page prefixes.`);
+  // In the then-branch: an else-branch call would gate the complement of the
+  // prefixes the condition names.
+  if (!calls[0].getAncestors().includes(guard.getThenStatement())) {
+    fatal(`${PAGE_ROUTE_PATH}: the getSessionInfo call is not in its if statement's then-branch — rule 4 cannot read the gated page prefixes.`);
+  }
   // The guard must be `p.startsWith("/a") || p.startsWith("/b") ...` and
   // nothing else: any other operand would gate paths this rule cannot name.
   const operands = [];
