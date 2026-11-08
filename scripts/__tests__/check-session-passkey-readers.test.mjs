@@ -387,7 +387,9 @@ export async function handlePage(request: Request, p: string) {
   it.each(
     SEGMENT_NAMES.map((name, i) => [`${name}${SEGMENT_EXTENSIONS[i % SEGMENT_EXTENSIONS.length]}`, `src/app/[locale]/admin/seg/${name}${SEGMENT_EXTENSIONS[i % SEGMENT_EXTENSIONS.length]}`]),
   )("FAILS for %s under a gated prefix that reads data without the session", async (_label, rel) => {
-    await expectFail({ files: { [rel]: DATA_PAGE } }, new RegExp(`${rel.replace(/[[\].]/g, "\\$&")} {2}is a server component`));
+    // Every regex metacharacter escaped, the backslash included.
+    const escaped = rel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    await expectFail({ files: { [rel]: DATA_PAGE } }, new RegExp(`${escaped} {2}is a server component`));
   });
 
   it.each([
