@@ -26,7 +26,17 @@ export function ActiveVaultProvider({ children }: { children: ReactNode }) {
     setVaultState((prev) => {
       if (prev?.type === v.type) {
         if (v.type === "personal") return prev;
-        if (v.type === "team" && prev.type === "team" && prev.teamId === v.teamId)
+        // Every field, not only the id: the role gates controls (attachment
+        // delete) and changes while the user stays in the team.
+        if (
+          v.type === "team" &&
+          prev.type === "team" &&
+          prev.teamId === v.teamId &&
+          prev.teamRole === v.teamRole &&
+          prev.teamName === v.teamName &&
+          prev.tenantName === v.tenantName &&
+          prev.isCrossTenant === v.isCrossTenant
+        )
           return prev;
       }
       return v;

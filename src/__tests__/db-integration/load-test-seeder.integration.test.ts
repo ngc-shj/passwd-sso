@@ -9,9 +9,10 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
+import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { createPrismaForRole } from "./helpers";
 import { hashSessionToken } from "@/lib/auth/session/session-cache";
@@ -19,6 +20,9 @@ import { hashSessionToken } from "@/lib/auth/session/session-cache";
 const SEEDER = join(process.cwd(), "load-test/setup/seed-load-test-users.mjs");
 const AUTH_FILE = join(process.cwd(), "load-test/setup/.load-test-auth.json");
 const TENANT_ID = "00000000-0000-4000-a000-0000000010ad";
+// execFileSync blocks the event loop, so vitest's test timeout cannot stop a
+// hung child; the child's own timeout (SIGTERM) does.
+const CHILD_TIMEOUT_MS = 60_000;
 
 interface Credential {
   userId: string;
@@ -29,18 +33,33 @@ describe("load-test seeder — real-DB integration", () => {
   // The seeder writes through a role that bypasses RLS, as its README requires.
   const su = createPrismaForRole("superuser");
 
+  function seederEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
+    return {
+      ...process.env,
+      DATABASE_URL: process.env.MIGRATION_DATABASE_URL ?? process.env.DATABASE_URL,
+      ALLOW_LOAD_TEST_SEED: "true",
+      ALLOW_NON_TEST_DBNAME: "true",
+      // Nothing listens here: the post-seed request is skipped, not failed.
+      BASE_URL: "http://127.0.0.1:9",
+      ...extra,
+    };
+  }
+
   function seeder(...args: string[]): void {
-    execFileSync(process.execPath, [SEEDER, ...args], {
-      env: {
-        ...process.env,
-        DATABASE_URL: process.env.MIGRATION_DATABASE_URL ?? process.env.DATABASE_URL,
-        ALLOW_LOAD_TEST_SEED: "true",
-        ALLOW_NON_TEST_DBNAME: "true",
-        // Nothing listens here: the post-seed request is skipped, not failed.
-        BASE_URL: "http://127.0.0.1:9",
-      },
-      stdio: "pipe",
-    });
+    execFileSync(process.execPath, [SEEDER, ...args], { env: seederEnv(), stdio: "pipe", timeout: CHILD_TIMEOUT_MS });
+  }
+
+  async function pendingOutboxRow(): Promise<string> {
+    const id = randomUUID();
+    await su.pool.query(
+      `INSERT INTO audit_outbox (id, tenant_id, payload, status) VALUES ($1::uuid, $2::uuid, '{}', 'PENDING')`,
+      [id, TENANT_ID],
+    );
+    return id;
+  }
+
+  async function markSent(outboxId: string): Promise<void> {
+    await su.pool.query(`UPDATE audit_outbox SET status = 'SENT', sent_at = now() WHERE id = $1::uuid`, [outboxId]);
   }
 
   function seed(): Credential {
@@ -73,6 +92,24 @@ describe("load-test seeder — real-DB integration", () => {
   });
 
   afterAll(async () => {
+    // Fallback when the seeder's own cleanup broke (the regression these cells
+    // catch): remove what it left, so the next run is not refused. Its outbox
+    // rows are this test's fixtures; FAILED makes them deletable.
+    const users = `(SELECT id FROM users WHERE email LIKE 'lt-user-%@loadtest.local')`;
+    for (const statement of [
+      `UPDATE audit_outbox SET status = 'FAILED' WHERE tenant_id = $1::uuid AND status NOT IN ('SENT', 'FAILED')`,
+      `DELETE FROM audit_outbox WHERE tenant_id = $1::uuid`,
+      `DELETE FROM audit_logs WHERE tenant_id = $1::uuid`,
+      `DELETE FROM audit_chain_anchors WHERE tenant_id = $1::uuid`,
+      `DELETE FROM sessions WHERE user_id IN ${users}`,
+      `DELETE FROM vault_keys WHERE user_id IN ${users}`,
+      `DELETE FROM tenant_members WHERE tenant_id = $1::uuid`,
+      `DELETE FROM users WHERE email LIKE 'lt-user-%@loadtest.local'`,
+      `DELETE FROM tenants WHERE id = $1::uuid`,
+    ]) {
+      await su.pool.query(statement, statement.includes("$1") ? [TENANT_ID] : []);
+    }
+    if (existsSync(AUTH_FILE)) unlinkSync(AUTH_FILE);
     await su.prisma.$disconnect();
     await su.pool.end();
   });
@@ -116,6 +153,51 @@ describe("load-test seeder — real-DB integration", () => {
       second.userId,
     );
     expect(member).toEqual({ active: true });
+  });
+
+  // audit_outbox refuses to delete a row that is not SENT or FAILED, so cleanup
+  // waits for the worker and refuses by name when the outbox does not drain.
+  it("cleanup refuses by name, deleting nothing, while an outbox row of the tenant stays PENDING", async () => {
+    const credential = seed();
+    const outboxId = await pendingOutboxRow();
+
+    let stderr = "";
+    try {
+      execFileSync(process.execPath, [SEEDER, "--cleanup"], {
+        env: seederEnv({ LOAD_TEST_OUTBOX_DRAIN_TIMEOUT_MS: "0" }),
+        stdio: "pipe",
+        timeout: CHILD_TIMEOUT_MS,
+      });
+    } catch (e) {
+      stderr = String((e as { stderr?: Buffer }).stderr ?? "");
+    }
+    expect(stderr).toContain("LOAD_TEST_CLEANUP_OUTBOX_UNDRAINED: 1 audit_outbox rows");
+
+    const left = await one<{ users: number; tenants: number }>(
+      `SELECT (SELECT count(*)::int FROM users WHERE id = $2::uuid) AS users,
+              (SELECT count(*)::int FROM tenants WHERE id = $1::uuid) AS tenants`,
+      TENANT_ID,
+      credential.userId,
+    );
+    expect(left).toEqual({ users: 1, tenants: 1 });
+    // The worker's part, so afterEach can clean up.
+    await markSent(outboxId);
+  });
+
+  it("cleanup waits for a PENDING outbox row the worker delivers, then completes", async () => {
+    seed();
+    const outboxId = await pendingOutboxRow();
+
+    const cleanup = promisify(execFile)(process.execPath, [SEEDER, "--cleanup"], {
+      env: seederEnv({ LOAD_TEST_OUTBOX_DRAIN_TIMEOUT_MS: "20000" }),
+      timeout: CHILD_TIMEOUT_MS,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await markSent(outboxId);
+    await cleanup;
+
+    const tenant = await one<{ n: number }>(`SELECT count(*)::int AS n FROM tenants WHERE id = $1::uuid`, TENANT_ID);
+    expect(tenant).toEqual({ n: 0 });
   });
 
   it("cleanup removes the users and the tenant, including audit rows a worker wrote for the tenant", async () => {

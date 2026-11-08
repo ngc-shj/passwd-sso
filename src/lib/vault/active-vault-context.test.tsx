@@ -59,14 +59,28 @@ describe("ActiveVaultProvider", () => {
   it("preserves identity when setting the same team twice", () => {
     const { result } = renderHook(useVaultPair, { wrapper });
     act(() => {
-      result.current.setVault({ type: "team", teamId: "team-1", teamName: "Eng" });
+      result.current.setVault({ type: "team", teamId: "team-1", teamName: "Eng", teamRole: "ADMIN" });
     });
     const first = result.current.vault;
     act(() => {
-      // Different object, same teamId — must dedupe
-      result.current.setVault({ type: "team", teamId: "team-1", teamName: "Eng v2" });
+      // Different object, same fields — must dedupe
+      result.current.setVault({ type: "team", teamId: "team-1", teamName: "Eng", teamRole: "ADMIN" });
     });
     expect(result.current.vault).toBe(first);
+  });
+
+  it.each([
+    ["role", { teamRole: "MEMBER" }],
+    ["name", { teamName: "Eng v2" }],
+  ])("replaces the team vault when its %s changes within the same team", (_label, change) => {
+    const { result } = renderHook(useVaultPair, { wrapper });
+    act(() => {
+      result.current.setVault({ type: "team", teamId: "team-1", teamName: "Eng", teamRole: "ADMIN" });
+    });
+    act(() => {
+      result.current.setVault({ type: "team", teamId: "team-1", teamName: "Eng", teamRole: "ADMIN", ...change });
+    });
+    expect(result.current.vault).toEqual({ type: "team", teamId: "team-1", teamName: "Eng", teamRole: "ADMIN", ...change });
   });
 
   it("switches when teamId changes (different team triggers replacement)", () => {

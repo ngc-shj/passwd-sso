@@ -10,8 +10,11 @@ const {
   teamDialogProps,
   toastMessageMock,
   vaultUser,
+  sectionGates,
 } = vi.hoisted(() => ({
   vaultUser: { id: "user-1" as string | null },
+  // Each mounted section's canSelectEntry, keyed by section type.
+  sectionGates: new Map<string, ((entry: unknown) => boolean) | undefined>(),
   mockUseWatchtower: vi.fn(),
   personalDialogProps: vi.fn(),
   teamDialogProps: vi.fn(),
@@ -60,34 +63,46 @@ vi.mock("@/lib/vault/vault-context", () => ({
 
 vi.mock("@/components/watchtower/issue-section", () => ({
   IssueSection: ({
+    type,
     issues,
     onSelectEntry,
     canSelectEntry,
   }: {
+    type: string;
     issues: Array<Record<string, unknown>>;
     onSelectEntry?: (entry: unknown) => void;
     canSelectEntry?: (entry: unknown) => boolean;
-  }) => (
-    <div>
-      {issues.map((issue) => (
-        <button
-          key={String(issue.id)}
-          disabled={canSelectEntry?.(issue) === false}
-          onClick={() => onSelectEntry?.(issue)}
-        >
-          select-{String(issue.id)}
-        </button>
-      ))}
-    </div>
-  ),
-  ReusedSection: () => null,
-  DuplicateSection: () => null,
+  }) => {
+    sectionGates.set(type, canSelectEntry);
+    return (
+      <div>
+        {issues.map((issue) => (
+          <span key={String(issue.id)}>
+            <button disabled={canSelectEntry?.(issue) === false} onClick={() => onSelectEntry?.(issue)}>
+              select-{String(issue.id)}
+            </button>
+            {/* Bypasses the disabled state, to reach the page's render guard. */}
+            <button onClick={() => onSelectEntry?.(issue)}>force-{String(issue.id)}</button>
+          </span>
+        ))}
+      </div>
+    );
+  },
+  ReusedSection: ({ canSelectEntry }: { canSelectEntry?: (entry: unknown) => boolean }) => {
+    sectionGates.set("reused", canSelectEntry);
+    return null;
+  },
+  DuplicateSection: ({ canSelectEntry }: { canSelectEntry?: (entry: unknown) => boolean }) => {
+    sectionGates.set("duplicate", canSelectEntry);
+    return null;
+  },
 }));
 
 describe("WatchtowerPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vaultUser.id = "user-1";
+    sectionGates.clear();
     mockUseWatchtower.mockReturnValue({
       report: {
         totalPasswords: 1,
@@ -376,6 +391,48 @@ describe("WatchtowerPage", () => {
       fireEvent.click(button);
 
       expect(screen.queryByTestId("team-edit-dialog") !== null).toBe(opens);
+    });
+
+    it("every section gets the same per-entry gate: a MEMBER's own entry opens, another member's does not", () => {
+      mockUseWatchtower.mockReturnValue({
+        report: teamReport,
+        loading: false,
+        progress: { current: 0, total: 0, step: "" },
+        analyze: vi.fn(),
+        canAnalyze: true,
+        cooldownRemainingMs: 0,
+        unavailableReason: null,
+      });
+
+      render(<WatchtowerPage scope={{ type: "team", teamId: "team-abc" }} teamRole="MEMBER" />);
+
+      expect([...sectionGates.keys()].sort()).toEqual(
+        ["breached", "duplicate", "expiring", "old", "reused", "unsecured", "weak"],
+      );
+      for (const [section, gate] of sectionGates) {
+        expect(gate?.(teamReport.weak[0]), section).toBe(true);
+        expect(gate?.(teamReport.breached[0]), section).toBe(false);
+      }
+    });
+
+    it("does not render the team edit dialog for an entry the MEMBER cannot edit, even when selected", () => {
+      mockUseWatchtower.mockReturnValue({
+        report: teamReport,
+        loading: false,
+        progress: { current: 0, total: 0, step: "" },
+        analyze: vi.fn(),
+        canAnalyze: true,
+        cooldownRemainingMs: 0,
+        unavailableReason: null,
+      });
+
+      render(<WatchtowerPage scope={{ type: "team", teamId: "team-abc" }} teamRole="MEMBER" />);
+      fireEvent.click(screen.getByText("force-team-entry-1"));
+      expect(screen.queryByTestId("team-edit-dialog")).toBeNull();
+
+      // Control: the same path opens the member's own entry.
+      fireEvent.click(screen.getByText("force-team-entry-2"));
+      expect(screen.getByTestId("team-edit-dialog")).toBeInTheDocument();
     });
 
     it.each([

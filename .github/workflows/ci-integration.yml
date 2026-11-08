@@ -54,6 +54,11 @@ on:
       # T2: route handlers read/write tenant-scoped tables; a route-only PR must
       # still run the integration suite (RLS scoping + write-read format).
       - 'src/app/api/**'
+      # The public share serve paths, share admission and the components the
+      # share-departure cells render (the /s/ page outside src/app/api).
+      - 'src/app/s/**'
+      - 'src/lib/share/**'
+      - 'src/components/share/**'
       - 'src/lib/emergency-access/**'
       - 'src/lib/access-request/**'
       # C7: the offline operator CLI, tested from src/__tests__/db-integration/.
@@ -83,6 +88,9 @@ permissions:
 jobs:
   integration:
     runs-on: ubuntu-latest
+    # Runs take ~6 minutes; a hung child process (e.g. the load-test seeder)
+    # must not hold the runner for GitHub's 6-hour default.
+    timeout-minutes: 30
 
     services:
       postgres:

@@ -179,3 +179,76 @@ seed 3 rejected — the locked link is admitted under both policies.
 ### T7 [Minor] Test hygiene
 - Action: captured pane callbacks reset in `beforeEach`; `vaultUser` reset in
   `beforeEach`; `S3_FORCE_PATH_STYLE` stubbed to `""` in the default cell.
+
+## Round 2
+
+Incremental review of `0c90d2039`. F1, F3–F7 resolved; F2 partly (below).
+
+### Findings
+- Functionality F2-1 [Major] `audit_outbox` refuses to delete a row that is not
+  SENT or FAILED (trigger `audit_outbox_before_delete_guard`), so cleanup failed
+  right after a run whose events were still PENDING/PROCESSING; the JSDoc's claim
+  that the delete waits for a draining worker was wrong; README SQL the same.
+- Functionality F2-2 [Minor] `ActiveVaultProvider.setVault` kept the previous
+  team object when the teamId matched, so a role change within the team never
+  reached the attachment delete gate (also raised by Testing as Adjacent).
+- Security S-R2-1 [Minor, Adjacent] the seeder's invalid-URL error echoed the
+  whole `DATABASE_URL` (password), now piped into CI logs by the new test.
+- Testing T8 [Major] `ci-integration.yml` did not trigger on `src/app/s/**`,
+  `src/lib/share/**`, `src/components/share/**`, which share-departure tests.
+- Testing T9 [Minor] the Watchtower page test pinned the gate on 2 of 7 sections
+  and could not reach the dialog render guard.
+- Testing T10 [Minor] A13 asserted the admitted download as "not 410" and never
+  reached the download's view-count UPDATE recheck.
+- Testing T11 [Minor] the seeder test's `execFileSync` had no timeout and the
+  integration job no `timeout-minutes`.
+- Testing T12 [Minor] a broken seeder cleanup would leave rows that make later
+  runs refuse; no red proof for the seeder cells.
+
+### Resolution Status
+#### F2-1 [Major] Cleanup fails on undrained outbox rows
+- Action: `deleteTenantAudit` waits (1 s poll, `LOAD_TEST_OUTBOX_DRAIN_TIMEOUT_MS`,
+  default 60 s) until the tenant has no outbox row outside SENT/FAILED, then
+  deletes; otherwise it throws `LOAD_TEST_CLEANUP_OUTBOX_UNDRAINED` naming the
+  count and the worker command. The trigger stays the boundary (no status
+  rewrite). JSDoc corrected; README explains the wait and the refusal; the CLI
+  labels a cleanup failure as such.
+- Tests: "cleanup refuses by name, deleting nothing, while an outbox row of the
+  tenant stays PENDING" (deny) and "cleanup waits for a PENDING outbox row the
+  worker delivers, then completes" (allow).
+- Red proof (scratch copy of the seeder, real DB): M10 drain wait removed →
+  3 cells fail.
+
+#### F2-2 [Minor] Stale team role in the active vault
+- Action: `setVault` keeps the previous object only when every field matches;
+  the old "same team, renamed" identity cell now asserts replacement, with a
+  role-change cell.
+
+#### S-R2-1 [Minor] Connection string in an error message
+- Action: the reason no longer includes the URL.
+
+#### T8 [Major] CI trigger paths
+- Action: the three share paths added to `ci-integration.yml`.
+
+#### T9 [Minor] Watchtower gate on every section, render guard
+- Action: the page test captures each section's `canSelectEntry` (all seven) and
+  checks it per entry; a cell selects past the disabled state and asserts no
+  dialog for another member's entry, with the own-entry control opening it.
+- Red proof: render guard removed → 1 fail; ReusedSection gate removed → 1 fail.
+
+#### T10 [Minor] Download assertions
+- Action: admitted download pinned to 401; new cell with the pre-check forced:
+  the download's UPDATE refuses while sharing is off (410, no view counted) and
+  counts the view once it is on.
+
+#### T11 [Minor] Timeouts
+- Action: every seeder child runs with a 60 s timeout; the integration job has
+  `timeout-minutes: 30` (runs take about 6 minutes).
+
+#### T12 [Minor] Residue after a broken cleanup; red proof
+- Action: `afterAll` removes whatever the seeder left (its outbox fixtures marked
+  FAILED first) and the credentials file.
+- Red proof (scratch copy, real DB): M7 tenant `audit_logs` delete removed →
+  cleanup cell fails; M8 membership reactivation removed → re-seed cell fails;
+  M9 session replacement removed → re-seed cell fails; the fallback left no
+  tenant behind.

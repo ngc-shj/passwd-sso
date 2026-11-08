@@ -281,9 +281,10 @@ describe("share links across a creator's departure — real-DB integration", () 
     return { status: res.status, body: await res.json().catch(() => null) };
   }
 
-  /** Download status with no access token: 410 when refused, the password demand when admitted. */
-  async function download(s: SeededShare): Promise<number> {
-    const res = await shareDownload(new NextRequest(`http://localhost/s/${s.token}/download`), {
+  /** Download status: 410 when refused; admitted without a token, the password demand (401). */
+  async function download(s: SeededShare, withAccessToken = false): Promise<number> {
+    const headers: Record<string, string> = withAccessToken ? { authorization: `Bearer ${createShareAccessToken(s.id)}` } : {};
+    const res = await shareDownload(new NextRequest(`http://localhost/s/${s.token}/download`, { headers }), {
       params: Promise.resolve({ token: s.token }),
     });
     return res.status;
@@ -490,8 +491,7 @@ describe("share links across a creator's departure — real-DB integration", () 
     const file = await share({ creatorId: t.creator, teamEntryId: t.entryId, shareType: "FILE", protect: true });
     await teamPolicy(t.teamId, { allowSharing: true, requireSharePassword: false });
     expect(await page(open)).toBe("served");
-    const admittedDownload = await download(file);
-    expect(admittedDownload).not.toBe(410);
+    expect(await download(file)).toBe(401);
 
     await teamPolicy(t.teamId, { allowSharing: false, requireSharePassword: false });
     expect(await page(open)).toBe("error:revoked");
@@ -505,7 +505,21 @@ describe("share links across a creator's departure — real-DB integration", () 
     await teamPolicy(t.teamId, { allowSharing: true, requireSharePassword: false });
     expect(await page(open)).toBe("served");
     expect((await verify(locked)).status).toBe(200);
-    expect(await download(file)).toBe(admittedDownload);
+    expect(await download(file)).toBe(401);
+  });
+
+  it("A13: with the pre-check forced, the download's view-count UPDATE refuses while sharing is off; a live twin counts the view", async () => {
+    const t = await teamWithCreator();
+    const file = await share({ creatorId: t.creator, teamEntryId: t.entryId, shareType: "FILE", protect: true });
+    forceAdmitted.on = true;
+
+    await teamPolicy(t.teamId, { allowSharing: false, requireSharePassword: false });
+    expect(await download(file, true)).toBe(410);
+    expect((await state(file.id)).view_count).toBe(0);
+
+    await teamPolicy(t.teamId, { allowSharing: true, requireSharePassword: false });
+    await download(file, true);
+    expect((await state(file.id)).view_count).toBe(1);
   });
 
   it("A13: requiring a share password stops the team's unprotected links only; relaxing it serves them again", async () => {

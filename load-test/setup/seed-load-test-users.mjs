@@ -92,7 +92,8 @@ export function validateDatabaseUrl(databaseUrl, opts = {}) {
   try {
     parsed = new URL(databaseUrl);
   } catch {
-    return { valid: false, reason: `DATABASE_URL is not a valid URL: ${databaseUrl}` };
+    // Not echoed: the connection string carries the password.
+    return { valid: false, reason: "DATABASE_URL is not a valid URL" };
   }
 
   const hostname = parsed.hostname;
@@ -394,11 +395,29 @@ async function cleanupTenant(pool) {
 }
 
 /**
- * The tenant's audit rows, outbox before log: a worker draining an outbox row
- * holds it locked, so the outbox delete waits for that drain to commit and the
- * log delete after it then sees the row the drain wrote.
+ * The tenant's audit rows, outbox before log. A trigger refuses to delete an
+ * outbox row that is not SENT or FAILED (audit evidence), so wait for the
+ * outbox worker to drain the run's events first, and refuse by name when it
+ * does not: the trigger stays the boundary. Once nothing is pending, no more
+ * audit_logs rows arrive for the tenant, so the log delete after it is final.
  */
 async function deleteTenantAudit(pool) {
+  const timeoutMs = Number(process.env.LOAD_TEST_OUTBOX_DRAIN_TIMEOUT_MS ?? 60_000);
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const { rows } = await pool.query(
+      `SELECT count(*)::int AS n FROM audit_outbox WHERE tenant_id = $1 AND status NOT IN ('SENT', 'FAILED')`,
+      [LOAD_TEST_TENANT.id],
+    );
+    if (rows[0].n === 0) break;
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `LOAD_TEST_CLEANUP_OUTBOX_UNDRAINED: ${rows[0].n} audit_outbox rows of the load-test tenant are not yet ` +
+          "SENT or FAILED; start the audit-outbox worker (npm run worker:audit-outbox) and re-run cleanup",
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
   await pool.query(`DELETE FROM audit_outbox WHERE tenant_id = $1`, [LOAD_TEST_TENANT.id]);
   await pool.query(`DELETE FROM audit_logs WHERE tenant_id = $1`, [LOAD_TEST_TENANT.id]);
   await pool.query(`DELETE FROM audit_chain_anchors WHERE tenant_id = $1`, [LOAD_TEST_TENANT.id]);
@@ -596,7 +615,7 @@ async function main() {
       console.warn("  Smoke check skipped: app not reachable (start it before running k6)");
     }
   } catch (err) {
-    console.error("Seed failed:", err.message);
+    console.error(isCleanup ? "Cleanup failed:" : "Seed failed:", err.message);
     console.error("\nClean up with: npm run test:load:cleanup");
     process.exit(1);
   } finally {
