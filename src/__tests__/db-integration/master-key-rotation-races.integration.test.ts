@@ -383,6 +383,37 @@ describe("master-key rotation — real-DB integration (C9)", () => {
     expect(share.rows[0].revoked_at).not.toBeNull();
   });
 
+  it("execute with revokeShares revokes server-key shares below the target and leaves client-encrypted (version 0) shares live (#997)", async () => {
+    const initiator = await seedOperator();
+    const approver = await seedOperator();
+    const rotationId = await seedRotationRow({
+      initiatedById: initiator.userId,
+      targetVersion: 2,
+      approvedById: approver.userId,
+      approvedAt: new Date(),
+      revokeShares: true,
+    });
+    const clientEncrypted = await seedPasswordShare(0);
+    const oldServerKey = await seedPasswordShare(1);
+    const currentServerKey = await seedPasswordShare(2);
+
+    const res = await executePOST(
+      buildRequest(`/api/admin/rotate-master-key/${rotationId}/execute`, initiator.token),
+      rotationParams(rotationId),
+    );
+    expect(res.status).toBe(200);
+
+    const rows = await ctx.su.pool.query<{ id: string; revoked: boolean }>(
+      `SELECT id::text, revoked_at IS NOT NULL AS revoked FROM password_shares WHERE id = ANY($1::uuid[])`,
+      [[clientEncrypted, oldServerKey, currentServerKey]],
+    );
+    expect(Object.fromEntries(rows.rows.map((r) => [r.id, r.revoked]))).toEqual({
+      [clientEncrypted]: false,
+      [oldServerKey]: true,
+      [currentServerKey]: false,
+    });
+  });
+
   // ── C9a fallback loop: ≥50 iterations, winCount>0 AND loserCount>0 ────────
 
   it("50-iteration loop: concurrent double-execute — winCount>0 AND loserCount>0 (RT4 fallback)", async () => {
