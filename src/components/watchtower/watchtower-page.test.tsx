@@ -9,7 +9,9 @@ const {
   personalDialogProps,
   teamDialogProps,
   toastMessageMock,
+  vaultUser,
 } = vi.hoisted(() => ({
+  vaultUser: { id: "user-1" as string | null },
   mockUseWatchtower: vi.fn(),
   personalDialogProps: vi.fn(),
   teamDialogProps: vi.fn(),
@@ -52,11 +54,27 @@ vi.mock("@/components/team/management/team-edit-dialog-loader", () => ({
   },
 }));
 
+vi.mock("@/lib/vault/vault-context", () => ({
+  useVault: () => ({ userId: vaultUser.id }),
+}));
+
 vi.mock("@/components/watchtower/issue-section", () => ({
-  IssueSection: ({ issues, onSelectEntry }: { issues: Array<Record<string, unknown>>; onSelectEntry?: (entry: unknown) => void }) => (
+  IssueSection: ({
+    issues,
+    onSelectEntry,
+    canSelectEntry,
+  }: {
+    issues: Array<Record<string, unknown>>;
+    onSelectEntry?: (entry: unknown) => void;
+    canSelectEntry?: (entry: unknown) => boolean;
+  }) => (
     <div>
       {issues.map((issue) => (
-        <button key={String(issue.id)} onClick={() => onSelectEntry?.(issue)}>
+        <button
+          key={String(issue.id)}
+          disabled={canSelectEntry?.(issue) === false}
+          onClick={() => onSelectEntry?.(issue)}
+        >
           select-{String(issue.id)}
         </button>
       ))}
@@ -69,6 +87,7 @@ vi.mock("@/components/watchtower/issue-section", () => ({
 describe("WatchtowerPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vaultUser.id = "user-1";
     mockUseWatchtower.mockReturnValue({
       report: {
         totalPasswords: 1,
@@ -200,6 +219,7 @@ describe("WatchtowerPage", () => {
           username: "admin@corp.com",
           scope: "team" as const,
           teamId: "team-abc",
+          createdById: "user-2",
           severity: "critical" as const,
           details: "count:3",
         },
@@ -211,6 +231,7 @@ describe("WatchtowerPage", () => {
           username: "root",
           scope: "team" as const,
           teamId: "team-abc",
+          createdById: "user-1",
           severity: "medium" as const,
           details: "entropy:25",
         },
@@ -253,7 +274,7 @@ describe("WatchtowerPage", () => {
         unavailableReason: null,
       });
 
-      render(<WatchtowerPage scope={{ type: "team", teamId: "team-abc" }} />);
+      render(<WatchtowerPage scope={{ type: "team", teamId: "team-abc" }} teamRole="OWNER" />);
 
       fireEvent.click(screen.getByText("select-team-entry-1"));
 
@@ -275,7 +296,7 @@ describe("WatchtowerPage", () => {
         unavailableReason: null,
       });
 
-      render(<WatchtowerPage scope={{ type: "team", teamId: "team-abc" }} />);
+      render(<WatchtowerPage scope={{ type: "team", teamId: "team-abc" }} teamRole="OWNER" />);
 
       fireEvent.click(screen.getByText("select-team-entry-1"));
 
@@ -295,7 +316,7 @@ describe("WatchtowerPage", () => {
         unavailableReason: null,
       });
 
-      render(<WatchtowerPage scope={{ type: "team", teamId: "team-abc" }} />);
+      render(<WatchtowerPage scope={{ type: "team", teamId: "team-abc" }} teamRole="OWNER" />);
 
       fireEvent.click(screen.getByText("select-team-entry-1"));
 
@@ -320,7 +341,7 @@ describe("WatchtowerPage", () => {
         unavailableReason: null,
       });
 
-      render(<WatchtowerPage scope={{ type: "team", teamId: "team-abc" }} />);
+      render(<WatchtowerPage scope={{ type: "team", teamId: "team-abc" }} teamRole="OWNER" />);
 
       fireEvent.click(screen.getByText("select-team-entry-1"));
 
@@ -330,6 +351,53 @@ describe("WatchtowerPage", () => {
       });
 
       expect(analyze).not.toHaveBeenCalled();
+    });
+    // #1014: the routes let a MEMBER write only entries they created
+    // (ONLY_OWN_ENTRIES); team-entry-1 is user-2's, team-entry-2 is user-1's.
+    it.each([
+      ["OWNER", "team-entry-1", true],
+      ["ADMIN", "team-entry-1", true],
+      ["MEMBER", "team-entry-2", true],
+      ["MEMBER", "team-entry-1", false],
+    ] as const)("%s selecting %s opens the team edit dialog: %s", (role, entryId, opens) => {
+      mockUseWatchtower.mockReturnValue({
+        report: teamReport,
+        loading: false,
+        progress: { current: 0, total: 0, step: "" },
+        analyze: vi.fn(),
+        canAnalyze: true,
+        cooldownRemainingMs: 0,
+        unavailableReason: null,
+      });
+
+      render(<WatchtowerPage scope={{ type: "team", teamId: "team-abc" }} teamRole={role} />);
+      const button = screen.getByText(`select-${entryId}`);
+      expect(button).toHaveProperty("disabled", !opens);
+      fireEvent.click(button);
+
+      expect(screen.queryByTestId("team-edit-dialog") !== null).toBe(opens);
+    });
+
+    it.each([
+      ["no team role", undefined, "user-1", "user-1"],
+      ["no session user", "OWNER", null, "user-1"],
+      ["an entry with no recorded creator", "OWNER", "user-1", null],
+    ] as const)("does not open a team entry with %s", (_label, role, userId, createdById) => {
+      vaultUser.id = userId;
+      mockUseWatchtower.mockReturnValue({
+        report: { ...teamReport, breached: [{ ...teamReport.breached[0], createdById }] },
+        loading: false,
+        progress: { current: 0, total: 0, step: "" },
+        analyze: vi.fn(),
+        canAnalyze: true,
+        cooldownRemainingMs: 0,
+        unavailableReason: null,
+      });
+
+      render(<WatchtowerPage scope={{ type: "team", teamId: "team-abc" }} teamRole={role} />);
+      fireEvent.click(screen.getByText("select-team-entry-1"));
+
+      expect(screen.queryByTestId("team-edit-dialog")).toBeNull();
     });
   });
 });

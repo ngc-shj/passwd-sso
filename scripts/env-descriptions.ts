@@ -499,8 +499,8 @@ export const descriptions: Record<
     group: "Blob storage",
     order: 5,
     description:
-      "Send path-style S3 requests (https://host/bucket/key). Set to true for an S3-compatible\n" +
-      "store (e.g. MinIO) reached through a custom endpoint (AWS_ENDPOINT_URL_S3) without\n" +
+      "Send path-style S3 requests (https://host/bucket/key). Set to true for an S3-compatible " +
+      "store (e.g. MinIO) reached through a custom endpoint (AWS_ENDPOINT_URL_S3) without " +
       "per-bucket DNS. Default: false (virtual-hosted requests, as AWS S3 expects).",
     example: "false",
   },

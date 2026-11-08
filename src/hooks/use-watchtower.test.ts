@@ -1438,6 +1438,7 @@ describe("useWatchtower", () => {
       blobAuthTag: "tag",
       updatedAt: new Date(Date.now() - (OLD_THRESHOLD_DAYS + 5) * MS_PER_DAY).toISOString(),
       expiresAt: null,
+      createdBy: { id: "creator-1", name: "C", email: null, image: null },
     };
 
     fetchSpy
@@ -1466,7 +1467,8 @@ describe("useWatchtower", () => {
 
     expect(result.current.report?.old).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: "team-entry-1", scope: "team", teamId: "team-1" }),
+        // The creator rides on the ref for the MEMBER own-entry edit rule (#1014).
+        expect.objectContaining({ id: "team-entry-1", scope: "team", teamId: "team-1", createdById: "creator-1" }),
       ]),
     );
     expect(mockBuildTeamEntryAAD).toHaveBeenCalledWith("team-1", "team-entry-1", "blob", 0);

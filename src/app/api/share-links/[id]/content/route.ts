@@ -109,8 +109,8 @@ async function handleGET(req: NextRequest, { params }: Params) {
       return notFound();
     }
 
-    // A team-entry share whose creator left the entry's team (or whose entry is
-    // trashed or gone) answers as a revoked one.
+    // A share share_creator_admitted refuses (creator left the team, entry
+    // trashed or gone, team policy no longer allows it) answers as a revoked one.
     if (!(await isShareCreatorAdmitted(tx, share.id))) {
       return notFound();
     }

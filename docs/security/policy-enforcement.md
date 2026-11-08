@@ -92,8 +92,8 @@ Sensitive browser-session flows that mint non-session credentials require a rece
 | `sessionAbsoluteTimeoutMinutes` | Blocking | Server | `auth-adapter.ts` `updateSession()` via `session-timeout.ts` resolver | Nullable (inherit tenant). Enforced via `min(tenant, ...teams.filter(non-null))`. Write constrained to `<= tenant`. Cascade-clamped when tenant lowers — emits `TEAM_POLICY_CLAMPED_BY_TENANT` audit |
 | `requireRepromptForAll` | Blocking | Client | `use-team-base-form-model.ts` | Forces `requireReprompt=true` on entries; reprompt gate is client-side |
 | `allowExport` | Blocking | Server | `audit-logs/download/route.ts`, `audit-logs/export/route.ts` | `assertPolicyAllowsExport(teamId)` → 403 |
-| `allowSharing` | Blocking | Server | `share-links/route.ts` | `assertPolicyAllowsSharing(teamId)` → 403 |
-| `requireSharePassword` | Blocking | Server | `share-links/route.ts` | `assertPolicySharePassword(teamId, requirePassword)` → 400 |
+| `allowSharing` | Blocking | Server | `share-links/route.ts`; every serve path via `share_creator_admitted` | Create: `assertPolicyAllowsSharing(teamId)` → 403. Serve: the team's existing links answer as revoked while sharing is off, and serve again when it is turned back on |
+| `requireSharePassword` | Blocking | Server | `share-links/route.ts`; every serve path via `share_creator_admitted` | Create: `assertPolicySharePassword(teamId, requirePassword)` → 400. Serve: the team's links without a password answer as revoked while the policy requires one |
 | `passwordHistoryCount` | Blocking | Client | `use-team-login-form-state.ts` | Fetches + decrypts last N history entries; `checkPasswordReuse()` blocks submit |
 | `inheritTenantCidrs` | Blocking | Server | `team-auth.ts` `requireTeamMember/Permission` | `withTeamIpRestriction()` called inside shared auth functions |
 | `teamAllowedCidrs` | Blocking | Server | `team-auth.ts` `requireTeamMember/Permission` | Combined with tenant CIDRs when `inheritTenantCidrs=true` |

@@ -838,6 +838,8 @@ describe("EntryListView — accordion team PasswordCard wiring", () => {
   beforeEach(() => {
     mockLayoutMode = "accordion";
     capturedCardProps = undefined;
+    capturedPaneEdit = undefined;
+    capturedPaneArchive = undefined;
   });
   afterAll(() => { mockLayoutMode = "master-detail"; });
 
@@ -889,6 +891,44 @@ describe("EntryListView — accordion team PasswordCard wiring", () => {
     );
     await waitFor(() => { expect(screen.getByTestId("card-te1")).toBeInTheDocument(); });
     expect(capturedCardProps?.canEdit).toBe(want);
+  });
+
+  it("canEdit=false wins over a canWriteEntry that answers true (card and pane)", async () => {
+    const adapter = {
+      ...teamAdapter(),
+      permissions: { canCreate: false, canEdit: false, canDelete: false, canShare: false },
+      canWriteEntry: () => true,
+    };
+    const { unmount } = render(
+      <EntryListView<TeamDisplayEntry>
+        adapter={adapter}
+        descriptor={NORMAL_VIEW}
+        query={{ tagId: null, folderId: null, entryType: null }}
+        searchQuery=""
+        sortBy="updatedAt"
+        refreshKey={0}
+      />,
+    );
+    await waitFor(() => { expect(screen.getByTestId("card-te1")).toBeInTheDocument(); });
+    expect(capturedCardProps?.canEdit).toBe(false);
+    unmount();
+
+    mockLayoutMode = "master-detail";
+    render(
+      <EntryListView<TeamDisplayEntry>
+        adapter={adapter}
+        descriptor={NORMAL_VIEW}
+        query={{ tagId: null, folderId: null, entryType: null }}
+        searchQuery=""
+        sortBy="updatedAt"
+        refreshKey={0}
+        onRequestEdit={() => {}}
+      />,
+    );
+    await waitFor(() => { expect(screen.getByTestId("row-te1")).toBeInTheDocument(); });
+    act(() => { fireEvent.click(screen.getByTestId("row-te1")); });
+    expect(capturedPaneEdit).toBeUndefined();
+    expect(capturedPaneArchive).toBeUndefined();
   });
 
   it.each([

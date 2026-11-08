@@ -79,8 +79,10 @@ export default async function SharePage({ params }: Props) {
       return <ShareError reason="revoked" />;
     }
 
-    // A team-entry share whose creator left the entry's team (or whose entry is
-    // trashed or gone) answers exactly as a revoked one, before the password gate.
+    // A share share_creator_admitted refuses (a team share whose creator left the
+    // team, whose entry is trashed or gone, or whose team policy no longer allows
+    // it; a personal share whose entry is trashed or gone) answers exactly as a
+    // revoked one, before the password gate.
     if (!(await isShareCreatorAdmitted(tx, share.id))) {
       return <ShareError reason="revoked" />;
     }

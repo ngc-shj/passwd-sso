@@ -350,6 +350,11 @@ async function cleanupUsers(pool) {
   const userIds = rows.map((r) => r.id);
   console.log(`Cleaning up ${userIds.length} load test users...`);
 
+  // The run's audit events first: once the outbox rows are gone the worker
+  // writes no more audit_logs for the tenant, and audit_logs.tenant_id is
+  // RESTRICT, so a row it wrote after this point would block the tenant delete.
+  await deleteTenantAudit(pool);
+
   // Delete in FK dependency order
   const tables = [
     { table: "audit_logs", column: "user_id" },
@@ -383,9 +388,20 @@ async function cleanupUsers(pool) {
  * Audit events from the run sit in audit_outbox under the tenant (FK).
  */
 async function cleanupTenant(pool) {
-  await pool.query(`DELETE FROM audit_outbox WHERE tenant_id = $1`, [LOAD_TEST_TENANT.id]);
+  await deleteTenantAudit(pool);
   await pool.query(`DELETE FROM tenant_members WHERE tenant_id = $1`, [LOAD_TEST_TENANT.id]);
   await pool.query(`DELETE FROM tenants WHERE id = $1`, [LOAD_TEST_TENANT.id]);
+}
+
+/**
+ * The tenant's audit rows, outbox before log: a worker draining an outbox row
+ * holds it locked, so the outbox delete waits for that drain to commit and the
+ * log delete after it then sees the row the drain wrote.
+ */
+async function deleteTenantAudit(pool) {
+  await pool.query(`DELETE FROM audit_outbox WHERE tenant_id = $1`, [LOAD_TEST_TENANT.id]);
+  await pool.query(`DELETE FROM audit_logs WHERE tenant_id = $1`, [LOAD_TEST_TENANT.id]);
+  await pool.query(`DELETE FROM audit_chain_anchors WHERE tenant_id = $1`, [LOAD_TEST_TENANT.id]);
 }
 
 // ─── Smoke Test ────────────────────────────────────────────────

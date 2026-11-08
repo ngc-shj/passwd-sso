@@ -1056,8 +1056,12 @@ describe("team attachments under the entry ItemKey — real-DB integration", () 
 
       const put = store.putObject(data, context);
       if (outcome === "is refused") {
-        await expect(put).rejects.toThrow();
-        expect(await objectsUnder(`${prefix}/team/${context.teamId}/`)).toEqual([]);
+        // Refused BECAUSE the request went virtual-hosted (to the bucket's own
+        // host name): it either does not resolve, or reaches MinIO as a request
+        // for no bucket. Any other error (credentials, config) fails the cell.
+        const error = (await put.then(() => null, (e: unknown) => e)) as { name?: string; code?: string; hostname?: string } | null;
+        const cause = error?.code === "ENOTFOUND" ? `ENOTFOUND ${error.hostname}` : error?.name;
+        expect([`ENOTFOUND ${BUCKET}.localhost`, "NoSuchBucket"]).toContain(cause);
         return;
       }
       const ref = await put;

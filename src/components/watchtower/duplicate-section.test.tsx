@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { render, screen, fireEvent } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { DuplicateSection } from "@/components/watchtower/issue-section";
 import type { DuplicateGroup } from "@/hooks/use-watchtower";
 
@@ -42,6 +42,22 @@ describe("DuplicateSection", () => {
     );
 
     expect(screen.getByText("1")).toBeTruthy();
+  });
+
+  it("canSelectEntry decides per entry which duplicates can be opened", () => {
+    render(
+      <DuplicateSection
+        title="Duplicates"
+        description="desc"
+        groups={groups}
+        formatCount={(count, hostname) => `${count} for ${hostname}`}
+        onSelectEntry={vi.fn()}
+        canSelectEntry={(entry) => entry.id === "e2"}
+      />,
+    );
+    const [, open1, open2] = screen.getAllByRole("button");
+    expect(open1).toHaveProperty("disabled", true);
+    expect(open2).toHaveProperty("disabled", false);
   });
 
   it("displays entry titles and usernames within group", () => {

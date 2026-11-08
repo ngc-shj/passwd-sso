@@ -140,6 +140,7 @@ describe("decryptTeamOverview", () => {
 describe("useTeamVaultListAdapter", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vaultUser.id = "u1";
     mockGetTeamKey.mockResolvedValue(STABLE_KEY);
     mockFetchApi.mockResolvedValue({ ok: true, json: async () => [] });
   });
@@ -170,7 +171,6 @@ describe("useTeamVaultListAdapter", () => {
     ["VIEWER", "their own", "u1", false],
     ["", "their own (role not loaded)", "u1", false],
   ] as const)("canWriteEntry: %s on %s entry → %s", (role, _whose, createdById, want) => {
-    vaultUser.id = "u1";
     const adapter = renderHook(() => useTeamVaultListAdapter(TEAM_ID, role)).result.current;
     const entry = { createdBy: { id: createdById, name: null, email: null, image: null } } as TeamDisplayEntry;
     expect(adapter.canWriteEntry?.(entry)).toBe(want);
@@ -181,7 +181,6 @@ describe("useTeamVaultListAdapter", () => {
     const adapter = renderHook(() => useTeamVaultListAdapter(TEAM_ID, "OWNER")).result.current;
     const entry = { createdBy: { id: "u1", name: null, email: null, image: null } } as TeamDisplayEntry;
     expect(adapter.canWriteEntry?.(entry)).toBe(false);
-    vaultUser.id = "u1";
   });
 
   it("reports ready:true (the team page gates on its own key probe)", () => {

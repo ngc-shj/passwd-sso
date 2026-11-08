@@ -65,12 +65,12 @@ describe("s3BlobStore lazy SDK loading", () => {
 describe("s3BlobStore client options", () => {
   it.each([
     ["true", true],
-    [undefined, false],
-  ])("S3_FORCE_PATH_STYLE=%s constructs the client with forcePathStyle %s", async (value, want) => {
+    ["", false],
+  ])("S3_FORCE_PATH_STYLE=%j constructs the client with forcePathStyle %s", async (value, want) => {
     vi.resetModules();
     vi.stubEnv("AWS_REGION", "ap-northeast-1");
     vi.stubEnv("S3_ATTACHMENTS_BUCKET", "attachments-bucket");
-    if (value !== undefined) vi.stubEnv("S3_FORCE_PATH_STYLE", value);
+    vi.stubEnv("S3_FORCE_PATH_STYLE", value);
     const constructed: unknown[] = [];
     vi.doMock("./runtime-module", () => ({
       requireOptionalModule: vi.fn().mockReturnValue({

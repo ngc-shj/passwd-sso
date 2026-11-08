@@ -16,8 +16,9 @@ export default async function TeamWatchtowerPage({
     notFound();
   }
 
+  let membership;
   try {
-    await requireTeamPermission(
+    membership = await requireTeamPermission(
       session.user.id,
       teamId,
       TEAM_PERMISSION.PASSWORD_UPDATE,
@@ -29,5 +30,5 @@ export default async function TeamWatchtowerPage({
     throw error;
   }
 
-  return <WatchtowerPage scope={{ type: "team", teamId }} />;
+  return <WatchtowerPage scope={{ type: "team", teamId }} teamRole={membership.role} />;
 }

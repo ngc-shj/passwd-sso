@@ -88,10 +88,12 @@ async function handlePOST(req: NextRequest) {
     const entry = await withUserTenantRls(session.user.id, async () =>
       prisma.passwordEntry.findUnique({
         where: { id: passwordEntryId },
-        select: { userId: true, entryType: true, tenantId: true },
+        select: { userId: true, entryType: true, tenantId: true, deletedAt: true },
       }),
     );
-    if (!entry || entry.userId !== session.user.id) {
+    // A trashed entry's links are never served (share_creator_admitted), so
+    // refuse to create one rather than hand back a dead link.
+    if (!entry || entry.userId !== session.user.id || entry.deletedAt) {
       return notFound();
     }
 
@@ -119,10 +121,10 @@ async function handlePOST(req: NextRequest) {
     const teamEntry = await withUserTenantRls(session.user.id, async () =>
       prisma.teamPasswordEntry.findUnique({
         where: { id: teamPasswordEntryId! },
-        select: { teamId: true, entryType: true, tenantId: true },
+        select: { teamId: true, entryType: true, tenantId: true, deletedAt: true },
       }),
     );
-    if (!teamEntry) {
+    if (!teamEntry || teamEntry.deletedAt) {
       return notFound();
     }
 

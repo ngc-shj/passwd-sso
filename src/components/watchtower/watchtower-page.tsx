@@ -44,13 +44,18 @@ import {
   formatExpiringDetails,
 } from "@/lib/watchtower/format-details";
 import { toast } from "sonner";
+import { useVault } from "@/lib/vault/vault-context";
+import { canWriteTeamEntry } from "@/lib/auth/access/team-permissions";
 import { MS_PER_SECOND } from "@/lib/constants/time";
+import type { TeamRoleValue } from "@/lib/constants";
 
 interface WatchtowerPageProps {
   scope: WatchtowerScope;
+  /** The viewer's role in the scoped team; a team entry opens for editing only under the routes' write rule. */
+  teamRole?: TeamRoleValue;
 }
 
-export function WatchtowerPage({ scope }: WatchtowerPageProps) {
+export function WatchtowerPage({ scope, teamRole }: WatchtowerPageProps) {
   const t = useTranslations("Watchtower");
   const locale = useLocale();
   const {
@@ -66,6 +71,11 @@ export function WatchtowerPage({ scope }: WatchtowerPageProps) {
     lastBreachCheckAt,
   } = useWatchtower(scope);
   const [selectedEntry, setSelectedEntry] = useState<WatchtowerEntryRef | null>(null);
+  const { userId } = useVault();
+  // The routes' rule (ONLY_OWN_ENTRIES): a MEMBER edits only entries they created.
+  const canEditEntry = (entry: WatchtowerEntryRef) =>
+    entry.scope === "personal" ||
+    (!!teamRole && !!userId && !!entry.createdById && canWriteTeamEntry(teamRole, entry.createdById, userId));
   const guard = useNavigationGuard(loading);
 
   const totalIssues = report ? calculateTotalIssues(report) : 0;
@@ -239,6 +249,7 @@ export function WatchtowerPage({ scope }: WatchtowerPageProps) {
                   issues={report.breached}
                   formatDetails={(d) => formatBreachDetails(d, t)}
                   onSelectEntry={setSelectedEntry}
+                  canSelectEntry={canEditEntry}
                 />
                 <IssueSection
                   type="weak"
@@ -247,6 +258,7 @@ export function WatchtowerPage({ scope }: WatchtowerPageProps) {
                   issues={report.weak}
                   formatDetails={(d) => formatWeakDetails(d, t)}
                   onSelectEntry={setSelectedEntry}
+                  canSelectEntry={canEditEntry}
                 />
                 <ReusedSection
                   title={t("reused")}
@@ -254,6 +266,7 @@ export function WatchtowerPage({ scope }: WatchtowerPageProps) {
                   groups={report.reused}
                   formatCount={(count) => t("reusedCount", { count })}
                   onSelectEntry={setSelectedEntry}
+                  canSelectEntry={canEditEntry}
                 />
                 <IssueSection
                   type="old"
@@ -262,6 +275,7 @@ export function WatchtowerPage({ scope }: WatchtowerPageProps) {
                   issues={report.old}
                   formatDetails={(d) => formatOldDetails(d, t)}
                   onSelectEntry={setSelectedEntry}
+                  canSelectEntry={canEditEntry}
                 />
                 <IssueSection
                   type="unsecured"
@@ -270,6 +284,7 @@ export function WatchtowerPage({ scope }: WatchtowerPageProps) {
                   issues={report.unsecured}
                   formatDetails={formatUnsecuredDetails}
                   onSelectEntry={setSelectedEntry}
+                  canSelectEntry={canEditEntry}
                 />
                 <DuplicateSection
                   title={t("duplicate")}
@@ -277,6 +292,7 @@ export function WatchtowerPage({ scope }: WatchtowerPageProps) {
                   groups={report.duplicate}
                   formatCount={(count, hostname) => t("duplicateCount", { count, hostname })}
                   onSelectEntry={setSelectedEntry}
+                  canSelectEntry={canEditEntry}
                 />
                 <IssueSection
                   type="expiring"
@@ -285,6 +301,7 @@ export function WatchtowerPage({ scope }: WatchtowerPageProps) {
                   issues={report.expiring}
                   formatDetails={(d) => formatExpiringDetails(d, locale, t)}
                   onSelectEntry={setSelectedEntry}
+                  canSelectEntry={canEditEntry}
                 />
               </div>
             )}
@@ -315,7 +332,7 @@ export function WatchtowerPage({ scope }: WatchtowerPageProps) {
           }}
         />
       )}
-      {selectedEntry?.scope === "team" && (
+      {selectedEntry?.scope === "team" && canEditEntry(selectedEntry) && (
         <TeamEditDialogLoader
           teamId={selectedEntry.teamId}
           id={selectedEntry.id}

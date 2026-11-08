@@ -13,8 +13,9 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-const { STABLE_KEY } = vi.hoisted(() => ({
+const { STABLE_KEY, detailState } = vi.hoisted(() => ({
   STABLE_KEY: {} as CryptoKey,
+  detailState: { data: null as null | { id: string } },
 }));
 
 vi.mock("next-intl", () => ({
@@ -29,7 +30,7 @@ vi.mock("@/lib/vault/vault-context", () => ({
 // Those mocks (decryptData, crypto-aad, fetchApi) now belong to use-password-entry-detail.test.tsx.
 
 vi.mock("@/hooks/vault/use-password-entry-detail", () => ({
-  usePasswordEntryDetail: () => ({ detailData: null, loading: false, error: null, invalidate: vi.fn() }),
+  usePasswordEntryDetail: () => ({ detailData: detailState.data, loading: false, error: null, invalidate: vi.fn() }),
 }));
 
 vi.mock("@/components/share/share-dialog", () => ({
@@ -45,7 +46,9 @@ vi.mock("../shared/favicon", () => ({
 }));
 
 vi.mock("./password-detail-inline", () => ({
-  PasswordDetailInline: () => <div data-testid="detail-inline" />,
+  PasswordDetailInline: ({ onEdit }: { onEdit?: () => void }) => (
+    <div data-testid="detail-inline" data-has-on-edit={String(!!onEdit)} />
+  ),
 }));
 
 vi.mock("../dialogs/personal-password-edit-dialog-loader", () => ({
@@ -88,6 +91,30 @@ const baseEntry: EntryCardData = {
 describe("PasswordCard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    detailState.data = null;
+  });
+
+  // The inline detail's history restore and attachment upload follow its onEdit
+  // (#1014), so canEdit=false must reach it as no onEdit.
+  it.each([
+    [true, "true"],
+    [false, "false"],
+  ])("expanded with canEdit=%s passes the inline detail onEdit: %s", (canEdit, hasOnEdit) => {
+    detailState.data = { id: "e1" };
+    render(
+      <PasswordCard
+        entry={baseEntry}
+        expanded={true}
+        canEdit={canEdit}
+        onToggleFavorite={vi.fn()}
+        onToggleArchive={vi.fn()}
+        onDelete={vi.fn()}
+        onToggleExpand={vi.fn()}
+        onRefresh={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId("detail-inline")).toHaveAttribute("data-has-on-edit", hasOnEdit);
   });
 
   it("renders the entry title and username", () => {
