@@ -71,7 +71,7 @@ prune flag, the blob mode and options, and `blobCursor`). `createWorker` owns
   `team_password_entry_histories`, `attachments`, `audit_outbox`, `tenants`.
 - `BYPASS_GRANT.RETENTION_BLOB_ORPHAN_SWEEP` — `attachments`.
 
-### #1009 — prune through a SECURITY DEFINER function [S6, F3, F5, F15, S7, T13]
+### `#1009` — prune through a SECURITY DEFINER function [S6, F3, F5, F15, S7, T13]
 
 The worker role gets no table grant. A migration creates
 `public.team_member_key_prune(p_batch integer) RETURNS TABLE(pruned_tenant_id uuid,
@@ -140,7 +140,7 @@ string[] }` (opaque ids, bounded to 100 with an omitted count — the evidence t
 deleted rows for dispute resolution, policy §3). Grouped with `TEAM_KEY_ROTATION` in the same
 tenant and team groups; webhook treatment identical to `TEAM_KEY_ROTATION`.
 
-### #1010 — orphan-object sweep [S1, F6, F7, F8, S11, S12, T5]
+### `#1010` — orphan-object sweep [S1, F6, F7, F8, S11, S12, T5]
 
 `AttachmentBlobStore` gains `listObjects(prefix: string, opts: { cursor?: string; pageSize:
 number }): Promise<{ objects: { key: string; lastModified: Date }[]; cursor?: string }>` (S3
@@ -211,7 +211,7 @@ separate post-restore step, set the mode to `off` until the restored rows are re
 Logging [S11]: counts only; errors logged as `{ name, httpStatusCode }`, never `message` (S3
 error messages embed the key).
 
-### #1012 — strict helpers [F9, F10, F11, S3, S8, T7]
+### `#1012` — strict helpers [F9, F10, F11, S3, S8, T7]
 
 Web, `src/lib/crypto/crypto-team.ts`:
 

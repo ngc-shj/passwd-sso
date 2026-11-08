@@ -44,7 +44,7 @@ try/catch, each **off by default**. Their counts appear in the heartbeat's
 function `team_member_key_prune(p_batch)`, whose single statement decides and
 deletes (one snapshot), bounded to `RETENTION_GC_BATCH_SIZE` (team, version)
 pairs per tick. The worker role holds EXECUTE on it and no table grant; the
-function refuses outside the RLS bypass, and while enforcement (#921) is off a
+function refuses outside the RLS bypass, and while enforcement (`#921`) is off a
 bypass whose grant omits `team_member_keys` is reported rather than refused.
 Grant: `BYPASS_GRANT.RETENTION_TEAM_KEY_PRUNE`. Policy and the concurrency
 argument: `docs/security/key-retention-policy.md` §1.

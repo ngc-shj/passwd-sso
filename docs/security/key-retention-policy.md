@@ -29,7 +29,7 @@ deleted. It applies to both automated systems and manual maintenance operations.
 - The re-key pass (whitepaper §6.2) is what lets version N reach zero
   references.
 
-### Automatic prune (#1009)
+### Automatic prune (`#1009`)
 
 - The retention GC worker deletes these versions — every member's row at
   (team, N) — once `RETENTION_GC_TEAM_KEY_PRUNE_ENABLED=true`. The switch is
@@ -52,7 +52,7 @@ deleted. It applies to both automated systems and manual maintenance operations.
 - The worker role holds EXECUTE on the function and no table grant. The
   function refuses unless the caller's RLS bypass is on; a bypass whose grant
   does not name `team_member_keys` is reported (`rls_bypass_not_granted`) and
-  becomes a refusal once enforcement is switched on (#921).
+  becomes a refusal once enforcement is switched on (`#921`).
 - Each tick writes one `TEAM_MEMBER_KEY_PRUNED` audit row per team (team
   scope, SYSTEM actor) carrying the versions, the row count and the holders'
   user ids (section 3).
@@ -172,7 +172,7 @@ reads the content as it was then. Their retention is bounded only by the
 operator's backup, WAL and bucket-versioning retention; set those with that in
 mind.
 
-### Orphaned attachment objects (#1010)
+### Orphaned attachment objects (`#1010`)
 
 With an external `BLOB_BACKEND` (S3, Azure, GCS), the retention GC worker can
 delete attachment objects that no `attachments` row references
