@@ -508,7 +508,7 @@ describe("share links across a creator's departure — real-DB integration", () 
     expect(await download(file)).toBe(401);
   });
 
-  it("A13: with the pre-check forced, the download's view-count UPDATE refuses while sharing is off; a live twin counts the view", async () => {
+  it("A13: with the pre-check forced, the download's view-count UPDATE refuses while sharing is off and counts the view once it is back on", async () => {
     const t = await teamWithCreator();
     const file = await share({ creatorId: t.creator, teamEntryId: t.entryId, shareType: "FILE", protect: true });
     forceAdmitted.on = true;
@@ -518,7 +518,8 @@ describe("share links across a creator's departure — real-DB integration", () 
     expect((await state(file.id)).view_count).toBe(0);
 
     await teamPolicy(t.teamId, { allowSharing: true, requireSharePassword: false });
-    await download(file, true);
+    // Past the UPDATE: the fixture stores no file, which the route answers 404.
+    expect(await download(file, true)).toBe(404);
     expect((await state(file.id)).view_count).toBe(1);
   });
 

@@ -252,3 +252,49 @@ Incremental review of `0c90d2039`. F1, F3–F7 resolved; F2 partly (below).
   cleanup cell fails; M8 membership reactivation removed → re-seed cell fails;
   M9 session replacement removed → re-seed cell fails; the fallback left no
   tenant behind.
+
+## Round 3
+
+Incremental review of `8047af0d5`. Round 2 findings resolved; new findings
+below are all within that fix scope.
+
+### Findings
+- Functionality F3-1 [Minor] A non-numeric `LOAD_TEST_OUTBOX_DRAIN_TIMEOUT_MS`
+  made the drain wait never expire (NaN deadline); an empty value refused at once.
+- Functionality F3-2 [Minor] The refusal message blamed a stopped worker, while a
+  running worker's retry backoff also keeps rows PENDING.
+- Functionality F3-3 [Minor] The drain wait runs twice on the users path.
+- Security S-R3-1 [Minor] / Testing F3-T1 [Major] vitest runs `afterAll` after a
+  refusing `beforeAll`, so the seeder test's fallback would wipe a developer's
+  existing seed, including marking its undrained outbox rows FAILED.
+- Security [Adjacent] The seeder deleted `audit_logs` by actor across tenants.
+- Testing F3-T2 [Minor] The drain-wait cell synchronised on a fixed sleep.
+- Testing F3-T3 [Minor] A failing refusal cell left its PENDING row, and
+  afterEach's 60 s drain equalled the child timeout.
+- Testing F3-T4 [Minor] `tenantName` / `isCrossTenant` in the vault compare were
+  unpinned.
+- Testing F3-T5 [Minor] The forced-precheck download's admitted status was
+  unasserted; the cell name said "twin".
+
+### Resolution Status
+- F3-1: the value is parsed once; unset or empty → 60 000; anything not a finite
+  non-negative number throws a named error.
+- F3-2: the message and the README name both cases (start the worker; or wait /
+  raise the timeout when it is retrying).
+- F3-3: no change needed (Anti-Deferral: worst case is a second wait whose
+  refusal leaves only the tenant row, removed by re-running cleanup, which then
+  takes the no-users branch; cost to restructure exceeds the benefit).
+- S-R3-1 / F3-T1: the fallback runs only once `beforeAll` has found no prior
+  seed (`ownsSeedState`), afterEach likewise, and FAILED is set only on this
+  suite's own fixture rows (`createdOutboxIds`). Proof: a seed created by hand,
+  then the suite → `LOAD_TEST_SEEDER_TEST_REFUSED`, 5 skipped, the user and the
+  credentials file still present; removed afterwards with `--cleanup`.
+- Adjacent: the actor-keyed `audit_logs` delete was removed from the seeder;
+  audit rows are deleted only by the load-test tenant.
+- F3-T2: the cell waits for the seeder's "Cleaning up 1 load test users" line,
+  then for one poll interval, asserts the child is still running, delivers the
+  row, and asserts exit 0; the row is delivered in `finally`.
+- F3-T3: `markSent` in `finally`; afterEach cleanup uses a 5 s drain timeout.
+- F3-T4: rows for tenant name and cross-tenant flag added.
+- F3-T5: the admitted download is asserted (404: the fixture stores no file,
+  answered after the UPDATE counted the view); cell renamed.

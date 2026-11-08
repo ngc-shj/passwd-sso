@@ -358,7 +358,6 @@ async function cleanupUsers(pool) {
 
   // Delete in FK dependency order
   const tables = [
-    { table: "audit_logs", column: "user_id" },
     { table: "attachments", column: "created_by_id" },
     { table: "password_shares", column: "created_by_id" },
     { table: "password_entries", column: "user_id" },
@@ -402,7 +401,12 @@ async function cleanupTenant(pool) {
  * audit_logs rows arrive for the tenant, so the log delete after it is final.
  */
 async function deleteTenantAudit(pool) {
-  const timeoutMs = Number(process.env.LOAD_TEST_OUTBOX_DRAIN_TIMEOUT_MS ?? 60_000);
+  const raw = process.env.LOAD_TEST_OUTBOX_DRAIN_TIMEOUT_MS;
+  const timeoutMs = raw === undefined || raw === "" ? 60_000 : Number(raw);
+  // NaN would never pass the deadline and poll forever.
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 0) {
+    throw new Error("LOAD_TEST_OUTBOX_DRAIN_TIMEOUT_MS must be a non-negative number of milliseconds");
+  }
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const { rows } = await pool.query(
@@ -413,7 +417,8 @@ async function deleteTenantAudit(pool) {
     if (Date.now() >= deadline) {
       throw new Error(
         `LOAD_TEST_CLEANUP_OUTBOX_UNDRAINED: ${rows[0].n} audit_outbox rows of the load-test tenant are not yet ` +
-          "SENT or FAILED; start the audit-outbox worker (npm run worker:audit-outbox) and re-run cleanup",
+          "SENT or FAILED. Start the audit-outbox worker (npm run worker:audit-outbox) if it is not running; " +
+          "if it is, the rows are in retry backoff: wait, or raise LOAD_TEST_OUTBOX_DRAIN_TIMEOUT_MS, then re-run cleanup",
       );
     }
     await new Promise((resolve) => setTimeout(resolve, 1000));

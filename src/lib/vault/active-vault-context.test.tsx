@@ -72,15 +72,18 @@ describe("ActiveVaultProvider", () => {
   it.each([
     ["role", { teamRole: "MEMBER" }],
     ["name", { teamName: "Eng v2" }],
+    ["tenant name", { tenantName: "Other" }],
+    ["cross-tenant flag", { isCrossTenant: true }],
   ])("replaces the team vault when its %s changes within the same team", (_label, change) => {
+    const base = { type: "team", teamId: "team-1", teamName: "Eng", teamRole: "ADMIN", tenantName: "Acme", isCrossTenant: false } as const;
     const { result } = renderHook(useVaultPair, { wrapper });
     act(() => {
-      result.current.setVault({ type: "team", teamId: "team-1", teamName: "Eng", teamRole: "ADMIN" });
+      result.current.setVault(base);
     });
     act(() => {
-      result.current.setVault({ type: "team", teamId: "team-1", teamName: "Eng", teamRole: "ADMIN", ...change });
+      result.current.setVault({ ...base, ...change });
     });
-    expect(result.current.vault).toEqual({ type: "team", teamId: "team-1", teamName: "Eng", teamRole: "ADMIN", ...change });
+    expect(result.current.vault).toEqual({ ...base, ...change });
   });
 
   it("switches when teamId changes (different team triggers replacement)", () => {

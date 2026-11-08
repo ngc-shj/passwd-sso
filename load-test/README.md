@@ -163,7 +163,7 @@ ALLOW_LOAD_TEST_SEED=true DATABASE_URL=... \
 
 ### Manual Cleanup
 
-Cleanup waits up to 60 seconds (`LOAD_TEST_OUTBOX_DRAIN_TIMEOUT_MS`) for the audit-outbox worker to deliver the run's audit events, because pending outbox rows cannot be deleted. If it stops with `LOAD_TEST_CLEANUP_OUTBOX_UNDRAINED`, start the worker (`npm run worker:audit-outbox`, or `docker compose start audit-outbox-worker`) and run cleanup again.
+Cleanup waits up to 60 seconds (`LOAD_TEST_OUTBOX_DRAIN_TIMEOUT_MS`) for the audit-outbox worker to deliver the run's audit events, because pending outbox rows cannot be deleted. If it stops with `LOAD_TEST_CLEANUP_OUTBOX_UNDRAINED`, start the worker (`npm run worker:audit-outbox`, or `docker compose start audit-outbox-worker`) if it is not running; if it is, the rows are waiting out a delivery retry, so wait or raise the timeout. Then run cleanup again.
 
 If the cleanup command fails for another reason (the same rule applies: run it once the outbox is drained):
 

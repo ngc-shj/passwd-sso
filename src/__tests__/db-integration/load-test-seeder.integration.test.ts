@@ -10,7 +10,6 @@
 
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import { execFile, execFileSync } from "node:child_process";
-import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
@@ -49,8 +48,14 @@ describe("load-test seeder — real-DB integration", () => {
     execFileSync(process.execPath, [SEEDER, ...args], { env: seederEnv(), stdio: "pipe", timeout: CHILD_TIMEOUT_MS });
   }
 
+  // This suite's own PENDING fixture rows: the only ones the fallback may mark FAILED.
+  const createdOutboxIds: string[] = [];
+  // Set once beforeAll has found no prior seed; until then the fallback must not run.
+  let ownsSeedState = false;
+
   async function pendingOutboxRow(): Promise<string> {
     const id = randomUUID();
+    createdOutboxIds.push(id);
     await su.pool.query(
       `INSERT INTO audit_outbox (id, tenant_id, payload, status) VALUES ($1::uuid, $2::uuid, '{}', 'PENDING')`,
       [id, TENANT_ID],
@@ -85,19 +90,37 @@ describe("load-test seeder — real-DB integration", () => {
     if (Number(existing?.n) !== 0 || existsSync(AUTH_FILE)) {
       throw new Error("LOAD_TEST_SEEDER_TEST_REFUSED: a load-test seed already exists; run npm run test:load:cleanup first");
     }
+    ownsSeedState = true;
   });
 
   afterEach(() => {
-    seeder("--cleanup");
+    // A drain timeout well under the child's, so a left-behind PENDING row ends
+    // in the seeder's named error rather than a kill.
+    if (ownsSeedState) {
+      execFileSync(process.execPath, [SEEDER, "--cleanup"], {
+        env: seederEnv({ LOAD_TEST_OUTBOX_DRAIN_TIMEOUT_MS: "5000" }),
+        stdio: "pipe",
+        timeout: CHILD_TIMEOUT_MS,
+      });
+    }
   });
 
   afterAll(async () => {
     // Fallback when the seeder's own cleanup broke (the regression these cells
-    // catch): remove what it left, so the next run is not refused. Its outbox
-    // rows are this test's fixtures; FAILED makes them deletable.
+    // catch): remove what it left, so the next run is not refused. Never over a
+    // seed that predates the suite (vitest runs afterAll after a refusing
+    // beforeAll), and FAILED only for this suite's own fixture rows.
+    if (!ownsSeedState) {
+      await su.prisma.$disconnect();
+      await su.pool.end();
+      return;
+    }
+    await su.pool.query(
+      `UPDATE audit_outbox SET status = 'FAILED' WHERE id = ANY($1::uuid[]) AND status NOT IN ('SENT', 'FAILED')`,
+      [createdOutboxIds],
+    );
     const users = `(SELECT id FROM users WHERE email LIKE 'lt-user-%@loadtest.local')`;
     for (const statement of [
-      `UPDATE audit_outbox SET status = 'FAILED' WHERE tenant_id = $1::uuid AND status NOT IN ('SENT', 'FAILED')`,
       `DELETE FROM audit_outbox WHERE tenant_id = $1::uuid`,
       `DELETE FROM audit_logs WHERE tenant_id = $1::uuid`,
       `DELETE FROM audit_chain_anchors WHERE tenant_id = $1::uuid`,
@@ -161,40 +184,63 @@ describe("load-test seeder — real-DB integration", () => {
     const credential = seed();
     const outboxId = await pendingOutboxRow();
 
-    let stderr = "";
     try {
-      execFileSync(process.execPath, [SEEDER, "--cleanup"], {
-        env: seederEnv({ LOAD_TEST_OUTBOX_DRAIN_TIMEOUT_MS: "0" }),
-        stdio: "pipe",
-        timeout: CHILD_TIMEOUT_MS,
-      });
-    } catch (e) {
-      stderr = String((e as { stderr?: Buffer }).stderr ?? "");
-    }
-    expect(stderr).toContain("LOAD_TEST_CLEANUP_OUTBOX_UNDRAINED: 1 audit_outbox rows");
+      let stderr = "";
+      try {
+        execFileSync(process.execPath, [SEEDER, "--cleanup"], {
+          env: seederEnv({ LOAD_TEST_OUTBOX_DRAIN_TIMEOUT_MS: "0" }),
+          stdio: "pipe",
+          timeout: CHILD_TIMEOUT_MS,
+        });
+      } catch (e) {
+        stderr = String((e as { stderr?: Buffer }).stderr ?? "");
+      }
+      expect(stderr).toContain("LOAD_TEST_CLEANUP_OUTBOX_UNDRAINED: 1 audit_outbox rows");
 
-    const left = await one<{ users: number; tenants: number }>(
-      `SELECT (SELECT count(*)::int FROM users WHERE id = $2::uuid) AS users,
-              (SELECT count(*)::int FROM tenants WHERE id = $1::uuid) AS tenants`,
-      TENANT_ID,
-      credential.userId,
-    );
-    expect(left).toEqual({ users: 1, tenants: 1 });
-    // The worker's part, so afterEach can clean up.
-    await markSent(outboxId);
+      const left = await one<{ users: number; tenants: number }>(
+        `SELECT (SELECT count(*)::int FROM users WHERE id = $2::uuid) AS users,
+                (SELECT count(*)::int FROM tenants WHERE id = $1::uuid) AS tenants`,
+        TENANT_ID,
+        credential.userId,
+      );
+      expect(left).toEqual({ users: 1, tenants: 1 });
+    } finally {
+      // The worker's part, so afterEach can clean up.
+      await markSent(outboxId);
+    }
   });
 
   it("cleanup waits for a PENDING outbox row the worker delivers, then completes", async () => {
     seed();
     const outboxId = await pendingOutboxRow();
 
-    const cleanup = promisify(execFile)(process.execPath, [SEEDER, "--cleanup"], {
-      env: seederEnv({ LOAD_TEST_OUTBOX_DRAIN_TIMEOUT_MS: "20000" }),
-      timeout: CHILD_TIMEOUT_MS,
-    });
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-    await markSent(outboxId);
-    await cleanup;
+    try {
+      const child = execFile(process.execPath, [SEEDER, "--cleanup"], {
+        env: seederEnv({ LOAD_TEST_OUTBOX_DRAIN_TIMEOUT_MS: "20000" }),
+        timeout: CHILD_TIMEOUT_MS,
+      });
+      let exited = false;
+      const exit = new Promise<number | null>((resolve) => {
+        child.on("exit", (code) => {
+          exited = true;
+          resolve(code);
+        });
+      });
+      // Sync on the seeder reaching the drain wait (it prints this line right
+      // before), not on a fixed sleep; then let at least one poll see PENDING.
+      await new Promise<void>((resolve, reject) => {
+        child.stdout?.on("data", (chunk: Buffer) => {
+          if (String(chunk).includes("Cleaning up 1 load test users")) resolve();
+        });
+        child.on("exit", () => reject(new Error("seeder exited before reaching the drain wait")));
+      });
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      expect(exited).toBe(false);
+      await markSent(outboxId);
+      expect(await exit).toBe(0);
+    } finally {
+      await markSent(outboxId);
+    }
 
     const tenant = await one<{ n: number }>(`SELECT count(*)::int AS n FROM tenants WHERE id = $1::uuid`, TENANT_ID);
     expect(tenant).toEqual({ n: 0 });
