@@ -56,17 +56,15 @@ describe("createWorker", () => {
   });
 
   describe("a blob sweep on the db backend", () => {
-    const savedBackend = process.env.BLOB_BACKEND;
+    // BLOB_BACKEND is stubbed per call; setup.ts unstubs it after each test.
     afterEach(() => {
-      if (savedBackend === undefined) delete process.env.BLOB_BACKEND;
-      else process.env.BLOB_BACKEND = savedBackend;
       logError.mockReset();
       sweepOnce.mockReset();
     });
 
     /** Start a worker, let it run one tick, stop it; returns the logged _logType values of error lines. */
     async function startedErrors(mode: (typeof BLOB_SWEEP_MODE)[keyof typeof BLOB_SWEEP_MODE], backend: string): Promise<unknown[]> {
-      process.env.BLOB_BACKEND = backend;
+      vi.stubEnv("BLOB_BACKEND", backend);
       const worker = createWorker({
         databaseUrl: "postgresql://unused@localhost/unused",
         intervalMs: 1,
