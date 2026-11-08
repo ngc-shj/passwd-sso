@@ -108,6 +108,7 @@ The seed script uses a triple guard to prevent accidental connections to product
 ## Authentication
 
 - Auth.js v5 database session strategy
+- Every seeded user is an active member of one load-test tenant (`Load Test Tenant`, slug `load-test-tenant`), which the seeder creates and cleanup removes. The rows are written by the E2E seed helpers (`e2e/helpers/db.ts`), so `DATABASE_URL` must name a role that bypasses RLS, such as the migration role `passwd_user`
 - Sessions are directly INSERTed into the DB (same pattern as E2E tests): the cookie carries the raw token, `sessions.session_token` stores its HMAC digest, computed with the app's own `hashSessionToken`. The seeder therefore needs the same `SESSION_TOKEN_HMAC_KEY` (or, in dev, `SHARE_MASTER_KEY`) as the app under test
 - k6 sends the token in the cookie Auth.js reads in the target deployment; set `COOKIE_NAME` to match it (default `authjs.session-token`):
 
@@ -168,7 +169,11 @@ If the cleanup command fails:
 DELETE FROM password_entries WHERE user_id IN (SELECT id FROM users WHERE email LIKE 'lt-user-%@loadtest.local');
 DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE email LIKE 'lt-user-%@loadtest.local');
 DELETE FROM vault_keys WHERE user_id IN (SELECT id FROM users WHERE email LIKE 'lt-user-%@loadtest.local');
+DELETE FROM tenant_members WHERE user_id IN (SELECT id FROM users WHERE email LIKE 'lt-user-%@loadtest.local');
 DELETE FROM users WHERE email LIKE 'lt-user-%@loadtest.local';
+DELETE FROM audit_outbox WHERE tenant_id = '00000000-0000-4000-a000-0000000010ad';
+DELETE FROM tenant_members WHERE tenant_id = '00000000-0000-4000-a000-0000000010ad';
+DELETE FROM tenants WHERE id = '00000000-0000-4000-a000-0000000010ad';
 ```
 
 ### k6 Not Installed
