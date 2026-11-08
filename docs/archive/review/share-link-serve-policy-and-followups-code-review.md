@@ -332,3 +332,20 @@ Incremental review of `d8630ad93`. Security: no findings.
   (scratch seeder, real DB): filter dropped → the cell fails.
 - Testing T5-2 [Minor] The drain-wait cell's budget excluded seed time. Action:
   the cell has its own 60 s timeout; the comment says so.
+
+## Round 6
+
+Incremental review of `0cda7fbbe`. Functionality: no findings. Security: no
+findings.
+
+## Tightening-only skip — Round 6
+Findings applied directly (no Round 7 review):
+- [T6-1] [Minor] The seeder test's own refusal check, `afterAll` fallback and
+  final count still selected load-test emails in every tenant, so a run killed
+  inside the foreign-tenant cell would leave a row that refused every later run
+  (and that the tenant-scoped cleanup cannot remove) —
+  `src/__tests__/db-integration/load-test-seeder.integration.test.ts` — scoped
+  to the load-test tenant like the seeder; suite 8/8.
+Justification: scoped within the Round 5 fix (the test file it added to), a
+test-fixture consistency change with no product code, no security-boundary
+touch.

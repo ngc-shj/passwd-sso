@@ -80,10 +80,10 @@ describe("load-test seeder — real-DB integration", () => {
   }
 
   beforeAll(async () => {
-    // Its cleanup deletes every lt-user-%@loadtest.local user, the fixed tenant
+    // Its cleanup deletes the fixed tenant's lt-user-%@loadtest.local users, the tenant
     // and the credentials file; refuse to run over a developer's own seed.
     const existing = await one<{ n: number }>(
-      `SELECT (SELECT count(*) FROM users WHERE email LIKE 'lt-user-%@loadtest.local')
+      `SELECT (SELECT count(*) FROM users WHERE email LIKE 'lt-user-%@loadtest.local' AND tenant_id = $1::uuid)
             + (SELECT count(*) FROM tenants WHERE id = $1::uuid) AS n`,
       TENANT_ID,
     );
@@ -119,7 +119,7 @@ describe("load-test seeder — real-DB integration", () => {
       `UPDATE audit_outbox SET status = 'FAILED' WHERE id = ANY($1::uuid[]) AND status NOT IN ('SENT', 'FAILED')`,
       [createdOutboxIds],
     );
-    const users = `(SELECT id FROM users WHERE email LIKE 'lt-user-%@loadtest.local')`;
+    const users = `(SELECT id FROM users WHERE email LIKE 'lt-user-%@loadtest.local' AND tenant_id = $1::uuid)`;
     for (const statement of [
       `DELETE FROM audit_outbox WHERE tenant_id = $1::uuid`,
       `DELETE FROM audit_logs WHERE tenant_id = $1::uuid`,
@@ -127,7 +127,7 @@ describe("load-test seeder — real-DB integration", () => {
       `DELETE FROM sessions WHERE user_id IN ${users}`,
       `DELETE FROM vault_keys WHERE user_id IN ${users}`,
       `DELETE FROM tenant_members WHERE tenant_id = $1::uuid`,
-      `DELETE FROM users WHERE email LIKE 'lt-user-%@loadtest.local'`,
+      `DELETE FROM users WHERE email LIKE 'lt-user-%@loadtest.local' AND tenant_id = $1::uuid`,
       `DELETE FROM tenants WHERE id = $1::uuid`,
     ]) {
       await su.pool.query(statement, statement.includes("$1") ? [TENANT_ID] : []);
@@ -318,7 +318,7 @@ describe("load-test seeder — real-DB integration", () => {
     seeder("--cleanup");
 
     const left = await one<Record<string, number>>(
-      `SELECT (SELECT count(*)::int FROM users WHERE email LIKE 'lt-user-%@loadtest.local') AS users,
+      `SELECT (SELECT count(*)::int FROM users WHERE email LIKE 'lt-user-%@loadtest.local' AND tenant_id = $1::uuid) AS users,
               (SELECT count(*)::int FROM sessions WHERE session_token = $2) AS sessions,
               (SELECT count(*)::int FROM tenant_members WHERE tenant_id = $1::uuid) AS members,
               (SELECT count(*)::int FROM audit_logs WHERE tenant_id = $1::uuid) AS audit_logs,
