@@ -7,7 +7,8 @@ import {
   BLOB_CONFIG_ERROR,
   BLOB_CONTENT_TYPE,
 } from "@/lib/blob-store/constants";
-import { buildObjectKey, encodeObjectRef, resolveObjectRefKey } from "@/lib/blob-store/object-ref";
+import { blobMarkerKey, buildObjectKey, encodeObjectRef, resolveObjectRefKey } from "@/lib/blob-store/object-ref";
+import { createdUnlessExists, HTTP_CONFLICT, HTTP_PRECONDITION_FAILED, nullIfNotFound } from "@/lib/blob-store/errors";
 import { streamBodyToBuffer } from "@/lib/blob-store/stream";
 import { requireOptionalModule } from "@/lib/blob-store/runtime-module";
 
@@ -19,6 +20,12 @@ type AzureContainerClient = {
     uploadData: (data: Buffer, options?: unknown) => Promise<unknown>;
     download: () => Promise<{ readableStreamBody?: unknown }>;
     deleteIfExists: () => Promise<unknown>;
+  };
+  listBlobsFlat: (options: { prefix: string }) => {
+    byPage: (settings: { continuationToken?: string; maxPageSize: number }) => AsyncIterator<{
+      segment: { blobItems: { name: string; properties: { lastModified: Date } }[] };
+      continuationToken?: string;
+    }>;
   };
 };
 type AzureBlobServiceClient = { getContainerClient: (containerName: string) => unknown };
@@ -96,6 +103,39 @@ export const azureBlobStore: AttachmentBlobStore = {
     const containerClient = await getAzureContainerClient();
     const blobClient = containerClient.getBlockBlobClient(key);
     await blobClient.deleteIfExists();
+  },
+  async listObjects(prefix, { cursor, pageSize }) {
+    const containerClient = await getAzureContainerClient();
+    const pages = containerClient
+      .listBlobsFlat({ prefix })
+      .byPage({ ...(cursor ? { continuationToken: cursor } : {}), maxPageSize: pageSize });
+    const { done, value } = await pages.next();
+    if (done || !value) return { objects: [] };
+    const objects = value.segment.blobItems.map((item) => ({
+      key: item.name,
+      lastModified: item.properties.lastModified,
+    }));
+    return value.continuationToken ? { objects, cursor: value.continuationToken } : { objects };
+  },
+  async readMarker() {
+    const containerClient = await getAzureContainerClient();
+    return nullIfNotFound(async () => {
+      const download = await containerClient.getBlockBlobClient(blobMarkerKey()).download();
+      return (await streamBodyToBuffer(download.readableStreamBody)).toString("utf8");
+    });
+  },
+  async createMarker(body) {
+    const containerClient = await getAzureContainerClient();
+    return createdUnlessExists(
+      () =>
+        containerClient.getBlockBlobClient(blobMarkerKey()).uploadData(Buffer.from(body, "utf8"), {
+          blobHTTPHeaders: { blobContentType: BLOB_CONTENT_TYPE.TEXT_PLAIN },
+          // Conditional create: the service refuses when the blob exists.
+          conditions: { ifNoneMatch: "*" },
+        }),
+      // An existing blob is 409 BlobAlreadyExists; a precondition miss is 412.
+      [HTTP_CONFLICT, HTTP_PRECONDITION_FAILED],
+    );
   },
   toStored(data) {
     return data instanceof Uint8Array ? data : new Uint8Array(data);

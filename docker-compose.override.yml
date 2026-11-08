@@ -74,6 +74,9 @@ services:
     env_file:
       # See docker-compose.yml app service for the .env vs .env.local note.
       - .env
+    # The RETENTION_GC_* sweep settings and the BLOB_* / DEPLOYMENT_ID values
+    # come from .env, the same file the app reads: the trash purge and the
+    # orphan-blob sweep must see the app's blob backend, bucket and prefix.
     environment:
       - RETENTION_GC_DATABASE_URL=postgresql://passwd_retention_gc_worker:${PASSWD_RETENTION_GC_WORKER_PASSWORD:?PASSWD_RETENTION_GC_WORKER_PASSWORD is required}@db:5432/passwd_sso
       # Least-privilege: connect ONLY via the scoped worker role. Blank out the

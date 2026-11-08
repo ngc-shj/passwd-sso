@@ -15,9 +15,9 @@ const { mockDecryptData, mockBuildTeamAAD, mockFetchApi, mockGetTeamKey, mockGet
 vi.mock("@/lib/crypto/crypto-client", () => ({
   decryptData: (...args: unknown[]) => mockDecryptData(...args),
 }));
-vi.mock("@/lib/crypto/crypto-aad", () => ({
+vi.mock("@/lib/crypto/crypto-aad", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/crypto/crypto-aad")>()),
   buildTeamEntryAAD: (...args: unknown[]) => mockBuildTeamAAD(...args),
-  VAULT_TYPE: { BLOB: "blob", OVERVIEW: "overview" },
 }));
 vi.mock("@/lib/url-helpers", () => ({
   fetchApi: (...args: unknown[]) => mockFetchApi(...args),
@@ -42,7 +42,7 @@ import { renderHook } from "@testing-library/react";
 import { decryptTeamOverview, useTeamVaultListAdapter } from "./team-vault-list-adapter";
 import { isStepUpRequiredError } from "@/lib/http/handle-step-up-error";
 import type { TeamDisplayEntry } from "@/types/team-display-entry";
-import { aadModelDecrypt } from "@/__tests__/helpers/aad-model-decrypt";
+import { aadGatedDecrypt, aadModelDecrypt } from "@/__tests__/helpers/aad-model-decrypt";
 
 const TEAM_ID = "team-1";
 const STABLE_KEY = {} as CryptoKey;
@@ -108,6 +108,24 @@ describe("decryptTeamOverview", () => {
     const current = await decryptTeamOverview(TEAM_ID, rawEntry({ aadVersion: 1 }), { getEntryDecryptionKey: mockGetEntryKey });
     expect(current.title).toBe("Current");
     expect(mockBuildTeamAAD).toHaveBeenCalledWith(TEAM_ID, "e1", "overview", 2);
+  });
+
+  // T8: the overview opens at the overview vaultType and the entry's own ItemKey version.
+  it.each([
+    ["control: opens an overview sealed at overview / the entry's ItemKey version", "overview", 2, "Current"],
+    ["refuses an overview sealed at the blob vaultType", "blob", 2, "(decryption failed)"],
+    ["refuses an overview sealed at another ItemKey version", "overview", 1, "(decryption failed)"],
+  ] as const)("%s (T8)", async (_label, vaultType, sealedVersion, title) => {
+    const { buildTeamEntryAAD: realBuild } =
+      await vi.importActual<typeof import("@/lib/crypto/crypto-aad")>("@/lib/crypto/crypto-aad");
+    mockBuildTeamAAD.mockImplementation(realBuild);
+    mockDecryptData.mockImplementation(
+      aadGatedDecrypt(realBuild(TEAM_ID, "e1", vaultType, sealedVersion), JSON.stringify({ title: "Current" })),
+    );
+
+    const result = await decryptTeamOverview(TEAM_ID, rawEntry({ aadVersion: 1 }), { getEntryDecryptionKey: mockGetEntryKey });
+
+    expect(result.title).toBe(title);
   });
 
   it("includes deletedAt only when present (trash rows — INV-C1.5)", async () => {

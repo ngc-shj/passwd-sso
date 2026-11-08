@@ -147,12 +147,14 @@ export function buildPersonalEntryAAD(
  * Binds ciphertext to specific team + entry + vault type + itemKeyVersion.
  * vaultType distinguishes "blob" vs "overview" to prevent cross-field replay.
  * itemKeyVersion prevents version mismatch (0=TeamKey direct, >=1=ItemKey).
+ * Every parameter is required. Outside tests only crypto-team.ts calls it
+ * (sealTeamEntryField / openTeamEntryField; team-entry-aad-strictness.test.ts).
  */
 export function buildTeamEntryAAD(
   teamId: string,
   entryId: string,
-  vaultType: VaultType = VAULT_TYPE.BLOB,
-  itemKeyVersion: number = 0
+  vaultType: VaultType,
+  itemKeyVersion: number
 ): Uint8Array {
   return buildAADBytes(SCOPE_TEAM, 4, [
     teamId,

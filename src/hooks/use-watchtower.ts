@@ -5,7 +5,8 @@ import { useClientSnapshot } from "@/hooks/use-client-snapshot";
 import { useVault } from "@/lib/vault/vault-context";
 import { useTeamVaultOptional, type TeamVaultContextValue } from "@/lib/team/team-vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
-import { buildPersonalEntryAAD, buildTeamEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
+import { buildPersonalEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
+import { openTeamEntryField } from "@/lib/crypto/crypto-team";
 import { API_PATH, ENTRY_TYPE, LOCAL_STORAGE_KEY, apiPath } from "@/lib/constants";
 import { MS_PER_DAY, MS_PER_SECOND } from "@/lib/constants/time";
 import { WATCHTOWER_COOLDOWN_MS } from "@/lib/constants/timing";
@@ -811,7 +812,6 @@ async function fetchTeamWatchtowerEntries({
         continue;
       }
       const itemKeyVersion = typeof raw.itemKeyVersion === "number" ? raw.itemKeyVersion : 0;
-      const aad = buildTeamEntryAAD(teamId, raw.id, VAULT_TYPE.BLOB, itemKeyVersion);
 
       // Each entry at its OWN team key version: an entry carried through a
       // rotation stays at an older version than the latest key (D5).
@@ -824,14 +824,14 @@ async function fetchTeamWatchtowerEntries({
         teamKeyVersion: typeof raw.teamKeyVersion === "number" ? raw.teamKeyVersion : 1,
       });
 
-      const plaintext = await decryptData(
+      const plaintext = await openTeamEntryField(
         {
           ciphertext: raw.encryptedBlob,
           iv: raw.blobIv,
           authTag: raw.blobAuthTag,
         },
         decryptKey,
-        aad,
+        { teamId, entryId: raw.id, vaultType: VAULT_TYPE.BLOB, itemKeyVersion },
       );
       const parsed = JSON.parse(plaintext);
       entries.push({

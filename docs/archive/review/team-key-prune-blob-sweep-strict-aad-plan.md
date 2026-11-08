@@ -581,3 +581,46 @@ seals team entries), mirror comments both ways.
 | C7 | rewritten strictness guard | locked |
 | C8 | docs and generated artifacts | locked |
 | C9 | worker manifests, gates, enumerations | locked |
+
+## Implementation Checklist
+
+Batch W (worker: C1, C2, C3, C4, C8, C9):
+- `prisma/schema.prisma` (`AuditAction` + `TEAM_MEMBER_KEY_PRUNED`), new migration (enum value;
+  `team_member_key_prune` definer function, PUBLIC revoke, EXECUTE to the worker role, guarded
+  by role existence like the audit definer migrations).
+- `src/lib/constants/audit/audit.ts` (`AUDIT_ACTION`, `AUDIT_ACTION_VALUES`, groups as
+  `TEAM_KEY_ROTATION`), `messages/{en,ja}/AuditLog.json`, webhook groups/suppress as rotation.
+- `src/lib/tenant-rls-grants.ts` (two grants), `scripts/checks/check-bypass-rls.mjs` allowed usage.
+- `src/workers/retention-gc-worker/{sweep,index}.ts`, new blob-orphan module, `SweepOpts` /
+  `WorkerConfig`, `buildSweepOpts`; `scripts/retention-gc-worker.ts` (pick list, refines,
+  `--init-blob-marker`).
+- `src/lib/blob-store/{types,object-ref,s3-blob-store,azure-blob-store,gcs-blob-store,db-blob-store}.ts`
+  (`listObjects`, `readMarker`, `createMarker`, `parseObjectKey`).
+- `src/lib/env-schema.ts`, `.env.example` (generated), `scripts/env-descriptions.ts`,
+  `scripts/env-allowlist.ts`, docker-compose worker env.
+- Gates/manifests: `scripts/checks/check-team-key-version-refs.mjs` (+ self-test, + pre-pr/CI
+  wiring), `worker-policy-manifest.json`, `worker-bundle-smoke.json`, `db-grants-manifest.json`,
+  `bootstrap-rds-roles.mjs` if it grants functions, `scripts/rls-cross-tenant-verify.sql`
+  `[E-RLS-SECDEF]`, `src/__tests__/workers/worker-policy-manifest.test.ts`,
+  `sweep-bypass-source.test.ts` `EXPECTED_MEMBERS`, raw-SQL allowlist, rotation-lock gate note.
+- Docs: key-retention-policy, retention-gc-worker architecture, deletion-retention matrix
+  (generator), audit-log-reference, env docs.
+- Reuse: `encodeObjectRef` / `decodeObjectRef` / `validateObjectRefKey`, `normalizeTeamKeyVersion`
+  semantics, `enqueueAuditInWorkerTx`, `race-helpers.ts`, `getAttachmentBlobStore`,
+  `requireOptionalModule`, `MS_PER_*` constants.
+
+Batch C (crypto: C5, C6, C7):
+- `src/lib/crypto/{crypto-team,crypto-aad}.ts`, `src/lib/team/{team-key-resolution,rekey-payload,rotation-payload,team-entry-save,team-history-restore}.ts`,
+  `src/lib/vault/{entry-save-core,personal-entry-save,build-team-get-detail,team-vault-list-adapter}.ts`,
+  `src/hooks/{use-watchtower.ts,team/use-team-login-form-state.ts}`,
+  `src/components/team/management/{team-edit-dialog-loader,team-export}.tsx`,
+  `src/components/passwords/import/password-import-importer.ts`,
+  `src/components/passwords/entry/entry-history-section.tsx`,
+  `src/app/[locale]/admin/teams/[teamId]/audit-logs/page.tsx`,
+  `extension/src/lib/crypto-team.ts`, `extension/src/background/index.ts`,
+  `src/__tests__/team-entry-aad-strictness.test.ts`, `src/__tests__/aad-parity.test.ts`,
+  `ios/PasswdSSOTests/AADParityTests.swift`; every test tree mocking the changed symbols.
+
+CI parity (Step 2-1 item 7): `check-npm-audit.mjs` (needs registry network) and
+`check-terraform-test-count.mjs` (terraform tree untouched) run in CI only — pre-existing,
+recorded in the deviation log.

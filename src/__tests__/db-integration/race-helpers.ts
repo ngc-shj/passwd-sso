@@ -5,14 +5,73 @@
  * lock that only a test-held "blocker" transaction holds, running the other
  * side, and observing through pg_blocking_pids whether it ran through or waited
  * on the parked side — no fixed sleeps. Used by
- * team-key-version-guard.integration.test.ts and
- * team-tenant-departure.integration.test.ts.
+ * team-key-version-guard.integration.test.ts,
+ * team-tenant-departure.integration.test.ts and
+ * team-member-key-prune.integration.test.ts (holdPrismaWriter).
  */
 import type { Pool, PoolClient } from "pg";
+import type { Prisma, PrismaClient } from "@prisma/client";
 
 export const BLOCK_WAIT_MS = 10_000;
 
 export type HeldLock = { pid: number; release: () => Promise<void> };
+
+/** A Prisma interactive transaction parked after its writes, uncommitted. */
+export type HeldWriter = {
+  pid: number;
+  /** Let the transaction commit; resolves once it has. */
+  release: () => Promise<void>;
+  /** Roll the transaction back (idempotent; safe after release). */
+  abort: () => Promise<void>;
+};
+
+/**
+ * Run `write` in a Prisma interactive transaction on `client` and park it,
+ * uncommitted, until `release()` or `abort()`; resolves once the writes ran,
+ * with the transaction's backend pid. `timeoutMs` is the transaction's own
+ * timeout: set it well above the hold, or Prisma rolls the writer back
+ * mid-cell and the cell observes a write that never commits.
+ */
+export async function holdPrismaWriter(
+  client: PrismaClient,
+  write: (tx: Prisma.TransactionClient) => Promise<void>,
+  timeoutMs: number,
+): Promise<HeldWriter> {
+  let releaseGate!: () => void;
+  let abortGate!: (reason: Error) => void;
+  const gate = new Promise<void>((resolve, reject) => {
+    releaseGate = resolve;
+    abortGate = reject;
+  });
+  let written!: (pid: number) => void;
+  let failed!: (e: unknown) => void;
+  const ready = new Promise<number>((resolve, reject) => {
+    written = resolve;
+    failed = reject;
+  });
+  const done = client.$transaction(
+    async (tx) => {
+      const [{ pid }] = await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`;
+      await write(tx);
+      written(pid);
+      await gate;
+    },
+    { timeout: timeoutMs, maxWait: timeoutMs },
+  );
+  done.catch(failed);
+  const pid = await ready;
+  return {
+    pid,
+    async release() {
+      releaseGate();
+      await done;
+    },
+    async abort() {
+      abortGate(new Error("held writer aborted"));
+      await done.catch(() => {});
+    },
+  };
+}
 
 export function createRaceHelpers(pool: Pool) {
   /** Open a transaction holding `lockSql` until `release()`; returns its backend pid. */
@@ -147,5 +206,11 @@ export function createRaceHelpers(pool: Pool) {
     throw new Error(`work neither settled nor blocked on pid ${parkedPid} within ${BLOCK_WAIT_MS}ms`);
   }
 
-  return { holdRowLock, parkBehind, waitingQueryOf, backendsBlockedBy, waitForBackendBlockedBy, settledOrBlocked };
+  /** pg_stat_activity.state of `pid` (`idle in transaction` while a held writer waits). */
+  async function backendState(pid: number): Promise<string | undefined> {
+    const r = await pool.query<{ state: string }>(`SELECT state FROM pg_stat_activity WHERE pid = $1`, [pid]);
+    return r.rows[0]?.state;
+  }
+
+  return { holdRowLock, parkBehind, waitingQueryOf, backendsBlockedBy, waitForBackendBlockedBy, settledOrBlocked, backendState };
 }

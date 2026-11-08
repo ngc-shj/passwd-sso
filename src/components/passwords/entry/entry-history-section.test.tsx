@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import React from "react";
@@ -61,15 +61,15 @@ vi.mock("@/lib/team/team-vault-core", async () => {
   return { TeamKeyVersionUnavailableError: actual.TeamKeyVersionUnavailableError };
 });
 
-vi.mock("@/lib/crypto/crypto-aad", () => ({
+vi.mock("@/lib/crypto/crypto-aad", async (importOriginal) => ({
   // History uses the entry-blob AAD (PV "blob"); see C1 in
-  // personal-history-aad-mismatch-plan.md. NOTE (RT1): decryptData + the AAD
-  // builders are mocked here, so this suite verifies AAD scope SELECTION +
-  // wiring only, not real AES-GCM. Real-crypto coverage is the integration
-  // test (C5).
+  // personal-history-aad-mismatch-plan.md. NOTE (RT1): decryptData and the
+  // personal AAD builder are mocked here, so this suite verifies AAD scope
+  // SELECTION + wiring only, not real AES-GCM. Real-crypto coverage is the
+  // integration test (C5). The team AAD is the real builder's, reached
+  // through the real crypto-team helpers (plan C5 T8).
+  ...(await importOriginal<typeof import("@/lib/crypto/crypto-aad")>()),
   buildPersonalEntryAAD: vi.fn().mockReturnValue("test-aad"),
-  buildTeamEntryAAD: vi.fn().mockReturnValue("test-team-aad"),
-  VAULT_TYPE: { BLOB: "blob", OVERVIEW: "overview" },
 }));
 
 vi.mock("sonner", () => ({
@@ -142,7 +142,8 @@ vi.mock("@/components/ui/alert-dialog", () => ({
 }));
 
 import { EntryHistorySection } from "./entry-history-section";
-import { buildPersonalEntryAAD } from "@/lib/crypto/crypto-aad";
+import { buildPersonalEntryAAD, buildTeamEntryAAD } from "@/lib/crypto/crypto-aad";
+import { aadGatedDecrypt } from "@/__tests__/helpers/aad-model-decrypt";
 import { toast } from "sonner";
 import { TeamKeyVersionUnavailableError } from "@/lib/team/team-vault-core";
 
@@ -406,6 +407,60 @@ describe("EntryHistorySection", () => {
         "entry-1",
         expect.objectContaining({ teamKeyVersion: OLD_TEAM_KEY_VERSION }),
       );
+    });
+  });
+
+  // T8: the team view opens the history blob at the blob vaultType and the
+  // row's own ItemKey version (aadVersion 1), or without AAD (aadVersion 0).
+  describe("team view AAD", () => {
+    afterEach(() => {
+      mockDecryptData.mockReset();
+    });
+
+    async function viewTeamRow(row: { itemKeyVersion: number; aadVersion: number }) {
+      globalThis.fetch = vi.fn((url: string) => Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve(
+          url.includes("/history/h1")
+            ? { encryptedBlob: "ct", blobIv: "iv", blobAuthTag: "tag", teamKeyVersion: 1, ...row }
+            : HISTORY_ITEMS,
+        ),
+      })) as unknown as typeof fetch;
+      await act(async () => {
+        render(<EntryHistorySection entryId="entry-1" teamId="team-1" />);
+      });
+      await waitFor(() => expect(screen.getByText(/entryHistory/)).toHaveTextContent("(1)"));
+      fireEvent.click(screen.getByText(/entryHistory/));
+      await act(async () => {
+        fireEvent.click(screen.getAllByText(/viewVersion/)[0]);
+      });
+      await waitFor(() => expect(mockDecryptData).toHaveBeenCalled());
+      return {
+        opened: screen.queryByTestId("view-dialog") !== null,
+        failed: vi.mocked(toast.error).mock.calls.some((c) => c[0] === "historyDecryptFailed"),
+      };
+    }
+    const sealedAt = (vaultType: "blob" | "overview", itemKeyVersion: number) =>
+      buildTeamEntryAAD("team-1", "entry-1", vaultType, itemKeyVersion);
+
+    it("control: a row sealed at blob / its own ItemKey version opens", async () => {
+      mockDecryptData.mockImplementation(aadGatedDecrypt(sealedAt("blob", 3), JSON.stringify({ title: "T" })));
+      expect(await viewTeamRow({ itemKeyVersion: 3, aadVersion: 1 })).toEqual({ opened: true, failed: false });
+    });
+
+    it("a row whose blob was sealed at the overview vaultType is refused", async () => {
+      mockDecryptData.mockImplementation(aadGatedDecrypt(sealedAt("overview", 3), JSON.stringify({ title: "T" })));
+      expect(await viewTeamRow({ itemKeyVersion: 3, aadVersion: 1 })).toEqual({ opened: false, failed: true });
+    });
+
+    it("a row sealed at another ItemKey version than it reports is refused", async () => {
+      mockDecryptData.mockImplementation(aadGatedDecrypt(sealedAt("blob", 2), JSON.stringify({ title: "T" })));
+      expect(await viewTeamRow({ itemKeyVersion: 3, aadVersion: 1 })).toEqual({ opened: false, failed: true });
+    });
+
+    it("control: a legacy row (aadVersion 0) opens without AAD", async () => {
+      mockDecryptData.mockImplementation(aadGatedDecrypt(undefined, JSON.stringify({ title: "T" })));
+      expect(await viewTeamRow({ itemKeyVersion: 0, aadVersion: 0 })).toEqual({ opened: true, failed: false });
     });
   });
 

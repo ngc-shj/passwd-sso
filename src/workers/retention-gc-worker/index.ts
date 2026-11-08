@@ -25,13 +25,17 @@ import {
   RLS_FREE_EXPIRY_TABLES,
   type RetentionEntry,
 } from "./registry";
-import { sweepOnce } from "./sweep";
+import { sweepOnce, type BlobSweepSettings, type SweepOpts } from "./sweep";
+import type { BlobCursor } from "./sweep-blob-orphans";
 
 export interface WorkerConfig {
   databaseUrl: string;
   intervalMs: number;
   batchSize: number;
   emitHeartbeatAudit: boolean;
+  /** RETENTION_GC_TEAM_KEY_PRUNE_ENABLED: the irreversible prune runs only when true. */
+  teamKeyPrune: boolean;
+  blobSweep: BlobSweepSettings;
 }
 
 /**
@@ -153,7 +157,7 @@ export function validateRegistry(
 }
 
 export function createWorker(config: WorkerConfig) {
-  const { databaseUrl, intervalMs, batchSize, emitHeartbeatAudit } = config;
+  const { databaseUrl, intervalMs, batchSize, emitHeartbeatAudit, teamKeyPrune, blobSweep } = config;
 
   // Validate the registry before touching any DB connection.
   // Throws immediately on misconfigured identifier or missing globalDelete flag (INV-C2b).
@@ -182,16 +186,19 @@ export function createWorker(config: WorkerConfig) {
   const controller = new AbortController();
   const { signal } = controller;
 
+  // The orphan-blob sweep's cursor lives as long as the process: every tick
+  // receives this same object, so a bucket larger than one tick's maxObjects
+  // is covered over successive ticks. A restart begins a new pass.
+  const blobCursor: BlobCursor = { sawReferenced: false };
+  const sweepOpts: SweepOpts = { intervalMs, emitHeartbeatAudit, teamKeyPrune, blobSweep, blobCursor };
+
   async function loop(): Promise<void> {
     const log = getLogger();
     log.info({ intervalMs, batchSize }, "retention-gc.loop_start");
 
     while (!signal.aborted) {
       try {
-        const counts = await sweepOnce(workerPrisma, batchSize, {
-          intervalMs,
-          emitHeartbeatAudit,
-        });
+        const counts = await sweepOnce(workerPrisma, batchSize, sweepOpts);
         log.info({ counts }, "retention-gc.sweep_done");
       } catch (err) {
         // Pin error log shape to {code} only — do NOT spread err — to avoid

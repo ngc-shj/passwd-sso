@@ -334,12 +334,22 @@ BEGIN
   -- passwd_app's UPDATE/DELETE on audit_logs has been REVOKEd (see migration
   -- 20260522000200_audit_log_revoke_via_definer). Without these definer
   -- procedures, legitimate tenant-merge and retention-purge flows would fail.
+  --
+  --   - team_member_key_prune(p_batch)  (#1009, 20261108120100)
+  --       Called only by the retention GC worker (sweep.ts sweepTeamMemberKeys).
+  --       EXECUTE is granted to passwd_retention_gc_worker only (PUBLIC revoked;
+  --       passwd_app cannot call it). Its first statement refuses unless the
+  --       CALLER's RLS bypass is on (rls_bypass_admits('team_member_keys')),
+  --       so it never widens a caller's view. Fixed SQL, one bounded statement:
+  --       deletes team_member_keys versions below the team's current version
+  --       that no entry, history row or mode-0 attachment of the team
+  --       references. The worker role holds no grant on team_member_keys.
   ASSERT NOT EXISTS (
     SELECT 1 FROM pg_catalog.pg_proc pr
     JOIN pg_catalog.pg_namespace n ON n.oid = pr.pronamespace
     WHERE n.nspname = 'public'
       AND pr.prosecdef = true
-      AND pr.proname NOT IN ('audit_log_tenant_migrate', 'audit_log_purge')
+      AND pr.proname NOT IN ('audit_log_tenant_migrate', 'audit_log_purge', 'team_member_key_prune')
   ),
     format('[E-RLS-SECDEF] SECURITY DEFINER functions exist in public schema: %s — these bypass RLS when called by passwd_app. Add an allowlist + safety justification next to this ASSERT before merging.', (
       SELECT string_agg(pr.proname || ' (owner=' || (SELECT rolname FROM pg_roles WHERE oid = pr.proowner) || ')', ',')
@@ -347,7 +357,7 @@ BEGIN
       JOIN pg_catalog.pg_namespace n ON n.oid = pr.pronamespace
       WHERE n.nspname = 'public'
         AND pr.prosecdef = true
-        AND pr.proname NOT IN ('audit_log_tenant_migrate', 'audit_log_purge')
+        AND pr.proname NOT IN ('audit_log_tenant_migrate', 'audit_log_purge', 'team_member_key_prune')
     ));
 
   -- 10b. Routines that grant themselves an RLS bypass. A SECURITY INVOKER

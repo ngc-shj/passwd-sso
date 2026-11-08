@@ -18,13 +18,16 @@ vi.mock("@/lib/crypto/crypto-client", () => ({
   encryptData: mockEncryptData,
 }));
 
-vi.mock("@/lib/crypto/crypto-team", () => ({
+// importOriginal spread: the real sealTeamEntryField runs (over the mocked encryptData).
+vi.mock("@/lib/crypto/crypto-team", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/crypto/crypto-team")>()),
   generateItemKey: () => new Uint8Array(32),
   wrapItemKey: async () => ({ ciphertext: "ik-ct", iv: "ik-iv", authTag: "ik-at" }),
   deriveItemEncryptionKey: async () => ({} as CryptoKey),
 }));
 
 import { runImportEntries } from "@/components/passwords/import/password-import-importer";
+import { buildTeamEntryAAD } from "@/lib/crypto/crypto-aad";
 
 function response(ok: boolean): Response {
   return {
@@ -226,6 +229,36 @@ describe("runImportEntries", () => {
     expect(entry.encryptedOverview).toEqual({ ciphertext: "overview", iv: "iv2", authTag: "tag2" });
     // keyVersion must match the provided vault key version, not be hardcoded
     expect(entry.keyVersion).toBe(3);
+  });
+
+  // T8: the team branch seals the blob at the blob vaultType and the overview
+  // at the overview vaultType, both at ItemKey version 1.
+  it("seals a team entry's blob and overview at their own team entry AAD (ItemKey version 1)", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(response(true)) // GET tags
+      .mockResolvedValueOnce(bulkResponse(true, 1, 0)); // POST bulk
+    vi.stubGlobal("fetch", fetchMock);
+    mockEncryptData
+      .mockResolvedValueOnce({ ciphertext: "b", iv: "i1", authTag: "t1" })
+      .mockResolvedValueOnce({ ciphertext: "o", iv: "i2", authTag: "t2" });
+
+    await runImportEntries({
+      entries: [makeEntry()],
+      isTeamImport: true,
+      tagsPath: "/api/teams/t1/tags",
+      foldersPath: "/api/teams/t1/folders",
+      sourceFilename: "team.json",
+      teamEncryptionKey: {} as CryptoKey,
+      teamKeyVersion: 1,
+      teamId: "t1",
+    });
+
+    const entryId = JSON.parse(String((fetchMock.mock.calls[1][1] as RequestInit).body)).entries[0].id as string;
+    expect(mockEncryptData.mock.calls.map((c) => Array.from(c[2] as Uint8Array))).toEqual([
+      Array.from(buildTeamEntryAAD("t1", entryId, "blob", 1)),
+      Array.from(buildTeamEntryAAD("t1", entryId, "overview", 1)),
+    ]);
   });
 
   it("calls favorite toggle API for team import when isFavorite is true", async () => {

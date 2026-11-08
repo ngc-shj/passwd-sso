@@ -1,12 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  decryptTeamEntry,
   deriveItemCekWrapKey,
   deriveItemEncryptionKey,
-  encryptTeamEntry,
   unwrapItemKey,
   unwrapTeamAttachmentCek,
 } from "@/lib/crypto/crypto-team";
+import { decryptData, encryptData } from "@/lib/crypto/crypto-client";
 import { AAD_VERSION, buildItemKeyWrapAAD, buildTeamEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import {
   FIXTURE_TEAM_ID as TEAM_ID,
@@ -18,6 +17,7 @@ import {
   sealEntryV0,
   sealEntryV1,
   sealHistoryRow,
+  swapBlobAndOverview,
 } from "@/__tests__/helpers/team-key-fixtures";
 import { base64ToBytes } from "@/lib/team/team-attachment-crypto";
 
@@ -124,9 +124,9 @@ describe("buildEntryRekeyPayload", () => {
     expect(body.encryptedItemKey.iv).not.toBe(f.data.entry.itemKeyIv);
     const next = await newContentKey(f.keys.get(CURRENT)!, body.encryptedItemKey);
     expect(Array.from(next.raw)).not.toEqual(Array.from(f.liveItemKey));
-    expect(await decryptTeamEntry(body.encryptedBlob, next.content, buildTeamEntryAAD(TEAM_ID, ENTRY, VAULT_TYPE.BLOB, 3))).toBe('{"title":"live"}');
+    expect(await decryptData(body.encryptedBlob, next.content, buildTeamEntryAAD(TEAM_ID, ENTRY, VAULT_TYPE.BLOB, 3))).toBe('{"title":"live"}');
     expect(
-      await decryptTeamEntry(body.encryptedOverview, next.content, buildTeamEntryAAD(TEAM_ID, ENTRY, VAULT_TYPE.OVERVIEW, 3)),
+      await decryptData(body.encryptedOverview, next.content, buildTeamEntryAAD(TEAM_ID, ENTRY, VAULT_TYPE.OVERVIEW, 3)),
     ).toBe('{"title":"live"}');
   });
 
@@ -167,8 +167,8 @@ describe("buildEntryRekeyPayload", () => {
     ]);
     const next = await newContentKey(f.keys.get(CURRENT)!, result.body.encryptedItemKey);
     const aad = buildTeamEntryAAD(TEAM_ID, ENTRY, VAULT_TYPE.BLOB, 3);
-    expect(await decryptTeamEntry(result.body.history[0].encryptedBlob, next.content, aad)).toBe("own");
-    expect(await decryptTeamEntry(result.body.history[1].encryptedBlob, next.content, aad)).toBe("trial");
+    expect(await decryptData(result.body.history[0].encryptedBlob, next.content, aad)).toBe("own");
+    expect(await decryptData(result.body.history[1].encryptedBlob, next.content, aad)).toBe("trial");
     expect(result.body.history[0].snapshotBlobIv).toBe(f.data.history[0].blobIv);
   });
 
@@ -195,7 +195,7 @@ describe("buildEntryRekeyPayload", () => {
   ])("re-keys a history row labelled aadVersion %s without AAD at label 0", async (_label, aadVersion) => {
     const f = await baseFixture();
     const sealed = await sealHistoryRow({ id: "h-legacy", entryId: ENTRY, teamKey: f.keys.get(2)!, teamKeyVersion: 2, itemKey: f.liveItemKey, itemKeyVersion: 2, itemKeyId: f.liveId, blob: "x" });
-    const noAad = await encryptTeamEntry("legacy", await deriveItemEncryptionKey(f.liveItemKey));
+    const noAad = await encryptData("legacy", await deriveItemEncryptionKey(f.liveItemKey));
     f.data.history = [{
       ...sealed,
       encryptedBlob: noAad.ciphertext,
@@ -211,13 +211,13 @@ describe("buildEntryRekeyPayload", () => {
     expect({
       ids: result.body.history.map((h) => ({ id: h.id, aadVersion: h.aadVersion })),
       retained: result.body.retainHistoryIds,
-      openedWithoutAad: await decryptTeamEntry(row.encryptedBlob, next.content),
+      openedWithoutAad: await decryptData(row.encryptedBlob, next.content),
     }).toEqual({ ids: [{ id: "h-legacy", aadVersion: 0 }], retained: [], openedWithoutAad: "legacy" });
   });
 
   it("re-keys a legacy v0 history row (no AAD, under the team key) without AAD at label 0", async () => {
     const f = await baseFixture();
-    const noAad = await encryptTeamEntry("legacy-v0", f.keys.get(2)!);
+    const noAad = await encryptData("legacy-v0", f.keys.get(2)!);
     f.data.history = [{
       id: "h-legacy-v0",
       encryptedBlob: noAad.ciphertext,
@@ -237,7 +237,7 @@ describe("buildEntryRekeyPayload", () => {
 
     expect({
       ids: result.body.history.map((h) => ({ id: h.id, aadVersion: h.aadVersion })),
-      openedWithoutAad: await decryptTeamEntry(result.body.history[0].encryptedBlob, next.content),
+      openedWithoutAad: await decryptData(result.body.history[0].encryptedBlob, next.content),
     }).toEqual({ ids: [{ id: "h-legacy-v0", aadVersion: 0 }], openedWithoutAad: "legacy-v0" });
   });
 
@@ -249,7 +249,7 @@ describe("buildEntryRekeyPayload", () => {
     { reason: "not_available", outcome: "retains the row" },
   ] as const)("legacy v0 history row whose team key version is $reason → $outcome", async ({ reason }) => {
     const f = await baseFixture();
-    const noAad = await encryptTeamEntry("legacy-v0", f.keys.get(2)!);
+    const noAad = await encryptData("legacy-v0", f.keys.get(2)!);
     f.data.history = [{
       id: "h-legacy-v0",
       encryptedBlob: noAad.ciphertext,
@@ -297,14 +297,14 @@ describe("buildEntryRekeyPayload", () => {
 
     expect({
       ids: result.body.history.map((h) => ({ id: h.id, aadVersion: h.aadVersion })),
-      openedStrict: await decryptTeamEntry(result.body.history[0].encryptedBlob, next.content, buildTeamEntryAAD(TEAM_ID, ENTRY, VAULT_TYPE.BLOB, 3)),
+      openedStrict: await decryptData(result.body.history[0].encryptedBlob, next.content, buildTeamEntryAAD(TEAM_ID, ENTRY, VAULT_TYPE.BLOB, 3)),
     }).toEqual({ ids: [{ id: "h-bound", aadVersion: AAD_VERSION }], openedStrict: "bound" });
   });
 
   it("retains (not re-keys) a no-AAD ciphertext labelled aadVersion 1: history rows open at strict AAD", async () => {
     const f = await baseFixture();
     const sealed = await sealHistoryRow({ id: "h-mislabelled", entryId: ENTRY, teamKey: f.keys.get(2)!, teamKeyVersion: 2, itemKey: f.liveItemKey, itemKeyVersion: 2, itemKeyId: f.liveId, blob: "x" });
-    const noAad = await encryptTeamEntry("legacy", await deriveItemEncryptionKey(f.liveItemKey));
+    const noAad = await encryptData("legacy", await deriveItemEncryptionKey(f.liveItemKey));
     f.data.history = [{ ...sealed, encryptedBlob: noAad.ciphertext, blobIv: noAad.iv, blobAuthTag: noAad.authTag }];
 
     const result = payloadOf(await buildEntryRekeyPayload(TEAM_ID, f.data, makeResolver(f.keys)));
@@ -387,6 +387,52 @@ describe("buildEntryRekeyPayload", () => {
     expect(result).toEqual({ kind: "blocked", block: REKEY_ENTRY_BLOCK.UNDECRYPTABLE, teamKeyVersion: 2 });
   });
 
+  // T8: the live entry opens each field at its own vaultType and ItemKey version.
+  it.each([
+    ["blob and overview swapped", (f: Fixture) => Promise.resolve(swapBlobAndOverview(f.data.entry))],
+    ["sealed at a wrong ItemKey version", async (f: Fixture) => ({
+      ...(await sealEntryV1({
+        entryId: ENTRY, teamKey: f.keys.get(2)!, teamKeyVersion: 2, itemKey: f.liveItemKey, itemKeyVersion: 2,
+        itemKeyId: f.liveId, blob: '{"title":"live"}', overview: '{"title":"live"}', aadItemKeyVersion: 1,
+      })),
+      itemKeyTeamKeyVersion: 2,
+    })],
+  ])("blocks undecryptable when the live entry's fields are %s", async (_name, mutate) => {
+    const f = await baseFixture();
+    f.data.entry = await mutate(f);
+
+    const result = await buildEntryRekeyPayload(TEAM_ID, f.data, makeResolver(f.keys));
+
+    expect(result).toEqual({ kind: "blocked", block: REKEY_ENTRY_BLOCK.UNDECRYPTABLE, teamKeyVersion: 2 });
+  });
+
+  // T8: a restorable history row opens at its own vaultType and ItemKey version.
+  it.each([
+    ["sealed at the overview vaultType", { aadVaultType: "overview" as const }],
+    ["sealed at a wrong ItemKey version", { aadItemKeyVersion: 1 }],
+  ])("retains a history row %s", async (_name, change) => {
+    const f = await baseFixture();
+    f.data.history = [
+      await sealHistoryRow({
+        id: "h-wrong", entryId: ENTRY, teamKey: f.keys.get(2)!, teamKeyVersion: 2, itemKey: f.liveItemKey,
+        itemKeyVersion: 2, itemKeyId: f.liveId, blob: "x", ...change,
+      }),
+    ];
+
+    const result = payloadOf(await buildEntryRekeyPayload(TEAM_ID, f.data, makeResolver(f.keys)));
+
+    expect({ history: result.body.history, retained: result.body.retainHistoryIds }).toEqual({ history: [], retained: ["h-wrong"] });
+  });
+
+  it("throws (does not block) on a live entry labelled with an unsupported aadVersion", async () => {
+    const f = await baseFixture();
+    f.data.entry = { ...f.data.entry, aadVersion: 2.5 };
+
+    await expect(buildEntryRekeyPayload(TEAM_ID, f.data, makeResolver(f.keys))).rejects.toThrow(
+      "Unsupported team entry aadVersion",
+    );
+  });
+
   it("throws RekeyTransientError on a transient key failure (no payload)", async () => {
     const f = await baseFixture();
 
@@ -459,6 +505,21 @@ describe("buildEntryUpgradePayload", () => {
     expect(result.body).toMatchObject({ teamKeyVersion: CURRENT, itemKeyVersion: 5, snapshotBlobIv: v0.blobIv });
     const raw = await unwrapItemKey(result.body.encryptedItemKey, keys.get(CURRENT)!, buildItemKeyWrapAAD(TEAM_ID, ENTRY, CURRENT));
     const content = await deriveItemEncryptionKey(raw);
-    expect(await decryptTeamEntry(result.body.encryptedBlob, content, buildTeamEntryAAD(TEAM_ID, ENTRY, VAULT_TYPE.BLOB, 5))).toBe("B");
+    expect(await decryptData(result.body.encryptedBlob, content, buildTeamEntryAAD(TEAM_ID, ENTRY, VAULT_TYPE.BLOB, 5))).toBe("B");
+  });
+
+  // T8: the upgrade opens each v0 field at its own vaultType and ItemKey version 0.
+  it.each([
+    ["blob and overview swapped", async (key: CryptoKey) =>
+      swapBlobAndOverview(await sealEntryV0({ entryId: ENTRY, teamKey: key, teamKeyVersion: 1, blob: "B", overview: "O" }))],
+    ["sealed at a wrong ItemKey version", async (key: CryptoKey) =>
+      sealEntryV0({ entryId: ENTRY, teamKey: key, teamKeyVersion: 1, blob: "B", overview: "O", aadItemKeyVersion: 1 })],
+  ])("blocks undecryptable when the v0 entry's fields are %s", async (_name, seal) => {
+    const keys = await makeTeamKeys([1, CURRENT]);
+    const v0 = await seal(keys.get(1)!);
+
+    const result = await buildEntryUpgradePayload(TEAM_ID, v0, 5, CURRENT, makeResolver(keys));
+
+    expect(result).toEqual({ kind: "blocked", block: REKEY_ENTRY_BLOCK.UNDECRYPTABLE, teamKeyVersion: 1 });
   });
 });

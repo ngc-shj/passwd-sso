@@ -200,6 +200,28 @@ export const RLS_FREE_EXPIRY_TABLES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Tables the worker deletes rows from OUTSIDE the registry, through a
+ * dedicated sweep in sweep.ts (each off by default). Listed here, beside the
+ * registry, so the deletion-retention matrix (scripts/generate-security-matrices.ts)
+ * shows them as worker-pruned without importing sweep.ts.
+ */
+export const DEDICATED_SWEEPS: ReadonlyArray<{
+  table: string;
+  sweep: string;
+  enabledBy: string;
+  rule: string;
+  auditAction: string;
+}> = [
+  {
+    table: "team_member_keys",
+    sweep: "sweepTeamMemberKeys",
+    enabledBy: "RETENTION_GC_TEAM_KEY_PRUNE_ENABLED",
+    rule: "versions below the team's current one that no entry, history row or mode-0 attachment of the team references (SECURITY DEFINER fn team_member_key_prune)",
+    auditAction: "TEAM_MEMBER_KEY_PRUNED",
+  },
+];
+
+/**
  * The retention-GC registry — one row per managed table.
  *
  * Scope: only tables that are (a) key-targetable, (b) free of ON DELETE CASCADE

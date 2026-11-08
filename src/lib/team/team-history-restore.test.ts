@@ -55,6 +55,36 @@ describe("buildTeamHistoryRestoreBody", () => {
     expect(await decryptData(body.encryptedBlob, rowKey, buildTeamEntryAAD(TEAM_ID, ENTRY, VAULT_TYPE.BLOB, 3))).toBe(fullBlob);
   });
 
+  // T8: the row opens at the blob vaultType and its own ItemKey version.
+  it.each([
+    ["sealed at the overview vaultType", { aadVaultType: "overview" as const }],
+    ["sealed at another ItemKey version", { aadItemKeyVersion: 2 }],
+  ])("refuses a row %s", async (_name, change) => {
+    const itemKey = generateItemKey();
+    const row = await sealHistoryRow({
+      id: "h1", entryId: ENTRY, teamKey: await makeTeamKey(), teamKeyVersion: 2,
+      itemKey, itemKeyVersion: 3, itemKeyId: "row-ik", blob: '{"title":"t"}', ...change,
+    });
+    const rowKey = await deriveItemEncryptionKey(itemKey);
+
+    await expect(
+      buildTeamHistoryRestoreBody(TEAM_ID, ENTRY, { ...row, entryType: ENTRY_TYPE.LOGIN }, vi.fn(async () => rowKey)),
+    ).rejects.toThrow();
+  });
+
+  it("control: the same row sealed at blob / its own ItemKey version is restored", async () => {
+    const itemKey = generateItemKey();
+    const row = await sealHistoryRow({
+      id: "h1", entryId: ENTRY, teamKey: await makeTeamKey(), teamKeyVersion: 2,
+      itemKey, itemKeyVersion: 3, itemKeyId: "row-ik", blob: '{"title":"t"}',
+    });
+    const rowKey = await deriveItemEncryptionKey(itemKey);
+
+    const body = await buildTeamHistoryRestoreBody(TEAM_ID, ENTRY, { ...row, entryType: ENTRY_TYPE.LOGIN }, vi.fn(async () => rowKey));
+
+    expect(body.snapshotBlobIv).toBe(row.blobIv);
+  });
+
   it("refuses an aadVersion-0 row before obtaining a key or decrypting (S-R3-2)", async () => {
     const teamKey = await makeTeamKey();
     const { fullBlob } = buildTeamEntryPayload({

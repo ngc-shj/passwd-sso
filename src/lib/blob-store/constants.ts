@@ -1,5 +1,8 @@
+import { MS_PER_DAY } from "@/lib/constants/time";
+
 export const BLOB_CONTENT_TYPE = {
   OCTET_STREAM: "application/octet-stream",
+  TEXT_PLAIN: "text/plain; charset=utf-8",
 } as const;
 
 export const BLOB_OBJECT_SCOPE = {
@@ -16,3 +19,19 @@ export const BLOB_CONFIG_ERROR = {
   AZURE_AUTH_REQUIRED:
     "Azure backend requires AZURE_STORAGE_CONNECTION_STRING or AZURE_STORAGE_SAS_TOKEN",
 } as const;
+
+/** RETENTION_GC_BLOB_SWEEP_MODE: the retention GC worker's orphan-object sweep. */
+export const BLOB_SWEEP_MODE = {
+  OFF: "off",
+  REPORT: "report",
+  DELETE: "delete",
+} as const;
+
+export type BlobSweepMode = (typeof BLOB_SWEEP_MODE)[keyof typeof BLOB_SWEEP_MODE];
+
+/**
+ * The orphan grace period `report` mode uses when RETENTION_GC_BLOB_ORPHAN_GRACE_MS
+ * is unset (one day). `delete` mode has no default: the operator sizes it
+ * against the database backup retention window.
+ */
+export const BLOB_ORPHAN_GRACE_REPORT_DEFAULT_MS = MS_PER_DAY;

@@ -12,8 +12,8 @@ import {
 } from "@/hooks/team/team-login-form-initial-values";
 import { getPolicyViolations, checkPasswordReuse, type PolicyViolation } from "@/lib/security/password-policy-validation";
 import { useTeamVault, type EntryItemKeyData } from "@/lib/team/team-vault-context";
-import { decryptData } from "@/lib/crypto/crypto-client";
-import { buildTeamEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
+import { VAULT_TYPE } from "@/lib/crypto/crypto-aad";
+import { openTeamEntryField } from "@/lib/crypto/crypto-team";
 import { itemKeyIdsMatch } from "@/lib/team/team-key-resolution";
 import { historyRowKeyData, type TeamHistoryRowDto } from "@/lib/team/team-history-restore";
 import { apiPath } from "@/lib/constants";
@@ -75,8 +75,12 @@ async function fetchDecryptedHistoryPasswords(
           }
         : await fetchHistoryRowKeyData(teamId, entryId, record.id);
       const decryptKey = await getEntryDecryptionKey(teamId, entryId, keyData);
-      const aad = buildTeamEntryAAD(teamId, entryId, VAULT_TYPE.BLOB, itemKeyVersion);
-      const plaintext = await decryptData(record.encryptedBlob, decryptKey, aad);
+      const plaintext = await openTeamEntryField(record.encryptedBlob, decryptKey, {
+        teamId,
+        entryId,
+        vaultType: VAULT_TYPE.BLOB,
+        itemKeyVersion,
+      });
       const parsed: { password?: string } = JSON.parse(plaintext);
       if (typeof parsed.password === "string") {
         passwords.push(parsed.password);

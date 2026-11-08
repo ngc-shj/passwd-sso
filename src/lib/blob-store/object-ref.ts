@@ -53,14 +53,82 @@ function scopeSegments(context: AttachmentBlobContext): string[] {
     : [BLOB_OBJECT_SCOPE.PERSONAL];
 }
 
+/**
+ * The key prefix objects are written under: BLOB_OBJECT_PREFIX with one
+ * trailing `/`, or "" when unset (no leading `/` at the bucket root).
+ */
+export function objectKeyPrefix(): string {
+  const rawPrefix = process.env.BLOB_OBJECT_PREFIX?.trim() ?? "";
+  return rawPrefix ? `${rawPrefix.replace(/\/+$/, "")}/` : "";
+}
+
 export function buildObjectKey(context: AttachmentBlobPutContext): string {
   if (!GENERATION_RE.test(context.generation)) {
     throw new Error("Blob object generation must be 32 lowercase hex characters");
   }
-  const rawPrefix = process.env.BLOB_OBJECT_PREFIX?.trim() ?? "";
-  const prefix = rawPrefix ? `${rawPrefix.replace(/\/+$/, "")}/` : "";
   const scope = scopeSegments(context).join("/");
-  return `${prefix}${scope}/${context.entryId}/${context.attachmentId}/${context.generation}${OBJECT_SUFFIX}`;
+  return `${objectKeyPrefix()}${scope}/${context.entryId}/${context.attachmentId}/${context.generation}${OBJECT_SUFFIX}`;
+}
+
+const MARKER_NAME = ".passwd-sso-deployment";
+
+/**
+ * The deployment-ownership marker's key under the current prefix. The orphan
+ * sweep deletes nothing unless this object's body equals DEPLOYMENT_ID.
+ */
+export function blobMarkerKey(): string {
+  return `${objectKeyPrefix()}${MARKER_NAME}`;
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export interface ParsedObjectKey {
+  scope: (typeof BLOB_OBJECT_SCOPE)[keyof typeof BLOB_OBJECT_SCOPE];
+  teamId?: string;
+  entryId: string;
+  /** Lowercased, so it compares equal to the uuid column it is looked up by. */
+  attachmentId: string;
+  generation?: string;
+}
+
+/**
+ * The inverse of buildObjectKey, for keys under the CURRENT prefix only:
+ *
+ *   <prefix>team/<teamId>/<entryId>/<attachmentId>[/<generation>].bin
+ *   <prefix>personal/<entryId>/<attachmentId>[/<generation>].bin
+ *
+ * Every id segment must be UUID syntax and a generation 32 lowercase hex.
+ * Anything else (another prefix, an extra or missing segment, the marker)
+ * is null: the orphan sweep never deletes what it cannot attribute to a row.
+ */
+export function parseObjectKey(key: string): ParsedObjectKey | null {
+  const prefix = objectKeyPrefix();
+  if (!key.startsWith(prefix)) return null;
+  const segments = key.slice(prefix.length).split("/");
+  const [scope, ...rest] = segments;
+  let teamId: string | undefined;
+  let ids: string[];
+  if (scope === BLOB_OBJECT_SCOPE.TEAM) {
+    [teamId, ...ids] = rest;
+    if (teamId === undefined || !UUID_RE.test(teamId)) return null;
+  } else if (scope === BLOB_OBJECT_SCOPE.PERSONAL) {
+    ids = rest;
+  } else {
+    return null;
+  }
+  if (ids.length !== 2 && ids.length !== 3) return null;
+  const last = stripSuffix(ids[ids.length - 1]);
+  if (last === null) return null;
+  const [entryId, attachmentId, generation] = ids.length === 3 ? [ids[0], ids[1], last] : [ids[0], last, undefined];
+  if (!UUID_RE.test(entryId) || !UUID_RE.test(attachmentId)) return null;
+  if (generation !== undefined && !GENERATION_RE.test(generation)) return null;
+  return {
+    scope,
+    ...(teamId !== undefined ? { teamId } : {}),
+    entryId,
+    attachmentId: attachmentId.toLowerCase(),
+    ...(generation !== undefined ? { generation } : {}),
+  };
 }
 
 function sameId(segment: string, id: string): boolean {

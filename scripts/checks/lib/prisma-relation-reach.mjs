@@ -78,34 +78,51 @@ export class SchemaReadError extends Error {
 }
 
 /**
- * `model -> (field -> { type, list, optional })` from the schema itself, plus the
- * client handle each model answers to. Throws on a schema it cannot read: a walk
+ * `model -> (field -> { type, list, optional, column })` from the schema itself,
+ * plus the client handle and the database table each model answers to. `column`
+ * is the field's `@map` name, else the field name; a model's table is its
+ * `@@map` name, else the model name. Throws on a schema it cannot read: a walk
  * that resolved every field to "not a relation" would pass every call.
  */
 export function loadPrismaSchema(abs) {
   if (!existsSync(abs)) throw new SchemaReadError(`prisma schema not found at ${abs}.`);
   const models = new Map();
+  const tables = new Map();
   let current = null;
+  let currentName = null;
   for (const line of readFileSync(abs, "utf8").split("\n")) {
     const open = /^model\s+(\w+)\s*\{/.exec(line);
     if (open) {
       current = new Map();
-      models.set(open[1], current);
+      currentName = open[1];
+      models.set(currentName, current);
+      tables.set(currentName, currentName);
       continue;
     }
     if (/^\}/.test(line)) {
       current = null;
+      currentName = null;
       continue;
     }
     if (!current) continue;
     const trimmed = line.trim();
+    const tableMap = /^@@map\(\s*"([^"]+)"\s*\)/.exec(trimmed);
+    if (tableMap) tables.set(currentName, tableMap[1]);
     if (trimmed.startsWith("@@") || trimmed.startsWith("//")) continue;
     const field = /^[ \t]+(\w+)[ \t]+([A-Za-z_]\w*)(\[\])?(\?)?/.exec(line);
-    if (field) current.set(field[1], { type: field[2], list: !!field[3], optional: !!field[4] });
+    if (field) {
+      const columnMap = /@map\(\s*"([^"]+)"\s*\)/.exec(line.replace(/\/\/.*$/, ""));
+      current.set(field[1], {
+        type: field[2],
+        list: !!field[3],
+        optional: !!field[4],
+        column: columnMap ? columnMap[1] : field[1],
+      });
+    }
   }
   if (models.size === 0) throw new SchemaReadError(`parsed zero models from ${abs}.`);
   const handles = new Map([...models.keys()].map((m) => [m[0].toLowerCase() + m.slice(1), m]));
-  return { models, handles };
+  return { models, handles, tables };
 }
 
 /**

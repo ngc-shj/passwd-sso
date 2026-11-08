@@ -27,8 +27,9 @@ import {
 } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import { useTeamVaultOptional } from "@/lib/team/team-vault-core";
-import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
-import { buildTeamEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
+import type { EncryptedData } from "@/lib/crypto/crypto-client";
+import { VAULT_TYPE } from "@/lib/crypto/crypto-aad";
+import { openTeamEntryField } from "@/lib/crypto/crypto-team";
 import { useAuditLogs, type AuditLogItem } from "@/hooks/vault/use-audit-logs";
 import { getActionLabel } from "@/lib/audit/audit-action-label";
 import { getCommonTargetLabel } from "@/lib/audit/audit-target-label";
@@ -94,12 +95,11 @@ export default function TeamAdminAuditLogsPage({
             teamKeyVersion: ov.teamKeyVersion,
           });
 
-          const overviewAad = buildTeamEntryAAD(teamId, entryId, VAULT_TYPE.OVERVIEW, ov.itemKeyVersion);
           const overview = JSON.parse(
-            await decryptData(
+            await openTeamEntryField(
               { ciphertext: ov.encryptedOverview, iv: ov.overviewIv, authTag: ov.overviewAuthTag } as EncryptedData,
               itemEncKey,
-              overviewAad,
+              { teamId, entryId, vaultType: VAULT_TYPE.OVERVIEW, itemKeyVersion: ov.itemKeyVersion },
             ),
           );
           if (overview.title) names.set(entryId, overview.title);

@@ -1,9 +1,12 @@
 import {
-  decryptTeamEntry,
   deriveItemCekWrapKey,
   deriveItemEncryptionKey,
-  encryptTeamEntry,
   generateItemKey,
+  openLegacyTeamEntryField,
+  openTeamEntryField,
+  openTeamEntryFieldAt,
+  sealLegacyTeamEntryField,
+  sealTeamEntryField,
   unwrapItemKey,
   unwrapTeamAttachmentCek,
   wrapItemKey,
@@ -13,7 +16,6 @@ import {
 import {
   AAD_VERSION,
   buildItemKeyWrapAAD,
-  buildTeamEntryAAD,
   CURRENT_CEK_WRAP_AAD_VERSION,
   VAULT_TYPE,
 } from "@/lib/crypto/crypto-aad";
@@ -22,7 +24,6 @@ import {
   isAesGcmAuthFailure,
   itemKeyIdsMatch,
   normalizeTeamKeyVersion,
-  teamEntryAadFor,
   type ResolveTeamKey,
   type TeamKeyResolution,
 } from "@/lib/team/team-key-resolution";
@@ -257,13 +258,10 @@ function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
   return diff === 0;
 }
 
-async function tryDecrypt(
-  encrypted: EncryptedData,
-  key: CryptoKey,
-  aad: Uint8Array | undefined,
-): Promise<string | null> {
+/** An open that returns null on an AES-GCM authentication failure only; anything else throws. */
+async function tryOpen(open: () => Promise<string>): Promise<string | null> {
   try {
-    return await decryptTeamEntry(encrypted, key, aad);
+    return await open();
   } catch (e) {
     if (isAesGcmAuthFailure(e)) return null;
     throw e;
@@ -329,16 +327,18 @@ export async function buildEntryRekeyPayload(
     const liveHeld = await toHeld(entry.itemKeyId ?? null, live.raw);
     held.push(liveHeld);
 
-    const blob = await tryDecrypt(
+    const blob = await tryOpen(() => openTeamEntryFieldAt(
       { ciphertext: entry.encryptedBlob, iv: entry.blobIv, authTag: entry.blobAuthTag },
       liveHeld.contentKey,
-      teamEntryAadFor(teamId, entryId, VAULT_TYPE.BLOB, entry.itemKeyVersion, entry.aadVersion),
-    );
-    const overview = await tryDecrypt(
+      { teamId, entryId, vaultType: VAULT_TYPE.BLOB, itemKeyVersion: entry.itemKeyVersion },
+      entry.aadVersion,
+    ));
+    const overview = await tryOpen(() => openTeamEntryFieldAt(
       { ciphertext: entry.encryptedOverview, iv: entry.overviewIv, authTag: entry.overviewAuthTag },
       liveHeld.contentKey,
-      teamEntryAadFor(teamId, entryId, VAULT_TYPE.OVERVIEW, entry.itemKeyVersion, entry.aadVersion),
-    );
+      { teamId, entryId, vaultType: VAULT_TYPE.OVERVIEW, itemKeyVersion: entry.itemKeyVersion },
+      entry.aadVersion,
+    ));
     if (blob === null || overview === null) return blocked(REKEY_ENTRY_BLOCK.UNDECRYPTABLE);
 
     // Every history wrap the runner can open joins the trial set. A row's
@@ -405,15 +405,15 @@ export async function buildEntryRekeyPayload(
         currentKey,
         buildItemKeyWrapAAD(teamId, entryId, data.teamKeyVersion),
       ),
-      encryptedBlob: await encryptTeamEntry(
+      encryptedBlob: await sealTeamEntryField(
         blob,
         newContentKey,
-        buildTeamEntryAAD(teamId, entryId, VAULT_TYPE.BLOB, newItemKeyVersion),
+        { teamId, entryId, vaultType: VAULT_TYPE.BLOB, itemKeyVersion: newItemKeyVersion },
       ),
-      encryptedOverview: await encryptTeamEntry(
+      encryptedOverview: await sealTeamEntryField(
         overview,
         newContentKey,
-        buildTeamEntryAAD(teamId, entryId, VAULT_TYPE.OVERVIEW, newItemKeyVersion),
+        { teamId, entryId, vaultType: VAULT_TYPE.OVERVIEW, itemKeyVersion: newItemKeyVersion },
       ),
       aadVersion: AAD_VERSION,
       history,
@@ -462,20 +462,26 @@ async function resealHistoryRow(
   newContentKey: CryptoKey,
   newItemKeyVersion: number,
 ): Promise<EncryptedData | null> {
-  const aad = buildTeamEntryAAD(teamId, entryId, VAULT_TYPE.BLOB, itemKeyVersion);
   for (const key of keys) {
-    const plaintext = await tryDecrypt(encrypted, key, aad);
+    const plaintext = await tryOpen(() =>
+      openTeamEntryField(encrypted, key, { teamId, entryId, vaultType: VAULT_TYPE.BLOB, itemKeyVersion }),
+    );
     if (plaintext !== null) {
-      return encryptTeamEntry(plaintext, newContentKey, buildTeamEntryAAD(teamId, entryId, VAULT_TYPE.BLOB, newItemKeyVersion));
+      return sealTeamEntryField(plaintext, newContentKey, {
+        teamId,
+        entryId,
+        vaultType: VAULT_TYPE.BLOB,
+        itemKeyVersion: newItemKeyVersion,
+      });
     }
   }
   return null;
 }
 
 /**
- * The team entry re-seal without AAD (D80; its NAME is confined to this module
- * by team-entry-aad-strictness.test.ts — that no other team encrypt omits AAD
- * is not gated): a legacy history row, which carries no
+ * The team entry re-seal without AAD (D80; the guard confines the legacy
+ * entry points it calls to this function — team-entry-aad-strictness.test.ts,
+ * plan C6): a legacy history row, which carries no
  * entry binding, opened without AAD and re-sealed without AAD under the new
  * ItemKey, so it stays a row the history restore refuses. null if no key
  * opens it (the row is retained). Opening unbound ciphertext here is the
@@ -487,8 +493,8 @@ async function resealLegacyHistoryRow(
   newContentKey: CryptoKey,
 ): Promise<EncryptedData | null> {
   for (const key of keys) {
-    const plaintext = await tryDecrypt(encrypted, key, undefined);
-    if (plaintext !== null) return encryptTeamEntry(plaintext, newContentKey);
+    const plaintext = await tryOpen(() => openLegacyTeamEntryField(encrypted, key));
+    if (plaintext !== null) return sealLegacyTeamEntryField(plaintext, newContentKey);
   }
   return null;
 }
@@ -591,16 +597,18 @@ export async function buildEntryUpgradePayload(
       teamKeyVersion: version,
     };
   }
-  const blob = await tryDecrypt(
+  const blob = await tryOpen(() => openTeamEntryFieldAt(
     { ciphertext: entry.encryptedBlob, iv: entry.blobIv, authTag: entry.blobAuthTag },
     resolved.key,
-    teamEntryAadFor(teamId, entry.id, VAULT_TYPE.BLOB, 0, entry.aadVersion),
-  );
-  const overview = await tryDecrypt(
+    { teamId, entryId: entry.id, vaultType: VAULT_TYPE.BLOB, itemKeyVersion: 0 },
+    entry.aadVersion,
+  ));
+  const overview = await tryOpen(() => openTeamEntryFieldAt(
     { ciphertext: entry.encryptedOverview, iv: entry.overviewIv, authTag: entry.overviewAuthTag },
     resolved.key,
-    teamEntryAadFor(teamId, entry.id, VAULT_TYPE.OVERVIEW, 0, entry.aadVersion),
-  );
+    { teamId, entryId: entry.id, vaultType: VAULT_TYPE.OVERVIEW, itemKeyVersion: 0 },
+    entry.aadVersion,
+  ));
   if (blob === null || overview === null) {
     return { kind: "blocked", block: REKEY_ENTRY_BLOCK.UNDECRYPTABLE, teamKeyVersion: version };
   }
@@ -628,15 +636,15 @@ export async function encryptUpgrade(
   try {
     const contentKey = await deriveItemEncryptionKey(itemKey);
     return {
-      encryptedBlob: await encryptTeamEntry(
+      encryptedBlob: await sealTeamEntryField(
         blob,
         contentKey,
-        buildTeamEntryAAD(teamId, entry.id, VAULT_TYPE.BLOB, nextItemKeyVersion),
+        { teamId, entryId: entry.id, vaultType: VAULT_TYPE.BLOB, itemKeyVersion: nextItemKeyVersion },
       ),
-      encryptedOverview: await encryptTeamEntry(
+      encryptedOverview: await sealTeamEntryField(
         overview,
         contentKey,
-        buildTeamEntryAAD(teamId, entry.id, VAULT_TYPE.OVERVIEW, nextItemKeyVersion),
+        { teamId, entryId: entry.id, vaultType: VAULT_TYPE.OVERVIEW, itemKeyVersion: nextItemKeyVersion },
       ),
       aadVersion: AAD_VERSION,
       teamKeyVersion: currentTeamKeyVersion,

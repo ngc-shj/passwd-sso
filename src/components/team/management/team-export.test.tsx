@@ -52,9 +52,9 @@ vi.mock("@/lib/crypto/crypto-client", () => ({
   decryptData: vi.fn(async () => JSON.stringify({ title: "secret-title", password: "p" })),
 }));
 
-vi.mock("@/lib/crypto/crypto-aad", () => ({
+vi.mock("@/lib/crypto/crypto-aad", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/crypto/crypto-aad")>()),
   buildTeamEntryAAD: vi.fn(() => "aad"),
-  VAULT_TYPE: { BLOB: "blob", OVERVIEW: "overview" },
 }));
 
 vi.mock("@/lib/folder/folder-path", () => ({
@@ -129,11 +129,12 @@ import { TeamExportPagePanel } from "./team-export";
 import { decryptData } from "@/lib/crypto/crypto-client";
 import { buildTeamEntryAAD } from "@/lib/crypto/crypto-aad";
 import { formatExportContent } from "@/lib/format/export-format-common";
-import { aadModelDecrypt } from "@/__tests__/helpers/aad-model-decrypt";
+import { aadGatedDecrypt, aadModelDecrypt } from "@/__tests__/helpers/aad-model-decrypt";
 
 describe("TeamExportPagePanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(buildTeamEntryAAD).mockImplementation(() => "aad" as unknown as Uint8Array);
     mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve([]) });
   });
 
@@ -222,6 +223,42 @@ describe("TeamExportPagePanel", () => {
     expect(vi.mocked(buildTeamEntryAAD)).toHaveBeenCalledWith("team-1", "e1", "blob", 0);
     expect(vi.mocked(buildTeamEntryAAD)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(decryptData)).toHaveBeenCalledWith(expect.objectContaining({ ciphertext }), expect.anything(), "aad");
+    expect(vi.mocked(formatExportContent).mock.calls[0]?.[0]).toHaveLength(exported);
+  });
+
+  // T8: the blob opens at the blob vaultType and the entry's own ItemKey version.
+  it.each([
+    ["control: exports a blob sealed at blob / the entry's ItemKey version", "blob", 3, 1],
+    ["skips a blob sealed at the overview vaultType", "overview", 3, 0],
+    ["skips a blob sealed at another ItemKey version", "blob", 2, 0],
+  ] as const)("%s (T8)", async (_label, vaultType, sealedVersion, exported) => {
+    const { buildTeamEntryAAD: realBuild } =
+      await vi.importActual<typeof import("@/lib/crypto/crypto-aad")>("@/lib/crypto/crypto-aad");
+    vi.mocked(buildTeamEntryAAD).mockImplementation(realBuild);
+    URL.createObjectURL = vi.fn(() => "blob:x");
+    URL.revokeObjectURL = vi.fn();
+    mockFetch.mockImplementation(async (url: string) => {
+      if (url.endsWith("/passwords/e1")) {
+        return {
+          ok: true,
+          json: async () => ({ id: "e1", entryType: "LOGIN", encryptedBlob: "blob", blobIv: "iv", blobAuthTag: "tag", aadVersion: 1, itemKeyVersion: 3 }),
+        };
+      }
+      if (url.includes("/passwords")) return { ok: true, json: async () => [{ id: "e1", entryType: "LOGIN" }] };
+      return { ok: true, json: async () => [] };
+    });
+    vi.mocked(decryptData).mockImplementationOnce(
+      aadGatedDecrypt(realBuild("team-1", "e1", vaultType, sealedVersion), JSON.stringify({ title: "t", password: "p" })),
+    );
+
+    render(<TeamExportPagePanel teamId="team-1" />);
+    fireEvent.change(screen.getByTestId("exp-pw"), { target: { value: "longpassword1" } });
+    fireEvent.change(screen.getByTestId("exp-confirm"), { target: { value: "longpassword1" } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("export-json"));
+    });
+
+    expect(vi.mocked(decryptData)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(formatExportContent).mock.calls[0]?.[0]).toHaveLength(exported);
   });
 

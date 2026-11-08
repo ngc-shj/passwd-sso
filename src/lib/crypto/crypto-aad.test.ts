@@ -121,15 +121,9 @@ describe("crypto-aad", () => {
 
   describe("scope separation", () => {
     it("OV blob vs overview produce different AAD", () => {
-      const blob = buildTeamEntryAAD("team-1", "entry-1", "blob");
-      const overview = buildTeamEntryAAD("team-1", "entry-1", "overview");
+      const blob = buildTeamEntryAAD("team-1", "entry-1", "blob", 0);
+      const overview = buildTeamEntryAAD("team-1", "entry-1", "overview", 0);
       expect(blob).not.toEqual(overview);
-    });
-
-    it("OV defaults to blob vaultType", () => {
-      const explicit = buildTeamEntryAAD("team-1", "entry-1", "blob");
-      const defaulted = buildTeamEntryAAD("team-1", "entry-1");
-      expect(explicit).toEqual(defaulted);
     });
   });
 
@@ -249,10 +243,8 @@ describe("crypto-aad", () => {
       expect(v0).not.toEqual(v1);
     });
 
-    it("defaults to itemKeyVersion=0 for backward compatibility", () => {
-      const explicit = buildTeamEntryAAD("team-1", "entry-1", "blob", 0);
-      const defaulted = buildTeamEntryAAD("team-1", "entry-1", "blob");
-      expect(explicit).toEqual(defaulted);
+    it("has no parameter defaults (every argument is required)", () => {
+      expect(buildTeamEntryAAD.length).toBe(4);
     });
   });
 

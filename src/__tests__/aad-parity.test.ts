@@ -7,7 +7,12 @@ import {
   buildTeamAttachmentCekWrapAAD as appBuildTeamAttachmentCekWrapAAD,
   VAULT_TYPE as APP_VAULT_TYPE,
 } from "@/lib/crypto/crypto-aad";
-import { buildTeamKeyWrapAAD as appBuildTeamKeyWrapAAD } from "@/lib/crypto/crypto-team";
+import {
+  buildTeamKeyWrapAAD as appBuildTeamKeyWrapAAD,
+  openTeamEntryField as appOpenTeamEntryField,
+  sealTeamEntryField as appSealTeamEntryField,
+  type TeamEntryAadContext,
+} from "@/lib/crypto/crypto-team";
 import { encryptData } from "@/lib/crypto/crypto-client";
 import {
   buildPersonalEntryAAD as extBuildPersonalEntryAAD,
@@ -19,6 +24,7 @@ import {
   buildItemKeyWrapAAD as extBuildItemKeyWrapAAD,
   buildTeamKeyWrapAAD as extBuildTeamKeyWrapAAD,
   buildTeamAttachmentCekWrapAAD as extBuildTeamAttachmentCekWrapAAD,
+  openTeamEntryField as extOpenTeamEntryField,
 } from "../../extension/src/lib/crypto-team";
 
 // Recurrence guard for the cross-codebase AAD desync class (#503: the app
@@ -173,5 +179,68 @@ describe("team attachment CEK wrap AAD parity (app ↔ extension; iOS shares the
     expect(toHex(extBuildTeamAttachmentCekWrapAAD("チーム", "エントリ", "添付", 3, 1))).toBe(
       toHex(appBuildTeamAttachmentCekWrapAAD("チーム", "エントリ", "添付", 3, 1)),
     );
+  });
+});
+
+describe("team entry golden ciphertext at itemKeyVersion 2 (app helper ↔ extension twin; iOS mirrors)", () => {
+  // A fixed key / IV ciphertext per field, sealed at the team entry AAD at
+  // itemKeyVersion 2 by an independent AES-GCM implementation. Both the app's
+  // openTeamEntryField and the extension twin must open it, and neither may
+  // when any single context field differs. iOS pins the same vectors in
+  // AADParityTests.swift (testTeamEntryGoldenCiphertextItemKeyVersion2).
+  const KEY_HEX = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
+  const GOLDEN = {
+    blob: {
+      aadHex: "4f5601040001740001650004626c6f62000132",
+      enc: { ciphertext: "149f4ea11fb1b2578c26bf62b2c88026df32fd5fde198dc3842bafb46b7facc154", iv: "0a0b0c0d0e0f101112131415", authTag: "5b988622130061a798910620926ca826" },
+      plaintext: '{"title":"golden","password":"p"}',
+    },
+    overview: {
+      aadHex: "4f56010400017400016500086f76657276696577000132",
+      enc: { ciphertext: "edde55fdb54dd5f8783a9e1e77d16b330d4d", iv: "1a1b1c1d1e1f202122232425", authTag: "207483b8e1a7a43fa475366bc2e27be0" },
+      plaintext: '{"title":"golden"}',
+    },
+  } as const;
+  const ctxOf = (vaultType: "blob" | "overview"): TeamEntryAadContext => ({ teamId: "t", entryId: "e", vaultType, itemKeyVersion: 2 });
+  const importKey = () => crypto.subtle.importKey(
+    "raw", new Uint8Array(Buffer.from(KEY_HEX, "hex")), "AES-GCM", false, ["encrypt", "decrypt"],
+  );
+
+  it.each(["blob", "overview"] as const)("%s AAD at itemKeyVersion 2: app === extension === golden", (vaultType) => {
+    expect(toHex(appBuildTeamEntryAAD("t", "e", vaultType, 2))).toBe(GOLDEN[vaultType].aadHex);
+    expect(toHex(extBuildTeamEntryAAD("t", "e", vaultType, 2))).toBe(GOLDEN[vaultType].aadHex);
+  });
+
+  it.each(["blob", "overview"] as const)("the app helper and the extension twin open the golden %s", async (vaultType) => {
+    const key = await importKey();
+    const { enc, plaintext } = GOLDEN[vaultType];
+    expect(await appOpenTeamEntryField(enc, key, ctxOf(vaultType))).toBe(plaintext);
+    expect(await extOpenTeamEntryField(enc, key, ctxOf(vaultType))).toBe(plaintext);
+  });
+
+  it.each([
+    ["teamId", { teamId: "t2" }],
+    ["entryId", { entryId: "e2" }],
+    ["itemKeyVersion", { itemKeyVersion: 1 }],
+  ] as const)("neither opens the golden blob when only %s differs", async (_field, change) => {
+    const key = await importKey();
+    const ctx = { ...ctxOf("blob"), ...change };
+    await expect(appOpenTeamEntryField(GOLDEN.blob.enc, key, ctx)).rejects.toThrow();
+    await expect(extOpenTeamEntryField(GOLDEN.blob.enc, key, ctx)).rejects.toThrow();
+  });
+
+  it("neither opens the golden blob at the overview vaultType, nor the golden overview at blob", async () => {
+    const key = await importKey();
+    await expect(appOpenTeamEntryField(GOLDEN.blob.enc, key, ctxOf("overview"))).rejects.toThrow();
+    await expect(extOpenTeamEntryField(GOLDEN.blob.enc, key, ctxOf("overview"))).rejects.toThrow();
+    await expect(appOpenTeamEntryField(GOLDEN.overview.enc, key, ctxOf("blob"))).rejects.toThrow();
+    await expect(extOpenTeamEntryField(GOLDEN.overview.enc, key, ctxOf("blob"))).rejects.toThrow();
+  });
+
+  it("an app-sealed field opens in the extension twin at the same context only", async () => {
+    const key = await importKey();
+    const sealed = await appSealTeamEntryField("round-trip", key, ctxOf("overview"));
+    expect(await extOpenTeamEntryField(sealed, key, ctxOf("overview"))).toBe("round-trip");
+    await expect(extOpenTeamEntryField(sealed, key, { ...ctxOf("overview"), itemKeyVersion: 3 })).rejects.toThrow();
   });
 });

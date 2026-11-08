@@ -201,6 +201,24 @@ describe("renderDeletionRetentionMatrix", () => {
     }
   });
 
+  it("lists a dedicated sweep's table as worker-pruned, not under no-automated-purge", () => {
+    const models = [
+      { name: "TeamMemberKey", dbName: "team_member_keys" },
+      { name: "Account", dbName: "accounts" },
+    ];
+    const out = renderDeletionRetentionMatrix(RETENTION_REGISTRY, models, [
+      { table: "team_member_keys", sweep: "sweepTeamMemberKeys", enabledBy: "FLAG", rule: "rule", auditAction: "ACTION" },
+    ]);
+    const purgeSectionStart = out.indexOf("## No automated purge (manual or cascade-only deletion)");
+    const dedicatedStart = out.indexOf("## Worker-pruned outside the registry");
+    expect(dedicatedStart).toBeGreaterThan(-1);
+    expect(out.slice(dedicatedStart, purgeSectionStart)).toContain("| `team_member_keys` | `sweepTeamMemberKeys` | `FLAG` |");
+    expect(out.slice(purgeSectionStart)).not.toContain("`team_member_keys`");
+    // Control: without the dedicated entry it falls back to no-automated-purge.
+    const without = renderDeletionRetentionMatrix(RETENTION_REGISTRY, models, []);
+    expect(without.slice(without.indexOf("## No automated purge"))).toContain("`team_member_keys`");
+  });
+
   it("every real Prisma model has a non-null dbName (keeps the renderer's `?? name` fallback dead)", () => {
     // The renderer keys models by `model.dbName ?? model.name`. RETENTION_REGISTRY
     // keys by lowercase table name, so if a model lacked @@map (dbName null) the

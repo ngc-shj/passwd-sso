@@ -30,6 +30,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  DEDICATED_SWEEPS,
   RETENTION_REGISTRY,
   type RetentionEntry,
 } from "@/workers/retention-gc-worker/registry";
@@ -294,6 +295,7 @@ function retentionEntryTable(entry: RetentionEntry): string {
 export function renderDeletionRetentionMatrix(
   registry: readonly RetentionEntry[],
   models: readonly PrismaModel[],
+  dedicated: typeof DEDICATED_SWEEPS = DEDICATED_SWEEPS,
 ): string {
   const lines: string[] = [];
   lines.push(GENERATED_HEADER);
@@ -324,7 +326,25 @@ export function renderDeletionRetentionMatrix(
   }
   lines.push("");
 
-  const managedTables = new Set(registry.map((e) => e.table));
+  lines.push("## Worker-pruned outside the registry");
+  lines.push("");
+  lines.push(
+    "Tables the retention-GC worker deletes rows from through a dedicated sweep " +
+      "(`DEDICATED_SWEEPS` in `registry.ts`), each off until its switch is set. " +
+      "The worker's orphan-blob sweep (`RETENTION_GC_BLOB_SWEEP_MODE`) deletes " +
+      "external attachment objects, never `attachments` rows, so it has no row here.",
+  );
+  lines.push("");
+  lines.push("| Table | Sweep | Enabled by | Deletes | Audit action |");
+  lines.push("| --- | --- | --- | --- | --- |");
+  for (const entry of dedicated) {
+    lines.push(
+      `| \`${entry.table}\` | \`${entry.sweep}\` | \`${entry.enabledBy}\` | ${entry.rule} | ${entry.auditAction} |`,
+    );
+  }
+  lines.push("");
+
+  const managedTables = new Set([...registry.map((e) => e.table), ...dedicated.map((e) => e.table)]);
 
   lines.push("## No automated purge (manual or cascade-only deletion)");
   lines.push("");

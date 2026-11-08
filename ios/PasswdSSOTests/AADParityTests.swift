@@ -1,3 +1,4 @@
+import CryptoKit
 import XCTest
 @testable import Shared
 
@@ -100,6 +101,62 @@ final class AADParityTests: XCTestCase {
       0x00, 0x08, 0x6f, 0x76, 0x65, 0x72, 0x76, 0x69, 0x65, 0x77,  // len("overview")=8, "overview"
       0x00, 0x01, 0x30,       // len("0")=1, "0"
     ])
+  }
+
+  // MARK: - Team entry golden ciphertext (itemKeyVersion 2)
+
+  // The same vectors as src/__tests__/aad-parity.test.ts and the extension's
+  // crypto-team.test.ts ("team entry golden ciphertext at itemKeyVersion 2"):
+  // a fixed key / IV ciphertext per field, sealed at the team entry AAD at
+  // itemKeyVersion 2. The web openTeamEntryField and the extension twin open
+  // them; so must this AAD, and no AAD with a single field changed.
+  private let goldenKeyHex = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+  private let goldenBlob = EncryptedData(
+    ciphertext: "149f4ea11fb1b2578c26bf62b2c88026df32fd5fde198dc3842bafb46b7facc154",
+    iv: "0a0b0c0d0e0f101112131415",
+    authTag: "5b988622130061a798910620926ca826"
+  )
+  private let goldenOverview = EncryptedData(
+    ciphertext: "edde55fdb54dd5f8783a9e1e77d16b330d4d",
+    iv: "1a1b1c1d1e1f202122232425",
+    authTag: "207483b8e1a7a43fa475366bc2e27be0"
+  )
+
+  func testTeamEntryAADItemKeyVersion2ByteIdentical() throws {
+    XCTAssertEqual(
+      hexEncode(try buildTeamEntryAAD(teamId: "t", entryId: "e", vaultType: VaultType.blob, itemKeyVersion: 2)),
+      "4f5601040001740001650004626c6f62000132"
+    )
+    XCTAssertEqual(
+      hexEncode(try buildTeamEntryAAD(teamId: "t", entryId: "e", vaultType: VaultType.overview, itemKeyVersion: 2)),
+      "4f56010400017400016500086f76657276696577000132"
+    )
+  }
+
+  func testTeamEntryGoldenCiphertextItemKeyVersion2() throws {
+    let key = SymmetricKey(data: try hexDecode(goldenKeyHex))
+    let blobAAD = try buildTeamEntryAAD(teamId: "t", entryId: "e", vaultType: VaultType.blob, itemKeyVersion: 2)
+    let overviewAAD = try buildTeamEntryAAD(teamId: "t", entryId: "e", vaultType: VaultType.overview, itemKeyVersion: 2)
+
+    let blob = try decryptAESGCMEncoded(encrypted: goldenBlob, key: key, aad: blobAAD)
+    XCTAssertEqual(String(data: blob, encoding: .utf8), "{\"title\":\"golden\",\"password\":\"p\"}")
+    let overview = try decryptAESGCMEncoded(encrypted: goldenOverview, key: key, aad: overviewAAD)
+    XCTAssertEqual(String(data: overview, encoding: .utf8), "{\"title\":\"golden\"}")
+  }
+
+  func testTeamEntryGoldenCiphertextRefusesAnySingleContextChange() throws {
+    let key = SymmetricKey(data: try hexDecode(goldenKeyHex))
+    let changed = [
+      try buildTeamEntryAAD(teamId: "t2", entryId: "e", vaultType: VaultType.blob, itemKeyVersion: 2),
+      try buildTeamEntryAAD(teamId: "t", entryId: "e2", vaultType: VaultType.blob, itemKeyVersion: 2),
+      try buildTeamEntryAAD(teamId: "t", entryId: "e", vaultType: VaultType.overview, itemKeyVersion: 2),
+      try buildTeamEntryAAD(teamId: "t", entryId: "e", vaultType: VaultType.blob, itemKeyVersion: 1),
+    ]
+    for aad in changed {
+      XCTAssertThrowsError(try decryptAESGCMEncoded(encrypted: goldenBlob, key: key, aad: aad))
+    }
+    let blobAAD = try buildTeamEntryAAD(teamId: "t", entryId: "e", vaultType: VaultType.blob, itemKeyVersion: 2)
+    XCTAssertThrowsError(try decryptAESGCMEncoded(encrypted: goldenOverview, key: key, aad: blobAAD))
   }
 
   // MARK: - Attachment

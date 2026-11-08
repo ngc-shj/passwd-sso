@@ -481,6 +481,7 @@ const ROUTINE_EXECUTE = [
   { kind: "FUNCTION", signature: "public.audit_log_purge(uuid, timestamptz)", roles: ["passwd_app", "passwd_retention_gc_worker"] },
   { kind: "PROCEDURE", signature: "public.audit_log_tenant_migrate(uuid, uuid, uuid)", roles: ["passwd_app"] },
   { kind: "FUNCTION", signature: "public.share_creator_admitted(uuid)", roles: ["passwd_app"] },
+  { kind: "FUNCTION", signature: "public.team_member_key_prune(integer)", roles: ["passwd_retention_gc_worker"] },
 ];
 
 /**

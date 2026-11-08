@@ -1,9 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/crypto/crypto-client", () => ({
-  encryptData: vi.fn(async (value: string) => `enc:${value}`),
-}));
-
 vi.mock("@/lib/url-helpers", () => ({
   fetchApi: (path: string, init?: RequestInit) =>
     init !== undefined ? fetch(path, init) : fetch(path),
@@ -14,8 +10,9 @@ vi.mock("@/lib/url-helpers", () => ({
 import { buildEncryptedEntryBody, submitEntry } from "@/lib/vault/entry-save-core";
 
 describe("buildEncryptedEntryBody", () => {
+  const seal = vi.fn(async (value: string, vaultType: string) => ({ ciphertext: `enc:${vaultType}:${value}`, iv: "iv", authTag: "tag" }));
   const baseParams = {
-    encryptionKey: {} as CryptoKey,
+    seal,
     fullBlob: '{"a":1}',
     overviewBlob: '{"b":2}',
     tagIds: ["tag-1"],
@@ -30,8 +27,8 @@ describe("buildEncryptedEntryBody", () => {
     });
 
     expect(body.id).toBe("entry-new");
-    expect(body.encryptedBlob).toBe('enc:{"a":1}');
-    expect(body.encryptedOverview).toBe('enc:{"b":2}');
+    expect(body.encryptedBlob).toEqual({ ciphertext: 'enc:blob:{"a":1}', iv: "iv", authTag: "tag" });
+    expect(body.encryptedOverview).toEqual({ ciphertext: 'enc:overview:{"b":2}', iv: "iv", authTag: "tag" });
     expect(body.tagIds).toEqual(["tag-1"]);
     expect(body.keyVersion).toBe(1);
   });
@@ -44,7 +41,7 @@ describe("buildEncryptedEntryBody", () => {
     });
 
     expect(body.id).toBeUndefined();
-    expect(body.encryptedBlob).toBe('enc:{"a":1}');
+    expect(body.encryptedBlob).toEqual({ ciphertext: 'enc:blob:{"a":1}', iv: "iv", authTag: "tag" });
   });
 
   it("includes optional fields with null values, excludes undefined", async () => {
@@ -65,22 +62,12 @@ describe("buildEncryptedEntryBody", () => {
     expect("requireReprompt" in body).toBe(false);
   });
 
-  it("passes AAD to encryptData", async () => {
-    const { encryptData } = await import("@/lib/crypto/crypto-client");
+  it("seals the blob at the blob vaultType and the overview at the overview vaultType", async () => {
+    seal.mockClear();
 
-    const blobAAD = new Uint8Array([1, 2, 3]);
-    const overviewAAD = new Uint8Array([4, 5, 6]);
+    await buildEncryptedEntryBody({ ...baseParams, mode: "create", entryId: "entry-aad" });
 
-    await buildEncryptedEntryBody({
-      ...baseParams,
-      mode: "create",
-      entryId: "entry-aad",
-      blobAAD,
-      overviewAAD,
-    });
-
-    expect(encryptData).toHaveBeenCalledWith('{"a":1}', expect.any(Object), blobAAD);
-    expect(encryptData).toHaveBeenCalledWith('{"b":2}', expect.any(Object), overviewAAD);
+    expect(seal.mock.calls).toEqual([['{"a":1}', "blob"], ['{"b":2}', "overview"]]);
   });
 });
 

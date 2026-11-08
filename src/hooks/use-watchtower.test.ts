@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
-import { aadModelDecrypt } from "@/__tests__/helpers/aad-model-decrypt";
+import { aadGatedDecrypt, aadModelDecrypt } from "@/__tests__/helpers/aad-model-decrypt";
 
 // ─── Minimal localStorage mock for Node/jsdom environment ────
 
@@ -47,11 +47,10 @@ vi.mock("@/lib/crypto/crypto-client", () => ({
   decryptData: mockDecryptData,
 }));
 
-vi.mock("@/lib/crypto/crypto-aad", () => ({
+vi.mock("@/lib/crypto/crypto-aad", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/crypto/crypto-aad")>()),
   buildPersonalEntryAAD: mockBuildPersonalEntryAAD,
   buildTeamEntryAAD: mockBuildTeamEntryAAD,
-  // C1 const-object: real source exports VAULT_TYPE; mock must mirror.
-  VAULT_TYPE: { BLOB: "blob", OVERVIEW: "overview" },
 }));
 
 vi.mock("@/lib/security/password-analyzer", () => ({
@@ -1512,6 +1511,49 @@ describe("useWatchtower", () => {
     });
 
     expect(mockDecryptData).toHaveBeenCalledWith(expect.objectContaining({ ciphertext }), fakeKey, "team-aad");
+    expect((result.current.report?.old ?? []).some((f: { id: string }) => f.id === "team-entry-1")).toBe(analyzed);
+  });
+
+  // T8: the blob opens at the blob vaultType and the entry's own ItemKey version.
+  it.each([
+    ["control: opens a blob sealed at blob / the entry's ItemKey version", "blob", 3, true],
+    ["skips a blob sealed at the overview vaultType", "overview", 3, false],
+    ["skips a blob sealed at another ItemKey version", "blob", 2, false],
+  ] as const)("%s (T8)", async (_label, vaultType, sealedVersion, analyzed) => {
+    const { buildTeamEntryAAD: realBuild } =
+      await vi.importActual<typeof import("@/lib/crypto/crypto-aad")>("@/lib/crypto/crypto-aad");
+    mockBuildTeamEntryAAD.mockImplementation(realBuild);
+    mockUseTeamVaultOptional.mockReturnValue({
+      getTeamEncryptionKey: vi.fn().mockResolvedValue(fakeKey),
+      getEntryDecryptionKey: vi.fn().mockResolvedValue(fakeKey),
+    });
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse([{
+        id: "team-entry-1",
+        entryType: "LOGIN",
+        encryptedBlob: "cipher",
+        blobIv: "iv",
+        blobAuthTag: "tag",
+        aadVersion: 1,
+        itemKeyVersion: 3,
+        updatedAt: new Date(Date.now() - (OLD_THRESHOLD_DAYS + 5) * MS_PER_DAY).toISOString(),
+        expiresAt: null,
+      }]));
+    mockAnalyzeStrength.mockReturnValue(strongResult);
+    mockDecryptData.mockImplementation(aadGatedDecrypt(
+      realBuild("team-1", "team-entry-1", vaultType, sealedVersion),
+      JSON.stringify({ title: "T", password: "TeamStr0ng!42", url: "https://team.example.com" }),
+    ));
+
+    const { result } = renderHook(() =>
+      useWatchtower({ type: "team", teamId: "team-1" }, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 })
+    );
+    await act(async () => {
+      await result.current.analyze();
+    });
+
+    expect(mockDecryptData).toHaveBeenCalledTimes(1);
     expect((result.current.report?.old ?? []).some((f: { id: string }) => f.id === "team-entry-1")).toBe(analyzed);
   });
 

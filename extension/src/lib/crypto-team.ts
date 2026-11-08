@@ -11,7 +11,7 @@
  *   itemKey → HKDF("passwd-sso-item-cekwrap-v1", empty) → AES-256-GCM attachment CEK-wrap key
  */
 
-import { hexDecode, type EncryptedData } from "./crypto";
+import { decryptData, hexDecode, type EncryptedData } from "./crypto";
 
 // ─── Constants ──────────────────────────────────────────────────
 
@@ -113,12 +113,19 @@ function buildAADBytes(
   return bytes;
 }
 
-/** Build AAD for Team Vault entry encryption (scope "OV") */
+/** Team entry sub-blob selector bound into the "OV" AAD. */
+export type TeamEntryVaultType = "blob" | "overview";
+
+/**
+ * Build AAD for Team Vault entry encryption (scope "OV"). Every parameter is
+ * required; outside tests only openTeamEntryField below calls it
+ * (src/__tests__/team-entry-aad-strictness.test.ts).
+ */
 export function buildTeamEntryAAD(
   teamId: string,
   entryId: string,
-  vaultType: "blob" | "overview" = "blob",
-  itemKeyVersion: number = 0
+  vaultType: TeamEntryVaultType,
+  itemKeyVersion: number
 ): Uint8Array {
   return buildAADBytes(SCOPE_TEAM, 4, [
     teamId,
@@ -173,6 +180,33 @@ export function buildTeamKeyWrapAAD(ctx: TeamKeyWrapContext): Uint8Array {
     String(ctx.keyVersion),
     String(ctx.wrapVersion),
   ]);
+}
+
+// ─── Team Entry Decryption ──────────────────────────────────────
+
+/** Where a team entry blob / overview is bound (mirrors the web TeamEntryAadContext). */
+export interface TeamEntryAadContext {
+  teamId: string;
+  entryId: string;
+  vaultType: TeamEntryVaultType;
+  itemKeyVersion: number;
+}
+
+/**
+ * Open a team entry field at the team entry AAD, whatever `aadVersion` the
+ * server reports. Twin of openTeamEntryField in src/lib/crypto/crypto-team.ts
+ * — keep the two in step. The extension never seals team entries.
+ */
+export async function openTeamEntryField(
+  encrypted: EncryptedData,
+  key: CryptoKey,
+  ctx: TeamEntryAadContext
+): Promise<string> {
+  return decryptData(
+    encrypted,
+    key,
+    buildTeamEntryAAD(ctx.teamId, ctx.entryId, ctx.vaultType, ctx.itemKeyVersion)
+  );
 }
 
 // ─── ECDH Public Key Import ─────────────────────────────────────

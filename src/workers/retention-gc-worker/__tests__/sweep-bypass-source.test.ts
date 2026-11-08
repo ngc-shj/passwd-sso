@@ -26,12 +26,14 @@ const REPO_ROOT = path.resolve(WORKER_DIR, "../../..");
 const EXEMPT = new Set(["enqueueAuditInWorkerTx", "assertSweepBypass"]);
 const EXPECTED_MEMBERS = [
   "listTrashRetentionTenants",
+  "readAttachmentRefs",
   "sweepAuditLogs",
   "sweepAuditProvenanceEntry",
   "sweepExpiredAccessRequests",
   "sweepExpiryEntry",
   "sweepGuardedExpiryEntry",
   "sweepPerTenantAge",
+  "sweepTeamMemberKeys",
   "sweepTrashTenant",
 ];
 const ENTRY_GATED = new Set(["sweepExpiryEntry", "sweepGuardedExpiryEntry", "sweepAuditProvenanceEntry"]);
@@ -60,7 +62,7 @@ function setBypassGucsCalls(sf: SourceFile): Node[] {
 }
 
 describe("retention-gc sweep.ts bypass invariants (C2)", () => {
-  it("the derived member set is the seven tx-taking sweeps", () => {
+  it("the derived member set is the tx-taking sweeps", () => {
     expect(members().map((fn) => fn.getName()).sort()).toEqual(EXPECTED_MEMBERS);
   });
 

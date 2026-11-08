@@ -125,6 +125,31 @@ export const envObject = z.object({
     .enum(["true", "false"])
     .default("false")
     .transform((v) => v === "true"),
+  // Kill switch for the irreversible TeamMemberKey prune (#1009). Off by
+  // default: an operator enables it after reviewing the reference classification.
+  RETENTION_GC_TEAM_KEY_PRUNE_ENABLED: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
+  // Orphaned attachment-object sweep (#1010). `report` classifies and logs what
+  // it would delete; `delete` deletes. Either needs DEPLOYMENT_ID (the bucket
+  // marker), refined in the worker schema (scripts/retention-gc-worker.ts).
+  // The values of BLOB_SWEEP_MODE (src/lib/blob-store/constants.ts), spelled
+  // out: this module's import closure is a public contract
+  // (check-public-contract), and the worker's options type pins the two together.
+  RETENTION_GC_BLOB_SWEEP_MODE: z.enum(["off", "report", "delete"]).default("off"),
+  // No default here: `delete` mode requires it set explicitly (worker-schema
+  // refine), sized against the backup retention window; `report` mode falls
+  // back to BLOB_ORPHAN_GRACE_REPORT_DEFAULT_MS (buildSweepOpts).
+  RETENTION_GC_BLOB_ORPHAN_GRACE_MS: z.coerce
+    .number()
+    .int()
+    .min(MS_PER_HOUR)
+    .max(35 * MS_PER_DAY)
+    .optional(),
+  RETENTION_GC_BLOB_SWEEP_MAX_OBJECTS: z.coerce.number().int().min(100).max(1_000_000).default(10_000),
+  RETENTION_GC_BLOB_SWEEP_MAX_DELETES: z.coerce.number().int().min(1).max(100_000).default(1_000),
+  RETENTION_GC_BLOB_SWEEP_MAX_DELETE_RATIO: z.coerce.number().gt(0).max(1).default(0.5),
 
   // --- Critical (always required) ---
   DATABASE_URL: nonEmpty,

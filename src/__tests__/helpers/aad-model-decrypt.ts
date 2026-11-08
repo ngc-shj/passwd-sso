@@ -15,3 +15,19 @@ export function aadModelDecrypt(plaintext: string) {
     return plaintext;
   };
 }
+
+/**
+ * A stricter stand-in: opens only at exactly the `expected` AAD bytes
+ * (undefined = no AAD), so a reader passing the wrong team entry context — the
+ * other vaultType, another ItemKey version — fails as it would against real
+ * ciphertext (plan team-key-prune-blob-sweep-strict-aad C5 T8).
+ */
+export function aadGatedDecrypt(expected: Uint8Array | undefined, plaintext: string) {
+  return async (_encrypted: unknown, _key: unknown, aad?: unknown): Promise<string> => {
+    const same = expected === undefined
+      ? aad === undefined
+      : aad instanceof Uint8Array && aad.length === expected.length && aad.every((b, i) => b === expected[i]);
+    if (!same) throw new DOMException("The operation failed for an operation-specific reason", "OperationError");
+    return plaintext;
+  };
+}

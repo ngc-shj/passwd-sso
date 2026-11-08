@@ -88,3 +88,102 @@ describe("azureBlobStore lazy SDK loading", () => {
     },
   );
 });
+
+describe("azureBlobStore listing and marker", () => {
+  // No @azure/storage-blob in this repo's dependencies, so the page shape is
+  // the store's own narrow one (listBlobsFlat().byPage() -> { segment.blobItems,
+  // continuationToken }); see the plan's VE1.
+  type Page = {
+    segment: { blobItems: { name: string; properties: { lastModified: Date } }[] };
+    continuationToken?: string;
+  };
+  const T0 = new Date("2026-01-01T00:00:00Z");
+
+  async function loadStore(opts: {
+    pages?: Page[];
+    download?: () => Promise<unknown>;
+    uploadData?: (data: Buffer, options?: unknown) => Promise<unknown>;
+    prefix?: string;
+  }) {
+    vi.resetModules();
+    vi.stubEnv("AZURE_STORAGE_ACCOUNT", "acct");
+    vi.stubEnv("AZURE_BLOB_CONTAINER", "attachments");
+    vi.stubEnv("AZURE_STORAGE_CONNECTION_STRING", "UseDevelopmentStorage=true;");
+    vi.stubEnv("BLOB_OBJECT_PREFIX", opts.prefix ?? "");
+    const byPage = vi.fn((_settings: { continuationToken?: string; maxPageSize: number }) => {
+      const pages = [...(opts.pages ?? [])];
+      return { next: async () => (pages.length > 0 ? { done: false, value: pages.shift() } : { done: true, value: undefined }) };
+    });
+    const listBlobsFlat = vi.fn((_options: { prefix: string }) => ({ byPage }));
+    const uploadData = vi.fn(opts.uploadData ?? (async () => ({})));
+    const getBlockBlobClient = vi.fn((_key: string) => ({
+      uploadData,
+      download: opts.download ?? vi.fn(),
+      deleteIfExists: vi.fn(),
+    }));
+    vi.doMock("./runtime-module", () => ({
+      requireOptionalModule: vi.fn().mockReturnValue({
+        BlobServiceClient: {
+          fromConnectionString: vi.fn().mockReturnValue({
+            getContainerClient: vi.fn().mockReturnValue({ getBlockBlobClient, listBlobsFlat }),
+          }),
+        },
+      }),
+    }));
+    vi.doMock("./stream", () => ({ streamBodyToBuffer: async (b: Buffer) => b }));
+    const { azureBlobStore: store } = await import("./azure-blob-store");
+    return { store, byPage, listBlobsFlat, uploadData, getBlockBlobClient };
+  }
+
+  it("returns an empty page when the listing has no page", async () => {
+    const { store } = await loadStore({ pages: [] });
+    await expect(store.listObjects("p/", { pageSize: 10 })).resolves.toEqual({ objects: [] });
+  });
+
+  it("maps a page and passes the continuation token back", async () => {
+    const { store, byPage, listBlobsFlat } = await loadStore({
+      pages: [{ segment: { blobItems: [{ name: "a", properties: { lastModified: T0 } }] }, continuationToken: "tok-1" }],
+    });
+    const page = await store.listObjects("p/", { pageSize: 1, cursor: "tok-0" });
+    expect(page).toEqual({ objects: [{ key: "a", lastModified: T0 }], cursor: "tok-1" });
+    expect(listBlobsFlat).toHaveBeenCalledWith({ prefix: "p/" });
+    expect(byPage).toHaveBeenCalledWith({ continuationToken: "tok-0", maxPageSize: 1 });
+  });
+
+  it.each([
+    ["an empty final token", ""],
+    ["an absent final token", undefined],
+  ])("treats %s as the end of the listing", async (_label, token) => {
+    const { store } = await loadStore({ pages: [{ segment: { blobItems: [] }, continuationToken: token }] });
+    expect((await store.listObjects("", { pageSize: 5 })).cursor).toBeUndefined();
+  });
+
+  it("readMarker returns null on 404 and the body otherwise", async () => {
+    const absent = await loadStore({
+      download: async () => {
+        throw Object.assign(new Error("BlobNotFound"), { name: "RestError", statusCode: 404 });
+      },
+    });
+    await expect(absent.store.readMarker()).resolves.toBeNull();
+
+    const present = await loadStore({ download: async () => ({ readableStreamBody: Buffer.from("dep-1") }), prefix: "t" });
+    await expect(present.store.readMarker()).resolves.toBe("dep-1");
+    expect(present.getBlockBlobClient).toHaveBeenCalledWith("t/.passwd-sso-deployment");
+  });
+
+  it("createMarker sends ifNoneMatch '*' and reports created", async () => {
+    const { store, uploadData, getBlockBlobClient } = await loadStore({});
+    await expect(store.createMarker("dep-1")).resolves.toBe("created");
+    expect(getBlockBlobClient).toHaveBeenCalledWith(".passwd-sso-deployment");
+    expect(uploadData.mock.calls[0][1]).toMatchObject({ conditions: { ifNoneMatch: "*" } });
+  });
+
+  it.each([409, 412])("createMarker on an existing marker (%s) reports exists", async (statusCode) => {
+    const { store } = await loadStore({
+      uploadData: async () => {
+        throw Object.assign(new Error("BlobAlreadyExists"), { name: "RestError", statusCode });
+      },
+    });
+    await expect(store.createMarker("dep-2")).resolves.toBe("exists");
+  });
+});

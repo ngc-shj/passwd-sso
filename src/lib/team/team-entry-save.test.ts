@@ -14,6 +14,8 @@ vi.mock("@/lib/crypto/crypto-client", () => ({
 }));
 
 import { saveTeamEntry } from "@/lib/team/team-entry-save";
+import { encryptData } from "@/lib/crypto/crypto-client";
+import { buildTeamEntryAAD } from "@/lib/crypto/crypto-aad";
 
 describe("saveTeamEntry", () => {
   beforeEach(() => {
@@ -159,5 +161,29 @@ describe("saveTeamEntry", () => {
 
     const body = JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body)) as Record<string, unknown>;
     expect(body).toMatchObject({ itemKeyVersion: 4, snapshotBlobIv: "b-iv", encryptedItemKey: { ciphertext: "c", iv: "i", authTag: "a" } });
+  });
+
+  // T8: the blob is sealed at the blob vaultType, the overview at the overview
+  // vaultType, both at the entry's ItemKey version.
+  it("seals blob and overview at their own team entry AAD and the entry's ItemKey version", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(new Response(null, { status: 200 }));
+    vi.mocked(encryptData).mockClear();
+
+    await saveTeamEntry({
+      mode: "edit",
+      teamId: "team-1",
+      entryId: "entry-existing",
+      encryptionKey: {} as CryptoKey,
+      teamKeyVersion: 2,
+      itemKeyVersion: 4,
+      fullBlob: "{\"a\":1}",
+      overviewBlob: "{\"b\":2}",
+      tagIds: [],
+    });
+
+    expect(vi.mocked(encryptData).mock.calls.map(([p, , aad]) => [p, Array.from(aad as Uint8Array)])).toEqual([
+      ["{\"a\":1}", Array.from(buildTeamEntryAAD("team-1", "entry-existing", "blob", 4))],
+      ["{\"b\":2}", Array.from(buildTeamEntryAAD("team-1", "entry-existing", "overview", 4))],
+    ]);
   });
 });

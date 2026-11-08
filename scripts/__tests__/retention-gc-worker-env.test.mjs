@@ -31,10 +31,10 @@ afterEach(() => {
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-function spawnWorker(envOverrides = {}) {
+function spawnWorker(envOverrides = {}, args = ["--validate-env-only"]) {
   return spawnSync(
     "node_modules/.bin/tsx",
-    [WORKER, "--validate-env-only"],
+    [WORKER, ...args],
     {
       // Never inherit parent env — explicit pass only (mirrors audit-outbox-worker-env.test.mjs).
       // DATABASE_URL="" is passed explicitly so dotenv's loadEnv() cannot override it.
@@ -218,5 +218,143 @@ describe("retention-gc-worker --validate-env-only", () => {
     expect(result.stderr).not.toContain(sensitiveValue);
     // No success JSON on the failure path.
     expect(extractJsonLine(result.stdout)).toBeNull();
+  });
+});
+
+// ── sweep settings (#1009 / #1010) ──────────────────────────────────────────
+
+/** The paths of the JSON error lines on stderr. */
+function errorPaths(stderr) {
+  return stderr
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .flatMap((l) => {
+      try {
+        const obj = JSON.parse(l);
+        return obj.level === "error" && typeof obj.path === "string" ? [obj.path] : [];
+      } catch {
+        return [];
+      }
+    });
+}
+
+const DEPLOYMENT_ID = "550e8400-e29b-41d4-a716-446655440000";
+
+describe("retention-gc-worker --validate-env-only: sweep settings", () => {
+  it.each([
+    ["RETENTION_GC_TEAM_KEY_PRUNE_ENABLED", "true"],
+    ["RETENTION_GC_BLOB_SWEEP_MODE", "off"],
+    ["RETENTION_GC_BLOB_ORPHAN_GRACE_MS", "3600000"],
+    ["RETENTION_GC_BLOB_ORPHAN_GRACE_MS", "3024000000"],
+    ["RETENTION_GC_BLOB_SWEEP_MAX_OBJECTS", "100"],
+    ["RETENTION_GC_BLOB_SWEEP_MAX_OBJECTS", "1000000"],
+    ["RETENTION_GC_BLOB_SWEEP_MAX_DELETES", "1"],
+    ["RETENTION_GC_BLOB_SWEEP_MAX_DELETES", "100000"],
+    ["RETENTION_GC_BLOB_SWEEP_MAX_DELETE_RATIO", "1"],
+    ["RETENTION_GC_BLOB_SWEEP_MAX_DELETE_RATIO", "0.01"],
+    // An empty optional blob variable reads as unset, as the store reads it.
+    ["BLOB_BACKEND", ""],
+    ["BLOB_BACKEND", "s3"],
+  ])("accepts %s=%j", (name, value) => {
+    const result = spawnWorker({ DATABASE_URL: VALID_DATABASE_URL, [name]: value });
+    expect(result.status, result.stderr).toBe(0);
+  });
+
+  it.each([
+    ["RETENTION_GC_TEAM_KEY_PRUNE_ENABLED", "yes"],
+    ["RETENTION_GC_BLOB_SWEEP_MODE", "purge"],
+    ["RETENTION_GC_BLOB_ORPHAN_GRACE_MS", "3599999"],
+    ["RETENTION_GC_BLOB_ORPHAN_GRACE_MS", "3024000001"],
+    ["RETENTION_GC_BLOB_SWEEP_MAX_OBJECTS", "99"],
+    ["RETENTION_GC_BLOB_SWEEP_MAX_OBJECTS", "1000001"],
+    ["RETENTION_GC_BLOB_SWEEP_MAX_DELETES", "0"],
+    ["RETENTION_GC_BLOB_SWEEP_MAX_DELETES", "100001"],
+    ["RETENTION_GC_BLOB_SWEEP_MAX_DELETE_RATIO", "0"],
+    ["RETENTION_GC_BLOB_SWEEP_MAX_DELETE_RATIO", "1.01"],
+    ["BLOB_BACKEND", "ftp"],
+    ["DEPLOYMENT_ID", "not-a-uuid"],
+  ])("refuses %s=%j, naming it", (name, value) => {
+    const result = spawnWorker({ DATABASE_URL: VALID_DATABASE_URL, [name]: value });
+    expect(result.status).toBe(1);
+    expect(errorPaths(result.stderr)).toContain(name);
+  });
+
+  it.each(["report", "delete"])("requires DEPLOYMENT_ID when the blob sweep mode is %s", (mode) => {
+    const grace = { RETENTION_GC_BLOB_ORPHAN_GRACE_MS: "86400000" };
+    const without = spawnWorker({ DATABASE_URL: VALID_DATABASE_URL, RETENTION_GC_BLOB_SWEEP_MODE: mode, DEPLOYMENT_ID: "", ...grace });
+    expect(without.status).toBe(1);
+    expect(errorPaths(without.stderr)).toEqual(["DEPLOYMENT_ID"]);
+    const withId = spawnWorker({ DATABASE_URL: VALID_DATABASE_URL, RETENTION_GC_BLOB_SWEEP_MODE: mode, DEPLOYMENT_ID, ...grace });
+    expect(withId.status, withId.stderr).toBe(0);
+  });
+
+  it("delete mode refuses a defaulted grace period, naming RETENTION_GC_BLOB_ORPHAN_GRACE_MS", () => {
+    const result = spawnWorker({
+      DATABASE_URL: VALID_DATABASE_URL,
+      RETENTION_GC_BLOB_SWEEP_MODE: "delete",
+      DEPLOYMENT_ID,
+      RETENTION_GC_BLOB_ORPHAN_GRACE_MS: "",
+    });
+    expect(result.status).toBe(1);
+    expect(errorPaths(result.stderr)).toEqual(["RETENTION_GC_BLOB_ORPHAN_GRACE_MS"]);
+  });
+
+  it("delete mode passes with an explicit grace period", () => {
+    const result = spawnWorker({
+      DATABASE_URL: VALID_DATABASE_URL,
+      RETENTION_GC_BLOB_SWEEP_MODE: "delete",
+      DEPLOYMENT_ID,
+      RETENTION_GC_BLOB_ORPHAN_GRACE_MS: "2592000000",
+    });
+    expect(result.status, result.stderr).toBe(0);
+  });
+
+  it("report mode passes without a grace period (it uses the default)", () => {
+    const result = spawnWorker({
+      DATABASE_URL: VALID_DATABASE_URL,
+      RETENTION_GC_BLOB_SWEEP_MODE: "report",
+      DEPLOYMENT_ID,
+      RETENTION_GC_BLOB_ORPHAN_GRACE_MS: "",
+    });
+    expect(result.status, result.stderr).toBe(0);
+  });
+});
+
+// The store-less refusals: each exits 1 before any blob store is built, so
+// none of them can write. The MinIO-backed created/exists cells live in
+// src/__tests__/db-integration/retention-gc-blob-orphans.integration.test.ts.
+describe("retention-gc-worker --init-blob-marker refusals", () => {
+  /** The refusal reason on stderr, or null. */
+  function refusal(stderr) {
+    for (const l of stderr.trim().split("\n").filter(Boolean)) {
+      try {
+        const obj = JSON.parse(l);
+        if (obj.msg === "init-blob-marker refused") return obj.reason;
+      } catch {
+        // not JSON
+      }
+    }
+    return null;
+  }
+
+  it.each([
+    ["the blob sweep mode is off", { RETENTION_GC_BLOB_SWEEP_MODE: "off", DEPLOYMENT_ID, BLOB_BACKEND: "s3" }, "blob_sweep_mode_off"],
+    ["BLOB_BACKEND is db", { RETENTION_GC_BLOB_SWEEP_MODE: "report", DEPLOYMENT_ID, BLOB_BACKEND: "db" }, "db_backend"],
+    ["BLOB_BACKEND is unset", { RETENTION_GC_BLOB_SWEEP_MODE: "report", DEPLOYMENT_ID, BLOB_BACKEND: "" }, "db_backend"],
+  ])("exits 1 when %s", (_label, env, reason) => {
+    const result = spawnWorker({ DATABASE_URL: VALID_DATABASE_URL, ...env }, ["--init-blob-marker"]);
+    expect(result.status).toBe(1);
+    expect(refusal(result.stderr)).toBe(reason);
+    expect(result.stdout).not.toContain("init-blob-marker");
+  });
+
+  it("exits 1 at env validation when DEPLOYMENT_ID is missing", () => {
+    const result = spawnWorker(
+      { DATABASE_URL: VALID_DATABASE_URL, RETENTION_GC_BLOB_SWEEP_MODE: "report", DEPLOYMENT_ID: "", BLOB_BACKEND: "s3" },
+      ["--init-blob-marker"],
+    );
+    expect(result.status).toBe(1);
+    expect(errorPaths(result.stderr)).toEqual(["DEPLOYMENT_ID"]);
   });
 });
