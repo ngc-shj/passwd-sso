@@ -57,6 +57,8 @@ interface EntryHistorySectionProps {
   entryId: string;
   teamId?: string;
   requireReprompt?: boolean;
+  /** False hides the restore action (the entry is not the user's to write). */
+  canRestore?: boolean;
   onRestore?: () => void;
 }
 
@@ -138,6 +140,7 @@ export function EntryHistorySection({
   entryId,
   teamId: scopedTeamId,
   requireReprompt,
+  canRestore = true,
   onRestore,
 }: EntryHistorySectionProps) {
   const t = useTranslations("PasswordDetail");
@@ -352,7 +355,7 @@ export function EntryHistorySection({
                         {h.changedBy.name || h.changedBy.email}
                       </p>
                     )}
-                    {restoreBlocked && (
+                    {canRestore && restoreBlocked && (
                       <p id={blockedHintId} className="text-xs text-muted-foreground">
                         {t("restoreVersionTooOld")}
                       </p>
@@ -369,18 +372,20 @@ export function EntryHistorySection({
                     <Eye className="h-3 w-3 mr-1" />
                     {t("viewVersion")}
                   </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 shrink-0 text-xs"
-                    disabled={restoreBlocked}
-                    aria-describedby={restoreBlocked ? blockedHintId : undefined}
-                    onClick={() => requireVerification(entryId, requireReprompt ?? false, () => setRestoreTarget(h))}
-                  >
-                    <RotateCcw className="h-3 w-3 mr-1" />
-                    {t("restoreVersion")}
-                  </Button>
+                  {canRestore && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 shrink-0 text-xs"
+                      disabled={restoreBlocked}
+                      aria-describedby={restoreBlocked ? blockedHintId : undefined}
+                      onClick={() => requireVerification(entryId, requireReprompt ?? false, () => setRestoreTarget(h))}
+                    >
+                      <RotateCcw className="h-3 w-3 mr-1" />
+                      {t("restoreVersion")}
+                    </Button>
+                  )}
                 </div>
               );
             })}

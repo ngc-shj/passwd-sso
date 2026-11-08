@@ -18,11 +18,15 @@ vi.mock("../entry/attachment-section", () => ({
 }));
 
 vi.mock("@/components/team/forms/team-attachment-section", () => ({
-  TeamAttachmentSection: () => <div data-testid="team-attachment-section" />,
+  TeamAttachmentSection: ({ readOnly }: { readOnly?: boolean }) => (
+    <div data-testid="team-attachment-section" data-readonly={String(!!readOnly)} />
+  ),
 }));
 
 vi.mock("../entry/entry-history-section", () => ({
-  EntryHistorySection: () => <div data-testid="history-section" />,
+  EntryHistorySection: ({ canRestore }: { canRestore?: boolean }) => (
+    <div data-testid="history-section" data-can-restore={String(canRestore)} />
+  ),
 }));
 
 vi.mock("@/lib/url-helpers", () => ({
@@ -130,6 +134,21 @@ describe("PasswordDetailInline", () => {
     );
     expect(screen.queryByTestId("history-section")).not.toBeInTheDocument();
     expect(screen.queryByTestId("attachment-section")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["without onEdit (not the user's entry to write)", undefined, "false", "true"],
+    ["with onEdit", () => {}, "true", "false"],
+  ])("team entry %s: history restore and attachment upload follow it (#1014)", (_label, onEdit, canRestore, attachmentsReadOnly) => {
+    render(
+      <PasswordDetailInline
+        data={{ ...baseData, entryType: ENTRY_TYPE.LOGIN }}
+        teamId="team-1"
+        onEdit={onEdit}
+      />,
+    );
+    expect(screen.getByTestId("history-section")).toHaveAttribute("data-can-restore", canRestore);
+    expect(screen.getByTestId("team-attachment-section")).toHaveAttribute("data-readonly", attachmentsReadOnly);
   });
 
   it("shows the Edit button only when onEdit is provided", async () => {

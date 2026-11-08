@@ -144,6 +144,10 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
   const tc = useTranslations("Common");
   const layoutMode = useLayoutMode();
 
+  // Edit, archive, history restore and attachment upload on one entry.
+  const canWriteEntry = (entry: E) =>
+    adapter.permissions.canEdit && (adapter.canWriteEntry?.(entry) ?? true);
+
   // INV-DEV1: assert descriptor × adapter compatibility on mount + when they change.
   useEffect(() => {
     assertDescriptorAdapterCompat(descriptor, adapter);
@@ -656,7 +660,7 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
       loading={detailLoading}
       error={detailError}
       onEdit={
-        activeEntry && descriptor.rowActions.edit && adapter.permissions.canEdit
+        activeEntry && descriptor.rowActions.edit && canWriteEntry(activeEntry)
           ? () => onRequestEdit?.(activeEntry)
           : undefined
       }
@@ -681,7 +685,7 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
       }
       isArchived={activeEntry?.isArchived}
       onArchive={
-        activeEntry && descriptor.rowActions.archive && adapter.permissions.canEdit
+        activeEntry && descriptor.rowActions.archive && canWriteEntry(activeEntry)
           ? () => void handleSetArchived(activeEntry, !activeEntry.isArchived)
           : undefined
       }
@@ -819,7 +823,7 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
               onDelete={handleCardDelete}
               onToggleExpand={handleToggleExpand}
               onRefresh={() => { invalidateDetail(); onDataChange?.(); }}
-              canEdit={descriptor.rowActions.edit && adapter.permissions.canEdit}
+              canEdit={descriptor.rowActions.edit && canWriteEntry(entry)}
               canDelete={descriptor.rowActions.trash && adapter.permissions.canDelete}
               canShare={descriptor.rowActions.share && adapter.permissions.canShare}
               readOnly={descriptor.detailReadOnly}

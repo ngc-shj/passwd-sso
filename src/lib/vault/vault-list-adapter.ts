@@ -167,6 +167,13 @@ export interface VaultListAdapter<E extends PasswordRowEntry & PasswordDetailPan
   bulkScope(view: EntryListViewKind): BulkScope;
 
   /**
+   * Optional per-entry write check, intersected with permissions.canEdit for
+   * edit, archive, history restore and attachment upload. Team only: a MEMBER
+   * writes only entries they created. Absent means canEdit alone decides.
+   */
+  canWriteEntry?(entry: E): boolean;
+
+  /**
    * Optional formatted "created by" label for the accordion PasswordCard
    * (team only — INV-C6.1). Personal omits it (personal entries have no author).
    */

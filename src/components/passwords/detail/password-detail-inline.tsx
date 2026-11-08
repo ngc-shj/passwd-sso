@@ -113,6 +113,7 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
           entryId={data.id}
           teamId={scopedTeamId}
           requireReprompt={data.requireReprompt ?? false}
+          canRestore={!!onEdit}
           onRestore={onRefresh}
         />
       )}

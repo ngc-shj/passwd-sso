@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockDecryptData, mockBuildTeamAAD, mockFetchApi, mockGetTeamKey, mockGetEntryKey, mockNotifyTeam } =
+const { mockDecryptData, mockBuildTeamAAD, mockFetchApi, mockGetTeamKey, mockGetEntryKey, mockNotifyTeam, vaultUser } =
   vi.hoisted(() => ({
+    vaultUser: { id: "u1" as string | null },
     mockDecryptData: vi.fn(),
     mockBuildTeamAAD: vi.fn(),
     mockFetchApi: vi.fn(),
@@ -31,6 +32,10 @@ vi.mock("@/lib/team/team-vault-context", () => ({
     getTeamEncryptionKey: mockGetTeamKey,
     getEntryDecryptionKey: mockGetEntryKey,
   }),
+}));
+
+vi.mock("@/lib/vault/vault-context", () => ({
+  useVault: () => ({ userId: vaultUser.id }),
 }));
 
 import { renderHook } from "@testing-library/react";
@@ -155,6 +160,28 @@ describe("useTeamVaultListAdapter", () => {
 
     const viewer = renderHook(() => useTeamVaultListAdapter(TEAM_ID, "VIEWER")).result.current.permissions;
     expect(viewer).toEqual({ canCreate: false, canEdit: false, canDelete: false, canShare: false });
+  });
+
+  it.each([
+    ["OWNER", "another member's", "u2", true],
+    ["ADMIN", "another member's", "u2", true],
+    ["MEMBER", "their own", "u1", true],
+    ["MEMBER", "another member's", "u2", false],
+    ["VIEWER", "their own", "u1", false],
+    ["", "their own (role not loaded)", "u1", false],
+  ] as const)("canWriteEntry: %s on %s entry → %s", (role, _whose, createdById, want) => {
+    vaultUser.id = "u1";
+    const adapter = renderHook(() => useTeamVaultListAdapter(TEAM_ID, role)).result.current;
+    const entry = { createdBy: { id: createdById, name: null, email: null, image: null } } as TeamDisplayEntry;
+    expect(adapter.canWriteEntry?.(entry)).toBe(want);
+  });
+
+  it("canWriteEntry refuses while the session user is unknown, even for the entry's creator", () => {
+    vaultUser.id = null;
+    const adapter = renderHook(() => useTeamVaultListAdapter(TEAM_ID, "OWNER")).result.current;
+    const entry = { createdBy: { id: "u1", name: null, email: null, image: null } } as TeamDisplayEntry;
+    expect(adapter.canWriteEntry?.(entry)).toBe(false);
+    vaultUser.id = "u1";
   });
 
   it("reports ready:true (the team page gates on its own key probe)", () => {
