@@ -24,8 +24,10 @@
  *  (b') Legacy confinement (C6). `openTeamEntryFieldAt` and
  *       `openLegacyTeamEntryField` are only CALLED (never referenced as a
  *       value, re-exported or element-accessed), and only directly inside
- *       `reencryptV0`, `buildEntryRekeyPayload`, `buildEntryUpgradePayload`,
- *       `resealLegacyHistoryRow` or the history view's `handleView`;
+ *       `reencryptV0`, `buildEntryUpgradePayload` (both v0 entries, sealed
+ *       under the team key), `resealLegacyHistoryRow` or the history view's
+ *       `handleView`; a live v1+ entry is opened strictly (the re-key's
+ *       `buildEntryRekeyPayload` is not on the list — review SS2);
  *       `sealLegacyTeamEntryField` only inside `resealLegacyHistoryRow`. The
  *       enclosing function is the nearest declared function or
  *       variable-bound arrow / function expression — an unbound closure (the
@@ -82,7 +84,6 @@ const SEAL_LEGACY = "sealLegacyTeamEntryField";
 /** (b') C6: each legacy entry point, and the `file#function` declarations that may call it. */
 const LEGACY_OPEN_CALLERS = [
   `${ROTATION_PAYLOAD}#reencryptV0`,
-  `${REKEY_PAYLOAD}#buildEntryRekeyPayload`,
   `${REKEY_PAYLOAD}#buildEntryUpgradePayload`,
   `${REKEY_PAYLOAD}#resealLegacyHistoryRow`,
   `${HISTORY_VIEW}#handleView`,
@@ -507,10 +508,10 @@ const FIXTURE_BASE: Record<string, string> = {
     import type { CryptoKey, EncryptedData } from "@/lib/crypto/crypto-client";
     export async function reencryptV0(e: EncryptedData, k: CryptoKey, c: Ctx) { return openTeamEntryFieldAt(e, k, c, 0); }`,
   [REKEY_PAYLOAD]: `
-    import { openLegacyTeamEntryField, openTeamEntryFieldAt, sealLegacyTeamEntryField, type Ctx } from "@/lib/crypto/crypto-team";
+    import { openLegacyTeamEntryField, openTeamEntryField, openTeamEntryFieldAt, sealLegacyTeamEntryField, type Ctx } from "@/lib/crypto/crypto-team";
     import type { CryptoKey, EncryptedData } from "@/lib/crypto/crypto-client";
     async function tryOpen(open: () => Promise<string>) { try { return await open(); } catch { return null; } }
-    export async function buildEntryRekeyPayload(e: EncryptedData, k: CryptoKey, c: Ctx) { return tryOpen(() => openTeamEntryFieldAt(e, k, c, 1)); }
+    export async function buildEntryRekeyPayload(e: EncryptedData, k: CryptoKey, c: Ctx) { return tryOpen(() => openTeamEntryField(e, k, c)); }
     export async function buildEntryUpgradePayload(e: EncryptedData, k: CryptoKey, c: Ctx) { return tryOpen(() => openTeamEntryFieldAt(e, k, c, 0)); }
     export async function resealLegacyHistoryRow(e: EncryptedData, k: CryptoKey) {
       const p = await tryOpen(() => openLegacyTeamEntryField(e, k));
@@ -642,6 +643,12 @@ describe("team entry AAD strictness guard (red proofs)", () => {
       [REKEY_PAYLOAD]: `${FIXTURE_BASE[REKEY_PAYLOAD]}
     export async function resealHistoryRow(e: EncryptedData, k: CryptoKey) { return tryOpen(() => openLegacyTeamEntryField(e, k)); }`,
     }, [`${REKEY_PAYLOAD}:11 openLegacyTeamEntryField is called from resealHistoryRow`]],
+    ["the re-key's live-entry open at a server-reported label (review SS2)", {
+      [REKEY_PAYLOAD]: FIXTURE_BASE[REKEY_PAYLOAD].replace(
+        "return tryOpen(() => openTeamEntryField(e, k, c)); }",
+        "return tryOpen(() => openTeamEntryFieldAt(e, k, c, 0)); }",
+      ),
+    }, [`${REKEY_PAYLOAD}:5 openTeamEntryFieldAt is called from buildEntryRekeyPayload`]],
     ["the legacy sealer outside resealLegacyHistoryRow", {
       [REKEY_PAYLOAD]: `${FIXTURE_BASE[REKEY_PAYLOAD]}
     export async function buildEntryUpgradeBody(k: CryptoKey) { return sealLegacyTeamEntryField("p", k); }`,

@@ -335,12 +335,13 @@ BEGIN
   -- 20260522000200_audit_log_revoke_via_definer). Without these definer
   -- procedures, legitimate tenant-merge and retention-purge flows would fail.
   --
-  --   - team_member_key_prune(p_batch)  (#1009, 20261108120100)
+  --   - team_member_key_prune(p_batch)  (#1009, 20261108120100; redefined 20261109100000)
   --       Called only by the retention GC worker (sweep.ts sweepTeamMemberKeys).
   --       EXECUTE is granted to passwd_retention_gc_worker only (PUBLIC revoked;
   --       passwd_app cannot call it). Its first statement refuses unless the
   --       CALLER's RLS bypass is on (rls_bypass_admits('team_member_keys')),
-  --       so it never widens a caller's view. Fixed SQL, one bounded statement:
+  --       so it never widens a caller's view. Fixed SQL: locks up to p_batch
+  --       teams (SKIP LOCKED), then one bounded statement over those teams
   --       deletes team_member_keys versions below the team's current version
   --       that no entry, history row or mode-0 attachment of the team
   --       references. The worker role holds no grant on team_member_keys.

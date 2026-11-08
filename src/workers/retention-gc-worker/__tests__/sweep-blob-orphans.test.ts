@@ -166,14 +166,25 @@ describe("classification", () => {
     expect(store.deleted).toEqual([key]);
   });
 
-  it("keeps and counts an unparseable key, and never reads a row for it", async () => {
+  it("deletes an object at exactly put + grace (the boundary is inclusive)", async () => {
     referenced();
-    store.objects.push({ key: `${PREFIX}/personal/not-a-uuid/${randomUUID()}.bin`, lastModified: OLD });
+    const put = new Date(NOW.getTime() - GRACE_MS);
+    const key = orphan(put);
+    const result = await sweepOrphanBlobs(deps(new Date(put.getTime() + GRACE_MS)), opts(), cursor);
+    expect(result).toMatchObject({ young: 0, deleted: 1 });
+    expect(store.deleted).toEqual([key]);
+  });
+
+  it("keeps and counts an unparseable key, and never reads a row for it", async () => {
+    const live = referenced();
+    const unparseableId = randomUUID();
+    // A valid attachment id behind a non-UUID entry segment: a read of it would show.
+    store.objects.push({ key: `${PREFIX}/personal/not-a-uuid/${unparseableId}/${newBlobGeneration()}.bin`, lastModified: OLD });
     store.objects.push({ key: `${PREFIX}/.passwd-sso-deployment`, lastModified: OLD });
     const result = await sweepOrphanBlobs(deps(), opts(), cursor);
     expect(result).toMatchObject({ unparseable: 2, deleted: 0 });
     expect(store.deleted).toEqual([]);
-    expect(rows.calls.flat()).not.toContain("not-a-uuid");
+    expect(rows.calls).toEqual([[live.split("/")[3]]]);
   });
 
   it("deletes the old generation of a live attachment and keeps the generation its row names", async () => {
@@ -300,6 +311,24 @@ describe("the breaker", () => {
     expect(result.deleted).toBe(0);
   });
 
+  // The 20-key floor at the default ratio: 20 orphans of 21 old keys are
+  // above 0.5 but not above the floor; 21 orphans are above both.
+  it("does not trip on 20 unreferenced keys with one referenced at ratio 0.5 (the floor)", async () => {
+    referenced();
+    for (let i = 0; i < 20; i++) orphan();
+    const result = await sweepOrphanBlobs(deps(), opts({ maxDeleteRatio: 0.5 }), cursor);
+    expect(result.refused).toBeUndefined();
+    expect(result.deleted).toBe(20);
+  });
+
+  it("trips on 21 unreferenced keys with one referenced at ratio 0.5 (one past the floor)", async () => {
+    referenced();
+    for (let i = 0; i < 21; i++) orphan();
+    const result = await sweepOrphanBlobs(deps(), opts({ maxDeleteRatio: 0.5 }), cursor);
+    expect(result.refused).toBe(BLOB_SWEEP_REFUSAL.BREAKER);
+    expect(store.deleted).toEqual([]);
+  });
+
   it("trips on 21 unreferenced keys above the ratio", async () => {
     for (let i = 0; i < 20; i++) referenced();
     for (let i = 0; i < 21; i++) orphan();
@@ -314,6 +343,14 @@ describe("the breaker", () => {
     const result = await sweepOrphanBlobs(deps(), opts({ maxDeleteRatio: 0.5 }), cursor);
     expect(result.refused).toBeUndefined();
     expect(result.deleted).toBe(21);
+  });
+
+  it("does not trip at exactly maxDeletes", async () => {
+    for (let i = 0; i < 10; i++) referenced();
+    for (let i = 0; i < 3; i++) orphan();
+    const result = await sweepOrphanBlobs(deps(), opts({ maxDeletes: 3, maxDeleteRatio: 1 }), cursor);
+    expect(result.refused).toBeUndefined();
+    expect(result.deleted).toBe(3);
   });
 
   it("trips over maxDeletes whatever the ratio", async () => {

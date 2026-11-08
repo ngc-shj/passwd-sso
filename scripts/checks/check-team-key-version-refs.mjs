@@ -16,33 +16,42 @@
  *      CLASSIFICATION as `reference`, `current`, `self` or `excluded`, with a
  *      reason; an unclassified pair fails, and so does a classified pair the
  *      schema no longer has (a stale table hides nothing but misleads).
- *   2. The function body read from the LATEST migration that
- *      `CREATE [OR REPLACE] FUNCTION … team_member_key_prune` must name every
- *      `reference`, `current` and `self` pair as `<alias>.<column>`, the alias
- *      bound (FROM / JOIN / USING) to that pair's table.
- *   3. The body never names `item_key_team_key_version` (the re-key marker is
+ *   2. The body read from the LATEST migration that
+ *      `CREATE [OR REPLACE] FUNCTION … team_member_key_prune` has the shape
+ *      the concurrency argument needs (lib/team-key-prune-shape.mjs): the
+ *      RLS-bypass check first, a READ COMMITTED guard, exactly one statement
+ *      locking `teams` FOR NO KEY UPDATE … SKIP LOCKED, then exactly one
+ *      RETURN QUERY restricted to the locked teams, and nothing else.
+ *   3. That RETURN QUERY — the statement that decides and deletes — names
+ *      every `reference`, `current` and `self` pair as `<alias>.<column>`, the
+ *      alias bound (FROM / JOIN / USING) to that pair's table. A mention only
+ *      in the team-lock statement's pre-filter does not count: that statement
+ *      reads before the locks are held and only chooses what to lock.
+ *   4. The body never names `item_key_team_key_version` (the re-key marker is
  *      not a reference; keying the decision on it would keep or drop keys by
  *      the wrong rule).
  *
- * What it proves: the classification covers the schema, and the function text
- * mentions each reference column through a correctly bound alias. What it does
- * NOT prove: that the predicate around the mention is right (the integration
- * cells in team-member-key-prune.integration.test.ts do, per reference, and a
- * live cell asserts pg_get_functiondef names each column). It reads text; a
- * function rebuilt by dynamic SQL (EXECUTE) would defeat it and must not be
- * written.
+ * What it proves: the classification covers the schema, the body's statement
+ * order is lock-then-decide, and the deciding statement mentions each
+ * reference column through a correctly bound alias. What it does NOT prove:
+ * that the predicate around the mention is right (the integration cells in
+ * team-member-key-prune.integration.test.ts do, per reference, and a live cell
+ * runs the same shape check over pg_get_functiondef). It reads text; a
+ * function rebuilt by dynamic SQL (EXECUTE) would defeat it, and the shape
+ * check refuses one.
  *
  * Env: TEAM_KEY_VERSION_REFS_CHECK_ROOT — repository root (self-test fixtures).
  */
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { SchemaReadError, loadPrismaSchema } from "./lib/prisma-relation-reach.mjs";
+import { PRUNE_FUNCTION, pruneBodyShape, pruneFunctionBody } from "./lib/team-key-prune-shape.mjs";
 
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 const ROOT = process.env.TEAM_KEY_VERSION_REFS_CHECK_ROOT ?? REPO_ROOT;
 const SCHEMA_PATH = "prisma/schema.prisma";
 const MIGRATIONS_DIR = "prisma/migrations";
-const FUNCTION_NAME = "team_member_key_prune";
+const FUNCTION_NAME = PRUNE_FUNCTION;
 
 const CLASS = {
   REFERENCE: "reference",
@@ -142,11 +151,10 @@ function versionPairs(schema) {
   return pairs;
 }
 
-/** The body of the latest migration's definition of the prune function, comments stripped. */
+/** The body of the latest migration's definition of the prune function. */
 function latestFunctionBody() {
   const dir = join(ROOT, MIGRATIONS_DIR);
   if (!existsSync(dir)) fail(`${dir} not found.`);
-  const createRe = new RegExp(String.raw`CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+(?:public\.)?${FUNCTION_NAME}\b`, "i");
   const migrations = readdirSync(dir, { withFileTypes: true })
     .filter((d) => d.isDirectory())
     .map((d) => d.name)
@@ -154,17 +162,10 @@ function latestFunctionBody() {
   for (const name of migrations.reverse()) {
     const file = join(dir, name, "migration.sql");
     if (!existsSync(file)) continue;
-    const sql = readFileSync(file, "utf8");
-    const match = createRe.exec(sql);
-    if (!match) continue;
-    const rest = sql.slice(match.index);
-    const open = /\bAS\s+(\$[A-Za-z_]*\$)/i.exec(rest);
-    if (!open) fail(`${name}: cannot find the dollar-quoted body of ${FUNCTION_NAME}.`);
-    const bodyStart = open.index + open[0].length;
-    const bodyEnd = rest.indexOf(open[1], bodyStart);
-    if (bodyEnd < 0) fail(`${name}: the body of ${FUNCTION_NAME} is not closed by ${open[1]}.`);
-    const body = rest.slice(bodyStart, bodyEnd).replace(/--[^\n]*/g, "");
-    return { migration: name, body };
+    const found = pruneFunctionBody(readFileSync(file, "utf8"));
+    if (found.missing) continue;
+    if (found.error) fail(`${name}: ${found.error}`);
+    return { migration: name, body: found.body };
   }
   fail(`no migration under ${MIGRATIONS_DIR} defines ${FUNCTION_NAME}.`);
 }
@@ -185,7 +186,7 @@ function aliasesByTable(body) {
 
 function namesColumn(body, aliases, column) {
   for (const alias of aliases ?? []) {
-    if (new RegExp(String.raw`\b${alias}\.${column}\b`, "i").test(body)) return true;
+    if (new RegExp(String.raw`\b${alias}\s*\.\s*${column}\b`, "i").test(body)) return true;
   }
   return false;
 }
@@ -214,18 +215,22 @@ for (const key of Object.keys(CLASSIFICATION)) {
 }
 
 const { migration, body } = latestFunctionBody();
-const aliases = aliasesByTable(body);
-for (const pair of pairs) {
-  const entry = CLASSIFICATION[pair.key];
-  if (!entry || entry.class === CLASS.EXCLUDED) continue;
-  if (!namesColumn(body, aliases.get(pair.table), pair.column)) {
-    problems.push(
-      `${entry.class.toUpperCase()} ${pair.key} is not named as <alias>.${pair.column} with the alias bound to ${pair.table} ` +
-        `in ${FUNCTION_NAME} (latest definition: ${MIGRATIONS_DIR}/${migration}/migration.sql).`,
-    );
+const shape = pruneBodyShape(body);
+for (const p of shape.problems) problems.push(`SHAPE ${p} (latest definition: ${MIGRATIONS_DIR}/${migration}/migration.sql)`);
+if (shape.returnQuery) {
+  const aliases = aliasesByTable(shape.returnQuery);
+  for (const pair of pairs) {
+    const entry = CLASSIFICATION[pair.key];
+    if (!entry || entry.class === CLASS.EXCLUDED) continue;
+    if (!namesColumn(shape.returnQuery, aliases.get(pair.table), pair.column)) {
+      problems.push(
+        `${entry.class.toUpperCase()} ${pair.key} is not named as <alias>.${pair.column} with the alias bound to ${pair.table} ` +
+          `in ${FUNCTION_NAME}'s RETURN QUERY (latest definition: ${MIGRATIONS_DIR}/${migration}/migration.sql).`,
+      );
+    }
   }
 }
-if (new RegExp(String.raw`\b${FORBIDDEN_COLUMN}\b`, "i").test(body)) {
+if (new RegExp(String.raw`\b${FORBIDDEN_COLUMN}\b`, "i").test(body.replace(/--[^\n]*/g, ""))) {
   problems.push(`${FUNCTION_NAME} (${migration}) names ${FORBIDDEN_COLUMN}: the re-key marker is not a reference.`);
 }
 
@@ -235,5 +240,5 @@ if (problems.length > 0) {
   process.exit(1);
 }
 console.log(
-  `OK (${pairs.length} version columns classified; ${FUNCTION_NAME} in ${migration} names every reference, current and self column)`,
+  `OK (${pairs.length} version columns classified; ${FUNCTION_NAME} in ${migration} has the lock-then-decide shape and its RETURN QUERY names every reference, current and self column)`,
 );

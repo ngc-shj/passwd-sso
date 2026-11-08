@@ -3,18 +3,44 @@
  * real database — sweepOnce with the flag on, on the worker role's connection,
  * through the team_member_key_prune SECURITY DEFINER function.
  *
- * Every reference cell asserts by (team, version), never by a count: the
- * prune is global (it sweeps every team of the database, the developer's dev
- * data included — RT11), so a cell only reads its own team. Each has a
- * positive control in the same team: an unreferenced old version that IS
- * pruned, so a prune that did nothing cannot pass.
+ * The function locks the teams it considers (`teams FOR NO KEY UPDATE SKIP
+ * LOCKED`), then, in a later statement (a new READ COMMITTED snapshot taken
+ * with the locks held), decides and deletes for the locked teams only. Every
+ * transaction that copies a non-current version (restore, the PUT snapshot,
+ * the re-key) holds `teams FOR SHARE` for its whole run, so the prune skips
+ * its team, and sees any copier of a team it did lock as committed.
  *
- * Race cells: production sweepOnce (connection B) runs while a writer
- * (connection A, a held Prisma interactive transaction) has moved a
- * reference but not committed; the prune's single statement reads one
- * snapshot, so the version survives. The negative control runs a two-
- * statement check-then-delete straddling A's commit and loses the version,
- * which shows the harness can observe a loss.
+ * Reference cells assert by (team, version), never by a count: the prune is
+ * global (it sweeps every team of the database, the developer's dev data
+ * included — RT11), so a cell only reads its own teams. Each has a positive
+ * control: an unreferenced old version that IS pruned, so a prune that did
+ * nothing cannot pass.
+ *
+ * What each concurrency cell proves:
+ *   - "SS1" (the review finding): A, a restore-shape writer, holds teams FOR
+ *     SHARE and the entry FOR UPDATE and has written the entry at the version
+ *     k it read from history row h; B deletes h and commits (the GC history
+ *     sweep's shape); one production tick C runs to completion while A is
+ *     open. C must not wait on A (SKIP LOCKED), must skip A's team entirely
+ *     (not even its unreferenced v2 goes) and must prune an unlocked team in
+ *     the same call; after A commits, k is kept by the entry. Red without the
+ *     lock statement (C sees neither h nor the entry at k) and without SKIP
+ *     LOCKED (C waits on A).
+ *   - "SS1, A commits during the call": the same setup, A released as soon as
+ *     the prune's backend is observed running the function (or the call has
+ *     settled). For any commit point of A, k survives. Red for a body that
+ *     decides before it locks (one statement: its snapshot predates A's
+ *     commit, the lock succeeds after it) once the window is wide enough to
+ *     observe — the red-proof widens it in a test-local mutant.
+ *   - "skip": a team held FOR SHARE by an open writer is skipped, then pruned
+ *     by a later call once the writer committed.
+ *   - restore / snapshot: A moves a reference WITHOUT taking the team lock and
+ *     stays open; the deciding statement reads one snapshot, so a reference
+ *     an open writer is moving is still seen on the side it left. The
+ *     negative controls run a two-statement check-then-delete straddling A's
+ *     commit and lose the version, which shows the harness can observe a loss.
+ *   - rotation: A's UPDATE of the team row holds it FOR NO KEY UPDATE, so the
+ *     team is skipped while A is open and pruned by the new rule afterwards.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { randomUUID, randomBytes } from "node:crypto";
@@ -26,11 +52,12 @@ import {
   setBypassRlsGucs,
   type TestContext,
 } from "./helpers";
-import { createRaceHelpers, holdPrismaWriter } from "./race-helpers";
+import { BLOCK_WAIT_MS, createRaceHelpers, holdPrismaWriter } from "./race-helpers";
 import { sweepOnce } from "@/workers/retention-gc-worker/sweep";
 import { BYPASS_GRANT, defineGrant, setBypassGucs, type BypassGrant } from "@/lib/tenant-rls-grants";
 import { BYPASS_PURPOSE } from "@/lib/tenant-rls-purpose";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
+import { pruneBodyShape, pruneFunctionBody } from "../../../scripts/checks/lib/team-key-prune-shape.mjs";
 
 const BATCH = 1000;
 const MAX_TICKS = 20;
@@ -51,6 +78,22 @@ const hex = (n: number) => randomBytes(n).toString("hex");
 
 /** Thrown inside a transaction to roll it back after the cell observed it. */
 class Rollback extends Error {}
+
+/** The RDS-shape cell needs a superuser connection and was given none. */
+class SuperuserUrlMissingError extends Error {
+  constructor() {
+    super("the RDS-shape cell needs MIGRATION_DATABASE_URL (or DATABASE_URL) pointing at a superuser");
+    this.name = "SuperuserUrlMissingError";
+  }
+}
+
+/** The RDS-shape cell's connection is not a superuser: CREATE ROLE and ALTER FUNCTION OWNER would fail midway. */
+class NotSuperuserError extends Error {
+  constructor(role: string) {
+    super(`the RDS-shape cell connects as ${role}, which is not a superuser`);
+    this.name = "NotSuperuserError";
+  }
+}
 
 describe("team key prune (#1009)", () => {
   let ctx: TestContext;
@@ -149,14 +192,19 @@ describe("team key prune (#1009)", () => {
     return found.map((r) => Number(r.v));
   }
 
+  /** One production tick, flag on. */
+  function pruneTick() {
+    return sweepOnce(ctx.retentionWorker.prisma, BATCH, {
+      intervalMs: 1,
+      emitHeartbeatAudit: false,
+      teamKeyPrune: true,
+    });
+  }
+
   /** Production sweepOnce, flag on, until the prune finds nothing; never a failed tick. */
   async function pruneUntilDone(): Promise<void> {
     for (let tick = 0; tick < MAX_TICKS; tick++) {
-      const counts = await sweepOnce(ctx.retentionWorker.prisma, BATCH, {
-        intervalMs: 1,
-        emitHeartbeatAudit: false,
-        teamKeyPrune: true,
-      });
+      const counts = await pruneTick();
       expect(counts.team_member_keys).not.toBe(-1);
       if (counts.team_member_keys === 0) return;
     }
@@ -336,17 +384,24 @@ describe("team key prune (#1009)", () => {
       expect(grantees).not.toContain("passwd_app");
     });
 
-    it("the live definition names every reference column (C2's live counterpart)", async () => {
+    it("the live definition has the gate's lock-then-decide shape, and its RETURN QUERY names every reference column (C2's live counterpart)", async () => {
       const [{ def }] = await rows<{ def: string }>(
         `SELECT pg_get_functiondef('public.team_member_key_prune(integer)'::regprocedure) AS def`,
       );
-      for (const column of REFERENCE_COLUMNS) expect(def).toContain(column);
+      const found = pruneFunctionBody(def);
+      expect(found.error).toBeUndefined();
+      expect(found.missing).toBeUndefined();
+      const shape = pruneBodyShape(found.body ?? "");
+      expect(shape.problems).toEqual([]);
+      const decides = (shape.returnQuery ?? "").replace(/ \. /g, ".");
+      for (const column of REFERENCE_COLUMNS) expect(decides).toContain(column);
       expect(def).not.toContain("item_key_team_key_version");
     });
 
     it("under an RDS-shaped owner (NOSUPERUSER NOBYPASSRLS, FORCE RLS) the body reads through the caller's bypass, and the grant covers every table it reads", async () => {
       await pruneUntilDone();
-      const superuserUrl = process.env.MIGRATION_DATABASE_URL ?? process.env.DATABASE_URL ?? "";
+      const superuserUrl = process.env.MIGRATION_DATABASE_URL ?? process.env.DATABASE_URL;
+      if (!superuserUrl) throw new SuperuserUrlMissingError();
       const before = await rows<{ owner: string }>(
         `SELECT proowner::regrole::text AS owner FROM pg_proc WHERE oid = 'public.team_member_key_prune(integer)'::regprocedure`,
       );
@@ -364,11 +419,18 @@ describe("team key prune (#1009)", () => {
       });
       await c.connect();
       try {
+        const { rows: [self] } = await c.query<{ name: string; rolsuper: boolean }>(
+          `SELECT current_user AS name, rolsuper FROM pg_roles WHERE rolname = current_user`,
+        );
+        if (!self?.rolsuper) throw new NotSuperuserError(self?.name ?? "an unknown role");
         await c.query("BEGIN");
         try {
           await c.query(`CREATE ROLE ${probe} NOSUPERUSER NOBYPASSRLS NOLOGIN`);
           await c.query(`GRANT USAGE ON SCHEMA public TO ${probe}`);
           await c.query(`GRANT SELECT ON teams, team_password_entries, team_password_entry_histories, attachments TO ${probe}`);
+          // The team lock (FOR NO KEY UPDATE) needs UPDATE on teams; the
+          // migration role that owns the function owns the table.
+          await c.query(`GRANT UPDATE ON teams TO ${probe}`);
           await c.query(`GRANT SELECT, DELETE ON team_member_keys TO ${probe}`);
           await c.query(`GRANT EXECUTE ON FUNCTION public.rls_bypass_enforced(), public.rls_bypass_admits(text) TO ${probe}`);
           await c.query(`ALTER FUNCTION public.team_member_key_prune(integer) OWNER TO ${probe}`);
@@ -474,6 +536,135 @@ describe("team key prune (#1009)", () => {
       await expect(writer.release()).resolves.toBeUndefined();
     }
 
+    /** Wait until `work` settles or waits on `pid`'s locks, and say which. */
+    async function settledOrBlockedOn(work: Promise<unknown>, pid: number): Promise<"settled" | "blocked"> {
+      let settled = false;
+      void work.then(() => { settled = true; }, () => { settled = true; });
+      const deadline = Date.now() + BLOCK_WAIT_MS;
+      while (Date.now() < deadline) {
+        if (settled) return "settled";
+        if ((await race().backendsBlockedBy(pid)).length > 0) return "blocked";
+        await new Promise((res) => setTimeout(res, 20));
+      }
+      throw new Error(`the prune neither settled nor waited on pid ${pid} within ${BLOCK_WAIT_MS}ms`);
+    }
+
+    /** Wait until `work` settles or a worker backend is running the prune function, and say which. */
+    async function settledOrPruning(work: Promise<unknown>): Promise<"settled" | "pruning"> {
+      let settled = false;
+      void work.then(() => { settled = true; }, () => { settled = true; });
+      const deadline = Date.now() + BLOCK_WAIT_MS;
+      while (Date.now() < deadline) {
+        if (settled) return "settled";
+        const { rows: running } = await ctx.su.pool.query(
+          `SELECT pid FROM pg_stat_activity
+            WHERE usename = 'passwd_retention_gc_worker' AND state = 'active' AND query LIKE '%team_member_key_prune(%'`,
+        );
+        if (running.length > 0) return "pruning";
+        await new Promise((res) => setTimeout(res, 5));
+      }
+      throw new Error(`the prune neither settled nor ran within ${BLOCK_WAIT_MS}ms`);
+    }
+
+    /**
+     * The SS1 setup: team at v3, entry at v3, history row h at k = 1 (v2 is
+     * unreferenced); A = a restore-shape writer holding teams FOR SHARE and the
+     * entry FOR UPDATE that read h and wrote the entry at h's version, open;
+     * then B deletes h and commits. Also seeds an unlocked control team.
+     */
+    async function restoreWithDeletedSource() {
+      await pruneUntilDone();
+      const teamId = await seedTeam(3);
+      const entryId = await seedEntry(teamId, 3);
+      const historyId = await seedHistory(entryId, 1);
+      const control = await seedTeam(3);
+      const writer = await holdPrismaWriter(ctx.su.prisma, async (tx) => {
+        await setBypassRlsGucs(tx);
+        await tx.$queryRawUnsafe(`SELECT id FROM teams WHERE id = $1::uuid FOR SHARE`, teamId);
+        await tx.$queryRawUnsafe(`SELECT id FROM team_password_entries WHERE id = $1::uuid FOR UPDATE`, entryId);
+        const [h] = await tx.$queryRawUnsafe<{ v: number }[]>(
+          `SELECT team_key_version AS v FROM team_password_entry_histories WHERE id = $1::uuid`,
+          historyId,
+        );
+        await tx.$executeRawUnsafe(`UPDATE team_password_entries SET team_key_version = $2 WHERE id = $1::uuid`, entryId, h.v);
+      }, HOLD_TIMEOUT_MS);
+      try {
+        await sql(`DELETE FROM team_password_entry_histories WHERE id = $1::uuid`, historyId);
+        expect(await rows(`SELECT id FROM team_password_entry_histories WHERE id = $1::uuid`, historyId)).toEqual([]);
+      } catch (e) {
+        await writer.abort();
+        throw e;
+      }
+      return { teamId, entryId, control, writer };
+    }
+
+    it("SS1: a restore holding its team lock, whose copy source a third party deleted, keeps k — the prune skips the team", async () => {
+      const { teamId, entryId, control, writer } = await restoreWithDeletedSource();
+      let tick: Promise<unknown> | undefined;
+      try {
+        const pending = pruneTick();
+        tick = pending;
+        expect(await settledOrBlockedOn(pending, writer.pid)).toBe("settled");
+        expect((await pending).team_member_keys).not.toBe(-1);
+        expect(await versions(control)).toEqual([3]); // the same call pruned the unlocked team
+        expect(await versions(teamId)).toEqual([1, 2, 3]); // skipped: not even the unreferenced v2
+        expect(await race().backendState(writer.pid)).toBe("idle in transaction");
+      } catch (e) {
+        await writer.abort();
+        await tick?.catch(() => {});
+        throw e;
+      }
+      await expect(writer.release()).resolves.toBeUndefined();
+      expect(await rows(`SELECT team_key_version AS v FROM team_password_entries WHERE id = $1::uuid`, entryId)).toEqual([{ v: 1 }]);
+      await pruneUntilDone();
+      expect(await versions(teamId)).toEqual([1, 3]); // k kept by the entry; v2 now goes
+    });
+
+    it("SS1, A commits during the call: k survives wherever A's commit lands", async () => {
+      const { teamId, entryId, control, writer } = await restoreWithDeletedSource();
+      const tick = pruneTick();
+      try {
+        await settledOrPruning(tick);
+      } catch (e) {
+        await writer.abort();
+        await tick.catch(() => {});
+        throw e;
+      }
+      await expect(writer.release()).resolves.toBeUndefined();
+      expect((await tick).team_member_keys).not.toBe(-1);
+      expect(await versions(control)).toEqual([3]);
+      expect(await rows(`SELECT team_key_version AS v FROM team_password_entries WHERE id = $1::uuid`, entryId)).toEqual([{ v: 1 }]);
+      expect(await versions(teamId)).toContain(1);
+      await pruneUntilDone();
+      expect(await versions(teamId)).toEqual([1, 3]);
+    });
+
+    it("skip: a team an open writer holds FOR SHARE is skipped, then pruned by a later call once it committed", async () => {
+      await pruneUntilDone();
+      const teamId = await seedTeam(3);
+      const control = await seedTeam(3);
+      const writer = await holdPrismaWriter(ctx.su.prisma, async (tx) => {
+        await setBypassRlsGucs(tx);
+        await tx.$queryRawUnsafe(`SELECT id FROM teams WHERE id = $1::uuid FOR SHARE`, teamId);
+      }, HOLD_TIMEOUT_MS);
+      let tick: Promise<unknown> | undefined;
+      try {
+        const pending = pruneTick();
+        tick = pending;
+        expect(await settledOrBlockedOn(pending, writer.pid)).toBe("settled");
+        expect((await pending).team_member_keys).not.toBe(-1);
+        expect(await versions(control)).toEqual([3]);
+        expect(await versions(teamId)).toEqual([1, 2, 3]);
+      } catch (e) {
+        await writer.abort();
+        await tick?.catch(() => {});
+        throw e;
+      }
+      await expect(writer.release()).resolves.toBeUndefined();
+      await pruneUntilDone();
+      expect(await versions(teamId)).toEqual([3]);
+    });
+
     it("restore (entry <- k, history row deleted): k survives", async () => {
       await pruneUntilDone();
       const teamId = await seedTeam(3);
@@ -521,9 +712,10 @@ describe("team key prune (#1009)", () => {
       expect(await versions(teamId)).toEqual([1, 3]);
     });
 
-    it("rotation committing between: the version current in B's snapshot survives", async () => {
+    it("rotation committing between: the team is skipped while the rotation holds it", async () => {
       await pruneUntilDone();
       const teamId = await seedTeam(3);
+      const control = await seedTeam(3);
       await seedEntry(teamId, 2);
       await duringWriter(
         async (tx) => {
@@ -539,14 +731,16 @@ describe("team key prune (#1009)", () => {
         },
         async () => {
           await pruneUntilDone();
-          // v3 is current (and unreferenced) in B's snapshot; v1 is the control.
-          expect(await versions(teamId)).toEqual([2, 3]);
+          // A's UPDATE holds the team row: the team is skipped, not even its
+          // unreferenced v1 goes; the unlocked control team is pruned.
+          expect(await versions(teamId)).toEqual([1, 2, 3]);
+          expect(await versions(control)).toEqual([3]);
         },
       );
       expect(await rows(`SELECT team_key_version AS v FROM teams WHERE id = $1::uuid`, teamId)).toEqual([{ v: 4 }]);
-      expect(await versions(teamId)).toEqual([2, 3, 4]);
-      // Once the rotation is visible v3 is an unreferenced old version, which
-      // the rule prunes; v4 (now current) and v2 (referenced) stay.
+      expect(await versions(teamId)).toEqual([1, 2, 3, 4]);
+      // Once the rotation is visible v1 and v3 are unreferenced old versions,
+      // which the rule prunes; v4 (now current) and v2 (referenced) stay.
       await pruneUntilDone();
       expect(await versions(teamId)).toEqual([2, 4]);
     });

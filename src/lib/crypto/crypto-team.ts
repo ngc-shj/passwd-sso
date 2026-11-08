@@ -375,8 +375,14 @@ export async function openTeamEntryField(
  * 0 → no AAD (a row written before AAD binding), AAD_VERSION (1) → the team
  * entry AAD; anything else (an unknown version, a non-number) throws.
  * Trusting `aadVersion` lets a server label a row 0 and substitute a no-AAD
- * ciphertext, so it may be called only from the paths that upgrade such a row
- * or only display it (plan C6; the guard confines the call sites).
+ * ciphertext under the same key. It is therefore called only where a row may
+ * legitimately predate AAD binding and the key cannot open anything that is
+ * AAD-bound elsewhere: a v0 entry sealed directly under the team key (the
+ * v0→v1 upgrade, rotation's v0 re-encryption) and the history view, which only
+ * displays (plan C6; team-entry-aad-strictness.test.ts confines the call
+ * sites). A live v1+ entry is never opened here: its ItemKey also seals the
+ * legacy history rows re-sealed without AAD (D80), so a label of 0 on it would
+ * launder one of those into live content — the re-key opens it strictly.
  */
 export async function openTeamEntryFieldAt(
   encrypted: EncryptedData,

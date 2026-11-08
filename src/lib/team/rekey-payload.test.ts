@@ -130,6 +130,72 @@ describe("buildEntryRekeyPayload", () => {
     ).toBe('{"title":"live"}');
   });
 
+  // Review SS2: a live v1+ entry is always sealed at the entry AAD, so the
+  // re-key opens it strictly. A server-reported label other than AAD_VERSION
+  // is blocked, never honoured — at 0 it would open an unbound ciphertext
+  // under the live ItemKey (e.g. a legacy history row's, D80) as live content.
+  it("an honest live entry at aadVersion 1 is re-keyed: label 1, its plaintext unchanged", async () => {
+    const f = await baseFixture();
+    expect(f.data.entry.aadVersion).toBe(AAD_VERSION);
+
+    const { body } = payloadOf(await buildEntryRekeyPayload(TEAM_ID, f.data, makeResolver(f.keys)));
+    const next = await newContentKey(f.keys.get(CURRENT)!, body.encryptedItemKey);
+
+    expect({
+      aadVersion: body.aadVersion,
+      blob: await decryptData(body.encryptedBlob, next.content, buildTeamEntryAAD(TEAM_ID, ENTRY, VAULT_TYPE.BLOB, 3)),
+      overview: await decryptData(body.encryptedOverview, next.content, buildTeamEntryAAD(TEAM_ID, ENTRY, VAULT_TYPE.OVERVIEW, 3)),
+    }).toEqual({ aadVersion: AAD_VERSION, blob: '{"title":"live"}', overview: '{"title":"live"}' });
+  });
+
+  it.each([
+    ["0", 0],
+    ["2", 2],
+    ["2.5", 2.5],
+    ['"1" (a string)', "1"],
+    ["null", null],
+    ["undefined", undefined],
+  ])("blocks (does not throw) a live v1+ entry reported at aadVersion %s", async (_label, aadVersion) => {
+    const f = await baseFixture();
+    f.data.entry = { ...f.data.entry, aadVersion: aadVersion as number };
+
+    const result = await buildEntryRekeyPayload(TEAM_ID, f.data, makeResolver(f.keys));
+
+    expect(result).toEqual({ kind: "blocked", block: REKEY_ENTRY_BLOCK.UNDECRYPTABLE, teamKeyVersion: 2 });
+  });
+
+  it("blocks the laundering shape: live reported at 0 with no-AAD ciphertexts under the live content key", async () => {
+    const f = await baseFixture();
+    const liveContent = await deriveItemEncryptionKey(f.liveItemKey);
+    const blob = await encryptData('{"title":"substituted"}', liveContent);
+    const overview = await encryptData('{"title":"substituted"}', liveContent);
+    f.data.entry = {
+      ...f.data.entry,
+      aadVersion: 0,
+      encryptedBlob: blob.ciphertext,
+      blobIv: blob.iv,
+      blobAuthTag: blob.authTag,
+      encryptedOverview: overview.ciphertext,
+      overviewIv: overview.iv,
+      overviewAuthTag: overview.authTag,
+    };
+
+    const result = await buildEntryRekeyPayload(TEAM_ID, f.data, makeResolver(f.keys));
+
+    expect(result).toEqual({ kind: "blocked", block: REKEY_ENTRY_BLOCK.UNDECRYPTABLE, teamKeyVersion: 2 });
+  });
+
+  it("control for the laundering cell: the same no-AAD ciphertexts labelled 1 do not open strictly either", async () => {
+    const f = await baseFixture();
+    const liveContent = await deriveItemEncryptionKey(f.liveItemKey);
+    const blob = await encryptData('{"title":"substituted"}', liveContent);
+    f.data.entry = { ...f.data.entry, encryptedBlob: blob.ciphertext, blobIv: blob.iv, blobAuthTag: blob.authTag };
+
+    const result = await buildEntryRekeyPayload(TEAM_ID, f.data, makeResolver(f.keys));
+
+    expect(result).toEqual({ kind: "blocked", block: REKEY_ENTRY_BLOCK.UNDECRYPTABLE, teamKeyVersion: 2 });
+  });
+
   it("re-keys history rows by their own wrap and by trial with the live ItemKey, and retains the rest", async () => {
     const f = await baseFixture();
     const onlyOtherHolderKey = await makeTeamKey(); // version 1: only another member holds it
@@ -422,15 +488,6 @@ describe("buildEntryRekeyPayload", () => {
     const result = payloadOf(await buildEntryRekeyPayload(TEAM_ID, f.data, makeResolver(f.keys)));
 
     expect({ history: result.body.history, retained: result.body.retainHistoryIds }).toEqual({ history: [], retained: ["h-wrong"] });
-  });
-
-  it("throws (does not block) on a live entry labelled with an unsupported aadVersion", async () => {
-    const f = await baseFixture();
-    f.data.entry = { ...f.data.entry, aadVersion: 2.5 };
-
-    await expect(buildEntryRekeyPayload(TEAM_ID, f.data, makeResolver(f.keys))).rejects.toThrow(
-      "Unsupported team entry aadVersion",
-    );
   });
 
   it("throws RekeyTransientError on a transient key failure (no payload)", async () => {

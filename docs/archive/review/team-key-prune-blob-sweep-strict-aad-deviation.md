@@ -73,3 +73,60 @@
   names every inventory a function removal must update; orphan scenario reproduces the
   post-commit cleanup failure; blob integration `afterAll` cleans up only what `beforeAll`
   created.
+
+## Code review round 1
+
+- D10 (SS1, FF1; supersedes the approach's concurrency part 2 and C1's "one statement" control
+  class) — `team_member_key_prune` is redefined by
+  `20261109100000_team_member_key_prune_team_lock` (forward migration; 20261108120100 untouched).
+  One statement was not enough: a restore holding `teams FOR SHARE` reads history row h at k, the
+  GC history sweep deletes h and commits, and a snapshot that sees neither h nor the uncommitted
+  entry at k deletes k. The body now (1) refuses outside READ COMMITTED (the argument needs a new
+  snapshot per statement), (2) locks up to `p_batch` teams `FOR NO KEY UPDATE OF t SKIP LOCKED`,
+  (3) decides and deletes in a later statement restricted to `team_id = ANY (v_teams)`, with the
+  three reference checks evaluated once per distinct (team, version) pair (`pairs` → `picked`).
+  Safety: every copier of a non-current version (restore, PUT snapshot, re-key) holds `teams FOR
+  SHARE` from before it reads its source until commit; rotation holds `FOR NO KEY UPDATE`; both
+  conflict with the prune's lock, so the team is skipped, and a copier of a locked team is seen
+  committed or has not started. Third-party deleters of a copy source are covered because the
+  copier still holds the lock. Deviation from the orchestrator's step-1 text: the lock statement
+  also filters to teams with at least one old version unreferenced at its (pre-lock) snapshot —
+  without it, more than `p_batch` teams whose old versions are all referenced would fill every
+  call and later teams would never be reached; the filter only chooses what to lock, step 2
+  decides. Because the pre-filter mentions the reference columns too, C2 now checks the
+  reference names inside the RETURN QUERY only. The "index-friendly" claim is gone; no new index.
+- D11 (C2 / TF1) — the body-shape rules live in `scripts/checks/lib/team-key-prune-shape.mjs`
+  (shared SQL lexer), used by the gate over the latest defining migration and by the integration
+  test over `pg_get_functiondef`. Rules: bypass check first; guards are `IF <cond> THEN RAISE` with
+  no statement keyword in the condition; a READ COMMITTED guard before the lock; exactly one
+  `SELECT … INTO v` locking teams `FOR NO KEY UPDATE OF <teams alias> SKIP LOCKED`; exactly one
+  RETURN QUERY, last, containing `<alias>.team_id = ANY (v)`; nothing else (PERFORM, DML,
+  dynamic EXECUTE, DECLARE initialisers). Limit: the restriction is required to appear, not to be
+  a top-level conjunct of every read.
+- D12 (C1 race cells) — the rotation cell's expectation changed: A's UPDATE holds the team row,
+  so the team is now skipped while A is open ([1, 2, 3], with an unlocked control team pruned),
+  and the post-commit prune leaves [2, 4]. The restore / snapshot cells keep their writers
+  WITHOUT the team lock: they now prove that the deciding statement reads one snapshot.
+- D13 (SS1 red-proof m2) — "decision before lock" in one statement is red only if A commits
+  between that statement's snapshot and its lock. The "SS1" cell holds A for the whole call, so
+  m2 is green there by construction (SKIP LOCKED still skips A's team); a second cell, "SS1, A
+  commits during the call", releases A as soon as the prune backend is observed running, and the
+  test-local m2 mutant widens its window with `pg_sleep(1.5)` before the lock. Production passes
+  that cell for any commit point; without the widened window it would release A after the call.
+- D14 (RDS-shape cell) — the stand-in owner needs `UPDATE` on `teams` to take the team lock; in
+  production the migration role owns both the function and the table.
+- D15 (SS2; supersedes D7 for the live entry) — `buildEntryRekeyPayload` blocks a live v1+ entry
+  whose `aadVersion` is not `AAD_VERSION` (`REKEY_ENTRY_BLOCK.UNDECRYPTABLE`, no new API code)
+  and opens it with strict `openTeamEntryField`; D7's "a malformed label stops the re-key pass"
+  no longer applies to it (the 2.5 throw cell is now a blocked cell). C6 drops
+  `buildEntryRekeyPayload` from the allow-list; `buildEntryUpgradePayload` / `reencryptV0`
+  (v0 entries under the team key) and `handleView` keep it. The extension never re-keys; iOS has
+  no re-key path (`rg -i rekey extension/src ios` finds none).
+- D16 (TF4) — the MinIO young side cannot assert `young === 1`: MinIO's 1 s LastModified
+  granularity can give the referenced object the orphan's second, making it young too. The cell
+  asserts `young` equals the count of attachment objects listed at or after the orphan's
+  LastModified (≥ 1) and `refused` undefined.
+- D17 (FF4) — the start-time line is `retention-gc.blob_sweep_inert` (error level, `{ mode }`),
+  logged once per `start()` from `createWorker`'s loop.
+- D18 (FF3) — `--init-blob-marker` skips both database-URL refines (at-least-one URL, production
+  scoped URL); every other refine still applies to it.

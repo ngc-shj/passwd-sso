@@ -23,6 +23,10 @@ function emptyAsUnset<T extends z.ZodType>(schema: T) {
   return z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? undefined : v), schema);
 }
 
+// --init-blob-marker writes the bucket marker and exits without connecting to
+// the database, so the database-URL rules below do not apply to it.
+const initBlobMarkerRun = process.argv.includes("--init-blob-marker");
+
 // Pick only the fields the worker reads. envObject (not envSchema) because
 // Zod 4 throws on .pick() of a refined schema (F16).
 const workerEnvSchema = envObject.pick({
@@ -88,7 +92,7 @@ const workerEnvSchema = envObject.pick({
   // At-least-one-URL (all environments). Path pinned to DATABASE_URL for stable
   // diagnostics on the common "nothing configured" failure.
   .refine(
-    (env) => Boolean(env.RETENTION_GC_DATABASE_URL ?? env.DATABASE_URL),
+    (env) => initBlobMarkerRun || Boolean(env.RETENTION_GC_DATABASE_URL ?? env.DATABASE_URL),
     {
       message:
         "Either RETENTION_GC_DATABASE_URL or DATABASE_URL must be set.",
@@ -99,7 +103,7 @@ const workerEnvSchema = envObject.pick({
   // DATABASE_URL must NOT be used as a fallback (least-privilege; 2026-07 review).
   .refine(
     (env) =>
-      env.NODE_ENV !== "production" || Boolean(env.RETENTION_GC_DATABASE_URL),
+      initBlobMarkerRun || env.NODE_ENV !== "production" || Boolean(env.RETENTION_GC_DATABASE_URL),
     {
       message:
         "RETENTION_GC_DATABASE_URL is required in production (no DATABASE_URL fallback).",
@@ -232,7 +236,7 @@ function startWorker(): void {
   });
 }
 
-if (process.argv.includes("--init-blob-marker")) {
+if (initBlobMarkerRun) {
   initBlobMarker().then(
     () => process.exit(0),
     (err: unknown) => {

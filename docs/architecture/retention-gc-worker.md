@@ -41,16 +41,21 @@ try/catch, each **off by default**. Their counts appear in the heartbeat's
 | `attachment_objects` (objects) | `RETENTION_GC_BLOB_SWEEP_MODE=report\|delete` | external attachment objects no row references, past the grace period | none (counts are logged) |
 
 **Team key prune** (`sweepTeamMemberKeys`): calls the SECURITY DEFINER
-function `team_member_key_prune(p_batch)`, whose single statement decides and
-deletes (one snapshot), bounded to `RETENTION_GC_BATCH_SIZE` (team, version)
-pairs per tick. The worker role holds EXECUTE on it and no table grant; the
+function `team_member_key_prune(p_batch)`, which locks the candidate teams
+(`FOR NO KEY UPDATE SKIP LOCKED` — a team a restore, entry update, re-key or
+rotation holds is skipped that tick, never waited on) and then, in a later
+statement that sees every such writer of a locked team as committed, decides
+and deletes, bounded to `RETENTION_GC_BATCH_SIZE` (team, version) pairs per
+tick. The worker role holds EXECUTE on it and no table grant; the
 function refuses outside the RLS bypass, and while enforcement (`#921`) is off a
 bypass whose grant omits `team_member_keys` is reported rather than refused.
 Grant: `BYPASS_GRANT.RETENTION_TEAM_KEY_PRUNE`. Policy and the concurrency
 argument: `docs/security/key-retention-policy.md` §1.
 
 **Orphan-blob sweep** (`sweepOrphanBlobs`): only with an external
-`BLOB_BACKEND`; the worker must receive the same `BLOB_*` values as the app
+`BLOB_BACKEND` — a mode other than `off` on the `db` backend does nothing, and
+the worker says so once at start (`retention-gc.blob_sweep_inert`, error
+level); the worker must receive the same `BLOB_*` values as the app
 (the trash purge depends on that too). Per tick it lists up to
 `RETENTION_GC_BLOB_SWEEP_MAX_OBJECTS` keys under the current prefix (pages of
 1000, no transaction open), reads the matching `attachments` rows in a short
@@ -61,6 +66,28 @@ on a listing error and on restart. Safety rails — the operator-created
 deployment marker, the grace period, the breaker, `report` mode — and the
 database-restore rule are in `docs/security/key-retention-policy.md` §4.
 
+**Breaker refusals.** A `retention-gc.blob_sweep_refused` warning with
+`refused: "breaker"` carries `sawReferenced`, `listed`, `parseableOld` and
+`unreferencedOld` (counts only, never a key); `refused: "marker_missing"` /
+`"marker_mismatch"` carry nothing else. A breaker refusal is not transient:
+the listing advances past the refused stretch, but the same stretch trips again
+on every later pass — an orphan-dense range of keys, or a pass whose first
+tick sees no referenced key (`sawReferenced: false`). When it repeats:
+
+1. Run `RETENTION_GC_BLOB_SWEEP_MODE=report` and confirm from the counts (and
+   the bucket) that the unreferenced objects really are orphans of this
+   deployment's database.
+2. For one pass, change the limit that tripped: raise
+   `RETENTION_GC_BLOB_SWEEP_MAX_DELETES` when `unreferencedOld` exceeded it, or
+   lower `RETENTION_GC_BLOB_SWEEP_MAX_OBJECTS` so each tick covers fewer keys
+   and stays under it; raise `RETENTION_GC_BLOB_SWEEP_MAX_DELETE_RATIO` when the
+   share did. `sawReferenced: false` has no override (an empty or foreign
+   database must never delete): raise `RETENTION_GC_BLOB_SWEEP_MAX_OBJECTS` so
+   the pass's first tick reaches a referenced key, together with the cap or
+   ratio that tick then needs.
+3. Restore the previous values once the pass has completed (the refusal no
+   longer appears).
+
 Create the marker once per bucket, from the owning deployment:
 
 ```bash
@@ -69,7 +96,8 @@ RETENTION_GC_BLOB_SWEEP_MODE=report DEPLOYMENT_ID=<uuid> BLOB_BACKEND=s3 ... \
 ```
 
 It refuses (exit 1, nothing written) when the mode is `off`, `DEPLOYMENT_ID` is
-missing or the backend is `db`. Where the worker's identity has no write access
+missing or the backend is `db`. It never connects to the database, so it needs
+no `RETENTION_GC_DATABASE_URL` / `DATABASE_URL`. Where the worker's identity has no write access
 to the bucket, run it with operator credentials.
 
 ## Per-tenant retention

@@ -272,7 +272,8 @@ async function tryOpen(open: () => Promise<string>): Promise<string | null> {
 
 /**
  * Build the re-key POST for one entry (C2, D23–D26). The live blob/overview
- * open with the live ItemKey; each history row with its own wrap, else by
+ * open with the live ItemKey at strict entry AAD (a live entry reported at any
+ * other AAD label is blocked as undecryptable); each history row with its own wrap, else by
  * trial with every ItemKey the runner holds for the entry (the live one and
  * every history wrap it could open), at strict entry AAD; rows it cannot open
  * are retained. A legacy row (the rows the history restore refuses: aadVersion
@@ -302,6 +303,12 @@ export async function buildEntryRekeyPayload(
   });
 
   if (entry.itemKeyVersion < 1) return blocked(REKEY_ENTRY_BLOCK.NEEDS_UPGRADE);
+  // A live v1+ entry is always sealed at AAD_VERSION (every writer of one
+  // seals with the entry's AAD), so it opens strictly. Another label is
+  // blocked, never honoured: opening at a server-reported 0 would accept an
+  // unbound ciphertext under the live ItemKey — a legacy history row's,
+  // re-sealed without AAD (D80) — and re-seal it as AAD-bound live content.
+  if (entry.aadVersion !== AAD_VERSION) return blocked(REKEY_ENTRY_BLOCK.UNDECRYPTABLE);
   if (data.attachments.some((a) => a.encryptionMode !== ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED)) {
     return blocked(REKEY_ENTRY_BLOCK.NEEDS_MIGRATION);
   }
@@ -327,17 +334,15 @@ export async function buildEntryRekeyPayload(
     const liveHeld = await toHeld(entry.itemKeyId ?? null, live.raw);
     held.push(liveHeld);
 
-    const blob = await tryOpen(() => openTeamEntryFieldAt(
+    const blob = await tryOpen(() => openTeamEntryField(
       { ciphertext: entry.encryptedBlob, iv: entry.blobIv, authTag: entry.blobAuthTag },
       liveHeld.contentKey,
       { teamId, entryId, vaultType: VAULT_TYPE.BLOB, itemKeyVersion: entry.itemKeyVersion },
-      entry.aadVersion,
     ));
-    const overview = await tryOpen(() => openTeamEntryFieldAt(
+    const overview = await tryOpen(() => openTeamEntryField(
       { ciphertext: entry.encryptedOverview, iv: entry.overviewIv, authTag: entry.overviewAuthTag },
       liveHeld.contentKey,
       { teamId, entryId, vaultType: VAULT_TYPE.OVERVIEW, itemKeyVersion: entry.itemKeyVersion },
-      entry.aadVersion,
     ));
     if (blob === null || overview === null) return blocked(REKEY_ENTRY_BLOCK.UNDECRYPTABLE);
 

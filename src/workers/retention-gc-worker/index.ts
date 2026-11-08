@@ -26,6 +26,8 @@ import {
   type RetentionEntry,
 } from "./registry";
 import { sweepOnce, type BlobSweepSettings, type SweepOpts } from "./sweep";
+import { BLOB_STORAGE, resolveBlobBackend } from "@/lib/blob-store";
+import { BLOB_SWEEP_MODE } from "@/lib/blob-store/constants";
 import type { BlobCursor } from "./sweep-blob-orphans";
 
 export interface WorkerConfig {
@@ -195,6 +197,14 @@ export function createWorker(config: WorkerConfig) {
   async function loop(): Promise<void> {
     const log = getLogger();
     log.info({ intervalMs, batchSize }, "retention-gc.loop_start");
+    // The orphan sweep only runs against an external store; configured on the
+    // db backend it would skip every tick without a word.
+    if (blobSweep.mode !== BLOB_SWEEP_MODE.OFF && resolveBlobBackend() === BLOB_STORAGE.DB) {
+      log.error(
+        { mode: blobSweep.mode, _logType: "retention-gc.blob_sweep_inert" },
+        "retention-gc.blob_sweep_inert",
+      );
+    }
 
     while (!signal.aborted) {
       try {

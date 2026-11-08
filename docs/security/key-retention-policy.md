@@ -36,19 +36,37 @@ deleted. It applies to both automated systems and manual maintenance operations.
   **off by default**: deletion is irreversible, so enable it only after
   reviewing the reference classification (`scripts/checks/check-team-key-version-refs.mjs`).
   While it is off, old versions are retained indefinitely.
-- The decision and the delete are one SQL statement inside the SECURITY
-  DEFINER function `team_member_key_prune(p_batch)` (migration
-  `20261108120100_team_member_key_prune`), so they read one snapshot: a
-  reference a committed transaction moved from one table to another (restore,
-  history snapshot) is seen on one side. The references are exactly the three
-  above, normalised as the reader does (a stored version below 1 counts as 1);
-  the current version is never selected. Each tick deletes at most
+- The prune is the SECURITY DEFINER function `team_member_key_prune(p_batch)`
+  (migrations `20261108120100_team_member_key_prune`, redefined by
+  `20261109100000_team_member_key_prune_team_lock`). It first locks up to
+  `p_batch` teams that have an old version no row references, `teams ... FOR
+  NO KEY UPDATE SKIP LOCKED`, then decides and deletes in a later statement,
+  for the locked teams only. The references are exactly the three above,
+  normalised as the reader does (a stored version below 1 counts as 1); the
+  current version is never selected. Each tick deletes at most
   `RETENTION_GC_BATCH_SIZE` (team, version) pairs.
-- No non-current reference is created from nothing: every writer that creates
-  a reference asserts the current version under the team row lock, and every
-  writer of an older version copies an existing reference inside one
-  transaction. A new column that can hold a team key version must be added to
-  the function and to the gate's classification; the gate fails until it is.
+- Concurrency. No non-current reference is created from nothing: every writer
+  that creates a reference asserts the current version under the team row
+  lock. Every transaction that copies a non-current version into a row —
+  history restore, the full-update history snapshot, the per-entry re-key —
+  holds `teams ... FOR SHARE` from before it reads the copy source until it
+  commits, and rotation holds `teams ... FOR NO KEY UPDATE`
+  (`src/lib/team/team-key-rotation-lock.ts`). The prune's lock conflicts with
+  both and skips, never waits: a team any such writer holds is not pruned in
+  that tick, and a writer that starts later waits until the prune's
+  transaction ends. The deciding statement runs after the locks are held, so
+  under READ COMMITTED (the function refuses any other isolation level) it
+  sees every copier of a locked team as committed. A third party deleting a
+  copier's source in the meantime (the history age sweep, the history trim)
+  is covered because the copier still holds its team lock.
+  A single statement alone is not enough: a restore that read history row h,
+  whose h the history sweep then deleted, would be invisible to a snapshot
+  that sees neither h nor the restored entry.
+- A new column that can hold a team key version must be added to the
+  function and to the gate's classification; the gate fails until it is. The
+  gate also checks the function's statement order (bypass check, isolation
+  guard, one team-lock statement, one deciding statement restricted to the
+  locked teams).
 - The worker role holds EXECUTE on the function and no table grant. The
   function refuses unless the caller's RLS bypass is on; a bypass whose grant
   does not name `team_member_keys` is reported (`rls_bypass_not_granted`) and
@@ -200,7 +218,8 @@ A refused tick deletes nothing, records `-1` for `attachment_objects` and still
 advances the listing, which resets when a pass completes, on a listing error
 and on worker restart. Run `report` mode first and inspect its counts; when a
 legitimate orphan backlog trips the breaker, raise the ratio or cap for one
-pass and lower it again.
+pass and lower it again (operator steps per refusal cause:
+`docs/architecture/retention-gc-worker.md`, "Breaker refusals").
 
 **Database restore.** Every writer of an attachment ref writes a fresh object
 key, so an object unreferenced past the grace period is never referenced

@@ -35,6 +35,8 @@ const BUCKET = "retention-gc-blob-orphans-test";
 const DEPLOYMENT_ID = "550e8400-e29b-41d4-a716-446655440000";
 const GRACE_MS = 3_600_000;
 const RUN = `orphans-${randomUUID()}`;
+/** The cells write a few dozen objects; far more rounds than that means the cleanup is not converging. */
+const CLEANUP_MAX_ROUNDS = 20;
 const REPO_ROOT = resolve(__dirname, "..", "..", "..");
 
 describe("orphan-blob sweep on MinIO (#1010)", () => {
@@ -70,11 +72,20 @@ describe("orphan-blob sweep on MinIO (#1010)", () => {
 
   afterAll(async () => {
     if (s3) {
-      for (;;) {
+      // Bounded: each round deletes a listing page (≤ 1000 keys); a partial
+      // DeleteObjects failure throws instead of re-listing the same keys forever.
+      for (let round = 0; ; round++) {
+        if (round >= CLEANUP_MAX_ROUNDS) {
+          throw new Error(`afterAll: objects still under ${BUCKET}/${RUN}/ after ${CLEANUP_MAX_ROUNDS} delete rounds`);
+        }
         const listed = await s3.send(new ListObjectsV2Command({ Bucket: BUCKET, Prefix: `${RUN}/` }));
         const keys = (listed.Contents ?? []).map((o) => ({ Key: o.Key ?? "" }));
         if (keys.length === 0) break;
-        await s3.send(new DeleteObjectsCommand({ Bucket: BUCKET, Delete: { Objects: keys } }));
+        const deleted = await s3.send(new DeleteObjectsCommand({ Bucket: BUCKET, Delete: { Objects: keys } }));
+        const failed = deleted.Errors?.length ?? 0;
+        if (failed > 0) {
+          throw new Error(`afterAll: DeleteObjects failed for ${failed} of ${keys.length} objects under ${BUCKET}/${RUN}/`);
+        }
       }
     }
     if (ctx) {
@@ -262,7 +273,15 @@ describe("orphan-blob sweep on MinIO (#1010)", () => {
         opts(),
         { sawReferenced: false },
       );
-      expect(young.deleted).toBe(0);
+      // Young: every attachment object listed at or after the orphan's
+      // LastModified — the orphan, and the referenced object too when MinIO's
+      // 1 s granularity gave both the same second. Not refused: a refusal
+      // also deletes nothing.
+      const sameSecondOrLater = (await s3.send(new ListObjectsV2Command({ Bucket: BUCKET, Prefix: `${prefix}/personal/` })))
+        .Contents?.filter((o) => (o.LastModified?.getTime() ?? 0) >= lastModified).length ?? 0;
+      expect(sameSecondOrLater).toBeGreaterThanOrEqual(1);
+      expect(young).toMatchObject({ young: sameSecondOrLater, deleted: 0 });
+      expect(young.refused).toBeUndefined();
       expect(await keysUnderPrefix()).toContain(orphan);
 
       const old = await sweepOrphanBlobs(

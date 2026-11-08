@@ -357,4 +357,34 @@ describe("retention-gc-worker --init-blob-marker refusals", () => {
     expect(result.status).toBe(1);
     expect(errorPaths(result.stderr)).toEqual(["DEPLOYMENT_ID"]);
   });
+  // Review FF3: --init-blob-marker never connects to the database, so the
+  // database-URL rules do not apply to it. Each cell reaches the marker step
+  // (refused there, on the db backend, so nothing is written) instead of
+  // failing env validation.
+  it.each([
+    ["no database URL at all", {}],
+    ["production without RETENTION_GC_DATABASE_URL", { NODE_ENV: "production", DATABASE_URL: VALID_DATABASE_URL }],
+  ])("does not require a database URL: %s", (_label, env) => {
+    const result = spawnWorker(
+      { RETENTION_GC_BLOB_SWEEP_MODE: "report", DEPLOYMENT_ID, BLOB_BACKEND: "db", ...env },
+      ["--init-blob-marker"],
+    );
+    expect(result.status).toBe(1);
+    expect(errorPaths(result.stderr)).toEqual([]);
+    expect(refusal(result.stderr)).toBe("db_backend");
+  });
+});
+
+describe("retention-gc-worker normal boot", () => {
+  it("still exits 1 at env validation without a database URL (control for the --init-blob-marker cells)", () => {
+    const result = spawnWorker({ RETENTION_GC_BLOB_SWEEP_MODE: "report", DEPLOYMENT_ID, BLOB_BACKEND: "db" }, []);
+    expect(result.status).toBe(1);
+    expect(errorPaths(result.stderr)).toEqual(["DATABASE_URL"]);
+  });
+
+  it("still exits 1 in production without RETENTION_GC_DATABASE_URL", () => {
+    const result = spawnWorker({ NODE_ENV: "production", DATABASE_URL: VALID_DATABASE_URL }, []);
+    expect(result.status).toBe(1);
+    expect(errorPaths(result.stderr)).toEqual(["RETENTION_GC_DATABASE_URL"]);
+  });
 });
