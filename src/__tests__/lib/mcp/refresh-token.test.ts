@@ -160,6 +160,8 @@ describe("exchangeRefreshToken", () => {
       const mockRefreshUpdate = overrides.refreshUpdate ?? vi.fn().mockResolvedValue({});
 
       (prisma as unknown as Record<string, unknown>).$transaction = async (fn: (tx: unknown) => unknown) => fn(prisma);
+      // The user's credential lock the rotation takes (user-auth-serialization.ts).
+      (prisma as unknown as Record<string, unknown>).$executeRaw = vi.fn().mockResolvedValue(1);
       // C13: active membership default so happy-path and CAS tests pass.
       (prisma as unknown as Record<string, unknown>).tenantMember = {
         findUnique: vi.fn().mockResolvedValue({ deactivatedAt: null }),
@@ -409,6 +411,8 @@ describe("exchangeRefreshToken", () => {
         where: expect.objectContaining({
           id: VALID_RT.id,
           rotatedAt: null,
+          // A token revoked while the rotation waited for the user lock loses.
+          revokedAt: null,
         }),
         data: expect.objectContaining({
           rotatedAt: expect.any(Date),
@@ -425,6 +429,11 @@ describe("exchangeRefreshToken", () => {
       // Family revocation lookup returns family members for the loser to revoke.
       refreshFindMany: vi.fn().mockResolvedValue([{ accessTokenId: "winner-at-id" }]),
     });
+    const { prisma } = await import("@/lib/prisma");
+    (prisma as unknown as { mcpRefreshToken: { findUnique: ReturnType<typeof vi.fn> } }).mcpRefreshToken.findUnique = vi
+      .fn()
+      .mockResolvedValueOnce(VALID_RT) // the read before the lock
+      .mockResolvedValueOnce({ rotatedAt: new Date(), revokedAt: null }); // the winner's rotation, re-read
 
     const result = await exchangeRefreshToken({
       refreshToken: "valid-refresh-token",
@@ -453,5 +462,64 @@ describe("exchangeRefreshToken", () => {
         }),
       }),
     );
+  });
+
+  it("takes the user's credential lock before claiming the rotation", async () => {
+    const { mockRefreshUpdateMany } = await setupPrisma();
+    const { prisma } = await import("@/lib/prisma");
+    const executeRaw = (prisma as unknown as { $executeRaw: ReturnType<typeof vi.fn> }).$executeRaw;
+
+    await exchangeRefreshToken({
+      refreshToken: "valid-refresh-token",
+      clientId: "mcpc_testclient",
+      clientSecretHash: "hashed:correct-secret",
+    });
+
+    const lockCall = executeRaw.mock.calls.findIndex((c: unknown[]) => String(c[0]).includes("pg_advisory_xact_lock"));
+    expect(lockCall).toBeGreaterThanOrEqual(0);
+    expect(executeRaw.mock.calls[lockCall][1]).toBe(`user-auth:${VALID_RT.userId}`);
+    expect(executeRaw.mock.invocationCallOrder[lockCall]).toBeLessThan(mockRefreshUpdateMany.mock.invocationCallOrder[0]);
+  });
+
+  it("a token both rotated and revoked when re-read is still a lost race: family revoked", async () => {
+    const { mockRefreshFindMany } = await setupPrisma({
+      refreshUpdateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      refreshFindMany: vi.fn().mockResolvedValue([{ accessTokenId: "winner-at-id" }]),
+    });
+    const { prisma } = await import("@/lib/prisma");
+    (prisma as unknown as { mcpRefreshToken: { findUnique: ReturnType<typeof vi.fn> } }).mcpRefreshToken.findUnique = vi
+      .fn()
+      .mockResolvedValueOnce(VALID_RT)
+      .mockResolvedValueOnce({ rotatedAt: new Date(), revokedAt: new Date() });
+
+    const result = await exchangeRefreshToken({
+      refreshToken: "valid-refresh-token",
+      clientId: "mcpc_testclient",
+      clientSecretHash: "hashed:correct-secret",
+    });
+
+    expect(result).toMatchObject({ ok: false, error: "invalid_grant", reason: "concurrent_rotation_revoked" });
+    expect(mockRefreshFindMany).toHaveBeenCalled();
+  });
+
+  it("a token revoked (not rotated) while it waited for the lock answers revoked: no family revocation, no race audit", async () => {
+    const { mockRefreshFindMany, mockAccessCreate } = await setupPrisma({
+      refreshUpdateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    });
+    const { prisma } = await import("@/lib/prisma");
+    (prisma as unknown as { mcpRefreshToken: { findUnique: ReturnType<typeof vi.fn> } }).mcpRefreshToken.findUnique = vi
+      .fn()
+      .mockResolvedValueOnce(VALID_RT) // the read before the lock
+      .mockResolvedValueOnce({ rotatedAt: null, revokedAt: new Date() }); // after the lost claim
+
+    const result = await exchangeRefreshToken({
+      refreshToken: "valid-refresh-token",
+      clientId: "mcpc_testclient",
+      clientSecretHash: "hashed:correct-secret",
+    });
+
+    expect(result).toEqual({ ok: false, error: "invalid_grant", reason: "revoked" });
+    expect(mockAccessCreate).not.toHaveBeenCalled();
+    expect(mockRefreshFindMany).not.toHaveBeenCalled();
   });
 });

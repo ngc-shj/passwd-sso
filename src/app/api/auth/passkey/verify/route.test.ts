@@ -89,6 +89,7 @@ vi.mock("@/lib/auth/session/session-concurrency", () => ({
   createCappedSession: mockCreateCappedSession,
 }));
 
+import { UserAuthRevokedError } from "@/lib/auth/session/user-auth-serialization";
 import { POST } from "./route";
 import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 import { configuredSessionCookieName } from "@/lib/auth/session/cookie-name";
@@ -638,6 +639,21 @@ describe("POST /api/auth/passkey/verify", () => {
     expect(status).toBe(200);
     expect(json.ok).toBe(true);
     expect(json.prf).toBeUndefined();
+  });
+
+  it("answers AUTHENTICATION_FAILED, with no cookie and no sign-in audit, when the passkey was revoked during the ceremony", async () => {
+    mockCreateCappedSession.mockRejectedValue(new UserAuthRevokedError("credential"));
+
+    const res = await POST(createRequest("POST", ROUTE_URL, {
+      body: validBody,
+      headers: { origin: "http://localhost:3000" },
+    }));
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(401);
+    expect(json.error).toBe("AUTHENTICATION_FAILED");
+    expect(res.headers.getSetCookie()).toEqual([]);
+    expect(mockLogAudit).not.toHaveBeenCalledWith(expect.objectContaining({ action: "AUTH_LOGIN" }));
   });
 
   it("propagates a throw from createCappedSession without setting a session cookie", async () => {

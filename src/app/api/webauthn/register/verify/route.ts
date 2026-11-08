@@ -14,6 +14,7 @@ import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { invalidateUserSessionsCache } from "@/lib/auth/session/user-session-invalidation";
+import { isSessionRowLive, lockUserAuthArtifacts, UserAuthRevokedError } from "@/lib/auth/session/user-auth-serialization";
 import { getLogger } from "@/lib/logger";
 import { errorLogFields } from "@/lib/logger/error-fields";
 import {
@@ -281,34 +282,46 @@ async function handlePOST(req: NextRequest) {
     return errorResponse(API_ERROR.PIN_LENGTH_POLICY_NOT_SATISFIED);
   }
 
-  const credential = await withUserTenantRls(userId, async () => {
-    return prisma.webAuthnCredential.create({
-      data: {
-        userId,
-        tenantId: userInfo.tenantId,
-        credentialId,
-        publicKey,
-        counter: BigInt(counter),
-        transports,
-        deviceType,
-        backedUp,
-        discoverable,
-        minPinLength,
-        largeBlobSupported,
-        nickname: nickname ?? null,
-        prfSupported,
-        registeredDevice,
-        prfSalt: prfSaltToPersist,
-        ...(hasPrf
-          ? {
-              prfEncryptedSecretKey,
-              prfSecretKeyIv,
-              prfSecretKeyAuthTag,
-            }
-          : {}),
-      },
+  // A passkey is a credential like any token: under the user's credential
+  // lock, the session registering it is re-read (user-auth-serialization.ts),
+  // so a session revoked meanwhile cannot leave a passkey behind that the
+  // revocation never saw.
+  let credential;
+  try {
+    credential = await withUserTenantRls(userId, async () => {
+      await lockUserAuthArtifacts(prisma, userId);
+      if (!(await isSessionRowLive(prisma, req, userId))) throw new UserAuthRevokedError("session");
+      return prisma.webAuthnCredential.create({
+        data: {
+          userId,
+          tenantId: userInfo.tenantId,
+          credentialId,
+          publicKey,
+          counter: BigInt(counter),
+          transports,
+          deviceType,
+          backedUp,
+          discoverable,
+          minPinLength,
+          largeBlobSupported,
+          nickname: nickname ?? null,
+          prfSupported,
+          registeredDevice,
+          prfSalt: prfSaltToPersist,
+          ...(hasPrf
+            ? {
+                prfEncryptedSecretKey,
+                prfSecretKeyIv,
+                prfSecretKeyAuthTag,
+              }
+            : {}),
+        },
+      });
     });
-  });
+  } catch (err) {
+    if (err instanceof UserAuthRevokedError) return unauthorized();
+    throw err;
+  }
 
   // F5/F19 (#959): every writer of `hasPasskey` invalidates the user's cached
   // sessions (cross-tenant — passkeys are user-global) so the layout, page

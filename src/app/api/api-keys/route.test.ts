@@ -27,6 +27,13 @@ const {
   mockCreateRateLimiter: vi.fn((_opts: unknown) => ({ check: mockRateLimitCheck, clear: vi.fn() })),
 }));
 
+// The in-transaction session re-read (user-auth-serialization.ts, tested on
+// its own): a live session by default. The lock itself runs for real.
+const { mockIsSessionRowLive } = vi.hoisted(() => ({ mockIsSessionRowLive: vi.fn() }));
+vi.mock("@/lib/auth/session/user-auth-serialization", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth/session/user-auth-serialization")>()),
+  isSessionRowLive: mockIsSessionRowLive,
+}));
 vi.mock("@/lib/auth/session/check-auth", () => ({
   checkAuth: mockCheckAuth,
 }));
@@ -167,6 +174,7 @@ describe("GET /api/api-keys", () => {
 
 describe("POST /api/api-keys", () => {
   beforeEach(() => {
+    mockIsSessionRowLive.mockResolvedValue(true);
     mockCheckAuth.mockReset();
     mockPrismaApiKey.count.mockReset();
     mockPrismaApiKey.create.mockReset();
@@ -335,6 +343,25 @@ describe("POST /api/api-keys", () => {
     expect(json.token).toMatch(/^api_/);
     expect(res.headers.get("Cache-Control")).toBe("no-store");
     // The count-then-create runs under a per-user advisory lock (TOCTOU fix).
+    expectAdvisoryLockAcquired(mockExecuteRaw);
+  });
+
+  it("a session revoked while the create waited for the lock: 401, no key", async () => {
+    mockCheckAuth.mockResolvedValue({ ok: true, auth: { type: "session", userId: "u1" } });
+    mockPrismaApiKey.count.mockResolvedValue(0);
+    mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "t1" });
+    mockIsSessionRowLive.mockResolvedValue(false);
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 30);
+
+    const res = await POST(
+      createRequest("POST", "http://localhost:3000/api/api-keys", {
+        body: { name: "Test", scope: ["passwords:read"], expiresAt: expiresAt.toISOString() },
+      }),
+    );
+    expect(res.status).toBe(401);
+    expect(mockPrismaApiKey.create).not.toHaveBeenCalled();
+    // The re-read ran under the lock.
     expectAdvisoryLockAcquired(mockExecuteRaw);
   });
 

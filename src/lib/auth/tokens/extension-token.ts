@@ -1,9 +1,10 @@
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { generateShareToken, hashToken } from "@/lib/crypto/crypto-server";
-import { withBypassRls, advisoryXactLock } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { lockUserAuthArtifacts, UserAuthRevokedError } from "@/lib/auth/session/user-auth-serialization";
 import { randomUUID } from "node:crypto";
 import {
   CLIENT_TOKEN_MAX_ACTIVE_FAMILIES,
@@ -310,8 +311,9 @@ export async function emitRevokedFamilyAudits(
  *     evicted while `families + 1` (the new family about to be created)
  *     exceeds the cap.
  *
- * Precondition: the caller has already taken `advisoryXactLock(tx, userId)`
- * in this same transaction — this function does not re-acquire it.
+ * Precondition: the caller has already taken the user's credential lock
+ * (`lockUserAuthArtifacts`) in this same transaction — this function does not
+ * re-acquire it.
  */
 export async function enforceActiveFamilyCap(
   tx: Prisma.TransactionClient,
@@ -420,8 +422,14 @@ export async function issueExtensionToken(params: {
   scope: string;
   /** RFC 7638 JWK thumbprint of the extension's DPoP key. Required. */
   cnfJkt: string;
+  /**
+   * The proof this issuance rests on, consumed in the issuing transaction
+   * after the user's credential lock (user-auth-serialization.ts): the bridge
+   * code's compare-and-set. False when it is gone, and nothing is issued.
+   */
+  consumeProof: (tx: Prisma.TransactionClient) => Promise<boolean>;
 }): Promise<{ token: string; expiresAt: Date; scopeCsv: string; cnfJkt: string }> {
-  const { userId, tenantId, scope, cnfJkt } = params;
+  const { userId, tenantId, scope, cnfJkt, consumeProof } = params;
   const now = new Date();
 
   // Read tenant extension-token idle/absolute TTLs.
@@ -465,8 +473,10 @@ export async function issueExtensionToken(params: {
 
   const created = await withUserTenantRls(userId, async () =>
     prisma.$transaction(async (tx) => {
-      // Serialize concurrent token issuance for this user (count-then-evict-then-create cap race).
-      await advisoryXactLock(tx, userId);
+      // Serialize concurrent token issuance for this user (count-then-evict-then-create cap race),
+      // and this issuance against a revocation of the user's credentials.
+      await lockUserAuthArtifacts(tx, userId);
+      if (!(await consumeProof(tx))) throw new UserAuthRevokedError("code");
       const revokedFamilies = await enforceActiveFamilyCap(tx, {
         userId,
         clientKind: "BROWSER_EXTENSION",

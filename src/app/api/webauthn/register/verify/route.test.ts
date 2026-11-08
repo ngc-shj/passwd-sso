@@ -56,6 +56,14 @@ const {
   };
 });
 
+// The user's credential lock and the in-transaction session re-read
+// (user-auth-serialization.ts, tested on its own): a live session by default.
+const { mockIsSessionRowLive } = vi.hoisted(() => ({ mockIsSessionRowLive: vi.fn() }));
+vi.mock("@/lib/auth/session/user-auth-serialization", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth/session/user-auth-serialization")>()),
+  lockUserAuthArtifacts: vi.fn(async () => {}),
+  isSessionRowLive: mockIsSessionRowLive,
+}));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 
 vi.mock("@/lib/security/rate-limit", () => ({
@@ -146,6 +154,7 @@ vi.mock("@/lib/http/parse-body", () => ({
   },
 }));
 
+import { lockUserAuthArtifacts } from "@/lib/auth/session/user-auth-serialization";
 import { POST } from "./route";
 
 // Module-level `rateLimiter = createRateLimiter(...)` runs at import time,
@@ -238,6 +247,7 @@ function makeCreatedCredential(discoverable: boolean | null) {
 describe("POST /api/webauthn/register/verify", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockIsSessionRowLive.mockResolvedValue(true);
 
     vi.stubEnv("WEBAUTHN_RP_ID", "example.com");
 
@@ -275,6 +285,20 @@ describe("POST /api/webauthn/register/verify", () => {
       totalSessions: 0,
       cacheTombstoneFailures: 0,
     });
+  });
+
+  it("a session revoked while the registration waited for the user lock: 401, no passkey, no audit", async () => {
+    mockIsSessionRowLive.mockResolvedValue(false);
+
+    const res = await POST(createRequest("POST", ROUTE_URL, { body: makeBody({ credProps: { rk: true } }) }));
+    expect(res.status).toBe(401);
+    expect(mockPrismaCredentialCreate).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: "WEBAUTHN_CREDENTIAL_REGISTER" }),
+    );
+    expect(vi.mocked(lockUserAuthArtifacts).mock.invocationCallOrder[0]).toBeLessThan(
+      mockIsSessionRowLive.mock.invocationCallOrder[0],
+    );
   });
 
   // ── credProps.rk extraction tests ───────────────────────────

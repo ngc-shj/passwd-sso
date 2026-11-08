@@ -149,7 +149,42 @@ async function h() {
   });
 }`;
 
+const CAP_THEN_CREATE_WITH_CREDENTIAL_LOCK = `
+import { withTenantRls } from "@/lib/tenant-rls";
+import { isSessionRowLive, lockUserAuthArtifacts } from "@/lib/auth/session/user-auth-serialization";
+import { MAX_WIDGETS_PER_TENANT } from "@/lib/constants";
+async function handlePOST() {
+  return withTenantRls(prisma, t, async (tx) => {
+    await lockUserAuthArtifacts(tx, userId);
+    const n = await tx.widget.count({ where: { t } });
+    if (n >= MAX_WIDGETS_PER_TENANT) throw new Err();
+    return tx.widget.create({ data: {} });
+  });
+}`;
+
 describe("check-count-then-create-lock", () => {
+  it("passes a cap-then-create site locked through the user credential lock", () => {
+    const r = run("src/app/api/x/route.ts", CAP_THEN_CREATE_WITH_CREDENTIAL_LOCK);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain("check-count-then-create-lock: OK");
+  });
+
+  it("fails the same site when the credential lock call is removed", () => {
+    const r = run("src/app/api/x/route.ts", CAP_THEN_CREATE_WITH_CREDENTIAL_LOCK.replace("await lockUserAuthArtifacts(tx, userId);", ""));
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("src/app/api/x/route.ts");
+  });
+
+  it("fails a site whose lockUserAuthArtifacts is not the credential lock's import", () => {
+    const local = CAP_THEN_CREATE_WITH_CREDENTIAL_LOCK.replace(
+      'import { isSessionRowLive, lockUserAuthArtifacts } from "@/lib/auth/session/user-auth-serialization";',
+      "async function lockUserAuthArtifacts() {}",
+    );
+    const r = run("src/app/api/x/route.ts", local);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("src/app/api/x/route.ts");
+  });
+
   it("fails a cap-then-create site with no advisory lock", () => {
     const r = run("src/app/api/x/route.ts", CAP_THEN_CREATE_NO_LOCK);
     expect(r.code).toBe(1);

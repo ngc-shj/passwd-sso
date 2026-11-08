@@ -10,6 +10,7 @@ import {
   resolveRefreshTokenGate,
 } from "./oauth-server";
 import { MCP_PRESENTED_TOKEN_MAX_LENGTH } from "@/lib/constants/auth/mcp";
+import { UserAuthRevokedError } from "@/lib/auth/session/user-auth-serialization";
 
 // ─── Mock Prisma ──────────────────────────────────────────────
 
@@ -37,6 +38,8 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 // derivePasskeyState calls .toISOString() on it).
 function addPasskeyStateMocks(client: unknown, opts: { requirePasskey?: boolean; hasPasskey?: boolean } = {}) {
   const d = mockDelegates(client);
+  // The user's credential lock the mint paths take (user-auth-serialization.ts).
+  d.$executeRaw = vi.fn().mockResolvedValue(1);
   d.webAuthnCredential = {
     count: vi.fn().mockResolvedValue(opts.hasPasskey === false ? 0 : 1),
   };
@@ -109,25 +112,70 @@ describe("createAuthorizationCode", () => {
     vi.clearAllMocks();
   });
 
-  it("creates an authorization code and returns plaintext + expiry", async () => {
-    const { prisma } = await import("@/lib/prisma");
-    const mockCreate = vi.fn().mockResolvedValue({ id: "code-uuid" });
-    mockDelegates(prisma).mcpAuthorizationCode = { create: mockCreate };
+  const CODE_PARAMS = {
+    clientId: "client-uuid",
+    tenantId: "tenant-uuid",
+    userId: "user-uuid",
+    redirectUri: "https://example.com/callback",
+    scope: "credentials:read",
+    codeChallenge: "challenge",
+  };
 
-    const result = await createAuthorizationCode({
-      clientId: "client-uuid",
-      tenantId: "tenant-uuid",
-      userId: "user-uuid",
-      redirectUri: "https://example.com/callback",
-      scope: "credentials:read",
-      codeChallenge: "challenge",
+  async function codeMocks() {
+    const { prisma } = await import("@/lib/prisma");
+    const calls: string[] = [];
+    const d = mockDelegates(prisma);
+    d.$executeRaw = vi.fn(async () => {
+      calls.push("lock");
+      return 1;
     });
+    const mockCreate = vi.fn(async () => {
+      calls.push("create");
+      return { id: "code-uuid" };
+    });
+    d.mcpAuthorizationCode = { create: mockCreate };
+    return { calls, mockCreate };
+  }
+
+  it("creates a user's code under the user's lock once the proof holds, and returns plaintext + expiry", async () => {
+    const { calls, mockCreate } = await codeMocks();
+    const userProof = vi.fn(async () => {
+      calls.push("proof");
+      return true;
+    });
+
+    const result = await createAuthorizationCode({ ...CODE_PARAMS, userProof });
 
     expect(result.code).toBeTruthy();
     expect(typeof result.code).toBe("string");
     expect(result.expiresAt).toBeInstanceOf(Date);
     expect(result.expiresAt.getTime()).toBeGreaterThan(Date.now());
     expect(mockCreate).toHaveBeenCalledOnce();
+    expect(calls).toEqual(["lock", "proof", "create"]);
+  });
+
+  it("creates no code when the session was revoked while it waited", async () => {
+    const { mockCreate } = await codeMocks();
+
+    await expect(
+      createAuthorizationCode({ ...CODE_PARAMS, userProof: async () => false }),
+    ).rejects.toBeInstanceOf(UserAuthRevokedError);
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("creates no user's code without a proof", async () => {
+    const { mockCreate } = await codeMocks();
+
+    await expect(createAuthorizationCode(CODE_PARAMS)).rejects.toBeInstanceOf(UserAuthRevokedError);
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("creates a service account's code without the user lock", async () => {
+    const { calls, mockCreate } = await codeMocks();
+
+    await createAuthorizationCode({ ...CODE_PARAMS, userId: undefined, serviceAccountId: "sa-1" });
+    expect(mockCreate).toHaveBeenCalledOnce();
+    expect(calls).toEqual(["create"]);
   });
 });
 
@@ -432,6 +480,14 @@ describe("exchangeCodeForToken", () => {
       expect.objectContaining({ where: { id: "code-id", usedAt: null } }),
     );
     expect(mockTokenCreate).toHaveBeenCalledOnce();
+    // The consume runs under the user's credential lock, so a revocation that
+    // consumed the code first (it consumes pending codes) makes it lose — the
+    // CAS-loser cell below.
+    const executeRaw = mockDelegates(prisma).$executeRaw as ReturnType<typeof vi.fn>;
+    const lockCall = executeRaw.mock.calls.findIndex((c: unknown[]) => String(c[0]).includes("pg_advisory_xact_lock"));
+    expect(lockCall).toBeGreaterThanOrEqual(0);
+    expect(executeRaw.mock.calls[lockCall][1]).toBe("user-auth:user-uuid");
+    expect(executeRaw.mock.invocationCallOrder[lockCall]).toBeLessThan(mockConsume.mock.invocationCallOrder[0]);
   });
 
   it("rejects a second concurrent exchange of the same code (single-use CAS)", async () => {

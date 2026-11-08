@@ -297,6 +297,8 @@ describe("Scenario 3: PKCE Token Exchange Success via /api/mcp/token", () => {
     // Wire up the $transaction mock to run through the real PKCE path
     mockWithBypassRls.mockImplementation(async (_p, fn) => {
       const tx = {
+        // The user's credential lock the exchange takes (user-auth-serialization.ts).
+        $executeRaw: vi.fn().mockResolvedValue(1),
         mcpAuthorizationCode: {
           findUnique: vi.fn().mockResolvedValue({
             id: "auth-code-id",

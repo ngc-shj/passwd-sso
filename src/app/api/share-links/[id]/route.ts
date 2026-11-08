@@ -6,8 +6,8 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, unauthorized, notFound } from "@/lib/http/api-response";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION, SHARE_TYPE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { withBypassRls } from "@/lib/tenant-rls";
-import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
+import { withTenantRls } from "@/lib/tenant-rls";
+import { SHARE_LINK_MANAGER, shareLinkManagerOf } from "@/lib/share/share-link-manager";
 import { withRequestLog } from "@/lib/http/with-request-log";
 
 type Params = { params: Promise<{ id: string }> };
@@ -36,28 +36,35 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
     }),
   );
 
-  if (!share || share.createdById !== session.user.id) {
+  if (!share) {
     return notFound();
   }
+
+  // The creator, or for a team entry's link a team OWNER/ADMIN (#995).
+  const manager = await shareLinkManagerOf(session.user.id, share, req);
+  if (!manager) {
+    return notFound();
+  }
+  const byTeamAdmin = manager === SHARE_LINK_MANAGER.TEAM_ADMIN;
 
   if (share.revokedAt) {
     return errorResponse(API_ERROR.ALREADY_REVOKED);
   }
 
-  const teamPasswordEntryId = share.teamPasswordEntryId;
-
-  await withUserTenantRls(session.user.id, async () =>
-    prisma.passwordShare.update({
-      where: { id, createdById: session.user.id },
+  // Revoke and audit in one transaction, the revoke as a compare-and-set on an
+  // unrevoked row: of two concurrent revokes (the creator and an admin, say)
+  // one revokes and audits, the other answers ALREADY_REVOKED.
+  const revoked = await withTenantRls(prisma, share.tenantId, async (tx) => {
+    const { count } = await tx.passwordShare.updateMany({
+      where: byTeamAdmin
+        ? { id, teamPasswordEntryId: share.teamPasswordEntryId, revokedAt: null }
+        : { id, createdById: session.user.id, revokedAt: null },
       data: { revokedAt: new Date() },
-    }),
-  );
-
-  // Atomic audit: SHARE_REVOKE / SEND_REVOKE
-  await withBypassRls(prisma, async (tx) => {
+    });
+    if (count === 0) return false;
     const teamId = share.teamPasswordEntry?.teamId;
     await logAuditInTx(tx, share.tenantId, {
-      ...(teamPasswordEntryId && teamId
+      ...(share.teamPasswordEntryId && teamId
         ? teamAuditBase(req, session.user.id, teamId)
         : personalAuditBase(req, session.user.id)),
       action: share.shareType === SHARE_TYPE.TEXT || share.shareType === SHARE_TYPE.FILE
@@ -65,8 +72,13 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
         : AUDIT_ACTION.SHARE_REVOKE,
       targetType: AUDIT_TARGET_TYPE.PASSWORD_SHARE,
       targetId: share.id,
+      ...(byTeamAdmin ? { metadata: { revokedByTeamAdmin: true, creatorId: share.createdById } } : {}),
     });
-  }, BYPASS_GRANT.AUDIT_WRITE_DIRECT_OUTBOX);
+    return true;
+  });
+  if (!revoked) {
+    return errorResponse(API_ERROR.ALREADY_REVOKED);
+  }
 
   return NextResponse.json({ ok: true });
 }

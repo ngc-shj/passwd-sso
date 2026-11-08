@@ -25,6 +25,7 @@ import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { MS_PER_DAY } from "@/lib/constants/time";
 import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
+import { isSessionRowLive, lockUserAuthArtifacts, UserAuthRevokedError } from "@/lib/auth/session/user-auth-serialization";
 import {
   OPERATOR_TOKEN_PREFIX,
   OPERATOR_TOKEN_DEFAULT_EXPIRES_DAYS,
@@ -188,6 +189,11 @@ async function handlePOST(req: NextRequest) {
   let token;
   try {
     token = await withTenantRls(prisma, actor.tenantId, async (tx) => {
+      // The user lock first (user-auth-serialization.ts): it serializes the
+      // create against a revocation of the user's credentials, under which the
+      // session that authenticated it is re-read.
+      await lockUserAuthArtifacts(tx, session.user.id);
+      if (!(await isSessionRowLive(tx, req, session.user.id))) throw new UserAuthRevokedError("session");
       await advisoryXactLock(tx, actor.tenantId);
       const tokenCount = await tx.operatorToken.count({
         where: {
@@ -224,6 +230,7 @@ async function handlePOST(req: NextRequest) {
     if (e instanceof OperatorTokenLimitError) {
       return errorResponse(API_ERROR.OPERATOR_TOKEN_LIMIT_EXCEEDED);
     }
+    if (e instanceof UserAuthRevokedError) return unauthorized();
     throw e;
   }
 

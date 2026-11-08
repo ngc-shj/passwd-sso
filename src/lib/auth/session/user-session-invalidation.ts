@@ -1,10 +1,12 @@
 import * as Sentry from "@sentry/nextjs";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
 import { invalidateCachedSessionsBulkByDigest, hashSessionToken } from "@/lib/auth/session/session-cache";
 import { getLogger } from "@/lib/logger";
+import { lockUserAuthArtifacts } from "@/lib/auth/session/user-auth-serialization";
 
 /**
  * Options for {@link invalidateUserSessions}.
@@ -58,6 +60,10 @@ export type InvalidateUserSessionsResult = {
   mcpRefreshTokens: number;
   delegationSessions: number;
   operatorTokens: number;
+  /** Single-use codes consumed: each exchanges for a fresh token with no session (#974 round 2). */
+  extensionBridgeCodes: number;
+  mobileBridgeCodes: number;
+  mcpAuthorizationCodes: number;
   cacheTombstoneFailures: number;
 };
 
@@ -115,57 +121,15 @@ export async function invalidateUserSessions(
   const now = new Date();
 
   return withBypassRls(prisma, async (tx) => {
-    // SELECT tokens before deleteMany so we can invalidate the cache after
-    // the DB delete commits (R3 / S-6 sequencing).
-    const targetSessions = await tx.session.findMany({
-      where: {
-        userId,
-        ...tenantFilter,
-        ...(excludeSessionDigest ? { sessionToken: { not: excludeSessionDigest } } : {}),
-      },
-      select: { sessionToken: true },
-    });
-
-    const sessionsResult = await tx.session.deleteMany({
-      where: {
-        userId,
-        ...tenantFilter,
-        ...(excludeSessionDigest ? { sessionToken: { not: excludeSessionDigest } } : {}),
-      },
-    });
-    const extensionTokensResult = await tx.extensionToken.updateMany({
-      where: { userId, revokedAt: null, ...tenantFilter },
-      data: { revokedAt: now },
-    });
-    const apiKeysResult = await tx.apiKey.updateMany({
-      where: { userId, revokedAt: null, ...tenantFilter },
-      data: { revokedAt: now },
-    });
-    const mcpAccessTokensResult = await tx.mcpAccessToken.updateMany({
-      where: { userId, revokedAt: null, ...tenantFilter },
-      data: { revokedAt: now },
-    });
-    const mcpRefreshTokensResult = await tx.mcpRefreshToken.updateMany({
-      where: { userId, revokedAt: null, ...tenantFilter },
-      data: { revokedAt: now },
-    });
-    const delegationSessionsResult = await tx.delegationSession.updateMany({
-      where: { userId, revokedAt: null, ...tenantFilter },
-      data: { revokedAt: now },
-    });
-    // OperatorToken uses subjectUserId (not userId) as the "authenticates
-    // as" column. Same tenantFilter semantics — all-tenants for vault
-    // reset, single-tenant for member removal.
-    const operatorTokensResult = await tx.operatorToken.updateMany({
-      where: { subjectUserId: userId, revokedAt: null, ...tenantFilter },
-      data: { revokedAt: now },
+    const { counts, sessionTokens } = await revokeUserAuthArtifactsInTx(tx, userId, {
+      tenantFilter,
+      excludeSessionDigest,
+      now,
     });
 
     let cacheTombstoneFailures = 0;
-    if (targetSessions.length > 0) {
-      const cacheResult = await invalidateCachedSessions(
-        targetSessions.map((s) => s.sessionToken),
-      );
+    if (sessionTokens.length > 0) {
+      const cacheResult = await invalidateCachedSessions(sessionTokens);
       cacheTombstoneFailures = cacheResult.failed;
     }
 
@@ -199,7 +163,105 @@ export async function invalidateUserSessions(
       );
     }
 
-    return {
+    return { ...counts, cacheTombstoneFailures };
+  }, BYPASS_GRANT.USER_SESSION_INVALIDATION);
+}
+
+type UserAuthArtifactCounts = Omit<InvalidateUserSessionsResult, "cacheTombstoneFailures">;
+
+/**
+ * The database half of `invalidateUserSessions`, on the caller's
+ * transaction: delete the user's sessions and revoke every user-bound token
+ * (the same models, same scope rules). Lets a caller make the revocation
+ * atomic with its own write — the admin passkey revoke deletes the credential
+ * and its possible sign-ins together, or neither. Returns the deleted
+ * sessions' token digests: the caller tombstones them in the session cache
+ * AFTER its transaction commits.
+ *
+ * The caller's bypass grant must cover session, extensionToken, apiKey,
+ * mcpAccessToken, mcpRefreshToken, delegationSession, operatorToken,
+ * extensionBridgeCode, mobileBridgeCode and mcpAuthorizationCode.
+ */
+export async function revokeUserAuthArtifactsInTx(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  options: {
+    tenantFilter: { tenantId?: string };
+    excludeSessionDigest?: string | null;
+    now?: Date;
+  },
+): Promise<{ counts: UserAuthArtifactCounts; sessionTokens: string[] }> {
+  const { tenantFilter, excludeSessionDigest = null } = options;
+  const now = options.now ?? new Date();
+  // Serialized against every mint of a user-bound credential
+  // (user-auth-serialization.ts): a mint that waited on this revocation finds
+  // its proof gone; one that went first is revoked below.
+  await lockUserAuthArtifacts(tx, userId);
+  // SELECT tokens before deleteMany so we can invalidate the cache after
+  // the DB delete commits (R3 / S-6 sequencing).
+  const targetSessions = await tx.session.findMany({
+    where: {
+      userId,
+      ...tenantFilter,
+      ...(excludeSessionDigest ? { sessionToken: { not: excludeSessionDigest } } : {}),
+    },
+    select: { sessionToken: true },
+  });
+
+  const sessionsResult = await tx.session.deleteMany({
+    where: {
+      userId,
+      ...tenantFilter,
+      ...(excludeSessionDigest ? { sessionToken: { not: excludeSessionDigest } } : {}),
+    },
+  });
+  const extensionTokensResult = await tx.extensionToken.updateMany({
+    where: { userId, revokedAt: null, ...tenantFilter },
+    data: { revokedAt: now },
+  });
+  const apiKeysResult = await tx.apiKey.updateMany({
+    where: { userId, revokedAt: null, ...tenantFilter },
+    data: { revokedAt: now },
+  });
+  const mcpAccessTokensResult = await tx.mcpAccessToken.updateMany({
+    where: { userId, revokedAt: null, ...tenantFilter },
+    data: { revokedAt: now },
+  });
+  const mcpRefreshTokensResult = await tx.mcpRefreshToken.updateMany({
+    where: { userId, revokedAt: null, ...tenantFilter },
+    data: { revokedAt: now },
+  });
+  const delegationSessionsResult = await tx.delegationSession.updateMany({
+    where: { userId, revokedAt: null, ...tenantFilter },
+    data: { revokedAt: now },
+  });
+  // OperatorToken uses subjectUserId (not userId) as the "authenticates
+  // as" column. Same tenantFilter semantics — all-tenants for vault
+  // reset, single-tenant for member removal.
+  const operatorTokensResult = await tx.operatorToken.updateMany({
+    where: { subjectUserId: userId, revokedAt: null, ...tenantFilter },
+    data: { revokedAt: now },
+  });
+
+  // A pending single-use code is consumed, not left to expire: its exchange
+  // needs no session and checks no passkey requirement, so a code obtained
+  // before this revocation would mint a fresh extension, iOS or MCP token after
+  // it. The bootstrap migration consumes the same three (src/auth.ts).
+  const extensionBridgeCodesResult = await tx.extensionBridgeCode.updateMany({
+    where: { userId, usedAt: null, ...tenantFilter },
+    data: { usedAt: now },
+  });
+  const mobileBridgeCodesResult = await tx.mobileBridgeCode.updateMany({
+    where: { userId, usedAt: null, ...tenantFilter },
+    data: { usedAt: now },
+  });
+  const mcpAuthorizationCodesResult = await tx.mcpAuthorizationCode.updateMany({
+    where: { userId, usedAt: null, ...tenantFilter },
+    data: { usedAt: now },
+  });
+
+  return {
+    counts: {
       sessions: sessionsResult.count,
       extensionTokens: extensionTokensResult.count,
       apiKeys: apiKeysResult.count,
@@ -207,9 +269,12 @@ export async function invalidateUserSessions(
       mcpRefreshTokens: mcpRefreshTokensResult.count,
       delegationSessions: delegationSessionsResult.count,
       operatorTokens: operatorTokensResult.count,
-      cacheTombstoneFailures,
-    };
-  }, BYPASS_GRANT.USER_SESSION_INVALIDATION);
+      extensionBridgeCodes: extensionBridgeCodesResult.count,
+      mobileBridgeCodes: mobileBridgeCodesResult.count,
+      mcpAuthorizationCodes: mcpAuthorizationCodesResult.count,
+    },
+    sessionTokens: targetSessions.map((session) => session.sessionToken),
+  };
 }
 
 /**

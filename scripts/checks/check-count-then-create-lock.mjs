@@ -86,6 +86,14 @@ const COUNT_RE = /\.(count|aggregate|findMany)\s*\(/;
 // tenant's client count with no `.create` at all), or upsert.
 const CREATE_RE = /\.(create|createMany|updateMany|upsert)\s*\(/;
 const LOCK_RE = /pg_advisory_xact_lock|advisoryXactLock\s*\(/;
+// The per-user credential lock (user-auth-serialization.ts) wraps
+// advisoryXactLock; it counts only when imported from its module, so a local
+// function of the same name does not pass for a lock.
+const CREDENTIAL_LOCK_CALL_RE = /\blockUserAuthArtifacts\s*\(/;
+const CREDENTIAL_LOCK_IMPORT_RE =
+  /import\s*\{[^}]*\blockUserAuthArtifacts\b[^}]*\}\s*from\s*["']@\/lib\/auth\/session\/user-auth-serialization["']/;
+const hasLock = (src) =>
+  LOCK_RE.test(src) || (CREDENTIAL_LOCK_CALL_RE.test(src) && CREDENTIAL_LOCK_IMPORT_RE.test(src));
 const RLS_WRAPPER_RE = /with(?:Bypass|Tenant|UserTenant|TeamTenant)Rls\s*\(/;
 
 function walk(dir) {
@@ -125,7 +133,7 @@ for (const file of files) {
     continue; // exempt sites are allowed to lack the lock
   }
 
-  if (isCapThenCreate && !LOCK_RE.test(src)) {
+  if (isCapThenCreate && !hasLock(src)) {
     violations.push(rel);
   }
 }

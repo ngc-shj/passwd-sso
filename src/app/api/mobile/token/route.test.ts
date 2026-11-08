@@ -133,6 +133,7 @@ vi.mock("@/lib/logger", () => ({
   getLogger: () => ({ warn: mockWarn, error: mockError, info: vi.fn() }),
 }));
 
+import { UserAuthRevokedError } from "@/lib/auth/session/user-auth-serialization";
 import { POST } from "./route";
 
 // The module-level `tokenLimiter = createRateLimiter(...)` call in route.ts
@@ -243,13 +244,22 @@ describe("POST /api/mobile/token", () => {
     });
     mockVerifyPkceS256.mockReturnValue(true);
     mockVerifyDpop.mockResolvedValue(happyDpop());
-    mockIssueIosToken.mockResolvedValue({
-      accessToken: "acc-tok",
-      refreshToken: "ref-tok",
-      expiresAt: new Date(Date.now() + 86_400_000),
-      familyId: "fam-1",
-      familyCreatedAt: new Date(),
-      tokenId: TOKEN_ID,
+    // issueIosToken consumes the bridge code inside its transaction (the
+    // route's consumeProof, run for real here), and issues nothing when the
+    // CAS loses — that half is issueIosToken's own contract, pinned against the
+    // real function in mobile-token.test.ts ("issues nothing when its proof is
+    // gone once the credential lock is held").
+    mockIssueIosToken.mockImplementation(async (params: { consumeProof: (tx: unknown) => Promise<boolean> }) => {
+      const held = await params.consumeProof({ mobileBridgeCode: { updateMany: mockMobileBridgeCodeUpdateMany } });
+      if (!held) throw new UserAuthRevokedError("code");
+      return {
+        accessToken: "acc-tok",
+        refreshToken: "ref-tok",
+        expiresAt: new Date(Date.now() + 86_400_000),
+        familyId: "fam-1",
+        familyCreatedAt: new Date(),
+        tokenId: TOKEN_ID,
+      };
     });
   });
 
@@ -314,7 +324,8 @@ describe("POST /api/mobile/token", () => {
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
     expect(json.error).toBe("MOBILE_BRIDGE_CODE_INVALID");
-    expect(mockIssueIosToken).not.toHaveBeenCalled();
+    // The CAS runs inside the issuing transaction; losing it issues nothing.
+    expect(mockLogAuditAsync).not.toHaveBeenCalledWith(expect.objectContaining({ action: "MOBILE_TOKEN_ISSUED" }));
   });
 
   it("returns MOBILE_BRIDGE_CODE_INVALID (NOT a separate code) when PKCE verification fails — S7 uniform error", async () => {

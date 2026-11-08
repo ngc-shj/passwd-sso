@@ -183,7 +183,7 @@ These user-meaningful fields should be rendered in `getTargetLabel()` with i18n 
 | Action | Scope | targetType | metadata | UI display |
 |--------|-------|------------|----------|------------|
 | `SHARE_CREATE` | PERSONAL/TEAM | PasswordShare | `{ expiresIn, maxViews }` | — (export-only) |
-| `SHARE_REVOKE` | PERSONAL/TEAM | PasswordShare | — | — |
+| `SHARE_REVOKE` | PERSONAL/TEAM | PasswordShare | `{ revokedByTeamAdmin, creatorId }` when a team OWNER/ADMIN revoked another member's link (#995); none when the creator did | — |
 | `SHARE_ACCESS_VERIFY_SUCCESS` | PERSONAL | PasswordShare | `{ ip }` | — (export-only) |
 | `SHARE_ACCESS_VERIFY_FAILED` | PERSONAL | PasswordShare | `{ ip }` | — (export-only) |
 
@@ -283,6 +283,8 @@ These user-meaningful fields should be rendered in `getTargetLabel()` with i18n 
 | `ADMIN_VAULT_RESET_EXECUTE` | TENANT | User | `{ deletedEntries, deletedAttachments, ... }` | deletedEntries |
 | `ADMIN_VAULT_RESET_REVOKE` | TENANT | User | `{ revokedById, resetId }` | — (export-only) |
 | `TENANT_ROLE_UPDATE` | TENANT | TenantMember | `{ newRole, previousRole, transfer }` | roleChange template |
+| `TENANT_MEMBER_PASSKEY_REVOKE` | TENANT | WebAuthnCredential | `{ targetUserId, credentialId, registeredInTenant, sessions, extensionTokens, apiKeys, ... }` | — (export-only) |
+| `TENANT_MEMBER_PASSKEY_REVOKE_ALL` | TENANT | User | `{ targetUserId, passkeys, credentialIds, credentialIdsOmitted, sessions, extensionTokens, apiKeys, ... }` | — (export-only) |
 
 **Notes:**
 - `resetId` added to ADMIN_VAULT_RESET_INITIATE by `audit-metadata-standardize` branch.
@@ -291,6 +293,9 @@ These user-meaningful fields should be rendered in `getTargetLabel()` with i18n 
 - TEAM_KEY_ROTATION_CARRY: one row per entry a rotation left unchanged (written in the rotation's transaction beside the summary TEAM_KEY_ROTATION row); `targetId` is the entry id, `reason` is `not_held`, `undecryptable` or `key_invalid` as claimed by the rotating member (the row's actor), `teamKeyVersion` the entry's version. An `undecryptable` / `key_invalid` carry is that member's unverifiable claim; the entry stays on its old key until another holder re-keys it.
 - TEAM_ENTRY_REKEY / TEAM_ATTACHMENT_MIGRATE: written in the re-key / migrate transaction (team-key-rotation-rekey plan C2/C4). The original history and attachment attribution is kept although the actor rewrote the ciphertext. TEAM_ENTRY_REKEY: `fromTeamKeyVersion` is the team key version the replaced ItemKey was created under (0 when unknown), `retained` lists the history rows left as they were (`{ id, teamKeyVersion, itemKeyVersion }` each). TEAM_ATTACHMENT_MIGRATE: `toItemKeyVersion` is the ItemKey version the attachment's CEK is now wrapped under.
 - TENANT_ROLE_UPDATE: `transfer` is true for ownership transfers.
+- TENANT_MEMBER_PASSKEY_REVOKE: a tenant admin deleted a member's passkey (#974). Written in the transaction that deletes the credential and revokes the member's sessions and tokens in every tenant (the passkey is user-global); the counts are those revocations. `registeredInTenant` is false for a passkey registered under another tenant; that tenant gets its own row (see below).
+- TENANT_MEMBER_PASSKEY_REVOKE_ALL: a tenant admin deleted every passkey a member has, in every tenant, with the same revocations in the same transaction (#974). `passkeys` is how many were deleted, `credentialIds` the first 10 public credential ids (each cut to 512 characters), `credentialIdsOmitted` how many more there were. The containment path: under the member's credential lock no passkey can be registered meanwhile.
+- Both passkey revoke actions also write a row into each other tenant a revoked passkey was registered under, in the same transaction: actor SYSTEM (`userId` the system actor, no IP or user agent), metadata `{ targetUserId, revokedFromTenantId, ... }` naming only that tenant's passkeys (`credentialId` + `registeredInTenant: true`, or `passkeys` / `credentialIds` / `credentialIdsOmitted`) — not the revoking admin, nor the session/token counts across the member's tenants.
 
 ### SCIM Provisioning (`group:scim`)
 

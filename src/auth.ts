@@ -21,6 +21,7 @@ import {
 import type { ClaimRefusalDiagnosis } from "@/lib/tenant/claim-refusal";
 import { classifySentinelTenantConstraint } from "@/lib/tenant/sentinel-tenant-constraint";
 import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
+import { lockUserAuthArtifacts } from "@/lib/auth/session/user-auth-serialization";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import {
@@ -601,6 +602,10 @@ async function claimedTenantMembership(
     // updateMany would otherwise leave stale cache entries up to TTL).
     let migratedSessionTokens: string[] = [];
     await prisma.$transaction(async (tx) => {
+      // The user's credential lock first (user-auth-serialization.ts): this
+      // migration revokes the user's tokens and consumes their pending codes,
+      // so a mint must not commit a credential around it.
+      await lockUserAuthArtifacts(tx, userId);
       await assertBootstrapSingleMember(tx, existingTenantId); // row 6b throw
 
       // Migrate user and account rows

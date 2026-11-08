@@ -126,6 +126,9 @@ async function auditFamilyRevokedRows(
   return rows.map((r) => r.payload);
 }
 
+// The bridge-code proof is not what these cells test: always held.
+const PROOF_HELD = async () => true;
+
 describe("passkey-signin-client-token-cascade C3 — active-family cap (real DB)", () => {
   let ctx: TestContext;
   let tenantId: string;
@@ -159,12 +162,14 @@ describe("passkey-signin-client-token-cascade C3 — active-family cap (real DB)
 
   it("(a) an extension family + an iOS family + an active AutoFill token: a new extension install evicts nothing", async () => {
     const ext1 = await issueExtensionToken({
+      consumeProof: PROOF_HELD,
       userId,
       tenantId,
       scope: "passwords:read",
       cnfJkt: cnfJkt("ext1"),
     });
     const ios1 = await issueIosToken({
+      consumeProof: PROOF_HELD,
       userId,
       tenantId,
       deviceJkt: cnfJkt("ios1"),
@@ -173,13 +178,14 @@ describe("passkey-signin-client-token-cascade C3 — active-family cap (real DB)
       absoluteMinutes: ABSOLUTE_MINUTES,
       presenceAt: new Date(),
     });
-    await issueAutofillToken({ userId, tenantId, cnfJkt: cnfJkt("af1") });
+    await issueAutofillToken({ userId, tenantId, cnfJkt: cnfJkt("af1"), authorizingTokenId: ios1.tokenId });
 
     const fam1 = await familyIdForToken(ext1.token);
     const before = await activeFamilies(ctx, userId);
     expect(before.sort()).toEqual([fam1, ios1.familyId].sort());
 
     const ext2 = await issueExtensionToken({
+      consumeProof: PROOF_HELD,
       userId,
       tenantId,
       scope: "passwords:read",
@@ -196,18 +202,18 @@ describe("passkey-signin-client-token-cascade C3 — active-family cap (real DB)
   // ── (b) a 4th family evicts exactly the family with the oldest presence ──
 
   it("(b) a 4th family evicts exactly the family with the oldest presence, all of its rows", async () => {
-    const ext1 = await issueExtensionToken({ userId, tenantId, scope: "passwords:read", cnfJkt: cnfJkt("b1") });
+    const ext1 = await issueExtensionToken({ userId, tenantId, scope: "passwords:read", cnfJkt: cnfJkt("b1"), consumeProof: PROOF_HELD });
     const fam1 = await familyIdForToken(ext1.token);
-    const ext2 = await issueExtensionToken({ userId, tenantId, scope: "passwords:read", cnfJkt: cnfJkt("b2") });
+    const ext2 = await issueExtensionToken({ userId, tenantId, scope: "passwords:read", cnfJkt: cnfJkt("b2"), consumeProof: PROOF_HELD });
     const fam2 = await familyIdForToken(ext2.token);
-    const ext3 = await issueExtensionToken({ userId, tenantId, scope: "passwords:read", cnfJkt: cnfJkt("b3") });
+    const ext3 = await issueExtensionToken({ userId, tenantId, scope: "passwords:read", cnfJkt: cnfJkt("b3"), consumeProof: PROOF_HELD });
     const fam3 = await familyIdForToken(ext3.token);
 
     await backdatePresence(ctx, fam1, new Date("2025-06-01"));
     await backdatePresence(ctx, fam2, new Date("2025-01-01")); // oldest
     await backdatePresence(ctx, fam3, new Date("2025-06-02"));
 
-    const ext4 = await issueExtensionToken({ userId, tenantId, scope: "passwords:read", cnfJkt: cnfJkt("b4") });
+    const ext4 = await issueExtensionToken({ userId, tenantId, scope: "passwords:read", cnfJkt: cnfJkt("b4"), consumeProof: PROOF_HELD });
     const fam4 = await familyIdForToken(ext4.token);
 
     expect(await isFamilyFullyRevoked(ctx, fam2)).toBe(true);
@@ -228,12 +234,12 @@ describe("passkey-signin-client-token-cascade C3 — active-family cap (real DB)
     const cnfA = cnfJkt("same-device");
     const cnfB = cnfJkt("other-device");
 
-    const extA1 = await issueExtensionToken({ userId, tenantId, scope: "passwords:read", cnfJkt: cnfA });
+    const extA1 = await issueExtensionToken({ userId, tenantId, scope: "passwords:read", cnfJkt: cnfA, consumeProof: PROOF_HELD });
     const famA1 = await familyIdForToken(extA1.token);
-    const extB = await issueExtensionToken({ userId, tenantId, scope: "passwords:read", cnfJkt: cnfB });
+    const extB = await issueExtensionToken({ userId, tenantId, scope: "passwords:read", cnfJkt: cnfB, consumeProof: PROOF_HELD });
     const famB = await familyIdForToken(extB.token);
 
-    const extA2 = await issueExtensionToken({ userId, tenantId, scope: "passwords:read", cnfJkt: cnfA });
+    const extA2 = await issueExtensionToken({ userId, tenantId, scope: "passwords:read", cnfJkt: cnfA, consumeProof: PROOF_HELD });
     const famA2 = await familyIdForToken(extA2.token);
 
     expect(await isFamilyFullyRevoked(ctx, famA1)).toBe(true);
@@ -252,11 +258,12 @@ describe("passkey-signin-client-token-cascade C3 — active-family cap (real DB)
   // ── (d) iOS refresh (familyId supplied) never evicts ────────────────────
 
   it("(d) iOS refresh (familyId supplied) with the cap already reached evicts nothing", async () => {
-    const ext1 = await issueExtensionToken({ userId, tenantId, scope: "passwords:read", cnfJkt: cnfJkt("d1") });
+    const ext1 = await issueExtensionToken({ userId, tenantId, scope: "passwords:read", cnfJkt: cnfJkt("d1"), consumeProof: PROOF_HELD });
     const fam1 = await familyIdForToken(ext1.token);
-    const ext2 = await issueExtensionToken({ userId, tenantId, scope: "passwords:read", cnfJkt: cnfJkt("d2") });
+    const ext2 = await issueExtensionToken({ userId, tenantId, scope: "passwords:read", cnfJkt: cnfJkt("d2"), consumeProof: PROOF_HELD });
     const fam2 = await familyIdForToken(ext2.token);
     const ios1 = await issueIosToken({
+      consumeProof: PROOF_HELD,
       userId,
       tenantId,
       deviceJkt: cnfJkt("d3"),
@@ -272,6 +279,7 @@ describe("passkey-signin-client-token-cascade C3 — active-family cap (real DB)
     // Refresh-rotation continuing ios1's OWN family (familyId supplied) —
     // must skip supersede + cap entirely.
     const refreshed = await issueIosToken({
+      consumeProof: PROOF_HELD,
       userId,
       tenantId,
       deviceJkt: cnfJkt("d3"),
@@ -296,7 +304,7 @@ describe("passkey-signin-client-token-cascade C3 — active-family cap (real DB)
     const cnfs = Array.from({ length: 10 }, (_, i) => cnfJkt(`conc-${i}`));
     await Promise.all(
       cnfs.map((cnf) =>
-        issueExtensionToken({ userId, tenantId, scope: "passwords:read", cnfJkt: cnf }),
+        issueExtensionToken({ userId, tenantId, scope: "passwords:read", cnfJkt: cnf, consumeProof: PROOF_HELD }),
       ),
     );
 
@@ -322,6 +330,7 @@ describe("passkey-signin-client-token-cascade C3 — active-family cap (real DB)
   it("(f) a genuinely older family is evicted, not one whose only recent presence sits on an expired row", async () => {
     const now = Date.now();
     const iosX = await issueIosToken({
+      consumeProof: PROOF_HELD,
       userId,
       tenantId,
       deviceJkt: cnfJkt("f-ios"),
@@ -352,18 +361,18 @@ describe("passkey-signin-client-token-cascade C3 — active-family cap (real DB)
       );
     });
 
-    const extY = await issueExtensionToken({ userId, tenantId, scope: "passwords:read", cnfJkt: cnfJkt("f-y") });
+    const extY = await issueExtensionToken({ userId, tenantId, scope: "passwords:read", cnfJkt: cnfJkt("f-y"), consumeProof: PROOF_HELD });
     const famY = await familyIdForToken(extY.token);
     await backdatePresence(ctx, famY, new Date(now - 2 * 60 * 60 * 1000)); // genuinely 2h old
 
-    const extZ = await issueExtensionToken({ userId, tenantId, scope: "passwords:read", cnfJkt: cnfJkt("f-z") });
+    const extZ = await issueExtensionToken({ userId, tenantId, scope: "passwords:read", cnfJkt: cnfJkt("f-z"), consumeProof: PROOF_HELD });
     const famZ = await familyIdForToken(extZ.token);
     // famZ keeps its just-issued (now) presence.
 
     const before = await activeFamilies(ctx, userId);
     expect(before.sort()).toEqual([iosX.familyId, famY, famZ].sort());
 
-    const extW = await issueExtensionToken({ userId, tenantId, scope: "passwords:read", cnfJkt: cnfJkt("f-w") });
+    const extW = await issueExtensionToken({ userId, tenantId, scope: "passwords:read", cnfJkt: cnfJkt("f-w"), consumeProof: PROOF_HELD });
     const famW = await familyIdForToken(extW.token);
 
     expect(await isFamilyFullyRevoked(ctx, famY)).toBe(true);
@@ -374,11 +383,11 @@ describe("passkey-signin-client-token-cascade C3 — active-family cap (real DB)
   // ── (g) tie-break: equal presence → lower familyId evicted ──────────────
 
   it("(g) equal presence: the lexicographically lower familyId is evicted (deterministic tie-break)", async () => {
-    const extA = await issueExtensionToken({ userId, tenantId, scope: "passwords:read", cnfJkt: cnfJkt("g-a") });
+    const extA = await issueExtensionToken({ userId, tenantId, scope: "passwords:read", cnfJkt: cnfJkt("g-a"), consumeProof: PROOF_HELD });
     const famA = await familyIdForToken(extA.token);
-    const extB = await issueExtensionToken({ userId, tenantId, scope: "passwords:read", cnfJkt: cnfJkt("g-b") });
+    const extB = await issueExtensionToken({ userId, tenantId, scope: "passwords:read", cnfJkt: cnfJkt("g-b"), consumeProof: PROOF_HELD });
     const famB = await familyIdForToken(extB.token);
-    const extC = await issueExtensionToken({ userId, tenantId, scope: "passwords:read", cnfJkt: cnfJkt("g-c") });
+    const extC = await issueExtensionToken({ userId, tenantId, scope: "passwords:read", cnfJkt: cnfJkt("g-c"), consumeProof: PROOF_HELD });
     const famC = await familyIdForToken(extC.token);
 
     const tiedPresence = new Date(Date.now() - 3_600_000);
@@ -388,7 +397,7 @@ describe("passkey-signin-client-token-cascade C3 — active-family cap (real DB)
 
     const [lower, higher] = [famA, famB].sort();
 
-    const extD = await issueExtensionToken({ userId, tenantId, scope: "passwords:read", cnfJkt: cnfJkt("g-d") });
+    const extD = await issueExtensionToken({ userId, tenantId, scope: "passwords:read", cnfJkt: cnfJkt("g-d"), consumeProof: PROOF_HELD });
     const famD = await familyIdForToken(extD.token);
 
     expect(await isFamilyFullyRevoked(ctx, lower)).toBe(true);
@@ -401,9 +410,19 @@ describe("passkey-signin-client-token-cascade C3 — active-family cap (real DB)
 
   it("(h) N concurrent AutoFill mints leave exactly one active IOS_AUTOFILL row", async () => {
     const N = 10;
+    const host = await issueIosToken({
+      consumeProof: PROOF_HELD,
+      userId,
+      tenantId,
+      deviceJkt: cnfJkt("h-host"),
+      cnfJkt: cnfJkt("h-host"),
+      idleMinutes: IDLE_MINUTES,
+      absoluteMinutes: ABSOLUTE_MINUTES,
+      presenceAt: new Date(),
+    });
     await Promise.all(
       Array.from({ length: N }, (_, i) =>
-        issueAutofillToken({ userId, tenantId, cnfJkt: cnfJkt(`h-${i}`) }),
+        issueAutofillToken({ userId, tenantId, cnfJkt: cnfJkt(`h-${i}`), authorizingTokenId: host.tokenId }),
       ),
     );
 

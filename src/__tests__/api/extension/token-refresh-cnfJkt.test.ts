@@ -110,6 +110,8 @@ describe("POST /api/extension/token/refresh — cnfJkt preservation (C10)", () =
 
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
       const txMock = {
+        // The user's credential lock (user-auth-serialization.ts).
+        $executeRaw: vi.fn().mockResolvedValue(1),
         extensionToken: {
           updateMany: vi.fn().mockResolvedValue({ count: 1 }),
           create: vi.fn().mockResolvedValue(newToken),
@@ -137,6 +139,7 @@ describe("POST /api/extension/token/refresh — cnfJkt preservation (C10)", () =
     }) => unknown);
     // Re-examine by inspecting the mock transaction's inner create call
     const txMock = {
+      $executeRaw: vi.fn().mockResolvedValue(1),
       extensionToken: {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         create: vi.fn().mockResolvedValue(newToken),

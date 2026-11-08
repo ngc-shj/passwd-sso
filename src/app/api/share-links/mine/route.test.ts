@@ -19,7 +19,8 @@ const { mockUserFindMany, mockWithBypassRls } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/auth/access/team-auth", () => ({
+vi.mock("@/lib/auth/access/team-auth", async () => ({
+  hasTeamPermission: (await vi.importActual<typeof import("@/lib/auth/access/team-auth")>("@/lib/auth/access/team-auth")).hasTeamPermission,
   requireTeamMember: mockRequireTeamMember,
   TeamAuthError: class TeamAuthError extends Error {
     status: number;

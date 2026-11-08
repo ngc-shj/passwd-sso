@@ -2036,20 +2036,20 @@ const SESSION_CAP = "src/lib/auth/session/session-concurrency.ts";
 
 describe("grant over-breadth", () => {
   it("fails a grant model no call naming the grant reaches", () => {
-    // AUTH_SESSION_CAPPING lists session + tenant. This fixture reaches only
+    // AUTH_DELETE_USER lists session + user. This fixture reaches only
     // the second, so the first is a permission with nothing behind it.
     const { code, stderr } = run(SESSION_CAP, `
 import { withBypassRls } from "@/lib/tenant-rls"; import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 const id = "t";
 export async function GET() {
-  return withBypassRls(prisma, async (tx) => tx.tenant.findUnique({ where: { id } }), BYPASS_GRANT.AUTH_SESSION_CAPPING);
+  return withBypassRls(prisma, async (tx) => tx.user.findUnique({ where: { id } }), BYPASS_GRANT.AUTH_DELETE_USER);
 }`);
     expect(code).toBe(1);
     expect(stderr).toContain("lists a model no call naming it reaches");
-    expect(stderr).toMatch(/src\/lib\/tenant-rls-grants\.ts:\d+  BYPASS_GRANT\.AUTH_SESSION_CAPPING  prisma\.session\n/);
+    expect(stderr).toMatch(/src\/lib\/tenant-rls-grants\.ts:\d+  BYPASS_GRANT\.AUTH_DELETE_USER  prisma\.session\n/);
     // The one it DOES reach must not be reported alongside it, or the message
     // stops naming what to remove.
-    expect(stderr).not.toContain("prisma.tenant\n");
+    expect(stderr).not.toContain("prisma.user\n");
   });
 
   it("passes when every model of the grant is reached", () => {
@@ -2058,9 +2058,9 @@ import { withBypassRls } from "@/lib/tenant-rls"; import { BYPASS_GRANT } from "
 const id = "t";
 export async function GET() {
   return withBypassRls(prisma, async (tx) => {
-    await tx.tenant.findUnique({ where: { id } });
+    await tx.user.findUnique({ where: { id } });
     return tx.session.findMany({});
-  }, BYPASS_GRANT.AUTH_SESSION_CAPPING);
+  }, BYPASS_GRANT.AUTH_DELETE_USER);
 }`);
     expect(code).toBe(0);
     expect(stdout).toContain("check-bypass-rls: OK");
@@ -2071,8 +2071,8 @@ export async function GET() {
     // only when NO call naming it reaches the model.
     const { code, stdout } = run(SESSION_CAP, `
 import { withBypassRls } from "@/lib/tenant-rls"; import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
-export const a = () => withBypassRls(prisma, async (tx) => tx.tenant.count(), BYPASS_GRANT.AUTH_SESSION_CAPPING);
-export const b = () => withBypassRls(prisma, async (tx) => tx.session.count(), BYPASS_GRANT.AUTH_SESSION_CAPPING);`);
+export const a = () => withBypassRls(prisma, async (tx) => tx.user.count(), BYPASS_GRANT.AUTH_DELETE_USER);
+export const b = () => withBypassRls(prisma, async (tx) => tx.session.count(), BYPASS_GRANT.AUTH_DELETE_USER);`);
     expect(code).toBe(0);
     expect(stdout).toContain("check-bypass-rls: OK");
   });
@@ -2089,9 +2089,9 @@ import { resolveSomething } from "@/lib/elsewhere";
 const id = "t";
 export async function GET() {
   return withBypassRls(prisma, async (tx) => {
-    await tx.tenant.findUnique({ where: { id } });
+    await tx.user.findUnique({ where: { id } });
     return resolveSomething(tx, id);
-  }, BYPASS_GRANT.AUTH_SESSION_CAPPING);
+  }, BYPASS_GRANT.AUTH_DELETE_USER);
 }`],
       ["src/lib/elsewhere.ts", `export async function resolveSomething(db: TX, id) { return db.session.findMany({}); }`],
     ]);
@@ -2105,7 +2105,7 @@ export async function GET() {
     const { code, stdout } = run(SESSION_CAP, `
 import { withBypassRls } from "@/lib/tenant-rls"; import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 export async function GET() {
-  return withBypassRls(prisma, async (tx) => tx.$executeRaw\`SELECT 1\`, BYPASS_GRANT.AUTH_SESSION_CAPPING);
+  return withBypassRls(prisma, async (tx) => tx.$executeRaw\`SELECT 1\`, BYPASS_GRANT.AUTH_DELETE_USER);
 }`);
     expect(code).toBe(0);
     expect(stdout).toContain("check-bypass-rls: OK");
@@ -2119,9 +2119,9 @@ export async function GET() {
 import { withBypassRls } from "@/lib/tenant-rls"; import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 export async function GET() {
   return withBypassRls(prisma, async (tx) => {
-    await tx.tenant.count();
+    await tx.user.count();
     await tx.$executeRaw\`CALL some_definer_procedure()\`;
-  }, BYPASS_GRANT.AUTH_SESSION_CAPPING);
+  }, BYPASS_GRANT.AUTH_DELETE_USER);
 }`);
     expect(code).toBe(0);
     expect(stdout).toContain("check-bypass-rls: OK");
@@ -2130,12 +2130,12 @@ export async function GET() {
   it("fails a grant no call or self-setting site names", () => {
     const { code, stderr } = runMulti([[SESSION_CAP, `
 import { withBypassRls } from "@/lib/tenant-rls"; import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
-export const a = () => withBypassRls(prisma, async (tx) => { await tx.tenant.count(); await tx.session.count(); }, BYPASS_GRANT.AUTH_SESSION_CAPPING);`]],
+export const a = () => withBypassRls(prisma, async (tx) => { await tx.user.count(); await tx.session.count(); }, BYPASS_GRANT.AUTH_DELETE_USER);`]],
     CHECKER, { keepGrants: ["WEBHOOK_SECRET_MIGRATION"] });
     expect(code).toBe(1);
     expect(stderr).toContain("stale grant: a BYPASS_GRANT member no withBypassRls call or self-setting site names.");
     expect(stderr).toMatch(/src\/lib\/tenant-rls-grants\.ts:\d+  BYPASS_GRANT\.WEBHOOK_SECRET_MIGRATION\n/);
-    expect(stderr).not.toContain("BYPASS_GRANT.AUTH_SESSION_CAPPING");
+    expect(stderr).not.toContain("BYPASS_GRANT.AUTH_DELETE_USER");
   });
 
   it("counts a grant handed to setBypassGucs as named, through an own wrapper too", () => {
@@ -2143,7 +2143,7 @@ export const a = () => withBypassRls(prisma, async (tx) => { await tx.tenant.cou
     // grant is used, and its reach is the database's to report.
     const { code, stdout } = runMulti([[SESSION_CAP, `
 import { withBypassRls } from "@/lib/tenant-rls"; import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
-export const a = () => withBypassRls(prisma, async (tx) => { await tx.tenant.count(); await tx.session.count(); }, BYPASS_GRANT.AUTH_SESSION_CAPPING);`],
+export const a = () => withBypassRls(prisma, async (tx) => { await tx.user.count(); await tx.session.count(); }, BYPASS_GRANT.AUTH_DELETE_USER);`],
     ["src/workers/zz-worker.ts", `import { BYPASS_GRANT, setBypassGucs, type BypassGrant } from "@/lib/tenant-rls-grants";
 async function inTx(db: TX, grant: BypassGrant | null) { if (grant) await setBypassGucs(db, grant); }
 export const run = (db: TX) => inTx(db, BYPASS_GRANT.WEBHOOK_SECRET_MIGRATION);
@@ -2155,7 +2155,7 @@ export const direct = (db: TX) => setBypassGucs(db, BYPASS_GRANT.OUTBOX_DEPTH_RE
   it("refuses a self-setting site handed a grant it cannot read", () => {
     const { code, stderr } = runMulti([[SESSION_CAP, `
 import { withBypassRls } from "@/lib/tenant-rls"; import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
-export const a = () => withBypassRls(prisma, async (tx) => { await tx.tenant.count(); await tx.session.count(); }, BYPASS_GRANT.AUTH_SESSION_CAPPING);`],
+export const a = () => withBypassRls(prisma, async (tx) => { await tx.user.count(); await tx.session.count(); }, BYPASS_GRANT.AUTH_DELETE_USER);`],
     ["src/workers/zz-worker.ts", `import { defineGrant, setBypassGucs } from "@/lib/tenant-rls-grants";
 import { BYPASS_PURPOSE } from "@/lib/tenant-rls-purpose";
 export const run = (db: TX) => setBypassGucs(db, defineGrant(BYPASS_PURPOSE.AUDIT_WRITE, ["auditLog"]));`]]);

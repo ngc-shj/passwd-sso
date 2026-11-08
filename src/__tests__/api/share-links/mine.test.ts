@@ -35,7 +35,8 @@ vi.mock("@/lib/prisma", () => ({
     user: { findMany: mockUserFindMany },
   },
 }));
-vi.mock("@/lib/auth/access/team-auth", () => ({
+vi.mock("@/lib/auth/access/team-auth", async () => ({
+  hasTeamPermission: (await vi.importActual<typeof import("@/lib/auth/access/team-auth")>("@/lib/auth/access/team-auth")).hasTeamPermission,
   requireTeamMember: mockRequireTeamMember,
   TeamAuthError: class extends Error {
     status: number;
@@ -304,7 +305,8 @@ describe("GET /api/share-links/mine", () => {
     const req = createRequest("GET", "http://localhost/api/share-links/mine?team=team-1");
     await GET(req as never);
 
-    expect(mockRequireTeamMember).toHaveBeenCalledWith(DEFAULT_SESSION.user.id, "team-1");
+    // With the request, so the team's IP restriction applies.
+    expect(mockRequireTeamMember).toHaveBeenCalledWith(DEFAULT_SESSION.user.id, "team-1", expect.anything());
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({

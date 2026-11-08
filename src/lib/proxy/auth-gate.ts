@@ -6,6 +6,13 @@
  * Zod-validated cache values). Per-worker in-process Map removed in the
  * sessioncache-redesign refactor — see docs/archive/review/sessioncache-
  * redesign-plan.md.
+ *
+ * The cache decides only whether the proxy passes a request on. It never
+ * authenticates one by itself: every route and page it passes re-reads the
+ * session row (Auth.js `auth()` reads the database on each call), so a
+ * revocation whose tombstone failed to land leaves at most a request the
+ * handler refuses. scripts/checks/check-session-passkey-readers.mjs (rule 4)
+ * holds every session-gated route and layout to that.
  */
 
 import type { NextRequest } from "next/server";

@@ -178,6 +178,8 @@ describe("POST /api/extension/token/exchange", () => {
         // issueExtensionToken acquires a pg_advisory_xact_lock via
         // tx.$executeRaw before the count-then-create cap enforcement.
         $executeRaw: vi.fn().mockResolvedValue(1),
+        // The bridge code is CAS-consumed inside the issuing transaction.
+        extensionBridgeCode: { updateMany: mockBridgeCodeUpdateMany },
         extensionToken: {
           findMany: mockExtensionTokenFindMany,
           create: mockExtensionTokenCreate,

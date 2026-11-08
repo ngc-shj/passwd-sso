@@ -31,7 +31,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { hashToken } from "@/lib/crypto/crypto-server";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse, zodValidationError } from "@/lib/http/api-response";
+import { errorResponse, unauthorized, zodValidationError } from "@/lib/http/api-response";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { withUserTenantRls } from "@/lib/tenant-context";
@@ -44,6 +44,7 @@ import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { BRIDGE_CODE_TTL_MS, MS_PER_MINUTE } from "@/lib/constants";
 import { generateShareToken } from "@/lib/crypto/crypto-server";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
+import { isSessionRowLive, lockUserAuthArtifacts, UserAuthRevokedError } from "@/lib/auth/session/user-auth-serialization";
 import {
   BASE64URL_RE,
   MOBILE_BRIDGE_CODE_IP_MAX_LENGTH,
@@ -217,24 +218,37 @@ async function handleGET(req: NextRequest): Promise<Response> {
     });
   }
 
-  const created = await withBypassRls(
-    prisma,
-    async (tx) =>
-      tx.mobileBridgeCode.create({
-        data: {
-          codeHash,
-          userId,
-          tenantId,
-          state,
-          codeChallenge,
-          deviceJkt,
-          expiresAt,
-          ip: meta.ip?.slice(0, MOBILE_BRIDGE_CODE_IP_MAX_LENGTH) ?? null,
-          userAgent: meta.userAgent?.slice(0, MOBILE_BRIDGE_CODE_USER_AGENT_MAX_LENGTH) ?? null,
-        },
-      }),
-    BYPASS_GRANT.MOBILE_BRIDGE_CODE_LIFECYCLE,
-  );
+  // The user lock serializes the issue against a revocation of the user's
+  // credentials, and the session that authenticated it is re-read under it
+  // (user-auth-serialization.ts).
+  let created;
+  try {
+    created = await withBypassRls(
+      prisma,
+      async (tx) => {
+        await lockUserAuthArtifacts(tx, userId);
+        if (!(await isSessionRowLive(tx, req, userId))) throw new UserAuthRevokedError("session");
+        return tx.mobileBridgeCode.create({
+          data: {
+            codeHash,
+            userId,
+            tenantId,
+            state,
+            codeChallenge,
+            deviceJkt,
+            expiresAt,
+            ip: meta.ip?.slice(0, MOBILE_BRIDGE_CODE_IP_MAX_LENGTH) ?? null,
+            userAgent: meta.userAgent?.slice(0, MOBILE_BRIDGE_CODE_USER_AGENT_MAX_LENGTH) ?? null,
+          },
+        });
+      },
+      BYPASS_GRANT.MOBILE_BRIDGE_CODE_ISSUE,
+    );
+  } catch (err) {
+    // The session was revoked while this request waited.
+    if (err instanceof UserAuthRevokedError) return unauthorized();
+    throw err;
+  }
 
   // Audit the device-pairing initiation (step 1). deviceJkt is a public JWK
   // thumbprint; the bridge code itself is never logged.

@@ -51,6 +51,7 @@ vi.mock("@/lib/logger", () => ({
   getLogger: () => ({ warn: mockWarn, error: mockError, info: vi.fn(), debug: vi.fn() }),
 }));
 
+import { UserAuthRevokedError } from "@/lib/auth/session/user-auth-serialization";
 import { POST } from "./route";
 
 // Module-scope snapshot (route.ts:27 `const mintLimiter = createRateLimiter(...)`
@@ -118,6 +119,15 @@ describe("POST /api/mobile/autofill-token", () => {
     expect(passed).toMatchObject({ userId: "u1", tenantId: "t1" });
     expect(passed.cnfJkt).toEqual(expect.any(String));
     expect(json.cnfJkt).toBe(passed.cnfJkt);
+  });
+
+  it("answers 401, with no mint audit, when the host token was revoked before the mint took the lock", async () => {
+    mockIssueAutofill.mockRejectedValue(new UserAuthRevokedError("token"));
+
+    const res = await POST(post({ jwk: VALID_JWK }));
+    expect(res.status).toBe(401);
+    expect(mockIssueAutofill.mock.calls[0][0]).toMatchObject({ authorizingTokenId: "token-1" });
+    expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
   // #959: the route no longer reads the session cookie, so a session-only

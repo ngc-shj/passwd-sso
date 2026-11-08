@@ -5,6 +5,7 @@ import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse } from "@/lib/http/api-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
+import { lockUserAuthArtifacts } from "@/lib/auth/session/user-auth-serialization";
 import { validateExtensionToken, revokeExtensionTokenFamily, EXTENSION_TOKEN_REVOKE_REASON } from "@/lib/auth/tokens/extension-token";
 import { computeClientTokenExpiry, getFamilyPresenceAt } from "@/lib/auth/tokens/client-token-expiry";
 import { REFRESH_REPLAY_GRACE_MS } from "@/lib/auth/tokens/mobile-token";
@@ -195,6 +196,10 @@ async function handlePOST(req: NextRequest) {
 
   const created = await withUserTenantRls(userId, async () =>
     prisma.$transaction(async (tx) => {
+      // Serialized against a revocation of the user's credentials
+      // (user-auth-serialization.ts): without the lock, a revocation's
+      // statement could miss the row this transaction inserts.
+      await lockUserAuthArtifacts(tx, userId);
       const revoked = await tx.extensionToken.updateMany({
         where: { id: tokenId, revokedAt: null, expiresAt: { gt: now } },
         data: { revokedAt: now },

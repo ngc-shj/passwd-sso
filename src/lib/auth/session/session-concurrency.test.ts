@@ -42,6 +42,7 @@ import {
   reportSessionEviction,
 } from "./session-concurrency";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
+import { UserAuthRevokedError } from "@/lib/auth/session/user-auth-serialization";
 
 const LIVE = new Date(Date.now() + 3_600_000);
 
@@ -49,6 +50,8 @@ function makeTx() {
   return {
     $executeRaw: vi.fn().mockResolvedValue(1),
     tenant: { findUnique: vi.fn() },
+    // A passkey sign-in's credential, re-read under the user's credential lock.
+    webAuthnCredential: { findFirst: vi.fn().mockResolvedValue({ id: "cred-1" }) },
     session: {
       findUnique: vi.fn().mockResolvedValue(null),
       findMany: vi.fn().mockResolvedValue([]),
@@ -233,6 +236,47 @@ describe("createSessionUnderConcurrencyCap", () => {
       maxSessions: 1,
       evicted: [{ id: "old-s1", sessionToken: "old-tok-1", ipAddress: "1.1.1.1", userAgent: "old-1" }],
     });
+  });
+
+  it("a passkey sign-in whose credential was revoked meanwhile gets no session (checked after the lock)", async () => {
+    const tx = makeTx();
+    tx.tenant.findUnique.mockResolvedValue({ maxConcurrentSessions: null });
+    tx.webAuthnCredential.findFirst.mockResolvedValue(null);
+
+    await expect(
+      createSessionUnderConcurrencyCap(tx as never, {
+        userId: "u-1",
+        tenantId: "tenant-1",
+        sessionToken: "raw-token",
+        expires,
+        ip: null,
+        userAgent: null,
+        provider: "webauthn",
+        authCredentialId: "cred-1",
+      }),
+    ).rejects.toBeInstanceOf(UserAuthRevokedError);
+    expect(tx.session.create).not.toHaveBeenCalled();
+    expect(tx.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      tx.webAuthnCredential.findFirst.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("a sign-in with no credential (OAuth, email) reads no credential", async () => {
+    const tx = makeTx();
+    tx.tenant.findUnique.mockResolvedValue({ maxConcurrentSessions: null });
+    tx.session.create.mockResolvedValue({ userId: "u-1", expires });
+
+    await createSessionUnderConcurrencyCap(tx as never, {
+      userId: "u-1",
+      tenantId: "tenant-1",
+      sessionToken: "raw-token",
+      expires,
+      ip: null,
+      userAgent: null,
+      provider: "google",
+    });
+    expect(tx.webAuthnCredential.findFirst).not.toHaveBeenCalled();
+    expect(tx.session.create).toHaveBeenCalled();
   });
 
   it("hashes the raw sessionToken before writing it (H4) and passes through the passkey fields", async () => {

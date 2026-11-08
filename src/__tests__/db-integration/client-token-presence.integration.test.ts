@@ -128,6 +128,7 @@ async function issueDpopBoundToken(params: {
 }) {
   const kp = await generateKeypair();
   const issued = await issueExtensionToken({
+    consumeProof: async () => true,
     userId: params.userId,
     tenantId: params.tenantId,
     scope: params.scope ?? "passwords:read,vault:unlock-data",

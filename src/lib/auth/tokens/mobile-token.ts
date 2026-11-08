@@ -1,9 +1,11 @@
+import type { Prisma } from "@prisma/client";
 import type { NextRequest } from "next/server";
 import { createHash, randomUUID } from "node:crypto";
 import { EXTENSION_TOKEN_LAST_USED_IP_MAX_LENGTH } from "@/lib/validations/common.server";
 import { prisma } from "@/lib/prisma";
 import { generateShareToken, hashToken } from "@/lib/crypto/crypto-server";
-import { withBypassRls, advisoryXactLock } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { isTokenRowLive, lockUserAuthArtifacts, UserAuthRevokedError } from "@/lib/auth/session/user-auth-serialization";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
@@ -89,6 +91,13 @@ export interface IssueIosTokenParams {
   presenceAt: Date;
   ip?: string | null;
   userAgent?: string | null;
+  /**
+   * The proof this issuance rests on, checked in the issuing transaction after
+   * the user's credential lock (user-auth-serialization.ts): the bridge code's
+   * compare-and-set on exchange, the old refresh row still unrevoked on
+   * rotation. False when it is gone, and nothing is issued.
+   */
+  consumeProof: (tx: Prisma.TransactionClient) => Promise<boolean>;
 }
 
 export interface IssuedIosToken {
@@ -141,6 +150,7 @@ export async function issueIosToken(
     presenceAt,
     ip,
     userAgent,
+    consumeProof,
   } = params;
   // The legacy `devicePubkey` column is retained as nullable but we no longer
   // populate it for new iOS rows — `cnfJkt` is the single source of truth for
@@ -182,8 +192,10 @@ export async function issueIosToken(
 
   const created = await withUserTenantRls(userId, async () =>
     prisma.$transaction(async (tx) => {
-      // Serialize concurrent token issuance for this user (count-then-evict-then-create cap race).
-      await advisoryXactLock(tx, userId);
+      // Serialize concurrent token issuance for this user (count-then-evict-then-create cap race),
+      // and this issuance against a revocation of the user's credentials.
+      await lockUserAuthArtifacts(tx, userId);
+      if (!(await consumeProof(tx))) throw new UserAuthRevokedError(isNewFamily ? "code" : "token");
       let revokedFamilies: RevokedFamily[] = [];
       if (isNewFamily) {
         revokedFamilies = await enforceActiveFamilyCap(tx, {
@@ -268,6 +280,12 @@ export interface IssueAutofillTokenParams {
    * can present the token.
    */
   cnfJkt: string;
+  /**
+   * The host token that authenticated this mint. Re-read under the user's
+   * credential lock: one revoked meanwhile mints nothing
+   * (user-auth-serialization.ts).
+   */
+  authorizingTokenId: string;
 }
 
 export interface IssuedAutofillToken {
@@ -292,7 +310,7 @@ export interface IssuedAutofillToken {
 export async function issueAutofillToken(
   params: IssueAutofillTokenParams,
 ): Promise<IssuedAutofillToken> {
-  const { userId, tenantId, cnfJkt } = params;
+  const { userId, tenantId, cnfJkt, authorizingTokenId } = params;
   const now = new Date();
   const expiresAt = new Date(now.getTime() + IOS_AUTOFILL_TOKEN_TTL_MS);
   const scopeCsv = EXTENSION_TOKEN_SCOPE.PASSWORDS_WRITE;
@@ -304,8 +322,10 @@ export async function issueAutofillToken(
     prisma.$transaction(async (tx) => {
       // Serialize concurrent AutoFill mints for this user: without the lock two
       // mints each revoke the (same) priors and both create, leaving two
-      // active AutoFill tokens.
-      await advisoryXactLock(tx, userId);
+      // active AutoFill tokens. The same lock serializes it against a
+      // revocation of the user's credentials.
+      await lockUserAuthArtifacts(tx, userId);
+      if (!(await isTokenRowLive(tx, authorizingTokenId, userId))) throw new UserAuthRevokedError("token");
       // Single active AutoFill token per user (short-lived, single-purpose).
       // IOS_AUTOFILL is outside the active-family cap, so this never evicts
       // the host's IOS_APP family.
@@ -434,17 +454,20 @@ export async function refreshIosToken(
   const now = params.now ? params.now() : Date.now();
   const bodyHash = sha256Hex(bodyBytes);
   const cacheKey = rotationKey(oldRow.tokenHash);
+  // The rotation this same request body already got, within the retry grace.
+  const cachedRetry = (): IssuedIosToken | null => {
+    const cached = rotationCache.get(cacheKey);
+    return cached && now - cached.issuedAt <= REFRESH_REPLAY_GRACE_MS && cached.bodyHash === bodyHash
+      ? cached.token
+      : null;
+  };
 
   // ── 1. Replay-vs-retry disambiguation ─────────────────────────
   if (oldRow.revokedAt) {
-    const cached = rotationCache.get(cacheKey);
-    if (
-      cached &&
-      now - cached.issuedAt <= REFRESH_REPLAY_GRACE_MS &&
-      cached.bodyHash === bodyHash
-    ) {
+    const retried = cachedRetry();
+    if (retried) {
       // Legitimate retry-after-network-failure: return same token, no audit.
-      return { ok: true, replayed: true, token: cached.token };
+      return { ok: true, replayed: true, token: retried };
     }
 
     // Genuine replay: revoke the family + emit forensic audit event.
@@ -526,21 +549,39 @@ export async function refreshIosToken(
   // ── 3. Happy path: rotate ─────────────────────────────────────
   // issueIosToken revokes ALL active rows in the family and issues a new pair
   // sharing the same familyId / familyCreatedAt, in one locked transaction.
-  const issued = await issueIosToken({
-    userId: oldRow.userId,
-    tenantId: oldRow.tenantId,
-    deviceJkt,
-    cnfJkt,
-    familyId: oldRow.familyId,
-    familyCreatedAt: oldRow.familyCreatedAt,
-    idleMinutes,
-    absoluteMinutes,
-    // Carry the family's presence max forward (C4) — the new row's own
-    // future presence writes only ever raise it.
-    presenceAt,
-    ip: extractClientIp(req),
-    userAgent: req.headers.get("user-agent"),
-  });
+  let issued: IssuedIosToken;
+  try {
+    issued = await issueIosToken({
+      userId: oldRow.userId,
+      tenantId: oldRow.tenantId,
+      deviceJkt,
+      cnfJkt,
+      familyId: oldRow.familyId,
+      familyCreatedAt: oldRow.familyCreatedAt,
+      idleMinutes,
+      absoluteMinutes,
+      // Carry the family's presence max forward (C4) — the new row's own
+      // future presence writes only ever raise it.
+      presenceAt,
+      ip: extractClientIp(req),
+      userAgent: req.headers.get("user-agent"),
+      // The old row read above may have been revoked since (a revocation of
+      // the user's credentials, or a concurrent rotation): re-read under the lock.
+      consumeProof: (tx) => isTokenRowLive(tx, oldRow.id, oldRow.userId),
+    });
+  } catch (e) {
+    if (e instanceof UserAuthRevokedError) {
+      // A retry that overlapped the rotation it repeats waited on the lock and
+      // found the row that rotation revoked: answer it as step 1 would have.
+      // Best-effort, like step 1: the cache is per process and written after
+      // the winner's commit returns, so a retry served elsewhere (or that wins
+      // that race) still gets FAMILY_EXPIRED — refusing, not issuing.
+      const retried = cachedRetry();
+      if (retried) return { ok: true, replayed: true, token: retried };
+      return { ok: false, error: "REFRESH_TOKEN_FAMILY_EXPIRED" };
+    }
+    throw e;
+  }
 
   // Cache for the legitimate retry-after-network-failure window.
   rotationCache.set(cacheKey, { bodyHash, issuedAt: now, token: issued });

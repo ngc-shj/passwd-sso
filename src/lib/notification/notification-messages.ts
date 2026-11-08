@@ -52,6 +52,26 @@ const MESSAGES = {
         `An admin has initiated a vault reset for ${targetEmail}. A second admin must approve before it can be executed.`,
     },
   },
+  PASSKEY_REVOKED_BY_ADMIN: {
+    ja: {
+      title: "パスキーが失効されました",
+      body: "テナント管理者があなたのパスキーを1つ失効し、すべてのセッションを終了しました。",
+    },
+    en: {
+      title: "Passkey revoked",
+      body: "A tenant admin revoked one of your passkeys and ended all your sessions.",
+    },
+  },
+  PASSKEYS_ALL_REVOKED_BY_ADMIN: {
+    ja: {
+      title: "パスキーがすべて失効されました",
+      body: "テナント管理者があなたのパスキーをすべて失効し、すべてのセッションを終了しました。",
+    },
+    en: {
+      title: "All passkeys revoked",
+      body: "A tenant admin revoked all of your passkeys and ended all your sessions.",
+    },
+  },
   MASTER_KEY_ROTATION_PENDING_APPROVAL: {
     ja: {
       title: "マスターキーローテーション承認待ち",

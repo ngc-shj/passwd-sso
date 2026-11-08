@@ -8,6 +8,7 @@
  * - Token validation (for /api/mcp tool calls)
  */
 
+import { lockUserAuthArtifacts, UserAuthRevokedError } from "@/lib/auth/session/user-auth-serialization";
 import { randomBytes, createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import type { PrismaClient, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
@@ -90,6 +91,12 @@ export interface CreateAuthCodeParams {
   scope: string;
   codeChallenge: string;
   codeChallengeMethod?: string;
+  /**
+   * For a user's code: what authenticated the user (their session), re-read in
+   * the creating transaction after the user's credential lock
+   * (user-auth-serialization.ts). False, or absent, and no code is created.
+   */
+  userProof?: (tx: Prisma.TransactionClient) => Promise<boolean>;
 }
 
 export interface AuthCodeResult {
@@ -104,8 +111,12 @@ export async function createAuthorizationCode(
   const codeHash = hashToken(plainCode);
   const expiresAt = new Date(Date.now() + MCP_CODE_EXPIRY_SEC * MS_PER_SECOND);
 
-  await withBypassRls(prisma, async (tx) =>
-    tx.mcpAuthorizationCode.create({
+  await withBypassRls(prisma, async (tx) => {
+    if (params.userId) {
+      await lockUserAuthArtifacts(tx, params.userId);
+      if (!params.userProof || !(await params.userProof(tx))) throw new UserAuthRevokedError("session");
+    }
+    return tx.mcpAuthorizationCode.create({
       data: {
         codeHash,
         clientId: params.clientId,
@@ -118,8 +129,8 @@ export async function createAuthorizationCode(
         codeChallengeMethod: params.codeChallengeMethod ?? "S256",
         expiresAt,
       },
-    }),
-  BYPASS_GRANT.MCP_AUTH_CODE_LIFECYCLE);
+    });
+  }, BYPASS_GRANT.MCP_AUTH_CODE_ISSUE);
 
   return { code: plainCode, expiresAt };
 }
@@ -301,6 +312,10 @@ export async function exchangeCodeForToken(
     // usedAt === null; gating the consume on `usedAt: null` makes the loser's
     // count === 0 and aborts it, preventing double-redemption of one code into
     // multiple independent token families. Mirrors the refresh-token CAS below.
+    // Under the user's credential lock (user-auth-serialization.ts): a
+    // revocation of the user's credentials consumes pending codes, so it
+    // either precedes this CAS (count 0) or revokes what is minted below.
+    if (authCode.userId !== null) await lockUserAuthArtifacts(tx, authCode.userId);
     const consumed = await tx.mcpAuthorizationCode.updateMany({
       where: { id: authCode.id, usedAt: null },
       data: { usedAt: new Date() },
@@ -577,12 +592,26 @@ export async function exchangeRefreshToken(
       // Atomic compare-and-swap: claim the rotation slot.
       // UPDATE ... WHERE rotatedAt IS NULL acquires a row-level lock; concurrent
       // transactions block here and after winner commits, see count===0.
+      // Under the user's credential lock, and only while still unrevoked: a
+      // revocation of the user's credentials either precedes the claim (the
+      // revokedAt it set fails it) or revokes the pair minted below
+      // (user-auth-serialization.ts).
+      if (rt.userId !== null) await lockUserAuthArtifacts(tx, rt.userId);
       const claim = await tx.mcpRefreshToken.updateMany({
-        where: { id: rt.id, rotatedAt: null },
+        where: { id: rt.id, rotatedAt: null, revokedAt: null },
         data: { rotatedAt: new Date(), replacedByHash: newRefreshTokenHash },
       });
 
       if (claim.count === 0) {
+        // Revoked (not rotated) while this exchange waited for the lock: a
+        // revocation of the user's credentials, not a client race — answer it
+        // as the revoked token it now is, without family revocation or a
+        // concurrent-rotation audit.
+        const current = await tx.mcpRefreshToken.findUnique({
+          where: { id: rt.id },
+          select: { rotatedAt: true, revokedAt: true },
+        });
+        if (current && current.revokedAt && !current.rotatedAt) return { type: "revoked" as const };
         // Race lost — another transaction won the CAS between our findUnique and updateMany.
         return {
           type: "race_lost" as const,

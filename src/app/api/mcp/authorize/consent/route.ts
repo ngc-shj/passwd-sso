@@ -19,6 +19,7 @@ import { errorResponse, unauthorized } from "@/lib/http/api-response";
 import { readFormWithCap } from "@/lib/http/parse-body";
 import { MAX_JSON_BODY_BYTES, PKCE_CODE_CHALLENGE_SCHEMA } from "@/lib/validations/common.server";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
+import { isSessionRowLive, UserAuthRevokedError } from "@/lib/auth/session/user-auth-serialization";
 import { serverAppUrl, getAppOrigin } from "@/lib/url-helpers";
 import { API_PATH } from "@/lib/constants/auth/api-path";
 import {
@@ -381,16 +382,24 @@ export async function POST(req: NextRequest) {
     return NextResponse.redirect(url.toString(), 302);
   }
 
-  // Create authorization code
-  const { code } = await createAuthorizationCode({
-    clientId: effectiveClient.id,
-    tenantId: userTenantId,
-    userId: session.user.id,
-    redirectUri,
-    scope: grantedScopes.join(","),
-    codeChallenge,
-    codeChallengeMethod,
-  });
+  // Create authorization code. The session that consented is re-read under the
+  // user's credential lock: a revocation committed meanwhile leaves no code.
+  let code: string;
+  try {
+    ({ code } = await createAuthorizationCode({
+      clientId: effectiveClient.id,
+      tenantId: userTenantId,
+      userId: session.user.id,
+      redirectUri,
+      scope: grantedScopes.join(","),
+      codeChallenge,
+      codeChallengeMethod,
+      userProof: (tx) => isSessionRowLive(tx, req, session.user.id),
+    }));
+  } catch (err) {
+    if (err instanceof UserAuthRevokedError) return unauthorized();
+    throw err;
+  }
 
   // Audit the consent grant
   await logAuditAsync({

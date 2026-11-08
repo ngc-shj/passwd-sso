@@ -12,6 +12,7 @@ import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { MS_PER_HOUR } from "@/lib/constants/time";
 import { EXTENSION_TOKEN_SCOPE } from "@/lib/constants/auth/extension-token";
 import { jwkThumbprint } from "@/lib/auth/dpop/verify";
+import { UserAuthRevokedError } from "@/lib/auth/session/user-auth-serialization";
 import { issueAutofillToken } from "@/lib/auth/tokens/mobile-token";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
@@ -117,7 +118,15 @@ export const POST = withRequestLog(async (req: NextRequest) => {
   const { jwk } = parsed.data;
 
   const cnfJkt = jwkThumbprint({ kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y });
-  const issued = await issueAutofillToken({ userId, tenantId, cnfJkt });
+  let issued: Awaited<ReturnType<typeof issueAutofillToken>>;
+  try {
+    issued = await issueAutofillToken({ userId, tenantId, cnfJkt, authorizingTokenId: authed.data.tokenId });
+  } catch (e) {
+    // The host token was revoked while this request waited (a revocation of
+    // the user's credentials): answer as for a revoked token.
+    if (e instanceof UserAuthRevokedError) return unauthorized();
+    throw e;
+  }
 
   await logAuditAsync({
     ...personalAuditBase(req, userId),

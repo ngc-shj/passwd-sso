@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { withBypassRls, advisoryXactLock } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { lockUserAuthArtifacts, UserAuthRevokedError } from "@/lib/auth/session/user-auth-serialization";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { checkNewDeviceAndNotify } from "@/lib/auth/policy/new-device-detection";
 import { hashSessionToken } from "@/lib/auth/session/session-cache";
@@ -72,9 +73,20 @@ export async function createSessionUnderConcurrencyCap(
   // Serialize concurrent session creation for this user so the
   // count-then-evict-then-create sequence cannot race past the concurrent
   // session cap (two concurrent sign-ins both reading count < max).
-  // Advisory lock is transaction-scoped; matches the codebase idiom
-  // (attachments, vault rotate-key).
-  await advisoryXactLock(tx, input.userId);
+  // The user's credential lock (user-auth-serialization.ts), transaction-scoped
+  // and keyed apart from the vault-data lock; it also serializes this sign-in
+  // against a revocation of the user's credentials.
+  await lockUserAuthArtifacts(tx, input.userId);
+
+  // A passkey sign-in whose credential was revoked while the ceremony ran
+  // (an admin's passkey revoke deletes it under this lock) gets no session.
+  if (input.authCredentialId) {
+    const credential = await tx.webAuthnCredential.findFirst({
+      where: { id: input.authCredentialId, userId: input.userId },
+      select: { id: true },
+    });
+    if (!credential) throw new UserAuthRevokedError("credential");
+  }
 
   // The sessions this sign-in replaces are not the user's other devices:
   // delete them before counting, or at the cap they would push out a session

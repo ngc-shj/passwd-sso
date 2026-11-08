@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, unauthorized, notFound } from "@/lib/http/api-response";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { SHARE_LINK_MANAGER, shareLinkManagerOf } from "@/lib/share/share-link-manager";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { SHARE_ACCESS_LOG_LIMIT } from "@/lib/validations/common.server";
 import { isValidCursorId } from "@/lib/audit/audit-query";
@@ -19,15 +20,17 @@ async function handleGET(req: NextRequest, { params }: Params) {
 
   const { id } = await params;
 
-  // Verify the share link belongs to the current user
+  // The link's creator only: the log holds viewers' IP addresses and user
+  // agents, which a team admin's revoke right (#995) does not extend to. A team
+  // link's creator is held to the team's IP restriction.
   const share = await withUserTenantRls(session.user.id, async () =>
     prisma.passwordShare.findUnique({
       where: { id },
-      select: { createdById: true },
+      select: { createdById: true, teamPasswordEntry: { select: { teamId: true } } },
     }),
   );
 
-  if (!share || share.createdById !== session.user.id) {
+  if (!share || (await shareLinkManagerOf(session.user.id, share, req)) !== SHARE_LINK_MANAGER.CREATOR) {
     return notFound();
   }
 

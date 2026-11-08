@@ -22,6 +22,7 @@ import { API_PATH, apiPath } from "@/lib/constants";
 import { useTenantRole } from "@/hooks/use-tenant-role";
 import { TenantVaultResetButton } from "../security/tenant-vault-reset-button";
 import { TenantClearLockoutButton } from "../security/tenant-clear-lockout-button";
+import { TenantMemberPasskeysDialog } from "../security/tenant-member-passkeys-dialog";
 import { TenantResetHistoryDialog } from "../security/tenant-reset-history-dialog";
 import { handleStepUpError } from "@/lib/http/handle-step-up-error";
 import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
@@ -195,6 +196,9 @@ export function TenantMembersCard() {
                 !isSelf && !isDeactivated && myLevel > targetLevel;
               // Self-target is allowed for lockout clear (matches the server's
               // self-bypass of the role-hierarchy check — see clear-lockout route.ts).
+              // The server's canRevokeMemberPasskey: strictly above, or OWNER on OWNER.
+              const canRevokePasskey =
+                !isSelf && !isDeactivated && (myLevel > targetLevel || (isOwner && m.role === "OWNER"));
               const canClearLockout =
                 !isDeactivated && (isSelf || myLevel > targetLevel);
               const canChangeRole =
@@ -258,6 +262,11 @@ export function TenantMembersCard() {
                       memberName={m.name ?? m.email ?? "—"}
                       disabled={!canClearLockout}
                       onSuccess={reloadMembers}
+                    />
+                    <TenantMemberPasskeysDialog
+                      userId={m.userId}
+                      memberName={m.name ?? m.email ?? "—"}
+                      disabled={!canRevokePasskey}
                     />
                   </div>
                 </div>

@@ -137,13 +137,18 @@ describe("POST /api/mobile/token — real-key DPoP (C10 sentinel for C6)", () =>
     mockCheck.mockResolvedValue({ allowed: true });
     mockVerifyPkceS256.mockReturnValue(true);
     mockMobileBridgeCodeUpdateMany.mockResolvedValue({ count: 1 });
-    mockIssueIosToken.mockResolvedValue({
-      accessToken: "acc-tok",
-      refreshToken: "ref-tok",
-      expiresAt: new Date(Date.now() + 86_400_000),
-      familyId: "fam-1",
-      familyCreatedAt: new Date(),
-      tokenId: TOKEN_ID,
+    // issueIosToken consumes the bridge code inside its transaction (the
+    // route's consumeProof), after the user's credential lock.
+    mockIssueIosToken.mockImplementation(async (params: { consumeProof: (tx: unknown) => Promise<boolean> }) => {
+      await params.consumeProof({ mobileBridgeCode: { updateMany: mockMobileBridgeCodeUpdateMany } });
+      return {
+        accessToken: "acc-tok",
+        refreshToken: "ref-tok",
+        expiresAt: new Date(Date.now() + 86_400_000),
+        familyId: "fam-1",
+        familyCreatedAt: new Date(),
+        tokenId: TOKEN_ID,
+      };
     });
     // withBypassRls callback runs against the tx — give it a tx-shape that
     // routes the bridge-code mocks AND the tenant lookup that

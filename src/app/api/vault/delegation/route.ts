@@ -11,6 +11,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
+import { isSessionRowLive, lockUserAuthArtifacts, UserAuthRevokedError } from "@/lib/auth/session/user-auth-serialization";
 import { resolveUserTenantId } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { getLogger } from "@/lib/logger";
@@ -185,20 +186,36 @@ async function handlePOST(request: NextRequest) {
     }),
   BYPASS_GRANT.DELEGATION_SESSION_LOOKUP);
 
-  // Step 1: Create new delegation session in DB.
+  // Step 1: Create new delegation session in DB. The user lock serializes it
+  // against a revocation of the user's credentials (user-auth-serialization.ts),
+  // so the session that authenticated it and the MCP token it authorizes are
+  // re-read under it: a delegation must not outlive either.
   const expiresAt = new Date(Date.now() + effectiveTtl * MS_PER_SECOND);
-  const delegationSession = await withBypassRls(prisma, (tx) =>
-    tx.delegationSession.create({
-      data: {
-        tenantId,
-        userId,
-        mcpTokenId,
-        entryIds,
-        note: note ?? null,
-        expiresAt,
-      },
-    }),
-  BYPASS_GRANT.DELEGATION_SESSION_LOOKUP);
+  let delegationSession;
+  try {
+    delegationSession = await withBypassRls(prisma, async (tx) => {
+      await lockUserAuthArtifacts(tx, userId);
+      if (!(await isSessionRowLive(tx, request, userId))) throw new UserAuthRevokedError("session");
+      const tokenLive = await tx.mcpAccessToken.findFirst({
+        where: { id: mcpTokenId, userId, revokedAt: null, expiresAt: { gt: new Date() } },
+        select: { id: true },
+      });
+      if (!tokenLive) throw new UserAuthRevokedError("token");
+      return tx.delegationSession.create({
+        data: {
+          tenantId,
+          userId,
+          mcpTokenId,
+          entryIds,
+          note: note ?? null,
+          expiresAt,
+        },
+      });
+    }, BYPASS_GRANT.DELEGATION_SESSION_CREATE);
+  } catch (err) {
+    if (err instanceof UserAuthRevokedError) return unauthorized();
+    throw err;
+  }
 
   // Step 2: Store metadata entries in Redis. On failure, roll back via
   // deleteMany (idempotent — avoids P2025 if a concurrent vault-lock fired).

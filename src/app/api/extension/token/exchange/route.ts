@@ -46,6 +46,7 @@ import {
   unauthorized,
 } from "@/lib/http/api-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
+import { UserAuthRevokedError } from "@/lib/auth/session/user-auth-serialization";
 import { issueExtensionToken } from "@/lib/auth/tokens/extension-token";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
@@ -197,36 +198,11 @@ async function handlePOST(req: NextRequest) {
   //    already enforced it on the read above). updateMany returns
   //    `{ count }` rather than throwing on miss, which is what we need to
   //    detect the race-lost case.
-  const consumeResult = await withBypassRls(
-    prisma,
-    async (tx) =>
-      tx.extensionBridgeCode.updateMany({
-        where: {
-          codeHash,
-          usedAt: null,
-          cnfJkt: consumed.cnfJkt,
-          expiresAt: { gt: now },
-        },
-        data: { usedAt: now },
-      }),
-    BYPASS_GRANT.EXTENSION_BRIDGE_CODE_LIFECYCLE,
-  );
-
-  if (consumeResult.count === 0) {
-    // Race lost (another caller consumed between SELECT and CAS) OR the row
-    // expired during DPoP verification. Same response envelope as code-unknown.
-    getLogger().warn(
-      {
-        event: "extension_token_exchange_failure",
-        reason: "unknown_or_consumed",
-        ip,
-        userAgent: req.headers.get("user-agent"),
-      },
-      "extension token exchange failed: race-lost or expired",
-    );
-    return unauthorized();
-  }
-
+  //    It runs inside the issuing transaction, after the user's credential lock,
+  //    so a revocation of the user's credentials (which consumes pending codes)
+  //    either precedes it — and the CAS finds the code used — or follows the
+  //    issuance and revokes the token (user-auth-serialization.ts).
+  //
   // 6. Token issuance. Carry consumed.cnfJkt into the new token so future
   //    DPoP-validated requests verify against the same thumbprint.
   let issued: Awaited<ReturnType<typeof issueExtensionToken>>;
@@ -236,8 +212,35 @@ async function handlePOST(req: NextRequest) {
       tenantId: consumed.tenantId,
       scope: consumed.scope,
       cnfJkt: consumed.cnfJkt,
+      consumeProof: async (tx) => {
+        const consumeResult = await tx.extensionBridgeCode.updateMany({
+          where: {
+            codeHash,
+            usedAt: null,
+            cnfJkt: consumed.cnfJkt,
+            expiresAt: { gt: now },
+          },
+          data: { usedAt: now },
+        });
+        return consumeResult.count === 1;
+      },
     });
   } catch (err) {
+    if (err instanceof UserAuthRevokedError) {
+      // Race lost (another caller consumed between SELECT and CAS, or a
+      // revocation consumed it) OR the row expired during DPoP verification.
+      // Same response envelope as code-unknown.
+      getLogger().warn(
+        {
+          event: "extension_token_exchange_failure",
+          reason: "unknown_or_consumed",
+          ip,
+          userAgent: req.headers.get("user-agent"),
+        },
+        "extension token exchange failed: race-lost or expired",
+      );
+      return unauthorized();
+    }
     await logAuditAsync({
       ...personalAuditBase(req, consumed.userId),
       tenantId: consumed.tenantId,

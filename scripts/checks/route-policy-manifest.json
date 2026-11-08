@@ -2685,6 +2685,38 @@
         }
       }
     },
+    "src/app/api/tenant/members/[userId]/passkeys/[credentialId]/route.ts": {
+      "kind": "api-session-required",
+      "methods": [
+        "DELETE"
+      ],
+      "auth": [
+        "session"
+      ],
+      "sessionPasskeyGate": {
+        "DELETE": {
+          "value": "gated"
+        }
+      }
+    },
+    "src/app/api/tenant/members/[userId]/passkeys/route.ts": {
+      "kind": "api-session-required",
+      "methods": [
+        "GET",
+        "DELETE"
+      ],
+      "auth": [
+        "session"
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "DELETE": {
+          "value": "gated"
+        }
+      }
+    },
     "src/app/api/tenant/members/[userId]/reset-vault/[resetId]/approve/route.ts": {
       "kind": "api-session-required",
       "methods": [
