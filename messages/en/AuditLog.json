@@ -184,6 +184,7 @@
   "ACCESS_DENIED": "Access denied by network policy",
   "TENANT_ROLE_UPDATE": "Changed tenant member role",
   "TENANT_MEMBER_LOCKOUT_CLEAR": "Cleared member vault lockout",
+  "TENANT_MEMBER_PASSKEY_REVOKE": "Revoked a member's passkey",
   "yes": "yes",
   "no": "no",
   "included": "included",

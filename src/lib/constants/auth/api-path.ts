@@ -206,6 +206,10 @@ export const apiPath = {
     `${API_PATH.TENANT_MEMBERS}/${userId}/reset-vault/${resetId}/revoke`,
   tenantMemberClearLockout: (userId: string) =>
     `${API_PATH.TENANT_MEMBERS}/${userId}/clear-lockout`,
+  tenantMemberPasskeys: (userId: string) =>
+    `${API_PATH.TENANT_MEMBERS}/${userId}/passkeys`,
+  tenantMemberPasskeyById: (userId: string, credentialId: string) =>
+    `${API_PATH.TENANT_MEMBERS}/${userId}/passkeys/${credentialId}`,
   teamRotateKey: (teamId: string) => `${API_PATH.TEAMS}/${teamId}/rotate-key`,
   teamRotateKeyData: (teamId: string) => `${API_PATH.TEAMS}/${teamId}/rotate-key/data`,
   teamRekey: (teamId: string) => `${API_PATH.TEAMS}/${teamId}/rekey`,

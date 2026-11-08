@@ -81,7 +81,7 @@
   "vaultAutoLockExceedsIdleCap": "Vault auto-lock must be {n} minutes or less (same as the shorter of the web session / client app idle timeouts above).",
   "requireVaultTimeoutLogout": "Force sign-out on client app vault timeout",
   "requireVaultTimeoutLogoutHelp": "When enabled, the browser extension and iOS app sign out (instead of only locking) once the vault auto-lock timeout above is reached, ending the client app session. This overrides each user's own \"lock only\" preference.",
-"accessRestrictionTitle": "Access Restriction",
+  "accessRestrictionTitle": "Access Restriction",
   "accessRestrictionDescription": "Restrict access to this tenant by IP address or Tailscale network. When configured, only matching connections are allowed (OR logic).",
   "allowedCidrsLabel": "Allowed IP Ranges (CIDR)",
   "allowedCidrsHelp": "Enter one CIDR per line (e.g. 192.168.1.0/24). Maximum {max} entries. Leave empty to allow all IPs.",
@@ -256,5 +256,16 @@
   "delegationPolicySave": "Save",
   "delegationPolicySaved": "Delegation policy updated",
   "delegationPolicyLoadFailed": "Failed to load delegation policy.",
-  "delegationPolicySaveFailed": "Failed to update delegation policy."
+  "delegationPolicySaveFailed": "Failed to update delegation policy.",
+  "memberPasskeysTitle": "Member passkeys",
+  "memberPasskeysDescription": "Passkeys {name} registered in this tenant. Revoke one that is lost or compromised.",
+  "memberPasskeysLoadFailed": "Failed to load passkeys.",
+  "memberPasskeysEmpty": "No passkeys registered in this tenant.",
+  "memberPasskeyLastUsed": "Last used: {date}",
+  "memberPasskeyNeverUsed": "never",
+  "revokePasskey": "Revoke",
+  "revokePasskeyTitle": "Revoke passkey",
+  "revokePasskeyDescription": "The passkey is deleted and {name} is signed out of this tenant, including extension and API tokens. They can sign in another way and register a new passkey.",
+  "revokePasskeySuccess": "Passkey revoked.",
+  "revokePasskeyFailed": "Failed to revoke the passkey."
 }

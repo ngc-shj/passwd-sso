@@ -274,6 +274,8 @@ Routes are grouped by their top-level API area for readability (grouping is cosm
 | `src/app/api/tenant/mcp-clients/[id]/route.ts` | api-session-required | GET, PUT, DELETE | session | - | GET gated, PUT gated, DELETE gated | - | - |
 | `src/app/api/tenant/mcp-clients/route.ts` | api-session-required | GET, POST | session | - | GET gated, POST gated | - | - |
 | `src/app/api/tenant/members/[userId]/clear-lockout/route.ts` | api-session-required | POST | session | - | POST gated | - | - |
+| `src/app/api/tenant/members/[userId]/passkeys/[credentialId]/route.ts` | api-session-required | DELETE | session | - | DELETE gated | - | - |
+| `src/app/api/tenant/members/[userId]/passkeys/route.ts` | api-session-required | GET | session | - | GET gated | - | - |
 | `src/app/api/tenant/members/[userId]/reset-vault/[resetId]/approve/route.ts` | api-session-required | POST | session | - | POST gated | - | - |
 | `src/app/api/tenant/members/[userId]/reset-vault/[resetId]/revoke/route.ts` | api-session-required | POST | session | - | POST gated | - | - |
 | `src/app/api/tenant/members/[userId]/reset-vault/route.ts` | api-session-required | GET, POST | session | - | GET gated, POST gated | - | - |

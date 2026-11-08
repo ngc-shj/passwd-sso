@@ -283,6 +283,7 @@ These user-meaningful fields should be rendered in `getTargetLabel()` with i18n 
 | `ADMIN_VAULT_RESET_EXECUTE` | TENANT | User | `{ deletedEntries, deletedAttachments, ... }` | deletedEntries |
 | `ADMIN_VAULT_RESET_REVOKE` | TENANT | User | `{ revokedById, resetId }` | — (export-only) |
 | `TENANT_ROLE_UPDATE` | TENANT | TenantMember | `{ newRole, previousRole, transfer }` | roleChange template |
+| `TENANT_MEMBER_PASSKEY_REVOKE` | TENANT | WebAuthnCredential | `{ targetUserId, credentialId, sessions, extensionTokens, apiKeys, ..., invalidationFailed? }` | — (export-only) |
 
 **Notes:**
 - `resetId` added to ADMIN_VAULT_RESET_INITIATE by `audit-metadata-standardize` branch.
@@ -291,6 +292,7 @@ These user-meaningful fields should be rendered in `getTargetLabel()` with i18n 
 - TEAM_KEY_ROTATION_CARRY: one row per entry a rotation left unchanged (written in the rotation's transaction beside the summary TEAM_KEY_ROTATION row); `targetId` is the entry id, `reason` is `not_held`, `undecryptable` or `key_invalid` as claimed by the rotating member (the row's actor), `teamKeyVersion` the entry's version. An `undecryptable` / `key_invalid` carry is that member's unverifiable claim; the entry stays on its old key until another holder re-keys it.
 - TEAM_ENTRY_REKEY / TEAM_ATTACHMENT_MIGRATE: written in the re-key / migrate transaction (team-key-rotation-rekey plan C2/C4). The original history and attachment attribution is kept although the actor rewrote the ciphertext. TEAM_ENTRY_REKEY: `fromTeamKeyVersion` is the team key version the replaced ItemKey was created under (0 when unknown), `retained` lists the history rows left as they were (`{ id, teamKeyVersion, itemKeyVersion }` each). TEAM_ATTACHMENT_MIGRATE: `toItemKeyVersion` is the ItemKey version the attachment's CEK is now wrapped under.
 - TENANT_ROLE_UPDATE: `transfer` is true for ownership transfers.
+- TENANT_MEMBER_PASSKEY_REVOKE: a tenant admin deleted a member's passkey (#974). Written after the member's sessions and tokens in the tenant were revoked; the counts are `invalidateUserSessions`'s, and `invalidationFailed` is set when that step threw.
 
 ### SCIM Provisioning (`group:scim`)
 

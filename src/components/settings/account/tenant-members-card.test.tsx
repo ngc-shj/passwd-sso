@@ -115,6 +115,14 @@ vi.mock("@/components/settings/security/tenant-clear-lockout-button", () => ({
   ),
 }));
 
+vi.mock("@/components/settings/security/tenant-member-passkeys-dialog", () => ({
+  TenantMemberPasskeysDialog: ({ userId, disabled }: { userId: string; disabled?: boolean; memberName?: string }) => (
+    <button data-testid={`passkeys-${userId}`} disabled={disabled}>
+      Passkeys
+    </button>
+  ),
+}));
+
 vi.mock("@/components/settings/security/tenant-reset-history-dialog", () => ({
   TenantResetHistoryDialog: ({
     userId,
@@ -1079,6 +1087,8 @@ describe("TenantMembersCard", () => {
     });
 
     expect(screen.getByTestId("vault-reset-owner-id")).toBeDisabled();
+    // The passkey revoke follows the same rule (the server refuses self).
+    expect(screen.getByTestId("passkeys-owner-id")).toBeDisabled();
   });
 
   it("enables VaultResetButton for lower-level non-self non-deactivated member", async () => {
@@ -1105,6 +1115,7 @@ describe("TenantMembersCard", () => {
     });
 
     expect(screen.getByTestId("vault-reset-other-user")).not.toBeDisabled();
+    expect(screen.getByTestId("passkeys-other-user")).not.toBeDisabled();
   });
 
   // -------------------------------------------------------------------------
