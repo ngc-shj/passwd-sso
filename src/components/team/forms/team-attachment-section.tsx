@@ -30,7 +30,9 @@ import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { useTeamVault } from "@/lib/team/team-vault-context";
 import { ItemKeyUpgradeRequiredError } from "@/lib/team/team-vault-core";
-import { apiPath } from "@/lib/constants";
+import { apiPath, TEAM_PERMISSION, TEAM_ROLE } from "@/lib/constants";
+import { useActiveVault } from "@/lib/vault/active-vault-context";
+import { hasTeamPermission } from "@/lib/auth/access/team-permissions";
 import {
   TeamAttachmentKeyError,
   ATTACHMENT_KEY_FAILURE,
@@ -93,6 +95,14 @@ export function TeamAttachmentSection({
   const [deleteTarget, setDeleteTarget] = useState<TeamAttachmentMeta | null>(null);
   const [deleting, setDeleting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // The delete route requires PASSWORD_DELETE (not MEMBER). The role comes from
+  // the active team vault; unknown means no delete control.
+  const activeVault = useActiveVault();
+  const teamRole =
+    activeVault?.type === "team" && activeVault.teamId === scopedId
+      ? Object.values(TEAM_ROLE).find((r) => r === activeVault.teamRole)
+      : undefined;
+  const canDelete = !readOnly && !!teamRole && hasTeamPermission(teamRole, TEAM_PERMISSION.PASSWORD_DELETE);
 
   if (!scopedId) return null;
 
@@ -304,7 +314,7 @@ export function TeamAttachmentSection({
                     <Download className="h-4 w-4" />
                   )}
                 </Button>
-                {!readOnly && (
+                {canDelete && (
                   <Button
                     variant="ghost"
                     size="icon"

@@ -14,7 +14,8 @@ import { render, screen } from "@testing-library/react";
 import { mockTeamMismatch } from "@/__tests__/helpers/mock-app-navigation";
 import type { encryptBinary, decryptBinary } from "@/lib/crypto/crypto-client";
 
-const { mockFetch, mockToast, encryptBinaryMock, decryptBinaryMock, mockUpload } = vi.hoisted(() => ({
+const { mockFetch, mockToast, encryptBinaryMock, decryptBinaryMock, mockUpload, activeVault } = vi.hoisted(() => ({
+  activeVault: { current: { type: "team", teamId: "team-1", teamRole: "OWNER" } as Record<string, unknown> | null },
   mockFetch: vi.fn(),
   mockUpload: vi.fn(),
   mockToast: { error: vi.fn(), success: vi.fn() },
@@ -34,6 +35,10 @@ vi.mock("next-intl", () => ({
 }));
 
 vi.mock("sonner", () => ({ toast: mockToast }));
+
+vi.mock("@/lib/vault/active-vault-context", () => ({
+  useActiveVault: () => activeVault.current,
+}));
 
 vi.mock("@/lib/url-helpers", () => ({
   fetchApi: (...args: unknown[]) => mockFetch(...args),
@@ -75,6 +80,28 @@ import { toastApiError } from "@/lib/http/toast-api-error";
 describe("TeamAttachmentSection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    activeVault.current = { type: "team", teamId: "team-1", teamRole: "OWNER" };
+  });
+
+  const oneAttachment = [
+    { id: "a1", filename: "x.png", contentType: "image/png", sizeBytes: 100, createdAt: new Date().toISOString() },
+  ];
+
+  // The delete route requires PASSWORD_DELETE: OWNER/ADMIN, not MEMBER.
+  it.each([
+    ["OWNER of this team", { type: "team", teamId: "team-1", teamRole: "OWNER" }, true],
+    ["ADMIN of this team", { type: "team", teamId: "team-1", teamRole: "ADMIN" }, true],
+    ["MEMBER of this team", { type: "team", teamId: "team-1", teamRole: "MEMBER" }, false],
+    ["OWNER of another team", { type: "team", teamId: "team-2", teamRole: "OWNER" }, false],
+    ["no active vault", null, false],
+  ])("delete control for %s: %s", (_label, vault, shown) => {
+    activeVault.current = vault;
+    render(
+      <TeamAttachmentSection teamId="team-1" entryId="entry-1" attachments={oneAttachment} onAttachmentsChange={vi.fn()} />,
+    );
+    expect(screen.queryByTitle("delete") !== null).toBe(shown);
+    // Upload is not part of this rule.
+    expect(screen.getByText("upload")).toBeInTheDocument();
   });
 
   it("renders nothing when teamId is missing", () => {

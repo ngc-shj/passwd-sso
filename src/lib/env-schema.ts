@@ -345,6 +345,10 @@ export const envObject = z.object({
   // --- Conditional: Cloud blob storage ---
   AWS_REGION: nonEmpty.optional(),
   S3_ATTACHMENTS_BUCKET: nonEmpty.optional(),
+  S3_FORCE_PATH_STYLE: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
   AZURE_STORAGE_ACCOUNT: nonEmpty.optional(),
   AZURE_BLOB_CONTAINER: nonEmpty.optional(),
   AZURE_STORAGE_CONNECTION_STRING: nonEmpty.optional(),

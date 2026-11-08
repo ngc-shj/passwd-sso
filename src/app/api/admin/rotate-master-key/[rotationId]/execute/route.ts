@@ -176,7 +176,9 @@ async function handlePOST(
 
   // Destructive write — system-wide PasswordShare revocation. Master key is
   // global, so old-version shares across ALL tenants are revoked regardless
-  // of which tenant approved the rotation (NF4).
+  // of which tenant approved the rotation (NF4). Version 0 marks a
+  // client-encrypted (team) share the master key never protected; it is not
+  // revoked (#997).
   //
   // S2: the CAS above has already committed `executedAt = now`. If the
   // share-revocation throws, we MUST still emit MASTER_KEY_ROTATION_EXECUTE —
@@ -191,7 +193,7 @@ async function handlePOST(
         async (tx) =>
           tx.passwordShare.updateMany({
             where: {
-              masterKeyVersion: { lt: row.targetVersion },
+              masterKeyVersion: { gt: 0, lt: row.targetVersion },
               revokedAt: null,
               expiresAt: { gt: new Date() },
             },

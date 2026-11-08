@@ -2,14 +2,17 @@
 /**
  * Load test user seeder for k6 scenarios.
  *
- * Seeds users, sessions, and vault keys into the database,
- * then writes session credentials to .load-test-auth.json.
+ * Seeds a load-test tenant, its users (each an active member), sessions and
+ * vault keys into the database, then writes session credentials to
+ * .load-test-auth.json. The rows are written by the E2E seed helpers
+ * (e2e/helpers/db.ts), so a schema change that breaks one breaks both loudly.
  *
  * Usage:
  *   node load-test/setup/seed-load-test-users.mjs [--users N] [--cleanup] [--smoke]
  *
  * Environment:
- *   DATABASE_URL             - PostgreSQL connection string
+ *   DATABASE_URL             - PostgreSQL connection string of a role that bypasses RLS
+ *                              (the migration role, e.g. passwd_user)
  *   ALLOW_LOAD_TEST_SEED=true     - Explicit opt-in required
  *   ALLOW_NON_TEST_DBNAME=true    - Override dbname pattern check (e.g. dev DB named "passwd_sso")
  *   VERIFIER_PEPPER_KEY           - 64-char hex for HMAC verifier (or SHARE_MASTER_KEY for dev fallback)
@@ -41,6 +44,24 @@ const DEFAULT_PASSPHRASE = "LoadTest!Passphrase2026";
 const DEFAULT_USER_COUNT = 50;
 const SESSION_HOURS = 8;
 
+// Every seeded user belongs to this tenant (users.tenant_id is NOT NULL, and
+// the proxy refuses a session without an active tenant membership).
+export const LOAD_TEST_TENANT = {
+  id: "00000000-0000-4000-a000-0000000010ad",
+  name: "Load Test Tenant",
+  slug: "load-test-tenant",
+};
+
+/**
+ * Deterministic UUIDv4-shaped id for load-test user `i`, so a re-seed updates
+ * the same rows instead of colliding on the email.
+ */
+export function loadTestUserId(i) {
+  const hex = createHash("sha256").update(`load-test-user:${i}`).digest("hex");
+  const variant = ((parseInt(hex[16], 16) & 0x3) | 0x8).toString(16);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
 // Crypto constants (must match src/lib/crypto-client.ts)
 const PBKDF2_ITERATIONS = 600_000;
 const IV_LENGTH = 12;
@@ -71,7 +92,8 @@ export function validateDatabaseUrl(databaseUrl, opts = {}) {
   try {
     parsed = new URL(databaseUrl);
   } catch {
-    return { valid: false, reason: `DATABASE_URL is not a valid URL: ${databaseUrl}` };
+    // Not echoed: the connection string carries the password.
+    return { valid: false, reason: "DATABASE_URL is not a valid URL" };
   }
 
   const hostname = parsed.hostname;
@@ -234,35 +256,35 @@ function setupVaultCrypto(passphrase) {
   };
 }
 
-// Sessions are stored as an HMAC DIGEST of the token, never the raw value.
-// Seeding must apply the SAME transform the app uses to look rows up, so load
-// the production function (as e2e/helpers/db.ts imports it) rather than
-// re-implementing it: two copies drift, and every seeded session then fails
-// to authenticate.
-let hashSessionTokenFn;
-async function loadHashSessionToken() {
-  if (!hashSessionTokenFn) {
-    const mod = await tsImport("../../src/lib/auth/session/session-cache.ts", import.meta.url);
+// The E2E seed helpers write users, memberships, sessions (as the HMAC digest
+// the app looks up, via the production hashSessionToken) and vault keys. Load
+// them rather than re-implementing the SQL: two copies drift, and every seeded
+// session then fails to authenticate.
+let seedHelpers;
+async function loadSeedHelpers() {
+  if (!seedHelpers) {
+    const session = await tsImport("../../src/lib/auth/session/session-cache.ts", import.meta.url);
     // Resolve the HMAC key now, so a missing/invalid key fails before the
     // first row is written rather than midway through the seed.
-    mod.validateSessionTokenHmacKey();
-    hashSessionTokenFn = mod.hashSessionToken;
+    session.validateSessionTokenHmacKey();
+    seedHelpers = await tsImport("../../e2e/helpers/db.ts", import.meta.url);
   }
-  return hashSessionTokenFn;
+  return seedHelpers;
 }
 
 // ─── Database Operations ───────────────────────────────────────
 
 async function seedUsers(pool, userCount) {
-  const now = new Date().toISOString();
   const credentials = [];
-  const hashSessionToken = await loadHashSessionToken();
+  const db = await loadSeedHelpers();
+
+  await db.seedTenant(LOAD_TEST_TENANT);
 
   console.log(`Generating vault crypto for ${userCount} users (PBKDF2 600k × 2 per user)...`);
   const startTime = Date.now();
 
   for (let i = 0; i < userCount; i++) {
-    const userId = `lt-user-${i}`;
+    const userId = loadTestUserId(i);
     const email = EMAIL_PATTERN.replace("{i}", String(i));
     // The shape Auth.js mints, inside the alphabet the app's session-cookie
     // reader accepts (src/lib/auth/session/session-cookie.ts).
@@ -270,59 +292,33 @@ async function seedUsers(pool, userCount) {
 
     const crypto = setupVaultCrypto(DEFAULT_PASSPHRASE);
 
-    // Insert user with vault fields
+    await db.seedUser({
+      id: userId,
+      email,
+      name: `Load Test User ${i}`,
+      tenantId: LOAD_TEST_TENANT.id,
+      vaultFields: {
+        accountSalt: crypto.accountSalt,
+        encryptedSecretKey: crypto.encryptedSecretKey,
+        secretKeyIv: crypto.secretKeyIv,
+        secretKeyAuthTag: crypto.secretKeyAuthTag,
+        masterPasswordServerHash: crypto.serverHash,
+        masterPasswordServerSalt: crypto.serverSalt,
+        passphraseVerifierHmac: crypto.verifierHmac,
+        keyVersion: 1,
+      },
+    });
+    // seedUser leaves an existing membership as it is; a re-seed must not keep
+    // one a previous run (or the app) deactivated.
     await pool.query(
-      `INSERT INTO users (
-        id, email, name,
-        email_verified, vault_setup_at, created_at, updated_at,
-        account_salt, encrypted_secret_key, secret_key_iv, secret_key_auth_tag,
-        master_password_server_hash, master_password_server_salt,
-        passphrase_verifier_hmac, passphrase_verifier_version,
-        key_version
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-      ON CONFLICT (id) DO NOTHING`,
-      [
-        userId,
-        email,
-        `Load Test User ${i}`,
-        now, now, now, now,
-        crypto.accountSalt,
-        crypto.encryptedSecretKey,
-        crypto.secretKeyIv,
-        crypto.secretKeyAuthTag,
-        crypto.serverHash,
-        crypto.serverSalt,
-        crypto.verifierHmac,
-        1,
-        1,
-      ],
+      `UPDATE tenant_members SET deactivated_at = NULL WHERE tenant_id = $1 AND user_id = $2`,
+      [LOAD_TEST_TENANT.id, userId],
     );
 
-    // Insert session (token digest, as the app stores it; the raw token goes
-    // in the cookie). ON CONFLICT (id) handles re-seed: update token + expiry
-    const expires = new Date(Date.now() + SESSION_HOURS * 60 * 60 * 1000);
-    await pool.query(
-      `INSERT INTO sessions (id, session_token, user_id, expires)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (id) DO UPDATE SET session_token = $2, expires = $4`,
-      [`lt-session-${userId}`, hashSessionToken(sessionToken), userId, expires.toISOString()],
-    );
-
-    // Insert vault key (verification artifact)
-    await pool.query(
-      `INSERT INTO vault_keys (id, user_id, version, verification_ciphertext, verification_iv, verification_auth_tag, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       ON CONFLICT (id) DO NOTHING`,
-      [
-        `lt-vaultkey-${userId}`,
-        userId,
-        1,
-        crypto.verificationArtifact.ciphertext,
-        crypto.verificationArtifact.iv,
-        crypto.verificationArtifact.authTag,
-        now,
-      ],
-    );
+    // One live session per user: a re-seed replaces the previous run's.
+    await pool.query(`DELETE FROM sessions WHERE user_id = $1`, [userId]);
+    await db.seedSession(userId, sessionToken, SESSION_HOURS, LOAD_TEST_TENANT.id);
+    await db.seedVaultKey(userId, crypto.verificationArtifact, LOAD_TEST_TENANT.id);
 
     credentials.push({
       userId,
@@ -344,19 +340,25 @@ async function seedUsers(pool, userCount) {
 
 async function cleanupUsers(pool) {
   const { rows } = await pool.query(
-    `SELECT id FROM users WHERE email LIKE 'lt-user-%@loadtest.local'`,
+    `SELECT id FROM users WHERE email LIKE 'lt-user-%@loadtest.local' AND tenant_id = $1`,
+    [LOAD_TEST_TENANT.id],
   );
   if (rows.length === 0) {
     console.log("No load test users found to clean up.");
+    await cleanupTenant(pool);
     return;
   }
 
   const userIds = rows.map((r) => r.id);
   console.log(`Cleaning up ${userIds.length} load test users...`);
 
+  // The run's audit events first: once the outbox rows are gone the worker
+  // writes no more audit_logs for the tenant, and audit_logs.tenant_id is
+  // RESTRICT, so a row it wrote after this point would block the tenant delete.
+  await deleteTenantAudit(pool);
+
   // Delete in FK dependency order
   const tables = [
-    { table: "audit_logs", column: "user_id" },
     { table: "attachments", column: "created_by_id" },
     { table: "password_shares", column: "created_by_id" },
     { table: "password_entries", column: "user_id" },
@@ -364,6 +366,7 @@ async function cleanupUsers(pool) {
     { table: "vault_keys", column: "user_id" },
     { table: "extension_tokens", column: "user_id" },
     { table: "sessions", column: "user_id" },
+    { table: "tenant_members", column: "user_id" },
   ];
 
   for (const { table, column } of tables) {
@@ -371,6 +374,7 @@ async function cleanupUsers(pool) {
   }
 
   await pool.query(`DELETE FROM users WHERE id = ANY($1)`, [userIds]);
+  await cleanupTenant(pool);
   console.log(`Cleaned up ${userIds.length} load test users.`);
 
   // Remove auth file
@@ -378,6 +382,51 @@ async function cleanupUsers(pool) {
     unlinkSync(AUTH_FILE);
     console.log(`Removed ${AUTH_FILE}`);
   }
+}
+
+/**
+ * Delete the load-test tenant's remaining tenant-keyed rows, then the tenant.
+ * Audit events from the run sit in audit_outbox under the tenant (FK).
+ */
+async function cleanupTenant(pool) {
+  await deleteTenantAudit(pool);
+  await pool.query(`DELETE FROM tenant_members WHERE tenant_id = $1`, [LOAD_TEST_TENANT.id]);
+  await pool.query(`DELETE FROM tenants WHERE id = $1`, [LOAD_TEST_TENANT.id]);
+}
+
+/**
+ * The tenant's audit rows, outbox before log. A trigger refuses to delete an
+ * outbox row that is not SENT or FAILED (audit evidence), so wait for the
+ * outbox worker to drain the run's events first, and refuse by name when it
+ * does not: the trigger stays the boundary. Once nothing is pending, no more
+ * audit_logs rows arrive for the tenant, so the log delete after it is final.
+ */
+async function deleteTenantAudit(pool) {
+  const raw = process.env.LOAD_TEST_OUTBOX_DRAIN_TIMEOUT_MS?.trim();
+  const timeoutMs = raw === undefined || raw === "" ? 60_000 : Number(raw);
+  // NaN would never pass the deadline and poll forever.
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 0) {
+    throw new Error("LOAD_TEST_OUTBOX_DRAIN_TIMEOUT_MS must be a non-negative number of milliseconds");
+  }
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const { rows } = await pool.query(
+      `SELECT count(*)::int AS n FROM audit_outbox WHERE tenant_id = $1 AND status NOT IN ('SENT', 'FAILED')`,
+      [LOAD_TEST_TENANT.id],
+    );
+    if (rows[0].n === 0) break;
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `LOAD_TEST_CLEANUP_OUTBOX_UNDRAINED: ${rows[0].n} audit_outbox rows of the load-test tenant are not yet ` +
+          "SENT or FAILED. Start the audit-outbox worker (npm run worker:audit-outbox) if it is not running; " +
+          "if it is, the rows are in retry backoff: wait, or raise LOAD_TEST_OUTBOX_DRAIN_TIMEOUT_MS, then re-run cleanup",
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  await pool.query(`DELETE FROM audit_outbox WHERE tenant_id = $1`, [LOAD_TEST_TENANT.id]);
+  await pool.query(`DELETE FROM audit_logs WHERE tenant_id = $1`, [LOAD_TEST_TENANT.id]);
+  await pool.query(`DELETE FROM audit_chain_anchors WHERE tenant_id = $1`, [LOAD_TEST_TENANT.id]);
 }
 
 // ─── Smoke Test ────────────────────────────────────────────────
@@ -493,7 +542,8 @@ async function runSmokeTest(pool) {
 
   // Verify cleanup
   const { rows } = await pool.query(
-    `SELECT count(*) as cnt FROM users WHERE email LIKE 'lt-user-%@loadtest.local'`,
+    `SELECT count(*) as cnt FROM users WHERE email LIKE 'lt-user-%@loadtest.local' AND tenant_id = $1`,
+    [LOAD_TEST_TENANT.id],
   );
   if (Number(rows[0].cnt) !== 0) {
     console.error("FAIL: Cleanup did not remove all load test users");
@@ -572,14 +622,12 @@ async function main() {
       console.warn("  Smoke check skipped: app not reachable (start it before running k6)");
     }
   } catch (err) {
-    console.error("Seed failed:", err.message);
-    console.error("\nManual cleanup SQL:");
-    console.error("  DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE email LIKE 'lt-user-%@loadtest.local');");
-    console.error("  DELETE FROM vault_keys WHERE user_id IN (SELECT id FROM users WHERE email LIKE 'lt-user-%@loadtest.local');");
-    console.error("  DELETE FROM users WHERE email LIKE 'lt-user-%@loadtest.local';");
+    console.error(isCleanup ? "Cleanup failed:" : "Seed failed:", err.message);
+    console.error("\nClean up with: npm run test:load:cleanup");
     process.exit(1);
   } finally {
     await pool.end();
+    await seedHelpers?.closePool();
   }
 }
 

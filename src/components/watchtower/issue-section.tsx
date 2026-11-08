@@ -45,6 +45,8 @@ interface IssueSectionProps {
   issues: PasswordIssue[];
   formatDetails: (details: string) => string;
   onSelectEntry?: (entry: WatchtowerEntryRef) => void;
+  /** False disables an entry's open action (the viewer may not edit it). */
+  canSelectEntry?: (entry: WatchtowerEntryRef) => boolean;
 }
 
 export function IssueSection({
@@ -54,6 +56,7 @@ export function IssueSection({
   issues,
   formatDetails,
   onSelectEntry,
+  canSelectEntry,
 }: IssueSectionProps) {
   const [expanded, setExpanded] = useState(issues.length > 0);
   const config = issueConfig[type];
@@ -105,7 +108,7 @@ export function IssueSection({
                 variant="ghost"
                 size="sm"
                 onClick={() => onSelectEntry?.(issue)}
-                disabled={!onSelectEntry}
+                disabled={!onSelectEntry || canSelectEntry?.(issue) === false}
               >
                   <ExternalLink className="h-3.5 w-3.5" />
               </Button>
@@ -125,6 +128,8 @@ interface ReusedSectionProps {
   groups: ReusedGroup[];
   formatCount: (count: number) => string;
   onSelectEntry?: (entry: WatchtowerEntryRef) => void;
+  /** False disables an entry's open action (the viewer may not edit it). */
+  canSelectEntry?: (entry: WatchtowerEntryRef) => boolean;
 }
 
 export function ReusedSection({
@@ -133,6 +138,7 @@ export function ReusedSection({
   groups,
   formatCount,
   onSelectEntry,
+  canSelectEntry,
 }: ReusedSectionProps) {
   const [expanded, setExpanded] = useState(groups.length > 0);
   const config = issueConfig.reused;
@@ -189,7 +195,7 @@ export function ReusedSection({
                       variant="ghost"
                       size="sm"
                       onClick={() => onSelectEntry?.(entry)}
-                      disabled={!onSelectEntry}
+                      disabled={!onSelectEntry || canSelectEntry?.(entry) === false}
                     >
                         <ExternalLink className="h-3.5 w-3.5" />
                     </Button>
@@ -212,6 +218,8 @@ interface DuplicateSectionProps {
   groups: DuplicateGroup[];
   formatCount: (count: number, hostname: string) => string;
   onSelectEntry?: (entry: WatchtowerEntryRef) => void;
+  /** False disables an entry's open action (the viewer may not edit it). */
+  canSelectEntry?: (entry: WatchtowerEntryRef) => boolean;
 }
 
 export function DuplicateSection({
@@ -220,6 +228,7 @@ export function DuplicateSection({
   groups,
   formatCount,
   onSelectEntry,
+  canSelectEntry,
 }: DuplicateSectionProps) {
   const [expanded, setExpanded] = useState(groups.length > 0);
   const Icon = Files;
@@ -275,7 +284,7 @@ export function DuplicateSection({
                       variant="ghost"
                       size="sm"
                       onClick={() => onSelectEntry?.(entry)}
-                      disabled={!onSelectEntry}
+                      disabled={!onSelectEntry || canSelectEntry?.(entry) === false}
                     >
                         <ExternalLink className="h-3.5 w-3.5" />
                     </Button>

@@ -495,21 +495,30 @@ export const descriptions: Record<
     description: "S3 bucket name for attachments. Required when BLOB_BACKEND=s3.",
     example: "my-passwd-sso-attachments",
   },
-  AZURE_STORAGE_ACCOUNT: {
+  S3_FORCE_PATH_STYLE: {
     group: "Blob storage",
     order: 5,
+    description:
+      "Send path-style S3 requests (https://host/bucket/key). Set to true for an S3-compatible " +
+      "store (e.g. MinIO) reached through a custom endpoint (AWS_ENDPOINT_URL_S3) without " +
+      "per-bucket DNS. Default: false (virtual-hosted requests, as AWS S3 expects).",
+    example: "false",
+  },
+  AZURE_STORAGE_ACCOUNT: {
+    group: "Blob storage",
+    order: 6,
     description: "Azure Storage account name. Required when BLOB_BACKEND=azure.",
     example: "mystorageaccount",
   },
   AZURE_BLOB_CONTAINER: {
     group: "Blob storage",
-    order: 6,
+    order: 7,
     description: "Azure Blob container name for attachments. Required when BLOB_BACKEND=azure.",
     example: "attachments",
   },
   AZURE_STORAGE_CONNECTION_STRING: {
     group: "Blob storage",
-    order: 7,
+    order: 8,
     description:
       "Azure Storage connection string (includes account key).\n" +
       "Mutually exclusive with AZURE_STORAGE_SAS_TOKEN.",
@@ -517,7 +526,7 @@ export const descriptions: Record<
   },
   AZURE_STORAGE_SAS_TOKEN: {
     group: "Blob storage",
-    order: 8,
+    order: 9,
     description:
       "Azure Shared Access Signature token for scoped blob access.\n" +
       "Mutually exclusive with AZURE_STORAGE_CONNECTION_STRING.",
@@ -525,7 +534,7 @@ export const descriptions: Record<
   },
   GCS_ATTACHMENTS_BUCKET: {
     group: "Blob storage",
-    order: 9,
+    order: 10,
     description: "Google Cloud Storage bucket for attachments. Required when BLOB_BACKEND=gcs.",
     example: "my-passwd-sso-attachments",
   },

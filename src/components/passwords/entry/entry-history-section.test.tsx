@@ -204,6 +204,24 @@ describe("EntryHistorySection", () => {
     expect(screen.getByText(/restoreVersion/)).toBeInTheDocument();
   });
 
+  it.each([
+    ["aadVersion 1", HISTORY_ITEMS[0]],
+    ["aadVersion 0 (too old)", { ...HISTORY_ITEMS[0], aadVersion: 0 }],
+  ])("canRestore=false: a team row (%s) keeps View and offers no Restore or too-old label (#1014)", async (_label, item) => {
+    globalThis.fetch = mockFetchHistoryList([item] as typeof HISTORY_ITEMS);
+    await act(async () => {
+      render(<EntryHistorySection entryId="entry-1" teamId="team-1" canRestore={false} />);
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/entryHistory/)).toHaveTextContent("(1)");
+    });
+    fireEvent.click(screen.getByText(/entryHistory/));
+
+    expect(screen.getByRole("button", { name: "viewVersion" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "restoreVersion" })).toBeNull();
+    expect(screen.queryByText("restoreVersionTooOld")).toBeNull();
+  });
+
   it("View button calls requireVerification", async () => {
     await act(async () => {
       render(

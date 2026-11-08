@@ -35,8 +35,8 @@ vi.mock("next-auth/react", () => ({
 // pane-level logic (empty-state, loading, error routing). Cross-entry reveal
 // carry-over (S5) is tested at the parent level via key= in Batch 4.
 vi.mock("./password-detail-inline", () => ({
-  PasswordDetailInline: ({ data }: { data: InlineDetailData }) => (
-    <div data-testid="detail-inline" data-entry-id={data.id} />
+  PasswordDetailInline: ({ data, onEdit }: { data: InlineDetailData; onEdit?: () => void }) => (
+    <div data-testid="detail-inline" data-entry-id={data.id} data-has-on-edit={String(!!onEdit)} />
   ),
 }));
 
@@ -174,6 +174,26 @@ describe("PasswordDetailPane", () => {
     expect(detailEl).toHaveAttribute("data-entry-id", "entry-1");
     // Empty-state must not be shown
     expect(screen.queryByText("selectAnEntry")).not.toBeInTheDocument();
+  });
+
+  // The inline detail's history restore and attachment upload follow its onEdit
+  // (#1014): the pane passes its own onEdit through, absent stays absent.
+  it.each([
+    ["absent", undefined, "false"],
+    ["present", () => {}, "true"],
+  ])("passes onEdit (%s) through to the inline detail", (_label, onEdit, hasOnEdit) => {
+    render(
+      <PasswordDetailPane
+        entryId="entry-1"
+        entry={null}
+        detailData={minimalDetailData}
+        loading={false}
+        error={null}
+        onEdit={onEdit}
+      />,
+    );
+
+    expect(screen.getByTestId("detail-inline")).toHaveAttribute("data-has-on-edit", hasOnEdit);
   });
 
   it("renders nothing meaningful when entryId is set but entry/detailData are null and not loading or error", () => {

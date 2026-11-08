@@ -2,7 +2,9 @@
  * Integration test (real DB): a team-entry share link stops serving once its
  * creator no longer holds the membership of the entry's team they held when
  * they created it, or the entry is trashed or gone
- * (docs/archive/review/departed-member-share-links-plan.md, #990).
+ * (docs/archive/review/departed-member-share-links-plan.md, #990); while the
+ * team's policy disallows sharing or requires a share password the link lacks
+ * (#996); and a personal entry share while its entry is trashed or gone (#998).
  *
  * Production routes, the share page and share_creator_admitted run on the app
  * role under FORCE RLS; only auth, step-up, rate limits, the SCIM token and
@@ -87,11 +89,12 @@ import { ShareError } from "@/components/share/share-error";
 import { ShareProtectedContent } from "@/components/share/share-protected-content";
 import { POST as verifyAccess } from "@/app/api/share-links/verify-access/route";
 import { GET as shareContent } from "@/app/api/share-links/[id]/content/route";
+import { GET as shareDownload } from "@/app/s/[token]/download/route";
 import { POST as createShareLink, GET as listShareLinks } from "@/app/api/share-links/route";
 import { GET as listMine } from "@/app/api/share-links/mine/route";
 import { PATCH as scimPatchUser, DELETE as scimDeleteUser } from "@/app/api/scim/v2/Users/[id]/route";
 import { DELETE as removeMember } from "@/app/api/teams/[teamId]/members/[memberId]/route";
-import { hashToken, generateAccessPassword, hashAccessPassword } from "@/lib/crypto/crypto-server";
+import { hashToken, generateAccessPassword, hashAccessPassword, encryptShareData } from "@/lib/crypto/crypto-server";
 import { createShareAccessToken } from "@/lib/auth/tokens/share-access-token";
 import { BYPASS_GRANT, setBypassGucs, setTenantGucs } from "@/lib/tenant-rls-grants";
 import { prisma } from "@/lib/prisma";
@@ -176,6 +179,15 @@ describe("share links across a creator's departure — real-DB integration", () 
     return rowId;
   }
 
+  async function teamPolicy(teamId: string, o: { allowSharing: boolean; requireSharePassword: boolean }): Promise<void> {
+    await sql(
+      `INSERT INTO team_policies (id, team_id, tenant_id, allow_sharing, require_share_password, created_at, updated_at)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, now(), now())
+       ON CONFLICT (team_id) DO UPDATE SET allow_sharing = $4, require_share_password = $5, updated_at = now()`,
+      randomUUID(), teamId, tenantId, o.allowSharing, o.requireSharePassword,
+    );
+  }
+
   async function teamEntry(teamId: string, owner: string): Promise<string> {
     const id = randomUUID();
     await sql(
@@ -214,19 +226,23 @@ describe("share links across a creator's departure — real-DB integration", () 
     protect?: boolean;
     maxViews?: number | null;
     createdAt?: string;
+    /** Encrypt real data under the server key (a personal share the content route can open). */
+    serverKeyData?: boolean;
   }): Promise<SeededShare> {
     const id = randomUUID();
     const token = hex(32);
     const password = o.protect ? generateAccessPassword() : undefined;
     const hashed = password ? hashAccessPassword(password) : null;
+    const sealed = o.serverKeyData ? encryptShareData(JSON.stringify({ title: "t", password: "p" }), tenantId) : null;
     await sql(
       `INSERT INTO password_shares (id, tenant_id, token_hash, share_type, entry_type, encrypted_data, data_iv,
          data_auth_tag, expires_at, max_views, created_by_id, team_password_entry_id, master_key_version,
          access_password_hash, access_password_hash_version, password_entry_id, created_at)
        VALUES ($1::uuid, $2::uuid, $3, $4::"ShareType", 'LOGIN', $5, $6, $7, now() + interval '1 day', $8,
          $9::uuid, $10::uuid, $11, $12, $13, $14::uuid, ${o.createdAt ?? "now()"})`,
-      id, tenantId, hashToken(token), o.shareType ?? "ENTRY_SHARE", hex(32), hex(12), hex(16),
-      o.maxViews ?? null, o.creatorId, o.teamEntryId ?? null, o.version ?? 0,
+      id, tenantId, hashToken(token), o.shareType ?? "ENTRY_SHARE",
+      sealed?.ciphertext ?? hex(32), sealed?.iv ?? hex(12), sealed?.authTag ?? hex(16),
+      o.maxViews ?? null, o.creatorId, o.teamEntryId ?? null, sealed?.masterKeyVersion ?? o.version ?? 0,
       hashed?.hash ?? null, hashed?.version ?? 1, o.personalEntryId ?? null,
     );
     return { id, token, password };
@@ -263,6 +279,15 @@ describe("share links across a creator's departure — real-DB integration", () 
       { params: Promise.resolve({ id: s.id }) },
     );
     return { status: res.status, body: await res.json().catch(() => null) };
+  }
+
+  /** Download status: 410 when refused; admitted without a token, the password demand (401). */
+  async function download(s: SeededShare, withAccessToken = false): Promise<number> {
+    const headers: Record<string, string> = withAccessToken ? { authorization: `Bearer ${createShareAccessToken(s.id)}` } : {};
+    const res = await shareDownload(new NextRequest(`http://localhost/s/${s.token}/download`, { headers }), {
+      params: Promise.resolve({ token: s.token }),
+    });
+    return res.status;
   }
 
   function scimActive(userId: string, active: boolean) {
@@ -455,6 +480,103 @@ describe("share links across a creator's departure — real-DB integration", () 
     expect(await page(late)).toBe("error:revoked");
   });
 
+  // ── A13 / A14: sharing policy and personal entry state (#996, #998) ──
+
+  it("A13: turning the team's sharing off stops its links at the page, verify-access and content; turning it back on serves them", async () => {
+    const t = await teamWithCreator();
+    const open = await share({ creatorId: t.creator, teamEntryId: t.entryId });
+    const locked = await share({ creatorId: t.creator, teamEntryId: t.entryId, protect: true });
+    const revokedControl = await share({ creatorId: t.creator, teamEntryId: t.entryId, protect: true });
+    await sql(`UPDATE password_shares SET revoked_at = now() WHERE id = $1::uuid`, revokedControl.id);
+    const file = await share({ creatorId: t.creator, teamEntryId: t.entryId, shareType: "FILE", protect: true });
+    await teamPolicy(t.teamId, { allowSharing: true, requireSharePassword: false });
+    expect(await page(open)).toBe("served");
+    expect(await download(file)).toBe(401);
+
+    await teamPolicy(t.teamId, { allowSharing: false, requireSharePassword: false });
+    expect(await page(open)).toBe("error:revoked");
+    expect(await page(locked)).toBe("error:revoked");
+    expect(await verify(locked)).toEqual(await verify(revokedControl));
+    expect(await content(locked)).toEqual(await content(revokedControl));
+    expect((await state(open.id)).view_count).toBe(1);
+    expect((await state(locked.id)).revoked_at).toBeNull();
+    expect(await download(file)).toBe(410);
+
+    await teamPolicy(t.teamId, { allowSharing: true, requireSharePassword: false });
+    expect(await page(open)).toBe("served");
+    expect((await verify(locked)).status).toBe(200);
+    expect(await download(file)).toBe(401);
+  });
+
+  it("A13: with the pre-check forced, the download's view-count UPDATE refuses while sharing is off and counts the view once it is back on", async () => {
+    const t = await teamWithCreator();
+    const file = await share({ creatorId: t.creator, teamEntryId: t.entryId, shareType: "FILE", protect: true });
+    forceAdmitted.on = true;
+
+    await teamPolicy(t.teamId, { allowSharing: false, requireSharePassword: false });
+    expect(await download(file, true)).toBe(410);
+    expect((await state(file.id)).view_count).toBe(0);
+
+    await teamPolicy(t.teamId, { allowSharing: true, requireSharePassword: false });
+    // Past the UPDATE: the fixture stores no file, which the route answers 404.
+    expect(await download(file, true)).toBe(404);
+    expect((await state(file.id)).view_count).toBe(1);
+  });
+
+  it("A13: requiring a share password stops the team's unprotected links only; relaxing it serves them again", async () => {
+    const t = await teamWithCreator();
+    const open = await share({ creatorId: t.creator, teamEntryId: t.entryId });
+    const locked = await share({ creatorId: t.creator, teamEntryId: t.entryId, protect: true });
+
+    await teamPolicy(t.teamId, { allowSharing: true, requireSharePassword: true });
+    expect(await page(open)).toBe("error:revoked");
+    expect(await page(locked)).toBe("gate");
+    expect((await verify(locked)).status).toBe(200);
+
+    await teamPolicy(t.teamId, { allowSharing: true, requireSharePassword: false });
+    expect(await page(open)).toBe("served");
+  });
+
+  it("A13: another team's policy does not stop this team's links", async () => {
+    const t = await teamWithCreator();
+    const otherTeam = await team(t.owner);
+    await teamPolicy(otherTeam, { allowSharing: false, requireSharePassword: true });
+    const s = await share({ creatorId: t.creator, teamEntryId: t.entryId });
+    expect(await page(s)).toBe("served");
+  });
+
+  it.each([
+    ["trashed", "trash"],
+    ["deleted", "delete"],
+  ] as const)("A14: a personal entry share stops when its entry is %s; a Send of the same creator still serves", async (_label, path) => {
+    const creator = await member();
+    const entry = await personalEntry(creator);
+    const personal = await share({ creatorId: creator, personalEntryId: entry, protect: true, serverKeyData: true });
+    const revokedControl = await share({ creatorId: creator, personalEntryId: entry, protect: true, serverKeyData: true });
+    await sql(`UPDATE password_shares SET revoked_at = now() WHERE id = $1::uuid`, revokedControl.id);
+    const send = await share({ creatorId: creator, version: 1, shareType: "TEXT", protect: true });
+    expect(await page(personal)).toBe("gate");
+    expect((await content(personal)).status).toBe(200);
+
+    if (path === "trash") {
+      await sql(`UPDATE password_entries SET deleted_at = now() WHERE id = $1::uuid`, entry);
+    } else {
+      await sql(`DELETE FROM password_entries WHERE id = $1::uuid`, entry);
+    }
+
+    expect(await page(personal)).toBe("error:revoked");
+    expect(await verify(personal)).toEqual(await verify(revokedControl));
+    // A viewer already holding an access token is refused too.
+    expect(await content(personal)).toEqual(await content(revokedControl));
+    expect(await page(send)).toBe("gate");
+    expect((await verify(send)).status).toBe(200);
+    if (path === "trash") {
+      await sql(`UPDATE password_entries SET deleted_at = NULL WHERE id = $1::uuid`, entry);
+      expect(await page(personal)).toBe("gate");
+      expect((await content(personal)).status).toBe(200);
+    }
+  });
+
   // ── A8: lists ──
 
   it("A8: /mine?team= reports creatorAdmitted=false to an admin and a member; a VIEWER does not list another member's link", async () => {
@@ -528,19 +650,40 @@ describe("share links across a creator's departure — real-DB integration", () 
     const otherTeamId = await team(owner);
     const base = "timestamptz '2026-06-01 00:00:00+00'";
 
-    async function caseShare(memberOffset: string | null, opts: { entry?: string | null; deactivated?: boolean; inTeam?: string; version?: number } = {}) {
+    async function caseShare(
+      memberOffset: string | null,
+      opts: { entry?: string | null; deactivated?: boolean; inTeam?: string; version?: number; shareType?: "ENTRY_SHARE" | "TEXT" } = {},
+    ) {
       const user = await member();
       if (memberOffset !== null) {
         const row = await addTeamMember(opts.inTeam ?? teamId, user, "MEMBER", `${base} + interval '${memberOffset}'`);
         if (opts.deactivated) await sql(`UPDATE team_members SET deactivated_at = now() WHERE id = $1::uuid`, row);
       }
-      return (await share({ creatorId: user, teamEntryId: opts.entry === undefined ? entryId : opts.entry, version: opts.version ?? 0, createdAt: base })).id;
+      return (await share({
+        creatorId: user,
+        teamEntryId: opts.entry === undefined ? entryId : opts.entry,
+        version: opts.version ?? 0,
+        shareType: opts.shareType,
+        createdAt: base,
+      })).id;
     }
 
-    async function personalCase() {
+    async function personalCase(entryState: "live" | "trashed" | "gone" = "live", shareType: "ENTRY_SHARE" | "FILE" = "ENTRY_SHARE") {
       const user = await member();
       const entry = await personalEntry(user);
-      return (await share({ creatorId: user, personalEntryId: entry, version: 1, createdAt: base })).id;
+      const id = (await share({ creatorId: user, personalEntryId: entry, version: 1, shareType, createdAt: base })).id;
+      if (entryState === "trashed") await sql(`UPDATE password_entries SET deleted_at = now() WHERE id = $1::uuid`, entry);
+      if (entryState === "gone") await sql(`DELETE FROM password_entries WHERE id = $1::uuid`, entry);
+      return id;
+    }
+
+    async function policyCase(policy: { allowSharing: boolean; requireSharePassword: boolean }, protect: boolean) {
+      const policyOwner = await ctx.createUser(tenantId);
+      const policyTeam = await team(policyOwner);
+      await teamPolicy(policyTeam, policy);
+      const user = await member();
+      await addTeamMember(policyTeam, user, "MEMBER", `${base} - interval '1 second'`);
+      return (await share({ creatorId: user, teamEntryId: await teamEntry(policyTeam, policyOwner), protect, createdAt: base })).id;
     }
 
     const cases: [string, string, boolean][] = [
@@ -552,8 +695,15 @@ describe("share links across a creator's departure — real-DB integration", () 
       ["creator never a member (another member is)", await caseShare(null), false],
       ["creator a member of another team only", await caseShare("-1 second", { inTeam: otherTeamId }), false],
       ["team share whose entry is gone (version 0, no entry)", await caseShare("-1 second", { entry: null }), false],
-      ["Send (version 1, no entry)", await caseShare(null, { entry: null, version: 1 }), true],
+      ["Send (version 1, no entry)", await caseShare(null, { entry: null, version: 1, shareType: "TEXT" }), true],
       ["personal entry share (version 1)", await personalCase(), true],
+      ["personal entry share, entry trashed", await personalCase("trashed"), false],
+      ["personal entry share, entry gone", await personalCase("gone"), false],
+      ["FILE share with a personal entry gone (not an entry share)", await personalCase("gone", "FILE"), true],
+      ["team policy allows sharing (row present)", await policyCase({ allowSharing: true, requireSharePassword: false }, false), true],
+      ["team policy disallows sharing", await policyCase({ allowSharing: false, requireSharePassword: false }, true), false],
+      ["team policy requires a password, link has none", await policyCase({ allowSharing: true, requireSharePassword: true }, false), false],
+      ["team policy requires a password, link has one", await policyCase({ allowSharing: true, requireSharePassword: true }, true), true],
       ["unknown id", randomUUID(), false],
     ];
     const legacyCreator = await member();
@@ -616,16 +766,23 @@ describe("share links across a creator's departure — real-DB integration", () 
     expect(c.n).toBe(1);
   });
 
-  it("A10b: the function's migration applies as a NOSUPERUSER NOBYPASSRLS role (RDS)", async () => {
-    const file = readFileSync(join(process.cwd(), "prisma/migrations/20261102000000_share_creator_admitted/migration.sql"), "utf8");
-    const whole = analyze(file);
-    expect([whole.beginCount, whole.commitCount, whole.rollbackCount]).toEqual([1, 1, 0]);
-    const trimmed = file.trim();
-    expect(trimmed.startsWith("BEGIN;")).toBe(true);
-    expect(trimmed.endsWith("COMMIT;")).toBe(true);
-    const body = trimmed.slice("BEGIN;".length, -"COMMIT;".length);
-    const inner = analyze(body);
-    expect([inner.beginCount, inner.commitCount, inner.rollbackCount]).toEqual([0, 0, 0]);
+  // Each migration replaces the function as the role that created it, as on RDS.
+  it.each([
+    [["20261102000000_share_creator_admitted"]],
+    [["20261102000000_share_creator_admitted", "20261108000000_share_admission_policy_and_personal_entry"]],
+  ])("A10b: the function's migrations %j apply as a NOSUPERUSER NOBYPASSRLS role (RDS)", async (migrations) => {
+    const bodies = migrations.map((migration) => {
+      const file = readFileSync(join(process.cwd(), `prisma/migrations/${migration}/migration.sql`), "utf8");
+      const whole = analyze(file);
+      expect([whole.beginCount, whole.commitCount, whole.rollbackCount]).toEqual([1, 1, 0]);
+      const trimmed = file.trim();
+      expect(trimmed.startsWith("BEGIN;")).toBe(true);
+      expect(trimmed.endsWith("COMMIT;")).toBe(true);
+      const body = trimmed.slice("BEGIN;".length, -"COMMIT;".length);
+      const inner = analyze(body);
+      expect([inner.beginCount, inner.commitCount, inner.rollbackCount]).toEqual([0, 0, 0]);
+      return body;
+    });
 
     const t = await teamWithCreator();
     const s = await share({ creatorId: t.creator, teamEntryId: t.entryId });
@@ -637,12 +794,15 @@ describe("share links across a creator's departure — real-DB integration", () 
       await client.query(`CREATE ROLE ${role} NOSUPERUSER NOBYPASSRLS NOLOGIN`);
       await client.query(`GRANT USAGE, CREATE ON SCHEMA public TO ${role}`);
       await client.query(`SET LOCAL ROLE ${role}`);
-      await client.query(body);
+      for (const body of bodies) await client.query(body);
       await client.query(`RESET ROLE`);
-      const owner = await client.query(
-        `SELECT pg_get_userbyid(proowner) AS owner FROM pg_proc WHERE oid = 'public.share_creator_admitted(uuid)'::regprocedure`,
+      const fn = await client.query(
+        `SELECT pg_get_userbyid(proowner) AS owner,
+                has_function_privilege('passwd_app', oid, 'EXECUTE') AS app,
+                EXISTS (SELECT 1 FROM aclexplode(proacl) a WHERE a.grantee = 0) AS public
+           FROM pg_proc WHERE oid = 'public.share_creator_admitted(uuid)'::regprocedure`,
       );
-      expect(owner.rows[0].owner).toBe(role);
+      expect(fn.rows[0]).toEqual({ owner: role, app: true, public: false });
       await client.query(`SET LOCAL ROLE passwd_app`);
       const r = await client.query(`SELECT share_creator_admitted($1::uuid) AS ok`, [s.id]);
       expect(r.rows[0].ok).toBe(true);

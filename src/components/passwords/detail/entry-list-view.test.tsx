@@ -38,6 +38,8 @@ const { mockFetchApi, mockDecryptData, mockBuildAAD, STABLE_KEY, mockCanUsePassk
 let capturedPaneRestore: (() => void) | undefined;
 let capturedPaneDeletePermanently: (() => void) | undefined;
 let capturedPaneDelete: (() => void) | undefined;
+let capturedPaneEdit: (() => void) | undefined;
+let capturedPaneArchive: (() => void) | undefined;
 let capturedBulkOnSuccess: (() => void) | undefined;
 let capturedBulkOnStepUpRequired: (() => Promise<void> | void) | undefined;
 
@@ -151,6 +153,8 @@ vi.mock("./password-detail-pane", () => ({
     onRestore,
     onDeletePermanently,
     onDelete,
+    onEdit,
+    onArchive,
   }: {
     entryId: string | null;
     entry?: { username?: string } | null;
@@ -158,7 +162,11 @@ vi.mock("./password-detail-pane", () => ({
     onRestore?: () => void;
     onDeletePermanently?: () => void;
     onDelete?: () => void;
+    onEdit?: () => void;
+    onArchive?: () => void;
   }) => {
+    capturedPaneEdit = onEdit;
+    capturedPaneArchive = onArchive;
     capturedPaneRestore = onRestore;
     capturedPaneDeletePermanently = onDeletePermanently;
     capturedPaneDelete = onDelete;
@@ -830,6 +838,8 @@ describe("EntryListView — accordion team PasswordCard wiring", () => {
   beforeEach(() => {
     mockLayoutMode = "accordion";
     capturedCardProps = undefined;
+    capturedPaneEdit = undefined;
+    capturedPaneArchive = undefined;
   });
   afterAll(() => { mockLayoutMode = "master-detail"; });
 
@@ -864,6 +874,88 @@ describe("EntryListView — accordion team PasswordCard wiring", () => {
       createdByLabel: () => "createdBy:Alice",
     };
   }
+
+  it.each([
+    [true, true],
+    [false, false],
+  ])("gives the card canEdit=%s when the adapter's canWriteEntry answers %s (#1014)", async (canWrite, want) => {
+    render(
+      <EntryListView<TeamDisplayEntry>
+        adapter={{ ...teamAdapter(), canWriteEntry: () => canWrite }}
+        descriptor={NORMAL_VIEW}
+        query={{ tagId: null, folderId: null, entryType: null }}
+        searchQuery=""
+        sortBy="updatedAt"
+        refreshKey={0}
+      />,
+    );
+    await waitFor(() => { expect(screen.getByTestId("card-te1")).toBeInTheDocument(); });
+    expect(capturedCardProps?.canEdit).toBe(want);
+  });
+
+  it("canEdit=false wins over a canWriteEntry that answers true (card and pane)", async () => {
+    const adapter = {
+      ...teamAdapter(),
+      permissions: { canCreate: false, canEdit: false, canDelete: false, canShare: false },
+      canWriteEntry: () => true,
+    };
+    const { unmount } = render(
+      <EntryListView<TeamDisplayEntry>
+        adapter={adapter}
+        descriptor={NORMAL_VIEW}
+        query={{ tagId: null, folderId: null, entryType: null }}
+        searchQuery=""
+        sortBy="updatedAt"
+        refreshKey={0}
+      />,
+    );
+    await waitFor(() => { expect(screen.getByTestId("card-te1")).toBeInTheDocument(); });
+    expect(capturedCardProps?.canEdit).toBe(false);
+    unmount();
+
+    mockLayoutMode = "master-detail";
+    render(
+      <EntryListView<TeamDisplayEntry>
+        adapter={adapter}
+        descriptor={NORMAL_VIEW}
+        query={{ tagId: null, folderId: null, entryType: null }}
+        searchQuery=""
+        sortBy="updatedAt"
+        refreshKey={0}
+        onRequestEdit={() => {}}
+      />,
+    );
+    await waitFor(() => { expect(screen.getByTestId("row-te1")).toBeInTheDocument(); });
+    act(() => { fireEvent.click(screen.getByTestId("row-te1")); });
+    expect(capturedPaneEdit).toBeUndefined();
+    expect(capturedPaneArchive).toBeUndefined();
+  });
+
+  it.each([
+    ["the entry is writable", true],
+    ["the entry is not the member's", false],
+  ])("master-detail: the pane gets edit and archive only when %s (#1014)", async (_label, canWrite) => {
+    mockLayoutMode = "master-detail";
+    const canWriteEntry = vi.fn((entry: TeamDisplayEntry) => entry.id === "te1" && canWrite);
+    render(
+      <EntryListView<TeamDisplayEntry>
+        adapter={{ ...teamAdapter(), canWriteEntry }}
+        descriptor={NORMAL_VIEW}
+        query={{ tagId: null, folderId: null, entryType: null }}
+        searchQuery=""
+        sortBy="updatedAt"
+        refreshKey={0}
+        onRequestEdit={() => {}}
+      />,
+    );
+    await waitFor(() => { expect(screen.getByTestId("row-te1")).toBeInTheDocument(); });
+    act(() => { fireEvent.click(screen.getByTestId("row-te1")); });
+    expect(canWriteEntry).toHaveBeenCalled();
+    expect(capturedPaneEdit !== undefined).toBe(canWrite);
+    expect(capturedPaneArchive !== undefined).toBe(canWrite);
+    // Delete is not part of the rule: canDelete alone decides.
+    expect(capturedPaneDelete).toBeDefined();
+  });
 
   it("passes getPassword/getDetail/getUrl + createdBy to the team accordion card", async () => {
     render(

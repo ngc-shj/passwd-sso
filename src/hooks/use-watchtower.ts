@@ -48,6 +48,8 @@ export interface TeamWatchtowerEntryRef {
   username: string | null;
   scope: "team";
   teamId: string;
+  /** The entry's creator, for the MEMBER own-entry write rule; null when the list did not carry it. */
+  createdById: string | null;
 }
 
 export type WatchtowerEntryRef =
@@ -106,6 +108,7 @@ interface DecryptedEntry {
   expiresAt: string | null;
   scope: "personal" | "team";
   teamId?: string;
+  createdById?: string | null;
 }
 
 interface FetchWatchtowerEntriesSuccess {
@@ -133,6 +136,7 @@ function toWatchtowerEntryRef(entry: DecryptedEntry): WatchtowerEntryRef {
       username: entry.username,
       scope: "team",
       teamId: entry.teamId,
+      createdById: entry.createdById ?? null,
     };
   }
 
@@ -840,6 +844,7 @@ async function fetchTeamWatchtowerEntries({
         expiresAt: raw.expiresAt ?? null,
         scope: "team",
         teamId,
+        createdById: typeof raw.createdBy?.id === "string" ? raw.createdBy.id : null,
       });
     } catch {
       // Skip team entries that fail to decrypt

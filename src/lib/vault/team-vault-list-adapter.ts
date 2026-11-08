@@ -3,13 +3,15 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { useTeamVault, type EntryItemKeyData } from "@/lib/team/team-vault-context";
+import { useVault } from "@/lib/vault/vault-context";
+import { canWriteTeamEntry, hasTeamPermission, type TeamPermission } from "@/lib/auth/access/team-permissions";
 import { decryptData } from "@/lib/crypto/crypto-client";
 import { buildTeamEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import { buildTeamGetDetail } from "@/lib/vault/build-team-get-detail";
 import { fetchApi } from "@/lib/url-helpers";
 import { readRequireReprompt } from "@/lib/vault/read-require-reprompt";
 import { throwIfStepUp } from "@/lib/http/handle-step-up-error";
-import { apiPath, ENTRY_TYPE, TEAM_ROLE } from "@/lib/constants";
+import { apiPath, ENTRY_TYPE, TEAM_PERMISSION, TEAM_ROLE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import { notifyTeamDataChanged } from "@/lib/events";
 import type { VaultListAdapter, EntryListViewKind, EntryListQuery } from "@/lib/vault/vault-list-adapter";
@@ -141,13 +143,15 @@ export async function decryptTeamOverview(
  *
  * Availability: the team page gates on its own key probe (banner XOR list), so the
  * adapter reports ready:true — EntryListView only mounts once the key is available.
- * Permissions (page.tsx:303-306 verbatim): canCreate/canEdit = OWNER|ADMIN|MEMBER,
- * canDelete = OWNER|ADMIN, canShare = canEdit; VIEWER all-false.
+ * Permissions from the routes' role table (team-permissions.ts): canCreate /
+ * canEdit = OWNER|ADMIN|MEMBER, canDelete = OWNER|ADMIN, canShare = canEdit;
+ * VIEWER all-false. canWriteEntry narrows a MEMBER to their own entries.
  * Favorites are KEPT for team (deviation from the locked plan, user-approved):
  * supportsFavorite = true, setFavorite hits teamPasswordFavorite.
  */
 export function useTeamVaultListAdapter(teamId: string, role: string): VaultListAdapter<TeamDisplayEntry> {
   const { getTeamEncryptionKey, getEntryDecryptionKey } = useTeamVault();
+  const { userId } = useVault();
   const t = useTranslations("Team");
 
   // getTeamEncryptionKey / getEntryDecryptionKey are session-derived and change
@@ -162,16 +166,17 @@ export function useTeamVaultListAdapter(teamId: string, role: string): VaultList
   });
 
   return useMemo(() => {
-    const canEdit =
-      role === TEAM_ROLE.OWNER || role === TEAM_ROLE.ADMIN || role === TEAM_ROLE.MEMBER;
-    const canDelete = role === TEAM_ROLE.OWNER || role === TEAM_ROLE.ADMIN;
+    const teamRole = Object.values(TEAM_ROLE).find((r) => r === role);
+    const can = (permission: TeamPermission) => !!teamRole && hasTeamPermission(teamRole, permission);
+    const canEdit = can(TEAM_PERMISSION.PASSWORD_UPDATE);
+    const canDelete = can(TEAM_PERMISSION.PASSWORD_DELETE);
 
     const adapter: VaultListAdapter<TeamDisplayEntry> = {
       kind: "team",
       teamId,
       availability: { ready: true },
       permissions: {
-        canCreate: canEdit,
+        canCreate: can(TEAM_PERMISSION.PASSWORD_CREATE),
         canEdit,
         canDelete,
         canShare: canEdit,
@@ -216,6 +221,12 @@ export function useTeamVaultListAdapter(teamId: string, role: string): VaultList
           { getEntryDecryptionKey: getEntryKeyRef.current },
         );
         return () => getDetail();
+      },
+
+      // The routes' rule (ONLY_OWN_ENTRIES): a MEMBER edits, restores history and
+      // uploads only on entries they created. The server stays the authority.
+      canWriteEntry(entry: TeamDisplayEntry) {
+        return !!teamRole && !!userId && canWriteTeamEntry(teamRole, entry.createdBy.id, userId);
       },
 
       // Accordion PasswordCard "created by" label (INV-C6.1 — team-specific).
@@ -278,5 +289,5 @@ export function useTeamVaultListAdapter(teamId: string, role: string): VaultList
       },
     };
     return adapter;
-  }, [teamId, role, t]);
+  }, [teamId, role, userId, t]);
 }

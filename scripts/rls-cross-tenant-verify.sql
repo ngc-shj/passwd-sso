@@ -353,9 +353,10 @@ BEGIN
   -- 10b. Routines that grant themselves an RLS bypass. A SECURITY INVOKER
   -- routine that sets app.bypass_rls / app.bypass_tables reads past RLS as any
   -- caller, so it is reviewed like a definer. Allowlist:
-  --   - share_creator_admitted(uuid) (#990, 20261102000000)
+  --   - share_creator_admitted(uuid) (#990, 20261102000000; #996/#998, 20261108000000)
   --       Read-only; returns one boolean for one share id. Grants itself exactly
-  --       password_shares, team_password_entries, team_members for the call,
+  --       password_shares, team_password_entries, team_members, team_policies,
+  --       password_entries for the call,
   --       saves and restores the caller's settings, EXECUTE to passwd_app only.
   -- A review tripwire for accidents, not a boundary — any role may set these
   -- settings itself. Known bypasses: dynamic names (EXECUTE, variables), a
@@ -381,16 +382,16 @@ BEGIN
              OR EXISTS (SELECT 1 FROM unnest(pr.proconfig) c WHERE c LIKE 'app.bypass\_%'))
         AND pr.oid <> 'public.share_creator_admitted(uuid)'::regprocedure
     ));
-  -- The allowlisted routine's bypass stays exactly its three tables: it writes
+  -- The allowlisted routine's bypass stays exactly its five tables: it writes
   -- app.bypass_tables exactly twice, and those two writes are the grant of this
   -- list and the restore of the caller's value (a widened restore would carry the
   -- wider grant into the caller's transaction).
   ASSERT (SELECT regexp_count(pr.prosrc, $re$set_config\s*\(\s*'app\.bypass_tables'$re$, 1, 'i') = 2
-                 AND strpos(pr.prosrc, $t$set_config('app.bypass_tables', 'password_shares,team_password_entries,team_members', true)$t$) > 0
+                 AND strpos(pr.prosrc, $t$set_config('app.bypass_tables', 'password_shares,team_password_entries,team_members,team_policies,password_entries', true)$t$) > 0
                  AND strpos(pr.prosrc, $t$set_config('app.bypass_tables', COALESCE(v_prev_tables, ''), true)$t$) > 0
             FROM pg_catalog.pg_proc pr
            WHERE pr.oid = 'public.share_creator_admitted(uuid)'::regprocedure),
-    '[E-RLS-BYPASS-ROUTINE] share_creator_admitted no longer sets exactly password_shares,team_password_entries,team_members';
+    '[E-RLS-BYPASS-ROUTINE] share_creator_admitted no longer sets exactly password_shares,team_password_entries,team_members,team_policies,password_entries';
 END $$;
 
 -- =====================================================================

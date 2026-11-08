@@ -14,7 +14,19 @@ describe("loadCloudBlobConfig", () => {
       backend: BLOB_STORAGE.S3,
       region: "ap-northeast-1",
       bucket: "bucket",
+      forcePathStyle: false,
     });
+  });
+
+  it.each([
+    ["true", true],
+    ["false", false],
+    ["", false],
+  ])("reads S3_FORCE_PATH_STYLE=%j as forcePathStyle %s", (value, want) => {
+    vi.stubEnv("AWS_REGION", "ap-northeast-1");
+    vi.stubEnv("S3_ATTACHMENTS_BUCKET", "bucket");
+    vi.stubEnv("S3_FORCE_PATH_STYLE", value);
+    expect(loadCloudBlobConfig(BLOB_STORAGE.S3).forcePathStyle).toBe(want);
   });
 
   it("loads azure config", () => {

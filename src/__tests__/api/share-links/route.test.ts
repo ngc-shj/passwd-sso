@@ -359,6 +359,38 @@ describe("POST /api/share-links", () => {
     expect(json.error).toBe("NOT_FOUND");
   });
 
+  // A trashed entry's links never serve (share_creator_admitted, #998), so
+  // creation refuses it; the same request on the live entry creates (201).
+  it.each([
+    [
+      "personal",
+      { userId: DEFAULT_SESSION.user.id, entryType: ENTRY_TYPE.LOGIN, tenantId: "tenant-1" },
+      { passwordEntryId: VALID_ENTRY_ID, data: { title: "Test", password: "secret" }, expiresIn: "1d" },
+    ],
+    [
+      "team",
+      { teamId: "team-123", entryType: ENTRY_TYPE.LOGIN, tenantId: "tenant-1" },
+      {
+        teamPasswordEntryId: VALID_ENTRY_ID,
+        encryptedShareData: { ciphertext: "client-encrypted", iv: "c".repeat(24), authTag: "d".repeat(32) },
+        entryType: ENTRY_TYPE.LOGIN,
+        expiresIn: "1d",
+      },
+    ],
+  ])("%s entry: trashed → 404 and no share row; live → 201", async (_label, entry, body) => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockCreate.mockResolvedValue({ id: "share-1", expiresAt: new Date(Date.now() + 86400000) });
+
+    mockFindUnique.mockResolvedValue({ ...entry, deletedAt: new Date() });
+    const trashed = await parseResponse(await POST(createRequest("POST", "http://localhost/api/share-links", { body }) as never));
+    expect(trashed.status).toBe(404);
+    expect(mockCreate).not.toHaveBeenCalled();
+
+    mockFindUnique.mockResolvedValue({ ...entry, deletedAt: null });
+    const live = await parseResponse(await POST(createRequest("POST", "http://localhost/api/share-links", { body }) as never));
+    expect(live.status).toBe(201);
+  });
+
   it("returns 400 when team share omits encryptedShareData", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
 

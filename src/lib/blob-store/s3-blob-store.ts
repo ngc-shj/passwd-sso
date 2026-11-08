@@ -15,7 +15,7 @@ import { requireOptionalModule } from "@/lib/blob-store/runtime-module";
 // supplying package.
 type S3SendClient = { send: (command: unknown) => Promise<unknown> };
 type S3Module = {
-  S3Client: new (options: { region: string }) => unknown;
+  S3Client: new (options: { region: string; forcePathStyle: boolean }) => unknown;
   PutObjectCommand: new (input: unknown) => unknown;
   GetObjectCommand: new (input: unknown) => unknown;
   DeleteObjectCommand: new (input: unknown) => unknown;
@@ -28,13 +28,13 @@ let s3ClientPromise: Promise<{
   DeleteObjectCommand: new (input: unknown) => unknown;
 }> | null = null;
 
-async function getS3Client(region: string) {
+async function getS3Client({ region, forcePathStyle }: { region: string; forcePathStyle: boolean }) {
   if (!s3ClientPromise) {
     s3ClientPromise = (async () => {
       const moduleName = "@aws-sdk/client-s3";
       const mod = requireOptionalModule<Record<string, unknown>>(moduleName) as S3Module;
       return {
-        client: new mod.S3Client({ region }) as S3SendClient,
+        client: new mod.S3Client({ region, forcePathStyle }) as S3SendClient,
         PutObjectCommand: mod.PutObjectCommand as new (input: unknown) => unknown,
         GetObjectCommand: mod.GetObjectCommand as new (input: unknown) => unknown,
         DeleteObjectCommand: mod.DeleteObjectCommand as new (input: unknown) => unknown,
@@ -55,13 +55,13 @@ export const s3BlobStore: AttachmentBlobStore = {
     loadCloudBlobConfig(BLOB_STORAGE.S3);
   },
   async putObject(data, context) {
-    const { bucket, region } = loadCloudBlobConfig(BLOB_STORAGE.S3);
+    const config = loadCloudBlobConfig(BLOB_STORAGE.S3);
     const key = buildObjectKey(context);
-    const { client, PutObjectCommand } = await getS3Client(region);
+    const { client, PutObjectCommand } = await getS3Client(config);
 
     await client.send(
       new PutObjectCommand({
-        Bucket: bucket,
+        Bucket: config.bucket,
         Key: key,
         Body: Buffer.from(data),
         ContentType: BLOB_CONTENT_TYPE.OCTET_STREAM,
@@ -71,13 +71,13 @@ export const s3BlobStore: AttachmentBlobStore = {
     return encodeObjectRef({ key });
   },
   async getObject(stored, context) {
-    const { bucket, region } = loadCloudBlobConfig(BLOB_STORAGE.S3);
+    const config = loadCloudBlobConfig(BLOB_STORAGE.S3);
     const key = resolveObjectRefKey(stored, context);
-    const { client, GetObjectCommand } = await getS3Client(region);
+    const { client, GetObjectCommand } = await getS3Client(config);
 
     const response = await client.send(
       new GetObjectCommand({
-        Bucket: bucket,
+        Bucket: config.bucket,
         Key: key,
       }),
     );
@@ -86,13 +86,13 @@ export const s3BlobStore: AttachmentBlobStore = {
     return streamBodyToBuffer(body);
   },
   async deleteObject(stored, context) {
-    const { bucket, region } = loadCloudBlobConfig(BLOB_STORAGE.S3);
+    const config = loadCloudBlobConfig(BLOB_STORAGE.S3);
     const key = resolveObjectRefKey(stored, context);
-    const { client, DeleteObjectCommand } = await getS3Client(region);
+    const { client, DeleteObjectCommand } = await getS3Client(config);
 
     await client.send(
       new DeleteObjectCommand({
-        Bucket: bucket,
+        Bucket: config.bucket,
         Key: key,
       }),
     );

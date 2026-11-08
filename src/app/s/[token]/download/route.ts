@@ -80,8 +80,8 @@ export async function GET(req: NextRequest, { params }: Params) {
       return new NextResponse(null, { status: 410 });
     }
 
-    // Same admission as the other serve paths (#990). Downloads serve personal
-    // FILE Sends, which are always admitted; applied so no serve path is exempt.
+    // Same admission as the other serve paths (#990, #996). FILE Sends are always
+    // admitted; a team FILE share is refused like any other team share.
     if (!(await isShareCreatorAdmitted(tx, share.id))) {
       return new NextResponse(null, { status: 410 });
     }

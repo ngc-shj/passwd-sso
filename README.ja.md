@@ -246,6 +246,7 @@ npm run docker:down
 | `REDIS_URL` | レート制限用 Redis URL（**本番必須**） |
 | `BLOB_BACKEND` | 添付ファイルの保存先（`db` / `s3` / `azure` / `gcs`） |
 | `AWS_REGION`, `S3_ATTACHMENTS_BUCKET` | `BLOB_BACKEND=s3` の場合に必須 |
+| `S3_FORCE_PATH_STYLE` | バケットごとの DNS がない S3 互換ストア（MinIO など）を `AWS_ENDPOINT_URL_S3` で使う場合に `true` |
 | `AZURE_STORAGE_ACCOUNT`, `AZURE_BLOB_CONTAINER` | `BLOB_BACKEND=azure` の場合に必須 |
 | `AZURE_STORAGE_CONNECTION_STRING` または `AZURE_STORAGE_SAS_TOKEN` | `BLOB_BACKEND=azure` の場合はいずれか必須 |
 | `GCS_ATTACHMENTS_BUCKET` | `BLOB_BACKEND=gcs` の場合に必須 |

@@ -64,6 +64,23 @@ describe("IssueSection", () => {
     );
   });
 
+  it.each([
+    [true, false],
+    [false, true],
+  ])("canSelectEntry=%s leaves the open action disabled=%s", (selectable, disabled) => {
+    const onSelectEntry = vi.fn();
+    const issues: PasswordIssue[] = [
+      { id: "1", title: "Gmail", username: "u", scope: "personal", details: "d", severity: "critical" },
+    ];
+    render(
+      <IssueSection {...baseProps} issues={issues} onSelectEntry={onSelectEntry} canSelectEntry={() => selectable} />,
+    );
+    const open = screen.getAllByRole("button")[1]!;
+    expect(open).toHaveProperty("disabled", disabled);
+    fireEvent.click(open);
+    expect(onSelectEntry).toHaveBeenCalledTimes(selectable ? 1 : 0);
+  });
+
   it("hides issue list when collapsed via click", () => {
     const issues: PasswordIssue[] = [
       { id: "1", title: "Gmail", username: "u", scope: "personal", details: "d", severity: "critical" },
@@ -150,6 +167,29 @@ describe("ReusedSection", () => {
     expect(onSelectEntry).toHaveBeenCalledWith(
       expect.objectContaining({ id: "1", scope: "personal" }),
     );
+  });
+
+  it("canSelectEntry decides per entry which reused entries can be opened", () => {
+    const onSelectEntry = vi.fn();
+    const groups: ReusedGroup[] = [
+      {
+        entries: [
+          { id: "1", title: "Gmail", username: "user1", scope: "personal" },
+          { id: "2", title: "Twitter", username: null, scope: "personal" },
+        ],
+      },
+    ];
+    render(
+      <ReusedSection
+        {...baseProps}
+        groups={groups}
+        onSelectEntry={onSelectEntry}
+        canSelectEntry={(entry) => entry.id === "1"}
+      />,
+    );
+    const [, open1, open2] = screen.getAllByRole("button");
+    expect(open1).toHaveProperty("disabled", false);
+    expect(open2).toHaveProperty("disabled", true);
   });
 
   it("collapses on click", () => {

@@ -768,6 +768,22 @@ describe("AUDIT_ANCHOR_PUBLISHER_ENABLED parsing", () => {
   });
 });
 
+describe("S3_FORCE_PATH_STYLE", () => {
+  it.each([
+    [undefined, false],
+    ["true", true],
+    ["false", false],
+  ])("parses %j as %s", (value, want) => {
+    const result = envObject.safeParse(baseEnv(value === undefined ? {} : { S3_FORCE_PATH_STYLE: value }));
+    expect(result.success).toBe(true);
+    expect(result.data?.S3_FORCE_PATH_STYLE).toBe(want);
+  });
+
+  it("rejects a value that is neither true nor false", () => {
+    expect(envObject.safeParse(baseEnv({ S3_FORCE_PATH_STYLE: "yes" })).success).toBe(false);
+  });
+});
+
 describe("AUDIT_ANCHOR_DESTINATION_S3_PREFIX", () => {
   it.each(["a", "a/b", "a.b", ".a", "audit-anchors", "x_y/z-1"])("accepts %j", (prefix) => {
     expect(isValidAnchorS3Prefix(prefix)).toBe(true);

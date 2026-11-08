@@ -91,9 +91,10 @@ async function handlePOST(req: NextRequest) {
     return notFound();
   }
 
-  // A team-entry share whose creator left the entry's team (or whose entry is
-  // trashed or gone) answers as a revoked one — before the password check, so a
-  // wrong password on it writes no audit row and is not told apart either.
+  // A share share_creator_admitted refuses (creator left the team, entry trashed
+  // or gone, team policy no longer allows it) answers as a revoked one — before
+  // the password check, so a wrong password on it writes no audit row and is
+  // not told apart either.
   const admitted = await withBypassRls(prisma, (tx) => isShareCreatorAdmitted(tx, share.id),
     BYPASS_GRANT.SHARE_LINK_VERIFY_ACCESS);
   if (!admitted) {
