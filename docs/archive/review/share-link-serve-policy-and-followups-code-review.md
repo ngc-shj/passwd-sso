@@ -298,3 +298,21 @@ below are all within that fix scope.
 - F3-T4: rows for tenant name and cross-tenant flag added.
 - F3-T5: the admitted download is asserted (404: the fixture stores no file,
   answered after the UPDATE counted the view); cell renamed.
+
+## Round 4
+
+Incremental review of `5818cb911`. Security: no findings (S-R3-1 confirmed
+closed). Round 3 findings resolved.
+
+### Findings and resolution
+- Functionality F4-1 [Minor] A whitespace-only drain timeout parsed as 0 ms.
+  Action: the value is trimmed before the unset check.
+- Security [Adjacent] Cleanup selected users by the email pattern in every
+  tenant. Action: it selects only the load-test tenant's users.
+- Testing T4-1 [Minor] The drain-timeout validation had no test. Action:
+  `--cleanup` with `"abc"` and `"-1"` must refuse by name. Red proof (scratch
+  seeder, real DB): validation removed → both cells fail. The unset/empty → 60 s
+  branch stays untested: telling it apart needs a pending row and a full wait.
+- Testing T4-2 [Minor] The drain-wait cell's child timeout (60 s) exceeded the
+  30 s test timeout. Action: 25 s (above the 20 s drain), the child is killed in
+  `finally` if still running, and the stdout chunk is typed as a string.

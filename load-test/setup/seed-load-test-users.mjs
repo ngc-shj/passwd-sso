@@ -340,7 +340,8 @@ async function seedUsers(pool, userCount) {
 
 async function cleanupUsers(pool) {
   const { rows } = await pool.query(
-    `SELECT id FROM users WHERE email LIKE 'lt-user-%@loadtest.local'`,
+    `SELECT id FROM users WHERE email LIKE 'lt-user-%@loadtest.local' AND tenant_id = $1`,
+    [LOAD_TEST_TENANT.id],
   );
   if (rows.length === 0) {
     console.log("No load test users found to clean up.");
@@ -401,7 +402,7 @@ async function cleanupTenant(pool) {
  * audit_logs rows arrive for the tenant, so the log delete after it is final.
  */
 async function deleteTenantAudit(pool) {
-  const raw = process.env.LOAD_TEST_OUTBOX_DRAIN_TIMEOUT_MS;
+  const raw = process.env.LOAD_TEST_OUTBOX_DRAIN_TIMEOUT_MS?.trim();
   const timeoutMs = raw === undefined || raw === "" ? 60_000 : Number(raw);
   // NaN would never pass the deadline and poll forever.
   if (!Number.isFinite(timeoutMs) || timeoutMs < 0) {

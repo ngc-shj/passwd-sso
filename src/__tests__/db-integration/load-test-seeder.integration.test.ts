@@ -214,12 +214,14 @@ describe("load-test seeder — real-DB integration", () => {
     seed();
     const outboxId = await pendingOutboxRow();
 
+    // Under the 30 s test timeout and above the 20 s drain, so a stalled child
+    // fails this cell rather than outliving it.
+    const child = execFile(process.execPath, [SEEDER, "--cleanup"], {
+      env: seederEnv({ LOAD_TEST_OUTBOX_DRAIN_TIMEOUT_MS: "20000" }),
+      timeout: 25_000,
+    });
+    let exited = false;
     try {
-      const child = execFile(process.execPath, [SEEDER, "--cleanup"], {
-        env: seederEnv({ LOAD_TEST_OUTBOX_DRAIN_TIMEOUT_MS: "20000" }),
-        timeout: CHILD_TIMEOUT_MS,
-      });
-      let exited = false;
       const exit = new Promise<number | null>((resolve) => {
         child.on("exit", (code) => {
           exited = true;
@@ -229,7 +231,7 @@ describe("load-test seeder — real-DB integration", () => {
       // Sync on the seeder reaching the drain wait (it prints this line right
       // before), not on a fixed sleep; then let at least one poll see PENDING.
       await new Promise<void>((resolve, reject) => {
-        child.stdout?.on("data", (chunk: Buffer) => {
+        child.stdout?.on("data", (chunk: string) => {
           if (String(chunk).includes("Cleaning up 1 load test users")) resolve();
         });
         child.on("exit", () => reject(new Error("seeder exited before reaching the drain wait")));
@@ -239,11 +241,26 @@ describe("load-test seeder — real-DB integration", () => {
       await markSent(outboxId);
       expect(await exit).toBe(0);
     } finally {
+      if (!exited) child.kill();
       await markSent(outboxId);
     }
 
     const tenant = await one<{ n: number }>(`SELECT count(*)::int AS n FROM tenants WHERE id = $1::uuid`, TENANT_ID);
     expect(tenant).toEqual({ n: 0 });
+  });
+
+  it.each(["abc", "-1"])("cleanup refuses a drain timeout of %j by name", (value) => {
+    let stderr = "";
+    try {
+      execFileSync(process.execPath, [SEEDER, "--cleanup"], {
+        env: seederEnv({ LOAD_TEST_OUTBOX_DRAIN_TIMEOUT_MS: value }),
+        stdio: "pipe",
+        timeout: CHILD_TIMEOUT_MS,
+      });
+    } catch (e) {
+      stderr = String((e as { stderr?: Buffer }).stderr ?? "");
+    }
+    expect(stderr).toContain("LOAD_TEST_OUTBOX_DRAIN_TIMEOUT_MS must be a non-negative number of milliseconds");
   });
 
   it("cleanup removes the users and the tenant, including audit rows a worker wrote for the tenant", async () => {
