@@ -185,6 +185,7 @@
   "TENANT_ROLE_UPDATE": "テナントメンバーのロール変更",
   "TENANT_MEMBER_LOCKOUT_CLEAR": "メンバーの保管庫ロックアウトを解除",
   "TENANT_MEMBER_PASSKEY_REVOKE": "メンバーのパスキーを失効",
+  "TENANT_MEMBER_PASSKEY_REVOKE_ALL": "メンバーのパスキーをすべて失効",
   "yes": "あり",
   "no": "なし",
   "included": "含む",

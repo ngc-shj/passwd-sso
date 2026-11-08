@@ -2,12 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "node:crypto";
 import { checkAuth } from "@/lib/auth/session/check-auth";
 import { prisma } from "@/lib/prisma";
-import { advisoryXactLock } from "@/lib/tenant-rls";
+import { isSessionRowLive, lockUserAuthArtifacts, UserAuthRevokedError } from "@/lib/auth/session/user-auth-serialization";
 import { hashToken } from "@/lib/crypto/crypto-server";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { apiKeyCreateSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse } from "@/lib/http/api-response";
+import { errorResponse, unauthorized } from "@/lib/http/api-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { parseBody } from "@/lib/http/parse-body";
 import { createRateLimiter } from "@/lib/security/rate-limit";
@@ -111,10 +111,14 @@ async function handlePOST(req: NextRequest) {
   // two concurrent POSTs cannot both read count < MAX and both create, blowing
   // past MAX_API_KEYS_PER_USER (TOCTOU). The lock, count, and create fold into
   // one tenant tx via the proxy; over-limit throws a sentinel mapped outside.
+  // The same lock serializes the create against a revocation of the user's
+  // credentials, so the session that authenticated it is re-read under it
+  // (user-auth-serialization.ts).
   let key: { id: string; expiresAt: Date | null; createdAt: Date };
   try {
     key = await withUserTenantRls(userId, async (tenantId) => {
-      await advisoryXactLock(prisma, userId);
+      await lockUserAuthArtifacts(prisma, userId);
+      if (!(await isSessionRowLive(prisma, req, userId))) throw new UserAuthRevokedError("session");
       const existingCount = await prisma.apiKey.count({
         where: { userId: userId, revokedAt: null },
       });
@@ -138,6 +142,7 @@ async function handlePOST(req: NextRequest) {
     if (e instanceof ApiKeyLimitError) {
       return errorResponse(API_ERROR.API_KEY_LIMIT_EXCEEDED);
     }
+    if (e instanceof UserAuthRevokedError) return unauthorized();
     throw e;
   }
 

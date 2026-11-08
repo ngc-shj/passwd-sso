@@ -23,6 +23,16 @@
  *      `API_DEFAULT_SESSION_READERS` (src/lib/proxy/session-passkey-gate.ts),
  *      so an invalid session answers 401 before the route's `auth()` runs; and
  *      that list holds nothing else.
+ *   4. The proxy's session cache never authenticates a request on its own.
+ *      The proxy decides `api-session-required` routes and the /dashboard and
+ *      /admin pages on a Redis-cached view of the session, which a revocation
+ *      evicts by tombstone; a tombstone that fails to land leaves a revoked
+ *      session passing the proxy until the entry's TTL. That is harmless only
+ *      while whatever runs next re-reads the session row: so every
+ *      `api-session-required` route file reads the session (Auth.js `auth()`
+ *      reads the database on every call), or is named in BEARER_ONLY_ROUTES
+ *      with the token it authenticates instead, and each layout in
+ *      PAGE_SESSION_LAYOUTS reads it.
  *
  * A route file is a session reader when it references, by import binding, one
  * of READER_EXPORTS (the module that defines it, not the spelling). A name is
@@ -94,6 +104,32 @@ const READER_EXEMPTIONS = new Map([
       "authenticated by the WebAuthn assertion, and a successful sign-in sets passkeyVerifiedAt itself.",
   ],
 ]);
+
+// `api-session-required` route files that read no session: they authenticate a
+// bearer token against its database row, so a session the proxy passed on a
+// stale cache entry authenticates nothing there (rule 4).
+const BEARER_ONLY_ROUTES = new Map([
+  [
+    "src/app/api/extension/key/reset/route.ts",
+    "Authenticated by the extension's bearer token, validated against its ExtensionToken row (DPoP-bound); no session is read.",
+  ],
+  [
+    "src/app/api/extension/token/refresh/route.ts",
+    "Authenticated by the extension token presented as the bearer, validated against its row and re-read under the user's credential lock by the rotation; no session is read.",
+  ],
+  [
+    "src/app/api/extension/token/route.ts",
+    "POST answers 410 to everyone; DELETE revokes the bearer token it is handed, validated against its row; no session is read.",
+  ],
+]);
+
+// The layouts under the page prefixes the proxy session-gates (page-route.ts:
+// /dashboard and /admin). Every page under them renders inside the layout, so
+// its `auth()` decides before any page does (rule 4).
+const PAGE_SESSION_LAYOUTS = [
+  "src/app/[locale]/dashboard/layout.tsx",
+  "src/app/[locale]/admin/layout.tsx",
+];
 
 const failures = [];
 const fail = (message) => failures.push(message);
@@ -279,6 +315,8 @@ const routeFiles = walkSourceFiles(join(ROOT, SCAN_ROOT))
 if (routeFiles.length === 0) fatal(`scanned zero route files under ${join(ROOT, SCAN_ROOT)}: nothing was examined.`);
 
 const listedReaders = new Set(proxyReaders.map((e) => `${e.method} ${e.path}`));
+const usedBearerOnly = new Set();
+let sessionRequiredRoutes = 0;
 const apiDefaultReaders = new Set();
 const usedExemptions = new Set();
 let readerFiles = 0;
@@ -299,6 +337,18 @@ for (const rel of routeFiles) {
   const adjudicates = callsAdjudicator(file);
   const routePath = routePathOf(rel);
   const where = isReader ? ` (reads the session: ${refs[0].what}, line ${refs[0].line})` : "";
+
+  if (entry.kind === "api-session-required") {
+    sessionRequiredRoutes += 1;
+    if (BEARER_ONLY_ROUTES.has(rel)) {
+      if (isReader) fail(`${rel}  reads the session but is named in BEARER_ONLY_ROUTES: remove the entry`);
+      else usedBearerOnly.add(rel);
+    } else if (!isReader) {
+      fail(
+        `${rel}  is api-session-required but reads no session itself: the proxy passed it on a cached view of the session, which a failed revocation tombstone leaves stale; read it (auth() reads the database) or name the bearer token it authenticates in BEARER_ONLY_ROUTES`,
+      );
+    }
+  }
 
   for (const method of entry.methods ?? []) {
     const value = entry.sessionPasskeyGate?.[method]?.value;
@@ -339,6 +389,27 @@ for (const key of listedReaders) {
   }
 }
 
+for (const [rel, reason] of BEARER_ONLY_ROUTES) {
+  if (reason.length < MIN_REASON) fail(`BEARER_ONLY_ROUTES ${rel}: reason shorter than ${MIN_REASON} chars`);
+  if (!usedBearerOnly.has(rel)) {
+    fail(`BEARER_ONLY_ROUTES ${rel}: stale — not an api-session-required route file that reads no session`);
+  }
+}
+
+for (const rel of PAGE_SESSION_LAYOUTS) {
+  const abs = join(ROOT, rel);
+  if (!existsSync(abs)) {
+    fail(`${rel}  (PAGE_SESSION_LAYOUTS) not found: the pages the proxy session-gates must render inside a layout that reads the session`);
+    continue;
+  }
+  const sf = project.createSourceFile(rel, readFileSync(abs, "utf8"), { overwrite: true });
+  let bindings;
+  const file = { sf, rel, imports: importsOf(sf, rel), bindingsFor: () => (bindings ??= bindingIndex(sf)) };
+  if (readerReferences(file).length === 0) {
+    fail(`${rel}  (PAGE_SESSION_LAYOUTS) reads no session: its pages would render on the proxy's cached view of the session alone`);
+  }
+}
+
 for (const [rel, reason] of READER_EXEMPTIONS) {
   if (reason.length < MIN_REASON) fail(`READER_EXEMPTIONS ${rel}: reason shorter than ${MIN_REASON} chars`);
   if (!usedExemptions.has(rel)) {
@@ -353,6 +424,8 @@ if (failures.length > 0) {
 }
 
 console.log(
-  `check-session-passkey-readers: routes=${routeFiles.length} readers=${readerFiles} api-default-readers=${apiDefaultReaders.size} own-gate=${ownGateMethods} exemptions=${usedExemptions.size}`,
+  `check-session-passkey-readers: routes=${routeFiles.length} readers=${readerFiles} api-default-readers=${apiDefaultReaders.size} own-gate=${ownGateMethods} exemptions=${usedExemptions.size} session-required=${sessionRequiredRoutes} bearer-only=${usedBearerOnly.size} layouts=${PAGE_SESSION_LAYOUTS.length}`,
 );
-console.log("OK (every session reader is gated by the proxy, listed, exempt with a reason, or adjudicates itself)");
+console.log(
+  "OK (every session reader is gated by the proxy, listed, exempt with a reason, or adjudicates itself; every session-required route and gated layout re-reads the session)",
+);

@@ -258,7 +258,7 @@
   "delegationPolicyLoadFailed": "Failed to load delegation policy.",
   "delegationPolicySaveFailed": "Failed to update delegation policy.",
   "memberPasskeysTitle": "Member passkeys",
-  "memberPasskeysDescription": "Passkeys {name} can sign in with, including ones registered in another tenant. Revoke one that is lost or compromised.",
+  "memberPasskeysDescription": "Passkeys {name} can sign in with, including ones registered in another tenant. Revoke one that is lost, or all of them if the account may be compromised.",
   "memberPasskeysLoadFailed": "Failed to load passkeys.",
   "memberPasskeysEmpty": "No passkeys registered.",
   "memberPasskeyLastUsed": "Last used: {date}",
@@ -268,6 +268,10 @@
   "revokePasskeyDescription": "The passkey is deleted and {name} is signed out everywhere, including extension and API tokens. They can sign in another way and register a new passkey.",
   "revokePasskeySuccess": "Passkey revoked.",
   "revokePasskeyFailed": "Failed to revoke the passkey.",
-  "memberPasskeyOtherTenant": "Registered in another tenant",
-  "revokePasskeyCacheWarning": "Passkey revoked. Some sign-ins may stay valid for a few minutes, until the server's session cache expires."
+  "revokeAllPasskeys": "Revoke all",
+  "revokeAllPasskeysTitle": "Revoke all passkeys",
+  "revokeAllPasskeysDescription": "Every passkey {name} has is deleted, including ones registered in another tenant, and they are signed out everywhere, including extension and API tokens. Use this if the account may be compromised: revoking one passkey leaves any other one registered. They can sign in another way and register a new passkey.",
+  "revokeAllPasskeysSuccess": "All passkeys revoked.",
+  "revokeAllPasskeysFailed": "Failed to revoke the passkeys.",
+  "memberPasskeyOtherTenant": "Registered in another tenant"
 }

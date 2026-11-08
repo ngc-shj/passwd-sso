@@ -160,6 +160,8 @@ describe("exchangeRefreshToken", () => {
       const mockRefreshUpdate = overrides.refreshUpdate ?? vi.fn().mockResolvedValue({});
 
       (prisma as unknown as Record<string, unknown>).$transaction = async (fn: (tx: unknown) => unknown) => fn(prisma);
+      // The user's credential lock the rotation takes (user-auth-serialization.ts).
+      (prisma as unknown as Record<string, unknown>).$executeRaw = vi.fn().mockResolvedValue(1);
       // C13: active membership default so happy-path and CAS tests pass.
       (prisma as unknown as Record<string, unknown>).tenantMember = {
         findUnique: vi.fn().mockResolvedValue({ deactivatedAt: null }),
@@ -409,6 +411,8 @@ describe("exchangeRefreshToken", () => {
         where: expect.objectContaining({
           id: VALID_RT.id,
           rotatedAt: null,
+          // A token revoked while the rotation waited for the user lock loses.
+          revokedAt: null,
         }),
         data: expect.objectContaining({
           rotatedAt: expect.any(Date),

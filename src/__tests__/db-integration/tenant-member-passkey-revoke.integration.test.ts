@@ -37,6 +37,7 @@ vi.mock("@/lib/auth/session/recent-current-auth-method", async () => {
 
 import { GET as listPasskeys } from "@/app/api/tenant/members/[userId]/passkeys/route";
 import { DELETE as revokePasskey } from "@/app/api/tenant/members/[userId]/passkeys/[credentialId]/route";
+import { DELETE as revokeAllPasskeys } from "@/app/api/tenant/members/[userId]/passkeys/route";
 import { hashSessionToken } from "@/lib/auth/session/session-cache";
 
 describe("tenant admin revokes a member's passkey — real-DB integration", () => {
@@ -184,6 +185,49 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
       );
       expect(notices).toEqual([{ type: "SECURITY_ALERT" }]);
     }, { timeout: 5000 });
+    expect(mockSendEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it("revoking all of a member's passkeys deletes every one, in every tenant, signs them out everywhere, and is audited once", async () => {
+    const owner = await memberWithRole("OWNER");
+    const target = await memberWithRole("MEMBER");
+    const here = await passkey(target);
+    // One registered under a previous tenant: user-global, so it goes too.
+    await sql(`INSERT INTO tenant_members (id, tenant_id, user_id, role, deactivated_at, created_at, updated_at)
+               VALUES ($1::uuid, $2::uuid, $3::uuid, 'MEMBER', now(), now(), now())`, randomUUID(), otherTenantId, target);
+    const there = await passkey(target, otherTenantId);
+    const signedIn = await signedInWith(target, here);
+    const elsewhere = await signedInWith(target, there, otherTenantId);
+    // Another member's passkey is not touched.
+    const bystander = await passkey(await memberWithRole("MEMBER"));
+
+    mockAuth.mockResolvedValue({ user: { id: owner } });
+    const res = await revokeAllPasskeys(
+      new NextRequest(`http://localhost/api/tenant/members/${target}/passkeys`, { method: "DELETE" }),
+      { params: Promise.resolve({ userId: target }) },
+    );
+    expect(res.status).toBe(200);
+
+    expect(await exists("webauthn_credentials", here)).toBe(false);
+    expect(await exists("webauthn_credentials", there)).toBe(false);
+    expect(await exists("webauthn_credentials", bystander)).toBe(true);
+    expect(await exists("sessions", signedIn.sessionId)).toBe(false);
+    expect(await exists("sessions", elsewhere.sessionId)).toBe(false);
+    expect(await tokenRevoked(signedIn.tokenId)).toBe(true);
+    expect(await tokenRevoked(elsewhere.tokenId)).toBe(true);
+
+    const audits = await sql<{ payload: string }>(
+      `SELECT payload::text AS payload FROM audit_outbox WHERE tenant_id = $1::uuid AND payload::text LIKE '%TENANT_MEMBER_PASSKEY_REVOKE%'`,
+      tenantId,
+    );
+    expect(audits).toHaveLength(1);
+    expect(JSON.parse(audits[0].payload)).toMatchObject({
+      action: "TENANT_MEMBER_PASSKEY_REVOKE_ALL",
+      userId: owner,
+      targetId: target,
+      metadata: { targetUserId: target, passkeys: 2, sessions: 2, extensionTokens: 2 },
+    });
+    expect(JSON.parse(audits[0].payload).metadata.credentialIds).toHaveLength(2);
     expect(mockSendEmail).toHaveBeenCalledTimes(1);
   });
 

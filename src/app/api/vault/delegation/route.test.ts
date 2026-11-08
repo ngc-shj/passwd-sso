@@ -47,6 +47,14 @@ const {
   };
 });
 
+// The user's credential lock and the in-transaction session re-read
+// (user-auth-serialization.ts, tested on its own): a live session by default.
+const { mockIsSessionRowLive } = vi.hoisted(() => ({ mockIsSessionRowLive: vi.fn() }));
+vi.mock("@/lib/auth/session/user-auth-serialization", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth/session/user-auth-serialization")>()),
+  lockUserAuthArtifacts: vi.fn(async () => {}),
+  isSessionRowLive: mockIsSessionRowLive,
+}));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/tenant-context", () => ({ resolveUserTenantId: mockResolveUserTenantId }));
 vi.mock("@/lib/security/rate-limit", () => ({
@@ -86,6 +94,7 @@ vi.mock("@/lib/logger", () => ({
   getLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
+import { lockUserAuthArtifacts } from "@/lib/auth/session/user-auth-serialization";
 import { POST, GET, DELETE } from "./route";
 import { NextRequest } from "next/server";
 
@@ -146,6 +155,7 @@ const makeGetRequest = () =>
 describe("POST /api/vault/delegation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockIsSessionRowLive.mockResolvedValue(true);
     mockAuth.mockResolvedValue({ user: { id: USER_ID } });
     mockResolveUserTenantId.mockResolvedValue(TENANT_ID);
     mockRateLimiterCheck.mockResolvedValue({ allowed: true });
@@ -384,6 +394,31 @@ describe("POST /api/vault/delegation", () => {
     expect(expiresAtMs).toBeGreaterThanOrEqual(before + VALID_POST_BODY.ttlSeconds * 1000);
     expect(expiresAtMs).toBeLessThanOrEqual(after + VALID_POST_BODY.ttlSeconds * 1000 + 100);
     expect(json.entryCount).toBe(VALID_ENTRIES.length);
+  });
+
+  it("a session revoked while the create waited for the user lock: 401, no delegation", async () => {
+    mockIsSessionRowLive.mockResolvedValue(false);
+
+    const res = await POST(makePostRequest(VALID_POST_BODY));
+    expect(res.status).toBe(401);
+    expect(mockPrismaDelegationSession.create).not.toHaveBeenCalled();
+    expect(mockStoreDelegationEntries).not.toHaveBeenCalled();
+    expect(vi.mocked(lockUserAuthArtifacts).mock.invocationCallOrder[0]).toBeLessThan(
+      mockIsSessionRowLive.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("an MCP token revoked after the pre-check is re-read under the lock: 401, no delegation", async () => {
+    mockPrismaMcpAccessToken.findFirst
+      .mockResolvedValueOnce(VALID_MCP_TOKEN) // the pre-check
+      .mockResolvedValueOnce(null); // under the lock
+
+    const res = await POST(makePostRequest(VALID_POST_BODY));
+    expect(res.status).toBe(401);
+    expect(mockPrismaDelegationSession.create).not.toHaveBeenCalled();
+    expect(mockPrismaMcpAccessToken.findFirst).toHaveBeenLastCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ revokedAt: null, userId: USER_ID }) }),
+    );
   });
 
   it("TTL is clamped to tenant max", async () => {

@@ -54,6 +54,7 @@ import { MS_PER_MINUTE, MS_PER_SECOND } from "@/lib/constants/time";
 import { canonicalHtu } from "@/lib/auth/dpop/htu-canonical";
 import { verifyDpopProof } from "@/lib/auth/dpop/verify";
 import { getJtiCache } from "@/lib/auth/dpop/jti-cache";
+import { UserAuthRevokedError } from "@/lib/auth/session/user-auth-serialization";
 import { issueIosToken } from "@/lib/auth/tokens/mobile-token";
 import {
   EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT,
@@ -217,28 +218,10 @@ async function handlePOST(req: NextRequest): Promise<Response> {
     return errorResponse(API_ERROR.MOBILE_BRIDGE_CODE_INVALID);
   }
 
-  // 7. CAS-consume the bridge code. count===0 means lost a race or the row
-  // was used/expired between steps 3 and 7.
-  const cas = await withBypassRls(
-    prisma,
-    async (tx) =>
-      tx.mobileBridgeCode.updateMany({
-        where: { codeHash, usedAt: null, expiresAt: { gt: now } },
-        data: { usedAt: now },
-      }),
-    BYPASS_GRANT.MOBILE_BRIDGE_CODE_LIFECYCLE,
-  );
-  if (cas.count === 0) {
-    getLogger().warn(
-      {
-        event: "mobile_token_failure",
-        reason: looksFresh ? "cas_race_lost" : "bridge_code_stale",
-        userId: stored.userId,
-      },
-      "mobile token failed: bridge code CAS-consume returned 0",
-    );
-    return errorResponse(API_ERROR.MOBILE_BRIDGE_CODE_INVALID);
-  }
+  // 7. The bridge code is CAS-consumed inside the issuing transaction (step
+  // 9), after the user's credential lock, so a revocation of the user's
+  // credentials either consumes it first or revokes what was issued
+  // (user-auth-serialization.ts).
 
   // 8. Read tenant extension-token TTL policy (C8: iOS shares the browser
   // extension's tenant-configurable idle/absolute fields). FAIL-CLOSED:
@@ -282,8 +265,28 @@ async function handlePOST(req: NextRequest): Promise<Response> {
       presenceAt: now,
       ip: clientIp,
       userAgent: req.headers.get("user-agent"),
+      // count===0: lost a race, was used/expired between steps 3 and 9, or a
+      // revocation consumed it.
+      consumeProof: async (tx) => {
+        const cas = await tx.mobileBridgeCode.updateMany({
+          where: { codeHash, usedAt: null, expiresAt: { gt: now } },
+          data: { usedAt: now },
+        });
+        return cas.count === 1;
+      },
     });
   } catch (err) {
+    if (err instanceof UserAuthRevokedError) {
+      getLogger().warn(
+        {
+          event: "mobile_token_failure",
+          reason: looksFresh ? "cas_race_lost" : "bridge_code_stale",
+          userId: stored.userId,
+        },
+        "mobile token failed: bridge code CAS-consume returned 0",
+      );
+      return errorResponse(API_ERROR.MOBILE_BRIDGE_CODE_INVALID);
+    }
     getLogger().error(
       {
         event: "mobile_token_issue_failed",

@@ -46,15 +46,17 @@ interface TenantMemberPasskeysDialogProps {
   disabled?: boolean;
 }
 
-// A tenant admin's view of a member's passkeys, to revoke a compromised one
-// (#974). Revoking also signs the member out everywhere (passkeys are user-global).
+// A tenant admin's view of a member's passkeys, to revoke a compromised one, or
+// all of them when the account may be compromised (#974). Revoking also signs
+// the member out everywhere (passkeys are user-global).
 export function TenantMemberPasskeysDialog({ userId, memberName, disabled }: TenantMemberPasskeysDialogProps) {
   const t = useTranslations("TenantAdmin");
   const locale = useLocale();
   const [open, setOpen] = useState(false);
   const [passkeys, setPasskeys] = useState<MemberPasskey[] | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
-  const [target, setTarget] = useState<MemberPasskey | null>(null);
+  // The passkey to revoke, or "all" of them.
+  const [target, setTarget] = useState<MemberPasskey | "all" | null>(null);
   const [revoking, setRevoking] = useState(false);
 
   const load = useCallback(async () => {
@@ -82,31 +84,32 @@ export function TenantMemberPasskeysDialog({ userId, memberName, disabled }: Ten
   const revokeRetryRef = useRef<() => Promise<void>>(async () => {});
   const inlineReauth = useInlineReauth(() => revokeRetryRef.current());
 
+  const revokeAll = target === "all";
+
   const handleRevoke = async () => {
     if (!target) return;
     setRevoking(true);
+    const failed = revokeAll ? t("revokeAllPasskeysFailed") : t("revokePasskeyFailed");
     try {
-      // @stepup id:tenant-member-passkey-delete
-      const res = await fetchApi(apiPath.tenantMemberPasskeyById(userId, target.id), { method: "DELETE" });
+      const res =
+        target === "all"
+          ? // @stepup id:tenant-member-passkeys-delete-all
+            await fetchApi(apiPath.tenantMemberPasskeys(userId), { method: "DELETE" })
+          : // @stepup id:tenant-member-passkey-delete
+            await fetchApi(apiPath.tenantMemberPasskeyById(userId, target.id), { method: "DELETE" });
       if (res.ok) {
-        const body = (await res.json().catch(() => null)) as { cacheTombstoneFailures?: number } | null;
-        if ((body?.cacheTombstoneFailures ?? 0) > 0) {
-          // Revoked, but some cached sign-ins may last until the cache expires.
-          toast.warning(t("revokePasskeyCacheWarning"));
-        } else {
-          toast.success(t("revokePasskeySuccess"));
-        }
+        toast.success(revokeAll ? t("revokeAllPasskeysSuccess") : t("revokePasskeySuccess"));
         setTarget(null);
         await load();
         return;
       }
       if (await handleStepUpError(res, inlineReauth.triggerOnStaleError)) return;
-      toast.error(t("revokePasskeyFailed"));
-      // The passkey may be gone already (a concurrent revoke answers 404).
+      toast.error(failed);
+      // The passkeys may be gone already (a concurrent revoke answers 404).
       setTarget(null);
       await load();
     } catch {
-      toast.error(t("revokePasskeyFailed"));
+      toast.error(failed);
     } finally {
       setRevoking(false);
     }
@@ -154,6 +157,11 @@ export function TenantMemberPasskeysDialog({ userId, memberName, disabled }: Ten
                 </Button>
               </div>
             ))}
+            <div className="flex justify-end pt-2">
+              <Button variant="destructive" size="sm" onClick={() => setTarget("all")}>
+                {t("revokeAllPasskeys")}
+              </Button>
+            </div>
           </div>
         )}
       </DialogContent>
@@ -161,14 +169,18 @@ export function TenantMemberPasskeysDialog({ userId, memberName, disabled }: Ten
       <AlertDialog open={!!target} onOpenChange={(o) => !o && setTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{t("revokePasskeyTitle")}</AlertDialogTitle>
-            <AlertDialogDescription>{t("revokePasskeyDescription", { name: memberName })}</AlertDialogDescription>
+            <AlertDialogTitle>{revokeAll ? t("revokeAllPasskeysTitle") : t("revokePasskeyTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {revokeAll
+                ? t("revokeAllPasskeysDescription", { name: memberName })
+                : t("revokePasskeyDescription", { name: memberName })}
+            </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
             <Button variant="destructive" onClick={handleRevoke} disabled={revoking}>
               {revoking && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {t("revokePasskey")}
+              {revokeAll ? t("revokeAllPasskeys") : t("revokePasskey")}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

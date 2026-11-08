@@ -56,6 +56,13 @@ const {
   };
 });
 
+// The in-transaction session re-read (user-auth-serialization.ts, tested on
+// its own): a live session by default. The lock itself runs for real.
+const { mockIsSessionRowLive } = vi.hoisted(() => ({ mockIsSessionRowLive: vi.fn() }));
+vi.mock("@/lib/auth/session/user-auth-serialization", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth/session/user-auth-serialization")>()),
+  isSessionRowLive: mockIsSessionRowLive,
+}));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -169,6 +176,7 @@ function makeRequest(): import("next/server").NextRequest {
 describe("POST /api/extension/bridge-code", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockIsSessionRowLive.mockResolvedValue(true);
     _resetPasskeyAuditForTests();
     vi.stubEnv("EXTENSION_BRIDGE_CODE_ALLOWED_ORIGINS", ALLOWED_ORIGIN);
     __resetAllowlistForTests();
@@ -420,6 +428,20 @@ describe("POST /api/extension/bridge-code", () => {
         String(c[0]).includes("pg_advisory_xact_lock"),
       ),
     ).toBe(true);
+  });
+
+  it("a session revoked while the issue waited for the user lock: 401, no code, no failure audit", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockIsSessionRowLive.mockResolvedValue(false);
+
+    const res = await POST(makeRequest());
+    expect(res.status).toBe(401);
+    expect(mockBridgeCodeCreate).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
+    // Re-read under the lock, not before it.
+    expect(mockExecuteRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      mockIsSessionRowLive.mock.invocationCallOrder[0],
+    );
   });
 
   it("revokes oldest unused codes when BRIDGE_CODE_MAX_ACTIVE is exceeded", async () => {

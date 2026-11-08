@@ -133,6 +133,7 @@ import { CLIENT_TOKEN_MAX_ACTIVE_FAMILIES } from "@/lib/constants";
 
 const USER_ID = "00000000-0000-4000-8000-000000000001";
 const TENANT_ID = "00000000-0000-4000-8000-000000000002";
+const HOST_TOKEN_ID = "00000000-0000-4000-8000-0000000000a0";
 const FAMILY_ID = "00000000-0000-4000-8000-000000000003";
 // RFC 7638 JWK thumbprint shape (43 base64url chars). The deviceJkt and
 // cnfJkt fields are conceptually the same value — both represent the
@@ -150,6 +151,8 @@ function setupTransactionPassthrough() {
     cb({
       $executeRaw: mockTxExecuteRaw,
       extensionToken: {
+        // The authorizing / old token re-read under the credential lock: live.
+        findFirst: async () => ({ id: HOST_TOKEN_ID }),
         findMany: mockExtFindMany,
         create: mockExtCreate,
         updateMany: mockExtUpdateMany,
@@ -204,6 +207,7 @@ beforeEach(() => {
 describe("issueIosToken", () => {
   it("creates an IOS_APP row with cnfJkt + IOS scopes (deviceJkt is bound via cnfJkt)", async () => {
     const result = await issueIosToken({
+      consumeProof: async () => true,
       userId: USER_ID,
       tenantId: TENANT_ID,
       deviceJkt: DEVICE_JKT,
@@ -253,6 +257,7 @@ describe("issueIosToken", () => {
 
   it("generates a new familyId when none is provided", async () => {
     const result = await issueIosToken({
+      consumeProof: async () => true,
       userId: USER_ID,
       tenantId: TENANT_ID,
       deviceJkt: DEVICE_JKT,
@@ -275,6 +280,7 @@ describe("issueIosToken", () => {
     });
 
     await issueIosToken({
+      consumeProof: async () => true,
       userId: USER_ID,
       tenantId: TENANT_ID,
       deviceJkt: DEVICE_JKT,
@@ -316,6 +322,7 @@ describe("issueIosToken", () => {
     mockExtUpdateMany.mockResolvedValue({ count: 2 });
 
     await issueIosToken({
+      consumeProof: async () => true,
       userId: USER_ID,
       tenantId: TENANT_ID,
       deviceJkt: DEVICE_JKT,
@@ -351,6 +358,7 @@ describe("issueIosToken", () => {
     mockExtUpdateMany.mockResolvedValue({ count: 2 });
 
     await issueIosToken({
+      consumeProof: async () => true,
       userId: USER_ID,
       tenantId: TENANT_ID,
       deviceJkt: DEVICE_JKT,
@@ -388,6 +396,7 @@ describe("issueIosToken", () => {
     );
 
     await issueIosToken({
+      consumeProof: async () => true,
       userId: USER_ID,
       tenantId: TENANT_ID,
       deviceJkt: DEVICE_JKT,
@@ -412,6 +421,7 @@ describe("issueIosToken", () => {
     );
 
     await issueIosToken({
+      consumeProof: async () => true,
       userId: USER_ID,
       tenantId: TENANT_ID,
       deviceJkt: DEVICE_JKT,
@@ -440,6 +450,7 @@ describe("issueIosToken", () => {
   it("caps the access row at IOS_ACCESS_TOKEN_TTL_MS when the tenant policy is far looser", async () => {
     const before = Date.now();
     await issueIosToken({
+      consumeProof: async () => true,
       userId: USER_ID,
       tenantId: TENANT_ID,
       deviceJkt: DEVICE_JKT,
@@ -472,6 +483,7 @@ describe("issueIosToken", () => {
       }),
     );
     const result = await issueIosToken({
+      consumeProof: async () => true,
       userId: USER_ID,
       tenantId: TENANT_ID,
       deviceJkt: DEVICE_JKT,
@@ -493,6 +505,7 @@ describe("issueIosToken", () => {
   it("writes lastPresenceAt on both the access and refresh rows", async () => {
     const presenceAt = new Date(Date.now() - 60_000);
     await issueIosToken({
+      consumeProof: async () => true,
       userId: USER_ID,
       tenantId: TENANT_ID,
       deviceJkt: DEVICE_JKT,
@@ -515,6 +528,7 @@ describe("issueAutofillToken", () => {
   it("creates a single passwords:write IOS_AUTOFILL row bound to cnfJkt with the short TTL", async () => {
     const before = Date.now();
     const result = await issueAutofillToken({
+      authorizingTokenId: HOST_TOKEN_ID,
       userId: USER_ID,
       tenantId: TENANT_ID,
       cnfJkt: CNF_JKT,
@@ -541,7 +555,7 @@ describe("issueAutofillToken", () => {
   });
 
   it("revokes prior active IOS_AUTOFILL rows for the user before minting (single active token)", async () => {
-    await issueAutofillToken({ userId: USER_ID, tenantId: TENANT_ID, cnfJkt: CNF_JKT });
+    await issueAutofillToken({ userId: USER_ID, tenantId: TENANT_ID, cnfJkt: CNF_JKT, authorizingTokenId: HOST_TOKEN_ID });
 
     expect(mockExtUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -556,14 +570,14 @@ describe("issueAutofillToken", () => {
   });
 
   it("uses a fresh familyId per mint (non-refreshable, single-purpose)", async () => {
-    await issueAutofillToken({ userId: USER_ID, tenantId: TENANT_ID, cnfJkt: CNF_JKT });
+    await issueAutofillToken({ userId: USER_ID, tenantId: TENANT_ID, cnfJkt: CNF_JKT, authorizingTokenId: HOST_TOKEN_ID });
     const createData = mockExtCreate.mock.calls[0][0].data;
     expect(createData.familyId).toBeTruthy();
     expect(typeof createData.familyId).toBe("string");
   });
 
   it("serializes the revoke-priors-then-create race under a per-user advisory lock", async () => {
-    await issueAutofillToken({ userId: USER_ID, tenantId: TENANT_ID, cnfJkt: CNF_JKT });
+    await issueAutofillToken({ userId: USER_ID, tenantId: TENANT_ID, cnfJkt: CNF_JKT, authorizingTokenId: HOST_TOKEN_ID });
     // Mutation-kill: removing the tx.$executeRaw lock line leaves $executeRaw
     // uncalled with this SQL (TOCTOU cap race; memory: project_count_then_create_toctou_class).
     expect(

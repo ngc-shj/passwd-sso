@@ -38,6 +38,14 @@ const {
   };
 });
 
+// The user's credential lock and the in-transaction session re-read
+// (user-auth-serialization.ts, tested on its own): a live session by default.
+const { mockIsSessionRowLive } = vi.hoisted(() => ({ mockIsSessionRowLive: vi.fn() }));
+vi.mock("@/lib/auth/session/user-auth-serialization", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth/session/user-auth-serialization")>()),
+  lockUserAuthArtifacts: vi.fn(async () => {}),
+  isSessionRowLive: mockIsSessionRowLive,
+}));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 
 vi.mock("@/lib/auth/policy/access-restriction", () => ({
@@ -105,6 +113,7 @@ vi.mock("@/lib/auth/policy/passkey-enforcement", async (importOriginal) => {
 
 import { GET } from "./route";
 import { _resetPasskeyAuditForTests } from "@/lib/auth/policy/passkey-enforcement";
+import { lockUserAuthArtifacts } from "@/lib/auth/session/user-auth-serialization";
 
 // Module-scope snapshot (route.ts:59 `const authorizeLimiter = createRateLimiter(...)`
 // runs at import time, above). See fail-closed.ts module doc.
@@ -134,6 +143,7 @@ function buildUrl(params: Partial<typeof VALID>): string {
 describe("GET /api/mobile/authorize", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockIsSessionRowLive.mockResolvedValue(true);
     _resetPasskeyAuditForTests();
     mockGetAppOrigin.mockReturnValue("https://example.test");
     mockAuth.mockResolvedValue({ user: { id: "11111111-1111-1111-1111-111111111111" } });
@@ -180,6 +190,19 @@ describe("GET /api/mobile/authorize", () => {
       targetType: "MobileBridgeCode",
       metadata: { deviceJkt: VALID.device_jkt },
     });
+  });
+
+  it("a session revoked while the issue waited for the user lock: 401, no bridge code, no audit", async () => {
+    mockIsSessionRowLive.mockResolvedValue(false);
+
+    const res = await GET(createRequest("GET", buildUrl(VALID)));
+    expect(res.status).toBe(401);
+    expect(mockMobileBridgeCodeCreate).not.toHaveBeenCalled();
+    expect(mockLogAuditAsync).not.toHaveBeenCalled();
+    // The session was re-read under the lock, not before it.
+    expect(vi.mocked(lockUserAuthArtifacts).mock.invocationCallOrder[0]).toBeLessThan(
+      mockIsSessionRowLive.mock.invocationCallOrder[0],
+    );
   });
 
   it("redirects to the sign-in page (callbackUrl=self) when no Auth.js session is present", async () => {

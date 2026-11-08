@@ -47,6 +47,13 @@ const {
   mockDerivePasskeyState: vi.fn(),
 }));
 
+// The in-transaction session re-read (user-auth-serialization.ts, tested on
+// its own): a live session by default. The lock itself runs for real.
+const { mockIsSessionRowLive } = vi.hoisted(() => ({ mockIsSessionRowLive: vi.fn() }));
+vi.mock("@/lib/auth/session/user-auth-serialization", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth/session/user-auth-serialization")>()),
+  isSessionRowLive: mockIsSessionRowLive,
+}));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
   requireRecentCurrentAuthMethod: mockRequireRecentCurrentAuthMethod,
@@ -132,6 +139,7 @@ function makeRequest(opts: {
 describe("POST /api/extension/bridge-code — C4 rewrite", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockIsSessionRowLive.mockResolvedValue(true);
     _resetPasskeyAuditForTests();
     vi.stubEnv("EXTENSION_BRIDGE_CODE_ALLOWED_ORIGINS", ALLOWED_ORIGIN);
     __resetAllowlistForTests();

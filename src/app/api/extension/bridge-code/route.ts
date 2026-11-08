@@ -41,7 +41,8 @@ import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
 import { extractClientIp } from "@/lib/auth/policy/ip-access";
 import { checkAccessRestrictionWithAudit } from "@/lib/auth/policy/access-restriction";
-import { withBypassRls, advisoryXactLock } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { isSessionRowLive, lockUserAuthArtifacts, UserAuthRevokedError } from "@/lib/auth/session/user-auth-serialization";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { logAuditAsync, extractRequestMeta, personalAuditBase, tenantAuditBase } from "@/lib/audit/audit";
@@ -286,8 +287,11 @@ async function handlePOST(req: NextRequest) {
       // count-then-evict-then-create sequence cannot race past the active cap
       // (two concurrent issues both reading active.length < max). Advisory lock
       // is transaction-scoped; matches the codebase idiom (attachments, vault
-      // rotate-key).
-      await advisoryXactLock(tx, userId);
+      // rotate-key). The same lock serializes it against a revocation of the
+      // user's credentials, so the session that authenticated it is re-read
+      // under it (user-auth-serialization.ts).
+      await lockUserAuthArtifacts(tx, userId);
+      if (!(await isSessionRowLive(tx, req, userId))) throw new UserAuthRevokedError("session");
       const active = await tx.extensionBridgeCode.findMany({
         where: { userId, usedAt: null, expiresAt: { gt: now } },
         orderBy: { createdAt: "asc" },
@@ -315,6 +319,8 @@ async function handlePOST(req: NextRequest) {
       });
     }, BYPASS_GRANT.EXTENSION_BRIDGE_CODE_LIFECYCLE);
   } catch (err) {
+    // The session was revoked while this request waited.
+    if (err instanceof UserAuthRevokedError) return unauthorized();
     await emitBridgeCodeIssueFailure({
       req,
       userId,

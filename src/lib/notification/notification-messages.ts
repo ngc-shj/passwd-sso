@@ -62,6 +62,16 @@ const MESSAGES = {
       body: "A tenant admin revoked one of your passkeys and ended all your sessions.",
     },
   },
+  PASSKEYS_ALL_REVOKED_BY_ADMIN: {
+    ja: {
+      title: "パスキーがすべて失効されました",
+      body: "テナント管理者があなたのパスキーをすべて失効し、すべてのセッションを終了しました。",
+    },
+    en: {
+      title: "All passkeys revoked",
+      body: "A tenant admin revoked all of your passkeys and ended all your sessions.",
+    },
+  },
   MASTER_KEY_ROTATION_PENDING_APPROVAL: {
     ja: {
       title: "マスターキーローテーション承認待ち",

@@ -39,6 +39,7 @@
   "mcp-client-post": { "method": "POST", "pathTokens": ["apiPath.tenantMcpClients", "API_PATH.TENANT_MCP_CLIENTS", "/api/tenant/mcp-clients"] },
   "clear-lockout-post": { "method": "POST", "pathTokens": ["/clear-lockout"] },
   "tenant-member-passkey-delete": { "method": "DELETE", "pathTokens": ["apiPath.tenantMemberPasskeyById", "/passkeys/"] },
+  "tenant-member-passkeys-delete-all": { "method": "DELETE", "pathTokens": ["apiPath.tenantMemberPasskeys"] },
   "reset-vault-approve": { "method": "POST", "pathTokens": ["/approve"] },
   "reset-vault-post": { "method": "POST", "pathTokens": ["apiPath.tenantMemberResetVault", "/reset-vault"] },
   "tenant-member-put": { "method": "PUT", "pathTokens": ["apiPath.tenantMemberById", "/api/tenant/members/"] },

@@ -916,6 +916,7 @@ describe("issueExtensionToken", () => {
 
   it("returns a 64-char token, expiresAt, scopeCsv, and cnfJkt", async () => {
     const result = await issueExtensionToken({
+      consumeProof: async () => true,
       userId: "u1",
       tenantId: "t1",
       scope: "passwords:read,vault:unlock-data",
@@ -937,6 +938,7 @@ describe("issueExtensionToken", () => {
 
   it("creates the token via prisma.extensionToken.create with the hashed token and cnfJkt", async () => {
     await issueExtensionToken({
+      consumeProof: async () => true,
       userId: "u1",
       tenantId: "t1",
       scope: "passwords:read",
@@ -958,6 +960,7 @@ describe("issueExtensionToken", () => {
   it("stamps lastPresenceAt = now on the new row (issuance itself counts as presence)", async () => {
     const before = Date.now();
     await issueExtensionToken({
+      consumeProof: async () => true,
       userId: "u1",
       tenantId: "t1",
       scope: "passwords:read",
@@ -980,6 +983,7 @@ describe("issueExtensionToken", () => {
     mockUpdateMany.mockResolvedValue({ count: 2 });
 
     await issueExtensionToken({
+      consumeProof: async () => true,
       userId: "u1",
       tenantId: "tenant-1",
       scope: "passwords:read",
@@ -1011,6 +1015,7 @@ describe("issueExtensionToken", () => {
     mockUpdateMany.mockResolvedValue({ count: 0 });
 
     await issueExtensionToken({
+      consumeProof: async () => true,
       userId: "u1",
       tenantId: "tenant-1",
       scope: "passwords:read",
@@ -1022,6 +1027,7 @@ describe("issueExtensionToken", () => {
 
   it("excludes IOS_AUTOFILL from the active-family membership query", async () => {
     await issueExtensionToken({
+      consumeProof: async () => true,
       userId: "u1",
       tenantId: "tenant-1",
       scope: "passwords:read",
@@ -1046,6 +1052,7 @@ describe("issueExtensionToken", () => {
     );
 
     await issueExtensionToken({
+      consumeProof: async () => true,
       userId: "u1",
       tenantId: "tenant-1",
       scope: "passwords:read",
@@ -1079,6 +1086,7 @@ describe("issueExtensionToken", () => {
     mockUpdateMany.mockResolvedValue({ count: 2 });
 
     await issueExtensionToken({
+      consumeProof: async () => true,
       userId: "u1",
       tenantId: "tenant-1",
       scope: "passwords:read",
@@ -1106,6 +1114,7 @@ describe("issueExtensionToken", () => {
 
   it("invokes prisma.$transaction exactly once per call", async () => {
     await issueExtensionToken({
+      consumeProof: async () => true,
       userId: "u1",
       tenantId: "tenant-1",
       scope: "passwords:read",
@@ -1124,6 +1133,7 @@ describe("issueExtensionToken", () => {
     mockTenantFindUnique.mockResolvedValueOnce(null);
     await expect(
       issueExtensionToken({
+        consumeProof: async () => true,
         userId: "u1",
         tenantId: "tenant-gone",
         scope: "passwords:read",
@@ -1138,6 +1148,7 @@ describe("issueExtensionToken", () => {
 
     const before = Date.now();
     await issueExtensionToken({
+      consumeProof: async () => true,
       userId: "u1",
       tenantId: "t1",
       scope: "passwords:read",

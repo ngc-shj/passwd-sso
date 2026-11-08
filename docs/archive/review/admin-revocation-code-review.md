@@ -126,3 +126,82 @@ Testing: RT1 T4; RT2 T1, T2, T6, T7; RT4 T5; RT5/RT8 T1, T3.
 - `check-rls-nesting` read the JSDoc `{@link invalidateUserSessions}` on the
   extracted helper as a call (a false nesting report); the reference is plain
   text instead.
+
+# Round 2
+
+## Changes from Previous Round
+Round 1 fixes reviewed (commit 618516ebb added the single-use code tables to the
+revocation; ddf166d0b the tests). Two further external reviews (X1–X5) were
+folded in; this section records them and their resolution.
+
+## Findings
+- R2-1 [Major] `revokeUserAuthArtifactsInTx` did not consume pending
+  ExtensionBridgeCode / MobileBridgeCode / McpAuthorizationCode rows: each
+  exchanges for a fresh token with no session. Fixed in 618516ebb; the revoked
+  model set is now derived from the schema (`user-auth-artifacts.member-set.test.ts`:
+  every user-bound model with `revokedAt` / `usedAt` is revoked or exempted with a
+  reason).
+- X1 [High] A mint racing a revocation survives it: a code consumed, then the
+  revocation commits, then the token is issued (or a session-authenticated mint
+  whose session was deleted meanwhile).
+- X2 [Medium] A session revoked while its cache tombstone failed stays valid at
+  the proxy for up to the cache TTL.
+- X3 [Medium] A compromised session can register a second passkey before the
+  admin revokes the first; revoking one leaves the other to sign back in with.
+- X4 [Blocker] Unit tests failing in the mid-change tree (missing `$executeRaw`
+  mocks); no real-DB race test.
+- X5 [Minor] Two unused imports.
+
+## Resolution Status
+### X1 — serialize revocation against every mint
+- User decision: fix in this PR. `user-auth-serialization.ts`: the revocation
+  and every mint of a user credential take one transaction-scoped advisory lock
+  keyed by the user id (the key the per-user caps already used, so it is one
+  lock and cannot deadlock against them), and the mint re-checks its proof in
+  the locked transaction: the session row (`isSessionRowLive`), the token row
+  (`isTokenRowLive` / the refresh CAS with `revokedAt: null`), the code CAS, or
+  the passkey row for a passkey sign-in. A lost proof throws
+  `UserAuthRevokedError`, mapped to 401 (or the flow's own refusal).
+- Mints covered: every sign-in (session cap), extension bridge code / exchange /
+  refresh, mobile authorize / token / refresh / autofill, API key, operator token
+  (user lock before the per-tenant cap lock), vault delegation (also re-reads the
+  MCP token), MCP consent code / exchange / refresh, passkey registration.
+- Grants widened where the recheck reads a new model (`session` on the bridge
+  code, mobile bridge code and MCP code grants; `webAuthnCredential` on session
+  capping); delegation got its own `DELEGATION_SESSION_CREATE` grant rather than
+  widening the shared lookup grant.
+
+### X2 — the cache is not an authenticator
+- Measured, not assumed: the Redis cache is read only by the proxy's
+  `getSessionInfo`; `auth()` (database strategy) reads the session row on every
+  call; every `api-session-required` route reads the session itself except three
+  bearer-only routes; the /dashboard and /admin layouts call `auth()`. A stale
+  entry therefore passes the proxy and is refused by the handler.
+- User decision: pin that invariant instead of adding an auth generation.
+  `check-session-passkey-readers.mjs` rule 4 fails an `api-session-required`
+  route that reads no session (unless named in `BEARER_ONLY_ROUTES` with the
+  token it authenticates) and a gated layout that reads none; self-test cells for
+  each refusal. The admin dialog's "sign-ins may stay valid" warning was wrong
+  and is removed (the response still reports `cacheTombstoneFailures`; Sentry
+  still fires).
+
+### X3 — revoke all passkeys
+- User decision: add `DELETE /api/tenant/members/[userId]/passkeys`: every
+  passkey of the member (any tenant), their sessions and tokens everywhere, one
+  `TENANT_MEMBER_PASSKEY_REVOKE_ALL` audit row, in one transaction under the
+  member's lock — so no passkey can be registered meanwhile, and no session that
+  could register one survives. Shared with the single revoke in
+  `src/lib/tenant/member-passkey-revoke.ts`. Dialog "Revoke all" button; ja/en
+  notification and email wording per extent.
+
+### X4 / X5 — tests
+- Mocks updated; each changed mint has a "proof revoked while waiting → 401,
+  nothing created" unit cell, with lock-before-recheck ordering asserted.
+- `user-auth-serialization.integration.test.ts` (real DB): a revocation held
+  open, a mint parked on it (observed via `pg_blocking_pids`), then commit —
+  passkey sign-in, bridge-code exchange and MCP consent each issue nothing; each
+  has a control (lock only, no revocation) that does issue. A source-mutation
+  red proof of these cells was not run (the scratch-copy run was not permitted);
+  the controls show the refusal is the revocation's, and the unit cells cover the
+  recheck branches.
+- `tenant-member-passkey-revoke.integration.test.ts`: revoke-all cell.

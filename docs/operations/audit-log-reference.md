@@ -284,6 +284,7 @@ These user-meaningful fields should be rendered in `getTargetLabel()` with i18n 
 | `ADMIN_VAULT_RESET_REVOKE` | TENANT | User | `{ revokedById, resetId }` | — (export-only) |
 | `TENANT_ROLE_UPDATE` | TENANT | TenantMember | `{ newRole, previousRole, transfer }` | roleChange template |
 | `TENANT_MEMBER_PASSKEY_REVOKE` | TENANT | WebAuthnCredential | `{ targetUserId, credentialId, registeredInTenant, sessions, extensionTokens, apiKeys, ... }` | — (export-only) |
+| `TENANT_MEMBER_PASSKEY_REVOKE_ALL` | TENANT | User | `{ targetUserId, passkeys, credentialIds, sessions, extensionTokens, apiKeys, ... }` | — (export-only) |
 
 **Notes:**
 - `resetId` added to ADMIN_VAULT_RESET_INITIATE by `audit-metadata-standardize` branch.
@@ -293,6 +294,7 @@ These user-meaningful fields should be rendered in `getTargetLabel()` with i18n 
 - TEAM_ENTRY_REKEY / TEAM_ATTACHMENT_MIGRATE: written in the re-key / migrate transaction (team-key-rotation-rekey plan C2/C4). The original history and attachment attribution is kept although the actor rewrote the ciphertext. TEAM_ENTRY_REKEY: `fromTeamKeyVersion` is the team key version the replaced ItemKey was created under (0 when unknown), `retained` lists the history rows left as they were (`{ id, teamKeyVersion, itemKeyVersion }` each). TEAM_ATTACHMENT_MIGRATE: `toItemKeyVersion` is the ItemKey version the attachment's CEK is now wrapped under.
 - TENANT_ROLE_UPDATE: `transfer` is true for ownership transfers.
 - TENANT_MEMBER_PASSKEY_REVOKE: a tenant admin deleted a member's passkey (#974). Written in the transaction that deletes the credential and revokes the member's sessions and tokens in every tenant (the passkey is user-global); the counts are those revocations. `registeredInTenant` is false for a passkey registered under another tenant.
+- TENANT_MEMBER_PASSKEY_REVOKE_ALL: a tenant admin deleted every passkey a member has, in every tenant, with the same revocations in the same transaction (#974). `passkeys` is how many were deleted, `credentialIds` their public credential ids. The containment path: under the member's credential lock no passkey can be registered meanwhile.
 
 ### SCIM Provisioning (`group:scim`)
 

@@ -219,6 +219,7 @@ describe(
 
         // Step 5: issue extension token via real DB.
         const issued = await issueExtensionToken({
+          consumeProof: async () => true,
           userId,
           tenantId,
           scope: "passwords:read,passwords:write",
@@ -275,6 +276,7 @@ describe(
     it("validateExtensionToken rejects BROWSER_EXTENSION token without DPoP", async () => {
       const kp = await generateKeypair();
       const issued = await issueExtensionToken({
+        consumeProof: async () => true,
         userId,
         tenantId,
         scope: "passwords:read",
@@ -298,6 +300,7 @@ describe(
     it("cnfJkt is preserved when a token is refreshed (C10)", async () => {
       const kp = await generateKeypair();
       const originalIssued = await issueExtensionToken({
+        consumeProof: async () => true,
         userId,
         tenantId,
         scope: "passwords:read",

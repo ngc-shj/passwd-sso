@@ -8,7 +8,7 @@ const {
   mockRequireRecentSession,
   mockMemberFindFirst,
   mockMemberFindMany,
-  mockCredentialFindFirst,
+  mockCredentialFindMany,
   mockCredentialDeleteMany,
   mockRevokeArtifacts,
   mockInvalidateCachedSessions,
@@ -28,7 +28,7 @@ const {
     mockRequireRecentSession: vi.fn(),
     mockMemberFindFirst: vi.fn(),
     mockMemberFindMany: vi.fn(),
-    mockCredentialFindFirst: vi.fn(),
+    mockCredentialFindMany: vi.fn(),
     mockCredentialDeleteMany: vi.fn(),
     mockRevokeArtifacts: vi.fn(),
     mockInvalidateCachedSessions: vi.fn(),
@@ -43,7 +43,7 @@ const {
 
 const tx = {
   tenantMember: { findFirst: mockMemberFindFirst, findMany: mockMemberFindMany },
-  webAuthnCredential: { findFirst: mockCredentialFindFirst, deleteMany: mockCredentialDeleteMany },
+  webAuthnCredential: { findMany: mockCredentialFindMany, deleteMany: mockCredentialDeleteMany },
 };
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -64,6 +64,11 @@ vi.mock("@/lib/tenant-rls", () => ({
 }));
 vi.mock("@/lib/auth/session/user-session-invalidation", () => ({
   revokeUserAuthArtifactsInTx: mockRevokeArtifacts,
+}));
+vi.mock("@/lib/auth/session/user-auth-serialization", () => ({
+  lockUserAuthArtifacts: vi.fn(async () => {
+    calls.push("lock");
+  }),
 }));
 vi.mock("@/lib/auth/session/session-cache-helpers", () => ({
   invalidateCachedSessions: mockInvalidateCachedSessions,
@@ -104,14 +109,14 @@ describe("DELETE /api/tenant/members/[userId]/passkeys/[credentialId]", () => {
     calls.length = 0;
     committed.value = false;
     mockAuth.mockResolvedValue({ user: { id: ADMIN, name: "Admin", email: "admin@example.com" } });
-    mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant-1", role: "OWNER" });
+    mockRequireTenantPermission.mockResolvedValue({ userId: ADMIN, tenantId: "tenant-1", role: "OWNER" });
     mockRequireRecentSession.mockResolvedValue(null);
     mockMemberFindFirst.mockResolvedValue({ role: "MEMBER" });
     mockMemberFindMany.mockResolvedValue([
       { userId: ADMIN, role: "OWNER", user: { email: "admin@example.com", locale: "en" } },
       { userId: TARGET, role: "MEMBER", user: { email: "member@example.com", locale: "ja" } },
     ]);
-    mockCredentialFindFirst.mockResolvedValue({ id: CRED, credentialId: "public-cred", tenantId: "tenant-1" });
+    mockCredentialFindMany.mockResolvedValue([{ id: CRED, credentialId: "public-cred", tenantId: "tenant-1" }]);
     mockCredentialDeleteMany.mockImplementation(async () => {
       calls.push("delete");
       return { count: 1 };
@@ -134,7 +139,7 @@ describe("DELETE /api/tenant/members/[userId]/passkeys/[credentialId]", () => {
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, sessionsRevoked: 2, cacheTombstoneFailures: 0 });
-    expect(calls).toEqual(["delete", "revoke", "audit", "cache-after-commit"]);
+    expect(calls).toEqual(["lock", "delete", "revoke", "audit", "cache-after-commit"]);
     expect(mockRevokeArtifacts).toHaveBeenCalledWith(tx, TARGET, { tenantFilter: {} });
     expect(mockInvalidateCachedSessions).toHaveBeenCalledWith(["d1", "d2"]);
     expect(mockLogAuditInTx).toHaveBeenCalledWith(
@@ -188,10 +193,10 @@ describe("DELETE /api/tenant/members/[userId]/passkeys/[credentialId]", () => {
   });
 
   it("revokes a passkey the member registered under another tenant, recorded as such", async () => {
-    mockCredentialFindFirst.mockResolvedValue({ id: CRED, credentialId: "public-cred", tenantId: "previous-tenant" });
+    mockCredentialFindMany.mockResolvedValue([{ id: CRED, credentialId: "public-cred", tenantId: "previous-tenant" }]);
 
     expect((await revoke()).status).toBe(200);
-    expect(mockCredentialFindFirst).toHaveBeenCalledWith(
+    expect(mockCredentialFindMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: CRED, userId: TARGET } }),
     );
     expect(mockLogAuditInTx.mock.calls[0][2].metadata).toMatchObject({ registeredInTenant: false });

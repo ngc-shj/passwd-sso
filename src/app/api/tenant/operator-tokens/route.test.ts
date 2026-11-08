@@ -51,6 +51,13 @@ const { mockUserFindMany, mockWithBypassRls } = vi.hoisted(() => ({
   mockWithBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
 }));
 
+// The in-transaction session re-read (user-auth-serialization.ts, tested on
+// its own): a live session by default. The lock itself runs for real.
+const { mockIsSessionRowLive } = vi.hoisted(() => ({ mockIsSessionRowLive: vi.fn() }));
+vi.mock("@/lib/auth/session/user-auth-serialization", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth/session/user-auth-serialization")>()),
+  isSessionRowLive: mockIsSessionRowLive,
+}));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -214,6 +221,7 @@ describe("GET /api/tenant/operator-tokens", () => {
 describe("POST /api/tenant/operator-tokens", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockIsSessionRowLive.mockResolvedValue(true);
     // Real emitRateLimitFailClosed now runs on the 503 path (rate-limit-audit
     // stub removed); reset its module-scoped throttle so a prior test's
     // emission does not swallow this test's (5-min window, per-scope key).
@@ -385,6 +393,28 @@ describe("POST /api/tenant/operator-tokens", () => {
     );
     // The count-then-create runs under a per-tenant advisory lock (TOCTOU fix).
     expectAdvisoryLockAcquired(mockExecuteRaw);
+  });
+
+  it("takes the user's credential lock before the per-tenant cap lock", async () => {
+    await POST(
+      createRequest("POST", "http://localhost/api/tenant/operator-tokens", {
+        body: { name: "My operator token", expiresInDays: 30 },
+      }),
+    );
+    expect(mockExecuteRaw.mock.calls.map((c) => c[1])).toEqual([USER_ID, ACTOR.tenantId]);
+  });
+
+  it("a session revoked while the create waited for the lock: 401, no token, no audit", async () => {
+    mockIsSessionRowLive.mockResolvedValue(false);
+
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/tenant/operator-tokens", {
+        body: { name: "My operator token", expiresInDays: 30 },
+      }),
+    );
+    expect(res.status).toBe(401);
+    expect(mockPrismaOperatorToken.create).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalledWith(expect.objectContaining({ action: "OPERATOR_TOKEN_CREATE" }));
   });
 
   it("emits audit OPERATOR_TOKEN_CREATE with tokenId and scope", async () => {

@@ -14,7 +14,9 @@ const {
   mockWithBypassRls,
   mockInvalidateCachedSessions,
   mockInvalidateCachedSessionsBulkByDigest,
+  mockExecuteRaw,
 } = vi.hoisted(() => ({
+  mockExecuteRaw: vi.fn(async () => 0),
   mockSession: { deleteMany: vi.fn(), findMany: vi.fn() },
   mockExtensionToken: { updateMany: vi.fn() },
   mockApiKey: { updateMany: vi.fn() },
@@ -46,6 +48,8 @@ vi.mock("@/lib/prisma", () => ({
     extensionBridgeCode: mockExtensionBridgeCode,
     mobileBridgeCode: mockMobileBridgeCode,
     mcpAuthorizationCode: mockMcpAuthorizationCode,
+    // The user's credential lock (user-auth-serialization.ts).
+    $executeRaw: mockExecuteRaw,
   },
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
@@ -157,6 +161,20 @@ describe("invalidateUserSessions", () => {
       expect.objectContaining({ where: { userId: "user-1", tenantId: "tenant-1", ...exclusion } }),
     );
     expect(mockSession.deleteMany).toHaveBeenCalledWith({ where: { userId: "user-1", tenantId: "tenant-1", ...exclusion } });
+  });
+
+  it("takes the user's credential lock before revoking anything", async () => {
+    const order: string[] = [];
+    mockExecuteRaw.mockImplementationOnce(async () => {
+      order.push("lock");
+      return 0;
+    });
+    mockSession.findMany.mockImplementationOnce(async () => {
+      order.push("read");
+      return [];
+    });
+    await invalidateUserSessions("user-1", { tenantId: "tenant-1" });
+    expect(order).toEqual(["lock", "read"]);
   });
 
   it("uses withBypassRls", async () => {

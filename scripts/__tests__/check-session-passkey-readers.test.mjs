@@ -100,6 +100,28 @@ const NO_READER = `export async function GET() {
 }
 `;
 
+const BEARER_ROUTE = `import { validateExtensionToken } from "@/lib/auth/tokens/extension-token";
+export async function POST(req: Request) {
+  const result = await validateExtensionToken(req);
+  return Response.json({ ok: result.ok });
+}
+`;
+
+const LAYOUT = `${AUTH_IMPORT}
+export default async function Layout({ children }: { children: unknown }) {
+  const session = await auth();
+  if (!session) return null;
+  return children;
+}
+`;
+const BEARER_ONLY = [
+  "src/app/api/extension/key/reset/route.ts",
+  "src/app/api/extension/token/refresh/route.ts",
+  "src/app/api/extension/token/route.ts",
+];
+const DASHBOARD_LAYOUT = "src/app/[locale]/dashboard/layout.tsx";
+const ADMIN_LAYOUT = "src/app/[locale]/admin/layout.tsx";
+
 const proxyList = (entries) => `export interface SessionGateEntry { method: string; path: string; reason: string }
 export const API_DEFAULT_SESSION_READERS: readonly SessionGateEntry[] = [
 ${entries.map(([m, p]) => `  { method: "${m}", path: "${p}", reason: "step-up reauth reads the session" },`).join("\n")}
@@ -116,6 +138,9 @@ const BASE_FILES = {
   "src/app/api/auth/passkey/verify/route.ts": PASSKEY_VERIFY,
   "src/app/api/passwords/route.ts": SESSION_ROUTE,
   "src/app/api/health/route.ts": NO_READER,
+  ...Object.fromEntries(BEARER_ONLY.map((rel) => [rel, BEARER_ROUTE])),
+  [DASHBOARD_LAYOUT]: LAYOUT,
+  [ADMIN_LAYOUT]: LAYOUT,
   [PROXY_LIST]: proxyList(BASE_LIST),
 };
 
@@ -132,6 +157,7 @@ const BASE_MANIFEST = {
   "src/app/api/auth/passkey/verify/route.ts": route("api-default", { POST: "tier-a" }),
   "src/app/api/passwords/route.ts": route("api-session-required", { GET: "gated" }),
   "src/app/api/health/route.ts": route("api-default", { GET: "gated" }),
+  ...Object.fromEntries(BEARER_ONLY.map((rel) => [rel, route("api-session-required", { POST: "gated" })])),
 };
 
 /** Write the base fixture into `root`, `files` / `manifest` merged over it (null deletes). */
@@ -192,7 +218,39 @@ describe.concurrent("check-session-passkey-readers.mjs", { timeout: 60_000 }, ()
     // reauth, own-gate, openapi, nextauth, passkey verify, passwords; NOT the v1 shadow or health.
     // openapi.json is the early-return reader that adjudicates itself; its
     // FAIL counterpart (the call removed) is under Rule 1.
-    expect(out).toMatch(/routes=8 readers=6 api-default-readers=1 own-gate=1 exemptions=2/);
+    expect(out).toMatch(
+      /routes=11 readers=6 api-default-readers=1 own-gate=1 exemptions=2 session-required=5 bearer-only=3 layouts=2/,
+    );
+  });
+
+  // ─── Rule 4: the session cache never authenticates on its own ───
+  it("FAILS for an api-session-required route that reads no session and is not bearer-only", async () => {
+    await expectFail(
+      { manifest: { "src/app/api/health/route.ts": route("api-session-required", { GET: "gated" }) } },
+      /health\/route\.ts {2}is api-session-required but reads no session itself/,
+    );
+  });
+
+  it("FAILS for a bearer-only route that reads the session after all", async () => {
+    await expectFail(
+      { files: { [BEARER_ONLY[0]]: REAUTH } },
+      /reads the session but is named in BEARER_ONLY_ROUTES/,
+    );
+  });
+
+  it("FAILS for a stale bearer-only entry", async () => {
+    await expectFail({ files: { [BEARER_ONLY[1]]: null }, manifest: { [BEARER_ONLY[1]]: null } }, /BEARER_ONLY_ROUTES .*token\/refresh.*: stale/);
+  });
+
+  it("FAILS when a session-gated layout reads no session", async () => {
+    await expectFail(
+      { files: { [ADMIN_LAYOUT]: "export default function Layout({ children }: { children: unknown }) { return children; }\n" } },
+      /admin\/layout\.tsx {2}\(PAGE_SESSION_LAYOUTS\) reads no session/,
+    );
+  });
+
+  it("FAILS when a session-gated layout is missing", async () => {
+    await expectFail({ files: { [DASHBOARD_LAYOUT]: null } }, /dashboard\/layout\.tsx {2}\(PAGE_SESSION_LAYOUTS\) not found/);
   });
 
   // ─── Inputs ───

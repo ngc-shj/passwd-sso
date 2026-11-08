@@ -7,6 +7,8 @@ import { withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
+import { refuseMemberPasskeyTarget, revokeMemberPasskeys } from "@/lib/tenant/member-passkey-revoke";
 import { forbidden, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
 
 export const runtime = "nodejs";
@@ -76,4 +78,40 @@ async function handleGET(_req: NextRequest, { params }: Params) {
   });
 }
 
+// DELETE /api/tenant/members/[userId]/passkeys — revoke ALL of a member's
+// passkeys and end their sessions and tokens in every tenant, in one
+// transaction under the member's credential lock (revokeMemberPasskeys). The
+// containment path: revoking one passkey leaves any other a compromised
+// session registered first, to sign back in with.
+async function handleDELETE(req: NextRequest, { params }: Params) {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return unauthorized();
+  }
+
+  const { userId: targetUserId } = await params;
+
+  let actor;
+  try {
+    actor = await requireTenantPermission(session.user.id, TENANT_PERMISSION.MEMBER_MANAGE);
+  } catch (err) {
+    return handleAuthError(err);
+  }
+
+  const refused = await refuseMemberPasskeyTarget(actor, targetUserId);
+  if (refused) return refused;
+
+  // @stepup id:tenant-member-passkeys-delete-all method:DELETE
+  const stepUpError = await requireRecentCurrentAuthMethod(req, session.user.id);
+  if (stepUpError) return stepUpError;
+
+  return revokeMemberPasskeys(req, {
+    actor: session.user,
+    tenantId: actor.tenantId,
+    targetUserId,
+    scope: { all: true },
+  });
+}
+
 export const GET = withRequestLog(handleGET);
+export const DELETE = withRequestLog(handleDELETE);

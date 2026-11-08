@@ -2702,13 +2702,17 @@
     "src/app/api/tenant/members/[userId]/passkeys/route.ts": {
       "kind": "api-session-required",
       "methods": [
-        "GET"
+        "GET",
+        "DELETE"
       ],
       "auth": [
         "session"
       ],
       "sessionPasskeyGate": {
         "GET": {
+          "value": "gated"
+        },
+        "DELETE": {
           "value": "gated"
         }
       }

@@ -258,7 +258,7 @@
   "delegationPolicyLoadFailed": "委任ポリシーの読み込みに失敗しました。",
   "delegationPolicySaveFailed": "委任ポリシーの更新に失敗しました。",
   "memberPasskeysTitle": "メンバーのパスキー",
-  "memberPasskeysDescription": "{name} がサインインに使えるパスキーです（別のテナントで登録したものを含む）。紛失・漏えいしたものを失効できます。",
+  "memberPasskeysDescription": "{name} がサインインに使えるパスキーです（別のテナントで登録したものを含む）。紛失したものを失効するか、アカウントの侵害が疑われる場合はすべて失効できます。",
   "memberPasskeysLoadFailed": "パスキーを読み込めませんでした。",
   "memberPasskeysEmpty": "登録されたパスキーはありません。",
   "memberPasskeyLastUsed": "最終使用: {date}",
@@ -268,6 +268,10 @@
   "revokePasskeyDescription": "パスキーを削除し、{name} のすべてのセッションを終了します（拡張機能と API のトークンも含む）。別の方法でサインインして新しいパスキーを登録できます。",
   "revokePasskeySuccess": "パスキーを失効しました。",
   "revokePasskeyFailed": "パスキーを失効できませんでした。",
-  "memberPasskeyOtherTenant": "別のテナントで登録",
-  "revokePasskeyCacheWarning": "パスキーを失効しました。サーバーのセッションキャッシュが切れるまでの数分間、一部のサインインが有効なままの場合があります。"
+  "revokeAllPasskeys": "すべて失効",
+  "revokeAllPasskeysTitle": "すべてのパスキーを失効",
+  "revokeAllPasskeysDescription": "{name} のパスキーを別のテナントで登録したものも含めてすべて削除し、すべてのセッションを終了します（拡張機能と API のトークンも含む）。アカウントの侵害が疑われる場合はこちらを使ってください。パスキーを1つ失効しても、登録済みの他のパスキーは残ります。別の方法でサインインして新しいパスキーを登録できます。",
+  "revokeAllPasskeysSuccess": "すべてのパスキーを失効しました。",
+  "revokeAllPasskeysFailed": "パスキーを失効できませんでした。",
+  "memberPasskeyOtherTenant": "別のテナントで登録"
 }

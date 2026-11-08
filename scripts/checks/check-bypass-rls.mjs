@@ -312,8 +312,9 @@ const ALLOWED_USAGE = new Set([
   // user-global, so the member's credentials under a previous tenant are listed
   // and revocable too. Each call first reads the member active in the admin's
   // tenant (explicit tenantId filter), then the credentials by that user id.
+  // The revoke (one or all) runs in the shared member-passkey-revoke module.
   "src/app/api/tenant/members/[userId]/passkeys/route.ts",
-  "src/app/api/tenant/members/[userId]/passkeys/[credentialId]/route.ts",
+  "src/lib/tenant/member-passkey-revoke.ts",
   // Operator CLI (SSO tenant-claim registry, lockout recovery, owning-column
   // realignment). Runs out of band with MIGRATION_DATABASE_URL and must read and
   // repair rows across every tenant, which is the bypass itself. Its purpose is

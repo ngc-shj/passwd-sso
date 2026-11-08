@@ -130,6 +130,8 @@ import { _resetPasskeyAuditForTests } from "@/lib/auth/policy/passkey-enforcemen
 import { MCP_SCOPES } from "@/lib/constants/auth/mcp";
 import { API_PATH } from "@/lib/constants/auth/api-path";
 import { PKCE_CODE_CHALLENGE_SCHEMA } from "@/lib/validations/common.server";
+import { UserAuthRevokedError } from "@/lib/auth/session/user-auth-serialization";
+import { TEST_SESSION_TOKEN } from "@/__tests__/helpers/fixtures";
 
 const VALID_SESSION = { user: { id: "user-uuid-123" } };
 
@@ -748,6 +750,31 @@ describe("POST /api/mcp/authorize/consent", () => {
         scope: expect.stringContaining("credentials:list"),
       }),
     );
+  });
+
+  it("hands createAuthorizationCode a proof that re-reads the consenting session in its transaction", async () => {
+    const req = createFormRequest("http://localhost/api/mcp/authorize/consent", VALID_FORM_FIELDS, {
+      cookie: `authjs.session-token=${TEST_SESSION_TOKEN}`,
+    });
+    await POST(req as unknown as import("next/server").NextRequest);
+
+    const { userProof } = mockCreateAuthorizationCode.mock.calls[0][0];
+    const findFirst = vi.fn().mockResolvedValueOnce({ id: "s1" }).mockResolvedValueOnce(null);
+    const tx = { session: { findFirst } };
+    expect(await userProof(tx)).toBe(true);
+    expect(await userProof(tx)).toBe(false); // revoked meanwhile
+    expect(findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ userId: VALID_SESSION.user.id }) }),
+    );
+  });
+
+  it("a session revoked before the code is created: 401, no consent audit", async () => {
+    mockCreateAuthorizationCode.mockRejectedValueOnce(new UserAuthRevokedError("session"));
+    const req = createFormRequest("http://localhost/api/mcp/authorize/consent", VALID_FORM_FIELDS);
+
+    const res = await POST(req as unknown as import("next/server").NextRequest);
+    expect(res.status).toBe(401);
+    expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
   it("calls logAuditAsync after successful consent", async () => {

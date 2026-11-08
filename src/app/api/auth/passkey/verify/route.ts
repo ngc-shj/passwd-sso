@@ -32,6 +32,7 @@ import {
   SESSION_COOKIE_READ,
 } from "@/lib/auth/session/session-cookie";
 import { createCappedSession } from "@/lib/auth/session/session-concurrency";
+import { UserAuthRevokedError } from "@/lib/auth/session/user-auth-serialization";
 import { resolveEffectiveSessionTimeouts } from "@/lib/auth/session/session-timeout";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 
@@ -162,19 +163,25 @@ async function handlePOST(req: NextRequest) {
   // cap eviction once the session has committed — the same post-sign-in
   // work the adapter's paths get — and deletes the replaced sessions before
   // the cap counts them.
-  await createCappedSession({
-    userId: user.id,
-    tenantId: existingUser.tenantId,
-    sessionToken,
-    expires,
-    ip: meta.ip,
-    userAgent: meta.userAgent,
-    acceptLanguage: meta.acceptLanguage,
-    provider: "webauthn",
-    passkeyVerifiedAt: verifiedAt,
-    authCredentialId: user.credentialRowId,
-    replacesSessionTokens,
-  });
+  try {
+    await createCappedSession({
+      userId: user.id,
+      tenantId: existingUser.tenantId,
+      sessionToken,
+      expires,
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+      acceptLanguage: meta.acceptLanguage,
+      provider: "webauthn",
+      passkeyVerifiedAt: verifiedAt,
+      authCredentialId: user.credentialRowId,
+      replacesSessionTokens,
+    });
+  } catch (e) {
+    // The passkey was revoked while this ceremony ran: no session.
+    if (e instanceof UserAuthRevokedError) return errorResponse(API_ERROR.AUTHENTICATION_FAILED);
+    throw e;
+  }
 
   await logAuditAsync({
     ...personalAuditBase(req, user.id),

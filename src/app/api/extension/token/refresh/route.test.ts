@@ -180,6 +180,8 @@ describe("POST /api/extension/token/refresh", () => {
     mockTransaction.mockImplementation(
       async (cb: (tx: unknown) => unknown) =>
         cb({
+          // The user's credential lock (user-auth-serialization.ts).
+          $executeRaw: vi.fn().mockResolvedValue(1),
           extensionToken: {
             updateMany: mockExtTokenUpdateMany,
             create: mockExtTokenCreate,

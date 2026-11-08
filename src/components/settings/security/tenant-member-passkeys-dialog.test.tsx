@@ -116,18 +116,29 @@ describe("TenantMemberPasskeysDialog", () => {
     expect(mockToast.error).not.toHaveBeenCalled();
   });
 
-  it("warns, rather than reporting plain success, when some cached sign-ins could not be evicted", async () => {
+  it("revokes all of the member's passkeys after confirmation and reloads the list", async () => {
     mockFetch
-      .mockResolvedValueOnce(listResponse([PASSKEY]))
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ ok: true, cacheTombstoneFailures: 1 }) })
+      .mockResolvedValueOnce(listResponse([PASSKEY, { ...PASSKEY, id: "cred-2", nickname: "Phone" }]))
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ ok: true, cacheTombstoneFailures: 0 }) })
       .mockResolvedValueOnce(listResponse([]));
     render(<TenantMemberPasskeysDialog userId="u-1" memberName="Alice" />);
     fireEvent.click(screen.getByRole("button"));
-    fireEvent.click(await screen.findByRole("button", { name: "revokePasskey" }));
-    fireEvent.click(screen.getAllByRole("button", { name: "revokePasskey" }).at(-1)!);
+    fireEvent.click(await screen.findByRole("button", { name: "revokeAllPasskeys" }));
+    expect(screen.getByText("revokeAllPasskeysTitle")).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: "revokeAllPasskeys" }).at(-1)!);
 
-    await waitFor(() => expect(mockToast.warning).toHaveBeenCalledWith("revokePasskeyCacheWarning"));
-    expect(mockToast.success).not.toHaveBeenCalled();
+    await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith("revokeAllPasskeysSuccess"));
+    expect(mockFetch).toHaveBeenCalledWith("/api/tenant/members/u-1/passkeys", { method: "DELETE" });
+    expect(await screen.findByText("memberPasskeysEmpty")).toBeInTheDocument();
+  });
+
+  it("offers no revoke-all when the member has no passkeys", async () => {
+    mockFetch.mockResolvedValueOnce(listResponse([]));
+    render(<TenantMemberPasskeysDialog userId="u-1" memberName="Alice" />);
+    fireEvent.click(screen.getByRole("button"));
+
+    expect(await screen.findByText("memberPasskeysEmpty")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "revokeAllPasskeys" })).not.toBeInTheDocument();
   });
 
   it("says so when the list cannot be loaded", async () => {

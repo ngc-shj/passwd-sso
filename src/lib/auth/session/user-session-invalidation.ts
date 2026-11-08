@@ -6,6 +6,7 @@ import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
 import { invalidateCachedSessionsBulkByDigest, hashSessionToken } from "@/lib/auth/session/session-cache";
 import { getLogger } from "@/lib/logger";
+import { lockUserAuthArtifacts } from "@/lib/auth/session/user-auth-serialization";
 
 /**
  * Options for {@link invalidateUserSessions}.
@@ -192,6 +193,10 @@ export async function revokeUserAuthArtifactsInTx(
 ): Promise<{ counts: UserAuthArtifactCounts; sessionTokens: string[] }> {
   const { tenantFilter, excludeSessionDigest = null } = options;
   const now = options.now ?? new Date();
+  // Serialized against every mint of a user-bound credential
+  // (user-auth-serialization.ts): a mint that waited on this revocation finds
+  // its proof gone; one that went first is revoked below.
+  await lockUserAuthArtifacts(tx, userId);
   // SELECT tokens before deleteMany so we can invalidate the cache after
   // the DB delete commits (R3 / S-6 sequencing).
   const targetSessions = await tx.session.findMany({
