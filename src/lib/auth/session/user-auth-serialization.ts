@@ -35,7 +35,7 @@ import { advisoryXactLock } from "@/lib/tenant-rls";
 import { getSessionTokenDigest } from "@/app/api/sessions/helpers";
 
 export async function lockUserAuthArtifacts(
-  tx: Pick<Prisma.TransactionClient, "$executeRaw">,
+  tx: Parameters<typeof advisoryXactLock>[0],
   userId: string,
 ): Promise<void> {
   await advisoryXactLock(tx, userAuthLockKey(userId));
