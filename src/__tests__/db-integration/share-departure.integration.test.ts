@@ -638,12 +638,16 @@ describe("share links across a creator's departure — real-DB integration", () 
       metadata: { revokedByTeamAdmin: true, creatorId: t.creator },
     });
 
-    // /mine offers the admin the revoke action on it.
+    // /mine offers the admin the revoke action on it, but not its access log.
     mockAuth.mockResolvedValue({ user: { id: admin } });
     const live = await share({ creatorId: t.creator, teamEntryId: t.entryId });
     const res = await listMine(new NextRequest(`http://localhost/api/share-links/mine?team=${t.teamId}`));
-    const items = ((await res.json()) as { items: { id: string; canRevoke: boolean }[] }).items;
-    expect(items.find((i) => i.id === live.id)?.canRevoke).toBe(true);
+    const items = ((await res.json()) as { items: { id: string; canRevoke: boolean; canViewAccessLogs: boolean }[] }).items;
+    expect(items.find((i) => i.id === live.id)).toMatchObject({ canRevoke: true, canViewAccessLogs: false });
+    mockAuth.mockResolvedValue({ user: { id: t.creator } });
+    const asCreator = await listMine(new NextRequest(`http://localhost/api/share-links/mine?team=${t.teamId}`));
+    const creatorItems = ((await asCreator.json()) as { items: { id: string; canViewAccessLogs: boolean }[] }).items;
+    expect(creatorItems.find((i) => i.id === live.id)?.canViewAccessLogs).toBe(true);
   });
 
   it.each([

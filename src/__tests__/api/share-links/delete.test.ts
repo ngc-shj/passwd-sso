@@ -31,6 +31,18 @@ vi.mock("@/lib/audit/audit", () => ({
   teamAuditBase: (_req: unknown, userId: string, teamId: string) => ({ scope: "TEAM", userId, teamId, ip: "127.0.0.1", userAgent: "Test", acceptLanguage: null }),
   tenantAuditBase: (_req: unknown, userId: string, tenantId: string) => ({ scope: "TENANT", userId, tenantId, ip: "127.0.0.1", userAgent: "Test", acceptLanguage: null }),
 }));
+const { mockRequireTeamPermission, TeamAuthError } = vi.hoisted(() => ({
+  mockRequireTeamPermission: vi.fn(async () => ({ role: "ADMIN" })),
+  TeamAuthError: class TeamAuthError extends Error {
+    constructor(message: string, readonly status: number) {
+      super(message);
+    }
+  },
+}));
+vi.mock("@/lib/auth/access/team-auth", () => ({
+  requireTeamPermission: mockRequireTeamPermission,
+  TeamAuthError,
+}));
 // A team link's creator is held to the team's IP restriction; allowed here.
 vi.mock("@/lib/team/team-policy", () => ({
   withTeamIpRestriction: vi.fn(async () => undefined),
@@ -43,6 +55,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
   withTenantRls: mockWithTenantRls,
 }));
 
+const ADMIN_ID = "admin-id";
 import { DELETE } from "@/app/api/share-links/[id]/route";
 
 describe("DELETE /api/share-links/[id]", () => {
@@ -229,5 +242,58 @@ describe("DELETE /api/share-links/[id]", () => {
         action: "SEND_REVOKE",
       })
     );
+  });
+
+  // A team OWNER/ADMIN revoking another member's team link (#995).
+  describe("team admin path", () => {
+    const teamShare = {
+      id: "s1",
+      shareType: "ENTRY_SHARE",
+      createdById: "creator-id",
+      revokedAt: null,
+      tenantId: "tenant-1",
+      teamPasswordEntryId: "entry-1",
+      teamPasswordEntry: { teamId: "team-1" },
+    };
+
+    it("revokes with the team-scoped compare-and-set and audits it as an admin revocation", async () => {
+      mockAuth.mockResolvedValue({ user: { id: ADMIN_ID } });
+      mockFindUnique.mockResolvedValue(teamShare);
+      mockUpdate.mockResolvedValue({ count: 1 });
+
+      const res = await DELETE(createRequest("DELETE", "http://localhost/api/share-links/s1") as never, createParams({ id: "s1" }));
+
+      expect(res.status).toBe(200);
+      expect(mockRequireTeamPermission).toHaveBeenCalledWith(ADMIN_ID, "team-1", "password:delete", expect.anything());
+      expect(mockUpdate).toHaveBeenCalledWith({
+        where: { id: "s1", teamPasswordEntryId: "entry-1", revokedAt: null },
+        data: { revokedAt: expect.any(Date) },
+      });
+      expect(mockLogAuditInTx.mock.calls[0][2]).toMatchObject({
+        metadata: { revokedByTeamAdmin: true, creatorId: "creator-id" },
+      });
+    });
+
+    it("an admin revoke that lost the race answers ALREADY_REVOKED and writes no audit", async () => {
+      mockAuth.mockResolvedValue({ user: { id: ADMIN_ID } });
+      mockFindUnique.mockResolvedValue(teamShare);
+      mockUpdate.mockResolvedValue({ count: 0 });
+
+      const res = await DELETE(createRequest("DELETE", "http://localhost/api/share-links/s1") as never, createParams({ id: "s1" }));
+
+      expect(res.status).toBe(409);
+      expect(mockLogAuditInTx).not.toHaveBeenCalled();
+    });
+
+    it("a team member without PASSWORD_DELETE gets 404 and nothing is written", async () => {
+      mockAuth.mockResolvedValue({ user: { id: ADMIN_ID } });
+      mockFindUnique.mockResolvedValue(teamShare);
+      mockRequireTeamPermission.mockRejectedValueOnce(new TeamAuthError("FORBIDDEN", 403));
+
+      const res = await DELETE(createRequest("DELETE", "http://localhost/api/share-links/s1") as never, createParams({ id: "s1" }));
+
+      expect(res.status).toBe(404);
+      expect(mockUpdate).not.toHaveBeenCalled();
+    });
   });
 });

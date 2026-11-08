@@ -16,12 +16,15 @@ import { NextRequest } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
 
-const { mockAuth, stepUp } = vi.hoisted(() => ({
+const { mockAuth, mockSendEmail, stepUp } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
+  mockSendEmail: vi.fn(),
   // When set, the step-up check refuses with this status.
   stepUp: { refuseWith: null as number | null },
 }));
 vi.mock("@/auth", () => ({ auth: (...args: unknown[]) => mockAuth(...args) }));
+// No real mail from a test run; the send is asserted instead.
+vi.mock("@/lib/email", () => ({ sendEmail: (...args: unknown[]) => mockSendEmail(...args) }));
 vi.mock("@/lib/auth/session/recent-current-auth-method", async () => {
   const { NextResponse } = await import("next/server");
   return {
@@ -180,7 +183,8 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
         target, tenantId,
       );
       expect(notices).toEqual([{ type: "SECURITY_ALERT" }]);
-    });
+    }, { timeout: 5000 });
+    expect(mockSendEmail).toHaveBeenCalledTimes(1);
   });
 
   it("a stale session's step-up refusal stops the revoke: the passkey and the sessions stay", async () => {

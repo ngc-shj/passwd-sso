@@ -43,7 +43,7 @@ import { formatDateTime } from "@/lib/format/format-datetime";
 import { formatFileSize } from "@/lib/format/format-file-size";
 import { SendDialog } from "@/components/share/send-dialog";
 import { fetchApi } from "@/lib/url-helpers";
-import { API_ERROR } from "@/lib/http/api-error-codes";
+import { revokeLeftLinkRevoked } from "@/lib/share/share-link-revoke";
 
 interface ShareLinkItem {
   id: string;
@@ -192,11 +192,7 @@ export default function ShareLinksPage() {
     setRevokingId(id);
     try {
       const res = await fetchApi(apiPath.shareLinkById(id), { method: "DELETE" });
-      // Already revoked (by its creator or another admin since the list
-      // loaded): the goal is met, so show it revoked rather than an error.
-      const alreadyRevoked =
-        !res.ok && ((await res.json().catch(() => null)) as { error?: string } | null)?.error === API_ERROR.ALREADY_REVOKED;
-      if (res.ok || alreadyRevoked) {
+      if (await revokeLeftLinkRevoked(res)) {
         toast.success(tShare("revokeSuccess"));
         // Update in-place
         setLinks((prev) =>

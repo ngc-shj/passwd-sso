@@ -169,6 +169,24 @@ describe("DELETE /api/tenant/members/[userId]/passkeys/[credentialId]", () => {
     expect(mockSentryCapture).toHaveBeenCalledTimes(1);
   });
 
+  it("a thrown cache eviction after commit still answers 200, counts every session as unevicted, and tells the member", async () => {
+    mockInvalidateCachedSessions.mockRejectedValue(new Error("redis down"));
+
+    const res = await revoke();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ cacheTombstoneFailures: 2 });
+    expect(mockCreateNotification).toHaveBeenCalled();
+  });
+
+  it("an admin deactivated since the pre-check is refused at the delete", async () => {
+    mockMemberFindMany.mockResolvedValue([
+      { userId: TARGET, role: "MEMBER", user: { email: null, locale: null } },
+    ]);
+
+    expect((await revoke()).status).toBe(403);
+    expect(mockCredentialDeleteMany).not.toHaveBeenCalled();
+  });
+
   it("revokes a passkey the member registered under another tenant, recorded as such", async () => {
     mockCredentialFindFirst.mockResolvedValue({ id: CRED, credentialId: "public-cred", tenantId: "previous-tenant" });
 
