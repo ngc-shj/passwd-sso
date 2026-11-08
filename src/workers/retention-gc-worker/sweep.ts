@@ -22,6 +22,7 @@
 import { PrismaClient } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
 import { getLogger } from "@/lib/logger";
+import { errorLogFields } from "@/lib/logger/error-fields";
 import {
   AUDIT_SCOPE,
   AUDIT_ACTION,
@@ -77,9 +78,13 @@ import {
   type BlobSweepOptions,
 } from "./sweep-blob-orphans";
 
-/** The error's code for the per-entry failure log (never its message). */
+/**
+ * The error's code for the per-entry failure log (never its message), read
+ * through errorLogFields so a raw-query failure reports the driver SQLSTATE
+ * (42501 from the prune's bypass check) rather than Prisma's P2010 wrapper.
+ */
 function errCode(err: unknown): string {
-  return (err as NodeJS.ErrnoException | undefined)?.code ?? "unknown";
+  return errorLogFields(err).code;
 }
 
 /**

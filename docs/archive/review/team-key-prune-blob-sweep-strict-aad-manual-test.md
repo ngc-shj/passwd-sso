@@ -79,6 +79,9 @@ team entry crypto paths. Tier-2: key-material deletion and AAD binding.
   keeps the `AuditAction` enum value, `AUDIT_ACTION` / `AUDIT_ACTION_VALUES`, the audit groups and
   the en/ja labels, so those rows still filter, display and verify; revert only the sweep code
   (or leave the kill switch off). The `team_member_key_prune` function is removed, if at all, by a
-  forward migration that revokes EXECUTE and drops it, with `db-grants-manifest.json`,
-  `bootstrap-rds-roles.mjs` and the `[E-RLS-SECDEF]` allowlist updated in the same change —
-  never by a manual `DROP`.
+  forward migration that revokes EXECUTE and drops it, never by a manual `DROP`. The same change
+  updates every inventory that names it — the plan's C9 list: `db-grants-manifest.json`,
+  `bootstrap-rds-roles.mjs`, the `[E-RLS-SECDEF]` allowlist, `worker-policy-manifest.json` and
+  `SECURITY_DEFINER_FUNCTION_NAMES` in `worker-policy-manifest.test.ts`,
+  `check-team-key-version-refs.mjs` with its self-test, and the retention docs and generated
+  deletion-retention matrix.

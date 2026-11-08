@@ -183,8 +183,13 @@ describe("team key prune dispatch (#1009)", () => {
     expect(metadata.rows).toBe(holders.length);
   });
 
-  it("records -1 and an entry_failed line when the prune fails", async () => {
-    const { workerPrisma } = makePrisma({ pruneError: Object.assign(new Error("denied"), { code: "42501" }) });
+  it("records -1 and logs the driver SQLSTATE, not Prisma's P2010 wrapper, when the prune fails", async () => {
+    // The shape the pg adapter produces for a $queryRaw failure.
+    const pruneError = Object.assign(new Error("raw query failed"), {
+      code: "P2010",
+      meta: { driverAdapterError: { cause: { originalCode: "42501", code: "42501" } } },
+    });
+    const { workerPrisma } = makePrisma({ pruneError });
     const counts = await sweepOnce(workerPrisma, 100, { ...BASE, teamKeyPrune: true });
     expect(counts.team_member_keys).toBe(-1);
     expect(logError).toHaveBeenCalledWith(

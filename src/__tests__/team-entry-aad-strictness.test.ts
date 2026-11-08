@@ -130,6 +130,8 @@ const KNOWN_TEAM_READERS = [
   "extension/src/background/index.ts",
   "src/lib/team/team-entry-save.ts",
   "src/components/passwords/import/password-import-importer.ts",
+  "src/lib/team/rotation-payload.ts",
+  "src/components/passwords/entry/entry-history-section.tsx",
 ];
 
 interface Tree {
