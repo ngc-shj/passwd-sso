@@ -59,3 +59,17 @@
 - Red-proofs on scratch copies / an isolated database (`tmk_redproof`, created and dropped): C1
   predicates, blob grace / marker / breaker arms / exact equality, C7 rules (each fails exactly
   its own cells), 34 T8 per-site mutants all caught.
+
+## Step 2-5 self-R-check
+
+- Security: no findings.
+- Functionality R1 (Major) — `errCode` read only the top-level code, so a prune refusal logged as
+  Prisma's `P2010`; now delegates to `errorLogFields` (`pgErrorCode` first). Dispatch test uses
+  the adapter's real nested shape (red against the old helper by construction: top-level `P2010`).
+- Testing R42 (Minor) — `rotation-payload.ts` and `entry-history-section.tsx` added to the (d')
+  floor. RT11 (Minor, accepted per plan C1 note) — local integration runs prune unreferenced keys
+  across the developer's dev DB.
+- External review follow-ups: manual-test rollback keeps the audit enum/constants/labels and
+  names every inventory a function removal must update; orphan scenario reproduces the
+  post-commit cleanup failure; blob integration `afterAll` cleans up only what `beforeAll`
+  created.
