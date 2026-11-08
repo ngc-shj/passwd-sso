@@ -19,7 +19,7 @@
   "viewCount": "{current} / {max} views",
   "revoked": "Revoked",
   "expired": "Expired",
-  "notAdmitted": "Unavailable: the creator left the team or the entry was removed",
+  "notAdmitted": "Unavailable: the creator left the team, the entry was removed, or the team's sharing policy no longer allows it",
   "revokeSuccess": "Share link revoked",
   "revokeError": "Failed to revoke",
   "sharedEntry": "Shared Entry",

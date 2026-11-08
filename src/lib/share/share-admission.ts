@@ -3,8 +3,11 @@ import type { Prisma } from "@prisma/client";
 /**
  * Whether a share link may still be served — a team-entry share only while its
  * creator holds the membership of the entry's team they held when they created
- * it, and the entry is not trashed or gone (#990). The rule lives in the SQL
- * function `public.share_creator_admitted(uuid)` (migration 20261102000000);
+ * it, the entry is not trashed or gone (#990), and the team's policy allows
+ * sharing and any share password it requires (#996); a personal entry share only
+ * while its entry is not trashed or gone (#998). The rule lives in the SQL
+ * function `public.share_creator_admitted(uuid)` (migrations 20261102000000,
+ * 20261108000000);
  * this module only calls it. Serve paths call `isShareCreatorAdmitted` beside
  * their revoked check and repeat the function call inside their view-count
  * UPDATEs (docs/archive/review/departed-member-share-links-plan.md C1, C3).

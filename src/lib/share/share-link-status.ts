@@ -1,10 +1,12 @@
 /**
  * Display status of a share link in the lists (dashboard page and share dialog).
  * Dependency-free so both client components can import it. `creatorAdmitted`
- * false (the link no longer serves because its creator left the entry's team or
- * the entry was trashed or removed, #990) is shown only on an otherwise active
- * link: revoked, used-up and expired are final, while a link not admitted can
- * serve again (the creator's membership is reactivated, the entry restored).
+ * false (the link no longer serves because its creator left the entry's team,
+ * the entry was trashed or removed, or the team's sharing policy no longer
+ * allows it: #990, #996, #998) is shown only on an otherwise active link:
+ * revoked, used-up and expired are final, while a link not admitted can serve
+ * again (the creator's membership is reactivated, the entry restored, the
+ * policy relaxed).
  */
 
 export const SHARE_LINK_STATUS = {
