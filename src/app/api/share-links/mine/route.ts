@@ -3,8 +3,8 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, handleAuthError, unauthorized, validationError } from "@/lib/http/api-response";
-import { requireTeamMember } from "@/lib/auth/access/team-auth";
-import { TEAM_ROLE, SHARE_TYPE } from "@/lib/constants";
+import { hasTeamPermission, requireTeamMember } from "@/lib/auth/access/team-auth";
+import { TEAM_PERMISSION, TEAM_ROLE, SHARE_TYPE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { isValidCursorId } from "@/lib/audit/audit-query";
@@ -35,11 +35,13 @@ async function handleGET(req: NextRequest) {
   const limit = 30;
 
   const where: Record<string, unknown> = {};
+  let canRevokeTeamLinks = false;
   if (teamId) {
     let membershipRole: string | undefined;
     try {
       const membership = await requireTeamMember(session.user.id, teamId);
       membershipRole = membership.role;
+      canRevokeTeamLinks = hasTeamPermission(membership.role, TEAM_PERMISSION.PASSWORD_DELETE);
     } catch (e) {
       return handleAuthError(e);
     }
@@ -139,7 +141,8 @@ async function handleGET(req: NextRequest) {
       teamName: s.teamPasswordEntry?.team?.name ?? null,
       hasPersonalEntry: !!s.passwordEntry,
       sharedBy: sharedByOf(s.createdById),
-      canRevoke: s.createdById === session.user.id,
+      // A team OWNER/ADMIN may revoke any of the team's links (#995).
+      canRevoke: s.createdById === session.user.id || canRevokeTeamLinks,
       creatorAdmitted: admitted.get(s.id) === true,
       isActive:
         !s.revokedAt &&

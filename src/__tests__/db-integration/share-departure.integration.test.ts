@@ -92,6 +92,7 @@ import { GET as shareContent } from "@/app/api/share-links/[id]/content/route";
 import { GET as shareDownload } from "@/app/s/[token]/download/route";
 import { POST as createShareLink, GET as listShareLinks } from "@/app/api/share-links/route";
 import { GET as listMine } from "@/app/api/share-links/mine/route";
+import { DELETE as revokeShareLink } from "@/app/api/share-links/[id]/route";
 import { PATCH as scimPatchUser, DELETE as scimDeleteUser } from "@/app/api/scim/v2/Users/[id]/route";
 import { DELETE as removeMember } from "@/app/api/teams/[teamId]/members/[memberId]/route";
 import { hashToken, generateAccessPassword, hashAccessPassword, encryptShareData } from "@/lib/crypto/crypto-server";
@@ -600,6 +601,87 @@ describe("share links across a creator's departure — real-DB integration", () 
     const asViewer = await listMine(new NextRequest(`http://localhost/api/share-links/mine?team=${t.teamId}`));
     // A VIEWER lists only their own links: neither of these.
     expect(((await asViewer.json()) as { items: unknown[] }).items).toEqual([]);
+  });
+
+  // ── A15: team OWNER/ADMIN revoke another member's link (#995) ──
+
+  async function revokeAs(actor: string, shareId: string) {
+    mockAuth.mockResolvedValue({ user: { id: actor } });
+    const res = await revokeShareLink(new NextRequest(`http://localhost/api/share-links/${shareId}`, { method: "DELETE" }), {
+      params: Promise.resolve({ id: shareId }),
+    });
+    return res.status;
+  }
+
+  it.each([
+    ["OWNER", "OWNER"],
+    ["ADMIN", "ADMIN"],
+  ] as const)("A15: a team %s revokes another member's link; it stops serving and the revocation is audited as an admin one", async (_label, role) => {
+    const t = await teamWithCreator();
+    const admin = role === "OWNER" ? t.owner : await member();
+    if (role === "ADMIN") await addTeamMember(t.teamId, admin, "ADMIN");
+    const s = await share({ creatorId: t.creator, teamEntryId: t.entryId });
+    expect(await page(s)).toBe("served");
+
+    expect(await revokeAs(admin, s.id)).toBe(200);
+
+    expect((await state(s.id)).revoked_at).not.toBeNull();
+    expect(await page(s)).toBe("error:revoked");
+    const [audit] = await sql<{ payload: string }>(
+      `SELECT payload::text AS payload FROM audit_outbox WHERE tenant_id = $1::uuid AND payload::text LIKE $2`,
+      tenantId, `%${s.id}%`,
+    );
+    expect(JSON.parse(audit.payload)).toMatchObject({
+      action: "SHARE_REVOKE",
+      userId: admin,
+      metadata: { revokedByTeamAdmin: true, creatorId: t.creator },
+    });
+
+    // /mine offers the admin the revoke action on it.
+    mockAuth.mockResolvedValue({ user: { id: admin } });
+    const live = await share({ creatorId: t.creator, teamEntryId: t.entryId });
+    const res = await listMine(new NextRequest(`http://localhost/api/share-links/mine?team=${t.teamId}`));
+    const items = ((await res.json()) as { items: { id: string; canRevoke: boolean }[] }).items;
+    expect(items.find((i) => i.id === live.id)?.canRevoke).toBe(true);
+  });
+
+  it.each([
+    ["a MEMBER of the team", "MEMBER", true],
+    ["an OWNER of another team", "OTHER_TEAM_OWNER", false],
+  ] as const)("A15: %s cannot revoke another member's team link (404, still serving)", async (_label, kind, sameTeam) => {
+    const t = await teamWithCreator();
+    const actor = await member();
+    if (sameTeam) {
+      await addTeamMember(t.teamId, actor, kind);
+    } else {
+      await team(actor);
+    }
+    const s = await share({ creatorId: t.creator, teamEntryId: t.entryId });
+
+    expect(await revokeAs(actor, s.id)).toBe(404);
+
+    expect((await state(s.id)).revoked_at).toBeNull();
+    expect(await page(s)).toBe("served");
+    if (sameTeam) {
+      mockAuth.mockResolvedValue({ user: { id: actor } });
+      const res = await listMine(new NextRequest(`http://localhost/api/share-links/mine?team=${t.teamId}`));
+      const items = ((await res.json()) as { items: { id: string; canRevoke: boolean }[] }).items;
+      expect(items.find((i) => i.id === s.id)?.canRevoke).toBe(false);
+    }
+  });
+
+  it("A15: a team OWNER cannot revoke a member's personal share or Send (404)", async () => {
+    const t = await teamWithCreator();
+    const entry = await personalEntry(t.creator);
+    const personal = await share({ creatorId: t.creator, personalEntryId: entry, version: 1 });
+    const send = await share({ creatorId: t.creator, version: 1, shareType: "TEXT" });
+
+    for (const s of [personal, send]) {
+      expect(await revokeAs(t.owner, s.id)).toBe(404);
+      expect((await state(s.id)).revoked_at).toBeNull();
+    }
+    // Control: the creator still revokes their own.
+    expect(await revokeAs(t.creator, personal.id)).toBe(200);
   });
 
   it("A8: GET /api/share-links as the creator re-admitted on a new membership reports their old link as not admitted", async () => {
