@@ -228,6 +228,17 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
       metadata: { targetUserId: target, passkeys: 2, sessions: 2, extensionTokens: 2 },
     });
     expect(JSON.parse(audits[0].payload).metadata.credentialIds).toHaveLength(2);
+    // The tenant the other passkey was registered under sees it in its own log.
+    const elsewhereAudits = await sql<{ payload: string }>(
+      `SELECT payload::text AS payload FROM audit_outbox WHERE tenant_id = $1::uuid AND payload::text LIKE '%TENANT_MEMBER_PASSKEY_REVOKE_ALL%'`,
+      otherTenantId,
+    );
+    expect(elsewhereAudits).toHaveLength(1);
+    // (Selected by the row's tenant_id; the payload does not repeat it.)
+    expect(JSON.parse(elsewhereAudits[0].payload)).toMatchObject({
+      action: "TENANT_MEMBER_PASSKEY_REVOKE_ALL",
+      metadata: { targetUserId: target, revokedFromTenantId: tenantId },
+    });
     expect(mockSendEmail).toHaveBeenCalledTimes(1);
   });
 

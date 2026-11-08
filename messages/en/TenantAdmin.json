@@ -270,7 +270,7 @@
   "revokePasskeyFailed": "Failed to revoke the passkey.",
   "revokeAllPasskeys": "Revoke all",
   "revokeAllPasskeysTitle": "Revoke all passkeys",
-  "revokeAllPasskeysDescription": "Every passkey {name} has is deleted, including ones registered in another tenant, and they are signed out everywhere, including extension and API tokens. Use this if the account may be compromised: revoking one passkey leaves any other one registered. They can sign in another way and register a new passkey.",
+  "revokeAllPasskeysDescription": "Every passkey {name} has is deleted, including ones registered in another tenant, and they are signed out everywhere, including extension and API tokens. Use this if the account may be compromised: revoking one passkey leaves any other one registered. They can sign in another way and register a new passkey. It does not remove the other ways they can sign in (for example a linked Google or SSO account) or tokens they created as an admin (SCIM, service accounts).",
   "revokeAllPasskeysSuccess": "All passkeys revoked.",
   "revokeAllPasskeysFailed": "Failed to revoke the passkeys.",
   "memberPasskeyOtherTenant": "Registered in another tenant"

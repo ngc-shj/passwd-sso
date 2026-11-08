@@ -480,6 +480,14 @@ describe("exchangeCodeForToken", () => {
       expect.objectContaining({ where: { id: "code-id", usedAt: null } }),
     );
     expect(mockTokenCreate).toHaveBeenCalledOnce();
+    // The consume runs under the user's credential lock, so a revocation that
+    // consumed the code first (it consumes pending codes) makes it lose — the
+    // CAS-loser cell below.
+    const executeRaw = mockDelegates(prisma).$executeRaw as ReturnType<typeof vi.fn>;
+    const lockCall = executeRaw.mock.calls.findIndex((c: unknown[]) => String(c[0]).includes("pg_advisory_xact_lock"));
+    expect(lockCall).toBeGreaterThanOrEqual(0);
+    expect(executeRaw.mock.calls[lockCall][1]).toBe("user-auth:user-uuid");
+    expect(executeRaw.mock.invocationCallOrder[lockCall]).toBeLessThan(mockConsume.mock.invocationCallOrder[0]);
   });
 
   it("rejects a second concurrent exchange of the same code (single-use CAS)", async () => {

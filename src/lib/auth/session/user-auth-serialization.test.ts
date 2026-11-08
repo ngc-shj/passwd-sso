@@ -12,12 +12,12 @@ function sessionTx(row: { id: string } | null) {
 }
 
 describe("lockUserAuthArtifacts", () => {
-  it("takes the transaction-scoped advisory lock keyed by the user id, the key the per-user caps use", async () => {
+  it("takes the transaction-scoped advisory lock under the user's namespaced credential key", async () => {
     const $executeRaw = vi.fn().mockResolvedValue(1);
     await lockUserAuthArtifacts({ $executeRaw } as never, USER);
 
     expect(String($executeRaw.mock.calls[0][0])).toContain("pg_advisory_xact_lock");
-    expect($executeRaw.mock.calls[0][1]).toBe(USER);
+    expect($executeRaw.mock.calls[0][1]).toBe(`user-auth:${USER}`);
   });
 });
 

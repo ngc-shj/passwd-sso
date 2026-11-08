@@ -132,6 +132,36 @@ describe("TenantMemberPasskeysDialog", () => {
     expect(await screen.findByText("memberPasskeysEmpty")).toBeInTheDocument();
   });
 
+  it("shows the revoke-all error on a refused revoke-all and reloads the list", async () => {
+    mockFetch
+      .mockResolvedValueOnce(listResponse([PASSKEY]))
+      .mockResolvedValueOnce({ ok: false, status: 404, json: async () => ({ error: "NOT_FOUND" }) })
+      .mockResolvedValueOnce(listResponse([PASSKEY]));
+    render(<TenantMemberPasskeysDialog userId="u-1" memberName="Alice" />);
+    fireEvent.click(screen.getByRole("button"));
+    fireEvent.click(await screen.findByRole("button", { name: "revokeAllPasskeys" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "revokeAllPasskeys" }).at(-1)!);
+
+    await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith("revokeAllPasskeysFailed"));
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(3));
+    expect(mockToast.success).not.toHaveBeenCalled();
+  });
+
+  it("opens the recent-session dialog when revoke-all needs a step-up, with no toast", async () => {
+    mockFetch
+      .mockResolvedValueOnce(listResponse([PASSKEY]))
+      .mockResolvedValueOnce({ ok: false, status: 403, json: async () => ({ error: "SESSION_STEP_UP_REQUIRED" }) });
+    render(<TenantMemberPasskeysDialog userId="u-1" memberName="Alice" />);
+    fireEvent.click(screen.getByRole("button"));
+    fireEvent.click(await screen.findByRole("button", { name: "revokeAllPasskeys" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "revokeAllPasskeys" }).at(-1)!);
+
+    await waitFor(() => expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument());
+    expect(mockFetch).toHaveBeenLastCalledWith("/api/tenant/members/u-1/passkeys", { method: "DELETE" });
+    expect(mockToast.success).not.toHaveBeenCalled();
+    expect(mockToast.error).not.toHaveBeenCalled();
+  });
+
   it("offers no revoke-all when the member has no passkeys", async () => {
     mockFetch.mockResolvedValueOnce(listResponse([]));
     render(<TenantMemberPasskeysDialog userId="u-1" memberName="Alice" />);

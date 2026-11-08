@@ -317,7 +317,7 @@ async function handlePOST(req: NextRequest) {
           userAgent: meta.userAgent?.slice(0, EXTENSION_BRIDGE_CODE_USER_AGENT_MAX_LENGTH) ?? null,
         },
       });
-    }, BYPASS_GRANT.EXTENSION_BRIDGE_CODE_LIFECYCLE);
+    }, BYPASS_GRANT.EXTENSION_BRIDGE_CODE_ISSUE);
   } catch (err) {
     // The session was revoked while this request waited.
     if (err instanceof UserAuthRevokedError) return unauthorized();

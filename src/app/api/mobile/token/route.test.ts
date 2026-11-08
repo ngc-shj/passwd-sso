@@ -245,7 +245,10 @@ describe("POST /api/mobile/token", () => {
     mockVerifyPkceS256.mockReturnValue(true);
     mockVerifyDpop.mockResolvedValue(happyDpop());
     // issueIosToken consumes the bridge code inside its transaction (the
-    // route's consumeProof), and issues nothing when the CAS loses.
+    // route's consumeProof, run for real here), and issues nothing when the
+    // CAS loses — that half is issueIosToken's own contract, pinned against the
+    // real function in mobile-token.test.ts ("issues nothing when its proof is
+    // gone once the credential lock is held").
     mockIssueIosToken.mockImplementation(async (params: { consumeProof: (tx: unknown) => Promise<boolean> }) => {
       const held = await params.consumeProof({ mobileBridgeCode: { updateMany: mockMobileBridgeCodeUpdateMany } });
       if (!held) throw new UserAuthRevokedError("code");

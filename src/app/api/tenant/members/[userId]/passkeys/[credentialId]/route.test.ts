@@ -200,6 +200,14 @@ describe("DELETE /api/tenant/members/[userId]/passkeys/[credentialId]", () => {
       expect.objectContaining({ where: { id: CRED, userId: TARGET } }),
     );
     expect(mockLogAuditInTx.mock.calls[0][2].metadata).toMatchObject({ registeredInTenant: false });
+    // The tenant it was registered under sees the revocation in its own log.
+    expect(mockLogAuditInTx).toHaveBeenCalledTimes(2);
+    expect(mockLogAuditInTx.mock.calls[1][1]).toBe("previous-tenant");
+    expect(mockLogAuditInTx.mock.calls[1][2]).toMatchObject({
+      action: "TENANT_MEMBER_PASSKEY_REVOKE",
+      tenantId: "previous-tenant",
+      metadata: { targetUserId: TARGET, registeredInTenant: false, revokedFromTenantId: "tenant-1" },
+    });
   });
 
   it("a step-up refusal is returned before anything is deleted", async () => {

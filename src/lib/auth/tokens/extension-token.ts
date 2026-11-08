@@ -311,8 +311,9 @@ export async function emitRevokedFamilyAudits(
  *     evicted while `families + 1` (the new family about to be created)
  *     exceeds the cap.
  *
- * Precondition: the caller has already taken `advisoryXactLock(tx, userId)`
- * in this same transaction — this function does not re-acquire it.
+ * Precondition: the caller has already taken the user's credential lock
+ * (`lockUserAuthArtifacts`) in this same transaction — this function does not
+ * re-acquire it.
  */
 export async function enforceActiveFamilyCap(
   tx: Prisma.TransactionClient,

@@ -55,6 +55,7 @@ const {
   };
 });
 
+const { mockTxExecuteRaw } = vi.hoisted(() => ({ mockTxExecuteRaw: vi.fn() }));
 vi.mock("@/lib/auth/tokens/extension-token", () => ({
   validateExtensionToken: mockValidateExtensionToken,
   revokeExtensionTokenFamily: mockRevokeExtensionTokenFamily,
@@ -177,11 +178,12 @@ describe("POST /api/extension/token/refresh", () => {
     mockExtTokenAggregate.mockResolvedValue({ _max: { lastPresenceAt: null } });
     mockExtTokenFindUnique.mockResolvedValue(null);
     // Interactive transaction: pass tx object with same mocks to the callback
+    mockTxExecuteRaw.mockResolvedValue(1);
     mockTransaction.mockImplementation(
       async (cb: (tx: unknown) => unknown) =>
         cb({
           // The user's credential lock (user-auth-serialization.ts).
-          $executeRaw: vi.fn().mockResolvedValue(1),
+          $executeRaw: mockTxExecuteRaw,
           extensionToken: {
             updateMany: mockExtTokenUpdateMany,
             create: mockExtTokenCreate,
@@ -342,6 +344,18 @@ describe("POST /api/extension/token/refresh", () => {
     });
     await expect(POST(req)).rejects.toThrow(/tenant-gone not found/);
     expect(mockExtTokenCreate).not.toHaveBeenCalled();
+  });
+
+  it("claims the old token under the user's credential lock, taken first", async () => {
+    mockValidateExtensionToken.mockResolvedValue(validTokenResult());
+
+    await POST(createRequest("POST", "http://localhost/api/extension/token/refresh", {
+      headers: { Authorization: "Bearer valid-token" },
+    }));
+
+    expect(String(mockTxExecuteRaw.mock.calls[0][0])).toContain("pg_advisory_xact_lock");
+    expect(mockTxExecuteRaw.mock.calls[0][1]).toMatch(/^user-auth:/);
+    expect(mockTxExecuteRaw.mock.invocationCallOrder[0]).toBeLessThan(mockExtTokenUpdateMany.mock.invocationCallOrder[0]);
   });
 
   it("revokes old token and creates new in transaction", async () => {

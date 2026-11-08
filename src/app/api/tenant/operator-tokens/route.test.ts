@@ -401,7 +401,7 @@ describe("POST /api/tenant/operator-tokens", () => {
         body: { name: "My operator token", expiresInDays: 30 },
       }),
     );
-    expect(mockExecuteRaw.mock.calls.map((c) => c[1])).toEqual([USER_ID, ACTOR.tenantId]);
+    expect(mockExecuteRaw.mock.calls.map((c) => c[1])).toEqual([`user-auth:${USER_ID}`, ACTOR.tenantId]);
   });
 
   it("a session revoked while the create waited for the lock: 401, no token, no audit", async () => {

@@ -454,17 +454,20 @@ export async function refreshIosToken(
   const now = params.now ? params.now() : Date.now();
   const bodyHash = sha256Hex(bodyBytes);
   const cacheKey = rotationKey(oldRow.tokenHash);
+  // The rotation this same request body already got, within the retry grace.
+  const cachedRetry = (): IssuedIosToken | null => {
+    const cached = rotationCache.get(cacheKey);
+    return cached && now - cached.issuedAt <= REFRESH_REPLAY_GRACE_MS && cached.bodyHash === bodyHash
+      ? cached.token
+      : null;
+  };
 
   // ── 1. Replay-vs-retry disambiguation ─────────────────────────
   if (oldRow.revokedAt) {
-    const cached = rotationCache.get(cacheKey);
-    if (
-      cached &&
-      now - cached.issuedAt <= REFRESH_REPLAY_GRACE_MS &&
-      cached.bodyHash === bodyHash
-    ) {
+    const retried = cachedRetry();
+    if (retried) {
       // Legitimate retry-after-network-failure: return same token, no audit.
-      return { ok: true, replayed: true, token: cached.token };
+      return { ok: true, replayed: true, token: retried };
     }
 
     // Genuine replay: revoke the family + emit forensic audit event.
@@ -567,7 +570,13 @@ export async function refreshIosToken(
       consumeProof: (tx) => isTokenRowLive(tx, oldRow.id, oldRow.userId),
     });
   } catch (e) {
-    if (e instanceof UserAuthRevokedError) return { ok: false, error: "REFRESH_TOKEN_FAMILY_EXPIRED" };
+    if (e instanceof UserAuthRevokedError) {
+      // A retry that overlapped the rotation it repeats waited on the lock and
+      // found the row that rotation revoked: answer it as step 1 would have.
+      const retried = cachedRetry();
+      if (retried) return { ok: true, replayed: true, token: retried };
+      return { ok: false, error: "REFRESH_TOKEN_FAMILY_EXPIRED" };
+    }
     throw e;
   }
 

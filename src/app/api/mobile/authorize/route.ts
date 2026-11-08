@@ -242,7 +242,7 @@ async function handleGET(req: NextRequest): Promise<Response> {
           },
         });
       },
-      BYPASS_GRANT.MOBILE_BRIDGE_CODE_LIFECYCLE,
+      BYPASS_GRANT.MOBILE_BRIDGE_CODE_ISSUE,
     );
   } catch (err) {
     // The session was revoked while this request waited.

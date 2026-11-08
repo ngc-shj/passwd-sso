@@ -18,6 +18,7 @@ import { passkeyRevokedByAdminEmail, type PasskeyRevokeExtent } from "@/lib/emai
 import { resolveUserLocale } from "@/lib/locale";
 import { getLogger } from "@/lib/logger";
 import { errorLogFields } from "@/lib/logger/error-fields";
+import { AUDIT_CREDENTIAL_ID_MAX_LENGTH } from "@/lib/validations/common.server";
 
 /** One passkey, or every passkey the member has. */
 export type MemberPasskeyRevokeScope = { credentialId: string } | { all: true };
@@ -51,6 +52,13 @@ export async function refuseMemberPasskeyTarget(
   if (!canRevokeMemberPasskey(actor.role, targetMember.role)) return forbidden();
   return null;
 }
+
+// The revoke-all audit row names at most this many public credential ids, each
+// cut to AUDIT_CREDENTIAL_ID_MAX_LENGTH, and counts the rest: a member can hold
+// any number of passkeys with ids up to ~1 KB each, and metadata past
+// METADATA_MAX_BYTES is replaced whole — targetUserId and every count with it —
+// on the record of the containment action itself. 10 × 512 stays well inside.
+const REVOKE_ALL_AUDIT_MAX_CREDENTIAL_IDS = 10;
 
 const REVOKE_OUTCOME = {
   NOT_FOUND: "not_found",
@@ -107,32 +115,44 @@ export async function revokeMemberPasskeys(
 
     const { counts, sessionTokens } = await revokeUserAuthArtifactsInTx(tx, targetUserId, { tenantFilter: {} });
 
-    if (extent === "one") {
-      const [credential] = credentials;
-      await logAuditInTx(tx, tenantId, {
-        ...tenantAuditBase(req, actorUserId, tenantId),
-        action: AUDIT_ACTION.TENANT_MEMBER_PASSKEY_REVOKE,
-        targetType: AUDIT_TARGET_TYPE.WEBAUTHN_CREDENTIAL,
-        targetId: credential.id,
-        metadata: {
-          targetUserId,
-          credentialId: credential.credentialId,
-          registeredInTenant: credential.tenantId === tenantId,
-          ...counts,
-        },
-      });
-    } else {
-      await logAuditInTx(tx, tenantId, {
-        ...tenantAuditBase(req, actorUserId, tenantId),
-        action: AUDIT_ACTION.TENANT_MEMBER_PASSKEY_REVOKE_ALL,
-        targetType: "User",
-        targetId: targetUserId,
-        metadata: {
-          targetUserId,
-          passkeys: count,
-          credentialIds: credentials.map((c) => c.credentialId),
-          ...counts,
-        },
+    const [first] = credentials;
+    const audit =
+      extent === "one"
+        ? {
+            action: AUDIT_ACTION.TENANT_MEMBER_PASSKEY_REVOKE,
+            targetType: AUDIT_TARGET_TYPE.WEBAUTHN_CREDENTIAL,
+            targetId: first.id,
+            metadata: {
+              targetUserId,
+              credentialId: first.credentialId,
+              registeredInTenant: first.tenantId === tenantId,
+              ...counts,
+            },
+          }
+        : {
+            action: AUDIT_ACTION.TENANT_MEMBER_PASSKEY_REVOKE_ALL,
+            targetType: "User",
+            targetId: targetUserId,
+            metadata: {
+              targetUserId,
+              passkeys: count,
+              credentialIds: credentials
+                .slice(0, REVOKE_ALL_AUDIT_MAX_CREDENTIAL_IDS)
+                .map((c) => c.credentialId.slice(0, AUDIT_CREDENTIAL_ID_MAX_LENGTH)),
+              credentialIdsOmitted: Math.max(0, credentials.length - REVOKE_ALL_AUDIT_MAX_CREDENTIAL_IDS),
+              ...counts,
+            },
+          };
+    await logAuditInTx(tx, tenantId, { ...tenantAuditBase(req, actorUserId, tenantId), ...audit });
+    // A passkey registered under another tenant signs the member in there too,
+    // so that tenant's admins see its revocation in their own log, with the
+    // tenant it was revoked from.
+    const otherTenants = [...new Set(credentials.map((c) => c.tenantId))].filter((t) => t !== tenantId);
+    for (const other of otherTenants) {
+      await logAuditInTx(tx, other, {
+        ...tenantAuditBase(req, actorUserId, other),
+        ...audit,
+        metadata: { ...audit.metadata, revokedFromTenantId: tenantId },
       });
     }
     return { counts, sessionTokens, target: targetRow.user };

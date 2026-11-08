@@ -24,15 +24,23 @@
  *      so an invalid session answers 401 before the route's `auth()` runs; and
  *      that list holds nothing else.
  *   4. The proxy's session cache never authenticates a request on its own.
- *      The proxy decides `api-session-required` routes and the /dashboard and
- *      /admin pages on a Redis-cached view of the session, which a revocation
- *      evicts by tombstone; a tombstone that fails to land leaves a revoked
- *      session passing the proxy until the entry's TTL. That is harmless only
- *      while whatever runs next re-reads the session row: so every
- *      `api-session-required` route file reads the session (Auth.js `auth()`
- *      reads the database on every call), or is named in BEARER_ONLY_ROUTES
- *      with the token it authenticates instead, and each layout in
- *      PAGE_SESSION_LAYOUTS reads it.
+ *      The proxy decides `api-session-required` routes and the session-gated
+ *      pages on a Redis-cached view of the session, which a revocation evicts
+ *      by tombstone; a tombstone that fails to land leaves a revoked session
+ *      passing the proxy until the entry's TTL. That is harmless only while
+ *      whatever runs next re-reads the session row, through a primitive in
+ *      DB_READER_EXPORTS (Auth.js `auth()` reads the database on every call;
+ *      the cookie-only helpers do not count). So:
+ *      - every `api-session-required` route file reads it, or is named in
+ *        BEARER_ONLY_ROUTES with the token it authenticates instead;
+ *      - the page prefixes are read from the `if` that guards the proxy's
+ *        getSessionInfo call in src/lib/proxy/page-route.ts; each has a
+ *        layout that reads it, and every server-component segment file under
+ *        it (page, layout, template, default, loading, not-found) reads it
+ *        itself or imports only from PAGE_NON_READER_IMPORTS — a client
+ *        navigation re-renders the page without its layout, so a page that
+ *        reads data must read the session too. Floor: an imported component
+ *        is not followed.
  *
  * A route file is a session reader when it references, by import binding, one
  * of READER_EXPORTS (the module that defines it, not the spelling). A name is
@@ -123,13 +131,25 @@ const BEARER_ONLY_ROUTES = new Map([
   ],
 ]);
 
-// The layouts under the page prefixes the proxy session-gates (page-route.ts:
-// /dashboard and /admin). Every page under them renders inside the layout, so
-// its `auth()` decides before any page does (rule 4).
-const PAGE_SESSION_LAYOUTS = [
-  "src/app/[locale]/dashboard/layout.tsx",
-  "src/app/[locale]/admin/layout.tsx",
-];
+// Rule 4's readers: the primitives that read the session row from the
+// database. The cookie-only helpers of READER_EXPORTS name a session without
+// checking it is still there.
+const DB_READER_EXPORTS = new Map([
+  ["src/auth", ["auth"]],
+  ["src/lib/auth/session/check-auth", ["checkAuth"]],
+  ["src/lib/auth/session/auth-or-token", ["authOrToken"]],
+  ["src/lib/auth/session/step-up", ["requireRecentSession"]],
+  ["src/lib/auth/session/recent-current-auth-method", ["requireRecentCurrentAuthMethod"]],
+]);
+
+// Where the proxy session-gates pages, and the segment files a request there
+// renders (rule 4).
+const PAGE_ROUTE_PATH = "src/lib/proxy/page-route.ts";
+const PAGE_APP_ROOT = "src/app/[locale]";
+const PAGE_SEGMENT_FILE_RE = /\/(page|layout|template|default|loading|not-found)\.tsx?$/;
+// What a server-component segment file that reads no session may import: it
+// can redirect, translate, or hand off to a client component, and nothing else.
+const PAGE_NON_READER_IMPORTS = [/^next(\/|$)/, /^next-intl(\/|$)/, /^@\/i18n\//, /^@\/components\//, /^react$/, /^lucide-react$/];
 
 const failures = [];
 const fail = (message) => failures.push(message);
@@ -216,9 +236,9 @@ function importsOf(sf, rel) {
   return out;
 }
 
-function isReaderExport(from, name) {
-  if (!READER_EXPORTS.has(from)) return false;
-  const names = READER_EXPORTS.get(from);
+function isReaderExport(from, name, exports = READER_EXPORTS) {
+  if (!exports.has(from)) return false;
+  const names = exports.get(from);
   if (names === null) return name !== "default";
   return names.some((n) => (n instanceof RegExp ? n.test(name) : n === name));
 }
@@ -252,7 +272,7 @@ function isNonReference(id) {
 }
 
 /** The reader references in the file: `{ line, what }` for each. */
-function readerReferences(file) {
+function readerReferences(file, exports = READER_EXPORTS) {
   const { sf, rel } = file;
   const refs = [];
   for (const id of sf.getDescendantsOfKind(SyntaxKind.Identifier)) {
@@ -263,13 +283,13 @@ function readerReferences(file) {
       // A namespace import reads through its member: `ns.auth()`.
       const parent = id.getParent();
       if (parent.getKind() === SyntaxKind.PropertyAccessExpression && parent.getExpression() === id) {
-        if (isReaderExport(imp.from, parent.getName())) refs.push({ line: id.getStartLineNumber(), what: `${imp.local}.${parent.getName()}` });
-      } else if (READER_EXPORTS.has(imp.from)) {
+        if (isReaderExport(imp.from, parent.getName(), exports)) refs.push({ line: id.getStartLineNumber(), what: `${imp.local}.${parent.getName()}` });
+      } else if (exports.has(imp.from)) {
         refs.push({ line: id.getStartLineNumber(), what: `namespace ${imp.local} of ${imp.from} used as a value` });
       }
       continue;
     }
-    if (isReaderExport(imp.from, imp.imported)) refs.push({ line: id.getStartLineNumber(), what: `${imp.imported} from ${imp.from}` });
+    if (isReaderExport(imp.from, imp.imported, exports)) refs.push({ line: id.getStartLineNumber(), what: `${imp.imported} from ${imp.from}` });
   }
   for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
     const callee = call.getExpression();
@@ -282,7 +302,7 @@ function readerReferences(file) {
       continue;
     }
     const from = resolveSpecifier(rel, arg.getLiteralText());
-    if (from && READER_EXPORTS.has(from)) refs.push({ line: call.getStartLineNumber(), what: `dynamic import of ${from}` });
+    if (from && exports.has(from)) refs.push({ line: call.getStartLineNumber(), what: `dynamic import of ${from}` });
   }
   return refs;
 }
@@ -343,9 +363,9 @@ for (const rel of routeFiles) {
     if (BEARER_ONLY_ROUTES.has(rel)) {
       if (isReader) fail(`${rel}  reads the session but is named in BEARER_ONLY_ROUTES: remove the entry`);
       else usedBearerOnly.add(rel);
-    } else if (!isReader) {
+    } else if (readerReferences(file, DB_READER_EXPORTS).length === 0) {
       fail(
-        `${rel}  is api-session-required but reads no session itself: the proxy passed it on a cached view of the session, which a failed revocation tombstone leaves stale; read it (auth() reads the database) or name the bearer token it authenticates in BEARER_ONLY_ROUTES`,
+        `${rel}  is api-session-required but reads no session row itself: the proxy passed it on a cached view of the session, which a failed revocation tombstone leaves stale; read it (auth() reads the database) or name the bearer token it authenticates in BEARER_ONLY_ROUTES`,
       );
     }
   }
@@ -396,17 +416,66 @@ for (const [rel, reason] of BEARER_ONLY_ROUTES) {
   }
 }
 
-for (const rel of PAGE_SESSION_LAYOUTS) {
-  const abs = join(ROOT, rel);
-  if (!existsSync(abs)) {
-    fail(`${rel}  (PAGE_SESSION_LAYOUTS) not found: the pages the proxy session-gates must render inside a layout that reads the session`);
-    continue;
+/** The path prefixes in the `if` condition that guards page-route.ts's getSessionInfo call. */
+function sessionGatedPagePrefixes() {
+  const abs = join(ROOT, PAGE_ROUTE_PATH);
+  if (!existsSync(abs)) fatal(`${PAGE_ROUTE_PATH} not found under ${ROOT}.`);
+  const sf = project.createSourceFile(PAGE_ROUTE_PATH, readFileSync(abs, "utf8"), { overwrite: true });
+  const call = sf
+    .getDescendantsOfKind(SyntaxKind.CallExpression)
+    .find((c) => c.getExpression().getText() === "getSessionInfo");
+  const guard = call?.getFirstAncestorByKind(SyntaxKind.IfStatement);
+  if (!guard) fatal(`${PAGE_ROUTE_PATH}: no getSessionInfo call inside an if statement — rule 4 cannot read the gated page prefixes.`);
+  const prefixes = guard
+    .getExpression()
+    .getDescendantsOfKind(SyntaxKind.CallExpression)
+    .filter((c) => c.getExpression().getKind() === SyntaxKind.PropertyAccessExpression && c.getExpression().getName() === "startsWith")
+    .map((c) => unwrapExpression(c.getArguments()[0]))
+    .filter((a) => a?.getKind() === SyntaxKind.StringLiteral)
+    .map((a) => a.getLiteralText());
+  if (prefixes.length === 0) fatal(`${PAGE_ROUTE_PATH}: the getSessionInfo guard names no literal startsWith prefix.`);
+  return prefixes;
+}
+
+const gatedPrefixes = sessionGatedPagePrefixes();
+let pageSegmentFiles = 0;
+for (const prefix of gatedPrefixes) {
+  const dir = `${PAGE_APP_ROOT}${prefix}`;
+  const layout = `${dir}/layout.tsx`;
+  if (!existsSync(join(ROOT, layout))) {
+    fail(`${layout}  not found: the pages under ${prefix} (session-gated in ${PAGE_ROUTE_PATH}) must render inside a layout that reads the session`);
   }
-  const sf = project.createSourceFile(rel, readFileSync(abs, "utf8"), { overwrite: true });
-  let bindings;
-  const file = { sf, rel, imports: importsOf(sf, rel), bindingsFor: () => (bindings ??= bindingIndex(sf)) };
-  if (readerReferences(file).length === 0) {
-    fail(`${rel}  (PAGE_SESSION_LAYOUTS) reads no session: its pages would render on the proxy's cached view of the session alone`);
+  const segments = walkSourceFiles(join(ROOT, dir))
+    .map((abs) => relative(ROOT, abs).split("\\").join("/"))
+    .filter((rel) => PAGE_SEGMENT_FILE_RE.test(rel))
+    .sort();
+  for (const rel of segments) {
+    const text = readFileSync(join(ROOT, rel), "utf8");
+    const sf = project.createSourceFile(rel, text, { overwrite: true });
+    const directive = sf.getStatements()[0];
+    const isClient =
+      directive?.getKind() === SyntaxKind.ExpressionStatement &&
+      unwrapExpression(directive.getExpression())?.getKind() === SyntaxKind.StringLiteral &&
+      directive.getExpression().getLiteralText() === "use client";
+    if (isClient) continue;
+    pageSegmentFiles += 1;
+    let bindings;
+    const file = { sf, rel, imports: importsOf(sf, rel), bindingsFor: () => (bindings ??= bindingIndex(sf)) };
+    if (readerReferences(file, DB_READER_EXPORTS).length > 0) continue;
+    if (rel === layout) {
+      fail(`${rel}  reads no session: the pages under ${prefix} would render on the proxy's cached view of the session alone`);
+      continue;
+    }
+    const outside = sf
+      .getImportDeclarations()
+      .filter((d) => !d.isTypeOnly())
+      .map((d) => d.getModuleSpecifierValue())
+      .filter((spec) => !PAGE_NON_READER_IMPORTS.some((re) => re.test(spec)));
+    if (outside.length > 0) {
+      fail(
+        `${rel}  is a server component under the session-gated ${prefix} that reads no session row but imports ${outside.join(", ")}: a client navigation renders it on the proxy's cached view of the session alone — read the session (auth()) or keep it to redirects and client components`,
+      );
+    }
   }
 }
 
@@ -424,7 +493,7 @@ if (failures.length > 0) {
 }
 
 console.log(
-  `check-session-passkey-readers: routes=${routeFiles.length} readers=${readerFiles} api-default-readers=${apiDefaultReaders.size} own-gate=${ownGateMethods} exemptions=${usedExemptions.size} session-required=${sessionRequiredRoutes} bearer-only=${usedBearerOnly.size} layouts=${PAGE_SESSION_LAYOUTS.length}`,
+  `check-session-passkey-readers: routes=${routeFiles.length} readers=${readerFiles} api-default-readers=${apiDefaultReaders.size} own-gate=${ownGateMethods} exemptions=${usedExemptions.size} session-required=${sessionRequiredRoutes} bearer-only=${usedBearerOnly.size} gated-page-prefixes=${gatedPrefixes.length} page-segments=${pageSegmentFiles}`,
 );
 console.log(
   "OK (every session reader is gated by the proxy, listed, exempt with a reason, or adjudicates itself; every session-required route and gated layout re-reads the session)",

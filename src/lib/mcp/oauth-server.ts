@@ -130,7 +130,7 @@ export async function createAuthorizationCode(
         expiresAt,
       },
     });
-  }, BYPASS_GRANT.MCP_AUTH_CODE_LIFECYCLE);
+  }, BYPASS_GRANT.MCP_AUTH_CODE_ISSUE);
 
   return { code: plainCode, expiresAt };
 }
@@ -603,6 +603,15 @@ export async function exchangeRefreshToken(
       });
 
       if (claim.count === 0) {
+        // Revoked (not rotated) while this exchange waited for the lock: a
+        // revocation of the user's credentials, not a client race — answer it
+        // as the revoked token it now is, without family revocation or a
+        // concurrent-rotation audit.
+        const current = await tx.mcpRefreshToken.findUnique({
+          where: { id: rt.id },
+          select: { rotatedAt: true, revokedAt: true },
+        });
+        if (current && current.revokedAt && !current.rotatedAt) return { type: "revoked" as const };
         // Race lost — another transaction won the CAS between our findUnique and updateMany.
         return {
           type: "race_lost" as const,

@@ -121,6 +121,37 @@ const BEARER_ONLY = [
 ];
 const DASHBOARD_LAYOUT = "src/app/[locale]/dashboard/layout.tsx";
 const ADMIN_LAYOUT = "src/app/[locale]/admin/layout.tsx";
+const PAGE_ROUTE = "src/lib/proxy/page-route.ts";
+const pageRoute = (cond) => `import { getSessionInfo } from "./auth-gate";
+export async function handlePage(request: Request, pathWithoutLocale: string) {
+  if (${cond}) {
+    const session = await getSessionInfo(request);
+    if (!session.valid) return redirect();
+  }
+}
+`;
+const BASE_PAGE_ROUTE = pageRoute(`pathWithoutLocale.startsWith("/dashboard") || pathWithoutLocale.startsWith("/admin")`);
+const REDIRECT_PAGE = `import { redirect } from "next/navigation";
+export default async function Page() {
+  redirect("/x");
+}
+`;
+const WRAPPER_PAGE = `import { Thing } from "@/components/thing";
+export default function Page() {
+  return <Thing />;
+}
+`;
+const DATA_PAGE = `import { prisma } from "@/lib/prisma";
+export default async function Page() {
+  const rows = await prisma.passwordEntry.findMany();
+  return rows.length;
+}
+`;
+const COOKIE_ONLY_ROUTE = `import { readSessionCookie } from "@/lib/auth/session/session-cookie";
+export async function GET(req: Request) {
+  return Response.json(readSessionCookie(req.headers.get("cookie")));
+}
+`;
 
 const proxyList = (entries) => `export interface SessionGateEntry { method: string; path: string; reason: string }
 export const API_DEFAULT_SESSION_READERS: readonly SessionGateEntry[] = [
@@ -141,6 +172,10 @@ const BASE_FILES = {
   ...Object.fromEntries(BEARER_ONLY.map((rel) => [rel, BEARER_ROUTE])),
   [DASHBOARD_LAYOUT]: LAYOUT,
   [ADMIN_LAYOUT]: LAYOUT,
+  [PAGE_ROUTE]: BASE_PAGE_ROUTE,
+  "src/app/[locale]/dashboard/settings/page.tsx": REDIRECT_PAGE,
+  "src/app/[locale]/admin/export/page.tsx": WRAPPER_PAGE,
+  "src/app/[locale]/admin/teams/page.tsx": LAYOUT,
   [PROXY_LIST]: proxyList(BASE_LIST),
 };
 
@@ -219,7 +254,7 @@ describe.concurrent("check-session-passkey-readers.mjs", { timeout: 60_000 }, ()
     // openapi.json is the early-return reader that adjudicates itself; its
     // FAIL counterpart (the call removed) is under Rule 1.
     expect(out).toMatch(
-      /routes=11 readers=6 api-default-readers=1 own-gate=1 exemptions=2 session-required=5 bearer-only=3 layouts=2/,
+      /routes=11 readers=6 api-default-readers=1 own-gate=1 exemptions=2 session-required=5 bearer-only=3 gated-page-prefixes=2 page-segments=5/,
     );
   });
 
@@ -227,7 +262,7 @@ describe.concurrent("check-session-passkey-readers.mjs", { timeout: 60_000 }, ()
   it("FAILS for an api-session-required route that reads no session and is not bearer-only", async () => {
     await expectFail(
       { manifest: { "src/app/api/health/route.ts": route("api-session-required", { GET: "gated" }) } },
-      /health\/route\.ts {2}is api-session-required but reads no session itself/,
+      /health\/route\.ts {2}is api-session-required but reads no session row itself/,
     );
   });
 
@@ -242,15 +277,51 @@ describe.concurrent("check-session-passkey-readers.mjs", { timeout: 60_000 }, ()
     await expectFail({ files: { [BEARER_ONLY[1]]: null }, manifest: { [BEARER_ONLY[1]]: null } }, /BEARER_ONLY_ROUTES .*token\/refresh.*: stale/);
   });
 
-  it("FAILS when a session-gated layout reads no session", async () => {
+  it("FAILS for an api-session-required route that reads only the session cookie, not the row", async () => {
     await expectFail(
-      { files: { [ADMIN_LAYOUT]: "export default function Layout({ children }: { children: unknown }) { return children; }\n" } },
-      /admin\/layout\.tsx {2}\(PAGE_SESSION_LAYOUTS\) reads no session/,
+      {
+        files: { "src/app/api/health/route.ts": COOKIE_ONLY_ROUTE },
+        manifest: { "src/app/api/health/route.ts": route("api-session-required", { GET: "gated" }) },
+      },
+      /health\/route\.ts {2}is api-session-required but reads no session row itself/,
     );
   });
 
-  it("FAILS when a session-gated layout is missing", async () => {
-    await expectFail({ files: { [DASHBOARD_LAYOUT]: null } }, /dashboard\/layout\.tsx {2}\(PAGE_SESSION_LAYOUTS\) not found/);
+  it("FAILS when a session-gated layout reads no session", async () => {
+    await expectFail(
+      { files: { [ADMIN_LAYOUT]: "export default function Layout({ children }: { children: unknown }) { return children; }\n" } },
+      /admin\/layout\.tsx {2}reads no session/,
+    );
+  });
+
+  it("FAILS when a session-gated prefix has no layout", async () => {
+    await expectFail({ files: { [DASHBOARD_LAYOUT]: null } }, /dashboard\/layout\.tsx {2}not found/);
+  });
+
+  it("FAILS when page-route.ts gates a new prefix that has no layout (the prefixes are read, not listed)", async () => {
+    await expectFail(
+      { files: { [PAGE_ROUTE]: pageRoute(`pathWithoutLocale.startsWith("/dashboard") || pathWithoutLocale.startsWith("/admin") || pathWithoutLocale.startsWith("/vault")`) } },
+      /vault\/layout\.tsx {2}not found/,
+    );
+  });
+
+  it("FAILS closed when page-route.ts's getSessionInfo guard cannot be read", async () => {
+    await expectFail({ files: { [PAGE_ROUTE]: "export const nothing = 1;\n" } }, /no getSessionInfo call inside an if statement/);
+  });
+
+  it("FAILS for a server page under a gated prefix that reads data without reading the session", async () => {
+    await expectFail(
+      { files: { "src/app/[locale]/admin/export/page.tsx": DATA_PAGE } },
+      /admin\/export\/page\.tsx {2}is a server component under the session-gated \/admin that reads no session row but imports @\/lib\/prisma/,
+    );
+  });
+
+  it("passes the same data page once it is a client component", async () => {
+    await expectPass({ files: { "src/app/[locale]/admin/export/page.tsx": `"use client";\n${DATA_PAGE}` } });
+  });
+
+  it("passes the same data page once it reads the session", async () => {
+    await expectPass({ files: { "src/app/[locale]/admin/export/page.tsx": `${AUTH_IMPORT}\n${DATA_PAGE.replace("const rows", "await auth();\n  const rows")}` } });
   });
 
   // ─── Inputs ───

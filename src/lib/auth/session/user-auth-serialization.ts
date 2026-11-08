@@ -2,7 +2,9 @@
  * Serializes revoking a user's credentials against minting new ones.
  *
  * `revokeUserAuthArtifactsInTx` (every revocation: vault reset, member removal,
- * SCIM deactivation, the admin passkey revoke) and every path that mints a
+ * SCIM deactivation, the admin passkey revoke), the bootstrap→SSO tenant
+ * migration in src/auth.ts (it revokes the user's tokens itself) and every path
+ * that mints a
  * user-bound credential — a session, an extension / iOS / autofill / MCP
  * token, an API key, an operator token, a delegation, a single-use code —
  * take the same transaction-scoped lock on the user. A mint therefore runs
@@ -16,10 +18,16 @@
  *     unrevoked (`isTokenRowLive`, or the refresh's own compare-and-set);
  *   - a code exchange: the code is consumed in the same transaction.
  *
- * The lock key is the user id, the key the existing per-user caps already use
- * (session cap, extension/iOS family caps, API keys, bridge codes), so every
- * per-user lock in the codebase is one lock: no ordering between two of them
- * can deadlock. Take it first in the transaction, before any row lock.
+ * The per-user credential caps (session cap, extension/iOS family caps, API
+ * keys, bridge codes) serialize on this same lock, so a cap and a revocation
+ * are one lock and no ordering between them can deadlock. Take it first in the
+ * transaction, before any row lock.
+ *
+ * Its key is namespaced (`user-auth:<userId>`), apart from the bare-user-id
+ * lock that vault data paths hold (key rotation for up to its 2-minute
+ * transaction, attachments, file sends): a revocation must not queue behind a
+ * key rotation and time out — its callers on SCIM deactivation and team
+ * removal carry on when it fails.
  */
 import type { NextRequest } from "next/server";
 import type { Prisma } from "@prisma/client";
@@ -30,7 +38,12 @@ export async function lockUserAuthArtifacts(
   tx: Pick<Prisma.TransactionClient, "$executeRaw">,
   userId: string,
 ): Promise<void> {
-  await advisoryXactLock(tx, userId);
+  await advisoryXactLock(tx, userAuthLockKey(userId));
+}
+
+/** The credential lock's key; namespaced apart from the vault-data lock on the bare user id. */
+export function userAuthLockKey(userId: string): string {
+  return `user-auth:${userId}`;
 }
 
 /**

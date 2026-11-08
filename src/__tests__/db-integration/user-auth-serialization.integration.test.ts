@@ -20,8 +20,22 @@ import type { Prisma } from "@prisma/client";
 import { createTestContext, Deferred, setBypassRlsGucs, type TestContext } from "./helpers";
 import { createRaceHelpers } from "./race-helpers";
 
+const { mockAuth } = vi.hoisted(() => ({ mockAuth: vi.fn() }));
+
 // No real mail from a sign-in's new-device check.
 vi.mock("@/lib/email", () => ({ sendEmail: vi.fn() }));
+// The route-level cells: the session is the request's real row (re-read by
+// isSessionRowLive); only Auth.js's own read and the step-up are stood in for.
+vi.mock("@/auth", () => ({ auth: (...args: unknown[]) => mockAuth(...args) }));
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: async () => null,
+}));
+vi.mock("@/lib/security/rate-limit", () => ({
+  createRateLimiter: () => ({
+    check: async () => ({ allowed: true, retryAfterMs: 0 }),
+    clear: () => {},
+  }),
+}));
 
 import { revokeUserAuthArtifactsInTx } from "@/lib/auth/session/user-session-invalidation";
 import {
@@ -34,6 +48,9 @@ import { hashSessionToken } from "@/lib/auth/session/session-cache";
 import { configuredSessionCookieName } from "@/lib/auth/session/cookie-name";
 import { issueExtensionToken } from "@/lib/auth/tokens/extension-token";
 import { createAuthorizationCode } from "@/lib/mcp/oauth-server";
+import { invalidateUserSessions } from "@/lib/auth/session/user-session-invalidation";
+import { POST as createApiKey } from "@/app/api/api-keys/route";
+import { POST as createOperatorToken } from "@/app/api/tenant/operator-tokens/route";
 
 describe("credential revocation vs. mint — real-DB integration", () => {
   let ctx: TestContext;
@@ -99,12 +116,20 @@ describe("credential revocation vs. mint — real-DB integration", () => {
     };
   }
 
-  /** Start `mint`, see it wait on the held transaction, commit, and return how it settled. */
+  /**
+   * Start `mint`, see it wait on the held transaction's credential lock (not on
+   * some row lock), commit, and return how it settled. The holder commits even
+   * when the wait fails, so a failing cell leaves no open transaction behind.
+   */
   async function mintBehind<T>(held: Awaited<ReturnType<typeof holdRevocation>>, mint: () => Promise<T>) {
     const pending = mint();
     pending.catch(() => {});
-    await race.waitForBackendBlockedBy(held.pid);
-    await held.commit();
+    try {
+      const parked = await race.waitForBackendBlockedBy(held.pid);
+      expect(await race.waitingQueryOf(parked)).toContain("pg_advisory_xact_lock");
+    } finally {
+      await held.commit();
+    }
     return pending;
   }
 
@@ -181,7 +206,8 @@ describe("credential revocation vs. mint — real-DB integration", () => {
       tenantId,
       scope: "passwords:read",
       cnfJkt: "j".repeat(43),
-      // The exchange route's compare-and-set.
+      // A copy of the exchange route's compare-and-set (its own route test pins
+      // the real one); here it is the code consumption the revocation races.
       consumeProof: async (tx) =>
         (await tx.extensionBridgeCode.updateMany({ where: { id: codeId, usedAt: null }, data: { usedAt: new Date() } }))
           .count === 1,
@@ -267,5 +293,89 @@ describe("credential revocation vs. mint — real-DB integration", () => {
 
     await mintBehind(held, consent(clientId, req));
     expect(await authorizationCodeCount()).toBe(1);
+  });
+
+  // ─── Route-level session-authenticated mints ────────────────
+  // The lock and the session re-read run on the routes' own clients (the
+  // ALS-proxied prisma inside withUserTenantRls, a withTenantRls tx): the
+  // control proves the lock lands in the transaction that creates — it waits,
+  // then creates — and that the caller's session row is visible there.
+
+  async function postAs(url: string, body: unknown, req: NextRequest) {
+    mockAuth.mockResolvedValue({ user: { id: userId, email: "u@example.com" } });
+    return new NextRequest(url, {
+      method: "POST",
+      headers: { cookie: req.headers.get("cookie") ?? "", "content-type": "application/json", origin: "http://localhost" },
+      body: JSON.stringify(body),
+    });
+  }
+
+  async function apiKeyCount(): Promise<number> {
+    const [{ n }] = await sql<{ n: number }>(`SELECT count(*)::int AS n FROM api_keys WHERE user_id = $1::uuid`, userId);
+    return n;
+  }
+
+  const apiKeyBody = () => ({
+    name: "k",
+    scope: ["passwords:read"],
+    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+  });
+
+  it("API key creation parked behind a revocation of its session: 401, no key", async () => {
+    const req = await postAs("http://localhost/api/api-keys", apiKeyBody(), await sessionCookieRequest());
+    const held = await holdRevocation({ revoke: true });
+
+    const res = await mintBehind(held, () => createApiKey(req));
+    expect(res.status).toBe(401);
+    expect(await apiKeyCount()).toBe(0);
+  });
+
+  it("control: the same API key creation parked behind the lock alone creates the key", async () => {
+    const req = await postAs("http://localhost/api/api-keys", apiKeyBody(), await sessionCookieRequest());
+    const held = await holdRevocation({ revoke: false });
+
+    const res = await mintBehind(held, () => createApiKey(req));
+    expect(res.status).toBe(201);
+    expect(await apiKeyCount()).toBe(1);
+  });
+
+  async function operatorTokenCount(): Promise<number> {
+    const [{ n }] = await sql<{ n: number }>(`SELECT count(*)::int AS n FROM operator_tokens WHERE subject_user_id = $1::uuid`, userId);
+    return n;
+  }
+
+  it("operator token creation parked behind a revocation of its session: 401, no token", async () => {
+    const req = await postAs("http://localhost/api/tenant/operator-tokens", { name: "op", expiresInDays: 30 }, await sessionCookieRequest());
+    const held = await holdRevocation({ revoke: true });
+
+    const res = await mintBehind(held, () => createOperatorToken(req));
+    expect(res.status).toBe(401);
+    expect(await operatorTokenCount()).toBe(0);
+  });
+
+  it("control: the same operator token creation parked behind the lock alone creates the token", async () => {
+    const req = await postAs("http://localhost/api/tenant/operator-tokens", { name: "op", expiresInDays: 30 }, await sessionCookieRequest());
+    const held = await holdRevocation({ revoke: false });
+
+    const res = await mintBehind(held, () => createOperatorToken(req));
+    expect(res.status).toBe(201);
+    expect(await operatorTokenCount()).toBe(1);
+  });
+
+  // ─── A revocation does not wait on the vault-data lock ──────
+  // Key rotation, attachments and file sends hold an advisory lock on the bare
+  // user id, a key rotation for up to two minutes. The credential lock is
+  // namespaced apart, so a revocation (whose callers on SCIM deactivation and
+  // team removal carry on when it fails) completes under it.
+
+  it("a revocation completes while the user's vault-data lock is held", async () => {
+    await sessionCookieRequest();
+    const vaultLock = await race.holdRowLock(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [userId]);
+    try {
+      const result = await invalidateUserSessions(userId, { allTenants: true, reason: "test" });
+      expect(result.sessions).toBe(1);
+    } finally {
+      await vaultLock.release();
+    }
   });
 });

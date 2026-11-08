@@ -13,6 +13,7 @@ const {
   mockTenantFindUnique,
   mockTransaction,
   mockTxExecuteRaw,
+  mockTxExtFindFirst,
   mockWithBypassRls,
   mockWithUserTenantRls,
 } = vi.hoisted(() => ({
@@ -28,6 +29,7 @@ const {
   mockTenantFindUnique: vi.fn(),
   mockTransaction: vi.fn(),
   mockTxExecuteRaw: vi.fn().mockResolvedValue(1),
+  mockTxExtFindFirst: vi.fn(),
   mockWithBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
   mockWithUserTenantRls: vi.fn(async (_u: string, fn: () => unknown) => fn()),
 }));
@@ -128,6 +130,7 @@ import {
 } from "@/lib/validations/common";
 import { MS_PER_MINUTE, MS_PER_DAY } from "@/lib/constants/time";
 import { CLIENT_TOKEN_MAX_ACTIVE_FAMILIES } from "@/lib/constants";
+import { UserAuthRevokedError } from "@/lib/auth/session/user-auth-serialization";
 
 // ─── Shared test fixtures ────────────────────────────────────
 
@@ -151,8 +154,9 @@ function setupTransactionPassthrough() {
     cb({
       $executeRaw: mockTxExecuteRaw,
       extensionToken: {
-        // The authorizing / old token re-read under the credential lock: live.
-        findFirst: async () => ({ id: HOST_TOKEN_ID }),
+        // The authorizing / old token re-read under the credential lock
+        // (live by default; set per test).
+        findFirst: mockTxExtFindFirst,
         findMany: mockExtFindMany,
         create: mockExtCreate,
         updateMany: mockExtUpdateMany,
@@ -174,6 +178,7 @@ function happyAccessRowResponse(overrides: Partial<{ id: string }> = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   setupTransactionPassthrough();
+  mockTxExtFindFirst.mockResolvedValue({ id: HOST_TOKEN_ID });
   mockExtFindMany.mockResolvedValue([]);
   mockExtCreate.mockResolvedValue(happyAccessRowResponse());
   mockExtUpdate.mockResolvedValue({});
@@ -253,6 +258,28 @@ describe("issueIosToken", () => {
         String(c[0]).includes("pg_advisory_xact_lock"),
       ),
     ).toBe(true);
+  });
+
+  it("issues nothing when its proof is gone once the credential lock is held", async () => {
+    const consumeProof = vi.fn(async () => false);
+
+    await expect(
+      issueIosToken({
+        consumeProof,
+        userId: USER_ID,
+        tenantId: TENANT_ID,
+        deviceJkt: DEVICE_JKT,
+        cnfJkt: CNF_JKT,
+        idleMinutes: TENANT_IDLE_MINUTES,
+        absoluteMinutes: TENANT_ABSOLUTE_MINUTES,
+        presenceAt: new Date(),
+        ip: null,
+        userAgent: null,
+      }),
+    ).rejects.toBeInstanceOf(UserAuthRevokedError);
+    expect(mockExtCreate).not.toHaveBeenCalled();
+    // The proof was read under the lock, not before it.
+    expect(mockTxExecuteRaw.mock.invocationCallOrder[0]).toBeLessThan(consumeProof.mock.invocationCallOrder[0]);
   });
 
   it("generates a new familyId when none is provided", async () => {
@@ -554,6 +581,20 @@ describe("issueAutofillToken", () => {
     });
   });
 
+  it("mints nothing when the authorizing host token was revoked while it waited for the lock", async () => {
+    mockTxExtFindFirst.mockResolvedValue(null);
+
+    await expect(
+      issueAutofillToken({ userId: USER_ID, tenantId: TENANT_ID, cnfJkt: CNF_JKT, authorizingTokenId: HOST_TOKEN_ID }),
+    ).rejects.toBeInstanceOf(UserAuthRevokedError);
+    expect(mockExtCreate).not.toHaveBeenCalled();
+    expect(mockExtUpdateMany).not.toHaveBeenCalled();
+    expect(mockTxExtFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ id: HOST_TOKEN_ID, userId: USER_ID, revokedAt: null }) }),
+    );
+    expect(mockTxExecuteRaw.mock.invocationCallOrder[0]).toBeLessThan(mockTxExtFindFirst.mock.invocationCallOrder[0]);
+  });
+
   it("revokes prior active IOS_AUTOFILL rows for the user before minting (single active token)", async () => {
     await issueAutofillToken({ userId: USER_ID, tenantId: TENANT_ID, cnfJkt: CNF_JKT, authorizingTokenId: HOST_TOKEN_ID });
 
@@ -693,6 +734,63 @@ describe("refreshIosToken", () => {
     }
     expect(mockLogAuditAsync).not.toHaveBeenCalled();
     expect(mockRevokeFamily).not.toHaveBeenCalled();
+  });
+
+  it("an old row revoked while the rotation waited for the lock: FAMILY_EXPIRED, nothing issued, no family revocation", async () => {
+    mockTxExtFindFirst.mockResolvedValue(null);
+
+    const result = await refreshIosToken({
+      req: makeReq(),
+      bodyBytes: new TextEncoder().encode(JSON.stringify({ refresh: "x" })),
+      oldRow: baseRow,
+      deviceJkt: DEVICE_JKT,
+      cnfJkt: CNF_JKT,
+    });
+
+    expect(result).toEqual({ ok: false, error: "REFRESH_TOKEN_FAMILY_EXPIRED" });
+    expect(mockExtCreate).not.toHaveBeenCalled();
+    expect(mockTxExtFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ id: "row-old", userId: USER_ID, revokedAt: null }) }),
+    );
+  });
+
+  it("a retry that overlapped the rotation it repeats gets that rotation's token, not FAMILY_EXPIRED", async () => {
+    const body = new TextEncoder().encode(JSON.stringify({ refresh: "x" }));
+    mockExtCreate.mockResolvedValueOnce(happyAccessRowResponse({ id: "row-new-1" }));
+    const first = await refreshIosToken({ req: makeReq(), bodyBytes: body, oldRow: baseRow, deviceJkt: DEVICE_JKT, cnfJkt: CNF_JKT });
+    expect(first.ok).toBe(true);
+
+    // The retry read the old row before the first rotation committed (not yet
+    // revoked) and finds it revoked under the lock.
+    mockTxExtFindFirst.mockResolvedValue(null);
+    const second = await refreshIosToken({ req: makeReq(), bodyBytes: body, oldRow: baseRow, deviceJkt: DEVICE_JKT, cnfJkt: CNF_JKT });
+
+    expect(second.ok).toBe(true);
+    if (second.ok && first.ok) {
+      expect(second.replayed).toBe(true);
+      expect(second.token.accessToken).toBe(first.token.accessToken);
+    }
+  });
+
+  it("an overlapping refresh with a different body is not handed the cached rotation", async () => {
+    mockExtCreate.mockResolvedValueOnce(happyAccessRowResponse({ id: "row-new-1" }));
+    await refreshIosToken({
+      req: makeReq(),
+      bodyBytes: new TextEncoder().encode(JSON.stringify({ refresh: "x" })),
+      oldRow: baseRow,
+      deviceJkt: DEVICE_JKT,
+      cnfJkt: CNF_JKT,
+    });
+
+    mockTxExtFindFirst.mockResolvedValue(null);
+    const second = await refreshIosToken({
+      req: makeReq(),
+      bodyBytes: new TextEncoder().encode(JSON.stringify({ refresh: "y" })),
+      oldRow: baseRow,
+      deviceJkt: DEVICE_JKT,
+      cnfJkt: CNF_JKT,
+    });
+    expect(second).toEqual({ ok: false, error: "REFRESH_TOKEN_FAMILY_EXPIRED" });
   });
 
   it("replay (different body, revoked token): revokes family, emits MOBILE_TOKEN_REPLAY_DETECTED with rich metadata", async () => {

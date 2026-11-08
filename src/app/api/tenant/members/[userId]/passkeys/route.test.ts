@@ -81,6 +81,7 @@ vi.mock("@/lib/notification", () => ({ createNotification: mockCreateNotificatio
 vi.mock("@/lib/email", () => ({ sendEmail: mockSendEmail }));
 vi.mock("@sentry/nextjs", () => ({ captureMessage: mockSentryCapture }));
 
+import { AUDIT_CREDENTIAL_ID_MAX_LENGTH, METADATA_MAX_BYTES } from "@/lib/validations/common.server";
 import { DELETE } from "./route";
 
 const ADMIN = "admin-1";
@@ -115,11 +116,17 @@ describe("DELETE /api/tenant/members/[userId]/passkeys", () => {
     mockRequireTenantPermission.mockResolvedValue({ userId: ADMIN, tenantId: "tenant-1", role: "OWNER" });
     mockRequireRecentSession.mockResolvedValue(null);
     mockMemberFindFirst.mockResolvedValue({ role: "MEMBER" });
-    mockMemberFindMany.mockResolvedValue([
-      { userId: ADMIN, role: "OWNER", user: { email: "admin@example.com", locale: "en" } },
-      { userId: TARGET, role: "MEMBER", user: { email: "member@example.com", locale: "ja" } },
-    ]);
-    mockCredentialFindMany.mockResolvedValue(PASSKEYS);
+    mockMemberFindMany.mockImplementation(async () => {
+      calls.push("roles");
+      return [
+        { userId: ADMIN, role: "OWNER", user: { email: "admin@example.com", locale: "en" } },
+        { userId: TARGET, role: "MEMBER", user: { email: "member@example.com", locale: "ja" } },
+      ];
+    });
+    mockCredentialFindMany.mockImplementation(async () => {
+      calls.push("credentials");
+      return PASSKEYS;
+    });
     mockCredentialDeleteMany.mockImplementation(async () => {
       calls.push("delete");
       return { count: 2 };
@@ -142,7 +149,8 @@ describe("DELETE /api/tenant/members/[userId]/passkeys", () => {
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, sessionsRevoked: 2, cacheTombstoneFailures: 0 });
-    expect(calls).toEqual(["lock", "delete", "revoke", "audit", "cache-after-commit"]);
+    // Everything is read under the member's lock, the roles re-read first.
+    expect(calls).toEqual(["lock", "roles", "credentials", "delete", "revoke", "audit", "audit", "cache-after-commit"]);
     // Every passkey the member has, in any tenant: no id filter on the read.
     expect(mockCredentialFindMany).toHaveBeenCalledWith(expect.objectContaining({ where: { userId: TARGET } }));
     expect(mockCredentialDeleteMany).toHaveBeenCalledWith({
@@ -156,9 +164,66 @@ describe("DELETE /api/tenant/members/[userId]/passkeys", () => {
         action: "TENANT_MEMBER_PASSKEY_REVOKE_ALL",
         targetType: "User",
         targetId: TARGET,
-        metadata: { targetUserId: TARGET, passkeys: 2, credentialIds: ["public-1", "public-2"], ...COUNTS },
+        metadata: { targetUserId: TARGET, passkeys: 2, credentialIds: ["public-1", "public-2"], credentialIdsOmitted: 0, ...COUNTS },
       }),
     );
+  });
+
+  it("also audits in each other tenant a revoked passkey was registered under, naming the tenant it was revoked from", async () => {
+    await revokeAll();
+
+    expect(mockLogAuditInTx).toHaveBeenCalledTimes(2);
+    expect(mockLogAuditInTx).toHaveBeenCalledWith(
+      tx,
+      "previous-tenant",
+      expect.objectContaining({
+        action: "TENANT_MEMBER_PASSKEY_REVOKE_ALL",
+        tenantId: "previous-tenant",
+        userId: ADMIN,
+        metadata: expect.objectContaining({ targetUserId: TARGET, passkeys: 2, revokedFromTenantId: "tenant-1" }),
+      }),
+    );
+    // The originating tenant's row carries no such marker.
+    expect(mockLogAuditInTx.mock.calls[0][2].metadata.revokedFromTenantId).toBeUndefined();
+  });
+
+  it("writes no second audit row when every revoked passkey was registered in the admin's tenant", async () => {
+    mockCredentialFindMany.mockResolvedValue([PASSKEYS[0], { ...PASSKEYS[1], tenantId: "tenant-1" }]);
+
+    await revokeAll();
+    expect(mockLogAuditInTx).toHaveBeenCalledTimes(1);
+  });
+
+  it("bounds the audit row's credential ids, so the counts survive the metadata size cap", async () => {
+    const many = Array.from({ length: 11 }, (_, i) => ({
+      id: `cred-row-${i}`,
+      credentialId: `${i}`.padEnd(1023, "x"),
+      tenantId: "tenant-1",
+    }));
+    mockCredentialFindMany.mockResolvedValue(many);
+    mockCredentialDeleteMany.mockResolvedValue({ count: 11 });
+
+    await revokeAll();
+    const { metadata } = mockLogAuditInTx.mock.calls[0][2];
+    expect(metadata.credentialIds).toHaveLength(10);
+    expect(metadata.credentialIds.every((id: string) => id.length === AUDIT_CREDENTIAL_ID_MAX_LENGTH)).toBe(true);
+    expect(metadata).toMatchObject({ targetUserId: TARGET, passkeys: 11, credentialIdsOmitted: 1, ...COUNTS });
+    expect(Buffer.byteLength(JSON.stringify(metadata))).toBeLessThan(METADATA_MAX_BYTES);
+  });
+
+  it("answers 401 without a session", async () => {
+    mockAuth.mockResolvedValue(null);
+
+    expect((await revokeAll()).status).toBe(401);
+    expect(mockCredentialDeleteMany).not.toHaveBeenCalled();
+  });
+
+  it("refuses an actor without MEMBER_MANAGE before anything else", async () => {
+    mockRequireTenantPermission.mockRejectedValue(Object.assign(new Error("FORBIDDEN"), { name: "TenantAuthError", status: 403 }));
+
+    expect((await revokeAll()).status).toBe(403);
+    expect(mockRequireRecentSession).not.toHaveBeenCalled();
+    expect(mockCredentialDeleteMany).not.toHaveBeenCalled();
   });
 
   it("tells the member that all their passkeys were revoked", async () => {
@@ -196,6 +261,7 @@ describe("DELETE /api/tenant/members/[userId]/passkeys", () => {
 
     expect((await revokeAll()).status).toBe(403);
     expect(mockRequireRecentSession).not.toHaveBeenCalled();
+    expect(mockCredentialDeleteMany).not.toHaveBeenCalled();
   });
 
   it("a step-up refusal is returned before anything is deleted", async () => {

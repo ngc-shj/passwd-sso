@@ -205,3 +205,137 @@ folded in; this section records them and their resolution.
   the controls show the refusal is the revocation's, and the unit cells cover the
   recheck branches.
 - `tenant-member-passkey-revoke.integration.test.ts`: revoke-all cell.
+
+# Round 3
+
+## Changes from Previous Round
+Incremental review of 2b065ae45 (serialization, revoke-all, rule 4). Local LLM
+seeds were unavailable (pre-screen timed out); all three experts did full
+reviews of the commit.
+
+## Functionality Findings
+- R3-F1 [Major] check-count-then-create-lock knew only `advisoryXactLock(` /
+  `pg_advisory_xact_lock`; three cap sites now lock through
+  `lockUserAuthArtifacts`, so the static CI gate went red.
+- R3-F2 [Major] The credential lock shared its key (the bare user id) with the
+  vault-data lock key rotation holds for up to its 2-minute transaction; a
+  revocation queued behind it would hit the 5 s transaction timeout, and SCIM
+  deactivation / team removal carry on when revocation fails.
+- R3-F3 [Minor] An iOS refresh overlapping the rotation it retries now got
+  FAMILY_EXPIRED instead of the cached rotation.
+- R3-F4 [Minor] An MCP refresh revoked while waiting was answered and audited as
+  a concurrent rotation (family revoked, CONCURRENT_ROTATION reason).
+- R3-F5 [Adjacent, Minor] Adapter sign-in does not re-check active membership
+  under the lock.
+- R3-F6 [Adjacent, Minor] Shared lifecycle bypass grants widened with `session`.
+
+## Security Findings
+- R3-S1 [Minor] The bootstrap→SSO tenant migration (src/auth.ts) revokes the
+  user's tokens without the credential lock.
+- R3-S2 [Minor] Unbounded `credentialIds` in the revoke-all audit row: past
+  METADATA_MAX_BYTES the whole metadata is replaced, losing every count.
+- R3-S3 [Minor] Rule 4: cookie-only helpers counted as readers; a client
+  navigation renders a page without its layout; per-file granularity.
+- R3-S4 [Adjacent, Minor] Revoke-all leaves non-token footholds (linked IdP
+  accounts, admin-created SCIM / service-account tokens, grants).
+- R3-S5 [Adjacent, Minor] Revoke-all reaches other tenants' passkeys with no
+  audit row there.
+- X2 independently confirmed: no path where a cached proxy decision alone
+  grants anything.
+
+## Testing Findings
+- R3-T1 [Critical] iOS / AutoFill / iOS refresh rechecks had no deny cell.
+- R3-T2 [Major] The lock on MCP code exchange, MCP refresh and extension refresh
+  was unpinned.
+- R3-T3 [Major] Passkey verify's UserAuthRevokedError mapping untested.
+- R3-T4 [Major] No real-DB allow/deny pair for route-level session mints.
+- R3-T5..T10 [Minor] integration holder cleanup; deny cells not asserting the
+  advisory-lock wait; revoke-all route gaps; rule 4 member sets hand-kept;
+  dialog revoke-all failure / step-up; integration CAS twin.
+
+## Resolution Status
+### R3-F1 — gate recognizes the credential lock
+- `lockUserAuthArtifacts(` counts as a lock only with its import from
+  `user-auth-serialization` (a same-named local function does not). Self-test:
+  wrapper passes, wrapper removed fails, imposter fails.
+
+### R3-F2 — namespaced credential lock key
+- `userAuthLockKey(userId)` = `user-auth:<userId>`; every credential cap and
+  mint and the revocation use it, so mint-vs-mint and mint-vs-revocation
+  serialization are unchanged, while the vault-data lock (rotate-key,
+  attachments, file sends, PRF) stays on the bare id. Integration cell: a
+  revocation completes while the bare-id lock is held.
+
+### R3-F3 / R3-F4
+- iOS refresh: on UserAuthRevokedError the step-1 retry cache is consulted
+  (same body, within the grace) before FAMILY_EXPIRED; cells for both.
+- MCP refresh: a lost claim re-reads the row; revoked-not-rotated answers
+  `revoked` with no family revocation; rotated stays `race_lost`.
+
+### R3-F5 — Accepted
+- **Anti-Deferral check**: acceptable risk.
+- **Justification**: a session created for a member with no active membership
+  is refused by the proxy (`auth-gate.ts` returns invalid when the tenant does
+  not resolve) and every handler's tenant resolution fails. Requiring the
+  membership in session creation would also refuse the documented
+  `User.tenantId` fallback the adjudicator uses. Worst case: an unusable session
+  row until expiry. Likelihood: low. Cost-to-fix: changing the sign-in
+  adjudicator's contract, out of this PR's scope.
+
+### R3-F6
+- Narrow `EXTENSION_BRIDGE_CODE_ISSUE`, `MOBILE_BRIDGE_CODE_ISSUE`,
+  `MCP_AUTH_CODE_ISSUE` grants for the issuing transactions; the lifecycle
+  grants are back to their previous model lists.
+
+### R3-S1
+- The migration transaction takes the credential lock first; the lock module's
+  header names it among the revokers.
+
+### R3-S2
+- At most 10 public ids, each cut to AUDIT_CREDENTIAL_ID_MAX_LENGTH, plus
+  `credentialIdsOmitted`; a cell with 11 × 1023-byte ids keeps every count and
+  stays under METADATA_MAX_BYTES.
+
+### R3-S3 / R3-T8 — rule 4 tightened
+- Rule 4 counts only DB readers (`auth`, `checkAuth`, `authOrToken`, the step-up
+  readers). The gated page prefixes are read from the `if` guarding
+  getSessionInfo in page-route.ts (fails closed when unreadable); each needs a
+  reading layout, and every server-component segment file under them reads the
+  session or imports only next / next-intl / @/i18n / @/components / react /
+  lucide-react. Red cells: cookie-only route, layout reading none, missing
+  layout, a new prefix without a layout, an unreadable guard, a data page; allow
+  cells: the same page as a client component or reading the session.
+- Accepted floors: per-file (not per-method) reading, imported components not
+  followed, and the BEARER_ONLY reason-length branch (a constant map with no
+  fixture hook) — each documented in the gate.
+
+### R3-S4 — user decision: state the scope, track the rest
+- The revoke-all confirmation states what it does not cover; issue `#1016`
+  tracks account links and admin-created credentials.
+
+### R3-S5 — user decision: audit in each affected tenant
+- A revoked passkey registered under another tenant writes the same audit row
+  there, with `revokedFromTenantId` (single and all). Unit and integration cells.
+
+### R3-T1..T10
+- T1: deny cells for issueIosToken (proof gone, lock first), issueAutofillToken
+  (host token revoked), refreshIosToken (row revoked → FAMILY_EXPIRED; overlap →
+  cached rotation; different body → FAMILY_EXPIRED); autofill route 401. The
+  mobile token route's mock runs the route's real CAS; issueIosToken's own
+  refusal is pinned against the real function.
+- T2: lock key and lock-before-claim cells for MCP code exchange, MCP refresh and
+  extension refresh.
+- T3: passkey verify → 401 AUTHENTICATION_FAILED, no cookie, no AUTH_LOGIN.
+- T4: integration pairs for `POST /api/api-keys` and
+  `POST /api/tenant/operator-tokens` through the real handlers (held revocation
+  → 401 and nothing created; lock-only control → created).
+- T5/T6: the holder commits in `finally`; every parked mint is asserted to wait
+  on `pg_advisory_xact_lock`. T7: revoke-all read order, 401 / permission
+  cells, no-delete assertion. T9: dialog failure and step-up cells. T10: the
+  integration CAS copy is labelled as a twin.
+- Mutation red proof (scratch copy, unit level): removing each of the 11
+  guarded clauses (iOS proof check, autofill recheck, MCP refresh lock, revoked
+  vs rotated, overlap retry, passkey verify mapping, other-tenant audit, id
+  bound, lock key namespace, extension refresh lock, MCP code lock) turns its
+  test red. The integration cells were not mutation-run (that needs the
+  database env in the copy).
