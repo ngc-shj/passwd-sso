@@ -93,6 +93,7 @@ import { GET as shareDownload } from "@/app/s/[token]/download/route";
 import { POST as createShareLink, GET as listShareLinks } from "@/app/api/share-links/route";
 import { GET as listMine } from "@/app/api/share-links/mine/route";
 import { DELETE as revokeShareLink } from "@/app/api/share-links/[id]/route";
+import { GET as shareAccessLogs } from "@/app/api/share-links/[id]/access-logs/route";
 import { PATCH as scimPatchUser, DELETE as scimDeleteUser } from "@/app/api/scim/v2/Users/[id]/route";
 import { DELETE as removeMember } from "@/app/api/teams/[teamId]/members/[memberId]/route";
 import { hashToken, generateAccessPassword, hashAccessPassword, encryptShareData } from "@/lib/crypto/crypto-server";
@@ -668,6 +669,43 @@ describe("share links across a creator's departure — real-DB integration", () 
       const items = ((await res.json()) as { items: { id: string; canRevoke: boolean }[] }).items;
       expect(items.find((i) => i.id === s.id)?.canRevoke).toBe(false);
     }
+  });
+
+  it("A15: the creator and a team admin revoking at once: one revokes (200, one audit row), the other answers ALREADY_REVOKED", async () => {
+    const t = await teamWithCreator();
+    const s = await share({ creatorId: t.creator, teamEntryId: t.entryId });
+    const revokeAsync = () =>
+      revokeShareLink(new NextRequest(`http://localhost/api/share-links/${s.id}`, { method: "DELETE" }), {
+        params: Promise.resolve({ id: s.id }),
+      });
+    // Two callers: auth() answers the creator to the first, the owner to the second.
+    mockAuth.mockResolvedValueOnce({ user: { id: t.creator } }).mockResolvedValueOnce({ user: { id: t.owner } });
+    const statuses = (await Promise.all([revokeAsync(), revokeAsync()])).map((r) => r.status).sort();
+
+    expect(statuses).toEqual([200, 409]);
+    const audits = await sql<{ n: number }>(
+      `SELECT count(*)::int AS n FROM audit_outbox WHERE tenant_id = $1::uuid AND payload::text LIKE $2 AND payload::text LIKE '%SHARE_REVOKE%'`,
+      tenantId, `%${s.id}%`,
+    );
+    expect(audits[0].n).toBe(1);
+  });
+
+  it("A15: the access log of a team link is the creator's only: a team admin who may revoke it, and a MEMBER, get 404", async () => {
+    const t = await teamWithCreator();
+    const other = await member();
+    await addTeamMember(t.teamId, other, "MEMBER");
+    const s = await share({ creatorId: t.creator, teamEntryId: t.entryId });
+    const logsAs = async (actor: string) => {
+      mockAuth.mockResolvedValue({ user: { id: actor } });
+      const res = await shareAccessLogs(new NextRequest(`http://localhost/api/share-links/${s.id}/access-logs`), {
+        params: Promise.resolve({ id: s.id }),
+      });
+      return res.status;
+    };
+
+    expect(await logsAs(t.creator)).toBe(200);
+    expect(await logsAs(t.owner)).toBe(404);
+    expect(await logsAs(other)).toBe(404);
   });
 
   it("A15: a team OWNER cannot revoke a member's personal share or Send (404)", async () => {

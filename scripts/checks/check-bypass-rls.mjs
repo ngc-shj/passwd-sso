@@ -308,6 +308,12 @@ const ALLOWED_USAGE = new Set([
   // under-counts on shared resources. SYSTEM_MAINTENANCE bypass purpose.
   "src/lib/quota/resource-quotas.ts",
   "src/app/api/tenant/policy/route.ts",
+  // A tenant admin's view and revoke of a member's passkeys (#974): passkeys are
+  // user-global, so the member's credentials under a previous tenant are listed
+  // and revocable too. Each call first reads the member active in the admin's
+  // tenant (explicit tenantId filter), then the credentials by that user id.
+  "src/app/api/tenant/members/[userId]/passkeys/route.ts",
+  "src/app/api/tenant/members/[userId]/passkeys/[credentialId]/route.ts",
   // Operator CLI (SSO tenant-claim registry, lockout recovery, owning-column
   // realignment). Runs out of band with MIGRATION_DATABASE_URL and must read and
   // repair rows across every tenant, which is the bypass itself. Its purpose is
@@ -355,7 +361,6 @@ const ALLOWED_USAGE = new Set([
   "src/app/api/maintenance/audit-chain-verify/route.ts",
   "src/app/api/user/passkey-status/route.ts",
   "src/app/api/share-links/route.ts", // logAuditInTx for SHARE_CREATE
-  "src/app/api/share-links/[id]/route.ts", // logAuditInTx for SHARE_REVOKE
   "src/app/api/share-links/verify-access/route.ts",
   "src/app/api/share-links/[id]/content/route.ts",
   "src/app/s/[token]/page.tsx",

@@ -258,14 +258,15 @@
   "delegationPolicyLoadFailed": "Failed to load delegation policy.",
   "delegationPolicySaveFailed": "Failed to update delegation policy.",
   "memberPasskeysTitle": "Member passkeys",
-  "memberPasskeysDescription": "Passkeys {name} registered in this tenant. Revoke one that is lost or compromised.",
+  "memberPasskeysDescription": "Passkeys {name} can sign in with, including ones registered in another tenant. Revoke one that is lost or compromised.",
   "memberPasskeysLoadFailed": "Failed to load passkeys.",
-  "memberPasskeysEmpty": "No passkeys registered in this tenant.",
+  "memberPasskeysEmpty": "No passkeys registered.",
   "memberPasskeyLastUsed": "Last used: {date}",
   "memberPasskeyNeverUsed": "never",
   "revokePasskey": "Revoke",
   "revokePasskeyTitle": "Revoke passkey",
-  "revokePasskeyDescription": "The passkey is deleted and {name} is signed out of this tenant, including extension and API tokens. They can sign in another way and register a new passkey.",
+  "revokePasskeyDescription": "The passkey is deleted and {name} is signed out everywhere, including extension and API tokens. They can sign in another way and register a new passkey.",
   "revokePasskeySuccess": "Passkey revoked.",
-  "revokePasskeyFailed": "Failed to revoke the passkey."
+  "revokePasskeyFailed": "Failed to revoke the passkey.",
+  "memberPasskeyOtherTenant": "Registered in another tenant"
 }

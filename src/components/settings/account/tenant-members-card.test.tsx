@@ -1091,6 +1091,26 @@ describe("TenantMembersCard", () => {
     expect(screen.getByTestId("passkeys-owner-id")).toBeDisabled();
   });
 
+  it.each([
+    ["an OWNER on another OWNER (passkey revoke only)", "OWNER", "OWNER", null, { reset: true, passkeys: false }],
+    ["an ADMIN on another ADMIN", "ADMIN", "ADMIN", null, { reset: true, passkeys: true }],
+    ["an OWNER on a deactivated MEMBER", "OWNER", "MEMBER", "2026-01-01T00:00:00Z", { reset: true, passkeys: true }],
+  ])("disabled state for %s", async (_label, myRole, targetRole, deactivatedAt, disabled) => {
+    const member = makeMember({ id: "mem-x", userId: "target-user", role: targetRole, deactivatedAt });
+    mockUseTenantRole.mockReturnValue({ role: myRole, isAdmin: true, loading: false });
+    setupAsFetchReady({ members: [member], currentUserId: "me" });
+
+    await act(async () => {
+      render(<TenantMembersCard />);
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("passkeys-target-user")).toBeInTheDocument();
+    });
+
+    expect((screen.getByTestId("vault-reset-target-user") as HTMLButtonElement).disabled).toBe(disabled.reset);
+    expect((screen.getByTestId("passkeys-target-user") as HTMLButtonElement).disabled).toBe(disabled.passkeys);
+  });
+
   it("enables VaultResetButton for lower-level non-self non-deactivated member", async () => {
     const member = makeMember({
       id: "mem-1",

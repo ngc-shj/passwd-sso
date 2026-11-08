@@ -219,6 +219,13 @@ export const BYPASS_GRANT = Object.freeze({
   TENANT_SESSION_CACHE_INVALIDATION: defineGrant(BYPASS_PURPOSE.TOKEN_LIFECYCLE, ["session"]),
   TENANT_TEAM_POLICY_LOOKUP: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["teamPolicy", "tenant", "team"]),
   TENANT_WEBHOOK_DISPATCH: defineGrant(BYPASS_PURPOSE.WEBHOOK_DISPATCH, ["tenantWebhook"]),
+  // A tenant admin's view and revoke of a member's passkeys (#974): passkeys are
+  // user-global, so one registered under the member's previous tenant still
+  // signs them in here. The member is checked active in the admin's tenant first.
+  TENANT_MEMBER_PASSKEY_LIST: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["tenantMember", "webAuthnCredential"]),
+  // The revoke, in one transaction: the member's sessions and tokens in every
+  // tenant are revoked with the user-global credential, and audited.
+  TENANT_MEMBER_PASSKEY_REVOKE: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["apiKey", "auditOutbox", "delegationSession", "extensionToken", "mcpAccessToken", "mcpRefreshToken", "operatorToken", "session", "tenantMember", "user", "webAuthnCredential"]),
   TOKEN_TENANT_LOOKUP: defineGrant(BYPASS_PURPOSE.TOKEN_LIFECYCLE, ["tenant"]),
   TOKEN_TENANT_MEMBERSHIP_CHECK: defineGrant(BYPASS_PURPOSE.TOKEN_LIFECYCLE, ["tenantMember"]),
   USER_SESSION_CACHE_INVALIDATION: defineGrant(BYPASS_PURPOSE.TOKEN_LIFECYCLE, ["session"]),

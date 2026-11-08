@@ -41,6 +41,7 @@ const PASSKEY = {
   nickname: "YubiKey",
   deviceType: "singleDevice",
   registeredDevice: null,
+  registeredInTenant: true,
   createdAt: "2026-01-01T00:00:00Z",
   lastUsedAt: null,
 };
@@ -86,16 +87,48 @@ describe("TenantMemberPasskeysDialog", () => {
     expect(await screen.findByText("memberPasskeysEmpty")).toBeInTheDocument();
   });
 
-  it("shows an error and keeps the passkey when the revoke fails", async () => {
+  it("shows an error on a refused revoke and reloads the list (the passkey may be gone already)", async () => {
     mockFetch
       .mockResolvedValueOnce(listResponse([PASSKEY]))
-      .mockResolvedValueOnce({ ok: false, status: 403, json: async () => ({ error: "FORBIDDEN" }) });
+      .mockResolvedValueOnce({ ok: false, status: 404, json: async () => ({ error: "NOT_FOUND" }) })
+      .mockResolvedValueOnce(listResponse([PASSKEY]));
     render(<TenantMemberPasskeysDialog userId="u-1" memberName="Alice" />);
     fireEvent.click(screen.getByRole("button"));
     fireEvent.click(await screen.findByRole("button", { name: "revokePasskey" }));
     fireEvent.click(screen.getAllByRole("button", { name: "revokePasskey" }).at(-1)!);
 
     await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith("revokePasskeyFailed"));
-    expect(screen.getByText("YubiKey")).toBeInTheDocument();
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(3));
+    expect(await screen.findByText("YubiKey")).toBeInTheDocument();
+  });
+
+  it("opens the recent-session dialog on a SESSION_STEP_UP_REQUIRED response, with no toast", async () => {
+    mockFetch
+      .mockResolvedValueOnce(listResponse([PASSKEY]))
+      .mockResolvedValueOnce({ ok: false, status: 403, json: async () => ({ error: "SESSION_STEP_UP_REQUIRED" }) });
+    render(<TenantMemberPasskeysDialog userId="u-1" memberName="Alice" />);
+    fireEvent.click(screen.getByRole("button"));
+    fireEvent.click(await screen.findByRole("button", { name: "revokePasskey" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "revokePasskey" }).at(-1)!);
+
+    await waitFor(() => expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument());
+    expect(mockToast.success).not.toHaveBeenCalled();
+    expect(mockToast.error).not.toHaveBeenCalled();
+  });
+
+  it("says so when the list cannot be loaded", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({}) });
+    render(<TenantMemberPasskeysDialog userId="u-1" memberName="Alice" />);
+    fireEvent.click(screen.getByRole("button"));
+
+    expect(await screen.findByText("memberPasskeysLoadFailed")).toBeInTheDocument();
+  });
+
+  it("marks a passkey registered in another tenant", async () => {
+    mockFetch.mockResolvedValueOnce(listResponse([{ ...PASSKEY, registeredInTenant: false }]));
+    render(<TenantMemberPasskeysDialog userId="u-1" memberName="Alice" />);
+    fireEvent.click(screen.getByRole("button"));
+
+    expect(await screen.findByText("memberPasskeyOtherTenant")).toBeInTheDocument();
   });
 });

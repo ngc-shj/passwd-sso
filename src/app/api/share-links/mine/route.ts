@@ -39,7 +39,7 @@ async function handleGET(req: NextRequest) {
   if (teamId) {
     let membershipRole: string | undefined;
     try {
-      const membership = await requireTeamMember(session.user.id, teamId);
+      const membership = await requireTeamMember(session.user.id, teamId, req);
       membershipRole = membership.role;
       canRevokeTeamLinks = hasTeamPermission(membership.role, TEAM_PERMISSION.PASSWORD_DELETE);
     } catch (e) {
@@ -143,6 +143,7 @@ async function handleGET(req: NextRequest) {
       sharedBy: sharedByOf(s.createdById),
       // A team OWNER/ADMIN may revoke any of the team's links (#995).
       canRevoke: s.createdById === session.user.id || canRevokeTeamLinks,
+      canViewAccessLogs: s.createdById === session.user.id,
       creatorAdmitted: admitted.get(s.id) === true,
       isActive:
         !s.revokedAt &&

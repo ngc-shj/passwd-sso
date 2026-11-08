@@ -196,6 +196,9 @@ export function TenantMembersCard() {
                 !isSelf && !isDeactivated && myLevel > targetLevel;
               // Self-target is allowed for lockout clear (matches the server's
               // self-bypass of the role-hierarchy check — see clear-lockout route.ts).
+              // The server's canRevokeMemberPasskey: strictly above, or OWNER on OWNER.
+              const canRevokePasskey =
+                !isSelf && !isDeactivated && (myLevel > targetLevel || (isOwner && m.role === "OWNER"));
               const canClearLockout =
                 !isDeactivated && (isSelf || myLevel > targetLevel);
               const canChangeRole =
@@ -263,7 +266,7 @@ export function TenantMembersCard() {
                     <TenantMemberPasskeysDialog
                       userId={m.userId}
                       memberName={m.name ?? m.email ?? "—"}
-                      disabled={!canReset}
+                      disabled={!canRevokePasskey}
                     />
                   </div>
                 </div>

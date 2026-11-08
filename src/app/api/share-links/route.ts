@@ -129,10 +129,12 @@ async function handlePOST(req: NextRequest) {
     }
 
     try {
+      // The request carries the team's IP restriction into the check.
       await requireTeamPermission(
           session.user.id,
           teamEntry.teamId,
-          TEAM_PERMISSION.PASSWORD_READ
+          TEAM_PERMISSION.PASSWORD_READ,
+          req,
         );
     } catch (e) {
       return handleAuthError(e);

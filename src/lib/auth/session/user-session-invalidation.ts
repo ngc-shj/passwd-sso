@@ -1,4 +1,5 @@
 import * as Sentry from "@sentry/nextjs";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
@@ -115,57 +116,15 @@ export async function invalidateUserSessions(
   const now = new Date();
 
   return withBypassRls(prisma, async (tx) => {
-    // SELECT tokens before deleteMany so we can invalidate the cache after
-    // the DB delete commits (R3 / S-6 sequencing).
-    const targetSessions = await tx.session.findMany({
-      where: {
-        userId,
-        ...tenantFilter,
-        ...(excludeSessionDigest ? { sessionToken: { not: excludeSessionDigest } } : {}),
-      },
-      select: { sessionToken: true },
-    });
-
-    const sessionsResult = await tx.session.deleteMany({
-      where: {
-        userId,
-        ...tenantFilter,
-        ...(excludeSessionDigest ? { sessionToken: { not: excludeSessionDigest } } : {}),
-      },
-    });
-    const extensionTokensResult = await tx.extensionToken.updateMany({
-      where: { userId, revokedAt: null, ...tenantFilter },
-      data: { revokedAt: now },
-    });
-    const apiKeysResult = await tx.apiKey.updateMany({
-      where: { userId, revokedAt: null, ...tenantFilter },
-      data: { revokedAt: now },
-    });
-    const mcpAccessTokensResult = await tx.mcpAccessToken.updateMany({
-      where: { userId, revokedAt: null, ...tenantFilter },
-      data: { revokedAt: now },
-    });
-    const mcpRefreshTokensResult = await tx.mcpRefreshToken.updateMany({
-      where: { userId, revokedAt: null, ...tenantFilter },
-      data: { revokedAt: now },
-    });
-    const delegationSessionsResult = await tx.delegationSession.updateMany({
-      where: { userId, revokedAt: null, ...tenantFilter },
-      data: { revokedAt: now },
-    });
-    // OperatorToken uses subjectUserId (not userId) as the "authenticates
-    // as" column. Same tenantFilter semantics — all-tenants for vault
-    // reset, single-tenant for member removal.
-    const operatorTokensResult = await tx.operatorToken.updateMany({
-      where: { subjectUserId: userId, revokedAt: null, ...tenantFilter },
-      data: { revokedAt: now },
+    const { counts, sessionTokens } = await revokeUserAuthArtifactsInTx(tx, userId, {
+      tenantFilter,
+      excludeSessionDigest,
+      now,
     });
 
     let cacheTombstoneFailures = 0;
-    if (targetSessions.length > 0) {
-      const cacheResult = await invalidateCachedSessions(
-        targetSessions.map((s) => s.sessionToken),
-      );
+    if (sessionTokens.length > 0) {
+      const cacheResult = await invalidateCachedSessions(sessionTokens);
       cacheTombstoneFailures = cacheResult.failed;
     }
 
@@ -199,7 +158,83 @@ export async function invalidateUserSessions(
       );
     }
 
-    return {
+    return { ...counts, cacheTombstoneFailures };
+  }, BYPASS_GRANT.USER_SESSION_INVALIDATION);
+}
+
+type UserAuthArtifactCounts = Omit<InvalidateUserSessionsResult, "cacheTombstoneFailures">;
+
+/**
+ * The database half of `invalidateUserSessions`, on the caller's
+ * transaction: delete the user's sessions and revoke every user-bound token
+ * (the same models, same scope rules). Lets a caller make the revocation
+ * atomic with its own write — the admin passkey revoke deletes the credential
+ * and its possible sign-ins together, or neither. Returns the deleted
+ * sessions' token digests: the caller tombstones them in the session cache
+ * AFTER its transaction commits.
+ *
+ * The caller's bypass grant must cover session, extensionToken, apiKey,
+ * mcpAccessToken, mcpRefreshToken, delegationSession and operatorToken.
+ */
+export async function revokeUserAuthArtifactsInTx(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  options: {
+    tenantFilter: { tenantId?: string };
+    excludeSessionDigest?: string | null;
+    now?: Date;
+  },
+): Promise<{ counts: UserAuthArtifactCounts; sessionTokens: string[] }> {
+  const { tenantFilter, excludeSessionDigest = null } = options;
+  const now = options.now ?? new Date();
+  // SELECT tokens before deleteMany so we can invalidate the cache after
+  // the DB delete commits (R3 / S-6 sequencing).
+  const targetSessions = await tx.session.findMany({
+    where: {
+      userId,
+      ...tenantFilter,
+      ...(excludeSessionDigest ? { sessionToken: { not: excludeSessionDigest } } : {}),
+    },
+    select: { sessionToken: true },
+  });
+
+  const sessionsResult = await tx.session.deleteMany({
+    where: {
+      userId,
+      ...tenantFilter,
+      ...(excludeSessionDigest ? { sessionToken: { not: excludeSessionDigest } } : {}),
+    },
+  });
+  const extensionTokensResult = await tx.extensionToken.updateMany({
+    where: { userId, revokedAt: null, ...tenantFilter },
+    data: { revokedAt: now },
+  });
+  const apiKeysResult = await tx.apiKey.updateMany({
+    where: { userId, revokedAt: null, ...tenantFilter },
+    data: { revokedAt: now },
+  });
+  const mcpAccessTokensResult = await tx.mcpAccessToken.updateMany({
+    where: { userId, revokedAt: null, ...tenantFilter },
+    data: { revokedAt: now },
+  });
+  const mcpRefreshTokensResult = await tx.mcpRefreshToken.updateMany({
+    where: { userId, revokedAt: null, ...tenantFilter },
+    data: { revokedAt: now },
+  });
+  const delegationSessionsResult = await tx.delegationSession.updateMany({
+    where: { userId, revokedAt: null, ...tenantFilter },
+    data: { revokedAt: now },
+  });
+  // OperatorToken uses subjectUserId (not userId) as the "authenticates
+  // as" column. Same tenantFilter semantics — all-tenants for vault
+  // reset, single-tenant for member removal.
+  const operatorTokensResult = await tx.operatorToken.updateMany({
+    where: { subjectUserId: userId, revokedAt: null, ...tenantFilter },
+    data: { revokedAt: now },
+  });
+
+  return {
+    counts: {
       sessions: sessionsResult.count,
       extensionTokens: extensionTokensResult.count,
       apiKeys: apiKeysResult.count,
@@ -207,9 +242,9 @@ export async function invalidateUserSessions(
       mcpRefreshTokens: mcpRefreshTokensResult.count,
       delegationSessions: delegationSessionsResult.count,
       operatorTokens: operatorTokensResult.count,
-      cacheTombstoneFailures,
-    };
-  }, BYPASS_GRANT.USER_SESSION_INVALIDATION);
+    },
+    sessionTokens: targetSessions.map((session) => session.sessionToken),
+  };
 }
 
 /**

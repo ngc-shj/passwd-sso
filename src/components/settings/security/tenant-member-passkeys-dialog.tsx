@@ -35,6 +35,7 @@ interface MemberPasskey {
   nickname: string | null;
   deviceType: string;
   registeredDevice: string | null;
+  registeredInTenant: boolean;
   createdAt: string;
   lastUsedAt: string | null;
 }
@@ -95,6 +96,9 @@ export function TenantMemberPasskeysDialog({ userId, memberName, disabled }: Ten
       }
       if (await handleStepUpError(res, inlineReauth.triggerOnStaleError)) return;
       toast.error(t("revokePasskeyFailed"));
+      // The passkey may be gone already (a concurrent revoke answers 404).
+      setTarget(null);
+      await load();
     } catch {
       toast.error(t("revokePasskeyFailed"));
     } finally {
@@ -130,6 +134,9 @@ export function TenantMemberPasskeysDialog({ userId, memberName, disabled }: Ten
               <div key={p.id} className="flex items-center justify-between gap-2 rounded-md border p-3">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">{p.nickname ?? p.registeredDevice ?? p.deviceType}</p>
+                  {!p.registeredInTenant && (
+                    <p className="text-xs text-muted-foreground">{t("memberPasskeyOtherTenant")}</p>
+                  )}
                   <p className="text-xs text-muted-foreground">
                     {t("memberPasskeyLastUsed", {
                       date: p.lastUsedAt ? formatDateTime(p.lastUsedAt, locale) : t("memberPasskeyNeverUsed"),

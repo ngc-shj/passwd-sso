@@ -6,19 +6,21 @@ const {
   mockAuth,
   mockPrismaPasswordShare,
   mockWithUserTenantRls,
-  mockWithBypassRls,
+  mockWithTenantRls,
   mockLogAuditInTx,
 } = vi.hoisted(() => {
-  const tx = {};
+  const mockPrismaPasswordShare = {
+    findUnique: vi.fn(),
+    // The revoke's compare-and-set, on the transaction client.
+    updateMany: vi.fn(async () => ({ count: 1 })),
+  };
+  const tx = { passwordShare: mockPrismaPasswordShare };
   return {
     mockTx: tx,
     mockAuth: vi.fn(),
-    mockPrismaPasswordShare: {
-      findUnique: vi.fn(),
-      update: vi.fn(),
-    },
+    mockPrismaPasswordShare,
     mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
-    mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: (tx: unknown) => unknown) => fn(tx)),
+    mockWithTenantRls: vi.fn(async (_prisma: unknown, _tenantId: string, fn: (tx: unknown) => unknown) => fn(tx)),
     mockLogAuditInTx: vi.fn(),
   };
 });
@@ -26,6 +28,11 @@ const {
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: { passwordShare: mockPrismaPasswordShare },
+}));
+// A team link's creator is held to the team's IP restriction; allowed here.
+vi.mock("@/lib/team/team-policy", () => ({
+  withTeamIpRestriction: vi.fn(async () => undefined),
+  PolicyViolationError: class PolicyViolationError extends Error {},
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
@@ -37,7 +44,7 @@ vi.mock("@/lib/audit/audit", () => ({
   tenantAuditBase: (_req: unknown, userId: string, tenantId: string) => ({ scope: "TENANT", userId, tenantId, ip: "127.0.0.1", userAgent: "test", acceptLanguage: null }),
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
-  withBypassRls: mockWithBypassRls,
+  withTenantRls: mockWithTenantRls,
 }));
 vi.mock("@/lib/logger", () => ({
   default: {
@@ -69,7 +76,7 @@ describe("DELETE /api/share-links/[id]", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockPrismaPasswordShare.findUnique.mockResolvedValue(MOCK_SHARE);
-    mockPrismaPasswordShare.update.mockResolvedValue({ ...MOCK_SHARE, revokedAt: new Date() });
+    mockPrismaPasswordShare.updateMany.mockResolvedValue({ count: 1 });
   });
 
   it("returns 401 when not authenticated", async () => {
@@ -122,9 +129,9 @@ describe("DELETE /api/share-links/[id]", () => {
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.ok).toBe(true);
-    expect(mockPrismaPasswordShare.update).toHaveBeenCalledWith(
+    expect(mockPrismaPasswordShare.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: SHARE_ID, createdById: "user-1" },
+        where: { id: SHARE_ID, createdById: "user-1", revokedAt: null },
         data: expect.objectContaining({ revokedAt: expect.any(Date) }),
       }),
     );

@@ -16,11 +16,21 @@ import { NextRequest } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
 
-const mockAuth = vi.fn();
-vi.mock("@/auth", () => ({ auth: (...args: unknown[]) => mockAuth(...args) }));
-vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
-  requireRecentCurrentAuthMethod: async () => null,
+const { mockAuth, stepUp } = vi.hoisted(() => ({
+  mockAuth: vi.fn(),
+  // When set, the step-up check refuses with this status.
+  stepUp: { refuseWith: null as number | null },
 }));
+vi.mock("@/auth", () => ({ auth: (...args: unknown[]) => mockAuth(...args) }));
+vi.mock("@/lib/auth/session/recent-current-auth-method", async () => {
+  const { NextResponse } = await import("next/server");
+  return {
+    requireRecentCurrentAuthMethod: async () =>
+      stepUp.refuseWith === null
+        ? null
+        : NextResponse.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: stepUp.refuseWith }),
+  };
+});
 
 import { GET as listPasskeys } from "@/app/api/tenant/members/[userId]/passkeys/route";
 import { DELETE as revokePasskey } from "@/app/api/tenant/members/[userId]/passkeys/[credentialId]/route";
@@ -42,6 +52,7 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
   beforeEach(async () => {
     tenantId = await ctx.createTenant();
     otherTenantId = await ctx.createTenant();
+    stepUp.refuseWith = null;
     vi.clearAllMocks();
   });
 
@@ -122,12 +133,14 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
     ["an OWNER revokes a MEMBER's", "OWNER", "MEMBER"],
     ["an OWNER revokes an ADMIN's", "OWNER", "ADMIN"],
     ["an ADMIN revokes a MEMBER's", "ADMIN", "MEMBER"],
-  ] as const)("%s only passkey: it is deleted, the member is signed out of the tenant, and it is audited", async (_label, actorRole, targetRole) => {
+    ["an OWNER revokes another OWNER's", "OWNER", "OWNER"],
+  ] as const)("%s only passkey: it is deleted, the member is signed out of every tenant, and it is audited", async (_label, actorRole, targetRole) => {
     const actor = await memberWithRole(actorRole);
     const target = await memberWithRole(targetRole);
     const credential = await passkey(target);
     const signedIn = await signedInWith(target, credential);
-    // Elsewhere: the member's session in another tenant is left alone.
+    // Elsewhere: the passkey is user-global, so the member's session and token
+    // under another tenant end too.
     await sql(`INSERT INTO tenant_members (id, tenant_id, user_id, role, deactivated_at, created_at, updated_at)
                VALUES ($1::uuid, $2::uuid, $3::uuid, 'MEMBER', now(), now(), now())`, randomUUID(), otherTenantId, target);
     const elsewhere = await signedInWith(target, null, otherTenantId);
@@ -141,19 +154,64 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
     expect(await exists("webauthn_credentials", credential)).toBe(false);
     expect(await exists("sessions", signedIn.sessionId)).toBe(false);
     expect(await tokenRevoked(signedIn.tokenId)).toBe(true);
-    expect(await exists("sessions", elsewhere.sessionId)).toBe(true);
-    expect(await tokenRevoked(elsewhere.tokenId)).toBe(false);
+    expect(await exists("sessions", elsewhere.sessionId)).toBe(false);
+    expect(await tokenRevoked(elsewhere.tokenId)).toBe(true);
 
     const [audit] = await sql<{ payload: string }>(
       `SELECT payload::text AS payload FROM audit_outbox WHERE tenant_id = $1::uuid AND payload::text LIKE '%TENANT_MEMBER_PASSKEY_REVOKE%'`,
       tenantId,
     );
+    const [{ credential_id: publicId }] = await sql<{ credential_id: string }>(
+      `SELECT payload->'metadata'->>'credentialId' AS credential_id FROM audit_outbox WHERE tenant_id = $1::uuid AND payload::text LIKE '%TENANT_MEMBER_PASSKEY_REVOKE%'`,
+      tenantId,
+    );
+    expect(publicId).toMatch(/^cred-/);
     expect(JSON.parse(audit.payload)).toMatchObject({
       action: "TENANT_MEMBER_PASSKEY_REVOKE",
       userId: actor,
       targetId: credential,
-      metadata: { targetUserId: target, sessions: 1, extensionTokens: 1 },
+      metadata: { targetUserId: target, registeredInTenant: true, sessions: 2, extensionTokens: 2 },
     });
+    // The member is told (the notification is written after the response, so
+    // poll for it).
+    await vi.waitFor(async () => {
+      const notices = await sql<{ type: string }>(
+        `SELECT type::text FROM notifications WHERE user_id = $1::uuid AND tenant_id = $2::uuid`,
+        target, tenantId,
+      );
+      expect(notices).toEqual([{ type: "SECURITY_ALERT" }]);
+    });
+  });
+
+  it("a stale session's step-up refusal stops the revoke: the passkey and the sessions stay", async () => {
+    const owner = await memberWithRole("OWNER");
+    const target = await memberWithRole("MEMBER");
+    const credential = await passkey(target);
+    const signedIn = await signedInWith(target, credential);
+    stepUp.refuseWith = 403;
+
+    expect(await revokeAs(owner, target, credential)).toBe(403);
+
+    expect(await exists("webauthn_credentials", credential)).toBe(true);
+    expect(await exists("sessions", signedIn.sessionId)).toBe(true);
+    expect(await tokenRevoked(signedIn.tokenId)).toBe(false);
+  });
+
+  it("a passkey the member registered under a previous tenant is listed (marked) and revocable", async () => {
+    const owner = await memberWithRole("OWNER");
+    const member = await memberWithRole("MEMBER");
+    const here = await passkey(member);
+    const previous = await passkey(member, otherTenantId);
+
+    const listed = await listAs(owner, member);
+    expect(listed.status).toBe(200);
+    expect(
+      Object.fromEntries((listed.body?.passkeys as { id: string; registeredInTenant: boolean }[]).map((p) => [p.id, p.registeredInTenant])),
+    ).toEqual({ [here]: true, [previous]: false });
+
+    expect(await revokeAs(owner, member, previous)).toBe(200);
+    expect(await exists("webauthn_credentials", previous)).toBe(false);
+    expect(await exists("webauthn_credentials", here)).toBe(true);
   });
 
   it.each([
@@ -174,18 +232,15 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
     expect(await exists("sessions", signedIn.sessionId)).toBe(true);
   });
 
-  it("an OWNER cannot reach a member of another tenant, or a passkey registered under another tenant (404)", async () => {
+  it("an OWNER cannot reach a member of another tenant (404 on list and revoke), nor another member's passkey by id", async () => {
     const owner = await memberWithRole("OWNER");
     const foreignMember = await memberWithRole("MEMBER", otherTenantId);
     const foreignCredential = await passkey(foreignMember, otherTenantId);
     expect(await revokeAs(owner, foreignMember, foreignCredential)).toBe(404);
+    expect((await listAs(owner, foreignMember)).status).toBe(404);
     expect(await exists("webauthn_credentials", foreignCredential)).toBe(true);
 
-    // The member is in this tenant, the passkey was registered under another.
     const member = await memberWithRole("MEMBER");
-    const elsewhereCredential = await passkey(member, otherTenantId);
-    expect(await revokeAs(owner, member, elsewhereCredential)).toBe(404);
-    expect(await exists("webauthn_credentials", elsewhereCredential)).toBe(true);
     // Another member's credential id under this member's path: 404.
     const someoneElse = await memberWithRole("MEMBER");
     const theirs = await passkey(someoneElse);

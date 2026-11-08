@@ -326,6 +326,8 @@ All password data is encrypted **client-side** before reaching the server. The s
 | `/api/tenant/members/[userId]` | GET, PUT, DELETE | Manage tenant member |
 | `/api/tenant/members/[userId]/reset-vault` | POST | Admin vault reset |
 | `/api/tenant/members/[userId]/reset-vault/[resetId]/revoke` | POST | Revoke vault reset |
+| `/api/tenant/members/[userId]/passkeys` | GET | List a member's passkeys (incl. ones registered in another tenant) |
+| `/api/tenant/members/[userId]/passkeys/[credentialId]` | DELETE | Revoke a member's passkey and end all their sessions/tokens (step-up) |
 | `/api/tenant/role` | GET | Get current user's tenant role |
 | `/api/tenant/policy` | GET, PUT | Tenant security policy |
 | `/api/tenant/scim-tokens` | GET, POST | SCIM token management |

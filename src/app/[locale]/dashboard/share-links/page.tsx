@@ -43,6 +43,7 @@ import { formatDateTime } from "@/lib/format/format-datetime";
 import { formatFileSize } from "@/lib/format/format-file-size";
 import { SendDialog } from "@/components/share/send-dialog";
 import { fetchApi } from "@/lib/url-helpers";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 
 interface ShareLinkItem {
   id: string;
@@ -62,6 +63,8 @@ interface ShareLinkItem {
   hasPersonalEntry: boolean;
   sharedBy: string | null;
   canRevoke: boolean;
+  /** The access log (viewers' IPs and user agents) is the creator's only. */
+  canViewAccessLogs: boolean;
   isActive: boolean;
   /** False when the link no longer serves because its creator left the entry's team. */
   creatorAdmitted?: boolean;
@@ -189,7 +192,11 @@ export default function ShareLinksPage() {
     setRevokingId(id);
     try {
       const res = await fetchApi(apiPath.shareLinkById(id), { method: "DELETE" });
-      if (res.ok) {
+      // Already revoked (by its creator or another admin since the list
+      // loaded): the goal is met, so show it revoked rather than an error.
+      const alreadyRevoked =
+        !res.ok && ((await res.json().catch(() => null)) as { error?: string } | null)?.error === API_ERROR.ALREADY_REVOKED;
+      if (res.ok || alreadyRevoked) {
         toast.success(tShare("revokeSuccess"));
         // Update in-place
         setLinks((prev) =>
@@ -402,7 +409,7 @@ export default function ShareLinksPage() {
                   <span className="hidden whitespace-nowrap text-xs text-muted-foreground sm:block">
                     {formatDate(link.createdAt)}
                   </span>
-                  {link.viewCount > 0 && (
+                  {link.viewCount > 0 && link.canViewAccessLogs && (
                     <Button
                       variant="ghost"
                       size="icon"
