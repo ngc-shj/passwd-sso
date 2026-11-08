@@ -9,8 +9,11 @@
  * UPDATE ... SKIP LOCKED`) in one statement and decide and delete in a LATER
  * statement, restricted to the locked teams, so the decision reads a snapshot
  * taken with the locks held (every copier of a non-current version holds
- * `teams ... FOR SHARE` for its whole transaction). This module checks that
- * order over the PL/pgSQL body:
+ * `teams ... FOR SHARE` for its whole transaction). The locks must also be
+ * cheap and few — every team writer waits for them at most
+ * TEAM_KEY_LOCK_TIMEOUT_MS — so the expensive candidate search runs first,
+ * unlocked and capped by a constant. This module checks that order over the
+ * PL/pgSQL body:
  *
  *   - the first statement is the RLS-bypass check
  *     `IF NOT (SELECT [public.]rls_bypass_admits('team_member_keys')) THEN RAISE ... '42501'`;
@@ -18,16 +21,21 @@
  *     condition reads no table (no SELECT or other statement keyword), and one
  *     of them refuses unless `current_setting('transaction_isolation')` is
  *     `'read committed'` (a later statement gets a new snapshot only there);
- *   - exactly one `SELECT ... INTO <var>` statement, which locks `teams`
- *     through `FOR NO KEY UPDATE OF <alias> SKIP LOCKED` (alias bound to teams);
- *   - exactly one `RETURN QUERY`, after it and last, naming
- *     `<alias>.team_id = ANY (<var>)`;
- *   - no other statement (PERFORM, EXECUTE, INSERT/UPDATE/DELETE, a second
+ *   - exactly one candidate `SELECT ... INTO <cands>` with no locking clause
+ *     and a `LIMIT <integer literal>` (the per-call team cap, not a parameter);
+ *   - then exactly one lock `SELECT ... INTO <teams>` that reads only `teams`,
+ *     restricts it to `<alias>.id = ANY (<cands>)` and locks it through
+ *     `FOR NO KEY UPDATE OF <alias> SKIP LOCKED` (alias bound to teams);
+ *   - then exactly one `RETURN QUERY`, last, naming
+ *     `<alias>.team_id = ANY (<teams>)`;
+ *   - no other statement (PERFORM, EXECUTE, INSERT/UPDATE/DELETE, a further
  *     SELECT, assignment from a query) and no DECLARE initialiser.
  *
  * What it does NOT prove: that `= ANY (<var>)` restricts every branch of the
- * RETURN QUERY (it is required to appear, not to be a top-level conjunct of
- * each read), or that the predicates are right — the integration cells do.
+ * RETURN QUERY or of the lock (it is required to appear, not to be a
+ * top-level conjunct of each read), that the cap is small, or that the
+ * predicates are right — the integration cells and the EXPLAIN measurement in
+ * the deviation log do.
  * It reads text through the shared SQL lexer (sql-scan.mjs), so a keyword in
  * a comment or a string literal is not a keyword.
  */
@@ -130,15 +138,40 @@ function locksTeamsSkipLocked(st) {
   return false;
 }
 
+/** Any `FOR [NO KEY] UPDATE | FOR [KEY] SHARE` locking clause. */
+function hasLockingClause(st) {
+  return st.some((t, i) =>
+    word(t, "FOR") &&
+    (word(st[i + 1], "UPDATE") || word(st[i + 1], "SHARE") || word(st[i + 1], "NO") || (word(st[i + 1], "KEY") && word(st[i + 2], "SHARE"))),
+  );
+}
+
+/** Every table named after FROM / JOIN (a parenthesised subquery is not a table). */
+function tablesRead(st) {
+  const out = new Set();
+  for (let i = 0; i < st.length; i++) {
+    if (!word(st[i], "FROM") && !word(st[i], "JOIN")) continue;
+    let j = i + 1;
+    if (word(st[j], "PUBLIC") && st[j + 1]?.type === TOKEN.DOT) j += 2;
+    if (st[j]?.type === TOKEN.WORD) out.add(st[j].text.toLowerCase());
+  }
+  return out;
+}
+
+/** `LIMIT <integer literal>` somewhere in the statement. */
+function limitedByLiteral(st) {
+  return st.some((t, i) => word(t, "LIMIT") && st[i + 1]?.type === TOKEN.NUMBER && /^[0-9]+$/.test(st[i + 1].text));
+}
+
 /** The variable of `SELECT ... INTO <var> ...` at depth 0, or null. */
 function intoVariable(st) {
   const into = st.findIndex((t) => t.depth === 0 && word(t, "INTO"));
   return into >= 0 && st[into + 1]?.type === TOKEN.WORD ? st[into + 1].text.toLowerCase() : null;
 }
 
-/** `<alias> . team_id = ANY ( <var> )` anywhere in the statement. */
-function restrictsTo(st, variable) {
-  return [...render(st).matchAll(/\b[a-z_][a-z0-9_]* \. team_id = ANY \( ([a-z_][a-z0-9_]*) \)/gi)]
+/** `<alias> . <column> = ANY ( <var> )` anywhere in the statement. */
+function restrictsTo(st, column, variable) {
+  return [...render(st).matchAll(new RegExp(String.raw`\b[a-z_][a-z0-9_]* \. ${column} = ANY \( ([a-z_][a-z0-9_]*) \)`, "gi"))]
     .some((m) => m[1].toLowerCase() === variable);
 }
 
@@ -173,11 +206,9 @@ export function pruneBodyShape(body) {
     problems.push(`the first statement of ${PRUNE_FUNCTION} must be the RLS-bypass check (IF NOT (SELECT rls_bypass_admits('team_member_keys')) THEN RAISE ... '42501').`);
   }
 
-  let lockAt = -1;
-  let lockVar = null;
+  const selects = [];
   let returnAt = -1;
   let isolationAt = -1;
-  let locks = 0;
   let returns = 0;
   statements.forEach((st, i) => {
     if (i === 0 && isBypassCheck(st)) return;
@@ -189,13 +220,7 @@ export function pruneBodyShape(body) {
       return;
     }
     if (word(st[0], "SELECT")) {
-      locks++;
-      lockAt = i;
-      lockVar = intoVariable(st);
-      if (!lockVar) problems.push(`${PRUNE_FUNCTION}'s team-lock statement must be SELECT ... INTO <variable>.`);
-      if (!locksTeamsSkipLocked(st)) {
-        problems.push(`${PRUNE_FUNCTION}'s team-lock statement must lock teams with FOR NO KEY UPDATE OF <teams alias> SKIP LOCKED.`);
-      }
+      selects.push({ at: i, st, variable: intoVariable(st), locking: hasLockingClause(st) });
       return;
     }
     const cond = guardCondition(st);
@@ -206,19 +231,47 @@ export function pruneBodyShape(body) {
       if (isIsolationGuard(cond)) isolationAt = i;
       return;
     }
-    problems.push(`unexpected statement in ${PRUNE_FUNCTION} (only guards, one team-lock SELECT and one RETURN QUERY are allowed): ${render(st).slice(0, 80)}`);
+    problems.push(`unexpected statement in ${PRUNE_FUNCTION} (only guards, one candidate SELECT, one team-lock SELECT and one RETURN QUERY are allowed): ${render(st).slice(0, 80)}`);
   });
 
-  if (locks !== 1) problems.push(`${PRUNE_FUNCTION} must have exactly one team-lock statement (SELECT ... INTO), found ${locks}.`);
+  const candidates = selects.filter((s) => !s.locking);
+  const locks = selects.filter((s) => s.locking);
+  if (candidates.length !== 1) {
+    problems.push(`${PRUNE_FUNCTION} must have exactly one unlocked candidate statement (SELECT ... INTO, no FOR UPDATE/SHARE), found ${candidates.length}.`);
+  }
+  if (locks.length !== 1) problems.push(`${PRUNE_FUNCTION} must have exactly one team-lock statement (SELECT ... INTO ... FOR NO KEY UPDATE), found ${locks.length}.`);
   if (returns !== 1) problems.push(`${PRUNE_FUNCTION} must have exactly one RETURN QUERY, found ${returns}.`);
-  if (isolationAt < 0 || (lockAt >= 0 && isolationAt > lockAt)) {
+
+  const [cand] = candidates;
+  const [lock] = locks;
+  if (candidates.length === 1) {
+    if (!cand.variable) problems.push(`${PRUNE_FUNCTION}'s candidate statement must be SELECT ... INTO <variable>.`);
+    if (!limitedByLiteral(cand.st)) {
+      problems.push(`${PRUNE_FUNCTION}'s candidate statement must cap the teams with LIMIT <integer literal> (not a parameter).`);
+    }
+  }
+  if (locks.length === 1) {
+    if (!lock.variable) problems.push(`${PRUNE_FUNCTION}'s team-lock statement must be SELECT ... INTO <variable>.`);
+    if (!locksTeamsSkipLocked(lock.st)) {
+      problems.push(`${PRUNE_FUNCTION}'s team-lock statement must lock teams with FOR NO KEY UPDATE OF <teams alias> SKIP LOCKED.`);
+    }
+    const others = [...tablesRead(lock.st)].filter((t) => t !== "teams");
+    if (others.length > 0) {
+      problems.push(`${PRUNE_FUNCTION}'s team-lock statement must read only teams (the search belongs in the candidate statement), found ${others.join(", ")}.`);
+    }
+    if (cand?.variable && !restrictsTo(lock.st, "id", cand.variable)) {
+      problems.push(`${PRUNE_FUNCTION}'s team-lock statement must restrict to the candidates (<teams alias>.id = ANY (${cand.variable})).`);
+    }
+    if (cand && cand.at > lock.at) problems.push(`${PRUNE_FUNCTION}'s candidate statement must precede its team-lock statement.`);
+  }
+  if (isolationAt < 0 || (lock && isolationAt > lock.at)) {
     problems.push(`${PRUNE_FUNCTION} must refuse unless current_setting('transaction_isolation') is 'read committed' (IF ... <> 'read committed' THEN RAISE), before the team lock.`);
   }
-  if (locks === 1 && returns === 1) {
-    if (lockAt > returnAt) problems.push(`${PRUNE_FUNCTION}'s team-lock statement must precede its RETURN QUERY.`);
+  if (locks.length === 1 && returns === 1) {
+    if (lock.at > returnAt) problems.push(`${PRUNE_FUNCTION}'s team-lock statement must precede its RETURN QUERY.`);
     if (returnAt !== statements.length - 1) problems.push(`${PRUNE_FUNCTION}'s RETURN QUERY must be its last statement.`);
-    if (lockVar && !restrictsTo(statements[returnAt], lockVar)) {
-      problems.push(`${PRUNE_FUNCTION}'s RETURN QUERY must restrict to the locked teams (<alias>.team_id = ANY (${lockVar})).`);
+    if (lock.variable && !restrictsTo(statements[returnAt], "team_id", lock.variable)) {
+      problems.push(`${PRUNE_FUNCTION}'s RETURN QUERY must restrict to the locked teams (<alias>.team_id = ANY (${lock.variable})).`);
     }
   }
   return { problems, returnQuery: returns === 1 ? render(statements[returnAt]) : null };

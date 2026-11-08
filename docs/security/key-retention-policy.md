@@ -37,11 +37,16 @@ deleted. It applies to both automated systems and manual maintenance operations.
   reviewing the reference classification (`scripts/checks/check-team-key-version-refs.mjs`).
   While it is off, old versions are retained indefinitely.
 - The prune is the SECURITY DEFINER function `team_member_key_prune(p_batch)`
-  (migrations `20261108120100_team_member_key_prune`, redefined by
-  `20261109100000_team_member_key_prune_team_lock`). It first locks up to
-  `p_batch` teams that have an old version no row references, `teams ... FOR
-  NO KEY UPDATE SKIP LOCKED`, then decides and deletes in a later statement,
-  for the locked teams only. The references are exactly the three above,
+  (migration `20261108120100_team_member_key_prune`, redefined by
+  `20261109100000_team_member_key_prune_team_lock` and
+  `20261109110000_team_member_key_prune_team_cap`). Three statements: it
+  chooses, without a lock, at most 25 teams that have an old version no row
+  references; locks exactly those teams by primary key, `teams ... FOR NO KEY
+  UPDATE SKIP LOCKED`; then decides and deletes in a later statement, for the
+  locked teams only. Team writers wait for that lock at most
+  `TEAM_KEY_LOCK_TIMEOUT_MS` (3 s), so it is held only for the deciding
+  statement, at most 25 audit rows and the commit — tens of milliseconds on a
+  team of 500 members, 20 000 entries and 50 000 history rows. The references are exactly the three above,
   normalised as the reader does (a stored version below 1 counts as 1); the
   current version is never selected. Each tick deletes at most
   `RETENTION_GC_BATCH_SIZE` (team, version) pairs.

@@ -851,14 +851,17 @@ export async function sweepExpiredAccessRequests(
 /**
  * Prune a batch of unreferenced TeamMemberKey versions (#1009) through the
  * team_member_key_prune SECURITY DEFINER function — the worker role holds
- * EXECUTE on it and no grant on team_member_keys. The function locks the
- * candidate teams (FOR NO KEY UPDATE SKIP LOCKED: a team a writer holds is
- * skipped) and then decides and deletes for those teams in a later statement:
+ * EXECUTE on it and no grant on team_member_keys. The function chooses at
+ * most 25 candidate teams without a lock, locks them (FOR NO KEY UPDATE SKIP
+ * LOCKED: a team a writer holds is skipped) and then decides and deletes for
+ * those teams in a later statement:
  * a version is deleted only when it is below the team's current version and
  * no entry, history row or mode-0 attachment of the team references it.
  * `batchSize` bounds the (team, version) pairs. The team locks are held until
  * this transaction commits, which is what keeps a copier of an old version
- * out until the deletion is final.
+ * out until the deletion is final — so nothing slow may run in this
+ * transaction after the call: every team writer waits for it at most
+ * TEAM_KEY_LOCK_TIMEOUT_MS.
  *
  * Emits one TEAM_MEMBER_KEY_PRUNED row per (tenant, team) in the same
  * transaction, carrying the versions, the row count and the holders' user

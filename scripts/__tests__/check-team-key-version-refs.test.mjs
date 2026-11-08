@@ -167,8 +167,9 @@ describe("check-team-key-version-refs", () => {
     expect(code).toBe(1);
     expect(out).toContain("STALE classification MasterKeyRotation.targetVersion");
   });
-  it("does not count a reference named only in the team-lock statement's pre-filter", () => {
-    // The pre-filter reads before the locks are held; the RETURN QUERY decides.
+
+  it("does not count a reference named only in the candidate statement", () => {
+    // The candidate statement reads before the locks are held; the RETURN QUERY decides.
     const block = /       AND NOT EXISTS \(\n         SELECT 1 FROM team_password_entry_histories h\n[\s\S]*?\n       \)\n/;
     expect(PRUNE_SQL).toMatch(block);
     write(PRUNE_PATH, PRUNE_SQL.replace(block, ""));
@@ -178,7 +179,7 @@ describe("check-team-key-version-refs", () => {
     expect(out).toContain("RETURN QUERY");
   });
 
-  describe("body shape (lock the teams, then decide in a later statement)", () => {
+  describe("body shape (choose unlocked, lock the teams, then decide in a later statement)", () => {
     const LOCK_STATEMENT = /  SELECT array_agg\(s\.id\) INTO v_teams\n[\s\S]*?FOR NO KEY UPDATE OF t SKIP LOCKED\n    \) s;\n/;
 
     function shapeFails(sql, message) {
@@ -190,7 +191,7 @@ describe("check-team-key-version-refs", () => {
 
     it("fails when the team-lock statement is missing", () => {
       expect(PRUNE_SQL).toMatch(LOCK_STATEMENT);
-      shapeFails(PRUNE_SQL.replace(LOCK_STATEMENT, ""), "must have exactly one team-lock statement (SELECT ... INTO), found 0");
+      shapeFails(PRUNE_SQL.replace(LOCK_STATEMENT, ""), "must have exactly one team-lock statement (SELECT ... INTO ... FOR NO KEY UPDATE), found 0");
     });
 
     it("fails when the team lock does not skip locked teams", () => {
@@ -217,7 +218,7 @@ describe("check-team-key-version-refs", () => {
     it("fails on a second SELECT statement", () => {
       shapeFails(
         replaceOnce(PRUNE_SQL, "  RETURN QUERY\n", "  SELECT count(*) INTO v_teams FROM team_member_keys;\n  RETURN QUERY\n"),
-        "must have exactly one team-lock statement (SELECT ... INTO), found 2",
+        "must have exactly one unlocked candidate statement (SELECT ... INTO, no FOR UPDATE/SHARE), found 2",
       );
     });
 
@@ -244,7 +245,7 @@ describe("check-team-key-version-refs", () => {
     it("fails when the bypass check is not the first statement", () => {
       const bypass = /  IF NOT \(SELECT public\.rls_bypass_admits\('team_member_keys'\)\) THEN\n[\s\S]*?END IF;\n/.exec(PRUNE_SQL)[0];
       shapeFails(
-        PRUNE_SQL.replace(bypass, "").replace("  -- Step 1:", `${bypass}  -- Step 1:`),
+        PRUNE_SQL.replace(bypass, "").replace("  -- Step 1,", `${bypass}  -- Step 1,`),
         "first statement of team_member_key_prune must be the RLS-bypass check",
       );
     });
@@ -252,6 +253,56 @@ describe("check-team-key-version-refs", () => {
     it("fails without the READ COMMITTED guard", () => {
       const guard = /  IF current_setting\('transaction_isolation'\)[\s\S]*?END IF;\n/.exec(PRUNE_SQL)[0];
       shapeFails(PRUNE_SQL.replace(guard, ""), "must refuse unless current_setting('transaction_isolation') is 'read committed'");
+    });
+
+    const CANDIDATE_STATEMENT = /  SELECT array_agg\(c\.id\) INTO v_cands\n[\s\S]*?\n    \) c;\n/;
+
+    it("fails without the unlocked candidate statement", () => {
+      expect(PRUNE_SQL).toMatch(CANDIDATE_STATEMENT);
+      shapeFails(PRUNE_SQL.replace(CANDIDATE_STATEMENT, ""), "must have exactly one unlocked candidate statement (SELECT ... INTO, no FOR UPDATE/SHARE), found 0");
+    });
+
+    it("fails when the candidate statement takes a lock (the search would run under it)", () => {
+      shapeFails(
+        replaceOnce(PRUNE_SQL, "       LIMIT 25\n    ) c;", "       LIMIT 25\n       FOR SHARE OF t\n    ) c;"),
+        "must have exactly one team-lock statement (SELECT ... INTO ... FOR NO KEY UPDATE), found 2",
+      );
+    });
+
+    it("fails when the candidate cap is the batch parameter", () => {
+      shapeFails(replaceOnce(PRUNE_SQL, "       LIMIT 25\n", "       LIMIT p_batch\n"), "must cap the teams with LIMIT <integer literal>");
+    });
+
+    it("passes another literal cap (allow side of the cell above)", () => {
+      write(PRUNE_PATH, replaceOnce(PRUNE_SQL, "       LIMIT 25\n", "       LIMIT 10\n"));
+      const { code, out } = run();
+      expect(code, out).toBe(0);
+    });
+
+    it("fails when the team-lock statement reads another table", () => {
+      shapeFails(
+        replaceOnce(
+          PRUNE_SQL,
+          "       WHERE t.id = ANY (v_cands)\n",
+          "       WHERE t.id = ANY (v_cands)\n         AND EXISTS (SELECT 1 FROM team_member_keys k2 WHERE k2.team_id = t.id)\n",
+        ),
+        "team-lock statement must read only teams",
+      );
+    });
+
+    it("fails when the team-lock statement is not restricted to the candidates", () => {
+      shapeFails(replaceOnce(PRUNE_SQL, "       WHERE t.id = ANY (v_cands)\n", "       WHERE true\n"), "must restrict to the candidates");
+    });
+
+    it("fails when the lock precedes the candidate search", () => {
+      const cand = CANDIDATE_STATEMENT.exec(PRUNE_SQL)[0];
+      const lock = LOCK_STATEMENT.exec(PRUNE_SQL)[0];
+      shapeFails(PRUNE_SQL.replace(cand, "").replace(lock, `${lock}${cand}`), "candidate statement must precede its team-lock statement");
+    });
+
+    it("fails on the round-1 body (lock and search in one statement)", () => {
+      const round1 = readFileSync(join(MIGRATIONS, "20261109100000_team_member_key_prune_team_lock", "migration.sql"), "utf8");
+      shapeFails(round1, "team-lock statement must read only teams");
     });
 
     it("fails on dynamic SQL", () => {

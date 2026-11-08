@@ -19,14 +19,16 @@
  *   2. The body read from the LATEST migration that
  *      `CREATE [OR REPLACE] FUNCTION … team_member_key_prune` has the shape
  *      the concurrency argument needs (lib/team-key-prune-shape.mjs): the
- *      RLS-bypass check first, a READ COMMITTED guard, exactly one statement
- *      locking `teams` FOR NO KEY UPDATE … SKIP LOCKED, then exactly one
- *      RETURN QUERY restricted to the locked teams, and nothing else.
+ *      RLS-bypass check first, a READ COMMITTED guard, exactly one unlocked
+ *      candidate statement capped by a literal LIMIT, then exactly one
+ *      statement locking only those `teams` rows FOR NO KEY UPDATE … SKIP
+ *      LOCKED, then exactly one RETURN QUERY restricted to the locked teams,
+ *      and nothing else.
  *   3. That RETURN QUERY — the statement that decides and deletes — names
  *      every `reference`, `current` and `self` pair as `<alias>.<column>`, the
  *      alias bound (FROM / JOIN / USING) to that pair's table. A mention only
- *      in the team-lock statement's pre-filter does not count: that statement
- *      reads before the locks are held and only chooses what to lock.
+ *      in the candidate statement does not count: that statement reads
+ *      before the locks are held and only chooses what to lock.
  *   4. The body never names `item_key_team_key_version` (the re-key marker is
  *      not a reference; keying the decision on it would keep or drop keys by
  *      the wrong rule).

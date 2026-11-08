@@ -3,12 +3,15 @@
  * real database — sweepOnce with the flag on, on the worker role's connection,
  * through the team_member_key_prune SECURITY DEFINER function.
  *
- * The function locks the teams it considers (`teams FOR NO KEY UPDATE SKIP
- * LOCKED`), then, in a later statement (a new READ COMMITTED snapshot taken
- * with the locks held), decides and deletes for the locked teams only. Every
- * transaction that copies a non-current version (restore, the PUT snapshot,
- * the re-key) holds `teams FOR SHARE` for its whole run, so the prune skips
- * its team, and sees any copier of a team it did lock as committed.
+ * The function chooses at most 25 candidate teams without a lock, locks them
+ * by primary key (`teams FOR NO KEY UPDATE SKIP LOCKED`), then, in a later
+ * statement (a new READ COMMITTED snapshot taken with the locks held), decides
+ * and deletes for the locked teams only. Every transaction that copies a
+ * non-current version (restore, the PUT snapshot, the re-key) holds `teams FOR
+ * SHARE` for its whole run, so the prune skips its team, and sees any copier
+ * of a team it did lock as committed. That the body has this statement order
+ * is the shape gate's job (check-team-key-version-refs.mjs, and the live
+ * pg_get_functiondef cell below); these cells check behaviour.
  *
  * Reference cells assert by (team, version), never by a count: the prune is
  * global (it sweeps every team of the database, the developer's dev data
@@ -26,19 +29,32 @@
  *     the same call; after A commits, k is kept by the entry. Red without the
  *     lock statement (C sees neither h nor the entry at k) and without SKIP
  *     LOCKED (C waits on A).
- *   - "SS1, A commits during the call": the same setup, A released as soon as
- *     the prune's backend is observed running the function (or the call has
- *     settled). For any commit point of A, k survives. Red for a body that
- *     decides before it locks (one statement: its snapshot predates A's
- *     commit, the lock succeeds after it) once the window is wide enough to
- *     observe — the red-proof widens it in a test-local mutant.
+ *   - "SS1, A commits while the prune is parked": the same setup, but the
+ *     function (called directly as the worker role) is parked before its first
+ *     read: the test holds `attachments` ACCESS EXCLUSIVE, and the candidate
+ *     statement names attachments, so the backend waits when it plans that
+ *     statement. A commits while it is parked, then the gate opens; k must
+ *     survive. This is deterministic, but it is NOT a test of "decide before
+ *     lock": PostgreSQL takes a statement's relation locks when it plans it,
+ *     before the statement's snapshot, so no park point reachable without a
+ *     production change lies between one statement's snapshot and its row
+ *     locks. A one-statement decide-then-lock body passes it (and every cell
+ *     here) unless A commits inside that statement's execution — a timing
+ *     window this file cannot hold open. The shape gate excludes that body
+ *     ("decision precedes the lock", "the lock reads only teams").
+ *   - "a writer during the prune's lock": a FOR SHARE writer (production
+ *     lockTeamKeyVersion) that starts while a prune transaction holds the team
+ *     lock waits on it and completes once the prune commits — the allow side
+ *     of the bounded wait every team writer has.
  *   - "skip": a team held FOR SHARE by an open writer is skipped, then pruned
  *     by a later call once the writer committed.
  *   - restore / snapshot: A moves a reference WITHOUT taking the team lock and
- *     stays open; the deciding statement reads one snapshot, so a reference
- *     an open writer is moving is still seen on the side it left. The
- *     negative controls run a two-statement check-then-delete straddling A's
- *     commit and lose the version, which shows the harness can observe a loss.
+ *     stays open; B never acts on A's uncommitted move — the reference is
+ *     still seen on the side it left, and k survives A's commit. The negative
+ *     controls run a two-statement check-then-delete straddling A's commit and
+ *     lose the version, which shows the harness can observe a loss.
+ *   - isolation: under REPEATABLE READ the function refuses (25001) and
+ *     deletes nothing; the argument above needs a new snapshot per statement.
  *   - rotation: A's UPDATE of the team row holds it FOR NO KEY UPDATE, so the
  *     team is skipped while A is open and pruned by the new rule afterwards.
  */
@@ -57,6 +73,10 @@ import { sweepOnce } from "@/workers/retention-gc-worker/sweep";
 import { BYPASS_GRANT, defineGrant, setBypassGucs, type BypassGrant } from "@/lib/tenant-rls-grants";
 import { BYPASS_PURPOSE } from "@/lib/tenant-rls-purpose";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
+import { lockTeamKeyVersion } from "@/lib/team/team-key-rotation-lock";
+import { TEAM_KEY_LOCK_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
+import { pgErrorCode } from "@/lib/prisma/prisma-error";
+import { Prisma } from "@prisma/client";
 import { pruneBodyShape, pruneFunctionBody } from "../../../scripts/checks/lib/team-key-prune-shape.mjs";
 
 const BATCH = 1000;
@@ -362,6 +382,25 @@ describe("team key prune (#1009)", () => {
       ).rejects.toThrow("TEAM_KEY_PRUNE_BATCH");
     });
 
+    it("refuses REPEATABLE READ (25001) and deletes nothing", async () => {
+      await pruneUntilDone();
+      const teamId = await seedTeam(3);
+      const refused = await ctx.retentionWorker.prisma
+        .$transaction(
+          async (tx) => {
+            await setBypassGucs(tx, PRUNE_GRANT);
+            return tx.$queryRawUnsafe(`SELECT * FROM team_member_key_prune(${BATCH})`);
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+        )
+        .then(() => null, (e: unknown) => e);
+      expect(pgErrorCode(refused)).toBe("25001");
+      expect(String(refused)).toContain("TEAM_KEY_PRUNE_ISOLATION");
+      expect(await versions(teamId)).toEqual([1, 2, 3]);
+      await pruneUntilDone(); // control: READ COMMITTED prunes the same team
+      expect(await versions(teamId)).toEqual([3]);
+    });
+
     it("grants EXECUTE to the worker role only: passwd_app is denied, PUBLIC holds nothing", async () => {
       const app = new Client({ connectionString: appConnectionString() });
       await app.connect();
@@ -549,23 +588,6 @@ describe("team key prune (#1009)", () => {
       throw new Error(`the prune neither settled nor waited on pid ${pid} within ${BLOCK_WAIT_MS}ms`);
     }
 
-    /** Wait until `work` settles or a worker backend is running the prune function, and say which. */
-    async function settledOrPruning(work: Promise<unknown>): Promise<"settled" | "pruning"> {
-      let settled = false;
-      void work.then(() => { settled = true; }, () => { settled = true; });
-      const deadline = Date.now() + BLOCK_WAIT_MS;
-      while (Date.now() < deadline) {
-        if (settled) return "settled";
-        const { rows: running } = await ctx.su.pool.query(
-          `SELECT pid FROM pg_stat_activity
-            WHERE usename = 'passwd_retention_gc_worker' AND state = 'active' AND query LIKE '%team_member_key_prune(%'`,
-        );
-        if (running.length > 0) return "pruning";
-        await new Promise((res) => setTimeout(res, 5));
-      }
-      throw new Error(`the prune neither settled nor ran within ${BLOCK_WAIT_MS}ms`);
-    }
-
     /**
      * The SS1 setup: team at v3, entry at v3, history row h at k = 1 (v2 is
      * unreferenced); A = a restore-shape writer holding teams FOR SHARE and the
@@ -620,23 +642,65 @@ describe("team key prune (#1009)", () => {
       expect(await versions(teamId)).toEqual([1, 3]); // k kept by the entry; v2 now goes
     });
 
-    it("SS1, A commits during the call: k survives wherever A's commit lands", async () => {
+    it("SS1, A commits while the prune is parked before its first read: k survives", async () => {
       const { teamId, entryId, control, writer } = await restoreWithDeletedSource();
-      const tick = pruneTick();
+      // The candidate statement names attachments; holding the table ACCESS
+      // EXCLUSIVE parks the prune when it plans that statement, before it
+      // reads or locks anything. A touched no attachments row, so it commits.
+      const gate = await race().holdRowLock(`LOCK TABLE attachments IN ACCESS EXCLUSIVE MODE`, []);
+      let call: Promise<PruneRow[]> | undefined;
       try {
-        await settledOrPruning(tick);
+        const pending = callAsWorker(PRUNE_GRANT, (tx) =>
+          tx.$queryRawUnsafe<PruneRow[]>(`SELECT * FROM team_member_key_prune(${BATCH})`),
+        );
+        call = pending;
+        pending.catch(() => {});
+        const parked = await race().waitForBackendBlockedBy(gate.pid);
+        expect(await race().waitingQueryOf(parked)).toContain("team_member_key_prune");
+        await expect(writer.release()).resolves.toBeUndefined();
       } catch (e) {
         await writer.abort();
-        await tick.catch(() => {});
+        await gate.release();
+        await call?.catch(() => {});
         throw e;
       }
-      await expect(writer.release()).resolves.toBeUndefined();
-      expect((await tick).team_member_keys).not.toBe(-1);
-      expect(await versions(control)).toEqual([3]);
+      await gate.release();
+      const pruned = (await call)
+        .filter((r) => r.pruned_team_id === teamId || r.pruned_team_id === control)
+        .map((r) => `${r.pruned_team_id === teamId ? "team" : "control"} v${r.pruned_key_version}`)
+        .sort();
+      expect(pruned).toEqual(["control v1", "control v2", "team v2"]); // k = 1 of the team is kept
       expect(await rows(`SELECT team_key_version AS v FROM team_password_entries WHERE id = $1::uuid`, entryId)).toEqual([{ v: 1 }]);
-      expect(await versions(teamId)).toContain(1);
-      await pruneUntilDone();
       expect(await versions(teamId)).toEqual([1, 3]);
+    });
+
+    it("a team writer that starts while the prune holds the team lock completes once the prune commits", async () => {
+      await pruneUntilDone();
+      const teamId = await seedTeam(3);
+      const prune = await holdPrismaWriter(ctx.retentionWorker.prisma, async (tx) => {
+        await setBypassGucs(tx, PRUNE_GRANT);
+        const pruned = await tx.$queryRawUnsafe<PruneRow[]>(`SELECT * FROM team_member_key_prune(${BATCH})`);
+        if (!pruned.some((r) => r.pruned_team_id === teamId)) throw new Error("the prune did not lock and prune the cell's team");
+      }, HOLD_TIMEOUT_MS);
+      let write: Promise<Awaited<ReturnType<typeof lockTeamKeyVersion>>> | undefined;
+      const started = Date.now();
+      try {
+        const pending = ctx.su.prisma.$transaction(async (tx) => {
+          await setBypassRlsGucs(tx);
+          return lockTeamKeyVersion(tx, teamId);
+        });
+        write = pending;
+        pending.catch(() => {});
+        await race().waitForBackendBlockedBy(prune.pid);
+      } catch (e) {
+        await prune.abort();
+        await write?.catch(() => {});
+        throw e;
+      }
+      await expect(prune.release()).resolves.toBeUndefined();
+      await expect(write).resolves.toMatchObject({ teamKeyVersion: 3, tenantId });
+      expect(Date.now() - started).toBeLessThan(TEAM_KEY_LOCK_TIMEOUT_MS);
+      expect(await versions(teamId)).toEqual([3]);
     });
 
     it("skip: a team an open writer holds FOR SHARE is skipped, then pruned by a later call once it committed", async () => {

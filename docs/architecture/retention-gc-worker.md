@@ -41,12 +41,14 @@ try/catch, each **off by default**. Their counts appear in the heartbeat's
 | `attachment_objects` (objects) | `RETENTION_GC_BLOB_SWEEP_MODE=report\|delete` | external attachment objects no row references, past the grace period | none (counts are logged) |
 
 **Team key prune** (`sweepTeamMemberKeys`): calls the SECURITY DEFINER
-function `team_member_key_prune(p_batch)`, which locks the candidate teams
-(`FOR NO KEY UPDATE SKIP LOCKED` — a team a restore, entry update, re-key or
-rotation holds is skipped that tick, never waited on) and then, in a later
-statement that sees every such writer of a locked team as committed, decides
-and deletes, bounded to `RETENTION_GC_BATCH_SIZE` (team, version) pairs per
-tick. The worker role holds EXECUTE on it and no table grant; the
+function `team_member_key_prune(p_batch)`, which chooses at most 25 candidate
+teams without a lock, locks them by primary key (`FOR NO KEY UPDATE SKIP
+LOCKED` — a team a restore, entry update, re-key or rotation holds is skipped
+that tick, never waited on) and then, in a later statement that sees every
+such writer of a locked team as committed, decides and deletes, bounded to
+`RETENTION_GC_BATCH_SIZE` (team, version) pairs per tick. The team locks last
+only for that statement, the audit rows and the commit, because every team
+writer gives up after a 3 s wait. The worker role holds EXECUTE on it and no table grant; the
 function refuses outside the RLS bypass, and while enforcement (`#921`) is off a
 bypass whose grant omits `team_member_keys` is reported rather than refused.
 Grant: `BYPASS_GRANT.RETENTION_TEAM_KEY_PRUNE`. Policy and the concurrency

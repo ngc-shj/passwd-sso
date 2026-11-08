@@ -130,3 +130,48 @@
   logged once per `start()` from `createWorker`'s loop.
 - D18 (FF3) — `--init-blob-marker` skips both database-URL refines (at-least-one URL, production
   scoped URL); every other refine still applies to it.
+- D12 correction (round 2, testing N2): the restore / snapshot cells prove that B never acts on
+  an open writer's uncommitted move (the reference is still seen on the side it left, and k
+  survives the commit); that the body decides in one statement is the shape gate's job, not
+  theirs.
+
+## Code review round 2
+
+- D19 (functionality N1) — `20261109110000_team_member_key_prune_team_cap` (forward
+  `CREATE OR REPLACE`) splits the round-1 lock statement in two: (1) an unlocked candidate
+  statement with the per-pair pre-filter, `LIMIT 25`; (2) `SELECT … FROM teams t WHERE t.id =
+  ANY (v_cands) … FOR NO KEY UPDATE OF t SKIP LOCKED`; (3) the unchanged RETURN QUERY on a fresh
+  snapshot. Reason: round 1 locked up to `p_batch` (1000) teams while its pre-filter scan was
+  still running and held them through the decision, the audit rows and the commit; every team
+  writer waits at most `TEAM_KEY_LOCK_TIMEOUT_MS` (3 s) and then fails.
+- D20 — the cap is a constant in the body (25), not a parameter: a second parameter changes the
+  signature, which is a new function (EXECUTE grant, `bootstrap-rds-roles.mjs`,
+  `db-grants-manifest.json`, the worker's call) for a value nothing needs to tune. 25 keeps the
+  lock footprint and the audit rows per call small; teams beyond the first 25 (id order) are
+  reached on later ticks because a team leaves the candidate set once its unreferenced versions
+  are gone. A team a writer keeps locked holds one of the 25 slots for that tick only.
+- D21 (measurement, isolated DB `tmk_perf_r2`, created/migrated/dropped) — 1 team × 500
+  members × 4 versions (v1 unreferenced), 20 000 entries, 50 001 histories, 2 000 mode-0
+  attachments, plus 30 small teams with unreferenced versions; ANALYZEd. EXPLAIN ANALYZE:
+  candidate statement 163–167 ms (unlocked), lock statement 0.05 ms (25 teams), decide+delete
+  27.2–27.6 ms (49 pairs). Lock-to-commit, statement by statement with one audit INSERT per
+  team: 30.7 ms (25 teams, 49 pairs) and 19.2 ms (6 teams); a FOR SHARE writer on the big team
+  queued right after the lock waited 28.5 ms. The round-1 lock statement (search under lock,
+  `LIMIT 1000`) took 176–178 ms on the same data, all of it under the team locks.
+- D22 (shape gate) — rules added: exactly one unlocked candidate `SELECT … INTO` (no FOR
+  UPDATE/SHARE) with `LIMIT <integer literal>`; exactly one locking `SELECT … INTO` that reads
+  only `teams`, restricts to `<alias>.id = ANY (<cands>)` and precedes the RETURN QUERY; the
+  candidate precedes the lock. The round-1 body now fails the gate (self-test cell).
+- D23 (testing N1) — a deterministic park point exists only before a statement's snapshot:
+  PostgreSQL takes a statement's relation locks when it plans it. The "parked" cell holds
+  `attachments` ACCESS EXCLUSIVE so the function waits when it plans its candidate statement;
+  A commits there. It is deterministic but does not distinguish a one-statement
+  decide-then-lock body (red-proof m2 green in every behavioural cell); that body is excluded
+  by the shape gate's "decision precedes the lock" and "lock reads only teams" cells. No
+  production change was made to create a park point. The round-1 timing harness
+  (`settledOrPruning`, the `pg_sleep` mutant) is gone.
+- D24 (testing N3) — live cell: REPEATABLE READ, worker role, production grant → 25001
+  `TEAM_KEY_PRUNE_ISOLATION`, the seeded versions stay; READ COMMITTED then prunes them.
+- D25 (allow side of the bounded wait) — live cell: a prune transaction holds the team lock, a
+  production `lockTeamKeyVersion` writer waits on it, and completes with the team once the
+  prune commits, inside `TEAM_KEY_LOCK_TIMEOUT_MS`.

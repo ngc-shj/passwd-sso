@@ -96,3 +96,29 @@ TF1, TF6 · RT8 TF8 · RT10 TF2, TF3 · RT11 TF5 · R42 checked.
   TF5 — bounded cleanup, throws on DeleteObjects errors. TF7 — named errors + rolsuper check.
 - Verification: vitest 21626 pass; extension 2761; typecheck/lint 0; integration 1442 pass (MinIO);
   gates, audit-db-grants, worker bundle smoke 0; `next build` 0.
+
+### Round 2
+Round 1 fixes verified: security no findings (SS1, SS2 resolved); functionality FF1–FF4 resolved;
+testing TF1–TF8 resolved. New:
+- RN1 [Major, functionality] The prune held FOR NO KEY UPDATE on up to p_batch teams from a lock
+  statement that also ran the pre-filter, through the decision, audit and commit, while every team
+  writer waits at most 3 s. Action: migration `20261109110000_team_member_key_prune_team_cap` —
+  unlocked candidate statement (`LIMIT 25`, constant in the body, D20) → cheap lock statement over
+  the candidates (`FOR NO KEY UPDATE OF t SKIP LOCKED`) → deciding `RETURN QUERY` on the locked set.
+  Measured on an isolated seeded DB (500 members, 20k entries, 50k histories, 2k mode-0
+  attachments, 30 teams): lock-to-commit 30.7 ms, a queued FOR SHARE writer waited 28.5 ms (D21).
+  Shape gate updated (34 self-test cells, D22); integration allow cell — a production
+  `lockTeamKeyVersion` writer waits on the prune and completes within the budget (D25).
+  A lock wait past 3 s surfaces as `TEAM_KEY_VERSION_MISMATCH` ("key outdated") — pre-existing for
+  rotation; unreachable for the prune at the measured window. A dedicated `TEAM_BUSY` code is a
+  follow-up candidate (not in this change).
+- RTN1 [Minor, testing] The in-flight cell never interleaved. Action: deterministic "parked" cell
+  (ACCESS EXCLUSIVE on `attachments` parks the function before its first read). The
+  decide-then-lock mutant cannot be caught behaviourally without a production change (relation
+  locks precede the snapshot); the shape gate blocks it (D23).
+- RTN2 [Minor] Header and D12 wording corrected. RTN3 [Minor] Live REPEATABLE READ → 25001 cell with
+  a READ COMMITTED control (D24).
+- Red-proof (isolated DB): lock removed → SS1/skip/writer red; no SKIP LOCKED → SS1/skip red;
+  isolation guard removed → isolation red; decide-then-lock → gate-only.
+- Verification: vitest 21634; extension 2761; typecheck/lint 0; integration 1444 (MinIO); gates,
+  audit-db-grants (442), worker smoke 0; `next build` 0.
