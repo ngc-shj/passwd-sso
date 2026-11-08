@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
-const { mockAuth, mockPrismaPasswordEntry, mockPrismaAttachment, mockWithUserTenantRls, mockGetObject, mockDeleteObject } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaPasswordEntry, mockPrismaAttachment, mockWithUserTenantRls, mockGetObject, mockDeleteObject, mockExecuteRaw, mockDeleteBlobs } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaPasswordEntry: {
     findUnique: vi.fn(),
@@ -13,6 +13,8 @@ const { mockAuth, mockPrismaPasswordEntry, mockPrismaAttachment, mockWithUserTen
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockGetObject: vi.fn(),
   mockDeleteObject: vi.fn(),
+  mockExecuteRaw: vi.fn(),
+  mockDeleteBlobs: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -32,6 +34,9 @@ vi.mock("@/lib/blob-store", () => ({
     deleteObject: mockDeleteObject,
   }),
 }));
+vi.mock("@/lib/blob-store/cleanup", () => ({
+  deleteAttachmentBlobs: mockDeleteBlobs,
+}));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: vi.fn(),
   extractRequestMeta: () => ({ ip: "127.0.0.1" }),
@@ -42,6 +47,10 @@ vi.mock("@/lib/http/with-request-log", () => ({
 }));
 
 import { GET, DELETE } from "./route";
+import { BlobRefInvalidError } from "@/lib/blob-store/object-ref";
+
+// The transaction client the DELETE's withUserTenantRls callback receives.
+const tx = { attachment: mockPrismaAttachment, $executeRaw: mockExecuteRaw };
 
 function createParams(id: string, attachmentId: string) {
   return { params: Promise.resolve({ id, attachmentId }) };
@@ -204,6 +213,19 @@ describe("GET /api/passwords/[id]/attachments/[attachmentId]", () => {
     expect(json.cekKeyVersion).toBeNull();
     expect(json.cekWrapAadVersion).toBeNull();
   });
+
+  it("returns 409 BLOB_REF_INVALID when the stored ref does not name the row's object", async () => {
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue({ userId: "user-1" });
+    mockPrismaAttachment.findUnique.mockResolvedValue(mode0Attachment);
+    mockGetObject.mockRejectedValue(new BlobRefInvalidError());
+    const res = await GET(
+      createRequest("GET", "http://localhost:3000/api/passwords/pw-1/attachments/att-1"),
+      createParams("pw-1", "att-1")
+    );
+    const json = await res.json();
+    expect(res.status).toBe(409);
+    expect(json.error).toBe("BLOB_REF_INVALID");
+  });
 });
 
 describe("DELETE /api/passwords/[id]/attachments/[attachmentId]", () => {
@@ -211,6 +233,11 @@ describe("DELETE /api/passwords/[id]/attachments/[attachmentId]", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockDeleteObject.mockResolvedValue(undefined);
+    mockDeleteBlobs.mockResolvedValue(undefined);
+    mockExecuteRaw.mockResolvedValue(1);
+    mockWithUserTenantRls.mockImplementation(
+      async (_userId: string, fn: (tenantId: string, client: typeof tx) => unknown) => fn("t1", tx),
+    );
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -239,6 +266,8 @@ describe("DELETE /api/passwords/[id]/attachments/[attachmentId]", () => {
       createParams("pw-1", "att-1")
     );
     expect(res.status).toBe(404);
+    expect(mockPrismaAttachment.delete).not.toHaveBeenCalled();
+    expect(mockDeleteBlobs).not.toHaveBeenCalled();
   });
 
   it("deletes attachment successfully", async () => {
@@ -260,5 +289,41 @@ describe("DELETE /api/passwords/[id]/attachments/[attachmentId]", () => {
     expect(mockPrismaAttachment.delete).toHaveBeenCalledWith({
       where: { id: "att-1", passwordEntryId: "pw-1" },
     });
+  });
+
+  it("deletes the row in a transaction under the per-user lock, then its object after commit", async () => {
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue({ userId: "user-1" });
+    const stored = Buffer.from("ref");
+    mockPrismaAttachment.findUnique.mockResolvedValue({ id: "att-1", filename: "test.pdf", encryptedData: stored });
+    mockPrismaAttachment.delete.mockResolvedValue({});
+
+    const res = await DELETE(
+      createRequest("DELETE", "http://localhost:3000/api/passwords/pw-1/attachments/att-1"),
+      createParams("pw-1", "att-1")
+    );
+    expect(res.status).toBe(200);
+    expect(
+      mockExecuteRaw.mock.calls.some((c) => String(c[0]).includes("pg_advisory_xact_lock")),
+    ).toBe(true);
+    expect(mockDeleteBlobs).toHaveBeenCalledWith([
+      { stored, context: { attachmentId: "att-1", entryId: "pw-1" } },
+    ]);
+    expect(mockPrismaAttachment.delete.mock.invocationCallOrder[0]).toBeLessThan(
+      mockDeleteBlobs.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("leaves the object in place when the row delete fails", async () => {
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue({ userId: "user-1" });
+    mockPrismaAttachment.findUnique.mockResolvedValue({ id: "att-1", filename: "test.pdf", encryptedData: Buffer.from("ref") });
+    mockPrismaAttachment.delete.mockRejectedValue(new Error("db down"));
+
+    await expect(
+      DELETE(
+        createRequest("DELETE", "http://localhost:3000/api/passwords/pw-1/attachments/att-1"),
+        createParams("pw-1", "att-1")
+      ),
+    ).rejects.toThrow("db down");
+    expect(mockDeleteBlobs).not.toHaveBeenCalled();
   });
 });

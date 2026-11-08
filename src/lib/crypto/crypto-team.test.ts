@@ -14,8 +14,13 @@ import {
   CURRENT_TEAM_WRAP_VERSION,
   HKDF_ECDH_WRAP_INFO,
   HKDF_ITEM_ENC_INFO,
+  HKDF_ITEM_CEKWRAP_INFO,
   generateItemKey,
   deriveItemEncryptionKey,
+  deriveItemCekWrapKey,
+  wrapTeamAttachmentCek,
+  unwrapTeamAttachmentCek,
+  type TeamAttachmentCekWrapContext,
   wrapItemKey,
   unwrapItemKey,
   generateECDHKeyPair,
@@ -775,6 +780,79 @@ describe("crypto-team", () => {
 
       const wrapped = await wrapItemKey(itemKey, teamEncKey, aad1);
       await expect(unwrapItemKey(wrapped, teamEncKey, aad2)).rejects.toThrow();
+    });
+  });
+
+  // Team attachment CEK wrap (TW scope, mode-2)
+  describe("team attachment CEK wrap (TW scope)", () => {
+    const TW_CTX: TeamAttachmentCekWrapContext = {
+      teamId: "team-tw-rt",
+      entryId: "entry-tw-rt",
+      attachmentId: "attachment-tw-rt",
+      itemKeyVersion: 2,
+      cekWrapAadVersion: 1,
+    };
+    const newCek = () => crypto.getRandomValues(new Uint8Array(32));
+
+    it("HKDF_ITEM_CEKWRAP_INFO has its own domain value", () => {
+      expect(HKDF_ITEM_CEKWRAP_INFO).toBe("passwd-sso-item-cekwrap-v1");
+      expect(HKDF_ITEM_CEKWRAP_INFO).not.toBe(HKDF_ITEM_ENC_INFO);
+    });
+
+    it("derives a non-extractable AES-256-GCM key for encrypt/decrypt", async () => {
+      const key = await deriveItemCekWrapKey(generateItemKey());
+      expect(key.algorithm).toMatchObject({ name: "AES-GCM", length: 256 });
+      expect(key.extractable).toBe(false);
+      expect([...key.usages].sort()).toEqual(["decrypt", "encrypt"]);
+    });
+
+    it("wrap→unwrap round-trips the CEK under the same ItemKey and AAD", async () => {
+      const itemKey = generateItemKey();
+      const cek = newCek();
+      const wrapped = await wrapTeamAttachmentCek(cek, await deriveItemCekWrapKey(itemKey), TW_CTX);
+      // A separately derived key from the same ItemKey opens it (determinism).
+      const unwrapped = await unwrapTeamAttachmentCek(wrapped, await deriveItemCekWrapKey(itemKey), TW_CTX);
+      expect(unwrapped).toEqual(cek);
+    });
+
+    it.each([
+      ["teamId", { teamId: "other-team" }],
+      ["entryId", { entryId: "other-entry" }],
+      ["attachmentId", { attachmentId: "other-attachment" }],
+      ["itemKeyVersion", { itemKeyVersion: 3 }],
+      ["cekWrapAadVersion", { cekWrapAadVersion: 2 }],
+    ] as const)("anti-vacuous: unwrap under a different %s rejects", async (_field, change) => {
+      const itemKey = generateItemKey();
+      const key = await deriveItemCekWrapKey(itemKey);
+      const wrapped = await wrapTeamAttachmentCek(newCek(), key, TW_CTX);
+      await expect(unwrapTeamAttachmentCek(wrapped, key, { ...TW_CTX, ...change })).rejects.toThrow();
+    });
+
+    it("anti-vacuous: unwrap under a different ItemKey rejects", async () => {
+      const wrapped = await wrapTeamAttachmentCek(newCek(), await deriveItemCekWrapKey(generateItemKey()), TW_CTX);
+      await expect(
+        unwrapTeamAttachmentCek(wrapped, await deriveItemCekWrapKey(generateItemKey()), TW_CTX),
+      ).rejects.toThrow();
+    });
+
+    it("domain separation: the content key of the same ItemKey cannot open a CEK wrap", async () => {
+      const itemKey = generateItemKey();
+      const wrapped = await wrapTeamAttachmentCek(newCek(), await deriveItemCekWrapKey(itemKey), TW_CTX);
+      await expect(
+        unwrapTeamAttachmentCek(wrapped, await deriveItemEncryptionKey(itemKey), TW_CTX),
+      ).rejects.toThrow();
+    });
+
+    it("domain separation: a CEK wrapped under the content key does not open with the CEK-wrap key", async () => {
+      const itemKey = generateItemKey();
+      // Control: the same call shape round-trips when both sides use the content key.
+      const contentKey = await deriveItemEncryptionKey(itemKey);
+      const cek = newCek();
+      const wrapped = await wrapTeamAttachmentCek(cek, contentKey, TW_CTX);
+      expect(await unwrapTeamAttachmentCek(wrapped, contentKey, TW_CTX)).toEqual(cek);
+      await expect(
+        unwrapTeamAttachmentCek(wrapped, await deriveItemCekWrapKey(itemKey), TW_CTX),
+      ).rejects.toThrow();
     });
   });
 });

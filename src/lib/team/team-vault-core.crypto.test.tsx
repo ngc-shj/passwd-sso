@@ -387,7 +387,7 @@ describe("team-vault-core (real WebCrypto)", () => {
 
     let key: CryptoKey | null = null;
     await act(async () => {
-      key = await result.current.getItemEncryptionKey(TEAM_ID, ENTRY_ID);
+      key = (await result.current.getItemEncryptionKey(TEAM_ID, ENTRY_ID)).keys.encryptionKey;
     });
     expect(key).not.toBeNull();
 
@@ -480,5 +480,131 @@ describe("team-vault-core (real WebCrypto)", () => {
       caught = e;
     }
     expect(caught).not.toBeInstanceOf(TeamKeyVersionUnavailableError);
+  });
+
+  // ─── C5 / A5: ItemKey cache keyed by (entryId, itemKeyId) ────────────────
+
+  async function cacheFixture() {
+    const memberKeyPair = await generateECDHKeyPair();
+    const ecdhPrivateKeyBytes = await exportPrivateKey(memberKeyPair.privateKey);
+    const latest = await buildMemberKeyFixture(memberKeyPair.publicKey, 3);
+    const latestKey = await (await import("@/lib/crypto/crypto-team")).deriveTeamEncryptionKey(latest.teamKeyBytes);
+    const { encrypted } = await buildItemKeyFixture(latestKey, 3);
+    const memberKeyFetches: string[] = [];
+    globalThis.fetch = (async (url: string) => {
+      memberKeyFetches.push(url);
+      return makeFetchRouter(latest, new Map([[3, latest]]))(url);
+    }) as unknown as typeof fetch;
+    const { result } = renderHook(() => useTeamVault(), { wrapper: makeWrapper(ecdhPrivateKeyBytes) });
+    const valid = (itemKeyId: string | null): EntryItemKeyData => ({
+      itemKeyVersion: 1,
+      encryptedItemKey: encrypted.ciphertext,
+      itemKeyIv: encrypted.iv,
+      itemKeyAuthTag: encrypted.authTag,
+      itemKeyId,
+      teamKeyVersion: 3,
+    });
+    // A wrap that cannot open under any key: only a cache hit returns a key for it.
+    const garbage = (itemKeyId: string | null): EntryItemKeyData => ({
+      ...valid(itemKeyId),
+      itemKeyAuthTag: "00".repeat(16),
+    });
+    return { result, memberKeyFetches, valid, garbage };
+  }
+
+  it("(h) the same (entryId, itemKeyId) returns the cached keys without re-resolving", async () => {
+    const { result, memberKeyFetches, valid, garbage } = await cacheFixture();
+
+    let first: CryptoKey | null = null;
+    let second: CryptoKey | null = null;
+    await act(async () => {
+      first = await result.current.getEntryDecryptionKey(TEAM_ID, ENTRY_ID, valid("ik-a"));
+    });
+    const fetchesAfterFirst = memberKeyFetches.length;
+    await act(async () => {
+      second = await result.current.getEntryDecryptionKey(TEAM_ID, ENTRY_ID, garbage("ik-a"));
+    });
+
+    expect(second).toBe(first);
+    expect(memberKeyFetches.length).toBe(fetchesAfterFirst);
+  });
+
+  it("(i) a key cached for one itemKeyId is never returned for another", async () => {
+    const { result, valid, garbage } = await cacheFixture();
+
+    await act(async () => {
+      await result.current.getEntryDecryptionKey(TEAM_ID, ENTRY_ID, valid("ik-a"));
+    });
+
+    await expect(
+      act(async () => {
+        await result.current.getEntryDecryptionKey(TEAM_ID, ENTRY_ID, garbage("ik-b"));
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("(j) a null itemKeyId is never cached: every call re-resolves", async () => {
+    const { result, valid, garbage } = await cacheFixture();
+
+    await act(async () => {
+      await result.current.getEntryDecryptionKey(TEAM_ID, ENTRY_ID, valid(null));
+    });
+
+    await expect(
+      act(async () => {
+        await result.current.getEntryDecryptionKey(TEAM_ID, ENTRY_ID, garbage(null));
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("(k) a member-key row that fails to unwrap resolves key_invalid, distinct from transient", async () => {
+    const memberKeyPair = await generateECDHKeyPair();
+    const otherKeyPair = await generateECDHKeyPair();
+    const ecdhPrivateKeyBytes = await exportPrivateKey(memberKeyPair.privateKey);
+    const latest = await buildMemberKeyFixture(memberKeyPair.publicKey, 3);
+    // Version 2's row exists but is wrapped to someone else's key.
+    const broken = await buildMemberKeyFixture(otherKeyPair.publicKey, 2);
+    globalThis.fetch = (async (url: string) =>
+      makeFetchRouter(latest, new Map([[2, broken]]))(url)) as unknown as typeof fetch;
+
+    const { result } = renderHook(() => useTeamVault(), { wrapper: makeWrapper(ecdhPrivateKeyBytes) });
+
+    let resolution: Awaited<ReturnType<typeof result.current.resolveTeamKey>> | null = null;
+    await act(async () => {
+      resolution = await result.current.resolveTeamKey(TEAM_ID, 2);
+    });
+    expect(resolution).toEqual({ reason: "key_invalid" });
+
+    let caught: unknown;
+    try {
+      await act(async () => {
+        await result.current.getEntryDecryptionKey(TEAM_ID, ENTRY_ID, { itemKeyVersion: 0, teamKeyVersion: 2 });
+      });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(TeamKeyVersionUnavailableError);
+    expect((caught as TeamKeyVersionUnavailableError).reason).toBe("key_invalid");
+  });
+
+  it("(l) resolveTeamKey answers the latest key and a held older version", async () => {
+    const memberKeyPair = await generateECDHKeyPair();
+    const ecdhPrivateKeyBytes = await exportPrivateKey(memberKeyPair.privateKey);
+    const latest = await buildMemberKeyFixture(memberKeyPair.publicKey, 3);
+    const old = await buildMemberKeyFixture(memberKeyPair.publicKey, 2);
+    globalThis.fetch = (async (url: string) =>
+      makeFetchRouter(latest, new Map([[2, old]]))(url)) as unknown as typeof fetch;
+
+    const { result } = renderHook(() => useTeamVault(), { wrapper: makeWrapper(ecdhPrivateKeyBytes) });
+
+    const resolved: unknown[] = [];
+    await act(async () => {
+      resolved.push(await result.current.resolveTeamKey(TEAM_ID, 3));
+      resolved.push(await result.current.resolveTeamKey(TEAM_ID, 2));
+      resolved.push(await result.current.resolveTeamKey(TEAM_ID, 1));
+    });
+    expect(resolved[0]).toHaveProperty("key");
+    expect(resolved[1]).toHaveProperty("key");
+    expect(resolved[2]).toEqual({ reason: "not_available" });
   });
 });

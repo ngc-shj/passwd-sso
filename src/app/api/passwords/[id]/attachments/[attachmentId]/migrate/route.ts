@@ -5,7 +5,7 @@ import { advisoryXactLock } from "@/lib/tenant-rls";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
+import { AUDIT_TARGET_TYPE, AUDIT_ACTION, ATTACHMENT_ENCRYPTION_MODE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { errorResponse, notFound, unauthorized, rateLimited, validationError } from "@/lib/http/api-response";
 import { migrateLimiter } from "@/lib/security/rate-limiters";
@@ -14,11 +14,16 @@ import {
   ATTACHMENT_MIGRATE_PAYLOAD_MAX,
   BASE64_RE,
   CEK_WRAP_BASE64_MAX,
+  isBase64,
 } from "@/lib/validations/common";
 import { readJsonWithCap } from "@/lib/http/parse-body";
 import { CURRENT_CEK_WRAP_AAD_VERSION } from "@/lib/crypto/crypto-aad";
+import { getAttachmentBlobStore } from "@/lib/blob-store";
+import { deleteAttachmentBlobs } from "@/lib/blob-store/cleanup";
+import { BlobRefInvalidError, newBlobGeneration } from "@/lib/blob-store/object-ref";
 import {
   applyAttachmentMigration,
+  AttachmentMigrationCasError,
   LegacyAttachmentInconsistentVersionError,
   LegacyMigrationNotApplicableError,
   LegacyBodyHashMismatchError,
@@ -126,11 +131,46 @@ async function handlePUT(
   // drops invalid bytes — both blobs are persisted verbatim into BYTEA
   // columns, so a malformed input would corrupt the row instead of failing
   // fast.
-  if (!BASE64_RE.test(encryptedData) || !BASE64_RE.test(cekEncrypted)) {
+  if (!isBase64(encryptedData) || !BASE64_RE.test(cekEncrypted)) {
     return validationError();
   }
 
-  let result: { encryptionMode: 2; fromKeyVersion: number | null };
+  // Snapshot the row, and read the stored ciphertext through the blob store
+  // (on an external backend the column holds only a ref). The hash binds the
+  // request to these bytes; the transaction below applies only while the
+  // locked row still holds this column, IV and tag.
+  const current = await withUserTenantRls(userId, async () =>
+    prisma.attachment.findFirst({
+      where: {
+        id: attachmentId,
+        passwordEntryId: entryId,
+        passwordEntry: { userId },
+        teamPasswordEntryId: null,
+      },
+      select: { encryptedData: true, iv: true, authTag: true, encryptionMode: true },
+    }),
+  );
+  if (!current) {
+    return notFound();
+  }
+  if (current.encryptionMode !== ATTACHMENT_ENCRYPTION_MODE.VAULT_KEY) {
+    return errorResponse(API_ERROR.LEGACY_MIGRATION_NOT_APPLICABLE);
+  }
+  const blobStore = getAttachmentBlobStore();
+  let body: Buffer;
+  try {
+    body = await blobStore.getObject(current.encryptedData, { attachmentId, entryId });
+  } catch (err) {
+    if (err instanceof BlobRefInvalidError) return errorResponse(API_ERROR.BLOB_REF_INVALID);
+    throw err;
+  }
+
+  // The new body goes to a fresh object before the transaction; it is deleted
+  // unless the transaction commits the row that references it.
+  const newContext = { attachmentId, entryId, generation: newBlobGeneration() };
+  const newStored = await blobStore.putObject(Buffer.from(encryptedData, "base64"), newContext);
+
+  let result: { encryptionMode: typeof ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED; fromKeyVersion: number | null; oldStored: Uint8Array };
   try {
     result = await withUserTenantRls(userId, async () => {
       // withUserTenantRls opens the transaction, and `prisma` resolves to it
@@ -175,9 +215,17 @@ async function handlePUT(
           cekKeyVersion,
           cekWrapAadVersion,
         },
+        snapshot: {
+          stored: current.encryptedData,
+          body,
+          iv: current.iv,
+          authTag: current.authTag,
+        },
+        newStored,
       });
     });
   } catch (err) {
+    await blobStore.deleteObject(newStored, newContext).catch(() => {});
     if (err instanceof LegacyAttachmentInconsistentVersionError) {
       return errorResponse(API_ERROR.ATTACHMENT_INCONSISTENT_VERSION);
     }
@@ -189,11 +237,19 @@ async function handlePUT(
       // No payload per S11
       return errorResponse(API_ERROR.LEGACY_INTEGRITY_MISMATCH);
     }
+    if (err instanceof AttachmentMigrationCasError) {
+      return errorResponse(API_ERROR.MIGRATE_CAS_FAILED);
+    }
     if (err instanceof Error && (err.message === API_ERROR.NOT_FOUND || err.message === API_ERROR.USER_NOT_FOUND)) {
       return notFound();
     }
     throw err;
   }
+
+  // The old object is unreferenced once the row commits.
+  await deleteAttachmentBlobs([
+    { stored: result.oldStored, context: { attachmentId, entryId } },
+  ]);
 
   await logAuditAsync({
     ...personalAuditBase(req, userId),

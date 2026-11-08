@@ -58,3 +58,11 @@ regexes = [
   '''P256\.Signing\.PrivateKey''',
   '''P256\.KeyAgreement\.PrivateKey''',
 ]
+
+[[allowlists]]
+description = "HKDF info labels for the team entry ItemKey derivations (domain-separation constants registered in docs/security/crypto-domain-ledger.md), not credentials: generic-api-key matches them when passed next to a `...KeyBytes` assignment in scripts/generate-team-key-fixture.ts. Matched by exact value so the rest of that file is still scanned."
+regexTarget = "match"
+regexes = [
+  '''passwd-sso-item-enc-v1''',
+  '''passwd-sso-item-cekwrap-v1''',
+]

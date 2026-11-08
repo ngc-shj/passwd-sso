@@ -4,7 +4,7 @@ import { createRequest, createParams } from "@/__tests__/helpers/request-builder
 import { API_ERROR } from "@/lib/http/api-error-codes";
 
 const {
-  mockAuth, mockPrismaTeamPasswordEntry, mockPrismaTeamFolder, mockTeamLockRow, mockPrismaTeamTag, mockAuditLogCreate,
+  mockAuth, mockPrismaTeamPasswordEntry, mockPrismaTeamFolder, mockTeamLockRow, mockEntryLockRow, mockPrismaTeamTag, mockAuditLogCreate,
   mockRequireTeamPermission,
   mockRequireTeamMember, mockHasTeamPermission, TeamAuthError,
   mockPrismaTransaction,
@@ -30,6 +30,8 @@ const {
     mockPrismaTeamFolder: { findUnique: vi.fn() },
     // Rows for the service's in-tx team key-version read (FROM teams ... FOR SHARE).
     mockTeamLockRow: vi.fn(),
+    // Rows for the service's entry FOR UPDATE read.
+    mockEntryLockRow: vi.fn(),
     mockPrismaTeamTag: { count: vi.fn().mockResolvedValue(0) },
     mockAuditLogCreate: vi.fn(),
     mockRequireTeamPermission: vi.fn(),
@@ -57,10 +59,13 @@ vi.mock("@/lib/prisma", () => ({
     user: { findMany: mockUserFindMany },
   },
 }));
-vi.mock("@/lib/auth/access/team-auth", () => ({
+vi.mock("@/lib/auth/access/team-auth", async () => ({
   requireTeamPermission: mockRequireTeamPermission,
   requireTeamMember: mockRequireTeamMember,
   hasTeamPermission: mockHasTeamPermission,
+  // The real role read: the service re-checks the actor under the team lock.
+  activeTeamRole: (await vi.importActual<typeof import("@/lib/auth/access/team-auth")>("@/lib/auth/access/team-auth")).activeTeamRole,
+  canWriteTeamEntry: (await vi.importActual<typeof import("@/lib/auth/access/team-auth")>("@/lib/auth/access/team-auth")).canWriteTeamEntry,
   TeamAuthError,
 }));
 vi.mock("@/lib/tenant-context", () => ({
@@ -90,11 +95,16 @@ const TEAM_ID = "team-123";
 const PW_ID = "pw-456";
 const now = new Date("2025-01-01T00:00:00Z");
 
+const CUR_ITEM_KEY_ID = "11111111-1111-4111-8111-111111111111";
+
+// A full update reusing the locked row's ItemKey (teamCurRow below) at the
+// team's current key version.
 const validE2EBody = {
   encryptedBlob: { ciphertext: "new-blob-data", iv: "a".repeat(24), authTag: "b".repeat(32) },
   encryptedOverview: { ciphertext: "new-overview-data", iv: "c".repeat(24), authTag: "d".repeat(32) },
   aadVersion: 1,
-  teamKeyVersion: 1,
+  teamKeyVersion: 5,
+  itemKeyId: CUR_ITEM_KEY_ID,
 };
 
 function makeEntryForGET(overrides = {}) {
@@ -244,6 +254,19 @@ describe("GET /api/teams/[teamId]/passwords/[id]", () => {
     expect(json.error).toBe("NOT_FOUND");
   });
 
+  it("returns the ItemKey id and the version a new ItemKey must take (high-water + 1)", async () => {
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(
+      makeEntryForGET({ itemKeyVersion: 2, itemKeyId: CUR_ITEM_KEY_ID, itemKeyVersionHighWater: 4 }),
+    );
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`),
+      createParams({ teamId: TEAM_ID, id: PW_ID }),
+    );
+    const json = await res.json();
+    expect(json.itemKeyId).toBe(CUR_ITEM_KEY_ID);
+    expect(json.nextItemKeyVersion).toBe(5);
+  });
+
   it("returns requireReprompt and expiresAt in GET response", async () => {
     const expiresDate = new Date("2026-12-31T00:00:00Z");
     mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(
@@ -289,6 +312,10 @@ const teamCurRow = {
   encrypted_item_key: "cur-ik-cipher",
   item_key_iv: "cur-ik-iv",
   item_key_auth_tag: "cur-ik-tag",
+  item_key_id: CUR_ITEM_KEY_ID,
+  item_key_team_key_version: 5,
+  item_key_version_high_water: 2,
+  created_by_id: "test-user-id",
 };
 
 describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
@@ -303,19 +330,23 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
     teamPasswordEntry: {
       update: vi.fn(),
     },
+    // The actor's membership, re-read under the team lock.
+    teamMember: { findFirst: vi.fn() },
   };
 
   beforeEach(() => {
     vi.resetAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
+    txMock.teamMember.findFirst.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
     mockRequireTeamMember.mockResolvedValue({ id: "member-1", role: TEAM_ROLE.ADMIN, userId: "test-user-id" });
     mockHasTeamPermission.mockReturnValue(true);
     mockAuditLogCreate.mockResolvedValue({});
-    mockTeamLockRow.mockResolvedValue([{ team_key_version: 1, tenant_id: "tenant-1" }]);
+    mockTeamLockRow.mockResolvedValue([{ team_key_version: 5, tenant_id: "tenant-1" }]);
+    mockEntryLockRow.mockResolvedValue([teamCurRow]);
     // The team key-version lock read gets the team row; the entry FOR UPDATE
     // snapshot gets teamCurRow.
     txMock.$queryRaw.mockImplementation(teamLockQuery((sql) =>
-      sql.includes("FROM teams") ? mockTeamLockRow() : [teamCurRow],
+      sql.includes("FROM teams") ? mockTeamLockRow() : mockEntryLockRow(),
     ));
     txMock.teamPasswordEntryHistory.create.mockResolvedValue({});
     txMock.teamPasswordEntryHistory.findMany.mockResolvedValue([]);
@@ -403,11 +434,11 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
 
   it("returns 409 when teamKeyVersion does not match team's current version (F-13)", async () => {
     mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
-    mockTeamLockRow.mockResolvedValue([{ team_key_version: 2, tenant_id: "tenant-1" }]); // team is at v2
+    mockTeamLockRow.mockResolvedValue([{ team_key_version: 6, tenant_id: "tenant-1" }]); // team is at v6
 
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`, {
-        body: { ...validE2EBody, teamKeyVersion: 1 }, // stale version
+        body: { ...validE2EBody, teamKeyVersion: 5 }, // stale version
       }),
       createParams({ teamId: TEAM_ID, id: PW_ID }),
     );
@@ -428,6 +459,21 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
       createParams({ teamId: TEAM_ID, id: PW_ID }),
     );
     expect(res.status).toBe(403);
+  });
+
+  it("returns 403 ACTOR_NOT_PERMITTED when the actor's membership is gone under the team lock, writing nothing", async () => {
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
+    txMock.teamMember.findFirst.mockResolvedValue(null);
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`, {
+        body: validE2EBody,
+      }),
+      createParams({ teamId: TEAM_ID, id: PW_ID }),
+    );
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe(API_ERROR.ACTOR_NOT_PERMITTED);
+    expect(txMock.teamPasswordEntry.update).not.toHaveBeenCalled();
+    expect(txMock.teamPasswordEntryHistory.create).not.toHaveBeenCalled();
   });
 
   it("returns 400 on malformed JSON for PUT", async () => {
@@ -507,7 +553,7 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
           overviewIv: "c".repeat(24),
           overviewAuthTag: "d".repeat(32),
           aadVersion: 1,
-          teamKeyVersion: 1,
+          teamKeyVersion: 5,
         }),
       }),
     );
@@ -675,6 +721,112 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
         data: expect.objectContaining({ teamFolderId: null }),
       }),
     );
+  });
+
+  // ── ItemKey identity and re-key rules through the route (plan C1, A7) ──
+
+  function putBody(body: unknown) {
+    return PUT(
+      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`, { body }),
+      createParams({ teamId: TEAM_ID, id: PW_ID }),
+    );
+  }
+
+  const STALE_ITEM_KEY_ID = "22222222-2222-4222-8222-222222222222";
+
+  it("refuses a full update carrying a stale itemKeyId (409 ITEM_KEY_CHANGED)", async () => {
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
+    const res = await putBody({ ...validE2EBody, itemKeyId: STALE_ITEM_KEY_ID });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe(API_ERROR.ITEM_KEY_CHANGED);
+    expect(txMock.teamPasswordEntry.update).not.toHaveBeenCalled();
+  });
+
+  it("refuses a full update of an entry whose ItemKey is wrapped under an older team key (409 ENTRY_REKEY_REQUIRED)", async () => {
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
+    mockEntryLockRow.mockResolvedValue([{ ...teamCurRow, team_key_version: 4 }]);
+    const res = await putBody(validE2EBody);
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe(API_ERROR.ENTRY_REKEY_REQUIRED);
+    expect(txMock.teamPasswordEntry.update).not.toHaveBeenCalled();
+
+    // Minus-step control: the same body on the entry at the current version → 200.
+    mockEntryLockRow.mockResolvedValue([teamCurRow]);
+    const ok = await putBody(validE2EBody);
+    expect(ok.status).toBe(200);
+    expect(txMock.teamPasswordEntry.update).toHaveBeenCalledTimes(1);
+  });
+
+  it("answers ITEM_KEY_CHANGED, not ENTRY_REKEY_REQUIRED, for a stale id on a stale entry (check order)", async () => {
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
+    mockEntryLockRow.mockResolvedValue([{ ...teamCurRow, team_key_version: 4 }]);
+    const res = await putBody({ ...validE2EBody, itemKeyId: STALE_ITEM_KEY_ID });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe(API_ERROR.ITEM_KEY_CHANGED);
+  });
+
+  it("accepts a metadata-only update of an entry pending re-key", async () => {
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
+    mockEntryLockRow.mockResolvedValue([{ ...teamCurRow, team_key_version: 4 }]);
+    const res = await putBody({ isArchived: true });
+    expect(res.status).toBe(200);
+    expect(txMock.teamPasswordEntry.update).toHaveBeenCalledOnce();
+  });
+
+  describe("v0→v1 upgrade", () => {
+    const v0Row = {
+      ...teamCurRow,
+      item_key_version: 0,
+      encrypted_item_key: null,
+      item_key_iv: null,
+      item_key_auth_tag: null,
+      item_key_id: null,
+      item_key_version_high_water: 1,
+    };
+    const NEW_WRAP = { ciphertext: "new-wrap", iv: "7".repeat(24), authTag: "8".repeat(32) };
+    const upgradeBody = {
+      ...validE2EBody,
+      itemKeyId: undefined,
+      itemKeyVersion: 2,
+      encryptedItemKey: NEW_WRAP,
+      snapshotBlobIv: "6".repeat(24),
+    };
+
+    beforeEach(() => {
+      mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
+      mockEntryLockRow.mockResolvedValue([{ ...v0Row, blob_iv: "6".repeat(24) }]);
+    });
+
+    it("accepts high-water + 1 and mints a new ItemKey id (control)", async () => {
+      const res = await putBody(upgradeBody);
+      expect(res.status).toBe(200);
+      const data = txMock.teamPasswordEntry.update.mock.calls[0][0].data;
+      expect(data).toMatchObject({ itemKeyVersion: 2, itemKeyIv: NEW_WRAP.iv, itemKeyVersionHighWater: 2 });
+      expect(typeof data.itemKeyId).toBe("string");
+    });
+
+    it("refuses high-water + 2 (409 ITEM_KEY_VERSION_INVALID)", async () => {
+      const res = await putBody({ ...upgradeBody, itemKeyVersion: 3 });
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toBe(API_ERROR.ITEM_KEY_VERSION_INVALID);
+      expect(txMock.teamPasswordEntry.update).not.toHaveBeenCalled();
+    });
+
+    it("refuses a wrap IV a history row already used (400 ITEM_KEY_IV_REUSED)", async () => {
+      txMock.teamPasswordEntryHistory.findMany.mockImplementation(async (args: { select: Record<string, boolean> }) =>
+        args.select.itemKeyIv ? [{ itemKeyIv: NEW_WRAP.iv }] : [],
+      );
+      const res = await putBody(upgradeBody);
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe(API_ERROR.ITEM_KEY_IV_REUSED);
+      expect(txMock.teamPasswordEntry.update).not.toHaveBeenCalled();
+    });
+
+    it("refuses a new wrap without the blobIv snapshot (400)", async () => {
+      const res = await putBody({ ...upgradeBody, snapshotBlobIv: undefined });
+      expect(res.status).toBe(400);
+      expect(mockPrismaTransaction).not.toHaveBeenCalled();
+    });
   });
 });
 

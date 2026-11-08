@@ -1986,6 +1986,20 @@
         }
       }
     },
+    "src/app/api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]/migrate/route.ts": {
+      "kind": "api-session-required",
+      "methods": [
+        "PUT"
+      ],
+      "auth": [
+        "session"
+      ],
+      "sessionPasskeyGate": {
+        "PUT": {
+          "value": "gated"
+        }
+      }
+    },
     "src/app/api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]/route.ts": {
       "kind": "api-session-required",
       "methods": [
@@ -2074,6 +2088,24 @@
       ],
       "sessionPasskeyGate": {
         "GET": {
+          "value": "gated"
+        }
+      }
+    },
+    "src/app/api/teams/[teamId]/passwords/[id]/rekey/route.ts": {
+      "kind": "api-session-required",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "auth": [
+        "session"
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "POST": {
           "value": "gated"
         }
       }
@@ -2241,6 +2273,20 @@
           "value": "gated"
         },
         "PUT": {
+          "value": "gated"
+        }
+      }
+    },
+    "src/app/api/teams/[teamId]/rekey/route.ts": {
+      "kind": "api-session-required",
+      "methods": [
+        "GET"
+      ],
+      "auth": [
+        "session"
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
           "value": "gated"
         }
       }

@@ -18,7 +18,13 @@ vi.mock("@/lib/redis", () => ({
   getRedis: mockGetRedis,
 }));
 
-import { v1ApiKeyLimiter } from "./rate-limiters";
+import {
+  teamAttachmentMigrateLimiter,
+  teamEntryRekeyLimiter,
+  teamRekeyReadLimiter,
+  v1ApiKeyLimiter,
+} from "./rate-limiters";
+import { MAX_ATTACHMENTS_PER_ENTRY, TEAM_ROTATE_ENTRIES_MAX } from "@/lib/validations/common";
 
 type PipelineResult = [Error | null, number][];
 function makePipeline(results: PipelineResult) {
@@ -76,6 +82,26 @@ describe("rate-limiters", () => {
       expect(result.allowed).toBe(false);
       expect(result.redisErrored).toBeUndefined();
       expect(result.retryAfterMs).toBe(5_000);
+    });
+  });
+
+  // A re-key pass over the largest rotatable team must fit in one window:
+  // each limiter allows the pass's own request count and refuses past its
+  // derived budget.
+  describe("team re-key pass limiters", () => {
+    const fullTeamAttachments = TEAM_ROTATE_ENTRIES_MAX * MAX_ATTACHMENTS_PER_ENTRY;
+    const atCount = async (limiter: typeof teamEntryRekeyLimiter, count: number) => {
+      mockGetRedis.mockReturnValue({ pipeline: () => makePipeline([[null, count], [null, 0], [null, 60_000]]) });
+      return (await limiter.check("test:team:rekey")).allowed;
+    };
+
+    it.each([
+      ["migrate: every legacy attachment of a full team, plus one retry per entry", teamAttachmentMigrateLimiter, fullTeamAttachments + TEAM_ROTATE_ENTRIES_MAX],
+      ["re-key POST: every entry of a full team, plus one retry each", teamEntryRekeyLimiter, 2 * TEAM_ROTATE_ENTRIES_MAX],
+      ["reads: 3 entry reads and 1 page read per entry, plus one per migrated attachment", teamRekeyReadLimiter, 4 * TEAM_ROTATE_ENTRIES_MAX + fullTeamAttachments],
+    ])("%s", async (_label, limiter, budget) => {
+      expect(await atCount(limiter, budget)).toBe(true);
+      expect(await atCount(limiter, budget + 1)).toBe(false);
     });
   });
 });

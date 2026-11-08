@@ -11,7 +11,12 @@ const {
   mockGetObject,
   mockDeleteObject,
   mockWithTeamTenantRls,
+  mockHistoryFindMany,
+  mockLockEntry,
+  mockLockRow,
+  mockTeamMemberFindFirst,
 } = vi.hoisted(() => ({
+  mockTeamMemberFindFirst: vi.fn(),
   mockAuth: vi.fn(),
   mockRequireTeamPermission: vi.fn(),
   mockEntryFindUnique: vi.fn(),
@@ -19,11 +24,15 @@ const {
   mockAttachmentDelete: vi.fn(),
   mockGetObject: vi.fn(),
   mockDeleteObject: vi.fn(),
-  mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
+  mockWithTeamTenantRls: vi.fn(),
+  mockHistoryFindMany: vi.fn(),
+  mockLockEntry: vi.fn(),
+  mockLockRow: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/auth/access/team-auth", () => {
+vi.mock("@/lib/auth/access/team-auth", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/auth/access/team-auth")>("@/lib/auth/access/team-auth");
   class TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -32,7 +41,13 @@ vi.mock("@/lib/auth/access/team-auth", () => {
       this.status = status;
     }
   }
-  return { requireTeamPermission: mockRequireTeamPermission, TeamAuthError };
+  return {
+    requireTeamPermission: mockRequireTeamPermission,
+    // The real role read and permission table: the delete re-checks the actor under the team lock.
+    activeTeamRole: actual.activeTeamRole,
+    hasTeamPermission: actual.hasTeamPermission,
+    TeamAuthError,
+  };
 });
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -49,13 +64,21 @@ vi.mock("@/lib/audit/audit", () => ({
   teamAuditBase: vi.fn((_, userId, teamId) => ({ scope: "TEAM", userId, teamId })),
 }));
 vi.mock("@/lib/blob-store", () => ({
+  BLOB_STORAGE: { DB: "db", S3: "s3" },
   getAttachmentBlobStore: () => ({
+    backend: "s3",
     getObject: mockGetObject,
     deleteObject: mockDeleteObject,
   }),
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withTeamTenantRls: mockWithTeamTenantRls,
+}));
+// Raw-SQL row locks; exercised against a real DB in
+// team-attachment-rekey.integration.test.ts.
+vi.mock("@/lib/team/team-attachment-lock", () => ({
+  lockTeamAttachmentEntry: mockLockEntry,
+  lockTeamAttachmentRow: mockLockRow,
 }));
 
 import { NextRequest } from "next/server";
@@ -80,7 +103,23 @@ function createDeleteRequest() {
   );
 }
 
-const TEAM_ENTRY = { teamId: "o1" };
+const ITEM_KEY_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+const TEAM_ENTRY = {
+  teamId: "o1",
+  encryptedItemKey: "entry-wrap",
+  itemKeyIv: "1".repeat(24),
+  itemKeyAuthTag: "2".repeat(32),
+  teamKeyVersion: 1,
+  itemKeyVersion: 1,
+  itemKeyId: ITEM_KEY_ID,
+};
+const tx = {
+  teamPasswordEntry: { findUnique: mockEntryFindUnique },
+  attachment: { findUnique: mockAttachmentFindUnique, delete: mockAttachmentDelete },
+  teamPasswordEntryHistory: { findMany: mockHistoryFindMany },
+  teamMember: { findFirst: mockTeamMemberFindFirst },
+};
+const withTx = async (_teamId: string, fn: (tenantId: string, client: typeof tx) => unknown) => fn("t1", tx);
 
 const ATTACHMENT = {
   id: "a1",
@@ -96,7 +135,11 @@ const ATTACHMENT = {
 };
 
 describe("GET /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockWithTeamTenantRls.mockImplementation(withTx);
+    mockHistoryFindMany.mockResolvedValue([]);
+  });
 
   it("returns 401 when not authenticated", async () => {
     mockAuth.mockResolvedValue(null);
@@ -157,11 +200,67 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]", ()
     expect(json.keyVersion).toBe(1);
     expect(json.aadVersion).toBe(1);
     expect(json.encryptionMode).toBe(1);
+    // Legacy mode 1: the entry wrap (and any history wraps) for trial decryption.
+    expect(json.itemKeyWraps).toEqual([
+      {
+        source: "entry",
+        historyId: null,
+        encryptedItemKey: "entry-wrap",
+        itemKeyIv: "1".repeat(24),
+        itemKeyAuthTag: "2".repeat(32),
+        teamKeyVersion: 1,
+        itemKeyVersion: 1,
+      },
+    ]);
+  });
+
+  it("returns the mode-2 CEK wrap with the entry wrap holding its ItemKey", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
+    mockAttachmentFindUnique.mockResolvedValue({
+      ...ATTACHMENT,
+      encryptionMode: 2,
+      cekEncrypted: Buffer.from([5]),
+      cekIv: "c".repeat(24),
+      cekAuthTag: "d".repeat(32),
+      cekKeyVersion: 1,
+      cekWrapAadVersion: 1,
+      cekItemKeyId: ITEM_KEY_ID,
+    });
+    mockGetObject.mockResolvedValue(Buffer.from("encrypted-data"));
+
+    const res = await GET(createGetRequest(), makeParams("o1", "e1", "a1"));
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.cekKeyVersion).toBe(1);
+    expect(json.itemKeyWrap).toMatchObject({ source: "entry", itemKeyVersion: 1, teamKeyVersion: 1 });
+  });
+
+  it("returns 409 ATTACHMENT_KEY_UNAVAILABLE for a mode-2 attachment no wrap opens", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
+    mockAttachmentFindUnique.mockResolvedValue({
+      ...ATTACHMENT,
+      encryptionMode: 2,
+      cekItemKeyId: "99999999-8888-4777-8666-555555555555",
+    });
+
+    const res = await GET(createGetRequest(), makeParams("o1", "e1", "a1"));
+    const json = await res.json();
+    expect(res.status).toBe(409);
+    expect(json.error).toBe("ATTACHMENT_KEY_UNAVAILABLE");
   });
 });
 
 describe("DELETE /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockWithTeamTenantRls.mockImplementation(withTx);
+    mockLockEntry.mockResolvedValue({ teamKeyVersion: 1, tenantId: "t1", itemKeyVersion: 1, itemKeyId: ITEM_KEY_ID });
+    mockTeamMemberFindFirst.mockResolvedValue({ role: "ADMIN" });
+  });
 
   it("returns 401 when not authenticated", async () => {
     mockAuth.mockResolvedValue(null);
@@ -196,20 +295,30 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]",
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
     mockEntryFindUnique.mockResolvedValue({ teamId: "o1" });
-    mockAttachmentFindUnique.mockResolvedValue(null);
+    mockLockRow.mockResolvedValue(null);
     const res = await DELETE(createDeleteRequest(), makeParams("o1", "e1", "a1"));
     expect(res.status).toBe(404);
+    expect(mockAttachmentDelete).not.toHaveBeenCalled();
+  });
+
+  it("refuses with 403 ACTOR_NOT_PERMITTED when the actor's membership is gone under the team lock", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockEntryFindUnique.mockResolvedValue({ teamId: "o1" });
+    mockTeamMemberFindFirst.mockResolvedValue(null);
+    const res = await DELETE(createDeleteRequest(), makeParams("o1", "e1", "a1"));
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe("ACTOR_NOT_PERMITTED");
+    expect(mockAttachmentDelete).not.toHaveBeenCalled();
+    expect(mockDeleteObject).not.toHaveBeenCalled();
   });
 
   it("deletes attachment successfully", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
     mockEntryFindUnique.mockResolvedValue({ teamId: "o1" });
-    mockAttachmentFindUnique.mockResolvedValue({
-      id: "a1",
-      filename: "test.pdf",
-      encryptedData: Buffer.from("blob-key"),
-    });
+    const stored = Buffer.from(JSON.stringify({ key: `team/o1/e1/a1/${"0".repeat(32)}.bin` }));
+    mockLockRow.mockResolvedValue({ filename: "test.pdf", encryptedData: stored });
     mockDeleteObject.mockResolvedValue(undefined);
     mockAttachmentDelete.mockResolvedValue({});
 
@@ -218,5 +327,10 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]",
     expect(res.status).toBe(200);
     expect(body.success).toBe(true);
     expect(mockAttachmentDelete).toHaveBeenCalledWith({ where: { id: "a1", teamPasswordEntryId: "e1" } });
+    // The locked row's object, deleted after the row.
+    expect(mockDeleteObject).toHaveBeenCalledWith(stored, { attachmentId: "a1", entryId: "e1", teamId: "o1" });
+    expect(mockAttachmentDelete.mock.invocationCallOrder[0]).toBeLessThan(
+      mockDeleteObject.mock.invocationCallOrder[0],
+    );
   });
 });

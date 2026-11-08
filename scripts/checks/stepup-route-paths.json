@@ -23,6 +23,8 @@
   "team-password-empty-trash": { "method": "POST", "pathTokens": ["apiPath.teamPasswordsEmptyTrash", "/passwords/empty-trash"] },
   "team-policy-put": { "method": "PUT", "pathTokens": ["apiPath.teamPolicy", "/policy"] },
   "team-rotate-key-post": { "method": "POST", "pathTokens": ["apiPath.teamRotateKey", "/rotate-key"] },
+  "team-attachment-migrate-put": { "method": "PUT", "pathTokens": ["apiPath.teamPasswordAttachmentMigrate"] },
+  "team-entry-rekey-post": { "method": "POST", "pathTokens": ["apiPath.teamPasswordRekey"] },
   "team-delete": { "method": "DELETE", "pathTokens": ["apiPath.teamById"] },
   "team-webhook-delete": { "method": "DELETE", "pathTokens": ["apiPath.teamWebhookById", "/webhooks/"] },
   "team-webhook-post": { "method": "POST", "pathTokens": ["apiPath.teamWebhooks", "/webhooks"] },

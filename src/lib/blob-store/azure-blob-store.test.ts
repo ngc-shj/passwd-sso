@@ -57,9 +57,34 @@ describe("azureBlobStore lazy SDK loading", () => {
     await store.putObject(new Uint8Array([1, 2, 3]), {
       attachmentId: "att-1",
       entryId: "entry-1",
+      generation: "0123456789abcdef0123456789abcdef",
     });
 
     expect(requireOptionalModule).toHaveBeenCalledWith("@azure/storage-blob");
     expect(uploadData).toHaveBeenCalledTimes(1);
+    expect(getBlockBlobClient).toHaveBeenCalledWith("personal/entry-1/att-1/0123456789abcdef0123456789abcdef.bin");
   });
+
+  it.each(["getObject", "deleteObject"] as const)(
+    "%s fails closed on an undecodable or foreign ref without touching storage",
+    async (op) => {
+      vi.resetModules();
+      vi.stubEnv("AZURE_STORAGE_ACCOUNT", "acct");
+      vi.stubEnv("AZURE_BLOB_CONTAINER", "attachments");
+      vi.stubEnv("AZURE_STORAGE_CONNECTION_STRING", "UseDevelopmentStorage=true;");
+      const requireOptionalModule = vi.fn();
+      vi.doMock("./runtime-module", () => ({ requireOptionalModule }));
+      const { azureBlobStore: store } = await import("./azure-blob-store");
+      const { BlobRefInvalidError, encodeObjectRef } = await import("./object-ref");
+      const context = { attachmentId: "att-1", entryId: "entry-1" };
+
+      await expect(store[op](new Uint8Array(Buffer.from("raw")), context)).rejects.toBeInstanceOf(
+        BlobRefInvalidError,
+      );
+      await expect(
+        store[op](encodeObjectRef({ key: "personal/entry-1/att-2.bin" }), context),
+      ).rejects.toBeInstanceOf(BlobRefInvalidError);
+      expect(requireOptionalModule).not.toHaveBeenCalled();
+    },
+  );
 });

@@ -136,6 +136,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history/[historyId]", () => {
       blobAuthTag: "aabbccddee0011223344556677889900",
       aadVersion: 1,
       teamKeyVersion: 1,
+      itemKeyId: "11111111-1111-4111-8111-111111111111",
       changedAt,
     });
 
@@ -150,6 +151,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history/[historyId]", () => {
     expect(json.blobAuthTag).toBe("aabbccddee0011223344556677889900");
     expect(json.aadVersion).toBe(1);
     expect(json.teamKeyVersion).toBe(1);
+    expect(json.itemKeyId).toBe("11111111-1111-4111-8111-111111111111");
     // Should NOT contain decrypted fields
     expect(json.title).toBeUndefined();
     expect(json.password).toBeUndefined();

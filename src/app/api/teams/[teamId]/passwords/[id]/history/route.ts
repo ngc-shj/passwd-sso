@@ -65,6 +65,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
       aadVersion: h.aadVersion,
       teamKeyVersion: h.teamKeyVersion,
       itemKeyVersion: h.itemKeyVersion,
+      itemKeyId: h.itemKeyId,
       changedAt: h.changedAt,
       changedBy: displayIdentityOf(changers, h.changedById),
     })),

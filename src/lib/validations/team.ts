@@ -95,6 +95,11 @@ export const updateTeamE2EPasswordSchema = z.object({
   teamKeyVersion: z.number().int().min(1).max(TEAM_KEY_VERSION_MAX).optional(),
   itemKeyVersion: z.number().int().min(0).max(TEAM_KEY_VERSION_MAX).optional(),
   encryptedItemKey: encryptedFieldSchema.optional(),
+  // The ItemKey a full update reusing it was encrypted under (compared with
+  // the locked row; null never matches).
+  itemKeyId: z.string().uuid().nullable().optional(),
+  // The blobIv the client read: with encryptedItemKey, marks a v0→v1 upgrade.
+  snapshotBlobIv: hexIv.optional(),
   tagIds: z.array(z.string().uuid()).optional(),
   teamFolderId: z.string().uuid().nullable().optional(),
   isArchived: z.boolean().optional(),
@@ -119,7 +124,26 @@ export const updateTeamE2EPasswordSchema = z.object({
     return true;
   },
   { message: "encryptedItemKey is forbidden when itemKeyVersion is 0 or absent" },
+).refine(
+  // A new wrap is accepted only as the v0→v1 upgrade, which names the blob it replaces.
+  (data) => !data.encryptedItemKey || data.snapshotBlobIv !== undefined,
+  { message: "encryptedItemKey requires snapshotBlobIv" },
 );
+
+/**
+ * History restore body. History rows hold no overview, so the client sends
+ * the row's blob and the overview rebuilt from it, both re-encrypted under the
+ * restored row's ItemKey (or team key for a v0 row) at the current AAD version
+ * and the row's ItemKey version — every restore, so the server never copies a
+ * row's aadVersion 0 into a live entry — and the `blobIv` of the row it
+ * decrypted: a row a re-key rewrote since is refused rather than restored
+ * beside ciphertexts sealed under the row's previous key.
+ */
+export const restoreTeamHistorySchema = z.object({
+  encryptedBlob: encryptedFieldSchema,
+  encryptedOverview: encryptedFieldSchema,
+  snapshotBlobIv: hexIv,
+});
 
 export const updateTeamSchema = z.object({
   name: z.string().min(1).max(NAME_MAX_LENGTH).trim().optional(),
@@ -208,6 +232,7 @@ export type CreateTeamE2EInput = z.infer<typeof createTeamE2ESchema>;
 export type TeamMemberKeyInput = z.infer<typeof teamMemberKeySchema>;
 export type CreateTeamE2EPasswordInput = z.infer<typeof createTeamE2EPasswordSchema>;
 export type UpdateTeamE2EPasswordInput = z.infer<typeof updateTeamE2EPasswordSchema>;
+export type RestoreTeamHistoryInput = z.infer<typeof restoreTeamHistorySchema>;
 export type UpdateTeamInput = z.infer<typeof updateTeamSchema>;
 export type InviteInput = z.infer<typeof inviteSchema>;
 export type AddMemberInput = z.infer<typeof addMemberSchema>;

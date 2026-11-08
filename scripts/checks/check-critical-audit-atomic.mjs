@@ -85,6 +85,18 @@ const CRITICAL_ACTIONS = new Set([
   "TEAM_MEMBER_SCIM_ROLE_UPDATE",
   "TEAM_MEMBER_KEY_DISTRIBUTE",
   "SCIM_GROUP_MAPPING_CREATE",
+  // team-key-rotation-rekey D3: one row per entry a rotation carries
+  // unchanged, enqueued (logAuditBulkInTx) in the rotation's transaction.
+  "TEAM_KEY_ROTATION_CARRY",
+  // team-key-rotation-rekey: the rotation summary commits with the new key
+  // version, beside the carry rows (a rolled-back rotation leaves neither).
+  "TEAM_KEY_ROTATION",
+  // team-key-rotation-rekey C4: a migrate rewrites an attachment's ciphertext
+  // and key wrap; its audit row commits with the rewrite (logAuditInTx).
+  "TEAM_ATTACHMENT_MIGRATE",
+  // team-key-rotation-rekey C2 (D2): a re-key replaces an entry's ItemKey and
+  // rewrites its history and CEK wraps; its audit row commits with the rewrite.
+  "TEAM_ENTRY_REKEY",
 ]);
 
 const project = createAstProject();

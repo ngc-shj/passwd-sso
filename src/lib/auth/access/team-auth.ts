@@ -67,6 +67,20 @@ export function hasTeamPermission(
 }
 
 /**
+ * Whether `role` may write an existing entry's content or key material
+ * (full-update PUT, history restore, attachment upload): PASSWORD_UPDATE, and
+ * a MEMBER only on an entry they created.
+ */
+export function canWriteTeamEntry(
+  role: TeamRole,
+  createdById: string,
+  userId: string,
+): boolean {
+  if (!hasTeamPermission(role, TEAM_PERMISSION.PASSWORD_UPDATE)) return false;
+  return role !== TEAM_ROLE.MEMBER || createdById === userId;
+}
+
+/**
  * The user's role in the team as the transaction sees it now, or null when
  * they are not an active member. Call it after the transaction's locks:
  * requireTeamPermission ran before them, and a departure, removal or demotion

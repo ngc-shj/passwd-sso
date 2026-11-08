@@ -8,6 +8,7 @@ import {
 import { toBlobColumns, toOverviewColumns } from "@/lib/crypto/crypto-blob";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { CURRENT_CEK_WRAP_AAD_VERSION } from "@/lib/crypto/crypto-aad";
+import { ATTACHMENT_ENCRYPTION_MODE } from "@/lib/constants/vault/attachment-encryption-mode";
 
 // ── Error classes ────────────────────────────────────────────────────────────
 
@@ -217,7 +218,7 @@ export async function applyVaultRotation(
 
   // ── Defensive guard A: no mode-0 residual ───────────────────────────────
   const mode0Residual = await tx.attachment.count({
-    where: { passwordEntry: { userId }, encryptionMode: 0 },
+    where: { passwordEntry: { userId }, encryptionMode: ATTACHMENT_ENCRYPTION_MODE.VAULT_KEY },
   });
   if (mode0Residual > 0) {
     throw new LegacyAttachmentsResidualError();
@@ -232,7 +233,7 @@ export async function applyVaultRotation(
   const mode2InvariantViolations = await tx.attachment.count({
     where: {
       passwordEntry: { userId },
-      encryptionMode: 2,
+      encryptionMode: ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED,
       OR: [
         { cekEncrypted: null },
         { cekIv: null },
@@ -251,7 +252,7 @@ export async function applyVaultRotation(
   // Extra mode-2 rows in the DB (not in manifest) are allowed — concurrent-
   // upload tolerance.
   const mode2Rows = await tx.attachment.findMany({
-    where: { passwordEntry: { userId }, encryptionMode: 2 },
+    where: { passwordEntry: { userId }, encryptionMode: ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED },
     select: { id: true, cekKeyVersion: true },
   });
   const mode2IdSet = new Set(mode2Rows.map((r) => r.id));
@@ -366,7 +367,7 @@ export async function applyVaultRotation(
       where: {
         id: rewrap.id,
         passwordEntry: { userId, tenantId },
-        encryptionMode: 2,
+        encryptionMode: ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED,
       },
       data: {
         cekEncrypted: Buffer.from(rewrap.cekEncrypted, "base64"),
@@ -461,7 +462,7 @@ export async function applyVaultRotation(
   const staleMode2Count = await tx.attachment.count({
     where: {
       passwordEntry: { userId },
-      encryptionMode: 2,
+      encryptionMode: ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED,
       cekKeyVersion: { not: newKeyVersion },
     },
   });
@@ -492,7 +493,7 @@ export async function applyVaultRotation(
 // ── applyAttachmentMigration ─────────────────────────────────────────────────
 
 export interface AttachmentMigrationPayload {
-  oldEncryptedDataHash: string; // hex SHA-256 (lowercase) of stored bytes
+  oldEncryptedDataHash: string; // hex SHA-256 (lowercase) of the stored ciphertext
   encryptedData: string;        // base64 — replacement body under CEK
   iv: string;                   // hex(24)
   authTag: string;              // hex(32)
@@ -503,12 +504,29 @@ export interface AttachmentMigrationPayload {
   cekWrapAadVersion: number;
 }
 
+/**
+ * The attachment row as the caller read it before the transaction: its
+ * `encrypted_data` column (a ref on external blob backends, the bytes on the
+ * DB backend), the ciphertext read through the blob store from it, and its
+ * `iv`/`authTag`. The migration applies only while the locked row still
+ * holds exactly this column, IV and tag.
+ */
+export interface AttachmentMigrationSnapshot {
+  stored: Uint8Array;
+  body: Uint8Array;
+  iv: string;
+  authTag: string;
+}
+
 export interface AttachmentMigrationOptions {
   userId: string;
   tenantId: string;
   entryId: string;
   attachmentId: string;
   payload: AttachmentMigrationPayload;
+  snapshot: AttachmentMigrationSnapshot;
+  /** The `encrypted_data` value for the new body, already written through the blob store. */
+  newStored: Uint8Array;
 }
 
 /** Error thrown when migration is attempted on a non-mode-0 attachment. */
@@ -527,12 +545,27 @@ export class LegacyBodyHashMismatchError extends Error {
   }
 }
 
+/** The locked row no longer holds the snapshot the caller hashed. */
+export class AttachmentMigrationCasError extends Error {
+  constructor() {
+    super("MIGRATE_CAS_FAILED");
+    this.name = "AttachmentMigrationCasError";
+  }
+}
+
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  return Buffer.from(a).equals(Buffer.from(b));
+}
+
 /**
  * Migrate a single mode-0 attachment to mode-2 (CEK indirection).
  *
  * Caller is responsible for:
  *   - session auth (no Bearer/SA/MCP)
  *   - rate-limiting
+ *   - reading the snapshot (row + body through the blob store) and writing
+ *     the new body to a fresh object before the transaction, deleting it if
+ *     this throws, and deleting the old object (`oldStored`) after commit
  *   - advisory lock + transaction wrapping
  *   - user keyVersion check (cekKeyVersion must equal user.keyVersion)
  *   - mapping error classes to HTTP responses
@@ -543,46 +576,67 @@ export class LegacyBodyHashMismatchError extends Error {
 export async function applyAttachmentMigration(
   tx: Prisma.TransactionClient,
   opts: AttachmentMigrationOptions,
-): Promise<{ encryptionMode: 2; fromKeyVersion: number | null }> {
+): Promise<{ encryptionMode: typeof ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED; fromKeyVersion: number | null; oldStored: Uint8Array }> {
   const { createHash } = await import("node:crypto");
-  const { userId, tenantId, entryId, attachmentId, payload } = opts;
+  const { userId, tenantId, entryId, attachmentId, payload, snapshot, newStored } = opts;
 
   // Scope query: personal entry only, not team entry
   const row = await tx.attachment.findFirst({
     where: {
       id: attachmentId,
       passwordEntry: { userId, tenantId },
-      passwordEntryId: { not: null },
+      passwordEntryId: entryId,
       teamPasswordEntryId: null,
     },
-    select: { id: true, encryptionMode: true, encryptedData: true, keyVersion: true },
+    select: {
+      id: true,
+      encryptionMode: true,
+      encryptedData: true,
+      iv: true,
+      authTag: true,
+      keyVersion: true,
+    },
   });
   if (!row) {
     throw new Error(API_ERROR.NOT_FOUND);
   }
 
   // Mode check (I5.3): only mode-0 rows are eligible
-  if (row.encryptionMode !== 0) {
+  if (row.encryptionMode !== ATTACHMENT_ENCRYPTION_MODE.VAULT_KEY) {
     throw new LegacyMigrationNotApplicableError();
   }
 
-  // Body hash check (I5.4)
-  const actualHash = createHash("sha256").update(row.encryptedData as Buffer).digest("hex");
+  // The body was read (and the new one written) before the transaction:
+  // apply only while the row still holds what was read.
+  if (
+    row.iv !== snapshot.iv ||
+    row.authTag !== snapshot.authTag ||
+    !bytesEqual(row.encryptedData, snapshot.stored)
+  ) {
+    throw new AttachmentMigrationCasError();
+  }
+
+  // Body hash check (I5.4) over the stored ciphertext as read through the
+  // blob store — on an external backend the column holds only a ref.
+  const actualHash = createHash("sha256").update(snapshot.body).digest("hex");
   if (actualHash !== payload.oldEncryptedDataHash) {
     throw new LegacyBodyHashMismatchError();
   }
 
   // Update with updateMany to safely include all scoping predicates (I5.8)
+  // and the iv/authTag CAS.
   const updateResult = await tx.attachment.updateMany({
     where: {
       id: attachmentId,
       passwordEntry: { userId, tenantId },
-      encryptionMode: 0,
-      passwordEntryId: { not: null },
+      encryptionMode: ATTACHMENT_ENCRYPTION_MODE.VAULT_KEY,
+      iv: snapshot.iv,
+      authTag: snapshot.authTag,
+      passwordEntryId: entryId,
       teamPasswordEntryId: null,
     },
     data: {
-      encryptedData: Buffer.from(payload.encryptedData, "base64"),
+      encryptedData: Buffer.from(newStored),
       iv: payload.iv,
       authTag: payload.authTag,
       cekEncrypted: Buffer.from(payload.cekEncrypted, "base64"),
@@ -590,13 +644,12 @@ export async function applyAttachmentMigration(
       cekAuthTag: payload.cekAuthTag,
       cekKeyVersion: payload.cekKeyVersion,
       cekWrapAadVersion: payload.cekWrapAadVersion,
-      encryptionMode: 2,
+      encryptionMode: ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED,
     },
   });
   if (updateResult.count !== 1) {
-    throw new Error(API_ERROR.NOT_FOUND);
+    throw new AttachmentMigrationCasError();
   }
 
-  void entryId; // referenced in audit by caller
-  return { encryptionMode: 2 as const, fromKeyVersion: row.keyVersion };
+  return { encryptionMode: ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED, fromKeyVersion: row.keyVersion, oldStored: row.encryptedData };
 }

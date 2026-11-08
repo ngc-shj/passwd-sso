@@ -24,6 +24,7 @@ import {
   verificationArtifactSchema,
   VAULT_ROTATE_ENTRIES_MAX,
   VAULT_ROTATE_HISTORY_MAX,
+  VAULT_ROTATE_BODY_MAX,
   ECDH_PRIVATE_KEY_CIPHERTEXT_MAX,
   WRAPPED_SECRET_KEY_MAX,
   VAULT_ROTATE_ATTACHMENT_CEK_MAX,
@@ -121,7 +122,7 @@ async function handlePOST(request: NextRequest) {
   });
   if (blocked) return blocked;
 
-  const bodyRead = await readJsonWithCap(request, 16 * 1024 * 1024);
+  const bodyRead = await readJsonWithCap(request, VAULT_ROTATE_BODY_MAX);
   if (!bodyRead.ok) {
     return errorResponse(bodyRead.tooLarge ? API_ERROR.PAYLOAD_TOO_LARGE : API_ERROR.INVALID_JSON);
   }

@@ -8,6 +8,7 @@
  *   ECDH(ephemeral, member) → HKDF("passwd-sso-team-v1", salt) → AES-256-GCM wrapping key
  *   teamKey → HKDF("passwd-sso-team-enc-v1", empty) → AES-256-GCM encryption key
  *   itemKey → HKDF("passwd-sso-item-enc-v1", empty) → AES-256-GCM encryption key
+ *   itemKey → HKDF("passwd-sso-item-cekwrap-v1", empty) → AES-256-GCM attachment CEK-wrap key
  */
 
 import { hexDecode, type EncryptedData } from "./crypto";
@@ -29,6 +30,9 @@ const HKDF_ECDH_WRAP_INFO = "passwd-sso-ecdh-v1";
 /** HKDF info for ItemKey → entry encryption key */
 const HKDF_ITEM_ENC_INFO = "passwd-sso-item-enc-v1";
 
+/** HKDF info for ItemKey → team attachment CEK-wrap key */
+const HKDF_ITEM_CEKWRAP_INFO = "passwd-sso-item-cekwrap-v1";
+
 /** AAD scope for TeamMemberKey wrapping */
 const AAD_SCOPE_TEAM_KEY = "OK";
 
@@ -37,6 +41,9 @@ const SCOPE_TEAM = "OV";
 
 /** AAD scope for ItemKey wrapping */
 const SCOPE_ITEM_KEY = "IK";
+
+/** AAD scope for team attachment CEK wrapping */
+const SCOPE_TEAM_ATTACHMENT_WRAP = "TW";
 
 // ─── Utility ────────────────────────────────────────────────────
 
@@ -131,6 +138,23 @@ export function buildItemKeyWrapAAD(
     teamId,
     entryId,
     String(teamKeyVersion),
+  ]);
+}
+
+/** Build AAD for team attachment CEK wrapping (scope "TW") */
+export function buildTeamAttachmentCekWrapAAD(
+  teamId: string,
+  entryId: string,
+  attachmentId: string,
+  itemKeyVersion: number,
+  cekWrapAadVersion: number
+): Uint8Array {
+  return buildAADBytes(SCOPE_TEAM_ATTACHMENT_WRAP, 5, [
+    teamId,
+    entryId,
+    attachmentId,
+    String(itemKeyVersion),
+    String(cekWrapAadVersion),
   ]);
 }
 
@@ -407,4 +431,82 @@ export async function deriveItemEncryptionKey(
     false,
     ["encrypt", "decrypt"]
   );
+}
+
+// ─── Team Attachment CEK Wrap ────────────────────────────────────
+
+/**
+ * Derive the AES-256-GCM key that wraps team attachment CEKs (mode-2).
+ * HKDF(itemKey, info="passwd-sso-item-cekwrap-v1", salt=empty)
+ */
+export async function deriveItemCekWrapKey(
+  itemKey: Uint8Array
+): Promise<CryptoKey> {
+  const hkdfKey = await crypto.subtle.importKey(
+    "raw",
+    toArrayBuffer(itemKey),
+    "HKDF",
+    false,
+    ["deriveKey"]
+  );
+
+  return crypto.subtle.deriveKey(
+    {
+      name: "HKDF",
+      hash: "SHA-256",
+      salt: new ArrayBuffer(32),
+      info: textEncode(HKDF_ITEM_CEKWRAP_INFO),
+    },
+    hkdfKey,
+    { name: "AES-GCM", length: AES_KEY_LENGTH },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+
+/** Where a team attachment CEK wrap is bound (scope "TW"). */
+export interface TeamAttachmentCekWrapContext {
+  teamId: string;
+  entryId: string;
+  attachmentId: string;
+  itemKeyVersion: number;
+  cekWrapAadVersion: number;
+}
+
+/**
+ * Unwrap a team attachment CEK with the ItemKey's CEK-wrap key, verifying
+ * the "TW" AAD. Returns the raw CEK bytes.
+ */
+export async function unwrapTeamAttachmentCek(
+  encrypted: EncryptedData,
+  cekWrapKey: CryptoKey,
+  ctx: TeamAttachmentCekWrapContext
+): Promise<Uint8Array> {
+  const ciphertext = hexDecode(encrypted.ciphertext);
+  const iv = hexDecode(encrypted.iv);
+  const authTag = hexDecode(encrypted.authTag);
+
+  const combined = new Uint8Array(ciphertext.length + authTag.length);
+  combined.set(ciphertext);
+  combined.set(authTag, ciphertext.length);
+
+  const aad = buildTeamAttachmentCekWrapAAD(
+    ctx.teamId,
+    ctx.entryId,
+    ctx.attachmentId,
+    ctx.itemKeyVersion,
+    ctx.cekWrapAadVersion
+  );
+
+  const decrypted = await crypto.subtle.decrypt(
+    {
+      name: "AES-GCM",
+      iv: toArrayBuffer(iv),
+      additionalData: toArrayBuffer(aad),
+    },
+    cekWrapKey,
+    toArrayBuffer(combined)
+  );
+
+  return new Uint8Array(decrypted);
 }

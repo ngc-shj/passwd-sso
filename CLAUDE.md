@@ -287,6 +287,7 @@ All password data is encrypted **client-side** before reaching the server. The s
 | `/api/teams/[teamId]/member-key` | GET, POST | Get/submit member encryption key |
 | `/api/teams/[teamId]/rotate-key` | POST | Rotate team encryption key |
 | `/api/teams/[teamId]/rotate-key/data` | GET | Bulk fetch entries for team key rotation |
+| `/api/teams/[teamId]/rekey` | GET | List entries pending re-key after a rotation |
 | `/api/teams/[teamId]/invitations` | GET, POST | List/create team invitations |
 | `/api/teams/[teamId]/invitations/[invId]` | DELETE | Cancel invitation |
 | `/api/teams/[teamId]/policy` | GET, PUT | Team security policy |
@@ -296,9 +297,11 @@ All password data is encrypted **client-side** before reaching the server. The s
 | `/api/teams/[teamId]/passwords/[id]/favorite` | PUT, DELETE | Toggle team entry favorite |
 | `/api/teams/[teamId]/passwords/[id]/attachments` | GET, POST | Team entry attachments |
 | `/api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]` | GET, DELETE | Team attachment download/delete |
+| `/api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]/migrate` | PUT | Migrate a legacy team attachment to a wrapped CEK (step-up) |
 | `/api/teams/[teamId]/passwords/[id]/history` | GET | Team entry version history |
 | `/api/teams/[teamId]/passwords/[id]/history/[historyId]` | GET | Team history record |
 | `/api/teams/[teamId]/passwords/[id]/history/[historyId]/restore` | POST | Restore team entry from history |
+| `/api/teams/[teamId]/passwords/[id]/rekey` | GET, POST | Re-key one team entry under the current team key (POST step-up) |
 | `/api/teams/[teamId]/passwords/bulk-archive` | POST | Bulk archive team entries |
 | `/api/teams/[teamId]/passwords/bulk-restore` | POST | Bulk restore team entries |
 | `/api/teams/[teamId]/passwords/bulk-trash` | POST | Bulk soft-delete team entries |

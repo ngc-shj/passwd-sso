@@ -28,8 +28,7 @@ import {
 import { fetchApi } from "@/lib/url-helpers";
 import { useTeamVaultOptional } from "@/lib/team/team-vault-core";
 import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
-import { unwrapItemKey, deriveItemEncryptionKey } from "@/lib/crypto/crypto-team";
-import { buildTeamEntryAAD, buildItemKeyWrapAAD } from "@/lib/crypto/crypto-aad";
+import { buildTeamEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import { useAuditLogs, type AuditLogItem } from "@/hooks/vault/use-audit-logs";
 import { getActionLabel } from "@/lib/audit/audit-action-label";
 import { getCommonTargetLabel } from "@/lib/audit/audit-target-label";
@@ -61,6 +60,7 @@ interface TeamEntryOverview {
   itemKeyIv: string;
   itemKeyAuthTag: string;
   itemKeyVersion: number;
+  itemKeyId?: string | null;
 }
 
 export default function TeamAdminAuditLogsPage({
@@ -83,18 +83,18 @@ export default function TeamAdminAuditLogsPage({
       const names = new Map<string, string>();
       for (const [entryId, ov] of Object.entries(overviews)) {
         try {
-          const ikAad = buildItemKeyWrapAAD(teamId, entryId, ov.teamKeyVersion);
-          const rawItemKey = await unwrapItemKey(
-            { ciphertext: ov.encryptedItemKey, iv: ov.itemKeyIv, authTag: ov.itemKeyAuthTag },
-            teamKey,
-            ikAad,
-          );
-          const itemEncKey = await deriveItemEncryptionKey(rawItemKey);
-          rawItemKey.fill(0);
+          // Each entry at its OWN team key version: an entry carried through
+          // a rotation stays at an older version than the latest key (D5).
+          const itemEncKey = await teamVault.getEntryDecryptionKey(teamId, entryId, {
+            itemKeyVersion: ov.itemKeyVersion,
+            encryptedItemKey: ov.encryptedItemKey,
+            itemKeyIv: ov.itemKeyIv,
+            itemKeyAuthTag: ov.itemKeyAuthTag,
+            itemKeyId: ov.itemKeyId ?? null,
+            teamKeyVersion: ov.teamKeyVersion,
+          });
 
-          const overviewAad = ov.aadVersion >= 1
-            ? buildTeamEntryAAD(teamId, entryId, "overview", ov.itemKeyVersion)
-            : undefined;
+          const overviewAad = buildTeamEntryAAD(teamId, entryId, VAULT_TYPE.OVERVIEW, ov.itemKeyVersion);
           const overview = JSON.parse(
             await decryptData(
               { ciphertext: ov.encryptedOverview, iv: ov.overviewIv, authTag: ov.overviewAuthTag } as EncryptedData,

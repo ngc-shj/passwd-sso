@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { dbBlobStore } from "@/lib/blob-store/db-blob-store";
 import { BLOB_STORAGE } from "@/lib/blob-store/types";
 
-const DUMMY_CONTEXT = { attachmentId: "att-1", entryId: "entry-1" };
+const DUMMY_CONTEXT = { attachmentId: "att-1", entryId: "entry-1", generation: "0123456789abcdef0123456789abcdef" };
 
 describe("dbBlobStore", () => {
   describe("backend", () => {

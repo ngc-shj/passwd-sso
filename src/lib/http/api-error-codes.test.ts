@@ -131,7 +131,11 @@ describe("API_ERROR structural invariants", () => {
     // 178 = 177 + SCIM_APPROVAL_TARGET_INACTIVE (scim-team-admission-approval
     // review round 2, S-R2-2/F-N1/F-N2/T-N2: split out of the generic CONFLICT
     // approve used for a target who left the tenant).
-    expect(Object.keys(API_ERROR).length).toBe(178);
+    // 201 = 178 + 23 team entry re-key codes (team-key-rotation-rekey C1-C4).
+    // 202 = 201 + HISTORY_ROW_CHANGED (team-key-rotation-rekey review round 1 F1).
+    // 203 = 202 + HISTORY_ROW_LEGACY (team-key-rotation-rekey review round 3 S-R3-2).
+    // 204 = 203 + REKEY_HISTORY_LEGACY (team-key-rotation-rekey review round 4 N-R4-1).
+    expect(Object.keys(API_ERROR).length).toBe(204);
   });
 });
 

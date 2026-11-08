@@ -53,5 +53,11 @@
     "description": "Account OAuth token encryption (server-side master key) — scope \"AC\"",
     "crossCodebase": false,
     "roundTrip": "src/lib/crypto/account-token-crypto.test.ts"
+  },
+  "TW": {
+    "description": "Team attachment CEK wrapping under the entry ItemKey (HKDF passwd-sso-item-cekwrap-v1), mode-2 — scope \"TW\"",
+    "crossCodebase": true,
+    "parity": "src/__tests__/aad-parity.test.ts",
+    "roundTrip": "src/lib/crypto/crypto-team.test.ts"
   }
 }

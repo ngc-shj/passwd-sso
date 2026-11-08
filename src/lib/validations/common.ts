@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { SEC_PER_MINUTE, SEC_PER_DAY, MIN_PER_HOUR, MIN_PER_DAY, DAYS_PER_YEAR } from "@/lib/constants/time";
+import { MAX_FILE_SIZE } from "./body-limits";
 
 // ─── Validation Constants (single source of truth) ──────────
 // Used by both Zod schemas (server) and UI components (client).
@@ -78,6 +79,10 @@ export const aadVersionSchema = z.number().int().min(1).max(AAD_VERSION_CURRENT)
 export const TEAM_KEY_VERSION_MIN = 2;
 export const TEAM_KEY_VERSION_MAX = 10_000;
 export const TEAM_ROTATE_ENTRIES_MAX = 1000;
+// History rows one team entry re-key POST names (re-keyed + retained). Writers
+// trim an entry's history to 20; the rest is margin for rows a trim has not
+// yet reached.
+export const REKEY_HISTORY_MAX = 40;
 export const TEAM_ROTATE_MEMBER_KEYS_MIN = 1;
 export const TEAM_ROTATE_MEMBER_KEYS_MAX = 1000;
 
@@ -278,13 +283,20 @@ export const VAULT_ROTATE_ATTACHMENT_CEK_MAX = 5000;  // new in Phase B
 // ─── Attachment Constants ────────────────────────────────────
 
 export const ALLOWED_EXTENSIONS = ["pdf", "png", "jpg", "jpeg", "txt", "csv"] as const;
-export const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 export const MAX_ATTACHMENTS_PER_ENTRY = 20;
 
-// Content-Length cap for the attachment-migrate JSON payload. Mirrors the
-// upload route's Content-Length pre-check so the migrate endpoint cannot be
-// abused as a memory-DoS vector via oversized base64 body submissions.
-export const ATTACHMENT_MIGRATE_PAYLOAD_MAX = MAX_FILE_SIZE * 2;
+// Body size caps (MAX_FILE_SIZE, ATTACHMENT_MIGRATE_PAYLOAD_MAX,
+// ATTACHMENT_UPLOAD_MULTIPART_MAX, REKEY_BODY_MAX, VAULT_ROTATE_BODY_MAX,
+// PROXY_CLIENT_MAX_BODY_SIZE)
+// live in ./body-limits, which next.config.ts imports.
+export {
+  MAX_FILE_SIZE,
+  ATTACHMENT_MIGRATE_PAYLOAD_MAX,
+  ATTACHMENT_UPLOAD_MULTIPART_MAX,
+  REKEY_BODY_MAX,
+  VAULT_ROTATE_BODY_MAX,
+  PROXY_CLIENT_MAX_BODY_SIZE,
+} from "./body-limits";
 
 // Cap on the base64-encoded `encryptedData` field inside the migrate JSON.
 // Decoded body must stay within MAX_FILE_SIZE; the +64 margin accommodates
@@ -322,6 +334,19 @@ export const ALLOWED_CONTENT_TYPES = [
  *   - Length not a multiple of 4
  */
 export const BASE64_RE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)$/;
+
+const BASE64_CHARS_RE = /^[A-Za-z0-9+/]*={0,2}$/;
+
+/**
+ * The BASE64_RE grammar for a string of any length. BASE64_RE backtracks once
+ * per 4-character group, and V8 overflows its stack (RangeError) on a few
+ * million characters — an attachment body near ATTACHMENT_BODY_BASE64_MAX
+ * crashed its route with a 500. Use this for body-sized fields; BASE64_RE
+ * stays for the small ones (CEK wraps).
+ */
+export function isBase64(value: string): boolean {
+  return value.length > 0 && value.length % 4 === 0 && BASE64_CHARS_RE.test(value);
+}
 
 /** Validates a hex string of the given byte length (e.g. 12 bytes = 24 hex chars). */
 export const hexString = (bytes: number) =>

@@ -11,6 +11,10 @@ interface SaveTeamEntryParams {
   teamKeyVersion: number;
   itemKeyVersion: number;
   encryptedItemKey?: { ciphertext: string; iv: string; authTag: string };
+  /** Edit reusing the ItemKey: the identity it was encrypted under (C1). */
+  itemKeyId?: string | null;
+  /** v0→v1 upgrade: the blobIv the client read. */
+  snapshotBlobIv?: string;
   fullBlob: string;
   overviewBlob: string;
   entryType?: EntryTypeValue;
@@ -28,6 +32,8 @@ export async function saveTeamEntry({
   teamKeyVersion,
   itemKeyVersion,
   encryptedItemKey,
+  itemKeyId,
+  snapshotBlobIv,
   fullBlob,
   overviewBlob,
   entryType,
@@ -58,7 +64,14 @@ export async function saveTeamEntry({
       teamKeyVersion,
       itemKeyVersion,
     },
-    optionals: { encryptedItemKey, entryType, teamFolderId, requireReprompt, expiresAt },
+    optionals: {
+      encryptedItemKey,
+      ...(mode === "edit" ? { itemKeyId, snapshotBlobIv } : {}),
+      entryType,
+      teamFolderId,
+      requireReprompt,
+      expiresAt,
+    },
   });
 
   const endpoint = mode === "create"

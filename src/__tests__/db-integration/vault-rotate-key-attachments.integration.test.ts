@@ -31,6 +31,7 @@ import {
   AttachmentCekWrapAadVersionMismatchError,
   type AttachmentCekRewrap,
   type RotationPayload,
+  type AttachmentMigrationOptions,
   type AttachmentMigrationPayload,
 } from "@/lib/vault/rotate-key-server";
 import { buildAttachmentAAD, buildAttachmentCekWrapAAD } from "@/lib/crypto/crypto-aad";
@@ -42,6 +43,29 @@ import {
   seedVaultUser,
   type TestContext,
 } from "./helpers";
+
+// ── Migration helper ─────────────────────────────────────────────────────────
+
+/**
+ * applyAttachmentMigration as the migrate route drives it on the DB backend:
+ * the snapshot is the row read before the transaction (its encrypted_data
+ * column is the body itself) and the new body is stored inline.
+ */
+async function migrateOnDbBackend(
+  tx: Parameters<typeof applyAttachmentMigration>[0],
+  opts: Omit<AttachmentMigrationOptions, "snapshot" | "newStored">,
+) {
+  const row = await tx.attachment.findUnique({
+    where: { id: opts.attachmentId },
+    select: { encryptedData: true, iv: true, authTag: true },
+  });
+  const stored = row?.encryptedData ?? new Uint8Array();
+  return applyAttachmentMigration(tx, {
+    ...opts,
+    snapshot: { stored, body: stored, iv: row?.iv ?? "", authTag: row?.authTag ?? "" },
+    newStored: Buffer.from(opts.payload.encryptedData, "base64"),
+  });
+}
 
 // ── Crypto helpers ───────────────────────────────────────────────────────────
 
@@ -545,7 +569,7 @@ describe("vault attachment rotation — Phase B integration (#437)", () => {
 
       await ctx.su.prisma.$transaction(async (tx) => {
         await setBypassRlsGucs(tx);
-        return applyAttachmentMigration(tx, {
+        return migrateOnDbBackend(tx, {
           userId, tenantId, entryId, attachmentId: attId,
           payload: {
             oldEncryptedDataHash: oldHash,
@@ -935,7 +959,7 @@ describe("vault attachment rotation — Phase B integration (#437)", () => {
     await expect(
       ctx.su.prisma.$transaction(async (tx) => {
         await setBypassRlsGucs(tx);
-        return applyAttachmentMigration(tx, {
+        return migrateOnDbBackend(tx, {
           userId: attackerUserId, // wrong user
           tenantId,
           entryId,
@@ -1028,7 +1052,7 @@ describe("vault attachment rotation — Phase B integration (#437)", () => {
     await expect(
       ctx.su.prisma.$transaction(async (tx) => {
         await setBypassRlsGucs(tx);
-        return applyAttachmentMigration(tx, {
+        return migrateOnDbBackend(tx, {
           userId, tenantId,
           entryId: teamEntryId,
           attachmentId: attId,
@@ -1068,7 +1092,7 @@ describe("vault attachment rotation — Phase B integration (#437)", () => {
     await expect(
       ctx.su.prisma.$transaction(async (tx) => {
         await setBypassRlsGucs(tx);
-        return applyAttachmentMigration(tx, { userId, tenantId, entryId, attachmentId: attId, payload: migratePayload });
+        return migrateOnDbBackend(tx, { userId, tenantId, entryId, attachmentId: attId, payload: migratePayload });
       }),
     ).rejects.toThrow(LegacyBodyHashMismatchError);
   });
@@ -1108,7 +1132,7 @@ describe("vault attachment rotation — Phase B integration (#437)", () => {
     await expect(
       ctx.su.prisma.$transaction(async (tx) => {
         await setBypassRlsGucs(tx);
-        return applyAttachmentMigration(tx, { userId, tenantId, entryId, attachmentId: attId, payload: migratePayload });
+        return migrateOnDbBackend(tx, { userId, tenantId, entryId, attachmentId: attId, payload: migratePayload });
       }),
     ).resolves.toMatchObject({ encryptionMode: 2 });
   });
@@ -1135,7 +1159,7 @@ describe("vault attachment rotation — Phase B integration (#437)", () => {
 
     await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
-      return applyAttachmentMigration(tx, {
+      return migrateOnDbBackend(tx, {
         userId, tenantId, entryId, attachmentId: attId,
         payload: {
           oldEncryptedDataHash: oldHash,
@@ -1271,7 +1295,7 @@ describe("vault attachment rotation — Phase B integration (#437)", () => {
     // First, migrate the row
     await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
-      return applyAttachmentMigration(tx, { userId, tenantId, entryId, attachmentId: attId, payload: migratePayload });
+      return migrateOnDbBackend(tx, { userId, tenantId, entryId, attachmentId: attId, payload: migratePayload });
     });
 
     // Build rewrap from the migrated row
@@ -1434,7 +1458,7 @@ describe("vault attachment rotation — Phase B integration (#437)", () => {
             await instanceA.prisma.$transaction(async (tx) => {
               await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${userId}::text))`;
               await setBypassRlsGucs(tx);
-              return applyAttachmentMigration(tx, {
+              return migrateOnDbBackend(tx, {
                 userId, tenantId, entryId, attachmentId: iterAttId, payload: migratePayloadIter,
               });
             });

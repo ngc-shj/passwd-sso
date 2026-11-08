@@ -11,7 +11,13 @@ const {
   MockTeamAuthError,
   mockWithTeamTenantRls,
   mockRateLimitCheck,
+  mockLockEntry,
+  mockPutObject,
+  mockDeleteObject,
+  mockTeamMemberFindFirst,
 } = vi.hoisted(() => ({
+  // The actor's membership, re-read under the team lock (activeTeamRole).
+  mockTeamMemberFindFirst: vi.fn(),
   mockAuth: vi.fn(),
   mockRequireTeamPermission: vi.fn(),
   mockPrismaTeamPasswordEntry: {
@@ -26,7 +32,10 @@ const {
     findUnique: vi.fn(),
   },
   mockExecuteRaw: vi.fn().mockResolvedValue(1),
-  mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
+  mockWithTeamTenantRls: vi.fn(),
+  mockLockEntry: vi.fn(),
+  mockPutObject: vi.fn(),
+  mockDeleteObject: vi.fn(),
   MockTeamAuthError: class MockTeamAuthError extends Error {
     status: number;
     constructor(message: string, status = 403) {
@@ -42,10 +51,16 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: vi.fn().mockReturnValue({ check: mockRateLimitCheck, clear: vi.fn() }),
 }));
-vi.mock("@/lib/auth/access/team-auth", () => ({
-  requireTeamPermission: mockRequireTeamPermission,
-  TeamAuthError: MockTeamAuthError,
-}));
+vi.mock("@/lib/auth/access/team-auth", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/auth/access/team-auth")>("@/lib/auth/access/team-auth");
+  return {
+    requireTeamPermission: mockRequireTeamPermission,
+    activeTeamRole: actual.activeTeamRole,
+    canWriteTeamEntry: actual.canWriteTeamEntry,
+    hasTeamPermission: actual.hasTeamPermission,
+    TeamAuthError: MockTeamAuthError,
+  };
+});
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     teamPasswordEntry: mockPrismaTeamPasswordEntry,
@@ -61,8 +76,29 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   withTeamTenantRls: mockWithTeamTenantRls,
 }));
+// The team → entry row locks are raw SQL against a real transaction
+// (team-attachment-rekey.integration.test.ts); here they return the locked
+// entry's key identity.
+vi.mock("@/lib/team/team-attachment-lock", () => ({
+  lockTeamAttachmentEntry: mockLockEntry,
+}));
+vi.mock("@/lib/blob-store", () => ({
+  getAttachmentBlobStore: () => ({
+    backend: "db",
+    putObject: mockPutObject,
+    deleteObject: mockDeleteObject,
+  }),
+}));
 
 import { GET, POST } from "./route";
+import { TeamRotationInProgressError } from "@/lib/team/team-key-rotation-lock";
+
+// The transaction client withTeamTenantRls hands the upload callback.
+const tx = {
+  attachment: mockPrismaAttachment,
+  $executeRaw: mockExecuteRaw,
+  teamMember: { findFirst: mockTeamMemberFindFirst },
+};
 
 function createParams(teamId: string, id: string) {
   return { params: Promise.resolve({ teamId: teamId, id }) };
@@ -111,6 +147,7 @@ function expectAdvisoryLockAcquired(mock: ReturnType<typeof vi.fn>) {
 describe("GET /api/teams/[teamId]/passwords/[id]/attachments", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockWithTeamTenantRls.mockImplementation(async (_teamId: string, fn: () => unknown) => fn());
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockRequireTeamPermission.mockResolvedValue(undefined);
     mockRateLimitCheck.mockResolvedValue({ allowed: true });
@@ -171,34 +208,78 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments", () => {
   });
 });
 
+const ATTACHMENT_ID = "11111111-2222-4333-8444-555555555555";
+const ITEM_KEY_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+const OTHER_ITEM_KEY_ID = "99999999-8888-4777-8666-555555555555";
+const STORED = new Uint8Array([7, 7, 7]);
+const LOCKED_ENTRY = {
+  teamKeyVersion: 3,
+  tenantId: "t1",
+  itemKeyVersion: 2,
+  itemKeyId: ITEM_KEY_ID,
+  entryTeamKeyVersion: 3,
+  createdById: "user-1",
+};
+
+// A complete mode-2 upload: body under a fresh CEK, the CEK wrapped under the
+// entry's ItemKey (version 2, id ITEM_KEY_ID).
+function validFields(overrides: Record<string, string | Blob | undefined> = {}): Record<string, string | Blob> {
+  const fields: Record<string, string | Blob | undefined> = {
+    id: ATTACHMENT_ID,
+    file: new Blob(["abc"]),
+    filename: "doc.pdf",
+    contentType: "application/pdf",
+    iv: VALID_IV,
+    authTag: VALID_AUTH_TAG,
+    sizeBytes: "3",
+    aadVersion: "1",
+    encryptionMode: "2",
+    itemKeyId: ITEM_KEY_ID,
+    cekKeyVersion: "2",
+    cekEncrypted: Buffer.from(new Uint8Array(48)).toString("base64"),
+    cekIv: "c".repeat(24),
+    cekAuthTag: "d".repeat(32),
+    cekWrapAadVersion: "1",
+    ...overrides,
+  };
+  return Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined)) as Record<string, string | Blob>;
+}
+
+async function upload(fields: Record<string, string | Blob> = validFields()) {
+  const res = await POST(
+    await createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", fields),
+    createParams("team-1", "pw-1"),
+  );
+  return { res, json: await res.json() };
+}
+
 describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
-    mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({
-      teamId: "team-1",
-      tenantId: "t1",
-      itemKeyVersion: 1,
-      teamKeyVersion: 1,
-    });
+    mockRequireTeamPermission.mockResolvedValue({ role: "MEMBER" });
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ teamId: "team-1", createdById: "user-1" });
     mockPrismaAttachment.count.mockResolvedValue(0);
+    mockPrismaAttachment.create.mockResolvedValue({
+      id: ATTACHMENT_ID,
+      filename: "doc.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 3,
+      createdAt: new Date(),
+    });
     mockRateLimitCheck.mockResolvedValue({ allowed: true });
+    mockLockEntry.mockResolvedValue(LOCKED_ENTRY);
+    mockTeamMemberFindFirst.mockResolvedValue({ role: "MEMBER" });
+    mockPutObject.mockResolvedValue(STORED);
+    mockDeleteObject.mockResolvedValue(undefined);
+    mockWithTeamTenantRls.mockImplementation(
+      async (_teamId: string, fn: (tenantId: string, client: typeof tx) => unknown) => fn("t1", tx),
+    );
   });
 
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
-    const res = await POST(
-      await createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
-        file: new Blob(["abc"]),
-        filename: "doc.pdf",
-        contentType: "application/pdf",
-        iv: VALID_IV,
-        authTag: VALID_AUTH_TAG,
-        sizeBytes: "3",
-      }),
-      createParams("team-1", "pw-1"),
-    );
+    const { res } = await upload();
     expect(res.status).toBe(401);
   });
 
@@ -206,102 +287,35 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     mockRequireTeamPermission.mockRejectedValue(
       new MockTeamAuthError("FORBIDDEN", 403),
     );
-    const res = await POST(
-      await createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
-        file: new Blob(["abc"]),
-        filename: "doc.pdf",
-        contentType: "application/pdf",
-        iv: VALID_IV,
-        authTag: VALID_AUTH_TAG,
-        sizeBytes: "3",
-      }),
-      createParams("team-1", "pw-1"),
-    );
-    const json = await res.json();
+    const { res, json } = await upload();
     expect(res.status).toBe(403);
     expect(json.error).toBe("FORBIDDEN");
   });
 
   it("returns 404 when entry does not belong to team", async () => {
     mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ teamId: "other-team" });
-    const res = await POST(
-      await createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
-        file: new Blob(["abc"]),
-        filename: "doc.pdf",
-        contentType: "application/pdf",
-        iv: VALID_IV,
-        authTag: VALID_AUTH_TAG,
-        sizeBytes: "3",
-      }),
-      createParams("team-1", "pw-1"),
-    );
+    const { res } = await upload();
     expect(res.status).toBe(404);
+    expect(mockPutObject).not.toHaveBeenCalled();
   });
 
   it("returns 400 when required fields are missing", async () => {
-    const res = await POST(
-      await createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
-        filename: "doc.pdf",
-      }),
-      createParams("team-1", "pw-1"),
-    );
-    const json = await res.json();
+    const { res, json } = await upload({ filename: "doc.pdf" });
     expect(res.status).toBe(400);
     expect(json.error).toBe("MISSING_REQUIRED_FIELDS");
   });
 
   it("returns 400 when content type is not allowed", async () => {
-    const res = await POST(
-      await createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
-        file: new Blob(["abc"]),
-        filename: "doc.pdf",
-        contentType: "application/zip",
-        iv: VALID_IV,
-        authTag: VALID_AUTH_TAG,
-        sizeBytes: "3",
-      }),
-      createParams("team-1", "pw-1"),
-    );
-    const json = await res.json();
+    const { res, json } = await upload(validFields({ contentType: "application/zip" }));
     expect(res.status).toBe(400);
     expect(json.error).toBe("CONTENT_TYPE_NOT_ALLOWED");
-  });
-
-  it("returns 400 when attachment limit is exceeded", async () => {
-    // The cap check now runs INSIDE the advisory-locked callback, after all
-    // request validation and the blob store put — so the request must be fully
-    // valid (encryptionMode included) to reach it.
-    mockPrismaAttachment.count.mockResolvedValue(20);
-    const res = await POST(
-      await createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
-        file: new Blob(["abc"]),
-        filename: "doc.pdf",
-        contentType: "application/pdf",
-        iv: VALID_IV,
-        authTag: VALID_AUTH_TAG,
-        sizeBytes: "3",
-        aadVersion: "1",
-        encryptionMode: "1",
-      }),
-      createParams("team-1", "pw-1"),
-    );
-    const json = await res.json();
-    expect(res.status).toBe(400);
-    expect(json.error).toBe("ATTACHMENT_LIMIT_EXCEEDED");
   });
 
   it("returns 413 when declared content-length is too large", async () => {
     const res = await POST(
       await createFormDataRequest(
         "http://localhost/api/teams/team-1/passwords/pw-1/attachments",
-        {
-          file: new Blob(["abc"]),
-          filename: "doc.pdf",
-          contentType: "application/pdf",
-          iv: VALID_IV,
-          authTag: VALID_AUTH_TAG,
-          sizeBytes: "3",
-        },
+        validFields(),
         { "content-length": String(30 * 1024 * 1024) },
       ),
       createParams("team-1", "pw-1"),
@@ -312,19 +326,9 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
   });
 
   it("returns 400 when actual file size exceeds max", async () => {
-    const huge = new Blob([new Uint8Array(11 * 1024 * 1024)]);
-    const res = await POST(
-      await createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
-        file: huge,
-        filename: "doc.pdf",
-        contentType: "application/pdf",
-        iv: VALID_IV,
-        authTag: VALID_AUTH_TAG,
-        sizeBytes: "100",
-      }),
-      createParams("team-1", "pw-1"),
+    const { res, json } = await upload(
+      validFields({ file: new Blob([new Uint8Array(11 * 1024 * 1024)]), sizeBytes: "100" }),
     );
-    const json = await res.json();
     expect(res.status).toBe(400);
     expect(json.error).toBe("FILE_TOO_LARGE");
   });
@@ -343,165 +347,247 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
   });
 
   it("returns 400 for invalid extension", async () => {
-    const res = await POST(
-      await createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
-        file: new Blob(["abc"]),
-        filename: "bad.exe",
-        contentType: "application/pdf",
-        iv: VALID_IV,
-        authTag: VALID_AUTH_TAG,
-        sizeBytes: "3",
-      }),
-      createParams("team-1", "pw-1"),
-    );
+    const { res } = await upload(validFields({ filename: "bad.exe" }));
     expect(res.status).toBe(400);
   });
 
   it("returns 400 for invalid iv format", async () => {
-    const res = await POST(
-      await createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
-        file: new Blob(["abc"]),
-        filename: "doc.pdf",
-        contentType: "application/pdf",
-        iv: "bad-iv",
-        authTag: VALID_AUTH_TAG,
-        sizeBytes: "3",
-      }),
-      createParams("team-1", "pw-1"),
-    );
-    const json = await res.json();
+    const { res, json } = await upload(validFields({ iv: "bad-iv" }));
     expect(res.status).toBe(400);
     expect(json.error).toBe("INVALID_ENCRYPTION_FORMAT");
   });
 
   it("returns 400 for invalid authTag format", async () => {
-    const res = await POST(
-      await createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
-        file: new Blob(["abc"]),
-        filename: "doc.pdf",
-        contentType: "application/pdf",
-        iv: VALID_IV,
-        authTag: "bad-tag",
-        sizeBytes: "3",
-      }),
-      createParams("team-1", "pw-1"),
-    );
-    const json = await res.json();
+    const { res, json } = await upload(validFields({ authTag: "bad-tag" }));
     expect(res.status).toBe(400);
     expect(json.error).toBe("INVALID_ENCRYPTION_FORMAT");
   });
 
-  it("creates attachment with client-encrypted data (encryptionMode=1)", async () => {
-    mockPrismaAttachment.create.mockResolvedValue({
-      id: "att-1",
-      filename: "doc.pdf",
-      contentType: "application/pdf",
-      sizeBytes: 3,
-      createdAt: new Date(),
-    });
-    const res = await POST(
-      await createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
-        file: new Blob(["abc"]),
-        filename: "doc.pdf",
-        contentType: "application/pdf",
-        iv: VALID_IV,
-        authTag: VALID_AUTH_TAG,
-        sizeBytes: "3",
-        aadVersion: "1",
-        encryptionMode: "1",
-      }),
-      createParams("team-1", "pw-1"),
-    );
+  it("creates a mode-2 attachment with the CEK identity and team key version of the LOCKED entry", async () => {
+    // The client spells the id in upper case: the stored id comes from the
+    // locked row, never from the request.
+    const { res } = await upload(validFields({ itemKeyId: ITEM_KEY_ID.toUpperCase() }));
     expect(res.status).toBe(201);
     expectAdvisoryLockAcquired(mockExecuteRaw);
+    expect(mockLockEntry).toHaveBeenCalledWith(tx, "team-1", "pw-1");
     expect(mockPrismaAttachment.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
+          id: ATTACHMENT_ID,
           iv: VALID_IV,
           authTag: VALID_AUTH_TAG,
           sizeBytes: 3,
-          encryptionMode: 1,
+          encryptionMode: 2,
           aadVersion: 1,
+          keyVersion: 3,
+          cekIv: "c".repeat(24),
+          cekAuthTag: "d".repeat(32),
+          cekKeyVersion: 2,
+          cekWrapAadVersion: 1,
+          cekItemKeyId: ITEM_KEY_ID,
+          tenantId: "t1",
           teamPasswordEntryId: "pw-1",
+          encryptedData: Buffer.from(STORED),
         }),
       }),
     );
+    expect(mockDeleteObject).not.toHaveBeenCalled();
+  });
+
+  it("writes the body to a fresh generation key before the transaction", async () => {
+    await upload();
+    await upload();
+    const [first, second] = mockPutObject.mock.calls.map((c) => c[1]);
+    expect(first).toMatchObject({ attachmentId: ATTACHMENT_ID, entryId: "pw-1", teamId: "team-1" });
+    expect(first.generation).toMatch(/^[0-9a-f]{32}$/);
+    expect(second.generation).toMatch(/^[0-9a-f]{32}$/);
+    expect(first.generation).not.toBe(second.generation);
+    expect(mockPutObject.mock.invocationCallOrder[0]).toBeLessThan(
+      mockWithTeamTenantRls.mock.invocationCallOrder[1],
+    );
+  });
+
+  it.each(["0", "1", "3"])("rejects encryptionMode=%s (mode 2 only)", async (mode) => {
+    const { res, json } = await upload(validFields({ encryptionMode: mode }));
+    expect(res.status).toBe(400);
+    expect(json.error).toBe("VALIDATION_ERROR");
+    expect(mockPutObject).not.toHaveBeenCalled();
   });
 
   it("returns 400 when encryptionMode is missing", async () => {
-    const res = await POST(
-      await createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
-        file: new Blob(["abc"]),
-        filename: "doc.pdf",
-        contentType: "application/pdf",
-        iv: VALID_IV,
-        authTag: VALID_AUTH_TAG,
-        sizeBytes: "3",
-      }),
-      createParams("team-1", "pw-1"),
-    );
-    const json = await res.json();
+    const { res, json } = await upload(validFields({ encryptionMode: undefined }));
     expect(res.status).toBe(400);
     expect(json.error).toBe("MISSING_REQUIRED_FIELDS");
   });
 
-  it("returns 400 when encryptionMode=0", async () => {
-    const res = await POST(
-      await createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
-        file: new Blob(["abc"]),
-        filename: "doc.pdf",
-        contentType: "application/pdf",
-        iv: VALID_IV,
-        authTag: VALID_AUTH_TAG,
-        sizeBytes: "3",
-        encryptionMode: "0",
-      }),
-      createParams("team-1", "pw-1"),
-    );
-    const json = await res.json();
+  it.each(["id", "itemKeyId", "cekKeyVersion", "cekEncrypted", "cekIv", "cekAuthTag", "cekWrapAadVersion"])(
+    "returns 400 MISSING_REQUIRED_FIELDS without %s",
+    async (field) => {
+      const { res, json } = await upload(validFields({ [field]: undefined }));
+      expect(res.status).toBe(400);
+      expect(json.error).toBe("MISSING_REQUIRED_FIELDS");
+      expect(mockPutObject).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ["a non-v4 attachment id", { id: "not-a-uuid" }],
+    ["a malformed itemKeyId", { itemKeyId: "nope" }],
+    ["a malformed cekIv", { cekIv: "x".repeat(24) }],
+    ["a malformed cekAuthTag", { cekAuthTag: "d".repeat(31) }],
+    ["a zero cekKeyVersion", { cekKeyVersion: "0" }],
+    ["a non-numeric cekKeyVersion", { cekKeyVersion: "2a" }],
+    ["a cekWrapAadVersion other than the current one", { cekWrapAadVersion: "2" }],
+    ["a non-base64 cekEncrypted", { cekEncrypted: "!!!!" }],
+    ["an oversized cekEncrypted", { cekEncrypted: "A".repeat(260) }],
+    ["an aadVersion other than 1", { aadVersion: "2" }],
+  ])("returns 400 VALIDATION_ERROR for %s", async (_label, change) => {
+    const { res, json } = await upload(validFields(change));
     expect(res.status).toBe(400);
     expect(json.error).toBe("VALIDATION_ERROR");
   });
 
-  it("returns 429 when rate limited", async () => {
-    mockRateLimitCheck.mockResolvedValueOnce({ allowed: false, retryAfterMs: 30_000 });
-    const res = await POST(
-      await createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
-        file: new Blob(["abc"]),
-        filename: "doc.pdf",
-        contentType: "application/pdf",
-        iv: VALID_IV,
-        authTag: VALID_AUTH_TAG,
-        sizeBytes: "3",
-        encryptionMode: "1",
-      }),
-      createParams("team-1", "pw-1"),
-    );
-    expect(res.status).toBe(429);
-    expect(res.headers.get("Retry-After")).toBe("30");
+  it("returns 409 ENTRY_UPGRADE_REQUIRED when the locked entry is v0, before comparing ids", async () => {
+    mockLockEntry.mockResolvedValue({ ...LOCKED_ENTRY, itemKeyVersion: 0, itemKeyId: null });
+    const { res, json } = await upload(validFields({ itemKeyId: OTHER_ITEM_KEY_ID }));
+    expect(res.status).toBe(409);
+    expect(json.error).toBe("ENTRY_UPGRADE_REQUIRED");
+    expect(mockPrismaAttachment.create).not.toHaveBeenCalled();
+    expect(mockDeleteObject).toHaveBeenCalledWith(STORED, expect.objectContaining({ attachmentId: ATTACHMENT_ID }));
   });
 
-  it("returns 400 when entry has itemKeyVersion=0", async () => {
-    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({
-      teamId: "team-1",
-      tenantId: "t1",
-      itemKeyVersion: 0,
-      teamKeyVersion: 1,
-    });
-    const res = await POST(
-      await createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
-        file: new Blob(["abc"]),
-        filename: "doc.pdf",
-        contentType: "application/pdf",
-        iv: VALID_IV,
-        authTag: VALID_AUTH_TAG,
-        sizeBytes: "3",
-        encryptionMode: "1",
-      }),
-      createParams("team-1", "pw-1"),
-    );
-    const json = await res.json();
+  it("returns 409 ITEM_KEY_CHANGED when the locked entry holds another ItemKey", async () => {
+    mockLockEntry.mockResolvedValue({ ...LOCKED_ENTRY, itemKeyId: OTHER_ITEM_KEY_ID });
+    const { res, json } = await upload();
+    expect(res.status).toBe(409);
+    expect(json.error).toBe("ITEM_KEY_CHANGED");
+    expect(mockPrismaAttachment.create).not.toHaveBeenCalled();
+    expect(mockDeleteObject).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns 409 ITEM_KEY_CHANGED when the locked entry's ItemKey id is NULL", async () => {
+    mockLockEntry.mockResolvedValue({ ...LOCKED_ENTRY, itemKeyId: null });
+    const { res, json } = await upload();
+    expect(res.status).toBe(409);
+    expect(json.error).toBe("ITEM_KEY_CHANGED");
+  });
+
+  it("checks the ItemKey id before cekKeyVersion (stale id + wrong version → ITEM_KEY_CHANGED)", async () => {
+    mockLockEntry.mockResolvedValue({ ...LOCKED_ENTRY, itemKeyId: OTHER_ITEM_KEY_ID });
+    const { json } = await upload(validFields({ cekKeyVersion: "5" }));
+    expect(json.error).toBe("ITEM_KEY_CHANGED");
+  });
+
+  it("returns 409 CEK_KEY_VERSION_MISMATCH when cekKeyVersion is not the locked itemKeyVersion", async () => {
+    const { res, json } = await upload(validFields({ cekKeyVersion: "1" }));
+    expect(res.status).toBe(409);
+    expect(json.error).toBe("CEK_KEY_VERSION_MISMATCH");
+    expect(mockPrismaAttachment.create).not.toHaveBeenCalled();
+    expect(mockDeleteObject).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns 409 ENTRY_REKEY_REQUIRED when the locked entry's ItemKey is wrapped under an older team key, writing nothing", async () => {
+    mockLockEntry.mockResolvedValue({ ...LOCKED_ENTRY, entryTeamKeyVersion: 2 });
+    const { res, json } = await upload();
+    expect(res.status).toBe(409);
+    expect(json.error).toBe("ENTRY_REKEY_REQUIRED");
+    expect(mockPrismaAttachment.create).not.toHaveBeenCalled();
+    expect(mockDeleteObject).toHaveBeenCalledTimes(1);
+  });
+
+  it("checks cekKeyVersion before the re-key rule (wrong version on an off-version entry → CEK_KEY_VERSION_MISMATCH)", async () => {
+    mockLockEntry.mockResolvedValue({ ...LOCKED_ENTRY, entryTeamKeyVersion: 2 });
+    const { json } = await upload(validFields({ cekKeyVersion: "1" }));
+    expect(json.error).toBe("CEK_KEY_VERSION_MISMATCH");
+  });
+
+  it("control: an entry at team key version 0 on a team at version 1 is current (normalised) → 201", async () => {
+    mockLockEntry.mockResolvedValue({ ...LOCKED_ENTRY, teamKeyVersion: 1, entryTeamKeyVersion: 0 });
+    const { res } = await upload();
+    expect(res.status).toBe(201);
+  });
+
+  it("returns 403 ONLY_OWN_ENTRIES for a MEMBER on another member's entry before anything is stored", async () => {
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ teamId: "team-1", createdById: "other-user" });
+    const { res, json } = await upload();
+    expect(res.status).toBe(403);
+    expect(json.error).toBe("ONLY_OWN_ENTRIES");
+    expect(mockPutObject).not.toHaveBeenCalled();
+    expect(mockLockEntry).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 ACTOR_NOT_PERMITTED for a MEMBER when the locked entry's creator is another member, and deletes the written object", async () => {
+    mockLockEntry.mockResolvedValue({ ...LOCKED_ENTRY, createdById: "other-user" });
+    const { res, json } = await upload();
+    expect(res.status).toBe(403);
+    expect(json.error).toBe("ACTOR_NOT_PERMITTED");
+    expect(mockPrismaAttachment.create).not.toHaveBeenCalled();
+    expect(mockDeleteObject).toHaveBeenCalledTimes(1);
+  });
+
+  it("control: an ADMIN uploads to another member's entry → 201", async () => {
+    mockRequireTeamPermission.mockResolvedValue({ role: "ADMIN" });
+    mockTeamMemberFindFirst.mockResolvedValue({ role: "ADMIN" });
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ teamId: "team-1", createdById: "other-user" });
+    mockLockEntry.mockResolvedValue({ ...LOCKED_ENTRY, createdById: "other-user" });
+    const { res } = await upload();
+    expect(res.status).toBe(201);
+  });
+
+  it("returns 400 ATTACHMENT_LIMIT_EXCEEDED under the advisory lock and deletes the written object", async () => {
+    mockPrismaAttachment.count.mockResolvedValue(20);
+    const { res, json } = await upload();
     expect(res.status).toBe(400);
-    expect(json.error).toBe("ITEM_KEY_REQUIRED");
+    expect(json.error).toBe("ATTACHMENT_LIMIT_EXCEEDED");
+    expectAdvisoryLockAcquired(mockExecuteRaw);
+    expect(mockDeleteObject).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["no longer an active member", null],
+    ["demoted to VIEWER", { role: "VIEWER" }],
+  ])("returns 403 ACTOR_NOT_PERMITTED when the actor is %s under the team lock, and deletes the written object", async (_label, membership) => {
+    mockTeamMemberFindFirst.mockResolvedValue(membership);
+    const { res, json } = await upload();
+    expect(res.status).toBe(403);
+    expect(json.error).toBe("ACTOR_NOT_PERMITTED");
+    expect(mockTeamMemberFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { teamId: "team-1", userId: "user-1", deactivatedAt: null } }),
+    );
+    expect(mockPrismaAttachment.create).not.toHaveBeenCalled();
+    expect(mockDeleteObject).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns 404 when the entry is gone under the lock", async () => {
+    mockLockEntry.mockResolvedValue(null);
+    const { res } = await upload();
+    expect(res.status).toBe(404);
+    expect(mockDeleteObject).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns 409 TEAM_KEY_VERSION_MISMATCH when a rotation holds the team row", async () => {
+    mockLockEntry.mockRejectedValue(new TeamRotationInProgressError());
+    const { res, json } = await upload();
+    expect(res.status).toBe(409);
+    expect(json.error).toBe("TEAM_KEY_VERSION_MISMATCH");
+    expect(mockDeleteObject).toHaveBeenCalledTimes(1);
+  });
+
+  it("deletes the written object and rethrows when the transaction fails", async () => {
+    mockPrismaAttachment.create.mockRejectedValue(new Error("db down"));
+    await expect(
+      POST(
+        await createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", validFields()),
+        createParams("team-1", "pw-1"),
+      ),
+    ).rejects.toThrow("db down");
+    expect(mockDeleteObject).toHaveBeenCalledWith(STORED, expect.objectContaining({ teamId: "team-1" }));
+  });
+
+  it("returns 429 when rate limited", async () => {
+    mockRateLimitCheck.mockResolvedValueOnce({ allowed: false, retryAfterMs: 30_000 });
+    const { res } = await upload();
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("30");
   });
 });

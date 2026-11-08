@@ -44,6 +44,7 @@ vi.mock("@/lib/team/team-policy", () => ({
 import { prisma } from "@/lib/prisma";
 import { TEAM_PERMISSION, TEAM_ROLE } from "@/lib/constants";
 import {
+  canWriteTeamEntry,
   hasTeamPermission,
   isRoleAbove,
   getTeamMembership,
@@ -54,6 +55,22 @@ import {
 } from "./team-auth";
 
 const mockPrisma = prisma as unknown as MockPrisma;
+
+describe("canWriteTeamEntry", () => {
+  it("lets a MEMBER write only an entry they created", () => {
+    expect(canWriteTeamEntry(TEAM_ROLE.MEMBER, "u1", "u1")).toBe(true);
+    expect(canWriteTeamEntry(TEAM_ROLE.MEMBER, "u2", "u1")).toBe(false);
+  });
+
+  it("lets an OWNER or ADMIN write any entry", () => {
+    expect(canWriteTeamEntry(TEAM_ROLE.OWNER, "u2", "u1")).toBe(true);
+    expect(canWriteTeamEntry(TEAM_ROLE.ADMIN, "u2", "u1")).toBe(true);
+  });
+
+  it("refuses a VIEWER even on an entry they created", () => {
+    expect(canWriteTeamEntry(TEAM_ROLE.VIEWER, "u1", "u1")).toBe(false);
+  });
+});
 
 describe("hasTeamPermission", () => {
   it("OWNER has all permissions", () => {

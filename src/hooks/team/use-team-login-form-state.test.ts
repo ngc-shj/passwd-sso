@@ -1,8 +1,23 @@
 // @vitest-environment jsdom
 
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { useTeamLoginFormState } from "@/hooks/team/use-team-login-form-state";
+import { aadModelDecrypt } from "@/__tests__/helpers/aad-model-decrypt";
+import { buildTeamEntryAAD } from "@/lib/crypto/crypto-aad";
+
+const { mockFetchApi, mockDecryptData } = vi.hoisted(() => ({
+  mockFetchApi: vi.fn(),
+  mockDecryptData: vi.fn(),
+}));
+
+vi.mock("@/lib/url-helpers", () => ({
+  fetchApi: (...args: unknown[]) => mockFetchApi(...args),
+}));
+
+vi.mock("@/lib/crypto/crypto-client", () => ({
+  decryptData: (...args: unknown[]) => mockDecryptData(...args),
+}));
 
 vi.mock("@/lib/team/team-vault-context", () => ({
   useTeamVault: () => ({
@@ -184,6 +199,50 @@ describe("useTeamLoginFormState", () => {
     expect(result.current.generatorSettings.length).toBe(16);
     // Policy enforces uppercase
     expect(result.current.generatorSettings.uppercase).toBe(true);
+  });
+});
+
+// D67: history passwords for the reuse check are read at AAD 1 whatever
+// aadVersion the server reports for the row.
+describe("useTeamLoginFormState password-reuse history (strict team entry AAD)", () => {
+  it.each([
+    ["refuses a no-AAD history blob the server labels aadVersion 0", 0, "noaad-blob", false],
+    ["control: reads an aadVersion-1 history blob sealed with the entry AAD", 1, "blob", true],
+  ])("%s", async (_label, aadVersion, ciphertext, flagsReuse) => {
+    mockFetchApi.mockResolvedValue({
+      ok: true,
+      json: async () => [{
+        id: "h1",
+        encryptedBlob: { ciphertext, iv: "iv", authTag: "tag" },
+        aadVersion,
+        teamKeyVersion: 1,
+        itemKeyVersion: 1,
+        itemKeyId: "ik-1",
+      }],
+    });
+    mockDecryptData.mockReset();
+    mockDecryptData.mockImplementation(aadModelDecrypt(JSON.stringify({ password: "reused-pw" })));
+    const setPolicyViolations = vi.fn();
+
+    const { result } = renderHook(() =>
+      useTeamLoginFormState({
+        teamId: "team-1",
+        editData: {
+          id: "entry-1", title: "T", username: null, password: "current", url: null, notes: null,
+          itemKeyVersion: 1, itemKeyId: "ik-1", teamKeyVersion: 1,
+        },
+        teamPolicy: { ...NO_POLICY, passwordHistoryCount: 5 },
+        setPolicyViolations,
+      }),
+    );
+    await waitFor(() => expect(mockDecryptData).toHaveBeenCalled());
+    // The settled decrypt (or refusal) is read by the reuse check on the next change.
+    await act(async () => {});
+    act(() => result.current.setPassword("reused-pw"));
+
+    const last = setPolicyViolations.mock.calls.at(-1)?.[0] as { key: string }[];
+    expect(last.some((v) => v.key === "policyPasswordReuse")).toBe(flagsReuse);
+    expect(mockDecryptData.mock.calls[0][2]).toEqual(buildTeamEntryAAD("team-1", "entry-1", "blob", 1));
   });
 });
 

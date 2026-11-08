@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { advisoryXactLock } from "@/lib/tenant-rls";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { getAttachmentBlobStore } from "@/lib/blob-store";
+import { deleteAttachmentBlobs } from "@/lib/blob-store/cleanup";
+import { BlobRefInvalidError } from "@/lib/blob-store/object-ref";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
+import { AUDIT_TARGET_TYPE, AUDIT_ACTION, ATTACHMENT_ENCRYPTION_MODE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { errorResponse, notFound, unauthorized } from "@/lib/http/api-response";
 
@@ -52,11 +55,17 @@ async function handleGET(
   }
 
   const blobStore = getAttachmentBlobStore();
-  const encryptedBuffer = await blobStore.getObject(attachment.encryptedData, {
-    attachmentId,
-    entryId: id,
-  });
-  const isMode2 = attachment.encryptionMode === 2;
+  let encryptedBuffer: Buffer;
+  try {
+    encryptedBuffer = await blobStore.getObject(attachment.encryptedData, {
+      attachmentId,
+      entryId: id,
+    });
+  } catch (e) {
+    if (e instanceof BlobRefInvalidError) return errorResponse(API_ERROR.BLOB_REF_INVALID);
+    throw e;
+  }
+  const isMode2 = attachment.encryptionMode === ATTACHMENT_ENCRYPTION_MODE.CEK_WRAPPED;
   // Return encrypted data + crypto metadata for client-side decryption
   return NextResponse.json({
     id: attachment.id,
@@ -107,28 +116,30 @@ async function handleDELETE(
     return notFound();
   }
 
-  const attachment = await withUserTenantRls(session.user.id, async () =>
-    prisma.attachment.findUnique({
+  // The row is deleted in a transaction under the per-user advisory lock that
+  // upload and migrate also take, so the stored ref read here is the one the
+  // deleted row held; the object is deleted after commit.
+  const userId = session.user.id;
+  const attachment = await withUserTenantRls(userId, async (_tenantId, tx) => {
+    await advisoryXactLock(tx, userId);
+    const row = await tx.attachment.findUnique({
       where: { id: attachmentId, passwordEntryId: id },
       select: { id: true, filename: true, encryptedData: true },
-    }),
-  );
+    });
+    if (!row) return null;
+    await tx.attachment.delete({
+      where: { id: attachmentId, passwordEntryId: id },
+    });
+    return row;
+  });
 
   if (!attachment) {
     return errorResponse(API_ERROR.ATTACHMENT_NOT_FOUND);
   }
 
-  const blobStore = getAttachmentBlobStore();
-  await blobStore.deleteObject(attachment.encryptedData, {
-    attachmentId,
-    entryId: id,
-  });
-
-  await withUserTenantRls(session.user.id, async () =>
-    prisma.attachment.delete({
-      where: { id: attachmentId, passwordEntryId: id },
-    }),
-  );
+  await deleteAttachmentBlobs([
+    { stored: attachment.encryptedData, context: { attachmentId, entryId: id } },
+  ]);
 
   await logAuditAsync({
     ...personalAuditBase(req, session.user.id),

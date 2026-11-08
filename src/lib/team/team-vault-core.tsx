@@ -14,6 +14,7 @@ import {
   createTeamKeyEscrow,
   unwrapItemKey,
   deriveItemEncryptionKey,
+  deriveItemCekWrapKey,
   type TeamKeyWrapContext,
 } from "../crypto/crypto-team";
 import { buildItemKeyWrapAAD } from "../crypto/crypto-aad";
@@ -30,6 +31,19 @@ import {
   type ClientLogStage,
 } from "@/lib/logger/client";
 import { isKnownApiError } from "@/lib/http/api-error-codes";
+import {
+  TEAM_KEY_FAILURE,
+  isAesGcmAuthFailure,
+  normalizeTeamKeyVersion,
+  type TeamKeyFailureReason,
+  type TeamKeyResolution,
+} from "./team-key-resolution";
+
+export {
+  TEAM_KEY_FAILURE,
+  type TeamKeyFailureReason,
+  type TeamKeyResolution,
+} from "./team-key-resolution";
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -50,9 +64,26 @@ interface LatestPointer {
   cachedAt: number;
 }
 
-interface CachedItemKey {
-  key: CryptoKey;
+/** The two keys derived from one ItemKey (plan C5). */
+export interface ItemKeys {
+  /** Entry blob / overview content key (HKDF "passwd-sso-item-enc-v1"). */
+  encryptionKey: CryptoKey;
+  /** Team attachment CEK-wrap key (HKDF "passwd-sso-item-cekwrap-v1"). */
+  cekWrapKey: CryptoKey;
+}
+
+interface CachedItemKeys {
+  keys: ItemKeys;
   cachedAt: number;
+}
+
+/** The live ItemKey of an entry, with the identity a writer must send back. */
+export interface ItemEncryptionKeyInfo {
+  keys: ItemKeys;
+  itemKeyVersion: number;
+  itemKeyId: string | null;
+  /** The entry's team key version (the wrap's). */
+  teamKeyVersion: number;
 }
 
 export interface TeamKeyInfo {
@@ -65,6 +96,12 @@ export interface EntryItemKeyData {
   encryptedItemKey?: string;
   itemKeyIv?: string;
   itemKeyAuthTag?: string;
+  /**
+   * Identity of the wrapped ItemKey (the entry's, or a history row's own).
+   * The ItemKey cache is keyed by (entryId, itemKeyId); a null or absent id
+   * is never cached and always re-resolved.
+   */
+  itemKeyId?: string | null;
   teamKeyVersion: number;
 }
 
@@ -75,10 +112,22 @@ export interface TeamVaultContextValue {
   getTeamKeyInfo: (teamId: string) => Promise<TeamKeyInfo | null>;
   /** Get a specific (possibly non-latest) team encryption key version, e.g. for old history rows. */
   getTeamEncryptionKeyForVersion: (teamId: string, keyVersion: number) => Promise<CryptoKey | null>;
-  /** Get the per-entry ItemKey-derived encryption key for attachment operations. */
-  getItemEncryptionKey: (teamId: string, entryId: string) => Promise<CryptoKey>;
-  /** Get the correct decryption key for an entry (ItemKey-derived if v>=1, TeamKey if v0). */
+  /**
+   * Resolve the team encryption key at a team key version, with the reason
+   * when it cannot be resolved (`key_invalid` = the member's own key row at
+   * that version fails to unwrap).
+   */
+  resolveTeamKey: (teamId: string, teamKeyVersion: number) => Promise<TeamKeyResolution>;
+  /**
+   * Fetch the entry and resolve its live ItemKey: both derived keys plus the
+   * identity and version a writer (attachment upload) must send. Throws
+   * ItemKeyUpgradeRequiredError for a v0 entry.
+   */
+  getItemEncryptionKey: (teamId: string, entryId: string) => Promise<ItemEncryptionKeyInfo>;
+  /** Get the correct decryption key for an entry or history row (ItemKey-derived if v>=1, TeamKey if v0). */
   getEntryDecryptionKey: (teamId: string, entryId: string, entry: EntryItemKeyData) => Promise<CryptoKey>;
+  /** Both ItemKey-derived keys of a v>=1 wrap (entry or history row). */
+  getEntryItemKeys: (teamId: string, entryId: string, entry: EntryItemKeyData) => Promise<ItemKeys>;
   /** Invalidate a cached team key (e.g. after key rotation). */
   invalidateTeamKey: (teamId: string) => void;
   /** Clear all cached team keys (e.g. on vault lock). */
@@ -119,29 +168,32 @@ type TeamMemberKeyResponse = {
   wrapVersion: number;
 };
 
-/**
- * Discriminates why a versioned TeamKey fetch failed (F3):
- * - "not_available": the version genuinely does not exist for this member
- *   (404 MEMBER_KEY_NOT_FOUND) or the server returned a different version
- *   than requested. This is not transient — retrying will not help.
- * - "transient": network/5xx/unwrap failure. May succeed on retry.
- */
-export type TeamKeyFailureReason = "not_available" | "transient";
-
 /** Thrown by getEntryDecryptionKey / getItemEncryptionKey ONLY when a
- * versioned TeamKey fetch fails for a non-transient reason (member-key 404,
- * or server returned a different keyVersion than requested — reason
- * "not_available"). Lets callers (e.g. history view) show a distinct "key
- * unavailable" message instead of the generic decrypt-failure toast.
- * Transient failures (network/5xx/unwrap) throw a plain Error instead (F3) —
- * they are not evidence the version predates membership. */
+ * versioned TeamKey fetch fails for a non-transient reason: "not_available"
+ * (member-key 404, or server returned a different keyVersion than requested)
+ * or "key_invalid" (the member's key row at that version fails to unwrap).
+ * Lets callers (e.g. history view) show a distinct message instead of the
+ * generic decrypt-failure toast. Transient failures (network/5xx) throw a
+ * plain Error instead (F3) — they are not evidence about the key. */
 export class TeamKeyVersionUnavailableError extends Error {
   readonly reason: TeamKeyFailureReason;
 
-  constructor(teamId: string, keyVersion: number, reason: TeamKeyFailureReason = "not_available") {
+  constructor(
+    teamId: string,
+    keyVersion: number,
+    reason: TeamKeyFailureReason = TEAM_KEY_FAILURE.NOT_AVAILABLE,
+  ) {
     super(`Team key version ${keyVersion} unavailable for team ${teamId}`);
     this.name = "TeamKeyVersionUnavailableError";
     this.reason = reason;
+  }
+}
+
+/** getItemEncryptionKey on a v0 entry: it has no ItemKey until upgraded. */
+export class ItemKeyUpgradeRequiredError extends Error {
+  constructor() {
+    super("Entry has no ItemKey (itemKeyVersion < 1)");
+    this.name = "ItemKeyUpgradeRequiredError";
   }
 }
 
@@ -174,6 +226,11 @@ function parseTeamMemberKeyResponse(data: unknown): TeamMemberKeyResponse {
   };
 }
 
+/** ItemKey cache slot: one ItemKey identity of one entry. */
+function itemKeySlot(entryId: string, itemKeyId: string): string {
+  return `${entryId}:${itemKeyId.toLowerCase()}`;
+}
+
 // ─── Provider ─────────────────────────────────────────────────
 
 interface TeamVaultProviderProps {
@@ -196,14 +253,23 @@ export function TeamVaultProvider({
   // `${teamId}:latest` pointer (LatestPointer) recording which version number
   // is currently "latest" for that team.
   const cacheRef = useRef<Map<string, CachedTeamKey | LatestPointer>>(new Map());
-  const itemKeyCacheRef = useRef<Map<string, Map<string, CachedItemKey>>>(new Map());
+  // Per team: `${entryId}:${itemKeyId}` → both ItemKey-derived keys (C5).
+  // Rotation re-wraps an ItemKey without changing it or its id, so the slot
+  // stays valid across team key versions; a different id is a different key.
+  const itemKeyCacheRef = useRef<Map<string, Map<string, CachedItemKeys>>>(new Map());
+  // Bumped by every clear. A populate site captures it before its first await
+  // and writes only if it is unchanged, so an unwrap in flight when the vault
+  // locks (or a team key is invalidated) cannot repopulate the cleared cache.
+  const cacheGenerationRef = useRef(0);
 
   const clearAll = useCallback(() => {
+    cacheGenerationRef.current += 1;
     cacheRef.current.clear();
     itemKeyCacheRef.current.clear();
   }, []);
 
   const invalidateTeamKey = useCallback((teamId: string) => {
+    cacheGenerationRef.current += 1;
     const prefix = `${teamId}:`;
     for (const key of cacheRef.current.keys()) {
       if (key.startsWith(prefix)) {
@@ -221,11 +287,12 @@ export function TeamVaultProvider({
   //
   // On failure, discriminates WHY (F3): "not_available" (404
   // MEMBER_KEY_NOT_FOUND, or the server returned a different keyVersion than
-  // requested — genuinely not recoverable by retry) vs "transient" (missing
-  // local vault state, network/5xx/unwrap failure — may succeed on retry).
-  // getTeamEncryptionKeyForVersion propagates this so getEntryDecryptionKey /
-  // getItemEncryptionKey can throw TeamKeyVersionUnavailableError ONLY for
-  // "not_available", never for a transient failure.
+  // requested — genuinely not recoverable by retry), "key_invalid" (the
+  // member's key row fails AES-GCM authentication on unwrap) vs "transient"
+  // (missing local vault state, network/5xx — may succeed on retry).
+  // resolveTeamKey propagates this so getEntryDecryptionKey /
+  // getItemEncryptionKey throw TeamKeyVersionUnavailableError only for the
+  // first two, never for a transient failure.
   const fetchAndUnwrapTeamKey = useCallback(
     async (
       teamId: string,
@@ -237,7 +304,7 @@ export function TeamVaultProvider({
       const ecdhPrivateKeyBytes = getEcdhPrivateKeyBytes();
       const userId = getUserId();
       if (!ecdhPrivateKeyBytes || !userId) {
-        return { failure: "transient" };
+        return { failure: TEAM_KEY_FAILURE.TRANSIENT };
       }
 
       let stage: ClientLogStage = CLIENT_LOG_STAGE.FETCH_MEMBER_KEY;
@@ -266,7 +333,9 @@ export function TeamVaultProvider({
           ecdhPrivateKeyBytes.fill(0);
           // 404 MEMBER_KEY_NOT_FOUND is the "genuinely unavailable" signal;
           // any other status (403/5xx/etc.) is transient (F3).
-          return { failure: res.status === 404 ? "not_available" : "transient" };
+          return {
+            failure: res.status === 404 ? TEAM_KEY_FAILURE.NOT_AVAILABLE : TEAM_KEY_FAILURE.TRANSIENT,
+          };
         }
 
         stage = CLIENT_LOG_STAGE.PARSE_MEMBER_KEY;
@@ -281,7 +350,7 @@ export function TeamVaultProvider({
             responseVersion: memberKeyData.keyVersion,
           });
           ecdhPrivateKeyBytes.fill(0);
-          return { failure: "not_available" };
+          return { failure: TEAM_KEY_FAILURE.NOT_AVAILABLE };
         }
 
         // Import ECDH private key, then zero-clear the copy. Pass the
@@ -310,17 +379,30 @@ export function TeamVaultProvider({
 
         // Unwrap team key
         stage = CLIENT_LOG_STAGE.UNWRAP_TEAM_KEY;
-        const teamKeyBytes = await unwrapTeamKey(
-          {
-            ciphertext: memberKeyData.encryptedTeamKey,
-            iv: memberKeyData.teamKeyIv,
-            authTag: memberKeyData.teamKeyAuthTag,
-          },
-          memberKeyData.ephemeralPublicKey,
-          ecdhPrivateKey,
-          memberKeyData.hkdfSalt,
-          ctx
-        );
+        let teamKeyBytes: Uint8Array;
+        try {
+          teamKeyBytes = await unwrapTeamKey(
+            {
+              ciphertext: memberKeyData.encryptedTeamKey,
+              iv: memberKeyData.teamKeyIv,
+              authTag: memberKeyData.teamKeyAuthTag,
+            },
+            memberKeyData.ephemeralPublicKey,
+            ecdhPrivateKey,
+            memberKeyData.hkdfSalt,
+            ctx
+          );
+        } catch (e) {
+          // The member's own key row exists but fails authentication: not a
+          // retryable condition, and not "no key at this version" either.
+          if (!isAesGcmAuthFailure(e)) throw e;
+          clientLogError(CLIENT_LOG_EVENT.TEAM_ENCRYPTION_KEY_FAILED, {
+            teamId: opaque(teamId),
+            stage,
+            code: toClientErrorCode(e),
+          });
+          return { failure: TEAM_KEY_FAILURE.KEY_INVALID };
+        }
 
         // Derive encryption key from team key, then zero-clear raw bytes
         stage = CLIENT_LOG_STAGE.DERIVE_TEAM_ENCRYPTION_KEY;
@@ -339,9 +421,9 @@ export function TeamVaultProvider({
           code: toClientErrorCode(e),
         });
         ecdhPrivateKeyBytes.fill(0);
-        // Any exception here (network error, malformed response, unwrap
-        // failure) is transient, not evidence the version is unavailable.
-        return { failure: "transient" };
+        // Any other exception here (network error, malformed response) is
+        // transient, not evidence the version is unavailable.
+        return { failure: TEAM_KEY_FAILURE.TRANSIENT };
       }
     },
     [getEcdhPrivateKeyBytes, getUserId]
@@ -360,8 +442,10 @@ export function TeamVaultProvider({
         }
       }
 
+      const generation = cacheGenerationRef.current;
       const resolved = await fetchAndUnwrapTeamKey(teamId);
       if ("failure" in resolved) return null;
+      if (generation !== cacheGenerationRef.current) return resolved.key;
 
       const cachedAt = Date.now();
       // Non-latest fetches never reach here (no requestedVersion passed above),
@@ -397,8 +481,10 @@ export function TeamVaultProvider({
         return { key: cached.key };
       }
 
+      const generation = cacheGenerationRef.current;
       const resolved = await fetchAndUnwrapTeamKey(teamId, keyVersion);
       if ("failure" in resolved) return resolved;
+      if (generation !== cacheGenerationRef.current) return { key: resolved.key };
 
       // Versioned (non-latest) fetches never write the latest pointer slot.
       cacheRef.current.set(cacheKey, {
@@ -433,154 +519,56 @@ export function TeamVaultProvider({
 
   // Resolves the TeamKey for a normalized version: the cached latest key when
   // it matches, otherwise the specific version via the versioned fetch.
-  // Single source of truth for the F3 failure discrimination shared by
-  // getEntryDecryptionKey and getItemEncryptionKey: only "not_available"
-  // (404 / version mismatch) throws TeamKeyVersionUnavailableError — so the
-  // history UI can show the "predates your team membership" message — while
-  // a transient failure throws a plain Error (with failureMessage) for the
-  // generic toast.
-  const resolveTeamKeyForVersion = useCallback(
-    async (
-      teamId: string,
-      normalizedTeamKeyVersion: number,
-      failureMessage: string,
-    ): Promise<{ key: CryptoKey; isLatest: boolean }> => {
+  // Single source of truth for the failure discrimination: "transient" (F3)
+  // stays retryable, "not_available" means the member holds no key at that
+  // version, "key_invalid" that its own key row there fails to unwrap.
+  const resolveTeamKey = useCallback(
+    async (teamId: string, teamKeyVersion: number): Promise<TeamKeyResolution> => {
+      const normalized = normalizeTeamKeyVersion(teamKeyVersion);
       const keyInfo = await getTeamKeyInfo(teamId);
-      if (!keyInfo) {
-        throw new Error(failureMessage);
+      if (keyInfo && keyInfo.keyVersion === normalized) {
+        return { key: keyInfo.key };
       }
-      if (normalizedTeamKeyVersion === keyInfo.keyVersion) {
-        return { key: keyInfo.key, isLatest: true };
-      }
-      const resolved = await getTeamEncryptionKeyForVersionWithReason(
-        teamId,
-        normalizedTeamKeyVersion,
-      );
-      if ("failure" in resolved) {
-        if (resolved.failure === "not_available") {
-          throw new TeamKeyVersionUnavailableError(teamId, normalizedTeamKeyVersion);
-        }
-        throw new Error(failureMessage);
-      }
-      return { key: resolved.key, isLatest: false };
+      const resolved = await getTeamEncryptionKeyForVersionWithReason(teamId, normalized);
+      return "failure" in resolved ? { reason: resolved.failure } : { key: resolved.key };
     },
     [getTeamKeyInfo, getTeamEncryptionKeyForVersionWithReason]
   );
 
-  const getItemEncryptionKey = useCallback(
-    async (teamId: string, entryId: string): Promise<CryptoKey> => {
-      // Check cache
-      const teamCache = itemKeyCacheRef.current.get(teamId);
-      const cached = teamCache?.get(entryId);
-      if (cached && Date.now() - cached.cachedAt < CACHE_TTL_MS) {
-        return cached.key;
+  // Throwing form for the entry decrypt paths: "not_available" and
+  // "key_invalid" throw TeamKeyVersionUnavailableError (so the history UI can
+  // show a distinct message), a transient failure throws a plain Error (with
+  // failureMessage) for the generic toast.
+  const requireTeamKey = useCallback(
+    async (teamId: string, teamKeyVersion: number, failureMessage: string): Promise<CryptoKey> => {
+      const resolved = await resolveTeamKey(teamId, teamKeyVersion);
+      if ("key" in resolved) return resolved.key;
+      if (resolved.reason === TEAM_KEY_FAILURE.TRANSIENT) {
+        throw new Error(failureMessage);
       }
-
-      // Fetch entry to get ItemKey metadata
-      const res = await fetchApi(apiPath.teamPasswordById(teamId, entryId));
-      if (!res.ok) {
-        throw new Error(`Failed to fetch entry ItemKey data (status=${res.status})`);
-      }
-      const raw = await res.json();
-
-      const itemKeyVersion = typeof raw.itemKeyVersion === "number" ? raw.itemKeyVersion : 0;
-      if (
-        itemKeyVersion < 1 ||
-        typeof raw.encryptedItemKey !== "string" ||
-        typeof raw.itemKeyIv !== "string" ||
-        typeof raw.itemKeyAuthTag !== "string" ||
-        typeof raw.teamKeyVersion !== "number"
-      ) {
-        throw new Error("Entry does not have ItemKey (itemKeyVersion < 1). Cannot encrypt attachments.");
-      }
-
-      // Normalize the entry's teamKeyVersion the same way getEntryDecryptionKey
-      // does: legacy schema-default-0 rows were sealed under version 1.
-      const rawTeamKeyVersion = raw.teamKeyVersion as number;
-      const normalizedTeamKeyVersion = rawTeamKeyVersion < 1 ? 1 : rawTeamKeyVersion;
-
-      // Version-aware TeamKey resolution (M3): a restored stale-version entry
-      // (teamKeyVersion < latest) must unwrap its ItemKey with the TeamKey
-      // version it was actually wrapped under, not the latest one, or the
-      // AAD-bound unwrap fails even though the entry is otherwise viewable.
-      const { key: teamKey, isLatest } = await resolveTeamKeyForVersion(
+      throw new TeamKeyVersionUnavailableError(
         teamId,
-        normalizedTeamKeyVersion,
-        "Failed to obtain team encryption key for ItemKey unwrap",
+        normalizeTeamKeyVersion(teamKeyVersion),
+        resolved.reason,
       );
-
-      // AAD uses the entry's raw teamKeyVersion as recorded at wrap time —
-      // NOT the normalized value — matching getEntryDecryptionKey.
-      const ikAad = buildItemKeyWrapAAD(teamId, entryId, raw.teamKeyVersion);
-      const rawItemKey = await unwrapItemKey(
-        {
-          ciphertext: raw.encryptedItemKey,
-          iv: raw.itemKeyIv,
-          authTag: raw.itemKeyAuthTag,
-        },
-        teamKey,
-        ikAad,
-      );
-
-      // Derive encryption key from ItemKey
-      const encryptionKey = await deriveItemEncryptionKey(rawItemKey);
-      rawItemKey.fill(0);
-
-      // Cache only the latest-version ItemKey (same rule as getEntryDecryptionKey
-      // — a non-latest unwrap must never poison the itemKeyCacheRef slot, which
-      // is keyed by entryId only and has no version dimension).
-      if (!isLatest) {
-        return encryptionKey;
-      }
-
-      if (!itemKeyCacheRef.current.has(teamId)) {
-        itemKeyCacheRef.current.set(teamId, new Map());
-      }
-      itemKeyCacheRef.current.get(teamId)!.set(entryId, {
-        key: encryptionKey,
-        cachedAt: Date.now(),
-      });
-
-      return encryptionKey;
     },
-    [resolveTeamKeyForVersion]
+    [resolveTeamKey]
   );
 
-  const getEntryDecryptionKey = useCallback(
-    async (teamId: string, entryId: string, entry: EntryItemKeyData): Promise<CryptoKey> => {
-      const itemKeyVersion = entry.itemKeyVersion ?? 0;
-
-      // Normalize: legacy schema-default-0 rows (column added with DEFAULT 0,
-      // no backfill) were sealed under what became version 1 — `<1 -> 1`,
-      // NOT `?? 1` alone, since `0 ?? 1 === 0`.
-      const rawTeamKeyVersion = entry.teamKeyVersion;
-      const normalizedTeamKeyVersion = rawTeamKeyVersion < 1 ? 1 : rawTeamKeyVersion;
-
-      const { key: teamKey, isLatest } = await resolveTeamKeyForVersion(
-        teamId,
-        normalizedTeamKeyVersion,
-        "Failed to obtain team encryption key",
-      );
-
-      // v0: use the (possibly old) TeamKey directly. Raw-0 rows predate
-      // ItemKey mode entirely, so there is no ItemKey unwrap here regardless
-      // of which TeamKey version was resolved.
-      if (itemKeyVersion < 1) {
-        return teamKey;
-      }
-
-      // v>=1: check cache first — but only for the latest version. Versioned
-      // (non-latest) ItemKey unwraps are never cached, to avoid cross-version
-      // contamination in itemKeyCacheRef (keyed by entryId only).
-      if (isLatest) {
-        const teamCache = itemKeyCacheRef.current.get(teamId);
-        const cached = teamCache?.get(entryId);
+  // Both ItemKey-derived keys of a v>=1 wrap. Served from the (entryId,
+  // itemKeyId) cache without resolving any team key when that identity was
+  // unwrapped before; a null / absent id is never cached (C5).
+  const getEntryItemKeys = useCallback(
+    async (teamId: string, entryId: string, entry: EntryItemKeyData): Promise<ItemKeys> => {
+      const itemKeyId = entry.itemKeyId ?? null;
+      if (itemKeyId !== null) {
+        const cached = itemKeyCacheRef.current.get(teamId)?.get(itemKeySlot(entryId, itemKeyId));
         if (cached && Date.now() - cached.cachedAt < CACHE_TTL_MS) {
-          return cached.key;
+          return cached.keys;
         }
       }
 
-      // Validate required fields
+      const generation = cacheGenerationRef.current;
       if (
         typeof entry.encryptedItemKey !== "string" ||
         typeof entry.itemKeyIv !== "string" ||
@@ -589,11 +577,18 @@ export function TeamVaultProvider({
         throw new Error("Entry has itemKeyVersion >= 1 but missing ItemKey encryption data");
       }
 
-      // AAD uses the entry's raw teamKeyVersion as recorded at wrap time —
-      // NOT the normalized value — to match what the server used when
-      // wrapping this row's ItemKey. (Raw-0 rows never reach here: they
-      // return above at the itemKeyVersion < 1 check, since a schema-default
-      // teamKeyVersion of 0 predates ItemKey mode entirely.)
+      // Version-aware TeamKey resolution (M3): a restored stale-version entry
+      // or an old history row unwraps with the TeamKey version it was wrapped
+      // under, not the latest one. Legacy schema-default-0 rows were sealed
+      // under what became version 1 (normalised inside requireTeamKey).
+      const teamKey = await requireTeamKey(
+        teamId,
+        entry.teamKeyVersion,
+        "Failed to obtain team encryption key",
+      );
+
+      // AAD uses the row's raw teamKeyVersion as recorded at wrap time —
+      // NOT the normalized value — to match what was used when wrapping.
       const ikAad = buildItemKeyWrapAAD(teamId, entryId, entry.teamKeyVersion);
       const rawItemKey = await unwrapItemKey(
         {
@@ -604,27 +599,71 @@ export function TeamVaultProvider({
         teamKey,
         ikAad,
       );
-
-      // Derive encryption key and zero-clear raw bytes
-      const encryptionKey = await deriveItemEncryptionKey(rawItemKey);
-      rawItemKey.fill(0);
-
-      if (!isLatest) {
-        return encryptionKey;
+      let keys: ItemKeys;
+      try {
+        keys = {
+          encryptionKey: await deriveItemEncryptionKey(rawItemKey),
+          cekWrapKey: await deriveItemCekWrapKey(rawItemKey),
+        };
+      } finally {
+        rawItemKey.fill(0);
       }
 
-      // Cache (latest version only)
-      if (!itemKeyCacheRef.current.has(teamId)) {
-        itemKeyCacheRef.current.set(teamId, new Map());
+      if (itemKeyId !== null && generation === cacheGenerationRef.current) {
+        let teamCache = itemKeyCacheRef.current.get(teamId);
+        if (!teamCache) {
+          teamCache = new Map();
+          itemKeyCacheRef.current.set(teamId, teamCache);
+        }
+        teamCache.set(itemKeySlot(entryId, itemKeyId), { keys, cachedAt: Date.now() });
       }
-      itemKeyCacheRef.current.get(teamId)!.set(entryId, {
-        key: encryptionKey,
-        cachedAt: Date.now(),
-      });
-
-      return encryptionKey;
+      return keys;
     },
-    [resolveTeamKeyForVersion]
+    [requireTeamKey]
+  );
+
+  const getItemEncryptionKey = useCallback(
+    async (teamId: string, entryId: string): Promise<ItemEncryptionKeyInfo> => {
+      // Always read the entry: the identity a writer sends must be the live
+      // one, and the cache is keyed by it.
+      const res = await fetchApi(apiPath.teamPasswordById(teamId, entryId));
+      if (!res.ok) {
+        throw new Error(`Failed to fetch entry ItemKey data (status=${res.status})`);
+      }
+      const raw = await res.json();
+
+      const itemKeyVersion = typeof raw.itemKeyVersion === "number" ? raw.itemKeyVersion : 0;
+      if (itemKeyVersion < 1) {
+        throw new ItemKeyUpgradeRequiredError();
+      }
+      if (typeof raw.teamKeyVersion !== "number") {
+        throw new Error("Entry ItemKey data is missing teamKeyVersion");
+      }
+      const itemKeyId = typeof raw.itemKeyId === "string" ? raw.itemKeyId : null;
+
+      const keys = await getEntryItemKeys(teamId, entryId, {
+        itemKeyVersion,
+        encryptedItemKey: raw.encryptedItemKey,
+        itemKeyIv: raw.itemKeyIv,
+        itemKeyAuthTag: raw.itemKeyAuthTag,
+        itemKeyId,
+        teamKeyVersion: raw.teamKeyVersion,
+      });
+      return { keys, itemKeyVersion, itemKeyId, teamKeyVersion: raw.teamKeyVersion };
+    },
+    [getEntryItemKeys]
+  );
+
+  const getEntryDecryptionKey = useCallback(
+    async (teamId: string, entryId: string, entry: EntryItemKeyData): Promise<CryptoKey> => {
+      // v0: the (possibly old) TeamKey directly. Raw-0 rows predate ItemKey
+      // mode entirely, so there is no ItemKey unwrap here.
+      if ((entry.itemKeyVersion ?? 0) < 1) {
+        return requireTeamKey(teamId, entry.teamKeyVersion, "Failed to obtain team encryption key");
+      }
+      return (await getEntryItemKeys(teamId, entryId, entry)).encryptionKey;
+    },
+    [requireTeamKey, getEntryItemKeys]
   );
 
   const distributePendingKeys = useCallback(async () => {
@@ -746,6 +785,12 @@ export function TeamVaultProvider({
     }
   }, [getEcdhPrivateKeyBytes, getUserId]);
 
+  // Locking the vault drops every unwrapped key: the provider stays mounted
+  // across lock, so nothing else would release them.
+  useEffect(() => {
+    if (!vaultUnlocked) clearAll();
+  }, [vaultUnlocked, clearAll]);
+
   // ─── Periodic auto key distribution (same pattern as EA auto-confirm) ──
   useEffect(() => {
     if (!vaultUnlocked || pollingSuspended) return;
@@ -782,8 +827,10 @@ export function TeamVaultProvider({
     getTeamEncryptionKey,
     getTeamKeyInfo,
     getTeamEncryptionKeyForVersion,
+    resolveTeamKey,
     getItemEncryptionKey,
     getEntryDecryptionKey,
+    getEntryItemKeys,
     invalidateTeamKey,
     clearAll,
     distributePendingKeys,

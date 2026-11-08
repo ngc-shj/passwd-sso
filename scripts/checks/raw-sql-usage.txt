@@ -72,6 +72,8 @@ src/app/api/passwords/[id]/history/[historyId]/restore/route.ts # row lock (FOR 
 src/app/api/passwords/[id]/route.ts # row lock (FOR UPDATE) for atomic blob snapshot+update on concurrent PUT
 src/app/api/share-links/[id]/content/route.ts # atomic view_count increment + revocation/expiry/creator-admission recheck (TOCTOU close)
 src/app/api/teams/[teamId]/passwords/[id]/history/[historyId]/restore/route.ts # row lock (FOR UPDATE) so the pre-restore snapshot sources the committed row, serialising with concurrent PUTs
+src/app/api/teams/[teamId]/passwords/[id]/rekey/route.ts # re-key POST row locks: the entry FOR UPDATE, then its history and attachment rows FOR UPDATE for the exact-set check
+src/app/api/teams/[teamId]/rekey/route.ts # re-key pass work list: count of history rows whose item_key_id differs from their entry's (a column comparison across the join)
 src/app/api/teams/[teamId]/rotate-key/route.ts # teams FOR NO KEY UPDATE CAS as the first statement, serialising rotation with the writers of its inputs
 src/app/api/v1/passwords/[id]/route.ts # row lock (FOR UPDATE) for atomic blob snapshot+update on concurrent PUT
 src/app/api/tenant/teams/[teamId]/owner/route.ts # teams FOR NO KEY UPDATE under the bounded lock wait, serialising owner assignment with departures and admissions holding the team FOR SHARE
@@ -89,6 +91,7 @@ src/lib/prisma/savepoint.ts # SAVEPOINT / ROLLBACK TO / RELEASE around one item 
 src/lib/services/scim-user-service.ts # DELETE team_members ... RETURNING team_id, checking every left team was locked against key rotation; the SCIM DELETE departure record and invitation expiry, stamped with clock_timestamp()
 src/lib/services/team-password-service.ts # row lock (FOR UPDATE) for atomic team entry blob snapshot+update
 src/lib/share/share-admission.ts # calls share_creator_admitted(uuid), the single spelling of whether a share link may still be served (issue 990)
+src/lib/team/team-attachment-lock.ts # team attachment writer locks: entry FOR SHARE (ItemKey identity read under the team lock) and attachment FOR UPDATE for upload, migrate and delete
 src/lib/team/team-departure.ts # tenant departure/return: conditional tenant_members UPDATE stamped with clock_timestamp(), team_members marker writes RETURNING team_id, invitation expiry
 src/lib/team/team-key-rotation-lock.ts # teams FOR SHARE locks (and lock_timeout) serialising entry, member-key and membership writers with team key rotation
 src/lib/team/tenant-row-lock.ts # tenant_members FOR SHARE / FOR UPDATE row locks (ORDER BY user_id) and the departure-record read, under the bounded lock wait

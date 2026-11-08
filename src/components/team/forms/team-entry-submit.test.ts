@@ -114,6 +114,7 @@ describe("executeTeamEntrySubmit", () => {
         encryptedItemKey: "ek-ct",
         itemKeyIv: "ek-iv",
         itemKeyAuthTag: "ek-at",
+        itemKeyId: "ik-1",
       },
       teamEncryptionKey: dummyKey,
       teamKeyVersion: 1,
@@ -132,15 +133,18 @@ describe("executeTeamEntrySubmit", () => {
       encryptedItemKey: "ek-ct",
       itemKeyIv: "ek-iv",
       itemKeyAuthTag: "ek-at",
+      itemKeyId: "ik-1",
       teamKeyVersion: 1,
     });
     const call = mockSaveTeamEntry.mock.calls[0][0];
     expect(call.itemKeyVersion).toBe(1);
+    // The ItemKey it reused, compared with the locked row (C1).
+    expect(call.itemKeyId).toBe("ik-1");
     expect(call.encryptedItemKey).toBeUndefined(); // Keep existing in DB
     expect(call.mode).toBe("edit");
   });
 
-  it("edit v0 upgrades to v1 with new ItemKey", async () => {
+  it("edit v0 upgrades at the server's nextItemKeyVersion and names the blob it replaces", async () => {
     mockSaveTeamEntry.mockResolvedValue({ ok: true });
 
     await executeTeamEntrySubmit({
@@ -155,6 +159,8 @@ describe("executeTeamEntrySubmit", () => {
         notes: null,
         tags: [],
         itemKeyVersion: 0,
+        nextItemKeyVersion: 4,
+        blobIv: "b-iv",
       },
       teamEncryptionKey: dummyKey,
       teamKeyVersion: 1,
@@ -168,7 +174,8 @@ describe("executeTeamEntrySubmit", () => {
     });
 
     const call = mockSaveTeamEntry.mock.calls[0][0];
-    expect(call.itemKeyVersion).toBe(1);
+    expect(call.itemKeyVersion).toBe(4);
+    expect(call.snapshotBlobIv).toBe("b-iv");
     expect(call.encryptedItemKey).toEqual({ ciphertext: "ct", iv: "iv", authTag: "at" });
     expect(call.entryId).toBe("entry-1");
     expect(call.mode).toBe("edit");
@@ -210,7 +217,7 @@ describe("executeTeamEntrySubmit", () => {
   it("handles error and resets saving", async () => {
     const setSaving = vi.fn();
 
-    mockSaveTeamEntry.mockResolvedValue({ ok: false });
+    mockSaveTeamEntry.mockResolvedValue(new Response(JSON.stringify({ error: "INTERNAL_ERROR" }), { status: 500 }));
 
     await executeTeamEntrySubmit({
       teamId: "team-1",
@@ -236,6 +243,40 @@ describe("executeTeamEntrySubmit", () => {
     });
 
     expect(toastErrorMock).toHaveBeenCalledWith("failedToSave");
+    expect(setSaving).toHaveBeenLastCalledWith(false);
+  });
+
+  it.each([
+    ["ITEM_KEY_CHANGED", "teamEntryItemKeyChanged"],
+    ["ITEM_KEY_VERSION_INVALID", "teamEntryItemKeyChanged"],
+    ["ENTRY_REKEY_REQUIRED", "teamEntryRekeyRequired"],
+    ["TEAM_KEY_VERSION_MISMATCH", "teamEntryTeamKeyChanged"],
+  ])("maps a %s refusal to its own message", async (code, message) => {
+    const setSaving = vi.fn();
+    const onSaved = vi.fn();
+    mockSaveTeamEntry.mockResolvedValue(new Response(JSON.stringify({ error: code }), { status: 409 }));
+
+    await executeTeamEntrySubmit({
+      teamId: "team-1",
+      isEdit: true,
+      editData: {
+        id: "entry-1", title: "x", username: "u", password: "p", url: null, notes: null, tags: [],
+        itemKeyVersion: 1, teamKeyVersion: 1, encryptedItemKey: "c", itemKeyIv: "i", itemKeyAuthTag: "a", itemKeyId: "ik-1",
+      },
+      teamEncryptionKey: dummyKey,
+      teamKeyVersion: 2,
+      fullBlob: "{}",
+      overviewBlob: "{}",
+      tagIds: [],
+      t: mockTranslator<PasswordFormTranslator>(),
+      setSaving,
+      handleOpenChange: vi.fn(),
+      onSaved,
+      getEntryDecryptionKey: vi.fn().mockResolvedValue(dummyKey),
+    });
+
+    expect(toastErrorMock).toHaveBeenCalledWith(message);
+    expect(onSaved).not.toHaveBeenCalled();
     expect(setSaving).toHaveBeenLastCalledWith(false);
   });
 });

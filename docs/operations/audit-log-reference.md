@@ -272,7 +272,10 @@ These user-meaningful fields should be rendered in `getTargetLabel()` with i18n 
 |--------|-------|------------|----------|------------|
 | `MASTER_KEY_ROTATION` | TEAM | — | `{ targetVersion, revokedShares }` | — (export-only) |
 | `TEAM_E2E_MIGRATION` | TEAM | — | — | — |
-| `TEAM_KEY_ROTATION` | TEAM | TeamPasswordEntry | `{ fromVersion, toVersion, entriesRotated, membersUpdated }` | — (export-only) |
+| `TEAM_KEY_ROTATION` | TEAM | TeamPasswordEntry | `{ fromVersion, toVersion, entriesRotated, entriesCarried, membersUpdated }` | — (export-only) |
+| `TEAM_KEY_ROTATION_CARRY` | TEAM | TeamPasswordEntry | `{ reason, teamKeyVersion }` | — (export-only) |
+| `TEAM_ENTRY_REKEY` | TEAM | TeamPasswordEntry | `{ fromItemKeyVersion, toItemKeyVersion, fromTeamKeyVersion, toTeamKeyVersion, retained }` | — (export-only) |
+| `TEAM_ATTACHMENT_MIGRATE` | TEAM | Attachment | `{ entryId, fromEncryptionMode, toItemKeyVersion }` | — (export-only) |
 | `TEAM_MEMBER_KEY_DISTRIBUTE` | TEAM | TeamMember | — | — |
 | `POLICY_UPDATE` | TEAM | Team | `{ ...policyFields }` | — (export-only) |
 | `AUDIT_LOG_DOWNLOAD` | PERSONAL/TEAM | — | `{ format, filterCriteria, rowCount }` | format, rowCount |
@@ -284,7 +287,9 @@ These user-meaningful fields should be rendered in `getTargetLabel()` with i18n 
 **Notes:**
 - `resetId` added to ADMIN_VAULT_RESET_INITIATE by `audit-metadata-standardize` branch.
 - System events (TEAM_E2E_MIGRATION) have no ip/userAgent.
-- TEAM_KEY_ROTATION: `targetType` is TeamPasswordEntry, `targetId` is teamId.
+- TEAM_KEY_ROTATION: `targetType` is TeamPasswordEntry, `targetId` is teamId. Written in the rotation's transaction, so a rotation that rolls back leaves no row.
+- TEAM_KEY_ROTATION_CARRY: one row per entry a rotation left unchanged (written in the rotation's transaction beside the summary TEAM_KEY_ROTATION row); `targetId` is the entry id, `reason` is `not_held`, `undecryptable` or `key_invalid` as claimed by the rotating member (the row's actor), `teamKeyVersion` the entry's version. An `undecryptable` / `key_invalid` carry is that member's unverifiable claim; the entry stays on its old key until another holder re-keys it.
+- TEAM_ENTRY_REKEY / TEAM_ATTACHMENT_MIGRATE: written in the re-key / migrate transaction (team-key-rotation-rekey plan C2/C4). The original history and attachment attribution is kept although the actor rewrote the ciphertext. TEAM_ENTRY_REKEY: `fromTeamKeyVersion` is the team key version the replaced ItemKey was created under (0 when unknown), `retained` lists the history rows left as they were (`{ id, teamKeyVersion, itemKeyVersion }` each). TEAM_ATTACHMENT_MIGRATE: `toItemKeyVersion` is the ItemKey version the attachment's CEK is now wrapped under.
 - TENANT_ROLE_UPDATE: `transfer` is true for ownership transfers.
 
 ### SCIM Provisioning (`group:scim`)
@@ -417,7 +422,7 @@ These user-meaningful fields should be rendered in `getTargetLabel()` with i18n 
 | `group:history` | ENTRY_HISTORY_RESTORE, HISTORY_PURGE |
 | `group:team` | TEAM_MEMBER_ADD, TEAM_MEMBER_INVITE, TEAM_MEMBER_REMOVE, TEAM_ROLE_UPDATE, TEAM_MEMBER_TENANT_DEACTIVATE, TEAM_MEMBER_TENANT_RESTORE, TEAM_OWNER_ASSIGNED_BY_TENANT_ADMIN, SCIM_GROUP_MAPPING_CREATE, TEAM_MEMBER_SCIM_PENDING, TEAM_MEMBER_SCIM_PENDING_WITHDRAW, TEAM_MEMBER_SCIM_REMOVE, TEAM_MEMBER_SCIM_ROLE_UPDATE, TEAM_MEMBER_SCIM_APPROVE, TEAM_MEMBER_SCIM_REJECT |
 | `group:share` | SHARE_CREATE, SHARE_REVOKE, SHARE_ACCESS_VERIFY_SUCCESS, SHARE_ACCESS_VERIFY_FAILED |
-| `group:admin` | MASTER_KEY_ROTATION, TEAM_E2E_MIGRATION, TEAM_KEY_ROTATION, TEAM_MEMBER_KEY_DISTRIBUTE, POLICY_UPDATE, AUDIT_LOG_DOWNLOAD, WATCHTOWER_ALERT_SENT, ADMIN_VAULT_RESET_INITIATE, ADMIN_VAULT_RESET_EXECUTE |
+| `group:admin` | MASTER_KEY_ROTATION, TEAM_E2E_MIGRATION, TEAM_KEY_ROTATION, TEAM_KEY_ROTATION_CARRY, TEAM_ENTRY_REKEY, TEAM_ATTACHMENT_MIGRATE, TEAM_MEMBER_KEY_DISTRIBUTE, POLICY_UPDATE, AUDIT_LOG_DOWNLOAD, WATCHTOWER_ALERT_SENT, ADMIN_VAULT_RESET_INITIATE, ADMIN_VAULT_RESET_EXECUTE |
 | `group:scim` | SCIM_TOKEN_CREATE, SCIM_TOKEN_REVOKE, SCIM_USER_CREATE, SCIM_USER_UPDATE, SCIM_USER_DEACTIVATE, SCIM_USER_REACTIVATE, SCIM_USER_DELETE, SCIM_GROUP_UPDATE |
 | `group:webhook` | WEBHOOK_CREATE, WEBHOOK_DELETE, WEBHOOK_DELIVERY_FAILED |
 

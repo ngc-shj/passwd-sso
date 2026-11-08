@@ -14,6 +14,8 @@ import { API_ERROR, type ApiErrorCode } from "@/lib/http/api-error-codes";
 import { toBlobColumns, toOverviewColumns } from "@/lib/crypto/crypto-blob";
 import { dedupeTagIds, tagConnect, tagSet } from "@/lib/services/tag-relation";
 import { lockTeamKeyVersion, TeamRotationInProgressError } from "@/lib/team/team-key-rotation-lock";
+import { itemKeyIdsMatch, itemKeyIvReused, nextItemKeyVersion, normalizeTeamKeyVersion } from "@/lib/team/team-item-key";
+import { activeTeamRole, canWriteTeamEntry } from "@/lib/auth/access/team-auth";
 import type { EntryType, Prisma } from "@prisma/client";
 
 // ---------------------------------------------------------------------------
@@ -60,6 +62,10 @@ export interface UpdateTeamPasswordInput {
   teamKeyVersion?: number;
   itemKeyVersion?: number;
   encryptedItemKey?: EncryptedCiphertext | null;
+  /** The ItemKey a full update that reuses it was encrypted under. */
+  itemKeyId?: string | null;
+  /** blobIv the client read; identifies a v0→v1 upgrade with `encryptedItemKey`. */
+  snapshotBlobIv?: string;
   tagIds?: string[];
   teamFolderId?: string | null;
   isArchived?: boolean;
@@ -141,7 +147,7 @@ async function assertCurrentTeamKeyVersion(
   teamId: string,
   // A full update whose caller omitted the version never matches.
   teamKeyVersion: number | undefined,
-): Promise<{ tenantId: string }> {
+): Promise<{ tenantId: string; teamKeyVersion: number }> {
   let team: Awaited<ReturnType<typeof lockTeamKeyVersion>>;
   try {
     team = await lockTeamKeyVersion(tx, teamId);
@@ -154,7 +160,7 @@ async function assertCurrentTeamKeyVersion(
   if (!team || team.teamKeyVersion !== teamKeyVersion) {
     throw new TeamPasswordServiceError(API_ERROR.TEAM_KEY_VERSION_MISMATCH, 409);
   }
-  return { tenantId: team.tenantId };
+  return { tenantId: team.tenantId, teamKeyVersion: team.teamKeyVersion };
 }
 
 // ---------------------------------------------------------------------------
@@ -228,6 +234,8 @@ export async function listTeamPasswords(
           itemKeyAuthTag: entry.itemKeyAuthTag,
         }
       : {}),
+    // Keys the client ItemKey cache (C5); null never caches.
+    itemKeyId: entry.itemKeyId,
     isFavorite: entry.favorites.length > 0,
     isArchived: entry.isArchived,
     tags: entry.tags,
@@ -277,7 +285,11 @@ export async function createTeamPassword(
   // `prisma` resolves to the caller's withTeamTenantRls transaction, which
   // holds the FOR SHARE until the entry insert commits.
   // tenantId is resolved from the team record, not passed by caller.
-  const { tenantId } = await assertCurrentTeamKeyVersion(prisma, teamId, teamKeyVersion);
+  const { tenantId, teamKeyVersion: currentTeamKeyVersion } = await assertCurrentTeamKeyVersion(
+    prisma,
+    teamId,
+    teamKeyVersion,
+  );
   const folder = teamFolderId
     ? await prisma.teamFolder.findUnique({
         where: { id: teamFolderId },
@@ -306,6 +318,11 @@ export async function createTeamPassword(
             itemKeyAuthTag: encryptedItemKey.authTag,
           }
         : {}),
+      // A new entry's ItemKey (if any) is created under the current team key:
+      // the server mints its identity, and the entry is not pending re-key.
+      ...(itemKeyVersion >= 1 ? { itemKeyId: crypto.randomUUID() } : {}),
+      itemKeyTeamKeyVersion: normalizeTeamKeyVersion(currentTeamKeyVersion),
+      itemKeyVersionHighWater: itemKeyVersion,
       entryType,
       teamId,
       tenantId,
@@ -375,6 +392,93 @@ export async function getTeamPasswordForUpdate(
 // updateTeamPassword
 // ---------------------------------------------------------------------------
 
+// Row type for the FOR UPDATE read of the entry (team_password_entries).
+// item_key_* wrap columns and item_key_id are nullable.
+type LockedTeamEntryRow = {
+  encrypted_blob: string;
+  blob_iv: string;
+  blob_auth_tag: string;
+  aad_version: number;
+  team_key_version: number;
+  item_key_version: number;
+  encrypted_item_key: string | null;
+  item_key_iv: string | null;
+  item_key_auth_tag: string | null;
+  item_key_id: string | null;
+  item_key_team_key_version: number;
+  item_key_version_high_water: number;
+  created_by_id: string;
+};
+
+/**
+ * The ItemKey columns a full update writes, decided against the LOCKED row
+ * (plan C1/C6). Three shapes:
+ *  - v0→v1 upgrade: the locked row is v0 and the body carries a new wrap
+ *    plus the blobIv it read. The version must be high-water + 1 and the wrap
+ *    IV unused by the row and its history; a fresh `item_key_id` is minted and
+ *    the re-key marker is left as it was.
+ *  - legacy v0 edit: no ItemKey before or after.
+ *  - reuse of the entry's ItemKey: the body's `itemKeyId` must be the locked
+ *    one (checked before the team-key-version rule, so a stale client learns
+ *    the key changed), and an ItemKey wrapped under an older team key must be
+ *    re-keyed before it is written to again.
+ */
+async function resolveFullUpdateItemKey(
+  tx: Pick<Prisma.TransactionClient, "teamPasswordEntryHistory">,
+  passwordId: string,
+  cur: LockedTeamEntryRow,
+  currentTeamKeyVersion: number,
+  body: {
+    itemKeyVersion: number | undefined;
+    encryptedItemKey: EncryptedCiphertext | null | undefined;
+    itemKeyId: string | null | undefined;
+    snapshotBlobIv: string | undefined;
+  },
+): Promise<Record<string, unknown>> {
+  const requested = body.itemKeyVersion ?? cur.item_key_version;
+  // Prevent itemKeyVersion downgrade (v1→v0) — cryptographic downgrade attack
+  if (requested < cur.item_key_version) {
+    throw new TeamPasswordServiceError(API_ERROR.ITEM_KEY_VERSION_DOWNGRADE, 400);
+  }
+
+  if (body.encryptedItemKey) {
+    if (
+      cur.item_key_version !== 0 ||
+      body.snapshotBlobIv === undefined ||
+      body.snapshotBlobIv.toLowerCase() !== cur.blob_iv.toLowerCase()
+    ) {
+      throw new TeamPasswordServiceError(API_ERROR.ITEM_KEY_CHANGED, 409);
+    }
+    if (requested !== nextItemKeyVersion(cur.item_key_version_high_water, cur.item_key_version)) {
+      throw new TeamPasswordServiceError(API_ERROR.ITEM_KEY_VERSION_INVALID, 409);
+    }
+    if (await itemKeyIvReused(tx, passwordId, cur.item_key_iv, body.encryptedItemKey.iv)) {
+      throw new TeamPasswordServiceError(API_ERROR.ITEM_KEY_IV_REUSED, 400);
+    }
+    return {
+      itemKeyVersion: requested,
+      encryptedItemKey: body.encryptedItemKey.ciphertext,
+      itemKeyIv: body.encryptedItemKey.iv,
+      itemKeyAuthTag: body.encryptedItemKey.authTag,
+      itemKeyId: crypto.randomUUID(),
+      itemKeyVersionHighWater: requested,
+    };
+  }
+
+  if (requested === 0) return { itemKeyVersion: 0 };
+
+  if (!itemKeyIdsMatch(body.itemKeyId, cur.item_key_id)) {
+    throw new TeamPasswordServiceError(API_ERROR.ITEM_KEY_CHANGED, 409);
+  }
+  if (requested !== cur.item_key_version) {
+    throw new TeamPasswordServiceError(API_ERROR.ITEM_KEY_VERSION_INVALID, 409);
+  }
+  if (normalizeTeamKeyVersion(cur.team_key_version) !== normalizeTeamKeyVersion(currentTeamKeyVersion)) {
+    throw new TeamPasswordServiceError(API_ERROR.ENTRY_REKEY_REQUIRED, 409);
+  }
+  return { itemKeyVersion: requested };
+}
+
 export async function updateTeamPassword(
   teamId: string,
   passwordId: string,
@@ -387,6 +491,8 @@ export async function updateTeamPassword(
     teamKeyVersion,
     itemKeyVersion,
     encryptedItemKey,
+    itemKeyId,
+    snapshotBlobIv,
     tagIds,
     teamFolderId,
     isArchived,
@@ -398,13 +504,10 @@ export async function updateTeamPassword(
 
   const isFullUpdate = encryptedBlob !== undefined;
 
-  // Prevent itemKeyVersion downgrade (v1→v0) — cryptographic downgrade attack
-  if (itemKeyVersion !== undefined && itemKeyVersion < (existingEntry.itemKeyVersion ?? 0)) {
-    throw new TeamPasswordServiceError(API_ERROR.ITEM_KEY_VERSION_DOWNGRADE, 400);
-  }
-
   // C7: any change to itemKeyVersion / teamKeyVersion / aadVersion requires re-encryption.
   // Without encryptedBlob (isFullUpdate=false), changing these breaks AAD reconstruction.
+  // A metadata-only update writes no key material, so it is exempt from the
+  // ItemKey identity and re-key checks a full update runs under the lock.
   const itemKeyVersionChanged = itemKeyVersion !== undefined && itemKeyVersion !== (existingEntry.itemKeyVersion ?? 0);
   const teamKeyVersionChanged = teamKeyVersion !== undefined && teamKeyVersion !== existingEntry.teamKeyVersion;
   const aadVersionChanged = aadVersion !== undefined && aadVersion !== existingEntry.aadVersion;
@@ -412,34 +515,7 @@ export async function updateTeamPassword(
     throw new TeamPasswordServiceError(API_ERROR.KEY_VERSION_WITHOUT_REENCRYPT, 409);
   }
 
-  // Upgrading v0→v>=1 requires encryptedItemKey; reusing v>=1 does not
-  const existingVersion = existingEntry.itemKeyVersion ?? 0;
-  if (
-    itemKeyVersion !== undefined &&
-    itemKeyVersion >= 1 &&
-    existingVersion < 1 &&
-    !encryptedItemKey
-  ) {
-    throw new TeamPasswordServiceError(API_ERROR.ITEM_KEY_REQUIRED, 400);
-  }
-
-  // Re-wrap requirement: buildItemKeyWrapAAD binds the encryptedItemKey to
-  // teamKeyVersion. If teamKeyVersion changes (rotation) and the entry holds
-  // a wrapped item key (effective itemKeyVersion >= 1), the encryptedItemKey
-  // MUST be re-wrapped with the new team key — otherwise the existing wrap's
-  // AAD no longer matches and the item key (and thus the entry) becomes
-  // undecryptable.
-  const effectiveItemKeyVersion = itemKeyVersion ?? existingVersion;
-  if (
-    isFullUpdate &&
-    teamKeyVersionChanged &&
-    effectiveItemKeyVersion >= 1 &&
-    !encryptedItemKey
-  ) {
-    throw new TeamPasswordServiceError(API_ERROR.ITEM_KEY_REQUIRED, 400);
-  }
-
-  // teamKeyVersion is validated inside the transaction below, under the lock.
+  // teamKeyVersion and the ItemKey are validated inside the transaction below, under the locks.
   const folder = teamFolderId
     ? await prisma.teamFolder.findUnique({
         where: { id: teamFolderId },
@@ -457,14 +533,6 @@ export async function updateTeamPassword(
     Object.assign(updateData, toOverviewColumns(encryptedOverview!));
     updateData.aadVersion = aadVersion;
     updateData.teamKeyVersion = teamKeyVersion;
-    if (itemKeyVersion !== undefined) {
-      updateData.itemKeyVersion = itemKeyVersion;
-      if (encryptedItemKey) {
-        updateData.encryptedItemKey = encryptedItemKey.ciphertext;
-        updateData.itemKeyIv = encryptedItemKey.iv;
-        updateData.itemKeyAuthTag = encryptedItemKey.authTag;
-      }
-    }
   }
 
   if (teamFolderId !== undefined) updateData.teamFolderId = teamFolderId;
@@ -475,20 +543,6 @@ export async function updateTeamPassword(
     updateData.tags = tagSet(tagIds);
   }
 
-  // Row type for the FOR UPDATE snapshot read (team_password_entries).
-  // item_key_* columns are nullable.
-  type TeamBlobRow = {
-    encrypted_blob: string;
-    blob_iv: string;
-    blob_auth_tag: string;
-    aad_version: number;
-    team_key_version: number;
-    item_key_version: number;
-    encrypted_item_key: string | null;
-    item_key_iv: string | null;
-    item_key_auth_tag: string | null;
-  };
-
   // Snapshot + update in a single transaction for atomicity (F-9).
   // When the blob is changing, acquire a PK + team_id row lock first so
   // concurrent PUTs serialise here and each writer snapshots the immediately-
@@ -497,17 +551,35 @@ export async function updateTeamPassword(
   return prisma.$transaction(async (tx) => {
     if (isFullUpdate) {
       // Lock order: teams FOR SHARE first, then the entry FOR UPDATE.
-      await assertCurrentTeamKeyVersion(tx, teamId, teamKeyVersion);
-      const [cur] = await tx.$queryRaw<TeamBlobRow[]>`
+      const team = await assertCurrentTeamKeyVersion(tx, teamId, teamKeyVersion);
+      const [cur] = await tx.$queryRaw<LockedTeamEntryRow[]>`
         SELECT encrypted_blob, blob_iv, blob_auth_tag,
                aad_version, team_key_version, item_key_version,
-               encrypted_item_key, item_key_iv, item_key_auth_tag
+               encrypted_item_key, item_key_iv, item_key_auth_tag,
+               item_key_id, item_key_team_key_version, item_key_version_high_water,
+               created_by_id
         FROM team_password_entries
         WHERE id = ${passwordId}::uuid AND team_id = ${teamId}::uuid
         FOR UPDATE
       `;
       // Entry may be concurrently deleted between the caller's read and this lock.
       if (!cur) throw new TeamPasswordServiceError(API_ERROR.NOT_FOUND, 404);
+      // The route's permission and own-entry checks ran before the locks; a
+      // removal, departure or demotion committed since would otherwise write
+      // key material the actor no longer may.
+      const role = await activeTeamRole(tx, teamId, userId);
+      if (!role || !canWriteTeamEntry(role, cur.created_by_id, userId)) {
+        throw new TeamPasswordServiceError(API_ERROR.ACTOR_NOT_PERMITTED, 403);
+      }
+      Object.assign(
+        updateData,
+        await resolveFullUpdateItemKey(tx, passwordId, cur, team.teamKeyVersion, {
+          itemKeyVersion,
+          encryptedItemKey,
+          itemKeyId,
+          snapshotBlobIv,
+        }),
+      );
       await tx.teamPasswordEntryHistory.create({
         data: {
           entryId: passwordId,
@@ -521,6 +593,7 @@ export async function updateTeamPassword(
           encryptedItemKey: cur.encrypted_item_key,
           itemKeyIv: cur.item_key_iv,
           itemKeyAuthTag: cur.item_key_auth_tag,
+          itemKeyId: cur.item_key_id,
           changedById: userId,
         },
       });

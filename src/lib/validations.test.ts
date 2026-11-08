@@ -391,7 +391,20 @@ describe("updateTeamE2EPasswordSchema itemKeyVersion/encryptedItemKey refine", (
     expect(result.success).toBe(true);
   });
 
-  it("accepts itemKeyVersion=1 with encryptedItemKey", () => {
+  it("accepts itemKeyVersion=1 with encryptedItemKey and the upgrade's blobIv snapshot", () => {
+    const result = updateTeamE2EPasswordSchema.safeParse({
+      encryptedBlob: encField,
+      encryptedOverview: encField,
+      aadVersion: 1,
+      teamKeyVersion: 1,
+      itemKeyVersion: 1,
+      encryptedItemKey: encField,
+      snapshotBlobIv: "c".repeat(HEX_IV_LENGTH),
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects encryptedItemKey without the upgrade's blobIv snapshot", () => {
     const result = updateTeamE2EPasswordSchema.safeParse({
       encryptedBlob: encField,
       encryptedOverview: encField,
@@ -400,7 +413,7 @@ describe("updateTeamE2EPasswordSchema itemKeyVersion/encryptedItemKey refine", (
       itemKeyVersion: 1,
       encryptedItemKey: encField,
     });
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
   });
 
   it("allows itemKeyVersion>=1 without encryptedItemKey (reuse existing)", () => {

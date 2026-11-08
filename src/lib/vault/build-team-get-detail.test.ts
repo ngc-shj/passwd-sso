@@ -25,9 +25,11 @@ vi.mock("@/lib/crypto/crypto-client", () => ({
 
 vi.mock("@/lib/crypto/crypto-aad", () => ({
   buildTeamEntryAAD: (...args: unknown[]) => mockBuildTeamEntryAAD(...args),
+  VAULT_TYPE: { BLOB: "blob", OVERVIEW: "overview" },
 }));
 
 import { buildTeamGetDetail } from "./build-team-get-detail";
+import { aadModelDecrypt } from "@/__tests__/helpers/aad-model-decrypt";
 
 const TEAM_ID = "team-1";
 const ENTRY_ID = "entry-xyz";
@@ -89,6 +91,25 @@ describe("buildTeamGetDetail", () => {
       STABLE_KEY,
       "mock-team-aad",
     );
+  });
+
+  it("refuses a no-AAD blob the server labels aadVersion 0 (strict AAD, D67)", async () => {
+    mockFetchApi.mockResolvedValueOnce({
+      ok: true,
+      json: async () => makeRawRow({ aadVersion: 0, itemKeyVersion: 0, encryptedBlob: "noaad-blob" }),
+    });
+    mockDecryptData.mockImplementationOnce(aadModelDecrypt(makeBlob()));
+    await expect(
+      buildTeamGetDetail(TEAM_ID, { id: ENTRY_ID, entryType: "LOGIN" }, { getEntryDecryptionKey })(),
+    ).rejects.toThrow();
+    expect(mockDecryptData).toHaveBeenLastCalledWith(expect.anything(), STABLE_KEY, "mock-team-aad");
+  });
+
+  it("control: opens an aadVersion-1 blob sealed with the entry AAD", async () => {
+    mockFetchApi.mockResolvedValueOnce({ ok: true, json: async () => makeRawRow({ aadVersion: 1 }) });
+    mockDecryptData.mockImplementationOnce(aadModelDecrypt(makeBlob()));
+    const detail = await buildTeamGetDetail(TEAM_ID, { id: ENTRY_ID, entryType: "LOGIN" }, { getEntryDecryptionKey })();
+    expect(detail.title).toBe("GitHub");
   });
 
   it("throws when the fetch fails", async () => {

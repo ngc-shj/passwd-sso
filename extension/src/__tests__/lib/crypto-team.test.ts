@@ -1,14 +1,19 @@
 import { describe, it, expect } from "vitest";
-import { hexEncode, type EncryptedData } from "../../lib/crypto";
+import { readFileSync } from "node:fs";
+import { hexDecode, hexEncode, type EncryptedData } from "../../lib/crypto";
 import {
   buildTeamEntryAAD,
   buildItemKeyWrapAAD,
   buildTeamKeyWrapAAD,
+  buildTeamAttachmentCekWrapAAD,
   deriveTeamEncryptionKey,
   deriveItemEncryptionKey,
+  deriveItemCekWrapKey,
   unwrapTeamKey,
   unwrapItemKey,
+  unwrapTeamAttachmentCek,
   type TeamKeyWrapContext,
+  type TeamAttachmentCekWrapContext,
 } from "../../lib/crypto-team";
 
 // ─── Helpers ─────────────────────────────────────────────────
@@ -423,5 +428,145 @@ describe("deriveItemEncryptionKey", () => {
     await expect(
       crypto.subtle.decrypt({ name: "AES-GCM", iv }, key2, encrypted),
     ).rejects.toThrow();
+  });
+});
+
+// ─── Team Attachment CEK Wrap (TW) ───────────────────────────
+
+describe("buildTeamAttachmentCekWrapAAD", () => {
+  it("matches the frozen TW golden vector", () => {
+    expect(hexEncode(buildTeamAttachmentCekWrapAAD("t", "e", "a", 2, 1))).toBe(
+      "54570105000174000165000161000132000131",
+    );
+  });
+
+  it("produces different output for different itemKeyVersion", () => {
+    expect(hexEncode(buildTeamAttachmentCekWrapAAD("t", "e", "a", 1, 1))).not.toBe(
+      hexEncode(buildTeamAttachmentCekWrapAAD("t", "e", "a", 2, 1)),
+    );
+  });
+});
+
+describe("unwrapTeamAttachmentCek round-trip", () => {
+  const ctx: TeamAttachmentCekWrapContext = {
+    teamId: "team-1",
+    entryId: "entry-1",
+    attachmentId: "att-1",
+    itemKeyVersion: 2,
+    cekWrapAadVersion: 1,
+  };
+  const twAad = (c: TeamAttachmentCekWrapContext) =>
+    buildTeamAttachmentCekWrapAAD(c.teamId, c.entryId, c.attachmentId, c.itemKeyVersion, c.cekWrapAadVersion);
+
+  it("unwraps a CEK wrapped under the ItemKey's CEK-wrap key", async () => {
+    const itemKey = crypto.getRandomValues(new Uint8Array(32));
+    const cek = crypto.getRandomValues(new Uint8Array(32));
+    const cekWrapKey = await deriveItemCekWrapKey(itemKey);
+    const wrapped = await aesEncrypt(cek, cekWrapKey, twAad(ctx));
+    expect(await unwrapTeamAttachmentCek(wrapped, cekWrapKey, ctx)).toEqual(cek);
+  });
+
+  it.each([
+    ["teamId", { teamId: "team-2" }],
+    ["entryId", { entryId: "entry-2" }],
+    ["attachmentId", { attachmentId: "att-2" }],
+    ["itemKeyVersion", { itemKeyVersion: 1 }],
+    ["cekWrapAadVersion", { cekWrapAadVersion: 2 }],
+  ])("fails when the %s bound into the AAD differs", async (_field, change) => {
+    const cekWrapKey = await deriveItemCekWrapKey(crypto.getRandomValues(new Uint8Array(32)));
+    const wrapped = await aesEncrypt(crypto.getRandomValues(new Uint8Array(32)), cekWrapKey, twAad(ctx));
+    await expect(unwrapTeamAttachmentCek(wrapped, cekWrapKey, { ...ctx, ...change })).rejects.toThrow();
+  });
+
+  it("fails under the item enc key of the same ItemKey (separate HKDF domain)", async () => {
+    const itemKey = crypto.getRandomValues(new Uint8Array(32));
+    const wrapped = await aesEncrypt(
+      crypto.getRandomValues(new Uint8Array(32)),
+      await deriveItemCekWrapKey(itemKey),
+      twAad(ctx),
+    );
+    await expect(
+      unwrapTeamAttachmentCek(wrapped, await deriveItemEncryptionKey(itemKey), ctx),
+    ).rejects.toThrow();
+  });
+});
+
+// ─── Cross-codebase fixture (scripts/generate-team-key-fixture.ts) ───
+
+describe("team-key fixture: itemKeyVersion 2 entry and TW attachment", () => {
+  const f = JSON.parse(
+    readFileSync(
+      new URL("../../../../ios/PasswdSSOTests/fixtures/team-key-fixture.json", import.meta.url),
+      "utf8",
+    ),
+  );
+
+  async function decrypt(key: CryptoKey, enc: EncryptedData, aad: Uint8Array): Promise<Uint8Array> {
+    const combined = new Uint8Array([...hexDecode(enc.ciphertext), ...hexDecode(enc.authTag)]);
+    return new Uint8Array(
+      await crypto.subtle.decrypt(
+        { name: "AES-GCM", iv: new Uint8Array(hexDecode(enc.iv)), additionalData: new Uint8Array(aad) },
+        key,
+        combined,
+      ),
+    );
+  }
+
+  async function itemKeyV2(): Promise<Uint8Array> {
+    const teamEncKey = await deriveTeamEncryptionKey(hexDecode(f.rawTeamKeyHex));
+    return unwrapItemKey(
+      f.encryptedItemKeyV2,
+      teamEncKey,
+      buildItemKeyWrapAAD(f.teamId, f.entryIdV2, f.teamKeyVersion),
+    );
+  }
+
+  const twCtx = (itemKeyVersion: number): TeamAttachmentCekWrapContext => ({
+    teamId: f.teamId,
+    entryId: f.entryIdV2,
+    attachmentId: f.attachmentId,
+    itemKeyVersion,
+    cekWrapAadVersion: f.cekWrapAadVersion,
+  });
+
+  it("builds the fixture's v2 OV and TW AAD bytes", () => {
+    expect(hexEncode(buildTeamEntryAAD(f.teamId, f.entryIdV2, "overview", f.itemKeyVersionV2))).toBe(
+      f.overviewAADV2Hex,
+    );
+    expect(
+      hexEncode(buildTeamAttachmentCekWrapAAD(f.teamId, f.entryIdV2, f.attachmentId, f.itemKeyVersionV2, f.cekWrapAadVersion)),
+    ).toBe(f.cekWrapAADHex);
+  });
+
+  it("decrypts the itemKeyVersion 2 entry overview", async () => {
+    const itemKey = await itemKeyV2();
+    expect(hexEncode(itemKey)).toBe(f.itemKeyV2Hex);
+    const plain = await decrypt(
+      await deriveItemEncryptionKey(itemKey),
+      f.encryptedOverviewV2,
+      buildTeamEntryAAD(f.teamId, f.entryIdV2, "overview", f.itemKeyVersionV2),
+    );
+    expect(new TextDecoder().decode(plain)).toBe(f.overviewPlaintextV2);
+  });
+
+  it("rejects the itemKeyVersion 2 overview under the version-1 AAD", async () => {
+    const key = await deriveItemEncryptionKey(await itemKeyV2());
+    await expect(
+      decrypt(key, f.encryptedOverviewV2, buildTeamEntryAAD(f.teamId, f.entryIdV2, "overview", 1)),
+    ).rejects.toThrow();
+  });
+
+  it("unwraps the TW-wrapped CEK and decrypts the attachment body", async () => {
+    const cekWrapKey = await deriveItemCekWrapKey(await itemKeyV2());
+    const cek = await unwrapTeamAttachmentCek(f.encryptedCek, cekWrapKey, twCtx(f.itemKeyVersionV2));
+    expect(hexEncode(cek)).toBe(f.cekHex);
+    const cekKey = await crypto.subtle.importKey("raw", new Uint8Array(cek), { name: "AES-GCM" }, false, ["decrypt"]);
+    const body = await decrypt(cekKey, f.encryptedAttachmentBody, hexDecode(f.attachmentAADHex));
+    expect(new TextDecoder().decode(body)).toBe(f.attachmentBodyPlaintext);
+  });
+
+  it("rejects the TW-wrapped CEK under the version-1 AAD", async () => {
+    const cekWrapKey = await deriveItemCekWrapKey(await itemKeyV2());
+    await expect(unwrapTeamAttachmentCek(f.encryptedCek, cekWrapKey, twCtx(1))).rejects.toThrow();
   });
 });
