@@ -134,3 +134,13 @@ the candidate set once its unreferenced versions are gone). Testing: RTN1–RTN3
   side; the live cell asserts `pg_proc.provolatile = 'v'`. (PostgreSQL also refuses a DELETE inside a
   non-volatile function at run time, so the mutant would fail every behavioural cell as well.)
 - Verification: gate self-test 36/36; prune integration 30/30; vitest, lint, `next build` 0.
+
+### Round 4
+All three experts: No findings. RTN4 resolved. Noted limit (not a finding): the static gate reads
+the latest `CREATE [OR REPLACE] FUNCTION`; a later `ALTER FUNCTION … STABLE` would be caught by the
+live `provolatile` cell and the behavioural cells in the CI integration job, not by the static gate.
+
+## Final state
+Code review rounds: 4. Open findings: none. Follow-up candidates (not in this change): SC3 (wire
+`BLOB_*` and `s3:ListBucket` in Terraform), a dedicated `TEAM_BUSY` code for bounded team-lock
+timeouts (today mapped to `TEAM_KEY_VERSION_MISMATCH`, pre-existing for rotation).
