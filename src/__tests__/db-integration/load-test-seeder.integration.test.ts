@@ -214,8 +214,7 @@ describe("load-test seeder — real-DB integration", () => {
     seed();
     const outboxId = await pendingOutboxRow();
 
-    // Under the 30 s test timeout and above the 20 s drain, so a stalled child
-    // fails this cell rather than outliving it.
+    // Above the 20 s drain; the cell's own timeout (below) covers seed time too.
     const child = execFile(process.execPath, [SEEDER, "--cleanup"], {
       env: seederEnv({ LOAD_TEST_OUTBOX_DRAIN_TIMEOUT_MS: "20000" }),
       timeout: 25_000,
@@ -247,6 +246,42 @@ describe("load-test seeder — real-DB integration", () => {
 
     const tenant = await one<{ n: number }>(`SELECT count(*)::int AS n FROM tenants WHERE id = $1::uuid`, TENANT_ID);
     expect(tenant).toEqual({ n: 0 });
+  }, 60_000);
+
+  it("cleanup leaves a user matching the load-test email pattern in another tenant alone", async () => {
+    const foreignTenant = randomUUID();
+    const foreignUser = randomUUID();
+    await su.pool.query(
+      `INSERT INTO tenants (id, name, slug, created_at, updated_at) VALUES ($1::uuid, 'foreign', $2, now(), now())`,
+      [foreignTenant, `foreign-${foreignTenant.slice(0, 8)}`],
+    );
+    try {
+      await su.pool.query(
+        `INSERT INTO users (id, email, tenant_id, created_at, updated_at) VALUES ($1::uuid, $2, $3::uuid, now(), now())`,
+        [foreignUser, `lt-user-foreign-${foreignUser.slice(0, 8)}@loadtest.local`, foreignTenant],
+      );
+      await su.pool.query(
+        `INSERT INTO tenant_members (id, tenant_id, user_id, role, created_at, updated_at)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, 'MEMBER', now(), now())`,
+        [randomUUID(), foreignTenant, foreignUser],
+      );
+      seed();
+
+      seeder("--cleanup");
+
+      const left = await one<Record<string, number>>(
+        `SELECT (SELECT count(*)::int FROM users WHERE id = $1::uuid) AS foreign_user,
+                (SELECT count(*)::int FROM tenant_members WHERE user_id = $1::uuid) AS foreign_member,
+                (SELECT count(*)::int FROM tenants WHERE id = $2::uuid) AS load_test_tenant`,
+        foreignUser,
+        TENANT_ID,
+      );
+      expect(left).toEqual({ foreign_user: 1, foreign_member: 1, load_test_tenant: 0 });
+    } finally {
+      await su.pool.query(`DELETE FROM tenant_members WHERE tenant_id = $1::uuid`, [foreignTenant]);
+      await su.pool.query(`DELETE FROM users WHERE id = $1::uuid`, [foreignUser]);
+      await su.pool.query(`DELETE FROM tenants WHERE id = $1::uuid`, [foreignTenant]);
+    }
   });
 
   it.each(["abc", "-1"])("cleanup refuses a drain timeout of %j by name", (value) => {

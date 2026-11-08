@@ -542,7 +542,8 @@ async function runSmokeTest(pool) {
 
   // Verify cleanup
   const { rows } = await pool.query(
-    `SELECT count(*) as cnt FROM users WHERE email LIKE 'lt-user-%@loadtest.local'`,
+    `SELECT count(*) as cnt FROM users WHERE email LIKE 'lt-user-%@loadtest.local' AND tenant_id = $1`,
+    [LOAD_TEST_TENANT.id],
   );
   if (Number(rows[0].cnt) !== 0) {
     console.error("FAIL: Cleanup did not remove all load test users");

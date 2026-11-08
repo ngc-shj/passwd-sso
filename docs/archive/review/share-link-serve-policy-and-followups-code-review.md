@@ -316,3 +316,19 @@ closed). Round 3 findings resolved.
 - Testing T4-2 [Minor] The drain-wait cell's child timeout (60 s) exceeded the
   30 s test timeout. Action: 25 s (above the 20 s drain), the child is killed in
   `finally` if still running, and the stdout chunk is typed as a string.
+
+## Round 5
+
+Incremental review of `d8630ad93`. Security: no findings.
+
+### Findings and resolution
+- Functionality F5-1 [Minor] The smoke check's final count and the README's
+  manual SQL still selected load-test emails in every tenant. Action: both are
+  scoped to the load-test tenant; the README SQL was run once against the dev DB.
+- Testing T5-1 [Major] The tenant-scoped cleanup selection had no test. Action:
+  a cell seeds a foreign tenant with a user matching the email pattern, runs
+  `--cleanup`, and asserts the foreign user and membership survive while the
+  load-test tenant is gone (foreign rows removed in `finally`). Red proof
+  (scratch seeder, real DB): filter dropped → the cell fails.
+- Testing T5-2 [Minor] The drain-wait cell's budget excluded seed time. Action:
+  the cell has its own 60 s timeout; the comment says so.

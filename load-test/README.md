@@ -170,11 +170,11 @@ If the cleanup command fails for another reason (the same rule applies: run it o
 ```sql
 DELETE FROM audit_outbox WHERE tenant_id = '00000000-0000-4000-a000-0000000010ad';
 DELETE FROM audit_logs WHERE tenant_id = '00000000-0000-4000-a000-0000000010ad';
-DELETE FROM password_entries WHERE user_id IN (SELECT id FROM users WHERE email LIKE 'lt-user-%@loadtest.local');
-DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE email LIKE 'lt-user-%@loadtest.local');
-DELETE FROM vault_keys WHERE user_id IN (SELECT id FROM users WHERE email LIKE 'lt-user-%@loadtest.local');
-DELETE FROM tenant_members WHERE user_id IN (SELECT id FROM users WHERE email LIKE 'lt-user-%@loadtest.local');
-DELETE FROM users WHERE email LIKE 'lt-user-%@loadtest.local';
+DELETE FROM password_entries WHERE user_id IN (SELECT id FROM users WHERE email LIKE 'lt-user-%@loadtest.local' AND tenant_id = '00000000-0000-4000-a000-0000000010ad');
+DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE email LIKE 'lt-user-%@loadtest.local' AND tenant_id = '00000000-0000-4000-a000-0000000010ad');
+DELETE FROM vault_keys WHERE user_id IN (SELECT id FROM users WHERE email LIKE 'lt-user-%@loadtest.local' AND tenant_id = '00000000-0000-4000-a000-0000000010ad');
+DELETE FROM tenant_members WHERE user_id IN (SELECT id FROM users WHERE email LIKE 'lt-user-%@loadtest.local' AND tenant_id = '00000000-0000-4000-a000-0000000010ad');
+DELETE FROM users WHERE email LIKE 'lt-user-%@loadtest.local' AND tenant_id = '00000000-0000-4000-a000-0000000010ad';
 DELETE FROM audit_chain_anchors WHERE tenant_id = '00000000-0000-4000-a000-0000000010ad';
 DELETE FROM tenant_members WHERE tenant_id = '00000000-0000-4000-a000-0000000010ad';
 DELETE FROM tenants WHERE id = '00000000-0000-4000-a000-0000000010ad';
