@@ -47,7 +47,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { SchemaReadError, loadPrismaSchema } from "./lib/prisma-relation-reach.mjs";
-import { PRUNE_FUNCTION, pruneBodyShape, pruneFunctionBody } from "./lib/team-key-prune-shape.mjs";
+import { PRUNE_FUNCTION, pruneBodyShape, pruneFunctionBody, pruneVolatilityProblem } from "./lib/team-key-prune-shape.mjs";
 
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 const ROOT = process.env.TEAM_KEY_VERSION_REFS_CHECK_ROOT ?? REPO_ROOT;
@@ -167,7 +167,7 @@ function latestFunctionBody() {
     const found = pruneFunctionBody(readFileSync(file, "utf8"));
     if (found.missing) continue;
     if (found.error) fail(`${name}: ${found.error}`);
-    return { migration: name, body: found.body };
+    return { migration: name, body: found.body, attributes: found.attributes };
   }
   fail(`no migration under ${MIGRATIONS_DIR} defines ${FUNCTION_NAME}.`);
 }
@@ -216,7 +216,9 @@ for (const key of Object.keys(CLASSIFICATION)) {
   if (!seen.has(key)) problems.push(`STALE classification ${key}: the schema has no such Int version column.`);
 }
 
-const { migration, body } = latestFunctionBody();
+const { migration, body, attributes } = latestFunctionBody();
+const volatility = pruneVolatilityProblem(attributes);
+if (volatility) problems.push(`SHAPE ${volatility} (latest definition: ${MIGRATIONS_DIR}/${migration}/migration.sql)`);
 const shape = pruneBodyShape(body);
 for (const p of shape.problems) problems.push(`SHAPE ${p} (latest definition: ${MIGRATIONS_DIR}/${migration}/migration.sql)`);
 if (shape.returnQuery) {

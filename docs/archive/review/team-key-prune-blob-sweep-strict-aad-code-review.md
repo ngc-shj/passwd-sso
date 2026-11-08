@@ -122,3 +122,15 @@ testing TF1–TF8 resolved. New:
   isolation guard removed → isolation red; decide-then-lock → gate-only.
 - Verification: vitest 21634; extension 2761; typecheck/lint 0; integration 1444 (MinIO); gates,
   audit-db-grants (442), worker smoke 0; `next build` 0.
+
+### Round 3
+Security: no findings. Functionality: no findings (the 25-team window slides forward; a team leaves
+the candidate set once its unreferenced versions are gone). Testing: RTN1–RTN3 resolved; new:
+- RTN4 [Minor] Lock-then-decide depends on the function being VOLATILE (a STABLE/IMMUTABLE PL/pgSQL
+  body runs every statement on the caller's snapshot); neither the gate nor a live cell pinned it.
+  Action: `pruneVolatilityProblem` in `scripts/checks/lib/team-key-prune-shape.mjs` over the
+  definition's attribute text (before `AS` and after the body); the gate reports it as SHAPE; deny
+  cells STABLE (before the body) and IMMUTABLE (after the body), the real migration as the allow
+  side; the live cell asserts `pg_proc.provolatile = 'v'`. (PostgreSQL also refuses a DELETE inside a
+  non-volatile function at run time, so the mutant would fail every behavioural cell as well.)
+- Verification: gate self-test 36/36; prune integration 30/30; vitest, lint, `next build` 0.

@@ -189,6 +189,15 @@ describe("check-team-key-version-refs", () => {
       expect(out).toContain(message);
     }
 
+    it("fails when the function is declared STABLE (statements would share the caller's snapshot)", () => {
+      shapeFails(replaceOnce(PRUNE_SQL, "LANGUAGE plpgsql", "LANGUAGE plpgsql\n STABLE"), "must be VOLATILE (declared STABLE)");
+    });
+
+    it("fails when IMMUTABLE follows the body", () => {
+      expect(PRUNE_SQL).toMatch(/\$function\$\s*;/);
+      shapeFails(PRUNE_SQL.replace(/(\$function\$)(\s*;)/, "$1 IMMUTABLE$2"), "must be VOLATILE (declared IMMUTABLE)");
+    });
+
     it("fails when the team-lock statement is missing", () => {
       expect(PRUNE_SQL).toMatch(LOCK_STATEMENT);
       shapeFails(PRUNE_SQL.replace(LOCK_STATEMENT, ""), "must have exactly one team-lock statement (SELECT ... INTO ... FOR NO KEY UPDATE), found 0");

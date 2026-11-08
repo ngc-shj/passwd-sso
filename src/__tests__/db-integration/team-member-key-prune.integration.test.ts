@@ -77,7 +77,7 @@ import { lockTeamKeyVersion } from "@/lib/team/team-key-rotation-lock";
 import { TEAM_KEY_LOCK_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 import { pgErrorCode } from "@/lib/prisma/prisma-error";
 import { Prisma } from "@prisma/client";
-import { pruneBodyShape, pruneFunctionBody } from "../../../scripts/checks/lib/team-key-prune-shape.mjs";
+import { pruneBodyShape, pruneFunctionBody, pruneVolatilityProblem } from "../../../scripts/checks/lib/team-key-prune-shape.mjs";
 
 const BATCH = 1000;
 const MAX_TICKS = 20;
@@ -432,6 +432,12 @@ describe("team key prune (#1009)", () => {
       expect(found.missing).toBeUndefined();
       const shape = pruneBodyShape(found.body ?? "");
       expect(shape.problems).toEqual([]);
+      // Lock-then-decide needs a fresh snapshot per statement: VOLATILE only.
+      expect(pruneVolatilityProblem(found.attributes)).toBeNull();
+      const [{ provolatile }] = await rows<{ provolatile: string }>(
+        `SELECT provolatile::text AS provolatile FROM pg_proc WHERE oid = 'public.team_member_key_prune(integer)'::regprocedure`,
+      );
+      expect(provolatile).toBe("v");
       const decides = (shape.returnQuery ?? "").replace(/ \. /g, ".");
       for (const column of REFERENCE_COLUMNS) expect(decides).toContain(column);
       expect(def).not.toContain("item_key_team_key_version");

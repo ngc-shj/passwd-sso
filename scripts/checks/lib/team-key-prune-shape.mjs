@@ -54,8 +54,9 @@ const render = (tokens) => tokens.map((t) => t.text).join(" ");
 
 /**
  * The dollar-quoted body following `CREATE [OR REPLACE] FUNCTION ... team_member_key_prune`
- * in `sql` (a migration, or pg_get_functiondef's output). Returns
- * `{ body }` or `{ error }`; `{ missing: true }` when `sql` does not define it.
+ * in `sql` (a migration, or pg_get_functiondef's output), with the definition's attribute text
+ * around it (before `AS` and after the body up to `;`). Returns `{ body, attributes }` or
+ * `{ error }`; `{ missing: true }` when `sql` does not define it.
  */
 export function pruneFunctionBody(sql) {
   const createRe = new RegExp(String.raw`CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+(?:public\.)?${PRUNE_FUNCTION}\b`, "i");
@@ -67,7 +68,22 @@ export function pruneFunctionBody(sql) {
   const bodyStart = open.index + open[0].length;
   const bodyEnd = rest.indexOf(open[1], bodyStart);
   if (bodyEnd < 0) return { error: `the body of ${PRUNE_FUNCTION} is not closed by ${open[1]}.` };
-  return { body: rest.slice(bodyStart, bodyEnd) };
+  const afterBody = rest.slice(bodyEnd + open[1].length);
+  const end = afterBody.indexOf(";");
+  const attributes = `${rest.slice(0, open.index)} ${end < 0 ? afterBody : afterBody.slice(0, end)}`.replace(/--[^\n]*/g, "");
+  return { body: rest.slice(bodyStart, bodyEnd), attributes };
+}
+
+/**
+ * Lock-then-decide needs each statement to take a fresh snapshot after the team lock, which a
+ * PL/pgSQL function does only when VOLATILE (the default): a STABLE or IMMUTABLE body runs every
+ * statement on the caller's snapshot. Returns a problem string, or null.
+ */
+export function pruneVolatilityProblem(attributes) {
+  const declared = /\b(STABLE|IMMUTABLE)\b/i.exec(attributes ?? "");
+  return declared
+    ? `${PRUNE_FUNCTION} must be VOLATILE (declared ${declared[1].toUpperCase()}): a non-volatile body reads every statement on the caller's snapshot, so the decision would not follow the team lock`
+    : null;
 }
 
 /** Split depth-0 tokens at `;` into statements (empty ones dropped). */
