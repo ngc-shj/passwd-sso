@@ -573,6 +573,9 @@ export async function refreshIosToken(
     if (e instanceof UserAuthRevokedError) {
       // A retry that overlapped the rotation it repeats waited on the lock and
       // found the row that rotation revoked: answer it as step 1 would have.
+      // Best-effort, like step 1: the cache is per process and written after
+      // the winner's commit returns, so a retry served elsewhere (or that wins
+      // that race) still gets FAMILY_EXPIRED — refusing, not issuing.
       const retried = cachedRetry();
       if (retried) return { ok: true, replayed: true, token: retried };
       return { ok: false, error: "REFRESH_TOKEN_FAMILY_EXPIRED" };

@@ -82,6 +82,7 @@ vi.mock("@/lib/email", () => ({ sendEmail: mockSendEmail }));
 vi.mock("@sentry/nextjs", () => ({ captureMessage: mockSentryCapture }));
 
 import { AUDIT_CREDENTIAL_ID_MAX_LENGTH, METADATA_MAX_BYTES } from "@/lib/validations/common.server";
+import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { DELETE } from "./route";
 
 const ADMIN = "admin-1";
@@ -169,22 +170,49 @@ describe("DELETE /api/tenant/members/[userId]/passkeys", () => {
     );
   });
 
-  it("also audits in each other tenant a revoked passkey was registered under, naming the tenant it was revoked from", async () => {
+  it("also audits in each other tenant a revoked passkey was registered under: that tenant's passkeys only, as the system", async () => {
     await revokeAll();
 
     expect(mockLogAuditInTx).toHaveBeenCalledTimes(2);
-    expect(mockLogAuditInTx).toHaveBeenCalledWith(
-      tx,
-      "previous-tenant",
-      expect.objectContaining({
-        action: "TENANT_MEMBER_PASSKEY_REVOKE_ALL",
-        tenantId: "previous-tenant",
-        userId: ADMIN,
-        metadata: expect.objectContaining({ targetUserId: TARGET, passkeys: 2, revokedFromTenantId: "tenant-1" }),
-      }),
-    );
+    expect(mockLogAuditInTx.mock.calls[1][1]).toBe("previous-tenant");
+    expect(mockLogAuditInTx.mock.calls[1][2]).toEqual({
+      scope: "TENANT",
+      userId: SYSTEM_ACTOR_ID,
+      actorType: "SYSTEM",
+      tenantId: "previous-tenant",
+      ip: null,
+      userAgent: null,
+      action: "TENANT_MEMBER_PASSKEY_REVOKE_ALL",
+      targetType: "User",
+      targetId: TARGET,
+      metadata: {
+        targetUserId: TARGET,
+        passkeys: 1,
+        credentialIds: ["public-2"],
+        credentialIdsOmitted: 0,
+        revokedFromTenantId: "tenant-1",
+      },
+    });
     // The originating tenant's row carries no such marker.
     expect(mockLogAuditInTx.mock.calls[0][2].metadata.revokedFromTenantId).toBeUndefined();
+  });
+
+  it("writes one row per other tenant, however many of its passkeys were revoked", async () => {
+    mockCredentialFindMany.mockResolvedValue([
+      PASSKEYS[0],
+      { id: "cred-row-2", credentialId: "public-2", tenantId: "previous-tenant" },
+      { id: "cred-row-3", credentialId: "public-3", tenantId: "previous-tenant" },
+      { id: "cred-row-4", credentialId: "public-4", tenantId: "third-tenant" },
+    ]);
+    mockCredentialDeleteMany.mockResolvedValue({ count: 4 });
+
+    await revokeAll();
+    expect(mockLogAuditInTx).toHaveBeenCalledTimes(3);
+    const byTenant = Object.fromEntries(mockLogAuditInTx.mock.calls.map((c) => [c[1], c[2].metadata]));
+    expect(Object.keys(byTenant).sort()).toEqual(["previous-tenant", "tenant-1", "third-tenant"]);
+    expect(byTenant["previous-tenant"]).toMatchObject({ passkeys: 2, credentialIds: ["public-2", "public-3"] });
+    expect(byTenant["third-tenant"]).toMatchObject({ passkeys: 1, credentialIds: ["public-4"] });
+    expect(byTenant["tenant-1"]).toMatchObject({ passkeys: 4 });
   });
 
   it("writes no second audit row when every revoked passkey was registered in the admin's tenant", async () => {

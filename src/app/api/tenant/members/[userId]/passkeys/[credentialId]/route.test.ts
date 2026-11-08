@@ -81,6 +81,7 @@ vi.mock("@/lib/notification", () => ({ createNotification: mockCreateNotificatio
 vi.mock("@/lib/email", () => ({ sendEmail: mockSendEmail }));
 vi.mock("@sentry/nextjs", () => ({ captureMessage: mockSentryCapture }));
 
+import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { DELETE } from "./route";
 
 const ADMIN = "admin-1";
@@ -203,10 +204,19 @@ describe("DELETE /api/tenant/members/[userId]/passkeys/[credentialId]", () => {
     // The tenant it was registered under sees the revocation in its own log.
     expect(mockLogAuditInTx).toHaveBeenCalledTimes(2);
     expect(mockLogAuditInTx.mock.calls[1][1]).toBe("previous-tenant");
-    expect(mockLogAuditInTx.mock.calls[1][2]).toMatchObject({
-      action: "TENANT_MEMBER_PASSKEY_REVOKE",
+    // Attributed to the system, with no request metadata and none of the
+    // revoking tenant's counts: only what concerns that tenant.
+    expect(mockLogAuditInTx.mock.calls[1][2]).toEqual({
+      scope: "TENANT",
+      userId: SYSTEM_ACTOR_ID,
+      actorType: "SYSTEM",
       tenantId: "previous-tenant",
-      metadata: { targetUserId: TARGET, registeredInTenant: false, revokedFromTenantId: "tenant-1" },
+      ip: null,
+      userAgent: null,
+      action: "TENANT_MEMBER_PASSKEY_REVOKE",
+      targetType: "WebAuthnCredential",
+      targetId: CRED,
+      metadata: { targetUserId: TARGET, credentialId: "public-cred", registeredInTenant: true, revokedFromTenantId: "tenant-1" },
     });
   });
 

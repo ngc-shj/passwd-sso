@@ -285,11 +285,11 @@ async function handlePOST(req: NextRequest) {
     await withBypassRls(prisma, async (tx) => {
       // Serialize concurrent bridge-code issuance for this user so the
       // count-then-evict-then-create sequence cannot race past the active cap
-      // (two concurrent issues both reading active.length < max). Advisory lock
-      // is transaction-scoped; matches the codebase idiom (attachments, vault
-      // rotate-key). The same lock serializes it against a revocation of the
-      // user's credentials, so the session that authenticated it is re-read
-      // under it (user-auth-serialization.ts).
+      // (two concurrent issues both reading active.length < max), under the
+      // user's credential lock (user-auth-serialization.ts; transaction-scoped,
+      // keyed apart from the vault-data lock). The same lock serializes it
+      // against a revocation of the user's credentials, so the session that
+      // authenticated it is re-read under it.
       await lockUserAuthArtifacts(tx, userId);
       if (!(await isSessionRowLive(tx, req, userId))) throw new UserAuthRevokedError("session");
       const active = await tx.extensionBridgeCode.findMany({

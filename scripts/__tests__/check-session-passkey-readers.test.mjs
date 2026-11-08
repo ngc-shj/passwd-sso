@@ -306,7 +306,53 @@ describe.concurrent("check-session-passkey-readers.mjs", { timeout: 60_000 }, ()
   });
 
   it("FAILS closed when page-route.ts's getSessionInfo guard cannot be read", async () => {
-    await expectFail({ files: { [PAGE_ROUTE]: "export const nothing = 1;\n" } }, /no getSessionInfo call inside an if statement/);
+    await expectFail({ files: { [PAGE_ROUTE]: "export const nothing = 1;\n" } }, /expected one getSessionInfo call, found 0/);
+  });
+
+  it("FAILS closed when the getSessionInfo guard has an operand other than a literal startsWith", async () => {
+    await expectFail(
+      { files: { [PAGE_ROUTE]: pageRoute(`pathWithoutLocale.startsWith("/dashboard") || isGated(pathWithoutLocale)`) } },
+      /operand other than a literal startsWith/,
+    );
+  });
+
+  it("FAILS closed when page-route.ts calls getSessionInfo twice", async () => {
+    await expectFail(
+      { files: { [PAGE_ROUTE]: `${BASE_PAGE_ROUTE}export async function other(r: Request) { return getSessionInfo(r); }\n` } },
+      /expected one getSessionInfo call, found 2/,
+    );
+  });
+
+  it("FAILS for a gated layout that reads only the session cookie, not the row", async () => {
+    await expectFail(
+      { files: { [ADMIN_LAYOUT]: COOKIE_ONLY_ROUTE.replace("export async function GET(req: Request)", "export default async function Layout(req: Request)") } },
+      /admin\/layout\.tsx {2}reads no session/,
+    );
+  });
+
+  it("FAILS for a gated page that re-exports a data module", async () => {
+    await expectFail(
+      { files: { "src/app/[locale]/admin/export/page.tsx": `export { default } from "@/lib/pages/export";\n` } },
+      /admin\/export\/page\.tsx {2}is a server component .* imports @\/lib\/pages\/export/,
+    );
+  });
+
+  it("FAILS for a gated page whose dynamic import cannot be read", async () => {
+    await expectFail(
+      { files: { "src/app/[locale]/admin/export/page.tsx": `export default async function Page() {\n  const m = await import(name);\n  return m;\n}\n` } },
+      /admin\/export\/page\.tsx {2}is a server component .* imports <unreadable dynamic import at line 2>/,
+    );
+  });
+
+  it("FAILS for a non-page segment file (loading) that reads data without the session", async () => {
+    await expectFail(
+      { files: { "src/app/[locale]/admin/loading.tsx": DATA_PAGE } },
+      /admin\/loading\.tsx {2}is a server component/,
+    );
+  });
+
+  it("passes a gated page whose only outside import is type-only", async () => {
+    await expectPass({ files: { "src/app/[locale]/admin/export/page.tsx": `import type { Row } from "@/lib/types";\n${WRAPPER_PAGE}` } });
   });
 
   it("FAILS for a server page under a gated prefix that reads data without reading the session", async () => {

@@ -18,6 +18,9 @@ describe("lockUserAuthArtifacts", () => {
 
     expect(String($executeRaw.mock.calls[0][0])).toContain("pg_advisory_xact_lock");
     expect($executeRaw.mock.calls[0][1]).toBe(`user-auth:${USER}`);
+    // One statement, the lock: callers (and the bootstrap migration's write
+    // walk) rely on it writing no row.
+    expect($executeRaw).toHaveBeenCalledTimes(1);
   });
 });
 

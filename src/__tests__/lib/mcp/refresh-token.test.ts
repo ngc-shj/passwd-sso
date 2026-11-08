@@ -429,6 +429,11 @@ describe("exchangeRefreshToken", () => {
       // Family revocation lookup returns family members for the loser to revoke.
       refreshFindMany: vi.fn().mockResolvedValue([{ accessTokenId: "winner-at-id" }]),
     });
+    const { prisma } = await import("@/lib/prisma");
+    (prisma as unknown as { mcpRefreshToken: { findUnique: ReturnType<typeof vi.fn> } }).mcpRefreshToken.findUnique = vi
+      .fn()
+      .mockResolvedValueOnce(VALID_RT) // the read before the lock
+      .mockResolvedValueOnce({ rotatedAt: new Date(), revokedAt: null }); // the winner's rotation, re-read
 
     const result = await exchangeRefreshToken({
       refreshToken: "valid-refresh-token",
@@ -474,6 +479,27 @@ describe("exchangeRefreshToken", () => {
     expect(lockCall).toBeGreaterThanOrEqual(0);
     expect(executeRaw.mock.calls[lockCall][1]).toBe(`user-auth:${VALID_RT.userId}`);
     expect(executeRaw.mock.invocationCallOrder[lockCall]).toBeLessThan(mockRefreshUpdateMany.mock.invocationCallOrder[0]);
+  });
+
+  it("a token both rotated and revoked when re-read is still a lost race: family revoked", async () => {
+    const { mockRefreshFindMany } = await setupPrisma({
+      refreshUpdateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      refreshFindMany: vi.fn().mockResolvedValue([{ accessTokenId: "winner-at-id" }]),
+    });
+    const { prisma } = await import("@/lib/prisma");
+    (prisma as unknown as { mcpRefreshToken: { findUnique: ReturnType<typeof vi.fn> } }).mcpRefreshToken.findUnique = vi
+      .fn()
+      .mockResolvedValueOnce(VALID_RT)
+      .mockResolvedValueOnce({ rotatedAt: new Date(), revokedAt: new Date() });
+
+    const result = await exchangeRefreshToken({
+      refreshToken: "valid-refresh-token",
+      clientId: "mcpc_testclient",
+      clientSecretHash: "hashed:correct-secret",
+    });
+
+    expect(result).toMatchObject({ ok: false, error: "invalid_grant", reason: "concurrent_rotation_revoked" });
+    expect(mockRefreshFindMany).toHaveBeenCalled();
   });
 
   it("a token revoked (not rotated) while it waited for the lock answers revoked: no family revocation, no race audit", async () => {

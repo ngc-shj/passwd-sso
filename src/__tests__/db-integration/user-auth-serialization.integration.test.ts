@@ -18,7 +18,7 @@ import { randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { createTestContext, Deferred, setBypassRlsGucs, type TestContext } from "./helpers";
-import { createRaceHelpers } from "./race-helpers";
+import { BLOCK_WAIT_MS, createRaceHelpers } from "./race-helpers";
 
 const { mockAuth } = vi.hoisted(() => ({ mockAuth: vi.fn() }));
 
@@ -370,12 +370,25 @@ describe("credential revocation vs. mint — real-DB integration", () => {
 
   it("a revocation completes while the user's vault-data lock is held", async () => {
     await sessionCookieRequest();
+    // The vault paths' lock: advisoryXactLock on the bare user id.
     const vaultLock = await race.holdRowLock(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [userId]);
+    const pending = invalidateUserSessions(userId, { allTenants: true, reason: "test" });
+    pending.catch(() => {});
     try {
-      const result = await invalidateUserSessions(userId, { allTenants: true, reason: "test" });
-      expect(result.sessions).toBe(1);
+      // Bounded: it must settle, and must never be seen waiting on the vault lock.
+      let settled = false;
+      void pending.then(() => { settled = true; }, () => { settled = true; });
+      const deadline = Date.now() + BLOCK_WAIT_MS;
+      while (!settled) {
+        if ((await race.backendsBlockedBy(vaultLock.pid)).length > 0) {
+          throw new Error("the revocation waited on the vault-data lock");
+        }
+        if (Date.now() > deadline) throw new Error(`the revocation did not settle within ${BLOCK_WAIT_MS}ms`);
+        await new Promise((res) => setTimeout(res, 20));
+      }
     } finally {
       await vaultLock.release();
     }
+    expect((await pending).sessions).toBe(1);
   });
 });

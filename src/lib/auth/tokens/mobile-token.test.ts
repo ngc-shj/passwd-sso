@@ -749,6 +749,7 @@ describe("refreshIosToken", () => {
 
     expect(result).toEqual({ ok: false, error: "REFRESH_TOKEN_FAMILY_EXPIRED" });
     expect(mockExtCreate).not.toHaveBeenCalled();
+    expect(mockRevokeFamily).not.toHaveBeenCalled();
     expect(mockTxExtFindFirst).toHaveBeenCalledWith(
       expect.objectContaining({ where: expect.objectContaining({ id: "row-old", userId: USER_ID, revokedAt: null }) }),
     );

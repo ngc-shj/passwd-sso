@@ -339,3 +339,63 @@ reviews of the commit.
   bound, lock key namespace, extension refresh lock, MCP code lock) turns its
   test red. The integration cells were not mutation-run (that needs the
   database env in the copy).
+
+# Round 4
+
+## Changes from Previous Round
+Incremental review of 3c93024ef. Functionality: all Round-3 fixes verified
+(lock-key sweep: no inversion; grants narrowed back), five Minors. Security:
+one Major on the new cross-tenant audit row. Testing: two Majors, six Minors.
+
+## Findings
+- R4-S1 [Major] (with R4-F1 [Minor]) The row written into another tenant
+  spread the revoking request's base: tenant A's admin id (hydrated to name,
+  email, avatar by the audit-log view), IP and user agent, the session/token
+  counts across every tenant, and every revoked credential id — into a log
+  tenant B's admins read and export; `registeredInTenant: false` was wrong there.
+- R4-S2 [Minor] Rule 4: `@/components` imports not followed; segment set and
+  guard extraction incomplete. R4-F3 [Minor]: re-exports / dynamic imports not
+  checked; a non-literal guard operand silently dropped.
+- R4-F2 [Minor] audit-log reference not updated. R4-F4 [Minor] stale lock
+  comments. R4-F5 [Minor] iOS overlap fallback is best-effort, undocumented.
+- R4-T1 [Major] The revoked-vs-rotated boundary was unpinned (the race-lost
+  fixture re-read an unrotated row). R4-T2 [Major] The vault-lock cell would
+  hang to the test timeout, leaking the holder. R4-T3..T8 [Minor] cookie-only
+  layout cell; "no family revocation" unasserted; extension refresh lock key
+  pinned by prefix only; other-tenant de-duplication unpinned; single-statement
+  lock unpinned; imposter cell asserted exit code only.
+
+## Resolution Status
+### R4-S1 / R4-F1
+- The other-tenant row is built on its own: actor SYSTEM (`SYSTEM_ACTOR_ID`,
+  `actorType: SYSTEM`), no IP or user agent, metadata naming only that tenant's
+  passkeys (`credentialId` + `registeredInTenant: true`, or the bounded
+  `passkeys` / `credentialIds` / `credentialIdsOmitted`), `targetUserId` and
+  `revokedFromTenantId` (the user decision of Round 3) — no counts. Unit cells
+  pin the whole row; integration cell checks the drained payload.
+
+### R4-S2 / R4-F3
+- The guard must be exactly one getSessionInfo call under an `if` whose `||`
+  operands are all literal `startsWith` calls, or the gate refuses to run.
+  Segment files include `route` and `.js`/`.jsx`; re-exports and literal
+  import()/require count as loads, an unreadable one fails. Cells for each.
+- Accepted floor: `@/components` imports are not followed (verified: the only
+  two server components there are data-free), documented in the gate header.
+
+### R4-F2 / R4-F4 / R4-F5
+- audit-log reference documents the id bound, `credentialIdsOmitted` and the
+  per-tenant SYSTEM row; lock comments point at the credential lock and its
+  separation from the vault-data lock; the iOS fallback is commented as
+  best-effort (fails closed).
+
+### R4-T1..T8
+- Race-lost re-reads a rotated row; new cell: rotated and revoked → race_lost
+  with family revocation. Vault-lock cell is bounded (BLOCK_WAIT_MS), fails with
+  a named message if the revocation waits on the bare-id lock, and releases the
+  holder in `finally`. Cookie-only layout cell; `mockRevokeFamily` asserted;
+  lock key pinned to the user; three-tenant de-duplication cell (row count
+  pinned); `$executeRaw` called once; imposter cell names the file.
+- Mutation red proof (scratch copy): the rotated boundary, the SYSTEM actor,
+  the per-tenant passkey filter and the per-tenant de-duplication each turn
+  their cell red (the de-duplication cell first survived — keyed by tenant it
+  collapsed duplicates — and now also pins the row count).

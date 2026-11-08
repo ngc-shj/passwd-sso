@@ -182,6 +182,7 @@ describe("check-count-then-create-lock", () => {
     );
     const r = run("src/app/api/x/route.ts", local);
     expect(r.code).toBe(1);
+    expect(r.stderr).toContain("src/app/api/x/route.ts");
   });
 
   it("fails a cap-then-create site with no advisory lock", () => {

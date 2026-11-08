@@ -37,10 +37,13 @@
  *        getSessionInfo call in src/lib/proxy/page-route.ts; each has a
  *        layout that reads it, and every server-component segment file under
  *        it (page, layout, template, default, loading, not-found) reads it
- *        itself or imports only from PAGE_NON_READER_IMPORTS — a client
+ *        itself or loads only modules in PAGE_NON_READER_IMPORTS (imports,
+ *        re-exports and literal import()s; an unreadable one fails) — a client
  *        navigation re-renders the page without its layout, so a page that
- *        reads data must read the session too. Floor: an imported component
- *        is not followed.
+ *        reads data must read the session too. The guard must be one
+ *        getSessionInfo call under an `if` of literal startsWith operands only,
+ *        or the gate refuses to run. Floor: an imported @/components module is
+ *        not followed (today every server component there is data-free).
  *
  * A route file is a session reader when it references, by import binding, one
  * of READER_EXPORTS (the module that defines it, not the spelling). A name is
@@ -146,7 +149,8 @@ const DB_READER_EXPORTS = new Map([
 // renders (rule 4).
 const PAGE_ROUTE_PATH = "src/lib/proxy/page-route.ts";
 const PAGE_APP_ROOT = "src/app/[locale]";
-const PAGE_SEGMENT_FILE_RE = /\/(page|layout|template|default|loading|not-found)\.tsx?$/;
+const PAGE_SEGMENT_FILE_RE = /\/(page|layout|template|default|loading|not-found|route)\.(tsx?|jsx?)$/;
+const PAGE_SEGMENT_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx"];
 // What a server-component segment file that reads no session may import: it
 // can redirect, translate, or hand off to a client component, and nothing else.
 const PAGE_NON_READER_IMPORTS = [/^next(\/|$)/, /^next-intl(\/|$)/, /^@\/i18n\//, /^@\/components\//, /^react$/, /^lucide-react$/];
@@ -421,19 +425,37 @@ function sessionGatedPagePrefixes() {
   const abs = join(ROOT, PAGE_ROUTE_PATH);
   if (!existsSync(abs)) fatal(`${PAGE_ROUTE_PATH} not found under ${ROOT}.`);
   const sf = project.createSourceFile(PAGE_ROUTE_PATH, readFileSync(abs, "utf8"), { overwrite: true });
-  const call = sf
+  const calls = sf
     .getDescendantsOfKind(SyntaxKind.CallExpression)
-    .find((c) => c.getExpression().getText() === "getSessionInfo");
-  const guard = call?.getFirstAncestorByKind(SyntaxKind.IfStatement);
+    .filter((c) => c.getExpression().getText() === "getSessionInfo");
+  if (calls.length !== 1) {
+    fatal(`${PAGE_ROUTE_PATH}: expected one getSessionInfo call, found ${calls.length} — rule 4 reads the gated page prefixes from its guard.`);
+  }
+  const guard = calls[0].getFirstAncestorByKind(SyntaxKind.IfStatement);
   if (!guard) fatal(`${PAGE_ROUTE_PATH}: no getSessionInfo call inside an if statement — rule 4 cannot read the gated page prefixes.`);
-  const prefixes = guard
-    .getExpression()
-    .getDescendantsOfKind(SyntaxKind.CallExpression)
-    .filter((c) => c.getExpression().getKind() === SyntaxKind.PropertyAccessExpression && c.getExpression().getName() === "startsWith")
-    .map((c) => unwrapExpression(c.getArguments()[0]))
-    .filter((a) => a?.getKind() === SyntaxKind.StringLiteral)
-    .map((a) => a.getLiteralText());
-  if (prefixes.length === 0) fatal(`${PAGE_ROUTE_PATH}: the getSessionInfo guard names no literal startsWith prefix.`);
+  // The guard must be `p.startsWith("/a") || p.startsWith("/b") ...` and
+  // nothing else: any other operand would gate paths this rule cannot name.
+  const operands = [];
+  const flatten = (node) => {
+    const n = unwrapExpression(node);
+    if (n.getKind() === SyntaxKind.BinaryExpression && n.getOperatorToken().getKind() === SyntaxKind.BarBarToken) {
+      flatten(n.getLeft());
+      flatten(n.getRight());
+    } else operands.push(n);
+  };
+  flatten(guard.getExpression());
+  const prefixes = operands.map((n) => {
+    const callee = n.getKind() === SyntaxKind.CallExpression ? n.getExpression() : null;
+    const arg = callee ? unwrapExpression(n.getArguments()[0]) : null;
+    if (
+      callee?.getKind() !== SyntaxKind.PropertyAccessExpression ||
+      callee.getName() !== "startsWith" ||
+      arg?.getKind() !== SyntaxKind.StringLiteral
+    ) {
+      fatal(`${PAGE_ROUTE_PATH}: the getSessionInfo guard has an operand other than a literal startsWith (${n.getText().slice(0, 80)}) — rule 4 cannot name the paths it gates.`);
+    }
+    return arg.getLiteralText();
+  });
   return prefixes;
 }
 
@@ -445,7 +467,7 @@ for (const prefix of gatedPrefixes) {
   if (!existsSync(join(ROOT, layout))) {
     fail(`${layout}  not found: the pages under ${prefix} (session-gated in ${PAGE_ROUTE_PATH}) must render inside a layout that reads the session`);
   }
-  const segments = walkSourceFiles(join(ROOT, dir))
+  const segments = walkSourceFiles(join(ROOT, dir), PAGE_SEGMENT_EXTENSIONS)
     .map((abs) => relative(ROOT, abs).split("\\").join("/"))
     .filter((rel) => PAGE_SEGMENT_FILE_RE.test(rel))
     .sort();
@@ -466,11 +488,20 @@ for (const prefix of gatedPrefixes) {
       fail(`${rel}  reads no session: the pages under ${prefix} would render on the proxy's cached view of the session alone`);
       continue;
     }
-    const outside = sf
-      .getImportDeclarations()
-      .filter((d) => !d.isTypeOnly())
-      .map((d) => d.getModuleSpecifierValue())
-      .filter((spec) => !PAGE_NON_READER_IMPORTS.some((re) => re.test(spec)));
+    // Every module the file loads: imports, re-exports (`export { default }
+    // from "…"`) and literal import()/require; one it cannot read fails.
+    const specifiers = [
+      ...sf.getImportDeclarations().filter((d) => !d.isTypeOnly()).map((d) => d.getModuleSpecifierValue()),
+      ...sf.getExportDeclarations().filter((d) => !d.isTypeOnly() && d.getModuleSpecifierValue()).map((d) => d.getModuleSpecifierValue()),
+    ];
+    for (const c of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+      const callee = c.getExpression();
+      if (callee.getKind() !== SyntaxKind.ImportKeyword && !(callee.getKind() === SyntaxKind.Identifier && callee.getText() === "require")) continue;
+      const arg = unwrapExpression(c.getArguments()[0]);
+      if (arg?.getKind() === SyntaxKind.StringLiteral || arg?.getKind() === SyntaxKind.NoSubstitutionTemplateLiteral) specifiers.push(arg.getLiteralText());
+      else specifiers.push(`<unreadable dynamic import at line ${c.getStartLineNumber()}>`);
+    }
+    const outside = specifiers.filter((spec) => !PAGE_NON_READER_IMPORTS.some((re) => re.test(spec)));
     if (outside.length > 0) {
       fail(
         `${rel}  is a server component under the session-gated ${prefix} that reads no session row but imports ${outside.join(", ")}: a client navigation renders it on the proxy's cached view of the session alone — read the session (auth()) or keep it to redirects and client components`,

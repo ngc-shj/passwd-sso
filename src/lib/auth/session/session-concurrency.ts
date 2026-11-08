@@ -73,10 +73,9 @@ export async function createSessionUnderConcurrencyCap(
   // Serialize concurrent session creation for this user so the
   // count-then-evict-then-create sequence cannot race past the concurrent
   // session cap (two concurrent sign-ins both reading count < max).
-  // Advisory lock is transaction-scoped; matches the codebase idiom
-  // (attachments, vault rotate-key).
-  // The same lock serializes this sign-in against a revocation of the user's
-  // credentials (user-auth-serialization.ts).
+  // The user's credential lock (user-auth-serialization.ts), transaction-scoped
+  // and keyed apart from the vault-data lock; it also serializes this sign-in
+  // against a revocation of the user's credentials.
   await lockUserAuthArtifacts(tx, input.userId);
 
   // A passkey sign-in whose credential was revoked while the ceremony ran

@@ -9,7 +9,9 @@ import { lockUserAuthArtifacts } from "@/lib/auth/session/user-auth-serializatio
 import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
 import { withBypassRls, withTenantRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
-import { AUDIT_ACTION, AUDIT_TARGET_TYPE, NOTIFICATION_TYPE } from "@/lib/constants";
+import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE, NOTIFICATION_TYPE } from "@/lib/constants";
+import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
+import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { forbidden, notFound } from "@/lib/http/api-response";
 import { createNotification } from "@/lib/notification";
 import { notificationBody, notificationTitle } from "@/lib/notification/notification-messages";
@@ -115,44 +117,58 @@ export async function revokeMemberPasskeys(
 
     const { counts, sessionTokens } = await revokeUserAuthArtifactsInTx(tx, targetUserId, { tenantFilter: {} });
 
-    const [first] = credentials;
-    const audit =
+    // The passkeys a row names: one, or a bounded list with the rest counted.
+    const passkeyFields = (subset: typeof credentials) =>
+      extent === "one"
+        ? { credentialId: subset[0].credentialId }
+        : {
+            passkeys: subset.length,
+            credentialIds: subset
+              .slice(0, REVOKE_ALL_AUDIT_MAX_CREDENTIAL_IDS)
+              .map((c) => c.credentialId.slice(0, AUDIT_CREDENTIAL_ID_MAX_LENGTH)),
+            credentialIdsOmitted: Math.max(0, subset.length - REVOKE_ALL_AUDIT_MAX_CREDENTIAL_IDS),
+          };
+    const action =
       extent === "one"
         ? {
             action: AUDIT_ACTION.TENANT_MEMBER_PASSKEY_REVOKE,
             targetType: AUDIT_TARGET_TYPE.WEBAUTHN_CREDENTIAL,
-            targetId: first.id,
-            metadata: {
-              targetUserId,
-              credentialId: first.credentialId,
-              registeredInTenant: first.tenantId === tenantId,
-              ...counts,
-            },
+            targetId: credentials[0].id,
           }
-        : {
-            action: AUDIT_ACTION.TENANT_MEMBER_PASSKEY_REVOKE_ALL,
-            targetType: "User",
-            targetId: targetUserId,
-            metadata: {
-              targetUserId,
-              passkeys: count,
-              credentialIds: credentials
-                .slice(0, REVOKE_ALL_AUDIT_MAX_CREDENTIAL_IDS)
-                .map((c) => c.credentialId.slice(0, AUDIT_CREDENTIAL_ID_MAX_LENGTH)),
-              credentialIdsOmitted: Math.max(0, credentials.length - REVOKE_ALL_AUDIT_MAX_CREDENTIAL_IDS),
-              ...counts,
-            },
-          };
-    await logAuditInTx(tx, tenantId, { ...tenantAuditBase(req, actorUserId, tenantId), ...audit });
+        : { action: AUDIT_ACTION.TENANT_MEMBER_PASSKEY_REVOKE_ALL, targetType: "User", targetId: targetUserId };
+
+    await logAuditInTx(tx, tenantId, {
+      ...tenantAuditBase(req, actorUserId, tenantId),
+      ...action,
+      metadata: {
+        targetUserId,
+        ...passkeyFields(credentials),
+        ...(extent === "one" ? { registeredInTenant: credentials[0].tenantId === tenantId } : {}),
+        ...counts,
+      },
+    });
+
     // A passkey registered under another tenant signs the member in there too,
-    // so that tenant's admins see its revocation in their own log, with the
-    // tenant it was revoked from.
+    // so that tenant's admins see its revocation in their own log. What they
+    // see is that tenant's own: its passkeys only, and the system as the actor —
+    // not the revoking admin, their request, or counts over the member's other
+    // tenants — plus the tenant it was revoked from.
     const otherTenants = [...new Set(credentials.map((c) => c.tenantId))].filter((t) => t !== tenantId);
     for (const other of otherTenants) {
       await logAuditInTx(tx, other, {
-        ...tenantAuditBase(req, actorUserId, other),
-        ...audit,
-        metadata: { ...audit.metadata, revokedFromTenantId: tenantId },
+        scope: AUDIT_SCOPE.TENANT,
+        userId: SYSTEM_ACTOR_ID,
+        actorType: ACTOR_TYPE.SYSTEM,
+        tenantId: other,
+        ip: null,
+        userAgent: null,
+        ...action,
+        metadata: {
+          targetUserId,
+          ...passkeyFields(credentials.filter((c) => c.tenantId === other)),
+          ...(extent === "one" ? { registeredInTenant: true } : {}),
+          revokedFromTenantId: tenantId,
+        },
       });
     }
     return { counts, sessionTokens, target: targetRow.user };

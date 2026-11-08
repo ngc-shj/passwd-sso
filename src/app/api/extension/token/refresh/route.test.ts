@@ -354,7 +354,7 @@ describe("POST /api/extension/token/refresh", () => {
     }));
 
     expect(String(mockTxExecuteRaw.mock.calls[0][0])).toContain("pg_advisory_xact_lock");
-    expect(mockTxExecuteRaw.mock.calls[0][1]).toMatch(/^user-auth:/);
+    expect(mockTxExecuteRaw.mock.calls[0][1]).toBe(`user-auth:${validTokenResult().data.userId}`);
     expect(mockTxExecuteRaw.mock.invocationCallOrder[0]).toBeLessThan(mockExtTokenUpdateMany.mock.invocationCallOrder[0]);
   });
 

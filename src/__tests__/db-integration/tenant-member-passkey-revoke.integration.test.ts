@@ -39,6 +39,7 @@ import { GET as listPasskeys } from "@/app/api/tenant/members/[userId]/passkeys/
 import { DELETE as revokePasskey } from "@/app/api/tenant/members/[userId]/passkeys/[credentialId]/route";
 import { DELETE as revokeAllPasskeys } from "@/app/api/tenant/members/[userId]/passkeys/route";
 import { hashSessionToken } from "@/lib/auth/session/session-cache";
+import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 
 describe("tenant admin revokes a member's passkey — real-DB integration", () => {
   let ctx: TestContext;
@@ -235,10 +236,17 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
     );
     expect(elsewhereAudits).toHaveLength(1);
     // (Selected by the row's tenant_id; the payload does not repeat it.)
-    expect(JSON.parse(elsewhereAudits[0].payload)).toMatchObject({
+    const elsewhere0 = JSON.parse(elsewhereAudits[0].payload);
+    expect(elsewhere0).toMatchObject({
       action: "TENANT_MEMBER_PASSKEY_REVOKE_ALL",
-      metadata: { targetUserId: target, revokedFromTenantId: tenantId },
+      userId: SYSTEM_ACTOR_ID,
+      actorType: "SYSTEM",
+      ip: null,
+      metadata: { targetUserId: target, passkeys: 1, revokedFromTenantId: tenantId },
     });
+    // None of the revoking tenant's view: not its admin, not counts across tenants.
+    expect(elsewhere0.metadata.sessions).toBeUndefined();
+    expect(elsewhere0.metadata.credentialIds).toHaveLength(1);
     expect(mockSendEmail).toHaveBeenCalledTimes(1);
   });
 
