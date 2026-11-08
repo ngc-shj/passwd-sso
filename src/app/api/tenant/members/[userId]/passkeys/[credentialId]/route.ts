@@ -1,3 +1,4 @@
+import * as Sentry from "@sentry/nextjs";
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
@@ -136,10 +137,13 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
     );
   }
   if (cacheTombstoneFailures > 0) {
-    getLogger().error(
-      { targetUserId, failures: cacheTombstoneFailures, reason: "tenant_member_passkey_revoke", _logType: "session.cache_tombstone_failures" },
-      "session.cache_tombstone_failures",
-    );
+    // The same on-call signal invalidateUserSessions raises for a tombstone
+    // that did not land.
+    Sentry.captureMessage("session cache tombstone failures during tenant member passkey revoke", {
+      level: "error",
+      tags: { reason: "tenant_member_passkey_revoke" },
+      extra: { targetUserId, failures: cacheTombstoneFailures },
+    });
   }
 
   // The member learns of it in the app and by email, as of a vault reset.

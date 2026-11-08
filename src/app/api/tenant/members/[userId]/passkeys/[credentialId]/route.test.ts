@@ -15,6 +15,7 @@ const {
   mockLogAuditInTx,
   mockCreateNotification,
   mockSendEmail,
+  mockSentryCapture,
   calls,
   committed,
 } = vi.hoisted(() => {
@@ -34,6 +35,7 @@ const {
     mockLogAuditInTx: vi.fn(),
     mockCreateNotification: vi.fn(),
     mockSendEmail: vi.fn(),
+    mockSentryCapture: vi.fn(),
     calls,
     committed: { value: false },
   };
@@ -72,6 +74,7 @@ vi.mock("@/lib/audit/audit", () => ({
 }));
 vi.mock("@/lib/notification", () => ({ createNotification: mockCreateNotification }));
 vi.mock("@/lib/email", () => ({ sendEmail: mockSendEmail }));
+vi.mock("@sentry/nextjs", () => ({ captureMessage: mockSentryCapture }));
 
 import { DELETE } from "./route";
 
@@ -144,6 +147,7 @@ describe("DELETE /api/tenant/members/[userId]/passkeys/[credentialId]", () => {
     );
     expect(mockCreateNotification).toHaveBeenCalledWith(expect.objectContaining({ userId: TARGET, type: "SECURITY_ALERT" }));
     expect(mockSendEmail).toHaveBeenCalledWith(expect.objectContaining({ to: "member@example.com" }));
+    expect(mockSentryCapture).not.toHaveBeenCalled();
   });
 
   it("a failed revocation fails the request: no commit, no cache eviction, the member is not told", async () => {
@@ -162,6 +166,17 @@ describe("DELETE /api/tenant/members/[userId]/passkeys/[credentialId]", () => {
     const res = await revoke();
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ cacheTombstoneFailures: 2 });
+    expect(mockSentryCapture).toHaveBeenCalledTimes(1);
+  });
+
+  it("revokes a passkey the member registered under another tenant, recorded as such", async () => {
+    mockCredentialFindFirst.mockResolvedValue({ id: CRED, credentialId: "public-cred", tenantId: "previous-tenant" });
+
+    expect((await revoke()).status).toBe(200);
+    expect(mockCredentialFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: CRED, userId: TARGET } }),
+    );
+    expect(mockLogAuditInTx.mock.calls[0][2].metadata).toMatchObject({ registeredInTenant: false });
   });
 
   it("a step-up refusal is returned before anything is deleted", async () => {

@@ -225,11 +225,11 @@ export const BYPASS_GRANT = Object.freeze({
   TENANT_MEMBER_PASSKEY_LIST: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["tenantMember", "webAuthnCredential"]),
   // The revoke, in one transaction: the member's sessions and tokens in every
   // tenant are revoked with the user-global credential, and audited.
-  TENANT_MEMBER_PASSKEY_REVOKE: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["apiKey", "auditOutbox", "delegationSession", "extensionToken", "mcpAccessToken", "mcpRefreshToken", "operatorToken", "session", "tenantMember", "user", "webAuthnCredential"]),
+  TENANT_MEMBER_PASSKEY_REVOKE: defineGrant(BYPASS_PURPOSE.TOKEN_LIFECYCLE, ["apiKey", "auditOutbox", "delegationSession", "extensionBridgeCode", "extensionToken", "mcpAccessToken", "mcpAuthorizationCode", "mcpRefreshToken", "mobileBridgeCode", "operatorToken", "session", "tenantMember", "user", "webAuthnCredential"]),
   TOKEN_TENANT_LOOKUP: defineGrant(BYPASS_PURPOSE.TOKEN_LIFECYCLE, ["tenant"]),
   TOKEN_TENANT_MEMBERSHIP_CHECK: defineGrant(BYPASS_PURPOSE.TOKEN_LIFECYCLE, ["tenantMember"]),
   USER_SESSION_CACHE_INVALIDATION: defineGrant(BYPASS_PURPOSE.TOKEN_LIFECYCLE, ["session"]),
-  USER_SESSION_INVALIDATION: defineGrant(BYPASS_PURPOSE.TOKEN_LIFECYCLE, ["apiKey", "delegationSession", "extensionToken", "mcpAccessToken", "mcpRefreshToken", "operatorToken", "session"]),
+  USER_SESSION_INVALIDATION: defineGrant(BYPASS_PURPOSE.TOKEN_LIFECYCLE, ["apiKey", "delegationSession", "extensionBridgeCode", "extensionToken", "mcpAccessToken", "mcpAuthorizationCode", "mcpRefreshToken", "mobileBridgeCode", "operatorToken", "session"]),
   VAULT_ENTRY_CROSS_TENANT_READ: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["passwordEntry"]),
   VAULT_RESET_COUNT: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["attachment", "passwordEntry"]),
   VAULT_RESET_EXECUTE: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["attachment", "auditOutbox", "emergencyAccessGrant", "folder", "passwordEntry", "passwordShare", "tag", "team", "teamMember", "teamMemberKey", "teamPasswordEntry", "user", "vaultKey"]),

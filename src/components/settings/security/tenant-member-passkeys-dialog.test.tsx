@@ -6,7 +6,7 @@ import "@testing-library/jest-dom/vitest";
 const { mockFetch, mockToast, mockCanUsePasskeyRecovery, mockReauthenticateWithPasskey } =
   vi.hoisted(() => ({
     mockFetch: vi.fn(),
-    mockToast: { success: vi.fn(), error: vi.fn() },
+    mockToast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
     mockCanUsePasskeyRecovery: vi.fn(),
     mockReauthenticateWithPasskey: vi.fn(),
   }));
@@ -114,6 +114,20 @@ describe("TenantMemberPasskeysDialog", () => {
     await waitFor(() => expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument());
     expect(mockToast.success).not.toHaveBeenCalled();
     expect(mockToast.error).not.toHaveBeenCalled();
+  });
+
+  it("warns, rather than reporting plain success, when some cached sign-ins could not be evicted", async () => {
+    mockFetch
+      .mockResolvedValueOnce(listResponse([PASSKEY]))
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ ok: true, cacheTombstoneFailures: 1 }) })
+      .mockResolvedValueOnce(listResponse([]));
+    render(<TenantMemberPasskeysDialog userId="u-1" memberName="Alice" />);
+    fireEvent.click(screen.getByRole("button"));
+    fireEvent.click(await screen.findByRole("button", { name: "revokePasskey" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "revokePasskey" }).at(-1)!);
+
+    await waitFor(() => expect(mockToast.warning).toHaveBeenCalledWith("revokePasskeyCacheWarning"));
+    expect(mockToast.success).not.toHaveBeenCalled();
   });
 
   it("says so when the list cannot be loaded", async () => {

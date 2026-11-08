@@ -268,5 +268,6 @@
   "revokePasskeyDescription": "The passkey is deleted and {name} is signed out everywhere, including extension and API tokens. They can sign in another way and register a new passkey.",
   "revokePasskeySuccess": "Passkey revoked.",
   "revokePasskeyFailed": "Failed to revoke the passkey.",
-  "memberPasskeyOtherTenant": "Registered in another tenant"
+  "memberPasskeyOtherTenant": "Registered in another tenant",
+  "revokePasskeyCacheWarning": "Passkey revoked. Some sign-ins may stay valid for a few minutes, until the server's session cache expires."
 }

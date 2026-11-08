@@ -47,7 +47,7 @@ interface TenantMemberPasskeysDialogProps {
 }
 
 // A tenant admin's view of a member's passkeys, to revoke a compromised one
-// (#974). Revoking also signs the member out of this tenant.
+// (#974). Revoking also signs the member out everywhere (passkeys are user-global).
 export function TenantMemberPasskeysDialog({ userId, memberName, disabled }: TenantMemberPasskeysDialogProps) {
   const t = useTranslations("TenantAdmin");
   const locale = useLocale();
@@ -89,7 +89,13 @@ export function TenantMemberPasskeysDialog({ userId, memberName, disabled }: Ten
       // @stepup id:tenant-member-passkey-delete
       const res = await fetchApi(apiPath.tenantMemberPasskeyById(userId, target.id), { method: "DELETE" });
       if (res.ok) {
-        toast.success(t("revokePasskeySuccess"));
+        const body = (await res.json().catch(() => null)) as { cacheTombstoneFailures?: number } | null;
+        if ((body?.cacheTombstoneFailures ?? 0) > 0) {
+          // Revoked, but some cached sign-ins may last until the cache expires.
+          toast.warning(t("revokePasskeyCacheWarning"));
+        } else {
+          toast.success(t("revokePasskeySuccess"));
+        }
         setTarget(null);
         await load();
         return;

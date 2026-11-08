@@ -8,6 +8,9 @@ const {
   mockMcpRefreshToken,
   mockDelegationSession,
   mockOperatorToken,
+  mockExtensionBridgeCode,
+  mockMobileBridgeCode,
+  mockMcpAuthorizationCode,
   mockWithBypassRls,
   mockInvalidateCachedSessions,
   mockInvalidateCachedSessionsBulkByDigest,
@@ -19,6 +22,9 @@ const {
   mockMcpRefreshToken: { updateMany: vi.fn() },
   mockDelegationSession: { updateMany: vi.fn() },
   mockOperatorToken: { updateMany: vi.fn() },
+  mockExtensionBridgeCode: { updateMany: vi.fn() },
+  mockMobileBridgeCode: { updateMany: vi.fn() },
+  mockMcpAuthorizationCode: { updateMany: vi.fn() },
   mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
   mockInvalidateCachedSessions: vi
     .fn<(tokens: ReadonlyArray<string>) => Promise<{ total: number; failed: number }>>()
@@ -37,6 +43,9 @@ vi.mock("@/lib/prisma", () => ({
     mcpRefreshToken: mockMcpRefreshToken,
     delegationSession: mockDelegationSession,
     operatorToken: mockOperatorToken,
+    extensionBridgeCode: mockExtensionBridgeCode,
+    mobileBridgeCode: mockMobileBridgeCode,
+    mcpAuthorizationCode: mockMcpAuthorizationCode,
   },
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
@@ -55,6 +64,7 @@ import {
   invalidateUserSessionsCache,
   type InvalidateUserSessionsOptions,
 } from "./user-session-invalidation";
+import { hashSessionToken } from "@/lib/auth/session/session-cache";
 import {
   expectInvalidatedAfterCommit,
   expectNotInvalidatedOnDbThrow,
@@ -74,6 +84,9 @@ describe("invalidateUserSessions", () => {
     mockMcpRefreshToken.updateMany.mockResolvedValue({ count: 5 });
     mockDelegationSession.updateMany.mockResolvedValue({ count: 6 });
     mockOperatorToken.updateMany.mockResolvedValue({ count: 7 });
+    mockExtensionBridgeCode.updateMany.mockResolvedValue({ count: 8 });
+    mockMobileBridgeCode.updateMany.mockResolvedValue({ count: 9 });
+    mockMcpAuthorizationCode.updateMany.mockResolvedValue({ count: 10 });
   });
 
   it("deletes sessions, revokes extension tokens, API keys, MCP access/refresh tokens, delegation sessions, and operator tokens", async () => {
@@ -118,8 +131,32 @@ describe("invalidateUserSessions", () => {
       mcpRefreshTokens: 5,
       delegationSessions: 6,
       operatorTokens: 7,
+      extensionBridgeCodes: 8,
+      mobileBridgeCodes: 9,
+      mcpAuthorizationCodes: 10,
       cacheTombstoneFailures: 0,
     });
+  });
+
+  it("consumes the user's unused single-use codes in scope (each exchanges for a token with no session)", async () => {
+    await invalidateUserSessions("user-1", { tenantId: "tenant-1" });
+
+    for (const m of [mockExtensionBridgeCode, mockMobileBridgeCode, mockMcpAuthorizationCode]) {
+      expect(m.updateMany).toHaveBeenCalledWith({
+        where: { userId: "user-1", usedAt: null, tenantId: "tenant-1" },
+        data: { usedAt: expect.any(Date) },
+      });
+    }
+  });
+
+  it("keeps the caller's own session: excluded by digest from both the tombstone list and the delete", async () => {
+    await invalidateUserSessions("user-1", { tenantId: "tenant-1", excludeSessionToken: "raw-current" });
+
+    const exclusion = { sessionToken: { not: hashSessionToken("raw-current") } };
+    expect(mockSession.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { userId: "user-1", tenantId: "tenant-1", ...exclusion } }),
+    );
+    expect(mockSession.deleteMany).toHaveBeenCalledWith({ where: { userId: "user-1", tenantId: "tenant-1", ...exclusion } });
   });
 
   it("uses withBypassRls", async () => {
@@ -288,6 +325,9 @@ describe("invalidateUserSessions", () => {
       mcpRefreshTokens: 5,
       delegationSessions: 6,
       operatorTokens: 7,
+      extensionBridgeCodes: 8,
+      mobileBridgeCodes: 9,
+      mcpAuthorizationCodes: 10,
       cacheTombstoneFailures: 0,
     });
   });

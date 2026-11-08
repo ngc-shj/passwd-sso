@@ -265,8 +265,9 @@
   "memberPasskeyNeverUsed": "未使用",
   "revokePasskey": "失効",
   "revokePasskeyTitle": "パスキーを失効",
-  "revokePasskeyDescription": "パスキーを削除し、{name} をすべてのサインインから退出させます（拡張機能と API のトークンも含む）。別の方法でサインインして新しいパスキーを登録できます。",
+  "revokePasskeyDescription": "パスキーを削除し、{name} のすべてのセッションを終了します（拡張機能と API のトークンも含む）。別の方法でサインインして新しいパスキーを登録できます。",
   "revokePasskeySuccess": "パスキーを失効しました。",
   "revokePasskeyFailed": "パスキーを失効できませんでした。",
-  "memberPasskeyOtherTenant": "別のテナントで登録"
+  "memberPasskeyOtherTenant": "別のテナントで登録",
+  "revokePasskeyCacheWarning": "パスキーを失効しました。サーバーのセッションキャッシュが切れるまでの数分間、一部のサインインが有効なままの場合があります。"
 }

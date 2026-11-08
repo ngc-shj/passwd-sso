@@ -59,6 +59,10 @@ export type InvalidateUserSessionsResult = {
   mcpRefreshTokens: number;
   delegationSessions: number;
   operatorTokens: number;
+  /** Single-use codes consumed: each exchanges for a fresh token with no session (#974 round 2). */
+  extensionBridgeCodes: number;
+  mobileBridgeCodes: number;
+  mcpAuthorizationCodes: number;
   cacheTombstoneFailures: number;
 };
 
@@ -174,7 +178,8 @@ type UserAuthArtifactCounts = Omit<InvalidateUserSessionsResult, "cacheTombstone
  * AFTER its transaction commits.
  *
  * The caller's bypass grant must cover session, extensionToken, apiKey,
- * mcpAccessToken, mcpRefreshToken, delegationSession and operatorToken.
+ * mcpAccessToken, mcpRefreshToken, delegationSession, operatorToken,
+ * extensionBridgeCode, mobileBridgeCode and mcpAuthorizationCode.
  */
 export async function revokeUserAuthArtifactsInTx(
   tx: Prisma.TransactionClient,
@@ -233,6 +238,23 @@ export async function revokeUserAuthArtifactsInTx(
     data: { revokedAt: now },
   });
 
+  // A pending single-use code is consumed, not left to expire: its exchange
+  // needs no session and checks no passkey requirement, so a code obtained
+  // before this revocation would mint a fresh extension, iOS or MCP token after
+  // it. The bootstrap migration consumes the same three (src/auth.ts).
+  const extensionBridgeCodesResult = await tx.extensionBridgeCode.updateMany({
+    where: { userId, usedAt: null, ...tenantFilter },
+    data: { usedAt: now },
+  });
+  const mobileBridgeCodesResult = await tx.mobileBridgeCode.updateMany({
+    where: { userId, usedAt: null, ...tenantFilter },
+    data: { usedAt: now },
+  });
+  const mcpAuthorizationCodesResult = await tx.mcpAuthorizationCode.updateMany({
+    where: { userId, usedAt: null, ...tenantFilter },
+    data: { usedAt: now },
+  });
+
   return {
     counts: {
       sessions: sessionsResult.count,
@@ -242,6 +264,9 @@ export async function revokeUserAuthArtifactsInTx(
       mcpRefreshTokens: mcpRefreshTokensResult.count,
       delegationSessions: delegationSessionsResult.count,
       operatorTokens: operatorTokensResult.count,
+      extensionBridgeCodes: extensionBridgeCodesResult.count,
+      mobileBridgeCodes: mobileBridgeCodesResult.count,
+      mcpAuthorizationCodes: mcpAuthorizationCodesResult.count,
     },
     sessionTokens: targetSessions.map((session) => session.sessionToken),
   };
