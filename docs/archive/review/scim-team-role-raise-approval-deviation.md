@@ -33,5 +33,6 @@ exported into the shell, not copied), compose workers stopped, each mutant appli
 | M1 raise applied in place (all non-equal adds to the role-update arm) | A10 ×2, R1/R2 ×2, R3, R4, R6, R7 (8 of 46) |
 | M2 hold deletes keys from the pre-read before its CAS | A7d, R9 (the two race cells) |
 | M3 hold keeps the keys | R1/R2 ×2, R7 |
+| M4 `previouslyActive` keyed on `previousRole` instead of the transition kind (route `pendingMetadata`) | route test A7e ×2 (N = 16, 80); integration A10 ×2 |
 
 Unmodified tree: 46/46.
