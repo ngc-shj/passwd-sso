@@ -116,10 +116,12 @@ const TRANSITIONS = new Set(["departFromTenant", "returnToTenant"]);
  * Pinned site counts of the real tree, per rule. A change is a site to review.
  * scim-team-admission-approval: member writes +3 (approve CAS, reject delete,
  * SCIM withdraw delete); admissions unchanged (the SCIM reactivation left, the
- * approve CAS joined).
+ * approve CAS joined). scim-team-role-raise-approval: member writes +2 (the
+ * SCIM raise-hold CAS of an active row and its key delete for the rows that
+ * CAS returned).
  */
 const EXPECTED = {
-  memberWrites: Number(process.env.TEAM_ROTATION_INPUT_LOCK_WRITES ?? 19),
+  memberWrites: Number(process.env.TEAM_ROTATION_INPUT_LOCK_WRITES ?? 21),
   tenantStateWrites: Number(process.env.TEAM_ROTATION_INPUT_LOCK_TENANT_WRITES ?? 2),
   admissions: Number(process.env.TEAM_ROTATION_INPUT_LOCK_ADMISSIONS ?? 7),
 };
