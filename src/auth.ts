@@ -582,9 +582,11 @@ async function claimedTenantMembership(
     // `DELETE /Users/<id>`, `deactivateScimUser`, which also drops the user's
     // external mapping), after which directory sync declines the user instead
     // of writing a row, and their next SSO sign-in finds no row and migrates
-    // them, bootstrap data and audit history included. Two cases still refuse
-    // after the delete: a second active member in the bootstrap tenant (row
-    // 6b), and an OWNER-role row, which `deactivateScimUser` will not delete.
+    // them, bootstrap data and audit history included. Two exceptions: with
+    // another active member in the bootstrap tenant, row 6b's
+    // `assertBootstrapSingleMember` throws, so that sign-in is filed as
+    // `provider_error` with no claim and leaves the `unmapped` report; and an
+    // OWNER-role row cannot be deleted this way (`deactivateScimUser` refuses).
     const priorMembership = await tx.tenantMember.findUnique({
       where: { tenantId_userId: { tenantId: target.id, userId } },
       select: { id: true },
