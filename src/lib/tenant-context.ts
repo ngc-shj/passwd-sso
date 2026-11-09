@@ -300,7 +300,10 @@ export async function resolveExistingUsersForTenant(
  * tenant that owns them on this tenant's say-so — and the one-active-membership
  * guard does not stop it once that tenant has suspended them (round-6 R6-S2).
  * The way back is the user's own act, as for attachment: signing in through this
- * tenant's IdP moves the column here, after which this tenant owns them.
+ * tenant's IdP moves the column here, after which this tenant owns them. A user
+ * active in a bootstrap tenant who holds a deactivated row here is the exception:
+ * that sign-in is refused until this tenant deletes the row (see the
+ * `priorMembership` refusal in `src/auth.ts`).
  *
  * MUST be called OUTSIDE a tenant context: another tenant's membership, and a
  * users row filed under it, are what RLS hides inside one. A user with no row is
