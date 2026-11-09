@@ -83,3 +83,26 @@ with no claim, excluded from `unmapped` by reason and by the claim filter; OWNER
 - F4 [Minor] "the other member must leave" named no supported action. Action: README en/ja say the
   bootstrap tenant's admin deactivates or removes that member first, and that their rows stay there.
 - Verification: vitest 21636; lint/tsc 0; integration 1446 (MinIO); `next build` 0.
+
+### Round 3
+Security: the parent filters select exactly the rows whose parents move (a key pair of a grant the
+user only receives stays with its grant, which the tenant-only move used to split); filters do not
+depend on the parent's tenantId; the relation subqueries stay inside `AUTH_TENANT_CLAIM_MEMBERSHIP`'s
+grant; no other tenant-only move remains. Functionality/testing: Prisma shapes valid; the AST guard
+pins the filters by exact text; the new cell reds per table (whole-map comparison). Findings, all
+Minor and comment-only:
+- `src/lib/tenant/owning-column.ts` justified leaving data behind by the removed tenant-only move.
+- `src/lib/tenant-context.ts` called the OWNER exception a deletion that does not admit the user.
+- Two round-2 docblock edits were not rewrapped.
+
+## Tightening-only skip — Round 3
+Findings applied directly (no Round 4 review):
+- [R3-S F1] [Minor] owning-column rationale restated as history — `src/lib/tenant/owning-column.ts` — applied
+- [R3-FT F1] [Minor] the two exceptions named correctly — `src/lib/tenant-context.ts` — applied
+- [R3-FT F2] [Minor] docblocks rewrapped — `src/__tests__/helpers/bootstrap-migration-set.ts`,
+  `src/__tests__/db-integration/tenant-claim-binding.integration.test.ts` — applied
+Justification: every finding is comment wording within Round 2's fix scope; no behaviour or
+security-boundary change.
+
+## Final state
+Code review rounds: 3. Open findings: none.

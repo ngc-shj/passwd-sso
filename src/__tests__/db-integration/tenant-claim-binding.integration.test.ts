@@ -1125,8 +1125,9 @@ describe("tenant claim binding (C3/C4/C5)", () => {
      * A user of a third tenant with a row in every moved table. The migration
      * moves `passwordEntryHistory`, `emergencyAccessKeyPair` and
      * `shareAccessLog` through their parent, so these rows show it does not
-     * reach past the bootstrap tenant. `onTenant` receives the tenant before any row
-     * is seeded, so a seed that throws still leaves it to the caller's teardown.
+     * reach past the bootstrap tenant. `onTenant` receives the tenant before any
+     * row is seeded, so a seed that throws still leaves it to the caller's
+     * teardown.
      */
     async function seedBoundary(onTenant: (tenantId: string) => void): Promise<{ tenantId: string; userId: string }> {
       const tenantId = await ctx.createTenant();

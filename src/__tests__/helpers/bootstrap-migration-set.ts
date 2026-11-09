@@ -87,9 +87,9 @@ export const REVOKED_BY = {
 /**
  * The migration's writes that are not counters: the user row itself, the
  * three models with no user column, moved through their parent to the user's
- * own rows (a bootstrap tenant may still hold a deactivated member), the audit trail (moved by the `audit_log_tenant_migrate`
- * procedure, since `audit_logs` UPDATE is revoked from the app role), and the
- * membership it replaces.
+ * own rows (a bootstrap tenant may still hold a deactivated member), the audit
+ * trail (moved by the `audit_log_tenant_migrate` procedure, since `audit_logs`
+ * UPDATE is revoked from the app role), and the membership it replaces.
  */
 export const NON_COUNTER_WRITES = {
   user: "the user's own tenant column",

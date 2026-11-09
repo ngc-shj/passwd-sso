@@ -22,11 +22,13 @@ import type { Prisma } from "@prisma/client";
  * `folder` rows stay in the tenant that released them, so the vault reads as
  * EMPTY rather than as missing, and the caller reports how many rows that is.
  *
- * Moving those rows instead was considered and refused: the sibling
- * bootstrap-migration path moves three tables (`passwordEntryHistory`,
- * `emergencyAccessKeyPair`, `shareAccessLog`) by tenant id alone, which is sound
- * only because a bootstrap tenant has one member. The tenant releasing a user
- * here is a real multi-member one, so that path would move other members' rows.
+ * Moving those rows instead was considered and refused when the sibling
+ * bootstrap-migration path still moved three tables (`passwordEntryHistory`,
+ * `emergencyAccessKeyPair`, `shareAccessLog`) by tenant id alone, so reusing it
+ * for the real multi-member tenant releasing a user here would have moved other
+ * members' rows. That path now moves them through their parent to the user's
+ * own rows (#955); the decision to leave the data behind here has not been
+ * revisited since.
  */
 export async function realignOwningTenantColumn(
   db: Pick<Prisma.TransactionClient, "user">,
