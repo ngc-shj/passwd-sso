@@ -253,3 +253,36 @@ export async function parseBody<T>(
 
   return { ok: true, data: parsed.data };
 }
+
+/**
+ * parseBody for a route whose body is optional: no body at all (no stream, or
+ * zero bytes) is `data: null` rather than INVALID_JSON. A body that is present
+ * is capped, parsed and validated exactly as parseBody does.
+ */
+export async function parseOptionalBody<T>(
+  req: NextRequest,
+  schema: ZodSchema<T>,
+  options?: { maxBytes?: number },
+): Promise<ParseResult<T | null>> {
+  const maxBytes = options?.maxBytes ?? MAX_JSON_BODY_BYTES;
+  const read = await readBytesWithCap(req, maxBytes);
+  if (!read.ok) {
+    if (read.tooLarge) {
+      return { ok: false, response: errorResponse(API_ERROR.PAYLOAD_TOO_LARGE) };
+    }
+    return { ok: true, data: null };
+  }
+  if (read.bytes.length === 0) return { ok: true, data: null };
+
+  let body: unknown;
+  try {
+    body = JSON.parse(new TextDecoder().decode(read.bytes));
+  } catch {
+    return { ok: false, response: errorResponse(API_ERROR.INVALID_JSON) };
+  }
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) {
+    return { ok: false, response: zodValidationError(parsed.error) };
+  }
+  return { ok: true, data: parsed.data };
+}

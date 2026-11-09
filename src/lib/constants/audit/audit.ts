@@ -736,6 +736,10 @@ export const AUDIT_ACTION_GROUPS_TENANT: Record<string, AuditAction[]> = {
     AUDIT_ACTION.TENANT_MEMBER_LOCKOUT_CLEAR,
     AUDIT_ACTION.TENANT_MEMBER_PASSKEY_REVOKE,
     AUDIT_ACTION.TENANT_MEMBER_PASSKEY_REVOKE_ALL,
+    // A tenant admin's containment of a member revokes the member's emergency-
+    // access grants with a TENANT-scope row (member-containment.ts); the
+    // owner's own revoke stays PERSONAL.
+    AUDIT_ACTION.EMERGENCY_ACCESS_REVOKE,
     AUDIT_ACTION.USER_TENANT_REALIGNED,
     AUDIT_ACTION.POLICY_UPDATE,
     AUDIT_ACTION.TEAM_POLICY_CLAMPED_BY_TENANT,

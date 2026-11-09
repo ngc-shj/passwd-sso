@@ -21,6 +21,13 @@ import { resolveUserLocale } from "@/lib/locale";
 import { getLogger } from "@/lib/logger";
 import { errorLogFields } from "@/lib/logger/error-fields";
 import { AUDIT_CREDENTIAL_ID_MAX_LENGTH } from "@/lib/validations/common.server";
+import {
+  containMemberInTx,
+  refusedContainmentKinds,
+  type ContainedCounts,
+  type MemberContainmentRequest,
+  type OtherTenantContainment,
+} from "@/lib/tenant/member-containment";
 
 /** One passkey, or every passkey the member has. */
 export type MemberPasskeyRevokeScope = { credentialId: string } | { all: true };
@@ -31,6 +38,11 @@ export interface MemberPasskeyRevokeParams {
   tenantId: string;
   targetUserId: string;
   scope: MemberPasskeyRevokeScope;
+  /**
+   * With revoke-all only: what else to contain in the same transaction
+   * (member-containment.ts). Absent = passkeys, sessions and tokens only.
+   */
+  containment?: MemberContainmentRequest | null;
 }
 
 /**
@@ -61,6 +73,8 @@ export async function refuseMemberPasskeyTarget(
 // METADATA_MAX_BYTES is replaced whole — targetUserId and every count with it —
 // on the record of the containment action itself. 10 × 512 stays well inside.
 const REVOKE_ALL_AUDIT_MAX_CREDENTIAL_IDS = 10;
+// Unlinked account ids, bounded the same way (each a 36-character uuid).
+const REVOKE_ALL_AUDIT_MAX_ACCOUNT_IDS = 10;
 
 const REVOKE_OUTCOME = {
   NOT_FOUND: "not_found",
@@ -79,14 +93,17 @@ const REVOKE_OUTCOME = {
  * passkey before the revoke took the user lock would otherwise leave that one
  * behind to sign back in with. Under the lock no passkey can be registered
  * meanwhile (register/verify takes it too), and every session that could
- * register one afterwards is gone when it releases.
+ * register one afterwards is gone when it releases. It proceeds for a member
+ * with no passkeys (an SSO-only member's sessions still end), and with a
+ * containment request also unlinks the member's IdP accounts and revokes the
+ * footholds they created that the admin chose (#1016), in the same transaction.
  */
 export async function revokeMemberPasskeys(
   req: NextRequest,
-  { actor, tenantId, targetUserId, scope }: MemberPasskeyRevokeParams,
+  { actor, tenantId, targetUserId, scope, containment = null }: MemberPasskeyRevokeParams,
 ): Promise<NextResponse> {
   const actorUserId = actor.id;
-  const extent: PasskeyRevokeExtent = "credentialId" in scope ? "one" : "all";
+  const single = "credentialId" in scope;
   // One transaction: both roles re-read (a promotion or demotion committed
   // meanwhile decides), the credentials deleted by count (a concurrent revoke
   // answers 404), the member's sessions and tokens revoked, the audit row
@@ -104,22 +121,37 @@ export async function revokeMemberPasskeys(
     const targetRow = roles.find((r) => r.userId === targetUserId);
     if (!targetRow) return REVOKE_OUTCOME.NOT_FOUND;
     if (!actorRow || !canRevokeMemberPasskey(actorRow.role, targetRow.role)) return REVOKE_OUTCOME.FORBIDDEN;
+    // The per-kind rule on the role re-read here (a demotion committed
+    // meanwhile decides), as the route checked it before the step-up.
+    if (containment && refusedContainmentKinds(actorRow.role, containment).length > 0) return REVOKE_OUTCOME.FORBIDDEN;
 
     const credentials = await tx.webAuthnCredential.findMany({
-      where: { userId: targetUserId, ...("credentialId" in scope ? { id: scope.credentialId } : {}) },
+      where: { userId: targetUserId, ...(single ? { id: scope.credentialId } : {}) },
       select: { id: true, credentialId: true, tenantId: true },
     });
-    if (credentials.length === 0) return REVOKE_OUTCOME.NOT_FOUND;
-    const { count } = await tx.webAuthnCredential.deleteMany({
-      where: { userId: targetUserId, id: { in: credentials.map((c) => c.id) } },
-    });
-    if (count === 0) return REVOKE_OUTCOME.NOT_FOUND;
+    // Revoking all of a member's passkeys also ends their sessions and tokens,
+    // so it proceeds with none: an SSO-only member is contained the same way.
+    // One named passkey that is gone (a concurrent revoke) is a 404.
+    if (single && credentials.length === 0) return REVOKE_OUTCOME.NOT_FOUND;
+    if (credentials.length > 0) {
+      const { count } = await tx.webAuthnCredential.deleteMany({
+        where: { userId: targetUserId, id: { in: credentials.map((c) => c.id) } },
+      });
+      if (single && count === 0) return REVOKE_OUTCOME.NOT_FOUND;
+    }
 
     const { counts, sessionTokens } = await revokeUserAuthArtifactsInTx(tx, targetUserId, { tenantFilter: {} });
 
+    // After the passkeys and sessions, in the same transaction: a failure here
+    // rolls all of it back.
+    const contained =
+      !single && containment
+        ? await containMemberInTx(tx, { req, actorUserId, tenantId, targetUserId, request: containment })
+        : null;
+
     // The passkeys a row names: one, or a bounded list with the rest counted.
     const passkeyFields = (subset: typeof credentials) =>
-      extent === "one"
+      single
         ? { credentialId: subset[0].credentialId }
         : {
             passkeys: subset.length,
@@ -129,7 +161,7 @@ export async function revokeMemberPasskeys(
             credentialIdsOmitted: Math.max(0, subset.length - REVOKE_ALL_AUDIT_MAX_CREDENTIAL_IDS),
           };
     const action =
-      extent === "one"
+      single
         ? {
             action: AUDIT_ACTION.TENANT_MEMBER_PASSKEY_REVOKE,
             targetType: AUDIT_TARGET_TYPE.WEBAUTHN_CREDENTIAL,
@@ -143,8 +175,9 @@ export async function revokeMemberPasskeys(
       metadata: {
         targetUserId,
         ...passkeyFields(credentials),
-        ...(extent === "one" ? { registeredInTenant: credentials[0].tenantId === tenantId } : {}),
+        ...(single ? { registeredInTenant: credentials[0].tenantId === tenantId } : {}),
         ...counts,
+        ...(contained ? containedFields(contained.contained, contained.unlinkedAccountIds) : {}),
       },
     });
 
@@ -152,8 +185,12 @@ export async function revokeMemberPasskeys(
     // so that tenant's admins see its revocation in their own log. What they
     // see is that tenant's own: its passkeys only, and the system as the actor —
     // not the revoking admin, their request, or counts over the member's other
-    // tenants — plus the tenant it was revoked from.
-    const otherTenants = [...new Set(credentials.map((c) => c.tenantId))].filter((t) => t !== tenantId);
+    // tenants — plus the tenant it was revoked from. An account unlinked or an
+    // emergency-access grant revoked that was filed under such a tenant is
+    // counted into the same row (a tenant reached only through them gets one).
+    const otherTenants = [
+      ...new Set([...credentials.map((c) => c.tenantId), ...(contained?.otherTenants.keys() ?? [])]),
+    ].filter((t) => t !== tenantId);
     for (const other of otherTenants) {
       await logAuditInTx(tx, other, {
         scope: AUDIT_SCOPE.TENANT,
@@ -166,16 +203,20 @@ export async function revokeMemberPasskeys(
         metadata: {
           targetUserId,
           ...passkeyFields(credentials.filter((c) => c.tenantId === other)),
-          ...(extent === "one" ? { registeredInTenant: true } : {}),
+          ...(single ? { registeredInTenant: true } : {}),
+          ...otherTenantFields(contained?.otherTenants.get(other)),
           revokedFromTenantId: tenantId,
         },
       });
     }
-    return { counts, sessionTokens, target: targetRow.user };
+    return { counts, sessionTokens, contained, passkeysRevoked: credentials.length, target: targetRow.user };
   }, BYPASS_GRANT.TENANT_MEMBER_PASSKEY_REVOKE);
   if (outcome === REVOKE_OUTCOME.NOT_FOUND) return notFound();
   if (outcome === REVOKE_OUTCOME.FORBIDDEN) return forbidden();
-  const { counts, sessionTokens, target } = outcome;
+  const { counts, sessionTokens, contained, passkeysRevoked, target } = outcome;
+  // What the member is told: a passkey, all of them, or — with none to
+  // revoke — only that their sessions ended.
+  const extent: PasskeyRevokeExtent = single ? "one" : passkeysRevoked > 0 ? "all" : "sessions";
 
   // After the commit, evict the revoked sessions from the proxy's session
   // cache. The cache never authenticates a request on its own (every handler
@@ -203,7 +244,7 @@ export async function revokeMemberPasskeys(
   }
 
   // The member learns of it in the app and by email, as of a vault reset.
-  const notificationKey = extent === "one" ? "PASSKEY_REVOKED_BY_ADMIN" : "PASSKEYS_ALL_REVOKED_BY_ADMIN";
+  const notificationKey = NOTIFICATION_KEY[extent];
   const locale = resolveUserLocale(target.locale);
   createNotification({
     userId: targetUserId,
@@ -221,5 +262,37 @@ export async function revokeMemberPasskeys(
     ok: true,
     sessionsRevoked: counts.sessions,
     cacheTombstoneFailures,
+    ...(contained ? { contained: contained.contained } : {}),
   });
+}
+
+const NOTIFICATION_KEY = {
+  one: "PASSKEY_REVOKED_BY_ADMIN",
+  all: "PASSKEYS_ALL_REVOKED_BY_ADMIN",
+  sessions: "SESSIONS_ALL_REVOKED_BY_ADMIN",
+} as const satisfies Record<PasskeyRevokeExtent, string>;
+
+/** The revoke-all row's containment counts, unlinked account ids bounded. */
+function containedFields(contained: ContainedCounts, unlinkedAccountIds: readonly string[]) {
+  return {
+    ...Object.fromEntries(Object.entries(contained).flatMap(([kind, c]) => [
+      [`${kind}Contained`, c.revoked],
+      [`${kind}Skipped`, c.skipped],
+    ])),
+    ...(contained.accounts
+      ? {
+          unlinkedAccountIds: unlinkedAccountIds.slice(0, REVOKE_ALL_AUDIT_MAX_ACCOUNT_IDS),
+          unlinkedAccountIdsOmitted: Math.max(0, unlinkedAccountIds.length - REVOKE_ALL_AUDIT_MAX_ACCOUNT_IDS),
+        }
+      : {}),
+  };
+}
+
+/** Another tenant's share of a containment: its own counts only. */
+function otherTenantFields(entry: OtherTenantContainment | undefined) {
+  if (!entry) return {};
+  return {
+    ...(entry.accountsUnlinked > 0 ? { accountsUnlinked: entry.accountsUnlinked } : {}),
+    ...(entry.emergencyAccessGrantsRevoked > 0 ? { emergencyAccessGrantsRevoked: entry.emergencyAccessGrantsRevoked } : {}),
+  };
 }

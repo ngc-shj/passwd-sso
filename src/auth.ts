@@ -841,16 +841,14 @@ type OAuthSignInSubject =
  *   provider construction uses); otherwise `not_linked`.
  * - Not linked, no such user: none.
  *
- * Not modelled: a sign-in made while another session is active, which Auth.js
- * links to that session's user. The app has no linking flow; such a sign-in is
- * resolved as if no session existed, with three outcomes:
- * - refused (`not_linked`);
- * - through a provider that links by email, resolved to the user whose email
- *   that provider vouches for;
- * - when the email names no user (any provider), resolved to none: the callback
- *   allows it with no writes (no `createUser` follows), Auth.js links the IdP
- *   account to the session's user, and that user's claim gate runs on their
- *   next sign-in through that account.
+ * No session-time linking: Auth.js would link a sign-in made while another
+ * session is active to that session's user, but the auth route strips the
+ * session cookie from every callback request (#967,
+ * `withoutSessionCookieOnCallback` in `app/api/auth/[...nextauth]/route.ts`),
+ * so every callback is a fresh sign-in and resolves exactly as above. The only
+ * `linkAccount` caller is Auth.js's own sign-in handling, through the outcomes
+ * listed here. Links made before #967 remain; a tenant admin can list and
+ * unlink a member's linked accounts when containing a compromised session.
  */
 async function resolveOAuthSignInSubject(
   account: Account,

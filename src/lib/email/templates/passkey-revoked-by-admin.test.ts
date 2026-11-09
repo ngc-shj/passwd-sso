@@ -16,6 +16,24 @@ describe("passkeyRevokedByAdminEmail", () => {
     expect(result.text).toContain("Alice Admin");
   });
 
+  it.each([
+    ["en", "All your sessions were ended", "ended all your sessions", "register a new passkey"],
+    ["ja", "すべてのセッションが終了されました", "すべてのセッションを終了しました", "新しいパスキーを登録"],
+  ] as const)("%s, no passkeys: says only that the sessions ended, with no new-passkey line", (locale, subject, what, newPasskey) => {
+    const result = passkeyRevokedByAdminEmail(locale, "Alice Admin", "sessions");
+    expect(result.subject).toBe(subject);
+    expect(result.html).toContain(what);
+    expect(result.text).toContain(what);
+    expect(result.html).not.toContain(newPasskey);
+    expect(result.text).not.toContain(newPasskey);
+    expect(result.text).not.toMatch(/passkey|パスキー/i);
+  });
+
+  it.each(["one", "all"] as const)("%s: keeps the new-passkey line", (extent) => {
+    expect(passkeyRevokedByAdminEmail("en", "Alice Admin", extent).text).toContain("register a new passkey");
+    expect(passkeyRevokedByAdminEmail("ja", "Alice Admin", extent).text).toContain("新しいパスキーを登録");
+  });
+
   it("escapes HTML in the admin name", () => {
     const result = passkeyRevokedByAdminEmail("en", "<script>xss</script>", "one");
     expect(result.html).not.toContain("<script>");

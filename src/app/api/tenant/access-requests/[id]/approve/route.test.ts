@@ -260,6 +260,20 @@ describe("POST /api/tenant/access-requests/[id]/approve", () => {
     );
   });
 
+  it("records the approver as the JIT token's creator", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockAccessRequestFindUnique.mockResolvedValue(makeAccessRequest());
+    mockTenantFindUnique.mockResolvedValue(null);
+    makeTransactionSuccess();
+
+    const req = createRequest("POST", `http://localhost/api/tenant/access-requests/${REQUEST_ID}/approve`);
+    expect((await POST(req, createParams({ id: REQUEST_ID }))).status).toBe(200);
+    expect(mockSaTokenCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({ createdById: DEFAULT_SESSION.user.id }),
+    });
+  });
+
   it("counts only non-revoked AND non-expired tokens toward the limit", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue(ACTOR);

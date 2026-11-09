@@ -116,6 +116,8 @@ export const TENANT_OWNED_LEFT = {
   teamInvitation: "team-owned; teams are not migrated",
   scimToken: "tenant-owned credential; the user column is who minted it",
   serviceAccount: "tenant-owned identity; the user column is who created it",
+  serviceAccountToken:
+    "the composite FK (serviceAccountId, tenantId) pins it to its service account's tenant, and service accounts are not migrated; the user column is who minted it",
   mcpClient: "tenant-owned OAuth client; the user column is who registered it",
   masterKeyRotation: "tenant-owned operation; every user column is provenance",
   adminVaultReset:

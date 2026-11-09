@@ -239,6 +239,25 @@ describe("POST /api/tenant/service-accounts/[id]/tokens", () => {
     );
   });
 
+  it("records the minting admin as the token's creator", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockServiceAccountFindUnique.mockResolvedValue({ id: SA_ID, tenantId: "tenant-1", isActive: true });
+    makeTransactionSuccess();
+
+    const req = createRequest("POST", `http://localhost/api/tenant/service-accounts/${SA_ID}/tokens`, {
+      body: {
+        name: "deploy-token",
+        scope: ["passwords:read"],
+        expiresAt: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(),
+      },
+    });
+    expect((await POST(req, createParams({ id: SA_ID }))).status).toBe(201);
+    expect(mockServiceAccountTokenCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({ createdById: DEFAULT_SESSION.user.id }),
+    });
+  });
+
   it("acquires the per-SA advisory lock before the limit count (serializes issuance)", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue(ACTOR);

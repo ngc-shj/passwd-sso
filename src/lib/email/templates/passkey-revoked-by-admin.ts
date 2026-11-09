@@ -6,27 +6,48 @@ interface TemplateResult {
   text: string;
 }
 
-/** One passkey revoked, or all of them. */
-export type PasskeyRevokeExtent = "one" | "all";
+/**
+ * One passkey revoked, all of them, or — revoke-all on a member with none —
+ * only the sessions ended.
+ */
+export type PasskeyRevokeExtent = "one" | "all" | "sessions";
 
 const LABELS = {
   ja: {
-    subject: { one: "パスキーが失効されました", all: "パスキーがすべて失効されました" },
-    what: { one: "あなたのパスキーを1つ失効し", all: "あなたのパスキーをすべて失効し" },
-    body: (adminName: string, what: string) =>
-      `<p>テナント管理者 <strong>${adminName}</strong> が${what}、すべてのセッションを終了しました。</p>
-       <p>心当たりがない場合は、テナント管理者に確認してください。別の方法でサインインし、新しいパスキーを登録できます。</p>`,
-    text: (adminName: string, what: string) =>
-      `テナント管理者「${adminName}」が${what}、すべてのセッションを終了しました。心当たりがない場合は、テナント管理者に確認してください。別の方法でサインインし、新しいパスキーを登録できます。`,
+    subject: {
+      one: "パスキーが失効されました",
+      all: "パスキーがすべて失効されました",
+      sessions: "すべてのセッションが終了されました",
+    },
+    what: {
+      one: "あなたのパスキーを1つ失効し、すべてのセッションを終了しました",
+      all: "あなたのパスキーをすべて失効し、すべてのセッションを終了しました",
+      sessions: "あなたのすべてのセッションを終了しました",
+    },
+    newPasskey: "別の方法でサインインし、新しいパスキーを登録できます。",
+    body: (adminName: string, what: string, newPasskey: string) =>
+      `<p>テナント管理者 <strong>${adminName}</strong> が${what}。</p>
+       <p>心当たりがない場合は、テナント管理者に確認してください。${newPasskey}</p>`,
+    text: (adminName: string, what: string, newPasskey: string) =>
+      `テナント管理者「${adminName}」が${what}。心当たりがない場合は、テナント管理者に確認してください。${newPasskey}`,
   },
   en: {
-    subject: { one: "Your passkey was revoked", all: "All your passkeys were revoked" },
-    what: { one: "revoked one of your passkeys", all: "revoked all of your passkeys" },
-    body: (adminName: string, what: string) =>
-      `<p><strong>${adminName}</strong> (a tenant admin) ${what} and ended all your sessions.</p>
-       <p>If you did not expect this, contact your tenant admin. You can sign in another way and register a new passkey.</p>`,
-    text: (adminName: string, what: string) =>
-      `${adminName} (a tenant admin) ${what} and ended all your sessions. If you did not expect this, contact your tenant admin. You can sign in another way and register a new passkey.`,
+    subject: {
+      one: "Your passkey was revoked",
+      all: "All your passkeys were revoked",
+      sessions: "All your sessions were ended",
+    },
+    what: {
+      one: "revoked one of your passkeys and ended all your sessions",
+      all: "revoked all of your passkeys and ended all your sessions",
+      sessions: "ended all your sessions",
+    },
+    newPasskey: " You can sign in another way and register a new passkey.",
+    body: (adminName: string, what: string, newPasskey: string) =>
+      `<p><strong>${adminName}</strong> (a tenant admin) ${what}.</p>
+       <p>If you did not expect this, contact your tenant admin.${newPasskey}</p>`,
+    text: (adminName: string, what: string, newPasskey: string) =>
+      `${adminName} (a tenant admin) ${what}. If you did not expect this, contact your tenant admin.${newPasskey}`,
   },
 } as const;
 
@@ -40,9 +61,11 @@ export function passkeyRevokedByAdminEmail(
   extent: PasskeyRevokeExtent,
 ): TemplateResult {
   const l = getLabels(locale);
+  // The new-passkey line only when a passkey was removed.
+  const newPasskey = extent === "sessions" ? "" : l.newPasskey;
   return {
     subject: l.subject[extent],
-    html: emailLayout(l.body(escapeHtml(adminName), l.what[extent]), locale),
-    text: l.text(adminName, l.what[extent]),
+    html: emailLayout(l.body(escapeHtml(adminName), l.what[extent], newPasskey), locale),
+    text: l.text(adminName, l.what[extent], newPasskey),
   };
 }

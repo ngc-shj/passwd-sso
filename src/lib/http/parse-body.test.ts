@@ -3,6 +3,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import {
   parseBody,
+  parseOptionalBody,
   readJsonWithCap,
   readBytesWithCap,
   readStreamWithCap,
@@ -212,6 +213,39 @@ describe("parseBody", () => {
       const json = await result.response.json();
       expect(json.error).toBe("PAYLOAD_TOO_LARGE");
     }
+  });
+});
+
+describe("parseOptionalBody", () => {
+  it("returns null data when the request has no body", async () => {
+    const req = new NextRequest("http://localhost:3000/api/test", { method: "DELETE" });
+    expect(await parseOptionalBody(req, schema)).toEqual({ ok: true, data: null });
+  });
+
+  it("returns null data for a zero-byte body", async () => {
+    expect(await parseOptionalBody(textRequest(""), schema)).toEqual({ ok: true, data: null });
+  });
+
+  it("validates a present body like parseBody", async () => {
+    expect(await parseOptionalBody(jsonRequest({ name: "Alice", age: 30 }), schema)).toEqual({
+      ok: true,
+      data: { name: "Alice", age: 30 },
+    });
+    const invalid = await parseOptionalBody(jsonRequest({ name: "" }), schema);
+    expect(invalid.ok).toBe(false);
+    if (!invalid.ok) expect((await invalid.response.json()).error).toBe("VALIDATION_ERROR");
+  });
+
+  it("returns 400 INVALID_JSON for a present non-JSON body", async () => {
+    const result = await parseOptionalBody(textRequest("not json"), schema);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect((await result.response.json()).error).toBe("INVALID_JSON");
+  });
+
+  it("returns 413 for a body over the cap", async () => {
+    const result = await parseOptionalBody(jsonRequest({ name: "x".repeat(100), age: 1 }), schema, { maxBytes: 10 });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.response.status).toBe(413);
   });
 });
 

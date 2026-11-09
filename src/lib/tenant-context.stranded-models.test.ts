@@ -34,6 +34,7 @@ const NOT_STRANDED: Record<string, string> = {
   TeamInvitation: "team-owned; invitedById is who sent it",
   ScimToken: "tenant-owned credential; createdById is who minted it",
   ServiceAccount: "tenant-owned identity; createdById is who created it",
+  ServiceAccountToken: "tenant-owned credential of a service account; createdById is who minted it",
   McpClient: "tenant-owned OAuth client; createdById is who registered it",
   MasterKeyRotation: "tenant-owned operation; every user column is who initiated, approved, executed or revoked it",
   AdminVaultReset:

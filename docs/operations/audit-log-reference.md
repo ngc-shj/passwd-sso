@@ -229,7 +229,7 @@ These user-meaningful fields should be rendered in `getTargetLabel()` with i18n 
 | `EMERGENCY_GRANT_CONFIRM` | PERSONAL | EmergencyAccessGrant | `{ ownerId, granteeId, wrapVersion, keyVersion }` | eaGrantConfirmedFor template |
 | `EMERGENCY_ACCESS_REQUEST` | PERSONAL | EmergencyAccessGrant | `{ ownerId, granteeId, waitDays }` | eaAccessRequestedBy template |
 | `EMERGENCY_ACCESS_ACTIVATE` | PERSONAL | EmergencyAccessGrant | `{ ownerId, granteeId, earlyApproval }` | eaAccessActivatedFor template |
-| `EMERGENCY_ACCESS_REVOKE` | PERSONAL | EmergencyAccessGrant | `{ ownerId, granteeId, permanent }` | eaAccessRevokedFor template |
+| `EMERGENCY_ACCESS_REVOKE` | PERSONAL / TENANT | EmergencyAccessGrant | `{ ownerId, granteeId, permanent }` (+ `revokedById` when TENANT) | eaAccessRevokedFor template |
 | `EMERGENCY_VAULT_ACCESS` | PERSONAL | EmergencyAccessGrant | `{ ownerId, granteeId, entryCount }` | viewedByOwner template, entryCount |
 
 **Notes:**
@@ -287,7 +287,8 @@ These user-meaningful fields should be rendered in `getTargetLabel()` with i18n 
 | `ADMIN_VAULT_RESET_REVOKE` | TENANT | User | `{ revokedById, resetId }` | — (export-only) |
 | `TENANT_ROLE_UPDATE` | TENANT | TenantMember | `{ newRole, previousRole, transfer }` | roleChange template |
 | `TENANT_MEMBER_PASSKEY_REVOKE` | TENANT | WebAuthnCredential | `{ targetUserId, credentialId, registeredInTenant, sessions, extensionTokens, apiKeys, ... }` | — (export-only) |
-| `TENANT_MEMBER_PASSKEY_REVOKE_ALL` | TENANT | User | `{ targetUserId, passkeys, credentialIds, credentialIdsOmitted, sessions, extensionTokens, apiKeys, ... }` | — (export-only) |
+| `TENANT_MEMBER_PASSKEY_REVOKE_ALL` | TENANT | User | `{ targetUserId, passkeys, credentialIds, credentialIdsOmitted, sessions, extensionTokens, apiKeys, ..., <kind>Contained, <kind>Skipped, unlinkedAccountIds, unlinkedAccountIdsOmitted }` | — (export-only) |
+| `EMERGENCY_ACCESS_REVOKE` | TENANT | EmergencyAccessGrant | `{ ownerId, granteeId, permanent: true, revokedById }` | — (export-only) |
 
 **Notes:**
 - `resetId` added to ADMIN_VAULT_RESET_INITIATE by `audit-metadata-standardize` branch.
@@ -298,8 +299,9 @@ These user-meaningful fields should be rendered in `getTargetLabel()` with i18n 
 - TEAM_MEMBER_KEY_PRUNED: the retention GC worker deleted old team key versions no row of the team references (#1009; `RETENTION_GC_TEAM_KEY_PRUNE_ENABLED`). Actor SYSTEM, no IP, user agent `retention-gc-worker`; one row per team per tick, written in the prune's transaction. `targetId` is the team id, `keyVersions` the versions deleted, `rows` the `team_member_keys` rows deleted, `holderUserIds` the first 100 user ids that held any of them (sorted), `holderUserIdsOmitted` how many more — the record of who held a version once its rows are gone.
 - TENANT_ROLE_UPDATE: `transfer` is true for ownership transfers.
 - TENANT_MEMBER_PASSKEY_REVOKE: a tenant admin deleted a member's passkey (#974). Written in the transaction that deletes the credential and revokes the member's sessions and tokens in every tenant (the passkey is user-global); the counts are those revocations. `registeredInTenant` is false for a passkey registered under another tenant; that tenant gets its own row (see below).
-- TENANT_MEMBER_PASSKEY_REVOKE_ALL: a tenant admin deleted every passkey a member has, in every tenant, with the same revocations in the same transaction (#974). `passkeys` is how many were deleted, `credentialIds` the first 10 public credential ids (each cut to 512 characters), `credentialIdsOmitted` how many more there were. The containment path: under the member's credential lock no passkey can be registered meanwhile.
-- Both passkey revoke actions also write a row into each other tenant a revoked passkey was registered under, in the same transaction: actor SYSTEM (`userId` the system actor, no IP or user agent), metadata `{ targetUserId, revokedFromTenantId, ... }` naming only that tenant's passkeys (`credentialId` + `registeredInTenant: true`, or `passkeys` / `credentialIds` / `credentialIdsOmitted`) — not the revoking admin, nor the session/token counts across the member's tenants.
+- TENANT_MEMBER_PASSKEY_REVOKE_ALL: a tenant admin deleted every passkey a member has, in every tenant, with the same revocations in the same transaction (#974). `passkeys` is how many were deleted, `credentialIds` the first 10 public credential ids (each cut to 512 characters), `credentialIdsOmitted` how many more there were. The containment path: under the member's credential lock no passkey can be registered meanwhile. It is written for a member with no passkeys too (`passkeys: 0`): their sessions and tokens still end (#1016).
+- TENANT_MEMBER_PASSKEY_REVOKE_ALL with containment (#1016): when the admin also chose linked accounts to unlink or footholds the member created to revoke, they are written in the same transaction, after the passkeys and sessions, and the row adds per kind `<kind>Contained` (rows written) and `<kind>Skipped` (named ids that matched nothing live of the member's in this tenant), for the kinds the request named: `accounts`, `scimTokens`, `serviceAccounts`, `serviceAccountTokens`, `mcpClients`, `breakglassGrants`, `emergencyAccessGrants`. `unlinkedAccountIds` is the first 10 unlinked account ids, `unlinkedAccountIdsOmitted` how many more. An unlinked account is recorded only here. Every other revoked row also gets its own row from the admin, in the same transaction: `SCIM_TOKEN_REVOKE` (`{ targetUserId }`), `SERVICE_ACCOUNT_UPDATE` and `MCP_CLIENT_UPDATE` (`{ isActive: false, tokensRevoked, targetUserId }` — the service account's tokens, or the MCP client's access and refresh tokens, are revoked with it, so a later reactivation revives none), `SERVICE_ACCOUNT_TOKEN_REVOKE` (`{ serviceAccountId, targetUserId }`), `PERSONAL_LOG_ACCESS_REVOKE` (`{ grantId, requesterId, targetUserId, revokedById }`) and the TENANT-scope `EMERGENCY_ACCESS_REVOKE` (the grantee is not emailed).
+- Both passkey revoke actions also write a row into each other tenant a revoked passkey was registered under, in the same transaction: actor SYSTEM (`userId` the system actor, no IP or user agent), metadata `{ targetUserId, revokedFromTenantId, ... }` naming only that tenant's passkeys (`credentialId` + `registeredInTenant: true`, or `passkeys` / `credentialIds` / `credentialIdsOmitted`) — not the revoking admin, nor the session/token counts across the member's tenants. With containment, an unlinked account or a revoked emergency-access grant filed under another tenant is counted into that tenant's row (`accountsUnlinked`, `emergencyAccessGrantsRevoked`); a tenant reached only through them gets one row too (`passkeys: 0`). Never two rows per tenant.
 
 ### SCIM Provisioning (`group:scim`)
 
@@ -380,7 +382,7 @@ These user-meaningful fields should be rendered in `getTargetLabel()` with i18n 
 | Action | Scope | targetType | metadata | UI display |
 |--------|-------|------------|----------|------------|
 | `MCP_CLIENT_CREATE` | TENANT | McpClient | `{ name }` | name |
-| `MCP_CLIENT_UPDATE` | TENANT | McpClient | `{ name }` | name |
+| `MCP_CLIENT_UPDATE` | TENANT | McpClient | `{ name }` (containment: `{ isActive: false, tokensRevoked, targetUserId }`) | name |
 | `MCP_CLIENT_DELETE` | TENANT | McpClient | `{ name }` | name |
 | `MCP_CLIENT_DCR_REGISTER` | TENANT | McpClient | `{ clientName, ip }` | clientName |
 | `MCP_CLIENT_DCR_CLAIM` | TENANT | McpClient | `{ clientId, tenantId }` | clientId |
@@ -439,7 +441,7 @@ These user-meaningful fields should be rendered in `getTargetLabel()` with i18n 
 
 | Group | Actions |
 |-------|---------|
-| `group:admin` | ADMIN_VAULT_RESET_INITIATE, ADMIN_VAULT_RESET_EXECUTE, ADMIN_VAULT_RESET_REVOKE, TENANT_ROLE_UPDATE, USER_TENANT_REALIGNED, HISTORY_PURGE |
+| `group:admin` | ADMIN_VAULT_RESET_INITIATE, ADMIN_VAULT_RESET_EXECUTE, ADMIN_VAULT_RESET_REVOKE, TENANT_ROLE_UPDATE, TENANT_MEMBER_PASSKEY_REVOKE, TENANT_MEMBER_PASSKEY_REVOKE_ALL, EMERGENCY_ACCESS_REVOKE, USER_TENANT_REALIGNED, HISTORY_PURGE |
 | `group:scim` | SCIM_TOKEN_CREATE, SCIM_TOKEN_REVOKE, SCIM_USER_CREATE, SCIM_USER_UPDATE, SCIM_USER_DEACTIVATE, SCIM_USER_REACTIVATE, SCIM_USER_REACTIVATION_REFUSED, SCIM_USER_DELETE, SCIM_GROUP_UPDATE |
 | `group:directorySync` | DIRECTORY_SYNC_CONFIG_CREATE, DIRECTORY_SYNC_CONFIG_UPDATE, DIRECTORY_SYNC_CONFIG_DELETE, DIRECTORY_SYNC_RUN, DIRECTORY_SYNC_STALE_RESET, DIRECTORY_SYNC_ACTIVATION_REFUSED |
 | `group:breakglass` | PERSONAL_LOG_ACCESS_REQUEST, PERSONAL_LOG_ACCESS_VIEW, PERSONAL_LOG_ACCESS_REVOKE, PERSONAL_LOG_ACCESS_EXPIRE |

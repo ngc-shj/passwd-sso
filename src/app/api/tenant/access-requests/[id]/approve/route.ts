@@ -198,6 +198,8 @@ async function handlePOST(req: NextRequest, { params }: Params) {
           name: `JIT-${requestId.slice(0, 8)}`,
           scope: validatedScope,
           expiresAt,
+          // The approver mints it: containment of the approver finds it.
+          createdById: session.user.id,
         },
       });
 
