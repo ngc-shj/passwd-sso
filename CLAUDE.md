@@ -323,7 +323,7 @@ All password data is encrypted **client-side** before reaching the server. The s
 | Endpoint | Methods | Purpose |
 |----------|---------|---------|
 | `/api/tenant/members` | GET | List tenant members |
-| `/api/tenant/members/[userId]` | GET, PUT, DELETE | Manage tenant member |
+| `/api/tenant/members/[userId]` | PUT | Change a tenant member's role (OWNER only) |
 | `/api/tenant/members/[userId]/reset-vault` | POST | Admin vault reset |
 | `/api/tenant/members/[userId]/reset-vault/[resetId]/revoke` | POST | Revoke vault reset |
 | `/api/tenant/members/[userId]/passkeys` | GET, DELETE | List a member's passkeys (incl. ones registered in another tenant); DELETE revokes all of them and ends all their sessions/tokens (step-up) |

@@ -1,6 +1,12 @@
 import { defineConfig } from "vitest/config";
 import path from "path";
 
+// CI runs the coverage suite in shards (`--shard=i/n --reporter=blob`) and
+// merges them with `vitest --merge-reports --coverage`. A shard sees only its
+// slice of the tests, so the floors below are checked once, on the merge;
+// each shard job sets VITEST_COVERAGE_SHARD=1 to skip them.
+const isCoverageShard = process.env.VITEST_COVERAGE_SHARD === "1";
+
 export default defineConfig({
   test: {
     globals: true,
@@ -64,7 +70,7 @@ export default defineConfig({
         "src/app/api/auth/\\[...nextauth\\]/**",
         "src/components/**/*.test.{ts,tsx}",
       ],
-      thresholds: {
+      thresholds: isCoverageShard ? undefined : {
         // T8: floors exist so negative/denied paths (authz rejection,
         // expired-grant, revoked-token) can't silently erode. They are a
         // ratchet, not a target — set a couple of points under the measured
