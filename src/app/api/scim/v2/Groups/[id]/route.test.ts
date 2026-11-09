@@ -511,7 +511,11 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
     // One member per transition group, each with a distinct previous role so
     // the CAS writes do not collapse into one updateManyAndReturn call:
     // becamePending (create), becamePending (reactivate), pendingRoleRaised,
-    // activeRoleChanged, pendingWithdrawn, activeRemoved, departedUnmarked.
+    // activeRaiseHeld, activeRoleChanged, pendingWithdrawn, activeRemoved,
+    // departedUnmarked. The group is the MEMBER mapping, so an active row can
+    // sit above it (ADMIN, a demotion) as well as below it (VIEWER, a hold).
+    const memberMapping = { ...mapping, role: "MEMBER" };
+
     function buildFixture(usersPerGroup: number) {
       const addUserIds: string[] = [];
       const removeUserIds: string[] = [];
@@ -528,40 +532,45 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
         // becamePending via reactivate: a deactivated, non-pending row.
         const reactivateId = fixtureUserId(2, i);
         addUserIds.push(reactivateId);
-        existingMemberships.push({ id: `m-reactivate-${i}`, userId: reactivateId, role: "ADMIN", deactivatedAt: new Date(), deactivatedByTenant: false, scimApprovalPending: false });
+        existingMemberships.push({ id: `m-reactivate-${i}`, userId: reactivateId, role: "MEMBER", deactivatedAt: new Date(), deactivatedByTenant: false, scimApprovalPending: false });
         userIdByMemberId.set(`m-reactivate-${i}`, reactivateId);
-        // pendingRoleRaised: a pending row at a lower role (MEMBER < ADMIN).
+        // pendingRoleRaised: a pending row at a lower role (VIEWER < MEMBER).
         const raiseId = fixtureUserId(3, i);
         addUserIds.push(raiseId);
-        existingMemberships.push({ id: `m-raise-${i}`, userId: raiseId, role: "MEMBER", deactivatedAt: new Date(), deactivatedByTenant: false, scimApprovalPending: true });
+        existingMemberships.push({ id: `m-raise-${i}`, userId: raiseId, role: "VIEWER", deactivatedAt: new Date(), deactivatedByTenant: false, scimApprovalPending: true });
         userIdByMemberId.set(`m-raise-${i}`, raiseId);
-        // activeRoleChanged: an active row at a different role.
+        // activeRaiseHeld: an active row at a lower role (VIEWER < MEMBER).
+        const holdId = fixtureUserId(8, i);
+        addUserIds.push(holdId);
+        existingMemberships.push({ id: `m-hold-${i}`, userId: holdId, role: "VIEWER", deactivatedAt: null, deactivatedByTenant: false, scimApprovalPending: false });
+        userIdByMemberId.set(`m-hold-${i}`, holdId);
+        // activeRoleChanged: an active row at a higher role (ADMIN > MEMBER).
         const roleChangeId = fixtureUserId(4, i);
         addUserIds.push(roleChangeId);
-        existingMemberships.push({ id: `m-role-${i}`, userId: roleChangeId, role: "MEMBER", deactivatedAt: null, deactivatedByTenant: false, scimApprovalPending: false });
+        existingMemberships.push({ id: `m-role-${i}`, userId: roleChangeId, role: "ADMIN", deactivatedAt: null, deactivatedByTenant: false, scimApprovalPending: false });
         userIdByMemberId.set(`m-role-${i}`, roleChangeId);
         // pendingWithdrawn: a pending row removed.
         const withdrawId = fixtureUserId(5, i);
         removeUserIds.push(withdrawId);
-        removeMemberships.push({ id: `m-withdraw-${i}`, userId: withdrawId, role: "ADMIN", deactivatedAt: new Date(), deactivatedByTenant: false, scimApprovalPending: true });
+        removeMemberships.push({ id: `m-withdraw-${i}`, userId: withdrawId, role: "MEMBER", deactivatedAt: new Date(), deactivatedByTenant: false, scimApprovalPending: true });
         userIdByMemberId.set(`m-withdraw-${i}`, withdrawId);
         // activeRemoved: an active row removed.
         const removeId = fixtureUserId(6, i);
         removeUserIds.push(removeId);
-        removeMemberships.push({ id: `m-remove-${i}`, userId: removeId, role: "ADMIN", deactivatedAt: null, deactivatedByTenant: false, scimApprovalPending: false });
+        removeMemberships.push({ id: `m-remove-${i}`, userId: removeId, role: "MEMBER", deactivatedAt: null, deactivatedByTenant: false, scimApprovalPending: false });
         userIdByMemberId.set(`m-remove-${i}`, removeId);
         // departedUnmarked: a departure-marked row removed.
         const departedId = fixtureUserId(7, i);
         removeUserIds.push(departedId);
-        removeMemberships.push({ id: `m-departed-${i}`, userId: departedId, role: "ADMIN", deactivatedAt: new Date(), deactivatedByTenant: true, scimApprovalPending: false });
+        removeMemberships.push({ id: `m-departed-${i}`, userId: departedId, role: "MEMBER", deactivatedAt: new Date(), deactivatedByTenant: true, scimApprovalPending: false });
         userIdByMemberId.set(`m-departed-${i}`, departedId);
       }
       return { addUserIds, removeUserIds, existingMemberships, removeMemberships, userIdByMemberId };
     }
 
     it.each([
-      { usersPerGroup: 2, totalRows: 14 },
-      { usersPerGroup: 10, totalRows: 70 },
+      { usersPerGroup: 2, totalRows: 16 },
+      { usersPerGroup: 10, totalRows: 80 },
     ])("gives the same call-shape counts at N = $totalRows", async ({ usersPerGroup, totalRows }) => {
       const { addUserIds, removeUserIds, existingMemberships, removeMemberships, userIdByMemberId } = buildFixture(usersPerGroup);
       // (T6) The fixture builder is the source of truth for "how many rows";
@@ -570,6 +579,7 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
       // wrong auditRows total below.
       expect(addUserIds.length + removeUserIds.length).toBe(totalRows);
 
+      mockScimGroupMapping.findUnique.mockResolvedValue(memberMapping);
       mockTeamMember.findMany
         .mockResolvedValueOnce(existingMemberships) // applyAddOperations' membership read
         .mockResolvedValueOnce(removeMemberships) // applyRemoveOperations' locked re-read
@@ -617,12 +627,21 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
       expect(mockTeamMember.createMany).toHaveBeenCalledTimes(1);
       expect(mockTeamMember.create).not.toHaveBeenCalled();
       // One teamMember write per (kind, write shape, previous role): reactivate,
-      // raise, role-change, remove, departed-unmark (updateManyAndReturn each)
-      // and withdraw (deleteMany), independent of usersPerGroup.
+      // pending raise, raise hold, demotion, remove, departed-unmark
+      // (updateManyAndReturn each) and withdraw (deleteMany), independent of
+      // usersPerGroup.
       expect(mockTeamMember.updateMany).not.toHaveBeenCalled();
-      expect(mockTeamMember.updateManyAndReturn).toHaveBeenCalledTimes(5);
+      expect(mockTeamMember.updateManyAndReturn).toHaveBeenCalledTimes(6);
       expect(mockTeamMember.deleteMany).toHaveBeenCalledTimes(1);
-      expect(keyDeleteMany).toHaveBeenCalledTimes(1);
+      // Key deletes: one after the reactivate CAS, one after the hold CAS —
+      // each for exactly the users its CAS wrote, never the demoted ones.
+      expect(keyDeleteMany).toHaveBeenCalledTimes(2);
+      const keyDeleteUserSets = keyDeleteMany.mock.calls.map(
+        (call: unknown[]) => new Set((call[0] as { where: { userId: { in: string[] } } }).where.userId.in),
+      );
+      const usersOf = (category: number) =>
+        new Set([...Array(usersPerGroup).keys()].map((i) => fixtureUserId(category, i)));
+      expect(keyDeleteUserSets).toEqual([usersOf(2), usersOf(8)]);
       // One bulk audit call per action present (PENDING, WITHDRAW, REMOVE,
       // ROLE_UPDATE), together carrying one row per transition.
       expect(mockLogAuditBulkInTx).toHaveBeenCalledTimes(4);
@@ -630,7 +649,30 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
         (sum: number, call: unknown[]) => sum + (call[2] as unknown[]).length,
         0,
       );
-      expect(auditRows).toBe(7 * usersPerGroup);
+      expect(auditRows).toBe(8 * usersPerGroup);
+
+      type AuditRow = { action: string; targetId: string; metadata: Record<string, unknown> };
+      const rowsOf = (action: string): AuditRow[] =>
+        mockLogAuditBulkInTx.mock.calls
+          .flatMap((call: unknown[]) => call[2] as AuditRow[])
+          .filter((row: AuditRow) => row.action === action);
+      const holdIds = new Set([...Array(usersPerGroup).keys()].map((i) => fixtureUserId(8, i)));
+      const pendingRows = rowsOf("TEAM_MEMBER_SCIM_PENDING");
+      // create + reactivate + pending raise + hold.
+      expect(pendingRows).toHaveLength(4 * usersPerGroup);
+      for (const row of pendingRows) {
+        if (holdIds.has(row.targetId)) {
+          expect(row.metadata).toEqual({ scimTokenId: "t1", role: "MEMBER", previousRole: "VIEWER", previouslyActive: true });
+        } else {
+          expect(row.metadata).not.toHaveProperty("previouslyActive");
+        }
+      }
+      // ROLE_UPDATE carries only the demotions.
+      const roleUpdateRows = rowsOf("TEAM_MEMBER_SCIM_ROLE_UPDATE");
+      expect(roleUpdateRows).toHaveLength(usersPerGroup);
+      for (const row of roleUpdateRows) {
+        expect(row.metadata).toEqual({ scimTokenId: "t1", role: "MEMBER", previousRole: "ADMIN" });
+      }
     });
   });
 

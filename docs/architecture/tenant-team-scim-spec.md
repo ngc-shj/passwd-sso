@@ -97,13 +97,47 @@ Rules:
   add, or a lower-role add); a user not active in the tenant is
   `Referenced user is not an active member of this tenant` (400) unless the
   row is already departure-marked or pending, which is left untouched
-- approval pins the role shown to the approver, but only for the admission
-  itself: once a member is active, the IdP can raise their role further (up
-  to `ADMIN`, never `OWNER`) through a later group sync without another team
-  approval — the approver's pin does not follow the member past admission.
-  Every such raise is a `TEAM_MEMBER_SCIM_ROLE_UPDATE` in the team audit log
-  and a team webhook delivery, so the team sees it even though it did not
-  approve it
+- approval pins the role shown to the approver, and a raise is a
+  re-admission (scim-team-role-raise-approval plan): a group add of an
+  ACTIVE member whose role is below the group's role ends the active
+  membership and makes the row a pending admission at the group's role, in
+  one CAS write on the state the locked pre-read saw (deactivated,
+  `scimApprovalPending`, `scimManaged` — also for a member first added by
+  invitation or the members API — `keyDistributed: false`), and deletes the
+  member's team keys for the rows that write returned. It is decided by the
+  same approve/reject flow as any admission. A group add at or below the
+  active role is unchanged: a demotion applies at once
+  (`TEAM_MEMBER_SCIM_ROLE_UPDATE`), an equal role is a no-op. So the SCIM
+  token's only direct effect on an active member's privileges is downward
+- consequences of a held raise:
+  - the member has no team access while it waits; approval leaves
+    `keyDistributed: false`, and a key-holding OWNER/ADMIN's browser
+    distributes the team key again, as for any admission
+  - rejecting it removes the member from the team (the row is deleted). To
+    keep them at the old role, correct the IdP mapping so the next sync
+    re-admits them there, or a team admin adds them back
+  - the IdP reverting the raise before anyone decides (add back to the lower
+    group, remove from the higher one): the lower-group add leaves the
+    pending row as is (a pending row is never lowered) and the higher-group
+    removal withdraws (deletes) it; the next sync re-admits the member
+    pending at the lower role
+  - the IdP's request order shows in the audit: add-to-higher first gives
+    `TEAM_MEMBER_SCIM_PENDING` with `previouslyActive: true`; remove-from-lower
+    first gives `TEAM_MEMBER_SCIM_REMOVE` and then the add takes the
+    deactivated-row path (`TEAM_MEMBER_SCIM_PENDING` without
+    `previouslyActive`). The end state is the same
+  - the member's team share links stop serving while the raise waits (they
+    require an active membership created before the link), serve again on
+    approval (same row), and stay dead after a reject (a later re-admission
+    is a new row); they are not revoked
+  - a manual role change (`PUT .../members/[memberId]`) or ownership transfer
+    racing the SCIM add makes the add's CAS miss: the add is dropped without
+    a transition, and since the key deletion follows the rows the CAS
+    returned, the member's keys and `keyDistributed` are left as they are
+- one role group per team per user is the supported IdP configuration. A
+  user in two role groups of one team is demoted by the lower group's sync
+  and re-admitted (taken out pending) by each sync of the higher group that
+  follows it
 - member remove: withdraws (deletes) a pending row, deactivates an active
   one, unmarks a departure-marked one (so a tenant return no longer restores
   it) — never downgrades a role; removing a user with no row in the team at
@@ -193,10 +227,12 @@ Rules:
   `logAuditBulkInTx` and delivered to team webhooks
   (`AUDIT_ACTION_GROUPS_TEAM`, `TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS`):
   `SCIM_GROUP_MAPPING_CREATE` (a new IdP group mapping), `TEAM_MEMBER_SCIM_PENDING`
-  (a row becomes pending, or a pending role is raised), `TEAM_MEMBER_SCIM_PENDING_WITHDRAW`
+  (a row becomes pending, a pending role is raised, or an active member's
+  raise is held for approval — `metadata.previouslyActive: true`), `TEAM_MEMBER_SCIM_PENDING_WITHDRAW`
   (a pending row removed), `TEAM_MEMBER_SCIM_REMOVE` (an active member
   deactivated, or a departure-marked row unmarked — `metadata.departed: true`),
-  `TEAM_MEMBER_SCIM_ROLE_UPDATE` (an active member's role changed)
+  `TEAM_MEMBER_SCIM_ROLE_UPDATE` (an active member demoted; a raise is never
+  applied in place)
 - `AUDIT_ACTION_GROUPS_TEAM` also carries the `group:scim` category
   (`SCIM_GROUP_UPDATE`) for historical team-log display; `TEAM_WEBHOOK_EXCLUDED_GROUPS`
   excludes it from team webhook delivery

@@ -79,7 +79,7 @@
   "approveNeedsKey": "Only an owner or admin who holds the current team key can approve. Another admin can approve it, or you can reject it.",
   "approveTargetLeftTenant": "This user is no longer active in the organization. Reject the request instead.",
   "approvalBusyRetry": "Another change to this team is in progress. Try again in a moment.",
-  "approveRoleNote": "After approval, the identity provider can still raise this member's role (up to Admin, never Owner) without another approval. Such changes are recorded in the team audit log and team webhooks.",
+  "approveRoleNote": "If the identity provider later raises this member's role, the member is taken out of the team and waits for approval at the new role, as here. Lowering the role takes effect immediately.",
   "pendingTenantInactive": "No longer in the organization",
   "pendingTenantInactiveHint": "This user is no longer an active member of the organization. Approve always fails for them — reject the request instead.",
   "requestAlreadyHandled": "This request was already handled. The list has been refreshed.",

@@ -41,6 +41,7 @@ export const SCIM_TRANSITION_KIND = {
   ACTIVE_REMOVED: "activeRemoved",
   DEPARTED_UNMARKED: "departedUnmarked",
   ACTIVE_ROLE_CHANGED: "activeRoleChanged",
+  ACTIVE_RAISE_HELD: "activeRaiseHeld",
 } as const;
 
 export type ScimTransitionKind = (typeof SCIM_TRANSITION_KIND)[keyof typeof SCIM_TRANSITION_KIND];
@@ -52,7 +53,11 @@ export interface ScimMemberTransition {
   role: TeamRole;
   /** Known only when the write returned it (updateManyAndReturn); createMany does not. */
   memberId?: string;
-  /** The row's role before a pendingRoleRaised / activeRoleChanged transition. */
+  /**
+   * The row's role before a pendingRoleRaised, activeRaiseHeld (an active row
+   * taken out pending at a higher role) or activeRoleChanged (a demotion)
+   * transition.
+   */
   previousRole?: TeamRole;
 }
 
@@ -86,6 +91,7 @@ function countAddedRemoved(transitions: ScimMemberTransition[]): { added: number
   const added = transitions.filter((t) =>
     t.kind === SCIM_TRANSITION_KIND.BECAME_PENDING ||
     t.kind === SCIM_TRANSITION_KIND.PENDING_ROLE_RAISED ||
+    t.kind === SCIM_TRANSITION_KIND.ACTIVE_RAISE_HELD ||
     t.kind === SCIM_TRANSITION_KIND.ACTIVE_ROLE_CHANGED,
   ).length;
   return { added, removed: transitions.length - added };
@@ -297,8 +303,11 @@ async function lockGroupWrite(
  * Apply SCIM Group member additions (C2). A user active in the tenant always
  * ends up with a row at `role` — created pending, raised from a lower
  * pending role, moved from deactivated to pending, or (already active)
- * role-changed in place. A user inactive in the tenant leaves a
- * departure-marked or pending row untouched; anything else is
+ * demoted in place. An active row below `role` is not raised in place: the
+ * raise is a re-admission, so the membership ends and the row becomes a
+ * pending admission at `role` that only the approve route can make active
+ * again (scim-team-role-raise-approval plan C1). A user inactive in the
+ * tenant leaves a departure-marked or pending row untouched; anything else is
  * `ScimNoSuchMemberError`.
  */
 async function applyAddOperations(
@@ -333,6 +342,7 @@ async function applyAddOperations(
   const toCreateUserIds: string[] = [];
   const toBecomePending: { id: string; userId: string }[] = [];
   const toRaiseByPreviousRole = new Map<TeamRole, string[]>();
+  const toHoldByPreviousRole = new Map<TeamRole, string[]>();
   const toUpdateRoleByPreviousRole = new Map<TeamRole, string[]>();
 
   for (const uid of userIds) {
@@ -370,9 +380,12 @@ async function applyAddOperations(
     }
 
     if (membership.role !== role) {
-      const ids = toUpdateRoleByPreviousRole.get(membership.role) ?? [];
+      const byPreviousRole = higherRole(membership.role, role) === role
+        ? toHoldByPreviousRole
+        : toUpdateRoleByPreviousRole;
+      const ids = byPreviousRole.get(membership.role) ?? [];
       ids.push(membership.id);
-      toUpdateRoleByPreviousRole.set(membership.role, ids);
+      byPreviousRole.set(membership.role, ids);
     }
   }
 
@@ -398,14 +411,9 @@ async function applyAddOperations(
 
   if (toBecomePending.length > 0) {
     // A deactivated non-pending membership of an active tenant member
-    // becomes pending: stale keys are cleared so an eventual approval
-    // distributes the current team key, not one wrapped for a membership
-    // that already ended.
-    await tx.teamMemberKey.deleteMany({
-      where: { teamId, userId: { in: toBecomePending.map((m) => m.userId) } },
-    });
-    // CAS on the state the pre-read saw: a team-side DELETE does not take the
-    // user's advisory lock, so the transitions come from the rows written.
+    // becomes pending. CAS on the state the pre-read saw: a team-side DELETE
+    // does not take the user's advisory lock, so the transitions — and the
+    // key deletion below — come from the rows written.
     const rows = await tx.teamMember.updateManyAndReturn({
       where: {
         id: { in: toBecomePending.map((m) => m.id) },
@@ -422,6 +430,13 @@ async function applyAddOperations(
       },
       select: { id: true, userId: true },
     });
+    // Stale keys are cleared so an eventual approval distributes the current
+    // team key, not one wrapped for a membership that already ended.
+    if (rows.length > 0) {
+      await tx.teamMemberKey.deleteMany({
+        where: { teamId, userId: { in: rows.map((r) => r.userId) } },
+      });
+    }
     for (const row of rows) {
       transitions.push({ kind: SCIM_TRANSITION_KIND.BECAME_PENDING, userId: row.userId, role, memberId: row.id });
     }
@@ -436,6 +451,41 @@ async function applyAddOperations(
     for (const row of rows) {
       transitions.push({
         kind: SCIM_TRANSITION_KIND.PENDING_ROLE_RAISED,
+        userId: row.userId,
+        role,
+        previousRole,
+        memberId: row.id,
+      });
+    }
+  }
+
+  for (const [previousRole, ids] of toHoldByPreviousRole) {
+    // A raise of an active row ends the membership and admits the row pending
+    // at the group's role — the same state toBecomePending writes, plus
+    // deactivatedAt. Keys are deleted only for the rows the CAS wrote: a miss
+    // (a concurrent manual role PUT or ownership transfer changed the row)
+    // must leave an active member's key alone, or the row stays
+    // keyDistributed with no key and no admin browser redistributes it.
+    const rows = await tx.teamMember.updateManyAndReturn({
+      where: { id: { in: ids }, teamId, role: previousRole, deactivatedAt: null, scimApprovalPending: false },
+      data: {
+        deactivatedAt: new Date(),
+        scimApprovalPending: true,
+        scimManaged: true,
+        deactivatedByTenant: false,
+        keyDistributed: false,
+        role,
+      },
+      select: { id: true, userId: true },
+    });
+    if (rows.length > 0) {
+      await tx.teamMemberKey.deleteMany({
+        where: { teamId, userId: { in: rows.map((r) => r.userId) } },
+      });
+    }
+    for (const row of rows) {
+      transitions.push({
+        kind: SCIM_TRANSITION_KIND.ACTIVE_RAISE_HELD,
         userId: row.userId,
         role,
         previousRole,

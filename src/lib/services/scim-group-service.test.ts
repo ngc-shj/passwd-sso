@@ -112,19 +112,22 @@ describe("patchScimGroup — add operations (C2)", () => {
 
     const result = await patchScimGroup(TENANT_ID, SCIM_ID, [{ op: "add", userId: "user-a" }], BASE_URL, tx);
 
-    expect(teamMemberKey.deleteMany).toHaveBeenCalledWith({ where: { teamId: TEAM_ID, userId: { in: ["user-a"] } } });
     expect(teamMember.updateManyAndReturn).toHaveBeenCalledWith({
       where: { id: { in: ["m-old"] }, teamId: TEAM_ID, deactivatedAt: { not: null }, scimApprovalPending: false },
       data: { scimManaged: true, scimApprovalPending: true, deactivatedByTenant: false, keyDistributed: false, role: "ADMIN" },
       select: { id: true, userId: true },
     });
+    expect(teamMemberKey.deleteMany).toHaveBeenCalledWith({ where: { teamId: TEAM_ID, userId: { in: ["user-a"] } } });
+    // Keys follow the rows the CAS wrote, so the CAS runs first.
+    expect(teamMember.updateManyAndReturn.mock.invocationCallOrder[0])
+      .toBeLessThan(teamMemberKey.deleteMany.mock.invocationCallOrder[0]);
     expect(result.transitions).toEqual([
       { kind: SCIM_TRANSITION_KIND.BECAME_PENDING, userId: "user-a", role: "ADMIN", memberId: "m-old" },
     ]);
   });
 
-  it("emits no transition for a row the becomes-pending CAS no longer matches", async () => {
-    const { tx, teamMember, tenantMember } = makeTx();
+  it("emits no transition and deletes no key for a row the becomes-pending CAS no longer matches", async () => {
+    const { tx, teamMember, tenantMember, teamMemberKey } = makeTx();
     teamMember.findMany
       .mockResolvedValueOnce([
         { id: "m-old", userId: "user-a", role: "ADMIN", deactivatedAt: new Date("2026-01-01"), deactivatedByTenant: false, scimApprovalPending: false },
@@ -135,6 +138,7 @@ describe("patchScimGroup — add operations (C2)", () => {
 
     const result = await patchScimGroup(TENANT_ID, SCIM_ID, [{ op: "add", userId: "user-a" }], BASE_URL, tx);
 
+    expect(teamMemberKey.deleteMany).not.toHaveBeenCalled();
     expect(result.transitions).toEqual([]);
   });
 
@@ -177,8 +181,8 @@ describe("patchScimGroup — add operations (C2)", () => {
     expect(result.transitions).toEqual([]);
   });
 
-  it("changes an active member's role in place via a CAS on the previous role", async () => {
-    const { tx, teamMember, tenantMember } = makeTx();
+  it("holds an active member raised by the mapping as a pending admission at its role (CAS, then keys of the rows written)", async () => {
+    const { tx, teamMember, tenantMember, teamMemberKey } = makeTx();
     teamMember.findMany
       .mockResolvedValueOnce([
         { id: "m-1", userId: "user-a", role: "MEMBER", deactivatedAt: null, deactivatedByTenant: false, scimApprovalPending: false },
@@ -189,13 +193,64 @@ describe("patchScimGroup — add operations (C2)", () => {
 
     const result = await patchScimGroup(TENANT_ID, SCIM_ID, [{ op: "add", userId: "user-a" }], BASE_URL, tx);
 
+    expect(teamMember.updateManyAndReturn).toHaveBeenCalledTimes(1);
     expect(teamMember.updateManyAndReturn).toHaveBeenCalledWith({
-      where: { id: { in: ["m-1"] }, teamId: TEAM_ID, role: "MEMBER", deactivatedAt: null },
-      data: { role: "ADMIN" },
+      where: { id: { in: ["m-1"] }, teamId: TEAM_ID, role: "MEMBER", deactivatedAt: null, scimApprovalPending: false },
+      data: {
+        deactivatedAt: expect.any(Date),
+        scimApprovalPending: true,
+        scimManaged: true,
+        deactivatedByTenant: false,
+        keyDistributed: false,
+        role: "ADMIN",
+      },
       select: { id: true, userId: true },
     });
+    expect(teamMemberKey.deleteMany).toHaveBeenCalledWith({ where: { teamId: TEAM_ID, userId: { in: ["user-a"] } } });
+    expect(teamMember.updateManyAndReturn.mock.invocationCallOrder[0])
+      .toBeLessThan(teamMemberKey.deleteMany.mock.invocationCallOrder[0]);
     expect(result.transitions).toEqual([
-      { kind: SCIM_TRANSITION_KIND.ACTIVE_ROLE_CHANGED, userId: "user-a", role: "ADMIN", previousRole: "MEMBER", memberId: "m-1" },
+      { kind: SCIM_TRANSITION_KIND.ACTIVE_RAISE_HELD, userId: "user-a", role: "ADMIN", previousRole: "MEMBER", memberId: "m-1" },
+    ]);
+  });
+
+  it("deletes no key and emits no transition when the raise-hold CAS no longer matches", async () => {
+    const { tx, teamMember, tenantMember, teamMemberKey } = makeTx();
+    teamMember.findMany
+      .mockResolvedValueOnce([
+        { id: "m-1", userId: "user-a", role: "MEMBER", deactivatedAt: null, deactivatedByTenant: false, scimApprovalPending: false },
+      ])
+      .mockResolvedValueOnce([]); // loadGroupMembers
+    tenantMember.findMany.mockResolvedValue([{ userId: "user-a" }]);
+    teamMember.updateManyAndReturn.mockResolvedValue([]); // a concurrent writer changed the row
+
+    const result = await patchScimGroup(TENANT_ID, SCIM_ID, [{ op: "add", userId: "user-a" }], BASE_URL, tx);
+
+    expect(teamMemberKey.deleteMany).not.toHaveBeenCalled();
+    expect(result.transitions).toEqual([]);
+  });
+
+  it("demotes an active member in place via a CAS on the previous role", async () => {
+    const { tx, teamMember, tenantMember, teamMemberKey, scimGroupMapping } = makeTx();
+    scimGroupMapping.findUnique.mockResolvedValue({ ...DEFAULT_MAPPING, role: "MEMBER" });
+    teamMember.findMany
+      .mockResolvedValueOnce([
+        { id: "m-1", userId: "user-a", role: "ADMIN", deactivatedAt: null, deactivatedByTenant: false, scimApprovalPending: false },
+      ])
+      .mockResolvedValueOnce([]); // loadGroupMembers
+    tenantMember.findMany.mockResolvedValue([{ userId: "user-a" }]);
+    teamMember.updateManyAndReturn.mockResolvedValue([{ id: "m-1", userId: "user-a" }]);
+
+    const result = await patchScimGroup(TENANT_ID, SCIM_ID, [{ op: "add", userId: "user-a" }], BASE_URL, tx);
+
+    expect(teamMember.updateManyAndReturn).toHaveBeenCalledWith({
+      where: { id: { in: ["m-1"] }, teamId: TEAM_ID, role: "ADMIN", deactivatedAt: null },
+      data: { role: "MEMBER" },
+      select: { id: true, userId: true },
+    });
+    expect(teamMemberKey.deleteMany).not.toHaveBeenCalled();
+    expect(result.transitions).toEqual([
+      { kind: SCIM_TRANSITION_KIND.ACTIVE_ROLE_CHANGED, userId: "user-a", role: "MEMBER", previousRole: "ADMIN", memberId: "m-1" },
     ]);
   });
 
@@ -629,9 +684,9 @@ describe("replaceScimGroup — current-member set and deltas (C2)", () => {
     expect(freshMembersCall.where.userId.in).toEqual(["user-a"]);
   });
 
-  it("counts added from activeRoleChanged + becamePending + pendingRoleRaised transitions, removed from the rest", async () => {
+  it("counts an activeRaiseHeld transition as added", async () => {
     const { tx, teamMember, tenantMember } = makeTx();
-    // user-a: active member with the wrong role (MEMBER), requested role ADMIN.
+    // user-a: active member below the group's role (MEMBER < ADMIN) — held.
     teamMember.findMany
       .mockResolvedValueOnce([]) // unlocked pre-read (none at ADMIN role yet)
       .mockResolvedValueOnce([]) // locked re-read (none at ADMIN role yet)
@@ -644,6 +699,28 @@ describe("replaceScimGroup — current-member set and deltas (C2)", () => {
 
     const result = await replaceScimGroup(TENANT_ID, SCIM_ID, { displayName: "core:ADMIN", memberUserIds: ["user-a"] }, BASE_URL, tx);
 
+    expect(result.transitions.map((t) => t.kind)).toEqual([SCIM_TRANSITION_KIND.ACTIVE_RAISE_HELD]);
+    expect(result.added).toBe(1);
+    expect(result.removed).toBe(0);
+  });
+
+  it("counts an activeRoleChanged (demotion) transition as added", async () => {
+    const { tx, teamMember, tenantMember, scimGroupMapping } = makeTx();
+    scimGroupMapping.findUnique.mockResolvedValue({ ...DEFAULT_MAPPING, role: "MEMBER" });
+    // user-a: active member above the group's role (ADMIN > MEMBER) — demoted.
+    teamMember.findMany
+      .mockResolvedValueOnce([]) // unlocked pre-read (none at MEMBER role yet)
+      .mockResolvedValueOnce([]) // locked re-read (none at MEMBER role yet)
+      .mockResolvedValueOnce([
+        { id: "m-1", userId: "user-a", role: "ADMIN", deactivatedAt: null, deactivatedByTenant: false, scimApprovalPending: false },
+      ]) // applyAddOperations' membership read
+      .mockResolvedValueOnce([]); // loadGroupMembers
+    tenantMember.findMany.mockResolvedValue([{ userId: "user-a" }]);
+    teamMember.updateManyAndReturn.mockResolvedValue([{ id: "m-1", userId: "user-a" }]);
+
+    const result = await replaceScimGroup(TENANT_ID, SCIM_ID, { displayName: "core:MEMBER", memberUserIds: ["user-a"] }, BASE_URL, tx);
+
+    expect(result.transitions.map((t) => t.kind)).toEqual([SCIM_TRANSITION_KIND.ACTIVE_ROLE_CHANGED]);
     expect(result.added).toBe(1);
     expect(result.removed).toBe(0);
   });

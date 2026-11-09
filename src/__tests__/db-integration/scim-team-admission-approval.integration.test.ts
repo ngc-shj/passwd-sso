@@ -4,7 +4,9 @@
  * until an active key-holding team OWNER/ADMIN approves it or the team
  * rejects it (docs/archive/review/scim-team-admission-approval-plan.md).
  *
- * Covers A1-A10, A12, A13 and A11's GET half. Production routes and services
+ * Covers A1-A10, A12, A13 and A11's GET half, and the SCIM raise of an active
+ * member (R1-R9, docs/archive/review/scim-team-role-raise-approval-plan.md).
+ * Production routes and services
  * run under their real RLS contexts on the app role; only auth, step-up,
  * rate-limit and the SCIM-token boundary are mocked. Races are parked on a
  * row lock held by a test "blocker" transaction and witnessed through
@@ -862,12 +864,13 @@ describe("scim-team-admission-approval — real-DB integration", () => {
 
   // ── A7d: SCIM role CAS vs a concurrent ownership transfer ─────
 
-  it("A7d: an ownership transfer committed after SCIM's pre-read leaves the role CAS a no-op", async () => {
+  it("A7d: an ownership transfer committed after SCIM's pre-read leaves the raise-hold CAS a no-op and the transferee's key intact", async () => {
     const owner = await ctx.createUser(tenantId);
     const teamId = await team(owner);
     const groupId = await mapGroup(teamId, "ADMIN");
     const x = await member();
-    await activeMember(teamId, x.id, "MEMBER");
+    await activeMember(teamId, x.id, "MEMBER", { keyDistributed: true });
+    await seedKey(teamId, x.id);
     const xRow = await membership(teamId, x.id);
     const y = await member(); // brand-new add target, used only to park SCIM mid-transaction
 
@@ -886,8 +889,16 @@ describe("scim-team-admission-approval — real-DB integration", () => {
       await Promise.allSettled([scimming, transferring]);
     }
 
-    expect(await membership(teamId, x.id)).toMatchObject({ role: "OWNER" });
+    expect(await membership(teamId, x.id)).toMatchObject({
+      role: "OWNER", deactivated_at: null, scim_approval_pending: false, key_distributed: true,
+    });
+    // The hold's key deletion follows the rows its CAS wrote: none here.
+    expect(await keyCount(teamId, x.id)).toBe(1);
+    // A regression marker only: a raise never emits ROLE_UPDATE now, and this
+    // race leaves the CAS a miss either way. The key and PENDING assertions
+    // carry the cell.
     expect(await auditRows("TEAM_MEMBER_SCIM_ROLE_UPDATE", { teamId })).toEqual([]);
+    expect((await auditRows("TEAM_MEMBER_SCIM_PENDING", { teamId })).map((r) => r.targetId)).toEqual([y.id]);
     expect(await membership(teamId, y.id)).toMatchObject({ scim_approval_pending: true, role: "ADMIN" });
   });
 
@@ -1030,8 +1041,10 @@ describe("scim-team-admission-approval — real-DB integration", () => {
     const a = await member(); // becomes pending (create)
     const b = await member(); // pending role raised VIEWER -> MEMBER
     await pendingMember(teamId, b.id, "VIEWER");
-    const c = await member(); // active role changed VIEWER -> MEMBER
+    const c = await member(); // active raise VIEWER -> MEMBER held pending
     await activeMember(teamId, c.id, "VIEWER");
+    const g = await member(); // active demoted ADMIN -> MEMBER
+    await activeMember(teamId, g.id, "ADMIN");
     const d = await member(); // pending withdrawn
     await pendingMember(teamId, d.id, "MEMBER");
     const e = await member(); // active removed
@@ -1040,13 +1053,14 @@ describe("scim-team-admission-approval — real-DB integration", () => {
     await departedMember(teamId, f.id, "MEMBER");
 
     const res = verb === "PUT"
-      ? await scimPut(groupId, `${teamSlug}:MEMBER`, [a.id, b.id, c.id])
-      : await scimPatch(groupId, { add: [a.id, b.id, c.id], remove: [d.id, e.id, f.id] });
+      ? await scimPut(groupId, `${teamSlug}:MEMBER`, [a.id, b.id, c.id, g.id])
+      : await scimPatch(groupId, { add: [a.id, b.id, c.id, g.id], remove: [d.id, e.id, f.id] });
     expect(res.status).toBe(200);
 
     expect(await membership(teamId, a.id)).toMatchObject({ scim_approval_pending: true, role: "MEMBER" });
     expect(await membership(teamId, b.id)).toMatchObject({ scim_approval_pending: true, role: "MEMBER" });
-    expect(await membership(teamId, c.id)).toMatchObject({ role: "MEMBER", deactivated_at: null });
+    expect(await membership(teamId, c.id)).toMatchObject({ scim_approval_pending: true, role: "MEMBER", deactivated_at: expect.any(Date) });
+    expect(await membership(teamId, g.id)).toMatchObject({ role: "MEMBER", deactivated_at: null });
     expect(await membership(teamId, d.id)).toBeNull();
     expect(await membership(teamId, e.id)).toMatchObject({ deactivated_at: expect.any(Date) });
     expect(await membership(teamId, f.id)).toMatchObject({ deactivated_by_tenant: false });
@@ -1055,13 +1069,22 @@ describe("scim-team-admission-approval — real-DB integration", () => {
     expect(pending).toEqual(expect.arrayContaining([
       expect.objectContaining({ targetId: a.id, metadata: expect.objectContaining({ role: "MEMBER", scimTokenId: "token-under-test" }) }),
       expect.objectContaining({ targetId: b.id, metadata: expect.objectContaining({ role: "MEMBER", previousRole: "VIEWER" }) }),
+      expect.objectContaining({
+        targetId: c.id,
+        metadata: { scimTokenId: "token-under-test", role: "MEMBER", previousRole: "VIEWER", previouslyActive: true },
+      }),
     ]));
-    expect(pending).toHaveLength(2);
+    expect(pending).toHaveLength(3);
+    // previouslyActive marks only the held raise, not a raised pending row.
+    expect(pending.filter((r) => r.metadata.previouslyActive === true).map((r) => r.targetId)).toEqual([c.id]);
     expectScimTeamAuditRows(pending);
 
     const roleUpdated = await auditRows("TEAM_MEMBER_SCIM_ROLE_UPDATE", { teamId });
     expect(roleUpdated).toEqual([
-      expect.objectContaining({ targetId: c.id, metadata: expect.objectContaining({ role: "MEMBER", previousRole: "VIEWER" }) }),
+      expect.objectContaining({
+        targetId: g.id,
+        metadata: { scimTokenId: "token-under-test", role: "MEMBER", previousRole: "ADMIN" },
+      }),
     ]);
     expectScimTeamAuditRows(roleUpdated);
 
@@ -1230,6 +1253,236 @@ describe("scim-team-admission-approval — real-DB integration", () => {
 
       expect(res.status).toBe(200);
       expect(await membership(teamId, target.id)).toEqual(before);
+    });
+  });
+
+  // ── R: SCIM raise of an active member is a re-admission ──────
+  // (docs/archive/review/scim-team-role-raise-approval-plan.md, cells 1-7, 9)
+
+  describe("R: SCIM raise of an active member", () => {
+    /** A key-holding team ADMIN who can approve a held raise. */
+    async function keyHoldingAdmin(teamId: string): Promise<string> {
+      const admin = await ctx.createUser(tenantId);
+      await activeMember(teamId, admin, "ADMIN", { keyDistributed: true });
+      await seedKey(teamId, admin);
+      return admin;
+    }
+
+    /** An active SCIM-managed VIEWER holding this team's key (the cell 1 fixture). */
+    async function keyedScimViewer(teamId: string): Promise<{ id: string; rowId: string }> {
+      const x = await member();
+      const rowId = await addMemberRow(teamId, x.id, {
+        role: "VIEWER", deactivated: false, scimManaged: true, keyDistributed: true,
+      });
+      await seedKey(teamId, x.id);
+      return { id: x.id, rowId };
+    }
+
+    async function teamSlugOf(teamId: string): Promise<string> {
+      const [{ slug }] = await sql<{ slug: string }>(`SELECT slug FROM teams WHERE id = $1::uuid`, teamId);
+      return slug;
+    }
+
+    it.each(["PATCH", "PUT"] as const)("R1/R2: a SCIM %s add of an active VIEWER to the ADMIN group holds it pending at ADMIN, keys gone, audited as a pending admission", async (verb) => {
+      const owner = await ctx.createUser(tenantId);
+      const teamId = await team(owner);
+      const adminGroup = await mapGroup(teamId, "ADMIN");
+      const x = await keyedScimViewer(teamId);
+      // The member's key in another team is not this team's to delete.
+      const otherOwner = await ctx.createUser(tenantId);
+      const otherTeamId = await team(otherOwner);
+      await activeMember(otherTeamId, x.id, "MEMBER", { keyDistributed: true });
+      await seedKey(otherTeamId, x.id);
+
+      // Positive control: the active VIEWER passes the team permission check.
+      expect((await teamGet(teamId, x.id)).status).toBe(200);
+      expect(await keyCount(teamId, x.id)).toBe(1);
+
+      const res = verb === "PATCH"
+        ? await scimPatch(adminGroup, { add: [x.id] })
+        : await scimPut(adminGroup, `${await teamSlugOf(teamId)}:ADMIN`, [x.id]);
+      expect(res.status).toBe(200);
+
+      expect(await membership(teamId, x.id)).toMatchObject({
+        id: x.rowId,
+        role: "ADMIN",
+        deactivated_at: expect.any(Date),
+        deactivated_by_tenant: false,
+        scim_managed: true,
+        scim_approval_pending: true,
+        key_distributed: false,
+      });
+      expect(await keyCount(teamId, x.id)).toBe(0);
+      expect(await keyCount(otherTeamId, x.id)).toBe(1);
+
+      const pending = await auditRows("TEAM_MEMBER_SCIM_PENDING", { teamId });
+      expect(pending).toEqual([
+        expect.objectContaining({
+          targetId: x.id,
+          metadata: { scimTokenId: "token-under-test", role: "ADMIN", previousRole: "VIEWER", previouslyActive: true },
+        }),
+      ]);
+      expectScimTeamAuditRows(pending);
+      expect(await auditRows("TEAM_MEMBER_SCIM_ROLE_UPDATE", { teamId })).toEqual([]);
+
+      expect((await teamGet(teamId, x.id)).status).toBe(404);
+      expect((await teamPasswordsGet(teamId, x.id)).status).toBe(404);
+    });
+
+    it("R3: a held raise approved by a key-holding team ADMIN at ADMIN becomes an active ADMIN; a stale expectedRole VIEWER answers 409", async () => {
+      const owner = await ctx.createUser(tenantId);
+      const teamId = await team(owner);
+      const approver = await keyHoldingAdmin(teamId);
+      const adminGroup = await mapGroup(teamId, "ADMIN");
+      const x = await keyedScimViewer(teamId);
+      expect((await scimPatch(adminGroup, { add: [x.id] })).status).toBe(200);
+
+      const stale = await approve(teamId, x.rowId, approver, "VIEWER");
+      expect(stale.status).toBe(409);
+      expect((await stale.json()).error).toBe("SCIM_APPROVAL_ROLE_CHANGED");
+      expect(await membership(teamId, x.id)).toMatchObject({ scim_approval_pending: true, role: "ADMIN" });
+      expect(await auditRows("TEAM_MEMBER_SCIM_APPROVE", { teamId })).toEqual([]);
+
+      expect((await approve(teamId, x.rowId, approver, "ADMIN")).status).toBe(200);
+      expect(await membership(teamId, x.id)).toMatchObject({
+        id: x.rowId, role: "ADMIN", deactivated_at: null, scim_approval_pending: false, key_distributed: false,
+      });
+      expect(await auditRows("TEAM_MEMBER_SCIM_APPROVE", { teamId })).toEqual([
+        expect.objectContaining({ targetId: x.id }),
+      ]);
+    });
+
+    it("R4: rejecting a held raise deletes the row; the member is no longer in the team", async () => {
+      const owner = await ctx.createUser(tenantId);
+      const teamId = await team(owner);
+      const adminGroup = await mapGroup(teamId, "ADMIN");
+      const x = await keyedScimViewer(teamId);
+      expect((await scimPatch(adminGroup, { add: [x.id] })).status).toBe(200);
+
+      expect((await reject(teamId, x.rowId, owner)).status).toBe(200);
+      expect(await membership(teamId, x.id)).toBeNull();
+      expect((await teamGet(teamId, x.id)).status).toBe(404);
+      expect(await auditRows("TEAM_MEMBER_SCIM_REJECT", { teamId })).toEqual([
+        expect.objectContaining({ targetId: x.id }),
+      ]);
+    });
+
+    it("R5: a demotion applies at once with TEAM_MEMBER_SCIM_ROLE_UPDATE; an equal-role add writes nothing", async () => {
+      const owner = await ctx.createUser(tenantId);
+      const teamId = await team(owner);
+      const memberGroup = await mapGroup(teamId, "MEMBER");
+      const demoted = await member();
+      await activeMember(teamId, demoted.id, "ADMIN", { keyDistributed: true });
+      await seedKey(teamId, demoted.id);
+
+      expect((await scimPatch(memberGroup, { add: [demoted.id] })).status).toBe(200);
+      expect(await membership(teamId, demoted.id)).toMatchObject({
+        role: "MEMBER", deactivated_at: null, scim_approval_pending: false, key_distributed: true,
+      });
+      expect(await keyCount(teamId, demoted.id)).toBe(1);
+      const roleUpdated = await auditRows("TEAM_MEMBER_SCIM_ROLE_UPDATE", { teamId });
+      expect(roleUpdated).toEqual([
+        expect.objectContaining({
+          targetId: demoted.id,
+          metadata: { scimTokenId: "token-under-test", role: "MEMBER", previousRole: "ADMIN" },
+        }),
+      ]);
+      expectScimTeamAuditRows(roleUpdated);
+      expect(await auditRows("TEAM_MEMBER_SCIM_PENDING", { teamId })).toEqual([]);
+
+      const same = await member();
+      await activeMember(teamId, same.id, "MEMBER", { keyDistributed: true });
+      const before = await membership(teamId, same.id);
+      expect((await scimPatch(memberGroup, { add: [same.id] })).status).toBe(200);
+      expect(await membership(teamId, same.id)).toEqual(before);
+      expect(await auditRows("TEAM_MEMBER_SCIM_ROLE_UPDATE", { teamId })).toHaveLength(1);
+      expect(await auditRows("TEAM_MEMBER_SCIM_PENDING", { teamId })).toEqual([]);
+      expect((await auditRows("SCIM_GROUP_UPDATE", { teamId })).at(-1)?.metadata).toMatchObject({ added: 0 });
+    });
+
+    it("R6: after a held raise the ADMIN group lists the member and the VIEWER group does not; a repeated ADMIN PUT writes nothing", async () => {
+      const owner = await ctx.createUser(tenantId);
+      const teamId = await team(owner);
+      const adminGroup = await mapGroup(teamId, "ADMIN");
+      const viewerGroup = await mapGroup(teamId, "VIEWER");
+      const x = await keyedScimViewer(teamId);
+
+      // Positive control for the VIEWER-group read: it lists x before the raise.
+      const viewerBefore = (await (await scimGroupGet(viewerGroup)).json()) as { members: { value: string }[] };
+      expect(viewerBefore.members.map((m) => m.value)).toContain(x.id);
+
+      expect((await scimPatch(adminGroup, { add: [x.id] })).status).toBe(200);
+
+      const adminRead = (await (await scimGroupGet(adminGroup)).json()) as { members: { value: string }[] };
+      expect(adminRead.members.map((m) => m.value)).toContain(x.id);
+      const viewerRead = (await (await scimGroupGet(viewerGroup)).json()) as { members: { value: string }[] };
+      expect(viewerRead.members.map((m) => m.value)).not.toContain(x.id);
+
+      const held = await membership(teamId, x.id);
+      const again = await scimPut(adminGroup, `${await teamSlugOf(teamId)}:ADMIN`, [x.id]);
+      expect(again.status).toBe(200);
+      expect(await membership(teamId, x.id)).toEqual(held);
+      expect(await auditRows("TEAM_MEMBER_SCIM_PENDING", { teamId })).toHaveLength(1);
+      expect((await auditRows("SCIM_GROUP_UPDATE", { teamId })).at(-1)?.metadata).toMatchObject({ added: 0 });
+    });
+
+    it("R7: an active member not managed by SCIM is held the same way and becomes scim_managed", async () => {
+      const owner = await ctx.createUser(tenantId);
+      const teamId = await team(owner);
+      const adminGroup = await mapGroup(teamId, "ADMIN");
+      const x = await member();
+      const rowId = await activeMember(teamId, x.id, "VIEWER", { keyDistributed: true });
+      await seedKey(teamId, x.id);
+      expect(await membership(teamId, x.id)).toMatchObject({ scim_managed: false });
+
+      expect((await scimPatch(adminGroup, { add: [x.id] })).status).toBe(200);
+      expect(await membership(teamId, x.id)).toMatchObject({
+        id: rowId,
+        role: "ADMIN",
+        deactivated_at: expect.any(Date),
+        scim_managed: true,
+        scim_approval_pending: true,
+        key_distributed: false,
+      });
+      expect(await keyCount(teamId, x.id)).toBe(0);
+      expect(await auditRows("TEAM_MEMBER_SCIM_PENDING", { teamId })).toEqual([
+        expect.objectContaining({ targetId: x.id, metadata: expect.objectContaining({ previouslyActive: true }) }),
+      ]);
+    });
+
+    it("R9: a manual role change committed after SCIM's pre-read makes the raise-hold CAS miss and leaves keys and key_distributed untouched", async () => {
+      const owner = await ctx.createUser(tenantId);
+      const teamId = await team(owner);
+      const adminGroup = await mapGroup(teamId, "ADMIN");
+      const x = await keyedScimViewer(teamId);
+      const y = await member(); // brand-new add target, used only to park SCIM mid-transaction (as A7d)
+
+      // SCIM's pre-read sees x active at VIEWER, then its createMany for y
+      // parks on y's user row; the role PUT commits meanwhile.
+      const blocker = await race.holdRowLock(`SELECT id FROM users WHERE id = $1::uuid FOR UPDATE`, [y.id]);
+      let scimming: Promise<Response> | undefined;
+      let changing: Promise<Response> | undefined;
+      try {
+        scimming = scimPatch(adminGroup, { add: [y.id, x.id] });
+        await race.waitForBackendBlockedBy(blocker.pid);
+        changing = changeRole(teamId, x.rowId, owner, "MEMBER");
+        expect((await changing).status).toBe(200);
+        await blocker.release();
+        expect((await scimming).status).toBe(200);
+      } finally {
+        await blocker.release();
+        await Promise.allSettled([scimming, changing]);
+      }
+
+      expect(await membership(teamId, x.id)).toMatchObject({
+        role: "MEMBER", deactivated_at: null, scim_approval_pending: false, key_distributed: true,
+      });
+      expect(await keyCount(teamId, x.id)).toBe(1);
+      expect((await auditRows("TEAM_MEMBER_SCIM_PENDING", { teamId })).map((r) => r.targetId)).toEqual([y.id]);
+      // A regression marker only: a raise never emits ROLE_UPDATE now, and this
+      // race leaves the CAS a miss either way. The key and PENDING assertions
+      // carry the cell.
+      expect(await auditRows("TEAM_MEMBER_SCIM_ROLE_UPDATE", { teamId })).toEqual([]);
     });
   });
 });

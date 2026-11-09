@@ -417,6 +417,42 @@ describe("getCommonTargetLabel", () => {
       expect(t).toHaveBeenCalledWith("roleChange" as never, { from: "MEMBER", to: "ADMIN" });
     });
 
+    it("shows a SCIM demotion as a role change", () => {
+      const t = makeMockT();
+      const log = {
+        action: AUDIT_ACTION.TEAM_MEMBER_SCIM_ROLE_UPDATE,
+        targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
+        targetId: "member-id-3",
+        metadata: { scimTokenId: "tok", role: "MEMBER", previousRole: "ADMIN" },
+      };
+      getCommonTargetLabel(t, log, {}, TARGET_TYPE);
+      expect(t).toHaveBeenCalledWith("roleChange" as never, { from: "ADMIN", to: "MEMBER" });
+    });
+
+    it("shows a held SCIM raise of an active member as a role change", () => {
+      const t = makeMockT();
+      const log = {
+        action: AUDIT_ACTION.TEAM_MEMBER_SCIM_PENDING,
+        targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
+        targetId: "member-id-4",
+        metadata: { scimTokenId: "tok", role: "ADMIN", previousRole: "VIEWER", previouslyActive: true },
+      };
+      getCommonTargetLabel(t, log, {}, TARGET_TYPE);
+      expect(t).toHaveBeenCalledWith("roleChange" as never, { from: "VIEWER", to: "ADMIN" });
+    });
+
+    it("does not show a raise of a pending row (not previously active) as a role change", () => {
+      const t = makeMockT();
+      const log = {
+        action: AUDIT_ACTION.TEAM_MEMBER_SCIM_PENDING,
+        targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
+        targetId: "member-id-5",
+        metadata: { scimTokenId: "tok", role: "ADMIN", previousRole: "VIEWER" },
+      };
+      expect(getCommonTargetLabel(t, log, {}, TARGET_TYPE)).toBeNull();
+      expect(t).not.toHaveBeenCalledWith("roleChange" as never, expect.anything());
+    });
+
     it("returns null when role metadata fields are missing", () => {
       const t = makeMockT();
       const log = {

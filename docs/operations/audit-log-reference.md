@@ -206,16 +206,18 @@ These user-meaningful fields should be rendered in `getTargetLabel()` with i18n 
 | `TEAM_MEMBER_REMOVE` | TEAM | TeamMember | `{ removedUserId, removedRole }` | removedRole |
 | `TEAM_ROLE_UPDATE` | TEAM | TeamMember | `{ newRole, previousRole, transfer }` | roleChange template |
 | `SCIM_GROUP_MAPPING_CREATE` | TEAM | Team | `{ displayName }` | displayName |
-| `TEAM_MEMBER_SCIM_PENDING` | TEAM | TeamMember | `{ userId, role, previousRole? }` | role |
-| `TEAM_MEMBER_SCIM_PENDING_WITHDRAW` | TEAM | TeamMember | `{ userId, role }` | role |
-| `TEAM_MEMBER_SCIM_REMOVE` | TEAM | TeamMember | `{ userId, role, departed? }` | role |
-| `TEAM_MEMBER_SCIM_ROLE_UPDATE` | TEAM | TeamMember | `{ userId, newRole, previousRole }` | roleChange template |
+| `TEAM_MEMBER_SCIM_PENDING` | TEAM | TeamMember | `{ scimTokenId, role, previousRole?, previouslyActive? }` | role |
+| `TEAM_MEMBER_SCIM_PENDING_WITHDRAW` | TEAM | TeamMember | `{ scimTokenId, role }` | role |
+| `TEAM_MEMBER_SCIM_REMOVE` | TEAM | TeamMember | `{ scimTokenId, role, departed? }` | role |
+| `TEAM_MEMBER_SCIM_ROLE_UPDATE` | TEAM | TeamMember | `{ scimTokenId, role, previousRole }` | role |
 | `TEAM_MEMBER_SCIM_APPROVE` | TEAM | TeamMember | `{ memberId, role }` | role |
 | `TEAM_MEMBER_SCIM_REJECT` | TEAM | TeamMember | `{ memberId, role }` | role |
 
 **Notes:**
 - TEAM_MEMBER_ADD: Logged when a member is directly added (not via invitation). `reactivated` is true when a previously removed member is re-added.
 - SCIM_GROUP_MAPPING_CREATE and the TEAM_MEMBER_SCIM_* actions (scim-team-admission-approval plan) are TEAM-scoped, in `group:team` rather than `group:scim` below, so team webhooks (which exclude `group:scim`) still deliver them. A SCIM group add now leaves an admitted member PENDING — deactivated, no key — until a team OWNER/ADMIN approves (TEAM_MEMBER_SCIM_APPROVE) or rejects (TEAM_MEMBER_SCIM_REJECT) it; `metadata.scimTokenId` is also present on all of these.
+- TEAM_MEMBER_SCIM_PENDING: `previousRole` is set when a pending row's role is raised, or when an ACTIVE member was added to a higher-role group; the latter also sets `previouslyActive: true` — the active membership ended and waits for approval at `role` (scim-team-role-raise-approval plan). The target user is `targetId`.
+- TEAM_MEMBER_SCIM_ROLE_UPDATE: a demotion only — an active member added to a lower-role group, changed at once (`role` is the new role). A SCIM raise is never applied in place; it is a TEAM_MEMBER_SCIM_PENDING with `previouslyActive: true`.
 
 ### Emergency Access (`group:emergency`)
 

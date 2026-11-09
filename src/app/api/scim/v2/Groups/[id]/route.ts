@@ -39,7 +39,22 @@ const SCIM_TRANSITION_ACTION: Record<ScimTransitionKind, AuditAction> = {
   [SCIM_TRANSITION_KIND.ACTIVE_REMOVED]: AUDIT_ACTION.TEAM_MEMBER_SCIM_REMOVE,
   [SCIM_TRANSITION_KIND.DEPARTED_UNMARKED]: AUDIT_ACTION.TEAM_MEMBER_SCIM_REMOVE,
   [SCIM_TRANSITION_KIND.ACTIVE_ROLE_CHANGED]: AUDIT_ACTION.TEAM_MEMBER_SCIM_ROLE_UPDATE,
+  [SCIM_TRANSITION_KIND.ACTIVE_RAISE_HELD]: AUDIT_ACTION.TEAM_MEMBER_SCIM_PENDING,
 };
+
+/**
+ * TEAM_MEMBER_SCIM_PENDING metadata. `previouslyActive` is keyed on the
+ * transition kind, not on `previousRole` (a raised pending row carries one
+ * too): it marks an active member taken out pending approval of a raise.
+ */
+function pendingMetadata(t: ScimMemberTransition, scimTokenId: string): Record<string, unknown> {
+  if (t.kind === SCIM_TRANSITION_KIND.ACTIVE_RAISE_HELD) {
+    return { scimTokenId, role: t.role, previousRole: t.previousRole, previouslyActive: true };
+  }
+  return t.previousRole != null
+    ? { scimTokenId, role: t.role, previousRole: t.previousRole }
+    : { scimTokenId, role: t.role };
+}
 
 function transitionsFor(transitions: ScimMemberTransition[], action: AuditAction): ScimMemberTransition[] {
   return transitions.filter((t) => SCIM_TRANSITION_ACTION[t.kind] === action);
@@ -73,10 +88,7 @@ async function emitScimTransitionAudits(
       action: AUDIT_ACTION.TEAM_MEMBER_SCIM_PENDING,
       targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
       targetId: t.userId,
-      metadata:
-        t.previousRole != null
-          ? { scimTokenId, role: t.role, previousRole: t.previousRole }
-          : { scimTokenId, role: t.role },
+      metadata: pendingMetadata(t, scimTokenId),
     })),
   );
 

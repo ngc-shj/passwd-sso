@@ -129,6 +129,20 @@ export function getCommonTargetLabel(
       to: String(meta.newRole),
     });
   }
+  // SCIM demotions, and a SCIM raise of an active member held pending
+  // approval: without the change shown, a held raise reads as a first-time
+  // admission.
+  if (
+    (log.action === AUDIT_ACTION.TEAM_MEMBER_SCIM_ROLE_UPDATE ||
+      (log.action === AUDIT_ACTION.TEAM_MEMBER_SCIM_PENDING && meta?.previouslyActive === true)) &&
+    meta?.previousRole &&
+    meta?.role
+  ) {
+    return t("roleChange" as never, {
+      from: String(meta.previousRole),
+      to: String(meta.role),
+    });
+  }
 
   return null;
 }
