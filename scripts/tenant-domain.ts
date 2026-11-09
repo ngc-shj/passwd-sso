@@ -1088,12 +1088,15 @@ export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResu
         // The same reason, filed under the claim's own tenant: the user holds a
         // deactivated membership row there while active in a bootstrap tenant,
         // so the sign-in that would move them in was refused. `add --from`
-        // would move the claim out of the tenant it belongs to.
+        // would move the claim out of the tenant it belongs to. Directory sync
+        // declines a user another tenant owns, so it does not recreate a
+        // deleted row.
         printGroup(
           "Claims registered to the tenant the row is filed under, refused because the user holds a DEACTIVATED " +
-            "membership row there while active in a personal bootstrap tenant — not `add --from`: that tenant " +
-            "removes the row with SCIM `DELETE /Users/<userId>`, and the user signs in before the next directory " +
-            "sync recreates it:",
+            "membership row there while active in a personal bootstrap tenant — not `add --from`: if that tenant " +
+            "means to admit the user, it removes the row with SCIM `DELETE /Users/<userId>`, and the user's " +
+            "next SSO sign-in moves them in, with their bootstrap data (see the README's `tenant_mismatch` row " +
+            "for the two exceptions); a row the tenant deactivated on purpose stays:",
           UNMAPPED_BUCKET.OTHER_TENANT,
           OTHER_TENANT_ROWS.deactivatedRow,
         );

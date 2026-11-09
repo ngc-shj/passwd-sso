@@ -2378,6 +2378,10 @@ describe("tenant-domain CLI (C7)", () => {
           expect(refusedHeading).toBeGreaterThan(deactivatedHeading);
           expect(printed[deactivatedHeading]).toContain("SCIM `DELETE /Users/<userId>`");
           expect(printed[deactivatedHeading]).toContain("not `add --from`");
+          // Directory sync declines a user another tenant owns, so the delete
+          // is not a race against the next sync (#955).
+          expect(printed[deactivatedHeading]).toContain("next SSO sign-in moves them in");
+          expect(printed[deactivatedHeading]).not.toMatch(/recreat/i);
           // Every printed line that is not indented is a heading, so a row
           // belongs to the nearest one above it.
           const headingAbove = (tenantId: string, field: string) => {

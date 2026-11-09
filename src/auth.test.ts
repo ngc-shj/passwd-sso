@@ -862,9 +862,9 @@ describe("ensureTenantMembershipForSignIn", () => {
     // C13: audit_log tenant migration is now routed via SECURITY DEFINER
     // stored procedure (audit_log_tenant_migrate) instead of updateMany.
     expect(mockPrisma.$executeRaw).toHaveBeenCalled();
-    // passwordEntryHistory has no userId — filtered by tenantId only
+    // No user column: scoped through the parent entry (#955 S2)
     expect(mockPrisma.passwordEntryHistory.updateMany).toHaveBeenCalledWith({
-      where: { tenantId: TENANT_BOOTSTRAP },
+      where: { tenantId: TENANT_BOOTSTRAP, entry: { userId: "user-1" } },
       data: { tenantId: TENANT_CLAIMED },
     });
     expect(mockPrisma.vaultKey.updateMany).toHaveBeenCalledWith({
@@ -877,7 +877,7 @@ describe("ensureTenantMembershipForSignIn", () => {
       data: { tenantId: TENANT_CLAIMED },
     });
     expect(mockPrisma.emergencyAccessKeyPair.updateMany).toHaveBeenCalledWith({
-      where: { tenantId: TENANT_BOOTSTRAP },
+      where: { tenantId: TENANT_BOOTSTRAP, grant: { ownerId: "user-1" } },
       data: { tenantId: TENANT_CLAIMED },
     });
     expect(mockPrisma.passwordShare.updateMany).toHaveBeenCalledWith({
@@ -885,7 +885,7 @@ describe("ensureTenantMembershipForSignIn", () => {
       data: { tenantId: TENANT_CLAIMED },
     });
     expect(mockPrisma.shareAccessLog.updateMany).toHaveBeenCalledWith({
-      where: { tenantId: TENANT_BOOTSTRAP },
+      where: { tenantId: TENANT_BOOTSTRAP, share: { createdById: "user-1" } },
       data: { tenantId: TENANT_CLAIMED },
     });
     expect(mockPrisma.attachment.updateMany).toHaveBeenCalledWith({

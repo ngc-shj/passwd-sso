@@ -296,7 +296,7 @@ Evidence:
 - `withBypassRls` is allowlisted for 101 files (`ALLOWED_USAGE` in `scripts/checks/check-bypass-rls.mjs`). Each bypasses RLS intentionally for cross-tenant operations (audit writes, tenant resolution, admin key rotation, passkey sign-in, etc.).
 - Until enforce mode ships (#911), a bypass can still reach a table outside its grant. The database admits the reach and reports it (`rls.bypass_not_granted`). It does not refuse it. A report under normal traffic is a grant to fix before the flip.
 - `tenants` is under FORCE RLS with `tenants_tenant_isolation` (#923): a statement sees a tenant row under a bypass whose grant names `tenants`, or the row of the tenant its scope set. Tenant resolution at sign-in reads it under named bypass grants.
-- Bootstrap tenant migration assumes single-user tenants. Multi-user bootstrap tenants are not supported.
+- Bootstrap tenant migration requires the bootstrap tenant to have one active member, and moves only the migrating user's rows: the rows with no user column (password history, emergency-access key pairs, share access logs) are moved through their parent, so a deactivated member's rows stay behind. Multi-user bootstrap tenants are otherwise not supported.
 
 ### Conclusion (Section 7)
 - Multi-tenant isolation is enforced at DB level via FORCE RLS with CI guard scripts.

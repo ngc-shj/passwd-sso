@@ -563,24 +563,30 @@ async function claimedTenantMembership(
 
     // A membership row the user already holds in the target can only be a
     // deactivated one: the bootstrap membership is their active one, and
-    // `tenant_members_one_active_per_user` allows no second. Reactivating it is
-    // the target tenant's decision — SCIM, directory sync, its admins — not a
-    // sign-in's: row 4 leaves such a row deactivated (`update: {}`), and
-    // `tenant-domain realign` does too. Migrating anyway would delete the
-    // bootstrap membership and leave the user active nowhere, so the migration
-    // is refused here, before any write, and the user keeps their bootstrap
-    // tenant and its data. Filed under the target. Reachable on row 6 only: a
-    // tenant row 9a has just created has no members.
+    // `tenant_members_one_active_per_user` allows no second. A sign-in does not
+    // reactivate it: row 4 leaves such a row deactivated (`update: {}`), and
+    // `tenant-domain realign` does too, because a row the tenant deactivated on
+    // purpose (the IdP sent `active: false`, a later suspension) looks the same
+    // as one created deactivated for any other reason. Migrating anyway would
+    // delete the bootstrap membership and leave the user active nowhere, so the
+    // migration is refused here, before any write, and the user keeps their
+    // bootstrap tenant and its data. Filed under the target. Reachable on row 6
+    // only: a tenant row 9a has just created has no members.
     //
-    // No producer can reactivate this user today, so the refusal repeats on
-    // every sign-in. Directory sync created the row deactivated because the
-    // bootstrap membership is active, and refuses to reactivate it with
-    // ACTIVE_IN_ANOTHER_TENANT (`usersActiveInAnotherTenant` has no bootstrap
-    // exemption). SCIM reactivation meets `tenant_members_one_active_per_user`
-    // and answers 409. `realign` takes only users active nowhere. What works
-    // today: the target tenant deletes the row (SCIM `DELETE /Users/<userId>`,
-    // `deactivateScimUser`), and the user signs in before the next directory
-    // sync recreates it; the sign-in then finds no row and migrates.
+    // SCIM and directory sync do not reactivate the row or migrate the user
+    // either: they act only on users the tenant owns (`usersOwnedByAnotherTenant`,
+    // `resolveExistingUsersForTenant`), and the bootstrap tenant owns this one.
+    // Since that rule, neither creates such a row for a user another tenant
+    // owns, so this shape is left over from rows written before it. The way out
+    // is the target tenant's choice to admit the user: it deletes the row (SCIM
+    // `DELETE /Users/<id>`, `deactivateScimUser`, which also drops the user's
+    // external mapping), after which directory sync declines the user instead
+    // of writing a row, and their next SSO sign-in finds no row and migrates
+    // them, bootstrap data and audit history included. Two exceptions: with
+    // another active member in the bootstrap tenant, row 6b's
+    // `assertBootstrapSingleMember` throws, so that sign-in is filed as
+    // `provider_error` with no claim and leaves the `unmapped` report; and an
+    // OWNER-role row cannot be deleted this way (`deactivateScimUser` refuses).
     const priorMembership = await tx.tenantMember.findUnique({
       where: { tenantId_userId: { tenantId: target.id, userId } },
       select: { id: true },
@@ -643,8 +649,13 @@ async function claimedTenantMembership(
         where: { userId, tenantId: existingTenantId },
         data: { tenantId: target.id },
       });
+      // History, key pairs and share access logs have no user column: each is
+      // scoped through its parent to the rows that parent moves above or below.
+      // `assertBootstrapSingleMember` counts ACTIVE members only, so a bootstrap
+      // tenant can still hold a deactivated member's rows; by tenant alone, this
+      // migration carried them into the target.
       await tx.passwordEntryHistory.updateMany({
-        where: { tenantId: existingTenantId },
+        where: { tenantId: existingTenantId, entry: { userId } },
         data: { tenantId: target.id },
       });
       await tx.vaultKey.updateMany({
@@ -660,10 +671,8 @@ async function claimedTenantMembership(
         where: { ownerId: userId, tenantId: existingTenantId },
         data: { tenantId: target.id },
       });
-      // emergencyAccessKeyPair/shareAccessLog have no userId column;
-      // safe because bootstrap tenants are single-user by design.
       await tx.emergencyAccessKeyPair.updateMany({
-        where: { tenantId: existingTenantId },
+        where: { tenantId: existingTenantId, grant: { ownerId: userId } },
         data: { tenantId: target.id },
       });
       await tx.passwordShare.updateMany({
@@ -671,7 +680,7 @@ async function claimedTenantMembership(
         data: { tenantId: target.id },
       });
       await tx.shareAccessLog.updateMany({
-        where: { tenantId: existingTenantId },
+        where: { tenantId: existingTenantId, share: { createdById: userId } },
         data: { tenantId: target.id },
       });
       await tx.attachment.updateMany({

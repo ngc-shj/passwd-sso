@@ -17,7 +17,36 @@ import { randomBytes, randomUUID } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 import { NextRequest } from "next/server";
 
-const { nextAuthConfigs } = vi.hoisted(() => ({ nextAuthConfigs: [] as unknown[] }));
+const { nextAuthConfigs, mockFetchOktaUsers, scimTenant } = vi.hoisted(() => ({
+  nextAuthConfigs: [] as unknown[],
+  mockFetchOktaUsers: vi.fn(),
+  scimTenant: { id: "" },
+}));
+
+// The remedy cell runs a directory sync and a SCIM DELETE. Mocked as in
+// directory-sync-cross-tenant-users and scim-cross-tenant-users: the provider
+// fetch, credential decryption and SCIM token validation are system boundaries
+// that cell is not about. Nothing else this file loads imports them.
+vi.mock("@/lib/directory-sync/okta", () => ({ fetchOktaUsers: mockFetchOktaUsers }));
+vi.mock("@/lib/directory-sync/credentials", () => ({
+  decryptCredentials: () => JSON.stringify({ orgUrl: "https://example.okta.com", apiToken: "token" }),
+}));
+vi.mock("@/lib/scim/with-scim-auth", async () => {
+  const { SYSTEM_ACTOR_ID } = await import("@/lib/constants/app");
+  const { ACTOR_TYPE } = await import("@/lib/constants/audit/audit");
+  return {
+    authorizeScim: async () => ({
+      ok: true,
+      data: {
+        tokenId: "token-under-test",
+        tenantId: scimTenant.id,
+        createdById: null,
+        auditUserId: SYSTEM_ACTOR_ID,
+        actorType: ACTOR_TYPE.SYSTEM,
+      },
+    }),
+  };
+});
 
 // See audit-sentinel-claim-denial.integration.test.ts for why `next-auth`
 // itself is mocked. The config handed to it is kept: its signIn callback is
@@ -57,6 +86,8 @@ import { providerRef, resetIdentifierPepperForTests } from "@/lib/audit/identifi
 import { hashToken } from "@/lib/crypto/crypto-server";
 import { validateExtensionToken } from "@/lib/auth/tokens/extension-token";
 import { validateApiKey } from "@/lib/auth/tokens/api-key";
+import { DELETE as scimDeleteUser } from "@/app/api/scim/v2/Users/[id]/route";
+import { runDirectorySync } from "@/lib/directory-sync/engine";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { DEREGISTER_ACTOR_LABEL, TENANT_CLAIM_EVENT_OPERATION } from "@/lib/tenant/tenant-claim-event";
@@ -720,7 +751,7 @@ describe("tenant claim binding (C3/C4/C5)", () => {
   /**
    * The migration's writes that are not counters (`NON_COUNTER_WRITES`), but
    * the membership, which `placement` reads with its active flag. The three
-   * the migration moves by tenant alone are reached through their parent.
+   * with no user column are reached through their parent.
    */
   const NON_COUNTER_TABLES: Record<Exclude<NonCounterWriteHandle, "tenantMember">, OwnedTable> = {
     user: { select: `SELECT tenant_id FROM users WHERE id = $1::uuid`, seed: null },
@@ -1093,9 +1124,10 @@ describe("tenant claim binding (C3/C4/C5)", () => {
     /**
      * A user of a third tenant with a row in every moved table. The migration
      * moves `passwordEntryHistory`, `emergencyAccessKeyPair` and
-     * `shareAccessLog` by tenant alone, so these rows show it does not reach
-     * past the bootstrap tenant. `onTenant` receives the tenant before any row
-     * is seeded, so a seed that throws still leaves it to the caller's teardown.
+     * `shareAccessLog` through their parent, so these rows show it does not
+     * reach past the bootstrap tenant. `onTenant` receives the tenant before any
+     * row is seeded, so a seed that throws still leaves it to the caller's
+     * teardown.
      */
     async function seedBoundary(onTenant: (tenantId: string) => void): Promise<{ tenantId: string; userId: string }> {
       const tenantId = await ctx.createTenant();
@@ -1304,9 +1336,9 @@ describe("tenant claim binding (C3/C4/C5)", () => {
 
     /**
      * The target already holds a membership row for the member — deactivated,
-     * since the bootstrap membership is the active one. Reactivating it is the
-     * target tenant's decision, not a sign-in's, so the migration is refused
-     * before any write and the member keeps their bootstrap tenant.
+     * since the bootstrap membership is the active one. A sign-in does not
+     * reactivate a membership, so the migration is refused before any write and
+     * the member keeps their bootstrap tenant.
      */
     it("row 6, a deactivated membership row in the target: refused with tenant_mismatch, nothing written", async () => {
       stubModeEnv(CLAIM_BINDING_MODE.OFF);
@@ -1337,6 +1369,139 @@ describe("tenant claim binding (C3/C4/C5)", () => {
         expect(rows).toHaveLength(1);
         expect(rows[0]!.tenant_id).toBe(target.tenantId);
         expect(rows[0]!.metadata.reason).toBe("tenant_mismatch");
+      } finally {
+        await teardown(member, ...(member ? [member.home] : []), target.tenantId);
+      }
+    });
+
+    /**
+     * The remedy for the cell above (#955). The row is the shape directory sync
+     * wrote before it declined users another tenant owns: deactivated,
+     * SCIM-managed, with a User mapping. The target deletes it with SCIM
+     * DELETE; the next sync declines the user instead of writing the row back;
+     * the member's next sign-in migrates them. The DELETE's session
+     * invalidation stays in the target, so the bootstrap tenant's credentials
+     * survive it.
+     */
+    it("row 6, the deactivated row deleted with SCIM DELETE: the sync declines the member and the next sign-in migrates them", async () => {
+      stubModeEnv(CLAIM_BINDING_MODE.OFF);
+      const target = await claimedTenant("migrate-6-remedy");
+      const externalId = `okta-${randomUUID()}`;
+      const configId = randomUUID();
+      let member: (Victim & { providerAccountId: string }) | null = null;
+      try {
+        member = await seedBootstrapMember();
+        const { userId } = member;
+        await ctx.su.prisma.$transaction(async (tx) => {
+          await setBypassRlsGucs(tx);
+          await tx.$executeRawUnsafe(
+            `INSERT INTO tenant_members (id, tenant_id, user_id, role, deactivated_at, scim_managed, provisioning_source, created_at, updated_at)
+             VALUES ($1::uuid, $2::uuid, $3::uuid, 'MEMBER', now(), true, 'SCIM', now(), now())`,
+            randomUUID(), target.tenantId, userId,
+          );
+          await tx.$executeRawUnsafe(
+            `INSERT INTO scim_external_mappings (id, tenant_id, external_id, resource_type, internal_id, created_at, updated_at)
+             VALUES ($1::uuid, $2::uuid, $3, 'User', $4, now(), now())`,
+            randomUUID(), target.tenantId, externalId, userId,
+          );
+          await tx.$executeRawUnsafe(
+            `INSERT INTO directory_sync_configs
+               (id, tenant_id, provider, display_name, enabled, sync_interval_minutes,
+                encrypted_credentials, credentials_iv, credentials_auth_tag, status, created_at, updated_at)
+             VALUES ($1::uuid, $2::uuid, 'OKTA'::"DirectorySyncProvider", 'remedy-config', true, 60,
+                'cipher', 'iv', 'tag', 'IDLE'::"DirectorySyncStatus", now(), now())`,
+            configId, target.tenantId,
+          );
+        });
+        const inTarget = () =>
+          ctx.su.prisma.$transaction(async (tx) => {
+            await setBypassRlsGucs(tx);
+            const [row] = await tx.$queryRawUnsafe<{ members: number; mappings: number }[]>(
+              `SELECT (SELECT count(*)::int FROM tenant_members WHERE tenant_id = $1::uuid AND user_id = $2::uuid) AS members,
+                      (SELECT count(*)::int FROM scim_external_mappings WHERE tenant_id = $1::uuid) AS mappings`,
+              target.tenantId, userId,
+            );
+            return row!;
+          });
+        const signIn = () =>
+          capturedSignIn()(signInParams(member!.email, target.claim, SIGN_IN_PROVIDER, member!.providerAccountId));
+
+        // The stuck state: refused, filed under the target.
+        expect(await signIn()).toBe(false);
+        expect((await outboxRowsForClaim(target.claim)).map((r) => r.metadata.reason)).toEqual(["tenant_mismatch"]);
+
+        scimTenant.id = target.tenantId;
+        const res = await scimDeleteUser(
+          new NextRequest(`http://localhost/api/scim/v2/Users/${userId}`, { method: "DELETE" }),
+          { params: Promise.resolve({ id: userId }) },
+        );
+        expect(res.status).toBe(204);
+        expect(await inTarget()).toEqual({ members: 0, mappings: 0 });
+        // Revocation stayed in the target: the bootstrap session and extension token live on.
+        expect(await ctx.su.prisma.session.count({ where: { userId, tenantId: member.home } })).toBe(1);
+        expect(await validateSeededExtensionToken(userId)).toMatchObject({ ok: false, error: "EXTENSION_TOKEN_DPOP_INVALID" });
+
+        mockFetchOktaUsers.mockResolvedValue([
+          {
+            id: externalId,
+            profile: { email: member.email, displayName: "Bootstrap Member", firstName: "First", lastName: "Last" },
+            status: "ACTIVE",
+          },
+        ]);
+        const result = await runDirectorySync({ configId, tenantId: target.tenantId });
+        expect(result).toMatchObject({ success: true, usersCreated: 0, usersRefused: 1 });
+        expect(await inTarget()).toEqual({ members: 0, mappings: 0 });
+        const refusals = await ctx.su.prisma.$transaction(async (tx) => {
+          await setBypassRlsGucs(tx);
+          return tx.$queryRawUnsafe<{ target_type: string; target_id: string; metadata: Record<string, unknown> }[]>(
+            `SELECT payload->>'targetType' AS target_type, payload->>'targetId' AS target_id, payload->'metadata' AS metadata
+               FROM audit_outbox
+              WHERE tenant_id = $1::uuid AND payload->>'action' = 'DIRECTORY_SYNC_ACTIVATION_REFUSED'`,
+            target.tenantId,
+          );
+        });
+        expect(refusals).toEqual([
+          {
+            target_type: "DirectorySyncConfig",
+            target_id: configId,
+            metadata: expect.objectContaining({ userId: null, reason: "owned_by_another_tenant" }),
+          },
+        ]);
+
+        expect(await signIn()).toBe(true);
+        expect((await placement(userId)).members).toEqual([{ tenantId: target.tenantId, deactivatedAt: null }]);
+        expect(await tenantOf(userId)).toBe(target.tenantId);
+      } finally {
+        mockFetchOktaUsers.mockReset();
+        scimTenant.id = "";
+        await teardown(member, ...(member ? [member.home] : []), target.tenantId);
+      }
+    });
+
+    /**
+     * Row 6b counts ACTIVE members, so a bootstrap tenant can also hold a
+     * deactivated one. History, emergency-access key pairs and share access logs
+     * carry no user column; moved by tenant alone, the departed member's rows
+     * went to the target with the migrating member's (#955 S2).
+     */
+    it("row 6, a deactivated second member in the bootstrap tenant: their rows stay behind", async () => {
+      stubModeEnv(CLAIM_BINDING_MODE.OFF);
+      const target = await claimedTenant("migrate-6-departed-peer");
+      let member: (Victim & { providerAccountId: string }) | null = null;
+      try {
+        member = await seedBootstrapMember();
+        const departed = await ctx.createUser(member.home);
+        await linkAccount(departed, member.home);
+        await seedOwnedRows(departed, member.home);
+        await deactivateMemberships(departed);
+        await expectSeededEverywhere(departed, member.home);
+
+        expect(
+          await capturedSignIn()(signInParams(member.email, target.claim, SIGN_IN_PROVIDER, member.providerAccountId)),
+        ).toBe(true);
+
+        expect(await placement(member.userId)).toEqual(movedTo(target.tenantId, member.home));
+        expect((await placement(departed)).tables).toEqual(movedTo(member.home).tables);
       } finally {
         await teardown(member, ...(member ? [member.home] : []), target.tenantId);
       }
