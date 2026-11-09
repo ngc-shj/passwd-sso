@@ -1095,8 +1095,8 @@ export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResu
           "Claims registered to the tenant the row is filed under, refused because the user holds a DEACTIVATED " +
             "membership row there while active in a personal bootstrap tenant — not `add --from`: if that tenant " +
             "means to admit the user, it removes the row with SCIM `DELETE /Users/<userId>`, and the user's " +
-            "next SSO sign-in moves them in, with their bootstrap data; a row the tenant deactivated on purpose " +
-            "stays:",
+            "next SSO sign-in moves them in, with their bootstrap data, unless their bootstrap tenant has another " +
+            "active member; a row the tenant deactivated on purpose stays:",
           UNMAPPED_BUCKET.OTHER_TENANT,
           OTHER_TENANT_ROWS.deactivatedRow,
         );
