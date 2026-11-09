@@ -3,7 +3,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { useTeamLoginFormState } from "@/hooks/team/use-team-login-form-state";
-import { aadModelDecrypt } from "@/__tests__/helpers/aad-model-decrypt";
+import { aadGatedDecrypt, aadModelDecrypt } from "@/__tests__/helpers/aad-model-decrypt";
 import { buildTeamEntryAAD } from "@/lib/crypto/crypto-aad";
 
 const { mockFetchApi, mockDecryptData } = vi.hoisted(() => ({
@@ -243,6 +243,48 @@ describe("useTeamLoginFormState password-reuse history (strict team entry AAD)",
     const last = setPolicyViolations.mock.calls.at(-1)?.[0] as { key: string }[];
     expect(last.some((v) => v.key === "policyPasswordReuse")).toBe(flagsReuse);
     expect(mockDecryptData.mock.calls[0][2]).toEqual(buildTeamEntryAAD("team-1", "entry-1", "blob", 1));
+  });
+
+  // T8: each history row opens at the blob vaultType and its OWN ItemKey version.
+  it.each([
+    ["control: reads a history blob sealed at blob / the row's ItemKey version", "blob", 3, true],
+    ["skips a history blob sealed at the overview vaultType", "overview", 3, false],
+    ["skips a history blob sealed at another ItemKey version", "blob", 2, false],
+  ] as const)("%s (T8)", async (_label, vaultType, sealedVersion, flagsReuse) => {
+    mockFetchApi.mockResolvedValue({
+      ok: true,
+      json: async () => [{
+        id: "h1",
+        encryptedBlob: { ciphertext: "blob", iv: "iv", authTag: "tag" },
+        aadVersion: 1,
+        teamKeyVersion: 1,
+        itemKeyVersion: 3,
+        itemKeyId: "ik-1",
+      }],
+    });
+    mockDecryptData.mockReset();
+    mockDecryptData.mockImplementation(
+      aadGatedDecrypt(buildTeamEntryAAD("team-1", "entry-1", vaultType, sealedVersion), JSON.stringify({ password: "reused-pw" })),
+    );
+    const setPolicyViolations = vi.fn();
+
+    const { result } = renderHook(() =>
+      useTeamLoginFormState({
+        teamId: "team-1",
+        editData: {
+          id: "entry-1", title: "T", username: null, password: "current", url: null, notes: null,
+          itemKeyVersion: 1, itemKeyId: "ik-1", teamKeyVersion: 1,
+        },
+        teamPolicy: { ...NO_POLICY, passwordHistoryCount: 5 },
+        setPolicyViolations,
+      }),
+    );
+    await waitFor(() => expect(mockDecryptData).toHaveBeenCalled());
+    await act(async () => {});
+    act(() => result.current.setPassword("reused-pw"));
+
+    const last = setPolicyViolations.mock.calls.at(-1)?.[0] as { key: string }[];
+    expect(last.some((v) => v.key === "policyPasswordReuse")).toBe(flagsReuse);
   });
 });
 

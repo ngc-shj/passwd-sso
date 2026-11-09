@@ -1,4 +1,5 @@
-import { buildTeamEntryAAD, AAD_VERSION } from "@/lib/crypto/crypto-aad";
+import { AAD_VERSION } from "@/lib/crypto/crypto-aad";
+import { sealTeamEntryField } from "@/lib/crypto/crypto-team";
 import { apiPath } from "@/lib/constants";
 import { buildEncryptedEntryBody, submitEntry } from "@/lib/vault/entry-save-core";
 import type { EntryTypeValue } from "@/lib/constants";
@@ -47,17 +48,13 @@ export async function saveTeamEntry({
     throw new Error("encryptedItemKey is required when itemKeyVersion >= 1");
   }
 
-  const blobAAD = buildTeamEntryAAD(teamId, entryId, "blob", itemKeyVersion);
-  const overviewAAD = buildTeamEntryAAD(teamId, entryId, "overview", itemKeyVersion);
-
   const body = await buildEncryptedEntryBody({
     mode,
     entryId,
-    encryptionKey,
+    seal: (plaintext, vaultType) =>
+      sealTeamEntryField(plaintext, encryptionKey, { teamId, entryId, vaultType, itemKeyVersion }),
     fullBlob,
     overviewBlob,
-    blobAAD,
-    overviewAAD,
     tagIds,
     extra: {
       aadVersion: AAD_VERSION,

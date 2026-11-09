@@ -1,4 +1,5 @@
-import { buildPersonalEntryAAD, VAULT_TYPE, AAD_VERSION } from "@/lib/crypto/crypto-aad";
+import { buildPersonalEntryAAD, AAD_VERSION } from "@/lib/crypto/crypto-aad";
+import { encryptData } from "@/lib/crypto/crypto-client";
 import { API_PATH, apiPath } from "@/lib/constants";
 import { buildEncryptedEntryBody, submitEntry } from "@/lib/vault/entry-save-core";
 import type { EntryTypeValue } from "@/lib/constants";
@@ -37,17 +38,13 @@ export async function savePersonalEntry({
   }
 
   const entryId = mode === "create" ? crypto.randomUUID() : initialId!;
-  const blobAAD = buildPersonalEntryAAD(userId, entryId, VAULT_TYPE.BLOB);
-  const overviewAAD = buildPersonalEntryAAD(userId, entryId, VAULT_TYPE.OVERVIEW);
-
   const body = await buildEncryptedEntryBody({
     mode,
     entryId,
-    encryptionKey,
+    seal: (plaintext, vaultType) =>
+      encryptData(plaintext, encryptionKey, buildPersonalEntryAAD(userId, entryId, vaultType)),
     fullBlob,
     overviewBlob,
-    blobAAD,
-    overviewAAD,
     tagIds,
     extra: {
       keyVersion,

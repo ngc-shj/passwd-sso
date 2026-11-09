@@ -53,11 +53,12 @@ const teamCryptoMocks = vi.hoisted(() => ({
   deriveItemEncryptionKey: vi.fn().mockResolvedValue("item-enc-key"),
   buildItemKeyWrapAAD: vi.fn().mockReturnValue(new Uint8Array([5, 6])),
 }));
-// buildTeamEntryAAD stays real: AAD bytes are computed from the arguments,
-// never a fixed value that would match any reader.
+// importOriginal spread: openTeamEntryField and buildTeamEntryAAD stay real, so
+// AAD bytes are computed from the arguments, never a fixed value that would
+// match any reader.
 vi.mock("../../lib/crypto-team", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/crypto-team")>()),
   ...teamCryptoMocks,
-  buildTeamEntryAAD: (await importOriginal<typeof import("../../lib/crypto-team")>()).buildTeamEntryAAD,
 }));
 
 const ORIGIN = "http://router.example:8080";

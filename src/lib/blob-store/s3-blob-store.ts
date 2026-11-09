@@ -1,12 +1,14 @@
 import {
   BLOB_STORAGE,
   type AttachmentBlobStore,
+  type BlobObjectListing,
 } from "@/lib/blob-store/types";
 import { loadCloudBlobConfig } from "@/lib/blob-store/config";
 import {
   BLOB_CONTENT_TYPE,
 } from "@/lib/blob-store/constants";
-import { buildObjectKey, encodeObjectRef, resolveObjectRefKey } from "@/lib/blob-store/object-ref";
+import { blobMarkerKey, buildObjectKey, encodeObjectRef, resolveObjectRefKey } from "@/lib/blob-store/object-ref";
+import { createdUnlessExists, HTTP_PRECONDITION_FAILED, nullIfNotFound } from "@/lib/blob-store/errors";
 import { streamBodyToBuffer } from "@/lib/blob-store/stream";
 import { requireOptionalModule } from "@/lib/blob-store/runtime-module";
 
@@ -19,6 +21,7 @@ type S3Module = {
   PutObjectCommand: new (input: unknown) => unknown;
   GetObjectCommand: new (input: unknown) => unknown;
   DeleteObjectCommand: new (input: unknown) => unknown;
+  ListObjectsV2Command: new (input: unknown) => unknown;
 };
 
 let s3ClientPromise: Promise<{
@@ -26,6 +29,7 @@ let s3ClientPromise: Promise<{
   PutObjectCommand: new (input: unknown) => unknown;
   GetObjectCommand: new (input: unknown) => unknown;
   DeleteObjectCommand: new (input: unknown) => unknown;
+  ListObjectsV2Command: new (input: unknown) => unknown;
 }> | null = null;
 
 async function getS3Client({ region, forcePathStyle }: { region: string; forcePathStyle: boolean }) {
@@ -38,6 +42,7 @@ async function getS3Client({ region, forcePathStyle }: { region: string; forcePa
         PutObjectCommand: mod.PutObjectCommand as new (input: unknown) => unknown,
         GetObjectCommand: mod.GetObjectCommand as new (input: unknown) => unknown,
         DeleteObjectCommand: mod.DeleteObjectCommand as new (input: unknown) => unknown,
+        ListObjectsV2Command: mod.ListObjectsV2Command as new (input: unknown) => unknown,
       };
     })();
   }
@@ -95,6 +100,57 @@ export const s3BlobStore: AttachmentBlobStore = {
         Bucket: config.bucket,
         Key: key,
       }),
+    );
+  },
+  async listObjects(prefix, { cursor, pageSize }) {
+    const config = loadCloudBlobConfig(BLOB_STORAGE.S3);
+    const { client, ListObjectsV2Command } = await getS3Client(config);
+    const response = await client.send(
+      new ListObjectsV2Command({
+        Bucket: config.bucket,
+        Prefix: prefix,
+        MaxKeys: pageSize,
+        ...(cursor ? { ContinuationToken: cursor } : {}),
+      }),
+    );
+    // ListObjectsV2CommandOutput's fields this reads (s3-blob-store.test.ts
+    // types its fixtures against the SDK output type).
+    const page = response as {
+      Contents?: { Key?: string; LastModified?: Date }[];
+      IsTruncated?: boolean;
+      NextContinuationToken?: string;
+    };
+    const objects: BlobObjectListing[] = [];
+    for (const item of page.Contents ?? []) {
+      if (item.Key && item.LastModified) objects.push({ key: item.Key, lastModified: item.LastModified });
+    }
+    const next = page.IsTruncated ? page.NextContinuationToken : undefined;
+    return next ? { objects, cursor: next } : { objects };
+  },
+  async readMarker() {
+    const config = loadCloudBlobConfig(BLOB_STORAGE.S3);
+    const { client, GetObjectCommand } = await getS3Client(config);
+    return nullIfNotFound(async () => {
+      const response = await client.send(new GetObjectCommand({ Bucket: config.bucket, Key: blobMarkerKey() }));
+      return (await streamBodyToBuffer((response as { Body?: unknown }).Body)).toString("utf8");
+    });
+  },
+  async createMarker(body) {
+    const config = loadCloudBlobConfig(BLOB_STORAGE.S3);
+    const { client, PutObjectCommand } = await getS3Client(config);
+    return createdUnlessExists(
+      () =>
+        client.send(
+          new PutObjectCommand({
+            Bucket: config.bucket,
+            Key: blobMarkerKey(),
+            Body: Buffer.from(body, "utf8"),
+            ContentType: BLOB_CONTENT_TYPE.TEXT_PLAIN,
+            // Conditional create: the store refuses (412) when the key exists.
+            IfNoneMatch: "*",
+          }),
+        ),
+      [HTTP_PRECONDITION_FAILED],
     );
   },
   toStored(data) {

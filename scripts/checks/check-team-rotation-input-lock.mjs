@@ -70,7 +70,15 @@
  * "before" is source order; callers are followed one level, in the same file;
  * an alias of the model (`const tm = tx.teamMember`) or a `*Unsafe` raw call
  * is not seen. The real-DB races in team-tenant-departure.integration.test.ts
- * pin that the lock and the write share a transaction.
+ * pin that the lock and the write share a transaction. SQL inside a database
+ * function is not seen either: team_member_key_prune (the retention GC
+ * worker's TeamMemberKey prune, #1009) deletes team_member_keys rows in its
+ * migration-defined body, not through a TS call site; it locks each team it
+ * prunes FOR NO KEY UPDATE (SKIP LOCKED) before deciding, deletes only
+ * versions below the team's current one that nothing references, and its
+ * concurrency argument and race cells are in
+ * team-member-key-prune.integration.test.ts (its statement order is checked
+ * by check-team-key-version-refs.mjs).
  *
  * Exit 0 = clean. Exit 1 = a violation, a stale exemption, or site counts that
  * differ from the pinned ones (a scan that lost sites, or a site to review).

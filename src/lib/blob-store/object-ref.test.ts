@@ -7,9 +7,12 @@ import {
   validateObjectRefKey,
   resolveObjectRefKey,
   BlobRefInvalidError,
+  parseObjectKey,
+  blobMarkerKey,
   type BlobObjectRef,
 } from "@/lib/blob-store/object-ref";
 import { BLOB_OBJECT_SCOPE } from "@/lib/blob-store/constants";
+import type { AttachmentBlobPutContext } from "@/lib/blob-store/types";
 
 describe("encodeObjectRef / decodeObjectRef roundtrip", () => {
   it("encodes and decodes a simple key", () => {
@@ -261,5 +264,88 @@ describe("resolveObjectRefKey", () => {
     }
     expect(caught).toBeInstanceOf(BlobRefInvalidError);
     expect((caught as Error).message).not.toContain(key);
+  });
+});
+
+describe("parseObjectKey", () => {
+  const TEAM = "11111111-1111-4111-8111-111111111111";
+  const ENTRY = "22222222-2222-4222-8222-222222222222";
+  const ATT = "33333333-3333-4333-8333-333333333333";
+  const GEN = "0123456789abcdef0123456789abcdef";
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it.each<[string, AttachmentBlobPutContext]>([
+    ["team, generation", { attachmentId: ATT, entryId: ENTRY, teamId: TEAM, generation: GEN }],
+    ["personal, generation", { attachmentId: ATT, entryId: ENTRY, generation: GEN }],
+  ])("inverts buildObjectKey (%s) and agrees with validateObjectRefKey", (_label, context) => {
+    vi.stubEnv("BLOB_OBJECT_PREFIX", "tenant-a/attachments/");
+    const key = buildObjectKey(context);
+    const parsed = parseObjectKey(key);
+    expect(parsed).toEqual({
+      scope: context.teamId ? BLOB_OBJECT_SCOPE.TEAM : BLOB_OBJECT_SCOPE.PERSONAL,
+      ...(context.teamId ? { teamId: TEAM } : {}),
+      entryId: ENTRY,
+      attachmentId: ATT,
+      generation: GEN,
+    });
+    expect(parsed && validateObjectRefKey(key, parsed)).toBe(true);
+  });
+
+  it.each([
+    ["team", `team/${TEAM}/${ENTRY}/${ATT}.bin`, { scope: "team", teamId: TEAM, entryId: ENTRY, attachmentId: ATT }],
+    ["personal", `personal/${ENTRY}/${ATT}.bin`, { scope: "personal", entryId: ENTRY, attachmentId: ATT }],
+  ])("parses the legacy %s form, which validateObjectRefKey also accepts", (_label, key, expected) => {
+    const parsed = parseObjectKey(key);
+    expect(parsed).toEqual(expected);
+    expect(parsed && validateObjectRefKey(key, parsed)).toBe(true);
+  });
+
+  it("returns the attachment id lowercased", () => {
+    expect(parseObjectKey(`personal/${ENTRY}/${ATT.toUpperCase()}/${GEN}.bin`)?.attachmentId).toBe(ATT);
+  });
+
+  it.each([
+    ["a non-UUID attachment id", `personal/${ENTRY}/att-1/${GEN}.bin`],
+    ["a non-UUID entry id", `personal/entry-1/${ATT}/${GEN}.bin`],
+    ["a non-UUID team id", `team/team-1/${ENTRY}/${ATT}/${GEN}.bin`],
+    ["an uppercase generation", `personal/${ENTRY}/${ATT}/${GEN.toUpperCase()}.bin`],
+    ["a missing .bin suffix", `personal/${ENTRY}/${ATT}/${GEN}`],
+    ["an extra segment", `personal/x/${ENTRY}/${ATT}/${GEN}.bin`],
+    ["an unknown scope", `shared/${ENTRY}/${ATT}/${GEN}.bin`],
+    ["the marker", ".passwd-sso-deployment"],
+  ])("returns null for %s", (_label, key) => {
+    expect(parseObjectKey(key)).toBeNull();
+  });
+
+  it("returns null for a key under another prefix (control: the same tail under the current prefix parses)", () => {
+    vi.stubEnv("BLOB_OBJECT_PREFIX", "current");
+    const tail = `personal/${ENTRY}/${ATT}/${GEN}.bin`;
+    expect(parseObjectKey(`previous/${tail}`)).toBeNull();
+    expect(parseObjectKey(tail)).toBeNull();
+    expect(parseObjectKey(`current/${tail}`)).not.toBeNull();
+  });
+
+  it("returns null for the marker key under a prefix", () => {
+    vi.stubEnv("BLOB_OBJECT_PREFIX", "current");
+    expect(parseObjectKey(blobMarkerKey())).toBeNull();
+  });
+});
+
+describe("blobMarkerKey", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("has no leading slash when the prefix is empty", () => {
+    vi.stubEnv("BLOB_OBJECT_PREFIX", "");
+    expect(blobMarkerKey()).toBe(".passwd-sso-deployment");
+  });
+
+  it("sits under the prefix, normalised like buildObjectKey's", () => {
+    vi.stubEnv("BLOB_OBJECT_PREFIX", "tenant-a//");
+    expect(blobMarkerKey()).toBe("tenant-a/.passwd-sso-deployment");
   });
 });

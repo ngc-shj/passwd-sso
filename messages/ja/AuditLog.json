@@ -101,6 +101,7 @@
   "TEAM_KEY_ROTATION_CARRY": "チームキーローテーションでエントリを持ち越し",
   "TEAM_ENTRY_REKEY": "チームエントリを新しいキーで再暗号化",
   "TEAM_ATTACHMENT_MIGRATE": "チームの添付ファイルを現在の形式に変換",
+  "TEAM_MEMBER_KEY_PRUNED": "使われなくなったチームキーのバージョンを削除",
   "TEAM_MEMBER_KEY_DISTRIBUTE": "メンバー鍵を配布",
   "TEAM_MEMBER_KEY_OLD_VERSION_READ": "旧バージョンのチーム鍵を取得",
   "teamAuditLog": "監査ログ — {teamName}",

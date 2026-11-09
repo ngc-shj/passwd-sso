@@ -1,14 +1,16 @@
-import { encryptData } from "@/lib/crypto/crypto-client";
+import type { EncryptedData } from "@/lib/crypto/crypto-client";
+import { VAULT_TYPE, type VaultType } from "@/lib/crypto/crypto-aad";
 import { fetchApi } from "@/lib/url-helpers";
+
+/** Seals one entry field; the scope's own sealer binds its AAD (personal "PV", team "OV"). */
+export type SealEntryField = (plaintext: string, vaultType: VaultType) => Promise<EncryptedData>;
 
 interface BuildEncryptedBodyParams {
   mode: "create" | "edit";
   entryId: string;
-  encryptionKey: CryptoKey;
+  seal: SealEntryField;
   fullBlob: string;
   overviewBlob: string;
-  blobAAD?: Uint8Array;
-  overviewAAD?: Uint8Array;
   tagIds: string[];
   /** Extra fields merged into the body (scope-specific: keyVersion, aadVersion, team fields, etc.) */
   extra: Record<string, unknown>;
@@ -18,23 +20,21 @@ interface BuildEncryptedBodyParams {
 
 /**
  * Shared mechanics for personal and team entry save:
- * 1. Encrypt blob + overview with scope-specific AAD
+ * 1. Seal blob + overview with the scope's sealer
  * 2. Build request body with common + scope-specific fields
  */
 export async function buildEncryptedEntryBody({
   mode,
   entryId,
-  encryptionKey,
+  seal,
   fullBlob,
   overviewBlob,
-  blobAAD,
-  overviewAAD,
   tagIds,
   extra,
   optionals,
 }: BuildEncryptedBodyParams): Promise<Record<string, unknown>> {
-  const encryptedBlob = await encryptData(fullBlob, encryptionKey, blobAAD);
-  const encryptedOverview = await encryptData(overviewBlob, encryptionKey, overviewAAD);
+  const encryptedBlob = await seal(fullBlob, VAULT_TYPE.BLOB);
+  const encryptedOverview = await seal(overviewBlob, VAULT_TYPE.OVERVIEW);
 
   const body: Record<string, unknown> = {
     ...(mode === "create" ? { id: entryId } : {}),

@@ -2853,6 +2853,7 @@ const POOL_RULE_ALLOWLIST = new Map([
   ["src/__tests__/db-integration/statement-text-settings.integration.test.ts", "superuser client reading pg_settings and issuing SET LOCAL in rolled-back transactions; no bypass"],
   ["src/__tests__/db-integration/audit-db-grants.integration.test.ts", "the superuser client that drives the grant audit under test"],
   ["src/__tests__/db-integration/retire-dcr-cleanup-worker.integration.test.ts", "superuser clients that run the role-retirement migration body under test and check its residue"],
+  ["src/__tests__/db-integration/team-member-key-prune.integration.test.ts", "superuser clients for the rolled-back RDS-shaped definer-owner cell and its fresh-connection leak check, and a passwd_app client probing the EXECUTE denial; none sets a bypass through application code"],
   ["src/__tests__/db-integration/rls-bypass-grants.integration.test.ts", "the old-code cell: a pool deliberately WITHOUT the factory's listener, proving report mode admits old code (E2)"],
 ]);
 // A regex, as check-raw-sql-usage matches it: a string literal naming a Prisma

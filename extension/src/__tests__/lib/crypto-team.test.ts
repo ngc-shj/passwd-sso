@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { hexDecode, hexEncode, type EncryptedData } from "../../lib/crypto";
+import { encryptData, hexDecode, hexEncode, type EncryptedData } from "../../lib/crypto";
 import {
   buildTeamEntryAAD,
   buildItemKeyWrapAAD,
@@ -12,6 +12,8 @@ import {
   unwrapTeamKey,
   unwrapItemKey,
   unwrapTeamAttachmentCek,
+  openTeamEntryField,
+  type TeamEntryAadContext,
   type TeamKeyWrapContext,
   type TeamAttachmentCekWrapContext,
 } from "../../lib/crypto-team";
@@ -88,21 +90,19 @@ describe("crypto-team AAD builders", () => {
     });
 
     it("produces different output for different teamId", () => {
-      const a = buildTeamEntryAAD("team-1", "entry-1");
-      const b = buildTeamEntryAAD("team-2", "entry-1");
+      const a = buildTeamEntryAAD("team-1", "entry-1", "blob", 0);
+      const b = buildTeamEntryAAD("team-2", "entry-1", "blob", 0);
       expect(a).not.toEqual(b);
     });
 
     it("produces different output for different entryId", () => {
-      const a = buildTeamEntryAAD("team-1", "entry-1");
-      const b = buildTeamEntryAAD("team-1", "entry-2");
+      const a = buildTeamEntryAAD("team-1", "entry-1", "blob", 0);
+      const b = buildTeamEntryAAD("team-1", "entry-2", "blob", 0);
       expect(a).not.toEqual(b);
     });
 
-    it("defaults vaultType to blob and itemKeyVersion to 0", () => {
-      const explicit = buildTeamEntryAAD("team-1", "entry-1", "blob", 0);
-      const defaulted = buildTeamEntryAAD("team-1", "entry-1");
-      expect(defaulted).toEqual(explicit);
+    it("has no parameter defaults (every argument is required)", () => {
+      expect(buildTeamEntryAAD.length).toBe(4);
     });
   });
 
@@ -488,6 +488,67 @@ describe("unwrapTeamAttachmentCek round-trip", () => {
     await expect(
       unwrapTeamAttachmentCek(wrapped, await deriveItemEncryptionKey(itemKey), ctx),
     ).rejects.toThrow();
+  });
+});
+
+// ─── openTeamEntryField (twin of the web helper) ─────────────────
+
+describe("openTeamEntryField", () => {
+  const ctx: TeamEntryAadContext = { teamId: "t", entryId: "e", vaultType: "blob", itemKeyVersion: 2 };
+  const newKey = () => crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+
+  it("opens a field sealed at buildTeamEntryAAD(ctx)", async () => {
+    const key = await newKey();
+    const enc = await encryptData("x", key, buildTeamEntryAAD("t", "e", "blob", 2));
+    expect(await openTeamEntryField(enc, key, ctx)).toBe("x");
+  });
+
+  it.each([
+    ["teamId", { teamId: "t2" }],
+    ["entryId", { entryId: "e2" }],
+    ["vaultType", { vaultType: "overview" as const }],
+    ["itemKeyVersion", { itemKeyVersion: 1 }],
+  ])("fails when only %s differs", async (_field, change) => {
+    const key = await newKey();
+    const enc = await encryptData("x", key, buildTeamEntryAAD("t", "e", "blob", 2));
+    await expect(openTeamEntryField(enc, key, { ...ctx, ...change })).rejects.toThrow();
+  });
+
+  it("refuses a no-AAD ciphertext", async () => {
+    const key = await newKey();
+    await expect(openTeamEntryField(await encryptData("x", key), key, ctx)).rejects.toThrow();
+  });
+});
+
+// The same golden vectors as src/__tests__/aad-parity.test.ts ("team entry
+// golden ciphertext at itemKeyVersion 2") and iOS AADParityTests.swift.
+describe("team entry golden ciphertext at itemKeyVersion 2", () => {
+  const KEY_HEX = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
+  const GOLDEN = {
+    blob: {
+      enc: { ciphertext: "149f4ea11fb1b2578c26bf62b2c88026df32fd5fde198dc3842bafb46b7facc154", iv: "0a0b0c0d0e0f101112131415", authTag: "5b988622130061a798910620926ca826" },
+      plaintext: '{"title":"golden","password":"p"}',
+    },
+    overview: {
+      enc: { ciphertext: "edde55fdb54dd5f8783a9e1e77d16b330d4d", iv: "1a1b1c1d1e1f202122232425", authTag: "207483b8e1a7a43fa475366bc2e27be0" },
+      plaintext: '{"title":"golden"}',
+    },
+  } as const;
+  const ctxOf = (vaultType: "blob" | "overview"): TeamEntryAadContext => ({ teamId: "t", entryId: "e", vaultType, itemKeyVersion: 2 });
+  const importKey = () =>
+    crypto.subtle.importKey("raw", new Uint8Array(hexDecode(KEY_HEX)), "AES-GCM", false, ["decrypt"]);
+
+  it.each(["blob", "overview"] as const)("opens the golden %s", async (vaultType) => {
+    expect(await openTeamEntryField(GOLDEN[vaultType].enc, await importKey(), ctxOf(vaultType))).toBe(GOLDEN[vaultType].plaintext);
+  });
+
+  it.each([
+    ["teamId", { teamId: "t2" }],
+    ["entryId", { entryId: "e2" }],
+    ["vaultType", { vaultType: "overview" as const }],
+    ["itemKeyVersion", { itemKeyVersion: 1 }],
+  ])("does not open the golden blob when only %s differs", async (_field, change) => {
+    await expect(openTeamEntryField(GOLDEN.blob.enc, await importKey(), { ...ctxOf("blob"), ...change })).rejects.toThrow();
   });
 });
 

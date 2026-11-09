@@ -3,9 +3,11 @@
  *
  * Exports one sweep per registry kind (sweepExpiryEntry, sweepGuardedExpiryEntry,
  * sweepAuditProvenanceEntry, sweepAuditLogs, sweepPerTenantAge, sweepTrashEntry),
- * the access-request status sweep (sweepExpiredAccessRequests), the worker-side
- * audit enqueue (enqueueAuditInWorkerTx), and sweepOnce, which orchestrates one
- * full registry sweep plus the heartbeat audit.
+ * the access-request status sweep (sweepExpiredAccessRequests), the team key
+ * prune (sweepTeamMemberKeys), the orphan-blob sweep's row read
+ * (readAttachmentRefs), the worker-side audit enqueue (enqueueAuditInWorkerTx),
+ * and sweepOnce, which orchestrates one full registry sweep, the two dedicated
+ * sweeps, and the heartbeat audit.
  *
  * The RLS bypass is set only by the module-private inSweepTx, which opens each
  * sweep's transaction; every sweep that takes a tx asserts the bypass state its
@@ -20,6 +22,7 @@
 import { PrismaClient } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
 import { getLogger } from "@/lib/logger";
+import { errorLogFields } from "@/lib/logger/error-fields";
 import {
   AUDIT_SCOPE,
   AUDIT_ACTION,
@@ -51,6 +54,7 @@ import {
   type RetentionEntry,
 } from "./registry";
 import { AUDIT_IP_MAX_LENGTH, USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
+import { AUDIT_TARGET_TYPE } from "@/lib/constants/audit/audit-target";
 import {
   BYPASS_GRANT,
   grantForTables,
@@ -64,6 +68,24 @@ import {
   deleteAttachmentBlobs,
   type AttachmentBlobRef,
 } from "@/lib/blob-store/cleanup";
+import { BLOB_STORAGE, getAttachmentBlobStore } from "@/lib/blob-store";
+import { BLOB_SWEEP_MODE } from "@/lib/blob-store/constants";
+import {
+  BLOB_SWEEP_PAGE_SIZE,
+  sweepOrphanBlobs,
+  type AttachmentRefRow,
+  type BlobCursor,
+  type BlobSweepOptions,
+} from "./sweep-blob-orphans";
+
+/**
+ * The error's code for the per-entry failure log (never its message), read
+ * through errorLogFields so a raw-query failure reports the driver SQLSTATE
+ * (42501 from the prune's bypass check) rather than Prisma's P2010 wrapper.
+ */
+function errCode(err: unknown): string {
+  return errorLogFields(err).code;
+}
 
 /**
  * Fixed "no live dependents" guard SQL fragments, keyed by GuardName.
@@ -115,6 +137,11 @@ export type EmitFn = (
   payload: AuditOutboxPayload,
 ) => Promise<void>;
 
+/** The orphan-blob sweep's settings; mode `off` (the default) never runs it. */
+export type BlobSweepSettings =
+  | { mode: typeof BLOB_SWEEP_MODE.OFF }
+  | (Omit<BlobSweepOptions, "pageSize"> & { pageSize?: number });
+
 export interface SweepOpts {
   intervalMs: number;
   emitHeartbeatAudit: boolean;
@@ -124,7 +151,23 @@ export interface SweepOpts {
    * Production callers omit this; sweepOnce defaults to enqueueAuditInWorkerTx.
    */
   _emitFn?: EmitFn;
+  /**
+   * Kill switch for the irreversible team key prune
+   * (RETENTION_GC_TEAM_KEY_PRUNE_ENABLED). Absent or false: never runs.
+   */
+  teamKeyPrune?: boolean;
+  /** RETENTION_GC_BLOB_SWEEP_*; absent or mode `off`: never runs. */
+  blobSweep?: BlobSweepSettings;
+  /**
+   * The orphan-blob sweep's cursor. createWorker owns one for the process
+   * lifetime and passes the same object every tick; a blob sweep without it
+   * is refused (it could never get past the first `maxObjects` keys).
+   */
+  blobCursor?: BlobCursor;
 }
+
+/** At most this many holder ids per TEAM_MEMBER_KEY_PRUNED row; the rest are counted. */
+export const PRUNE_AUDIT_MAX_HOLDERS = 100;
 
 /**
  * Inline audit enqueue — mirrors enqueueAuditInTx from @/lib/audit/audit-outbox
@@ -806,6 +849,130 @@ export async function sweepExpiredAccessRequests(
 }
 
 /**
+ * Prune a batch of unreferenced TeamMemberKey versions (#1009) through the
+ * team_member_key_prune SECURITY DEFINER function — the worker role holds
+ * EXECUTE on it and no grant on team_member_keys. The function chooses at
+ * most 25 candidate teams without a lock, locks them (FOR NO KEY UPDATE SKIP
+ * LOCKED: a team a writer holds is skipped) and then decides and deletes for
+ * those teams in a later statement:
+ * a version is deleted only when it is below the team's current version and
+ * no entry, history row or mode-0 attachment of the team references it.
+ * `batchSize` bounds the (team, version) pairs. The team locks are held until
+ * this transaction commits, which is what keeps a copier of an old version
+ * out until the deletion is final — so nothing slow may run in this
+ * transaction after the call: every team writer waits for it at most
+ * TEAM_KEY_LOCK_TIMEOUT_MS.
+ *
+ * Emits one TEAM_MEMBER_KEY_PRUNED row per (tenant, team) in the same
+ * transaction, carrying the versions, the row count and the holders' user
+ * ids (the evidence that replaces the deleted rows).
+ *
+ * @returns Number of team_member_keys rows deleted.
+ */
+export async function sweepTeamMemberKeys(
+  tx: Prisma.TransactionClient,
+  batchSize: number,
+  emit: EmitFn,
+): Promise<number> {
+  await assertSweepBypass(tx, true);
+
+  const pruned = await tx.$queryRaw<
+    Array<{ pruned_tenant_id: string; pruned_team_id: string; pruned_key_version: number; pruned_user_ids: string[] }>
+  >`SELECT pruned_tenant_id, pruned_team_id, pruned_key_version, pruned_user_ids
+      FROM team_member_key_prune(${batchSize}::integer)`;
+
+  const byTeam = new Map<string, { tenantId: string; keyVersions: number[]; rows: number; holders: Set<string> }>();
+  for (const row of pruned) {
+    const team = byTeam.get(row.pruned_team_id) ?? {
+      tenantId: row.pruned_tenant_id,
+      keyVersions: [],
+      rows: 0,
+      holders: new Set<string>(),
+    };
+    team.keyVersions.push(Number(row.pruned_key_version));
+    team.rows += row.pruned_user_ids.length;
+    for (const userId of row.pruned_user_ids) team.holders.add(userId);
+    byTeam.set(row.pruned_team_id, team);
+  }
+
+  let total = 0;
+  for (const [teamId, team] of byTeam) {
+    const holders = [...team.holders].sort();
+    await emit(tx, team.tenantId, {
+      scope: AUDIT_SCOPE.TEAM,
+      action: AUDIT_ACTION.TEAM_MEMBER_KEY_PRUNED,
+      userId: SYSTEM_ACTOR_ID,
+      actorType: ACTOR_TYPE.SYSTEM,
+      serviceAccountId: null,
+      teamId,
+      targetType: AUDIT_TARGET_TYPE.TEAM,
+      targetId: teamId,
+      metadata: {
+        keyVersions: team.keyVersions.sort((a, b) => a - b),
+        rows: team.rows,
+        holderUserIds: holders.slice(0, PRUNE_AUDIT_MAX_HOLDERS),
+        holderUserIdsOmitted: Math.max(0, holders.length - PRUNE_AUDIT_MAX_HOLDERS),
+      },
+      ip: null,
+      userAgent: "retention-gc-worker",
+    });
+    total += team.rows;
+  }
+  return total;
+}
+
+/**
+ * The attachments rows with the given ids and their stored refs, for the
+ * orphan-blob sweep (#1010). Asserts the bypass first: without it RLS would
+ * return no rows, and an empty answer reads as "nothing references these
+ * objects". The ids are UUID syntax (parseObjectKey), lowercased.
+ */
+export async function readAttachmentRefs(
+  tx: Prisma.TransactionClient,
+  ids: string[],
+): Promise<AttachmentRefRow[]> {
+  await assertSweepBypass(tx, true);
+  if (ids.length === 0) return [];
+  const rows = await tx.$queryRaw<Array<{ id: string; encrypted_data: Uint8Array }>>`
+    SELECT id, encrypted_data FROM attachments WHERE id = ANY(${ids}::uuid[])`;
+  return rows.map((row) => ({ id: row.id, encryptedData: row.encrypted_data }));
+}
+
+const BLOB_CURSOR_MISSING_CODE = "RETENTION_GC_BLOB_CURSOR_MISSING";
+
+/**
+ * Run the orphan-blob sweep when it is configured and the backend is an
+ * external store. Returns the count to record — `deleted` on a completed tick
+ * (0 in report mode), -1 on a refusal — or null when it does not run.
+ */
+async function runBlobSweep(
+  workerPrisma: PrismaClient,
+  opts: SweepOpts,
+  log: ReturnType<typeof getLogger>,
+): Promise<number | null> {
+  const settings = opts.blobSweep;
+  if (!settings || settings.mode === BLOB_SWEEP_MODE.OFF) return null;
+  const store = getAttachmentBlobStore();
+  if (store.backend === BLOB_STORAGE.DB) return null;
+  if (!opts.blobCursor) {
+    throw Object.assign(new Error("retention-gc blob sweep requires the worker's cursor"), {
+      code: BLOB_CURSOR_MISSING_CODE,
+    });
+  }
+  const result = await sweepOrphanBlobs(
+    {
+      readRefs: (ids) => inSweepTx(workerPrisma, BYPASS_GRANT.RETENTION_BLOB_ORPHAN_SWEEP, (tx) => readAttachmentRefs(tx, ids)),
+      store,
+      now: () => new Date(),
+      log,
+    },
+    { ...settings, pageSize: settings.pageSize ?? BLOB_SWEEP_PAGE_SIZE },
+    opts.blobCursor,
+  );
+  return result.refused ? -1 : result.deleted;
+}
+
+/**
  * Run one full sweep across the RETENTION_REGISTRY.
  *
  * Each EXPIRY entry runs in its own $transaction (INV-C4a). A per-entry error
@@ -840,7 +1007,7 @@ export async function sweepOnce(
       log.info({ count: expiredCount }, "retention-gc.access_requests_expired");
     }
   } catch (err) {
-    const code = (err as NodeJS.ErrnoException | undefined)?.code ?? "unknown";
+    const code = errCode(err);
     log.error({ table: "access_requests", code, _logType: "retention-gc.entry_failed" }, "retention-gc.entry_failed");
   }
 
@@ -879,10 +1046,33 @@ export async function sweepOnce(
       // Per-entry error isolation (INV-C4b): log {table, code} — authoritative error record (F7).
       // Never log err.message or the generated SQL (S6).
       const code =
-        (err as NodeJS.ErrnoException | undefined)?.code ?? "unknown";
+        errCode(err);
       log.error({ table: tableName, code, _logType: "retention-gc.entry_failed" }, "retention-gc.entry_failed");
       counts[tableName] = -1;
     }
+  }
+
+  // The dedicated sweeps run after the registry, each in its own try/catch
+  // (INV-C4b) under a fixed counts key. Both are off unless configured.
+  if (opts.teamKeyPrune === true) {
+    try {
+      counts.team_member_keys = await inSweepTx(workerPrisma, BYPASS_GRANT.RETENTION_TEAM_KEY_PRUNE, (tx) =>
+        sweepTeamMemberKeys(tx, batchSize, enqueueAuditInWorkerTx),
+      );
+    } catch (err) {
+      const code = errCode(err);
+      log.error({ table: "team_member_keys", code, _logType: "retention-gc.entry_failed" }, "retention-gc.entry_failed");
+      counts.team_member_keys = -1;
+    }
+  }
+
+  try {
+    const blobCount = await runBlobSweep(workerPrisma, opts, log);
+    if (blobCount !== null) counts.attachment_objects = blobCount;
+  } catch (err) {
+    const code = errCode(err);
+    log.error({ table: "attachment_objects", code, _logType: "retention-gc.entry_failed" }, "retention-gc.entry_failed");
+    counts.attachment_objects = -1;
   }
 
   // Emit a heartbeat audit row if any rows were deleted, or if always-on heartbeat is set.
@@ -920,7 +1110,7 @@ export async function sweepOnce(
       // Heartbeat failure is non-fatal. The per-entry log lines are the
       // authoritative record (INV-C4b). Log {code} only (S6).
       const code =
-        (err as NodeJS.ErrnoException | undefined)?.code ?? "unknown";
+        errCode(err);
       log.error({ code, _logType: "retention-gc.heartbeat_failed" }, "retention-gc.heartbeat_failed");
     }
   }

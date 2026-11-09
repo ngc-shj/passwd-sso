@@ -1,17 +1,16 @@
 import {
-  decryptTeamEntry,
-  encryptTeamEntry,
+  openTeamEntryFieldAt,
+  sealTeamEntryField,
   unwrapItemKey,
   wrapItemKey,
   type EncryptedData,
 } from "@/lib/crypto/crypto-team";
-import { buildItemKeyWrapAAD, buildTeamEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
+import { buildItemKeyWrapAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import { ROTATE_CARRY_REASON, type RotateCarryReason } from "@/lib/constants/team/rotate-key";
 import {
   TEAM_KEY_FAILURE,
   isAesGcmAuthFailure,
   normalizeTeamKeyVersion,
-  teamEntryAadFor,
   type ResolveTeamKey,
   type TeamKeyFailureReason,
 } from "@/lib/team/team-key-resolution";
@@ -181,15 +180,17 @@ async function reencryptV0(
   oldTeamKey: CryptoKey,
   ctx: RotationContext,
 ): Promise<RotateEntryV0> {
-  const blob = await decryptTeamEntry(
+  const blob = await openTeamEntryFieldAt(
     { ciphertext: entry.encryptedBlob, iv: entry.blobIv, authTag: entry.blobAuthTag },
     oldTeamKey,
-    teamEntryAadFor(ctx.teamId, entry.id, VAULT_TYPE.BLOB, 0, entry.aadVersion),
+    { teamId: ctx.teamId, entryId: entry.id, vaultType: VAULT_TYPE.BLOB, itemKeyVersion: 0 },
+    entry.aadVersion,
   );
-  const overview = await decryptTeamEntry(
+  const overview = await openTeamEntryFieldAt(
     { ciphertext: entry.encryptedOverview, iv: entry.overviewIv, authTag: entry.overviewAuthTag },
     oldTeamKey,
-    teamEntryAadFor(ctx.teamId, entry.id, VAULT_TYPE.OVERVIEW, 0, entry.aadVersion),
+    { teamId: ctx.teamId, entryId: entry.id, vaultType: VAULT_TYPE.OVERVIEW, itemKeyVersion: 0 },
+    entry.aadVersion,
   );
   return {
     id: entry.id,
@@ -197,15 +198,15 @@ async function reencryptV0(
     // Both ciphertexts are replaced, so the snapshot names both IVs.
     snapshotIv: entry.blobIv,
     snapshotOverviewIv: entry.overviewIv,
-    encryptedBlob: await encryptTeamEntry(
+    encryptedBlob: await sealTeamEntryField(
       blob,
       ctx.newTeamEncryptionKey,
-      buildTeamEntryAAD(ctx.teamId, entry.id, VAULT_TYPE.BLOB, 0),
+      { teamId: ctx.teamId, entryId: entry.id, vaultType: VAULT_TYPE.BLOB, itemKeyVersion: 0 },
     ),
-    encryptedOverview: await encryptTeamEntry(
+    encryptedOverview: await sealTeamEntryField(
       overview,
       ctx.newTeamEncryptionKey,
-      buildTeamEntryAAD(ctx.teamId, entry.id, VAULT_TYPE.OVERVIEW, 0),
+      { teamId: ctx.teamId, entryId: entry.id, vaultType: VAULT_TYPE.OVERVIEW, itemKeyVersion: 0 },
     ),
     aadVersion: V0_AAD_VERSION,
   };

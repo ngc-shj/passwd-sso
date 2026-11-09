@@ -17,6 +17,16 @@ export const dbBlobStore: AttachmentBlobStore = {
   async deleteObject() {
     // No external object to delete.
   },
+  async listObjects() {
+    // Payloads live in the attachments rows; there is no object to list.
+    return { objects: [] };
+  },
+  async readMarker() {
+    return null;
+  },
+  async createMarker() {
+    throw new Error("The DB blob backend has no object store to mark");
+  },
   toStored(data) {
     return data instanceof Uint8Array ? data : new Uint8Array(data);
   },

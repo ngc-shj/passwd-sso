@@ -1,7 +1,6 @@
 import { encryptData } from "@/lib/crypto/crypto-client";
 import {
   buildPersonalEntryAAD,
-  buildTeamEntryAAD,
   buildItemKeyWrapAAD,
   VAULT_TYPE,
   AAD_VERSION,
@@ -10,6 +9,7 @@ import {
   generateItemKey,
   wrapItemKey,
   deriveItemEncryptionKey,
+  sealTeamEntryField,
 } from "@/lib/crypto/crypto-team";
 import {
   buildPersonalImportBlobs,
@@ -46,6 +46,98 @@ interface RunImportParams {
 interface RunImportResult {
   successCount: number;
   failedCount: number;
+}
+
+/**
+ * One team import entry: a fresh ItemKey wrapped under the team key, blob and
+ * overview sealed at the team entry AAD (ItemKey version 1).
+ */
+async function encryptTeamImportEntry(
+  entry: ParsedEntry,
+  tagIds: string[],
+  folderId: string | null | undefined,
+  teamId: string,
+  teamEncryptionKey: CryptoKey,
+  teamKeyVersion: number,
+): Promise<{ id: string; body: object }> {
+  const { fullBlob, overviewBlob } = buildPersonalImportBlobs(entry);
+  const entryId = crypto.randomUUID();
+
+  // Generate per-entry ItemKey
+  const rawItemKey = generateItemKey();
+  let itemEncKey: CryptoKey;
+  let encryptedItemKey: { ciphertext: string; iv: string; authTag: string };
+  try {
+    const ikAad = buildItemKeyWrapAAD(teamId, entryId, teamKeyVersion);
+    const wrapped = await wrapItemKey(rawItemKey, teamEncryptionKey, ikAad);
+    itemEncKey = await deriveItemEncryptionKey(rawItemKey);
+    encryptedItemKey = { ciphertext: wrapped.ciphertext, iv: wrapped.iv, authTag: wrapped.authTag };
+  } finally {
+    rawItemKey.fill(0);
+  }
+
+  const encryptedBlob = await sealTeamEntryField(fullBlob, itemEncKey, {
+    teamId,
+    entryId,
+    vaultType: VAULT_TYPE.BLOB,
+    itemKeyVersion: 1,
+  });
+  const encryptedOverview = await sealTeamEntryField(overviewBlob, itemEncKey, {
+    teamId,
+    entryId,
+    vaultType: VAULT_TYPE.OVERVIEW,
+    itemKeyVersion: 1,
+  });
+
+  return {
+    id: entryId,
+    body: {
+      id: entryId,
+      encryptedBlob,
+      encryptedOverview,
+      entryType: entry.entryType,
+      aadVersion: AAD_VERSION,
+      teamKeyVersion,
+      itemKeyVersion: 1,
+      encryptedItemKey,
+      tagIds,
+      ...(entry.requireReprompt ? { requireReprompt: true } : {}),
+      ...(entry.expiresAt ? { expiresAt: entry.expiresAt } : {}),
+      ...(folderId ? { teamFolderId: folderId } : {}),
+    },
+  };
+}
+
+/** One personal import entry, sealed at the personal entry AAD. */
+async function encryptPersonalImportEntry(
+  entry: ParsedEntry,
+  tagIds: string[],
+  folderId: string | null | undefined,
+  userId: string,
+  encryptionKey: CryptoKey,
+  keyVersion: number,
+): Promise<object> {
+  const { fullBlob, overviewBlob } = buildPersonalImportBlobs(entry);
+  const entryId = crypto.randomUUID();
+  // C1: blob and overview now bind distinct vaultType in AAD.
+  const blobAad = buildPersonalEntryAAD(userId, entryId, VAULT_TYPE.BLOB);
+  const overviewAad = buildPersonalEntryAAD(userId, entryId, VAULT_TYPE.OVERVIEW);
+  const encryptedBlob = await encryptData(fullBlob, encryptionKey, blobAad);
+  const encryptedOverview = await encryptData(overviewBlob, encryptionKey, overviewAad);
+
+  return {
+    id: entryId,
+    encryptedBlob,
+    encryptedOverview,
+    entryType: entry.entryType,
+    keyVersion,
+    aadVersion: AAD_VERSION,
+    tagIds,
+    ...(entry.requireReprompt ? { requireReprompt: true } : {}),
+    ...(entry.isFavorite ? { isFavorite: true } : {}),
+    ...(entry.expiresAt ? { expiresAt: entry.expiresAt } : {}),
+    ...(folderId ? { folderId } : {}),
+  };
 }
 
 function importRequestHeaders(sourceFilename: string): HeadersInit {
@@ -106,76 +198,25 @@ export async function runImportEntries({
     for (const entry of chunk) {
       const tagIds = resolveEntryTagIds(entry, tagNameToId);
 
+      const folderId = resolveEntryFolderId(entry, folderPathToId);
+
       if (isTeamImport) {
         try {
-          const { fullBlob, overviewBlob } = buildPersonalImportBlobs(entry);
-          const entryId = crypto.randomUUID();
-          const tkv = teamKeyVersion ?? 1;
-
-          // Generate per-entry ItemKey
-          const rawItemKey = generateItemKey();
-          let itemEncKey: CryptoKey;
-          let encryptedItemKey: { ciphertext: string; iv: string; authTag: string };
-          try {
-            const ikAad = buildItemKeyWrapAAD(teamId!, entryId, tkv);
-            const wrapped = await wrapItemKey(rawItemKey, teamEncryptionKey!, ikAad);
-            itemEncKey = await deriveItemEncryptionKey(rawItemKey);
-            encryptedItemKey = { ciphertext: wrapped.ciphertext, iv: wrapped.iv, authTag: wrapped.authTag };
-          } finally {
-            rawItemKey.fill(0);
-          }
-
-          const blobAad = buildTeamEntryAAD(teamId!, entryId, "blob", 1);
-          const overviewAad = buildTeamEntryAAD(teamId!, entryId, "overview", 1);
-          const encryptedBlob = await encryptData(fullBlob, itemEncKey!, blobAad);
-          const encryptedOverview = await encryptData(overviewBlob, itemEncKey!, overviewAad);
-
+          const sealed = await encryptTeamImportEntry(
+            entry, tagIds, folderId, teamId!, teamEncryptionKey!, teamKeyVersion ?? 1,
+          );
           if (entry.isFavorite) {
-            chunkFavoriteEntryIds.push(entryId);
+            chunkFavoriteEntryIds.push(sealed.id);
           }
-
-          const folderId = resolveEntryFolderId(entry, folderPathToId);
-          encryptedEntries.push({
-            id: entryId,
-            encryptedBlob,
-            encryptedOverview,
-            entryType: entry.entryType,
-            aadVersion: AAD_VERSION,
-            teamKeyVersion: tkv,
-            itemKeyVersion: 1,
-            encryptedItemKey,
-            tagIds,
-            ...(entry.requireReprompt ? { requireReprompt: true } : {}),
-            ...(entry.expiresAt ? { expiresAt: entry.expiresAt } : {}),
-            ...(folderId ? { teamFolderId: folderId } : {}),
-          });
+          encryptedEntries.push(sealed.body);
         } catch {
           // Encryption failed for this entry — skip it
           continue;
         }
       } else {
-        const { fullBlob, overviewBlob } = buildPersonalImportBlobs(entry);
-        const entryId = crypto.randomUUID();
-        // C1: blob and overview now bind distinct vaultType in AAD.
-        const blobAad = buildPersonalEntryAAD(userId!, entryId, VAULT_TYPE.BLOB);
-        const overviewAad = buildPersonalEntryAAD(userId!, entryId, VAULT_TYPE.OVERVIEW);
-        const encryptedBlob = await encryptData(fullBlob, encryptionKey!, blobAad);
-        const encryptedOverview = await encryptData(overviewBlob, encryptionKey!, overviewAad);
-
-        const folderId = resolveEntryFolderId(entry, folderPathToId);
-        encryptedEntries.push({
-          id: entryId,
-          encryptedBlob,
-          encryptedOverview,
-          entryType: entry.entryType,
-          keyVersion: keyVersion!,
-          aadVersion: AAD_VERSION,
-          tagIds,
-          ...(entry.requireReprompt ? { requireReprompt: true } : {}),
-          ...(entry.isFavorite ? { isFavorite: true } : {}),
-          ...(entry.expiresAt ? { expiresAt: entry.expiresAt } : {}),
-          ...(folderId ? { folderId } : {}),
-        });
+        encryptedEntries.push(
+          await encryptPersonalImportEntry(entry, tagIds, folderId, userId!, encryptionKey!, keyVersion!),
+        );
       }
     }
 

@@ -19,8 +19,8 @@ import {
   formatExportDate,
 } from "@/lib/format/export-format-common";
 import { useTeamVault } from "@/lib/team/team-vault-context";
-import { decryptData } from "@/lib/crypto/crypto-client";
-import { buildTeamEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
+import { VAULT_TYPE } from "@/lib/crypto/crypto-aad";
+import { openTeamEntryField } from "@/lib/crypto/crypto-team";
 import { buildFolderPath } from "@/lib/folder/folder-path";
 import type { FolderItem } from "@/components/folders/folder-tree";
 import { fetchApi } from "@/lib/url-helpers";
@@ -99,15 +99,14 @@ function TeamExportPanelContent({ teamId: scopedTeamId }: TeamExportPanelContent
             itemKeyId: raw.itemKeyId ?? null,
             teamKeyVersion: raw.teamKeyVersion ?? 1,
           });
-          const aad = buildTeamEntryAAD(scopedTeamId, raw.id, VAULT_TYPE.BLOB, itemKeyVersion);
-          const json = await decryptData(
+          const json = await openTeamEntryField(
             {
               ciphertext: raw.encryptedBlob,
               iv: raw.blobIv,
               authTag: raw.blobAuthTag,
             },
             decryptKey,
-            aad,
+            { teamId: scopedTeamId, entryId: raw.id, vaultType: VAULT_TYPE.BLOB, itemKeyVersion },
           );
           const data = JSON.parse(json);
 

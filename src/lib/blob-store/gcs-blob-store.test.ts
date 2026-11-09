@@ -80,3 +80,88 @@ describe("gcsBlobStore lazy SDK loading", () => {
     },
   );
 });
+
+describe("gcsBlobStore listing and marker", () => {
+  // No @google-cloud/storage in this repo's dependencies, so the result is the
+  // store's own narrow shape (getFiles({ autoPaginate: false }) -> [files,
+  // nextQuery, apiResponse]); see the plan's VE1.
+  type File = { name: string; metadata: { updated?: string } };
+
+  async function loadStore(opts: {
+    getFiles?: (query: unknown) => Promise<[File[], { pageToken?: string } | null, unknown]>;
+    download?: () => Promise<[Buffer]>;
+    save?: (data: Buffer, options?: unknown) => Promise<unknown>;
+  }) {
+    vi.resetModules();
+    vi.stubEnv("GCS_ATTACHMENTS_BUCKET", "attachments");
+    vi.stubEnv("BLOB_OBJECT_PREFIX", "");
+    const getFiles = vi.fn(opts.getFiles ?? (async () => [[], null, {}] as [File[], null, unknown]));
+    const save = vi.fn(opts.save ?? (async () => ({})));
+    const file = vi.fn((_key: string) => ({ save, download: opts.download ?? vi.fn(), delete: vi.fn() }));
+    vi.doMock("./runtime-module", () => ({
+      requireOptionalModule: vi.fn().mockReturnValue({
+        Storage: class {
+          bucket = vi.fn().mockReturnValue({ file, getFiles });
+        },
+      }),
+    }));
+    const { gcsBlobStore: store } = await import("./gcs-blob-store");
+    return { store, getFiles, save, file };
+  }
+
+  it("returns an empty page and no cursor for an empty listing", async () => {
+    const { store, getFiles } = await loadStore({});
+    await expect(store.listObjects("p/", { pageSize: 10 })).resolves.toEqual({ objects: [] });
+    expect(getFiles).toHaveBeenCalledWith({ prefix: "p/", autoPaginate: false, maxResults: 10 });
+  });
+
+  it("parses metadata.updated into a Date and returns the next page token", async () => {
+    const { store, getFiles } = await loadStore({
+      getFiles: async () => [
+        [
+          { name: "a", metadata: { updated: "2026-01-01T00:00:00.000Z" } },
+          { name: "no-updated", metadata: {} },
+        ],
+        { pageToken: "tok-1" },
+        {},
+      ],
+    });
+    const page = await store.listObjects("", { pageSize: 2, cursor: "tok-0" });
+    expect(page).toEqual({ objects: [{ key: "a", lastModified: new Date("2026-01-01T00:00:00.000Z") }], cursor: "tok-1" });
+    expect(page.objects[0].lastModified).toBeInstanceOf(Date);
+    expect(getFiles.mock.calls[0][0]).toMatchObject({ pageToken: "tok-0" });
+  });
+
+  it.each([
+    ["an empty final token", { pageToken: "" }],
+    ["no next query", null],
+  ])("treats %s as the end of the listing", async (_label, nextQuery) => {
+    const { store } = await loadStore({ getFiles: async () => [[], nextQuery, {}] });
+    expect((await store.listObjects("", { pageSize: 5 })).cursor).toBeUndefined();
+  });
+
+  it("readMarker returns null on 404 and the body otherwise", async () => {
+    const absent = await loadStore({
+      download: async () => {
+        throw Object.assign(new Error("No such object"), { name: "ApiError", code: 404 });
+      },
+    });
+    await expect(absent.store.readMarker()).resolves.toBeNull();
+    const present = await loadStore({ download: async () => [Buffer.from("dep-1")] });
+    await expect(present.store.readMarker()).resolves.toBe("dep-1");
+    expect(present.file).toHaveBeenCalledWith(".passwd-sso-deployment");
+  });
+
+  it("createMarker preconditions on generation 0 and reports created, then exists on 412", async () => {
+    const created = await loadStore({});
+    await expect(created.store.createMarker("dep-1")).resolves.toBe("created");
+    expect(created.save.mock.calls[0][1]).toMatchObject({ preconditionOpts: { ifGenerationMatch: 0 } });
+
+    const exists = await loadStore({
+      save: async () => {
+        throw Object.assign(new Error("precondition"), { name: "ApiError", code: 412 });
+      },
+    });
+    await expect(exists.store.createMarker("dep-2")).resolves.toBe("exists");
+  });
+});

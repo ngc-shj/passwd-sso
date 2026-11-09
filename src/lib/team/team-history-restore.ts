@@ -1,5 +1,6 @@
-import { decryptData, encryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
-import { buildTeamEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
+import type { EncryptedData } from "@/lib/crypto/crypto-client";
+import { VAULT_TYPE } from "@/lib/crypto/crypto-aad";
+import { openTeamEntryField, sealTeamEntryField } from "@/lib/crypto/crypto-team";
 import type { EntryTypeValue } from "@/lib/constants";
 import { buildTeamOverviewFromBlob } from "@/lib/team/team-entry-payload";
 import type { EntryItemKeyData } from "@/lib/team/team-vault-core";
@@ -72,10 +73,10 @@ export async function buildTeamHistoryRestoreBody(
   const keyData = historyRowKeyData(row);
   const itemKeyVersion = keyData.itemKeyVersion ?? 0;
   const key = await getEntryDecryptionKey(teamId, entryId, keyData);
-  const plaintext = await decryptData(
+  const plaintext = await openTeamEntryField(
     { ciphertext: row.encryptedBlob, iv: row.blobIv, authTag: row.blobAuthTag },
     key,
-    buildTeamEntryAAD(teamId, entryId, VAULT_TYPE.BLOB, itemKeyVersion),
+    { teamId, entryId, vaultType: VAULT_TYPE.BLOB, itemKeyVersion },
   );
   let blob: Record<string, unknown>;
   try {
@@ -86,15 +87,15 @@ export async function buildTeamHistoryRestoreBody(
   }
   const overview = buildTeamOverviewFromBlob(blob, row.entryType);
   return {
-    encryptedBlob: await encryptData(
+    encryptedBlob: await sealTeamEntryField(
       plaintext,
       key,
-      buildTeamEntryAAD(teamId, entryId, VAULT_TYPE.BLOB, itemKeyVersion),
+      { teamId, entryId, vaultType: VAULT_TYPE.BLOB, itemKeyVersion },
     ),
-    encryptedOverview: await encryptData(
+    encryptedOverview: await sealTeamEntryField(
       overview,
       key,
-      buildTeamEntryAAD(teamId, entryId, VAULT_TYPE.OVERVIEW, itemKeyVersion),
+      { teamId, entryId, vaultType: VAULT_TYPE.OVERVIEW, itemKeyVersion },
     ),
     snapshotBlobIv: row.blobIv,
   };

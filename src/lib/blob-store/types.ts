@@ -22,6 +22,25 @@ export interface AttachmentBlobContext {
 /** A write always names its generation (fixed keys would allow overwrite). */
 export type AttachmentBlobPutContext = AttachmentBlobContext & { generation: string };
 
+/** One object of a listing page. */
+export interface BlobObjectListing {
+  key: string;
+  lastModified: Date;
+}
+
+/** One listing page; `cursor` is absent once the listing is complete. */
+export interface BlobListPage {
+  objects: BlobObjectListing[];
+  cursor?: string;
+}
+
+export const BLOB_MARKER_CREATE = {
+  CREATED: "created",
+  EXISTS: "exists",
+} as const;
+
+export type BlobMarkerCreateResult = (typeof BLOB_MARKER_CREATE)[keyof typeof BLOB_MARKER_CREATE];
+
 /**
  * Minimal storage boundary for attachment binary payloads.
  *
@@ -44,6 +63,16 @@ export interface AttachmentBlobStore {
     stored: Uint8Array,
     context: AttachmentBlobContext,
   ): Promise<void>;
+  /**
+   * One page of the objects whose key starts with `prefix`, at most
+   * `pageSize`. Pass the returned cursor back for the next page; the DB
+   * backend lists nothing.
+   */
+  listObjects(prefix: string, opts: { cursor?: string; pageSize: number }): Promise<BlobListPage>;
+  /** The deployment-ownership marker's body, or null when there is none. */
+  readMarker(): Promise<string | null>;
+  /** Create the marker with `body` unless one exists; never overwrites. */
+  createMarker(body: string): Promise<BlobMarkerCreateResult>;
   toStored(data: Uint8Array | Buffer): Uint8Array;
   toBuffer(stored: Uint8Array): Buffer;
   toBase64(stored: Uint8Array): string;

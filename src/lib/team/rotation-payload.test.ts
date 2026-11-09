@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { decryptTeamEntry, unwrapItemKey } from "@/lib/crypto/crypto-team";
-import { buildItemKeyWrapAAD, buildTeamEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
+import { openTeamEntryField, unwrapItemKey } from "@/lib/crypto/crypto-team";
+import { buildItemKeyWrapAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import { ROTATE_CARRY_REASON } from "@/lib/constants/team/rotate-key";
 import {
   FIXTURE_TEAM_ID as TEAM_ID,
@@ -10,6 +10,7 @@ import {
   makeTeamKeys,
   sealEntryV0,
   sealEntryV1,
+  swapBlobAndOverview,
 } from "@/__tests__/helpers/team-key-fixtures";
 
 // Real Web Crypto throughout; the spy only records the raw ItemKey buffers
@@ -117,10 +118,27 @@ describe("buildRotationEntryPayload", () => {
 
     const rotated = (result as { entry: RotateEntryV0 }).entry;
     expect(rotated).toMatchObject({ itemKeyVersion: 0, snapshotIv: entry.blobIv, snapshotOverviewIv: entry.overviewIv });
-    expect(await decryptTeamEntry(rotated.encryptedBlob, ctx.newKey, buildTeamEntryAAD(TEAM_ID, "v0", VAULT_TYPE.BLOB, 0))).toBe("B");
-    expect(
-      await decryptTeamEntry(rotated.encryptedOverview, ctx.newKey, buildTeamEntryAAD(TEAM_ID, "v0", VAULT_TYPE.OVERVIEW, 0)),
-    ).toBe("O");
+    const at = (vaultType: typeof VAULT_TYPE.BLOB | typeof VAULT_TYPE.OVERVIEW) =>
+      ({ teamId: TEAM_ID, entryId: "v0", vaultType, itemKeyVersion: 0 });
+    expect(await openTeamEntryField(rotated.encryptedBlob, ctx.newKey, at(VAULT_TYPE.BLOB))).toBe("B");
+    expect(await openTeamEntryField(rotated.encryptedOverview, ctx.newKey, at(VAULT_TYPE.OVERVIEW))).toBe("O");
+  });
+
+  // T8: the v0 re-seal opens each field at its own vaultType and ItemKey version 0.
+  it.each([
+    ["blob and overview swapped", async (key: CryptoKey) =>
+      swapBlobAndOverview(await sealEntryV0({ entryId: "v0", teamKey: key, teamKeyVersion: 2, blob: "B", overview: "O" }))],
+    ["sealed at a wrong ItemKey version", async (key: CryptoKey) =>
+      sealEntryV0({ entryId: "v0", teamKey: key, teamKeyVersion: 2, blob: "B", overview: "O", aadItemKeyVersion: 1 })],
+  ])("carries a v0 entry whose fields are %s as undecryptable", async (_name, seal) => {
+    const keys = await makeTeamKeys([2]);
+    const ctx = await context([2]);
+    const entry = await seal(keys.get(2)!);
+
+    expect(await buildRotationEntryPayload(entry, makeResolver(keys), ctx)).toEqual({
+      kind: "carry",
+      carry: { id: "v0", teamKeyVersion: 2, reason: ROTATE_CARRY_REASON.UNDECRYPTABLE },
+    });
   });
 
   it("carries not_held without resolving any key when the actor holds no key at the entry's version", async () => {

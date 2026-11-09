@@ -153,3 +153,14 @@ describe("dbBlobStore", () => {
     });
   });
 });
+
+describe("dbBlobStore listing and marker", () => {
+  it("lists no objects", async () => {
+    await expect(dbBlobStore.listObjects("", { pageSize: 10 })).resolves.toEqual({ objects: [] });
+  });
+
+  it("has no marker and refuses to create one", async () => {
+    await expect(dbBlobStore.readMarker()).resolves.toBeNull();
+    await expect(dbBlobStore.createMarker("dep-1")).rejects.toThrow("no object store");
+  });
+});

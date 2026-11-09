@@ -23,13 +23,13 @@ vi.mock("@/lib/crypto/crypto-client", () => ({
   decryptData: (...args: unknown[]) => mockDecryptData(...args),
 }));
 
-vi.mock("@/lib/crypto/crypto-aad", () => ({
+vi.mock("@/lib/crypto/crypto-aad", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/crypto/crypto-aad")>()),
   buildTeamEntryAAD: (...args: unknown[]) => mockBuildTeamEntryAAD(...args),
-  VAULT_TYPE: { BLOB: "blob", OVERVIEW: "overview" },
 }));
 
 import { buildTeamGetDetail } from "./build-team-get-detail";
-import { aadModelDecrypt } from "@/__tests__/helpers/aad-model-decrypt";
+import { aadGatedDecrypt, aadModelDecrypt } from "@/__tests__/helpers/aad-model-decrypt";
 
 const TEAM_ID = "team-1";
 const ENTRY_ID = "entry-xyz";
@@ -110,6 +110,24 @@ describe("buildTeamGetDetail", () => {
     mockDecryptData.mockImplementationOnce(aadModelDecrypt(makeBlob()));
     const detail = await buildTeamGetDetail(TEAM_ID, { id: ENTRY_ID, entryType: "LOGIN" }, { getEntryDecryptionKey })();
     expect(detail.title).toBe("GitHub");
+  });
+
+  // T8: the blob opens at the blob vaultType and the entry's own ItemKey version.
+  it.each([
+    ["control: opens a blob sealed at blob / the entry's ItemKey version", "blob", 2, true],
+    ["refuses a blob sealed at the overview vaultType", "overview", 2, false],
+    ["refuses a blob sealed at another ItemKey version", "blob", 1, false],
+  ] as const)("%s (T8)", async (_label, vaultType, sealedVersion, opens) => {
+    const { buildTeamEntryAAD: realBuild } =
+      await vi.importActual<typeof import("@/lib/crypto/crypto-aad")>("@/lib/crypto/crypto-aad");
+    mockBuildTeamEntryAAD.mockImplementation(realBuild);
+    mockFetchApi.mockResolvedValueOnce({ ok: true, json: async () => makeRawRow({ aadVersion: 1 }) });
+    mockDecryptData.mockImplementationOnce(aadGatedDecrypt(realBuild(TEAM_ID, ENTRY_ID, vaultType, sealedVersion), makeBlob()));
+
+    const detail = buildTeamGetDetail(TEAM_ID, { id: ENTRY_ID, entryType: "LOGIN" }, { getEntryDecryptionKey })();
+
+    if (opens) expect((await detail).title).toBe("GitHub");
+    else await expect(detail).rejects.toThrow();
   });
 
   it("throws when the fetch fails", async () => {

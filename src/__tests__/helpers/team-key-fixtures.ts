@@ -7,13 +7,13 @@ import {
   deriveItemCekWrapKey,
   deriveItemEncryptionKey,
   deriveTeamEncryptionKey,
-  encryptTeamEntry,
   generateItemKey,
   generateTeamSymmetricKey,
   wrapItemKey,
+  sealTeamEntryField,
   wrapTeamAttachmentCek,
 } from "@/lib/crypto/crypto-team";
-import { buildItemKeyWrapAAD, buildTeamEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
+import { buildItemKeyWrapAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import type { ResolveTeamKey, TeamKeyFailureReason } from "@/lib/team/team-key-resolution";
 import { bytesToBase64 } from "@/lib/team/team-attachment-crypto";
 
@@ -78,11 +78,12 @@ export async function sealWith(
   vaultType: "blob" | "overview",
   itemKeyVersion: number,
 ) {
-  return encryptTeamEntry(
-    plaintext,
-    key,
-    buildTeamEntryAAD(FIXTURE_TEAM_ID, entryId, vaultType === "blob" ? VAULT_TYPE.BLOB : VAULT_TYPE.OVERVIEW, itemKeyVersion),
-  );
+  return sealTeamEntryField(plaintext, key, {
+    teamId: FIXTURE_TEAM_ID,
+    entryId,
+    vaultType: vaultType === "blob" ? VAULT_TYPE.BLOB : VAULT_TYPE.OVERVIEW,
+    itemKeyVersion,
+  });
 }
 
 /** A v1+ entry under `itemKey`, wrapped under `teamKey` at `teamKeyVersion`. */
@@ -95,10 +96,13 @@ export async function sealEntryV1(opts: {
   itemKeyId: string | null;
   blob: string;
   overview: string;
+  /** Seal at this ItemKey version instead of the recorded one (a wrong-version cell). */
+  aadItemKeyVersion?: number;
 }) {
   const contentKey = await deriveItemEncryptionKey(opts.itemKey);
-  const blob = await sealWith(contentKey, opts.blob, opts.entryId, "blob", opts.itemKeyVersion);
-  const overview = await sealWith(contentKey, opts.overview, opts.entryId, "overview", opts.itemKeyVersion);
+  const aadVersion = opts.aadItemKeyVersion ?? opts.itemKeyVersion;
+  const blob = await sealWith(contentKey, opts.blob, opts.entryId, "blob", aadVersion);
+  const overview = await sealWith(contentKey, opts.overview, opts.entryId, "overview", aadVersion);
   const wrap = await wrapUnder(opts.itemKey, opts.teamKey, opts.entryId, opts.teamKeyVersion);
   return {
     id: opts.entryId,
@@ -123,9 +127,11 @@ export async function sealEntryV0(opts: {
   teamKeyVersion: number;
   blob: string;
   overview: string;
+  /** Seal at this ItemKey version instead of 0 (a wrong-version cell). */
+  aadItemKeyVersion?: number;
 }) {
-  const blob = await sealWith(opts.teamKey, opts.blob, opts.entryId, "blob", 0);
-  const overview = await sealWith(opts.teamKey, opts.overview, opts.entryId, "overview", 0);
+  const blob = await sealWith(opts.teamKey, opts.blob, opts.entryId, "blob", opts.aadItemKeyVersion ?? 0);
+  const overview = await sealWith(opts.teamKey, opts.overview, opts.entryId, "overview", opts.aadItemKeyVersion ?? 0);
   return {
     id: opts.entryId,
     encryptedBlob: blob.ciphertext,
@@ -144,6 +150,30 @@ export async function sealEntryV0(opts: {
   };
 }
 
+/**
+ * The same row with its blob and overview ciphertexts swapped: each column
+ * then holds a field sealed at the other vaultType, which a strict open of
+ * that column must refuse.
+ */
+export function swapBlobAndOverview<T extends {
+  encryptedBlob: string;
+  blobIv: string;
+  blobAuthTag: string;
+  encryptedOverview: string;
+  overviewIv: string;
+  overviewAuthTag: string;
+}>(row: T): T {
+  return {
+    ...row,
+    encryptedBlob: row.encryptedOverview,
+    blobIv: row.overviewIv,
+    blobAuthTag: row.overviewAuthTag,
+    encryptedOverview: row.encryptedBlob,
+    overviewIv: row.blobIv,
+    overviewAuthTag: row.blobAuthTag,
+  };
+}
+
 /** A history row: blob under `itemKey` (or the team key for v0) with its own wrap. */
 export async function sealHistoryRow(opts: {
   id: string;
@@ -154,9 +184,15 @@ export async function sealHistoryRow(opts: {
   itemKeyVersion: number;
   itemKeyId: string | null;
   blob: string;
+  /** Seal at this ItemKey version instead of the recorded one (a wrong-version cell). */
+  aadItemKeyVersion?: number;
+  /** Seal at this vaultType instead of "blob" (a swapped-field cell). */
+  aadVaultType?: "blob" | "overview";
 }) {
   const contentKey = opts.itemKey ? await deriveItemEncryptionKey(opts.itemKey) : opts.teamKey;
-  const blob = await sealWith(contentKey, opts.blob, opts.entryId, "blob", opts.itemKeyVersion);
+  const blob = await sealWith(
+    contentKey, opts.blob, opts.entryId, opts.aadVaultType ?? "blob", opts.aadItemKeyVersion ?? opts.itemKeyVersion,
+  );
   const wrap = opts.itemKey
     ? await wrapUnder(opts.itemKey, opts.teamKey, opts.entryId, opts.teamKeyVersion)
     : { encryptedItemKey: null, itemKeyIv: null, itemKeyAuthTag: null };

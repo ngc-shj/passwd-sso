@@ -28,9 +28,12 @@ import {
 } from "./crypto-emergency";
 import { toArrayBuffer, textEncode } from "./crypto-utils";
 import {
+  AAD_VERSION,
   buildTeamAttachmentCekWrapAAD,
+  buildTeamEntryAAD,
   buildTeamKeyWrapAAD,
   type TeamKeyWrapContext,
+  type VaultType,
 } from "./crypto-aad";
 
 // Re-export so callers importing TeamKeyWrapContext from crypto-team still work.
@@ -327,26 +330,92 @@ export async function createTeamKeyEscrow(
 // ─── Team Entry Encryption/Decryption ────────────────────────────
 
 /**
- * Encrypt team entry data (text) with team encryption key.
- * Uses AES-256-GCM with AAD from crypto-aad.ts (buildTeamEntryAAD).
+ * Where a team entry blob / overview is bound: the team entry AAD ("OV")
+ * at the entry's ItemKey version. Every field is required — there is no
+ * optional-AAD path through the strict helpers.
  */
-export async function encryptTeamEntry(
-  plaintext: string,
-  teamEncryptionKey: CryptoKey,
-  aad?: Uint8Array
-): Promise<EncryptedData> {
-  return encryptData(plaintext, teamEncryptionKey, aad);
+export interface TeamEntryAadContext {
+  teamId: string;
+  entryId: string;
+  vaultType: VaultType;
+  itemKeyVersion: number;
+}
+
+function teamEntryAAD(ctx: TeamEntryAadContext): Uint8Array {
+  return buildTeamEntryAAD(ctx.teamId, ctx.entryId, ctx.vaultType, ctx.itemKeyVersion);
 }
 
 /**
- * Decrypt team entry data (text) with team encryption key.
+ * Seal a team entry field at the team entry AAD. The only web path that
+ * encrypts team entry text (team-entry-aad-strictness.test.ts, plan C5/C7).
  */
-export async function decryptTeamEntry(
+export async function sealTeamEntryField(
+  plaintext: string,
+  key: CryptoKey,
+  ctx: TeamEntryAadContext
+): Promise<EncryptedData> {
+  return encryptData(plaintext, key, teamEntryAAD(ctx));
+}
+
+/**
+ * Open a team entry field at the team entry AAD, whatever `aadVersion` the
+ * server reports for the row. Mirrored by openTeamEntryField in
+ * extension/src/lib/crypto-team.ts — keep the two in step.
+ */
+export async function openTeamEntryField(
   encrypted: EncryptedData,
-  teamEncryptionKey: CryptoKey,
-  aad?: Uint8Array
+  key: CryptoKey,
+  ctx: TeamEntryAadContext
 ): Promise<string> {
-  return decryptData(encrypted, teamEncryptionKey, aad);
+  return decryptData(encrypted, key, teamEntryAAD(ctx));
+}
+
+/**
+ * Open a team entry field at the AAD its server-reported `aadVersion` names:
+ * 0 → no AAD (a row written before AAD binding), AAD_VERSION (1) → the team
+ * entry AAD; anything else (an unknown version, a non-number) throws.
+ * Trusting `aadVersion` lets a server label a row 0 and substitute a no-AAD
+ * ciphertext under the same key. It is therefore called only where a row may
+ * legitimately predate AAD binding and the key cannot open anything that is
+ * AAD-bound elsewhere: a v0 entry sealed directly under the team key (the
+ * v0→v1 upgrade, rotation's v0 re-encryption) and the history view, which only
+ * displays (plan C6; team-entry-aad-strictness.test.ts confines the call
+ * sites). A live v1+ entry is never opened here: its ItemKey also seals the
+ * legacy history rows re-sealed without AAD (D80), so a label of 0 on it would
+ * launder one of those into live content — the re-key opens it strictly.
+ */
+export async function openTeamEntryFieldAt(
+  encrypted: EncryptedData,
+  key: CryptoKey,
+  ctx: TeamEntryAadContext,
+  aadVersion: unknown
+): Promise<string> {
+  if (aadVersion === 0) return decryptData(encrypted, key);
+  if (aadVersion === AAD_VERSION) return decryptData(encrypted, key, teamEntryAAD(ctx));
+  throw new Error("Unsupported team entry aadVersion");
+}
+
+/**
+ * Open a team entry field sealed without AAD (a legacy history row). Called
+ * only where openTeamEntryFieldAt may be (plan C6).
+ */
+export async function openLegacyTeamEntryField(
+  encrypted: EncryptedData,
+  key: CryptoKey
+): Promise<string> {
+  return decryptData(encrypted, key);
+}
+
+/**
+ * Seal a team entry field WITHOUT AAD: a legacy history row re-sealed under a
+ * new ItemKey stays a row the history restore refuses (D80). Confined to
+ * resealLegacyHistoryRow (plan C6).
+ */
+export async function sealLegacyTeamEntryField(
+  plaintext: string,
+  key: CryptoKey
+): Promise<EncryptedData> {
+  return encryptData(plaintext, key);
 }
 
 /**

@@ -963,6 +963,58 @@ export const descriptions: Record<
       "Useful for liveness verification in audit pipelines; increases audit_outbox volume.",
     example: "false",
   },
+  RETENTION_GC_TEAM_KEY_PRUNE_ENABLED: {
+    group: "Retention GC worker",
+    order: 4,
+    description:
+      "When true, each sweep deletes team key versions (team_member_keys) that no entry, history row or\n" +
+      "mode-0 attachment of the team references and that are below the team's current version. Irreversible.\n" +
+      "Default: false. Enable after reviewing docs/security/key-retention-policy.md section 1.",
+    example: "false",
+  },
+  RETENTION_GC_BLOB_SWEEP_MODE: {
+    group: "Retention GC worker",
+    order: 5,
+    description:
+      "Orphaned attachment-object sweep for an external BLOB_BACKEND: off | report | delete. Default: off.\n" +
+      "report logs what it would delete; delete deletes. Either requires DEPLOYMENT_ID and a bucket marker\n" +
+      "created with `node dist/retention-gc-worker.js --init-blob-marker`. Run report before delete.",
+    example: "off",
+  },
+  RETENTION_GC_BLOB_ORPHAN_GRACE_MS: {
+    group: "Retention GC worker",
+    order: 6,
+    description:
+      "An unreferenced object younger than this is never deleted (uploads in flight). Range: 3600000 (1 hour)\n" +
+      "to 3024000000 (35 days). REQUIRED when RETENTION_GC_BLOB_SWEEP_MODE=delete: set it to at least the\n" +
+      "database backup / PITR retention window, or keep noncurrent bucket versions for that window\n" +
+      "(docs/security/key-retention-policy.md section 4). report mode defaults to 86400000 (1 day).",
+    example: "86400000",
+  },
+  RETENTION_GC_BLOB_SWEEP_MAX_OBJECTS: {
+    group: "Retention GC worker",
+    order: 7,
+    description:
+      "Objects the orphan sweep lists per tick; a larger bucket is covered over successive ticks.\n" +
+      "Default: 10000. Range: 100-1000000.",
+    example: "10000",
+  },
+  RETENTION_GC_BLOB_SWEEP_MAX_DELETES: {
+    group: "Retention GC worker",
+    order: 8,
+    description:
+      "Breaker: a tick with more unreferenced old objects than this deletes nothing. Default: 1000.\n" +
+      "Range: 1-100000.",
+    example: "1000",
+  },
+  RETENTION_GC_BLOB_SWEEP_MAX_DELETE_RATIO: {
+    group: "Retention GC worker",
+    order: 9,
+    description:
+      "Breaker: a tick with more than 20 unreferenced old objects AND more than this share of the tick's\n" +
+      "attachment objects deletes nothing. Default: 0.5. Range: (0, 1].",
+    example: "0.5",
+  },
 
   // ── Audit anchor publisher ───────────────────────────────────────────────
 
@@ -974,7 +1026,10 @@ export const descriptions: Record<
       "changing this invalidates all existing audit-anchor manifests' deploymentId\n" +
       "claim and causes verifiers to flag as cross-deployment replay.\n" +
       "Stored in system_settings on first publisher boot; subsequent boots\n" +
-      "fail-closed if env var diverges from stored value.",
+      "fail-closed if env var diverges from stored value.\n" +
+      "Also the retention GC worker's blob-bucket ownership marker: required when\n" +
+      "RETENTION_GC_BLOB_SWEEP_MODE is not off. Must be unique per deployment —\n" +
+      "give a cloned environment its own before it starts.",
     example: "550e8400-e29b-41d4-a716-446655440000",
   },
   AUDIT_ANCHOR_SIGNING_KEY: {

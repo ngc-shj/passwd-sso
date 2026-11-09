@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { API_PATH, ENTRY_TYPE, apiPath } from "@/lib/constants";
-import { AAD_VERSION } from "@/lib/crypto/crypto-aad";
+import { AAD_VERSION, buildPersonalEntryAAD } from "@/lib/crypto/crypto-aad";
+import { encryptData } from "@/lib/crypto/crypto-client";
 
 // fetchApi has a `typeof window` guard — bypass it so node-env tests work
 vi.mock("@/lib/url-helpers", () => ({
@@ -95,5 +96,26 @@ describe("savePersonalEntry", () => {
         tagIds: [],
       }),
     ).rejects.toThrow("initialId is required for edit mode");
+  });
+
+  it("seals blob and overview at their own personal entry AAD", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(new Response(null, { status: 200 }));
+    vi.mocked(encryptData).mockClear();
+
+    await savePersonalEntry({
+      mode: "edit",
+      initialId: "entry-existing",
+      encryptionKey: {} as CryptoKey,
+      userId: "user-1",
+      keyVersion: 1,
+      fullBlob: "{\"a\":1}",
+      overviewBlob: "{\"b\":2}",
+      tagIds: [],
+    });
+
+    expect(vi.mocked(encryptData).mock.calls.map(([p, , aad]) => [p, Array.from(aad as Uint8Array)])).toEqual([
+      ["{\"a\":1}", Array.from(buildPersonalEntryAAD("user-1", "entry-existing", "blob"))],
+      ["{\"b\":2}", Array.from(buildPersonalEntryAAD("user-1", "entry-existing", "overview"))],
+    ]);
   });
 });

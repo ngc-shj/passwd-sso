@@ -34,9 +34,9 @@ vi.mock("@/lib/crypto/crypto-client", () => ({
   decryptData: (...args: unknown[]) => mockDecryptData(...args),
 }));
 
-vi.mock("@/lib/crypto/crypto-aad", () => ({
+vi.mock("@/lib/crypto/crypto-aad", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/crypto/crypto-aad")>()),
   buildTeamEntryAAD: (...args: unknown[]) => mockBuildTeamEntryAAD(...args),
-  VAULT_TYPE: { BLOB: "blob", OVERVIEW: "overview" },
 }));
 
 vi.mock("@/components/team/forms/team-entry-dialog-shell", () => ({
@@ -78,7 +78,8 @@ vi.mock("@/components/team/management/team-edit-dialog", () => ({
 }));
 
 import { TeamEditDialogLoader } from "@/components/team/management/team-edit-dialog-loader";
-import { aadModelDecrypt } from "@/__tests__/helpers/aad-model-decrypt";
+import { aadGatedDecrypt, aadModelDecrypt } from "@/__tests__/helpers/aad-model-decrypt";
+import type { buildTeamEntryAAD as BuildTeamEntryAAD } from "@/lib/crypto/crypto-aad";
 
 describe("TeamEditDialogLoader", () => {
   beforeEach(() => {
@@ -233,6 +234,40 @@ describe("TeamEditDialogLoader", () => {
       expect(await screen.findByText(/operation failed|notFound/)).toBeInTheDocument();
       expect(screen.queryByTestId("edit-dialog")).not.toBeInTheDocument();
     }
+  });
+
+  // T8: the blob opens at the blob vaultType and the entry's own ItemKey version.
+  it.each([
+    ["control: opens a blob sealed at blob / the entry's ItemKey version", "blob", 3, true],
+    ["refuses a blob sealed at the overview vaultType", "overview", 3, false],
+    ["refuses a blob sealed at another ItemKey version", "blob", 2, false],
+  ] as const)("%s (T8)", async (_label, vaultType, sealedVersion, opens) => {
+    const { buildTeamEntryAAD: realBuild } =
+      await vi.importActual<{ buildTeamEntryAAD: typeof BuildTeamEntryAAD }>("@/lib/crypto/crypto-aad");
+    mockBuildTeamEntryAAD.mockImplementation(realBuild);
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        id: "entry-1", entryType: "LOGIN", encryptedBlob: "cipher", blobIv: "iv", blobAuthTag: "tag",
+        aadVersion: 1, itemKeyVersion: 3, teamKeyVersion: 1, tags: [],
+      }),
+    });
+    mockDecryptData.mockImplementation(
+      aadGatedDecrypt(realBuild("team-1", "entry-1", vaultType, sealedVersion), JSON.stringify({ title: "Entry" })),
+    );
+
+    render(
+      <TeamEditDialogLoader teamId="team-1" id="entry-1" open={true} onOpenChange={vi.fn()} onSaved={vi.fn()} />,
+    );
+
+    if (opens) {
+      expect(await screen.findByTestId("edit-dialog")).toBeInTheDocument();
+    } else {
+      // The AES-GCM refusal (a DOMException, rendered as notFound) is the error state.
+      expect(await screen.findByText(/operation failed|notFound/)).toBeInTheDocument();
+      expect(screen.queryByTestId("edit-dialog")).not.toBeInTheDocument();
+    }
+    expect(mockDecryptData).toHaveBeenCalled();
   });
 
   it("shows an error state when the team key is unavailable", async () => {

@@ -1,7 +1,7 @@
 "use client";
 
-import { decryptData } from "@/lib/crypto/crypto-client";
-import { buildTeamEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
+import { VAULT_TYPE } from "@/lib/crypto/crypto-aad";
+import { openTeamEntryField } from "@/lib/crypto/crypto-team";
 import { readRequireReprompt } from "@/lib/vault/read-require-reprompt";
 import { apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
@@ -33,7 +33,7 @@ interface TeamGetDetailDeps {
  * The closure:
  *   1. Fetches the raw encrypted blob from the server.
  *   2. Derives the per-entry decryption key via getEntryDecryptionKey (ItemKey v>=1 or TeamKey v0).
- *   3. Decrypts it using AES-256-GCM with the team AAD (buildTeamEntryAAD, "blob" scope).
+ *   3. Opens it at the team entry AAD (openTeamEntryField, "blob" scope).
  *   4. Assembles the complete InlineDetailData from the decrypted fields.
  *
  * Team entries use urlHost: null and passwordHistory: [] in the detail pane — the team API
@@ -63,15 +63,14 @@ export function buildTeamGetDetail(
       teamKeyVersion: (raw.teamKeyVersion as number) ?? 1,
     });
 
-    const aad = buildTeamEntryAAD(teamId, entry.id, VAULT_TYPE.BLOB, itemKeyVersion);
-    const plaintext = await decryptData(
+    const plaintext = await openTeamEntryField(
       {
         ciphertext: raw.encryptedBlob as string,
         iv: raw.blobIv as string,
         authTag: raw.blobAuthTag as string,
       },
       decryptKey,
-      aad,
+      { teamId, entryId: entry.id, vaultType: VAULT_TYPE.BLOB, itemKeyVersion },
     );
 
     const blob = JSON.parse(plaintext) as Record<string, unknown>;

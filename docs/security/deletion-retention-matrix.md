@@ -35,6 +35,14 @@ Sourced from `src/workers/retention-gc-worker/registry.ts` (`RETENTION_REGISTRY`
 | `directory_sync_logs` | PER_TENANT_AGE | `started_at` | `tenants.directorySyncLogRetentionDays` | - | LOG_RETENTION_PURGED |
 | `notifications` | PER_TENANT_AGE | `created_at` | `tenants.notificationRetentionDays` | - | LOG_RETENTION_PURGED |
 
+## Worker-pruned outside the registry
+
+Tables the retention-GC worker deletes rows from through a dedicated sweep (`DEDICATED_SWEEPS` in `registry.ts`), each off until its switch is set. The worker's orphan-blob sweep (`RETENTION_GC_BLOB_SWEEP_MODE`) deletes external attachment objects, never `attachments` rows, so it has no row here.
+
+| Table | Sweep | Enabled by | Deletes | Audit action |
+| --- | --- | --- | --- | --- |
+| `team_member_keys` | `sweepTeamMemberKeys` | `RETENTION_GC_TEAM_KEY_PRUNE_ENABLED` | versions below the team's current one that no entry, history row or mode-0 attachment of the team references (SECURITY DEFINER fn team_member_key_prune) | TEAM_MEMBER_KEY_PRUNED |
+
 ## No automated purge (manual or cascade-only deletion)
 
 Every remaining Prisma model, i.e. models with no row in the registry above. What they share is the negative: the retention-GC worker's own sweep never touches them. How a row CAN be deleted varies -- explicit application code (manual user/admin action), an `ON DELETE CASCADE` side effect of a parent-row deletion, or, for an append-only table such as `tenant_claim_events`, neither of those: it has no foreign key and the application role holds no DELETE, so its only SANCTIONED deletion path is a dedicated owner-only routine (the owner has others, enumerated where the control class is stated). Do not read membership here as "deleted with its parent".
@@ -53,7 +61,6 @@ Every remaining Prisma model, i.e. models with no row in the registry above. Wha
 | `TenantMemberDeparture` | `tenant_member_departures` |
 | `ScimGroupMapping` | `scim_group_mappings` |
 | `TeamMember` | `team_members` |
-| `TeamMemberKey` | `team_member_keys` |
 | `TeamTag` | `team_tags` |
 | `TeamPasswordFavorite` | `team_password_favorites` |
 | `AuditChainAnchor` | `audit_chain_anchors` |

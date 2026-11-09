@@ -9,7 +9,7 @@ import { apiPath } from "@/lib/constants";
 import { useVault } from "@/lib/vault/vault-context";
 import { useTeamVault } from "@/lib/team/team-vault-context";
 import { TeamKeyVersionUnavailableError } from "@/lib/team/team-vault-core";
-import { TEAM_KEY_FAILURE, teamEntryAadFor } from "@/lib/team/team-key-resolution";
+import { TEAM_KEY_FAILURE } from "@/lib/team/team-key-resolution";
 import {
   buildTeamHistoryRestoreBody,
   historyRowKeyData,
@@ -20,6 +20,7 @@ import { toastApiError } from "@/lib/http/toast-api-error";
 import { API_ERROR, apiErrorToI18nKey } from "@/lib/http/api-error-codes";
 import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
 import { buildPersonalEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
+import { openTeamEntryFieldAt } from "@/lib/crypto/crypto-team";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -60,6 +61,25 @@ interface EntryHistorySectionProps {
   /** False hides the restore action (the entry is not the user's to write). */
   canRestore?: boolean;
   onRestore?: () => void;
+}
+
+/**
+ * A personal history row's blob. History records are verbatim server-side
+ * snapshots of the entry blob, so they are sealed with the entry AAD
+ * (PV "blob") — never a history-specific scope. Kept outside the component so
+ * no scope holds both a team key source and a raw primitive
+ * (team-entry-aad-strictness.test.ts rule (c')).
+ */
+async function openPersonalHistoryBlob(
+  h: HistoryEntry,
+  encryptionKey: CryptoKey,
+  userId: string,
+  entryId: string,
+): Promise<string> {
+  const aad = h.aadVersion >= 1
+    ? buildPersonalEntryAAD(userId, entryId, VAULT_TYPE.BLOB)
+    : undefined;
+  return decryptData(h.encryptedBlob, encryptionKey, aad);
 }
 
 function ViewContent({ data }: { data: Record<string, unknown> }) {
@@ -279,28 +299,22 @@ export function EntryHistorySection({
           entryId,
           historyRowKeyData(data as TeamHistoryRowDto),
         );
-        const aad = teamEntryAadFor(scopedTeamId, entryId, VAULT_TYPE.BLOB, historyItemKeyVersion, data.aadVersion);
-        const plaintext = await decryptData(
+        // Display only: a legacy (aadVersion 0) row opens without AAD (plan C6).
+        const plaintext = await openTeamEntryFieldAt(
           {
             ciphertext: data.encryptedBlob,
             iv: data.blobIv,
             authTag: data.blobAuthTag,
           },
           decryptKey,
-          aad,
+          { teamId: scopedTeamId, entryId, vaultType: VAULT_TYPE.BLOB, itemKeyVersion: historyItemKeyVersion },
+          data.aadVersion,
         );
         setViewData(JSON.parse(plaintext));
       } else {
         // Personal entries: client-side decryption
         if (!encryptionKey || !userId) return;
-        // History records are verbatim server-side snapshots of the entry
-        // blob, so they are sealed with the entry AAD (PV "blob") — never a
-        // history-specific scope. Mirrors the team path above.
-        const aad = h.aadVersion >= 1
-          ? buildPersonalEntryAAD(userId, entryId, VAULT_TYPE.BLOB)
-          : undefined;
-        const plaintext = await decryptData(h.encryptedBlob, encryptionKey, aad);
-        setViewData(JSON.parse(plaintext));
+        setViewData(JSON.parse(await openPersonalHistoryBlob(h, encryptionKey, userId, entryId)));
       }
     } catch (e) {
       const message = keyErrorMessage(e);

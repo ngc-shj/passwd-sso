@@ -6,11 +6,14 @@
 
 import { describe, it, expect } from "vitest";
 import {
-  encryptTeamEntry,
-  decryptTeamEntry,
+  sealTeamEntryField,
+  openTeamEntryField,
   deriveTeamEncryptionKey,
   generateTeamSymmetricKey,
+  type TeamEntryAadContext,
 } from "./crypto-team";
+
+const CTX: TeamEntryAadContext = { teamId: "team-1", entryId: "entry-A", vaultType: "blob", itemKeyVersion: 1 };
 
 describe("crypto-team adversarial: ciphertext-swap across team keys", () => {
   it("decryption fails when team-vault ciphertext encrypted under K1 is presented to K2", async () => {
@@ -22,16 +25,16 @@ describe("crypto-team adversarial: ciphertext-swap across team keys", () => {
     const k2 = await deriveTeamEncryptionKey(k2Bytes);
 
     const plaintext = "team-entry-secret";
-    const ciphertext = await encryptTeamEntry(plaintext, k1);
+    const ciphertext = await sealTeamEntryField(plaintext, k1, CTX);
 
     // Positive control: decryption succeeds under K1.
-    const recovered = await decryptTeamEntry(ciphertext, k1);
+    const recovered = await openTeamEntryField(ciphertext, k1, CTX);
     expect(recovered).toBe(plaintext);
 
     // Negative: K2 rejects.
     let thrownError: unknown = null;
     try {
-      await decryptTeamEntry(ciphertext, k2);
+      await openTeamEntryField(ciphertext, k2, CTX);
     } catch (err) {
       thrownError = err;
     }
@@ -44,17 +47,16 @@ describe("crypto-team adversarial: ciphertext-swap across team keys", () => {
 
   it("AAD swap (matched team key) also fails — orthogonal rejection vector", async () => {
     const k = await deriveTeamEncryptionKey(generateTeamSymmetricKey());
-    const aadA = new TextEncoder().encode("team-1|entry-A|kv-1|wv-1");
-    const aadB = new TextEncoder().encode("team-1|entry-B|kv-1|wv-1");
+    const ctxB: TeamEntryAadContext = { ...CTX, entryId: "entry-B" };
 
-    const ciphertext = await encryptTeamEntry("team-plaintext", k, aadA);
+    const ciphertext = await sealTeamEntryField("team-plaintext", k, CTX);
 
-    const recovered = await decryptTeamEntry(ciphertext, k, aadA);
+    const recovered = await openTeamEntryField(ciphertext, k, CTX);
     expect(recovered).toBe("team-plaintext");
 
     let thrownError: unknown = null;
     try {
-      await decryptTeamEntry(ciphertext, k, aadB);
+      await openTeamEntryField(ciphertext, k, ctxB);
     } catch (err) {
       thrownError = err;
     }
@@ -72,27 +74,27 @@ describe("crypto-team adversarial: ciphertext-swap across team keys", () => {
     const k1B = await deriveTeamEncryptionKey(k1Bytes); // SAME bytes — should produce SAME logical key
     const k2 = await deriveTeamEncryptionKey(k2Bytes);
 
-    const ct = await encryptTeamEntry("hkdf-determinism", k1A);
+    const ct = await sealTeamEntryField("hkdf-determinism", k1A, CTX);
     // Same bytes → derives to logically equivalent key; decryption succeeds.
-    expect(await decryptTeamEntry(ct, k1B)).toBe("hkdf-determinism");
+    expect(await openTeamEntryField(ct, k1B, CTX)).toBe("hkdf-determinism");
 
     // Different bytes → different derived key; decryption rejects.
     let rejected = false;
     try {
-      await decryptTeamEntry(ct, k2);
+      await openTeamEntryField(ct, k2, CTX);
     } catch {
       rejected = true;
     }
     expect(rejected).toBe(true);
   });
 
-  it("encryptTeamEntry produces unique IVs across 32 calls under the same team key", async () => {
+  it("sealTeamEntryField produces unique IVs across 32 calls under the same team key", async () => {
     // Nonce-reuse property at the team-vault surface — a key-rotation flow that
     // re-encrypts every entry under a new key must NOT collapse to a single IV.
     const k = await deriveTeamEncryptionKey(generateTeamSymmetricKey());
     const ivs = new Set<string>();
     for (let i = 0; i < 32; i++) {
-      const c = await encryptTeamEntry("same-team-entry", k);
+      const c = await sealTeamEntryField("same-team-entry", k, CTX);
       ivs.add(c.iv);
     }
     expect(ivs.size).toBe(32);
@@ -100,7 +102,7 @@ describe("crypto-team adversarial: ciphertext-swap across team keys", () => {
 
   it("flipping one byte of team-entry ciphertext rejects decryption (AES-GCM authenticity)", async () => {
     const k = await deriveTeamEncryptionKey(generateTeamSymmetricKey());
-    const original = await encryptTeamEntry("team-authentic", k);
+    const original = await sealTeamEntryField("team-authentic", k, CTX);
     const tampered = {
       ...original,
       ciphertext:
@@ -109,7 +111,7 @@ describe("crypto-team adversarial: ciphertext-swap across team keys", () => {
     };
     let rejected = false;
     try {
-      await decryptTeamEntry(tampered, k);
+      await openTeamEntryField(tampered, k, CTX);
     } catch {
       rejected = true;
     }
@@ -120,13 +122,13 @@ describe("crypto-team adversarial: ciphertext-swap across team keys", () => {
     const kOld = await deriveTeamEncryptionKey(generateTeamSymmetricKey());
     const kNew = await deriveTeamEncryptionKey(generateTeamSymmetricKey());
 
-    const preRotation = await encryptTeamEntry("pre", kOld);
-    expect(await decryptTeamEntry(preRotation, kOld)).toBe("pre");
+    const preRotation = await sealTeamEntryField("pre", kOld, CTX);
+    expect(await openTeamEntryField(preRotation, kOld, CTX)).toBe("pre");
 
-    const postRotation = await encryptTeamEntry("post", kNew);
+    const postRotation = await sealTeamEntryField("post", kNew, CTX);
     let rejected = false;
     try {
-      await decryptTeamEntry(postRotation, kOld);
+      await openTeamEntryField(postRotation, kOld, CTX);
     } catch {
       rejected = true;
     }

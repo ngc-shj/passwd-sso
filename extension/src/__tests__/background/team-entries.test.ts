@@ -77,11 +77,11 @@ const teamCryptoMocks = vi.hoisted(() => ({
   buildItemKeyWrapAAD: vi.fn().mockReturnValue(new Uint8Array([5, 6])),
 }));
 
-// buildTeamEntryAAD stays real: the strict-AAD cells assert the bytes each
-// reader passes to decryptData.
+// importOriginal spread: openTeamEntryField and buildTeamEntryAAD stay real —
+// the strict-AAD cells assert the bytes each reader passes to decryptData.
 vi.mock("../../lib/crypto-team", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/crypto-team")>()),
   ...teamCryptoMocks,
-  buildTeamEntryAAD: (await importOriginal<typeof import("../../lib/crypto-team")>()).buildTeamEntryAAD,
 }));
 
 type MessageHandler = (
@@ -943,6 +943,65 @@ describe("team entries in background", () => {
       );
       const blobCall = cryptoMocks.decryptData.mock.calls.find(([enc]) => enc.ciphertext === "blob-aad");
       expect(blobCall?.[2]).toEqual(buildTeamEntryAAD("team-1", "team-pw-1", "blob", 0));
+    });
+
+    // T8: each field opens only at its own vaultType and the entry's ItemKey
+    // version (0 here); the stand-in opens a ciphertext only at the exact AAD
+    // bytes it was "sealed" at.
+    describe("wrong context (T8)", () => {
+      type Sealed = { vaultType: "blob" | "overview"; itemKeyVersion: number };
+      const RIGHT_OV: Sealed = { vaultType: "overview", itemKeyVersion: 0 };
+      const RIGHT_BLOB: Sealed = { vaultType: "blob", itemKeyVersion: 0 };
+
+      async function installSealedAt(overview: Sealed, blob: Sealed): Promise<void> {
+        const { buildTeamEntryAAD } = await vi.importActual<typeof import("../../lib/crypto-team")>(
+          "../../lib/crypto-team",
+        );
+        const sealed: Record<string, { aad: Uint8Array; plaintext: string }> = {
+          "ov-aad": { aad: buildTeamEntryAAD("team-1", "team-pw-1", overview.vaultType, overview.itemKeyVersion), plaintext: TEAM_OVERVIEW_PLAINTEXT },
+          "blob-aad": { aad: buildTeamEntryAAD("team-1", "team-pw-1", blob.vaultType, blob.itemKeyVersion), plaintext: JSON.stringify({ password: "team-secret" }) },
+        };
+        cryptoMocks.decryptData.mockImplementation(
+          async (enc: { ciphertext: string }, _key: unknown, aad?: Uint8Array) => {
+            if (enc.ciphertext === "11") return PERSONAL_OVERVIEW_PLAINTEXT;
+            const entry = sealed[enc.ciphertext];
+            if (!entry || !aad || aad.length !== entry.aad.length || aad.some((b, i) => b !== entry.aad[i])) {
+              throw new DOMException("auth tag mismatch", "OperationError");
+            }
+            return entry.plaintext;
+          },
+        );
+        serveTeamEntry("ov-aad", "blob-aad", 1);
+      }
+
+      async function copiedPassword(): Promise<string | null> {
+        const res = (await sendMessage({ type: "COPY_PASSWORD", entryId: "team-pw-1", teamId: "team-1" })) as {
+          password: string | null;
+        };
+        return res.password;
+      }
+
+      it.each([
+        ["control: an overview sealed at overview / the entry's ItemKey version is listed", RIGHT_OV, 1],
+        ["an overview sealed at the blob vaultType is not listed", { vaultType: "blob", itemKeyVersion: 0 } as Sealed, 0],
+        ["an overview sealed at another ItemKey version is not listed", { vaultType: "overview", itemKeyVersion: 1 } as Sealed, 0],
+      ])("list: %s", async (_label, overview, listed) => {
+        await installSealedAt(overview, RIGHT_BLOB);
+        await unlockVault();
+        expect(await teamEntriesListed()).toBe(listed);
+      });
+
+      it.each([
+        ["control: blob and overview at their own context open", RIGHT_OV, RIGHT_BLOB, "team-secret"],
+        ["a blob sealed at the overview vaultType is refused", RIGHT_OV, { vaultType: "overview", itemKeyVersion: 0 } as Sealed, null],
+        ["a blob sealed at another ItemKey version is refused", RIGHT_OV, { vaultType: "blob", itemKeyVersion: 1 } as Sealed, null],
+        ["an overview sealed at the blob vaultType is refused", { vaultType: "blob", itemKeyVersion: 0 } as Sealed, RIGHT_BLOB, null],
+        ["an overview sealed at another ItemKey version is refused", { vaultType: "overview", itemKeyVersion: 1 } as Sealed, RIGHT_BLOB, null],
+      ])("by id: %s", async (_label, overview, blob, password) => {
+        await installSealedAt(overview, blob);
+        await unlockVault();
+        expect(await copiedPassword()).toBe(password);
+      });
     });
   });
 

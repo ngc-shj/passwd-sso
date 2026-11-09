@@ -63,12 +63,13 @@ const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 const WORKERS_DIR = path.join(REPO_ROOT, "src/workers");
 const SCRIPTS_DIR = path.join(REPO_ROOT, "scripts");
 
-// SECURITY DEFINER function names, extracted from the migration that creates
+// SECURITY DEFINER function names, extracted from the migrations that create
 // them (grep 'CREATE OR REPLACE FUNCTION' / 'CREATE FUNCTION' / 'SECURITY DEFINER'
-// against prisma/migrations/20260522000200_audit_log_revoke_via_definer/migration.sql).
+// against prisma/migrations/20260522000200_audit_log_revoke_via_definer/migration.sql
+// and prisma/migrations/20261108120100_team_member_key_prune/migration.sql).
 // The sibling migration 20260618000000_add_retention_gc_worker_role only GRANTs
 // EXECUTE on the existing audit_log_purge function — it defines no new function.
-const SECURITY_DEFINER_FUNCTION_NAMES = ["audit_log_purge", "audit_log_tenant_migrate"] as const;
+const SECURITY_DEFINER_FUNCTION_NAMES = ["audit_log_purge", "audit_log_tenant_migrate", "team_member_key_prune"] as const;
 
 interface SweepBounds {
   value: boolean;

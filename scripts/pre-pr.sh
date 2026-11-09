@@ -392,6 +392,7 @@ queue_step "Smoke: worker-bundle-boot" bash scripts/checks/check-worker-bundle-s
 queue_step "Static: critical-audit-atomic" node scripts/checks/check-critical-audit-atomic.mjs
 queue_step "Static: tenant-claim-event-coverage" node scripts/checks/check-tenant-claim-event-coverage.mjs
 queue_step "Static: team-rotation-input-lock" node scripts/checks/check-team-rotation-input-lock.mjs
+queue_step "Static: team-key-version-refs" node scripts/checks/check-team-key-version-refs.mjs
 queue_step "Static: share-serve-admission" node scripts/checks/check-share-serve-admission.mjs
 queue_step "Static: session-token-hashed" node scripts/checks/check-session-token-hashed.mjs
 queue_step "Static: bound-unknown-ip" node scripts/checks/check-bound-unknown-ip.mjs

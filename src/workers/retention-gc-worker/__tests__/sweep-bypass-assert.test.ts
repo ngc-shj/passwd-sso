@@ -19,6 +19,8 @@ import {
   sweepPerTenantAge,
   sweepExpiredAccessRequests,
   listTrashRetentionTenants,
+  sweepTeamMemberKeys,
+  readAttachmentRefs,
   grantForEntry,
 } from "../sweep";
 import {
@@ -204,6 +206,19 @@ const MEMBERS: MemberCase[] = [
     gated: false,
     write: "$executeRawUnsafe",
     run: (tx) => sweepExpiredAccessRequests(tx, 100),
+  },
+  {
+    // The prune call itself is the write (the definer function deletes).
+    name: "sweepTeamMemberKeys",
+    gated: false,
+    write: "$queryRaw",
+    run: (tx) => sweepTeamMemberKeys(tx, 100, async () => {}),
+  },
+  {
+    name: "readAttachmentRefs",
+    gated: false,
+    write: "$queryRaw",
+    run: async (tx) => (await readAttachmentRefs(tx, ["11111111-1111-4111-8111-111111111111"])).length,
   },
 ];
 

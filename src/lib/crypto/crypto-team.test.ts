@@ -6,8 +6,12 @@ import {
   wrapTeamKeyForMember,
   unwrapTeamKey,
   createTeamKeyEscrow,
-  encryptTeamEntry,
-  decryptTeamEntry,
+  sealTeamEntryField,
+  openTeamEntryField,
+  openTeamEntryFieldAt,
+  openLegacyTeamEntryField,
+  sealLegacyTeamEntryField,
+  type TeamEntryAadContext,
   encryptTeamAttachment,
   decryptTeamAttachment,
   buildTeamKeyWrapAAD,
@@ -31,7 +35,7 @@ import {
   hexDecode,
   type TeamKeyWrapContext,
 } from "./crypto-team";
-import { deriveEncryptionKey } from "./crypto-client";
+import { decryptData, deriveEncryptionKey, encryptData } from "./crypto-client";
 import {
   buildTeamEntryAAD,
   buildItemKeyWrapAAD,
@@ -50,6 +54,13 @@ const TEST_CTX: TeamKeyWrapContext = {
 function makeCtx(overrides?: Partial<TeamKeyWrapContext>): TeamKeyWrapContext {
   return { ...TEST_CTX, ...overrides };
 }
+
+const ENTRY_CTX: TeamEntryAadContext = {
+  teamId: TEST_TEAM_ID,
+  entryId: "entry-test-001",
+  vaultType: VAULT_TYPE.BLOB,
+  itemKeyVersion: 2,
+};
 
 describe("crypto-team", () => {
   describe("generateTeamSymmetricKey", () => {
@@ -370,50 +381,108 @@ describe("crypto-team", () => {
 
       // Encrypt with admin's key, decrypt with member's key
       const plaintext = "team-entry-secret-data";
-      const encrypted = await encryptTeamEntry(plaintext, teamEncKey);
-      const decrypted = await decryptTeamEntry(encrypted, memberEncKey);
+      const encrypted = await sealTeamEntryField(plaintext, teamEncKey, ENTRY_CTX);
+      const decrypted = await openTeamEntryField(encrypted, memberEncKey, ENTRY_CTX);
       expect(decrypted).toBe(plaintext);
     });
   });
 
-  describe("encryptTeamEntry + decryptTeamEntry", () => {
-    it("encrypts and decrypts text data", async () => {
-      const teamKey = generateTeamSymmetricKey();
-      const encKey = await deriveTeamEncryptionKey(teamKey);
+  describe("sealTeamEntryField + openTeamEntryField", () => {
+    it("seals and opens text data at the team entry AAD", async () => {
+      const encKey = await deriveTeamEncryptionKey(generateTeamSymmetricKey());
       const plaintext = '{"title":"My Login","password":"secret123"}';
 
-      const encrypted = await encryptTeamEntry(plaintext, encKey);
+      const encrypted = await sealTeamEntryField(plaintext, encKey, ENTRY_CTX);
       expect(encrypted.ciphertext).toBeTruthy();
       expect(encrypted.iv).toHaveLength(24);
       expect(encrypted.authTag).toHaveLength(32);
-
-      const decrypted = await decryptTeamEntry(encrypted, encKey);
-      expect(decrypted).toBe(plaintext);
+      expect(await openTeamEntryField(encrypted, encKey, ENTRY_CTX)).toBe(plaintext);
     });
 
-    it("supports AAD binding", async () => {
-      const teamKey = generateTeamSymmetricKey();
-      const encKey = await deriveTeamEncryptionKey(teamKey);
-      const plaintext = "aad-bound-data";
-      const aad = new TextEncoder().encode("entry-id-123");
+    it("seals at exactly buildTeamEntryAAD(ctx) (byte-compatible with stored rows)", async () => {
+      const encKey = await deriveTeamEncryptionKey(generateTeamSymmetricKey());
+      const encrypted = await sealTeamEntryField("bytes", encKey, ENTRY_CTX);
+      const aad = buildTeamEntryAAD(ENTRY_CTX.teamId, ENTRY_CTX.entryId, ENTRY_CTX.vaultType, ENTRY_CTX.itemKeyVersion);
+      expect(await decryptData(encrypted, encKey, aad)).toBe("bytes");
+    });
 
-      const encrypted = await encryptTeamEntry(plaintext, encKey, aad);
-      const decrypted = await decryptTeamEntry(encrypted, encKey, aad);
-      expect(decrypted).toBe(plaintext);
+    it.each([
+      ["teamId", { teamId: "team-other" }],
+      ["entryId", { entryId: "entry-other" }],
+      ["vaultType", { vaultType: VAULT_TYPE.OVERVIEW }],
+      ["itemKeyVersion", { itemKeyVersion: ENTRY_CTX.itemKeyVersion + 1 }],
+    ] as const)("fails to open when only %s differs", async (_field, change) => {
+      const encKey = await deriveTeamEncryptionKey(generateTeamSymmetricKey());
+      const encrypted = await sealTeamEntryField("bound", encKey, ENTRY_CTX);
+      await expect(openTeamEntryField(encrypted, encKey, { ...ENTRY_CTX, ...change })).rejects.toThrow();
+    });
 
-      // Fails with wrong AAD
-      const wrongAad = new TextEncoder().encode("wrong-entry-id");
-      await expect(decryptTeamEntry(encrypted, encKey, wrongAad)).rejects.toThrow();
+    it("control: the unchanged context opens", async () => {
+      const encKey = await deriveTeamEncryptionKey(generateTeamSymmetricKey());
+      const encrypted = await sealTeamEntryField("bound", encKey, ENTRY_CTX);
+      await expect(openTeamEntryField(encrypted, encKey, { ...ENTRY_CTX })).resolves.toBe("bound");
     });
 
     it("fails with wrong key", async () => {
-      const teamKey1 = generateTeamSymmetricKey();
-      const teamKey2 = generateTeamSymmetricKey();
-      const encKey1 = await deriveTeamEncryptionKey(teamKey1);
-      const encKey2 = await deriveTeamEncryptionKey(teamKey2);
+      const encKey1 = await deriveTeamEncryptionKey(generateTeamSymmetricKey());
+      const encKey2 = await deriveTeamEncryptionKey(generateTeamSymmetricKey());
+      const encrypted = await sealTeamEntryField("test", encKey1, ENTRY_CTX);
+      await expect(openTeamEntryField(encrypted, encKey2, ENTRY_CTX)).rejects.toThrow();
+    });
 
-      const encrypted = await encryptTeamEntry("test", encKey1);
-      await expect(decryptTeamEntry(encrypted, encKey2)).rejects.toThrow();
+    it("refuses a no-AAD ciphertext", async () => {
+      const encKey = await deriveTeamEncryptionKey(generateTeamSymmetricKey());
+      const legacy = await encryptData("legacy", encKey);
+      await expect(openTeamEntryField(legacy, encKey, ENTRY_CTX)).rejects.toThrow();
+    });
+  });
+
+  describe("legacy entry points", () => {
+    it("openLegacyTeamEntryField opens a no-AAD ciphertext", async () => {
+      const encKey = await deriveTeamEncryptionKey(generateTeamSymmetricKey());
+      expect(await openLegacyTeamEntryField(await encryptData("legacy", encKey), encKey)).toBe("legacy");
+    });
+
+    it("openLegacyTeamEntryField fails on an AAD-bound ciphertext", async () => {
+      const encKey = await deriveTeamEncryptionKey(generateTeamSymmetricKey());
+      const bound = await sealTeamEntryField("bound", encKey, ENTRY_CTX);
+      await expect(openLegacyTeamEntryField(bound, encKey)).rejects.toThrow();
+    });
+
+    it("sealLegacyTeamEntryField output opens only without AAD", async () => {
+      const encKey = await deriveTeamEncryptionKey(generateTeamSymmetricKey());
+      const sealed = await sealLegacyTeamEntryField("legacy", encKey);
+      expect(await decryptData(sealed, encKey)).toBe("legacy");
+      await expect(openTeamEntryField(sealed, encKey, ENTRY_CTX)).rejects.toThrow();
+    });
+
+    it("openTeamEntryFieldAt(0) opens without AAD and refuses an AAD-bound ciphertext", async () => {
+      const encKey = await deriveTeamEncryptionKey(generateTeamSymmetricKey());
+      expect(await openTeamEntryFieldAt(await encryptData("legacy", encKey), encKey, ENTRY_CTX, 0)).toBe("legacy");
+      const bound = await sealTeamEntryField("bound", encKey, ENTRY_CTX);
+      await expect(openTeamEntryFieldAt(bound, encKey, ENTRY_CTX, 0)).rejects.toThrow();
+    });
+
+    it("openTeamEntryFieldAt(1) opens strictly and refuses a no-AAD ciphertext", async () => {
+      const encKey = await deriveTeamEncryptionKey(generateTeamSymmetricKey());
+      const bound = await sealTeamEntryField("bound", encKey, ENTRY_CTX);
+      expect(await openTeamEntryFieldAt(bound, encKey, ENTRY_CTX, 1)).toBe("bound");
+      await expect(openTeamEntryFieldAt(await encryptData("legacy", encKey), encKey, ENTRY_CTX, 1)).rejects.toThrow();
+    });
+
+    it.each([
+      ["2", 2],
+      ["undefined", undefined],
+      ["NaN", Number.NaN],
+      ['the string "1"', "1"],
+      ["1.5", 1.5],
+      ["-1", -1],
+    ])("openTeamEntryFieldAt(%s) throws before decrypting", async (_label, aadVersion) => {
+      const encKey = await deriveTeamEncryptionKey(generateTeamSymmetricKey());
+      const bound = await sealTeamEntryField("bound", encKey, ENTRY_CTX);
+      await expect(openTeamEntryFieldAt(bound, encKey, ENTRY_CTX, aadVersion)).rejects.toThrow(
+        "Unsupported team entry aadVersion",
+      );
     });
   });
 
@@ -481,7 +550,7 @@ describe("crypto-team", () => {
 
       // 2. Admin encrypts team data
       const entry = '{"title":"Team Secret","password":"team-pass-123"}';
-      const encryptedEntry = await encryptTeamEntry(entry, teamEncKey);
+      const encryptedEntry = await sealTeamEntryField(entry, teamEncKey, ENTRY_CTX);
 
       // 3. Member joins -> admin distributes team key
       const memberKeyPair = await generateECDHKeyPair();
@@ -515,15 +584,15 @@ describe("crypto-team", () => {
 
       // 5. Member derives encryption key and decrypts data
       const memberEncKey = await deriveTeamEncryptionKey(unwrapped);
-      const decrypted = await decryptTeamEntry(encryptedEntry, memberEncKey);
+      const decrypted = await openTeamEntryField(encryptedEntry, memberEncKey, ENTRY_CTX);
       expect(decrypted).toBe(entry);
 
       // 6. Member creates new entry
       const newEntry = '{"title":"Member Entry","password":"new-pass"}';
-      const newEncrypted = await encryptTeamEntry(newEntry, memberEncKey);
+      const newEncrypted = await sealTeamEntryField(newEntry, memberEncKey, ENTRY_CTX);
 
       // 7. Admin can decrypt member's entry
-      const adminDecrypted = await decryptTeamEntry(newEncrypted, teamEncKey);
+      const adminDecrypted = await openTeamEntryField(newEncrypted, teamEncKey, ENTRY_CTX);
       expect(adminDecrypted).toBe(newEntry);
     });
   });
@@ -736,8 +805,8 @@ describe("crypto-team", () => {
       const aad = buildTeamEntryAAD(teamId, entryId, VAULT_TYPE.BLOB, 1);
       const plaintext = '{"title":"OV round-trip","username":"u"}';
 
-      const encrypted = await encryptTeamEntry(plaintext, encKey, aad);
-      const decrypted = await decryptTeamEntry(encrypted, encKey, aad);
+      const encrypted = await encryptData(plaintext, encKey, aad);
+      const decrypted = await decryptData(encrypted, encKey, aad);
       expect(decrypted).toBe(plaintext);
     });
 
@@ -749,8 +818,8 @@ describe("crypto-team", () => {
       const blobAad = buildTeamEntryAAD(teamId, entryId, VAULT_TYPE.BLOB, 1);
       const overviewAad = buildTeamEntryAAD(teamId, entryId, VAULT_TYPE.OVERVIEW, 1);
 
-      const encrypted = await encryptTeamEntry("secret", encKey, blobAad);
-      await expect(decryptTeamEntry(encrypted, encKey, overviewAad)).rejects.toThrow();
+      const encrypted = await encryptData("secret", encKey, blobAad);
+      await expect(decryptData(encrypted, encKey, overviewAad)).rejects.toThrow();
     });
   });
 

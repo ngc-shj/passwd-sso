@@ -27,7 +27,7 @@ import {
   deriveTeamEncryptionKey,
   unwrapItemKey,
   deriveItemEncryptionKey,
-  buildTeamEntryAAD,
+  openTeamEntryField,
   buildItemKeyWrapAAD,
   type TeamKeyWrapContext,
 } from "../lib/crypto-team";
@@ -1792,11 +1792,10 @@ async function decryptTeamOverviews(
     }
 
     if (!decryptionKey) return null;
-    const aad = buildTeamEntryAAD(teamId, item.id, "overview", itemKeyVersion);
-    const plaintext = await decryptData(
+    const plaintext = await openTeamEntryField(
       { ciphertext: item.encryptedOverview, iv: item.overviewIv, authTag: item.overviewAuthTag },
       decryptionKey,
-      aad,
+      { teamId, entryId: item.id, vaultType: "overview", itemKeyVersion },
     );
     const overview = JSON.parse(plaintext) as {
       title?: string;
@@ -1939,18 +1938,16 @@ async function fetchAndDecryptTeamBlob(
   assertVaultEpoch(epoch);
   if (!decryptionKey) return null;
 
-  const blobAAD = buildTeamEntryAAD(teamId, data.id, "blob", itemKeyVersion);
-  const blobPlain = await decryptData(
+  const blobPlain = await openTeamEntryField(
     { ciphertext: data.encryptedBlob, iv: data.blobIv, authTag: data.blobAuthTag },
     decryptionKey,
-    blobAAD,
+    { teamId, entryId: data.id, vaultType: "blob", itemKeyVersion },
   );
 
-  const overviewAAD = buildTeamEntryAAD(teamId, data.id, "overview", itemKeyVersion);
-  const overviewPlain = await decryptData(
+  const overviewPlain = await openTeamEntryField(
     { ciphertext: data.encryptedOverview, iv: data.overviewIv, authTag: data.overviewAuthTag },
     decryptionKey,
-    overviewAAD,
+    { teamId, entryId: data.id, vaultType: "overview", itemKeyVersion },
   );
 
   // Same narrowing as the personal path: a JSON.parse SyntaxError carries a window
