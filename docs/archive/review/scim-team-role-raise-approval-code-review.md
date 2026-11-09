@@ -57,3 +57,13 @@ N/A — no environment constraints declared in Phase 1. Integration `verified-lo
   users; never the demoted ones).
 - QA-3 — Action: mutant M4 (key on `previousRole`) recorded in the deviation log: route A7e ×2 and
   integration A10 ×2 red.
+
+### Round 2
+One reviewer, all three perspectives: no findings. The label predicate matches what the route
+emits (only `ACTIVE_RAISE_HELD` carries `previouslyActive`); the label renders only metadata the
+same viewers already receive from the team and tenant audit-log APIs (no widening); the key-delete
+set assertion fails under a mutant that deletes demoted users' keys; the integration comments are
+accurate.
+
+## Final state
+Code review rounds: 2. Open findings: none. Pre-PR 92/92.
