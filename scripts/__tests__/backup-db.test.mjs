@@ -2228,7 +2228,10 @@ exec "${realMkdir}" "$@"`);
       c.on("exit", (code) => res({ code, out }));
     })));
 
-    expect(both.filter((r) => r.code === 0), "exactly one run may hold the lock").toHaveLength(1);
+    // The runs' output is the only evidence of why a run lost; without it a CI
+    // failure here is undiagnosable.
+    expect(both.filter((r) => r.code === 0),
+      `exactly one run may hold the lock; runs: ${JSON.stringify(both)}`).toHaveLength(1);
     for (const r of both.filter((r) => r.code !== 0)) expect(r.out).toMatch(/BACKUP_ERR:LOCKED/);
     expect(generations()).toHaveLength(1);
     expect(readdirSync(backupDir).filter((n) => n.endsWith(".partial"))).toEqual([]);
