@@ -86,16 +86,16 @@ export const REVOKED_BY = {
 
 /**
  * The migration's writes that are not counters: the user row itself, the
- * three models it moves by tenant alone (no user column; a bootstrap tenant
- * has one member), the audit trail (moved by the `audit_log_tenant_migrate`
+ * three models with no user column, moved through their parent to the user's
+ * own rows (a bootstrap tenant may still hold a deactivated member), the audit trail (moved by the `audit_log_tenant_migrate`
  * procedure, since `audit_logs` UPDATE is revoked from the app role), and the
  * membership it replaces.
  */
 export const NON_COUNTER_WRITES = {
   user: "the user's own tenant column",
-  passwordEntryHistory: "moved by tenant alone; reached through its entry",
-  emergencyAccessKeyPair: "moved by tenant alone; reached through its grant",
-  shareAccessLog: "moved by tenant alone; reached through its share",
+  passwordEntryHistory: "moved through its entry's user",
+  emergencyAccessKeyPair: "moved through its grant's owner",
+  shareAccessLog: "moved through its share's creator",
   auditLog: "moved by CALL audit_log_tenant_migrate",
   tenantMember: "the bootstrap membership deleted, the target membership created",
 } as const;

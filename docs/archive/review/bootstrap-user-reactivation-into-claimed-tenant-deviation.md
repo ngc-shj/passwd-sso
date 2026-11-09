@@ -33,3 +33,14 @@ Unmodified tree: the cell passes (`npm run test:integration -- tenant-claim-bind
 
 `rg -n 'sync recreates|recreates it|No producer can reactivate|SCIM, directory sync, its admins'` over
 the six member-set files and `rg -n '作り直' README.ja.md`: no matches.
+
+## D3 — Production behaviour change: the bootstrap migration's tenant-only moves (code review S2)
+
+The plan's R4 ("no behaviour change") no longer holds. Code review round 2 found that the migration
+moved password history, emergency-access key pairs and share access logs by tenant alone, carrying a
+deactivated bootstrap member's rows into the claimed tenant. The user chose to fix it in this PR
+(2026-11-09). Each move is now scoped through its parent to the migrating user. Red-proof: on a
+scratch worktree at `df8f12b3d` with the three parent filters removed, the cell "row 6, a
+deactivated second member in the bootstrap tenant: their rows stay behind" fails at the departed
+member's placement, with `passwordEntryHistory`, `emergencyAccessKeyPair` and `shareAccessLog` all
+filed under the target.

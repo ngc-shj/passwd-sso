@@ -70,8 +70,16 @@ const NON_COUNTER_DATA_KEYS: Record<string, readonly string[]> = {
 };
 /** The bootstrap tenant's id as `claimedTenantMembership` names it. */
 const BOOTSTRAP_TENANT_ID = "existingTenantId";
-/** The three moves by tenant alone (no user column). */
-const TENANT_ONLY_MOVES = ["passwordEntryHistory", "emergencyAccessKeyPair", "shareAccessLog"] as const;
+/**
+ * The three moves with no user column, each scoped through its parent to the
+ * migrating user (#955 S2): row 6b counts active members only, so a bootstrap
+ * tenant can hold a deactivated member whose rows must stay behind.
+ */
+const PARENT_SCOPED_MOVES = {
+  passwordEntryHistory: ["entry", "{ userId }"],
+  emergencyAccessKeyPair: ["grant", "{ ownerId: userId }"],
+  shareAccessLog: ["share", "{ createdById: userId }"],
+} as const;
 
 type MigrationWrite = {
   readonly handle: string;
@@ -349,12 +357,12 @@ describe("bootstrap migration member set", () => {
     expect(problems).toEqual([]);
   });
 
-  it("scopes the moves by tenant alone to the bootstrap tenant it checked has one member", () => {
+  it("scopes the moves with no user column to the user's rows through their parent", () => {
     const writes = migrationWrites(auth);
-    for (const handle of TENANT_ONLY_MOVES) {
+    for (const [handle, parentFilter] of Object.entries(PARENT_SCOPED_MOVES)) {
       const own = writes.filter((w) => w.handle === handle);
       expect(own, handle).toHaveLength(1);
-      expect([...own[0].where], handle).toEqual([["tenantId", BOOTSTRAP_TENANT_ID]]);
+      expect([...own[0].where], handle).toEqual([["tenantId", BOOTSTRAP_TENANT_ID], parentFilter]);
     }
     const check = auth
       .getFunctionOrThrow(FUNCTION_NAME)

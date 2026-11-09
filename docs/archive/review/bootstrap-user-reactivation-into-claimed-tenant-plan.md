@@ -66,7 +66,7 @@ lists these refusals under their own heading.
   move the user: a second active member in the bootstrap tenant (row 6b) and an OWNER-role row
   (`deactivateScimUser` refuses, `SCIM_OWNER_PROTECTED`).
 - R3: a real-DB cell proves the remedy end to end through the SCIM route, red-proved per step.
-- R4: no behaviour change in sign-in, directory sync, SCIM or the ownership helpers.
+- R4: no behaviour change in sign-in, directory sync, SCIM or the ownership helpers. Superseded in code review (S2, deviation D3): the bootstrap migration now moves history, key pairs and share access logs only through the migrating user's parents.
 
 ## Technical approach
 

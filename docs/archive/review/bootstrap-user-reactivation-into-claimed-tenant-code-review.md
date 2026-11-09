@@ -62,3 +62,24 @@ N/A — no environment constraints declared in Phase 1. C2 `verified-local`
   `SCIM_OWNER_PROTECTED`); the CLI heading points to the README row for both exceptions instead of
   listing one. Modified: `README.md`, `README.ja.md`, `scripts/tenant-domain.ts`.
 - Verification: README parity 5/5; `tenant-claim-cli` integration 190/190; lint and typecheck 0.
+
+### Round 2
+One reviewer, all three perspectives. Round-1 claims verified (row 6b throws → `provider_error`
+with no claim, excluded from `unmapped` by reason and by the claim filter; OWNER → 403). New:
+- S2 [Major, security] The advice "the other member must leave the bootstrap tenant first" turned a
+  pre-existing defect into an operator procedure: the migration moved `passwordEntryHistory`,
+  `emergencyAccessKeyPair` and `shareAccessLog` by tenant alone, and `assertBootstrapSingleMember`
+  counts active members only, so a deactivated member's rows went to the claimed tenant.
+  Action (user decision: fix in this PR): each of the three is scoped through its parent to the
+  migrating user (`entry: { userId }`, `grant: { ownerId: userId }`, `share: { createdById: userId }`),
+  matching the parent writes. Real-DB cell "row 6, a deactivated second member in the bootstrap
+  tenant: their rows stay behind"; red-proved by restoring the tenant-only filters on a scratch
+  worktree (all three tables move to the target). The AST guard
+  (`src/auth.bootstrap-migration.test.ts`) now pins the parent filters; `src/auth.test.ts`, the
+  `bootstrap-migration-set` helper comments and `docs/security/security-review.md` updated.
+  Modified: `src/auth.ts`, tests above, `docs/security/security-review.md`.
+- F3 [Minor] `src/lib/tenant-context.ts` still said "still refused after it". Action: reworded to
+  point at the two cases named at the `src/auth.ts` refusal.
+- F4 [Minor] "the other member must leave" named no supported action. Action: README en/ja say the
+  bootstrap tenant's admin deactivates or removes that member first, and that their rows stay there.
+- Verification: vitest 21636; lint/tsc 0; integration 1446 (MinIO); `next build` 0.

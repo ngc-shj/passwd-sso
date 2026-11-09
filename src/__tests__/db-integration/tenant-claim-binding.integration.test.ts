@@ -751,7 +751,7 @@ describe("tenant claim binding (C3/C4/C5)", () => {
   /**
    * The migration's writes that are not counters (`NON_COUNTER_WRITES`), but
    * the membership, which `placement` reads with its active flag. The three
-   * the migration moves by tenant alone are reached through their parent.
+   * with no user column are reached through their parent.
    */
   const NON_COUNTER_TABLES: Record<Exclude<NonCounterWriteHandle, "tenantMember">, OwnedTable> = {
     user: { select: `SELECT tenant_id FROM users WHERE id = $1::uuid`, seed: null },
@@ -1124,8 +1124,8 @@ describe("tenant claim binding (C3/C4/C5)", () => {
     /**
      * A user of a third tenant with a row in every moved table. The migration
      * moves `passwordEntryHistory`, `emergencyAccessKeyPair` and
-     * `shareAccessLog` by tenant alone, so these rows show it does not reach
-     * past the bootstrap tenant. `onTenant` receives the tenant before any row
+     * `shareAccessLog` through their parent, so these rows show it does not
+     * reach past the bootstrap tenant. `onTenant` receives the tenant before any row
      * is seeded, so a seed that throws still leaves it to the caller's teardown.
      */
     async function seedBoundary(onTenant: (tenantId: string) => void): Promise<{ tenantId: string; userId: string }> {

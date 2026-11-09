@@ -302,8 +302,9 @@ export async function resolveExistingUsersForTenant(
  * The way back is the user's own act, as for attachment: signing in through this
  * tenant's IdP moves the column here, after which this tenant owns them. A user
  * active in a bootstrap tenant who holds a deactivated row here is the exception:
- * that sign-in is refused until this tenant deletes the row, and still refused
- * after it in the two cases the `priorMembership` refusal in `src/auth.ts` names.
+ * that sign-in is refused until this tenant deletes the row; the two cases where
+ * deleting it does not let the user in are named at the `priorMembership`
+ * refusal in `src/auth.ts`.
  *
  * MUST be called OUTSIDE a tenant context: another tenant's membership, and a
  * users row filed under it, are what RLS hides inside one. A user with no row is
