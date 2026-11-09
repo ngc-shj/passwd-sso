@@ -633,8 +633,15 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
       expect(mockTeamMember.updateMany).not.toHaveBeenCalled();
       expect(mockTeamMember.updateManyAndReturn).toHaveBeenCalledTimes(6);
       expect(mockTeamMember.deleteMany).toHaveBeenCalledTimes(1);
-      // Key deletes: one after the reactivate CAS, one after the hold CAS.
+      // Key deletes: one after the reactivate CAS, one after the hold CAS —
+      // each for exactly the users its CAS wrote, never the demoted ones.
       expect(keyDeleteMany).toHaveBeenCalledTimes(2);
+      const keyDeleteUserSets = keyDeleteMany.mock.calls.map(
+        (call: unknown[]) => new Set((call[0] as { where: { userId: { in: string[] } } }).where.userId.in),
+      );
+      const usersOf = (category: number) =>
+        new Set([...Array(usersPerGroup).keys()].map((i) => fixtureUserId(category, i)));
+      expect(keyDeleteUserSets).toEqual([usersOf(2), usersOf(8)]);
       // One bulk audit call per action present (PENDING, WITHDRAW, REMOVE,
       // ROLE_UPDATE), together carrying one row per transition.
       expect(mockLogAuditBulkInTx).toHaveBeenCalledTimes(4);

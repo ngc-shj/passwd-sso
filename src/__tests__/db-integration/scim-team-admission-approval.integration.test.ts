@@ -894,6 +894,9 @@ describe("scim-team-admission-approval — real-DB integration", () => {
     });
     // The hold's key deletion follows the rows its CAS wrote: none here.
     expect(await keyCount(teamId, x.id)).toBe(1);
+    // A regression marker only: a raise never emits ROLE_UPDATE now, and this
+    // race leaves the CAS a miss either way. The key and PENDING assertions
+    // carry the cell.
     expect(await auditRows("TEAM_MEMBER_SCIM_ROLE_UPDATE", { teamId })).toEqual([]);
     expect((await auditRows("TEAM_MEMBER_SCIM_PENDING", { teamId })).map((r) => r.targetId)).toEqual([y.id]);
     expect(await membership(teamId, y.id)).toMatchObject({ scim_approval_pending: true, role: "ADMIN" });
@@ -1476,6 +1479,9 @@ describe("scim-team-admission-approval — real-DB integration", () => {
       });
       expect(await keyCount(teamId, x.id)).toBe(1);
       expect((await auditRows("TEAM_MEMBER_SCIM_PENDING", { teamId })).map((r) => r.targetId)).toEqual([y.id]);
+      // A regression marker only: a raise never emits ROLE_UPDATE now, and this
+      // race leaves the CAS a miss either way. The key and PENDING assertions
+      // carry the cell.
       expect(await auditRows("TEAM_MEMBER_SCIM_ROLE_UPDATE", { teamId })).toEqual([]);
     });
   });
