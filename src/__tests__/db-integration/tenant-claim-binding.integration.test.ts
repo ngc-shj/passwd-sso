@@ -1477,6 +1477,35 @@ describe("tenant claim binding (C3/C4/C5)", () => {
       }
     });
 
+    /**
+     * Row 6b counts ACTIVE members, so a bootstrap tenant can also hold a
+     * deactivated one. History, emergency-access key pairs and share access logs
+     * carry no user column; moved by tenant alone, the departed member's rows
+     * went to the target with the migrating member's (#955 S2).
+     */
+    it("row 6, a deactivated second member in the bootstrap tenant: their rows stay behind", async () => {
+      stubModeEnv(CLAIM_BINDING_MODE.OFF);
+      const target = await claimedTenant("migrate-6-departed-peer");
+      let member: (Victim & { providerAccountId: string }) | null = null;
+      try {
+        member = await seedBootstrapMember();
+        const departed = await ctx.createUser(member.home);
+        await linkAccount(departed, member.home);
+        await seedOwnedRows(departed, member.home);
+        await deactivateMemberships(departed);
+        await expectSeededEverywhere(departed, member.home);
+
+        expect(
+          await capturedSignIn()(signInParams(member.email, target.claim, SIGN_IN_PROVIDER, member.providerAccountId)),
+        ).toBe(true);
+
+        expect(await placement(member.userId)).toEqual(movedTo(target.tenantId, member.home));
+        expect((await placement(departed)).tables).toEqual(movedTo(member.home).tables);
+      } finally {
+        await teardown(member, ...(member ? [member.home] : []), target.tenantId);
+      }
+    });
+
     /** Row 6b: a bootstrap tenant with a second active member is not migrated. */
     it("row 6b, a second active member in the bootstrap tenant: refused, nothing written", async () => {
       stubModeEnv(CLAIM_BINDING_MODE.OFF);

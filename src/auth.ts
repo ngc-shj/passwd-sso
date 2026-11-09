@@ -649,8 +649,13 @@ async function claimedTenantMembership(
         where: { userId, tenantId: existingTenantId },
         data: { tenantId: target.id },
       });
+      // History, key pairs and share access logs have no user column: each is
+      // scoped through its parent to the rows that parent moves above or below.
+      // `assertBootstrapSingleMember` counts ACTIVE members only, so a bootstrap
+      // tenant can still hold a deactivated member's rows; by tenant alone, this
+      // migration carried them into the target.
       await tx.passwordEntryHistory.updateMany({
-        where: { tenantId: existingTenantId },
+        where: { tenantId: existingTenantId, entry: { userId } },
         data: { tenantId: target.id },
       });
       await tx.vaultKey.updateMany({
@@ -666,10 +671,8 @@ async function claimedTenantMembership(
         where: { ownerId: userId, tenantId: existingTenantId },
         data: { tenantId: target.id },
       });
-      // emergencyAccessKeyPair/shareAccessLog have no userId column;
-      // safe because bootstrap tenants are single-user by design.
       await tx.emergencyAccessKeyPair.updateMany({
-        where: { tenantId: existingTenantId },
+        where: { tenantId: existingTenantId, grant: { ownerId: userId } },
         data: { tenantId: target.id },
       });
       await tx.passwordShare.updateMany({
@@ -677,7 +680,7 @@ async function claimedTenantMembership(
         data: { tenantId: target.id },
       });
       await tx.shareAccessLog.updateMany({
-        where: { tenantId: existingTenantId },
+        where: { tenantId: existingTenantId, share: { createdById: userId } },
         data: { tenantId: target.id },
       });
       await tx.attachment.updateMany({
