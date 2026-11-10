@@ -9,26 +9,44 @@
  * sees no rows and the backfill silently does nothing.
  *
  * Control class: best-effort tripwire over SQL TEXT (tokenizeSql, no catalog,
- * no binding). Known bypasses: a table reached through a view, function or
+ * no binding). Known bypasses: a table reached through a view (incl. `REFRESH
+ * MATERIALIZED VIEW`, whose stored query is not in the statement), function or
  * trigger; DML in a function the migration calls; a `set_config` behind a
- * helper; a non-`public` search_path.
+ * helper; a non-`public` search_path; `ALTER TABLE … SET SCHEMA` and a
+ * DROP / re-CREATE of a forced table (FORCE membership is not moved or reset);
+ * dynamic SQL assembled by string concatenation from pieces that each look
+ * harmless; a literal that names a table in a spelling no name token carries.
  *
  * Model:
  *   - FORCE state is replayed per statement in migration name order
- *     (`FORCE` adds, `NO FORCE` removes).
+ *     (`FORCE` adds, `NO FORCE` removes, `ALTER TABLE t RENAME TO t2` moves).
  *   - Units: the top level, and each `DO` body (re-tokenized). Function and
  *     procedure bodies are not units.
  *   - In a DO unit, every table-introducing position (FROM incl. comma items,
- *     JOIN, UPDATE, INSERT INTO, DELETE FROM, USING, MERGE INTO) is a
- *     reference. At the top level only data statements are read.
+ *     JOIN, UPDATE, INSERT INTO [… TABLE t], DELETE FROM, USING, MERGE INTO
+ *     [ONLY], `TABLE t` query form) is a reference. At the top level only data
+ *     statements are read (SELECT / INSERT / UPDATE / DELETE / MERGE / WITH /
+ *     TABLE, `CREATE TABLE|MATERIALIZED VIEW … AS <query>`).
  *   - A reference to a FORCE table is refused unless the lexically current
  *     `app.bypass_rls` is 'on' and the current `app.bypass_tables` literal
  *     lists the table. Top-level references are always refused.
+ *   - Every string literal of a DO body (quoted or dollar-quoted, variable
+ *     assignments included) is unquoted and re-tokenized. One that names a
+ *     FORCE table makes the body RLS-relevant. A bare mention is not a
+ *     reference (RAISE prose is fine) unless the body also has an EXECUTE that
+ *     is not literal DDL.
  *
  * Fail-closed (MIGRATION_RLS_DML_UNPARSED, never baselinable): unterminated or
- * unrecognised dollar quote, DO without a dollar-quoted body, EXECUTE or FORCE
- * ROW LEVEL SECURITY inside a DO, set_config(..., false), a bypass grant in a
- * nested block / branch / loop, a grant never restored by the end of its unit.
+ * unrecognised dollar quote, DO without a dollar-quoted body, FORCE ROW LEVEL
+ * SECURITY inside a DO, set_config(..., false), a bypass_rls grant or a literal
+ * bypass_tables value in a nested block / branch / loop, a grant never restored
+ * by the end of its unit, `SET|RESET [LOCAL|SESSION] app.bypass_*` inside a DO,
+ * and EXECUTE inside a DO unless it is literal DDL: a first literal that is not
+ * a DDL head, a literal-free EXECUTE in an RLS-relevant body, or (for DDL) a
+ * literal with a second statement, a CTAS / CREATE MATERIALIZED VIEW … AS, an
+ * app.bypass_* setting, a later literal referencing a FORCE table, or one that
+ * cannot be tokenized. A string literal with an unterminated `$` quote in a DO
+ * body is read by word match (not UNPARSED) unless it is an EXECUTE literal.
  *
  * Output:
  *   MIGRATION_RLS_DML: <dir>:<line>: <table>
@@ -101,6 +119,22 @@ function enclosingOpen(tokens, k) {
   return -1;
 }
 
+const SET_OPS = new Set(["UNION", "INTERSECT", "EXCEPT"]);
+
+/**
+ * `TABLE t` used as a query: at the start of a statement, after a set operator
+ * (`UNION [ALL|DISTINCT]`), after `AS` (CTAS) or at the start of a parenthesised
+ * query. `ALTER|CREATE|DROP|LOCK … TABLE` and `ON TABLE` never match.
+ */
+const isSetOp = (t) => t?.type === TOKEN.WORD && SET_OPS.has(t.upper);
+
+function isTableQueryForm(tokens, k, start) {
+  if (k === start) return true;
+  const prev = tokens[k - 1];
+  if (prev.type === TOKEN.LPAREN || isWord(prev, "AS") || isSetOp(prev)) return true;
+  return (isWord(prev, "ALL") || isWord(prev, "DISTINCT")) && isSetOp(tokens[k - 2]);
+}
+
 const FROM_FUNCTIONS = new Set(["EXTRACT", "SUBSTRING", "TRIM", "OVERLAY", "POSITION"]);
 
 /** CTE definitions in [start, end): `{ name, from, until }` visibility windows. */
@@ -155,6 +189,14 @@ export function findReferences(tokens, start, end) {
     const k = chain.last;
     if (ctes.some((c) => c.name === table && k > c.from && k < c.until)) return;
     if (!refs.has(k)) refs.set(k, { table, index: k, line: tokens[k].line });
+  };
+
+  // `TABLE [ONLY] t` as a query (shorthand for SELECT * FROM t) at `k`.
+  const tableForm = (k) => {
+    let i = k + 1;
+    if (isWord(tokens[i], "ONLY")) i++;
+    const chain = chainAt(tokens, i);
+    if (chain) add(chain);
   };
 
   // One FROM-clause item at `i`; returns the index after the item (and alias).
@@ -226,8 +268,18 @@ export function findReferences(tokens, start, end) {
     } else if (t.upper === "JOIN") {
       fromItem(k + 1);
     } else if ((t.upper === "INSERT" || t.upper === "MERGE") && isWord(tokens[k + 1], "INTO")) {
-      const chain = chainAt(tokens, k + 2);
-      if (chain) add(chain);
+      let i = k + 2;
+      if (t.upper === "MERGE" && isWord(tokens[i], "ONLY")) i++;
+      const chain = chainAt(tokens, i);
+      if (chain) {
+        add(chain);
+        // INSERT INTO u [(cols)] TABLE t: the source of the insert
+        let j = chain.end;
+        if (tokens[j]?.type === TOKEN.LPAREN && tokens[j].match !== undefined) j = tokens[j].match + 1;
+        if (t.upper === "INSERT" && isWord(tokens[j], "TABLE")) tableForm(j);
+      }
+    } else if (t.upper === "TABLE" && isTableQueryForm(tokens, k, start)) {
+      tableForm(k);
     } else if (t.upper === "UPDATE") {
       if (prev !== undefined && prev.type === TOKEN.WORD && ["FOR", "ON", "DO", "KEY", "OF", "OR", "AFTER", "BEFORE"].includes(prev.upper)) continue;
       let i = k + 1;
@@ -249,8 +301,9 @@ export function findReferences(tokens, start, end) {
 // ---------------------------------------------------------------------------
 
 const wordChar = (c) => c !== undefined && /[A-Za-z0-9_$\u0080-\uDFFF]/.test(c);
-// Tag rule of check-destructive-migration.mjs: Unicode letters are legal.
-const DOLLAR_TAG = /\$(?:[\p{L}_][\p{L}\p{N}_$]*)?\$/uy;
+// Tag rule of check-destructive-migration.mjs: Unicode letters are legal. A tag
+// never contains `$` (PostgreSQL), else `$q$x$q$` would lex as ONE tag.
+const DOLLAR_TAG = /\$(?:[\p{L}_][\p{L}\p{N}_]*)?\$/uy;
 // What sql-scan's tokenizer recognises as a dollar tag.
 const ASCII_TAG_SRC = String.raw`\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$`;
 const ASCII_TAG = new RegExp(`^${ASCII_TAG_SRC}$`);
@@ -362,7 +415,10 @@ export function normalizeDollarTags(sql) {
 // FORCE replay
 // ---------------------------------------------------------------------------
 
-/** FORCE / NO FORCE occurrences of one top-level statement: `{ table, force }[]`. */
+/**
+ * FORCE / NO FORCE occurrences of one top-level statement, `{ table, force }`,
+ * and `ALTER TABLE t RENAME TO t2` as `{ rename: { from, to } }`.
+ */
 function forceEvents(tokens, s, e) {
   if (!isWord(tokens[s], "ALTER") || !isWord(tokens[s + 1], "TABLE")) return [];
   let i = s + 2;
@@ -372,6 +428,10 @@ function forceEvents(tokens, s, e) {
   if (!chain) return [];
   const table = tableKey(chain.parts);
   const out = [];
+  if (isWord(tokens[chain.end], "RENAME") && isWord(tokens[chain.end + 1], "TO")) {
+    const to = chainAt(tokens, chain.end + 2);
+    if (to) out.push({ rename: { from: table, to: tableKey(to.parts) } });
+  }
   for (let k = chain.end; k < e; k++) {
     if (isForceRls(tokens, k)) {
       out.push({ table, force: !isWord(tokens[k - 1], "NO") });
@@ -423,26 +483,112 @@ const DDL_HEADS = new Set([
   "ALTER", "CREATE", "DROP", "GRANT", "REVOKE", "COMMENT", "SET", "RESET", "ANALYZE", "REINDEX", "VACUUM",
 ]);
 
+/** A dollar-quoted token's body (its tags removed), or null when it is not one. */
+function dollarBody(text) {
+  const tag = ASCII_TAG_PREFIX.exec(text);
+  return tag && text.length >= 2 * tag[0].length ? text.slice(tag[0].length, text.length - tag[0].length) : null;
+}
+
+/** The text a string-literal token denotes (quotes / dollar tag removed, `''` and E-escapes resolved). */
+function unquoteLiteral(text) {
+  const dollar = text.startsWith("$") ? dollarBody(text) : null;
+  if (dollar !== null) return dollar;
+  const m = /^[Ee]?'/.exec(text);
+  if (!m) return text;
+  const body = text.slice(m[0].length, text.endsWith("'") ? -1 : undefined).replace(/''/g, "'");
+  return m[0].length === 2 ? body.replace(/\\(.)/gs, "$1") : body;
+}
+
+/**
+ * Re-tokenize a string literal's contents. `errors` is non-empty for an
+ * unterminated / unrecognised `$` quote; null when the tokenizer throws.
+ */
+function literalTokens(text) {
+  try {
+    const inner = normalizeDollarTags(unquoteLiteral(text));
+    return { tokens: tokenizeSql(inner.sql), errors: inner.errors };
+  } catch {
+    return null;
+  }
+}
+
+const MAX_LITERAL_NESTING = 4;
+
+/**
+ * Does a string literal, re-tokenized, name a FORCE table (a name token equal to
+ * a forced table, in the literal or in a literal nested in it)? A mention is not
+ * a reference by itself: prose such as a RAISE message is allowed unless the
+ * body also executes dynamic SQL. Returns null when the literal cannot be read.
+ */
+function literalMentionsForced(text, forced, level = 0) {
+  const lit = literalTokens(text);
+  if (lit === null) return null;
+  // An unterminated `$` quote inside prose: fall back to a word match on the raw text.
+  if (lit.errors.length > 0) {
+    const raw = unquoteLiteral(text).toLowerCase();
+    return [...forced].some((t) => new RegExp(`(^|[^a-z0-9_])${t.replace(/[^a-z0-9_]/g, "\\$&")}($|[^a-z0-9_])`).test(raw));
+  }
+  for (const t of lit.tokens) {
+    if (isName(t) && forced.has(nameOf(t))) return true;
+    if (t.type === TOKEN.STRING) {
+      if (level >= MAX_LITERAL_NESTING) return null;
+      const r = literalMentionsForced(t.text, forced, level + 1);
+      if (r !== false) return r;
+    }
+  }
+  return false;
+}
+
+/** `SET|RESET [LOCAL|SESSION] app.bypass_*` at token `k`: the lexical bypass state becomes unknowable. */
+function isBypassSetting(tokens, k) {
+  if (!isWord(tokens[k], "SET") && !isWord(tokens[k], "RESET")) return false;
+  let i = k + 1;
+  if (isWord(tokens[i], "LOCAL") || isWord(tokens[i], "SESSION")) i++;
+  const chain = chainAt(tokens, i);
+  return chain !== null && chain.parts.join(".").toLowerCase().startsWith("app.bypass_");
+}
+
 /**
  * Dynamic SQL is invisible to this scan, so EXECUTE fails closed, with two
  * narrowings (needed: 8 shipped DO bodies use EXECUTE for role / column-type
  * DDL, and none can be baselined as a hit):
  *   - the statement's first string literal is a DDL / utility command
- *     (`EXECUTE format('ALTER TABLE %I …', t)`): it cannot read rows;
+ *     (`EXECUTE format('ALTER TABLE %I …', t)`): it cannot read rows. Every
+ *     literal of the statement is then re-tokenized and refused when it holds a
+ *     depth-0 `;` followed by more tokens (a smuggled second statement), when
+ *     the first is a data statement (`CREATE TABLE … AS SELECT`, `CREATE
+ *     MATERIALIZED VIEW … AS`), sets an `app.bypass_*` setting, or when a later
+ *     one references a FORCE table;
  *   - the statement holds no string literal at all (`EXECUTE r.definition`)
- *     and the body names no FORCE table and no bypass setting, so nothing in
- *     it connects the dynamic text to an RLS-bound table.
- * A DML / SELECT literal, or a literal-free EXECUTE in a body that names a
- * FORCE table or a bypass setting, stays refused.
+ *     and the body is not RLS-relevant: it names no FORCE table (in code or in
+ *     ANY string literal, which is how `q := 'UPDATE t …'; EXECUTE q` is
+ *     caught) and no bypass setting.
+ * Returns the refusal reason, or null.
  */
-function isDdlExecute(tokens, k, bodyIsRlsRelevant) {
+function executeProblem(tokens, k, bodyIsRlsRelevant, forced) {
+  const lits = [];
   for (let j = k + 1; j < tokens.length && tokens[j].type !== TOKEN.SEMI; j++) {
-    const t = tokens[j];
-    if (t.type !== TOKEN.STRING) continue;
-    const m = /^[Ee]?'\s*([A-Za-z]+)/.exec(t.text);
-    return m !== null && DDL_HEADS.has(m[1].toUpperCase());
+    if (tokens[j].type === TOKEN.STRING) lits.push(tokens[j].text);
   }
-  return !bodyIsRlsRelevant;
+  const notDdl = "EXECUTE inside a DO body (dynamic SQL that is not literal DDL)";
+  if (lits.length === 0) return bodyIsRlsRelevant ? notDdl : null;
+  const head = /^[Ee]?'\s*([A-Za-z]+)/.exec(lits[0]);
+  if (head === null || !DDL_HEADS.has(head[1].toUpperCase())) return notDdl;
+
+  for (let n = 0; n < lits.length; n++) {
+    const lit = literalTokens(lits[n]);
+    if (lit === null || lit.errors.length > 0) return "EXECUTE literal cannot be tokenized";
+    const { tokens: lt } = lit;
+    if (lt.some((t, i) => t.type === TOKEN.SEMI && t.depth <= 0 && i < lt.length - 1)) {
+      return "EXECUTE literal holds more than one statement";
+    }
+    if (n === 0 && isDataStatement(lt, 0, lt.length)) return "EXECUTE of a data statement (CREATE … AS SELECT)";
+    if (lt.some((_, i) => isBypassSetting(lt, i))) return "EXECUTE sets an app.bypass_* setting";
+    if (n > 0 && findReferences(lt, 0, lt.length).some((r) => forced.has(r.table))) {
+      return "EXECUTE literal references a FORCE table";
+    }
+  }
+  return null;
 }
 
 /** Split the arguments of the call whose `(` is at `open`: arrays of token indexes. */
@@ -473,14 +619,30 @@ function scanDoBody(tokens, forced) {
   const errors = [];
   const depths = blockDepths(tokens);
   const bodyRefs = findReferences(tokens, 0, tokens.length);
+  let literalsReadable = true;
+  let literalMentions = false;
+  for (const t of tokens) {
+    if (t.type !== TOKEN.STRING) continue;
+    const r = literalMentionsForced(t.text, forced);
+    if (r === null) {
+      literalsReadable = false;
+      errors.push({ line: t.line, reason: "string literal cannot be tokenized" });
+    } else if (r) literalMentions = true;
+  }
   const bodyIsRlsRelevant =
+    !literalsReadable ||
+    literalMentions ||
     bodyRefs.some((r) => forced.has(r.table)) ||
     tokens.some((t) => t.type === TOKEN.STRING && /app\.bypass_/i.test(t.text));
 
   for (let k = 0; k < tokens.length; k++) {
     const t = tokens[k];
-    if (isWord(t, "EXECUTE") && !isExecutePrivilegeOrTrigger(tokens, k) && !isDdlExecute(tokens, k, bodyIsRlsRelevant)) {
-      errors.push({ line: t.line, reason: "EXECUTE inside a DO body (dynamic SQL that is not literal DDL)" });
+    if (isWord(t, "EXECUTE") && !isExecutePrivilegeOrTrigger(tokens, k)) {
+      const reason = executeProblem(tokens, k, bodyIsRlsRelevant, forced);
+      if (reason !== null) errors.push({ line: t.line, reason });
+    }
+    if (isBypassSetting(tokens, k)) {
+      errors.push({ line: t.line, reason: "SET / RESET of an app.bypass_* setting inside a DO body (lexical state unknown)" });
     }
     if (isForceRls(tokens, k)) {
       errors.push({ line: t.line, reason: "FORCE ROW LEVEL SECURITY inside a DO body" });
@@ -514,6 +676,10 @@ function scanDoBody(tokens, forced) {
     const setting = literalOf(tokens, args[0])?.toLowerCase();
     if (setting !== "app.bypass_rls" && setting !== "app.bypass_tables") continue;
     const line = tokens[ev.index].line;
+    const value0 = literalOf(tokens, args[1]);
+    if (setting === "app.bypass_tables" && value0 !== null && value0 !== "" && depths[ev.index] !== 1) {
+      errors.push({ line, reason: "bypass_tables set inside a nested block, branch or loop" });
+    }
     const local = args[2].length === 1 ? tokens[args[2][0]] : null;
     if (isWord(local, "FALSE")) {
       errors.push({ line, reason: `set_config('${setting}', ..., false) is session-scoped` });
@@ -544,7 +710,7 @@ function scanDoBody(tokens, forced) {
 // Migration scan
 // ---------------------------------------------------------------------------
 
-const DATA_HEADS = new Set(["SELECT", "INSERT", "UPDATE", "DELETE", "MERGE", "WITH"]);
+const DATA_HEADS = new Set(["SELECT", "INSERT", "UPDATE", "DELETE", "MERGE", "WITH", "TABLE"]);
 
 function isDataStatement(tokens, s, e) {
   const head = tokens[s];
@@ -553,7 +719,7 @@ function isDataStatement(tokens, s, e) {
   if (isWord(head, "CREATE")) {
     let hasTable = false;
     for (let k = s + 1; k < e; k++) {
-      if (isWord(tokens[k], "TABLE")) hasTable = true;
+      if (isWord(tokens[k], "TABLE") || (isWord(tokens[k], "MATERIALIZED") && isWord(tokens[k + 1], "VIEW"))) hasTable = true;
       if (hasTable && tokens[k].depth === head.depth && isWord(tokens[k], "AS")) {
         const n = tokens[k + 1];
         return n !== undefined && (isWord(n, "SELECT") || isWord(n, "WITH") || isWord(n, "VALUES") || isWord(n, "TABLE") || n.type === TOKEN.LPAREN);
@@ -584,7 +750,9 @@ export function scanSql(sql, forced) {
     while (e < tokens.length && tokens[e].type !== TOKEN.SEMI) e++;
     if (e > s) {
       for (const ev of forceEvents(tokens, s, e)) {
-        if (ev.force) {
+        if (ev.rename) {
+          if (forced.delete(ev.rename.from)) forced.add(ev.rename.to);
+        } else if (ev.force) {
           forceStatements++;
           forcedTables.add(ev.table);
           forced.add(ev.table);
@@ -594,11 +762,10 @@ export function scanSql(sql, forced) {
       }
       if (isWord(tokens[s], "DO")) {
         const bodyTok = tokens.slice(s, e).find((t) => t.type === TOKEN.STRING && t.text.startsWith("$"));
-        const m = bodyTok && ASCII_TAG_PREFIX.exec(bodyTok.text);
-        if (!bodyTok || !m || bodyTok.text.length < 2 * m[0].length) {
+        const body = bodyTok ? dollarBody(bodyTok.text) : null;
+        if (body === null) {
           errors.push({ line: tokens[s].line + 1, reason: "DO without a dollar-quoted body" });
         } else {
-          const body = bodyTok.text.slice(m[0].length, bodyTok.text.length - m[0].length);
           const inner = normalizeDollarTags(body);
           const offset = bodyTok.line + 1;
           for (const err of inner.errors) errors.push({ line: err.line + offset, reason: err.reason });

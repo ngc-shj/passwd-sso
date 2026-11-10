@@ -958,7 +958,7 @@ export async function setTestBypass(client: pg.PoolClient, tables: readonly stri
   await setGucs(client, {
     rls: "on",
     tables: tables.join(","),
-    purpose: "system_maintenance",
+    purpose: BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
     tenant: "00000000-0000-0000-0000-000000000000",
   });
 }

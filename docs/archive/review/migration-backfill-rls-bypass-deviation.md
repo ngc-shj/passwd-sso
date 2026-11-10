@@ -71,37 +71,72 @@ silent handling of an unterminated quote, which this gate reports as UNPARSED.
 
 ## Mutation results
 Every mutant was applied to a copy in the scratchpad (never the real source) and run against the
-named cells. "Red" means the named cell failed for the mutated control.
+cells named; "Red" quotes the first failing assertion. C1 mutants ran through
+`RLS_BACKFILL_RERUN_SQL` against the describe they target (21 departure / 12 re-key cells, both
+green unmutated); a run in which no test executed is invalid and was rerun (code review round 1).
 
-| Contract / control | Mutation | Killing cell |
+### C1 departure block
+| Control | Mutation | Killing cell | Red |
+|---|---|---|---|
+| bypass grant | `app.bypass_rls 'on'` removed (both blocks) | C1 as passwd_app literal map | `expected { memberships: … } to deeply equal …` (17 failed) |
+| restores | each of `bypass_rls`, `bypass_tables`, `purpose`, `tenant_id` restore removed | every `runBlock` (I3 sentinels) | `expected { rls: 'on', … } to deeply equal { rls: 'off', … }` (12–15 failed) |
+| role gate | `rolsuper` half dropped | superuser-role skip cell | `expected [] to have a length of 1 but got +0` |
+| role gate | `rolbypassrls` half dropped | bypassrls-role skip cell | `expected [] to have a length of 1 but got +0` |
+| role gate | inverted | C1 literal map | 16 failed |
+| role gate | `current_user` → `session_user` | `SET LOCAL ROLE passwd_app` cell | (Phase 2) |
+| step-1 exclusion | logs arm removed / its tenant, action, target conjunct each loosened | C1 literal map | 2–4 failed each, `expected { memberships: … }` |
+| step-1 exclusion | outbox arm removed / its tenant, action, target conjunct each loosened | C1 literal map | 3–4 failed each |
+| candidate-copy exclusion | outbox arm removed; whole exclusion removed | I2 skip-count delta | (Phase 2) |
+| outbox enqueue | rows filtered out | C1 outbox payload cell | `expected {} to deeply equal { …(8) }` |
+| 2c conflict arm | `DO NOTHING` → `DO UPDATE` | C1 literal map | (Phase 2) |
+| `updated_at` | removed from 2a / 2b / 2c / step 1, each | C1 literal map | `"unchanged"` where `"moved"` expected |
+| bypass list | each of 8 tables removed | per-table table-list cells (permanent control) | bypass notice names the table |
+| locks | advisory (candidates), advisory (2c subjects), tenant rows, teams, each removed | the matching lock cell (55P03) | (Phase 2 self-check; the cell names the statement that waited) |
+
+### C1 re-key block
+| Control | Mutation | Killing cell | Red |
+|---|---|---|---|
+| bypass grant | removed | C1 literal map | 10 failed |
+| restore | `bypass_rls` restore removed | `runBlock` I3 | `{ rls: 'on' }` vs `{ rls: 'off' }` |
+| step 1 | `team_key_version <= 1` → `<= 3` | C1 literal map | 2 failed |
+| step 1 | `high_water = 0` removed | C1 literal map (restored entry stays pending) | (Phase 2) |
+| step 1 | role condition removed | the bypass-role cells | (Phase 2) |
+| steps 2 / 3 / 4 | role condition added to each | migration-superuser straggler cell | 3 failed each |
+| step 2 | `>` → `<>` | `appHighWaterAbove` | hw expected 5, got 1 |
+| step 4 | each of five wrap conjuncts dropped | `differsIn_*` variants | expected null, got the entry's id |
+| bypass list | each of 4 tables removed | per-table table-list cells | bypass notice |
+| teams lock | removed | re-key teams-lock cell | 55P03 |
+
+### C3 gate (self-test cells; mutants via `MIGRATION_RLS_DML_GATE_UNDER_TEST`)
+Reference keywords (JOIN, USING, MERGE, INSERT, UPDATE, comma items), CTE exclusion, nested grant
+(`bypass_rls` and `bypass_tables`), restore required, table list exact split, `false`, EXECUTE
+rules (literal mention, multi-statement, CTAS / materialized view, later literal, bypass SET in a
+literal, literal-free EXECUTE in a relevant body), SET / RESET in a body, RENAME replay, MERGE ONLY,
+INSERT … TABLE, `TABLE` query forms, UNION ALL TABLE, top-level reading and matview, unterminated
+quote, FORCE in DO, NO FORCE replay, Unicode and dollar-quoted literals: each disabled on a copy
+turned its named refusal cell red (37 mutants across Phase 2 and review round 1). The three
+real-tree cells also fail under every copy-run because the copy has no `prisma/migrations`; the
+named cell's failure is the signal.
+
+### C6 scripts (mutants via `RUNBOOK_MD`)
+| Control | Mutation | Killing cell |
 |---|---|---|
-| C1 2c conflict arm | `DO NOTHING` → `DO UPDATE` | C1 literal map; `SET LOCAL ROLE passwd_app` cell |
-| C1 role gate | `current_user` → `session_user` | `SET LOCAL ROLE passwd_app` cell |
-| C1 departure teams lock | removed | departure teams-lock cell (55P03) |
-| C1 re-key step 1 | `high_water = 0` removed | C1 literal map (restored entry stays pending) |
-| C1 re-key step 1 | role condition removed | the three bypass-role I2 cells |
-| C1 re-key teams lock | removed | re-key teams-lock cell |
-| C1 exclusion | outbox arm removed | C1 literal map |
-| C1 bypass list | each of 12 tables removed | the per-table table-list cells, which run exactly this mutation as a permanent control (bypass notice naming the table) |
-| C1 advisory lock | `pg_advisory_xact_lock` removed | "the advisory lock of a candidate (tenant, user)" cell |
-| C1 tenant-row lock | `FOR SHARE OF tmb` removed | "a candidate's tenant_members row" cell |
-| C1 advisory lock, 2c subjects | SCIM_USER_DELETE arm removed from the key set | "the advisory lock of a 2c subject" cell |
-| C6 contain session NOTICE | `session_user` replaced by a constant | contain success cell (exact NOTICE text) |
-| C3 reference keywords | JOIN, USING, MERGE, INSERT, UPDATE, comma items disabled | C5 per-form refusal cells |
-| C3 CTE exclusion | disabled | C5 CTE cell |
-| C3 nested grant / restore / table list / `false` / EXECUTE | each disabled | C5 matching refusal cells |
-| C3 top-level reading, unterminated quote, FORCE-in-DO, NO FORCE replay | each disabled | C5 matching cells |
-| C3 list membership | exact split → substring | C5 near-name cell |
-| C3 Unicode tag mapping | disabled | C5 Unicode-tag cell |
-| C6 contain tenant matches | team/membership, tenant-row each dropped | C6 single-conjunct refusal cells |
-| C6 contain active / departed | each dropped | C6 refusal cells |
-| C6 contain count check | removed | mixed-list refusal cell |
-| C6 contain locks | each of three removed | C6 lock cells (55P03) |
-| C6 contain record / marker / stamp | `manual`, marker dropped; stamp → `now()` | C6 success cell |
-| C6 contain input checks | template label, 255 bound, array shape, dedupe each dropped | C6 refusal / success cells |
-| C6 report section 2 | outbox arm, logs arm, action conjunct, time filter each mutated | C6 section-2 cells |
-| C6 report section 1 | logs record flag mutated; C1's exclusion added | C6 report literal map |
-| C6 report positive control | removed | grant-removed cell |
+| report positive control | removed | grant-removed cell |
+| report section 1 | C1's exclusion added | section-1 literal map |
+| report record flag | logs arm, outbox arm each removed; tenant, action, target conjunct of each arm each loosened | section-1 literal map (negatives per conjunct and store) |
+| report section 2 | logs arm, outbox arm, action conjunct, time filter each mutated | section-2 cells |
+| contain guard | team/membership tenant, tenant-row tenant, active, departed each dropped; any-vs-every | single-conjunct refusal cells, mixed list |
+| contain inputs | template label, 255 bound, array shape (2-D / 3 columns / 3-D), dedupe each dropped | refusal / success cells |
+| contain writes | `manual`, marker dropped; stamp → `now()`; count check removed | success / mixed-list cells |
+| contain locks | each of three removed | contain lock cells (55P03) |
+| contain NOTICE | `session_user` → constant | success cell (exact NOTICE) |
 
-Review-verified, not mutant-verified (no deterministic cell distinguishes them): lock ORDER in C1
-and contain; the outbox-store record flag in report section 1.
+### Review-verified, not mutant-verified
+- `app.tenant_id` set to the nil UUID (both blocks): an equivalent mutant. With the bypass granted
+  and the table listed, the policy's OR short-circuits before the tenant arm's cast, so removing it
+  changes nothing — including when the two blocks run in sequence as `migrate deploy` runs them
+  after the first restored an unset value to `''` (checked on a copy). Kept for parity with
+  `20261109162613`, whose policies it protects if a list ever falls short.
+- The candidate-copy exclusion's logs arm and its conjuncts: the candidate set drives only the
+  advisory count and which rows are locked; step 1 re-derives its own predicate (pinned above).
+- Lock ORDER in C1 and contain: no deterministic cell distinguishes an order.

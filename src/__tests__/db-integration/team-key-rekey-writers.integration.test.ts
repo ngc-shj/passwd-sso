@@ -214,6 +214,60 @@ describe("team entry key identity writers — real-DB integration", () => {
     return id;
   }
 
+  async function seedAttachment(entryId: string, userId: string, cekKeyVersion: number | null, mode: number): Promise<void> {
+    await sql(
+      `INSERT INTO attachments (
+         id, team_password_entry_id, tenant_id, created_by_id, filename, content_type, size_bytes,
+         encrypted_data, iv, auth_tag, key_version, cek_key_version, aad_version, encryption_mode, created_at
+       ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'f.bin', 'application/octet-stream', 4,
+                 '\\x00010203'::bytea, $5, $6, 1, $7, 1, $8, now())`,
+      randomUUID(), entryId, tenantId, userId, hex(12), hex(16), cekKeyVersion, mode,
+    );
+  }
+
+  /**
+   * The entries and history rows the backfill's high-water and item_key_id steps read: each
+   * high-water term alone (history, CEK attachment, mode-0 attachment, none), and an entry whose
+   * history rows equal its wrap except, in turn, exactly one wrap column (or hold a NULL there).
+   */
+  async function seedIdentityShapes(teamV3: string, owner: string) {
+    const hwHistory = await seedEntry(teamV3, owner, { teamKeyVersion: 3, itemKeyVersion: 1 });
+    await seedHistory(hwHistory, owner, { teamKeyVersion: 3, itemKeyVersion: 3 });
+    const hwAttachment = await seedEntry(teamV3, owner, { teamKeyVersion: 3, itemKeyVersion: 1 });
+    await seedHistory(hwAttachment, owner, { teamKeyVersion: 3, itemKeyVersion: 2 });
+    const mode0Only = await seedEntry(teamV3, owner, { teamKeyVersion: 3, itemKeyVersion: 2 });
+    const neither = await seedEntry(teamV3, owner, { teamKeyVersion: 3, itemKeyVersion: 1 });
+    await seedAttachment(hwHistory, owner, 2, 1);
+    await seedAttachment(hwAttachment, owner, 4, 1);
+    await seedAttachment(mode0Only, owner, null, 0);
+
+    const wrap = newWrap();
+    const idEntry = await seedEntry(teamV3, owner, { teamKeyVersion: 3, itemKeyVersion: 2, wrap });
+    const other = await seedEntry(teamV3, owner, { teamKeyVersion: 3, itemKeyVersion: 1 });
+    const v0 = await seedEntry(teamV3, owner, { teamKeyVersion: 3, itemKeyVersion: 0 });
+    const sameLength = (s: string) => hex(s.length / 2);
+    const fullMatch = await seedHistory(idEntry, owner, { teamKeyVersion: 3, itemKeyVersion: 2, wrap });
+    const variants = {
+      teamKeyVersion: await seedHistory(idEntry, owner, { teamKeyVersion: 4, itemKeyVersion: 2, wrap }),
+      itemKeyVersion: await seedHistory(idEntry, owner, { teamKeyVersion: 3, itemKeyVersion: 3, wrap }),
+      encryptedItemKey: await seedHistory(idEntry, owner, {
+        teamKeyVersion: 3, itemKeyVersion: 2, wrap: { ...wrap, encryptedItemKey: sameLength(wrap.encryptedItemKey) },
+      }),
+      itemKeyIv: await seedHistory(idEntry, owner, {
+        teamKeyVersion: 3, itemKeyVersion: 2, wrap: { ...wrap, itemKeyIv: sameLength(wrap.itemKeyIv) },
+      }),
+      itemKeyAuthTag: await seedHistory(idEntry, owner, {
+        teamKeyVersion: 3, itemKeyVersion: 2, wrap: { ...wrap, itemKeyAuthTag: sameLength(wrap.itemKeyAuthTag) },
+      }),
+    };
+    const nullVariants = await Promise.all([
+      seedHistory(idEntry, owner, { teamKeyVersion: 3, itemKeyVersion: 2, wrap: { ...wrap, encryptedItemKey: null } }),
+      seedHistory(idEntry, owner, { teamKeyVersion: 3, itemKeyVersion: 2, wrap: { ...wrap, itemKeyIv: null } }),
+      seedHistory(idEntry, owner, { teamKeyVersion: 3, itemKeyVersion: 2, wrap: { ...wrap, itemKeyAuthTag: null } }),
+    ]);
+    return { hwHistory, hwAttachment, mode0Only, neither, idEntry, other, v0, fullMatch, variants, nullVariants };
+  }
+
   async function entry(id: string): Promise<EntryRow> {
     const r = await ctx.su.pool.query<EntryRow>(
       `SELECT item_key_version, team_key_version, item_key_id, item_key_team_key_version,
@@ -315,53 +369,9 @@ describe("team entry key identity writers — real-DB integration", () => {
     const atV1 = await seedEntry(teamV1, owner1, { teamKeyVersion: 1, itemKeyVersion: 1 });
     const atV3 = await seedEntry(teamV3, owner1, { teamKeyVersion: 3, itemKeyVersion: 1 });
 
-    // High-water terms.
-    const hwHistory = await seedEntry(teamV3, owner1, { teamKeyVersion: 3, itemKeyVersion: 1 });
-    await seedHistory(hwHistory, owner1, { teamKeyVersion: 3, itemKeyVersion: 3 });
-    const hwAttachment = await seedEntry(teamV3, owner1, { teamKeyVersion: 3, itemKeyVersion: 1 });
-    await seedHistory(hwAttachment, owner1, { teamKeyVersion: 3, itemKeyVersion: 2 });
-    const mode0Only = await seedEntry(teamV3, owner1, { teamKeyVersion: 3, itemKeyVersion: 2 });
-    const neither = await seedEntry(teamV3, owner1, { teamKeyVersion: 3, itemKeyVersion: 1 });
-    async function attachment(entryId: string, cekKeyVersion: number | null, mode: number) {
-      await sql(
-        `INSERT INTO attachments (
-           id, team_password_entry_id, tenant_id, created_by_id, filename, content_type, size_bytes,
-           encrypted_data, iv, auth_tag, key_version, cek_key_version, aad_version, encryption_mode, created_at
-         ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'f.bin', 'application/octet-stream', 4,
-                   '\\x00010203'::bytea, $5, $6, 1, $7, 1, $8, now())`,
-        randomUUID(), entryId, tenantId, owner1, hex(12), hex(16), cekKeyVersion, mode,
-      );
-    }
-    await attachment(hwHistory, 2, 1);
-    await attachment(hwAttachment, 4, 1);
-    await attachment(mode0Only, null, 0);
-
-    // item_key_id: one entry with history rows equal to its wrap except, in
-    // turn, one predicate column.
-    const wrap = newWrap();
-    const idEntry = await seedEntry(teamV3, owner1, { teamKeyVersion: 3, itemKeyVersion: 2, wrap });
-    const other = await seedEntry(teamV3, owner1, { teamKeyVersion: 3, itemKeyVersion: 1 });
-    const v0 = await seedEntry(teamV3, owner1, { teamKeyVersion: 3, itemKeyVersion: 0 });
-    const sameLength = (s: string) => hex(s.length / 2);
-    const fullMatch = await seedHistory(idEntry, owner1, { teamKeyVersion: 3, itemKeyVersion: 2, wrap });
-    const variants = {
-      teamKeyVersion: await seedHistory(idEntry, owner1, { teamKeyVersion: 4, itemKeyVersion: 2, wrap }),
-      itemKeyVersion: await seedHistory(idEntry, owner1, { teamKeyVersion: 3, itemKeyVersion: 3, wrap }),
-      encryptedItemKey: await seedHistory(idEntry, owner1, {
-        teamKeyVersion: 3, itemKeyVersion: 2, wrap: { ...wrap, encryptedItemKey: sameLength(wrap.encryptedItemKey) },
-      }),
-      itemKeyIv: await seedHistory(idEntry, owner1, {
-        teamKeyVersion: 3, itemKeyVersion: 2, wrap: { ...wrap, itemKeyIv: sameLength(wrap.itemKeyIv) },
-      }),
-      itemKeyAuthTag: await seedHistory(idEntry, owner1, {
-        teamKeyVersion: 3, itemKeyVersion: 2, wrap: { ...wrap, itemKeyAuthTag: sameLength(wrap.itemKeyAuthTag) },
-      }),
-    };
-    const nullVariants = await Promise.all([
-      seedHistory(idEntry, owner1, { teamKeyVersion: 3, itemKeyVersion: 2, wrap: { ...wrap, encryptedItemKey: null } }),
-      seedHistory(idEntry, owner1, { teamKeyVersion: 3, itemKeyVersion: 2, wrap: { ...wrap, itemKeyIv: null } }),
-      seedHistory(idEntry, owner1, { teamKeyVersion: 3, itemKeyVersion: 2, wrap: { ...wrap, itemKeyAuthTag: null } }),
-    ]);
+    const {
+      hwHistory, hwAttachment, mode0Only, neither, idEntry, other, v0, fullMatch, variants, nullVariants,
+    } = await seedIdentityShapes(teamV3, owner1);
 
     const migration = readFileSync(
       join(process.cwd(), "prisma/migrations/20261104000000_team_key_rotation_rekey/migration.sql"),
@@ -827,21 +837,16 @@ describe("team entry key identity writers — real-DB integration", () => {
       entries.atV0Team = await seedEntry(teamV0, owner, { teamKeyVersion: 0, itemKeyVersion: 1 });
       entries.atV3 = await seedEntry(teamV3, owner, { teamKeyVersion: 3, itemKeyVersion: 1 });
       entries.v0Entry = await seedEntry(teamV1, owner, { teamKeyVersion: 1, itemKeyVersion: 0 });
-      entries.hwHistory = await seedEntry(teamV3, owner, { teamKeyVersion: 3, itemKeyVersion: 1 });
-      await seedHistory(entries.hwHistory, owner, { teamKeyVersion: 3, itemKeyVersion: 3 });
-      entries.hwAttachment = await seedEntry(teamV3, owner, { teamKeyVersion: 3, itemKeyVersion: 1 });
-      await sql(
-        `INSERT INTO attachments (
-           id, team_password_entry_id, tenant_id, created_by_id, filename, content_type, size_bytes,
-           encrypted_data, iv, auth_tag, key_version, cek_key_version, aad_version, encryption_mode, created_at
-         ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'f.bin', 'application/octet-stream', 4,
-                   '\\x00010203'::bytea, $5, $6, 1, 4, 1, 1, now())`,
-        randomUUID(), entries.hwAttachment, tenantId, owner, hex(12), hex(16),
-      );
-      const wrap = newWrap();
-      entries.idEntry = await seedEntry(teamV3, owner, { teamKeyVersion: 3, itemKeyVersion: 2, wrap });
-      histories.identical = { id: await seedHistory(entries.idEntry, owner, { teamKeyVersion: 3, itemKeyVersion: 2, wrap }), entry: "idEntry" };
-      histories.otherTeamKey = { id: await seedHistory(entries.idEntry, owner, { teamKeyVersion: 4, itemKeyVersion: 2, wrap }), entry: "idEntry" };
+      const shapes = await seedIdentityShapes(teamV3, owner);
+      Object.assign(entries, {
+        hwHistory: shapes.hwHistory, hwAttachment: shapes.hwAttachment, mode0Only: shapes.mode0Only,
+        neither: shapes.neither, idEntry: shapes.idEntry, other: shapes.other, v0Shape: shapes.v0,
+      });
+      histories.identical = { id: shapes.fullMatch, entry: "idEntry" };
+      for (const [column, id] of Object.entries(shapes.variants)) histories[`differsIn_${column}`] = { id, entry: "idEntry" };
+      shapes.nullVariants.forEach((id, i) => {
+        histories[`null_${["encryptedItemKey", "itemKeyIv", "itemKeyAuthTag"][i]}`] = { id, entry: "idEntry" };
+      });
 
       // The pre-change state: what the columns held before the key-identity release.
       await sql(
@@ -855,6 +860,9 @@ describe("team entry key identity writers — real-DB integration", () => {
       entries.appPending = await seedEntry(teamV3, owner, { teamKeyVersion: 3, itemKeyVersion: 1, marker: 0, highWater: 1 });
       entries.stragglerNoId = await seedEntry(teamV3, owner, { teamKeyVersion: 3, itemKeyVersion: 1, marker: 0, highWater: 1 });
       await sql(`UPDATE team_password_entries SET item_key_id = NULL WHERE id = $1::uuid`, entries.stragglerNoId);
+
+      // An app-written entry whose high-water sits above everything its own rows hold: the raise-only guard must keep it.
+      entries.appHighWaterAbove = await seedEntry(teamV3, owner, { teamKeyVersion: 3, itemKeyVersion: 1, marker: 0, highWater: 5 });
 
       // Restored through the real route to a NULL-id row on a team at version 1: marker 0, high-water 1.
       entries.restored = await seedEntry(teamV1, owner, { teamKeyVersion: 1, itemKeyVersion: 1 });
@@ -891,16 +899,24 @@ describe("team entry key identity writers — real-DB integration", () => {
       return { entries: entriesState, histories };
     }
 
+    const NO_HISTORY_IDS = {
+      identical: null, differsIn_teamKeyVersion: null, differsIn_itemKeyVersion: null,
+      differsIn_encryptedItemKey: null, differsIn_itemKeyIv: null, differsIn_itemKeyAuthTag: null,
+      null_encryptedItemKey: null, null_itemKeyIv: null, null_itemKeyAuthTag: null,
+    };
     const PRE = {
       entries: {
         atV1: { marker: 0, hw: 0, hasId: false }, atV0Team: { marker: 0, hw: 0, hasId: false },
         atV3: { marker: 0, hw: 0, hasId: false }, v0Entry: { marker: 0, hw: 0, hasId: false },
         hwHistory: { marker: 0, hw: 0, hasId: false }, hwAttachment: { marker: 0, hw: 0, hasId: false },
-        idEntry: { marker: 0, hw: 0, hasId: false },
+        idEntry: { marker: 0, hw: 0, hasId: false }, mode0Only: { marker: 0, hw: 0, hasId: false },
+        neither: { marker: 0, hw: 0, hasId: false }, other: { marker: 0, hw: 0, hasId: false },
+        v0Shape: { marker: 0, hw: 0, hasId: false },
         appCurrent: { marker: 1, hw: 1, hasId: true }, appPending: { marker: 0, hw: 1, hasId: true },
+        appHighWaterAbove: { marker: 0, hw: 5, hasId: true },
         stragglerNoId: { marker: 0, hw: 1, hasId: false }, restored: { marker: 0, hw: 1, hasId: true },
       },
-      histories: { identical: null, otherTeamKey: null },
+      histories: NO_HISTORY_IDS,
     };
     /** Steps 2-4 on any role; step 1 (marker) additionally where the role cannot bypass. */
     const POST_STEPS_2_TO_4 = {
@@ -908,11 +924,14 @@ describe("team entry key identity writers — real-DB integration", () => {
         atV1: { marker: 0, hw: 1, hasId: true }, atV0Team: { marker: 0, hw: 1, hasId: true },
         atV3: { marker: 0, hw: 1, hasId: true }, v0Entry: { marker: 0, hw: 0, hasId: false },
         hwHistory: { marker: 0, hw: 3, hasId: true }, hwAttachment: { marker: 0, hw: 4, hasId: true },
-        idEntry: { marker: 0, hw: 2, hasId: true },
+        idEntry: { marker: 0, hw: 3, hasId: true }, mode0Only: { marker: 0, hw: 2, hasId: true },
+        neither: { marker: 0, hw: 1, hasId: true }, other: { marker: 0, hw: 1, hasId: true },
+        v0Shape: { marker: 0, hw: 0, hasId: false },
         appCurrent: { marker: 1, hw: 1, hasId: true }, appPending: { marker: 0, hw: 1, hasId: true },
+        appHighWaterAbove: { marker: 0, hw: 5, hasId: true },
         stragglerNoId: { marker: 0, hw: 1, hasId: true }, restored: { marker: 0, hw: 1, hasId: true },
       },
-      histories: { identical: "entry's id", otherTeamKey: null },
+      histories: { ...NO_HISTORY_IDS, identical: "entry's id" },
     };
     const POST_APP_ROLE = {
       ...POST_STEPS_2_TO_4,

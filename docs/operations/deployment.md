@@ -136,14 +136,17 @@ It builds/pushes an immutable git-SHA tag, runs `terraform apply
 
 ### Code-only release (no schema change)
 
-Deployments that applied `20261101000000_team_tenant_departure` before
-`20261110000000_rls_backfill_rerun` follow
-[departed-member-access-backfill.md](departed-member-access-backfill.md) around that
-migration.
-
 The migration task is idempotent (`prisma migrate deploy` is a no-op when there
 are no pending migrations), so a code-only release is the same `./scripts/deploy.sh`
 — it re-runs the (no-op) migration and advances the services.
+
+### One-time upgrade: `20261110000000_rls_backfill_rerun`
+
+Every deployment that applied `20261101000000_team_tenant_departure` before this
+release: **before** `./scripts/deploy.sh`, run the report in
+[departed-member-access-backfill.md](departed-member-access-backfill.md) and
+disable the team webhooks its section 2 lists — the migration's audit rows fan
+out to webhooks once it runs. After the deploy, follow the rest of that page.
 
 ### One-time upgrade: anchor publisher converged, DCR role retired
 

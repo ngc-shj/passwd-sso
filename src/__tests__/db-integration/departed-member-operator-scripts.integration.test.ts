@@ -22,6 +22,7 @@ import type pg from "pg";
 import {
   appConnectionString,
   assertRlsApplies,
+  collectNotices,
   createTestContext,
   expectBypassNotices,
   readBackfillBlock,
@@ -237,21 +238,26 @@ describe("departed-member operator scripts — real-DB integration", () => {
 
   type Results = pg.QueryResult[];
 
-  /** Runs `text` as one simple-protocol query on its own connection; rolls back after a raise. */
-  async function runScript(text: string, setup?: (client: pg.PoolClient) => Promise<void>): Promise<Results> {
+  /**
+   * Runs `text` as one simple-protocol query on its own connection; rolls back after a raise.
+   * `setup` may return a teardown, run before the connection goes back to the pool.
+   */
+  async function runScript(text: string, setup?: (client: pg.PoolClient) => Promise<(() => void) | void>): Promise<Results> {
     const client = await appPool.connect();
+    let teardown: (() => void) | void = undefined;
     try {
       const { rows } = await client.query<{ rolsuper: boolean; rolbypassrls: boolean }>(
         `SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user`,
       );
       expect(rows[0]).toEqual({ rolsuper: false, rolbypassrls: false });
-      await setup?.(client);
+      teardown = await setup?.(client);
       const res = await client.query(text);
       return (Array.isArray(res) ? res : [res]) as Results;
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
       throw error;
     } finally {
+      teardown?.();
       client.release();
     }
   }
@@ -321,9 +327,14 @@ describe("departed-member operator scripts — real-DB integration", () => {
       await candidate("recLogs", { record: true }).then((u) => logsRecord({ tenant, team: teamB, target: u }));
       await candidate("recOutbox", { record: true }).then((u) => outboxRecord({ tenant, team: teamB, target: u }));
       await candidate("recSent", { record: true }).then((u) => outboxRecord({ tenant, team: teamA, target: u, status: "SENT" }));
-      // Records that do not explain it: another action, another tenant.
-      await candidate("negAction").then((u) => logsRecord({ tenant, team: teamA, target: u, action: RESTORE }));
-      await candidate("negTenant").then((u) => outboxRecord({ tenant: otherTenant, team: teamA, target: u }));
+      // Records that do not explain it, in each store: another action, another target, another tenant.
+      const unrelatedTarget = randomUUID();
+      await candidate("negActionLogs").then((u) => logsRecord({ tenant, team: teamA, target: u, action: RESTORE }));
+      await candidate("negTargetLogs").then(() => logsRecord({ tenant, team: teamA, target: unrelatedTarget }));
+      await candidate("negTenantLogs").then((u) => logsRecord({ tenant: otherTenant, team: teamA, target: u }));
+      await candidate("negActionOutbox").then((u) => outboxRecord({ tenant, team: teamA, target: u, action: RESTORE }));
+      await candidate("negTargetOutbox").then(() => outboxRecord({ tenant, team: teamA, target: unrelatedTarget }));
+      await candidate("negTenantOutbox").then((u) => outboxRecord({ tenant: otherTenant, team: teamA, target: u }));
       // Not candidates: created after the departure; user active; membership already ended.
       await candidate("late", { offset: SECOND });
       const activeUser = await mkMember(tenant);
@@ -344,7 +355,7 @@ describe("departed-member operator scripts — real-DB integration", () => {
       const w = await seedWorld();
       const { section1 } = await runReport();
       expect(section1Map(w, section1)).toEqual(expectedSection1(w));
-      expect(Object.keys(section1Map(w, section1))).toHaveLength(7);
+      expect(Object.keys(section1Map(w, section1))).toHaveLength(11);
     });
 
     it("after C1, in the block's transaction, the report body lists exactly C1's excluded set; C1 ended the rest", async () => {
@@ -439,10 +450,11 @@ describe("departed-member operator scripts — real-DB integration", () => {
         async (store) => {
           const tenant = await newTenant();
           const stamp = newStamp();
-          const found = await recordTeam(tenant, stamp, { backfill: C1_DIR, status: store === "outbox" ? "SENT" : undefined }, store);
-          const otherBackfill = await recordTeam(tenant, stamp, { backfill: "20261101000000_other_backfill" }, store);
-          const otherAction = await recordTeam(tenant, stamp, { backfill: C1_DIR, action: RESTORE }, store);
-          const noBackfill = await recordTeam(tenant, stamp, { backfill: null }, store);
+          const status = store === "outbox" ? "SENT" : undefined;
+          const found = await recordTeam(tenant, stamp, { backfill: C1_DIR, status }, store);
+          const otherBackfill = await recordTeam(tenant, stamp, { backfill: "20261101000000_other_backfill", status }, store);
+          const otherAction = await recordTeam(tenant, stamp, { backfill: C1_DIR, action: RESTORE, status }, store);
+          const noBackfill = await recordTeam(tenant, stamp, { backfill: null, status }, store);
 
           const report = await runReport();
           // Preconditions: none of the four teams has a section-1 row.
@@ -545,13 +557,13 @@ describe("departed-member operator scripts — real-DB integration", () => {
       return ((await res.json()) as { teams: { id: string }[] }).teams.map((t) => t.id);
     }
 
-    /** What a refusal must leave untouched, read through the superuser. */
-    async function snapshot(l: Leak) {
+    /** What a refusal must leave untouched in every tenant the cell created, read through the superuser. */
+    async function snapshot() {
       const members = await sql(
-        `SELECT id, deactivated_at, deactivated_by_tenant, updated_at FROM team_members WHERE tenant_id = $1::uuid ORDER BY id`, l.tenant,
+        `SELECT id, deactivated_at, deactivated_by_tenant, updated_at FROM team_members WHERE tenant_id = ANY($1::uuid[]) ORDER BY id`, tenants,
       );
       const outbox = await sql(
-        `SELECT id FROM audit_outbox WHERE tenant_id = $1::uuid AND payload->'metadata'->>'backfill' = $2 ORDER BY id`, l.tenant, RLS_BACKFILL_RERUN_DIR,
+        `SELECT id FROM audit_outbox WHERE tenant_id = ANY($1::uuid[]) AND payload->'metadata'->>'backfill' = $2 ORDER BY id`, tenants, RLS_BACKFILL_RERUN_DIR,
       );
       return { members, outbox };
     }
@@ -597,11 +609,12 @@ describe("departed-member operator scripts — real-DB integration", () => {
     }
 
     async function runContain(text: string): Promise<string[]> {
-      const messages: string[] = [];
+      let collected: ReturnType<typeof collectNotices> | undefined;
       await runScript(text, async (client) => {
-        client.on("notice", (n: { message?: string }) => messages.push(n.message ?? ""));
+        collected = collectNotices(client);
+        return collected.stop;
       });
-      return messages;
+      return collected?.messages ?? [];
     }
 
     it("ends an OWNER and a member at the tenant's stamp with the marker and outbox records; the team becomes ownerless", async () => {
@@ -635,13 +648,13 @@ describe("departed-member operator scripts — real-DB integration", () => {
     });
 
     describe("refusals write nothing", () => {
-      async function expectRefused(l: Leak, text: string, expected: { message?: RegExp; code?: string }) {
-        const before = await snapshot(l);
+      async function expectRefused(text: string, expected: { message?: RegExp; code?: string }) {
+        const before = await snapshot();
         const error = await runScript(text).then(() => null, (e: unknown) => e as { message: string; code?: string });
         expect(error).not.toBeNull();
         if (expected.message) expect(error!.message).toMatch(expected.message);
         if (expected.code) expect(error!.code).toBe(expected.code);
-        expect(await snapshot(l)).toEqual(before);
+        expect(await snapshot()).toEqual(before);
       }
       const QUALIFY = /membership\(s\) qualify .*nothing was written/;
       const label = "ops-test";
@@ -656,7 +669,7 @@ describe("departed-member operator scripts — real-DB integration", () => {
         const l = await seedLeak();
         const other = await newTenant();
         await departIn(other, l.rows[1].user, l.stamp);
-        await expectRefused(l, containWith({ triples: triplesLiteral([[other, l.team, l.rows[1].user]]), label }), { message: QUALIFY });
+        await expectRefused(containWith({ triples: triplesLiteral([[other, l.team, l.rows[1].user]]), label }), { message: QUALIFY });
       });
 
       it("the tenant row is the user's row in another tenant (departed there, active in the triple's tenant)", async () => {
@@ -673,7 +686,7 @@ describe("departed-member operator scripts — real-DB integration", () => {
         await addMembership(otherTeam, moved, other, { createdAt: iso(l.stamp, -SECOND) });
         const [active] = await sql(`SELECT 1 FROM tenant_members WHERE tenant_id = $1::uuid AND user_id = $2::uuid AND deactivated_at IS NULL`, other, moved);
         expect(active).toBeDefined();
-        await expectRefused(l, containWith({ triples: triplesLiteral([[other, otherTeam, moved]]), label }), { message: QUALIFY });
+        await expectRefused(containWith({ triples: triplesLiteral([[other, otherTeam, moved]]), label }), { message: QUALIFY });
         // The first tenant's membership is untouched, and its row stays departed.
         expect((await readTeamMembers([l.rows[1].rowId]))[0].deactivated_at).toBeNull();
       });
@@ -681,42 +694,41 @@ describe("departed-member operator scripts — real-DB integration", () => {
       it("the membership is already ended", async () => {
         const l = await seedLeak();
         await endMembership(l.rows[1].rowId, l.stamp);
-        await expectRefused(l, containWith({ triples: triplesLiteral([tripleOf(l, l.rows[1])]), label }), { message: QUALIFY });
+        await expectRefused(containWith({ triples: triplesLiteral([tripleOf(l, l.rows[1])]), label }), { message: QUALIFY });
       });
 
       it("the member's tenant row is active", async () => {
         const l = await seedLeak();
         await sql(`UPDATE tenant_members SET deactivated_at = NULL WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, l.tenant, l.rows[1].user);
-        await expectRefused(l, containWith({ triples: triplesLiteral([tripleOf(l, l.rows[1])]), label }), { message: QUALIFY });
+        await expectRefused(containWith({ triples: triplesLiteral([tripleOf(l, l.rows[1])]), label }), { message: QUALIFY });
       });
 
       it("a mixed list (one qualifying triple, one not) ends neither", async () => {
         const l = await seedLeak(2);
         await sql(`UPDATE tenant_members SET deactivated_at = NULL WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, l.tenant, l.rows[2].user);
-        await expectRefused(
-          l, containWith({ triples: triplesLiteral([tripleOf(l, l.rows[1]), tripleOf(l, l.rows[2])]), label }), { message: QUALIFY },
+        await expectRefused(containWith({ triples: triplesLiteral([tripleOf(l, l.rows[1]), tripleOf(l, l.rows[2])]), label }), { message: QUALIFY },
         );
       });
 
       it("an empty array", async () => {
-        const l = await seedLeak();
-        await expectRefused(l, containWith({ triples: "{}", label }), { message: /two-dimensional uuid array/ });
+        await seedLeak();
+        await expectRefused(containWith({ triples: "{}", label }), { message: /two-dimensional uuid array/ });
       });
 
       it("a one-dimensional array", async () => {
         const l = await seedLeak();
-        await expectRefused(l, containWith({ triples: `{${tripleOf(l, l.rows[1]).join(",")}}`, label }), { message: /two-dimensional uuid array/ });
+        await expectRefused(containWith({ triples: `{${tripleOf(l, l.rows[1]).join(",")}}`, label }), { message: /two-dimensional uuid array/ });
       });
 
       it("a two-dimensional array with two columns", async () => {
         const l = await seedLeak();
-        await expectRefused(l, containWith({ triples: triplesLiteral([[l.tenant, l.team]]), label }), { message: /two-dimensional uuid array/ });
+        await expectRefused(containWith({ triples: triplesLiteral([[l.tenant, l.team]]), label }), { message: /two-dimensional uuid array/ });
       });
 
       it("a three-dimensional array whose second dimension has three entries", async () => {
         const l = await seedLeak();
         const [t, m, u] = tripleOf(l, l.rows[1]);
-        await expectRefused(l, containWith({ triples: `{{{${t}},{${m}},{${u}}}}`, label }), { message: /two-dimensional uuid array/ });
+        await expectRefused(containWith({ triples: `{{{${t}},{${m}},{${u}}}}`, label }), { message: /two-dimensional uuid array/ });
       });
 
       it.each([
@@ -725,12 +737,12 @@ describe("departed-member operator scripts — real-DB integration", () => {
         ["the template token", TEMPLATE_LABEL],
       ])("a label that is %s", async (_name, bad) => {
         const l = await seedLeak();
-        await expectRefused(l, containWith({ triples: goodTriples(l), label: bad }), { message: /operator label must be 1 to 255 characters/ });
+        await expectRefused(containWith({ triples: goodTriples(l), label: bad }), { message: /operator label must be 1 to 255 characters/ });
       });
 
       it("a malformed id raises 22P02 at the cast", async () => {
         const l = await seedLeak();
-        await expectRefused(l, containWith({ triples: `{{${l.tenant},${l.team},not-a-uuid}}`, label }), { code: "22P02" });
+        await expectRefused(containWith({ triples: `{{${l.tenant},${l.team},not-a-uuid}}`, label }), { code: "22P02" });
       });
     });
 

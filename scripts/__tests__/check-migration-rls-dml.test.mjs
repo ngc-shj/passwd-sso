@@ -143,6 +143,14 @@ describe("check-migration-rls-dml: references refused without a bypass", () => {
     ["top-level UPDATE", `UPDATE team_members SET a = 1;`, [[1, "team_members"]]],
     ["top-level INSERT … SELECT", `INSERT INTO other_t SELECT * FROM team_members;`, [[1, "team_members"]]],
     ["top-level CREATE TABLE AS", `CREATE TABLE copy AS SELECT * FROM team_members;`, [[1, "team_members"]]],
+    // Reference forms that are easy to miss.
+    ["MERGE INTO ONLY", doBlock(`MERGE INTO ONLY team_members m USING (SELECT 1) s ON true WHEN MATCHED THEN DELETE;`), [[3, "team_members"]]],
+    ["INSERT INTO u TABLE t", `INSERT INTO other_t TABLE team_members;`, [[1, "team_members"]]],
+    ["INSERT INTO u (cols) TABLE t", `INSERT INTO other_t (a) TABLE team_members;`, [[1, "team_members"]]],
+    ["top-level TABLE t", `TABLE team_members;`, [[1, "team_members"]]],
+    ["TABLE t after UNION ALL", doBlock(`PERFORM 1 UNION ALL TABLE team_members;`), [[3, "team_members"]]],
+    ["CREATE TABLE AS TABLE t", `CREATE TABLE copy AS TABLE team_members;`, [[1, "team_members"]]],
+    ["top-level CREATE MATERIALIZED VIEW AS SELECT", `CREATE MATERIALIZED VIEW mv AS SELECT * FROM team_members;`, [[1, "team_members"]]],
     // State tracking.
     [
       "grant → DML → restore → DML (only the last DML is refused)",
@@ -175,8 +183,13 @@ describe("check-migration-rls-dml: references refused without a bypass", () => {
       [[6, "team_members"]],
     ],
     [
-      "grant given the wrong value ('on ' is not 'on')",
+      "grant given the wrong value ('ona' is not 'on')",
       doBlock([`PERFORM set_config('app.bypass_rls', 'ona', true);`, tablesOf("team_members"), `UPDATE team_members SET a = 1;`].join("\n")),
+      [[5, "team_members"]],
+    ],
+    [
+      "grant given the wrong value ('on ' with a trailing space is not 'on')",
+      doBlock([`PERFORM set_config('app.bypass_rls', 'on ', true);`, tablesOf("team_members"), `UPDATE team_members SET a = 1;`].join("\n")),
       [[5, "team_members"]],
     ],
   ];
@@ -201,6 +214,37 @@ describe("check-migration-rls-dml: references refused without a bypass", () => {
 
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("MIGRATION_RLS_DML: 20260101000001_write:1: team_members");
+  });
+});
+
+describe("check-migration-rls-dml: ALTER TABLE … RENAME TO moves FORCE membership", () => {
+  it("refuses DML on the new name", () => {
+    addMigration(FORCE_DIR, `ALTER TABLE team_members FORCE ROW LEVEL SECURITY;`);
+    addMigration(CASE_DIR, `ALTER TABLE team_members RENAME TO team_members_v2;\nUPDATE team_members_v2 SET a = 1;`);
+
+    const r = runGate();
+
+    expect(r.status).toBe(1);
+    expect(hitLinesOf(r.stderr)).toEqual([`  ${hitLine(2, "team_members_v2")}`]);
+  });
+
+  it("passes DML on the old name, which is no longer the forced table", () => {
+    addMigration(FORCE_DIR, `ALTER TABLE team_members FORCE ROW LEVEL SECURITY;`);
+    addMigration(CASE_DIR, `ALTER TABLE team_members RENAME TO team_members_v2;\nUPDATE team_members SET a = 1;`);
+
+    const r = runGate();
+
+    expect({ status: r.status, stderr: r.stderr }).toEqual({ status: 0, stderr: "" });
+  });
+
+  it("does not treat RENAME COLUMN … TO as a table rename", () => {
+    addMigration(FORCE_DIR, `ALTER TABLE team_members FORCE ROW LEVEL SECURITY;`);
+    addMigration(CASE_DIR, `ALTER TABLE team_members RENAME COLUMN a TO b;\nUPDATE team_members SET b = 1;`);
+
+    const r = runGate();
+
+    expect(r.status).toBe(1);
+    expect(hitLinesOf(r.stderr)).toEqual([`  ${hitLine(2, "team_members")}`]);
   });
 });
 
@@ -251,6 +295,70 @@ describe("check-migration-rls-dml: fail closed", () => {
       doBlock([`SELECT count(*) INTO n FROM team_members;`, `EXECUTE v_sql;`].join("\n")),
       4,
       "EXECUTE",
+    ],
+    [
+      "EXECUTE of a variable holding a DML literal (DECLARE)",
+      `DO $$\nDECLARE q text := 'UPDATE team_members SET x = 1';\nBEGIN\nEXECUTE q;\nEND\n$$;`,
+      4,
+      "EXECUTE",
+    ],
+    [
+      "EXECUTE of a loop column holding a DML literal",
+      doBlock([`FOR r IN SELECT 'UPDATE team_members SET x = 1' AS s LOOP`, `EXECUTE r.s;`, `END LOOP;`].join("\n")),
+      4,
+      "EXECUTE",
+    ],
+    [
+      "EXECUTE of a variable holding a dollar-quoted DML literal",
+      `DO $$\nDECLARE q text := $q$UPDATE team_members SET x = 1$q$;\nBEGIN\nEXECUTE q;\nEND\n$$;`,
+      4,
+      "EXECUTE",
+    ],
+    [
+      "literal-free EXECUTE next to prose that names a FORCE table",
+      doBlock([`RAISE NOTICE 'backfilling team_members';`, `EXECUTE r.definition;`].join("\n")),
+      4,
+      "EXECUTE",
+    ],
+    ["EXECUTE of CREATE TABLE AS SELECT", doBlock(`EXECUTE 'CREATE TABLE c AS SELECT * FROM team_members';`), 3, "data statement"],
+    [
+      "EXECUTE of CREATE MATERIALIZED VIEW AS SELECT",
+      doBlock(`EXECUTE 'CREATE MATERIALIZED VIEW c AS SELECT * FROM team_members';`),
+      3,
+      "data statement",
+    ],
+    [
+      "EXECUTE of DDL followed by DML in one literal",
+      doBlock(`EXECUTE 'ALTER TABLE u ADD COLUMN c int; UPDATE team_members SET x = 1';`),
+      3,
+      "more than one statement",
+    ],
+    [
+      "EXECUTE of DDL concatenated with a DML literal",
+      doBlock(`EXECUTE 'ALTER TABLE u ADD COLUMN c int; ' || 'UPDATE team_members SET x = 1';`),
+      3,
+      "references a FORCE table",
+    ],
+    ["EXECUTE of SET LOCAL app.bypass_rls", doBlock(`EXECUTE 'SET LOCAL app.bypass_rls = on';`), 3, "app.bypass_"],
+    ["SET LOCAL app.bypass_rls in a DO body", doBlock(`SET LOCAL app.bypass_rls = 'on';`), 3, "app.bypass_"],
+    ["RESET app.bypass_tables in a DO body", doBlock(`RESET app.bypass_tables;`), 3, "app.bypass_"],
+    [
+      "bypass_tables literal inside IF",
+      doBlock([`IF true THEN`, tablesOf("team_members"), `END IF;`].join("\n")),
+      4,
+      "bypass_tables set inside a nested block",
+    ],
+    [
+      "bypass_tables literal inside LOOP",
+      doBlock([`FOR r IN SELECT 1 LOOP`, tablesOf("team_members"), `END LOOP;`].join("\n")),
+      4,
+      "bypass_tables set inside a nested block",
+    ],
+    [
+      "bypass_tables literal inside an EXCEPTION handler",
+      doBlock([`BEGIN NULL; EXCEPTION WHEN OTHERS THEN`, tablesOf("team_members"), `END;`].join("\n")),
+      4,
+      "bypass_tables set inside a nested block",
     ],
     [
       "FORCE ROW LEVEL SECURITY inside a DO",
@@ -338,6 +446,25 @@ describe("check-migration-rls-dml: passes", () => {
     [
       "EXECUTE of literal DDL",
       doBlock(`EXECUTE format('ALTER TABLE %I ADD COLUMN x int', 'team_members');`),
+      true,
+    ],
+    ["a bare mention in prose is not a reference", doBlock(`RAISE NOTICE 'backfilling team_members';`), true],
+    [
+      "prose naming a FORCE table next to an EXECUTE of literal DDL",
+      doBlock([`RAISE NOTICE 'altering team_members';`, `EXECUTE format('ALTER TABLE %I ADD COLUMN x int', 'team_members');`].join("\n")),
+      true,
+    ],
+    ["EXECUTE of literal DDL with a trailing semicolon", doBlock(`EXECUTE 'ALTER TABLE u ADD COLUMN c int;';`), true],
+    ["a literal-free EXECUTE in a body that names no FORCE table", doBlock(`EXECUTE r.definition;`), true],
+    [
+      "a dollar-quoted literal naming no FORCE table next to a literal-free EXECUTE",
+      doBlock([`v := $q$hello$q$;`, `EXECUTE r.definition;`].join("\n")),
+      true,
+    ],
+    ["ALTER / CREATE TABLE in a DO body are not TABLE query forms", doBlock([`ALTER TABLE team_members ADD COLUMN x int;`, `CREATE TABLE team_members_copy (id int);`].join("\n")), true],
+    [
+      "a bypass_tables literal at the unit's top block, and an empty one nested",
+      doBlock([GRANT, tablesOf("team_members"), `IF true THEN`, tablesOf(""), `END IF;`, RESTORE].join("\n")),
       true,
     ],
     ["trigger EXECUTE FUNCTION is not dynamic SQL", doBlock(`CREATE TRIGGER g BEFORE INSERT ON other_t FOR EACH ROW EXECUTE FUNCTION f();`), true],
@@ -546,7 +673,10 @@ describe("check-migration-rls-dml: real tree", () => {
     `${REKEY}:72:team_password_entry_histories`,
     `${REKEY}:74:team_password_entries`,
   ];
-  // Hits per baselined directory, counted by reading each migration.
+  // Hits per baselined directory, counted by reading each migration. The 121
+  // was recounted without the gate: replay FORCE/NO FORCE over the earlier
+  // migrations by regex, strip comments, split on `;`, and count
+  // `UPDATE … SET` / FROM / JOIN / USING / INSERT INTO names that are forced.
   const COUNTS = {
     "20260321100000_unify_all_ids_to_uuid": 121,
     "20260415130000_audit_path_unification": 2,
@@ -608,11 +738,11 @@ describe("check-migration-rls-dml: real tree", () => {
     for (const e of entries) expect(e.slice(e.indexOf("#") + 1).trim().length).toBeGreaterThanOrEqual(10);
   });
 
-  // C1 is written by a separate change; the cell reads it once it exists.
-  const c1Dir = existsSync(REAL_MIGRATIONS)
-    ? readdirSync(REAL_MIGRATIONS).find((d) => d.endsWith("_rls_backfill_rerun"))
-    : undefined;
-  it.skipIf(c1Dir === undefined)("the C1 fix-forward migration yields no hit", () => {
+  it("the C1 fix-forward migration yields no hit", () => {
+    const c1Dir = readdirSync(REAL_MIGRATIONS).find((d) => d.endsWith("_rls_backfill_rerun"));
+    expect(c1Dir).toBe("20261110000000_rls_backfill_rerun");
+    expect(existsSync(join(REAL_MIGRATIONS, c1Dir, "migration.sql"))).toBe(true);
+
     const { hits } = list();
 
     expect(hits.filter((h) => h.startsWith(`${c1Dir}:`))).toEqual([]);

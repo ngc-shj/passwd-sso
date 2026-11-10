@@ -140,7 +140,7 @@ BEGIN
 
     -- 2a. PENDING invitations issued by a user who departed at or after issue.
     UPDATE team_invitations ti
-       SET status = 'EXPIRED'
+       SET status = 'EXPIRED', updated_at = clock_timestamp()
       FROM tenant_members tmb
      WHERE ti.status = 'PENDING'
        AND tmb.tenant_id = ti.tenant_id
@@ -151,7 +151,7 @@ BEGIN
 
     -- 2b. PENDING invitations addressed to a user who departed at or after issue.
     UPDATE team_invitations ti
-       SET status = 'EXPIRED'
+       SET status = 'EXPIRED', updated_at = clock_timestamp()
       FROM users u
       JOIN tenant_members tmb ON tmb.user_id = u.id
      WHERE ti.status = 'PENDING'
@@ -163,7 +163,7 @@ BEGIN
 
     -- 2c, second half: expire the invitations the departure records void.
     UPDATE team_invitations ti
-       SET status = 'EXPIRED'
+       SET status = 'EXPIRED', updated_at = clock_timestamp()
       FROM users u
       JOIN tenant_member_departures d ON d.user_id = u.id
      WHERE ti.status = 'PENDING'
@@ -183,7 +183,8 @@ BEGIN
     WITH ended AS (
       UPDATE team_members tm
          SET deactivated_at = tmb.deactivated_at,
-             deactivated_by_tenant = true
+             deactivated_by_tenant = true,
+             updated_at = clock_timestamp()
         FROM tenant_members tmb
        WHERE tmb.tenant_id = tm.tenant_id
          AND tmb.user_id = tm.user_id

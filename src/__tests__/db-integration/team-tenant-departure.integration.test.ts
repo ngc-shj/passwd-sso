@@ -1748,6 +1748,24 @@ describe("team membership across a tenant departure — real-DB integration", ()
       expect(await readGucs(client)).toEqual(sentinels);
     }
 
+    /** updated_at of every fixture membership and invitation; the client must see all rows. */
+    async function readUpdatedAt(client: pg.PoolClient, fx: Fx) {
+      const read = async (table: "team_members" | "team_invitations", ids: Record<string, string>) => {
+        const { rows } = await client.query<{ id: string; updated_at: Date }>(
+          `SELECT id, updated_at FROM ${table} WHERE id = ANY($1::uuid[])`, [Object.values(ids)],
+        );
+        const byId = new Map(rows.map((r) => [r.id, r.updated_at.getTime()]));
+        return Object.fromEntries(Object.entries(ids).map(([n, id]) => [n, byId.get(id)!]));
+      };
+      return {
+        memberships: await read("team_members", Object.fromEntries(Object.entries(fx.rows).map(([n, r]) => [n, r.rowId]))),
+        invitations: await read("team_invitations", fx.invitations),
+      };
+    }
+
+    const movedBetween = (before: Record<string, number>, after: Record<string, number>) =>
+      Object.fromEntries(Object.keys(before).map((n) => [n, after[n] > before[n] ? "moved" : after[n] === before[n] ? "unchanged" : "earlier"]));
+
     async function stateUnderTestBypass(client: pg.PoolClient, fx: Fx): Promise<State> {
       await setTestBypass(client, BLOCK_TABLES);
       return readState(client, fx);
@@ -1801,8 +1819,21 @@ describe("team membership across a tenant departure — real-DB integration", ()
 
     it("C1 as passwd_app ends exactly the memberships no record explains, expires the voided invitations, keeps the app's records (literal map)", async () => {
       await asApp(async (client) => {
+        await setTestBypass(client, BLOCK_TABLES);
+        const updatedBefore = await readUpdatedAt(client, fx);
         await runBlock(client, rerunDeparture());
         expect(await stateUnderTestBypass(client, fx)).toEqual(postState(fx));
+        // updated_at follows endTeamMemberships and the invitation expiry: moved on what the block changed, nothing else.
+        const updatedAfter = await readUpdatedAt(client, fx);
+        expect(movedBetween(updatedBefore.memberships, updatedAfter.memberships)).toEqual(
+          Object.fromEntries(Object.keys(fx.rows).map((n) => [n, ENDED_NAMES.includes(n) ? "moved" : "unchanged"])),
+        );
+        expect(movedBetween(updatedBefore.invitations, updatedAfter.invitations)).toEqual({
+          acceptedInvitation: "unchanged",
+          byBefore: "moved", byAt: "moved", byAfter: "unchanged",
+          toBefore: "moved", toAt: "moved", toAfter: "unchanged", toBeforeUpper: "moved",
+          toDeletedBefore: "moved", toDeletedAfter: "unchanged", toNoAudit: "unchanged", toKept: "unchanged",
+        });
         const rows = await enqueued(client);
         expect(Object.fromEntries(rows.map((r) => [r.targetId, r.teamId]))).toEqual(
           Object.fromEntries(ENDED_NAMES.map((n) => [fx.rows[n].userId, fx.teamX])),
@@ -1883,7 +1914,7 @@ describe("team membership across a tenant departure — real-DB integration", ()
         `SELECT id, tenant_id, payload, status, attempt_count, max_attempts, created_at, next_retry_at, processing_started_at, sent_at, last_error
            FROM audit_outbox WHERE id = $1::uuid`, outboxId,
       );
-      expect((await deliverRow(ctx.su.prisma, row, expected as AuditOutboxPayload)).inserted).toBe(true);
+      expect((await deliverRow(ctx.su.prisma, row, row.payload as AuditOutboxPayload)).inserted).toBe(true);
       expect(await sql(
         `SELECT action::text, actor_type::text, user_id::text, team_id::text, target_type, target_id FROM audit_logs WHERE outbox_id = $1::uuid`, outboxId,
       )).toEqual([{
