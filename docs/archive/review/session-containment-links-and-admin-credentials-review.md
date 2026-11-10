@@ -7,7 +7,7 @@ Initial review.
 
 ## Functionality Findings
 - F1 [Major] Account list/unlink must scope by user only (`Account.tenantId` is the link-time tenant
-  and strands on realignment); flag `linkedInTenant`; cross-tenant audit parity with passkeys.
+  and strands on realignment); flag `linkedHere`; cross-tenant audit parity with passkeys.
 - F2 [Major] Unlink does not stop Google's email linking from re-linking; the warning was wrong.
 - F3 [Major] Service-account tokens minted on others' service accounts have no creator column.
 - F4 [Major] "Same as PUT isActive:false" revokes no tokens, audits post-commit; reactivation revives
@@ -46,7 +46,7 @@ Testing: RT1 (T1, T3, T8), RT2, RT3, RT5, RT6, RT7 (T5, T6), RT8, RT10, RT11 (T4
 ## Resolution Status
 
 ### Round 1
-The plan was rewritten. Adopted: accounts by user with `linkedInTenant` and cross-tenant audit
+The plan was rewritten. Adopted: accounts by user with `linkedHere` and cross-tenant audit
 (F1/S3); Google re-link caveat and "may stop" warning (F2); `ServiceAccountToken.createdById` with
 both mint paths, plus per-token revocation (F3/S1); SA/MCP containment also revokes their tokens,
 named audit actions in the transaction (F4/S4); emergency-access grants listed and revocable (S2);

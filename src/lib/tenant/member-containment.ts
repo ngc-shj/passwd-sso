@@ -114,7 +114,7 @@ export function refusedContainmentKinds(role: TenantRole, request: MemberContain
 
 export interface MemberContainmentListing {
   /** Never providerAccountId or any token: not needed to choose an unlink. */
-  linkedAccounts: { id: string; provider: string; linkedInTenant: boolean }[];
+  linkedAccounts: { id: string; provider: string; linkedHere: boolean }[];
   /** Only the kinds the actor may contain. */
   createdFootholds: Partial<Record<FootholdKind, unknown[]>>;
 }
@@ -193,7 +193,7 @@ export async function listMemberContainment(
   return {
     linkedAccounts: accounts.map(({ tenantId: linkedTenantId, ...a }) => ({
       ...a,
-      linkedInTenant: linkedTenantId === tenantId,
+      linkedHere: linkedTenantId === tenantId,
     })),
     createdFootholds,
   };

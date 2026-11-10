@@ -37,7 +37,7 @@ compromised session can leave behind. User decision (2026-11-10): full containme
   `NOT_FOUND` exits in `revokeMemberPasskeys` stay only for the single-credential scope; the target
   stays active-only everywhere (GET member read, `refuseMemberPasskeyTarget`, the in-transaction
   re-read, the members card).
-- R3: GET additionally returns `linkedAccounts: [{ id, provider, linkedInTenant }]` (never
+- R3: GET additionally returns `linkedAccounts: [{ id, provider, linkedHere }]` (never
   `providerAccountId` or any token) and `createdFootholds` per kind: live rows only.
 - R4: DELETE accepts an optional strict body `{ unlinkAccountIds?, revoke?: { scimTokenIds?,
   serviceAccountIds?, serviceAccountTokenIds?, mcpClientIds?, breakglassGrantIds?,
@@ -107,7 +107,7 @@ account tokens `createdById = target` (any service account of the tenant); MCP c
 `createdById = target`; break-glass grants `requesterId = target`, not revoked, `expiresAt > now`
 (future `effectiveAt` included); emergency-access grants `ownerId = target`, status not
 `REVOKED`/`REJECTED` (shows `hasEscrow` = `encryptedSecretKey` present and grantee email).
-Accounts: `userId = target`, `linkedInTenant = (tenantId = actor tenant)`.
+Accounts: `userId = target`, `linkedHere = (tenantId = actor tenant)`.
 
 ### C4 — Containment writes (R4, R5)
 After the passkey/session revocation in the same transaction, CAS writes per kind (match predicate
@@ -169,7 +169,7 @@ the email/notification copy, the scope contract below in the admin docs if one d
    token revoked, audit `passkeys: 0`. A deactivated member (deactivated here, active and owned in
    another tenant): GET and DELETE refused 404, their passkeys/accounts/grants unchanged.
 2. GET (one request): `linkedAccounts` deep-equals the target's accounts incl. one under another
-   tenant (`linkedInTenant: false`); raw JSON contains neither the seeded `provider_account_id` nor
+   tenant (`linkedHere: false`); raw JSON contains neither the seeded `provider_account_id` nor
    token values; per kind the listed ids equal exactly the target's live rows — a bystander's
    same-tenant row, the target's row in another tenant (tenant-owned kinds), revoked/inactive/expired
    rows are absent; a future-effective break-glass grant is present.

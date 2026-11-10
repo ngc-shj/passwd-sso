@@ -198,8 +198,8 @@ describe("TenantMemberPasskeysDialog", () => {
     const LISTING = {
       passkeys: [PASSKEY],
       linkedAccounts: [
-        { id: "acc-1", provider: "google", linkedInTenant: true },
-        { id: "acc-2", provider: "saml-jackson", linkedInTenant: false },
+        { id: "acc-1", provider: "google", linkedHere: true },
+        { id: "acc-2", provider: "saml-jackson", linkedHere: false },
       ],
       createdFootholds: {
         scimTokens: [{ id: "scim-1", description: "Okta provisioning", createdAt: "2026-01-01T00:00:00Z" }],

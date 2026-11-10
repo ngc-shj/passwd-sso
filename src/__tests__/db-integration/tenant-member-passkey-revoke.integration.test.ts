@@ -627,8 +627,8 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
     const body = JSON.parse(text);
     expect(body.linkedAccounts).toEqual(
       expect.arrayContaining([
-        { id: here.id, provider: "google", linkedInTenant: true },
-        { id: there.id, provider: "saml-jackson", linkedInTenant: false },
+        { id: here.id, provider: "google", linkedHere: true },
+        { id: there.id, provider: "saml-jackson", linkedHere: false },
       ]),
     );
     expect(body.linkedAccounts).toHaveLength(2);

@@ -45,7 +45,7 @@ interface MemberPasskey {
 interface LinkedAccount {
   id: string;
   provider: string;
-  linkedInTenant: boolean;
+  linkedHere: boolean;
 }
 
 // The footholds a member created, as GET lists them (member-containment.ts);
@@ -167,7 +167,7 @@ export function TenantMemberPasskeysDialog({ userId, memberName, disabled }: Ten
     kind: "accounts",
     id: a.id,
     label: a.provider,
-    detail: a.linkedInTenant ? undefined : t("containmentLinkedAccountOtherTenant"),
+    detail: a.linkedHere ? undefined : t("containmentLinkedAccountOtherTenant"),
   }));
   const footholdItems = (kind: FootholdKind): ContainmentItem[] => {
     switch (kind) {
