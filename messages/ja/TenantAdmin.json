@@ -271,7 +271,7 @@
   "revokeAllPasskeys": "すべて失効",
   "revokeAllPasskeysTitle": "すべてのパスキーを失効",
   "revokeAllPasskeysDescription": "{name} のパスキーを別のテナントで登録したものも含めてすべて削除し、すべてのセッションを終了します（拡張機能と API のトークンも含む）。パスキーがない場合（SSO のみのメンバーなど）も実行できます。アカウントの侵害が疑われる場合はこちらを使ってください。パスキーを1つ失効しても、登録済みの他のパスキーは残ります。連携済みのサインインアカウントと本人が作成したものは、チェックを付けたものだけが対象です。",
-  "revokeAllPasskeysSuccess": "すべてのパスキーを失効しました。",
+  "revokeAllPasskeysDone": "完了しました。{name} のパスキー（ある場合）を失効し、すべてのセッションを終了しました。",
   "revokeAllPasskeysFailed": "パスキーを失効できませんでした。",
   "memberPasskeyOtherTenant": "別のテナントで登録",
   "containmentLinkedAccounts": "連携済みのサインインアカウント",
@@ -291,5 +291,13 @@
   "containmentChosen": "同時に次も実行します:",
   "containmentUnlinkWarning": "連携を解除すると、それが {name} の唯一のサインイン手段（SSO）の場合はサインインできなくなることがあります。メールアドレスでアカウントを連携するプロバイダー（許可ドメインを設定した Google）が、本人のメールアドレスを示すアカウントを再び連携することは防げません。それは ID プロバイダー側で対処してください。",
   "containmentIntegrationsWarning": "サービスアカウントや MCP クライアントを無効化すると、それを使う連携が停止します。",
-  "containmentEmergencyWarning": "有効化済みの緊急アクセス許可を取り消すと以降の保管庫へのアクセスは止まりますが、すでに行われたアクセスは取り消せません。連絡先には通知されません。"
+  "containmentEmergencyWarning": "有効化済みの緊急アクセス許可を取り消すと以降の保管庫へのアクセスは止まりますが、すでに行われたアクセスは取り消せません。連絡先には通知されません。",
+  "containmentNameAccounts": "連携済みのサインインアカウント",
+  "containmentNameScimTokens": "SCIM トークン",
+  "containmentNameServiceAccounts": "サービスアカウント",
+  "containmentNameServiceAccountTokens": "サービスアカウントトークン",
+  "containmentNameMcpClients": "MCP クライアント",
+  "containmentNameBreakglassGrants": "ブレークグラスアクセス",
+  "containmentNameEmergencyAccessGrants": "緊急アクセス許可",
+  "containmentSkipped": "チェックを付けた項目の一部は、すでに無効になっているか本人のものではなくなっているため変更されませんでした: {kinds}。一覧と監査ログを確認してください。"
 }

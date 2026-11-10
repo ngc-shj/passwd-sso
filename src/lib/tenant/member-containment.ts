@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import type { Prisma, TenantRole } from "@prisma/client";
-import { logAuditInTx, tenantAuditBase } from "@/lib/audit/audit";
+import { logAuditBulkInTx, tenantAuditBase } from "@/lib/audit/audit";
 import type { AuditLogParams } from "@/lib/audit/audit-payload";
 import { hasTenantPermission, type TenantPermission } from "@/lib/auth/access/tenant-auth";
 import { transition } from "@/lib/emergency-access/emergency-access-state";
@@ -219,12 +219,22 @@ export interface MemberContainmentResult {
   otherTenants: Map<string, OtherTenantContainment>;
 }
 
+/** How many times each id occurs. */
+function tally(ids: readonly string[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const id of ids) counts.set(id, (counts.get(id) ?? 0) + 1);
+  return counts;
+}
+
 /**
  * Write a containment request in the caller's transaction, after the
  * passkey and session revocation: each named row only when it matches its id,
  * the member as creator or owner, the admin's tenant (tenant-owned kinds) and
- * liveness. Each write is a compare-and-set on that predicate; an id that
- * matches nothing is skipped and counted. Audited per row in the transaction.
+ * liveness. One compare-and-set statement per kind on that predicate (the
+ * emergency-access grants one by one through the state machine), so the work
+ * is bounded by the number of kinds, not of rows: the rows it returns are the
+ * rows written, counted and audited; an id that matches nothing is skipped and
+ * counted. Audited per row, in one batch per kind, in the transaction.
  */
 export async function containMemberInTx(
   tx: Prisma.TransactionClient,
@@ -250,8 +260,9 @@ export async function containMemberInTx(
   const mcpLive = { tenantId, createdById: targetUserId, isActive: true };
   const breakglassLive = { tenantId, requesterId: targetUserId, revokedAt: null, expiresAt: { gt: now } };
   const eaLive = { ownerId: targetUserId, status: { notIn: [EA_STATUS.REVOKED, EA_STATUS.REJECTED] } };
-  const audit = (params: Required<Pick<AuditLogParams, "action" | "targetType" | "targetId" | "metadata">>) =>
-    logAuditInTx(tx, tenantId, { ...tenantAuditBase(req, actorUserId, tenantId), ...params });
+  const base = tenantAuditBase(req, actorUserId, tenantId);
+  const audit = (rows: Required<Pick<AuditLogParams, "action" | "targetType" | "targetId" | "metadata">>[]) =>
+    logAuditBulkInTx(tx, tenantId, rows.map((params) => ({ ...base, ...params })));
   const contained: ContainedCounts = {};
   const otherTenants = new Map<string, OtherTenantContainment>();
   const elsewhere = (other: string): OtherTenantContainment => {
@@ -264,16 +275,26 @@ export async function containMemberInTx(
   };
 
   // Accounts: the user's, wherever filed (Account.tenantId is the tenant at
-  // link time). No per-account row: the revoke-all row names them.
+  // link time). A delete returns no rows, so the rows are read on the same
+  // predicate and the delete must remove exactly them: anything else (an
+  // unlink committed meanwhile) rolls the containment back for a retry rather
+  // than miscount another tenant's share. No per-account row: the revoke-all
+  // row names them.
   const unlinkedAccountIds: string[] = [];
   if (request.unlinkAccountIds.length > 0) {
     const accounts = await tx.account.findMany({
       where: { id: { in: [...request.unlinkAccountIds] }, userId: targetUserId },
       select: { id: true, tenantId: true },
     });
+    if (accounts.length > 0) {
+      const { count: deleted } = await tx.account.deleteMany({
+        where: { id: { in: accounts.map((a) => a.id) }, userId: targetUserId },
+      });
+      if (deleted !== accounts.length) {
+        throw new Error(`member containment: ${deleted} of ${accounts.length} accounts read were deleted`);
+      }
+    }
     for (const account of accounts) {
-      const { count: deleted } = await tx.account.deleteMany({ where: { id: account.id, userId: targetUserId } });
-      if (deleted !== 1) continue;
       unlinkedAccountIds.push(account.id);
       if (account.tenantId !== tenantId) elsewhere(account.tenantId).accountsUnlinked += 1;
     }
@@ -281,148 +302,150 @@ export async function containMemberInTx(
   count("accounts", request.unlinkAccountIds, unlinkedAccountIds.length);
 
   const scimIds = request.revoke.scimTokens;
-  let scimRevoked = 0;
   if (scimIds.length > 0) {
-    const tokens = await tx.scimToken.findMany({
+    const revoked = await tx.scimToken.updateManyAndReturn({
       where: { id: { in: [...scimIds] }, ...scimLive },
+      data: { revokedAt: now },
       select: { id: true },
     });
-    for (const token of tokens) {
-      const { count: n } = await tx.scimToken.updateMany({
-        where: { id: token.id, ...scimLive },
-        data: { revokedAt: now },
-      });
-      if (n !== 1) continue;
-      scimRevoked += 1;
-      await audit({ action: AUDIT_ACTION.SCIM_TOKEN_REVOKE, targetType: AUDIT_TARGET_TYPE.SCIM_TOKEN, targetId: token.id, metadata: { targetUserId } });
-    }
+    await audit(revoked.map((token) => ({
+      action: AUDIT_ACTION.SCIM_TOKEN_REVOKE,
+      targetType: AUDIT_TARGET_TYPE.SCIM_TOKEN,
+      targetId: token.id,
+      metadata: { targetUserId },
+    })));
+    count(FOOTHOLD_KIND.SCIM_TOKENS, scimIds, revoked.length);
   }
-  count(FOOTHOLD_KIND.SCIM_TOKENS, scimIds, scimRevoked);
 
   // Service accounts: deactivated AND their live tokens revoked — stronger
-  // than PUT isActive:false, so a later reactivation revives no token.
+  // than PUT isActive:false, so a later reactivation revives no token. The
+  // tokens are found by the service accounts this statement deactivated,
+  // never by the ids the request named.
   const saIds = request.revoke.serviceAccounts;
-  let saDeactivated = 0;
+  // Tokens revoked with their service account, for the token step below.
+  const revokedWithServiceAccount = new Map<string, { serviceAccountId: string; createdById: string | null; expiresAt: Date }>();
   if (saIds.length > 0) {
-    const accounts = await tx.serviceAccount.findMany({
+    const deactivated = await tx.serviceAccount.updateManyAndReturn({
       where: { id: { in: [...saIds] }, ...saLive },
+      data: { isActive: false },
       select: { id: true },
     });
-    for (const sa of accounts) {
-      const { count: n } = await tx.serviceAccount.updateMany({
-        where: { id: sa.id, ...saLive },
-        data: { isActive: false },
-      });
-      if (n !== 1) continue;
-      saDeactivated += 1;
-      const { count: tokensRevoked } = await tx.serviceAccountToken.updateMany({
-        where: { serviceAccountId: sa.id, tenantId, revokedAt: null },
-        data: { revokedAt: now },
-      });
-      await audit({
-        action: AUDIT_ACTION.SERVICE_ACCOUNT_UPDATE,
-        targetType: AUDIT_TARGET_TYPE.SERVICE_ACCOUNT,
-        targetId: sa.id,
-        metadata: { isActive: false, tokensRevoked, targetUserId },
-      });
-    }
+    const tokens = deactivated.length > 0
+      ? await tx.serviceAccountToken.updateManyAndReturn({
+          where: { serviceAccountId: { in: deactivated.map((sa) => sa.id) }, tenantId, revokedAt: null },
+          data: { revokedAt: now },
+          select: { id: true, serviceAccountId: true, createdById: true, expiresAt: true },
+        })
+      : [];
+    for (const { id, ...token } of tokens) revokedWithServiceAccount.set(id, token);
+    const tokensRevoked = tally(tokens.map((t) => t.serviceAccountId));
+    await audit(deactivated.map((sa) => ({
+      action: AUDIT_ACTION.SERVICE_ACCOUNT_UPDATE,
+      targetType: AUDIT_TARGET_TYPE.SERVICE_ACCOUNT,
+      targetId: sa.id,
+      metadata: { isActive: false, tokensRevoked: tokensRevoked.get(sa.id) ?? 0, targetUserId },
+    })));
+    count(FOOTHOLD_KIND.SERVICE_ACCOUNTS, saIds, deactivated.length);
   }
-  count(FOOTHOLD_KIND.SERVICE_ACCOUNTS, saIds, saDeactivated);
 
-  // Tokens the member minted, on any service account of the tenant.
+  // Tokens the member minted, on any service account of the tenant. A named
+  // token the step above already revoked with its service account is
+  // contained too when it was live and the member's: it gets its own row,
+  // marked, so the kind's count and its rows agree.
   const saTokenIds = request.revoke.serviceAccountTokens;
-  let saTokensRevoked = 0;
   if (saTokenIds.length > 0) {
-    const tokens = await tx.serviceAccountToken.findMany({
+    const revoked = await tx.serviceAccountToken.updateManyAndReturn({
       where: { id: { in: [...saTokenIds] }, ...saTokenLive },
+      data: { revokedAt: now },
       select: { id: true, serviceAccountId: true },
     });
-    for (const token of tokens) {
-      const { count: n } = await tx.serviceAccountToken.updateMany({
-        where: { id: token.id, ...saTokenLive },
-        data: { revokedAt: now },
-      });
-      if (n !== 1) continue;
-      saTokensRevoked += 1;
-      await audit({
+    const withServiceAccount = saTokenIds.flatMap((id) => {
+      const token = revokedWithServiceAccount.get(id);
+      return token && token.createdById === targetUserId && token.expiresAt > now
+        ? [{ id, serviceAccountId: token.serviceAccountId }]
+        : [];
+    });
+    await audit([
+      ...revoked.map((token) => ({
         action: AUDIT_ACTION.SERVICE_ACCOUNT_TOKEN_REVOKE,
         targetType: AUDIT_TARGET_TYPE.SERVICE_ACCOUNT_TOKEN,
         targetId: token.id,
         metadata: { serviceAccountId: token.serviceAccountId, targetUserId },
-      });
-    }
+      })),
+      ...withServiceAccount.map((token) => ({
+        action: AUDIT_ACTION.SERVICE_ACCOUNT_TOKEN_REVOKE,
+        targetType: AUDIT_TARGET_TYPE.SERVICE_ACCOUNT_TOKEN,
+        targetId: token.id,
+        metadata: { serviceAccountId: token.serviceAccountId, targetUserId, revokedWithServiceAccount: true },
+      })),
+    ]);
+    count(FOOTHOLD_KIND.SERVICE_ACCOUNT_TOKENS, saTokenIds, revoked.length + withServiceAccount.length);
   }
-  count(FOOTHOLD_KIND.SERVICE_ACCOUNT_TOKENS, saTokenIds, saTokensRevoked);
 
-  // MCP clients: deactivated and their access and refresh tokens revoked.
+  // MCP clients: deactivated and their access and refresh tokens revoked,
+  // found by the clients this statement deactivated.
   const mcpIds = request.revoke.mcpClients;
-  let mcpDeactivated = 0;
   if (mcpIds.length > 0) {
-    const clients = await tx.mcpClient.findMany({
+    const deactivated = await tx.mcpClient.updateManyAndReturn({
       where: { id: { in: [...mcpIds] }, ...mcpLive },
+      data: { isActive: false },
       select: { id: true },
     });
-    for (const client of clients) {
-      const { count: n } = await tx.mcpClient.updateMany({
-        where: { id: client.id, ...mcpLive },
-        data: { isActive: false },
-      });
-      if (n !== 1) continue;
-      mcpDeactivated += 1;
-      const access = await tx.mcpAccessToken.updateMany({
-        where: { clientId: client.id, tenantId, revokedAt: null },
-        data: { revokedAt: now },
-      });
-      const refresh = await tx.mcpRefreshToken.updateMany({
-        where: { clientId: client.id, tenantId, revokedAt: null },
-        data: { revokedAt: now },
-      });
-      await audit({
-        action: AUDIT_ACTION.MCP_CLIENT_UPDATE,
-        targetType: AUDIT_TARGET_TYPE.MCP_CLIENT,
-        targetId: client.id,
-        metadata: { isActive: false, tokensRevoked: access.count + refresh.count, targetUserId },
-      });
-    }
+    const clientIds = deactivated.map((client) => client.id);
+    const access = clientIds.length > 0
+      ? await tx.mcpAccessToken.updateManyAndReturn({
+          where: { clientId: { in: clientIds }, tenantId, revokedAt: null },
+          data: { revokedAt: now },
+          select: { clientId: true },
+        })
+      : [];
+    const refresh = clientIds.length > 0
+      ? await tx.mcpRefreshToken.updateManyAndReturn({
+          where: { clientId: { in: clientIds }, tenantId, revokedAt: null },
+          data: { revokedAt: now },
+          select: { clientId: true },
+        })
+      : [];
+    const tokensRevoked = tally([...access, ...refresh].map((t) => t.clientId));
+    await audit(deactivated.map((client) => ({
+      action: AUDIT_ACTION.MCP_CLIENT_UPDATE,
+      targetType: AUDIT_TARGET_TYPE.MCP_CLIENT,
+      targetId: client.id,
+      metadata: { isActive: false, tokensRevoked: tokensRevoked.get(client.id) ?? 0, targetUserId },
+    })));
+    count(FOOTHOLD_KIND.MCP_CLIENTS, mcpIds, deactivated.length);
   }
-  count(FOOTHOLD_KIND.MCP_CLIENTS, mcpIds, mcpDeactivated);
 
   const breakglassIds = request.revoke.breakglassGrants;
-  let breakglassRevoked = 0;
   if (breakglassIds.length > 0) {
-    const grants = await tx.personalLogAccessGrant.findMany({
+    const revoked = await tx.personalLogAccessGrant.updateManyAndReturn({
       where: { id: { in: [...breakglassIds] }, ...breakglassLive },
+      data: { revokedAt: now },
       select: { id: true, targetUserId: true },
     });
-    for (const grant of grants) {
-      const { count: n } = await tx.personalLogAccessGrant.updateMany({
-        where: { id: grant.id, ...breakglassLive },
-        data: { revokedAt: now },
-      });
-      if (n !== 1) continue;
-      breakglassRevoked += 1;
-      // The single revoke route's row, with the admin as the revoker.
-      await audit({
-        action: AUDIT_ACTION.PERSONAL_LOG_ACCESS_REVOKE,
-        targetType: "User",
-        targetId: grant.targetUserId,
-        metadata: { grantId: grant.id, requesterId: targetUserId, targetUserId: grant.targetUserId, revokedById: actorUserId },
-      });
-    }
+    // The single revoke route's row, with the admin as the revoker.
+    await audit(revoked.map((grant) => ({
+      action: AUDIT_ACTION.PERSONAL_LOG_ACCESS_REVOKE,
+      targetType: "User",
+      targetId: grant.targetUserId,
+      metadata: { grantId: grant.id, requesterId: targetUserId, targetUserId: grant.targetUserId, revokedById: actorUserId },
+    })));
+    count(FOOTHOLD_KIND.BREAKGLASS_GRANTS, breakglassIds, revoked.length);
   }
-  count(FOOTHOLD_KIND.BREAKGLASS_GRANTS, breakglassIds, breakglassRevoked);
 
   // Last: the member's emergency-access grants, through the state machine's
-  // single writer, clearing what the owner's permanent revoke clears. The
-  // grantee is not told (the grantee may be the attacker). An ACTIVATED grant
-  // stops serving the vault; a key already unwrapped cannot be taken back.
+  // single writer, clearing what the owner's permanent revoke clears — one by
+  // one (at most MEMBER_CONTAINMENT_MAX_IDS), as transition() writes a single
+  // row. The grantee is not told (the grantee may be the attacker). An
+  // ACTIVATED grant stops serving the vault; a key already unwrapped cannot be
+  // taken back.
   const eaIds = request.revoke.emergencyAccessGrants;
-  let eaRevoked = 0;
   if (eaIds.length > 0) {
     const grants = await tx.emergencyAccessGrant.findMany({
       where: { id: { in: [...eaIds] }, ...eaLive },
       select: { id: true, tenantId: true, granteeId: true },
     });
+    const revoked: typeof grants = [];
     for (const grant of grants) {
       const result = await transition({
         db: tx,
@@ -439,17 +462,17 @@ export async function containMemberInTx(
         },
       });
       if (!result.ok) continue;
-      eaRevoked += 1;
+      revoked.push(grant);
       if (grant.tenantId !== tenantId) elsewhere(grant.tenantId).emergencyAccessGrantsRevoked += 1;
-      await audit({
-        action: AUDIT_ACTION.EMERGENCY_ACCESS_REVOKE,
-        targetType: AUDIT_TARGET_TYPE.EMERGENCY_ACCESS_GRANT,
-        targetId: grant.id,
-        metadata: { ownerId: targetUserId, granteeId: grant.granteeId, permanent: true, revokedById: actorUserId },
-      });
     }
+    await audit(revoked.map((grant) => ({
+      action: AUDIT_ACTION.EMERGENCY_ACCESS_REVOKE,
+      targetType: AUDIT_TARGET_TYPE.EMERGENCY_ACCESS_GRANT,
+      targetId: grant.id,
+      metadata: { ownerId: targetUserId, granteeId: grant.granteeId, permanent: true, revokedById: actorUserId },
+    })));
+    count(FOOTHOLD_KIND.EMERGENCY_ACCESS_GRANTS, eaIds, revoked.length);
   }
-  count(FOOTHOLD_KIND.EMERGENCY_ACCESS_GRANTS, eaIds, eaRevoked);
 
   return { contained, unlinkedAccountIds, otherTenants };
 }

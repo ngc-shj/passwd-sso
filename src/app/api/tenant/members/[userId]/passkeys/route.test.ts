@@ -13,6 +13,7 @@ const {
   mockRevokeArtifacts,
   mockInvalidateCachedSessions,
   mockLogAuditInTx,
+  mockLogAuditBulkInTx,
   mockCreateNotification,
   mockSendEmail,
   mockSentryCapture,
@@ -34,6 +35,7 @@ const {
     mockRevokeArtifacts: vi.fn(),
     mockInvalidateCachedSessions: vi.fn(),
     mockLogAuditInTx: vi.fn(),
+    mockLogAuditBulkInTx: vi.fn(),
     mockCreateNotification: vi.fn(),
     mockSendEmail: vi.fn(),
     mockSentryCapture: vi.fn(),
@@ -43,20 +45,31 @@ const {
   };
 });
 
-// A containment model: every named id is the member's and live (findMany
-// returns one row per id), and each compare-and-set write lands. Each call is
-// recorded by model, for the write order.
+// A containment model: every named id is the member's and live (findMany and
+// a bulk write return one row per id; a sweep keyed by parent ids, one row per
+// parent), and each compare-and-set write lands. Each write is recorded by
+// model, for the write order.
+type ContainmentWhere = { id?: { in: string[] }; serviceAccountId?: { in: string[] }; clientId?: { in: string[] } };
 function containmentModel(name: string, row: Record<string, unknown> = {}) {
-  const write = vi.fn(async () => {
-    calls.push(name);
-    return { count: 1 };
-  });
+  const rows = (where: ContainmentWhere) => {
+    const parents = where.serviceAccountId?.in ?? where.clientId?.in;
+    if (parents) return parents.map((p) => ({ id: `${p}-child`, serviceAccountId: p, clientId: p, tenantId: "tenant-1", ...row }));
+    return (where.id?.in ?? []).map((id) => ({ id, tenantId: "tenant-1", ...row }));
+  };
   return {
-    findMany: vi.fn(async (args: { where: { id?: { in: string[] } } }) =>
-      (args.where.id?.in ?? []).map((id) => ({ id, tenantId: "tenant-1", ...row })),
-    ),
-    updateMany: write,
-    deleteMany: write,
+    findMany: vi.fn(async (args: { where: ContainmentWhere }) => rows(args.where)),
+    updateMany: vi.fn(async () => {
+      calls.push(name);
+      return { count: 1 };
+    }),
+    updateManyAndReturn: vi.fn(async (args: { where: ContainmentWhere }) => {
+      calls.push(name);
+      return rows(args.where);
+    }),
+    deleteMany: vi.fn(async (args: { where: ContainmentWhere }) => {
+      calls.push(name);
+      return { count: args.where.id?.in.length ?? 1 };
+    }),
   };
 }
 
@@ -105,6 +118,7 @@ vi.mock("@/lib/auth/session/session-cache-helpers", () => ({
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditInTx: mockLogAuditInTx,
+  logAuditBulkInTx: mockLogAuditBulkInTx,
   // The admin's request metadata is present, so the other-tenant row's lack of
   // it is the code's doing.
   tenantAuditBase: vi.fn((_req: unknown, userId: string, tenantId: string) => ({
@@ -179,6 +193,9 @@ describe("DELETE /api/tenant/members/[userId]/passkeys", () => {
     });
     mockLogAuditInTx.mockImplementation(async () => {
       calls.push("audit");
+    });
+    mockLogAuditBulkInTx.mockImplementation(async (_tx: unknown, _tenant: string, rows: unknown[]) => {
+      if (rows.length > 0) calls.push("audit");
     });
     mockInvalidateCachedSessions.mockImplementation(async () => {
       calls.push(committed.value ? "cache-after-commit" : "cache-before-commit");
@@ -471,7 +488,13 @@ describe("DELETE /api/tenant/members/[userId]/passkeys", () => {
         unlinkedAccountIdsOmitted: 0,
       });
       expect(writes.lastIndexOf("emergencyAccessGrant")).toBeLessThan(writes.lastIndexOf("audit"));
-      expect(mockLogAuditInTx.mock.calls.map((c) => c[2].action)).toEqual([
+      // The containment rows in one batch per kind, then the revoke-all rows.
+      const actions = [
+        ...mockLogAuditBulkInTx.mock.calls.flatMap((c) => (c[2] as { action: string }[]).map((r) => r.action)),
+        ...mockLogAuditInTx.mock.calls.map((c) => c[2].action),
+      ];
+      expect(mockLogAuditBulkInTx.mock.invocationCallOrder.at(-1)).toBeLessThan(mockLogAuditInTx.mock.invocationCallOrder[0]);
+      expect(actions).toEqual([
         "SCIM_TOKEN_REVOKE",
         "SERVICE_ACCOUNT_UPDATE",
         "SERVICE_ACCOUNT_TOKEN_REVOKE",
@@ -494,11 +517,11 @@ describe("DELETE /api/tenant/members/[userId]/passkeys", () => {
     });
 
     it("counts a named id that matches nothing live of the member's as skipped, and audits nothing for it", async () => {
-      tx.scimToken.findMany.mockResolvedValueOnce([]);
+      tx.scimToken.updateManyAndReturn.mockResolvedValueOnce([]);
 
       const res = await revokeAll({ revoke: { scimTokenIds: [uuid(2)] } });
       expect((await res.json()).contained).toEqual({ scimTokens: { revoked: 0, skipped: 1 } });
-      expect(mockLogAuditInTx.mock.calls.map((c) => c[2].action)).not.toContain("SCIM_TOKEN_REVOKE");
+      expect(mockLogAuditBulkInTx.mock.calls.flatMap((c) => c[2] as unknown[])).toEqual([]);
     });
 
     // Per-kind permission is defence in depth (OWNER and ADMIN hold all of them

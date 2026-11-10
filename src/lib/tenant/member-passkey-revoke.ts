@@ -21,6 +21,7 @@ import { resolveUserLocale } from "@/lib/locale";
 import { getLogger } from "@/lib/logger";
 import { errorLogFields } from "@/lib/logger/error-fields";
 import { AUDIT_CREDENTIAL_ID_MAX_LENGTH } from "@/lib/validations/common.server";
+import { MEMBER_PASSKEY_REVOKE_TX_TIMEOUT_MS } from "@/lib/constants/auth/member-containment";
 import {
   containMemberInTx,
   refusedContainmentKinds,
@@ -138,6 +139,15 @@ export async function revokeMemberPasskeys(
         where: { userId: targetUserId, id: { in: credentials.map((c) => c.id) } },
       });
       if (single && count === 0) return REVOKE_OUTCOME.NOT_FOUND;
+      // The audit rows and the member's notice name the credentials read, so
+      // they must be the ones deleted. Every other deleter of a member's
+      // passkey (their own DELETE /api/webauthn/credentials/[id]) takes the
+      // credential lock held here, so none can go between the read and the
+      // delete; were one to, the revoke rolls back for a retry rather than
+      // record a passkey it did not delete.
+      if (count !== credentials.length) {
+        throw new Error(`member passkey revoke: ${count} of ${credentials.length} credentials read were deleted`);
+      }
     }
 
     const { counts, sessionTokens } = await revokeUserAuthArtifactsInTx(tx, targetUserId, { tenantFilter: {} });
@@ -210,7 +220,7 @@ export async function revokeMemberPasskeys(
       });
     }
     return { counts, sessionTokens, contained, passkeysRevoked: credentials.length, target: targetRow.user };
-  }, BYPASS_GRANT.TENANT_MEMBER_PASSKEY_REVOKE);
+  }, BYPASS_GRANT.TENANT_MEMBER_PASSKEY_REVOKE, { timeout: MEMBER_PASSKEY_REVOKE_TX_TIMEOUT_MS });
   if (outcome === REVOKE_OUTCOME.NOT_FOUND) return notFound();
   if (outcome === REVOKE_OUTCOME.FORBIDDEN) return forbidden();
   const { counts, sessionTokens, contained, passkeysRevoked, target } = outcome;

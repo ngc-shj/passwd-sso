@@ -136,8 +136,8 @@
     },
     "src/lib/tenant/member-containment.ts#containMemberInTx": {
       "class": "opaque-where",
-      "calls": 5,
-      "reason": "A tenant admin's containment of a member (#1016): reads and revokes the SCIM and service-account tokens the member minted and revokes their emergency-access grants; the spreads are the live predicates (tenantId / createdById / ownerId), never a digest. Revocation only."
+      "calls": 3,
+      "reason": "A tenant admin's containment of a member (#1016): revokes the SCIM and service-account tokens the member minted (one bulk compare-and-set each) and reads their emergency-access grants to revoke; the spreads are the live predicates (tenantId / createdById / ownerId), never a digest. Revocation only."
     },
     "src/app/api/user/mcp-tokens/[id]/route.ts#handleDELETE": {
       "class": "opaque-where",

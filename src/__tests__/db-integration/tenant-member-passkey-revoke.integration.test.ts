@@ -57,6 +57,8 @@ import { hashToken } from "@/lib/crypto/crypto-server";
 import { validateServiceAccountToken } from "@/lib/auth/tokens/service-account-token";
 import { validateMcpToken } from "@/lib/mcp/oauth-server";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
+import { pgErrorCode } from "@/lib/prisma/prisma-error";
+import { MEMBER_CONTAINMENT_MAX_IDS } from "@/lib/validations/member-containment";
 
 describe("tenant admin revokes a member's passkey — real-DB integration", () => {
   let ctx: TestContext;
@@ -440,14 +442,26 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
   }
 
   /** An access token of `client`, held by `userId` (not the member being contained). */
-  async function mcpAccessToken(client: string, userId: string, tenant = tenantId): Promise<string> {
+  async function mcpAccessToken(client: string, userId: string, tenant = tenantId): Promise<{ id: string; plaintext: string }> {
+    const id = randomUUID();
     const plaintext = `mcp_${hex()}`;
     await sql(
       `INSERT INTO mcp_access_tokens (id, token_hash, client_id, tenant_id, user_id, scope, expires_at, created_at)
        VALUES ($1::uuid, $2, $3::uuid, $4::uuid, $5::uuid, 'credentials:list', now() + interval '1 day', now())`,
-      randomUUID(), hashToken(plaintext), client, tenant, userId,
+      id, hashToken(plaintext), client, tenant, userId,
     );
-    return plaintext;
+    return { id, plaintext };
+  }
+
+  /** A live refresh token of `client`, paired with `accessTokenId`. */
+  async function mcpRefreshToken(client: string, accessTokenId: string, userId: string, tenant = tenantId): Promise<string> {
+    const id = randomUUID();
+    await sql(
+      `INSERT INTO mcp_refresh_tokens (id, token_hash, family_id, access_token_id, client_id, tenant_id, user_id, scope, expires_at, created_at, family_created_at)
+       VALUES ($1::uuid, $2, $3::uuid, $4::uuid, $5::uuid, $6::uuid, $7::uuid, 'credentials:list', now() + interval '7 days', now(), now())`,
+      id, hashToken(`mcpr_${hex()}`), randomUUID(), accessTokenId, client, tenant, userId,
+    );
+    return id;
   }
 
   async function breakglassGrant(
@@ -618,7 +632,7 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
       ]),
     );
     expect(body.linkedAccounts).toHaveLength(2);
-    for (const secret of [here.providerAccountId, here.accessToken, here.refreshToken, there.providerAccountId, there.accessToken]) {
+    for (const secret of [here.providerAccountId, here.accessToken, here.refreshToken, there.providerAccountId, there.accessToken, there.refreshToken]) {
       expect(text).not.toContain(secret);
     }
     expect(text).not.toMatch(/providerAccountId|access_token|refresh_token|encryptedSecretKey|tokenHash/);
@@ -643,7 +657,16 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
     kind: string;
     table: string;
     action: string;
-    seed: (ids: { target: string; bystander: string }) => Promise<{ live: string; skipped: string[]; dead: string }>;
+    // `collateral`: rows hanging off a skipped row (a skipped service account's
+    // or MCP client's live tokens), which must stay byte-unchanged too.
+    // `auditTargetId`: the audit row's targetId when it is not the row's id.
+    seed: (ids: { target: string; bystander: string }) => Promise<{
+      live: string;
+      skipped: string[];
+      dead: string;
+      collateral?: { table: string; id: string }[];
+      auditTargetId?: string;
+    }>;
     deadColumn: string;
     written: (id: string) => Promise<boolean>;
   };
@@ -664,11 +687,18 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
     {
       bodyKey: "serviceAccountIds", kind: "serviceAccounts", table: "service_accounts", action: "SERVICE_ACCOUNT_UPDATE", deadColumn: "is_active",
       written: isInactive("service_accounts"),
-      seed: async ({ target, bystander }) => ({
-        live: await serviceAccount(target),
-        skipped: [await serviceAccount(bystander), await serviceAccount(target, otherTenantId)],
-        dead: await serviceAccount(target, tenantId, "dead"),
-      }),
+      seed: async ({ target, bystander }) => {
+        const skipped = [await serviceAccount(bystander), await serviceAccount(target, otherTenantId)];
+        return {
+          live: await serviceAccount(target),
+          skipped,
+          dead: await serviceAccount(target, tenantId, "dead"),
+          collateral: [
+            { table: "service_account_tokens", id: (await saToken(skipped[0], bystander)).id },
+            { table: "service_account_tokens", id: (await saToken(skipped[1], target, otherTenantId)).id },
+          ],
+        };
+      },
     },
     {
       bodyKey: "serviceAccountTokenIds", kind: "serviceAccountTokens", table: "service_account_tokens", action: "SERVICE_ACCOUNT_TOKEN_REVOKE", deadColumn: "revoked_at",
@@ -686,19 +716,34 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
     {
       bodyKey: "mcpClientIds", kind: "mcpClients", table: "mcp_clients", action: "MCP_CLIENT_UPDATE", deadColumn: "is_active",
       written: isInactive("mcp_clients"),
-      seed: async ({ target, bystander }) => ({
-        live: await mcpClient(target),
-        skipped: [await mcpClient(bystander), await mcpClient(target, otherTenantId)],
-        dead: await mcpClient(target, tenantId, "dead"),
-      }),
+      seed: async ({ target, bystander }) => {
+        const skipped = [
+          { client: await mcpClient(bystander), tenant: tenantId },
+          { client: await mcpClient(target, otherTenantId), tenant: otherTenantId },
+        ];
+        const collateral: { table: string; id: string }[] = [];
+        for (const { client, tenant } of skipped) {
+          const access = await mcpAccessToken(client, bystander, tenant);
+          collateral.push({ table: "mcp_access_tokens", id: access.id });
+          collateral.push({ table: "mcp_refresh_tokens", id: await mcpRefreshToken(client, access.id, bystander, tenant) });
+        }
+        return {
+          live: await mcpClient(target),
+          skipped: skipped.map((s) => s.client),
+          dead: await mcpClient(target, tenantId, "dead"),
+          collateral,
+        };
+      },
     },
     {
       bodyKey: "breakglassGrantIds", kind: "breakglassGrants", table: "personal_log_access_grants", action: "PERSONAL_LOG_ACCESS_REVOKE", deadColumn: "revoked_at",
       written: isRevoked("personal_log_access_grants"),
+      // The row's targetId is the break-glass target whose logs it opened.
       seed: async ({ target, bystander }) => ({
         live: await breakglassGrant(target, bystander),
         skipped: [await breakglassGrant(bystander, target), await breakglassGrant(target, bystander, otherTenantId)],
         dead: await breakglassGrant(target, bystander, tenantId, "dead"),
+        auditTargetId: bystander,
       }),
     },
     {
@@ -718,8 +763,9 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
     const target = await memberWithRole("ADMIN");
     const bystander = await memberWithRole("ADMIN");
     await alsoMemberElsewhere(target);
-    const { live, skipped, dead } = await seed({ target, bystander });
+    const { live, skipped, dead, collateral = [], auditTargetId = live } = await seed({ target, bystander });
     const before = Object.fromEntries(await Promise.all(skipped.map(async (id) => [id, await rowText(table, id)] as const)));
+    const collateralBefore = await Promise.all(collateral.map((c) => rowText(c.table, c.id)));
     const [deadBefore] = await sql<{ v: string }>(`SELECT ${deadColumn}::text AS v FROM ${table} WHERE id = $1::uuid`, dead);
 
     const res = await containAs(owner, target, { revoke: { [bodyKey]: [live, ...skipped, dead] } });
@@ -728,17 +774,19 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
 
     expect(await written(live)).toBe(true);
     for (const id of skipped) expect(await rowText(table, id)).toBe(before[id]);
+    expect(await Promise.all(collateral.map((c) => rowText(c.table, c.id)))).toEqual(collateralBefore);
     const [deadAfter] = await sql<{ v: string }>(`SELECT ${deadColumn}::text AS v FROM ${table} WHERE id = $1::uuid`, dead);
     expect(deadAfter.v).toBe(deadBefore.v);
 
     const rows = (await auditRows(tenantId)).filter((r) => r.action === action);
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ userId: owner });
+    expect(rows[0]).toMatchObject({ userId: owner, targetId: auditTargetId });
+    if (kind === "breakglassGrants") expect(rows[0].metadata.grantId).toBe(live);
     const revokeAll = (await auditRows(tenantId)).find((r) => r.action === "TENANT_MEMBER_PASSKEY_REVOKE_ALL");
     expect(revokeAll?.metadata).toMatchObject({ [`${kind}Contained`]: 1, [`${kind}Skipped`]: skipped.length + 1 });
   });
 
-  it("cell 3: a contained service account's tokens are refused by the production validator; a contained MCP client's access token too", async () => {
+  it("cell 3: a contained service account's tokens are refused by the production validator; a contained MCP client's access token too, and its refresh token is revoked", async () => {
     const owner = await memberWithRole("OWNER");
     const target = await memberWithRole("ADMIN");
     const bystander = await memberWithRole("ADMIN");
@@ -747,18 +795,131 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
     const token = await saToken(sa, bystander);
     const client = await mcpClient(target);
     const access = await mcpAccessToken(client, bystander);
+    const refresh = await mcpRefreshToken(client, access.id, bystander);
     const bearer = (t: string) => new NextRequest("http://localhost/api/v1/passwords", { headers: { authorization: `Bearer ${t}` } });
     expect((await validateServiceAccountToken(bearer(token.plaintext))).ok).toBe(true);
-    expect((await validateMcpToken(access)).ok).toBe(true);
+    expect((await validateMcpToken(access.plaintext)).ok).toBe(true);
 
     const res = await containAs(owner, target, { revoke: { serviceAccountIds: [sa], mcpClientIds: [client] } });
     expect(res.status).toBe(200);
 
     expect(await validateServiceAccountToken(bearer(token.plaintext))).toMatchObject({ ok: false, error: "SA_TOKEN_REVOKED" });
-    expect(await validateMcpToken(access)).toMatchObject({ ok: false, error: "token_revoked" });
+    expect(await validateMcpToken(access.plaintext)).toMatchObject({ ok: false, error: "token_revoked" });
+    expect(await isRevoked("mcp_refresh_tokens")(refresh)).toBe(true);
     const audits = await auditRows(tenantId);
     expect(audits.find((r) => r.action === "SERVICE_ACCOUNT_UPDATE")?.metadata).toMatchObject({ isActive: false, tokensRevoked: 1 });
-    expect(audits.find((r) => r.action === "MCP_CLIENT_UPDATE")?.metadata).toMatchObject({ isActive: false, tokensRevoked: 1 });
+    expect(audits.find((r) => r.action === "MCP_CLIENT_UPDATE")?.metadata).toMatchObject({ isActive: false, tokensRevoked: 2 });
+  });
+
+  it("cell 3: a ticked token on a ticked service account is counted contained, not skipped, and audited once as revoked with it", async () => {
+    const owner = await memberWithRole("OWNER");
+    const target = await memberWithRole("ADMIN");
+    const sa = await serviceAccount(target);
+    const token = await saToken(sa, target);
+
+    const res = await containAs(owner, target, { revoke: { serviceAccountIds: [sa], serviceAccountTokenIds: [token.id] } });
+    expect((await res.json()).contained).toEqual({
+      serviceAccounts: { revoked: 1, skipped: 0 },
+      serviceAccountTokens: { revoked: 1, skipped: 0 },
+    });
+    expect(await isRevoked("service_account_tokens")(token.id)).toBe(true);
+
+    const audits = await auditRows(tenantId);
+    expect(audits.find((r) => r.action === "SERVICE_ACCOUNT_UPDATE")?.metadata).toMatchObject({ tokensRevoked: 1 });
+    const tokenRows = audits.filter((r) => r.action === "SERVICE_ACCOUNT_TOKEN_REVOKE");
+    expect(tokenRows).toHaveLength(1);
+    expect(tokenRows[0]).toMatchObject({ targetId: token.id, metadata: { serviceAccountId: sa, targetUserId: target, revokedWithServiceAccount: true } });
+    const revokeAll = audits.find((r) => r.action === "TENANT_MEMBER_PASSKEY_REVOKE_ALL");
+    expect(revokeAll?.metadata).toMatchObject({ serviceAccountTokensContained: 1, serviceAccountTokensSkipped: 0 });
+  });
+
+  it(`cell 3: a request naming MEMBER_CONTAINMENT_MAX_IDS (${MEMBER_CONTAINMENT_MAX_IDS}) ids of every kind is written whole, one audit row per row`, async () => {
+    const owner = await memberWithRole("OWNER");
+    const target = await memberWithRole("ADMIN");
+    const bystander = await memberWithRole("ADMIN");
+    const n = MEMBER_CONTAINMENT_MAX_IDS;
+    const ids = async (text: string, ...params: unknown[]) => (await sql<{ id: string }>(text, ...params)).map((r) => r.id);
+    const hash = `replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', '')`;
+
+    const accountIds = await ids(
+      `INSERT INTO accounts (id, user_id, tenant_id, type, provider, provider_account_id)
+       SELECT gen_random_uuid(), $1::uuid, $2::uuid, 'oidc', 'google', 'pai-' || gen_random_uuid() FROM generate_series(1, $3::int) RETURNING id`,
+      target, tenantId, n,
+    );
+    const scimIds = await ids(
+      `INSERT INTO scim_tokens (id, tenant_id, token_hash, created_by_id, created_at)
+       SELECT gen_random_uuid(), $1::uuid, ${hash}, $2::uuid, now() FROM generate_series(1, $3::int) RETURNING id`,
+      tenantId, target, n,
+    );
+    const saIds = await ids(
+      `INSERT INTO service_accounts (id, tenant_id, name, created_by_id, is_active, created_at, updated_at)
+       SELECT gen_random_uuid(), $1::uuid, 'sa-' || g, $2::uuid, true, now(), now() FROM generate_series(1, $3::int) g RETURNING id`,
+      tenantId, target, n,
+    );
+    // One live token on each service account (revoked with it), and the
+    // member's tokens on a bystander's service account (named themselves).
+    const saTokenSql = `INSERT INTO service_account_tokens (id, service_account_id, tenant_id, token_hash, prefix, name, scope, expires_at, created_by_id, created_at)
+       SELECT gen_random_uuid(), sa, $1::uuid, ${hash}, 'sa_xxxx', 'tok', 'passwords:read', now() + interval '1 day', $2::uuid, now()`;
+    await sql(`${saTokenSql} FROM unnest($3::uuid[]) sa`, tenantId, bystander, saIds);
+    const bystanderSa = await serviceAccount(bystander);
+    const saTokenIds = await ids(`${saTokenSql} FROM (SELECT $3::uuid AS sa, generate_series(1, $4::int)) s RETURNING id`, tenantId, target, bystanderSa, n);
+    const mcpIds = await ids(
+      `INSERT INTO mcp_clients (id, tenant_id, client_id, client_secret_hash, name, redirect_uris, allowed_scopes, is_active, created_by_id, created_at, updated_at)
+       SELECT gen_random_uuid(), $1::uuid, 'cli-' || gen_random_uuid(), '', 'mcp-' || g, ARRAY['http://localhost/cb']::text[], 'credentials:list', true, $2::uuid, now(), now()
+         FROM generate_series(1, $3::int) g RETURNING id`,
+      tenantId, target, n,
+    );
+    await sql(
+      `INSERT INTO mcp_access_tokens (id, token_hash, client_id, tenant_id, user_id, scope, expires_at, created_at)
+       SELECT gen_random_uuid(), ${hash}, c, $1::uuid, $2::uuid, 'credentials:list', now() + interval '1 day', now() FROM unnest($3::uuid[]) c`,
+      tenantId, bystander, mcpIds,
+    );
+    await sql(
+      `INSERT INTO mcp_refresh_tokens (id, token_hash, family_id, access_token_id, client_id, tenant_id, user_id, scope, expires_at, created_at, family_created_at)
+       SELECT gen_random_uuid(), ${hash}, gen_random_uuid(), a.id, a.client_id, a.tenant_id, a.user_id, a.scope, now() + interval '7 days', now(), now()
+         FROM mcp_access_tokens a WHERE a.client_id = ANY($1::uuid[])`,
+      mcpIds,
+    );
+    const breakglassIds = await ids(
+      `INSERT INTO personal_log_access_grants (id, tenant_id, requester_id, target_user_id, reason, expires_at, created_at)
+       SELECT gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid, 'incident review', now() + interval '1 day', now() FROM generate_series(1, $4::int) RETURNING id`,
+      tenantId, target, bystander, n,
+    );
+    const eaIds = await ids(
+      `INSERT INTO emergency_access_grants (id, tenant_id, owner_id, grantee_email, status, wait_days, token_hash, token_expires_at,
+         encrypted_secret_key, secret_key_iv, secret_key_auth_tag, hkdf_salt, owner_ephemeral_public_key, created_at, updated_at)
+       SELECT gen_random_uuid(), $1::uuid, $2::uuid, 'contact-' || g || '@example.net', 'IDLE', 7, ${hash}, now() + interval '30 days',
+              'esk', repeat('a', 24), repeat('b', 32), repeat('c', 64), 'epk', now(), now()
+         FROM generate_series(1, $3::int) g RETURNING id`,
+      tenantId, target, n,
+    );
+
+    const res = await containAs(owner, target, {
+      unlinkAccountIds: accountIds,
+      revoke: {
+        scimTokenIds: scimIds, serviceAccountIds: saIds, serviceAccountTokenIds: saTokenIds, mcpClientIds: mcpIds,
+        breakglassGrantIds: breakglassIds, emergencyAccessGrantIds: eaIds,
+      },
+    });
+    expect(res.status).toBe(200);
+    const all = { revoked: n, skipped: 0 };
+    expect((await res.json()).contained).toEqual({
+      accounts: all, scimTokens: all, serviceAccounts: all, serviceAccountTokens: all, mcpClients: all, breakglassGrants: all, emergencyAccessGrants: all,
+    });
+    const [left] = await sql<Record<string, number>>(
+      `SELECT (SELECT count(*)::int FROM service_account_tokens WHERE tenant_id = $1::uuid AND revoked_at IS NULL) AS sa_tokens,
+              (SELECT count(*)::int FROM mcp_access_tokens WHERE tenant_id = $1::uuid AND revoked_at IS NULL) AS mcp_access,
+              (SELECT count(*)::int FROM mcp_refresh_tokens WHERE tenant_id = $1::uuid AND revoked_at IS NULL) AS mcp_refresh,
+              (SELECT count(*)::int FROM emergency_access_grants WHERE owner_id = $2::uuid AND status <> 'REVOKED') AS ea,
+              (SELECT count(*)::int FROM accounts WHERE user_id = $2::uuid) AS accounts`,
+      tenantId, target,
+    );
+    expect(left).toEqual({ sa_tokens: 0, mcp_access: 0, mcp_refresh: 0, ea: 0, accounts: 0 });
+    const counts = (await auditRows(tenantId)).reduce<Record<string, number>>((acc, r) => ({ ...acc, [r.action]: (acc[r.action] ?? 0) + 1 }), {});
+    expect(counts).toMatchObject({
+      SCIM_TOKEN_REVOKE: n, SERVICE_ACCOUNT_UPDATE: n, SERVICE_ACCOUNT_TOKEN_REVOKE: n, MCP_CLIENT_UPDATE: n,
+      PERSONAL_LOG_ACCESS_REVOKE: n, EMERGENCY_ACCESS_REVOKE: n, TENANT_MEMBER_PASSKEY_REVOKE_ALL: 1,
+    });
   });
 
   it("cell 3: unlinking removes only the named accounts of the target; the other tenant's revoke-all row counts the one filed there", async () => {
@@ -817,19 +978,20 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
     // skips the existing row at ADD time; the UPDATE re-checks it. No function
     // is created.
     await sql(`ALTER TABLE emergency_access_grants ADD CONSTRAINT containment_atomicity_probe CHECK (id <> '${grant}'::uuid) NOT VALID`);
+    let rejection: unknown = null;
     try {
-      await expect(
-        containAs(owner, target, {
-          unlinkAccountIds: [linked.id],
-          revoke: {
-            scimTokenIds: [scim], serviceAccountIds: [sa], serviceAccountTokenIds: [saTok.id], mcpClientIds: [client],
-            breakglassGrantIds: [bg], emergencyAccessGrantIds: [grant],
-          },
-        }),
-      ).rejects.toThrow();
+      rejection = await containAs(owner, target, {
+        unlinkAccountIds: [linked.id],
+        revoke: {
+          scimTokenIds: [scim], serviceAccountIds: [sa], serviceAccountTokenIds: [saTok.id], mcpClientIds: [client],
+          breakglassGrantIds: [bg], emergencyAccessGrantIds: [grant],
+        },
+      }).then(() => null, (e: unknown) => e);
     } finally {
       await sql(`ALTER TABLE emergency_access_grants DROP CONSTRAINT IF EXISTS containment_atomicity_probe`);
     }
+    // The probe's violation, not some other failure on the way.
+    expect(pgErrorCode(rejection)).toBe("23514");
 
     expect(await exists("webauthn_credentials", credential)).toBe(true);
     expect(await exists("sessions", signedIn.sessionId)).toBe(true);
@@ -868,9 +1030,15 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
     const idle = await emergencyGrant(target, tenantId, { status: "IDLE", escrow: true, grantee });
     const activated = await emergencyGrant(target, tenantId, { status: "ACTIVATED", escrow: true, grantee });
     const filedElsewhere = await emergencyGrant(target, otherTenantId, { status: "IDLE", escrow: true, grantee });
+    // Another owner's IDLE grant to the same grantee, never contained.
+    const control = await emergencyGrant(owner, tenantId, { status: "IDLE", escrow: true, grantee });
 
-    // Positive control: the grantee reads the activated grant's vault data.
+    const requestAccess = (id: string) =>
+      requestEmergencyAccess(new NextRequest(`http://localhost/api/emergency-access/${id}/request`, { method: "POST" }), { params: Promise.resolve({ id }) });
+    // Positive controls: the grantee can request an IDLE grant through this
+    // route, and reads the activated grant's vault data.
     mockAuth.mockResolvedValue({ user: { id: grantee } });
+    expect((await requestAccess(control)).status).toBe(200);
     const vaultBefore = await readEmergencyVault(new NextRequest(`http://localhost/api/emergency-access/${activated}/vault`), { params: Promise.resolve({ id: activated }) });
     expect(vaultBefore.status).toBe(200);
 
@@ -883,13 +1051,16 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
          FROM emergency_access_grants WHERE owner_id = $1::uuid`,
       target,
     );
+    expect(rows).toHaveLength(4);
     for (const row of rows) {
       expect(row).toMatchObject({ status: "REVOKED", esk: null, iv: null, tag: null, epk: null, salt: null, revoked: true });
     }
 
     mockAuth.mockResolvedValue({ user: { id: grantee } });
-    const request = await requestEmergencyAccess(new NextRequest(`http://localhost/api/emergency-access/${idle}/request`, { method: "POST" }), { params: Promise.resolve({ id: idle }) });
-    expect(request.status).toBeGreaterThanOrEqual(400);
+    // Found and the grantee's, so refused by the status compare-and-set alone.
+    const request = await requestAccess(idle);
+    expect(request.status).toBe(400);
+    expect(await request.json()).toMatchObject({ error: "INVALID_STATUS" });
     const vaultAfter = await readEmergencyVault(new NextRequest(`http://localhost/api/emergency-access/${activated}/vault`), { params: Promise.resolve({ id: activated }) });
     expect(vaultAfter.status).toBeGreaterThanOrEqual(400);
 
@@ -955,11 +1126,40 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
           `SELECT rolbypassrls AS bypass, rolsuper AS superuser FROM pg_roles WHERE rolname = current_user`,
         )).rows;
         expect(principal).toEqual({ bypass: false, superuser: false });
+        // Rolled back at the end: the block's table-wide UPDATE never commits
+        // to the shared database.
         await client.query("BEGIN");
-        const invisible = await client.query(`SELECT id FROM service_account_tokens WHERE id = $1::uuid`, [jit.id]);
-        expect(invisible.rows).toEqual([]);
-        await client.query(block!);
-        await client.query("COMMIT");
+        try {
+          const visible = async () => (await client.query(`SELECT id FROM service_account_tokens WHERE id = $1::uuid`, [jit.id])).rows;
+          expect(await visible()).toEqual([]);
+          await client.query(block!);
+
+          // The block restored the settings it found (none): no bypass is left
+          // behind, and the rows are invisible again. (It restores
+          // app.tenant_id to '', which the policies cannot cast, so the read
+          // names a tenant — not the token's — the way a tenant context would.)
+          const [gucs] = (await client.query<{ rls: string | null; tables: string | null }>(
+            `SELECT current_setting('app.bypass_rls', true) AS rls, current_setting('app.bypass_tables', true) AS tables`,
+          )).rows;
+          expect(gucs).toEqual({ rls: "", tables: "" });
+          await client.query(`SELECT set_config('app.tenant_id', '00000000-0000-0000-0000-000000000000', true)`);
+          expect(await visible()).toEqual([]);
+
+          // Read the result on the same connection, inside the transaction,
+          // under a bypass set here as the block sets its own.
+          await client.query(
+            `SELECT set_config('app.bypass_rls', 'on', true), set_config('app.bypass_tables', 'service_account_tokens', true),
+                    set_config('app.bypass_purpose', 'system_maintenance', true),
+                    set_config('app.tenant_id', '00000000-0000-0000-0000-000000000000', true)`,
+          );
+          const rows = (await client.query<{ id: string; created_by_id: string | null }>(
+            `SELECT id, created_by_id FROM service_account_tokens WHERE id = ANY($1::uuid[])`,
+            [[jit.id, direct.id]],
+          )).rows;
+          expect(Object.fromEntries(rows.map((r) => [r.id, r.created_by_id]))).toEqual({ [jit.id]: approver, [direct.id]: null });
+        } finally {
+          await client.query("ROLLBACK");
+        }
       } finally {
         client.release();
       }
@@ -967,10 +1167,8 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
       await pool.end();
     }
 
-    const rows = await sql<{ id: string; created_by_id: string | null }>(
-      `SELECT id, created_by_id FROM service_account_tokens WHERE id = ANY($1::uuid[])`,
-      [jit.id, direct.id],
-    );
-    expect(Object.fromEntries(rows.map((r) => [r.id, r.created_by_id]))).toEqual({ [jit.id]: approver, [direct.id]: null });
+    // Nothing committed.
+    const [after] = await sql<{ created_by_id: string | null }>(`SELECT created_by_id FROM service_account_tokens WHERE id = $1::uuid`, jit.id);
+    expect(after.created_by_id).toBeNull();
   });
 });

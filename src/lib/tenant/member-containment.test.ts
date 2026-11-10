@@ -1,13 +1,14 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
 vi.mock("@/lib/prisma", () => ({ prisma: {} }));
 vi.mock("@/lib/tenant-rls", () => ({ isBypassRlsActive: () => true }));
 vi.mock("@/lib/audit/audit", () => ({
-  logAuditInTx: vi.fn(async () => {}),
+  logAuditBulkInTx: vi.fn(async () => {}),
   tenantAuditBase: vi.fn(() => ({ scope: "TENANT" })),
 }));
 
+import { logAuditBulkInTx } from "@/lib/audit/audit";
 import {
   containMemberInTx,
   listMemberContainment,
@@ -30,8 +31,12 @@ const MODEL_OF_KIND = {
   emergencyAccessGrants: "emergencyAccessGrant",
 } as const;
 
-/** A fake transaction recording every call's `where` per model and method. */
-function recordingTx() {
+/**
+ * A fake transaction recording every call's `where` per model and method.
+ * A bulk write returns one row per id it names, or the rows `returns` gives
+ * for its model.
+ */
+function recordingTx(returns: Record<string, (where: Record<string, unknown>) => unknown[]> = {}) {
   const wheres: Record<string, Record<string, unknown[]>> = {};
   const tx = new Proxy(
     {},
@@ -39,57 +44,122 @@ function recordingTx() {
       get: (_t, model: string) => {
         const record = (method: string) => async (args: { where: { id?: { in: string[] } } }) => {
           ((wheres[model] ??= {})[method] ??= []).push(args.where);
-          if (method === "findMany") return (args.where.id?.in ?? []).map((id) => ({ id, tenantId: TENANT, serviceAccountId: "sa", targetUserId: "x", granteeId: null }));
+          const rows = () =>
+            returns[model]?.(args.where) ??
+            (args.where.id?.in ?? []).map((id) => ({ id, tenantId: TENANT, serviceAccountId: "sa", clientId: "c", targetUserId: "x", granteeId: null }));
+          if (method === "findMany" || method === "updateManyAndReturn") return rows();
+          if (method === "deleteMany") return { count: (args.where.id?.in ?? []).length };
           return { count: 1 };
         };
-        return { findMany: record("findMany"), updateMany: record("updateMany"), deleteMany: record("deleteMany") };
+        return {
+          findMany: record("findMany"),
+          updateMany: record("updateMany"),
+          updateManyAndReturn: record("updateManyAndReturn"),
+          deleteMany: record("deleteMany"),
+        };
       },
     },
   );
   return { tx: tx as never, wheres };
 }
 
+const ALL_KINDS_INPUT = {
+  revoke: {
+    scimTokenIds: ["id-1"],
+    serviceAccountIds: ["id-2"],
+    serviceAccountTokenIds: ["id-3"],
+    mcpClientIds: ["id-4"],
+    breakglassGrantIds: ["id-5"],
+    emergencyAccessGrantIds: ["id-6"],
+  },
+};
+
+const containArgs = (request: NonNullable<ReturnType<typeof toContainmentRequest>>) => ({
+  req: new NextRequest("http://localhost/"),
+  actorUserId: "admin-1",
+  tenantId: TENANT,
+  targetUserId: TARGET,
+  request,
+  now: NOW,
+});
+
 describe("member containment predicates", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("the writes match exactly the rows the listing calls live, for every kind", async () => {
     const listing = recordingTx();
     await listMemberContainment(listing.tx, { tenantId: TENANT, targetUserId: TARGET, role: "OWNER", now: NOW });
 
     const writes = recordingTx();
-    const request = toContainmentRequest({
-      revoke: {
-        scimTokenIds: ["id-1"],
-        serviceAccountIds: ["id-2"],
-        serviceAccountTokenIds: ["id-3"],
-        mcpClientIds: ["id-4"],
-        breakglassGrantIds: ["id-5"],
-        emergencyAccessGrantIds: ["id-6"],
-      },
-    });
+    const request = toContainmentRequest(ALL_KINDS_INPUT);
     expect(request).not.toBeNull();
-    await containMemberInTx(writes.tx, {
-      req: new NextRequest("http://localhost/"),
-      actorUserId: "admin-1",
-      tenantId: TENANT,
-      targetUserId: TARGET,
-      request: request!,
-      now: NOW,
-    });
+    await containMemberInTx(writes.tx, containArgs(request!));
 
     for (const [kind, model] of Object.entries(MODEL_OF_KIND)) {
       const [live] = listing.wheres[model].findMany;
-      const [candidates] = writes.wheres[model].findMany;
-      expect(candidates, kind).toEqual({ id: { in: [expect.any(String)] }, ...(live as object) });
-      // The compare-and-set write re-checks the same predicate on the row.
-      // (A contained service account's own token revocation is keyed by its
-      // service account, not a token id.)
-      const write = writes.wheres[model].updateMany.find((w) => "id" in (w as object));
       if (model === "emergencyAccessGrant") {
-        // Through transition(): the owner predicate plus its allowed from-states.
+        // Read on the predicate, then written one by one through transition():
+        // the owner predicate plus its allowed from-states.
+        const [candidates] = writes.wheres[model].findMany;
+        expect(candidates, kind).toEqual({ id: { in: [expect.any(String)] }, ...(live as object) });
+        const [write] = writes.wheres[model].updateMany;
         expect(write).toMatchObject({ id: expect.any(String), ownerId: TARGET });
       } else {
-        expect(write, kind).toEqual({ id: expect.any(String), ...(live as object) });
+        // One compare-and-set statement on the named ids and the same predicate.
+        // (A contained service account's own token revocation is keyed by its
+        // service account, not a token id.)
+        const write = writes.wheres[model].updateManyAndReturn.find((w) => "id" in (w as object));
+        expect(write, kind).toEqual({ id: { in: [expect.any(String)] }, ...(live as object) });
       }
     }
+  });
+
+  it("revokes a contained service account's and MCP client's tokens by the parents the write returned, not the ids requested", async () => {
+    // Of two named, only one matches live.
+    const writes = recordingTx({
+      serviceAccount: () => [{ id: "sa-live" }],
+      mcpClient: () => [{ id: "mcp-live" }],
+      serviceAccountToken: () => [],
+      mcpAccessToken: () => [],
+      mcpRefreshToken: () => [],
+    });
+    const request = toContainmentRequest({ revoke: { serviceAccountIds: ["sa-live", "sa-dead"], mcpClientIds: ["mcp-live", "mcp-dead"] } });
+    const result = await containMemberInTx(writes.tx, containArgs(request!));
+
+    expect(writes.wheres.serviceAccountToken.updateManyAndReturn).toEqual([
+      { serviceAccountId: { in: ["sa-live"] }, tenantId: TENANT, revokedAt: null },
+    ]);
+    for (const model of ["mcpAccessToken", "mcpRefreshToken"]) {
+      expect(writes.wheres[model].updateManyAndReturn).toEqual([{ clientId: { in: ["mcp-live"] }, tenantId: TENANT, revokedAt: null }]);
+    }
+    expect(result.contained).toEqual({ serviceAccounts: { revoked: 1, skipped: 1 }, mcpClients: { revoked: 1, skipped: 1 } });
+  });
+
+  it("audits exactly the rows each bulk write returned, in one batch per kind", async () => {
+    const writes = recordingTx({ scimToken: () => [{ id: "scim-a" }, { id: "scim-b" }] });
+    const request = toContainmentRequest({ revoke: { scimTokenIds: ["scim-a", "scim-b", "scim-gone"] } });
+    const result = await containMemberInTx(writes.tx, containArgs(request!));
+
+    expect(logAuditBulkInTx).toHaveBeenCalledTimes(1);
+    const [, tenant, rows] = vi.mocked(logAuditBulkInTx).mock.calls[0];
+    expect(tenant).toBe(TENANT);
+    expect(rows.map((r) => r.targetId)).toEqual(["scim-a", "scim-b"]);
+    expect(result.contained).toEqual({ scimTokens: { revoked: 2, skipped: 1 } });
+  });
+
+  it("refuses to count accounts the delete did not remove: the containment rolls back", async () => {
+    const writes = recordingTx({ account: () => [{ id: "acc-1", tenantId: TENANT }, { id: "acc-2", tenantId: "other" }] });
+    // The delete removes one of the two rows read.
+    const tx = new Proxy(writes.tx as object, {
+      get: (target, model: string) =>
+        model === "account"
+          ? { ...(target as Record<string, object>)[model], deleteMany: async () => ({ count: 1 }) }
+          : (target as Record<string, unknown>)[model],
+    });
+    const request = toContainmentRequest({ unlinkAccountIds: ["acc-1", "acc-2"] });
+    await expect(containMemberInTx(tx as never, containArgs(request!))).rejects.toThrow(/1 of 2 accounts/);
   });
 
   it("every tenant-owned kind names the admin's tenant; the user's kinds match on the user", async () => {

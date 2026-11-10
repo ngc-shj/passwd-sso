@@ -4270,6 +4270,24 @@ describe("relation reach: models a query's argument reaches are charged to the g
     expect(stdout).toContain(UNREADABLE);
   });
 
+  it("charges a relation in the element a mapped createMany data returns", () => {
+    const { code, stderr } = typed("ids: string[]", `tx.session.createMany({ data: ids.map((id) => ({ sessionToken: id, user: { connect: { id } } })) })`, "AUTH_SESSION_CAPPING");
+    expect(code, stderr).toBe(1);
+    expect(stderr).toContain(`${SESSION_CAP}:2  prisma.user  (relation Session.data.user)  not in BYPASS_GRANT.AUTH_SESSION_CAPPING`);
+  });
+
+  it("reads a mapped createMany data whose element is scalar-only, and charges nothing", () => {
+    expectReadableReachingNothing(typed("ids: string[]", `tx.user.createMany({ data: ids.map((id) => ({ email: id })) })`, "AUTH_USER_LOOKUP"));
+  });
+
+  it.each([
+    ["a block-bodied map callback", "ids: string[]", `tx.user.createMany({ data: ids.map((id) => { return { email: id }; }) })`],
+    ["a map on a value that is not an array", "c: boolean", `(() => { const ids = { map: (f: (s: string) => unknown): Record<string, unknown>[] => [{ v: f("x") }] }; return tx.user.createMany({ data: ids.map((id) => ({ email: id })) }); })()`],
+    ["a map given a named callback", "ids: string[], mk: (s: string) => Record<string, unknown>", `tx.user.createMany({ data: ids.map(mk) })`],
+  ])("keeps %s unreadable", (_label, params, body) => {
+    expectUnreadable(typed(params, body, "AUTH_USER_LOOKUP"));
+  });
+
   it("fails named when the tree has no prisma/schema.prisma", () => {
     const { code, stderr } = runMulti([[SESSION_CAP, `${HEAD_RLS}export const f = () => withBypassRls(prisma, async (tx) => tx.user.count(), BYPASS_GRANT.AUDIT_USER_DISPLAY_LOOKUP);`], ["prisma/schema.prisma", ""]]);
     expect(code).toBe(1);

@@ -36,7 +36,9 @@
  *     relation field of the model; in a `where` also AND/OR/NOT and the
  *     relation-filter keys). Anything else stays unreadable. A type bounds the
  *     keys a value is declared with, not every key it carries at run time
- *     (structural width): this reads the declared contract, not a proof.
+ *     (structural width): this reads the declared contract, not a proof;
+ *   - a `data` given as `rows.map((r) => <expr>)` on an array: `<expr>` is
+ *     read as each element.
  */
 import { SyntaxKind, ts } from "ts-morph";
 import { existsSync, readFileSync } from "node:fs";
@@ -696,7 +698,8 @@ function createWalker(models, visitor, ctx, full) {
   /** Every relation a `data` of `model` writes through (an object or an array of them). */
   function data(value, model, trail) {
     const v = unwrapExpression(value);
-    const items = v?.getKind() === SyntaxKind.ArrayLiteralExpression ? v.getElements() : [v];
+    const mapped = mappedElement(v);
+    const items = mapped ? [mapped] : v?.getKind() === SyntaxKind.ArrayLiteralExpression ? v.getElements() : [v];
     for (const item of items) {
       const objs = item?.getKind() === SyntaxKind.SpreadElement ? null : readValue(item, dataKey(model));
       if (!objs) {
@@ -705,6 +708,23 @@ function createWalker(models, visitor, ctx, full) {
       }
       for (const obj of objs) dataObject(obj, model, trail);
     }
+  }
+
+  /**
+   * (`full` only.) For `rows.map((r) => <expr>)` on a value the checker types
+   * as an array, the arrow callback's body: each element is what it returns.
+   * A block body is not an expression readValue reads, so it stays unreadable.
+   * Otherwise null.
+   */
+  function mappedElement(v) {
+    if (!full || !ctx.checker || v?.getKind() !== SyntaxKind.CallExpression) return null;
+    const callee = unwrapExpression(v.getExpression());
+    if (callee?.getKind() !== SyntaxKind.PropertyAccessExpression || callee.getName() !== "map") return null;
+    const receiver = ctx.checker.getTypeAtLocation(callee.getExpression().compilerNode);
+    if (!ctx.checker.isArrayType(receiver) && !ctx.checker.isTupleType(receiver)) return null;
+    const [fn, ...rest] = v.getArguments();
+    if (rest.length > 0 || fn?.getKind() !== SyntaxKind.ArrowFunction) return null;
+    return fn.getBody();
   }
 
   /** Every relation one `data` object literal of `model` writes through. */

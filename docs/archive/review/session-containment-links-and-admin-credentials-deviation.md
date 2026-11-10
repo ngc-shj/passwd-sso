@@ -33,14 +33,38 @@ notification key `SESSIONS_ALL_REVOKED_BY_ADMIN`.
 It already withholds the dialog trigger for deactivated members (pinned by its test), which is the
 active-only rule.
 
-## D8 — Backfill cell commits on the shared dev database
-It runs the migration's DO block as `passwd_app` and commits (the restored GUCs leave the role unable
-to read the rows inside the same transaction), so it may also attribute other NULL-creator JIT
-tokens on the dev database — the migration's own intended effect.
+## D8 — Backfill cell runs inside a rolled-back transaction (superseded in review round 1)
+It runs the migration's DO block as `passwd_app` inside an open transaction, asserts the block
+restored the GUCs (`app.bypass_rls` / `app.bypass_tables` empty, the row invisible again), re-sets a
+bypass locally on the same connection to read `created_by_id`, and rolls back, so nothing reaches the
+shared database. The block restores `app.tenant_id` to `''`, which the policies cannot cast to uuid:
+any RLS read after it in the same transaction errors until a tenant id is set. The migration commits
+straight after, so this affects only the test, which sets a nil tenant id before its visibility read.
 
 ## D9 — Not done here
 CLAUDE.md's endpoint row was edited by the implementation agent and reverted (CLAUDE.md edits need
 the user's approval). The follow-up issue for SC1/SC2 is filed with the PR.
+
+## D10 — Review round 1 (N1, F1, F3)
+- N1: each kind is one `updateManyAndReturn` on `{ id: { in }, ...live }` (accounts: read on the
+  predicate, `deleteMany` the rows read, count verified or the transaction throws), audited with one
+  `logAuditBulkInTx` per kind; emergency-access grants stay a loop through `transition()`, bounded
+  by `MEMBER_CONTAINMENT_MAX_IDS`. The revoke transaction runs under
+  `MEMBER_PASSKEY_REVOKE_TX_TIMEOUT_MS` (15 s, `src/lib/constants/auth/member-containment.ts`).
+  The bulk audit write first made `member-passkey-revoke.ts` an "unreadable relation argument" site
+  of `check-bypass-rls`: `enqueueAuditBulkInTx` writes `createMany({ data: payloads.map(...) })`, and
+  an array-typed `data` has an index signature, which the typed reading refuses. Rather than accept
+  that blind spot, the relation walk (`scripts/checks/lib/prisma-relation-reach.mjs`) now reads a
+  `data` given as `<array>.map((r) => <expr>)` as `<expr>` per element; the unreadable count is back
+  to 3. Self-tests cover a relation charged through the mapped element, a scalar-only element read
+  as reaching nothing, and three shapes kept unreadable (block body, non-array receiver, named
+  callback); dropping the array check or the mapped read each turns its cells red.
+- F1: a named token already revoked with its contained service account counts as contained and gets
+  its own `SERVICE_ACCOUNT_TOKEN_REVOKE` row marked `revokedWithServiceAccount: true` when it matches
+  the token live predicate (the member's, unexpired), so the kind's count equals its rows.
+- F3: `DELETE /api/webauthn/credentials/[id]` takes `lockUserAuthArtifacts` inside its tenant
+  transaction and deletes by `deleteMany` (404 on count 0); revoke-all additionally throws when the
+  delete count differs from the credentials read.
 
 ## Red-proof (RT7)
 Scratch worktree at `d22755a43` (`.env` exported, not copied), compose workers stopped,

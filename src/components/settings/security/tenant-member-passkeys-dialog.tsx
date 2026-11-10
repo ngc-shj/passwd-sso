@@ -81,6 +81,20 @@ interface ContainmentItem {
 
 const itemKey = (item: Pick<ContainmentItem, "kind" | "id">) => `${item.kind}:${item.id}`;
 
+// Each kind's short name, for the warning naming kinds with skipped rows.
+const CONTAINMENT_KIND_NAME = {
+  accounts: "containmentNameAccounts",
+  scimTokens: "containmentNameScimTokens",
+  serviceAccounts: "containmentNameServiceAccounts",
+  serviceAccountTokens: "containmentNameServiceAccountTokens",
+  mcpClients: "containmentNameMcpClients",
+  breakglassGrants: "containmentNameBreakglassGrants",
+  emergencyAccessGrants: "containmentNameEmergencyAccessGrants",
+} as const satisfies Record<ContainmentItem["kind"], string>;
+
+/** Per kind the request named, as DELETE answers it (member-containment.ts). */
+type ContainedCounts = Partial<Record<ContainmentItem["kind"], { revoked: number; skipped: number }>>;
+
 interface TenantMemberPasskeysDialogProps {
   userId: string;
   memberName: string;
@@ -107,7 +121,9 @@ export function TenantMemberPasskeysDialog({ userId, memberName, disabled }: Ten
   const [target, setTarget] = useState<MemberPasskey | "all" | null>(null);
   const [revoking, setRevoking] = useState(false);
 
-  const load = useCallback(async () => {
+  // `keepSelection`: after a failed revoke, keep what the admin ticked that is
+  // still listed, so a retry does not silently drop it.
+  const load = useCallback(async ({ keepSelection = false }: { keepSelection?: boolean } = {}) => {
     setLoadFailed(false);
     try {
       const res = await fetchApi(apiPath.tenantMemberPasskeys(userId));
@@ -120,7 +136,13 @@ export function TenantMemberPasskeysDialog({ userId, memberName, disabled }: Ten
       setPasskeys(body.passkeys);
       setLinkedAccounts(body.linkedAccounts ?? []);
       setFootholds(body.createdFootholds ?? {});
-      setSelected(new Set());
+      const listed = new Set([
+        ...(body.linkedAccounts ?? []).map((a) => itemKey({ kind: "accounts", id: a.id })),
+        ...FOOTHOLD_KINDS.flatMap(([kind]) =>
+          ((body.createdFootholds ?? {})[kind] ?? []).map((r) => itemKey({ kind, id: r.id })),
+        ),
+      ]);
+      setSelected((prev) => (keepSelection ? new Set([...prev].filter((key) => listed.has(key))) : new Set()));
     } catch {
       setLoadFailed(true);
     }
@@ -214,6 +236,17 @@ export function TenantMemberPasskeysDialog({ userId, memberName, disabled }: Ten
     };
   };
 
+  // Ticked rows the server did not change (no longer live, or not the
+  // member's): name their kinds, so the admin does not take them as contained.
+  const warnSkipped = (body: { contained?: ContainedCounts } | null) => {
+    const kinds = (Object.keys(CONTAINMENT_KIND_NAME) as ContainmentItem["kind"][]).filter(
+      (kind) => (body?.contained?.[kind]?.skipped ?? 0) > 0,
+    );
+    if (kinds.length === 0) return;
+    const names = new Intl.ListFormat(locale, { type: "conjunction" }).format(kinds.map((kind) => t(CONTAINMENT_KIND_NAME[kind])));
+    toast.warning(t("containmentSkipped", { kinds: names }), { duration: Infinity });
+  };
+
   const handleRevoke = async () => {
     if (!target) return;
     setRevoking(true);
@@ -232,7 +265,9 @@ export function TenantMemberPasskeysDialog({ userId, memberName, disabled }: Ten
           : // @stepup id:tenant-member-passkey-delete
             await fetchApi(apiPath.tenantMemberPasskeyById(userId, target.id), { method: "DELETE" });
       if (res.ok) {
-        toast.success(revokeAll ? t("revokeAllPasskeysSuccess") : t("revokePasskeySuccess"));
+        // Neutral: revoke-all succeeds for a member with no passkeys too.
+        toast.success(revokeAll ? t("revokeAllPasskeysDone", { name: memberName }) : t("revokePasskeySuccess"));
+        if (revokeAll) warnSkipped(await res.json().catch(() => null));
         setTarget(null);
         await load();
         return;
@@ -241,7 +276,7 @@ export function TenantMemberPasskeysDialog({ userId, memberName, disabled }: Ten
       toast.error(failed);
       // The passkeys may be gone already (a concurrent revoke answers 404).
       setTarget(null);
-      await load();
+      await load({ keepSelection: true });
     } catch {
       toast.error(failed);
     } finally {

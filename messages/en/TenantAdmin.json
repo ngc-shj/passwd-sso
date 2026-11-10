@@ -271,7 +271,7 @@
   "revokeAllPasskeys": "Revoke all",
   "revokeAllPasskeysTitle": "Revoke all passkeys",
   "revokeAllPasskeysDescription": "Every passkey {name} has is deleted, including ones registered in another tenant, and they are signed out everywhere, including extension and API tokens. This works even if they have no passkeys (for example an SSO-only member). Use this if the account may be compromised: revoking one passkey leaves any other one registered. Linked sign-in accounts and items they created are changed only if you ticked them.",
-  "revokeAllPasskeysSuccess": "All passkeys revoked.",
+  "revokeAllPasskeysDone": "Done: {name}'s passkeys, if any, are revoked and they are signed out everywhere.",
   "revokeAllPasskeysFailed": "Failed to revoke the passkeys.",
   "memberPasskeyOtherTenant": "Registered in another tenant",
   "containmentLinkedAccounts": "Linked sign-in accounts",
@@ -291,5 +291,13 @@
   "containmentChosen": "Also, in the same step:",
   "containmentUnlinkWarning": "Unlinking may stop {name} from signing in if it is their only way to sign in (SSO). It does not stop a provider that links accounts by email (Google with allowed domains) from linking an account that asserts their email again; contain that at the identity provider.",
   "containmentIntegrationsWarning": "Deactivating a service account or MCP client stops the integrations that use it.",
-  "containmentEmergencyWarning": "Revoking an activated emergency access grant stops further access to the vault, but cannot undo access already gained. The contact is not notified."
+  "containmentEmergencyWarning": "Revoking an activated emergency access grant stops further access to the vault, but cannot undo access already gained. The contact is not notified.",
+  "containmentNameAccounts": "linked sign-in accounts",
+  "containmentNameScimTokens": "SCIM tokens",
+  "containmentNameServiceAccounts": "service accounts",
+  "containmentNameServiceAccountTokens": "service account tokens",
+  "containmentNameMcpClients": "MCP clients",
+  "containmentNameBreakglassGrants": "break-glass access",
+  "containmentNameEmergencyAccessGrants": "emergency access grants",
+  "containmentSkipped": "Some ticked items were not changed because they are no longer active or no longer theirs: {kinds}. Review the list and the audit log."
 }
