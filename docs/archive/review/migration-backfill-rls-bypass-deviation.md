@@ -53,6 +53,13 @@ The contain lock cells insert `SET LOCAL lock_timeout` right after the script's 
 `RLS_BACKFILL_RERUN_SQL` (C1 block extraction) and `RUNBOOK_MD` (C6 script extraction) point the
 cells at a copy, used only for red-proofs.
 
+## D12 — Phase 2 self-check fixes
+The `20260418042050` baseline residual (team absolute-timeout overrides left empty) gets an
+operator step in the runbook, and the baseline reason points to it. The 2c-subject advisory lock
+and the contain NOTICE, first listed as review-verified, got killing cells. The implementation
+commit's message calls the gate a closure of the class; it is a tripwire with listed bypasses, as
+the plan and the gate header say — the PR body states it that way.
+
 ## D11 — Simplify pass
 The `<name>  # reason` parser was a third verbatim copy; it now lives in
 `scripts/checks/lib/reasoned-allowlist.mjs`, used by `check-migration-rls-dml`,
@@ -78,6 +85,8 @@ named cells. "Red" means the named cell failed for the mutated control.
 | C1 bypass list | each of 12 tables removed | the per-table table-list cells, which run exactly this mutation as a permanent control (bypass notice naming the table) |
 | C1 advisory lock | `pg_advisory_xact_lock` removed | "the advisory lock of a candidate (tenant, user)" cell |
 | C1 tenant-row lock | `FOR SHARE OF tmb` removed | "a candidate's tenant_members row" cell |
+| C1 advisory lock, 2c subjects | SCIM_USER_DELETE arm removed from the key set | "the advisory lock of a 2c subject" cell |
+| C6 contain session NOTICE | `session_user` replaced by a constant | contain success cell (exact NOTICE text) |
 | C3 reference keywords | JOIN, USING, MERGE, INSERT, UPDATE, comma items disabled | C5 per-form refusal cells |
 | C3 CTE exclusion | disabled | C5 CTE cell |
 | C3 nested grant / restore / table list / `false` / EXECUTE | each disabled | C5 matching refusal cells |
@@ -95,6 +104,4 @@ named cells. "Red" means the named cell failed for the mutated control.
 | C6 report positive control | removed | grant-removed cell |
 
 Review-verified, not mutant-verified (no deterministic cell distinguishes them): lock ORDER in C1
-and contain; contain's `session_user` NOTICE (the cell asserts only that the user name is absent
-from the payload); the outbox-store record flag in report section 1; the advisory lock taken for
-2c-only subjects (SCIM-deleted users without a tenant row).
+and contain; the outbox-store record flag in report section 1.

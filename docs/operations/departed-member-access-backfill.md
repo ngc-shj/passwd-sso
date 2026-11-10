@@ -68,6 +68,20 @@ is re-invited. That includes a member the original ended on a role that
 bypassed RLS and who was re-admitted since, when the re-run later ran on a role
 that cannot bypass: the re-admission left no record, so the migration revoked it.
 
+## Team absolute session timeouts (`20260418042050`)
+
+An older migration has the same defect and cannot be re-run.
+`20260418042050_unify_session_timeout_policy` copied each team's legacy
+`max_session_duration_minutes` into the new `session_absolute_timeout_minutes`
+override. On a migrate role without `BYPASSRLS` over existing data that copy saw
+no rows, so those teams' overrides stayed empty and the teams inherit the
+tenant's absolute session timeout, which may be longer. The source column was
+dropped by `20260425103520`, so the old values are not in the database.
+
+If the deployment applied `20260418042050` that way, tell each tenant admin to
+check the absolute session timeout of every team that had a stricter session
+duration before that release and set it again in the team's policy.
+
 ## Report
 
 Read-only (`BEGIN READ ONLY` ... `ROLLBACK`). It raises

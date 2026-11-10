@@ -1992,6 +1992,10 @@ describe("team membership across a tenant departure — real-DB integration", ()
         await blockedBy(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [advisoryKey(tenantId, fx.rows.leak.userId)], "pg_advisory_xact_lock");
       });
 
+      it("the advisory lock of a 2c subject (SCIM-deleted, no tenant row), key built by the app's helper", async () => {
+        await blockedBy(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [advisoryKey(tenantId, fx.deletedUsers.deleted)], "pg_advisory_xact_lock");
+      });
+
       it("a candidate's tenant_members row", async () => {
         await blockedBy(
           `SELECT 1 FROM tenant_members WHERE tenant_id = $1::uuid AND user_id = $2::uuid FOR UPDATE`,

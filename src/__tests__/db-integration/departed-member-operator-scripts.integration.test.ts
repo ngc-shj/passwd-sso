@@ -498,6 +498,12 @@ describe("departed-member operator scripts — real-DB integration", () => {
       await logsRecord({ tenant, team, target: user, backfill: RLS_BACKFILL_RERUN_DIR });
       await outboxRecord({ tenant, team, target: user, backfill: RLS_BACKFILL_RERUN_DIR });
       await webhook(tenant, team, iso(stamp, SECOND), iso(stamp, SECOND));
+      // A candidate with no record in either store: the record flag is
+      // `EXISTS(audit_logs) OR EXISTS(audit_outbox)`, so the outbox arm is only
+      // evaluated — and its policy only reports — for a row the logs arm misses.
+      const unrecorded = await mkMember(tenant);
+      await departIn(tenant, unrecorded, stamp);
+      await addMembership(team, unrecorded, tenant, { createdAt: iso(stamp, -SECOND) });
     }
   });
 
@@ -587,7 +593,7 @@ describe("departed-member operator scripts — real-DB integration", () => {
         // The database user goes only to the operator's own session.
         expect(JSON.stringify(records.get(r.user))).not.toContain("passwd_app");
       }
-      if (notices) expect(notices.some((m) => m.includes(`ended ${l.rows.length} membership(s) as database user`))).toBe(true);
+      if (notices) expect(notices.some((m) => m === `contain: ended ${l.rows.length} membership(s) as database user passwd_app`)).toBe(true);
     }
 
     async function runContain(text: string): Promise<string[]> {
