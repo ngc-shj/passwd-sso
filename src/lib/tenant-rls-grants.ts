@@ -228,10 +228,13 @@ export const BYPASS_GRANT = Object.freeze({
   // A tenant admin's view and revoke of a member's passkeys (#974): passkeys are
   // user-global, so one registered under the member's previous tenant still
   // signs them in here. The member is checked active in the admin's tenant first.
-  TENANT_MEMBER_PASSKEY_LIST: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["tenantMember", "webAuthnCredential"]),
+  // Also the member's linked accounts and the footholds they created
+  // (member-containment.ts, #1016).
+  TENANT_MEMBER_PASSKEY_LIST: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["account", "emergencyAccessGrant", "mcpClient", "personalLogAccessGrant", "scimToken", "serviceAccount", "serviceAccountToken", "tenantMember", "webAuthnCredential"]),
   // The revoke, in one transaction: the member's sessions and tokens in every
-  // tenant are revoked with the user-global credential, and audited.
-  TENANT_MEMBER_PASSKEY_REVOKE: defineGrant(BYPASS_PURPOSE.TOKEN_LIFECYCLE, ["apiKey", "auditOutbox", "delegationSession", "extensionBridgeCode", "extensionToken", "mcpAccessToken", "mcpAuthorizationCode", "mcpRefreshToken", "mobileBridgeCode", "operatorToken", "session", "tenantMember", "user", "webAuthnCredential"]),
+  // tenant are revoked with the user-global credential, and audited; with a
+  // containment request, the chosen accounts and footholds too.
+  TENANT_MEMBER_PASSKEY_REVOKE: defineGrant(BYPASS_PURPOSE.TOKEN_LIFECYCLE, ["account", "apiKey", "auditOutbox", "delegationSession", "emergencyAccessGrant", "extensionBridgeCode", "extensionToken", "mcpAccessToken", "mcpAuthorizationCode", "mcpClient", "mcpRefreshToken", "mobileBridgeCode", "operatorToken", "personalLogAccessGrant", "scimToken", "serviceAccount", "serviceAccountToken", "session", "tenantMember", "user", "webAuthnCredential"]),
   TOKEN_TENANT_LOOKUP: defineGrant(BYPASS_PURPOSE.TOKEN_LIFECYCLE, ["tenant"]),
   TOKEN_TENANT_MEMBERSHIP_CHECK: defineGrant(BYPASS_PURPOSE.TOKEN_LIFECYCLE, ["tenantMember"]),
   USER_SESSION_CACHE_INVALIDATION: defineGrant(BYPASS_PURPOSE.TOKEN_LIFECYCLE, ["session"]),

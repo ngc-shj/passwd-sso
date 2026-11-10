@@ -38,7 +38,7 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     webAuthnCredential: {
       findFirst: mockPrismaFindFirst,
-      delete: mockPrismaDelete,
+      deleteMany: mockPrismaDelete,
       update: mockPrismaUpdate,
     },
     // Read only by the real step-up helper the FN-7 cells run.
@@ -80,10 +80,16 @@ vi.mock("@/lib/auth/policy/passkey-enforcement", async (importOriginal) => ({
   derivePasskeyState: mockDerivePasskeyState,
 }));
 
+// The member's credential lock (user-auth-serialization.ts), taken around the delete.
+vi.mock("@/lib/auth/session/user-auth-serialization", () => ({
+  lockUserAuthArtifacts: vi.fn(async () => {}),
+}));
+
 vi.mock("@/lib/logger", () => ({
   getLogger: () => ({ error: mockLoggerError, warn: vi.fn(), info: vi.fn(), debug: vi.fn() }),
 }));
 
+import { lockUserAuthArtifacts } from "@/lib/auth/session/user-auth-serialization";
 import { DELETE, PATCH } from "./route";
 
 // ── Test data ────────────────────────────────────────────────
@@ -115,7 +121,7 @@ describe("DELETE /api/webauthn/credentials/[id]", () => {
     mockRequireRecentCurrentAuthMethod.mockResolvedValue(null);
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockPrismaFindFirst.mockResolvedValue(EXISTING_CREDENTIAL);
-    mockPrismaDelete.mockResolvedValue(EXISTING_CREDENTIAL);
+    mockPrismaDelete.mockResolvedValue({ count: 1 });
     mockInvalidateUserSessionsCache.mockResolvedValue({
       totalSessions: 0,
       cacheTombstoneFailures: 0,
@@ -170,6 +176,31 @@ describe("DELETE /api/webauthn/credentials/[id]", () => {
     expect(mockPrismaDelete).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: "cred-1", userId: "user-1" } }),
     );
+  });
+
+  it("takes the member's credential lock, inside the tenant transaction, before the delete", async () => {
+    const req = createRequest("DELETE", ROUTE_URL);
+    await DELETE(req, CTX);
+
+    expect(lockUserAuthArtifacts).toHaveBeenCalledWith(expect.anything(), "user-1");
+    expect(vi.mocked(lockUserAuthArtifacts).mock.invocationCallOrder[0]).toBeLessThan(
+      mockPrismaDelete.mock.invocationCallOrder[0],
+    );
+    // The second withUserTenantRls call is the delete's transaction.
+    expect(mockWithUserTenantRls.mock.invocationCallOrder[1]).toBeLessThan(
+      vi.mocked(lockUserAuthArtifacts).mock.invocationCallOrder[0],
+    );
+  });
+
+  it("answers 404, with no audit row or cache invalidation, when the passkey was deleted meanwhile", async () => {
+    mockPrismaDelete.mockResolvedValue({ count: 0 });
+    const req = createRequest("DELETE", ROUTE_URL);
+    const { status, json } = await parseResponse(await DELETE(req, CTX));
+
+    expect(status).toBe(404);
+    expect(json.error).toBe("NOT_FOUND");
+    expect(mockLogAudit).not.toHaveBeenCalled();
+    expect(mockInvalidateUserSessionsCache).not.toHaveBeenCalled();
   });
 
   it("queries credential filtered by id and userId", async () => {
@@ -287,7 +318,7 @@ describe("DELETE /api/webauthn/credentials/[id] — last passkey", () => {
     mockRequireRecentCurrentAuthMethod.mockResolvedValue(null);
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockPrismaFindFirst.mockResolvedValue(EXISTING_CREDENTIAL);
-    mockPrismaDelete.mockResolvedValue(EXISTING_CREDENTIAL);
+    mockPrismaDelete.mockResolvedValue({ count: 1 });
     mockInvalidateUserSessionsCache.mockResolvedValue({ totalSessions: 0, cacheTombstoneFailures: 0 });
   });
 

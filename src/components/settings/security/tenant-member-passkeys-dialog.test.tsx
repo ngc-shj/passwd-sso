@@ -127,7 +127,7 @@ describe("TenantMemberPasskeysDialog", () => {
     expect(screen.getByText("revokeAllPasskeysTitle")).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button", { name: "revokeAllPasskeys" }).at(-1)!);
 
-    await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith("revokeAllPasskeysSuccess"));
+    await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith('revokeAllPasskeysDone:{"name":"Alice"}'));
     expect(mockFetch).toHaveBeenCalledWith("/api/tenant/members/u-1/passkeys", { method: "DELETE" });
     expect(await screen.findByText("memberPasskeysEmpty")).toBeInTheDocument();
   });
@@ -162,13 +162,20 @@ describe("TenantMemberPasskeysDialog", () => {
     expect(mockToast.error).not.toHaveBeenCalled();
   });
 
-  it("offers no revoke-all when the member has no passkeys", async () => {
-    mockFetch.mockResolvedValueOnce(listResponse([]));
+  it("offers revoke-all for a member with no passkeys (an SSO-only member), sending no body", async () => {
+    mockFetch
+      .mockResolvedValueOnce(listResponse([]))
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ ok: true }) })
+      .mockResolvedValueOnce(listResponse([]));
     render(<TenantMemberPasskeysDialog userId="u-1" memberName="Alice" />);
     fireEvent.click(screen.getByRole("button"));
 
     expect(await screen.findByText("memberPasskeysEmpty")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "revokeAllPasskeys" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "revokeAllPasskeys" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "revokeAllPasskeys" }).at(-1)!);
+
+    await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith('revokeAllPasskeysDone:{"name":"Alice"}'));
+    expect(mockFetch).toHaveBeenCalledWith("/api/tenant/members/u-1/passkeys", { method: "DELETE" });
   });
 
   it("says so when the list cannot be loaded", async () => {
@@ -185,5 +192,196 @@ describe("TenantMemberPasskeysDialog", () => {
     fireEvent.click(screen.getByRole("button"));
 
     expect(await screen.findByText("memberPasskeyOtherTenant")).toBeInTheDocument();
+  });
+
+  describe("containment", () => {
+    const LISTING = {
+      passkeys: [PASSKEY],
+      linkedAccounts: [
+        { id: "acc-1", provider: "google", linkedHere: true },
+        { id: "acc-2", provider: "saml-jackson", linkedHere: false },
+      ],
+      createdFootholds: {
+        scimTokens: [{ id: "scim-1", description: "Okta provisioning", createdAt: "2026-01-01T00:00:00Z" }],
+        serviceAccounts: [{ id: "sa-1", name: "deploy-bot" }],
+        serviceAccountTokens: [{ id: "sat-1", name: "ci-token", serviceAccount: { name: "prod-sa" } }],
+        mcpClients: [{ id: "mcp-1", name: "agent-client" }],
+        breakglassGrants: [{ id: "bg-1", reason: "incident 42", expiresAt: "2026-02-01T00:00:00Z" }],
+        emergencyAccessGrants: [{ id: "ea-1", granteeEmail: "unknown@example.net", status: "ACCEPTED", hasEscrow: true }],
+      },
+    };
+
+    function open() {
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => LISTING });
+      render(<TenantMemberPasskeysDialog userId="u-1" memberName="Alice" />);
+      fireEvent.click(screen.getByRole("button"));
+    }
+
+    it("lists linked accounts and every foothold kind with an unchecked checkbox each", async () => {
+      open();
+      expect(await screen.findByText("google")).toBeInTheDocument();
+      for (const label of ["saml-jackson", "Okta provisioning", "deploy-bot", "ci-token", "agent-client", "incident 42", "unknown@example.net"]) {
+        expect(screen.getByText(label)).toBeInTheDocument();
+      }
+      expect(screen.getByText("containmentLinkedAccountOtherTenant")).toBeInTheDocument();
+      expect(screen.getByText("containmentEscrowed")).toBeInTheDocument();
+      const boxes = screen.getAllByRole("checkbox");
+      expect(boxes).toHaveLength(8);
+      for (const box of boxes) expect(box).not.toBeChecked();
+      expect(screen.getByText("containmentDeactivateNote")).toBeInTheDocument();
+      expect(screen.getByText("containmentScope")).toBeInTheDocument();
+    });
+
+    it("sends no body when nothing is ticked, and the confirm lists nothing more", async () => {
+      open();
+      fireEvent.click(await screen.findByRole("button", { name: "revokeAllPasskeys" }));
+      expect(screen.queryByTestId("containment-chosen")).not.toBeInTheDocument();
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ ok: true }) });
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => LISTING });
+      fireEvent.click(screen.getAllByRole("button", { name: "revokeAllPasskeys" }).at(-1)!);
+
+      await waitFor(() => expect(mockToast.success).toHaveBeenCalled());
+      expect(mockFetch).toHaveBeenNthCalledWith(2, "/api/tenant/members/u-1/passkeys", { method: "DELETE" });
+    });
+
+    it("posts exactly the ticked ids, lists them in the confirm, and shows each chosen kind's warning", async () => {
+      open();
+      fireEvent.click(await screen.findByLabelText("google"));
+      fireEvent.click(screen.getByLabelText(/ci-token/));
+      fireEvent.click(screen.getByLabelText(/unknown@example.net/));
+      fireEvent.click(screen.getByLabelText("agent-client"));
+      fireEvent.click(screen.getByRole("button", { name: "revokeAllPasskeys" }));
+
+      const chosen = screen.getByTestId("containment-chosen");
+      expect([...chosen.querySelectorAll("li")].map((li) => li.textContent)).toEqual([
+        "google",
+        "ci-token",
+        "agent-client",
+        "unknown@example.net",
+      ]);
+      expect(screen.getByText(/^containmentUnlinkWarning/)).toBeInTheDocument();
+      expect(screen.getByText("containmentIntegrationsWarning")).toBeInTheDocument();
+      expect(screen.getByText("containmentEmergencyWarning")).toBeInTheDocument();
+
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ ok: true }) });
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => LISTING });
+      fireEvent.click(screen.getAllByRole("button", { name: "revokeAllPasskeys" }).at(-1)!);
+
+      await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(3));
+      const [url, init] = mockFetch.mock.calls[1] as [string, RequestInit];
+      expect(url).toBe("/api/tenant/members/u-1/passkeys");
+      expect(init.method).toBe("DELETE");
+      expect(JSON.parse(init.body as string)).toEqual({
+        unlinkAccountIds: ["acc-1"],
+        revoke: { serviceAccountTokenIds: ["sat-1"], mcpClientIds: ["mcp-1"], emergencyAccessGrantIds: ["ea-1"] },
+      });
+    });
+
+    it("warns naming each kind the server skipped, after the success toast", async () => {
+      open();
+      fireEvent.click(await screen.findByLabelText("google"));
+      fireEvent.click(screen.getByLabelText("deploy-bot"));
+      fireEvent.click(screen.getByLabelText(/ci-token/));
+      fireEvent.click(screen.getByRole("button", { name: "revokeAllPasskeys" }));
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ok: true,
+          contained: {
+            accounts: { revoked: 1, skipped: 0 },
+            serviceAccounts: { revoked: 0, skipped: 1 },
+            serviceAccountTokens: { revoked: 0, skipped: 1 },
+          },
+        }),
+      });
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => LISTING });
+      fireEvent.click(screen.getAllByRole("button", { name: "revokeAllPasskeys" }).at(-1)!);
+
+      await waitFor(() => expect(mockToast.warning).toHaveBeenCalledTimes(1));
+      expect(mockToast.warning).toHaveBeenCalledWith(
+        'containmentSkipped:{"kinds":"containmentNameServiceAccounts and containmentNameServiceAccountTokens"}',
+        expect.anything(),
+      );
+      expect(mockToast.success).toHaveBeenCalledWith('revokeAllPasskeysDone:{"name":"Alice"}');
+    });
+
+    it("does not warn when nothing was skipped", async () => {
+      open();
+      fireEvent.click(await screen.findByLabelText("deploy-bot"));
+      fireEvent.click(screen.getByRole("button", { name: "revokeAllPasskeys" }));
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, contained: { serviceAccounts: { revoked: 1, skipped: 0 } } }),
+      });
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => LISTING });
+      fireEvent.click(screen.getAllByRole("button", { name: "revokeAllPasskeys" }).at(-1)!);
+
+      await waitFor(() => expect(mockToast.success).toHaveBeenCalled());
+      await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(3));
+      expect(mockToast.warning).not.toHaveBeenCalled();
+    });
+
+    it("keeps the ticked rows still listed after a failed revoke-all, dropping only ones no longer listed", async () => {
+      open();
+      fireEvent.click(await screen.findByLabelText("google"));
+      fireEvent.click(screen.getByLabelText("deploy-bot"));
+      fireEvent.click(screen.getByRole("button", { name: "revokeAllPasskeys" }));
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({ error: "INTERNAL_ERROR" }) });
+      // The reloaded list no longer has the service account.
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ ...LISTING, createdFootholds: { ...LISTING.createdFootholds, serviceAccounts: [] } }),
+      });
+      fireEvent.click(screen.getAllByRole("button", { name: "revokeAllPasskeys" }).at(-1)!);
+
+      await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith("revokeAllPasskeysFailed"));
+      await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(3));
+      await waitFor(() => expect(screen.queryByText("deploy-bot")).not.toBeInTheDocument());
+      expect(screen.getByLabelText("google")).toBeChecked();
+      expect(screen.getAllByRole("checkbox").filter((box) => box.getAttribute("aria-checked") === "true")).toHaveLength(1);
+
+      // The retry sends only what is still ticked.
+      fireEvent.click(screen.getByRole("button", { name: "revokeAllPasskeys" }));
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ ok: true }) });
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => LISTING });
+      fireEvent.click(screen.getAllByRole("button", { name: "revokeAllPasskeys" }).at(-1)!);
+      await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(5));
+      expect(JSON.parse((mockFetch.mock.calls[3][1] as RequestInit).body as string)).toEqual({ unlinkAccountIds: ["acc-1"] });
+    });
+
+    it("clears the selection after a successful revoke-all", async () => {
+      open();
+      fireEvent.click(await screen.findByLabelText("google"));
+      fireEvent.click(screen.getByRole("button", { name: "revokeAllPasskeys" }));
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ ok: true }) });
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => LISTING });
+      fireEvent.click(screen.getAllByRole("button", { name: "revokeAllPasskeys" }).at(-1)!);
+
+      await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(3));
+      await waitFor(() => expect(screen.getByLabelText("google")).not.toBeChecked());
+    });
+
+    it("an unticked box is not sent", async () => {
+      open();
+      const box = await screen.findByLabelText("google");
+      fireEvent.click(box);
+      fireEvent.click(box);
+      fireEvent.click(screen.getByLabelText("deploy-bot"));
+      fireEvent.click(screen.getByRole("button", { name: "revokeAllPasskeys" }));
+      expect(screen.queryByText(/^containmentUnlinkWarning/)).not.toBeInTheDocument();
+      expect(screen.getByText("containmentIntegrationsWarning")).toBeInTheDocument();
+      expect(screen.queryByText("containmentEmergencyWarning")).not.toBeInTheDocument();
+
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ ok: true }) });
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => LISTING });
+      fireEvent.click(screen.getAllByRole("button", { name: "revokeAllPasskeys" }).at(-1)!);
+      await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(3));
+      expect(JSON.parse((mockFetch.mock.calls[1][1] as RequestInit).body as string)).toEqual({
+        revoke: { serviceAccountIds: ["sa-1"] },
+      });
+    });
   });
 });

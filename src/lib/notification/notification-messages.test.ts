@@ -9,6 +9,9 @@ const KEYS = [
   "ADMIN_VAULT_RESET_PENDING_APPROVAL",
   "WATCHTOWER_ALERT",
   "VAULT_LOCKOUT",
+  "PASSKEY_REVOKED_BY_ADMIN",
+  "PASSKEYS_ALL_REVOKED_BY_ADMIN",
+  "SESSIONS_ALL_REVOKED_BY_ADMIN",
 ] as const;
 
 describe("notificationTitle", () => {
@@ -140,5 +143,15 @@ describe("locale fallback", () => {
     const result = notificationBody("ADMIN_VAULT_RESET", "fr");
     const enResult = notificationBody("ADMIN_VAULT_RESET", "en");
     expect(result).toBe(enResult);
+  });
+});
+
+describe("tenant admin revocation notices", () => {
+  it.each([
+    ["en", "A tenant admin ended all your sessions."],
+    ["ja", "テナント管理者があなたのすべてのセッションを終了しました。"],
+  ] as const)("the zero-passkey notice (%s) says only that the sessions ended", (locale, body) => {
+    expect(notificationBody("SESSIONS_ALL_REVOKED_BY_ADMIN", locale)).toBe(body);
+    expect(notificationTitle("SESSIONS_ALL_REVOKED_BY_ADMIN", locale)).not.toMatch(/passkey|パスキー/i);
   });
 });

@@ -13,9 +13,11 @@ const {
   mockRevokeArtifacts,
   mockInvalidateCachedSessions,
   mockLogAuditInTx,
+  mockLogAuditBulkInTx,
   mockCreateNotification,
   mockSendEmail,
   mockSentryCapture,
+  mockHasTenantPermission,
   calls,
   committed,
 } = vi.hoisted(() => {
@@ -33,28 +35,69 @@ const {
     mockRevokeArtifacts: vi.fn(),
     mockInvalidateCachedSessions: vi.fn(),
     mockLogAuditInTx: vi.fn(),
+    mockLogAuditBulkInTx: vi.fn(),
     mockCreateNotification: vi.fn(),
     mockSendEmail: vi.fn(),
     mockSentryCapture: vi.fn(),
+    mockHasTenantPermission: vi.fn(),
     calls,
     committed: { value: false },
   };
 });
 
+// A containment model: every named id is the member's and live (findMany and
+// a bulk write return one row per id; a sweep keyed by parent ids, one row per
+// parent), and each compare-and-set write lands. Each write is recorded by
+// model, for the write order.
+type ContainmentWhere = { id?: { in: string[] }; serviceAccountId?: { in: string[] }; clientId?: { in: string[] } };
+function containmentModel(name: string, row: Record<string, unknown> = {}) {
+  const rows = (where: ContainmentWhere) => {
+    const parents = where.serviceAccountId?.in ?? where.clientId?.in;
+    if (parents) return parents.map((p) => ({ id: `${p}-child`, serviceAccountId: p, clientId: p, tenantId: "tenant-1", ...row }));
+    return (where.id?.in ?? []).map((id) => ({ id, tenantId: "tenant-1", ...row }));
+  };
+  return {
+    findMany: vi.fn(async (args: { where: ContainmentWhere }) => rows(args.where)),
+    updateMany: vi.fn(async () => {
+      calls.push(name);
+      return { count: 1 };
+    }),
+    updateManyAndReturn: vi.fn(async (args: { where: ContainmentWhere }) => {
+      calls.push(name);
+      return rows(args.where);
+    }),
+    deleteMany: vi.fn(async (args: { where: ContainmentWhere }) => {
+      calls.push(name);
+      return { count: args.where.id?.in.length ?? 1 };
+    }),
+  };
+}
+
 const tx = {
   tenantMember: { findFirst: mockMemberFindFirst, findMany: mockMemberFindMany },
   webAuthnCredential: { findMany: mockCredentialFindMany, deleteMany: mockCredentialDeleteMany },
+  account: containmentModel("account"),
+  scimToken: containmentModel("scimToken"),
+  serviceAccount: containmentModel("serviceAccount"),
+  serviceAccountToken: containmentModel("serviceAccountToken", { serviceAccountId: "sa-1" }),
+  mcpClient: containmentModel("mcpClient"),
+  mcpAccessToken: containmentModel("mcpAccessToken"),
+  mcpRefreshToken: containmentModel("mcpRefreshToken"),
+  personalLogAccessGrant: containmentModel("personalLogAccessGrant", { targetUserId: "someone" }),
+  emergencyAccessGrant: containmentModel("emergencyAccessGrant", { granteeId: "grantee-1" }),
 };
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({ prisma: {} }));
 vi.mock("@/lib/auth/access/tenant-auth", () => ({
   requireTenantPermission: mockRequireTenantPermission,
+  hasTenantPermission: mockHasTenantPermission,
 }));
 vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
   requireRecentCurrentAuthMethod: mockRequireRecentSession,
 }));
 vi.mock("@/lib/tenant-rls", () => ({
+  isBypassRlsActive: () => true,
   withTenantRls: (_p: unknown, _t: unknown, fn: (t: typeof tx) => unknown) => fn(tx),
   withBypassRls: async (_p: unknown, fn: (t: typeof tx) => unknown) => {
     const result = await fn(tx);
@@ -75,6 +118,7 @@ vi.mock("@/lib/auth/session/session-cache-helpers", () => ({
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditInTx: mockLogAuditInTx,
+  logAuditBulkInTx: mockLogAuditBulkInTx,
   // The admin's request metadata is present, so the other-tenant row's lack of
   // it is the code's doing.
   tenantAuditBase: vi.fn((_req: unknown, userId: string, tenantId: string) => ({
@@ -91,7 +135,7 @@ vi.mock("@sentry/nextjs", () => ({ captureMessage: mockSentryCapture }));
 
 import { AUDIT_CREDENTIAL_ID_MAX_LENGTH, METADATA_MAX_BYTES } from "@/lib/validations/common.server";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
-import { DELETE } from "./route";
+import { DELETE, GET } from "./route";
 
 const ADMIN = "admin-1";
 const TARGET = "member-1";
@@ -109,12 +153,14 @@ const PASSKEYS = [
   { id: "cred-row-2", credentialId: "public-2", tenantId: "previous-tenant" },
 ];
 
-function revokeAll() {
+function revokeAll(body?: unknown) {
   return DELETE(
-    createRequest("DELETE", `http://localhost/api/tenant/members/${TARGET}/passkeys`),
+    createRequest("DELETE", `http://localhost/api/tenant/members/${TARGET}/passkeys`, { body }),
     createParams({ userId: TARGET }),
   );
 }
+
+const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 
 describe("DELETE /api/tenant/members/[userId]/passkeys", () => {
   beforeEach(() => {
@@ -124,6 +170,7 @@ describe("DELETE /api/tenant/members/[userId]/passkeys", () => {
     mockAuth.mockResolvedValue({ user: { id: ADMIN, name: "Admin", email: "admin@example.com" } });
     mockRequireTenantPermission.mockResolvedValue({ userId: ADMIN, tenantId: "tenant-1", role: "OWNER" });
     mockRequireRecentSession.mockResolvedValue(null);
+    mockHasTenantPermission.mockReturnValue(true);
     mockMemberFindFirst.mockResolvedValue({ role: "MEMBER" });
     mockMemberFindMany.mockImplementation(async () => {
       calls.push("roles");
@@ -146,6 +193,9 @@ describe("DELETE /api/tenant/members/[userId]/passkeys", () => {
     });
     mockLogAuditInTx.mockImplementation(async () => {
       calls.push("audit");
+    });
+    mockLogAuditBulkInTx.mockImplementation(async (_tx: unknown, _tenant: string, rows: unknown[]) => {
+      if (rows.length > 0) calls.push("audit");
     });
     mockInvalidateCachedSessions.mockImplementation(async () => {
       calls.push(committed.value ? "cache-after-commit" : "cache-before-commit");
@@ -274,13 +324,23 @@ describe("DELETE /api/tenant/members/[userId]/passkeys", () => {
     );
   });
 
-  it("a member with no passkeys left answers 404, with no revocation or audit", async () => {
+  it("a member with no passkeys is still contained: sessions and tokens revoked, audited with passkeys 0, told only that their sessions ended", async () => {
     mockCredentialFindMany.mockResolvedValue([]);
 
-    expect((await revokeAll()).status).toBe(404);
+    const res = await revokeAll();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, sessionsRevoked: 2, cacheTombstoneFailures: 0 });
     expect(mockCredentialDeleteMany).not.toHaveBeenCalled();
-    expect(mockRevokeArtifacts).not.toHaveBeenCalled();
-    expect(mockLogAuditInTx).not.toHaveBeenCalled();
+    expect(mockRevokeArtifacts).toHaveBeenCalledWith(tx, TARGET, { tenantFilter: {} });
+    expect(mockLogAuditInTx).toHaveBeenCalledTimes(1);
+    expect(mockLogAuditInTx.mock.calls[0][2]).toMatchObject({
+      action: "TENANT_MEMBER_PASSKEY_REVOKE_ALL",
+      metadata: { targetUserId: TARGET, passkeys: 0, credentialIds: [], credentialIdsOmitted: 0, ...COUNTS },
+    });
+    expect(mockCreateNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "すべてのセッションが終了されました" }),
+    );
+    expect(mockSendEmail).toHaveBeenCalledWith(expect.objectContaining({ subject: "すべてのセッションが終了されました" }));
   });
 
   it("refuses the actor's own passkeys before anything else", async () => {
@@ -315,5 +375,236 @@ describe("DELETE /api/tenant/members/[userId]/passkeys", () => {
     await expect(revokeAll()).rejects.toThrow("db down");
     expect(committed.value).toBe(false);
     expect(mockCreateNotification).not.toHaveBeenCalled();
+  });
+
+  it("a delete removing fewer passkeys than were read fails the request: no audit row names a passkey it did not delete", async () => {
+    mockCredentialDeleteMany.mockResolvedValue({ count: 1 });
+
+    await expect(revokeAll()).rejects.toThrow(/1 of 2 credentials/);
+    expect(committed.value).toBe(false);
+    expect(mockRevokeArtifacts).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
+    expect(mockCreateNotification).not.toHaveBeenCalled();
+    expect(mockSendEmail).not.toHaveBeenCalled();
+  });
+
+  describe("containment body", () => {
+    const ALL_KINDS = {
+      unlinkAccountIds: [uuid(1)],
+      revoke: {
+        scimTokenIds: [uuid(2)],
+        serviceAccountIds: [uuid(3)],
+        serviceAccountTokenIds: [uuid(4)],
+        mcpClientIds: [uuid(5)],
+        breakglassGrantIds: [uuid(6)],
+        emergencyAccessGrantIds: [uuid(7)],
+      },
+    };
+    const CONTAINMENT_MODELS = [
+      "account", "scimToken", "serviceAccount", "serviceAccountToken", "mcpClient",
+      "mcpAccessToken", "mcpRefreshToken", "personalLogAccessGrant", "emergencyAccessGrant",
+    ] as const;
+
+    it.each([
+      ["no body", undefined],
+      ["an empty object", {}],
+      ["empty arrays", { unlinkAccountIds: [], revoke: { scimTokenIds: [] } }],
+    ])("%s contains nothing more: no containment model is touched, no `contained` in the response", async (_label, body) => {
+      const res = await revokeAll(body);
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true, sessionsRevoked: 2, cacheTombstoneFailures: 0 });
+      for (const model of CONTAINMENT_MODELS) {
+        expect(tx[model].findMany).not.toHaveBeenCalled();
+        expect(tx[model].updateMany).not.toHaveBeenCalled();
+      }
+    });
+
+    it("a zero-byte body is no body", async () => {
+      const res = await DELETE(
+        new (await import("next/server")).NextRequest(`http://localhost/api/tenant/members/${TARGET}/passkeys`, {
+          method: "DELETE",
+          body: "",
+        }),
+        createParams({ userId: TARGET }),
+      );
+      expect(res.status).toBe(200);
+    });
+
+    it.each([
+      ["101 ids of one kind", { revoke: { scimTokenIds: Array.from({ length: 101 }, (_, i) => uuid(i)) } }],
+      ["a non-uuid id", { unlinkAccountIds: ["not-a-uuid"] }],
+      ["an unknown top-level key", { unlinkAccountIds: [], revokeAll: true }],
+      ["an unknown kind", { revoke: { webhookIds: [uuid(1)] } }],
+      ["a non-object", ["x"]],
+    ])("refuses %s with 400 before the step-up, and revokes nothing", async (_label, body) => {
+      const res = await revokeAll(body);
+
+      expect(res.status).toBe(400);
+      expect(mockRequireRecentSession).not.toHaveBeenCalled();
+      expect(mockRevokeArtifacts).not.toHaveBeenCalled();
+    });
+
+    it("refuses malformed JSON with 400 before the step-up", async () => {
+      const res = await DELETE(
+        new (await import("next/server")).NextRequest(`http://localhost/api/tenant/members/${TARGET}/passkeys`, {
+          method: "DELETE",
+          body: "{not json",
+        }),
+        createParams({ userId: TARGET }),
+      );
+      expect(res.status).toBe(400);
+      expect(mockRequireRecentSession).not.toHaveBeenCalled();
+    });
+
+    it("writes every kind after the passkey and session revocation, in the pinned order, before the revoke-all row, in one transaction", async () => {
+      const res = await revokeAll(ALL_KINDS);
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const one = { revoked: 1, skipped: 0 };
+      expect(body).toEqual({
+        ok: true,
+        sessionsRevoked: 2,
+        cacheTombstoneFailures: 0,
+        contained: {
+          accounts: one,
+          scimTokens: one,
+          serviceAccounts: one,
+          serviceAccountTokens: one,
+          mcpClients: one,
+          breakglassGrants: one,
+          emergencyAccessGrants: one,
+        },
+      });
+      const writes = calls.filter((c) => !["lock", "roles", "credentials", "cache-after-commit"].includes(c));
+      expect(writes.filter((c) => c !== "audit")).toEqual([
+        "delete", "revoke",
+        "account",
+        "scimToken",
+        "serviceAccount", "serviceAccountToken",
+        "serviceAccountToken",
+        "mcpClient", "mcpAccessToken", "mcpRefreshToken",
+        "personalLogAccessGrant",
+        "emergencyAccessGrant",
+      ]);
+      // The revoke-all row comes after every containment write, carrying the counts.
+      const revokeAllCall = mockLogAuditInTx.mock.calls.find((c) => c[2].action === "TENANT_MEMBER_PASSKEY_REVOKE_ALL" && c[1] === "tenant-1");
+      expect(revokeAllCall?.[2].metadata).toMatchObject({
+        accountsContained: 1,
+        accountsSkipped: 0,
+        scimTokensContained: 1,
+        emergencyAccessGrantsContained: 1,
+        unlinkedAccountIds: [uuid(1)],
+        unlinkedAccountIdsOmitted: 0,
+      });
+      expect(writes.lastIndexOf("emergencyAccessGrant")).toBeLessThan(writes.lastIndexOf("audit"));
+      // The containment rows in one batch per kind, then the revoke-all rows.
+      const actions = [
+        ...mockLogAuditBulkInTx.mock.calls.flatMap((c) => (c[2] as { action: string }[]).map((r) => r.action)),
+        ...mockLogAuditInTx.mock.calls.map((c) => c[2].action),
+      ];
+      expect(mockLogAuditBulkInTx.mock.invocationCallOrder.at(-1)).toBeLessThan(mockLogAuditInTx.mock.invocationCallOrder[0]);
+      expect(actions).toEqual([
+        "SCIM_TOKEN_REVOKE",
+        "SERVICE_ACCOUNT_UPDATE",
+        "SERVICE_ACCOUNT_TOKEN_REVOKE",
+        "MCP_CLIENT_UPDATE",
+        "PERSONAL_LOG_ACCESS_REVOKE",
+        "EMERGENCY_ACCESS_REVOKE",
+        "TENANT_MEMBER_PASSKEY_REVOKE_ALL",
+        "TENANT_MEMBER_PASSKEY_REVOKE_ALL",
+      ]);
+      expect(committed.value).toBe(true);
+    });
+
+    it("a containment write that fails fails the request: no commit, the member is not told", async () => {
+      tx.emergencyAccessGrant.updateMany.mockRejectedValueOnce(new Error("constraint"));
+
+      await expect(revokeAll(ALL_KINDS)).rejects.toThrow("constraint");
+      expect(committed.value).toBe(false);
+      expect(mockCreateNotification).not.toHaveBeenCalled();
+      expect(mockSendEmail).not.toHaveBeenCalled();
+    });
+
+    it("counts a named id that matches nothing live of the member's as skipped, and audits nothing for it", async () => {
+      tx.scimToken.updateManyAndReturn.mockResolvedValueOnce([]);
+
+      const res = await revokeAll({ revoke: { scimTokenIds: [uuid(2)] } });
+      expect((await res.json()).contained).toEqual({ scimTokens: { revoked: 0, skipped: 1 } });
+      expect(mockLogAuditBulkInTx.mock.calls.flatMap((c) => c[2] as unknown[])).toEqual([]);
+    });
+
+    // Per-kind permission is defence in depth (OWNER and ADMIN hold all of them
+    // today), so it is driven by the mocked lookup; each refusal has its allow pair.
+    it.each([
+      ["scimTokenIds", "tenant:scim:manage"],
+      ["serviceAccountIds", "tenant:serviceAccount:manage"],
+      ["serviceAccountTokenIds", "tenant:serviceAccount:manage"],
+      ["mcpClientIds", "tenant:serviceAccount:manage"],
+      ["breakglassGrantIds", "tenant:breakglass:request"],
+    ])("%s: refused 403 before the step-up without %s, allowed with it", async (key, permission) => {
+      mockHasTenantPermission.mockImplementation((_role: string, p: string) => p !== permission);
+      const refused = await revokeAll({ revoke: { [key]: [uuid(9)] } });
+      expect(refused.status).toBe(403);
+      expect(mockRequireRecentSession).not.toHaveBeenCalled();
+      expect(mockRevokeArtifacts).not.toHaveBeenCalled();
+
+      mockHasTenantPermission.mockReturnValue(true);
+      const allowed = await revokeAll({ revoke: { [key]: [uuid(9)] } });
+      expect(allowed.status).toBe(200);
+      expect(mockRevokeArtifacts).toHaveBeenCalledTimes(1);
+    });
+
+    it("refuses break-glass grants to an ADMIN actor (only an OWNER), allows other kinds", async () => {
+      mockRequireTenantPermission.mockResolvedValue({ userId: ADMIN, tenantId: "tenant-1", role: "ADMIN" });
+
+      expect((await revokeAll({ revoke: { breakglassGrantIds: [uuid(6)] } })).status).toBe(403);
+      expect(mockRequireRecentSession).not.toHaveBeenCalled();
+      expect((await revokeAll({ revoke: { scimTokenIds: [uuid(2)] } })).status).toBe(200);
+    });
+
+    it("re-checks the kinds on the role re-read in the transaction: a demotion committed meanwhile refuses", async () => {
+      mockMemberFindMany.mockResolvedValue([
+        { userId: ADMIN, role: "ADMIN", user: { email: "admin@example.com", locale: "en" } },
+        { userId: TARGET, role: "MEMBER", user: { email: "member@example.com", locale: "ja" } },
+      ]);
+
+      expect((await revokeAll({ revoke: { breakglassGrantIds: [uuid(6)] } })).status).toBe(403);
+      expect(mockRevokeArtifacts).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("GET lists the footholds each kind's permission allows", () => {
+    function list() {
+      return GET(
+        createRequest("GET", `http://localhost/api/tenant/members/${TARGET}/passkeys`),
+        createParams({ userId: TARGET }),
+      );
+    }
+
+    it.each([
+      ["scimTokens", "tenant:scim:manage"],
+      ["serviceAccounts", "tenant:serviceAccount:manage"],
+      ["serviceAccountTokens", "tenant:serviceAccount:manage"],
+      ["mcpClients", "tenant:serviceAccount:manage"],
+      ["breakglassGrants", "tenant:breakglass:request"],
+    ])("omits %s without %s, lists it with it", async (kind, permission) => {
+      mockHasTenantPermission.mockImplementation((_role: string, p: string) => p !== permission);
+      const without = await (await list()).json();
+      expect(without.createdFootholds).not.toHaveProperty(kind);
+      expect(without.createdFootholds).toHaveProperty("emergencyAccessGrants");
+
+      mockHasTenantPermission.mockReturnValue(true);
+      const withIt = await (await list()).json();
+      expect(withIt.createdFootholds).toHaveProperty(kind);
+    });
+
+    it("omits break-glass grants for an ADMIN actor", async () => {
+      mockRequireTenantPermission.mockResolvedValue({ userId: ADMIN, tenantId: "tenant-1", role: "ADMIN" });
+      const body = await (await list()).json();
+      expect(body.createdFootholds).not.toHaveProperty("breakglassGrants");
+      expect(body.createdFootholds).toHaveProperty("scimTokens");
+    });
   });
 });

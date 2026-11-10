@@ -666,6 +666,17 @@ export async function createTestContext(): Promise<TestContext> {
         `DELETE FROM scim_external_mappings WHERE tenant_id = $1::uuid`,
         tenantId,
       );
+      // SCIM tokens FK to tenants and break-glass grants to users (requester
+      // and target), both with RESTRICT: the users and tenants deletes below
+      // fail while either remains.
+      await tx.$executeRawUnsafe(
+        `DELETE FROM scim_tokens WHERE tenant_id = $1::uuid`,
+        tenantId,
+      );
+      await tx.$executeRawUnsafe(
+        `DELETE FROM personal_log_access_grants WHERE tenant_id = $1::uuid`,
+        tenantId,
+      );
       await tx.$executeRawUnsafe(
         `DELETE FROM tenant_member_departures WHERE tenant_id = $1::uuid`,
         tenantId,

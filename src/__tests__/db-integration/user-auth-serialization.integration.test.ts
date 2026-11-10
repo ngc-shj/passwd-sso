@@ -51,6 +51,7 @@ import { createAuthorizationCode } from "@/lib/mcp/oauth-server";
 import { invalidateUserSessions } from "@/lib/auth/session/user-session-invalidation";
 import { POST as createApiKey } from "@/app/api/api-keys/route";
 import { POST as createOperatorToken } from "@/app/api/tenant/operator-tokens/route";
+import { DELETE as deleteOwnPasskey } from "@/app/api/webauthn/credentials/[id]/route";
 
 describe("credential revocation vs. mint — real-DB integration", () => {
   let ctx: TestContext;
@@ -186,6 +187,45 @@ describe("credential revocation vs. mint — real-DB integration", () => {
 
     await mintBehind(held, signIn(credentialId, token));
     expect(await sessionExists(token)).toBe(true);
+  });
+
+  // ─── A member's own passkey delete vs. an admin's revoke-all ──
+  // The admin revoke-all reads the member's passkeys and deletes exactly them
+  // under the lock (its audit row names the ones read); the member's own
+  // delete takes the lock too, so it cannot remove one in between.
+
+  async function deleteOwn(credentialId: string) {
+    mockAuth.mockResolvedValue({ user: { id: userId } });
+    return deleteOwnPasskey(
+      new NextRequest(`http://localhost/api/webauthn/credentials/${credentialId}`, { method: "DELETE" }),
+      { params: Promise.resolve({ id: credentialId }) },
+    );
+  }
+
+  async function credentialExists(id: string): Promise<boolean> {
+    return (await sql(`SELECT 1 FROM webauthn_credentials WHERE id = $1::uuid`, id)).length > 0;
+  }
+
+  it("a member's own passkey delete parked behind an admin's revoke-all of it answers 404", async () => {
+    const credentialId = await passkey();
+    const held = await holdRevocation({
+      revoke: true,
+      before: async (tx) => {
+        await tx.webAuthnCredential.deleteMany({ where: { id: credentialId } });
+      },
+    });
+
+    const res = await mintBehind(held, () => deleteOwn(credentialId));
+    expect(res.status).toBe(404);
+  });
+
+  it("control: the same delete parked behind the lock alone deletes the passkey", async () => {
+    const credentialId = await passkey();
+    const held = await holdRevocation({ revoke: false });
+
+    const res = await mintBehind(held, () => deleteOwn(credentialId));
+    expect(res.status).toBe(200);
+    expect(await credentialExists(credentialId)).toBe(false);
   });
 
   // ─── Bridge-code exchange vs. the revocation consuming the code ─

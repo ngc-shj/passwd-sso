@@ -198,6 +198,7 @@ model User {
   breakGlassRequested    PersonalLogAccessGrant[]   @relation("BreakGlassRequester")
   breakGlassTargeted     PersonalLogAccessGrant[]   @relation("BreakGlassTarget")
   createdServiceAccounts ServiceAccount[]           @relation("serviceAccountCreator")
+  createdServiceAccountTokens ServiceAccountToken[] @relation("serviceAccountTokenCreator")
   approvedAccessRequests AccessRequest[]           @relation("AccessRequestApprovedBy")
   requestedAccessRequests AccessRequest[]          @relation("AccessRequestRequester")
   createdMcpClients      McpClient[]                @relation("mcpClientCreator")
@@ -1829,14 +1830,19 @@ model ServiceAccountToken {
   createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   revokedAt        DateTime? @map("revoked_at") @db.Timestamptz(3)
   lastUsedAt       DateTime? @map("last_used_at") @db.Timestamptz(3)
+  // Who minted it: the admin for a direct mint, the approver for a JIT token.
+  // NULL for tokens minted directly before the column existed.
+  createdById      String?   @map("created_by_id") @db.Uuid
 
   // Composite FK (serviceAccountId, tenantId) → ServiceAccount(id, tenantId)
   // enforces tenant-boundary consistency at the DB level: a token cannot point
   // to an SA owned by a different tenant.
   serviceAccount ServiceAccount @relation(fields: [serviceAccountId, tenantId], references: [id, tenantId], onDelete: Cascade)
   tenant         Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  createdBy      User?          @relation("serviceAccountTokenCreator", fields: [createdById], references: [id], onDelete: SetNull)
 
   @@index([serviceAccountId, revokedAt])
+  @@index([createdById])
   @@index([tenantId])
   @@index([expiresAt])
   @@map("service_account_tokens")

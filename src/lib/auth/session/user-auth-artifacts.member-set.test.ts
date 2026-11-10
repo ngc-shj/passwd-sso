@@ -17,6 +17,7 @@ import { revokeUserAuthArtifactsInTx } from "./user-session-invalidation";
 /** User-bound rows with such a column that are not a way to act as the user. */
 const NOT_AUTH_ARTIFACTS: Record<string, string> = {
   scimToken: "authenticates the IdP's provisioning as the tenant; createdById only records who minted it",
+  serviceAccountToken: "authenticates the tenant's service account; createdById only records who minted it, and a tenant admin revokes it by containment (member-containment.ts), not by session invalidation",
   passwordShare: "a share link authenticates its viewer, not the user who created it",
   emergencyAccessGrant: "a grant between two users; the grantee acts through their own sessions",
   adminVaultReset: "an admin workflow row about the user, not a credential",

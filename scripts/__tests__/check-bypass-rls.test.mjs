@@ -4270,6 +4270,38 @@ describe("relation reach: models a query's argument reaches are charged to the g
     expect(stdout).toContain(UNREADABLE);
   });
 
+  it("charges a relation in the element a mapped createMany data returns", () => {
+    const { code, stderr } = typed("ids: string[]", `tx.session.createMany({ data: ids.map((id) => ({ sessionToken: id, user: { connect: { id } } })) })`, "AUTH_SESSION_CAPPING");
+    expect(code, stderr).toBe(1);
+    expect(stderr).toContain(`${SESSION_CAP}:2  prisma.user  (relation Session.data.user)  not in BYPASS_GRANT.AUTH_SESSION_CAPPING`);
+  });
+
+  it("reads a mapped createMany data whose element is scalar-only, and charges nothing", () => {
+    expectReadableReachingNothing(typed("ids: string[]", `tx.user.createMany({ data: ids.map((id) => ({ email: id })) })`, "AUTH_USER_LOOKUP"));
+  });
+
+  it.each([
+    ["a block-bodied map callback", "ids: string[]", `tx.user.createMany({ data: ids.map((id) => { return { email: id }; }) })`],
+    ["a map on a value that is not an array", "c: boolean", `(() => { const ids = { map: (f: (s: string) => unknown): Record<string, unknown>[] => [{ v: f("x") }] }; return tx.user.createMany({ data: ids.map((id) => ({ email: id })) }); })()`],
+    ["a map given a named callback", "ids: string[], mk: (s: string) => Record<string, unknown>", `tx.user.createMany({ data: ids.map(mk) })`],
+    // The unannotated parameter's type is contextual, from a receiver a guard narrowed.
+    ["a map returning its unannotated parameter, on a narrowed receiver", "rows: unknown[]", `(() => { const isScalar = (x: unknown): x is { email: string }[] => true; if (!isScalar(rows)) return null; return tx.user.createMany({ data: rows.map((r) => r) }); })()`],
+    ["a map spreading its unannotated parameter, on a narrowed receiver", "rows: unknown[]", `(() => { const isScalar = (x: unknown): x is { email: string }[] => true; if (!isScalar(rows)) return null; return tx.user.createMany({ data: rows.map((r) => ({ ...r })) }); })()`],
+  ])("keeps %s unreadable", (_label, params, body) => {
+    expectUnreadable(typed(params, body, "AUTH_USER_LOOKUP"));
+  });
+
+  it("keeps a mapped data unreadable whose relation key's value is built from the unannotated parameter", () => {
+    // The relation key itself is charged; what its value reaches is not known.
+    // A spread under the relation is read by type: narrowed, it would read as reaching nothing more.
+    const { stdout } = typed("rows: unknown[]", `(() => { const isUser = (x: unknown): x is { u: { id: string } }[] => true; if (!isUser(rows)) return null; return tx.session.createMany({ data: rows.map((r) => ({ sessionToken: "s", user: { connect: { ...r.u } } })) }); })()`, "AUTH_SESSION_LIFECYCLE");
+    expect(stdout).toContain(UNREADABLE);
+  });
+
+  it("reads a mapped data that uses its unannotated parameter only under scalar keys", () => {
+    expectReadableReachingNothing(typed("rows: { e: string }[]", `tx.user.createMany({ data: rows.map((r) => ({ email: r.e, name: String(r) })) })`, "AUTH_USER_LOOKUP"));
+  });
+
   it("fails named when the tree has no prisma/schema.prisma", () => {
     const { code, stderr } = runMulti([[SESSION_CAP, `${HEAD_RLS}export const f = () => withBypassRls(prisma, async (tx) => tx.user.count(), BYPASS_GRANT.AUDIT_USER_DISPLAY_LOOKUP);`], ["prisma/schema.prisma", ""]]);
     expect(code).toBe(1);

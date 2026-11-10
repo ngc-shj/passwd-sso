@@ -159,6 +159,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
           name: result.data.name,
           scope,
           expiresAt,
+          createdById: session.user.id,
         },
       });
     });

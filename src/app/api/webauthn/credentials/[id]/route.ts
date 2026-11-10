@@ -16,6 +16,7 @@ import {
   passkeyEnforcementBlocks,
 } from "@/lib/auth/policy/passkey-enforcement";
 import { invalidateUserSessionsCache } from "@/lib/auth/session/user-session-invalidation";
+import { lockUserAuthArtifacts } from "@/lib/auth/session/user-auth-serialization";
 import { getLogger } from "@/lib/logger";
 import { errorLogFields } from "@/lib/logger/error-fields";
 
@@ -87,11 +88,20 @@ async function handleDELETE(
   const stepUp = await requireRecentCurrentAuthMethod(req, session.user.id);
   if (stepUp) return stepUp;
 
-  await withUserTenantRls(userId, async () =>
-    prisma.webAuthnCredential.delete({
+  // Under the member's credential lock, as a registration takes it: a tenant
+  // admin's revoke-all reads the member's passkeys and deletes exactly those
+  // under the same lock, so its audit row and notice never name a passkey
+  // this delete removed in between. One deleted meanwhile (that revoke, or a
+  // concurrent delete of the same passkey) answers 404.
+  const { count } = await withUserTenantRls(userId, async () => {
+    await lockUserAuthArtifacts(prisma, userId);
+    return prisma.webAuthnCredential.deleteMany({
       where: { id, userId },
-    }),
-  );
+    });
+  });
+  if (count === 0) {
+    return notFound();
+  }
 
   // F5/F19 (#959): every writer of `hasPasskey` invalidates the user's cached
   // sessions (cross-tenant — passkeys are user-global), so deleting the last
