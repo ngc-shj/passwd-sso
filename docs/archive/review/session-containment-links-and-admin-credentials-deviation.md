@@ -55,8 +55,9 @@ the user's approval). The follow-up issue for SC1/SC2 is filed with the PR.
   of `check-bypass-rls`: `enqueueAuditBulkInTx` writes `createMany({ data: payloads.map(...) })`, and
   an array-typed `data` has an index signature, which the typed reading refuses. Rather than accept
   that blind spot, the relation walk (`scripts/checks/lib/prisma-relation-reach.mjs`) now reads a
-  `data` given as `<array>.map((r) => <expr>)` as `<expr>` per element; the unreadable count is back
-  to 3. Self-tests cover a relation charged through the mapped element, a scalar-only element read
+  `data` given as `<array>.map((r) => ({ ... }))` as that object literal per element, provided an
+  unannotated `r` is read only under non-relation keys (code review round 2, R2-1); the unreadable
+  count is back to 3. Self-tests cover a relation charged through the mapped element, a scalar-only element read
   as reaching nothing, and three shapes kept unreadable (block body, non-array receiver, named
   callback); dropping the array check or the mapped read each turns its cells red.
 - F1: a named token already revoked with its contained service account counts as contained and gets

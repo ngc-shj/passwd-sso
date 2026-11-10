@@ -1,6 +1,6 @@
 # Code Review: session-containment-links-and-admin-credentials
 Date: 2026-11-10
-Review round: 1
+Review round: 2
 
 ## Changes from Previous Round
 Initial review of `d22755a43` + `9305f4deb` (full diff). No Critical findings.
@@ -74,3 +74,23 @@ Integration `verified-local` (compose workers stopped and restarted); CI pending
 - T3–T7 — Action: tokens seeded on skipped parents and asserted unchanged; refresh token revoked
   and in the secret loop; `targetId` asserted; exact row count and a 200 positive control; GUC
   restore asserted.
+
+### Round 2
+One reviewer, all three perspectives, on `a7e5b385c`: no Critical or Major findings; three Minor.
+- R2-1 [Minor, security] The relation walk read `rows.map((r) => <body>)` through the callback's
+  unannotated parameter, whose type is contextual and can be narrowed by a user type guard on the
+  receiver — a `data` that was unreadable before could read as reaching nothing. Action: the mapped
+  element must be an object literal, and every read of an unannotated parameter must sit in the
+  value of a top-level property whose key is not a relation of the written model. Self-tests: a
+  narrowed identity map, a narrowed spread, and a relation value spreading the parameter stay
+  unreadable; scalar-key use stays readable. Dropping each guard turns its cell red.
+- R2-2 [Minor, testing] The `revokedWithServiceAccount` filter's creator and expiry conjuncts were
+  unpinned. Action: unit cell with a member-minted, a bystander-minted and an expired token on a
+  contained service account: `{ revoked: 1, skipped: 2 }`, one marked row. Each conjunct forced true
+  turns it red.
+- R2-3 [Minor, testing] The revoke-all delete-count throw was unreached. Action: route cell where the
+  delete removes fewer than were read: rejects, nothing after it runs, no audit, notice or mail.
+  Removing the throw turns it red.
+
+## Final state
+Code review rounds: 2. Open findings: none.

@@ -377,6 +377,17 @@ describe("DELETE /api/tenant/members/[userId]/passkeys", () => {
     expect(mockCreateNotification).not.toHaveBeenCalled();
   });
 
+  it("a delete removing fewer passkeys than were read fails the request: no audit row names a passkey it did not delete", async () => {
+    mockCredentialDeleteMany.mockResolvedValue({ count: 1 });
+
+    await expect(revokeAll()).rejects.toThrow(/1 of 2 credentials/);
+    expect(committed.value).toBe(false);
+    expect(mockRevokeArtifacts).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
+    expect(mockCreateNotification).not.toHaveBeenCalled();
+    expect(mockSendEmail).not.toHaveBeenCalled();
+  });
+
   describe("containment body", () => {
     const ALL_KINDS = {
       unlinkAccountIds: [uuid(1)],

@@ -149,6 +149,33 @@ describe("member containment predicates", () => {
     expect(result.contained).toEqual({ scimTokens: { revoked: 2, skipped: 1 } });
   });
 
+  it("counts a token revoked with its service account as contained only when it was the member's and unexpired", async () => {
+    const LATER = new Date(NOW.getTime() + 60_000);
+    const writes = recordingTx({
+      serviceAccount: () => [{ id: "sa-1" }],
+      // The service account's statement revokes all three; the token statement then finds none live.
+      serviceAccountToken: (where) =>
+        "serviceAccountId" in where
+          ? [
+              { id: "tok-member", serviceAccountId: "sa-1", createdById: TARGET, expiresAt: LATER },
+              { id: "tok-bystander", serviceAccountId: "sa-1", createdById: "someone-else", expiresAt: LATER },
+              { id: "tok-expired", serviceAccountId: "sa-1", createdById: TARGET, expiresAt: NOW },
+            ]
+          : [],
+    });
+    const request = toContainmentRequest({
+      revoke: { serviceAccountIds: ["sa-1"], serviceAccountTokenIds: ["tok-member", "tok-bystander", "tok-expired"] },
+    });
+    const result = await containMemberInTx(writes.tx, containArgs(request!));
+
+    expect(result.contained.serviceAccountTokens).toEqual({ revoked: 1, skipped: 2 });
+    const tokenRows = vi
+      .mocked(logAuditBulkInTx)
+      .mock.calls.flatMap(([, , rows]) => rows)
+      .filter((r) => r.action === "SERVICE_ACCOUNT_TOKEN_REVOKE");
+    expect(tokenRows.map((r) => [r.targetId, r.metadata?.revokedWithServiceAccount])).toEqual([["tok-member", true]]);
+  });
+
   it("refuses to count accounts the delete did not remove: the containment rolls back", async () => {
     const writes = recordingTx({ account: () => [{ id: "acc-1", tenantId: TENANT }, { id: "acc-2", tenantId: "other" }] });
     // The delete removes one of the two rows read.

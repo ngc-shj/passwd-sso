@@ -37,8 +37,10 @@
  *     relation-filter keys). Anything else stays unreadable. A type bounds the
  *     keys a value is declared with, not every key it carries at run time
  *     (structural width): this reads the declared contract, not a proof;
- *   - a `data` given as `rows.map((r) => <expr>)` on an array: `<expr>` is
- *     read as each element.
+ *   - a `data` given as `rows.map((r) => ({ ... }))` on an array: the object
+ *     literal is read as each element, provided an unannotated `r` (typed
+ *     from the receiver, which a guard can narrow) is read only under
+ *     non-relation keys.
  */
 import { SyntaxKind, ts } from "ts-morph";
 import { existsSync, readFileSync } from "node:fs";
@@ -698,7 +700,7 @@ function createWalker(models, visitor, ctx, full) {
   /** Every relation a `data` of `model` writes through (an object or an array of them). */
   function data(value, model, trail) {
     const v = unwrapExpression(value);
-    const mapped = mappedElement(v);
+    const mapped = mappedElement(v, model);
     const items = mapped ? [mapped] : v?.getKind() === SyntaxKind.ArrayLiteralExpression ? v.getElements() : [v];
     for (const item of items) {
       const objs = item?.getKind() === SyntaxKind.SpreadElement ? null : readValue(item, dataKey(model));
@@ -711,12 +713,15 @@ function createWalker(models, visitor, ctx, full) {
   }
 
   /**
-   * (`full` only.) For `rows.map((r) => <expr>)` on a value the checker types
-   * as an array, the arrow callback's body: each element is what it returns.
-   * A block body is not an expression readValue reads, so it stays unreadable.
-   * Otherwise null.
+   * (`full` only.) For `rows.map((r) => ({ ... }))` on a value the checker
+   * types as an array, the object literal each element is. An unannotated `r`
+   * has no declared type: its type is contextual, from the receiver, which a
+   * user type guard can narrow. So every read of such a parameter must sit in
+   * the value of a top-level property whose key is not a relation of `model` —
+   * a value the walk never reads; a spread of it, or a relation key's value
+   * built from it, leaves the data unreadable. Otherwise null.
    */
-  function mappedElement(v) {
+  function mappedElement(v, model) {
     if (!full || !ctx.checker || v?.getKind() !== SyntaxKind.CallExpression) return null;
     const callee = unwrapExpression(v.getExpression());
     if (callee?.getKind() !== SyntaxKind.PropertyAccessExpression || callee.getName() !== "map") return null;
@@ -724,7 +729,18 @@ function createWalker(models, visitor, ctx, full) {
     if (!ctx.checker.isArrayType(receiver) && !ctx.checker.isTupleType(receiver)) return null;
     const [fn, ...rest] = v.getArguments();
     if (rest.length > 0 || fn?.getKind() !== SyntaxKind.ArrowFunction) return null;
-    return fn.getBody();
+    const body = unwrapAssertions(fn.getBody());
+    if (body?.getKind() !== SyntaxKind.ObjectLiteralExpression) return null;
+    const untyped = new Set(fn.getParameters().filter((p) => !p.getTypeNode()).map((p) => p.compilerNode));
+    if (untyped.size === 0) return body;
+    for (const ref of body.getDescendantsOfKind(SyntaxKind.Identifier)) {
+      const declarations = ref.getSymbol()?.getDeclarations() ?? [];
+      if (!declarations.some((d) => untyped.has(d.compilerNode))) continue;
+      const top = ref.getAncestors().find((a) => a.getParent() === body);
+      if (top?.getKind() !== SyntaxKind.PropertyAssignment || ref === top.getNameNode()) return null;
+      if (relationField(model, top.getName())) return null;
+    }
+    return body;
   }
 
   /** Every relation one `data` object literal of `model` writes through. */
