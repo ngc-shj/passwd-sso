@@ -77,4 +77,21 @@ Scratch worktree at `d22755a43` (`.env` exported, not copied), compose workers s
 | M3 emergency-access match without `ownerId` (listing, write) | cell 3 (emergencyAccessGrants) |
 | M4 backfill without `app.bypass_rls` | migration backfill cell |
 
+Round 1 (code review F2), scratch worktree at `a7e5b385c`, the whole file per mutant (31 tests; the
+unmutated baseline 31/31 green). Each predicate mutant edits only the containment write's copy:
+
+| Mutant | Red cells |
+|--------|-----------|
+| M5 service-account write without `createdById` | cell 3 (serviceAccounts) |
+| M6 service-account-token write without `createdById` | cell 3 (serviceAccountTokens) |
+| M7 MCP-client write without `createdById` | cell 3 (mcpClients) |
+| M8 break-glass write without `requesterId` | cell 3 (breakglassGrants) |
+| M9 account read and delete without `userId` | cell 3 (unlinking) |
+| M10 SCIM write without `tenantId` | cell 3 (scimTokens) |
+| M11 service-account-token write without `tenantId` | cell 3 (serviceAccountTokens) |
+| M12 break-glass write without `tenantId` | cell 3 (breakglassGrants) |
+| M13 containment moved to its own transaction after the revoke commits | cell 4, and every cell 3 asserting the revoke-all row's `contained` fields |
+
+The relation-walk extension in `check-bypass-rls` is red-proved in its self-tests (D10).
+
 Unmodified tree: integration suite 147 files / 1471 tests green (MinIO).
