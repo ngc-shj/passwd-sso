@@ -136,6 +136,11 @@ It builds/pushes an immutable git-SHA tag, runs `terraform apply
 
 ### Code-only release (no schema change)
 
+Deployments that applied `20261101000000_team_tenant_departure` before
+`20261110000000_rls_backfill_rerun` follow
+[departed-member-access-backfill.md](departed-member-access-backfill.md) around that
+migration.
+
 The migration task is idempotent (`prisma migrate deploy` is a no-op when there
 are no pending migrations), so a code-only release is the same `./scripts/deploy.sh`
 — it re-runs the (no-op) migration and advances the services.

@@ -451,6 +451,7 @@ queue_step "Static: operator-echo-escaped" node scripts/checks/check-operator-ec
 queue_step "Static: crypto-domains" node scripts/checks/check-crypto-domains.mjs
 queue_step "Static: migration-drift" node scripts/checks/check-migration-drift.mjs
 queue_step "Static: destructive-migration" node scripts/checks/check-destructive-migration.mjs
+queue_step "Static: migration-rls-dml" node scripts/checks/check-migration-rls-dml.mjs
 queue_step "Static: migration-transaction" node scripts/checks/check-migration-transaction.mjs
 queue_step "Static: raw-sql-usage" node scripts/checks/check-raw-sql-usage.mjs
 # worker-batch-limit-overrun plan §C2: a LIMIT/FETCH in a write literal must sit

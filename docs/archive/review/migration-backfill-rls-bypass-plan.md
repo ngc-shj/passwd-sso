@@ -320,7 +320,7 @@ table); PL/pgSQL forms (`BEGIN UPDATE`, `IF … THEN UPDATE`, `FOR r IN SELECT`,
 missing the table; near-name list (`tenant_members` granted, `team_members` written); grant with
 `false`; non-literal `bypass_tables`; grant inside `IF`, `LOOP` or a nested `BEGIN …
 EXCEPTION`; restore before the last DML; no restore; top-level DML on a forced table;
-`EXECUTE`; `FORCE ROW LEVEL SECURITY` inside a `DO`; unterminated dollar quote. Passing: full
+`EXECUTE`; `FORCE ROW LEVEL SECURITY` inside a `DO`; unterminated dollar quote; a
 `DO` without a dollar-quoted body; Unicode dollar tag; `false` on `bypass_tables`; one statement
 over two forced tables with only one granted; a forced-earlier, written-later table across
 migrations; under `CI`, a root override without the fixture flag. Passing: full grant + COALESCE
@@ -499,3 +499,27 @@ suite with compose workers stopped, `scripts/pre-pr.sh`.
 | C4 | Integration cells as NOBYPASSRLS role | locked |
 | C5 | Gate self-tests | locked |
 | C6 | Operator docs + tested report and contain scripts | locked |
+
+## Implementation Checklist
+- C1: `prisma/migrations/20261110000000_rls_backfill_rerun/migration.sql` (new).
+- C2: `prisma/migrations/20261101000000_team_tenant_departure/`, `20261104000000_team_key_rotation_rekey/` — no change.
+- C3: `scripts/checks/check-migration-rls-dml.mjs`, `scripts/checks/migration-rls-dml-baseline.txt`
+  (new); reuse `tokenizeSql` / `TOKEN` / `nameOf` from `scripts/checks/lib/sql-scan.mjs`; baseline
+  format and root-override convention from `check-destructive-migration.mjs`; wired in
+  `scripts/pre-pr.sh` beside `Static: destructive-migration` (CI static-checks runs pre-pr with
+  `PRE_PR_STATIC_ONLY=1`).
+- C5: `scripts/__tests__/check-migration-rls-dml.test.mjs` (new; required by the gate-selftest
+  coverage meta-gate).
+- C4: extend `src/__tests__/db-integration/team-tenant-departure.integration.test.ts` and
+  `team-key-rekey-writers.integration.test.ts`; C6 cells in a new
+  `src/__tests__/db-integration/departed-member-operator-scripts.integration.test.ts`. Reuse
+  `createPool` / `createPrismaForRole` / `appConnectionString` / `expectBypassNotices` /
+  `deleteTestData` (`helpers.ts`), `buildOutboxPayload` (`src/lib/audit/audit-payload.ts`),
+  `deliverRow` (`src/workers/audit-outbox-worker.ts`), `SYSTEM_ACTOR_ID`
+  (`src/lib/constants/app.ts`), `AUDIT_TARGET_TYPE`, `TENANT_MEMBERSHIP_SOURCE`.
+- Export the advisory key builder from `src/lib/team/tenant-row-lock.ts` (`advisoryKey`).
+- C6: new runbook `docs/operations/departed-member-access-backfill.md` holding both scripts
+  between markers; linked from `docs/operations/README.md` and the migration section of
+  `docs/operations/deployment.md`; setup-doc notes in `docs/setup/{gcp,aws,vercel}/*.md`.
+- CI parity: the gate runs through pre-pr (static-checks job); its self-test through the unit
+  vitest job; integration cells through the integration job.

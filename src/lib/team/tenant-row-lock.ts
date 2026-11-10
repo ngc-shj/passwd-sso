@@ -40,7 +40,7 @@ export type LockedTenantRow = {
 const LOCK_MODE = { share: "share", update: "update" } as const;
 export type TenantRowLockMode = (typeof LOCK_MODE)[keyof typeof LOCK_MODE];
 
-function advisoryKey(tenantId: string, userId: string): string {
+export function advisoryKey(tenantId: string, userId: string): string {
   return `tenant-member:${tenantId}:${userId}`;
 }
 

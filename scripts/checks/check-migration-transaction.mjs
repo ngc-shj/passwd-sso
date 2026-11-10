@@ -39,6 +39,7 @@ import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { tokenize } from "./check-destructive-migration.mjs";
+import { MIN_REASON_LENGTH, parseReasonedAllowlist } from "./lib/reasoned-allowlist.mjs";
 
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 const ROOT = process.env.MIGRATION_TX_CHECK_ROOT ?? REPO_ROOT;
@@ -47,7 +48,6 @@ const ALLOWLIST_FILE =
   process.env.MIGRATION_TX_CHECK_ALLOWLIST ??
   join(ROOT, "scripts/checks/migration-transaction-baseline.txt");
 
-const MIN_REASON_LENGTH = 10;
 
 /**
  * Keywords that begin a schema-modifying statement. `DO` is included because
@@ -159,26 +159,7 @@ export function analyze(sql) {
 
 function readAllowlist() {
   if (!existsSync(ALLOWLIST_FILE)) return { entries: new Map(), errors: [] };
-  const entries = new Map();
-  const errors = [];
-  for (const raw of readFileSync(ALLOWLIST_FILE, "utf8").split("\n")) {
-    const line = raw.trim();
-    if (line.length === 0 || line.startsWith("#")) continue;
-    const hashIndex = line.indexOf("#");
-    if (hashIndex === -1) {
-      errors.push(`ALLOWLIST_ENTRY_WITHOUT_REASON: ${line}`);
-      continue;
-    }
-    const name = line.slice(0, hashIndex).trim();
-    const reason = line.slice(hashIndex + 1).trim();
-    if (name.length === 0) continue;
-    if (reason.length < MIN_REASON_LENGTH) {
-      errors.push(`ALLOWLIST_ENTRY_WITHOUT_REASON: ${line}`);
-      continue;
-    }
-    entries.set(name, reason);
-  }
-  return { entries, errors };
+  return parseReasonedAllowlist(readFileSync(ALLOWLIST_FILE, "utf8"));
 }
 
 export function findUnwrapped() {

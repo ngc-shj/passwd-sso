@@ -42,6 +42,7 @@
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { MIN_REASON_LENGTH, parseReasonedAllowlist } from "./lib/reasoned-allowlist.mjs";
 
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 // Env-overridable so the self-test can run against an isolated fixture tree
@@ -52,7 +53,6 @@ const ALLOWLIST_FILE =
   process.env.DESTRUCTIVE_MIGRATION_CHECK_ALLOWLIST ??
   join(ROOT, "scripts/checks/destructive-migration-baseline.txt");
 
-const MIN_REASON_LENGTH = 10;
 
 /**
  * Lexical scan: return the SQL's significant tokens (bare words upper-cased,
@@ -324,26 +324,7 @@ export function findDestructiveKinds(sql) {
 
 function readAllowlist() {
   if (!existsSync(ALLOWLIST_FILE)) return { entries: new Map(), errors: [] };
-  const entries = new Map();
-  const errors = [];
-  for (const raw of readFileSync(ALLOWLIST_FILE, "utf8").split("\n")) {
-    const line = raw.trim();
-    if (line.length === 0 || line.startsWith("#")) continue;
-    const hashIndex = line.indexOf("#");
-    if (hashIndex === -1) {
-      errors.push(`ALLOWLIST_ENTRY_WITHOUT_REASON: ${line}`);
-      continue;
-    }
-    const name = line.slice(0, hashIndex).trim();
-    const reason = line.slice(hashIndex + 1).trim();
-    if (name.length === 0) continue;
-    if (reason.length < MIN_REASON_LENGTH) {
-      errors.push(`ALLOWLIST_ENTRY_WITHOUT_REASON: ${line}`);
-      continue;
-    }
-    entries.set(name, reason);
-  }
-  return { entries, errors };
+  return parseReasonedAllowlist(readFileSync(ALLOWLIST_FILE, "utf8"));
 }
 
 function findDestructiveMigrations() {

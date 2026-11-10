@@ -1,0 +1,25 @@
+# Baseline: migrations whose statements read or write a FORCE-RLS table with no
+# RLS bypass (see scripts/checks/check-migration-rls-dml.mjs and
+# docs/archive/review/migration-backfill-rls-bypass-plan.md, "Member set").
+#
+# These already shipped; the gate binds NEW migrations. Do NOT add an entry to
+# silence the gate: wrap the backfill in a DO block that grants itself
+# app.bypass_rls / app.bypass_tables and restores them (pattern:
+# 20261109162613_*). Each reason below was checked against the migration and
+# the code; an entry whose migration stops hitting is reported STALE.
+
+20260321100000_unify_all_ids_to_uuid  # id remap reads FORCE tables; if it saw no rows the ids stay non-UUID text and the next migration's ALTER COLUMN TYPE uuid USING col::uuid fails the deploy loudly
+20260415130000_audit_path_unification  # NULL user_id backfill and its pre-check; the later ALTER COLUMN user_id SET NOT NULL validates every row regardless of RLS and fails the deploy if any NULL survived
+20260418042050_unify_session_timeout_policy  # extension_tokens family backfill is repeated and then NOT NULL-flipped by 20260418144000 (loud); team_policies carry of the legacy max_session_duration_minutes is not repeatable (column dropped by 20260425103520), leaving the team override NULL = inherit the tenant timeout
+20260418144000_flip_extension_token_family_not_null  # defensive backfill only; the SET NOT NULL right after it validates every row regardless of RLS and fails the deploy loudly if a NULL was left
+20260418160000_clamp_session_timeout_min_to_5  # raises team_policies overrides below 5 minutes; skipped rows keep a shorter override, and the resolver takes min(tenant, team) so it is stricter, never looser
+20260430120002_admin_vault_reset_backfill  # legacy in-flight resets left unrevoked are refused at runtime (execute needs approvedAt, approve throws on null target_email_at_initiate) and expire after 24h (RESET_TOTAL_TTL_MS)
+20260502000000_audit_anchor_publisher_phase2  # UPDATE epoch WHERE NULL matches nothing: ADD COLUMN epoch DEFAULT 1 already gives every existing row 1, so the statement is a no-op with or without RLS
+20260519100000_replace_mobile_bridge_code_device_pubkey_with_jkt  # DELETE of 60s-TTL bridge codes; any row left makes the following ADD COLUMN device_jkt NOT NULL (no default) fail the deploy loudly
+20260522000100_access_request_requester  # PENDING to EXPIRED for requester-less rows; the approve route refuses a request with no requester (approve/route.ts) so a row left PENDING cannot be approved
+20260524060000_extension_dpop_sender_constrained  # DELETE of legacy BROWSER_EXTENSION tokens with null cnf_jkt; any row left makes the ADD CONSTRAINT CHECK that follows (validated over all rows regardless of RLS) fail the deploy loudly
+20260629000000_add_mcp_refresh_token_family_created_at  # family_created_at backfill is repeated by 20260629000100, whose SET NOT NULL validates every row regardless of RLS and fails the deploy loudly if a NULL was left
+20260629000100_flip_mcp_refresh_token_family_created_at_not_null  # defensive backfill only; the SET NOT NULL right after it validates every row regardless of RLS and fails the deploy loudly if a NULL was left
+20260725000000_hash_session_tokens_purge_plaintext  # DELETE of sessions; rows left hold plaintext tokens that can never match the digest lookup (dead) and the retention GC purges sessions past expiry (registry.ts sessions EXPIRY), though the plaintext stays until then
+20261101000000_team_tenant_departure  # fixed forward by 20261110000000_rls_backfill_rerun
+20261104000000_team_key_rotation_rekey  # fixed forward by 20261110000000_rls_backfill_rerun
