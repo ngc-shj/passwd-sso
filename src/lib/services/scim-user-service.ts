@@ -216,7 +216,7 @@ export async function replaceScimUser(
   if (!member) throw new ScimUserNotFoundError();
   if (member.role === TENANT_ROLE.OWNER && active === false) throw new ScimOwnerProtectedError();
 
-  let auditAction: AuditAction = AUDIT_ACTION.SCIM_USER_UPDATE;
+  let auditAction: AuditAction;
   try {
     auditAction = await prisma.$transaction(async (tx) => {
       // The active state moves only through team-departure.ts, which ends or
