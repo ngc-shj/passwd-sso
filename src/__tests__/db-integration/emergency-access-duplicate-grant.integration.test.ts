@@ -17,13 +17,13 @@ import {
 import { randomUUID } from "node:crypto";
 import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
 import { duplicateGrantWhere } from "@/lib/emergency-access/emergency-access-server";
+import { MS_PER_HOUR } from "@/lib/constants/time";
 
 describe("emergency-access duplicateGrantWhere (C6)", () => {
   let ctx: TestContext;
   let tenantId: string;
   let ownerId: string;
   const granteeEmail = "grantee-dup@example.com";
-  const MS_PER_HOUR = 60 * 60 * 1000;
 
   beforeAll(async () => {
     ctx = await createTestContext();
@@ -88,10 +88,10 @@ describe("emergency-access duplicateGrantWhere (C6)", () => {
     expect(await findDuplicate(now)).toBeNull();
   });
 
-  it("a PENDING invite expiring exactly at `now` is not a duplicate", async () => {
+  it("a PENDING invite expiring exactly at `now` is still a duplicate, as accept still honours it", async () => {
     const now = new Date();
-    await insertGrant("PENDING", now);
-    expect(await findDuplicate(now)).toBeNull();
+    const id = await insertGrant("PENDING", now);
+    expect(await findDuplicate(now)).toBe(id);
   });
 
   it.each(["ACCEPTED", "ACTIVATED"])(

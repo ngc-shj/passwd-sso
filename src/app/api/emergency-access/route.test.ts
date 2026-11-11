@@ -143,7 +143,7 @@ describe("POST /api/emergency-access", () => {
       ownerId: "owner-1",
       granteeEmail: { in: ["grantee@test.com"], mode: "insensitive" },
       status: { notIn: [EA_STATUS.REVOKED, EA_STATUS.REJECTED] },
-      NOT: { status: EA_STATUS.PENDING, tokenExpiresAt: { lte: clock } },
+      NOT: { status: EA_STATUS.PENDING, tokenExpiresAt: { lt: clock } },
     };
 
     beforeEach(() => {

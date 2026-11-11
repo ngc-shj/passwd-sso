@@ -292,12 +292,13 @@ describe("POST /api/teams/[teamId]/invitations", () => {
       expect(status).toBe(201);
     });
 
-    it("treats a PENDING invitation expiring at the current instant as expired", async () => {
+    it("treats a PENDING invitation expiring at the current instant as still live, as accept does", async () => {
       mockInvitationFindMany.mockResolvedValue([
         { id: "inv-boundary", createdAt: new Date("2026-05-01T00:00:00Z"), expiresAt: new Date(clock.getTime()) },
       ]);
-      const { status } = await parseResponse(await invite());
-      expect(status).toBe(201);
+      const { status, json } = await parseResponse(await invite());
+      expect(status).toBe(409);
+      expect(json.error).toBe("INVITATION_ALREADY_SENT");
     });
 
     it("returns 409 when a live PENDING invitation sits beside an expired one", async () => {

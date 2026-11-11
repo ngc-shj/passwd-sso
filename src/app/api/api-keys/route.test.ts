@@ -80,6 +80,7 @@ vi.mock("@/lib/constants/auth/api-key", async (importOriginal) => {
 import { NextRequest } from "next/server";
 import { GET, POST } from "./route";
 import { snapshotFactory } from "@/__tests__/helpers/fail-closed";
+import { MS_PER_DAY } from "@/lib/constants/time";
 
 // The module-level `apiKeyCreateLimiter = createRateLimiter(...)` call in
 // route.ts runs once at import time, above. The global `beforeEach` in
@@ -269,7 +270,7 @@ describe("POST /api/api-keys", () => {
           body: {
             name: "Test",
             scope: ["passwords:read"],
-            expiresAt: new Date(clock.getTime() + 30 * 86_400_000).toISOString(),
+            expiresAt: new Date(clock.getTime() + 30 * MS_PER_DAY).toISOString(),
           },
         }),
       );

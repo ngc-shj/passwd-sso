@@ -66,7 +66,7 @@ describe("duplicateGrantWhere", () => {
       ownerId: "owner-1",
       granteeEmail: { in: ["gr_ntee@test.com"], mode: "insensitive" },
       status: { notIn: [EA_STATUS.REVOKED, EA_STATUS.REJECTED] },
-      NOT: { status: EA_STATUS.PENDING, tokenExpiresAt: { lte: now } },
+      NOT: { status: EA_STATUS.PENDING, tokenExpiresAt: { lt: now } },
     });
   });
 });

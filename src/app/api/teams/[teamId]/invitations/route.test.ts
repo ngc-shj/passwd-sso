@@ -434,12 +434,16 @@ describe("POST /api/teams/[teamId]/invitations", () => {
       expect(mockPrismaTeamInvitation.create).toHaveBeenCalledOnce();
     });
 
-    it("treats a PENDING invitation expiring at the current instant as expired", async () => {
+    it("treats a PENDING invitation expiring at the current instant as still live, as accept does", async () => {
       mockPrismaTeamInvitation.findMany.mockResolvedValue([
         { id: "boundary-inv", createdAt: now, expiresAt: new Date(clock.getTime()) },
       ]);
 
-      expect((await invite()).status).toBe(201);
+      const res = await invite();
+
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toBe("INVITATION_ALREADY_SENT");
+      expect(mockPrismaTeamInvitation.create).not.toHaveBeenCalled();
     });
 
     it("refuses with ALREADY_SENT when a live PENDING invitation sits beside an expired one", async () => {

@@ -177,8 +177,10 @@ async function handlePOST(req: NextRequest, { params }: Params) {
         });
         // A PENDING row past its expiry can no longer be accepted, so it is
         // superseded (expired below) rather than reported as already sent.
+        // "Past" is decided as accept decides it (`expiresAt < now` refuses),
+        // so a row accept would still honour is never superseded.
         const now = new Date();
-        const live = pending.filter((inv) => inv.expiresAt > now);
+        const live = pending.filter((inv) => inv.expiresAt >= now);
         for (const existing of live) {
           if (!inviteeIds.some((id) => departedSince(rows.get(id), existing.createdAt))) {
             return { outcome: ISSUE_OUTCOME.ALREADY_SENT };

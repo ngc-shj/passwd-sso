@@ -5,3 +5,4 @@
 - `check:security-matrices` fails until `docs/security/deletion-retention-matrix.md` is committed (the check diffs against git); not a defect.
 - Second external review: iOS fail-closed persist, extension synchronous disconnect on any server change, CLI chmod-before-rename (plan addendum round 2).
 - Third external review: extension clears synchronously on every server change; CLI migrate tightens via O_NOFOLLOW fd and refuses symlinks (plan addendum round 3).
+- Phase 2 self R-check (R48): C5/C6 expiry boundary aligned with the accept routes (`expiresAt < now` = expired); `expiresAt === now` is now live in both. RT3: tests use `MS_PER_HOUR` / `MS_PER_DAY` from `@/lib/constants/time`.

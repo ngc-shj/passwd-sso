@@ -157,7 +157,7 @@ Member set: the `count` / `findFirst` / `findMany`-for-dedup callers from the C2
 
 - `src/app/api/teams/[teamId]/invitations/route.ts` POST is a latent defect that exists today until the next sweep.
   - Select `expiresAt`.
-  - Partition the pending rows before the loop: expired ones (`expiresAt <= now`) never yield `ALREADY_SENT`.
+  - Partition the pending rows before the loop: expired ones (`expiresAt < now`, the accept route's own test) never yield `ALREADY_SENT`.
   - The existing `updateMany` still flips every pending row, expired ones included, to EXPIRED.
   - A single live pending row still returns `ALREADY_SENT`.
 - Abuse check (S5): the route requires `MEMBER_INVITE`, and superseded rows are flipped, so they do not accumulate.
@@ -168,7 +168,7 @@ Member set: the `count` / `findFirst` / `findMany`-for-dedup callers from the C2
 - `src/app/api/emergency-access/route.ts` POST duplicate check (`status notIn [REVOKED, REJECTED]`)
   treats a never-accepted invite whose `tokenExpiresAt` has passed as a live duplicate until the
   next sweep deletes it (latent today; security R2 N1). Add
-  `NOT: { status: PENDING, tokenExpiresAt: { lte: now } }` to the `where`.
+  `NOT: { status: PENDING, tokenExpiresAt: { lt: now } }` to the `where` (strict, matching the accept routes' `tokenExpiresAt < now`).
 - The expired row is left in place (non-actionable: accept routes check `tokenExpiresAt`;
   purged by the existing `EMERGENCY_GRANT_DEAD` sweep). No supersede write.
 - Acceptance (unit, `src/app/api/emergency-access/route.test.ts`): the `findFirst` `where`
@@ -180,11 +180,11 @@ Member set: the `count` / `findFirst` / `findMany`-for-dedup callers from the C2
   `INVITATION_EXPIRED`. Same state exists today within a sweep interval.
 - Tests (testing R3 M1/M2):
   - Unit (`src/app/api/emergency-access/route.test.ts`, fake timers): assert the exact `where`
-    shape including `NOT: { status: PENDING, tokenExpiresAt: { lte: <now> } }`; the existing
+    shape including `NOT: { status: PENDING, tokenExpiresAt: { lt: <now> } }`; the existing
     live-duplicate case additionally asserts that clause (not only the 409).
   - Real-DB (`src/__tests__/db-integration/`): run the duplicate-check `where` against seeded
     grants — expired PENDING → not a duplicate; live PENDING → duplicate; ACCEPTED/ACTIVATED
-    with past `token_expires_at` → duplicate; `token_expires_at = now()` → not a duplicate.
+    with past `token_expires_at` → duplicate; `token_expires_at = now` → still a duplicate (accept still honours it).
     To avoid a twin, export the `where` builder from the route module's lib side
     (`src/lib/emergency-access/`) and call it from both the route and the test.
 
@@ -199,7 +199,7 @@ Retaining expired rows for 30 more days keeps this material at rest.
 - `api_keys` / `operator_tokens`: token hashes only.
 
 Reading any of these needs the DB plus the master key or the pepper. An attacker who has them already
-reads every live share and reset. Before SC6 (#581, 2026-06-18), expired shares were kept
+reads every live share and reset. Before SC6 (`#581`, 2026-06-18), expired shares were kept
 indefinitely. Every read path rejects expired rows before decrypting (C2), so a master-key
 rotation that retires an old version leaves retained rows undecryptable but never decrypted.
 
@@ -235,7 +235,7 @@ Unit tests:
   - New cases:
     - an expired PENDING row gives 201, and `updateMany` flips it;
     - an expired row plus a live row gives `ALREADY_SENT`;
-    - `expiresAt === now` counts as expired.
+    - `expiresAt === now` counts as live, as the accept route does.
   - Use fake timers.
 - C2 deny-side tests per the C2 obligation.
 

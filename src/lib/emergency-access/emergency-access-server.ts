@@ -59,7 +59,9 @@ export async function markGrantsStaleForOwner(
  *
  * A never-accepted invite whose token has expired is excluded: it can no longer
  * be accepted, and until the retention sweep removes it, it would otherwise
- * block re-inviting the same person.
+ * block re-inviting the same person. "Expired" matches the accept routes
+ * (`tokenExpiresAt < now` refuses), so an invite they would still honour keeps
+ * counting as a duplicate.
  */
 export function duplicateGrantWhere(
   ownerId: string,
@@ -72,6 +74,6 @@ export function duplicateGrantWhere(
     // `%` in the address matched other grants (round-8 R8-S4).
     granteeEmail: { in: [granteeEmail], mode: "insensitive" },
     status: { notIn: [EA_STATUS.REVOKED, EA_STATUS.REJECTED] },
-    NOT: { status: EA_STATUS.PENDING, tokenExpiresAt: { lte: now } },
+    NOT: { status: EA_STATUS.PENDING, tokenExpiresAt: { lt: now } },
   };
 }
