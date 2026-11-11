@@ -468,6 +468,9 @@ describe("departed-member operator scripts — real-DB integration", () => {
         const tenant = await newTenant();
         const stamp = newStamp();
         const { team, user, hook } = await recordTeam(tenant, stamp, { backfill: C1_DIR }, "logs");
+        // On a database holding no other rows, the final DELETE would empty tenant_members and
+        // trip the report's bypass control instead of exercising section 2.
+        await mkMember(tenant);
         const actor = { userId: SYSTEM_ACTOR_ID, actorType: ACTOR_TYPE.SYSTEM };
         const listed = async () => inTenants((await runReport()).section2, [tenant]).map((r) => r.id);
         expect(await listed()).toEqual([hook]);
