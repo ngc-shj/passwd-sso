@@ -16,6 +16,7 @@ import { describeEntryFetchFailure } from "../lib/v1-entry-failure.js";
 import * as output from "../lib/output.js";
 
 import { BLOCKED_KEYS } from "../lib/blocked-keys.js";
+import { onRedirectRefused } from "../lib/redirect-refusal.js";
 
 interface RunOptions {
   config?: string;
@@ -84,7 +85,7 @@ export async function runCommand(opts: RunOptions): Promise<void> {
       headers: { Authorization: authHeader },
       // Never let a redirect carry the bearer token to another host.
       redirect: "error",
-    });
+    }).catch(onRedirectRefused(url));
     if (!res.ok) {
       output.error(await describeEntryFetchFailure(res, mapping.entry));
       process.exit(1);

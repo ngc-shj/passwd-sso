@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -155,6 +155,90 @@ describe("check-client-credential-fetch.mjs — redirect axis", () => {
     expectFail("no scannable source files");
   });
 
+  it("FAILS when a parameter shadows the const init's name", () => {
+    cli(
+      "a.ts",
+      'const init = { redirect: "error" as const };\nexport const g = (u: string) => fetch(u, init);\nexport function f(u: string, init: RequestInit) {\n  return fetch(u, init);\n}\n',
+    );
+    expectFail("declared more than once");
+  });
+
+  it("FAILS when an inner let shadows the const init's name", () => {
+    cli(
+      "a.ts",
+      'const init = { redirect: "error" as const };\nexport function f(u: string, o: RequestInit) {\n  {\n    let init = o;\n    void init;\n  }\n  return fetch(u, init);\n}\n',
+    );
+    expectFail("declared more than once");
+  });
+
+  it.each([
+    ["assigned", 'opts.redirect = "follow";'],
+    ["assigned through a string key", 'opts["redirect"] = "follow";'],
+    ["assigned through a computed key", 'opts[k] = "follow";'],
+    ["deleted", "delete (opts as Partial<RequestInit>).redirect;"],
+    ["merged with Object.assign", "Object.assign(opts, o);"],
+  ])("FAILS when the const init's redirect is %s after declaration", (_label, write) => {
+    cli(
+      "a.ts",
+      `export function f(u: string, o: RequestInit, k: string) {\n  const opts: RequestInit & Record<string, unknown> = { redirect: "error" };\n  ${write}\n  return fetch(u, opts);\n}\n`,
+    );
+    expectFail("is written through");
+  });
+
+  it("passes when another property of the const init is assigned", () => {
+    cli(
+      "a.ts",
+      'export function f(u: string, h: Record<string, string>) {\n  const opts: RequestInit = { redirect: "error" };\n  opts.headers = h;\n  return fetch(u, opts);\n}\n',
+    );
+    expect(runGuard().exitCode).toBe(0);
+  });
+
+  it("scans .js files", () => {
+    ext("content/x.js", "export const f = (u) => fetch(u);\n");
+    expectFail("fetch call without a pinned redirect");
+  });
+
+  it("FAILS on an init that is a call, not an object literal", () => {
+    cli("a.ts", "const mk = (): RequestInit => ({});\nexport const f = (u: string) => fetch(u, mk());\n");
+    expectFail("init is not an object literal");
+  });
+
+  it("FAILS on a computed key after redirect", () => {
+    cli("a.ts", 'export const f = (u: string, k: string) => fetch(u, { redirect: "error", [k]: "follow" });\n');
+    expectFail("computed property key");
+  });
+
+  it('FAILS on a globalThis["fetch"] call without redirect', () => {
+    cli("a.ts", 'export const f = (u: string) => globalThis["fetch"](u);\n');
+    expectFail("fetch call without a pinned redirect");
+  });
+
+  it('FAILS on globalThis["fetch"] used as a value', () => {
+    cli("a.ts", 'export const run = (g: (f: unknown) => void) => g(globalThis["fetch"]);\n');
+    expectFail("unclassified fetch reference");
+  });
+
+  it("FAILS on an import of a binding named fetch", () => {
+    cli("a.ts", 'import { fetch } from "undici";\nexport const f = (u: string) => fetch(u, { redirect: "error" });\n');
+    expectFail("import/export of a binding named fetch");
+  });
+
+  it("FAILS on an alias used as a value", () => {
+    cli("a.ts", "const doFetch = fetch;\nexport const run = (g: (f: unknown) => void) => g(doFetch);\n");
+    expectFail("unclassified fetch reference");
+  });
+
+  it("FAILS on a file with a syntax error", () => {
+    cli("a.ts", 'export const f = (u: string) => fetch(u, { redirect: "error" ;\n');
+    expectFail("failed to parse");
+  });
+
+  it("FAILS on a file that cannot be read", () => {
+    cli("a.ts", "export const x = 1;\n");
+    chmodSync(join(cliRoot, "a.ts"), 0o000);
+    expectFail("failed to read");
+  });
+
   it("ignores test files", () => {
     cli("a.test.ts", "export const f = (u: string) => fetch(u);\n");
     cli("__tests__/b.ts", "export const f = (u: string) => fetch(u);\n");
@@ -173,9 +257,29 @@ describe("check-client-credential-fetch.mjs — Authorization tripwire", () => {
     expectFail("Authorization header property");
   });
 
+  it('FAILS on xhr.setRequestHeader("Authorization", …)', () => {
+    ext("lib/x.ts", 'export const f = (x: XMLHttpRequest) => x.setRequestHeader("Authorization", "Bearer t");\n');
+    expectFail('setRequestHeader("Authorization", …)');
+  });
+
   it('FAILS on headers.set("Authorization", …)', () => {
     ext("lib/x.ts", 'export const f = (h: Headers) => h.set("Authorization", "Bearer t");\n');
     expectFail("outside the allowlist");
+  });
+
+  it('FAILS on h["Authorization"] = …', () => {
+    ext("lib/x.ts", 'export const f = (h: Record<string, string>) => { h["Authorization"] = "Bearer t"; };\n');
+    expectFail("Authorization header assignment");
+  });
+
+  it('FAILS on headers.append("Authorization", …)', () => {
+    ext("lib/x.ts", 'export const f = (h: Headers) => h.append("Authorization", "Bearer t");\n');
+    expectFail('append("Authorization", …)');
+  });
+
+  it("FAILS on a shorthand { Authorization } property", () => {
+    ext("lib/x.ts", "export const f = (Authorization: string) => ({ Authorization });\n");
+    expectFail("Authorization header property");
   });
 
   it("passes Authorization in an allowlisted file", () => {

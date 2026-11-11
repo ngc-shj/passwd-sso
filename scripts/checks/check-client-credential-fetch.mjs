@@ -33,7 +33,12 @@
  * `redirect` property is the string literal "error" or "manual" and sits AFTER
  * every spread element (a later spread could override it). A missing or
  * unreadable init, a different value, a computed key, or `redirect` before a
- * spread is a violation. Any other reference to the identifier `fetch` (passed
+ * spread is a violation. A const init is accepted only if its name is declared
+ * once in the file (a parameter or inner binding of the same name could shadow
+ * it; name-based, so this can only over-report) and the object is never
+ * written through after its declaration where the write could reach
+ * `redirect` (`x.redirect = …`, `x[k] = …` with a non-literal or "redirect"
+ * key, `delete x.redirect`, `Object.assign(x, …)`). Any other reference to the identifier `fetch` (passed
  * as a value, re-assigned, destructured, shorthand) is "unclassified fetch
  * reference", so a new alias cannot slip past; the only exemption is the type
  * position `typeof fetch`, which has no runtime effect. An alias that is used
@@ -48,14 +53,15 @@
  * ## Axis 2 — Authorization (TRIPWIRE, not a boundary; extension/src only)
  *
  * A property named `Authorization` (identifier or string key, any case), a
- * `.set/.append("Authorization", …)` call, or `x["Authorization"] = …`,
+ * `.set/.append/.setRequestHeader("Authorization", …)` call, or
+ * `x["Authorization"] = …`,
  * outside the allowlist below, is a violation. This is a name-based tripwire:
  * it raises the cost of the cheap regression (a new helper that attaches the
  * bearer) and does NOT prove the issuer binding of the allowed sites.
  * Known bypasses: a computed/dynamic header name (`h[name]`), a name built by
  * concatenation, a header object passed through a helper outside the
  * allowlist that gets the name from elsewhere, `new Headers(entriesFromData)`,
- * and any non-fetch transport (XHR, WebSocket, `chrome.*` APIs). The
+ * and any other non-fetch transport (WebSocket, `chrome.*` APIs). The
  * redirect axis still bounds where those requests can be re-sent to; the
  * issuer binding of the allowlisted sites is reviewed by hand.
  *
@@ -66,7 +72,9 @@
  *
  * Env: `CLIENT_CREDENTIAL_CLI_ROOT` (default `cli/src`) and
  * `CLIENT_CREDENTIAL_EXT_ROOT` (default `extension/src`) override the scan
- * roots, for the self-test's fixture trees. A root with no scannable file is an
+ * roots, for the self-test's fixture trees. `.js`/`.mjs` files are scanned
+ * alongside `.ts`/`.tsx` (the extension ships content scripts as `.js`). A
+ * root with no scannable file is an
  * error (a gate that examined nothing must not read as green).
  *
  * Fail-closed: a file that cannot be read or parsed is an ERROR (exit 1).
@@ -75,7 +83,7 @@
 import { Node, SyntaxKind } from "ts-morph";
 import { readFileSync } from "node:fs";
 import { join, relative } from "node:path";
-import { createAstProject, walkSourceFiles } from "./lib/ast-project.mjs";
+import { createAstProject, DEFAULT_SOURCE_EXTENSIONS, walkSourceFiles } from "./lib/ast-project.mjs";
 
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 const CLI_ROOT = process.env.CLIENT_CREDENTIAL_CLI_ROOT ?? join(REPO_ROOT, "cli/src");
@@ -97,6 +105,7 @@ class GateIOError extends Error {}
 
 const GLOBAL_OBJECTS = new Set(["globalThis", "window", "self"]);
 const ALLOWED_REDIRECT = new Set(["error", "manual"]);
+const SCANNED_EXTENSIONS = [...DEFAULT_SOURCE_EXTENSIONS, ".js", ".mjs"];
 
 function strText(node) {
   if (!node) return null;
@@ -167,14 +176,77 @@ function findConstObjectLiteral(from, name) {
   return null;
 }
 
+/** Every binding name declared in the file (variables, parameters, functions, classes, catch). */
+function countDeclarations(sf, name) {
+  let n = 0;
+  for (const id of sf.getDescendantsOfKind(SyntaxKind.Identifier)) {
+    if (id.getText() !== name) continue;
+    const p = id.getParent();
+    if (
+      (Node.isVariableDeclaration(p) ||
+        Node.isParameterDeclaration(p) ||
+        Node.isBindingElement(p) ||
+        Node.isFunctionDeclaration(p) ||
+        Node.isClassDeclaration(p)) &&
+      p.getNameNode() === id
+    ) {
+      n += 1;
+    }
+  }
+  return n;
+}
+
+/** A write through `name` after its declaration that could change `redirect`, or null. */
+function redirectWriteThrough(sf, name) {
+  const isName = (n) => Node.isIdentifier(unwrap(n)) && unwrap(n).getText() === name;
+  const reachesRedirect = (target) => {
+    if (Node.isPropertyAccessExpression(target)) return isName(target.getExpression()) && target.getName() === "redirect";
+    if (Node.isElementAccessExpression(target)) {
+      if (!isName(target.getExpression())) return false;
+      const key = strText(target.getArgumentExpression());
+      return key === null || key === "redirect";
+    }
+    return false;
+  };
+  for (const n of sf.getDescendants()) {
+    if (Node.isBinaryExpression(n)) {
+      const k = n.getOperatorToken().getKind();
+      if (k >= SyntaxKind.FirstAssignment && k <= SyntaxKind.LastAssignment && reachesRedirect(unwrap(n.getLeft()))) {
+        return n;
+      }
+    } else if (Node.isDeleteExpression(n) && reachesRedirect(unwrap(n.getExpression()))) {
+      return n;
+    } else if (Node.isCallExpression(n)) {
+      const callee = n.getExpression();
+      if (
+        Node.isPropertyAccessExpression(callee) &&
+        callee.getName() === "assign" &&
+        callee.getExpression().getText() === "Object" &&
+        n.getArguments().length > 0 &&
+        isName(n.getArguments()[0])
+      ) {
+        return n;
+      }
+    }
+  }
+  return null;
+}
+
 /** Returns a reason string if the call's init does not pin redirect, else null. */
 function redirectProblem(call) {
   const args = call.getArguments();
   if (args.length < 2) return "no init argument (redirect defaults to follow)";
   let init = unwrap(args[1]);
   if (Node.isIdentifier(init)) {
-    const resolved = findConstObjectLiteral(init, init.getText());
-    if (!resolved) return `init \`${init.getText()}\` does not resolve to a same-scope const object literal`;
+    const name = init.getText();
+    const resolved = findConstObjectLiteral(init, name);
+    if (!resolved) return `init \`${name}\` does not resolve to a same-scope const object literal`;
+    const sf = call.getSourceFile();
+    if (countDeclarations(sf, name) !== 1) {
+      return `init \`${name}\` is declared more than once in the file (a shadowing binding may be the one passed)`;
+    }
+    const write = redirectWriteThrough(sf, name);
+    if (write) return `init \`${name}\` is written through at line ${write.getStartLineNumber()}, which can change redirect`;
     init = resolved;
   }
   if (!Node.isObjectLiteralExpression(init)) return "init is not an object literal";
@@ -334,7 +406,7 @@ function scanAuthorization(sf, label, rel, findings) {
       const callee = n.getExpression();
       if (
         Node.isPropertyAccessExpression(callee) &&
-        (callee.getName() === "set" || callee.getName() === "append") &&
+        ["set", "append", "setRequestHeader"].includes(callee.getName()) &&
         isAuth(strText(n.getArguments()[0]))
       ) {
         findings.push(`${loc(n)}: ${callee.getName()}("Authorization", …) outside the allowlist`);
@@ -350,7 +422,7 @@ function scanAuthorization(sf, label, rel, findings) {
 
 function scanRoot(project, root, labelPrefix, { authorization }) {
   const findings = [];
-  const files = walkSourceFiles(root);
+  const files = walkSourceFiles(root, SCANNED_EXTENSIONS);
   if (files.length === 0) throw new GateIOError(`no scannable source files under ${root}`);
   for (const file of files) {
     const rel = relative(root, file).split("\\").join("/");
@@ -366,6 +438,12 @@ function scanRoot(project, root, labelPrefix, { authorization }) {
       sf = project.createSourceFile(label, text, { overwrite: true });
     } catch (err) {
       throw new GateIOError(`failed to parse ${label}: ${err.message}`);
+    }
+    // createSourceFile recovers from syntax errors; a recovered tree can drop
+    // the very call this gate checks, so any parse diagnostic is an error.
+    const diagnostics = sf.compilerNode.parseDiagnostics;
+    if (!Array.isArray(diagnostics) || diagnostics.length > 0) {
+      throw new GateIOError(`failed to parse ${label}: syntax error`);
     }
     scanRedirect(sf, label, findings);
     if (authorization) scanAuthorization(sf, label, rel, findings);

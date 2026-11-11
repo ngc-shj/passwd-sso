@@ -36,6 +36,7 @@ vi.mock("../../lib/theme", () => ({
 }));
 
 import { App } from "../../options/App";
+import { DEFAULT_SERVER_URL } from "../../lib/server-url";
 
 const allDefaults = {
   serverUrl: "https://example.com",
@@ -485,6 +486,31 @@ describe("Options App", () => {
       expect(fetchMock).not.toHaveBeenCalled();
       expect(dpopKeyMocks.signDpopProof).not.toHaveBeenCalled();
       expect(dpopKeyMocks.deleteIdbKey).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["null", null],
+      ["empty", ""],
+    ])("sends nothing when the issuer is %s and the configured server is the default", async (_label, issuerUrl) => {
+      // An empty-input default must not stand in for a missing issuer.
+      mockGetSettings.mockResolvedValue({ ...allDefaults, serverUrl: DEFAULT_SERVER_URL });
+      holdToken(issuerUrl);
+      await clickReset();
+
+      await screen.findByText(/Reset failed/);
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(dpopKeyMocks.signDpopProof).not.toHaveBeenCalled();
+    });
+
+    it("posts to the default server when it is both the issuer and the configured server", async () => {
+      // Control for the case above: the same configuration with a recorded issuer.
+      mockGetSettings.mockResolvedValue({ ...allDefaults, serverUrl: DEFAULT_SERVER_URL });
+      holdToken(DEFAULT_SERVER_URL);
+      await clickReset();
+
+      await screen.findByText(/Reset complete/);
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect((fetchMock.mock.calls[0] as [string])[0]).toBe(`${DEFAULT_SERVER_URL}/api/extension/key/reset`);
     });
   });
 });

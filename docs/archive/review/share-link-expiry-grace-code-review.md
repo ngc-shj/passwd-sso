@@ -136,3 +136,49 @@ None.
 
 ### R42 class C7 closure (credential reaching a non-issuer or following a redirect)
 - The member set expanded three times (Round 1 adjacent finding, F2, F3). Closed by the mutation-verified CI guard `scripts/checks/check-client-credential-fetch.mjs` (AST, ts-morph): every `fetch` in `cli/src` and `extension/src` must pin `redirect` to `"error"` or `"manual"` after any spread, an unclassified fetch reference fails, and an `Authorization` header in `extension/src` is allowed only in `dpop-fetch.ts` and `options/App.tsx`. Self-test `scripts/__tests__/check-client-credential-fetch.test.mjs`. Red-proven: removing `redirect: "error"` from the refresh fetch in `cli/src/lib/oauth.ts` → exit 1. Wired in `scripts/pre-pr.sh` ("Static: client-credential-fetch"), which the ci.yml static-checks job runs.
+
+---
+
+# Round 3
+Date: 2026-11-12
+
+## Changes from Previous Round
+Incremental review of commit 104e2e5ed (Round 2 fixes and the class-C7 guard).
+
+## Functionality Findings
+- F4 [Minor] The guard resolved a shadowed or mutated init to an outer const with `redirect: "error"` (`scripts/checks/check-client-credential-fetch.mjs` `findConstObjectLiteral`). — Fixed (same finding as S3-m1).
+- F5 [Minor] A refused redirect surfaced in the CLI as undici's bare "fetch failed" (`cli/src/lib/api-client.ts` `apiRequest`, `env`, `run`, OAuth requests). — Fixed.
+
+## Security Findings
+- S3-M1 [Major] The options-page key reset accepted a null issuer when the configured server is the default: `validateServerUrl` maps empty input to `DEFAULT_SERVER_URL`, so `validateServerUrl(issuerUrl ?? "")` matched it and the token was sent (`extension/src/options/App.tsx` `handleResetConnection`). — Fixed.
+- S3-m1 [Minor] Guard bypasses: (a) shadowing parameter / inner `let`, (b) write through the init after declaration, (d) `setRequestHeader("Authorization", …)` not on the tripwire, (e) `.js` files not scanned; (c) computed global access (`globalThis["fe"+"tch"]`) is contrived. — (a)(b)(d)(e) fixed; (c) recorded as a known bypass of a name-based gate.
+
+## Testing Findings
+- T8 [Major] = S3-M1 seen from the test: the null-issuer case passed only because the fixture's configured server was not the default. — Fixed.
+- T9 [Minor] T7's `vi.waitFor` in the controls broke their pairing with the one-macrotask negatives. — Fixed.
+- T10 [Minor] = S3-m1 (e). — Fixed.
+- T11 [Minor] The guard's parse fail-closed branch was unreachable (ts-morph recovers from syntax errors) and untested; the read-error branch was untested. — Fixed.
+- T12 [Minor] Working guard branches had no self-test (call init, computed key after redirect, `globalThis["fetch"]` call and value, import of `fetch`, alias used as value, `h["Authorization"] =`, `.append`, shorthand). — Fixed.
+- T13 [Minor] The restored-token server-change test did not pin the revoke destination (a revoke to the new URL stayed green). — Fixed.
+- T14 [Minor] "never sends a restored token that has no recorded issuer" is held by two guards, so removing either alone stays green. — Accepted as defence in depth; the test says so.
+
+## Resolution Status
+### S3-M1 / T8 [Major] Null issuer matched the default server
+- Action: `isAllowedServerUrl` (which rejects empty input) gates the issuer before `validateServerUrl` normalises it.
+- Class sweep: every `validateServerUrl` call in `extension/src` and `cli/src` was checked; the others take a configured or user-typed URL (empty → default is the intended UX) or are display-only; the CLI's `validateServerUrl` throws on empty input.
+- Modified file: `extension/src/options/App.tsx`
+- Tests: `extension/src/__tests__/options/App.test.tsx` (null and empty issuer with the default configured server → nothing sent; control with a recorded default issuer → sent). Red-proved: both negatives fail against 104e2e5ed.
+
+### F4 / S3-m1 / T10 [Minor] Guard bypasses
+- Action: a const init is accepted only if its name is declared once in the file and nothing writes through it where the write could reach `redirect`; `setRequestHeader` joins the tripwire; `.js`/`.mjs` are scanned.
+- Modified files: `scripts/checks/check-client-credential-fetch.mjs`, `scripts/__tests__/check-client-credential-fetch.test.mjs`. Red-proved: the 9 new cases fail against the 104e2e5ed guard; the "another property assigned" control passes.
+
+### F5 [Minor] Bare "fetch failed" on a refused redirect
+- Action: `onRedirectRefused(url)` (`cli/src/lib/redirect-refusal.ts`) rethrows undici's redirect rejection with the server origin and the fix (`passwd-sso login --server <url>`); other errors pass through. Attached with `.catch` at the `apiRequest`, `env`, `run` and OAuth register/exchange/refresh fetches (revoke stays best-effort and silent).
+- Tests: `cli/src/__tests__/unit/redirect-refusal.test.ts` (real local server: 308 → message; connection refused → unchanged; 200 → untouched), `cli/src/__tests__/unit/api-client.test.ts` (red-proved against 104e2e5ed).
+
+### T11 / T12 [Minor] Guard fail-closed and branch coverage
+- Action: any parse diagnostic is a GateIOError; self-tests for the syntax-error and unreadable-file branches and for each previously unpinned branch. Red-proved: the syntax-error case fails without the diagnostic check.
+
+### T9 / T13 [Minor] Test pairing and revoke destination
+- Action: the in-flight-refresh controls assert after the same `settle()` as their negatives (microtask-only continuations, so deterministic); the restored-token positive waits for exactly one DELETE to the token endpoint at its issuer (the configured default server). Red-proved: a revoke redirected to the new server fails the positive case.

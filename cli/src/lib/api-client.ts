@@ -8,6 +8,7 @@
 import { loadCredentials, saveCredentials } from "./config.js";
 import { refreshTokenGrant } from "./oauth.js";
 import { MS_PER_MINUTE, MS_PER_SECOND } from "./time.js";
+import { onRedirectRefused } from "./redirect-refusal.js";
 
 let cachedToken: string | null = null;
 let cachedExpiresAt: number | null = null;
@@ -157,7 +158,7 @@ export async function apiRequest<T = unknown>(
     fetchOpts.body = JSON.stringify(body);
   }
 
-  let res = await fetch(url, fetchOpts);
+  let res = await fetch(url, fetchOpts).catch(onRedirectRefused(url));
 
   if (res.status === 401) {
     const refreshed = await refreshToken();
@@ -167,7 +168,7 @@ export async function apiRequest<T = unknown>(
         ...fetchOpts.headers as Record<string, string>,
         Authorization: `Bearer ${newToken}`,
       };
-      res = await fetch(url, fetchOpts);
+      res = await fetch(url, fetchOpts).catch(onRedirectRefused(url));
     }
   }
 

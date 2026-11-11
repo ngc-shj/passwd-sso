@@ -13,6 +13,7 @@ import {
 } from "node:http";
 import { spawn } from "node:child_process";
 import { MS_PER_MINUTE, MS_PER_SECOND, SEC_PER_HOUR } from "./time.js";
+import { onRedirectRefused } from "./redirect-refusal.js";
 
 const CALLBACK_TIMEOUT_MS = 2 * MS_PER_MINUTE;
 
@@ -209,7 +210,7 @@ export async function registerClient(
       token_endpoint_auth_method: "none",
       scope: CLI_SCOPES,
     }),
-  });
+  }).catch(onRedirectRefused(serverUrl));
 
   if (!response.ok) {
     const text = await response.text().catch(() => "");
@@ -277,7 +278,7 @@ export async function exchangeCode(
       client_id: params.clientId,
       code_verifier: params.codeVerifier,
     }).toString(),
-  });
+  }).catch(onRedirectRefused(serverUrl));
 
   if (!response.ok) {
     const text = await response.text().catch(() => "");
@@ -305,7 +306,7 @@ export async function refreshTokenGrant(
       refresh_token: refreshToken,
       client_id: clientId,
     }).toString(),
-  });
+  }).catch(onRedirectRefused(serverUrl));
 
   if (!response.ok) return null;
 

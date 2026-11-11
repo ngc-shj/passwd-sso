@@ -80,6 +80,16 @@ describe("apiRequest", () => {
     expect(fetchCall[1].body).toBe(JSON.stringify({ title: "Test" }));
   });
 
+  it("reports a refused redirect with the server and the fix, not a bare fetch failure", async () => {
+    mockFetch.mockRejectedValueOnce(
+      new TypeError("fetch failed", { cause: new Error("unexpected redirect") }),
+    );
+
+    await expect(apiRequest("/api/vault/status")).rejects.toThrow(
+      "The server at https://test.example.com redirected the request",
+    );
+  });
+
   it("throws when not logged in", async () => {
     clearTokenCache();
     (loadCredentials as ReturnType<typeof vi.fn>).mockReturnValue(null);

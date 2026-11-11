@@ -3472,6 +3472,11 @@ describe("session persistence", () => {
 
     describe("a refresh in flight when the connection ends", () => {
       const refreshed = (json: () => Promise<unknown>) => () => ({ ok: true, json });
+      // Every continuation after the held refresh is microtask-only (mocked
+      // fetch, storage and alarms), so one macrotask drains it deterministically.
+      // Each negative asserts after this settle, and its control asserts after
+      // the same settle — proving the outcome is observable within the window
+      // the negative waits.
       const settle = () => new Promise<void>((r) => setTimeout(r, 0));
 
       const END_BY = [
@@ -3536,10 +3541,9 @@ describe("session persistence", () => {
 
         hold.release();
         await answered.promise;
-        await vi.waitFor(() =>
-          expect(chromeMock!.alarms.create).toHaveBeenCalledWith(ALARM_TOKEN_TTL, expect.anything()),
-        );
+        await settle();
 
+        expect(chromeMock!.alarms.create).toHaveBeenCalledWith(ALARM_TOKEN_TTL, expect.anything());
         expect(await hasToken()).toBe(true);
       });
 
@@ -3573,7 +3577,9 @@ describe("session persistence", () => {
         await hold.reached;
 
         hold.release();
-        await vi.waitFor(async () => expect(await hasToken()).toBe(false));
+        await settle();
+
+        expect(await hasToken()).toBe(false);
       });
     });
   });
@@ -4138,7 +4144,10 @@ describe("session hydration", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await loadBackground();
-    // The token is held (hydrated) but every request path refuses it.
+    // The token is held (hydrated) but no request carries it. This pins the
+    // outcome, not one guard: tokenServerUrl's early null-issuer refusal and
+    // swFetchWithExpiryRetry's pre-send issuer recheck each refuse it on their
+    // own (defence in depth), so removing either alone keeps this green.
     expect(await sendMessage({ type: "GET_STATUS" })).toEqual(expect.objectContaining({ hasToken: true }));
     expect(await sendMessage({ type: "GET_TOKEN" })).toEqual({
       type: "GET_TOKEN",
@@ -4181,10 +4190,17 @@ describe("session hydration", () => {
       "local",
     );
     expect(await sendMessage({ type: "GET_STATUS" })).toEqual(expect.objectContaining({ hasToken: false }));
-    await new Promise((r) => setTimeout(r, 20)); // let a (wrong) revoke, if any, be issued
-
+    const deletes = () =>
+      (fetchMock.mock.calls as unknown as [string, RequestInit][])
+        .filter(([, init]) => init?.method === "DELETE" && bearerOf(init).includes("tok-restored"))
+        .map(([url]) => String(url));
+    if (expectedDeletes > 0) {
+      await vi.waitFor(() => expect(deletes()).toEqual(["https://localhost:3000/api/extension/token"]));
+    } else {
+      await new Promise((r) => setTimeout(r, 20)); // let a (wrong) revoke, if any, be issued
+      expect(deletes()).toEqual([]);
+    }
     expect(callsWith(fetchMock, OLD_URL, "tok-restored")).toBe(0);
-    expect(callsWith(fetchMock, "/api/extension/token", "tok-restored")).toBe(expectedDeletes);
   });
 
   it("refreshes once and retries once on a 401 when the token is near expiry", async () => {

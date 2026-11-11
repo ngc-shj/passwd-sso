@@ -18,6 +18,7 @@ import { describeEntryFetchFailure } from "../lib/v1-entry-failure.js";
 import { BLOCKED_KEYS } from "../lib/blocked-keys.js";
 import { shellQuote } from "../lib/shell-quote.js";
 import * as output from "../lib/output.js";
+import { onRedirectRefused } from "../lib/redirect-refusal.js";
 
 interface EnvOptions {
   config?: string;
@@ -80,7 +81,7 @@ export async function envCommand(opts: EnvOptions): Promise<void> {
       headers: { Authorization: authHeader },
       // Never let a redirect carry the bearer token to another host.
       redirect: "error",
-    });
+    }).catch(onRedirectRefused(url));
     if (!res.ok) {
       output.error(await describeEntryFetchFailure(res, mapping.entry));
       process.exit(1);

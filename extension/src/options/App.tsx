@@ -7,7 +7,7 @@ import { useTheme } from "../lib/theme";
 import { getDpopThumbprint, deleteIdbKey } from "../lib/dpop-key";
 import { EXT_API_PATH } from "../lib/api-paths";
 import { EXT_MSG } from "../lib/constants";
-import { DEFAULT_SERVER_URL, validateServerUrl } from "../lib/server-url";
+import { DEFAULT_SERVER_URL, isAllowedServerUrl, validateServerUrl } from "../lib/server-url";
 import { sendMessage } from "../lib/messaging";
 import { listBindings, originPattern, type HttpAuthBinding } from "../lib/http-auth-bindings";
 
@@ -349,8 +349,14 @@ export function App() {
 
       // The token goes only to the server that issued it. One whose issuer is
       // unknown, or no longer the configured server, is not sent at all.
-      const issuer = validateServerUrl(statusRes.issuerUrl ?? "");
-      if (!issuer.ok || issuer.value !== validated.value) {
+      // isAllowedServerUrl first: validateServerUrl maps empty input to the
+      // default server, which would let a missing issuer match it.
+      if (!isAllowedServerUrl(statusRes.issuerUrl)) {
+        setResetStatus("error");
+        return;
+      }
+      const issuer = validateServerUrl(statusRes.issuerUrl);
+      if (issuer.value !== validated.value) {
         setResetStatus("error");
         return;
       }
