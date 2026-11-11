@@ -528,10 +528,11 @@ function endConnectionForPasskeyRequirement(generation: number): void {
  * synchronously, before any await — an in-flight hydration must not restore it
  * into memory meanwhile — whether or not its issuer is known (settings can be
  * lost while the session token survives). The token is revoked best-effort at
- * the server that issued it: the issuer recorded with it, else the previous
- * URL (`fallbackIssuerUrl`). Neither is ever used to keep the token.
+ * the server that issued it, recorded with it. A token whose issuer is unknown
+ * is not revoked anywhere: the previous configured URL may be a different
+ * server, and sending the token there is the leak this binding closes.
  */
-function endConnectionForServerChange(fallbackIssuerUrl: string | null): void {
+function endConnectionForServerChange(): void {
   hydrationSuperseded = true;
   const heldToken = currentToken;
   const heldIssuer = currentIssuerUrl;
@@ -547,7 +548,7 @@ function endConnectionForServerChange(fallbackIssuerUrl: string | null): void {
   void (async () => {
     const session = stored ? await stored : null;
     const token = heldToken ?? session?.token ?? null;
-    const revokeAt = (heldToken !== null ? heldIssuer : session?.issuerUrl ?? null) ?? fallbackIssuerUrl;
+    const revokeAt = heldToken !== null ? heldIssuer : session?.issuerUrl ?? null;
     if (token === null || revokeAt === null) return;
     await revokeTokenOnServerWith({ getCurrentToken: () => token }, revokeAt);
   })().catch(() => {});
@@ -571,7 +572,7 @@ export function applyToken(
   token: string,
   expiresAt: number,
   cnfJkt: string,
-  issuerUrl?: string,
+  issuerUrl: string,
 ): void {
   hydrationSuperseded = true;
   connectionGeneration += 1;
@@ -587,7 +588,7 @@ export function applyToken(
   currentToken = token;
   tokenExpiresAt = expiresAt;
   currentCnfJkt = cnfJkt;
-  if (issuerUrl !== undefined) currentIssuerUrl = issuerUrl;
+  currentIssuerUrl = issuerUrl;
 
   const delayMs = expiresAt - Date.now();
   if (delayMs > 0) {
@@ -1270,9 +1271,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   if (changes.serverUrl) {
     const { oldValue, newValue } = changes.serverUrl;
     if (oldValue !== newValue) {
-      endConnectionForServerChange(
-        typeof oldValue === "string" && oldValue !== "" ? oldValue : null,
-      );
+      endConnectionForServerChange();
     }
     if (newValue) {
       registerTokenBridgeScript(String(newValue)).catch(() => {});
@@ -1494,13 +1493,16 @@ chrome.commands.onCommand.addListener(async (command) => {
  * value — and then the connection ends instead of the token going anywhere.
  */
 async function tokenServerUrl(): Promise<string> {
+  const issuer = currentIssuerUrl;
+  // A token without a recorded issuer is never sent anywhere.
+  if (issuer === null) throw new Error("NO_TOKEN");
   const { serverUrl } = await getSettings();
-  if (currentIssuerUrl === null) return serverUrl;
-  if (serverUrl !== currentIssuerUrl) {
-    endConnectionForServerChange(currentIssuerUrl);
+  if (currentIssuerUrl !== issuer) throw new Error("NO_TOKEN");
+  if (serverUrl !== issuer) {
+    endConnectionForServerChange();
     throw new Error("NO_TOKEN");
   }
-  return currentIssuerUrl;
+  return issuer;
 }
 
 /**
@@ -1536,6 +1538,7 @@ async function swFetchWithExpiryRetry(
   if (!currentToken) {
     throw new Error("NO_TOKEN");
   }
+  const generationAtStart = connectionGeneration;
   const serverUrl = await tokenServerUrl();
   let parsed: URL;
   try {
@@ -1556,6 +1559,11 @@ async function swFetchWithExpiryRetry(
   }
 
   assertFresh();
+  // The issuer was resolved before the awaits above: a disconnect and
+  // reconnect meanwhile would pair the new token with the old issuer.
+  if (connectionGeneration !== generationAtStart || currentIssuerUrl !== serverUrl) {
+    throw new Error("NO_TOKEN");
+  }
   const tokenUsed = currentToken;
   const generationUsed = connectionGeneration;
   const res = await swFetchAuthenticated(path, init, serverUrl, tokenUsed, assertFresh);
@@ -2786,7 +2794,9 @@ async function handleMessage(
       if (tokenExpiresAt && Date.now() >= tokenExpiresAt) {
         clearToken(DISCONNECT_REASON.EXPIRED);
       }
-      sendResponse({ type: EXT_MSG.GET_TOKEN, token: currentToken });
+      // The issuer travels with the token: a caller outside the SW (the options
+      // page's key reset) must send it there and nowhere else.
+      sendResponse({ type: EXT_MSG.GET_TOKEN, token: currentToken, issuerUrl: currentIssuerUrl });
       return;
     }
 
@@ -3756,7 +3766,7 @@ function respondWithFailure(
         sendResponse({ type: EXT_MSG.GET_STATUS, hasToken: false, expiresAt: null, vaultUnlocked: false } as ExtensionResponse);
         break;
       case EXT_MSG.GET_TOKEN:
-        sendResponse({ type: EXT_MSG.GET_TOKEN, token: null } as ExtensionResponse);
+        sendResponse({ type: EXT_MSG.GET_TOKEN, token: null, issuerUrl: null } as ExtensionResponse);
         break;
       case EXT_MSG.GET_MATCHES_FOR_URL:
         sendResponse({ type: EXT_MSG.GET_MATCHES_FOR_URL, entries: [], vaultLocked: !!currentToken && !encryptionKey, disconnected: !currentToken, suppressInline: false } as ExtensionResponse);

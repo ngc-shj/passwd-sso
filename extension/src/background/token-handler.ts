@@ -25,16 +25,22 @@ export const MIN_RETRY_HEADROOM_MS = 5 * MS_PER_SECOND;
 // ── Helpers ────────────────────────────────────────────────────
 
 /**
- * The server a token-bearing request goes to: the token's issuer when known
- * (refused outright if it fails the server-URL rule — never replaced by the
- * configured URL), else the configured server.
+ * The configured server, for the bridge-code and exchange fetches — the only
+ * requests made before a token exists. They do not go through
+ * swFetchAuthenticated.
  */
-async function getValidServerUrl(issuerUrl?: string | null): Promise<string | null> {
-  if (issuerUrl != null) return isAllowedServerUrl(issuerUrl) ? issuerUrl : null;
+async function getConfiguredServerUrl(): Promise<string | null> {
   const { serverUrl } = await getSettings();
-  // Also covers the bridge-code and exchange fetches, which do not go through
-  // swFetchAuthenticated.
   return isAllowedServerUrl(serverUrl) ? serverUrl : null;
+}
+
+/**
+ * The server a token-bearing request goes to: the token's issuer, and nothing
+ * else. An unknown issuer, or one failing the server-URL rule, means the token
+ * is not sent — never the configured URL in its place.
+ */
+function tokenIssuerServerUrl(issuerUrl: string | null): string | null {
+  return issuerUrl !== null && isAllowedServerUrl(issuerUrl) ? issuerUrl : null;
 }
 
 // ── Token refresh ──────────────────────────────────────────────
@@ -42,8 +48,8 @@ async function getValidServerUrl(issuerUrl?: string | null): Promise<string | nu
 export interface TokenRefreshCallbacks {
   getCurrentToken(): string | null;
   getTokenExpiresAt(): number | null;
-  /** The server that issued the token; the refresh goes there when known. */
-  getIssuerUrl?(): string | null;
+  /** The server that issued the token; the refresh goes there or nowhere. */
+  getIssuerUrl(): string | null;
   setToken(token: string, expiresAt: number): void;
   /** Called when the refresh response includes a new cnfJkt (C10 binding propagation). */
   setCnfJkt?(cnfJkt: string): void;
@@ -66,7 +72,7 @@ export async function attemptTokenRefreshWith(
   if (Date.now() >= tokenExpiresAt) return;
 
   try {
-    const serverUrl = await getValidServerUrl(callbacks.getIssuerUrl?.());
+    const serverUrl = tokenIssuerServerUrl(callbacks.getIssuerUrl());
     if (!serverUrl) return;
 
     let res: Response;
@@ -188,7 +194,7 @@ export async function startConnect(
   const fetchFn = callbacks.fetchImpl ?? fetch;
   const signFn = callbacks.signDpopProofImpl ?? signDpopProof;
 
-  const serverUrl = await getValidServerUrl();
+  const serverUrl = await getConfiguredServerUrl();
   if (!serverUrl) return { ok: false, errorCode: "GENERIC_FAILURE" };
 
   // Step 1: bridge-code (credentialed; no access token yet → no `ath`).
@@ -302,18 +308,17 @@ export interface TokenRevokeCallbacks {
 }
 
 /**
- * `issuerUrl` names the server that issued the token when it is no longer the
- * configured one (the server URL was just changed): the token is revoked there
- * and never sent to the newly configured server.
+ * Revoke the token at the server that issued it (`issuerUrl`), which may no
+ * longer be the configured one. An unknown issuer means no request is sent.
  */
 export async function revokeTokenOnServerWith(
   callbacks: TokenRevokeCallbacks,
-  issuerUrl?: string | null,
+  issuerUrl: string | null,
 ): Promise<void> {
   const token = callbacks.getCurrentToken();
   if (!token) return;
   try {
-    const serverUrl = await getValidServerUrl(issuerUrl);
+    const serverUrl = tokenIssuerServerUrl(issuerUrl);
     if (!serverUrl) return;
     await swFetchAuthenticated(
       EXT_API_PATH.EXTENSION_TOKEN,

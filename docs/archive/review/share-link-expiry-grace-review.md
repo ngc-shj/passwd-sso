@@ -6,7 +6,7 @@ Review round: 1
 Initial review. Local LLM pre-screen skipped (Ollama unavailable).
 
 ## Functionality Findings
-- F1 [Major][design] Expired-never-accepted emergency invites retained 30d block re-invite (`DUPLICATE_GRANT`) and show as live PENDING (`src/app/api/emergency-access/route.ts:46`). Merged with S1. → Resolved: `emergency_access_grants` removed from scope (plan SC1).
+- F1 [Major][design] Expired-never-accepted emergency invites retained 30d block re-invite (`DUPLICATE_GRANT`) and show as live PENDING (`src/app/api/emergency-access/route.ts` `handlePOST` duplicate-grant check). Merged with S1. → Resolved: `emergency_access_grants` removed from scope (plan SC1).
 - F2 [Minor][prose] C2/C3 "reviewer to confirm" TODOs. → Resolved: Round-1 enumeration recorded in C2/C3.
 
 ## Security Findings

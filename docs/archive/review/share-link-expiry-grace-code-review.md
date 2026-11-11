@@ -39,7 +39,7 @@ R1–R57, RS1–RS6 checked; findings: S-m1 (quota/read-path), S-m2 (binding/TOC
 R1–R57 no findings except R42 (T-1). RT1–RT6 ok; RT7 T-1, T-3; RT8–RT11 ok.
 
 ## Environment Verification Report
-- VE1 (real-DB integration tests need the racing workers stopped): verified-local — `docker compose stop audit-outbox-worker retention-gc-worker` then `ANCHOR_TEST_S3_ENDPOINT=http://127.0.0.1:9000 npm run test:integration` (150 files, exit 0); workers restarted.
+- VE1 (real-DB integration tests need the racing workers stopped): verified-local — `docker compose stop audit-outbox-worker retention-gc-worker` then `npm run test:integration` with `ANCHOR_TEST_S3_ENDPOINT` set to the local MinIO (150 files, exit 0); workers restarted.
 - iOS: verified-local on the macOS build host (`xcodebuild … test`, TEST SUCCEEDED).
 
 ## Resolution Status
@@ -84,3 +84,55 @@ R1–R57 no findings except R42 (T-1). RT1–RT6 ok; RT7 T-1, T-3; RT8–RT11 ok
   - Likelihood: low — 1000 shares per ~month per user; the quota exists to stop storage exhaustion (C18 / A04-1).
   - Cost to fix: trivial in code, but it would let expired-but-retained rows (which occupy storage, incl. FILE Send blobs) escape the storage-exhaustion control — the plan (C3) deliberately keeps them counted.
 - **Orchestrator sign-off**: acceptable-risk exception satisfied; plan C3 records the decision.
+
+---
+
+# Round 2
+Date: 2026-11-12
+
+## Changes from Previous Round
+Incremental review of the Round 1 fixes (commit 2a3e0ba98): extension issuer binding, in-flight refresh generation guard, OAuth/DPoP `redirect: "error"`.
+
+## Functionality Findings
+- F2 [Major] The options page's "reset connection" sent the token and a DPoP proof to the configured URL, not to the token's issuer (`extension/src/options/App.tsx` `handleResetConnection`). — Fixed (same finding as S2-m2).
+- F3 [Minor] CLI bearer requests outside `oauth.ts` followed redirects (`cli/src/lib/api-client.ts` `apiRequest`, `cli/src/commands/env.ts`, `cli/src/commands/run.ts`). — Fixed (same finding as T6).
+
+## Security Findings
+- S2-m1 [Minor] A token with no recorded issuer fell back to the configured URL for requests, refresh and revoke (`tokenServerUrl`, `getValidServerUrl`). — Fixed.
+- S2-m2 [Major] = F2. — Fixed.
+- S2-m3 [Minor] `swFetchWithExpiryRetry` resolved the issuer before its awaits (host permission, proof signing); a disconnect and reconnect meanwhile paired the new token with the old issuer. — Fixed.
+
+## Testing Findings
+- T5 [Major] `background.test.ts` failed under shuffle seeds 1794419690957 / 1794419775221. — Not reproduced: serial runs with both seeds and 424242 exit 0, full suite exit 0. The reviewer ran against a tree mid-way through the S2-m1 change (481 tests then failed on fixtures without an issuer); no leaking state was found.
+- T6 [Minor] = F3. — Fixed.
+- T7 [Minor] The control cases of "a refresh in flight when the connection ends" used a one-macrotask settle. — Fixed.
+
+## Quality Warnings
+None.
+
+## Resolution Status
+### F2 / S2-m2 [Major] Reset connection sent the token to the configured URL
+- Action: GET_TOKEN returns the token's `issuerUrl`; the options page validates it and sends the proof and request only when it equals the configured server, with `redirect: "error"`; otherwise nothing is sent and the status shows an error.
+- Modified files: `extension/src/background/index.ts`, `extension/src/types/messages.ts`, `extension/src/options/App.tsx`
+- Tests: `extension/src/__tests__/options/App.test.tsx` (issuer matches → request to issuer with redirect error; null / different issuer → no fetch, no proof, IDB key kept). Red-proved against 2a3e0ba98.
+
+### S2-m1 [Minor] Token without an issuer fell back to the configured URL
+- Action: `applyToken` requires the issuer; `tokenServerUrl` and `tokenIssuerServerUrl` (refresh, revoke) refuse a null issuer; the server-change revoke no longer falls back to the previous configured URL (a token whose issuer is unknown is revoked nowhere — the F1 decision for the CLI, applied to the extension). `getConfiguredServerUrl` is left only for bridge-code/exchange, which run before a token exists.
+- Modified files: `extension/src/background/index.ts`, `extension/src/background/token-handler.ts`
+- Tests: `extension/src/__tests__/background.test.ts` ("never sends a restored token that has no recorded issuer"; "on a server change, a restored token revokes it at its issuer / nowhere when it has no recorded issuer"), `extension/src/__tests__/background/swFetch-dpop.test.ts` (refresh and revoke with a null issuer send nothing). Each red-proved against the previous implementation on a throwaway copy.
+
+### S2-m3 [Minor] Issuer resolved before the pre-send awaits
+- Action: `swFetchWithExpiryRetry` captures `connectionGeneration` before resolving the issuer and re-checks it (and the issuer) immediately before sending.
+- Modified file: `extension/src/background/index.ts`
+- Test: `extension/src/__tests__/background.test.ts` ("a reconnect while the request waits for the host permission", with a no-reconnect control). Red-proved.
+
+### F3 / T6 [Minor] CLI bearer requests followed redirects
+- Action: `redirect: "error"` on `apiRequest`, `env` and `run` fetches.
+- Modified files: `cli/src/lib/api-client.ts`, `cli/src/commands/env.ts`, `cli/src/commands/run.ts`
+
+### T7 [Minor] One-macrotask settle in control cases
+- Action: the controls wait with `vi.waitFor` on their observable outcome (TTL alarm created; `hasToken` false).
+- Modified file: `extension/src/__tests__/background.test.ts`
+
+### R42 class C7 closure (credential reaching a non-issuer or following a redirect)
+- The member set expanded three times (Round 1 adjacent finding, F2, F3). Closed by the mutation-verified CI guard `scripts/checks/check-client-credential-fetch.mjs` (AST, ts-morph): every `fetch` in `cli/src` and `extension/src` must pin `redirect` to `"error"` or `"manual"` after any spread, an unclassified fetch reference fails, and an `Authorization` header in `extension/src` is allowed only in `dpop-fetch.ts` and `options/App.tsx`. Self-test `scripts/__tests__/check-client-credential-fetch.test.mjs`. Red-proven: removing `redirect: "error"` from the refresh fetch in `cli/src/lib/oauth.ts` → exit 1. Wired in `scripts/pre-pr.sh` ("Static: client-credential-fetch"), which the ci.yml static-checks job runs.

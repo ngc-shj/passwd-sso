@@ -329,8 +329,11 @@ export function App() {
       // Get current DPoP thumbprint — must be sent in body and in the DPoP proof.
       const cnfJkt = await getDpopThumbprint();
 
-      // Get the current token from the background SW.
-      const statusRes = await chrome.runtime.sendMessage({ type: EXT_MSG.GET_TOKEN }) as { token: string | null };
+      // Get the current token, and the server that issued it, from the SW.
+      const statusRes = await chrome.runtime.sendMessage({ type: EXT_MSG.GET_TOKEN }) as {
+        token: string | null;
+        issuerUrl: string | null;
+      };
       const token = statusRes?.token;
       if (!token) {
         // No active session — just delete the IDB key locally, then tell SW
@@ -344,17 +347,27 @@ export function App() {
         return;
       }
 
+      // The token goes only to the server that issued it. One whose issuer is
+      // unknown, or no longer the configured server, is not sent at all.
+      const issuer = validateServerUrl(statusRes.issuerUrl ?? "");
+      if (!issuer.ok || issuer.value !== validated.value) {
+        setResetStatus("error");
+        return;
+      }
+
       // Sign a DPoP proof for the reset endpoint.
       const { signDpopProof } = await import("../lib/dpop-key");
       const dpopProof = await signDpopProof({
         route: EXT_API_PATH.EXTENSION_KEY_RESET,
         method: "POST",
-        serverUrl: validated.value,
+        serverUrl: issuer.value,
         accessToken: token,
       });
 
-      const res = await fetch(`${validated.value}${EXT_API_PATH.EXTENSION_KEY_RESET}`, {
+      const res = await fetch(`${issuer.value}${EXT_API_PATH.EXTENSION_KEY_RESET}`, {
         method: "POST",
+        // Never let a redirect carry the token elsewhere.
+        redirect: "error",
         // Omit cookies — extension authenticates via Bearer + DPoP. Without
         // this, Chrome attaches the web app's session cookie (host_permissions),
         // tripping the server's CSRF gate (cookie+POST → assertOrigin 403).

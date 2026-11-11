@@ -150,7 +150,7 @@ async function loadBackground() {
 }
 function applyToken(token: string, expiresAt: number, cnfJkt: string): void {
   if (!bgModule) throw new Error("loadBackground() must run first");
-  bgModule.applyToken(token, expiresAt, cnfJkt);
+  bgModule.applyToken(token, expiresAt, cnfJkt, "https://localhost:3000");
 }
 // Default sender: an extension page (every UNLOCK_VAULT call in this file
 // relies on it). Content-origin calls (GET_*_MATCHES_FOR_URL,

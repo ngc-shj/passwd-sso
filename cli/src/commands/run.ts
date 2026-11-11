@@ -82,6 +82,8 @@ export async function runCommand(opts: RunOptions): Promise<void> {
 
     const res = await fetch(url, {
       headers: { Authorization: authHeader },
+      // Never let a redirect carry the bearer token to another host.
+      redirect: "error",
     });
     if (!res.ok) {
       output.error(await describeEntryFetchFailure(res, mapping.entry));

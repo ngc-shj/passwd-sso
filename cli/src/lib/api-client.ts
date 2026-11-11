@@ -144,6 +144,9 @@ export async function apiRequest<T = unknown>(
 
   const fetchOpts: RequestInit = {
     method,
+    // The bearer token and body go to the issuing server only; it never
+    // legitimately redirects these requests.
+    redirect: "error",
     headers: {
       Authorization: `Bearer ${token}`,
       ...(body !== undefined ? { "Content-Type": "application/json" } : {}),

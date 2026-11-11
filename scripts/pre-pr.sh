@@ -458,6 +458,7 @@ queue_step "Static: raw-sql-usage" node scripts/checks/check-raw-sql-usage.mjs
 # at the top of a depth-0 MATERIALIZED CTE body, never in a rescannable subquery.
 queue_step "Static: limited-subquery-write" node scripts/checks/check-limited-subquery-write.mjs
 queue_step "Static: cli-shell-safety" node scripts/checks/check-cli-shell-safety.mjs
+queue_step "Static: client-credential-fetch" node scripts/checks/check-client-credential-fetch.mjs
 queue_step "Static: gate-selftest-coverage" bash scripts/checks/check-gate-selftest-coverage.sh
 queue_step "Static: no-pipe-into-grep-q" bash scripts/checks/check-no-pipe-into-grep-q.sh
 queue_step "Static: doc-paths" node scripts/checks/check-doc-paths.mjs

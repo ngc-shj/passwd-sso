@@ -121,6 +121,7 @@ describe("attemptTokenRefreshWith (C8 — DPoP header on refresh)", () => {
     const setToken = vi.fn();
     await attemptTokenRefreshWith({
       getCurrentToken: () => TOKEN,
+      getIssuerUrl: () => SERVER_URL,
       getTokenExpiresAt: () => Date.now() + 600_000,
       setToken,
       clearToken: vi.fn(),
@@ -150,6 +151,7 @@ describe("attemptTokenRefreshWith (C8 — DPoP header on refresh)", () => {
 
     await attemptTokenRefreshWith({
       getCurrentToken: () => TOKEN,
+      getIssuerUrl: () => SERVER_URL,
       getTokenExpiresAt: () => cappedExpiry, // presence-capped: same expiry comes back
       setToken: vi.fn(),
       clearToken: vi.fn(),
@@ -175,6 +177,7 @@ describe("attemptTokenRefreshWith (C8 — DPoP header on refresh)", () => {
 
     await attemptTokenRefreshWith({
       getCurrentToken: () => TOKEN,
+      getIssuerUrl: () => SERVER_URL,
       getTokenExpiresAt: () => Date.now() + 60_000,
       setToken: vi.fn(),
       clearToken: vi.fn(),
@@ -194,6 +197,7 @@ describe("attemptTokenRefreshWith (C8 — DPoP header on refresh)", () => {
 
     await attemptTokenRefreshWith({
       getCurrentToken: () => TOKEN,
+      getIssuerUrl: () => SERVER_URL,
       getTokenExpiresAt: () => expiry,
       setToken: vi.fn(),
       clearToken,
@@ -212,6 +216,7 @@ describe("attemptTokenRefreshWith (C8 — DPoP header on refresh)", () => {
 
     await attemptTokenRefreshWith({
       getCurrentToken: () => TOKEN,
+      getIssuerUrl: () => SERVER_URL,
       getTokenExpiresAt: () => Date.now() + 3_000,
       setToken: vi.fn(),
       clearToken: vi.fn(),
@@ -234,6 +239,7 @@ describe("attemptTokenRefreshWith (C8 — DPoP header on refresh)", () => {
     const clearToken = vi.fn();
     await attemptTokenRefreshWith({
       getCurrentToken: () => TOKEN,
+      getIssuerUrl: () => SERVER_URL,
       getTokenExpiresAt: () => Date.now() + 600_000,
       setToken: vi.fn(),
       clearToken,
@@ -261,6 +267,7 @@ describe("attemptTokenRefreshWith — PASSKEY_REQUIRED refusal", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(res));
     const callbacks = {
       getCurrentToken: () => TOKEN,
+      getIssuerUrl: () => SERVER_URL,
       getTokenExpiresAt: () => Date.now() + 600_000,
       setToken: vi.fn(),
       clearToken: vi.fn(),
@@ -308,7 +315,7 @@ describe("revokeTokenOnServerWith (C8 — DPoP header on revoke)", () => {
 
     await revokeTokenOnServerWith({
       getCurrentToken: () => TOKEN,
-    });
+    }, SERVER_URL);
 
     expect(mockFetch).toHaveBeenCalledOnce();
     const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
@@ -329,6 +336,16 @@ describe("revokeTokenOnServerWith (C8 — DPoP header on revoke)", () => {
     }
   });
 
+  it("sends nothing when the issuer is unknown (null), never falling back to the configured server", async () => {
+    const mockFetch = vi.fn().mockResolvedValue(new Response("", { status: 200 }));
+    vi.stubGlobal("fetch", mockFetch);
+
+    await revokeTokenOnServerWith({ getCurrentToken: () => TOKEN }, null);
+
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(dpopKeyMocks.signDpopProof).not.toHaveBeenCalled();
+  });
+
   it("sends nothing when issuerUrl fails isAllowedServerUrl (plain http off localhost)", async () => {
     const mockFetch = vi.fn().mockResolvedValue(new Response("", { status: 200 }));
     vi.stubGlobal("fetch", mockFetch);
@@ -344,11 +361,11 @@ describe("attemptTokenRefreshWith — refresh goes to the token's issuer", () =>
   const ISSUER = "https://issuer.example.com";
   let mockFetch: ReturnType<typeof vi.fn>;
 
-  function refreshCallbacks(getIssuerUrl?: () => string | null) {
+  function refreshCallbacks(getIssuerUrl: () => string | null) {
     return {
       getCurrentToken: () => TOKEN,
       getTokenExpiresAt: () => Date.now() + 600_000,
-      ...(getIssuerUrl ? { getIssuerUrl } : {}),
+      getIssuerUrl,
       setToken: vi.fn(),
       clearToken: vi.fn(),
       endForPasskeyRequirement: vi.fn(),
@@ -387,15 +404,11 @@ describe("attemptTokenRefreshWith — refresh goes to the token's issuer", () =>
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it("falls back to the configured server when no getIssuerUrl is supplied", async () => {
-    await attemptTokenRefreshWith(refreshCallbacks());
+  it("sends nothing when the issuer is unknown (null), never falling back to the configured server", async () => {
+    const callbacks = refreshCallbacks(() => null);
+    await attemptTokenRefreshWith(callbacks);
 
-    expect(mockFetch.mock.calls[0][0]).toBe(`${SERVER_URL}/api/extension/token/refresh`);
-  });
-
-  it("falls back to the configured server when the issuer is unknown (null)", async () => {
-    await attemptTokenRefreshWith(refreshCallbacks(() => null));
-
-    expect(mockFetch.mock.calls[0][0]).toBe(`${SERVER_URL}/api/extension/token/refresh`);
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(dpopKeyMocks.signDpopProof).not.toHaveBeenCalled();
   });
 });

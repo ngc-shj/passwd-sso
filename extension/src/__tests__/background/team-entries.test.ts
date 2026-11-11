@@ -174,7 +174,7 @@ async function loadBackground() {
 }
 function applyToken(token: string, expiresAt: number, cnfJkt: string): void {
   if (!bgModule) throw new Error("loadBackground() must be called before applyToken()");
-  bgModule.applyToken(token, expiresAt, cnfJkt);
+  bgModule.applyToken(token, expiresAt, cnfJkt, "https://localhost:3000");
 }
 
 // Every message this file drives through handleMessage is extension-page-only
