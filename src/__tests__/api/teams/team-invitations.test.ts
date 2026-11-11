@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { DEFAULT_SESSION } from "../../helpers/mock-auth";
 import { createRequest, createParams, parseResponse } from "../../helpers/request-builder";
 
@@ -28,7 +28,9 @@ const {
   mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
 }));
 
-const { mockUserFindMany, mockTeamMemberFindMany, mockTeamMemberFindFirst, mockLockTenantRows } = vi.hoisted(() => ({
+const { mockUserFindMany, mockTeamMemberFindMany, mockTeamMemberFindFirst, mockLockTenantRows, mockExecuteRaw, mockLockTeamsAgainstRotation } = vi.hoisted(() => ({
+  mockExecuteRaw: vi.fn().mockResolvedValue(undefined),
+  mockLockTeamsAgainstRotation: vi.fn().mockResolvedValue(undefined),
   mockUserFindMany: vi.fn().mockResolvedValue([]),
   mockTeamMemberFindMany: vi.fn(),
   mockTeamMemberFindFirst: vi.fn(),
@@ -36,7 +38,7 @@ const { mockUserFindMany, mockTeamMemberFindMany, mockTeamMemberFindFirst, mockL
 }));
 vi.mock("@/lib/team/team-key-rotation-lock", async (importOriginal) => ({
   ...(await importOriginal()) as Record<string, unknown>,
-  lockTeamsAgainstRotation: vi.fn().mockResolvedValue(undefined),
+  lockTeamsAgainstRotation: mockLockTeamsAgainstRotation,
 }));
 vi.mock("@/lib/team/tenant-row-lock", async (importOriginal) => ({
   ...(await importOriginal()) as Record<string, unknown>,
@@ -73,6 +75,7 @@ vi.mock("@/lib/prisma", () => ({
     team: mockPrismaTeam,
     user: { findUnique: mockUserFindUnique, findMany: mockUserFindMany },
     teamMember: { findUnique: mockTeamMemberFindUnique, findMany: mockTeamMemberFindMany, findFirst: mockTeamMemberFindFirst },
+    $executeRaw: mockExecuteRaw,
   },
 }));
 vi.mock("@/lib/audit/audit", () => ({
@@ -208,7 +211,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
   it("returns 409 when pending invitation exists", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockInvitationFindMany.mockResolvedValue([{ id: "inv-existing", createdAt: new Date() }]);
+    mockInvitationFindMany.mockResolvedValue([{ id: "inv-existing", createdAt: new Date(), expiresAt: new Date("2999-01-01T00:00:00Z") }]);
     const req = createRequest("POST", undefined, { body: { email: "new@test.com", role: "MEMBER" } });
     const res = await POST(req, createParams({ teamId: "o1" }));
     const { status, json } = await parseResponse(res);
@@ -252,5 +255,59 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     const res = await POST(req, createParams({ teamId: "o1" }));
     const { status } = await parseResponse(res);
     expect(status).toBe(201);
+  });
+
+  describe("expired PENDING invitations", () => {
+    const clock = new Date("2026-06-01T00:00:00Z");
+    const created = {
+      id: "inv-new",
+      email: "new@test.com",
+      role: "MEMBER",
+      token: "abc",
+      expiresAt: clock,
+      createdAt: clock,
+    };
+    const invite = () =>
+      POST(
+        createRequest("POST", undefined, { body: { email: "new@test.com", role: "MEMBER" } }),
+        createParams({ teamId: "o1" }),
+      );
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(clock);
+      mockAuth.mockResolvedValue(DEFAULT_SESSION);
+      mockRequireTeamPermission.mockResolvedValue(undefined);
+      mockInvitationCreate.mockResolvedValue(created);
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("issues a new invitation when the only PENDING one has expired", async () => {
+      mockInvitationFindMany.mockResolvedValue([
+        { id: "inv-expired", createdAt: new Date("2026-05-01T00:00:00Z"), expiresAt: new Date(clock.getTime() - 1) },
+      ]);
+      const { status } = await parseResponse(await invite());
+      expect(status).toBe(201);
+    });
+
+    it("treats a PENDING invitation expiring at the current instant as expired", async () => {
+      mockInvitationFindMany.mockResolvedValue([
+        { id: "inv-boundary", createdAt: new Date("2026-05-01T00:00:00Z"), expiresAt: new Date(clock.getTime()) },
+      ]);
+      const { status } = await parseResponse(await invite());
+      expect(status).toBe(201);
+    });
+
+    it("returns 409 when a live PENDING invitation sits beside an expired one", async () => {
+      mockInvitationFindMany.mockResolvedValue([
+        { id: "inv-expired", createdAt: new Date("2026-05-01T00:00:00Z"), expiresAt: new Date(clock.getTime() - 1) },
+        { id: "inv-live", createdAt: new Date("2026-05-30T00:00:00Z"), expiresAt: new Date(clock.getTime() + 1) },
+      ]);
+      const { status, json } = await parseResponse(await invite());
+      expect(status).toBe(409);
+      expect(json.error).toBe("INVITATION_ALREADY_SENT");
+    });
   });
 });

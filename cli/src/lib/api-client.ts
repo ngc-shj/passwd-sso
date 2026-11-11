@@ -5,7 +5,7 @@
  * Automatically refreshes expired tokens via OAuth 2.1 refresh_token grant.
  */
 
-import { loadCredentials, saveCredentials, loadConfig } from "./config.js";
+import { loadCredentials, saveCredentials } from "./config.js";
 import { refreshTokenGrant } from "./oauth.js";
 import { MS_PER_MINUTE, MS_PER_SECOND } from "./time.js";
 
@@ -13,6 +13,7 @@ let cachedToken: string | null = null;
 let cachedExpiresAt: number | null = null;
 let cachedRefreshToken: string | null = null;
 let cachedClientId: string | null = null;
+let cachedServerUrl: string | null = null;
 
 export function setInsecure(enabled: boolean): void {
   if (enabled) {
@@ -31,16 +32,19 @@ export function getToken(): string | null {
   cachedExpiresAt = new Date(creds.expiresAt).getTime();
   cachedRefreshToken = creds.refreshToken || null;
   cachedClientId = creds.clientId || null;
+  cachedServerUrl = creds.serverUrl;
   return cachedToken;
 }
 
 export function setTokenCache(
   token: string,
+  serverUrl: string,
   expiresAt?: string,
   refreshToken?: string,
   clientId?: string,
 ): void {
   cachedToken = token;
+  cachedServerUrl = serverUrl;
   if (expiresAt) {
     cachedExpiresAt = new Date(expiresAt).getTime();
   }
@@ -57,6 +61,7 @@ export function clearTokenCache(): void {
   cachedExpiresAt = null;
   cachedRefreshToken = null;
   cachedClientId = null;
+  cachedServerUrl = null;
 }
 
 export function assertLoggedIn(): void {
@@ -65,12 +70,16 @@ export function assertLoggedIn(): void {
   }
 }
 
-function getBaseUrl(): string {
-  const config = loadConfig();
-  if (!config.serverUrl) {
-    throw new Error("Server URL not configured. Run `passwd-sso login` first.");
+/**
+ * The server that issued the cached tokens. Tokens are only ever sent there:
+ * the configured serverUrl can point elsewhere (a later `login` to another
+ * server, a hand-edited config) and must not receive this server's tokens.
+ */
+export function getTokenServerUrl(): string {
+  if (!getToken() || !cachedServerUrl) {
+    throw new Error("Not logged in. Run `passwd-sso login` first.");
   }
-  return config.serverUrl.replace(/\/$/, "");
+  return cachedServerUrl;
 }
 
 export interface ApiResponse<T = unknown> {
@@ -89,7 +98,7 @@ function isTokenExpiringSoon(): boolean {
 async function refreshToken(): Promise<boolean> {
   if (!cachedRefreshToken || !cachedClientId) return false;
 
-  const baseUrl = getBaseUrl();
+  const baseUrl = getTokenServerUrl();
   try {
     const result = await refreshTokenGrant(baseUrl, cachedRefreshToken, cachedClientId);
     if (!result || !result.refreshToken) return false;
@@ -101,8 +110,9 @@ async function refreshToken(): Promise<boolean> {
       refreshToken: result.refreshToken,
       clientId: cachedClientId,
       expiresAt,
+      serverUrl: baseUrl,
     });
-    setTokenCache(result.accessToken, expiresAt, result.refreshToken, cachedClientId);
+    setTokenCache(result.accessToken, baseUrl, expiresAt, result.refreshToken, cachedClientId);
 
     return true;
   } catch {
@@ -128,7 +138,7 @@ export async function apiRequest<T = unknown>(
     }
   }
 
-  const baseUrl = getBaseUrl();
+  const baseUrl = getTokenServerUrl();
   const url = `${baseUrl}${path}`;
   const { method = "GET", body, headers = {} } = options;
 

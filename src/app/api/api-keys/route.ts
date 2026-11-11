@@ -120,7 +120,9 @@ async function handlePOST(req: NextRequest) {
       await lockUserAuthArtifacts(prisma, userId);
       if (!(await isSessionRowLive(prisma, req, userId))) throw new UserAuthRevokedError("session");
       const existingCount = await prisma.apiKey.count({
-        where: { userId: userId, revokedAt: null },
+        // Expired keys stay listed for the retention-gc grace window; they
+        // must not hold a slot (api-key.ts rejects at expiresAt <= now).
+        where: { userId: userId, revokedAt: null, expiresAt: { gt: new Date() } },
       });
       if (existingCount >= MAX_API_KEYS_PER_USER) {
         throw new ApiKeyLimitError();

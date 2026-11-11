@@ -3261,6 +3261,83 @@ describe("session persistence", () => {
     expect(authHeader).toBe("Bearer tok-1");
   });
 
+  describe("serverUrl change in storage", () => {
+    const OLD_URL = "https://old.example.com";
+    const NEW_URL = "https://new.example.com";
+
+    function deleteCallsFor(token: string): [string, RequestInit][] {
+      const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+      return (fetchMock.mock.calls as [string, RequestInit][]).filter(
+        ([url, init]) =>
+          String(url).includes("/api/extension/token") &&
+          init?.method === "DELETE" &&
+          bearerOf(init).includes(token),
+      );
+    }
+
+    async function hasToken(): Promise<boolean> {
+      const status = (await sendMessage({ type: "GET_STATUS" })) as { hasToken: boolean };
+      return status.hasToken;
+    }
+
+    it("clears the token and revokes it at the old server only", async () => {
+      applyToken("tok-chg", Date.now() + 600_000, STATIC_TEST_JKT);
+      expect(await hasToken()).toBe(true);
+
+      storageChangeHandlers[0](
+        { serverUrl: { oldValue: OLD_URL, newValue: NEW_URL } },
+        "local",
+      );
+
+      await vi.waitFor(() => expect(deleteCallsFor("tok-chg")).toHaveLength(1));
+      expect(deleteCallsFor("tok-chg")[0][0]).toBe(`${OLD_URL}/api/extension/token`);
+      const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+      const urls = (fetchMock.mock.calls as [string, RequestInit][])
+        .filter(([, init]) => bearerOf(init).includes("tok-chg"))
+        .map(([url]) => String(url));
+      expect(urls.some((u) => u.startsWith(NEW_URL))).toBe(false);
+      expect(await hasToken()).toBe(false);
+    });
+
+    it.each([
+      ["oldValue is undefined", { newValue: NEW_URL }],
+      ["oldValue is empty", { oldValue: "", newValue: NEW_URL }],
+    ])("clears the token, with no issuer to revoke at, when %s", async (_label, change) => {
+      // Settings lost while the session token survived: the token's issuer is
+      // unknown, so it must not be kept for the new server either.
+      applyToken("tok-orphan", Date.now() + 600_000, STATIC_TEST_JKT);
+
+      storageChangeHandlers[0]({ serverUrl: change }, "local");
+
+      expect(await hasToken()).toBe(false);
+      await new Promise((r) => setTimeout(r, 50));
+      expect(deleteCallsFor("tok-orphan")).toHaveLength(0);
+    });
+
+    it("keeps the token and sends no revoke when the value is unchanged", async () => {
+      applyToken("tok-keep", Date.now() + 600_000, STATIC_TEST_JKT);
+
+      storageChangeHandlers[0]({ serverUrl: { oldValue: OLD_URL, newValue: OLD_URL } }, "local");
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(deleteCallsFor("tok-keep")).toHaveLength(0);
+      expect(await hasToken()).toBe(true);
+    });
+
+    it("ignores a serverUrl change reported for a non-local storage area", async () => {
+      applyToken("tok-area", Date.now() + 600_000, STATIC_TEST_JKT);
+
+      storageChangeHandlers[0](
+        { serverUrl: { oldValue: OLD_URL, newValue: NEW_URL } },
+        "sync",
+      );
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(deleteCallsFor("tok-area")).toHaveLength(0);
+      expect(await hasToken()).toBe(true);
+    });
+  });
+
   it("clears refresh alarm on CLEAR_TOKEN", async () => {
     applyToken("tok-1", Date.now() + 600_000, "");
     await sendMessage({ type: "CLEAR_TOKEN" });
@@ -3408,6 +3485,103 @@ describe("session persistence", () => {
 });
 
 describe("session hydration", () => {
+  it("never restores a stored token when the server URL changes during startup hydration", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+    const OLD_URL = "https://old.example.com";
+    const NEW_URL = "https://new.example.com";
+    const stored = {
+      token: "cold-tok",
+      expiresAt: Date.now() + 600_000,
+      userId: "u-1",
+      tokenCnfJkt: STATIC_TEST_JKT,
+    };
+    // Startup hydration and the server-change handler each read session
+    // storage; release them separately so hydration completes while the
+    // handler's read is still pending — the window in which a token restored
+    // into memory would be sent to the new server.
+    let releaseHydration!: (value: unknown) => void;
+    let releaseHandler!: (value: unknown) => void;
+    sessionStorageMocks.loadSession
+      .mockReturnValueOnce(new Promise((r) => { releaseHydration = r; }))
+      .mockReturnValueOnce(new Promise((r) => { releaseHandler = r; }));
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({}) }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      await loadBackground();
+      storageChangeHandlers[0]({ serverUrl: { oldValue: OLD_URL, newValue: NEW_URL } }, "local");
+      releaseHydration(stored);
+
+      const status = (await sendMessage({ type: "GET_STATUS" })) as { hasToken: boolean };
+      expect(status.hasToken).toBe(false);
+
+      releaseHandler(stored);
+      const callsWithToken = () =>
+        (fetchMock.mock.calls as unknown as [string, RequestInit][])
+          .filter(([, init]) => bearerOf(init).includes("cold-tok"));
+      await vi.waitFor(() => expect(callsWithToken()).toHaveLength(1));
+      const [url, init] = callsWithToken()[0];
+      expect(url).toBe(`${OLD_URL}/api/extension/token`);
+      expect(init.method).toBe("DELETE");
+    } finally {
+      sessionStorageMocks.loadSession.mockResolvedValue(null);
+    }
+  });
+
+  it("removes the stored token synchronously on a server change, before any session read settles", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+    sessionStorageMocks.loadSession.mockReturnValue(new Promise(() => {}));
+    try {
+      await loadBackground();
+      sessionStorageMocks.clearSession.mockClear();
+
+      storageChangeHandlers[0](
+        { serverUrl: { oldValue: "https://old.example.com", newValue: "https://new.example.com" } },
+        "local",
+      );
+
+      // No await between the event and the assertion: a SW torn down while the
+      // read is pending must not leave the token in session storage.
+      expect(sessionStorageMocks.clearSession).toHaveBeenCalledTimes(1);
+    } finally {
+      sessionStorageMocks.loadSession.mockResolvedValue(null);
+    }
+  });
+
+  it("does not wipe a connection made while the old token's session read is pending", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+    const OLD_URL = "https://old.example.com";
+    let releaseHydration!: (value: unknown) => void;
+    let releaseHandler!: (value: unknown) => void;
+    sessionStorageMocks.loadSession
+      .mockReturnValueOnce(new Promise((r) => { releaseHydration = r; }))
+      .mockReturnValueOnce(new Promise((r) => { releaseHandler = r; }));
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({}) }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      await loadBackground();
+      storageChangeHandlers[0]({ serverUrl: { oldValue: OLD_URL, newValue: "https://new.example.com" } }, "local");
+      releaseHydration(null);
+
+      applyToken("fresh-tok", Date.now() + 600_000, STATIC_TEST_JKT);
+      releaseHandler({ token: "old-tok", expiresAt: Date.now() + 600_000, tokenCnfJkt: STATIC_TEST_JKT });
+      await new Promise((r) => setTimeout(r, 50));
+
+      const status = (await sendMessage({ type: "GET_STATUS" })) as { hasToken: boolean };
+      expect(status.hasToken).toBe(true);
+      const freshDeletes = (fetchMock.mock.calls as unknown as [string, RequestInit][])
+        .filter(([, init]) => init?.method === "DELETE" && bearerOf(init).includes("fresh-tok"));
+      expect(freshDeletes).toHaveLength(0);
+    } finally {
+      sessionStorageMocks.loadSession.mockResolvedValue(null);
+    }
+  });
+
   it("restores token and unlocked vault state from session storage on startup", async () => {
     vi.resetModules();
     vi.clearAllMocks();

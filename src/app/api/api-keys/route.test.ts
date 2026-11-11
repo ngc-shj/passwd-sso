@@ -253,6 +253,35 @@ describe("POST /api/api-keys", () => {
     expect(json.error).toBe("API_KEY_LIMIT_EXCEEDED");
   });
 
+  it("counts only unexpired, unrevoked keys toward the cap", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const clock = new Date("2026-06-01T00:00:00Z");
+    vi.setSystemTime(clock);
+    try {
+      mockCheckAuth.mockResolvedValue({
+        ok: true,
+        auth: { type: "session", userId: "u1" },
+      });
+      mockPrismaApiKey.count.mockResolvedValue(10);
+
+      await POST(
+        createRequest("POST", "http://localhost:3000/api/api-keys", {
+          body: {
+            name: "Test",
+            scope: ["passwords:read"],
+            expiresAt: new Date(clock.getTime() + 30 * 86_400_000).toISOString(),
+          },
+        }),
+      );
+
+      expect(mockPrismaApiKey.count).toHaveBeenCalledWith({
+        where: { userId: "u1", revokedAt: null, expiresAt: { gt: clock } },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("returns 429 when rate limited", async () => {
     mockCheckAuth.mockResolvedValue({
       ok: true,

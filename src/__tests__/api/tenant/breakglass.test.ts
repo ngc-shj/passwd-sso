@@ -9,6 +9,7 @@ const {
   mockLogAudit,
   mockRateLimiterCheck,
   mockCreateNotification,
+  mockExecuteRaw,
   mockTenantMemberFindFirst,
   mockPersonalLogAccessGrantFindFirst,
   mockPersonalLogAccessGrantCreate,
@@ -23,6 +24,7 @@ const {
   mockLogAudit: vi.fn(),
   mockRateLimiterCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockCreateNotification: vi.fn(),
+  mockExecuteRaw: vi.fn().mockResolvedValue(undefined),
   mockTenantMemberFindFirst: vi.fn(),
   mockPersonalLogAccessGrantFindFirst: vi.fn(),
   mockPersonalLogAccessGrantCreate: vi.fn(),
@@ -54,6 +56,7 @@ vi.mock("@/lib/auth/access/tenant-auth", () => {
 });
 vi.mock("@/lib/prisma", () => ({
   prisma: {
+    $executeRaw: mockExecuteRaw,
     tenantMember: { findFirst: mockTenantMemberFindFirst },
     user: { findMany: mockUserFindMany },
     personalLogAccessGrant: {

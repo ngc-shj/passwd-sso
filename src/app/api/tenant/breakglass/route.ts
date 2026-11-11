@@ -5,7 +5,7 @@ import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { GRANT_STATUS } from "@/lib/constants/integrations/breakglass";
 import type { GrantStatus } from "@/lib/constants/integrations/breakglass";
-import { withTenantRls } from "@/lib/tenant-rls";
+import { advisoryXactLock, withTenantRls } from "@/lib/tenant-rls";
 import { displayUserOf, fetchUserDisplayMap } from "@/lib/audit/audit-user-lookup";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { BREAKGLASS_USER_LIST_LIMIT } from "@/lib/validations/common.server";
@@ -100,6 +100,12 @@ async function handlePOST(req: NextRequest) {
   let result: GrantResult;
   try {
     result = await withTenantRls(prisma, actor.tenantId, async (tx) => {
+      // Serialize grant creation per (tenant, requester, target) before the
+      // duplicate and cooling-off reads. Without it two concurrent POSTs under
+      // READ COMMITTED can both miss the duplicate, and the second can then see
+      // the first's commit as a "recent grant" and be created with no
+      // cooling-off at all.
+      await advisoryXactLock(tx, `breakglass-grant:${actor.tenantId}:${userId}:${targetUserId}`);
       const member = await tx.tenantMember.findFirst({
         where: {
           userId: targetUserId,

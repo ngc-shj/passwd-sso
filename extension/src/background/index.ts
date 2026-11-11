@@ -516,6 +516,35 @@ function endConnectionForPasskeyRequirement(generation: number): void {
 }
 
 /**
+ * The configured server URL changed: every authenticated request reads the URL
+ * from settings, so a held token would now go to the new server. Whatever
+ * token exists stops being usable synchronously, before any await — an
+ * in-flight hydration must not restore it into memory meanwhile — whether or
+ * not the previous URL is known (settings can be lost while the session token
+ * survives). `issuerUrl`, when known, is only where the token is revoked
+ * best-effort; it is never used to keep the token.
+ */
+function endConnectionForServerChange(issuerUrl: string | null): void {
+  hydrationSuperseded = true;
+  const heldToken = currentToken;
+  // A not-yet-hydrated SW holds the token only in session storage. Start that
+  // read first (issued before clearToken's clearSession), but clear without
+  // waiting for it: the SW can be torn down mid-await, which would leave the
+  // token stored for the next start to restore against the new server. If the
+  // read loses the race the token is simply not revoked — revocation is
+  // best-effort, removal is not.
+  const stored = heldToken === null && issuerUrl !== null ? loadSession() : null;
+  clearToken(DISCONNECT_REASON.MANUAL);
+
+  if (issuerUrl === null) return;
+  void (async () => {
+    const token = heldToken ?? (await stored)?.token ?? null;
+    if (token === null) return;
+    await revokeTokenOnServerWith({ getCurrentToken: () => token }, issuerUrl);
+  })().catch(() => {});
+}
+
+/**
  * Install a freshly-issued token into the SW state. Single source of truth
  * for the post-issuance bookkeeping (vault relock on user/session switch,
  * alarm scheduling, persistence). The production caller is the START_CONNECT
@@ -1212,8 +1241,16 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local") return;
-  if (changes.serverUrl?.newValue) {
-    registerTokenBridgeScript(String(changes.serverUrl.newValue)).catch(() => {});
+  if (changes.serverUrl) {
+    const { oldValue, newValue } = changes.serverUrl;
+    if (oldValue !== newValue) {
+      endConnectionForServerChange(
+        typeof oldValue === "string" && oldValue !== "" ? oldValue : null,
+      );
+    }
+    if (newValue) {
+      registerTokenBridgeScript(String(newValue)).catch(() => {});
+    }
   }
   // Update in-memory caches
   if (changes.showBadgeCount) cachedShowBadgeCount = changes.showBadgeCount.newValue !== false;

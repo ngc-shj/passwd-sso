@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterAll, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, statSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, statSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { MS_PER_HOUR } from "../../lib/time.js";
@@ -66,6 +66,49 @@ describe("config", () => {
     const stat = statSync(configPath);
     expect(stat.mode & 0o777).toBe(0o600);
   });
+
+  it("saveConfig tightens a pre-existing 0644 config.json to 0600", () => {
+    const dir = join(testXdgConfig, "passwd-sso");
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const configPath = join(dir, "config.json");
+    writeFileSync(configPath, "{}", { mode: 0o644 });
+    chmodSync(configPath, 0o644);
+
+    saveConfig({ serverUrl: "https://example.com", locale: "en" });
+
+    expect(statSync(configPath).mode & 0o777).toBe(0o600);
+    expect(JSON.parse(readFileSync(configPath, "utf-8")).serverUrl).toBe("https://example.com");
+  });
+
+  it("saveConfig tightens a pre-existing 0755 config dir to 0700", () => {
+    const dir = join(testXdgConfig, "passwd-sso");
+    mkdirSync(dir, { recursive: true });
+    chmodSync(dir, 0o755);
+
+    saveConfig({ serverUrl: "https://example.com", locale: "en" });
+
+    expect(statSync(dir).mode & 0o777).toBe(0o700);
+  });
+
+  it("saveCredentials tightens a pre-existing 0755 data dir to 0700 and 0644 file to 0600", () => {
+    const credPath = getCredentialsFilePath();
+    const dir = join(credPath, "..");
+    mkdirSync(dir, { recursive: true });
+    chmodSync(dir, 0o755);
+    writeFileSync(credPath, "x", { mode: 0o644 });
+    chmodSync(credPath, 0o644);
+
+    saveCredentials({
+      accessToken: "a",
+      refreshToken: "r",
+      clientId: "c",
+      expiresAt: new Date(Date.now() + MS_PER_HOUR).toISOString(),
+      serverUrl: "https://issuer.example.com",
+    });
+
+    expect(statSync(dir).mode & 0o777).toBe(0o700);
+    expect(statSync(credPath).mode & 0o777).toBe(0o600);
+  });
 });
 
 describe("credentials", () => {
@@ -84,9 +127,17 @@ describe("credentials", () => {
     refreshToken: "mcpr_test_refresh",
     clientId: "mcpc_test_client",
     expiresAt: new Date(Date.now() + MS_PER_HOUR).toISOString(),
+    serverUrl: "https://issuer.example.com",
   };
 
-  it("saves and loads credentials with all 4 fields", () => {
+  function writeRawCreds(obj: unknown): void {
+    const credPath = getCredentialsFilePath();
+    mkdirSync(join(credPath, ".."), { recursive: true, mode: 0o700 });
+    writeFileSync(credPath, JSON.stringify(obj), { mode: 0o600 });
+    _resetMigrationState();
+  }
+
+  it("saves and loads credentials with all 5 fields", () => {
     saveCredentials(validCreds);
     _resetMigrationState();
     const loaded = loadCredentials();
@@ -95,6 +146,33 @@ describe("credentials", () => {
     expect(loaded!.refreshToken).toBe(validCreds.refreshToken);
     expect(loaded!.clientId).toBe(validCreds.clientId);
     expect(loaded!.expiresAt).toBe(validCreds.expiresAt);
+    expect(loaded!.serverUrl).toBe(validCreds.serverUrl);
+  });
+
+  it("returns null for legacy credentials without serverUrl", () => {
+    const { serverUrl: _omit, ...legacy } = validCreds;
+    writeRawCreds(legacy);
+    expect(loadCredentials()).toBeNull();
+  });
+
+  it("returns null when serverUrl is empty", () => {
+    writeRawCreds({ ...validCreds, serverUrl: "" });
+    expect(loadCredentials()).toBeNull();
+  });
+
+  it("returns null when serverUrl is non-https and non-loopback", () => {
+    writeRawCreds({ ...validCreds, serverUrl: "http://evil.example.com" });
+    expect(loadCredentials()).toBeNull();
+  });
+
+  it("loads credentials whose serverUrl is loopback http", () => {
+    writeRawCreds({ ...validCreds, serverUrl: "http://localhost:3000" });
+    expect(loadCredentials()?.serverUrl).toBe("http://localhost:3000");
+  });
+
+  it("strips a trailing slash from a hand-edited serverUrl", () => {
+    writeRawCreds({ ...validCreds, serverUrl: "https://issuer.example.com/" });
+    expect(loadCredentials()?.serverUrl).toBe("https://issuer.example.com");
   });
 
   it("creates credentials file with 0o600 permissions", () => {

@@ -289,13 +289,21 @@ export interface TokenRevokeCallbacks {
   getCurrentToken(): string | null;
 }
 
+/**
+ * `issuerUrl` names the server that issued the token when it is no longer the
+ * configured one (the server URL was just changed): the token is revoked there
+ * and never sent to the newly configured server.
+ */
 export async function revokeTokenOnServerWith(
   callbacks: TokenRevokeCallbacks,
+  issuerUrl?: string,
 ): Promise<void> {
   const token = callbacks.getCurrentToken();
   if (!token) return;
   try {
-    const serverUrl = await getValidServerUrl();
+    const serverUrl = issuerUrl === undefined
+      ? await getValidServerUrl()
+      : isAllowedServerUrl(issuerUrl) ? issuerUrl : null;
     if (!serverUrl) return;
     await swFetchAuthenticated(
       EXT_API_PATH.EXTENSION_TOKEN,

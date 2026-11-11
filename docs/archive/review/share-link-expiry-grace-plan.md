@@ -117,15 +117,15 @@ or migration.
 
   | Gate | Expired-row deny test |
   |---|---|
-  | `/s/[token]/page.tsx` | |
-  | `/s/[token]/download/route.ts` | |
-  | `/api/share-links/[id]/content` | |
-  | `/api/share-links/verify-access` | |
-  | `lib/auth/tokens/api-key.ts` | |
-  | `lib/auth/tokens/operator-token.ts` | |
-  | `/api/tenant/breakglass/[id]/logs` | |
-  | `/api/vault/admin-reset` | |
-  | `reset-vault/[resetId]/approve` | |
+  | `/s/[token]/page.tsx` | added: `src/app/s/[token]/page.test.tsx` — "renders the expired error, not the content, for an expired unrevoked share" |
+  | `/s/[token]/download/route.ts` | existing: `src/__tests__/api/s/download.test.ts` — "returns 410 for expired share" |
+  | `/api/share-links/[id]/content` | existing: `src/app/api/share-links/[id]/content/route.test.ts` — "returns 404 when share is expired" (and `src/__tests__/api/share-links/content.test.ts` — "returns 404 for expired share") |
+  | `/api/share-links/verify-access` | existing: `src/app/api/share-links/verify-access/route.test.ts` — "returns 404 when share is expired" |
+  | `lib/auth/tokens/api-key.ts` | added: `src/lib/auth/tokens/api-key.test.ts` — "rejects an expired, unrevoked key with API_KEY_EXPIRED before the membership lookup" |
+  | `lib/auth/tokens/operator-token.ts` | existing: `src/lib/auth/tokens/operator-token.test.ts` — "returns OPERATOR_TOKEN_EXPIRED when expiresAt is in the past" |
+  | `/api/tenant/breakglass/[id]/logs` | existing: `src/app/api/tenant/breakglass/[id]/logs/route.test.ts` — "returns 403 when grant has expired" (and `src/__tests__/api/tenant/breakglass-logs.test.ts` — "returns 403 for expired grant") |
+  | `/api/vault/admin-reset` | existing: `src/app/api/vault/admin-reset/route.test.ts` — "returns 410 when token is expired" |
+  | `reset-vault/[resetId]/approve` | added: `src/app/api/tenant/members/[userId]/reset-vault/[resetId]/approve/route.test.ts` — "returns 409 RESET_NOT_APPROVABLE for an expired, unrevoked reset, which the CAS refuses via expiresAt > now" |
 
 ### C3 — Caps and duplicate checks ignore expired rows
 
@@ -280,3 +280,56 @@ Scope contract:
 | C4 | Out-of-tenant/stranded counters — consequence accepted | locked |
 | C5 | Team invitation re-issue ignores expired PENDING | locked |
 | C6 | Emergency-access duplicate check ignores expired PENDING | locked |
+
+## Implementation Checklist
+
+Production (done by orchestrator):
+- [x] `src/workers/retention-gc-worker/registry.ts` — `EXPIRED_RECORD_VISIBILITY_GRACE_DAYS` + `retentionDays` on 5 entries (C1)
+- [x] `src/app/api/api-keys/route.ts` — cap count `expiresAt: { gt: new Date() }` (C3)
+- [x] `src/app/api/teams/[teamId]/invitations/route.ts` — select `expiresAt`, loop over live rows only (C5)
+- [x] `src/lib/emergency-access/emergency-access-server.ts` — `duplicateGrantWhere()`; `src/app/api/emergency-access/route.ts` uses it (C6)
+
+Tests (all test trees, R19):
+- `src/workers/retention-gc-worker/__tests__/registry.test.ts` — set-equality of grace members (C1/N3)
+- `src/__tests__/db-integration/retention-gc-security-records.integration.test.ts` — shares boundary/existing tests; new admin_vault_resets, personal_log_access_grants (C1)
+- `src/__tests__/db-integration/retention-gc-forensic-credentials.integration.test.ts` — new api_keys, operator_tokens (C1)
+- `src/__tests__/db-integration/count-then-create-toctou.integration.test.ts` — predicate + expired-key case (C3)
+- `src/app/api/api-keys/route.test.ts` — cap `where` (C3)
+- `src/app/api/teams/[teamId]/invitations/route.test.ts` and `src/__tests__/api/teams/team-invitations.test.ts` — C5 cases, mocks gain `expiresAt`
+- `src/app/api/emergency-access/route.test.ts` — exact `where` (C6); new real-DB test for `duplicateGrantWhere` (C6)
+- C2 deny-test checklist table above — filled
+
+Docs: `docs/security/deletion-retention-matrix.md` regenerated (C1).
+
+Shared utilities to reuse: `createTestContext`, `setBypassRlsGucs`, `inRetentionSweepTx`, `ctx.deleteTestData`, `sweepAuditProvenanceEntry` (`src/__tests__/db-integration/helpers.ts`, `sweep.ts`); `MS_PER_DAY` (`src/lib/constants/time`).
+
+CI parity: `scripts/pre-pr.sh` is the aggregate local gate (117 steps incl. `check:security-matrices`, `check:env-docs`); CI workflows with multi-line run blocks reviewed via pre-pr coverage.
+
+## Addendum — external review findings (2026-11-12), fixed with class sweep
+
+An external review of the branch raised five findings; each was treated as a class
+(R42) and every member found in the repo was fixed.
+
+| ID | Class | Members fixed |
+|----|-------|---------------|
+| C7 | Stored credential sent to a server other than its issuer | CLI: `StoredCredentials.serverUrl` (legacy creds → re-login), `api-client` (requests + refresh), `login` revoke at old issuer, `env`/`run` login-token path, `status` display. Extension: `serverUrl` change disconnects and revokes at the old issuer (`endConnectionForServerChange`). iOS: `ServerURLSetupViewModel.persist` discards host + upload tokens when the server changes. |
+| C8 | Read-gated create without serialization (TOCTOU) | `emergency-access` POST, `tenant/breakglass` POST (cooling-off bypass), `vault/delegation` POST (existing-session read outside the lock), `teams/[teamId]/invitations` POST (no row lock for addresses without an account), `tenant/members/[userId]` PUT (double/zero OWNER). Derived by a sub-agent sweep of every read→decide→write site; exclusions recorded in the review log. |
+| C9 | `equals` + `mode: "insensitive"` (unescaped ILIKE) | `teams/[teamId]/invitations` (2 sites); `members/search` pending-user exclusion made case-insensitive. New ESLint `no-restricted-syntax` rule (`INSENSITIVE_EQUALS_RESTRICTION`) over `src/**` and `scripts/**`. |
+| C10 | Secret file mode applied only at creation | `writeSecretFile` (CLI + e2e mirror) `fchmodSync`; `migrate` chmod after rename; `saveConfig` via `writeSecretFile`; config/data dirs tightened to 0700. |
+
+Not fixed, by decision:
+- New-device notification duplicate under concurrent login (`new-device-detection.ts`): cosmetic; a lock would serialize the auth path.
+- Unique-constraint-protected creates return 500 instead of 409 to the losing request (`prismaErrorResponse` has no callers): integrity holds; cosmetic.
+- An AST gate for the C8 class (sibling of `check-count-then-create-lock.mjs`): proposed as follow-up.
+
+### Addendum round 2 (second external review, 2026-11-12)
+
+- C7 iOS: `ServerURLSetupViewModel.persist` discards host + upload tokens unless the very same URL is re-verified (also when no previous config is readable), and a failed discard aborts the save (`persist` throws; the setup screen shows a retry message).
+- C7 extension: any `serverUrl` change stops token use synchronously (`hydrationSuperseded = true`, in-memory clear) before any await, including when the previous URL is unknown; the previous URL, when known, is only the revocation target.
+- C10 CLI migrate: the legacy file is tightened to 0600 before the rename, so a chmod failure leaves it unmoved instead of moved at its old mode.
+- Follow-up candidate (not done): bind extension / iOS tokens to their issuer URL at storage time, as the CLI now does, so the guarantee does not depend on observing the URL change.
+
+### Addendum round 3 (third external review, 2026-11-12)
+
+- C7 extension: on a server change the stored session is cleared synchronously in every case (the session read for revocation is started first but never awaited before the clear), so a SW torn down mid-read leaves no token behind, and a connection made while the read is pending is never wiped. A token the read loses is not revoked (best-effort).
+- C10 CLI migrate: the legacy file is tightened through an O_NOFOLLOW descriptor (`fstat` regular-file check + `fchmod`); a symlinked legacy file is neither followed nor migrated.

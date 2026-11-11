@@ -13,6 +13,7 @@
 
 import {
   openSync,
+  fchmodSync,
   writeSync,
   closeSync,
   readFileSync,
@@ -34,6 +35,10 @@ export function writeSecretFile(
     mode,
   );
   try {
+    // open()'s mode applies only when the file is created; an existing file
+    // keeps its old mode (e.g. 0644), so set it on the descriptor before the
+    // secret is written.
+    fchmodSync(fd, mode);
     // Intentional persistence of the caller's own secrets (OAuth tokens /
     // decrypted export) to a 0600 O_NOFOLLOW file. CodeQL js/http-to-file-access
     // is excluded for this in .github/codeql/codeql-config.yml (inline

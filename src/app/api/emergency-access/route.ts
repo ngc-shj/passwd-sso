@@ -12,12 +12,13 @@ import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-respons
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { resolveUserLocale } from "@/lib/locale";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { withBypassRls } from "@/lib/tenant-rls";
+import { advisoryXactLock, withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { parseBody } from "@/lib/http/parse-body";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { EMERGENCY_ACCESS_INVITE_TTL_MS } from "@/lib/constants/emergency-access";
+import { duplicateGrantWhere } from "@/lib/emergency-access/emergency-access-server";
 
 const createLimiter = createRateLimiter({ windowMs: 15 * MS_PER_MINUTE, max: 5 });
 
@@ -43,27 +44,22 @@ async function handlePOST(req: NextRequest) {
     return errorResponse(API_ERROR.CANNOT_GRANT_SELF);
   }
 
-  // Check for duplicate active grant
-  const existing = await withUserTenantRls(session.user.id, async () =>
-    prisma.emergencyAccessGrant.findFirst({
-      where: {
-        ownerId: session.user.id,
-        // `in`, not `equals`: insensitive `equals` is an unescaped ILIKE, so `_` or
-        // `%` in the address matched other grants (round-8 R8-S4).
-        granteeEmail: { in: [granteeEmail], mode: "insensitive" },
-        status: { notIn: [EA_STATUS.REVOKED, EA_STATUS.REJECTED] },
-      },
-    }),
-  );
-
-  if (existing) {
-    return errorResponse(API_ERROR.DUPLICATE_GRANT);
-  }
-
   const token = generateShareToken();
   const tokenExpiresAt = new Date(Date.now() + EMERGENCY_ACCESS_INVITE_TTL_MS);
-  const grant = await withUserTenantRls(session.user.id, async (tenantId) =>
-    prisma.emergencyAccessGrant.create({
+  // The duplicate check and the create run in one transaction under a lock on
+  // (owner, grantee): no unique index can express "one live grant per grantee"
+  // (liveness depends on the clock), so two concurrent POSTs would otherwise
+  // both pass the check and leave a second grant behind when one is revoked.
+  const grant = await withUserTenantRls(session.user.id, async (tenantId) => {
+    await advisoryXactLock(
+      prisma,
+      `emergency-grant:${session.user.id}:${granteeEmail.toLowerCase()}`,
+    );
+    const existing = await prisma.emergencyAccessGrant.findFirst({
+      where: duplicateGrantWhere(session.user.id, granteeEmail, new Date()),
+    });
+    if (existing) return null;
+    return prisma.emergencyAccessGrant.create({
       data: {
         ownerId: session.user.id,
         tenantId,
@@ -72,8 +68,12 @@ async function handlePOST(req: NextRequest) {
         tokenHash: hashToken(token),
         tokenExpiresAt,
       },
-    }),
-  );
+    });
+  });
+
+  if (!grant) {
+    return errorResponse(API_ERROR.DUPLICATE_GRANT);
+  }
 
   await logAuditAsync({
     ...personalAuditBase(req, session.user.id),

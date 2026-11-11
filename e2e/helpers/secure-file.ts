@@ -8,6 +8,7 @@
  */
 import {
   openSync,
+  fchmodSync,
   writeSync,
   closeSync,
   readFileSync,
@@ -24,6 +25,10 @@ export function writeSecretFile(path: string, data: string, mode = 0o600): void 
     mode,
   );
   try {
+    // open()'s mode applies only when the file is created; an existing file
+    // keeps its old mode (e.g. 0644), so set it on the descriptor before the
+    // secret is written.
+    fchmodSync(fd, mode);
     writeSync(fd, data);
   } finally {
     closeSync(fd);

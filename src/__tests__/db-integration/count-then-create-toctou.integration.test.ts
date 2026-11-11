@@ -79,10 +79,24 @@ async function activeCount(ctx: TestContext, userId: string): Promise<number> {
   return Number(r[0].n);
 }
 
+// The api_keys route's cap count, as SQL: non-revoked AND unexpired (the route's
+// `where: { userId, revokedAt: null, expiresAt: { gt: now } }`). Expired rows are
+// retained for the visibility grace window and must not consume the cap.
+async function countCappedApiKeys(
+  client: Pick<PrismaClient, "$queryRawUnsafe">,
+  userId: string,
+): Promise<number> {
+  const r: Array<{ n: bigint }> = await client.$queryRawUnsafe(
+    `SELECT count(*) n FROM api_keys
+     WHERE user_id = $1::uuid AND revoked_at IS NULL AND expires_at > now()`,
+    userId,
+  );
+  return Number(r[0].n);
+}
+
 // One "issue" = the api-keys CAS against a cap of MAX, mirroring the
-// api_keys route (count non-revoked → if < MAX → create), optionally guarded by
-// the same advisory lock the production fix adds. The cap in production counts
-// `revoked_at IS NULL`, so this replica does too.
+// api_keys route (count non-revoked, unexpired → if < MAX → create), optionally
+// guarded by the same advisory lock the production fix adds.
 async function issueApiKey(
   client: PrismaClient,
   userId: string,
@@ -98,12 +112,7 @@ async function issueApiKey(
         userId,
       );
     }
-    const r: Array<{ n: bigint }> = await tx.$queryRawUnsafe(
-      `SELECT count(*) n FROM api_keys
-       WHERE user_id = $1::uuid AND revoked_at IS NULL`,
-      userId,
-    );
-    const existing = Number(r[0].n);
+    const existing = await countCappedApiKeys(tx, userId);
     if (existing >= max) return; // cap reached — production throws + maps to 400
     // Widen the window so the un-serialized path reliably interleaves.
     await tx.$executeRawUnsafe(`SELECT pg_sleep(0.15)`);
@@ -122,7 +131,7 @@ async function issueApiKey(
 
 async function activeApiKeyCount(ctx: TestContext, userId: string): Promise<number> {
   const r: Array<{ n: bigint }> = await ctx.su.prisma.$queryRawUnsafe(
-    `SELECT count(*) n FROM api_keys WHERE user_id = $1::uuid AND revoked_at IS NULL`,
+    `SELECT count(*) n FROM api_keys WHERE user_id = $1::uuid AND revoked_at IS NULL AND expires_at > now()`,
     userId,
   );
   return Number(r[0].n);
@@ -253,5 +262,36 @@ describe.skipIf(SKIP)("count-then-create TOCTOU — advisory lock (api_keys)", (
     // Winner reads count=0, inserts; loser blocks, then reads count=1 >= MAX and
     // refuses → exactly MAX survive.
     expect(await activeApiKeyCount(ctx, userId)).toBe(MAX);
+  });
+
+  it("an expired unrevoked key does not consume the cap (cap-1 live + 1 expired stays below the cap)", async () => {
+    await seed();
+    const CAP = 3;
+    const insertKey = async (expiresAt: string) => {
+      await ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        await tx.$executeRawUnsafe(
+          `INSERT INTO api_keys
+             (id, user_id, tenant_id, token_hash, prefix, name, scope, expires_at, created_at)
+           VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'api_XXXX', 'k', 'passwords:read',
+                   ${expiresAt}, now())`,
+          randomUUID(),
+          userId,
+          tenantId,
+          randomUUID().replace(/-/g, ""),
+        );
+      });
+    };
+    await insertKey("now() - interval '1 hour'");
+    for (let i = 0; i < CAP - 1; i++) await insertKey("now() + interval '30 days'");
+
+    // 3 unrevoked rows exist, so a cap predicate without `expires_at > now()`
+    // would count CAP and refuse the create.
+    const rows: Array<{ n: bigint }> = await ctx.su.prisma.$queryRawUnsafe(
+      `SELECT count(*) n FROM api_keys WHERE user_id = $1::uuid AND revoked_at IS NULL`,
+      userId,
+    );
+    expect(Number(rows[0].n)).toBe(CAP);
+    expect(await countCappedApiKeys(ctx.su.prisma, userId)).toBe(CAP - 1);
   });
 });

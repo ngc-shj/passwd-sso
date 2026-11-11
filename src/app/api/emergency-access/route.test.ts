@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaGrant, mockPrismaUser, mockCheck, mockSendEmail, mockWithUserTenantRls, mockWithBypassRls } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaGrant, mockPrismaUser, mockExecuteRaw, mockCheck, mockSendEmail, mockWithUserTenantRls, mockWithBypassRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaGrant: {
     create: vi.fn(),
@@ -9,6 +9,7 @@ const { mockAuth, mockPrismaGrant, mockPrismaUser, mockCheck, mockSendEmail, moc
     findMany: vi.fn(),
   },
   mockPrismaUser: { findUnique: vi.fn(), findFirst: vi.fn() },
+  mockExecuteRaw: vi.fn().mockResolvedValue(undefined),
   mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockSendEmail: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
@@ -17,7 +18,7 @@ const { mockAuth, mockPrismaGrant, mockPrismaUser, mockCheck, mockSendEmail, moc
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: { emergencyAccessGrant: mockPrismaGrant, user: mockPrismaUser },
+  prisma: { emergencyAccessGrant: mockPrismaGrant, user: mockPrismaUser, $executeRaw: mockExecuteRaw },
 }));
 vi.mock("@/lib/email", () => ({ sendEmail: mockSendEmail }));
 vi.mock("@/lib/crypto/crypto-server", () => ({
@@ -55,6 +56,7 @@ describe("POST /api/emergency-access", () => {
       tokenExpiresAt: new Date("2099-01-01"),
     });
     mockPrismaUser.findUnique.mockResolvedValue({ email: "owner@test.com", name: "Owner Name" });
+    mockExecuteRaw.mockResolvedValue(undefined);
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -115,12 +117,60 @@ describe("POST /api/emergency-access", () => {
     );
   });
 
-  it("returns 409 for duplicate grant", async () => {
-    mockPrismaGrant.findFirst.mockResolvedValue({ id: "existing" });
+  it("takes the (owner, grantee) lock before the duplicate read and the create", async () => {
     const res = await POST(createRequest("POST", "http://localhost/api/emergency-access", {
+      body: { granteeEmail: "Grantee@Test.com", waitDays: 7 },
+    }));
+    expect(res.status).toBe(201);
+    expect(mockExecuteRaw).toHaveBeenCalledTimes(1);
+    // Tagged-template call: the key is the first interpolated value.
+    expect(mockExecuteRaw.mock.calls[0][1]).toBe("emergency-grant:owner-1:grantee@test.com");
+    const lockOrder = mockExecuteRaw.mock.invocationCallOrder[0];
+    expect(lockOrder).toBeLessThan(mockPrismaGrant.findFirst.mock.invocationCallOrder[0]);
+    expect(lockOrder).toBeLessThan(mockPrismaGrant.create.mock.invocationCallOrder[0]);
+  });
+
+  it("runs the duplicate read and the create in one withUserTenantRls transaction", async () => {
+    await POST(createRequest("POST", "http://localhost/api/emergency-access", {
       body: { granteeEmail: "grantee@test.com", waitDays: 7 },
     }));
-    expect(res.status).toBe(409);
+    expect(mockWithUserTenantRls).toHaveBeenCalledTimes(1);
+  });
+
+  describe("duplicate check clock", () => {
+    const clock = new Date("2026-06-01T00:00:00Z");
+    const expectedWhere = {
+      ownerId: "owner-1",
+      granteeEmail: { in: ["grantee@test.com"], mode: "insensitive" },
+      status: { notIn: [EA_STATUS.REVOKED, EA_STATUS.REJECTED] },
+      NOT: { status: EA_STATUS.PENDING, tokenExpiresAt: { lte: clock } },
+    };
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(clock);
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("excludes expired PENDING invites from the duplicate check", async () => {
+      const res = await POST(createRequest("POST", "http://localhost/api/emergency-access", {
+        body: { granteeEmail: "grantee@test.com", waitDays: 7 },
+      }));
+      expect(res.status).toBe(201);
+      expect(mockPrismaGrant.findFirst).toHaveBeenCalledWith({ where: expectedWhere });
+    });
+
+    it("returns 409 for duplicate grant", async () => {
+      mockPrismaGrant.findFirst.mockResolvedValue({ id: "existing" });
+      const res = await POST(createRequest("POST", "http://localhost/api/emergency-access", {
+        body: { granteeEmail: "grantee@test.com", waitDays: 7 },
+      }));
+      expect(res.status).toBe(409);
+      expect(mockPrismaGrant.create).not.toHaveBeenCalled();
+      expect(mockPrismaGrant.findFirst).toHaveBeenCalledWith({ where: expectedWhere });
+    });
   });
 
   it("creates grant with hashed token and returns plaintext token", async () => {

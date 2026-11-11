@@ -2,6 +2,20 @@ import { defineConfig, globalIgnores } from "eslint/config";
 import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
 
+// Prisma compiles `{ equals: v, mode: "insensitive" }` to an unescaped ILIKE, so
+// `_` / `%` in v act as wildcards (prisma-filters.ts). Shared by every block that
+// sets no-restricted-syntax for src/, since a later block's options replace an
+// earlier one's for the files both match.
+const INSENSITIVE_EQUALS_RESTRICTION = {
+  // Sibling combinators in both orders: the two keys of one object literal.
+  selector:
+    "Property[key.name='equals'] ~ Property[key.name='mode'][value.value='insensitive'], " +
+    "Property[key.name='mode'][value.value='insensitive'] ~ Property[key.name='equals']",
+  message:
+    "`equals` with mode: \"insensitive\" is an unescaped ILIKE. Use { in: [value], mode: \"insensitive\" } " +
+    "for an exact case-insensitive match (see src/lib/prisma/prisma-filters.ts).",
+};
+
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
@@ -30,6 +44,12 @@ const eslintConfig = defineConfig([
     ".claude/**",
   ]),
   {
+    files: ["src/**/*.{ts,tsx}", "scripts/**/*.{ts,mts}"],
+    rules: {
+      "no-restricted-syntax": ["error", INSENSITIVE_EQUALS_RESTRICTION],
+    },
+  },
+  {
     // Prevent plain fetch() in client-side code — use fetchApi() instead.
     files: ["src/components/**/*.{ts,tsx}", "src/hooks/**/*.{ts,tsx}"],
     ignores: ["**/*.test.*", "**/__tests__/**"],
@@ -55,6 +75,7 @@ const eslintConfig = defineConfig([
             "Do not use plain fetch as a default parameter. " +
             "Use fetchApi from @/lib/url-helpers instead.",
         },
+        INSENSITIVE_EQUALS_RESTRICTION,
       ],
     },
   },

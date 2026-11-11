@@ -424,6 +424,25 @@ describe("POST /api/tenant/members/[userId]/reset-vault/[resetId]/approve", () =
     expect(mockSendEmail).not.toHaveBeenCalled();
   });
 
+  it("returns 409 RESET_NOT_APPROVABLE for an expired, unrevoked reset, which the CAS refuses via expiresAt > now", async () => {
+    mockPrismaAdminVaultResetFindFirst.mockResolvedValue({
+      ...RESET_RECORD,
+      revokedAt: null,
+      expiresAt: new Date(Date.now() - 1000),
+    });
+    mockPrismaAdminVaultResetUpdateMany.mockResolvedValue({ count: 0 });
+    const res = await POST(buildReq(), buildParams());
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("RESET_NOT_APPROVABLE");
+    expect(mockPrismaAdminVaultResetUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ expiresAt: { gt: expect.any(Date) } }),
+      }),
+    );
+    expect(mockCreateNotification).not.toHaveBeenCalled();
+    expect(mockSendEmail).not.toHaveBeenCalled();
+  });
+
   it("approves: CAS WHERE includes load-bearing self-approval guard + state checks", async () => {
     await POST(buildReq(), buildParams());
     expect(mockPrismaAdminVaultResetUpdateMany).toHaveBeenCalledWith(

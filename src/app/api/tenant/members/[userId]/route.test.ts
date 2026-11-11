@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaTenantMember, mockRequireTenantPermission, mockWithTenantRls, TenantAuthError, mockLogAudit, mockRequireRecentSession } = vi.hoisted(() => {
+const { mockAuth, mockLockTenantRows, mockPrismaTenantMember, mockRequireTenantPermission, mockWithTenantRls, TenantAuthError, mockLogAudit, mockRequireRecentSession } = vi.hoisted(() => {
   class _TenantAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -16,7 +16,9 @@ const { mockAuth, mockPrismaTenantMember, mockRequireTenantPermission, mockWithT
     mockPrismaTenantMember: {
       findFirst: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
     },
+    mockLockTenantRows: vi.fn(),
     mockRequireTenantPermission: vi.fn(),
     mockWithTenantRls: vi.fn((p: unknown, _t: unknown, fn: (tx: unknown) => unknown) => fn(p)),
     TenantAuthError: _TenantAuthError,
@@ -42,6 +44,10 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
   withTenantRls: mockWithTenantRls,
   withBypassRls: vi.fn((p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
 }));
+vi.mock("@/lib/team/tenant-row-lock", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
+  lockTenantRows: mockLockTenantRows,
+}));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: vi.fn().mockReturnValue({ ip: "127.0.0.1", userAgent: "test" }),
@@ -54,6 +60,7 @@ vi.mock("@/lib/logger", () => ({
 }));
 
 import { PUT } from "./route";
+import { TenantMemberLockTimeoutError } from "@/lib/team/tenant-row-lock";
 
 const TENANT_ID = "tenant-1";
 const ACTOR_USER_ID = "owner-user-id";
@@ -69,6 +76,13 @@ const TARGET_ADMIN = {
   deactivatedAt: null,
   scimManaged: false,
 };
+
+function lockedRows(actorRole: string | null = "OWNER", actorDeactivatedAt: Date | null = null) {
+  return new Map([
+    [ACTOR_USER_ID, { hasRow: true, role: actorRole, deactivatedAt: actorDeactivatedAt, departedAt: null }],
+    [TARGET_USER_ID, { hasRow: true, role: "ADMIN", deactivatedAt: null, departedAt: null }],
+  ]);
+}
 
 const UPDATED_MEMBER = {
   id: "membership-admin",
@@ -93,6 +107,52 @@ describe("PUT /api/tenant/members/[userId]", () => {
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     mockPrismaTenantMember.findFirst.mockResolvedValue(TARGET_ADMIN);
     mockPrismaTenantMember.update.mockResolvedValue(UPDATED_MEMBER);
+    mockPrismaTenantMember.updateMany.mockResolvedValue({ count: 1 });
+    mockLockTenantRows.mockResolvedValue(lockedRows());
+  });
+
+  it("locks the actor's and the target's rows FOR UPDATE before reading the target", async () => {
+    await putRequest(TARGET_USER_ID, { role: "MEMBER" });
+    expect(mockLockTenantRows).toHaveBeenCalledTimes(1);
+    expect(mockLockTenantRows).toHaveBeenCalledWith(
+      expect.anything(), TENANT_ID, [ACTOR_USER_ID, TARGET_USER_ID], "update", expect.anything(),
+    );
+    expect(mockLockTenantRows.mock.invocationCallOrder[0]).toBeLessThan(
+      mockPrismaTenantMember.findFirst.mock.invocationCallOrder[0],
+    );
+    expect(mockLockTenantRows.mock.invocationCallOrder[0]).toBeLessThan(
+      mockPrismaTenantMember.update.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("returns 403 OWNER_ONLY when the locked actor row is no longer OWNER, and mutates nothing", async () => {
+    mockLockTenantRows.mockResolvedValue(lockedRows("ADMIN"));
+    const res = await putRequest(TARGET_USER_ID, { role: "OWNER" });
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe("OWNER_ONLY");
+    expect(mockPrismaTenantMember.update).not.toHaveBeenCalled();
+    expect(mockPrismaTenantMember.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 OWNER_ONLY when the locked actor row is deactivated", async () => {
+    mockLockTenantRows.mockResolvedValue(lockedRows("OWNER", new Date()));
+    const res = await putRequest(TARGET_USER_ID, { role: "MEMBER" });
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe("OWNER_ONLY");
+    expect(mockPrismaTenantMember.update).not.toHaveBeenCalled();
+  });
+
+  it("returns 409 CONFLICT when the tenant row lock cannot be taken", async () => {
+    mockLockTenantRows.mockRejectedValue(new TenantMemberLockTimeoutError());
+    const res = await putRequest(TARGET_USER_ID, { role: "OWNER" });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("CONFLICT");
+    expect(mockPrismaTenantMember.update).not.toHaveBeenCalled();
+  });
+
+  it("rethrows a non-conflict error from the transaction", async () => {
+    mockLockTenantRows.mockRejectedValue(new Error("boom"));
+    await expect(putRequest(TARGET_USER_ID)).rejects.toThrow("boom");
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -240,15 +300,7 @@ describe("PUT /api/tenant/members/[userId]", () => {
     };
 
     beforeEach(() => {
-      // First findFirst: target lookup (outside transfer scope)
-      // Second findFirst: actor re-verification inside transfer scope
-      mockPrismaTenantMember.findFirst
-        .mockResolvedValueOnce(TARGET_ADMIN) // target lookup
-        .mockResolvedValueOnce(ACTOR); // actor re-verify
-      // First update: demote actor, second update: promote target
-      mockPrismaTenantMember.update
-        .mockResolvedValueOnce({ ...ACTOR, role: "ADMIN" }) // demote actor
-        .mockResolvedValueOnce(TRANSFERRED_MEMBER); // promote target
+      mockPrismaTenantMember.update.mockResolvedValue(TRANSFERRED_MEMBER);
     });
 
     it("transfers ownership: demotes actor to ADMIN, promotes target to OWNER", async () => {
@@ -258,11 +310,21 @@ describe("PUT /api/tenant/members/[userId]", () => {
       expect(json.role).toBe("OWNER");
       expect(json.userId).toBe(TARGET_USER_ID);
 
-      // Verify demote happened first, then promote
-      expect(mockPrismaTenantMember.update).toHaveBeenCalledTimes(2);
-      const calls = mockPrismaTenantMember.update.mock.calls;
-      expect(calls[0][0]).toMatchObject({ data: { role: "ADMIN" } }); // demote actor
-      expect(calls[1][0]).toMatchObject({ data: { role: "OWNER" } }); // promote target
+      // The demotion is conditional on the actor still being OWNER and runs
+      // before the promotion.
+      expect(mockPrismaTenantMember.updateMany).toHaveBeenCalledTimes(1);
+      expect(mockPrismaTenantMember.updateMany).toHaveBeenCalledWith({
+        where: { userId: ACTOR_USER_ID, tenantId: TENANT_ID, role: "OWNER" },
+        data: { role: "ADMIN" },
+      });
+      expect(mockPrismaTenantMember.update).toHaveBeenCalledTimes(1);
+      expect(mockPrismaTenantMember.update.mock.calls[0][0]).toMatchObject({
+        where: { id: TARGET_ADMIN.id, tenantId: TENANT_ID },
+        data: { role: "OWNER" },
+      });
+      expect(mockPrismaTenantMember.updateMany.mock.invocationCallOrder[0]).toBeLessThan(
+        mockPrismaTenantMember.update.mock.invocationCallOrder[0],
+      );
     });
 
     it("logs audit with transfer flag", async () => {
@@ -279,15 +341,12 @@ describe("PUT /api/tenant/members/[userId]", () => {
       );
     });
 
-    it("returns 403 if actor lost OWNER during re-verification", async () => {
-      mockPrismaTenantMember.findFirst
-        .mockReset()
-        .mockResolvedValueOnce(TARGET_ADMIN) // target lookup
-        .mockResolvedValueOnce(null); // actor re-verify fails
+    it("returns 404 and demotes nobody when the target was deactivated under the lock", async () => {
+      mockPrismaTenantMember.findFirst.mockResolvedValue(null); // target deactivated under the lock
       const res = await putRequest(TARGET_USER_ID, { role: "OWNER" });
-      expect(res.status).toBe(403);
-      const json = await res.json();
-      expect(json.error).toBe("OWNER_ONLY");
+      expect(res.status).toBe(404);
+      expect(mockPrismaTenantMember.updateMany).not.toHaveBeenCalled();
+      expect(mockPrismaTenantMember.update).not.toHaveBeenCalled();
     });
   });
 

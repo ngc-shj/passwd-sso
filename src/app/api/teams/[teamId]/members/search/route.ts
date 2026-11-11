@@ -61,7 +61,9 @@ async function handleGET(req: NextRequest, { params }: Params) {
       let pendingUserIds = new Set<string>();
       if (pendingEmails.length > 0) {
         const pendingUsers = await prisma.user.findMany({
-          where: { email: { in: pendingEmails }, tenantId },
+          // Insensitive, as invitations are issued and accepted by address
+          // case-insensitively.
+          where: { email: { in: pendingEmails, mode: "insensitive" }, tenantId },
           select: { id: true },
         });
         pendingUserIds = new Set(pendingUsers.map((u) => u.id));

@@ -9,7 +9,7 @@ import { spawn } from "node:child_process";
 import { loadSecretsConfig, getPasswordPath, getSecretsServerUrl } from "../lib/secrets-config.js";
 import { getEncryptionKey, getUserId } from "../lib/vault-state.js";
 import { autoUnlockIfNeeded } from "./unlock.js";
-import { getToken } from "../lib/api-client.js";
+import { getToken, getTokenServerUrl } from "../lib/api-client.js";
 import { decryptData } from "../lib/crypto.js";
 import { buildPersonalEntryAAD, VAULT_TYPE } from "../lib/crypto-aad.js";
 import { describeEntryFetchFailure } from "../lib/v1-entry-failure.js";
@@ -54,6 +54,8 @@ export async function runCommand(opts: RunOptions): Promise<void> {
       process.exit(1);
     }
     authHeader = `Bearer ${token}`;
+    // A login token goes only to the server that issued it.
+    baseUrl = getTokenServerUrl();
   }
 
   if (!await autoUnlockIfNeeded()) {

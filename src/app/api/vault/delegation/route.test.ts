@@ -167,7 +167,7 @@ describe("POST /api/vault/delegation", () => {
     mockPrismaPasswordEntry.findMany.mockResolvedValue(
       VALID_ENTRIES.map((e) => ({ id: e.id })),
     );
-    mockPrismaDelegationSession.findFirst.mockResolvedValue(null);
+    mockPrismaDelegationSession.findMany.mockResolvedValue([]);
     mockPrismaDelegationSession.create.mockResolvedValue({
       id: SESSION_ID,
       expiresAt: EXPIRES_AT,
@@ -367,8 +367,38 @@ describe("POST /api/vault/delegation", () => {
     expect(mockPrismaDelegationSession.create).not.toHaveBeenCalled();
   });
 
+  it("reads the existing sessions under the user lock, before creating the new one", async () => {
+    mockPrismaDelegationSession.findMany.mockResolvedValue([{ id: "old-session-id" }]);
+    await POST(makePostRequest(VALID_POST_BODY));
+    const readOrder = mockPrismaDelegationSession.findMany.mock.invocationCallOrder[0];
+    expect(vi.mocked(lockUserAuthArtifacts).mock.invocationCallOrder[0]).toBeLessThan(readOrder);
+    expect(readOrder).toBeLessThan(mockPrismaDelegationSession.create.mock.invocationCallOrder[0]);
+    expect(mockPrismaDelegationSession.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ userId: USER_ID, revokedAt: null }),
+      }),
+    );
+  });
+
+  it("evicts and revokes every pre-existing session for the token, not just one", async () => {
+    mockPrismaDelegationSession.findMany.mockResolvedValue([{ id: "old-1" }, { id: "old-2" }]);
+    mockPrismaDelegationSession.updateMany.mockResolvedValue({ count: 1 });
+
+    const res = await POST(makePostRequest(VALID_POST_BODY));
+    expect(res.status).toBe(200);
+    expect(mockEvictDelegationRedisKeys).toHaveBeenCalledTimes(2);
+    expect(mockEvictDelegationRedisKeys).toHaveBeenCalledWith(USER_ID, "old-1");
+    expect(mockEvictDelegationRedisKeys).toHaveBeenCalledWith(USER_ID, "old-2");
+    expect(mockPrismaDelegationSession.updateMany).toHaveBeenCalledTimes(2);
+    for (const id of ["old-1", "old-2"]) {
+      expect(mockPrismaDelegationSession.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ id }) }),
+      );
+    }
+  });
+
   it("auto-revokes existing delegation session for same token", async () => {
-    mockPrismaDelegationSession.findFirst.mockResolvedValue({ id: "old-session-id" });
+    mockPrismaDelegationSession.findMany.mockResolvedValue([{ id: "old-session-id" }]);
     mockPrismaDelegationSession.updateMany.mockResolvedValue({ count: 1 });
 
     const res = await POST(makePostRequest(VALID_POST_BODY));
@@ -514,7 +544,7 @@ describe("POST /api/vault/delegation", () => {
 
   it("enforces create → store → audit → evict → revoke order on success (C5 I-C5-1, T3)", async () => {
     // Set up an existing session so the evict/revoke steps actually run.
-    mockPrismaDelegationSession.findFirst.mockResolvedValue({ id: "old-session-id" });
+    mockPrismaDelegationSession.findMany.mockResolvedValue([{ id: "old-session-id" }]);
 
     await POST(makePostRequest(VALID_POST_BODY));
 
@@ -536,7 +566,7 @@ describe("POST /api/vault/delegation", () => {
   });
 
   it("returns 200 + audit-once when evict-old throws (C5 step-4 best-effort, T4)", async () => {
-    mockPrismaDelegationSession.findFirst.mockResolvedValue({ id: "old-session-id" });
+    mockPrismaDelegationSession.findMany.mockResolvedValue([{ id: "old-session-id" }]);
     mockEvictDelegationRedisKeys.mockRejectedValueOnce(new Error("Redis evict transient"));
 
     const res = await POST(makePostRequest(VALID_POST_BODY));
@@ -551,7 +581,7 @@ describe("POST /api/vault/delegation", () => {
   });
 
   it("returns 200 + audit-once when revoke-old throws (C5 step-5 best-effort, T4)", async () => {
-    mockPrismaDelegationSession.findFirst.mockResolvedValue({ id: "old-session-id" });
+    mockPrismaDelegationSession.findMany.mockResolvedValue([{ id: "old-session-id" }]);
     mockPrismaDelegationSession.updateMany.mockRejectedValueOnce(new Error("DB revoke transient"));
 
     const res = await POST(makePostRequest(VALID_POST_BODY));

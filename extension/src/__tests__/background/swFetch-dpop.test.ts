@@ -308,4 +308,27 @@ describe("revokeTokenOnServerWith (C8 — DPoP header on revoke)", () => {
     const headers = init.headers as Headers;
     expect(headers.get("DPoP")).toBe("fake.dpop.jws");
   });
+
+  it("revokes at the given issuerUrl and never at the configured server", async () => {
+    const mockFetch = vi.fn().mockResolvedValue(new Response("", { status: 200 }));
+    vi.stubGlobal("fetch", mockFetch);
+
+    await revokeTokenOnServerWith({ getCurrentToken: () => TOKEN }, "https://issuer.example");
+
+    expect(mockFetch).toHaveBeenCalledOnce();
+    expect(mockFetch.mock.calls[0][0]).toBe("https://issuer.example/api/extension/token");
+    for (const call of mockFetch.mock.calls) {
+      expect(String(call[0])).not.toContain(SERVER_URL);
+    }
+  });
+
+  it("sends nothing when issuerUrl fails isAllowedServerUrl (plain http off localhost)", async () => {
+    const mockFetch = vi.fn().mockResolvedValue(new Response("", { status: 200 }));
+    vi.stubGlobal("fetch", mockFetch);
+
+    await revokeTokenOnServerWith({ getCurrentToken: () => TOKEN }, "http://issuer.example");
+
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(dpopKeyMocks.signDpopProof).not.toHaveBeenCalled();
+  });
 });

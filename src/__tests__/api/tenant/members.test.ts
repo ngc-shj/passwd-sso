@@ -9,6 +9,7 @@ const {
   mockLogAudit,
   mockTenantMemberFindFirst,
   mockTenantMemberUpdate,
+  mockLockTenantRows,
   mockDispatchTenantWebhook,
   mockRequireRecentSession,
 } = vi.hoisted(() => ({
@@ -18,6 +19,7 @@ const {
   mockLogAudit: vi.fn(),
   mockTenantMemberFindFirst: vi.fn(),
   mockTenantMemberUpdate: vi.fn(),
+  mockLockTenantRows: vi.fn(),
   mockDispatchTenantWebhook: vi.fn(),
   mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
@@ -42,11 +44,16 @@ vi.mock("@/lib/prisma", () => ({
     tenantMember: {
       findFirst: mockTenantMemberFindFirst,
       update: mockTenantMemberUpdate,
+      updateMany: vi.fn(),
     },
   },
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withTenantRls: mockWithTenantRls,
+}));
+vi.mock("@/lib/team/tenant-row-lock", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
+  lockTenantRows: mockLockTenantRows,
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
@@ -97,7 +104,15 @@ const makeUpdatedMember = (role: string) => ({
 });
 
 describe("PUT /api/tenant/members/[userId]", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // The actor (DEFAULT_SESSION user) is the locked OWNER by default.
+    mockLockTenantRows.mockResolvedValue(
+      new Map([
+        [DEFAULT_SESSION.user.id, { hasRow: true, role: "OWNER", deactivatedAt: null, departedAt: null }],
+      ]),
+    );
+  });
 
   it("returns 401 without session", async () => {
     mockAuth.mockResolvedValue(null);
