@@ -1461,6 +1461,8 @@ describe("team membership across a tenant departure — real-DB integration", ()
       rows: Record<string, { rowId: string; userId: string }>;
       invitations: Record<string, string>;
       deletedUsers: Record<string, string>;
+      /** Departed members' memberships created after the stamp, with what the skip count gains once one is moved before it. */
+      spares: Record<string, { rowId: string; adds: number }>;
     };
 
     /**
@@ -1477,6 +1479,7 @@ describe("team membership across a tenant departure — real-DB integration", ()
       const rows: Fx["rows"] = {};
       const invitations: Fx["invitations"] = {};
       const deletedUsers: Fx["deletedUsers"] = {};
+      const spares: Fx["spares"] = {};
 
       /** A MEMBER of the tenant whose row departed at the stamp. */
       async function departed(): Promise<{ id: string; email: string }> {
@@ -1579,6 +1582,24 @@ describe("team membership across a tenant departure — real-DB integration", ()
         await record({ targetId: tenantOnly, tenant: otherTenantId });
       }
 
+      // Spares for the I2 skip count: created after the stamp, so not candidates until that cell moves
+      // them before it. Each holds a record differing from the matching one in a single field: the
+      // matching record excludes its member (adds 0), a one-field-off record does not (adds 1).
+      const spareOf = async (name: string, adds: number, record: (targetId: string) => Promise<unknown>) => {
+        const u = await departed();
+        const rowId = await addTeamMember(teamX, u.id, "MEMBER");
+        await sql(`UPDATE team_members SET created_at = $2::timestamptz WHERE id = $1::uuid`, rowId, at(SECOND));
+        await record(u.id);
+        spares[name] = { rowId, adds };
+      };
+      await spareOf("recordedLogs", 0, (targetId) => logsRecord({ targetId }));
+      for (const arm of ["Logs", "Outbox"] as const) {
+        const record = arm === "Logs" ? logsRecord : outboxRecord;
+        await spareOf(`negAction${arm}`, 1, (targetId) => record({ targetId, action: "TEAM_MEMBER_TENANT_RESTORE" }));
+        await spareOf(`negTarget${arm}`, 1, () => record({ targetId: stranger }));
+        await spareOf(`negTenant${arm}`, 1, (targetId) => record({ targetId, tenant: otherTenantId }));
+      }
+
       // Invitations around the stamp, by an inviter who departed and to an invitee who departed.
       const inviter = await departed();
       for (const [name, offset] of [["byBefore", -SECOND], ["byAt", 0], ["byAfter", SECOND]] as const) {
@@ -1609,10 +1630,12 @@ describe("team membership across a tenant departure — real-DB integration", ()
       );
       await invitationAt("toDeletedBefore", teamX, ownerId, deleted.email, at(-SECOND));
       await invitationAt("toDeletedAfter", teamY, ownerId, deleted.email, at(SECOND));
+      await invitationAt("toDeletedAt", teamY, ownerId, deleted.email, at(0));
+      await invitationAt("toDeletedBeforeUpper", teamY, ownerId, deleted.email.toUpperCase(), at(-SECOND));
       await invitationAt("toNoAudit", teamX, ownerId, noAudit.email, at(-SECOND));
       await invitationAt("toKept", teamX, ownerId, kept.email, at(-SECOND));
       Object.assign(deletedUsers, { deleted: deleted.id, noAudit: noAudit.id, kept: kept.id });
-      return { stamp, at, teamX, teamY, ownerId, rows, invitations, deletedUsers };
+      return { stamp, at, teamX, teamY, ownerId, rows, invitations, deletedUsers, spares };
     }
 
     type State = {
@@ -1672,7 +1695,8 @@ describe("team membership across a tenant departure — real-DB integration", ()
           acceptedInvitation: "ACCEPTED",
           byBefore: "PENDING", byAt: "PENDING", byAfter: "PENDING",
           toBefore: "PENDING", toAt: "PENDING", toAfter: "PENDING", toBeforeUpper: "PENDING",
-          toDeletedBefore: "PENDING", toDeletedAfter: "PENDING", toNoAudit: "PENDING", toKept: "PENDING",
+          toDeletedBefore: "PENDING", toDeletedAfter: "PENDING", toDeletedAt: "PENDING", toDeletedBeforeUpper: "PENDING",
+          toNoAudit: "PENDING", toKept: "PENDING",
         },
         records: { deleted: null, noAudit: null, kept: fx.at(-2 * SECOND) },
       };
@@ -1686,7 +1710,8 @@ describe("team membership across a tenant departure — real-DB integration", ()
           acceptedInvitation: "ACCEPTED",
           byBefore: "EXPIRED", byAt: "EXPIRED", byAfter: "PENDING",
           toBefore: "EXPIRED", toAt: "EXPIRED", toAfter: "PENDING", toBeforeUpper: "EXPIRED",
-          toDeletedBefore: "EXPIRED", toDeletedAfter: "PENDING", toNoAudit: "PENDING", toKept: "PENDING",
+          toDeletedBefore: "EXPIRED", toDeletedAfter: "PENDING", toDeletedAt: "EXPIRED", toDeletedBeforeUpper: "EXPIRED",
+          toNoAudit: "PENDING", toKept: "PENDING",
         },
         // "kept" keeps the app's record (DO NOTHING); "deleted" is seeded from its audit row.
         records: { deleted: fx.at(0), noAudit: null, kept: fx.at(-2 * SECOND) },
@@ -1755,7 +1780,11 @@ describe("team membership across a tenant departure — real-DB integration", ()
           `SELECT id, updated_at FROM ${table} WHERE id = ANY($1::uuid[])`, [Object.values(ids)],
         );
         const byId = new Map(rows.map((r) => [r.id, r.updated_at.getTime()]));
-        return Object.fromEntries(Object.entries(ids).map(([n, id]) => [n, byId.get(id)!]));
+        return Object.fromEntries(Object.entries(ids).map(([n, id]) => {
+          const updatedAt = byId.get(id);
+          if (updatedAt === undefined) throw new Error(`readUpdatedAt: ${table} row ${id} (${n}) was not returned`);
+          return [n, updatedAt];
+        }));
       };
       return {
         memberships: await read("team_members", Object.fromEntries(Object.entries(fx.rows).map(([n, r]) => [n, r.rowId]))),
@@ -1832,7 +1861,8 @@ describe("team membership across a tenant departure — real-DB integration", ()
           acceptedInvitation: "unchanged",
           byBefore: "moved", byAt: "moved", byAfter: "unchanged",
           toBefore: "moved", toAt: "moved", toAfter: "unchanged", toBeforeUpper: "moved",
-          toDeletedBefore: "moved", toDeletedAfter: "unchanged", toNoAudit: "unchanged", toKept: "unchanged",
+          toDeletedBefore: "moved", toDeletedAfter: "unchanged", toDeletedAt: "moved", toDeletedBeforeUpper: "moved",
+          toNoAudit: "unchanged", toKept: "unchanged",
         });
         const rows = await enqueued(client);
         expect(Object.fromEntries(rows.map((r) => [r.targetId, r.teamId]))).toEqual(
@@ -1967,13 +1997,17 @@ describe("team membership across a tenant departure — real-DB integration", ()
             expect(await readState(client, fx)).toEqual(preState(fx));
             expect((await enqueued(client)).length).toBe(0);
 
-            // One more leaked candidate ("late" made older than the stamp), and one more
-            // membership whose user has an outbox record (an excluded one): count + 1.
+            // Memberships made older than the stamp: "late" is one more leaked candidate (+1). The
+            // spares each hold a record of the exclusion's two stores, one field off (+1) or matching
+            // (+0): an outbox-recorded one and a logs-recorded one, and per store a record of another
+            // action, of another user, of another tenant.
+            const spareRows = Object.values(fx.spares);
+            expect(spareRows.reduce((n, s) => n + s.adds, 0)).toBe(6);
             await client.query(`UPDATE team_members SET created_at = $2::timestamptz WHERE id = ANY($1::uuid[])`,
-              [[fx.rows.late.rowId, fx.rows.spareRecorded.rowId], fx.at(-SECOND)]);
+              [[fx.rows.late.rowId, fx.rows.spareRecorded.rowId, ...spareRows.map((s) => s.rowId)], fx.at(-SECOND)]);
             await client.query(`SET LOCAL ROLE ${role}`);
             await client.query(rerunDeparture());
-            expect(skipCount()).toBe(first + 1);
+            expect(skipCount()).toBe(first + 1 + 6);
             await client.query("RESET ROLE");
             expect((await readState(client, fx)).memberships).toEqual(membershipStates([]));
           } finally {

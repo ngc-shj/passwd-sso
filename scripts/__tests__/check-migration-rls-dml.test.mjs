@@ -82,6 +82,28 @@ function hitLinesOf(stderr) {
   return stderr.split("\n").filter((l) => l.includes("MIGRATION_RLS_DML: "));
 }
 
+const linesWith = (stderr, marker) => stderr.split("\n").filter((l) => l.startsWith(`  ${marker}`));
+const unparsedLine = (line, reason) => `  MIGRATION_RLS_DML_UNPARSED: ${CASE_DIR}:${line}: ${reason}`;
+const dynamicLine = (line) => `  MIGRATION_RLS_DML_DYNAMIC: ${CASE_DIR}:${line}`;
+
+const R_NESTED = "bypass setting (grant or restore) inside a nested block, branch or loop";
+const R_SESSION = (setting) => `set_config('${setting}', ..., false) is session-scoped`;
+const R_NOT_RESTORED = "bypass_rls granted but not restored by the end of the DO body";
+const R_SET_BYPASS_DO = "SET / RESET of an app.bypass_* setting inside a DO body (lexical state unknown)";
+const R_SET_BYPASS_LIT = "SET / RESET of an app.bypass_* setting inside an EXECUTE literal (lexical state unknown)";
+const R_FORCE_DO = "FORCE ROW LEVEL SECURITY inside a DO body";
+const R_FORCE_LIT = "FORCE ROW LEVEL SECURITY inside an EXECUTE literal";
+const R_RENAME_DO = "ALTER TABLE <FORCE table> RENAME TO inside a DO body";
+const R_RENAME_LIT = "ALTER TABLE <FORCE table> RENAME TO inside an EXECUTE literal";
+const R_UNKNOWN_SETTING = "RESET ALL or a SET / RESET with a non-plain name after a bypass grant (restore state unknown)";
+const R_FIRST_ARG = "set_config with a first argument that is not a plain 'literal'";
+const R_SET_CONFIG_LIT = (setting) => `set_config of ${setting} inside an EXECUTE literal`;
+const R_ESCAPE = "EXECUTE of an E-string with an escape other than \\' and \\\\, or an unterminated literal";
+const R_UNICODE = "EXECUTE of a U&'…' literal";
+const R_LIT_QUOTE = "EXECUTE literal holds an unterminated or unrecognised $ quote";
+const R_DO_IN_LIT = "DO inside an EXECUTE literal";
+const R_PREPARED = "EXECUTE (prepared statement) inside an EXECUTE literal";
+
 beforeEach(() => {
   root = mkdtempSync(resolve(tmpdir(), "migration-rls-dml-"));
   mkdirSync(join(root, "scripts", "checks"), { recursive: true });
@@ -151,6 +173,36 @@ describe("check-migration-rls-dml: references refused without a bypass", () => {
     ["TABLE t after UNION ALL", doBlock(`PERFORM 1 UNION ALL TABLE team_members;`), [[3, "team_members"]]],
     ["CREATE TABLE AS TABLE t", `CREATE TABLE copy AS TABLE team_members;`, [[1, "team_members"]]],
     ["top-level CREATE MATERIALIZED VIEW AS SELECT", `CREATE MATERIALIZED VIEW mv AS SELECT * FROM team_members;`, [[1, "team_members"]]],
+    ["WITH … ) TABLE t", `WITH x AS (SELECT 1) TABLE team_members;`, [[1, "team_members"]]],
+    ["WITH a AS (…), b AS (…) TABLE t", `WITH a AS (SELECT 1), b AS (SELECT 2) TABLE team_members;`, [[1, "team_members"]]],
+    ["FOR r IN TABLE t", doBlock(`FOR r IN TABLE team_members LOOP NULL; END LOOP;`), [[3, "team_members"]]],
+    ["INSERT INTO u AS a TABLE t", `INSERT INTO other_t AS o TABLE team_members;`, [[1, "team_members"]]],
+    ["INSERT INTO u OVERRIDING SYSTEM VALUE TABLE t", `INSERT INTO other_t OVERRIDING SYSTEM VALUE TABLE team_members;`, [[1, "team_members"]]],
+    ["INSERT INTO u AS a (cols) OVERRIDING USER VALUE TABLE t", `INSERT INTO other_t AS o (a) OVERRIDING USER VALUE TABLE team_members;`, [[1, "team_members"]]],
+    ["CURSOR FOR TABLE t", doBlock(`DECLARE c CURSOR FOR TABLE team_members;`), [[3, "team_members"]]],
+    // Identifier characters >= U+0080: a fullwidth letter before `$x$` must not open a dollar quote
+    // that swallows the statement between the two (U+FF21 is above the old \uDFFF ceiling).
+    ["top level: fullwidth letter before $x$", `SELECT 1 AS Ａ$x$;\nUPDATE team_members SET a = 1;\nSELECT 2 AS Ａ$x$;`, [[2, "team_members"]]],
+    ["DO body: fullwidth letter before $x$", doBlock(`PERFORM 1 AS Ａ$x$;\nUPDATE team_members SET a = 1;\nPERFORM 2 AS Ａ$x$;`), [[4, "team_members"]]],
+    // A single-literal EXECUTE is a nested unit: its references are read like the body's.
+    ["EXECUTE of a DML literal", doBlock(`EXECUTE 'UPDATE team_members SET a = 1';`), [[3, "team_members"]]],
+    ["EXECUTE of a dollar-quoted DML literal", doBlock(`EXECUTE $q$UPDATE team_members SET a = 1$q$;`), [[3, "team_members"]]],
+    ["EXECUTE of an E-string DML literal (\\' only)", doBlock(`EXECUTE E'UPDATE team_members SET a = \\'x\\'';`), [[3, "team_members"]]],
+    ["EXECUTE … INTO … USING of a DML literal", doBlock(`EXECUTE 'UPDATE team_members SET a = $1 RETURNING a' INTO n USING v;`), [[3, "team_members"]]],
+    ["EXECUTE of CREATE TABLE AS SELECT", doBlock(`EXECUTE 'CREATE TABLE c AS SELECT * FROM team_members';`), [[3, "team_members"]]],
+    ["EXECUTE of CREATE MATERIALIZED VIEW AS SELECT", doBlock(`EXECUTE 'CREATE MATERIALIZED VIEW c AS SELECT * FROM team_members';`), [[3, "team_members"]]],
+    ["EXECUTE of DDL followed by DML in one literal", doBlock(`EXECUTE 'ALTER TABLE u ADD COLUMN c int; UPDATE team_members SET x = 1';`), [[3, "team_members"]]],
+    ["multi-line EXECUTE literal: line of the DML inside it", doBlock(`EXECUTE 'ALTER TABLE u ADD COLUMN c int;\nUPDATE team_members SET x = 1';`), [[4, "team_members"]]],
+    [
+      "EXECUTE of DML after the grant was restored",
+      doBlock([GRANT, tablesOf("team_members"), RESTORE, `EXECUTE 'UPDATE team_members SET a = 1';`].join("\n")),
+      [[6, "team_members"]],
+    ],
+    [
+      "EXECUTE of DML on a table the grant does not list",
+      doBlock([GRANT, tablesOf("tenant_members"), `EXECUTE 'UPDATE team_members SET a = 1';`, RESTORE].join("\n")),
+      [[5, "team_members"]],
+    ],
     // State tracking.
     [
       "grant → DML → restore → DML (only the last DML is refused)",
@@ -249,136 +301,217 @@ describe("check-migration-rls-dml: ALTER TABLE … RENAME TO moves FORCE members
 });
 
 describe("check-migration-rls-dml: fail closed", () => {
-  // [name, sql, file line, message fragment]
+  // [name, sql, file line, full reason, ...further [line, reason] pairs]; the UNPARSED lines must equal exactly these.
   const failClosed = [
     [
       "set_config(bypass_rls, …, false)",
       doBlock([`PERFORM set_config('app.bypass_rls', 'on', false);`].join("\n")),
       3,
-      "session-scoped",
+      R_SESSION("app.bypass_rls"),
     ],
     [
       "set_config(bypass_tables, …, false)",
       doBlock([GRANT, `PERFORM set_config('app.bypass_tables', 'team_members', false);`, RESTORE].join("\n")),
       4,
-      "session-scoped",
+      R_SESSION("app.bypass_tables"),
     ],
-    ["grant inside IF", doBlock([`IF true THEN`, GRANT, `END IF;`].join("\n")), 4, "nested block"],
-    ["grant inside LOOP", doBlock([`FOR r IN SELECT 1 LOOP`, GRANT, `END LOOP;`].join("\n")), 4, "nested block"],
+    ["grant inside IF", doBlock([`IF true THEN`, GRANT, `END IF;`].join("\n")), 4, R_NESTED],
+    ["grant inside LOOP", doBlock([`FOR r IN SELECT 1 LOOP`, GRANT, `END LOOP;`].join("\n")), 4, R_NESTED],
     [
       "grant inside a nested BEGIN … EXCEPTION",
       doBlock([`BEGIN`, GRANT, `EXCEPTION WHEN OTHERS THEN NULL;`, `END;`].join("\n")),
       4,
-      "nested block",
+      R_NESTED,
     ],
-    [
-      "grant inside CASE",
-      doBlock([`CASE WHEN true THEN`, GRANT, `END CASE;`].join("\n")),
-      4,
-      "nested block",
-    ],
+    ["grant inside CASE", doBlock([`CASE WHEN true THEN`, GRANT, `END CASE;`].join("\n")), 4, R_NESTED],
     [
       "grant inside an EXCEPTION handler",
       doBlock([`BEGIN NULL; EXCEPTION WHEN OTHERS THEN`, GRANT, `END;`].join("\n")),
       4,
-      "nested block",
+      R_NESTED,
     ],
     [
       "no restore",
       doBlock([GRANT, tablesOf("team_members"), `UPDATE team_members SET a = 1;`].join("\n")),
       3,
-      "not restored",
+      R_NOT_RESTORED,
     ],
-    ["EXECUTE of DML", doBlock(`EXECUTE 'UPDATE team_members SET a = 1';`), 3, "EXECUTE"],
-    [
-      "EXECUTE of a variable in a body that names a FORCE table",
-      doBlock([`SELECT count(*) INTO n FROM team_members;`, `EXECUTE v_sql;`].join("\n")),
-      4,
-      "EXECUTE",
-    ],
-    [
-      "EXECUTE of a variable holding a DML literal (DECLARE)",
-      `DO $$\nDECLARE q text := 'UPDATE team_members SET x = 1';\nBEGIN\nEXECUTE q;\nEND\n$$;`,
-      4,
-      "EXECUTE",
-    ],
-    [
-      "EXECUTE of a loop column holding a DML literal",
-      doBlock([`FOR r IN SELECT 'UPDATE team_members SET x = 1' AS s LOOP`, `EXECUTE r.s;`, `END LOOP;`].join("\n")),
-      4,
-      "EXECUTE",
-    ],
-    [
-      "EXECUTE of a variable holding a dollar-quoted DML literal",
-      `DO $$\nDECLARE q text := $q$UPDATE team_members SET x = 1$q$;\nBEGIN\nEXECUTE q;\nEND\n$$;`,
-      4,
-      "EXECUTE",
-    ],
-    [
-      "literal-free EXECUTE next to prose that names a FORCE table",
-      doBlock([`RAISE NOTICE 'backfilling team_members';`, `EXECUTE r.definition;`].join("\n")),
-      4,
-      "EXECUTE",
-    ],
-    ["EXECUTE of CREATE TABLE AS SELECT", doBlock(`EXECUTE 'CREATE TABLE c AS SELECT * FROM team_members';`), 3, "data statement"],
-    [
-      "EXECUTE of CREATE MATERIALIZED VIEW AS SELECT",
-      doBlock(`EXECUTE 'CREATE MATERIALIZED VIEW c AS SELECT * FROM team_members';`),
-      3,
-      "data statement",
-    ],
-    [
-      "EXECUTE of DDL followed by DML in one literal",
-      doBlock(`EXECUTE 'ALTER TABLE u ADD COLUMN c int; UPDATE team_members SET x = 1';`),
-      3,
-      "more than one statement",
-    ],
-    [
-      "EXECUTE of DDL concatenated with a DML literal",
-      doBlock(`EXECUTE 'ALTER TABLE u ADD COLUMN c int; ' || 'UPDATE team_members SET x = 1';`),
-      3,
-      "references a FORCE table",
-    ],
-    ["EXECUTE of SET LOCAL app.bypass_rls", doBlock(`EXECUTE 'SET LOCAL app.bypass_rls = on';`), 3, "app.bypass_"],
-    ["SET LOCAL app.bypass_rls in a DO body", doBlock(`SET LOCAL app.bypass_rls = 'on';`), 3, "app.bypass_"],
-    ["RESET app.bypass_tables in a DO body", doBlock(`RESET app.bypass_tables;`), 3, "app.bypass_"],
     [
       "bypass_tables literal inside IF",
       doBlock([`IF true THEN`, tablesOf("team_members"), `END IF;`].join("\n")),
       4,
-      "bypass_tables set inside a nested block",
+      R_NESTED,
     ],
     [
       "bypass_tables literal inside LOOP",
       doBlock([`FOR r IN SELECT 1 LOOP`, tablesOf("team_members"), `END LOOP;`].join("\n")),
       4,
-      "bypass_tables set inside a nested block",
+      R_NESTED,
     ],
     [
       "bypass_tables literal inside an EXCEPTION handler",
       doBlock([`BEGIN NULL; EXCEPTION WHEN OTHERS THEN`, tablesOf("team_members"), `END;`].join("\n")),
       4,
-      "bypass_tables set inside a nested block",
+      R_NESTED,
     ],
+    // Restores must sit at the body's top block after the last grant.
+    [
+      "bypass_rls restore inside IF",
+      doBlock([GRANT, tablesOf("team_members"), `UPDATE team_members SET a = 1;`, `IF true THEN`, RESTORE, `END IF;`].join("\n")),
+      7,
+      R_NESTED,
+      // the refused restore is not applied, so the grant is still open at the end
+      [3, R_NOT_RESTORED],
+    ],
+    [
+      "bypass_rls restore inside LOOP",
+      doBlock([GRANT, `FOR r IN SELECT 1 LOOP`, RESTORE, `END LOOP;`].join("\n")),
+      5,
+      R_NESTED,
+      // the refused restore is not applied, so the grant is still open at the end
+      [3, R_NOT_RESTORED],
+    ],
+    [
+      "bypass_tables '' restore inside a nested block",
+      doBlock([GRANT, tablesOf("team_members"), `BEGIN`, tablesOf(""), `END;`, RESTORE].join("\n")),
+      6,
+      R_NESTED,
+    ],
+    [
+      "bypass_rls restore inside an EXCEPTION handler",
+      doBlock([GRANT, `BEGIN NULL; EXCEPTION WHEN OTHERS THEN`, RESTORE, `END;`].join("\n")),
+      5,
+      R_NESTED,
+      // the refused restore is not applied, so the grant is still open at the end
+      [3, R_NOT_RESTORED],
+    ],
+    // SET / RESET.
+    ["SET LOCAL app.bypass_rls in a DO body", doBlock(`SET LOCAL app.bypass_rls = 'on';`), 3, R_SET_BYPASS_DO],
+    ["RESET app.bypass_tables in a DO body", doBlock(`RESET app.bypass_tables;`), 3, R_SET_BYPASS_DO],
+    ["EXECUTE of SET LOCAL app.bypass_rls", doBlock(`EXECUTE 'SET LOCAL app.bypass_rls = on';`), 3, R_SET_BYPASS_LIT],
+    [
+      "RESET ALL after a grant",
+      doBlock([GRANT, tablesOf("team_members"), `RESET ALL;`, `UPDATE team_members SET a = 1;`, RESTORE].join("\n")),
+      5,
+      R_UNKNOWN_SETTING,
+    ],
+    [
+      "EXECUTE of RESET ALL after a grant",
+      doBlock([GRANT, tablesOf("team_members"), `EXECUTE 'RESET ALL';`, `UPDATE team_members SET a = 1;`, RESTORE].join("\n")),
+      5,
+      R_UNKNOWN_SETTING,
+    ],
+    [
+      "SET of a quoted setting name after a grant",
+      doBlock([GRANT, `SET LOCAL "lock_timeout" TO 0;`, RESTORE].join("\n")),
+      4,
+      R_UNKNOWN_SETTING,
+    ],
+    [
+      "EXECUTE of a SET of a quoted setting name after a grant",
+      doBlock([GRANT, `EXECUTE 'SET LOCAL "lock_timeout" = 0';`, RESTORE].join("\n")),
+      4,
+      R_UNKNOWN_SETTING,
+    ],
+    [
+      "SET of a quoted app.bypass_rls name",
+      doBlock([GRANT, `SET LOCAL "app.bypass_rls" TO 'off';`, RESTORE].join("\n")),
+      4,
+      R_SET_BYPASS_DO,
+    ],
+    [
+      "EXECUTE of a SET of a quoted app.bypass_rls name",
+      doBlock([GRANT, `EXECUTE 'SET LOCAL "app.bypass_rls" = ''off''';`, RESTORE].join("\n")),
+      4,
+      R_SET_BYPASS_LIT,
+    ],
+    // set_config.
+    [
+      "set_config with a runtime-built name",
+      doBlock([GRANT, `PERFORM set_config(v_name, 'off', true);`, RESTORE].join("\n")),
+      4,
+      R_FIRST_ARG,
+    ],
+    [
+      "set_config with a concatenated name",
+      doBlock([GRANT, `PERFORM set_config('app.' || 'bypass_rls', 'off', true);`, RESTORE].join("\n")),
+      4,
+      R_FIRST_ARG,
+    ],
+    [
+      "set_config with an E-string name",
+      doBlock([GRANT, `PERFORM set_config(E'app.bypass_rls', 'off', true);`, RESTORE].join("\n")),
+      4,
+      R_FIRST_ARG,
+    ],
+    [
+      "set_config with a dollar-quoted name",
+      doBlock([GRANT, `PERFORM set_config($n$app.bypass_rls$n$, 'off', true);`, RESTORE].join("\n")),
+      4,
+      R_FIRST_ARG,
+    ],
+    [
+      "set_config of a bypass setting inside an EXECUTE literal",
+      doBlock(`EXECUTE 'SELECT set_config(''app.bypass_rls'', ''on'', true)';`),
+      3,
+      R_SET_CONFIG_LIT("app.bypass_rls"),
+    ],
+    [
+      "set_config behind a DDL literal's column default",
+      doBlock(`EXECUTE 'ALTER TABLE u ADD COLUMN c text DEFAULT set_config(''app.bypass_tables'', ''team_members'', true)';`),
+      3,
+      R_SET_CONFIG_LIT("app.bypass_tables"),
+    ],
+    [
+      "set_config with a runtime-built name inside an EXECUTE literal",
+      doBlock(`EXECUTE 'SELECT set_config(v_name, ''off'', true)';`),
+      3,
+      R_FIRST_ARG,
+    ],
+    // E-string / U& EXECUTE operands that cannot be unquoted.
+    ["EXECUTE of an E-string with an octal escape (\\073)", doBlock(`EXECUTE E'ALTER TABLE u ADD COLUMN c int\\073 UPDATE team_members SET x = 1';`), 3, R_ESCAPE],
+    ["EXECUTE of an E-string with a hex escape (\\x3b)", doBlock(`EXECUTE E'ALTER TABLE u ADD COLUMN c int\\x3b UPDATE team_members SET x = 1';`), 3, R_ESCAPE],
+    ["EXECUTE of an E-string with an octal name escape (\\137)", doBlock(`EXECUTE E'UPDATE team_members SET a = 1 WHERE app\\137x';`), 3, R_ESCAPE],
+    ["EXECUTE of an E-string with a unicode escape", doBlock(`EXECUTE E'UPDATE team_members SET a = 1 -- \\u0041';`), 3, R_ESCAPE],
+    ["EXECUTE of a U&'…' literal", doBlock(`EXECUTE U&'UPDATE team_members SET a = 1';`), 3, R_UNICODE],
+    // Nested-unit restrictions.
     [
       "FORCE ROW LEVEL SECURITY inside a DO",
       doBlock(`ALTER TABLE other_t FORCE ROW LEVEL SECURITY;`),
       3,
-      "FORCE ROW LEVEL SECURITY",
+      R_FORCE_DO,
     ],
     [
-      "unterminated dollar quote",
-      `DO $$\nBEGIN\nUPDATE team_members SET a = 1;\nEND;\n`,
-      1,
-      "unterminated dollar quote",
+      "FORCE ROW LEVEL SECURITY inside an EXECUTE literal",
+      doBlock(`EXECUTE 'ALTER TABLE other_t FORCE ROW LEVEL SECURITY';`),
+      3,
+      R_FORCE_LIT,
     ],
+    ["RENAME of a FORCE table inside a DO", doBlock(`ALTER TABLE team_members RENAME TO team_members_v2;`), 3, R_RENAME_DO],
+    [
+      "RENAME of a FORCE table inside an EXECUTE literal",
+      doBlock(`EXECUTE 'ALTER TABLE public.team_members RENAME TO team_members_v2';`),
+      3,
+      R_RENAME_LIT,
+    ],
+    [
+      "DO inside an EXECUTE literal",
+      doBlock(`EXECUTE 'DO $x$ BEGIN UPDATE team_members SET a = 1; END $x$';`),
+      3,
+      R_DO_IN_LIT,
+    ],
+    ["a prepared EXECUTE inside an EXECUTE literal", doBlock(`EXECUTE 'EXECUTE p(1)';`), 3, R_PREPARED],
+    ["EXECUTE literal with an unterminated $ quote", doBlock(`EXECUTE 'SELECT $x$ 1';`), 3, R_LIT_QUOTE],
+    // Dollar quotes.
+    ["unterminated dollar quote", `DO $$\nBEGIN\nUPDATE team_members SET a = 1;\nEND;\n`, 1, "unterminated dollar quote"],
     [
       "unterminated Unicode dollar quote",
       `DO $é1$\nBEGIN\nUPDATE team_members SET a = 1;\nEND;\n`,
       1,
       "unterminated dollar quote",
+      [1, "DO without a dollar-quoted body"],
     ],
-    ["unrecognised dollar quote", `SELECT $ab-c$ 1 $ab-c$;`, 1, "unrecognised dollar quote"],
+    ["unrecognised dollar quote", `SELECT $ab-c$ 1 $ab-c$;`, 1, "unrecognised dollar quote", [1, "unrecognised dollar quote"]],
     [
       "full DO without a dollar-quoted body",
       `DO 'BEGIN UPDATE team_members SET a = 1; END';`,
@@ -387,7 +520,7 @@ describe("check-migration-rls-dml: fail closed", () => {
     ],
   ];
 
-  for (const [name, sql, line, fragment] of failClosed) {
+  for (const [name, sql, line, reason, ...more] of failClosed) {
     it(`fails closed: ${name}`, () => {
       addForceBase();
       addMigration(CASE_DIR, sql);
@@ -395,20 +528,118 @@ describe("check-migration-rls-dml: fail closed", () => {
       const r = runGate();
 
       expect(r.status).toBe(1);
-      expect(r.stderr).toContain(`MIGRATION_RLS_DML_UNPARSED: ${CASE_DIR}:${line}: `);
-      expect(r.stderr).toContain(fragment);
+      expect(linesWith(r.stderr, "MIGRATION_RLS_DML_UNPARSED")).toEqual([
+        unparsedLine(line, reason),
+        ...more.map(([l, why]) => unparsedLine(l, why)),
+      ]);
     });
   }
 
   it("cannot be baselined away", () => {
     addForceBase();
-    addMigration(CASE_DIR, doBlock(`EXECUTE 'UPDATE team_members SET a = 1';`));
+    addMigration(CASE_DIR, doBlock(`EXECUTE U&'UPDATE team_members SET a = 1';`));
     setBaseline(`${CASE_DIR}  # baselined but still fails closed\n`);
 
     const r = runGate();
 
     expect(r.status).toBe(1);
-    expect(r.stderr).toContain("MIGRATION_RLS_DML_UNPARSED");
+    expect(linesWith(r.stderr, "MIGRATION_RLS_DML_UNPARSED")).toEqual([unparsedLine(3, R_UNICODE)]);
+  });
+});
+
+describe("check-migration-rls-dml: dynamic EXECUTE", () => {
+  // [name, body, file line(s) of the EXECUTE findings]; every shape is an EXECUTE that is not ONE plain literal.
+  const dynamic = [
+    ["format() of a literal", doBlock(`EXECUTE format('UPDATE %I SET a = 1', 'team_members');`), [3]],
+    ["format() with %s of a variable", doBlock(`EXECUTE format('ALTER TABLE u ADD COLUMN c int %s', q);`), [3]],
+    ["a DDL literal concatenated with a variable", doBlock(`EXECUTE 'ALTER TABLE u ADD COLUMN c int;' || q;`), [3]],
+    ["SET LOCAL lock_timeout literal concatenated with a variable", doBlock(`EXECUTE 'SET LOCAL lock_timeout = 0; ' || q;`), [3]],
+    ["two literals concatenated", doBlock(`EXECUTE 'ALTER TABLE u ADD COLUMN c int; ' || 'UPDATE team_members SET x = 1';`), [3]],
+    ["a parenthesised literal", doBlock(`EXECUTE ('SELECT 1');`), [3]],
+    ["two adjacent literals", doBlock(`EXECUTE 'SELECT'\n' 1';`), [3]],
+    ["a function call", doBlock(`EXECUTE build_sql();`), [3]],
+    ["a variable", doBlock(`EXECUTE v_sql;`), [3]],
+    ["a variable with INTO / USING", doBlock(`EXECUTE v_sql INTO n USING v;`), [3]],
+    ["a record column", doBlock([`FOR r IN SELECT 'UPDATE team_members SET x = 1' AS s LOOP`, `EXECUTE r.s;`, `END LOOP;`].join("\n")), [4]],
+    ["a variable assigned a DML literal (DECLARE)", `DO $$\nDECLARE q text := 'UPDATE team_members SET x = 1';\nBEGIN\nEXECUTE q;\nEND\n$$;`, [4]],
+    ["a variable assigned a dollar-quoted literal", `DO $$\nDECLARE q text := $q$UPDATE team_members SET x = 1$q$;\nBEGIN\nEXECUTE q;\nEND\n$$;`, [4]],
+    [
+      "catalog-derived names formatted into a literal-free EXECUTE",
+      doBlock([`FOR r IN SELECT format('UPDATE %I SET a = 1', c.relname) AS s FROM pg_class c LOOP`, `EXECUTE r.s;`, `END LOOP;`].join("\n")),
+      [4],
+    ],
+    ["literal-free EXECUTE next to prose naming a FORCE table", doBlock([`RAISE NOTICE 'backfilling team_members';`, `EXECUTE r.definition;`].join("\n")), [4]],
+    ["a literal-free EXECUTE in a body that names no FORCE table", doBlock(`EXECUTE r.definition;`), [3]],
+    ["a literal-free EXECUTE of a grant-covered body", doBlock([GRANT, tablesOf("team_members"), `EXECUTE v_sql;`, RESTORE].join("\n")), [5]],
+    ["two findings in one body", doBlock([`EXECUTE v_a;`, `EXECUTE format('SELECT %s', v_b);`].join("\n")), [3, 4]],
+  ];
+
+  for (const [name, sql, lines] of dynamic) {
+    it(`reports MIGRATION_RLS_DML_DYNAMIC: ${name}`, () => {
+      addForceBase();
+      addMigration(CASE_DIR, sql);
+
+      const r = runGate();
+
+      expect(r.status).toBe(1);
+      expect(linesWith(r.stderr, "MIGRATION_RLS_DML_DYNAMIC")).toEqual(lines.map(dynamicLine));
+      expect(linesWith(r.stderr, "MIGRATION_RLS_DML_UNPARSED")).toEqual([]);
+    });
+  }
+
+  it("is baselinable, and --list prints it with the DYNAMIC prefix before the trailer", () => {
+    addForceBase();
+    addMigration(CASE_DIR, doBlock(`EXECUTE format('GRANT CONNECT ON DATABASE %I TO r', current_database());`));
+    setBaseline(`${CASE_DIR}  # role DDL through format() with %I; no DML on a FORCE table\n`);
+
+    const run = runGate();
+    const list = runGate({ args: ["--list"] });
+
+    expect({ status: run.status, stderr: run.stderr }).toEqual({ status: 0, stderr: "" });
+    expect(list.stdout.trim().split("\n")).toEqual([
+      `MIGRATION_RLS_DML_DYNAMIC: ${CASE_DIR}:3`,
+      `FORCE_STATEMENTS=3 FORCED_TABLES=3`,
+    ]);
+  });
+
+  it("a baseline entry for a directory with a DYNAMIC finding is not stale", () => {
+    addForceBase();
+    addMigration(CASE_DIR, doBlock(`EXECUTE v_sql;`));
+    setBaseline(`${CASE_DIR}  # shipped role DDL replay; executes no DML on a FORCE table\n`);
+
+    const r = runGate();
+
+    expect(r.status).toBe(0);
+  });
+
+  it("is not reported for EXECUTE FUNCTION, GRANT EXECUTE, or a single plain literal", () => {
+    addForceBase();
+    addMigration(
+      CASE_DIR,
+      doBlock(
+        [
+          `CREATE TRIGGER g BEFORE INSERT ON other_t FOR EACH ROW EXECUTE FUNCTION f();`,
+          `GRANT EXECUTE ON FUNCTION f() TO r;`,
+          `EXECUTE 'ALTER TABLE u ADD COLUMN c int';`,
+        ].join("\n"),
+      ),
+    );
+
+    const r = runGate();
+
+    expect({ status: r.status, stderr: r.stderr }).toEqual({ status: 0, stderr: "" });
+  });
+
+  it("is not reported at the top level or inside a function body", () => {
+    addForceBase();
+    addMigration(
+      CASE_DIR,
+      `CREATE FUNCTION f() RETURNS void AS $$ BEGIN EXECUTE format('x %s', 1); END $$ LANGUAGE plpgsql;`,
+    );
+
+    const r = runGate();
+
+    expect({ status: r.status, stderr: r.stderr }).toEqual({ status: 0, stderr: "" });
   });
 });
 
@@ -443,28 +674,58 @@ describe("check-migration-rls-dml: passes", () => {
     ["a function in FROM is not a table", doBlock(`PERFORM 1 FROM team_members(1);`), true],
     ["an unforced table", doBlock(`UPDATE other_t SET a = 1;`), true],
     ["a non-public schema is not the forced table", doBlock(`UPDATE audit.team_members SET a = 1;`), true],
-    [
-      "EXECUTE of literal DDL",
-      doBlock(`EXECUTE format('ALTER TABLE %I ADD COLUMN x int', 'team_members');`),
-      true,
-    ],
-    ["a bare mention in prose is not a reference", doBlock(`RAISE NOTICE 'backfilling team_members';`), true],
-    [
-      "prose naming a FORCE table next to an EXECUTE of literal DDL",
-      doBlock([`RAISE NOTICE 'altering team_members';`, `EXECUTE format('ALTER TABLE %I ADD COLUMN x int', 'team_members');`].join("\n")),
-      true,
-    ],
+    ["EXECUTE of literal DDL", doBlock(`EXECUTE 'ALTER TABLE team_members ADD COLUMN x int';`), true],
     ["EXECUTE of literal DDL with a trailing semicolon", doBlock(`EXECUTE 'ALTER TABLE u ADD COLUMN c int;';`), true],
-    ["a literal-free EXECUTE in a body that names no FORCE table", doBlock(`EXECUTE r.definition;`), true],
+    ["EXECUTE 'SET LOCAL lock_timeout = 0' (single literal, no bypass)", doBlock(`EXECUTE 'SET LOCAL lock_timeout = 0';`), true],
+    ["EXECUTE of an E-string whose only escapes are \\' and \\\\", doBlock(`EXECUTE E'ALTER TABLE u ADD COLUMN c text DEFAULT \\'a\\\\b\\'';`), true],
+    ["EXECUTE of a dollar-quoted DDL literal", doBlock(`EXECUTE $q$ALTER TABLE u ADD COLUMN c int$q$;`), true],
+    ["EXECUTE … INTO … USING of a literal that touches no FORCE table", doBlock(`EXECUTE 'SELECT $1' INTO n USING v;`), true],
+    ["a bare mention in prose is not a reference", doBlock(`RAISE NOTICE 'backfilling team_members';`), true],
+    ["RAISE prose naming a FORCE table next to a single-literal EXECUTE", doBlock([`RAISE NOTICE 'altering team_members';`, `EXECUTE 'ALTER TABLE u ADD COLUMN x int';`].join("\n")), true],
+    ["a string variable naming a FORCE table that is never executed", doBlock(`v := 'UPDATE team_members SET a = 1';`), true],
     [
-      "a dollar-quoted literal naming no FORCE table next to a literal-free EXECUTE",
-      doBlock([`v := $q$hello$q$;`, `EXECUTE r.definition;`].join("\n")),
+      "grant + single-literal DML covered by the grant + restore",
+      doBlock([GRANT, tablesOf("team_members"), `EXECUTE 'UPDATE team_members SET a = 1';`, RESTORE].join("\n")),
       true,
     ],
+    [
+      "grant + a literal that is DDL then DML on a granted table",
+      doBlock([GRANT, tablesOf("team_members"), `EXECUTE 'ALTER TABLE u ADD COLUMN c int; UPDATE team_members SET a = 1';`, RESTORE].join("\n")),
+      true,
+    ],
+    ["RESET ALL in a unit that never granted", doBlock(`RESET ALL;`), true],
+    [
+      "SET LOCAL lock_timeout and RESET lock_timeout after a grant (plain names)",
+      doBlock([GRANT, `SET LOCAL lock_timeout = 0;`, `RESET lock_timeout;`, RESTORE].join("\n")),
+      true,
+    ],
+    [
+      "set_config of an unrelated plain-literal setting after a grant",
+      doBlock([GRANT, `PERFORM set_config('lock_timeout', '0', true);`, RESTORE].join("\n")),
+      true,
+    ],
+    ["ALTER TABLE RENAME TO of an unforced table", doBlock(`ALTER TABLE other_t RENAME TO other_t2;`), true],
+    ["RENAME COLUMN of a forced table is not a table rename", doBlock(`ALTER TABLE team_members RENAME COLUMN a TO b;`), true],
+    [
+      "LOCK / TRUNCATE / ON / ADD / FOR TABLE are not TABLE query forms",
+      doBlock(
+        [
+          `LOCK TABLE team_members IN SHARE MODE;`,
+          `TRUNCATE TABLE team_members;`,
+          `GRANT SELECT ON TABLE team_members TO r;`,
+          `ALTER PUBLICATION p ADD TABLE team_members;`,
+          `CREATE PUBLICATION p2 FOR TABLE team_members;`,
+        ].join("\n"),
+      ),
+      true,
+    ],
+    ["top level: a fullwidth-letter identifier holding $x$ twice is one word each time", `SELECT 1 AS Ａ$x$, 2 AS Ａ$x$;`, true],
+    ["top level: a single fullwidth-letter identifier holding $x$ opens no dollar quote", `SELECT 1 AS Ａ$x$;`, true],
+    ["DO body: a single fullwidth-letter identifier holding $x$ opens no dollar quote", doBlock(`PERFORM 1 AS Ａ$x$;`), true],
     ["ALTER / CREATE TABLE in a DO body are not TABLE query forms", doBlock([`ALTER TABLE team_members ADD COLUMN x int;`, `CREATE TABLE team_members_copy (id int);`].join("\n")), true],
     [
-      "a bypass_tables literal at the unit's top block, and an empty one nested",
-      doBlock([GRANT, tablesOf("team_members"), `IF true THEN`, tablesOf(""), `END IF;`, RESTORE].join("\n")),
+      "a bypass_tables literal and its '' restore at the unit's top block",
+      doBlock([GRANT, tablesOf("team_members"), `UPDATE team_members SET a = 1;`, tablesOf(""), RESTORE].join("\n")),
       true,
     ],
     ["trigger EXECUTE FUNCTION is not dynamic SQL", doBlock(`CREATE TRIGGER g BEFORE INSERT ON other_t FOR EACH ROW EXECUTE FUNCTION f();`), true],
@@ -695,17 +956,37 @@ describe("check-migration-rls-dml: real tree", () => {
     [REKEY]: 9,
   };
 
+  // DYNAMIC findings per directory (shipped DO bodies whose EXECUTE is not one
+  // plain literal), counted by grepping `EXECUTE` in each DO body by hand: role /
+  // grant / policy / constraint / trigger DDL replays, none of them DML.
+  const DYNAMIC_COUNTS = {
+    "20260321110000_convert_id_columns_to_uuid_type": 6,
+    "20260412100001_add_audit_outbox_worker_role": 1,
+    "20260428170853_add_dcr_cleanup_worker_role_and_system_tenant": 1,
+    "20260502000000_audit_anchor_publisher_phase2": 1,
+    "20260611011121_revoke_public_connect_on_app_db": 1,
+    "20260618000000_add_retention_gc_worker_role": 1,
+    "20261019000000_rls_bypass_admits_report_mode": 4,
+    "20261023010000_retire_dcr_cleanup_worker_role": 7,
+  };
+
   const baselineDirs = () =>
     readFileSync(REAL_BASELINE, "utf8")
       .split("\n")
       .filter((l) => l.trim() !== "" && !l.trim().startsWith("#"))
       .map((l) => l.split("#")[0].trim());
 
+  const DYNAMIC_PREFIX = "MIGRATION_RLS_DML_DYNAMIC: ";
   const list = () => {
     const r = runGate({ args: ["--list"], real: true });
     expect(r.status).toBe(0);
     const lines = r.stdout.trim().split("\n");
-    return { hits: lines.slice(0, -1), trailer: lines[lines.length - 1] };
+    const body = lines.slice(0, -1);
+    return {
+      hits: body.filter((l) => !l.startsWith(DYNAMIC_PREFIX)),
+      dynamic: body.filter((l) => l.startsWith(DYNAMIC_PREFIX)).map((l) => l.slice(DYNAMIC_PREFIX.length)),
+      trailer: lines[lines.length - 1],
+    };
   };
 
   it("passes with exactly the baseline", () => {
@@ -720,13 +1001,16 @@ describe("check-migration-rls-dml: real tree", () => {
     expect(hits.filter((h) => h.startsWith(DEPARTURE) || h.startsWith(REKEY))).toEqual(ORIGINAL_HITS);
   });
 
-  it("the hit directories equal the baseline file's entries, with the literal per-directory counts", () => {
-    const { hits } = list();
+  it("the hit and dynamic directories together equal the baseline file's entries, with the literal per-directory counts", () => {
+    const { hits, dynamic } = list();
     const counts = {};
     for (const h of hits) counts[h.split(":")[0]] = (counts[h.split(":")[0]] ?? 0) + 1;
+    const dynamicCounts = {};
+    for (const d of dynamic) dynamicCounts[d.split(":")[0]] = (dynamicCounts[d.split(":")[0]] ?? 0) + 1;
 
-    expect(Object.keys(counts).sort()).toEqual([...baselineDirs()].sort());
+    expect([...new Set([...Object.keys(counts), ...Object.keys(dynamicCounts)])].sort()).toEqual([...baselineDirs()].sort());
     expect(counts).toEqual(COUNTS);
+    expect(dynamicCounts).toEqual(DYNAMIC_COUNTS);
   });
 
   it("every baseline entry carries a reason of at least 10 characters", () => {
@@ -734,7 +1018,7 @@ describe("check-migration-rls-dml: real tree", () => {
       .split("\n")
       .filter((l) => l.trim() !== "" && !l.trim().startsWith("#"));
 
-    expect(entries.length).toBe(15);
+    expect(entries.length).toBe(22);
     for (const e of entries) expect(e.slice(e.indexOf("#") + 1).trim().length).toBeGreaterThanOrEqual(10);
   });
 
@@ -743,9 +1027,10 @@ describe("check-migration-rls-dml: real tree", () => {
     expect(c1Dir).toBe("20261110000000_rls_backfill_rerun");
     expect(existsSync(join(REAL_MIGRATIONS, c1Dir, "migration.sql"))).toBe(true);
 
-    const { hits } = list();
+    const { hits, dynamic } = list();
 
     expect(hits.filter((h) => h.startsWith(`${c1Dir}:`))).toEqual([]);
+    expect(dynamic.filter((d) => d.startsWith(`${c1Dir}:`))).toEqual([]);
     expect(baselineDirs()).not.toContain(c1Dir);
   });
 

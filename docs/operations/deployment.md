@@ -416,6 +416,11 @@ aws logs tail /ecs/passwd-sso-prod/audit-anchor-publisher --since 2d --region <r
 
 ### Run migration only
 
+The first time this runs `20261110000000_rls_backfill_rerun` on a database that applied
+`20261101000000_team_tenant_departure`, do the before-deploy steps of
+[departed-member-access-backfill.md](departed-member-access-backfill.md) first (see
+"One-time upgrade: `20261110000000_rls_backfill_rerun`" above).
+
 ```bash
 docker compose --profile migrate up migrate --abort-on-container-exit --exit-code-from migrate
 ```

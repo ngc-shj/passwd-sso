@@ -813,11 +813,15 @@ describe("team entry key identity writers — real-DB integration", () => {
       await appPool.end();
     });
 
+    const APP_WRITTEN = ["appCurrent", "appPending", "appHighWaterAbove", "restored"] as const;
+    const SAME_IDS = Object.fromEntries(APP_WRITTEN.map((n) => [n, "same id"]));
     type EntryState = { marker: number; hw: number; hasId: boolean };
     type Fx = {
       teamV1: string;
       entries: Record<string, string>;
       histories: Record<string, { id: string; entry: string }>;
+      /** item_key_id of the app-written entries, as seeded: no step may replace one. */
+      appItemKeyIds: Record<string, string>;
     };
 
     /**
@@ -848,6 +852,16 @@ describe("team entry key identity writers — real-DB integration", () => {
         histories[`null_${["encryptedItemKey", "itemKeyIv", "itemKeyAuthTag"][i]}`] = { id, entry: "idEntry" };
       });
 
+      // An entry with no ItemKey that still holds a wrap, beside a history row of the same wrap: step 4 must not
+      // give it an id from an entry that has none (the app never writes this shape; the guard is what excludes it).
+      entries.v0WithWrap = await seedEntry(teamV3, owner, { teamKeyVersion: 3, itemKeyVersion: 0 });
+      const strayWrap = newWrap();
+      await sql(
+        `UPDATE team_password_entries SET encrypted_item_key = $2, item_key_iv = $3, item_key_auth_tag = $4 WHERE id = $1::uuid`,
+        entries.v0WithWrap, strayWrap.encryptedItemKey, strayWrap.itemKeyIv, strayWrap.itemKeyAuthTag,
+      );
+      histories.v0WithWrap = { id: await seedHistory(entries.v0WithWrap, owner, { teamKeyVersion: 3, itemKeyVersion: 0, wrap: strayWrap }), entry: "v0WithWrap" };
+
       // The pre-change state: what the columns held before the key-identity release.
       await sql(
         `UPDATE team_password_entries SET item_key_team_key_version = 0, item_key_version_high_water = 0, item_key_id = NULL WHERE id = ANY($1::uuid[])`,
@@ -872,7 +886,9 @@ describe("team entry key identity writers — real-DB integration", () => {
       const restoredRow = await entry(entries.restored);
       expect({ marker: restoredRow.item_key_team_key_version, hw: restoredRow.item_key_version_high_water, hasId: restoredRow.item_key_id !== null })
         .toEqual({ marker: 0, hw: 1, hasId: true });
-      return { teamV1, entries, histories };
+      const appItemKeyIds: Fx["appItemKeyIds"] = {};
+      for (const name of APP_WRITTEN) appItemKeyIds[name] = (await entry(entries[name])).item_key_id!;
+      return { teamV1, entries, histories, appItemKeyIds };
     }
 
     async function readState(client: pg.PoolClient, fx: Fx) {
@@ -896,13 +912,15 @@ describe("team entry key identity writers — real-DB integration", () => {
         const ik = histIk.get(h.id) ?? null;
         return [n, ik === null ? null : ik === byId.get(fx.entries[h.entry])!.ik ? "entry's id" : "other id"];
       }));
-      return { entries: entriesState, histories };
+      const appItemKeyIds = Object.fromEntries(APP_WRITTEN.map((n) => [n, byId.get(fx.entries[n])!.ik === fx.appItemKeyIds[n] ? "same id" : "other id"]));
+      return { entries: entriesState, histories, appItemKeyIds };
     }
 
     const NO_HISTORY_IDS = {
       identical: null, differsIn_teamKeyVersion: null, differsIn_itemKeyVersion: null,
       differsIn_encryptedItemKey: null, differsIn_itemKeyIv: null, differsIn_itemKeyAuthTag: null,
       null_encryptedItemKey: null, null_itemKeyIv: null, null_itemKeyAuthTag: null,
+      v0WithWrap: null,
     };
     const PRE = {
       entries: {
@@ -911,12 +929,13 @@ describe("team entry key identity writers — real-DB integration", () => {
         hwHistory: { marker: 0, hw: 0, hasId: false }, hwAttachment: { marker: 0, hw: 0, hasId: false },
         idEntry: { marker: 0, hw: 0, hasId: false }, mode0Only: { marker: 0, hw: 0, hasId: false },
         neither: { marker: 0, hw: 0, hasId: false }, other: { marker: 0, hw: 0, hasId: false },
-        v0Shape: { marker: 0, hw: 0, hasId: false },
+        v0Shape: { marker: 0, hw: 0, hasId: false }, v0WithWrap: { marker: 0, hw: 0, hasId: false },
         appCurrent: { marker: 1, hw: 1, hasId: true }, appPending: { marker: 0, hw: 1, hasId: true },
         appHighWaterAbove: { marker: 0, hw: 5, hasId: true },
         stragglerNoId: { marker: 0, hw: 1, hasId: false }, restored: { marker: 0, hw: 1, hasId: true },
       },
       histories: NO_HISTORY_IDS,
+      appItemKeyIds: SAME_IDS,
     };
     /** Steps 2-4 on any role; step 1 (marker) additionally where the role cannot bypass. */
     const POST_STEPS_2_TO_4 = {
@@ -926,19 +945,20 @@ describe("team entry key identity writers — real-DB integration", () => {
         hwHistory: { marker: 0, hw: 3, hasId: true }, hwAttachment: { marker: 0, hw: 4, hasId: true },
         idEntry: { marker: 0, hw: 3, hasId: true }, mode0Only: { marker: 0, hw: 2, hasId: true },
         neither: { marker: 0, hw: 1, hasId: true }, other: { marker: 0, hw: 1, hasId: true },
-        v0Shape: { marker: 0, hw: 0, hasId: false },
+        v0Shape: { marker: 0, hw: 0, hasId: false }, v0WithWrap: { marker: 0, hw: 0, hasId: false },
         appCurrent: { marker: 1, hw: 1, hasId: true }, appPending: { marker: 0, hw: 1, hasId: true },
         appHighWaterAbove: { marker: 0, hw: 5, hasId: true },
         stragglerNoId: { marker: 0, hw: 1, hasId: true }, restored: { marker: 0, hw: 1, hasId: true },
       },
       histories: { ...NO_HISTORY_IDS, identical: "entry's id" },
+      appItemKeyIds: SAME_IDS,
     };
     const POST_APP_ROLE = {
       ...POST_STEPS_2_TO_4,
       entries: {
         ...POST_STEPS_2_TO_4.entries,
         atV1: { marker: 1, hw: 1, hasId: true }, atV0Team: { marker: 1, hw: 1, hasId: true },
-        v0Entry: { marker: 1, hw: 0, hasId: false },
+        v0Entry: { marker: 1, hw: 0, hasId: false }, v0WithWrap: { marker: 0, hw: 0, hasId: false },
       },
     };
 

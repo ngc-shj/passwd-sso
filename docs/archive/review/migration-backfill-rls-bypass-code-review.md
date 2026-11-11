@@ -1,6 +1,6 @@
 # Code Review: migration-backfill-rls-bypass
 Date: 2026-11-11
-Review round: 1
+Review rounds: 1–2
 
 ## Changes from Previous Round
 Initial review of `1f17bc245` + `55ede325a` (full diff), on top of the Phase 2 self-check.
@@ -64,6 +64,30 @@ RT7 T1/T2/T3; RT8 T7; RT9 n/a; RT10 T6; RT11 T5.
   reading the warning. Anti-Deferral: worst case an operator never sees the skip warning, which C6
   already assumes; cost to measure: a scratch database and a `migrate deploy` run.
 
+## Round 2 (incremental: `55ede325a..0c30f9fb8`)
+### Functionality
+- F6 [Major] `format('%s')` / `||` assembly of the EXECUTE text gets past the CTAS and
+  second-statement refusals.
+- F7 [Major] `RESET ALL` and a runtime-named SET change the bypass state unseen.
+- F8 [Minor] Some `TABLE` query forms are not references. F9 [Minor] `ALTER TABLE <forced>
+  RENAME TO` in a DO body is neither replayed nor refused. F10 [Minor, adjacent] the Compose deploy
+  flow has no pointer to the one-time upgrade.
+### Security
+- S2-1 [Major] An EXECUTE with a DDL-headed literal still runs variable-held DML (S1 not closed).
+- S2-2 [Minor] E-string / U& escapes hide `;` and the setting name. S2-3 [Minor] the EXECUTE
+  bypass refusal sees only SET / RESET syntax. S2-4 [Minor, adjacent] a Unicode identifier
+  character before `$` opens a dollar quote PostgreSQL does not see. S2-5 [Minor] a catalog-derived
+  table name in dynamic SQL is neither refused nor declared. S2-6 [Minor, adjacent] a restore inside
+  a branch satisfies "not restored" lexically.
+### Testing
+- T11 [Major] The candidate-copy exclusion's logs arm and every conjunct loosening survive, and
+  were recorded as review-verified for a wrong reason (the skip WARNING prints the count).
+- T12 [Major] Mutation results rows without excerpts, a C6 table with no Red column, a one-paragraph
+  C3 entry, and unrecorded guard conjuncts.
+- T13–T17 [Minor] `app.tenant_id` reasoning relies on an unspecified evaluation order;
+  `readUpdatedAt` treats an invisible row as unchanged; re-key I2 compares only `hasId`; fail-closed
+  cells match a fragment every reason contains; D4 stale.
+
 ## Resolution Status
 ### Round 1
 - F1 / S1 [Major] — the gate re-tokenizes every string literal in a `DO` body; a FORCE-table
@@ -95,3 +119,21 @@ RT7 T1/T2/T3; RT8 T7; RT9 n/a; RT10 T6; RT11 T5.
   cell created; `setTestBypass` uses `BYPASS_PURPOSE`.
 - T8–T10 [Minor] — the C1 no-hit cell runs unconditionally; a real `'on '` fixture; the 121 count
   recounted by an independent script (same value).
+
+### Round 2
+- F6 / F7 / S2-1 / S2-2 / S2-3 / S2-5 — mechanism changed rather than another case added: an
+  `EXECUTE` whose operand is not one plain literal is a baselinable `MIGRATION_RLS_DML_DYNAMIC`
+  finding (22 shipped, all DDL-only, baselined with reasons across 8 directories); a single plain
+  literal is scanned as a nested unit; E-string escapes other than `\'` / `\\`, `U&`, `RESET ALL`
+  / runtime-named SET after a grant, and a non-literal `set_config` name fail closed (deviation D1).
+- S2-6 — every bypass setting at block depth other than 1 fails closed. F8 — `WITH … ) TABLE`,
+  `IN TABLE`, `INSERT … AS a` / `OVERRIDING`, `CURSOR FOR TABLE` are references. F9 — forced-table
+  RENAME in a DO body or literal fails closed. S2-4 — identifier class covers U+0080 and above in
+  both the gate and `sql-scan`. 37 gate mutants red, re-run independently on the final source.
+- F10 — `deployment.md` "Run migration only" (Compose) points to the one-time upgrade section.
+- T11 — one-field spares per store and conjunct; every arm and loosening killed (rows in the log).
+- T12 — every mutant re-run with a red excerpt; C6 Red column; C3 one row per mutant; the
+  superseded round-1 placeholder rows removed.
+- T13 — the nil-UUID grant kept on purpose and recorded as such. T14 — a missing row throws. T15 —
+  `appItemKeyIds` compares same / other id. T16 — every fail-closed cell asserts the full UNPARSED
+  line set. T17 — D4 states the independent recount.

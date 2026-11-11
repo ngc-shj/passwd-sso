@@ -703,6 +703,18 @@ describe("departed-member operator scripts — real-DB integration", () => {
         await expectRefused(containWith({ triples: triplesLiteral([tripleOf(l, l.rows[1])]), label }), { message: QUALIFY });
       });
 
+      it("the team is another team of the tenant, where the user holds no membership", async () => {
+        const l = await seedLeak();
+        const elsewhere = await mkTeam(l.tenant);
+        await expectRefused(containWith({ triples: triplesLiteral([[l.tenant, elsewhere, l.rows[1].user]]), label }), { message: QUALIFY });
+        expect((await readTeamMembers([l.rows[1].rowId]))[0].deactivated_at).toBeNull();
+      });
+
+      it("a null id in a triple is refused by name, before the qualify count", async () => {
+        const l = await seedLeak();
+        await expectRefused(containWith({ triples: `{{${l.tenant},${l.team},NULL}}`, label }), { message: /holds a null id/ });
+      });
+
       it("a mixed list (one qualifying triple, one not) ends neither", async () => {
         const l = await seedLeak(2);
         await sql(`UPDATE tenant_members SET deactivated_at = NULL WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, l.tenant, l.rows[2].user);
