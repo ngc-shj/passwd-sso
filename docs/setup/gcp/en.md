@@ -14,6 +14,7 @@ This guide describes a production-oriented GCP deployment.
 
 - `DATABASE_URL` (app role `passwd_app`)
 - `MIGRATION_DATABASE_URL` (SUPERUSER role `passwd_user` — used for `prisma migrate deploy` only)
+  - Check `rolsuper` / `rolbypassrls` of that role in `pg_roles`: Cloud SQL's admin has neither, so RLS applies to it. See [departed-member-access-backfill](../../operations/departed-member-access-backfill.md).
 - `OUTBOX_WORKER_DATABASE_URL` (least-privilege role `passwd_outbox_worker` — required for audit-outbox-worker)
 - `AUTH_SECRET`
 - `AUTH_URL`

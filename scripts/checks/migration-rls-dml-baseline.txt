@@ -1,0 +1,36 @@
+# Baseline: migrations whose statements read or write a FORCE-RLS table with no
+# RLS bypass (see scripts/checks/check-migration-rls-dml.mjs and
+# docs/archive/review/migration-backfill-rls-bypass-plan.md, "Member set").
+#
+# These already shipped; the gate binds NEW migrations. Do NOT add an entry to
+# silence the gate: wrap the backfill in a DO block that grants itself
+# app.bypass_rls / app.bypass_tables and restores them (pattern:
+# 20261109162613_*). Each reason below was checked against the migration and
+# the code; an entry whose migration stops hitting is reported STALE.
+#
+# An entry also covers MIGRATION_RLS_DML_DYNAMIC findings: a shipped DO body whose
+# EXECUTE is not one plain string literal. Each such reason says what the dynamic
+# statement runs and why it touches no row of a FORCE-RLS table.
+
+20260321100000_unify_all_ids_to_uuid  # id remap reads FORCE tables; if it saw no rows the ids stay non-UUID text and the next migration's ALTER COLUMN TYPE uuid USING col::uuid fails the deploy loudly
+20260415130000_audit_path_unification  # NULL user_id backfill and its pre-check; the later ALTER COLUMN user_id SET NOT NULL validates every row regardless of RLS and fails the deploy if any NULL survived
+20260418042050_unify_session_timeout_policy  # extension_tokens family backfill is repeated and then NOT NULL-flipped by 20260418144000 (loud); team_policies carry of the legacy max_session_duration_minutes is not repeatable (column dropped by 20260425103520), leaving the team override NULL = inherit the tenant timeout; operators re-enter it (docs/operations/departed-member-access-backfill.md, "Team absolute session timeouts")
+20260418144000_flip_extension_token_family_not_null  # defensive backfill only; the SET NOT NULL right after it validates every row regardless of RLS and fails the deploy loudly if a NULL was left
+20260418160000_clamp_session_timeout_min_to_5  # raises team_policies overrides below 5 minutes; skipped rows keep a shorter override, and the resolver takes min(tenant, team) so it is stricter, never looser
+20260430120002_admin_vault_reset_backfill  # legacy in-flight resets left unrevoked are refused at runtime (execute needs approvedAt, approve throws on null target_email_at_initiate) and expire after 24h (RESET_TOTAL_TTL_MS)
+20260502000000_audit_anchor_publisher_phase2  # UPDATE epoch WHERE NULL matches nothing: ADD COLUMN epoch DEFAULT 1 already gives every existing row 1, so the statement is a no-op with or without RLS; DYNAMIC: EXECUTE format('GRANT CONNECT ON DATABASE %I TO passwd_anchor_publisher', current_database()) is a database privilege grant with no DML
+20260519100000_replace_mobile_bridge_code_device_pubkey_with_jkt  # DELETE of 60s-TTL bridge codes; any row left makes the following ADD COLUMN device_jkt NOT NULL (no default) fail the deploy loudly
+20260522000100_access_request_requester  # PENDING to EXPIRED for requester-less rows; the approve route refuses a request with no requester (approve/route.ts) so a row left PENDING cannot be approved
+20260524060000_extension_dpop_sender_constrained  # DELETE of legacy BROWSER_EXTENSION tokens with null cnf_jkt; any row left makes the ADD CONSTRAINT CHECK that follows (validated over all rows regardless of RLS) fail the deploy loudly
+20260629000000_add_mcp_refresh_token_family_created_at  # family_created_at backfill is repeated by 20260629000100, whose SET NOT NULL validates every row regardless of RLS and fails the deploy loudly if a NULL was left
+20260629000100_flip_mcp_refresh_token_family_created_at_not_null  # defensive backfill only; the SET NOT NULL right after it validates every row regardless of RLS and fails the deploy loudly if a NULL was left
+20260725000000_hash_session_tokens_purge_plaintext  # DELETE of sessions; rows left hold plaintext tokens that can never match the digest lookup (dead) and the retention GC purges sessions past expiry (registry.ts sessions EXPIRY), though the plaintext stays until then
+20261101000000_team_tenant_departure  # fixed forward by 20261110000000_rls_backfill_rerun
+20261104000000_team_key_rotation_rekey  # fixed forward by 20261110000000_rls_backfill_rerun
+20260321110000_convert_id_columns_to_uuid_type  # DYNAMIC: EXECUTE format('ALTER TABLE %I DROP|ADD CONSTRAINT %I %s') replays FK / CHECK definitions saved from pg_get_constraintdef, format('DROP TRIGGER %I ON %I') and EXECUTE r.definition replays CREATE TRIGGER text saved from pg_get_triggerdef; constraint and trigger DDL only, no DML on a FORCE table (the loops read TEMP tables and pg_* catalogs); the static DROP POLICY literals are scanned as nested units
+20260412100001_add_audit_outbox_worker_role  # DYNAMIC: EXECUTE format('GRANT CONNECT ON DATABASE %I TO passwd_outbox_worker', current_database()); a database privilege grant with no DML
+20260428170853_add_dcr_cleanup_worker_role_and_system_tenant  # DYNAMIC: EXECUTE format('GRANT CONNECT ON DATABASE %I TO passwd_dcr_cleanup_worker', current_database()); a database privilege grant with no DML
+20260611011121_revoke_public_connect_on_app_db  # DYNAMIC: EXECUTE format('REVOKE CONNECT ON DATABASE %I FROM PUBLIC', current_database()); a database privilege revoke with no DML
+20260618000000_add_retention_gc_worker_role  # DYNAMIC: EXECUTE format('GRANT CONNECT ON DATABASE %I TO passwd_retention_gc_worker', current_database()); a database privilege grant with no DML
+20261019000000_rls_bypass_admits_report_mode  # DYNAMIC: EXECUTE format('GRANT EXECUTE ON FUNCTION ... TO %I') over a fixed role list, and two EXECUTE format('ALTER POLICY %I ON public.%I USING (%s) WITH CHECK (%s)') that replay policy text rewritten from pg_policies; privilege and policy DDL only, the loops read pg_roles / pg_policies, no DML on a FORCE table
+20261023010000_retire_dcr_cleanup_worker_role  # DYNAMIC: EXECUTE format('REVOKE ... FROM %I [GRANTED BY %I]') and format('ALTER DEFAULT PRIVILEGES ... REVOKE ALL ...') over names read from pg_auth_members / pg_namespace / pg_default_acl; role-membership and ACL DDL only, no DML on a FORCE table

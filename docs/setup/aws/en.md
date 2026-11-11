@@ -276,6 +276,8 @@ MIGRATION_DATABASE_URL='postgresql://SUPERUSER:password@HOST:5432/DB' npx prisma
 
 The `MIGRATION_DATABASE_URL` must point to a role with DDL privileges (table owner). The app service `DATABASE_URL` should use a non-SUPERUSER role.
 
+Check `rolsuper` / `rolbypassrls` of the migrate role in `pg_roles`: RDS's master has neither, so RLS applies to it. See [departed-member-access-backfill](../../operations/departed-member-access-backfill.md).
+
 ## Health Checks
 
 | Endpoint | Purpose | Used by |

@@ -138,8 +138,10 @@ function normalizeInput(input) {
 // Tokenizer
 // ---------------------------------------------------------------------------
 
-const isWordStart = (c) => /[A-Za-z_\u0080-\uDFFF]/.test(c);
-const isWordChar = (c) => /[A-Za-z0-9_$\u0080-\uDFFF]/.test(c);
+// PostgreSQL treats every character >= U+0080 as an identifier character. SUB
+// (U+E000) stays out: it is the substitution sentinel, lexed as an operator.
+const isWordStart = (c) => /[A-Za-z_\u0080-\uDFFF-\u{10FFFF}]/u.test(c);
+const isWordChar = (c) => /[A-Za-z0-9_$\u0080-\uDFFF-\u{10FFFF}]/u.test(c);
 
 /**
  * Lex `input` into tokens. Comments (`--` to end of line, nested `/* … *\/`)

@@ -9,6 +9,7 @@ Language policy:
 | --- | --- |
 | [deployment.md](deployment.md) | Deployment procedures |
 | [dev-host-migration.md](dev-host-migration.md) | Moving a development / verification deployment to another machine |
+| [departed-member-access-backfill.md](departed-member-access-backfill.md) | Follow-up for departed members that kept team access (#1033): report and contain scripts |
 | [admin-tokens.md](admin-tokens.md) | Operator token mint / use / rotate / revoke runbook |
 | [incident-runbook.md](incident-runbook.md) | Incident response runbook |
 | [audit-log-reference.md](audit-log-reference.md) | Audit log schema reference |

@@ -64,6 +64,8 @@ Example (run from local machine against production DB):
 MIGRATION_DATABASE_URL='postgresql://SUPERUSER:password@HOST:5432/DB' npx prisma migrate deploy
 ```
 
+Check `rolsuper` / `rolbypassrls` of the migrate role in `pg_roles`: a managed-Postgres admin has neither, so RLS applies to it. See [departed-member-access-backfill](../../operations/departed-member-access-backfill.md).
+
 Recommended: enforce migrations in CI (e.g., GitHub Actions) before production deploy.
 
 ## 4b. Audit-outbox-worker (Required)

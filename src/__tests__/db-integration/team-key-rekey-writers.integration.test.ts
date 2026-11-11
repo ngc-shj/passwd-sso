@@ -18,7 +18,25 @@ import { randomUUID, randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { NextRequest } from "next/server";
-import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
+import type pg from "pg";
+import {
+  appConnectionString,
+  BYPASS_ROLE_KIND,
+  collectNotices,
+  createTestContext,
+  enterBypassRole,
+  expectBypassNotices,
+  gucSentinels,
+  parseNoticeCounts,
+  readBackfillBlock,
+  readGucs,
+  RLS_BACKFILL_RERUN_DIR,
+  setBypassRlsGucs,
+  setGucs,
+  setTestBypass,
+  type TestContext,
+} from "./helpers";
+import { createPool } from "@/lib/db/pool-factory";
 import { createRaceHelpers } from "./race-helpers";
 
 const mockAuth = vi.fn();
@@ -196,6 +214,60 @@ describe("team entry key identity writers — real-DB integration", () => {
     return id;
   }
 
+  async function seedAttachment(entryId: string, userId: string, cekKeyVersion: number | null, mode: number): Promise<void> {
+    await sql(
+      `INSERT INTO attachments (
+         id, team_password_entry_id, tenant_id, created_by_id, filename, content_type, size_bytes,
+         encrypted_data, iv, auth_tag, key_version, cek_key_version, aad_version, encryption_mode, created_at
+       ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'f.bin', 'application/octet-stream', 4,
+                 '\\x00010203'::bytea, $5, $6, 1, $7, 1, $8, now())`,
+      randomUUID(), entryId, tenantId, userId, hex(12), hex(16), cekKeyVersion, mode,
+    );
+  }
+
+  /**
+   * The entries and history rows the backfill's high-water and item_key_id steps read: each
+   * high-water term alone (history, CEK attachment, mode-0 attachment, none), and an entry whose
+   * history rows equal its wrap except, in turn, exactly one wrap column (or hold a NULL there).
+   */
+  async function seedIdentityShapes(teamV3: string, owner: string) {
+    const hwHistory = await seedEntry(teamV3, owner, { teamKeyVersion: 3, itemKeyVersion: 1 });
+    await seedHistory(hwHistory, owner, { teamKeyVersion: 3, itemKeyVersion: 3 });
+    const hwAttachment = await seedEntry(teamV3, owner, { teamKeyVersion: 3, itemKeyVersion: 1 });
+    await seedHistory(hwAttachment, owner, { teamKeyVersion: 3, itemKeyVersion: 2 });
+    const mode0Only = await seedEntry(teamV3, owner, { teamKeyVersion: 3, itemKeyVersion: 2 });
+    const neither = await seedEntry(teamV3, owner, { teamKeyVersion: 3, itemKeyVersion: 1 });
+    await seedAttachment(hwHistory, owner, 2, 1);
+    await seedAttachment(hwAttachment, owner, 4, 1);
+    await seedAttachment(mode0Only, owner, null, 0);
+
+    const wrap = newWrap();
+    const idEntry = await seedEntry(teamV3, owner, { teamKeyVersion: 3, itemKeyVersion: 2, wrap });
+    const other = await seedEntry(teamV3, owner, { teamKeyVersion: 3, itemKeyVersion: 1 });
+    const v0 = await seedEntry(teamV3, owner, { teamKeyVersion: 3, itemKeyVersion: 0 });
+    const sameLength = (s: string) => hex(s.length / 2);
+    const fullMatch = await seedHistory(idEntry, owner, { teamKeyVersion: 3, itemKeyVersion: 2, wrap });
+    const variants = {
+      teamKeyVersion: await seedHistory(idEntry, owner, { teamKeyVersion: 4, itemKeyVersion: 2, wrap }),
+      itemKeyVersion: await seedHistory(idEntry, owner, { teamKeyVersion: 3, itemKeyVersion: 3, wrap }),
+      encryptedItemKey: await seedHistory(idEntry, owner, {
+        teamKeyVersion: 3, itemKeyVersion: 2, wrap: { ...wrap, encryptedItemKey: sameLength(wrap.encryptedItemKey) },
+      }),
+      itemKeyIv: await seedHistory(idEntry, owner, {
+        teamKeyVersion: 3, itemKeyVersion: 2, wrap: { ...wrap, itemKeyIv: sameLength(wrap.itemKeyIv) },
+      }),
+      itemKeyAuthTag: await seedHistory(idEntry, owner, {
+        teamKeyVersion: 3, itemKeyVersion: 2, wrap: { ...wrap, itemKeyAuthTag: sameLength(wrap.itemKeyAuthTag) },
+      }),
+    };
+    const nullVariants = await Promise.all([
+      seedHistory(idEntry, owner, { teamKeyVersion: 3, itemKeyVersion: 2, wrap: { ...wrap, encryptedItemKey: null } }),
+      seedHistory(idEntry, owner, { teamKeyVersion: 3, itemKeyVersion: 2, wrap: { ...wrap, itemKeyIv: null } }),
+      seedHistory(idEntry, owner, { teamKeyVersion: 3, itemKeyVersion: 2, wrap: { ...wrap, itemKeyAuthTag: null } }),
+    ]);
+    return { hwHistory, hwAttachment, mode0Only, neither, idEntry, other, v0, fullMatch, variants, nullVariants };
+  }
+
   async function entry(id: string): Promise<EntryRow> {
     const r = await ctx.su.pool.query<EntryRow>(
       `SELECT item_key_version, team_key_version, item_key_id, item_key_team_key_version,
@@ -297,53 +369,9 @@ describe("team entry key identity writers — real-DB integration", () => {
     const atV1 = await seedEntry(teamV1, owner1, { teamKeyVersion: 1, itemKeyVersion: 1 });
     const atV3 = await seedEntry(teamV3, owner1, { teamKeyVersion: 3, itemKeyVersion: 1 });
 
-    // High-water terms.
-    const hwHistory = await seedEntry(teamV3, owner1, { teamKeyVersion: 3, itemKeyVersion: 1 });
-    await seedHistory(hwHistory, owner1, { teamKeyVersion: 3, itemKeyVersion: 3 });
-    const hwAttachment = await seedEntry(teamV3, owner1, { teamKeyVersion: 3, itemKeyVersion: 1 });
-    await seedHistory(hwAttachment, owner1, { teamKeyVersion: 3, itemKeyVersion: 2 });
-    const mode0Only = await seedEntry(teamV3, owner1, { teamKeyVersion: 3, itemKeyVersion: 2 });
-    const neither = await seedEntry(teamV3, owner1, { teamKeyVersion: 3, itemKeyVersion: 1 });
-    async function attachment(entryId: string, cekKeyVersion: number | null, mode: number) {
-      await sql(
-        `INSERT INTO attachments (
-           id, team_password_entry_id, tenant_id, created_by_id, filename, content_type, size_bytes,
-           encrypted_data, iv, auth_tag, key_version, cek_key_version, aad_version, encryption_mode, created_at
-         ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'f.bin', 'application/octet-stream', 4,
-                   '\\x00010203'::bytea, $5, $6, 1, $7, 1, $8, now())`,
-        randomUUID(), entryId, tenantId, owner1, hex(12), hex(16), cekKeyVersion, mode,
-      );
-    }
-    await attachment(hwHistory, 2, 1);
-    await attachment(hwAttachment, 4, 1);
-    await attachment(mode0Only, null, 0);
-
-    // item_key_id: one entry with history rows equal to its wrap except, in
-    // turn, one predicate column.
-    const wrap = newWrap();
-    const idEntry = await seedEntry(teamV3, owner1, { teamKeyVersion: 3, itemKeyVersion: 2, wrap });
-    const other = await seedEntry(teamV3, owner1, { teamKeyVersion: 3, itemKeyVersion: 1 });
-    const v0 = await seedEntry(teamV3, owner1, { teamKeyVersion: 3, itemKeyVersion: 0 });
-    const sameLength = (s: string) => hex(s.length / 2);
-    const fullMatch = await seedHistory(idEntry, owner1, { teamKeyVersion: 3, itemKeyVersion: 2, wrap });
-    const variants = {
-      teamKeyVersion: await seedHistory(idEntry, owner1, { teamKeyVersion: 4, itemKeyVersion: 2, wrap }),
-      itemKeyVersion: await seedHistory(idEntry, owner1, { teamKeyVersion: 3, itemKeyVersion: 3, wrap }),
-      encryptedItemKey: await seedHistory(idEntry, owner1, {
-        teamKeyVersion: 3, itemKeyVersion: 2, wrap: { ...wrap, encryptedItemKey: sameLength(wrap.encryptedItemKey) },
-      }),
-      itemKeyIv: await seedHistory(idEntry, owner1, {
-        teamKeyVersion: 3, itemKeyVersion: 2, wrap: { ...wrap, itemKeyIv: sameLength(wrap.itemKeyIv) },
-      }),
-      itemKeyAuthTag: await seedHistory(idEntry, owner1, {
-        teamKeyVersion: 3, itemKeyVersion: 2, wrap: { ...wrap, itemKeyAuthTag: sameLength(wrap.itemKeyAuthTag) },
-      }),
-    };
-    const nullVariants = await Promise.all([
-      seedHistory(idEntry, owner1, { teamKeyVersion: 3, itemKeyVersion: 2, wrap: { ...wrap, encryptedItemKey: null } }),
-      seedHistory(idEntry, owner1, { teamKeyVersion: 3, itemKeyVersion: 2, wrap: { ...wrap, itemKeyIv: null } }),
-      seedHistory(idEntry, owner1, { teamKeyVersion: 3, itemKeyVersion: 2, wrap: { ...wrap, itemKeyAuthTag: null } }),
-    ]);
+    const {
+      hwHistory, hwAttachment, mode0Only, neither, idEntry, other, v0, fullMatch, variants, nullVariants,
+    } = await seedIdentityShapes(teamV3, owner1);
 
     const migration = readFileSync(
       join(process.cwd(), "prisma/migrations/20261104000000_team_key_rotation_rekey/migration.sql"),
@@ -767,6 +795,318 @@ describe("team entry key identity writers — real-DB integration", () => {
       const s = await seedAdminRestore();
       const res = await parkedBehindTeamRow(s.teamId, s.admin, () => restore(s.teamId, s.entryId, s.historyId), null);
       expect(res.status).toBe(200);
+    });
+  });
+
+  // ── C1: 20261110000000_rls_backfill_rerun, re-key block ──────────────────
+
+  describe("C1: rls_backfill_rerun — team-key-rotation-rekey-rerun", () => {
+    const ORIGINAL_DIR = "20261104000000_team_key_rotation_rekey";
+    const BLOCK_TABLES = ["teams", "team_password_entries", "team_password_entry_histories", "attachments"] as const;
+    const RERUN_REPORT = "team-key-rotation-rekey-rerun backfill:";
+
+    let appPool: pg.Pool;
+    beforeAll(() => {
+      appPool = createPool({ connectionString: appConnectionString(), max: 3 });
+    });
+    afterAll(async () => {
+      await appPool.end();
+    });
+
+    const APP_WRITTEN = ["appCurrent", "appPending", "appHighWaterAbove", "restored"] as const;
+    const SAME_IDS = Object.fromEntries(APP_WRITTEN.map((n) => [n, "same id"]));
+    type EntryState = { marker: number; hw: number; hasId: boolean };
+    type Fx = {
+      teamV1: string;
+      entries: Record<string, string>;
+      histories: Record<string, { id: string; entry: string }>;
+      /** item_key_id of the app-written entries, as seeded: no step may replace one. */
+      appItemKeyIds: Record<string, string>;
+    };
+
+    /**
+     * Pre-change rows (marker 0, high-water 0, no ids) of every shape the steps move, beside
+     * app-written rows the steps must leave: one that a real history restore left at marker 0
+     * with a high-water of 1 on a team at version 1.
+     */
+    async function seedFixtures(): Promise<Fx> {
+      const teamV0 = await seedTeam(0);
+      const teamV1 = await seedTeam(1);
+      const teamV3 = await seedTeam(3);
+      const owner = await seedMember(teamV1, "OWNER", [1]);
+      const entries: Fx["entries"] = {};
+      const histories: Fx["histories"] = {};
+
+      entries.atV1 = await seedEntry(teamV1, owner, { teamKeyVersion: 1, itemKeyVersion: 1 });
+      entries.atV0Team = await seedEntry(teamV0, owner, { teamKeyVersion: 0, itemKeyVersion: 1 });
+      entries.atV3 = await seedEntry(teamV3, owner, { teamKeyVersion: 3, itemKeyVersion: 1 });
+      entries.v0Entry = await seedEntry(teamV1, owner, { teamKeyVersion: 1, itemKeyVersion: 0 });
+      const shapes = await seedIdentityShapes(teamV3, owner);
+      Object.assign(entries, {
+        hwHistory: shapes.hwHistory, hwAttachment: shapes.hwAttachment, mode0Only: shapes.mode0Only,
+        neither: shapes.neither, idEntry: shapes.idEntry, other: shapes.other, v0Shape: shapes.v0,
+      });
+      histories.identical = { id: shapes.fullMatch, entry: "idEntry" };
+      for (const [column, id] of Object.entries(shapes.variants)) histories[`differsIn_${column}`] = { id, entry: "idEntry" };
+      shapes.nullVariants.forEach((id, i) => {
+        histories[`null_${["encryptedItemKey", "itemKeyIv", "itemKeyAuthTag"][i]}`] = { id, entry: "idEntry" };
+      });
+
+      // An entry with no ItemKey that still holds a wrap, beside a history row of the same wrap: step 4 must not
+      // give it an id from an entry that has none (the app never writes this shape; the guard is what excludes it).
+      entries.v0WithWrap = await seedEntry(teamV3, owner, { teamKeyVersion: 3, itemKeyVersion: 0 });
+      const strayWrap = newWrap();
+      await sql(
+        `UPDATE team_password_entries SET encrypted_item_key = $2, item_key_iv = $3, item_key_auth_tag = $4 WHERE id = $1::uuid`,
+        entries.v0WithWrap, strayWrap.encryptedItemKey, strayWrap.itemKeyIv, strayWrap.itemKeyAuthTag,
+      );
+      histories.v0WithWrap = { id: await seedHistory(entries.v0WithWrap, owner, { teamKeyVersion: 3, itemKeyVersion: 0, wrap: strayWrap }), entry: "v0WithWrap" };
+
+      // The pre-change state: what the columns held before the key-identity release.
+      await sql(
+        `UPDATE team_password_entries SET item_key_team_key_version = 0, item_key_version_high_water = 0, item_key_id = NULL WHERE id = ANY($1::uuid[])`,
+        [Object.values(entries)],
+      );
+      await sql(`UPDATE team_password_entry_histories SET item_key_id = NULL WHERE entry_id = ANY($1::uuid[])`, [Object.values(entries)]);
+
+      // App-written rows.
+      entries.appCurrent = await seedEntry(teamV1, owner, { teamKeyVersion: 1, itemKeyVersion: 1, marker: 1, highWater: 1 });
+      entries.appPending = await seedEntry(teamV3, owner, { teamKeyVersion: 3, itemKeyVersion: 1, marker: 0, highWater: 1 });
+      entries.stragglerNoId = await seedEntry(teamV3, owner, { teamKeyVersion: 3, itemKeyVersion: 1, marker: 0, highWater: 1 });
+      await sql(`UPDATE team_password_entries SET item_key_id = NULL WHERE id = $1::uuid`, entries.stragglerNoId);
+
+      // An app-written entry whose high-water sits above everything its own rows hold: the raise-only guard must keep it.
+      entries.appHighWaterAbove = await seedEntry(teamV3, owner, { teamKeyVersion: 3, itemKeyVersion: 1, marker: 0, highWater: 5 });
+
+      // Restored through the real route to a NULL-id row on a team at version 1: marker 0, high-water 1.
+      entries.restored = await seedEntry(teamV1, owner, { teamKeyVersion: 1, itemKeyVersion: 1 });
+      const snapshot = await seedHistory(entries.restored, owner, { teamKeyVersion: 1, itemKeyVersion: 1, itemKeyId: null });
+      mockAuth.mockResolvedValue({ user: { id: owner } });
+      expect((await restore(teamV1, entries.restored, snapshot)).status).toBe(200);
+      const restoredRow = await entry(entries.restored);
+      expect({ marker: restoredRow.item_key_team_key_version, hw: restoredRow.item_key_version_high_water, hasId: restoredRow.item_key_id !== null })
+        .toEqual({ marker: 0, hw: 1, hasId: true });
+      const appItemKeyIds: Fx["appItemKeyIds"] = {};
+      for (const name of APP_WRITTEN) appItemKeyIds[name] = (await entry(entries[name])).item_key_id!;
+      return { teamV1, entries, histories, appItemKeyIds };
+    }
+
+    async function readState(client: pg.PoolClient, fx: Fx) {
+      const names = Object.keys(fx.entries);
+      const rows = await client.query<{ id: string; m: number; hw: number; ik: string | null }>(
+        `SELECT id, item_key_team_key_version AS m, item_key_version_high_water AS hw, item_key_id AS ik
+           FROM team_password_entries WHERE id = ANY($1::uuid[])`,
+        [names.map((n) => fx.entries[n])],
+      );
+      const byId = new Map(rows.rows.map((r) => [r.id, r]));
+      const entriesState: Record<string, EntryState> = Object.fromEntries(names.map((n) => {
+        const r = byId.get(fx.entries[n])!;
+        return [n, { marker: r.m, hw: r.hw, hasId: r.ik !== null }];
+      }));
+      const hist = await client.query<{ id: string; ik: string | null }>(
+        `SELECT id, item_key_id AS ik FROM team_password_entry_histories WHERE id = ANY($1::uuid[])`,
+        [Object.values(fx.histories).map((h) => h.id)],
+      );
+      const histIk = new Map(hist.rows.map((r) => [r.id, r.ik]));
+      const histories = Object.fromEntries(Object.entries(fx.histories).map(([n, h]) => {
+        const ik = histIk.get(h.id) ?? null;
+        return [n, ik === null ? null : ik === byId.get(fx.entries[h.entry])!.ik ? "entry's id" : "other id"];
+      }));
+      const appItemKeyIds = Object.fromEntries(APP_WRITTEN.map((n) => [n, byId.get(fx.entries[n])!.ik === fx.appItemKeyIds[n] ? "same id" : "other id"]));
+      return { entries: entriesState, histories, appItemKeyIds };
+    }
+
+    const NO_HISTORY_IDS = {
+      identical: null, differsIn_teamKeyVersion: null, differsIn_itemKeyVersion: null,
+      differsIn_encryptedItemKey: null, differsIn_itemKeyIv: null, differsIn_itemKeyAuthTag: null,
+      null_encryptedItemKey: null, null_itemKeyIv: null, null_itemKeyAuthTag: null,
+      v0WithWrap: null,
+    };
+    const PRE = {
+      entries: {
+        atV1: { marker: 0, hw: 0, hasId: false }, atV0Team: { marker: 0, hw: 0, hasId: false },
+        atV3: { marker: 0, hw: 0, hasId: false }, v0Entry: { marker: 0, hw: 0, hasId: false },
+        hwHistory: { marker: 0, hw: 0, hasId: false }, hwAttachment: { marker: 0, hw: 0, hasId: false },
+        idEntry: { marker: 0, hw: 0, hasId: false }, mode0Only: { marker: 0, hw: 0, hasId: false },
+        neither: { marker: 0, hw: 0, hasId: false }, other: { marker: 0, hw: 0, hasId: false },
+        v0Shape: { marker: 0, hw: 0, hasId: false }, v0WithWrap: { marker: 0, hw: 0, hasId: false },
+        appCurrent: { marker: 1, hw: 1, hasId: true }, appPending: { marker: 0, hw: 1, hasId: true },
+        appHighWaterAbove: { marker: 0, hw: 5, hasId: true },
+        stragglerNoId: { marker: 0, hw: 1, hasId: false }, restored: { marker: 0, hw: 1, hasId: true },
+      },
+      histories: NO_HISTORY_IDS,
+      appItemKeyIds: SAME_IDS,
+    };
+    /** Steps 2-4 on any role; step 1 (marker) additionally where the role cannot bypass. */
+    const POST_STEPS_2_TO_4 = {
+      entries: {
+        atV1: { marker: 0, hw: 1, hasId: true }, atV0Team: { marker: 0, hw: 1, hasId: true },
+        atV3: { marker: 0, hw: 1, hasId: true }, v0Entry: { marker: 0, hw: 0, hasId: false },
+        hwHistory: { marker: 0, hw: 3, hasId: true }, hwAttachment: { marker: 0, hw: 4, hasId: true },
+        idEntry: { marker: 0, hw: 3, hasId: true }, mode0Only: { marker: 0, hw: 2, hasId: true },
+        neither: { marker: 0, hw: 1, hasId: true }, other: { marker: 0, hw: 1, hasId: true },
+        v0Shape: { marker: 0, hw: 0, hasId: false }, v0WithWrap: { marker: 0, hw: 0, hasId: false },
+        appCurrent: { marker: 1, hw: 1, hasId: true }, appPending: { marker: 0, hw: 1, hasId: true },
+        appHighWaterAbove: { marker: 0, hw: 5, hasId: true },
+        stragglerNoId: { marker: 0, hw: 1, hasId: true }, restored: { marker: 0, hw: 1, hasId: true },
+      },
+      histories: { ...NO_HISTORY_IDS, identical: "entry's id" },
+      appItemKeyIds: SAME_IDS,
+    };
+    const POST_APP_ROLE = {
+      ...POST_STEPS_2_TO_4,
+      entries: {
+        ...POST_STEPS_2_TO_4.entries,
+        atV1: { marker: 1, hw: 1, hasId: true }, atV0Team: { marker: 1, hw: 1, hasId: true },
+        v0Entry: { marker: 1, hw: 0, hasId: false }, v0WithWrap: { marker: 0, hw: 0, hasId: false },
+      },
+    };
+
+    async function asApp<T>(fn: (client: pg.PoolClient, notices: string[]) => Promise<T>): Promise<T> {
+      const client = await appPool.connect();
+      const collected = collectNotices(client);
+      try {
+        const [principal] = (await client.query<{ rolsuper: boolean; rolbypassrls: boolean }>(
+          `SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user`,
+        )).rows;
+        expect(principal).toEqual({ rolsuper: false, rolbypassrls: false });
+        await client.query("BEGIN");
+        return await fn(client, collected.messages);
+      } finally {
+        collected.stop();
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    }
+
+    /** Runs the block with the settings sentinels in place and asserts it left them as found (I3). */
+    async function runBlock(client: pg.PoolClient, block: string): Promise<void> {
+      const sentinels = gucSentinels();
+      await setGucs(client, sentinels);
+      await client.query(block);
+      expect(await readGucs(client)).toEqual(sentinels);
+    }
+
+    async function stateUnderTestBypass(client: pg.PoolClient, fx: Fx) {
+      await setTestBypass(client, BLOCK_TABLES);
+      return readState(client, fx);
+    }
+
+    const countsOf = (messages: string[], prefix: string) => {
+      const line = messages.filter((m) => m.startsWith(prefix));
+      expect(line).toHaveLength(1);
+      return parseNoticeCounts(line[0]);
+    };
+    const rerunRekey = () => readBackfillBlock(RLS_BACKFILL_RERUN_DIR, "team-key-rotation-rekey-rerun");
+
+    let fx: Fx;
+    beforeEach(async () => {
+      fx = await seedFixtures();
+    });
+
+    it("control: the ORIGINAL block as passwd_app changes nothing and reports zero everywhere; under a test bypass it moves the fixtures", async () => {
+      await asApp(async (client, notices) => {
+        const original = readBackfillBlock(ORIGINAL_DIR, "team-key-rotation-rekey");
+        expect(await stateUnderTestBypass(client, fx)).toEqual(PRE);
+
+        await runBlock(client, original);
+        const counts = countsOf(notices, "team-key-rotation-rekey backfill:");
+        expect(counts).toEqual({ marker: 0, high_water: 0, entry_ids: 0, history_ids: 0 });
+        expect(await stateUnderTestBypass(client, fx)).toEqual(PRE);
+
+        // Positive control: the same block with the bypass it lacked.
+        await setTestBypass(client, BLOCK_TABLES);
+        notices.length = 0;
+        await client.query(original);
+        const changed = countsOf(notices, "team-key-rotation-rekey backfill:");
+        expect(changed.marker).toBeGreaterThan(0);
+        expect(changed.entry_ids).toBeGreaterThan(0);
+        expect((await readState(client, fx)).entries.atV1).toEqual({ marker: 1, hw: 1, hasId: true });
+      });
+    });
+
+    it("C1 as passwd_app: markers, high-water, ids and history ids are what the literal map says; the restored entry stays pending", async () => {
+      await asApp(async (client) => {
+        await runBlock(client, rerunRekey());
+        expect(await stateUnderTestBypass(client, fx)).toEqual(POST_APP_ROLE);
+      });
+    });
+
+    it("I1: a second run in the same transaction changes nothing", async () => {
+      await asApp(async (client, notices) => {
+        await runBlock(client, rerunRekey());
+        const afterFirst = await stateUnderTestBypass(client, fx);
+        notices.length = 0;
+        await runBlock(client, rerunRekey());
+        expect(countsOf(notices, RERUN_REPORT)).toEqual({ marker: 0, high_water: 0, entry_ids: 0, history_ids: 0 });
+        expect(await stateUnderTestBypass(client, fx)).toEqual(afterFirst);
+      });
+    });
+
+    it.each(BLOCK_TABLES)("table-list control: with %s removed from app.bypass_tables the block reports it under system_maintenance", async (removed) => {
+      const block = rerunRekey();
+      const literal = /'(teams,[a-z_,]+)'/.exec(block);
+      expect(literal).not.toBeNull();
+      const mutated = block.replace(literal![1], literal![1].split(",").filter((t) => t !== removed).join(","));
+      expect(mutated).not.toBe(block);
+      const notices = await expectBypassNotices(() => asApp(async (client) => {
+        await runBlock(client, mutated);
+      }));
+      expect(notices).toContainEqual({ table: removed, purpose: "system_maintenance" });
+    });
+
+    describe("I2: a migrate role that bypasses RLS", () => {
+      async function inRolledBackTx<T>(fn: (client: pg.PoolClient) => Promise<T>): Promise<T> {
+        const client = await ctx.su.pool.connect();
+        try {
+          await client.query("BEGIN");
+          return await fn(client);
+        } finally {
+          await client.query("ROLLBACK");
+          client.release();
+        }
+      }
+
+      it.each([BYPASS_ROLE_KIND.MIGRATION_SUPERUSER, BYPASS_ROLE_KIND.BYPASSRLS_ROLE, BYPASS_ROLE_KIND.SUPERUSER_ROLE])(
+        "%s: step 1 leaves marker 0, steps 2-4 repair the stragglers, app-written rows are unchanged (literal map)",
+        async (kind) => {
+          await inRolledBackTx(async (client) => {
+            await enterBypassRole(client, kind);
+            await client.query(rerunRekey());
+            await client.query("RESET ROLE");
+            expect(await readState(client, fx)).toEqual(POST_STEPS_2_TO_4);
+          });
+        },
+      );
+
+      it("passwd_app entered with SET LOCAL ROLE (session_user bypasses, current_user does not): step 1 applies", async () => {
+        await inRolledBackTx(async (client) => {
+          await enterBypassRole(client, BYPASS_ROLE_KIND.APP_ROLE);
+          await client.query(rerunRekey());
+          await client.query("RESET ROLE");
+          expect(await readState(client, fx)).toEqual(POST_APP_ROLE);
+        });
+      });
+    });
+
+    it("the teams lock held alone makes the block fail on its teams FOR SHARE with 55P03", async () => {
+      const a = await ctx.su.pool.connect();
+      const b = await appPool.connect();
+      try {
+        await a.query("BEGIN");
+        await a.query(`SELECT 1 FROM teams WHERE id = $1::uuid FOR NO KEY UPDATE`, [fx.teamV1]);
+        await b.query("BEGIN");
+        await b.query("SET LOCAL lock_timeout = '1500ms'");
+        await setGucs(b, gucSentinels());
+        const error = await b.query(rerunRekey()).then(() => null, (e: unknown) => e as { code?: string; where?: string });
+        expect(error?.code).toBe("55P03");
+        expect(error?.where).toContain("FROM teams ORDER BY id FOR SHARE");
+      } finally {
+        await b.query("ROLLBACK").catch(() => {});
+        await a.query("ROLLBACK").catch(() => {});
+        b.release();
+        a.release();
+      }
     });
   });
 });

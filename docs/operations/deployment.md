@@ -140,6 +140,14 @@ The migration task is idempotent (`prisma migrate deploy` is a no-op when there
 are no pending migrations), so a code-only release is the same `./scripts/deploy.sh`
 — it re-runs the (no-op) migration and advances the services.
 
+### One-time upgrade: `20261110000000_rls_backfill_rerun`
+
+Every deployment that applied `20261101000000_team_tenant_departure` before this
+release: **before** `./scripts/deploy.sh`, run the report in
+[departed-member-access-backfill.md](departed-member-access-backfill.md) and
+disable the team webhooks its section 2 lists — the migration's audit rows fan
+out to webhooks once it runs. After the deploy, follow the rest of that page.
+
 ### One-time upgrade: anchor publisher converged, DCR role retired
 
 The release carrying migration `20261023010000_retire_dcr_cleanup_worker_role`
@@ -407,6 +415,11 @@ aws logs tail /ecs/passwd-sso-prod/audit-anchor-publisher --since 2d --region <r
 ## Deploy Flow (Local / Docker Compose)
 
 ### Run migration only
+
+The first time this runs `20261110000000_rls_backfill_rerun` on a database that applied
+`20261101000000_team_tenant_departure`, do the before-deploy steps of
+[departed-member-access-backfill.md](departed-member-access-backfill.md) first (see
+"One-time upgrade: `20261110000000_rls_backfill_rerun`" above).
 
 ```bash
 docker compose --profile migrate up migrate --abort-on-container-exit --exit-code-from migrate

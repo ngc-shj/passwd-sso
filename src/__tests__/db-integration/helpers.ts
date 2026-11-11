@@ -20,6 +20,8 @@ import { bypassNoticeBuffer } from "./bypass-notice-sink";
 import { defineGrant, MODEL_TABLE, setBypassGucs, type BypassGrant, type BypassModel } from "@/lib/tenant-rls-grants";
 import { BYPASS_PURPOSE } from "@/lib/tenant-rls-purpose";
 import { randomUUID, randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { pgErrorCode } from "@/lib/prisma/prisma-error";
 import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
 
@@ -901,4 +903,118 @@ export async function expectBypassNotices(fn: () => Promise<unknown>): Promise<B
   const before = buffer.length;
   await fn();
   return buffer.splice(before);
+}
+
+// ─── Backfill-block cells (rls_backfill_rerun, #1033) ───────────
+
+/** The migration C1's two blocks live in. */
+export const RLS_BACKFILL_RERUN_DIR = "20261110000000_rls_backfill_rerun";
+
+/**
+ * The text between a migration's `-- BEGIN BACKFILL <name>` and `-- END
+ * BACKFILL <name>` markers; throws unless exactly one pair exists. For the
+ * rerun migration, RLS_BACKFILL_RERUN_SQL names a file to read instead (a
+ * mutated copy, for a red proof outside the source tree).
+ */
+export function readBackfillBlock(migrationDir: string, name: string): string {
+  const override = migrationDir === RLS_BACKFILL_RERUN_DIR ? process.env.RLS_BACKFILL_RERUN_SQL : undefined;
+  const sqlText = readFileSync(
+    override ?? join(process.cwd(), "prisma/migrations", migrationDir, "migration.sql"),
+    "utf8",
+  );
+  const found = [...sqlText.matchAll(new RegExp(`-- BEGIN BACKFILL ${name}\\n([\\s\\S]*?)-- END BACKFILL ${name}\\n`, "g"))];
+  if (found.length !== 1) throw new Error(`expected exactly one BACKFILL block "${name}" in ${migrationDir}, found ${found.length}`);
+  return found[0][1];
+}
+
+export type GucState = { rls: string | null; tables: string | null; purpose: string | null; tenant: string | null };
+
+/**
+ * Settings a block must leave as it found them. `tenant` is a random UUID
+ * that names no tenant: it casts cleanly in a policy and admits no row.
+ */
+export function gucSentinels(): GucState {
+  return { rls: "off", tables: "sentinel_none", purpose: "sentinel", tenant: randomUUID() };
+}
+
+export async function setGucs(client: pg.PoolClient, gucs: GucState): Promise<void> {
+  await client.query(
+    `SELECT set_config('app.bypass_rls', $1, true), set_config('app.bypass_tables', $2, true),
+            set_config('app.bypass_purpose', $3, true), set_config('app.tenant_id', $4, true)`,
+    [gucs.rls, gucs.tables, gucs.purpose, gucs.tenant],
+  );
+}
+
+export async function readGucs(client: pg.PoolClient): Promise<GucState> {
+  const { rows } = await client.query<GucState>(
+    `SELECT current_setting('app.bypass_rls', true) AS rls, current_setting('app.bypass_tables', true) AS tables,
+            current_setting('app.bypass_purpose', true) AS purpose, current_setting('app.tenant_id', true) AS tenant`,
+  );
+  return rows[0];
+}
+
+/** A test-owned bypass over `tables`, transaction-local, for reading or running an original block. */
+export async function setTestBypass(client: pg.PoolClient, tables: readonly string[]): Promise<void> {
+  await setGucs(client, {
+    rls: "on",
+    tables: tables.join(","),
+    purpose: BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+    tenant: "00000000-0000-0000-0000-000000000000",
+  });
+}
+
+/** `name=n` pairs of a block's report NOTICE. */
+export function parseNoticeCounts(message: string): Record<string, number> {
+  return Object.fromEntries([...message.matchAll(/(\w+)=(\d+)/g)].map((m) => [m[1], Number(m[2])]));
+}
+
+/** Collects the NOTICE / WARNING messages a client receives, until `stop()`. */
+export function collectNotices(client: pg.PoolClient): { messages: string[]; stop: () => void } {
+  const messages: string[] = [];
+  const listener = (n: { message?: string }) => messages.push(n.message ?? "");
+  client.on("notice", listener);
+  return { messages, stop: () => void client.removeListener("notice", listener) };
+}
+
+export const BYPASS_ROLE_KIND = {
+  MIGRATION_SUPERUSER: "migration-superuser",
+  BYPASSRLS_ROLE: "bypassrls-role",
+  SUPERUSER_ROLE: "superuser-role",
+  APP_ROLE: "app-role",
+} as const;
+export type BypassRoleKind = (typeof BYPASS_ROLE_KIND)[keyof typeof BYPASS_ROLE_KIND];
+
+/**
+ * Inside an open transaction on a superuser client, make `current_user` one of
+ * the four principals a migrate role can be, asserting its attributes: the
+ * session role itself (both attributes), a created `BYPASSRLS` role, a created
+ * `SUPERUSER NOBYPASSRLS` role (each NOLOGIN, random name, `IN ROLE passwd_app`),
+ * or `passwd_app` entered with SET LOCAL ROLE (session_user bypasses,
+ * current_user does not). The created roles vanish with the rollback. Returns
+ * the role's name, for `SET LOCAL ROLE` after a `RESET ROLE`.
+ */
+export async function enterBypassRole(client: pg.PoolClient, kind: BypassRoleKind): Promise<string> {
+  let expected: { rolsuper: boolean; rolbypassrls: boolean };
+  if (kind === BYPASS_ROLE_KIND.MIGRATION_SUPERUSER) {
+    expected = { rolsuper: true, rolbypassrls: true };
+  } else if (kind === BYPASS_ROLE_KIND.APP_ROLE) {
+    await client.query(`SET LOCAL ROLE passwd_app`);
+    expected = { rolsuper: false, rolbypassrls: false };
+  } else {
+    const name = `rerun_${randomBytes(6).toString("hex")}`;
+    const attrs = kind === BYPASS_ROLE_KIND.BYPASSRLS_ROLE ? "NOSUPERUSER BYPASSRLS" : "SUPERUSER NOBYPASSRLS";
+    await client.query(`CREATE ROLE ${name} NOLOGIN ${attrs} IN ROLE passwd_app`);
+    await client.query(`SET LOCAL ROLE ${name}`);
+    expected = kind === BYPASS_ROLE_KIND.BYPASSRLS_ROLE
+      ? { rolsuper: false, rolbypassrls: true }
+      : { rolsuper: true, rolbypassrls: false };
+  }
+  const { rows } = await client.query<{ rolsuper: boolean; rolbypassrls: boolean }>(
+    `SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user`,
+  );
+  if (rows[0]?.rolsuper !== expected.rolsuper || rows[0]?.rolbypassrls !== expected.rolbypassrls) {
+    throw new Error(`role ${kind}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(rows[0])}`);
+  }
+  const { rows: current } = await client.query<{ name: string }>(`SELECT current_user AS name`);
+  return current[0].name;
 }
