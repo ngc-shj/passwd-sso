@@ -1,6 +1,6 @@
 # Code Review: migration-backfill-rls-bypass
 Date: 2026-11-11
-Review rounds: 1–3
+Review rounds: 1–4
 
 ## Changes from Previous Round
 Initial review of `1f17bc245` + `55ede325a` (full diff), on top of the Phase 2 self-check.
@@ -102,6 +102,12 @@ Baseline (all 22 DYNAMIC sites DDL-only), round-2 resolutions and the Compose po
 - T20 [Minor] No mutation rows for the `INTO` / `USING` terminators, RENAME inside a literal, and a
   bypass SET inside a literal.
 T11–T17 resolutions verified; no vacuous cells.
+
+## Round 4 (incremental: `4f38e48d0..6315bad52`)
+No findings. Checked: the U+E000 refusal's line number and that every tokenized unit comes from the
+raw file; the `pg_settings` refusal across case, quoting, qualification and both literal kinds
+(prose and top-level DML correctly not refused); header against code; M38–M47 red claims traced
+against their cells; round-3 Resolution Status claims.
 
 ## Resolution Status
 ### Round 1
