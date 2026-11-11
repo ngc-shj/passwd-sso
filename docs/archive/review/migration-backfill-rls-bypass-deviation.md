@@ -153,7 +153,7 @@ green unmutated); a run in which no test executed is invalid and was rerun (code
 | C6 contain | contain inputs | array: 3-column check dropped | a two-dimensional array with two columns | `if (expected.message) expect(error!.message).toMatch(expected.…`: AssertionError: expected 'contain: 0 of 1 membership(s) qualify…' to match /two-dimensional uuid array/ |
 | C6 contain | contain inputs | array: at-least-one check dropped | SURVIVOR (38 passed (38)) | |
 | C6 contain | contain inputs | null-id check removed | a null id in a triple is refused by name, before the qualify count | `if (expected.message) expect(error!.message).toMatch(expected.…`: AssertionError: expected 'contain: 0 of 1 membership(s) qualify…' to match /holds a null id/ |
-| C6 contain | contain inputs | dedupe dropped | a duplicated triple counts once and ends the membership |  |
+| C6 contain | contain inputs | dedupe dropped | a duplicated triple counts once and ends the membership | the script raised instead of ending the row: `contain: 2 of 3 membership(s) qualify (…); nothing was written` |
 | C6 contain | contain writes | `manual` flag dropped | ends an OWNER and a member at the tenant's stamp with the marker and outbox reco (+4) | `expect(records.get(r.user)).toEqual(buildOutboxPayload({`: -     "manual": true, |
 | C6 contain | contain writes | `operator` label replaced by constant | ends an OWNER and a member at the tenant's stamp with the marker and outbox reco (+4) | `expect(records.get(r.user)).toEqual(buildOutboxPayload({`: -     "operator": "ops-test", / +     "operator": "x", |
 | C6 contain | contain writes | backfill marker dropped | ends an OWNER and a member at the tenant's stamp with the marker and outbox reco (+4) | `expect([...records.keys()].sort()).toEqual(l.rows.map((r) => r.u…`: - [ / -   "160cdae1-ba70-4d37-a324-3a0b761442d7", |
@@ -194,10 +194,10 @@ The round-1 runs below cover the controls not re-run in round 2.
 | teams lock | removed | re-key teams-lock cell | 55P03 |
 
 ### C3 gate (self-test cells; mutants via `MIGRATION_RLS_DML_GATE_UNDER_TEST`)
-Review round 2 redesign: 37 mutants, each on a fresh copy of `scripts/checks` with `prisma` and
-`node_modules` linked so the real-tree cells run too. Base: the unmutated copy passes all 189 cells.
-Each mutant was run with `-t` on its named cell (1–4 cells executed, never 0) and turned it red;
-the whole set was re-run independently against the final source by the orchestrator.
+Review rounds 2–3: 47 mutants (M38–M47 added in round 3), each on a fresh copy of `scripts/checks`
+with `prisma` and `node_modules` linked so the real-tree cells run too. Base: the unmutated copy
+passes all 197 cells. Each mutant was run with `-t` on its named cell (1–4 cells executed, never 0)
+and turned it red; all 47 were re-run together against the final source.
 
 | # | Mutation | Named cell | Red |
 |---|---|---|---|
@@ -238,6 +238,16 @@ the whole set was re-run independently against the final source by the orchestra
 | M35 | `EXECUTE FUNCTION` / `GRANT EXECUTE` counted dynamic | not reported for those or a plain literal | status 1 with `DYNAMIC: …:3`, expected 0 |
 | M36 | `\'` and `\\` escapes refused | passes: E-string with only `\'` / `\\` | status 1 (UNPARSED), expected 0 |
 | M37 | plain setting names treated as unknown | passes: `SET LOCAL` / `RESET lock_timeout` after a grant | status 1 (UNPARSED), expected 0 |
+| M38 | U+E000 check removed | fails closed: U+E000 before `$a$` | status 0, expected 1 |
+| M39 | `pg_settings` refusal removed | fails closed: `pg_settings` written inside a DO body | status 0, expected 1 |
+| M40 | `pg_settings` refused in DO bodies only | fails closed: `pg_settings` inside an EXECUTE literal | status 0, expected 1 |
+| M41 | unknown-setting check not limited to a statement start | passes: grant + `UPDATE … SET "col"` | status 1 (UNPARSED), expected 0 |
+| M42 | any dotted tail accepted as a plain name | fails closed: `SET LOCAL app."x"` after a grant | status 0, expected 1 |
+| M43 | `CURSOR WITH HOLD FOR` not a query form | refuses: `CURSOR WITH HOLD FOR TABLE t` | status 0, expected 1 |
+| M44 | `INTO` not an operand terminator | refuses: `EXECUTE … INTO … USING` of a DML literal | hit list `[]`, expected `…:3: team_members` |
+| M45 | `USING` not an operand terminator | passes: `EXECUTE … USING` (no INTO), no FORCE table | status 1, expected 0 |
+| M46 | forced-table RENAME refused in DO bodies only | fails closed: RENAME inside an EXECUTE literal | status 0, expected 1 |
+| M47 | bypass SET refused in DO bodies only | fails closed: `EXECUTE` of `SET LOCAL app.bypass_rls` | status 0, expected 1 |
 
 Rules kept from before round 2 — reference keywords (JOIN, USING, MERGE, INSERT, UPDATE, comma
 items), CTE exclusion, nested grant, restore required, exact table-list split, `false`, SET / RESET

@@ -17,7 +17,9 @@
  * function or procedure body that a migration creates and later calls;
  * `ALTER TABLE … SET SCHEMA`; DROP and re-CREATE of a forced table (FORCE
  * membership is neither moved nor reset); `CREATE POLICY` / view / function
- * text is never read as a statement.
+ * text is never read as a statement; a `set_config` reached through a helper
+ * function (the lexical bypass state is then wrong); a non-`public`
+ * search_path (an unqualified name may resolve to another table).
  *
  * Model:
  *   - FORCE state is replayed per statement in migration name order
@@ -56,7 +58,9 @@
  * not a plain `'…'` literal; `set_config(…, false)` on a bypass setting; any
  * `set_config` of a bypass setting inside an EXECUTE literal or inside a
  * nested block, branch, loop or exception handler (grants AND restores must sit
- * at the body's top block); a grant never restored by the end of the DO body.
+ * at the body's top block); a grant never restored by the end of the DO body;
+ * `pg_settings` named inside a DO body or an EXECUTE literal; U+E000 anywhere
+ * in the file (sql-scan's substitution sentinel).
  *
  * Output:
  *   MIGRATION_RLS_DML: <dir>:<line>: <table>
@@ -90,6 +94,7 @@ const BASELINE_FILE =
 const isWord = (t, upper) => t !== undefined && t.type === TOKEN.WORD && t.upper === upper;
 const isForceRls = (tokens, k) =>
   isWord(tokens[k], "FORCE") && isWord(tokens[k + 1], "ROW") && isWord(tokens[k + 2], "LEVEL") && isWord(tokens[k + 3], "SECURITY");
+const SQL_SCAN_SENTINEL = "\uE000";
 const isName = (t) => t !== undefined && (t.type === TOKEN.WORD || t.type === TOKEN.QIDENT);
 
 /** Words that end a FROM list or cannot be an alias. */
@@ -631,6 +636,7 @@ function scanUnit(tokens, forced, st, out, lineBase, nested) {
       if (isBypassSetting(tokens, k)) fail(t, `SET / RESET of an app.bypass_* setting inside ${where} (lexical state unknown)`);
       else if (atStmtStart(tokens, k) && !hasPlainSettingName(tokens, k)) events.push({ index: k, unknownSetting: true });
     } else if (isForceRls(tokens, k)) fail(t, `FORCE ROW LEVEL SECURITY inside ${where}`);
+    else if (isName(t) && nameOf(t) === "pg_settings") fail(t, `pg_settings inside ${where} (can change a bypass setting unseen)`);
   }
   events.sort((a, b) => a.index - b.index);
 
@@ -731,6 +737,12 @@ export function scanSql(sql, forced) {
   let forceStatements = 0;
   const forcedTables = new Set();
 
+  // sql-scan's substitution sentinel lexes as an operator, so `x\uE000$a$` opens a
+  // dollar quote PostgreSQL does not see.
+  const sentinel = sql.indexOf(SQL_SCAN_SENTINEL);
+  if (sentinel >= 0) {
+    errors.push({ line: sql.slice(0, sentinel).split("\n").length, reason: "U+E000 in the SQL text (the scanner's substitution sentinel)" });
+  }
   const norm = normalizeDollarTags(sql);
   for (const e of norm.errors) errors.push({ line: e.line + 1, reason: e.reason });
   const tokens = tokenizeSql(norm.sql);

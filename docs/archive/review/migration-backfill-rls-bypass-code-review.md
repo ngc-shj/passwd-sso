@@ -1,6 +1,6 @@
 # Code Review: migration-backfill-rls-bypass
 Date: 2026-11-11
-Review rounds: 1–2
+Review rounds: 1–3
 
 ## Changes from Previous Round
 Initial review of `1f17bc245` + `55ede325a` (full diff), on top of the Phase 2 self-check.
@@ -88,6 +88,21 @@ RT7 T1/T2/T3; RT8 T7; RT9 n/a; RT10 T6; RT11 T5.
   `readUpdatedAt` treats an invisible row as unchanged; re-key I2 compares only `hasId`; fail-closed
   cells match a fragment every reason contains; D4 stale.
 
+## Round 3 (incremental: `0c30f9fb8..4f38e48d0`)
+### Functionality / Security
+- FS3-1 [Minor] U+E000 (sql-scan's sentinel) before `$` still opens a dollar quote PostgreSQL does
+  not see, hiding statements; the S2-4 resolution claimed the class closed.
+- FS3-2 [Minor] The rewritten header dropped two still-working bypasses (a `set_config` behind a
+  helper, a non-`public` search_path); `UPDATE pg_settings` turns the bypass off unseen.
+Baseline (all 22 DYNAMIC sites DDL-only), round-2 resolutions and the Compose pointer: verified.
+### Testing
+- T18 [Minor] The C6 dedupe row had no red excerpt.
+- T19 [Minor] No cell for the `atStmtStart` term of the unknown-setting rule, a quoted dotted
+  tail, or `CURSOR WITH HOLD FOR TABLE`.
+- T20 [Minor] No mutation rows for the `INTO` / `USING` terminators, RENAME inside a literal, and a
+  bypass SET inside a literal.
+T11–T17 resolutions verified; no vacuous cells.
+
 ## Resolution Status
 ### Round 1
 - F1 / S1 [Major] — the gate re-tokenizes every string literal in a `DO` body; a FORCE-table
@@ -129,7 +144,7 @@ RT7 T1/T2/T3; RT8 T7; RT9 n/a; RT10 T6; RT11 T5.
 - S2-6 — every bypass setting at block depth other than 1 fails closed. F8 — `WITH … ) TABLE`,
   `IN TABLE`, `INSERT … AS a` / `OVERRIDING`, `CURSOR FOR TABLE` are references. F9 — forced-table
   RENAME in a DO body or literal fails closed. S2-4 — identifier class covers U+0080 and above in
-  both the gate and `sql-scan`. 37 gate mutants red, re-run independently on the final source.
+  both the gate and `sql-scan`, except U+E000 in `sql-scan` (its sentinel; closed in round 3). 37 gate mutants red, re-run independently on the final source.
 - F10 — `deployment.md` "Run migration only" (Compose) points to the one-time upgrade section.
 - T11 — one-field spares per store and conjunct; every arm and loosening killed (rows in the log).
 - T12 — every mutant re-run with a red excerpt; C6 Red column; C3 one row per mutant; the
@@ -137,3 +152,11 @@ RT7 T1/T2/T3; RT8 T7; RT9 n/a; RT10 T6; RT11 T5.
 - T13 — the nil-UUID grant kept on purpose and recorded as such. T14 — a missing row throws. T15 —
   `appItemKeyIds` compares same / other id. T16 — every fail-closed cell asserts the full UNPARSED
   line set. T17 — D4 states the independent recount.
+
+### Round 3
+- FS3-1 — U+E000 anywhere in a migration fails closed (none shipped). FS3-2 — both bypasses back in
+  the header; `pg_settings` named in a DO body or EXECUTE literal fails closed (none shipped).
+- T18 — excerpt taken from the round-2 run log (the mutant raised "2 of 3 membership(s) qualify").
+- T19 / T20 — cells added (incl. `USING` without `INTO`, needed because M45 first survived: `INTO`
+  ended the operand before `USING` was reached); M38–M47 recorded; all 47 gate mutants re-run red
+  against the final source, base 197 cells green.

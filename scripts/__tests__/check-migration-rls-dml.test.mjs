@@ -103,6 +103,9 @@ const R_UNICODE = "EXECUTE of a U&'…' literal";
 const R_LIT_QUOTE = "EXECUTE literal holds an unterminated or unrecognised $ quote";
 const R_DO_IN_LIT = "DO inside an EXECUTE literal";
 const R_PREPARED = "EXECUTE (prepared statement) inside an EXECUTE literal";
+const R_PG_SETTINGS_DO = "pg_settings inside a DO body (can change a bypass setting unseen)";
+const R_PG_SETTINGS_LIT = "pg_settings inside an EXECUTE literal (can change a bypass setting unseen)";
+const R_SENTINEL = "U+E000 in the SQL text (the scanner's substitution sentinel)";
 
 beforeEach(() => {
   root = mkdtempSync(resolve(tmpdir(), "migration-rls-dml-"));
@@ -180,6 +183,7 @@ describe("check-migration-rls-dml: references refused without a bypass", () => {
     ["INSERT INTO u OVERRIDING SYSTEM VALUE TABLE t", `INSERT INTO other_t OVERRIDING SYSTEM VALUE TABLE team_members;`, [[1, "team_members"]]],
     ["INSERT INTO u AS a (cols) OVERRIDING USER VALUE TABLE t", `INSERT INTO other_t AS o (a) OVERRIDING USER VALUE TABLE team_members;`, [[1, "team_members"]]],
     ["CURSOR FOR TABLE t", doBlock(`DECLARE c CURSOR FOR TABLE team_members;`), [[3, "team_members"]]],
+    ["CURSOR WITH HOLD FOR TABLE t", doBlock(`DECLARE c CURSOR WITH HOLD FOR TABLE team_members;`), [[3, "team_members"]]],
     // Identifier characters >= U+0080: a fullwidth letter before `$x$` must not open a dollar quote
     // that swallows the statement between the two (U+FF21 is above the old \uDFFF ceiling).
     ["top level: fullwidth letter before $x$", `SELECT 1 AS Ａ$x$;\nUPDATE team_members SET a = 1;\nSELECT 2 AS Ａ$x$;`, [[2, "team_members"]]],
@@ -189,6 +193,7 @@ describe("check-migration-rls-dml: references refused without a bypass", () => {
     ["EXECUTE of a dollar-quoted DML literal", doBlock(`EXECUTE $q$UPDATE team_members SET a = 1$q$;`), [[3, "team_members"]]],
     ["EXECUTE of an E-string DML literal (\\' only)", doBlock(`EXECUTE E'UPDATE team_members SET a = \\'x\\'';`), [[3, "team_members"]]],
     ["EXECUTE … INTO … USING of a DML literal", doBlock(`EXECUTE 'UPDATE team_members SET a = $1 RETURNING a' INTO n USING v;`), [[3, "team_members"]]],
+    ["EXECUTE … USING (no INTO) of a DML literal", doBlock(`EXECUTE 'UPDATE team_members SET a = $1' USING v;`), [[3, "team_members"]]],
     ["EXECUTE of CREATE TABLE AS SELECT", doBlock(`EXECUTE 'CREATE TABLE c AS SELECT * FROM team_members';`), [[3, "team_members"]]],
     ["EXECUTE of CREATE MATERIALIZED VIEW AS SELECT", doBlock(`EXECUTE 'CREATE MATERIALIZED VIEW c AS SELECT * FROM team_members';`), [[3, "team_members"]]],
     ["EXECUTE of DDL followed by DML in one literal", doBlock(`EXECUTE 'ALTER TABLE u ADD COLUMN c int; UPDATE team_members SET x = 1';`), [[3, "team_members"]]],
@@ -401,6 +406,23 @@ describe("check-migration-rls-dml: fail closed", () => {
       5,
       R_UNKNOWN_SETTING,
     ],
+    [
+      "SET of a dotted name with a quoted tail after a grant",
+      doBlock([GRANT, `SET LOCAL app."x" = 1;`, RESTORE].join("\n")),
+      4,
+      R_UNKNOWN_SETTING,
+    ],
+    [
+      "pg_settings written inside a DO body",
+      doBlock(
+        [GRANT, tablesOf("team_members"), `UPDATE pg_settings SET setting = '' WHERE name = 'app.bypass_rls';`, `UPDATE team_members SET a = 1;`, RESTORE].join("\n"),
+      ),
+      5,
+      R_PG_SETTINGS_DO,
+    ],
+    ["pg_settings inside an EXECUTE literal", doBlock(`EXECUTE 'UPDATE pg_catalog.pg_settings SET setting = 1';`), 3, R_PG_SETTINGS_LIT],
+    // `x\uE000$a$` is one identifier to PostgreSQL; sql-scan would open a dollar quote there.
+    ["U+E000 before $a$", `SELECT 1;\nSELECT 1 AS x\uE000$a$;\nUPDATE team_members SET a = 1;\nSELECT 1 AS y\uE000$a$;`, 2, R_SENTINEL],
     [
       "SET of a quoted setting name after a grant",
       doBlock([GRANT, `SET LOCAL "lock_timeout" TO 0;`, RESTORE].join("\n")),
@@ -680,6 +702,7 @@ describe("check-migration-rls-dml: passes", () => {
     ["EXECUTE of an E-string whose only escapes are \\' and \\\\", doBlock(`EXECUTE E'ALTER TABLE u ADD COLUMN c text DEFAULT \\'a\\\\b\\'';`), true],
     ["EXECUTE of a dollar-quoted DDL literal", doBlock(`EXECUTE $q$ALTER TABLE u ADD COLUMN c int$q$;`), true],
     ["EXECUTE … INTO … USING of a literal that touches no FORCE table", doBlock(`EXECUTE 'SELECT $1' INTO n USING v;`), true],
+    ["EXECUTE … USING (no INTO) of a literal that touches no FORCE table", doBlock(`EXECUTE 'PERFORM $1' USING v;`), true],
     ["a bare mention in prose is not a reference", doBlock(`RAISE NOTICE 'backfilling team_members';`), true],
     ["RAISE prose naming a FORCE table next to a single-literal EXECUTE", doBlock([`RAISE NOTICE 'altering team_members';`, `EXECUTE 'ALTER TABLE u ADD COLUMN x int';`].join("\n")), true],
     ["a string variable naming a FORCE table that is never executed", doBlock(`v := 'UPDATE team_members SET a = 1';`), true],
@@ -694,6 +717,11 @@ describe("check-migration-rls-dml: passes", () => {
       true,
     ],
     ["RESET ALL in a unit that never granted", doBlock(`RESET ALL;`), true],
+    [
+      "grant + UPDATE … SET \"col\" on a granted table (SET mid-statement is not a setting)",
+      doBlock([GRANT, tablesOf("team_members"), `UPDATE team_members SET "a" = 1;`, RESTORE].join("\n")),
+      true,
+    ],
     [
       "SET LOCAL lock_timeout and RESET lock_timeout after a grant (plain names)",
       doBlock([GRANT, `SET LOCAL lock_timeout = 0;`, `RESET lock_timeout;`, RESTORE].join("\n")),
