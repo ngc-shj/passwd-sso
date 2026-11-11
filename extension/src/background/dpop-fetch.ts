@@ -72,5 +72,7 @@ export async function swFetchAuthenticated(
   // holds host_permissions for that origin), which trips the server's
   // baseline CSRF gate (cookie-bearing mutating request → assertOrigin
   // rejects chrome-extension origin with 403).
-  return fetch(`${serverUrl}${path}`, { ...init, headers, credentials: "omit" });
+  // redirect: "error" — the bearer token, its DPoP proof and the body go to
+  // the issuing server only; server endpoints never redirect.
+  return fetch(`${serverUrl}${path}`, { ...init, headers, credentials: "omit", redirect: "error" });
 }

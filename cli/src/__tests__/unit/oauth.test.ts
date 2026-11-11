@@ -237,6 +237,7 @@ describe("registerClient", () => {
     const [url, opts] = mockFetch.mock.calls[0];
     expect(url).toBe("https://vault.example.com/api/mcp/register");
     expect(opts.method).toBe("POST");
+    expect(opts.redirect).toBe("error");
 
     const body = JSON.parse(opts.body);
     expect(body.client_name).toBe("passwd-sso-cli");
@@ -309,6 +310,7 @@ describe("refreshTokenGrant", () => {
     const [url, opts] = mockFetch.mock.calls[0];
     expect(url).toBe("https://vault.example.com/api/mcp/token");
     expect(opts.method).toBe("POST");
+    expect(opts.redirect).toBe("error");
     expect(opts.headers["Content-Type"]).toBe("application/x-www-form-urlencoded");
     expect(opts.body).toContain("grant_type=refresh_token");
     expect(opts.body).toContain("refresh_token=mcpr_old_refresh");
@@ -384,6 +386,7 @@ describe("revokeTokenRequest", () => {
     const [url, opts] = mockFetch.mock.calls[0];
     expect(url).toBe("https://vault.example.com/api/mcp/revoke");
     expect(opts.method).toBe("POST");
+    expect(opts.redirect).toBe("error");
     expect(opts.headers["Content-Type"]).toBe("application/x-www-form-urlencoded");
     expect(opts.body).toContain("token=mcp_access_token");
     expect(opts.body).toContain("client_id=mcpc_client123");
@@ -445,6 +448,7 @@ describe("exchangeCode", () => {
     const [url, opts] = mockFetch.mock.calls[0];
     expect(url).toBe("https://vault.example.com/api/mcp/token");
     expect(opts.method).toBe("POST");
+    expect(opts.redirect).toBe("error");
     expect(opts.headers["Content-Type"]).toBe("application/x-www-form-urlencoded");
     expect(opts.body).toContain("grant_type=authorization_code");
     expect(opts.body).toContain("code=auth_code");

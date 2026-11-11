@@ -62,6 +62,13 @@ describe("swFetchAuthenticated (C8)", () => {
     expect(headers.get("Authorization")).toBe(`Bearer ${TOKEN}`);
   });
 
+  it("refuses redirects even when the caller asks to follow them", async () => {
+    await swFetchAuthenticated("/api/passwords", { method: "GET", redirect: "follow" }, SERVER_URL, TOKEN);
+
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(init.redirect).toBe("error");
+  });
+
   it("retries once on transient sign failure then succeeds", async () => {
     dpopKeyMocks.signDpopProof
       .mockRejectedValueOnce(new Error("WebCrypto glitch"))
@@ -330,5 +337,65 @@ describe("revokeTokenOnServerWith (C8 — DPoP header on revoke)", () => {
 
     expect(mockFetch).not.toHaveBeenCalled();
     expect(dpopKeyMocks.signDpopProof).not.toHaveBeenCalled();
+  });
+});
+
+describe("attemptTokenRefreshWith — refresh goes to the token's issuer", () => {
+  const ISSUER = "https://issuer.example.com";
+  let mockFetch: ReturnType<typeof vi.fn>;
+
+  function refreshCallbacks(getIssuerUrl?: () => string | null) {
+    return {
+      getCurrentToken: () => TOKEN,
+      getTokenExpiresAt: () => Date.now() + 600_000,
+      ...(getIssuerUrl ? { getIssuerUrl } : {}),
+      setToken: vi.fn(),
+      clearToken: vi.fn(),
+      endForPasskeyRequirement: vi.fn(),
+      scheduleRefreshAlarm: vi.fn(),
+      createTtlAlarm: vi.fn(),
+    };
+  }
+
+  beforeEach(() => {
+    dpopKeyMocks.signDpopProof.mockReset();
+    dpopKeyMocks.signDpopProof.mockResolvedValue("fake.dpop.jws");
+    mockFetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ token: "new-token", expiresAt: new Date(Date.now() + 900_000).toISOString(), scope: [] }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", mockFetch);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("sends the refresh to the issuer when settings name another server", async () => {
+    // settings (mocked above) say https://example.com; the issuer differs.
+    await attemptTokenRefreshWith(refreshCallbacks(() => ISSUER));
+
+    expect(mockFetch).toHaveBeenCalledOnce();
+    expect(mockFetch.mock.calls[0][0]).toBe(`${ISSUER}/api/extension/token/refresh`);
+  });
+
+  it("sends nothing when the issuer is not an allowed server URL", async () => {
+    await attemptTokenRefreshWith(refreshCallbacks(() => "http://evil.example.com"));
+
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the configured server when no getIssuerUrl is supplied", async () => {
+    await attemptTokenRefreshWith(refreshCallbacks());
+
+    expect(mockFetch.mock.calls[0][0]).toBe(`${SERVER_URL}/api/extension/token/refresh`);
+  });
+
+  it("falls back to the configured server when the issuer is unknown (null)", async () => {
+    await attemptTokenRefreshWith(refreshCallbacks(() => null));
+
+    expect(mockFetch.mock.calls[0][0]).toBe(`${SERVER_URL}/api/extension/token/refresh`);
   });
 });

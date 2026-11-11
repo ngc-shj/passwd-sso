@@ -24,7 +24,13 @@ export const MIN_RETRY_HEADROOM_MS = 5 * MS_PER_SECOND;
 
 // ── Helpers ────────────────────────────────────────────────────
 
-async function getValidServerUrl(): Promise<string | null> {
+/**
+ * The server a token-bearing request goes to: the token's issuer when known
+ * (refused outright if it fails the server-URL rule — never replaced by the
+ * configured URL), else the configured server.
+ */
+async function getValidServerUrl(issuerUrl?: string | null): Promise<string | null> {
+  if (issuerUrl != null) return isAllowedServerUrl(issuerUrl) ? issuerUrl : null;
   const { serverUrl } = await getSettings();
   // Also covers the bridge-code and exchange fetches, which do not go through
   // swFetchAuthenticated.
@@ -36,6 +42,8 @@ async function getValidServerUrl(): Promise<string | null> {
 export interface TokenRefreshCallbacks {
   getCurrentToken(): string | null;
   getTokenExpiresAt(): number | null;
+  /** The server that issued the token; the refresh goes there when known. */
+  getIssuerUrl?(): string | null;
   setToken(token: string, expiresAt: number): void;
   /** Called when the refresh response includes a new cnfJkt (C10 binding propagation). */
   setCnfJkt?(cnfJkt: string): void;
@@ -58,7 +66,7 @@ export async function attemptTokenRefreshWith(
   if (Date.now() >= tokenExpiresAt) return;
 
   try {
-    const serverUrl = await getValidServerUrl();
+    const serverUrl = await getValidServerUrl(callbacks.getIssuerUrl?.());
     if (!serverUrl) return;
 
     let res: Response;
@@ -125,7 +133,7 @@ export interface StartConnectCallbacks {
    * Persist the issued token + expiry + cnfJkt into SW in-memory + session
    * storage state. Invoked exactly once on success, never on failure.
    */
-  setToken(token: string, expiresAt: number, cnfJkt: string): void;
+  setToken(token: string, expiresAt: number, cnfJkt: string, issuerUrl: string): void;
   /**
    * Optional injection point so tests can swap fetch without touching globalThis.
    */
@@ -199,6 +207,9 @@ export async function startConnect(
       `${serverUrl}${EXT_API_PATH.EXTENSION_BRIDGE_CODE}`,
       {
         method: "POST",
+        // Server endpoints never redirect; a redirect must not carry the
+        // request (and its proof or code) to another host.
+        redirect: "error",
         credentials: "include",
         headers: {
           "Content-Type": "application/json",
@@ -236,6 +247,7 @@ export async function startConnect(
       `${serverUrl}${EXT_API_PATH.EXTENSION_TOKEN_EXCHANGE}`,
       {
         method: "POST",
+        redirect: "error",
         credentials: "omit",
         headers: {
           "Content-Type": "application/json",
@@ -257,7 +269,7 @@ export async function startConnect(
     ) {
       return { ok: false, errorCode: "GENERIC_FAILURE" };
     }
-    callbacks.setToken(data.token, expiresAtMs, data.cnfJkt);
+    callbacks.setToken(data.token, expiresAtMs, data.cnfJkt, serverUrl);
     return { ok: true };
   } catch (err) {
     if (err instanceof DpopSignError) {
@@ -296,14 +308,12 @@ export interface TokenRevokeCallbacks {
  */
 export async function revokeTokenOnServerWith(
   callbacks: TokenRevokeCallbacks,
-  issuerUrl?: string,
+  issuerUrl?: string | null,
 ): Promise<void> {
   const token = callbacks.getCurrentToken();
   if (!token) return;
   try {
-    const serverUrl = issuerUrl === undefined
-      ? await getValidServerUrl()
-      : isAllowedServerUrl(issuerUrl) ? issuerUrl : null;
+    const serverUrl = await getValidServerUrl(issuerUrl);
     if (!serverUrl) return;
     await swFetchAuthenticated(
       EXT_API_PATH.EXTENSION_TOKEN,

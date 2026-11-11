@@ -44,6 +44,8 @@ interface StoredSessionState {
   tokenCnfJkt?: string;
   /** Personal vault key version at the time of unlock. Used to stamp saved entries correctly. */
   personalKeyVersion?: number;
+  /** The server that issued the token; the only one it is ever sent to. */
+  issuerUrl?: string;
 }
 
 /** Shape returned to callers after decryption. */
@@ -60,6 +62,8 @@ export interface SessionState {
   tokenCnfJkt: string;
   /** Personal vault key version at the time of unlock. Used to stamp saved entries correctly. */
   personalKeyVersion?: number;
+  /** The server that issued the token (required in a stored session; see loadSession). */
+  issuerUrl?: string;
 }
 
 function isEncryptedField(v: unknown): v is EncryptedField {
@@ -91,6 +95,7 @@ export async function persistSession(state: SessionState): Promise<void> {
     requireVaultTimeoutLogout: state.requireVaultTimeoutLogout ?? undefined,
     tokenCnfJkt: state.tokenCnfJkt,
     personalKeyVersion: state.personalKeyVersion,
+    issuerUrl: state.issuerUrl,
   };
   await chrome.storage.session.set({ [SESSION_KEY]: stored });
 }
@@ -148,6 +153,13 @@ export async function loadSession(): Promise<SessionState | null> {
     return null;
   }
 
+  // issuerUrl validation: absent means a session from before tokens were bound
+  // to their issuer. Its token cannot be attributed to a server, so it is not
+  // restored — the user reconnects (same treatment as a missing tokenCnfJkt).
+  if (typeof raw.issuerUrl !== "string" || raw.issuerUrl === "") {
+    return null;
+  }
+
   // personalKeyVersion validation
   let personalKeyVersion: number | undefined;
   if (typeof raw.personalKeyVersion === "number" && Number.isInteger(raw.personalKeyVersion) && raw.personalKeyVersion >= 0) {
@@ -164,6 +176,7 @@ export async function loadSession(): Promise<SessionState | null> {
     requireVaultTimeoutLogout,
     tokenCnfJkt: raw.tokenCnfJkt,
     personalKeyVersion,
+    issuerUrl: raw.issuerUrl,
   };
 }
 

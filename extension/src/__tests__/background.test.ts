@@ -298,9 +298,9 @@ async function loadBackground() {
   // Settle the module-load registration so it cannot land on the next test's chrome mock.
   await bgModule.tokenBridgeRegistration;
 }
-function applyToken(token: string, expiresAt: number, cnfJkt: string): void {
+function applyToken(token: string, expiresAt: number, cnfJkt: string, issuerUrl?: string): void {
   if (!bgModule) throw new Error("loadBackground() must be called before applyToken()");
-  bgModule.applyToken(token, expiresAt, cnfJkt);
+  bgModule.applyToken(token, expiresAt, cnfJkt, issuerUrl);
 }
 
 // A fire-and-forget chain from an earlier test's (already replaced) module
@@ -3264,6 +3264,11 @@ describe("session persistence", () => {
   describe("serverUrl change in storage", () => {
     const OLD_URL = "https://old.example.com";
     const NEW_URL = "https://new.example.com";
+    // One macrotask turn: every continuation behind a handler call here is
+    // microtask-only (mocked fetch, storage and DPoP signing), so it has all
+    // run by the time this resolves — unlike a fixed wall-clock sleep, it
+    // cannot be outrun on a slow host.
+    const drain = () => new Promise<void>((r) => setTimeout(r, 0));
 
     function deleteCallsFor(token: string): [string, RequestInit][] {
       const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
@@ -3310,7 +3315,17 @@ describe("session persistence", () => {
       storageChangeHandlers[0]({ serverUrl: change }, "local");
 
       expect(await hasToken()).toBe(false);
-      await new Promise((r) => setTimeout(r, 50));
+      await drain();
+      expect(deleteCallsFor("tok-orphan")).toHaveLength(0);
+
+      // Control: the same event with a known previous URL does revoke, so the
+      // absence above is the missing issuer, not a harness that cannot see it.
+      applyToken("tok-ctl", Date.now() + 600_000, STATIC_TEST_JKT);
+      storageChangeHandlers[0](
+        { serverUrl: { oldValue: OLD_URL, newValue: NEW_URL } },
+        "local",
+      );
+      await vi.waitFor(() => expect(deleteCallsFor("tok-ctl")).toHaveLength(1));
       expect(deleteCallsFor("tok-orphan")).toHaveLength(0);
     });
 
@@ -3318,10 +3333,15 @@ describe("session persistence", () => {
       applyToken("tok-keep", Date.now() + 600_000, STATIC_TEST_JKT);
 
       storageChangeHandlers[0]({ serverUrl: { oldValue: OLD_URL, newValue: OLD_URL } }, "local");
-      await new Promise((r) => setTimeout(r, 50));
+      await drain();
 
       expect(deleteCallsFor("tok-keep")).toHaveLength(0);
       expect(await hasToken()).toBe(true);
+
+      // Control: a real change of the same token is observed as a revoke.
+      storageChangeHandlers[0]({ serverUrl: { oldValue: OLD_URL, newValue: NEW_URL } }, "local");
+      await vi.waitFor(() => expect(deleteCallsFor("tok-keep")).toHaveLength(1));
+      expect(await hasToken()).toBe(false);
     });
 
     it("ignores a serverUrl change reported for a non-local storage area", async () => {
@@ -3331,10 +3351,203 @@ describe("session persistence", () => {
         { serverUrl: { oldValue: OLD_URL, newValue: NEW_URL } },
         "sync",
       );
-      await new Promise((r) => setTimeout(r, 50));
+      await drain();
 
       expect(deleteCallsFor("tok-area")).toHaveLength(0);
       expect(await hasToken()).toBe(true);
+
+      // Control: the identical change reported for the local area is acted on.
+      storageChangeHandlers[0](
+        { serverUrl: { oldValue: OLD_URL, newValue: NEW_URL } },
+        "local",
+      );
+      await vi.waitFor(() => expect(deleteCallsFor("tok-area")).toHaveLength(1));
+      expect(await hasToken()).toBe(false);
+    });
+  });
+
+  describe("token bound to its issuing server", () => {
+    const OLD_URL = "https://old.example.com";
+    const NEW_URL = "https://new.example.com";
+    const TOKEN_PATH = "/api/extension/token";
+
+    const fetchMock = () => globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    const callsCarrying = (token: string): [string, RequestInit][] =>
+      (fetchMock().mock.calls as [string, RequestInit][]).filter(([, init]) =>
+        bearerOf(init).includes(token),
+      );
+    const urlsCarrying = (token: string) => callsCarrying(token).map(([url]) => String(url));
+    const deletesCarrying = (token: string) =>
+      callsCarrying(token).filter(([url, init]) => String(url).includes(TOKEN_PATH) && init?.method === "DELETE");
+    // Settings reads return `serverUrl` from now on, with no storage.onChanged.
+    const settingsSay = (serverUrl: string) =>
+      chromeMock!.storage.local.get.mockResolvedValue({ serverUrl, autoLockMinutes: 15 });
+    const hasToken = async () =>
+      ((await sendMessage({ type: "GET_STATUS" })) as { hasToken: boolean }).hasToken;
+
+    // Settings and issuer agree: a vault unlocked under the token, then one
+    // authenticated request (FETCH_PASSWORDS) that reaches the issuer.
+    async function connectAt(token: string, url: string): Promise<void> {
+      settingsSay(url);
+      applyToken(token, Date.now() + 600_000, STATIC_TEST_JKT, url);
+      await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+    }
+
+    it("sends authenticated requests to the issuer while settings still agree", async () => {
+      await connectAt("tok-bound", OLD_URL);
+
+      const res = (await sendMessage({ type: "FETCH_PASSWORDS" })) as { entries: unknown[] | null };
+
+      expect(res.entries).not.toBeNull();
+      const urls = urlsCarrying("tok-bound");
+      expect(urls.some((u) => u.startsWith(`${OLD_URL}${EXT_API_PATH.PASSWORDS}`))).toBe(true);
+      expect(urls.every((u) => u.startsWith(OLD_URL))).toBe(true);
+      expect(await hasToken()).toBe(true);
+    });
+
+    it("persists the issuer with the session so a restart restores the binding", async () => {
+      await connectAt("tok-bound", OLD_URL);
+
+      expect(sessionStorageMocks.persistSession).toHaveBeenCalledWith(
+        expect.objectContaining({ token: "tok-bound", issuerUrl: OLD_URL }),
+      );
+    });
+
+    it("never sends the token to a changed server that storage.onChanged has not reported", async () => {
+      await connectAt("tok-bound", OLD_URL);
+      // Control: before the change the same request reaches the issuer.
+      await sendMessage({ type: "FETCH_PASSWORDS" });
+      expect(urlsCarrying("tok-bound").some((u) => u.startsWith(OLD_URL))).toBe(true);
+      fetchMock().mockClear();
+
+      settingsSay(NEW_URL);
+      const res = (await sendMessage({ type: "FETCH_PASSWORDS" })) as { entries: unknown[] | null };
+
+      expect(res.entries).toBeNull();
+      expect(urlsCarrying("tok-bound").some((u) => u.startsWith(NEW_URL))).toBe(false);
+      expect(await hasToken()).toBe(false);
+      await vi.waitFor(() => expect(deletesCarrying("tok-bound")).toHaveLength(1));
+      expect(deletesCarrying("tok-bound")[0][0]).toBe(`${OLD_URL}${TOKEN_PATH}`);
+    });
+
+    it("refreshes at the issuer, not at the configured server", async () => {
+      await connectAt("tok-bound", OLD_URL);
+      fetchMock().mockClear();
+
+      alarmHandlers[0]({ name: ALARM_TOKEN_REFRESH });
+
+      await vi.waitFor(() =>
+        expect(urlsCarrying("tok-bound").some((u) => u.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH))).toBe(true),
+      );
+      expect(urlsCarrying("tok-bound").every((u) => u.startsWith(OLD_URL))).toBe(true);
+    });
+
+    describe("a refresh in flight when the connection ends", () => {
+      const refreshed = (json: () => Promise<unknown>) => () => ({ ok: true, json });
+      const settle = () => new Promise<void>((r) => setTimeout(r, 0));
+
+      const END_BY = [
+        ["CLEAR_TOKEN", () => sendMessage({ type: "CLEAR_TOKEN" }).then(() => undefined)],
+        ["a server change", () => storageChangeHandlers[0](
+          { serverUrl: { oldValue: OLD_URL, newValue: NEW_URL } }, "local")],
+      ] as const;
+
+      it.each(END_BY)("does not restore the token after %s", async (_label, endConnection) => {
+        await connectAt("tok-inflight", OLD_URL);
+        fetchMock().mockClear();
+        const answered = deferred();
+        const hold = holdNextCall(
+          fetchMock(),
+          (url: string) => String(url).includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH),
+          {
+            result: refreshed(async () => {
+              answered.resolve();
+              return {
+                token: "late-tok",
+                expiresAt: new Date(Date.now() + 900_000).toISOString(),
+                scope: [],
+              };
+            }),
+          },
+        );
+        alarmHandlers[0]({ name: ALARM_TOKEN_REFRESH });
+        await hold.reached;
+        await endConnection();
+        chromeMock!.alarms.create.mockClear();
+
+        hold.release();
+        await answered.promise;
+        await settle();
+
+        expect(await hasToken()).toBe(false);
+        expect(chromeMock!.alarms.create).not.toHaveBeenCalledWith(ALARM_TOKEN_TTL, expect.anything());
+        expect(chromeMock!.alarms.create).not.toHaveBeenCalledWith(ALARM_TOKEN_REFRESH, expect.anything());
+      });
+
+      it("control: the same refresh, with the connection kept, installs the new token", async () => {
+        await connectAt("tok-inflight", OLD_URL);
+        fetchMock().mockClear();
+        const answered = deferred();
+        const hold = holdNextCall(
+          fetchMock(),
+          (url: string) => String(url).includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH),
+          {
+            result: refreshed(async () => {
+              answered.resolve();
+              return {
+                token: "late-tok",
+                expiresAt: new Date(Date.now() + 900_000).toISOString(),
+                scope: [],
+              };
+            }),
+          },
+        );
+        alarmHandlers[0]({ name: ALARM_TOKEN_REFRESH });
+        await hold.reached;
+        chromeMock!.alarms.create.mockClear();
+
+        hold.release();
+        await answered.promise;
+        await settle();
+
+        expect(await hasToken()).toBe(true);
+        expect(chromeMock!.alarms.create).toHaveBeenCalledWith(ALARM_TOKEN_TTL, expect.anything());
+      });
+
+      it("a late 401 does not clear a newer connection", async () => {
+        await connectAt("tok-old", OLD_URL);
+        const hold = holdNextCall(
+          fetchMock(),
+          (url: string) => String(url).includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH),
+          { result: () => ({ ok: false, status: 401, json: async () => ({}) }) },
+        );
+        alarmHandlers[0]({ name: ALARM_TOKEN_REFRESH });
+        await hold.reached;
+        // The connection the refresh belongs to ends and a new one begins.
+        applyToken("tok-new", Date.now() + 600_000, STATIC_TEST_JKT, OLD_URL);
+
+        hold.release();
+        await settle();
+
+        expect(await hasToken()).toBe(true);
+        expect(deletesCarrying("tok-new")).toHaveLength(0);
+      });
+
+      it("control: the same 401 with no newer connection ends the connection", async () => {
+        await connectAt("tok-old", OLD_URL);
+        const hold = holdNextCall(
+          fetchMock(),
+          (url: string) => String(url).includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH),
+          { result: () => ({ ok: false, status: 401, json: async () => ({}) }) },
+        );
+        alarmHandlers[0]({ name: ALARM_TOKEN_REFRESH });
+        await hold.reached;
+
+        hold.release();
+        await settle();
+
+        expect(await hasToken()).toBe(false);
+      });
     });
   });
 
@@ -3496,6 +3709,7 @@ describe("session hydration", () => {
       expiresAt: Date.now() + 600_000,
       userId: "u-1",
       tokenCnfJkt: STATIC_TEST_JKT,
+      issuerUrl: OLD_URL,
     };
     // Startup hydration and the server-change handler each read session
     // storage; release them separately so hydration completes while the
@@ -3569,8 +3783,21 @@ describe("session hydration", () => {
       releaseHydration(null);
 
       applyToken("fresh-tok", Date.now() + 600_000, STATIC_TEST_JKT);
-      releaseHandler({ token: "old-tok", expiresAt: Date.now() + 600_000, tokenCnfJkt: STATIC_TEST_JKT });
-      await new Promise((r) => setTimeout(r, 50));
+      releaseHandler({
+        token: "old-tok",
+        expiresAt: Date.now() + 600_000,
+        tokenCnfJkt: STATIC_TEST_JKT,
+        issuerUrl: OLD_URL,
+      });
+      // The handler's revoke of the old token is the step that follows its
+      // session read; once it is observed, any wipe of the new connection
+      // would already have happened.
+      const fetchCalls = () => fetchMock.mock.calls as unknown as [string, RequestInit][];
+      await vi.waitFor(() =>
+        expect(
+          fetchCalls().filter(([, init]) => init?.method === "DELETE" && bearerOf(init).includes("old-tok")),
+        ).toHaveLength(1),
+      );
 
       const status = (await sendMessage({ type: "GET_STATUS" })) as { hasToken: boolean };
       expect(status.hasToken).toBe(true);
@@ -3580,6 +3807,52 @@ describe("session hydration", () => {
     } finally {
       sessionStorageMocks.loadSession.mockResolvedValue(null);
     }
+  });
+
+  it("restores the issuer from the session, so a later request goes to it and not to a changed setting", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+    const OLD_URL = "https://old.example.com";
+    const NEW_URL = "https://new.example.com";
+    const settingsSay = (serverUrl: string) =>
+      chromeMock!.storage.local.get.mockResolvedValue({ serverUrl, autoLockMinutes: 15 });
+    settingsSay(OLD_URL);
+    sessionStorageMocks.loadSession.mockResolvedValueOnce({
+      token: "hydrated-tok",
+      expiresAt: Date.now() + 600_000,
+      userId: "u-1",
+      vaultSecretKey: "010203",
+      tokenCnfJkt: STATIC_TEST_JKT,
+      issuerUrl: OLD_URL,
+    });
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const carrying = () =>
+      (fetchMock.mock.calls as unknown as [string, RequestInit][]).filter(([, init]) =>
+        bearerOf(init).includes("hydrated-tok"),
+      );
+
+    await loadBackground();
+    // Control: with the setting and the restored issuer in agreement the request goes to the issuer.
+    await sendMessage({ type: "FETCH_PASSWORDS" });
+    const urls = carrying().map(([url]) => String(url));
+    expect(urls).toContain(`${OLD_URL}${EXT_API_PATH.PASSWORDS}`);
+    expect(urls.every((u) => u.startsWith(OLD_URL))).toBe(true);
+    fetchMock.mockClear();
+
+    // A token without a restored issuer would follow the setting; a restored one must not.
+    settingsSay(NEW_URL);
+    await sendMessage({ type: "FETCH_PASSWORDS" });
+
+    expect(carrying().some(([url]) => String(url).startsWith(NEW_URL))).toBe(false);
+    await vi.waitFor(() =>
+      expect(carrying().filter(([, init]) => init?.method === "DELETE").map(([url]) => String(url))).toEqual([
+        `${OLD_URL}/api/extension/token`,
+      ]),
+    );
+    const status = (await sendMessage({ type: "GET_STATUS" })) as { hasToken: boolean };
+    expect(status.hasToken).toBe(false);
   });
 
   it("restores token and unlocked vault state from session storage on startup", async () => {

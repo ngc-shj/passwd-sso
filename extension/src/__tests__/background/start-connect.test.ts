@@ -64,12 +64,15 @@ describe("startConnect (C6)", () => {
     expect(setToken).toHaveBeenCalledTimes(1);
     expect(setToken.mock.calls[0][0]).toBe(TOKEN);
     expect(setToken.mock.calls[0][2]).toBe(CNF_JKT);
+    // The token is bound to the server it was issued by.
+    expect(setToken.mock.calls[0][3]).toBe(SERVER);
 
     // Bridge-code request: credentialed + empty body + DPoP header.
     const [bridgeUrl, bridgeInit] = fetchImpl.mock.calls[0] as [string, RequestInit];
     expect(bridgeUrl).toBe(`${SERVER}/api/extension/bridge-code`);
     expect(bridgeInit.method).toBe("POST");
     expect(bridgeInit.credentials).toBe("include");
+    expect(bridgeInit.redirect).toBe("error");
     expect(bridgeInit.body).toBe("{}");
     expect((bridgeInit.headers as Record<string, string>).DPoP).toBe("dpop.proof.jws");
 
@@ -77,6 +80,7 @@ describe("startConnect (C6)", () => {
     const [exchangeUrl, exchangeInit] = fetchImpl.mock.calls[1] as [string, RequestInit];
     expect(exchangeUrl).toBe(`${SERVER}/api/extension/token/exchange`);
     expect(exchangeInit.credentials).toBe("omit");
+    expect(exchangeInit.redirect).toBe("error");
     expect(JSON.parse(exchangeInit.body as string)).toEqual({ code: BRIDGE_CODE });
   });
 

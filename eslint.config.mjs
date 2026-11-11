@@ -7,10 +7,16 @@ import nextTs from "eslint-config-next/typescript";
 // sets no-restricted-syntax for src/, since a later block's options replace an
 // earlier one's for the files both match.
 const INSENSITIVE_EQUALS_RESTRICTION = {
-  // Sibling combinators in both orders: the two keys of one object literal.
-  selector:
-    "Property[key.name='equals'] ~ Property[key.name='mode'][value.value='insensitive'], " +
-    "Property[key.name='mode'][value.value='insensitive'] ~ Property[key.name='equals']",
+  // Sibling combinators in both orders: the two keys of one object literal,
+  // written as identifiers or as quoted keys. A `mode` supplied through a
+  // variable or a spread is not visible to a syntax selector — that residue is
+  // what the prisma-filters.ts guidance covers.
+  selector: [
+    ":matches(Property[key.name='equals'], Property[key.value='equals']) ~ " +
+      ":matches(Property[key.name='mode'], Property[key.value='mode'])[value.value='insensitive']",
+    ":matches(Property[key.name='mode'], Property[key.value='mode'])[value.value='insensitive'] ~ " +
+      ":matches(Property[key.name='equals'], Property[key.value='equals'])",
+  ].join(", "),
   message:
     "`equals` with mode: \"insensitive\" is an unescaped ILIKE. Use { in: [value], mode: \"insensitive\" } " +
     "for an exact case-insensitive match (see src/lib/prisma/prisma-filters.ts).",

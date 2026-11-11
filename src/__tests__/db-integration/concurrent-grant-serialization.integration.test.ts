@@ -16,6 +16,13 @@
  * read→write window of the un-serialized path; with the lock the loser is
  * blocked on the lock regardless of timing.
  *
+ * Because the SQL is a replica, removing a lock from a ROUTE leaves this file
+ * green. The route-level pin is each route's unit test, which asserts the lock
+ * (with its exact key) is taken before the gating read and the write
+ * (invocationCallOrder): emergency-access/route.test.ts,
+ * tenant/breakglass/route.test.ts, teams/[teamId]/invitations/route.test.ts,
+ * tenant/members/[userId]/route.test.ts.
+ *
  * Delegation POST is not covered here: its serialization is lockUserAuthArtifacts
  * (already proven by the user-auth-serialization tests) and the route also
  * writes Redis; its read-under-lock ordering is pinned in the route's unit test.

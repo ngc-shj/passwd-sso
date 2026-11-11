@@ -425,22 +425,31 @@ describe("POST /api/tenant/members/[userId]/reset-vault/[resetId]/approve", () =
   });
 
   it("returns 409 RESET_NOT_APPROVABLE for an expired, unrevoked reset, which the CAS refuses via expiresAt > now", async () => {
-    mockPrismaAdminVaultResetFindFirst.mockResolvedValue({
-      ...RESET_RECORD,
-      revokedAt: null,
-      expiresAt: new Date(Date.now() - 1000),
-    });
-    mockPrismaAdminVaultResetUpdateMany.mockResolvedValue({ count: 0 });
-    const res = await POST(buildReq(), buildParams());
-    expect(res.status).toBe(409);
-    expect((await res.json()).error).toBe("RESET_NOT_APPROVABLE");
-    expect(mockPrismaAdminVaultResetUpdateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({ expiresAt: { gt: expect.any(Date) } }),
-      }),
-    );
-    expect(mockCreateNotification).not.toHaveBeenCalled();
-    expect(mockSendEmail).not.toHaveBeenCalled();
+    // The 409 itself comes from the mocked count; what pins the expiry gate is
+    // that the CAS compares against the request's own clock, not any Date.
+    const clock = new Date("2026-11-12T00:00:00.000Z");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(clock);
+    try {
+      mockPrismaAdminVaultResetFindFirst.mockResolvedValue({
+        ...RESET_RECORD,
+        revokedAt: null,
+        expiresAt: new Date(clock.getTime() - 1000),
+      });
+      mockPrismaAdminVaultResetUpdateMany.mockResolvedValue({ count: 0 });
+      const res = await POST(buildReq(), buildParams());
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toBe("RESET_NOT_APPROVABLE");
+      expect(mockPrismaAdminVaultResetUpdateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ expiresAt: { gt: clock } }),
+        }),
+      );
+      expect(mockCreateNotification).not.toHaveBeenCalled();
+      expect(mockSendEmail).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("approves: CAS WHERE includes load-bearing self-approval guard + state checks", async () => {

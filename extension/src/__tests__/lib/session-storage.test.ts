@@ -53,6 +53,7 @@ const { persistSession, loadSession, clearSession } = await import(
   "../../lib/session-storage"
 );
 
+const ISSUER = "https://sso.example.com";
 const VALID_JKT = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG"; // 43 chars
 
 describe("session-storage", () => {
@@ -115,6 +116,7 @@ describe("session-storage", () => {
     it("returns the plain token even when vaultSecretKey is absent", async () => {
       mockStorage[SESSION_KEY] = {
         token: "tok-1",
+        issuerUrl: ISSUER,
         expiresAt: 1700000000000,
         userId: "u-1",
         tokenCnfJkt: VALID_JKT,
@@ -130,6 +132,7 @@ describe("session-storage", () => {
         tenantAutoLockMinutes: null,
         requireVaultTimeoutLogout: null,
         tokenCnfJkt: VALID_JKT,
+        issuerUrl: ISSUER,
       });
       // Decrypting the token is no longer part of the contract.
       expect(mockDecryptField).not.toHaveBeenCalled();
@@ -142,6 +145,7 @@ describe("session-storage", () => {
 
       mockStorage[SESSION_KEY] = {
         token: "tok-1",
+        issuerUrl: ISSUER,
         expiresAt: 1700000000000,
         encryptedVaultSecretKey: { ciphertext: "vsk-enc", iv: "iv2", authTag: "tag2" },
         tokenCnfJkt: VALID_JKT,
@@ -157,6 +161,7 @@ describe("session-storage", () => {
 
       mockStorage[SESSION_KEY] = {
         token: "tok-1",
+        issuerUrl: ISSUER,
         expiresAt: 1700000000000,
         encryptedVaultSecretKey: { ciphertext: "vsk-enc", iv: "iv2", authTag: "tag2" },
         tokenCnfJkt: VALID_JKT,
@@ -187,6 +192,7 @@ describe("session-storage", () => {
     it("returns null when encryptedVaultSecretKey is not a valid EncryptedField", async () => {
       mockStorage[SESSION_KEY] = {
         token: "tok-1",
+        issuerUrl: ISSUER,
         expiresAt: 1700000000000,
         encryptedVaultSecretKey: { ciphertext: 123, iv: "iv1", authTag: "tag1" }, // wrong type
         tokenCnfJkt: VALID_JKT,
@@ -198,6 +204,7 @@ describe("session-storage", () => {
     it("returns null when tokenCnfJkt is absent (pre-PR upgrade scenario)", async () => {
       mockStorage[SESSION_KEY] = {
         token: "tok-1",
+        issuerUrl: ISSUER,
         expiresAt: 1700000000000,
         // tokenCnfJkt intentionally omitted — simulates old session without DPoP binding
       };
@@ -209,6 +216,7 @@ describe("session-storage", () => {
     it("returns null when tokenCnfJkt has wrong length (42 chars)", async () => {
       mockStorage[SESSION_KEY] = {
         token: "tok-1",
+        issuerUrl: ISSUER,
         expiresAt: 1700000000000,
         tokenCnfJkt: "a".repeat(42), // one char too short
       };
@@ -220,6 +228,7 @@ describe("session-storage", () => {
     it("returns null when tokenCnfJkt contains invalid charset", async () => {
       mockStorage[SESSION_KEY] = {
         token: "tok-1",
+        issuerUrl: ISSUER,
         expiresAt: 1700000000000,
         tokenCnfJkt: "!".repeat(43), // invalid base64url chars
       };
@@ -231,6 +240,7 @@ describe("session-storage", () => {
     it("round-trips requireVaultTimeoutLogout", async () => {
       mockStorage[SESSION_KEY] = {
         token: "tok-1",
+        issuerUrl: ISSUER,
         expiresAt: 1700000000000,
         tokenCnfJkt: VALID_JKT,
         requireVaultTimeoutLogout: true,
@@ -243,6 +253,7 @@ describe("session-storage", () => {
       for (const bad of [undefined, "true" as unknown as boolean, 1 as unknown as boolean]) {
         mockStorage[SESSION_KEY] = {
           token: "tok-1",
+          issuerUrl: ISSUER,
           expiresAt: 1700000000000,
           tokenCnfJkt: VALID_JKT,
           requireVaultTimeoutLogout: bad,
@@ -250,6 +261,40 @@ describe("session-storage", () => {
         const result = await loadSession();
         expect(result?.requireVaultTimeoutLogout).toBeNull();
       }
+    });
+  });
+
+  describe("issuerUrl binding", () => {
+    it("returns null for a stored session without issuerUrl (pre-binding session)", async () => {
+      mockStorage[SESSION_KEY] = {
+        token: "tok-1",
+        expiresAt: 1700000000000,
+        tokenCnfJkt: VALID_JKT,
+      };
+      expect(await loadSession()).toBeNull();
+    });
+
+    it("returns null when issuerUrl is empty or not a string", async () => {
+      for (const bad of ["", 5 as unknown as string]) {
+        mockStorage[SESSION_KEY] = {
+          token: "tok-1",
+          expiresAt: 1700000000000,
+          tokenCnfJkt: VALID_JKT,
+          issuerUrl: bad,
+        };
+        expect(await loadSession()).toBeNull();
+      }
+    });
+
+    it("round-trips issuerUrl through persistSession and loadSession", async () => {
+      await persistSession({
+        token: "tok-1",
+        expiresAt: 1700000000000,
+        tokenCnfJkt: VALID_JKT,
+        issuerUrl: ISSUER,
+      });
+      const result = await loadSession();
+      expect(result?.issuerUrl).toBe(ISSUER);
     });
   });
 
@@ -275,6 +320,7 @@ describe("session-storage", () => {
     it("loadSession round-trips personalKeyVersion", async () => {
       mockStorage[SESSION_KEY] = {
         token: "tok-1",
+        issuerUrl: ISSUER,
         expiresAt: 1700000000000,
         tokenCnfJkt: VALID_JKT,
         personalKeyVersion: 3,
@@ -287,6 +333,7 @@ describe("session-storage", () => {
       for (const bad of [1.5, -1, "3" as unknown as number]) {
         mockStorage[SESSION_KEY] = {
           token: "tok-1",
+          issuerUrl: ISSUER,
           expiresAt: 1700000000000,
           tokenCnfJkt: VALID_JKT,
           personalKeyVersion: bad,
