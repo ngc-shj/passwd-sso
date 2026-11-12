@@ -402,3 +402,32 @@ from the mismatch, so widening the timeout arm would not reach these cells.)
 | C6 | docs | locked |
 | C7 | memoized error-body read (pre-existing double-read) | locked |
 | C8 | `apiErrorToI18nKey` own-key lookup | locked |
+
+## Implementation Checklist
+
+Derivations re-run at Phase 2 start (output matched the plan's member sets; C8 sweep found exactly
+`API_ERROR_I18N` and `EA_I18N`).
+
+- Foundation (orchestrator, commit `504e30f13`): `api-error-codes.ts` (+test count 205),
+  `messages/{en,ja}/ApiErrors.json`, `rotate-key.ts` `TEAM_BUSY_RETRY_AFTER_MS`, `api-response.ts`
+  `teamBusy()`, `lock-conflict-response.ts` `membershipConflictResponse`,
+  `team-key-rotation-lock.ts` `isTeamLockTimeout`, `read-api-error-body.ts` `parseJsonBodyOnce`
+  (+ CLI/extension copies, see deviation D1), `toast-api-error.ts`.
+- Server batch: `team-password-service.ts`; routes `passwords`, `passwords/[id]`, `bulk-import`,
+  `attachments`, `attachments/[attachmentId]`, `migrate`, `rekey`, `history/.../restore`,
+  `confirm-key`; every non-SCIM `isMembershipLockConflict` site → `membershipConflictResponse`;
+  `vault/reset`; docs (`error-handling.md`, `tenant-row-lock.ts` comment); their unit tests;
+  `team-key-version-guard.integration.test.ts`; `team-entry-rekey.test.ts` `importActual`.
+- Client batch: `rekey-runner.ts` (+ `Teams.rekeyStopRetryBudget`), `team-entry-submit.ts`
+  (+ `PasswordForm.teamEntryTeamBusy`), `password-import-importer.ts`, `team-attachment-section.tsx`,
+  members-list page, transfer-ownership page, invite-accept page, `ownerless-teams-card.tsx`,
+  invite/add/create/tenant-members consumers; their tests (real `Response`s on step-up consumers).
+- Foundation-test batch: `read-api-error-body`, `toast-api-error`, `handle-step-up-error`,
+  `api-error-codes`, `api-response`, `lock-conflict-response`, `tenant-reset-history-dialog` tests.
+- Reuse: `errorResponse`, `rateLimited` pattern, `readApiErrorBody`, `toastApiError`,
+  `apiErrorToI18nKey`, `handleStepUpError`, `withRotationStandIn`, `MS_PER_SECOND`.
+- CI parity: gates absent from `scripts/pre-pr.sh` that this diff can affect —
+  `check:bypass-rls`, `check:rls-nesting`, `check:crypto-domains`,
+  `check-state-mutation-centralization.sh`, `check-api-error-body-drift.sh` — are run directly at
+  Step 2-4. Not affected (no file in their input set): terraform fmt/test-count, licenses,
+  migration drift, npm audit.
