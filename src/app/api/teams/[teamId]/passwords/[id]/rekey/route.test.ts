@@ -424,9 +424,14 @@ describe("POST /api/teams/[teamId]/passwords/[id]/rekey", () => {
     expect(mockLogAuditInTx).not.toHaveBeenCalled();
   };
 
-  it("409 TEAM_KEY_VERSION_MISMATCH while a rotation holds the team row", async () => {
+  it("409 TEAM_BUSY with Retry-After while a rotation holds the team row", async () => {
     mockLockTeamKeyVersion.mockRejectedValue(new TeamRotationInProgressError());
-    await expectRefused(validBody(), 409, "TEAM_KEY_VERSION_MISMATCH");
+    const { res, json } = await rekey(validBody());
+    expect(res.status).toBe(409);
+    expect(json.error).toBe("TEAM_BUSY");
+    expect(res.headers.get("Retry-After")).toBe("3");
+    expect(txMock.teamPasswordEntry.update).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 
   it("404 when the team is gone under the lock", async () => {

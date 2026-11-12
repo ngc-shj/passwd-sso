@@ -12,7 +12,7 @@ import { withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
-import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, handleAuthError, teamBusy, unauthorized } from "@/lib/http/api-response";
 import { lockTeamKeyVersion, TeamRotationInProgressError } from "@/lib/team/team-key-rotation-lock";
 
 type Params = { params: Promise<{ teamId: string; memberId: string }> };
@@ -172,10 +172,10 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   } catch (e) {
     // The member was deactivated, or received a key, since the check.
     if (e instanceof MemberChangedError) return errorResponse(API_ERROR.MEMBER_NOT_FOUND);
-    // A rotation held the team past the lock timeout: the key being
-    // distributed is about to be superseded.
+    // A rotation held the team past the lock timeout: not a version
+    // comparison, so the client is told to retry rather than to refetch.
     if (!(e instanceof TeamRotationInProgressError)) throw e;
-    distributed = "version_mismatch" as const;
+    distributed = "busy" as const;
   }
 
   if (distributed === "actor_not_permitted") {
@@ -186,6 +186,9 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   }
   if (distributed === "already_distributed") {
     return errorResponse(API_ERROR.KEY_ALREADY_DISTRIBUTED);
+  }
+  if (distributed === "busy") {
+    return teamBusy();
   }
   if (distributed === "version_mismatch") {
     return errorResponse(API_ERROR.TEAM_KEY_VERSION_MISMATCH);

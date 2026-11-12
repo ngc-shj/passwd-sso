@@ -275,7 +275,7 @@ describe("POST /api/teams/[teamId]/members/[memberId]/approve", () => {
     expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 
-  it("returns the generic 409 CONFLICT, not SCIM_APPROVAL_TARGET_INACTIVE, when a rotation holds the team past the lock wait", async () => {
+  it("returns the generic 409 CONFLICT, not SCIM_APPROVAL_TARGET_INACTIVE, when the team row cannot be locked", async () => {
     const { TeamRotationLockError } = await vi.importActual<typeof import("@/lib/team/team-key-rotation-lock")>("@/lib/team/team-key-rotation-lock");
     mockLockTeamsAgainstRotation.mockRejectedValue(new TeamRotationLockError(1));
 
@@ -283,6 +283,20 @@ describe("POST /api/teams/[teamId]/members/[memberId]/approve", () => {
 
     expect(res.status).toBe(409);
     expect((await res.json()).error).toBe("CONFLICT");
+    expect(res.headers.get("Retry-After")).toBeNull();
     expect(tx.teamMember.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("returns 409 TEAM_BUSY with Retry-After when the team row lock wait times out", async () => {
+    const { TeamRotationInProgressError } = await vi.importActual<typeof import("@/lib/team/team-key-rotation-lock")>("@/lib/team/team-key-rotation-lock");
+    mockLockTeamsAgainstRotation.mockRejectedValue(new TeamRotationInProgressError());
+
+    const res = await approve();
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("TEAM_BUSY");
+    expect(res.headers.get("Retry-After")).toBe("3");
+    expect(tx.teamMember.updateMany).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 });

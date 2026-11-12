@@ -16,6 +16,7 @@ import { createLockBudget, withBoundedLockWait } from "@/lib/team/team-key-rotat
 import { isMembershipLockConflict, lockTenantRows } from "@/lib/team/tenant-row-lock";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
+import { membershipConflictResponse } from "@/lib/http/lock-conflict-response";
 import { parseBody } from "@/lib/http/parse-body";
 import { withRequestLog } from "@/lib/http/with-request-log";
 
@@ -163,7 +164,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       { timeout: TEAM_MEMBERSHIP_TX_TIMEOUT_MS },
     );
   } catch (e) {
-    if (isMembershipLockConflict(e)) return errorResponse(API_ERROR.CONFLICT);
+    if (isMembershipLockConflict(e)) return membershipConflictResponse(e);
     throw e;
   }
 

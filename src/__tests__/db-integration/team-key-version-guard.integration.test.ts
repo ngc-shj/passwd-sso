@@ -245,6 +245,12 @@ async function keyDistributeAudits(ctx: TestContext, teamId: string): Promise<un
   return r.rows.map((row) => row.payload).filter((p) => p.teamId === teamId);
 }
 
+/** Audit outbox rows written for this team (workers stopped, read from audit_outbox). */
+async function teamAuditRows(ctx: TestContext, teamId: string): Promise<unknown[]> {
+  const r = await ctx.su.pool.query<{ payload: { teamId?: string } }>(`SELECT payload FROM audit_outbox`);
+  return r.rows.map((row) => row.payload).filter((p) => p.teamId === teamId);
+}
+
 describe("team key rotation serialisation — real-DB integration", () => {
   let ctx: TestContext;
   let tenantId: string;
@@ -496,7 +502,7 @@ describe("team key rotation serialisation — real-DB integration", () => {
       });
     });
 
-    it("a write that waits past the lock timeout on a rotation answers 409, not an expired transaction", async () => {
+    it("a write that waits past the lock timeout on a rotation answers 409 TEAM_BUSY, not an expired transaction", async () => {
       const seed = await seedTeam(ctx, tenantId, 1);
       mockAuth.mockResolvedValue({ user: { id: seed.ownerId } });
 
@@ -509,14 +515,94 @@ describe("team key rotation serialisation — real-DB integration", () => {
 
       expect({ status: res.response.status, error: (await res.response.json()).error }).toEqual({
         status: 409,
-        error: "TEAM_KEY_VERSION_MISMATCH",
+        error: "TEAM_BUSY",
       });
+      expect(res.response.headers.get("Retry-After")).toBe("3");
       expect(res.waitedMs).toBeGreaterThanOrEqual(TEAM_KEY_LOCK_TIMEOUT_MS);
       expect(res.waitedMs).toBeLessThan(TEAM_KEY_LOCK_TIMEOUT_MS + 1_500);
       expect(await ctx.su.pool.query(
         `SELECT 1 FROM team_password_entries WHERE team_id = $1::uuid AND id <> $2::uuid`,
         [seed.teamId, seed.existingEntryId],
       ).then((r) => r.rowCount)).toBe(0);
+      expect(await teamAuditRows(ctx, seed.teamId)).toEqual([]);
+    }, 15_000);
+
+    it("a full PUT that waits past the lock timeout on a rotation answers 409 TEAM_BUSY and writes nothing", async () => {
+      const seed = await seedTeam(ctx, tenantId, 1);
+      mockAuth.mockResolvedValue({ user: { id: seed.ownerId } });
+
+      const res = await withRotationStandIn(seed, () =>
+        updateEntry(
+          jsonRequest(
+            `http://localhost/api/teams/${seed.teamId}/passwords/${seed.existingEntryId}`,
+            "PUT",
+            {
+              encryptedBlob: encryptedField(),
+              encryptedOverview: encryptedField(),
+              aadVersion: 1,
+              teamKeyVersion: 1,
+              itemKeyVersion: 0,
+            },
+          ),
+          { params: Promise.resolve({ teamId: seed.teamId, id: seed.existingEntryId }) },
+        ),
+      );
+
+      const entry = await ctx.su.pool.query<{ blob_iv: string }>(
+        `SELECT blob_iv FROM team_password_entries WHERE id = $1::uuid`,
+        [seed.existingEntryId],
+      );
+      const history = await ctx.su.pool.query(
+        `SELECT 1 FROM team_password_entry_histories WHERE entry_id = $1::uuid`,
+        [seed.existingEntryId],
+      );
+      expect({
+        status: res.response.status,
+        error: (await res.response.json()).error,
+        retryAfter: res.response.headers.get("Retry-After"),
+        blobIv: entry.rows[0].blob_iv,
+        historyRows: history.rowCount,
+      }).toEqual({
+        status: 409,
+        error: "TEAM_BUSY",
+        retryAfter: "3",
+        blobIv: seed.existingBlobIv,
+        historyRows: 0,
+      });
+      expect(res.waitedMs).toBeGreaterThanOrEqual(TEAM_KEY_LOCK_TIMEOUT_MS);
+      expect(await teamAuditRows(ctx, seed.teamId)).toEqual([]);
+    }, 15_000);
+
+    it("a bulk import that waits past the lock timeout on a rotation answers 409 TEAM_BUSY and persists nothing", async () => {
+      const seed = await seedTeam(ctx, tenantId, 1);
+      mockAuth.mockResolvedValue({ user: { id: seed.ownerId } });
+
+      const res = await withRotationStandIn(seed, () =>
+        bulkImport(
+          jsonRequest(`http://localhost/api/teams/${seed.teamId}/passwords/bulk-import`, "POST", {
+            entries: [newEntryBody(randomUUID(), 1), newEntryBody(randomUUID(), 1)],
+          }),
+          { params: Promise.resolve({ teamId: seed.teamId }) },
+        ),
+      );
+
+      const persisted = await ctx.su.pool.query<{ id: string }>(
+        `SELECT id FROM team_password_entries WHERE team_id = $1::uuid`,
+        [seed.teamId],
+      );
+      expect({
+        status: res.response.status,
+        error: (await res.response.json()).error,
+        retryAfter: res.response.headers.get("Retry-After"),
+        persisted: persisted.rows.map((r) => r.id),
+      }).toEqual({
+        status: 409,
+        error: "TEAM_BUSY",
+        retryAfter: "3",
+        persisted: [seed.existingEntryId],
+      });
+      expect(res.waitedMs).toBeGreaterThanOrEqual(TEAM_KEY_LOCK_TIMEOUT_MS);
+      expect(await teamAuditRows(ctx, seed.teamId)).toEqual([]);
     }, 15_000);
 
     it("past the rotation lock, the write's other waits keep their own timeout", async () => {
@@ -656,7 +742,7 @@ describe("team key rotation serialisation — real-DB integration", () => {
       });
     });
 
-    it("a removal that waits past the lock timeout on a rotation answers 409 and removes nothing", async () => {
+    it("a removal that waits past the lock timeout on a rotation answers 409 TEAM_BUSY and removes nothing", async () => {
       const seed = await seedTeam(ctx, tenantId, 1);
       mockAuth.mockResolvedValue({ user: { id: seed.ownerId } });
 
@@ -672,8 +758,46 @@ describe("team key rotation serialisation — real-DB integration", () => {
         status: res.response.status,
         error: (await res.response.json()).error,
         memberRows: member.rowCount,
+        retryAfter: res.response.headers.get("Retry-After"),
         memberKeys: await memberKeyVersions(ctx, seed.teamId, seed.memberId),
-      }).toEqual({ status: 409, error: "CONFLICT", memberRows: 1, memberKeys: [1] });
+      }).toEqual({ status: 409, error: "TEAM_BUSY", memberRows: 1, retryAfter: "3", memberKeys: [1] });
+      expect(await teamAuditRows(ctx, seed.teamId)).toEqual([]);
+    }, 15_000);
+
+    it("a key distribution that waits past the lock timeout on a rotation answers 409 TEAM_BUSY and leaves the member pending", async () => {
+      const seed = await seedTeam(ctx, tenantId, 1);
+      mockAuth.mockResolvedValue({ user: { id: seed.ownerId } });
+
+      const res = await withRotationStandIn(seed, () =>
+        confirmKey(
+          jsonRequest(
+            `http://localhost/api/teams/${seed.teamId}/members/${seed.pendingRowId}/confirm-key`,
+            "POST",
+            { ...memberKey(seed.pendingId, 1), userId: undefined },
+          ),
+          { params: Promise.resolve({ teamId: seed.teamId, memberId: seed.pendingRowId }) },
+        ),
+      );
+
+      const pending = await ctx.su.pool.query<{ key_distributed: boolean }>(
+        `SELECT key_distributed FROM team_members WHERE id = $1::uuid`,
+        [seed.pendingRowId],
+      );
+      expect({
+        status: res.response.status,
+        error: (await res.response.json()).error,
+        retryAfter: res.response.headers.get("Retry-After"),
+        keyDistributed: pending.rows[0].key_distributed,
+        pendingKeys: await memberKeyVersions(ctx, seed.teamId, seed.pendingId),
+      }).toEqual({
+        status: 409,
+        error: "TEAM_BUSY",
+        retryAfter: "3",
+        keyDistributed: false,
+        pendingKeys: [],
+      });
+      expect(res.waitedMs).toBeGreaterThanOrEqual(TEAM_KEY_LOCK_TIMEOUT_MS);
+      expect(await keyDistributeAudits(ctx, seed.teamId)).toEqual([]);
     }, 15_000);
 
     it("a SCIM user deletion while a rotation is in flight leaves the user no key to the new version", async () => {

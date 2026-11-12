@@ -12,6 +12,7 @@ import {
   validationError,
   zodValidationError,
   rateLimited,
+  teamBusy,
   serviceUnavailable,
   oauthTemporarilyUnavailable,
   prismaErrorResponse,
@@ -76,6 +77,15 @@ describe("rateLimited", () => {
   it("omits Retry-After header when retryAfterMs is 0", async () => {
     const res = rateLimited(0);
     expect(res.headers.get("Retry-After")).toBeNull();
+  });
+});
+
+describe("teamBusy", () => {
+  it("returns 409 TEAM_BUSY with Retry-After: 3", async () => {
+    const res = teamBusy();
+    expect(res.status).toBe(409);
+    expect(res.headers.get("Retry-After")).toBe("3");
+    expect(await res.json()).toEqual({ error: "TEAM_BUSY" });
   });
 });
 

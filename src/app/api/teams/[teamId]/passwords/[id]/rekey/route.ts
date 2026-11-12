@@ -12,7 +12,7 @@ import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-curren
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE, TEAM_PERMISSION, ATTACHMENT_ENCRYPTION_MODE } from "@/lib/constants";
 import { TEAM_ENTRY_REKEY_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 import { withTeamTenantRls } from "@/lib/tenant-context";
-import { errorResponse, handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, handleAuthError, notFound, rateLimited, teamBusy, unauthorized } from "@/lib/http/api-response";
 import { teamEntryRekeyLimiter, teamRekeyReadLimiter } from "@/lib/security/rate-limiters";
 import {
   BASE64_RE,
@@ -293,7 +293,7 @@ async function handlePOST(req: NextRequest, { params }: RouteContext) {
           team = await lockTeamKeyVersion(tx, teamId);
         } catch (e) {
           if (e instanceof TeamRotationInProgressError) {
-            throw new RekeyRefusal(API_ERROR.TEAM_KEY_VERSION_MISMATCH);
+            throw new RekeyRefusal(API_ERROR.TEAM_BUSY);
           }
           throw e;
         }
@@ -477,6 +477,7 @@ async function handlePOST(req: NextRequest, { params }: RouteContext) {
     );
   } catch (e) {
     if (e instanceof RekeyRefusal) {
+      if (e.code === API_ERROR.TEAM_BUSY) return teamBusy();
       return e.code === API_ERROR.NOT_FOUND ? notFound() : errorResponse(e.code);
     }
     if (e instanceof RekeyConsistencyError) {

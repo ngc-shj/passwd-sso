@@ -221,7 +221,7 @@ describe("createTeamPassword", () => {
     expect(err.code).toBe("TEAM_KEY_VERSION_MISMATCH");
   });
 
-  it("answers TEAM_KEY_VERSION_MISMATCH (409) when a rotation holds the team past the lock timeout", async () => {
+  it("answers TEAM_BUSY (409) when a rotation holds the team past the lock timeout", async () => {
     // lock_not_available, nested the way the pg driver adapter reports it.
     mockTeamLockRead.mockRejectedValue(
       Object.assign(new Error("canceling statement due to lock timeout"), {
@@ -231,7 +231,7 @@ describe("createTeamPassword", () => {
 
     const err = await createTeamPassword(TEAM_ID, BASE_CREATE_INPUT).catch((e) => e);
     expect(err).toBeInstanceOf(TeamPasswordServiceError);
-    expect(err.code).toBe("TEAM_KEY_VERSION_MISMATCH");
+    expect(err.code).toBe("TEAM_BUSY");
     expect(err.statusHint).toBe(409);
     expect(mockTeamPasswordEntryCreate).not.toHaveBeenCalled();
   });

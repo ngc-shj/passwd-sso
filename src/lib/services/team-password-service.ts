@@ -140,7 +140,8 @@ async function assertTeamTagsOwnership(
  * one, holding the team row FOR SHARE until the transaction ends so the
  * write serialises with rotation (see team-key-rotation-lock.ts) — the team
  * twin of `assertCurrentKeyVersion`. A rotation that holds the row past the
- * lock timeout answers the same 409: the client refetches the team key.
+ * lock timeout answers TEAM_BUSY: the client retries, it does not refetch the
+ * team key.
  */
 async function assertCurrentTeamKeyVersion(
   tx: Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw">,
@@ -153,7 +154,7 @@ async function assertCurrentTeamKeyVersion(
     team = await lockTeamKeyVersion(tx, teamId);
   } catch (e) {
     if (e instanceof TeamRotationInProgressError) {
-      throw new TeamPasswordServiceError(API_ERROR.TEAM_KEY_VERSION_MISMATCH, 409);
+      throw new TeamPasswordServiceError(API_ERROR.TEAM_BUSY, 409);
     }
     throw e;
   }

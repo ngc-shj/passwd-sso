@@ -256,6 +256,52 @@ describe("POST /api/teams/[teamId]/passwords/bulk-import", () => {
     // entry is attempted and no ENTRY_CREATE / ENTRY_BULK_IMPORT is emitted.
     expect(mockCreateTeamPassword).toHaveBeenCalledTimes(2);
     expect(mockLogAudit).not.toHaveBeenCalled();
+    expect(res.headers.get("Retry-After")).toBeNull();
+  });
+
+  it("fails the whole import with 409 TEAM_BUSY when the first entry times out on the team lock", async () => {
+    mockCreateTeamPassword.mockRejectedValueOnce(new TeamPasswordServiceError("TEAM_BUSY", 409));
+
+    const entries = [
+      makeEntry("660e8400-e29b-41d4-a716-000000000001"),
+      makeEntry("660e8400-e29b-41d4-a716-000000000002"),
+    ];
+
+    const res = await POST(
+      createRequest("POST", URL, { body: { entries } }),
+      createParams({ teamId: TEAM_ID }),
+    );
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("TEAM_BUSY");
+    expect(res.headers.get("Retry-After")).toBe("3");
+    // The rethrow leaves the tenant transaction: no further entry is attempted
+    // and nothing is audited.
+    expect(mockCreateTeamPassword).toHaveBeenCalledTimes(1);
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  it("fails the whole import with 409 TEAM_BUSY when a later entry times out on the team lock", async () => {
+    mockCreateTeamPassword
+      .mockResolvedValueOnce({ id: "660e8400-e29b-41d4-a716-000000000001", entryType: "LOGIN", tags: [], createdAt: new Date() })
+      .mockRejectedValueOnce(new TeamPasswordServiceError("TEAM_BUSY", 409));
+
+    const entries = [
+      makeEntry("660e8400-e29b-41d4-a716-000000000001"),
+      makeEntry("660e8400-e29b-41d4-a716-000000000002"),
+      makeEntry("660e8400-e29b-41d4-a716-000000000003"),
+    ];
+
+    const res = await POST(
+      createRequest("POST", URL, { body: { entries } }),
+      createParams({ teamId: TEAM_ID }),
+    );
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("TEAM_BUSY");
+    expect(res.headers.get("Retry-After")).toBe("3");
+    expect(mockCreateTeamPassword).toHaveBeenCalledTimes(2);
+    expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
   it("rolls a DB-rejected entry back to its own savepoint and reports only the entries around it", async () => {

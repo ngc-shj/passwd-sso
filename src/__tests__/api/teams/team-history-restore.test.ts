@@ -56,6 +56,7 @@ vi.mock("@/lib/tenant-context", () => ({
 
 import { POST } from "@/app/api/teams/[teamId]/passwords/[id]/history/[historyId]/restore/route";
 import { TeamAuthError } from "@/lib/auth/access/team-auth";
+import { logAuditAsync } from "@/lib/audit/audit";
 
 describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", () => {
   beforeEach(() => vi.clearAllMocks());
@@ -130,7 +131,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
   function setupRestoreTx(
     holderKeys: { userId: string }[],
     actor: { role: string } | null = { role: "MEMBER" },
-    over: { createdById?: string; rowBlobIv?: string; rowAadVersion?: number } = {},
+    over: { createdById?: string; rowBlobIv?: string; rowAadVersion?: number; teamLockError?: Error } = {},
   ) {
     const entryUpdate = vi.fn();
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) =>
@@ -139,7 +140,10 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
           const sql = strings.join("?");
           if (sql.includes("current_setting('lock_timeout')")) return [{ lock_timeout: "0", statement_timeout: "0" }];
           // The team row FOR SHARE (lockTeamKeyVersion).
-          if (/FROM teams\b/.test(sql)) return [{ team_key_version: 3, tenant_id: "t1" }];
+          if (/FROM teams\b/.test(sql)) {
+            if (over.teamLockError) throw over.teamLockError;
+            return [{ team_key_version: 3, tenant_id: "t1" }];
+          }
           // In-tx FOR UPDATE row lock (TOCTOU fix): the snapshot sources from
           // this locked row, not the outside-tx read.
           return [
@@ -232,7 +236,26 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
     const { status, json } = await parseResponse(res);
     expect(status).toBe(409);
     expect(json.error).toBe(API_ERROR.HISTORY_KEY_UNAVAILABLE);
+    expect(res.headers.get("Retry-After")).toBeNull();
     expect(entryUpdate).not.toHaveBeenCalled();
+  });
+
+  it("refuses 409 TEAM_BUSY with Retry-After when the team row lock wait times out", async () => {
+    preChecksPass();
+    // lock_not_available, nested the way the pg driver adapter reports it.
+    const entryUpdate = setupRestoreTx([{ userId: "u-holder" }], { role: "MEMBER" }, {
+      teamLockError: Object.assign(new Error("canceling statement due to lock timeout"), {
+        meta: { driverAdapterError: { cause: { originalCode: "55P03" } } },
+      }),
+    });
+
+    const res = await POST(createRequest("POST", undefined, { body: BODY }), createParams({ teamId: "o1", id: "p1", historyId: "h1" }));
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(409);
+    expect(json.error).toBe(API_ERROR.TEAM_BUSY);
+    expect(res.headers.get("Retry-After")).toBe("3");
+    expect(entryUpdate).not.toHaveBeenCalled();
+    expect(logAuditAsync).not.toHaveBeenCalled();
   });
 
   it("refuses with 403 ACTOR_NOT_PERMITTED when the actor's membership is gone under the team lock", async () => {

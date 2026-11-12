@@ -5,7 +5,7 @@ import { logAuditAsync, logAuditBulkAsync, teamAuditBase } from "@/lib/audit/aud
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE, TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
-import { errorResponse, handleAuthError, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, handleAuthError, rateLimited, teamBusy, unauthorized } from "@/lib/http/api-response";
 import { parseBody } from "@/lib/http/parse-body";
 import { bulkTeamImportSchema } from "@/lib/validations";
 import { createRateLimiter } from "@/lib/security/rate-limit";
@@ -25,6 +25,10 @@ const teamBulkImportLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max:
 
 function isTeamKeyVersionMismatch(e: unknown): e is TeamPasswordServiceError {
   return e instanceof TeamPasswordServiceError && e.code === API_ERROR.TEAM_KEY_VERSION_MISMATCH;
+}
+
+function isTeamBusy(e: unknown): e is TeamPasswordServiceError {
+  return e instanceof TeamPasswordServiceError && e.code === API_ERROR.TEAM_BUSY;
 }
 
 // POST /api/teams/[teamId]/passwords/bulk-import - Bulk create team password entries (E2E encrypted)
@@ -93,7 +97,10 @@ async function handlePOST(req: NextRequest, { params }: Params) {
         // A stale teamKeyVersion means the whole import is racing a rotation —
         // rethrow out of the tx so it fully rolls back (no entries left under
         // the pre-rotation key) instead of being counted as a per-entry failure.
-        if (isTeamKeyVersionMismatch(attempt.error)) throw attempt.error;
+        // A team-lock timeout aborts the same way: it can only occur before
+        // this transaction holds the team row, and the next entry would wait
+        // again.
+        if (isTeamKeyVersionMismatch(attempt.error) || isTeamBusy(attempt.error)) throw attempt.error;
         // The SQLSTATE only: a Prisma error's message carries the query and its
         // bound parameters, i.e. this entry's ciphertext.
         getLogger().warn({ teamId, code: pgErrorCode(attempt.error) }, "teams.bulk_import.entry_failed");
@@ -104,6 +111,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     if (isTeamKeyVersionMismatch(e)) {
       return errorResponse(API_ERROR.TEAM_KEY_VERSION_MISMATCH);
     }
+    if (isTeamBusy(e)) return teamBusy();
     throw e;
   }
 

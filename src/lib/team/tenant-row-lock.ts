@@ -162,7 +162,8 @@ const PRISMA_TX_EXPIRED = "P2028";
  * The refusals a membership transaction raises against a concurrent one:
  * rotation conflicts, a tenant-row wait past the budget, a deadlock, or the
  * transaction expiring. Each rolled the transaction back and is safe to
- * retry, so routes answer 409 and directory sync fails the run.
+ * retry, so routes answer 409. (Directory sync reaches the lock through
+ * team-departure.ts and fails on the thrown error, not through this helper.)
  */
 export function isMembershipLockConflict(e: unknown): boolean {
   if (isTeamRotationConflict(e) || e instanceof TenantMemberLockTimeoutError) return true;

@@ -10,7 +10,7 @@ import { BlobRefInvalidError } from "@/lib/blob-store/object-ref";
 import { AUDIT_TARGET_TYPE, TEAM_PERMISSION, AUDIT_ACTION, ATTACHMENT_ENCRYPTION_MODE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, handleAuthError, notFound, teamBusy, unauthorized } from "@/lib/http/api-response";
 import { TeamRotationInProgressError } from "@/lib/team/team-key-rotation-lock";
 import { lockTeamAttachmentEntry, lockTeamAttachmentRow } from "@/lib/team/team-attachment-lock";
 import { itemKeyIdsMatch, normalizeTeamKeyVersion } from "@/lib/team/team-item-key";
@@ -251,7 +251,7 @@ async function handleDELETE(
       }
     } catch (e) {
       if (e instanceof TeamRotationInProgressError) {
-        return { ok: false, code: API_ERROR.TEAM_KEY_VERSION_MISMATCH };
+        return { ok: false, code: API_ERROR.TEAM_BUSY };
       }
       throw e;
     }
@@ -270,6 +270,7 @@ async function handleDELETE(
   });
 
   if (!outcome.ok) {
+    if (outcome.code === API_ERROR.TEAM_BUSY) return teamBusy();
     return outcome.code === API_ERROR.NOT_FOUND ? notFound() : errorResponse(outcome.code);
   }
 

@@ -445,6 +445,30 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
     expect(res.status).toBe(409);
     const json = await res.json();
     expect(json.error).toBe("TEAM_KEY_VERSION_MISMATCH");
+    expect(res.headers.get("Retry-After")).toBeNull();
+  });
+
+  it("returns 409 TEAM_BUSY with Retry-After when the team row lock wait times out", async () => {
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
+    // lock_not_available, nested the way the pg driver adapter reports it.
+    mockTeamLockRow.mockImplementation(() => {
+      throw Object.assign(new Error("canceling statement due to lock timeout"), {
+        meta: { driverAdapterError: { cause: { originalCode: "55P03" } } },
+      });
+    });
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`, {
+        body: validE2EBody,
+      }),
+      createParams({ teamId: TEAM_ID, id: PW_ID }),
+    );
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("TEAM_BUSY");
+    expect(res.headers.get("Retry-After")).toBe("3");
+    expect(txMock.teamPasswordEntry.update).not.toHaveBeenCalled();
+    expect(txMock.teamPasswordEntryHistory.create).not.toHaveBeenCalled();
+    expect(mockAuditLogCreate).not.toHaveBeenCalled();
   });
 
   it("returns 403 when MEMBER tries to update another's entry", async () => {

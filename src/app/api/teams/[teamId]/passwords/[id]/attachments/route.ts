@@ -25,7 +25,7 @@ import {
 import { CURRENT_CEK_WRAP_AAD_VERSION } from "@/lib/crypto/crypto-aad";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { rejectOversizedMultipart } from "@/lib/http/parse-body";
-import { errorResponse, handleAuthError, notFound, rateLimited, unauthorized, validationError } from "@/lib/http/api-response";
+import { errorResponse, handleAuthError, notFound, rateLimited, teamBusy, unauthorized, validationError } from "@/lib/http/api-response";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 import { TeamRotationInProgressError } from "@/lib/team/team-key-rotation-lock";
@@ -271,7 +271,7 @@ async function handlePOST(
         locked = await lockTeamAttachmentEntry(tx, teamId, id);
       } catch (e) {
         if (e instanceof TeamRotationInProgressError) {
-          return { ok: false, code: API_ERROR.TEAM_KEY_VERSION_MISMATCH };
+          return { ok: false, code: API_ERROR.TEAM_BUSY };
         }
         throw e;
       }
@@ -351,6 +351,7 @@ async function handlePOST(
 
   if (!outcome.ok) {
     await blobStore.deleteObject(storedBlob, blobContext).catch(() => {});
+    if (outcome.code === API_ERROR.TEAM_BUSY) return teamBusy();
     return outcome.code === API_ERROR.NOT_FOUND ? notFound() : errorResponse(outcome.code);
   }
   const { attachment } = outcome;

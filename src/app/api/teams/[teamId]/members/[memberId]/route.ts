@@ -25,6 +25,7 @@ import {
 import { getLogger } from "@/lib/logger";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
+import { membershipConflictResponse } from "@/lib/http/lock-conflict-response";
 import { buildTeamMemberDisplayItems } from "@/lib/team/team-member-display";
 import { errorLogFields } from "@/lib/logger/error-fields";
 
@@ -164,7 +165,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     } catch (e) {
       if (e instanceof MemberChangedError) return errorResponse(API_ERROR.MEMBER_NOT_FOUND);
       if (e instanceof ActorNotPermittedError) return errorResponse(API_ERROR.FORBIDDEN);
-      if (isMembershipLockConflict(e)) return errorResponse(API_ERROR.CONFLICT);
+      if (isMembershipLockConflict(e)) return membershipConflictResponse(e);
       throw e;
     }
 
@@ -213,7 +214,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
   } catch (e) {
     if (e instanceof MemberChangedError) return errorResponse(API_ERROR.MEMBER_NOT_FOUND);
     if (e instanceof ActorNotPermittedError) return errorResponse(API_ERROR.FORBIDDEN);
-    if (isMembershipLockConflict(e)) return errorResponse(API_ERROR.CONFLICT);
+    if (isMembershipLockConflict(e)) return membershipConflictResponse(e);
     throw e;
   }
 
@@ -300,7 +301,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
     if (e instanceof MemberChangedError) return errorResponse(API_ERROR.MEMBER_NOT_FOUND);
     if (e instanceof ActorNotPermittedError) return errorResponse(API_ERROR.FORBIDDEN);
     // A rotation of this team held it past the lock wait; nothing was removed.
-    if (isMembershipLockConflict(e)) return errorResponse(API_ERROR.CONFLICT);
+    if (isMembershipLockConflict(e)) return membershipConflictResponse(e);
     throw e;
   }
 

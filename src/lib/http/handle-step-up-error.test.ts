@@ -7,6 +7,7 @@ import {
   throwIfStepUp,
 } from "@/lib/http/handle-step-up-error";
 import { API_ERROR } from "@/lib/http/api-error-codes";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 
 function stepUp403(): Response {
   return {
@@ -98,5 +99,43 @@ describe("throwIfStepUp / StepUpRequiredError", () => {
     expect(new StepUpRequiredError().code).toBe(
       API_ERROR.SESSION_STEP_UP_REQUIRED,
     );
+  });
+});
+
+describe("real Response bodies stay readable after the step-up check", () => {
+  const realError = (error: string, status = 409): Response =>
+    new Response(JSON.stringify({ error }), {
+      status,
+      headers: { "content-type": "application/json" },
+    });
+
+  it("readApiErrorBody still yields the code after handleStepUpError returned false", async () => {
+    const res = realError(API_ERROR.TEAM_BUSY);
+    const trigger = vi.fn().mockResolvedValue(undefined);
+    expect(await handleStepUpError(res, trigger)).toBe(false);
+    expect((await readApiErrorBody(res))?.error).toBe(API_ERROR.TEAM_BUSY);
+    expect(trigger).not.toHaveBeenCalled();
+  });
+
+  it("readApiErrorBody still yields the code after throwIfStepUp returned", async () => {
+    const res = realError(API_ERROR.TEAM_BUSY);
+    await expect(throwIfStepUp(res)).resolves.toBeUndefined();
+    expect((await readApiErrorBody(res))?.error).toBe(API_ERROR.TEAM_BUSY);
+  });
+
+  it("a real step-up 403 still triggers reauth", async () => {
+    const trigger = vi.fn().mockResolvedValue(undefined);
+    const handled = await handleStepUpError(
+      realError(API_ERROR.SESSION_STEP_UP_REQUIRED, 403),
+      trigger,
+    );
+    expect(handled).toBe(true);
+    expect(trigger).toHaveBeenCalledOnce();
+  });
+
+  it("a real step-up 403 still makes throwIfStepUp throw", async () => {
+    await expect(
+      throwIfStepUp(realError(API_ERROR.SESSION_STEP_UP_REQUIRED, 403)),
+    ).rejects.toBeInstanceOf(StepUpRequiredError);
   });
 });

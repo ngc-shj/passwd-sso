@@ -327,7 +327,7 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
     expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
-  it("answers 409, changing nothing, when the transferring OWNER's tenant row is held past the lock wait", async () => {
+  it("answers 409 CONFLICT without Retry-After, changing nothing, when the transferring OWNER's tenant row is held past the lock wait", async () => {
     mockPrismaTeamMember.findUnique.mockResolvedValue({
       id: MEMBER_ID, teamId: TEAM_ID, userId: "target-user", role: TEAM_ROLE.ADMIN, deactivatedAt: null,
     });
@@ -342,7 +342,30 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
     );
 
     expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("CONFLICT");
+    expect(res.headers.get("Retry-After")).toBeNull();
     expect(mockPrismaTeamMember.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("answers 409 TEAM_BUSY with Retry-After, changing nothing, when the team row lock wait times out (PUT transfer)", async () => {
+    mockPrismaTeamMember.findUnique.mockResolvedValue({
+      id: MEMBER_ID, teamId: TEAM_ID, userId: "target-user", role: TEAM_ROLE.ADMIN, deactivatedAt: null,
+    });
+    mockTeamLockQuery.mockImplementation(teamLockQuery((sql) => {
+      if (sql.includes("FROM teams")) throw Object.assign(new Error("lock timeout"), { code: "55P03" });
+      return [{ id: TEAM_ID }];
+    }));
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`, { body: { role: TEAM_ROLE.OWNER } }),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
+    );
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("TEAM_BUSY");
+    expect(res.headers.get("Retry-After")).toBe("3");
+    expect(mockPrismaTeamMember.updateMany).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
   it("refuses a role change when the acting member left the tenant since the permission check", async () => {
@@ -400,7 +423,7 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
     expect(teamLock.order).toBeLessThan(mockPrismaTeamMember.findFirst.mock.invocationCallOrder[0]);
   });
 
-  it("answers 409 when the acting member's tenant row is held past the lock wait (PUT)", async () => {
+  it("answers 409 CONFLICT without Retry-After when the acting member's tenant row is held past the lock wait (PUT)", async () => {
     mockPrismaTeamMember.findUnique.mockResolvedValue({
       id: MEMBER_ID, teamId: TEAM_ID, userId: "target-user", role: TEAM_ROLE.MEMBER, deactivatedAt: null,
     });
@@ -415,7 +438,30 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
     );
 
     expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("CONFLICT");
+    expect(res.headers.get("Retry-After")).toBeNull();
     expect(mockPrismaTeamMember.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("answers 409 TEAM_BUSY with Retry-After when the team row lock wait times out (PUT)", async () => {
+    mockPrismaTeamMember.findUnique.mockResolvedValue({
+      id: MEMBER_ID, teamId: TEAM_ID, userId: "target-user", role: TEAM_ROLE.MEMBER, deactivatedAt: null,
+    });
+    mockTeamLockQuery.mockImplementation(teamLockQuery((sql) => {
+      if (sql.includes("FROM teams")) throw Object.assign(new Error("lock timeout"), { code: "55P03" });
+      return [{ id: TEAM_ID }];
+    }));
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`, { body: { role: TEAM_ROLE.ADMIN } }),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
+    );
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("TEAM_BUSY");
+    expect(res.headers.get("Retry-After")).toBe("3");
+    expect(mockPrismaTeamMember.updateMany).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
   it("keeps a cross-tenant guest visible in the role update response", async () => {
@@ -774,7 +820,7 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
     expect(mockPrismaTeamMember.deleteMany).not.toHaveBeenCalled();
   });
 
-  it("answers 409 when the acting member's tenant row is held past the lock wait (DELETE)", async () => {
+  it("answers 409 CONFLICT without Retry-After when the acting member's tenant row is held past the lock wait (DELETE)", async () => {
     mockPrismaTeamMember.findUnique.mockResolvedValue({
       id: MEMBER_ID, teamId: TEAM_ID, tenantId: "tenant-1", userId: "u", role: TEAM_ROLE.MEMBER, deactivatedAt: null,
     });
@@ -789,7 +835,30 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
     );
 
     expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("CONFLICT");
+    expect(res.headers.get("Retry-After")).toBeNull();
     expect(mockPrismaTeamMember.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("answers 409 TEAM_BUSY with Retry-After when the team row lock wait times out (DELETE)", async () => {
+    mockPrismaTeamMember.findUnique.mockResolvedValue({
+      id: MEMBER_ID, teamId: TEAM_ID, tenantId: "tenant-1", userId: "u", role: TEAM_ROLE.MEMBER, deactivatedAt: null,
+    });
+    mockTeamLockQuery.mockImplementation(teamLockQuery((sql) => {
+      if (sql.includes("FROM teams")) throw Object.assign(new Error("lock timeout"), { code: "55P03" });
+      return [{ id: TEAM_ID }];
+    }));
+
+    const res = await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
+    );
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("TEAM_BUSY");
+    expect(res.headers.get("Retry-After")).toBe("3");
+    expect(mockPrismaTeamMember.deleteMany).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
   it("answers 404, removing nothing, when the row changed between the check and the team lock", async () => {
