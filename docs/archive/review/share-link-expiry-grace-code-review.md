@@ -293,3 +293,20 @@ No findings. The Round 6 escapes are reported; the remaining escapes (comma oper
 ### T27 / T28 Wrapper-kind coverage
 - Action: escape cases for a member call through `as`, `satisfies` and `!`; positive controls for a read and a fetch init through parentheses, `satisfies` and `!`.
 - Red-proved on a scratch copy: for each of the four wrapper kinds, removing it from the walk used by `isCalled` alone, and from the walk used by the reference check alone, fails a test (8 of 8).
+
+# Round 8
+
+## Changes from Previous Round
+Incremental review of commit 52615a0a2 (Round 7, test-only).
+
+## Functionality Findings
+No findings.
+
+## Security Findings
+No findings. The new positive controls bless only uncalled reads of non-redirect keys and the init in the fetch init position.
+
+## Testing Findings
+No findings. Every new escape case fails with "unclassified init reference" (not a parse error); spot-checked mutants fail exactly their tests.
+
+## Resolution Status
+Loop converged: all three experts report no findings.
