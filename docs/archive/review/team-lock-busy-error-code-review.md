@@ -114,3 +114,10 @@ Changes from Round 1: documentation only (dispositions, red-proof additions).
     holds the team row"; a savepoint rollback releases the row lock, so a later entry can time out
     too. → Fixed: comment reworded in `src/app/api/teams/[teamId]/passwords/bulk-import/route.ts`
     (comment only; behaviour unchanged — the error aborts the whole transaction either way).
+
+## Round 3 (2026-11-13)
+
+Changes from Round 2: the bulk-import comment and the lock-holder wording (R2-1, R2-2).
+All three experts: No findings (R2-1 verified against rotate-key, the retention prune, the owner
+route and team update/delete; R2-2 against `attemptInSavepoint`'s rollback semantics; no
+executable code changed). Review loop terminated: all experts returned No findings.
