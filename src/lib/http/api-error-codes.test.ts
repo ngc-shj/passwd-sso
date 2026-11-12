@@ -135,7 +135,8 @@ describe("API_ERROR structural invariants", () => {
     // 202 = 201 + HISTORY_ROW_CHANGED (team-key-rotation-rekey review round 1 F1).
     // 203 = 202 + HISTORY_ROW_LEGACY (team-key-rotation-rekey review round 3 S-R3-2).
     // 204 = 203 + REKEY_HISTORY_LEGACY (team-key-rotation-rekey review round 4 N-R4-1).
-    expect(Object.keys(API_ERROR).length).toBe(204);
+    // 205 = 204 + TEAM_BUSY (team-lock-busy-error C1).
+    expect(Object.keys(API_ERROR).length).toBe(205);
   });
 });
 

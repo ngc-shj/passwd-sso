@@ -53,6 +53,7 @@
   "memberKeyNotFound": "Member encryption key not found.",
   "vaultNotReady": "Member's vault is not set up yet.",
   "teamKeyVersionMismatch": "Encryption key version is outdated. Please refresh and try again.",
+  "teamBusy": "Another change to a team is in progress. Please try again in a moment.",
   "keyVersionMismatch": "Your vault key was rotated. Please unlock the vault again and retry.",
   "entryCountMismatch": "The number of submitted entries does not match the total. Please refresh and try again.",
   "onlyOwnEntries": "You can only modify your own entries.",

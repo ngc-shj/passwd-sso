@@ -51,6 +51,14 @@ export class TeamRotationInProgressError extends Error {
 }
 
 /**
+ * A bounded wait for a `teams` row lock ran out (the default timeout error of
+ * withBoundedLockWait). Routes answer it with TEAM_BUSY, not a key mismatch.
+ */
+export function isTeamLockTimeout(e: unknown): e is TeamRotationInProgressError {
+  return e instanceof TeamRotationInProgressError;
+}
+
+/**
  * One lock-wait deadline shared by every bounded wait of a transaction. A
  * transaction that waits on a tenant row and then on a team row passes the
  * same budget to both, so the two waits together end inside

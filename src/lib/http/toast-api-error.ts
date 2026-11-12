@@ -2,6 +2,7 @@
 
 import { toast } from "sonner";
 import { apiErrorToI18nKey, type ApiErrorCode } from "./api-error-codes";
+import { parseJsonBodyOnce } from "./read-api-error-body";
 
 /**
  * Parse an API error response, map its `error` code to the matching
@@ -18,7 +19,8 @@ export async function toastApiError(
   tErrors: (key: string) => string,
   fallbackErrorCode?: ApiErrorCode,
 ): Promise<void> {
-  const body = (await res.json().catch(() => ({}))) as { error?: unknown };
+  // Through the shared parse: a step-up check may already have read this body.
+  const body = ((await parseJsonBodyOnce(res)) ?? {}) as { error?: unknown };
   const code = body.error ?? fallbackErrorCode;
   toast.error(tErrors(apiErrorToI18nKey(code)));
 }

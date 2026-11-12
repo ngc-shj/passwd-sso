@@ -7,6 +7,7 @@ import {
 } from "@/lib/http/api-error-codes";
 import { mapPrismaError } from "@/lib/prisma/prisma-error";
 import { MS_PER_SECOND } from "@/lib/constants/time";
+import { TEAM_BUSY_RETRY_AFTER_MS } from "@/lib/constants/team/rotate-key";
 
 /**
  * Canonical wire shape of the Main API error envelope.
@@ -148,6 +149,16 @@ export const rateLimited = (retryAfterMs?: number) => {
     headers,
   );
 };
+
+/**
+ * 409 TEAM_BUSY: a bounded wait for a `teams` row lock ran out (a key
+ * rotation holds the team). Retry-safe; distinct from TEAM_KEY_VERSION_MISMATCH,
+ * which tells the client to re-fetch the team key.
+ */
+export const teamBusy = () =>
+  errorResponse(API_ERROR.TEAM_BUSY, undefined, undefined, {
+    "Retry-After": String(Math.ceil(TEAM_BUSY_RETRY_AFTER_MS / MS_PER_SECOND)),
+  });
 
 const DEFAULT_SERVICE_UNAVAILABLE_RETRY_AFTER_SEC = 30;
 

@@ -11,6 +11,12 @@ export const TEAM_ROTATE_TX_TIMEOUT_MS = MS_PER_MINUTE;
 export const TEAM_KEY_LOCK_TIMEOUT_MS = 3 * MS_PER_SECOND;
 
 /**
+ * `Retry-After` on a TEAM_BUSY answer: a writer that just spent the whole
+ * lock wait should not retry sooner than one more wait.
+ */
+export const TEAM_BUSY_RETRY_AFTER_MS = TEAM_KEY_LOCK_TIMEOUT_MS;
+
+/**
  * Prisma transaction timeout for a transaction that waits on tenant
  * membership rows and team rows (tenant departure, admission): its lock
  * waits share one TEAM_KEY_LOCK_TIMEOUT_MS deadline, and this leaves room for
