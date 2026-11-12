@@ -222,11 +222,16 @@ a browser (body already used), so its code arms never fire — e.g. the members-
 `CONFLICT` → `approvalBusyRetry` arm has never been reachable. Unit tests mock a re-readable
 `json()` and hid it. The C5 `TEAM_BUSY` arms on step-up-gated consumers depend on this fix.
 
-- Fix at the shared reader, not per site: `readApiErrorBody` memoizes its parse per `Response`
-  (module-level `WeakMap<Response, Promise<MainApiErrorBody | null>>`), so every later reader of
-  the same response gets the same parsed body without touching the stream again.
-  `toastApiError` reads through `readApiErrorBody` instead of its own `res.json()` (its `{}`
-  fallback becomes the `null` case; same output).
+- Fix at the shared reader, not per site: a memoized raw parse in `read-api-error-body.ts`,
+  `parseJsonBodyOnce(res)` (module-level `WeakMap<Response, Promise<unknown>>`; parse failure →
+  `null`, never rejects; no `ok` check). `readApiErrorBody` keeps its `res.ok → null` guard first
+  and its shape check, now over the memoized parse. `toastApiError` reads the memoized raw parse
+  with its existing `{}` / `body.error ?? fallback` logic, so its contract is unchanged for every
+  response it handles today (ok or not, any `error` type) — round-6 F6-T1; the only behaviour
+  change is that a second reader of a used body now sees the code. Known caller where that shows
+  (round-6 F6-2): `tenant-reset-history-dialog.tsx` calls `readApiErrorBody(res)` then
+  `toastApiError(res, …, FORBIDDEN)`; it now shows the server's specific code instead of always
+  the `FORBIDDEN` fallback — intended, matching that code's comment.
 - Why not `res.clone()` in the helpers (round-5 F5-1 / Q5-1): it throws on the plain-object
   `Response` mocks used across ~24 callers' tests and on an already-consumed body, and it fixes
   only the step-up helpers, not a second `readApiErrorBody`/`toastApiError` on the same response.
@@ -241,7 +246,9 @@ a browser (body already used), so its code arms never fire — e.g. the members-
   `scripts/checks/check-step-up-client-coverage.sh` unpiped after the change.
 - Acceptance: with a real `Response` (single-read body), a second `readApiErrorBody(res)` and a
   `toastApiError(res, …)` after `handleStepUpError` returned `false` both see the code; a step-up
-  403 still triggers reauth; full unit suite green with existing mocks unchanged.
+  403 still triggers reauth; full unit suite run right after the C7 edit, and any failure from a
+  mock object reused across tests with a changed `json()` (the memo is per object) is fixed by a
+  fresh mock per test, not by weakening the memo (round-6 F6-1).
 
 ### C8 — `apiErrorToI18nKey` looks up own keys only (pre-existing, review S4 note)
 
@@ -251,7 +258,8 @@ C5 widens rendering of server-supplied codes through this function, so both use
 `Object.hasOwn` (available: `lib` includes `esnext`; ES2022 runtimes). Acceptance: `"constructor"`
 with and without an `overrides` object → `unknownError` (a `string`); a real code → its key; a
 real code with an override → the override. Same `in`-over-an-i18n-map pattern elsewhere is swept
-at Phase 2 (`rg -n " in [A-Z_]+_I18N\b" src`).
+at Phase 2 (`rg -n " in [A-Z_]+_I18N\b" src`); known member: `eaErrorToI18nKey` (`error in
+EA_I18N`), fixed the same way (round-6 S6-1).
 
 ## Forbidden patterns
 
@@ -323,13 +331,20 @@ from the mismatch, so widening the timeout arm would not reach these cells.)
 - C7: `read-api-error-body.test.ts` / `handle-step-up-error.test.ts` / `toast-api-error.test.ts` —
   real `Response` (undici, vitest `node` env, single-read body): a second `readApiErrorBody` and a
   `toastApiError` after `handleStepUpError`/`throwIfStepUp` returned `false` see the code (fail
-  on the old reader); a step-up 403 read through the memo still triggers. Consumer level: convert
-  the members-list approve/reject `it.each` cells (incl. `CONFLICT` → `approvalBusyRetry`) and the
-  ownerless-card cells to real `Response`s; red-proof: they fail with the memo removed on the
-  scratchpad copy.
+  on the old reader); the same object read twice → identical result with `json` called once; two
+  distinct objects → their own parses; `toastApiError` keeps today's results for an ok response,
+  a JSON `null` body and a non-string `error` (existing `toast-api-error.test.ts` cells unchanged);
+  a step-up 403 read through the memo still triggers (pin; red-proof: memo caches `null`).
+  Consumer level: convert the members-list approve/reject `it.each` cells (incl. `CONFLICT` →
+  `approvalBusyRetry`) to real `Response`s; write the new ownerless-card cells and a
+  `tenant-reset-history-dialog` cell (specific code shown, not the `FORBIDDEN` fallback) with real
+  `Response`s. Each asserts the arm's outcome (toast key, refresh), not just no throw. Red-proof:
+  remove the `WeakMap` get/set in `parseJsonBodyOnce` on the scratchpad copy.
 - C8: `api-error-codes.test.ts` — `"constructor"`/`"toString"`/`"__proto__"`, with and without
   `overrides`, → `unknownError` and `typeof === "string"`; positive controls (real code, real code
-  with override). Red-proof: revert to `in` / plain property read on the scratchpad copy.
+  with override); `eaErrorToI18nKey("constructor")` → `actionFailed`. Red-proof: revert each
+  lookup separately on the scratchpad copy (`"constructor"` with overrides kills the `overrides`
+  mutation; `"__proto__"` without overrides kills the `API_ERROR_I18N` one; the EA cell its own).
 - Runner clamp boundary: `Retry-After` 30 → 30 s, 31 → 30 s.
   Status-keyed consumers: existing fixed-message cells' mocks carry the real route code
   (`SLUG_ALREADY_TAKEN`, `SCIM_MANAGED_MEMBER`, `INVITATION_ALREADY_SENT`, `ALREADY_A_MEMBER`)

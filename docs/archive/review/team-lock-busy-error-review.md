@@ -196,3 +196,32 @@ Changes from Round 4: added C7 (step-up helpers read a clone) and C8 (own-key i1
 - Functionality: R42 F5-3; mock fidelity F5-1; inherited lookup F5-2; fail-closed ok.
 - Security: step-up fail-closed ok; guard binding ok; inherited lookup S5-1; error-surface ok.
 - Testing: RT7 Q5-2/Q5-3/Q5-5; RT8 Q5-4; RT10 Q5-1/Q5-2.
+
+## Round 6 (2026-11-13)
+
+Changes from Round 5: C7 redesigned to a memoized reader; C8 covers `overrides`.
+
+### Functionality
+- F6-1 Minor — memo per object can return a stale parse for reused test mocks. → Resolved: full
+  suite right after the C7 edit; fix any such test with a fresh mock.
+- F6-2 Minor (prose) — `tenant-reset-history-dialog` now shows the specific server code. →
+  Resolved: recorded as the intended change with its own cell.
+- F6-3 Minor — `toastApiError` parse differences. → Obsolete under the F6-T1 resolution
+  (`toastApiError` keeps its own parse logic over the memo).
+
+### Security
+- S6-1 Minor — `eaErrorToI18nKey` uses `in` on `EA_I18N`. → Resolved: in C8.
+- No cross-request retention (client-only importers; WeakMap keyed by per-fetch `Response`).
+
+### Testing
+- F6-T1 Major (design) — routing `toastApiError` through `readApiErrorBody` added an `ok` and a
+  string-`error` guard, breaking 5 existing cells and contradicting "same output". → Resolved:
+  memoized raw `parseJsonBodyOnce` with no `ok` check; `readApiErrorBody` keeps its guards over it;
+  `toastApiError` keeps its own logic over it.
+- F6-T2 Minor — per-object isolation and single-`json()` cells. → Resolved.
+- F6-T3 Minor — exact memo mutation, arm-outcome assertions, per-lookup C8 mutations. → Resolved.
+
+### Recurring Issue Check (non-N/A)
+- Functionality: R1/R5 F6-2/F6-3; R2 F6-1; R3, R8, R10, R14, R30 ok.
+- Security: inherited lookup S6-1; step-up fail-closed, retention, logging ok.
+- Testing: RT1–RT4, RT7–RT11 ok; RT5 F6-T1; RT6 F6-T2.
