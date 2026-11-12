@@ -12,6 +12,9 @@ beforeAll(async () => {
   server = createServer((req, res) => {
     if (req.url === "/redirect") {
       res.writeHead(308, { Location: "https://elsewhere.example/" });
+    } else if (req.url === "/drop") {
+      req.socket.destroy();
+      return;
     } else {
       res.writeHead(200);
     }
@@ -39,8 +42,8 @@ describe("onRedirectRefused", () => {
   });
 
   it("passes any other network error through unchanged", async () => {
-    // Port 1 on loopback refuses the connection.
-    const url = "http://127.0.0.1:1/";
+    // The same server drops the connection: a network error that is not a redirect.
+    const url = `${origin}/drop`;
     const err = await fetch(url, { redirect: "error" }).catch(onRedirectRefused(url)).then(
       () => null,
       (e: unknown) => e,

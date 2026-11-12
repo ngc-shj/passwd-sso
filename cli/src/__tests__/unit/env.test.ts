@@ -156,6 +156,23 @@ describe("envCommand", () => {
     expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe("Bearer login-token");
   });
 
+  it("reports a refused redirect on the entry fetch with the server and the fix", async () => {
+    vi.mocked(loadSecretsConfig).mockReturnValue({
+      apiKey: "api_test",
+      secrets: { FOO: { entry: "entry-1", field: "password" } },
+    });
+    vi.mocked(getSecretsServerUrl).mockReturnValue("https://config.example.com");
+    vi.mocked(getPasswordPath).mockReturnValue("/api/v1/passwords/entry-1");
+    vi.mocked(autoUnlockIfNeeded).mockResolvedValue(true);
+    vi.mocked(getEncryptionKey).mockReturnValue({} as never);
+    vi.mocked(getUserId).mockReturnValue("user-1");
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("fetch failed", { cause: new Error("unexpected redirect") })));
+
+    await expect(envCommand({ format: "shell" })).rejects.toThrow(
+      "The server at https://config.example.com redirected the request",
+    );
+  });
+
   it("fetches from the secrets-config server when using an apiKey", async () => {
     vi.mocked(loadSecretsConfig).mockReturnValue({
       apiKey: "api_test",

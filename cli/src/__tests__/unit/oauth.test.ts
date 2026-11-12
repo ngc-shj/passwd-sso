@@ -286,6 +286,26 @@ describe("registerClient", () => {
   });
 });
 
+describe("a refused redirect on an OAuth request", () => {
+  const mockFetch = vi.fn();
+  beforeEach(() => {
+    mockFetch.mockReset();
+    global.fetch = mockFetch;
+  });
+
+  it.each([
+    ["registerClient", async () => (await import("../../lib/oauth.js")).registerClient("https://vault.example.com", "http://127.0.0.1:9999/callback")],
+    ["exchangeCode", async () => (await import("../../lib/oauth.js")).exchangeCode("https://vault.example.com", {
+      code: "c", redirectUri: "http://127.0.0.1:9999/callback", clientId: "mcpc_test", codeVerifier: "v",
+    })],
+    ["refreshTokenGrant", async () => (await import("../../lib/oauth.js")).refreshTokenGrant("https://vault.example.com", "mcpr_x", "mcpc_x")],
+  ])("%s names the server and the fix", async (_name, call) => {
+    mockFetch.mockRejectedValueOnce(new TypeError("fetch failed", { cause: new Error("unexpected redirect") }));
+
+    await expect(call()).rejects.toThrow("The server at https://vault.example.com redirected the request");
+  });
+});
+
 describe("refreshTokenGrant", () => {
   const mockFetch = vi.fn();
   beforeEach(() => {

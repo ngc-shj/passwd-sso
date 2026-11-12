@@ -35,10 +35,13 @@
  * unreadable init, a different value, a computed key, or `redirect` before a
  * spread is a violation. A const init is accepted only if its name is declared
  * once in the file (a parameter or inner binding of the same name could shadow
- * it; name-based, so this can only over-report) and the object is never
- * written through after its declaration where the write could reach
- * `redirect` (`x.redirect = …`, `x[k] = …` with a non-literal or "redirect"
- * key, `delete x.redirect`, `Object.assign(x, …)`). Any other reference to the identifier `fetch` (passed
+ * it; name-based, so this can only over-report) and every other reference to
+ * the name is a known-safe use: the init argument of a checked fetch call, a
+ * property access with a literal key other than `redirect`, or an object spread
+ * (a copy). Anything else — an alias, a call argument, `Reflect.set`,
+ * `x.redirect`, `x[k]`, a destructuring target — is "unclassified init
+ * reference", since the object could then be changed out of sight. Any other
+ * reference to the identifier `fetch` (passed
  * as a value, re-assigned, destructured, shorthand) is "unclassified fetch
  * reference", so a new alias cannot slip past; the only exemption is the type
  * position `typeof fetch`, which has no runtime effect. An alias that is used
@@ -133,6 +136,19 @@ function isInTypePosition(id) {
   return id.getFirstAncestorByKind(SyntaxKind.TypeQuery) !== undefined;
 }
 
+/** True when `id` is the name of a member (a key), not a reference to a binding. */
+function isMemberKeyName(id) {
+  const p = id.getParent();
+  return (
+    (Node.isPropertyAssignment(p) ||
+      Node.isPropertySignature(p) ||
+      Node.isPropertyDeclaration(p) ||
+      Node.isMethodDeclaration(p) ||
+      Node.isMethodSignature(p)) &&
+    p.getNameNode() === id
+  );
+}
+
 /** True when `node` is `globalThis|window|self` `.fetch` or `["fetch"]`. */
 function isGlobalFetchMember(node) {
   if (Node.isPropertyAccessExpression(node)) {
@@ -196,44 +212,46 @@ function countDeclarations(sf, name) {
   return n;
 }
 
-/** A write through `name` after its declaration that could change `redirect`, or null. */
-function redirectWriteThrough(sf, name) {
-  const isName = (n) => Node.isIdentifier(unwrap(n)) && unwrap(n).getText() === name;
-  const reachesRedirect = (target) => {
-    if (Node.isPropertyAccessExpression(target)) return isName(target.getExpression()) && target.getName() === "redirect";
-    if (Node.isElementAccessExpression(target)) {
-      if (!isName(target.getExpression())) return false;
-      const key = strText(target.getArgumentExpression());
-      return key === null || key === "redirect";
+/**
+ * The first reference to `name` that is not a known-safe use, or null. Allowlist,
+ * not a list of write forms: an alias, a helper argument, `Reflect.set`, a
+ * destructuring target all escape a denylist. Safe uses: the declaration, the
+ * init argument of a checked fetch call, a property access with a literal key
+ * other than `redirect`, and an object spread (a copy).
+ */
+function unclassifiedInitReference(sf, name, isFetchCall) {
+  for (const id of sf.getDescendantsOfKind(SyntaxKind.Identifier)) {
+    if (id.getText() !== name || isInTypePosition(id)) continue;
+    const idParent = id.getParent();
+    if (isMemberKeyName(id) || (Node.isPropertyAccessExpression(idParent) && idParent.getNameNode() === id)) {
+      continue; // a property key that happens to share the name
     }
-    return false;
-  };
-  for (const n of sf.getDescendants()) {
-    if (Node.isBinaryExpression(n)) {
-      const k = n.getOperatorToken().getKind();
-      if (k >= SyntaxKind.FirstAssignment && k <= SyntaxKind.LastAssignment && reachesRedirect(unwrap(n.getLeft()))) {
-        return n;
-      }
-    } else if (Node.isDeleteExpression(n) && reachesRedirect(unwrap(n.getExpression()))) {
-      return n;
-    } else if (Node.isCallExpression(n)) {
-      const callee = n.getExpression();
-      if (
-        Node.isPropertyAccessExpression(callee) &&
-        callee.getName() === "assign" &&
-        callee.getExpression().getText() === "Object" &&
-        n.getArguments().length > 0 &&
-        isName(n.getArguments()[0])
-      ) {
-        return n;
-      }
+    if (Node.isVariableDeclaration(idParent) && idParent.getNameNode() === id) continue;
+    let n = id;
+    while (
+      (Node.isParenthesizedExpression(n.getParent()) ||
+        Node.isAsExpression(n.getParent()) ||
+        Node.isSatisfiesExpression(n.getParent()) ||
+        Node.isNonNullExpression(n.getParent())) &&
+      n.getParent().getExpression() === n
+    ) {
+      n = n.getParent();
     }
+    const p = n.getParent();
+    if (Node.isCallExpression(p) && p.getArguments()[1] === n && isFetchCall(p)) continue;
+    if (Node.isPropertyAccessExpression(p) && p.getExpression() === n && p.getName() !== "redirect") continue;
+    if (Node.isElementAccessExpression(p) && p.getExpression() === n) {
+      const key = strText(p.getArgumentExpression());
+      if (key !== null && key !== "redirect") continue;
+    }
+    if (Node.isSpreadAssignment(p)) continue;
+    return id;
   }
   return null;
 }
 
 /** Returns a reason string if the call's init does not pin redirect, else null. */
-function redirectProblem(call) {
+function redirectProblem(call, isFetchCall) {
   const args = call.getArguments();
   if (args.length < 2) return "no init argument (redirect defaults to follow)";
   let init = unwrap(args[1]);
@@ -243,10 +261,12 @@ function redirectProblem(call) {
     if (!resolved) return `init \`${name}\` does not resolve to a same-scope const object literal`;
     const sf = call.getSourceFile();
     if (countDeclarations(sf, name) !== 1) {
-      return `init \`${name}\` is declared more than once in the file (a shadowing binding may be the one passed)`;
+      return `init \`${name}\` is declared more than once in the file (the gate matches by name, so it cannot tell which binding is passed); rename it or pass an inline literal`;
     }
-    const write = redirectWriteThrough(sf, name);
-    if (write) return `init \`${name}\` is written through at line ${write.getStartLineNumber()}, which can change redirect`;
+    const ref = unclassifiedInitReference(sf, name, isFetchCall);
+    if (ref) {
+      return `unclassified init reference: \`${name}\` at line ${ref.getStartLineNumber()} is used other than as a fetch init or a non-redirect property access`;
+    }
     init = resolved;
   }
   if (!Node.isObjectLiteralExpression(init)) return "init is not an object literal";
@@ -325,15 +345,18 @@ function scanRedirect(sf, label, findings) {
     }
   }
 
+  const isFetchCall = (call) => {
+    const callee = unwrap(call.getExpression());
+    return (
+      (Node.isIdentifier(callee) && (callee.getText() === "fetch" || aliasNames.has(callee.getText()))) ||
+      isGlobalFetchMember(callee)
+    );
+  };
   const classified = new Set();
   for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
-    const callee = unwrap(call.getExpression());
-    const isFetchCall =
-      (Node.isIdentifier(callee) && (callee.getText() === "fetch" || aliasNames.has(callee.getText()))) ||
-      isGlobalFetchMember(callee);
-    if (!isFetchCall) continue;
-    classified.add(callee);
-    const problem = redirectProblem(call);
+    if (!isFetchCall(call)) continue;
+    classified.add(unwrap(call.getExpression()));
+    const problem = redirectProblem(call, isFetchCall);
     if (problem) findings.push(`${loc(call)}: fetch call without a pinned redirect: ${problem}`);
   }
 
@@ -353,26 +376,12 @@ function scanRedirect(sf, label, findings) {
         }
         continue;
       }
-      if (
-        (Node.isPropertyAssignment(parent) ||
-          Node.isMethodDeclaration(parent) ||
-          Node.isPropertySignature(parent) ||
-          Node.isPropertyDeclaration(parent) ||
-          Node.isMethodSignature(parent)) &&
-        parent.getNameNode() === id
-      ) {
-        continue;
-      }
+      if (isMemberKeyName(id)) continue;
       if (Node.isImportSpecifier(parent) || Node.isExportSpecifier(parent)) {
         findings.push(`${loc(id)}: unclassified fetch reference (import/export of a binding named fetch)`);
         continue;
       }
-    } else if (Node.isPropertyAccessExpression(parent) && parent.getNameNode() === id) {
-      continue;
-    } else if (
-      (Node.isPropertyAssignment(parent) || Node.isPropertySignature(parent) || Node.isMethodDeclaration(parent)) &&
-      parent.getNameNode() === id
-    ) {
+    } else if (isMemberKeyName(id) || (Node.isPropertyAccessExpression(parent) && parent.getNameNode() === id)) {
       continue;
     }
     findings.push(

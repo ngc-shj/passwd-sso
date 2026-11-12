@@ -177,18 +177,32 @@ describe("check-client-credential-fetch.mjs — redirect axis", () => {
     ["assigned through a computed key", 'opts[k] = "follow";'],
     ["deleted", "delete (opts as Partial<RequestInit>).redirect;"],
     ["merged with Object.assign", "Object.assign(opts, o);"],
+    ["reached through an alias", 'const o2 = opts;\n  o2.redirect = "follow";'],
+    ["handed to a helper", "mutate(opts);"],
+    ["set with Reflect.set", 'Reflect.set(opts, "redirect", "follow");'],
+    ["redefined with Object.defineProperty", 'Object.defineProperty(opts, "redirect", { value: "follow" });'],
+    ["a destructuring-assignment target", "({ r: opts.redirect } = o as { r: RequestRedirect });"],
+    ["a for-of target", "for (opts.redirect of [\"follow\" as const]);"],
   ])("FAILS when the const init's redirect is %s after declaration", (_label, write) => {
     cli(
       "a.ts",
-      `export function f(u: string, o: RequestInit, k: string) {\n  const opts: RequestInit & Record<string, unknown> = { redirect: "error" };\n  ${write}\n  return fetch(u, opts);\n}\n`,
+      `declare function mutate(o: object): void;\nexport function f(u: string, o: RequestInit, k: string) {\n  const opts: RequestInit & Record<string, unknown> = { redirect: "error" };\n  ${write}\n  return fetch(u, opts);\n}\n`,
     );
-    expectFail("is written through");
+    expectFail("unclassified init reference");
   });
 
   it("passes when another property of the const init is assigned", () => {
     cli(
       "a.ts",
       'export function f(u: string, h: Record<string, string>) {\n  const opts: RequestInit = { redirect: "error" };\n  opts.headers = h;\n  return fetch(u, opts);\n}\n',
+    );
+    expect(runGuard().exitCode).toBe(0);
+  });
+
+  it("passes a const init read through literal keys and copied by a spread", () => {
+    cli(
+      "a.ts",
+      'export function f(u: string) {\n  const opts: RequestInit = { redirect: "error" };\n  opts["method"] = "POST";\n  const copy = { ...opts };\n  void copy;\n  void opts.method;\n  return fetch(u, opts);\n}\n',
     );
     expect(runGuard().exitCode).toBe(0);
   });
@@ -208,6 +222,11 @@ describe("check-client-credential-fetch.mjs — redirect axis", () => {
     expectFail("computed property key");
   });
 
+  it('passes a globalThis["fetch"] call that pins redirect', () => {
+    cli("a.ts", 'export const f = (u: string) => globalThis["fetch"](u, { redirect: "error" });\n');
+    expect(runGuard().exitCode).toBe(0);
+  });
+
   it('FAILS on a globalThis["fetch"] call without redirect', () => {
     cli("a.ts", 'export const f = (u: string) => globalThis["fetch"](u);\n');
     expectFail("fetch call without a pinned redirect");
@@ -221,6 +240,14 @@ describe("check-client-credential-fetch.mjs — redirect axis", () => {
   it("FAILS on an import of a binding named fetch", () => {
     cli("a.ts", 'import { fetch } from "undici";\nexport const f = (u: string) => fetch(u, { redirect: "error" });\n');
     expectFail("import/export of a binding named fetch");
+  });
+
+  it("passes a class member that shares an alias's name", () => {
+    cli(
+      "a.ts",
+      'const fetchFn = fetch;\nexport const f = (u: string) => fetchFn(u, { redirect: "error" });\nexport class C {\n  fetchFn = 1;\n}\ninterface I {\n  fetchFn(): void;\n}\nexport type T = I;\n',
+    );
+    expect(runGuard().exitCode).toBe(0);
   });
 
   it("FAILS on an alias used as a value", () => {

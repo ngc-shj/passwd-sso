@@ -155,6 +155,23 @@ describe("apiRequest", () => {
     );
   });
 
+  it("reports a refused redirect on the retry after a refresh", async () => {
+    clearTokenCache();
+    setTokenCache("old-token", "https://test.example.com", new Date(Date.now() + MS_PER_HOUR).toISOString(), "mcpr_refresh123", "mcpc_client123");
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 401, json: async () => ({}) });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ access_token: "mcp_new_access", refresh_token: "mcpr_new_refresh", expires_in: 3600, scope: "" }),
+    });
+    mockFetch.mockRejectedValueOnce(new TypeError("fetch failed", { cause: new Error("unexpected redirect") }));
+
+    await expect(apiRequest("/api/test")).rejects.toThrow(
+      "The server at https://test.example.com redirected the request",
+    );
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+  });
+
   it("returns 401 response when refresh also fails", async () => {
     clearTokenCache();
     setTokenCache("old-token", "https://test.example.com", new Date(Date.now() + MS_PER_HOUR).toISOString(), "mcpr_refresh", "mcpc_client");

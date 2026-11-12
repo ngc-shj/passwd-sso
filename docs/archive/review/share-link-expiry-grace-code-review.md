@@ -182,3 +182,34 @@ Incremental review of commit 104e2e5ed (Round 2 fixes and the class-C7 guard).
 
 ### T9 / T13 [Minor] Test pairing and revoke destination
 - Action: the in-flight-refresh controls assert after the same `settle()` as their negatives (microtask-only continuations, so deterministic); the restored-token positive waits for exactly one DELETE to the token endpoint at its issuer (the configured default server). Red-proved: a revoke redirected to the new server fails the positive case.
+
+# Round 4
+
+## Changes from Previous Round
+Incremental review of commit 49f689b0a (Round 3 fixes).
+
+## Functionality Findings
+- F6 [Minor] The guard's "declared more than once" check over-reports across unrelated functions (name-based), and its message blamed a shadowing binding that need not exist. — Message fixed; the over-report is the documented fail-closed trade-off of a name-based gate.
+
+## Security Findings
+- S4-m1 [Minor] The const-init write check was a denylist of write forms, so an alias, a mutating helper, `Reflect.set`, `Object.defineProperty`, a destructuring-assignment target or a for-of target could change `redirect` and still pass (`scripts/checks/check-client-credential-fetch.mjs`). Second patch round on this check. — Fixed by changing the mechanism.
+- Options-page issuer comparison and `onRedirectRefused`: no finding (no two distinct servers compare equal; the message carries only the origin).
+
+## Testing Findings
+- T15 [Minor] The restored-token server-change revoke used the configured default as the issuer, so a revoke to the configured URL stayed green. — Fixed.
+- T16 [Minor] The cold-start hydration test did not pin the session-issuer revoke branch. — Fixed.
+- T17 [Minor] `onRedirectRefused` was pinned at 1 of its 7 call sites. — Fixed.
+- T18 [Minor] The network-error case relied on a closed port (flaky), and `globalThis["fetch"]` had no positive control. — Fixed.
+
+## Resolution Status
+### S4-m1 / F6 [Minor] Guard const-init check
+- Action: the denylist of writes is replaced by an allowlist of uses. Every reference to the init's name must be its declaration, the init argument of a checked fetch call, a property access with a literal key other than `redirect`, or an object spread; anything else is "unclassified init reference" (mirrors "unclassified fetch reference"). The duplicate-declaration message now says the gate matches by name and suggests a rename or an inline literal.
+- Modified files: `scripts/checks/check-client-credential-fetch.mjs`, `scripts/__tests__/check-client-credential-fetch.test.mjs`. Red-proved: the six escape forms exit 0 under the 49f689b0a guard and exit 1 under the new one; the literal-key/spread control passes. Real tree: OK.
+
+### T15 / T16 [Minor] Revoke destination per branch
+- Action: the restored-token case uses an issuer distinct from both the old and the new configured URL and waits for exactly one DELETE at that issuer; the cold-start test does the same for the session branch.
+- Red-proved on a scratch worktree: revoking at the configured URL in the held-token branch fails both restored-token cases; the same mutation in the session branch fails the cold-start test.
+
+### T17 / T18 [Minor] Per-site redirect refusal and test hygiene
+- Action: tests for the 401 retry, `env`, `run`, and OAuth register/exchange/refresh; the network-error case drops the connection on the same local server; positive `globalThis["fetch"]` control.
+- Red-proved: removing `.catch(onRedirectRefused(…))` at each of the 7 sites fails exactly that site's test.

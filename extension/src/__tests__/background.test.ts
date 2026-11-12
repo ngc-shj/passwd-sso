@@ -3737,12 +3737,15 @@ describe("session hydration", () => {
     chromeMock = installChromeMock();
     const OLD_URL = "https://old.example.com";
     const NEW_URL = "https://new.example.com";
+    // The issuer differs from the reported old value, so a revoke sent to the
+    // previous configured URL instead of the issuer is visible.
+    const ISSUER_URL = "https://issuer.example.com";
     const stored = {
       token: "cold-tok",
       expiresAt: Date.now() + 600_000,
       userId: "u-1",
       tokenCnfJkt: STATIC_TEST_JKT,
-      issuerUrl: OLD_URL,
+      issuerUrl: ISSUER_URL,
     };
     // Startup hydration and the server-change handler each read session
     // storage; release them separately so hydration completes while the
@@ -3769,7 +3772,7 @@ describe("session hydration", () => {
           .filter(([, init]) => bearerOf(init).includes("cold-tok"));
       await vi.waitFor(() => expect(callsWithToken()).toHaveLength(1));
       const [url, init] = callsWithToken()[0];
-      expect(url).toBe(`${OLD_URL}/api/extension/token`);
+      expect(url).toBe(`${ISSUER_URL}/api/extension/token`);
       expect(init.method).toBe("DELETE");
     } finally {
       sessionStorageMocks.loadSession.mockResolvedValue(null);
@@ -4163,15 +4166,21 @@ describe("session hydration", () => {
   });
 
   it.each([
-    ["revokes it at its issuer", "https://localhost:3000", 1],
+    ["revokes it at its issuer", "https://issuer.example.com", 1],
     ["revokes it nowhere when it has no recorded issuer", undefined, 0],
   ])("on a server change, a restored token %s", async (_label, issuerUrl, expectedDeletes) => {
     // The previous configured URL is never a revocation target: it may be a
-    // different server than the one that issued the token.
+    // different server than the one that issued the token. The issuer differs
+    // from the default server, the reported old value and the new one, so a
+    // revoke sent anywhere but the issuer is visible.
     const OLD_URL = "https://old.example.com";
+    const NEW_URL = "https://new.example.com";
     vi.resetModules();
     vi.clearAllMocks();
     chromeMock = installChromeMock();
+    // Settings name the issuer while the session is restored (a mismatch would
+    // end the connection during hydration), then the new server after the change.
+    chromeMock.storage.local.get.mockResolvedValue({ serverUrl: issuerUrl ?? "https://localhost:3000", autoLockMinutes: 15 });
     sessionStorageMocks.loadSession.mockResolvedValueOnce({
       token: "tok-restored",
       expiresAt: Date.now() + 600_000,
@@ -4185,22 +4194,21 @@ describe("session hydration", () => {
     await loadBackground();
     expect(await sendMessage({ type: "GET_STATUS" })).toEqual(expect.objectContaining({ hasToken: true }));
 
-    storageChangeHandlers[0](
-      { serverUrl: { oldValue: OLD_URL, newValue: "https://new.example.com" } },
-      "local",
-    );
+    chromeMock.storage.local.get.mockResolvedValue({ serverUrl: NEW_URL, autoLockMinutes: 15 });
+    storageChangeHandlers[0]({ serverUrl: { oldValue: OLD_URL, newValue: NEW_URL } }, "local");
     expect(await sendMessage({ type: "GET_STATUS" })).toEqual(expect.objectContaining({ hasToken: false }));
     const deletes = () =>
       (fetchMock.mock.calls as unknown as [string, RequestInit][])
         .filter(([, init]) => init?.method === "DELETE" && bearerOf(init).includes("tok-restored"))
         .map(([url]) => String(url));
     if (expectedDeletes > 0) {
-      await vi.waitFor(() => expect(deletes()).toEqual(["https://localhost:3000/api/extension/token"]));
+      await vi.waitFor(() => expect(deletes()).toEqual([`${issuerUrl}/api/extension/token`]));
     } else {
       await new Promise((r) => setTimeout(r, 20)); // let a (wrong) revoke, if any, be issued
       expect(deletes()).toEqual([]);
     }
     expect(callsWith(fetchMock, OLD_URL, "tok-restored")).toBe(0);
+    expect(callsWith(fetchMock, NEW_URL, "tok-restored")).toBe(0);
   });
 
   it("refreshes once and retries once on a 401 when the token is near expiry", async () => {
