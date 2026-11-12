@@ -179,14 +179,17 @@ describe("check-client-credential-fetch.mjs — redirect axis", () => {
     ["merged with Object.assign", "Object.assign(opts, o);"],
     ["reached through an alias", 'const o2 = opts;\n  o2.redirect = "follow";'],
     ["handed to a helper", "mutate(opts);"],
+    ["handed to a helper as the second argument", "mutate2(u, opts);"],
+    ["passed to fetch in a position other than the init", 'void fetch(u, { redirect: "error" }, opts);'],
     ["set with Reflect.set", 'Reflect.set(opts, "redirect", "follow");'],
     ["redefined with Object.defineProperty", 'Object.defineProperty(opts, "redirect", { value: "follow" });'],
     ["a destructuring-assignment target", "({ r: opts.redirect } = o as { r: RequestRedirect });"],
     ["a for-of target", "for (opts.redirect of [\"follow\" as const]);"],
+    ["reached through a member call that returns it", 'Object.assign(opts.valueOf(), { redirect: "follow" });'],
   ])("FAILS when the const init's redirect is %s after declaration", (_label, write) => {
     cli(
       "a.ts",
-      `declare function mutate(o: object): void;\nexport function f(u: string, o: RequestInit, k: string) {\n  const opts: RequestInit & Record<string, unknown> = { redirect: "error" };\n  ${write}\n  return fetch(u, opts);\n}\n`,
+      `declare function mutate(o: object): void;\ndeclare function mutate2(u: string, o: object): void;\nexport function f(u: string, o: RequestInit, k: string) {\n  const opts: RequestInit & Record<string, unknown> = { redirect: "error" };\n  ${write}\n  return fetch(u, opts);\n}\n`,
     );
     expectFail("unclassified init reference");
   });
@@ -240,6 +243,43 @@ describe("check-client-credential-fetch.mjs — redirect axis", () => {
   it("FAILS on an import of a binding named fetch", () => {
     cli("a.ts", 'import { fetch } from "undici";\nexport const f = (u: string) => fetch(u, { redirect: "error" });\n');
     expectFail("import/export of a binding named fetch");
+  });
+
+  it("FAILS on an exported const init", () => {
+    cli("a.ts", 'export const opts: RequestInit = { redirect: "error" };\nexport const f = (u: string) => fetch(u, opts);\n');
+    expectFail("is exported");
+  });
+
+  it("FAILS on an init literal with a method that rewrites it", () => {
+    cli(
+      "a.ts",
+      'export function f(u: string) {\n  const opts = { redirect: "error" as RequestRedirect, relax() { this.redirect = "follow"; } };\n  return fetch(u, opts);\n}\n',
+    );
+    expectFail("accessor or method");
+  });
+
+  it("FAILS on an init literal with a getter", () => {
+    cli(
+      "a.ts",
+      'export const f = (u: string) => fetch(u, { redirect: "error", get method() { return "GET"; } });\n',
+    );
+    expectFail("accessor or method");
+  });
+
+  it("passes a const init passed through a type assertion and named in a type", () => {
+    cli(
+      "a.ts",
+      'export function f(u: string) {\n  const opts = { redirect: "error" as const };\n  type O = typeof opts;\n  const k: O | undefined = undefined;\n  void k;\n  return fetch(u, opts as RequestInit);\n}\n',
+    );
+    expect(runGuard().exitCode).toBe(0);
+  });
+
+  it("passes names that share the init's name but are keys, not references", () => {
+    cli(
+      "a.tsx",
+      'declare const X: (p: { opts: number }) => null;\nexport function f(u: string, o: { opts: number }) {\n  const opts: RequestInit = { redirect: "error" };\n  const { opts: y } = o;\n  void y;\n  void (<X opts={1} />);\n  void { opts: 1 }.opts;\n  return fetch(u, opts);\n}\nexport class C {\n  get opts() {\n    return 1;\n  }\n}\nexport enum E {\n  opts,\n}\n',
+    );
+    expect(runGuard().exitCode).toBe(0);
   });
 
   it("passes a class member that shares an alias's name", () => {

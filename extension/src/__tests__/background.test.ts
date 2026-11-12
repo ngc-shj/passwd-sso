@@ -4201,12 +4201,10 @@ describe("session hydration", () => {
       (fetchMock.mock.calls as unknown as [string, RequestInit][])
         .filter(([, init]) => init?.method === "DELETE" && bearerOf(init).includes("tok-restored"))
         .map(([url]) => String(url));
-    if (expectedDeletes > 0) {
-      await vi.waitFor(() => expect(deletes()).toEqual([`${issuerUrl}/api/extension/token`]));
-    } else {
-      await new Promise((r) => setTimeout(r, 20)); // let a (wrong) revoke, if any, be issued
-      expect(deletes()).toEqual([]);
-    }
+    // The revoke path awaits only mocks (session read, DPoP signing), so one
+    // macrotask drains it; both cases wait the same, so the negative is paired.
+    await new Promise<void>((r) => setTimeout(r, 0));
+    expect(deletes()).toEqual(expectedDeletes > 0 ? [`${issuerUrl}/api/extension/token`] : []);
     expect(callsWith(fetchMock, OLD_URL, "tok-restored")).toBe(0);
     expect(callsWith(fetchMock, NEW_URL, "tok-restored")).toBe(0);
   });

@@ -213,3 +213,37 @@ Incremental review of commit 49f689b0a (Round 3 fixes).
 ### T17 / T18 [Minor] Per-site redirect refusal and test hygiene
 - Action: tests for the 401 retry, `env`, `run`, and OAuth register/exchange/refresh; the network-error case drops the connection on the same local server; positive `globalThis["fetch"]` control.
 - Red-proved: removing `.catch(onRedirectRefused(…))` at each of the 7 sites fails exactly that site's test.
+
+# Round 5
+
+## Changes from Previous Round
+Incremental review of commit cae9dcfc2 (Round 4 fixes, including `/simplify`'s extraction of `isMemberKeyName`).
+
+## Functionality Findings
+- F7 [Minor] = S5-M1: a member call that returns the object (`opts.valueOf()`) was accepted as a property access. — Fixed.
+- F8 [Minor] Names that share the init's name but are keys (getter name, binding-pattern key, JSX attribute, enum member) were reported. — Fixed.
+
+## Security Findings
+- S5-M1 [Major] A non-redirect property access was accepted even as a callee, so `opts.valueOf()`, `__defineGetter__`, or a method in the literal could change `redirect` (the Round 4 alias escape, one call away). — Fixed.
+- S5-m1 [Minor] A getter or method in the init literal can rewrite `redirect` through `this` while fetch reads the init. — Fixed.
+- S5-m2 [Minor] `export const opts = {…}` let another file write the init unseen. — Fixed.
+- `eval` / `new Function` and non-import cross-file reach (globals, extension messaging) are listed as known bypasses: a name-based AST gate cannot see them.
+
+## Testing Findings
+- T19 [Major] = S5-M1, unpinned. — Fixed.
+- T20 [Major] The "argument of a checked fetch call" condition had no test (dropping it stayed green). — Fixed.
+- T21 [Minor] The "init is the second argument" condition had no test. — Fixed.
+- T22 [Minor] The wrapper unwrapping, the type-position skip and the key skip had no positive control. — Fixed.
+- T23 [Minor] The no-issuer server-change case waited a fixed 20 ms before its negative assertion. — Fixed.
+
+## Resolution Status
+### S5-M1 / S5-m1 / S5-m2 / F7 / F8 / T19 [Major] Guard const-init check
+- Action: a property or element access passes only when it is read, not called; the init literal may hold no getter, setter or method (checked for inline inits too); an exported declaration is refused; `isMemberKeyName` covers accessors, binding-pattern keys, enum members and JSX attributes. Header lists the known bypasses.
+- Modified files: `scripts/checks/check-client-credential-fetch.mjs`, `scripts/__tests__/check-client-credential-fetch.test.mjs`. Red-proved: the five new cases fail against the cae9dcfc2 guard. Real tree: OK.
+
+### T20 / T21 / T22 [Major] Allowlist branches without tests
+- Action: escape cases for a helper taking the init second and for the init in a non-init fetch position; positive controls for `opts as RequestInit`, `typeof opts`, and key-only names.
+- Red-proved on a scratch copy: dropping the fetch-call condition, the argument-index condition, the wrapper climb, the type-position skip, or the key skip each fails exactly its test.
+
+### T23 [Minor] Timed negative in the server-change revoke test
+- Action: both cases wait one macrotask (the revoke path awaits only mocks) and assert the exact DELETE list, so the negative is paired with a positive that passes under the same wait. Red-proved: restoring the configured-URL fallback fails the no-issuer case.

@@ -37,8 +37,9 @@
  * once in the file (a parameter or inner binding of the same name could shadow
  * it; name-based, so this can only over-report) and every other reference to
  * the name is a known-safe use: the init argument of a checked fetch call, a
- * property access with a literal key other than `redirect`, or an object spread
- * (a copy). Anything else — an alias, a call argument, `Reflect.set`,
+ * property read (not a call) with a literal key other than `redirect`, or an
+ * object spread (a copy); the literal itself may hold no getter, setter or
+ * method, and the declaration must not be exported. Anything else — an alias, a call argument, `Reflect.set`,
  * `x.redirect`, `x[k]`, a destructuring target — is "unclassified init
  * reference", since the object could then be changed out of sight. Any other
  * reference to the identifier `fetch` (passed
@@ -52,6 +53,10 @@
  * Control class (R49): verification — the property is checked on the call
  * itself, not inferred from a name list. The one non-verifying piece is the
  * alias set (name-based, per file).
+ *
+ * Known bypasses (Axis 1): code in strings (`eval`, `new Function`), a computed
+ * global (`globalThis["fe" + "tch"]`), and an init reached from another file
+ * through something other than an import (a global, extension messaging).
  *
  * ## Axis 2 — Authorization (TRIPWIRE, not a boundary; extension/src only)
  *
@@ -139,12 +144,17 @@ function isInTypePosition(id) {
 /** True when `id` is the name of a member (a key), not a reference to a binding. */
 function isMemberKeyName(id) {
   const p = id.getParent();
+  if (Node.isBindingElement(p)) return p.getPropertyNameNode() === id;
   return (
     (Node.isPropertyAssignment(p) ||
       Node.isPropertySignature(p) ||
       Node.isPropertyDeclaration(p) ||
       Node.isMethodDeclaration(p) ||
-      Node.isMethodSignature(p)) &&
+      Node.isMethodSignature(p) ||
+      Node.isGetAccessorDeclaration(p) ||
+      Node.isSetAccessorDeclaration(p) ||
+      Node.isEnumMember(p) ||
+      Node.isJsxAttribute(p)) &&
     p.getNameNode() === id
   );
 }
@@ -212,12 +222,17 @@ function countDeclarations(sf, name) {
   return n;
 }
 
+function isCalled(access) {
+  const p = access.getParent();
+  return Node.isCallExpression(p) && p.getExpression() === access;
+}
+
 /**
  * The first reference to `name` that is not a known-safe use, or null. Allowlist,
  * not a list of write forms: an alias, a helper argument, `Reflect.set`, a
  * destructuring target all escape a denylist. Safe uses: the declaration, the
- * init argument of a checked fetch call, a property access with a literal key
- * other than `redirect`, and an object spread (a copy).
+ * init argument of a checked fetch call, a property read (not a call) with a
+ * literal key other than `redirect`, and an object spread (a copy).
  */
 function unclassifiedInitReference(sf, name, isFetchCall) {
   for (const id of sf.getDescendantsOfKind(SyntaxKind.Identifier)) {
@@ -239,8 +254,11 @@ function unclassifiedInitReference(sf, name, isFetchCall) {
     }
     const p = n.getParent();
     if (Node.isCallExpression(p) && p.getArguments()[1] === n && isFetchCall(p)) continue;
-    if (Node.isPropertyAccessExpression(p) && p.getExpression() === n && p.getName() !== "redirect") continue;
-    if (Node.isElementAccessExpression(p) && p.getExpression() === n) {
+    // A member that is called can return the object itself (`opts.valueOf()`), so only reads pass.
+    if (Node.isPropertyAccessExpression(p) && p.getExpression() === n && p.getName() !== "redirect" && !isCalled(p)) {
+      continue;
+    }
+    if (Node.isElementAccessExpression(p) && p.getExpression() === n && !isCalled(p)) {
       const key = strText(p.getArgumentExpression());
       if (key !== null && key !== "redirect") continue;
     }
@@ -259,6 +277,9 @@ function redirectProblem(call, isFetchCall) {
     const name = init.getText();
     const resolved = findConstObjectLiteral(init, name);
     if (!resolved) return `init \`${name}\` does not resolve to a same-scope const object literal`;
+    if (resolved.getFirstAncestorByKind(SyntaxKind.VariableStatement)?.isExported()) {
+      return `init \`${name}\` is exported, so another file can change it out of sight`;
+    }
     const sf = call.getSourceFile();
     if (countDeclarations(sf, name) !== 1) {
       return `init \`${name}\` is declared more than once in the file (the gate matches by name, so it cannot tell which binding is passed); rename it or pass an inline literal`;
@@ -270,6 +291,12 @@ function redirectProblem(call, isFetchCall) {
     init = resolved;
   }
   if (!Node.isObjectLiteralExpression(init)) return "init is not an object literal";
+  // A getter or method runs code against the init while fetch reads it.
+  const runsCode = (prop) =>
+    Node.isGetAccessorDeclaration(prop) || Node.isSetAccessorDeclaration(prop) || Node.isMethodDeclaration(prop);
+  if (init.getProperties().some(runsCode)) {
+    return "init has an accessor or method, which can change redirect while fetch reads it";
+  }
   let lastSpread = -1;
   let redirectIdx = -1;
   let redirectValue;
