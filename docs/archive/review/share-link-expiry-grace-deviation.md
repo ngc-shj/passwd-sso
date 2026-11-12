@@ -12,3 +12,4 @@
 - Phase 3 Round 4: guard const-init check changed from a denylist of writes to an allowlist of uses (second patch round on the same check); per-site tests for the CLI redirect message; revoke-destination pins per branch.
 - Phase 3 Round 5: guard accepts a property access only as a read, refuses accessor/method members and exported inits, widens the key-name skip; server-change revoke test drops its fixed wait.
 - Phase 3 Round 6: guard treats parenthesised calls, `new` and template tags as invocations; tests pin the element-access, setter and setter-key branches.
+- Phase 3 Round 7: test-only; per-wrapper-kind coverage of the guard's wrapper walk.

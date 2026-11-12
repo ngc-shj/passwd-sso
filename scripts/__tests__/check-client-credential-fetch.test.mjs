@@ -188,6 +188,9 @@ describe("check-client-credential-fetch.mjs — redirect axis", () => {
     ["reached through a member call that returns it", 'Object.assign(opts.valueOf(), { redirect: "follow" });'],
     ["reached through an element-access call that returns it", 'Object.assign(opts["valueOf"](), { redirect: "follow" });'],
     ["reached through a parenthesised member call", 'Object.assign((opts.valueOf)(), { redirect: "follow" });'],
+    ["reached through a member call through as", 'Object.assign((opts.valueOf as () => object)(), { redirect: "follow" });'],
+    ["reached through a member call through satisfies", 'Object.assign((opts.valueOf satisfies () => object)(), { redirect: "follow" });'],
+    ["reached through a member call through a non-null assertion", 'Object.assign(opts.valueOf!(), { redirect: "follow" });'],
     ["reached through a member used as a template tag", 'Object.assign(opts.valueOf``, { redirect: "follow" });'],
     ["reached through a member used as a constructor", "void new (opts as any).constructor();"],
   ])("FAILS when the const init's redirect is %s after declaration", (_label, write) => {
@@ -280,6 +283,15 @@ describe("check-client-credential-fetch.mjs — redirect axis", () => {
       "a.ts",
       'export function f(u: string) {\n  const opts = { redirect: "error" as const };\n  type O = typeof opts;\n  const k: O | undefined = undefined;\n  void k;\n  return fetch(u, opts as RequestInit);\n}\n',
     );
+    expect(runGuard().exitCode).toBe(0);
+  });
+
+  it.each([
+    ["parentheses", "void (opts).cache;\n  return fetch(u, (opts));"],
+    ["satisfies", "void (opts satisfies RequestInit).cache;\n  return fetch(u, opts satisfies RequestInit);"],
+    ["a non-null assertion", "void opts!.cache;\n  return fetch(u, opts!);"],
+  ])("passes a const init read and passed through %s", (_label, body) => {
+    cli("a.ts", `export function f(u: string) {\n  const opts: RequestInit = { redirect: "error" };\n  ${body}\n}\n`);
     expect(runGuard().exitCode).toBe(0);
   });
 

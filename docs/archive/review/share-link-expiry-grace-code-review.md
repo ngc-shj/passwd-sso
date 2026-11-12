@@ -271,4 +271,25 @@ Incremental review of commit 618114fd6 (Round 5 fixes).
 ## Resolution Status
 ### F9 / S6-m1 / T24–T26 [Minor] Invocation forms and untested branches
 - Action: `isCalled` looks through paren/as/satisfies/non-null wrappers and treats a call, `new`, or a template tag as an invocation; the wrapper walk is shared with `unclassifiedInitReference` as `outermostWrapper`. Tests for the parenthesised call, template tag, constructor, element-access call, setter in the init, and setter key.
-- Red-proved: the three invocation-form cases fail against the 618114fd6 guard; removing the element-access `isCalled`, the setter refusal, the setter key skip, or the wrapper walk in `isCalled` each fails exactly its test.
+- Red-proved: the three invocation-form cases fail against the 618114fd6 guard; removing the element-access `isCalled`, the setter refusal, the setter key skip, or the whole wrapper walk in `isCalled` each fails exactly its test (per-kind coverage of the walk was added in Round 7).
+
+# Round 7
+
+## Changes from Previous Round
+Incremental review of commit 1a1eb2f4d (Round 6 fixes).
+
+## Functionality Findings
+No findings. `outermostWrapper` is equivalent to the loop it replaced; realistic reads through wrappers (`(opts.headers as Headers).set`, `opts.signal!.aborted`, optional chaining) still pass.
+
+## Security Findings
+No findings. The Round 6 escapes are reported; the remaining escapes (comma operator, `Function.prototype.call.call`, prototype getters) are contrived and covered by the header's framing of a name-based single-file gate.
+
+## Testing Findings
+- T28 [Major] The `as`, `satisfies` and non-null arms of the wrapper walk had no test on the `isCalled` side (removing them let a wrapped member call pass). — Fixed.
+- T27 [Minor] The paren, `satisfies` and non-null arms had no positive control on the reference side (removing them only over-reports). — Fixed.
+- The `p.getExpression() !== node` condition and the template-tag identity check are unreachable as mutants (no input distinguishes them); kept as defensive.
+
+## Resolution Status
+### T27 / T28 Wrapper-kind coverage
+- Action: escape cases for a member call through `as`, `satisfies` and `!`; positive controls for a read and a fetch init through parentheses, `satisfies` and `!`.
+- Red-proved on a scratch copy: for each of the four wrapper kinds, removing it from the walk used by `isCalled` alone, and from the walk used by the reference check alone, fails a test (8 of 8).
