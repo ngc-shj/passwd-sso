@@ -50,8 +50,8 @@ describe("writeSecretFile / readSecretFile", () => {
 
     writeSecretFile(path, "new");
 
-    expect(statSync(path).mode & 0o777).toBe(0o600);
     expect(readFileSync(path, "utf-8")).toBe("new");
+    expect(statSync(path).mode & 0o777).toBe(0o600);
   });
 
   it.runIf(isPosix)("refuses to write through a pre-existing symlink (O_NOFOLLOW)", () => {

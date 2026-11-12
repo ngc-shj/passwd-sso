@@ -26,7 +26,7 @@ describe("writeSecretFile (e2e mirror)", () => {
 
     writeSecretFile(path, "new");
 
-    expect(statSync(path).mode & 0o777).toBe(0o600);
     expect(readFileSync(path, "utf-8")).toBe("new");
+    expect(statSync(path).mode & 0o777).toBe(0o600);
   });
 });

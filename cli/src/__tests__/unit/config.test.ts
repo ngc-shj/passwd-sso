@@ -76,8 +76,8 @@ describe("config", () => {
 
     saveConfig({ serverUrl: "https://example.com", locale: "en" });
 
-    expect(statSync(configPath).mode & 0o777).toBe(0o600);
     expect(JSON.parse(readFileSync(configPath, "utf-8")).serverUrl).toBe("https://example.com");
+    expect(statSync(configPath).mode & 0o777).toBe(0o600);
   });
 
   it("saveConfig tightens a pre-existing 0755 config dir to 0700", () => {

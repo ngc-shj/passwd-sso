@@ -309,6 +309,12 @@ function applyToken(token: string, expiresAt: number, cnfJkt: string, issuerUrl 
 function bearerOf(init: unknown): string {
   return new Headers((init as RequestInit | undefined)?.headers).get("Authorization") ?? "";
 }
+// Compare origins, not prefixes: "https://old.example.com.evil" starts with
+// "https://old.example.com".
+function isAtOrigin(url: unknown, origin: string): boolean {
+  return new URL(String(url)).origin === origin;
+}
+
 function callsWith(
   mock: { mock: { calls: unknown[][] } },
   pathPart: string,
@@ -3301,7 +3307,7 @@ describe("session persistence", () => {
       const urls = (fetchMock.mock.calls as [string, RequestInit][])
         .filter(([, init]) => bearerOf(init).includes("tok-chg"))
         .map(([url]) => String(url));
-      expect(urls.some((u) => u.startsWith(NEW_URL))).toBe(false);
+      expect(urls.some((u) => isAtOrigin(u, NEW_URL))).toBe(false);
       expect(await hasToken()).toBe(false);
     });
 
@@ -3393,7 +3399,7 @@ describe("session persistence", () => {
       expect(res.entries).not.toBeNull();
       const urls = urlsCarrying("tok-bound");
       expect(urls.some((u) => u.startsWith(`${OLD_URL}${EXT_API_PATH.PASSWORDS}`))).toBe(true);
-      expect(urls.every((u) => u.startsWith(OLD_URL))).toBe(true);
+      expect(urls.every((u) => isAtOrigin(u, OLD_URL))).toBe(true);
       expect(await hasToken()).toBe(true);
     });
 
@@ -3409,14 +3415,14 @@ describe("session persistence", () => {
       await connectAt("tok-bound", OLD_URL);
       // Control: before the change the same request reaches the issuer.
       await sendMessage({ type: "FETCH_PASSWORDS" });
-      expect(urlsCarrying("tok-bound").some((u) => u.startsWith(OLD_URL))).toBe(true);
+      expect(urlsCarrying("tok-bound").some((u) => isAtOrigin(u, OLD_URL))).toBe(true);
       fetchMock().mockClear();
 
       settingsSay(NEW_URL);
       const res = (await sendMessage({ type: "FETCH_PASSWORDS" })) as { entries: unknown[] | null };
 
       expect(res.entries).toBeNull();
-      expect(urlsCarrying("tok-bound").some((u) => u.startsWith(NEW_URL))).toBe(false);
+      expect(urlsCarrying("tok-bound").some((u) => isAtOrigin(u, NEW_URL))).toBe(false);
       expect(await hasToken()).toBe(false);
       await vi.waitFor(() => expect(deletesCarrying("tok-bound")).toHaveLength(1));
       expect(deletesCarrying("tok-bound")[0][0]).toBe(`${OLD_URL}${TOKEN_PATH}`);
@@ -3440,7 +3446,7 @@ describe("session persistence", () => {
         hold.release();
         await pending;
 
-        expect(urlsCarrying("tok-new").some((u) => u.startsWith(OLD_URL))).toBe(false);
+        expect(urlsCarrying("tok-new").some((u) => isAtOrigin(u, OLD_URL))).toBe(false);
         // The parked request itself is never sent, under either token.
         const sentPasswords = (token: string) =>
           urlsCarrying(token).filter((u) => u.includes(EXT_API_PATH.PASSWORDS));
@@ -3467,7 +3473,7 @@ describe("session persistence", () => {
       await vi.waitFor(() =>
         expect(urlsCarrying("tok-bound").some((u) => u.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH))).toBe(true),
       );
-      expect(urlsCarrying("tok-bound").every((u) => u.startsWith(OLD_URL))).toBe(true);
+      expect(urlsCarrying("tok-bound").every((u) => isAtOrigin(u, OLD_URL))).toBe(true);
     });
 
     describe("a refresh in flight when the connection ends", () => {
@@ -3874,14 +3880,14 @@ describe("session hydration", () => {
     await sendMessage({ type: "FETCH_PASSWORDS" });
     const urls = carrying().map(([url]) => String(url));
     expect(urls).toContain(`${OLD_URL}${EXT_API_PATH.PASSWORDS}`);
-    expect(urls.every((u) => u.startsWith(OLD_URL))).toBe(true);
+    expect(urls.every((u) => isAtOrigin(u, OLD_URL))).toBe(true);
     fetchMock.mockClear();
 
     // A token without a restored issuer would follow the setting; a restored one must not.
     settingsSay(NEW_URL);
     await sendMessage({ type: "FETCH_PASSWORDS" });
 
-    expect(carrying().some(([url]) => String(url).startsWith(NEW_URL))).toBe(false);
+    expect(carrying().some(([url]) => isAtOrigin(url, NEW_URL))).toBe(false);
     await vi.waitFor(() =>
       expect(carrying().filter(([, init]) => init?.method === "DELETE").map(([url]) => String(url))).toEqual([
         `${OLD_URL}/api/extension/token`,
