@@ -166,3 +166,33 @@ Resolved as C8 (own-key lookup), since C5 widens its use on server-supplied code
 - Security: retry bounds, disclosure, rendering, fail-closed, authz ordering, client clamp ok.
 - Testing: R1, R3, R8, R12, R16, R17, R19, R29, R37, R38, R42 ok; RT1–RT6, RT8–RT11 ok; RT7
   T4-F1.
+
+## Round 5 (2026-11-13)
+
+Changes from Round 4: added C7 (step-up helpers read a clone) and C8 (own-key i18n lookup).
+
+### Functionality
+- F5-1 Major (design) — `res.clone()` throws on the plain-object `Response` mocks of ~24 callers'
+  tests. → Resolved by redesign: C7 now memoizes the parse in `readApiErrorBody` (WeakMap per
+  `Response`) and routes `toastApiError` through it; no clone, existing mocks unaffected, and a
+  second reader of any kind is covered, not only the step-up helpers.
+- F5-2 Minor — C8 missed the `overrides?.[code]` lookup. → Resolved.
+- F5-3 Minor — record the sweep of other double-read helpers. → Resolved: two rg derivations in C7.
+
+### Security
+- S5-1 Minor — same as F5-2. → Resolved.
+- No fail-open: a step-up 403 is read through the same memo, and the guard's tokens are unchanged
+  (run the guard unpiped after the change).
+
+### Testing
+- Q5-1 Major — mock breakage under clone. → Resolved by the C7 redesign.
+- Q5-2 Major — consumer-level C7 proof unnamed. → Resolved: members-list approve/reject `it.each`
+  and ownerless-card cells converted to real `Response`s, red-proved by removing the memo.
+- Q5-3 Minor — pre-consumed-body pin. → Obsolete (no `bodyUsed` guard in the redesign).
+- Q5-4/Q5-5 Minor — C8 overrides cell, red-proof, `typeof string`. → Resolved.
+- Q5-6 Minor — clamp boundary 30/31. → Resolved.
+
+### Recurring Issue Check (non-N/A)
+- Functionality: R42 F5-3; mock fidelity F5-1; inherited lookup F5-2; fail-closed ok.
+- Security: step-up fail-closed ok; guard binding ok; inherited lookup S5-1; error-surface ok.
+- Testing: RT7 Q5-2/Q5-3/Q5-5; RT8 Q5-4; RT10 Q5-1/Q5-2.

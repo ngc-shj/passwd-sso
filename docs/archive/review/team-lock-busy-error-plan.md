@@ -213,31 +213,45 @@ before the run, not dropped). Known members and their change:
 run" doc comment on `isMembershipLockConflict` (directory sync reaches the lock through
 `team-departure.ts` and fails on the thrown error, not through this helper).
 
-### C7 — step-up helpers leave the error body readable (pre-existing defect, review F4-1)
+### C7 — one error-body read per `Response` (pre-existing defect, review F4-1)
 
-`handleStepUpError` and `throwIfStepUp` (`src/lib/http/handle-step-up-error.ts`) read the body of
-the caller's `Response` without cloning it. Every caller that then reads the code again
-(`readApiErrorBody(res)`, `toastApiError(res, …)`) gets `null` in a browser (body already used),
-so its code arms never fire — e.g. the members-list approve/reject `CONFLICT` →
-`approvalBusyRetry` arm has never been reachable. Unit tests mock a re-readable `json()` and hid
-it. The C5 `TEAM_BUSY` arms on step-up-gated consumers depend on this being fixed.
+`handleStepUpError` / `throwIfStepUp` (`src/lib/http/handle-step-up-error.ts`) read the caller's
+`Response` body through `readApiErrorBody`, which calls `res.json()` with no clone. Every caller
+that then reads the code again (`readApiErrorBody(res)`, `toastApiError(res, …)`) gets `null` in
+a browser (body already used), so its code arms never fire — e.g. the members-list approve/reject
+`CONFLICT` → `approvalBusyRetry` arm has never been reachable. Unit tests mock a re-readable
+`json()` and hid it. The C5 `TEAM_BUSY` arms on step-up-gated consumers depend on this fix.
 
-- Fix at the helper (closes the class for all callers, not per site): read from `res.clone()`;
-  when `res.bodyUsed` is already true, treat the body as unreadable (`null`) rather than throw.
-  Signatures unchanged.
-- Member set (for the record and for the test): `rg -n "handleStepUpError\(|throwIfStepUp\("
-  src --glob '!**/*.test.*'`; Phase 2 lists the callers that read the body afterwards — all are
-  fixed by the helper change with no call-site edit.
-- Acceptance: with a real `Response` (body readable once), after `handleStepUpError` returns
-  `false` the caller's `readApiErrorBody(res)` yields the code; a step-up 403 still triggers
-  reauth; a `Response` whose body was already consumed yields `false` without throwing.
+- Fix at the shared reader, not per site: `readApiErrorBody` memoizes its parse per `Response`
+  (module-level `WeakMap<Response, Promise<MainApiErrorBody | null>>`), so every later reader of
+  the same response gets the same parsed body without touching the stream again.
+  `toastApiError` reads through `readApiErrorBody` instead of its own `res.json()` (its `{}`
+  fallback becomes the `null` case; same output).
+- Why not `res.clone()` in the helpers (round-5 F5-1 / Q5-1): it throws on the plain-object
+  `Response` mocks used across ~24 callers' tests and on an already-consumed body, and it fixes
+  only the step-up helpers, not a second `readApiErrorBody`/`toastApiError` on the same response.
+  The memo needs only `json()`, which every existing mock provides.
+- Member set swept (round-5 F5-3; recorded with command output at Phase 2):
+  `rg -n "handleStepUpError\(|throwIfStepUp\(" src --glob '!**/*.test.*'` (callers that read the
+  body afterwards: members-list approve/reject, ownerless card — fixed by the memo; callers that
+  pass `res.clone()` stay correct) and
+  `rg -n "readApiErrorBody\(|toastApiError\(" src --glob '!**/*.test.*'` (no other caller reads
+  one response twice; any direct `res.json()` after a helper on the error path is listed and
+  switched to `readApiErrorBody`). Signatures and the step-up guard's tokens are unchanged; run
+  `scripts/checks/check-step-up-client-coverage.sh` unpiped after the change.
+- Acceptance: with a real `Response` (single-read body), a second `readApiErrorBody(res)` and a
+  `toastApiError(res, …)` after `handleStepUpError` returned `false` both see the code; a step-up
+  403 still triggers reauth; full unit suite green with existing mocks unchanged.
 
 ### C8 — `apiErrorToI18nKey` looks up own keys only (pre-existing, review S4 note)
 
-`error in API_ERROR_I18N` also matches inherited names (`"constructor"`, `"toString"`), returning
-a function instead of a key. C5 widens rendering of server-supplied codes through this function,
-so it is fixed here: `Object.hasOwn(API_ERROR_I18N, error)`. Acceptance: `"constructor"` →
-`unknownError`; a real code → its key.
+Both lookups — `overrides?.[code]` and `error in API_ERROR_I18N` — match inherited names
+(`"constructor"`, `"toString"`, `"__proto__"`), returning a function or object instead of a key.
+C5 widens rendering of server-supplied codes through this function, so both use
+`Object.hasOwn` (available: `lib` includes `esnext`; ES2022 runtimes). Acceptance: `"constructor"`
+with and without an `overrides` object → `unknownError` (a `string`); a real code → its key; a
+real code with an override → the override. Same `in`-over-an-i18n-map pattern elsewhere is swept
+at Phase 2 (`rg -n " in [A-Z_]+_I18N\b" src`).
 
 ## Forbidden patterns
 
@@ -306,9 +320,17 @@ from the mismatch, so widening the timeout arm would not reach these cells.)
   cell (a thrown fetch or a non-JSON 5xx → `networkError`); create dialog: non-slug 409 → toast,
   slug field untouched. Every UI cell on a step-up-gated consumer returns a real `Response`
   (body readable once), so it fails while C7 is unfixed.
-- C7: `handle-step-up-error.test.ts` — real `Response`: body readable after `handleStepUpError`
-  and `throwIfStepUp` return; step-up 403 still triggers; pre-consumed body → `false`, no throw.
-- C8: `api-error-codes.test.ts` — `"constructor"`/`"toString"` → `unknownError`.
+- C7: `read-api-error-body.test.ts` / `handle-step-up-error.test.ts` / `toast-api-error.test.ts` —
+  real `Response` (undici, vitest `node` env, single-read body): a second `readApiErrorBody` and a
+  `toastApiError` after `handleStepUpError`/`throwIfStepUp` returned `false` see the code (fail
+  on the old reader); a step-up 403 read through the memo still triggers. Consumer level: convert
+  the members-list approve/reject `it.each` cells (incl. `CONFLICT` → `approvalBusyRetry`) and the
+  ownerless-card cells to real `Response`s; red-proof: they fail with the memo removed on the
+  scratchpad copy.
+- C8: `api-error-codes.test.ts` — `"constructor"`/`"toString"`/`"__proto__"`, with and without
+  `overrides`, → `unknownError` and `typeof === "string"`; positive controls (real code, real code
+  with override). Red-proof: revert to `in` / plain property read on the scratchpad copy.
+- Runner clamp boundary: `Retry-After` 30 → 30 s, 31 → 30 s.
   Status-keyed consumers: existing fixed-message cells' mocks carry the real route code
   (`SLUG_ALREADY_TAKEN`, `SCIM_MANAGED_MEMBER`, `INVITATION_ALREADY_SENT`, `ALREADY_A_MEMBER`)
   instead of `{}` or another code; plus one cell each for a `CONFLICT` 409 and a code-less 409
@@ -360,5 +382,5 @@ from the mismatch, so widening the timeout arm would not reach these cells.)
 | C4 | membership family / vault reset team-lock timeout → `TEAM_BUSY` | locked |
 | C5 | web client handling | locked |
 | C6 | docs | locked |
-| C7 | step-up helpers read a clone (pre-existing body double-read) | locked |
+| C7 | memoized error-body read (pre-existing double-read) | locked |
 | C8 | `apiErrorToI18nKey` own-key lookup | locked |
