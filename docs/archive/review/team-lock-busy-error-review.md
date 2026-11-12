@@ -63,3 +63,42 @@ Preserved from each expert's output; non-N/A entries:
 - Testing: R1 ok; R2 ok; R3 T-F2; R8 ok; R12 ok; R16 ok; R17 T-F7; R19 T-F3; R29 ok; R37 ok;
   R38 T-F7; R42 T-F10; RT1 T-F3; RT2 ok; RT3 T-F8; RT4 T-F4; RT5 T-F3; RT6 T-F8; RT7
   T-F1/T-F2/T-F6; RT8 T-F5; RT9 T-F10; RT10 T-F2/T-F6; RT11 ok; all others N/A.
+
+## Round 2 (2026-11-13)
+
+Changes from Round 1: TEAM_BUSY narrowed to `TeamRotationInProgressError`; admin-reset keeps
+CONFLICT; runner wired on all three locking chains with a 30 s clamp; six membership client
+consumers named; test cells enumerated per file.
+
+### Functionality
+- F2-1 Major (design) — `teams/route.ts` and `tenant/members/[userId]` cannot raise the team-lock
+  timeout (tenant-row locks only). → Resolved: R1 lists the reachable sites; those two use
+  `membershipConflictResponse` uniformly with only a CONFLICT pin; create-dialog and
+  tenant-members-card keyed on their real codes, no TEAM_BUSY cell.
+- F2-2 Major (design) — members-list role/remove, transfer-ownership and invite-accept pages
+  receive TEAM_BUSY and show `networkError`/`acceptFailed`. → Resolved: TEAM_BUSY arm each (C5).
+- F2-3 Minor (prose) — C5 rg used non-existent `apiPath` names, missed `API_PATH.*` consumers. →
+  Resolved: derivation corrected; `vault-reset/page.tsx` recorded as no-change.
+- F2-4 Minor (design) — `membershipConflictResponse` would pull `next/server` into a lock module
+  imported by directory sync/services. → Resolved: new `src/lib/http/lock-conflict-response.ts`.
+- F2-5 Minor (prose) — importer bound misstated. → Resolved.
+
+### Security
+No findings. S-F1..S-F4 resolutions verified; owner route 404s a foreign team before any lock;
+generic 409 rendering on invite/add/create/role discloses nothing beyond codes already in the body.
+
+### Testing
+- T2-F2 Major (design) — existing status-keyed cells mock code-less / other-code 409s and would
+  flip when re-keyed. → Resolved: mocks carry the real route codes; code-less and CONFLICT cells
+  added.
+- T2-F1, F3–F9 Minor (design) — ownerless card test is new; pin cells labelled and red-proved by
+  mutation; mid-batch bulk-import abort; importer exhaustion/clamp/default; runner clamp/default/
+  shared budget; delete network-error pin; integration timeouts/lower bound; integration header +
+  no-audit. → All resolved in the Testing strategy.
+
+### Recurring Issue Check (non-N/A)
+- Functionality: R1 ok; R2 ok; R3 F2-1; R8 F2-2; R10 ok; R12 ok; R17 ok; R18 ok; R22 ok; R29 F2-5;
+  R34 ok; R38 ok; R40 ok; R42 F2-1/F2-2/F2-3; R51 ok.
+- Security: R1, R2, R3, R12, R17, R29, R34, R37, R38, R42 ok; RS2 ok.
+- Testing: R3, R8, R12, R16, R19, R29, R37, R42 ok; R17/R38 T2-F5/F6; RT1–RT3, RT5, RT6, RT9,
+  RT11 ok; RT4 T2-F8/F9; RT7 T2-F3; RT8 T2-F4/F9; RT10 T2-F2/F4.
