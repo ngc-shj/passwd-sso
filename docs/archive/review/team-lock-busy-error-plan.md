@@ -139,6 +139,11 @@ would mislabel a tenant-role change as team activity (review S-F3, F-F3).
   so a member demoted after `requireTeamPermission` can see `TEAM_BUSY` for up to 3 s; the retry
   then answers 403. Pre-transaction authorization still runs first, so an unauthorized principal
   never sees it. `TEAM_BUSY` names no team; the routes add no team id to the body.
+- Accepted (review F3-3): membership routes share one `LockBudget` across the tenant-row wait and
+  the team-row wait; when the tenant wait spends it, `withBoundedLockWait` throws the team
+  timeout before waiting on a team row, so `TEAM_BUSY` can answer a contention that was on the
+  tenant row. Both are transient and retry-safe and the advice ("try again in a moment") is
+  right; distinguishing a spent budget would add a third error class for wording only.
 
 ### C5 — web client
 
@@ -152,7 +157,11 @@ before the run, not dropped). Known members and their change:
   the upgrade PUT, the migrate PUT (`migrateRefusal`), the re-key POST. (The re-key GET and the
   migrate download GET take no lock.) `BUSY_WAIT`: sleep `min(retryAfterMs(res),
   REKEY_BUSY_MAX_WAIT_MS)` with `REKEY_BUSY_MAX_WAIT_MS = 30 s`, retry the same request, count
-  against `MAX_ROTATION_WAITS`, never call `invalidateTeamKeys`. Update the `refreshKeys` comment
+  against its own pass-wide `MAX_BUSY_WAITS = 10` (like `rateWaits`), never call
+  `invalidateTeamKeys`. Why a separate budget (review F3-1): only a `FOR NO KEY UPDATE` holder —
+  a rotation, or the retention-GC prune's short hold — blocks these `FOR SHARE` requests, and one
+  long rotation produces several consecutive busy waits; sharing the budget of 5 would leave no
+  refresh budget for the mismatch that follows the rotation's commit. Update the `refreshKeys` comment
   and `Teams.rekeyStopRetryBudget` (en/ja) to name a busy team.
 - `src/components/team/forms/team-entry-submit.ts` `saveErrorMessage`: `TEAM_BUSY` → new
   `PasswordForm.teamEntryTeamBusy` (en/ja).
@@ -170,8 +179,11 @@ before the run, not dropped). Known members and their change:
 - `src/app/[locale]/admin/teams/[teamId]/members/list/page.tsx` role change (PUT) and removal
   (DELETE), `.../members/transfer-ownership/page.tsx` (PUT), and
   `src/app/[locale]/dashboard/teams/invite/[token]/page.tsx` (accept): today any unexpected
-  non-ok becomes `networkError` / `acceptFailed`; add a `TEAM_BUSY` arm → `tApi("teamBusy")`
-  (review F2-2).
+  non-ok becomes `networkError` / `acceptFailed`. The members-list role/remove and
+  transfer-ownership handlers render `tApi(apiErrorToI18nKey(code))` for any coded non-ok
+  response (so `CONFLICT` and `TEAM_BUSY` both read correctly — review F3-4), keeping
+  `networkError` for a code-less failure; the accept page adds a `TEAM_BUSY` arm →
+  `tApi("teamBusy")` beside its 410/403/404 arms (review F2-2).
 - Status-keyed consumers (any 409 → one fixed state message) misreport other 409 codes today.
   Each keys its fixed message on the specific code and renders `tApi(apiErrorToI18nKey(code))`
   for any other 409 (an absent or unknown code falls to `unknownError` via the same mapping):
@@ -180,7 +192,7 @@ before the run, not dropped). Known members and their change:
   - `team-add-from-tenant-section.tsx`: keeps its `SCIM_*` arms; `ALREADY_A_MEMBER` →
     `alreadyMember`; anything else → `tApi`.
   - `team-create-dialog.tsx` (route can answer `CONFLICT`, never `TEAM_BUSY`):
-    `SLUG_ALREADY_TAKEN` → `slugTaken`; else `tApi`.
+    `SLUG_ALREADY_TAKEN` → `slugTaken` on the slug field; any other 409 → `tApi` as a toast.
   - `tenant-members-card.tsx` (same): `SCIM_MANAGED_MEMBER` → `scimManagedRoleError`; else `tApi`.
 - No change, confirmed: history restore, attachment upload (incl. the upgrade PUT via
   `TeamEntryUpgradeError`) and `vault-reset/page.tsx` already render
@@ -210,9 +222,14 @@ run" doc comment on `isMembershipLockConflict` (directory sync reaches the lock 
 
 Every flipped or new cell asserts the code, `Retry-After` (present for `TEAM_BUSY`, absent for
 `CONFLICT`), and that no write or audit mock was called. Each change cell is red-proved against
-the old mapping on a scratchpad copy (RT7), never in place. Cells marked **pin** (a `CONFLICT`
-outcome that the old code also produced) cannot fail on the old mapping by construction; they are
-red-proved by mutating `isTeamLockTimeout` to return `true` unconditionally on the scratchpad copy.
+the old mapping on a scratchpad copy (RT7), never in place. Cells marked **pin** (an outcome the
+old code also produced) cannot fail on the old mapping by construction; each is red-proved by a
+mutation on its own decision path, on the scratchpad copy: `isTeamLockTimeout` → always `true`
+for the `membershipConflictResponse` and `vault/reset` pins; the route's arm replaced by
+`teamBusy()` for the `vault/admin-reset` and SCIM pins; the mapping in
+`assertCurrentTeamKeyVersion` / each entry route widened to `TEAM_BUSY` for every error for the
+entry-family genuine-mismatch cells. (The entry family decides with `instanceof
+TeamRotationInProgressError`, not `isTeamLockTimeout`.)
 
 - Shared: `api-error-codes.test.ts` (count, 409, `teamBusy`); `api-response.test.ts` `teamBusy()`
   (409, `Retry-After: "3"`); `tenant-row-lock.test.ts` `membershipConflictResponse` over all five
@@ -231,7 +248,10 @@ red-proved by mutating `isTeamLockTimeout` to return `true` unconditionally on t
   or `TenantMemberLockTimeoutError` → `CONFLICT` **pin**; add both where none exists
   (`teams/[teamId]/invitations`, `tenant/teams/[teamId]/owner`). `teams/route.ts` and
   `tenant/members/[userId]` get only a `TenantMemberLockTimeoutError` → `CONFLICT` **pin** (no
-  `TEAM_BUSY` cell: unreachable there). `approve`/`reject` existing `TeamRotationLockError` cells stay
+  `TEAM_BUSY` cell: unreachable there). In `members/[memberId]/route.test.ts` the three existing
+  timeout cells (PUT, PUT transfer, DELETE) throw `55P03` on `FROM tenant_members` — a tenant-row
+  timeout — so they become `CONFLICT` pins with the code asserted; the `TEAM_BUSY` cells are new,
+  throwing `55P03` on the `FROM teams` lock query (`mockTeamLockQuery`) for each method. `approve`/`reject` existing `TeamRotationLockError` cells stay
   `CONFLICT` and gain a `TEAM_BUSY` timeout cell. `vault/reset`: timeout → `TEAM_BUSY`, lock error →
   `CONFLICT`; `vault/admin-reset`: timeout → `CONFLICT` (SC5).
 - Integration (`team-key-version-guard.integration.test.ts`, real lock): flip the create timeout
@@ -243,15 +263,17 @@ red-proved by mutating `isTeamLockTimeout` to return `true` unconditionally on t
   Parked-rotation cells (genuine mismatch after the wait) stay `TEAM_KEY_VERSION_MISMATCH`.
 - Client: `rekey-runner.test.ts` — `TEAM_BUSY` on each of upgrade PUT, migrate PUT, re-key POST →
   sleeps `Retry-After`, retries, `invalidateTeamKeys` not called; a huge `Retry-After` is clamped
-  to 30 s; a missing header uses the existing default; busy waits and rotation waits share
-  `MAX_ROTATION_WAITS` (mixed cell exhausting it → `RETRY_BUDGET_EXHAUSTED`); `TEAM_BUSY` then
-  genuine mismatch → `REFRESH_KEYS`.
+  to 30 s; a missing header uses the existing default; `MAX_BUSY_WAITS` exhaustion →
+  `RETRY_BUDGET_EXHAUSTED`, and busy waits do not consume `MAX_ROTATION_WAITS` (5 rotation waits
+  after busy waits still succeed); `TEAM_BUSY` then genuine mismatch → `REFRESH_KEYS`.
   `password-import-importer.test.ts` — 409 `TEAM_BUSY` retried; other 409 not; `TEAM_BUSY` on every
   attempt → chunk failed after exactly 3 calls; huge `Retry-After` clamped; missing header →
   default. `team-entry-submit.test.ts` table row. `team-attachment-section.test.tsx` — delete API
   error → `toastApiError`; rejected fetch → `deleteError`.
   UI consumers (members-list approve/reject/role/remove, transfer-ownership, invite-accept page,
-  ownerless card, the two status-keyed consumers that can receive it): a `TEAM_BUSY` cell each.
+  ownerless card, the two status-keyed consumers that can receive it): a `TEAM_BUSY` cell each;
+  members-list role/remove and transfer-ownership also a `CONFLICT` cell and a code-less failure
+  cell (`networkError`); create dialog: non-slug 409 → toast, slug field untouched.
   Status-keyed consumers: existing fixed-message cells' mocks carry the real route code
   (`SLUG_ALREADY_TAKEN`, `SCIM_MANAGED_MEMBER`, `INVITATION_ALREADY_SENT`, `ALREADY_A_MEMBER`)
   instead of `{}` or another code; plus one cell each for a `CONFLICT` 409 and a code-less 409
@@ -284,8 +306,9 @@ red-proved by mutating `isTeamLockTimeout` to return `true` unconditionally on t
 1. Owner rotates a large team's key; a member saves an entry during it → after ~3 s,
    `teamEntryTeamBusy`; retrying after the rotation answers a mismatch and the form's existing
    key-changed path applies.
-2. Admin runs the re-key pass while the retention GC prunes old team keys → a re-key POST times out
-   → runner waits 3 s and retries with its cached keys.
+2. Admin runs the re-key pass while another admin starts a rotation of the same team → a re-key
+   POST times out on the rotation's `FOR NO KEY UPDATE` → runner waits 3 s and retries; once the
+   rotation commits, the retry answers a mismatch and the runner refreshes keys.
 3. Admin approves a SCIM-pending member during a rotation → `approvalBusyRetry`, as for any busy
    conflict today.
 4. CSV import into a team during a rotation → the chunk is retried after `Retry-After`.

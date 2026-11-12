@@ -102,3 +102,37 @@ generic 409 rendering on invite/add/create/role discloses nothing beyond codes a
 - Security: R1, R2, R3, R12, R17, R29, R34, R37, R38, R42 ok; RS2 ok.
 - Testing: R3, R8, R12, R16, R19, R29, R37, R42 ok; R17/R38 T2-F5/F6; RT1–RT3, RT5, RT6, RT9,
   RT11 ok; RT4 T2-F8/F9; RT7 T2-F3; RT8 T2-F4/F9; RT10 T2-F2/F4.
+
+## Round 3 (2026-11-13)
+
+Changes from Round 2: reachable TEAM_BUSY site list; helper moved to the HTTP layer; three more
+UI consumers; status-keyed consumers keyed on real codes; test cells refined.
+
+### Functionality
+- F3-1 Minor (design) — BUSY_WAIT shared the pass-wide rotation budget. → Resolved: own
+  `MAX_BUSY_WAITS = 10`; rationale corrected (only a `FOR NO KEY UPDATE` holder blocks these
+  `FOR SHARE` requests, so the source is a rotation or the prune, not membership writes).
+- F3-2 Minor (prose) — scenario 2 named the prune, contradicting SC4. → Resolved: rotation.
+- F3-3 Minor (design) — a spent shared budget throws the team timeout without a team wait. →
+  Accepted in C4 (retry-safe; advice correct; a third error class would be wording only).
+- F3-4 Minor (design) — members-list role/remove and transfer-ownership left CONFLICT as
+  `networkError`. → Resolved: render `tApi(apiErrorToI18nKey(code))` for any coded non-ok.
+- F3-5 Minor (prose) — create-dialog fallback surface. → Resolved: toast; slug field only for
+  `SLUG_ALREADY_TAKEN`.
+
+### Security
+No findings (invite-accept reachable only by the valid, email-matched invitee; generic rendering
+discloses nothing beyond body codes; helper layering fine).
+
+### Testing
+- T3-F1 Minor (prose) — `members/[memberId]` existing timeout cells are tenant-row timeouts. →
+  Resolved: they become CONFLICT pins; new TEAM_BUSY cells throw on `FROM teams`.
+- T3-F2 / T3-F3 Minor (design/prose) — pin red-proof mutation did not reach admin-reset, SCIM or
+  entry-family mismatch cells. → Resolved: per-decision-path mutations named.
+
+### Recurring Issue Check (non-N/A)
+- Functionality: R1, R2, R8, R10, R12, R17, R18, R22, R34, R38, R40, R42 ok; R3 F3-4; R29
+  F3-2/F3-5; R51 F3-1/F3-3.
+- Security: R1, R2, R3, R12, R17, R29, R34, R37, R38, R42 ok; RS2 ok.
+- Testing: R3, R8, R12, R16, R17, R19, R29, R37, R38, R42 ok; RT1–RT6, RT8, RT9, RT11 ok; RT7
+  T3-F2/F3; RT10 T3-F1.
