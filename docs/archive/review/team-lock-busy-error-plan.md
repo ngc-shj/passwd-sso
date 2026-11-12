@@ -226,9 +226,11 @@ a browser (body already used), so its code arms never fire — e.g. the members-
   `parseJsonBodyOnce(res)` (module-level `WeakMap<Response, Promise<unknown>>`; parse failure →
   `null`, never rejects; no `ok` check). `readApiErrorBody` keeps its `res.ok → null` guard first
   and its shape check, now over the memoized parse. `toastApiError` reads the memoized raw parse
-  with its existing `{}` / `body.error ?? fallback` logic, so its contract is unchanged for every
-  response it handles today (ok or not, any `error` type) — round-6 F6-T1; the only behaviour
-  change is that a second reader of a used body now sees the code. Known caller where that shows
+  as `(parsed ?? {})` with its existing `body.error ?? fallback` logic, so its contract is
+  unchanged for every response it handles today (ok or not, any `error` type) — round-6 F6-T1.
+  Two behaviour changes, both deliberate: a second reader of a used body now sees the code; and a
+  literal JSON `null` body, which today throws a `TypeError` out of `toastApiError` (`null.error`),
+  now shows the fallback toast (round-7 F7-1 / F7-T1). Known caller where that shows
   (round-6 F6-2): `tenant-reset-history-dialog.tsx` calls `readApiErrorBody(res)` then
   `toastApiError(res, …, FORBIDDEN)`; it now shows the server's specific code instead of always
   the `FORBIDDEN` fallback — intended, matching that code's comment.
@@ -332,8 +334,9 @@ from the mismatch, so widening the timeout arm would not reach these cells.)
   real `Response` (undici, vitest `node` env, single-read body): a second `readApiErrorBody` and a
   `toastApiError` after `handleStepUpError`/`throwIfStepUp` returned `false` see the code (fail
   on the old reader); the same object read twice → identical result with `json` called once; two
-  distinct objects → their own parses; `toastApiError` keeps today's results for an ok response,
-  a JSON `null` body and a non-string `error` (existing `toast-api-error.test.ts` cells unchanged);
+  distinct objects → their own parses; `toastApiError` keeps today's results for an ok response
+  and a non-string `error` (existing `toast-api-error.test.ts` cells unchanged), and a JSON `null`
+  body shows the fallback toast (`unknownError` without a fallback code);
   a step-up 403 read through the memo still triggers (pin; red-proof: memo caches `null`).
   Consumer level: convert the members-list approve/reject `it.each` cells (incl. `CONFLICT` →
   `approvalBusyRetry`) to real `Response`s; write the new ownerless-card cells and a

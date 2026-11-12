@@ -225,3 +225,25 @@ Changes from Round 5: C7 redesigned to a memoized reader; C8 covers `overrides`.
 - Functionality: R1/R5 F6-2/F6-3; R2 F6-1; R3, R8, R10, R14, R30 ok.
 - Security: inherited lookup S6-1; step-up fail-closed, retention, logging ok.
 - Testing: RT1–RT4, RT7–RT11 ok; RT5 F6-T1; RT6 F6-T2.
+
+## Round 7 (2026-11-13)
+
+Changes from Round 6: C7 split into a memoized raw parse; C8 covers `eaErrorToI18nKey`.
+
+- Functionality: F7-1 Minor (prose) — a JSON `null` body throws in `toastApiError` today; the plan
+  claimed "unchanged". → Resolved: recorded as a deliberate change; the cell asserts the fallback.
+- Security: No findings (memo retention bounded by the `Response`; step-up fail-closed unchanged;
+  `parseJsonBodyOnce` stays module-private).
+- Testing: F7-T1 Minor (design/prose) — same as F7-1. → Resolved.
+
+### Saturation call (Round 7)
+
+Phase 1 closes on the saturation criterion: 7 rounds completed; no Critical or Major open in any
+category; Round 7 raised no finding against contracts, control classes, invariants or acceptance
+criteria (both findings were labelled prose by their experts and are resolved above); no Minor
+remains. No carried-forward findings.
+
+### Recurring Issue Check (non-N/A)
+- Functionality: R1, R3, R20, R42 ok; R8 F7-1.
+- Security: secret retention, step-up fail-closed, prototype-key class ok.
+- Testing: RT1–RT4, RT6–RT11 ok; RT5 F7-T1.
