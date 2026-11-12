@@ -247,3 +247,28 @@ Incremental review of commit cae9dcfc2 (Round 4 fixes, including `/simplify`'s e
 
 ### T23 [Minor] Timed negative in the server-change revoke test
 - Action: both cases wait one macrotask (the revoke path awaits only mocks) and assert the exact DELETE list, so the negative is paired with a positive that passes under the same wait. Red-proved: restoring the configured-URL fallback fails the no-issuer case.
+
+# Round 6
+
+## Changes from Previous Round
+Incremental review of commit 618114fd6 (Round 5 fixes).
+
+## Functionality Findings
+- F9 [Minor] A tagged template (`` opts.valueOf`` ``) invokes a member but counted as a read. — Fixed (same class as S6-m1).
+- The server-change test comment named a session read the hydrated path never takes. — Fixed.
+
+## Security Findings
+- S6-m1 [Minor] `(opts.valueOf)()` and a tagged template still passed as reads; `isCalled` checked only the direct parent. — Fixed, with `new` as the third invocation form.
+- The header said "property read" where writes to other keys also pass. — Reworded to "property access (not a call)".
+- No credential-bearing request path in cli/src or extension/src bypasses the global fetch (node:http is only the local OAuth callback listener; `chrome.webRequest.onAuthRequired` answers page basic-auth, a different class).
+
+## Testing Findings
+- T24 [Major] The element-access `isCalled` branch had no test. — Fixed.
+- T25 [Minor] The setter branch of the accessor/method refusal had no test. — Fixed.
+- T26 [Minor] The setter branch of `isMemberKeyName` had no test. — Fixed.
+- The single-macrotask server-change test passed 20 of 20 runs.
+
+## Resolution Status
+### F9 / S6-m1 / T24–T26 [Minor] Invocation forms and untested branches
+- Action: `isCalled` looks through paren/as/satisfies/non-null wrappers and treats a call, `new`, or a template tag as an invocation; the wrapper walk is shared with `unclassifiedInitReference` as `outermostWrapper`. Tests for the parenthesised call, template tag, constructor, element-access call, setter in the init, and setter key.
+- Red-proved: the three invocation-form cases fail against the 618114fd6 guard; removing the element-access `isCalled`, the setter refusal, the setter key skip, or the wrapper walk in `isCalled` each fails exactly its test.

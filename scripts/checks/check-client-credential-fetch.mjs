@@ -37,7 +37,7 @@
  * once in the file (a parameter or inner binding of the same name could shadow
  * it; name-based, so this can only over-report) and every other reference to
  * the name is a known-safe use: the init argument of a checked fetch call, a
- * property read (not a call) with a literal key other than `redirect`, or an
+ * property access (not a call) with a literal key other than `redirect`, or an
  * object spread (a copy); the literal itself may hold no getter, setter or
  * method, and the declaration must not be exported. Anything else — an alias, a call argument, `Reflect.set`,
  * `x.redirect`, `x[k]`, a destructuring target — is "unclassified init
@@ -137,6 +137,25 @@ function unwrap(node) {
   return node;
 }
 
+/** The outermost paren/as/satisfies/non-null wrapper around `node` (the inverse of `unwrap`). */
+function outermostWrapper(node) {
+  for (;;) {
+    const p = node.getParent();
+    if (
+      !(
+        Node.isParenthesizedExpression(p) ||
+        Node.isAsExpression(p) ||
+        Node.isSatisfiesExpression(p) ||
+        Node.isNonNullExpression(p)
+      ) ||
+      p.getExpression() !== node
+    ) {
+      return node;
+    }
+    node = p;
+  }
+}
+
 function isInTypePosition(id) {
   return id.getFirstAncestorByKind(SyntaxKind.TypeQuery) !== undefined;
 }
@@ -222,16 +241,20 @@ function countDeclarations(sf, name) {
   return n;
 }
 
+/** True when `access` is invoked: a call, `new`, or a template tag. */
 function isCalled(access) {
+  // `(opts.valueOf)()` keeps `this`, so look through wrappers first.
+  access = outermostWrapper(access);
   const p = access.getParent();
-  return Node.isCallExpression(p) && p.getExpression() === access;
+  if (Node.isTaggedTemplateExpression(p)) return p.getTag() === access;
+  return (Node.isCallExpression(p) || Node.isNewExpression(p)) && p.getExpression() === access;
 }
 
 /**
  * The first reference to `name` that is not a known-safe use, or null. Allowlist,
  * not a list of write forms: an alias, a helper argument, `Reflect.set`, a
  * destructuring target all escape a denylist. Safe uses: the declaration, the
- * init argument of a checked fetch call, a property read (not a call) with a
+ * init argument of a checked fetch call, a property access (not a call) with a
  * literal key other than `redirect`, and an object spread (a copy).
  */
 function unclassifiedInitReference(sf, name, isFetchCall) {
@@ -242,19 +265,10 @@ function unclassifiedInitReference(sf, name, isFetchCall) {
       continue; // a property key that happens to share the name
     }
     if (Node.isVariableDeclaration(idParent) && idParent.getNameNode() === id) continue;
-    let n = id;
-    while (
-      (Node.isParenthesizedExpression(n.getParent()) ||
-        Node.isAsExpression(n.getParent()) ||
-        Node.isSatisfiesExpression(n.getParent()) ||
-        Node.isNonNullExpression(n.getParent())) &&
-      n.getParent().getExpression() === n
-    ) {
-      n = n.getParent();
-    }
+    const n = outermostWrapper(id);
     const p = n.getParent();
     if (Node.isCallExpression(p) && p.getArguments()[1] === n && isFetchCall(p)) continue;
-    // A member that is called can return the object itself (`opts.valueOf()`), so only reads pass.
+    // A member that is called can return the object itself (`opts.valueOf()`), so only uncalled access passes.
     if (Node.isPropertyAccessExpression(p) && p.getExpression() === n && p.getName() !== "redirect" && !isCalled(p)) {
       continue;
     }

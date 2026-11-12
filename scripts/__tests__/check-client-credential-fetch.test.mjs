@@ -186,6 +186,10 @@ describe("check-client-credential-fetch.mjs — redirect axis", () => {
     ["a destructuring-assignment target", "({ r: opts.redirect } = o as { r: RequestRedirect });"],
     ["a for-of target", "for (opts.redirect of [\"follow\" as const]);"],
     ["reached through a member call that returns it", 'Object.assign(opts.valueOf(), { redirect: "follow" });'],
+    ["reached through an element-access call that returns it", 'Object.assign(opts["valueOf"](), { redirect: "follow" });'],
+    ["reached through a parenthesised member call", 'Object.assign((opts.valueOf)(), { redirect: "follow" });'],
+    ["reached through a member used as a template tag", 'Object.assign(opts.valueOf``, { redirect: "follow" });'],
+    ["reached through a member used as a constructor", "void new (opts as any).constructor();"],
   ])("FAILS when the const init's redirect is %s after declaration", (_label, write) => {
     cli(
       "a.ts",
@@ -258,6 +262,11 @@ describe("check-client-credential-fetch.mjs — redirect axis", () => {
     expectFail("accessor or method");
   });
 
+  it("FAILS on an init literal with a setter", () => {
+    cli("a.ts", 'export const f = (u: string) => fetch(u, { redirect: "error", set x(v: string) { void v; } });\n');
+    expectFail("accessor or method");
+  });
+
   it("FAILS on an init literal with a getter", () => {
     cli(
       "a.ts",
@@ -277,7 +286,7 @@ describe("check-client-credential-fetch.mjs — redirect axis", () => {
   it("passes names that share the init's name but are keys, not references", () => {
     cli(
       "a.tsx",
-      'declare const X: (p: { opts: number }) => null;\nexport function f(u: string, o: { opts: number }) {\n  const opts: RequestInit = { redirect: "error" };\n  const { opts: y } = o;\n  void y;\n  void (<X opts={1} />);\n  void { opts: 1 }.opts;\n  return fetch(u, opts);\n}\nexport class C {\n  get opts() {\n    return 1;\n  }\n}\nexport enum E {\n  opts,\n}\n',
+      'declare const X: (p: { opts: number }) => null;\nexport function f(u: string, o: { opts: number }) {\n  const opts: RequestInit = { redirect: "error" };\n  const { opts: y } = o;\n  void y;\n  void (<X opts={1} />);\n  void { opts: 1 }.opts;\n  return fetch(u, opts);\n}\nexport class C {\n  get opts() {\n    return 1;\n  }\n  set opts(v: number) {\n    void v;\n  }\n}\nexport enum E {\n  opts,\n}\n',
     );
     expect(runGuard().exitCode).toBe(0);
   });

@@ -4201,8 +4201,8 @@ describe("session hydration", () => {
       (fetchMock.mock.calls as unknown as [string, RequestInit][])
         .filter(([, init]) => init?.method === "DELETE" && bearerOf(init).includes("tok-restored"))
         .map(([url]) => String(url));
-    // The revoke path awaits only mocks (session read, DPoP signing), so one
-    // macrotask drains it; both cases wait the same, so the negative is paired.
+    // The token was hydrated, so the revoke path awaits only the mocked DPoP
+    // signing: one macrotask drains it, and both cases wait the same.
     await new Promise<void>((r) => setTimeout(r, 0));
     expect(deletes()).toEqual(expectedDeletes > 0 ? [`${issuerUrl}/api/extension/token`] : []);
     expect(callsWith(fetchMock, OLD_URL, "tok-restored")).toBe(0);
