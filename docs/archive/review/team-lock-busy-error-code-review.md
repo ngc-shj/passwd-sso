@@ -59,8 +59,10 @@ None.
 ### F1 Minor — busy budget is pass-wide — Accepted
 - **Anti-Deferral check**: acceptable risk.
 - **Justification**: the plan fixes `MAX_BUSY_WAITS` as pass-wide, the same shape as `rateWaits`.
-  Only a `FOR NO KEY UPDATE` holder (a rotation, or the retention prune's ~31 ms hold) makes these
-  requests time out, so ten 3 s timeouts in one pass mean the team was being rotated repeatedly —
+  These requests take `teams ... FOR SHARE`, so only a conflicting row lock on the team makes them
+  time out: a rotation, the retention prune's ~31 ms hold, an owner assignment, or a team
+  update/delete — all but rotation brief or one-off. Ten 3 s timeouts in one pass therefore mean
+  the team was being rotated repeatedly (round-2 R2-1 corrected the list) —
   stopping and reporting is the useful outcome. Worst case: a pass over a team rotated many times
   stops with `RETRY_BUDGET_EXHAUSTED` and the admin re-runs it (the pass is resumable). Likelihood:
   low. Cost to fix: ~15 min, but it would remove the bound that stops a pass from waiting out an
@@ -97,3 +99,18 @@ None.
 
 ### T4 Minor — importer delay equality — No change
 - The reviewer recommends keeping it as is; the spy is restored in `afterEach`.
+
+## Round 2 (2026-11-13)
+
+Changes from Round 1: documentation only (dispositions, red-proof additions).
+
+- Security: No findings. Testing: No findings (red-proof record matches the named cells).
+- Functionality:
+  - R2-1 Minor — the F1 justification listed only rotation and the retention prune as lock
+    holders; owner assignment (`tenant/teams/[teamId]/owner`) and team update/delete also conflict
+    with `FOR SHARE`. → Fixed: F1 text and the plan's C5 rationale now list them; the accept
+    decision is unchanged (the others are brief or one-off).
+  - R2-2 Minor — the bulk-import comment said a timeout "can only occur before this transaction
+    holds the team row"; a savepoint rollback releases the row lock, so a later entry can time out
+    too. → Fixed: comment reworded in `src/app/api/teams/[teamId]/passwords/bulk-import/route.ts`
+    (comment only; behaviour unchanged — the error aborts the whole transaction either way).

@@ -97,9 +97,9 @@ async function handlePOST(req: NextRequest, { params }: Params) {
         // A stale teamKeyVersion means the whole import is racing a rotation —
         // rethrow out of the tx so it fully rolls back (no entries left under
         // the pre-rotation key) instead of being counted as a per-entry failure.
-        // A team-lock timeout aborts the same way: it can only occur before
-        // this transaction holds the team row, and the next entry would wait
-        // again.
+        // A team-lock timeout aborts the same way: it occurs while the
+        // transaction does not hold the team row (the first entry, or one after
+        // a savepoint rollback released it), and the next entry would wait again.
         if (isTeamKeyVersionMismatch(attempt.error) || isTeamBusy(attempt.error)) throw attempt.error;
         // The SQLSTATE only: a Prisma error's message carries the query and its
         // bound parameters, i.e. this entry's ciphertext.

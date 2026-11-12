@@ -158,8 +158,9 @@ before the run, not dropped). Known members and their change:
   migrate download GET take no lock.) `BUSY_WAIT`: sleep `min(retryAfterMs(res),
   REKEY_BUSY_MAX_WAIT_MS)` with `REKEY_BUSY_MAX_WAIT_MS = 30 s`, retry the same request, count
   against its own pass-wide `MAX_BUSY_WAITS = 10` (like `rateWaits`), never call
-  `invalidateTeamKeys`. Why a separate budget (review F3-1): only a `FOR NO KEY UPDATE` holder —
-  a rotation, or the retention-GC prune's short hold — blocks these `FOR SHARE` requests, and one
+  `invalidateTeamKeys`. Why a separate budget (review F3-1): only a conflicting lock on the team row —
+  a rotation, the retention-GC prune's short hold, an owner assignment, or a team update/delete,
+  all but rotation brief — blocks these `FOR SHARE` requests, and one
   long rotation produces several consecutive busy waits; sharing the budget of 5 would leave no
   refresh budget for the mismatch that follows the rotation's commit. Update the `refreshKeys` comment
   and `Teams.rekeyStopRetryBudget` (en/ja) to name a busy team.
