@@ -136,3 +136,33 @@ discloses nothing beyond body codes; helper layering fine).
 - Security: R1, R2, R3, R12, R17, R29, R34, R37, R38, R42 ok; RS2 ok.
 - Testing: R3, R8, R12, R16, R17, R19, R29, R37, R38, R42 ok; RT1–RT6, RT8, RT9, RT11 ok; RT7
   T3-F2/F3; RT10 T3-F1.
+
+## Round 4 (2026-11-13)
+
+Changes from Round 3: separate busy budget with corrected rationale; members-list/transfer
+handlers render coded errors; per-decision-path pin mutations.
+
+### Functionality
+- F4-1 Major (design) — `handleStepUpError` reads the `Response` body without cloning, so every
+  later `readApiErrorBody(res)` on step-up-gated consumers returns null in a browser; the planned
+  TEAM_BUSY arms (and the existing approve/reject CONFLICT arm) are dead. Verified by the
+  orchestrator in `src/lib/http/handle-step-up-error.ts` / `read-api-error-body.ts`. → Resolved:
+  new C7 fixes the helper (clone; pre-consumed body → false); UI cells use real `Response`s.
+- F4-2 Minor (prose) — transfer-ownership lacks `tApi`. → Resolved in C5.
+- F4-3 Minor (prose) — code-less path wording. → Resolved in Testing strategy.
+
+### Security
+No findings. Note (pre-existing): `apiErrorToI18nKey` uses `in`, matching inherited names. →
+Resolved as C8 (own-key lookup), since C5 widens its use on server-supplied codes.
+
+### Testing
+- T4-F1 Minor (design) — entry-family mismatch pin mutation was off-path. → Resolved: mutate the
+  mismatch-producing statement per site.
+- T4-F2 Minor (prose) — busy budget boundary and rate-limit isolation. → Resolved.
+
+### Recurring Issue Check (non-N/A)
+- Functionality: R1, R2, R8, R12, R17, R18, R22, R34, R38, R40, R42, R51 ok; R3/R4 F4-1; R29
+  F4-2/F4-3.
+- Security: retry bounds, disclosure, rendering, fail-closed, authz ordering, client clamp ok.
+- Testing: R1, R3, R8, R12, R16, R17, R19, R29, R37, R38, R42 ok; RT1–RT6, RT8–RT11 ok; RT7
+  T4-F1.

@@ -180,8 +180,8 @@ before the run, not dropped). Known members and their change:
   (DELETE), `.../members/transfer-ownership/page.tsx` (PUT), and
   `src/app/[locale]/dashboard/teams/invite/[token]/page.tsx` (accept): today any unexpected
   non-ok becomes `networkError` / `acceptFailed`. The members-list role/remove and
-  transfer-ownership handlers render `tApi(apiErrorToI18nKey(code))` for any coded non-ok
-  response (so `CONFLICT` and `TEAM_BUSY` both read correctly — review F3-4), keeping
+  transfer-ownership handlers render `tApi(apiErrorToI18nKey(code))` (transfer-ownership adds
+  `useTranslations("ApiErrors")` and the import) for any coded non-ok response (so `CONFLICT` and `TEAM_BUSY` both read correctly — review F3-4), keeping
   `networkError` for a code-less failure; the accept page adds a `TEAM_BUSY` arm →
   `tApi("teamBusy")` beside its 410/403/404 arms (review F2-2).
 - Status-keyed consumers (any 409 → one fixed state message) misreport other 409 codes today.
@@ -213,6 +213,32 @@ before the run, not dropped). Known members and their change:
 run" doc comment on `isMembershipLockConflict` (directory sync reaches the lock through
 `team-departure.ts` and fails on the thrown error, not through this helper).
 
+### C7 — step-up helpers leave the error body readable (pre-existing defect, review F4-1)
+
+`handleStepUpError` and `throwIfStepUp` (`src/lib/http/handle-step-up-error.ts`) read the body of
+the caller's `Response` without cloning it. Every caller that then reads the code again
+(`readApiErrorBody(res)`, `toastApiError(res, …)`) gets `null` in a browser (body already used),
+so its code arms never fire — e.g. the members-list approve/reject `CONFLICT` →
+`approvalBusyRetry` arm has never been reachable. Unit tests mock a re-readable `json()` and hid
+it. The C5 `TEAM_BUSY` arms on step-up-gated consumers depend on this being fixed.
+
+- Fix at the helper (closes the class for all callers, not per site): read from `res.clone()`;
+  when `res.bodyUsed` is already true, treat the body as unreadable (`null`) rather than throw.
+  Signatures unchanged.
+- Member set (for the record and for the test): `rg -n "handleStepUpError\(|throwIfStepUp\("
+  src --glob '!**/*.test.*'`; Phase 2 lists the callers that read the body afterwards — all are
+  fixed by the helper change with no call-site edit.
+- Acceptance: with a real `Response` (body readable once), after `handleStepUpError` returns
+  `false` the caller's `readApiErrorBody(res)` yields the code; a step-up 403 still triggers
+  reauth; a `Response` whose body was already consumed yields `false` without throwing.
+
+### C8 — `apiErrorToI18nKey` looks up own keys only (pre-existing, review S4 note)
+
+`error in API_ERROR_I18N` also matches inherited names (`"constructor"`, `"toString"`), returning
+a function instead of a key. C5 widens rendering of server-supplied codes through this function,
+so it is fixed here: `Object.hasOwn(API_ERROR_I18N, error)`. Acceptance: `"constructor"` →
+`unknownError`; a real code → its key.
+
 ## Forbidden patterns
 
 - pattern: `errorResponse\(API_ERROR\.TEAM_BUSY` outside `src/lib/http/api-response.ts` — reason:
@@ -226,10 +252,12 @@ the old mapping on a scratchpad copy (RT7), never in place. Cells marked **pin**
 old code also produced) cannot fail on the old mapping by construction; each is red-proved by a
 mutation on its own decision path, on the scratchpad copy: `isTeamLockTimeout` → always `true`
 for the `membershipConflictResponse` and `vault/reset` pins; the route's arm replaced by
-`teamBusy()` for the `vault/admin-reset` and SCIM pins; the mapping in
-`assertCurrentTeamKeyVersion` / each entry route widened to `TEAM_BUSY` for every error for the
-entry-family genuine-mismatch cells. (The entry family decides with `instanceof
-TeamRotationInProgressError`, not `isTeamLockTimeout`.)
+`teamBusy()` for the `vault/admin-reset` and SCIM pins; for each entry-family genuine-mismatch
+cell, the statement that produces the mismatch answer changed to `TEAM_BUSY` — the
+version-comparison throw in `assertCurrentTeamKeyVersion`, the route's own mismatch return where
+one exists (history restore, re-key), and confirm-key's `version_mismatch` response branch. (The
+entry family decides the timeout with `instanceof TeamRotationInProgressError`, a separate arm
+from the mismatch, so widening the timeout arm would not reach these cells.)
 
 - Shared: `api-error-codes.test.ts` (count, 409, `teamBusy`); `api-response.test.ts` `teamBusy()`
   (409, `Retry-After: "3"`); `tenant-row-lock.test.ts` `membershipConflictResponse` over all five
@@ -263,9 +291,11 @@ TeamRotationInProgressError`, not `isTeamLockTimeout`.)
   Parked-rotation cells (genuine mismatch after the wait) stay `TEAM_KEY_VERSION_MISMATCH`.
 - Client: `rekey-runner.test.ts` — `TEAM_BUSY` on each of upgrade PUT, migrate PUT, re-key POST →
   sleeps `Retry-After`, retries, `invalidateTeamKeys` not called; a huge `Retry-After` is clamped
-  to 30 s; a missing header uses the existing default; `MAX_BUSY_WAITS` exhaustion →
-  `RETRY_BUDGET_EXHAUSTED`, and busy waits do not consume `MAX_ROTATION_WAITS` (5 rotation waits
-  after busy waits still succeed); `TEAM_BUSY` then genuine mismatch → `REFRESH_KEYS`.
+  to 30 s; a missing header uses the existing default; budget boundary: the 10th busy wait still
+  retries and the 11th stops with `RETRY_BUDGET_EXHAUSTED` (same `++n > MAX` form as the other
+  counters); busy waits consume neither `MAX_ROTATION_WAITS` (5 rotation waits after 10 busy
+  waits still succeed) nor `MAX_RATE_LIMIT_WAITS`; `TEAM_BUSY` then genuine mismatch →
+  `REFRESH_KEYS`.
   `password-import-importer.test.ts` — 409 `TEAM_BUSY` retried; other 409 not; `TEAM_BUSY` on every
   attempt → chunk failed after exactly 3 calls; huge `Retry-After` clamped; missing header →
   default. `team-entry-submit.test.ts` table row. `team-attachment-section.test.tsx` — delete API
@@ -273,7 +303,12 @@ TeamRotationInProgressError`, not `isTeamLockTimeout`.)
   UI consumers (members-list approve/reject/role/remove, transfer-ownership, invite-accept page,
   ownerless card, the two status-keyed consumers that can receive it): a `TEAM_BUSY` cell each;
   members-list role/remove and transfer-ownership also a `CONFLICT` cell and a code-less failure
-  cell (`networkError`); create dialog: non-slug 409 → toast, slug field untouched.
+  cell (a thrown fetch or a non-JSON 5xx → `networkError`); create dialog: non-slug 409 → toast,
+  slug field untouched. Every UI cell on a step-up-gated consumer returns a real `Response`
+  (body readable once), so it fails while C7 is unfixed.
+- C7: `handle-step-up-error.test.ts` — real `Response`: body readable after `handleStepUpError`
+  and `throwIfStepUp` return; step-up 403 still triggers; pre-consumed body → `false`, no throw.
+- C8: `api-error-codes.test.ts` — `"constructor"`/`"toString"` → `unknownError`.
   Status-keyed consumers: existing fixed-message cells' mocks carry the real route code
   (`SLUG_ALREADY_TAKEN`, `SCIM_MANAGED_MEMBER`, `INVITATION_ALREADY_SENT`, `ALREADY_A_MEMBER`)
   instead of `{}` or another code; plus one cell each for a `CONFLICT` 409 and a code-less 409
@@ -325,3 +360,5 @@ TeamRotationInProgressError`, not `isTeamLockTimeout`.)
 | C4 | membership family / vault reset team-lock timeout → `TEAM_BUSY` | locked |
 | C5 | web client handling | locked |
 | C6 | docs | locked |
+| C7 | step-up helpers read a clone (pre-existing body double-read) | locked |
+| C8 | `apiErrorToI18nKey` own-key lookup | locked |
