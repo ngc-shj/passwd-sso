@@ -52,3 +52,20 @@ mutated copy and run the real test files; no production file was edited.
   `check:crypto-domains`, `check-state-mutation-centralization.sh`,
   `check-step-up-client-coverage.sh`, `check-api-error-body-drift.sh`. Forbidden pattern
   (`errorResponse(API_ERROR.TEAM_BUSY` outside `api-response.ts`): no hits.
+
+### Red-proof additions (code review round 1, T1)
+
+Same method (scratch copies of the module and its test, or a scratch alias config); unmutated
+controls passed first.
+
+- `rekey-runner.ts`: busy counter merged into the rotation counter → 5 cells failed (10th retries,
+  11th stops, rotation-budget isolation, rate-limit-budget isolation ×2); `>` → `>=` → the same 5
+  failed; clamp removed → the 31 s and 3600 s cells failed.
+- `password-import-importer.ts`: retry widened to every 409 → "another 409 code" and "code-less
+  409" cells failed; TEAM_BUSY retry removed → the retry, 3-call cap, clamp and default cells
+  failed.
+- `vault/admin-reset`: its timeout arm made to return `teamBusy()` → its CONFLICT pin failed.
+- Not separately mutated: the CLI/extension memo cells (byte-identical copies of the main reader,
+  whose cells were red-proved, and pinned to it by `check-api-error-body-drift.sh`); the SCIM
+  routes (unchanged by this branch, so no new cell); the integration TEAM_BUSY cells (fail on the
+  old code by construction — the old route answered `TEAM_KEY_VERSION_MISMATCH`/`CONFLICT`).
