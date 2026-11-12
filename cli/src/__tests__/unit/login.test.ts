@@ -92,11 +92,13 @@ describe("loginCommand", () => {
           refreshToken: "mcpr_refresh_token",
           clientId: "mcpc_client123",
           expiresAt: expect.any(String),
+          serverUrl: "https://example.com",
         }),
       );
 
       expect(mockSetTokenCache).toHaveBeenCalledWith(
         "mcp_access_token",
+        "https://example.com",
         expect.any(String),
         "mcpr_refresh_token",
         "mcpc_client123",
@@ -136,11 +138,13 @@ describe("loginCommand", () => {
           refreshToken: "",
           clientId: "",
           expiresAt: expect.any(String),
+          serverUrl: "https://example.com",
         }),
       );
 
       expect(mockSetTokenCache).toHaveBeenCalledWith(
         "mymanualtoken123",
+        "https://example.com",
         expect.any(String),
       );
 
@@ -271,6 +275,7 @@ describe("loginCommand", () => {
         refreshToken: "mcpr_old_refresh",
         clientId: "mcpc_oldclient",
         expiresAt: new Date(Date.now() + MS_PER_HOUR).toISOString(),
+        serverUrl: "https://example.com",
       });
       mockRunOAuthFlow.mockResolvedValueOnce({
         accessToken: "mcp_new_access",
@@ -288,6 +293,36 @@ describe("loginCommand", () => {
         "mcpc_oldclient",
         "refresh_token",
       );
+    });
+
+    it("revokes at the old issuer, never at the newly entered server", async () => {
+      mockLoadCredentials.mockReturnValue({
+        accessToken: "mcp_old_access",
+        refreshToken: "mcpr_old_refresh",
+        clientId: "mcpc_oldclient",
+        expiresAt: new Date(Date.now() + MS_PER_HOUR).toISOString(),
+        serverUrl: "https://server-a.example.com",
+      });
+      mockRunOAuthFlow.mockResolvedValueOnce({
+        accessToken: "mcp_new_access",
+        refreshToken: "mcpr_new_refresh",
+        expiresIn: 3600,
+        scope: "",
+        clientId: "mcpc_newclient",
+      });
+
+      await loginCommand({ server: "https://server-b.example.com" });
+
+      expect(mockRevokeTokenRequest).toHaveBeenCalledTimes(1);
+      expect(mockRevokeTokenRequest).toHaveBeenCalledWith(
+        "https://server-a.example.com",
+        "mcpr_old_refresh",
+        "mcpc_oldclient",
+        "refresh_token",
+      );
+      for (const call of mockRevokeTokenRequest.mock.calls) {
+        expect(call[0]).not.toBe("https://server-b.example.com");
+      }
     });
 
     it("does not call revokeTokenRequest when no credentials exist", async () => {
@@ -311,6 +346,7 @@ describe("loginCommand", () => {
         refreshToken: "",
         clientId: "",
         expiresAt: new Date(Date.now() + 15 * MS_PER_MINUTE).toISOString(),
+        serverUrl: "https://example.com",
       });
       promptAnswer = "mynewtoken";
 
@@ -325,6 +361,7 @@ describe("loginCommand", () => {
         refreshToken: "mcpr_old_refresh",
         clientId: "mcpc_oldclient",
         expiresAt: new Date(Date.now() + MS_PER_HOUR).toISOString(),
+        serverUrl: "https://example.com",
       });
       mockRevokeTokenRequest.mockRejectedValueOnce(new Error("Network error"));
       mockRunOAuthFlow.mockResolvedValueOnce({

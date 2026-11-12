@@ -80,6 +80,7 @@ vi.mock("@/lib/constants/auth/api-key", async (importOriginal) => {
 import { NextRequest } from "next/server";
 import { GET, POST } from "./route";
 import { snapshotFactory } from "@/__tests__/helpers/fail-closed";
+import { MS_PER_DAY } from "@/lib/constants/time";
 
 // The module-level `apiKeyCreateLimiter = createRateLimiter(...)` call in
 // route.ts runs once at import time, above. The global `beforeEach` in
@@ -251,6 +252,35 @@ describe("POST /api/api-keys", () => {
     expect(res.status).toBe(400);
     const json = await res.json();
     expect(json.error).toBe("API_KEY_LIMIT_EXCEEDED");
+  });
+
+  it("counts only unexpired, unrevoked keys toward the cap", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const clock = new Date("2026-06-01T00:00:00Z");
+    vi.setSystemTime(clock);
+    try {
+      mockCheckAuth.mockResolvedValue({
+        ok: true,
+        auth: { type: "session", userId: "u1" },
+      });
+      mockPrismaApiKey.count.mockResolvedValue(10);
+
+      await POST(
+        createRequest("POST", "http://localhost:3000/api/api-keys", {
+          body: {
+            name: "Test",
+            scope: ["passwords:read"],
+            expiresAt: new Date(clock.getTime() + 30 * MS_PER_DAY).toISOString(),
+          },
+        }),
+      );
+
+      expect(mockPrismaApiKey.count).toHaveBeenCalledWith({
+        where: { userId: "u1", revokedAt: null, expiresAt: { gt: clock } },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("returns 429 when rate limited", async () => {

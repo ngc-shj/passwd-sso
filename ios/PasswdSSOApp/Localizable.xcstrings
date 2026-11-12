@@ -3140,6 +3140,22 @@
           }
         }
       }
+    },
+    "Couldn't remove the previous server's sign-in. Try again." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't remove the previous server's sign-in. Try again."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "以前のサーバーのサインイン情報を削除できませんでした。もう一度お試しください。"
+          }
+        }
+      }
     }
   },
   "version" : "1.1"

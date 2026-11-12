@@ -21,6 +21,13 @@ vi.mock("../../lib/api", () => ({
   ensureHostPermission: (v: unknown) => mockEnsureHostPermission(v),
 }));
 
+const dpopKeyMocks = vi.hoisted(() => ({
+  getDpopThumbprint: vi.fn(),
+  deleteIdbKey: vi.fn(),
+  signDpopProof: vi.fn(),
+}));
+vi.mock("../../lib/dpop-key", () => dpopKeyMocks);
+
 let mockThemeState = "system";
 const mockSetTheme = vi.fn((t: string) => { mockThemeState = t; });
 vi.mock("../../lib/theme", () => ({
@@ -29,6 +36,7 @@ vi.mock("../../lib/theme", () => ({
 }));
 
 import { App } from "../../options/App";
+import { DEFAULT_SERVER_URL } from "../../lib/server-url";
 
 const allDefaults = {
   serverUrl: "https://example.com",
@@ -415,6 +423,94 @@ describe("Options App", () => {
       stored = {};
       await openSection();
       expect(await screen.findByText(/No sites set up/)).toBeInTheDocument();
+    });
+  });
+
+  describe("reset connection sends the token only to its issuer", () => {
+    type RuntimeMock = { runtime: { sendMessage: ReturnType<typeof vi.fn> } };
+    const chromeRuntime = () => (globalThis as unknown as { chrome: RuntimeMock }).chrome.runtime;
+    const TOKEN = "held-token";
+    let savedSendMessage: unknown;
+    let savedFetch: typeof fetch;
+    let fetchMock: ReturnType<typeof vi.fn>;
+
+    // GET_TOKEN answers through the promise form the reset handler uses.
+    function holdToken(issuerUrl: string | null) {
+      chromeRuntime().sendMessage = vi.fn((msg: { type: string }) =>
+        Promise.resolve(msg.type === "GET_TOKEN" ? { type: "GET_TOKEN", token: TOKEN, issuerUrl } : undefined),
+      );
+    }
+
+    async function clickReset() {
+      render(<App />);
+      await screen.findByText("General");
+      navigateTo("Security");
+      fireEvent.click(await screen.findByRole("button", { name: "Reset" }));
+    }
+
+    beforeEach(() => {
+      savedSendMessage = chromeRuntime().sendMessage;
+      savedFetch = globalThis.fetch;
+      fetchMock = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+      dpopKeyMocks.getDpopThumbprint.mockResolvedValue("jkt-1");
+      dpopKeyMocks.deleteIdbKey.mockResolvedValue(undefined);
+      dpopKeyMocks.signDpopProof.mockResolvedValue("dpop.jws");
+    });
+
+    afterEach(() => {
+      chromeRuntime().sendMessage = savedSendMessage as RuntimeMock["runtime"]["sendMessage"];
+      globalThis.fetch = savedFetch;
+    });
+
+    it("posts to the issuer with redirect error when it equals the configured server", async () => {
+      holdToken(allDefaults.serverUrl);
+      await clickReset();
+
+      await screen.findByText(/Reset complete/);
+      expect(fetchMock).toHaveBeenCalledOnce();
+      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe(`${allDefaults.serverUrl}/api/extension/key/reset`);
+      expect(init.redirect).toBe("error");
+      expect((init.headers as Record<string, string>).Authorization).toBe(`Bearer ${TOKEN}`);
+    });
+
+    it.each([
+      ["no issuer is recorded", null],
+      ["the issuer differs from the configured server", "https://other.example"],
+    ])("sends nothing and reports an error when %s", async (_label, issuerUrl) => {
+      holdToken(issuerUrl);
+      await clickReset();
+
+      await screen.findByText(/Reset failed/);
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(dpopKeyMocks.signDpopProof).not.toHaveBeenCalled();
+      expect(dpopKeyMocks.deleteIdbKey).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["null", null],
+      ["empty", ""],
+    ])("sends nothing when the issuer is %s and the configured server is the default", async (_label, issuerUrl) => {
+      // An empty-input default must not stand in for a missing issuer.
+      mockGetSettings.mockResolvedValue({ ...allDefaults, serverUrl: DEFAULT_SERVER_URL });
+      holdToken(issuerUrl);
+      await clickReset();
+
+      await screen.findByText(/Reset failed/);
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(dpopKeyMocks.signDpopProof).not.toHaveBeenCalled();
+    });
+
+    it("posts to the default server when it is both the issuer and the configured server", async () => {
+      // Control for the case above: the same configuration with a recorded issuer.
+      mockGetSettings.mockResolvedValue({ ...allDefaults, serverUrl: DEFAULT_SERVER_URL });
+      holdToken(DEFAULT_SERVER_URL);
+      await clickReset();
+
+      await screen.findByText(/Reset complete/);
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect((fetchMock.mock.calls[0] as [string])[0]).toBe(`${DEFAULT_SERVER_URL}/api/extension/key/reset`);
     });
   });
 });

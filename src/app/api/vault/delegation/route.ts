@@ -170,30 +170,21 @@ async function handlePOST(request: NextRequest) {
     return errorResponse(API_ERROR.DELEGATION_ENTRIES_NOT_FOUND);
   }
 
-  // Look up existing delegation for this token (one-active-per-token).
-  // Revoking is DEFERRED to AFTER the new session's Redis store succeeds
-  // (C5) to prevent transient Redis failures from killing the user's
-  // currently-active delegation alongside the new one.
-  const existingSession = await withBypassRls(prisma, (tx) =>
-    tx.delegationSession.findFirst({
-      where: {
-        userId,
-        mcpTokenId,
-        revokedAt: null,
-        expiresAt: { gt: new Date() },
-      },
-      select: { id: true },
-    }),
-  BYPASS_GRANT.DELEGATION_SESSION_LOOKUP);
-
   // Step 1: Create new delegation session in DB. The user lock serializes it
   // against a revocation of the user's credentials (user-auth-serialization.ts),
   // so the session that authenticated it and the MCP token it authorizes are
   // re-read under it: a delegation must not outlive either.
+  // The existing delegations for this token (one-active-per-token) are read
+  // under the same lock, so a concurrent POST sees this one's session and
+  // supersedes it rather than leaving two active. Revoking them is DEFERRED to
+  // AFTER the new session's Redis store succeeds (C5) to prevent transient
+  // Redis failures from killing the user's currently-active delegation
+  // alongside the new one.
   const expiresAt = new Date(Date.now() + effectiveTtl * MS_PER_SECOND);
   let delegationSession;
+  let existingSessions: { id: string }[];
   try {
-    delegationSession = await withBypassRls(prisma, async (tx) => {
+    ({ delegationSession, existingSessions } = await withBypassRls(prisma, async (tx) => {
       await lockUserAuthArtifacts(tx, userId);
       if (!(await isSessionRowLive(tx, request, userId))) throw new UserAuthRevokedError("session");
       const tokenLive = await tx.mcpAccessToken.findFirst({
@@ -201,7 +192,16 @@ async function handlePOST(request: NextRequest) {
         select: { id: true },
       });
       if (!tokenLive) throw new UserAuthRevokedError("token");
-      return tx.delegationSession.create({
+      const existing = await tx.delegationSession.findMany({
+        where: {
+          userId,
+          mcpTokenId,
+          revokedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+        select: { id: true },
+      });
+      const created = await tx.delegationSession.create({
         data: {
           tenantId,
           userId,
@@ -211,7 +211,8 @@ async function handlePOST(request: NextRequest) {
           expiresAt,
         },
       });
-    }, BYPASS_GRANT.DELEGATION_SESSION_CREATE);
+      return { delegationSession: created, existingSessions: existing };
+    }, BYPASS_GRANT.DELEGATION_SESSION_CREATE));
   } catch (err) {
     if (err instanceof UserAuthRevokedError) return unauthorized();
     throw err;
@@ -253,11 +254,11 @@ async function handlePOST(request: NextRequest) {
     logAuditAsync({ ...tenantAuditBase(request, userId, tenantId), ...auditBody }),
   ]);
 
-  // Step 4 + 5: Best-effort cleanup of the existing session. Both wrapped
+  // Step 4 + 5: Best-effort cleanup of the existing sessions. Both wrapped
   // in try/catch with warn-only logging so a Redis or DB transient does not
   // surface as a 500 to the caller. delegation/check uses orderBy createdAt
   // desc (I-C5-2) so the new session is preferred during any overlap.
-  if (existingSession) {
+  for (const existingSession of existingSessions) {
     try {
       await evictDelegationRedisKeys(userId, existingSession.id);
     } catch (err) {

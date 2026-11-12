@@ -10,7 +10,7 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import { INVITATION_STATUS, TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
-import { withBypassRls } from "@/lib/tenant-rls";
+import { advisoryXactLock, withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
@@ -101,8 +101,10 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   // only as typed, so every case variant is a candidate invitee. Only id is
   // needed downstream — fetching the full row would expose
   // private-key-encryption material across tenants if the row leaks via logs.
+  // `in`, not `equals`: insensitive `equals` is an unescaped ILIKE, so `_` or
+  // `%` in the address would match other users (prisma-filters.ts).
   const existingUsersPromise = withBypassRls(prisma, (tx) =>
-    tx.user.findMany({ where: { email: { equals: email, mode: "insensitive" } }, select: { id: true } }),
+    tx.user.findMany({ where: { email: { in: [email], mode: "insensitive" } }, select: { id: true } }),
   BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP);
 
   const [team, existingUsers] = await Promise.all([teamContextPromise, existingUsersPromise]);
@@ -157,6 +159,10 @@ async function handlePOST(req: NextRequest, { params }: Params) {
         // The team too (after the tenant rows, as every writer orders them), so
         // a removal or demotion of the inviter is serialised as well.
         await lockTeamsAgainstRotation(tx, [teamId], budget);
+        // The locks above are shared, and an address with no account adds no
+        // invitee row to lock, so two inviters could both find no PENDING
+        // invitation and both issue one. Serialize issuance per (team, address).
+        await advisoryXactLock(tx, `team-invitation:${teamId}:${email.toLowerCase()}`);
         // The inviter's authority, re-read under those locks: a departure that
         // committed after requireTeamPermission ended their membership and
         // expired their invitations, and an invitation stamped after it would
@@ -166,10 +172,16 @@ async function handlePOST(req: NextRequest, { params }: Params) {
           return { outcome: ISSUE_OUTCOME.INVITER_GONE };
         }
         const pending = await tx.teamInvitation.findMany({
-          where: { teamId: teamId, status: INVITATION_STATUS.PENDING, email: { equals: email, mode: "insensitive" } },
-          select: { id: true, createdAt: true },
+          where: { teamId: teamId, status: INVITATION_STATUS.PENDING, email: { in: [email], mode: "insensitive" } },
+          select: { id: true, createdAt: true, expiresAt: true },
         });
-        for (const existing of pending) {
+        // A PENDING row past its expiry can no longer be accepted, so it is
+        // superseded (expired below) rather than reported as already sent.
+        // "Past" is decided as accept decides it (`expiresAt < now` refuses),
+        // so a row accept would still honour is never superseded.
+        const now = new Date();
+        const live = pending.filter((inv) => inv.expiresAt >= now);
+        for (const existing of live) {
           if (!inviteeIds.some((id) => departedSince(rows.get(id), existing.createdAt))) {
             return { outcome: ISSUE_OUTCOME.ALREADY_SENT };
           }

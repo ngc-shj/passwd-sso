@@ -15,15 +15,15 @@ Sourced from `src/workers/retention-gc-worker/registry.ts` (`RETENTION_REGISTRY`
 | `mobile_bridge_codes` | EXPIRY | `expires_at` | - | - | - |
 | `mcp_authorization_codes` | EXPIRY | `expires_at` | - | - | - |
 | `mcp_access_tokens` | EXPIRY_GUARDED | `expires_at` | - | guard: `MCP_TOKEN_FAMILY_DEAD` (no live dependents) | - |
-| `api_keys` | EXPIRY_AUDIT_PROVENANCE | `expires_at` | - | - | CREDENTIAL_RETENTION_PURGED |
+| `api_keys` | EXPIRY_AUDIT_PROVENANCE | `expires_at` | - | retentionDays: 30 (grace window before purge) | CREDENTIAL_RETENTION_PURGED |
 | `service_account_tokens` | EXPIRY_AUDIT_PROVENANCE | `expires_at` | - | - | CREDENTIAL_RETENTION_PURGED |
-| `operator_tokens` | EXPIRY_AUDIT_PROVENANCE | `expires_at` | - | - | CREDENTIAL_RETENTION_PURGED |
+| `operator_tokens` | EXPIRY_AUDIT_PROVENANCE | `expires_at` | - | retentionDays: 30 (grace window before purge) | CREDENTIAL_RETENTION_PURGED |
 | `extension_tokens` | EXPIRY_AUDIT_PROVENANCE | `expires_at` | - | - | CREDENTIAL_RETENTION_PURGED |
 | `access_requests` | EXPIRY_AUDIT_PROVENANCE | `expires_at` | - | retentionDays: 7 (grace window before purge) | SECURITY_RECORD_RETENTION_PURGED |
-| `admin_vault_resets` | EXPIRY_AUDIT_PROVENANCE | `expires_at` | - | - | SECURITY_RECORD_RETENTION_PURGED |
+| `admin_vault_resets` | EXPIRY_AUDIT_PROVENANCE | `expires_at` | - | retentionDays: 30 (grace window before purge) | SECURITY_RECORD_RETENTION_PURGED |
 | `master_key_rotations` | EXPIRY_AUDIT_PROVENANCE | `expires_at` | - | - | SECURITY_RECORD_RETENTION_PURGED |
-| `personal_log_access_grants` | EXPIRY_AUDIT_PROVENANCE | `expires_at` | - | - | SECURITY_RECORD_RETENTION_PURGED |
-| `password_shares` | EXPIRY_AUDIT_PROVENANCE | `expires_at` | - | - | SECURITY_RECORD_RETENTION_PURGED |
+| `personal_log_access_grants` | EXPIRY_AUDIT_PROVENANCE | `expires_at` | - | retentionDays: 30 (grace window before purge) | SECURITY_RECORD_RETENTION_PURGED |
+| `password_shares` | EXPIRY_AUDIT_PROVENANCE | `expires_at` | - | retentionDays: 30 (grace window before purge) | SECURITY_RECORD_RETENTION_PURGED |
 | `team_invitations` | EXPIRY_AUDIT_PROVENANCE | `expires_at` | - | - | SECURITY_RECORD_RETENTION_PURGED |
 | `emergency_access_grants` | EXPIRY_AUDIT_PROVENANCE | `created_at` | - | guard: `EMERGENCY_GRANT_DEAD` (no live dependents) | SECURITY_RECORD_RETENTION_PURGED |
 | `audit_logs` | PER_TENANT_FN | n/a (SECURITY DEFINER fn) | `tenants.auditLogRetentionDays` | clamped to AUDIT_LOG_RETENTION_MIN floor (sweep.ts) | - |

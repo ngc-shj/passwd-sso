@@ -158,7 +158,7 @@ function sendMessage(message: unknown): Promise<unknown> {
 let bgModule: typeof import("../background/index") | null = null;
 function applyToken(token: string, expiresAt: number, cnfJkt: string): void {
   if (!bgModule) throw new Error("background module must be loaded before applyToken()");
-  bgModule.applyToken(token, expiresAt, cnfJkt);
+  bgModule.applyToken(token, expiresAt, cnfJkt, "https://localhost:3000");
 }
 
 async function unlockVault(chromeMock: ReturnType<typeof installChromeMock>) {

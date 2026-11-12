@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
 const { mockAuth, mockPrismaTeamInvitation, mockPrismaUser, mockPrismaTeam, mockPrismaTeamMember, mockRequireTeamPermission, TeamAuthError, mockWithTeamTenantRls, mockWithBypassRls } = vi.hoisted(() => {
@@ -38,6 +38,7 @@ vi.mock("@/lib/prisma", () => ({
     team: mockPrismaTeam,
     teamMember: mockPrismaTeamMember,
     auditLog: { create: vi.fn().mockResolvedValue({}) },
+    $executeRaw: mockExecuteRaw,
   },
 }));
 vi.mock("@/lib/auth/access/team-auth", async () => ({
@@ -48,6 +49,7 @@ vi.mock("@/lib/auth/access/team-auth", async () => ({
   TeamAuthError,
 }));
 const { mockLockTenantRows } = vi.hoisted(() => ({ mockLockTenantRows: vi.fn() }));
+const { mockExecuteRaw } = vi.hoisted(() => ({ mockExecuteRaw: vi.fn() }));
 const { mockLockTeamsAgainstRotation } = vi.hoisted(() => ({ mockLockTeamsAgainstRotation: vi.fn() }));
 vi.mock("@/lib/team/team-key-rotation-lock", async (importOriginal) => ({
   ...(await importOriginal()) as Record<string, unknown>,
@@ -70,6 +72,8 @@ import { TEAM_ROLE, INVITATION_STATUS } from "@/lib/constants";
 
 const TEAM_ID = "team-123";
 const now = new Date("2025-01-01T00:00:00Z");
+// A pending invitation that has not expired yet, whatever the wall clock.
+const FUTURE = new Date("2999-01-01T00:00:00Z");
 
 describe("GET /api/teams/[teamId]/invitations", () => {
   beforeEach(() => {
@@ -222,14 +226,14 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     expect(json.error).toBe("ALREADY_A_MEMBER");
     expect(mockWithBypassRls).toHaveBeenCalledTimes(1);
     expect(mockPrismaUser.findMany).toHaveBeenCalledWith({
-      where: { email: { equals: "guest@test.com", mode: "insensitive" } },
+      where: { email: { in: ["guest@test.com"], mode: "insensitive" } },
       select: { id: true },
     });
     expect(mockPrismaTeamInvitation.create).not.toHaveBeenCalled();
   });
 
   it("returns 409 when invitation already pending", async () => {
-    mockPrismaTeamInvitation.findMany.mockResolvedValue([{ id: "existing-inv", createdAt: now }]);
+    mockPrismaTeamInvitation.findMany.mockResolvedValue([{ id: "existing-inv", createdAt: now, expiresAt: FUTURE }]);
 
     const res = await POST(
       createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/invitations`, {
@@ -279,7 +283,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     });
 
     it("expires a pending invitation issued before the invitee left and issues a new one", async () => {
-      mockPrismaTeamInvitation.findMany.mockResolvedValue([{ id: "stale-inv", createdAt: now }]);
+      mockPrismaTeamInvitation.findMany.mockResolvedValue([{ id: "stale-inv", createdAt: now, expiresAt: FUTURE }]);
       mockLockTenantRows.mockResolvedValue(departed(new Date(now.getTime() + 1)));
 
       const res = await invite();
@@ -293,14 +297,14 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     });
 
     it("treats a pending invitation issued at the instant of the departure as stale", async () => {
-      mockPrismaTeamInvitation.findMany.mockResolvedValue([{ id: "stale-inv", createdAt: now }]);
+      mockPrismaTeamInvitation.findMany.mockResolvedValue([{ id: "stale-inv", createdAt: now, expiresAt: FUTURE }]);
       mockLockTenantRows.mockResolvedValue(departed(now));
 
       expect((await invite()).status).toBe(201);
     });
 
     it("keeps refusing a pending invitation issued after the departure", async () => {
-      mockPrismaTeamInvitation.findMany.mockResolvedValue([{ id: "live-inv", createdAt: now }]);
+      mockPrismaTeamInvitation.findMany.mockResolvedValue([{ id: "live-inv", createdAt: now, expiresAt: FUTURE }]);
       mockLockTenantRows.mockResolvedValue(departed(new Date(now.getTime() - 1)));
 
       const res = await invite();
@@ -364,6 +368,21 @@ describe("POST /api/teams/[teamId]/invitations", () => {
       expect(teamLock).toBeLessThan(roleRead);
     });
 
+    it("serializes issuance per (team, address) after the team lock and before the pending read", async () => {
+      const res = await invite("New@Test.com");
+
+      expect(res.status).toBe(201);
+      expect(mockExecuteRaw).toHaveBeenCalledTimes(1);
+      // Tagged-template call: the key is the first interpolated value.
+      expect(mockExecuteRaw.mock.calls[0][1]).toBe(`team-invitation:${TEAM_ID}:new@test.com`);
+      const [addressLock] = mockExecuteRaw.mock.invocationCallOrder;
+      expect(mockLockTeamsAgainstRotation.mock.invocationCallOrder[0]).toBeLessThan(addressLock);
+      // The pending-invitation read is the invitation findMany inside the tx (the
+      // outer GET-style read is not made by POST), so it must follow the lock.
+      expect(addressLock).toBeLessThan(mockPrismaTeamInvitation.findMany.mock.invocationCallOrder[0]);
+      expect(addressLock).toBeLessThan(mockPrismaTeamInvitation.create.mock.invocationCallOrder[0]);
+    });
+
     it("refuses when the inviter's role no longer allows inviting", async () => {
       mockPrismaTeamMember.findFirst.mockResolvedValue({ role: TEAM_ROLE.VIEWER });
 
@@ -380,6 +399,64 @@ describe("POST /api/teams/[teamId]/invitations", () => {
         expect.anything(), "tenant-1", ["test-user-id", "left-user", "left-user-upper"], "share", expect.anything(),
       );
       expect(mockLockTenantRows.mock.invocationCallOrder[0]).toBeLessThan(mockPrismaTeamInvitation.create.mock.invocationCallOrder[0]);
+    });
+  });
+
+  describe("expired PENDING invitations", () => {
+    const clock = new Date("2026-06-01T00:00:00Z");
+    const invite = () =>
+      POST(
+        createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/invitations`, { body: { email: "pending@test.com", role: TEAM_ROLE.MEMBER } }),
+        createParams({ teamId: TEAM_ID }),
+      );
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(clock);
+      mockPrismaTeamInvitation.create.mockResolvedValue({ id: "new-inv", email: "pending@test.com", role: TEAM_ROLE.MEMBER, token: "t", expiresAt: now, createdAt: now });
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("issues a new invitation and flips the row when the only PENDING one has expired", async () => {
+      mockPrismaTeamInvitation.findMany.mockResolvedValue([
+        { id: "expired-inv", createdAt: now, expiresAt: new Date(clock.getTime() - 1) },
+      ]);
+
+      const res = await invite();
+
+      expect(res.status).toBe(201);
+      expect(mockPrismaTeamInvitation.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: ["expired-inv"] }, status: INVITATION_STATUS.PENDING },
+        data: { status: INVITATION_STATUS.EXPIRED },
+      });
+      expect(mockPrismaTeamInvitation.create).toHaveBeenCalledOnce();
+    });
+
+    it("treats a PENDING invitation expiring at the current instant as still live, as accept does", async () => {
+      mockPrismaTeamInvitation.findMany.mockResolvedValue([
+        { id: "boundary-inv", createdAt: now, expiresAt: new Date(clock.getTime()) },
+      ]);
+
+      const res = await invite();
+
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toBe("INVITATION_ALREADY_SENT");
+      expect(mockPrismaTeamInvitation.create).not.toHaveBeenCalled();
+    });
+
+    it("refuses with ALREADY_SENT when a live PENDING invitation sits beside an expired one", async () => {
+      mockPrismaTeamInvitation.findMany.mockResolvedValue([
+        { id: "expired-inv", createdAt: now, expiresAt: new Date(clock.getTime() - 1) },
+        { id: "live-inv", createdAt: now, expiresAt: new Date(clock.getTime() + 1) },
+      ]);
+
+      const res = await invite();
+
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toBe("INVITATION_ALREADY_SENT");
+      expect(mockPrismaTeamInvitation.create).not.toHaveBeenCalled();
     });
   });
 });

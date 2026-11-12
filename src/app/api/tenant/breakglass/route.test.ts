@@ -13,6 +13,7 @@ const {
   mockGrantFindMany,
   mockGrantFindFirst,
   mockGrantCreate,
+  mockExecuteRaw,
   mockTenantMemberFindFirst,
   mockCreateNotification,
   mockDispatchTenantWebhook,
@@ -38,6 +39,7 @@ const {
     mockGrantFindMany: vi.fn(),
     mockGrantFindFirst: vi.fn(),
     mockGrantCreate: vi.fn(),
+    mockExecuteRaw: vi.fn().mockResolvedValue(undefined),
     mockTenantMemberFindFirst: vi.fn(),
     mockCreateNotification: vi.fn(),
     mockDispatchTenantWebhook: vi.fn(),
@@ -58,6 +60,7 @@ vi.mock("@/lib/auth/access/tenant-auth", () => ({
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
+    $executeRaw: mockExecuteRaw,
     personalLogAccessGrant: {
       findMany: mockGrantFindMany,
       findFirst: mockGrantFindFirst,
@@ -296,6 +299,28 @@ describe("POST /api/tenant/breakglass", () => {
     mockTenantMemberFindFirst.mockResolvedValue(TARGET_MEMBER);
     mockGrantFindFirst.mockResolvedValue(null); // no duplicate
     mockGrantCreate.mockResolvedValue(createdGrant);
+    mockExecuteRaw.mockResolvedValue(undefined);
+  });
+
+  it("takes the (tenant, requester, target) lock before the member, duplicate and cooling-off reads", async () => {
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/tenant/breakglass", {
+        body: validBody,
+        headers: { origin: "http://localhost" },
+      }),
+    );
+    expect(res.status).toBe(201);
+    expect(mockExecuteRaw).toHaveBeenCalledTimes(1);
+    expect(mockExecuteRaw.mock.calls[0][1]).toBe(
+      `breakglass-grant:${TENANT_ID}:${ACTOR_USER_ID}:${TARGET_USER_ID}`,
+    );
+    const lockOrder = mockExecuteRaw.mock.invocationCallOrder[0];
+    expect(lockOrder).toBeLessThan(mockTenantMemberFindFirst.mock.invocationCallOrder[0]);
+    // duplicate read and cooling-off read are both findFirst calls on the grant table
+    for (const order of mockGrantFindFirst.mock.invocationCallOrder) {
+      expect(lockOrder).toBeLessThan(order);
+    }
+    expect(lockOrder).toBeLessThan(mockGrantCreate.mock.invocationCallOrder[0]);
   });
 
   it("returns 401 when unauthenticated", async () => {

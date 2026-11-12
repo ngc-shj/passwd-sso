@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { prisma as defaultPrisma, type TxOrPrisma } from "@/lib/prisma";
 import { bulkTransition } from "@/lib/emergency-access/emergency-access-state";
 import { EA_STATUS, EA_ACTOR } from "@/lib/constants";
@@ -51,4 +52,28 @@ export async function markGrantsStaleForOwner(
     extraData: { ownerEphemeralPublicKey: null },
   });
   return result.updated;
+}
+
+/**
+ * The owner's grants that block a new grant to `granteeEmail` (DUPLICATE_GRANT).
+ *
+ * A never-accepted invite whose token has expired is excluded: it can no longer
+ * be accepted, and until the retention sweep removes it, it would otherwise
+ * block re-inviting the same person. "Expired" matches the accept routes
+ * (`tokenExpiresAt < now` refuses), so an invite they would still honour keeps
+ * counting as a duplicate.
+ */
+export function duplicateGrantWhere(
+  ownerId: string,
+  granteeEmail: string,
+  now: Date,
+): Prisma.EmergencyAccessGrantWhereInput {
+  return {
+    ownerId,
+    // `in`, not `equals`: insensitive `equals` is an unescaped ILIKE, so `_` or
+    // `%` in the address matched other grants (round-8 R8-S4).
+    granteeEmail: { in: [granteeEmail], mode: "insensitive" },
+    status: { notIn: [EA_STATUS.REVOKED, EA_STATUS.REJECTED] },
+    NOT: { status: EA_STATUS.PENDING, tokenExpiresAt: { lt: now } },
+  };
 }

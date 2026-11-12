@@ -8,10 +8,10 @@
  */
 
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
-  writeFileSync,
   lstatSync,
   unlinkSync,
 } from "node:fs";
@@ -23,6 +23,7 @@ import {
 } from "./paths.js";
 import { writeSecretFile, readSecretFile } from "./secure-file.js";
 import { migrateIfNeeded } from "./migrate.js";
+import { validateServerUrl } from "./oauth.js";
 
 export interface CliConfig {
   serverUrl: string;
@@ -34,18 +35,27 @@ const DEFAULT_CONFIG: CliConfig = {
   locale: "en",
 };
 
-function ensureConfigDir(): void {
-  const dir = getConfigDir();
+/**
+ * Create `dir` 0700, or tighten it to 0700 if it already exists: mkdirSync's
+ * mode applies only to a freshly created directory. A symlink is left alone
+ * (callers refuse to write through one).
+ */
+function ensurePrivateDir(dir: string): void {
   if (!existsSync(dir)) {
     mkdirSync(dir, { mode: 0o700, recursive: true });
+    return;
+  }
+  if (!lstatSync(dir).isSymbolicLink()) {
+    chmodSync(dir, 0o700);
   }
 }
 
+function ensureConfigDir(): void {
+  ensurePrivateDir(getConfigDir());
+}
+
 function ensureDataDir(): void {
-  const dir = getDataDir();
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { mode: 0o700, recursive: true });
-  }
+  ensurePrivateDir(getDataDir());
 }
 
 export function loadConfig(): CliConfig {
@@ -61,9 +71,7 @@ export function loadConfig(): CliConfig {
 
 export function saveConfig(config: CliConfig): void {
   ensureConfigDir();
-  writeFileSync(getConfigFilePath(), JSON.stringify(config, null, 2), {
-    mode: 0o600,
-  });
+  writeSecretFile(getConfigFilePath(), JSON.stringify(config, null, 2));
 }
 
 // ─── Credential Storage ───────────────────────────────────────────────────────
@@ -73,6 +81,12 @@ export interface StoredCredentials {
   refreshToken: string;
   clientId: string;
   expiresAt: string; // ISO 8601
+  /**
+   * The server that issued these tokens (normalised, no trailing slash). Every
+   * request carrying them goes here, never to the configured serverUrl, which
+   * `login` rewrites before the old tokens are revoked.
+   */
+  serverUrl: string;
 }
 
 /**
@@ -91,7 +105,9 @@ export function saveCredentials(creds: StoredCredentials): void {
 /**
  * Load stored credentials. Returns null if the file does not exist,
  * cannot be parsed as JSON, or is missing required fields (e.g. legacy
- * plaintext token format written by older CLI versions).
+ * plaintext token format written by older CLI versions, or credentials
+ * saved before the issuing serverUrl was recorded — those must re-login
+ * rather than have their tokens sent to whatever server is configured now).
  */
 export function loadCredentials(): StoredCredentials | null {
   migrateIfNeeded();
@@ -125,16 +141,24 @@ export function loadCredentials(): StoredCredentials | null {
       typeof obj.accessToken !== "string" ||
       typeof obj.refreshToken !== "string" ||
       typeof obj.clientId !== "string" ||
-      typeof obj.expiresAt !== "string"
+      typeof obj.expiresAt !== "string" ||
+      typeof obj.serverUrl !== "string" ||
+      obj.serverUrl === ""
     ) {
       return null;
     }
+    // The tokens are sent to this URL; a hand-edited file must not redirect
+    // them to a non-https or credential-bearing URL.
+    validateServerUrl(obj.serverUrl);
 
     return {
       accessToken: obj.accessToken,
       refreshToken: obj.refreshToken,
       clientId: obj.clientId,
       expiresAt: obj.expiresAt,
+      // Callers append `/api/...`; `login` writes it without the slash, but a
+      // hand-edited file may carry one.
+      serverUrl: obj.serverUrl.replace(/\/$/, ""),
     };
   } catch {
     return null;

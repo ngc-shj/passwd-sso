@@ -143,7 +143,7 @@ export interface SerializedAttestationResponse {
 
 export type ExtensionResponse =
   | { type: typeof EXT_MSG.START_CONNECT; ok: boolean; errorCode?: string }
-  | { type: typeof EXT_MSG.GET_TOKEN; token: string | null }
+  | { type: typeof EXT_MSG.GET_TOKEN; token: string | null; issuerUrl: string | null }
   | { type: typeof EXT_MSG.CLEAR_TOKEN; ok: true }
   | { type: typeof EXT_MSG.GET_STATUS; hasToken: boolean; expiresAt: number | null; vaultUnlocked: boolean; disconnectReason?: DisconnectReason | null; tenantAutoLockMinutes?: number | null; requireVaultTimeoutLogout?: boolean | null; userId?: string | null }
   | { type: typeof EXT_MSG.UNLOCK_VAULT; ok: boolean; error?: string }

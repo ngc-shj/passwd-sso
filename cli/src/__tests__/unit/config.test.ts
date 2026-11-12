@@ -1,18 +1,13 @@
-import { describe, it, expect, vi, afterAll, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, statSync } from "node:fs";
+import { describe, it, expect, vi, afterAll, afterEach, beforeEach } from "vitest";
+import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, statSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { MS_PER_HOUR } from "../../lib/time.js";
-
-const origEnv = { ...process.env };
 
 // Override dirs for testing
 const testDir = mkdtempSync(join(tmpdir(), "psso-test-"));
 const testXdgConfig = join(testDir, "xdg-config");
 const testXdgData = join(testDir, "xdg-data");
-
-process.env.XDG_CONFIG_HOME = testXdgConfig;
-process.env.XDG_DATA_HOME = testXdgData;
 
 vi.mock("node:os", async () => {
   const actual = await vi.importActual<typeof import("node:os")>("node:os");
@@ -26,6 +21,12 @@ vi.mock("node:os", async () => {
 const { loadConfig, saveConfig, saveCredentials, loadCredentials, deleteCredentials } = await import("../../lib/config.js");
 const { getCredentialsFilePath } = await import("../../lib/paths.js");
 const { _resetMigrationState } = await import("../../lib/migrate.js");
+
+// paths.ts reads XDG_* on every call; unstubEnvs restores them after each test.
+beforeEach(() => {
+  vi.stubEnv("XDG_CONFIG_HOME", testXdgConfig);
+  vi.stubEnv("XDG_DATA_HOME", testXdgData);
+});
 
 describe("config", () => {
   afterEach(() => {
@@ -41,7 +42,6 @@ describe("config", () => {
 
   afterAll(() => {
     rmSync(testDir, { recursive: true, force: true });
-    process.env = { ...origEnv };
   });
 
   it("returns defaults when no config file exists", () => {
@@ -66,6 +66,49 @@ describe("config", () => {
     const stat = statSync(configPath);
     expect(stat.mode & 0o777).toBe(0o600);
   });
+
+  it("saveConfig tightens a pre-existing 0644 config.json to 0600", () => {
+    const dir = join(testXdgConfig, "passwd-sso");
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const configPath = join(dir, "config.json");
+    writeFileSync(configPath, "{}", { mode: 0o644 });
+    chmodSync(configPath, 0o644);
+
+    saveConfig({ serverUrl: "https://example.com", locale: "en" });
+
+    expect(JSON.parse(readFileSync(configPath, "utf-8")).serverUrl).toBe("https://example.com");
+    expect(statSync(configPath).mode & 0o777).toBe(0o600);
+  });
+
+  it("saveConfig tightens a pre-existing 0755 config dir to 0700", () => {
+    const dir = join(testXdgConfig, "passwd-sso");
+    mkdirSync(dir, { recursive: true });
+    chmodSync(dir, 0o755);
+
+    saveConfig({ serverUrl: "https://example.com", locale: "en" });
+
+    expect(statSync(dir).mode & 0o777).toBe(0o700);
+  });
+
+  it("saveCredentials tightens a pre-existing 0755 data dir to 0700 and 0644 file to 0600", () => {
+    const credPath = getCredentialsFilePath();
+    const dir = join(credPath, "..");
+    mkdirSync(dir, { recursive: true });
+    chmodSync(dir, 0o755);
+    writeFileSync(credPath, "x", { mode: 0o644 });
+    chmodSync(credPath, 0o644);
+
+    saveCredentials({
+      accessToken: "a",
+      refreshToken: "r",
+      clientId: "c",
+      expiresAt: new Date(Date.now() + MS_PER_HOUR).toISOString(),
+      serverUrl: "https://issuer.example.com",
+    });
+
+    expect(statSync(dir).mode & 0o777).toBe(0o700);
+    expect(statSync(credPath).mode & 0o777).toBe(0o600);
+  });
 });
 
 describe("credentials", () => {
@@ -84,9 +127,17 @@ describe("credentials", () => {
     refreshToken: "mcpr_test_refresh",
     clientId: "mcpc_test_client",
     expiresAt: new Date(Date.now() + MS_PER_HOUR).toISOString(),
+    serverUrl: "https://issuer.example.com",
   };
 
-  it("saves and loads credentials with all 4 fields", () => {
+  function writeRawCreds(obj: unknown): void {
+    const credPath = getCredentialsFilePath();
+    mkdirSync(join(credPath, ".."), { recursive: true, mode: 0o700 });
+    writeFileSync(credPath, JSON.stringify(obj), { mode: 0o600 });
+    _resetMigrationState();
+  }
+
+  it("saves and loads credentials with all 5 fields", () => {
     saveCredentials(validCreds);
     _resetMigrationState();
     const loaded = loadCredentials();
@@ -95,6 +146,33 @@ describe("credentials", () => {
     expect(loaded!.refreshToken).toBe(validCreds.refreshToken);
     expect(loaded!.clientId).toBe(validCreds.clientId);
     expect(loaded!.expiresAt).toBe(validCreds.expiresAt);
+    expect(loaded!.serverUrl).toBe(validCreds.serverUrl);
+  });
+
+  it("returns null for legacy credentials without serverUrl", () => {
+    const { serverUrl: _omit, ...legacy } = validCreds;
+    writeRawCreds(legacy);
+    expect(loadCredentials()).toBeNull();
+  });
+
+  it("returns null when serverUrl is empty", () => {
+    writeRawCreds({ ...validCreds, serverUrl: "" });
+    expect(loadCredentials()).toBeNull();
+  });
+
+  it("returns null when serverUrl is non-https and non-loopback", () => {
+    writeRawCreds({ ...validCreds, serverUrl: "http://evil.example.com" });
+    expect(loadCredentials()).toBeNull();
+  });
+
+  it("loads credentials whose serverUrl is loopback http", () => {
+    writeRawCreds({ ...validCreds, serverUrl: "http://localhost:3000" });
+    expect(loadCredentials()?.serverUrl).toBe("http://localhost:3000");
+  });
+
+  it("strips a trailing slash from a hand-edited serverUrl", () => {
+    writeRawCreds({ ...validCreds, serverUrl: "https://issuer.example.com/" });
+    expect(loadCredentials()?.serverUrl).toBe("https://issuer.example.com");
   });
 
   it("creates credentials file with 0o600 permissions", () => {

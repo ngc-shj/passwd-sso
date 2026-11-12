@@ -171,6 +171,19 @@ describe("validateApiKey — deactivated-user (C13)", () => {
     expect(result).toEqual({ ok: false, error: "API_KEY_INVALID" });
   });
 
+  it("rejects an expired, unrevoked key with API_KEY_EXPIRED before the membership lookup", async () => {
+    mockApiKeyFindUnique.mockResolvedValue({
+      ...VALID_KEY_ROW,
+      revokedAt: null,
+      expiresAt: new Date(Date.now() - 1000),
+    });
+    mockTenantMemberFindUnique.mockResolvedValue({ deactivatedAt: null });
+
+    const result = await validateApiKey(makeReq());
+    expect(result).toEqual({ ok: false, error: "API_KEY_EXPIRED" });
+    expect(mockTenantMemberFindUnique).not.toHaveBeenCalled();
+  });
+
   // L2 — SCIM deactivation fail-open backstop.
   // SCIM user deactivation calls invalidateUserSessions, which sets revokedAt on
   // this api_key. If that invalidation THROWS (the SCIM handler logs and returns

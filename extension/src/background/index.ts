@@ -142,6 +142,12 @@ let currentToken: string | null = null;
 let tokenExpiresAt: number | null = null;
 /** RFC 7638 JWK thumbprint of the DPoP key bound to the current token. */
 let currentCnfJkt: string | null = null;
+/**
+ * The server that issued the current token. Every request carrying it goes
+ * there and only there (see tokenServerUrl); null only for a token applied
+ * without one (tests).
+ */
+let currentIssuerUrl: string | null = null;
 let encryptionKey: CryptoKey | null = null;
 let currentUserId: string | null = null;
 let currentVaultSecretKeyHex: string | null = null;
@@ -487,6 +493,7 @@ function clearToken(reason: DisconnectReason = DISCONNECT_REASON.MANUAL): void {
   currentToken = null;
   tokenExpiresAt = null;
   currentCnfJkt = null;
+  currentIssuerUrl = null;
   clearTenantPolicy();
   clearVault();
   chrome.alarms.clear(ALARM_TOKEN_REFRESH);
@@ -511,8 +518,40 @@ function endConnectionForPasskeyRequirement(generation: number): void {
   // A reconnect since the refused request belongs to a different connection.
   if (connectionGeneration !== generation || currentToken === null) return;
   const token = currentToken;
+  const issuerUrl = currentIssuerUrl;
   clearToken(DISCONNECT_REASON.PASSKEY_REQUIRED);
-  void revokeTokenOnServerWith({ getCurrentToken: () => token });
+  void revokeTokenOnServerWith({ getCurrentToken: () => token }, issuerUrl);
+}
+
+/**
+ * The configured server URL changed. Whatever token exists stops being usable
+ * synchronously, before any await — an in-flight hydration must not restore it
+ * into memory meanwhile — whether or not its issuer is known (settings can be
+ * lost while the session token survives). The token is revoked best-effort at
+ * the server that issued it, recorded with it. A token whose issuer is unknown
+ * is not revoked anywhere: the previous configured URL may be a different
+ * server, and sending the token there is the leak this binding closes.
+ */
+function endConnectionForServerChange(): void {
+  hydrationSuperseded = true;
+  const heldToken = currentToken;
+  const heldIssuer = currentIssuerUrl;
+  // A not-yet-hydrated SW holds the token only in session storage. Start that
+  // read first (issued before clearToken's clearSession), but clear without
+  // waiting for it: the SW can be torn down mid-await, which would leave the
+  // token stored for the next start to restore against the new server. If the
+  // read loses the race the token is simply not revoked — revocation is
+  // best-effort, removal is not.
+  const stored = heldToken === null ? loadSession() : null;
+  clearToken(DISCONNECT_REASON.MANUAL);
+
+  void (async () => {
+    const session = stored ? await stored : null;
+    const token = heldToken ?? session?.token ?? null;
+    const revokeAt = heldToken !== null ? heldIssuer : session?.issuerUrl ?? null;
+    if (token === null || revokeAt === null) return;
+    await revokeTokenOnServerWith({ getCurrentToken: () => token }, revokeAt);
+  })().catch(() => {});
 }
 
 /**
@@ -533,6 +572,7 @@ export function applyToken(
   token: string,
   expiresAt: number,
   cnfJkt: string,
+  issuerUrl: string,
 ): void {
   hydrationSuperseded = true;
   connectionGeneration += 1;
@@ -548,6 +588,7 @@ export function applyToken(
   currentToken = token;
   tokenExpiresAt = expiresAt;
   currentCnfJkt = cnfJkt;
+  currentIssuerUrl = issuerUrl;
 
   const delayMs = expiresAt - Date.now();
   if (delayMs > 0) {
@@ -714,6 +755,7 @@ function persistState(): void {
       requireVaultTimeoutLogout,
       tokenCnfJkt: currentCnfJkt,
       personalKeyVersion: personalKeyVersion ?? undefined,
+      issuerUrl: currentIssuerUrl ?? undefined,
     }).catch(() => {});
   }
 }
@@ -724,6 +766,7 @@ function discardRestoredSession(): void {
   bumpVaultEpoch();
   currentToken = null;
   tokenExpiresAt = null;
+  currentIssuerUrl = null;
   currentUserId = null;
   currentVaultSecretKeyHex = null;
   personalKeyVersion = null;
@@ -755,6 +798,7 @@ async function hydrateFromSession(): Promise<void> {
 
   currentToken = state.token;
   tokenExpiresAt = state.expiresAt;
+  currentIssuerUrl = state.issuerUrl ?? null;
   currentUserId = state.userId ?? null;
   currentVaultSecretKeyHex = state.vaultSecretKey ?? null;
   // Restore tenant-policy auto-lock so the options UI sees the override
@@ -865,33 +909,45 @@ function scheduleRefreshAlarm(expiresAt: number): void {
 
 async function attemptTokenRefresh(): Promise<void> {
   const generation = connectionGeneration;
+  // The refresh response arrives after awaits: a logout, disconnect or server
+  // change in the meantime ended this connection, and its answer must neither
+  // bring the token back nor end (or re-arm alarms for) a newer connection.
+  const isSameConnection = () => connectionGeneration === generation;
   await attemptTokenRefreshWith({
     getCurrentToken: () => currentToken,
     getTokenExpiresAt: () => tokenExpiresAt,
+    getIssuerUrl: () => currentIssuerUrl,
     setToken: (token, expiresAt) => {
+      if (!isSameConnection()) return;
       currentToken = token;
       tokenExpiresAt = expiresAt;
       persistState();
     },
     // Carry forward cnfJkt from refresh response (server preserves binding per C10).
     setCnfJkt: (cnfJkt) => {
+      if (!isSameConnection()) return;
       currentCnfJkt = cnfJkt;
     },
     // A refresh that the server rejects (401/403/404) means the session is no
     // longer valid — record it as REVOKED, not the default MANUAL.
-    clearToken: () => clearToken(DISCONNECT_REASON.REVOKED),
+    clearToken: () => {
+      if (isSameConnection()) clearToken(DISCONNECT_REASON.REVOKED);
+    },
     endForPasskeyRequirement: () => endConnectionForPasskeyRequirement(generation),
-    scheduleRefreshAlarm,
+    scheduleRefreshAlarm: (expiresAt) => {
+      if (isSameConnection()) scheduleRefreshAlarm(expiresAt);
+    },
     createTtlAlarm: (when) => {
-      chrome.alarms.create(ALARM_TOKEN_TTL, { when });
+      if (isSameConnection()) chrome.alarms.create(ALARM_TOKEN_TTL, { when });
     },
   });
 }
 
 async function revokeCurrentTokenOnServer(): Promise<void> {
-  await revokeTokenOnServerWith({
-    getCurrentToken: () => currentToken,
-  });
+  await revokeTokenOnServerWith(
+    { getCurrentToken: () => currentToken },
+    currentIssuerUrl,
+  );
 }
 
 // ── Refresh single-flight (C5 extension technical approach) ──────────────
@@ -1212,8 +1268,14 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local") return;
-  if (changes.serverUrl?.newValue) {
-    registerTokenBridgeScript(String(changes.serverUrl.newValue)).catch(() => {});
+  if (changes.serverUrl) {
+    const { oldValue, newValue } = changes.serverUrl;
+    if (oldValue !== newValue) {
+      endConnectionForServerChange();
+    }
+    if (newValue) {
+      registerTokenBridgeScript(String(newValue)).catch(() => {});
+    }
   }
   // Update in-memory caches
   if (changes.showBadgeCount) cachedShowBadgeCount = changes.showBadgeCount.newValue !== false;
@@ -1425,6 +1487,25 @@ chrome.commands.onCommand.addListener(async (command) => {
 });
 
 /**
+ * Where a request carrying the current token goes: the server that issued it.
+ * The configured URL is read only to notice that it changed under a held
+ * token — storage.onChanged can run after a read that already sees the new
+ * value — and then the connection ends instead of the token going anywhere.
+ */
+async function tokenServerUrl(): Promise<string> {
+  const issuer = currentIssuerUrl;
+  // A token without a recorded issuer is never sent anywhere.
+  if (issuer === null) throw new Error("NO_TOKEN");
+  const { serverUrl } = await getSettings();
+  if (currentIssuerUrl !== issuer) throw new Error("NO_TOKEN");
+  if (serverUrl !== issuer) {
+    endConnectionForServerChange();
+    throw new Error("NO_TOKEN");
+  }
+  return issuer;
+}
+
+/**
  * `opts.epoch`: the vault epoch the caller's request belongs to. Asserted after
  * this function's own awaits, immediately before each send — the body of a
  * write is encrypted for the vault state it was built in, so it must never go
@@ -1457,7 +1538,8 @@ async function swFetchWithExpiryRetry(
   if (!currentToken) {
     throw new Error("NO_TOKEN");
   }
-  const { serverUrl } = await getSettings();
+  const generationAtStart = connectionGeneration;
+  const serverUrl = await tokenServerUrl();
   let parsed: URL;
   try {
     parsed = new URL(serverUrl);
@@ -1477,6 +1559,11 @@ async function swFetchWithExpiryRetry(
   }
 
   assertFresh();
+  // The issuer was resolved before the awaits above: a disconnect and
+  // reconnect meanwhile would pair the new token with the old issuer.
+  if (connectionGeneration !== generationAtStart || currentIssuerUrl !== serverUrl) {
+    throw new Error("NO_TOKEN");
+  }
   const tokenUsed = currentToken;
   const generationUsed = connectionGeneration;
   const res = await swFetchAuthenticated(path, init, serverUrl, tokenUsed, assertFresh);
@@ -1529,7 +1616,7 @@ async function recordUnlockPresence(authHash: string, epoch: number): Promise<vo
   if (!currentToken) return;
   const generation = connectionGeneration;
   try {
-    const { serverUrl } = await getSettings();
+    const serverUrl = await tokenServerUrl();
     // The hash proves the unlock this epoch committed; after a lock or a
     // reconnect it would be posted under a token it does not belong to.
     if (!isVaultEpochCurrent(epoch) || !currentToken) return;
@@ -2685,7 +2772,7 @@ async function handleMessage(
       // bridge code, or DPoP key material is ever exposed to MAIN-world JS
       // (content script forwards only the request/response envelope).
       const result = await startConnect({
-        setToken: (token, expiresAt, cnfJkt) => applyToken(token, expiresAt, cnfJkt),
+        setToken: (token, expiresAt, cnfJkt, issuerUrl) => applyToken(token, expiresAt, cnfJkt, issuerUrl),
       });
       if (result.ok) void refreshTenantPolicy();
       const response: ExtensionResponse = {
@@ -2707,7 +2794,9 @@ async function handleMessage(
       if (tokenExpiresAt && Date.now() >= tokenExpiresAt) {
         clearToken(DISCONNECT_REASON.EXPIRED);
       }
-      sendResponse({ type: EXT_MSG.GET_TOKEN, token: currentToken });
+      // The issuer travels with the token: a caller outside the SW (the options
+      // page's key reset) must send it there and nowhere else.
+      sendResponse({ type: EXT_MSG.GET_TOKEN, token: currentToken, issuerUrl: currentIssuerUrl });
       return;
     }
 
@@ -3677,7 +3766,7 @@ function respondWithFailure(
         sendResponse({ type: EXT_MSG.GET_STATUS, hasToken: false, expiresAt: null, vaultUnlocked: false } as ExtensionResponse);
         break;
       case EXT_MSG.GET_TOKEN:
-        sendResponse({ type: EXT_MSG.GET_TOKEN, token: null } as ExtensionResponse);
+        sendResponse({ type: EXT_MSG.GET_TOKEN, token: null, issuerUrl: null } as ExtensionResponse);
         break;
       case EXT_MSG.GET_MATCHES_FOR_URL:
         sendResponse({ type: EXT_MSG.GET_MATCHES_FOR_URL, entries: [], vaultLocked: !!currentToken && !encryptionKey, disconnected: !currentToken, suppressInline: false } as ExtensionResponse);

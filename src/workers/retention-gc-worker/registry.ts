@@ -186,6 +186,15 @@ export type RetentionEntry =
   | PerTenantAgeEntry;
 
 /**
+ * Grace window (days past expires_at) for records whose UI lists an "expired"
+ * state — share links/sends, API keys, operator tokens, break-glass grants,
+ * admin vault resets. Without it the row is purged on the first sweep after
+ * expiry and that state is never shown. UI-visibility only, NOT forensic
+ * retention: the purge's provenance audit is permanent either way.
+ */
+export const EXPIRED_RECORD_VISIBILITY_GRACE_DAYS = 30;
+
+/**
  * EXPIRY tables that are intentionally RLS-free (no RLS policy, no tenant_id),
  * and therefore legitimately omit `globalDelete`. This is the single source of
  * truth for the boot validator's exception list — keep it co-located with the
@@ -317,6 +326,7 @@ export const RETENTION_REGISTRY: readonly RetentionEntry[] = [
     provenanceColumns: ["tenant_id", "user_id", "name", "last_used_at"],
     auditAction: "CREDENTIAL_RETENTION_PURGED",
     globalDelete: true,
+    retentionDays: EXPIRED_RECORD_VISIBILITY_GRACE_DAYS,
   },
   {
     // Service-account tokens — provenance: owning SA + last use.
@@ -346,6 +356,7 @@ export const RETENTION_REGISTRY: readonly RetentionEntry[] = [
     ],
     auditAction: "CREDENTIAL_RETENTION_PURGED",
     globalDelete: true,
+    retentionDays: EXPIRED_RECORD_VISIBILITY_GRACE_DAYS,
   },
   {
     // Extension tokens — richest provenance: last_used_ip + user_agent + owning user.
@@ -413,6 +424,7 @@ export const RETENTION_REGISTRY: readonly RetentionEntry[] = [
     ],
     auditAction: "SECURITY_RECORD_RETENTION_PURGED",
     globalDelete: true,
+    retentionDays: EXPIRED_RECORD_VISIBILITY_GRACE_DAYS,
   },
   {
     // Master key rotations — provenance: target version + approval/execution/revoke markers.
@@ -444,6 +456,7 @@ export const RETENTION_REGISTRY: readonly RetentionEntry[] = [
     ],
     auditAction: "SECURITY_RECORD_RETENTION_PURGED",
     globalDelete: true,
+    retentionDays: EXPIRED_RECORD_VISIBILITY_GRACE_DAYS,
   },
   {
     // Password shares / sends — provenance: creator + share/entry type + revoke marker.
@@ -463,6 +476,7 @@ export const RETENTION_REGISTRY: readonly RetentionEntry[] = [
     ],
     auditAction: "SECURITY_RECORD_RETENTION_PURGED",
     globalDelete: true,
+    retentionDays: EXPIRED_RECORD_VISIBILITY_GRACE_DAYS,
   },
   {
     // Team invitations — provenance: inviter + invitee email (PII, conscious

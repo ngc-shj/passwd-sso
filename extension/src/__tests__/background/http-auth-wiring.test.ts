@@ -280,7 +280,7 @@ function stubFetch(): void {
 }
 
 async function unlock(): Promise<void> {
-  bgModule!.applyToken("t", Date.now() + 3_600_000, "");
+  bgModule!.applyToken("t", Date.now() + 3_600_000, "", serverUrl);
   expect(await send({ type: "UNLOCK_VAULT", passphrase: "pw" })).toEqual({ type: "UNLOCK_VAULT", ok: true });
 }
 
@@ -613,7 +613,7 @@ describe("server URL rule in the service worker", () => {
   it("refuses a plain-http non-loopback server: no fetch, no permission check, no token bridge", async () => {
     serverUrl = "http://server.example";
     await loadBackground();
-    bgModule!.applyToken("t", Date.now() + 3_600_000, "");
+    bgModule!.applyToken("t", Date.now() + 3_600_000, "", serverUrl);
     const res = (await send({ type: "UNLOCK_VAULT", passphrase: "pw" })) as { ok: boolean };
     expect(res.ok).toBe(false);
     expect(serverFetches("http://server.example")).toBe(0);
@@ -626,7 +626,7 @@ describe("server URL rule in the service worker", () => {
   it.each(["http://localhost:3000", "https://server.example"])("control: %s is used", async (url) => {
     serverUrl = url;
     await loadBackground();
-    bgModule!.applyToken("t", Date.now() + 3_600_000, "");
+    bgModule!.applyToken("t", Date.now() + 3_600_000, "", serverUrl);
     expect(await send({ type: "UNLOCK_VAULT", passphrase: "pw" })).toEqual({ type: "UNLOCK_VAULT", ok: true });
     expect(serverFetches(url)).toBeGreaterThan(0);
     expect(chromeMock.scripting.registerContentScripts).toHaveBeenCalledWith([

@@ -13,6 +13,7 @@ import {
 } from "node:http";
 import { spawn } from "node:child_process";
 import { MS_PER_MINUTE, MS_PER_SECOND, SEC_PER_HOUR } from "./time.js";
+import { onRedirectRefused } from "./redirect-refusal.js";
 
 const CALLBACK_TIMEOUT_MS = 2 * MS_PER_MINUTE;
 
@@ -199,6 +200,7 @@ export async function registerClient(
 ): Promise<{ clientId: string }> {
   const response = await fetch(`${serverUrl}${MCP_REGISTER_ENDPOINT}`, { // codeql[js/file-system-data-in-network-request, js/file-access-to-http] serverUrl is user-provided config, not untrusted file data
     method: "POST",
+    redirect: "error",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       client_name: CLI_CLIENT_NAME,
@@ -208,7 +210,7 @@ export async function registerClient(
       token_endpoint_auth_method: "none",
       scope: CLI_SCOPES,
     }),
-  });
+  }).catch(onRedirectRefused(serverUrl));
 
   if (!response.ok) {
     const text = await response.text().catch(() => "");
@@ -265,6 +267,9 @@ export async function exchangeCode(
 ): Promise<OAuthResult> {
   const response = await fetch(`${serverUrl}${MCP_TOKEN_ENDPOINT}`, { // codeql[js/file-system-data-in-network-request] OAuth code exchange sends authorization code to the token endpoint
     method: "POST",
+    // A 307/308 would resend this body — the code and verifier — to wherever
+    // the redirect points; the token endpoint never legitimately redirects.
+    redirect: "error",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
       grant_type: "authorization_code",
@@ -273,7 +278,7 @@ export async function exchangeCode(
       client_id: params.clientId,
       code_verifier: params.codeVerifier,
     }).toString(),
-  });
+  }).catch(onRedirectRefused(serverUrl));
 
   if (!response.ok) {
     const text = await response.text().catch(() => "");
@@ -293,13 +298,15 @@ export async function refreshTokenGrant(
 ): Promise<TokenResponse | null> {
   const response = await fetch(`${serverUrl}${MCP_TOKEN_ENDPOINT}`, { // codeql[js/file-system-data-in-network-request] OAuth refresh grant sends stored refresh token to the token endpoint
     method: "POST",
+    // Never let a redirect carry the refresh token to another host.
+    redirect: "error",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
       grant_type: "refresh_token",
       refresh_token: refreshToken,
       client_id: clientId,
     }).toString(),
-  });
+  }).catch(onRedirectRefused(serverUrl));
 
   if (!response.ok) return null;
 
@@ -322,6 +329,8 @@ export async function revokeTokenRequest(
   try {
     await fetch(`${serverUrl}${MCP_REVOKE_ENDPOINT}`, { // codeql[js/file-system-data-in-network-request, js/file-access-to-http] OAuth token revocation sends stored token to the revocation endpoint
       method: "POST",
+      // Never let a redirect carry the token to another host.
+      redirect: "error",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams(params).toString(),
     });

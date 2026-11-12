@@ -49,7 +49,7 @@ export async function loginCommand(opts: LoginOptions = {}): Promise<void> {
   saveConfig(config);
 
   // Revoke previous session before starting new login
-  await revokeExistingSession(config.serverUrl);
+  await revokeExistingSession();
 
   if (opts.useToken) {
     // Manual token paste fallback (CI / headless without callback)
@@ -60,14 +60,18 @@ export async function loginCommand(opts: LoginOptions = {}): Promise<void> {
   }
 }
 
-/** Best-effort revocation of the previous session's tokens. */
-async function revokeExistingSession(serverUrl: string): Promise<void> {
+/**
+ * Best-effort revocation of the previous session's tokens, at the server that
+ * issued them — never the server being logged in to now, which may be another
+ * instance and must not receive this one's refresh token.
+ */
+async function revokeExistingSession(): Promise<void> {
   const creds = loadCredentials();
   if (!creds || !creds.refreshToken || !creds.clientId) return;
 
   try {
     // Revoking the refresh token also revokes all access tokens in the family
-    await revokeTokenRequest(serverUrl, creds.refreshToken, creds.clientId, "refresh_token");
+    await revokeTokenRequest(creds.serverUrl, creds.refreshToken, creds.clientId, "refresh_token");
   } catch {
     // Best-effort — failure here should not block login
   }
@@ -83,8 +87,9 @@ async function oauthLogin(serverUrl: string): Promise<void> {
       refreshToken: result.refreshToken,
       clientId: result.clientId,
       expiresAt,
+      serverUrl,
     });
-    setTokenCache(result.accessToken, expiresAt, result.refreshToken, result.clientId);
+    setTokenCache(result.accessToken, serverUrl, expiresAt, result.refreshToken, result.clientId);
 
     output.success(`Logged in to ${serverUrl}`);
   } catch (err) {
@@ -112,8 +117,9 @@ async function manualTokenLogin(serverUrl: string): Promise<void> {
     refreshToken: "",
     clientId: "",
     expiresAt,
+    serverUrl,
   });
-  setTokenCache(token, expiresAt);
+  setTokenCache(token, serverUrl, expiresAt);
 
   output.warn("Manual token will not auto-refresh. Use `passwd-sso login` for persistent sessions.");
   output.success(`Logged in to ${serverUrl}`);

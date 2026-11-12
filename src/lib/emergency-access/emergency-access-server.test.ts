@@ -10,7 +10,7 @@ vi.mock("@/lib/prisma", () => ({
   prisma: { emergencyAccessGrant: mockPrismaGrant },
 }));
 
-import { markGrantsStaleForOwner } from "./emergency-access-server";
+import { markGrantsStaleForOwner, duplicateGrantWhere } from "./emergency-access-server";
 import { EA_STATUS } from "@/lib/constants";
 
 describe("markGrantsStaleForOwner", () => {
@@ -55,5 +55,18 @@ describe("markGrantsStaleForOwner", () => {
       { keyVersion: { lt: 3 } },
       { keyVersion: null },
     ]);
+  });
+});
+
+describe("duplicateGrantWhere", () => {
+  it("matches the owner's non-terminal grants by exact address and excludes expired PENDING invites", () => {
+    const now = new Date("2026-06-01T00:00:00Z");
+
+    expect(duplicateGrantWhere("owner-1", "gr_ntee@test.com", now)).toEqual({
+      ownerId: "owner-1",
+      granteeEmail: { in: ["gr_ntee@test.com"], mode: "insensitive" },
+      status: { notIn: [EA_STATUS.REVOKED, EA_STATUS.REJECTED] },
+      NOT: { status: EA_STATUS.PENDING, tokenExpiresAt: { lt: now } },
+    });
   });
 });

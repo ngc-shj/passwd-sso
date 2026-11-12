@@ -1,6 +1,8 @@
 import { describe, it, expect, afterEach, afterAll } from "vitest";
 import {
   mkdtempSync,
+  chmodSync,
+  readFileSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -38,6 +40,17 @@ describe("writeSecretFile / readSecretFile", () => {
     const path = freshPath("mode");
     writeSecretFile(path, "data");
 
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+  });
+
+  it.runIf(isPosix)("overwriting a pre-existing 0644 file leaves it 0600 with new content", () => {
+    const path = freshPath("overwrite");
+    writeFileSync(path, "old-content-longer-than-new", { mode: 0o644 });
+    chmodSync(path, 0o644);
+
+    writeSecretFile(path, "new");
+
+    expect(readFileSync(path, "utf-8")).toBe("new");
     expect(statSync(path).mode & 0o777).toBe(0o600);
   });
 

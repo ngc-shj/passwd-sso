@@ -29,6 +29,7 @@ import {
 import { sweepAuditProvenanceEntry, grantForEntry } from "@/workers/retention-gc-worker/sweep";
 import {
   RETENTION_REGISTRY,
+  EXPIRED_RECORD_VISIBILITY_GRACE_DAYS,
   type AuditProvenanceEntry,
 } from "@/workers/retention-gc-worker/registry";
 
@@ -41,6 +42,24 @@ function provenanceEntry(table: string): AuditProvenanceEntry {
 
 const inviteEntry = provenanceEntry("team_invitations");
 const shareEntry = provenanceEntry("password_shares");
+const adminResetEntry = provenanceEntry("admin_vault_resets");
+const breakGlassEntry = provenanceEntry("personal_log_access_grants");
+
+// The grace is always derived from the registry constant, never a literal. Fail
+// loud if a member entry stops carrying it: the boundary tests below pin it.
+const G = EXPIRED_RECORD_VISIBILITY_GRACE_DAYS;
+for (const entry of [shareEntry, adminResetEntry, breakGlassEntry]) {
+  if (entry.retentionDays !== G) {
+    throw new Error(
+      `${entry.table} registry entry must carry retentionDays === EXPIRED_RECORD_VISIBILITY_GRACE_DAYS (${G}), got ${entry.retentionDays}`,
+    );
+  }
+}
+
+// DB-clock expiry expressions around the grace boundary.
+const EXPIRED_1H = "now() - interval '1 hour'";
+const EXPIRED_WITHIN_GRACE = `now() - make_interval(days => ${G - 1})`;
+const EXPIRED_PAST_GRACE = `now() - make_interval(days => ${G}) - interval '1 hour'`;
 
 describe("retention-gc security-record GC (SC6)", () => {
   let ctx: TestContext;
@@ -72,6 +91,14 @@ describe("retention-gc security-record GC (SC6)", () => {
       );
       await tx.$executeRawUnsafe(
         `DELETE FROM password_shares WHERE tenant_id = $1::uuid`,
+        tid,
+      );
+      await tx.$executeRawUnsafe(
+        `DELETE FROM admin_vault_resets WHERE tenant_id = $1::uuid`,
+        tid,
+      );
+      await tx.$executeRawUnsafe(
+        `DELETE FROM personal_log_access_grants WHERE tenant_id = $1::uuid`,
         tid,
       );
       await tx.$executeRawUnsafe(
@@ -133,6 +160,41 @@ describe("retention-gc security-record GC (SC6)", () => {
         tenantId,
         `psh-${id.slice(0, 16)}`,
         userId,
+      );
+    });
+    return id;
+  }
+
+  async function insertAdminReset(expiresAt: string): Promise<string> {
+    const id = randomUUID();
+    const targetUserId = await ctx.createUser(tenantId);
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await tx.$executeRawUnsafe(
+        `INSERT INTO admin_vault_resets (id, tenant_id, target_user_id, initiated_by_id, token_hash, expires_at, created_at)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, ${expiresAt}, now())`,
+        id,
+        tenantId,
+        targetUserId,
+        userId,
+        `${id.replace(/-/g, "")}${id.replace(/-/g, "")}`,
+      );
+    });
+    return id;
+  }
+
+  async function insertBreakGlassGrant(expiresAt: string): Promise<string> {
+    const id = randomUUID();
+    const targetUserId = await ctx.createUser(tenantId);
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await tx.$executeRawUnsafe(
+        `INSERT INTO personal_log_access_grants (id, tenant_id, requester_id, target_user_id, reason, expires_at, created_at)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'incident review', ${expiresAt}, now())`,
+        id,
+        tenantId,
+        userId,
+        targetUserId,
       );
     });
     return id;
@@ -234,7 +296,7 @@ describe("retention-gc security-record GC (SC6)", () => {
   });
 
   it("password_shares: deletes the expired share and cascades its share_access_logs child", async () => {
-    const shareId = await insertShare("now() - interval '1 hour'");
+    const shareId = await insertShare(EXPIRED_PAST_GRACE);
     const logId = await insertShareAccessLog(shareId);
 
     await ctx.su.prisma.$transaction(async (tx) => {
@@ -265,8 +327,59 @@ describe("retention-gc security-record GC (SC6)", () => {
     expect(await outboxRowsFor(shareId)).toHaveLength(0);
   });
 
+  it.each([
+    ["1 hour ago", EXPIRED_1H],
+    ["G-1 days ago", EXPIRED_WITHIN_GRACE],
+  ])("password_shares: keeps a share expired %s (inside the visibility grace)", async (_label, expr) => {
+    const shareId = await insertShare(expr);
+
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await sweepAuditProvenanceEntry(tx, shareEntry, 100);
+    });
+
+    expect(await rowExists("password_shares", shareId)).toBe(true);
+    expect(await outboxRowsFor(shareId)).toHaveLength(0);
+  });
+
+  describe.each([
+    ["admin_vault_resets", adminResetEntry, insertAdminReset],
+    ["personal_log_access_grants", breakGlassEntry, insertBreakGlassGrant],
+  ] as const)("%s grace window", (table, entry, insert) => {
+    it.each([
+      ["1 hour ago", EXPIRED_1H],
+      ["G-1 days ago", EXPIRED_WITHIN_GRACE],
+    ])("keeps a row expired %s, with no provenance row", async (_label, expr) => {
+      const id = await insert(expr);
+
+      await ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        await sweepAuditProvenanceEntry(tx, entry, 100);
+      });
+
+      expect(await rowExists(table, id)).toBe(true);
+      expect(await outboxRowsFor(id)).toHaveLength(0);
+    });
+
+    it("deletes a row expired G days + 1 hour ago with one provenance row", async () => {
+      const id = await insert(EXPIRED_PAST_GRACE);
+
+      await ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        await sweepAuditProvenanceEntry(tx, entry, 100);
+      });
+
+      expect(await rowExists(table, id)).toBe(false);
+      const rows = await outboxRowsFor(id);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].tenant_id).toBe(tenantId);
+      expect(rows[0].payload.action).toBe("SECURITY_RECORD_RETENTION_PURGED");
+      expect(rows[0].payload.metadata.table).toBe(table);
+    });
+  });
+
   it("password_shares: worker role can run the full capture→emit→delete", async () => {
-    const shareId = await insertShare("now() - interval '1 hour'");
+    const shareId = await insertShare(EXPIRED_PAST_GRACE);
     await insertShareAccessLog(shareId);
 
     await inRetentionSweepTx(ctx.retentionWorker.prisma, async (tx) => {
@@ -283,7 +396,7 @@ describe("retention-gc security-record GC (SC6)", () => {
     const SEED = 6;
     const shareIds: string[] = [];
     for (let i = 0; i < SEED; i++) {
-      shareIds.push(await insertShare("now() - interval '1 hour'"));
+      shareIds.push(await insertShare(EXPIRED_PAST_GRACE));
     }
 
     // Two separate connections so the DELETEs genuinely contend at the row level.
@@ -326,6 +439,9 @@ describe("retention-gc security-record GC (SC6)", () => {
         totalAudit += rows.length;
       }
       expect(totalAudit).toBe(SEED);
+      // Positive control: every seeded share was really deleted (the sweep ran
+      // over eligible rows), so the audit count above is not vacuously equal.
+      for (const id of shareIds) expect(await rowExists("password_shares", id)).toBe(false);
     } finally {
       await clientA.prisma.$disconnect().then(() => clientA.pool.end());
       await clientB.prisma.$disconnect().then(() => clientB.pool.end());

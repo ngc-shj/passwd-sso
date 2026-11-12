@@ -237,6 +237,7 @@ describe("registerClient", () => {
     const [url, opts] = mockFetch.mock.calls[0];
     expect(url).toBe("https://vault.example.com/api/mcp/register");
     expect(opts.method).toBe("POST");
+    expect(opts.redirect).toBe("error");
 
     const body = JSON.parse(opts.body);
     expect(body.client_name).toBe("passwd-sso-cli");
@@ -285,6 +286,26 @@ describe("registerClient", () => {
   });
 });
 
+describe("a refused redirect on an OAuth request", () => {
+  const mockFetch = vi.fn();
+  beforeEach(() => {
+    mockFetch.mockReset();
+    global.fetch = mockFetch;
+  });
+
+  it.each([
+    ["registerClient", async () => (await import("../../lib/oauth.js")).registerClient("https://vault.example.com", "http://127.0.0.1:9999/callback")],
+    ["exchangeCode", async () => (await import("../../lib/oauth.js")).exchangeCode("https://vault.example.com", {
+      code: "c", redirectUri: "http://127.0.0.1:9999/callback", clientId: "mcpc_test", codeVerifier: "v",
+    })],
+    ["refreshTokenGrant", async () => (await import("../../lib/oauth.js")).refreshTokenGrant("https://vault.example.com", "mcpr_x", "mcpc_x")],
+  ])("%s names the server and the fix", async (_name, call) => {
+    mockFetch.mockRejectedValueOnce(new TypeError("fetch failed", { cause: new Error("unexpected redirect") }));
+
+    await expect(call()).rejects.toThrow("The server at https://vault.example.com redirected the request");
+  });
+});
+
 describe("refreshTokenGrant", () => {
   const mockFetch = vi.fn();
   beforeEach(() => {
@@ -309,6 +330,7 @@ describe("refreshTokenGrant", () => {
     const [url, opts] = mockFetch.mock.calls[0];
     expect(url).toBe("https://vault.example.com/api/mcp/token");
     expect(opts.method).toBe("POST");
+    expect(opts.redirect).toBe("error");
     expect(opts.headers["Content-Type"]).toBe("application/x-www-form-urlencoded");
     expect(opts.body).toContain("grant_type=refresh_token");
     expect(opts.body).toContain("refresh_token=mcpr_old_refresh");
@@ -384,6 +406,7 @@ describe("revokeTokenRequest", () => {
     const [url, opts] = mockFetch.mock.calls[0];
     expect(url).toBe("https://vault.example.com/api/mcp/revoke");
     expect(opts.method).toBe("POST");
+    expect(opts.redirect).toBe("error");
     expect(opts.headers["Content-Type"]).toBe("application/x-www-form-urlencoded");
     expect(opts.body).toContain("token=mcp_access_token");
     expect(opts.body).toContain("client_id=mcpc_client123");
@@ -445,6 +468,7 @@ describe("exchangeCode", () => {
     const [url, opts] = mockFetch.mock.calls[0];
     expect(url).toBe("https://vault.example.com/api/mcp/token");
     expect(opts.method).toBe("POST");
+    expect(opts.redirect).toBe("error");
     expect(opts.headers["Content-Type"]).toBe("application/x-www-form-urlencoded");
     expect(opts.body).toContain("grant_type=authorization_code");
     expect(opts.body).toContain("code=auth_code");

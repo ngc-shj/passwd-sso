@@ -26,6 +26,7 @@ import {
 import { sweepAuditProvenanceEntry, grantForEntry } from "@/workers/retention-gc-worker/sweep";
 import {
   RETENTION_REGISTRY,
+  EXPIRED_RECORD_VISIBILITY_GRACE_DAYS,
   type AuditProvenanceEntry,
 } from "@/workers/retention-gc-worker/registry";
 
@@ -33,6 +34,30 @@ const extEntry = RETENTION_REGISTRY.find(
   (e): e is AuditProvenanceEntry =>
     e.kind === "EXPIRY_AUDIT_PROVENANCE" && e.table === "extension_tokens",
 )!;
+const apiKeyEntry = RETENTION_REGISTRY.find(
+  (e): e is AuditProvenanceEntry =>
+    e.kind === "EXPIRY_AUDIT_PROVENANCE" && e.table === "api_keys",
+)!;
+const operatorTokenEntry = RETENTION_REGISTRY.find(
+  (e): e is AuditProvenanceEntry =>
+    e.kind === "EXPIRY_AUDIT_PROVENANCE" && e.table === "operator_tokens",
+)!;
+
+// The grace is derived from the registry constant, never a literal. Fail loud if
+// a member entry stops carrying it: the boundary tests below pin it.
+const G = EXPIRED_RECORD_VISIBILITY_GRACE_DAYS;
+for (const entry of [apiKeyEntry, operatorTokenEntry]) {
+  if (entry.retentionDays !== G) {
+    throw new Error(
+      `${entry.table} registry entry must carry retentionDays === EXPIRED_RECORD_VISIBILITY_GRACE_DAYS (${G}), got ${entry.retentionDays}`,
+    );
+  }
+}
+
+// DB-clock expiry expressions around the grace boundary.
+const EXPIRED_1H = "now() - interval '1 hour'";
+const EXPIRED_WITHIN_GRACE = `now() - make_interval(days => ${G - 1})`;
+const EXPIRED_PAST_GRACE = `now() - make_interval(days => ${G}) - interval '1 hour'`;
 
 describe("retention-gc forensic-credential GC (SC4/C6)", () => {
   let ctx: TestContext;
@@ -75,6 +100,49 @@ describe("retention-gc forensic-credential GC (SC4/C6)", () => {
       );
     });
     return id;
+  }
+
+  async function insertApiKey(expiresAt: string): Promise<string> {
+    const id = randomUUID();
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await tx.$executeRawUnsafe(
+        `INSERT INTO api_keys (id, user_id, tenant_id, token_hash, prefix, name, scope, expires_at, created_at)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'api_XXXX', 'k', 'passwords:read', ${expiresAt}, now())`,
+        id,
+        userId,
+        tenantId,
+        `${id.replace(/-/g, "")}${id.replace(/-/g, "")}`,
+      );
+    });
+    return id;
+  }
+
+  async function insertOperatorToken(expiresAt: string): Promise<string> {
+    const id = randomUUID();
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await tx.$executeRawUnsafe(
+        `INSERT INTO operator_tokens (id, token_hash, prefix, name, tenant_id, subject_user_id, created_by_user_id, scope, expires_at, created_at)
+         VALUES ($1::uuid, $2, 'op_XXXXX', 'k', $3::uuid, $4::uuid, $4::uuid, 'maintenance', ${expiresAt}, now())`,
+        id,
+        `${id.replace(/-/g, "")}${id.replace(/-/g, "")}`,
+        tenantId,
+        userId,
+      );
+    });
+    return id;
+  }
+
+  async function rowExists(table: string, id: string): Promise<boolean> {
+    const rows = await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      return tx.$queryRawUnsafe<{ id: string }[]>(
+        `SELECT id FROM ${table} WHERE id = $1::uuid`,
+        id,
+      );
+    });
+    return rows.length > 0;
   }
 
   async function extTokenExists(id: string): Promise<boolean> {
@@ -177,5 +245,41 @@ describe("retention-gc forensic-credential GC (SC4/C6)", () => {
         );
       }),
     ).rejects.toThrow(/permission denied/);
+  });
+
+  describe.each([
+    ["api_keys", apiKeyEntry, insertApiKey],
+    ["operator_tokens", operatorTokenEntry, insertOperatorToken],
+  ] as const)("%s grace window", (table, entry, insert) => {
+    it.each([
+      ["1 hour ago", EXPIRED_1H],
+      ["G-1 days ago", EXPIRED_WITHIN_GRACE],
+    ])("keeps a credential expired %s, with no provenance row", async (_label, expr) => {
+      const id = await insert(expr);
+
+      await ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        await sweepAuditProvenanceEntry(tx, entry, 100);
+      });
+
+      expect(await rowExists(table, id)).toBe(true);
+      expect(await outboxRowsFor(id)).toHaveLength(0);
+    });
+
+    it("deletes a credential expired G days + 1 hour ago with one provenance row", async () => {
+      const id = await insert(EXPIRED_PAST_GRACE);
+
+      await ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        await sweepAuditProvenanceEntry(tx, entry, 100);
+      });
+
+      expect(await rowExists(table, id)).toBe(false);
+      const rows = await outboxRowsFor(id);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].tenant_id).toBe(tenantId);
+      expect(rows[0].payload.action).toBe("CREDENTIAL_RETENTION_PURGED");
+      expect(rows[0].payload.metadata.table).toBe(table);
+    });
   });
 });

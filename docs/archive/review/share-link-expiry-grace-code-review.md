@@ -1,0 +1,312 @@
+# Code Review: share-link-expiry-grace
+Date: 2026-11-12
+Review round: 1
+
+## Changes from Previous Round
+Initial review (incremental on top of the Phase 2 self R-check, which fixed R48 expiry-boundary alignment and RT3 shared time constants). Local LLM pre-screening and seeds unavailable (Ollama down); all experts did full-diff review.
+
+## Functionality Findings
+- F1 [Minor] Legacy CLI credentials without `serverUrl` skip old-session revocation at login (`cli/src/commands/login.ts` `revokeExistingSession`, `cli/src/lib/config.ts` `loadCredentials`). — Accepted (see Resolution Status).
+
+Implementation Checklist cross-check: every listed file is in the diff.
+
+## Security Findings
+No Critical/Major.
+- S-m1 [Minor] `share_links` quota (`src/lib/quota/resource-quotas.ts`) counts expired rows during the grace window. — Accepted (plan C3 decision).
+- S-m2 [Minor] Extension token not structurally bound to its issuer URL; `storage.onChanged` can arrive after a settings read that already sees the new URL. — Fixed.
+- S-m3 [Minor] ESLint ILIKE selector misses quoted keys. — Merged into T-1, fixed.
+
+## Testing Findings
+- T-1 [Major] ESLint insensitive-equals rule has no automated test; quoted keys bypass it. — Fixed.
+- T-2 [Minor] Extension server-change negative assertions wait a fixed 50 ms with no positive control. — Fixed.
+- T-3 [Minor] Approve expired-reset 409 comes from the mocked `updateMany` count; `gt: expect.any(Date)` is weak. — Fixed.
+- T-4 [Minor] Race tests are SQL twins; the route-level pin lives in unit tests. — Fixed (header documents it).
+
+## Adjacent Findings
+- (Security) CLI OAuth requests follow redirects by default: a 307/308 would resend the refresh token / code to another host. Pre-existing; same class as C7 (credential reaching a server other than its issuer). — Fixed, with class sweep (CLI, extension; iOS already confines redirects to the pinned host).
+
+## Quality Warnings
+None. The Security and Testing experts summarised R-rule ranges instead of one line per rule; their findings carried file/line evidence, so the outputs were accepted.
+
+## Recurring Issue Check
+### Functionality expert
+R1–R57 one line per rule; findings: R25 → F1. All others Checked or N/A (see expert output: R1–R3, R5, R7, R9, R10, R17–R22, R29, R34, R36–R40, R42, R43, R48–R52 Checked; remainder N/A).
+
+### Security expert
+R1–R57, RS1–RS6 checked; findings: S-m1 (quota/read-path), S-m2 (binding/TOCTOU), S-m3 (gate spelling). Others clean.
+
+### Testing expert
+R1–R57 no findings except R42 (T-1). RT1–RT6 ok; RT7 T-1, T-3; RT8–RT11 ok.
+
+## Environment Verification Report
+- VE1 (real-DB integration tests need the racing workers stopped): verified-local — `docker compose stop audit-outbox-worker retention-gc-worker` then `npm run test:integration` with `ANCHOR_TEST_S3_ENDPOINT` set to the local MinIO (150 files, exit 0); workers restarted.
+- iOS: verified-local on the macOS build host (`xcodebuild … test`, TEST SUCCEEDED).
+
+## Resolution Status
+### T-1 / S-m3 [Major] ESLint ILIKE rule untested; quoted keys bypass it
+- Action: selector matches identifier and quoted keys in both orders; `scripts/__tests__/eslint-insensitive-equals.test.mjs` lints through the real config (both orders, quoted, nested, components block, scripts) plus four negatives.
+- Modified files: `eslint.config.mjs`, `scripts/__tests__/eslint-insensitive-equals.test.mjs`
+
+### S-m2 [Minor] Extension token not bound to its issuer
+- Action: the token now carries the issuing server (`currentIssuerUrl`, persisted in the session; sessions without it are not restored). Every request carrying it, the refresh, and every revoke go to the issuer; a configured URL that differs ends the connection instead of sending (`tokenServerUrl`).
+- Pre-existing defect surfaced by the fix and fixed with it: a token refresh still in flight when the connection ended (logout, CLEAR_TOKEN, server change) re-installed the token from its response; its late 401 could also clear a newer connection. `attemptTokenRefresh` now captures `connectionGeneration` and every mutating callback (`setToken`, `setCnfJkt`, `clearToken`, `scheduleRefreshAlarm`, `createTtlAlarm`) is a no-op once it changed.
+- Modified files: `extension/src/background/index.ts`, `extension/src/background/token-handler.ts`, `extension/src/lib/session-storage.ts`
+- Tests: `extension/src/__tests__/lib/session-storage.test.ts`, `extension/src/__tests__/background/swFetch-dpop.test.ts`, `extension/src/__tests__/background/start-connect.test.ts`, `extension/src/__tests__/background.test.ts` (issuer binding without an onChanged event, hydration, refresh at issuer, in-flight refresh after disconnect, late 401 vs newer connection). Red-proved: 13 fail against HEAD's three production files; 4 fail with the generation guard neutralised.
+
+### T-2 [Minor] Fixed sleeps before negative assertions
+- Action: the 50 ms sleeps are gone; each negative waits for the specific async step (controlled promise release / `vi.waitFor` on the step after it) or a one-macrotask drain where the work is microtask-only, and each has a positive control.
+- Modified file: `extension/src/__tests__/background.test.ts`
+
+### Adjacent [—] OAuth/token requests followed redirects
+- Action: `redirect: "error"` on CLI DCR/code-exchange/refresh/revoke (`cli/src/lib/oauth.ts`), extension bridge-code/exchange (`extension/src/background/token-handler.ts`) and every DPoP-authenticated request (`extension/src/background/dpop-fetch.ts`, set after the caller's init so it cannot be overridden). iOS: `LeafKeyPinningDelegate` already refuses redirects off the pinned https host — not a member.
+- Tests: `cli/src/__tests__/unit/oauth.test.ts`, `extension/src/__tests__/background/start-connect.test.ts`, `extension/src/__tests__/background/swFetch-dpop.test.ts`
+
+### T-3 [Minor] Weak approve expired-reset assertion
+- Action: fake `Date` pinned; the CAS `gt` is asserted equal to the request's clock.
+- Modified file: `src/app/api/tenant/members/[userId]/reset-vault/[resetId]/approve/route.test.ts`
+
+### T-4 [Minor] Race tests are SQL twins
+- Action: file header names the route unit tests that pin lock-before-read.
+- Modified file: `src/__tests__/db-integration/concurrent-grant-serialization.integration.test.ts`
+
+### F1 [Minor] Legacy CLI credentials skip revocation at login — Accepted
+- **Anti-Deferral check**: acceptable risk
+- **Justification**:
+  - Worst case: a refresh token minted before this change stays valid server-side until it expires after the user re-logs in (the user's own token; it never leaves their machine because legacy credentials are no longer loaded or sent anywhere).
+  - Likelihood: medium — every CLI user upgrading once.
+  - Cost to fix: the issuer of a legacy file is unknowable; revoking at the configured `serverUrl` is exactly the leak C7 closes (the configured URL may be a different server). No safe fix exists without the issuer.
+- **Orchestrator sign-off**: acceptable-risk exception satisfied; the user can revoke stale CLI sessions from the web app.
+
+### S-m1 [Minor] share_links quota counts expired rows — Accepted
+- **Anti-Deferral check**: acceptable risk
+- **Justification**:
+  - Worst case: a user who creates more than `QUOTA_MAX_SHARE_LINKS_PER_USER` (default 1000) shares within (lifetime + 30 days) is refused new shares until rows age out.
+  - Likelihood: low — 1000 shares per ~month per user; the quota exists to stop storage exhaustion (C18 / A04-1).
+  - Cost to fix: trivial in code, but it would let expired-but-retained rows (which occupy storage, incl. FILE Send blobs) escape the storage-exhaustion control — the plan (C3) deliberately keeps them counted.
+- **Orchestrator sign-off**: acceptable-risk exception satisfied; plan C3 records the decision.
+
+---
+
+# Round 2
+Date: 2026-11-12
+
+## Changes from Previous Round
+Incremental review of the Round 1 fixes (commit 2a3e0ba98): extension issuer binding, in-flight refresh generation guard, OAuth/DPoP `redirect: "error"`.
+
+## Functionality Findings
+- F2 [Major] The options page's "reset connection" sent the token and a DPoP proof to the configured URL, not to the token's issuer (`extension/src/options/App.tsx` `handleResetConnection`). — Fixed (same finding as S2-m2).
+- F3 [Minor] CLI bearer requests outside `oauth.ts` followed redirects (`cli/src/lib/api-client.ts` `apiRequest`, `cli/src/commands/env.ts`, `cli/src/commands/run.ts`). — Fixed (same finding as T6).
+
+## Security Findings
+- S2-m1 [Minor] A token with no recorded issuer fell back to the configured URL for requests, refresh and revoke (`tokenServerUrl`, `getValidServerUrl`). — Fixed.
+- S2-m2 [Major] = F2. — Fixed.
+- S2-m3 [Minor] `swFetchWithExpiryRetry` resolved the issuer before its awaits (host permission, proof signing); a disconnect and reconnect meanwhile paired the new token with the old issuer. — Fixed.
+
+## Testing Findings
+- T5 [Major] `background.test.ts` failed under shuffle seeds 1794419690957 / 1794419775221. — Not reproduced: serial runs with both seeds and 424242 exit 0, full suite exit 0. The reviewer ran against a tree mid-way through the S2-m1 change (481 tests then failed on fixtures without an issuer); no leaking state was found.
+- T6 [Minor] = F3. — Fixed.
+- T7 [Minor] The control cases of "a refresh in flight when the connection ends" used a one-macrotask settle. — Fixed.
+
+## Quality Warnings
+None.
+
+## Resolution Status
+### F2 / S2-m2 [Major] Reset connection sent the token to the configured URL
+- Action: GET_TOKEN returns the token's `issuerUrl`; the options page validates it and sends the proof and request only when it equals the configured server, with `redirect: "error"`; otherwise nothing is sent and the status shows an error.
+- Modified files: `extension/src/background/index.ts`, `extension/src/types/messages.ts`, `extension/src/options/App.tsx`
+- Tests: `extension/src/__tests__/options/App.test.tsx` (issuer matches → request to issuer with redirect error; null / different issuer → no fetch, no proof, IDB key kept). Red-proved against 2a3e0ba98.
+
+### S2-m1 [Minor] Token without an issuer fell back to the configured URL
+- Action: `applyToken` requires the issuer; `tokenServerUrl` and `tokenIssuerServerUrl` (refresh, revoke) refuse a null issuer; the server-change revoke no longer falls back to the previous configured URL (a token whose issuer is unknown is revoked nowhere — the F1 decision for the CLI, applied to the extension). `getConfiguredServerUrl` is left only for bridge-code/exchange, which run before a token exists.
+- Modified files: `extension/src/background/index.ts`, `extension/src/background/token-handler.ts`
+- Tests: `extension/src/__tests__/background.test.ts` ("never sends a restored token that has no recorded issuer"; "on a server change, a restored token revokes it at its issuer / nowhere when it has no recorded issuer"), `extension/src/__tests__/background/swFetch-dpop.test.ts` (refresh and revoke with a null issuer send nothing). Each red-proved against the previous implementation on a throwaway copy.
+
+### S2-m3 [Minor] Issuer resolved before the pre-send awaits
+- Action: `swFetchWithExpiryRetry` captures `connectionGeneration` before resolving the issuer and re-checks it (and the issuer) immediately before sending.
+- Modified file: `extension/src/background/index.ts`
+- Test: `extension/src/__tests__/background.test.ts` ("a reconnect while the request waits for the host permission", with a no-reconnect control). Red-proved.
+
+### F3 / T6 [Minor] CLI bearer requests followed redirects
+- Action: `redirect: "error"` on `apiRequest`, `env` and `run` fetches.
+- Modified files: `cli/src/lib/api-client.ts`, `cli/src/commands/env.ts`, `cli/src/commands/run.ts`
+
+### T7 [Minor] One-macrotask settle in control cases
+- Action: the controls wait with `vi.waitFor` on their observable outcome (TTL alarm created; `hasToken` false).
+- Modified file: `extension/src/__tests__/background.test.ts`
+
+### R42 class C7 closure (credential reaching a non-issuer or following a redirect)
+- The member set expanded three times (Round 1 adjacent finding, F2, F3). Closed by the mutation-verified CI guard `scripts/checks/check-client-credential-fetch.mjs` (AST, ts-morph): every `fetch` in `cli/src` and `extension/src` must pin `redirect` to `"error"` or `"manual"` after any spread, an unclassified fetch reference fails, and an `Authorization` header in `extension/src` is allowed only in `dpop-fetch.ts` and `options/App.tsx`. Self-test `scripts/__tests__/check-client-credential-fetch.test.mjs`. Red-proven: removing `redirect: "error"` from the refresh fetch in `cli/src/lib/oauth.ts` → exit 1. Wired in `scripts/pre-pr.sh` ("Static: client-credential-fetch"), which the ci.yml static-checks job runs.
+
+---
+
+# Round 3
+Date: 2026-11-12
+
+## Changes from Previous Round
+Incremental review of commit 104e2e5ed (Round 2 fixes and the class-C7 guard).
+
+## Functionality Findings
+- F4 [Minor] The guard resolved a shadowed or mutated init to an outer const with `redirect: "error"` (`scripts/checks/check-client-credential-fetch.mjs` `findConstObjectLiteral`). — Fixed (same finding as S3-m1).
+- F5 [Minor] A refused redirect surfaced in the CLI as undici's bare "fetch failed" (`cli/src/lib/api-client.ts` `apiRequest`, `env`, `run`, OAuth requests). — Fixed.
+
+## Security Findings
+- S3-M1 [Major] The options-page key reset accepted a null issuer when the configured server is the default: `validateServerUrl` maps empty input to `DEFAULT_SERVER_URL`, so `validateServerUrl(issuerUrl ?? "")` matched it and the token was sent (`extension/src/options/App.tsx` `handleResetConnection`). — Fixed.
+- S3-m1 [Minor] Guard bypasses: (a) shadowing parameter / inner `let`, (b) write through the init after declaration, (d) `setRequestHeader("Authorization", …)` not on the tripwire, (e) `.js` files not scanned; (c) computed global access (`globalThis["fe"+"tch"]`) is contrived. — (a)(b)(d)(e) fixed; (c) recorded as a known bypass of a name-based gate.
+
+## Testing Findings
+- T8 [Major] = S3-M1 seen from the test: the null-issuer case passed only because the fixture's configured server was not the default. — Fixed.
+- T9 [Minor] T7's `vi.waitFor` in the controls broke their pairing with the one-macrotask negatives. — Fixed.
+- T10 [Minor] = S3-m1 (e). — Fixed.
+- T11 [Minor] The guard's parse fail-closed branch was unreachable (ts-morph recovers from syntax errors) and untested; the read-error branch was untested. — Fixed.
+- T12 [Minor] Working guard branches had no self-test (call init, computed key after redirect, `globalThis["fetch"]` call and value, import of `fetch`, alias used as value, `h["Authorization"] =`, `.append`, shorthand). — Fixed.
+- T13 [Minor] The restored-token server-change test did not pin the revoke destination (a revoke to the new URL stayed green). — Fixed.
+- T14 [Minor] "never sends a restored token that has no recorded issuer" is held by two guards, so removing either alone stays green. — Accepted as defence in depth; the test says so.
+
+## Resolution Status
+### S3-M1 / T8 [Major] Null issuer matched the default server
+- Action: `isAllowedServerUrl` (which rejects empty input) gates the issuer before `validateServerUrl` normalises it.
+- Class sweep: every `validateServerUrl` call in `extension/src` and `cli/src` was checked; the others take a configured or user-typed URL (empty → default is the intended UX) or are display-only; the CLI's `validateServerUrl` throws on empty input.
+- Modified file: `extension/src/options/App.tsx`
+- Tests: `extension/src/__tests__/options/App.test.tsx` (null and empty issuer with the default configured server → nothing sent; control with a recorded default issuer → sent). Red-proved: both negatives fail against 104e2e5ed.
+
+### F4 / S3-m1 / T10 [Minor] Guard bypasses
+- Action: a const init is accepted only if its name is declared once in the file and nothing writes through it where the write could reach `redirect`; `setRequestHeader` joins the tripwire; `.js`/`.mjs` are scanned.
+- Modified files: `scripts/checks/check-client-credential-fetch.mjs`, `scripts/__tests__/check-client-credential-fetch.test.mjs`. Red-proved: the 9 new cases fail against the 104e2e5ed guard; the "another property assigned" control passes.
+
+### F5 [Minor] Bare "fetch failed" on a refused redirect
+- Action: `onRedirectRefused(url)` (`cli/src/lib/redirect-refusal.ts`) rethrows undici's redirect rejection with the server origin and the fix (`passwd-sso login --server <url>`); other errors pass through. Attached with `.catch` at the `apiRequest`, `env`, `run` and OAuth register/exchange/refresh fetches (revoke stays best-effort and silent).
+- Tests: `cli/src/__tests__/unit/redirect-refusal.test.ts` (real local server: 308 → message; connection refused → unchanged; 200 → untouched), `cli/src/__tests__/unit/api-client.test.ts` (red-proved against 104e2e5ed).
+
+### T11 / T12 [Minor] Guard fail-closed and branch coverage
+- Action: any parse diagnostic is a GateIOError; self-tests for the syntax-error and unreadable-file branches and for each previously unpinned branch. Red-proved: the syntax-error case fails without the diagnostic check.
+
+### T9 / T13 [Minor] Test pairing and revoke destination
+- Action: the in-flight-refresh controls assert after the same `settle()` as their negatives (microtask-only continuations, so deterministic); the restored-token positive waits for exactly one DELETE to the token endpoint at its issuer (the configured default server). Red-proved: a revoke redirected to the new server fails the positive case.
+
+# Round 4
+
+## Changes from Previous Round
+Incremental review of commit 49f689b0a (Round 3 fixes).
+
+## Functionality Findings
+- F6 [Minor] The guard's "declared more than once" check over-reports across unrelated functions (name-based), and its message blamed a shadowing binding that need not exist. — Message fixed; the over-report is the documented fail-closed trade-off of a name-based gate.
+
+## Security Findings
+- S4-m1 [Minor] The const-init write check was a denylist of write forms, so an alias, a mutating helper, `Reflect.set`, `Object.defineProperty`, a destructuring-assignment target or a for-of target could change `redirect` and still pass (`scripts/checks/check-client-credential-fetch.mjs`). Second patch round on this check. — Fixed by changing the mechanism.
+- Options-page issuer comparison and `onRedirectRefused`: no finding (no two distinct servers compare equal; the message carries only the origin).
+
+## Testing Findings
+- T15 [Minor] The restored-token server-change revoke used the configured default as the issuer, so a revoke to the configured URL stayed green. — Fixed.
+- T16 [Minor] The cold-start hydration test did not pin the session-issuer revoke branch. — Fixed.
+- T17 [Minor] `onRedirectRefused` was pinned at 1 of its 7 call sites. — Fixed.
+- T18 [Minor] The network-error case relied on a closed port (flaky), and `globalThis["fetch"]` had no positive control. — Fixed.
+
+## Resolution Status
+### S4-m1 / F6 [Minor] Guard const-init check
+- Action: the denylist of writes is replaced by an allowlist of uses. Every reference to the init's name must be its declaration, the init argument of a checked fetch call, a property access with a literal key other than `redirect`, or an object spread; anything else is "unclassified init reference" (mirrors "unclassified fetch reference"). The duplicate-declaration message now says the gate matches by name and suggests a rename or an inline literal.
+- Modified files: `scripts/checks/check-client-credential-fetch.mjs`, `scripts/__tests__/check-client-credential-fetch.test.mjs`. Red-proved: the six escape forms exit 0 under the 49f689b0a guard and exit 1 under the new one; the literal-key/spread control passes. Real tree: OK.
+
+### T15 / T16 [Minor] Revoke destination per branch
+- Action: the restored-token case uses an issuer distinct from both the old and the new configured URL and waits for exactly one DELETE at that issuer; the cold-start test does the same for the session branch.
+- Red-proved on a scratch worktree: revoking at the configured URL in the held-token branch fails both restored-token cases; the same mutation in the session branch fails the cold-start test.
+
+### T17 / T18 [Minor] Per-site redirect refusal and test hygiene
+- Action: tests for the 401 retry, `env`, `run`, and OAuth register/exchange/refresh; the network-error case drops the connection on the same local server; positive `globalThis["fetch"]` control.
+- Red-proved: removing `.catch(onRedirectRefused(…))` at each of the 7 sites fails exactly that site's test.
+
+# Round 5
+
+## Changes from Previous Round
+Incremental review of commit cae9dcfc2 (Round 4 fixes, including `/simplify`'s extraction of `isMemberKeyName`).
+
+## Functionality Findings
+- F7 [Minor] = S5-M1: a member call that returns the object (`opts.valueOf()`) was accepted as a property access. — Fixed.
+- F8 [Minor] Names that share the init's name but are keys (getter name, binding-pattern key, JSX attribute, enum member) were reported. — Fixed.
+
+## Security Findings
+- S5-M1 [Major] A non-redirect property access was accepted even as a callee, so `opts.valueOf()`, `__defineGetter__`, or a method in the literal could change `redirect` (the Round 4 alias escape, one call away). — Fixed.
+- S5-m1 [Minor] A getter or method in the init literal can rewrite `redirect` through `this` while fetch reads the init. — Fixed.
+- S5-m2 [Minor] `export const opts = {…}` let another file write the init unseen. — Fixed.
+- `eval` / `new Function` and non-import cross-file reach (globals, extension messaging) are listed as known bypasses: a name-based AST gate cannot see them.
+
+## Testing Findings
+- T19 [Major] = S5-M1, unpinned. — Fixed.
+- T20 [Major] The "argument of a checked fetch call" condition had no test (dropping it stayed green). — Fixed.
+- T21 [Minor] The "init is the second argument" condition had no test. — Fixed.
+- T22 [Minor] The wrapper unwrapping, the type-position skip and the key skip had no positive control. — Fixed.
+- T23 [Minor] The no-issuer server-change case waited a fixed 20 ms before its negative assertion. — Fixed.
+
+## Resolution Status
+### S5-M1 / S5-m1 / S5-m2 / F7 / F8 / T19 [Major] Guard const-init check
+- Action: a property or element access passes only when it is read, not called; the init literal may hold no getter, setter or method (checked for inline inits too); an exported declaration is refused; `isMemberKeyName` covers accessors, binding-pattern keys, enum members and JSX attributes. Header lists the known bypasses.
+- Modified files: `scripts/checks/check-client-credential-fetch.mjs`, `scripts/__tests__/check-client-credential-fetch.test.mjs`. Red-proved: the five new cases fail against the cae9dcfc2 guard. Real tree: OK.
+
+### T20 / T21 / T22 [Major] Allowlist branches without tests
+- Action: escape cases for a helper taking the init second and for the init in a non-init fetch position; positive controls for `opts as RequestInit`, `typeof opts`, and key-only names.
+- Red-proved on a scratch copy: dropping the fetch-call condition, the argument-index condition, the wrapper climb, the type-position skip, or the key skip each fails exactly its test.
+
+### T23 [Minor] Timed negative in the server-change revoke test
+- Action: both cases wait one macrotask (the revoke path awaits only mocks) and assert the exact DELETE list, so the negative is paired with a positive that passes under the same wait. Red-proved: restoring the configured-URL fallback fails the no-issuer case.
+
+# Round 6
+
+## Changes from Previous Round
+Incremental review of commit 618114fd6 (Round 5 fixes).
+
+## Functionality Findings
+- F9 [Minor] A tagged template (`` opts.valueOf`` ``) invokes a member but counted as a read. — Fixed (same class as S6-m1).
+- The server-change test comment named a session read the hydrated path never takes. — Fixed.
+
+## Security Findings
+- S6-m1 [Minor] `(opts.valueOf)()` and a tagged template still passed as reads; `isCalled` checked only the direct parent. — Fixed, with `new` as the third invocation form.
+- The header said "property read" where writes to other keys also pass. — Reworded to "property access (not a call)".
+- No credential-bearing request path in cli/src or extension/src bypasses the global fetch (node:http is only the local OAuth callback listener; `chrome.webRequest.onAuthRequired` answers page basic-auth, a different class).
+
+## Testing Findings
+- T24 [Major] The element-access `isCalled` branch had no test. — Fixed.
+- T25 [Minor] The setter branch of the accessor/method refusal had no test. — Fixed.
+- T26 [Minor] The setter branch of `isMemberKeyName` had no test. — Fixed.
+- The single-macrotask server-change test passed 20 of 20 runs.
+
+## Resolution Status
+### F9 / S6-m1 / T24–T26 [Minor] Invocation forms and untested branches
+- Action: `isCalled` looks through paren/as/satisfies/non-null wrappers and treats a call, `new`, or a template tag as an invocation; the wrapper walk is shared with `unclassifiedInitReference` as `outermostWrapper`. Tests for the parenthesised call, template tag, constructor, element-access call, setter in the init, and setter key.
+- Red-proved: the three invocation-form cases fail against the 618114fd6 guard; removing the element-access `isCalled`, the setter refusal, the setter key skip, or the whole wrapper walk in `isCalled` each fails exactly its test (per-kind coverage of the walk was added in Round 7).
+
+# Round 7
+
+## Changes from Previous Round
+Incremental review of commit 1a1eb2f4d (Round 6 fixes).
+
+## Functionality Findings
+No findings. `outermostWrapper` is equivalent to the loop it replaced; realistic reads through wrappers (`(opts.headers as Headers).set`, `opts.signal!.aborted`, optional chaining) still pass.
+
+## Security Findings
+No findings. The Round 6 escapes are reported; the remaining escapes (comma operator, `Function.prototype.call.call`, prototype getters) are contrived and covered by the header's framing of a name-based single-file gate.
+
+## Testing Findings
+- T28 [Major] The `as`, `satisfies` and non-null arms of the wrapper walk had no test on the `isCalled` side (removing them let a wrapped member call pass). — Fixed.
+- T27 [Minor] The paren, `satisfies` and non-null arms had no positive control on the reference side (removing them only over-reports). — Fixed.
+- The `p.getExpression() !== node` condition and the template-tag identity check are unreachable as mutants (no input distinguishes them); kept as defensive.
+
+## Resolution Status
+### T27 / T28 Wrapper-kind coverage
+- Action: escape cases for a member call through `as`, `satisfies` and `!`; positive controls for a read and a fetch init through parentheses, `satisfies` and `!`.
+- Red-proved on a scratch copy: for each of the four wrapper kinds, removing it from the walk used by `isCalled` alone, and from the walk used by the reference check alone, fails a test (8 of 8).
+
+# Round 8
+
+## Changes from Previous Round
+Incremental review of commit 52615a0a2 (Round 7, test-only).
+
+## Functionality Findings
+No findings.
+
+## Security Findings
+No findings. The new positive controls bless only uncalled reads of non-redirect keys and the init in the fetch init position.
+
+## Testing Findings
+No findings. Every new escape case fails with "unclassified init reference" (not a parse error); spot-checked mutants fail exactly their tests.
+
+## Resolution Status
+Loop converged: all three experts report no findings.

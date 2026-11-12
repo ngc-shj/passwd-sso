@@ -14,6 +14,7 @@ import { describe, it, expect } from "vitest";
 import { Prisma } from "@prisma/client";
 import {
   RETENTION_REGISTRY,
+  EXPIRED_RECORD_VISIBILITY_GRACE_DAYS,
   RLS_FREE_EXPIRY_TABLES,
   assertRegistryRlsParity,
   type ExpiryEntry,
@@ -268,5 +269,26 @@ describe("assertRegistryRlsParity — pure function (S14/RT7)", () => {
     expect(() =>
       assertRegistryRlsParity(RETENTION_REGISTRY, RLS_FREE_EXPIRY_TABLES, catalog),
     ).not.toThrow();
+  });
+});
+
+describe("RETENTION_REGISTRY — expired-record visibility grace", () => {
+  it("applies EXPIRED_RECORD_VISIBILITY_GRACE_DAYS to exactly the five tables whose UI lists an expired state", () => {
+    const graceTables = RETENTION_REGISTRY.filter(
+      (e) =>
+        "retentionDays" in e &&
+        e.retentionDays === EXPIRED_RECORD_VISIBILITY_GRACE_DAYS,
+    ).map((e) => e.table);
+
+    expect(new Set(graceTables)).toEqual(
+      new Set([
+        "password_shares",
+        "api_keys",
+        "operator_tokens",
+        "personal_log_access_grants",
+        "admin_vault_resets",
+      ]),
+    );
+    expect(graceTables).toHaveLength(5);
   });
 });

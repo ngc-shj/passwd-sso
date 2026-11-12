@@ -23,14 +23,20 @@ final class ServerURLSetupViewModel: @unchecked Sendable {
 
   private let defaults: UserDefaults
   private let trustService: ServerTrustService
+  private let discardPreviousServerTokens: () throws -> Void
 
   init(
     defaults: UserDefaults = UserDefaults(suiteName: AppGroupContainer.identifier) ?? .standard,
     trustService: ServerTrustService = ServerTrustService(),
-    reverifyURL: URL? = nil
+    reverifyURL: URL? = nil,
+    discardPreviousServerTokens: @escaping () throws -> Void = {
+      try HostTokenStore().deleteAll()
+      try UploadTokenStore().clear()
+    }
   ) {
     self.defaults = defaults
     self.trustService = trustService
+    self.discardPreviousServerTokens = discardPreviousServerTokens
     // Pre-fill the last successfully-probed server URL so it isn't re-typed
     // on every launch.
     if let config = loadServerConfig(defaults: defaults) {
@@ -55,9 +61,6 @@ final class ServerURLSetupViewModel: @unchecked Sendable {
     state = .probing
     do {
       try await probeServer(url)
-      let config = ServerConfig(baseURL: url)
-      persist(config)
-      state = .ready(config)
     } catch {
       // A probe failure with an existing pin is the TLS-rotation / MITM fork:
       // offer explicit re-verification instead of a dead-end error.
@@ -66,6 +69,14 @@ final class ServerURLSetupViewModel: @unchecked Sendable {
       } else {
         state = .probeFailed(error.localizedDescription)
       }
+      return
+    }
+    let config = ServerConfig(baseURL: url)
+    do {
+      try persist(config)
+      state = .ready(config)
+    } catch {
+      state = .probeFailed(L10n.string("Couldn't remove the previous server's sign-in. Try again."))
     }
   }
 
@@ -82,13 +93,18 @@ final class ServerURLSetupViewModel: @unchecked Sendable {
         serverURL: url,
         healthURL: url.appending(path: APIPath.healthLive, directoryHint: .notDirectory)
       )
-      let config = ServerConfig(baseURL: url)
-      persist(config)
-      state = .ready(config)
     } catch {
       // Old pin is still in place; keep the mismatch affordance so the user can
       // retry rather than dropping to a dead-end error.
       state = .trustMismatch(url)
+      return
+    }
+    let config = ServerConfig(baseURL: url)
+    do {
+      try persist(config)
+      state = .ready(config)
+    } catch {
+      state = .probeFailed(L10n.string("Couldn't remove the previous server's sign-in. Try again."))
     }
   }
 
@@ -122,7 +138,16 @@ final class ServerURLSetupViewModel: @unchecked Sendable {
     )
   }
 
-  private func persist(_ config: ServerConfig) {
+  // internal (not private) so tests can drive the server-change token discard.
+  func persist(_ config: ServerConfig) throws {
+    // Stored tokens were issued by whatever server was configured before. Session
+    // restore and the AutoFill upload send them to the configured server, so
+    // unless this re-verifies the very same URL they must be gone before the
+    // server is saved — including when no previous config is readable (lost
+    // defaults leave Keychain items behind). A failed delete aborts the save.
+    if loadServerConfig(defaults: defaults)?.baseURL != config.baseURL {
+      try discardPreviousServerTokens()
+    }
     saveServerConfig(config, defaults: defaults)
   }
 }

@@ -9,13 +9,14 @@ import { spawn } from "node:child_process";
 import { loadSecretsConfig, getPasswordPath, getSecretsServerUrl } from "../lib/secrets-config.js";
 import { getEncryptionKey, getUserId } from "../lib/vault-state.js";
 import { autoUnlockIfNeeded } from "./unlock.js";
-import { getToken } from "../lib/api-client.js";
+import { getToken, getTokenServerUrl } from "../lib/api-client.js";
 import { decryptData } from "../lib/crypto.js";
 import { buildPersonalEntryAAD, VAULT_TYPE } from "../lib/crypto-aad.js";
 import { describeEntryFetchFailure } from "../lib/v1-entry-failure.js";
 import * as output from "../lib/output.js";
 
 import { BLOCKED_KEYS } from "../lib/blocked-keys.js";
+import { onRedirectRefused } from "../lib/redirect-refusal.js";
 
 interface RunOptions {
   config?: string;
@@ -54,6 +55,8 @@ export async function runCommand(opts: RunOptions): Promise<void> {
       process.exit(1);
     }
     authHeader = `Bearer ${token}`;
+    // A login token goes only to the server that issued it.
+    baseUrl = getTokenServerUrl();
   }
 
   if (!await autoUnlockIfNeeded()) {
@@ -80,7 +83,9 @@ export async function runCommand(opts: RunOptions): Promise<void> {
 
     const res = await fetch(url, {
       headers: { Authorization: authHeader },
-    });
+      // Never let a redirect carry the bearer token to another host.
+      redirect: "error",
+    }).catch(onRedirectRefused(url));
     if (!res.ok) {
       output.error(await describeEntryFetchFailure(res, mapping.entry));
       process.exit(1);

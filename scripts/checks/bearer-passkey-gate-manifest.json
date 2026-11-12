@@ -119,6 +119,11 @@
       "calls": 1,
       "reason": "One-time MCP authorization code exchange, gated inline by passkeyEnforcementBlocks before the mint; the minted token is refresh-bound (SC1)."
     },
+    "src/app/api/emergency-access/route.ts#handlePOST": {
+      "class": "opaque-where",
+      "calls": 1,
+      "reason": "Duplicate-grant check: where is duplicateGrantWhere(ownerId, granteeEmail, now) (emergency-access-server.ts), an owner/email/status predicate with no digest. Decides whether a new invitation may be created; authenticates nothing."
+    },
     "src/lib/emergency-access/emergency-access-state.ts#transition": {
       "class": "opaque-where",
       "calls": 1,

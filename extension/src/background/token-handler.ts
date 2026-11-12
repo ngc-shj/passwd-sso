@@ -24,11 +24,23 @@ export const MIN_RETRY_HEADROOM_MS = 5 * MS_PER_SECOND;
 
 // ── Helpers ────────────────────────────────────────────────────
 
-async function getValidServerUrl(): Promise<string | null> {
+/**
+ * The configured server, for the bridge-code and exchange fetches — the only
+ * requests made before a token exists. They do not go through
+ * swFetchAuthenticated.
+ */
+async function getConfiguredServerUrl(): Promise<string | null> {
   const { serverUrl } = await getSettings();
-  // Also covers the bridge-code and exchange fetches, which do not go through
-  // swFetchAuthenticated.
   return isAllowedServerUrl(serverUrl) ? serverUrl : null;
+}
+
+/**
+ * The server a token-bearing request goes to: the token's issuer, and nothing
+ * else. An unknown issuer, or one failing the server-URL rule, means the token
+ * is not sent — never the configured URL in its place.
+ */
+function tokenIssuerServerUrl(issuerUrl: string | null): string | null {
+  return issuerUrl !== null && isAllowedServerUrl(issuerUrl) ? issuerUrl : null;
 }
 
 // ── Token refresh ──────────────────────────────────────────────
@@ -36,6 +48,8 @@ async function getValidServerUrl(): Promise<string | null> {
 export interface TokenRefreshCallbacks {
   getCurrentToken(): string | null;
   getTokenExpiresAt(): number | null;
+  /** The server that issued the token; the refresh goes there or nowhere. */
+  getIssuerUrl(): string | null;
   setToken(token: string, expiresAt: number): void;
   /** Called when the refresh response includes a new cnfJkt (C10 binding propagation). */
   setCnfJkt?(cnfJkt: string): void;
@@ -58,7 +72,7 @@ export async function attemptTokenRefreshWith(
   if (Date.now() >= tokenExpiresAt) return;
 
   try {
-    const serverUrl = await getValidServerUrl();
+    const serverUrl = tokenIssuerServerUrl(callbacks.getIssuerUrl());
     if (!serverUrl) return;
 
     let res: Response;
@@ -125,7 +139,7 @@ export interface StartConnectCallbacks {
    * Persist the issued token + expiry + cnfJkt into SW in-memory + session
    * storage state. Invoked exactly once on success, never on failure.
    */
-  setToken(token: string, expiresAt: number, cnfJkt: string): void;
+  setToken(token: string, expiresAt: number, cnfJkt: string, issuerUrl: string): void;
   /**
    * Optional injection point so tests can swap fetch without touching globalThis.
    */
@@ -180,7 +194,7 @@ export async function startConnect(
   const fetchFn = callbacks.fetchImpl ?? fetch;
   const signFn = callbacks.signDpopProofImpl ?? signDpopProof;
 
-  const serverUrl = await getValidServerUrl();
+  const serverUrl = await getConfiguredServerUrl();
   if (!serverUrl) return { ok: false, errorCode: "GENERIC_FAILURE" };
 
   // Step 1: bridge-code (credentialed; no access token yet → no `ath`).
@@ -199,6 +213,9 @@ export async function startConnect(
       `${serverUrl}${EXT_API_PATH.EXTENSION_BRIDGE_CODE}`,
       {
         method: "POST",
+        // Server endpoints never redirect; a redirect must not carry the
+        // request (and its proof or code) to another host.
+        redirect: "error",
         credentials: "include",
         headers: {
           "Content-Type": "application/json",
@@ -236,6 +253,7 @@ export async function startConnect(
       `${serverUrl}${EXT_API_PATH.EXTENSION_TOKEN_EXCHANGE}`,
       {
         method: "POST",
+        redirect: "error",
         credentials: "omit",
         headers: {
           "Content-Type": "application/json",
@@ -257,7 +275,7 @@ export async function startConnect(
     ) {
       return { ok: false, errorCode: "GENERIC_FAILURE" };
     }
-    callbacks.setToken(data.token, expiresAtMs, data.cnfJkt);
+    callbacks.setToken(data.token, expiresAtMs, data.cnfJkt, serverUrl);
     return { ok: true };
   } catch (err) {
     if (err instanceof DpopSignError) {
@@ -289,13 +307,18 @@ export interface TokenRevokeCallbacks {
   getCurrentToken(): string | null;
 }
 
+/**
+ * Revoke the token at the server that issued it (`issuerUrl`), which may no
+ * longer be the configured one. An unknown issuer means no request is sent.
+ */
 export async function revokeTokenOnServerWith(
   callbacks: TokenRevokeCallbacks,
+  issuerUrl: string | null,
 ): Promise<void> {
   const token = callbacks.getCurrentToken();
   if (!token) return;
   try {
-    const serverUrl = await getValidServerUrl();
+    const serverUrl = tokenIssuerServerUrl(issuerUrl);
     if (!serverUrl) return;
     await swFetchAuthenticated(
       EXT_API_PATH.EXTENSION_TOKEN,
