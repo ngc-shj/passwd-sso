@@ -74,6 +74,11 @@ vi.mock("@/components/ui/alert-dialog", () => ({
 
 import TeamTransferOwnershipPage from "./page";
 
+// A real Response: its body can be read once, as in a browser.
+function errorResponse(status: number, error?: string): Response {
+  return new Response(JSON.stringify(error === undefined ? {} : { error }), { status });
+}
+
 function makeMember(overrides: Partial<{
   id: string;
   userId: string;
@@ -128,11 +133,7 @@ describe("TeamTransferOwnershipPage (admin full-page, step-up denial)", () => {
     const baseImpl = mockFetch.getMockImplementation()!;
     mockFetch.mockImplementation((url: string, init?: RequestInit) => {
       if (init?.method === "PUT") {
-        return Promise.resolve({
-          ok: false,
-          status: 403,
-          json: () => Promise.resolve({ error: "SESSION_STEP_UP_REQUIRED" }),
-        });
+        return Promise.resolve(errorResponse(403, "SESSION_STEP_UP_REQUIRED"));
       }
       return baseImpl(url, init);
     });
@@ -153,6 +154,55 @@ describe("TeamTransferOwnershipPage (admin full-page, step-up denial)", () => {
       expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
     });
     expect(mockToast.error).not.toHaveBeenCalled();
+  });
+});
+
+describe("TeamTransferOwnershipPage (refusals)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockCanUsePasskeyRecovery.mockResolvedValue(false);
+  });
+
+  async function transferWith(failure: () => Promise<Response>) {
+    setupFetchReady({ members: [makeMember({ id: "mem-1", userId: "user-member", role: "MEMBER" })] });
+    const baseImpl = mockFetch.getMockImplementation()!;
+    mockFetch.mockImplementation((url: string, init?: RequestInit) =>
+      init?.method === "PUT" ? failure() : baseImpl(url, init),
+    );
+    await act(async () => {
+      render(<TeamTransferOwnershipPage params={Promise.resolve({ teamId: "team-1" })} />);
+    });
+    await waitFor(() => {
+      expect(screen.getAllByTestId("alert-action").length).toBeGreaterThanOrEqual(1);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getAllByTestId("alert-action")[0]);
+    });
+  }
+
+  it.each([
+    ["TEAM_BUSY", "teamBusy"],
+    ["CONFLICT", "conflict"],
+  ])("%s shows %s, not a network error", async (code, message) => {
+    await transferWith(() => Promise.resolve(errorResponse(409, code)));
+    await waitFor(() => {
+      expect(mockToast.error).toHaveBeenCalledWith(message);
+    });
+    expect(mockToast.error).not.toHaveBeenCalledWith("networkError");
+  });
+
+  it("a non-JSON 5xx shows networkError", async () => {
+    await transferWith(() => Promise.resolve(new Response("bad gateway", { status: 502 })));
+    await waitFor(() => {
+      expect(mockToast.error).toHaveBeenCalledWith("networkError");
+    });
+  });
+
+  it("a thrown fetch shows networkError", async () => {
+    await transferWith(() => Promise.reject(new TypeError("fetch failed")));
+    await waitFor(() => {
+      expect(mockToast.error).toHaveBeenCalledWith("networkError");
+    });
   });
 });
 

@@ -25,6 +25,8 @@ import { TenantClearLockoutButton } from "../security/tenant-clear-lockout-butto
 import { TenantMemberPasskeysDialog } from "../security/tenant-member-passkeys-dialog";
 import { TenantResetHistoryDialog } from "../security/tenant-reset-history-dialog";
 import { handleStepUpError } from "@/lib/http/handle-step-up-error";
+import { API_ERROR, apiErrorToI18nKey } from "@/lib/http/api-error-codes";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
 import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
 import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
@@ -63,6 +65,7 @@ const ROLE_LEVEL: Record<string, number> = {
 export function TenantMembersCard() {
   const t = useTranslations("TenantAdmin");
   const tCommon = useTranslations("Common");
+  const tApi = useTranslations("ApiErrors");
   const { role: myRole, isAdmin, loading: roleLoading } = useTenantRole();
   const isOwner = myRole === "OWNER";
   const [members, setMembers] = useState<TenantMember[]>([]);
@@ -131,7 +134,12 @@ export function TenantMembersCard() {
       if (!res.ok) {
         if (await handleStepUpError(res, inlineReauth.triggerOnStaleError, { userId, newRole })) return;
         if (res.status === 409) {
-          toast.error(t("scimManagedRoleError"));
+          const error = (await readApiErrorBody(res))?.error;
+          toast.error(
+            error === API_ERROR.SCIM_MANAGED_MEMBER
+              ? t("scimManagedRoleError")
+              : tApi(apiErrorToI18nKey(error)),
+          );
         } else {
           toast.error(t("roleChangeFailed"));
         }

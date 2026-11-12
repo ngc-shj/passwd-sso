@@ -228,7 +228,10 @@ export function TeamAttachmentSection({
         apiPath.teamPasswordAttachmentById(scopedId, entryId, deleteTarget.id),
         { method: "DELETE" }
       );
-      if (!res.ok) throw new Error("Delete failed");
+      if (!res.ok) {
+        await toastApiError(res, tApi);
+        return;
+      }
 
       onAttachmentsChange(attachments.filter((a) => a.id !== deleteTarget.id));
       toast.success(t("deleted"));

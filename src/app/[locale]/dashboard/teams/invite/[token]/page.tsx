@@ -10,6 +10,8 @@ import { Building2, CheckCircle2, XCircle, Loader2, Lock, RefreshCw } from "luci
 import { toast } from "sonner";
 import { fetchApi } from "@/lib/url-helpers";
 import { notifyTeamDataChanged } from "@/lib/events";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 
 const ROLE_KEYS: Record<string, string> = {
   [TEAM_ROLE.OWNER]: "roleOwner",
@@ -31,6 +33,7 @@ export default function AcceptInvitePage({
 }) {
   const { token } = use(params);
   const t = useTranslations("Team");
+  const tApi = useTranslations("ApiErrors");
   const router = useRouter();
   const { status: vaultStatus } = useVault();
 
@@ -56,6 +59,8 @@ export default function AcceptInvitePage({
           setError(t("inviteExpired"));
         } else if (res.status === 403 || res.status === 404) {
           setError(t("inviteInvalid"));
+        } else if ((await readApiErrorBody(res))?.error === API_ERROR.TEAM_BUSY) {
+          setError(tApi("teamBusy"));
         } else {
           setError(t("acceptFailed"));
         }

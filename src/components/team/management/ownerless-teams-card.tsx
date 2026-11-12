@@ -49,6 +49,7 @@ interface OwnerlessTeam {
 export function OwnerlessTeamsCard() {
   const t = useTranslations("Team");
   const tCommon = useTranslations("Common");
+  const tApi = useTranslations("ApiErrors");
   const [teams, setTeams] = useState<OwnerlessTeam[]>([]);
   const [selected, setSelected] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState<string | null>(null);
@@ -87,6 +88,7 @@ export function OwnerlessTeamsCard() {
         const error = (await readApiErrorBody(res))?.error;
         const message =
           error === API_ERROR.CONFLICT ? t("ownerAssignConflict")
+          : error === API_ERROR.TEAM_BUSY ? tApi("teamBusy")
           : error === API_ERROR.MEMBER_NOT_FOUND ? t("ownerAssignMemberGone")
           : error === API_ERROR.FORBIDDEN ? t("ownerAssignNotPermitted")
           : null;

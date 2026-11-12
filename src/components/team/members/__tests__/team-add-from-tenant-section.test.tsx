@@ -300,4 +300,47 @@ describe("TeamAddFromTenantSection", () => {
       expect(mockToast.error).toHaveBeenCalledWith("scimManagedCannotAdd");
     });
   });
+
+  // Status-keyed 409: only the code that names a state gets a fixed message.
+  it.each([
+    ["ALREADY_A_MEMBER", "alreadyMember"],
+    ["CONFLICT", "conflict"],
+    ["TEAM_BUSY", "teamBusy"],
+    [undefined, "unknownError"],
+  ])("maps a 409 with code %s to %s", async (code, message) => {
+    mockFetchApi
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [{ userId: "user-1", name: "Alice", email: "alice@example.com", image: null }],
+        signal: { aborted: false },
+      })
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(code === undefined ? {} : { error: code }), { status: 409 }),
+      );
+
+    render(<TeamAddFromTenantSection teamId="team-1" onSuccess={vi.fn()} />);
+
+    fireEvent.change(screen.getByPlaceholderText("searchTenantMembers"), {
+      target: { value: "alice" },
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(350);
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("member-info")).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("addButton"));
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(mockToast.error).toHaveBeenCalledWith(message);
+    });
+    expect(mockToast.error).toHaveBeenCalledTimes(1);
+  });
 });

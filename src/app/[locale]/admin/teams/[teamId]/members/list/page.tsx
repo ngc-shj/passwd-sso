@@ -47,7 +47,7 @@ import { TEAM_ROLE, API_PATH, apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import { filterMembers } from "@/lib/filter-members";
 import { handleStepUpError } from "@/lib/http/handle-step-up-error";
-import { API_ERROR } from "@/lib/http/api-error-codes";
+import { API_ERROR, apiErrorToI18nKey } from "@/lib/http/api-error-codes";
 import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
 import type { TeamMemberDisplayApiItem as Member } from "@/lib/team/team-member-display";
@@ -170,6 +170,11 @@ export default function TeamMembersPage({
       });
       if (!res.ok) {
         if (await handleStepUpError(res, inlineReauth.triggerOnStaleError, { type: "role", memberId, role })) return;
+        const error = (await readApiErrorBody(res))?.error;
+        if (error) {
+          toast.error(tApi(apiErrorToI18nKey(error)));
+          return;
+        }
         throw new Error("Failed");
       }
       toast.success(t("roleChanged"));
@@ -187,6 +192,11 @@ export default function TeamMembersPage({
       });
       if (!res.ok) {
         if (await handleStepUpError(res, inlineReauth.triggerOnStaleError, { type: "remove", memberId })) return;
+        const error = (await readApiErrorBody(res))?.error;
+        if (error) {
+          toast.error(tApi(apiErrorToI18nKey(error)));
+          return;
+        }
         throw new Error("Failed");
       }
       toast.success(t("memberRemoved"));
@@ -228,7 +238,7 @@ export default function TeamMembersPage({
           fetchAll();
           return;
         }
-        if (error === API_ERROR.CONFLICT) {
+        if (error === API_ERROR.CONFLICT || error === API_ERROR.TEAM_BUSY) {
           toast.error(t("approvalBusyRetry"));
           return;
         }
@@ -268,7 +278,7 @@ export default function TeamMembersPage({
           toast.error(t("forbidden"));
           return;
         }
-        if (error === API_ERROR.CONFLICT) {
+        if (error === API_ERROR.CONFLICT || error === API_ERROR.TEAM_BUSY) {
           toast.error(t("approvalBusyRetry"));
           return;
         }

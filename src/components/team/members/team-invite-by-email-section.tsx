@@ -17,7 +17,7 @@ import { toast } from "sonner";
 import { TEAM_ROLE, apiPath } from "@/lib/constants";
 import { fetchApi, appUrl } from "@/lib/url-helpers";
 import { readApiErrorBody } from "@/lib/http/read-api-error-body";
-import { API_ERROR } from "@/lib/http/api-error-codes";
+import { API_ERROR, apiErrorToI18nKey } from "@/lib/http/api-error-codes";
 
 interface Props {
   teamId: string;
@@ -26,6 +26,7 @@ interface Props {
 
 export function TeamInviteByEmailSection({ teamId, onSuccess }: Props) {
   const t = useTranslations("Team");
+  const tApi = useTranslations("ApiErrors");
   const [invEmail, setInvEmail] = useState("");
   const [invRole, setInvRole] = useState<string>(TEAM_ROLE.MEMBER);
   const [inviting, setInviting] = useState(false);
@@ -44,7 +45,9 @@ export function TeamInviteByEmailSection({ teamId, onSuccess }: Props) {
         toast.error(
           body?.error === API_ERROR.ALREADY_A_MEMBER
             ? t("alreadyMember")
-            : t("alreadyInvited")
+            : body?.error === API_ERROR.INVITATION_ALREADY_SENT
+            ? t("alreadyInvited")
+            : tApi(apiErrorToI18nKey(body?.error))
         );
         setInviting(false);
         return;

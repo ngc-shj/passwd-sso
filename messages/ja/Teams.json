@@ -39,7 +39,7 @@
   "rekeyStopTransient": "キーまたはリクエストが一時的に失敗しました。以降は何も送信していません。再キー化を再度実行してください。",
   "rekeyStopStepUpDeclined": "再認証が完了しませんでした。再キー化を再度実行すると再開します。",
   "rekeyStopCurrentKeyUnavailable": "現在のチームキーを開けませんでした。オーナーまたは管理者にキー配布の確認を依頼してください。",
-  "rekeyStopRetryBudget": "チームキーの変更が続いたか、リクエスト数が制限されました。しばらくしてから再試行してください。",
+  "rekeyStopRetryBudget": "チームキーの変更が続いたか、チームが使用中のままだったか、リクエスト数が制限されました。しばらくしてから再試行してください。",
   "rekeyReportTitle": "対応が必要なエントリ",
   "rekeyIssueUndecryptable": "古いチームキーで保存されたエントリ {count} 件を、あなたのキーで復号できませんでした。",
   "rekeyIssueKeyInvalid": "あなたが持つ古いチームキーを開けません — そのキーを持つ別のメンバーがこの {count} 件を再キー化します。",

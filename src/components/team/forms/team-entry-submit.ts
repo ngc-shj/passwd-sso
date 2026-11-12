@@ -185,7 +185,7 @@ export async function executeTeamEntrySubmit({
 /**
  * The ItemKey refusals of a team entry save (C1) each say what to do: the
  * entry changed under the form (reopen it), it must be re-keyed first, or a
- * rotation changed the team key.
+ * rotation changed the team key, or the team is busy with another change.
  */
 function saveErrorMessage(code: string | undefined, t: PasswordFormTranslator): string {
   switch (code) {
@@ -196,6 +196,8 @@ function saveErrorMessage(code: string | undefined, t: PasswordFormTranslator): 
       return t("teamEntryRekeyRequired");
     case API_ERROR.TEAM_KEY_VERSION_MISMATCH:
       return t("teamEntryTeamKeyChanged");
+    case API_ERROR.TEAM_BUSY:
+      return t("teamEntryTeamBusy");
     default:
       return t("failedToSave");
   }

@@ -54,6 +54,8 @@ export const REKEY_ACTION = {
   RATE_LIMITED: "rate_limited",
   /** Step-up required: re-authenticate and resume. */
   STEP_UP: "step_up",
+  /** TEAM_BUSY: another change holds the team row; wait for Retry-After, then retry. */
+  BUSY_WAIT: "busy_wait",
 } as const;
 
 export type RekeyAction = (typeof REKEY_ACTION)[keyof typeof REKEY_ACTION];
@@ -79,6 +81,7 @@ const ACTION_BY_CODE: Readonly<Record<string, RekeyAction>> = {
   [API_ERROR.REKEY_NOT_PENDING]: REKEY_ACTION.DONE,
   [API_ERROR.SESSION_STEP_UP_REQUIRED]: REKEY_ACTION.STEP_UP,
   [API_ERROR.RATE_LIMIT_EXCEEDED]: REKEY_ACTION.RATE_LIMITED,
+  [API_ERROR.TEAM_BUSY]: REKEY_ACTION.BUSY_WAIT,
 };
 
 /**
@@ -102,7 +105,7 @@ export const REKEY_STOP_REASON = {
   STEP_UP_DECLINED: "step_up_declined",
   /** The actor cannot resolve the team's current key. */
   CURRENT_KEY_UNAVAILABLE: "current_key_unavailable",
-  /** Rate limited, or rotations kept interrupting, past the retry budget. */
+  /** Rate limited, a team kept busy, or rotations kept interrupting, past the retry budget. */
   RETRY_BUDGET_EXHAUSTED: "retry_budget_exhausted",
   /** The caller aborted the pass (its control unmounted); nothing more is sent. */
   CANCELLED: "cancelled",
@@ -162,6 +165,11 @@ export const REKEY_ROTATION_PAUSE_MS = 3 * MS_PER_SECOND;
 const DEFAULT_RETRY_AFTER_MS = 5 * MS_PER_SECOND;
 const MAX_RATE_LIMIT_WAITS = 10;
 const MAX_ROTATION_WAITS = 5;
+// Its own budget: one long rotation yields several consecutive busy waits, and
+// sharing MAX_ROTATION_WAITS would leave no refresh for the mismatch after it.
+const MAX_BUSY_WAITS = 10;
+/** Upper bound on one busy sleep, whatever Retry-After says. */
+export const REKEY_BUSY_MAX_WAIT_MS = 30 * MS_PER_SECOND;
 const MAX_STEPS_PER_ENTRY = 20;
 
 // ─── Runner ────────────────────────────────────────────────────────────────
@@ -202,6 +210,7 @@ export async function runRekeyPass(deps: RekeyRunnerDeps): Promise<RekeyPassResu
   };
   let rateWaits = 0;
   let rotationWaits = 0;
+  let busyWaits = 0;
   let teamKeyChanged = false;
   let processed = 0;
 
@@ -214,13 +223,20 @@ export async function runRekeyPass(deps: RekeyRunnerDeps): Promise<RekeyPassResu
     }
     await deps.sleep(retryAfterMs(res));
   };
+  const waitBusy = async (res: Response) => {
+    if (++busyWaits > MAX_BUSY_WAITS) {
+      throw new StopPass(REKEY_STOP_REASON.RETRY_BUDGET_EXHAUSTED, API_ERROR.TEAM_BUSY);
+    }
+    await deps.sleep(Math.min(retryAfterMs(res), REKEY_BUSY_MAX_WAIT_MS));
+  };
   const refreshKeys = async (code: string | undefined) => {
     if (++rotationWaits > MAX_ROTATION_WAITS) {
       throw new StopPass(REKEY_STOP_REASON.RETRY_BUDGET_EXHAUSTED, code);
     }
     deps.invalidateTeamKeys();
     teamKeyChanged = true;
-    // A rotation in flight answers TEAM_KEY_VERSION_MISMATCH; wait it out.
+    // A rotation in flight answers TEAM_KEY_VERSION_MISMATCH; wait it out. A
+    // team busy for the lock wait answers TEAM_BUSY instead (waitBusy).
     await deps.sleep(REKEY_ROTATION_PAUSE_MS);
   };
   const reauthenticate = async () => {
@@ -337,6 +353,9 @@ export async function runRekeyPass(deps: RekeyRunnerDeps): Promise<RekeyPassResu
       case REKEY_ACTION.RATE_LIMITED:
         await waitRateLimit(res);
         return CONTINUE;
+      case REKEY_ACTION.BUSY_WAIT:
+        await waitBusy(res);
+        return CONTINUE;
       case REKEY_ACTION.REFRESH_KEYS:
         await refreshKeys(code);
         return CONTINUE;
@@ -415,6 +434,10 @@ export async function runRekeyPass(deps: RekeyRunnerDeps): Promise<RekeyPassResu
           await waitRateLimit(res);
           continue;
         }
+        if (action === REKEY_ACTION.BUSY_WAIT) {
+          await waitBusy(res);
+          continue;
+        }
         if (action === REKEY_ACTION.REFRESH_KEYS) {
           await refreshKeys(err?.error);
           continue;
@@ -469,6 +492,9 @@ export async function runRekeyPass(deps: RekeyRunnerDeps): Promise<RekeyPassResu
           return { kind: "done" };
         case REKEY_ACTION.RATE_LIMITED:
           await waitRateLimit(res);
+          continue;
+        case REKEY_ACTION.BUSY_WAIT:
+          await waitBusy(res);
           continue;
         case REKEY_ACTION.REFRESH_KEYS:
           await refreshKeys(err?.error);

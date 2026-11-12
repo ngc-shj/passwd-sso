@@ -56,6 +56,13 @@ function response429(retryAfterSec: number): Response {
   } as unknown as Response;
 }
 
+function conflictResponse(code: string | undefined, retryAfterSec?: number): Response {
+  return new Response(JSON.stringify(code === undefined ? {} : { error: code }), {
+    status: 409,
+    headers: retryAfterSec === undefined ? {} : { "Retry-After": String(retryAfterSec) },
+  });
+}
+
 function makeEntry(overrides: Partial<ParsedEntry> = {}): ParsedEntry {
   return {
     entryType: ENTRY_TYPE.LOGIN,
@@ -582,6 +589,113 @@ describe("runImportEntries", () => {
     });
 
     expect(result).toEqual({ successCount: 0, failedCount: 1 });
+  });
+
+  describe("TEAM_BUSY 409", () => {
+    const importOnce = () =>
+      runImportEntries({
+        entries: [makeEntry()],
+        isTeamImport: false,
+        tagsPath: "/api/tags",
+        foldersPath: "/api/folders",
+        sourceFilename: "busy.json",
+        userId: "user-1",
+        encryptionKey: {} as CryptoKey,
+        keyVersion: 1,
+      });
+
+    // Run sleeps instantly and record the requested delay.
+    let delays: number[];
+    let timeoutSpy: ReturnType<typeof vi.spyOn>;
+    afterEach(() => {
+      timeoutSpy.mockRestore();
+    });
+    beforeEach(() => {
+      delays = [];
+      timeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(((fn: () => void, ms?: number) => {
+        delays.push(ms ?? 0);
+        fn();
+        return 0 as unknown as ReturnType<typeof setTimeout>;
+      }) as unknown as typeof setTimeout);
+    });
+
+    it("retries a TEAM_BUSY 409 after Retry-After and then succeeds", async () => {
+      mockEncryptDataForEntries(1);
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(response(true)) // GET tags
+        .mockResolvedValueOnce(conflictResponse("TEAM_BUSY", 3))
+        .mockResolvedValueOnce(bulkResponse(true, 1, 0));
+      vi.stubGlobal("fetch", fetchMock);
+
+      expect(await importOnce()).toEqual({ successCount: 1, failedCount: 0 });
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(delays).toEqual([3000]);
+    });
+
+    it("does not retry another 409 code", async () => {
+      mockEncryptDataForEntries(1);
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(response(true))
+        .mockResolvedValueOnce(conflictResponse("CONFLICT", 3));
+      vi.stubGlobal("fetch", fetchMock);
+
+      expect(await importOnce()).toEqual({ successCount: 0, failedCount: 1 });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(delays).toEqual([]);
+    });
+
+    it("does not retry a code-less 409", async () => {
+      mockEncryptDataForEntries(1);
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(response(true))
+        .mockResolvedValueOnce(conflictResponse(undefined));
+      vi.stubGlobal("fetch", fetchMock);
+
+      expect(await importOnce()).toEqual({ successCount: 0, failedCount: 1 });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("fails the chunk after exactly 3 calls when every attempt is TEAM_BUSY", async () => {
+      mockEncryptDataForEntries(1);
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(response(true))
+        .mockResolvedValue(conflictResponse("TEAM_BUSY", 3));
+      vi.stubGlobal("fetch", fetchMock);
+
+      expect(await importOnce()).toEqual({ successCount: 0, failedCount: 1 });
+      // 1 GET tags + 3 POST attempts
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+    });
+
+    it("clamps a huge Retry-After to one minute", async () => {
+      mockEncryptDataForEntries(1);
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(response(true))
+        .mockResolvedValueOnce(conflictResponse("TEAM_BUSY", 100000))
+        .mockResolvedValueOnce(bulkResponse(true, 1, 0));
+      vi.stubGlobal("fetch", fetchMock);
+
+      await importOnce();
+      expect(delays).toEqual([60000]);
+    });
+
+    it("sleeps the 1 s default when Retry-After is missing", async () => {
+      mockEncryptDataForEntries(1);
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(response(true))
+        .mockResolvedValueOnce(conflictResponse("TEAM_BUSY"))
+        .mockResolvedValueOnce(bulkResponse(true, 1, 0));
+      vi.stubGlobal("fetch", fetchMock);
+
+      await importOnce();
+      expect(delays).toEqual([1000]);
+    });
   });
 
   it("accumulates success/failed counts from multiple chunks correctly", async () => {

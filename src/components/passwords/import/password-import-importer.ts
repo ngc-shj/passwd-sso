@@ -22,6 +22,8 @@ import {
   resolveEntryFolderId,
 } from "@/components/passwords/import/password-import-folders";
 import { apiPath } from "@/lib/constants";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { fetchApi } from "@/lib/url-helpers";
 import { MS_PER_SECOND, MS_PER_MINUTE } from "@/lib/constants/time";
 
@@ -140,6 +142,10 @@ async function encryptPersonalImportEntry(
   };
 }
 
+async function isTeamBusy(res: Response): Promise<boolean> {
+  return (await readApiErrorBody(res))?.error === API_ERROR.TEAM_BUSY;
+}
+
 function importRequestHeaders(sourceFilename: string): HeadersInit {
   return {
     "Content-Type": "application/json",
@@ -220,7 +226,7 @@ export async function runImportEntries({
       }
     }
 
-    // Send chunk with retry on 429
+    // Send chunk with retry on 429 and on a TEAM_BUSY 409 (a team lock wait timed out)
     let chunkSuccess = 0;
     let retries = 0;
     let sent = false;
@@ -232,7 +238,7 @@ export async function runImportEntries({
           body: JSON.stringify({ entries: encryptedEntries, sourceFilename }),
         });
 
-        if (res.status === 429) {
+        if (res.status === 429 || (res.status === 409 && (await isTeamBusy(res)))) {
           retries++;
           if (retries >= MAX_RETRIES_PER_CHUNK) {
             // Retries exhausted — treat entire chunk as failed
