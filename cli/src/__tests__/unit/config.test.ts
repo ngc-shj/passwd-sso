@@ -1,18 +1,13 @@
-import { describe, it, expect, vi, afterAll, afterEach } from "vitest";
+import { describe, it, expect, vi, afterAll, afterEach, beforeEach } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, statSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { MS_PER_HOUR } from "../../lib/time.js";
 
-const origEnv = { ...process.env };
-
 // Override dirs for testing
 const testDir = mkdtempSync(join(tmpdir(), "psso-test-"));
 const testXdgConfig = join(testDir, "xdg-config");
 const testXdgData = join(testDir, "xdg-data");
-
-process.env.XDG_CONFIG_HOME = testXdgConfig;
-process.env.XDG_DATA_HOME = testXdgData;
 
 vi.mock("node:os", async () => {
   const actual = await vi.importActual<typeof import("node:os")>("node:os");
@@ -26,6 +21,12 @@ vi.mock("node:os", async () => {
 const { loadConfig, saveConfig, saveCredentials, loadCredentials, deleteCredentials } = await import("../../lib/config.js");
 const { getCredentialsFilePath } = await import("../../lib/paths.js");
 const { _resetMigrationState } = await import("../../lib/migrate.js");
+
+// paths.ts reads XDG_* on every call; unstubEnvs restores them after each test.
+beforeEach(() => {
+  vi.stubEnv("XDG_CONFIG_HOME", testXdgConfig);
+  vi.stubEnv("XDG_DATA_HOME", testXdgData);
+});
 
 describe("config", () => {
   afterEach(() => {
@@ -41,7 +42,6 @@ describe("config", () => {
 
   afterAll(() => {
     rmSync(testDir, { recursive: true, force: true });
-    process.env = { ...origEnv };
   });
 
   it("returns defaults when no config file exists", () => {

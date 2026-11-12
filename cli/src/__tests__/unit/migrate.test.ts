@@ -13,7 +13,6 @@ import {
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-const origEnv = { ...process.env };
 let testHome: string;
 
 // Mock homedir for legacy path detection; read lazily so each test's testHome applies
@@ -28,13 +27,12 @@ describe("migrate", () => {
     vi.resetModules();
 
     // Point XDG dirs to test locations
-    process.env.XDG_CONFIG_HOME = join(testHome, ".config");
-    process.env.XDG_DATA_HOME = join(testHome, ".local", "share");
+    vi.stubEnv("XDG_CONFIG_HOME", join(testHome, ".config"));
+    vi.stubEnv("XDG_DATA_HOME", join(testHome, ".local", "share"));
   });
 
   afterEach(() => {
     rmSync(testHome, { recursive: true, force: true });
-    process.env = { ...origEnv };
     vi.restoreAllMocks();
   });
 
