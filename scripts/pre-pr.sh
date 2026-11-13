@@ -380,6 +380,7 @@ queue_step "Static: passkey-mint-gate" bash scripts/checks/check-passkey-mint-ga
 queue_step "Static: raw-body-read" bash scripts/checks/check-raw-body-read.sh
 queue_step "Static: actions-sha-pinned" bash scripts/checks/check-actions-sha-pinned.sh
 queue_step "Static: workflow-supply-chain" node scripts/checks/check-workflow-supply-chain.mjs
+queue_step "Static: required-aggregate" node scripts/checks/check-required-aggregate.mjs
 queue_step "Static: crypto-auth-deps-classified" node scripts/checks/check-crypto-auth-deps-classified.mjs
 queue_step "Static: override-key-disjointness" node scripts/checks/check-override-key-disjointness.mjs
 queue_step "Static: compose-log-caps" node scripts/checks/check-compose-log-caps.mjs

@@ -22,9 +22,9 @@ The following must NOT move into any `scripts/<subdir>/`:
 - **Operator / incident-response**: `purge-history.sh`, `purge-audit-logs.sh`, `rotate-master-key.sh`, `set-outbox-worker-password.sh`, `set-dcr-cleanup-worker-password.sh` (the latter referenced by `scripts/env-allowlist.ts` and `scripts/__tests__/set-dcr-cleanup-worker-password.test.mjs`)
 - **Other operational**: `deploy.sh`, `dev.sh`, `scim-smoke.sh`, `mcp-reauth.sh`, `generate-icons.sh`, `bump-version.sh`
 - **Data fixtures**: `rls-smoke-*.sql`, `rls-cross-tenant-*` (`*.sql` / `*.sh` / `*.manifest`, consumed by `.github/workflows/ci.yml` + `scripts/pre-pr.sh`), `tenant-team-*.sql`, `license-allowlist.json` (read by `scripts/checks/check-licenses.mjs` via `../license-allowlist.json`)
-- **Static-gate scripts / env tooling** (path hardcoded by CI, `pre-pr.sh`, or sibling imports): `check-state-mutation-centralization.{sh,ts}`, `migrate-prf-per-credential-salt.sh` (read by the `pre-pr.sh` PRF read-only integrity check), `env-descriptions.ts`, `env-allowlist.ts` (CODEOWNERS-gated, SEC-4), `scripts/lib/*` (e.g. `hex-leak-scan.mjs` invoked by `pre-pr.sh`)
-- **Admin-only refactor tools** (CODEOWNERS-gated): `move-and-rewrite-imports.mjs`, `verify-move-only-diff.mjs`, `verify-allowlist-rename-only.mjs`, `refactor-phase-verify.mjs`, `check-codeowners-drift.mjs`, `check-blame-ignore-revs.mjs`
-- **CI orchestrator** (CODEOWNERS-gated): `pre-pr.sh`
+- **Static-gate scripts / env tooling** (path hardcoded by CI, `pre-pr.sh`, or sibling imports): `check-state-mutation-centralization.{sh,ts}`, `migrate-prf-per-credential-salt.sh` (read by the `pre-pr.sh` PRF read-only integrity check), `env-descriptions.ts`, `env-allowlist.ts` (owned in CODEOWNERS, SEC-4), `scripts/lib/*` (e.g. `hex-leak-scan.mjs` invoked by `pre-pr.sh`)
+- **Admin-only refactor tools** (owned in CODEOWNERS): `move-and-rewrite-imports.mjs`, `verify-move-only-diff.mjs`, `verify-allowlist-rename-only.mjs`, `refactor-phase-verify.mjs`, `check-codeowners-drift.mjs`, `check-blame-ignore-revs.mjs`
+- **CI orchestrator** (owned in CODEOWNERS): `pre-pr.sh`
 - **Manual smoke tests**: `scripts/manual-tests/*` stays at that path
 
 ### Root-of-`src/lib/` pinned (9 files)
@@ -56,7 +56,9 @@ Guidance:
 
 - `scripts/pre-pr.sh` runs integration tests automatically when the diff matches the above paths AND a local Postgres is reachable (3-second timeout). Start the compose stack first: `docker compose -f docker-compose.yml -f docker-compose.override.yml up -d db`.
 - To defer integration tests to CI: `PREPR_SKIP_INTEGRATION=1 bash scripts/pre-pr.sh`.
-- **The authoritative gate is `.github/workflows/ci-integration.yml`** — it runs on every PR matching the path filter and blocks merge on failure. The local run is a convenience preview.
+- **The authoritative gate is `.github/workflows/ci-integration.yml`** — it starts on every PR, runs the suite when the diff matches the paths above (its `changes` job holds the list), and reports `Integration result`, the check `main`'s ruleset requires. The local run is a convenience preview. See [docs/operations/ci-required-checks.md](docs/operations/ci-required-checks.md).
+
+CODEOWNERS records owners; `main`'s merge rules do not require code-owner review.
 
 ## Refactor Workflow
 

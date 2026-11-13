@@ -27,7 +27,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // ---------------------------------------------------------------------------
 /** @type {ReadonlyArray<string>} */
 const ROSTER_GLOBS = [
-  // Security-sensitive src directories (existing CODEOWNERS-gated).
+  // Security-sensitive src directories (already covered by CODEOWNERS).
   "src/lib/auth/**",
   "src/lib/crypto/**",
   "src/lib/audit/**",
@@ -35,7 +35,7 @@ const ROSTER_GLOBS = [
   "src/lib/tenant-context.ts",
   "src/lib/tenant/**",
   "src/lib/constants/auth/**",
-  // directory-structure-review (S1): self-protect the new CODEOWNERS gates so a
+  // directory-structure-review (S1): self-protect the new CODEOWNERS rules so a
   // future deletion of these rules is caught by the drift check.
   "src/lib/proxy/**",
   "src/lib/security/**",

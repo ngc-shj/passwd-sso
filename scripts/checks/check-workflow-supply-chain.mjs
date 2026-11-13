@@ -15,11 +15,12 @@
  *     `|| exit 0` / `continue-on-error` / `set +e` / an unprotected pipe is
  *     theater — a real tamper (or a stale floor) would be swallowed.
  *
- * PRIMARY control note: `/.github/workflows/` is CODEOWNERS-gated to @ngc-shj,
- * so ANY new auto-merge or verifier-masking workflow — in any shape — already
- * requires owner review to land. These regex checks are DEFENSE-IN-DEPTH: they
- * catch the common shapes fast in `pre-pr.sh`, but a per-file grep cannot see a
- * cross-file reusable-workflow auto-merge split, so CODEOWNERS is the backstop.
+ * Control note: `/.github/workflows/` is owned by @ngc-shj in CODEOWNERS, but
+ * neither main's ruleset nor its classic protection requires code-owner review,
+ * so nothing structurally stops a workflow change from landing. The backstop is
+ * the maintainer reading every workflow diff. These regex checks catch the
+ * common shapes fast in `pre-pr.sh`; a per-file grep cannot see a cross-file
+ * reusable-workflow auto-merge split, and a PR can edit this gate itself.
  *
  * The detection logic is exported as pure functions so it can be unit-tested
  * with synthetic inputs (RT7 — the guard must be provably able to fail).
@@ -89,9 +90,9 @@ export function findAutoMergeViolation(content, name) {
  *     or `eval`, or nests the verifier inside a compound command. This gate does
  *     not see those and does not claim to.
  *
- * The PRIMARY control for all of it remains CODEOWNERS on `/.github/workflows/`
- * (see the file header): every shape above, caught or not, requires owner review
- * to land. These rules are the fast, specific half — they name the construct an
+ * The control for all of it remains the maintainer reading the workflow diff
+ * (see the file header): CODEOWNERS lists the owner but does not require their
+ * review. These rules are the fast, specific half — they name the construct an
  * operator wrote — not the boundary.
  * @param {string} content
  * @param {string} name
