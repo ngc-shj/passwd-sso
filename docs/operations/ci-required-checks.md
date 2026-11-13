@@ -42,12 +42,14 @@ CI job. It fails when an aggregate:
 
 The gated jobs use `!cancelled() && (…)` rather than `always() && (…)`. GitHub keeps a running
 job whose `if` is still true when its run is cancelled, so `always()` would let a superseded
-run keep its jobs running despite `cancel-in-progress`. The aggregates keep `always()`, so a
-cancelled run still reports red.
+run keep its jobs running despite `cancel-in-progress`. The aggregates keep `always()` on the
+job and on their one step, and fail outright when `cancelled()` is true: a job the cancelled
+run never started reads `skipped`, which would otherwise look like a path-filter skip.
 
 It also fails when:
 
-- a trigger filters paths or types, or targets anything but `branches: [main]`;
+- a workflow has any trigger besides `pull_request`, or that trigger filters paths or types,
+  or targets anything but `branches: [main]`;
 - a job-level `if` or step-level `if` falls outside the known forms (a skipped job counts as
   a pass, so an unexpected skip condition is treated as a failure);
 - `continue-on-error` appears;

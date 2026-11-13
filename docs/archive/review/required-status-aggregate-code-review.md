@@ -166,3 +166,67 @@ Seed unavailable (Ollama down) — no dispositions to record.
   `git ls-files` status cell. TF9: both allow cells (the `pull_request: {}` allow cell is gone,
   since SF3 now rejects it). TF10: red-proof table in the deviation log; guard mutation named.
 - Red-proof: see the deviation log, "Red-proof (code review round 1)".
+
+---
+
+# Round 2
+
+Date: 2026-11-13. Scope: `ba1959047..db738ca16` (the round-1 fix commit).
+
+## Findings
+
+All Minor; no Critical or Major.
+
+- **R2-1** (functionality F1, security SR2-1): rule 1 accepted triggers besides
+  `pull_request` (`push`, `workflow_dispatch`, `merge_group`). Such a run posts the same check
+  name on the PR head SHA without testing the merge with `main`; the ops doc said "nothing
+  else" but the gate did not enforce it.
+- **R2-2** (security SR2-2): after the `!cancelled()` change, gated jobs a cancelled run never
+  started conclude `skipped`, which the aggregate read as a path-filter skip, so a cancelled
+  run could report green with `e2e` never run. The aggregate step also relied on the default
+  `success()`.
+- **R2-3** (security SR2-3, testing F3): the main-guard rewrite had no class guard and no test
+  ran the security gates' entrypoints; a future false guard would exit 0 silently (in
+  `release.yml`, for the provenance verifier). Two rewritten scripts were loaded by nothing.
+- **R2-4** (testing F1): the URL-encoding half of the main guard was unpinned
+  (`file://${realpathSync(argv[1])}` passed every cell).
+- **R2-5** (testing F2): the filter probe's `if` component had no cell.
+- **R2-6** (testing F4): "one defect per red cell" overstated; `R10-no-outputs` planted an
+  extra R7 violation.
+- **R2-7** (functionality F2): CONTRIBUTING called pre-pr's regex "narrower" than the listed
+  paths; it matches them exactly.
+- **R2-8** (functionality F3): Test 9 still said "starts on every PR".
+
+## Seed Finding Disposition
+
+Seed unavailable (Ollama down).
+
+## Environment Verification Report
+
+Unchanged from round 1: VE1 pending the PR's own CI run, VE2 blocked-deferred until merge.
+
+## Resolution Status
+
+- **R2-1 — Resolved.** Rule 1 reports any `on` key besides `pull_request`. Cells
+  `R1-extra-push`, `R1-extra-dispatch`, `R1-extra-merge-group`; the ops doc's gate list says so.
+  Deviation D7.
+- **R2-2 — Resolved.** The aggregate step has `if: always()` and
+  `RUN_CANCELLED: ${{ cancelled() }}`, and exits 1 unless it is `false` (both workflows,
+  identical). Rules 3–4 pin both. Cells `R3-step-if`, `R3-step-if-absent`,
+  `R4-env-no-cancelled`, and execution cells for `RUN_CANCELLED` `true` and empty. Deviation D6.
+- **R2-3 — Resolved.** New `scripts/__tests__/script-main-guard.test.mjs`:
+  - an AST cell (ts-morph, no Program) that takes, for each `process.argv[1]`, the outermost
+    expression in its statement holding `import.meta.url`, and requires the canonical form;
+  - a positive control (≥ 20) and a detector cell over the three old spellings;
+  - import smoke for `check-blame-ignore-revs.mjs` and `check-codeowners-drift.mjs`;
+  - CLI cells: the provenance verifier exits 1 on empty stdin, and the supply-chain gate exits
+    1 on a dependabot auto-merge workflow.
+- **R2-4 — Resolved.** A CLI cell copies the gate into a temp directory named
+  `required aggregate-…` (with `node_modules` linked) and expects it to run.
+- **R2-5 — Resolved.** Cell `DIV-filter-if` (whitespace-only difference, R10-clean); the probe
+  label and gate header name `if`.
+- **R2-6 — Resolved.** The `app-ci` rewrite is dropped from `R10-no-outputs`; the header now says
+  each cell asserts the one target violation its regex names.
+- **R2-7, R2-8 — Resolved.** Wording fixed.
+
+Red-proof: deviation log, "Red-proof (code review round 2)".

@@ -8,14 +8,14 @@
  * into a green merge. This gate parses both workflows with js-yaml (the
  * structure GitHub reads) and checks:
  *
- *  - the trigger starts on every pull request into main (no paths /
- *    paths-ignore / types; `branches` exactly [main]);
+ *  - the only trigger is every pull request into main (no other event, no
+ *    paths / paths-ignore / types; `branches` exactly [main]);
  *  - the aggregate's shape, name, step and `needs` (every other job, no more);
  *  - no `continue-on-error`, and every job-level `if` is one of a closed set of
  *    fail-closed forms (an unknown form is a violation, not a pass);
  *  - the `changes` job's large-PR guard, filter `if` and `with` keys, and
  *    `|| 'true'` outputs;
- *  - the guard, filter (action and `with` keys) and aggregate steps are
+ *  - the guard, filter (action, `if` and `with` keys) and aggregate steps are
  *    identical across the two workflows;
  *  - each required name belongs to exactly one job across every workflow.
  *
@@ -58,7 +58,10 @@ const FC_AFTER_ALLOWED = {
 };
 
 const STEP_IF_ALLOWED = new Set(["failure()", "always()", "!cancelled()"]);
-const AGGREGATE_ENV = { NEEDS: "${{ toJSON(needs) }}" };
+const AGGREGATE_ENV = {
+  NEEDS: "${{ toJSON(needs) }}",
+  RUN_CANCELLED: "${{ cancelled() }}",
+};
 // Gated jobs use `!cancelled()`, not `always()`: GitHub keeps a running job
 // whose `if` is still true when its run is cancelled, so `always()` would let a
 // superseded run's jobs defeat `cancel-in-progress`. Only the aggregate keeps
@@ -202,6 +205,12 @@ export function findWorkflowViolations(content, name, spec) {
   } else if (!("pull_request" in on)) {
     out.push(`${name}: R1 'on.pull_request' is missing — the workflow must start on every pull request into main`);
   } else {
+    // Any other event (push, workflow_dispatch, merge_group, …) posts the same
+    // check name on the head SHA from a run that did not test the PR merge.
+    const others = Object.keys(on).filter((k) => k !== "pull_request");
+    if (others.length > 0) {
+      out.push(`${name}: R1 'on' must have 'pull_request' as its only event, found also: ${others.join(", ")}`);
+    }
     const pr = on.pull_request;
     if (!isPlainObject(pr)) {
       out.push(`${name}: R1 'on.pull_request' must be a mapping with 'branches: [main]'`);
@@ -256,11 +265,14 @@ export function findWorkflowViolations(content, name, spec) {
     }
     const step = steps[0];
     if (isPlainObject(step)) {
-      if ("if" in step) out.push(`${name}: job '${aggId}': R3 step-level 'if' is forbidden`);
+      // The default `success()` would skip the step in a cancelled run.
+      if (step.if === undefined || norm(step.if) !== "always()") {
+        out.push(`${name}: job '${aggId}': R3 step 'if' must be exactly 'always()'`);
+      }
       if ("shell" in step) out.push(`${name}: job '${aggId}': R3 step-level 'shell' is forbidden`);
       if ("uses" in step) out.push(`${name}: job '${aggId}': R4 the step must be a 'run' step, not 'uses'`);
       if (!isDeepStrictEqual(normEnv(step.env), AGGREGATE_ENV)) {
-        out.push(`${name}: job '${aggId}': R4 step 'env' must be exactly { NEEDS: \${{ toJSON(needs) }} }`);
+        out.push(`${name}: job '${aggId}': R4 step 'env' must be exactly { NEEDS: \${{ toJSON(needs) }}, RUN_CANCELLED: \${{ cancelled() }} }`);
       }
       if (typeof step.run !== "string" || step.run.includes("${{")) {
         out.push(`${name}: job '${aggId}': R4 step 'run' must be a string with no '\${{' expression`);
@@ -404,7 +416,7 @@ export function findAggregateStepDivergence(contentsByName, specs) {
     },
     {
       // The filter lists differ by design; the action and its inputs do not.
-      label: "'filter' step action and 'with' keys",
+      label: "'filter' step action, 'if' and 'with' keys",
       pick: (doc) => {
         const step = changesStep(doc, "filter");
         return step === undefined ? undefined : { uses: step.uses, if: step.if, withKeys: withKeysOf(step) };

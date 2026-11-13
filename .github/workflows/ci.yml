@@ -1170,10 +1170,19 @@ jobs:
       # ci-integration.yml; check-required-aggregate.mjs compares them and its
       # test executes this script.
       - name: Fail unless every job succeeded or was skipped
+        # `always()`: the default `success()` would skip this step in a
+        # cancelled run. A cancelled run fails outright, since jobs it never
+        # started read as `skipped` — the same as a path-filter skip.
+        if: always()
         env:
           NEEDS: ${{ toJSON(needs) }}
+          RUN_CANCELLED: ${{ cancelled() }}
         run: |
           set -euo pipefail
+          if [ "$RUN_CANCELLED" != "false" ]; then
+            echo "::error::the run was cancelled"
+            exit 1
+          fi
           if ! printf '%s' "$NEEDS" | jq -e -s 'length == 1 and (.[0] | type == "object" and length > 0)' >/dev/null 2>&1; then
             echo "::error::needs is empty or not a single JSON object"
             exit 1

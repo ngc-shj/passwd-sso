@@ -54,7 +54,7 @@ Contributors touching any of the following files MUST run `npm run test:integrat
 
 Guidance:
 
-- `scripts/pre-pr.sh` runs integration tests automatically on a `refactor/` branch whose diff touches the auth/DB modules above (its own regex, narrower than this list) AND a local Postgres is reachable (3-second timeout). Start the compose stack first: `docker compose -f docker-compose.yml -f docker-compose.override.yml up -d db`.
+- `scripts/pre-pr.sh` runs integration tests automatically on a `refactor/` branch whose diff touches the paths above (matched by its own regex) AND a local Postgres is reachable (3-second timeout). Start the compose stack first: `docker compose -f docker-compose.yml -f docker-compose.override.yml up -d db`.
 - To defer integration tests to CI: `PREPR_SKIP_INTEGRATION=1 bash scripts/pre-pr.sh`.
 - **The authoritative gate is `.github/workflows/ci-integration.yml`** — it starts on every PR into `main`, runs the suite when the diff matches its `changes` filter (a superset of the paths above), and reports `Integration result`, the check `main`'s ruleset is to require (the operations doc records whether it does yet). The local run is a convenience preview. See [docs/operations/ci-required-checks.md](docs/operations/ci-required-checks.md).
 

@@ -101,3 +101,47 @@ Run directly against a scratch copy of the step or guard text:
 | aggregate first check without `-s` | concatenated stream `{failure} {success}` exits 0 (new text: 1) |
 | aggregate prints `.value` instead of `.value.result` | the outputs sentinel appears (new text: absent) |
 | main guard as `file://${argv[1]}` | no output via a symlink or a path with a space (new guard: runs) |
+
+## D6 — The aggregate step carries `if: always()` and fails a cancelled run (code review round 2)
+
+- **Plan (C3 rules 3–4):** no step-level `if` on the aggregate; step `env` exactly `{ NEEDS }`.
+- **Implemented:** the step has `if: always()` and `env` exactly
+  `{ NEEDS: ${{ toJSON(needs) }}, RUN_CANCELLED: ${{ cancelled() }} }`. It exits 1 unless
+  `RUN_CANCELLED` is the literal `false`. Rules 3 and 4 pin both.
+- **Why:** after D4, a gated job that a cancelled run never started concludes `skipped`, which
+  the aggregate would read as a path-filter skip, so a cancelled run could report green with
+  `e2e` never run. The default step condition `success()` could also skip the step in a
+  cancelled run.
+
+## D7 — `pull_request` must be the only trigger (code review round 2)
+
+- **Plan (C1):** no rule against other events.
+- **Implemented:** rule 1 reports any key of `on` besides `pull_request` (`push`,
+  `workflow_dispatch`, `merge_group`, …).
+- **Why:** such a run posts the same check name on the PR's head SHA from a run that tested the
+  bare head, not the merge with `main`. A merge queue therefore needs a deliberate gate change,
+  as the ops doc's merge-queue note already says.
+
+## Red-proof (code review round 2)
+
+| Mutation | Result |
+| --- | --- |
+| guard `if (false)` in a copy of `verify-npm-provenance-source.mjs` | empty stdin exits 0 (real: 1), which the new CLI cell rejects |
+| a script with `pathToFileURL(process.argv[1]).href` in a scratch git repo running `script-main-guard.test.mjs` | the canonical-form cell reports exactly that guard; the positive control fails |
+| the three old guard spellings as fixtures | each is detected, and none is canonical (in-suite cell) |
+
+Gate mutations through the scratch alias config (unmutated control: all green):
+
+| Mutation | Cells that went red |
+| --- | --- |
+| extra-trigger check disabled | `R1-extra-push`, `R1-extra-dispatch`, `R1-extra-merge-group` |
+| aggregate step `if` check disabled | `R3-step-if`, `R3-step-if-absent` |
+| step `env` compared on `NEEDS` only | `R4-env-no-cancelled` |
+| filter probe without `if` | `DIV-filter-if` |
+
+Run directly:
+
+| Mutation | Result |
+| --- | --- |
+| aggregate step without the `RUN_CANCELLED` check | all-success needs with `RUN_CANCELLED=true` exits 0 (real: 1) |
+| main guard `` `file://${realpathSync(argv[1])}` `` in a directory named `dir with space` | silent exit 0 (real guard: runs, exits 1 on the broken tree) |

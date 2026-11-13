@@ -1,7 +1,7 @@
 /**
  * RT7 self-test for check-required-aggregate.mjs — the guard must be provably
- * able to fail. Each red cell plants ONE defect in a minimal valid workflow and
- * asserts a violation naming the job and clause; the allow cells prove the
+ * able to fail. Each red cell plants a defect in a minimal valid workflow and
+ * asserts the one target violation its regex names (job and clause); the allow cells prove the
  * closed `if` grammar still admits every canonical form. The aggregate and
  * `size` steps of both real workflows are also executed, since the gate does
  * not read what their `run` text does.
@@ -130,9 +130,6 @@ describe("findWorkflowViolations — allow cells", () => {
     "job-level permissions {}": (d) => {
       d.jobs["app-ci"].permissions = {};
     },
-    "other triggers beside pull_request": (d) => {
-      d.on.workflow_dispatch = null;
-    },
     "step-level always() and !cancelled()": (d) => {
       d.jobs["app-ci"].steps = [{ if: "always()", run: "true" }, { if: "!cancelled()", run: "true" }];
     },
@@ -168,6 +165,9 @@ const RED = {
   "R1-on-list": [(d) => { d.on = ["pull_request"]; }, /R1 'on' must be a mapping/],
   "R1-branches-absent": [(d) => { delete d.on.pull_request.branches; }, /R1 'on\.pull_request\.branches' must be exactly \[main\]/],
   "R1-branches-other": [(d) => { d.on.pull_request.branches = ["main", "release/*"]; }, /R1 'on\.pull_request\.branches' must be exactly \[main\]/],
+  "R1-extra-push": [(d) => { d.on.push = { branches: ["main"] }; }, /R1 'on' must have 'pull_request' as its only event, found also: push/],
+  "R1-extra-dispatch": [(d) => { d.on.workflow_dispatch = null; }, /R1 'on' must have 'pull_request' as its only event, found also: workflow_dispatch/],
+  "R1-extra-merge-group": [(d) => { d.on.merge_group = null; }, /R1 'on' must have 'pull_request' as its only event, found also: merge_group/],
   "R1-pull-request-target": [(d) => { d.on.pull_request_target = null; }, /R1 .*pull_request_target/],
   "R2-aggregate-missing": [(d) => { delete d.jobs["ci-result"]; }, /R2 aggregate job 'ci-result' is missing/],
   "R2-name-wrong": [(d) => { d.jobs["ci-result"].name = "Result"; }, /'ci-result'.*R2 name/],
@@ -179,12 +179,14 @@ const RED = {
   "R3-strategy": [(d) => { d.jobs["ci-result"].strategy = { matrix: { n: [1] } }; }, /'ci-result'.*R3 'strategy'/],
   "R3-defaults": [(d) => { d.jobs["ci-result"].defaults = { run: { shell: "sh" } }; }, /'ci-result'.*R3 'defaults'/],
   "R3-job-env": [(d) => { d.jobs["ci-result"].env = { A: "1" }; }, /'ci-result'.*R3 'env'/],
-  "R3-step-if": [(d) => { d.jobs["ci-result"].steps[0].if = "success()"; }, /'ci-result'.*R3 step-level 'if'/],
+  "R3-step-if": [(d) => { d.jobs["ci-result"].steps[0].if = "success()"; }, /'ci-result'.*R3 step 'if' must be exactly 'always\(\)'/],
+  "R3-step-if-absent": [(d) => { delete d.jobs["ci-result"].steps[0].if; }, /'ci-result'.*R3 step 'if' must be exactly 'always\(\)'/],
   "R3-step-shell": [(d) => { d.jobs["ci-result"].steps[0].shell = "sh"; }, /'ci-result'.*R3 step-level 'shell'/],
   "R3-workflow-default-shell": [(d) => { d.defaults = { run: { shell: "sh" } }; }, /R3 'defaults\.run\.shell'/],
   "R3-workflow-env": [(d) => { d.env = { A: "1" }; }, /R3 top-level 'env'/],
   "R4-two-steps": [(d) => { d.jobs["ci-result"].steps.push({ run: "true" }); }, /'ci-result'.*R4 must have exactly one step/],
-  "R4-env-changed": [(d) => { d.jobs["ci-result"].steps[0].env = { NEEDS: "{}" }; }, /'ci-result'.*R4 step 'env'/],
+  "R4-env-changed": [(d) => { d.jobs["ci-result"].steps[0].env.NEEDS = "{}"; }, /'ci-result'.*R4 step 'env'/],
+  "R4-env-no-cancelled": [(d) => { delete d.jobs["ci-result"].steps[0].env.RUN_CANCELLED; }, /'ci-result'.*R4 step 'env'/],
   "R4-uses": [(d) => { d.jobs["ci-result"].steps[0].uses = "x/y@0"; }, /'ci-result'.*R4 the step must be a 'run' step/],
   "R4-step-not-mapping": [(d) => { d.jobs["ci-result"].steps = ["echo"]; }, /'ci-result'.*R4 the step is not a mapping/],
   "R4-run-expression": [(d) => { d.jobs["ci-result"].steps[0].run = "echo ${{ github.actor }}"; }, /'ci-result'.*R4 step 'run'/],
@@ -224,7 +226,7 @@ const RED = {
   "R10-filter-duplicated": [(d) => { d.jobs.changes.steps.push(structuredClone(d.jobs.changes.steps[1])); }, /'changes'.*R10 must have exactly one step with id 'filter' \(found 2\)/],
   "R10-filter-with-extra": [(d) => { d.jobs.changes.steps[1].with["predicate-quantifier"] = "every"; }, /'changes'.*R10 'filter' step 'with' must have exactly the key 'filters'/],
   "R10-filter-with-base": [(d) => { d.jobs.changes.steps[1].with.base = "dev"; }, /'changes'.*R10 'filter' step 'with'/],
-  "R10-no-outputs": [(d) => { delete d.jobs.changes.outputs; d.jobs["app-ci"].if = "!cancelled() && (needs.changes.result != 'success')"; }, /'changes'.*R10 has no 'outputs'/],
+  "R10-no-outputs": [(d) => { delete d.jobs.changes.outputs; }, /'changes'.*R10 has no 'outputs'/],
   "R10-output-no-fallback": [(d) => { d.jobs.changes.outputs.app = "${{ steps.filter.outputs.app }}"; }, /'changes'.*R10 output 'app'/],
   "R10-output-wrong-key": [(d) => { d.jobs.changes.outputs.app = "${{ steps.filter.outputs.ci || 'true' }}"; }, /'changes'.*R10 output 'app'/],
   "R11-actor-step-if": [(d) => { d.jobs["app-ci"].steps[0].if = "github.actor != 'x'"; }, /'app-ci'.*R11/],
@@ -283,11 +285,15 @@ describe("findAggregateStepDivergence", () => {
   });
   it("DIV-filter-uses: flags a filter step on another action", () => {
     const contents = pair((b) => { b.jobs.changes.steps[1].uses = "x/y@1"; });
-    expect(findAggregateStepDivergence(contents, specs).join("\n")).toMatch(/'filter' step action and 'with' keys differs/);
+    expect(findAggregateStepDivergence(contents, specs).join("\n")).toMatch(/'filter' step action, 'if' and 'with' keys differs/);
+  });
+  it("DIV-filter-if: flags a filter 'if' that differs only in whitespace (R10 normalises it)", () => {
+    const contents = pair((b) => { b.jobs.changes.steps[1].if = "steps.size.outputs.small  ==  'true'"; });
+    expect(findAggregateStepDivergence(contents, specs).join("\n")).toMatch(/'filter' step action, 'if' and 'with' keys differs/);
   });
   it("DIV-filter-with-keys: flags a filter step with another input", () => {
     const contents = pair((b) => { b.jobs.changes.steps[1].with.base = "dev"; });
-    expect(findAggregateStepDivergence(contents, specs).join("\n")).toMatch(/'filter' step action and 'with' keys differs/);
+    expect(findAggregateStepDivergence(contents, specs).join("\n")).toMatch(/'filter' step action, 'if' and 'with' keys differs/);
   });
 });
 
@@ -383,6 +389,20 @@ describe("checkRepository", () => {
     expect(res.stderr).toMatch(/Required-aggregate violations:/);
   });
 
+  it("CLI: still runs main() from a directory whose name needs URL encoding", () => {
+    const dir = mkdtempSync(join(tmpdir(), "required aggregate-"));
+    tmpDirs.push(dir);
+    mkdirSync(join(dir, "scripts/checks"), { recursive: true });
+    mkdirSync(join(dir, ".github/workflows"), { recursive: true });
+    writeFileSync(join(dir, "scripts/checks/gate.mjs"), readFileSync(GATE, "utf8"));
+    symlinkSync(resolve("node_modules"), join(dir, "node_modules"));
+    writeFileSync(join(dir, ".github/workflows/ci.yml"), "jobs: [unclosed");
+    writeFileSync(join(dir, ".github/workflows/ci-integration.yml"), realText("ci-integration.yml"));
+    const res = spawnSync(process.execPath, [join(dir, "scripts/checks/gate.mjs")], { cwd: dir, encoding: "utf8" });
+    expect(res.status).toBe(1);
+    expect(res.stderr).toMatch(/Required-aggregate violations:/);
+  });
+
   it("CLI: exits 0 on the real repository", () => {
     const res = spawnSync(process.execPath, [GATE], { encoding: "utf8" });
     expect(res.status).toBe(0);
@@ -462,15 +482,25 @@ describe("aggregate step, executed (both real workflows)", () => {
     const run = realDoc(file).jobs[aggregateId].steps[0].run;
     for (const [label, needs, status, marker] of AGG_CASES) {
       it(`${file}: ${label} -> exit ${status}`, () => {
-        const res = runStep(run, { NEEDS: needs });
+        const res = runStep(run, { NEEDS: needs, RUN_CANCELLED: "false" });
         expect(res.status).toBe(status);
         expect(res.text).toMatch(marker);
       });
     }
 
+    // A job a cancelled run never started reads `skipped`, so all-success
+    // needs must still fail when the run itself was cancelled.
+    for (const cancelled of ["true", ""]) {
+      it(`${file}: RUN_CANCELLED='${cancelled}' with all-success needs -> exit 1`, () => {
+        const res = runStep(run, { NEEDS: needsJson({ a: entry("success") }), RUN_CANCELLED: cancelled });
+        expect(res.status).toBe(1);
+        expect(res.text).toMatch(/the run was cancelled/);
+      });
+    }
+
     it(`${file}: prints each job's result but never its outputs`, () => {
       const needs = needsJson({ a: { result: "success", outputs: { tok: "SENTINEL_9f3" } } });
-      const res = runStep(run, { NEEDS: needs });
+      const res = runStep(run, { NEEDS: needs, RUN_CANCELLED: "false" });
       expect(res.status).toBe(0);
       expect(res.text).toContain("a: success");
       expect(res.text).not.toContain("SENTINEL_9f3");

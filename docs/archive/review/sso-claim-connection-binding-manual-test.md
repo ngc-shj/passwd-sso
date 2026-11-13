@@ -138,7 +138,7 @@ Check that no refusal message contains a client secret or the raw JSON.
 
 A job that is not a required status check does not block a merge when it fails or never runs.
 
-**Correction (#958).** This step originally asked for `jackson-probe (1.52.2)` and `jackson-probe (1.42.0)` to be registered as required checks. That could not work. Matrix job names change with the matrix. Also, `ci-integration.yml` then filtered paths in its trigger, so a PR outside those paths never started it, and a required check from it would have stayed pending forever. The workflow now starts on every PR. Its `Integration result` job fails when `jackson-probe` (any matrix entry), `integration` or `changes` failed or was cancelled. `Integration result` is the check `main`'s ruleset is to require, alongside `CI result`; `docs/operations/ci-required-checks.md` records whether it does yet.
+**Correction (#958).** This step originally asked for `jackson-probe (1.52.2)` and `jackson-probe (1.42.0)` to be registered as required checks. That could not work. Matrix job names change with the matrix. Also, `ci-integration.yml` then filtered paths in its trigger, so a PR outside those paths never started it, and a required check from it would have stayed pending forever. The workflow now starts on every PR into `main`. Its `Integration result` job fails when `jackson-probe` (any matrix entry), `integration` or `changes` failed or was cancelled. `Integration result` is the check `main`'s ruleset is to require, alongside `CI result`; `docs/operations/ci-required-checks.md` records whether it does yet.
 
 **Steps:** after #958 merged and the ruleset was updated (see `docs/operations/ci-required-checks.md`), read back the rules that apply to `main`:
 
