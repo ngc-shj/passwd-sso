@@ -17,24 +17,46 @@ jobs:
     name: "Detect changed areas"
     runs-on: ubuntu-latest
     outputs:
-      app: ${{ steps.filter.outputs.app }}
-      extension: ${{ steps.filter.outputs.extension }}
-      cli: ${{ steps.filter.outputs.cli }}
-      e2e: ${{ steps.filter.outputs.e2e }}
-      ci: ${{ steps.filter.outputs.ci }}
-      env: ${{ steps.filter.outputs.env }}
-      ios: ${{ steps.filter.outputs.ios }}
-      terraform: ${{ steps.filter.outputs.terraform }}
+      app: ${{ steps.filter.outputs.app || 'true' }}
+      extension: ${{ steps.filter.outputs.extension || 'true' }}
+      cli: ${{ steps.filter.outputs.cli || 'true' }}
+      e2e: ${{ steps.filter.outputs.e2e || 'true' }}
+      ci: ${{ steps.filter.outputs.ci || 'true' }}
+      env: ${{ steps.filter.outputs.env || 'true' }}
+      ios: ${{ steps.filter.outputs.ios || 'true' }}
+      terraform: ${{ steps.filter.outputs.terraform || 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # GitHub's "List pull requests files" returns at most 3000 files, so above
+      # that the filter would decide on a truncated list. The filter is then
+      # skipped and every output falls back to 'true' (run everything). Kept
+      # identical to ci-integration.yml's step; check-required-aggregate.mjs
+      # compares them.
+      - name: Check the changed-file count against the PR files API cap
+        id: size
+        env:
+          CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
+        run: |
+          set -euo pipefail
+          if [[ "${CHANGED_FILES}" =~ ^[0-9]{1,9}$ ]] && (( 10#${CHANGED_FILES} < 3000 )); then
+            echo "small=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "small=false" >> "$GITHUB_OUTPUT"
+          fi
+
       # Every job gated on these outputs carries
-      #   always() && (needs.changes.result != 'success' || <outputs…>)
-      # rather than the outputs alone. When this job fails or is skipped its
-      # outputs are empty strings, so every `== 'true'` is false and the gated
-      # job is SKIPPED — which GitHub reports as non-blocking. A filter that
-      # cannot decide must run the work, not drop it.
+      #   !cancelled() && (needs.changes.result != 'success' || <outputs…>)
+      # rather than the outputs alone. When this job never ran its outputs are
+      # empty strings, so every `== 'true'` is false and the gated job would be
+      # SKIPPED — which GitHub reports as non-blocking. A filter that cannot
+      # decide must run the work, not drop it. (A skipped filter step instead
+      # leaves each output at its `|| 'true'` fallback.) `!cancelled()` rather
+      # than `always()`: a job whose `if` is still true when its run is
+      # cancelled keeps running, so `always()` would let a superseded run's
+      # gated jobs defeat `cancel-in-progress`.
       - id: filter
+        if: steps.size.outputs.small == 'true'
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
           filters: |
@@ -126,7 +148,7 @@ jobs:
   env-drift-check:
     name: env drift check
     needs: changes
-    if: always() && (needs.changes.result != 'success' || needs.changes.outputs.env == 'true')
+    if: "!cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.env == 'true')"
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
@@ -313,7 +335,7 @@ jobs:
     name: "App: Lint"
     runs-on: ubuntu-latest
     needs: changes
-    if: always() && (needs.changes.result != 'success' || needs.changes.outputs.app == 'true' || needs.changes.outputs.ci == 'true')
+    if: "!cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.app == 'true' || needs.changes.outputs.ci == 'true')"
     # The two production builds run in app-build and the test suite in
     # app-test. With them here the job ran 18–20m against its 20m cap and timed
     # out on healthy runs; raising the cap again (it was 15m before) would only
@@ -378,7 +400,7 @@ jobs:
     name: "App: Test (${{ matrix.shard }}/3)"
     runs-on: ubuntu-latest
     needs: changes
-    if: always() && (needs.changes.result != 'success' || needs.changes.outputs.app == 'true' || needs.changes.outputs.ci == 'true')
+    if: "!cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.app == 'true' || needs.changes.outputs.ci == 'true')"
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -444,7 +466,7 @@ jobs:
     name: "App: Coverage"
     runs-on: ubuntu-latest
     needs: [changes, app-test]
-    if: always() && needs.app-test.result == 'success'
+    if: "!cancelled() && needs.app-test.result == 'success'"
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -473,7 +495,7 @@ jobs:
     name: "App: Build"
     runs-on: ubuntu-latest
     needs: changes
-    if: always() && (needs.changes.result != 'success' || needs.changes.outputs.app == 'true' || needs.changes.outputs.ci == 'true')
+    if: "!cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.app == 'true' || needs.changes.outputs.ci == 'true')"
     timeout-minutes: 15
     services:
       redis:
@@ -532,7 +554,7 @@ jobs:
     name: "RLS: Gate fixture suites"
     runs-on: ubuntu-latest
     needs: changes
-    if: always() && (needs.changes.result != 'success' || needs.changes.outputs.app == 'true' || needs.changes.outputs.ci == 'true')
+    if: "!cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.app == 'true' || needs.changes.outputs.ci == 'true')"
     timeout-minutes: 20
     env:
       DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci"
@@ -560,7 +582,7 @@ jobs:
     name: "Extension: Test → Build"
     runs-on: ubuntu-latest
     needs: changes
-    if: always() && (needs.changes.result != 'success' || needs.changes.outputs.extension == 'true' || needs.changes.outputs.ci == 'true')
+    if: "!cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.extension == 'true' || needs.changes.outputs.ci == 'true')"
     timeout-minutes: 10
     defaults:
       run:
@@ -594,7 +616,7 @@ jobs:
     name: "iOS: xcodebuild test"
     runs-on: macos-latest
     needs: changes
-    if: always() && (needs.changes.result != 'success' || needs.changes.outputs.ios == 'true' || needs.changes.outputs.ci == 'true')
+    if: "!cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.ios == 'true' || needs.changes.outputs.ci == 'true')"
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -669,7 +691,7 @@ jobs:
     name: "CLI: Build → Test"
     runs-on: ubuntu-latest
     needs: changes
-    if: always() && (needs.changes.result != 'success' || needs.changes.outputs.cli == 'true' || needs.changes.outputs.ci == 'true')
+    if: "!cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.cli == 'true' || needs.changes.outputs.ci == 'true')"
     timeout-minutes: 10
     defaults:
       run:
@@ -700,13 +722,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: [changes, app-ci, app-test, app-coverage, app-build]
-    # `always()` defeats the skip-on-failed-dependency default; it does NOT
-    # supply outputs. When `changes` fails or is skipped its outputs are empty
-    # strings, every `== 'true'` comparison is false, and this job — which
-    # carries the CSP gate — is silently skipped and reported as non-blocking.
-    # The first clause makes an unresolved filter run the gate instead.
+    # `!cancelled()` defeats the skip-on-failed-dependency default; it does NOT
+    # supply outputs. When `changes` never ran its outputs are empty strings,
+    # every `== 'true'` comparison is false, and this job — which carries the
+    # CSP gate — would be silently skipped and reported as non-blocking. The
+    # first clause makes an unresolved filter run the gate instead.
     if: |
-      always() &&
+      !cancelled() &&
       (needs.changes.result != 'success' ||
        needs.changes.outputs.app == 'true' ||
        needs.changes.outputs.e2e == 'true' ||
@@ -806,7 +828,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: changes
-    if: always() && (needs.changes.result != 'success' || needs.changes.outputs.app == 'true' || needs.changes.outputs.ci == 'true')
+    if: "!cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.app == 'true' || needs.changes.outputs.ci == 'true')"
     services:
       postgres:
         image: postgres:16-alpine
@@ -901,7 +923,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: changes
-    if: always() && (needs.changes.result != 'success' || needs.changes.outputs.app == 'true' || needs.changes.outputs.ci == 'true')
+    if: "!cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.app == 'true' || needs.changes.outputs.ci == 'true')"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -936,7 +958,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: changes
-    if: always() && (needs.changes.result != 'success' || needs.changes.outputs.app == 'true' || needs.changes.outputs.ci == 'true')
+    if: "!cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.app == 'true' || needs.changes.outputs.ci == 'true')"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -977,7 +999,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: changes
-    if: always() && (needs.changes.result != 'success' || needs.changes.outputs.extension == 'true' || needs.changes.outputs.ci == 'true')
+    if: "!cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.extension == 'true' || needs.changes.outputs.ci == 'true')"
     defaults:
       run:
         working-directory: extension
@@ -1004,7 +1026,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: changes
-    if: always() && (needs.changes.result != 'success' || needs.changes.outputs.cli == 'true' || needs.changes.outputs.ci == 'true')
+    if: "!cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.cli == 'true' || needs.changes.outputs.ci == 'true')"
     defaults:
       run:
         working-directory: cli
@@ -1032,7 +1054,7 @@ jobs:
     timeout-minutes: 5
     needs: changes
     if: |
-      always() &&
+      !cancelled() &&
       (needs.changes.result != 'success' ||
        needs.changes.outputs.app == 'true' ||
        needs.changes.outputs.extension == 'true' ||
@@ -1060,7 +1082,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: changes
-    if: always() && (needs.changes.result != 'success' || needs.changes.outputs.terraform == 'true' || needs.changes.outputs.ci == 'true')
+    if: "!cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.terraform == 'true' || needs.changes.outputs.ci == 'true')"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -1104,3 +1126,64 @@ jobs:
 
       - name: Check the module test count against the prefix vectors
         run: node scripts/checks/check-terraform-test-count.mjs "$RUNNER_TEMP/anchor-prefix-test.json" infra/terraform/modules/anchor-prefix/prefix-vectors.json
+
+  # ─── Required check ───────────────────────────────────────
+  # The one check main's ruleset is to require from this workflow (see
+  # docs/operations/ci-required-checks.md for whether it does yet): it fails when
+  # any job here failed or was cancelled, and passes when each succeeded or was
+  # skipped by its path gate. Needs every other job; check-required-aggregate.mjs
+  # holds that set to the jobs map. `always()` here, unlike the gated jobs: a
+  # cancelled run must still report red.
+  ci-result:
+    name: "CI result"
+    needs:
+      - changes
+      - env-drift-check
+      - version-check
+      - secret-scan
+      - static-checks
+      - override-floor-staleness
+      - app-ci
+      - app-test
+      - app-coverage
+      - app-build
+      - rls-gate-fixtures
+      - extension-ci
+      - ios-ci
+      - cli-ci
+      - e2e
+      - rls-smoke
+      - container-scan
+      - audit-app
+      - audit-ext
+      - audit-cli
+      - license-audit
+      - terraform
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      # NEEDS arrives through env, never inlined into the script. Only each
+      # job's result is printed; outputs stay out of the log. Every failure
+      # path exits 1 explicitly. Kept identical in ci.yml and
+      # ci-integration.yml; check-required-aggregate.mjs compares them and its
+      # test executes this script.
+      - name: Fail unless every job succeeded or was skipped
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$NEEDS" | jq -e -s 'length == 1 and (.[0] | type == "object" and length > 0)' >/dev/null 2>&1; then
+            echo "::error::needs is empty or not a single JSON object"
+            exit 1
+          fi
+          if ! printf '%s' "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result // "missing")"'; then
+            echo "::error::needs could not be read"
+            exit 1
+          fi
+          if ! printf '%s' "$NEEDS" | jq -e 'all(.[]; .result == "success" or .result == "skipped")' >/dev/null 2>&1; then
+            echo "::error::a job failed, was cancelled, or reported no result"
+            exit 1
+          fi
+          echo "Every job succeeded or was skipped."

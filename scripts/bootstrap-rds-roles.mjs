@@ -56,6 +56,7 @@
 // refused BEFORE it sends the password statement.
 
 import { Client } from "pg";
+import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 // ONE loader/validator, shared with scripts/audit-db-grants.mjs. Two copies of
 // a security policy converge on the weaker one — which had already happened
@@ -693,7 +694,7 @@ async function main() {
 
 // Run only when invoked as a CLI, so the integration test can import
 // convergeRole() without the script connecting to a DB on import.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   main().catch((e) => {
     console.error(e);
     process.exit(1);

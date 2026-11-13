@@ -17,9 +17,9 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, realpathSync } from "node:fs";
 import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -247,7 +247,7 @@ export function checkBlameIgnoreRevs({ repoRoot = ROOT, runGitShow } = {}) {
 // ---------------------------------------------------------------------------
 // CLI
 // ---------------------------------------------------------------------------
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   const { ok, violations, checked, warnings } = checkBlameIgnoreRevs();
   if (warnings && warnings.length > 0) {
     for (const w of warnings) console.warn(`  warning: ${w}`);

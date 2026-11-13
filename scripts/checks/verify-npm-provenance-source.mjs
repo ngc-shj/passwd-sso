@@ -29,6 +29,9 @@
  * SLSA v1 fixtures; the file also runs as a CLI when invoked directly.
  */
 
+import { realpathSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+
 const PROVENANCE_PREDICATE = "https://slsa.dev/provenance/v1";
 // This release flow pins its Node/npm toolchain, so we require the EXACT values
 // current npm Trusted Publishing emits rather than a compatibility set — an
@@ -252,6 +255,6 @@ async function main() {
   process.exit(1);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   main();
 }

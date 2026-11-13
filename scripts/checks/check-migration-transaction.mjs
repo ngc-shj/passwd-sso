@@ -35,7 +35,7 @@
  *   ALLOWLIST_ENTRY_WITHOUT_REASON: <line>
  *   STALE_ALLOWLIST_ENTRY: <entry>
  */
-import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { tokenize } from "./check-destructive-migration.mjs";
@@ -264,6 +264,6 @@ function main() {
   );
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   main();
 }

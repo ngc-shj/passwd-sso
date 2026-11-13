@@ -1,7 +1,9 @@
-# Security-sensitive paths require review by the repository owner.
-# Changes to these files will not merge without an approving review from @ngc-shj.
+# Security-sensitive paths and their owner. Neither main's ruleset nor its
+# classic protection requires code-owner review (one maintainer cannot approve
+# their own PR), so this file records ownership and requests review; it does not
+# block a merge. See docs/operations/ci-required-checks.md.
 
-# Refactor-tool roots (stay at scripts/ root — CODEOWNERS-gated).
+# Refactor-tool roots (stay at scripts/ root — owned here).
 /scripts/move-and-rewrite-imports.mjs        @ngc-shj
 /scripts/verify-allowlist-rename-only.mjs    @ngc-shj
 /scripts/verify-move-only-diff.mjs           @ngc-shj
@@ -15,7 +17,7 @@
 /scripts/checks/**                           @ngc-shj
 # Supply-chain crypto/auth-deps parity test: gate the ENFORCING test too, not
 # just the manifest data, so the reconciliation logic + name-pattern heuristic +
-# manual-allowance acceptance cannot be weakened without owner review.
+# manual-allowance acceptance have the same owner as the data.
 /src/__tests__/checks/**                      @ngc-shj
 # PR 9 (F25 Round 4): dead flat-file patterns /src/lib/crypto* and
 # /src/lib/auth* REMOVED — no files match them after PR #392 split
@@ -45,5 +47,5 @@
 /.git-blame-ignore-revs                      @ngc-shj
 # S14 (Round 4): supply-chain integrity — Trivy suppression list.
 /.trivyignore                                @ngc-shj
-# Step 8 (SEC-4): env allowlist governance — changes require owner review.
+# Step 8 (SEC-4): env allowlist governance — owned here.
 /scripts/env-allowlist.ts                    @ngc-shj

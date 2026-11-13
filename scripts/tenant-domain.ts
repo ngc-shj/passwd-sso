@@ -104,7 +104,7 @@ loadEnv();
 import type { PrismaClient } from "@prisma/client";
 import { Prisma } from "@prisma/client";
 import { execFileSync } from "node:child_process";
-import { closeSync, fchmodSync, openSync, readFileSync, unlinkSync, writeSync } from "node:fs";
+import { closeSync, fchmodSync, openSync, readFileSync, unlinkSync, writeSync, realpathSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { withBypassRls } from "@/lib/tenant-rls";
@@ -3548,7 +3548,7 @@ async function main(): Promise<void> {
 // Run only when invoked as a CLI, so the integration test can import the
 // command functions without the module connecting to a DB on import
 // (bootstrap-rds-roles.mjs's shape — round-3 M26).
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   registerBypassNoticeSink(stderrBypassNoticeSink);
   main().catch((err) => {
     console.error(err);

@@ -15,9 +15,9 @@
  * Exit 0 = OK, Exit 1 = drift detected.
  */
 
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, realpathSync } from "node:fs";
 import { resolve, join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -27,7 +27,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // ---------------------------------------------------------------------------
 /** @type {ReadonlyArray<string>} */
 const ROSTER_GLOBS = [
-  // Security-sensitive src directories (existing CODEOWNERS-gated).
+  // Security-sensitive src directories (already covered by CODEOWNERS).
   "src/lib/auth/**",
   "src/lib/crypto/**",
   "src/lib/audit/**",
@@ -35,7 +35,7 @@ const ROSTER_GLOBS = [
   "src/lib/tenant-context.ts",
   "src/lib/tenant/**",
   "src/lib/constants/auth/**",
-  // directory-structure-review (S1): self-protect the new CODEOWNERS gates so a
+  // directory-structure-review (S1): self-protect the new CODEOWNERS rules so a
   // future deletion of these rules is caught by the drift check.
   "src/lib/proxy/**",
   "src/lib/security/**",
@@ -198,7 +198,7 @@ export function checkDrift({ rosterGlobs = ROSTER_GLOBS, repoRoot = ROOT } = {})
 // ---------------------------------------------------------------------------
 // CLI entry point
 // ---------------------------------------------------------------------------
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   const { ok, uncovered, errors } = checkDrift();
   if (errors && errors.length > 0) {
     for (const e of errors) console.error(e);

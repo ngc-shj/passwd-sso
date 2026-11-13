@@ -9,7 +9,8 @@
  * The drift-checker (scripts/check-env-docs.ts) validates this file at runtime
  * and fails CI if any entry is malformed, dead, or stale.
  *
- * Governance: changes to this file require a review from @ngc-shj (see .github/CODEOWNERS).
+ * Governance: owned by @ngc-shj in .github/CODEOWNERS (ownership only — code-owner
+ * review is not required by main's merge rules).
  */
 
 export type LiteralAllowlistEntry = {

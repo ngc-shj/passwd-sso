@@ -62,7 +62,7 @@
  *   a count that never runs out, and `--timeout-ms` as a delay
  *   `AbortSignal.timeout` rejects with a synchronous `ERR_OUT_OF_RANGE`.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import semver from "semver";
@@ -74,6 +74,7 @@ import {
   isPlainObject,
   splitOverrideKey,
 } from "./check-override-key-disjointness.mjs";
+import { pathToFileURL } from "node:url";
 
 // ---------------------------------------------------------------------------
 // Pure core. Nothing below this point until the "network shell" banner reads a
@@ -1295,6 +1296,6 @@ export async function run(argv, env, { stdout = console.log, stderr = console.er
   return 0;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   process.exitCode = await run(process.argv.slice(2), process.env);
 }

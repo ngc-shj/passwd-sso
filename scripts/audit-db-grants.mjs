@@ -34,7 +34,7 @@
  *   ROLE_STATE_VIOLATION / _IN_MANIFEST — a role state that is never legitimate
  *                                       (see roleStateViolations)
  */
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, realpathSync } from "node:fs";
 import { Client } from "pg";
 import { pathToFileURL } from "node:url";
 import {
@@ -860,7 +860,7 @@ async function main() {
   console.log(`db-grants: OK (${live.length} grants match the manifest)`);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   main().catch((e) => {
     console.error(e);
     process.exit(1);

@@ -1,92 +1,136 @@
 name: ci-integration
 
-# Round 4 S11/T12 fix: authoritative integration-test gate for auth/DB-touching PRs.
-# Runs `npm run test:integration` against a live Postgres service. Blocking this
-# job's result is set via repo branch-protection `required_status_checks` (not
-# declared in this file — verify post-merge via `gh api .../branches/main/protection`).
+# Real-DB integration suite and the Jackson connection-binding probe.
+#
+# The workflow starts on every pull request: a path filter in the trigger would
+# leave a PR outside those paths without any run, and a required check from it
+# pending forever. Relevance is decided in the `changes` job instead, and the
+# expensive jobs are skipped when nothing relevant changed. `integration-result`
+# ("Integration result") is the check main's ruleset is to require; it fails
+# when any job here failed or was cancelled. See
+# docs/operations/ci-required-checks.md, which also records whether the ruleset
+# requires it yet.
+#
+# `branches: [main]`: a required check is matched by name on the head SHA, so a
+# run of the same commit in a PR into another branch — where the filter compares
+# against a different base — must not be able to answer for a PR into main.
 
 on:
   pull_request:
-    paths:
-      - 'src/lib/auth/**'
-      - 'src/lib/prisma.ts'
-      - 'src/lib/prisma/**'
-      - 'src/lib/redis.ts'
-      # The session passkey gate's audit dedup is proven cross-process only in
-      # the real-Redis integration suite (two gate instances, one limiter).
-      - 'src/lib/proxy/**'
-      - 'src/lib/security/rate-limit.ts'
-      - 'src/lib/tenant-rls.ts'
-      - 'src/lib/tenant-rls-grants.ts'
-      - 'src/lib/tenant-rls-purpose.ts'
-      - 'src/lib/db/**'
-      # Constants the integration suite asserts against (e.g. the active
-      # client-family cap); a constants-only PR must still run the real-DB proof.
-      - 'src/lib/constants/**'
-      # audit/** writes audit_outbox and is covered only by integration tests for
-      # the invariant that the outbox openers use the un-proxied client — no
-      # static gate can tell the two clients apart, so a PR touching only this
-      # directory must still reach this job.
-      - 'src/lib/audit/**'
-      - 'src/lib/tenant-context.ts'
-      - 'src/lib/tenant/**'
-      - 'src/lib/mcp/**'
-      - 'src/lib/vault/**'
-      - 'src/lib/services/**'
-      # Team membership, tenant departure and the rotation locks; the
-      # directory-sync engine and SCIM services departing users through them.
-      - 'src/lib/team/**'
-      - 'src/lib/directory-sync/**'
-      - 'src/lib/scim/**'
-      # Attachment object keys / ref validation (MinIO cells) and the AAD and
-      # CEK-wrap derivations the team re-key integration cells decrypt with.
-      - 'src/lib/blob-store/**'
-      - 'src/lib/crypto/**'
-      # Body schemas, the API error codes and the limiters the re-key and
-      # attachment routes refuse with; the integration cells assert each code.
-      - 'src/lib/validations/**'
-      - 'src/lib/http/**'
-      - 'src/lib/security/**'
-      - 'src/workers/**'
-      - 'src/__tests__/db-integration/**'
-      - 'prisma/schema.prisma'
-      - 'prisma/migrations/**'
-      # T2: route handlers read/write tenant-scoped tables; a route-only PR must
-      # still run the integration suite (RLS scoping + write-read format).
-      - 'src/app/api/**'
-      # The public share serve paths, share admission and the components the
-      # share-departure cells render (the /s/ page outside src/app/api).
-      - 'src/app/s/**'
-      - 'src/lib/share/**'
-      - 'src/components/share/**'
-      - 'src/lib/emergency-access/**'
-      - 'src/lib/access-request/**'
-      # C7: the offline operator CLI, tested from src/__tests__/db-integration/.
-      - 'scripts/**'
-      # The k6 seeder and the E2E seed helpers it writes through
-      # (load-test-seeder.integration.test.ts).
-      - 'load-test/setup/**'
-      - 'e2e/helpers/db.ts'
-      # A dependency bump (the pg driver, Prisma, the S3 client) changes what
-      # these tests exercise; a change to this workflow changes how they run.
-      - 'package.json'
-      - 'package-lock.json'
-      - '.github/workflows/ci-integration.yml'
-      # jackson-probe: the Jackson images the repo references, and the
-      # provider wiring whose security rests on what that probe measures.
-      - 'docker-compose.yml'
-      - 'infra/terraform/**'
-      - 'src/auth.ts'
-      - 'src/auth.config.ts'
-      - 'src/app/\[locale\]/auth/signin/**'
-      - 'scripts/probes/**'
+    branches: [main]
 
 permissions:
   # Round 4 S23 fix: principle of least privilege — only content read needed.
   contents: read
 
 jobs:
+  changes:
+    name: "Integration: detect relevance"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      integration: ${{ steps.filter.outputs.integration || 'true' }}
+    steps:
+      # GitHub's "List pull requests files" returns at most 3000 files, so above
+      # that the filter would decide on a truncated list. The filter is then
+      # skipped and the output falls back to 'true' (run everything). Kept
+      # identical to ci.yml's step; check-required-aggregate.mjs compares them.
+      - name: Check the changed-file count against the PR files API cap
+        id: size
+        env:
+          CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
+        run: |
+          set -euo pipefail
+          if [[ "${CHANGED_FILES}" =~ ^[0-9]{1,9}$ ]] && (( 10#${CHANGED_FILES} < 3000 )); then
+            echo "small=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "small=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # No checkout: for pull_request the filter reads the PR files API.
+      # Patterns stay single-quoted: "\[locale\]" is an invalid YAML escape.
+      - id: filter
+        if: steps.size.outputs.small == 'true'
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          filters: |
+            integration:
+              - 'src/lib/auth/**'
+              - 'src/lib/prisma.ts'
+              - 'src/lib/prisma/**'
+              - 'src/lib/redis.ts'
+              # The session passkey gate's audit dedup is proven cross-process only in
+              # the real-Redis integration suite (two gate instances, one limiter).
+              - 'src/lib/proxy/**'
+              - 'src/lib/security/rate-limit.ts'
+              - 'src/lib/tenant-rls.ts'
+              - 'src/lib/tenant-rls-grants.ts'
+              - 'src/lib/tenant-rls-purpose.ts'
+              - 'src/lib/db/**'
+              # Constants the integration suite asserts against (e.g. the active
+              # client-family cap); a constants-only PR must still run the real-DB proof.
+              - 'src/lib/constants/**'
+              # audit/** writes audit_outbox and is covered only by integration tests for
+              # the invariant that the outbox openers use the un-proxied client — no
+              # static gate can tell the two clients apart, so a PR touching only this
+              # directory must still reach this job.
+              - 'src/lib/audit/**'
+              - 'src/lib/tenant-context.ts'
+              - 'src/lib/tenant/**'
+              - 'src/lib/mcp/**'
+              - 'src/lib/vault/**'
+              - 'src/lib/services/**'
+              # Team membership, tenant departure and the rotation locks; the
+              # directory-sync engine and SCIM services departing users through them.
+              - 'src/lib/team/**'
+              - 'src/lib/directory-sync/**'
+              - 'src/lib/scim/**'
+              # Attachment object keys / ref validation (MinIO cells) and the AAD and
+              # CEK-wrap derivations the team re-key integration cells decrypt with.
+              - 'src/lib/blob-store/**'
+              - 'src/lib/crypto/**'
+              # Body schemas, the API error codes and the limiters the re-key and
+              # attachment routes refuse with; the integration cells assert each code.
+              - 'src/lib/validations/**'
+              - 'src/lib/http/**'
+              - 'src/lib/security/**'
+              - 'src/workers/**'
+              - 'src/__tests__/db-integration/**'
+              - 'prisma/schema.prisma'
+              - 'prisma/migrations/**'
+              # T2: route handlers read/write tenant-scoped tables; a route-only PR must
+              # still run the integration suite (RLS scoping + write-read format).
+              - 'src/app/api/**'
+              # The public share serve paths, share admission and the components the
+              # share-departure cells render (the /s/ page outside src/app/api).
+              - 'src/app/s/**'
+              - 'src/lib/share/**'
+              - 'src/components/share/**'
+              - 'src/lib/emergency-access/**'
+              - 'src/lib/access-request/**'
+              # C7: the offline operator CLI, tested from src/__tests__/db-integration/.
+              - 'scripts/**'
+              # The k6 seeder and the E2E seed helpers it writes through
+              # (load-test-seeder.integration.test.ts).
+              - 'load-test/setup/**'
+              - 'e2e/helpers/db.ts'
+              # A dependency bump (the pg driver, Prisma, the S3 client) changes what
+              # these tests exercise; a change to this workflow changes how they run.
+              - 'package.json'
+              - 'package-lock.json'
+              - '.github/workflows/ci-integration.yml'
+              # jackson-probe: the Jackson images the repo references, and the
+              # provider wiring whose security rests on what that probe measures.
+              - 'docker-compose.yml'
+              - 'infra/terraform/**'
+              - 'src/auth.ts'
+              - 'src/auth.config.ts'
+              - 'src/app/\[locale\]/auth/signin/**'
+              - 'scripts/probes/**'
+
   integration:
+    needs: changes
+    if: "!cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.integration == 'true')"
     runs-on: ubuntu-latest
     # Runs take ~6 minutes; a hung child process (e.g. the load-test seeder)
     # must not hold the runner for GitHub's 6-hour default.
@@ -304,6 +348,8 @@ jobs:
   # holds them to those files. The probe itself asserts that the server reports
   # the version its digest is listed under.
   jackson-probe:
+    needs: changes
+    if: "!cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.integration == 'true')"
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -378,3 +424,39 @@ jobs:
             -v "$PWD/node_modules:/repo/node_modules:ro" \
             -v "$PWD/package-lock.json:/repo/package-lock.json:ro" \
             "$PROBE_DRIVER_IMAGE" /probe/jackson-connection-binding.mjs run
+
+  # The one check main's ruleset is to require from this workflow (job names
+  # of the matrix entries change with the matrix). Needs every other job here;
+  # check-required-aggregate.mjs holds that set to the jobs map. `always()`
+  # here, unlike the gated jobs: a cancelled run must still report red.
+  integration-result:
+    name: "Integration result"
+    needs: [changes, integration, jackson-probe]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      # NEEDS arrives through env, never inlined into the script. Only each
+      # job's result is printed; outputs stay out of the log. Every failure
+      # path exits 1 explicitly. Kept identical in ci.yml and
+      # ci-integration.yml; check-required-aggregate.mjs compares them and its
+      # test executes this script.
+      - name: Fail unless every job succeeded or was skipped
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$NEEDS" | jq -e -s 'length == 1 and (.[0] | type == "object" and length > 0)' >/dev/null 2>&1; then
+            echo "::error::needs is empty or not a single JSON object"
+            exit 1
+          fi
+          if ! printf '%s' "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result // "missing")"'; then
+            echo "::error::needs could not be read"
+            exit 1
+          fi
+          if ! printf '%s' "$NEEDS" | jq -e 'all(.[]; .result == "success" or .result == "skipped")' >/dev/null 2>&1; then
+            echo "::error::a job failed, was cancelled, or reported no result"
+            exit 1
+          fi
+          echo "Every job succeeded or was skipped."

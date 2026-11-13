@@ -134,17 +134,19 @@ Check that no refusal message contains a client secret or the raw JSON.
 - Step 2: the callback is refused by Auth.js (the `state` / `nonce` cookies of the second profile do not match), and no session is created in the second profile. This is the code-injection case PKCE does not cover for these providers; `nonce` is the control.
 - Step 3: refused with an Auth.js `InvalidCheck` error; no session.
 
-### Test 9: post-merge — the probe jobs are required checks
+### Test 9: post-merge — the probe result is a required check
 
-A job that is not a required status check does not block a merge when it fails or never runs, and `ci-integration.yml` does not declare which of its jobs are required.
+A job that is not a required status check does not block a merge when it fails or never runs.
 
-**Steps:** after merge, a repository admin adds `jackson-probe (1.52.2)` and `jackson-probe (1.42.0)` to the required status checks of `main`, in the branch protection settings. Then read them back:
+**Correction (#958).** This step originally asked for `jackson-probe (1.52.2)` and `jackson-probe (1.42.0)` to be registered as required checks. That could not work. Matrix job names change with the matrix. Also, `ci-integration.yml` then filtered paths in its trigger, so a PR outside those paths never started it, and a required check from it would have stayed pending forever. The workflow now starts on every PR into `main`. Its `Integration result` job fails when `jackson-probe` (any matrix entry), `integration` or `changes` failed or was cancelled. `Integration result` is the check `main`'s ruleset is to require, alongside `CI result`; `docs/operations/ci-required-checks.md` records whether it does yet.
+
+**Steps:** after #958 merged and the ruleset was updated (see `docs/operations/ci-required-checks.md`), read back the rules that apply to `main`:
 
 ```bash
-gh api repos/:owner/:repo/branches/main/protection/required_status_checks --jq '.contexts, .checks'
+gh api repos/:owner/:repo/rules/branches/main --jq '.[] | select(.type == "required_status_checks") | .parameters.required_status_checks'
 ```
 
-**Expected:** both names are listed. A matrix entry renamed or added later changes the check name, so it has to be registered again.
+**Expected:** `CI result` and `Integration result` are listed, each with `integration_id` 15368 (GitHub Actions).
 
 ---
 

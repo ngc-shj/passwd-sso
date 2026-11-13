@@ -39,7 +39,7 @@
  *                                             longer exists or is no longer
  *                                             destructive (anti-drift)
  */
-import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { MIN_REASON_LENGTH, parseReasonedAllowlist } from "./lib/reasoned-allowlist.mjs";
@@ -382,6 +382,6 @@ function main() {
 
 // Run only as a CLI, so the self-test can import tokenize()/findDestructiveKinds()
 // without executing the gate against the real repo.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   main();
 }

@@ -1,5 +1,5 @@
 {
-  "$note": "Crypto/auth-sensitive npm dependency manifest across all three npm workspaces (root/cli/extension). Reconciled by src/__tests__/checks/crypto-auth-deps-manifest.test.ts against (1) CODE imports derived via ts-morph AST over the crypto/auth roots, (2) each workspace package.json dependencies, (3) this manifest. A bump to any listed package should trigger deeper supply-chain review; a NEW crypto/auth import must be added here (or to excluded[]). Both this file and its enforcing test are CODEOWNERS-gated.",
+  "$note": "Crypto/auth-sensitive npm dependency manifest across all three npm workspaces (root/cli/extension). Reconciled by src/__tests__/checks/crypto-auth-deps-manifest.test.ts against (1) CODE imports derived via ts-morph AST over the crypto/auth roots, (2) each workspace package.json dependencies, (3) this manifest. A bump to any listed package should trigger deeper supply-chain review; a NEW crypto/auth import must be added here (or to excluded[]). Both this file and its enforcing test are owned in CODEOWNERS (ownership only; code-owner review is not required).",
   "owners_enum": ["security"],
   "packages": {
     "next-auth": {

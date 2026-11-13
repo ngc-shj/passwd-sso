@@ -12,6 +12,7 @@ Language policy:
 | [departed-member-access-backfill.md](departed-member-access-backfill.md) | Follow-up for departed members that kept team access (#1033): report and contain scripts |
 | [admin-tokens.md](admin-tokens.md) | Operator token mint / use / rotate / revoke runbook |
 | [incident-runbook.md](incident-runbook.md) | Incident response runbook |
+| [ci-required-checks.md](ci-required-checks.md) | The two checks `main` requires, what keeps them complete, and their limits |
 | [audit-log-reference.md](audit-log-reference.md) | Audit log schema reference |
 | [audit-log-forwarding.md](audit-log-forwarding.md) | Audit-log forwarding to stdout and per-tenant delivery targets |
 | [redis-ha.md](redis-ha.md) | Redis high-availability configuration |

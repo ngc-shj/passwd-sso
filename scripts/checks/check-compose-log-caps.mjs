@@ -29,9 +29,10 @@
  * `<<: *sentinel` merge key in docker-compose.ha.yml are both invisible to a
  * line scanner, and a scanner would report the sentinels as capped either way.
  */
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, realpathSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join, relative } from "node:path";
+import { pathToFileURL } from "node:url";
 
 /**
  * Services that legitimately do NOT use json-file, with the reason. An entry is
@@ -515,6 +516,6 @@ async function main(root = process.env.COMPOSE_LOG_CAPS_ROOT ?? ".") {
   );
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   await main(process.argv[2]);
 }
