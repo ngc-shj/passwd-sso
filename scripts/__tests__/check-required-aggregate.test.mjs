@@ -18,6 +18,7 @@ import {
   checkRepository,
   findAggregateStepDivergence,
   findRequiredNameCollisions,
+  findStatusFunctionMisuse,
   findWorkflowViolations,
 } from "../checks/check-required-aggregate.mjs";
 
@@ -32,7 +33,7 @@ const FC = (...filters) =>
 const AFTER = "!cancelled() && needs.app-test.result == 'success'";
 const FC_AFTER = `!cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.app == 'true') && needs.app-ci.result != 'failure' && needs.app-test.result != 'failure' && needs.app-coverage.result != 'failure' && needs.app-build.result != 'failure'`;
 
-const AGG_STEP = realDoc("ci.yml").jobs["ci-result"].steps[0];
+const [CANCEL_STEP, AGG_STEP] = realDoc("ci.yml").jobs["ci-result"].steps;
 const SIZE_STEP = realDoc("ci.yml").jobs.changes.steps.find((s) => s.id === "size");
 
 /** A minimal workflow that satisfies every rule of the `ci.yml` spec. */
@@ -78,7 +79,7 @@ function baseDoc() {
     permissions: {},
     needs: Object.keys(jobs),
     "runs-on": "ubuntu-latest",
-    steps: [structuredClone(AGG_STEP)],
+    steps: [structuredClone(CANCEL_STEP), structuredClone(AGG_STEP)],
   };
   return {
     name: "ci",
@@ -168,7 +169,8 @@ const RED = {
   "R1-extra-push": [(d) => { d.on.push = { branches: ["main"] }; }, /R1 'on' must have 'pull_request' as its only event, found also: push/],
   "R1-extra-dispatch": [(d) => { d.on.workflow_dispatch = null; }, /R1 'on' must have 'pull_request' as its only event, found also: workflow_dispatch/],
   "R1-extra-merge-group": [(d) => { d.on.merge_group = null; }, /R1 'on' must have 'pull_request' as its only event, found also: merge_group/],
-  "R1-pull-request-target": [(d) => { d.on.pull_request_target = null; }, /R1 .*pull_request_target/],
+  "R1-pull-request-target": [(d) => { d.on.pull_request_target = null; }, /R1 'on\.pull_request_target' is forbidden/],
+  "R1-pull-request-target-only": [(d) => { d.on = { pull_request_target: { branches: ["main"] } }; }, /R1 'on\.pull_request_target' is forbidden/],
   "R2-aggregate-missing": [(d) => { delete d.jobs["ci-result"]; }, /R2 aggregate job 'ci-result' is missing/],
   "R2-name-wrong": [(d) => { d.jobs["ci-result"].name = "Result"; }, /'ci-result'.*R2 name/],
   "R2-name-expression": [(d) => { d.jobs["ci-result"].name = "CI ${{ matrix.n }}"; }, /'ci-result'.*R2 name/],
@@ -179,17 +181,21 @@ const RED = {
   "R3-strategy": [(d) => { d.jobs["ci-result"].strategy = { matrix: { n: [1] } }; }, /'ci-result'.*R3 'strategy'/],
   "R3-defaults": [(d) => { d.jobs["ci-result"].defaults = { run: { shell: "sh" } }; }, /'ci-result'.*R3 'defaults'/],
   "R3-job-env": [(d) => { d.jobs["ci-result"].env = { A: "1" }; }, /'ci-result'.*R3 'env'/],
-  "R3-step-if": [(d) => { d.jobs["ci-result"].steps[0].if = "success()"; }, /'ci-result'.*R3 step 'if' must be exactly 'always\(\)'/],
-  "R3-step-if-absent": [(d) => { delete d.jobs["ci-result"].steps[0].if; }, /'ci-result'.*R3 step 'if' must be exactly 'always\(\)'/],
-  "R3-step-shell": [(d) => { d.jobs["ci-result"].steps[0].shell = "sh"; }, /'ci-result'.*R3 step-level 'shell'/],
+  "R3-step-if": [(d) => { d.jobs["ci-result"].steps[1].if = "success()"; }, /'ci-result'.*R3 step 'if' must be exactly 'always\(\)'/],
+  "R3-step-if-absent": [(d) => { delete d.jobs["ci-result"].steps[1].if; }, /'ci-result'.*R3 step 'if' must be exactly 'always\(\)'/],
+  "R3-step-shell": [(d) => { d.jobs["ci-result"].steps[1].shell = "sh"; }, /'ci-result'.*R3 step-level 'shell'/],
   "R3-workflow-default-shell": [(d) => { d.defaults = { run: { shell: "sh" } }; }, /R3 'defaults\.run\.shell'/],
   "R3-workflow-env": [(d) => { d.env = { A: "1" }; }, /R3 top-level 'env'/],
-  "R4-two-steps": [(d) => { d.jobs["ci-result"].steps.push({ run: "true" }); }, /'ci-result'.*R4 must have exactly one step/],
-  "R4-env-changed": [(d) => { d.jobs["ci-result"].steps[0].env.NEEDS = "{}"; }, /'ci-result'.*R4 step 'env'/],
-  "R4-env-no-cancelled": [(d) => { delete d.jobs["ci-result"].steps[0].env.RUN_CANCELLED; }, /'ci-result'.*R4 step 'env'/],
-  "R4-uses": [(d) => { d.jobs["ci-result"].steps[0].uses = "x/y@0"; }, /'ci-result'.*R4 the step must be a 'run' step/],
-  "R4-step-not-mapping": [(d) => { d.jobs["ci-result"].steps = ["echo"]; }, /'ci-result'.*R4 the step is not a mapping/],
-  "R4-run-expression": [(d) => { d.jobs["ci-result"].steps[0].run = "echo ${{ github.actor }}"; }, /'ci-result'.*R4 step 'run'/],
+  "R4-three-steps": [(d) => { d.jobs["ci-result"].steps.push({ run: "true" }); }, /'ci-result'.*R4 must have exactly two steps \(found 3\)/],
+  "R4-cancel-step-missing": [(d) => { d.jobs["ci-result"].steps.shift(); }, /'ci-result'.*R4 the first step must be exactly/],
+  "R4-cancel-step-if": [(d) => { d.jobs["ci-result"].steps[0].if = "failure()"; }, /'ci-result'.*R4 the first step must be exactly/],
+  "R4-cancel-step-run": [(d) => { d.jobs["ci-result"].steps[0].run = 'echo "::error::the run was cancelled"'; }, /'ci-result'.*R4 the first step must be exactly/],
+  "R4-cancel-step-extra-key": [(d) => { d.jobs["ci-result"].steps[0]["continue-on-error"] = false; }, /'ci-result'.*R4 the first step must be exactly/],
+  "R4-env-changed": [(d) => { d.jobs["ci-result"].steps[1].env.NEEDS = "{}"; }, /'ci-result'.*R4 step 'env'/],
+  "R4-env-extra": [(d) => { d.jobs["ci-result"].steps[1].env.RUN_CANCELLED = "${{ cancelled() }}"; }, /'ci-result'.*R4 step 'env'/],
+  "R4-uses": [(d) => { d.jobs["ci-result"].steps[1].uses = "x/y@0"; }, /'ci-result'.*R4 the step must be a 'run' step/],
+  "R4-step-not-mapping": [(d) => { d.jobs["ci-result"].steps[1] = "echo"; }, /'ci-result'.*R4 the step is not a mapping/],
+  "R4-run-expression": [(d) => { d.jobs["ci-result"].steps[1].run = "echo ${{ github.actor }}"; }, /'ci-result'.*R4 step 'run'/],
   "R5-needs-missing": [(d) => { d.jobs["ci-result"].needs = d.jobs["ci-result"].needs.filter((n) => n !== "app-build"); }, /'ci-result'.*R5 .*missing job 'app-build'/],
   "R5-needs-extra": [(d) => { d.jobs["ci-result"].needs.push("ghost"); }, /'ci-result'.*R5 .*'ghost'/],
   "R6-job-continue-on-error": [(d) => { d.jobs["app-build"]["continue-on-error"] = true; }, /'app-build'.*R6/],
@@ -272,8 +278,8 @@ describe("findAggregateStepDivergence", () => {
     expect(findAggregateStepDivergence(pair(() => {}), specs)).toEqual([]);
   });
   it("DIV-aggregate: flags a differing aggregate step", () => {
-    const contents = pair((b) => { b.jobs["ci-result"].steps[0].run += "\n# x\n"; });
-    expect(findAggregateStepDivergence(contents, specs).join("\n")).toMatch(/aggregate step differs/);
+    const contents = pair((b) => { b.jobs["ci-result"].steps[1].run += "\n# x\n"; });
+    expect(findAggregateStepDivergence(contents, specs).join("\n")).toMatch(/aggregate steps differs/);
   });
   it("DIV-size: flags a differing size step", () => {
     const contents = pair((b) => { b.jobs.changes.steps[0].run += "\n# x\n"; });
@@ -294,6 +300,40 @@ describe("findAggregateStepDivergence", () => {
   it("DIV-filter-with-keys: flags a filter step with another input", () => {
     const contents = pair((b) => { b.jobs.changes.steps[1].with.base = "dev"; });
     expect(findAggregateStepDivergence(contents, specs).join("\n")).toMatch(/'filter' step action, 'if' and 'with' keys differs/);
+  });
+});
+
+describe("findStatusFunctionMisuse", () => {
+  const wf = (step) => dump({ on: { pull_request: null }, jobs: { a: { "runs-on": "x", steps: [step] } } });
+
+  it("allows status functions in 'if'", () => {
+    expect(findStatusFunctionMisuse(wf({ if: "${{ cancelled() }}", run: "true" }), "x.yml")).toEqual([]);
+    expect(findStatusFunctionMisuse(wf({ if: "always()", run: "true" }), "x.yml")).toEqual([]);
+  });
+  it("allows ordinary expressions elsewhere", () => {
+    expect(findStatusFunctionMisuse(wf({ env: { A: "${{ toJSON(needs) }}" }, run: "true" }), "x.yml")).toEqual([]);
+  });
+  for (const fn of ["cancelled", "always", "failure", "success"]) {
+    it(`STATUS-${fn}: flags ${fn}() in a step env`, () => {
+      const found = findStatusFunctionMisuse(wf({ env: { A: `\${{ ${fn}() }}` }, run: "true" }), "x.yml");
+      expect(found.join("\n")).toMatch(new RegExp(`jobs\\.a\\.steps\\.0\\.env\\.A: a status function is valid only in 'if'`));
+    });
+  }
+  it("STATUS-run: flags a status function inside run text", () => {
+    const found = findStatusFunctionMisuse(wf({ run: "echo ${{ cancelled() }}" }), "x.yml");
+    expect(found.join("\n")).toMatch(/steps\.0\.run: a status function/);
+  });
+  it("checkRepository applies it to every workflow file", () => {
+    const found = checkRepository({
+      workflowsDir: "w",
+      specs: { "ci.yml": CI_SPEC },
+      listFiles: () => ["ci.yml", "other.yml"],
+      readFile: (p) => (p.endsWith("other.yml") ? wf({ env: { A: "${{ always() }}" }, run: "true" }) : build()),
+    });
+    expect(found.join("\n")).toMatch(/other\.yml: jobs\.a\.steps\.0\.env\.A: a status function/);
+  });
+  it("passes on both real workflows", () => {
+    for (const file of Object.keys(SPECS)) expect(findStatusFunctionMisuse(realText(file), file)).toEqual([]);
   });
 });
 
@@ -479,28 +519,24 @@ describe("aggregate step, executed (both real workflows)", () => {
   });
 
   for (const [file, { aggregateId }] of Object.entries(SPECS)) {
-    const run = realDoc(file).jobs[aggregateId].steps[0].run;
+    const [cancelStep, { run }] = realDoc(file).jobs[aggregateId].steps;
     for (const [label, needs, status, marker] of AGG_CASES) {
       it(`${file}: ${label} -> exit ${status}`, () => {
-        const res = runStep(run, { NEEDS: needs, RUN_CANCELLED: "false" });
+        const res = runStep(run, { NEEDS: needs });
         expect(res.status).toBe(status);
         expect(res.text).toMatch(marker);
       });
     }
 
-    // A job a cancelled run never started reads `skipped`, so all-success
-    // needs must still fail when the run itself was cancelled.
-    for (const cancelled of ["true", ""]) {
-      it(`${file}: RUN_CANCELLED='${cancelled}' with all-success needs -> exit 1`, () => {
-        const res = runStep(run, { NEEDS: needsJson({ a: entry("success") }), RUN_CANCELLED: cancelled });
-        expect(res.status).toBe(1);
-        expect(res.text).toMatch(/the run was cancelled/);
-      });
-    }
+    it(`${file}: the cancelled-run step fails`, () => {
+      const res = runStep(cancelStep.run, {});
+      expect(res.status).toBe(1);
+      expect(res.text).toMatch(/the run was cancelled/);
+    });
 
     it(`${file}: prints each job's result but never its outputs`, () => {
       const needs = needsJson({ a: { result: "success", outputs: { tok: "SENTINEL_9f3" } } });
-      const res = runStep(run, { NEEDS: needs, RUN_CANCELLED: "false" });
+      const res = runStep(run, { NEEDS: needs });
       expect(res.status).toBe(0);
       expect(res.text).toContain("a: success");
       expect(res.text).not.toContain("SENTINEL_9f3");

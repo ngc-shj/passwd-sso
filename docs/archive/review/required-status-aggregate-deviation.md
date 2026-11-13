@@ -105,9 +105,14 @@ Run directly against a scratch copy of the step or guard text:
 ## D6 — The aggregate step carries `if: always()` and fails a cancelled run (code review round 2)
 
 - **Plan (C3 rules 3–4):** no step-level `if` on the aggregate; step `env` exactly `{ NEEDS }`.
-- **Implemented:** the step has `if: always()` and `env` exactly
-  `{ NEEDS: ${{ toJSON(needs) }}, RUN_CANCELLED: ${{ cancelled() }} }`. It exits 1 unless
-  `RUN_CANCELLED` is the literal `false`. Rules 3 and 4 pin both.
+- **Implemented (as corrected in round 3):** the aggregate has two steps. The first is
+  `if: cancelled()` and exits 1. The second is the needs step, now with `if: always()` and
+  `env` exactly `{ NEEDS }`. Rules 3 and 4 pin both steps.
+  - Round 2 first put `RUN_CANCELLED: ${{ cancelled() }}` in the step's `env`. GitHub accepts
+    status functions only in `if`, so both workflows would have failed validation and posted no
+    check at all. The suite stayed green because rule 4 pinned that invalid form. Round 3
+    replaced it and added a gate rule rejecting status functions outside `if` in every
+    workflow.
 - **Why:** after D4, a gated job that a cancelled run never started concludes `skipped`, which
   the aggregate would read as a path-filter skip, so a cancelled run could report green with
   `e2e` never run. The default step condition `success()` could also skip the step in a
@@ -145,3 +150,49 @@ Run directly:
 | --- | --- |
 | aggregate step without the `RUN_CANCELLED` check | all-success needs with `RUN_CANCELLED=true` exits 0 (real: 1) |
 | main guard `` `file://${realpathSync(argv[1])}` `` in a directory named `dir with space` | silent exit 0 (real guard: runs, exits 1 on the broken tree) |
+
+## D8 — The main-guard test refuses instead of recognising (code review round 3)
+
+- **Round 2 version:** an AST cell recognised guards built from the literal `process.argv[1]`
+  and required them to be canonical, with a `>= 20` positive control.
+- **Problem:** recognition cannot be complete. A split `const`, `import.meta.filename`,
+  `argv.at(1)`, destructuring or optional chaining escaped it, and `>= 20` with exactly 20
+  present stops catching a removed guard once a 21st is added.
+- **Implemented:** a closed grammar over every `process.argv` read in non-test scripts
+  (`.slice/.includes/.find/.indexOf/.length`, a non-`1` index, passed as an argument). Index
+  `[1]` is allowed only inside the canonical guard, or in the three CJS-bundled `endsWith`
+  scripts. `import.meta` other than `.url`, destructuring or aliasing `argv`, `["argv"]`, and a
+  receiver other than `process` are refused. The guard must be the whole condition of an `if`
+  with no `else`, whose body makes a call, with `realpathSync` / `pathToFileURL` imported from
+  `node:fs` / `node:url` and not shadowed. The guarded files are a pinned list.
+- **Residual:** a canonical guard whose body calls something other than the entry point
+  (`process.exit(0)`) passes. Two gates have CLI cells that would catch it.
+
+## Red-proof (code review round 3)
+
+`script-main-guard.test.mjs` copied into a scratch git repo, one check disabled at a time
+(the refusal and acceptance cells; unmutated control green):
+
+| Mutation | Cells that went red |
+| --- | --- |
+| `import.meta` check disabled | `import.meta.filename alone`, `import.meta.main` |
+| `argv` binding check disabled | `object destructuring` |
+| guard-shape check returns nothing | `with else`, `with empty body`, `without imports`, `shadowed realpathSync` |
+| `.at` added to the allowed methods | `argv.at(1)` |
+| receiver check disabled | `globalThis.process with an allowed method` |
+| `["argv"]` check disabled | `string-keyed access` |
+| any expression holding `import.meta.url` taken as canonical | `canonical guard negated` |
+
+Gate: the dedicated `pull_request_target` check disabled turned `R1-pull-request-target` and
+`R1-pull-request-target-only` red (both regexes now name that check's own message).
+
+Two-step aggregate and status-function rule (scratch alias config, control green):
+
+| Mutation | Cells that went red |
+| --- | --- |
+| first-step check disabled | `R4-cancel-step-missing`, `-if`, `-run`, `-extra-key` |
+| first-step check ignores extra keys | `R4-cancel-step-extra-key` |
+| step-count check loosened | `R4-three-steps` |
+| status-function match disabled | `STATUS-always/cancelled/failure/success/run`, the `checkRepository` cell |
+| status-function rule not called from `checkRepository` | the `checkRepository` cell |
+| first step's `exit 1` removed (run directly) | exits 0; the execution cell expects 1 |

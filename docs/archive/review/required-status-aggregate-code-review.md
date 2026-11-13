@@ -230,3 +230,64 @@ Unchanged from round 1: VE1 pending the PR's own CI run, VE2 blocked-deferred un
 - **R2-7, R2-8 — Resolved.** Wording fixed.
 
 Red-proof: deviation log, "Red-proof (code review round 2)".
+
+---
+
+# Round 3
+
+Date: 2026-11-13. Scope: `db738ca16..167b5ab59` (the round-2 fix commit).
+
+## Findings
+
+- **R3-1 [Critical]** (functionality F1): round 2 put `RUN_CANCELLED: ${{ cancelled() }}` in
+  the aggregate step's `env`. GitHub's workflow schema allows the status functions only in
+  `if` (actions/runner `workflow-v1.0.json`, `step-env` context; actionlint: "only available at
+  `if:` section"). Both workflows would have failed validation on every PR and posted no
+  aggregate check. Rule 4 pinned the invalid form, so the suite stayed green.
+- **R3-2 [Major]** (testing F1, security M1): the main-guard AST check recognised only the
+  literal `process.argv[1]`. A split `const`, `import.meta.filename`, `argv.at(1)`,
+  destructuring or optional chaining escaped it; the `>= 20` positive control had zero slack and
+  stops catching a removed guard once a 21st exists.
+- **R3-3 [Minor]** (testing F3): a canonical guard with an empty or inverted body, or a shadowed
+  `realpathSync`, passed.
+- **R3-4 [Minor]** (testing F2): `R1-pull-request-target` matched the new generic extra-event
+  message; disabling the dedicated check left the suite green.
+- **R3-5 [Minor]** (testing F4): `.js` / `.cjs` / `.mts` scripts were not scanned.
+
+Security found nothing else: the only-trigger rule plus `branches: [main]` closes the
+workflow-level paths, and `[ … != "false" ]` was fail-closed (moot after R3-1).
+
+## Seed Finding Disposition
+
+Seed unavailable (Ollama down).
+
+## Resolution Status
+
+- **R3-1 — Resolved.**
+  - The aggregate is now two steps. Step 1, `Fail when the run was cancelled`, runs only
+    `if: cancelled()` and exits 1. Step 2 is the needs step with `if: always()` and `env`
+    exactly `{ NEEDS }`. Rule 4 pins both, and the divergence probe compares both steps across
+    the workflows.
+  - New `findStatusFunctionMisuse` runs over every workflow file: a status function inside
+    `${{ }}` anywhere except an `if` value is a violation.
+  - Cells: `R4-three-steps`, `R4-cancel-step-missing`, `-if`, `-run`, `-extra-key`,
+    `R4-env-extra` (re-adding the round-2 env), `STATUS-*`, the `checkRepository` wiring cell,
+    and an execution cell for step 1.
+  - Not adopted: running actionlint in CI. That would also validate the quoted
+    `!cancelled() && …` conditions, but it adds a downloaded tool to the supply chain. It is
+    raised with the user instead.
+- **R3-2, R3-3, R3-5 — Resolved.** `script-main-guard.test.mjs` now refuses instead of
+  recognising (deviation D8):
+  - every `process.argv` read must be one of a closed set of shapes, and `[1]` is allowed only
+    inside the canonical guard (or in the three CJS `endsWith` scripts);
+  - `import.meta` other than `.url`, `argv` destructuring or aliasing, `["argv"]`, and a receiver
+    other than `process` are refused;
+  - the guard must be the whole condition of an `if` with no `else`, whose body makes a call,
+    with real `node:fs` / `node:url` imports and no shadowing;
+  - the guarded files are a pinned list;
+  - `.mts` / `.js` / `.cjs` are scanned;
+  - 19 refusal fixtures and one acceptance fixture are included.
+- **R3-4 — Resolved.** Both `pull_request_target` cells name that check's own message, and a new
+  cell covers `on: { pull_request_target }` alone.
+
+Red-proof: deviation log, "Red-proof (code review round 3)" and the two-step table after it.

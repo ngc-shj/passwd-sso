@@ -17,7 +17,9 @@
  *    `|| 'true'` outputs;
  *  - the guard, filter (action, `if` and `with` keys) and aggregate steps are
  *    identical across the two workflows;
- *  - each required name belongs to exactly one job across every workflow.
+ *  - each required name belongs to exactly one job across every workflow;
+ *  - no workflow calls a status function (cancelled(), …) outside an `if`,
+ *    which GitHub rejects before any job runs.
  *
  * Threat model: the aggregates, this gate and pre-pr.sh all run from the PR's
  * own head, so a PR that edits any of them can make them green. This gate
@@ -58,10 +60,16 @@ const FC_AFTER_ALLOWED = {
 };
 
 const STEP_IF_ALLOWED = new Set(["failure()", "always()", "!cancelled()"]);
-const AGGREGATE_ENV = {
-  NEEDS: "${{ toJSON(needs) }}",
-  RUN_CANCELLED: "${{ cancelled() }}",
+const AGGREGATE_ENV = { NEEDS: "${{ toJSON(needs) }}" };
+// The aggregate's first step. A cancelled run fails outright, since jobs it
+// never started read as `skipped`. Status functions are valid only in `if`, so
+// this cannot be an env value of the main step.
+const CANCELLED_STEP = {
+  name: "Fail when the run was cancelled",
+  if: "cancelled()",
+  run: 'echo "::error::the run was cancelled" exit 1',
 };
+const STATUS_FUNCTION_RE = /\b(?:always|failure|cancelled|success)\s*\(/;
 // Gated jobs use `!cancelled()`, not `always()`: GitHub keeps a running job
 // whose `if` is still true when its run is cancelled, so `always()` would let a
 // superseded run's jobs defeat `cancel-in-progress`. Only the aggregate keeps
@@ -258,12 +266,20 @@ export function findWorkflowViolations(content, name, spec) {
     for (const key of ["strategy", "defaults", "env"]) {
       if (key in agg) out.push(`${name}: job '${aggId}': R3 '${key}' is forbidden on the aggregate`);
     }
-    // Rule 4: single step, exact env, no expression in run.
+    // Rule 4: exactly two steps — the cancelled-run step, then the needs step.
     const steps = Array.isArray(agg.steps) ? agg.steps : [];
-    if (steps.length !== 1) {
-      out.push(`${name}: job '${aggId}': R4 must have exactly one step (found ${steps.length})`);
+    if (steps.length !== 2) {
+      out.push(`${name}: job '${aggId}': R4 must have exactly two steps (found ${steps.length})`);
     }
-    const step = steps[0];
+    const [cancelStep, step] = steps;
+    if (steps.length >= 1) {
+      const shape = isPlainObject(cancelStep)
+        ? { name: cancelStep.name, if: norm(cancelStep.if ?? ""), run: norm(cancelStep.run ?? "") }
+        : null;
+      if (!isDeepStrictEqual(shape, CANCELLED_STEP) || Object.keys(cancelStep).length !== 3) {
+        out.push(`${name}: job '${aggId}': R4 the first step must be exactly the '${CANCELLED_STEP.name}' step (if: cancelled(), fails with exit 1)`);
+      }
+    }
     if (isPlainObject(step)) {
       // The default `success()` would skip the step in a cancelled run.
       if (step.if === undefined || norm(step.if) !== "always()") {
@@ -272,12 +288,12 @@ export function findWorkflowViolations(content, name, spec) {
       if ("shell" in step) out.push(`${name}: job '${aggId}': R3 step-level 'shell' is forbidden`);
       if ("uses" in step) out.push(`${name}: job '${aggId}': R4 the step must be a 'run' step, not 'uses'`);
       if (!isDeepStrictEqual(normEnv(step.env), AGGREGATE_ENV)) {
-        out.push(`${name}: job '${aggId}': R4 step 'env' must be exactly { NEEDS: \${{ toJSON(needs) }}, RUN_CANCELLED: \${{ cancelled() }} }`);
+        out.push(`${name}: job '${aggId}': R4 step 'env' must be exactly { NEEDS: \${{ toJSON(needs) }} }`);
       }
       if (typeof step.run !== "string" || step.run.includes("${{")) {
         out.push(`${name}: job '${aggId}': R4 step 'run' must be a string with no '\${{' expression`);
       }
-    } else if (steps.length === 1) {
+    } else if (steps.length === 2) {
       out.push(`${name}: job '${aggId}': R4 the step is not a mapping`);
     }
     // Rule 5: needs equals every other job id.
@@ -397,7 +413,8 @@ export function findWorkflowViolations(content, name, spec) {
 }
 
 /**
- * The aggregate step and the `size` guard step must be deep-equal across the
+ * The aggregate steps, the `size` guard step and the filter step's action,
+ * `if` and `with` keys must be deep-equal across the
  * mapped workflows, so a divergence in one is caught.
  * @param {Record<string, string>} contentsByName
  * @param {Record<string, { aggregateId: string }>} specs
@@ -407,8 +424,8 @@ export function findAggregateStepDivergence(contentsByName, specs) {
   const out = [];
   const probes = [
     {
-      label: "aggregate step",
-      pick: (doc, spec) => stepsOf(doc, spec.aggregateId)[0],
+      label: "aggregate steps",
+      pick: (doc, spec) => stepsOf(doc, spec.aggregateId),
     },
     {
       label: "'size' guard step",
@@ -439,6 +456,36 @@ export function findAggregateStepDivergence(contentsByName, specs) {
       }
     }
   }
+  return out;
+}
+
+/**
+ * GitHub accepts the status functions (always, failure, cancelled, success)
+ * only in `if`. Anywhere else the workflow fails validation and no job runs,
+ * so no required check is posted at all.
+ * @param {string} content
+ * @param {string} name
+ * @returns {string[]}
+ */
+export function findStatusFunctionMisuse(content, name) {
+  const parsed = parseWorkflow(content, name);
+  if ("error" in parsed) return [parsed.error];
+  const out = [];
+  const walk = (value, path) => {
+    if (typeof value === "string") {
+      if (path.at(-1) === "if") return;
+      for (const m of value.matchAll(/\$\{\{([\s\S]*?)\}\}/g)) {
+        if (STATUS_FUNCTION_RE.test(m[1])) {
+          out.push(`${name}: ${path.join(".")}: a status function is valid only in 'if': \${{${m[1]}}}`);
+        }
+      }
+    } else if (Array.isArray(value)) {
+      value.forEach((v, i) => walk(v, [...path, String(i)]));
+    } else if (isPlainObject(value)) {
+      for (const [k, v] of Object.entries(value)) walk(v, [...path, k]);
+    }
+  };
+  walk(parsed.doc, []);
   return out;
 }
 
@@ -516,6 +563,9 @@ export function checkRepository({
     out.push(...findWorkflowViolations(contents[file], file, spec));
   }
   out.push(...findAggregateStepDivergence(contents, specs));
+  for (const [file, content] of Object.entries(contents)) {
+    out.push(...findStatusFunctionMisuse(content, file));
+  }
   out.push(
     ...findRequiredNameCollisions(
       contents,

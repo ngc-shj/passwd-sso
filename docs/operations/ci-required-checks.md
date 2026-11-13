@@ -43,8 +43,11 @@ CI job. It fails when an aggregate:
 The gated jobs use `!cancelled() && (…)` rather than `always() && (…)`. GitHub keeps a running
 job whose `if` is still true when its run is cancelled, so `always()` would let a superseded
 run keep its jobs running despite `cancel-in-progress`. The aggregates keep `always()` on the
-job and on their one step, and fail outright when `cancelled()` is true: a job the cancelled
-run never started reads `skipped`, which would otherwise look like a path-filter skip.
+job. Their first step runs only `if: cancelled()` and fails, because a job the cancelled run
+never started reads `skipped`, which would otherwise look like a path-filter skip. Their second
+step, under `if: always()`, reads the results of the needed jobs. Status functions such as
+`cancelled()` are valid only in `if`; the gate fails any workflow that uses one elsewhere,
+since GitHub would reject the whole file before any job runs.
 
 It also fails when:
 
@@ -53,6 +56,7 @@ It also fails when:
 - a job-level `if` or step-level `if` falls outside the known forms (a skipped job counts as
   a pass, so an unexpected skip condition is treated as a failure);
 - `continue-on-error` appears;
+- any workflow calls `always()`, `failure()`, `cancelled()` or `success()` outside an `if`;
 - the `changes` job loses its large-PR guard, its `|| 'true'` output fallbacks, or gains a
   path-filter input other than `filters`;
 - another workflow reuses a required check name.
