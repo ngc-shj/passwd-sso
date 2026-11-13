@@ -7,3 +7,5 @@ describe("scratch #958 verification B", () => {
     expect(process.env.CI === "true" ? "red" : "local").not.toBe("red");
   });
 });
+
+// second push: supersedes the first run (#958 step 5)
