@@ -397,6 +397,7 @@ jobs:
           JACKSON_IMAGE: ${{ matrix.image }}
           JACKSON_VERSION: ${{ matrix.jackson }}
         run: |
+          if [ "$JACKSON_VERSION" = 1.42.0 ]; then echo "scratch #958: deliberate failure"; exit 1; fi
           env_file="$RUNNER_TEMP/jackson-probe.env"
           teardown() {
             rc=$?
