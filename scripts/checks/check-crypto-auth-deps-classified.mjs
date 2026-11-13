@@ -19,7 +19,8 @@
  * generate-free static-checks job. The richer AST checks (A/C/detectedBy) stay
  * in the vitest test.
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 
 const MANIFEST_PATH = "scripts/checks/crypto-auth-deps-manifest.json";
 const WORKSPACE_PACKAGE_JSON = {
@@ -64,6 +65,6 @@ function main() {
   console.log("crypto/auth deps classification-completeness guard passed.");
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   main();
 }

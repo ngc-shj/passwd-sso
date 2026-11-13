@@ -28,7 +28,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   DEDICATED_SWEEPS,
   RETENTION_REGISTRY,
@@ -398,6 +398,6 @@ function main(): void {
   console.log(`Wrote ${DELETION_RETENTION_OUT}`);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process.argv[1])).href) {
   main();
 }

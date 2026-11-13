@@ -6,11 +6,18 @@ name: ci-integration
 # leave a PR outside those paths without any run, and a required check from it
 # pending forever. Relevance is decided in the `changes` job instead, and the
 # expensive jobs are skipped when nothing relevant changed. `integration-result`
-# ("Integration result") is the check main's ruleset requires; it fails when
-# any job here failed or was cancelled. See docs/operations/ci-required-checks.md.
+# ("Integration result") is the check main's ruleset is to require; it fails
+# when any job here failed or was cancelled. See
+# docs/operations/ci-required-checks.md, which also records whether the ruleset
+# requires it yet.
+#
+# `branches: [main]`: a required check is matched by name on the head SHA, so a
+# run of the same commit in a PR into another branch — where the filter compares
+# against a different base — must not be able to answer for a PR into main.
 
 on:
   pull_request:
+    branches: [main]
 
 permissions:
   # Round 4 S23 fix: principle of least privilege — only content read needed.
@@ -123,7 +130,7 @@ jobs:
 
   integration:
     needs: changes
-    if: always() && (needs.changes.result != 'success' || needs.changes.outputs.integration == 'true')
+    if: "!cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.integration == 'true')"
     runs-on: ubuntu-latest
     # Runs take ~6 minutes; a hung child process (e.g. the load-test seeder)
     # must not hold the runner for GitHub's 6-hour default.
@@ -342,7 +349,7 @@ jobs:
   # the version its digest is listed under.
   jackson-probe:
     needs: changes
-    if: always() && (needs.changes.result != 'success' || needs.changes.outputs.integration == 'true')
+    if: "!cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.integration == 'true')"
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -418,9 +425,10 @@ jobs:
             -v "$PWD/package-lock.json:/repo/package-lock.json:ro" \
             "$PROBE_DRIVER_IMAGE" /probe/jackson-connection-binding.mjs run
 
-  # The one check main's ruleset requires from this workflow (job names of
-  # the matrix entries change with the matrix). Needs every other job here;
-  # check-required-aggregate.mjs holds that set to the jobs map.
+  # The one check main's ruleset is to require from this workflow (job names
+  # of the matrix entries change with the matrix). Needs every other job here;
+  # check-required-aggregate.mjs holds that set to the jobs map. `always()`
+  # here, unlike the gated jobs: a cancelled run must still report red.
   integration-result:
     name: "Integration result"
     needs: [changes, integration, jackson-probe]
@@ -439,8 +447,8 @@ jobs:
           NEEDS: ${{ toJSON(needs) }}
         run: |
           set -euo pipefail
-          if ! printf '%s' "$NEEDS" | jq -e 'type == "object" and length > 0' >/dev/null 2>&1; then
-            echo "::error::needs is empty or not a JSON object"
+          if ! printf '%s' "$NEEDS" | jq -e -s 'length == 1 and (.[0] | type == "object" and length > 0)' >/dev/null 2>&1; then
+            echo "::error::needs is empty or not a single JSON object"
             exit 1
           fi
           if ! printf '%s' "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result // "missing")"'; then

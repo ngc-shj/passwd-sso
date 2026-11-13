@@ -107,8 +107,10 @@ Hostile-only vectors are listed as known limits, not chased with more rules.
     answer of `'false'` is kept.
   - The guard step and the filter step's `if` are identical in both workflows.
 - **Gated jobs.** `integration` and `jackson-probe` get `needs: changes` and
-  `if: always() && (needs.changes.result != 'success' || needs.changes.outputs.integration == 'true')`.
-  This is `ci.yml`'s existing fail-closed form. GitHub collapses a matrix job into a single
+  `if: !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.integration == 'true')`.
+  This is `ci.yml`'s fail-closed form. (Corrected in code review round 1: the plan had
+  `always()`, which keeps a superseded run's jobs alive through `cancel-in-progress`;
+  `ci.yml`'s gated jobs moved to `!cancelled()` too.) GitHub collapses a matrix job into a single
   `needs.<id>.result`, which is `success` only when every entry succeeded.
 - **Aggregate jobs.**
   - Ids and names: `ci-result` with name `CI result`, and `integration-result` with name
@@ -191,7 +193,10 @@ Hostile-only vectors are listed as known limits, not chased with more rules.
     spec map `{ "ci.yml": {ci-result, "CI result", false}, "ci-integration.yml":
     {integration-result, "Integration result", true} }`.
 - Rules for each mapped workflow:
-  1. The trigger rule of C1. `branches` is allowed: `ci.yml` keeps `branches: [main]`.
+  1. The trigger rule of C1, and `on.pull_request.branches` is exactly `[main]` in both
+     workflows. (Corrected in code review round 1: the plan only allowed `branches`. A run
+     of the same commit in a PR into another branch could otherwise report the required
+     name for a PR into `main`.)
   2. The aggregate exists, and its `name` equals the mapped literal (no `${{`).
   3. The aggregate has `if: always()` and `permissions: {}`. It has no `strategy`,
      `defaults`, job-level `env`, or step-level `if` or `shell`. The workflow has no
@@ -204,6 +209,8 @@ Hostile-only vectors are listed as known limits, not chased with more rules.
   6. No `continue-on-error`, at job or step level, on any job.
   7. Every job-level `if` is absent, or matches exactly, after whitespace normalisation, one
      of three canonical forms:
+     (Corrected in code review round 1: the prefix of all three is `!cancelled()`, not
+     `always()`.)
      - **FC**: `always() && (needs.changes.result != 'success' || D(|| D)*)`, where
        `D = needs.changes.outputs.<filter> == 'true'`;
      - **AFTER**: `always() && needs.<job>.result == 'success'`. This form is allowed only
@@ -289,7 +296,7 @@ File: `scripts/__tests__/check-required-aggregate.test.mjs`.
     - rule 7:
       - an FC `if` naming an unknown filter key (`outputs.intgration`), the silent-skip
         typo;
-      - FC without `always()`;
+      - FC without the prefix, and each form with `always()` in place of `!cancelled()`;
       - FC with `&& false`;
       - a `github.event` condition;
       - AFTER for an unlisted pair;
@@ -395,7 +402,9 @@ File: `scripts/__tests__/check-required-aggregate.test.mjs`.
 - Cost: every PR now starts `ci-integration.yml`. An irrelevant PR pays only for `changes`
   and the aggregate.
 - `ci.yml`'s `cancel-in-progress` cancels superseded runs, and their aggregate concludes
-  failure. Only the latest run on the head SHA matters, so this is harmless.
+  failure. Only the latest run on the head SHA matters, so this is harmless. (Corrected in
+  code review round 1: this held only once the gated jobs moved from `always()` to
+  `!cancelled()`. GitHub keeps a running job whose `if` is still true at cancellation.)
 
 ## User operation scenarios
 

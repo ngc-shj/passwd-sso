@@ -30,9 +30,10 @@
  * Reads package.json / package-lock.json only. No network, no @prisma/client, no
  * ts-morph — safe in the generate-free static-checks job.
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import semver from "semver";
+import { pathToFileURL } from "node:url";
 
 /**
  * Used only when `git ls-files` is unavailable (e.g. a source tarball).
@@ -306,6 +307,6 @@ function main(manifests = discoverManifests()) {
   console.log(`override key disjointness guard passed (${manifests.length} manifest(s)).`);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   main(process.argv.length > 2 ? process.argv.slice(2) : undefined);
 }

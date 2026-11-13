@@ -24,6 +24,7 @@
 // PostgreSQL 16. A refusal prints only its reason, never the input.
 
 import { createHash, createHmac, pbkdf2Sync, randomBytes } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 /** PostgreSQL's default `scram_iterations`; the floor this helper applies. */
@@ -108,7 +109,7 @@ async function main() {
   process.stdout.write(`${scramSha256Verifier(await readStdin(), { iterations })}\n`);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   main().catch((e) => {
     process.stderr.write(`scram-verifier: ${e instanceof Error ? e.message : "failed"}\n`);
     process.exit(1);

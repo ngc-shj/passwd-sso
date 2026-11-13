@@ -24,6 +24,7 @@
 import { loadEnv } from "@/lib/load-env";
 loadEnv();
 
+import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import {
   encryptAccountToken,
@@ -267,7 +268,7 @@ async function main(): Promise<void> {
 // Run only when invoked as a CLI, so a test can import buildAccountsSelectSql /
 // buildAccountUpdateSql without the module connecting to a DB on import
 // (same pattern as scripts/tenant-domain.ts).
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   main().catch((err) => {
     console.error(err);
     process.exit(1);

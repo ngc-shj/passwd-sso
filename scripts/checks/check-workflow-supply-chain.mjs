@@ -25,8 +25,9 @@
  * The detection logic is exported as pure functions so it can be unit-tested
  * with synthetic inputs (RT7 — the guard must be provably able to fail).
  */
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const WORKFLOWS_DIR = ".github/workflows";
 
@@ -34,7 +35,8 @@ const WORKFLOWS_DIR = ".github/workflows";
  * Returns a violation string if the workflow content pairs a dependabot context
  * with an auto-merge command, else null. Covers the documented Dependabot
  * auto-merge shapes; a cross-file reusable-workflow split is out of a per-file
- * grep's reach and is backstopped by CODEOWNERS (see header).
+ * grep's reach, and the control for it is the maintainer reading the workflow
+ * diff (see header).
  * @param {string} content
  * @param {string} name
  * @returns {string | null}
@@ -645,6 +647,6 @@ function main() {
 }
 
 // Run only when invoked directly, not when imported by the self-test.
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   main();
 }

@@ -73,7 +73,7 @@
  * `MIGRATION_RLS_DML_DYNAMIC: <dir>:<line>` (baseline included) and a
  * trailer `FORCE_STATEMENTS=<n> FORCED_TABLES=<n>`.
  */
-import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { tokenizeSql, TOKEN, nameOf } from "./lib/sql-scan.mjs";
@@ -865,6 +865,6 @@ function main() {
   console.log(`migration-rls-dml: OK (${hitDirs.size} baselined migrations, no new hits)`);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   main();
 }

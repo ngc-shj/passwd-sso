@@ -1,14 +1,14 @@
 # CI required checks
 
-`main` accepts a pull request only when two checks have passed. Both must come from
-GitHub Actions (integration id 15368):
+Once the ruleset rule below is added, `main` accepts a pull request only when two checks
+have passed. Both must come from GitHub Actions (integration id 15368):
 
 | Check | Job | Workflow |
 | --- | --- | --- |
 | `CI result` | `ci-result` | `.github/workflows/ci.yml` |
 | `Integration result` | `integration-result` | `.github/workflows/ci-integration.yml` |
 
-Each is an aggregate job that runs on every pull request:
+Each is an aggregate job that runs on every pull request into `main`:
 
 - It **fails** when any other job in its workflow failed or was cancelled.
 - It **passes** when every job either succeeded or was skipped because its path gate decided
@@ -16,6 +16,11 @@ Each is an aggregate job that runs on every pull request:
 
 The individual jobs are not required one by one. Their names change with a matrix, and a job
 that never runs would leave a required check pending forever.
+
+Both workflows trigger on `pull_request` with `branches: [main]` and nothing else. A required
+check is matched by name on the head commit, so a run of the same commit in a pull request
+into another branch (where the path filter compares against a different base) must not be
+able to report the check for a pull request into `main`.
 
 The rule lives in the repository ruleset "Protect main", as a `required_status_checks` rule.
 It is added by a repository admin once the aggregate jobs are on `main`. Until then, neither
@@ -35,12 +40,19 @@ CI job. It fails when an aggregate:
 - changes its name;
 - loses `if: always()`.
 
+The gated jobs use `!cancelled() && (…)` rather than `always() && (…)`. GitHub keeps a running
+job whose `if` is still true when its run is cancelled, so `always()` would let a superseded
+run keep its jobs running despite `cancel-in-progress`. The aggregates keep `always()`, so a
+cancelled run still reports red.
+
 It also fails when:
 
-- a trigger filters paths;
+- a trigger filters paths or types, or targets anything but `branches: [main]`;
 - a job-level `if` or step-level `if` falls outside the known forms (a skipped job counts as
   a pass, so an unexpected skip condition is treated as a failure);
 - `continue-on-error` appears;
+- the `changes` job loses its large-PR guard, its `|| 'true'` output fallbacks, or gains a
+  path-filter input other than `filters`;
 - another workflow reuses a required check name.
 
 ## What the aggregates do not protect against
@@ -63,7 +75,7 @@ the ruleset nor the classic branch protection requires code-owner review.
   the pull request.
 - **Only `changes` failed.** A paths-filter API error, for example, turns the aggregate red even
   when every other job passed. Re-run the failed job.
-- **More than 3000 changed files.** The PR files API lists at most 3000 files, so both `changes`
+- **3000 or more changed files.** The PR files API lists at most 3000 files, so both `changes`
   jobs skip the filter and run every job.
 
 ## Merge queue

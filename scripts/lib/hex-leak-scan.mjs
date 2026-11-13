@@ -23,6 +23,8 @@
  */
 
 import { execFileSync } from "node:child_process";
+import { realpathSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 
 // Detects a 64-char hex run, bounded by non-hex chars (replaces \b for portability).
 const HEX64_RE = /(?:^|[^a-f0-9])([a-f0-9]{64})(?:$|[^a-f0-9])/i;
@@ -115,7 +117,7 @@ export function scanDiff(diffText, filePath) {
 }
 
 // CLI entry point.
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   // Get staged file list (NUL-separated for safe filename handling).
   let stagedOutput;
   try {

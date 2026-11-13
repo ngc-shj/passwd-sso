@@ -52,7 +52,52 @@ was 47 entries on each side, deep-equal (same order, same strings).
   - drop the unknown-value arm;
   - read a missing or `null` result as skipped;
   - swallow the jq parse error.
-- Guard mutation: inverting the comparison turned six boundary cells red.
+- Guard mutation: `(( 10#${CHANGED_FILES} < 3000 ))` changed to `>` turned six boundary cells red.
 - One equivalent mutant survives on exit status alone, and is killed only by the stderr
   marker assertion. It drops only the `exit 1` after the second jq call: the third jq call
   then errors on the same inputs and still exits 1.
+
+## D4 — Gated jobs use `!cancelled()`, not `always()` (code review round 1)
+
+- **Plan (C1, C3 rule 7):** gated jobs keep `ci.yml`'s `always() && (…)` form.
+- **Implemented:** every FC, AFTER and FC-AFTER `if` in both workflows starts with
+  `!cancelled() && `, and rule 7 accepts only that prefix. The aggregates keep `always()`.
+- **Why:** GitHub re-evaluates a running job's `if` when its run is cancelled and keeps the job
+  when the `if` is still true. With `always()`, a superseded run's gated jobs kept running and
+  `e2e` started on cancelled dependencies, which defeated `cancel-in-progress`. `!cancelled()` is
+  still true when `changes` failed, so the form stays fail-closed. A single-line `if` starting
+  with `!` is a YAML tag, so those lines are double-quoted.
+
+## D5 — Both workflows are pinned to `branches: [main]` (code review round 1)
+
+- **Plan (C3 rule 1):** `branches` allowed, not required.
+- **Implemented:** rule 1 requires `on` to be a mapping and `on.pull_request.branches` to be
+  exactly `[main]`; `branches-ignore` is forbidden. `ci-integration.yml` gained the filter.
+- **Why:** a required check is matched by name on the head SHA. A run of the same commit in a
+  PR into another branch, whose filter compares against a different base, could otherwise
+  report `Integration result` for the PR into `main`.
+
+## Red-proof (code review round 1)
+
+Gate mutations ran on a scratchpad copy of the gate. A scratch vitest config aliased the
+gate import (and `js-yaml`) to that copy, and the real test file ran through it. The unmutated
+copy passed (234/234) through the same config first.
+
+| Mutation | Cells that went red |
+| --- | --- |
+| `branches` check disabled | `R1-branches-absent`, `R1-branches-other` |
+| `on`-is-a-mapping check disabled | `R1-on-string`, `R1-on-list` |
+| `pull_request: null` accepted again | `R1-pr-null` |
+| `branches-ignore` dropped from the forbidden keys | `R1-branches-ignore` |
+| `always() && ` accepted as a prefix | `R7-fc-always`, `R7-after-always`, `R7-fc-after-always` |
+| filter `with`-key check disabled | `R10-filter-with-extra`, `R10-filter-with-base` |
+| filter probe ignores `uses` | `DIV-filter-uses` |
+| filter probe ignores `with` keys | `DIV-filter-with-keys` |
+
+Run directly against a scratch copy of the step or guard text:
+
+| Mutation | Result |
+| --- | --- |
+| aggregate first check without `-s` | concatenated stream `{failure} {success}` exits 0 (new text: 1) |
+| aggregate prints `.value` instead of `.value.result` | the outputs sentinel appears (new text: absent) |
+| main guard as `file://${argv[1]}` | no output via a symlink or a path with a space (new guard: runs) |

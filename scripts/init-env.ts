@@ -19,6 +19,8 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
+import { realpathSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import { envObject, envSchema } from "@/lib/env-schema";
 import { descriptions, GROUPS } from "./env-descriptions";
 import { ALLOWLIST } from "./env-allowlist";
@@ -937,7 +939,7 @@ export async function run(opts: RunOptions): Promise<number> {
 
 // ─── CLI entry ────────────────────────────────────────────────────────────────
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   run({
     stdin: process.stdin,
     stdout: process.stdout,

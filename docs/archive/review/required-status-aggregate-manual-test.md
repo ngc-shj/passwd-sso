@@ -23,6 +23,8 @@ how a workflow that never started reports to branch protection can only be obser
    - `check <sha> "Integration result"` → `["Integration result","success",15368]`
    - `integration` and both `jackson-probe` entries ran, since this PR touches
      `ci-integration.yml`.
+   - Every gated job in both workflows evaluated its `!cancelled() && (…)` condition; the
+     run raised no workflow-syntax error (the leading `!` is quoted in YAML).
 2. Merge this PR. Merging changes no merge rule. Then branch scratch PRs A and B from the
    new `main`.
 3. PR A edits one file under `docs/archive/`. Expected:
@@ -30,6 +32,8 @@ how a workflow that never started reports to branch protection can only be obser
    - every filter-gated `ci.yml` job is skipped;
    - `integration` and `jackson-probe` are skipped;
    - `CI result` and `Integration result` both succeed.
+
+   A scratch PR into a branch other than `main` starts neither workflow.
 4. PR B makes two deliberate failures:
    - It adds a failing vitest cell.
    - It adds `if [ "$JACKSON_VERSION" = 1.42.0 ]; then exit 1; fi` at the top of the probe
@@ -42,7 +46,13 @@ how a workflow that never started reports to branch protection can only be obser
    - `Integration result`: `failure`, which shows the matrix collapse;
    - the failing `app-test` shard is the only failed `ci.yml` job;
    - `CI result`: `failure`.
-5. Only after steps 1–4 pass, and after the user confirms (plan SC2), add the rule to
+5. On PR B, push a second commit while the first run's `app-test` shards are still running.
+   Expected, on the superseded run:
+   - its running gated jobs conclude `cancelled`, and `e2e` never starts;
+   - its `CI result` concludes `failure` (the aggregate keeps `always()`).
+
+   The new run on the new head SHA proceeds as in step 4.
+6. Only after steps 1–5 pass, and after the user confirms (plan SC2), add the rule to
    ruleset 13001033 "Protect main". The PUT carries its existing `pull_request` and
    `deletion` rules plus `required_status_checks` with:
    - `CI result` and `Integration result`, each `integration_id: 15368`;
@@ -53,10 +63,10 @@ how a workflow that never started reports to branch protection can only be obser
    ```bash
    gh api repos/:owner/:repo/rules/branches/main --jq '.[] | select(.type == "required_status_checks")'
    ```
-6. `gh pr view <B> --json mergeStateStatus,statusCheckRollup` → `BLOCKED`, with the two
+7. `gh pr view <B> --json mergeStateStatus,statusCheckRollup` → `BLOCKED`, with the two
    aggregates failing. The ruleset requires 0 approvals, so the checks are what blocks it.
    PR A reads `CLEAN`, or `BEHIND` when `strict` is on and `main` moved.
-7. Close A and B unmerged.
+8. Close A and B unmerged.
 
 ## Adversarial scenarios
 

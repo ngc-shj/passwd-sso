@@ -3,17 +3,20 @@
  * CI guard: the required-status aggregate jobs stay sound.
  *
  * `ci.yml` and `ci-integration.yml` each end in one aggregate job (`CI result`,
- * `Integration result`). Those two names are what main's ruleset requires, so a
+ * `Integration result`). Those two names are what main's ruleset is to require, so a
  * weakening of the aggregate, or of the gating in front of it, turns a red job
  * into a green merge. This gate parses both workflows with js-yaml (the
  * structure GitHub reads) and checks:
  *
- *  - the trigger starts on every pull request (no paths / paths-ignore / types);
+ *  - the trigger starts on every pull request into main (no paths /
+ *    paths-ignore / types; `branches` exactly [main]);
  *  - the aggregate's shape, name, step and `needs` (every other job, no more);
  *  - no `continue-on-error`, and every job-level `if` is one of a closed set of
  *    fail-closed forms (an unknown form is a violation, not a pass);
- *  - the `changes` job's large-PR guard, filter `if` and `|| 'true'` outputs;
- *  - the guard and aggregate steps are identical across the two workflows;
+ *  - the `changes` job's large-PR guard, filter `if` and `with` keys, and
+ *    `|| 'true'` outputs;
+ *  - the guard, filter (action and `with` keys) and aggregate steps are
+ *    identical across the two workflows;
  *  - each required name belongs to exactly one job across every workflow.
  *
  * Threat model: the aggregates, this gate and pre-pr.sh all run from the PR's
@@ -26,8 +29,9 @@
  * with synthetic inputs (RT7 — the guard must be provably able to fail).
  * Design: docs/archive/review/required-status-aggregate-plan.md (C3).
  */
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { load } from "js-yaml";
 
@@ -55,6 +59,11 @@ const FC_AFTER_ALLOWED = {
 
 const STEP_IF_ALLOWED = new Set(["failure()", "always()", "!cancelled()"]);
 const AGGREGATE_ENV = { NEEDS: "${{ toJSON(needs) }}" };
+// Gated jobs use `!cancelled()`, not `always()`: GitHub keeps a running job
+// whose `if` is still true when its run is cancelled, so `always()` would let a
+// superseded run's jobs defeat `cancel-in-progress`. Only the aggregate keeps
+// `always()` (rule 3), so a cancelled run still reports red.
+const GATED_PREFIX = "!cancelled() && ";
 const FC_BODY_RE =
   /^needs\.changes\.result != 'success'((?: \|\| needs\.changes\.outputs\.[A-Za-z0-9_-]+ == 'true')+)$/;
 
@@ -105,20 +114,22 @@ function parseFcBody(body) {
  */
 function classifyIf(jobId, expr) {
   const s = norm(expr);
-  const fc = /^always\(\) && \((.*)\)$/.exec(s);
+  if (!s.startsWith(GATED_PREFIX)) return null;
+  const rest = s.slice(GATED_PREFIX.length);
+  const fc = /^\((.*)\)$/.exec(rest);
   if (fc) {
     const filters = parseFcBody(fc[1]);
     if (filters) return { kind: "FC", filters, deps: ["changes"] };
   }
   const afterDeps = AFTER_ALLOWED[jobId];
   if (afterDeps) {
-    const want = `always() && ${afterDeps.map((d) => `needs.${d}.result == 'success'`).join(" && ")}`;
-    if (s === want) return { kind: "AFTER", filters: [], deps: afterDeps };
+    const want = `${afterDeps.map((d) => `needs.${d}.result == 'success'`).join(" && ")}`;
+    if (rest === want) return { kind: "AFTER", filters: [], deps: afterDeps };
   }
   const fcAfterDeps = FC_AFTER_ALLOWED[jobId];
   if (fcAfterDeps) {
     const tail = fcAfterDeps.map((d) => ` && needs.${d}.result != 'failure'`).join("");
-    const m = /^always\(\) && \((.*)\)(.*)$/.exec(s);
+    const m = /^\((.*)\)(.*)$/.exec(rest);
     if (m && m[2] === tail) {
       const filters = parseFcBody(m[1]);
       if (filters) return { kind: "FC-AFTER", filters, deps: ["changes", ...fcAfterDeps] };
@@ -153,6 +164,20 @@ function stepsOf(doc, jobId) {
 }
 
 /**
+ * @param {any} doc
+ * @param {string} id
+ * @returns {any} the `changes` job's step with this id, or undefined
+ */
+function changesStep(doc, id) {
+  return stepsOf(doc, "changes").find((s) => isPlainObject(s) && s.id === id);
+}
+
+/** @param {any} step */
+function withKeysOf(step) {
+  return isPlainObject(step.with) ? Object.keys(step.with) : [];
+}
+
+/**
  * Returns violation strings for one workflow against its spec (C3 rules 1-11).
  * @param {string} content
  * @param {string} name
@@ -167,15 +192,24 @@ export function findWorkflowViolations(content, name, spec) {
   const jobs = isPlainObject(doc.jobs) ? doc.jobs : {};
 
   // Rule 1: trigger.
+  // `branches: [main]` is required: a required check is matched by name on the
+  // head SHA, so a run of the same commit in a PR into another branch must not
+  // answer for a PR into main. The string and list forms of `on` cannot carry
+  // it, so `on` must be a mapping.
   const on = doc.on;
-  if (!isPlainObject(on) || !("pull_request" in on)) {
-    out.push(`${name}: R1 'on.pull_request' is missing — the workflow must start on every pull request`);
+  if (!isPlainObject(on)) {
+    out.push(`${name}: R1 'on' must be a mapping with 'pull_request.branches: [main]'`);
+  } else if (!("pull_request" in on)) {
+    out.push(`${name}: R1 'on.pull_request' is missing — the workflow must start on every pull request into main`);
   } else {
     const pr = on.pull_request;
-    if (pr !== null && !isPlainObject(pr)) {
-      out.push(`${name}: R1 'on.pull_request' must be empty or a mapping`);
-    } else if (pr) {
-      for (const key of ["paths", "paths-ignore", "types"]) {
+    if (!isPlainObject(pr)) {
+      out.push(`${name}: R1 'on.pull_request' must be a mapping with 'branches: [main]'`);
+    } else {
+      if (!isDeepStrictEqual(pr.branches, ["main"])) {
+        out.push(`${name}: R1 'on.pull_request.branches' must be exactly [main]`);
+      }
+      for (const key of ["paths", "paths-ignore", "types", "branches-ignore"]) {
         if (key in pr) {
           out.push(`${name}: R1 'on.pull_request.${key}' is forbidden — a PR outside it would never start the workflow`);
         }
@@ -328,8 +362,15 @@ export function findWorkflowViolations(content, name, spec) {
     const filter = steps.filter((s) => isPlainObject(s) && s.id === "filter");
     if (filter.length !== 1) {
       out.push(`${name}: job 'changes': R10 must have exactly one step with id 'filter' (found ${filter.length})`);
-    } else if (norm(filter[0].if ?? "") !== "steps.size.outputs.small == 'true'") {
-      out.push(`${name}: job 'changes': R10 'filter' step 'if' must be exactly 'steps.size.outputs.small == 'true''`);
+    } else {
+      if (norm(filter[0].if ?? "") !== "steps.size.outputs.small == 'true'") {
+        out.push(`${name}: job 'changes': R10 'filter' step 'if' must be exactly 'steps.size.outputs.small == 'true''`);
+      }
+      // Any other input (base, ref, predicate-quantifier, …) changes what the
+      // filter answers without touching the filter list.
+      if (!isDeepStrictEqual(withKeysOf(filter[0]), ["filters"])) {
+        out.push(`${name}: job 'changes': R10 'filter' step 'with' must have exactly the key 'filters'`);
+      }
     }
     const entries = Object.entries(changesOutputs);
     if (entries.length === 0) out.push(`${name}: job 'changes': R10 has no 'outputs'`);
@@ -359,7 +400,15 @@ export function findAggregateStepDivergence(contentsByName, specs) {
     },
     {
       label: "'size' guard step",
-      pick: (doc) => stepsOf(doc, "changes").find((s) => isPlainObject(s) && s.id === "size"),
+      pick: (doc) => changesStep(doc, "size"),
+    },
+    {
+      // The filter lists differ by design; the action and its inputs do not.
+      label: "'filter' step action and 'with' keys",
+      pick: (doc) => {
+        const step = changesStep(doc, "filter");
+        return step === undefined ? undefined : { uses: step.uses, if: step.if, withKeys: withKeysOf(step) };
+      },
     },
   ];
   for (const { label, pick } of probes) {
@@ -474,6 +523,6 @@ function main() {
   console.log("Required-aggregate check passed.");
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   main();
 }
