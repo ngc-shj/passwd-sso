@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, unauthorized } from "@/lib/http/api-response";
+import { membershipConflictResponse } from "@/lib/http/lock-conflict-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { INVITATION_STATUS, TEAM_PERMISSION } from "@/lib/constants";
 import { withUserTenantRls, withTeamTenantRls } from "@/lib/tenant-context";
@@ -255,7 +256,7 @@ async function handlePOST(req: NextRequest) {
   } catch (e) {
     if (e instanceof ScimApprovalPendingRaceError) return errorResponse(API_ERROR.SCIM_APPROVAL_PENDING);
     if (e instanceof ScimManagedMemberRaceError) return errorResponse(API_ERROR.SCIM_MANAGED_MEMBER);
-    if (isMembershipLockConflict(e)) return errorResponse(API_ERROR.CONFLICT);
+    if (isMembershipLockConflict(e)) return membershipConflictResponse(e);
     throw e;
   }
 

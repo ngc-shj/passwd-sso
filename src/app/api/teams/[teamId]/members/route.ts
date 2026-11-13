@@ -11,6 +11,7 @@ import { TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constant
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, unauthorized, validationError } from "@/lib/http/api-response";
+import { membershipConflictResponse } from "@/lib/http/lock-conflict-response";
 import { buildTeamMemberDisplayItems } from "@/lib/team/team-member-display";
 import { TEAM_MEMBERSHIP_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 import { createLockBudget, lockTeamsAgainstRotation } from "@/lib/team/team-key-rotation-lock";
@@ -202,7 +203,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       return errorResponse(API_ERROR.SCIM_APPROVAL_PENDING);
     }
     if (isMembershipLockConflict(e)) {
-      return errorResponse(API_ERROR.CONFLICT);
+      return membershipConflictResponse(e);
     }
     // Prisma unique constraint violation (race condition)
     if (isPrismaUniqueConstraintError(e)) {

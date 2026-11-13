@@ -172,6 +172,36 @@ describe("POST /api/vault/reset", () => {
     expect(json.error).toBe("VAULT_RESET_CONFIRMATION_MISMATCH");
   });
 
+  it("returns 409 TEAM_BUSY with Retry-After when a team row lock wait times out", async () => {
+    const { TeamRotationInProgressError } = await vi.importActual<typeof import("@/lib/team/team-key-rotation-lock")>("@/lib/team/team-key-rotation-lock");
+    mockExecuteVaultReset.mockRejectedValue(new TeamRotationInProgressError());
+
+    const res = await POST(createRequest("POST", URL, {
+      body: { confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT },
+    }));
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("TEAM_BUSY");
+    expect(res.headers.get("Retry-After")).toBe("3");
+    expect(mockInvalidateUserSessions).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  it("returns 409 CONFLICT without Retry-After when a team row cannot be locked", async () => {
+    const { TeamRotationLockError } = await vi.importActual<typeof import("@/lib/team/team-key-rotation-lock")>("@/lib/team/team-key-rotation-lock");
+    mockExecuteVaultReset.mockRejectedValue(new TeamRotationLockError(1));
+
+    const res = await POST(createRequest("POST", URL, {
+      body: { confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT },
+    }));
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("CONFLICT");
+    expect(res.headers.get("Retry-After")).toBeNull();
+    expect(mockInvalidateUserSessions).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
   it("deletes all vault data and logs audit on success", async () => {
     const res = await POST(createRequest("POST", URL, {
       body: { confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT },

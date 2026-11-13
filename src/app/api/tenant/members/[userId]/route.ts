@@ -15,6 +15,7 @@ import { isMembershipLockConflict, lockTenantRows } from "@/lib/team/tenant-row-
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
+import { membershipConflictResponse } from "@/lib/http/lock-conflict-response";
 
 export const runtime = "nodejs";
 
@@ -125,7 +126,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
       return { status: ROLE_CHANGE_OUTCOME.UPDATED, updated, previousRole: target.role };
     });
   } catch (e) {
-    if (isMembershipLockConflict(e)) return errorResponse(API_ERROR.CONFLICT);
+    if (isMembershipLockConflict(e)) return membershipConflictResponse(e);
     throw e;
   }
 

@@ -97,6 +97,7 @@ export const API_ERROR = {
   MEMBER_KEY_NOT_FOUND: "MEMBER_KEY_NOT_FOUND",
   VAULT_NOT_READY: "VAULT_NOT_READY",
   TEAM_KEY_VERSION_MISMATCH: "TEAM_KEY_VERSION_MISMATCH",
+  TEAM_BUSY: "TEAM_BUSY",
   KEY_VERSION_MISMATCH: "KEY_VERSION_MISMATCH",
   ENTRY_COUNT_MISMATCH: "ENTRY_COUNT_MISMATCH",
   ONLY_OWN_ENTRIES: "ONLY_OWN_ENTRIES",
@@ -417,6 +418,7 @@ export const API_ERROR_STATUS = {
   MEMBER_KEY_NOT_FOUND: 404,
   VAULT_NOT_READY: 409,
   TEAM_KEY_VERSION_MISMATCH: 409,
+  TEAM_BUSY: 409,
   KEY_VERSION_MISMATCH: 409,
   ENTRY_COUNT_MISMATCH: 400,
   ONLY_OWN_ENTRIES: 403,
@@ -663,6 +665,7 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   MEMBER_KEY_NOT_FOUND: "memberKeyNotFound",
   VAULT_NOT_READY: "vaultNotReady",
   TEAM_KEY_VERSION_MISMATCH: "teamKeyVersionMismatch",
+  TEAM_BUSY: "teamBusy",
   KEY_VERSION_MISMATCH: "keyVersionMismatch",
   ENTRY_COUNT_MISMATCH: "entryCountMismatch",
   ONLY_OWN_ENTRIES: "onlyOwnEntries",
@@ -829,8 +832,10 @@ export function apiErrorToI18nKey(
 ): string {
   if (typeof error === "string") {
     const code = error as ApiErrorCode;
-    if (overrides?.[code]) return overrides[code];
-    if (error in API_ERROR_I18N) return API_ERROR_I18N[code];
+    // Own keys only: a server-supplied "constructor" must not resolve to an
+    // inherited Object member.
+    if (overrides && Object.hasOwn(overrides, code) && overrides[code]) return overrides[code];
+    if (Object.hasOwn(API_ERROR_I18N, error)) return API_ERROR_I18N[code];
   }
   return "unknownError";
 }
@@ -867,7 +872,7 @@ const EA_I18N: Record<string, string> = {
 
 /** Translate an error code to an i18n key (EmergencyAccess namespace). */
 export function eaErrorToI18nKey(error: unknown): string {
-  if (typeof error === "string" && error in EA_I18N) {
+  if (typeof error === "string" && Object.hasOwn(EA_I18N, error)) {
     return EA_I18N[error];
   }
   return "actionFailed";

@@ -65,6 +65,7 @@ Object.assign(navigator, {
   clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
 });
 
+import { toast } from "sonner";
 import { TeamInviteByEmailSection } from "../team-invite-by-email-section";
 
 describe("TeamInviteByEmailSection", () => {
@@ -104,5 +105,38 @@ describe("TeamInviteByEmailSection", () => {
     });
 
     expect(onSuccess).toHaveBeenCalled();
+  });
+  describe("409 refusals", () => {
+    async function inviteWith(res: Response) {
+      mockFetchApi.mockResolvedValue(res);
+      const onSuccess = vi.fn();
+      render(<TeamInviteByEmailSection teamId="team-1" onSuccess={onSuccess} />);
+      fireEvent.change(screen.getByPlaceholderText("inviteEmailPlaceholder"), {
+        target: { value: "bob@example.com" },
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText("inviteSend"));
+      });
+      expect(onSuccess).not.toHaveBeenCalled();
+    }
+
+    const conflict = (error?: string) =>
+      new Response(JSON.stringify(error === undefined ? {} : { error }), { status: 409 });
+
+    it.each([
+      ["INVITATION_ALREADY_SENT", "alreadyInvited"],
+      ["ALREADY_A_MEMBER", "alreadyMember"],
+      ["CONFLICT", "conflict"],
+      ["TEAM_BUSY", "teamBusy"],
+    ])("%s shows %s", async (code, message) => {
+      await inviteWith(conflict(code));
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith(message));
+      expect(toast.error).toHaveBeenCalledTimes(1);
+    });
+
+    it("a code-less 409 shows the generic message, not alreadyInvited", async () => {
+      await inviteWith(conflict());
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith("unknownError"));
+    });
   });
 });

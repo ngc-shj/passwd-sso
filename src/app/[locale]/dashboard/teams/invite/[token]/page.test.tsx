@@ -223,8 +223,38 @@ describe("AcceptInvitePage", () => {
       });
     });
 
+    it("shows the busy message on a TEAM_BUSY 409", async () => {
+      mockFetchApi.mockResolvedValue(
+        new Response(JSON.stringify({ error: "TEAM_BUSY" }), { status: 409 }),
+      );
+
+      await act(async () => {
+        renderPage();
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("teamBusy")).toBeInTheDocument();
+      });
+      expect(screen.queryByText("acceptFailed")).not.toBeInTheDocument();
+    });
+
+    it("shows acceptFailed on a 409 with another code", async () => {
+      mockFetchApi.mockResolvedValue(
+        new Response(JSON.stringify({ error: "CONFLICT" }), { status: 409 }),
+      );
+
+      await act(async () => {
+        renderPage();
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("acceptFailed")).toBeInTheDocument();
+      });
+      expect(screen.queryByText("teamBusy")).not.toBeInTheDocument();
+    });
+
     it("shows retry button on error", async () => {
-      mockFetchApi.mockResolvedValue({ ok: false, status: 500 });
+      mockFetchApi.mockResolvedValue(new Response("oops", { status: 500 }));
 
       await act(async () => {
         renderPage();

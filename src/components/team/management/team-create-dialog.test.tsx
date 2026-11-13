@@ -218,11 +218,9 @@ describe("TeamCreateDialog", () => {
 
   it("shows slug-taken error when 409 returned", async () => {
     setupVault({ status: VAULT_STATUS.UNLOCKED });
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 409,
-      json: () => Promise.resolve({}),
-    });
+    mockFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "SLUG_ALREADY_TAKEN" }), { status: 409 }),
+    );
 
     render(<TeamCreateDialog trigger={<button>Open</button>} onCreated={vi.fn()} />);
     fireEvent.click(screen.getByText("Open"));
@@ -235,5 +233,28 @@ describe("TeamCreateDialog", () => {
     await waitFor(() => {
       expect(screen.getByText("slugTaken")).toBeInTheDocument();
     });
+  });
+
+  it.each([
+    ["CONFLICT", "conflict"],
+    [undefined, "unknownError"],
+  ])("shows a toast and leaves the slug field alone on a 409 with code %s", async (code, message) => {
+    setupVault({ status: VAULT_STATUS.UNLOCKED });
+    mockFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify(code === undefined ? {} : { error: code }), { status: 409 }),
+    );
+
+    render(<TeamCreateDialog trigger={<button>Open</button>} onCreated={vi.fn()} />);
+    fireEvent.click(screen.getByText("Open"));
+    const nameInput = await screen.findByLabelText("teamName");
+    fireEvent.change(nameInput, { target: { value: "demo" } });
+    const submit = screen.getByText("createButton").closest("button")!;
+    await act(async () => {
+      fireEvent.click(submit);
+    });
+    await waitFor(() => {
+      expect(mockToast.error).toHaveBeenCalledWith(message);
+    });
+    expect(screen.queryByText("slugTaken")).not.toBeInTheDocument();
   });
 });

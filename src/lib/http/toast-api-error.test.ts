@@ -5,6 +5,7 @@ vi.mock("sonner", () => ({ toast: { error: mockToastError } }));
 
 import { toastApiError } from "./toast-api-error";
 import { API_ERROR } from "./api-error-codes";
+import { readApiErrorBody } from "./read-api-error-body";
 
 const tErrors = (key: string): string => `t:${key}`;
 
@@ -58,5 +59,25 @@ describe("toastApiError", () => {
   it("returns 'unknownError' for an unrecognized code", async () => {
     await toastApiError(jsonRes({ error: "BOGUS_CODE" }), tErrors);
     expect(mockToastError).toHaveBeenCalledWith("t:unknownError");
+  });
+
+  it("still shows the code's key after readApiErrorBody consumed the body", async () => {
+    const res = new Response(JSON.stringify({ error: API_ERROR.TEAM_BUSY }), {
+      status: 409,
+      headers: { "content-type": "application/json" },
+    });
+    await readApiErrorBody(res);
+    await toastApiError(res, tErrors);
+    expect(mockToastError).toHaveBeenCalledWith("t:teamBusy");
+  });
+
+  it("falls back to unknownError for a JSON null body without a fallback code", async () => {
+    await toastApiError(jsonRes(null), tErrors);
+    expect(mockToastError).toHaveBeenCalledWith("t:unknownError");
+  });
+
+  it("uses the fallback code for a JSON null body", async () => {
+    await toastApiError(jsonRes(null), tErrors, API_ERROR.FORBIDDEN);
+    expect(mockToastError).toHaveBeenCalledWith("t:forbidden");
   });
 });

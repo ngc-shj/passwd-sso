@@ -11,7 +11,7 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE, TEAM_PERMISSION, ATTACHMENT_ENCRYPTION_MODE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
-import { errorResponse, handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, handleAuthError, notFound, rateLimited, teamBusy, unauthorized } from "@/lib/http/api-response";
 import { teamAttachmentMigrateLimiter } from "@/lib/security/rate-limiters";
 import {
   ATTACHMENT_BODY_BASE64_MAX,
@@ -158,7 +158,7 @@ async function handlePUT(req: NextRequest, { params }: RouteContext) {
         locked = await lockTeamAttachmentEntry(tx, teamId, entryId);
       } catch (e) {
         if (e instanceof TeamRotationInProgressError) {
-          return { ok: false, code: API_ERROR.TEAM_KEY_VERSION_MISMATCH };
+          return { ok: false, code: API_ERROR.TEAM_BUSY };
         }
         throw e;
       }
@@ -271,6 +271,7 @@ async function handlePUT(req: NextRequest, { params }: RouteContext) {
 
   if (!outcome.ok) {
     await blobStore.deleteObject(newStored, newContext).catch(() => {});
+    if (outcome.code === API_ERROR.TEAM_BUSY) return teamBusy();
     return outcome.code === API_ERROR.NOT_FOUND ? notFound() : errorResponse(outcome.code);
   }
 

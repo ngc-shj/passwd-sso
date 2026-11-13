@@ -11,7 +11,8 @@ import { FILENAME_MAX_LENGTH } from "@/lib/validations/common";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { displayIdentityOf, displayUserOf, fetchUserDisplayMap } from "@/lib/audit/audit-user-lookup";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { errorResponse, handleAuthError, teamBusy, unauthorized } from "@/lib/http/api-response";
 import * as teamPasswordService from "@/lib/services/team-password-service";
 import { TeamPasswordServiceError } from "@/lib/services/team-password-service";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
@@ -116,6 +117,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     );
   } catch (e) {
     if (e instanceof TeamPasswordServiceError) {
+      if (e.code === API_ERROR.TEAM_BUSY) return teamBusy();
       return errorResponse(e.code, e.statusHint);
     }
     throw e;

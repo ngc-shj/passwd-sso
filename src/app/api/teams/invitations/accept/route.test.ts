@@ -512,12 +512,27 @@ describe("POST /api/teams/invitations/accept", () => {
       await expect(teamTenantRlsCallbackPromises.at(-1)).rejects.toThrow();
     });
 
-    it("answers 409 when a tenant row is held past the lock wait", async () => {
+    it("answers 409 CONFLICT without Retry-After when a tenant row is held past the lock wait", async () => {
       const { TenantMemberLockTimeoutError } = await vi.importActual<typeof import("@/lib/team/tenant-row-lock")>("@/lib/team/tenant-row-lock");
       mockLockTenantRows.mockRejectedValue(new TenantMemberLockTimeoutError());
 
-      expect((await accept()).status).toBe(409);
+      const res = await accept();
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toBe("CONFLICT");
+      expect(res.headers.get("Retry-After")).toBeNull();
       expect(acceptTx.teamInvitation.updateMany).not.toHaveBeenCalled();
+    });
+
+    it("answers 409 TEAM_BUSY with Retry-After when a team row is held past the lock wait", async () => {
+      const { TeamRotationInProgressError } = await vi.importActual<typeof import("@/lib/team/team-key-rotation-lock")>("@/lib/team/team-key-rotation-lock");
+      mockLockTeamsAgainstRotation.mockRejectedValue(new TeamRotationInProgressError());
+
+      const res = await accept();
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toBe("TEAM_BUSY");
+      expect(res.headers.get("Retry-After")).toBe("3");
+      expect(acceptTx.teamInvitation.updateMany).not.toHaveBeenCalled();
+      expect(acceptTx.teamMember.upsert).not.toHaveBeenCalled();
     });
   });
 });

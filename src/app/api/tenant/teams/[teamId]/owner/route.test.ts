@@ -219,6 +219,34 @@ describe("POST /api/tenant/teams/[teamId]/owner", () => {
     });
   });
 
+  it("answers 409 TEAM_BUSY with Retry-After, changing nothing, when the team row lock wait times out", async () => {
+    const { TeamRotationInProgressError } = await vi.importActual<typeof import("@/lib/team/team-key-rotation-lock")>("@/lib/team/team-key-rotation-lock");
+    mockWithBoundedLockWait.mockRejectedValue(new TeamRotationInProgressError());
+
+    const res = await assign();
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("TEAM_BUSY");
+    expect(res.headers.get("Retry-After")).toBe("3");
+    expect(tx.teamMember.update).not.toHaveBeenCalled();
+    expect(tx.teamMember.updateMany).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
+  });
+
+  it("answers 409 CONFLICT without Retry-After, changing nothing, when a tenant row lock wait times out", async () => {
+    const { TenantMemberLockTimeoutError } = await vi.importActual<typeof import("@/lib/team/tenant-row-lock")>("@/lib/team/tenant-row-lock");
+    mockLockTenantRows.mockRejectedValue(new TenantMemberLockTimeoutError());
+
+    const res = await assign();
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("CONFLICT");
+    expect(res.headers.get("Retry-After")).toBeNull();
+    expect(tx.teamMember.update).not.toHaveBeenCalled();
+    expect(tx.teamMember.updateMany).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
+  });
+
   it("refuses (403), changing nothing, when the actor was demoted to tenant MEMBER after the permission check", async () => {
     mockLockTenantRows.mockResolvedValue(new Map([[ACTOR_ID, { ...active, role: "MEMBER" }], [TARGET_ID, active]]));
 

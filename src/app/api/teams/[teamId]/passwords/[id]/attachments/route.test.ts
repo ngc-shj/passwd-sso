@@ -15,9 +15,11 @@ const {
   mockPutObject,
   mockDeleteObject,
   mockTeamMemberFindFirst,
+  mockLogAuditAsync,
 } = vi.hoisted(() => ({
   // The actor's membership, re-read under the team lock (activeTeamRole).
   mockTeamMemberFindFirst: vi.fn(),
+  mockLogAuditAsync: vi.fn(),
   mockAuth: vi.fn(),
   mockRequireTeamPermission: vi.fn(),
   mockPrismaTeamPasswordEntry: {
@@ -72,6 +74,10 @@ vi.mock("@/lib/prisma", () => ({
     $executeRaw: mockExecuteRaw,
     auditLog: { create: vi.fn().mockResolvedValue({}) },
   },
+}));
+vi.mock("@/lib/audit/audit", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/audit/audit")>()),
+  logAuditAsync: mockLogAuditAsync,
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withTeamTenantRls: mockWithTeamTenantRls,
@@ -565,11 +571,14 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     expect(mockDeleteObject).toHaveBeenCalledTimes(1);
   });
 
-  it("returns 409 TEAM_KEY_VERSION_MISMATCH when a rotation holds the team row", async () => {
+  it("returns 409 TEAM_BUSY with Retry-After when a rotation holds the team row", async () => {
     mockLockEntry.mockRejectedValue(new TeamRotationInProgressError());
     const { res, json } = await upload();
     expect(res.status).toBe(409);
-    expect(json.error).toBe("TEAM_KEY_VERSION_MISMATCH");
+    expect(json.error).toBe("TEAM_BUSY");
+    expect(res.headers.get("Retry-After")).toBe("3");
+    expect(mockPrismaAttachment.create).not.toHaveBeenCalled();
+    expect(mockLogAuditAsync).not.toHaveBeenCalled();
     expect(mockDeleteObject).toHaveBeenCalledTimes(1);
   });
 

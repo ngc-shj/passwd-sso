@@ -1,6 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   readApiErrorBody,
+  parseJsonBodyOnce,
   getApiErrorMessage,
   getApiErrorDetail,
   getApiErrorFieldErrors,
@@ -262,5 +263,50 @@ describe("readMainApiErrorBody", () => {
     expect(readMainApiErrorBody({ error: 42 })).toBeNull();
     expect(readMainApiErrorBody({ error: null })).toBeNull();
     expect(readMainApiErrorBody({ error: { code: "X" } })).toBeNull();
+  });
+});
+
+describe("readApiErrorBody read-once", () => {
+  it("returns the same body when called twice on one error Response", async () => {
+    const res = makeJsonResponse({ error: "TEAM_BUSY" }, 409);
+    const first = await readApiErrorBody(res);
+    const second = await readApiErrorBody(res);
+    expect(first).toEqual({ error: "TEAM_BUSY" });
+    expect(second).toEqual({ error: "TEAM_BUSY" });
+  });
+
+  it("returns null both times for an unparseable body and never rejects", async () => {
+    const res = new Response("not-json", { status: 500 });
+    await expect(readApiErrorBody(res)).resolves.toBeNull();
+    await expect(readApiErrorBody(res)).resolves.toBeNull();
+  });
+});
+
+describe("parseJsonBodyOnce", () => {
+  it("calls json() once for the same object and shares the result", async () => {
+    const json = vi.fn().mockResolvedValue({ error: "X" });
+    const res = { json } as unknown as Response;
+    const a = await parseJsonBodyOnce(res);
+    const b = await parseJsonBodyOnce(res);
+    expect(json).toHaveBeenCalledTimes(1);
+    expect(a).toEqual({ error: "X" });
+    expect(b).toBe(a);
+  });
+
+  it("parses each distinct object on its own", async () => {
+    const jsonA = vi.fn().mockResolvedValue({ error: "A" });
+    const jsonB = vi.fn().mockResolvedValue({ error: "B" });
+    const a = await parseJsonBodyOnce({ json: jsonA } as unknown as Response);
+    const b = await parseJsonBodyOnce({ json: jsonB } as unknown as Response);
+    expect(a).toEqual({ error: "A" });
+    expect(b).toEqual({ error: "B" });
+    expect(jsonA).toHaveBeenCalledTimes(1);
+    expect(jsonB).toHaveBeenCalledTimes(1);
+  });
+
+  it("resolves null for an unparseable body instead of rejecting", async () => {
+    await expect(
+      parseJsonBodyOnce(new Response("not-json", { status: 500 })),
+    ).resolves.toBeNull();
   });
 });

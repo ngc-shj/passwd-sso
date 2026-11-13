@@ -61,8 +61,8 @@ Invariants:
   `z.treeifyError(...)` output (object tree shape, never a plain string).
 - `lockedUntil` is always present on `ACCOUNT_LOCKED` responses, even when
   null — consumers parse `null` as "no known expiry".
-- `RATE_LIMIT_EXCEEDED` responses include the `Retry-After` header (seconds,
-  ceiling-rounded). No body context field.
+- `RATE_LIMIT_EXCEEDED` and `TEAM_BUSY` responses include the `Retry-After`
+  header (seconds, ceiling-rounded). No body context field.
 - Any body context field other than `details`, `lockedUntil`, or
   `currentKeyVersion` is forbidden until this contract is amended (see §8).
 
@@ -120,7 +120,7 @@ response header:
 | `details` | `unknown` (tree from `z.treeifyError()`) | `VALIDATION_ERROR` | `validationError()` / `zodValidationError()` |
 | `lockedUntil` | `string \| null` (ISO 8601) | `ACCOUNT_LOCKED` | `vault/unlock` (2 sites), `travel-mode/disable` |
 | `currentKeyVersion` | `number` | `CONFLICT` | `webauthn/credentials/[id]/prf` only |
-| `Retry-After` (HTTP header) | seconds (integer) | `RATE_LIMIT_EXCEEDED` | `rateLimited()` |
+| `Retry-After` (HTTP header) | seconds (integer) | `RATE_LIMIT_EXCEEDED`, `TEAM_BUSY` | `rateLimited()`, `teamBusy()` |
 
 Adding a new body context field requires:
 
@@ -139,7 +139,7 @@ the broad class; the `error` code is the specific reason.
 | 401 | No identity — caller did not authenticate, or session/token is invalid/expired | `UNAUTHORIZED`, `INVALID_SESSION`, `API_KEY_INVALID`, all `MOBILE_*` |
 | 403 | Identity OK, permission insufficient — role, scope, tenancy, recency, or origin restriction denies access | `FORBIDDEN`, `FORBIDDEN_INSUFFICIENT_ROLE`, `ACCESS_DENIED`, `SESSION_STEP_UP_REQUIRED`, `*_SCOPE_INSUFFICIENT`, `OWNER_ONLY`, `ONLY_OWN_ENTRIES`, `NOT_AUTHORIZED_FOR_GRANT`, `ACCOUNT_LOCKED` |
 | 404 | Resource does not exist in this caller's scope | `NOT_FOUND`, `USER_NOT_FOUND`, `TEAM_NOT_FOUND`, `*_NOT_FOUND` family |
-| 409 | Request conflicts with current resource state | `CONFLICT`, `VAULT_ALREADY_SETUP`, `*_ALREADY_EXISTS`, `*_ALREADY_REVOKED`, `ALREADY_A_MEMBER`, `SLUG_ALREADY_TAKEN` |
+| 409 | Request conflicts with current resource state | `CONFLICT`, `VAULT_ALREADY_SETUP`, `*_ALREADY_EXISTS`, `*_ALREADY_REVOKED`, `ALREADY_A_MEMBER`, `SLUG_ALREADY_TAKEN`, `TEAM_BUSY` (team-row lock wait ran out; carries `Retry-After`) |
 | 410 | Endpoint deprecated and removed | (deprecated route stubs) |
 | 413 | Body exceeds size limit | `PAYLOAD_TOO_LARGE`, `FILE_TOO_LARGE`, `SEND_FILE_TOO_LARGE` |
 | 422 | Semantic validation of well-formed input failed (rare), OR a deliberately distinct-from-401 failure signal (see below) | `AUTH_HASH_MISMATCH`, `MCP_CLIENT_LIMIT_EXCEEDED` |

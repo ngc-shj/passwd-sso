@@ -246,6 +246,38 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     expect(json.error).toBe("INVITATION_ALREADY_SENT");
   });
 
+  it("returns 409 TEAM_BUSY with Retry-After when the team row lock wait times out", async () => {
+    const { TeamRotationInProgressError } = await vi.importActual<typeof import("@/lib/team/team-key-rotation-lock")>("@/lib/team/team-key-rotation-lock");
+    mockLockTeamsAgainstRotation.mockRejectedValue(new TeamRotationInProgressError());
+
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/invitations`, {
+        body: { email: "new@test.com", role: TEAM_ROLE.MEMBER },
+      }),
+      createParams({ teamId: TEAM_ID }),
+    );
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("TEAM_BUSY");
+    expect(res.headers.get("Retry-After")).toBe("3");
+    expect(mockPrismaTeamInvitation.create).not.toHaveBeenCalled();
+  });
+
+  it("returns 409 CONFLICT without Retry-After when the tenant row lock wait times out", async () => {
+    const { TenantMemberLockTimeoutError } = await vi.importActual<typeof import("@/lib/team/tenant-row-lock")>("@/lib/team/tenant-row-lock");
+    mockLockTenantRows.mockRejectedValue(new TenantMemberLockTimeoutError());
+
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/invitations`, {
+        body: { email: "new@test.com", role: TEAM_ROLE.MEMBER },
+      }),
+      createParams({ teamId: TEAM_ID }),
+    );
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("CONFLICT");
+    expect(res.headers.get("Retry-After")).toBeNull();
+    expect(mockPrismaTeamInvitation.create).not.toHaveBeenCalled();
+  });
+
   it("creates invitation successfully (201)", async () => {
     mockPrismaTeamInvitation.create.mockResolvedValue({
       id: "new-inv",

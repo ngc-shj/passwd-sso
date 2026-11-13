@@ -303,6 +303,7 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
     const json = await res.json();
     expect(res.status).toBe(409);
     expect(json.error).toBe("TEAM_KEY_VERSION_MISMATCH");
+    expect(res.headers.get("Retry-After")).toBeNull();
   });
 
   it("reads the team version FOR SHARE before the member row, and distributes at the current version", async () => {
@@ -327,7 +328,7 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
     expect(mockPrismaTeamMemberKey.upsert).toHaveBeenCalledOnce();
   });
 
-  it("returns 409 without distributing when a rotation holds the team past the lock timeout", async () => {
+  it("returns 409 TEAM_BUSY without distributing when a rotation holds the team past the lock timeout", async () => {
     mockPrismaTeamMember.findFirst.mockResolvedValueOnce({ role: "OWNER", teamId: "team-1" });
     // Only the pre-check read: the lock is the transaction's first statement,
     // so the in-tx member re-check never runs.
@@ -346,7 +347,8 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
     );
 
     expect(res.status).toBe(409);
-    expect((await res.json()).error).toBe("TEAM_KEY_VERSION_MISMATCH");
+    expect((await res.json()).error).toBe("TEAM_BUSY");
+    expect(res.headers.get("Retry-After")).toBe("3");
     expect(mockPrismaTeamMemberKey.upsert).not.toHaveBeenCalled();
     expect(mockPrismaTeamMember.updateMany).not.toHaveBeenCalled();
     // In-flight rotation (C4): no TEAM_MEMBER_KEY_DISTRIBUTE.

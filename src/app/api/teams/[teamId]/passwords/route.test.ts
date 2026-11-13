@@ -542,6 +542,26 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
     expect(res.status).toBe(409);
     const json = await res.json();
     expect(json.error).toBe("TEAM_KEY_VERSION_MISMATCH");
+    expect(res.headers.get("Retry-After")).toBeNull();
+  });
+
+  it("returns 409 TEAM_BUSY with Retry-After when the team row lock wait times out", async () => {
+    // lock_not_available, nested the way the pg driver adapter reports it.
+    mockTeamQueryRaw.mockImplementation(teamLockQuery(() => {
+      throw Object.assign(new Error("canceling statement due to lock timeout"), {
+        meta: { driverAdapterError: { cause: { originalCode: "55P03" } } },
+      });
+    }));
+
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, { body: validE2EBody }),
+      createParams({ teamId: TEAM_ID }),
+    );
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("TEAM_BUSY");
+    expect(res.headers.get("Retry-After")).toBe("3");
+    expect(mockPrismaTeamPasswordEntry.create).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
   it("returns 409 when team not found (Q-9)", async () => {

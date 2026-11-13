@@ -5,6 +5,7 @@ import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, unauthorized } from "@/lib/http/api-response";
+import { membershipConflictResponse } from "@/lib/http/lock-conflict-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { parseBody } from "@/lib/http/parse-body";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
@@ -98,7 +99,7 @@ async function handlePOST(request: NextRequest) {
   } catch (e) {
     // A rotation of one of the user's teams held it past the lock wait.
     // Nothing was deleted; the reset can be retried.
-    if (isTeamRotationConflict(e)) return errorResponse(API_ERROR.CONFLICT);
+    if (isTeamRotationConflict(e)) return membershipConflictResponse(e);
     throw e;
   }
 

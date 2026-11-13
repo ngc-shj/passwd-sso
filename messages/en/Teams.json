@@ -39,7 +39,7 @@
   "rekeyStopTransient": "A key or request failed temporarily. Nothing more was sent; run Finish re-key again.",
   "rekeyStopStepUpDeclined": "Re-authentication was not completed. Run Finish re-key again to resume.",
   "rekeyStopCurrentKeyUnavailable": "Your copy of the current team key could not be opened. Ask an owner or admin to check your key distribution.",
-  "rekeyStopRetryBudget": "The team key kept changing or requests were rate limited. Try again later.",
+  "rekeyStopRetryBudget": "The team key kept changing, the team stayed busy, or requests were rate limited. Try again later.",
   "rekeyReportTitle": "Entries that need attention",
   "rekeyIssueUndecryptable": "{count, plural, one {# entry} other {# entries}} saved under an older team key could not be decrypted with your key.",
   "rekeyIssueKeyInvalid": "Your copy of an older team key cannot be opened — another member who holds that key re-keys {count, plural, one {this entry} other {these # entries}}.",

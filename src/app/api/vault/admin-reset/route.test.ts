@@ -275,6 +275,23 @@ describe("POST /api/vault/admin-reset", () => {
     expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
+  it("answers CONFLICT, not TEAM_BUSY, when a team row lock wait times out after the token was spent", async () => {
+    // The token is spent before the transaction, so "try again in a moment"
+    // would mislead: the reset has to be initiated again.
+    const { TeamRotationInProgressError } = await vi.importActual<typeof import("@/lib/team/team-key-rotation-lock")>("@/lib/team/team-key-rotation-lock");
+    mockExecuteVaultReset.mockRejectedValue(new TeamRotationInProgressError());
+
+    const res = await POST(createRequest("POST", URL, {
+      body: { token: TOKEN, confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT },
+    }));
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("CONFLICT");
+    expect(res.headers.get("Retry-After")).toBeNull();
+    expect(mockInvalidateUserSessions).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
   it("rethrows a reset failure that is not a tenant-scope refusal", async () => {
     // The catch arm must not turn every failure into a 409 — a database error
     // mid-wipe is a 500, not "data held elsewhere".

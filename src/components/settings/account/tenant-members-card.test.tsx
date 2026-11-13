@@ -593,11 +593,9 @@ describe("TenantMembersCard", () => {
       if (url === "/api/tenant/members" && (!init?.method || init.method === "GET")) {
         return Promise.resolve({ ok: true, json: () => Promise.resolve([member]) });
       }
-      return Promise.resolve({
-        ok: false,
-        status: 403,
-        json: () => Promise.resolve({ error: "SESSION_STEP_UP_REQUIRED" }),
-      });
+      return Promise.resolve(
+        new Response(JSON.stringify({ error: "SESSION_STEP_UP_REQUIRED" }), { status: 403 }),
+      );
     });
 
     await act(async () => {
@@ -622,7 +620,11 @@ describe("TenantMembersCard", () => {
   // -------------------------------------------------------------------------
   // 8. Role change error: 409 (scimManaged conflict)
   // -------------------------------------------------------------------------
-  it("shows scimManagedRoleError toast on 409 response", async () => {
+  it.each([
+    ["SCIM_MANAGED_MEMBER", "scimManagedRoleError"],
+    ["CONFLICT", "conflict"],
+    [undefined, "unknownError"],
+  ])("shows %s 409 as %s, not the SCIM message for other codes", async (code, message) => {
     const member = makeMember({
       id: "mem-1",
       userId: "user-member",
@@ -644,7 +646,9 @@ describe("TenantMembersCard", () => {
         return Promise.resolve({ ok: true, json: () => Promise.resolve([member]) });
       }
       // PUT returns 409
-      return Promise.resolve({ ok: false, status: 409, json: () => Promise.resolve({ error: "SCIM_MANAGED_CONFLICT" }) });
+      return Promise.resolve(
+        new Response(JSON.stringify(code === undefined ? {} : { error: code }), { status: 409 }),
+      );
     });
 
     await act(async () => {
@@ -661,8 +665,9 @@ describe("TenantMembersCard", () => {
     });
 
     await waitFor(() => {
-      expect(mockToast.error).toHaveBeenCalledWith("scimManagedRoleError");
+      expect(mockToast.error).toHaveBeenCalledWith(message);
     });
+    expect(mockToast.error).toHaveBeenCalledTimes(1);
     expect(mockToast.success).not.toHaveBeenCalled();
   });
 
@@ -690,7 +695,7 @@ describe("TenantMembersCard", () => {
       if (url === "/api/tenant/members" && (!init?.method || init.method === "GET")) {
         return Promise.resolve({ ok: true, json: () => Promise.resolve([member]) });
       }
-      return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({ error: "INTERNAL_ERROR" }) });
+      return Promise.resolve(new Response(JSON.stringify({ error: "INTERNAL_ERROR" }), { status: 500 }));
     });
 
     await act(async () => {

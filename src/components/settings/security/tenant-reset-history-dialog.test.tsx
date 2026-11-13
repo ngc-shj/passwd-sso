@@ -356,6 +356,43 @@ describe("TenantResetHistoryDialog", () => {
     });
   });
 
+  describe("approve 403 error surfacing", () => {
+    it("toasts the response's own code key, not the FORBIDDEN fallback, on a real 403", async () => {
+      await renderAndOpen([
+        makeRow({ id: "reset-x", status: "pending_approval" }),
+      ]);
+      const baseImpl = mockFetch.getMockImplementation()!;
+      mockFetch.mockImplementation((url: string, init?: RequestInit) =>
+        String(url).includes("/approve")
+          ? Promise.resolve(
+              new Response(
+                JSON.stringify({ error: "FORBIDDEN_INSUFFICIENT_ROLE" }),
+                { status: 403, headers: { "content-type": "application/json" } },
+              ),
+            )
+          : baseImpl(url, init),
+      );
+
+      fireEvent.click(
+        screen
+          .getAllByRole("button")
+          .find((b) => b.textContent?.includes("approveButton"))!,
+      );
+      fireEvent.change(screen.getByPlaceholderText("APPROVE"), {
+        target: { value: "APPROVE" },
+      });
+      const submitButtons = screen
+        .getAllByRole("button")
+        .filter((b) => b.textContent?.includes("approveButton"));
+      fireEvent.click(submitButtons[submitButtons.length - 1]);
+
+      await waitFor(() => {
+        expect(mockToast.error).toHaveBeenCalledWith("forbiddenInsufficientRole");
+      });
+      expect(mockToast.error).not.toHaveBeenCalledWith("forbidden");
+    });
+  });
+
   describe("approvedBy display", () => {
     it("shows approvedBy label for approved rows when approvedBy is set", async () => {
       await renderAndOpen([

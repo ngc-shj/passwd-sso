@@ -10,7 +10,7 @@ if (typeof globalThis.ResizeObserver === "undefined") {
   } as unknown as typeof ResizeObserver;
 }
 
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { mockTeamMismatch } from "@/__tests__/helpers/mock-app-navigation";
 import type { encryptBinary, decryptBinary } from "@/lib/crypto/crypto-client";
 
@@ -231,6 +231,46 @@ describe("TeamAttachmentSection", () => {
       fireEvent.click(screen.getByTitle("download"));
 
       await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith("attachmentKeyUnavailable"));
+    });
+  });
+
+  describe("delete", () => {
+    const ATT = { id: "a1", filename: "x.png", contentType: "image/png", sizeBytes: 100, createdAt: new Date().toISOString() };
+
+    function confirmDelete(onChange = vi.fn()) {
+      render(<TeamAttachmentSection teamId="team-1" entryId="entry-1" attachments={[ATT]} onAttachmentsChange={onChange} />);
+      fireEvent.click(screen.getByTitle("delete"));
+      fireEvent.click(within(screen.getByRole("alertdialog")).getByText("delete"));
+      return onChange;
+    }
+
+    it("shows the server's own message on an API error, not the fixed deleteError", async () => {
+      const res = new Response(JSON.stringify({ error: "TEAM_BUSY" }), { status: 409 });
+      mockFetch.mockResolvedValue(res);
+      const onChange = confirmDelete();
+
+      await waitFor(() => expect(toastApiError).toHaveBeenCalledWith(res, expect.any(Function)));
+      expect(mockToast.error).not.toHaveBeenCalled();
+      expect(mockToast.success).not.toHaveBeenCalled();
+      expect(onChange).not.toHaveBeenCalled();
+    });
+
+    it("keeps deleteError for a network failure", async () => {
+      mockFetch.mockRejectedValue(new TypeError("fetch failed"));
+      const onChange = confirmDelete();
+
+      await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith("deleteError"));
+      expect(toastApiError).not.toHaveBeenCalled();
+      expect(onChange).not.toHaveBeenCalled();
+    });
+
+    it("removes the attachment on success", async () => {
+      mockFetch.mockResolvedValue(new Response(null, { status: 200 }));
+      const onChange = confirmDelete();
+
+      await waitFor(() => expect(onChange).toHaveBeenCalledWith([]));
+      expect(mockToast.success).toHaveBeenCalledWith("deleted");
+      expect(toastApiError).not.toHaveBeenCalled();
     });
   });
 

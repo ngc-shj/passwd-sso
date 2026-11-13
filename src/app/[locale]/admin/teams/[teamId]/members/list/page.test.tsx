@@ -113,6 +113,11 @@ vi.mock("@/components/ui/select", () => ({
 
 import TeamMembersPage from "./page";
 
+// A real Response: its body can be read once, as in a browser.
+function errorResponse(status: number, error?: string): Response {
+  return new Response(JSON.stringify(error === undefined ? {} : { error }), { status });
+}
+
 function makeMember(overrides: Partial<{
   id: string;
   userId: string;
@@ -179,11 +184,7 @@ describe("TeamMembersPage (admin full-page, step-up denial)", () => {
     const baseImpl = mockFetch.getMockImplementation()!;
     mockFetch.mockImplementation((url: string, init?: RequestInit) => {
       if (init?.method === "PUT") {
-        return Promise.resolve({
-          ok: false,
-          status: 403,
-          json: () => Promise.resolve({ error: "SESSION_STEP_UP_REQUIRED" }),
-        });
+        return Promise.resolve(errorResponse(403, "SESSION_STEP_UP_REQUIRED"));
       }
       return baseImpl(url, init);
     });
@@ -213,11 +214,7 @@ describe("TeamMembersPage (admin full-page, step-up denial)", () => {
     const baseImpl = mockFetch.getMockImplementation()!;
     mockFetch.mockImplementation((url: string, init?: RequestInit) => {
       if (init?.method === "DELETE") {
-        return Promise.resolve({
-          ok: false,
-          status: 403,
-          json: () => Promise.resolve({ error: "SESSION_STEP_UP_REQUIRED" }),
-        });
+        return Promise.resolve(errorResponse(403, "SESSION_STEP_UP_REQUIRED"));
       }
       return baseImpl(url, init);
     });
@@ -346,11 +343,7 @@ describe("TeamMembersPage (SCIM pending admission, C5)", () => {
     const baseImpl = mockFetch.getMockImplementation()!;
     mockFetch.mockImplementation((url: string, init?: RequestInit) => {
       if (url === "/api/teams/team-1/members/mem-pending/approve") {
-        return Promise.resolve({
-          ok: false,
-          status: 403,
-          json: () => Promise.resolve({ error: "SESSION_STEP_UP_REQUIRED" }),
-        });
+        return Promise.resolve(errorResponse(403, "SESSION_STEP_UP_REQUIRED"));
       }
       return baseImpl(url, init);
     });
@@ -380,11 +373,7 @@ describe("TeamMembersPage (SCIM pending admission, C5)", () => {
     const baseImpl = mockFetch.getMockImplementation()!;
     mockFetch.mockImplementation((url: string, init?: RequestInit) => {
       if (url === "/api/teams/team-1/members/mem-pending/reject") {
-        return Promise.resolve({
-          ok: false,
-          status: 403,
-          json: () => Promise.resolve({ error: "SESSION_STEP_UP_REQUIRED" }),
-        });
+        return Promise.resolve(errorResponse(403, "SESSION_STEP_UP_REQUIRED"));
       }
       return baseImpl(url, init);
     });
@@ -416,11 +405,7 @@ describe("TeamMembersPage (SCIM pending admission, C5)", () => {
     mockFetch.mockImplementation((url: string, init?: RequestInit) => {
       if (url === "/api/teams/team-1/members/mem-pending/approve") {
         approveCalls += 1;
-        return Promise.resolve({
-          ok: false,
-          status: 409,
-          json: () => Promise.resolve({ error: "SCIM_APPROVAL_ROLE_CHANGED" }),
-        });
+        return Promise.resolve(errorResponse(409, "SCIM_APPROVAL_ROLE_CHANGED"));
       }
       return baseImpl(url, init);
     });
@@ -461,10 +446,12 @@ describe("TeamMembersPage (SCIM pending admission, C5)", () => {
     // generic CONFLICT must not reuse the "reject instead" wording, since
     // nothing here says the target is actually gone.
     { button: "approveButton", path: "approve", status: 409, error: "CONFLICT", message: "approvalBusyRetry" },
+    { button: "approveButton", path: "approve", status: 409, error: "TEAM_BUSY", message: "approvalBusyRetry" },
     { button: "approveButton", path: "approve", status: 429, error: "RATE_LIMIT_EXCEEDED", message: "rateLimitExceeded" },
     { button: "rejectButton", path: "reject", status: 404, error: "MEMBER_NOT_FOUND", message: "requestAlreadyHandled" },
     { button: "rejectButton", path: "reject", status: 403, error: "FORBIDDEN", message: "forbidden" },
     { button: "rejectButton", path: "reject", status: 409, error: "CONFLICT", message: "approvalBusyRetry" },
+    { button: "rejectButton", path: "reject", status: 409, error: "TEAM_BUSY", message: "approvalBusyRetry" },
     { button: "rejectButton", path: "reject", status: 429, error: "RATE_LIMIT_EXCEEDED", message: "rateLimitExceeded" },
   ])("$path $status $error shows $message, not a network error", async ({ button, path, status, error, message }) => {
     const pending = makeMember({ id: "mem-pending", userId: "user-pending", role: "ADMIN", pendingApproval: true });
@@ -473,7 +460,7 @@ describe("TeamMembersPage (SCIM pending admission, C5)", () => {
     const baseImpl = mockFetch.getMockImplementation()!;
     mockFetch.mockImplementation((url: string, init?: RequestInit) => {
       if (url === `/api/teams/team-1/members/mem-pending/${path}`) {
-        return Promise.resolve({ ok: false, status, json: () => Promise.resolve({ error }) });
+        return Promise.resolve(errorResponse(status, error));
       }
       return baseImpl(url, init);
     });
@@ -512,7 +499,7 @@ describe("TeamMembersPage (SCIM pending admission, C5)", () => {
     const baseImpl = mockFetch.getMockImplementation()!;
     mockFetch.mockImplementation((url: string, init?: RequestInit) => {
       if (url === "/api/teams/team-1/members/mem-pending/approve") {
-        return Promise.resolve({ ok: false, status: 409, json: () => Promise.resolve({ error: "SOME_OTHER_CODE" }) });
+        return Promise.resolve(errorResponse(409, "SOME_OTHER_CODE"));
       }
       return baseImpl(url, init);
     });
@@ -527,6 +514,61 @@ describe("TeamMembersPage (SCIM pending admission, C5)", () => {
       fireEvent.click(screen.getByRole("button", { name: "approveButton" }));
     });
 
+    await waitFor(() => {
+      expect(mockToast.error).toHaveBeenCalledWith("networkError");
+    });
+  });
+});
+
+describe("TeamMembersPage (role change / removal refusals)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockCanUsePasskeyRecovery.mockResolvedValue(false);
+  });
+
+  async function renderWithFailure(method: "PUT" | "DELETE", failure: () => Promise<Response>) {
+    setupFetchReady({ members: [makeMember({ id: "mem-1", userId: "user-member", role: "MEMBER" })] });
+    const baseImpl = mockFetch.getMockImplementation()!;
+    mockFetch.mockImplementation((url: string, init?: RequestInit) =>
+      init?.method === method ? failure() : baseImpl(url, init),
+    );
+    await act(async () => {
+      render(<TeamMembersPage params={Promise.resolve({ teamId: "team-1" })} />);
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("select-change-MEMBER")).toBeInTheDocument();
+    });
+    await act(async () => {
+      if (method === "PUT") fireEvent.click(screen.getByTestId("select-change-MEMBER"));
+      else fireEvent.click(screen.getAllByTestId("alert-action")[0]);
+    });
+  }
+
+  it.each(["PUT", "DELETE"] as const)("%s TEAM_BUSY shows the busy message, not a network error", async (method) => {
+    await renderWithFailure(method, () => Promise.resolve(errorResponse(409, "TEAM_BUSY")));
+    await waitFor(() => {
+      expect(mockToast.error).toHaveBeenCalledWith("teamBusy");
+    });
+    expect(mockToast.error).not.toHaveBeenCalledWith("networkError");
+  });
+
+  it.each(["PUT", "DELETE"] as const)("%s CONFLICT shows the conflict message, not a network error", async (method) => {
+    await renderWithFailure(method, () => Promise.resolve(errorResponse(409, "CONFLICT")));
+    await waitFor(() => {
+      expect(mockToast.error).toHaveBeenCalledWith("conflict");
+    });
+    expect(mockToast.error).not.toHaveBeenCalledWith("networkError");
+  });
+
+  it.each(["PUT", "DELETE"] as const)("%s non-JSON 5xx shows networkError", async (method) => {
+    await renderWithFailure(method, () => Promise.resolve(new Response("bad gateway", { status: 502 })));
+    await waitFor(() => {
+      expect(mockToast.error).toHaveBeenCalledWith("networkError");
+    });
+  });
+
+  it.each(["PUT", "DELETE"] as const)("%s thrown fetch shows networkError", async (method) => {
+    await renderWithFailure(method, () => Promise.reject(new TypeError("fetch failed")));
     await waitFor(() => {
       expect(mockToast.error).toHaveBeenCalledWith("networkError");
     });

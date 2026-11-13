@@ -16,6 +16,7 @@ import { MS_PER_HOUR } from "@/lib/constants/time";
 import { TEAM_MEMBERSHIP_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
+import { membershipConflictResponse } from "@/lib/http/lock-conflict-response";
 
 type Params = { params: Promise<{ teamId: string; memberId: string }> };
 
@@ -138,7 +139,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     );
   } catch (e) {
     // A rotation, or another admission transaction, held a lock past budget.
-    if (isMembershipLockConflict(e)) return errorResponse(API_ERROR.CONFLICT);
+    if (isMembershipLockConflict(e)) return membershipConflictResponse(e);
     throw e;
   }
 

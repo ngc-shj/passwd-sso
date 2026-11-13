@@ -10,7 +10,7 @@ import { AAD_VERSION } from "@/lib/crypto/crypto-aad";
 import { restoreTeamHistorySchema } from "@/lib/validations";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, handleAuthError, notFound, teamBusy, unauthorized } from "@/lib/http/api-response";
 import { lockTeamKeyVersion, TeamRotationInProgressError } from "@/lib/team/team-key-rotation-lock";
 import { itemKeyIdsMatch, teamKeyVersionHolders } from "@/lib/team/team-item-key";
 
@@ -81,7 +81,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       if (!(await lockTeamKeyVersion(tx, teamId))) return { ok: false, code: API_ERROR.NOT_FOUND };
     } catch (e) {
       if (e instanceof TeamRotationInProgressError) {
-        return { ok: false, code: API_ERROR.TEAM_KEY_VERSION_MISMATCH };
+        return { ok: false, code: API_ERROR.TEAM_BUSY };
       }
       throw e;
     }
@@ -234,6 +234,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   );
 
   if (!outcome.ok) {
+    if (outcome.code === API_ERROR.TEAM_BUSY) return teamBusy();
     return outcome.code === API_ERROR.NOT_FOUND ? notFound() : errorResponse(outcome.code);
   }
 

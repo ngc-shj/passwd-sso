@@ -468,9 +468,16 @@ describe("PUT /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]/migr
     await expectRefused(validBody(change), 409, "MIGRATE_METADATA_CHANGED");
   });
 
-  it("409 TEAM_KEY_VERSION_MISMATCH while a rotation holds the team row", async () => {
+  it("409 TEAM_BUSY with Retry-After while a rotation holds the team row", async () => {
     mockLockEntry.mockRejectedValue(new TeamRotationInProgressError());
-    await expectRefused(validBody(), 409, "TEAM_KEY_VERSION_MISMATCH");
+    const { res, json } = await migrate(validBody());
+    expect(res.status).toBe(409);
+    expect(json.error).toBe("TEAM_BUSY");
+    expect(res.headers.get("Retry-After")).toBe("3");
+    expect(txMock.attachment.update).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
+    expect(mockDeleteObject).toHaveBeenCalledWith(NEW_REF, expect.objectContaining({ attachmentId: ATT }));
+    expect(mockDeleteBlobs).not.toHaveBeenCalled();
   });
 
   it("404 when the entry is gone under the lock", async () => {

@@ -244,13 +244,28 @@ describe("POST /api/teams/[teamId]/members/[memberId]/reject", () => {
     expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 
-  it("returns 409 when a rotation holds the team past the lock wait", async () => {
+  it("returns 409 CONFLICT without Retry-After when the team row cannot be locked", async () => {
     const { TeamRotationLockError } = await vi.importActual<typeof import("@/lib/team/team-key-rotation-lock")>("@/lib/team/team-key-rotation-lock");
     mockLockTeamsAgainstRotation.mockRejectedValue(new TeamRotationLockError(1));
 
     const res = await reject();
 
     expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("CONFLICT");
+    expect(res.headers.get("Retry-After")).toBeNull();
     expect(tx.teamMember.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("returns 409 TEAM_BUSY with Retry-After when the team row lock wait times out", async () => {
+    const { TeamRotationInProgressError } = await vi.importActual<typeof import("@/lib/team/team-key-rotation-lock")>("@/lib/team/team-key-rotation-lock");
+    mockLockTeamsAgainstRotation.mockRejectedValue(new TeamRotationInProgressError());
+
+    const res = await reject();
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("TEAM_BUSY");
+    expect(res.headers.get("Retry-After")).toBe("3");
+    expect(tx.teamMember.deleteMany).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 });

@@ -16,7 +16,7 @@ import { withTeamTenantRls } from "@/lib/tenant-context";
 import { displayIdentityOf, displayUserOf, fetchUserDisplayMap } from "@/lib/audit/audit-user-lookup";
 import { deleteAttachmentBlobs } from "@/lib/blob-store/cleanup";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, forbidden, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, forbidden, handleAuthError, notFound, teamBusy, unauthorized } from "@/lib/http/api-response";
 import * as teamPasswordService from "@/lib/services/team-password-service";
 import { TeamPasswordServiceError } from "@/lib/services/team-password-service";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
@@ -147,6 +147,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     );
   } catch (e) {
     if (e instanceof TeamPasswordServiceError) {
+      if (e.code === API_ERROR.TEAM_BUSY) return teamBusy();
       return errorResponse(e.code, e.statusHint);
     }
     throw e;

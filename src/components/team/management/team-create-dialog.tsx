@@ -19,7 +19,7 @@ import { Building2, Loader2, Lock } from "lucide-react";
 import { toast } from "sonner";
 import { API_PATH, VAULT_STATUS } from "@/lib/constants";
 import { useVault, VaultUnlockError } from "@/lib/vault/vault-context";
-import { API_ERROR } from "@/lib/http/api-error-codes";
+import { API_ERROR, apiErrorToI18nKey } from "@/lib/http/api-error-codes";
 import { readApiErrorBody, getApiErrorFieldErrors } from "@/lib/http/read-api-error-body";
 import { preventIMESubmit } from "@/lib/ui/ime-guard";
 import { formatLockedUntil } from "@/components/vault/vault-lock-screen";
@@ -34,6 +34,7 @@ interface TeamCreateDialogProps {
 
 export function TeamCreateDialog({ trigger, onCreated }: TeamCreateDialogProps) {
   const t = useTranslations("Team");
+  const tApi = useTranslations("ApiErrors");
   const tVault = useTranslations("Vault");
   const { status, userId, unlock, getEcdhPublicKeyJwk } = useVault();
   const [open, setOpen] = useState(false);
@@ -177,7 +178,12 @@ export function TeamCreateDialog({ trigger, onCreated }: TeamCreateDialogProps) 
       });
 
       if (res.status === 409) {
-        setSlugError(t("slugTaken"));
+        const body = await readApiErrorBody(res);
+        if (body?.error === API_ERROR.SLUG_ALREADY_TAKEN) {
+          setSlugError(t("slugTaken"));
+        } else {
+          toast.error(tApi(apiErrorToI18nKey(body?.error)));
+        }
         setSaving(false);
         return;
       }

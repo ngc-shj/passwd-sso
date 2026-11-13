@@ -16,7 +16,7 @@ import { Loader2, UserPlus, Search } from "lucide-react";
 import { toast } from "sonner";
 import { TEAM_ROLE, apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
-import { API_ERROR } from "@/lib/http/api-error-codes";
+import { API_ERROR, apiErrorToI18nKey } from "@/lib/http/api-error-codes";
 import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
 import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
@@ -37,6 +37,7 @@ interface Props {
 
 export function TeamAddFromTenantSection({ teamId, onSuccess, teamTenantName }: Props) {
   const t = useTranslations("Team");
+  const tApi = useTranslations("ApiErrors");
   const [addSearch, setAddSearch] = useState("");
   const [addRole, setAddRole] = useState<string>(TEAM_ROLE.MEMBER);
   const [adding, setAdding] = useState<string | null>(null);
@@ -110,7 +111,9 @@ export function TeamAddFromTenantSection({ teamId, onSuccess, teamTenantName }: 
             ? t("scimManagedCannotAdd")
             : body?.error === API_ERROR.SCIM_APPROVAL_PENDING
             ? t("scimApprovalPendingCannotAdd")
-            : t("alreadyMember"),
+            : body?.error === API_ERROR.ALREADY_A_MEMBER
+            ? t("alreadyMember")
+            : tApi(apiErrorToI18nKey(body?.error)),
         );
         setAdding(null);
         return;

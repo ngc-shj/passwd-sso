@@ -427,11 +427,15 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]",
     expect(mockDeleteBlobs).not.toHaveBeenCalled();
   });
 
-  it("returns 409 TEAM_KEY_VERSION_MISMATCH when a rotation holds the team row", async () => {
+  it("returns 409 TEAM_BUSY with Retry-After when a rotation holds the team row", async () => {
     mockLockEntry.mockRejectedValue(new TeamRotationInProgressError());
     const { res, json } = await del();
     expect(res.status).toBe(409);
-    expect(json.error).toBe("TEAM_KEY_VERSION_MISMATCH");
+    expect(json.error).toBe("TEAM_BUSY");
+    expect(res.headers.get("Retry-After")).toBe("3");
+    expect(mockPrismaAttachment.delete).not.toHaveBeenCalled();
+    expect(mockDeleteBlobs).not.toHaveBeenCalled();
+    expect(mockLogAuditAsync).not.toHaveBeenCalled();
   });
 
   it("deletes the row under the locks, then the locked row's object after commit", async () => {

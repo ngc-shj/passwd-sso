@@ -7,6 +7,25 @@
 import type { MainApiErrorBody } from "@/lib/http/api-response";
 
 /**
+ * Parse `res`'s JSON body once per `Response`; later calls return the same
+ * parse. A body can be read only once, so without this a second reader of an
+ * error response (a step-up check, then the caller's own code check) gets
+ * `null` in a browser. Never rejects: an unparseable body is `null`. Only for
+ * error-path readers — success paths read their body themselves.
+ */
+export function parseJsonBodyOnce(res: Response): Promise<unknown> {
+  let parse = jsonBodyParses.get(res);
+  if (!parse) {
+    parse = res.json().catch(() => null);
+    jsonBodyParses.set(res, parse);
+  }
+  return parse;
+}
+
+// Keyed weakly: an entry lives only as long as its Response.
+const jsonBodyParses = new WeakMap<Response, Promise<unknown>>();
+
+/**
  * Parse a non-2xx `Response` into the canonical Main API error envelope.
  *
  * Returns `null` if the body is missing, not JSON, or does not match the
@@ -39,7 +58,7 @@ export async function readApiErrorBody(
   res: Response,
 ): Promise<MainApiErrorBody | null> {
   if (res.ok) return null;
-  const json = await res.json().catch(() => null);
+  const json = await parseJsonBodyOnce(res);
   if (!json || typeof json !== "object" || typeof (json as { error?: unknown }).error !== "string") {
     return null;
   }

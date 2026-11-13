@@ -67,6 +67,36 @@ describe("apiErrorToI18nKey", () => {
       apiErrorToI18nKey("NOPE", { NOT_FOUND: "shareNotFound" }),
     ).toBe("unknownError");
   });
+
+  it("maps TEAM_BUSY to teamBusy", () => {
+    expect(apiErrorToI18nKey(API_ERROR.TEAM_BUSY)).toBe("teamBusy");
+  });
+
+  describe("inherited Object members are not codes", () => {
+    for (const inherited of ["constructor", "toString", "__proto__"]) {
+      it(`returns unknownError (a string) for "${inherited}" without overrides`, () => {
+        const key = apiErrorToI18nKey(inherited);
+        expect(typeof key).toBe("string");
+        expect(key).toBe("unknownError");
+      });
+
+      it(`returns unknownError (a string) for "${inherited}" with an overrides object`, () => {
+        const key = apiErrorToI18nKey(inherited, { NOT_FOUND: "shareNotFound" });
+        expect(typeof key).toBe("string");
+        expect(key).toBe("unknownError");
+      });
+    }
+
+    it("still maps a real code to its key (positive control)", () => {
+      expect(apiErrorToI18nKey(API_ERROR.FORBIDDEN)).toBe("forbidden");
+    });
+
+    it("still applies an override for a real code (positive control)", () => {
+      expect(
+        apiErrorToI18nKey(API_ERROR.NOT_FOUND, { NOT_FOUND: "shareNotFound" }),
+      ).toBe("shareNotFound");
+    });
+  });
 });
 
 describe("eaErrorToI18nKey", () => {
@@ -102,6 +132,12 @@ describe("eaErrorToI18nKey", () => {
     expect(eaErrorToI18nKey(null)).toBe("actionFailed");
     expect(eaErrorToI18nKey(undefined)).toBe("actionFailed");
   });
+
+  it("returns actionFailed for inherited Object member names", () => {
+    expect(eaErrorToI18nKey("constructor")).toBe("actionFailed");
+    expect(eaErrorToI18nKey("toString")).toBe("actionFailed");
+    expect(eaErrorToI18nKey("__proto__")).toBe("actionFailed");
+  });
 });
 
 // ── Structural invariants ───────────────────────────────────────
@@ -135,13 +171,18 @@ describe("API_ERROR structural invariants", () => {
     // 202 = 201 + HISTORY_ROW_CHANGED (team-key-rotation-rekey review round 1 F1).
     // 203 = 202 + HISTORY_ROW_LEGACY (team-key-rotation-rekey review round 3 S-R3-2).
     // 204 = 203 + REKEY_HISTORY_LEGACY (team-key-rotation-rekey review round 4 N-R4-1).
-    expect(Object.keys(API_ERROR).length).toBe(204);
+    // 205 = 204 + TEAM_BUSY (team-lock-busy-error C1).
+    expect(Object.keys(API_ERROR).length).toBe(205);
   });
 });
 
 // ── API_ERROR_STATUS invariants ─────────────────────────────────
 
 describe("API_ERROR_STATUS", () => {
+  it("maps TEAM_BUSY to 409", () => {
+    expect(API_ERROR_STATUS.TEAM_BUSY).toBe(409);
+  });
+
   it("covers every API_ERROR code (satisfies completeness)", () => {
     for (const code of Object.values(API_ERROR)) {
       expect(API_ERROR_STATUS).toHaveProperty(code);

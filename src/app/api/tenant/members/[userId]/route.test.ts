@@ -147,6 +147,7 @@ describe("PUT /api/tenant/members/[userId]", () => {
     const res = await putRequest(TARGET_USER_ID, { role: "OWNER" });
     expect(res.status).toBe(409);
     expect((await res.json()).error).toBe("CONFLICT");
+    expect(res.headers.get("Retry-After")).toBeNull();
     expect(mockPrismaTenantMember.update).not.toHaveBeenCalled();
   });
 

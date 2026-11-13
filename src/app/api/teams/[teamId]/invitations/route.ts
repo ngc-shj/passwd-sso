@@ -14,6 +14,7 @@ import { advisoryXactLock, withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
+import { membershipConflictResponse } from "@/lib/http/lock-conflict-response";
 import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import { TEAM_INVITATION_TTL_MS } from "@/lib/constants/team/invitation";
 import { displayIdentityOf, fetchUserDisplayMap } from "@/lib/audit/audit-user-lookup";
@@ -208,7 +209,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       { timeout: TEAM_MEMBERSHIP_TX_TIMEOUT_MS },
     );
   } catch (e) {
-    if (isMembershipLockConflict(e)) return errorResponse(API_ERROR.CONFLICT);
+    if (isMembershipLockConflict(e)) return membershipConflictResponse(e);
     throw e;
   }
 

@@ -15,7 +15,12 @@ import {
 import { bytesToBase64, type TeamAttachmentDownload } from "@/lib/team/team-attachment-crypto";
 import type { RekeyEntryData } from "@/lib/team/rekey-payload";
 import type { TeamKeyFailureReason } from "@/lib/team/team-key-resolution";
-import { REKEY_ROTATION_PAUSE_MS, REKEY_STOP_REASON, runRekeyPass } from "./rekey-runner";
+import {
+  REKEY_BUSY_MAX_WAIT_MS,
+  REKEY_ROTATION_PAUSE_MS,
+  REKEY_STOP_REASON,
+  runRekeyPass,
+} from "./rekey-runner";
 
 // ─── A fake server over real-crypto rows ────────────────────────────────────
 
@@ -540,6 +545,156 @@ describe("runRekeyPass status table", () => {
     const result = await runRekeyPass(deps);
 
     expect(result.stop?.reason).toBe(REKEY_STOP_REASON.TRANSIENT);
+  });
+});
+
+describe("runRekeyPass TEAM_BUSY (a team lock wait timed out)", () => {
+  const busy = (retryAfter?: string): Scripted => ({
+    status: 409,
+    code: API_ERROR.TEAM_BUSY,
+    ...(retryAfter ? { headers: { "Retry-After": retryAfter } } : {}),
+  });
+  const queueBusy = (server: FakeServer, key: string, count: number, retryAfter = "3") => {
+    for (let i = 0; i < count; i++) server.queue(key, busy(retryAfter));
+  };
+
+  it("re-key POST: sleeps Retry-After, retries the same request, never invalidates the key cache", async () => {
+    const { server, deps } = await setup();
+    server.queue("POST rekey:e1", busy("4"));
+
+    const result = await runRekeyPass(deps);
+
+    expect(deps.sleep).toHaveBeenCalledTimes(1);
+    expect(deps.sleep).toHaveBeenCalledWith(4000);
+    expect(deps.invalidateTeamKeys).not.toHaveBeenCalled();
+    expect(server.posts("e1")).toBe(2);
+    expect(result.rekeyed).toEqual(["e1"]);
+  });
+
+  it("upgrade PUT: sleeps Retry-After, retries, never invalidates the key cache", async () => {
+    const { server, deps } = await setup({ v0: ["e1"] });
+    server.queue("PUT entry:e1", busy("4"));
+
+    const result = await runRekeyPass(deps);
+
+    expect(deps.sleep).toHaveBeenCalledTimes(1);
+    expect(deps.sleep).toHaveBeenCalledWith(4000);
+    expect(deps.invalidateTeamKeys).not.toHaveBeenCalled();
+    expect(server.calls.filter((c) => c === "PUT entry:e1")).toHaveLength(2);
+    expect(result.rekeyed).toEqual(["e1"]);
+  });
+
+  it("migrate PUT: sleeps Retry-After, retries, never invalidates the key cache", async () => {
+    const { server, deps } = await setup();
+    await addLegacyAttachment(server, "e1");
+    server.queue("PUT migrate:e1", busy("4"));
+
+    const result = await runRekeyPass(deps);
+
+    expect(deps.sleep).toHaveBeenCalledTimes(1);
+    expect(deps.sleep).toHaveBeenCalledWith(4000);
+    expect(deps.invalidateTeamKeys).not.toHaveBeenCalled();
+    expect(server.calls.filter((c) => c === "PUT migrate:e1")).toHaveLength(2);
+    expect(result.rekeyed).toEqual(["e1"]);
+  });
+
+  it.each([
+    ["30", 30_000],
+    ["31", REKEY_BUSY_MAX_WAIT_MS],
+    ["3600", REKEY_BUSY_MAX_WAIT_MS],
+    [undefined, 5_000],
+  ])("Retry-After %s sleeps %i ms", async (retryAfter, expectedMs) => {
+    const { server, deps } = await setup();
+    server.queue("POST rekey:e1", busy(retryAfter));
+
+    await runRekeyPass(deps);
+
+    expect(deps.sleep).toHaveBeenCalledWith(expectedMs);
+  });
+
+  it("the 10th busy wait still retries", async () => {
+    const { server, deps } = await setup();
+    queueBusy(server, "POST rekey:e1", 10);
+
+    const result = await runRekeyPass(deps);
+
+    expect(result.status).toBe("completed");
+    expect(result.rekeyed).toEqual(["e1"]);
+    expect(deps.sleep).toHaveBeenCalledTimes(10);
+  });
+
+  it("the 11th busy wait stops the pass with RETRY_BUDGET_EXHAUSTED", async () => {
+    const { server, deps } = await setup();
+    queueBusy(server, "POST rekey:e1", 11);
+
+    const result = await runRekeyPass(deps);
+
+    expect(result.status).toBe("stopped");
+    expect(result.stop).toEqual({
+      reason: REKEY_STOP_REASON.RETRY_BUDGET_EXHAUSTED,
+      code: API_ERROR.TEAM_BUSY,
+      entryId: "e1",
+    });
+    expect(deps.sleep).toHaveBeenCalledTimes(10);
+    expect(deps.invalidateTeamKeys).not.toHaveBeenCalled();
+  });
+
+  it("10 busy waits leave the full rotation budget: 5 rotation waits after them still succeed", async () => {
+    const { server, deps } = await setup();
+    queueBusy(server, "POST rekey:e1", 10);
+    for (let i = 0; i < 5; i++) {
+      server.queue("POST rekey:e1", { status: 409, code: API_ERROR.TEAM_KEY_VERSION_MISMATCH });
+    }
+
+    const result = await runRekeyPass(deps);
+
+    expect(result.status).toBe("completed");
+    expect(result.rekeyed).toEqual(["e1"]);
+    expect(deps.invalidateTeamKeys).toHaveBeenCalledTimes(5);
+  });
+
+  it("10 busy waits leave the full rate-limit budget: 10 rate-limit waits after them still succeed", async () => {
+    const { server, deps } = await setup();
+    queueBusy(server, "POST rekey:e1", 10);
+    // On the list request: a per-entry step cap (20) would end the entry first.
+    for (let i = 0; i < 10; i++) {
+      server.queue("GET list", { status: 429, code: API_ERROR.RATE_LIMIT_EXCEEDED });
+    }
+
+    const result = await runRekeyPass(deps);
+
+    expect(result.status).toBe("completed");
+    expect(result.rekeyed).toEqual(["e1"]);
+  });
+
+  it("rate-limit waits do not consume the busy budget", async () => {
+    const { server, deps } = await setup();
+    // On the list request: a per-entry step cap (20) would end the entry first.
+    for (let i = 0; i < 10; i++) {
+      server.queue("GET list", { status: 429, code: API_ERROR.RATE_LIMIT_EXCEEDED });
+    }
+    queueBusy(server, "POST rekey:e1", 10);
+
+    const result = await runRekeyPass(deps);
+
+    expect(result.status).toBe("completed");
+    expect(result.rekeyed).toEqual(["e1"]);
+  });
+
+  it("TEAM_BUSY then a genuine mismatch → refreshes the keys (REFRESH_KEYS)", async () => {
+    const { server, deps } = await setup();
+    server.queue(
+      "POST rekey:e1",
+      busy("3"),
+      { status: 409, code: API_ERROR.TEAM_KEY_VERSION_MISMATCH },
+    );
+
+    const result = await runRekeyPass(deps);
+
+    expect(deps.invalidateTeamKeys).toHaveBeenCalledTimes(1);
+    expect(deps.sleep).toHaveBeenNthCalledWith(1, 3000);
+    expect(deps.sleep).toHaveBeenNthCalledWith(2, REKEY_ROTATION_PAUSE_MS);
+    expect(result.rekeyed).toEqual(["e1"]);
   });
 });
 

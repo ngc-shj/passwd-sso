@@ -72,9 +72,9 @@ vi.mock("@/lib/security/rate-limiters", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   withTeamTenantRls: mockWithTeamTenantRls,
 }));
-vi.mock("@/lib/team/team-key-rotation-lock", () => ({
+vi.mock("@/lib/team/team-key-rotation-lock", async () => ({
+  ...(await vi.importActual<typeof import("@/lib/team/team-key-rotation-lock")>("@/lib/team/team-key-rotation-lock")),
   lockTeamKeyVersion: mockLockTeamKeyVersion,
-  TeamRotationInProgressError: class extends Error {},
 }));
 vi.mock("@/lib/audit/audit-user-lookup", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/audit/audit-user-lookup")>()),

@@ -382,6 +382,19 @@ describe("POST /api/teams (E2E-only)", () => {
     expect(json.error).toBe("SLUG_ALREADY_TAKEN");
   });
 
+  it("returns 409 CONFLICT without Retry-After when the tenant row lock cannot be taken", async () => {
+    const { TenantMemberLockTimeoutError } = await vi.importActual<typeof import("@/lib/team/tenant-row-lock")>("@/lib/team/tenant-row-lock");
+    mockLockTenantRows.mockRejectedValue(new TenantMemberLockTimeoutError());
+
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/teams", {
+      body: validE2EBody,
+    }));
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("CONFLICT");
+    expect(res.headers.get("Retry-After")).toBeNull();
+    expect(mockPrismaTeam.create).not.toHaveBeenCalled();
+  });
+
   it("returns 409 on P2002 race condition during create", async () => {
     mockPrismaTeam.findUnique.mockResolvedValue(null);
     const p2002 = new Prisma.PrismaClientKnownRequestError(

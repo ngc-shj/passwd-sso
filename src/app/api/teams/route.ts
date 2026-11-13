@@ -6,6 +6,7 @@ import { checkAuth } from "@/lib/auth/session/check-auth";
 import { createTeamE2ESchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, forbidden, handleAuthError, unauthorized } from "@/lib/http/api-response";
+import { membershipConflictResponse } from "@/lib/http/lock-conflict-response";
 import { parseBody } from "@/lib/http/parse-body";
 import { TEAM_ROLE, EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { resolveUserTenantIdFromClient, withUserTenantRls } from "@/lib/tenant-context";
@@ -160,7 +161,7 @@ async function handlePOST(req: NextRequest) {
     );
   } catch (e) {
     if (e instanceof CreatorDepartedError) return forbidden();
-    if (isMembershipLockConflict(e)) return errorResponse(API_ERROR.CONFLICT);
+    if (isMembershipLockConflict(e)) return membershipConflictResponse(e);
     if (
       e instanceof Error &&
       (e.message === "TENANT_NOT_RESOLVED" ||

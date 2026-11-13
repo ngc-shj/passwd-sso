@@ -251,6 +251,7 @@ describe("executeTeamEntrySubmit", () => {
     ["ITEM_KEY_VERSION_INVALID", "teamEntryItemKeyChanged"],
     ["ENTRY_REKEY_REQUIRED", "teamEntryRekeyRequired"],
     ["TEAM_KEY_VERSION_MISMATCH", "teamEntryTeamKeyChanged"],
+    ["TEAM_BUSY", "teamEntryTeamBusy"],
   ])("maps a %s refusal to its own message", async (code, message) => {
     const setSaving = vi.fn();
     const onSaved = vi.fn();

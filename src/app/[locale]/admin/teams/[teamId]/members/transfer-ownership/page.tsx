@@ -28,6 +28,8 @@ import { TEAM_ROLE, apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import { filterMembers } from "@/lib/filter-members";
 import { handleStepUpError } from "@/lib/http/handle-step-up-error";
+import { apiErrorToI18nKey } from "@/lib/http/api-error-codes";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
 import type { TeamMemberDisplayApiItem as Member } from "@/lib/team/team-member-display";
 
@@ -48,6 +50,7 @@ export default function TeamTransferOwnershipPage({
   const { teamId } = use(params);
   const t = useTranslations("Team");
   const tCommon = useTranslations("Common");
+  const tApi = useTranslations("ApiErrors");
 
   const [team, setTeam] = useState<TeamInfo | null>(null);
   const [loadError, setLoadError] = useState(false);
@@ -115,6 +118,11 @@ export default function TeamTransferOwnershipPage({
       });
       if (!res.ok) {
         if (await handleStepUpError(res, inlineReauth.triggerOnStaleError, memberId)) return;
+        const error = (await readApiErrorBody(res))?.error;
+        if (error) {
+          toast.error(tApi(apiErrorToI18nKey(error)));
+          return;
+        }
         throw new Error("Failed");
       }
       toast.success(t("ownershipTransferred"));
