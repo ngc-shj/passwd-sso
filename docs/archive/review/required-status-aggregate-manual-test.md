@@ -82,3 +82,5 @@ how a workflow that never started reports to branch protection can only be obser
 - To stop the requirement: remove the `required_status_checks` rule from the ruleset.
 - To restore the old trigger: revert this PR's commits. The ruleset rule must be removed
   first, or every PR waits on checks that no longer exist.
+
+<!-- scratch #958 verification A: docs-only change; this PR is closed unmerged -->
