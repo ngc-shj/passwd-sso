@@ -436,3 +436,83 @@ that user's earlier authority:
 | C5 | Accept: locked ACCEPTED, SCIM guard, `TEAM_MEMBER_INVITE_ACCEPT` | locked |
 | C6 | Webhook delivery requires the creator's authority; one predicate; visibility; backfill | locked |
 | C7 | SC5 disposition and docs | locked |
+
+## Implementation Checklist
+
+Phase 2, Step 2-1. Batches are delegated in order: B1, then B2 and B3 in parallel, then B4.
+
+**B1 — schema and registration**
+- **`prisma/schema.prisma`:**
+  - `TeamMember.admittedAt` (`Timestamptz(3)`, nullable);
+  - `TeamWebhook.createdById` (uuid, nullable, no relation);
+  - enum `AuditAction` + `TEAM_MEMBER_INVITE_ACCEPT`.
+- **Migrations** (new timestamps after `20261110000000`):
+  - (a) `…_team_member_admitted_at`: the C2 column, trigger function and trigger, plus
+    `REVOKE EXECUTE … FROM PUBLIC`;
+  - (b) `…_share_creator_departed`: C3 `CREATE OR REPLACE` on the `20261108000000` body;
+  - (c) `…_team_member_invite_accept_audit_action`: `ADD VALUE` only;
+  - (d) `…_team_webhook_creator`: C6 column, worker column grant, backfill DO block.
+- **Registration:**
+  - `src/lib/constants/audit/audit.ts` (`AUDIT_ACTION`, `VALUES`, PERSONAL[TEAM], TEAM[TEAM]);
+  - `messages/{en,ja}/AuditLog.json`;
+  - `src/components/audit/audit-action-icons.tsx`;
+  - `docs/operations/audit-log-reference.md`;
+  - `scripts/checks/check-critical-audit-atomic.mjs` (`CRITICAL_ACTIONS`) and its test (`ALL`);
+  - `src/lib/constants/audit/audit.test.ts`.
+- **Grants:** `src/lib/tenant-rls-grants.ts`: `OUTBOX_WEBHOOK_SUBSCRIBER_RESOLVE`; remove
+  `TEAM_WEBHOOK_DISPATCH` once B3 deletes `dispatchWebhook`.
+- **Manifest:** `scripts/checks/db-grants-manifest.json` via `audit-db-grants --write` (needs a
+  migrated DB).
+
+**B2 — the C4 predicate and C5 accept**
+- **Helpers:**
+  - `src/lib/team/tenant-row-lock.ts`: `actorDepartedSinceAdmission` (reuses `departedAt`);
+  - `src/lib/auth/access/team-auth.ts`: `activeTeamAdmission` (a sibling of `activeTeamRole`).
+- **The six sites:**
+  1. `src/app/api/teams/[teamId]/invitations/route.ts`;
+  2. `src/app/api/teams/invitations/accept/route.ts` (also C5);
+  3. `src/app/api/teams/[teamId]/members/route.ts`;
+  4. `src/app/api/teams/[teamId]/members/[memberId]/approve/route.ts` (its own `findFirst`);
+  5. `src/app/api/teams/[teamId]/members/[memberId]/route.ts` (`lockActorThenTeam` returns the
+     map);
+  6. `src/app/api/teams/[teamId]/members/[memberId]/confirm-key/route.ts`, together with
+     `src/lib/team/team-key-rotation-lock.ts` (`lockTeamKeyVersion` gains an optional
+     `budget`).
+- **Reuse:** `lockTenantRows`, `departedAt`, `createLockBudget`, `isMembershipLockConflict`,
+  `membershipConflictResponse` (`src/lib/http/lock-conflict-response.ts`),
+  `TEAM_MEMBERSHIP_TX_TIMEOUT_MS`, `logAuditInTx`, `hasTeamPermission`.
+- **Unit tests (R19, all trees):**
+  - every site's `route.test.ts`;
+  - `src/__tests__/api/teams/team-invitations.test.ts`;
+  - `tenant-row-lock` and `team-auth` tests.
+
+**B3 — C6 delivery, visibility and dead-path removal**
+- **New:** `src/lib/team/webhook-creator-authority.ts`, holding `webhookCreatorAuthorized`
+  (import-safe).
+- **Worker:** `src/workers/audit-outbox-worker.ts` `resolveWebhookSubscribers`: dedicated grant,
+  batched `findMany`, explicit select.
+- **Route:** `src/app/api/teams/[teamId]/webhooks/route.ts`: POST sets `createdById`; GET returns
+  `creatorAuthorized`.
+- **UI:** `src/components/team/security/team-webhook-card.tsx` (+ `base-webhook-card.tsx` if
+  needed): the paused state, with an i18n key in `messages/{en,ja}`.
+- **Removal:** `src/lib/webhook-dispatcher.ts` `dispatchWebhook` + `TEAM_WEBHOOK_DISPATCH`; update
+  `webhook-dispatcher.test.ts` and the stale mock key in
+  `team-tenant-departure-directory-sync.integration.test.ts`.
+- **Unit tests:** worker-side predicate, routes, card.
+
+**B4 — integration tests and docs**
+- **`src/__tests__/db-integration/`:**
+  - new `departed-member-leaked-authority.integration.test.ts` covering C2, C4, C5 and C6;
+  - `share-departure.integration.test.ts` extended (C3, A10/A10b);
+  - `audit-outbox-worker-role*.integration.test.ts` (`column_privileges`);
+  - the existing suites listed in Testing strategy, adjusted;
+  - `departed-member-operator-scripts.integration.test.ts`.
+- **Docs:**
+  - `docs/operations/departed-member-access-backfill.md` (predicates, NULL-creator section, C4
+    case);
+  - `audit-log-reference.md`;
+  - a manual test (`departed-member-leaked-authority-manual-test.md`, R35 Tier-2: authz and
+    webhook delivery).
+
+**Gates to re-run:** `check-team-rotation-input-lock` (counts), `check-migration-rls-dml`,
+`check-critical-audit-atomic`, `audit-db-grants`, plus the full pre-pr.
