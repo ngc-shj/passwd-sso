@@ -291,3 +291,74 @@ Seed unavailable (Ollama down).
   cell covers `on: { pull_request_target }` alone.
 
 Red-proof: deviation log, "Red-proof (code review round 3)" and the two-step table after it.
+
+---
+
+# Round 4 and the stopping rule
+
+Date: 2026-11-13. Scope: `167b5ab59..e989b62ac` (the round-3 fix commit).
+
+## Findings
+
+- **R4-1 [Major]** (security R4-M1): a step-level `cancelled()` reports whether *this job* was
+  cancelled (actions/runner `CancelledFunction.cs`), not the run. In an `always()` aggregate
+  it is never true, so round 3's cancelled-run step never fired in the case it was added for,
+  while the gate, an execution cell and the docs presented it as protection.
+- **R4-2 [Major]** (testing R4-T1, security R4-m2): the closed grammar in
+  `script-main-guard.test.mjs` still admitted `argv[1]`-equivalent guards through allowed shapes:
+  `.includes(fileURLToPath(import.meta.url))`, `.slice(1)`, a helper taking `process.argv`.
+- **R4-3 [Minor]** (testing R4-T2): six guard-shape checks could be deleted with that suite
+  green; the "with else" fixture was red only through its empty body.
+- **R4-4 [Minor]** (testing R4-T3): the grammar refused legitimate shapes inconsistently.
+- **R4-5 [Minor]** (security R4-m1, testing R4-T4): the status-function rule was case-sensitive
+  and exempted any key named `if`; one "allowed" assertion could not fail.
+- **R4-6 [Minor]** (security R4-m3): the whitespace-normalised pin of the cancelled step accepted
+  a one-line `echo … exit 1`.
+- Functionality round 4 reported the same F1 (= R4-1) and F2 (= R4-5).
+  - It also checked every expression in the committed workflows against actions/runner
+    `workflow-v1.0.json`: step and job `if` with status functions, the quoted
+    `"!cancelled() && (…)"` conditions, and `NEEDS: ${{ toJSON(needs) }}` in a step `env` are
+    all valid.
+  - `findStatusFunctionMisuse` returned no false positives over all 8 workflow files.
+  - **F3 [Minor]**: the rule would also flag a status-function name inside an expression string
+    literal (`contains(x, 'failure(')`). Accepted: nothing does this today, and the result is a
+    loud gate failure, not a silent pass. A comment at the regex records it.
+
+## Stopping rule
+
+Rounds 2, 3 and 4 each found their main defects inside the previous round's own fix: the
+cancelled-run handling (D6) and the main-guard test (D8). Following
+`feedback_rounds_that_seed_their_own_defects_mean_wrong_scope`, the user chose to converge
+instead of running round 5:
+
+- **Withdraw the cancelled-run machinery.** The aggregate is back to round 1's single step,
+  which three rounds reviewed. The residual race is documented in the ops doc under "A run
+  cancelled by hand between two jobs" (re-run before merging). It needs a manual cancel on the
+  head commit while no job is running or queued; a cancel caused by a new push is unaffected.
+- **Withdraw the closed-grammar test.** Keep the 19-script guard fix, the two security-gate
+  CLI cells and the import smoke. Pin the canonical guard by fixed string in the 20 scripts
+  that carry it, and check that no script keeps the old spellings. How a NEW script decides it
+  is the entry point is a follow-up.
+- **Fix the status-function rule** (R4-5). It guards against round 3's Critical recurring.
+  It is now case-insensitive, exempts only `jobs.<id>.if` and `jobs.<id>.steps.<n>.if`, and has
+  cells for both.
+- **No further full round.** Instead, a targeted check of the reverted and changed parts, then
+  pre-pr.
+
+## Resolution Status
+
+- R4-1: Resolved by withdrawal (deviation D6). R4-6: moot (the step is gone).
+- R4-2, R4-3, R4-4: Resolved by withdrawal (deviation D8); follow-up below.
+- R4-5: Resolved. Cells `STATUS-case`, `STATUS-env-key-if`, `STATUS-with-key-if`.
+- Functionality F3: accepted (fails loud); commented at `STATUS_FUNCTION_RE`.
+
+## Follow-ups (not in this PR)
+
+1. A check that every NEW CLI script uses the canonical entry guard. Round 4's probes
+   (deviation D8 history, testing R4-T1) are its specification.
+2. Run actionlint in CI to validate workflow expressions and contexts (round 3's Critical and
+   the quoted `!cancelled()` conditions). This adds a downloaded tool to the supply chain, so
+   it is a decision of its own.
+3. Optional: a job-level `if: cancelled()` job in each aggregate's `needs`, which the server
+   evaluates against the run. It would close the documented manual-cancel race. Its behaviour
+   is unverified on GitHub.

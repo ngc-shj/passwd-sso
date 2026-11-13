@@ -42,12 +42,12 @@ CI job. It fails when an aggregate:
 
 The gated jobs use `!cancelled() && (…)` rather than `always() && (…)`. GitHub keeps a running
 job whose `if` is still true when its run is cancelled, so `always()` would let a superseded
-run keep its jobs running despite `cancel-in-progress`. The aggregates keep `always()` on the
-job. Their first step runs only `if: cancelled()` and fails, because a job the cancelled run
-never started reads `skipped`, which would otherwise look like a path-filter skip. Their second
-step, under `if: always()`, reads the results of the needed jobs. Status functions such as
-`cancelled()` are valid only in `if`; the gate fails any workflow that uses one elsewhere,
-since GitHub would reject the whole file before any job runs.
+run keep its jobs running despite `cancel-in-progress`. The aggregates keep `always()`, so a
+cancelled run whose jobs were running or queued reports red.
+
+Status functions such as `cancelled()` are valid only in a job's or step's `if`. The gate fails
+any workflow that uses one elsewhere, because GitHub would reject the whole file before any job
+runs, and no required check would be posted.
 
 It also fails when:
 
@@ -81,6 +81,11 @@ the ruleset nor the classic branch protection requires code-owner review.
   the pull request.
 - **Only `changes` failed.** A paths-filter API error, for example, turns the aggregate red even
   when every other job passed. Re-run the failed job.
+- **A run cancelled by hand between two jobs.** A gated job that the cancelled run never got to
+  evaluate concludes `skipped`, which the aggregate cannot tell apart from a path-filter skip.
+  If no job was running or queued at that moment, `CI result` can report success on that
+  commit. Cancelling because of a new push is not affected (the new commit has its own checks).
+  After a manual cancel, re-run the workflow before merging.
 - **3000 or more changed files.** The PR files API lists at most 3000 files, so both `changes`
   jobs skip the filter and run every job.
 

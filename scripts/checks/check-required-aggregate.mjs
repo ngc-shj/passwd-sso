@@ -61,15 +61,9 @@ const FC_AFTER_ALLOWED = {
 
 const STEP_IF_ALLOWED = new Set(["failure()", "always()", "!cancelled()"]);
 const AGGREGATE_ENV = { NEEDS: "${{ toJSON(needs) }}" };
-// The aggregate's first step. A cancelled run fails outright, since jobs it
-// never started read as `skipped`. Status functions are valid only in `if`, so
-// this cannot be an env value of the main step.
-const CANCELLED_STEP = {
-  name: "Fail when the run was cancelled",
-  if: "cancelled()",
-  run: 'echo "::error::the run was cancelled" exit 1',
-};
-const STATUS_FUNCTION_RE = /\b(?:always|failure|cancelled|success)\s*\(/;
+// GitHub resolves expression function names case-insensitively. A name inside
+// an expression string literal would also match; that fails loud, not silent.
+const STATUS_FUNCTION_RE = /\b(?:always|failure|cancelled|success)\s*\(/i;
 // Gated jobs use `!cancelled()`, not `always()`: GitHub keeps a running job
 // whose `if` is still true when its run is cancelled, so `always()` would let a
 // superseded run's jobs defeat `cancel-in-progress`. Only the aggregate keeps
@@ -266,25 +260,14 @@ export function findWorkflowViolations(content, name, spec) {
     for (const key of ["strategy", "defaults", "env"]) {
       if (key in agg) out.push(`${name}: job '${aggId}': R3 '${key}' is forbidden on the aggregate`);
     }
-    // Rule 4: exactly two steps — the cancelled-run step, then the needs step.
+    // Rule 4: single step, exact env, no expression in run.
     const steps = Array.isArray(agg.steps) ? agg.steps : [];
-    if (steps.length !== 2) {
-      out.push(`${name}: job '${aggId}': R4 must have exactly two steps (found ${steps.length})`);
+    if (steps.length !== 1) {
+      out.push(`${name}: job '${aggId}': R4 must have exactly one step (found ${steps.length})`);
     }
-    const [cancelStep, step] = steps;
-    if (steps.length >= 1) {
-      const shape = isPlainObject(cancelStep)
-        ? { name: cancelStep.name, if: norm(cancelStep.if ?? ""), run: norm(cancelStep.run ?? "") }
-        : null;
-      if (!isDeepStrictEqual(shape, CANCELLED_STEP) || Object.keys(cancelStep).length !== 3) {
-        out.push(`${name}: job '${aggId}': R4 the first step must be exactly the '${CANCELLED_STEP.name}' step (if: cancelled(), fails with exit 1)`);
-      }
-    }
+    const step = steps[0];
     if (isPlainObject(step)) {
-      // The default `success()` would skip the step in a cancelled run.
-      if (step.if === undefined || norm(step.if) !== "always()") {
-        out.push(`${name}: job '${aggId}': R3 step 'if' must be exactly 'always()'`);
-      }
+      if ("if" in step) out.push(`${name}: job '${aggId}': R3 step-level 'if' is forbidden`);
       if ("shell" in step) out.push(`${name}: job '${aggId}': R3 step-level 'shell' is forbidden`);
       if ("uses" in step) out.push(`${name}: job '${aggId}': R4 the step must be a 'run' step, not 'uses'`);
       if (!isDeepStrictEqual(normEnv(step.env), AGGREGATE_ENV)) {
@@ -293,7 +276,7 @@ export function findWorkflowViolations(content, name, spec) {
       if (typeof step.run !== "string" || step.run.includes("${{")) {
         out.push(`${name}: job '${aggId}': R4 step 'run' must be a string with no '\${{' expression`);
       }
-    } else if (steps.length === 2) {
+    } else if (steps.length === 1) {
       out.push(`${name}: job '${aggId}': R4 the step is not a mapping`);
     }
     // Rule 5: needs equals every other job id.
@@ -473,7 +456,11 @@ export function findStatusFunctionMisuse(content, name) {
   const out = [];
   const walk = (value, path) => {
     if (typeof value === "string") {
-      if (path.at(-1) === "if") return;
+      // Only a job's or a step's own `if` accepts them — not an input or env
+      // key that happens to be named `if`.
+      const isJobIf = path.length === 3 && path[0] === "jobs" && path[2] === "if";
+      const isStepIf = path.length === 5 && path[0] === "jobs" && path[2] === "steps" && path[4] === "if";
+      if (isJobIf || isStepIf) return;
       for (const m of value.matchAll(/\$\{\{([\s\S]*?)\}\}/g)) {
         if (STATUS_FUNCTION_RE.test(m[1])) {
           out.push(`${name}: ${path.join(".")}: a status function is valid only in 'if': \${{${m[1]}}}`);

@@ -102,7 +102,17 @@ Run directly against a scratch copy of the step or guard text:
 | aggregate prints `.value` instead of `.value.result` | the outputs sentinel appears (new text: absent) |
 | main guard as `file://${argv[1]}` | no output via a symlink or a path with a space (new guard: runs) |
 
-## D6 — The aggregate step carries `if: always()` and fails a cancelled run (code review round 2)
+## D6 — WITHDRAWN in round 4: a cancelled-run check on the aggregate (code review rounds 2–3)
+
+- **Withdrawn.** Round 4 found that a step-level `cancelled()` reports whether *this job* was
+  cancelled (actions/runner `CancelledFunction.cs`), so it is never true in an `always()`
+  aggregate; the step never fired in the case it was added for. With rounds 2–4 each finding
+  their main defect inside the previous round's fix, the user chose to withdraw it and document
+  the narrow race instead (`docs/operations/ci-required-checks.md`, "A run cancelled by hand
+  between two jobs"). The aggregate is back to round 1's single step. The status-function rule
+  that round 3 added stays. The text below is the history.
+
+### History
 
 - **Plan (C3 rules 3–4):** no step-level `if` on the aggregate; step `env` exactly `{ NEEDS }`.
 - **Implemented (as corrected in round 3):** the aggregate has two steps. The first is
@@ -151,7 +161,16 @@ Run directly:
 | aggregate step without the `RUN_CANCELLED` check | all-success needs with `RUN_CANCELLED=true` exits 0 (real: 1) |
 | main guard `` `file://${realpathSync(argv[1])}` `` in a directory named `dir with space` | silent exit 0 (real guard: runs, exits 1 on the broken tree) |
 
-## D8 — The main-guard test refuses instead of recognising (code review round 3)
+## D8 — WITHDRAWN in round 4: a closed grammar over how scripts read `process.argv` (code review round 3)
+
+- **Withdrawn.** Round 4 showed allowed shapes (`.includes(fileURLToPath(import.meta.url))`,
+  `.slice(1)`, a helper taking `process.argv`) still admitting symlink-blind guards, and six
+  guard-shape checks that could be deleted with the suite green. The test now pins the canonical
+  guard by fixed string in the 20 scripts that carry it, and checks that no script keeps the old
+  spellings. Covering how a NEW script decides it is the entry point is a follow-up. The text
+  below is the history.
+
+### History
 
 - **Round 2 version:** an AST cell recognised guards built from the literal `process.argv[1]`
   and required them to be canonical, with a `>= 20` positive control.
@@ -196,3 +215,13 @@ Two-step aggregate and status-function rule (scratch alias config, control green
 | status-function match disabled | `STATUS-always/cancelled/failure/success/run`, the `checkRepository` cell |
 | status-function rule not called from `checkRepository` | the `checkRepository` cell |
 | first step's `exit 1` removed (run directly) | exits 0; the execution cell expects 1 |
+
+## Red-proof (code review round 4)
+
+| Mutation | Cells that went red |
+| --- | --- |
+| status-function regex without `i` | `STATUS-case` |
+| exemption by last key `if` instead of the job/step `if` path | `STATUS-env-key-if`, `STATUS-with-key-if` |
+| aggregate step count loosened | `R4-two-steps` |
+| aggregate step-level `if` allowed | `R3-step-if` |
+| `check-compose-log-caps.mjs` guard without realpath (scratch git repo) | its pinned-guard cell, `no script keeps a symlink-blind guard spelling` |

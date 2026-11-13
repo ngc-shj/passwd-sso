@@ -33,7 +33,7 @@ const FC = (...filters) =>
 const AFTER = "!cancelled() && needs.app-test.result == 'success'";
 const FC_AFTER = `!cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.app == 'true') && needs.app-ci.result != 'failure' && needs.app-test.result != 'failure' && needs.app-coverage.result != 'failure' && needs.app-build.result != 'failure'`;
 
-const [CANCEL_STEP, AGG_STEP] = realDoc("ci.yml").jobs["ci-result"].steps;
+const AGG_STEP = realDoc("ci.yml").jobs["ci-result"].steps[0];
 const SIZE_STEP = realDoc("ci.yml").jobs.changes.steps.find((s) => s.id === "size");
 
 /** A minimal workflow that satisfies every rule of the `ci.yml` spec. */
@@ -79,7 +79,7 @@ function baseDoc() {
     permissions: {},
     needs: Object.keys(jobs),
     "runs-on": "ubuntu-latest",
-    steps: [structuredClone(CANCEL_STEP), structuredClone(AGG_STEP)],
+    steps: [structuredClone(AGG_STEP)],
   };
   return {
     name: "ci",
@@ -181,21 +181,16 @@ const RED = {
   "R3-strategy": [(d) => { d.jobs["ci-result"].strategy = { matrix: { n: [1] } }; }, /'ci-result'.*R3 'strategy'/],
   "R3-defaults": [(d) => { d.jobs["ci-result"].defaults = { run: { shell: "sh" } }; }, /'ci-result'.*R3 'defaults'/],
   "R3-job-env": [(d) => { d.jobs["ci-result"].env = { A: "1" }; }, /'ci-result'.*R3 'env'/],
-  "R3-step-if": [(d) => { d.jobs["ci-result"].steps[1].if = "success()"; }, /'ci-result'.*R3 step 'if' must be exactly 'always\(\)'/],
-  "R3-step-if-absent": [(d) => { delete d.jobs["ci-result"].steps[1].if; }, /'ci-result'.*R3 step 'if' must be exactly 'always\(\)'/],
-  "R3-step-shell": [(d) => { d.jobs["ci-result"].steps[1].shell = "sh"; }, /'ci-result'.*R3 step-level 'shell'/],
+  "R3-step-if": [(d) => { d.jobs["ci-result"].steps[0].if = "success()"; }, /'ci-result'.*R3 step-level 'if' is forbidden/],
+  "R3-step-shell": [(d) => { d.jobs["ci-result"].steps[0].shell = "sh"; }, /'ci-result'.*R3 step-level 'shell'/],
   "R3-workflow-default-shell": [(d) => { d.defaults = { run: { shell: "sh" } }; }, /R3 'defaults\.run\.shell'/],
   "R3-workflow-env": [(d) => { d.env = { A: "1" }; }, /R3 top-level 'env'/],
-  "R4-three-steps": [(d) => { d.jobs["ci-result"].steps.push({ run: "true" }); }, /'ci-result'.*R4 must have exactly two steps \(found 3\)/],
-  "R4-cancel-step-missing": [(d) => { d.jobs["ci-result"].steps.shift(); }, /'ci-result'.*R4 the first step must be exactly/],
-  "R4-cancel-step-if": [(d) => { d.jobs["ci-result"].steps[0].if = "failure()"; }, /'ci-result'.*R4 the first step must be exactly/],
-  "R4-cancel-step-run": [(d) => { d.jobs["ci-result"].steps[0].run = 'echo "::error::the run was cancelled"'; }, /'ci-result'.*R4 the first step must be exactly/],
-  "R4-cancel-step-extra-key": [(d) => { d.jobs["ci-result"].steps[0]["continue-on-error"] = false; }, /'ci-result'.*R4 the first step must be exactly/],
-  "R4-env-changed": [(d) => { d.jobs["ci-result"].steps[1].env.NEEDS = "{}"; }, /'ci-result'.*R4 step 'env'/],
-  "R4-env-extra": [(d) => { d.jobs["ci-result"].steps[1].env.RUN_CANCELLED = "${{ cancelled() }}"; }, /'ci-result'.*R4 step 'env'/],
-  "R4-uses": [(d) => { d.jobs["ci-result"].steps[1].uses = "x/y@0"; }, /'ci-result'.*R4 the step must be a 'run' step/],
-  "R4-step-not-mapping": [(d) => { d.jobs["ci-result"].steps[1] = "echo"; }, /'ci-result'.*R4 the step is not a mapping/],
-  "R4-run-expression": [(d) => { d.jobs["ci-result"].steps[1].run = "echo ${{ github.actor }}"; }, /'ci-result'.*R4 step 'run'/],
+  "R4-two-steps": [(d) => { d.jobs["ci-result"].steps.push({ run: "true" }); }, /'ci-result'.*R4 must have exactly one step \(found 2\)/],
+  "R4-env-changed": [(d) => { d.jobs["ci-result"].steps[0].env.NEEDS = "{}"; }, /'ci-result'.*R4 step 'env'/],
+  "R4-env-extra": [(d) => { d.jobs["ci-result"].steps[0].env.EXTRA = "1"; }, /'ci-result'.*R4 step 'env'/],
+  "R4-uses": [(d) => { d.jobs["ci-result"].steps[0].uses = "x/y@0"; }, /'ci-result'.*R4 the step must be a 'run' step/],
+  "R4-step-not-mapping": [(d) => { d.jobs["ci-result"].steps = ["echo"]; }, /'ci-result'.*R4 the step is not a mapping/],
+  "R4-run-expression": [(d) => { d.jobs["ci-result"].steps[0].run = "echo ${{ github.actor }}"; }, /'ci-result'.*R4 step 'run'/],
   "R5-needs-missing": [(d) => { d.jobs["ci-result"].needs = d.jobs["ci-result"].needs.filter((n) => n !== "app-build"); }, /'ci-result'.*R5 .*missing job 'app-build'/],
   "R5-needs-extra": [(d) => { d.jobs["ci-result"].needs.push("ghost"); }, /'ci-result'.*R5 .*'ghost'/],
   "R6-job-continue-on-error": [(d) => { d.jobs["app-build"]["continue-on-error"] = true; }, /'app-build'.*R6/],
@@ -278,7 +273,7 @@ describe("findAggregateStepDivergence", () => {
     expect(findAggregateStepDivergence(pair(() => {}), specs)).toEqual([]);
   });
   it("DIV-aggregate: flags a differing aggregate step", () => {
-    const contents = pair((b) => { b.jobs["ci-result"].steps[1].run += "\n# x\n"; });
+    const contents = pair((b) => { b.jobs["ci-result"].steps[0].run += "\n# x\n"; });
     expect(findAggregateStepDivergence(contents, specs).join("\n")).toMatch(/aggregate steps differs/);
   });
   it("DIV-size: flags a differing size step", () => {
@@ -306,9 +301,22 @@ describe("findAggregateStepDivergence", () => {
 describe("findStatusFunctionMisuse", () => {
   const wf = (step) => dump({ on: { pull_request: null }, jobs: { a: { "runs-on": "x", steps: [step] } } });
 
-  it("allows status functions in 'if'", () => {
+  it("allows status functions in a step's and a job's 'if'", () => {
     expect(findStatusFunctionMisuse(wf({ if: "${{ cancelled() }}", run: "true" }), "x.yml")).toEqual([]);
-    expect(findStatusFunctionMisuse(wf({ if: "always()", run: "true" }), "x.yml")).toEqual([]);
+    const jobIf = dump({ on: { pull_request: null }, jobs: { a: { if: "${{ always() }}", steps: [] } } });
+    expect(findStatusFunctionMisuse(jobIf, "x.yml")).toEqual([]);
+  });
+  it("STATUS-case: flags an upper-case status function (names are case-insensitive)", () => {
+    const found = findStatusFunctionMisuse(wf({ env: { A: "${{ Cancelled() }}" }, run: "true" }), "x.yml");
+    expect(found.join("\n")).toMatch(/steps\.0\.env\.A: a status function/);
+  });
+  it("STATUS-env-key-if: flags an env key that happens to be named 'if'", () => {
+    const found = findStatusFunctionMisuse(wf({ env: { if: "${{ cancelled() }}" }, run: "true" }), "x.yml");
+    expect(found.join("\n")).toMatch(/steps\.0\.env\.if: a status function/);
+  });
+  it("STATUS-with-key-if: flags an action input named 'if'", () => {
+    const found = findStatusFunctionMisuse(wf({ uses: "x/y@0", with: { if: "${{ always() }}" } }), "x.yml");
+    expect(found.join("\n")).toMatch(/steps\.0\.with\.if: a status function/);
   });
   it("allows ordinary expressions elsewhere", () => {
     expect(findStatusFunctionMisuse(wf({ env: { A: "${{ toJSON(needs) }}" }, run: "true" }), "x.yml")).toEqual([]);
@@ -519,7 +527,7 @@ describe("aggregate step, executed (both real workflows)", () => {
   });
 
   for (const [file, { aggregateId }] of Object.entries(SPECS)) {
-    const [cancelStep, { run }] = realDoc(file).jobs[aggregateId].steps;
+    const { run } = realDoc(file).jobs[aggregateId].steps[0];
     for (const [label, needs, status, marker] of AGG_CASES) {
       it(`${file}: ${label} -> exit ${status}`, () => {
         const res = runStep(run, { NEEDS: needs });
@@ -527,12 +535,6 @@ describe("aggregate step, executed (both real workflows)", () => {
         expect(res.text).toMatch(marker);
       });
     }
-
-    it(`${file}: the cancelled-run step fails`, () => {
-      const res = runStep(cancelStep.run, {});
-      expect(res.status).toBe(1);
-      expect(res.text).toMatch(/the run was cancelled/);
-    });
 
     it(`${file}: prints each job's result but never its outputs`, () => {
       const needs = needsJson({ a: { result: "success", outputs: { tok: "SENTINEL_9f3" } } });

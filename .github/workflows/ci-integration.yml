@@ -442,18 +442,7 @@ jobs:
       # path exits 1 explicitly. Kept identical in ci.yml and
       # ci-integration.yml; check-required-aggregate.mjs compares them and its
       # test executes this script.
-      # A cancelled run fails outright: jobs it never started read as
-      # `skipped`, the same as a path-filter skip. Status functions such as
-      # cancelled() are valid only in `if`, hence a step of its own.
-      - name: Fail when the run was cancelled
-        if: cancelled()
-        run: |
-          echo "::error::the run was cancelled"
-          exit 1
-      # `always()`: the default `success()` would skip this step in a
-      # cancelled run.
       - name: Fail unless every job succeeded or was skipped
-        if: always()
         env:
           NEEDS: ${{ toJSON(needs) }}
         run: |
