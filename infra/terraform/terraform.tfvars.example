@@ -49,7 +49,7 @@ jackson_image = "<ACCOUNT_ID>.dkr.ecr.ap-northeast-1.amazonaws.com/passwd-sso-de
 #   #   "AUDIT_ANCHOR_PUBLISHER_DATABASE_URL": "postgresql://passwd_anchor_publisher:PASSWORD@HOST:5432/passwd_sso",
 #   #   "AUDIT_ANCHOR_SIGNING_KEY": "<REPLACE>",  // npm run generate:audit-anchor-signing-key
 #   #   "AUDIT_ANCHOR_TAG_SECRET": "<REPLACE>",   // npm run generate:audit-anchor-tag-secret
-#   #   "DEPLOYMENT_ID": "<REPLACE>"              // a new UUID per deployment; reuse only for a successor of the same deployment (see docs/operations/deployment.md)
+#   #   "DEPLOYMENT_ID": "<REPLACE>"              // a new UUID per deployment; reuse only for a successor of the same deployment (see docs/operations/deployment.md); also read by the retention-gc worker while its orphan sweep runs
 #   # }
 #   # jackson-secrets.json:
 #   # { "JACKSON_API_KEYS": "<REPLACE>", "DB_URL": "...",
@@ -83,6 +83,15 @@ attachments_bucket_name    = ""
 enable_cloudfront          = false
 cloudfront_aliases         = []
 cloudfront_certificate_arn = ""
+
+# Attachment backend and the retention-gc orphan sweep. Default: attachments
+# stay in the database and the sweep is off. Switching an existing stack strands
+# the attachments already stored — read docs/operations/deployment.md "Orphan
+# attachment sweep on AWS" first. "s3" needs SSE-S3 (s3_kms_key_arn = "").
+# attachments_blob_backend              = "s3"
+# attachments_blob_backend_empty_db_ack = true      # after --count-db-blobs reports db_stored 0
+# retention_gc_blob_sweep_mode          = "report"  # then "delete" with a grace
+# retention_gc_blob_orphan_grace_ms     = 3024000000 # >= the restore window (here 35 d)
 
 # Audit-chain anchors (S3, Object Lock COMPLIANCE — always created;
 # enable_s3_audit_anchors must stay true). The bucket policy is built on the

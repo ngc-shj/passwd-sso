@@ -54,6 +54,7 @@
   "TEAM_MEMBER_SCIM_ROLE_UPDATE": "SCIM によりロール変更",
   "TEAM_MEMBER_SCIM_APPROVE": "SCIM 追加を承認",
   "TEAM_MEMBER_SCIM_REJECT": "SCIM 追加を拒否",
+  "TEAM_MEMBER_INVITE_ACCEPT": "チーム招待を承諾",
   "SHARE_CREATE": "共有リンク作成",
   "SHARE_REVOKE": "共有リンク取り消し",
   "SHARE_ACCESS_VERIFY_SUCCESS": "共有パスワード認証成功",

@@ -7,7 +7,9 @@ loadEnv();
 // parseEnv() on the full schema at module load and fail the worker boot when
 // non-worker vars (auth providers, WebAuthn, etc.) are absent.
 import { envObject } from "@/lib/env-schema";
-import { createWorker } from "@/workers/retention-gc-worker";
+import { createRetentionGcPool, createWorker } from "@/workers/retention-gc-worker";
+import { countDbStoredAttachments } from "@/workers/retention-gc-worker/sweep";
+import { createPrismaClient } from "@/lib/db/pool-factory";
 import { buildSweepOpts } from "@/workers/retention-gc-worker/options";
 import { BLOB_SWEEP_MODE } from "@/lib/blob-store/constants";
 import { BLOB_STORAGE, getAttachmentBlobStore, resolveBlobBackend } from "@/lib/blob-store";
@@ -26,6 +28,9 @@ function emptyAsUnset<T extends z.ZodType>(schema: T) {
 // --init-blob-marker writes the bucket marker and exits without connecting to
 // the database, so the database-URL rules below do not apply to it.
 const initBlobMarkerRun = process.argv.includes("--init-blob-marker");
+// --count-db-blobs reads the database as the worker does, so every rule
+// below applies to it.
+const countDbBlobsRun = process.argv.includes("--count-db-blobs");
 
 // Pick only the fields the worker reads. envObject (not envSchema) because
 // Zod 4 throws on .pick() of a refined schema (F16).
@@ -178,10 +183,12 @@ async function initBlobMarker(): Promise<void> {
   console.log(JSON.stringify({ level: "info", msg: "init-blob-marker", result }));
 }
 
-function startWorker(): void {
-  // The at-least-one-URL .refine() above guarantees this is non-nullish at
-  // runtime; narrow the type explicitly and fail closed if that invariant is
-  // ever broken (defense-in-depth — never connect with an undefined URL).
+/**
+ * The at-least-one-URL .refine() above guarantees this is non-nullish at
+ * runtime; narrow the type explicitly and fail closed if that invariant is
+ * ever broken (defense-in-depth — never connect with an undefined URL).
+ */
+function workerDatabaseUrl(): string {
   const databaseUrl =
     workerEnv.RETENTION_GC_DATABASE_URL ?? workerEnv.DATABASE_URL;
   if (!databaseUrl) {
@@ -195,6 +202,30 @@ function startWorker(): void {
     );
     process.exit(1);
   }
+  return databaseUrl;
+}
+
+// --count-db-blobs: how many attachments rows there are and how many keep
+// their bytes in the database (db_stored), read as the worker role under the
+// orphan sweep's grant; prints one line and exits 0. The operator reads
+// db_stored = 0 before switching a stack to an external backend and after the
+// rollout (docs/operations/deployment.md "Orphan attachment sweep on AWS").
+// Runs on any backend and in any sweep mode. Its own pool: the worker loop
+// never starts.
+async function countDbBlobs(): Promise<void> {
+  const pool = createRetentionGcPool(workerDatabaseUrl(), 1);
+  const prisma = createPrismaClient(pool);
+  try {
+    const { total, dbStored } = await countDbStoredAttachments(prisma);
+    console.log(JSON.stringify({ level: "info", msg: "count-db-blobs", total, db_stored: dbStored }));
+  } finally {
+    await prisma.$disconnect();
+    await pool.end();
+  }
+}
+
+function startWorker(): void {
+  const databaseUrl = workerDatabaseUrl();
 
   const worker = createWorker({
     databaseUrl,
@@ -242,6 +273,21 @@ if (initBlobMarkerRun) {
     (err: unknown) => {
       const httpStatusCode = blobErrorStatus(err);
       initBlobMarkerRefusal("store_error", { error: errorLogFields(err), httpStatusCode });
+    },
+  );
+} else if (countDbBlobsRun) {
+  countDbBlobs().then(
+    () => process.exit(0),
+    (err: unknown) => {
+      // The code only (S6/S7): a driver message can carry the connection target.
+      console.error(
+        JSON.stringify({
+          level: "error",
+          msg: "count-db-blobs failed",
+          code: (err as NodeJS.ErrnoException | undefined)?.code ?? "unknown",
+        }),
+      );
+      process.exit(1);
     },
   );
 } else {

@@ -4086,6 +4086,19 @@ describe("function rule: routines are created in migrations", () => {
     expect(other.code).toBe(1);
     expect(other.stderr).toContain(`${negative}:4  creates another`);
   });
+
+  it("names a schema-qualified routine by its own name, not its schema", () => {
+    const { code, stderr } = runMulti([["scripts/zz.sql", "CREATE FUNCTION public.qualified_probe() RETURNS int AS 'SELECT 1' LANGUAGE sql;\n"]]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("scripts/zz.sql:1  creates qualified_probe");
+  });
+
+  it("admits a schema-qualified CREATE of an allowlisted routine in its allowlisted file", () => {
+    const negative = "scripts/rls-cross-tenant-negative-test.sh";
+    const probe = "psql <<SQL\n    CREATE OR REPLACE FUNCTION public.rls_negative_secdef_probe() RETURNS int AS \\$\\$ SELECT 1 \\$\\$ LANGUAGE sql SECURITY DEFINER;\nSQL\n";
+    const { code, stderr } = runMulti([[negative, probe]]);
+    expect(code, stderr).toBe(0);
+  });
 });
 
 describe("grants the retention worker builds per entry", () => {

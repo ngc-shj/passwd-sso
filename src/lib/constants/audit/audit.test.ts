@@ -229,6 +229,14 @@ describe("audit constants", () => {
     }
   });
 
+  it("delivers TEAM_MEMBER_INVITE_ACCEPT in the team group and to team webhooks", () => {
+    expect(AUDIT_ACTION_VALUES).toContain(AUDIT_ACTION.TEAM_MEMBER_INVITE_ACCEPT);
+    expect(TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS).toContain(AUDIT_ACTION.TEAM_MEMBER_INVITE_ACCEPT);
+    expect(AUDIT_ACTION_GROUPS_TEAM[AUDIT_ACTION_GROUP.TEAM]).toContain(
+      AUDIT_ACTION.TEAM_MEMBER_INVITE_ACCEPT,
+    );
+  });
+
   it("delivers the team re-key actions in the team admin group and to team webhooks", () => {
     const rekeyActions = [
       AUDIT_ACTION.TEAM_KEY_ROTATION_CARRY,

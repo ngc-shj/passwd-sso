@@ -5,6 +5,9 @@
  * (docs/archive/review/departed-member-share-links-plan.md, #990); while the
  * team's policy disallows sharing or requires a share password the link lacks
  * (#996); and a personal entry share while its entry is trashed or gone (#998).
+ * A team share is also refused once its creator left the tenant at or after
+ * creating it, even when re-admitted on the same team row since
+ * (departed-member-leaked-authority-plan.md C3, #1035).
  *
  * Production routes, the share page and share_creator_admitted run on the app
  * role under FORCE RLS; only auth, step-up, rate limits, the SCIM token and
@@ -27,6 +30,7 @@ import {
   expectBypassNotices,
   setBypassRlsGucs,
   type TestContext,
+  redProofOverride,
 } from "./helpers";
 import { analyze } from "../../../scripts/checks/check-migration-transaction.mjs";
 
@@ -96,6 +100,8 @@ import { DELETE as revokeShareLink } from "@/app/api/share-links/[id]/route";
 import { GET as shareAccessLogs } from "@/app/api/share-links/[id]/access-logs/route";
 import { PATCH as scimPatchUser, DELETE as scimDeleteUser } from "@/app/api/scim/v2/Users/[id]/route";
 import { DELETE as removeMember } from "@/app/api/teams/[teamId]/members/[memberId]/route";
+import { POST as issueInvitation } from "@/app/api/teams/[teamId]/invitations/route";
+import { POST as acceptInvitation } from "@/app/api/teams/invitations/accept/route";
 import { hashToken, generateAccessPassword, hashAccessPassword, encryptShareData } from "@/lib/crypto/crypto-server";
 import { createShareAccessToken } from "@/lib/auth/tokens/share-access-token";
 import { BYPASS_GRANT, setBypassGucs, setTenantGucs } from "@/lib/tenant-rls-grants";
@@ -482,6 +488,70 @@ describe("share links across a creator's departure — real-DB integration", () 
     expect(await page(late)).toBe("error:revoked");
   });
 
+  // ── C3: a share is refused once its creator left the tenant after creating it ──
+
+  /** The creator's email, for an invitation addressed to them. */
+  async function emailOf(userId: string): Promise<string> {
+    const [row] = await sql<{ email: string }>(`SELECT email FROM users WHERE id = $1::uuid`, userId);
+    return row.email;
+  }
+
+  it("C3: a creator departed by SCIM and re-admitted by accept on the same team row: the earlier share is refused, a later one served", async () => {
+    const t = await teamWithCreator();
+    const earlier = await share({ creatorId: t.creator, teamEntryId: t.entryId, createdAt: "now() - interval '1 minute'" });
+    expect(await page(earlier)).toBe("served");
+    expect((await scimActive(t.creator, false)).status).toBe(200);
+    // Active elsewhere, as a departed user is when they accept.
+    await sql(
+      `INSERT INTO tenant_members (id, tenant_id, user_id, role, created_at, updated_at)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, 'MEMBER', now(), now())`,
+      randomUUID(), otherTenantId, t.creator,
+    );
+    mockAuth.mockResolvedValue({ user: { id: t.owner } });
+    const email = await emailOf(t.creator);
+    const issued = await issueInvitation(
+      jsonRequest(`http://localhost/api/teams/${t.teamId}/invitations`, "POST", { email, role: "MEMBER" }),
+      { params: Promise.resolve({ teamId: t.teamId }) },
+    );
+    expect(issued.status).toBe(201);
+    const { token } = (await issued.json()) as { token: string };
+    mockAuth.mockResolvedValue({ user: { id: t.creator, email } });
+    expect((await acceptInvitation(jsonRequest("http://localhost/api/teams/invitations/accept", "POST", { token }))).status).toBe(200);
+    // The same row came back; the tenant row stays departed.
+    const [row] = await sql<{ id: string; deactivated_at: Date | null }>(
+      `SELECT id, deactivated_at FROM team_members WHERE team_id = $1::uuid AND user_id = $2::uuid`, t.teamId, t.creator,
+    );
+    expect(row).toEqual({ id: t.creatorRow, deactivated_at: null });
+
+    const later = await share({ creatorId: t.creator, teamEntryId: t.entryId });
+
+    expect(await page(earlier)).toBe("error:revoked");
+    expect(await page(later)).toBe("served");
+  });
+
+  it("C3: a creator restored by SCIM active=true (returnToTenant) is served again", async () => {
+    const t = await teamWithCreator();
+    const s = await share({ creatorId: t.creator, teamEntryId: t.entryId });
+    expect((await scimActive(t.creator, false)).status).toBe(200);
+    expect(await page(s)).toBe("error:revoked");
+    expect((await scimActive(t.creator, true)).status).toBe(200);
+    expect(await page(s)).toBe("served");
+  });
+
+  it.each([
+    ["refused when the record is later than the share", "now() + interval '1 second'", "error:revoked"],
+    ["served when the record is earlier than the share (twin)", "now() - interval '1 hour'", "served"],
+  ])("C3: tenant row deleted, team row kept, a departure record: %s", async (_label, departedAt, want) => {
+    const t = await teamWithCreator();
+    const s = await share({ creatorId: t.creator, teamEntryId: t.entryId });
+    await sql(`DELETE FROM tenant_members WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, tenantId, t.creator);
+    await sql(
+      `INSERT INTO tenant_member_departures (tenant_id, user_id, departed_at) VALUES ($1::uuid, $2::uuid, ${departedAt})`,
+      tenantId, t.creator,
+    );
+    expect(await page(s)).toBe(want);
+  });
+
   // ── A13 / A14: sharing policy and personal entry state (#996, #998) ──
 
   it("A13: turning the team's sharing off stops its links at the page, verify-access and content; turning it back on serves them", async () => {
@@ -792,6 +862,34 @@ describe("share links across a creator's departure — real-DB integration", () 
       })).id;
     }
 
+    /** A creator whose membership predates the share, with a tenant-departure state relative to `base`. */
+    async function departureCase(o: { deactivated?: string; restored?: boolean; record?: string; deleteRow?: boolean; guest?: boolean }) {
+      const user = await member(o.guest ? otherTenantId : tenantId);
+      // A guest's tenant row is in another tenant only; the user row is filed
+      // here so teardown removes their share with this tenant.
+      if (o.guest) await sql(`UPDATE users SET tenant_id = $2::uuid WHERE id = $1::uuid`, user, tenantId);
+      await addTeamMember(teamId, user, "MEMBER", `${base} - interval '2 hours'`);
+      if (o.deactivated) {
+        await sql(
+          `UPDATE tenant_members SET deactivated_at = ${base} + interval '${o.deactivated}' WHERE tenant_id = $1::uuid AND user_id = $2::uuid`,
+          tenantId, user,
+        );
+      }
+      if (o.restored) await sql(`UPDATE tenant_members SET deactivated_at = NULL WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, tenantId, user);
+      if (o.record) {
+        await sql(
+          `INSERT INTO tenant_member_departures (tenant_id, user_id, departed_at) VALUES ($1::uuid, $2::uuid, ${base} + interval '${o.record}')`,
+          tenantId, user,
+        );
+      }
+      if (o.deleteRow) await sql(`DELETE FROM tenant_members WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, tenantId, user);
+      if (o.deactivated === "-1 hour") {
+        // Re-admitted after that departure: a later membership.
+        await sql(`UPDATE team_members SET created_at = ${base} - interval '1 second' WHERE team_id = $1::uuid AND user_id = $2::uuid`, teamId, user);
+      }
+      return (await share({ creatorId: user, teamEntryId: entryId, version: 0, createdAt: base })).id;
+    }
+
     async function personalCase(entryState: "live" | "trashed" | "gone" = "live", shareType: "ENTRY_SHARE" | "FILE" = "ENTRY_SHARE") {
       const user = await member();
       const entry = await personalEntry(user);
@@ -829,6 +927,13 @@ describe("share links across a creator's departure — real-DB integration", () 
       ["team policy requires a password, link has none", await policyCase({ allowSharing: true, requireSharePassword: true }, false), false],
       ["team policy requires a password, link has one", await policyCase({ allowSharing: true, requireSharePassword: true }, true), true],
       ["unknown id", randomUUID(), false],
+      ["creator departed the tenant 1s after the share (team row left active)", await departureCase({ deactivated: "1 second" }), false],
+      ["creator departed the tenant at the share's instant", await departureCase({ deactivated: "0 second" }), false],
+      ["creator departed 1h before the share, with a later membership", await departureCase({ deactivated: "-1 hour" }), true],
+      ["creator departed after the share, then restored", await departureCase({ deactivated: "1 second", restored: true }), true],
+      ["tenant row deleted, departure record after the share", await departureCase({ record: "1 second", deleteRow: true }), false],
+      ["tenant row re-created, departure record before the share", await departureCase({ record: "-1 hour" }), true],
+      ["guest creator (no tenant row in the share's tenant)", await departureCase({ guest: true }), true],
     ];
     const legacyCreator = await member();
 
@@ -894,9 +999,17 @@ describe("share links across a creator's departure — real-DB integration", () 
   it.each([
     [["20261102000000_share_creator_admitted"]],
     [["20261102000000_share_creator_admitted", "20261108000000_share_admission_policy_and_personal_entry"]],
+    [[
+      "20261102000000_share_creator_admitted",
+      "20261108000000_share_admission_policy_and_personal_entry",
+      "20261114000100_share_creator_departed",
+    ]],
   ])("A10b: the function's migrations %j apply as a NOSUPERUSER NOBYPASSRLS role (RDS)", async (migrations) => {
     const bodies = migrations.map((migration) => {
-      const file = readFileSync(join(process.cwd(), `prisma/migrations/${migration}/migration.sql`), "utf8");
+      // SHARE_CREATOR_DEPARTED_SQL names a file to read instead of the C3
+      // migration (a mutated copy, for a red proof outside the source tree).
+      const override = migration === "20261114000100_share_creator_departed" ? redProofOverride("SHARE_CREATOR_DEPARTED_SQL") : undefined;
+      const file = readFileSync(override ?? join(process.cwd(), `prisma/migrations/${migration}/migration.sql`), "utf8");
       const whole = analyze(file);
       expect([whole.beginCount, whole.commitCount, whole.rollbackCount]).toEqual([1, 1, 0]);
       const trimmed = file.trim();
@@ -910,6 +1023,11 @@ describe("share links across a creator's departure — real-DB integration", () 
 
     const t = await teamWithCreator();
     const s = await share({ creatorId: t.creator, teamEntryId: t.entryId });
+    // A creator who left the tenant after creating the share, their team row left active.
+    const departed = await teamWithCreator();
+    const departedShare = await share({ creatorId: departed.creator, teamEntryId: departed.entryId, createdAt: "now() - interval '1 minute'" });
+    await sql(`UPDATE tenant_members SET deactivated_at = now() WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, tenantId, departed.creator);
+    const departureRuleApplied = migrations.includes("20261114000100_share_creator_departed");
     const role = `probe_rds_${hex(4)}`;
     const client = await side.pool.connect();
     try {
@@ -928,8 +1046,11 @@ describe("share links across a creator's departure — real-DB integration", () 
       );
       expect(fn.rows[0]).toEqual({ owner: role, app: true, public: false });
       await client.query(`SET LOCAL ROLE passwd_app`);
+      // No context: the function's own call-scoped bypass is the only grant.
       const r = await client.query(`SELECT share_creator_admitted($1::uuid) AS ok`, [s.id]);
       expect(r.rows[0].ok).toBe(true);
+      const d = await client.query(`SELECT share_creator_admitted($1::uuid) AS ok`, [departedShare.id]);
+      expect(d.rows[0].ok).toBe(!departureRuleApplied);
     } finally {
       await client.query("ROLLBACK");
       client.release();

@@ -138,7 +138,10 @@ resource "aws_ecs_task_definition" "app" {
           { name = "EMAIL_FROM", value = var.email_from },
           { name = "SMTP_HOST", value = var.smtp_host },
           { name = "SMTP_PORT", value = tostring(var.smtp_port) },
-        ] : []
+        ] : [],
+        # BLOB_BACKEND=s3 and the bucket, when attachments_blob_backend is s3;
+        # nothing on the db default. The retention-gc worker gets the same list.
+        local.attachment_blob_env,
       )
       secrets = concat(
         [
@@ -200,6 +203,19 @@ resource "aws_ecs_task_definition" "app" {
     }
   ])
   tags = local.tags
+
+  # Preconditions 1 and 2 of the retention-gc task definition, repeated: the
+  # app reads the same BLOB_BACKEND.
+  lifecycle {
+    precondition {
+      condition     = local.attachment_backend_bucket_ready
+      error_message = "attachments_blob_backend = \"s3\" needs enable_s3_attachments = true and attachments_blob_backend_empty_db_ack = true (run the retention-gc worker with --count-db-blobs first and see db_stored 0; docs/operations/deployment.md \"Orphan attachment sweep on AWS\")."
+    }
+    precondition {
+      condition     = local.attachment_backend_sse_ready
+      error_message = "attachments_blob_backend = \"s3\" needs SSE-S3: set s3_kms_key_arn = \"\" (no task role holds KMS permissions for a CMK)."
+    }
+  }
 }
 
 ################################################################################
@@ -455,7 +471,11 @@ resource "aws_ecs_task_definition" "audit_outbox_worker" {
   cpu                = var.worker_cpu
   memory             = var.worker_memory
   execution_role_arn = aws_iam_role.ecs_task_execution.arn
-  task_role_arn      = aws_iam_role.ecs_task.arn
+  # No task_role_arn, as for the verify worker: the outbox worker calls no AWS
+  # API with the task's identity (its webhook, SIEM and S3-compatible
+  # deliveries carry each destination's own configured credentials), and
+  # without a role the task has no credentials to misuse. It ran as ecs_task
+  # before #1020 and so held the attachment bucket rights only the app uses.
 
   container_definitions = jsonencode([
     {
@@ -506,10 +526,12 @@ resource "aws_ecs_task_definition" "retention_gc_worker" {
   cpu                = var.worker_cpu
   memory             = var.worker_memory
   execution_role_arn = aws_iam_role.ecs_task_execution.arn
-  task_role_arn      = aws_iam_role.ecs_task.arn
+  # Its own role (iam.tf): the bucket rights the orphan sweep needs, and none of
+  # them when attachments_blob_backend is db.
+  task_role_arn = aws_iam_role.ecs_retention_gc_task.arn
 
   container_definitions = jsonencode([
-    {
+    merge({
       name      = "retention-gc-worker"
       image     = var.app_image
       essential = true
@@ -522,12 +544,51 @@ resource "aws_ecs_task_definition" "retention_gc_worker" {
           awslogs-stream-prefix = "ecs"
         }
       }
-      secrets = [
-        { name = "RETENTION_GC_DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:RETENTION_GC_DATABASE_URL::" },
-      ]
-    }
+      # DEPLOYMENT_ID only while the sweep runs: the worker refuses a mode other
+      # than off without it, and deletes only in a bucket whose marker holds it.
+      secrets = concat(
+        [
+          { name = "RETENTION_GC_DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:RETENTION_GC_DATABASE_URL::" },
+        ],
+        var.retention_gc_blob_sweep_mode != "off" ? [
+          { name = "DEPLOYMENT_ID", valueFrom = "${aws_secretsmanager_secret.app.arn}:DEPLOYMENT_ID::" }
+        ] : [],
+      )
+      # No environment key when the list is empty, so the defaults render the
+      # container definition exactly as before this switch existed.
+    }, length(local.retention_gc_blob_env) > 0 ? { environment = local.retention_gc_blob_env } : {})
   ])
   tags = local.tags
+
+  lifecycle {
+    # 1. s3 needs the bucket and the operator's word that the database holds
+    #    no attachments (they would become unreadable).
+    precondition {
+      condition     = local.attachment_backend_bucket_ready
+      error_message = "attachments_blob_backend = \"s3\" needs enable_s3_attachments = true and attachments_blob_backend_empty_db_ack = true (run the retention-gc worker with --count-db-blobs first and see db_stored 0; docs/operations/deployment.md \"Orphan attachment sweep on AWS\")."
+    }
+    # 2. No role holds KMS permissions; SSE-KMS support is a follow-up.
+    precondition {
+      condition     = local.attachment_backend_sse_ready
+      error_message = "attachments_blob_backend = \"s3\" needs SSE-S3: set s3_kms_key_arn = \"\" (no task role holds KMS permissions for a CMK)."
+    }
+    # 3. The sweep only runs against an external store.
+    precondition {
+      condition     = var.retention_gc_blob_sweep_mode == "off" || var.attachments_blob_backend == "s3"
+      error_message = "retention_gc_blob_sweep_mode other than \"off\" needs attachments_blob_backend = \"s3\"."
+    }
+    # 4. A floor, not the restore control: the grace only delays deletion, so
+    #    a restore to a point t days back leaves objects uploaded since then
+    #    deletable (grace - t) later — zero margin at t = window = grace. The
+    #    control is the restore procedure in deployment.md (mode off or report
+    #    until reconciled). A null grace is tested first so it reports this
+    #    message rather than an evaluation error. A window above 35 days makes
+    #    delete unreachable (the env schema caps the grace at 35 d).
+    precondition {
+      condition     = var.retention_gc_blob_sweep_mode != "delete" || (var.retention_gc_blob_orphan_grace_ms == null ? false : var.retention_gc_blob_orphan_grace_ms >= local.blob_restore_window_ms)
+      error_message = "retention_gc_blob_sweep_mode = \"delete\" needs retention_gc_blob_orphan_grace_ms set to at least the database restore window (max of db_backup_retention_days and, with enable_backup, backup_retention_days) in milliseconds. A window above 35 days cannot be met: run \"report\"."
+    }
+  }
 }
 
 # Worker services: desired_count = var.worker_desired_count (0 during first-time

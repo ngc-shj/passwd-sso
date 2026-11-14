@@ -13,7 +13,7 @@ import { withTenantRls } from "@/lib/tenant-rls";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { createLockBudget, withBoundedLockWait } from "@/lib/team/team-key-rotation-lock";
-import { isMembershipLockConflict, lockTenantRows } from "@/lib/team/tenant-row-lock";
+import { actorDepartedSinceAdmission, isMembershipLockConflict, lockTenantRows, readTenantRows } from "@/lib/team/tenant-row-lock";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
 import { membershipConflictResponse } from "@/lib/http/lock-conflict-response";
@@ -121,18 +121,31 @@ async function handlePOST(req: NextRequest, { params }: Params) {
           { budget },
         );
 
-        const activeOwners = await tx.teamMember.count({
+        // A leftover OWNER (tenant row departed at or after their admission)
+        // holds no authority and cannot be removed as an OWNER, so it does not
+        // count: the demotion below turns it into an ADMIN. Their tenant rows
+        // are read unlocked (D8): the check is against old state.
+        const activeOwners = await tx.teamMember.findMany({
           where: { teamId, role: TEAM_ROLE.OWNER, deactivatedAt: null },
+          select: { userId: true, admittedAt: true, createdAt: true },
         });
-        if (activeOwners > 0) return ASSIGN_OUTCOME.HAS_OWNER;
+        const ownerRows = await readTenantRows(tx, actor.tenantId, activeOwners.map((o) => o.userId));
+        if (activeOwners.some((o) => !actorDepartedSinceAdmission(ownerRows.get(o.userId), o.admittedAt ?? o.createdAt))) {
+          return ASSIGN_OUTCOME.HAS_OWNER;
+        }
         const target = await tx.teamMember.findFirst({
           where: { teamId, userId: targetUserId, deactivatedAt: null },
-          select: { id: true },
+          select: { id: true, admittedAt: true, createdAt: true },
         });
-        if (!target) return ASSIGN_OUTCOME.NOT_ACTIVE;
+        // A leftover membership (the target's tenant row departed at or after
+        // their admission, e.g. SCIM DELETE then re-creation) is treated as
+        // deactivated for every grant.
+        if (!target || actorDepartedSinceAdmission(rows.get(targetUserId), target.admittedAt ?? target.createdAt)) {
+          return ASSIGN_OUTCOME.NOT_ACTIVE;
+        }
 
-        // Every other OWNER row is a departed one: demoted, so a later return
-        // of that member does not give the team two owners.
+        // Every other OWNER row is a departed or leftover one: demoted, so a
+        // later return of that member does not give the team two owners.
         const demoted = await tx.teamMember.findMany({
           where: { teamId, role: TEAM_ROLE.OWNER, id: { not: target.id } },
           select: { userId: true },

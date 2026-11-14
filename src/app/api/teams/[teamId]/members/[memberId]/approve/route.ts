@@ -11,7 +11,7 @@ import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE, TEAM_PERMISSION } from "@
 import { extractRequestMeta, logAuditInTx } from "@/lib/audit/audit";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { createLockBudget, lockTeamsAgainstRotation } from "@/lib/team/team-key-rotation-lock";
-import { isMembershipLockConflict, lockTenantRows } from "@/lib/team/tenant-row-lock";
+import { actorDepartedSinceAdmission, isMembershipLockConflict, lockTenantRows } from "@/lib/team/tenant-row-lock";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { MS_PER_HOUR } from "@/lib/constants/time";
@@ -110,9 +110,14 @@ async function handlePOST(req: NextRequest, { params }: Params) {
         // members, so this is "holds the current key version".
         const approver = await tx.teamMember.findFirst({
           where: { teamId, userId: session.user.id, deactivatedAt: null },
-          select: { role: true, keyDistributed: true },
+          select: { role: true, keyDistributed: true, admittedAt: true, createdAt: true },
         });
-        if (!approver || !hasTeamPermission(approver.role, TEAM_PERMISSION.MEMBER_INVITE) || !approver.keyDistributed) {
+        if (
+          !approver ||
+          !hasTeamPermission(approver.role, TEAM_PERMISSION.MEMBER_INVITE) ||
+          !approver.keyDistributed ||
+          actorDepartedSinceAdmission(rows.get(session.user.id), approver.admittedAt ?? approver.createdAt)
+        ) {
           return APPROVE_OUTCOME.ACTOR_NOT_PERMITTED;
         }
 

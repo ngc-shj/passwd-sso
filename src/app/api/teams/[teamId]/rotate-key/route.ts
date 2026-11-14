@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { activeTeamRole, hasTeamPermission, requireTeamPermission } from "@/lib/auth/access/team-auth";
+import { activeTeamAdmission, hasTeamPermission, requireTeamPermission } from "@/lib/auth/access/team-auth";
 import { logAuditBulkInTx, logAuditInTx, teamAuditBase } from "@/lib/audit/audit";
 import { API_ERROR, type ApiErrorCode } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
@@ -27,6 +27,14 @@ import {
 } from "@/lib/validations/common";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { heldTeamKeyVersions, normalizeTeamKeyVersion } from "@/lib/team/team-item-key";
+import { createLockBudget } from "@/lib/team/team-key-rotation-lock";
+import {
+  actorDepartedSinceAdmission,
+  lockTenantRows,
+  readTenantRows,
+  TenantMemberLockTimeoutError,
+} from "@/lib/team/tenant-row-lock";
+import { membershipConflictResponse } from "@/lib/http/lock-conflict-response";
 
 // Counts successful rotations only: the slot check() takes is released by
 // clear() when the request ends in anything but a committed rotation (one
@@ -173,9 +181,14 @@ async function rotateTeamKey(req: NextRequest, teamId: string, userId: string): 
   try {
     await withTeamTenantRls(
       teamId,
-      async (_tenantId, tx) => {
+      async (tenantId, tx) => {
+        // The rotating member's tenant row first (tenant-row-lock.ts lock
+        // order: tenant rows, then the team): their departure holds it FOR
+        // UPDATE, so the authority re-read below sees a departure that
+        // committed meanwhile.
+        const actorRows = await lockTenantRows(tx, tenantId, [userId], "share", createLockBudget());
         // Re-verify teamKeyVersion hasn't changed since pre-read, under a row
-        // lock taken as the FIRST statement (see team-key-rotation-lock.ts).
+        // lock taken before any team or member write (see team-key-rotation-lock.ts).
         // Entry creates and full updates, history restores, key distribution,
         // and member removal hold this row FOR SHARE, so each has either
         // committed before the member and entry reads below (and is read) or
@@ -191,8 +204,14 @@ async function rotateTeamKey(req: NextRequest, teamId: string, userId: string): 
         // The rotating member's authority, under the team lock: a departure,
         // removal or demotion committed since requireTeamPermission would
         // otherwise rotate the team to a key the actor generated and keeps.
-        const actorRole = await activeTeamRole(tx, teamId, userId);
-        if (!actorRole || !hasTeamPermission(actorRole, TEAM_PERMISSION.TEAM_UPDATE)) {
+        // A leftover membership (the actor's tenant row departed at or after
+        // their admission) is treated as deactivated, which refuses here.
+        const actor = await activeTeamAdmission(tx, teamId, userId);
+        if (
+          !actor ||
+          !hasTeamPermission(actor.role, TEAM_PERMISSION.TEAM_UPDATE) ||
+          actorDepartedSinceAdmission(actorRows.get(userId), actor.admittedAt)
+        ) {
           throw new RotationRefusal(API_ERROR.ACTOR_NOT_PERMITTED);
         }
 
@@ -200,9 +219,23 @@ async function rotateTeamKey(req: NextRequest, teamId: string, userId: string): 
         // tx, after the team lock that member removal also takes)
         const members = await tx.teamMember.findMany({
           where: { teamId: teamId, deactivatedAt: null, keyDistributed: true },
-          select: { userId: true },
+          select: { userId: true, admittedAt: true, createdAt: true },
         });
-        const memberUserIds = new Set(members.map((m) => m.userId));
+        // A leftover key-holder (tenant row departed at or after their
+        // admission) is treated like a deactivated row: not wrapped the new
+        // version, a key supplied for them refused as for a non-member, and
+        // listed for distribution below. Their tenant rows are read unlocked:
+        // residue is old state, and locking every key-holder's row would
+        // serialise rotation with every SCIM write to any of them. A departure
+        // in flight takes the team row FOR SHARE, which this rotation's lock
+        // excludes, so it deactivates the membership before or after it.
+        const tenantRows = await readTenantRows(tx, tenantId, members.map((m) => m.userId));
+        const leftoverUserIds = members
+          .filter((m) => actorDepartedSinceAdmission(tenantRows.get(m.userId), m.admittedAt ?? m.createdAt))
+          .map((m) => m.userId);
+        const memberUserIds = new Set(
+          members.map((m) => m.userId).filter((id) => !leftoverUserIds.includes(id)),
+        );
         for (const memberUserId of memberUserIds) {
           if (!memberKeys.some((k) => k.userId === memberUserId)) {
             throw new TxValidationError({ missingKeyFor: memberUserId });
@@ -332,11 +365,15 @@ async function rotateTeamKey(req: NextRequest, teamId: string, userId: string): 
           throw new Error("ENTRY_COUNT_MISMATCH");
         }
 
-      // A deactivated member (left the tenant, or removed by the IdP) was not
-      // wrapped the new version: if they come back, they are listed for
-      // distribution of it rather than counted as holding it.
+      // A deactivated member (left the tenant, or removed by the IdP) or a
+      // leftover one was not wrapped the new version: if they come back, they
+      // are listed for distribution of it rather than counted as holding it.
         await tx.teamMember.updateMany({
-          where: { teamId: teamId, deactivatedAt: { not: null }, keyDistributed: true },
+          where: {
+            teamId: teamId,
+            keyDistributed: true,
+            OR: [{ deactivatedAt: { not: null } }, { userId: { in: leftoverUserIds } }],
+          },
           data: { keyDistributed: false },
         });
 
@@ -396,6 +433,11 @@ async function rotateTeamKey(req: NextRequest, teamId: string, userId: string): 
     }
     if (e instanceof TxValidationError) {
       return validationError(e.details);
+    }
+    // The rotating member's tenant row was held past the lock wait: nothing
+    // was rotated.
+    if (e instanceof TenantMemberLockTimeoutError) {
+      return membershipConflictResponse(e);
     }
     throw e;
   }

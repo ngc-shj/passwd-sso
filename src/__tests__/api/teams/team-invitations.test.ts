@@ -60,7 +60,7 @@ vi.mock("@/lib/auth/access/team-auth", async () => {
     requireTeamPermission: mockRequireTeamPermission,
     // The real role → permission table: POST re-checks the inviter's role under the lock.
     hasTeamPermission: actual.hasTeamPermission,
-    activeTeamRole: actual.activeTeamRole,
+    activeTeamAdmission: actual.activeTeamAdmission,
     TeamAuthError,
   };
 });
@@ -140,6 +140,8 @@ describe("GET /api/teams/[teamId]/invitations", () => {
   });
 });
 
+const ACTOR_ADMITTED_AT = new Date("2026-03-01T00:00:00.000Z");
+
 describe("POST /api/teams/[teamId]/invitations", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -151,7 +153,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     mockInvitationFindMany.mockResolvedValue([]);
     mockLockTenantRows.mockResolvedValue(new Map());
     // The inviter's membership, re-read under their tenant row: an active ADMIN.
-    mockTeamMemberFindFirst.mockResolvedValue({ role: "ADMIN" });
+    mockTeamMemberFindFirst.mockResolvedValue({ role: "ADMIN", admittedAt: ACTOR_ADMITTED_AT, createdAt: ACTOR_ADMITTED_AT });
   });
 
   it("returns 401 when not authenticated", async () => {
@@ -255,6 +257,32 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     const res = await POST(req, createParams({ teamId: "o1" }));
     const { status } = await parseResponse(res);
     expect(status).toBe(201);
+  });
+
+  describe("an inviter who left the tenant, judged against their admission to the team", () => {
+    const actorRow = (deactivatedAt: Date | null, departedAt: Date | null = null) =>
+      new Map([[DEFAULT_SESSION.user.id, { hasRow: true, role: null, deactivatedAt, departedAt }]]);
+    const after = (ms: number) => new Date(ACTOR_ADMITTED_AT.getTime() + ms);
+    const invite = async () => {
+      mockAuth.mockResolvedValue(DEFAULT_SESSION);
+      mockRequireTeamPermission.mockResolvedValue(undefined);
+      mockInvitationCreate.mockResolvedValue({ id: "inv-3", email: "new@test.com", role: "MEMBER", token: "t", expiresAt: new Date(), createdAt: new Date() });
+      const req = createRequest("POST", undefined, { body: { email: "new@test.com", role: "MEMBER" } });
+      return (await parseResponse(await POST(req, createParams({ teamId: "o1" })))).status;
+    };
+
+    it("refuses an ADMIN inviter whose tenant row departed after their admission", async () => {
+      mockLockTenantRows.mockResolvedValue(actorRow(after(1)));
+      expect(await invite()).toBe(403);
+      expect(mockInvitationCreate).not.toHaveBeenCalled();
+    });
+
+    it("allows a guest inviter, an active one, a re-admitted one and a re-provisioned one", async () => {
+      for (const rows of [new Map(), actorRow(null), actorRow(after(-1000)), actorRow(null, after(-1000))]) {
+        mockLockTenantRows.mockResolvedValue(rows);
+        expect(await invite()).toBe(201);
+      }
+    });
   });
 
   describe("expired PENDING invitations", () => {

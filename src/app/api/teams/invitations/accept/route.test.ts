@@ -8,9 +8,14 @@ const acceptTx = {
   teamMember: { findUnique: vi.fn(), findFirst: vi.fn(), upsert: vi.fn() },
   teamMemberKey: { deleteMany: vi.fn() },
 };
-const { mockLockTenantRows, mockLockTeamsAgainstRotation } = vi.hoisted(() => ({
+const { mockLockTenantRows, mockLockTeamsAgainstRotation, mockLogAuditInTx } = vi.hoisted(() => ({
   mockLockTenantRows: vi.fn(),
   mockLockTeamsAgainstRotation: vi.fn(),
+  mockLogAuditInTx: vi.fn(),
+}));
+vi.mock("@/lib/audit/audit", () => ({
+  logAuditInTx: mockLogAuditInTx,
+  extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "test" }),
 }));
 vi.mock("@/lib/team/tenant-row-lock", async (importOriginal) => ({
   ...(await importOriginal()) as Record<string, unknown>,
@@ -81,7 +86,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 }));
 
 import { POST } from "./route";
-import { TEAM_ROLE, INVITATION_STATUS } from "@/lib/constants";
+import { TEAM_ROLE, INVITATION_STATUS, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 // Module-scope snapshot (route.ts:16 `const acceptLimiter = createRateLimiter(...)`
@@ -94,6 +99,9 @@ const acceptLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
 const futureDate = new Date("2099-01-01T00:00:00Z");
 
 const issuedAt = new Date("2026-06-01T00:00:00.000Z");
+
+// When the inviter's membership of the team began: before the invitation.
+const inviterAdmittedAt = new Date("2026-05-01T00:00:00.000Z");
 
 const validInvitation = {
   id: "inv-1",
@@ -137,7 +145,8 @@ describe("POST /api/teams/invitations/accept", () => {
     acceptTx.teamInvitation.update.mockReset().mockResolvedValue({});
     acceptTx.teamMember.findUnique.mockReset().mockResolvedValue(null);
     // The inviter, re-read under the team lock: an active ADMIN.
-    acceptTx.teamMember.findFirst.mockReset().mockResolvedValue({ role: TEAM_ROLE.ADMIN });
+    acceptTx.teamMember.findFirst.mockReset().mockResolvedValue({ role: TEAM_ROLE.ADMIN, admittedAt: inviterAdmittedAt, createdAt: inviterAdmittedAt });
+    mockLogAuditInTx.mockReset().mockResolvedValue(undefined);
     acceptTx.teamMember.upsert.mockReset().mockResolvedValue({});
     acceptTx.teamMemberKey.deleteMany.mockReset().mockResolvedValue({ count: 0 });
     mockLockTenantRows.mockReset().mockResolvedValue(lockedRows());
@@ -219,12 +228,10 @@ describe("POST /api/teams/invitations/accept", () => {
     expect(res.status).toBe(403);
   });
 
-  it("handles already-member case gracefully", async () => {
+  it("handles already-member case gracefully, claiming and answering inside the locked transaction", async () => {
     mockPrismaTeamInvitation.findUnique.mockResolvedValue(validInvitation);
-    mockPrismaTeamMember.findUnique.mockResolvedValue({
-      id: "existing-member",
-      deactivatedAt: null,
-    });
+    mockPrismaTeamMember.findUnique.mockResolvedValue({ id: "existing-member", deactivatedAt: null });
+    acceptTx.teamMember.findUnique.mockResolvedValue({ deactivatedAt: null });
 
     const res = await POST(createRequest("POST", "http://localhost:3000/api/teams/invitations/accept", {
       body: { token: "valid-token" },
@@ -232,6 +239,48 @@ describe("POST /api/teams/invitations/accept", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.alreadyMember).toBe(true);
+    // ACCEPTED is written only by the locked claim, never by an unlocked write.
+    expect(mockPrismaTeamInvitation.updateMany).not.toHaveBeenCalled();
+    expect(acceptTx.teamInvitation.updateMany).toHaveBeenCalledOnce();
+    expect(acceptTx.teamMember.upsert).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
+  });
+
+  it("reaches the locked path for an active SCIM-managed member, answering alreadyMember there", async () => {
+    mockPrismaTeamInvitation.findUnique.mockResolvedValue(validInvitation);
+    mockPrismaTeamMember.findUnique.mockResolvedValue({
+      id: "scim-member", deactivatedAt: null, scimManaged: true, deactivatedByTenant: false, scimApprovalPending: false,
+    });
+    acceptTx.teamMember.findUnique.mockResolvedValue({
+      deactivatedAt: null, scimManaged: true, deactivatedByTenant: false, scimApprovalPending: false,
+    });
+
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/teams/invitations/accept", {
+      body: { token: "valid-token" },
+    }));
+    expect(res.status).toBe(200);
+    expect((await res.json()).alreadyMember).toBe(true);
+    expect(acceptTx.teamInvitation.updateMany).toHaveBeenCalledOnce();
+    expect(acceptTx.teamMember.upsert).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
+  });
+
+  it("answers 410 INVITATION_EXPIRED to an already-active member when the inviter departed since their admission", async () => {
+    mockPrismaTeamInvitation.findUnique.mockResolvedValue(validInvitation);
+    mockPrismaTeamMember.findUnique.mockResolvedValue({ id: "existing-member", deactivatedAt: null });
+    acceptTx.teamMember.findUnique.mockResolvedValue({ deactivatedAt: null });
+    mockLockTenantRows.mockResolvedValue(lockedRows({ "inviter-id": { deactivatedAt: new Date(inviterAdmittedAt.getTime() + 1) } }));
+
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/teams/invitations/accept", {
+      body: { token: "valid-token" },
+    }));
+    expect(res.status).toBe(410);
+    expect((await res.json()).error).toBe("INVITATION_EXPIRED");
+    expect(acceptTx.teamInvitation.update).toHaveBeenCalledWith({ where: { id: "inv-1" }, data: { status: INVITATION_STATUS.EXPIRED } });
+    // The locked claim ran and was overwritten by EXPIRED; no unlocked ACCEPTED write, no admission, no audit.
+    expect(mockPrismaTeamInvitation.updateMany).not.toHaveBeenCalled();
+    expect(acceptTx.teamMember.upsert).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 
   it("returns 409 SCIM_APPROVAL_PENDING for a pending member (pre-check)", async () => {
@@ -299,6 +348,18 @@ describe("POST /api/teams/invitations/accept", () => {
     expect(json.role).toBe(TEAM_ROLE.MEMBER);
     expect(json.team.name).toBe("My Team");
     expect(acceptTx.teamMember.upsert).toHaveBeenCalledTimes(1);
+    expect(mockLogAuditInTx).toHaveBeenCalledOnce();
+    expect(mockLogAuditInTx).toHaveBeenCalledWith(acceptTx, "tenant-1", expect.objectContaining({
+      scope: "TEAM",
+      action: "TEAM_MEMBER_INVITE_ACCEPT",
+      userId: "test-user-id",
+      teamId: "team-1",
+      targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
+      targetId: "test-user-id",
+      metadata: { invitationId: "inv-1", role: TEAM_ROLE.MEMBER, readmitted: false },
+    }));
+    // Audited before the keys are cleared, in the admission's own transaction.
+    expect(mockLogAuditInTx.mock.invocationCallOrder[0]).toBeLessThan(acceptTx.teamMemberKey.deleteMany.mock.invocationCallOrder[0]);
   });
 
   it("returns 410 when the accept CAS loses a concurrent race", async () => {
@@ -407,14 +468,35 @@ describe("POST /api/teams/invitations/accept", () => {
       expect(acceptTx.teamInvitation.update).toHaveBeenCalledWith({ where: { id: "inv-1" }, data: { status: INVITATION_STATUS.EXPIRED } });
       expect(acceptTx.teamMember.findFirst).toHaveBeenCalledWith({
         where: { teamId: "team-1", userId: "inviter-id", deactivatedAt: null },
-        select: { role: true },
+        select: { role: true, admittedAt: true, createdAt: true },
       });
       expect(acceptTx.teamMember.upsert).not.toHaveBeenCalled();
     });
 
+    it("refuses an invitation from an ADMIN inviter whose tenant row departed after their admission, though the invitation postdates it", async () => {
+      // Invitation (issuedAt) postdates the departure, so departedSince alone admits.
+      const departure = new Date(inviterAdmittedAt.getTime() + 1);
+      mockLockTenantRows.mockResolvedValue(lockedRows({ "inviter-id": { deactivatedAt: departure } }));
+
+      expect((await accept()).status).toBe(410);
+      expect(acceptTx.teamInvitation.update).toHaveBeenCalledWith({ where: { id: "inv-1" }, data: { status: INVITATION_STATUS.EXPIRED } });
+      expect(acceptTx.teamMember.upsert).not.toHaveBeenCalled();
+      expect(mockLogAuditInTx).not.toHaveBeenCalled();
+    });
+
+    it("admits from an inviter who was re-admitted after their departure", async () => {
+      mockLockTenantRows.mockResolvedValue(lockedRows({ "inviter-id": { deactivatedAt: new Date(inviterAdmittedAt.getTime() - 1000) } }));
+      expect((await accept()).status).toBe(200);
+    });
+
+    it("admits from an inviter re-provisioned active whose old departure record predates their membership", async () => {
+      mockLockTenantRows.mockResolvedValue(lockedRows({ "inviter-id": { departedAt: new Date(inviterAdmittedAt.getTime() - 1000) } }));
+      expect((await accept()).status).toBe(200);
+    });
+
     it("admits on an invitation from a guest ADMIN, who has no tenant row here", async () => {
       mockLockTenantRows.mockResolvedValue(lockedRows({ "inviter-id": { hasRow: false } }));
-      acceptTx.teamMember.findFirst.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
+      acceptTx.teamMember.findFirst.mockResolvedValue({ role: TEAM_ROLE.ADMIN, admittedAt: inviterAdmittedAt, createdAt: inviterAdmittedAt });
 
       expect((await accept()).status).toBe(200);
       expect(acceptTx.teamMember.upsert).toHaveBeenCalledOnce();
@@ -461,6 +543,10 @@ describe("POST /api/teams/invitations/accept", () => {
         update: expect.objectContaining({ deactivatedAt: null, deactivatedByTenant: false, keyDistributed: false, scimManaged: false }),
       }));
       expect(acceptTx.teamMemberKey.deleteMany).toHaveBeenCalledWith({ where: { teamId: "team-1", userId: "test-user-id" } });
+      expect(mockLogAuditInTx).toHaveBeenCalledWith(acceptTx, "tenant-1", expect.objectContaining({
+        action: "TEAM_MEMBER_INVITE_ACCEPT",
+        metadata: { invitationId: "inv-1", role: TEAM_ROLE.MEMBER, readmitted: true },
+      }));
       // (T1) An admission commits: the transaction callback resolved, it did
       // not reject and get its refusal response fabricated some other way.
       await expect(teamTenantRlsCallbackPromises.at(-1)).resolves.not.toBeUndefined();
@@ -475,6 +561,7 @@ describe("POST /api/teams/invitations/accept", () => {
       expect((await res.json()).alreadyMember).toBe(true);
       expect(acceptTx.teamMember.upsert).not.toHaveBeenCalled();
       expect(acceptTx.teamMemberKey.deleteMany).not.toHaveBeenCalled();
+      expect(mockLogAuditInTx).not.toHaveBeenCalled();
       // (T1) ALREADY_MEMBER is a returned outcome, not a thrown refusal: the
       // claim commits along with the rest of the transaction.
       await expect(teamTenantRlsCallbackPromises.at(-1)).resolves.not.toBeUndefined();

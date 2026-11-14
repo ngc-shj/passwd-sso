@@ -72,23 +72,28 @@ Store these in Secrets Manager:
 - `AUTH_JACKSON_SECRET` (that connection's own `clientSecret`)
 - `SHARE_MASTER_KEY`
 - `REDIS_URL` (REQUIRED in production — see [Redis](#app-service))
-- `BLOB_BACKEND`
 - `JACKSON_API_KEY` (passed to the Jackson container as `JACKSON_API_KEYS` — note the trailing `S`)
 - `PASSWD_OUTBOX_WORKER_PASSWORD` (sets the `passwd_outbox_worker` DB role password; on AWS rotate it by re-running `scripts/bootstrap-rds-roles.mjs` with the new value — the image has no `psql`, which `scripts/set-*-password.sh` need)
 - `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` (least-privilege role `passwd_anchor_publisher` — used by audit-anchor-publisher; in production it has no `DATABASE_URL` fallback)
 - `AUDIT_ANCHOR_SIGNING_KEY`, `AUDIT_ANCHOR_TAG_SECRET` (mapped into the publisher task only; the app no longer receives them)
-- `DEPLOYMENT_ID` (a UUID naming this deployment in every manifest; publisher task only — see [Audit anchor publisher](#audit-anchor-publisher))
+- `DEPLOYMENT_ID` (a UUID naming this deployment in every manifest; mapped into the publisher task, and into the retention-gc worker while its orphan sweep runs — see [Audit anchor publisher](#audit-anchor-publisher))
 - `PASSWD_ANCHOR_PUBLISHER_PASSWORD` is not stored on its own: it is an input to `scripts/bootstrap-rds-roles.mjs` only, taken from the userinfo of `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` (a second stored copy could drift from the URL)
 
 Optional:
 - `AUTH_JACKSON_CONNECTIONS` (further Jackson connections, one provider `saml-jackson-<id>` each; Terraform reads it only with `enable_jackson_connections = true`)
 - `GOOGLE_WORKSPACE_DOMAINS`
 - `SAML_PROVIDER_NAME`
-- `AWS_REGION`, `S3_ATTACHMENTS_BUCKET` (when `BLOB_BACKEND=s3`)
-- `AZURE_STORAGE_ACCOUNT`, `AZURE_BLOB_CONTAINER` (when `BLOB_BACKEND=azure`)
-- `GCS_ATTACHMENTS_BUCKET` (when `BLOB_BACKEND=gcs`)
 - `HEALTH_REDIS_REQUIRED=true` (fail health check when Redis is down)
 - `KEY_PROVIDER=aws-sm` (use AWS Secrets Manager for master key management — see [KMS Setup](../../operations/key-provider-setup.md#aws-secrets-manager-provider-aws-sm))
+
+Not secrets: the attachment backend comes from the Terraform variable
+`attachments_blob_backend` (`db` by default, or `s3`), which sets
+`BLOB_BACKEND`, `S3_ATTACHMENTS_BUCKET` and `AWS_REGION` on the app and the
+retention-gc worker as task environment. Secret keys with those names are not
+read by any task, and the Azure and GCS backends are not wired on AWS. See
+`infra/terraform/README.md` "Attachment storage and the orphan sweep" and,
+before switching an existing stack, `docs/operations/deployment.md` "Orphan
+attachment sweep on AWS".
 
 Generate:
 ```
@@ -180,8 +185,7 @@ Env vars:
 - `SAML_PROVIDER_NAME`
 - `SHARE_MASTER_KEY`
 - `REDIS_URL` (REQUIRED in production — Zod schema enforces this for `NODE_ENV=production`; backs session cache with tombstone-based revocation propagation (PR #407) and shared rate limiting)
-- `BLOB_BACKEND`
-- `AWS_REGION`, `S3_ATTACHMENTS_BUCKET` (required if `BLOB_BACKEND=s3`)
+- `BLOB_BACKEND`, and `AWS_REGION` and `S3_ATTACHMENTS_BUCKET` with `s3` (Terraform sets all three from `attachments_blob_backend`; unset, the default, keeps attachments in the database)
 - `AZURE_STORAGE_ACCOUNT`, `AZURE_BLOB_CONTAINER` (required if `BLOB_BACKEND=azure`)
 - `GCS_ATTACHMENTS_BUCKET` (required if `BLOB_BACKEND=gcs`)
 
@@ -212,7 +216,7 @@ populating the secret keys below before apply.
 | Service | Command | DB URL secret (role) |
 |---------|---------|----------------------|
 | `*-audit-outbox-worker` | `node dist/audit-outbox-worker.js` | `OUTBOX_WORKER_DATABASE_URL` (`passwd_outbox_worker`) |
-| `*-retention-gc-worker` | `node dist/retention-gc-worker.js` | `RETENTION_GC_DATABASE_URL` (`passwd_retention_gc_worker`) |
+| `*-retention-gc-worker` | `node dist/retention-gc-worker.js` | `RETENTION_GC_DATABASE_URL` (`passwd_retention_gc_worker`); also `DEPLOYMENT_ID` while the orphan sweep runs |
 | `*-audit-anchor-publisher` | `node dist/audit-anchor-publisher.js` | `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` (`passwd_anchor_publisher`) |
 | `*-audit-chain-verify-worker` | `node dist/audit-chain-verify-worker.js` | the app secret's `DATABASE_URL`, as `AUDIT_CHAIN_VERIFY_DATABASE_URL` (`passwd_app`) |
 
@@ -221,6 +225,13 @@ it only reads `tenants`, `audit_chain_anchors` and `audit_logs`, but the role
 reads every table the app reads and keeps every write the app has. A dedicated
 read-only role is a follow-up (SC3). It has no task role, so it holds no AWS
 credentials.
+
+The retention-gc worker runs as its own task role (`*-ecs-retention-gc-task`),
+which holds bucket permissions only with `attachments_blob_backend = "s3"`: list
+the attachments bucket, delete objects, and read and write the deployment
+marker. The app runs as `*-ecs-task`, which holds Get/Put/Delete on the
+attachments bucket's objects only with `"s3"`; the outbox worker has no task
+role, like the verify worker.
 
 Without audit-outbox-worker, `audit_outbox` rows accumulate as `PENDING` and
 audit logs are never persisted. Without retention-gc-worker, nothing is ever
