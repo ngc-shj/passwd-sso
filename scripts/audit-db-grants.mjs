@@ -24,7 +24,8 @@
  *
  * Also fails when the RLS bypass is not enforcing (public.rls_bypass_enforced()
  * absent or false), unless RLS_REPORT_MODE_ACK carries a non-empty reason, which
- * is printed as a WARNING so a deploy in report mode is visible in the task log.
+ * is printed as a WARNING so a deploy in report mode is visible in the task log;
+ * a reason left set on an enforcing database is warned about too.
  * `--write` refuses in report mode whatever is set. The variable is read from
  * the environment only (scripts/deploy.sh forwards it); no flag sets it.
  * Fails too when client_min_messages is above `warning` from a server-level

@@ -50,7 +50,8 @@ set -Eeuo pipefail
 #     (docs/operations/deployment.md). Never defaulted here or in the task def.
 #   RLS_REPORT_MODE_ACK   forwarded to the migrate task only when exported. A
 #     non-empty reason lets the grant audit pass while the RLS bypass is in
-#     report mode (after an un-flip); the audit prints it. Never defaulted.
+#     report mode (after an un-flip); the audit prints it. Left set once the
+#     bypass is enforcing again, it makes the audit warn. Never defaulted.
 
 # ---- argument parsing --------------------------------------------------------
 ROLLBACK_IMAGE=""

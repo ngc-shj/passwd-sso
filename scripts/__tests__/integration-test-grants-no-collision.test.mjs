@@ -11,7 +11,8 @@
  *
  * What this is: a catch for the plain mistake, a literal `defineGrant` in a
  * test under src/__tests__/db-integration that repeats a member's pair. It
- * does not follow a local alias or re-export of `defineGrant`, a grant built
+ * does not follow a local alias or re-export of `defineGrant`, a call through
+ * `.call`/`.apply`/`.bind` or a computed property name, a grant built
  * as an object literal or by spreading a member, the bypass statement sent by
  * hand, or an integration test outside that directory; and a listed call is
  * excused as written, so a row added to its `it.each` table is not read. For

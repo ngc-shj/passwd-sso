@@ -145,16 +145,13 @@ try {
     // The attributes of every role the harness connects as, for the evidence
     // consumer to tell a restricted connection from an exempt one.
     const { HARNESS_ROLES } = await import("../../../scripts/checks/check-rls-grant-evidence");
-    const { connectionUser, recordRoleAttributes } = await import("./rls-grant-evidence-recorder");
+    const { ROLE_ATTRIBUTES_SQL, connectionUser, recordRoleAttributes } = await import("./rls-grant-evidence-recorder");
     const names = new Set<string>([
       ...HARNESS_ROLES,
       ...Object.values({ superuser, ...roleUrls }).map(connectionUser),
       new URL(databaseUrl).username,
     ]);
-    const { rows: attrs } = await probe.query<{ name: string; rolsuper: boolean; rolbypassrls: boolean }>(
-      `SELECT rolname AS name, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = ANY($1::text[])`,
-      [[...names]],
-    );
+    const { rows: attrs } = await probe.query(ROLE_ATTRIBUTES_SQL, [[...names]]);
     recordRoleAttributes(attrs);
   }
   // DATABASE_URL itself too: `@/lib/prisma` and the enforcing-mode probe use it,
@@ -254,7 +251,7 @@ clientProto.query = function (this: PgClientInternals, ...args: unknown[]) {
     Error.stackTraceLimit = limit;
     if (!fromPrismaJoinChildren(stack, readSourceLine)) concurrentQueryReports.push(stack);
   }
-  recordGrantEvidence(this, args);
+  recordGrantEvidence(this.connectionParameters, args);
   return originalQuery.apply(this, args);
 };
 // Positive control: two queries at once on one client must produce exactly one

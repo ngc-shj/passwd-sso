@@ -19,7 +19,7 @@ const GRANTS = {
   C: { purpose: "p2", tables: "c" },
 };
 
-const role = (name: string, rolsuper = false, rolbypassrls = false) => ({ kind: "role", name, rolsuper, rolbypassrls });
+const role = (name: string, rolsuper = false, rolbypassrls = false, canSetRole = false) => ({ kind: "role", name, rolsuper, rolbypassrls, canSetRole });
 const grant = (purpose: string, tables: string, roleName: string) => ({ kind: "grant", purpose, tables, role: roleName });
 const harnessRoles = HARNESS_ROLES.map((r) => role(r));
 const superuserRole = role("migration_owner", true, true);
@@ -73,6 +73,29 @@ describe("compareGrantEvidence", () => {
     expect(tally.unexercised).toEqual(["A", "B", "C"]);
   });
 
+  it("counts no evidence from a role that can SET ROLE, or whose attribute line lacks canSetRole", () => {
+    const oldFormat = { kind: "role", name: "old_format", rolsuper: false, rolbypassrls: false };
+    const { tally } = analyzeGrantEvidence({
+      lines: [
+        ...harnessRoles,
+        role("member_with_set", false, false, true),
+        oldFormat,
+        grant("p1", "a,b", "member_with_set"),
+        grant("p2", "c", "old_format"),
+      ],
+      grants: GRANTS,
+    });
+    expect(tally.unexercised).toEqual(["A", "B", "C"]);
+  });
+
+  it("credits a role whose attribute line says it cannot SET ROLE", () => {
+    const { tally } = analyzeGrantEvidence({
+      lines: [...harnessRoles, role("probe", false, false, false), grant("p2", "c", "probe")],
+      grants: GRANTS,
+    });
+    expect(tally.unexercised).toEqual(["A", "B"]);
+  });
+
   it("tallies a grant line whose role has no attribute line as no evidence, not a failure", () => {
     const { failures, tally } = compareGrantEvidence({
       lines: [...harnessRoles, grant("p1", "a,b", "passwd_app"), grant("p2", "c", "cell_made_login")],
@@ -92,13 +115,13 @@ describe("compareGrantEvidence", () => {
     expect(failures).toEqual([expect.stringContaining("passwd_anchor_publisher")]);
   });
 
-  it("fails when no grant line resolves to a NOSUPERUSER NOBYPASSRLS role", () => {
+  it("fails when no grant line resolves to a NOSUPERUSER NOBYPASSRLS role that cannot SET ROLE", () => {
     const { failures } = compareGrantEvidence({
       lines: [...harnessRoles, superuserRole, grant("p1", "a,b", "migration_owner")],
       grants: GRANTS,
       baseline: ["A", "B", "C"],
     });
-    expect(failures).toEqual([expect.stringContaining("no grant line resolves to a NOSUPERUSER NOBYPASSRLS role")]);
+    expect(failures).toEqual([expect.stringContaining("no grant line resolves to a NOSUPERUSER NOBYPASSRLS role that cannot SET ROLE")]);
   });
 
   describe("the baseline, in both directions", () => {

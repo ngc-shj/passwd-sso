@@ -1,7 +1,7 @@
 /**
- * The owner-shaped probe role (rds-probe-role.ts): a connection whose
- * `current_user` is a NOSUPERUSER NOBYPASSRLS member of the table owner, which
- * is the principal the migration role is on RDS. Every RDS-shaped cell relies
+ * The owner-shaped probe role (rds-probe-role.ts): a login whose
+ * `current_user` is a NOSUPERUSER NOBYPASSRLS member of the table owner that
+ * cannot become the owner, which is the principal the migration role is on RDS. Every RDS-shaped cell relies
  * on these properties, so they are asserted here once rather than assumed.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -19,7 +19,7 @@ import {
   type TestContext,
 } from "./helpers";
 import { probeRoleName } from "./probe-role-names";
-import { connectionStringAsRole, createProbeRole, type ProbeRole } from "./rds-probe-role";
+import { createProbeRole, type ProbeRole } from "./rds-probe-role";
 
 // Omits users; not a production member's pair, which a refusal cell must not credit.
 const TENANT_AND_SESSIONS = defineGrant(BYPASS_PURPOSE.SYSTEM_MAINTENANCE, ["tenant", "session"]);
@@ -60,7 +60,7 @@ describe("owner-shaped probe role", () => {
     }
   });
 
-  it("a pool built on its URL runs as the probe, which RLS applies to, while the session user stays the superuser", async () => {
+  it("a pool built on its URL logs in as the probe, which RLS applies to", async () => {
     const pool = createPool({ connectionString: probe.connectionString, max: 1 });
     const prisma = createPrismaClient(pool, {}, { ownsPool: true });
     try {
@@ -69,12 +69,12 @@ describe("owner-shaped probe role", () => {
         `SELECT current_user, session_user`,
       );
       expect(who.current_user).toBe(probe.name);
-      expect(who.session_user).not.toBe(probe.name);
+      expect(who.session_user).toBe(probe.name);
       const [attrs] = await prisma.$queryRawUnsafe<{ rolsuper: boolean; rolbypassrls: boolean; rolcanlogin: boolean }[]>(
         `SELECT rolsuper, rolbypassrls, rolcanlogin FROM pg_roles WHERE rolname = $1`,
         probe.name,
       );
-      expect(attrs).toEqual({ rolsuper: false, rolbypassrls: false, rolcanlogin: false });
+      expect(attrs).toEqual({ rolsuper: false, rolbypassrls: false, rolcanlogin: true });
     } finally {
       await prisma.$disconnect();
     }
@@ -113,10 +113,32 @@ describe("owner-shaped probe role", () => {
     }
   });
 
-  it("appends an option to a URL that already has one, URL-encoded", () => {
-    const url = connectionStringAsRole("postgresql://u:p@localhost:5432/db?options=-c%20search_path%3Dpublic", "r");
-    expect(new URL(url).searchParams.get("options")).toBe("-c search_path=public -c role=r");
-    expect(url).not.toContain("+");
+  it("a session logged in as the probe cannot become the owner or a superuser", async () => {
+    const owner = (await withSuperuser((c) => c.query<{ tableowner: string }>(`SELECT tableowner FROM pg_tables WHERE schemaname = 'public' AND tablename = 'users'`))).rows[0].tableowner;
+    const client = new Client({ connectionString: probe.connectionString });
+    await client.connect();
+    try {
+      const denied = async (sql: string, values?: unknown[]) => {
+        await expect(client.query(sql, values)).rejects.toMatchObject({ code: "42501" });
+      };
+      await denied(`SET ROLE "${owner}"`);
+      await denied(`SET SESSION AUTHORIZATION "${owner}"`);
+      await denied(`SELECT set_config('role', $1, false)`, [owner]);
+      const { rows } = await client.query<{ current_user: string; session_user: string }>(`SELECT current_user, session_user`);
+      expect(rows).toEqual([{ current_user: probe.name, session_user: probe.name }]);
+    } finally {
+      await client.end();
+    }
+  });
+
+  it("holds its owner membership with INHERIT and without SET", async () => {
+    const rows = await withSuperuser(async (c) =>
+      (await c.query<{ inherit_option: boolean; set_option: boolean }>(
+        `SELECT m.inherit_option, m.set_option FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.member WHERE r.rolname = $1`,
+        [probe.name],
+      )).rows,
+    );
+    expect(rows).toEqual([{ inherit_option: true, set_option: false }]);
   });
 
   it("drop removes the role, and creating another sweeps only probes older than an hour", async () => {

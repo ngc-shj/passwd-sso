@@ -953,6 +953,7 @@ describe("audit-db-grants (real DB)", () => {
     it("passes the mode check in report mode with an acknowledgement and logs the warning line", async () => {
       await setFunction("false");
       const r = runModeAudit("incident 42");
+      expectWholeReport(r);
       expect(lines(r).filter((l) => l.includes("RLS_ENFORCE_MODE:"))).toEqual([]);
       const ackLine = lines(r).find((l) => l.includes('"_logType":"rls.report_mode_acknowledged"'));
       expect(ackLine).toBeDefined();
@@ -962,6 +963,7 @@ describe("audit-db-grants (real DB)", () => {
     it("does not accept a whitespace-only acknowledgement", async () => {
       await setFunction("false");
       const r = runModeAudit("   ");
+      expectWholeReport(r);
       expect(lines(r).filter((l) => l.includes("RLS_ENFORCE_MODE:")).join("\n")).toContain("report mode");
       expect(lines(r).some((l) => l.includes("rls.report_mode_acknowledged"))).toBe(false);
     });
@@ -969,6 +971,7 @@ describe("audit-db-grants (real DB)", () => {
     it("fails with RLS_ENFORCE_MODE when the function is absent, even with an acknowledgement", async () => {
       await setFunction(null);
       const r = runModeAudit("incident 42");
+      expectWholeReport(r);
       expect(lines(r).filter((l) => l.includes("RLS_ENFORCE_MODE:")).join("\n")).toContain("is absent");
       expect(lines(r).some((l) => l.includes("rls.report_mode_acknowledged"))).toBe(false);
     });

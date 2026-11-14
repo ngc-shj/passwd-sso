@@ -1,7 +1,7 @@
 # Code Review: verify-worker-readonly-role-rls-enforce
 
 Date: 2026-11-15
-Review round: 2
+Review round: 3
 
 ## Changes from Previous Round
 
@@ -291,3 +291,44 @@ Incremental review of the round-1 fixes by the same three experts. No Critical o
 - Full integration suite with a fresh evidence file: 154 files, 1661 passed, 5 todo, exit 0. Evidence check exit 0: 77 with evidence, 33 without, baseline unchanged.
 - Full unit suite: 1170 of 1171 files pass; the failure is the worktree-only `backup-db` case (one test, the script's own compose call). Production build, typecheck and lint pass.
 - Static gates: all pass except `rls-cross-tenant SQL parse`, which reads the shared development database `passwd_sso`; that database has not had the flip migration applied, so the new `[E-RLS-ENFORCED]` check refuses it. The same SQL passes Block 1 against this worktree's database.
+
+## Round 3
+
+Incremental review of the round-2 commit by the same three experts. No Critical or Major finding. The testing expert red-proved the `--write` refusal cells (refusal removed, `return` removed, exit code removed: each reddens its own assertion), the leftover-acknowledgement cells, and seventeen mutations of the recorder; the mode block ran five times without a failure.
+
+### Findings
+
+- **F15 — Minor.** The restore step did not tell the operator to stop exporting `RLS_REPORT_MODE_ACK`, which now raises the alarm while enforcing.
+- **S10 / T4 — Minor.** The recorder's role-switch match still missed spellings that change `current_user` (a quoted setting name, a line comment between the keywords, a composed `set_config` name, a quoted `set_config`, dynamic SQL), each confirmed on the database; its comment named only one blind spot.
+- **S11 — Minor.** The collision guard's header omitted `.call`/`.apply`/`.bind` and computed access from what it does not follow.
+- **T1 — Minor.** `expectWholeReport` was called in three of the six verify cells, not in all as the round-2 entry said.
+- **T2 / T3 — Minor.** Two recorder arms had no cell (the unstripped reading; two forms of the `session_authorization` option).
+
+### Resolution Status
+
+#### F15
+- Action: the restore step says to stop exporting the variable and why; the `deploy.sh` and audit header comments say the same.
+- Modified file: `docs/operations/deployment.md`, `scripts/deploy.sh`, `scripts/audit-db-grants.mjs`
+
+#### S10 / T2 / T4 — the mechanism is replaced, not extended
+- Three rounds found spellings the statement match missed, and dynamic SQL cannot be matched at all. The match is deleted.
+- Action: the probe role logs in as itself and holds the owner's privileges through a membership `WITH INHERIT TRUE, SET FALSE`, so PostgreSQL refuses any switch; a cell checks `SET ROLE`, `SET SESSION AUTHORIZATION` and `set_config('role', …)` are refused. The recorder credits the login user of a connection whose startup options set neither `role` nor `session_authorization`. Attribute lines record whether a role holds a SET-able membership, from one shared query; the consumer requires none, and treats a line without the field as not restricted.
+- Red proof (scratch copies): with the consumer's membership condition removed, its new cell fails; with the recorder's option rule removed, thirteen cells fail.
+- Remaining limit, stated in the consumer's header: statements inside a SECURITY DEFINER routine (S6).
+- The full suite's evidence is unchanged: 77 with evidence, 33 without.
+- Modified file: `src/__tests__/db-integration/rds-probe-role.ts`, `rds-probe-role.integration.test.ts`, `rls-grant-evidence-recorder.ts`, its test, `setup.ts`, `scripts/checks/check-rls-grant-evidence.ts`, its test, `scripts/checks/check-bypass-rls.mjs` (one allowlist reason)
+
+#### T3
+- Action: the option cells are a table over both settings, the three forms and both letter cases.
+- Modified file: `src/__tests__/db-integration/rls-grant-evidence-recorder.test.ts`
+
+#### S11
+- Action: added to the header's list.
+- Modified file: `scripts/__tests__/integration-test-grants-no-collision.test.mjs`
+
+#### T1
+- Action: all six verify cells call `expectWholeReport` first.
+- Modified file: `src/__tests__/db-integration/audit-db-grants.integration.test.ts`
+
+#### Correction to the round-2 N1 / N2 entry
+- The identity-based recorder named there would close the collision class only. The role question it was also said to answer is closed by the change above.

@@ -188,7 +188,10 @@ counts (`docs/operations/alerts.md`), so each acknowledged deploy raises it. `--
 whatever is set. The un-flip removes the refusal for every bypass, not only the
 one that failed. To restore it, run the same statement with `SELECT true`: a
 deploy does not, because the flip migration is already applied and
-`prisma migrate deploy` does not re-run it. The change reaches other sessions
+`prisma migrate deploy` does not re-run it. Then stop exporting
+`RLS_REPORT_MODE_ACK`: a deploy that still carries it passes, but warns and
+raises the same alarm, because a leftover acknowledgement would let a later
+un-flip pass. The change reaches other sessions
 through PostgreSQL's plan invalidation; confirm it with the canary rather than
 assuming it is immediate. The audit also fails on `CLIENT_MIN_MESSAGES_SERVER_LEVEL` when a
 server-level source (for example an RDS parameter group) sets `client_min_messages`

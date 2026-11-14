@@ -4,9 +4,17 @@
  * connection set (src/__tests__/db-integration/rls-grant-evidence-recorder.ts)
  * and one per role whose attributes it read. This check reads only that file.
  *
- * A BYPASS_GRANT member has evidence when a connection running as a role that
- * is neither SUPERUSER nor BYPASSRLS set its (purpose, tables) in a suite run
- * that passed — where any report or refusal fails a test. It does not show
+ * A BYPASS_GRANT member has evidence when a connection logged in as a role that
+ * is NOSUPERUSER, NOBYPASSRLS and holds no SET-able membership (`canSetRole`
+ * false on its attribute line) set its (purpose, tables) in a suite run that
+ * passed — where any report or refusal fails a test. That rests on one
+ * PostgreSQL fact: a session whose login role has none of those cannot change
+ * `current_user`, so the login user is the role every statement ran as; the
+ * exception is a SECURITY DEFINER routine, which runs as its owner by design
+ * (not seen here). The recorder files a connection whose startup options set a
+ * role under a name no attribute line carries, and an attribute line without
+ * `canSetRole` (written before the field existed) does not count as restricted:
+ * both fail toward no evidence. The check does not show
  * that a production call site set the grant, or that every table of it was
  * examined. The members without evidence are committed in
  * rls-grant-evidence-baseline.txt: a lower bound on what rests on production
@@ -33,7 +41,7 @@ export const HARNESS_ROLES = [
 export const BASELINE_PATH = fileURLToPath(new URL("./rls-grant-evidence-baseline.txt", import.meta.url));
 
 type GrantShape = { purpose: string; tables: string };
-type RoleAttrs = { rolsuper: boolean; rolbypassrls: boolean };
+type RoleAttrs = { rolsuper: boolean; rolbypassrls: boolean; canSetRole: boolean | undefined };
 
 export type EvidenceTally = {
   grantLines: number;
@@ -76,7 +84,11 @@ export function analyzeGrantEvidence({
   for (const line of lines) {
     if (isObject(line) && line.kind === "role" && typeof line.name === "string" &&
         typeof line.rolsuper === "boolean" && typeof line.rolbypassrls === "boolean") {
-      roles.set(line.name, { rolsuper: line.rolsuper, rolbypassrls: line.rolbypassrls });
+      roles.set(line.name, {
+        rolsuper: line.rolsuper,
+        rolbypassrls: line.rolbypassrls,
+        canSetRole: typeof line.canSetRole === "boolean" ? line.canSetRole : undefined,
+      });
     } else if (isObject(line) && line.kind === "grant" && typeof line.purpose === "string" &&
                typeof line.tables === "string" && typeof line.role === "string") {
       grantLines.push({ purpose: line.purpose, tables: line.tables, role: line.role });
@@ -99,13 +111,13 @@ export function analyzeGrantEvidence({
     if (!attrs) {
       unknownRoleLines += 1;
       unknownRoles.add(line.role);
-    } else if (!attrs.rolsuper && !attrs.rolbypassrls) {
+    } else if (!attrs.rolsuper && !attrs.rolbypassrls && attrs.canSetRole === false) {
       restrictedLines += 1;
       evidenced.add(pairKey(line.purpose, line.tables));
     }
   }
   if (restrictedLines === 0) {
-    problems.push("no grant line resolves to a NOSUPERUSER NOBYPASSRLS role: the record shows nothing about enforcement");
+    problems.push("no grant line resolves to a NOSUPERUSER NOBYPASSRLS role that cannot SET ROLE: the record shows nothing about enforcement");
   }
 
   const names = Object.keys(grants).sort();
@@ -140,7 +152,7 @@ export function compareGrantEvidence({
   const unexercised = new Set(tally.unexercised);
   for (const name of tally.unexercised) {
     if (!listed.has(name)) {
-      failures.push(`${name} has no NOSUPERUSER NOBYPASSRLS evidence and is not in the baseline: add a cell that sets it, or list it`);
+      failures.push(`${name} has no restricted-role evidence and is not in the baseline (restricted: NOSUPERUSER, NOBYPASSRLS, no SET-able membership): add a cell that sets it, or list it`);
     }
   }
   for (const name of listed) {

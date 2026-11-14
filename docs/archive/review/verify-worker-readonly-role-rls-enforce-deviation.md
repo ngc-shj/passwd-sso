@@ -55,6 +55,13 @@
 - Its red proof was run in code review (T3), on a scratch copy of the script whose grant was reduced to `user`: run as the cell runs it, the copy exits 1 with `42501 RLS_BYPASS_NOT_GRANTED: accounts` and the seeded token stays plaintext, so the cell's process call rejects. The real script exits 0 with the token encrypted.
 - `tenantClaimEvent` in `TENANT_CLAIM_BINDING_READ` and `TENANT_CLAIM_BINDING_WRITE` cannot be red-proven: `tenant_claim_events` has no RLS policy, so no bypass is consulted for it.
 
+### D-5b. C8 / C11: the probe role logs in as itself
+
+- The plan's probe role was `NOLOGIN`, reached from a superuser connection through `SET LOCAL ROLE` or a `-c role=` startup option. A session whose real identity is a superuser can switch role at any time, so the evidence recorder had to guess switches from statement text, and three review rounds each found spellings it missed.
+- The probe is now `LOGIN` with a random password and holds the table owner's privileges through a membership granted `WITH INHERIT TRUE, SET FALSE`. A session logged in as it cannot become another role; a cell checks that `SET ROLE`, `SET SESSION AUTHORIZATION` and `set_config('role', …)` are each refused.
+- The recorder credits a connection's login user, and only when its startup options set neither `role` nor `session_authorization`. An attribute line also records whether the role holds a SET-able membership, and the consumer requires that it does not. No statement text is read.
+- The owner-swap cells for the definer routines still use `SET LOCAL ROLE` on a superuser connection; they record no evidence, as before.
+
 ### D-6. C11: 33 grants have no restricted-role evidence
 
 - Of 110 `BYPASS_GRANT` members, 77 were set by a NOSUPERUSER NOBYPASSRLS role in the full suite. The other 33 are listed in `scripts/checks/rls-grant-evidence-baseline.txt`; the check fails when a grant leaves either set unannounced.
