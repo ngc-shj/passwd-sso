@@ -1,7 +1,9 @@
 import fs from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { assertAnchorArtifactKey } from "@/lib/audit/anchor-artifact-keys";
+import { AUDIT_ANCHOR_ARTIFACT_MAX_BYTES } from "@/lib/constants/audit/audit";
 import { assertArtifactSize, type AnchorDestination } from "./destination";
 
 type FilesystemConfig = {
@@ -10,6 +12,23 @@ type FilesystemConfig = {
 
 const PUBLIC_KEYS_DIR = "public-keys";
 const TEMP_PREFIX = ".tmp-";
+const READ_CHUNK_BYTES = 64 * 1024;
+// Absent on platforms without it; there a symlink is followed and the
+// regular-file check on the opened target is what remains.
+const O_NOFOLLOW = fsConstants.O_NOFOLLOW ?? 0;
+
+/**
+ * The name of an artifact key holds something that is not a regular file — a
+ * symlink, a directory, a device. `create` only ever links regular files, so
+ * it is not an artifact. Its `code` is what a failure reason carries.
+ */
+export class ArtifactNotRegularFileError extends Error {
+  readonly code = "ARTIFACT_NOT_REGULAR_FILE";
+  constructor() {
+    super("anchor artifact path is not a regular file");
+    this.name = "ArtifactNotRegularFileError";
+  }
+}
 
 function errnoOf(err: unknown): string | undefined {
   return (err as NodeJS.ErrnoException | undefined)?.code;
@@ -79,14 +98,33 @@ export class FilesystemDestination implements AnchorDestination {
     assertAnchorArtifactKey(artifactKey);
     let handle: fs.FileHandle;
     try {
-      handle = await fs.open(path.join(this.basePath, artifactKey), "r");
+      handle = await fs.open(path.join(this.basePath, artifactKey), fsConstants.O_RDONLY | O_NOFOLLOW);
     } catch (err) {
       if (errnoOf(err) === "ENOENT") return null;
+      // What O_NOFOLLOW answers for a symlink at the name.
+      if (errnoOf(err) === "ELOOP") throw new ArtifactNotRegularFileError();
       throw err;
     }
     try {
-      assertArtifactSize((await handle.stat()).size);
-      return await handle.readFile({ signal });
+      const stat = await handle.stat();
+      if (!stat.isFile()) throw new ArtifactNotRegularFileError();
+      assertArtifactSize(stat.size);
+
+      // The size checked is the file's at the stat. The read is bounded on its
+      // own, one byte past the limit, so a file that grew since is refused
+      // rather than read whole.
+      const chunks: Buffer[] = [];
+      let total = 0;
+      while (total <= AUDIT_ANCHOR_ARTIFACT_MAX_BYTES) {
+        signal?.throwIfAborted();
+        const chunk = Buffer.allocUnsafe(Math.min(READ_CHUNK_BYTES, AUDIT_ANCHOR_ARTIFACT_MAX_BYTES + 1 - total));
+        const { bytesRead } = await handle.read(chunk, 0, chunk.length, null);
+        if (bytesRead === 0) break;
+        chunks.push(chunk.subarray(0, bytesRead));
+        total += bytesRead;
+      }
+      assertArtifactSize(total);
+      return Buffer.concat(chunks, total);
     } finally {
       await handle.close();
     }

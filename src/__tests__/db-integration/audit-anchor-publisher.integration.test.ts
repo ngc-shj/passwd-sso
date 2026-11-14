@@ -15,8 +15,7 @@
  * far-future boundaries, each removed by a teardown registered at creation.
  *
  * MinIO-backed cases (S3 object versions) live in
- * audit-anchor-publisher-s3.integration.test.ts. The DESTINATION_DIVERGENCE
- * stub at the bottom is a TODO marker for later verifier work.
+ * audit-anchor-publisher-s3.integration.test.ts.
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
@@ -53,6 +52,7 @@ import {
 } from "./anchor-publisher-fixtures";
 import {
   ADVISORY_LOCK_KEY,
+  AUDIT_ANCHOR_UPLOAD_ATTEMPT_CAP,
   AuditAnchorPublisher,
   type CadenceOutcome,
   type PublisherConfig,
@@ -101,6 +101,8 @@ function lockHeldHolderQueryFromAlertsDoc(): string {
   if (blocks.length !== 1) throw new Error(`alerts.md: lock_held section has ${blocks.length} sql blocks, expected 1`);
   return blocks[0];
 }
+
+const CAP = AUDIT_ANCHOR_UPLOAD_ATTEMPT_CAP;
 
 describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () => {
   let ctx: TestContext;
@@ -541,13 +543,13 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
 
   // ─── no chain-enabled tenant ──────────────────────────────────────────────
 
-  it("with no chain-enabled tenant, four boots in a day each report skipped_no_tenants and never count", async () => {
+  it("with no chain-enabled tenant, more boots in a day than the cap each report skipped_no_tenants and never count", async () => {
     expect(await attemptsRow()).toBeNull();
     await setChainEnabled(ctx.su, tenantA, false);
     await setChainEnabled(ctx.su, tenantB, false);
     const { dest } = await c.filesystem();
 
-    for (let boot = 0; boot < 4; boot++) {
+    for (let boot = 0; boot < CAP + 1; boot++) {
       vi.resetModules();
       const mod = await import("@/workers/audit-anchor-publisher");
       const fresh = new mod.AuditAnchorPublisher({ prisma: pub.prisma, config: c.config([dest]) });
@@ -584,15 +586,15 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
 
   // ─── the attempt cap and the lock ─────────────────────────────────────────
 
-  it("the attempt count persists across boots: three lost commits create one object, then the cap, then a reset at the next boundary", async () => {
+  it("the attempt count persists across boots: lost commits up to the cap create one object, then the cap is reported, then a reset at the next boundary", async () => {
     expect(await attemptsRow()).toBeNull();
     const { dest } = await c.filesystem();
     const storing = trackDestination(dest);
     // Each attempt reaches the commit, then loses it: the first stores the
-    // object, the next two adopt it.
+    // object, the later ones adopt it.
     const failingCommit = { afterUpload: async () => { throw new Error("commit lost"); } };
 
-    for (let boot = 1; boot <= 3; boot++) {
+    for (let boot = 1; boot <= CAP; boot++) {
       vi.resetModules();
       const mod = await import("@/workers/audit-anchor-publisher");
       const fresh = new mod.AuditAnchorPublisher({
@@ -606,20 +608,20 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
     expect(createCalls(storing.calls)).toEqual([`create:${c.manifestKey()}`]);
 
     vi.resetModules();
-    const fourthMod = await import("@/workers/audit-anchor-publisher");
-    const fourth = await new fourthMod.AuditAnchorPublisher({
+    const pastCapMod = await import("@/workers/audit-anchor-publisher");
+    const pastCap = await new pastCapMod.AuditAnchorPublisher({
       prisma: pub.prisma,
       config: c.config([storing.dest]),
     }).runCadence(c.boundary);
-    expect(fourth).toMatchObject({ kind: "upload_cap_reached", attempts: 4 });
+    expect(pastCap).toMatchObject({ kind: "upload_cap_reached", attempts: CAP + 1 });
 
     vi.resetModules();
-    const fifthMod = await import("@/workers/audit-anchor-publisher");
-    const fifth = await new fifthMod.AuditAnchorPublisher({
+    const againMod = await import("@/workers/audit-anchor-publisher");
+    const again = await new againMod.AuditAnchorPublisher({
       prisma: pub.prisma,
       config: c.config([storing.dest]),
     }).runCadence(c.boundary);
-    expect(fifth.kind).toBe("upload_cap_reached");
+    expect(again.kind).toBe("upload_cap_reached");
     expect(createCalls(storing.calls)).toHaveLength(1);
 
     const capRows = (await c.outboxRows()).filter((r) => r.failureReason === "UPLOAD_ATTEMPT_CAP_REACHED");
@@ -633,7 +635,7 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
     expect(await attemptsRow()).toEqual({ boundary: next.toISOString(), count: 1 });
   });
 
-  it("a tenant set changed after a publish does not unsettle it: restarts skip, and a fourth boot does not report the cap", async () => {
+  it("a tenant set changed after a publish does not unsettle it: restarts skip, and a boot past the cap does not report it", async () => {
     const { dest } = await c.filesystem();
     expect((await runAt(c.boundary, [dest])).kind).toBe("published");
     const before = await sortedKeys(dest);
@@ -642,11 +644,11 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
     const tenantC = await c.createTenant();
 
     const kinds: string[] = [];
-    for (let boot = 0; boot < 4; boot++) {
+    for (let boot = 0; boot < CAP + 1; boot++) {
       kinds.push((await runAt(c.boundary, [dest])).kind);
     }
 
-    expect(kinds).toEqual(Array(4).fill("skipped_already_published"));
+    expect(kinds).toEqual(Array(CAP + 1).fill("skipped_already_published"));
     expect(await sortedKeys(dest)).toEqual(before);
     expect(await attemptsRow()).toEqual({ boundary: c.boundary.toISOString(), count: 1 });
     expect((await anchorState(ctx.su, [tenantC]))[0]?.last_published_at).toBeNull();
@@ -691,7 +693,12 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
 
       const runA = publisher(configA).runCadence(c.boundary);
       runs.push(runA);
-      await creating;
+      await Promise.race([
+        creating,
+        runA.then((o) => {
+          throw new Error("run A ended first: " + JSON.stringify(o));
+        }),
+      ]);
       expect(pidA).not.toBeNull();
       const runB = publisher(configB, second).runCadence(c.boundary);
       runs.push(runB);
@@ -792,6 +799,33 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
     ]);
     const [row] = (await publisherRowsFor(c.boundaryAt(1))).filter((r) => r.failureReason !== null);
     expect(row?.metadata).toMatchObject({ count: 1, artifactKey: c.manifestKey(c.boundaryAt(1)) });
+  });
+
+  it("a lost commit after a tenant was disabled: the retry adopts and still emits the one TENANT_DROPPED_FROM_MANIFEST row", async () => {
+    const { dest } = await c.filesystem();
+    expect((await runAt(c.boundary, [dest])).kind).toBe("published");
+    await setChainEnabled(ctx.su, tenantB, false);
+    const next = c.boundaryAt(1);
+    const storing = trackDestination(dest);
+
+    const lost = await runAt(next, [storing.dest], { hooks: { afterUpload: async () => { throw new Error("commit lost"); } } });
+    expect(lost).toMatchObject({ kind: "failed", stage: "after_upload" });
+    const retry = await runAt(next, [storing.dest]);
+
+    expect(retry).toMatchObject({ kind: "published", adopted: true, tenantsCount: 1 });
+    expect(createCalls(storing.calls)).toEqual([`create:${c.manifestKey(next)}`]);
+    const rows = await publisherRowsFor(next);
+    expect(failureReasons(rows)).toEqual(["COMMIT_FAILED_AFTER_UPLOAD:unknown", "TENANT_DROPPED_FROM_MANIFEST"]);
+    expect(rows.find((r) => r.failureReason === "TENANT_DROPPED_FROM_MANIFEST")?.metadata).toMatchObject({
+      count: 1,
+      artifactKey: c.manifestKey(next),
+    });
+
+    // Allow: the same lost commit and adopt over an unchanged tenant set emits no detection row.
+    const third = c.boundaryAt(2);
+    await runAt(third, [storing.dest], { hooks: { afterUpload: async () => { throw new Error("commit lost"); } } });
+    expect(await runAt(third, [storing.dest])).toMatchObject({ kind: "published", adopted: true });
+    expect(failureReasons(await publisherRowsFor(third))).toEqual(["COMMIT_FAILED_AFTER_UPLOAD:unknown"]);
   });
 
   it("a chain_seq lowered between two publishes emits one CHAIN_SEQ_REGRESSION row; an unchanged one, none", async () => {
@@ -1006,12 +1040,6 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
     expect(await sortedKeys(dest)).toEqual(afterRotation);
     expect(await dest.read(c.manifestKey(third))).toBeNull();
   });
-
-  // DESTINATION_DIVERGENCE stub — the follow-up audit-anchor-github-release-destination
-  // .integration.test.ts points at.
-  // TODO: upload manifest A to one destination and a tampered B to another, run the verifier's
-  //       cross-destination check, and assert it reports DESTINATION_DIVERGENCE.
-  it.todo("DESTINATION_DIVERGENCE: the verifier detects destinations holding different bytes for one key");
 });
 
 /** An instant an hour into `boundary`, as a publish for it would have written. */

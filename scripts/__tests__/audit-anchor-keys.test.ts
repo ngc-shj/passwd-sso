@@ -13,7 +13,9 @@ import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { run, type KeysDeps } from "../audit-anchor-keys";
+import type { AnchorDestination } from "@/lib/audit/anchor-destinations/destination";
 import { InMemoryDestination } from "@/lib/audit/anchor-destinations/in-memory-destination";
+import { createCalls, trackDestination } from "@/__tests__/helpers/anchor-manifest-fixtures";
 import {
   ANCHOR_ARTIFACT_CONTENT_TYPE,
   STATEMENT_OP,
@@ -66,7 +68,7 @@ function keyFile(name: string, seedHex: string, mode = 0o600, contents = `${seed
   return path;
 }
 
-function harness(destinations: InMemoryDestination[] = [], now = DAY_1) {
+function harness(destinations: AnchorDestination[] = [], now = DAY_1) {
   const out: string[] = [];
   const err: string[] = [];
   const deps: KeysDeps = {
@@ -175,12 +177,25 @@ describe("kid", () => {
   it.each([
     ["too short", SEED_HEX.slice(1)],
     ["too long", `${SEED_HEX}0`],
-    ["upper case", SEED_HEX.toUpperCase().replace(/^4/, "A")],
     ["one non-hex char", `${SEED_HEX.slice(1)}g`],
   ])("refuses a key file that is %s, without echoing it", async (_name, text) => {
     const h = harness();
     expect(await h.run("kid", "--key-file", keyFile("bad.key", SEED_HEX, 0o600, text))).toBe(1);
+    // Refused as text, before anything is derived from a truncated decode.
+    expect(h.stderr()).toContain("must hold exactly 64 hex chars");
     expect(h.stdout() + h.stderr()).not.toContain(text);
+  });
+
+  it("reads a seed in upper-case hex as the same key as its lower-case form, as the publisher's env does", async () => {
+    const lowerHex = "ab".repeat(32);
+    const lower = harness();
+    const upper = harness();
+    expect(await lower.run("kid", "--key-file", keyFile("lower.key", lowerHex))).toBe(0);
+    expect(await upper.run("kid", "--key-file", keyFile("upper.key", lowerHex.toUpperCase()))).toBe(0);
+
+    expect(upper.stdout()).toBe(lower.stdout());
+    expect(upper.stdout()).toContain(`kid=${kidForPublicKey(publicKeyForSigningKey(Buffer.from(lowerHex, "hex")))}\n`);
+    expectNoSeed(upper, lowerHex.toUpperCase());
   });
 
   it("refuses a key file past the size bound", async () => {
@@ -206,6 +221,78 @@ describe("kid", () => {
     expect(h.stdout()).toContain("archived[archived]=yes");
     expect(h.stdout()).toContain("archived[absent]=no");
     expect(h.stdout()).toContain("archived[different]=different");
+  });
+});
+
+describe("publish-pubkey over an archive that already holds the key's object", () => {
+  const key = publicKeyArtifactKey(KID);
+  const args = ["publish-pubkey", "--public-key", PUBLIC_HEX, "--confirm"];
+
+  async function holding(name: string, text: string) {
+    const store = new InMemoryDestination(name);
+    await store.create({ artifactBytes: Buffer.from(text), artifactKey: key, contentType: ANCHOR_ARTIFACT_CONTENT_TYPE.PUBLIC_KEY });
+    return { store, ...trackDestination(store) };
+  }
+
+  it.each([
+    ["the 64 chars with no newline, as an earlier runbook archived it", PUBLIC_HEX],
+    ["the 65 bytes this command writes", `${PUBLIC_HEX}\n`],
+  ])("reports %s as the same key: exit 0, no create, the stored bytes kept", async (_label, text) => {
+    const taken = await holding("taken", text);
+    const h = harness([taken.dest]);
+
+    expect(await h.run(...args)).toBe(0);
+
+    expect(h.stdout()).toContain("taken: exists (same key)");
+    expect(createCalls(taken.calls)).toEqual([]);
+    expect((await taken.store.read(key))?.toString()).toBe(text);
+  });
+
+  it.each([
+    ["another key", `${NEW_PUBLIC_HEX}\n`],
+    ["the key in upper case", `${PUBLIC_HEX.toUpperCase()}\n`],
+    ["63 chars of the key", PUBLIC_HEX.slice(1)],
+  ])("refuses over %s: exit 1 and no create on any destination", async (_label, text) => {
+    const clean = trackDestination(new InMemoryDestination("clean"));
+    const taken = await holding("taken", text);
+    const h = harness([clean.dest, taken.dest]);
+
+    expect(await h.run(...args)).toBe(1);
+
+    expect(h.stderr()).toContain("taken already holds a different object");
+    expect([...createCalls(clean.calls), ...createCalls(taken.calls)]).toEqual([]);
+    expect((await taken.store.read(key))?.toString()).toBe(text);
+  });
+
+  it("fails on a stored object it cannot read, with no create on any destination", async () => {
+    const clean = trackDestination(new InMemoryDestination("clean"));
+    const unreadable = trackDestination(new InMemoryDestination("unreadable"), {
+      read: async () => {
+        throw Object.assign(new Error("denied"), { code: "AccessDenied" });
+      },
+    });
+    const h = harness([clean.dest, unreadable.dest]);
+
+    expect(await h.run(...args)).toBe(1);
+
+    expect(h.stderr()).toContain("AccessDenied");
+    expect([...createCalls(clean.calls), ...createCalls(unreadable.calls)]).toEqual([]);
+  });
+
+  it("a competing writer that stores the same key in the other form between the check and the create is success", async () => {
+    const store = new InMemoryDestination("raced");
+    const { dest } = trackDestination(store, {
+      create: async (create) => {
+        await store.create({ ...create, artifactBytes: Buffer.from(PUBLIC_HEX) });
+        return store.create(create);
+      },
+    });
+    const h = harness([dest]);
+
+    expect(await h.run(...args)).toBe(0);
+
+    expect(h.stdout()).toContain("raced: exists (same key)");
+    expect((await store.read(key))?.toString()).toBe(PUBLIC_HEX);
   });
 });
 
@@ -239,12 +326,12 @@ describe("publish-pubkey", () => {
     expectNoSeed(h, SEED_HEX);
   });
 
-  it("treats the same bytes already stored as success", async () => {
+  it("treats the key it archived itself as already there", async () => {
     const dest = new InMemoryDestination();
     expect(await harness([dest]).run("publish-pubkey", "--public-key", PUBLIC_HEX, "--confirm")).toBe(0);
     const h = harness([dest]);
     expect(await h.run("publish-pubkey", "--public-key", PUBLIC_HEX, "--confirm")).toBe(0);
-    expect(h.stdout()).toContain("exists (identical)");
+    expect(h.stdout()).toContain("exists (same key)");
   });
 
   it("exits 1 and writes to no destination when one holds different bytes", async () => {
@@ -564,7 +651,7 @@ describe("package.json scripts, run as processes", () => {
   ];
 
   /** The script string's own argv (`tsx <file> <subcommand>`), then the operator's arguments. */
-  function spawnScript(name: string, args: string[]) {
+  function spawnScript(name: string, args: string[], fsPath = "") {
     const words = scripts[name].split(" ");
     expect(words[0]).toBe("tsx");
     return spawnSync(TSX, [...words.slice(1), ...args], {
@@ -576,7 +663,7 @@ describe("package.json scripts, run as processes", () => {
         HOME: process.env.HOME,
         AUDIT_ANCHOR_DESTINATION_S3_BUCKET: "",
         AUDIT_ANCHOR_DESTINATION_GH_REPO: "",
-        AUDIT_ANCHOR_DESTINATION_FS_PATH: "",
+        AUDIT_ANCHOR_DESTINATION_FS_PATH: fsPath,
       },
       encoding: "utf8",
       timeout: CASE_TIMEOUT_MS - 5_000,
@@ -590,6 +677,25 @@ describe("package.json scripts, run as processes", () => {
     expect(r.stdout).toContain(`kid=${KID}`);
     expect(r.stdout + r.stderr).not.toContain(SEED_HEX);
   }, CASE_TIMEOUT_MS);
+
+  it("with a filesystem destination from the environment: publish-pubkey archives the key, a second run finds it, and kid reports it archived", () => {
+    // `dir` is the per-case temp dir, removed in afterEach.
+    const archive = join(dir, "anchors");
+    const publish = () => spawnScript("audit-anchor-publish-pubkey", ["--public-key", PUBLIC_HEX, "--confirm"], archive);
+
+    const first = publish();
+    expect(first.status).toBe(0);
+    expect(first.stdout).toContain("filesystem: created");
+    expect(readFileSync(join(archive, "public-keys", `${KID}.pub`), "utf8")).toBe(`${PUBLIC_HEX}\n`);
+
+    const second = publish();
+    expect(second.status).toBe(0);
+    expect(second.stdout).toContain("filesystem: exists (same key)");
+
+    const kid = spawnScript("audit-anchor-kid", ["--key-file", keyFile("spawn.key", SEED_HEX)], archive);
+    expect(kid.status).toBe(0);
+    expect(kid.stdout).toContain("archived[filesystem]=yes");
+  }, 3 * CASE_TIMEOUT_MS);
 
   it.each(NAMES.filter((n) => n !== "audit-anchor-kid"))("%s with no arguments ends in its argument error", (name) => {
     const r = spawnScript(name, []);

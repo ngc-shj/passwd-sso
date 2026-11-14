@@ -237,6 +237,29 @@ describe("GitHubReleaseDestination — a taken asset name", () => {
 });
 
 describe("GitHubReleaseDestination — read and list", () => {
+  it("follows a download redirect to another origin, and sends the token to the API only", async () => {
+    const fake = await freshFake();
+    const key = manifestKeyFor(DATE);
+    const asset = fake.addAsset(TAG, { name: key, state: "uploaded", content: Buffer.from("redirected") });
+
+    expect(await destinationFor(fake).read(key)).toEqual(Buffer.from("redirected"));
+
+    expect(fake.downloads).toEqual([{ path: `/download/${asset.id}`, authorization: undefined }]);
+    // The header the redirect target must not see is the one the API did.
+    expect(fake.apiAuthorization).toBe("token fake-token");
+  });
+
+  it("reads a download the API streams directly", async () => {
+    const fake = await freshFake();
+    fake.downloadRedirect = false;
+    const key = manifestKeyFor(DATE);
+    fake.addAsset(TAG, { name: key, state: "uploaded", content: Buffer.from("direct") });
+
+    expect(await destinationFor(fake).read(key)).toEqual(Buffer.from("direct"));
+
+    expect(fake.downloads).toEqual([]);
+  });
+
   it("does not read or list an asset that is not uploaded", async () => {
     const fake = await freshFake();
     const reserved = manifestKeyFor(DATE);

@@ -88,20 +88,33 @@ export class PublishedObjectUnverifiableError extends Error {
 // publisher role may write. Wider than the keys `parseManifestArtifactKey` takes.
 const MANIFEST_GLOB_RE = /^.{4}-.{2}-.{2}\.kid-.*\.jws$/s;
 
+/** How many unrecognised keys one listing's log line names; the rest are counted. */
+export const UNRECOGNISED_KEYS_LOGGED_MAX = 5;
+
 type ParsedManifestKey = { key: string; date: string; kid: string };
 
 function parseManifestKeys(listedKeys: readonly string[]): ParsedManifestKey[] {
   const parsedKeys: ParsedManifestKey[] = [];
+  const unrecognised: string[] = [];
   for (const key of listedKeys) {
     const parsed = parseManifestArtifactKey(key);
     if (parsed) {
       parsedKeys.push({ key, ...parsed });
     } else if (MANIFEST_GLOB_RE.test(key)) {
-      getLogger().warn(
-        { artifactKey: key, _logType: "audit-anchor-publisher.unrecognised_manifest_key" },
-        "audit-anchor-publisher.unrecognised_manifest_key",
-      );
+      unrecognised.push(key);
     }
+  }
+  // One line per listing, however many there are: whoever can write such keys
+  // would otherwise choose the publisher's log volume.
+  if (unrecognised.length > 0) {
+    getLogger().warn(
+      {
+        count: unrecognised.length,
+        artifactKeys: unrecognised.slice(0, UNRECOGNISED_KEYS_LOGGED_MAX),
+        _logType: "audit-anchor-publisher.unrecognised_manifest_key",
+      },
+      "audit-anchor-publisher.unrecognised_manifest_key",
+    );
   }
   return parsedKeys;
 }

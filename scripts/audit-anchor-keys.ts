@@ -33,6 +33,7 @@ import {
 import { AUDIT_ANCHOR_ARTIFACT_MAX_BYTES } from "@/lib/constants/audit/audit";
 import { errorLogFields } from "@/lib/logger/error-fields";
 import { MS_PER_SECOND } from "@/lib/constants/time";
+import { HEX64_RE } from "@/lib/validations/common";
 
 const OPERATION_TIMEOUT_MS = 60 * MS_PER_SECOND;
 /** 64 hex chars, a newline, and slack. */
@@ -159,10 +160,14 @@ function readFileOnce(path: string, opts: { flag: string; maxBytes: number; priv
   }
 }
 
-/** The 32-byte seed in a key file: exactly 64 lower-case hex chars once trimmed. Never echoed. */
+/**
+ * The 32-byte seed in a key file: exactly 64 hex chars once trimmed, in either
+ * case — what the env schema accepts for AUDIT_ANCHOR_SIGNING_KEY, so a key the
+ * publisher runs with is one these commands read. Never echoed.
+ */
 function readSeed(path: string, flag: string): Buffer {
   const hex = readFileOnce(path, { flag, maxBytes: KEY_FILE_MAX_BYTES, privateKey: true }).toString("utf8").trim();
-  if (!/^[0-9a-f]{64}$/.test(hex)) throw new RefusedError(`key file ${path} must hold exactly 64 lower-case hex chars`);
+  if (!HEX64_RE.test(hex)) throw new RefusedError(`key file ${path} must hold exactly 64 hex chars`);
   return Buffer.from(hex, "hex");
 }
 
@@ -171,6 +176,15 @@ function publicKeyFromHex(hex: string): Buffer {
     return parsePublicKeyHex(hex);
   } catch {
     throw new UsageError("a public key must be exactly 64 lower-case hex chars");
+  }
+}
+
+/** Whether `stored` is the archive text of `publicKey`; content that does not parse is not. */
+function isPublicKeyText(stored: Buffer, publicKey: Buffer): boolean {
+  try {
+    return parsePublicKeyHex(stored.toString("utf8")).equals(publicKey);
+  } catch {
+    return false;
   }
 }
 
@@ -203,12 +217,17 @@ function describeError(err: unknown): string {
   return code === "unknown" ? name : `${name} (${code})`;
 }
 
+type PublishableArtifact = {
+  artifactKey: string;
+  bytes: Buffer;
+  contentType: string;
+  summary: string[];
+  /** When a stored object counts as this one, and how that is reported. Default: the same bytes. */
+  sameAs?: { matches: (stored: Buffer) => boolean; label: string };
+};
+
 /** Prints what is about to be written, refuses without --confirm, then writes create-only everywhere. */
-async function publishArtifact(
-  deps: KeysDeps,
-  values: ParsedOptions,
-  artifact: { artifactKey: string; bytes: Buffer; contentType: string; summary: string[] },
-): Promise<number> {
+async function publishArtifact(deps: KeysDeps, values: ParsedOptions, artifact: PublishableArtifact): Promise<number> {
   if (deps.destinations.length === 0) {
     throw new UsageError(
       "no destination configured: set AUDIT_ANCHOR_DESTINATION_S3_BUCKET, AUDIT_ANCHOR_DESTINATION_GH_REPO or AUDIT_ANCHOR_DESTINATION_FS_PATH",
@@ -224,20 +243,27 @@ async function publishArtifact(
   }
 
   const signal = AbortSignal.timeout(OPERATION_TIMEOUT_MS);
+  const sameAs = artifact.sameAs ?? { matches: (stored: Buffer) => stored.equals(bytes), label: "identical" };
   const different = (d: AnchorDestination) =>
     new RefusedError(`${d.name} already holds a different object at ${artifactKey}`);
   // Check every destination before the first write, so a conflict leaves nothing half-published.
+  const held = new Set<AnchorDestination>();
   for (const d of deps.destinations) {
     const stored = await d.read(artifactKey, signal);
-    if (stored !== null && !stored.equals(bytes)) throw different(d);
+    if (stored === null) continue;
+    if (!sameAs.matches(stored)) throw different(d);
+    held.add(d);
   }
   for (const d of deps.destinations) {
-    const result = await d.create({ artifactBytes: bytes, artifactKey, contentType: artifact.contentType, signal });
-    if (result === "exists") {
-      const stored = await d.read(artifactKey, signal);
-      if (stored === null || !stored.equals(bytes)) throw different(d);
+    let created = false;
+    if (!held.has(d)) {
+      created = (await d.create({ artifactBytes: bytes, artifactKey, contentType: artifact.contentType, signal })) === "created";
+      if (!created) {
+        const stored = await d.read(artifactKey, signal);
+        if (stored === null || !sameAs.matches(stored)) throw different(d);
+      }
     }
-    deps.stdout.write(`${d.name}: ${result === "created" ? "created" : "exists (identical)"}\n`);
+    deps.stdout.write(`${d.name}: ${created ? "created" : `exists (${sameAs.label})`}\n`);
   }
   return EXIT.OK;
 }
@@ -250,7 +276,7 @@ async function cmdKid(deps: KeysDeps, values: ParsedOptions): Promise<number> {
   const signal = AbortSignal.timeout(OPERATION_TIMEOUT_MS);
   for (const d of deps.destinations) {
     const stored = await d.read(archiveKey, signal);
-    const state = stored === null ? "no" : stored.toString("utf8").trim() === publicKey.toString("hex") ? "yes" : "different";
+    const state = stored === null ? "no" : isPublicKeyText(stored, publicKey) ? "yes" : "different";
     deps.stdout.write(`archived[${d.name}]=${state}\n`);
   }
   return EXIT.OK;
@@ -267,6 +293,11 @@ async function cmdPublishPubkey(deps: KeysDeps, values: ParsedOptions): Promise<
     bytes: Buffer.from(`${publicKey.toString("hex")}\n`),
     contentType: ANCHOR_ARTIFACT_CONTENT_TYPE.PUBLIC_KEY,
     summary: [`kid=${kid}`, `publicKey=${publicKey.toString("hex")}`],
+    // Compared as every reader of the archive does, by the parsed key: an
+    // earlier runbook archived the 64 chars without the newline written here,
+    // and on a bucket where the object can never be replaced a byte compare
+    // would refuse that key forever.
+    sameAs: { matches: (stored) => isPublicKeyText(stored, publicKey), label: "same key" },
   });
 }
 

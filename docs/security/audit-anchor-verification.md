@@ -158,10 +158,10 @@ passwd-sso audit-verify --manifest '<date>.kid-<kid>.jws' --public-key '<kid>.pu
 | 14 | InvalidTenantIdFormatError | `--my-tenant-id` is not canonical lower-case UUID (RFC 4122 §3). No automatic case conversion is performed. |
 | 15 | TenantNotInManifestError | Your tenant's derived tag is not present in the manifest. The tenant may not have had `audit_chain_enabled` at snapshot time. |
 | 16 | ChainBreakError | The current manifest's `previousManifest.sha256` does not match the sha256 of the supplied `--prior-manifest`. Manifests are not from the same chain or one has been replaced. |
-| 17 | ChainSeqRegressionError | A tenant's `chainSeq` decreased between prior and current manifest within the same epoch. This is a tamper signal. |
+| 17 | ChainSeqRegressionError | A tenant's `chainSeq` decreased between prior and current manifest within the same epoch. This is a tamper signal. A tenant whose `epoch` differs between the two is not compared: the CLI prints `WARN: epoch changed for tenantTag=…` on stderr and the exit status is unchanged. Nothing in the product changes a tenant's epoch, so ask the operator about that warning (their side records it as `EPOCH_CHANGED`). |
 | 18 | InvalidTagSecretLengthError | The tag secret is not 32 bytes (64 hex chars). |
 | 19 | KidMismatchError | The JWS header's `kid` does not name the public key the signature was checked under: the wrong key file, a misfiled archive entry, or a manifest relabelled with another `kid`. The signature is not evaluated. |
-| 1 | Unexpected error | All other errors: I/O, a fetch that did not answer 200, a `kid` of the wrong shape, a public key that is not 64 lower-case hex characters, a URL that is not `https`, a prior manifest under another key with no `--prior-public-key`. See stderr for details. |
+| 1 | Unexpected error | All other errors: I/O, a fetch that did not answer 200 (a redirect is not followed), took longer than 30 seconds or returned more than 8 MiB, a `kid` of the wrong shape, a public key that is not 64 lower-case hex characters, a URL that is not `https`, a prior manifest under another key with no `--prior-public-key`. See stderr for details. |
 
 **Note on exit code 14**: the CLI does NOT silently lowercase a provided UUID. If you copy
 a tenant ID with uppercase letters, the command exits 14. Use canonical lower-case.
@@ -272,7 +272,16 @@ the new key, whose `previousManifest` names that last one. Nothing is signed
 under both. To follow it:
 
 1. Verify the first new-key manifest against the last old-key one with `--prior-manifest`
-   and `--prior-public-key` (above). Exit 0 says the new chain continues the old one.
+   and `--prior-public-key` (above). Exit 0 says the new chain continues the old one —
+   **unless the command printed a `WARN` on stderr**. Exit 0 does not prove continuity
+   when the current manifest names no previous one: the CLI then prints
+   `WARN: current manifest claims genesis (no previousManifest) but --prior-manifest was
+   supplied; chain link cannot be verified` and still passes, because both signatures
+   verify and there is no link to check. It means the new-key manifest starts a chain of
+   its own: either a chain restart, which the operator publishes a `chain-restart`
+   statement for (below), or a manifest that does not continue the one you hold. Treat
+   a rotation whose first new-key manifest gives this warning as not continuous until a
+   restart statement accounts for it.
 2. Read the operator's rotation statement (below), which the **old** key signed and which
    names the new public key in full.
 

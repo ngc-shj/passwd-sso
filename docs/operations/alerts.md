@@ -744,10 +744,19 @@ unless noted:
   `cadence_failed`. Only the boundary's own manifest diverging at a secondary
   fails the run. Repeating daily, the secondary is not catching up: fix its
   access, or look at what it holds.
-- `audit-anchor-publisher.unrecognised_manifest_key` — the primary holds a key
-  that looks like a manifest's (`????-??-??.kid-*.jws`) but is not one the
-  publisher builds. It is ignored. On the anchors bucket only the publisher's
-  task role can have written it: treat it as use of that role's credentials.
+- `audit-anchor-publisher.unrecognised_manifest_key` — the primary holds keys
+  that look like a manifest's (`????-??-??.kid-*.jws`) but are not ones the
+  publisher builds. One line per listing (a publishing run lists twice), with
+  `count` and `artifactKeys`, the first five. They are ignored. On the anchors
+  bucket only the publisher's task role can have written them: treat it as use
+  of that role's credentials.
+- `audit-anchor-publisher.previous_manifest_unavailable` — a run adopted a
+  stored manifest and could not read back the previous manifest it names to
+  compare the two (`artifactKey` is the adopted one; `detail` is the check
+  that failed as for `published_object_unverifiable`, `HASH_MISMATCH` when the
+  object there is not the one named, or the destination's error code). The
+  publish stands; the `PREVIOUS_MANIFEST_UNAVAILABLE_FOR_COMPARISON` row below
+  is written with it.
 
 Rows a publish writes beside its `AUDIT_ANCHOR_PUBLISHED` row, each an
 `AUDIT_ANCHOR_PUBLISH_FAILED` row carrying `failureReason`, `artifactKey` and
@@ -758,9 +767,19 @@ query under Step 7 of the rotation runbook:
 |---|---|---|
 | `OWN_PUBLIC_KEY_NOT_ARCHIVED` | `public-keys/<kid>.pub` for the publisher's own key is missing at the primary, or holds another key. Verifiers cannot fetch the key. | Daily, until the key is archived (`npm run audit-anchor-publish-pubkey`, rotation runbook Step 4). |
 | `MULTIPLE_MANIFESTS_FOR_DATE` (`date`, `count`) | The date of the manifest this run chained to holds more than one manifest key. | Never. A second key on a date is a second publisher or a planted object. |
-| `TENANT_DROPPED_FROM_MANIFEST` (`count`) | Tenants of the previous manifest are absent from this one. | Once, with every tenant, on the first publish after a tag-secret rotation. Otherwise a tenant's `audit_chain_enabled` was cleared — find who did (see `cadence` below). |
+| `TENANT_DROPPED_FROM_MANIFEST` (`count`) | Tenants of the previous manifest are absent from this one. | Once, with every tenant, on the first publish after a tag-secret rotation. Otherwise a tenant's `audit_chain_enabled` was cleared, or its anchor row deleted — find who did (see `cadence` below). |
 | `CHAIN_SEQ_REGRESSION` (`count`) | Tenants whose `chainSeq` is lower than in the previous manifest, in the same epoch. | Never. A bug or tampering: a security incident. |
+| `EPOCH_CHANGED` (`count`) | Tenants whose `epoch` differs from the previous manifest's, in either direction. A `chainSeq` is compared within one epoch only, so for these tenants `CHAIN_SEQ_REGRESSION` says nothing. | Never: no code path writes `audit_chain_anchors.epoch`. The column was changed in the database directly — a database-write incident; compare the tenant's `chainSeq` in the two manifests by hand. |
+| `PREVIOUS_MANIFEST_UNAVAILABLE_FOR_COMPARISON` | The run adopted a stored manifest, and the previous manifest that one names is missing at the primary, does not verify, or is not the object its `sha256` names. The three rows above could not be computed for this publish. | Never on a store nothing deletes from. The `previous_manifest_unavailable` line says which; then compare the two manifests by hand (`audit-verify --prior-manifest`). |
 | `MISSING_PRIOR_CADENCE_PUBLICATION` | See `missing_prior_cadence` below. | |
+
+The three comparison rows are computed against the manifest the published one
+chains to: the one in hand on a fresh publish, and on an adopted publish the
+one the stored manifest names, read back from the primary and held to the hash
+it carries. So a publish reports them whether it signed the manifest or adopted
+it. A boundary that is adopted more than once — nothing its manifest covers
+could be settled — writes them again with each adopt, at most three times: the
+attempt cap bounds it.
 
 `AUDIT_ANCHOR_KEY_ROTATED` (`oldKid`, `newKid`, `anchoredAt`, `artifactKey`) is
 written by the first publish whose manifest is under another `kid` than the one
@@ -808,7 +827,11 @@ Logged once per healthy boundary, and only then: a `published` run, or a
 `skipped_no_tenants` run on an install where no tenant has ever enabled the
 chain (`everChainEnabled: false`, decided by the absence of any
 `audit_chain_anchors` row and of any manifest key at the primary destination,
-so deleting the anchor rows does not turn the skip healthy).
+so deleting the anchor rows does not turn the skip healthy). A tenant that has
+the chain enabled and no anchor row yet — the outbox worker creates the row
+with the tenant's first chained event — has nothing to anchor and is not
+published; when no chain-enabled tenant has a row the run is this same
+`skipped_no_tenants`, with `chainEnabledTenantCount` above 0.
 `skipped_already_published`, `failed`, `upload_cap_reached` and `lock_held`
 never emit it (nor does a `stale_boundary` skip, which is a
 `skipped_already_published`): a skip means this run published nothing, so it
@@ -853,6 +876,14 @@ and `everChainEnabled: true`.
 edge-triggered: every run in that state matches, so it fires at each boundary
 and each boot run until a tenant is chain-enabled again (the cadence-absent
 alarm follows a day later).
+`chainEnabledTenantCount` counts every chain-enabled tenant, with or without an
+anchor row. A `skipped_no_tenants` line with a count above 0 and
+`everChainEnabled: true` therefore does not match this alarm: tenants are
+enabled, none of them has an anchor row, and anchor rows or manifests of
+earlier ones exist. Only the cadence-absent alarm reports that state. It is
+what deleting every enabled tenant's anchor row leaves until the outbox worker
+writes the next chained event; if it persists, look at the worker and at who
+deleted the rows.
 **Recovery**: no application path writes `tenants.audit_chain_enabled`, so the
 change was made in the database directly; find who made it from the database's
 own logs. If the disable was deliberate, the state is correct and both alarms
@@ -913,7 +944,8 @@ because nothing recorded the earlier one.
 **What it means**: `cadence_failed` is every failed run, with `reason` (a token,
 also written to the `AUDIT_ANCHOR_PUBLISH_FAILED` row) and `stage`:
 
-- `before_upload` — the run failed before writing anything. Either before the
+- `before_upload` — the run failed before the primary held the boundary's
+  object. Either before the
   attempt count was written — the database unreachable, the tenants read
   failing, or one of the fail-closed states — in which case it cost no attempt;
   or after it — the signing step, or the same states found again under the
@@ -926,7 +958,10 @@ also written to the `AUDIT_ANCHOR_PUBLISH_FAILED` row) and `stage`:
   `CADENCE_FAILED:LATEST_UNDER_RETIRED_KEY`; trigger and reset of each are in
   the rotation runbook's table. `<code>` is `ARTIFACT_TOO_LARGE` when the object
   the run must read at the primary is larger than 8 MiB, which no publisher
-  wrote: every run fails until it is dealt with (the runbook's table). `<destination>` is `s3-object-lock`,
+  wrote: every run fails until it is dealt with (the runbook's table); on the
+  filesystem destination it is `ARTIFACT_NOT_REGULAR_FILE` when the name of an
+  artifact holds a symlink, a directory or a device instead of a file.
+  `<destination>` is `s3-object-lock`,
   `github-release` or `filesystem`. For an S3 service error `<code>` is the S3 error
   name: right after an upgrade,
   `s3-object-lock_READ_FAILED:AccessDenied` on every run is the publisher's IAM read
@@ -953,6 +988,10 @@ also written to the `AUDIT_ANCHOR_PUBLISH_FAILED` row) and `stage`:
   The run also pauses the manifest's tenants until the next boundary: the
   audit-outbox worker stops advancing their chains, and the 15-minute retry
   that publishes clears it. The retry adopts what the primary already holds.
+  A `CADENCE_FAILED:<code>` reason at this stage is a database or other error
+  raised once the primary held the boundary's object and before every
+  secondary did (`<code>` as for `before_upload`); it writes no pause, and the
+  retry adopts the stored object.
 - `after_upload` — `COMMIT_FAILED_AFTER_UPLOAD:<code>`, `<code>` being the `error.code` of
   the `commit_failed_after_upload` line; see that section above.
 

@@ -329,7 +329,12 @@ describe("AuditAnchorPublisher — MinIO: one version per manifest key", () => {
 
       const runA = publisher(configA).runCadence(c.boundary);
       runs.push(runA);
-      await creating;
+      await Promise.race([
+        creating,
+        runA.then((o) => {
+          throw new Error("run A ended first: " + JSON.stringify(o));
+        }),
+      ]);
       expect(pidA).not.toBeNull();
       const runB = publisher(configB, second).runCadence(c.boundary);
       runs.push(runB);

@@ -459,7 +459,11 @@ a bucket-configuration change produces one.
   `everChainEnabled: false`. That is healthy, and it is what keeps the
   cadence-absent alarm OK; nothing is written to the bucket and no attempt is
   counted.
-- **Once a tenant enables the chain**, the next boundary (or the next boot run)
+- **A tenant enables the chain** and has no chained event yet: it has no
+  `audit_chain_anchors` row (the outbox worker creates it with the tenant's
+  first chained event) and nothing to anchor. The boundary is still
+  `skipped_no_tenants`, now with `chainEnabledTenantCount` above 0.
+- **Once a chain-enabled tenant has its anchor row**, the next boundary (or the next boot run)
   publishes, and reports `MISSING_PRIOR_CADENCE_PUBLICATION` once — a warn line
   `audit-anchor-publisher.missing_prior_cadence` and one
   `AUDIT_ANCHOR_PUBLISH_FAILED` row — because no earlier manifest exists. It is

@@ -4,6 +4,17 @@
  * destination depends on: releases by tag, assets with a `state`, name
  * uniqueness within a release (422 on a taken name, whatever the holder's
  * state), asset download and asset delete.
+ *
+ * An asset download is documented as "either redirect or stream directly", so
+ * by default it answers 302 to a second listener — another origin — that
+ * serves the bytes; `downloadRedirect = false` streams them directly.
+ *
+ * What it assumes of the real API and cannot verify:
+ *   - the `assets` array embedded in a list or by-tag release is complete;
+ *   - the `state` values: `uploaded` for an asset with content, anything else
+ *     for a name held without it;
+ *   - a name reservation carries the `created_at` of its upload's start;
+ *   - deleting an asset that never finished uploading answers 204.
  */
 import http from "node:http";
 import type { AddressInfo } from "node:net";
@@ -30,6 +41,12 @@ export type FakeGitHub = {
   requests: string[];
   /** Asset ids a DELETE removed, in order. */
   deletedAssetIds: number[];
+  /** The `Authorization` header of the latest API request. */
+  apiAuthorization: string | undefined;
+  /** Answer an asset download with a redirect to the download listener (default) or with the bytes. */
+  downloadRedirect: boolean;
+  /** Every request the download listener received, with the `Authorization` header it carried. */
+  downloads: Array<{ path: string; authorization: string | undefined }>;
   /** Runs before each request is answered; a case scripts state changes here. */
   beforeRequest: ((method: string, path: string) => void) | null;
   /** Answer the next asset upload with a 422 although no asset holds the name. */
@@ -81,6 +98,9 @@ export async function startFakeGitHub(): Promise<FakeGitHub> {
     releases,
     requests: [],
     deletedAssetIds: [],
+    apiAuthorization: undefined,
+    downloadRedirect: true,
+    downloads: [],
     beforeRequest: null,
     rejectNextUpload: false,
     deleteStatus: null,
@@ -105,8 +125,23 @@ export async function startFakeGitHub(): Promise<FakeGitHub> {
     count(request) {
       return fake.requests.filter((r) => (typeof request === "string" ? r === request : request.test(r))).length;
     },
-    close: () => new Promise((resolve, reject) => server.close((err) => (err ? reject(err) : resolve()))),
+    close: async () => {
+      for (const listener of [server, downloadServer]) {
+        await new Promise<void>((resolve, reject) => listener.close((err) => (err ? reject(err) : resolve())));
+      }
+    },
   };
+
+  // Where a redirected download lands: its own port, so another origin.
+  const downloadServer = http.createServer((req, res) => {
+    const path = new URL(req.url ?? "/", "http://fake").pathname;
+    fake.downloads.push({ path, authorization: req.headers.authorization });
+    const found = findAsset(Number(path.match(/^\/download\/(\d+)$/)?.[1]));
+    if (!found) return json(res, 404, { message: "Not Found" });
+    res.writeHead(200, { "Content-Type": "application/octet-stream" });
+    res.end(found.asset.content);
+  });
+  let downloadOrigin = "";
 
   const server = http.createServer((req, res) => {
     const chunks: Buffer[] = [];
@@ -118,6 +153,7 @@ export async function startFakeGitHub(): Promise<FakeGitHub> {
       const host = req.headers.host ?? "localhost";
       const path = url.pathname;
       fake.requests.push(`${method} ${path}`);
+      fake.apiAuthorization = req.headers.authorization;
       fake.beforeRequest?.(method, path);
 
       if (path === `${REPO_PATH}/releases` && method === "POST") {
@@ -158,6 +194,10 @@ export async function startFakeGitHub(): Promise<FakeGitHub> {
         const found = findAsset(Number(byId[1]));
         if (!found) return json(res, 404, { message: "Not Found" });
         if (req.headers.accept === "application/octet-stream") {
+          if (fake.downloadRedirect) {
+            res.writeHead(302, { Location: `${downloadOrigin}/download/${found.asset.id}` });
+            return res.end();
+          }
           res.writeHead(200, { "Content-Type": "application/octet-stream" });
           return res.end(found.asset.content);
         }
@@ -177,10 +217,12 @@ export async function startFakeGitHub(): Promise<FakeGitHub> {
     });
   });
 
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => resolve());
-  });
-  fake.baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const listen = (listener: http.Server) =>
+    new Promise<string>((resolve, reject) => {
+      listener.once("error", reject);
+      listener.listen(0, "127.0.0.1", () => resolve(`http://127.0.0.1:${(listener.address() as AddressInfo).port}`));
+    });
+  fake.baseUrl = await listen(server);
+  downloadOrigin = await listen(downloadServer);
   return fake;
 }

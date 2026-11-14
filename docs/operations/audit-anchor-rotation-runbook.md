@@ -86,12 +86,15 @@ permissions. The role needs, on the prefix:
 Script behaviour common to all five:
 
 - Exit status `0` done, `1` refused or failed, `2` usage error (a missing `--confirm` is one).
-- A private key is read only from a file of mode `0600` holding exactly 64 lower-case hex
-  characters. No seed is printed, logged or accepted as an argument.
+- A private key is read only from a file of mode `0600` holding exactly 64 hex characters,
+  in either case (what `AUDIT_ANCHOR_SIGNING_KEY` accepts); a public key is 64 lower-case
+  hex characters. No seed is printed, logged or accepted as an argument.
 - A write prints the `kid`, the public key, the artifact key and the destinations, then
   refuses without `--confirm`: the write is create-only, and on the anchors bucket it cannot
   be undone. An identical object already there is success (`exists (identical)`); a
-  different one is exit `1` with nothing written anywhere.
+  different one is exit `1` with nothing written anywhere. A public key already archived
+  is compared as a key, not byte for byte — an archive file with or without the trailing
+  newline is the same key (`exists (same key)`), and nothing is written over it.
 
 ---
 
@@ -192,7 +195,7 @@ As the break-glass role on AWS ("Prerequisites"). Both, before the key is switch
 npm run audit-anchor-publish-pubkey -- --key-file /secure/path/old-key.hex --confirm
 npm run audit-anchor-publish-pubkey -- --public-key <new-public-key> --confirm
 # kid=…  publicKey=…  artifact=public-keys/<kid>.pub  destination=<name>
-# <destination>: created            (or: exists (identical))
+# <destination>: created            (or: exists (same key))
 ```
 
 - The **old** key is what lets the publisher, once it runs the new key, verify and chain to
@@ -371,7 +374,7 @@ and archive keys.
 
 | `failureReason` | Trigger | Reset — Terraform bucket | Reset — other stores |
 |---|---|---|---|
-| `<destination>_READ_FAILED:<code>` (stage `before_upload`) | The primary could not be listed or read. `<code>`: `UPLOAD_TIMEOUT` (the run's 60 s bound on destination I/O), an errno, `HTTP_<status>` from GitHub, the S3 error name for an S3 service error (`AccessDenied` for a denied request), `ARTIFACT_TOO_LARGE` (see the next row). | Fix access; nothing stored needs repair. Right after an upgrade it is the missing IAM read grant: apply Terraform (`docs/operations/deployment.md` "Upgrade order"). | Fix the token's access to the repository, or the mount and its permissions. |
+| `<destination>_READ_FAILED:<code>` (stage `before_upload`) | The primary could not be listed or read. `<code>`: `UPLOAD_TIMEOUT` (the run's 60 s bound on destination I/O), an errno, `HTTP_<status>` from GitHub, the S3 error name for an S3 service error (`AccessDenied` for a denied request), `ARTIFACT_TOO_LARGE` (see the next row), `ARTIFACT_NOT_REGULAR_FILE` (filesystem only: the name of an artifact holds a symlink, a directory or a device — remove it; the publisher only ever creates regular files). | Fix access; nothing stored needs repair. Right after an upgrade it is the missing IAM read grant: apply Terraform (`docs/operations/deployment.md` "Upgrade order"). | Fix the token's access to the repository, or the mount and its permissions. |
 | `<destination>_READ_FAILED:ARTIFACT_TOO_LARGE` (stage `before_upload`) | An object the run must read at the primary — the latest manifest or a public key in the archive — is larger than 8 MiB (`AUDIT_ANCHOR_ARTIFACT_MAX_BYTES`). The publisher never writes one that large, so another writer did. Every run fails the same way until it is gone. | Only the publisher's task role can write a manifest key and only the break-glass role the key archive, so treat it as use of that role's credentials. The bucket's policy lets nobody delete it, so the run cannot recover by itself: after the incident review, move the chain to a new location ("Restarting the chain"). | Remove the object; find what wrote it. |
 | `CADENCE_FAILED:PUBLISHED_OBJECT_UNVERIFIABLE` | The latest manifest at the primary does not verify. The `audit-anchor-publisher.published_object_unverifiable` line carries `artifactKey` and `detail`: `PUBLIC_KEY_NOT_ARCHIVED` (it is under another `kid` whose `public-keys/<kid>.pub` is not there), `PUBLIC_KEY_INVALID` (that file is not 64 hex chars, or not that `kid`'s key), `SIGNATURE_INVALID`, `DATE_MISMATCH` (its `anchoredAt` is another UTC date than its key), `OBJECT_MISSING` (listed, but the read found nothing). | `PUBLIC_KEY_NOT_ARCHIVED`: archive that key (Step 4) — the usual cause is a rotation that skipped it. Anything else is an object nobody can remove: treat the publisher role's credentials as compromised, then restart the chain. | `PUBLIC_KEY_NOT_ARCHIVED`: archive that key. `PUBLIC_KEY_INVALID`: replace the archived file with the right key. Otherwise remove the corrupt object (restore it from a mirror or a backup if one holds it), else restart the chain. |
 | `CADENCE_FAILED:PUBLISHED_OBJECT_AHEAD` | The latest manifest verifies and is dated after the wall clock's current boundary. (One that does not verify is the row above, whatever its date.) | Check the task's clock first (`date -u`): a clock that went back makes the publisher's own latest manifest look ahead. With a correct clock it was signed by a publisher whose clock ran ahead, or by someone holding a signing key — a key incident (rotate). Publishing resumes when the wall clock reaches that date; restart the chain to resume sooner. | Check the clock; remove the object. |
@@ -381,6 +384,7 @@ and archive keys.
 | `<destination>_UPLOAD_FAILED:<code>` (stage `upload`) | A create at the primary or at a secondary failed or hit the 60 s bound. `<code>` is `ARTIFACT_TOO_LARGE` when the signed manifest itself is larger than 8 MiB (`AUDIT_ANCHOR_ARTIFACT_MAX_BYTES`): the destination refuses it before sending anything. The manifest's tenants are paused until the next boundary. | Fix the destination. The retry finds what the primary already holds and adopts it — no second version. | The same. |
 | `<destination>_READ_FAILED:<code>` (stage `upload`) | A secondary already held the boundary's key and could not be read back for the compare (`ARTIFACT_TOO_LARGE`: the object there is larger than 8 MiB). Pause as above. | — (a secondary is never the Terraform bucket: S3 is the primary whenever it is configured) | Fix access to the secondary. |
 | `<destination>_MIRROR_DIVERGED` (stage `upload`) | A secondary holds other bytes than the primary at the boundary's key. Pause as above. | — | The primary is authoritative: find out what wrote the secondary's object, remove it, and let the retry copy the primary's bytes. After a chain restart see "Restarting the chain". |
+| `CADENCE_FAILED:<code>` (stage `upload`) | A database or other error after the primary held the boundary's object and before every secondary did. No pause. | Fix what `<code>` names. The retry adopts the stored object. | The same. |
 | `COMMIT_FAILED_AFTER_UPLOAD:<code>` (stage `after_upload`) | Every destination holds the object; the database commit failed. `<code>` is the `error.code` of the `audit-anchor-publisher.commit_failed_after_upload` line. No pause. | Fix the database. The retry adopts the stored object and settles it. | The same. |
 
 Not failures, but never the healthy line either:
@@ -391,6 +395,26 @@ Not failures, but never the healthy line either:
   other day a second publisher writes to this prefix — a clone must have its own.
 - `skipped_already_published` with `audit-anchor-publisher.stale_boundary`: the primary
   holds a manifest dated after the run's boundary (and not after the wall clock's).
+- `skipped_no_tenants` with `everChainEnabled: true`: no chain-enabled tenant has an anchor
+  row, while an anchor row or a manifest shows the chain was once on. With
+  `chainEnabledTenantCount: 0` every tenant's chain was turned off (alarmed on its own);
+  with a count above 0 the enabled tenants' anchor rows are missing — a tenant gets its row
+  with its first chained event, so this lasts only until the outbox worker writes one.
+
+Detection rows. A publish that succeeds can still write `AUDIT_ANCHOR_PUBLISH_FAILED` rows
+beside its `AUDIT_ANCHOR_PUBLISHED` row; none fails the run and none is alarmed
+(`docs/operations/alerts.md` has the full table):
+
+| `failureReason` | Trigger | What to do |
+|---|---|---|
+| `TENANT_DROPPED_FROM_MANIFEST` (`count`) | Tenants of the previous manifest are absent from this one. | Expected once after a tag-secret rotation. Otherwise find who cleared the tenant's `audit_chain_enabled` or deleted its anchor row. |
+| `CHAIN_SEQ_REGRESSION` (`count`) | A tenant's `chainSeq` is below the previous manifest's, in the same epoch. | Security incident ("Chain-sequence regression"). |
+| `EPOCH_CHANGED` (`count`) | A tenant's `epoch` differs from the previous manifest's. No code path writes it, and a changed epoch takes the tenant out of the regression check. | Database-write incident: find who changed `audit_chain_anchors.epoch`, and compare the tenant's `chainSeq` across the two manifests by hand. |
+| `PREVIOUS_MANIFEST_UNAVAILABLE_FOR_COMPARISON` | An adopted publish could not read back the previous manifest its manifest names, or that object is not the one named: the three rows above were not computed. | Find out why the previous manifest is missing or changed (on the Terraform bucket it cannot be, without a delete marker or a policy change); compare the two manifests by hand with `audit-verify --prior-manifest`. |
+
+The three comparison rows are written whether the run signed the manifest or adopted one an
+earlier run stored: an adopt reads the previous manifest back from the primary. A boundary
+adopted more than once repeats them, at most three times (the attempt cap).
 
 Where a step waits for the publisher: a failed run is retried every 15 minutes, at most three
 times per process and never within the last 30 minutes before the next boundary. When those
@@ -528,6 +552,12 @@ signed statement there says where the old one ended.
 8. Start the publisher with the new location (and key). Its first run publishes a manifest
    with `previousManifest: null`; the `AUDIT_ANCHOR_PUBLISHED` row carries `genesis: true`,
    and one `MISSING_PRIOR_CADENCE_PUBLICATION` row accompanies it, as on any first publish.
+   **Check that row.** The first `AUDIT_ANCHOR_PUBLISHED` row after a restart must carry
+   `genesis: true`. Anything else is an incident: a manifest is not bound to the location
+   it is stored at, so an old-chain manifest copied into the new location before this run
+   is adopted (its own date) or chained to (an earlier date) like any other, and the new
+   chain then continues the old one. Stop the publisher, remove what was copied where the
+   store allows it, or start again at another new location.
 9. Tell verifiers the new archive location and point them at the restart statement
    (`docs/security/audit-anchor-verification.md` "Verifying a statement").
 
@@ -682,13 +712,17 @@ nothing reads or writes them, and whatever they hold changes nothing.
 
 ### Chain-sequence regression
 
-- The publisher compares each manifest it builds with the one it chains to. For a tenant tag
-  present in both, in the same epoch, a lower `chainSeq` is a regression: after the publish
-  commits it writes one `AUDIT_ANCHOR_PUBLISH_FAILED` row with `CHAIN_SEQ_REGRESSION` and
-  `count`, the number of tenants affected. It is detection only — the manifest is published
-  as the anchor rows are — and an adopted publish, which built nothing, reports none.
-- The verifier's side is unchanged: `passwd-sso audit-verify --prior-manifest` exits 17
-  (`ChainSeqRegressionError`).
+- The publisher compares each manifest it publishes with the one that manifest chains to —
+  the one in hand when it signed the manifest, the one read back from the primary when it
+  adopted a stored one. For a tenant tag present in both, in the same epoch, a lower
+  `chainSeq` is a regression: after the publish commits it writes one
+  `AUDIT_ANCHOR_PUBLISH_FAILED` row with `CHAIN_SEQ_REGRESSION` and `count`, the number of
+  tenants affected. It is detection only — the manifest is published as the anchor rows are.
+- A tag whose `epoch` differs between the two manifests is not compared; it is reported as
+  `EPOCH_CHANGED` instead. Nothing writes `epoch`, so that row is an incident of its own.
+- The verifier's side: `passwd-sso audit-verify --prior-manifest` exits 17
+  (`ChainSeqRegressionError`) for a regression, and prints a `WARN: epoch changed …` line on
+  stderr — exit status unchanged — for a tenant whose epoch differs.
 - A regression is either a bug or active tampering. Treat as a security incident.
 
 ---

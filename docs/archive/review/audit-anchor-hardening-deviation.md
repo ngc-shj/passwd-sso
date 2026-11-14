@@ -180,3 +180,27 @@ The pass that applied these was interrupted by a session restart before it repor
 orchestrator re-verified the result (type-check, unit 1444 passed, CLI 484 passed, anchor
 integration 95 passed, eslint and the two static checks green). The per-fix red proofs were
 not re-run after the interruption; each fix has a test that names its guard.
+
+## Phase 3, round 1 fixes
+
+- **D44 — `anchor-publisher-key-load.integration.test.ts` is in the Implementation Checklist
+  and not in the diff:** it tests the application key provider only and references nothing
+  this change removed; no edit was needed.
+- **D45 — the run's tenant set is the chain-enabled tenants that have an anchor row**
+  (rows are created lazily by the outbox worker). With none, the run takes the no-tenant
+  path, so `skipped_no_tenants` can now carry `chainEnabledTenantCount > 0`. The
+  `chain-enabled-fell-to-zero` metric filter requires `= 0`, so that state shows through the
+  cadence-absent alarm when `everChainEnabled` is true and is the healthy skip when false.
+  No Terraform change; the docs say so.
+- **D46 — rows on an adopted publish:** plan C4 said the drop/regression rows are not emitted
+  on an adopted publish. They now are (code review S-1), with `EPOCH_CHANGED` (S-2) and
+  `PREVIOUS_MANIFEST_UNAVAILABLE_FOR_COMPARISON`, and a `previous_manifest_unavailable` warn
+  line naming which of missing / unverifiable / hash mismatch / destination error occurred.
+- **D47 — `publish-pubkey` compares the parsed key**, not bytes, and sends no `create` to a
+  destination its pre-check found holding the key (`exists (same key)`).
+- **D48 — the CLI's bounded read** stops at the first network chunk past the bound, not at
+  exactly bound + 1 bytes.
+- **D49 — one mutant stayed green:** the filesystem read loop's `total <= MAX` condition is
+  equivalent under the chunk sizing; the cap and the post-read check are each red-proven.
+- **D50 — S-7 accepted** (a manifest is not bound to its location); see the code-review
+  file's Resolution Status for the Anti-Deferral entry.

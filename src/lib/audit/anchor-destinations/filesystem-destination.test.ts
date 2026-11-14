@@ -1,8 +1,8 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { FilesystemDestination } from "./filesystem-destination";
+import { ArtifactNotRegularFileError, FilesystemDestination } from "./filesystem-destination";
 import { ANCHOR_ARTIFACT_CONTENT_TYPE, publicKeyArtifactKey } from "@/lib/audit/anchor-artifact-keys";
 import { AUDIT_ANCHOR_ARTIFACT_MAX_BYTES } from "@/lib/constants/audit/audit";
 import { ArtifactTooLargeError } from "./destination";
@@ -23,6 +23,7 @@ async function tempDir(): Promise<string> {
 }
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const dir of tempDirs.splice(0)) {
     await fs.chmod(dir, 0o755).catch(() => undefined);
     await fs.rm(dir, { recursive: true, force: true });
@@ -133,6 +134,88 @@ describe("FilesystemDestination", () => {
     await fs.writeFile(path.join(basePath, key), Buffer.alloc(AUDIT_ANCHOR_ARTIFACT_MAX_BYTES + 1));
 
     await expect(new FilesystemDestination({ basePath }).read(key)).rejects.toBeInstanceOf(ArtifactTooLargeError);
+  });
+
+  describe("read of a name that is not a regular file", () => {
+    it.each<[string, (basePath: string, key: string) => Promise<void>]>([
+      [
+        "a symlink to another file",
+        async (basePath, key) => {
+          await fs.writeFile(path.join(basePath, "elsewhere"), "not an artifact");
+          await fs.symlink(path.join(basePath, "elsewhere"), path.join(basePath, key));
+        },
+      ],
+      [
+        "a symlink to a directory",
+        async (basePath, key) => {
+          await fs.mkdir(path.join(basePath, "a-dir"));
+          await fs.symlink(path.join(basePath, "a-dir"), path.join(basePath, key));
+        },
+      ],
+      ["a directory", async (basePath, key) => void (await fs.mkdir(path.join(basePath, key)))],
+    ])("throws a named error for %s, and does not answer null", async (_label, plant) => {
+      const basePath = await tempDir();
+      const key = manifestKeyFor("2026-05-02");
+      await plant(basePath, key);
+
+      const error = await new FilesystemDestination({ basePath }).read(key).catch((err: unknown) => err);
+
+      expect(error).toBeInstanceOf(ArtifactNotRegularFileError);
+      expect(error).toMatchObject({ code: "ARTIFACT_NOT_REGULAR_FILE" });
+    });
+
+    it("reads a regular file planted at the name", async () => {
+      const basePath = await tempDir();
+      const key = manifestKeyFor("2026-05-02");
+      await fs.writeFile(path.join(basePath, key), "planted");
+
+      expect(await new FilesystemDestination({ basePath }).read(key)).toEqual(Buffer.from("planted"));
+    });
+  });
+
+  describe("read of a file that outgrew the size its stat reported", () => {
+    /** Every `open` answers a handle whose stat reports 1 byte; `bytesRead` sums what is read through it. */
+    function understateSize(): { bytesRead: () => number } {
+      let total = 0;
+      const realOpen = fs.open.bind(fs);
+      vi.spyOn(fs, "open").mockImplementation(async (...args: Parameters<typeof fs.open>) => {
+        const handle = await realOpen(...args);
+        const realStat = handle.stat.bind(handle);
+        const realRead = handle.read.bind(handle);
+        return Object.assign(handle, {
+          stat: async () => Object.assign(await realStat(), { size: 1 }),
+          read: async (...readArgs: Parameters<typeof realRead>) => {
+            const result = await realRead(...readArgs);
+            total += result.bytesRead;
+            return result;
+          },
+        }) as fs.FileHandle;
+      });
+      return { bytesRead: () => total };
+    }
+
+    it("stops one byte past the bound and throws ArtifactTooLargeError", async () => {
+      const basePath = await tempDir();
+      const key = manifestKeyFor("2026-05-02");
+      await fs.writeFile(path.join(basePath, key), Buffer.alloc(AUDIT_ANCHOR_ARTIFACT_MAX_BYTES + 100_000));
+      const reads = understateSize();
+
+      await expect(new FilesystemDestination({ basePath }).read(key)).rejects.toBeInstanceOf(ArtifactTooLargeError);
+
+      expect(reads.bytesRead()).toBe(AUDIT_ANCHOR_ARTIFACT_MAX_BYTES + 1);
+    });
+
+    it("returns a file exactly at the bound whole", async () => {
+      const basePath = await tempDir();
+      const key = manifestKeyFor("2026-05-02");
+      const bytes = Buffer.alloc(AUDIT_ANCHOR_ARTIFACT_MAX_BYTES, 0x61);
+      await fs.writeFile(path.join(basePath, key), bytes);
+      understateSize();
+
+      const stored = await new FilesystemDestination({ basePath }).read(key);
+
+      expect(stored?.equals(bytes)).toBe(true);
+    });
   });
 
   it("rejects with the signal's reason when it is already aborted", async () => {

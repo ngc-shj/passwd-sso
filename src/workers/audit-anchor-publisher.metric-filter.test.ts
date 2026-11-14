@@ -59,6 +59,7 @@ vi.mock("@/lib/db/pool-factory", async () => {
 });
 
 import {
+  AUDIT_ANCHOR_UPLOAD_ATTEMPT_CAP,
   AuditAnchorPublisher,
   PUBLISHER_AUDIT_DEAD_LETTER_REASON,
   SETTING_UPLOAD_ATTEMPTS,
@@ -271,7 +272,7 @@ beforeAll(async () => {
   await storeArtifact(divergedMirror, buildManifestArtifactKey(BOUNDARY, kidOf(SIGNING_KEY)), Buffer.from("other bytes"));
   lines.mirror_diverged = await cadence(makeDb(), { destinations: [await primary(), divergedMirror] });
   lines.upload_failed = await cadence(makeDb(), failingUpload);
-  lines.cap_reached = await cadence(makeDb({ settings: new Map([[ATTEMPTS, JSON.stringify({ boundary: BOUNDARY.toISOString(), count: 3 })]]) }));
+  lines.cap_reached = await cadence(makeDb({ settings: new Map([[ATTEMPTS, JSON.stringify({ boundary: BOUNDARY.toISOString(), count: AUDIT_ANCHOR_UPLOAD_ATTEMPT_CAP })]]) }));
   lines.lock_held = await cadence(makeDb({ lockTimeoutOnCall: 1 }));
   lines.commit_failed = await cadence(makeDb(), {
     hooks: {

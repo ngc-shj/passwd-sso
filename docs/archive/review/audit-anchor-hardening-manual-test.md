@@ -6,12 +6,19 @@ Run on 2026-11-14 (JST) in the branch's worktree, against the worktree's own dat
 `npm run generate:audit-anchor-signing-key`; no key material appears below or in the kept
 logs (checked by grepping the logs and statements for both seeds: 0 files).
 
-Runbook under test: `docs/operations/audit-anchor-rotation-runbook.md` as committed with this
-record. Its command lines were listed with
+Runbook under test: `docs/operations/audit-anchor-rotation-runbook.md`, blob
+`80234a8ae27da2b4bcf3f91e8fe16db3f2873440` (`git hash-object` of the file committed with this
+record). Its commands were extracted with
 
 ```
-grep -nE '^\s*(npm run [a-z:-]+|aws [a-z0-9]+ [a-z-]+|terraform [a-z]+)' docs/operations/audit-anchor-rotation-runbook.md
+awk '/^[[:space:]]*```(bash|sql)/{f=1; next} /^[[:space:]]*```/{f=0} f' docs/operations/audit-anchor-rotation-runbook.md
+grep -noE '`npm run [a-z:-]+[^`]*`' docs/operations/audit-anchor-rotation-runbook.md
 ```
+
+57 non-comment lines inside `bash`/`sql` fences and one inline `npm run` span (so an empty
+extraction would show as 0, not as a clean table). The script runs in section 2 were made
+before the code-review fixes; the fixes changed two output strings, noted in the rows, and
+the scripts' behaviour on those paths is covered by `scripts/__tests__/audit-anchor-keys.test.ts`.
 
 ## Pre-conditions
 
@@ -49,7 +56,7 @@ behaving as documented. The publisher role's column grants (`last_published_at`,
 |---|---|---|
 | `npm run generate:audit-anchor-signing-key -- --out <file>` | local | exit 0; file mode 600, 65 bytes |
 | `npm run audit-anchor-kid -- --key-file <file>` | local | exit 0; `publicKey=…`, `kid=audit-anchor-<16 hex>`; with a destination configured, `archived[s3-object-lock]=yes` after 2.3 |
-| `npm run audit-anchor-publish-pubkey -- --key-file <old> --confirm` | local (MinIO) | without `--confirm`: prints kid, key, artifact, destination and refuses, exit 2. With it: `s3-object-lock: created`, exit 0. Again: `exists (identical)`, exit 0 |
+| `npm run audit-anchor-publish-pubkey -- --key-file <old> --confirm` | local (MinIO) | without `--confirm`: prints kid, key, artifact, destination and refuses, exit 2. With it: `s3-object-lock: created`, exit 0. Again: reported as already held, exit 0 (the line reads `exists (same key)` since code review F-1) |
 | `npm run audit-anchor-publish-pubkey -- --public-key <hex> --confirm` | local (MinIO) | `created`, exit 0 |
 | `npm run audit-anchor-rotation-statement -- --old-key-file … --new-public-key … --out rotation.jws` | local | exit 0; header `typ: passwd-sso.audit-anchor-statement.v1`, `kid` = old kid; payload `{issuedAt, newKid, newPublicKey, oldKid, op: "rotation"}` |
 | `npm run audit-anchor-publish-statement -- --file rotation.jws --confirm` | local (MinIO) | `created` at `key-rotation-20261114.rotation.kid-<old kid>.jws`, exit 0; again: `exists (identical)`, exit 0 |
@@ -58,7 +65,11 @@ behaving as documented. The publisher role's column grants (`last_published_at`,
 | `npm run audit-anchor-publish-statement -- --file restart.jws --confirm` | local (filesystem destination, batch D) | exit 0 |
 | SQL: correct `last_published_at` (d1/d2 reset) | local, as a NOBYPASSRLS role | without the three `SET LOCAL` lines: `SELECT 0`, `UPDATE 0`; with them: `SELECT 1`, `UPDATE 1` (rolled back) |
 | SQL: clear `last_published_at` (chain restart) | local, as a NOBYPASSRLS role | without the GUCs `UPDATE 0`; with them `UPDATE 1` (rolled back) |
-| SQL: read the publisher's audit rows | not run | `blocked-deferred` — needs the outbox worker to have drained into `audit_logs`; the worktree runs none. The same rows were read from `audit_outbox` in section 1 |
+| SQL: read the publisher's audit rows (`BEGIN READ ONLY; SET LOCAL app.tenant_id …`) | local, as `passwd_app` (NOBYPASSRLS) | runs, `SELECT 0` — the worktree runs no outbox worker, so `audit_logs` holds no publisher row; the rows themselves were read from `audit_outbox` in section 1 |
+| SQL: change `audit_anchor_deployment_id` (DEPLOYMENT_ID change) | local, as a NOBYPASSRLS role | without the three `SET LOCAL` lines `UPDATE 0`; with them `UPDATE 1` (rolled back) |
+| `npm run generate:audit-anchor-tag-secret -- --out <file>` (inline) | local | exit 0; file mode 600, 65 bytes |
+| `(umask 077; aws secretsmanager get-secret-value … \| jq -r '.AUDIT_ANCHOR_SIGNING_KEY' > old-key.hex)` | local half only | `umask 077` + `jq -r` on a JSON document of that shape gives a mode-600, 65-byte file that `audit-anchor-kid` accepts (exit 0). The `aws secretsmanager` half: `blocked-deferred (E1)` |
+| `export …=$(terraform output -raw audit_anchors_bucket_name)` / `audit_anchor_s3_prefix` / `app_secrets_arn` | not run | `blocked-deferred (E1)`. Static: the three output names exist in `infra/terraform/outputs.tf` |
 | `aws s3api head-object …` | not run | `blocked-deferred (E1)` — real AWS. Local equivalent: the archived `.pub` is 65 bytes (64 hex + newline), 1 version |
 | `aws s3api get-object-retention …` | not run | `blocked-deferred (E1)`. COMPLIANCE retention on `create` is asserted on MinIO by `audit-anchor-s3-destination.integration.test.ts` |
 | `aws s3api list-object-versions …` (two places) | not run | `blocked-deferred (E1)`. Local equivalent via the SDK: every key in section 1 has 1 version, 0 delete markers |

@@ -9,6 +9,7 @@ import { readFileSync, openSync, fstatSync, readSync, closeSync } from "node:fs"
 import { createHash, createHmac, createPublicKey, verify as nodeVerify } from "node:crypto";
 import { z } from "zod";
 import {
+  AUDIT_ANCHOR_ARTIFACT_MAX_BYTES,
   AUDIT_ANCHOR_KID_HEX_CHARS,
   AUDIT_ANCHOR_KID_PREFIX,
   AUDIT_ANCHOR_TYP,
@@ -17,6 +18,9 @@ import {
 // --- Constants ---
 
 const AUDIT_ANCHOR_TAG_DOMAIN = "audit-anchor-tag-v1";
+
+/** How long a manifest or public-key fetch may take, headers and body together. */
+export const AUDIT_VERIFY_FETCH_TIMEOUT_MS = 30_000;
 
 // --- Typed errors ---
 
@@ -53,7 +57,7 @@ export class InvalidTenantIdFormatError extends Error {
 export class InvalidKidError extends Error {
   constructor(kid: unknown) {
     super(
-      `Invalid kid format; expected ${AUDIT_ANCHOR_KID_PREFIX}<${AUDIT_ANCHOR_KID_HEX_CHARS} lower-case hex chars>: got ${kid}`,
+      `Invalid kid format; expected ${AUDIT_ANCHOR_KID_PREFIX}<${AUDIT_ANCHOR_KID_HEX_CHARS} lower-case hex chars>: got ${JSON.stringify(kid)}`,
     );
     this.name = "InvalidKidError";
   }
@@ -173,6 +177,14 @@ export class ManifestFetchError extends Error {
     super(`Failed to fetch manifest: HTTP ${status}`);
     this.name = "ManifestFetchError";
     this.status = status;
+  }
+}
+
+/** A fetched manifest or public key larger than any anchor artifact. */
+export class ResponseTooLargeError extends Error {
+  constructor() {
+    super(`Fetched response is larger than ${AUDIT_ANCHOR_ARTIFACT_MAX_BYTES} bytes`);
+    this.name = "ResponseTooLargeError";
   }
 }
 
@@ -397,6 +409,38 @@ function fetchableUrl(raw: string, what: string): URL {
   throw new InsecureUrlError(what);
 }
 
+/**
+ * The body of a 200 answer from `url`, as text. Redirects are not followed;
+ * the request is bounded in time and the body in size, counted as it is read
+ * (a `Content-Length` may be absent or understated), so the server decides
+ * neither how long the verifier waits nor how much it buffers.
+ */
+async function fetchBoundedText(url: string, failure: (status: number) => Error): Promise<string> {
+  const resp = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(AUDIT_VERIFY_FETCH_TIMEOUT_MS) });
+  if (resp.status !== 200) {
+    await resp.body?.cancel();
+    throw failure(resp.status);
+  }
+  if (Number(resp.headers.get("content-length")) > AUDIT_ANCHOR_ARTIFACT_MAX_BYTES) {
+    await resp.body?.cancel();
+    throw new ResponseTooLargeError();
+  }
+  const reader = resp.body?.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (reader) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > AUDIT_ANCHOR_ARTIFACT_MAX_BYTES) {
+      await reader.cancel();
+      throw new ResponseTooLargeError();
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks, total).toString("utf-8");
+}
+
 /** The public key of `kid` from the archive at `archiveBase`. */
 async function fetchArchivedPublicKey(archiveBase: string, kid: string): Promise<Buffer> {
   // Three layers of defense for the file-data → outbound-fetch flow:
@@ -420,11 +464,9 @@ async function fetchArchivedPublicKey(archiveBase: string, kid: string): Promise
     // but explicit reject if URL resolution somehow crosses origins.
     throw new PublicKeyFetchError(0, pubUrlObj.href);
   }
-  const resp = await fetch(pubUrlObj.href, { redirect: "manual" });
-  if (resp.status !== 200) {
-    throw new PublicKeyFetchError(resp.status, pubUrlObj.href);
-  }
-  return parsePublicKeyHex(await resp.text());
+  return parsePublicKeyHex(
+    await fetchBoundedText(pubUrlObj.href, (status) => new PublicKeyFetchError(status, pubUrlObj.href)),
+  );
 }
 
 function sha256Hex(buf: Buffer): string {
@@ -511,11 +553,7 @@ export async function auditVerifyCommand(args: AuditVerifyArgs): Promise<void> {
   let jws: string;
   if (looksLikeUrl(args.manifest)) {
     const manifestUrl = fetchableUrl(args.manifest, "The manifest URL");
-    const resp = await fetch(manifestUrl.href, { redirect: "manual" });
-    if (resp.status !== 200) {
-      throw new ManifestFetchError(resp.status);
-    }
-    jws = (await resp.text()).trim();
+    jws = (await fetchBoundedText(manifestUrl.href, (status) => new ManifestFetchError(status))).trim();
   } else {
     jws = readFileSync(args.manifest, "utf-8").trim();
   }
@@ -605,6 +643,14 @@ export async function auditVerifyCommand(args: AuditVerifyArgs): Promise<void> {
 
       const priorSeq = BigInt(priorTenant.chainSeq);
       const currentSeq = BigInt(currentTenant.chainSeq);
+
+      // A chainSeq is comparable within one epoch only, so a changed epoch
+      // leaves the regression check below with nothing to say: say that.
+      if (priorTenant.epoch !== currentTenant.epoch) {
+        process.stderr.write(
+          `WARN: epoch changed for tenantTag=${priorTenant.tenantTag}: prior=${priorTenant.epoch}, current=${currentTenant.epoch}; chainSeq regression was not checked for this tenant\n`,
+        );
+      }
 
       if (priorTenant.epoch === currentTenant.epoch && currentSeq < priorSeq) {
         throw new ChainSeqRegressionError(

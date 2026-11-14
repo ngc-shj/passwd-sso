@@ -133,6 +133,12 @@ function buildVectors() {
         expect: "InvalidKidError",
       },
       {
+        // An unverified header's kid reaches the error message: both sides quote it.
+        name: "malformed kid: control characters",
+        jws: jws(own.privateKey, header(`${KID_PREFIX}\u001b[31mred\nline`), payload),
+        expect: "InvalidKidError",
+      },
+      {
         name: "anchoredAt not in the toISOString form",
         jws: jws(own.privateKey, header(own.kid), jcs({ ...manifest, anchoredAt: "2026-01-15T00:05:00Z" })),
         expect: "ManifestSchemaValidationError",

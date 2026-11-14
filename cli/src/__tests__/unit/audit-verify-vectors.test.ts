@@ -82,6 +82,7 @@ function signManifest(manifest: Record<string, unknown>, key: ReturnType<typeof 
 
 let tmpDir: string;
 let stdout: ReturnType<typeof vi.spyOn>;
+let stderr: ReturnType<typeof vi.spyOn>;
 let fetchSpy: ReturnType<typeof vi.spyOn>;
 
 function file(name: string, content: string): string {
@@ -92,6 +93,14 @@ function file(name: string, content: string): string {
 
 function printed(): string {
   return stdout.mock.calls.map((c: unknown[]) => String(c[0])).join("");
+}
+
+function warned(): string {
+  return stderr.mock.calls.map((c: unknown[]) => String(c[0])).join("");
+}
+
+function controlCharsOf(text: string): string[] {
+  return [...text].filter((c) => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f);
 }
 
 /** Serve `bodies` by URL; anything else answers 404. */
@@ -112,7 +121,7 @@ async function outcomeOf(run: Promise<void>): Promise<string> {
 beforeEach(() => {
   tmpDir = mkdtempSync(join(tmpdir(), "audit-verify-vectors-"));
   stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-  vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+  stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
   fetchSpy = vi.spyOn(globalThis, "fetch");
   vi.stubEnv("AUDIT_ANCHOR_PUBLIC_KEY_ARCHIVE_URL", "");
 });
@@ -148,6 +157,31 @@ describe("audit-verify — shared JWS vectors", () => {
   it("exports the error a mismatched kid raises, for the exit code", () => {
     expect(VECTORS.jws.some((v) => v.expect === KidMismatchError.name)).toBe(true);
   });
+
+  it.each(VECTORS.jws.filter((v) => v.expect !== "ok"))("$name: the error message carries no control character", async ({ jws }) => {
+    const err = await auditVerifyCommand({
+      manifest: file("m.jws", jws),
+      publicKey: file("key.pub", VECTORS.key.publicKeyHex),
+    }).then(
+      () => new Error("verified"),
+      (e: unknown) => e as Error,
+    );
+
+    expect(controlCharsOf(err.message)).toEqual([]);
+  });
+
+  it("the vectors include a kid that carries control characters, quoted in the message", async () => {
+    const hostile = VECTORS.jws.filter((v) => {
+      const header = JSON.parse(Buffer.from(v.jws.split(".")[0], "base64url").toString("utf8")) as { kid?: unknown } | null;
+      return typeof header?.kid === "string" && controlCharsOf(header.kid).length > 0;
+    });
+    expect(hostile.map((v) => v.expect)).toEqual(["InvalidKidError"]);
+
+    const kid = (JSON.parse(Buffer.from(hostile[0].jws.split(".")[0], "base64url").toString("utf8")) as { kid: string }).kid;
+    await expect(
+      auditVerifyCommand({ manifest: file("m.jws", hostile[0].jws), publicKey: file("key.pub", VECTORS.key.publicKeyHex) }),
+    ).rejects.toThrow(JSON.stringify(kid));
+  });
 });
 
 describe("audit-verify — an unverified header in an error message", () => {
@@ -165,7 +199,7 @@ describe("audit-verify — an unverified header in an error message", () => {
     );
 
     expect(err.message).toContain("Invalid JWS");
-    expect([...err.message].filter((c) => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f)).toEqual([]);
+    expect(controlCharsOf(err.message)).toEqual([]);
   });
 });
 
@@ -346,5 +380,46 @@ describe("audit-verify — the prior manifest's key", () => {
         priorPublicKey: file("retired.pub", retired.publicKeyHex),
       }),
     ).rejects.toBeInstanceOf(ChainBreakError);
+  });
+});
+
+describe("audit-verify — a tenant's epoch between the prior and the current manifest", () => {
+  const key = keyFor(0x42);
+  const TAG = "6db2cb938b211a0b0824844113d78dd8aaafbeb608b6a2fc3903aa5114c03323";
+  const tenant = (epoch: number, chainSeq: string) => ({ tenantTag: TAG, chainSeq, prevHash: "ab".repeat(32), epoch });
+
+  /** Verify a current manifest holding `current`, chained to a prior one holding `prior`. */
+  async function verifyPair(prior: ReturnType<typeof tenant>, current: ReturnType<typeof tenant>): Promise<void> {
+    const priorBody = { ...VECTORS.manifest, anchoredAt: "2026-01-14T00:05:00.000Z", tenants: [prior] };
+    const currentBody = {
+      ...VECTORS.manifest,
+      tenants: [current],
+      previousManifest: {
+        uri: "s3-object-lock://prior.jws",
+        sha256: createHash("sha256").update(canonical(priorBody)).digest("hex"),
+      },
+    };
+    await auditVerifyCommand({
+      manifest: file("m.jws", signManifest(currentBody, key)),
+      publicKey: file("key.pub", key.publicKeyHex),
+      priorManifest: file("prior.jws", signManifest(priorBody, key)),
+    });
+  }
+
+  it.each([
+    ["raised", 1, 2],
+    ["lowered", 2, 1],
+  ])("an epoch %s warns on stderr and still passes, though the chainSeq went down", async (_label, before, after) => {
+    await verifyPair(tenant(before, "9"), tenant(after, "0"));
+
+    expect(printed()).toContain("PASS");
+    expect(warned()).toContain(`WARN: epoch changed for tenantTag=${TAG}: prior=${before}, current=${after}`);
+  });
+
+  it("an unchanged epoch over an advancing chainSeq passes without a warning", async () => {
+    await verifyPair(tenant(1, "9"), tenant(1, "10"));
+
+    expect(printed()).toContain("PASS");
+    expect(warned()).toBe("");
   });
 });

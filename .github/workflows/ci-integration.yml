@@ -96,6 +96,11 @@ jobs:
               - 'src/lib/security/**'
               - 'src/workers/**'
               - 'src/__tests__/db-integration/**'
+              # What the integration tests import from outside their directory (the
+              # destination contract, the manifest fixtures, the fake Releases API),
+              # and the operator query one of them runs verbatim from the alerts doc.
+              - 'src/__tests__/helpers/**'
+              - 'docs/operations/alerts.md'
               - 'prisma/schema.prisma'
               - 'prisma/migrations/**'
               # T2: route handlers read/write tenant-scoped tables; a route-only PR must

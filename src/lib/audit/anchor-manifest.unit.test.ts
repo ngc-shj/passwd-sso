@@ -398,6 +398,7 @@ describe("readJwsKid", () => {
 
 describe("verify — kid binding", () => {
   const publicKey = Buffer.from(VECTORS.key.publicKeyHex, "hex");
+  const controlCharsOf = (text: string) => [...text].filter((c) => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f);
   const outcome = (jws: string): string => {
     try {
       verify(jws, publicKey);
@@ -409,6 +410,26 @@ describe("verify — kid binding", () => {
 
   it.each(VECTORS.jws)("shared vector: $name → $expect", ({ jws, expect: expected }) => {
     expect(outcome(jws)).toBe(expected);
+  });
+
+  it.each(VECTORS.jws.filter((v) => v.expect !== "ok"))("shared vector: $name — the error message carries no control character", ({ jws }) => {
+    let message: string | null = null;
+    try {
+      verify(jws, publicKey);
+    } catch (err) {
+      message = (err as Error).message;
+    }
+
+    expect(message).not.toBeNull();
+    expect(controlCharsOf(message ?? "")).toEqual([]);
+  });
+
+  it("the vectors include a kid that carries control characters", () => {
+    const kids = VECTORS.jws.map((v) => {
+      const header = JSON.parse(Buffer.from(v.jws.split(".")[0] ?? "", "base64url").toString("utf8")) as { kid?: unknown } | null;
+      return typeof header?.kid === "string" ? header.kid : "";
+    });
+    expect(kids.filter((kid) => controlCharsOf(kid).length > 0)).toHaveLength(1);
   });
 
   it("the vectors cover acceptance, a mismatched kid with and without a valid signature, and a malformed kid", () => {

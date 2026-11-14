@@ -361,8 +361,10 @@ Steps. One 60 s bound covers all destination I/O of the run: (2), (4) and the ba
   chained-to date, `OWN_PUBLIC_KEY_NOT_ARCHIVED` when it is not (a daily reminder until
   archived), `TENANT_DROPPED_FROM_MANIFEST` `{ count }` when a tenant tag of the previous
   manifest is absent from this one, `CHAIN_SEQ_REGRESSION` `{ count }` when a tag's
-  `chainSeq` is below the previous one in the same epoch (both computed from the two
-  manifests in hand; not on an adopted publish), and `MISSING_PRIOR_CADENCE_PUBLICATION` as
+  `chainSeq` is below the previous one in the same epoch, `EPOCH_CHANGED` `{ count }` when a
+  tag's epoch differs (all three computed against the previous manifest — on an adopted
+  publish it is read back and its hash checked, and `PREVIOUS_MANIFEST_UNAVAILABLE_FOR_COMPARISON`
+  is emitted when that fails; code review S-1, S-2), and `MISSING_PRIOR_CADENCE_PUBLICATION` as
   today. A `published` outcome can recur for one boundary only when the database was rewound
   or a commit was lost.
 - A previous manifest carrying another `deploymentId` is chained to and logged
@@ -657,8 +659,8 @@ done in Phase 2, and the line says what settles it.
 - **Anti-Deferral check**: not a deferral — implemented in this PR.
 - **Justification**: the bound is one deadline armed at the run's first destination call
   (named in the test); a clock before `B` writes `B`; `H` equal to the wall clock's boundary
-  is not d1; an equal `chainSeq`, or a lower one in a higher epoch, emits no regression row;
-  an adopted publish emits no drop/regression row. Settled by: one assertion each.
+  is not d1; an equal `chainSeq` emits no regression row (a changed epoch is its own row).
+  Superseded in code review: an adopted publish does emit the drop/regression rows (S-1). Settled by: one assertion each.
 - **Orchestrator sign-off**: in scope of C4.
 
 ### T3-6 Minor — literal seed in the vector file vs secret scanning — Accepted (Phase 2)

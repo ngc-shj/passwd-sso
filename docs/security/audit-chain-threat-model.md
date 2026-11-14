@@ -329,16 +329,29 @@ restarting the chain:
 | the advisory lock held by a session | runs stand down | `lock_held` |
 | `last_published_at` moved forward | every run fails closed (`LAST_PUBLISHED_AHEAD_OF_CLOCK` or `DESTINATION_BEHIND_DATABASE`) | `cadence_failed` |
 | every tenant's `audit_chain_enabled` cleared | `skipped_no_tenants`, unhealthy: an anchor row, or a manifest at the primary, shows the chain was once on — deleting the anchor rows as well does not make the skip healthy | `chain-enabled-fell-to-zero`, then cadence-absent |
+| every chain-enabled tenant's anchor row deleted | `skipped_no_tenants`, unhealthy while the primary holds a manifest: the enabled tenants have nothing to publish until the outbox worker writes each one's next chained event, which recreates the row from the genesis seed (the sequence restarts: `CHAIN_SEQ_REGRESSION` below) | cadence-absent, if it lasts a day |
 | `audit_anchor_deployment_id` changed | the publisher refuses to boot | `publisher-down` |
 
 **Detected by a row only.** No alarm; one `AUDIT_ANCHOR_PUBLISH_FAILED` row, written
 with the publish that noticed it, and the same event on the publisher's structured audit
 log line, which leaves the database's reach:
 
-- one tenant's `audit_chain_enabled` cleared → `TENANT_DROPPED_FROM_MANIFEST` (a tag of
-  the previous manifest is absent from this one);
+- one tenant's `audit_chain_enabled` cleared, or its anchor row deleted →
+  `TENANT_DROPPED_FROM_MANIFEST` (a tag of the previous manifest is absent from this
+  one);
 - a tenant's `chain_seq` lowered within an epoch → `CHAIN_SEQ_REGRESSION`; a verifier
-  comparing the two manifests gets exit 17.
+  comparing the two manifests gets exit 17;
+- a tenant's `epoch` changed, which takes it out of the `chain_seq` comparison →
+  `EPOCH_CHANGED` (no code path writes the column); the verifier prints a warning.
+
+These rows are written on an adopted publish as well as on a fresh one. A database
+writer can force an adopt — fail the commit after the create (a held row lock), let the
+retry find the stored object — and an adopt signs nothing, so it has no chained-to
+manifest in hand. It reads the previous manifest its stored manifest names back from the
+primary, holds it to the `sha256` that manifest carries, and compares against it; when
+that object is missing, does not verify or has another hash, the publish writes
+`PREVIOUS_MANIFEST_UNAVAILABLE_FOR_COMPARISON` instead of passing silently. A boundary
+adopted repeatedly writes the rows with each adopt, bounded by the attempt cap.
 
 **Out of reach.** The publisher signs what the anchor rows hold at the boundary. A
 writer who rewrites `audit_logs` and the tenant's anchor row consistently before a
@@ -366,6 +379,14 @@ Releases, the filesystem, and an S3 bucket without that bucket policy.
   by an operator running `list-object-versions`; nothing runs it automatically
   ([`audit-anchor-verification.md` § Object versions](audit-anchor-verification.md#object-versions)).
   Enforcing the condition in the policy needs a real-AWS apply and is a follow-up.
+- **A manifest is not bound to the location it is stored at.** Its signature covers its
+  content — `deploymentId`, date, tenants, `previousManifest` — and not the bucket,
+  prefix or repository. A manifest of an abandoned chain copied into a new chain's
+  location verifies there: the publisher adopts it on its own date or chains to it on a
+  later one, and the restarted chain silently continues the old one. On the Terraform
+  bucket only the publisher's task role can place it; on other stores, the one writer.
+  What shows it is the first `AUDIT_ANCHOR_PUBLISHED` row after a chain restart: it must
+  carry `genesis: true`, and the runbook treats anything else as an incident.
 - **SC5 — GitHub Releases and the filesystem do not separate writers or prevent
   deletion.** One credential writes manifests, the key archive and the statements, and
   can remove any of them; the column "Other stores" above is what that leaves

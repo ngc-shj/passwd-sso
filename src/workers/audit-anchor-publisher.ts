@@ -124,7 +124,11 @@ export const PUBLISHER_AUDIT_DEAD_LETTER_REASON = "anchor_publisher_emit_failed"
 
 // --- Public types ---
 
-/** `null` only where the run failed before it could read the tenants. */
+/**
+ * Every chain-enabled tenant, with or without an anchor row — not the number a
+ * run publishes. `null` only where the run failed before it could read the
+ * tenants.
+ */
 type TenantCount = { chainEnabledTenantCount: number | null };
 
 /** Where a failed run stopped. */
@@ -209,7 +213,7 @@ function parseUploadAttempts(raw: string): z.infer<typeof uploadAttemptsSchema> 
 type PendingEmit = { action: AuditAction; metadata: Record<string, unknown> };
 
 type AttemptGate =
-  | { kind: "no_tenants" }
+  | { kind: "no_tenants"; chainEnabledTenantCount: number }
   | { kind: "counted"; attempts: number; countUnreadable: boolean; chainEnabledTenantCount: number };
 
 /** How the latest manifest on the run's own date differs from this publisher's. */
@@ -222,7 +226,7 @@ type Decision =
   | { kind: "publish"; state: PublishedState };
 
 type PublishTxResult =
-  | { kind: "no_tenants" }
+  | { kind: "no_tenants"; chainEnabledTenantCount: number }
   | { kind: "skip"; otherIdentity?: OtherIdentity; chainEnabledTenantCount: number }
   | {
       kind: "published";
@@ -232,8 +236,14 @@ type PublishTxResult =
       /** The manifest this run chained to, when it built the bytes itself. */
       chainedTo: VerifiedManifest | null;
       state: PublishedState;
+      /** The primary's listing the decision was made from. */
+      listedKeys: string[];
       chainEnabledTenantCount: number;
     };
+
+/** The previous manifest an adopted one names could not be read back and held to its hash. */
+const PREVIOUS_UNAVAILABLE = Symbol("previous manifest unavailable");
+type ComparedTo = VerifiedManifest | null | typeof PREVIOUS_UNAVAILABLE;
 
 class LockHeldSignal {
   constructor(readonly chainEnabledTenantCount: number | null) {}
@@ -262,12 +272,30 @@ function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   });
 }
 
-async function chainEnabledTenantIds(tx: Prisma.TransactionClient): Promise<string[]> {
+type RunTenants = {
+  /** Every chain-enabled tenant: what the cadence line reports. */
+  chainEnabledCount: number;
+  /** Those of them that have an anchor row: the tenants a run publishes. */
+  anchoredIds: string[];
+};
+
+/**
+ * The run's tenant set: the chain-enabled tenants that have an anchor row.
+ * The outbox worker creates the row with a tenant's first chained event, so
+ * an enabled tenant without one has nothing to anchor yet. A run with no
+ * anchored tenant takes the no-tenant path: a zero-tenant manifest covers no
+ * row, so it could never settle and every restart would be a counted adopt.
+ */
+async function chainEnabledTenants(tx: Prisma.TransactionClient): Promise<RunTenants> {
   const tenants = await tx.tenant.findMany({
     where: { auditChainEnabled: true },
     select: { id: true },
   });
-  return tenants.map((t) => t.id);
+  const anchors = await tx.auditChainAnchor.findMany({
+    where: { tenantId: { in: tenants.map((t) => t.id) } },
+    select: { tenantId: true },
+  });
+  return { chainEnabledCount: tenants.length, anchoredIds: anchors.map((a) => a.tenantId) };
 }
 
 /**
@@ -286,11 +314,16 @@ function utcDate(instant: Date): string {
   return instant.toISOString().slice(0, 10);
 }
 
+/** The artifact key a `previousManifest.uri` names: what follows `://`. */
+function artifactKeyOfUri(uri: string): string {
+  return uri.slice(uri.indexOf("://") + 3);
+}
+
 /** The manifest key a `previousManifest.uri` names, or null when it names none. */
 function previousManifestKey(manifest: Manifest): { date: string; kid: string } | null {
   const uri = manifest.previousManifest?.uri;
   if (uri === undefined) return null;
-  return parseManifestArtifactKey(uri.slice(uri.indexOf("://") + 3));
+  return parseManifestArtifactKey(artifactKeyOfUri(uri));
 }
 
 /**
@@ -486,12 +519,14 @@ export class AuditAnchorPublisher {
     try {
       return await this.prisma.$transaction(async (tx): Promise<AttemptGate> => {
         await setBypassGucs(tx, BYPASS_GRANT.AUDIT_ANCHOR_PUBLISH, { tenantId: SYSTEM_TENANT_ID });
-        const tenantIds = await chainEnabledTenantIds(tx);
-        tenantCount = tenantIds.length;
+        const tenants = await chainEnabledTenants(tx);
+        tenantCount = tenants.chainEnabledCount;
         await setLockTimeout(tx, this.lockTimeoutMs);
         await advisoryXactLock(tx, ADVISORY_LOCK_KEY);
 
-        if (tenantIds.length === 0) return { kind: "no_tenants" };
+        if (tenants.anchoredIds.length === 0) {
+          return { kind: "no_tenants", chainEnabledTenantCount: tenants.chainEnabledCount };
+        }
 
         // Read-then-write is safe under the advisory lock every publisher
         // takes. A stored value that does not parse cannot say how many runs
@@ -514,7 +549,7 @@ export class AuditAnchorPublisher {
           update: { value },
           create: { key: SETTING_UPLOAD_ATTEMPTS, value },
         });
-        return { kind: "counted", attempts: count, countUnreadable, chainEnabledTenantCount: tenantIds.length };
+        return { kind: "counted", attempts: count, countUnreadable, chainEnabledTenantCount: tenants.chainEnabledCount };
       }, this.txOptions);
     } catch (err) {
       if (isLockNotAvailable(err)) throw new LockHeldSignal(tenantCount);
@@ -752,23 +787,23 @@ export class AuditAnchorPublisher {
       const view = await this.prisma.$transaction(async (tx) => {
         await setBypassGucs(tx, BYPASS_GRANT.AUDIT_ANCHOR_PUBLISH, { tenantId: SYSTEM_TENANT_ID });
         return {
-          tenantIds: await chainEnabledTenantIds(tx),
+          tenants: await chainEnabledTenants(tx),
           highWater: await publishedHighWater(tx),
           anyAnchor: (await tx.auditChainAnchor.findFirst({ select: { tenantId: true } })) !== null,
         };
       }, this.txOptions);
-      chainEnabledTenantCount = view.tenantIds.length;
+      chainEnabledTenantCount = view.tenants.chainEnabledCount;
 
       const listedKeys = await this.listPrimary(bound);
       // Every skipped_no_tenants of this run reports this one value. A
       // manifest key at the primary counts, so deleting the anchor rows does
       // not turn the skip healthy; the listing alone decides, nothing is read.
       everChainEnabled = view.anyAnchor || listedKeys.some((key) => parseManifestArtifactKey(key) !== null);
-      if (view.tenantIds.length === 0) return this.noTenants(everChainEnabled);
+      if (view.tenants.anchoredIds.length === 0) return this.noTenants(everChainEnabled, chainEnabledTenantCount);
 
       const decision = await this.decide(boundary, view.highWater, listedKeys, bound);
       if (decision.kind === "skip") {
-        return await this.skipAlreadyPublished(boundary, decision.otherIdentity, view.tenantIds.length);
+        return await this.skipAlreadyPublished(boundary, decision.otherIdentity, chainEnabledTenantCount);
       }
     } catch (err) {
       const reason = err instanceof RunFailure ? err.reason : `CADENCE_FAILED:${errorLogFields(err).code}`;
@@ -787,7 +822,7 @@ export class AuditAnchorPublisher {
       return this.fail(boundary, { reason, stage: "before_upload", chainEnabledTenantCount, artifactKey: null });
     }
 
-    if (gate.kind === "no_tenants") return this.noTenants(everChainEnabled);
+    if (gate.kind === "no_tenants") return this.noTenants(everChainEnabled, gate.chainEnabledTenantCount);
     if (gate.attempts > AUDIT_ANCHOR_UPLOAD_ATTEMPT_CAP) {
       log.error(
         {
@@ -822,22 +857,26 @@ export class AuditAnchorPublisher {
     const pendingEmits: PendingEmit[] = [];
     chainEnabledTenantCount = gate.chainEnabledTenantCount;
     let artifactKey: string | null = null;
+    // The primary holds the boundary's object, written by this run or found there.
+    let primaryStored = false;
     let uploaded = false;
 
     try {
       const result = await this.prisma.$transaction(async (tx): Promise<PublishTxResult> => {
         await setBypassGucs(tx, BYPASS_GRANT.AUDIT_ANCHOR_PUBLISH, { tenantId: SYSTEM_TENANT_ID });
-        const tenantIds = await chainEnabledTenantIds(tx);
-        chainEnabledTenantCount = tenantIds.length;
+        const tenants = await chainEnabledTenants(tx);
+        const tenantIds = tenants.anchoredIds;
+        const tenantCount = tenants.chainEnabledCount;
+        chainEnabledTenantCount = tenantCount;
         await setLockTimeout(tx, this.lockTimeoutMs);
         await advisoryXactLock(tx, ADVISORY_LOCK_KEY);
         await config.hooks?.inTx?.(tx);
 
-        if (tenantIds.length === 0) return { kind: "no_tenants" };
+        if (tenantIds.length === 0) return { kind: "no_tenants", chainEnabledTenantCount: tenantCount };
         const highWater = await publishedHighWater(tx);
         const listedKeys = await this.listPrimary(bound);
         const decision = await this.decide(boundary, highWater, listedKeys, bound);
-        if (decision.kind === "skip") return { ...decision, chainEnabledTenantCount: tenantIds.length };
+        if (decision.kind === "skip") return { ...decision, chainEnabledTenantCount: tenantCount };
 
         // Cadence-end safety net — informational, never aborts.
         if (prevBoundary.getTime() > config.publishOffsetMs) {
@@ -875,9 +914,11 @@ export class AuditAnchorPublisher {
         if (decision.kind === "adopt") {
           published = decision.latest;
           artifactKey = published.artifactKey;
+          primaryStored = true;
         } else {
-          // Every chain-enabled tenant is published. A pause holds chain
-          // advancement in the outbox worker; it does not hold publishing.
+          // Every chain-enabled tenant with an anchor row is published. A
+          // pause holds chain advancement in the outbox worker; it does not
+          // hold publishing.
           // Ordered, so a retry over an unchanged chain signs the same bytes.
           const anchors = await tx.auditChainAnchor.findMany({
             where: { tenantId: { in: tenantIds } },
@@ -930,6 +971,7 @@ export class AuditAnchorPublisher {
           }
 
           if (created === "created") {
+            primaryStored = true;
             published = {
               artifactKey: key,
               date: utcDate(boundary),
@@ -953,9 +995,10 @@ export class AuditAnchorPublisher {
               return {
                 kind: "skip",
                 otherIdentity: this.otherIdentityOf(published),
-                chainEnabledTenantCount: tenantIds.length,
+                chainEnabledTenantCount: tenantCount,
               };
             }
+            primaryStored = true;
           }
         }
 
@@ -983,11 +1026,12 @@ export class AuditAnchorPublisher {
           adopted,
           chainedTo,
           state: decision.state,
-          chainEnabledTenantCount: tenantIds.length,
+          listedKeys,
+          chainEnabledTenantCount: tenantCount,
         };
       }, this.txOptions);
 
-      if (result.kind === "no_tenants") return this.noTenants(everChainEnabled);
+      if (result.kind === "no_tenants") return this.noTenants(everChainEnabled, result.chainEnabledTenantCount);
       if (result.kind === "skip") {
         return await this.skipAlreadyPublished(boundary, result.otherIdentity, result.chainEnabledTenantCount);
       }
@@ -996,7 +1040,10 @@ export class AuditAnchorPublisher {
       // publish: a failed run would otherwise write them on every retry.
       const { published } = result;
       const destinations = config.destinations.map((d) => d.name);
-      pendingEmits.push(...this.publishedEmits(result, boundaryIso), {
+      const comparedTo = result.adopted
+        ? await this.previousOfAdopted(published, result.listedKeys, bound)
+        : result.chainedTo;
+      pendingEmits.push(...this.publishedEmits(result, comparedTo, boundaryIso), {
         action: AUDIT_ACTION.AUDIT_ANCHOR_PUBLISHED,
         metadata: {
           manifestSha256: published.sha256,
@@ -1050,20 +1097,61 @@ export class AuditAnchorPublisher {
         return this.fail(boundary, { reason: err.reason, stage: err.stage, chainEnabledTenantCount, artifactKey });
       }
       const reason = `CADENCE_FAILED:${errorLogFields(err).code}`;
-      return this.fail(boundary, { reason, stage: "before_upload", chainEnabledTenantCount, artifactKey });
+      const stage = primaryStored ? "upload" : "before_upload";
+      return this.fail(boundary, { reason, stage, chainEnabledTenantCount, artifactKey });
     }
   }
 
   /**
-   * The detection rows of one published outcome, computed from the manifests
-   * in hand. Drops and regressions compare against the manifest this run
-   * chained to, so an adopted publish — which built nothing — reports neither.
+   * The manifest an adopted one names as its previous, for the comparison a
+   * fresh publish makes against the manifest it chained to. An adopt can be
+   * forced from the database (a commit failed after the create), so it must
+   * not be a way around that comparison. Read from the primary and held to
+   * the hash the adopted manifest carries; null for a genesis manifest. Never
+   * throws: one that is missing, unverifiable or of another hash is reported
+   * by a row, and the publish stands.
+   */
+  private async previousOfAdopted(
+    published: VerifiedManifest,
+    listedKeys: string[],
+    bound: DestinationBound,
+  ): Promise<ComparedTo> {
+    const named = published.manifest.previousManifest;
+    if (named === null) return null;
+    const primary = this.primary;
+    const previousArtifactKey = artifactKeyOfUri(named.uri);
+    let detail: string;
+    try {
+      const previous = await bound.run((signal) =>
+        readVerifiedManifest(primary, previousArtifactKey, this.ownKey, listedKeys, signal),
+      );
+      if (previous.sha256 === named.sha256) return previous;
+      detail = "HASH_MISMATCH";
+    } catch (err) {
+      detail = err instanceof PublishedObjectUnverifiableError ? err.detail : destinationFaultCode(err);
+    }
+    getLogger().warn(
+      {
+        artifactKey: published.artifactKey,
+        detail,
+        _logType: "audit-anchor-publisher.previous_manifest_unavailable",
+      },
+      "audit-anchor-publisher.previous_manifest_unavailable",
+    );
+    return PREVIOUS_UNAVAILABLE;
+  }
+
+  /**
+   * The detection rows of one published outcome. Drops, regressions and epoch
+   * changes compare against `comparedTo`: the manifest a fresh publish chained
+   * to, or the one an adopted manifest names.
    */
   private publishedEmits(
     result: Extract<PublishTxResult, { kind: "published" }>,
+    comparedTo: ComparedTo,
     anchoredAt: string,
   ): PendingEmit[] {
-    const { published, chainedTo, state } = result;
+    const { published, state } = result;
     const emits: PendingEmit[] = [];
     const failed = (failureReason: string, extra: Record<string, unknown> = {}) =>
       emits.push({
@@ -1084,17 +1172,24 @@ export class AuditAnchorPublisher {
     }
     if (!state.ownPublicKeyArchived) failed("OWN_PUBLIC_KEY_NOT_ARCHIVED");
 
-    if (chainedTo) {
+    if (comparedTo === PREVIOUS_UNAVAILABLE) {
+      failed("PREVIOUS_MANIFEST_UNAVAILABLE_FOR_COMPARISON");
+    } else if (comparedTo) {
       const current = new Map(published.manifest.tenants.map((t) => [t.tenantTag, t]));
       let dropped = 0;
       let regressed = 0;
-      for (const before of chainedTo.manifest.tenants) {
+      let epochChanged = 0;
+      for (const before of comparedTo.manifest.tenants) {
         const now = current.get(before.tenantTag);
         if (!now) dropped++;
-        else if (now.epoch === before.epoch && BigInt(now.chainSeq) < BigInt(before.chainSeq)) regressed++;
+        // A chainSeq is comparable within one epoch only, and no code path
+        // writes `epoch`: a change is reported in its own right.
+        else if (now.epoch !== before.epoch) epochChanged++;
+        else if (BigInt(now.chainSeq) < BigInt(before.chainSeq)) regressed++;
       }
       if (dropped > 0) failed("TENANT_DROPPED_FROM_MANIFEST", { count: dropped });
       if (regressed > 0) failed("CHAIN_SEQ_REGRESSION", { count: regressed });
+      if (epochChanged > 0) failed("EPOCH_CHANGED", { count: epochChanged });
     }
     return emits;
   }
@@ -1140,12 +1235,13 @@ export class AuditAnchorPublisher {
     }
   }
 
-  private noTenants(everChainEnabled: boolean): CadenceOutcome {
+  /** No chain-enabled tenant has an anchor row; `chainEnabledTenantCount` still counts the enabled ones. */
+  private noTenants(everChainEnabled: boolean, chainEnabledTenantCount: number): CadenceOutcome {
     return {
       kind: "skipped_no_tenants",
       reason: "NO_CHAIN_ENABLED_TENANTS",
       everChainEnabled,
-      chainEnabledTenantCount: 0,
+      chainEnabledTenantCount,
     };
   }
 

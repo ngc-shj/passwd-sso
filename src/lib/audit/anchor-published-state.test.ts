@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { randomBytes } from "node:crypto";
 import {
   PublishedObjectUnverifiableError,
+  UNRECOGNISED_KEYS_LOGGED_MAX,
   UNVERIFIABLE_DETAIL,
   createAnchorKeyCache,
   publishedStateFromListing,
@@ -405,8 +406,33 @@ describe("readPublishedState", () => {
     expect(state.latest?.artifactKey).toBe(planted.artifactKey);
     expect(state.manifestKeys).toEqual([planted.artifactKey]);
     expect(mockWarn.mock.calls.map(([fields]) => fields)).toEqual([
-      { artifactKey: stray, _logType: "audit-anchor-publisher.unrecognised_manifest_key" },
+      { count: 1, artifactKeys: [stray], _logType: "audit-anchor-publisher.unrecognised_manifest_key" },
     ]);
+  });
+
+  it("logs one line per listing for any number of unrecognised keys, naming the first few and counting all", async () => {
+    const dest = new InMemoryDestination();
+    const strays = Array.from({ length: UNRECOGNISED_KEYS_LOGGED_MAX + 3 }, (_, i) => `9999-99-9${i}.kid-not-a-kid.jws`);
+
+    await publishedStateFromListing(dest, own(), strays);
+
+    expect(mockWarn.mock.calls.map(([fields]) => fields)).toEqual([
+      {
+        count: strays.length,
+        artifactKeys: strays.slice(0, UNRECOGNISED_KEYS_LOGGED_MAX),
+        _logType: "audit-anchor-publisher.unrecognised_manifest_key",
+      },
+    ]);
+  });
+
+  it("logs nothing about unrecognised keys when every key is recognised or of another shape", async () => {
+    const dest = new InMemoryDestination();
+    const planted = signedManifest({ signingKey: OWN_SEED, boundary: D1 });
+    await storeManifest(dest, planted);
+
+    await publishedStateFromListing(dest, own(), [...(await dest.list()), "notes.txt"]);
+
+    expect(mockWarn).not.toHaveBeenCalled();
   });
 
   it("fails as unverifiable when the latest object does not verify, though an older one would", async () => {

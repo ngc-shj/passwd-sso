@@ -100,6 +100,13 @@ afterEach(() => {
 // --- Integration tests ---
 
 describe("CLI audit-verify subcommand (integration)", () => {
+  // The cases below skip without a build, which suits a developer's machine.
+  // CI builds first, so a missing dist there would let every case skip and
+  // the suite read as a pass.
+  it("has the built CLI to run when in CI", () => {
+    expect(Boolean(process.env.CI) && !distExists).toBe(false);
+  });
+
   it.skipIf(!distExists)(
     "exits 0 and prints PASS for a valid JWS with matching public key",
     () => {
