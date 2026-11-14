@@ -100,7 +100,27 @@ RETENTION_GC_BLOB_SWEEP_MODE=report DEPLOYMENT_ID=<uuid> BLOB_BACKEND=s3 ... \
 It refuses (exit 1, nothing written) when the mode is `off`, `DEPLOYMENT_ID` is
 missing or the backend is `db`. It never connects to the database, so it needs
 no `RETENTION_GC_DATABASE_URL` / `DATABASE_URL`. Where the worker's identity has no write access
-to the bucket, run it with operator credentials.
+to the bucket, run it with operator credentials. On AWS the worker's own task
+role may write the marker key (`docs/operations/deployment.md` "Orphan
+attachment sweep on AWS").
+
+Before switching a deployment to an external backend, and after the rollout,
+count the attachments whose bytes are still in the database:
+
+```bash
+node dist/retention-gc-worker.js --count-db-blobs
+# {"level":"info","msg":"count-db-blobs","total":<n>,"db_stored":<m>}
+```
+
+It reads every `attachments` row as the worker's role under
+`BYPASS_GRANT.RETENTION_BLOB_ORPHAN_SWEEP` (`countDbStoredAttachments` in
+`sweep.ts`; without the bypass, RLS would show it no row and report 0), on any
+backend and in any mode, and keeps every database-URL rule of a normal boot. A
+row whose stored value is over `MAX_OBJECT_REF_BYTES` is counted by SQL alone —
+`encodeObjectRef` refuses a reference that large, so it is attachment bytes —
+and the rest are read in keyset pages of 500, each in its own transaction, and
+judged by `decodeObjectRef`. `db_stored` must be 0 before the switch: those
+attachments are unreadable on an external backend.
 
 ## Per-tenant retention
 

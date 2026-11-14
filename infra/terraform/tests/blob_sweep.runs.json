@@ -1,0 +1,23 @@
+{
+  "path": "tests/blob_sweep.tftest.hcl",
+  "runs": [
+    "defaults",
+    "s3_report",
+    "s3_delete_grace",
+    "s3_sweep_off",
+    "iam_policy",
+    "p1_s3_without_ack_fails",
+    "p1_s3_without_bucket_fails",
+    "p1_s3_with_bucket_and_ack_plans",
+    "p2_s3_with_cmk_fails",
+    "p2_db_with_cmk_plans",
+    "p3_report_on_db_fails",
+    "p3_report_on_s3_plans",
+    "p4_delete_null_grace_fails",
+    "p4_delete_grace_below_backup_window_fails",
+    "p4_delete_grace_at_backup_window_plans",
+    "p4_backup_off_grace_at_rds_window_plans",
+    "p4_backup_off_grace_below_rds_window_fails",
+    "c5_name_prefix_at_bound_plans"
+  ]
+}

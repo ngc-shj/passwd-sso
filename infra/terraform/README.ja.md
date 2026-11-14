@@ -242,7 +242,7 @@ ECS タスク定義は `{secret_arn}:KEY::` 形式で個別キーを参照し、
 | `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` | audit-anchor publisher ECS サービス用の最小権限 DB URL（`passwd_anchor_publisher` ロール）。`bootstrap-rds-roles.mjs` がこのパスワードでロールに `LOGIN` を付与するため、このシークレットが唯一の控え。 |
 | `AUDIT_ANCHOR_SIGNING_KEY` | publisher がマニフェスト署名に使う Ed25519 シード (32-byte hex)。publisher タスクにのみマッピング。`npm run generate:audit-anchor-signing-key` で生成。 |
 | `AUDIT_ANCHOR_TAG_SECRET` | マニフェスト内テナントタグ用 HMAC シークレット (32-byte hex)。publisher タスクにのみマッピング。`npm run generate:audit-anchor-tag-secret` で生成。 |
-| `DEPLOYMENT_ID` | 全マニフェストでこのデプロイメントを示す UUID。初回起動時に保存した値と異なると publisher は起動を拒否する。デプロイメントごとに 1 回生成し、保存済みの値を再利用するのは前任が既に存在しない同一デプロイメントの後継のみ — クローンや復元コピーは新しい値を生成する。publisher タスクにのみマッピング。 |
+| `DEPLOYMENT_ID` | 全マニフェストでこのデプロイメントを示す UUID。初回起動時に保存した値と異なると publisher は起動を拒否する。デプロイメントごとに 1 回生成し、保存済みの値を再利用するのは前任が既に存在しない同一デプロイメントの後継のみ — クローンや復元コピーは新しい値を生成する。publisher タスクと、`retention_gc_blob_sweep_mode` が `off` 以外の間は retention-gc worker にもマッピング（orphan sweep のバケットマーカーがこの値を保持する）。 |
 
 4 つの worker は app イメージ（`node dist/<worker>.js`）で専用 ECS サービス
 （`*-audit-outbox-worker` / `*-retention-gc-worker` / `*-audit-anchor-publisher` /
@@ -338,8 +338,9 @@ Terraform apply は想定内の誤検知）。Object Lock なしで作られた�
   `<name_prefix>-audit-anchor-publisher-role-override` が通知する。ロール自体への
   IAM 変更はこのスタックでは通知しない — `docs/operations/alerts.md` を参照）。env は `AUDIT_ANCHOR_PUBLISHER_ENABLED=true`、
   バケット、接頭辞、`AWS_REGION`。secrets は `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL`、
-  `AUDIT_ANCHOR_SIGNING_KEY`、`AUDIT_ANCHOR_TAG_SECRET`、`DEPLOYMENT_ID`（後ろの 3 つ
-  は他のどのタスクにも渡らない）。`desired_count = min(1, worker_desired_count)`、
+  `AUDIT_ANCHOR_SIGNING_KEY`、`AUDIT_ANCHOR_TAG_SECRET`、`DEPLOYMENT_ID`（署名鍵と
+  タグシークレットは他のどのタスクにも渡らない。`DEPLOYMENT_ID` は orphan sweep の
+  実行中は retention-gc worker にも渡る）。`desired_count = min(1, worker_desired_count)`、
   `deployment_maximum_percent = 100`、`deployment_minimum_healthy_percent = 0`:
   デプロイは旧タスクを停止してから（SIGTERM。スケジュールを止め、実行中の 1 回を
   `stopTimeout = 120` 以内に終える）新タスクを起動し、新タスクの起動時実行は現在の
@@ -375,6 +376,33 @@ recovery" に従います。`docs/operations/deployment.md` の "`DEPLOYMENT_ID`
 更新・ロールバックします。
 
 各アラームの意味と対処: `docs/operations/alerts.md`。
+
+## 添付ファイルの保存先と orphan sweep
+
+`attachments_blob_backend = "s3"` にしない限り、app と retention-gc worker は添付
+ファイルのバイト列をデータベースに保存します。この切り替えは添付バケットから
+`BLOB_BACKEND`、`S3_ATTACHMENTS_BUCKET`、`AWS_REGION` を両タスクに設定します。app
+シークレットにある同名のキーは読まれません。既存スタックの切り替えは、どちらの方向でも
+既存の添付ファイルを読めなくします。先に `docs/operations/deployment.md` の
+"Orphan attachment sweep on AWS" を読んでください。
+
+| Variable | Default | 意味 |
+|----------|---------|------|
+| `attachments_blob_backend` | `"db"` | `"db"` または `"s3"`。`"s3"` には `enable_s3_attachments`、`attachments_blob_backend_empty_db_ack`、`s3_kms_key_arn = ""` が必要（KMS 権限を持つタスクロールがない）。 |
+| `attachments_blob_backend_empty_db_ack` | `false` | retention-gc worker の `--count-db-blobs` が `db_stored: 0` を報告した後に `true` にする。 |
+| `retention_gc_blob_sweep_mode` | `"off"` | `RETENTION_GC_BLOB_SWEEP_MODE`: `"off"`、`"report"`、`"delete"`。`off` 以外には `"s3"` が必要で、worker に `DEPLOYMENT_ID` もマッピングされる。 |
+| `retention_gc_blob_orphan_grace_ms` | `null` | `RETENTION_GC_BLOB_ORPHAN_GRACE_MS`。`3600000` から `3024000000`（1 時間〜35 日）の整数。`"delete"` では必須で、データベースの復元可能期間（`db_backup_retention_days` と、`enable_backup` 時は `backup_retention_days` の大きい方）をミリ秒にした値以上。35 日を超える期間は満たせないので、そのスタックは `"report"` で運用する。 |
+
+retention-gc worker は専用タスクロール（`*-ecs-retention-gc-task`、output
+`retention_gc_worker_task_role_arn`。引き受けられるのはこのアカウントの ECS タスクのみ）
+で動きます。`"s3"` ではバケットへの `s3:ListBucket`、オブジェクトへの
+`s3:DeleteObject`、マーカーキー `.passwd-sso-deployment` だけへの
+`s3:GetObject`/`s3:PutObject` を持ち、`s3:DeleteObjectVersion` は持たないので、削除は
+削除マーカーを追加するだけです。`"db"` ではポリシーを持ちません。app と outbox worker は
+従来どおり `*-ecs-task` です。
+
+`project_name` と `env` を合わせた `<project_name>-<env>` は 20 文字以内にしてください。
+超えると AWS の名前長制限（EventBridge ルール 64、ターゲットグループ 32）を超えます。
 
 ## Production Recommendations
 

@@ -760,8 +760,12 @@ resource "aws_cloudwatch_event_target" "audit_anchor_publisher_role_task_definit
 # task emits several state changes (PROVISIONING … STOPPED), so one such task
 # can notify more than once.
 resource "aws_cloudwatch_event_rule" "audit_anchor_publisher_family_task_outside_service" {
-  count       = var.enable_monitoring ? 1 : 0
-  name        = "${local.name_prefix}-audit-anchor-publisher-family-task-outside-service"
+  count = var.enable_monitoring ? 1 : 0
+  # EventBridge allows 64 characters. The suffix is sized to the precondition's
+  # 20-character name_prefix bound below (20 + 36 = 56); the original
+  # "-audit-anchor-publisher-family-task-outside-service" was 66 characters
+  # with the shipped prod tfvars and failed every plan.
+  name        = "${local.name_prefix}-anchor-publisher-family-outside-svc"
   description = "A task of the audit-anchor publisher's family ran outside the publisher service"
 
   event_pattern = jsonencode({
@@ -777,6 +781,18 @@ resource "aws_cloudwatch_event_rule" "audit_anchor_publisher_family_task_outside
   })
 
   tags = local.tags
+
+  lifecycle {
+    # The name budget across the configuration: this rule and
+    # "-audit-anchor-publisher-role-task-definition" (44 characters) under
+    # EventBridge's 64, and "-jackson-tg" under the target group's 32. A
+    # precondition, not a variable validation: one validation reading both
+    # project_name and env needs Terraform 1.9.
+    precondition {
+      condition     = length(local.name_prefix) <= 20
+      error_message = "\"<project_name>-<env>\" must be at most 20 characters: longer names exceed AWS name limits (EventBridge rules 64, target groups 32)."
+    }
+  }
 }
 
 resource "aws_cloudwatch_event_target" "audit_anchor_publisher_family_task_outside_service_sns" {

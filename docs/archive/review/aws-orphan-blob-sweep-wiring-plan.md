@@ -240,7 +240,7 @@ retention worker gets least-privilege AWS access of its own.
 - **Acceptance:**
   - Real-DB integration as the retention-gc role (principal asserted, no bypassrls), on the
     shared database: deltas measured by the function before and after seeding (N4-3) — a
-    ciphertext row, an object-ref row and a row just over the bound, in two tenants, give
+    ciphertext row, an object-ref row and a row just over the bound, each in its own tenant (three), give
     `total +3, db_stored +2`. Without the bypass the count is 0 (the RLS positive control).
   - Unit: `encodeObjectRef` of a maximal key fits the bound; one byte over throws.
 
@@ -296,3 +296,56 @@ retention worker gets least-privilege AWS access of its own.
 | C4 | Root `terraform test` with a mocked provider | pending |
 | C5 | EventBridge rule name within 64 characters; `name_prefix` bound | pending |
 | C6 | `--count-db-blobs` check under the bypass grant | pending |
+
+## Implementation Checklist
+
+Step 2-1 impact analysis (worktree at plan revision 5).
+
+### Files to change
+
+| File | Change | Contract |
+|---|---|---|
+| `infra/terraform/variables.tf` | four variables with validations | C1 |
+| `infra/terraform/locals.tf` | `blob_marker_key`, `attachment_blob_env`, `retention_gc_blob_env`, `blob_restore_window_ms` | C1, C2 |
+| `infra/terraform/ecs.tf` | app env gains `local.attachment_blob_env`; retention container: conditional `environment` merge, conditional `DEPLOYMENT_ID` secret, `task_role_arn` → new role, preconditions 1–4 | C1, C2 |
+| `infra/terraform/iam.tf` | `aws_iam_role.ecs_retention_gc_task` (publisher trust), `aws_iam_role_policy.ecs_retention_gc_task_s3` (count-gated), stale "workers run as `ecs_task`" comment | C2, C3 |
+| `infra/terraform/outputs.tf` | `retention_gc_worker_task_role_arn` | C3 |
+| `infra/terraform/monitoring.tf` | rule `name` shortened (resource address kept); `length(local.name_prefix) <= 20` precondition | C5 |
+| `infra/terraform/tests/blob_sweep.tftest.hcl`, `blob_sweep.runs.json` (new) | mocked root-module test and its run manifest | C4 |
+| `scripts/checks/check-terraform-test-count.mjs` + `scripts/__tests__/check-terraform-test-count.test.mjs` | `runs` mode (name-set equality) next to `vectors` mode | C4 |
+| `.github/workflows/ci.yml` | terraform job step for the root test + count check; vitest `changes` filter adds `infra/terraform/tests/**` | C4 |
+| `src/__tests__/helpers/hcl-subset.ts` | `one()` | C1 (N10) |
+| `src/__tests__/infra/ecs-default-container-env.json` (new) | frozen default env/secret names, rendered before any HCL edit | C1 (N4-5) |
+| `src/__tests__/infra/blob-sweep-wiring.test.ts` (new) | frozen-fixture test, `s3` + `report` env through the worker schema, marker-key contract, run-manifest pin | C1, C2, C4 |
+| `src/lib/blob-store/object-ref.ts` + `object-ref.test.ts` | `MAX_OBJECT_REF_BYTES`; `encodeObjectRef` throws above it | C6 |
+| `src/workers/retention-gc-worker/sweep.ts` | `countDbStoredAttachments` (exported, pages via `inSweepTx`) and two tx-taking reads that assert the bypass | C6 |
+| `src/workers/retention-gc-worker/__tests__/sweep-bypass-source.test.ts`, `sweep-bypass-assert.test.ts` | R19: the derived member set gains the two reads | C6 |
+| `src/workers/retention-gc-worker/__tests__/` (new unit test) | paging / judging of `countDbStoredAttachments` | C6 |
+| `scripts/retention-gc-worker.ts` | `--count-db-blobs` argv branch with its own pool | C6 |
+| `scripts/__tests__/retention-gc-worker-env.test.mjs` | `--count-db-blobs` keeps the database-URL rules; failure prints a code only | C6 |
+| `src/__tests__/infra/audit-anchor-wiring.test.ts` | R19: two red fixtures anchored on the trust-policy `Condition` line, which the new role repeats, scoped to the publisher role | C2 |
+| `src/__tests__/db-integration/retention-gc-count-db-blobs.integration.test.ts` (new) | deltas under the worker role, RLS positive control | C6 |
+| `docs/operations/deployment.md` | "Orphan attachment sweep on AWS" section; `DEPLOYMENT_ID` statement; C5 rule name | C3, C5 |
+| `docs/operations/audit-anchor-rotation-runbook.md` | conditional marker step | C3 |
+| `docs/operations/alerts.md`, `docs/security/audit-chain-threat-model.md` | C5 rule name | C5 |
+| `infra/terraform/README.md`, `README.ja.md` | `DEPLOYMENT_ID` mapping, variable tables, `--count-db-blobs` | C3 |
+| `infra/terraform/terraform.tfvars.example`, `envs/prod/terraform.tfvars.example` | new variables (commented) | C3 |
+| `docs/setup/aws/en.md` | `BLOB_BACKEND` / `AWS_REGION` / `S3_ATTACHMENTS_BUCKET` / `DEPLOYMENT_ID` statements | C3 |
+| `docs/architecture/retention-gc-worker.md` | `--count-db-blobs` | C6 |
+
+### Reusable utilities (no new equivalents)
+
+- `one(aws_s3_bucket.attachments[*].id/.arn)` — Terraform built-in; `hcl-subset` gains it (an unknown traversal stays `HclUnknown`).
+- `src/__tests__/helpers/hcl-subset.ts` — `TerraformConfig`, `plain`, `nested`, `parseHcl`, `TERRAFORM_DIR`.
+- `scripts/checks/check-terraform-test-count.mjs` — generalised, not duplicated; `vectors` mode unchanged for anchor-prefix.
+- `src/__tests__/infra/audit-anchor-key-contract.test.ts` / `anchor-prefix-vectors.test.ts` — patterns for the marker contract and the run-manifest pin.
+- `src/workers/retention-gc-worker/sweep.ts` — module-private `inSweepTx` and `assertSweepBypass`; `readAttachmentRefs` is the model for the new reads; `AttachmentRefRow` type.
+- `BYPASS_GRANT.RETENTION_BLOB_ORPHAN_SWEEP` (`src/lib/tenant-rls-grants.ts`, `attachments` only) — reused, no new grant.
+- `src/lib/blob-store/object-ref.ts` — `decodeObjectRef` (sole judge of a ref), `encodeObjectRef`, `blobMarkerKey`.
+- `scripts/retention-gc-worker.ts` — `--init-blob-marker` is an argv flag read before the env parse, exempted from the database-URL refines, run through its own async function and `.then` (CJS bundle, no top-level await); `--count-db-blobs` follows the same shape but is not exempted.
+- `@/lib/db/pool-factory` `createPool` / `createPrismaClient` and `WORKER_POOL_*` constants — the worker's pool settings.
+- Integration: `createTestContext`, `assertRlsApplies`, `inRetentionSweepTx`, `setBypassRlsGucs`.
+
+### Gates to keep green
+
+`check-bypass-rls`, `check-rls-read-context`, `check-raw-sql-usage`, `check-worker-logtype`, `worker-bundle-smoke` map test, `check-doc-paths`, `check:env-docs` (no env var added: `BLOB_BACKEND` etc. already exist), `check-terraform-test-count` self-test, `src/__tests__/infra/**`.

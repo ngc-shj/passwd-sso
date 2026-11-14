@@ -9,6 +9,7 @@ import {
   BlobRefInvalidError,
   parseObjectKey,
   blobMarkerKey,
+  MAX_OBJECT_REF_BYTES,
   type BlobObjectRef,
 } from "@/lib/blob-store/object-ref";
 import { BLOB_OBJECT_SCOPE } from "@/lib/blob-store/constants";
@@ -48,6 +49,29 @@ describe("encodeObjectRef / decodeObjectRef roundtrip", () => {
     const encoded = encodeObjectRef(ref);
     const decoded = decodeObjectRef(encoded);
     expect(decoded).toEqual(ref);
+  });
+});
+
+describe("MAX_OBJECT_REF_BYTES", () => {
+  it("is a 1024-byte key inside the JSON wrapper", () => {
+    expect(MAX_OBJECT_REF_BYTES).toBe(1024 + '{"key":""}'.length);
+  });
+
+  it("fits the ref of a maximal key", () => {
+    const encoded = encodeObjectRef({ key: "a".repeat(1024) });
+    expect(encoded.length).toBe(MAX_OBJECT_REF_BYTES);
+    expect(decodeObjectRef(encoded)).toEqual({ key: "a".repeat(1024) });
+  });
+
+  it("refuses a ref one byte over", () => {
+    expect(() => encodeObjectRef({ key: "a".repeat(1025) })).toThrow(`Blob object ref exceeds ${MAX_OBJECT_REF_BYTES} bytes`);
+  });
+
+  it("counts encoded bytes, not characters: escaping and multi-byte text push a shorter key over", () => {
+    // 1023 characters, but each `"` is written as `\"`.
+    expect(() => encodeObjectRef({ key: `${"a".repeat(1021)}""` })).toThrow();
+    // 512 characters of 3-byte UTF-8.
+    expect(() => encodeObjectRef({ key: "\u3042".repeat(512) })).toThrow();
   });
 });
 

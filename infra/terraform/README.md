@@ -426,7 +426,7 @@ userinfo of that URL — the secret is its only copy.
 | `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` | Least-privilege DB URL for the audit-anchor publisher ECS service (`passwd_anchor_publisher` role). `bootstrap-rds-roles.mjs` gives the role `LOGIN` with this password; the secret is its only copy. |
 | `AUDIT_ANCHOR_SIGNING_KEY` | Ed25519 seed the publisher signs manifests with (32-byte hex). Mapped into the publisher task only. Generate with `npm run generate:audit-anchor-signing-key`. |
 | `AUDIT_ANCHOR_TAG_SECRET` | HMAC secret for tenant tags in manifests (32-byte hex). Mapped into the publisher task only. Generate with `npm run generate:audit-anchor-tag-secret`. |
-| `DEPLOYMENT_ID` | UUID naming this deployment in every manifest; the publisher refuses to boot when it differs from the one stored on its first boot. Generate once per deployment; reuse a stored value only for a successor of the same deployment whose predecessor is gone — a clone or a restored copy gets a new one. Mapped into the publisher task only. |
+| `DEPLOYMENT_ID` | UUID naming this deployment in every manifest; the publisher refuses to boot when it differs from the one stored on its first boot. Generate once per deployment; reuse a stored value only for a successor of the same deployment whose predecessor is gone — a clone or a restored copy gets a new one. Mapped into the publisher task, and into the retention-gc worker while `retention_gc_blob_sweep_mode` is not `off` (the orphan sweep's bucket marker holds it). |
 
 The four background workers run as dedicated ECS services
 (`*-audit-outbox-worker`, `*-retention-gc-worker`, `*-audit-anchor-publisher`,
@@ -524,7 +524,8 @@ created without Object Lock needs an in-place step before the next plan — see
   `docs/operations/alerts.md`); env `AUDIT_ANCHOR_PUBLISHER_ENABLED=true`, the bucket, the
   prefix and `AWS_REGION`; secrets `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL`,
   `AUDIT_ANCHOR_SIGNING_KEY`, `AUDIT_ANCHOR_TAG_SECRET` and `DEPLOYMENT_ID` (no
-  other task receives the last three). `desired_count = min(1,
+  other task receives the signing key or the tag secret; `DEPLOYMENT_ID` also
+  reaches the retention-gc worker while its orphan sweep runs). `desired_count = min(1,
   worker_desired_count)`, `deployment_maximum_percent = 100`,
   `deployment_minimum_healthy_percent = 0`: a deploy stops the old task (SIGTERM;
   it stops scheduling and finishes an in-flight run within `stopTimeout = 120`)
@@ -562,6 +563,34 @@ clone or a restored copy generates a new one and follows the rotation runbook's
 back all six services.
 
 Alarms and what to do about each: `docs/operations/alerts.md`.
+
+## Attachment storage and the orphan sweep
+
+The app and the retention-gc worker keep attachment bytes in the database
+unless `attachments_blob_backend = "s3"`. The switch sets `BLOB_BACKEND`,
+`S3_ATTACHMENTS_BUCKET` and `AWS_REGION` on both tasks from the attachments
+bucket; secret keys with those names in the app secret are not read. Switching
+an existing stack strands the attachments already stored, in either direction:
+read `docs/operations/deployment.md` "Orphan attachment sweep on AWS" first.
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `attachments_blob_backend` | `"db"` | `"db"` or `"s3"`. `"s3"` requires `enable_s3_attachments`, `attachments_blob_backend_empty_db_ack` and `s3_kms_key_arn = ""` (no task role holds KMS permissions). |
+| `attachments_blob_backend_empty_db_ack` | `false` | Set `true` after the retention-gc worker's `--count-db-blobs` reports `db_stored: 0`. |
+| `retention_gc_blob_sweep_mode` | `"off"` | `RETENTION_GC_BLOB_SWEEP_MODE`: `"off"`, `"report"` or `"delete"`. Anything but `off` requires `"s3"`, and also maps `DEPLOYMENT_ID` into the worker. |
+| `retention_gc_blob_orphan_grace_ms` | `null` | `RETENTION_GC_BLOB_ORPHAN_GRACE_MS`, an integer from `3600000` to `3024000000` (1 h to 35 d). Required for `"delete"`, and then at least the database restore window: the larger of `db_backup_retention_days` and, with `enable_backup`, `backup_retention_days`, in milliseconds. A window above 35 days cannot be met; such a stack runs `"report"`. |
+
+The retention-gc worker runs as its own task role (`*-ecs-retention-gc-task`,
+output `retention_gc_worker_task_role_arn`; assumable by this account's ECS
+tasks only). With `"s3"` it holds `s3:ListBucket` on the bucket,
+`s3:DeleteObject` on its objects and `s3:GetObject`/`s3:PutObject` on the marker
+key `.passwd-sso-deployment` only — never `s3:DeleteObjectVersion`, so a
+deletion only adds a delete marker. With `"db"` it holds no policy. The app and
+the outbox worker keep `*-ecs-task`, unchanged.
+
+`project_name` and `env` together (`<project_name>-<env>`) must be at most 20
+characters: longer names exceed AWS name limits (EventBridge rules 64, target
+groups 32).
 
 ## Production Recommendations
 

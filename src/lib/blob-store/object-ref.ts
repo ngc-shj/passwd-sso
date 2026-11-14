@@ -26,8 +26,23 @@ export function newBlobGeneration(): string {
   return randomBytes(16).toString("hex");
 }
 
+/** The longest object key the backends accept: 1024 bytes on S3 and GCS, 1024 characters on Azure. */
+const MAX_OBJECT_KEY_BYTES = 1024;
+
+/**
+ * The largest stored ref: a maximal key inside the `{"key":"…"}` wrapper.
+ * Enforced here, by the only writer of refs, so a stored value above it is
+ * attachment bytes kept in the database by construction — what
+ * `--count-db-blobs` relies on to judge such rows without reading them.
+ */
+export const MAX_OBJECT_REF_BYTES = MAX_OBJECT_KEY_BYTES + Buffer.byteLength(JSON.stringify({ key: "" }), "utf8");
+
 export function encodeObjectRef(ref: BlobObjectRef): Uint8Array {
-  return Buffer.from(JSON.stringify(ref), "utf8");
+  const encoded = Buffer.from(JSON.stringify(ref), "utf8");
+  if (encoded.length > MAX_OBJECT_REF_BYTES) {
+    throw new Error(`Blob object ref exceeds ${MAX_OBJECT_REF_BYTES} bytes`);
+  }
+  return encoded;
 }
 
 export function decodeObjectRef(stored: Uint8Array): BlobObjectRef | null {

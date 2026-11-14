@@ -327,6 +327,30 @@ The same procedure gives a clone or a restored copy of a deployment its own valu
 4. Restart the publisher worker (ECS: `--desired-count 1`; the next `terraform apply` sets it
    from `worker_desired_count` anyway).
 5. Verify the publisher boots without `DEPLOYMENT_ID_MISMATCH` in the audit log.
+6. **Only when the orphan attachment sweep runs** (`retention_gc_blob_sweep_mode` not `off`;
+   `docs/operations/deployment.md` "Orphan attachment sweep on AWS"): the attachments bucket's
+   marker still holds the old id, so the sweep refuses every tick with `marker_mismatch`.
+   Whether to re-create it depends on who else uses the bucket.
+
+   Inside this Terraform module the attachments bucket belongs to one stack: Terraform creates
+   it, S3 bucket names are global, and the worker's `S3_ATTACHMENTS_BUCKET` is set only from
+   that resource. A clone or restore made with the module therefore has a bucket of its own.
+   The question is whether any deployment **outside** the module reads or writes this bucket —
+   for example a Docker or restored copy given `S3_ATTACHMENTS_BUCKET` and S3 credentials
+   directly. That is an inventory question: check IAM Access Analyzer, or the IAM policy
+   simulator against the bucket ARN, and your own records.
+
+   - **No other deployment uses the bucket**: as an operator, delete the marker
+     (`aws s3api delete-object --bucket <attachments-bucket> --key .passwd-sso-deployment
+     --region <region>`), run `--init-blob-marker` once (deployment.md, "Running the worker's
+     one-off commands"; expect `"result":"created"`), then restart the worker so it reads the
+     new id — secrets are injected at task start, and the running task keeps the old one and
+     refuses with `marker_mismatch` until replaced:
+     `aws ecs update-service --cluster <cluster> --service <name_prefix>-retention-gc-worker
+     --force-new-deployment --region <region>`.
+   - **Another deployment uses it, or you cannot rule that out**: never touch the marker, and
+     set the sweep `off`. Re-creating the marker would make this deployment the bucket's owner,
+     and every object the other deployment uploads would then look orphaned to this sweep.
 
 This `system_settings` update is captured by the database-level audit trail (pgaudit,
 connection `application_name` logs), not by application-layer `AUDIT_ANCHOR_KEY_ROTATED`

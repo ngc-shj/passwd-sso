@@ -68,6 +68,11 @@ output "audit_anchor_publisher_task_role_arn" {
   description = "The only principal the anchors bucket policy lets write a manifest"
 }
 
+output "retention_gc_worker_task_role_arn" {
+  value       = aws_iam_role.ecs_retention_gc_task.arn
+  description = "The retention-gc worker's own task role (attachments bucket list, delete and marker access when attachments_blob_backend is s3)"
+}
+
 output "cloudfront_domain_name" {
   value = var.enable_cloudfront ? aws_cloudfront_distribution.attachments[0].domain_name : null
 }
