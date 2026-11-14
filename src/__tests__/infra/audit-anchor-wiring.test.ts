@@ -237,9 +237,23 @@ function roleViolations(tf: TerraformConfig, opts: EvalOptions = {}): string[] {
     } catch {
       out.push("publisher role: prefix module output does not evaluate");
     }
-    const want = [{ Effect: "Allow", Action: ["s3:PutObject", "s3:PutObjectRetention"], Resource: [`${BUCKET_ARN}/${prefix}/*`] }];
-    const got = policy.Statement.map((s) => ({ Effect: s.Effect, Action: asSortedList(s.Action), Resource: asSortedList(s.Resource) }));
-    if (JSON.stringify(got) !== JSON.stringify(want) || policy.Statement.some((s) => "Condition" in s || "NotAction" in s)) {
+    const want = [
+      { Effect: "Allow", Action: ["s3:PutObject", "s3:PutObjectRetention"], Resource: [`${BUCKET_ARN}/${prefix}/*`] },
+      { Effect: "Allow", Action: ["s3:GetObject"], Resource: [`${BUCKET_ARN}/${prefix}/*`] },
+      {
+        Effect: "Allow",
+        Action: ["s3:ListBucket"],
+        Resource: [BUCKET_ARN],
+        Condition: { StringLike: { "s3:prefix": [`${prefix}/*`] } },
+      },
+    ];
+    const got = policy.Statement.map((s) => ({
+      Effect: s.Effect,
+      Action: asSortedList(s.Action),
+      Resource: asSortedList(s.Resource),
+      ...(s.Condition === undefined ? {} : { Condition: normalizeCondition(s.Condition) }),
+    }));
+    if (JSON.stringify(got) !== JSON.stringify(want) || policy.Statement.some((s) => "NotAction" in s || "NotResource" in s)) {
       out.push(`publisher role: statements ${JSON.stringify(policy.Statement)}`);
     }
   }
@@ -960,17 +974,35 @@ const RED_FIXTURES: RedFixture[] = [
     violation: "publisher task: stopTimeout undefined, not 120",
   },
   {
-    name: "a publisher role that can also read",
+    name: "GetObject granted on the bucket root",
+    file: "iam.tf",
+    from: `        Action   = ["s3:GetObject"]
+        Resource = "\${aws_s3_bucket.audit_anchors[0].arn}/\${local.audit_anchor_prefix}/*"`,
+    to: `        Action   = ["s3:GetObject"]
+        Resource = "\${aws_s3_bucket.audit_anchors[0].arn}/*"`,
+    violation: "publisher role: statements",
+  },
+  {
+    name: "ListBucket without the prefix condition",
+    file: "iam.tf",
+    from: '        Condition = { StringLike = { "s3:prefix" = "${local.audit_anchor_prefix}/*" } }\n',
+    to: "",
+    violation: "publisher role: statements",
+  },
+  {
+    name: "a write action beyond PutObject and PutObjectRetention",
     file: "iam.tf",
     from: 'Action   = ["s3:PutObject", "s3:PutObjectRetention"]',
-    to: 'Action   = ["s3:PutObject", "s3:PutObjectRetention", "s3:GetObject"]',
+    to: 'Action   = ["s3:PutObject", "s3:PutObjectRetention", "s3:DeleteObject"]',
     violation: "publisher role: statements",
   },
   {
     name: "a publisher role granted outside the prefix",
     file: "iam.tf",
-    from: 'Resource = "${aws_s3_bucket.audit_anchors[0].arn}/${local.audit_anchor_prefix}/*"',
-    to: 'Resource = "${aws_s3_bucket.audit_anchors[0].arn}/*"',
+    from: `Action   = ["s3:PutObject", "s3:PutObjectRetention"]
+        Resource = "\${aws_s3_bucket.audit_anchors[0].arn}/\${local.audit_anchor_prefix}/*"`,
+    to: `Action   = ["s3:PutObject", "s3:PutObjectRetention"]
+        Resource = "\${aws_s3_bucket.audit_anchors[0].arn}/*"`,
     violation: "publisher role: statements",
   },
   {

@@ -32,3 +32,70 @@
 - **D11 — one guard without its own reddening test:** the inner "refusing to delete an
   uploaded asset" check in `deleteAssetReservation` is unreachable while the outer re-read
   guard exists (defence in depth; the outer guard is red-proven).
+
+## Batch C (C5, C7)
+
+- **D12 — script exit codes:** 0 ok, 1 refused or failed, 2 usage error; a missing `--confirm`
+  is a usage error (2). The argument-parse error is fixed text, because Node's `parseArgs`
+  message would echo a positional seed.
+- **D13 — a write reads every destination first:** a different object anywhere → exit 1 with
+  nothing written anywhere; a `create` that answers `"exists"` is re-read and compared
+  (covers a race).
+- **D14 — `audit-anchor-kid` works with no destination configured** (the archived-or-not line
+  is printed only when one is).
+- **D15 — file formats:** `--out` is create-only; the published statement is the trimmed JWS;
+  the archived `.pub` is the 64 hex chars plus a newline.
+- **D16 — `chain-restart` takes the previous manifest's key** from the own key when the kids
+  match, else `--previous-public-key <path>`.
+- **D17 — the IAM condition test also covers D1's full-key prefix form** and a narrowed
+  condition (`<prefix>/`) as a third red case.
+
+## Batch B (C3, C4)
+
+- **D18 — C4's acceptance "create conflict: ours-shaped under a foreign archived kid → row g"
+  cannot occur.** The conflicting object sits at the own-kid key name, so a manifest signed by
+  another key fails the kid binding: it is tested as fail-closed
+  (`PUBLISHED_OBJECT_UNVERIFIABLE`). Row g after `"exists"` is reached, and tested, with an
+  own-key object carrying another `deploymentId`.
+- **D19 — "rows f–h never count" holds in step 2 only.** A run that passes step 2 and then
+  skips in step 4 (another instance published in between) was already counted in step 3.
+- **D20 — `publishedStateFromListing(dest, own, listedKeys, signal)`** added beside
+  `readPublishedState`: the publisher lists once per step and the zero-tenant path uses the
+  listing alone.
+- **D21 — key cache location (T3-1):** `own` is `{ publicKey, keyCache? }`; the publisher
+  instance holds the cache, and without `keyCache` nothing is cached.
+- **D22 — a secondary's read failure during the mirror compare** is
+  `<name>_READ_FAILED:<code>` at stage `upload`, with the pause (C4 named only
+  `_UPLOAD_FAILED` for a secondary error; C1 reports a read under its own operation).
+- **D23 — a listed key whose read returns null** is unverifiable (row b), not row a.
+- **D24 — `MULTIPLE_MANIFESTS_FOR_DATE`** is counted from the listing for the date of the
+  manifest's `previousManifest.uri` key, so it also works on an adopted publish.
+- **D25 — `MISSING_PRIOR_CADENCE_PUBLICATION`** keeps today's query, runs on adopt too, and
+  carries `anchoredAt`.
+- **D26 — `last_published_at` and the pause-clear** go to the anchor rows whose tag is in the
+  stored manifest on fresh publishes as well as adopts (one code path).
+- **D27 — no destination configured** fails the run with `CADENCE_FAILED:NO_DESTINATION`.
+- **D28 — the non-writable filesystem primary test** uses a `0555` parent with a non-existent
+  base path (empty listing, `create` fails with EACCES); the old `/dev/null/…` path now fails
+  at `list`. Assumes a non-root test runner.
+- **D29 — the integration "anchor rows deleted → not healthy" case** first asserts that no
+  anchor row at all remains in the database, with a message naming the cleanup.
+- **D30 — logging:** `PublishedObjectUnverifiableError` carries a `detail` token, logged only
+  in the new `published_object_unverifiable` line; `_MIRROR_DIVERGED` and row a emit no
+  `upload_failed` line, so they match only the `cadence_failed` filter; `stale_boundary`
+  carries `latestArtifactKey` in place of `marker`. New `_logType`s: `published_object_unverifiable`,
+  `published_by_other_identity`, `previous_manifest_deployment_changed`,
+  `mirror_backfill_failed`, `unrecognised_manifest_key`. None renamed.
+- **D31 — `AnchorDestinationConfigError` has a `code`** (`NO_DESTINATION_CONFIGURED`,
+  `GITHUB_TOKEN_MISSING`) and the runner logs a fixed message with `errorLogFields(err)`
+  (the `check-caught-error-logging` gate refuses `msg: err.message`).
+- **D32 — the rotation acceptance archives the old key with `destination.create`**, not through
+  C7's `run` (the two batches were written in parallel); C7's own tests cover `run`.
+- **D33 — legacy-row positive control** (scratch copy of the pre-change tree at `dcc1eded9`,
+  not in the repository): a marker at `B` with no object made the old publisher return
+  `skipped_already_published`; a pointer naming an older manifest redirected
+  `previousManifest` to it. 2 passed, exit 0.
+- **D34 — two red-proof mutations were equivalent and stayed green:** `??=` → `=` on the
+  bound's timer (the old timer still fires; the real per-call mutation is red), and
+  swallowing the listing error in the hanging-`list` case (the next read yields the same
+  token; row a's own case is red).

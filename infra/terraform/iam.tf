@@ -129,9 +129,11 @@ resource "aws_iam_role" "ecs_audit_anchor_publisher_task" {
   tags = local.tags
 }
 
-# PUT with its lock headers (which needs PutObjectRetention too), under the
-# prefix only. No GET, LIST or DELETE: the publisher reads its previous
-# manifest pointer from the database, not the bucket.
+# PUT with its lock headers (which needs PutObjectRetention too), and the read
+# side of the publisher's protocol: GET under the prefix and LIST of the bucket
+# restricted to it, so it decides from the stored objects, not the database.
+# S3Destination lists under the prefix, or under a full key beneath it, and both
+# satisfy the s3:prefix condition. No DELETE.
 resource "aws_iam_role_policy" "ecs_audit_anchor_publisher_s3" {
   count = var.enable_s3_audit_anchors ? 1 : 0
   name  = "${local.name_prefix}-ecs-audit-anchor-publisher-s3"
@@ -143,6 +145,17 @@ resource "aws_iam_role_policy" "ecs_audit_anchor_publisher_s3" {
         Effect   = "Allow"
         Action   = ["s3:PutObject", "s3:PutObjectRetention"]
         Resource = "${aws_s3_bucket.audit_anchors[0].arn}/${local.audit_anchor_prefix}/*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = "${aws_s3_bucket.audit_anchors[0].arn}/${local.audit_anchor_prefix}/*"
+      },
+      {
+        Effect    = "Allow"
+        Action    = ["s3:ListBucket"]
+        Resource  = aws_s3_bucket.audit_anchors[0].arn
+        Condition = { StringLike = { "s3:prefix" = "${local.audit_anchor_prefix}/*" } }
       },
     ]
   })
