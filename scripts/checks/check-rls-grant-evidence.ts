@@ -5,13 +5,16 @@
  * and one per role whose attributes it read. This check reads only that file.
  *
  * A BYPASS_GRANT member has evidence when a connection logged in as a role that
- * is NOSUPERUSER, NOBYPASSRLS and holds no SET-able membership (`canSetRole`
- * false on its attribute line) set its (purpose, tables) in a suite run that
+ * is NOSUPERUSER, NOBYPASSRLS and cannot come to run as another role (no
+ * CREATEROLE, no membership with SET or ADMIN: `canSetRole` false on its
+ * attribute line) set its (purpose, tables) in a suite run that
  * passed — where any report or refusal fails a test. That rests on one
  * PostgreSQL fact: a session whose login role has none of those cannot change
- * `current_user`, so the login user is the role every statement ran as; the
- * exception is a SECURITY DEFINER routine, which runs as its owner by design
- * (not seen here). The recorder files a connection whose startup options set a
+ * `current_user`, so the login user is the role every statement ran as. Two
+ * things it does not cover: a SECURITY DEFINER routine, which runs as its owner
+ * by design (not seen here), and a role that inherits the table owner (the
+ * probe role of rds-probe-role.ts) issuing owner DDL that turns row-level
+ * security off for itself, which the cells using it do not do. The recorder files a connection whose startup options set a
  * role under a name no attribute line carries, and an attribute line without
  * `canSetRole` (written before the field existed) does not count as restricted:
  * both fail toward no evidence. The check does not show
@@ -184,7 +187,8 @@ export function parseEvidenceFile(text: string): { lines: unknown[]; errors: str
 }
 
 const BASELINE_HEADER = [
-  "# BYPASS_GRANT members no NOSUPERUSER NOBYPASSRLS connection set in the integration suite (C11).",
+  "# BYPASS_GRANT members no restricted connection (NOSUPERUSER, NOBYPASSRLS, unable to change role)",
+  "# set in the integration suite (C11).",
   "# Their enforcement rests on production observation, not on a suite run.",
   "# Regenerate: RLS_GRANT_EVIDENCE_FILE=<fresh file> npm run test:integration, then",
   "#   npm run check:rls-grant-evidence -- <file> --write",

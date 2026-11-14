@@ -1,7 +1,7 @@
 # Code Review: verify-worker-readonly-role-rls-enforce
 
 Date: 2026-11-15
-Review round: 3
+Review round: 4
 
 ## Changes from Previous Round
 
@@ -332,3 +332,44 @@ Incremental review of the round-2 commit by the same three experts. No Critical 
 
 #### Correction to the round-2 N1 / N2 entry
 - The identity-based recorder named there would close the collision class only. The role question it was also said to answer is closed by the change above.
+
+## Round 4
+
+Incremental review of the round-3 commit. No Critical or Major finding. The security expert tested the claim the new mechanism rests on, on PostgreSQL 16.12 inside a rolled-back transaction: as a NOSUPERUSER NOBYPASSRLS member of the owner `WITH INHERIT TRUE, SET FALSE`, `SET ROLE`, `set_config('role', …)`, granting itself SET or ADMIN, altering its own attributes and reassigning a function to the owner are each refused; neither SUPERUSER nor BYPASSRLS is inherited; the role stays subject to row-level security. A restricted login whose startup options name a privileged role is refused at connection time, so a missed option can only drop evidence. The testing expert's mutants of the probe helper (SET TRUE, a default grant, NOLOGIN) and of the recorder and consumer each redden a cell.
+
+### Findings
+
+- **S12 — Minor.** `canSetRole` ignored ADMIN: a role with an ADMIN-only membership grants itself SET and then switches (executed). CREATEROLE opens the same path for roles its holder creates.
+- **T5 — Minor.** The membership arm of the attribute query had no positive control: a query that is always false, or reads only `rolsuper`, passed every cell.
+- **S14 — Minor.** CREATE ROLE and GRANT were two statements, so a failed GRANT left a login role until a later sweep.
+- **S11 — Minor.** Where the owner is a superuser, the probe inherits ownership of every object: it could run owner DDL (turn FORCE off, replace a function) that stops row-level security applying to it. The comments named only the definer exception. No cell does this; the same held for the earlier NOLOGIN shape.
+- **S13 — Minor.** The startup-option comment claimed every accepted form; a backslash-escaped name is not read (fail-safe direction).
+- **F16 — Minor.** The baseline header still described evidence as "NOSUPERUSER NOBYPASSRLS" only.
+
+### Resolution Status
+
+#### S12 / T5
+- Action: `canSetRole` is true for a superuser, CREATEROLE, or a membership with SET or ADMIN. A cell creates, in a rolled-back transaction, a group and four other roles (SET-only member, INHERIT-only member, ADMIN-only member, CREATEROLE) and requires exactly the three that can change role to read true.
+- Modified file: `src/__tests__/db-integration/rls-grant-evidence-recorder.ts`, `rds-probe-role.integration.test.ts`, `scripts/checks/check-rls-grant-evidence.ts` (header)
+
+#### S14
+- Action: the two statements run in one transaction, and the password carries `VALID UNTIL` one hour ahead, the sweep's age limit.
+- Modified file: `src/__tests__/db-integration/rds-probe-role.ts`
+
+#### S11 — stated, not mechanised
+- Action: the probe helper's header and the consumer's header say that the probe owns everything where the owner is a superuser, and that cells using it issue no owner DDL; review is the control. A statement match for such DDL is not added: it would be the mechanism this round replaced.
+- Anti-Deferral: worst case — a future cell turns row-level security off for the probe before setting a grant and the member is credited. Likelihood — low: it takes an `ALTER TABLE` or a function replacement in a test that runs as the probe. Cost to fix — a table owner that is not a superuser in dev and CI, which changes the harness's bootstrap.
+- Modified file: `src/__tests__/db-integration/rds-probe-role.ts`, `scripts/checks/check-rls-grant-evidence.ts`
+
+#### S13
+- Action: the comment says the match is best-effort and why a miss cannot add evidence.
+- Modified file: `src/__tests__/db-integration/rls-grant-evidence-recorder.ts`
+
+#### F16
+- Action: the header constant and the committed baseline's header say "restricted connection (NOSUPERUSER, NOBYPASSRLS, unable to change role)".
+- Modified file: `scripts/checks/check-rls-grant-evidence.ts`, `scripts/checks/rls-grant-evidence-baseline.txt`
+
+### Verification after the round-4 fixes
+- Full integration suite with a fresh evidence file: 154 files, 1663 passed, 5 todo, exit 0. Evidence check exit 0: 77 with evidence, 33 without, baseline entries unchanged.
+- Full unit suite on the round-3 commit: 1170 of 1171 files pass (the worktree-only `backup-db` case). Build and typecheck pass. Static gates pass except `rls-cross-tenant SQL parse` against the shared development database, as before.
+- The unit files touched since then, typecheck, lint and the bypass gate pass.

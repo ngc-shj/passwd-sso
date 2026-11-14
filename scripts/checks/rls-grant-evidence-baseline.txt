@@ -1,4 +1,5 @@
-# BYPASS_GRANT members no NOSUPERUSER NOBYPASSRLS connection set in the integration suite (C11).
+# BYPASS_GRANT members no restricted connection (NOSUPERUSER, NOBYPASSRLS, unable to change role)
+# set in the integration suite (C11).
 # Their enforcement rests on production observation, not on a suite run.
 # Regenerate: RLS_GRANT_EVIDENCE_FILE=<fresh file> npm run test:integration, then
 #   npm run check:rls-grant-evidence -- <file> --write

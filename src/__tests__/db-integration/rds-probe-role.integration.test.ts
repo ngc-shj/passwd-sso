@@ -20,6 +20,7 @@ import {
 } from "./helpers";
 import { probeRoleName } from "./probe-role-names";
 import { createProbeRole, type ProbeRole } from "./rds-probe-role";
+import { ROLE_ATTRIBUTES_SQL, type RoleAttributes } from "./rls-grant-evidence-recorder";
 
 // Omits users; not a production member's pair, which a refusal cell must not credit.
 const TENANT_AND_SESSIONS = defineGrant(BYPASS_PURPOSE.SYSTEM_MAINTENANCE, ["tenant", "session"]);
@@ -139,6 +140,36 @@ describe("owner-shaped probe role", () => {
       )).rows,
     );
     expect(rows).toEqual([{ inherit_option: true, set_option: false }]);
+  });
+
+  // The positive control for `canSetRole`: without it, "the probe reads false"
+  // would also hold for an expression that is always false.
+  it("the attribute query tells a role that can change role from one that cannot", async () => {
+    const tag = randomBytes(4).toString("hex");
+    const name = (kind: string) => `attr_ctl_${tag}_${kind}`;
+    const rows = await withSuperuser(async (c) => {
+      await c.query("BEGIN");
+      try {
+        for (const kind of ["group", "settable", "inherit_only", "admin_only"]) {
+          await c.query(`CREATE ROLE "${name(kind)}" NOLOGIN`);
+        }
+        await c.query(`CREATE ROLE "${name("creator")}" NOLOGIN CREATEROLE`);
+        await c.query(`GRANT "${name("group")}" TO "${name("settable")}" WITH INHERIT FALSE, SET TRUE`);
+        await c.query(`GRANT "${name("group")}" TO "${name("inherit_only")}" WITH INHERIT TRUE, SET FALSE`);
+        await c.query(`GRANT "${name("group")}" TO "${name("admin_only")}" WITH ADMIN TRUE, INHERIT FALSE, SET FALSE`);
+        const names = ["group", "settable", "inherit_only", "admin_only", "creator"].map(name);
+        return (await c.query<RoleAttributes>(ROLE_ATTRIBUTES_SQL, [names])).rows;
+      } finally {
+        await c.query("ROLLBACK");
+      }
+    });
+    expect(Object.fromEntries(rows.map((r) => [r.name.slice(`attr_ctl_${tag}_`.length), r.canSetRole]))).toEqual({
+      group: false,
+      settable: true,
+      inherit_only: false,
+      admin_only: true,
+      creator: true,
+    });
   });
 
   it("drop removes the role, and creating another sweeps only probes older than an hour", async () => {

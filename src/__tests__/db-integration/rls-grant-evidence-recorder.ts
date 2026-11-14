@@ -19,12 +19,17 @@ export type RoleAttributes = { name: string; rolsuper: boolean; rolbypassrls: bo
 
 /**
  * The one query behind every attribute line; `$1` is a text[] of role names.
- * `canSetRole`: the role is a superuser or holds a membership with SET TRUE,
- * i.e. a session logged in as it could `SET ROLE` to another role. Memberships
- * are not followed transitively: one SET-able membership is enough to distrust.
+ * `canSetRole`: a session logged in as the role could come to run as another
+ * role. True for a superuser, for a membership with SET TRUE, for a membership
+ * with ADMIN TRUE (its holder can grant itself SET), and for CREATEROLE (its
+ * holder gets ADMIN on the roles it creates). Memberships are not followed
+ * transitively: one such membership is enough to distrust. The attributes are
+ * read once, when the line is written; a change made later in the run is not
+ * seen.
  */
 export const ROLE_ATTRIBUTES_SQL = `SELECT r.rolname AS name, r.rolsuper, r.rolbypassrls,
-  (r.rolsuper OR EXISTS (SELECT 1 FROM pg_auth_members m WHERE m.member = r.oid AND m.set_option)) AS "canSetRole"
+  (r.rolsuper OR r.rolcreaterole
+   OR EXISTS (SELECT 1 FROM pg_auth_members m WHERE m.member = r.oid AND (m.set_option OR m.admin_option))) AS "canSetRole"
   FROM pg_roles r WHERE r.rolname = ANY($1::text[])`;
 
 // The text setBypassGucs (src/lib/tenant-rls-grants.ts) sends; its bound values
@@ -32,10 +37,12 @@ export const ROLE_ATTRIBUTES_SQL = `SELECT r.rolname AS name, r.rolsuper, r.rolb
 const SET_BYPASS_GUCS_RE =
   /^SELECT set_config\('app\.bypass_rls', 'on', true\),\s*set_config\('app\.bypass_purpose', \$1, true\),\s*set_config\('app\.tenant_id', \$2, true\),\s*set_config\('app\.bypass_tables', \$3, true\)$/;
 
-// A startup option that sets the session's role or authorization, in any form
-// PostgreSQL accepts (`-c role=x`, `-crole=x`, `--role=x`); names are
-// case-insensitive. The value does not matter: any such option means the login
-// user is not who statements run as.
+// A startup option that sets the session's role or authorization (`-c role=x`,
+// `-crole=x`, `--role=x`; names are case-insensitive). The value does not
+// matter: any such option means the login user is not who statements run as.
+// This is a best-effort match (a backslash-escaped name is not read); a miss
+// files the connection under its login user, and a login user that counts as
+// restricted cannot make such an option take effect: the server refuses it.
 const ROLE_OPTION_RE = /(?:^|\s)(?:-c\s*|--)(?:role|session_authorization)\s*=/i;
 
 // Named so that no pg_roles row can match: the consumer counts it as a role
