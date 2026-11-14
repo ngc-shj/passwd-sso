@@ -260,10 +260,17 @@ value it is given differs (`DeploymentIdMismatchError`, one
   holds the value, so the successor must be given the same one.
 - **A clone, or a restored copy while the original still runs**, is a second
   deployment: generate a new value and follow "DEPLOYMENT_ID change recovery" in
-  `docs/operations/audit-anchor-rotation-runbook.md`. The copy also inherits the
-  original's manifest pointer and boundary marker (`system_settings`), so its
-  first manifest's `previousManifest` names the original's last manifest, which
-  is not in the copy's bucket.
+  `docs/operations/audit-anchor-rotation-runbook.md`. The copy inherits no
+  publication state that decides anything — the publisher reads what is
+  published from its destination, and the `system_settings` rows earlier
+  releases used for that are inert. What it does inherit is the anchors'
+  `last_published_at`. So give the copy its **own** destination (bucket or
+  prefix) and start its chain there by the runbook's "Restarting the chain":
+  against an empty destination the inherited values fail every run closed with
+  `CADENCE_FAILED:DESTINATION_BEHIND_DATABASE` until they are cleared. Never
+  point a copy at the original's prefix: the two would publish into one chain,
+  whichever runs second for a day skipping with
+  `audit-anchor-publisher.published_by_other_identity`.
 
 To add it to the app secret of an existing deployment (read-merge-write, as in
 `infra/terraform/README.md` "Adding a key to an existing app secret"; run from
@@ -300,6 +307,64 @@ key does not start. A deployment created before this release has
 `AUDIT_ANCHOR_SIGNING_KEY` and `AUDIT_ANCHOR_TAG_SECRET` already (the app task
 used to receive them); `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` is added as in the
 README.
+
+#### Upgrade order
+
+The release that makes the published objects the source of truth has the
+publisher list and read the anchors bucket before every run. Its task role
+could only write before, so the IAM grant must be in place before the new
+image runs:
+
+1. **Terraform first.** The only resource change is the publisher's IAM
+   policy (`aws_iam_role_policy.ecs_audit_anchor_publisher_s3`): `s3:GetObject`
+   on `<bucket>/<prefix>/*` and `s3:ListBucket` on the bucket for the prefix.
+2. **Then the image.**
+
+`./scripts/deploy.sh` run from this release's checkout does both in that
+order: its `terraform apply` (step 3) applies the whole configuration, the
+policy included, before it moves the publisher service (step 5). The order
+needs attention only when the image moves another way — an apply from an older
+checkout, a manual `update-service`, a deployment outside this Terraform, which
+needs the same two permissions for whatever identity its publisher uses.
+
+Without the grant nothing is published wrongly, but nothing is published:
+every run fails closed with `s3-object-lock_READ_FAILED:AccessDenied` and the `cadence_failed` alarm fires, until the grant is applied
+and the publisher restarted.
+
+Do not roll the publisher back to an earlier release once this one has
+published. This release no longer maintains the `system_settings` rows the
+earlier publisher decided from, so that publisher would read them as they were
+on upgrade day: it would treat later boundaries as unpublished, send the
+current day's key again, and chain to the manifest that was latest then.
+
+After the upgrade:
+
+- **Archive the current public key** once
+  (`docs/operations/audit-anchor-rotation-runbook.md`, "Prerequisites" and
+  Step 4, with the key the publisher runs):
+  `npm run audit-anchor-publish-pubkey -- --key-file <path> --confirm`. A
+  deployment that never archived it gets one `AUDIT_ANCHOR_PUBLISH_FAILED` row
+  with `OWN_PUBLIC_KEY_NOT_ARCHIVED` on every publish until it does.
+- Existing manifests are under the current key and verify as they are; the
+  first run chains to the latest one in the bucket. A day's key that earlier
+  releases wrote more than once keeps its versions
+  (`docs/security/audit-anchor-verification.md` "Object versions").
+- If the first runs fail with `CADENCE_FAILED:DESTINATION_BEHIND_DATABASE` or
+  `LAST_PUBLISHED_AHEAD_OF_CLOCK`, see the runbook's upgrade note under "Telling
+  which side is wrong".
+
+#### GitHub Releases destination
+
+`AUDIT_ANCHOR_DESTINATION_GH_REPO` must name a repository used for nothing
+else. The publisher creates one release per day (`audit-anchor-<date>`) plus
+`audit-anchor-public-keys` and `audit-anchor-key-rotation`, and lists every
+release of the repository on each run — 100 per request, inside the run's 60 s
+bound — so unrelated releases slow every run and a large enough number of them
+fails it (`github-release_READ_FAILED:UPLOAD_TIMEOUT`). Anyone who can write
+releases there can also replace or delete a manifest and archive a key: the
+repository's write access is the trust boundary
+(`docs/security/audit-chain-threat-model.md` "What each destination bounds").
+When S3 is configured too, S3 is the primary and GitHub mirrors it.
 
 #### Existing anchors bucket without Object Lock
 

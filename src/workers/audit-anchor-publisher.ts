@@ -73,6 +73,17 @@ class TokenError extends Error {
 }
 
 /**
+ * The fault token of a destination error. An AWS SDK service exception carries
+ * its fault in `name` (`AccessDenied`) and has no `code`, so the shared reader
+ * alone would report every S3 refusal as `unknown`.
+ */
+function destinationFaultCode(err: unknown): string {
+  const fields = errorLogFields(err);
+  if (fields.code !== "unknown") return fields.code;
+  return typeof err === "object" && err !== null && "$metadata" in err ? fields.name : fields.code;
+}
+
+/**
  * A run that ends `failed`. Thrown inside the publish transaction so that it
  * rolls back. `reason` is a token: it reaches audit_logs.metadata.failureReason,
  * which the tenant reads. `pauseTenantIds` are paused after the rollback.
@@ -567,7 +578,7 @@ export class AuditAnchorPublisher {
       );
       return new RunFailure(`CADENCE_FAILED:${err.code}`, "before_upload");
     }
-    return new RunFailure(`${dest.name}_READ_FAILED:${errorLogFields(err).code}`, "before_upload");
+    return new RunFailure(`${dest.name}_READ_FAILED:${destinationFaultCode(err)}`, "before_upload");
   }
 
   private isOurs(manifest: VerifiedManifest): boolean {
@@ -700,7 +711,7 @@ export class AuditAnchorPublisher {
       try {
         stored = await bound.run((signal) => secondary.read(published.artifactKey, signal));
       } catch (err) {
-        throw new RunFailure(`${secondary.name}_READ_FAILED:${errorLogFields(err).code}`, "upload", coveredTenantIds);
+        throw new RunFailure(`${secondary.name}_READ_FAILED:${destinationFaultCode(err)}`, "upload", coveredTenantIds);
       }
       if (!stored?.equals(published.bytes)) {
         throw new RunFailure(`${secondary.name}_MIRROR_DIVERGED`, "upload", coveredTenantIds);
@@ -719,7 +730,7 @@ export class AuditAnchorPublisher {
     );
     // Which destination failed and with what code is what diagnosis needs;
     // the line above carries the rest.
-    return new RunFailure(`${dest.name}_UPLOAD_FAILED:${errorLogFields(err).code}`, "upload", pauseTenantIds);
+    return new RunFailure(`${dest.name}_UPLOAD_FAILED:${destinationFaultCode(err)}`, "upload", pauseTenantIds);
   }
 
   private async runBounded(boundary: Date, bound: DestinationBound): Promise<CadenceOutcome> {

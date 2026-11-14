@@ -307,8 +307,8 @@ heartbeat をログに出します。どちらも app イメージで動きま�
 | キー | 内容 | 書き込める主体 |
 |------|------|---------------|
 | `<prefix>/????-??-??.kid-*.jws` | 日次マニフェスト | publisher のタスクロールのみ |
-| `<prefix>/key-rotation-*` | ローテーション告知（runbook Step 4） | break-glass ロールのみ |
-| `<prefix>/public-keys/*` | 公開鍵アーカイブ（runbook Step 5） | break-glass ロールのみ |
+| `<prefix>/key-rotation-*` | 署名付きのローテーション声明・チェーン再開声明（runbook Step 5） | break-glass ロールのみ |
+| `<prefix>/public-keys/*` | 公開鍵アーカイブ（runbook Step 4） | break-glass ロールのみ |
 | それ以外 | — | 誰も書けない（publisher も含む） |
 
 加えて、`s3:DeleteObject` と `s3:DeleteObjectVersion` は全員に拒否、
@@ -331,8 +331,11 @@ Terraform apply は想定内の誤検知）。Object Lock なしで作られた�
 **サービス。**
 
 - publisher: 専用タスクロール（`*-ecs-audit-anchor-publisher-task`。
-  `<bucket>/<prefix>/*` への `s3:PutObject` と `s3:PutObjectRetention` のみで、
-  読み取り・一覧・削除なし。引き受けられるのはこのアカウントの ECS タスクのみ
+  `<bucket>/<prefix>/*` への `s3:PutObject`・`s3:PutObjectRetention`・`s3:GetObject`
+  と、`s3:prefix` が `<prefix>/*` に一致する条件付きのバケットへの `s3:ListBucket`。
+  削除権限はなく、接頭辞の外は読み取りも一覧もできない。読み取り側は publisher の
+  判断材料で、実行のたびに接頭辞を一覧して最新のマニフェストを読み、書き込み先の
+  キーが既に使われていればそのオブジェクトを読み戻す。引き受けられるのはこのアカウントの ECS タスクのみ
   （`aws:SourceAccount`）で、このロールをタスクロールの上書きとして渡す
   `RunTask`/`StartTask` は EventBridge ルール
   `<name_prefix>-audit-anchor-publisher-role-override` が通知する。ロール自体への
@@ -343,7 +346,7 @@ Terraform apply は想定内の誤検知）。Object Lock なしで作られた�
   `deployment_maximum_percent = 100`、`deployment_minimum_healthy_percent = 0`:
   デプロイは旧タスクを停止してから（SIGTERM。スケジュールを止め、実行中の 1 回を
   `stopTimeout = 120` 以内に終える）新タスクを起動し、新タスクの起動時実行は現在の
-  境界が未公開のときだけ公開します。ロググループ
+  境界のマニフェストがバケットにないときだけ公開します。ロググループ
   `/ecs/<name_prefix>/audit-anchor-publisher`。
 - verify worker: タスクロールなし（AWS API を呼ばない）。secret は app シークレット
   の `DATABASE_URL` だけで、`AUDIT_CHAIN_VERIFY_DATABASE_URL` として渡される。これは
@@ -364,7 +367,18 @@ Terraform apply は想定内の誤検知）。Object Lock なしで作られた�
 'console.log(crypto.randomUUID())'`）、app シークレットに追加します。保存済みの値を
 再利用するのは、前任が既に存在しない同一デプロイメントの後継のみ。クローンや
 復元コピーは新しい値を生成し、ローテーション runbook の "DEPLOYMENT_ID change
-recovery" に従います。`docs/operations/deployment.md` の "`DEPLOYMENT_ID`" を参照。
+recovery" に従い、専用の接頭辞またはバケットを使います。
+`docs/operations/deployment.md` の "`DEPLOYMENT_ID`" を参照。
+
+**アップグレードの順序。** 上記の読み取り権限は新規で、これを導入したリリースの
+リソース変更はこの 1 点だけです。先に Terraform を apply し、その後で新しいイメージを
+動かします。`scripts/deploy.sh` はこの順で実行します（`terraform apply` がサービス
+更新より先）。権限のないまま新しいイメージで動く publisher は何も公開しません —
+権限を apply して publisher を再起動するまで、すべての実行が
+`s3-object-lock_READ_FAILED:<code>` で fail closed し、`cadence_failed` として通知
+されます。break-glass ロール自体の権限はここでは管理しません。書き込みに加えて、
+runbook のスクリプトはそのロールに接頭辞への `s3:GetObject` と `s3:ListBucket` を
+必要とします。`docs/operations/deployment.md` の "Upgrade order" を参照。
 
 **Outputs**（runbook と `scripts/deploy.sh` が使う）: `audit_anchors_bucket_name`、
 `audit_anchor_s3_prefix`、`audit_anchor_publisher_task_role_arn`、

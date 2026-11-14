@@ -58,7 +58,7 @@ type Subcommand = {
   required: string[];
 };
 
-const SUBCOMMANDS = {
+export const SUBCOMMANDS = {
   kid: {
     usage: "npm run audit-anchor-kid -- --key-file <path>",
     options: { "key-file": "string" },

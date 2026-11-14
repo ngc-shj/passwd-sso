@@ -41,22 +41,53 @@ canonicalBytes)`. `prevHash` is 1 byte (`0x00`) for the genesis link and 32 byte
 
 **Anchor publishing**: `src/workers/audit-anchor-publisher.ts` publishes once per
 daily cadence boundary, which `src/workers/audit-anchor-scheduler.ts` computes and
-passes in (`runCadence(boundary)`); the boundary fixes the idempotency marker, the
-artifact key and `anchoredAt`. Each run sets `lock_timeout` (10 s) and takes the
-blocking `pg_advisory_xact_lock(hashtext('audit-anchor-publish'))`; a wait past the
-timeout is the `lock_held` outcome, retried for the same boundary like a failure (any
-role that can connect can hold the key, so the holder is not assumed to publish; alarmed
-on AWS). Under the lock the run reads the marker
-`system_settings.audit_anchor_last_published_boundary`, which is monotonic: a boundary
-at or before it is `skipped_already_published` (before it also logs `stale_boundary`,
-alarmed on AWS), and a marker that does not parse, or one past the wall clock's
-current boundary, fails the run closed rather than reading as published or absent. A publish writes the marker — only forward — in the same commit as the
-manifest pointer. A `DEPLOYMENT_ID` value is pinned in
-`system_settings` at boot (`ensureDeploymentIdMatch`); a mismatch throws
-`DeploymentIdMismatchError` and emits `AUDIT_ANCHOR_PUBLISH_FAILED` — this stops a
-publisher configured for another deployment from writing this one's anchor state.
-It does not serialize two instances of the same deployment; the lock and the marker
-do.
+passes in (`runCadence(boundary)`); the boundary fixes the artifact key and
+`anchoredAt`. What is already published is read from the **primary destination** — the
+first configured: S3, else GitHub Releases, else the filesystem — never from a database
+value (`src/lib/audit/anchor-published-state.ts`). Each run lists the primary, reads the
+latest manifest and verifies it: under the publisher's own key when the key's `kid` is
+its own, else under `public-keys/<kid>.pub` from the same destination; the signature
+must verify under the key its `kid` names, and the key's date must be the UTC date of
+`anchoredAt`. From that manifest and one database value — the greatest
+`audit_chain_anchors.last_published_at` — the run decides, first match:
+
+- the listing or a read fails, the latest manifest does not verify, it is dated after the
+  wall clock's boundary, `last_published_at` is past the wall clock's boundary or past the
+  latest manifest, or the latest manifest is under another `kid` while a manifest key
+  named with the own `kid` exists → the run **fails closed** before any write;
+- the latest manifest is dated after the run's boundary → skip (`stale_boundary`);
+- it is the boundary's own and was published under another `kid` or `DEPLOYMENT_ID` →
+  skip (`published_by_other_identity`);
+- it is the boundary's own, this publisher's, and the database records it → skip;
+- it is the boundary's own, this publisher's, and the database does not record it →
+  **adopt**: mirror its bytes and record it, without signing anything;
+- otherwise → **publish**, with the latest manifest as `previousManifest`.
+
+`last_published_at` can therefore make a run refuse or adopt again; it cannot make one
+skip, and it does not choose `previousManifest`. A skip never counts as health.
+
+Every manifest write is create-only (`If-None-Match: *` on S3, `link()` on the
+filesystem, the asset name on GitHub Releases). A write that finds the key taken reads
+the stored object back: one the publisher's own key and `DEPLOYMENT_ID` produced is
+adopted, anything else fails the run or ends as the other-identity skip. A day's key
+therefore gets one version however many times a run is retried.
+
+Each run sets `lock_timeout` (10 s) and takes the blocking
+`pg_advisory_xact_lock(hashtext('audit-anchor-publish'))`; a wait past the timeout is the
+`lock_held` outcome, retried for the same boundary like a failure (any role that can
+connect can hold the key, so the holder is not assumed to publish; alarmed on AWS).
+Under the lock the publish transaction reads the database and the primary again and
+decides again. A `DEPLOYMENT_ID` value is pinned in `system_settings` at boot
+(`ensureDeploymentIdMatch`); a mismatch throws `DeploymentIdMismatchError` and emits
+`AUDIT_ANCHOR_PUBLISH_FAILED` — this stops a publisher configured for another deployment
+from booting against this database. It does not serialize two instances of the same
+deployment; the lock and the create-only write do. The `system_settings` rows
+`audit_anchor_last_published_boundary` and `audit_anchor_previous_manifest`, which
+earlier releases decided from, are inert: nothing reads them.
+
+Secondary destinations mirror the primary's bytes: the boundary's own object within the
+run (one that already holds other bytes fails the run), older gaps by a byte copy of at
+most 7 manifests per publishing run.
 
 **Pause**: an upload failure sets `publish_paused_until` on the manifest's tenants
 until the **next cadence boundary** — at most one cadence (24 h), no longer the 72 h
@@ -68,20 +99,21 @@ clears it, so in practice it lasts until the scheduler's next same-boundary retr
 (every 15 min, at most three times per process, until 30 min before the next
 boundary) succeeds.
 
-**Attempt cap**: each run that passes the marker and tenant checks is counted per
-boundary in `system_settings.audit_anchor_upload_attempts`, in its own transaction
-committed before the publish transaction opens, so neither a rollback nor a crash
-after the PUT resets it. Above 3 the run uploads nothing and logs
+**Attempt cap**: each run that passes the decision above with something to publish or
+adopt is counted per boundary in `system_settings.audit_anchor_upload_attempts`, in its
+own transaction committed before the publish transaction opens, so neither a rollback
+nor a crash after the write resets it. Above 3 the run writes nothing and logs
 `audit-anchor-publisher.upload_cap_reached`, alarmed on AWS
 (`<name_prefix>-audit-anchor-publisher-upload-cap-reached`), and the first such run
 writes one `AUDIT_ANCHOR_PUBLISH_FAILED` row (`UPLOAD_ATTEMPT_CAP_REACHED`). A
 stored count that does not parse is treated as past the cap for that boundary
 (overwritten with the first count past it; `UPLOAD_ATTEMPT_COUNT_UNREADABLE`),
 so damaging the row costs one boundary, as planting a count does. The cap
-bounds how many versions of one day's key a crash loop or a retry storm can lock
-into the COMPLIANCE bucket. Because the count is a database row, a database writer
-can plant it to suppress a day's publish; the alarm makes that visible the same day
-rather than at the ~25 h cadence-absent alarm.
+bounds how often a crash loop or a retry storm reaches the destinations for one
+boundary; that it cannot lock a second version of the day's key into the COMPLIANCE
+bucket is the create-only write's doing, not the cap's. Because the count is a
+database row, a database writer can plant it to suppress a day's publish; the alarm
+makes that visible the same day rather than at the ~25 h cadence-absent alarm.
 
 **Genesis**: `Buffer.from([0x00])` — a single zero byte, distinct from a 32-byte
 `event_hash`, so genesis is unambiguous in the hash computation.
@@ -119,8 +151,9 @@ tracks `prevSeq` and flags the first place `seq !== prevSeq + 1` as
 publisher instances both trying to publish) — PREVENTED structurally, not just
 detected. Row-level: `deliverRowWithChain`'s `SELECT ... FOR UPDATE` on the anchor row
 serializes concurrent delivery attempts for the same tenant. Publisher-level: the
-blocking advisory lock plus the boundary marker (see "Chain construction" above) let
-one run per boundary publish and make every other run skip; on ECS the service also
+blocking advisory lock, under which each run reads the primary destination again, plus
+the create-only write (see "Chain construction" above) let one run per boundary
+publish and make every other run skip or adopt the same object; on ECS the service also
 runs at most one task and a deploy stops the old one before starting the new.
 
 **Publisher task role reuse** — the anchors bucket policy lets only the publisher's
@@ -262,17 +295,82 @@ misreporting tamper.
 - **v1 trust-zone / signing-key co-location** and **tag-secret distribution
   boundary**: both already documented in `audit-anchor-verification.md` (linked
   above); not restated here to avoid drift between two copies of the same claim.
-- **Database-written publisher state**: the publisher trusts `system_settings` for
-  the manifest pointer, the boundary marker and the attempt count. A database writer
-  can make runs skip (marker), stop uploading (attempt count) or chain to a pointer
-  of its choosing. A marker past the wall clock's current boundary fails every run
-  closed (`CADENCE_FAILED:BOUNDARY_MARKER_AHEAD`, alarmed as `cadence_failed`), so a
-  future marker cannot suppress the boundaries before its date quietly; one past the
-  run's boundary but not the clock's is alarmed as `stale_boundary`. What remains is a
-  marker set to the current boundary before its publish: that boundary skips, and no
-  alarm treats a skip as healthy, so the cadence-absent alarm sees it within a day.
-  The cap is alarmed too; making the published objects the source of
-  truth is the protocol-hardening follow-up (SC5 of
-  `docs/archive/review/aws-anchor-publisher-verify-worker-plan.md`), as is a
-  compromised publisher writing a new version of the same day's key (see
-  [`audit-anchor-verification.md` § Object versions](audit-anchor-verification.md#object-versions)).
+- **Database-write adversary against the publisher** and **what each destination
+  bounds**: see the next section.
+
+---
+
+## Publisher adversaries
+
+### A database writer
+
+Someone who can write the publisher's tables — `system_settings`,
+`audit_chain_anchors`, `tenants` — but holds neither the signing key nor write access to
+a destination.
+
+**Prevented.** No database grant writes a destination, and the decisions below read the
+destination, not the database:
+
+- *Suppressing a publication by claiming it happened.* No database value produces a
+  skip. The legacy marker row is inert; a `last_published_at` at or past the boundary
+  with no manifest at the primary fails the run closed instead.
+- *Redirecting the chain.* `previousManifest` is the latest verified manifest at the
+  primary. The legacy pointer row is inert.
+- *Forcing a second version of a day's key.* Rewinding `last_published_at` makes the
+  next run adopt the stored object again — same bytes, no write to the primary.
+
+**Residual and alarmed.** Each stops or wedges publishing, visibly, and is reset by
+correcting the value (`docs/operations/audit-anchor-rotation-runbook.md`), never by
+restarting the chain:
+
+| Database write | What happens | Alarm |
+|---|---|---|
+| attempt count planted or damaged | that boundary is not published | `upload_cap_reached` |
+| the advisory lock held by a session | runs stand down | `lock_held` |
+| `last_published_at` moved forward | every run fails closed (`LAST_PUBLISHED_AHEAD_OF_CLOCK` or `DESTINATION_BEHIND_DATABASE`) | `cadence_failed` |
+| every tenant's `audit_chain_enabled` cleared | `skipped_no_tenants`, unhealthy: an anchor row, or a manifest at the primary, shows the chain was once on — deleting the anchor rows as well does not make the skip healthy | `chain-enabled-fell-to-zero`, then cadence-absent |
+| `audit_anchor_deployment_id` changed | the publisher refuses to boot | `publisher-down` |
+
+**Detected by a row only.** No alarm; one `AUDIT_ANCHOR_PUBLISH_FAILED` row, written
+with the publish that noticed it, and the same event on the publisher's structured audit
+log line, which leaves the database's reach:
+
+- one tenant's `audit_chain_enabled` cleared → `TENANT_DROPPED_FROM_MANIFEST` (a tag of
+  the previous manifest is absent from this one);
+- a tenant's `chain_seq` lowered within an epoch → `CHAIN_SEQ_REGRESSION`; a verifier
+  comparing the two manifests gets exit 17.
+
+**Out of reach.** The publisher signs what the anchor rows hold at the boundary. A
+writer who rewrites `audit_logs` and the tenant's anchor row consistently before a
+publish has the rewritten head anchored; the manifest protects history from the moment
+it is published, not before. The rows above are themselves database content.
+
+### What each destination bounds
+
+"Terraform bucket" is the anchors bucket of `infra/terraform`. "Other stores" are GitHub
+Releases, the filesystem, and an S3 bucket without that bucket policy.
+
+| Adversary | Terraform bucket | Other stores |
+|---|---|---|
+| Database writer | Enforceable boundary: no database grant writes the bucket, and nothing that decides what is published reads the database. | The same. |
+| Writer of the destination without the current signing key | The key archive (`public-keys/*`) is writable only by the break-glass role, so a foreign `kid` resolves only to a key an operator archived: the verification of the latest manifest is a fail-closed gate. Nobody can delete. | The same writer can archive a key of its own, so the foreign-`kid` check is a best-effort tripwire: it catches corruption and misfiling, and a forged predecessor is *detected* — the publish that chains to it writes `AUDIT_ANCHOR_KEY_ROTATED` naming the unknown `kid` — not prevented. The writer can also delete, so `DESTINATION_BEHIND_DATABASE` and `LATEST_UNDER_RETIRED_KEY` are tripwires too. Adoption never rests on a foreign key: only an object the publisher's own key signed is adopted. |
+| Holder of the publisher task role's credentials, without the signing key | Can only wedge publishing: a manifest key holding bytes that do not verify as the latest (`PUBLISHED_OBJECT_UNVERIFIABLE`), a key *named* with a newly archived `kid` (`LATEST_UNDER_RETIRED_KEY`), or a manifest-named key that turns a never-enabled deployment's healthy skip unhealthy. All alarmed; all repeatable, so the reset is the role-credential incident, not a key change. Can also add a version to an existing key (SC1 below). | — (the row above: these stores have one writer) |
+| Holder of the current signing key | Not bounded by anything here (see the v1 trust-zone caveat). | Not bounded. |
+
+### Stated limits
+
+- **SC1 — create-only is enforced by the publisher, not by the bucket.** The bucket
+  policy does not require `If-None-Match` on a manifest PUT. A holder of the publisher
+  task role's credentials can add a version to a manifest key; COMPLIANCE keeps the
+  earlier one, and without the signing key the new one does not verify. It is detectable
+  by an operator running `list-object-versions`; nothing runs it automatically
+  ([`audit-anchor-verification.md` § Object versions](audit-anchor-verification.md#object-versions)).
+  Enforcing the condition in the policy needs a real-AWS apply and is a follow-up.
+- **SC5 — GitHub Releases and the filesystem do not separate writers or prevent
+  deletion.** One credential writes manifests, the key archive and the statements, and
+  can remove any of them; the column "Other stores" above is what that leaves
+  unbounded. On GitHub the create-only write also rests on the API refusing a second
+  asset of the same name, which has been exercised against a fake of the documented API
+  only, and a name reserved by an upload that never finished is removed after 10 minutes
+  with no conditional delete to close the window. A deployment that needs the bounds of
+  the left column uses the Terraform bucket as its primary.

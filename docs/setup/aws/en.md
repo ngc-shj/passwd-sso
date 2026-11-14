@@ -238,9 +238,11 @@ chain-enabled tenant's chain head and writes it to
 `<prefix>/YYYY-MM-DD.kid-<kid>.jws` with a COMPLIANCE retain-until 2555 days
 (7 × 365) out.
 
-- Its own task role carries only `s3:PutObject` and `s3:PutObjectRetention` on
-  `<bucket>/<prefix>/*`; the bucket policy lets that role, and nobody else,
-  write a manifest key. The verify worker has no task role.
+- Its own task role carries `s3:PutObject`, `s3:PutObjectRetention` and
+  `s3:GetObject` on `<bucket>/<prefix>/*` and `s3:ListBucket` restricted to the
+  prefix: the publisher reads what is already published from the bucket and
+  writes each day's key once. The bucket policy lets that role, and nobody
+  else, write a manifest key. The verify worker has no task role.
 - The bucket has Object Lock (COMPLIANCE, `audit_anchor_object_lock_days`,
   default 2557), versioning and SSE-S3. Its policy refuses deletes, lifecycle
   rules, a PUT without COMPLIANCE mode, a retention more than 31 days past the
@@ -249,9 +251,9 @@ chain-enabled tenant's chain head and writes it to
   role in `audit_anchor_break_glass_role_arn` may write them.
 - Terraform variables, the prefix rule and the outputs:
   `infra/terraform/README.md` "Audit anchor publisher". `DEPLOYMENT_ID`, an
-  existing anchors bucket without Object Lock, the first-publish report and
-  the CloudTrail prerequisite: `docs/operations/deployment.md` "Audit anchor
-  publisher on ECS".
+  existing anchors bucket without Object Lock, the upgrade order, the
+  first-publish report and the CloudTrail prerequisite:
+  `docs/operations/deployment.md` "Audit anchor publisher on ECS".
 
 ## Admin / Maintenance Scripts
 

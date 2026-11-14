@@ -15,8 +15,8 @@ even if both the database and the internal chain-verify endpoint report no anoma
 
 | Item | Where to find it |
 |---|---|
-| Public key URL | Your operator provides `<ARCHIVE_URL>/public-keys/<kid>.pub`. The `kid` appears in the JWS header. |
-| Manifest file | Published daily at `<ARCHIVE_URL>/<date>.kid-<kid>.jws` (primary S3 + GitHub Release mirror). |
+| Public key URL | Your operator provides `<ARCHIVE_URL>/public-keys/<kid>.pub`. The `kid` appears in the JWS header and in the manifest's file name. |
+| Manifest file | Published daily at `<ARCHIVE_URL>/<date>.kid-<kid>.jws`; `<date>` is the UTC date of the manifest's `anchoredAt`. Where the operator mirrors to GitHub Releases, see "GitHub-only verifiers" below. |
 | Your tenant ID | Settings → General → Tenant Information. Format: lower-case UUID, e.g. `550e8400-e29b-41d4-a716-446655440000`. |
 | Tag secret | Obtained from the dashboard verification kit (Settings → Security → Download Audit-Anchor Kit). Kit download requires a fresh login + MFA challenge. **Never share the tag secret or print it in documentation.** |
 
@@ -43,6 +43,9 @@ echo "kid: $KID"
 # 3. Fetch the matching public key
 curl -fsSL "$ARCHIVE_URL/public-keys/$KID.pub" -o anchor.pub
 # anchor.pub is a 64-char hex string (32-byte Ed25519 raw public key)
+
+# 3a. The kid must name this key: "audit-anchor-" + its first 8 bytes in hex
+[ "audit-anchor-$(head -c 16 anchor.pub)" = "$KID" ] || echo "kid does not name this key — stop"
 
 # 4. Convert the raw hex public key to DER (SubjectPublicKeyInfo, RFC 8410)
 printf '%s' "$(cat anchor.pub)" \
@@ -86,15 +89,61 @@ passwd-sso audit-verify \
 ```
 
 The CLI fetches the public key from `AUDIT_ANCHOR_PUBLIC_KEY_ARCHIVE_URL` (set in your
-environment or provided via `--archive-url`). Optionally compare against a prior manifest
-to detect chain-sequence regression:
+environment or provided via `--archive-url`) as `<archive-url>/<kid>.pub`, or reads it from
+the file given with `--public-key <path>`.
+
+The tenant check and the prior-manifest check are separate runs: with `--my-tenant-id` the
+command reports your tenant's entry and stops, without looking at `--prior-manifest`. To
+check the chain link and chain-sequence regression against a prior manifest (a local file):
 
 ```bash
 passwd-sso audit-verify \
   --manifest today.jws \
-  --prior-manifest yesterday.jws \
-  --my-tenant-id <uuid> \
-  --tag-secret-file kit/tag-secret.hex
+  --prior-manifest yesterday.jws
+```
+
+### What the CLI enforces
+
+- **`kid` binding.** A signature is accepted only under the key the JWS header's `kid`
+  names. The `kid` is `audit-anchor-` followed by the first 8 bytes of the raw public key in
+  hex, so the CLI derives it from the key it was given — file or archive — and compares
+  before it checks the signature. A mismatch is exit 19 (`KidMismatchError`), whatever the
+  signature. See "What the `kid` does and does not prove" below.
+- **Strict public keys.** A public key, from a file or from the archive, is exactly 64
+  lower-case hex characters once surrounding whitespace is trimmed. Anything else — 63 or 65
+  characters, upper case, a stray character — is refused (`InvalidPublicKeyError`, exit 1)
+  rather than read as far as it parses.
+- **`https` only.** A manifest URL and the archive URL must be `https://`. `http://` is
+  accepted only when the host is exactly `localhost`, `127.0.0.1` or `[::1]`; any other
+  URL is refused before anything is fetched (`InsecureUrlError`, exit 1). Redirects are not
+  followed: an answer other than 200 is an error.
+- **The prior manifest's key**, in this order: the prior manifest has the same `kid` as the
+  current one → the current key; else `--prior-public-key <path>`; else the archive, but
+  only when the current key also came from the archive (a key you handed over with
+  `--public-key` says nothing about what the archive serves); else the command stops and
+  names `--prior-public-key` (`PriorPublicKeyRequiredError`, exit 1). Across a key rotation:
+
+  ```bash
+  passwd-sso audit-verify \
+    --manifest first-under-new-key.jws --public-key new.pub \
+    --prior-manifest last-under-old-key.jws --prior-public-key old.pub
+  ```
+
+### GitHub-only verifiers
+
+A deployment that publishes to GitHub Releases stores each manifest as an asset of the
+release tagged `audit-anchor-<date>`, the public keys as assets `<kid>.pub` of the release
+`audit-anchor-public-keys`, and statements in the release `audit-anchor-key-rotation`.
+GitHub answers an asset download with a redirect, which the CLI refuses, so the archive URL
+cannot point at a release. Download the files and pass them:
+
+```bash
+gh release download "audit-anchor-<date>" --repo <owner>/<repo> --pattern '*.jws'
+gh release download audit-anchor-public-keys --repo <owner>/<repo> --pattern '<kid>.pub'
+# or: curl -fsSL -o '<kid>.pub' \
+#   "https://github.com/<owner>/<repo>/releases/download/audit-anchor-public-keys/<kid>.pub"
+
+passwd-sso audit-verify --manifest '<date>.kid-<kid>.jws' --public-key '<kid>.pub'
 ```
 
 ### Exit codes
@@ -110,7 +159,9 @@ passwd-sso audit-verify \
 | 15 | TenantNotInManifestError | Your tenant's derived tag is not present in the manifest. The tenant may not have had `audit_chain_enabled` at snapshot time. |
 | 16 | ChainBreakError | The current manifest's `previousManifest.sha256` does not match the sha256 of the supplied `--prior-manifest`. Manifests are not from the same chain or one has been replaced. |
 | 17 | ChainSeqRegressionError | A tenant's `chainSeq` decreased between prior and current manifest within the same epoch. This is a tamper signal. |
-| 1 | Unexpected error | All other errors (I/O, parse failure, etc.). See stderr for details. |
+| 18 | InvalidTagSecretLengthError | The tag secret is not 32 bytes (64 hex chars). |
+| 19 | KidMismatchError | The JWS header's `kid` does not name the public key the signature was checked under: the wrong key file, a misfiled archive entry, or a manifest relabelled with another `kid`. The signature is not evaluated. |
+| 1 | Unexpected error | All other errors: I/O, a fetch that did not answer 200, a `kid` of the wrong shape, a public key that is not 64 lower-case hex characters, a URL that is not `https`, a prior manifest under another key with no `--prior-public-key`. See stderr for details. |
 
 **Note on exit code 14**: the CLI does NOT silently lowercase a provided UUID. If you copy
 a tenant ID with uppercase letters, the command exits 14. Use canonical lower-case.
@@ -134,8 +185,10 @@ To obtain the secret:
    - `verify.sh` — a shell script wrapping the openssl recipe above.
 
 Store `tag-secret.hex` with the same care as other authentication credentials. If you believe
-the secret is compromised, contact your operator immediately. Rotation requires a 30-day overlap
-during which manifests publish both old and new tags.
+the secret is compromised, contact your operator immediately. Rotation is a cutover: from the
+first manifest after it, every `tenantTag` is derived from the new secret, and you need a new
+kit to find your tenant. There is no period in which a manifest carries both tags; keep the
+old kit to check manifests published before the rotation.
 
 ---
 
@@ -196,12 +249,96 @@ confirm the snapshot covers your time window.
 
 ---
 
+## What the `kid` does and does not prove
+
+The `kid` in a manifest's header and file name is a 64-bit identifier of the signing key —
+the first 8 bytes of the public key — not a commitment to it. Binding it (CLI exit 19, step
+3a of the openssl recipe) stops a manifest from being checked under the wrong key: a stale
+key file, a key archived under another key's name, a manifest relabelled to point at a key
+that happens to verify something else.
+
+It adds nothing against a party who serves you **both** the manifest and the key. Such a
+party serves a matching pair, and 64 bits is the length of an identifier, not of a hash
+commitment. What makes a key the operator's is how you obtained it: pin the public key
+(all 64 hex characters, not the `kid`) through a channel independent of the archive the
+first time, and from then on accept a new key only across a rotation you can follow (below).
+
+---
+
+## Key rotation
+
+A rotation is a cutover: the last manifest under the old key is followed by the first under
+the new key, whose `previousManifest` names that last one. Nothing is signed
+under both. To follow it:
+
+1. Verify the first new-key manifest against the last old-key one with `--prior-manifest`
+   and `--prior-public-key` (above). Exit 0 says the new chain continues the old one.
+2. Read the operator's rotation statement (below), which the **old** key signed and which
+   names the new public key in full.
+
+**A manifest under a `kid` dated after the rotation away from it is untrusted.** Once a
+manifest under the new `kid` exists, the old key is retired: the publisher refuses to run
+under it, and no legitimate manifest is signed with it again. A manifest under the old `kid`
+whose date is later than the first new-key manifest was made by someone holding a retired
+key. Report it; never prefer it, even though its signature verifies.
+
+### Verifying a statement
+
+Operators publish two kinds of signed statement next to the manifests, as
+`<ARCHIVE_URL>/key-rotation-<YYYYMMDD>.<op>.kid-<signer-kid>.jws`:
+
+- `rotation` — signed by the old key:
+  `{"issuedAt": …, "newKid": …, "newPublicKey": "<64 hex>", "oldKid": …, "op": "rotation"}`;
+- `chain-restart` — signed by the key the new chain starts under:
+  `{"issuedAt": …, "op": "chain-restart", "previousChain": {"sha256": …, "uri": …} | null}`.
+  `previousChain` names the last manifest of the chain that was abandoned (its payload
+  SHA-256, computed as under "Object versions"), or is `null` when none of it survives.
+
+A statement is a JWS like a manifest, with the header `typ`
+`passwd-sso.audit-anchor-statement.v1`. `passwd-sso audit-verify` does not verify
+statements (it exits 11 on that `typ`); use the openssl recipe under "Quick check via
+openssl" with the statement in place of `manifest.jws`, and check the `typ` where the recipe
+reads the `kid`:
+
+```bash
+curl -fsSL "$ARCHIVE_URL/key-rotation-<YYYYMMDD>.rotation.kid-<old-kid>.jws" -o manifest.jws
+
+# Step 2 of the recipe, also asserting the statement typ
+KID=$(cut -d. -f1 manifest.jws \
+  | awk '{ pad=length($0)%4; if(pad) for(i=pad;i<4;i++) $0=$0"="; print }' \
+  | tr '_-' '/+' \
+  | base64 -d \
+  | python3 -c "import sys,json; h=json.load(sys.stdin); assert h['typ']=='passwd-sso.audit-anchor-statement.v1', h['typ']; print(h['kid'])")
+
+# Steps 3 to 6 unchanged, with the OLD key you already trust as anchor.pub. Then the payload:
+cut -d. -f2 manifest.jws \
+  | awk '{ pad=length($0)%4; if(pad) for(i=pad;i<4;i++) $0=$0"="; print }' \
+  | tr '_-' '/+' \
+  | base64 -d
+```
+
+Use the old public key you already hold, not one fetched for the occasion: the statement is
+only as good as your trust in the key that signed it. `newPublicKey` in the payload is then
+the key to pin for the manifests that follow.
+
+**What a rotation statement shows.** Continuity, and only when the old key was not
+compromised. It is signed by the old key, so whoever holds that key can issue one naming a
+key of their choosing. After a rotation made because the old key leaked, the statement
+proves nothing; take the new key from the operator through a channel that does not rest on
+the old one.
+
+---
+
 ## Object versions
 
-The anchors bucket is versioned and COMPLIANCE-locked, and one day's key can hold more than
-one version: a publish whose upload succeeded but whose database commit did not is retried,
-and the retry PUTs the same key again (the publisher sends no conditional write). Verify
-against every version, not only the latest:
+**One version per key.** The publisher writes a manifest only when no object holds its key,
+and a retry — after a failed database commit, a crash, a restart — finds the stored object
+and adopts it instead of writing again. A manifest key therefore has exactly one version,
+and so do the archived public keys and the statements.
+
+More than one version of a key is a write outside the protocol. On the anchors bucket it is
+detectable by an operator running `list-object-versions`; nothing runs it automatically, and
+a plain download returns only the latest version:
 
 ```bash
 # Operator: every version and delete marker under the prefix
@@ -222,32 +359,40 @@ cut -d. -f2 manifest.jws \
   | base64 -d | sha256sum
 ```
 
-Its `previousManifest.uri` is `s3-object-lock://<date>.kid-<kid>.jws`: the key without the
-bucket's prefix.
+Its `previousManifest.uri` is `<destination>://<date>.kid-<kid>.jws` — `s3-object-lock://…`
+for the anchors bucket, `github-release://…`, `filesystem://…` — the key without any prefix.
 
 The rules, per key:
 
 - **The authoritative version** of a key is the one whose SHA-256 the next published
-  manifest's `previousManifest.sha256` names. Only for the newest key, which no manifest
-  names yet, is it the latest version — and it is provisional until the next manifest names it.
-- **Other versions created before the key's next boundary** (its date + 1 day, 00:05 UTC) are
-  retries: expected, never authoritative.
-- **A version created after the key's next boundary** is a tamper signal. Report it; never
-  prefer it. Every publisher run for a key starts before that boundary, and its two
-  transactions are bounded at 90 seconds each, so allow those few minutes (plus clock skew) and
-  no more.
-- **A key that no manifest references** is expected only when the next publish reported
-  `MISSING_PRIOR_CADENCE_PUBLICATION` (an `AUDIT_ANCHOR_PUBLISH_FAILED` row your operator can
-  show you): the upload was stored but never committed. Otherwise report it.
+  manifest's `previousManifest.sha256` names. For the newest key, which no manifest names
+  yet, it is the only version.
+- **A second version** is a tamper signal, whichever one the chain names. Report it. The one
+  exception is a key written before the deployment was upgraded to this protocol: the
+  earlier publisher re-sent the same key when a commit was lost, so such a key may carry
+  several versions created before its next boundary (its date + 1 day, 00:05 UTC). Ask your
+  operator for the upgrade date; for those keys the authoritative-version rule above
+  decides, and a version created after the key's next boundary is still a tamper signal.
+- **Every key is named by the next manifest.** The publisher chains to the latest manifest
+  the destination holds, whether or not its own database recorded that publish. A manifest
+  key no later manifest names is expected in two cases only: two keys on one date (the
+  operator has an `AUDIT_ANCHOR_PUBLISH_FAILED` row with `MULTIPLE_MANIFESTS_FOR_DATE` for
+  it), and the last key of a chain that was restarted, which the chain-restart statement
+  names. A key written before the upgrade may also be unreferenced when the publish after it
+  reported `MISSING_PRIOR_CADENCE_PUBLICATION`.
+- **Consecutive manifests more than one day apart** mean a boundary was never published.
 - **A delete marker on an anchor key** is a tamper signal. The bucket policy refuses deletes to
   everyone, so one means the policy was replaced.
 
-**Residual.** These rules cannot tell a retry from a version written by a compromised
-publisher — or by anyone holding its task role — before the day's boundary passes, and the
-next manifest chains to whichever sha256 the database pointer holds. Preventing a second
-version of a past key, and making the published objects rather than the database the source of
-truth, is the protocol-hardening follow-up (SC5 in
-`docs/archive/review/aws-anchor-publisher-verify-worker-plan.md`).
+**Residual.** The one-version rule is kept by the publisher, not by the bucket: the policy
+lets the publisher's task role PUT a manifest key without the create-only condition, so
+anyone holding that role's credentials can add a version. Without the signing key that
+version does not verify — a verifier who downloads it gets a failure, and when it is the
+newest key the publisher itself stops, since it reads that key before every publish — but
+the versions stay, and only the listing above shows them. Enforcing the condition in the bucket policy is tracked
+as a follow-up (SC1 of `docs/archive/review/audit-anchor-hardening-plan.md`). On GitHub
+Releases and on a filesystem there are no versions to list: a writer there can replace or
+remove an object, and the chain of `previousManifest` hashes is what shows it.
 
 ---
 

@@ -622,7 +622,7 @@ resource "aws_ecs_task_definition" "audit_anchor_publisher" {
       command   = ["node", "dist/audit-anchor-publisher.js"]
       # The Fargate maximum. SIGTERM stops the scheduler arming and waits for an
       # in-flight run, whose transaction is bounded at 90 s; the default 30 s
-      # would SIGKILL a run mid-upload.
+      # would SIGKILL a run mid-write.
       stopTimeout = 120
       logConfiguration = {
         logDriver = "awslogs"
@@ -703,7 +703,7 @@ resource "aws_ecs_service" "audit_anchor_publisher" {
   name            = "${local.name_prefix}-audit-anchor-publisher"
   cluster         = aws_ecs_cluster.main.id
   task_definition = aws_ecs_task_definition.audit_anchor_publisher.arn
-  # Never more than one: the advisory lock and the boundary marker make a
+  # Never more than one: the advisory lock and the create-only write make a
   # second publisher harmless, not useful.
   desired_count = min(1, var.worker_desired_count)
   launch_type   = "FARGATE"

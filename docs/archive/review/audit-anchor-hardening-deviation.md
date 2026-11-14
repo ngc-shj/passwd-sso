@@ -99,3 +99,37 @@
   bound's timer (the old timer still fires; the real per-call mutation is red), and
   swallowing the listing error in the hanging-`list` case (the next read yields the same
   token; row a's own case is red).
+
+## Batch D (C6, C8) and what writing the docs found
+
+- **D35 — S3 service errors are named by the SDK exception's `name`.** An AWS SDK service
+  exception has no `code`, so `errorLogFields` reduced every S3 refusal to `unknown`
+  (`s3-object-lock_READ_FAILED:unknown` for a missing read grant, where C5 promised
+  `AccessDenied`; the same held for today's `_UPLOAD_FAILED`). The publisher's destination
+  tokens now fall back to the exception's token-shaped `name` when the error carries
+  `$metadata`. Found by a read-only LIST with bad credentials against MinIO; tested with the
+  SDK's own `S3ServiceException`.
+- **D36 — a future-dated garbage manifest key is row b, not row c.** The latest manifest is
+  verified before its date is compared, so `PUBLISHED_OBJECT_AHEAD` needs a manifest that
+  verifies. C3's "garbage or future-dated key (rows b, c)" is row b for garbage. Docs follow
+  the code.
+- **D37 — rolling back to a pre-protocol release is unsafe** once this one has published: the
+  old publisher trusts the marker row this release no longer updates, would re-PUT the day's
+  key and chain to the stale pointer. Documented in `deployment.md` and the runbook (read from
+  `dcc1eded9`, not executed).
+- **D38 — tag-secret cutover edge:** an adopt of a manifest built under the old secret matches
+  no anchor row under the new one and never settles; the runbook says to switch after the
+  day's `published` line.
+- **D39 — `worker-policy-manifest.json` `modules`** gains only `anchor-published-state.ts`: the
+  sweep-bounds scanner reads the `DELETE` string in `github-release-destination.ts` as an
+  unjudgeable write, so the destination files stay out, with a `$modules-note` saying why.
+- **D40 — `scripts/deploy.sh` already applies Terraform before it moves the services**; the
+  upgrade order is stated as a requirement it satisfies.
+- **D41 — doc corrections beyond the plan:** `audit-verify --my-tenant-id` returns before the
+  `--prior-manifest` check (pre-existing; the example now shows two runs); exit 18 added to
+  the table; the runbook's reference to a `block-secret-key-destruction.sh` hook that exists
+  nowhere is dropped; `docs/setup/aws/en.md` no longer says the task role is write-only.
+- **D42 — `SUBCOMMANDS` in `scripts/audit-anchor-keys.ts` is exported** for the runbook test.
+- **D43 — simplify pass:** the single-use `wallClockBoundaryMs` helper and the unused
+  `manifestKeysOf` export were removed; the other proposals touched locked tokens or
+  operator-visible text and were left.

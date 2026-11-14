@@ -492,8 +492,8 @@ aws:PrincipalArn` condition):
 | Keys | Holds | Writer |
 |------|-------|--------|
 | `<prefix>/????-??-??.kid-*.jws` | daily manifests | the publisher's task role only |
-| `<prefix>/key-rotation-*` | rotation advisory (runbook Step 4) | the break-glass role only |
-| `<prefix>/public-keys/*` | public-key archive (runbook Step 5) | the break-glass role only |
+| `<prefix>/key-rotation-*` | signed rotation and chain-restart statements (runbook Step 5) | the break-glass role only |
+| `<prefix>/public-keys/*` | public-key archive (runbook Step 4) | the break-glass role only |
 | anything else | — | nobody, the publisher included |
 
 On top of that: `s3:DeleteObject` and `s3:DeleteObjectVersion` are refused to
@@ -515,9 +515,13 @@ created without Object Lock needs an in-place step before the next plan — see
 
 **Services.**
 
-- Publisher: its own task role (`*-ecs-audit-anchor-publisher-task`, only
-  `s3:PutObject` and `s3:PutObjectRetention` on `<bucket>/<prefix>/*` — no read,
-  list or delete; assumable by this account's ECS tasks only, `aws:SourceAccount`,
+- Publisher: its own task role (`*-ecs-audit-anchor-publisher-task`:
+  `s3:PutObject`, `s3:PutObjectRetention` and `s3:GetObject` on
+  `<bucket>/<prefix>/*`, and `s3:ListBucket` on the bucket under the condition
+  `s3:prefix` like `<prefix>/*` — no delete, and no read or list outside the
+  prefix. The read side is what the publisher decides from: it lists the prefix
+  and reads the latest manifest before every run, and reads back any key it
+  finds taken. Assumable by this account's ECS tasks only, `aws:SourceAccount`,
   and any `RunTask`/`StartTask` passing it as a task-role override fires the
   EventBridge rule `<name_prefix>-audit-anchor-publisher-role-override`; IAM
   changes to the role are not alarmed by this stack, see
@@ -529,7 +533,7 @@ created without Object Lock needs an in-place step before the next plan — see
   `deployment_minimum_healthy_percent = 0`: a deploy stops the old task (SIGTERM;
   it stops scheduling and finishes an in-flight run within `stopTimeout = 120`)
   before the new one starts, and the new task's boot run publishes the current
-  boundary only if it is unpublished. Log group
+  boundary only if the bucket holds no manifest for it. Log group
   `/ecs/<name_prefix>/audit-anchor-publisher`.
 - Verify worker: no task role (it calls no AWS API); its only secret is the app
   secret's `DATABASE_URL`, passed as `AUDIT_CHAIN_VERIFY_DATABASE_URL`. That is
@@ -549,9 +553,20 @@ created without Object Lock needs an in-place step before the next plan — see
 **`DEPLOYMENT_ID`.** Generate once per deployment (`node -e
 'console.log(crypto.randomUUID())'`) and add it to the app secret. Reuse a stored
 value only for a successor of the same deployment whose predecessor is gone; a
-clone or a restored copy generates a new one and follows the rotation runbook's
-"DEPLOYMENT_ID change recovery". See `docs/operations/deployment.md`
-"`DEPLOYMENT_ID`".
+clone or a restored copy generates a new one, follows the rotation runbook's
+"DEPLOYMENT_ID change recovery", and gets its own prefix or bucket. See
+`docs/operations/deployment.md` "`DEPLOYMENT_ID`".
+
+**Upgrade order.** The read grant above is new, and it is the only resource
+change of the release that introduced it. Apply Terraform, then run the new
+image: `scripts/deploy.sh` does both in that order (its `terraform apply`
+precedes the service update). A publisher on the new image without the grant
+publishes nothing — every run fails closed with
+`s3-object-lock_READ_FAILED:<code>`, alarmed as `cadence_failed` — until the
+grant is applied and the publisher restarted. The break-glass role's own
+permissions are not managed here: besides the writes, the runbook's scripts
+need `s3:GetObject` and `s3:ListBucket` on the prefix for it. See
+`docs/operations/deployment.md` "Upgrade order".
 
 **Outputs** used by the runbooks and `scripts/deploy.sh`:
 `audit_anchors_bucket_name`, `audit_anchor_s3_prefix`,

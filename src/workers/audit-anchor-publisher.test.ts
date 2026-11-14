@@ -24,6 +24,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { randomBytes } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
+import { S3ServiceException } from "@aws-sdk/client-s3";
 import {
   ADVISORY_LOCK_KEY,
   AuditAnchorPublisher,
@@ -486,6 +487,35 @@ describe("AuditAnchorPublisher.runCadence — lock and no tenants", () => {
     const outcome = await publisherFor(db, { destinations: [primary] }).runCadence(BOUNDARY);
 
     expect(outcome).toMatchObject({ kind: "skipped_no_tenants", everChainEnabled: false });
+  });
+
+  it("names an S3 service refusal by the SDK exception's name, which carries no code", async () => {
+    const db = makeDb();
+    const refusal = new S3ServiceException({
+      name: "AccessDenied",
+      $fault: "client",
+      $metadata: { httpStatusCode: 403 },
+    });
+    const { dest } = tracked(new InMemoryDestination("s3-object-lock"), {
+      list: async () => {
+        throw refusal;
+      },
+    });
+    const outcome = await publisherFor(db, { destinations: [dest] }).runCadence(BOUNDARY);
+
+    expect(outcome).toMatchObject({ kind: "failed", reason: "s3-object-lock_READ_FAILED:AccessDenied" });
+  });
+
+  it("keeps unknown for a destination error that names no fault", async () => {
+    const db = makeDb();
+    const { dest } = tracked(new InMemoryDestination("filesystem"), {
+      list: async () => {
+        throw new Error("no code, no metadata");
+      },
+    });
+    const outcome = await publisherFor(db, { destinations: [dest] }).runCadence(BOUNDARY);
+
+    expect(outcome).toMatchObject({ kind: "failed", reason: "filesystem_READ_FAILED:unknown" });
   });
 
   it("with no tenant, a listing that fails is a read failure (row a), not a skip", async () => {

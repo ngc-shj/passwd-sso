@@ -674,62 +674,115 @@ aws ecs update-service --cluster <cluster> --service <name_prefix>-audit-anchor-
   --force-new-deployment --region <region>
 ```
 
-Reading what the database holds (as the owner role; `system_settings` admits
-only a bypassed session):
+**What decides a run.** Not a database row: the publisher lists its primary
+destination (the first configured: S3, else GitHub Releases, else the
+filesystem), reads and verifies the latest manifest there, and compares it
+with one database value, the greatest `audit_chain_anchors.last_published_at`.
+A run publishes, adopts an object an earlier run stored but did not commit,
+skips, or fails closed; the fail-closed reasons, what triggers each and how
+each is reset per destination type are the table "Fail-closed reasons and
+their resets" in `docs/operations/audit-anchor-rotation-runbook.md`. Every one
+of them reaches this page as `cadence_failed` (below): no reason has an alarm
+of its own.
+
+Reading what the database holds (as the owner role; both tables admit only a
+bypassed session):
 
 ```sql
 BEGIN READ ONLY;
 SET LOCAL app.bypass_rls = 'on';
-SET LOCAL app.bypass_tables = 'system_settings';
+SET LOCAL app.bypass_tables = 'system_settings,audit_chain_anchors';
 SET LOCAL app.bypass_purpose = 'system_maintenance';
 SELECT key, value, updated_at FROM system_settings
 WHERE key LIKE 'audit_anchor_%' ORDER BY key;
+SELECT tenant_id, last_published_at, publish_paused_until FROM audit_chain_anchors
+ORDER BY last_published_at DESC NULLS LAST;
 ROLLBACK;
 ```
 
-`audit_anchor_last_published_boundary` is the boundary marker,
-`audit_anchor_previous_manifest` the pointer the next manifest chains to, and
-`audit_anchor_upload_attempts` the attempt count (`{boundary, count}`). A count
-row that does not parse is replaced by the next run with the first count past
-the cap for that run's boundary (see `upload_cap_reached`).
+`audit_anchor_upload_attempts` is the attempt count (`{boundary, count}`); a
+count row that does not parse is replaced by the next run with the first count
+past the cap for that run's boundary (see `upload_cap_reached`).
+`audit_anchor_deployment_id` is the value the publisher was first booted with.
+`audit_anchor_last_published_boundary` and `audit_anchor_previous_manifest`
+are left over from earlier releases and inert: nothing reads or writes them,
+and editing them changes nothing.
 
-The marker only moves forward. A run whose boundary is at or before the marker
-is `skipped_already_published`; one strictly before it also logs
-`audit-anchor-publisher.stale_boundary` (below). Two markers fail every run
-before the upload, uncounted, as a database-write incident (it was damaged or
-planted):
+`last_published_at` is what a publish records, per tenant in the manifest: the
+wall clock clamped into the published boundary. It can make a run refuse
+(`LAST_PUBLISHED_AHEAD_OF_CLOCK`, `DESTINATION_BEHIND_DATABASE`) or adopt
+again; it never makes one skip.
 
-- one that is not the ISO-8601 timestamp a publish writes
-  (`2026-01-15T00:05:00.000Z`): `reason: CADENCE_FAILED:BOUNDARY_MARKER_UNREADABLE`;
-- one later than the wall clock's current boundary — a boundary no publish has
-  reached yet: `reason: CADENCE_FAILED:BOUNDARY_MARKER_AHEAD`. Read as
-  published, it would skip every boundary up to its date with no alarm but the
-  cadence-absent one a day later. A marker equal to the current boundary is a
-  publish of today and skips as usual.
+Lines the publisher logs that have no alarm of their own, all warn level
+unless noted:
 
-Either way, restore the marker to the last boundary a `published` line names
-(or delete it, and the anchors' `last_published_at` stands in) and restart the
-service for a boot run. For `BOUNDARY_MARKER_AHEAD`, first confirm the task's
-clock is right (`date -u` against the cadence lines' timestamps): a clock that
-runs behind makes a marker it wrote itself look ahead, and the fix there is the
-clock, not the row.
+- `audit-anchor-publisher.published_object_unverifiable` (error) — with
+  `artifactKey` and `detail`, on a run that fails with
+  `CADENCE_FAILED:PUBLISHED_OBJECT_UNVERIFIABLE`; `detail` says which check
+  failed (`PUBLIC_KEY_NOT_ARCHIVED`, `PUBLIC_KEY_INVALID`, `SIGNATURE_INVALID`,
+  `DATE_MISMATCH`, `OBJECT_MISSING`). The run's `cadence_failed` line is what
+  alarms.
+- `audit-anchor-publisher.published_by_other_identity` — the boundary's
+  manifest exists and was published under another `kid` or `DEPLOYMENT_ID`
+  (`kidMatches`, `deploymentMatches`, `artifactKey`). The run is a
+  `skipped_already_published`, and one `AUDIT_ANCHOR_PUBLISH_FAILED` row with
+  `PUBLISHED_BY_OTHER_IDENTITY` is written per boundary per process start.
+  Expected for the rest of the day after a signing-key rotation or a
+  `DEPLOYMENT_ID` change. On any other day a second deployment publishes to
+  this prefix; since a skip is never healthy, the cadence-absent alarm follows
+  within a day.
+- `audit-anchor-publisher.previous_manifest_deployment_changed` — the manifest
+  this run chains to carries another `deploymentId`. Expected once, on the
+  first publish after a `DEPLOYMENT_ID` change.
+- `audit-anchor-publisher.mirror_backfill_failed` — after a publish, copying
+  older manifests to a secondary destination failed (`destination`,
+  `error.code`; `MIRROR_DIVERGED` when the secondary holds other bytes at a
+  key, `PRIMARY_OBJECT_MISSING` when a listed key could not be read). It does
+  not change the run's outcome, and the next publishing run tries again.
+  Repeating daily, the secondary is not catching up: fix its access, or look
+  at what it holds.
+- `audit-anchor-publisher.unrecognised_manifest_key` — the primary holds a key
+  that looks like a manifest's (`????-??-??.kid-*.jws`) but is not one the
+  publisher builds. It is ignored. On the anchors bucket only the publisher's
+  task role can have written it: treat it as use of that role's credentials.
+
+Rows a publish writes beside its `AUDIT_ANCHOR_PUBLISHED` row, each an
+`AUDIT_ANCHOR_PUBLISH_FAILED` row carrying `failureReason`, `artifactKey` and
+`anchoredAt`. None stops the publish and none is alarmed; read them with the
+query under Step 7 of the rotation runbook:
+
+| `failureReason` | Meaning | Expected when |
+|---|---|---|
+| `OWN_PUBLIC_KEY_NOT_ARCHIVED` | `public-keys/<kid>.pub` for the publisher's own key is missing at the primary, or holds another key. Verifiers cannot fetch the key. | Daily, until the key is archived (`npm run audit-anchor-publish-pubkey`, rotation runbook Step 4). |
+| `MULTIPLE_MANIFESTS_FOR_DATE` (`date`, `count`) | The date of the manifest this run chained to holds more than one manifest key. | Never. A second key on a date is a second publisher or a planted object. |
+| `TENANT_DROPPED_FROM_MANIFEST` (`count`) | Tenants of the previous manifest are absent from this one. | Once, with every tenant, on the first publish after a tag-secret rotation. Otherwise a tenant's `audit_chain_enabled` was cleared — find who did (see `cadence` below). |
+| `CHAIN_SEQ_REGRESSION` (`count`) | Tenants whose `chainSeq` is lower than in the previous manifest, in the same epoch. | Never. A bug or tampering: a security incident. |
+| `MISSING_PRIOR_CADENCE_PUBLICATION` | See `missing_prior_cadence` below. | |
+
+`AUDIT_ANCHOR_KEY_ROTATED` (`oldKid`, `newKid`, `anchoredAt`, `artifactKey`) is
+written by the first publish whose manifest is under another `kid` than the one
+it chains to. Expected once per rotation; one naming a `kid` no operator
+archived is a forged predecessor (`docs/security/audit-chain-threat-model.md`).
+`AUDIT_ANCHOR_PUBLISHED` carries `adopted` (the run stored nothing: the object
+was already at the primary) and `genesis` (the manifest has no
+`previousManifest` — the first ever, or the first after a chain restart).
 
 ## `audit-anchor-publisher.stale_boundary`
 
 **Severity**: high
 **Trigger**: any occurrence (filter and alarm
 `<name_prefix>-audit-anchor-publisher-stale-boundary`). Warn level, with
-`boundary` and `marker`; the run is a `skipped_already_published`.
-**What it means**: a run for a boundary found the marker past it but not past
-the wall clock's current boundary. The run skips rather than write the marker
-back. On ECS this has no legitimate cause: a boundary's retries stop 30 minutes
-before the next, and a timer never runs before its boundary, so this process
-never runs a boundary after it published a later one. Another writer moved the
-marker — a second publisher against this database, or a database write. It is
-never a clock that went back: that clock's current boundary is earlier too, so
-the marker reads as ahead of it and the run fails closed with
-`CADENCE_FAILED:BOUNDARY_MARKER_AHEAD` (see the boundary-marker notes above).
-**Recovery**: look for a second publisher first. Run the holder query under
+`boundary` and `latestArtifactKey`; the run is a `skipped_already_published`.
+**What it means**: a run for a boundary found, at the primary destination, a
+verified manifest dated after that boundary but not after the wall clock's
+current one. The run skips. On ECS this has no legitimate cause: a boundary's
+retries stop 30 minutes before the next, and a timer never runs before its
+boundary, so this process never runs a boundary after it published a later
+one. Another writer published the later manifest — a second publisher against
+this destination. It is never a clock that went back: that clock's current
+boundary is earlier too, so the manifest reads as ahead of it and the run
+fails closed with `CADENCE_FAILED:PUBLISHED_OBJECT_AHEAD`.
+**Recovery**: look for a second publisher. Run the holder query under
 `audit-anchor-publisher.lock_held` (below), and list every session the
 publisher's pool would open:
 
@@ -740,20 +793,24 @@ WHERE application_name = 'passwd-sso-audit-anchor-publisher';
 ```
 
 More than the one task's connections, or a `client_addr` that is not the
-service's task, is a second publisher: stop it, then compare `marker` with the
-`published` lines (below) — a boundary it published is in the bucket under its
-key. If there is none, treat the marker as a database-write incident (see
-`cadence_healthy`): restore it to the last boundary a `published` line names.
+service's task, is a second publisher: stop it. A second publisher need not
+share this database — a clone pointed at the same prefix shows only at the
+destination. `latestArtifactKey` names the object; who wrote it is in the
+destination's own records (on AWS, the trail's data events for the anchors
+bucket).
 
 ## `audit-anchor-publisher.cadence_healthy`
 
 Logged once per healthy boundary, and only then: a `published` run, or a
 `skipped_no_tenants` run on an install where no tenant has ever enabled the
 chain (`everChainEnabled: false`, decided by the absence of any
-`audit_chain_anchors` row). `skipped_already_published`, `failed`,
-`upload_cap_reached` and `lock_held` never emit it (nor does a
-`stale_boundary` skip, which is a `skipped_already_published`): the boundary marker is a
-database row, so a skip must not read as health.
+`audit_chain_anchors` row and of any manifest key at the primary destination,
+so deleting the anchor rows does not turn the skip healthy).
+`skipped_already_published`, `failed`, `upload_cap_reached` and `lock_held`
+never emit it (nor does a `stale_boundary` skip, which is a
+`skipped_already_published`): a skip means this run published nothing, so it
+must not read as health. A `published` run that adopted a stored object emits
+it once, like any other.
 
 **Severity**: high
 **Trigger**: the alarm `<name_prefix>-audit-anchor-cadence-absent` — no line
@@ -765,9 +822,11 @@ the attempt cap, or no tenant chain-enabled any more.
 **Recovery**: read the last day's cadence lines (below); fix what their `reason`
 names; restart the service for a boot run. If the runs report
 `skipped_already_published` while no `published` line exists for that boundary,
-the marker was written by something other than a publish — treat it as a
-database-write incident (the publisher trusts `system_settings`; see
-`docs/security/audit-anchor-verification.md`).
+the boundary's manifest was published by something else: the
+`published_by_other_identity` line beside the skip says whether its `kid` or
+its `DEPLOYMENT_ID` differs. After a rotation or a `DEPLOYMENT_ID` change that
+is the rest of that day and clears at the next boundary; otherwise a second
+deployment writes to this prefix.
 
 A **deliberate full disable** — every tenant's chain turned off after one was
 on — leaves this alarm in ALARM, and that is the state to see: nothing is being
@@ -803,19 +862,20 @@ the chain with a tenant-scoped `UPDATE` (the shape of the `__system__` one under
 **Severity**: high
 **Trigger**: any occurrence (filter and alarm
 `<name_prefix>-audit-anchor-publisher-upload-cap-reached`).
-**What it means**: three runs for this boundary already passed the marker and
-tenant checks — each counted in `audit_anchor_upload_attempts` before it could
-upload — so this run uploaded nothing. The first run past the cap writes one
-`AUDIT_ANCHOR_PUBLISH_FAILED` row (`failureReason: UPLOAD_ATTEMPT_CAP_REACHED`);
-later runs for the same boundary log only. The cap exists so that a crash loop
-or a retry storm cannot lock more versions of the day's key.
+**What it means**: three runs for this boundary already found something to
+publish or adopt — each counted in `audit_anchor_upload_attempts` before its
+publish transaction opened — so this run wrote nothing. The first run past the
+cap writes one `AUDIT_ANCHOR_PUBLISH_FAILED` row (`failureReason:
+UPLOAD_ATTEMPT_CAP_REACHED`); later runs for the same boundary log only. The cap
+bounds how often a crash loop or a retry storm reaches the destinations for one
+boundary. A run that skips or fails closed at its first look is not counted.
 
 The line also fires, with `countUnreadable: true`, when the stored
 `audit_anchor_upload_attempts` value does not parse (not JSON, or not
 `{boundary, count}` with a positive integer count). Such a value cannot say how
-many runs reached the upload, so the run treats the boundary as past the cap:
-it overwrites the value with `{boundary: <this boundary>, count: 4}`, uploads
-nothing, and writes the one row with `failureReason:
+many runs reached the publish transaction, so the run treats the boundary as
+past the cap: it overwrites the value with `{boundary: <this boundary>, count:
+4}`, writes nothing, and writes the one row with `failureReason:
 UPLOAD_ATTEMPT_COUNT_UNREADABLE` instead.
 **Recovery**: read the boundary's earlier `cadence_failed` lines for the cause
 (and ECS task-stop events, for a crash loop). A count nobody's runs explain —
@@ -829,17 +889,17 @@ first run counts 1 and publishes. The missed boundary is then reported once as
 **Severity**: high
 **Trigger**: any occurrence (alarm
 `<name_prefix>-audit-anchor-publisher-commit-failed-after-upload`).
-**What it means**: every destination accepted the manifest, then the publish
+**What it means**: every destination holds the manifest, then the publish
 transaction did not commit (a database error, the 90 s transaction bound, a lost
-connection). The object is stored, the pointer and marker are not. No pause is
-written — the destination is healthy. The scheduler retries the boundary every
-15 minutes; the retry PUTs the same key again, so the bucket keeps both
-versions, and the one the next manifest's `previousManifest` names is the
-committed one.
+connection). The object is stored, `last_published_at` is not. No pause is
+written — the destinations are healthy. The scheduler retries the boundary every
+15 minutes; the retry finds the stored object, verifies it and adopts it
+(`published` with `adopted: true`), so the key keeps its one version.
 **Recovery**: read `error.code` on the line and check the database. Confirm a
 later `published` line for the same `boundary`. If none follows before the next
-boundary, that version stays unreferenced and the next publish reports
-`MISSING_PRIOR_CADENCE_PUBLICATION`.
+boundary, the next publish still chains to the stored object — the destination
+decides, not the database — and reports `MISSING_PRIOR_CADENCE_PUBLICATION`
+because nothing recorded the earlier one.
 
 ## `audit-anchor-publisher.cadence_failed` / `audit-anchor-publisher.upload_failed`
 
@@ -850,14 +910,23 @@ boundary, that version stays unreferenced and the next publish reports
 **What it means**: `cadence_failed` is every failed run, with `reason` (a token,
 also written to the `AUDIT_ANCHOR_PUBLISH_FAILED` row) and `stage`:
 
-- `before_upload` — the run failed before uploading. Either before the attempt
-  count was written — the database unreachable, the tenants read failing — in
-  which case it cost no attempt; or after it — the signing step, or an
-  `audit_anchor_previous_manifest` that does not parse — in which case it cost
-  one. A boundary marker that does not parse, or one past the wall clock's
-  current boundary, fails here too, before the count
-  (`CADENCE_FAILED:BOUNDARY_MARKER_UNREADABLE`,
-  `CADENCE_FAILED:BOUNDARY_MARKER_AHEAD`; see "Audit anchor publisher" above). Both are retried every 15 minutes (at most three times per process), so
+- `before_upload` — the run failed before writing anything. Either before the
+  attempt count was written — the database unreachable, the tenants read
+  failing, or one of the fail-closed states — in which case it cost no attempt;
+  or after it — the signing step, or the same states found again under the
+  lock — in which case it cost one. The fail-closed states are
+  `<destination>_READ_FAILED:<code>` (the primary could not be listed or read),
+  `CADENCE_FAILED:PUBLISHED_OBJECT_UNVERIFIABLE`,
+  `CADENCE_FAILED:PUBLISHED_OBJECT_AHEAD`,
+  `CADENCE_FAILED:LAST_PUBLISHED_AHEAD_OF_CLOCK`,
+  `CADENCE_FAILED:DESTINATION_BEHIND_DATABASE` and
+  `CADENCE_FAILED:LATEST_UNDER_RETIRED_KEY`; trigger and reset of each are in
+  the rotation runbook's table. `<destination>` is `s3-object-lock`,
+  `github-release` or `filesystem`. For an S3 service error `<code>` is the S3 error
+  name: right after an upgrade,
+  `s3-object-lock_READ_FAILED:AccessDenied` on every run is the publisher's IAM read
+  grant not applied yet (`docs/operations/deployment.md` "Upgrade order"). Both
+  kinds are retried every 15 minutes (at most three times per process), so
   a transient database outage at the boundary does not cost the day; a
   deterministic failure after the count reaches `upload_cap_reached` after
   three runs, and one before it stops at `retries_exhausted`. (An
@@ -865,12 +934,18 @@ also written to the `AUDIT_ANCHOR_PUBLISH_FAILED` row) and `stage`:
   here: it reports `upload_cap_reached` with `countUnreadable: true`, and the
   next boundary recovers by itself.) Fix it and delete the
   `audit_anchor_upload_attempts` row if the boundary must still be published.
-- `upload` — a destination refused or the 60 s upload bound fired
-  (`UPLOAD_TIMEOUT`). `upload_failed` names the destination and carries
-  `error.code` (`AccessDenied` usually means the bucket policy or the task role
-  drifted from Terraform). The run also pauses the manifest's tenants until the
-  next boundary: the audit-outbox worker stops advancing their chains, and the
-  15-minute retry that publishes clears it.
+- `upload` — a create at the primary or at a secondary failed, or the 60 s
+  bound on the run's destination I/O fired (`UPLOAD_TIMEOUT`):
+  `<destination>_UPLOAD_FAILED:<code>`. `upload_failed` names the destination
+  and carries `error` (`name: AccessDenied` usually means the bucket policy or
+  the task role drifted from Terraform; the line's `code` is `unknown` for an S3
+  service error, while the reason token carries the name). Two more reasons have this stage and no `upload_failed` line, both
+  about a secondary that already held the boundary's key:
+  `<destination>_MIRROR_DIVERGED` (it holds other bytes than the primary) and
+  `<destination>_READ_FAILED:<code>` (it could not be read back to compare).
+  The run also pauses the manifest's tenants until the next boundary: the
+  audit-outbox worker stops advancing their chains, and the 15-minute retry
+  that publishes clears it. The retry adopts what the primary already holds.
 - `after_upload` — see `commit_failed_after_upload` above.
 
 Rows per boundary: the persisted count admits at most three counted runs across
@@ -908,12 +983,15 @@ MISSING_PRIOR_CADENCE_PUBLICATION`) after its own commit; a run that fails
 writes only its own failure row, so the retries that follow do not repeat it
 and the run that publishes reports the gap once. It never stops the publish.
 
-Expected **once**, on the first publish after a tenant enables the chain. Any
-later occurrence means a boundary was never committed — the publisher was down
-for that whole day, every attempt failed, or the cap was reached. In the bucket
-that day's key may hold versions no manifest references, which
-`docs/security/audit-anchor-verification.md` treats as expected only in exactly
-this case.
+Expected **once**, on the first publish after a tenant enables the chain, and
+once after a chain restart. Any later occurrence means a boundary was never
+committed — the publisher was down for that whole day, every attempt failed, or
+the cap was reached — or that its object was stored and never recorded: a
+commit lost with no retry after it, including one lost just before a
+signing-key rotation or a `DEPLOYMENT_ID` change, which the new identity does
+not adopt. In that last case the day's manifest exists at the destination and
+the next one chains to it. The query reads the database only: it says nothing
+about what the destination holds.
 
 ## `audit-anchor-publisher.lock_held`
 
@@ -924,7 +1002,8 @@ this case.
 another session held, and stood down. It writes no failure row and no pause. It
 is retried for the same boundary like a failure (every 15 minutes, at most three
 times per process, not inside the last 30 minutes); if the holder published in
-the meantime, the retry's marker re-check makes it `skipped_already_published`.
+the meantime, the retry finds the boundary's manifest at the primary destination
+and is `skipped_already_published`.
 Nothing guarantees the holder publishes — any role that can connect can take
 the advisory lock — so after the retries the boundary waits like any other
 failure. On ECS it should never occur: the service runs one task and a deploy
@@ -1030,10 +1109,10 @@ own family, so there is no expected false positive.
 **Recovery**: the event names the principal, the cluster and the task
 definition. Stop any task running it (`aws ecs stop-task`); for a registered
 definition, deregister it (`aws ecs deregister-task-definition`). Then remove
-`iam:PassRole` on the publisher role from that principal. Compare the bucket's versions for the
-day's key against the `published` cadence lines
-(`docs/security/audit-anchor-verification.md`): a version no publish explains is
-a forged manifest.
+`iam:PassRole` on the publisher role from that principal. List the bucket's versions
+(`docs/security/audit-anchor-verification.md` "Object versions"): a manifest key
+has one version, so a second version of any key, or a manifest key no
+`published` cadence line explains, was written with that role.
 
 A task of the publisher's **own** family needs neither an override nor a new
 family; that route has its own section, "Publisher-family task outside the
@@ -1100,9 +1179,10 @@ revision (the CloudTrail one also names the principal). Stop the task
 it, delete that service. Compare the revision with the one the publisher
 service runs (`aws ecs describe-services`) and deregister any revision no
 deploy registered. Remove `ecs:RunTask` / `ecs:StartTask` (or `iam:PassRole` on
-the publisher role) from the principal that started it. Then compare the
-bucket's versions for the day's key against the `published` cadence lines
-(`docs/security/audit-anchor-verification.md`), as for the rules above.
+the publisher role) from the principal that started it. Then list the
+bucket's versions and compare the manifest keys with the `published` cadence
+lines (`docs/security/audit-anchor-verification.md` "Object versions"), as for
+the rules above.
 
 ## `rls.bypass_not_granted`
 

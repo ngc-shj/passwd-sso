@@ -179,13 +179,14 @@ locals {
   audit_anchor_prefix = module.anchor_prefix.prefix
 
   # The manifest key shape, `YYYY-MM-DD.kid-<kid>.jws`, from
-  # buildManifestArtifactKey (src/workers/audit-anchor-publisher.ts), joined to
+  # buildManifestArtifactKey (src/lib/audit/anchor-artifact-keys.ts), joined to
   # the prefix as joinS3Key does. S3 policy wildcards: `?` is one character,
   # `*` any sequence (including `/`). Pinned to the builder by
   # src/__tests__/infra/audit-anchor-key-contract.test.ts.
   audit_anchor_manifest_pattern = "${local.audit_anchor_prefix}/????-??-??.kid-*.jws"
-  # The rotation runbook's operator writes (Steps 4-5): the rotation advisory
-  # and the public-key archive the verifiers read.
+  # The rotation runbook's operator writes (Steps 4-5): the public-key archive
+  # the verifiers and the publisher read, and the signed rotation and
+  # chain-restart statements.
   audit_anchor_break_glass_patterns = [
     "${local.audit_anchor_prefix}/key-rotation-*",
     "${local.audit_anchor_prefix}/public-keys/*",
@@ -305,7 +306,7 @@ resource "aws_s3_bucket_policy" "audit_anchors" {
       },
       merge(
         {
-          # Rotation advisory and public-key archive: the break-glass operator
+          # Signed statements and public-key archive: the break-glass operator
           # only. With no operator role configured, nobody — an unconditional
           # Deny, never a condition with an empty value list.
           Sid       = "DenyBreakGlassPathWriteExceptOperator"
@@ -380,7 +381,7 @@ resource "aws_s3_bucket_policy" "audit_anchors" {
       },
       {
         # Also refuses a PUT without the header, so every writer must send it
-        # (S3Destination.upload does).
+        # (S3Destination.create does).
         Sid       = "DenyNonComplianceLockMode"
         Effect    = "Deny"
         Principal = "*"
