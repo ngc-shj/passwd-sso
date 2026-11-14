@@ -123,11 +123,13 @@ export async function withBoundedLockWait<T>(
 export async function lockTeamKeyVersion(
   tx: Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw">,
   teamId: string,
+  budget?: LockBudget,
 ): Promise<{ teamKeyVersion: number; tenantId: string } | null> {
   const [team] = await withBoundedLockWait(tx, () =>
     tx.$queryRaw<{ team_key_version: number; tenant_id: string }[]>`
       SELECT team_key_version, tenant_id FROM teams WHERE id = ${teamId}::uuid FOR SHARE
     `,
+    { budget },
   );
   return team ? { teamKeyVersion: team.team_key_version, tenantId: team.tenant_id } : null;
 }

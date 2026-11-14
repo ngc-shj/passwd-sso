@@ -84,6 +84,25 @@ describe("TeamWebhookCard (team-specific)", () => {
     mockReauthenticateWithPasskey.mockResolvedValue({ ok: true, verifiedAt: "2026-05-10T00:00:00Z" });
   });
 
+  it("shows the paused state only for a webhook whose creator lost authority", async () => {
+    const [active] = createSampleWebhooks("https://example.com/ok", "https://example.com/x");
+    setupFetchWebhooks(mockFetch, [
+      { ...active, id: "wh-paused", url: "https://example.com/paused", creatorAuthorized: false },
+      { ...active, id: "wh-ok", url: "https://example.com/ok", creatorAuthorized: true },
+      { ...active, id: "wh-legacy", url: "https://example.com/legacy", creatorAuthorized: null },
+    ]);
+
+    await act(async () => {
+      render(<TeamWebhookCard teamId="team-1" locale="en" />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByText("https://example.com/paused").length).toBeGreaterThan(0);
+    });
+    // The i18n mock renders the key; exactly one of three webhooks is paused.
+    expect(screen.getAllByText("creatorPaused")).toHaveLength(1);
+  });
+
   it("does not include group:webhook actions", async () => {
     setupFetchWebhooks(mockFetch, []);
 

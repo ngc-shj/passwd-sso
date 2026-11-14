@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { IDENTIFIER_HASH_SCOPE } from "@/lib/audit/auth-failure";
 
 const {
-  mockPrismaTeamWebhook,
   mockPrismaTenantWebhook,
   mockWithBypassRls,
   mockLogAudit,
@@ -13,10 +12,6 @@ const {
   mockResolve6,
   mockLoggerError,
 } = vi.hoisted(() => ({
-  mockPrismaTeamWebhook: {
-    findMany: vi.fn(),
-    update: vi.fn(),
-  },
   mockPrismaTenantWebhook: {
     findMany: vi.fn(),
     update: vi.fn(),
@@ -36,7 +31,6 @@ const {
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    teamWebhook: mockPrismaTeamWebhook,
     tenantWebhook: mockPrismaTenantWebhook,
   },
 }));
@@ -76,36 +70,9 @@ vi.mock("node:dns/promises", () => ({
 // Replace global fetch
 vi.stubGlobal("fetch", mockFetch);
 
-import { dispatchWebhook, dispatchTenantWebhook } from "./webhook-dispatcher";
+import { dispatchTenantWebhook } from "./webhook-dispatcher";
 import { createHmac } from "node:crypto";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
-
-const WEBHOOK = {
-  id: "11111111-1111-1111-1111-111111111111",
-  teamId: "33333333-3333-3333-3333-333333333333",
-  tenantId: "44444444-4444-4444-4444-444444444444",
-  url: "https://example.com/hook",
-  secretEncrypted: "encrypted",
-  secretIv: "iv123456789012",
-  secretAuthTag: "authtag1234567890123456789012",
-  masterKeyVersion: 1,
-  secretAadVersion: 2, // C4: v1 retired; v2 AAD path is exercised in webhook-aad.test.ts
-  events: ["ENTRY_CREATE"],
-  isActive: true,
-  lastError: null,
-  failCount: 0,
-  lastDeliveredAt: null,
-  lastFailedAt: null,
-  createdAt: new Date(),
-  updatedAt: new Date(),
-};
-
-const EVENT = {
-  type: "ENTRY_CREATE",
-  teamId: "33333333-3333-3333-3333-333333333333",
-  timestamp: new Date().toISOString(),
-  data: { entryId: "entry-1" },
-};
 
 const TENANT_WEBHOOK = {
   id: "22222222-2222-2222-2222-222222222222",
@@ -133,7 +100,7 @@ const TENANT_EVENT = {
   data: { targetUserId: "user-1" },
 };
 
-describe("dispatchWebhook", () => {
+describe("delivery core via dispatchTenantWebhook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
@@ -151,12 +118,12 @@ describe("dispatchWebhook", () => {
     // S8/S9 defense: a successful AAD mismatch detection at the crypto
     // layer is only useful if the dispatcher converts it into a silent
     // skip rather than letting it escape (500) or fall back to a default.
-    mockPrismaTeamWebhook.findMany.mockResolvedValue([WEBHOOK]);
+    mockPrismaTenantWebhook.findMany.mockResolvedValue([TENANT_WEBHOOK]);
     mockDecryptServerData.mockImplementationOnce(() => {
       throw new Error("Unsupported state or unable to authenticate data");
     });
 
-    dispatchWebhook(EVENT);
+    dispatchTenantWebhook(TENANT_EVENT);
     await vi.advanceTimersByTimeAsync(100);
 
     // Outbound HTTP MUST NOT have fired.
@@ -168,8 +135,8 @@ describe("dispatchWebhook", () => {
     // under src/lib.
     expect(mockLoggerError).toHaveBeenCalledWith(
       expect.objectContaining({
-        webhookId: WEBHOOK.id,
-        masterKeyVersion: WEBHOOK.masterKeyVersion,
+        webhookId: TENANT_WEBHOOK.id,
+        masterKeyVersion: TENANT_WEBHOOK.masterKeyVersion,
         error: { name: "Error", code: "unknown" },
         _logType: "webhook_delivery.secret_decrypt_failed",
       }),
@@ -181,46 +148,7 @@ describe("dispatchWebhook", () => {
     expect(fields.error).not.toHaveProperty("stack");
     // No update path was taken — the row remains untouched, no
     // lastDeliveredAt / lastFailedAt / failCount mutation.
-    expect(mockPrismaTeamWebhook.update).not.toHaveBeenCalled();
-  });
-
-  it("delivers successfully and updates lastDeliveredAt", async () => {
-    mockPrismaTeamWebhook.findMany.mockResolvedValue([WEBHOOK]);
-    mockFetch.mockResolvedValue({ ok: true });
-
-    dispatchWebhook(EVENT);
-    await vi.advanceTimersByTimeAsync(100);
-
-    expect(mockFetch).toHaveBeenCalledTimes(1);
-    const [url, opts] = mockFetch.mock.calls[0];
-    expect(url).toBe("https://example.com/hook");
-    expect(opts.method).toBe("POST");
-    expect(opts.headers["X-Signature"]).toMatch(/^sha256=/);
-
-    expect(mockPrismaTeamWebhook.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          failCount: 0,
-          lastError: null,
-        }),
-      }),
-    );
-  });
-
-  it("computes correct HMAC signature", async () => {
-    mockPrismaTeamWebhook.findMany.mockResolvedValue([WEBHOOK]);
-    mockFetch.mockResolvedValue({ ok: true });
-
-    dispatchWebhook(EVENT);
-    await vi.advanceTimersByTimeAsync(100);
-
-    const payload = JSON.stringify(EVENT);
-    const expectedHmac = createHmac("sha256", "test-hmac-secret")
-      .update(payload, "utf8")
-      .digest("hex");
-
-    const [, opts] = mockFetch.mock.calls[0];
-    expect(opts.headers["X-Signature"]).toBe(`sha256=${expectedHmac}`);
+    expect(mockPrismaTenantWebhook.update).not.toHaveBeenCalled();
   });
 
   // H2 regression: receivers need the timestamp out-of-band (header, not body)
@@ -228,130 +156,25 @@ describe("dispatchWebhook", () => {
   // the timestamp must be bound into a separate signature so an attacker can't
   // strip the X-Webhook-Timestamp header without invalidating the HMAC.
   it("emits Stripe-style X-Webhook-Timestamp + X-Webhook-Signature bound to t.body", async () => {
-    mockPrismaTeamWebhook.findMany.mockResolvedValue([WEBHOOK]);
+    mockPrismaTenantWebhook.findMany.mockResolvedValue([TENANT_WEBHOOK]);
     mockFetch.mockResolvedValue({ ok: true });
 
-    dispatchWebhook(EVENT);
+    dispatchTenantWebhook(TENANT_EVENT);
     await vi.advanceTimersByTimeAsync(100);
 
-    const payload = JSON.stringify(EVENT);
+    const payload = JSON.stringify(TENANT_EVENT);
     const expectedV1 = createHmac("sha256", "test-hmac-secret")
-      .update(`${EVENT.timestamp}.${payload}`, "utf8")
+      .update(`${TENANT_EVENT.timestamp}.${payload}`, "utf8")
       .digest("hex");
 
     const [, opts] = mockFetch.mock.calls[0];
-    expect(opts.headers["X-Webhook-Timestamp"]).toBe(EVENT.timestamp);
+    expect(opts.headers["X-Webhook-Timestamp"]).toBe(TENANT_EVENT.timestamp);
     expect(opts.headers["X-Webhook-Signature"]).toBe(
-      `t=${EVENT.timestamp},v1=${expectedV1}`,
+      `t=${TENANT_EVENT.timestamp},v1=${expectedV1}`,
     );
     // Backward-compat header must still be present so existing receivers
     // keep verifying. Removal is a separate breaking change.
     expect(opts.headers["X-Signature"]).toMatch(/^sha256=/);
-  });
-
-  it("retries and updates failCount on persistent failure", async () => {
-    mockPrismaTeamWebhook.findMany.mockResolvedValue([WEBHOOK]);
-    mockFetch.mockResolvedValue({ ok: false, status: 500 });
-
-    dispatchWebhook(EVENT);
-
-    // Advance through all retries: 1s + 5s + 25s + buffer
-    await vi.advanceTimersByTimeAsync(1_000);
-    await vi.advanceTimersByTimeAsync(5_000);
-    await vi.advanceTimersByTimeAsync(25_000);
-    await vi.advanceTimersByTimeAsync(1_000);
-
-    expect(mockFetch).toHaveBeenCalledTimes(3);
-    expect(mockPrismaTeamWebhook.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          failCount: 1,
-        }),
-      }),
-    );
-  });
-
-  it("logs WEBHOOK_DELIVERY_FAILED audit event on failure", async () => {
-    mockPrismaTeamWebhook.findMany.mockResolvedValue([WEBHOOK]);
-    mockFetch.mockResolvedValue({ ok: false, status: 500 });
-
-    dispatchWebhook(EVENT);
-    // Advance through all retries in steps to allow microtasks to settle
-    await vi.advanceTimersByTimeAsync(1_000);
-    await vi.advanceTimersByTimeAsync(5_000);
-    await vi.advanceTimersByTimeAsync(25_000);
-    await vi.advanceTimersByTimeAsync(1_000);
-    // Use vi.waitFor to poll for the assertion, avoiding flaky real-timer sleeps
-    await vi.waitFor(() => {
-      expect(mockLogAudit).toHaveBeenCalledWith(
-        expect.objectContaining({
-          action: "WEBHOOK_DELIVERY_FAILED",
-          teamId: "33333333-3333-3333-3333-333333333333",
-        }),
-      );
-    });
-  });
-
-  it("skips when no matching webhooks found", async () => {
-    mockPrismaTeamWebhook.findMany.mockResolvedValue([]);
-
-    dispatchWebhook(EVENT);
-    await vi.advanceTimersByTimeAsync(100);
-
-    expect(mockFetch).not.toHaveBeenCalled();
-  });
-
-  it("deactivates webhook when failCount reaches 10", async () => {
-    const highFailWebhook = { ...WEBHOOK, failCount: 9 };
-    mockPrismaTeamWebhook.findMany.mockResolvedValue([highFailWebhook]);
-    mockFetch.mockResolvedValue({ ok: false, status: 500 });
-
-    dispatchWebhook(EVENT);
-    await vi.advanceTimersByTimeAsync(32_000);
-
-    expect(mockPrismaTeamWebhook.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          failCount: 10,
-          isActive: false,
-        }),
-      }),
-    );
-  });
-
-  it("delivers to multiple webhooks independently", async () => {
-    const webhook2 = { ...WEBHOOK, id: "11111111-1111-1111-1111-111111111112", url: "https://other.com/hook" };
-    mockPrismaTeamWebhook.findMany.mockResolvedValue([WEBHOOK, webhook2]);
-    mockFetch
-      .mockResolvedValueOnce({ ok: true })
-      .mockResolvedValueOnce({ ok: false, status: 500 })
-      .mockResolvedValue({ ok: false, status: 500 });
-
-    dispatchWebhook(EVENT);
-    await vi.advanceTimersByTimeAsync(32_000);
-
-    expect(mockPrismaTeamWebhook.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: "11111111-1111-1111-1111-111111111111" },
-        data: expect.objectContaining({ failCount: 0 }),
-      }),
-    );
-    expect(mockPrismaTeamWebhook.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: "11111111-1111-1111-1111-111111111112" },
-        data: expect.objectContaining({ failCount: 1 }),
-      }),
-    );
-  });
-
-  it("never throws even on errors", async () => {
-    mockPrismaTeamWebhook.findMany.mockRejectedValue(new Error("DB error"));
-
-    // Should not throw
-    dispatchWebhook(EVENT);
-    await vi.advanceTimersByTimeAsync(100);
-
-    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it("dispatches multiple webhooks in parallel — all fetch calls initiated before any resolve", async () => {
@@ -359,13 +182,13 @@ describe("dispatchWebhook", () => {
     const callOrder: string[] = [];
     const resolvers: Array<() => void> = [];
 
-    const makeWebhook = (id: string, label: string) => ({ ...WEBHOOK, id, url: `https://example.com/hook-${label}` });
+    const makeWebhook = (id: string, label: string) => ({ ...TENANT_WEBHOOK, id, url: `https://example.com/hook-${label}` });
     const webhooks = [
       { id: "11111111-1111-1111-1111-1111111111aa", label: "wh-a" },
       { id: "11111111-1111-1111-1111-1111111111ab", label: "wh-b" },
       { id: "11111111-1111-1111-1111-1111111111ac", label: "wh-c" },
     ].map((w) => makeWebhook(w.id, w.label));
-    mockPrismaTeamWebhook.findMany.mockResolvedValue(webhooks);
+    mockPrismaTenantWebhook.findMany.mockResolvedValue(webhooks);
 
     mockFetch.mockImplementation((url: string) => {
       callOrder.push(`call:${url}`);
@@ -377,7 +200,7 @@ describe("dispatchWebhook", () => {
       });
     });
 
-    dispatchWebhook(EVENT);
+    dispatchTenantWebhook(TENANT_EVENT);
     // Let the async logic start (findMany resolves, fetch calls are made)
     await vi.advanceTimersByTimeAsync(0);
     await Promise.resolve();
@@ -405,13 +228,13 @@ describe("dispatchWebhook", () => {
     let fetchCallCount = 0;
 
     const makeWebhook = (i: number) => ({
-      ...WEBHOOK,
+      ...TENANT_WEBHOOK,
       // Canonical UUID; suffix encodes the loop index for traceability.
       id: `11111111-1111-1111-1111-1111111111${i.toString(16).padStart(2, "0")}`,
       url: `https://example.com/hook-${i}`,
     });
     const webhooks = Array.from({ length: 10 }, (_, i) => makeWebhook(i));
-    mockPrismaTeamWebhook.findMany.mockResolvedValue(webhooks);
+    mockPrismaTenantWebhook.findMany.mockResolvedValue(webhooks);
 
     mockFetch.mockImplementation(() => {
       fetchCallCount += 1;
@@ -426,7 +249,7 @@ describe("dispatchWebhook", () => {
       return Promise.resolve({ ok: true });
     });
 
-    dispatchWebhook(EVENT);
+    dispatchTenantWebhook(TENANT_EVENT);
     // Allow the async IIFE and findMany to resolve, then fetch calls to be initiated
     await vi.advanceTimersByTimeAsync(0);
     // Flush microtasks: findMany resolved → dispatchToWebhooks starts → first chunk fetches called
@@ -448,23 +271,23 @@ describe("dispatchWebhook", () => {
     const OK1 = "11111111-1111-1111-1111-111111111100";
     const FAIL = "11111111-1111-1111-1111-111111111101";
     const OK2 = "11111111-1111-1111-1111-111111111102";
-    const makeWebhook = (id: string) => ({ ...WEBHOOK, id, url: `https://example.com/hook-${id}` });
+    const makeWebhook = (id: string) => ({ ...TENANT_WEBHOOK, id, url: `https://example.com/hook-${id}` });
     const webhooks = [OK1, FAIL, OK2].map(makeWebhook);
-    mockPrismaTeamWebhook.findMany.mockResolvedValue(webhooks);
+    mockPrismaTenantWebhook.findMany.mockResolvedValue(webhooks);
 
     mockFetch
       .mockResolvedValueOnce({ ok: true })       // OK1 succeeds
       .mockRejectedValueOnce(new Error("Network error")) // FAIL throws
       .mockResolvedValueOnce({ ok: true });       // OK2 succeeds
 
-    dispatchWebhook(EVENT);
+    dispatchTenantWebhook(TENANT_EVENT);
     await vi.advanceTimersByTimeAsync(100);
 
     // All 3 fetches attempted
     expect(mockFetch).toHaveBeenCalledTimes(3);
 
     // Both successful webhooks updated with failCount: 0
-    const successCalls = mockPrismaTeamWebhook.update.mock.calls.filter(
+    const successCalls = mockPrismaTenantWebhook.update.mock.calls.filter(
       (call: Array<{ where?: { id: string }; data?: { failCount: number } }>) =>
         call[0]?.data?.failCount === 0,
     );
@@ -491,9 +314,9 @@ describe("SSRF defense (resolveAndValidateIps)", () => {
 
   it("skips delivery when DNS resolves to private IP", async () => {
     mockResolve4.mockResolvedValue(["192.168.1.1"]);
-    mockPrismaTeamWebhook.findMany.mockResolvedValue([WEBHOOK]);
+    mockPrismaTenantWebhook.findMany.mockResolvedValue([TENANT_WEBHOOK]);
 
-    dispatchWebhook(EVENT);
+    dispatchTenantWebhook(TENANT_EVENT);
     await vi.advanceTimersByTimeAsync(60_000);
 
     expect(mockFetch).not.toHaveBeenCalled();
@@ -501,9 +324,9 @@ describe("SSRF defense (resolveAndValidateIps)", () => {
 
   it("skips delivery when DNS resolves to cloud metadata IP", async () => {
     mockResolve4.mockResolvedValue(["169.254.169.254"]);
-    mockPrismaTeamWebhook.findMany.mockResolvedValue([WEBHOOK]);
+    mockPrismaTenantWebhook.findMany.mockResolvedValue([TENANT_WEBHOOK]);
 
-    dispatchWebhook(EVENT);
+    dispatchTenantWebhook(TENANT_EVENT);
     await vi.advanceTimersByTimeAsync(60_000);
 
     expect(mockFetch).not.toHaveBeenCalled();
@@ -512,9 +335,9 @@ describe("SSRF defense (resolveAndValidateIps)", () => {
   it("skips delivery when DNS resolution fails (empty results)", async () => {
     mockResolve4.mockResolvedValue([]);
     mockResolve6.mockResolvedValue([]);
-    mockPrismaTeamWebhook.findMany.mockResolvedValue([WEBHOOK]);
+    mockPrismaTenantWebhook.findMany.mockResolvedValue([TENANT_WEBHOOK]);
 
-    dispatchWebhook(EVENT);
+    dispatchTenantWebhook(TENANT_EVENT);
     await vi.advanceTimersByTimeAsync(60_000);
 
     expect(mockFetch).not.toHaveBeenCalled();
@@ -522,9 +345,9 @@ describe("SSRF defense (resolveAndValidateIps)", () => {
 
   it("skips delivery for loopback IP", async () => {
     mockResolve4.mockResolvedValue(["127.0.0.1"]);
-    mockPrismaTeamWebhook.findMany.mockResolvedValue([WEBHOOK]);
+    mockPrismaTenantWebhook.findMany.mockResolvedValue([TENANT_WEBHOOK]);
 
-    dispatchWebhook(EVENT);
+    dispatchTenantWebhook(TENANT_EVENT);
     await vi.advanceTimersByTimeAsync(60_000);
 
     expect(mockFetch).not.toHaveBeenCalled();
@@ -532,9 +355,9 @@ describe("SSRF defense (resolveAndValidateIps)", () => {
 
   it("skips delivery for TEST-NET-1 IP (RFC 5737)", async () => {
     mockResolve4.mockResolvedValue(["192.0.2.1"]);
-    mockPrismaTeamWebhook.findMany.mockResolvedValue([WEBHOOK]);
+    mockPrismaTenantWebhook.findMany.mockResolvedValue([TENANT_WEBHOOK]);
 
-    dispatchWebhook(EVENT);
+    dispatchTenantWebhook(TENANT_EVENT);
     await vi.advanceTimersByTimeAsync(60_000);
 
     expect(mockFetch).not.toHaveBeenCalled();
@@ -542,9 +365,9 @@ describe("SSRF defense (resolveAndValidateIps)", () => {
 
   it("skips delivery for TEST-NET-2 IP (RFC 5737)", async () => {
     mockResolve4.mockResolvedValue(["198.51.100.1"]);
-    mockPrismaTeamWebhook.findMany.mockResolvedValue([WEBHOOK]);
+    mockPrismaTenantWebhook.findMany.mockResolvedValue([TENANT_WEBHOOK]);
 
-    dispatchWebhook(EVENT);
+    dispatchTenantWebhook(TENANT_EVENT);
     await vi.advanceTimersByTimeAsync(60_000);
 
     expect(mockFetch).not.toHaveBeenCalled();
@@ -552,24 +375,24 @@ describe("SSRF defense (resolveAndValidateIps)", () => {
 
   it("skips delivery for TEST-NET-3 IP (RFC 5737)", async () => {
     mockResolve4.mockResolvedValue(["203.0.113.1"]);
-    mockPrismaTeamWebhook.findMany.mockResolvedValue([WEBHOOK]);
+    mockPrismaTenantWebhook.findMany.mockResolvedValue([TENANT_WEBHOOK]);
 
-    dispatchWebhook(EVENT);
+    dispatchTenantWebhook(TENANT_EVENT);
     await vi.advanceTimersByTimeAsync(60_000);
 
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it("fails delivery when server returns redirect (redirect: error)", async () => {
-    mockPrismaTeamWebhook.findMany.mockResolvedValue([WEBHOOK]);
+    mockPrismaTenantWebhook.findMany.mockResolvedValue([TENANT_WEBHOOK]);
     mockFetch.mockRejectedValue(new TypeError("redirect mode is set to error"));
 
-    dispatchWebhook(EVENT);
+    dispatchTenantWebhook(TENANT_EVENT);
     await vi.advanceTimersByTimeAsync(60_000);
 
     // All retry attempts should fail
     expect(mockFetch).toHaveBeenCalledTimes(3);
-    expect(mockPrismaTeamWebhook.update).toHaveBeenCalledWith(
+    expect(mockPrismaTenantWebhook.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ failCount: 1 }),
       }),
@@ -838,29 +661,6 @@ describe("webhook delivery-failed audit sentinel", () => {
 
   afterEach(() => {
     vi.useRealTimers();
-  });
-
-  it("WEBHOOK_DELIVERY_FAILED audit log uses SYSTEM_ACTOR_ID and SYSTEM actorType", async () => {
-    mockPrismaTeamWebhook.findMany.mockResolvedValue([WEBHOOK]);
-    mockFetch.mockResolvedValue({ ok: false, status: 500 });
-
-    dispatchWebhook(EVENT);
-    await vi.advanceTimersByTimeAsync(1_000);
-    await vi.advanceTimersByTimeAsync(5_000);
-    await vi.advanceTimersByTimeAsync(25_000);
-    await vi.advanceTimersByTimeAsync(1_000);
-
-    await vi.waitFor(() => {
-      expect(mockLogAudit).toHaveBeenCalledWith(
-        expect.objectContaining({
-          action: "WEBHOOK_DELIVERY_FAILED",
-          userId: SYSTEM_ACTOR_ID,
-          actorType: "SYSTEM",
-          // TEAM scope: teamId is present, tenantId is not part of this call
-          teamId: "33333333-3333-3333-3333-333333333333",
-        }),
-      );
-    });
   });
 
   it("TENANT_WEBHOOK_DELIVERY_FAILED audit log uses SYSTEM_ACTOR_ID and SYSTEM actorType", async () => {

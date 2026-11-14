@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
 import { addMemberSchema } from "@/lib/validations";
-import { activeTeamRole, hasTeamPermission, requireTeamMember, requireTeamPermission, TeamAuthError } from "@/lib/auth/access/team-auth";
+import { activeTeamAdmission, hasTeamPermission, requireTeamMember, requireTeamPermission, TeamAuthError } from "@/lib/auth/access/team-auth";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
@@ -15,7 +15,7 @@ import { membershipConflictResponse } from "@/lib/http/lock-conflict-response";
 import { buildTeamMemberDisplayItems } from "@/lib/team/team-member-display";
 import { TEAM_MEMBERSHIP_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 import { createLockBudget, lockTeamsAgainstRotation } from "@/lib/team/team-key-rotation-lock";
-import { isMembershipLockConflict, lockTenantRows } from "@/lib/team/tenant-row-lock";
+import { actorDepartedSinceAdmission, isMembershipLockConflict, lockTenantRows } from "@/lib/team/tenant-row-lock";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -136,9 +136,14 @@ async function handlePOST(req: NextRequest, { params }: Params) {
         }
         await lockTeamsAgainstRotation(tx, [teamId], budget);
         // The acting member's authority as it stands now: a departure,
-        // removal or demotion committed since the permission check.
-        const actorRole = await activeTeamRole(tx, teamId, session.user.id);
-        if (!actorRole || !hasTeamPermission(actorRole, TEAM_PERMISSION.MEMBER_INVITE)) {
+        // removal or demotion committed since the permission check, or a
+        // departure from the tenant after their admission that left the row.
+        const actor = await activeTeamAdmission(tx, teamId, session.user.id);
+        if (
+          !actor ||
+          !hasTeamPermission(actor.role, TEAM_PERMISSION.MEMBER_INVITE) ||
+          actorDepartedSinceAdmission(rows.get(session.user.id), actor.admittedAt)
+        ) {
           throw new TeamAuthError(API_ERROR.FORBIDDEN, 403);
         }
 

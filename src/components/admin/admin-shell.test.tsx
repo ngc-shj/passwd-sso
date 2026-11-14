@@ -61,6 +61,7 @@ function makeAdminTeam(
     scimManaged: false,
     deactivatedByTenant: false,
     scimApprovalPending: false,
+    admittedAt: null,
     teamId: team.id,
     keyDistributed: true,
     team,

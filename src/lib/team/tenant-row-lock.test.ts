@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { Prisma } from "@prisma/client";
 import {
   departedSince,
+  actorDepartedSinceAdmission,
   isMembershipLockConflict,
   lockTenantRows,
   TenantMemberLockTimeoutError,
@@ -108,6 +109,43 @@ describe("departedSince", () => {
 
   it("counts a SCIM DELETE record even when the row was re-created active", () => {
     expect(departedSince(row(null, new Date(issued.getTime() + 1)), issued)).toBe(true);
+  });
+});
+
+describe("actorDepartedSinceAdmission", () => {
+  const admitted = new Date("2026-06-01T00:00:00.000Z");
+  const at = (ms: number) => new Date(admitted.getTime() + ms);
+  const row = (deactivatedAt: Date | null, departedAt: Date | null = null) => ({ hasRow: true, role: null, deactivatedAt, departedAt });
+
+  it("is false for a guest with no row or departure record", () => {
+    expect(actorDepartedSinceAdmission(undefined, admitted)).toBe(false);
+    expect(actorDepartedSinceAdmission({ hasRow: false, role: null, deactivatedAt: null, departedAt: null }, admitted)).toBe(false);
+  });
+
+  it("is false for an active row with no departure", () => {
+    expect(actorDepartedSinceAdmission(row(null), admitted)).toBe(false);
+  });
+
+  it("is true for a departure after admission, and when equal", () => {
+    expect(actorDepartedSinceAdmission(row(at(1)), admitted)).toBe(true);
+    expect(actorDepartedSinceAdmission(row(admitted), admitted)).toBe(true);
+  });
+
+  it("is false when the actor was re-admitted after the departure (admittedAt later, not created_at)", () => {
+    // created_at < departure < admitted_at: the caller passes the later admittedAt.
+    const departure = at(-1000);
+    expect(actorDepartedSinceAdmission(row(departure), admitted)).toBe(false);
+    expect(actorDepartedSinceAdmission(row(departure), at(-2000))).toBe(true);
+  });
+
+  it("is true for a deleted tenant row whose departure record follows the admission", () => {
+    // SCIM DELETE residue: no tenant row, the team row kept. C3's SQL refuses the same state.
+    expect(actorDepartedSinceAdmission({ hasRow: false, role: null, deactivatedAt: null, departedAt: at(1) }, admitted)).toBe(true);
+  });
+
+  it("is false for a re-provisioned active row whose old departure record predates the membership", () => {
+    // departedAt() returns the record's stamp for an active row; admission is later, so it does not void.
+    expect(actorDepartedSinceAdmission(row(null, at(-1000)), admitted)).toBe(false);
   });
 });
 

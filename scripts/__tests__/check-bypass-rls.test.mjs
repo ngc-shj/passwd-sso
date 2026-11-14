@@ -4086,6 +4086,12 @@ describe("function rule: routines are created in migrations", () => {
     expect(other.code).toBe(1);
     expect(other.stderr).toContain(`${negative}:4  creates another`);
   });
+
+  it("names a schema-qualified routine by its own name, not its schema", () => {
+    const { code, stderr } = runMulti([["scripts/zz.sql", "CREATE FUNCTION public.qualified_probe() RETURNS int AS 'SELECT 1' LANGUAGE sql;\n"]]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("scripts/zz.sql:1  creates qualified_probe");
+  });
 });
 
 describe("grants the retention worker builds per entry", () => {

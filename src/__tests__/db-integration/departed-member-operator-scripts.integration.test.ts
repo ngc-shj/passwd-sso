@@ -264,15 +264,20 @@ describe("departed-member operator scripts — real-DB integration", () => {
 
   type Section1Row = { tenant_id: string; team_id: string; user_id: string; role: string; has_deactivation_record: boolean };
   type Section2Row = { id: string; tenant_id: string; team_id: string; is_active: boolean; created_at: Date; updated_at: Date };
+  type Section3Row = { id: string; tenant_id: string; team_id: string; is_active: boolean; created_at: Date; creator: string; creator_active_member: boolean };
 
-  /** The two report sections of a result set (the set_config selects are not sections). */
-  function sectionsOf(results: Results): { section1: Section1Row[]; section2: Section2Row[]; fields2: string[] } {
+  /** The three report sections of a result set (the set_config selects are not sections). */
+  function sectionsOf(results: Results): {
+    section1: Section1Row[]; section2: Section2Row[]; fields2: string[]; section3: Section3Row[]; fields3: string[];
+  } {
     const selects = results.filter((r) => r.command === "SELECT" && r.fields[0]?.name !== "set_config");
-    expect(selects).toHaveLength(2);
+    expect(selects).toHaveLength(3);
     return {
       section1: selects[0].rows as Section1Row[],
       section2: selects[1].rows as Section2Row[],
       fields2: selects[1].fields.map((f) => f.name),
+      section3: selects[2].rows as Section3Row[],
+      fields3: selects[2].fields.map((f) => f.name),
     };
   }
 
@@ -299,6 +304,8 @@ describe("departed-member operator scripts — real-DB integration", () => {
       rowIds: Record<string, string>;
       /** name -> expected section 1 row; names with no entry must be absent */
       expected: Record<string, { team: string; role: string; record: boolean }>;
+      /** Listed candidates C1 (`created_at <` a deactivated tenant row) does not end. */
+      outsideC1: Set<string>;
     };
 
     /** Candidates around C1's exclusion, and the adjacent non-candidates. */
@@ -342,7 +349,43 @@ describe("departed-member operator scripts — real-DB integration", () => {
       const endedUser = await mkMember(tenant);
       await departIn(tenant, endedUser, stamp);
       await endMembership(await addMembership(teamA, endedUser, tenant, { createdAt: iso(stamp, -SECOND) }), stamp);
-      return { tenant, stamp, teamA, teamB, users, rowIds, expected };
+
+      // The admission arm: created before the departure, re-admitted on the
+      // same row after it (the trigger stamps admitted_at) — not a candidate.
+      await candidate("readmitted");
+      delete expected.readmitted;
+      await sql(`UPDATE team_members SET deactivated_at = $2::timestamptz WHERE id = $1::uuid`, rowIds.readmitted, iso(stamp));
+      await sql(`UPDATE team_members SET deactivated_at = NULL WHERE id = $1::uuid`, rowIds.readmitted);
+      const [stamped] = await sql<{ admitted_at: Date | null }>(`SELECT admitted_at FROM team_members WHERE id = $1::uuid`, rowIds.readmitted);
+      expect(stamped.admitted_at!.getTime()).toBeGreaterThan(stamp.getTime());
+
+      // Listed, but outside C1's `<` on a deactivated tenant row: admitted at
+      // the departure's instant; departed only by a SCIM DELETE record (tenant
+      // row re-created active, or gone).
+      const outsideC1 = new Set<string>();
+      await candidate("atDeparture", { offset: 0 });
+      expected.atDeparture = { team: teamA, role: "MEMBER", record: false };
+      outsideC1.add("atDeparture");
+      for (const name of ["recordRecreated", "recordRowGone"]) {
+        const user = await mkMember(tenant);
+        await sql(
+          `INSERT INTO tenant_member_departures (tenant_id, user_id, departed_at) VALUES ($1::uuid, $2::uuid, $3::timestamptz)`,
+          tenant, user, iso(stamp),
+        );
+        if (name === "recordRowGone") await sql(`DELETE FROM tenant_members WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, tenant, user);
+        rowIds[name] = await addMembership(teamA, user, tenant, { createdAt: iso(stamp, -SECOND) });
+        users[name] = user;
+        expected[name] = { team: teamA, role: "MEMBER", record: false };
+        outsideC1.add(name);
+      }
+      // A departure record older than the membership: re-admitted since, not a candidate.
+      const recordOld = await mkMember(tenant);
+      await sql(
+        `INSERT INTO tenant_member_departures (tenant_id, user_id, departed_at) VALUES ($1::uuid, $2::uuid, $3::timestamptz)`,
+        tenant, recordOld, iso(stamp, -SECOND),
+      );
+      await addMembership(teamA, recordOld, tenant, { createdAt: iso(stamp) });
+      return { tenant, stamp, teamA, teamB, users, rowIds, expected, outsideC1 };
     }
 
     const expectedSection1 = (w: World, only?: (n: string) => boolean) =>
@@ -355,7 +398,7 @@ describe("departed-member operator scripts — real-DB integration", () => {
       const w = await seedWorld();
       const { section1 } = await runReport();
       expect(section1Map(w, section1)).toEqual(expectedSection1(w));
-      expect(Object.keys(section1Map(w, section1))).toHaveLength(11);
+      expect(Object.keys(section1Map(w, section1))).toHaveLength(14);
     });
 
     it("after C1, in the block's transaction, the report body lists exactly C1's excluded set; C1 ended the rest", async () => {
@@ -376,10 +419,12 @@ describe("departed-member operator scripts — real-DB integration", () => {
         const body = sectionsOf((Array.isArray(res) ? res : [res]) as Results);
 
         const excluded = (n: string) => w.expected[n]?.record === true;
-        expect(section1Map(w, body.section1)).toEqual(expectedSection1(w, excluded));
-        // C1 ended exactly the candidates the record flag does not exclude.
+        const kept = (n: string) => excluded(n) || w.outsideC1.has(n);
+        expect(section1Map(w, body.section1)).toEqual(expectedSection1(w, kept));
+        // C1 ended exactly the candidates the record flag does not exclude,
+        // except those its own narrower predicate never covered.
         for (const name of Object.keys(w.expected)) {
-          expect(endedByRow.get(w.rowIds[name]), name).toBe(!excluded(name));
+          expect(endedByRow.get(w.rowIds[name]), name).toBe(!kept(name));
         }
         expect(endedByRow.get(w.rowIds.late)).toBe(false);
       } finally {
@@ -492,6 +537,76 @@ describe("departed-member operator scripts — real-DB integration", () => {
       });
     });
 
+    it("section 2: a member departed only by a SCIM DELETE record lists the webhooks created after the record", async () => {
+      const tenant = await newTenant();
+      const stamp = newStamp();
+      const team = await mkTeam(tenant);
+      const user = await mkMember(tenant);
+      await sql(
+        `INSERT INTO tenant_member_departures (tenant_id, user_id, departed_at) VALUES ($1::uuid, $2::uuid, $3::timestamptz)`,
+        tenant, user, iso(stamp),
+      );
+      await addMembership(team, user, tenant, { createdAt: iso(stamp, -SECOND) });
+      const old = await webhook(tenant, team, iso(stamp, -3 * SECOND), iso(stamp, -2 * SECOND));
+      const created = await webhook(tenant, team, iso(stamp, SECOND), iso(stamp, SECOND));
+
+      const ids = inTenants((await runReport()).section2, [tenant]).map((r) => r.id);
+      expect(ids).toEqual([created]);
+      expect(ids).not.toContain(old);
+    });
+
+    describe("section 3 (webhooks with no recorded creator)", () => {
+      const SEVEN = ["id", "tenant_id", "team_id", "is_active", "created_at", "creator", "creator_active_member"];
+
+      const createRecord = (tenant: string, team: string, webhookId: string, user: string, store: "logs" | "outbox", at: string) =>
+        store === "logs"
+          ? sql(
+              `INSERT INTO audit_logs (id, tenant_id, scope, action, user_id, actor_type, team_id, metadata, outbox_id, created_at)
+               VALUES ($1::uuid, $2::uuid, 'TEAM', 'WEBHOOK_CREATE', $3::uuid, 'HUMAN', $4::uuid, $5::jsonb, $6::uuid, $7::timestamptz)`,
+              randomUUID(), tenant, user, team, JSON.stringify({ webhookId }), randomUUID(), at,
+            )
+          : sql(
+              `INSERT INTO audit_outbox (id, tenant_id, payload, status, created_at)
+               VALUES ($1::uuid, $2::uuid, $3::jsonb, 'PENDING', $4::timestamptz)`,
+              randomUUID(), tenant,
+              JSON.stringify(buildOutboxPayload({
+                scope: AUDIT_SCOPE.TEAM, action: AUDIT_ACTION.WEBHOOK_CREATE, userId: user, teamId: team, metadata: { webhookId },
+              })),
+              at,
+            );
+
+      it("lists each NULL-creator webhook with its recorded creator or 'unknown' and whether that creator is an active member; seven columns", async () => {
+        const tenant = await newTenant();
+        const stamp = newStamp();
+        const team = await mkTeam(tenant);
+        const activeAdmin = await mkMember(tenant);
+        await addMembership(team, activeAdmin, tenant, { role: "ADMIN" });
+        const gone = await mkMember(tenant);
+        await endMembership(await addMembership(team, gone, tenant, { role: "ADMIN" }), stamp);
+        const earlier = await mkMember(tenant);
+
+        const fromLogs = await webhook(tenant, team, iso(stamp), iso(stamp));
+        await createRecord(tenant, team, fromLogs, earlier, "logs", iso(stamp, -SECOND));
+        await createRecord(tenant, team, fromLogs, activeAdmin, "logs", iso(stamp));
+        const fromOutbox = await webhook(tenant, team, iso(stamp), iso(stamp));
+        await createRecord(tenant, team, fromOutbox, gone, "outbox", iso(stamp));
+        const unknown = await webhook(tenant, team, iso(stamp), iso(stamp));
+        const attributed = await webhook(tenant, team, iso(stamp), iso(stamp));
+        await sql(`UPDATE team_webhooks SET created_by_id = $2::uuid WHERE id = $1::uuid`, attributed, activeAdmin);
+
+        const report = await runReport();
+        expect(report.fields3).toEqual(SEVEN);
+        const rows = Object.fromEntries(
+          inTenants(report.section3, [tenant]).map((r) => [r.id, { creator: r.creator, active: r.creator_active_member }]),
+        );
+        expect(rows).toEqual({
+          [fromLogs]: { creator: activeAdmin, active: true },
+          [fromOutbox]: { creator: gone, active: false },
+          [unknown]: { creator: "unknown", active: false },
+        });
+      });
+    });
+
     it.each(bypassTables(reportScript()))("table-list control: with %s removed from the script's bypass list a notice names it", async (removed) => {
       await seedWorldForTableControl();
       const script = reportScript();
@@ -519,6 +634,11 @@ describe("departed-member operator scripts — real-DB integration", () => {
       const unrecorded = await mkMember(tenant);
       await departIn(tenant, unrecorded, stamp);
       await addMembership(team, unrecorded, tenant, { createdAt: iso(stamp, -SECOND) });
+      // A SCIM DELETE record, so the departures join examines a row.
+      await sql(
+        `INSERT INTO tenant_member_departures (tenant_id, user_id, departed_at) VALUES ($1::uuid, $2::uuid, $3::timestamptz)`,
+        tenant, unrecorded, iso(stamp, -SECOND),
+      );
     }
   });
 
@@ -535,7 +655,7 @@ describe("departed-member operator scripts — real-DB integration", () => {
     };
 
     /** A tenant with a tenant OWNER (`admin`) and a team whose members, an OWNER and `members` MEMBERs, all departed. */
-    async function seedLeak(members = 1): Promise<Leak> {
+    async function seedLeak(members = 1, o: { withRecord?: boolean } = {}): Promise<Leak> {
       const tenant = await newTenant();
       const stamp = newStamp();
       expect(Date.now() - stamp.getTime()).toBeGreaterThanOrEqual(3_600_000);
@@ -545,6 +665,13 @@ describe("departed-member operator scripts — real-DB integration", () => {
       for (const role of ["OWNER", ...Array.from({ length: members }, () => "MEMBER")]) {
         const user = await mkMember(tenant);
         await departIn(tenant, user, stamp);
+        if (o.withRecord) {
+          // An older SCIM DELETE record: the tenant row's stamp stays the later departure.
+          await sql(
+            `INSERT INTO tenant_member_departures (tenant_id, user_id, departed_at) VALUES ($1::uuid, $2::uuid, $3::timestamptz)`,
+            tenant, user, iso(stamp, -60 * SECOND),
+          );
+        }
         rows.push({ user, rowId: await addMembership(team, user, tenant, { role, createdAt: iso(stamp, -SECOND) }), role });
       }
       return { tenant, stamp, team, admin, rows };
@@ -706,6 +833,25 @@ describe("departed-member operator scripts — real-DB integration", () => {
         await expectRefused(containWith({ triples: triplesLiteral([tripleOf(l, l.rows[1])]), label }), { message: QUALIFY });
       });
 
+      it("the membership was created after the departure", async () => {
+        const l = await seedLeak();
+        await sql(`UPDATE team_members SET created_at = $2::timestamptz WHERE id = $1::uuid`, l.rows[1].rowId, iso(l.stamp, SECOND));
+        await expectRefused(containWith({ triples: triplesLiteral([tripleOf(l, l.rows[1])]), label }), { message: QUALIFY });
+      });
+
+      it("the membership was re-admitted on the same row after the departure (admitted_at)", async () => {
+        const l = await seedLeak();
+        await sql(`UPDATE team_members SET deactivated_at = $2::timestamptz WHERE id = $1::uuid`, l.rows[1].rowId, iso(l.stamp));
+        await sql(`UPDATE team_members SET deactivated_at = NULL WHERE id = $1::uuid`, l.rows[1].rowId);
+        await expectRefused(containWith({ triples: triplesLiteral([tripleOf(l, l.rows[1])]), label }), { message: QUALIFY });
+      });
+
+      it("a departure record later than the tenant row's stamp still qualifies; the stamp written is the tenant row's", async () => {
+        const l = await seedLeak(1, { withRecord: true });
+        await runContain(containWith({ triples: goodTriples(l), label }));
+        await expectContained(l, label);
+      });
+
       it("the team is another team of the tenant, where the user holds no membership", async () => {
         const l = await seedLeak();
         const elsewhere = await mkTeam(l.tenant);
@@ -808,7 +954,7 @@ describe("departed-member operator scripts — real-DB integration", () => {
     });
 
     it.each(bypassTables(containScript()))("table-list control: with %s removed from the script's bypass list a notice names it", async (removed) => {
-      const l = await seedLeak();
+      const l = await seedLeak(1, { withRecord: true });
       const script = containWith({ triples: goodTriples(l), label: "ops-test" });
       const literal = script.match(/set_config\('app\.bypass_tables', '([a-z_,]+)'/)![1];
       const mutated = script.replace(literal, literal.split(",").filter((t) => t !== removed).join(","));

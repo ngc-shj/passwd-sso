@@ -23,7 +23,7 @@ vi.mock("@/lib/directory-sync/okta", () => ({ fetchOktaUsers: mockFetchOktaUsers
 vi.mock("@/lib/directory-sync/credentials", () => ({
   decryptCredentials: () => JSON.stringify({ orgUrl: "https://example.okta.com", apiToken: "token" }),
 }));
-vi.mock("@/lib/webhook-dispatcher", () => ({ dispatchTenantWebhook: vi.fn(), dispatchWebhook: vi.fn() }));
+vi.mock("@/lib/webhook-dispatcher", () => ({ dispatchTenantWebhook: vi.fn() }));
 vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: async () => ({ allowed: true, retryAfterMs: 0 }), clear: () => {} }),
 }));

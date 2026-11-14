@@ -141,6 +141,10 @@ export async function lockTenantMemberCreation(
  * invitation's `created_at`: the row's deactivation, or the SCIM DELETE
  * record. An active row with a record is a re-creation; the record still
  * voids invitations issued before it.
+ *
+ * Mirrored in SQL as GREATEST(tm.deactivated_at, d.departed_at) by
+ * share_creator_admitted (migration 20261114000100) and the
+ * departed-member-access-backfill runbook; change them together.
  */
 export function departedAt(row: LockedTenantRow | undefined): Date | null {
   if (!row) return null;
@@ -153,6 +157,17 @@ export function departedAt(row: LockedTenantRow | undefined): Date | null {
 export function departedSince(row: LockedTenantRow | undefined, issuedAt: Date): boolean {
   const departed = departedAt(row);
   return departed !== null && departed.getTime() >= issuedAt.getTime();
+}
+
+/**
+ * "Departure after admission": the actor left the tenant at or after their
+ * membership of the team began (`admittedAt`, COALESCE(admitted_at, created_at)).
+ * A leftover membership row the departure missed grants no authority; a
+ * departure record older than a later (re-)admission does not void it.
+ */
+export function actorDepartedSinceAdmission(row: LockedTenantRow | undefined, admittedAt: Date): boolean {
+  const departed = departedAt(row);
+  return departed !== null && departed.getTime() >= admittedAt.getTime();
 }
 
 const DEADLOCK_DETECTED = "40P01";
