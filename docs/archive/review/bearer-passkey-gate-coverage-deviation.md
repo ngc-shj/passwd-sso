@@ -610,7 +610,7 @@ Real-repo summary line unchanged (`... sql-literals=136 token-table-literals=7 s
   T22 (renderSql with a second argument, with the import present): cells added, each deny with an allow twin, exact outcome.
 - T8 (U+E000 in a SQL file) already had its cells from the self-check fixes.
 - T17: `createMany` was dead in `SCALAR_WRITE_OPS`: the set is read only where the operation is one of update, updateMany, upsert, connectOrCreate (`WRITE_ARG_OPS`), so `createMany` can never be tested there (a nested createMany has its own branch). Removed; a cell pins nested updateMany data (a spread passes) and a nested update (a spread is opaque).
-- T21: `covered-span` (`g.span !== k.span`): two different spellings never share a span (each span is its own property or the spelling itself), and `g !== k` already excludes self, so the guard was redundant and was removed.
+- T21: `covered-span` (`g.span !== k.span`): **this claim was wrong and is withdrawn** (see "Code review round 2 fixes"): a property's name and its value share one span (`keySpan` returns the property for any spelling directly under it), so `{ tokenHash: "tokenHash" }` gave two floating keys that covered each other. The guard is restored.
   `keyspan-shorthand`: a shorthand property contains only its name, so its span can contain no other key; the shorthand branch was removed (span is the spelling itself). `c4-semi-depth`: cell added (`CREATE INDEX i ON notes (a; token_hash);`).
   `c4-first-nonword`: `first.upper` exists for every token and never equals a statement keyword unless the token is that word, so the non-word guard was dead and removed. `c4-generated-range`: only `GENERATED ALWAYS AS (expr)` has an expression, so the search was narrowed to that offset; cells put the digest column first and last in the expression.
 - Red proofs (scratch `scratchpad/batchR1/slot0..3`, whole self-test): base 1038 green; a deliberate syntax error turned 1037 of 1038 red (the stale-root cell does not run the gate); 48 mutations, each turned at least one cell red; three first survived and got cells
@@ -667,3 +667,68 @@ Real-repo summary line unchanged (`... sql-literals=136 token-table-literals=7 s
 | builder-callee-unwrap | mutant | 1 | builders: the review's remaining arms FAILS on the caller of a parenthesised builder call | 1 |
 | builder-unattrib | mutant | 1 | builders: the review's remaining arms FAILS on a call of a builder at module scope (canno… | 1 |
 | keyspan-covered-widen | mutant | 121 | lookups, whatever the receiver FAILS on a computed key bound by let (an unpinned key: flo…; lookups, whatever the receiver passes on a digest key outside any filter position once it… | 1 |
+
+# Code review round 2 fixes
+
+Gate self-test cells: 1042 before, 1083 after; `raw-sql.test.ts` +9 cells. Real-repo summary line unchanged
+(`... sql-literals=136 token-table-literals=7 sql-files=228 sql-qualifying=5`). The real schema still yields unique 75, references 138, views 0 and no unbalanced bracket.
+
+## Findings
+
+- F5/T23 (regression): the `g.span !== k.span` guard in `covered` is restored. Same-span pairs exist because `keySpan` returns the property for any
+  spelling directly under it, so a property's name and its value literal share a span; without the guard each covered the other and the function counted 0 sites.
+  Cells: deny for `{ tokenHash: "tokenHash" }`, `{ ["tokenHash"]: "tokenHash" }`, `{ "tokenHash": "codeHash" }` (UNLISTED, two floating keys: property/computed property and string),
+  each with a pass once both are counted, and an allow twin over a bound local (one key).
+  The other three round-1 removals were re-checked against the same failure mode (same-span pairs) and confirmed: restoring each one leaves all 1083 cells green
+  (`eq-shorthand-restore`, `eq-first-restore`, `eq-generated-restore` below, red = 0 by design). The shorthand branch is safe because a shorthand property holds only its name,
+  so no second key can share its span; the first-token guard and the GENERATED offsets do not involve spans.
+- S20 (strings): `scanSchemaLine` reads `//` comments and brackets outside double-quoted strings only (with `\"` escapes), so `@default("a//b")`, `@default("(")` and `@map("a[b")` no longer swallow the rest of the file.
+- F6 (fail closed): a bracket still open when a `}` or a `model` / `view` / `enum` / `type` / `datasource` / `generator` header starts at column 0, or at the end of the file, is fatal and names the line (or the end of the file).
+  Cells: a tricky attribute in an earlier model with a unique hash field in a later one (fatal) and a twin with a non-hash unique field (passes), for each of four spellings; one cell per header word and for `}`; the EOF case; a parenthesis inside a trailing `//` comment passes.
+- T24: an attribute at column 0 continues its field (`[ \t]*@`); cell with an indented twin already present.
+- T25: allow twins and pins added: a non-unique hash field followed by a composite `@@unique` that does not name it passes; a non-DO statement holding an EXECUTE of a CREATE in a string passes; an indented `{` on the line after `model Z` is fatal; `'$api_keys'` fails W5; `'x1api_keys'` passes.
+- S21 (fragment hides a keyword): src count first: 21 trustedSql templates in non-test src, 0 with `--` or `/*` anywhere in any part (tests hold 6, all this suite's refusal cells), so the rule is safe to apply.
+  Run-time: `trustedSql` refuses any template whose own text holds `--` or `/*` (code `RAW_SQL_COMMENT_MARKER`), after the loop so a template with a table substitution still gets the position-test refusal and its code. The F1 all-parts loop in `assertTablePosition`
+  was kept for that reason only (it makes the existing cells' `RAW_SQL_TOKEN_TABLE` expectations hold); the new check subsumes it for refusal.
+  Static: W6 refuses a trustedSql template whose literal text holds a comment marker (one violation, the first marker, with its line) in a comment, string or quoted identifier alike; the "swallowed substitution" check of round 1 is subsumed (a swallowed substitution needs a marker) and was removed.
+  Pinned behaviour: a marker inside a string or quoted identifier is refused by both layers (the mint's regex cannot tell strings apart); `$queryRaw` templates may hold comments. Header and plan-facing wording updated (W6; no src template holds a marker).
+  Unit cells: line and block markers, in a string, in a quoted identifier, as a whole fragment, after the last table, the fragment-hiding construction, and allow twins. Gate cells: one per form plus the fragment form and a `$queryRaw` twin.
+
+## Red proofs (scratch `scratchpad/batchR2/slot0..3`, whole self-test, base 1082 green then; a syntax error turned 1081 of 1082 red)
+
+- 30 mutations; every one turned at least one cell red except the three equivalence confirmations, which stay green by design. Four first survived and got cells or a corrected mutant:
+  `f3-clamp` (stray closing parentheses outside a string; the old cell's parentheses were inside one), `s21-line-part` (a newline before the marker's part), `s21-first-only` (markers in two different parts), and `s21-line-sub` (the mutation text itself was wrong and was fixed).
+- Run-time (scratch copy of `raw-sql.ts` and its test, 213 tests, base green): template-wide check removed 7 red; last part not scanned 7 red; `--` arm removed 4 red; `/*` arm removed 13 red.
+
+| Mutation | Direction | Red cells | Examples (cell names) | Exit |
+|----------|-----------|-----------|-----------------------|------|
+| f5-span-guard | weaken | 6 | site counting: two keys that share one span (F5) FAILS on a value spelling the same key (…; site counting: two keys that share one span (F5) FAILS on a computed name and a value (tw… | 1 |
+| eq-shorthand-restore | equiv | 0 |  | 0 |
+| eq-first-restore | equiv | 0 |  | 0 |
+| eq-generated-restore | equiv | 0 |  | 0 |
+| s20-string-off | weaken | 8 | schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) still …; schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) still … | 1 |
+| s20-escape-off | weaken | 2 | schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) still …; schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) passes… | 1 |
+| s20-comment-off | weaken | 1 | schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) passes… | 1 |
+| s20-open-paren | weaken | 9 | schema source: the forms a line scan misses (F2, F3) is fatal on a multi-line @relation t…; schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) is fat… | 1 |
+| s20-open-bracket | weaken | 1 | schema source: the forms a line scan misses (F2, F3) is fatal on a multi-line @relation t… | 1 |
+| s20-close-paren | weaken | 1071 | inputs passes on the base fixture and prints the analysed count; inputs FAILS when no source file is scanned | 1 |
+| s20-close-bracket | weaken | 1071 | inputs passes on the base fixture and prints the analysed count; inputs FAILS when no source file is scanned | 1 |
+| s20-header-check | weaken | 8 | schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) is fat…; schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) is fat… | 1 |
+| s20-eof-check | weaken | 1 | schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) is fat… | 1 |
+| s20-fatal | weaken | 9 | schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) is fat…; schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) is fat… | 1 |
+| s20-header-} | weaken | 2 | schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) is fat…; schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) is fat… | 1 |
+| s20-header-modelb | weaken | 1 | schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) is fat… | 1 |
+| s20-header-viewb | weaken | 1 | schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) is fat… | 1 |
+| s20-header-enumb | weaken | 1 | schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) is fat… | 1 |
+| s20-header-typeb | weaken | 1 | schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) is fat… | 1 |
+| s20-header-datasourceb | weaken | 1 | schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) is fat… | 1 |
+| s20-header-generatorb | weaken | 1 | schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) is fat… | 1 |
+| t24-col0 | weaken | 1 | schema source: the forms a line scan misses (F2, F3) is fatal on a @unique at column 0 on… | 1 |
+| f3-clamp | weaken | 1 | schema source: the forms a line scan misses (F2, F3) is fatal on a multi-line @@unique af… | 1 |
+| s21-marker | weaken | 10 | raw SQL: a comment marker in a trustedSql template (F1, S21, static side) FAILS on a line…; raw SQL: a comment marker in a trustedSql template (F1, S21, static side) FAILS on a bloc… | 1 |
+| s21-dash-only | weaken | 7 | raw SQL: a comment marker in a trustedSql template (F1, S21, static side) FAILS on a line…; raw SQL: a comment marker in a trustedSql template (F1, S21, static side) FAILS on a comm… | 1 |
+| s21-block-only | weaken | 3 | raw SQL: a comment marker in a trustedSql template (F1, S21, static side) FAILS on a bloc…; raw SQL: a comment marker in a trustedSql template (F1, S21, static side) FAILS on a bloc… | 1 |
+| s21-first-only | widen | 1 | raw SQL: a comment marker in a trustedSql template (F1, S21, static side) reports only th… | 1 |
+| s21-line-sub | weaken | 1 | raw SQL: a comment marker in a trustedSql template (F1, S21, static side) reports the lin… | 1 |
+| s21-line-part | weaken | 1 | raw SQL: a comment marker in a trustedSql template (F1, S21, static side) reports the lin… | 1 |
+| s21-line-in-part | weaken | 2 | raw SQL: a comment marker in a trustedSql template (F1, S21, static side) reports the lin…; raw SQL: a comment marker in a trustedSql template (F1, S21, static side) reports the lin… | 1 |

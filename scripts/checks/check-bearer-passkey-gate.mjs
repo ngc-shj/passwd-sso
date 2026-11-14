@@ -145,8 +145,11 @@
  *         relation position followed by `::`, `[` or `(` (not INTO's column list); a
  *         substituted qualifier `${x}.<name>` whose name is no column of any schema model;
  *         directly adjacent to a letter, digit, `_` or `$` of the template (`api_${x}`); or a
- *         substitution a comment swallowed (the lexer drops it, while the run-time mint still
- *         reads the text around it: `-- ${x} FROM\n ${t}`).
+ *         comment marker (`--` or `/*`) anywhere in the template's own text, in a comment, a
+ *         string or a quoted identifier alike. The run-time mint refuses every such template
+ *         (code RAW_SQL_COMMENT_MARKER), because a comment would hide a keyword the mint's text
+ *         test still sees, and a fragment holding `-- ` could do it across templates
+ *         (`${c} from\n ${t}`); no src template holds one.
  *     W1-W3 and W5 apply to a literal that names a token table (as a name or inside a string)
  *     and to every trustedSql template; W4 to every literal; W6 to trustedSql templates only.
  *     Each failure names its rule. A literal holding U+E000 (the lexer's substitution marker,
@@ -177,7 +180,10 @@
  *     (`Model.field`, reason; an entry that no longer names such a field is stale); no @relation
  *     references a digest key; no `model` / `view` opens its block on a later line (the shared
  *     schema reader would not see it). The schema is read over logical lines: attributes
- *     continued on the next line, and parentheses or brackets spanning lines, are joined first.
+ *     continued on the next line (indented or not), and parentheses or brackets spanning lines,
+ *     are joined first; comments and brackets count outside double-quoted strings only
+ *     (`@default("a//b")`), and a bracket still open at the next block header or `}` at column 0,
+ *     or at the end of the file, makes the schema unreadable (fatal).
  *   - The pg driver (C5): a call of a member named `query` (property, optional chain, pinned
  *     element access) takes a string literal or no-substitution template as its first
  *     argument, which is then a SQL-bearing literal. The files importing createPool or
@@ -427,21 +433,47 @@ const ALL_COLUMNS = new Set([...COLUMNS_BY_TABLE.values()].flatMap((cols) => [..
 /**
  * Facts the schema loader does not keep: `view` blocks, unique fields, `@relation(references: [...])` lists, and
  * blocks whose brace is on a later line (the loader reads only `model X {` on one line, so it cannot see them).
- * Physical lines are joined into logical ones first: inside unbalanced parentheses or brackets, and a line that
- * starts with an attribute (`@unique` under its field).
+ * Physical lines are joined into logical ones first: inside open parentheses or brackets, and a line that
+ * starts with an attribute (`@unique` under its field, indented or not). Comments and brackets are read
+ * outside double-quoted strings only (`@default("a//b")`); a block header or `}` at column 0 reached with a
+ * bracket still open, or the end of the file, makes the file unreadable (`unbalanced`).
  */
+/** One physical line without its `//` comment, and its net bracket depth change, both read outside strings. */
+function scanSchemaLine(raw) {
+  let code = "";
+  let delta = 0;
+  let inString = false;
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw[i];
+    if (inString) {
+      code += c;
+      if (c === "\\") code += raw[++i] ?? "";
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') inString = true;
+    else if (c === "/" && raw[i + 1] === "/") break;
+    else if (c === "(" || c === "[") delta += 1;
+    else if (c === ")" || c === "]") delta -= 1;
+    code += c;
+  }
+  return { code, delta };
+}
+
 function scanSchemaSource(text) {
-  const out = { views: [], unique: [], references: [], braceOnNextLine: [] };
+  const out = { views: [], unique: [], references: [], braceOnNextLine: [], unbalanced: null };
   const logical = [];
   let depth = 0;
-  for (const raw of text.split("\n")) {
-    const line = raw.replace(/\/\/.*$/, "");
-    const continues = depth > 0 || /^[ \t]+@(?!@)/.test(line);
+  text.split("\n").forEach((raw, n) => {
+    // A block header (or its closing brace) at column 0 cannot sit inside an open attribute: the file is unreadable here.
+    if (depth > 0 && out.unbalanced === null && /^(\}|model\b|view\b|enum\b|type\b|datasource\b|generator\b)/.test(raw)) out.unbalanced = `line ${n + 1}`;
+    const { code: line, delta } = scanSchemaLine(raw);
+    const continues = depth > 0 || /^[ \t]*@(?!@)/.test(line);
     if (continues && logical.length > 0) logical[logical.length - 1] += ` ${line.trim()}`;
     else logical.push(line);
-    for (const c of line) depth += c === "(" || c === "[" ? 1 : c === ")" || c === "]" ? -1 : 0;
-    if (depth < 0) depth = 0;
-  }
+    depth = Math.max(0, depth + delta);
+  });
+  if (depth > 0 && out.unbalanced === null) out.unbalanced = "the end of the file";
   let model = null;
   logical.forEach((line, k) => {
     const lone = /^(model|view)\s+(\w+)\s*$/.exec(line);
@@ -480,6 +512,7 @@ const UNIQUE_HASH_FIELDS = new Set(
 
 /** The first schema check that fails, as a fatal message, or null. */
 function schemaViolation() {
+  if (SCHEMA_SOURCE.unbalanced) return `${SCHEMA_PATH}: a parenthesis or bracket is still open at ${SCHEMA_SOURCE.unbalanced}: the schema cannot be read reliably.`;
   if (SCHEMA_SOURCE.braceOnNextLine.length > 0) return `${SCHEMA_PATH}: ${SCHEMA_SOURCE.braceOnNextLine[0]} opens its block on a later line: the schema reader cannot see it.`;
   const mapped = new Set();
   for (const [model, fields] of MODELS) {
@@ -1360,25 +1393,29 @@ function checkSqlLiteral(input, trusted) {
       }
     }
   });
-  // A substitution touching a word character assembles a name from parts (`api_${x}`); one a comment swallowed is
-  // invisible here while the run-time mint still reads the text around it (`-- ${x} FROM\n ${t}`).
-  const present = []; // the substitutions the lexer kept, in order: a token's source text, or null inside a quoted token
-  for (const t of tk) {
-    if (t.type === TOKEN.OPAQUE) present.push(t.text);
-    else if (t.type === TOKEN.QIDENT || t.type === TOKEN.STRING) for (const c of t.type === TOKEN.QIDENT ? t.value : t.text) if (c === SQL_SUBSTITUTION) present.push(null);
+  // A comment marker anywhere in the template's own text (a comment, a string or a quoted identifier alike):
+  // the run-time mint refuses every such template, so no fragment can comment out the keyword the next
+  // template's text shows its table-position test (`-- ` in one fragment, `from\n ${t}` in the next).
+  const newlines = (text) => [...text].filter((c) => c === "\n").length;
+  let markerLine = 0;
+  for (const [k, part] of input.parts.entries()) {
+    const marker = /--|\/\*/.exec(part);
+    if (marker) {
+      add("W6", { line: markerLine + newlines(part.slice(0, marker.index)) }, "a comment marker (-- or /*) in a trustedSql template: the run-time mint refuses it");
+      break;
+    }
+    markerLine += newlines(part) + newlines(input.substitutions[k] ?? "");
   }
-  let kept = 0;
+  // A substitution touching a word character assembles a name from parts (`api_${x}`).
   let line = 0;
   input.substitutions.forEach((substitution, k) => {
-    line += [...input.parts[k]].filter((c) => c === "\n").length;
-    if (kept < present.length && (present[kept] === null || present[kept] === substitution)) kept += 1;
-    else add("W6", { line }, "a substitution inside a comment is invisible to the lexer");
+    line += newlines(input.parts[k]);
     const before = input.parts[k].at(-1);
     const after = input.parts[k + 1][0];
     if ((before && SQL_WORD_CHAR.test(before)) || (after && SQL_WORD_CHAR.test(after))) {
       add("W6", { line }, "a substitution adjacent to a word character assembles a name from parts");
     }
-    line += [...substitution].filter((c) => c === "\n").length;
+    line += newlines(substitution);
   });
   return { names, violations };
 }
@@ -1648,7 +1685,7 @@ for (const { rel, sf } of sourceFiles(project, join(ROOT, SCAN_ROOT), ROOT)) {
     if (k.write) builders.push({ rel, name: k.owner.at.name, fn: k.owner.at.fn });
     const covered =
       countedCalls.some((c) => c.key === k.owner.key && within(c.call, k.occ)) ||
-      owned.some((g) => g !== k && g.owner?.key === k.owner.key && within(g.span, k.occ));
+      owned.some((g) => g !== k && g.owner?.key === k.owner.key && g.span !== k.span && within(g.span, k.occ));
     if (covered) continue;
     const a = entryFor(rel, k.owner.at, file);
     a.sites += 1;

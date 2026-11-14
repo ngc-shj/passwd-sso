@@ -2829,19 +2829,46 @@ describe.concurrent("raw SQL: W5 reads a string's body, with its delimiters stri
   });
 });
 
-describe.concurrent("raw SQL: a substitution a comment swallowed (F1, static side)", { timeout: 60_000 }, () => {
-  const SWALLOWED = "a substitution inside a comment is invisible to the lexer";
+describe.concurrent("raw SQL: a comment marker in a trustedSql template (F1, S21, static side)", { timeout: 60_000 }, () => {
+  const MARKER = "a comment marker (-- or /*) in a trustedSql template: the run-time mint refuses it";
   it("FAILS on a line comment that hides a substitution and the keyword after it", async () => {
-    await expectViolations(viaTrusted("SELECT to_jsonb( -- ${x} FROM\n ${tbl}) FROM y"), [ruleAt("W6", SWALLOWED)]);
+    await expectViolations(viaTrusted("SELECT to_jsonb( -- ${x} FROM\n ${tbl}) FROM y"), [ruleAt("W6", MARKER)]);
   });
-  it("FAILS on a block comment that hides both substitutions (a pair, on two lines)", async () => {
-    await expectViolations(viaTrusted("SELECT to_jsonb( /* ${x} FROM\n ${tbl}) */ FROM y"), [ruleAt("W6", SWALLOWED, 3), ruleAt("W6", SWALLOWED, 4)]);
+  it("FAILS on a block comment that hides both substitutions (one violation, the first marker)", async () => {
+    await expectViolations(viaTrusted("SELECT to_jsonb( /* ${x} FROM\n ${tbl}) */ FROM y"), [ruleAt("W6", MARKER)]);
   });
-  it("passes on a comment that hides no substitution (the run-time mint is the stricter judge of earlier comments)", async () => {
-    await expectPass(viaTrusted("SELECT 1 -- note\n FROM ${tbl}"));
+  it("FAILS on a comment that hides no substitution", async () => {
+    await expectViolations(viaTrusted("SELECT 1 -- note\n FROM ${tbl}"), [ruleAt("W6", MARKER)]);
   });
-  it("passes on a substitution after the comment has ended", async () => {
-    await expectPass(viaTrusted("SELECT 1 /* note */ FROM ${tbl}"));
+  it("FAILS on a block comment after which the keyword is real", async () => {
+    await expectViolations(viaTrusted("SELECT 1 /* note */ FROM ${tbl}"), [ruleAt("W6", MARKER)]);
+  });
+  it("FAILS on a marker inside a string (the mint cannot tell strings apart, so neither does the gate)", async () => {
+    await expectViolations(viaTrusted("SELECT '--' FROM notes"), [ruleAt("W6", MARKER)]);
+  });
+  it("FAILS on a marker inside a quoted identifier", async () => {
+    await expectViolations(viaTrusted('SELECT "a/*b" FROM notes'), [ruleAt("W6", MARKER)]);
+  });
+  it("reports only the first of two markers in different parts", async () => {
+    await expectViolations(viaTrusted("SELECT 1 FROM ${tbl} -- a\n WHERE ${parent} -- b"), [ruleAt("W6", MARKER)]);
+  });
+  it("reports the line of a marker that follows a newline in an earlier part", async () => {
+    await expectViolations(viaTrusted("SELECT 1\n FROM ${tbl} -- x"), [ruleAt("W6", MARKER, 4)]);
+  });
+  it("reports the line of a marker that follows a multi-line substitution", async () => {
+    await expectViolations(viaTrusted("SELECT ${(\n tbl\n )}\n FROM notes -- x"), [ruleAt("W6", MARKER, 6)]);
+  });
+  it("reports the line of the first marker", async () => {
+    await expectViolations(viaTrusted("SELECT 1\n  FROM notes -- x"), [ruleAt("W6", MARKER, 4)]);
+  });
+  it("FAILS on a comment fragment that would hide the keyword of the next template (S21)", async () => {
+    await expectViolations(sqlBody("const c = trustedSql`-- `;\n  return trustedSql`SELECT to_jsonb(${c} from\n ${tbl})`;"), [ruleAt("W6", MARKER)]);
+  });
+  it("passes on a single dash and a division (no marker)", async () => {
+    await expectPass(viaTrusted("SELECT 1 - 2, 4 / 2 FROM notes"));
+  });
+  it("passes on the same comments in a $queryRaw template (only trustedSql refuses them)", async () => {
+    await expectPass(viaTag("SELECT 1 -- note\n FROM notes /* more */"));
   });
   it("counts substitutions kept inside a quoted identifier, and a string, as kept", async () => {
     await expectPass(viaTrusted('SELECT "${tbl}".id FROM ${tbl} WHERE x = \'${parent}\''));
@@ -3058,6 +3085,7 @@ describe.concurrent("schema source: the forms a line scan misses (F2, F3)", { ti
     ["a @@unique(fields: [...], name: ...)", "secretHash String\n  @@unique(fields: [secretHash], name: \"n\")", "slug String\n  @@unique(fields: [slug], name: \"n\")"],
     ["a multi-line @@unique([...])", "secretHash String\n  @@unique([\n    secretHash\n  ])", "slug String\n  @@unique([\n    slug\n  ])"],
     ["a @unique on a continuation line", "secretHash String\n    @unique", "slug String\n    @unique"],
+    ["a @unique at column 0 on a continuation line", "secretHash String\n@unique", "slug String\n@unique"],
   ];
   it.each(UNIQUE_FORMS)("is fatal on %s over a hash field", async (_label, deny) => {
     await expectFatal(addToNote(deny), listing("Note.secretHash"));
@@ -3066,7 +3094,7 @@ describe.concurrent("schema source: the forms a line scan misses (F2, F3)", { ti
     await expectPass(addToNote(allow));
   });
   it("is fatal on a multi-line @@unique after a line with stray closing parentheses", async () => {
-    await expectFatal(addToNote('label String @map("l))")\n  secretHash String\n  @@unique([\n    secretHash\n  ])'), listing("Note.secretHash"));
+    await expectFatal(addToNote('label String @map("l")))\n  secretHash String\n  @@unique([\n    secretHash\n  ])'), listing("Note.secretHash"));
   });
   it("is fatal on a multi-line @relation that references a digest key", async () => {
     await expectFatal(addToNote("link ApiKey @relation(\n    fields: [title],\n    references: [tokenHash]\n  )"), `${SCHEMA_PREFIX} Note.link references tokenHash: a foreign key gives another column the digest's values.`);
@@ -3092,6 +3120,77 @@ describe.concurrent("schema source: the forms a line scan misses (F2, F3)", { ti
   });
   it("passes on an entry naming a unique hash field", async () => {
     await expectPass({ ...addToNote("contentHash String @unique"), nonBearerHashFields: { "Note.contentHash": { reason: REASON } } });
+  });
+});
+
+
+describe.concurrent("site counting: two keys that share one span (F5)", { timeout: 60_000 }, () => {
+  const DENY = [
+    ["a value spelling the same key", 'return { tokenHash: "tokenHash" };', [[2, "property"], [2, "string"]]],
+    ["a computed name and a value", 'return { ["tokenHash"]: "tokenHash" };', [[2, "computed property"], [2, "string"]]],
+    ["a string-literal name and a value that is another digest key", 'return { "tokenHash": "codeHash" };', [[2, "property"], [2, "string"]]],
+  ];
+  it.each(DENY)("FAILS on %s (two floating keys, neither covers the other)", async (_label, code, floating) => {
+    await expectViolations(inLookup(code), [unlisted(LOOKUP_KEY, { floating })]);
+  });
+  it.each(DENY)("passes on %s once both are counted", async (_label, code) => {
+    await expectPass(listed(inLookup(code), 2));
+  });
+  it("passes on the same property over a bound local (one floating key)", async () => {
+    await expectPass(listed(inLookup("const v = t;\n  return { tokenHash: v };")));
+  });
+});
+
+describe.concurrent("schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25)", { timeout: 60_000 }, () => {
+  const SCHEMA_PREFIX = "prisma/schema.prisma:";
+  const UNIQUE_HASH = "is a unique String ending in hash/digest but is not a digest key (tokenHash/codeHash/replacedByHash): name it one, or list";
+  const listing = (key) => `${SCHEMA_PREFIX} ${key} ${UNIQUE_HASH} "${key}" in the manifest's "nonBearerHashFields" with a reason.`;
+  const withModels = (early, later) => ({ files: { "prisma/schema.prisma": `${SCHEMA}\nmodel Early {\n  id String @id ${early}\n}\n\nmodel Later {\n  id String @id\n  ${later}\n}\n` } });
+  const TRICKY = [
+    ["a // inside a string", '@default("a//b")'],
+    ["an opening parenthesis inside a string", '@default("(")'],
+    ["an opening bracket inside a string", '@map("a[b")'],
+    ["an escaped quote and a // inside a string", '@default("a\\"b//c(")'],
+  ];
+  it.each(TRICKY)("still sees a unique hash field in a later model after %s", async (_label, attribute) => {
+    await expectFatal(withModels(attribute, "secretHash String @unique"), listing("Later.secretHash"));
+  });
+  it.each(TRICKY)("passes after %s when the later unique field is no hash", async (_label, attribute) => {
+    await expectPass(withModels(attribute, "slug String @unique"));
+  });
+  it("is fatal on a parenthesis still open when the next block starts", async () => {
+    const text = `${SCHEMA}\nmodel Y {\n  id String @id @default(1\n}\n`;
+    const line = text.split("\n").findLastIndex((l) => l === "}") + 1;
+    await expectFatal({ files: { "prisma/schema.prisma": text } }, `${SCHEMA_PREFIX} a parenthesis or bracket is still open at line ${line}: the schema cannot be read reliably.`);
+  });
+  const HEADERS = ["}", "model Q {", "view V {", "enum E {", "type T {", "datasource db {", "generator g {"];
+  it.each(HEADERS)("is fatal on a parenthesis still open when %s starts at column 0", async (header) => {
+    const text = `${SCHEMA}\nmodel Y {\n  id String @id @default(1\n${header}\n}\n`;
+    const line = text.split("\n").findIndex((l, i, all) => l === header && all[i - 1] === "  id String @id @default(1") + 1;
+    await expectFatal({ files: { "prisma/schema.prisma": text } }, `${SCHEMA_PREFIX} a parenthesis or bracket is still open at line ${line}: the schema cannot be read reliably.`);
+  });
+  it("passes on a parenthesis inside a trailing // comment (comments are read outside strings only)", async () => {
+    await expectPass({ files: { "prisma/schema.prisma": `${SCHEMA}\nmodel Y {\n  id String @id // see (note\n}\n` } });
+  });
+  it("is fatal on a bracket still open at the end of the file", async () => {
+    await expectFatal({ files: { "prisma/schema.prisma": `${SCHEMA}\nmodel Y {\n  id String @id @default([1` } }, `${SCHEMA_PREFIX} a parenthesis or bracket is still open at the end of the file: the schema cannot be read reliably.`);
+  });
+  it("is fatal on a model whose brace is indented on the next line", async () => {
+    await expectFatal({ files: { "prisma/schema.prisma": `${SCHEMA}\nmodel Z\n  {\n  id String @id\n}\n` } }, `${SCHEMA_PREFIX} Z opens its block on a later line: the schema reader cannot see it.`);
+  });
+  it("passes on a non-unique hash field followed by a composite @@unique that does not name it", async () => {
+    await expectPass({ files: { "prisma/schema.prisma": swap(SCHEMA, 'model Note {\n  id    String @id\n  title String\n', 'model Note {\n  id    String @id\n  title String\n  contentHash String\n  slug String\n  @@unique([slug, title])\n') } });
+  });
+
+  const MIG = "prisma/migrations/20240201000000_extra/migration.sql";
+  it("passes on a non-DO statement that merely holds an EXECUTE of a CREATE inside a string", async () => {
+    await expectPass({ files: { [MIG]: "SELECT 1 FROM notes WHERE x = $$ EXECUTE 'CREATE VIEW v AS SELECT 1' $$;" } });
+  });
+  it("FAILS on a table name after a dollar sign inside a string (W5)", async () => {
+    await expectViolations(viaUnsafe("SELECT 1 FROM notes WHERE x = '$api_keys'"), [ruleAt("W5", W.string("api_keys"))]);
+  });
+  it("passes on a table name that ends a longer word inside a string", async () => {
+    await expectPass(viaUnsafe("SELECT 1 FROM notes WHERE x = 'x1api_keys'"));
   });
 });
 

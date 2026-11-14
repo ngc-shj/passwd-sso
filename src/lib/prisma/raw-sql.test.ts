@@ -15,6 +15,7 @@ import {
 } from "./raw-sql";
 
 const TOKEN_TABLE_REFUSAL = expect.objectContaining({ code: RAW_SQL_REFUSAL_CODE.TOKEN_TABLE });
+const COMMENT_REFUSAL = expect.objectContaining({ code: RAW_SQL_REFUSAL_CODE.COMMENT_MARKER });
 // One token table and one ordinary table: a position rule that only held for a
 // token table, or only for another, would pass one of the two.
 const TABLE_KINDS = [
@@ -266,6 +267,36 @@ describe("trustedSql", () => {
     expect(() =>
       trustedSql`SELECT * FROM ${forged as unknown as SqlIdentifier}`,
     ).toThrow(TypeError);
+  });
+});
+
+describe("trustedSql refuses a comment marker anywhere in a template's own text", () => {
+  it.each([
+    ["a line comment marker", () => trustedSql`SELECT 1 -- note`],
+    ["a block comment marker", () => trustedSql`SELECT 1 /* note */`],
+    ["a marker inside a string", () => trustedSql`SELECT '--'`],
+    ["a marker inside a quoted identifier", () => trustedSql`SELECT "a/*b" FROM x`],
+    ["a marker that is the whole template (a fragment)", () => trustedSql`-- `],
+    ["a marker after the last table (the position test passed first)", () => trustedSql`SELECT 1 FROM ${sqlTable("notes")} -- x`],
+  ])("refuses %s", (_label, build) => {
+    expect(build).toThrow(COMMENT_REFUSAL);
+  });
+
+  it("cannot build a comment fragment to hide a keyword across templates", () => {
+    // The fragment itself is refused, so `${c} from\n ${t}` never gets a keyword the text test would trust.
+    expect(() => {
+      const c = trustedSql`-- `;
+      return trustedSql`SELECT to_jsonb(${c} from
+        ${sqlTable("api_keys")})`;
+    }).toThrow(COMMENT_REFUSAL);
+  });
+
+  it.each([
+    ["a single dash and a division", () => trustedSql`SELECT 1 - 2, 4 / 2`],
+    ["a slash and a star that do not touch", () => trustedSql`SELECT 2 / * 3`],
+    ["a template with no marker and a table", () => trustedSql`SELECT 1 FROM ${sqlTable("notes")}`],
+  ])("accepts %s", (_label, build) => {
+    expect(build).not.toThrow();
   });
 });
 

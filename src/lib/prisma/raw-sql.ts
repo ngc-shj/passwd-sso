@@ -288,6 +288,18 @@ export function trustedSql(
     );
   }
   text += strings[partsLength];
+  // No template may hold a comment marker, in a comment, a string or a quoted identifier alike: a
+  // fragment holding `-- ` would otherwise comment out the keyword that the enclosing template's
+  // text shows to the table-position test (`${c} from\n ${t}`). The static gate refuses the same text (W6). A
+  // template with a table substitution met the position test above first, so it keeps that code.
+  for (let i = 0; i <= partsLength; i++) {
+    if (commentMarkerExec(strings[i]) !== null) {
+      throw refusal(
+        RAW_SQL_REFUSAL_CODE.COMMENT_MARKER,
+        "trustedSql: a template may not hold a comment marker (-- or /*)",
+      );
+    }
+  }
   const obj = createGenuineObject();
   fragmentSet(obj, text);
   return obj as unknown as SqlFragment;
@@ -332,6 +344,7 @@ export const RAW_SQL_REFUSAL_CODE = freeze({
   DIGEST_COLUMN: "RAW_SQL_DIGEST_COLUMN",
   UNICODE_ESCAPE: "RAW_SQL_UNICODE_ESCAPE",
   TOKEN_TABLE: "RAW_SQL_TOKEN_TABLE",
+  COMMENT_MARKER: "RAW_SQL_COMMENT_MARKER",
 } as const);
 
 type RawSqlRefusalCode = (typeof RAW_SQL_REFUSAL_CODE)[keyof typeof RAW_SQL_REFUSAL_CODE];
