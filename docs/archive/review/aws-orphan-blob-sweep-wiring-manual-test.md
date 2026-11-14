@@ -221,11 +221,13 @@ tick; after step 6's marker delete, `--init-blob-marker` (`created`) and
 ## Rollback
 
 - **This change, on a `db` stack (M1):** revert the commit and run `deploy.sh`.
-  The retention task definition goes back to `ecs_task` (another replacement), the new role is
-  destroyed, and the rule returns to its old name — which fails every plan when
+  The retention and outbox task definitions go back to `ecs_task` (replacements), the new role
+  is destroyed, `ecs_s3_access[0]` is created again where `enable_s3_attachments` is on, and
+  the rule returns to its old name — which fails every plan when
   `<name_prefix>` is longer than 13 characters, so on such a stack keep the C5 part.
 - **A stack switched to `s3`:** do not go back to `db` (every S3-stored attachment becomes
-  unreadable). Set `retention_gc_blob_sweep_mode = "off"`, apply, `deploy.sh`.
+  unreadable). Set `retention_gc_blob_sweep_mode = "off"` in `$TF_VAR_FILE` and run
+  `deploy.sh` (no standalone apply).
 - **A wrongly deleted object:** M3's recovery steps.
 
 ## Not covered here

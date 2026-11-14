@@ -24,6 +24,8 @@
     "v_grace_below_min_fails",
     "v_grace_at_min_plans",
     "v_grace_non_integer_fails",
+    "v_grace_above_max_fails",
+    "v_mode_unknown_fails",
     "v_backend_uppercase_fails",
     "c5_name_prefix_at_bound_plans"
   ]

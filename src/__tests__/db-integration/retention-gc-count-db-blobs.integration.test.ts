@@ -5,8 +5,8 @@
  *
  * The database is shared with the other files, so the cells measure deltas:
  * the function's own counts before and after seeding, not absolute totals.
- * Each row sits in a tenant of its own (five tenants), so a count confined
- * to one tenant cannot pass.
+ * Each row sits in a tenant of its own, so a count confined to one tenant
+ * cannot pass.
  *
  * The rows straddle the SQL size bound (MAX_OBJECT_REF_BYTES): a row over it
  * is counted database-stored by SQL alone, a row of exactly the bound is read
@@ -100,11 +100,17 @@ describe("countDbStoredAttachments under the retention-gc role (#1020)", () => {
     const after = await countDbStoredAttachments(ctx.retentionWorker.prisma);
     // total: the five rows. db_stored: ciphertext, atBoundBlob, overBound.
     expect({ total: after.total - before.total, dbStored: after.dbStored - before.dbStored }).toEqual({ total: 5, dbStored: 3 });
+
+    // Pages of two reach the keyset cursor query, which must apply the same
+    // bound as the first page: the answer does not depend on the page size.
+    await expect(countDbStoredAttachments(ctx.retentionWorker.prisma, 2)).resolves.toEqual(after);
   });
 
   it("--count-db-blobs on the worker entrypoint prints one line agreeing with the function", async () => {
-    // Seeded by the cell above (or seeded here when run alone).
-    if (tenants.length === 0) await seed(randomBytes(64));
+    // One database-stored row and one ref of its own, so total and db_stored
+    // differ whatever else the table holds: a swap of the two fields fails.
+    await seed(randomBytes(64));
+    await seed(Buffer.from(encodeObjectRef({ key: `personal/${randomUUID()}/${randomUUID()}/${newBlobGeneration()}.bin` })));
     const adjacentBefore = await countDbStoredAttachments(ctx.retentionWorker.prisma);
     const run = spawnSync("node_modules/.bin/tsx", [resolve(REPO_ROOT, "scripts/retention-gc-worker.ts"), "--count-db-blobs"], {
       // The worker role's URL, as production injects it; DATABASE_URL="" so a
@@ -116,6 +122,8 @@ describe("countDbStoredAttachments under the retention-gc role (#1020)", () => {
     });
     const adjacentAfter = await countDbStoredAttachments(ctx.retentionWorker.prisma);
 
+    // A spawn failure or the spawn timeout, before any reading of the status.
+    expect(run.error).toBeUndefined();
     expect(run.status, run.stderr).toBe(0);
     const lines = run.stdout.split("\n").filter((l) => l.trim() !== "");
     expect(lines).toHaveLength(1);
@@ -126,7 +134,9 @@ describe("countDbStoredAttachments under the retention-gc role (#1020)", () => {
     expect(adjacentAfter).toEqual(adjacentBefore);
     expect(out.db_stored).toBe(adjacentBefore.dbStored);
     expect(out.total).toBe(adjacentBefore.total);
-  });
+    expect(adjacentBefore.total).toBeGreaterThan(adjacentBefore.dbStored);
+    // Above the child's own 60 s timeout, so that one reports, not vitest's.
+  }, 90_000);
 
   it("sees none of those rows as the same role without the bypass (the RLS positive control)", async () => {
     // Seeded by the cell above (or seeded here when run alone).

@@ -568,6 +568,13 @@ Keep `attachments_blob_backend = "s3"`, set `retention_gc_blob_sweep_mode =
 "off"` in `$TF_VAR_FILE` and run `scripts/deploy.sh`. Going back to `db`
 strands every S3-stored attachment.
 
+Going back to `db` is only for the case in rollout step 2, before any S3 upload
+exists and with uploads still quiesced. Its apply removes the app's bucket
+permissions at once, before the services move: an app task still on an `s3`
+revision (during the rolling update, or after `deploy.sh` rolled itself back)
+gets AccessDenied on attachments. If `deploy.sh` rolled back, set the backend
+to `s3` again in `$TF_VAR_FILE` and re-run it.
+
 #### Before a database restore
 
 Set the sweep mode to `off` or `report` **before** restoring, and keep it there
@@ -576,8 +583,10 @@ grace period, is the control: set it in `$TF_VAR_FILE` and run
 `scripts/deploy.sh`, or, when a deploy is not possible, stop the sweep by
 scaling the service to 0 (`aws ecs update-service --cluster "$CLUSTER" --service
 <name_prefix>-retention-gc-worker --desired-count 0 --region <region>`; this
-stops the retention purge too, and the next `terraform apply` restores
-`worker_desired_count`). Then confirm what runs:
+stops the retention purge too). Scaling to 0 does not last: the next
+`scripts/deploy.sh` restores `worker_desired_count` and starts the worker in
+whatever mode `$TF_VAR_FILE` holds, so change the mode there to `off` or
+`report` as well, even when you cannot deploy now. Then confirm what runs:
 
 ```bash
 TASK=$(aws ecs list-tasks --cluster "$CLUSTER" --service-name <name_prefix>-retention-gc-worker \

@@ -1,6 +1,6 @@
 # Code Review: aws-orphan-blob-sweep-wiring
 Date: 2026-11-14
-Review round: 1
+Review round: 2
 
 ## Changes from Previous Round
 
@@ -112,3 +112,40 @@ RT7 → T1–T3; RT9 noted (fixture confirmed equal to `main`'s rendering); RT10
 - F5: the precondition fires alongside the provider error (observed); D1 retitled, kept.
 - T5: real `expect_failures = [var.x]` runs; D2 states the `>= 1.5` floor is unverified in CI.
 - T6: `s3`+`delete` and `s3`+`off` parse; the delete env without a grace is refused.
+
+## Round 2 (incremental: a0ac567cc..128fe7229)
+
+All round-1 findings resolved (security, functionality and testing re-verified; sampled
+mutations re-run).
+
+### Security / Functionality (combined)
+- **N1 [Minor]** The manual test's rollback still named a standalone apply, and omitted the
+  outbox task definition and `ecs_s3_access` reversal.
+- **N2 [Minor]** Scaling the retention service to 0 does not survive the next `deploy.sh`, which
+  restarts it in the tfvars mode.
+- **N3 [Minor]** An `s3`→`db` apply removes the app's bucket rights before the services move.
+
+### Testing
+- **N1 [Major]** The keyset cursor branch's size comparison was unproven (a mutation survived).
+- **N2 [Minor]** The unit fake read only the operator token.
+- **N3 [Minor]** The entrypoint cell could not detect a field swap when run alone; timeout and
+  spawn-error handling.
+- **N4 [Minor]** The grace maximum and the sweep-mode enum had no real Terraform run.
+- **N5 [Minor]** Store tests hard-coded 1024/1025.
+
+### Resolution Status (round 2)
+- Sec/Func N1–N3: docs corrected (`deployment.md` rollback and restore; manual-test rollback).
+- Testing N1: a three-row, page-size-1 unit cell that asserts the cursor query ran, and an
+  integration call with page size 2 equal to the default; red-proved (`<` in the cursor query
+  fails only the new cell).
+- Testing N2: the fake accepts only the exact predicate shape and throws otherwise; three
+  mutations fail it.
+- Testing N3: the cell seeds a ciphertext row and a ref row and asserts `total > db_stored`;
+  spawn error asserted first; 90 s cell timeout.
+- Testing N4: `v_grace_above_max_fails`, `v_mode_unknown_fails` (27 runs); each red-proved.
+- Testing N5: `MAX_OBJECT_KEY_BYTES` exported and used.
+
+## Termination
+
+Round 2's changes are tests and operator docs only, apart from exporting one constant; each
+test change is red-proved and no security boundary is touched. No further round is run.

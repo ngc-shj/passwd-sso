@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { gcsBlobStore } from "@/lib/blob-store/gcs-blob-store";
+import { MAX_OBJECT_KEY_BYTES } from "@/lib/blob-store/object-ref";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -167,6 +168,7 @@ describe("gcsBlobStore listing and marker", () => {
 });
 
 // The suffix buildObjectKey appends to BLOB_OBJECT_PREFIX + "/" for this context.
+// MAX_OBJECT_KEY_BYTES is a plain constant, so the static import survives resetModules.
 const KEY_TAIL = "personal/entry-1/att-1/0123456789abcdef0123456789abcdef.bin";
 
 describe("gcsBlobStore.putObject and the ref size bound", () => {
@@ -188,15 +190,15 @@ describe("gcsBlobStore.putObject and the ref size bound", () => {
     return { put, save };
   }
 
-  it("uploads a maximal valid key (1024 bytes)", async () => {
-    const { put, save } = await storeWithPrefixOfKeyLength(1024);
+  it("uploads a maximal valid key (MAX_OBJECT_KEY_BYTES)", async () => {
+    const { put, save } = await storeWithPrefixOfKeyLength(MAX_OBJECT_KEY_BYTES);
     const stored = await put();
-    expect(JSON.parse(Buffer.from(stored).toString("utf8")).key).toHaveLength(1024);
+    expect(JSON.parse(Buffer.from(stored).toString("utf8")).key).toHaveLength(MAX_OBJECT_KEY_BYTES);
     expect(save).toHaveBeenCalledTimes(1);
   });
 
   it("refuses a key whose ref is over the bound before uploading anything", async () => {
-    const { put, save } = await storeWithPrefixOfKeyLength(1025);
+    const { put, save } = await storeWithPrefixOfKeyLength(MAX_OBJECT_KEY_BYTES + 1);
     await expect(put()).rejects.toThrow(/Blob object ref exceeds/);
     expect(save).not.toHaveBeenCalled();
   });

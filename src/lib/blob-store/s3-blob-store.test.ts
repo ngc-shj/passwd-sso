@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { BLOB_STORAGE } from "@/lib/blob-store/types";
 import { loadCloudBlobConfig } from "@/lib/blob-store/config";
 import { s3BlobStore } from "@/lib/blob-store/s3-blob-store";
-import { encodeObjectRef } from "@/lib/blob-store/object-ref";
+import { encodeObjectRef, MAX_OBJECT_KEY_BYTES } from "@/lib/blob-store/object-ref";
 import type { ListObjectsV2CommandOutput } from "@aws-sdk/client-s3";
 
 afterEach(() => {
@@ -260,6 +260,7 @@ describe("s3BlobStore listing and marker", () => {
 });
 
 // The suffix buildObjectKey appends to BLOB_OBJECT_PREFIX + "/" for this context.
+// MAX_OBJECT_KEY_BYTES is a plain constant, so the static import survives resetModules.
 const KEY_TAIL = "personal/entry-1/att-1/0123456789abcdef0123456789abcdef.bin";
 
 describe("s3BlobStore.putObject and the ref size bound", () => {
@@ -284,15 +285,15 @@ describe("s3BlobStore.putObject and the ref size bound", () => {
     return { put, send };
   }
 
-  it("uploads a maximal valid key (1024 bytes)", async () => {
-    const { put, send } = await storeWithPrefixOfKeyLength(1024);
+  it("uploads a maximal valid key (MAX_OBJECT_KEY_BYTES)", async () => {
+    const { put, send } = await storeWithPrefixOfKeyLength(MAX_OBJECT_KEY_BYTES);
     const stored = await put();
-    expect(JSON.parse(Buffer.from(stored).toString("utf8")).key).toHaveLength(1024);
+    expect(JSON.parse(Buffer.from(stored).toString("utf8")).key).toHaveLength(MAX_OBJECT_KEY_BYTES);
     expect(send).toHaveBeenCalledTimes(1);
   });
 
   it("refuses a key whose ref is over the bound before uploading anything", async () => {
-    const { put, send } = await storeWithPrefixOfKeyLength(1025);
+    const { put, send } = await storeWithPrefixOfKeyLength(MAX_OBJECT_KEY_BYTES + 1);
     await expect(put()).rejects.toThrow(/Blob object ref exceeds/);
     expect(send).not.toHaveBeenCalled();
   });

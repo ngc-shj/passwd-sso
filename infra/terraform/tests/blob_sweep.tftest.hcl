@@ -411,6 +411,26 @@ run "v_grace_non_integer_fails" {
   expect_failures = [var.retention_gc_blob_orphan_grace_ms]
 }
 
+run "v_grace_above_max_fails" {
+  command = plan
+
+  variables {
+    retention_gc_blob_orphan_grace_ms = 3024000001
+  }
+
+  expect_failures = [var.retention_gc_blob_orphan_grace_ms]
+}
+
+run "v_mode_unknown_fails" {
+  command = plan
+
+  variables {
+    retention_gc_blob_sweep_mode = "purge"
+  }
+
+  expect_failures = [var.retention_gc_blob_sweep_mode]
+}
+
 run "v_backend_uppercase_fails" {
   command = plan
 

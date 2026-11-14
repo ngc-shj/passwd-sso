@@ -9,6 +9,7 @@ import {
   BlobRefInvalidError,
   parseObjectKey,
   blobMarkerKey,
+  MAX_OBJECT_KEY_BYTES,
   MAX_OBJECT_REF_BYTES,
   type BlobObjectRef,
 } from "@/lib/blob-store/object-ref";
@@ -53,18 +54,19 @@ describe("encodeObjectRef / decodeObjectRef roundtrip", () => {
 });
 
 describe("MAX_OBJECT_REF_BYTES", () => {
-  it("is a 1024-byte key inside the JSON wrapper", () => {
-    expect(MAX_OBJECT_REF_BYTES).toBe(1024 + '{"key":""}'.length);
+  it("is a maximal key (1024 bytes, the S3 and GCS limit) inside the JSON wrapper", () => {
+    expect(MAX_OBJECT_KEY_BYTES).toBe(1024);
+    expect(MAX_OBJECT_REF_BYTES).toBe(MAX_OBJECT_KEY_BYTES + '{"key":""}'.length);
   });
 
   it("fits the ref of a maximal key", () => {
-    const encoded = encodeObjectRef({ key: "a".repeat(1024) });
+    const encoded = encodeObjectRef({ key: "a".repeat(MAX_OBJECT_KEY_BYTES) });
     expect(encoded.length).toBe(MAX_OBJECT_REF_BYTES);
-    expect(decodeObjectRef(encoded)).toEqual({ key: "a".repeat(1024) });
+    expect(decodeObjectRef(encoded)).toEqual({ key: "a".repeat(MAX_OBJECT_KEY_BYTES) });
   });
 
   it("refuses a ref one byte over", () => {
-    expect(() => encodeObjectRef({ key: "a".repeat(1025) })).toThrow(`Blob object ref exceeds ${MAX_OBJECT_REF_BYTES} bytes`);
+    expect(() => encodeObjectRef({ key: "a".repeat(MAX_OBJECT_KEY_BYTES + 1) })).toThrow(`Blob object ref exceeds ${MAX_OBJECT_REF_BYTES} bytes`);
   });
 
   it("counts encoded bytes, not characters: escaping and multi-byte text push a shorter key over", () => {

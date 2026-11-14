@@ -27,7 +27,7 @@ export function newBlobGeneration(): string {
 }
 
 /** The longest object key the backends accept: 1024 bytes on S3 and GCS, 1024 characters on Azure. */
-const MAX_OBJECT_KEY_BYTES = 1024;
+export const MAX_OBJECT_KEY_BYTES = 1024;
 
 /**
  * The largest stored ref: a maximal key inside the `{"key":"…"}` wrapper.

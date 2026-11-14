@@ -142,3 +142,27 @@ other 22515 unit tests pass. Every other gate passes.
   `run_retention_once` are stated; uploads resume only after step 2 on a completed `deploy.sh`,
   and stay quiesced after a rolled-back one.
 
+
+## D12 — Code review round 2 (testing) fixes
+
+- **N1.** The keyset cursor query's size bound was unproven: the at-bound unit cell and the
+  integration test both finished in one page. A unit cell with two at-bound blobs and a maximal
+  ref at page size 1 expects `{ total: 3, dbStored: 2 }` and asserts three cursor queries ran
+  (three bound values, `AND id >`); the integration test's first cell also runs
+  `countDbStoredAttachments(prisma, 2)` and requires the default-page-size answer. Red-proved:
+  `<` in the cursor query fails only the new unit cell; `<` in the first-page query fails the
+  existing at-bound cell and the new one.
+- **N2.** The unit fake's `sizeComparison` accepts only the exact predicate shape:
+  `octet_length(encrypted_data)` directly after `WHERE` / `FILTER (WHERE`, one operator, then the
+  bound as a bare `::int` followed by `)`, `AND id >` or `ORDER BY`. It throws otherwise, so
+  `<= $bound::int - 1`, `> $bound::int - 1` and `WHERE NOT …` fail the unit tests (red-proved,
+  each of the three, plus the cursor query's `- 1`).
+- **N3.** The entrypoint cell seeds one database-stored row and one ref of its own and asserts
+  `total > db_stored` (a field swap now fails on any table), asserts `run.error` is undefined
+  before the status, and has a 90 s timeout above the child's 60 s.
+- **N4.** `terraform test` runs `v_grace_above_max_fails` (3024000001) and
+  `v_mode_unknown_fails` (`"purge"`), each `expect_failures = [var.x]`; 27 runs,
+  `blob_sweep.runs.json` updated. Red-proved by removing the upper bound and by widening the enum.
+- **N5.** `MAX_OBJECT_KEY_BYTES` is exported from `object-ref.ts` (it was private); the three
+  store tests and `object-ref.test.ts` derive their maximal and over-the-bound keys from it, and
+  one assertion pins its value (1024).

@@ -16,14 +16,20 @@ type Row = { id: string; data: Uint8Array };
 
 /**
  * The size comparison the query's SQL states against its bound parameter,
- * read from the statement text (the fragment just before the first bound
- * value), so the fake applies the operator the code wrote rather than one of
- * its own.
+ * read from the statement text, so the fake applies the operator the code
+ * wrote rather than one of its own. Only the exact shape is accepted — the
+ * column's octet_length directly after WHERE (or FILTER (WHERE), one operator,
+ * the bare bound cast to int, then the end of the predicate — so a negated
+ * predicate or arithmetic on the bound throws instead of being read as the
+ * plain comparison.
  */
 function sizeComparison(strings: TemplateStringsArray): (length: number, bound: number) => boolean {
-  const m = /octet_length\(encrypted_data\)\s*(<=|>=|<|>|=)\s*$/.exec(strings[0]);
-  if (!m) throw new Error(`no size comparison before the bound in: ${strings[0]}`);
-  const op = m[1];
+  const left = /(?:FILTER \(WHERE|WHERE)\s+octet_length\(encrypted_data\)\s*(<=|>=|<|>|=)\s*$/.exec(strings[0]);
+  if (!left) throw new Error(`no plain size comparison before the bound in: ${strings[0]}`);
+  if (!/^::int(?:\)|\s+AND id >|\s+ORDER BY)/.test(strings[1] ?? "")) {
+    throw new Error(`the bound is not compared as a bare ::int: ${strings[1]}`);
+  }
+  const op = left[1];
   return (length, bound) =>
     op === "<=" ? length <= bound : op === ">=" ? length >= bound : op === "<" ? length < bound : op === ">" ? length > bound : length === bound;
 }
@@ -94,6 +100,16 @@ describe("countDbStoredAttachments", () => {
     const { workerPrisma } = makePrisma(rows);
     // The ref is not database-stored; the blob is, though it is not over the bound.
     await expect(countDbStoredAttachments(workerPrisma, 10)).resolves.toEqual({ total: 2, dbStored: 1 });
+  });
+
+  it("applies the same size bound on the pages after the first (the keyset cursor query)", async () => {
+    const { workerPrisma, txs } = makePrisma([atBoundBlob(), maximalRef(), atBoundBlob()]);
+    // One row per page: every at-bound row but the first is read by the cursor query.
+    await expect(countDbStoredAttachments(workerPrisma, 1)).resolves.toEqual({ total: 3, dbStored: 2 });
+    // The cursor query binds (bound, afterId, limit); the first page (bound, limit).
+    const cursorQueries = txs.flatMap((t) => t.queries).filter((q) => q.text.includes("ORDER BY id") && q.values.length === 3);
+    expect(cursorQueries).toHaveLength(3);
+    for (const q of cursorQueries) expect(q.text).toContain("AND id >");
   });
 
   it("counts every row, and as database-stored the ciphertext rows and the rows over the bound", async () => {
