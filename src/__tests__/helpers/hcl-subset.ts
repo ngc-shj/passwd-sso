@@ -427,6 +427,18 @@ const FUNCTIONS: Record<string, (...args: unknown[]) => unknown> = {
     return (lists as unknown[][]).flat();
   },
   compact: (list) => (list as unknown[]).filter((v) => v !== "" && v !== null),
+  // A splat over a resource stays unknown (`aws_s3_bucket.x[*].id`), and so
+  // does its one().
+  one: (v) => {
+    if (v instanceof HclUnknown) return v;
+    if (!Array.isArray(v)) throw new Error("one: not a list");
+    if (v.length > 1) throw new Error("one: more than one element");
+    return v.length === 1 ? v[0] : null;
+  },
+  floor: (n) => {
+    if (typeof n !== "number") throw new Error("floor: not a number");
+    return Math.floor(n);
+  },
   min: (...n) => Math.min(...(n as number[])),
   max: (...n) => Math.max(...(n as number[])),
   tostring: (v) => (v instanceof HclUnknown ? v : str(v)),

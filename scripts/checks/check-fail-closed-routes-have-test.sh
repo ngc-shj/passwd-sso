@@ -827,7 +827,9 @@ fi
 # 75 incl. the SCIM team admission approve and reject limiters
 #   (scim-team-admission-approval plan, C3) — each admits or discards a
 #   pending membership.
-EXPECTED_LIMITER_COUNT=75
+# 77 incl. the SCIM team bulk approve and reject limiters (scim-bulk-approve
+#   plan, C2/C3) — the same admissions, up to a batch per request.
+EXPECTED_LIMITER_COUNT=77
 limiter_count=$(grep -rh 'failClosedOnRedisError: true' "$REPO_ROOT/src/app/api" | wc -l)
 if [ "$limiter_count" -ne "$EXPECTED_LIMITER_COUNT" ]; then
   echo "AC4.4 FAIL: expected $EXPECTED_LIMITER_COUNT 'failClosedOnRedisError: true' instantiations; found $limiter_count"

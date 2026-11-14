@@ -131,7 +131,7 @@ call site legitimately needs to see across tenant boundaries:
 | `CROSS_TENANT_LOOKUP` | Team invitations/guest membership, emergency access grantor/grantee resolution, MCP client/consent pages — reads that must resolve an identity or resource whose tenant differs from the caller's. |
 | `SYSTEM_MAINTENANCE` | The 6 `src/app/api/maintenance/**` routes, resource-quota aggregation — operator/background tooling that intentionally spans all tenants. |
 | `AUDIT_WRITE` | `src/lib/audit/audit.ts`, `audit-outbox.ts` — writing audit rows attributed to a tenant that may differ from the active RLS context. |
-| `WEBHOOK_DISPATCH` | `src/lib/webhook-dispatcher.ts` — tenant/team webhook delivery. |
+| `WEBHOOK_DISPATCH` | `src/lib/webhook-dispatcher.ts` — tenant webhook delivery (team webhooks are delivered by the audit-outbox worker). |
 | `TOKEN_LIFECYCLE` | Token issuance/refresh/revocation across the token-lifecycle surface (extension, mobile, MCP, operator, service-account tokens). |
 | `AUDIT_ANCHOR_PUBLISH` | `src/workers/audit-anchor-publisher.ts` — cross-tenant manifest generation reads all tenants' chain state in one pass. |
 
@@ -245,7 +245,7 @@ audits it on every ECS deploy (`AUDITED_ROLES`, including `ROLEATTR … rolcanlo
 
 ### `passwd_audit_chain_verifier` (audit-chain verify worker)
 
-Migration: `prisma/migrations/20261111000000_audit_chain_verifier_role/migration.sql`. A `LOGIN`
+Migration: `prisma/migrations/20261114000400_audit_chain_verifier_role/migration.sql`. A `LOGIN`
 role: the audit-chain verify worker connects as it (`AUDIT_CHAIN_VERIFY_DATABASE_URL`). The
 migration creates it `NOLOGIN` with connection limit 10; the Docker initdb
 (`infra/postgres/initdb/05-create-audit-chain-verifier-role.sql`) and, on RDS,

@@ -14,6 +14,7 @@
   "noWebhooks": "No webhooks configured",
   "active": "Active",
   "inactive": "Inactive",
+  "creatorPaused": "Paused — its creator no longer has team admin access. Delivery resumes if they regain it; otherwise re-create the webhook as a current admin. Events during the pause are not sent.",
   "lastDelivered": "Last delivered",
   "failCount": "{count} failures",
   "limitReached": "Maximum webhooks reached",

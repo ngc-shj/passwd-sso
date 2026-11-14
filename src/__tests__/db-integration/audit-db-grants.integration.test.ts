@@ -884,9 +884,7 @@ describe("audit-db-grants (real DB)", () => {
       await modeClient.query("DROP FUNCTION IF EXISTS public.rls_bypass_enforced()");
       if (body === null) return;
       await modeClient.query(
-        // Unqualified (lands in public of the empty database): the function-rule gate
-        // reads the name after CREATE FUNCTION, and a qualified one reads as its schema.
-        `CREATE FUNCTION rls_bypass_enforced() RETURNS boolean LANGUAGE sql AS 'SELECT ${body}'`,
+        `CREATE FUNCTION public.rls_bypass_enforced() RETURNS boolean LANGUAGE sql AS 'SELECT ${body}'`,
       );
     }
 

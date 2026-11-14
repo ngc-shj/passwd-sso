@@ -14,7 +14,7 @@ This guide describes a production-oriented Azure deployment.
 
 - `DATABASE_URL` (app role `passwd_app`)
 - `MIGRATION_DATABASE_URL` (SUPERUSER role `passwd_user` — used for `prisma migrate deploy` only)
-  - A direct `prisma migrate deploy` runs neither `scripts/rls-enforce-preflight.mjs` nor `scripts/audit-db-grants.mjs`: migration `20261114000100_rls_bypass_enforce` turns RLS bypass enforcement on as soon as it is applied. See `docs/operations/deployment.md`, "The migrate task: preflight and mode audit".
+  - A direct `prisma migrate deploy` runs neither `scripts/rls-enforce-preflight.mjs` nor `scripts/audit-db-grants.mjs`: migration `20261114000500_rls_bypass_enforce` turns RLS bypass enforcement on as soon as it is applied. See `docs/operations/deployment.md`, "The migrate task: preflight and mode audit".
 - `OUTBOX_WORKER_DATABASE_URL` (least-privilege role `passwd_outbox_worker` — required for audit-outbox-worker)
 - `AUTH_SECRET`
 - `AUTH_URL`

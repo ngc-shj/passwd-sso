@@ -20,6 +20,7 @@ export interface WebhookItem {
   lastFailedAt: string | null;
   lastError: string | null;
   createdAt: string;
+  creatorAuthorized?: boolean | null;
 }
 
 export interface WebhookTestOpts {

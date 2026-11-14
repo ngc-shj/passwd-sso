@@ -2,7 +2,7 @@
 -- Password is read from PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD env var.
 --
 -- This role is also created, with its column-level grants, by the prisma
--- migration 20261111000000_audit_chain_verifier_role. Both paths use
+-- migration 20261114000400_audit_chain_verifier_role. Both paths use
 -- IF NOT EXISTS guards.
 --
 -- Separate file for the reason 04 gives: GRANTs on application tables do not

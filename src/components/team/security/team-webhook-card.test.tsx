@@ -84,6 +84,35 @@ describe("TeamWebhookCard (team-specific)", () => {
     mockReauthenticateWithPasskey.mockResolvedValue({ ok: true, verifiedAt: "2026-05-10T00:00:00Z" });
   });
 
+  it("shows the paused state only for a webhook whose creator lost authority", async () => {
+    const [active] = createSampleWebhooks("https://example.com/ok", "https://example.com/x");
+    setupFetchWebhooks(mockFetch, [
+      { ...active, id: "wh-paused", url: "https://example.com/paused", creatorAuthorized: false },
+      { ...active, id: "wh-ok", url: "https://example.com/ok", creatorAuthorized: true },
+      { ...active, id: "wh-legacy", url: "https://example.com/legacy", creatorAuthorized: null },
+    ]);
+
+    await act(async () => {
+      render(<TeamWebhookCard teamId="team-1" locale="en" />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByText("https://example.com/paused").length).toBeGreaterThan(0);
+    });
+    // The i18n mock renders the key. Each assertion is scoped to its own row,
+    // so a notice moved onto another webhook fails.
+    const rowOf = (url: string) => {
+      // The URL also appears outside the list (e.g. a dialog); take the list row.
+      const rows = screen.getAllByText(url).map((el) => el.closest(".space-y-1")).filter((r) => r instanceof HTMLElement);
+      if (rows.length !== 1) throw new Error(`expected one row for ${url}, found ${rows.length}`);
+      return rows[0];
+    };
+    expect(within(rowOf("https://example.com/paused")).getByText("creatorPaused")).toBeInTheDocument();
+    expect(within(rowOf("https://example.com/ok")).queryByText("creatorPaused")).toBeNull();
+    expect(within(rowOf("https://example.com/legacy")).queryByText("creatorPaused")).toBeNull();
+    expect(screen.getAllByText("creatorPaused")).toHaveLength(1);
+  });
+
   it("does not include group:webhook actions", async () => {
     setupFetchWebhooks(mockFetch, []);
 

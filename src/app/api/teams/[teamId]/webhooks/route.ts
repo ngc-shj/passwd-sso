@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { advisoryXactLock } from "@/lib/tenant-rls";
+import { webhookCreatorVerdicts } from "@/lib/team/webhook-creator-authority";
 import { requireTeamPermission } from "@/lib/auth/access/team-auth";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
@@ -59,8 +60,8 @@ async function handleGET(req: NextRequest, { params }: Params) {
     return handleAuthError(e);
   }
 
-  const webhooks = await withTeamTenantRls(teamId, async () =>
-    prisma.teamWebhook.findMany({
+  const webhooks = await withTeamTenantRls(teamId, async () => {
+    const rows = await prisma.teamWebhook.findMany({
       where: { teamId },
       select: {
         id: true,
@@ -72,10 +73,18 @@ async function handleGET(req: NextRequest, { params }: Params) {
         lastFailedAt: true,
         lastError: true,
         createdAt: true,
+        createdById: true,
       },
       orderBy: { createdAt: "desc" },
-    }),
-  );
+    });
+    const verdicts = await webhookCreatorVerdicts(prisma, teamId, rows);
+    // createdById itself stays server-side; only the verdict is exposed.
+    // A NULL creator is legacy: null, not a verdict.
+    return rows.map(({ createdById, ...rest }) => ({
+      ...rest,
+      creatorAuthorized: createdById === null ? null : verdicts.get(rest.id) === true,
+    }));
+  });
 
   return NextResponse.json({ webhooks });
 }
@@ -145,6 +154,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
           masterKeyVersion: version,
           secretAadVersion: WEBHOOK_SECRET_AAD_VERSION_CURRENT,
           events: data.events,
+          createdById: session.user.id,
         },
       });
     });

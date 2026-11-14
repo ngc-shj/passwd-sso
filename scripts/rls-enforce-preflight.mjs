@@ -16,7 +16,7 @@ import { pathToFileURL } from "node:url";
 import { Client } from "pg";
 
 // name must match prisma/migrations
-const FLIP_MIGRATION = "20261114000100_rls_bypass_enforce";
+const FLIP_MIGRATION = "20261114000500_rls_bypass_enforce";
 const ATTESTATION_ENV = "RLS_ENFORCE_ATTESTED";
 
 /**

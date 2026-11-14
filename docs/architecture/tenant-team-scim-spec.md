@@ -93,6 +93,9 @@ Rules:
   team OWNER/ADMIN holding the team key approves it
   (`POST /api/teams/[teamId]/members/[memberId]/approve`) or rejects it
   (`.../reject`); a pending member has no team access and receives no key.
+  `POST .../members/bulk-approve` and `.../bulk-reject` do the same for up to
+  `SCIM_BULK_ADMISSION_MAX` rows per request: each row gets the single route's
+  checks and its own outcome, a refused row is skipped, and the rest commit.
   A pending row already at or above the group's role is a no-op (repeated
   add, or a lower-role add); a user not active in the tenant is
   `Referenced user is not an active member of this tenant` (400) unless the

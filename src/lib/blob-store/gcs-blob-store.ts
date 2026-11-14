@@ -58,13 +58,15 @@ export const gcsBlobStore: AttachmentBlobStore = {
   },
   async putObject(data, context) {
     const key = buildObjectKey(context);
+    // Encoded before the upload, as in the S3 store.
+    const ref = encodeObjectRef({ key });
     const bucket = await getGcsBucket();
     const file = bucket.file(key);
     await file.save(Buffer.from(data), {
       resumable: false,
       contentType: BLOB_CONTENT_TYPE.OCTET_STREAM,
     });
-    return encodeObjectRef({ key });
+    return ref;
   },
   async getObject(stored, context) {
     const key = resolveObjectRefKey(stored, context);

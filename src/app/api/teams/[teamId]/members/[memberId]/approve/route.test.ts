@@ -83,6 +83,16 @@ const APPROVER_ID = "22222222-2222-4222-8222-222222222222";
 const MEMBER_ID = "33333333-3333-4333-8333-333333333333";
 const TARGET_USER_ID = "44444444-4444-4444-8444-444444444444";
 
+const APPROVER_ADMITTED_AT = new Date("2026-03-01T00:00:00.000Z");
+/** The approver's own row: an active, key-holding ADMIN admitted at APPROVER_ADMITTED_AT. */
+const approver = (overrides: Record<string, unknown> = {}) => ({
+  role: TEAM_ROLE.ADMIN,
+  keyDistributed: true,
+  admittedAt: APPROVER_ADMITTED_AT,
+  createdAt: APPROVER_ADMITTED_AT,
+  ...overrides,
+});
+
 /** Disambiguates the two in-tx findFirst reads by their select shape. */
 function findFirstBySelect(approverResult: unknown, targetResult: unknown) {
   return vi.fn(async (args: { select?: { keyDistributed?: boolean } }) =>
@@ -110,7 +120,7 @@ describe("POST /api/teams/[teamId]/members/[memberId]/approve", () => {
     ]));
     mockLockTeamsAgainstRotation.mockResolvedValue(undefined);
     tx.teamMember.findFirst.mockReset().mockImplementation(
-      findFirstBySelect({ role: TEAM_ROLE.ADMIN, keyDistributed: true }, { role: TEAM_ROLE.MEMBER }),
+      findFirstBySelect(approver(), { role: TEAM_ROLE.MEMBER }),
     );
     tx.teamMember.updateMany.mockReset().mockResolvedValue({ count: 1 });
   });
@@ -217,9 +227,53 @@ describe("POST /api/teams/[teamId]/members/[memberId]/approve", () => {
     expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 
+  describe("an approver who left the tenant, judged against their admission to the team", () => {
+    const after = (ms: number) => new Date(APPROVER_ADMITTED_AT.getTime() + ms);
+    const rowsWithApprover = (deactivatedAt: Date | null, departedAt: Date | null = null) =>
+      new Map([
+        [APPROVER_ID, { hasRow: true, deactivatedAt, departedAt }],
+        [TARGET_USER_ID, { hasRow: true, deactivatedAt: null, departedAt: null }],
+      ]);
+
+    it("returns 403 for a key-holding ADMIN whose tenant row departed after their admission", async () => {
+      mockLockTenantRows.mockResolvedValue(rowsWithApprover(after(1)));
+
+      expect((await approve()).status).toBe(403);
+      expect(tx.teamMember.updateMany).not.toHaveBeenCalled();
+      expect(mockLogAuditInTx).not.toHaveBeenCalled();
+    });
+
+    it("denies on the admission time, falling back to createdAt when admittedAt is null", async () => {
+      mockLockTenantRows.mockResolvedValue(rowsWithApprover(after(1)));
+      tx.teamMember.findFirst.mockImplementation(findFirstBySelect(approver({ admittedAt: null }), { role: TEAM_ROLE.MEMBER }));
+
+      expect((await approve()).status).toBe(403);
+      expect(tx.teamMember.updateMany).not.toHaveBeenCalled();
+      expect(mockLogAuditInTx).not.toHaveBeenCalled();
+    });
+
+    it("allows an approver re-admitted after the departure (created_at < departure < admitted_at)", async () => {
+      // Pins the admittedAt read: a createdAt-only comparison would deny this approver.
+      mockLockTenantRows.mockResolvedValue(rowsWithApprover(after(-1000)));
+      tx.teamMember.findFirst.mockImplementation(
+        findFirstBySelect(approver({ createdAt: after(-2000) }), { role: TEAM_ROLE.MEMBER }),
+      );
+
+      expect((await approve()).status).toBe(200);
+    });
+
+    it("allows a guest approver, an active one, a re-admitted one and a re-provisioned one", async () => {
+      const guest = new Map([[TARGET_USER_ID, { hasRow: true, deactivatedAt: null, departedAt: null }]]);
+      for (const rows of [guest, rowsWithApprover(null), rowsWithApprover(after(-1000)), rowsWithApprover(null, after(-1000))]) {
+        mockLockTenantRows.mockResolvedValue(rows);
+        expect((await approve()).status).toBe(200);
+      }
+    });
+  });
+
   it("returns 403, changing nothing, for an active team ADMIN without the key", async () => {
     tx.teamMember.findFirst.mockImplementation(
-      findFirstBySelect({ role: TEAM_ROLE.ADMIN, keyDistributed: false }, { role: TEAM_ROLE.MEMBER }),
+      findFirstBySelect(approver({ keyDistributed: false }), { role: TEAM_ROLE.MEMBER }),
     );
 
     const res = await approve();
@@ -230,7 +284,7 @@ describe("POST /api/teams/[teamId]/members/[memberId]/approve", () => {
 
   it("returns 404 when the target is no longer pending under the lock (a concurrent approve/reject or SCIM withdraw)", async () => {
     tx.teamMember.findFirst.mockImplementation(
-      findFirstBySelect({ role: TEAM_ROLE.ADMIN, keyDistributed: true }, null),
+      findFirstBySelect(approver(), null),
     );
 
     const res = await approve();
@@ -241,7 +295,7 @@ describe("POST /api/teams/[teamId]/members/[memberId]/approve", () => {
 
   it("returns 409 SCIM_APPROVAL_ROLE_CHANGED when the pending row's role no longer matches expectedRole", async () => {
     tx.teamMember.findFirst.mockImplementation(
-      findFirstBySelect({ role: TEAM_ROLE.ADMIN, keyDistributed: true }, { role: TEAM_ROLE.ADMIN }),
+      findFirstBySelect(approver(), { role: TEAM_ROLE.ADMIN }),
     );
 
     const res = await approve({ expectedRole: TEAM_ROLE.MEMBER });

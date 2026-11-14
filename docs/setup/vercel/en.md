@@ -64,7 +64,7 @@ Example (run from local machine against production DB):
 MIGRATION_DATABASE_URL='postgresql://SUPERUSER:password@HOST:5432/DB' npx prisma migrate deploy
 ```
 
-This path runs neither `scripts/rls-enforce-preflight.mjs` nor `scripts/audit-db-grants.mjs`: migration `20261114000100_rls_bypass_enforce` turns RLS bypass enforcement on as soon as it is applied. See `docs/operations/deployment.md`, "The migrate task: preflight and mode audit".
+This path runs neither `scripts/rls-enforce-preflight.mjs` nor `scripts/audit-db-grants.mjs`: migration `20261114000500_rls_bypass_enforce` turns RLS bypass enforcement on as soon as it is applied. See `docs/operations/deployment.md`, "The migrate task: preflight and mode audit".
 
 Check `rolsuper` / `rolbypassrls` of the migrate role in `pg_roles`: a managed-Postgres admin has neither, so RLS applies to it. See [departed-member-access-backfill](../../operations/departed-member-access-backfill.md).
 

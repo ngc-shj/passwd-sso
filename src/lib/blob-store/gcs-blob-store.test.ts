@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { gcsBlobStore } from "@/lib/blob-store/gcs-blob-store";
+import { MAX_OBJECT_KEY_BYTES } from "@/lib/blob-store/object-ref";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -163,5 +164,42 @@ describe("gcsBlobStore listing and marker", () => {
       },
     });
     await expect(exists.store.createMarker("dep-2")).resolves.toBe("exists");
+  });
+});
+
+// The suffix buildObjectKey appends to BLOB_OBJECT_PREFIX + "/" for this context.
+// MAX_OBJECT_KEY_BYTES is a plain constant, so the static import survives resetModules.
+const KEY_TAIL = "personal/entry-1/att-1/0123456789abcdef0123456789abcdef.bin";
+
+describe("gcsBlobStore.putObject and the ref size bound", () => {
+  async function storeWithPrefixOfKeyLength(keyLength: number) {
+    vi.resetModules();
+    vi.stubEnv("GCS_ATTACHMENTS_BUCKET", "attachments");
+    vi.stubEnv("BLOB_OBJECT_PREFIX", "p".repeat(keyLength - KEY_TAIL.length - 1));
+    const save = vi.fn().mockResolvedValue({});
+    const file = vi.fn().mockReturnValue({ save });
+    vi.doMock("./runtime-module", () => ({
+      requireOptionalModule: vi.fn().mockReturnValue({
+        Storage: class {
+          bucket = vi.fn().mockReturnValue({ file });
+        },
+      }),
+    }));
+    const { gcsBlobStore: store } = await import("./gcs-blob-store");
+    const put = () => store.putObject(new Uint8Array([1]), { attachmentId: "att-1", entryId: "entry-1", generation: "0123456789abcdef0123456789abcdef" });
+    return { put, save };
+  }
+
+  it("uploads a maximal valid key (MAX_OBJECT_KEY_BYTES)", async () => {
+    const { put, save } = await storeWithPrefixOfKeyLength(MAX_OBJECT_KEY_BYTES);
+    const stored = await put();
+    expect(JSON.parse(Buffer.from(stored).toString("utf8")).key).toHaveLength(MAX_OBJECT_KEY_BYTES);
+    expect(save).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a key whose ref is over the bound before uploading anything", async () => {
+    const { put, save } = await storeWithPrefixOfKeyLength(MAX_OBJECT_KEY_BYTES + 1);
+    await expect(put()).rejects.toThrow(/Blob object ref exceeds/);
+    expect(save).not.toHaveBeenCalled();
   });
 });

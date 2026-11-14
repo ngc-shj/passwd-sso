@@ -74,7 +74,7 @@ src/app/api/share-links/[id]/content/route.ts # atomic view_count increment + re
 src/app/api/teams/[teamId]/passwords/[id]/history/[historyId]/restore/route.ts # row lock (FOR UPDATE) so the pre-restore snapshot sources the committed row, serialising with concurrent PUTs
 src/app/api/teams/[teamId]/passwords/[id]/rekey/route.ts # re-key POST row locks: the entry FOR UPDATE, then its history and attachment rows FOR UPDATE for the exact-set check
 src/app/api/teams/[teamId]/rekey/route.ts # re-key pass work list: count of history rows whose item_key_id differs from their entry's (a column comparison across the join)
-src/app/api/teams/[teamId]/rotate-key/route.ts # teams FOR NO KEY UPDATE CAS as the first statement, serialising rotation with the writers of its inputs
+src/app/api/teams/[teamId]/rotate-key/route.ts # teams FOR NO KEY UPDATE CAS before reading its inputs (after the rotating member's tenant-row lock), serialising rotation with the writers of its inputs
 src/app/api/v1/passwords/[id]/route.ts # row lock (FOR UPDATE) for atomic blob snapshot+update on concurrent PUT
 src/app/api/tenant/teams/[teamId]/owner/route.ts # teams FOR NO KEY UPDATE under the bounded lock wait, serialising owner assignment with departures and admissions holding the team FOR SHARE
 src/app/s/[token]/download/route.ts # atomic view_count increment + revocation/expiry/creator-admission recheck on file download (TOCTOU close)

@@ -1,5 +1,6 @@
 /**
- * Webhook dispatcher for team and tenant audit events.
+ * Webhook dispatcher for tenant audit events and the shared delivery core.
+ * Team webhooks are delivered by the audit-outbox worker.
  *
  * fire-and-forget: never throws, never blocks the caller.
  * Retries up to 3 times with exponential backoff (1s, 5s, 25s).
@@ -41,22 +42,12 @@ export class WebhookSecretVersionError extends Error {
 
 // ─── Types ──────────────────────────────────────────────────────
 
-export interface TeamWebhookEvent {
-  type: string;
-  teamId: string;
-  timestamp: string;
-  data: Record<string, unknown>;
-}
-
 export interface TenantWebhookEvent {
   type: string;
   tenantId: string;
   timestamp: string;
   data: Record<string, unknown>;
 }
-
-/** @deprecated Use TeamWebhookEvent instead */
-export type WebhookEvent = TeamWebhookEvent;
 
 import { buildWebhookSecretAAD } from "@/lib/crypto/webhook-aad";
 
@@ -274,100 +265,6 @@ export async function deliverToWebhookRecords(
 }
 
 // ─── Public API ─────────────────────────────────────────────────
-
-/**
- * Dispatch a webhook event to all active webhooks for the given team.
- * fire-and-forget — call with `void dispatchWebhook(...)`.
- */
-export function dispatchWebhook(event: TeamWebhookEvent): void {
-  void (async () => {
-    const rows = await withBypassRls(prisma, async (tx) =>
-      tx.teamWebhook.findMany({
-        where: {
-          teamId: event.teamId,
-          isActive: true,
-          events: { has: event.type },
-        },
-      }),
-    BYPASS_GRANT.TEAM_WEBHOOK_DISPATCH);
-
-    if (rows.length === 0) return;
-
-    const webhooks: WebhookRecord[] = rows.map((r) => ({
-      id: r.id,
-      url: r.url,
-      secretEncrypted: r.secretEncrypted,
-      secretIv: r.secretIv,
-      secretAuthTag: r.secretAuthTag,
-      masterKeyVersion: r.masterKeyVersion,
-      secretAadVersion: r.secretAadVersion,
-      tenantId: r.tenantId,
-      kind: "TeamWebhook",
-      teamId: r.teamId,
-      failCount: r.failCount,
-    }));
-
-    const sanitizedEvent = {
-      ...event,
-      data: sanitizeWebhookData(event.data) as Record<string, unknown>,
-    };
-    const payload = JSON.stringify(sanitizedEvent);
-
-    await deliverToWebhookRecords(
-      webhooks,
-      payload,
-      event.timestamp,
-      async (id) => {
-        await withBypassRls(prisma, async (tx) =>
-          tx.teamWebhook.update({
-            where: { id },
-            data: {
-              lastDeliveredAt: new Date(),
-              failCount: 0,
-              lastError: null,
-            },
-          }),
-        BYPASS_GRANT.TEAM_WEBHOOK_DISPATCH);
-      },
-      async (id, newFailCount, url) => {
-        await withBypassRls(prisma, async (tx) => {
-          await tx.teamWebhook.update({
-            where: { id },
-            data: {
-              failCount: newFailCount,
-              lastFailedAt: new Date(),
-              lastError: `Delivery failed after ${WEBHOOK_MAX_RETRIES} attempts`,
-              isActive: newFailCount >= WEBHOOK_AUTO_DISABLE_THRESHOLD ? false : undefined,
-            },
-          });
-        }, BYPASS_GRANT.TEAM_WEBHOOK_DISPATCH);
-
-        // Lazy import to break circular dependency: webhook-dispatcher.ts ↔ audit.ts
-        const { logAuditAsync } = await import("@/lib/audit/audit");
-        await logAuditAsync({
-          scope: AUDIT_SCOPE.TEAM,
-          action: AUDIT_ACTION.WEBHOOK_DELIVERY_FAILED,
-          userId: SYSTEM_ACTOR_ID,
-          actorType: ACTOR_TYPE.SYSTEM,
-          teamId: event.teamId,
-          metadata: {
-            webhookId: id,
-            url: maskUrlForDisplay(url),
-            failCount: newFailCount,
-          },
-        });
-      },
-    );
-  })().catch((err) => {
-    getLogger().error(
-      {
-        error: errorLogFields(err),
-        _logType: "webhook_delivery.fire_and_forget_failed",
-      },
-      "webhook_delivery.fire_and_forget_failed",
-    );
-  });
-}
 
 /**
  * Dispatch a webhook event to all active webhooks for the given tenant.

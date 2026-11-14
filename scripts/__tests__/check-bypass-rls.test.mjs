@@ -4110,6 +4110,20 @@ describe("function rule: the enforce-mode function is migration-owned", () => {
     expect(stderr).toContain("a routine is created outside prisma/migrations");
     expect(stderr).toContain(`${path}:1  creates`);
   });
+
+  it("names a schema-qualified routine by its own name, not its schema", () => {
+    const { code, stderr } = runMulti([["scripts/zz.sql", "CREATE FUNCTION public.qualified_probe() RETURNS int AS 'SELECT 1' LANGUAGE sql;\n"]]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("scripts/zz.sql:1  creates qualified_probe");
+  });
+
+  it("admits a schema-qualified CREATE of an allowlisted routine in its allowlisted file", () => {
+    const negative = "scripts/rls-cross-tenant-negative-test.sh";
+    // Both routines the allowlist names for this file: an entry that matches nothing fails the run.
+    const probe = "psql <<SQL\n    CREATE OR REPLACE FUNCTION public.rls_negative_secdef_probe() RETURNS int AS \\$\\$ SELECT 1 \\$\\$ LANGUAGE sql SECURITY DEFINER;\n    CREATE OR REPLACE FUNCTION public.rls_bypass_enforced() RETURNS boolean LANGUAGE sql AS \\$\\$ SELECT false \\$\\$;\nSQL\n";
+    const { code, stderr } = runMulti([[negative, probe]]);
+    expect(code, stderr).toBe(0);
+  });
 });
 
 describe("grants the retention worker builds per entry", () => {

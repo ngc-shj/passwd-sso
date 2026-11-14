@@ -121,7 +121,7 @@ cleanup() {
   # Last: the DROP above authenticates through the passfile.
   psql_safe_cleanup
 }
-# The definition of the migration 20261114000100_rls_bypass_enforce, and the
+# The definition of the migration 20261114000500_rls_bypass_enforce, and the
 # same function returning false: the only statements of this script that touch
 # the mode, both inside case 19.
 RESTORE_ENFORCED_SQL="CREATE OR REPLACE FUNCTION public.rls_bypass_enforced() RETURNS boolean LANGUAGE sql IMMUTABLE PARALLEL SAFE AS \$\$ SELECT true \$\$"

@@ -388,3 +388,38 @@ describe("retention-gc-worker normal boot", () => {
     expect(errorPaths(result.stderr)).toEqual(["RETENTION_GC_DATABASE_URL"]);
   });
 });
+
+// --count-db-blobs reads the database, so unlike --init-blob-marker it keeps
+// every database-URL rule. The counting itself runs against a real database
+// in retention-gc-count-db-blobs.integration.test.ts.
+describe("retention-gc-worker --count-db-blobs", () => {
+  it.each([
+    ["no database URL at all", {}, "DATABASE_URL"],
+    ["production without RETENTION_GC_DATABASE_URL", { NODE_ENV: "production", DATABASE_URL: VALID_DATABASE_URL }, "RETENTION_GC_DATABASE_URL"],
+  ])("exits 1 at env validation with %s", (_label, env, path) => {
+    const result = spawnWorker(env, ["--count-db-blobs"]);
+    expect(result.status).toBe(1);
+    expect(errorPaths(result.stderr)).toEqual([path]);
+    expect(result.stdout).not.toContain("count-db-blobs");
+  });
+
+  it("exits 1 with only an error code when the database is unreachable, never the URL", () => {
+    const url = "postgresql://countuser:countsecret@127.0.0.1:1/passwd_sso";
+    const result = spawnWorker({ RETENTION_GC_DATABASE_URL: url }, ["--count-db-blobs"]);
+    expect(result.status).toBe(1);
+    const failure = result.stderr
+      .split("\n")
+      .filter(Boolean)
+      .map((l) => {
+        try {
+          return JSON.parse(l);
+        } catch {
+          return null;
+        }
+      })
+      .find((o) => o?.msg === "count-db-blobs failed");
+    expect(failure).toEqual({ level: "error", msg: "count-db-blobs failed", code: expect.any(String) });
+    expect(`${result.stdout}${result.stderr}`).not.toContain("countsecret");
+    expect(result.stdout).not.toContain('"msg":"count-db-blobs"');
+  });
+});

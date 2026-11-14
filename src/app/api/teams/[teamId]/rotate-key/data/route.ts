@@ -10,6 +10,7 @@ import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
 import { heldTeamKeyVersions } from "@/lib/team/team-item-key";
+import { actorDepartedSinceAdmission, readTenantRows } from "@/lib/team/tenant-row-lock";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -45,7 +46,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
     return errorResponse(API_ERROR.TEAM_NOT_FOUND);
   }
 
-  const [entries, activeMembers, actorKeyVersions] = await withTeamTenantRls(teamId, async () => {
+  const [entries, activeMembers, actorKeyVersions] = await withTeamTenantRls(teamId, async (tenantId) => {
     // All entries regardless of deletedAt / isArchived status
     const entries = await prisma.teamPasswordEntry.findMany({
       where: { teamId },
@@ -66,11 +67,17 @@ async function handleGET(req: NextRequest, { params }: Params) {
         aadVersion: true,
       },
     });
-    // Active members whose key has been distributed
-    const activeMembers = await prisma.teamMember.findMany({
+    // Active members whose key has been distributed, less leftover ones (their
+    // tenant row departed at or after their admission): the rotation treats
+    // those as deactivated and refuses a key wrapped for them.
+    const keyHolders = await prisma.teamMember.findMany({
       where: { teamId, deactivatedAt: null, keyDistributed: true },
-      select: { userId: true },
+      select: { userId: true, admittedAt: true, createdAt: true },
     });
+    const tenantRows = await readTenantRows(prisma, tenantId, keyHolders.map((m) => m.userId));
+    const activeMembers = keyHolders.filter(
+      (m) => !actorDepartedSinceAdmission(tenantRows.get(m.userId), m.admittedAt ?? m.createdAt),
+    );
     const actorKeyVersions = await heldTeamKeyVersions(prisma, teamId, session.user.id);
     return [entries, activeMembers, actorKeyVersions] as const;
   });

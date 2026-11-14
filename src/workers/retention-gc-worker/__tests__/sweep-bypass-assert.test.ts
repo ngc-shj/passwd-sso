@@ -21,6 +21,8 @@ import {
   listTrashRetentionTenants,
   sweepTeamMemberKeys,
   readAttachmentRefs,
+  countAttachmentRows,
+  readSmallAttachmentPage,
   grantForEntry,
 } from "../sweep";
 import {
@@ -34,6 +36,7 @@ import {
   type PerTenantTrashEntry,
 } from "../registry";
 import { isBypassStateRead, sqlText } from "@/__tests__/workers/retention-gc-tx-fakes";
+import { MAX_OBJECT_REF_BYTES } from "@/lib/blob-store/object-ref";
 
 const C2_ERROR = "retention-gc sweep requires the RLS bypass state its entry declares";
 const TENANT_ID = "11111111-1111-4111-8111-111111111111";
@@ -219,6 +222,18 @@ const MEMBERS: MemberCase[] = [
     gated: false,
     write: "$queryRaw",
     run: async (tx) => (await readAttachmentRefs(tx, ["11111111-1111-4111-8111-111111111111"])).length,
+  },
+  {
+    name: "countAttachmentRows",
+    gated: false,
+    write: "$queryRaw",
+    run: async (tx) => (await countAttachmentRows(tx, MAX_OBJECT_REF_BYTES)).total,
+  },
+  {
+    name: "readSmallAttachmentPage",
+    gated: false,
+    write: "$queryRaw",
+    run: async (tx) => (await readSmallAttachmentPage(tx, null, MAX_OBJECT_REF_BYTES, 10)).length,
   },
 ];
 

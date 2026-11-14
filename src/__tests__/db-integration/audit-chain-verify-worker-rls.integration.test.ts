@@ -587,7 +587,7 @@ describe("audit-chain verify worker boots as the verifier role", () => {
  * and replaying the block returns an over-granted role to that state.
  */
 describe("role passwd_audit_chain_verifier: effective privileges", () => {
-  const MIGRATION = "20261111000000_audit_chain_verifier_role";
+  const MIGRATION = "20261114000400_audit_chain_verifier_role";
   const PRIVILEGE_COLUMNS = ["SELECT", "INSERT", "UPDATE", "REFERENCES"];
   const PRIVILEGE_TABLES = ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"];
   // D2 of the plan, as keys of the shape snapshot() returns.

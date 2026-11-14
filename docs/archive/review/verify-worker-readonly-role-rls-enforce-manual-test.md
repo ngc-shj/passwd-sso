@@ -1,9 +1,9 @@
 # Manual test: verify-worker-readonly-role-rls-enforce
 
 Covers the deployment-facing parts of this change (#947, #921):
-- migration `20261111000000_audit_chain_verifier_role` (the role, created `NOLOGIN`) and `scripts/bootstrap-rds-roles.mjs` giving it `LOGIN`;
+- migration `20261114000400_audit_chain_verifier_role` (the role, created `NOLOGIN`) and `scripts/bootstrap-rds-roles.mjs` giving it `LOGIN`;
 - the verify worker reading `AUDIT_CHAIN_VERIFY_DATABASE_URL` (no `DATABASE_URL` fallback in production) and the ECS task's secret reference;
-- migration `20261114000100_rls_bypass_enforce` (`public.rls_bypass_enforced()` returns true) and the deploy gate around it: `scripts/rls-enforce-preflight.mjs`, the `RLS_ENFORCE_ATTESTED` and `RLS_REPORT_MODE_ACK` forwarding in `scripts/deploy.sh`, the mode audit in `scripts/audit-db-grants.mjs`.
+- migration `20261114000500_rls_bypass_enforce` (`public.rls_bypass_enforced()` returns true) and the deploy gate around it: `scripts/rls-enforce-preflight.mjs`, the `RLS_ENFORCE_ATTESTED` and `RLS_REPORT_MODE_ACK` forwarding in `scripts/deploy.sh`, the mode audit in `scripts/audit-db-grants.mjs`.
 
 ## Deploy note
 - **The flip applies at the deploy, not at merge.** From the moment run 1 of step 3 migrates, the previous tasks serve an enforcing database; a code rollback returns to those tasks and does not undo it.
@@ -23,14 +23,14 @@ Covers the deployment-facing parts of this change (#947, #921):
    - `SELECT rolname FROM pg_roles WHERE rolname = 'passwd_audit_chain_verifier';` — 0 rows;
    - `SELECT public.rls_bypass_enforced();` — `false`.
 2. Deploy without the attestation, then with a wrong one:
-   - `./scripts/deploy.sh`; then `RLS_ENFORCE_ATTESTED=20261114000100_rls_bypass_enforc ./scripts/deploy.sh`.
-   - Each exits non-zero at the migrate step ("ERROR: migration exited 1"). The migrate task log (`aws logs tail /ecs/<name_prefix>/app --log-stream-name-prefix migrate/ --since 1h --region <region>`) contains `rls-enforce-preflight: REFUSED: 20261114000100_rls_bypass_enforce is not applied on this database and RLS_ENFORCE_ATTESTED is not set to it.` and `No migration was applied.`
+   - `./scripts/deploy.sh`; then `RLS_ENFORCE_ATTESTED=20261114000500_rls_bypass_enforc ./scripts/deploy.sh`.
+   - Each exits non-zero at the migrate step ("ERROR: migration exited 1"). The migrate task log (`aws logs tail /ecs/<name_prefix>/app --log-stream-name-prefix migrate/ --since 1h --region <region>`) contains `rls-enforce-preflight: REFUSED: 20261114000500_rls_bypass_enforce is not applied on this database and RLS_ENFORCE_ATTESTED is not set to it.` and `No migration was applied.`
    - Re-run step 1's queries: `_prisma_migrations` count and `max(finished_at)` unchanged, no role, function still `false`. No service was updated (`aws ecs describe-services` shows each service's task definition unchanged).
 3. The two-run deploy:
    1. Add `AUDIT_CHAIN_VERIFY_DATABASE_URL` to the app secret by read-merge-write (`infra/terraform/README.md` "Adding a key to an existing app secret"), naming `passwd_audit_chain_verifier` and a new password. Keep the password in a secure store: steps 3.3 and 7 need it.
-   2. `RLS_ENFORCE_ATTESTED=20261114000100_rls_bypass_enforce ./scripts/deploy.sh`. The log shows `==> Forwarding to the migrate task: RLS_ENFORCE_ATTESTED` and `rls-enforce-preflight: OK (RLS_ENFORCE_ATTESTED attests the pending 20261114000100_rls_bypass_enforce)`, both migrations apply, and the audit fails with exactly `UNEXPECTED_GRANT: ROLEATTR:passwd_audit_chain_verifier rolcanlogin false` and `MISSING_GRANT: ROLEATTR:passwd_audit_chain_verifier rolcanlogin true`. `deploy.sh` exits at the migrate step; no service is updated.
+   2. `RLS_ENFORCE_ATTESTED=20261114000500_rls_bypass_enforce ./scripts/deploy.sh`. The log shows `==> Forwarding to the migrate task: RLS_ENFORCE_ATTESTED` and `rls-enforce-preflight: OK (RLS_ENFORCE_ATTESTED attests the pending 20261114000500_rls_bypass_enforce)`, both migrations apply, and the audit fails with exactly `UNEXPECTED_GRANT: ROLEATTR:passwd_audit_chain_verifier rolcanlogin false` and `MISSING_GRANT: ROLEATTR:passwd_audit_chain_verifier rolcanlogin true`. `deploy.sh` exits at the migrate step; no service is updated.
    3. Run `scripts/bootstrap-rds-roles.mjs` through ECS Exec with `PASSWD_APP_PASSWORD`, `PASSWD_OUTBOX_WORKER_PASSWORD`, `PASSWD_RETENTION_GC_WORKER_PASSWORD`, `PASSWD_ANCHOR_PUBLISHER_PASSWORD` and `PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD` exported. It prints `bootstrap-rds-roles: done`.
-   4. `./scripts/deploy.sh` (no attestation). The preflight prints `OK (20261114000100_rls_bypass_enforce is already applied)`, the audit passes, the services roll and settle.
+   4. `./scripts/deploy.sh` (no attestation). The preflight prints `OK (20261114000500_rls_bypass_enforce is already applied)`, the audit passes, the services roll and settle.
 4. The verify worker as the new role:
    - `aws logs tail /ecs/<name_prefix>/audit-chain-verify-worker --since 2h --filter-pattern audit-chain-verify-heartbeat --region <region>`: a heartbeat with `_logType: "audit-chain-verify-heartbeat"`, `verifiedTenantCount` equal to `tenantCount`, and `erroredTenantCount: 0`. The worker ticks at start, so the first one is within minutes.
    - Master: `SELECT usename, count(*) FROM pg_stat_activity WHERE datname = current_database() GROUP BY usename;` lists `passwd_audit_chain_verifier` with at most 2 connections per running task, beside `passwd_app` and the other worker roles.

@@ -45,7 +45,7 @@ set -Eeuo pipefail
 #   RLS_ENFORCE_ATTESTED  forwarded to the migrate task only when exported. The
 #     migrate task refuses a pending RLS-enforce migration unless this equals
 #     that migration's directory name, e.g.
-#       RLS_ENFORCE_ATTESTED=20261114000100_rls_bypass_enforce scripts/deploy.sh
+#       RLS_ENFORCE_ATTESTED=20261114000500_rls_bypass_enforce scripts/deploy.sh
 #     It attests that the production observations the flip depends on were made
 #     (docs/operations/deployment.md). Never defaulted here or in the task def.
 #   RLS_REPORT_MODE_ACK   forwarded to the migrate task only when exported. A

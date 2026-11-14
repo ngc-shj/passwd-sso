@@ -606,7 +606,7 @@ async function main(): Promise<void> {
 
   registerBypassNoticeSink(stderrBypassNoticeSink);
   // Two connections: a rolling deploy overlaps two tasks per desired task, and
-  // the role's CONNECTION LIMIT of 10 (migration 20261111000000) must hold.
+  // the role's CONNECTION LIMIT of 10 (migration 20261114000400) must hold.
   const pool = createPool({ connectionString: databaseUrl, max: 2 });
   const prisma = createPrismaClient(pool);
 

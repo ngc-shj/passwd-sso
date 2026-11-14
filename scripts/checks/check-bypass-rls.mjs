@@ -2859,6 +2859,7 @@ const POOL_RULE_ALLOWLIST = new Map([
   ["src/__tests__/db-integration/rds-probe-role.ts", "superuser clients that create, sweep and drop the owner-shaped probe role; no bypass is set"],
   ["src/__tests__/db-integration/rds-probe-role.integration.test.ts", "superuser clients that list and create probe roles to test the helper's sweep, and one client logged in as the probe to show it cannot become the owner; no bypass is set"],
   ["src/__tests__/db-integration/rls-bypass-grants.integration.test.ts", "the old-code cells: pools deliberately WITHOUT the factory's listener, standing in for code older than the grant requirement (refused without a grant, admitted with one)"],
+  ["src/__tests__/db-integration/scim-bulk-approve.integration.test.ts", "spies on Client.prototype.query to count the statements of one route call (the bulk cap's measurement); builds no connection"],
 ]);
 // A regex, as check-raw-sql-usage matches it: a string literal naming a Prisma
 // package outside an import is that gate's SPECIFIER_LITERAL.
@@ -2984,7 +2985,9 @@ function createdRoutinesOf(input) {
     let j = i + 1;
     if (tokens[j]?.upper === "OR" && tokens[j + 1]?.upper === "REPLACE") j += 2;
     if (tokens[j]?.type === TOKEN.WORD && (tokens[j].upper === "FUNCTION" || tokens[j].upper === "PROCEDURE")) {
-      const name = tokens[j + 1];
+      // `schema.name`: the routine is the part after the dot, not the schema.
+      const qualified = tokens[j + 2]?.type === TOKEN.DOT;
+      const name = tokens[qualified ? j + 3 : j + 1];
       out.push(name ? nameOf(name) ?? name.text : "?");
     }
   }
@@ -3012,6 +3015,7 @@ const FUNCTION_RULE_ALLOWLIST = [
   { file: "scripts/rls-cross-tenant-negative-test.sh", routine: "rls_negative_secdef_probe", why: "Case 9: a SECURITY DEFINER probe on a throwaway database, dropped by the case itself" },
   { file: "scripts/rls-cross-tenant-negative-test.sh", routine: "rls_bypass_enforced", why: "Case 19 (RLS_NEGATIVE_MUTATE_REAL_POLICY, CI's ephemeral database only): replaces the enforce-mode function with one returning false and restores the migration's definition in the same case" },
   { file: "src/__tests__/db-integration/audit-db-grants.integration.test.ts", routine: "rls_bypass_enforced", why: "RLS mode cells: a function returning a fixed value, created in an empty throwaway database the test makes and drops, so the audit's mode check can be driven through main() without un-flipping the shared database" },
+  { file: "src/__tests__/db-integration/departed-member-leaked-authority.integration.test.ts", routine: "c5_accept_rollback_probe", why: "C5 rollback cell: a trigger function that only raises, dropped in finally; sets no bypass setting" },
   { prefix: "scripts/__tests__/", why: "gate fixture strings: inputs for the gates that refuse these statements" },
 ];
 const functionAllowed = (file, routine) =>

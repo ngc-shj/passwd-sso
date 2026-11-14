@@ -2142,7 +2142,9 @@ exit 0`);
     })));
 
     const winners = both.filter((r) => r.code === 0);
-    expect(winners, "exactly one run may hold the lock").toHaveLength(1);
+    // The runs' output is the only evidence of why a run lost (see the
+    // contention case below): without it a CI failure here is undiagnosable.
+    expect(winners, `exactly one run may hold the lock; runs: ${JSON.stringify(both)}`).toHaveLength(1);
     const losers = both.filter((r) => r.code !== 0);
     for (const r of losers) expect(r.out).toMatch(/BACKUP_ERR:LOCKED/);
     // One writer means one generation and no residue from a second one.

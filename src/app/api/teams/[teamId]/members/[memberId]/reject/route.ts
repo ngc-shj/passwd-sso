@@ -2,18 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { hasTeamPermission, requireTeamPermission } from "@/lib/auth/access/team-auth";
+import { requireTeamPermission } from "@/lib/auth/access/team-auth";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE, TEAM_PERMISSION } from "@/lib/constants";
-import { extractRequestMeta, logAuditInTx } from "@/lib/audit/audit";
+import { TEAM_PERMISSION } from "@/lib/constants";
+import { extractRequestMeta } from "@/lib/audit/audit";
 import { withTeamTenantRls } from "@/lib/tenant-context";
-import { createLockBudget, lockTeamsAgainstRotation } from "@/lib/team/team-key-rotation-lock";
-import { isMembershipLockConflict, lockTenantRows } from "@/lib/team/tenant-row-lock";
+import { rejectScimPending } from "@/lib/team/scim-admission";
+import { isMembershipLockConflict } from "@/lib/team/tenant-row-lock";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { MS_PER_HOUR } from "@/lib/constants/time";
 import { TEAM_MEMBERSHIP_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
+import { SCIM_REJECT_OUTCOME, type ScimRejectOutcome } from "@/lib/constants/team/scim-admission";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
 import { membershipConflictResponse } from "@/lib/http/lock-conflict-response";
@@ -25,12 +26,6 @@ const rejectLimiter = createRateLimiter({
   max: 30,
   failClosedOnRedisError: true,
 });
-
-const REJECT_OUTCOME = {
-  REJECTED: "rejected",
-  ACTOR_NOT_PERMITTED: "actor_not_permitted",
-  NOT_FOUND: "not_found",
-} as const;
 
 // POST /api/teams/[teamId]/members/[memberId]/reject — A team OWNER/ADMIN
 // clears a SCIM-pending membership (scim-team-admission-approval, C3). Unlike
@@ -82,58 +77,18 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   }
 
   const { ip, userAgent } = extractRequestMeta(req);
-  let outcome: (typeof REJECT_OUTCOME)[keyof typeof REJECT_OUTCOME];
+  let outcome: ScimRejectOutcome | null;
   try {
     outcome = await withTeamTenantRls(
       teamId,
       async (tenantId, tx) => {
-        // Lock order (tenant-row-lock.ts): both tenant rows (FOR SHARE) in
-        // one call, then the team — the only lock reject shares with SCIM
-        // (lockGroupWrite) is the target's tenant-row advisory lock.
-        const budget = createLockBudget();
-        await lockTenantRows(tx, tenantId, [session.user.id, target.userId], "share", budget);
-        await lockTeamsAgainstRotation(tx, [teamId], budget);
-
-        // The actor's authority as it stands now: active, and holding
-        // MEMBER_INVITE (OWNER/ADMIN only) — a departure, removal or demotion
-        // since the permission check above ends it. No key requirement: a
-        // team without a key holder can still clear requests (SC5).
-        const actor = await tx.teamMember.findFirst({
-          where: { teamId, userId: session.user.id, deactivatedAt: null },
-          select: { role: true },
-        });
-        if (!actor || !hasTeamPermission(actor.role, TEAM_PERMISSION.MEMBER_INVITE)) {
-          return REJECT_OUTCOME.ACTOR_NOT_PERMITTED;
-        }
-
-        // Locked re-read of the target: still pending, for the audit row's
-        // role. (Self-rejection is ruled out structurally: the actor's row
-        // above is active, and a pending row is always deactivated.)
-        const lockedTarget = await tx.teamMember.findFirst({
-          where: { id: memberId, teamId, userId: target.userId, scimApprovalPending: true },
-          select: { role: true },
-        });
-        if (!lockedTarget) return REJECT_OUTCOME.NOT_FOUND;
-
-        const removed = await tx.teamMember.deleteMany({
-          where: { id: memberId, teamId, scimApprovalPending: true },
-        });
-        if (removed.count !== 1) return REJECT_OUTCOME.NOT_FOUND;
-
-        await logAuditInTx(tx, tenantId, {
-          scope: AUDIT_SCOPE.TEAM,
-          action: AUDIT_ACTION.TEAM_MEMBER_SCIM_REJECT,
-          userId: session.user.id,
+        const outcomes = await rejectScimPending(
+          tx,
           tenantId,
-          teamId,
-          targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
-          targetId: target.userId,
-          metadata: { memberId, role: lockedTarget.role },
-          ip,
-          userAgent,
-        });
-
-        return REJECT_OUTCOME.REJECTED;
+          { teamId, actorUserId: session.user.id, ip, userAgent },
+          [{ memberId, userId: target.userId }],
+        );
+        return outcomes?.get(memberId) ?? null;
       },
       { timeout: TEAM_MEMBERSHIP_TX_TIMEOUT_MS },
     );
@@ -143,8 +98,9 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  if (outcome === REJECT_OUTCOME.ACTOR_NOT_PERMITTED) return errorResponse(API_ERROR.FORBIDDEN);
-  if (outcome === REJECT_OUTCOME.NOT_FOUND) return errorResponse(API_ERROR.MEMBER_NOT_FOUND);
+  // null: the module refused the actor (left or demoted).
+  if (outcome === null) return errorResponse(API_ERROR.FORBIDDEN);
+  if (outcome === SCIM_REJECT_OUTCOME.NOT_FOUND) return errorResponse(API_ERROR.MEMBER_NOT_FOUND);
 
   return NextResponse.json({ success: true });
 }

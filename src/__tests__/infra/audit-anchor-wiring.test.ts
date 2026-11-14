@@ -243,10 +243,15 @@ function roleViolations(tf: TerraformConfig, opts: EvalOptions = {}): string[] {
       out.push(`publisher role: statements ${JSON.stringify(policy.Statement)}`);
     }
   }
-  // The anchor grant left the shared role: nothing it carries names the bucket.
-  for (const name of policiesOfRole(tf, "ecs_task").inline) {
-    const text = JSON.stringify(plain(tf.attr(tf.resource("aws_iam_role_policy", name), "policy", opts)));
-    if (text.includes("aws_s3_bucket.audit_anchors")) out.push(`shared role: ${name} grants on the anchors bucket`);
+  // The anchor grant is the publisher's alone: no other role's inline policy
+  // names the bucket. Every role is derived from the code, so a new task role
+  // (ecs_retention_gc_task, #1020) is covered without being listed here.
+  const others = tf.resources("aws_iam_role").map((r) => r.labels[1]).filter((role) => role !== "ecs_audit_anchor_publisher_task");
+  for (const role of others) {
+    for (const name of policiesOfRole(tf, role).inline) {
+      const text = JSON.stringify(plain(tf.attr(tf.resource("aws_iam_role_policy", name), "policy", opts)));
+      if (text.includes("aws_s3_bucket.audit_anchors")) out.push(`role ${role}: ${name} grants on the anchors bucket`);
+    }
   }
   return out;
 }
@@ -710,6 +715,21 @@ function allViolations(tf: TerraformConfig, opts: EvalOptions = {}): string[] {
   ];
 }
 
+/**
+ * The publisher role's trust policy up to its Condition line: the retention-gc
+ * role (iam.tf) carries the same Condition, so an edit anchored on the line
+ * alone would not be unique.
+ */
+const PUBLISHER_TRUST_HEAD = `resource "aws_iam_role" "ecs_audit_anchor_publisher_task" {
+  name = "\${local.name_prefix}-ecs-audit-anchor-publisher-task"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "ecs-tasks.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+`;
+
 /** The real configuration with one textual edit to `file`; the edit must apply. */
 function edited(file: string, from: string, to: string): TerraformConfig {
   const text = readFileSync(join(TERRAFORM_DIR, file), "utf8");
@@ -986,20 +1006,35 @@ const RED_FIXTURES: RedFixture[] = [
 }
 
 resource "aws_iam_role_policy" "ecs_s3_access" {`,
-    violation: "shared role: ecs_audit_anchor_s3 grants on the anchors bucket",
+    violation: "role ecs_task: ecs_audit_anchor_s3 grants on the anchors bucket",
+  },
+  {
+    name: "the anchor grant on the retention worker's role",
+    file: "iam.tf",
+    from: 'resource "aws_iam_role_policy" "ecs_s3_access" {',
+    to: `resource "aws_iam_role_policy" "ecs_retention_anchor_s3" {
+  name = "x"
+  role = aws_iam_role.ecs_retention_gc_task.id
+  policy = jsonencode({
+    Statement = [{ Effect = "Allow", Action = ["s3:PutObject"], Resource = "\${aws_s3_bucket.audit_anchors[0].arn}/*" }]
+  })
+}
+
+resource "aws_iam_role_policy" "ecs_s3_access" {`,
+    violation: "role ecs_retention_gc_task: ecs_retention_anchor_s3 grants on the anchors bucket",
   },
   {
     name: "a publisher role any account's ECS tasks may assume",
     file: "iam.tf",
-    from: '      Condition = { StringEquals = { "aws:SourceAccount" = data.aws_caller_identity.current.account_id } }\n',
-    to: "",
+    from: `${PUBLISHER_TRUST_HEAD}      Condition = { StringEquals = { "aws:SourceAccount" = data.aws_caller_identity.current.account_id } }\n`,
+    to: PUBLISHER_TRUST_HEAD,
     violation: "publisher trust: statements",
   },
   {
     name: "a publisher trust condition on a key ECS does not bind to the account",
     file: "iam.tf",
-    from: 'Condition = { StringEquals = { "aws:SourceAccount" = data.aws_caller_identity.current.account_id } }',
-    to: 'Condition = { ArnLike = { "aws:SourceArn" = "arn:aws:ecs:*:*:*" } }',
+    from: `${PUBLISHER_TRUST_HEAD}      Condition = { StringEquals = { "aws:SourceAccount" = data.aws_caller_identity.current.account_id } }`,
+    to: `${PUBLISHER_TRUST_HEAD}      Condition = { ArnLike = { "aws:SourceArn" = "arn:aws:ecs:*:*:*" } }`,
     violation: "publisher trust: statements",
   },
   {

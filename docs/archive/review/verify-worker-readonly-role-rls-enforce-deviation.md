@@ -78,3 +78,11 @@
 - No AWS call was made. The ECS command override, the `deploy.sh` `--overrides` forwarding, the Terraform secret wiring and the circuit-breaker behaviour described in `docs/operations/deployment.md` are covered by text-level tests (`migrate-task-wiring.test.ts`, the deploy-rollback tests) and by reading, not by a deploy.
 - `terraform fmt -check -recursive` passes locally. `terraform validate` and `plan` were not run: they need an initialised backend.
 - `typecheck:test` is not a root script; test files are type-checked by `npm run typecheck`.
+
+### D-9. Merged `main` before the PR: migrations renamed, baseline regenerated
+
+- `main` gained four migrations (`20261114000000` to `20261114000300`) after the branch was cut, one sharing the flip's timestamp prefix, and two of them backfill rows under a bypass. Left as they were, the flip would have sorted before those backfills. The two migrations of this branch are renamed to sort last: `20261114000400_audit_chain_verifier_role` and `20261114000500_rls_bypass_enforce`. The attestation value is therefore `RLS_ENFORCE_ATTESTED=20261114000500_rls_bypass_enforce`; the plan and the plan-review log keep the names they were written with.
+- `main` removed `TEAM_WEBHOOK_DISPATCH` and added `OUTBOX_WEBHOOK_SUBSCRIBER_RESOLVE`, which the suite exercises as a restricted role. The baseline was regenerated from a full run of the merged tree: 110 members, 78 with evidence, 32 without (D-6's figures predate the merge).
+- The merged tree's full suite passes on an enforcing database (157 files, 1752 passed; the one failure in the first run was the `lock_held` cell, which passes alone), so no code path added on `main` reaches outside its grant in a test.
+- A self-test cell added on `main` replaces the negative-test script with a fixture naming one allowlisted routine; with this branch's second allowlist entry for that file it reported an entry matching nothing. The fixture now names both.
+- The function rule on `main` now reads a schema-qualified name, so the mode cells create `public.rls_bypass_enforced()` qualified and the comment about the unqualified spelling is gone.

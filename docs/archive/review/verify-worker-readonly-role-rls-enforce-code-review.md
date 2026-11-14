@@ -413,3 +413,7 @@ What stays open, each recorded above with its cost and worst case:
 - S11 / S16: the probe role can run DDL on the owner's objects; cells that use it must not, and only review checks that.
 - S6: statements inside a SECURITY DEFINER routine are not attributed.
 - F11: the baseline has not yet been compared with a CI run of this branch.
+
+## After the review: merge of `main`
+
+Recorded in the deviation log (D-9): the two migrations are renamed to sort after the four `main` added, the evidence baseline is regenerated (78 with evidence, 32 without), and one self-test fixture and one test comment follow changes made on `main`. The merged tree passes the full integration suite on an enforcing database, the evidence check, typecheck, lint, the build and the static gates (except the one that reads the shared development database).
