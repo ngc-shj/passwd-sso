@@ -47,7 +47,12 @@ import {
   verify,
   type AnchorRow,
 } from "@/lib/audit/anchor-manifest";
-import { AUDIT_ANCHOR_MIRROR_BACKFILL_MAX } from "@/lib/constants/audit/audit";
+import {
+  AUDIT_ANCHOR_CADENCE_MS,
+  AUDIT_ANCHOR_MIRROR_BACKFILL_MAX,
+  AUDIT_ANCHOR_PUBLISH_OFFSET_MS,
+} from "@/lib/constants/audit/audit";
+import { MS_PER_HOUR } from "@/lib/constants/time";
 import {
   archivePublicKey,
   createCalls,
@@ -103,13 +108,10 @@ const OTHER_KEY = randomBytes(32);
 const OTHER_PUBLIC_KEY = publicKeyForSigningKey(OTHER_KEY);
 const OTHER_KID = kidOf(OTHER_KEY);
 
-const CADENCE_MS = 24 * 60 * 60 * 1000;
-const OFFSET_MS = 5 * 60 * 1000;
-const HOUR_MS = 60 * 60 * 1000;
 
 const BOUNDARY = new Date("2026-01-15T00:05:00.000Z");
-const PREV_BOUNDARY = new Date(BOUNDARY.getTime() - CADENCE_MS);
-const NEXT_BOUNDARY = new Date(BOUNDARY.getTime() + CADENCE_MS);
+const PREV_BOUNDARY = new Date(BOUNDARY.getTime() - AUDIT_ANCHOR_CADENCE_MS);
+const NEXT_BOUNDARY = new Date(BOUNDARY.getTime() + AUDIT_ANCHOR_CADENCE_MS);
 const WALL_CLOCK = new Date("2026-01-15T01:00:00.000Z");
 const OWN_KEY_AT_BOUNDARY = buildManifestArtifactKey(BOUNDARY, KID);
 
@@ -137,8 +139,8 @@ function makeConfig(overrides: Partial<PublisherConfig> = {}): PublisherConfig {
     signingKey: SIGNING_KEY,
     tagSecret: TAG_SECRET,
     destinations: [new InMemoryDestination("filesystem")],
-    cadenceMs: CADENCE_MS,
-    publishOffsetMs: OFFSET_MS,
+    cadenceMs: AUDIT_ANCHOR_CADENCE_MS,
+    publishOffsetMs: AUDIT_ANCHOR_PUBLISH_OFFSET_MS,
     ...overrides,
   };
 }
@@ -399,25 +401,25 @@ afterEach(() => {
 describe("cadence math", () => {
   it("currentCadenceBoundary aligns to floor((now - offset) / cadence) * cadence + offset", () => {
     const now = new Date("2026-01-15T12:34:56Z");
-    const boundary = currentCadenceBoundary(now, CADENCE_MS, OFFSET_MS);
+    const boundary = currentCadenceBoundary(now, AUDIT_ANCHOR_CADENCE_MS, AUDIT_ANCHOR_PUBLISH_OFFSET_MS);
     expect(boundary.toISOString()).toBe("2026-01-15T00:05:00.000Z");
   });
 
   it("previousCadenceBoundary returns one cadence prior to current", () => {
     const now = new Date("2026-01-15T12:34:56Z");
-    const prev = previousCadenceBoundary(now, CADENCE_MS, OFFSET_MS);
+    const prev = previousCadenceBoundary(now, AUDIT_ANCHOR_CADENCE_MS, AUDIT_ANCHOR_PUBLISH_OFFSET_MS);
     expect(prev.toISOString()).toBe("2026-01-14T00:05:00.000Z");
   });
 
   it("currentCadenceBoundary is idempotent on a boundary moment", () => {
     const onBoundary = new Date("2026-01-15T00:05:00Z");
-    const result = currentCadenceBoundary(onBoundary, CADENCE_MS, OFFSET_MS);
+    const result = currentCadenceBoundary(onBoundary, AUDIT_ANCHOR_CADENCE_MS, AUDIT_ANCHOR_PUBLISH_OFFSET_MS);
     expect(result.getTime()).toBe(onBoundary.getTime());
   });
 
   it("currentCadenceBoundary handles zero offset", () => {
     const now = new Date("2026-01-15T12:00:00Z");
-    const boundary = currentCadenceBoundary(now, CADENCE_MS, 0);
+    const boundary = currentCadenceBoundary(now, AUDIT_ANCHOR_CADENCE_MS, 0);
     expect(boundary.toISOString()).toBe("2026-01-15T00:00:00.000Z");
   });
 });
@@ -786,7 +788,7 @@ describe("AuditAnchorPublisher.runCadence — decision table", () => {
 
   it("a last_published_at on the latest manifest's date is neither d1 nor d2: the boundary publishes", async () => {
     const db = makeDb({
-      anchors: [anchor(TENANT_ID_1, { lastPublishedAt: new Date(PREV_BOUNDARY.getTime() + HOUR_MS) }), anchor(TENANT_ID_2)],
+      anchors: [anchor(TENANT_ID_1, { lastPublishedAt: new Date(PREV_BOUNDARY.getTime() + MS_PER_HOUR) }), anchor(TENANT_ID_2)],
     });
     const primary = await archivedPrimary();
     await storeManifest(primary, ours(PREV_BOUNDARY));
@@ -824,7 +826,7 @@ describe("AuditAnchorPublisher.runCadence — decision table", () => {
     });
 
     // Deny: an older key NAME carries the own kid — this key was rotated away from.
-    await storeArtifact(primary, buildManifestArtifactKey(new Date(PREV_BOUNDARY.getTime() - CADENCE_MS), KID), Buffer.from("x"));
+    await storeArtifact(primary, buildManifestArtifactKey(new Date(PREV_BOUNDARY.getTime() - AUDIT_ANCHOR_CADENCE_MS), KID), Buffer.from("x"));
     const before = await primary.list();
     const mirror = tracked(new InMemoryDestination("s3"));
     const outcome = await publisherFor(db, { destinations: [primary, mirror.dest] }).runCadence(BOUNDARY);
@@ -1065,7 +1067,7 @@ describe("AuditAnchorPublisher.runCadence — decision table", () => {
     });
     const outcome = await publisherFor(db, {
       destinations: [primary],
-      now: () => NEXT_BOUNDARY.getTime() + HOUR_MS,
+      now: () => NEXT_BOUNDARY.getTime() + MS_PER_HOUR,
     }).runCadence(BOUNDARY);
     expect(outcome.kind).toBe("skipped_already_published");
   });
@@ -1249,8 +1251,8 @@ describe("AuditAnchorPublisher.runCadence — publish", () => {
 
   it.each([
     ["inside the boundary", WALL_CLOCK.getTime(), WALL_CLOCK],
-    ["past the next boundary", NEXT_BOUNDARY.getTime() + HOUR_MS, new Date(NEXT_BOUNDARY.getTime() - 1)],
-    ["before the boundary", BOUNDARY.getTime() - HOUR_MS, BOUNDARY],
+    ["past the next boundary", NEXT_BOUNDARY.getTime() + MS_PER_HOUR, new Date(NEXT_BOUNDARY.getTime() - 1)],
+    ["before the boundary", BOUNDARY.getTime() - MS_PER_HOUR, BOUNDARY],
   ])("writes last_published_at from config.now clamped into the boundary: a clock %s", async (_label, clockMs, expected) => {
     const db = makeDb();
     // The decision reads a clock inside the boundary; the write, the one under test.
@@ -1322,7 +1324,7 @@ describe("AuditAnchorPublisher.runCadence — publish", () => {
 
   it("writes no missing-prior row when the previous boundary was published", async () => {
     const db = makeDb({
-      anchors: [anchor(TENANT_ID_1, { lastPublishedAt: new Date(PREV_BOUNDARY.getTime() + HOUR_MS) }), anchor(TENANT_ID_2)],
+      anchors: [anchor(TENANT_ID_1, { lastPublishedAt: new Date(PREV_BOUNDARY.getTime() + MS_PER_HOUR) }), anchor(TENANT_ID_2)],
     });
     const primary = await archivedPrimary();
     await storeManifest(primary, ours(PREV_BOUNDARY));
@@ -1564,7 +1566,7 @@ describe("AuditAnchorPublisher.runCadence — mirrors", () => {
   });
 
   it("a primary create failure fails at stage upload and pauses until the boundary after config.now's", async () => {
-    const configNow = WALL_CLOCK.getTime() + 2 * CADENCE_MS;
+    const configNow = WALL_CLOCK.getTime() + 2 * AUDIT_ANCHOR_CADENCE_MS;
     const db = makeDb();
     const { dest } = tracked(new InMemoryDestination("s3"), {
       create: async () => {
@@ -1581,7 +1583,7 @@ describe("AuditAnchorPublisher.runCadence — mirrors", () => {
           now = configNow;
         },
       },
-    }).runCadence(new Date(BOUNDARY.getTime() + 2 * CADENCE_MS));
+    }).runCadence(new Date(BOUNDARY.getTime() + 2 * AUDIT_ANCHOR_CADENCE_MS));
 
     expect(outcome).toMatchObject({ kind: "failed", stage: "upload", reason: "s3_UPLOAD_FAILED:unknown" });
     const pauses = pauseWrites(db);
@@ -1639,7 +1641,7 @@ describe("AuditAnchorPublisher.runCadence — mirrors", () => {
       const primary = await archivedPrimary();
       const gapKeys: string[] = [];
       for (let daysBack = GAP; daysBack >= 1; daysBack--) {
-        const planted = ours(new Date(BOUNDARY.getTime() - daysBack * CADENCE_MS));
+        const planted = ours(new Date(BOUNDARY.getTime() - daysBack * AUDIT_ANCHOR_CADENCE_MS));
         await storeManifest(primary, planted);
         gapKeys.push(planted.artifactKey);
       }
@@ -1649,7 +1651,7 @@ describe("AuditAnchorPublisher.runCadence — mirrors", () => {
     it("copies the newest missing manifest keys first, at most the bound per run, and the rest on the next", async () => {
       const { primary, gapKeys } = await primaryWithGap();
       const db = makeDb({
-        anchors: [anchor(TENANT_ID_1, { lastPublishedAt: new Date(PREV_BOUNDARY.getTime() + HOUR_MS) }), anchor(TENANT_ID_2)],
+        anchors: [anchor(TENANT_ID_1, { lastPublishedAt: new Date(PREV_BOUNDARY.getTime() + MS_PER_HOUR) }), anchor(TENANT_ID_2)],
       });
       const mirror = new InMemoryDestination("s3");
       const publisher = publisherFor(db, { destinations: [primary, mirror] });
@@ -1670,7 +1672,7 @@ describe("AuditAnchorPublisher.runCadence — mirrors", () => {
     it("copies manifest keys only: the primary's archived public key is not mirrored", async () => {
       const { primary } = await primaryWithGap();
       const db = makeDb({
-        anchors: [anchor(TENANT_ID_1, { lastPublishedAt: new Date(PREV_BOUNDARY.getTime() + HOUR_MS) }), anchor(TENANT_ID_2)],
+        anchors: [anchor(TENANT_ID_1, { lastPublishedAt: new Date(PREV_BOUNDARY.getTime() + MS_PER_HOUR) }), anchor(TENANT_ID_2)],
       });
       const mirror = new InMemoryDestination("s3");
 
@@ -1682,7 +1684,7 @@ describe("AuditAnchorPublisher.runCadence — mirrors", () => {
     it("a secondary that throws during the backfill does not change the outcome; the next run completes it", async () => {
       const { primary, gapKeys } = await primaryWithGap();
       const db = makeDb({
-        anchors: [anchor(TENANT_ID_1, { lastPublishedAt: new Date(PREV_BOUNDARY.getTime() + HOUR_MS) }), anchor(TENANT_ID_2)],
+        anchors: [anchor(TENANT_ID_1, { lastPublishedAt: new Date(PREV_BOUNDARY.getTime() + MS_PER_HOUR) }), anchor(TENANT_ID_2)],
       });
       const store = new InMemoryDestination("s3");
       let failBackfill = true;
@@ -1719,7 +1721,7 @@ describe("AuditAnchorPublisher.runCadence — mirrors", () => {
       const earlier = ours(PREV_BOUNDARY);
       await storeManifest(primary, earlier);
       const db = makeDb({
-        anchors: [anchor(TENANT_ID_1, { lastPublishedAt: new Date(PREV_BOUNDARY.getTime() + HOUR_MS) }), anchor(TENANT_ID_2)],
+        anchors: [anchor(TENANT_ID_1, { lastPublishedAt: new Date(PREV_BOUNDARY.getTime() + MS_PER_HOUR) }), anchor(TENANT_ID_2)],
       });
       const store = new InMemoryDestination("s3");
       await storeArtifact(store, earlier.artifactKey, Buffer.from("other bytes"));
@@ -1937,7 +1939,7 @@ describe("AuditAnchorPublisher.runCadence — failures", () => {
       const { dest, signals } = tracked(primary, overrides);
 
       const outcome = await publisherFor(db, { destinations: [dest], uploadTimeoutMs: 20 }).runCadence(
-        currentCadenceBoundary(new Date(), CADENCE_MS, OFFSET_MS),
+        currentCadenceBoundary(new Date(), AUDIT_ANCHOR_CADENCE_MS, AUDIT_ANCHOR_PUBLISH_OFFSET_MS),
       );
 
       expect(outcome).toMatchObject({ kind: "failed", stage, reason });
@@ -2035,7 +2037,7 @@ describe("AuditAnchorPublisher.runCadence — failures", () => {
       const primary = await archivedPrimary();
       await storeManifest(primary, ours(PREV_BOUNDARY));
       const db = makeDb({
-        anchors: [anchor(TENANT_ID_1, { lastPublishedAt: new Date(PREV_BOUNDARY.getTime() + HOUR_MS) }), anchor(TENANT_ID_2)],
+        anchors: [anchor(TENANT_ID_1, { lastPublishedAt: new Date(PREV_BOUNDARY.getTime() + MS_PER_HOUR) }), anchor(TENANT_ID_2)],
       });
       const store = new InMemoryDestination("s3");
       const { dest } = tracked(store, {

@@ -14,7 +14,12 @@ import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { run, type KeysDeps } from "../audit-anchor-keys";
 import { InMemoryDestination } from "@/lib/audit/anchor-destinations/in-memory-destination";
-import { STATEMENT_OP, publicKeyArtifactKey, statementArtifactKey } from "@/lib/audit/anchor-artifact-keys";
+import {
+  ANCHOR_ARTIFACT_CONTENT_TYPE,
+  STATEMENT_OP,
+  publicKeyArtifactKey,
+  statementArtifactKey,
+} from "@/lib/audit/anchor-artifact-keys";
 import {
   InvalidTypError,
   kidForPublicKey,
@@ -108,6 +113,26 @@ describe("dispatch and arguments", () => {
     expectNoSeed(h, SEED_HEX);
   });
 
+  it("does not echo a seed passed as the value of a key-file flag", async () => {
+    for (const argv of [["kid", "--key-file", SEED_HEX], ["rotation-statement", "--old-key-file", SEED_HEX, "--new-public-key", NEW_PUBLIC_HEX, "--out", join(dir, "x.jws")]]) {
+      const h = harness();
+      expect(await h.run(...argv)).toBe(1);
+      expect(h.stderr()).toContain("ENOENT");
+      expect(h.stderr()).toMatch(/--(old-)?key-file/);
+      expectNoSeed(h, SEED_HEX);
+    }
+  });
+
+  it("does not echo a seed passed as the value of --out when the write fails", async () => {
+    const h = harness();
+    expect(
+      await h.run("rotation-statement", "--old-key-file", OLD_KEY(), "--new-public-key", NEW_PUBLIC_HEX, "--out", join(dir, SEED_HEX, "x.jws")),
+    ).toBe(1);
+    expect(h.stderr()).toContain("ENOENT");
+    expect(h.stderr()).toContain("--out");
+    expectNoSeed(h, SEED_HEX);
+  });
+
   it("refuses an option the subcommand does not take", async () => {
     const h = harness();
     expect(await h.run("kid", "--key-file", OLD_KEY(), "--confirm")).toBe(2);
@@ -174,8 +199,8 @@ describe("kid", () => {
     const absent = new InMemoryDestination("absent");
     const different = new InMemoryDestination("different");
     const key = publicKeyArtifactKey(KID);
-    await archived.create({ artifactBytes: Buffer.from(`${PUBLIC_HEX}\n`), artifactKey: key, contentType: "text/plain" });
-    await different.create({ artifactBytes: Buffer.from(`${NEW_PUBLIC_HEX}\n`), artifactKey: key, contentType: "text/plain" });
+    await archived.create({ artifactBytes: Buffer.from(`${PUBLIC_HEX}\n`), artifactKey: key, contentType: ANCHOR_ARTIFACT_CONTENT_TYPE.PUBLIC_KEY });
+    await different.create({ artifactBytes: Buffer.from(`${NEW_PUBLIC_HEX}\n`), artifactKey: key, contentType: ANCHOR_ARTIFACT_CONTENT_TYPE.PUBLIC_KEY });
     const h = harness([archived, absent, different]);
     expect(await h.run("kid", "--key-file", OLD_KEY())).toBe(0);
     expect(h.stdout()).toContain("archived[archived]=yes");
@@ -225,7 +250,7 @@ describe("publish-pubkey", () => {
   it("exits 1 and writes to no destination when one holds different bytes", async () => {
     const clean = new InMemoryDestination("clean");
     const taken = new InMemoryDestination("taken");
-    await taken.create({ artifactBytes: Buffer.from(`${NEW_PUBLIC_HEX}\n`), artifactKey: key, contentType: "text/plain" });
+    await taken.create({ artifactBytes: Buffer.from(`${NEW_PUBLIC_HEX}\n`), artifactKey: key, contentType: ANCHOR_ARTIFACT_CONTENT_TYPE.PUBLIC_KEY });
     const h = harness([clean, taken]);
     expect(await h.run("publish-pubkey", "--public-key", PUBLIC_HEX, "--confirm")).toBe(1);
     expect(h.stderr()).toContain("taken");
@@ -463,7 +488,7 @@ describe("publish-statement", () => {
   it("writes to no destination when one of them holds a different statement", async () => {
     const clean = new InMemoryDestination("clean");
     const taken = new InMemoryDestination("taken");
-    await taken.create({ artifactBytes: Buffer.from("other"), artifactKey: rotationKey, contentType: "application/jose" });
+    await taken.create({ artifactBytes: Buffer.from("other"), artifactKey: rotationKey, contentType: ANCHOR_ARTIFACT_CONTENT_TYPE.JWS });
     const file = await signedStatement("rotation");
     expect(await harness([clean, taken]).run("publish-statement", "--file", file, "--public-key", PUBLIC_HEX, "--confirm")).toBe(1);
     expect(await clean.list()).toEqual([]);
@@ -495,6 +520,19 @@ describe("publish-statement", () => {
     expect(await h.run("publish-statement", "--file", file, "--public-key", PUBLIC_HEX, "--confirm")).toBe(1);
     expect(h.stderr()).toContain("InvalidTypError");
     expect(await dest.list()).toEqual([]);
+  });
+
+  it("prints no control character from a hostile header typ", async () => {
+    const [header, payload, signature] = readFileSync(await signedStatement("rotation"), "utf8").trim().split(".");
+    const hostileHeader = { ...JSON.parse(Buffer.from(header, "base64url").toString()), typ: "\u001b[31mred\nline" };
+    const file = join(dir, "hostile.jws");
+    writeFileSync(file, `${Buffer.from(JSON.stringify(hostileHeader)).toString("base64url")}.${payload}.${signature}\n`);
+
+    const h = harness([new InMemoryDestination()]);
+    expect(await h.run("publish-statement", "--file", file, "--public-key", PUBLIC_HEX, "--confirm")).toBe(1);
+    expect(h.stderr()).toContain("InvalidTypError");
+    expect([...(h.stdout() + h.stderr())].filter((c) => c.charCodeAt(0) < 0x20 && c !== "\n")).toEqual([]);
+    expect(h.stderr()).not.toContain("red");
   });
 
   it("refuses a statement checked under a key its kid does not name", async () => {

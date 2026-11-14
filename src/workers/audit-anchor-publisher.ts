@@ -30,7 +30,11 @@ import {
   type AnchorRow,
   type Manifest,
 } from "@/lib/audit/anchor-manifest";
-import { buildManifestArtifactKey, parseManifestArtifactKey } from "@/lib/audit/anchor-artifact-keys";
+import {
+  ANCHOR_ARTIFACT_CONTENT_TYPE,
+  buildManifestArtifactKey,
+  parseManifestArtifactKey,
+} from "@/lib/audit/anchor-artifact-keys";
 import {
   PublishedObjectUnverifiableError,
   createAnchorKeyCache,
@@ -231,8 +235,6 @@ type PublishTxResult =
       chainEnabledTenantCount: number;
     };
 
-const ARTIFACT_CONTENT_TYPE = "application/jose";
-
 class LockHeldSignal {
   constructor(readonly chainEnabledTenantCount: number | null) {}
 }
@@ -344,7 +346,11 @@ export class AuditAnchorPublisher {
     return this.config.destinations.slice(1);
   }
 
-  /** Derived on first use, inside a run: a signing key that is not a key fails the run, not the boot. */
+  /**
+   * Derived on first use, inside a run. The entrypoint derives the same key for
+   * its boot line, so a signing key that is not a key stops the process at boot
+   * (scripts/audit-anchor-publisher.ts); this getter alone would fail the run.
+   */
   private get ownKey(): OwnKey {
     this.derivedOwnKey ??= {
       publicKey: publicKeyForSigningKey(this.config.signingKey),
@@ -698,7 +704,7 @@ export class AuditAnchorPublisher {
           secondary.create({
             artifactBytes: published.bytes,
             artifactKey: published.artifactKey,
-            contentType: ARTIFACT_CONTENT_TYPE,
+            contentType: ANCHOR_ARTIFACT_CONTENT_TYPE.JWS,
             signal,
           }),
         );
@@ -917,7 +923,7 @@ export class AuditAnchorPublisher {
           let created: "created" | "exists";
           try {
             created = await bound.run((signal) =>
-              primary.create({ artifactBytes, artifactKey: key, contentType: ARTIFACT_CONTENT_TYPE, signal }),
+              primary.create({ artifactBytes, artifactKey: key, contentType: ANCHOR_ARTIFACT_CONTENT_TYPE.JWS, signal }),
             );
           } catch (err) {
             throw this.uploadFailure(primary, err, anchors.map((a) => a.tenantId));
@@ -1114,7 +1120,7 @@ export class AuditAnchorPublisher {
           const artifactBytes = await bound.run((signal) => primary.read(artifactKey, signal));
           if (artifactBytes === null) throw new TokenError("PRIMARY_OBJECT_MISSING");
           const result = await bound.run((signal) =>
-            mirror.create({ artifactBytes, artifactKey, contentType: ARTIFACT_CONTENT_TYPE, signal }),
+            mirror.create({ artifactBytes, artifactKey, contentType: ANCHOR_ARTIFACT_CONTENT_TYPE.JWS, signal }),
           );
           if (result === "exists") {
             const stored = await bound.run((signal) => mirror.read(artifactKey, signal));

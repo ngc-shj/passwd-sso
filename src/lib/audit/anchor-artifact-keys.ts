@@ -17,6 +17,12 @@ export const STATEMENT_OP = {
 
 export type StatementOp = (typeof STATEMENT_OP)[keyof typeof STATEMENT_OP];
 
+/** The Content-Type a destination stores each artifact under: a JWS, or a public key's hex text. */
+export const ANCHOR_ARTIFACT_CONTENT_TYPE = {
+  JWS: "application/jose",
+  PUBLIC_KEY: "text/plain",
+} as const;
+
 export class InvalidArtifactKeyError extends Error {
   readonly code = "INVALID_ARTIFACT_KEY";
   constructor() {

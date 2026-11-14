@@ -429,6 +429,8 @@ resource "aws_cloudwatch_metric_alarm" "audit_anchor_chain_enabled_fell_to_zero"
 # clock that went back reads that manifest as ahead instead
 # (PUBLISHED_OBJECT_AHEAD, under cadence_failed). Every fail-closed state of
 # the publisher's protocol reaches cadence_failed; none has a filter of its own.
+# The mirror backfill is not one: it is a log-only copy (mirror_backfill_failed)
+# with no filter and no alarm.
 locals {
   audit_anchor_publisher_failure_log_types = {
     cadence_failed             = "audit-anchor-publisher.cadence_failed"

@@ -1,6 +1,7 @@
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import {
   assertAnchorArtifactKey,
+  InvalidArtifactKeyError,
   parseManifestArtifactKey,
 } from "@/lib/audit/anchor-artifact-keys";
 import { assertArtifactSize, type AnchorDestination } from "./destination";
@@ -83,6 +84,24 @@ export function githubLocationForKey(artifactKey: string): { tag: string; assetN
 export function keyForGithubAsset(tag: string, assetName: string): string | null {
   if (!tag.startsWith(RELEASE_TAG_PREFIX)) return null;
   return tag === PUBLIC_KEYS_TAG ? `${PUBLIC_KEYS_DIR}${assetName}` : assetName;
+}
+
+/**
+ * The key of an asset that `read` and `create` would find where it sits: one
+ * whose own location is this tag and name. An asset under another tag (a
+ * manifest under another date's release, or under the key-rotation one) is
+ * not a stored object, so it is not listed.
+ */
+function storedKeyForAsset(tag: string, assetName: string): string | null {
+  const key = keyForGithubAsset(tag, assetName);
+  if (key === null) return null;
+  try {
+    const location = githubLocationForKey(key);
+    return location.tag === tag && location.assetName === assetName ? key : null;
+  } catch (err) {
+    if (err instanceof InvalidArtifactKeyError) return null;
+    throw err;
+  }
 }
 
 export class GitHubReleaseDestination implements AnchorDestination {
@@ -254,7 +273,7 @@ export class GitHubReleaseDestination implements AnchorDestination {
       for (const release of releases) {
         for (const asset of release.assets ?? []) {
           if (asset.state !== ASSET_STATE_UPLOADED) continue;
-          const key = keyForGithubAsset(release.tag_name, asset.name);
+          const key = storedKeyForAsset(release.tag_name, asset.name);
           if (key !== null) keys.push(key);
         }
       }

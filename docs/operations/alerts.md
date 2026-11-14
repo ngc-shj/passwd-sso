@@ -739,8 +739,11 @@ unless noted:
   `error.code`; `MIRROR_DIVERGED` when the secondary holds other bytes at a
   key, `PRIMARY_OBJECT_MISSING` when a listed key could not be read). It does
   not change the run's outcome, and the next publishing run tries again.
-  Repeating daily, the secondary is not catching up: fix its access, or look
-  at what it holds.
+  The backfill is a log-only byte copy: this line, including an older mirror
+  object that differs (`MIRROR_DIVERGED`), reaches no alarm and no
+  `cadence_failed`. Only the boundary's own manifest diverging at a secondary
+  fails the run. Repeating daily, the secondary is not catching up: fix its
+  access, or look at what it holds.
 - `audit-anchor-publisher.unrecognised_manifest_key` — the primary holds a key
   that looks like a manifest's (`????-??-??.kid-*.jws`) but is not one the
   publisher builds. It is ignored. On the anchors bucket only the publisher's
@@ -921,7 +924,9 @@ also written to the `AUDIT_ANCHOR_PUBLISH_FAILED` row) and `stage`:
   `CADENCE_FAILED:LAST_PUBLISHED_AHEAD_OF_CLOCK`,
   `CADENCE_FAILED:DESTINATION_BEHIND_DATABASE` and
   `CADENCE_FAILED:LATEST_UNDER_RETIRED_KEY`; trigger and reset of each are in
-  the rotation runbook's table. `<destination>` is `s3-object-lock`,
+  the rotation runbook's table. `<code>` is `ARTIFACT_TOO_LARGE` when the object
+  the run must read at the primary is larger than 8 MiB, which no publisher
+  wrote: every run fails until it is dealt with (the runbook's table). `<destination>` is `s3-object-lock`,
   `github-release` or `filesystem`. For an S3 service error `<code>` is the S3 error
   name: right after an upgrade,
   `s3-object-lock_READ_FAILED:AccessDenied` on every run is the publisher's IAM read
@@ -936,17 +941,20 @@ also written to the `AUDIT_ANCHOR_PUBLISH_FAILED` row) and `stage`:
   `audit_anchor_upload_attempts` row if the boundary must still be published.
 - `upload` — a create at the primary or at a secondary failed, or the 60 s
   bound on the run's destination I/O fired (`UPLOAD_TIMEOUT`):
-  `<destination>_UPLOAD_FAILED:<code>`. `upload_failed` names the destination
+  `<destination>_UPLOAD_FAILED:<code>` (`<code>` is `ARTIFACT_TOO_LARGE` when the
+  signed manifest is larger than 8 MiB). `upload_failed` names the destination
   and carries `error` (`name: AccessDenied` usually means the bucket policy or
   the task role drifted from Terraform; the line's `code` is `unknown` for an S3
   service error, while the reason token carries the name). Two more reasons have this stage and no `upload_failed` line, both
   about a secondary that already held the boundary's key:
   `<destination>_MIRROR_DIVERGED` (it holds other bytes than the primary) and
-  `<destination>_READ_FAILED:<code>` (it could not be read back to compare).
+  `<destination>_READ_FAILED:<code>` (it could not be read back to compare;
+  `ARTIFACT_TOO_LARGE` when the object there is larger than 8 MiB).
   The run also pauses the manifest's tenants until the next boundary: the
   audit-outbox worker stops advancing their chains, and the 15-minute retry
   that publishes clears it. The retry adopts what the primary already holds.
-- `after_upload` — see `commit_failed_after_upload` above.
+- `after_upload` — `COMMIT_FAILED_AFTER_UPLOAD:<code>`, `<code>` being the `error.code` of
+  the `commit_failed_after_upload` line; see that section above.
 
 Rows per boundary: the persisted count admits at most three counted runs across
 restarts, each writing at most one failure row, plus the one cap row (either

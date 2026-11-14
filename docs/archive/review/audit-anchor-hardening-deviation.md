@@ -149,3 +149,34 @@
   checkout and a fresh database.
 - Forbidden patterns (C1, C2, C4): no hit in non-test source; one `method: "DELETE"`, in the
   reservation-removal function of `github-release-destination.ts`.
+
+## Step 2-5 self-R-check
+
+Three focused passes (functionality, security, testing) over the recurring-rule checklist:
+no Critical, no Major; ten Minor, all fixed in this phase.
+
+- **R49 (security)** — the key scripts echoed the value of `--key-file` / `--old-key-file` /
+  `--out` in open- and write-failure messages, so a seed pasted as the flag's value reached
+  stderr. The messages now name the flag and the errno only.
+- **R48 (security)** — the GitHub destination listed an uploaded asset under any
+  `audit-anchor-*` tag, while `read`/`create` look a key up only under its own tag. `list`
+  now reports a key only where its own location is that tag and name.
+- **R49 / RS6 (security)** — `InvalidAlgorithmError` / `InvalidTypError` interpolated the raw
+  `alg` / `typ` of an unverified header (server and CLI), and the scripts printed
+  `err.message`. Both classes now `JSON.stringify` the value; the scripts print a
+  token-shaped name and code.
+- **R48 (security)** — the CLI threw a `TypeError` for a header that decodes to JSON `null`;
+  it now throws `InvalidSignatureError` like the server (vector added, asserted on both sides).
+- **R29 / R4** — `COMMIT_FAILED_AFTER_UPLOAD` and `ARTIFACT_TOO_LARGE` gained rows in the
+  alerts and runbook tables; the mirror backfill is stated as log-only (a differing older
+  mirror object reaches no alarm).
+- **R2** — the artifact content types are one exported constant in `anchor-artifact-keys.ts`.
+- **R29** — the `ownKey` getter comment now says the entrypoint derives the key at boot.
+- **RT11** — the CLI tests remove their temp dirs. **RT4** — the S3 two-instance case
+  observes the second instance waiting in `pg_locks`. **RT3** — tests import the time and
+  anchor constants instead of re-declaring them.
+
+The pass that applied these was interrupted by a session restart before it reported; the
+orchestrator re-verified the result (type-check, unit 1444 passed, CLI 484 passed, anchor
+integration 95 passed, eslint and the two static checks green). The per-fix red proofs were
+not re-run after the interruption; each fix has a test that names its guard.

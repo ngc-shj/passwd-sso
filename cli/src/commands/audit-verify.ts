@@ -22,14 +22,14 @@ const AUDIT_ANCHOR_TAG_DOMAIN = "audit-anchor-tag-v1";
 
 export class InvalidAlgorithmError extends Error {
   constructor(alg: unknown) {
-    super(`Invalid JWS alg: ${alg}; expected EdDSA`);
+    super(`Invalid JWS alg: ${JSON.stringify(alg)}; expected EdDSA`);
     this.name = "InvalidAlgorithmError";
   }
 }
 
 export class InvalidTypError extends Error {
   constructor(typ: unknown) {
-    super(`Invalid JWS typ: ${typ}; expected ${AUDIT_ANCHOR_TYP}`);
+    super(`Invalid JWS typ: ${JSON.stringify(typ)}; expected ${AUDIT_ANCHOR_TYP}`);
     this.name = "InvalidTypError";
   }
 }
@@ -266,17 +266,23 @@ function canonicalize(manifest: Manifest): Buffer {
   return Buffer.from(jcsCanonical(manifest), "utf-8");
 }
 
+function decodeHeader(headerB64: string): Record<string, unknown> {
+  let header: unknown;
+  try {
+    header = JSON.parse(b64urlDecode(headerB64).toString("utf-8"));
+  } catch {
+    throw new InvalidSignatureError();
+  }
+  if (typeof header !== "object" || header === null) throw new InvalidSignatureError();
+  return header as Record<string, unknown>;
+}
+
 function verifyJws(jws: string, publicKey: Buffer): Manifest {
   const parts = jws.split(".");
   if (parts.length !== 3) throw new InvalidSignatureError();
   const [headerB64, payloadB64, sigB64] = parts;
 
-  let header: Record<string, unknown>;
-  try {
-    header = JSON.parse(b64urlDecode(headerB64).toString("utf-8")) as Record<string, unknown>;
-  } catch {
-    throw new InvalidSignatureError();
-  }
+  const header = decodeHeader(headerB64);
 
   if (header.alg !== "EdDSA") throw new InvalidAlgorithmError(header.alg);
   if (header.typ !== AUDIT_ANCHOR_TYP) throw new InvalidTypError(header.typ);
@@ -339,12 +345,7 @@ function extractKidFromJws(jws: string): string {
   const dot = jws.indexOf(".");
   if (dot === -1) throw new InvalidSignatureError();
   const headerB64 = jws.slice(0, dot);
-  let header: Record<string, unknown>;
-  try {
-    header = JSON.parse(b64urlDecode(headerB64).toString("utf-8")) as Record<string, unknown>;
-  } catch {
-    throw new InvalidSignatureError();
-  }
+  const header = decodeHeader(headerB64);
   return typeof header.kid === "string" ? header.kid : "";
 }
 

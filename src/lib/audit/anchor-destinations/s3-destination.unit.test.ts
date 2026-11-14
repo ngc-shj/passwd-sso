@@ -28,10 +28,12 @@ vi.mock("@aws-sdk/client-s3", () => ({
 
 import { S3Destination, joinS3Key, s3ListPrefix } from "./s3-destination";
 import { ArtifactTooLargeError } from "./destination";
-import { InvalidArtifactKeyError } from "@/lib/audit/anchor-artifact-keys";
-import { AUDIT_ANCHOR_ARTIFACT_MAX_BYTES } from "@/lib/constants/audit/audit";
+import { ANCHOR_ARTIFACT_CONTENT_TYPE, InvalidArtifactKeyError } from "@/lib/audit/anchor-artifact-keys";
+import { AUDIT_ANCHOR_ARTIFACT_MAX_BYTES, AUDIT_ANCHOR_RETENTION_YEARS } from "@/lib/constants/audit/audit";
+import { MS_PER_DAY } from "@/lib/constants/time";
 
-const SEVEN_YEARS_MS = 7 * 365 * 24 * 60 * 60 * 1000;
+const YEAR_MS = 365 * MS_PER_DAY;
+const DEFAULT_RETENTION_MS = AUDIT_ANCHOR_RETENTION_YEARS * YEAR_MS;
 const ARTIFACT_KEY = "2026-05-02.kid-audit-anchor-0123456789abcdef.jws";
 
 function sentInput(call = 0): Record<string, unknown> {
@@ -47,7 +49,7 @@ async function createOnce(dest: S3Destination, signal?: AbortSignal): Promise<"c
   return dest.create({
     artifactBytes: Buffer.from("jws"),
     artifactKey: ARTIFACT_KEY,
-    contentType: "application/jose",
+    contentType: ANCHOR_ARTIFACT_CONTENT_TYPE.JWS,
     signal,
   });
 }
@@ -86,14 +88,14 @@ describe("S3Destination", () => {
     const dest = new S3Destination({ bucket: "my-bucket", prefix: "anchors" });
     const artifactBytes = Buffer.from("test-jws-payload");
 
-    await dest.create({ artifactBytes, artifactKey: ARTIFACT_KEY, contentType: "application/jose" });
+    await dest.create({ artifactBytes, artifactKey: ARTIFACT_KEY, contentType: ANCHOR_ARTIFACT_CONTENT_TYPE.JWS });
 
     expect(sendSpy).toHaveBeenCalledOnce();
     expect(sentInput()).toMatchObject({
       Bucket: "my-bucket",
       Key: `anchors/${ARTIFACT_KEY}`,
       Body: artifactBytes,
-      ContentType: "application/jose",
+      ContentType: ANCHOR_ARTIFACT_CONTENT_TYPE.JWS,
     });
   });
 
@@ -112,8 +114,8 @@ describe("S3Destination", () => {
     expect(input["ObjectLockMode"]).toBe("COMPLIANCE");
     const retainUntil = input["ObjectLockRetainUntilDate"] as Date;
     expect(retainUntil).toBeInstanceOf(Date);
-    expect(retainUntil.getTime()).toBeGreaterThanOrEqual(before + SEVEN_YEARS_MS);
-    expect(retainUntil.getTime()).toBeLessThanOrEqual(after + SEVEN_YEARS_MS);
+    expect(retainUntil.getTime()).toBeGreaterThanOrEqual(before + DEFAULT_RETENTION_MS);
+    expect(retainUntil.getTime()).toBeLessThanOrEqual(after + DEFAULT_RETENTION_MS);
   });
 
   it("honours an explicit retentionYears", async () => {
@@ -122,8 +124,8 @@ describe("S3Destination", () => {
     const after = Date.now();
 
     const retainUntil = (sentInput()["ObjectLockRetainUntilDate"] as Date).getTime();
-    expect(retainUntil).toBeGreaterThanOrEqual(before + SEVEN_YEARS_MS / 7);
-    expect(retainUntil).toBeLessThanOrEqual(after + SEVEN_YEARS_MS / 7);
+    expect(retainUntil).toBeGreaterThanOrEqual(before + YEAR_MS);
+    expect(retainUntil).toBeLessThanOrEqual(after + YEAR_MS);
   });
 
   it("requests SSE-S3 (AES256) server-side encryption", async () => {
@@ -238,13 +240,13 @@ describe("S3Destination.create — create-only", () => {
 
   it("refuses a key of no known shape and an artifact past the size bound, sending nothing", async () => {
     await expect(
-      dest().create({ artifactBytes: Buffer.from("x"), artifactKey: "notes.txt", contentType: "text/plain" }),
+      dest().create({ artifactBytes: Buffer.from("x"), artifactKey: "notes.txt", contentType: ANCHOR_ARTIFACT_CONTENT_TYPE.PUBLIC_KEY }),
     ).rejects.toBeInstanceOf(InvalidArtifactKeyError);
     await expect(
       dest().create({
         artifactBytes: Buffer.alloc(AUDIT_ANCHOR_ARTIFACT_MAX_BYTES + 1),
         artifactKey: ARTIFACT_KEY,
-        contentType: "application/jose",
+        contentType: ANCHOR_ARTIFACT_CONTENT_TYPE.JWS,
       }),
     ).rejects.toBeInstanceOf(ArtifactTooLargeError);
     expect(sendSpy).not.toHaveBeenCalled();

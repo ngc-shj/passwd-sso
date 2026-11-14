@@ -18,6 +18,7 @@ import { InMemoryDestination } from "@/lib/audit/anchor-destinations/in-memory-d
 import type { AnchorDestination } from "@/lib/audit/anchor-destinations/destination";
 import { buildManifestArtifactKey, publicKeyArtifactKey } from "@/lib/audit/anchor-artifact-keys";
 import { publicKeyForSigningKey } from "@/lib/audit/anchor-manifest";
+import { MS_PER_DAY } from "@/lib/constants/time";
 import {
   archivePublicKey,
   kidOf,
@@ -31,9 +32,8 @@ vi.mock("@/lib/logger", () => ({
   getLogger: () => ({ info: vi.fn(), warn: mockWarn, error: vi.fn(), debug: vi.fn() }),
 }));
 
-const DAY_MS = 24 * 60 * 60 * 1000;
 const D1 = new Date("2026-01-14T00:05:00.000Z");
-const D2 = new Date(D1.getTime() + DAY_MS);
+const D2 = new Date(D1.getTime() + MS_PER_DAY);
 
 const OWN_SEED = randomBytes(32);
 const OWN_PUBLIC = publicKeyForSigningKey(OWN_SEED);

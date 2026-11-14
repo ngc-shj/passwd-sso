@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { FilesystemDestination } from "./filesystem-destination";
-import { publicKeyArtifactKey } from "@/lib/audit/anchor-artifact-keys";
+import { ANCHOR_ARTIFACT_CONTENT_TYPE, publicKeyArtifactKey } from "@/lib/audit/anchor-artifact-keys";
 import { AUDIT_ANCHOR_ARTIFACT_MAX_BYTES } from "@/lib/constants/audit/audit";
 import { ArtifactTooLargeError } from "./destination";
 import {
@@ -144,7 +144,7 @@ describe("FilesystemDestination", () => {
       dest.create({
         artifactBytes: Buffer.from("x"),
         artifactKey: manifestKeyFor("2026-05-02"),
-        contentType: "application/jose",
+        contentType: ANCHOR_ARTIFACT_CONTENT_TYPE.JWS,
         signal,
       }),
     ).rejects.toBe(reason);

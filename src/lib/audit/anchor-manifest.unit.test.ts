@@ -604,6 +604,23 @@ describe("verify — algorithm rejection", () => {
     const tampered = tamperHeader(jws, { typ: "wrong-typ" });
     expect(() => verify(tampered, publicKeyRaw)).toThrow(InvalidTypError);
   });
+
+  it("keeps control characters of an unverified alg and typ out of the error message", () => {
+    const { publicKeyRaw, privateKeyRaw } = makeEd25519Keypair();
+    const jws = sign(canonicalize(buildManifest(makeMinimalInput())), privateKeyRaw);
+    const hostile = "\u001b[31mred\nline";
+
+    for (const overrides of [{ alg: hostile }, { typ: hostile }]) {
+      let message = "";
+      try {
+        verify(tamperHeader(jws, overrides), publicKeyRaw);
+      } catch (err) {
+        message = (err as Error).message;
+      }
+      expect(message).toContain("Invalid JWS");
+      expect([...message].filter((c) => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f)).toEqual([]);
+    }
+  });
 });
 
 describe("verify — payload tampering", () => {

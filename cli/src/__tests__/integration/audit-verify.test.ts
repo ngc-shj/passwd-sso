@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, writeFileSync, mkdtempSync } from "node:fs";
+import { existsSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolve } from "node:path";
@@ -85,13 +85,25 @@ function signManifest(
   return `${headerB64}.${payloadB64}.${b64urlEncode(sig)}`;
 }
 
+const tmpDirs: string[] = [];
+
+function makeTmpDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  tmpDirs.push(dir);
+  return dir;
+}
+
+afterEach(() => {
+  for (const dir of tmpDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
 // --- Integration tests ---
 
 describe("CLI audit-verify subcommand (integration)", () => {
   it.skipIf(!distExists)(
     "exits 0 and prints PASS for a valid JWS with matching public key",
     () => {
-      const tmpDir = mkdtempSync(join(tmpdir(), "audit-verify-int-"));
+      const tmpDir = makeTmpDir("audit-verify-int-");
 
       // Generate Ed25519 key pair
       const { privateKey, publicKey } = generateKeyPairSync("ed25519");
@@ -124,7 +136,7 @@ describe("CLI audit-verify subcommand (integration)", () => {
   it.skipIf(!distExists)(
     "exits 19 for a JWS checked under a key its kid does not name",
     () => {
-      const tmpDir = mkdtempSync(join(tmpdir(), "audit-verify-int-wrong-"));
+      const tmpDir = makeTmpDir("audit-verify-int-wrong-");
 
       // Generate signing key pair
       const { privateKey } = generateKeyPairSync("ed25519");
@@ -160,7 +172,7 @@ describe("CLI audit-verify subcommand (integration)", () => {
   it.skipIf(!distExists)(
     "exits 12 for a JWS under its own key with a signature that does not verify",
     () => {
-      const tmpDir = mkdtempSync(join(tmpdir(), "audit-verify-int-sig-"));
+      const tmpDir = makeTmpDir("audit-verify-int-sig-");
 
       const { privateKey, publicKey } = generateKeyPairSync("ed25519");
       const privateKeySeed = (
@@ -188,7 +200,7 @@ describe("CLI audit-verify subcommand (integration)", () => {
   it.skipIf(!distExists)(
     "verifies a prior manifest signed under another key with --prior-public-key",
     () => {
-      const tmpDir = mkdtempSync(join(tmpdir(), "audit-verify-int-prior-"));
+      const tmpDir = makeTmpDir("audit-verify-int-prior-");
       const seedOf = (pair: ReturnType<typeof generateKeyPairSync>) =>
         (pair.privateKey.export({ type: "pkcs8", format: "der" }) as Buffer).subarray(ED25519_PKCS8_PREFIX.length);
       const pubHexOf = (pair: ReturnType<typeof generateKeyPairSync>) =>

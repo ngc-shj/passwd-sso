@@ -6,7 +6,7 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import type { AnchorDestination } from "@/lib/audit/anchor-destinations/destination";
-import { buildManifestArtifactKey, publicKeyArtifactKey } from "@/lib/audit/anchor-artifact-keys";
+import { ANCHOR_ARTIFACT_CONTENT_TYPE, buildManifestArtifactKey, publicKeyArtifactKey } from "@/lib/audit/anchor-artifact-keys";
 import {
   buildManifest,
   canonicalize,
@@ -17,7 +17,7 @@ import {
   type Manifest,
 } from "@/lib/audit/anchor-manifest";
 
-export const ANCHOR_CONTENT_TYPE = "application/jose";
+export const ANCHOR_CONTENT_TYPE = ANCHOR_ARTIFACT_CONTENT_TYPE.JWS;
 
 export function kidOf(signingKey: Buffer): string {
   return kidForPublicKey(publicKeyForSigningKey(signingKey));

@@ -292,22 +292,70 @@ describe("AuditAnchorPublisher — MinIO: one version per manifest key", () => {
     expect((await anchorState(ctx.su, [tenantA, tenantB])).map((s) => s.last_published_at)).toEqual([null, null]);
   });
 
-  it("two instances, one boundary: exactly one publishes, the other makes no create, one version", async () => {
+  it("two instances, one boundary: the second waits in pg_locks behind the first mid-create, then makes no create and leaves one version", async () => {
     const second = createPrismaForRole("anchor-publisher");
+    // Released in `finally` too: a failed assertion must not leave run A
+    // holding the lock and its transaction open past the test.
+    let releaseA: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      releaseA = resolve;
+    });
+    const runs: Promise<unknown>[] = [];
     try {
-      const one = trackDestination(s3);
-      const two = trackDestination(s3);
+      let pidA: number | null = null;
+      let enteredCreate: () => void = () => {};
+      const creating = new Promise<void>((resolve) => {
+        enteredCreate = resolve;
+      });
+      const blocking = trackDestination(s3, {
+        create: async (args) => {
+          const result = await s3.create(args);
+          enteredCreate();
+          await gate;
+          return result;
+        },
+      });
+      const waiting = trackDestination(s3);
 
-      const outcomes = await Promise.all([
-        publisher(c.config([one.dest], { lockTimeoutMs: 20_000 })).runCadence(c.boundary),
-        publisher(c.config([two.dest], { lockTimeoutMs: 20_000 }), second).runCadence(c.boundary),
-      ]);
+      const configA = c.config([blocking.dest], {
+        hooks: {
+          inTx: async (tx) => {
+            const [row] = await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`;
+            pidA = row?.pid ?? null;
+          },
+        },
+      });
+      const configB = c.config([waiting.dest], { lockTimeoutMs: 20_000 });
 
-      expect(outcomes.map((o) => o.kind).sort()).toEqual(["published", "skipped_already_published"]);
+      const runA = publisher(configA).runCadence(c.boundary);
+      runs.push(runA);
+      await creating;
+      expect(pidA).not.toBeNull();
+      const runB = publisher(configB, second).runCadence(c.boundary);
+      runs.push(runB);
+
+      const deadline = Date.now() + 10_000;
+      let blocked = false;
+      while (!blocked && Date.now() < deadline) {
+        const rows = await ctx.su.prisma.$queryRawUnsafe<{ pid: number }[]>(
+          `SELECT pid FROM pg_locks
+            WHERE locktype = 'advisory' AND NOT granted AND $1::int = ANY(pg_blocking_pids(pid))`,
+          pidA,
+        );
+        blocked = rows.length > 0;
+        if (!blocked) await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      expect(blocked).toBe(true);
+
+      releaseA();
+      const outcomes = await Promise.all([runA, runB]);
+      expect(outcomes.map((o) => (o as CadenceOutcome).kind)).toEqual(["published", "skipped_already_published"]);
       // The lock keeps the second instance from the create at all.
-      expect([...createCalls(one.calls), ...createCalls(two.calls)]).toEqual([`create:${c.manifestKey()}`]);
+      expect([...createCalls(blocking.calls), ...createCalls(waiting.calls)]).toEqual([`create:${c.manifestKey()}`]);
       expect(await versionsOf(objectKey())).toHaveLength(1);
     } finally {
+      releaseA();
+      await Promise.allSettled(runs);
       await second.prisma.$disconnect();
       await second.pool.end();
     }

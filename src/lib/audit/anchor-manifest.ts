@@ -53,14 +53,14 @@ export type BuildManifestInput = {
 
 export class InvalidAlgorithmError extends Error {
   constructor(alg: unknown) {
-    super(`Invalid JWS alg: ${alg}; expected EdDSA`);
+    super(`Invalid JWS alg: ${JSON.stringify(alg)}; expected EdDSA`);
     this.name = "InvalidAlgorithmError";
   }
 }
 
 export class InvalidTypError extends Error {
   constructor(typ: unknown, expected: string = AUDIT_ANCHOR_TYP) {
-    super(`Invalid JWS typ: ${typ}; expected ${expected}`);
+    super(`Invalid JWS typ: ${JSON.stringify(typ)}; expected ${expected}`);
     this.name = "InvalidTypError";
   }
 }

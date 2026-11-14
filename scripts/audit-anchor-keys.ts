@@ -11,6 +11,7 @@ import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { loadEnv } from "@/lib/load-env";
 import {
+  ANCHOR_ARTIFACT_CONTENT_TYPE,
   STATEMENT_OP,
   publicKeyArtifactKey,
   statementArtifactKey,
@@ -30,6 +31,7 @@ import {
   verifyStatement,
 } from "@/lib/audit/anchor-manifest";
 import { AUDIT_ANCHOR_ARTIFACT_MAX_BYTES } from "@/lib/constants/audit/audit";
+import { errorLogFields } from "@/lib/logger/error-fields";
 import { MS_PER_SECOND } from "@/lib/constants/time";
 
 const OPERATION_TIMEOUT_MS = 60 * MS_PER_SECOND;
@@ -129,12 +131,13 @@ function stringOption(values: ParsedOptions, flag: string): string | undefined {
  * The file's bytes, read through one descriptor so the mode and size checked
  * are those of the bytes read. A private key file must be exactly mode 0600.
  */
-function readFileOnce(path: string, opts: { maxBytes: number; privateKey: boolean }): Buffer {
+function readFileOnce(path: string, opts: { flag: string; maxBytes: number; privateKey: boolean }): Buffer {
   let fd: number;
   try {
     fd = openSync(path, "r");
   } catch (err) {
-    throw new RefusedError(`cannot open ${path} (${(err as { code?: string }).code ?? "error"})`);
+    // Only the flag's name and the errno: its value may be a seed pasted by mistake.
+    throw new RefusedError(`cannot open the file given as --${opts.flag} (${(err as { code?: string }).code ?? "error"})`);
   }
   try {
     const st = fstatSync(fd);
@@ -157,8 +160,8 @@ function readFileOnce(path: string, opts: { maxBytes: number; privateKey: boolea
 }
 
 /** The 32-byte seed in a key file: exactly 64 lower-case hex chars once trimmed. Never echoed. */
-function readSeed(path: string): Buffer {
-  const hex = readFileOnce(path, { maxBytes: KEY_FILE_MAX_BYTES, privateKey: true }).toString("utf8").trim();
+function readSeed(path: string, flag: string): Buffer {
+  const hex = readFileOnce(path, { flag, maxBytes: KEY_FILE_MAX_BYTES, privateKey: true }).toString("utf8").trim();
   if (!/^[0-9a-f]{64}$/.test(hex)) throw new RefusedError(`key file ${path} must hold exactly 64 lower-case hex chars`);
   return Buffer.from(hex, "hex");
 }
@@ -171,8 +174,8 @@ function publicKeyFromHex(hex: string): Buffer {
   }
 }
 
-function readPublicKeyFile(path: string): Buffer {
-  const text = readFileOnce(path, { maxBytes: KEY_FILE_MAX_BYTES, privateKey: false }).toString("utf8");
+function readPublicKeyFile(path: string, flag: string): Buffer {
+  const text = readFileOnce(path, { flag, maxBytes: KEY_FILE_MAX_BYTES, privateKey: false }).toString("utf8");
   try {
     return parsePublicKeyHex(text);
   } catch {
@@ -180,8 +183,8 @@ function readPublicKeyFile(path: string): Buffer {
   }
 }
 
-function readJwsFile(path: string): string {
-  return readFileOnce(path, { maxBytes: AUDIT_ANCHOR_ARTIFACT_MAX_BYTES, privateKey: false }).toString("utf8").trim();
+function readJwsFile(path: string, flag: string): string {
+  return readFileOnce(path, { flag, maxBytes: AUDIT_ANCHOR_ARTIFACT_MAX_BYTES, privateKey: false }).toString("utf8").trim();
 }
 
 function writeStatementFile(path: string, jws: string): void {
@@ -189,12 +192,15 @@ function writeStatementFile(path: string, jws: string): void {
     // Create-only: a statement already there is never replaced.
     writeFileSync(path, `${jws}\n`, { flag: "wx", mode: 0o644 });
   } catch (err) {
-    throw new RefusedError(`cannot write ${path} (${(err as { code?: string }).code ?? "error"})`);
+    throw new RefusedError(`cannot write the file given as --out (${(err as { code?: string }).code ?? "error"})`);
   }
 }
 
+/** A token-shaped name and code only: an SDK or a parsed file's message is never printed verbatim. */
 function describeError(err: unknown): string {
-  return err instanceof Error ? `${err.name}: ${err.message}` : "unknown error";
+  if (!(err instanceof Error)) return "unknown error";
+  const { name, code } = errorLogFields(err);
+  return code === "unknown" ? name : `${name} (${code})`;
 }
 
 /** Prints what is about to be written, refuses without --confirm, then writes create-only everywhere. */
@@ -237,7 +243,7 @@ async function publishArtifact(
 }
 
 async function cmdKid(deps: KeysDeps, values: ParsedOptions): Promise<number> {
-  const publicKey = publicKeyForSigningKey(readSeed(stringOption(values, "key-file")!));
+  const publicKey = publicKeyForSigningKey(readSeed(stringOption(values, "key-file")!, "key-file"));
   const kid = kidForPublicKey(publicKey);
   deps.stdout.write(`publicKey=${publicKey.toString("hex")}\nkid=${kid}\n`);
   const archiveKey = publicKeyArtifactKey(kid);
@@ -254,18 +260,18 @@ async function cmdPublishPubkey(deps: KeysDeps, values: ParsedOptions): Promise<
   const keyFile = stringOption(values, "key-file");
   const hex = stringOption(values, "public-key");
   if ((keyFile === undefined) === (hex === undefined)) throw new UsageError("pass exactly one of --key-file and --public-key");
-  const publicKey = keyFile !== undefined ? publicKeyForSigningKey(readSeed(keyFile)) : publicKeyFromHex(hex!);
+  const publicKey = keyFile !== undefined ? publicKeyForSigningKey(readSeed(keyFile, "key-file")) : publicKeyFromHex(hex!);
   const kid = kidForPublicKey(publicKey);
   return publishArtifact(deps, values, {
     artifactKey: publicKeyArtifactKey(kid),
     bytes: Buffer.from(`${publicKey.toString("hex")}\n`),
-    contentType: "text/plain",
+    contentType: ANCHOR_ARTIFACT_CONTENT_TYPE.PUBLIC_KEY,
     summary: [`kid=${kid}`, `publicKey=${publicKey.toString("hex")}`],
   });
 }
 
 async function cmdRotationStatement(deps: KeysDeps, values: ParsedOptions): Promise<number> {
-  const seed = readSeed(stringOption(values, "old-key-file")!);
+  const seed = readSeed(stringOption(values, "old-key-file")!, "old-key-file");
   const newPublicKey = publicKeyFromHex(stringOption(values, "new-public-key")!);
   const oldKid = kidForPublicKey(publicKeyForSigningKey(seed));
   const newKid = kidForPublicKey(newPublicKey);
@@ -290,14 +296,14 @@ async function cmdChainRestart(deps: KeysDeps, values: ParsedOptions): Promise<n
     throw new UsageError("pass --previous-none, or --previous-manifest with --previous-uri (and optionally --previous-public-key), not both");
   }
 
-  const seed = readSeed(stringOption(values, "key-file")!);
+  const seed = readSeed(stringOption(values, "key-file")!, "key-file");
   const ownPublicKey = publicKeyForSigningKey(seed);
   let previousChain: { uri: string; sha256: string } | null = null;
   if (!none) {
-    const jws = readJwsFile(manifestFile!);
+    const jws = readJwsFile(manifestFile!, "previous-manifest");
     let priorKey: Buffer;
     if (priorKeyFile !== undefined) {
-      priorKey = readPublicKeyFile(priorKeyFile);
+      priorKey = readPublicKeyFile(priorKeyFile, "previous-public-key");
     } else if (readJwsKidOrRefuse(jws) === kidForPublicKey(ownPublicKey)) {
       priorKey = ownPublicKey;
     } else {
@@ -349,7 +355,7 @@ function isStatementOp(value: unknown): value is StatementOp {
 }
 
 async function cmdPublishStatement(deps: KeysDeps, values: ParsedOptions): Promise<number> {
-  const jws = readJwsFile(stringOption(values, "file")!);
+  const jws = readJwsFile(stringOption(values, "file")!, "file");
   let kid: string;
   try {
     kid = readJwsKid(jws);
@@ -372,7 +378,7 @@ async function cmdPublishStatement(deps: KeysDeps, values: ParsedOptions): Promi
   return publishArtifact(deps, values, {
     artifactKey: statementArtifactKey(issued, op, kid),
     bytes: Buffer.from(jws),
-    contentType: "application/jose",
+    contentType: ANCHOR_ARTIFACT_CONTENT_TYPE.JWS,
     summary: [`kid=${kid}`, `op=${op}`, `publicKey=${publicKey.toString("hex")}`],
   });
 }

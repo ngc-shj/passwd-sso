@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { writeFileSync, chmodSync, mkdtempSync } from "node:fs";
+import { writeFileSync, chmodSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createPrivateKey, createPublicKey, generateKeyPairSync, sign as nodeSign } from "node:crypto";
@@ -123,6 +123,7 @@ describe("auditVerifyCommand", () => {
 
   afterEach(() => {
     stderrSilence.mockRestore();
+    rmSync(tmpDir, { recursive: true, force: true });
   });
 
   describe("tag-secret-file mode 0644 rejected (closes TF4)", () => {

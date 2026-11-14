@@ -69,6 +69,8 @@ import { createAnchorScheduler } from "./audit-anchor-scheduler";
 import { InMemoryDestination } from "@/lib/audit/anchor-destinations/in-memory-destination";
 import { buildManifestArtifactKey } from "@/lib/audit/anchor-artifact-keys";
 import { publicKeyForSigningKey } from "@/lib/audit/anchor-manifest";
+import { AUDIT_ANCHOR_CADENCE_MS, AUDIT_ANCHOR_PUBLISH_OFFSET_MS } from "@/lib/constants/audit/audit";
+import { MS_PER_HOUR } from "@/lib/constants/time";
 import {
   archivePublicKey,
   kidOf,
@@ -78,12 +80,11 @@ import {
   trackDestination,
 } from "@/__tests__/helpers/anchor-manifest-fixtures";
 
-const CADENCE = 24 * 60 * 60 * 1000;
 const BOUNDARY = new Date("2026-01-15T00:05:00.000Z");
-const PREV_BOUNDARY = new Date(BOUNDARY.getTime() - CADENCE);
-const NEXT_BOUNDARY = new Date(BOUNDARY.getTime() + CADENCE);
+const PREV_BOUNDARY = new Date(BOUNDARY.getTime() - AUDIT_ANCHOR_CADENCE_MS);
+const NEXT_BOUNDARY = new Date(BOUNDARY.getTime() + AUDIT_ANCHOR_CADENCE_MS);
 /** A wall clock an hour into `boundary`. */
-const clockInto = (boundary: Date) => () => boundary.getTime() + 60 * 60 * 1000;
+const clockInto = (boundary: Date) => () => boundary.getTime() + MS_PER_HOUR;
 const TENANT = "11111111-1111-4111-8111-111111111111";
 const DEPLOYMENT_ID = "11111111-2222-4333-8444-555555555555";
 const SIGNING_KEY = randomBytes(32);
@@ -193,8 +194,8 @@ function config(overrides: Partial<PublisherConfig> = {}): PublisherConfig {
     signingKey: SIGNING_KEY,
     tagSecret: TAG_SECRET,
     destinations: [new InMemoryDestination(PRIMARY_NAME)],
-    cadenceMs: CADENCE,
-    publishOffsetMs: 5 * 60 * 1000,
+    cadenceMs: AUDIT_ANCHOR_CADENCE_MS,
+    publishOffsetMs: AUDIT_ANCHOR_PUBLISH_OFFSET_MS,
     now: clockInto(BOUNDARY),
     ...overrides,
   };
@@ -261,7 +262,7 @@ beforeAll(async () => {
   });
   lines.row_d2_destination_behind = await cadence(makeDb({ highWater: BOUNDARY }), { destinations: [await primary()] });
   const retired = await primaryHolding(
-    ours(new Date(PREV_BOUNDARY.getTime() - CADENCE)),
+    ours(new Date(PREV_BOUNDARY.getTime() - AUDIT_ANCHOR_CADENCE_MS)),
     signedManifest({ signingKey: OTHER_KEY, boundary: PREV_BOUNDARY }),
   );
   await archivePublicKey(retired, publicKeyForSigningKey(OTHER_KEY));
@@ -295,8 +296,8 @@ beforeAll(async () => {
       runCadence: async () => {
         throw new Error("unexpected");
       },
-      cadenceMs: 24 * 60 * 60 * 1000,
-      publishOffsetMs: 5 * 60 * 1000,
+      cadenceMs: AUDIT_ANCHOR_CADENCE_MS,
+      publishOffsetMs: AUDIT_ANCHOR_PUBLISH_OFFSET_MS,
       now: () => BOUNDARY.getTime() + 1000,
       setTimer: () => null,
       clearTimer: () => undefined,

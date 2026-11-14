@@ -6,6 +6,7 @@ import {
   keyForGithubAsset,
 } from "./github-release-destination";
 import {
+  ANCHOR_ARTIFACT_CONTENT_TYPE,
   InvalidArtifactKeyError,
   STATEMENT_OP,
   publicKeyArtifactKey,
@@ -53,7 +54,7 @@ function createManifest(dest: GitHubReleaseDestination, signal?: AbortSignal) {
   return dest.create({
     artifactBytes: Buffer.from("jws-payload"),
     artifactKey: MANIFEST_KEY,
-    contentType: "application/jose",
+    contentType: ANCHOR_ARTIFACT_CONTENT_TYPE.JWS,
     signal,
   });
 }
@@ -126,7 +127,7 @@ describe("GitHubReleaseDestination — requests", () => {
     expect(uploadInit.method).toBe("POST");
     const headers = uploadInit.headers as Record<string, string>;
     expect(headers["Authorization"]).toBe("token ghp_xxx");
-    expect(headers["Content-Type"]).toBe("application/jose");
+    expect(headers["Content-Type"]).toBe(ANCHOR_ARTIFACT_CONTENT_TYPE.JWS);
     expect(Buffer.from(uploadInit.body as Uint8Array)).toEqual(Buffer.from("jws-payload"));
   });
 
@@ -160,6 +161,23 @@ describe("GitHubReleaseDestination — requests", () => {
     await dest.list();
 
     expect(fetchSpy.mock.calls[0]?.[0]).toBe("http://127.0.0.1:1/repos/owner/repo/releases?per_page=100&page=1");
+  });
+
+  it("lists an uploaded asset only under the release its key is stored in", async () => {
+    const asset = (name: string) => ({ id: 1, name, state: "uploaded", size: 3, created_at: "2026-05-02T00:05:01Z" });
+    const rotation = statementArtifactKey(new Date("2026-05-02T12:00:00.000Z"), STATEMENT_OP.ROTATION, KID);
+    fetchSpy.mockResolvedValueOnce(
+      makeOkResponse([
+        { ...RELEASE, assets: [asset(MANIFEST_KEY)] },
+        { ...RELEASE, tag_name: "audit-anchor-2026-05-03", assets: [asset(MANIFEST_KEY)] },
+        { ...RELEASE, tag_name: "audit-anchor-key-rotation", assets: [asset(MANIFEST_KEY), asset(rotation), asset("notes.txt")] },
+        { ...RELEASE, tag_name: "audit-anchor-public-keys", assets: [asset(`${KID}.pub`), asset(MANIFEST_KEY)] },
+      ]),
+    );
+
+    const dest = new GitHubReleaseDestination({ repo: "owner/repo", token: "ghp_xxx" });
+
+    expect((await dest.list()).sort()).toEqual([MANIFEST_KEY, rotation, publicKeyArtifactKey(KID)].sort());
   });
 
   it("downloads an uploaded asset by id as an octet stream", async () => {
@@ -258,7 +276,7 @@ describe("GitHubReleaseDestination — failure paths", () => {
     const dest = new GitHubReleaseDestination({ repo: "owner/repo", token: "ghp_xxx" });
 
     await expect(
-      dest.create({ artifactBytes: Buffer.from("x"), artifactKey: "no-dot", contentType: "application/jose" }),
+      dest.create({ artifactBytes: Buffer.from("x"), artifactKey: "no-dot", contentType: ANCHOR_ARTIFACT_CONTENT_TYPE.JWS }),
     ).rejects.toBeInstanceOf(InvalidArtifactKeyError);
     await expect(dest.read("no-dot")).rejects.toBeInstanceOf(InvalidArtifactKeyError);
     expect(fetchSpy).not.toHaveBeenCalled();

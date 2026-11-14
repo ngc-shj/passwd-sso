@@ -107,6 +107,17 @@ function buildVectors() {
         expect: "InvalidSignatureError",
       },
       {
+        // JSON.parse accepts these; neither is a header object.
+        name: "header is JSON null",
+        jws: jws(own.privateKey, null, payload),
+        expect: "InvalidSignatureError",
+      },
+      {
+        name: "header is a JSON string",
+        jws: jws(own.privateKey, "EdDSA", payload),
+        expect: "InvalidSignatureError",
+      },
+      {
         name: "malformed kid: upper-case hex",
         jws: jws(own.privateKey, header(own.kid.toUpperCase().replace("AUDIT-ANCHOR-", KID_PREFIX)), payload),
         expect: "InvalidKidError",

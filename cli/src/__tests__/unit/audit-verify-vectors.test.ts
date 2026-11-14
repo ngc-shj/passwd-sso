@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -119,6 +119,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  rmSync(tmpDir, { recursive: true, force: true });
 });
 
 describe("the vector file", () => {
@@ -146,6 +147,25 @@ describe("audit-verify — shared JWS vectors", () => {
 
   it("exports the error a mismatched kid raises, for the exit code", () => {
     expect(VECTORS.jws.some((v) => v.expect === KidMismatchError.name)).toBe(true);
+  });
+});
+
+describe("audit-verify — an unverified header in an error message", () => {
+  it.each(["alg", "typ"])("keeps control characters of a hostile %s out of the message", async (field) => {
+    const [headerB64, payloadB64, signature] = VALID_JWS.split(".");
+    const header = { ...JSON.parse(Buffer.from(headerB64, "base64url").toString("utf8")), [field]: "\u001b[31mred\nline" };
+    const hostile = [Buffer.from(JSON.stringify(header)).toString("base64url"), payloadB64, signature].join(".");
+
+    const err = await auditVerifyCommand({
+      manifest: file("m.jws", hostile),
+      publicKey: file("key.pub", VECTORS.key.publicKeyHex),
+    }).then(
+      () => new Error("verified"),
+      (e: unknown) => e as Error,
+    );
+
+    expect(err.message).toContain("Invalid JWS");
+    expect([...err.message].filter((c) => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f)).toEqual([]);
   });
 });
 

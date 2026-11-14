@@ -8,6 +8,7 @@ import { randomBytes } from "node:crypto";
 import type { AnchorDestination } from "@/lib/audit/anchor-destinations/destination";
 import { ArtifactTooLargeError } from "@/lib/audit/anchor-destinations/destination";
 import {
+  ANCHOR_ARTIFACT_CONTENT_TYPE,
   InvalidArtifactKeyError,
   STATEMENT_OP,
   buildManifestArtifactKey,
@@ -17,7 +18,7 @@ import {
 import { kidForPublicKey } from "@/lib/audit/anchor-manifest";
 import { AUDIT_ANCHOR_ARTIFACT_MAX_BYTES } from "@/lib/constants/audit/audit";
 
-export const ANCHOR_CONTENT_TYPE = "application/jose";
+export const ANCHOR_CONTENT_TYPE = ANCHOR_ARTIFACT_CONTENT_TYPE.JWS;
 
 /** A kid of the derivable shape, unique per call. */
 export function randomKid(): string {
