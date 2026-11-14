@@ -133,3 +133,19 @@
 - **D43 — simplify pass:** the single-use `wallClockBoundaryMs` helper and the unused
   `manifestKeysOf` export were removed; the other proposals touched locked tokens or
   operator-visible text and were left.
+
+## Step 2-4 gates
+
+- `npx vitest run`: 22725 passed, 6 failed — all `scripts/__tests__/backup-db.test.mjs` Group B
+  ("a real archive reader is required"), which fails when run from a git worktree and does
+  not touch this change.
+- `npx next build`: pass. Anchor integration set (7 files, real Postgres + MinIO): 95 passed, 1 todo.
+- `scripts/pre-pr.sh`: 97 steps pass; two fail, neither from this branch —
+  `Test` (the `backup-db` cases above) and `Static: rls-cross-tenant SQL parse`
+  (`E-RLS-BYPASS-ROUTINE share_creator_admitted`): that step runs the branch's verify SQL
+  against the shared dev database `passwd_sso`, whose schema is the main checkout's branch,
+  not this worktree's database. This branch changes no migration and no RLS file
+  (`git diff --stat main...HEAD -- prisma scripts/rls-*` is empty). CI runs both on a clean
+  checkout and a fresh database.
+- Forbidden patterns (C1, C2, C4): no hit in non-test source; one `method: "DELETE"`, in the
+  reservation-removal function of `github-release-destination.ts`.
