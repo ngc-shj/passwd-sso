@@ -212,13 +212,27 @@ not re-run after the interruption; each fix has a test that names its guard.
   manifest through every manifest dated after the published high-water read under the lock
   (all of them when there is no high-water), comparing each with the predecessor it names.
   The one-step fix the finding proposed misses a lock held into the next day's first attempt
-  (the retry adopts) and a lock held for two days. No separate cap: the reads share the run's
-  60 s bound and a failed or timed-out read ends the walk with the UNAVAILABLE row.
+  (the retry adopts) and a lock held for two days. A failed or timed-out read ends the walk
+  with the UNAVAILABLE row. (Round 3 added a cap: see D55.)
 - **D52 — residual, stated in the threat model:** a database writer who moves
   `last_published_at` onto an unsettled manifest's date makes it count as settled and the walk
   skips it; the failed run's `commit_failed_after_upload` alarm and row remain. Closing it
   needs a settle marker outside the database.
-- **D53 — a null high-water over an existing chain walks the whole chain once** and re-reports
-  historical drops, bounded by the 60 s bound.
+- **D53 — a null high-water over an existing chain is walked on every publish while it stays
+  null** and re-reports historical drops — bounded, since round 3, by the walk's cap (D55).
 - **D54 — `comparedArtifactKey` is on all four comparison rows** (for a row about the new
   manifest it equals `artifactKey`); `previousOfAdopted` is renamed `namedPrevious`.
+
+## Phase 3, round 3 fixes
+
+- **D55 — the walk is capped** at `AUDIT_ANCHOR_UNSETTLED_WALK_MAX` (7) manifests compared;
+  when the cap cuts it, one `UNSETTLED_WALK_TRUNCATED` row carries the count and the last
+  manifest compared. A chain of exactly the cap that reaches a settled manifest or genesis
+  produces no truncation row.
+- **D56 — order after the commit:** the outcome's own rows are flushed, then the mirror
+  backfill runs, then the walk, then the walk's rows are flushed. The flush is split so a
+  hung mirror cannot delay the outcome's rows by the bound; walk rows therefore follow
+  `AUDIT_ANCHOR_PUBLISHED`.
+- **D57 — the D52 residual is cheaper than first stated** (one failed commit after the create,
+  then a write to `last_published_at`); the creator-side comparison that would close it is a
+  follow-up, not part of this change.

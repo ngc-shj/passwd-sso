@@ -365,14 +365,21 @@ through every manifest dated after the published high-water (the greatest
 when no row has one), reads each one's previous manifest back as an adopt does, and
 writes the rows for it, `comparedArtifactKey` naming the manifest a row is about. A
 manifest dated on the high-water's date is one a publish settled, and with it compared.
-The walk reads under the run's one destination bound and has no cap of its own; a read
-that fails or outlasts the bound ends it with the unavailable row. The high-water is a
-database value. Moving it back only widens the walk. Moving it forward past what the
-primary holds fails every run closed (above); moved onto the date of a manifest that is
-stored and unsettled, it makes that manifest count as settled and its comparison is
-skipped. What remains then is what storing a manifest without a publish always leaves:
-the failed run's `commit_failed_after_upload` alarm and its `AUDIT_ANCHOR_PUBLISH_FAILED`
-row.
+The walk reads under the run's one destination bound, after the mirror backfill, and
+compares at most 7 manifests (`AUDIT_ANCHOR_UNSETTLED_WALK_MAX`); when an unsettled
+manifest lies past them it stops and writes one `UNSETTLED_WALK_TRUNCATED` row naming the
+last manifest compared, so a walk cut short does not read as one that found nothing. A
+read that fails or outlasts the bound ends it with the unavailable row. The high-water is
+a database value. Moved back, or set to null, it costs a publish at most those 7
+read-backs and the rows they yield — changes already reported are reported again — and
+the truncation row when more than 7 manifests lie after it; that repeats on every publish
+while the value is null or behind, not once. Moving it forward past what the primary
+holds fails every run closed (above); moved onto the date of a manifest that is stored
+and unsettled, it makes that manifest count as settled and its comparison is skipped.
+That does not need a lock held through every attempt of the boundary: one commit failed
+after the create, then the value set, is enough. What remains then is one
+`commit_failed_after_upload` alarm with its `AUDIT_ANCHOR_PUBLISH_FAILED` row, and a day
+without a healthy line.
 
 **Out of reach.** The publisher signs what the anchor rows hold at the boundary. A
 writer who rewrites `audit_logs` and the tenant's anchor row consistently before a

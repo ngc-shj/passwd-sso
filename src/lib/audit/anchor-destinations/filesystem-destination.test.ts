@@ -173,6 +173,8 @@ describe("FilesystemDestination", () => {
       const key = manifestKeyFor("2026-05-02");
       const fifo = path.join(basePath, key);
       const made = spawnSync("mkfifo", [fifo]);
+      // CI runs where mkfifo exists: a skip there would report the case as covered.
+      if (made.error && process.env.CI) throw made.error;
       if (made.error) skip("mkfifo is not available on this platform, so no FIFO can be planted");
       expect(made.status).toBe(0);
 

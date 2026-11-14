@@ -52,6 +52,7 @@ import {
   AUDIT_ANCHOR_CADENCE_MS,
   AUDIT_ANCHOR_MIRROR_BACKFILL_MAX,
   AUDIT_ANCHOR_PUBLISH_OFFSET_MS,
+  AUDIT_ANCHOR_UNSETTLED_WALK_MAX,
 } from "@/lib/constants/audit/audit";
 import { MS_PER_HOUR, MS_PER_MINUTE } from "@/lib/constants/time";
 import {
@@ -2235,6 +2236,112 @@ describe("AuditAnchorPublisher.runCadence — rows emitted with a publish", () =
 
       expect(outcome).toMatchObject({ kind: "published", adopted: false });
       expect(failureRows(db, "TENANT_DROPPED_FROM_MANIFEST")).toEqual([dropAbout(OWN_KEY_AT_BOUNDARY, NEXT_KEY, NEXT_BOUNDARY)]);
+    });
+
+    describe("over more unsettled manifests than one run compares", () => {
+      /**
+       * A primary holding, before NEXT_BOUNDARY, one manifest with both tenants
+       * and `unsettledCount` later ones without tenant 2, each chained to the
+       * one before. Oldest first.
+       */
+      async function chainOf(unsettledCount: number): Promise<{ primary: InMemoryDestination; chain: SignedManifest[] }> {
+        const primary = await archivedPrimary();
+        const chain: SignedManifest[] = [];
+        for (let daysBack = unsettledCount + 1; daysBack >= 1; daysBack--) {
+          const before = chain.at(-1);
+          const planted = ours(
+            new Date(NEXT_BOUNDARY.getTime() - daysBack * AUDIT_ANCHOR_CADENCE_MS),
+            before
+              ? {
+                  tenants: [rowOf(TENANT_ID_1)],
+                  previousManifest: { uri: `filesystem://${before.artifactKey}`, sha256: before.sha256 },
+                }
+              : {},
+          );
+          await storeManifest(primary, planted);
+          chain.push(planted);
+        }
+        return { primary, chain };
+      }
+
+      const settledAt = (manifest: SignedManifest) =>
+        anchorsPublishedAt(new Date(new Date(manifest.manifest.anchoredAt).getTime() + MS_PER_HOUR));
+
+      const truncatedAfter = (comparedArtifactKey: string) => ({
+        failureReason: "UNSETTLED_WALK_TRUNCATED",
+        artifactKey: NEXT_KEY,
+        anchoredAt: NEXT_BOUNDARY.toISOString(),
+        comparedArtifactKey,
+        count: AUDIT_ANCHOR_UNSETTLED_WALK_MAX,
+      });
+
+      it("as many as the cap are all compared, back to the settled one, and no truncation is reported", async () => {
+        const { primary, chain } = await chainOf(AUDIT_ANCHOR_UNSETTLED_WALK_MAX);
+        const db = settledAt(chain[0]!);
+
+        clockInto(NEXT_BOUNDARY);
+        const outcome = await publisherFor(db, { destinations: [primary] }).runCadence(NEXT_BOUNDARY);
+
+        expect(outcome).toMatchObject({ kind: "published", adopted: false });
+        // The drop sits at the far end of the walk: the oldest unsettled manifest against the settled one.
+        expect(failureRows(db, "TENANT_DROPPED_FROM_MANIFEST")).toEqual([
+          dropAbout(chain[1]!.artifactKey, NEXT_KEY, NEXT_BOUNDARY),
+        ]);
+        expect(failureRows(db, "UNSETTLED_WALK_TRUNCATED")).toEqual([]);
+      });
+
+      it("one more than the cap stops at the cap: one row with the count and the last manifest compared, and no read past it", async () => {
+        const { primary, chain } = await chainOf(AUDIT_ANCHOR_UNSETTLED_WALK_MAX + 1);
+        const db = settledAt(chain[0]!);
+        const { dest, calls } = tracked(primary);
+
+        clockInto(NEXT_BOUNDARY);
+        const outcome = await publisherFor(db, { destinations: [dest] }).runCadence(NEXT_BOUNDARY);
+
+        expect(outcome).toMatchObject({ kind: "published", adopted: false });
+        expect(failureRows(db, "UNSETTLED_WALK_TRUNCATED")).toEqual([truncatedAfter(chain[2]!.artifactKey)]);
+        // The oldest unsettled manifest holds the drop and is the one not compared.
+        expect(failureRows(db, "TENANT_DROPPED_FROM_MANIFEST")).toEqual([]);
+        // One predecessor read per comparison; the newest is read by the decision, not the walk.
+        const predecessorReads = chain.slice(0, -1).map((m) => `read:${m.artifactKey}`);
+        expect(calls.filter((call) => predecessorReads.includes(call))).toEqual(predecessorReads.slice(1).reverse());
+      });
+
+      it("with no high-water the whole chain is unsettled, and the walk still stops at the cap", async () => {
+        const { primary, chain } = await chainOf(AUDIT_ANCHOR_UNSETTLED_WALK_MAX + 1);
+        const db = anchorsPublishedAt(null);
+
+        clockInto(NEXT_BOUNDARY);
+        const outcome = await publisherFor(db, { destinations: [primary] }).runCadence(NEXT_BOUNDARY);
+
+        expect(outcome).toMatchObject({ kind: "published", adopted: false });
+        expect(failureRows(db, "UNSETTLED_WALK_TRUNCATED")).toEqual([truncatedAfter(chain[2]!.artifactKey)]);
+        expect(failureRows(db, "TENANT_DROPPED_FROM_MANIFEST")).toEqual([]);
+      });
+
+      it("a secondary missing an older manifest is backfilled in the run of a capped walk, before the walk's reads", async () => {
+        const { primary, chain } = await chainOf(AUDIT_ANCHOR_UNSETTLED_WALK_MAX + 1);
+        const db = settledAt(chain[0]!);
+        const older = chain[0]!;
+        const mirror = new InMemoryDestination("s3");
+        for (const held of chain.slice(1)) await storeManifest(mirror, held);
+        // The walk alone reads the oldest unsettled manifest, as the last predecessor it compares against.
+        let backfilledBeforeWalkEnded: boolean | null = null;
+        const { dest } = tracked(primary, {
+          read: async (key, signal) => {
+            if (key === chain[1]!.artifactKey) backfilledBeforeWalkEnded = (await mirror.list()).includes(older.artifactKey);
+            return primary.read(key, signal);
+          },
+        });
+
+        clockInto(NEXT_BOUNDARY);
+        const outcome = await publisherFor(db, { destinations: [dest, mirror] }).runCadence(NEXT_BOUNDARY);
+
+        expect(outcome).toMatchObject({ kind: "published", adopted: false });
+        expect(failureRows(db, "UNSETTLED_WALK_TRUNCATED")).toEqual([truncatedAfter(chain[2]!.artifactKey)]);
+        expect(await mirror.read(older.artifactKey)).toEqual(older.bytes);
+        expect(backfilledBeforeWalkEnded).toBe(true);
+      });
     });
 
     it("an unsettled chained-to genesis manifest has no predecessor: no row and nothing reported unavailable", async () => {

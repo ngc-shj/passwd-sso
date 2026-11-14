@@ -1036,3 +1036,6 @@ export const AUDIT_ANCHOR_STATEMENT_TYP = "passwd-sso.audit-anchor-statement.v1"
 export const AUDIT_ANCHOR_ARTIFACT_MAX_BYTES = 8 * 1024 * 1024;
 // Manifest keys one publishing run copies to a secondary destination that lacks them.
 export const AUDIT_ANCHOR_MIRROR_BACKFILL_MAX = 7;
+// Unsettled manifests one publishing run compares with their predecessors. Bounds
+// work that a database writer or a store's other writers can lengthen.
+export const AUDIT_ANCHOR_UNSETTLED_WALK_MAX = 7;

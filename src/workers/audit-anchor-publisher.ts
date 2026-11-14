@@ -8,6 +8,7 @@ import {
   AUDIT_ACTION,
   ACTOR_TYPE,
   AUDIT_ANCHOR_MIRROR_BACKFILL_MAX,
+  AUDIT_ANCHOR_UNSETTLED_WALK_MAX,
 } from "@/lib/constants/audit/audit";
 import { SYSTEM_ACTOR_ID, SYSTEM_TENANT_ID } from "@/lib/constants/app";
 import { MS_PER_SECOND } from "@/lib/constants/time";
@@ -1046,10 +1047,7 @@ export class AuditAnchorPublisher {
       const comparedTo = result.adopted
         ? await this.namedPrevious(published, result.listedKeys, bound)
         : result.chainedTo;
-      pendingEmits.push(
-        ...this.publishedEmits(result, comparedTo, boundaryIso),
-        ...(await this.unsettledEmits(result, comparedTo, boundaryIso, bound)),
-      );
+      pendingEmits.push(...this.publishedEmits(result, comparedTo, boundaryIso));
       pendingEmits.push({
         action: AUDIT_ACTION.AUDIT_ANCHOR_PUBLISHED,
         metadata: {
@@ -1063,7 +1061,11 @@ export class AuditAnchorPublisher {
         },
       });
       await this.flushEmits(pendingEmits);
+      // The backfill before the walk: both spend the run's one bound, and the
+      // walk's length is set by what the database and the store say.
       await this.backfillMirrors([...result.state.manifestKeys, published.artifactKey], bound);
+      pendingEmits.push(...(await this.unsettledEmits(result, comparedTo, boundaryIso, bound)));
+      await this.flushEmits(pendingEmits);
 
       return {
         kind: "published",
@@ -1157,9 +1159,10 @@ export class AuditAnchorPublisher {
    * next publish compares only against a manifest that already lacks what was
    * dropped. Walks back from `comparedTo` by `previousManifest` until a
    * manifest dated on or before the high-water's date, which a publish
-   * settled, or the genesis one. No cap of its own: the reads share the run's
-   * bound, and a read that fails or outlasts it ends the walk with the
-   * unavailable row.
+   * settled, or the genesis one. At most AUDIT_ANCHOR_UNSETTLED_WALK_MAX
+   * manifests are compared: an unsettled one past them is not, and one row
+   * says the walk stopped there. The reads share the run's bound, and a read
+   * that fails or outlasts it ends the walk with the unavailable row.
    */
   private async unsettledEmits(
     result: Extract<PublishTxResult, { kind: "published" }>,
@@ -1171,10 +1174,28 @@ export class AuditAnchorPublisher {
     const settledDate =
       result.highWater === null ? null : utcDate(currentCadenceBoundary(result.highWater, cadenceMs, publishOffsetMs));
     const emits: PendingEmit[] = [];
+    const { artifactKey } = result.published;
     let stored = comparedTo;
+    let lastCompared: VerifiedManifest | null = null;
+    let count = 0;
     while (stored !== null && stored !== PREVIOUS_UNAVAILABLE && (settledDate === null || stored.date > settledDate)) {
+      if (lastCompared !== null && count >= AUDIT_ANCHOR_UNSETTLED_WALK_MAX) {
+        emits.push({
+          action: AUDIT_ACTION.AUDIT_ANCHOR_PUBLISH_FAILED,
+          metadata: {
+            failureReason: "UNSETTLED_WALK_TRUNCATED",
+            artifactKey,
+            anchoredAt,
+            comparedArtifactKey: lastCompared.artifactKey,
+            count,
+          },
+        });
+        break;
+      }
       const previous = await this.namedPrevious(stored, result.listedKeys, bound);
-      emits.push(...this.comparisonEmits(stored, previous, result.published.artifactKey, anchoredAt));
+      emits.push(...this.comparisonEmits(stored, previous, artifactKey, anchoredAt));
+      lastCompared = stored;
+      count++;
       stored = previous;
     }
     return emits;

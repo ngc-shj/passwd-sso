@@ -764,7 +764,8 @@ Rows a publish writes beside its `AUDIT_ANCHOR_PUBLISHED` row, each an
 manifest this run published) and `anchoredAt`. The four comparison rows —
 `TENANT_DROPPED_FROM_MANIFEST` to `PREVIOUS_MANIFEST_UNAVAILABLE_FOR_COMPARISON`
 — also carry `comparedArtifactKey`, the manifest the row is about: equal to
-`artifactKey`, or an earlier manifest no publish settled (below). None stops
+`artifactKey`, or an earlier manifest no publish settled (below);
+`UNSETTLED_WALK_TRUNCATED` carries it too. None stops
 the publish and none is alarmed; read them with the query under Step 7 of the
 rotation runbook:
 
@@ -776,6 +777,7 @@ rotation runbook:
 | `CHAIN_SEQ_REGRESSION` (`count`) | Tenants whose `chainSeq` is lower than in the previous manifest, in the same epoch. | Never. A bug or tampering: a security incident. |
 | `EPOCH_CHANGED` (`count`) | Tenants whose `epoch` differs from the previous manifest's, in either direction. A `chainSeq` is compared within one epoch only, so for these tenants `CHAIN_SEQ_REGRESSION` says nothing. | Never: no code path writes `audit_chain_anchors.epoch`. The column was changed in the database directly — a database-write incident; compare the tenant's `chainSeq` in the two manifests by hand. |
 | `PREVIOUS_MANIFEST_UNAVAILABLE_FOR_COMPARISON` | The previous manifest that `comparedArtifactKey` names — the manifest this run adopted, or an earlier one no publish settled — is missing at the primary, does not verify, or is not the object its `sha256` names; or the read-back failed or hit the run's bound (the `previous_manifest_unavailable` line's `detail` is then an error code: `AccessDenied`, `HTTP_5xx`, `UPLOAD_TIMEOUT`). The three rows above could not be computed for that manifest. | Only after a destination error; otherwise never on a store nothing deletes from. The `previous_manifest_unavailable` line says which; then compare the two manifests by hand (`audit-verify --prior-manifest`). |
+| `UNSETTLED_WALK_TRUNCATED` (`count`) | More manifests lie between the published high-water and this publish than one run compares (7). `count` were compared, the last of them `comparedArtifactKey`; the unsettled manifests before it were not, and no row speaks for them. | Never in normal operation: it takes more than 7 boundaries stored and not settled, or a `last_published_at` that is null or behind while the chain is longer than that. Compare the remaining manifests by hand, each with the one before it (`passwd-sso audit-verify --prior-manifest`), and find why `last_published_at` is behind — a value nobody's runs explain is a database-write incident. |
 | `MISSING_PRIOR_CADENCE_PUBLICATION` | See `missing_prior_cadence` below. | |
 
 The three comparison rows are computed against the manifest the published one
@@ -786,9 +788,11 @@ it. A boundary that is adopted more than once — nothing its manifest covers
 could be settled — writes them again with each adopt, at most three times: the
 attempt cap bounds it.
 
-A manifest that was stored but never settled — every run of its boundary ended
-`COMMIT_FAILED_AFTER_UPLOAD` or at the cap, so none wrote these rows — is
-compared by the next publish that does commit. That publish walks back from the
+A manifest that was stored but never settled — every run of its boundary failed
+after the primary held the object (a secondary failure,
+`COMMIT_FAILED_AFTER_UPLOAD`, a stage-`upload` failure, or the attempt cap), so
+none wrote these rows — is compared by the next publish that does commit. After
+its mirror backfill that publish walks back from the
 manifest it chains to, through every manifest dated after the published
 high-water (the greatest `last_published_at`, read before the publish writes
 it; all of them when no row has one), reads each one's previous manifest back
@@ -797,7 +801,9 @@ unsettled manifest and `artifactKey` and `anchoredAt` its own. A manifest dated
 on the high-water's date was settled by the publish that recorded it and is not
 compared again; a genesis manifest has nothing to be compared with. The
 read-backs share the run's 60 s bound: one that fails or outlasts it ends the
-walk with `PREVIOUS_MANIFEST_UNAVAILABLE_FOR_COMPARISON` for that manifest.
+walk with `PREVIOUS_MANIFEST_UNAVAILABLE_FOR_COMPARISON` for that manifest. One
+publish compares at most 7 unsettled manifests; when another lies past them the
+walk stops and writes `UNSETTLED_WALK_TRUNCATED` instead of ending silently.
 
 `AUDIT_ANCHOR_KEY_ROTATED` (`oldKid`, `newKid`, `anchoredAt`, `artifactKey`) is
 written by the first publish whose manifest is under another `kid` than the one

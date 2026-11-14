@@ -210,3 +210,34 @@ test except the two that became T2-2 and T2-3.
 Functionality: R29 F2-1; closed R48, R56/R38 (fresh-publish entry), R3; R43 no widening.
 Security: R4/R49 S2-1; R48 S2-2 (residual of S-5); closed R3, R45, RS3, RS6; R43 no widening.
 Testing: R29 T2-1; RT7 T2-2, T2-3; R19/RT1 T2-4; closed R33, R34, R35/R50, RT3, RT6.
+
+---
+
+# Round 3
+Date: 2026-11-15
+
+## Changes from Previous Round
+
+Incremental review of commit `194a67e11`. All seven round-2 findings confirmed resolved; the
+testing expert mutated nine guards of the walk on scratch copies and each reddened a test.
+No Critical, no Major. New findings, all Minor:
+
+| ID | Finding | Resolution |
+|----|---------|------------|
+| S3-1 | The unsettled-manifest walk had no length cap and ran before the mirror backfill: a nulled high-water (or a forged chain on a non-Terraform store) spent the bound on every publish, replayed historical rows and starved gap backfill | Fixed — the walk compares at most `AUDIT_ANCHOR_UNSETTLED_WALK_MAX` (7) manifests and emits one `UNSETTLED_WALK_TRUNCATED` row when cut; the backfill runs before the walk; docs name the bounded cost |
+| F3-1 | The docs named only `COMMIT_FAILED_AFTER_UPLOAD` and the cap as causes of an unsettled manifest, omitting a secondary failure after the primary stored the object | Fixed — alerts and runbook |
+| T3-1 | The FIFO case skipped silently when `mkfifo` cannot be spawned, including in CI | Fixed — in CI it fails with the spawn error |
+
+Security expert's recommendation on the stated residual D52 (not required for convergence):
+have the run that creates an object emit its comparison when its commit fails, so every
+stored manifest is reported by its creator. Not done here — it relaxes "rows only with a
+publish" and deserves its own review; recorded as a follow-up
+(TODO(audit-anchor-hardening): creator-side comparison on a failed commit). The threat model
+now states that the residual needs only one failed commit followed by a write to
+`last_published_at`, not a lock held through every attempt.
+
+## Recurring Issue Check (round-3 delta)
+Functionality: R29 F3-1; R38/R56/R57 checked for the walk (its range is a function of the
+high-water, which every `published` outcome advances). Security: R45/R49 S3-1; R4 resolved
+for the unsettled case with D52 stated; R56, R57, RS3/RS6 checked. Testing: R50 T3-1; RT7
+closed (all nine guards red); R29, R19/RT1 closed.

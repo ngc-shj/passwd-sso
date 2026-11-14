@@ -411,14 +411,17 @@ beside its `AUDIT_ANCHOR_PUBLISHED` row; none fails the run and none is alarmed
 | `CHAIN_SEQ_REGRESSION` (`count`) | A tenant's `chainSeq` is below the previous manifest's, in the same epoch. | Security incident ("Chain-sequence regression"). |
 | `EPOCH_CHANGED` (`count`) | A tenant's `epoch` differs from the previous manifest's. No code path writes it, and a changed epoch takes the tenant out of the regression check. | Database-write incident: find who changed `audit_chain_anchors.epoch`, and compare the tenant's `chainSeq` across the two manifests by hand. |
 | `PREVIOUS_MANIFEST_UNAVAILABLE_FOR_COMPARISON` | A publish could not read back the previous manifest that `comparedArtifactKey` names (the manifest it adopted, or an earlier one no publish settled), or that object is not the one named, or the read-back failed or hit the run's bound (the `previous_manifest_unavailable` line's `detail` is then an error code): the three rows above were not computed for that manifest. | Expected only after a destination error; fix it. Otherwise find out why the previous manifest is missing or changed (on the Terraform bucket it cannot be, without a delete marker or a policy change). Either way compare the two manifests by hand with `audit-verify --prior-manifest`. |
+| `UNSETTLED_WALK_TRUNCATED` (`count`) | More unsettled manifests precede this publish than one run compares (7): `count` were compared, `comparedArtifactKey` being the last, and the ones before it were not. | Compare the remaining manifests by hand, each with the one before it (`passwd-sso audit-verify --prior-manifest`), and find why `last_published_at` is behind: more than 7 boundaries stored and never settled, or a value moved back or cleared in the database (a database-write incident). |
 
 The three comparison rows are written whether the run signed the manifest or adopted one an
 earlier run stored: an adopt reads the previous manifest back from the primary. A boundary
 adopted more than once repeats them, at most three times (the attempt cap). Each row carries
 `comparedArtifactKey`, the manifest it is about. That is the published manifest
 (`artifactKey`), or an earlier one that was stored and never settled — every run of its
-boundary ended `COMMIT_FAILED_AFTER_UPLOAD` or at the cap: the next publish that commits
-compares each such manifest, back to the last settled one, with the manifest it chains to.
+boundary failed after the primary held the object (a secondary failure,
+`COMMIT_FAILED_AFTER_UPLOAD`, a stage-`upload` failure, or the attempt cap): the next
+publish that commits compares each such manifest, back to the last settled one, with the
+manifest it chains to — at most 7 of them, and `UNSETTLED_WALK_TRUNCATED` when more remain.
 
 Where a step waits for the publisher: a failed run is retried every 15 minutes, at most three
 times per process and never within the last 30 minutes before the next boundary. When those
@@ -698,7 +701,9 @@ nothing reads or writes them, and whatever they hold changes nothing.
 - A secondary that stays down fails each day's run after the primary holds that day's
   manifest. The chain is unaffected (the next day chains to what the primary holds); once the
   secondary is back, the day's run mirrors its own manifest and the backfill copies the
-  earlier ones, up to 7 per publishing run.
+  earlier ones, up to 7 per publishing run. None of those days' manifests was settled, so
+  that first publish also writes the comparison rows for them (`comparedArtifactKey`), up
+  to 7 manifests back, and `UNSETTLED_WALK_TRUNCATED` when the outage lasted longer.
 
 ### Manifest build failure
 
