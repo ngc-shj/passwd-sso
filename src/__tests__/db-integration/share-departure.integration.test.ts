@@ -30,6 +30,7 @@ import {
   expectBypassNotices,
   setBypassRlsGucs,
   type TestContext,
+  redProofOverride,
 } from "./helpers";
 import { analyze } from "../../../scripts/checks/check-migration-transaction.mjs";
 
@@ -1007,7 +1008,7 @@ describe("share links across a creator's departure — real-DB integration", () 
     const bodies = migrations.map((migration) => {
       // SHARE_CREATOR_DEPARTED_SQL names a file to read instead of the C3
       // migration (a mutated copy, for a red proof outside the source tree).
-      const override = migration === "20261114000100_share_creator_departed" ? process.env.SHARE_CREATOR_DEPARTED_SQL : undefined;
+      const override = migration === "20261114000100_share_creator_departed" ? redProofOverride("SHARE_CREATOR_DEPARTED_SQL") : undefined;
       const file = readFileSync(override ?? join(process.cwd(), `prisma/migrations/${migration}/migration.sql`), "utf8");
       const whole = analyze(file);
       expect([whole.beginCount, whole.commitCount, whole.rollbackCount]).toEqual([1, 1, 0]);

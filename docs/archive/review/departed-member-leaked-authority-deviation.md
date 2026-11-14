@@ -74,3 +74,35 @@ against `passwd_sso`. Every control was green first.
   nothing there.
 - Skipped: member DELETE and `rotate-key` keep `activeTeamRole` — they reduce authority (plan C4
   exclusions).
+
+## D8 — Code review round 1: the recipient side of C4
+
+C4 refused a leftover membership as an **actor** only. Round 1 (S1, S2) showed the same
+membership could still **receive** a grant. A leftover member is now treated as deactivated for
+every grant:
+
+- confirm-key refuses (`MEMBER_NOT_FOUND`) a leftover recipient.
+- Member PUT refuses a promotion or an ownership transfer to a leftover target; a demotion stays
+  allowed.
+- rotate-key does not wrap the new version for a leftover key-holder, refuses a key supplied for
+  one as for a non-member, and clears their `keyDistributed` in the existing `updateMany`.
+  `rotate-key/data` omits them, which is where the client builds `memberKeys` from.
+- rotate-key also refuses a leftover **actor**: the plan's C4 exclusion of rotate-key assumed
+  rotation only reduces authority, but the rotating member generates and keeps the new key.
+
+**The recipient's tenant row is read unlocked** (`readTenantRows`); only the actor's is locked.
+A first version locked the recipient too, and the full integration run showed why not:
+`lockTenantRows` takes an exclusive per-user advisory lock even in share mode, so a role change
+serialised behind any SCIM transaction on the same user and answered 409
+(`scim-team-admission-approval` A7d, R9). No lock is needed: the check is against residue, which
+is old state. A departure racing the request either deactivates the team row first, and the
+route's `deactivatedAt: null` write misses (404), or deactivates it after the commit, as for any
+active member. rotate-key's `FOR NO KEY UPDATE` serialises a departure before or after it.
+
+`pending-key-distributions` still lists leftover members: it runs under
+`TEAM_PENDING_KEY_DISTRIBUTION` without tenant-row tables, and widening that grant for an
+advisory list was not worth it; the confirm-key refusal is the control.
+
+rotate-key's team lock is no longer the transaction's first statement (the actor's tenant row
+comes first, per the lock order); `team-key-rotation-lock.ts`'s comment and `raw-sql-usage.txt`
+follow. `check-team-rotation-input-lock` counts are unchanged.

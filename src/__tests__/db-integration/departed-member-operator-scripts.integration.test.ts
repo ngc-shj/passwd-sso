@@ -30,6 +30,7 @@ import {
   setBypassRlsGucs,
   setTestBypass,
   type TestContext,
+  redProofOverride,
 } from "./helpers";
 
 const mockAuth = vi.fn();
@@ -59,7 +60,7 @@ const TEMPLATE_LABEL = "REPLACE-WITH-OPERATOR-LABEL";
  * red proof outside the source tree).
  */
 function runbookText(): string {
-  return readFileSync(process.env.RUNBOOK_MD ?? join(process.cwd(), "docs/operations/departed-member-access-backfill.md"), "utf8");
+  return readFileSync(redProofOverride("RUNBOOK_MD") ?? join(process.cwd(), "docs/operations/departed-member-access-backfill.md"), "utf8");
 }
 
 /** The text between `-- BEGIN <kind> <name>` and `-- END <kind> <name>`; throws unless exactly one pair exists. */
@@ -262,7 +263,7 @@ describe("departed-member operator scripts — real-DB integration", () => {
     }
   }
 
-  type Section1Row = { tenant_id: string; team_id: string; user_id: string; role: string; has_deactivation_record: boolean };
+  type Section1Row = { tenant_id: string; team_id: string; user_id: string; role: string; has_deactivation_record: boolean; containable: boolean };
   type Section2Row = { id: string; tenant_id: string; team_id: string; is_active: boolean; created_at: Date; updated_at: Date };
   type Section3Row = { id: string; tenant_id: string; team_id: string; is_active: boolean; created_at: Date; creator: string; creator_active_member: boolean };
 
@@ -303,7 +304,7 @@ describe("departed-member operator scripts — real-DB integration", () => {
       /** name -> team_members row id */
       rowIds: Record<string, string>;
       /** name -> expected section 1 row; names with no entry must be absent */
-      expected: Record<string, { team: string; role: string; record: boolean }>;
+      expected: Record<string, { team: string; role: string; record: boolean; containable?: false }>;
       /** Listed candidates C1 (`created_at <` a deactivated tenant row) does not end. */
       outsideC1: Set<string>;
     };
@@ -375,7 +376,8 @@ describe("departed-member operator scripts — real-DB integration", () => {
         if (name === "recordRowGone") await sql(`DELETE FROM tenant_members WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, tenant, user);
         rowIds[name] = await addMembership(teamA, user, tenant, { createdAt: iso(stamp, -SECOND) });
         users[name] = user;
-        expected[name] = { team: teamA, role: "MEMBER", record: false };
+        // No departed tenant row to stamp the membership with.
+        expected[name] = { team: teamA, role: "MEMBER", record: false, containable: false };
         outsideC1.add(name);
       }
       // A departure record older than the membership: re-admitted since, not a candidate.
@@ -389,10 +391,26 @@ describe("departed-member operator scripts — real-DB integration", () => {
     }
 
     const expectedSection1 = (w: World, only?: (n: string) => boolean) =>
-      Object.fromEntries(Object.entries(w.expected).filter(([n]) => !only || only(n)).map(([n, e]) => [w.users[n], { team_id: e.team, role: e.role, has_deactivation_record: e.record }]));
+      Object.fromEntries(Object.entries(w.expected).filter(([n]) => !only || only(n)).map(([n, e]) => [w.users[n], { team_id: e.team, role: e.role, has_deactivation_record: e.record, containable: e.containable ?? true }]));
 
     const section1Map = (w: World, rows: Section1Row[]) =>
-      Object.fromEntries(inTenants(rows, [w.tenant]).map((r) => [r.user_id, { team_id: r.team_id, role: r.role, has_deactivation_record: r.has_deactivation_record }]));
+      Object.fromEntries(inTenants(rows, [w.tenant]).map((r) => [r.user_id, { team_id: r.team_id, role: r.role, has_deactivation_record: r.has_deactivation_record, containable: r.containable }]));
+
+    it("the contain script ends every containable section-1 row in one batch, and refuses a batch with a non-containable row", async () => {
+      const w = await seedWorld();
+      const rows = inTenants((await runReport()).section1, [w.tenant]);
+      const containable = rows.filter((r) => r.containable);
+      const notContainable = rows.filter((r) => !r.containable);
+      expect(containable.length).toBeGreaterThan(0);
+      expect(notContainable.length).toBeGreaterThan(0);
+      const triples = (rs: Section1Row[]) => triplesLiteral(rs.map((r) => [r.tenant_id, r.team_id, r.user_id]));
+
+      await expect(runScript(containWith({ triples: triples([...containable, notContainable[0]]), label: "ops-test" }))).rejects.toThrow(/qualify/);
+      expect(inTenants((await runReport()).section1, [w.tenant])).toHaveLength(rows.length);
+
+      await runScript(containWith({ triples: triples(containable), label: "ops-test" }));
+      expect(inTenants((await runReport()).section1, [w.tenant]).map((r) => r.user_id).sort()).toEqual(notContainable.map((r) => r.user_id).sort());
+    });
 
     it("section 1 lists exactly the raw candidates with the record flag, and nothing adjacent (literal map)", async () => {
       const w = await seedWorld();

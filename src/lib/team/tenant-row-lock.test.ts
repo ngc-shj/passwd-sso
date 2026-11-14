@@ -5,6 +5,7 @@ import {
   actorDepartedSinceAdmission,
   isMembershipLockConflict,
   lockTenantRows,
+  readTenantRows,
   TenantMemberLockTimeoutError,
 } from "./tenant-row-lock";
 import { createLockBudget, TeamRotationInProgressError } from "./team-key-rotation-lock";
@@ -89,6 +90,42 @@ describe("lockTenantRows", () => {
     const set = statements.flatMap((s, i) => (s.includes("set_config('lock_timeout'") ? [values[i][0]] : []));
     expect(set.length).toBeGreaterThan(0);
     for (const v of set.filter((x) => x !== "0")) expect(Number(String(v).replace("ms", ""))).toBeLessThanOrEqual(500);
+  });
+});
+
+describe("readTenantRows", () => {
+  const tx = (
+    rows: { userId: string; role: string; deactivatedAt: Date | null }[],
+    records: { userId: string; departedAt: Date }[],
+  ) => ({
+    tenantMember: { findMany: vi.fn().mockResolvedValue(rows) },
+    tenantMemberDeparture: { findMany: vi.fn().mockResolvedValue(records) },
+  });
+
+  it("answers each user as lockTenantRows would: row, departure record, or neither", async () => {
+    const left = new Date("2026-05-01T00:00:00.000Z");
+    const recorded = new Date("2026-06-01T00:00:00.000Z");
+    const t = tx(
+      [{ userId: "a", role: "MEMBER", deactivatedAt: left }],
+      [{ userId: "b", departedAt: recorded }],
+    );
+
+    const result = await readTenantRows(t as unknown as Pick<Prisma.TransactionClient, "tenantMember" | "tenantMemberDeparture">, "tenant-1", ["a", "b", "c"]);
+
+    expect(result.get("a")).toEqual({ hasRow: true, role: "MEMBER", deactivatedAt: left, departedAt: null });
+    expect(result.get("b")).toEqual({ hasRow: false, role: null, deactivatedAt: null, departedAt: recorded });
+    expect(result.get("c")).toEqual({ hasRow: false, role: null, deactivatedAt: null, departedAt: null });
+    expect(t.tenantMember.findMany).toHaveBeenCalledWith({
+      where: { tenantId: "tenant-1", userId: { in: ["a", "b", "c"] } },
+      select: { userId: true, role: true, deactivatedAt: true },
+    });
+  });
+
+  it("reads nothing for no users", async () => {
+    const t = tx([], []);
+
+    expect((await readTenantRows(t as unknown as Pick<Prisma.TransactionClient, "tenantMember" | "tenantMemberDeparture">, "tenant-1", [])).size).toBe(0);
+    expect(t.tenantMember.findMany).not.toHaveBeenCalled();
   });
 });
 

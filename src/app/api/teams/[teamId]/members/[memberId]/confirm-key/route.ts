@@ -16,7 +16,12 @@ import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-res
 import { membershipConflictResponse } from "@/lib/http/lock-conflict-response";
 import { TEAM_MEMBERSHIP_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 import { createLockBudget, lockTeamKeyVersion } from "@/lib/team/team-key-rotation-lock";
-import { actorDepartedSinceAdmission, isMembershipLockConflict, lockTenantRows } from "@/lib/team/tenant-row-lock";
+import {
+  actorDepartedSinceAdmission,
+  isMembershipLockConflict,
+  lockTenantRows,
+  readTenantRows,
+} from "@/lib/team/tenant-row-lock";
 
 type Params = { params: Promise<{ teamId: string; memberId: string }> };
 
@@ -116,9 +121,26 @@ async function handlePOST(req: NextRequest, { params }: Params) {
 
         const member = await tx.teamMember.findUnique({
           where: { id: memberId },
-          select: { keyDistributed: true, deactivatedAt: true },
+          select: { teamId: true, userId: true, keyDistributed: true, deactivatedAt: true, admittedAt: true, createdAt: true },
         });
-        if (!member || member.deactivatedAt !== null) return "member_not_found" as const;
+        if (
+          !member ||
+          member.deactivatedAt !== null ||
+          member.teamId !== teamId ||
+          member.userId !== targetMember.userId
+        ) {
+          return "member_not_found" as const;
+        }
+        // A recipient whose tenant row departed at or after their admission
+        // holds a leftover membership and is treated as deactivated. Read
+        // unlocked: residue is old state, and locking the recipient's row would
+        // serialise this with every SCIM write to them. A departure in flight
+        // either reaches the member row first (the CAS below misses) or
+        // deactivates the membership after this commits.
+        const recipient = await readTenantRows(tx, tenantId, [targetMember.userId]);
+        if (actorDepartedSinceAdmission(recipient.get(targetMember.userId), member.admittedAt ?? member.createdAt)) {
+          return "member_not_found" as const;
+        }
         if (member.keyDistributed) return "already_distributed" as const;
 
         if (!team || data.keyVersion !== team.teamKeyVersion) {

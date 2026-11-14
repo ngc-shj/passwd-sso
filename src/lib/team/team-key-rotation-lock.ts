@@ -7,8 +7,10 @@ import { TEAM_KEY_LOCK_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
  * Team key rotation reads two inputs — the team's entries and its
  * key-holding members — and writes the next team key version. Every
  * transaction that changes either input serialises with it through the
- * team row: rotation takes `teams ... FOR NO KEY UPDATE` as its first
- * statement, and the writers below take `teams ... FOR SHARE` before
+ * team row: rotation takes `teams ... FOR NO KEY UPDATE` before it reads
+ * either input (after only the rotating member's tenant row, which
+ * tenant-row-lock.ts orders before teams), and the writers below take
+ * `teams ... FOR SHARE` before
  * touching entries, member keys or member rows. Under READ COMMITTED a
  * writer then either commits before rotation reads its inputs (and is
  * read), or waits and runs against the committed rotation.

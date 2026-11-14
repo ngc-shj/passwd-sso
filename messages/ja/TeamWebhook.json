@@ -14,7 +14,7 @@
   "noWebhooks": "Webhook が設定されていません",
   "active": "有効",
   "inactive": "無効",
-  "creatorPaused": "一時停止中 — 作成者に権限がありません。再開するには Webhook を作り直してください。",
+  "creatorPaused": "一時停止中 — 作成者がチームの管理権限を失っています。権限が戻れば配信を再開します。戻らない場合は、現在の管理者が Webhook を作り直してください。停止中のイベントは送信されません。",
   "lastDelivered": "最終配信",
   "failCount": "{count}回の失敗",
   "limitReached": "Webhook の上限に達しました",

@@ -5,6 +5,7 @@ import { teamLockQuery, lockQueryCalls } from "@/__tests__/helpers/team-rotation
 const { mockAuth, mockPrismaTeamMember, mockPrismaUser,
   mockPrismaTeamMemberKey, mockTeamLockQuery, mockWithTeamTenantRls,
   mockWithBypassRls, mockRequireTeamPermission, mockRequireRecentSession, mockLogAuditInTx,
+  mockTenantMemberFindMany, mockTenantMemberDepartureFindMany,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaTeamMember: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
@@ -18,6 +19,9 @@ const { mockAuth, mockPrismaTeamMember, mockPrismaUser,
   mockRequireTeamPermission: vi.fn().mockResolvedValue(undefined),
   mockRequireRecentSession: vi.fn().mockResolvedValue(null),
   mockLogAuditInTx: vi.fn(),
+  // The recipient's tenant row and departure record, read unlocked (readTenantRows).
+  mockTenantMemberFindMany: vi.fn(),
+  mockTenantMemberDepartureFindMany: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -39,6 +43,8 @@ vi.mock("@/lib/audit/audit", () => ({
 const txProxy = {
   teamMember: mockPrismaTeamMember,
   teamMemberKey: mockPrismaTeamMemberKey,
+  tenantMember: { findMany: mockTenantMemberFindMany },
+  tenantMemberDeparture: { findMany: mockTenantMemberDepartureFindMany },
   $queryRaw: mockTeamLockQuery,
   // setLockTimeout before the FOR SHARE.
   $executeRaw: vi.fn(),
@@ -82,6 +88,17 @@ const validBody = {
 const ACTOR_ADMITTED_AT = new Date("2026-03-01T00:00:00.000Z");
 /** The distributing member's row as activeTeamAdmission reads it. */
 const actorRow = (role = "OWNER") => ({ role, admittedAt: ACTOR_ADMITTED_AT, createdAt: ACTOR_ADMITTED_AT });
+const TARGET_ADMITTED_AT = new Date("2026-04-01T00:00:00.000Z");
+/** The recipient's row as the in-transaction re-read (after the tenant-row lock) reads it. */
+const lockedTarget = (over: Record<string, unknown> = {}) => ({
+  teamId: "team-1",
+  userId: "target-user",
+  keyDistributed: false,
+  deactivatedAt: null,
+  admittedAt: TARGET_ADMITTED_AT,
+  createdAt: TARGET_ADMITTED_AT,
+  ...over,
+});
 
 describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
   beforeEach(() => {
@@ -95,6 +112,8 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
     mockTeamLockQuery.mockImplementation(teamLockQuery([{ team_key_version: 1, tenant_id: "tenant-1" }]));
     mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key" });
     mockPrismaTeamMember.updateMany.mockResolvedValue({ count: 1 });
+    mockTenantMemberFindMany.mockResolvedValue([]);
+    mockTenantMemberDepartureFindMany.mockResolvedValue([]);
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -183,7 +202,7 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
     mockPrismaTeamMember.findFirst.mockResolvedValueOnce(actorRow()); // getTeamMembership (findFirst)
     mockPrismaTeamMember.findUnique
       .mockResolvedValueOnce({ id: "member-1", teamId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null }) // target check
-      .mockResolvedValueOnce({ keyDistributed: false, deactivatedAt: null }); // re-check inside tx
+      .mockResolvedValueOnce(lockedTarget()); // re-check inside tx
 
     const res = await POST(
       createRequest("POST", URL, { body: validBody }),
@@ -261,7 +280,7 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
       mockPrismaTeamMember.findFirst.mockResolvedValueOnce(actorRow());
       mockPrismaTeamMember.findUnique
         .mockResolvedValueOnce({ id: "member-1", teamId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null })
-        .mockResolvedValueOnce({ keyDistributed: false, deactivatedAt: null });
+        .mockResolvedValueOnce(lockedTarget());
       return POST(
         createRequest("POST", URL, { body: validBody }),
         { params: Promise.resolve({ teamId: "team-1", memberId: "member-1" }) },
@@ -289,7 +308,7 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
       }
     });
 
-    it("locks the distributor's tenant row, then the team row, in one transaction with a shared budget", async () => {
+    it("locks only the distributor's tenant row, before the team row, and reads the recipient's unlocked after it", async () => {
       actorTenantState(null);
 
       await distribute();
@@ -299,6 +318,11 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
       const teamRow = calls.find((c) => c.sql.includes("FROM teams"))!;
       expect(tenantRow.values).toEqual(["tenant-1", ["admin-user"]]);
       expect(tenantRow.order).toBeLessThan(teamRow.order);
+      expect(mockTenantMemberFindMany).toHaveBeenCalledWith({
+        where: { tenantId: "tenant-1", userId: { in: ["target-user"] } },
+        select: { userId: true, role: true, deactivatedAt: true },
+      });
+      expect(teamRow.order).toBeLessThan(mockTenantMemberFindMany.mock.invocationCallOrder[0]);
     });
 
     it("answers 409 CONFLICT without Retry-After when the distributor's tenant row is held past the lock wait", async () => {
@@ -313,6 +337,79 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
       expect((await res.json()).error).toBe("CONFLICT");
       expect(res.headers.get("Retry-After")).toBeNull();
       expect(mockPrismaTeamMemberKey.upsert).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("a recipient who left the tenant, judged against their admission to the team", () => {
+    const at = (ms: number) => new Date(TARGET_ADMITTED_AT.getTime() + ms);
+    /** Answer the recipient's unlocked tenant row and departure record (the distributor is a guest). */
+    const targetTenantState = (deactivatedAt: Date | null, departedAt: Date | null = null, hasRow = true) => {
+      mockTenantMemberFindMany.mockResolvedValue(
+        hasRow ? [{ userId: "target-user", role: "MEMBER", deactivatedAt }] : [],
+      );
+      mockTenantMemberDepartureFindMany.mockResolvedValue(
+        departedAt ? [{ userId: "target-user", departedAt }] : [],
+      );
+    };
+    const distribute = async (locked = lockedTarget()) => {
+      mockPrismaTeamMember.findFirst.mockResolvedValueOnce(actorRow());
+      mockPrismaTeamMember.findUnique
+        .mockResolvedValueOnce({ id: "member-1", teamId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null })
+        .mockResolvedValueOnce(locked);
+      return POST(
+        createRequest("POST", URL, { body: validBody }),
+        { params: Promise.resolve({ teamId: "team-1", memberId: "member-1" }) },
+      );
+    };
+    const expectNothingWritten = () => {
+      expect(mockPrismaTeamMemberKey.upsert).not.toHaveBeenCalled();
+      expect(mockPrismaTeamMember.updateMany).not.toHaveBeenCalled();
+      expect(mockLogAuditInTx).not.toHaveBeenCalled();
+    };
+
+    it("refuses (404 MEMBER_NOT_FOUND) a recipient whose tenant row was deactivated after their admission, writing no key", async () => {
+      targetTenantState(at(1));
+
+      const res = await distribute();
+
+      expect(res.status).toBe(404);
+      expect((await res.json()).error).toBe("MEMBER_NOT_FOUND");
+      expectNothingWritten();
+    });
+
+    it("refuses a recipient whose departure record (row deleted) postdates their admission", async () => {
+      targetTenantState(null, at(1), false);
+
+      expect((await distribute()).status).toBe(404);
+      expectNothingWritten();
+    });
+
+    it("refuses a recipient whose departure equals their admission", async () => {
+      targetTenantState(at(0));
+
+      expect((await distribute()).status).toBe(404);
+      expectNothingWritten();
+    });
+
+    it("refuses when the locked row is no longer the pre-checked user's", async () => {
+      targetTenantState(null);
+
+      expect((await distribute(lockedTarget({ userId: "other-user" }))).status).toBe(404);
+      expectNothingWritten();
+    });
+
+    it("distributes to a guest, an active, a re-admitted and a re-provisioned recipient", async () => {
+      for (const [setup, locked] of [
+        [() => targetTenantState(null, null, false), lockedTarget()],
+        [() => targetTenantState(null), lockedTarget()],
+        // created before the departure, re-admitted after it: admitted_at decides.
+        [() => targetTenantState(at(-1000)), lockedTarget({ createdAt: at(-5000) })],
+        [() => targetTenantState(null, at(-1000)), lockedTarget()],
+      ] as const) {
+        setup();
+        expect((await distribute(locked)).status).toBe(200);
+      }
+      expect(mockPrismaTeamMemberKey.upsert).toHaveBeenCalledTimes(4);
     });
   });
 
@@ -367,7 +464,7 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
     mockPrismaTeamMember.findFirst.mockResolvedValueOnce(actorRow()); // admin (findFirst)
     mockPrismaTeamMember.findUnique
       .mockResolvedValueOnce({ id: "member-1", teamId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null })
-      .mockResolvedValueOnce({ keyDistributed: false, deactivatedAt: null }); // re-check passes
+      .mockResolvedValueOnce(lockedTarget()); // re-check passes
     mockTeamLockQuery.mockImplementation(teamLockQuery([{ team_key_version: 2, tenant_id: "tenant-1" }])); // team rotated to v2
 
     const res = await POST(
@@ -384,7 +481,7 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
     mockPrismaTeamMember.findFirst.mockResolvedValueOnce(actorRow());
     mockPrismaTeamMember.findUnique
       .mockResolvedValueOnce({ id: "member-1", teamId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null })
-      .mockResolvedValueOnce({ keyDistributed: false, deactivatedAt: null });
+      .mockResolvedValueOnce(lockedTarget());
 
     const res = await POST(
       createRequest("POST", URL, { body: validBody }),
@@ -434,7 +531,7 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
     mockPrismaTeamMember.findFirst.mockResolvedValueOnce(actorRow());
     mockPrismaTeamMember.findUnique
       .mockResolvedValueOnce({ id: "member-1", teamId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null })
-      .mockResolvedValueOnce({ keyDistributed: false, deactivatedAt: null });
+      .mockResolvedValueOnce(lockedTarget());
 
     const res = await POST(
       createRequest("POST", URL, { body: validBody }),
@@ -452,7 +549,7 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
     mockPrismaTeamMember.findFirst.mockResolvedValueOnce(actorRow());
     mockPrismaTeamMember.findUnique
       .mockResolvedValueOnce({ id: "member-1", teamId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null })
-      .mockResolvedValueOnce({ keyDistributed: false, deactivatedAt: null });
+      .mockResolvedValueOnce(lockedTarget());
     // The guarded write matches nothing: the row changed since the read.
     mockPrismaTeamMember.updateMany.mockResolvedValue({ count: 0 });
 
@@ -471,7 +568,7 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
     mockPrismaTeamMember.findFirst.mockResolvedValueOnce(actorRow()); // getTeamMembership (findFirst)
     mockPrismaTeamMember.findUnique
       .mockResolvedValueOnce({ id: "member-1", teamId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null }) // target check (passes)
-      .mockResolvedValueOnce({ keyDistributed: true, deactivatedAt: null }); // re-check inside tx (race: another admin distributed first)
+      .mockResolvedValueOnce(lockedTarget({ keyDistributed: true })); // re-check inside tx (race: another admin distributed first)
 
     const res = await POST(
       createRequest("POST", URL, { body: validBody }),
@@ -488,7 +585,7 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
     mockPrismaTeamMember.findFirst.mockResolvedValueOnce(actorRow());
     mockPrismaTeamMember.findUnique
       .mockResolvedValueOnce({ id: "member-1", teamId: "team-1", userId: "guest-user", keyDistributed: false, deactivatedAt: null })
-      .mockResolvedValueOnce({ keyDistributed: false, deactivatedAt: null });
+      .mockResolvedValueOnce(lockedTarget({ userId: "guest-user" }));
     mockPrismaUser.findUnique.mockResolvedValueOnce({ ecdhPublicKey: "guest-pub-key" });
 
     const res = await POST(

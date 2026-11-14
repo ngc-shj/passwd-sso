@@ -277,6 +277,10 @@ describe("POST /api/teams/invitations/accept", () => {
     expect(res.status).toBe(410);
     expect((await res.json()).error).toBe("INVITATION_EXPIRED");
     expect(acceptTx.teamInvitation.update).toHaveBeenCalledWith({ where: { id: "inv-1" }, data: { status: INVITATION_STATUS.EXPIRED } });
+    // The locked claim ran and was overwritten by EXPIRED; no unlocked ACCEPTED write, no admission, no audit.
+    expect(mockPrismaTeamInvitation.updateMany).not.toHaveBeenCalled();
+    expect(acceptTx.teamMember.upsert).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 
   it("returns 409 SCIM_APPROVAL_PENDING for a pending member (pre-check)", async () => {

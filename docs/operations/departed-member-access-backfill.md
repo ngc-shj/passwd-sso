@@ -44,7 +44,11 @@ deploy`. Run them with `psql -v ON_ERROR_STOP=1 -f <file>`.
    that release on, a re-admission is evidenced (see "Re-admission evidence"
    below) and moves `team_members.admitted_at` past the departure, which takes
    the membership out of section 1.
-6. End the confirmed leaks with the contain script.
+6. End the confirmed leaks with the contain script. Pass only rows whose
+   `containable` is true: one row it cannot end makes the script refuse the
+   whole batch. A `containable` false row (the tenant row was deleted, or
+   re-created after a SCIM DELETE) is ended by a team admin removing the member;
+   the member already cannot act (see "Actors refused since this release").
 
 **For every membership the migration or the contain script ended** (found by
 `TEAM_MEMBER_TENANT_DEACTIVATE` records whose `metadata.backfill` is
@@ -100,6 +104,8 @@ report when the grant did not take effect.
   `tenant_member_departures`, so a member whose tenant row was deleted, or
   re-created after a SCIM DELETE, is listed too. This is the predicate the
   application's actor check uses (see "Actors refused since this release").
+  `containable` says whether the contain script can end the row: it needs a
+  departed tenant row to stamp the membership with.
 - Section 2: the team webhooks, columns `id, tenant_id, team_id, is_active,
   created_at, updated_at` only (never `url`, secrets or `last_error`). For a
   candidate's team, the webhooks created or updated after the candidate's
@@ -142,7 +148,8 @@ SELECT tm.tenant_id, tm.team_id, tm.user_id, tm.role,
         OR EXISTS (SELECT 1 FROM audit_outbox o
                     WHERE o.tenant_id = tm.tenant_id
                       AND o.payload->>'action' = 'TEAM_MEMBER_TENANT_DEACTIVATE'
-                      AND o.payload->>'targetId' = tm.user_id::text)) AS has_deactivation_record
+                      AND o.payload->>'targetId' = tm.user_id::text)) AS has_deactivation_record,
+       (tmb.deactivated_at IS NOT NULL) AS containable
   FROM team_members tm
   LEFT JOIN tenant_members tmb ON tmb.tenant_id = tm.tenant_id AND tmb.user_id = tm.user_id
   LEFT JOIN tenant_member_departures d ON d.tenant_id = tm.tenant_id AND d.user_id = tm.user_id
@@ -370,7 +377,15 @@ a SCIM-pending member, changing a role or transferring ownership, and
 distributing the team key all refuse an actor who departed the tenant at or
 after their admission to the team, even while their membership row is still
 active (the residue section 1 lists). The refusal is the route's usual one (403,
-or `INVITATION_EXPIRED` for accept).
+or `INVITATION_EXPIRED` for accept). Rotating the team key refuses such an actor
+too.
+
+The same membership is also refused as a **recipient**: it is not given the team
+key (confirm-key answers `MEMBER_NOT_FOUND`), not promoted, and never made OWNER;
+a demotion is still allowed. A team key rotation does not wrap the new version
+for it and clears its `key_distributed`, so it holds only keys it already had.
+The team's pending key distributions still list it, and an admin's browser keeps
+being refused until the membership is ended.
 
 This also refuses a member who was legitimately re-admitted **before**
 `20261114000000_team_member_admitted_at`: their row has no `admitted_at`, its

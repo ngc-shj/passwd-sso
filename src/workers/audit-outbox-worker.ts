@@ -1162,8 +1162,9 @@ async function resolveWebhookSubscribers(
       // team_members.
       const verdicts = await webhookCreatorVerdicts(tx, item.team_id, rows);
       const authorizedRows = rows.filter((r) => {
-        const verdict = verdicts.get(r.id);
-        if (verdict === false) {
+        // Deliver only on a positive verdict; a missing one fails closed.
+        const authorized = verdicts.get(r.id) === true || verdicts.get(r.id) === "legacy";
+        if (!authorized) {
           getLogger().warn(
             {
               webhookId: r.id,
@@ -1173,7 +1174,7 @@ async function resolveWebhookSubscribers(
             "outbox.webhook_creator_unauthorized",
           );
         }
-        return verdict !== false;
+        return authorized;
       });
       return authorizedRows.map((r) => ({
         id: r.id,

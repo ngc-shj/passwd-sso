@@ -119,6 +119,40 @@ export async function lockTenantRows(
 }
 
 /**
+ * The users' tenant rows as lockTenantRows answers them, read WITHOUT a lock:
+ * for a listing that a locked write re-checks (rotate-key/data), never for a
+ * decision. MUST run under the tenant's RLS context.
+ */
+export async function readTenantRows(
+  tx: Pick<Prisma.TransactionClient, "tenantMember" | "tenantMemberDeparture">,
+  tenantId: string,
+  userIds: readonly string[],
+): Promise<Map<string, LockedTenantRow>> {
+  const result = new Map<string, LockedTenantRow>();
+  if (userIds.length === 0) return result;
+  const rows = await tx.tenantMember.findMany({
+    where: { tenantId, userId: { in: [...userIds] } },
+    select: { userId: true, role: true, deactivatedAt: true },
+  });
+  const departures = await tx.tenantMemberDeparture.findMany({
+    where: { tenantId, userId: { in: [...userIds] } },
+    select: { userId: true, departedAt: true },
+  });
+  const rowById = new Map(rows.map((r) => [r.userId, r]));
+  const departedById = new Map(departures.map((d) => [d.userId, d.departedAt]));
+  for (const userId of userIds) {
+    const row = rowById.get(userId);
+    result.set(userId, {
+      hasRow: row !== undefined,
+      role: row?.role ?? null,
+      deactivatedAt: row?.deactivatedAt ?? null,
+      departedAt: departedById.get(userId) ?? null,
+    });
+  }
+  return result;
+}
+
+/**
  * The advisory half of lockTenantRows, for a writer about to INSERT a
  * user's tenant row as deactivated (SCIM POST `active=false`, directory-sync
  * create): an admission of that user as a guest holds the same lock, so it

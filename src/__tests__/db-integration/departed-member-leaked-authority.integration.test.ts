@@ -7,6 +7,9 @@
  * - C4: one actor predicate on the six sites that grant authority to others,
  *   proven on the residue state (an active team row left behind by a raw
  *   tenant-row departure), each deny cell with a positive twin.
+ * - C4 recipient: a residue TARGET is treated like a deactivated member by
+ *   confirm-key, a promotion or ownership transfer, and key rotation; a
+ *   demotion stays allowed.
  * - C5: accept answers ACCEPTED only inside the locked transaction, and audits
  *   the admission atomically with it.
  * - C6: team webhook delivery requires the creator's current authority, run as
@@ -84,6 +87,7 @@ import { POST as addMemberRoute } from "@/app/api/teams/[teamId]/members/route";
 import { PUT as changeRoleRoute, DELETE as removeMemberRoute } from "@/app/api/teams/[teamId]/members/[memberId]/route";
 import { POST as approveRoute } from "@/app/api/teams/[teamId]/members/[memberId]/approve/route";
 import { POST as confirmKeyRoute } from "@/app/api/teams/[teamId]/members/[memberId]/confirm-key/route";
+import { POST as rotateKeyRoute } from "@/app/api/teams/[teamId]/rotate-key/route";
 import { GET as listWebhooksRoute, POST as createWebhookRoute } from "@/app/api/teams/[teamId]/webhooks/route";
 import { deliverRowWithChain, processWebhookDeliveryBatch, type AuditOutboxRow } from "@/workers/audit-outbox-worker";
 import { enqueueAuditInTx } from "@/lib/audit/audit-outbox";
@@ -646,6 +650,119 @@ describe("departed-member leaked authority — real-DB integration", () => {
     });
   });
 
+  // ── C4 recipient: the target predicate, per site, on the residue state ───
+
+  describe("C4 recipient: a target whose tenant row departed after their admission receives nothing", () => {
+    /** The OWNER's team, and a target admitted an hour ago with `role`. */
+    async function targetTeam(role: string, o: RowOpts = {}) {
+      const owner = await ctx.createUser(tenantId);
+      const teamId = await team(owner);
+      const target = await member();
+      const targetRow = await addTeamMember(teamId, target.id, role, { createdAt: "now() - interval '1 hour'", ...o });
+      return { owner, teamId, target, targetRow };
+    }
+
+    const twins = [
+      ["denied when the target's tenant row departed after admission (residue)", true],
+      ["allowed without the departure (positive twin)", false],
+    ] as const;
+
+    it.each(twins)("confirm-key to the target: %s", async (_label, departed) => {
+      const { owner, teamId, target, targetRow } = await targetTeam("MEMBER", { keyDistributed: false, withKey: false });
+      await setEcdhKey(target.id);
+      if (departed) await residueDepart(target.id);
+
+      const res = await confirmKey(teamId, targetRow, owner);
+
+      expect(res.status).toBe(departed ? 404 : 200);
+      expect(await membership(teamId, target.id)).toMatchObject({ key_distributed: !departed });
+      const keys = await sql(`SELECT 1 FROM team_member_keys WHERE team_id = $1::uuid AND user_id = $2::uuid`, teamId, target.id);
+      expect(keys).toHaveLength(departed ? 0 : 1);
+    });
+
+    it.each(twins)("member PUT promotion of the target (MEMBER to ADMIN): %s", async (_label, departed) => {
+      const { owner, teamId, target, targetRow } = await targetTeam("MEMBER");
+      if (departed) await residueDepart(target.id);
+
+      const res = await changeRole(teamId, targetRow, owner, "ADMIN");
+
+      expect(res.status).toBe(departed ? 404 : 200);
+      expect(await membership(teamId, target.id)).toMatchObject({ role: departed ? "MEMBER" : "ADMIN" });
+    });
+
+    it.each(twins)("member PUT ownership transfer to the target: %s", async (_label, departed) => {
+      const { owner, teamId, target, targetRow } = await targetTeam("ADMIN");
+      if (departed) await residueDepart(target.id);
+
+      const res = await changeRole(teamId, targetRow, owner, "OWNER");
+
+      expect(res.status).toBe(departed ? 404 : 200);
+      expect(await membership(teamId, target.id)).toMatchObject({ role: departed ? "ADMIN" : "OWNER" });
+      expect(await membership(teamId, owner)).toMatchObject({ role: departed ? "OWNER" : "ADMIN" });
+    });
+
+    it.each([
+      ["allowed although the target's tenant row departed after admission (residue)", true],
+      ["allowed without the departure (positive twin)", false],
+    ] as const)("member PUT demotion of the target (ADMIN to VIEWER): %s", async (_label, departed) => {
+      const { owner, teamId, target, targetRow } = await targetTeam("ADMIN");
+      if (departed) await residueDepart(target.id);
+
+      const res = await changeRole(teamId, targetRow, owner, "VIEWER");
+
+      expect(res.status).toBe(200);
+      expect(await membership(teamId, target.id)).toMatchObject({ role: "VIEWER" });
+    });
+
+    describe("rotate-key with the target as a key-holder", () => {
+      function rotate(teamId: string, actor: string, keysFor: string[]) {
+        mockAuth.mockResolvedValue({ user: { id: actor } });
+        return rotateKeyRoute(
+          jsonRequest(`http://localhost/api/teams/${teamId}/rotate-key`, "POST", {
+            newTeamKeyVersion: 2,
+            entries: [],
+            memberKeys: keysFor.map((userId) => ({ userId, ...keyMaterial(2) })),
+          }),
+          { params: Promise.resolve({ teamId }) },
+        );
+      }
+      async function teamKeyVersion(teamId: string): Promise<number> {
+        const [row] = await sql<{ team_key_version: number }>(`SELECT team_key_version FROM teams WHERE id = $1::uuid`, teamId);
+        return row.team_key_version;
+      }
+      async function v2Key(teamId: string, userId: string) {
+        return sql(`SELECT 1 FROM team_member_keys WHERE team_id = $1::uuid AND user_id = $2::uuid AND key_version = 2`, teamId, userId);
+      }
+
+      it.each(twins)("rotates without the target's key and lists them for distribution: %s", async (_label, departed) => {
+        const { owner, teamId, target } = await targetTeam("MEMBER", { keyDistributed: true });
+        if (departed) await residueDepart(target.id);
+
+        // Without the departure the target is a key-holder and must be wrapped for.
+        const res = await rotate(teamId, owner, departed ? [owner] : [owner, target.id]);
+
+        expect(res.status).toBe(200);
+        expect(await teamKeyVersion(teamId)).toBe(2);
+        expect(await membership(teamId, target.id)).toMatchObject({ key_distributed: !departed, deactivated_at: null });
+        expect(await v2Key(teamId, target.id)).toHaveLength(departed ? 0 : 1);
+        expect(await v2Key(teamId, owner)).toHaveLength(1);
+      });
+
+      it.each(twins)("a key supplied for the target: %s", async (_label, departed) => {
+        const { owner, teamId, target } = await targetTeam("MEMBER", { keyDistributed: true });
+        if (departed) await residueDepart(target.id);
+
+        const res = await rotate(teamId, owner, [owner, target.id]);
+
+        // Refused as for a non-member, rotating nothing.
+        expect(res.status).toBe(departed ? 400 : 200);
+        if (departed) expect((await res.json()).details).toMatchObject({ unknownUserId: target.id });
+        expect(await teamKeyVersion(teamId)).toBe(departed ? 1 : 2);
+        expect(await membership(teamId, target.id)).toMatchObject({ key_distributed: true });
+      });
+    });
+  });
+
   // ── C5: accept ────────────────────────────────────────────────
 
   describe("C5: accept answers ACCEPTED only after the locked admission checks, and audits the admission", () => {
@@ -824,6 +941,9 @@ describe("departed-member leaked authority — real-DB integration", () => {
       return id;
     }
 
+    /** Each work item's event marker, to tell which event a POST carried. */
+    const markerOf = new Map<string, string>();
+
     /** One TEAM event for `teamId`, enqueued as the worker's drain would: returns its work item id. */
     async function teamEvent(teamId: string, actor: string): Promise<string> {
       const marker = randomUUID();
@@ -844,6 +964,7 @@ describe("departed-member leaked authority — real-DB integration", () => {
       const [item] = await sql<{ id: string }>(
         `SELECT id FROM webhook_deliveries WHERE outbox_id = $1::uuid AND scope = 'TEAM' AND team_id = $2::uuid`, row.id, teamId,
       );
+      markerOf.set(item.id, marker);
       return item.id;
     }
 
@@ -968,6 +1089,9 @@ describe("departed-member leaked authority — real-DB integration", () => {
       await drain();
 
       expect(received).toHaveLength(1);
+      // The one POST is the resumed event, not the skipped one redelivered.
+      expect(received[0].body).toContain(markerOf.get(resumed));
+      expect(received[0].body).not.toContain(markerOf.get(skipped));
       expect(await item(skipped)).toMatchObject({ status: "SENT" });
       expect(await item(resumed)).toMatchObject({ status: "SENT" });
       expect(await creatorAuthorized(teamId, owner, id)).toBe(true);
