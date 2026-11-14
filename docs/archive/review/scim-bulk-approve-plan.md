@@ -468,3 +468,40 @@ read after V1's locks at the default READ COMMITTED.
 | C6 | Row cap and its measurement | locked |
 | C7 | Registries | locked |
 | C8 | Departed-actor tripwire (#1035) | locked |
+
+## Implementation Checklist
+
+Files (Phase 2 impact analysis; C7's table lists the registries):
+
+- New: `src/lib/team/scim-admission.ts` + `scim-admission.test.ts`;
+  `src/lib/constants/team/scim-admission.ts`;
+  `src/app/api/teams/[teamId]/members/bulk-approve/route.ts` + `route.test.ts`;
+  `src/app/api/teams/[teamId]/members/bulk-reject/route.ts` + `route.test.ts`;
+  `src/__tests__/db-integration/scim-bulk-approve.integration.test.ts`;
+  `docs/archive/review/scim-bulk-approve-manual-test.md`, `-deviation.md`.
+- Changed: `members/[memberId]/approve/route.ts`, `members/[memberId]/reject/route.ts` (their
+  test files are NOT edited — AC1); `src/lib/validations/team.ts` + `team.test.ts`;
+  `src/lib/constants/auth/api-path.ts` + `api-path.test.ts`;
+  `src/app/[locale]/admin/teams/[teamId]/members/list/page.tsx` + `page.test.tsx`;
+  `messages/en/Team.json`, `messages/ja/Team.json`;
+  `scripts/checks/check-team-rotation-input-lock.mjs` +
+  `scripts/__tests__/check-team-rotation-input-lock.test.mjs`; the C7 registries and docs.
+- Test trees referencing the changed symbols (R19): co-located `route.test.ts` for approve and
+  reject; `src/__tests__/db-integration/scim-team-admission-approval.integration.test.ts`
+  (calls the routes; untouched, AC2); `page.test.tsx`. No e2e spec touches the members page.
+
+Reuse (do not reimplement): `lockTenantRows`, `isMembershipLockConflict`
+(`src/lib/team/tenant-row-lock.ts`); `createLockBudget`, `lockTeamsAgainstRotation`
+(`team-key-rotation-lock.ts`); `hasTeamPermission`, `requireTeamPermission` (`team-auth.ts`);
+`requireRecentCurrentAuthMethod`; `createRateLimiter` + `checkRateLimitOrFail`; `parseBody`;
+`withTeamTenantRls`; `logAuditInTx`, `extractRequestMeta`; `membershipConflictResponse`;
+`errorResponse` / `handleAuthError` / `unauthorized`; `withRequestLog`; `MS_PER_HOUR`,
+`TEAM_MEMBERSHIP_TX_TIMEOUT_MS`, `TEAM_INVITE_ROLE_VALUES`; test helpers
+`assertRedisFailClosed` (`src/__tests__/helpers/fail-closed.ts`) and the race helpers in
+`src/__tests__/db-integration/race-helpers.ts`; page: `handleStepUpError`, `useInlineReauth`,
+`readApiErrorBody`, the existing `AlertDialog` composition.
+
+CI parity: gates CI runs that `scripts/pre-pr.sh` does not name —
+`scripts/check-state-mutation-centralization.sh` (run by hand in Step 2-4),
+`check-npm-audit.mjs` and `check-terraform-test-count.mjs` (no dependency or Terraform change in
+this diff; not run).
