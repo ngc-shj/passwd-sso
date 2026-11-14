@@ -445,9 +445,13 @@ jobs:
       - name: Generate Prisma client
         run: npx prisma generate
 
+      # Two reporters: `blob` feeds the coverage merge, and `dot` puts a failing
+      # test's name and error in this job's log. With `blob` alone a red shard
+      # prints nothing, and its blob is not uploaded either.
       - run: >-
           npx vitest run --coverage
           --shard=${{ matrix.shard }}/3
+          --reporter=dot
           --reporter=blob
           --exclude scripts/__tests__/check-rls-nesting.test.mjs
           --exclude scripts/__tests__/check-bypass-rls.test.mjs
