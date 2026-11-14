@@ -1,5 +1,7 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import fs from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { spawnSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { ArtifactNotRegularFileError, FilesystemDestination } from "./filesystem-destination";
@@ -162,6 +164,33 @@ describe("FilesystemDestination", () => {
 
       expect(error).toBeInstanceOf(ArtifactNotRegularFileError);
       expect(error).toMatchObject({ code: "ARTIFACT_NOT_REGULAR_FILE" });
+    });
+
+    // A read blocked in `open` never settles: the race and the timeout make
+    // that a failure instead of a stall.
+    it("throws the named error for a FIFO at once, without waiting for a writer", { timeout: 5_000 }, async ({ skip }) => {
+      const basePath = await tempDir();
+      const key = manifestKeyFor("2026-05-02");
+      const fifo = path.join(basePath, key);
+      const made = spawnSync("mkfifo", [fifo]);
+      if (made.error) skip("mkfifo is not available on this platform, so no FIFO can be planted");
+      expect(made.status).toBe(0);
+
+      const read = new FilesystemDestination({ basePath }).read(key).catch((err: unknown) => err);
+      try {
+        const error = await Promise.race([
+          read,
+          new Promise((resolve) => setTimeout(() => resolve("still blocked in open"), 2_000)),
+        ]);
+
+        expect(error).toBeInstanceOf(ArtifactNotRegularFileError);
+        expect(error).toMatchObject({ code: "ARTIFACT_NOT_REGULAR_FILE" });
+      } finally {
+        // Opening the write end releases a reader still blocked in `open`, so
+        // a failing run leaves no thread behind; with no reader it is ENXIO.
+        await fs.open(fifo, fsConstants.O_WRONLY | fsConstants.O_NONBLOCK).then((h) => h.close(), () => undefined);
+        await read;
+      }
     });
 
     it("reads a regular file planted at the name", async () => {

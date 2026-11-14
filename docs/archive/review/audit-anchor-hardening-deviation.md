@@ -204,3 +204,21 @@ not re-run after the interruption; each fix has a test that names its guard.
   equivalent under the chunk sizing; the cap and the post-read check are each red-proven.
 - **D50 — S-7 accepted** (a manifest is not bound to its location); see the code-review
   file's Resolution Status for the Anti-Deferral entry.
+
+## Phase 3, round 2 fixes
+
+- **D51 — unsettled manifests are compared by a walk, not one extra step (S2-1).** After any
+  `published` outcome (fresh or adopted) the publisher walks back from the compared-to
+  manifest through every manifest dated after the published high-water read under the lock
+  (all of them when there is no high-water), comparing each with the predecessor it names.
+  The one-step fix the finding proposed misses a lock held into the next day's first attempt
+  (the retry adopts) and a lock held for two days. No separate cap: the reads share the run's
+  60 s bound and a failed or timed-out read ends the walk with the UNAVAILABLE row.
+- **D52 — residual, stated in the threat model:** a database writer who moves
+  `last_published_at` onto an unsettled manifest's date makes it count as settled and the walk
+  skips it; the failed run's `commit_failed_after_upload` alarm and row remain. Closing it
+  needs a settle marker outside the database.
+- **D53 — a null high-water over an existing chain walks the whole chain once** and re-reports
+  historical drops, bounded by the 60 s bound.
+- **D54 — `comparedArtifactKey` is on all four comparison rows** (for a row about the new
+  manifest it equals `artifactKey`); `previousOfAdopted` is renamed `namedPrevious`.

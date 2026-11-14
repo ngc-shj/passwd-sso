@@ -750,27 +750,32 @@ unless noted:
   `count` and `artifactKeys`, the first five. They are ignored. On the anchors
   bucket only the publisher's task role can have written them: treat it as use
   of that role's credentials.
-- `audit-anchor-publisher.previous_manifest_unavailable` — a run adopted a
-  stored manifest and could not read back the previous manifest it names to
-  compare the two (`artifactKey` is the adopted one; `detail` is the check
+- `audit-anchor-publisher.previous_manifest_unavailable` — a publish could not
+  read back the previous manifest a stored one names to compare the two: the
+  manifest it adopted, or an earlier one no publish settled (`artifactKey` is
+  the stored manifest whose previous is unavailable; `detail` is the check
   that failed as for `published_object_unverifiable`, `HASH_MISMATCH` when the
-  object there is not the one named, or the destination's error code). The
-  publish stands; the `PREVIOUS_MANIFEST_UNAVAILABLE_FOR_COMPARISON` row below
-  is written with it.
+  object there is not the one named, or an error code — the destination's, or
+  `UPLOAD_TIMEOUT` when the run's 60 s bound fired). The publish stands; the
+  `PREVIOUS_MANIFEST_UNAVAILABLE_FOR_COMPARISON` row below is written with it.
 
 Rows a publish writes beside its `AUDIT_ANCHOR_PUBLISHED` row, each an
-`AUDIT_ANCHOR_PUBLISH_FAILED` row carrying `failureReason`, `artifactKey` and
-`anchoredAt`. None stops the publish and none is alarmed; read them with the
-query under Step 7 of the rotation runbook:
+`AUDIT_ANCHOR_PUBLISH_FAILED` row carrying `failureReason`, `artifactKey` (the
+manifest this run published) and `anchoredAt`. The four comparison rows —
+`TENANT_DROPPED_FROM_MANIFEST` to `PREVIOUS_MANIFEST_UNAVAILABLE_FOR_COMPARISON`
+— also carry `comparedArtifactKey`, the manifest the row is about: equal to
+`artifactKey`, or an earlier manifest no publish settled (below). None stops
+the publish and none is alarmed; read them with the query under Step 7 of the
+rotation runbook:
 
 | `failureReason` | Meaning | Expected when |
 |---|---|---|
 | `OWN_PUBLIC_KEY_NOT_ARCHIVED` | `public-keys/<kid>.pub` for the publisher's own key is missing at the primary, or holds another key. Verifiers cannot fetch the key. | Daily, until the key is archived (`npm run audit-anchor-publish-pubkey`, rotation runbook Step 4). |
 | `MULTIPLE_MANIFESTS_FOR_DATE` (`date`, `count`) | The date of the manifest this run chained to holds more than one manifest key. | Never. A second key on a date is a second publisher or a planted object. |
-| `TENANT_DROPPED_FROM_MANIFEST` (`count`) | Tenants of the previous manifest are absent from this one. | Once, with every tenant, on the first publish after a tag-secret rotation. Otherwise a tenant's `audit_chain_enabled` was cleared, or its anchor row deleted — find who did (see `cadence` below). |
+| `TENANT_DROPPED_FROM_MANIFEST` (`count`) | Tenants of the manifest `comparedArtifactKey` chains to are absent from it. | Once, with every tenant, on the first publish after a tag-secret rotation. Otherwise a tenant's `audit_chain_enabled` was cleared, or its anchor row deleted — find who did (see `cadence` below). |
 | `CHAIN_SEQ_REGRESSION` (`count`) | Tenants whose `chainSeq` is lower than in the previous manifest, in the same epoch. | Never. A bug or tampering: a security incident. |
 | `EPOCH_CHANGED` (`count`) | Tenants whose `epoch` differs from the previous manifest's, in either direction. A `chainSeq` is compared within one epoch only, so for these tenants `CHAIN_SEQ_REGRESSION` says nothing. | Never: no code path writes `audit_chain_anchors.epoch`. The column was changed in the database directly — a database-write incident; compare the tenant's `chainSeq` in the two manifests by hand. |
-| `PREVIOUS_MANIFEST_UNAVAILABLE_FOR_COMPARISON` | The run adopted a stored manifest, and the previous manifest that one names is missing at the primary, does not verify, or is not the object its `sha256` names. The three rows above could not be computed for this publish. | Never on a store nothing deletes from. The `previous_manifest_unavailable` line says which; then compare the two manifests by hand (`audit-verify --prior-manifest`). |
+| `PREVIOUS_MANIFEST_UNAVAILABLE_FOR_COMPARISON` | The previous manifest that `comparedArtifactKey` names — the manifest this run adopted, or an earlier one no publish settled — is missing at the primary, does not verify, or is not the object its `sha256` names; or the read-back failed or hit the run's bound (the `previous_manifest_unavailable` line's `detail` is then an error code: `AccessDenied`, `HTTP_5xx`, `UPLOAD_TIMEOUT`). The three rows above could not be computed for that manifest. | Only after a destination error; otherwise never on a store nothing deletes from. The `previous_manifest_unavailable` line says which; then compare the two manifests by hand (`audit-verify --prior-manifest`). |
 | `MISSING_PRIOR_CADENCE_PUBLICATION` | See `missing_prior_cadence` below. | |
 
 The three comparison rows are computed against the manifest the published one
@@ -780,6 +785,19 @@ it carries. So a publish reports them whether it signed the manifest or adopted
 it. A boundary that is adopted more than once — nothing its manifest covers
 could be settled — writes them again with each adopt, at most three times: the
 attempt cap bounds it.
+
+A manifest that was stored but never settled — every run of its boundary ended
+`COMMIT_FAILED_AFTER_UPLOAD` or at the cap, so none wrote these rows — is
+compared by the next publish that does commit. That publish walks back from the
+manifest it chains to, through every manifest dated after the published
+high-water (the greatest `last_published_at`, read before the publish writes
+it; all of them when no row has one), reads each one's previous manifest back
+the same way, and writes the same rows with `comparedArtifactKey` naming the
+unsettled manifest and `artifactKey` and `anchoredAt` its own. A manifest dated
+on the high-water's date was settled by the publish that recorded it and is not
+compared again; a genesis manifest has nothing to be compared with. The
+read-backs share the run's 60 s bound: one that fails or outlasts it ends the
+walk with `PREVIOUS_MANIFEST_UNAVAILABLE_FOR_COMPARISON` for that manifest.
 
 `AUDIT_ANCHOR_KEY_ROTATED` (`oldKid`, `newKid`, `anchoredAt`, `artifactKey`) is
 written by the first publish whose manifest is under another `kid` than the one
@@ -916,7 +934,9 @@ UPLOAD_ATTEMPT_COUNT_UNREADABLE` instead.
 or an unreadable one, which no publisher writes — is a planted or damaged row:
 a database-write incident. The count resets on its own: the next boundary's
 first run counts 1 and publishes. The missed boundary is then reported once as
-`MISSING_PRIOR_CADENCE_PUBLICATION`.
+`MISSING_PRIOR_CADENCE_PUBLICATION`; when a counted run had stored the missed
+boundary's manifest, that publish also writes the comparison rows nothing wrote
+for it (`comparedArtifactKey` is its key).
 
 ## `audit-anchor-publisher.commit_failed_after_upload`
 
@@ -933,7 +953,10 @@ written — the destinations are healthy. The scheduler retries the boundary eve
 later `published` line for the same `boundary`. If none follows before the next
 boundary, the next publish still chains to the stored object — the destination
 decides, not the database — and reports `MISSING_PRIOR_CADENCE_PUBLICATION`
-because nothing recorded the earlier one.
+because nothing recorded the earlier one. It also compares the stored object
+with its own previous manifest, which no run did: a tenant dropped, a
+`chainSeq` lowered or an `epoch` changed in that object is reported then, in a
+row whose `comparedArtifactKey` is that object's key.
 
 ## `audit-anchor-publisher.cadence_failed` / `audit-anchor-publisher.upload_failed`
 

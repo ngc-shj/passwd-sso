@@ -238,10 +238,12 @@ type PublishTxResult =
       state: PublishedState;
       /** The primary's listing the decision was made from. */
       listedKeys: string[];
+      /** The published high-water the decision was made from, before this run's write. */
+      highWater: Date | null;
       chainEnabledTenantCount: number;
     };
 
-/** The previous manifest an adopted one names could not be read back and held to its hash. */
+/** The previous manifest a stored one names could not be read back and held to its hash. */
 const PREVIOUS_UNAVAILABLE = Symbol("previous manifest unavailable");
 type ComparedTo = VerifiedManifest | null | typeof PREVIOUS_UNAVAILABLE;
 
@@ -1027,6 +1029,7 @@ export class AuditAnchorPublisher {
           chainedTo,
           state: decision.state,
           listedKeys,
+          highWater,
           chainEnabledTenantCount: tenantCount,
         };
       }, this.txOptions);
@@ -1041,9 +1044,13 @@ export class AuditAnchorPublisher {
       const { published } = result;
       const destinations = config.destinations.map((d) => d.name);
       const comparedTo = result.adopted
-        ? await this.previousOfAdopted(published, result.listedKeys, bound)
+        ? await this.namedPrevious(published, result.listedKeys, bound)
         : result.chainedTo;
-      pendingEmits.push(...this.publishedEmits(result, comparedTo, boundaryIso), {
+      pendingEmits.push(
+        ...this.publishedEmits(result, comparedTo, boundaryIso),
+        ...(await this.unsettledEmits(result, comparedTo, boundaryIso, bound)),
+      );
+      pendingEmits.push({
         action: AUDIT_ACTION.AUDIT_ANCHOR_PUBLISHED,
         metadata: {
           manifestSha256: published.sha256,
@@ -1103,20 +1110,20 @@ export class AuditAnchorPublisher {
   }
 
   /**
-   * The manifest an adopted one names as its previous, for the comparison a
+   * The manifest a stored one names as its previous, for the comparison a
    * fresh publish makes against the manifest it chained to. An adopt can be
    * forced from the database (a commit failed after the create), so it must
    * not be a way around that comparison. Read from the primary and held to
-   * the hash the adopted manifest carries; null for a genesis manifest. Never
+   * the hash the stored manifest carries; null for a genesis manifest. Never
    * throws: one that is missing, unverifiable or of another hash is reported
    * by a row, and the publish stands.
    */
-  private async previousOfAdopted(
-    published: VerifiedManifest,
+  private async namedPrevious(
+    stored: VerifiedManifest,
     listedKeys: string[],
     bound: DestinationBound,
   ): Promise<ComparedTo> {
-    const named = published.manifest.previousManifest;
+    const named = stored.manifest.previousManifest;
     if (named === null) return null;
     const primary = this.primary;
     const previousArtifactKey = artifactKeyOfUri(named.uri);
@@ -1132,13 +1139,86 @@ export class AuditAnchorPublisher {
     }
     getLogger().warn(
       {
-        artifactKey: published.artifactKey,
+        artifactKey: stored.artifactKey,
         detail,
         _logType: "audit-anchor-publisher.previous_manifest_unavailable",
       },
       "audit-anchor-publisher.previous_manifest_unavailable",
     );
     return PREVIOUS_UNAVAILABLE;
+  }
+
+  /**
+   * The comparison rows of the manifests stored after the published high-water
+   * and before the published one. Each was stored by a run whose commit failed
+   * and never adopted by a run that committed, so no published outcome
+   * compared it with its predecessor — and a database writer can arrange that
+   * (a row lock held through every attempt of a boundary). Without this the
+   * next publish compares only against a manifest that already lacks what was
+   * dropped. Walks back from `comparedTo` by `previousManifest` until a
+   * manifest dated on or before the high-water's date, which a publish
+   * settled, or the genesis one. No cap of its own: the reads share the run's
+   * bound, and a read that fails or outlasts it ends the walk with the
+   * unavailable row.
+   */
+  private async unsettledEmits(
+    result: Extract<PublishTxResult, { kind: "published" }>,
+    comparedTo: ComparedTo,
+    anchoredAt: string,
+    bound: DestinationBound,
+  ): Promise<PendingEmit[]> {
+    const { cadenceMs, publishOffsetMs } = this.config;
+    const settledDate =
+      result.highWater === null ? null : utcDate(currentCadenceBoundary(result.highWater, cadenceMs, publishOffsetMs));
+    const emits: PendingEmit[] = [];
+    let stored = comparedTo;
+    while (stored !== null && stored !== PREVIOUS_UNAVAILABLE && (settledDate === null || stored.date > settledDate)) {
+      const previous = await this.namedPrevious(stored, result.listedKeys, bound);
+      emits.push(...this.comparisonEmits(stored, previous, result.published.artifactKey, anchoredAt));
+      stored = previous;
+    }
+    return emits;
+  }
+
+  /**
+   * What `compared` lost against `comparedTo`, the manifest it chains to.
+   * `artifactKey` is the manifest of the publish writing the rows and
+   * `comparedArtifactKey` the manifest each row is about: the same one, or an
+   * earlier manifest no publish settled.
+   */
+  private comparisonEmits(
+    compared: VerifiedManifest,
+    comparedTo: ComparedTo,
+    artifactKey: string,
+    anchoredAt: string,
+  ): PendingEmit[] {
+    const emits: PendingEmit[] = [];
+    const failed = (failureReason: string, extra: Record<string, unknown> = {}) =>
+      emits.push({
+        action: AUDIT_ACTION.AUDIT_ANCHOR_PUBLISH_FAILED,
+        metadata: { failureReason, artifactKey, anchoredAt, comparedArtifactKey: compared.artifactKey, ...extra },
+      });
+
+    if (comparedTo === PREVIOUS_UNAVAILABLE) {
+      failed("PREVIOUS_MANIFEST_UNAVAILABLE_FOR_COMPARISON");
+    } else if (comparedTo) {
+      const current = new Map(compared.manifest.tenants.map((t) => [t.tenantTag, t]));
+      let dropped = 0;
+      let regressed = 0;
+      let epochChanged = 0;
+      for (const before of comparedTo.manifest.tenants) {
+        const now = current.get(before.tenantTag);
+        if (!now) dropped++;
+        // A chainSeq is comparable within one epoch only, and no code path
+        // writes `epoch`: a change is reported in its own right.
+        else if (now.epoch !== before.epoch) epochChanged++;
+        else if (BigInt(now.chainSeq) < BigInt(before.chainSeq)) regressed++;
+      }
+      if (dropped > 0) failed("TENANT_DROPPED_FROM_MANIFEST", { count: dropped });
+      if (regressed > 0) failed("CHAIN_SEQ_REGRESSION", { count: regressed });
+      if (epochChanged > 0) failed("EPOCH_CHANGED", { count: epochChanged });
+    }
+    return emits;
   }
 
   /**
@@ -1172,25 +1252,7 @@ export class AuditAnchorPublisher {
     }
     if (!state.ownPublicKeyArchived) failed("OWN_PUBLIC_KEY_NOT_ARCHIVED");
 
-    if (comparedTo === PREVIOUS_UNAVAILABLE) {
-      failed("PREVIOUS_MANIFEST_UNAVAILABLE_FOR_COMPARISON");
-    } else if (comparedTo) {
-      const current = new Map(published.manifest.tenants.map((t) => [t.tenantTag, t]));
-      let dropped = 0;
-      let regressed = 0;
-      let epochChanged = 0;
-      for (const before of comparedTo.manifest.tenants) {
-        const now = current.get(before.tenantTag);
-        if (!now) dropped++;
-        // A chainSeq is comparable within one epoch only, and no code path
-        // writes `epoch`: a change is reported in its own right.
-        else if (now.epoch !== before.epoch) epochChanged++;
-        else if (BigInt(now.chainSeq) < BigInt(before.chainSeq)) regressed++;
-      }
-      if (dropped > 0) failed("TENANT_DROPPED_FROM_MANIFEST", { count: dropped });
-      if (regressed > 0) failed("CHAIN_SEQ_REGRESSION", { count: regressed });
-      if (epochChanged > 0) failed("EPOCH_CHANGED", { count: epochChanged });
-    }
+    emits.push(...this.comparisonEmits(published, comparedTo, published.artifactKey, anchoredAt));
     return emits;
   }
 

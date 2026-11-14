@@ -180,3 +180,33 @@ SC1, SC5, SC6) and the manual-test record.
   else is an incident. TODO(audit-anchor-hardening): bind a manifest to its chain location in a
   manifest v2.
 - **Orchestrator sign-off**: acceptable-risk exception, three values stated; detection in place.
+
+---
+
+# Round 2
+Date: 2026-11-15
+
+## Changes from Previous Round
+
+Incremental review of commit `74409b549` by the same three reviewers. All 26 round-1 findings
+confirmed resolved (S-7 accepted; the security expert judged its Anti-Deferral entry honest
+and the mitigation text present). R43 check: no predicate wider than in round 1. No Critical,
+no Major. New findings (`F2-`/`S2-`/`T2-`), all Minor:
+
+| ID | Finding | Resolution |
+|----|---------|------------|
+| S2-1 | A stored manifest that never reached a `published` outcome was never compared with its predecessor (hold the row lock all day: the next day chains to it and the drop is never named) | Fixed — after any `published` outcome the publisher walks back from the compared-to manifest through every manifest dated after the published high-water and compares each with the predecessor it names; rows carry `comparedArtifactKey`. Wider than the finding's one-step fix: see D51 |
+| S2-2 | A FIFO at an artifact name blocked `FilesystemDestination.read` in `open` | Fixed — `O_NONBLOCK`; FIFO test with a hang-as-failure timeout |
+| F2-1 | `alerts.md` said `PREVIOUS_MANIFEST_UNAVAILABLE_FOR_COMPARISON` is never expected on a no-delete store; a read error or the run's bound also writes it | Fixed — trigger and expectation reworded (alerts and runbook) |
+| T2-1 | Manual-test record: count not reproducible, "two strings" note on one row only, one verifier row showed a pre-fix string | Fixed — counting command recorded, both rows noted |
+| T2-2 | The step-2 anchored-tenant check stayed green when swapped for the enabled count | Fixed — new case, red-proven |
+| T2-3 | `audit-anchor-kid`'s parsed-key compare untested for a key archived without a newline | Fixed — new destination in the case, red-proven |
+| T2-4 | `skipped_no_tenants` with `chainEnabledTenantCount > 0` had no metric-filter scenario | Fixed — two scenarios |
+
+Mutation spot-checks by the testing expert on the round-1 fixes: every guard reddened its
+test except the two that became T2-2 and T2-3.
+
+## Recurring Issue Check (round-2 delta)
+Functionality: R29 F2-1; closed R48, R56/R38 (fresh-publish entry), R3; R43 no widening.
+Security: R4/R49 S2-1; R48 S2-2 (residual of S-5); closed R3, R45, RS3, RS6; R43 no widening.
+Testing: R29 T2-1; RT7 T2-2, T2-3; R19/RT1 T2-4; closed R33, R34, R35/R50, RT3, RT6.

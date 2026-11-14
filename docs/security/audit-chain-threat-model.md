@@ -344,14 +344,35 @@ log line, which leaves the database's reach:
 - a tenant's `epoch` changed, which takes it out of the `chain_seq` comparison →
   `EPOCH_CHANGED` (no code path writes the column); the verifier prints a warning.
 
-These rows are written on an adopted publish as well as on a fresh one. A database
+These rows are written by every run that ends `published`, for the manifest it
+published — signed by it or adopted — and for every earlier manifest that was stored
+and never settled; a run that ends any other way writes none of them. A database
 writer can force an adopt — fail the commit after the create (a held row lock), let the
 retry find the stored object — and an adopt signs nothing, so it has no chained-to
 manifest in hand. It reads the previous manifest its stored manifest names back from the
 primary, holds it to the `sha256` that manifest carries, and compares against it; when
-that object is missing, does not verify or has another hash, the publish writes
-`PREVIOUS_MANIFEST_UNAVAILABLE_FOR_COMPARISON` instead of passing silently. A boundary
-adopted repeatedly writes the rows with each adopt, bounded by the attempt cap.
+that object is missing, does not verify, has another hash or cannot be read inside the
+run's bound, the publish writes `PREVIOUS_MANIFEST_UNAVAILABLE_FOR_COMPARISON` instead
+of passing silently. A boundary adopted repeatedly writes the rows with each adopt,
+bounded by the attempt cap.
+
+The same writer can keep the commit failing through every attempt of a boundary, so
+that its manifest — already without the tenant — is stored and no run of that boundary
+ends `published`; the next boundary's manifest then chains to one that lacks the tenant
+too. So a publish does not stop at the manifest it chains to: from there it walks back
+through every manifest dated after the published high-water (the greatest
+`last_published_at`, read under the lock before the publish writes it; every manifest
+when no row has one), reads each one's previous manifest back as an adopt does, and
+writes the rows for it, `comparedArtifactKey` naming the manifest a row is about. A
+manifest dated on the high-water's date is one a publish settled, and with it compared.
+The walk reads under the run's one destination bound and has no cap of its own; a read
+that fails or outlasts the bound ends it with the unavailable row. The high-water is a
+database value. Moving it back only widens the walk. Moving it forward past what the
+primary holds fails every run closed (above); moved onto the date of a manifest that is
+stored and unsettled, it makes that manifest count as settled and its comparison is
+skipped. What remains then is what storing a manifest without a publish always leaves:
+the failed run's `commit_failed_after_upload` alarm and its `AUDIT_ANCHOR_PUBLISH_FAILED`
+row.
 
 **Out of reach.** The publisher signs what the anchor rows hold at the boundary. A
 writer who rewrites `audit_logs` and the tenant's anchor row consistently before a

@@ -237,6 +237,12 @@ beforeAll(async () => {
   lines.adopted = await cadence(makeDb(), { destinations: [await primaryHolding(ours(BOUNDARY))] });
   lines.never_enabled = await cadence(makeDb({ enabled: [], anchors: [] }));
   lines.disabled_after_enabled = await cadence(makeDb({ enabled: [], anchors: [TENANT] }));
+  // Enabled tenants, none with an anchor row yet: nothing to publish, and the
+  // primary alone says whether the chain was ever on.
+  lines.enabled_no_anchor_row = await cadence(makeDb({ enabled: [TENANT], anchors: [] }));
+  lines.enabled_no_anchor_row_after_manifest = await cadence(makeDb({ enabled: [TENANT], anchors: [] }), {
+    destinations: [await primaryHolding(ours(PREV_BOUNDARY))],
+  });
   lines.already_published = await cadence(makeDb({ highWater: new Date(clockInto(BOUNDARY)()) }), {
     destinations: [await primaryHolding(ours(BOUNDARY))],
   });
@@ -348,6 +354,12 @@ describe("publisher log lines vs their metric filters", () => {
     expect(cadenceLine("adopted")).toEqual([expect.objectContaining({ kind: "published", adopted: true })]);
     expect(kinds("never_enabled")).toEqual(["skipped_no_tenants"]);
     expect(kinds("disabled_after_enabled")).toEqual(["skipped_no_tenants"]);
+    expect(cadenceLine("enabled_no_anchor_row")).toEqual([
+      expect.objectContaining({ kind: "skipped_no_tenants", everChainEnabled: false, chainEnabledTenantCount: 1 }),
+    ]);
+    expect(cadenceLine("enabled_no_anchor_row_after_manifest")).toEqual([
+      expect.objectContaining({ kind: "skipped_no_tenants", everChainEnabled: true, chainEnabledTenantCount: 1 }),
+    ]);
     expect(kinds("already_published")).toEqual(["skipped_already_published"]);
     expect(kinds("stale_object")).toEqual(["skipped_already_published"]);
     expect(lines.stale_object.map((l) => l._logType)).toContain("audit-anchor-publisher.stale_boundary");
@@ -368,8 +380,13 @@ describe("publisher log lines vs their metric filters", () => {
     expect(kinds("commit_failed")).toEqual(["failed"]);
   });
 
-  it("counts a healthy boundary only for published, adopted and never-enabled skipped_no_tenants", () => {
-    expect(matchingScenarios(pattern("audit_anchor_cadence_healthy"))).toEqual(["adopted", "never_enabled", "published"]);
+  it("counts a healthy boundary only for published, adopted and a skipped_no_tenants where the chain was never on", () => {
+    expect(matchingScenarios(pattern("audit_anchor_cadence_healthy"))).toEqual([
+      "adopted",
+      "enabled_no_anchor_row",
+      "never_enabled",
+      "published",
+    ]);
   });
 
   it("counts exactly one healthy line per healthy boundary", () => {
@@ -377,6 +394,18 @@ describe("publisher log lines vs their metric filters", () => {
     expect(lines.published.filter((l) => matchesFilterPattern(p, l))).toHaveLength(1);
     expect(lines.adopted.filter((l) => matchesFilterPattern(p, l))).toHaveLength(1);
     expect(lines.never_enabled.filter((l) => matchesFilterPattern(p, l))).toHaveLength(1);
+    expect(lines.enabled_no_anchor_row.filter((l) => matchesFilterPattern(p, l))).toHaveLength(1);
+  });
+
+  it("puts enabled tenants without an anchor row over a stored manifest on no filter: not healthy, no failure, not fell-to-zero", () => {
+    const name = "enabled_no_anchor_row_after_manifest";
+    const patterns = [
+      pattern("audit_anchor_cadence_healthy"),
+      pattern("audit_anchor_chain_enabled_fell_to_zero"),
+      pattern("audit_anchor_publisher_dead_letter"),
+      ...Object.entries(FAILURE_LOG_TYPES).map(([key, value]) => pattern("audit_anchor_publisher_failure", { key, value })),
+    ];
+    expect(patterns.filter((p) => lines[name].some((l) => matchesFilterPattern(p, l)))).toEqual([]);
   });
 
   it.each(FAIL_CLOSED_SCENARIOS)("puts %s on the cadence_failed alarm path and on no other failure filter", (name) => {

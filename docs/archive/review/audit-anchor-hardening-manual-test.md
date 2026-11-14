@@ -7,7 +7,7 @@ Run on 2026-11-14 (JST) in the branch's worktree, against the worktree's own dat
 logs (checked by grepping the logs and statements for both seeds: 0 files).
 
 Runbook under test: `docs/operations/audit-anchor-rotation-runbook.md`, blob
-`80234a8ae27da2b4bcf3f91e8fe16db3f2873440` (`git hash-object` of the file committed with this
+`ed08a85298a47c933557f5ee4ba0f90de2b31eae` (`git hash-object` of the file committed with this
 record). Its commands were extracted with
 
 ```
@@ -15,10 +15,13 @@ awk '/^[[:space:]]*```(bash|sql)/{f=1; next} /^[[:space:]]*```/{f=0} f' docs/ope
 grep -noE '`npm run [a-z:-]+[^`]*`' docs/operations/audit-anchor-rotation-runbook.md
 ```
 
-57 non-comment lines inside `bash`/`sql` fences and one inline `npm run` span (so an empty
-extraction would show as 0, not as a clean table). The script runs in section 2 were made
-before the code-review fixes; the fixes changed two output strings, noted in the rows, and
-the scripts' behaviour on those paths is covered by `scripts/__tests__/audit-anchor-keys.test.ts`.
+71 lines inside `bash`/`sql` fences that are neither blank nor a `#` / `-- ` comment (the
+awk output piped through `grep -cvE '^\s*(#|-- |$)'`; continuation lines count), and one inline
+`npm run` span — so an empty extraction would show as 0, not as a clean table. The runs in
+sections 2 and 3 were made before the code-review fixes; the fixes changed two output strings,
+each noted in its row (`publish-pubkey`'s "already held" line, and the quoting of the `typ`
+in the CLI's error), and the behaviour on those paths is covered by
+`scripts/__tests__/audit-anchor-keys.test.ts` and the CLI vector tests.
 
 ## Pre-conditions
 
@@ -89,7 +92,7 @@ create-only scripts. To be run by the operator on the first real rotation (SC6).
 | openssl procedure of `audit-anchor-verification.md` on `rotation.jws` with the old public key | verifies | `Signature Verified Successfully`, exit 0 |
 | `passwd-sso audit-verify --manifest <published manifest> --public-key <right key>` | PASS | `PASS`, exit 0 |
 | same with another valid key | kid mismatch | `JWS kid … does not name the supplied public key (…)`, exit 19 |
-| `audit-verify` on a statement | not a manifest | `Invalid JWS typ: passwd-sso.audit-anchor-statement.v1; expected passwd-sso.audit-anchor.v1`, exit 11 |
+| `audit-verify` on a statement | not a manifest | `Invalid JWS typ: passwd-sso.audit-anchor-statement.v1; expected passwd-sso.audit-anchor.v1`, exit 11 (as run; the CLI now prints the value JSON-quoted — `Invalid JWS typ: "passwd-sso.audit-anchor-statement.v1"; …` — same exit code) |
 
 ## 4. Adversarial scenarios
 

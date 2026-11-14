@@ -385,7 +385,7 @@ and archive keys.
 | `<destination>_READ_FAILED:<code>` (stage `upload`) | A secondary already held the boundary's key and could not be read back for the compare (`ARTIFACT_TOO_LARGE`: the object there is larger than 8 MiB). Pause as above. | — (a secondary is never the Terraform bucket: S3 is the primary whenever it is configured) | Fix access to the secondary. |
 | `<destination>_MIRROR_DIVERGED` (stage `upload`) | A secondary holds other bytes than the primary at the boundary's key. Pause as above. | — | The primary is authoritative: find out what wrote the secondary's object, remove it, and let the retry copy the primary's bytes. After a chain restart see "Restarting the chain". |
 | `CADENCE_FAILED:<code>` (stage `upload`) | A database or other error after the primary held the boundary's object and before every secondary did. No pause. | Fix what `<code>` names. The retry adopts the stored object. | The same. |
-| `COMMIT_FAILED_AFTER_UPLOAD:<code>` (stage `after_upload`) | Every destination holds the object; the database commit failed. `<code>` is the `error.code` of the `audit-anchor-publisher.commit_failed_after_upload` line. No pause. | Fix the database. The retry adopts the stored object and settles it. | The same. |
+| `COMMIT_FAILED_AFTER_UPLOAD:<code>` (stage `after_upload`) | Every destination holds the object; the database commit failed. `<code>` is the `error.code` of the `audit-anchor-publisher.commit_failed_after_upload` line. No pause. | Fix the database. The retry adopts the stored object and settles it. If no retry commits before the next boundary, that boundary's publish chains to the stored object and writes the detection rows for it (`comparedArtifactKey` is its key). | The same. |
 
 Not failures, but never the healthy line either:
 
@@ -407,14 +407,18 @@ beside its `AUDIT_ANCHOR_PUBLISHED` row; none fails the run and none is alarmed
 
 | `failureReason` | Trigger | What to do |
 |---|---|---|
-| `TENANT_DROPPED_FROM_MANIFEST` (`count`) | Tenants of the previous manifest are absent from this one. | Expected once after a tag-secret rotation. Otherwise find who cleared the tenant's `audit_chain_enabled` or deleted its anchor row. |
+| `TENANT_DROPPED_FROM_MANIFEST` (`count`) | Tenants of the manifest `comparedArtifactKey` chains to are absent from it. | Expected once after a tag-secret rotation. Otherwise find who cleared the tenant's `audit_chain_enabled` or deleted its anchor row. |
 | `CHAIN_SEQ_REGRESSION` (`count`) | A tenant's `chainSeq` is below the previous manifest's, in the same epoch. | Security incident ("Chain-sequence regression"). |
 | `EPOCH_CHANGED` (`count`) | A tenant's `epoch` differs from the previous manifest's. No code path writes it, and a changed epoch takes the tenant out of the regression check. | Database-write incident: find who changed `audit_chain_anchors.epoch`, and compare the tenant's `chainSeq` across the two manifests by hand. |
-| `PREVIOUS_MANIFEST_UNAVAILABLE_FOR_COMPARISON` | An adopted publish could not read back the previous manifest its manifest names, or that object is not the one named: the three rows above were not computed. | Find out why the previous manifest is missing or changed (on the Terraform bucket it cannot be, without a delete marker or a policy change); compare the two manifests by hand with `audit-verify --prior-manifest`. |
+| `PREVIOUS_MANIFEST_UNAVAILABLE_FOR_COMPARISON` | A publish could not read back the previous manifest that `comparedArtifactKey` names (the manifest it adopted, or an earlier one no publish settled), or that object is not the one named, or the read-back failed or hit the run's bound (the `previous_manifest_unavailable` line's `detail` is then an error code): the three rows above were not computed for that manifest. | Expected only after a destination error; fix it. Otherwise find out why the previous manifest is missing or changed (on the Terraform bucket it cannot be, without a delete marker or a policy change). Either way compare the two manifests by hand with `audit-verify --prior-manifest`. |
 
 The three comparison rows are written whether the run signed the manifest or adopted one an
 earlier run stored: an adopt reads the previous manifest back from the primary. A boundary
-adopted more than once repeats them, at most three times (the attempt cap).
+adopted more than once repeats them, at most three times (the attempt cap). Each row carries
+`comparedArtifactKey`, the manifest it is about. That is the published manifest
+(`artifactKey`), or an earlier one that was stored and never settled — every run of its
+boundary ended `COMMIT_FAILED_AFTER_UPLOAD` or at the cap: the next publish that commits
+compares each such manifest, back to the last settled one, with the manifest it chains to.
 
 Where a step waits for the publisher: a failed run is retried every 15 minutes, at most three
 times per process and never within the last 30 minutes before the next boundary. When those
@@ -686,7 +690,9 @@ nothing reads or writes them, and whatever they hold changes nothing.
 - The scheduler retries the boundary every 15 minutes, at most three times per process and not
   later than 30 minutes before the next one. At most three runs per boundary reach the publish
   transaction, across restarts; the fourth reports `upload_cap_reached` (alarmed) and writes
-  one `UPLOAD_ATTEMPT_CAP_REACHED` row. A retry that finds the boundary's manifest already
+  one `UPLOAD_ATTEMPT_CAP_REACHED` row. A manifest those runs stored and none settled is
+  compared with its previous one by the next boundary's publish (the detection rows'
+  `comparedArtifactKey`). A retry that finds the boundary's manifest already
   at the primary adopts it — it writes no second version, copies the same bytes to the
   secondaries, and clears the pause. See `docs/operations/alerts.md` "Audit anchor publisher".
 - A secondary that stays down fails each day's run after the primary holds that day's

@@ -798,7 +798,11 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
       "TENANT_DROPPED_FROM_MANIFEST",
     ]);
     const [row] = (await publisherRowsFor(c.boundaryAt(1))).filter((r) => r.failureReason !== null);
-    expect(row?.metadata).toMatchObject({ count: 1, artifactKey: c.manifestKey(c.boundaryAt(1)) });
+    expect(row?.metadata).toMatchObject({
+      count: 1,
+      artifactKey: c.manifestKey(c.boundaryAt(1)),
+      comparedArtifactKey: c.manifestKey(c.boundaryAt(1)),
+    });
   });
 
   it("a lost commit after a tenant was disabled: the retry adopts and still emits the one TENANT_DROPPED_FROM_MANIFEST row", async () => {
@@ -819,6 +823,7 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
     expect(rows.find((r) => r.failureReason === "TENANT_DROPPED_FROM_MANIFEST")?.metadata).toMatchObject({
       count: 1,
       artifactKey: c.manifestKey(next),
+      comparedArtifactKey: c.manifestKey(next),
     });
 
     // Allow: the same lost commit and adopt over an unchanged tenant set emits no detection row.
@@ -826,6 +831,36 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
     await runAt(third, [storing.dest], { hooks: { afterUpload: async () => { throw new Error("commit lost"); } } });
     expect(await runAt(third, [storing.dest])).toMatchObject({ kind: "published", adopted: true });
     expect(failureReasons(await publisherRowsFor(third))).toEqual(["COMMIT_FAILED_AFTER_UPLOAD:unknown"]);
+  });
+
+  it("a boundary stored without a disabled tenant and never settled: the next boundary's publish reports the drop once", async () => {
+    const { dest } = await c.filesystem();
+    expect((await runAt(c.boundary, [dest])).kind).toBe("published");
+    const settledAt = await lastPublished();
+    await setChainEnabled(ctx.su, tenantB, false);
+    const unsettled = c.boundaryAt(1);
+    const lost = await runAt(unsettled, [dest], { hooks: { afterUpload: async () => { throw new Error("commit lost"); } } });
+    expect(lost).toMatchObject({ kind: "failed", stage: "after_upload" });
+    // Stored, and the database still records the first boundary's publish.
+    expect(await sortedKeys(dest)).toContain(c.manifestKey(unsettled));
+    expect(await lastPublished()).toEqual(settledAt);
+
+    const next = c.boundaryAt(2);
+    expect(await runAt(next, [dest])).toMatchObject({ kind: "published", adopted: false, tenantsCount: 1 });
+
+    // The new manifest and the one it chains to both lack the tenant.
+    const rows = await publisherRowsFor(next);
+    expect(failureReasons(rows)).toEqual(["MISSING_PRIOR_CADENCE_PUBLICATION", "TENANT_DROPPED_FROM_MANIFEST"]);
+    expect(rows.find((r) => r.failureReason === "TENANT_DROPPED_FROM_MANIFEST")?.metadata).toMatchObject({
+      count: 1,
+      artifactKey: c.manifestKey(next),
+      comparedArtifactKey: c.manifestKey(unsettled),
+    });
+
+    // Allow: the manifest chained to is now settled, so it is not compared again.
+    const after = c.boundaryAt(3);
+    expect((await runAt(after, [dest])).kind).toBe("published");
+    expect(failureReasons(await publisherRowsFor(after))).toEqual([]);
   });
 
   it("a chain_seq lowered between two publishes emits one CHAIN_SEQ_REGRESSION row; an unchanged one, none", async () => {

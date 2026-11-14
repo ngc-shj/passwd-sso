@@ -211,14 +211,18 @@ describe("kid", () => {
 
   it("reports whether the key is archived at each destination", async () => {
     const archived = new InMemoryDestination("archived");
+    // As an earlier runbook archived it: the 64 chars, no newline.
+    const bare = new InMemoryDestination("bare");
     const absent = new InMemoryDestination("absent");
     const different = new InMemoryDestination("different");
     const key = publicKeyArtifactKey(KID);
     await archived.create({ artifactBytes: Buffer.from(`${PUBLIC_HEX}\n`), artifactKey: key, contentType: ANCHOR_ARTIFACT_CONTENT_TYPE.PUBLIC_KEY });
+    await bare.create({ artifactBytes: Buffer.from(PUBLIC_HEX), artifactKey: key, contentType: ANCHOR_ARTIFACT_CONTENT_TYPE.PUBLIC_KEY });
     await different.create({ artifactBytes: Buffer.from(`${NEW_PUBLIC_HEX}\n`), artifactKey: key, contentType: ANCHOR_ARTIFACT_CONTENT_TYPE.PUBLIC_KEY });
-    const h = harness([archived, absent, different]);
+    const h = harness([archived, bare, absent, different]);
     expect(await h.run("kid", "--key-file", OLD_KEY())).toBe(0);
     expect(h.stdout()).toContain("archived[archived]=yes");
+    expect(h.stdout()).toContain("archived[bare]=yes");
     expect(h.stdout()).toContain("archived[absent]=no");
     expect(h.stdout()).toContain("archived[different]=different");
   });

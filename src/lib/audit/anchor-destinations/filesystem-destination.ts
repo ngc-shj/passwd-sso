@@ -16,10 +16,15 @@ const READ_CHUNK_BYTES = 64 * 1024;
 // Absent on platforms without it; there a symlink is followed and the
 // regular-file check on the opened target is what remains.
 const O_NOFOLLOW = fsConstants.O_NOFOLLOW ?? 0;
+// Without it, opening a FIFO read-only blocks in `open` until a writer
+// appears, holding a threadpool thread no signal reaches. With it the FIFO
+// opens at once and the regular-file check refuses it. Absent on platforms
+// without it; a regular file reads the same either way.
+const O_NONBLOCK = fsConstants.O_NONBLOCK ?? 0;
 
 /**
  * The name of an artifact key holds something that is not a regular file — a
- * symlink, a directory, a device. `create` only ever links regular files, so
+ * symlink, a directory, a FIFO, a device. `create` only ever links regular files, so
  * it is not an artifact. Its `code` is what a failure reason carries.
  */
 export class ArtifactNotRegularFileError extends Error {
@@ -98,7 +103,7 @@ export class FilesystemDestination implements AnchorDestination {
     assertAnchorArtifactKey(artifactKey);
     let handle: fs.FileHandle;
     try {
-      handle = await fs.open(path.join(this.basePath, artifactKey), fsConstants.O_RDONLY | O_NOFOLLOW);
+      handle = await fs.open(path.join(this.basePath, artifactKey), fsConstants.O_RDONLY | O_NOFOLLOW | O_NONBLOCK);
     } catch (err) {
       if (errnoOf(err) === "ENOENT") return null;
       // What O_NOFOLLOW answers for a symlink at the name.
