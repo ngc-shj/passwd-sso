@@ -343,7 +343,17 @@ jobs:
           # This is the role local runs have always used via .env; files that
           # depend on it assert it with `assertRlsApplies`.
           DATABASE_URL: postgresql://passwd_app:passwd_app_pass@localhost:5432/passwd_test
+          # The harness appends which roles set which bypass grants (C11); the
+          # next step reads it. A fresh path per run: the harness only appends.
+          RLS_GRANT_EVIDENCE_FILE: ${{ runner.temp }}/rls-grant-evidence.jsonl
         run: npm run test:integration
+
+      # Runs only when the suite passed: the file then describes a run where any
+      # bypass report or refusal failed a test.
+      - name: Check the per-grant evidence record
+        env:
+          RLS_GRANT_EVIDENCE_FILE: ${{ runner.temp }}/rls-grant-evidence.jsonl
+        run: npm run check:rls-grant-evidence
 
   # C1 (#742): a SAML sign-in must not complete through one Jackson connection's
   # client with another connection's IdP. The app's side is "no PKCE, each

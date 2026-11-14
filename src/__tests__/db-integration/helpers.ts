@@ -112,6 +112,11 @@ export function appConnectionString(): string {
   return getConnectionString("app");
 }
 
+/** The connection string the harness seeds and cleans up through: the migration role. */
+export function superuserConnectionString(): string {
+  return getConnectionString("superuser");
+}
+
 /** The connection string for the audit-chain verify worker's read-only role. */
 export function auditChainVerifierConnectionString(): string {
   return getConnectionString("audit-chain-verifier");

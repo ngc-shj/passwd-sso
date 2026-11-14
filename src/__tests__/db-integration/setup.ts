@@ -141,6 +141,22 @@ try {
   const { allRoleConnectionStrings } = await import("./helpers");
   const { roleUrlMismatches } = await import("./role-url-consistency");
   const { superuser, ...roleUrls } = allRoleConnectionStrings();
+  if (process.env.RLS_GRANT_EVIDENCE_FILE) {
+    // The attributes of every role the harness connects as, for the evidence
+    // consumer to tell a restricted connection from an exempt one.
+    const { HARNESS_ROLES } = await import("../../../scripts/checks/check-rls-grant-evidence");
+    const { connectionUser, recordRoleAttributes } = await import("./rls-grant-evidence-recorder");
+    const names = new Set<string>([
+      ...HARNESS_ROLES,
+      ...Object.values({ superuser, ...roleUrls }).map(connectionUser),
+      new URL(databaseUrl).username,
+    ]);
+    const { rows: attrs } = await probe.query<{ name: string; rolsuper: boolean; rolbypassrls: boolean }>(
+      `SELECT rolname AS name, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = ANY($1::text[])`,
+      [[...names]],
+    );
+    recordRoleAttributes(attrs);
+  }
   const mismatched = roleUrlMismatches(superuser, roleUrls);
   if (mismatched.length > 0) {
     throw new Error(
@@ -196,6 +212,7 @@ function failOnReports(when: string): void {
 const CONCURRENT_QUERY = "client is already executing a query";
 const concurrentQueryReports: string[] = [];
 type PgClientInternals = {
+  connectionParameters?: { user?: string; options?: string };
   _activeQuery?: unknown;
   _queryQueue?: unknown[];
   pipeline?: boolean;
@@ -211,6 +228,7 @@ if (!("_activeQuery" in shape) || !Array.isArray(shape._queryQueue)) {
 const { readFileSync } = await import("node:fs");
 const { fileURLToPath } = await import("node:url");
 const { fromPrismaJoinChildren } = await import("./prisma-join-children");
+const { recordGrantEvidence } = await import("./rls-grant-evidence-recorder");
 const sourceLines = new Map<string, string[]>();
 function readSourceLine(location: string, line: number): string | null {
   const path = location.startsWith("file://") ? fileURLToPath(location) : location;
@@ -234,6 +252,7 @@ clientProto.query = function (this: PgClientInternals, ...args: unknown[]) {
     Error.stackTraceLimit = limit;
     if (!fromPrismaJoinChildren(stack, readSourceLine)) concurrentQueryReports.push(stack);
   }
+  recordGrantEvidence(this.connectionParameters, args);
   return originalQuery.apply(this, args);
 };
 // Positive control: two queries at once on one client must produce exactly one

@@ -22,10 +22,10 @@
  * boundary. Code this analysis does not follow (the shapes recorded in #911
  * and #910, and future ones) can reach a model its grant does not list. The
  * database is the adjudicator: a bypassed statement that examines a row of an
- * RLS table outside `app.bypass_tables` is reported now (report mode, a
- * WARNING the pool factory's listener logs) and will be refused once SC5
- * flips `public.rls_bypass_enforced()`. This gate catches the honest mistake
- * before that report does.
+ * RLS table outside `app.bypass_tables` raises a WARNING (which the pool
+ * factory's listener logs) and is then refused with 42501, because
+ * `public.rls_bypass_enforced()` returns true. This gate catches the honest
+ * mistake before the database does.
  *
  * Writer rule: raw-SQL string and template arguments ($executeRaw/$queryRaw
  * and their Unsafe forms, Prisma.sql/Prisma.raw, a pg `query` call), with
@@ -2855,7 +2855,10 @@ const POOL_RULE_ALLOWLIST = new Map([
   ["src/__tests__/db-integration/audit-db-grants.integration.test.ts", "the superuser client that drives the grant audit under test"],
   ["src/__tests__/db-integration/retire-dcr-cleanup-worker.integration.test.ts", "superuser clients that run the role-retirement migration body under test and check its residue"],
   ["src/__tests__/db-integration/team-member-key-prune.integration.test.ts", "superuser clients for the rolled-back RDS-shaped definer-owner cell and its fresh-connection leak check, and a passwd_app client probing the EXECUTE denial; none sets a bypass through application code"],
-  ["src/__tests__/db-integration/rls-bypass-grants.integration.test.ts", "the old-code cell: a pool deliberately WITHOUT the factory's listener, proving report mode admits old code (E2)"],
+  ["src/__tests__/db-integration/definer-audit-functions-grant.integration.test.ts", "superuser client for the rolled-back owner-swap cell of the two audit definer routines; it sets the caller's grant with the statement setBypassGucs sends, since the routine under test reads it"],
+  ["src/__tests__/db-integration/rds-probe-role.ts", "superuser clients that create, sweep and drop the owner-shaped probe role; no bypass is set"],
+  ["src/__tests__/db-integration/rds-probe-role.integration.test.ts", "superuser clients that list and create probe roles to test the helper's sweep; no bypass is set"],
+  ["src/__tests__/db-integration/rls-bypass-grants.integration.test.ts", "the old-code cells: pools deliberately WITHOUT the factory's listener, standing in for code older than the grant requirement (refused without a grant, admitted with one)"],
 ]);
 // A regex, as check-raw-sql-usage matches it: a string literal naming a Prisma
 // package outside an import is that gate's SPECIFIER_LITERAL.
