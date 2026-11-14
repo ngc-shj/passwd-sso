@@ -87,7 +87,7 @@ own freshly migrated database. Not run to green locally for that reason.
 C6 counts statements with a spy on `pg`'s `Client.prototype.query` in B7. `check-bypass-rls`'s pool
 rule refuses any use of the `pg` `Client` binding other than `new` outside the pool factory, so the
 full unit suite failed on `check-bypass-rls.test.mjs` ("names every real BYPASS_GRANT member…") with
-`scim-bulk-approve.integration.test.ts:691  Client used other than by new`. The file is added to
+`Client used other than by new` in the new integration test file. The file is added to
 `POOL_RULE_ALLOWLIST` with its reason (it builds no connection), as seven other test files are.
 The plan's C7 table did not list this gate.
 
@@ -103,3 +103,32 @@ The plan's C7 table did not list this gate.
     test are byte-identical to the primary checkout's (`diff -q`), where the file passes 239/239.
 - Integration: `scim-bulk-approve.integration.test.ts` 11/11 (three runs),
   `scim-team-admission-approval.integration.test.ts` 46/46, both against `passwd_sso_wt_1005`.
+
+## D7 — Red-proofs added after the Phase 2 self-check (T1)
+
+The self-check found the plan's gate red-proofs and its "per-row transactions → B8" unrecorded.
+Run on scratch copies; the worktree was not touched.
+
+Gate rule 7 (`check-team-rotation-input-lock.mjs`), one mutation of a scratch copy of the gate at
+a time, the unchanged self-test file run against it. Control: 87 passed on the real tree and on
+the unmutated scratch copy. Every mutation failed a test that names its clause:
+
+| Mutation of the gate | Self-tests that failed |
+|----------------------|------------------------|
+| V7(b): `@/` specifiers not resolved | "refuses a fifth file importing the module by alias" (+12 using `@/` fixtures) |
+| V7(b): relative specifiers not resolved | "…by relative path", "…a relative import that spells the extension", "…a literal require()" (+2) |
+| V7(b): `import()` not read | "refuses a literal import() of the module" (+1) |
+| V7(b): `export … from` not read | "refuses export * from the module", "…export { … } from…", "…re-export … even from an admission route" |
+| V7(b): path compared by substring | "accepts a page importing the near-named constants file" (the allow fixture) |
+| V7(c): `lockTenantRows` call check removed | "refuses an admission route calling lockTenantRows" |
+| V7(d): routes also allowed `logAuditInTx` | "refuses an admission route importing logAuditInTx…" (+2) |
+| V7(d): only `@/lib/audit/audit` judged | "…importing enqueueAudit from audit-outbox", "…enqueueAuditInTx from audit-outbox-in-tx" |
+| V7(d): module also allowed `logAuditAsync` | "refuses the module importing logAuditAsync" |
+| V7(a): allowlist back on the approve route | "passes the admission module's approve CAS…", "refuses the approve CAS's scimApprovalPending: false in the old home…" |
+
+Per-row transactions: a scratch copy of the bulk-approve route that opens one
+`withTeamTenantRls` transaction per target, aliased in for the integration file. Control 11/11.
+Mutated: B8 red (`scim_approval_pending: false` where `true` was expected — the rows admitted
+before the failing audit call stayed committed), and also B5b (rows committed before the lock
+conflict) and B6 (`expected 'settled' to be 'blocked-on-parked'`: with per-row locks the second
+request no longer queues behind the first).

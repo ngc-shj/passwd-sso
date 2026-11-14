@@ -14,7 +14,7 @@ measurement); **T1 + F8-A** (fail-closed gate). S4 + T9 touch the #1035 obligati
 
 ## Functionality Findings
 
-- F1 Minor (design) — Reject audit `role` source unspecified (reject/route.ts:131 uses the locked
+- F1 Minor (design) — Reject audit `role` source unspecified (the single reject route writes the locked
   row's role). **Resolved**: C1/V5, U1.
 - F2 Minor (design) — `memberId` case and duplicate detection unspecified. **Resolved**: C2
   (schema lowercases, uniqueness on that form), U2/U3.
