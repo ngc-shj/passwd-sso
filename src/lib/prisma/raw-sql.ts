@@ -8,10 +8,14 @@
  * the only way to get text back out, and it works from that membership, not
  * from anything the value itself exposes.
  *
- * Two registries (identifier text, fragment text) rather than one: `trustedSql`
- * accepts either kind as a substitution, but `renderSql` accepts only a
- * fragment — an identifier is text for a position, not a full statement — and
- * distinguishing them needs more than a single string value per object.
+ * Three registries (identifier text, table text, fragment text) rather than
+ * one: `trustedSql` accepts any kind as a substitution, but `renderSql` accepts
+ * only a fragment — an identifier is text for a position, not a full statement
+ * — and distinguishing them needs more than a single string value per object.
+ * A table is its own kind because a bearer-token table may be spliced only
+ * where the template's own text makes it a relation (see `sqlTable`); an
+ * identifier never names one, and `joinSql` accepts neither a table nor, for
+ * that reason, anything it cannot place.
  *
  * A genuine value is `Object.create(null)`, frozen, and holds no text in any
  * own property; its only members are a shared throwing function on
@@ -30,6 +34,10 @@ export interface SqlIdentifier {
   readonly __sqlIdentifier: true;
 }
 
+export interface SqlTable {
+  readonly __sqlTable: true;
+}
+
 export interface SqlFragment {
   readonly __sqlFragment: true;
 }
@@ -42,11 +50,19 @@ const create = Object.create;
 const isSafeInteger = Number.isSafeInteger;
 
 const identifierRegistry = new WeakMap<object, string>();
+const tableRegistry = new WeakMap<object, string>();
 const fragmentRegistry = new WeakMap<object, string>();
 const identifierGet = WeakMap.prototype.get.bind(identifierRegistry) as (
   key: unknown,
 ) => string | undefined;
 const identifierSet = WeakMap.prototype.set.bind(identifierRegistry) as (
+  key: object,
+  value: string,
+) => unknown;
+const tableGet = WeakMap.prototype.get.bind(tableRegistry) as (
+  key: unknown,
+) => string | undefined;
+const tableSet = WeakMap.prototype.set.bind(tableRegistry) as (
   key: object,
   value: string,
 ) => unknown;
@@ -60,7 +76,7 @@ const fragmentSet = WeakMap.prototype.set.bind(fragmentRegistry) as (
 
 function throwOnConversion(): never {
   throw new TypeError(
-    "SqlIdentifier/SqlFragment must not be converted to a primitive, string, " +
+    "SqlIdentifier/SqlTable/SqlFragment must not be converted to a primitive, string, " +
       "or JSON value — use renderSql()",
   );
 }
@@ -111,6 +127,41 @@ const reservedHas = Set.prototype.has.bind(RESERVED_SQL_WORDS) as (
   value: string,
 ) => boolean;
 
+// `@@map` names of every model declaring a digest field. Written as literals
+// because the bearer passkey gate reads them from the AST and fails unless the
+// set equals the schema's token tables; `sqlIdentifier` refuses them, so a
+// token table can reach rendered SQL only through `sqlTable`.
+export const TOKEN_TABLE_NAMES: readonly string[] = freeze([
+  "extension_tokens",
+  "extension_bridge_codes",
+  "mobile_bridge_codes",
+  "scim_tokens",
+  "password_shares",
+  "emergency_access_grants",
+  "admin_vault_resets",
+  "service_account_tokens",
+  "operator_tokens",
+  "api_keys",
+  "mcp_authorization_codes",
+  "mcp_access_tokens",
+  "mcp_refresh_tokens",
+]);
+const tokenTableHas = Set.prototype.has.bind(new Set<string>(TOKEN_TABLE_NAMES)) as (
+  value: string,
+) => boolean;
+
+function assertSqlName(caller: string, name: string): void {
+  if (typeof name !== "string") {
+    throw new TypeError(`${caller}: name must be a string`);
+  }
+  if (regExec(name) === null) {
+    throw new Error(`${caller}: "${name}" must match ^[a-z_]+$`);
+  }
+  if (reservedHas(name)) {
+    throw new Error(`${caller}: "${name}" is a reserved PostgreSQL keyword`);
+  }
+}
+
 /**
  * Mint a genuine `SqlIdentifier` from a lowercase/underscore name that is not
  * a reserved PostgreSQL keyword. Precondition (enforced by review, not here):
@@ -119,14 +170,12 @@ const reservedHas = Set.prototype.has.bind(RESERVED_SQL_WORDS) as (
  * name can still choose the wrong table or column).
  */
 export function sqlIdentifier(name: string): SqlIdentifier {
-  if (typeof name !== "string") {
-    throw new TypeError("sqlIdentifier: name must be a string");
-  }
-  if (regExec(name) === null) {
-    throw new Error(`sqlIdentifier: "${name}" must match ^[a-z_]+$`);
-  }
-  if (reservedHas(name)) {
-    throw new Error(`sqlIdentifier: "${name}" is a reserved PostgreSQL keyword`);
+  assertSqlName("sqlIdentifier", name);
+  if (tokenTableHas(name)) {
+    throw refusal(
+      RAW_SQL_REFUSAL_CODE.TOKEN_TABLE,
+      `sqlIdentifier: "${name}" is a bearer-token table; mint it with sqlTable`,
+    );
   }
   const obj = createGenuineObject();
   identifierSet(obj, name);
@@ -134,15 +183,70 @@ export function sqlIdentifier(name: string): SqlIdentifier {
 }
 
 /**
+ * Mint a genuine `SqlTable` for any table, token tables included. Same syntax
+ * and reserved-word rules (and the same precondition) as `sqlIdentifier`.
+ * `trustedSql` places it only where the template's own text makes it a
+ * relation, so a token table cannot be spliced into a value position
+ * (`to_jsonb(${t})`) that would read its digest column without naming it.
+ */
+export function sqlTable(name: string): SqlTable {
+  assertSqlName("sqlTable", name);
+  const obj = createGenuineObject();
+  tableSet(obj, name);
+  return obj as unknown as SqlTable;
+}
+
+// Where a table substitution may sit, read from the template's own text. A
+// relation keyword as a whole word, then whitespace and an optional opening
+// quote (or the quote alone), directly before the substitution:
+const TABLE_RELATION_RE = /[^A-Za-z0-9_$](?:from|join|update|into|only)(?:[ \t\r\n]+"?|")$/i;
+// ... or a dot (or quote and dot) right after it, making it a qualifier.
+const TABLE_QUALIFIER_RE = /^"?\./;
+// A comment marker in the preceding text could supply the keyword.
+const COMMENT_MARKER_RE = /--|\/\*/;
+const tableRelationExec = RegExp.prototype.exec.bind(TABLE_RELATION_RE) as (
+  input: string,
+) => RegExpExecArray | null;
+const tableQualifierExec = RegExp.prototype.exec.bind(TABLE_QUALIFIER_RE) as (
+  input: string,
+) => RegExpExecArray | null;
+const commentMarkerExec = RegExp.prototype.exec.bind(COMMENT_MARKER_RE) as (
+  input: string,
+) => RegExpExecArray | null;
+
+/**
+ * Throws unless the table substitution between `strings[index]` and
+ * `strings[index + 1]` sits after a relation keyword or before a dot. Only the
+ * directly preceding part is read, so a table next to another substitution has
+ * no keyword to lean on (an empty part matches nothing).
+ */
+function assertTablePosition(strings: TemplateStringsArray, index: number): void {
+  const before = strings[index];
+  const after = strings[index + 1];
+  // The start of the template is a word boundary; the start of a later part is
+  // not (`ts_${x}from ${t}` must not read as a keyword).
+  const boundedBefore = index === 0 ? " " + before : before;
+  const isQualifier = tableQualifierExec(after) !== null;
+  const isRelation = tableRelationExec(boundedBefore) !== null;
+  if (commentMarkerExec(before) !== null || (!isQualifier && !isRelation)) {
+    throw refusal(
+      RAW_SQL_REFUSAL_CODE.TOKEN_TABLE,
+      "trustedSql: a table may be substituted only after FROM, JOIN, UPDATE, INTO or ONLY, " +
+        "or directly before a dot",
+    );
+  }
+}
+
+/**
  * Tagged-template builder. Each substitution must be a genuine
- * `SqlIdentifier` / `SqlFragment`, or a non-negative safe integer — anything
+ * `SqlIdentifier` / `SqlTable` / `SqlFragment`, or a non-negative safe integer — anything
  * else throws. Intended as a template tag only (`` trustedSql`…` ``); this
  * function has no way to tell a real template-strings object from a forged
  * array, so that restriction is enforced by the AST gate, not here.
  */
 export function trustedSql(
   strings: TemplateStringsArray,
-  ...parts: ReadonlyArray<SqlIdentifier | SqlFragment | number>
+  ...parts: ReadonlyArray<SqlIdentifier | SqlTable | SqlFragment | number>
 ): SqlFragment {
   let text = "";
   const partsLength = parts.length;
@@ -163,13 +267,19 @@ export function trustedSql(
       text += identifierText;
       continue;
     }
+    const tableText = tableGet(part);
+    if (tableText !== undefined) {
+      assertTablePosition(strings, i);
+      text += tableText;
+      continue;
+    }
     const fragmentText = fragmentGet(part);
     if (fragmentText !== undefined) {
       text += fragmentText;
       continue;
     }
     throw new TypeError(
-      "trustedSql: substitution must be a genuine SqlIdentifier/SqlFragment " +
+      "trustedSql: substitution must be a genuine SqlIdentifier/SqlTable/SqlFragment " +
         "or a non-negative safe integer",
     );
   }
@@ -212,11 +322,12 @@ export function joinSql(
   return obj as unknown as SqlFragment;
 }
 
-// Stable `code` values on renderSql's refusals, so a caller can tell a refusal
+// Stable `code` values on the refusals of renderSql, sqlIdentifier and trustedSql, so a caller can tell a refusal
 // from a programming error without parsing the message.
 export const RAW_SQL_REFUSAL_CODE = freeze({
   DIGEST_COLUMN: "RAW_SQL_DIGEST_COLUMN",
   UNICODE_ESCAPE: "RAW_SQL_UNICODE_ESCAPE",
+  TOKEN_TABLE: "RAW_SQL_TOKEN_TABLE",
 } as const);
 
 type RawSqlRefusalCode = (typeof RAW_SQL_REFUSAL_CODE)[keyof typeof RAW_SQL_REFUSAL_CODE];

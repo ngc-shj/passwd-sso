@@ -104,6 +104,21 @@ describe("validateRegistry — digest-column identifier throws at boot (C7)", ()
   });
 });
 
+describe("validateRegistry — token tables are tables, not columns (sqlTable / sqlIdentifier)", () => {
+  const entryWith = (table: string, cutoffColumn: string) =>
+    ({ kind: "EXPIRY", table, cutoffColumn, keyColumns: ["id"], globalDelete: true }) as unknown as RetentionEntry;
+
+  it("accepts a token table as the entry's table", () => {
+    expect(() => validateRegistry([entryWith("api_keys", "expires_at")])).not.toThrow();
+  });
+
+  it("refuses a token table named as a column, with its code", () => {
+    expect(() => validateRegistry([entryWith("sessions", "api_keys")])).toThrow(
+      expect.objectContaining({ code: RAW_SQL_REFUSAL_CODE.TOKEN_TABLE }),
+    );
+  });
+});
+
 describe("validateRegistry — digest refusal on every identifier field of every kind", () => {
   // One real entry per kind, with one free identifier swapped for a digest
   // column. Each base entry passes on its own, so each throw is the swap's.

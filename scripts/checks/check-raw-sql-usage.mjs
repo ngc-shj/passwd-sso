@@ -22,15 +22,15 @@
  *     first argument must be a string literal, a no-substitution template, or
  *     a direct `renderSql(...)` call — nothing wrapped around or appended.
  *   - RAW_SQL_NAMES: every occurrence of `renderSql` / `trustedSql` /
- *     `sqlIdentifier` / `joinSql` must sit in one of a small set of allowed
+ *     `sqlIdentifier` / `sqlTable` / `joinSql` must sit in one of a small set of allowed
  *     positions (the single canonical unaliased import from raw-sql.ts —
  *     "from raw-sql.ts" meaning the on-disk resolver below lands EXACTLY,
  *     case-sensitively, on src/lib/prisma/raw-sql.ts;
- *     `renderSql`/`sqlIdentifier`/`joinSql` as an ordinary call's callee AND
+ *     `renderSql`/`sqlIdentifier`/`sqlTable`/`joinSql` as an ordinary call's callee AND
  *     `trustedSql` as a tagged-template tag, each ONLY when that name also has
  *     a canonical import in the same file — a positionally-shaped call alone
  *     proves nothing about what the name is bound to; a type position). A
- *     decoded string/no-substitution-template literal equal to one of the four
+ *     decoded string/no-substitution-template literal equal to one of the five
  *     names, in expression position, denies too (a literal-keyed forge —
  *     `globalThis["renderSql"] = …` — never produces an Identifier occurrence;
  *     exempt: raw-sql.ts, this gate's own source). Any other module-loading
@@ -211,7 +211,7 @@
  * canonical-import requirement (F4-a) does not itself follow a re-export
  * chain — it only checks for a direct, unaliased import of a name FROM
  * raw-sql.ts — but this is not a gap: a barrel file re-exporting one of the
- * four names is denied outright by RAW_SQL_NAMES's re-export clause, so
+ * five names is denied outright by RAW_SQL_NAMES's re-export clause, so
  * there is no file through which such a chain could be built in the first
  * place. Threat model: this gate catches accidental and casual misuse in
  * code that goes through review; deliberately obfuscated code can defeat any
@@ -360,7 +360,7 @@ if (staleEntries.length > 0) {
 // ---------------------------------------------------------------------------
 // Layer 2 — AST gate (C3), independent of Layer 1.
 // ---------------------------------------------------------------------------
-const RAW_SQL_NAMES = ["renderSql", "trustedSql", "sqlIdentifier", "joinSql"];
+const RAW_SQL_NAMES = ["renderSql", "trustedSql", "sqlIdentifier", "sqlTable", "joinSql"];
 const RAW_SQL_MODULE_REL = "src/lib/prisma/raw-sql.ts";
 const GATE_SELF_REL = "scripts/checks/check-raw-sql-usage.mjs";
 const RAW_METHOD_RE = /^\$(query|execute)Raw\w*$/;
@@ -1095,7 +1095,7 @@ function checkUnsafeArg(sf, rel) {
 }
 
 // ---------------------------------------------------------------------------
-// RAW_SQL_NAMES — positional allowlist over every occurrence of the four
+// RAW_SQL_NAMES — positional allowlist over every occurrence of the five
 // raw-sql.ts exports, plus the module-loading-form and non-literal
 // import()/require() checks that need no name occurrence at all.
 // ---------------------------------------------------------------------------
@@ -1107,7 +1107,7 @@ function isAllowedRawSqlNameOccurrence(id, name, canonicallyImported) {
   if (Node.isQualifiedName(parent)) return isQualifiedNameInTypePosition(parent);
 
   if (Node.isCallExpression(parent) && parent.getExpression() === id) {
-    // Ordinary-call callee: allowed for renderSql / sqlIdentifier / joinSql,
+    // Ordinary-call callee: allowed for renderSql / sqlIdentifier / sqlTable / joinSql,
     // NOT for trustedSql (tag-only) — AND (F4-a) only when THIS file also
     // holds a canonical import of that name from raw-sql.ts. Without this, a
     // call positionally shaped like `renderSql(f)` passes even when `renderSql`
@@ -1163,12 +1163,12 @@ function collectCanonicallyImportedRawSqlNames(sf, rel) {
 }
 
 // F4-b: a decoded string / no-substitution-template literal equal to one of
-// the four raw-sql.ts export names, in expression position, denies — this is
+// the five raw-sql.ts export names, in expression position, denies — this is
 // how a literal-keyed forge (`globalThis["renderSql"] = …`,
 // `Object.assign(globalThis, {"renderSql": …})`,
 // `Object.defineProperty(globalThis, 'trustedSql', …)`) spells the name
 // without ever producing an Identifier occurrence the scan above would see.
-// raw-sql.ts itself and this gate's own source (which spells the four names
+// raw-sql.ts itself and this gate's own source (which spells the five names
 // as RAW_SQL_NAMES array data) are exempt, and so is each measured
 // (file, literal value, exact count) entry below: another gate that has to
 // recognise these names as data. Any other such literal in an exempted file,

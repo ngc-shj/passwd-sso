@@ -36,10 +36,11 @@ import { AUDIT_LOG_RETENTION_MIN } from "@/lib/validations/common";
 import { renderPredicate } from "./predicate";
 import {
   sqlIdentifier,
+  sqlTable,
   trustedSql,
   joinSql,
   renderSql,
-  type SqlIdentifier,
+  type SqlTable,
   type SqlFragment,
 } from "@/lib/prisma/raw-sql";
 import {
@@ -102,7 +103,7 @@ const GUARD_TABLES: Record<GuardName, readonly string[]> = {
   EMERGENCY_GRANT_DEAD: [],
 };
 
-const GUARD_SQL: Record<GuardName, (parent: SqlIdentifier) => SqlFragment> = {
+const GUARD_SQL: Record<GuardName, (parent: SqlTable) => SqlFragment> = {
   // mcp_access_tokens: hold the delete until no live refresh token or delegation
   // session references this access token. The FK CASCADE then removes the dead
   // children. revoked tokens/sessions do NOT count as live (a fully-rotated-away
@@ -276,7 +277,7 @@ async function assertSweepBypass(tx: Prisma.TransactionClient, expected: boolean
  *
  * Security:
  * - Identifiers (table, cutoffColumn, keyColumns) are validated at worker boot
- *   via sqlIdentifier in createWorker; called here defensively too.
+ *   via sqlIdentifier / sqlTable in createWorker; called here defensively too.
  * - The dispatcher sets bypass_rls for every globalDelete entry (INV-C2b); this
  *   asserts the state the entry declares before touching a row.
  * - DELETE is batch-bounded via a `WITH picked AS MATERIALIZED (... LIMIT $1)`
@@ -294,7 +295,7 @@ export async function sweepExpiryEntry(
   batchSize: number,
 ): Promise<number> {
   // Defensive identifier validation at sweep time (boot validation is primary).
-  const tableIdent = sqlIdentifier(entry.table);
+  const tableIdent = sqlTable(entry.table);
   const cutoffIdent = sqlIdentifier(entry.cutoffColumn);
   const keyIdents = entry.keyColumns.map((c) => sqlIdentifier(c));
 
@@ -341,7 +342,7 @@ export async function sweepGuardedExpiryEntry(
   entry: GuardedExpiryEntry,
   batchSize: number,
 ): Promise<number> {
-  const tableIdent = sqlIdentifier(entry.table);
+  const tableIdent = sqlTable(entry.table);
   const cutoffIdent = sqlIdentifier(entry.cutoffColumn);
   const keyIdents = entry.keyColumns.map((c) => sqlIdentifier(c));
 
@@ -397,7 +398,7 @@ export async function sweepAuditProvenanceEntry(
   entry: AuditProvenanceEntry,
   batchSize: number,
 ): Promise<number> {
-  const tableIdent = sqlIdentifier(entry.table);
+  const tableIdent = sqlTable(entry.table);
   const cutoffIdent = sqlIdentifier(entry.cutoffColumn);
   const provenanceIdents = entry.provenanceColumns.map((c) => sqlIdentifier(c));
 
@@ -536,7 +537,7 @@ export async function sweepPerTenantAge(
   entry: PerTenantAgeEntry,
   batchSize: number,
 ): Promise<number> {
-  const tableIdent = sqlIdentifier(entry.table);
+  const tableIdent = sqlTable(entry.table);
   const cutoffIdent = sqlIdentifier(entry.cutoffColumn);
 
   await assertSweepBypass(tx, true);
@@ -655,7 +656,7 @@ export async function sweepTrashEntry(
   entry: PerTenantTrashEntry,
   batchSize: number,
 ): Promise<number> {
-  sqlIdentifier(entry.table);
+  sqlTable(entry.table);
 
   // Enumerate only tenants with explicit trash retention configured (NULL →
   // skip). `tenants` carries the same tenant_isolation policy as every other

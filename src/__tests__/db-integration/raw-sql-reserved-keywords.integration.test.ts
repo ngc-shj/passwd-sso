@@ -5,10 +5,10 @@
  * silently drift the embedded list out of sync with what Postgres actually
  * rejects as an identifier.
  *
- * raw-sql.ts exports only the four functions `sqlIdentifier` / `trustedSql` /
- * `joinSql` / `renderSql` (C1's export-surface contract) — the keyword list
+ * raw-sql.ts's export surface is pinned by its unit test; the keyword list
  * itself is not exported, so this proves equality through behaviour instead
- * of importing the list directly:
+ * of importing the list directly, for both minting functions that share it
+ * (`sqlIdentifier` and `sqlTable`):
  *   - every word the catalog reports as catcode R or T must be rejected;
  *   - every other word that still matches the identifier pattern
  *     (`^[a-z_]+$`) must be accepted — this is what rules out an embedded
@@ -18,7 +18,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createTestContext, type TestContext } from "./helpers";
-import { sqlIdentifier } from "@/lib/prisma/raw-sql";
+import { sqlIdentifier, sqlTable } from "@/lib/prisma/raw-sql";
 
 describe("sqlIdentifier reserved-keyword list vs pg_get_keywords() (C1)", () => {
   let ctx: TestContext;
@@ -53,6 +53,7 @@ describe("sqlIdentifier reserved-keyword list vs pg_get_keywords() (C1)", () => 
     expect(reservedWords.length).toBeGreaterThan(0);
     for (const word of reservedWords) {
       expect(() => sqlIdentifier(word)).toThrow();
+      expect(() => sqlTable(word)).toThrow();
     }
   });
 
@@ -60,6 +61,7 @@ describe("sqlIdentifier reserved-keyword list vs pg_get_keywords() (C1)", () => 
     expect(acceptableNonReservedWords.length).toBeGreaterThan(0);
     for (const word of acceptableNonReservedWords) {
       expect(() => sqlIdentifier(word)).not.toThrow();
+      expect(() => sqlTable(word)).not.toThrow();
     }
   });
 

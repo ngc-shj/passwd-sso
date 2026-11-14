@@ -96,6 +96,7 @@ function withNonLiteralImportStubs(files, omit = []) {
 // with `omitRawSqlModule` to prove that a missing target earns no credit).
 const RAW_SQL_MODULE_STUB = [
   "export function sqlIdentifier(name) { return name; }",
+  "export function sqlTable(name) { return name; }",
   'export function trustedSql(strings, ...parts) { return strings.join(""); }',
   "export function joinSql(parts, sep) { return parts.join(sep); }",
   "export function renderSql(fragment) { return fragment; }",
@@ -146,7 +147,7 @@ function run(
   }
 }
 
-const RAW_SQL_IMPORT = `import { renderSql, trustedSql, sqlIdentifier, joinSql } from "@/lib/prisma/raw-sql";\n`;
+const RAW_SQL_IMPORT = `import { renderSql, trustedSql, sqlIdentifier, sqlTable, joinSql } from "@/lib/prisma/raw-sql";\n`;
 
 describe("check-raw-sql-usage Layer 2 — UNSAFE_ARG", () => {
   const rows = [
@@ -229,6 +230,12 @@ describe("check-raw-sql-usage Layer 2 — RAW_SQL_NAMES", () => {
       expectCode: 1,
       expectReason: "RAW_SQL_NAMES",
     },
+    {
+      name: "deny: sqlTable(a) called without any import of sqlTable from raw-sql.ts",
+      src: `export function run(a) {\n  return sqlTable(a);\n}\n`,
+      expectCode: 1,
+      expectReason: "RAW_SQL_NAMES",
+    },
     // F4-b: a literal-keyed global forge never produces an Identifier
     // occurrence the scan above would see.
     {
@@ -246,6 +253,12 @@ describe("check-raw-sql-usage Layer 2 — RAW_SQL_NAMES", () => {
     {
       name: "deny: Object.defineProperty(globalThis, 'sqlIdentifier', ...) (literal-keyed global forge)",
       src: `export function forge(fn) {\n  Object.defineProperty(globalThis, "sqlIdentifier", { value: fn });\n}\n`,
+      expectCode: 1,
+      expectReason: "RAW_SQL_NAMES",
+    },
+    {
+      name: "deny: globalThis[\"sqlTable\"] = fn (literal-keyed global forge)",
+      src: `export function forge(fn) {\n  globalThis["sqlTable"] = fn;\n}\n`,
       expectCode: 1,
       expectReason: "RAW_SQL_NAMES",
     },
@@ -386,6 +399,11 @@ describe("check-raw-sql-usage Layer 2 — RAW_SQL_NAMES", () => {
       expectCode: 0,
     },
     {
+      name: "allow: sqlTable ordinary call",
+      src: `${RAW_SQL_IMPORT}export function run(a) {\n  return sqlTable(a);\n}\n`,
+      expectCode: 0,
+    },
+    {
       name: "allow: joinSql ordinary call",
       src: `${RAW_SQL_IMPORT}export function run(a, b) {\n  return joinSql(a, b);\n}\n`,
       expectCode: 0,
@@ -414,6 +432,12 @@ describe("check-raw-sql-usage Layer 2 — RAW_SQL_NAMES", () => {
       expectReason: "RAW_SQL_NAMES",
     },
     {
+      name: "deny: function declaration named sqlTable",
+      src: `export function sqlTable() { return 1; }\n`,
+      expectCode: 1,
+      expectReason: "RAW_SQL_NAMES",
+    },
+    {
       name: "deny: class declaration named joinSql",
       src: `export class joinSql {}\n`,
       expectCode: 1,
@@ -434,6 +458,12 @@ describe("check-raw-sql-usage Layer 2 — RAW_SQL_NAMES", () => {
     {
       name: "deny: parameter named sqlIdentifier",
       src: `export function run(sqlIdentifier) {\n  return sqlIdentifier;\n}\n`,
+      expectCode: 1,
+      expectReason: "RAW_SQL_NAMES",
+    },
+    {
+      name: "deny: parameter named sqlTable",
+      src: `export function run(sqlTable) {\n  return sqlTable;\n}\n`,
       expectCode: 1,
       expectReason: "RAW_SQL_NAMES",
     },
@@ -2029,13 +2059,14 @@ describe("check-raw-sql-usage Layer 1 — unchanged allowlist behaviour (FR5 reg
 
 describe("check-raw-sql-usage Layer 2 — exemption self-tests (T-F1, T-F2)", () => {
   // T-F1: a realistic raw-sql.ts fixture, at the exact exempt path, holding
-  // all four declarations — proves the RAW_SQL_NAMES / shadow-file / literal
+  // all five declarations — proves the RAW_SQL_NAMES / shadow-file / literal
   // exemption for rel === RAW_SQL_MODULE_REL on content shaped like the real
   // module, not just an empty or unrelated file at that path.
-  it("allow: a fixture at src/lib/prisma/raw-sql.ts declaring the four names (exemption proven on realistic content)", () => {
+  it("allow: a fixture at src/lib/prisma/raw-sql.ts declaring the five names (exemption proven on realistic content)", () => {
     const result = run({
       "src/lib/prisma/raw-sql.ts": [
         'export function sqlIdentifier(name) { return name; }',
+        'export function sqlTable(name) { return name; }',
         'export function trustedSql(strings, ...parts) { return strings.join(""); }',
         'export function joinSql(parts, sep) { return parts.join(sep); }',
         "export function renderSql(fragment) { return fragment; }",

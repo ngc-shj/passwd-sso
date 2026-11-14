@@ -7,9 +7,20 @@ import {
   renderSql,
   namesDigestColumn,
   RAW_SQL_REFUSAL_CODE,
+  sqlTable,
+  TOKEN_TABLE_NAMES,
   type SqlIdentifier,
+  type SqlTable,
   type SqlFragment,
 } from "./raw-sql";
+
+const TOKEN_TABLE_REFUSAL = expect.objectContaining({ code: RAW_SQL_REFUSAL_CODE.TOKEN_TABLE });
+// One token table and one ordinary table: a position rule that only held for a
+// token table, or only for another, would pass one of the two.
+const TABLE_KINDS = [
+  ["a token table", "api_keys"],
+  ["a non-token table", "notes"],
+] as const;
 
 describe("sqlIdentifier", () => {
   it.each(["users", "tenant_id", "a"])("accepts %j", (name) => {
@@ -32,6 +43,157 @@ describe("sqlIdentifier", () => {
     ["reserved keyword: left", "left"],
   ])("rejects %s", (_label, name) => {
     expect(() => sqlIdentifier(name)).toThrow();
+  });
+});
+
+describe("sqlIdentifier and token tables", () => {
+  it.each(TOKEN_TABLE_NAMES)("refuses the token table %s with its code", (name) => {
+    expect(() => sqlIdentifier(name)).toThrow(TOKEN_TABLE_REFUSAL);
+  });
+
+  it("lists 13 distinct token tables, each a valid table name", () => {
+    expect(new Set(TOKEN_TABLE_NAMES).size).toBe(13);
+    expect(Object.isFrozen(TOKEN_TABLE_NAMES)).toBe(true);
+    for (const name of TOKEN_TABLE_NAMES) {
+      expect(() => sqlTable(name)).not.toThrow();
+    }
+  });
+
+  it.each(["notes", "api", "keys", "api_key", "api_keys_"])(
+    "still accepts %j, which is not a token table",
+    (name) => {
+      expect(() => sqlIdentifier(name)).not.toThrow();
+    },
+  );
+});
+
+describe("sqlTable", () => {
+  it.each(["users", "tenant_id", "a", ...TOKEN_TABLE_NAMES])("accepts %j", (name) => {
+    expect(() => sqlTable(name)).not.toThrow();
+  });
+
+  it.each([
+    ["empty string", ""],
+    ["uppercase", "Users"],
+    ["digit", "table1"],
+    ["quote", "users'"],
+    ["semicolon", "users;"],
+    ["space", "users table"],
+    ["unicode", "усers"],
+    ["reserved keyword: select", "select"],
+    ["reserved keyword: from", "from"],
+    ["reserved keyword: user", "user"],
+  ])("rejects %s", (_label, name) => {
+    expect(() => sqlTable(name)).toThrow();
+  });
+
+  it("rejects a non-string name", () => {
+    expect(() => sqlTable(1 as unknown as string)).toThrow(TypeError);
+  });
+
+  it("is not an identifier: a genuine SqlTable is not accepted by renderSql", () => {
+    expect(() => renderSql(sqlTable("notes") as unknown as SqlFragment)).toThrow(TypeError);
+  });
+
+  it("is a null-prototype object that throws on conversion", () => {
+    const table = sqlTable("notes");
+    expect(Object.getPrototypeOf(table)).toBeNull();
+    expect(() => `${table}`).toThrow(TypeError);
+  });
+
+  it("is not accepted by joinSql, as a part or as a separator", () => {
+    const table = sqlTable("notes") as unknown as SqlIdentifier;
+    expect(() => joinSql([table], trustedSql`, `)).toThrow(TypeError);
+    expect(() => joinSql([], table as unknown as SqlFragment)).toThrow(TypeError);
+  });
+});
+
+describe("trustedSql with a table substitution", () => {
+  describe.each(TABLE_KINDS)("%s", (_kind, name) => {
+    const t = sqlTable(name);
+
+    it.each([
+      ["FROM", "SELECT 1 FROM "],
+      ["from, lower case", "select 1 from "],
+      ["JOIN, mixed case", "SELECT 1 FROM x JoIn "],
+      ["UPDATE", "UPDATE "],
+      ["INTO", "INSERT INTO "],
+      ["ONLY", "SELECT 1 FROM ONLY "],
+      ["a tab", "SELECT 1 FROM\t"],
+      ["a newline", "SELECT 1 FROM\n   "],
+      ["a CRLF", "SELECT 1 FROM\r\n"],
+      ["an opening quote", 'SELECT 1 FROM "'],
+      ["a quote with no space", 'SELECT 1 FROM"'],
+      ["a keyword at the start of the template", "FROM "],
+    ])("renders after %s", (_label, prefix) => {
+      const strings = Object.assign([prefix, ""], { raw: [prefix, ""] }) as unknown as TemplateStringsArray;
+      expect(renderSql(trustedSql(strings, t))).toBe(prefix + name);
+    });
+
+    it("renders after a keyword on the line before it", () => {
+      expect(renderSql(trustedSql`SELECT 1
+        FROM
+        ${t} x`)).toBe(`SELECT 1\n        FROM\n        ${name} x`);
+    });
+
+    it("renders after a second substitution once text separates them", () => {
+      const other = sqlIdentifier("x");
+      expect(renderSql(trustedSql`SELECT ${other} FROM ${t}`)).toBe(`SELECT x FROM ${name}`);
+    });
+
+    it("renders as a qualifier", () => {
+      expect(renderSql(trustedSql`WHERE ${t}.id = 1`)).toBe(`WHERE ${name}.id = 1`);
+    });
+
+    it("renders as a qualifier inside quotes", () => {
+      expect(renderSql(trustedSql`WHERE "${t}".id = 1`)).toBe(`WHERE "${name}".id = 1`);
+    });
+
+    it("renders a qualifier directly after another substitution", () => {
+      const other = sqlIdentifier("x");
+      expect(renderSql(trustedSql`${other}${t}.id`)).toBe(`x${name}.id`);
+    });
+
+    it.each([
+      ["a value position", () => trustedSql`SELECT to_jsonb(${t}) FROM x`],
+      ["a cast", () => trustedSql`SELECT ${t}::text FROM x`],
+      ["a word that merely ends in a keyword", () => trustedSql`SELECT 1 ts_from ${t}`],
+      ["a word that merely ends in a keyword, no space before", () => trustedSql`SELECT 1 xfrom ${t}`],
+      ["a word that merely starts with a keyword", () => trustedSql`SELECT 1 FROMX ${t}`],
+      ["a keyword with no space or quote", () => trustedSql`SELECT 1 FROM${t}`],
+      ["a keyword supplied by a line comment", () => trustedSql`-- FROM
+        ${t}`],
+      ["a keyword supplied by a block comment", () => trustedSql`/* FROM */ ${t}`],
+      ["a comment before a qualifier", () => trustedSql`-- x
+        ${t}.id`],
+      ["a keyword other than the five", () => trustedSql`SELECT 1 WHERE ${t}`],
+      ["a keyword followed by a comma list", () => trustedSql`SELECT 1 FROM x, ${t}`],
+      ["the start of the template with no keyword", () => trustedSql`${t}`],
+      ["a position directly after another substitution", () => trustedSql`SELECT 1 FROM ${sqlIdentifier("x")}${t}`],
+      ["a keyword ending a part that follows a substitution mid-word", () => trustedSql`${sqlIdentifier("ts")}from ${t}`],
+      ["a dot that is not directly after it", () => trustedSql`SELECT ${t} .id`],
+    ])("refuses %s", (_label, build) => {
+      expect(build).toThrow(TOKEN_TABLE_REFUSAL);
+    });
+  });
+
+  it("refuses a forged look-alike table, as it does for an identifier", () => {
+    const forgedTables = [
+      ["a plain string", "notes"],
+      ["a JSON-parsed object", JSON.parse('{"__sqlTable":true}')],
+      ["an object literal with the same keys", { __sqlTable: true }],
+      ["a frozen copy of a genuine table", Object.freeze({ ...sqlTable("notes") })],
+      ["a spread copy of a genuine table", { ...sqlTable("notes") }],
+    ] as const;
+    for (const [, forged] of forgedTables) {
+      expect(() =>
+        trustedSql`SELECT * FROM ${forged as unknown as SqlTable}`,
+      ).toThrow(TypeError);
+    }
+  });
+
+  it("does not take an identifier for a table: an identifier keeps its position-free behavior", () => {
+    expect(renderSql(trustedSql`SELECT to_jsonb(${sqlIdentifier("notes")})`)).toBe("SELECT to_jsonb(notes)");
   });
 });
 
@@ -407,6 +569,91 @@ describe("tamper resistance of renderSql's refusal patterns", () => {
   });
 });
 
+describe("tamper resistance of the table position rule", () => {
+  it("ignores a post-import replacement of RegExp.prototype.exec/test, Set.prototype.has and Array.prototype.includes", () => {
+    const originalExec = RegExp.prototype.exec;
+    const originalTest = RegExp.prototype.test;
+    const originalHas = Set.prototype.has;
+    const originalIncludes = Array.prototype.includes;
+    let identifierRefusal: unknown;
+    let valueRefusal: unknown;
+    let rendered: string | undefined;
+    let rejectedBadSyntax: unknown;
+    try {
+      // Both directions: a "no match" exec would refuse the legal position, a
+      // "match" exec would admit the value position; Set.has / includes
+      // reporting false would let a token table through sqlIdentifier.
+      RegExp.prototype.exec = function () {
+        return null;
+      };
+      RegExp.prototype.test = function () {
+        return false;
+      };
+      Set.prototype.has = function () {
+        return false;
+      };
+      Array.prototype.includes = function () {
+        return false;
+      };
+      try {
+        sqlIdentifier("api_keys");
+      } catch (e) {
+        identifierRefusal = e;
+      }
+      try {
+        sqlTable("Users';--");
+      } catch (e) {
+        rejectedBadSyntax = e;
+      }
+      try {
+        void trustedSql`SELECT to_jsonb(${sqlTable("api_keys")})`;
+      } catch (e) {
+        valueRefusal = e;
+      }
+      try {
+        rendered = renderSql(trustedSql`SELECT 1 FROM ${sqlTable("api_keys")}`);
+      } catch {
+        rendered = undefined;
+      }
+    } finally {
+      RegExp.prototype.exec = originalExec;
+      RegExp.prototype.test = originalTest;
+      Set.prototype.has = originalHas;
+      Array.prototype.includes = originalIncludes;
+    }
+    expect(identifierRefusal).toEqual(TOKEN_TABLE_REFUSAL);
+    expect(rejectedBadSyntax).toBeInstanceOf(Error);
+    expect(valueRefusal).toEqual(TOKEN_TABLE_REFUSAL);
+    expect(rendered).toBe("SELECT 1 FROM api_keys");
+  });
+
+  it("still admits a legal position and refuses a value position when RegExp.prototype.exec reports a match", () => {
+    const originalExec = RegExp.prototype.exec;
+    const originalTest = RegExp.prototype.test;
+    let valueRefusal: unknown;
+    let rendered: string | undefined;
+    try {
+      RegExp.prototype.exec = function () {
+        return [""] as unknown as RegExpExecArray;
+      };
+      RegExp.prototype.test = function () {
+        return true;
+      };
+      try {
+        void trustedSql`SELECT to_jsonb(${sqlTable("notes")})`;
+      } catch (e) {
+        valueRefusal = e;
+      }
+      rendered = renderSql(trustedSql`SELECT 1 FROM ${sqlTable("notes")}`);
+    } finally {
+      RegExp.prototype.exec = originalExec;
+      RegExp.prototype.test = originalTest;
+    }
+    expect(valueRefusal).toEqual(TOKEN_TABLE_REFUSAL);
+    expect(rendered).toBe("SELECT 1 FROM notes");
+  });
+});
+
 describe("namesDigestColumn", () => {
   it.each(["token_hash", "CODE_HASH", "replaced_by_hash"])("is true for %j", (text) => {
     expect(namesDigestColumn(text)).toBe(true);
@@ -418,13 +665,15 @@ describe("namesDigestColumn", () => {
 });
 
 describe("export surface", () => {
-  it("exports exactly the builders, renderSql, and the digest predicate with its refusal codes", () => {
+  it("exports exactly the builders, renderSql, the digest predicate, the token table list and the refusal codes", () => {
     expect(Object.keys(RawSql).sort()).toEqual([
       "RAW_SQL_REFUSAL_CODE",
+      "TOKEN_TABLE_NAMES",
       "joinSql",
       "namesDigestColumn",
       "renderSql",
       "sqlIdentifier",
+      "sqlTable",
       "trustedSql",
     ]);
   });

@@ -21,7 +21,7 @@
 #   src/lib/prisma/raw-sql.ts (a module-private WeakMap adjudicates which
 #   values are real). This gate enforces only the SYNTAX the runtime cannot
 #   see: every occurrence of a sensitive name (`renderSql`, `trustedSql`,
-#   `sqlIdentifier`, `joinSql`, the `$queryRaw`/`$executeRaw` family, any
+#   `sqlIdentifier`, `sqlTable`, `joinSql`, the `$queryRaw`/`$executeRaw` family, any
 #   `@prisma/*` import, `$extends`) is judged by its syntactic POSITION alone —
 #   never by what it is bound to. An Unsafe call's first argument must be a
 #   string literal, a no-substitution template, or a direct `renderSql(...)`
