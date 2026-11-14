@@ -224,7 +224,7 @@ describe("tenants RLS (C1 / C4 / C5)", () => {
   });
 
   it("(d) a bypass grant naming `tenant` admits both tenants with no report", async () => {
-    const grant = defineGrant(BYPASS_PURPOSE.SYSTEM_MAINTENANCE, ["tenant"]);
+    const grant = BYPASS_GRANT.SYSTEM_MAINTENANCE_TENANT_LOOKUP;
     let rows: Array<{ id: string }> = [];
     const notices = await expectBypassNotices(async () => {
       rows = await ctx.app.prisma.$transaction(async (tx) => {

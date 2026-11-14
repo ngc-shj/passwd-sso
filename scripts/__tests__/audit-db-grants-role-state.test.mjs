@@ -21,11 +21,14 @@ import {
   creatorGrantKeys,
   enforceModeViolations,
   clientMinMessagesViolations,
+  reportModeAckLogLine,
   AUDITED_ROLES,
   RETIRED_ROLES,
 } from "../audit-db-grants.mjs";
 // Has a main guard, so importing it does not connect.
 import { ROLES } from "../bootstrap-rds-roles.mjs";
+import { matchesFilterPattern } from "@/__tests__/helpers/cloudwatch-filter-pattern";
+import { TerraformConfig, TERRAFORM_DIR, plain, nested } from "@/__tests__/helpers/hcl-subset";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MANIFEST = resolve(__dirname, "..", "checks", "db-grants-manifest.json");
@@ -306,6 +309,35 @@ describe("enforceModeViolations", () => {
   });
 });
 
+describe("acknowledged report mode reaches an alarm", () => {
+  const tf = new TerraformConfig(TERRAFORM_DIR);
+  const filter = tf.resource("aws_cloudwatch_log_metric_filter", "rls_report_mode_acknowledged");
+  const warning = enforceModeViolations({ functionPresent: true, enforced: false, acknowledgement: "incident 42" })
+    .warnings[0];
+
+  it("emits a line the metric filter matches", () => {
+    const line = JSON.parse(reportModeAckLogLine(warning));
+    expect(line.msg).toContain("incident 42");
+    expect(matchesFilterPattern(String(tf.attr(filter, "pattern")), line)).toBe(true);
+    expect(matchesFilterPattern(String(tf.attr(filter, "pattern")), { ...line, _logType: "rls.bypass_not_granted" })).toBe(false);
+  });
+
+  it("filters the log group the migrate task writes to", () => {
+    const ALL_ON = { vars: { smtp_host: "smtp.example.com", smtp_auth_enabled: true, enable_google_auth: true, enable_jackson_connections: true, email_from: "a@example.com" } };
+    const migrate = plain(tf.attr(tf.resource("aws_ecs_task_definition", "migrate"), "container_definitions", ALL_ON))
+      .find((c) => c.name === "migrate");
+    expect(migrate.logConfiguration.options["awslogs-group"]).toBe(String(tf.attr(filter, "log_group_name")));
+  });
+
+  it("alarms on the metric the filter publishes", () => {
+    const alarm = tf.resource("aws_cloudwatch_metric_alarm", "rls_report_mode_acknowledged");
+    const [transformation] = nested(filter, "metric_transformation");
+    expect(String(tf.attr(alarm, "metric_name"))).toBe(String(tf.attr(transformation, "name")));
+    expect(String(tf.attr(alarm, "namespace"))).toBe(String(tf.attr(transformation, "namespace")));
+    expect(String(tf.attr(alarm, "metric_name"))).toBe("RlsReportModeAcknowledged");
+  });
+});
+
 describe("clientMinMessagesViolations", () => {
   it.each([
     ["notice", "default", false],
@@ -315,15 +347,27 @@ describe("clientMinMessagesViolations", () => {
     ["error", "environment variable", true],
     ["error", "command line", true],
     ["error", "database", true],
-    ["error", "user", true],
-    ["error", "database user", true],
     ["error", "override", true],
-    ["error", "a source no server has yet", true],
-    ["error", "session", false],
-    ["error", "client", false],
     ["notice", "database", false],
+    ["notice", "global", false],
   ])("%s from %s: violation=%s", (setting, source, isViolation) => {
     expect(clientMinMessagesViolations({ setting, source }).length > 0).toBe(isViolation);
+  });
+
+  // The audit's own connection overrides the setting: the server default under
+  // it is unreadable, so a harmless value must not pass.
+  it.each([
+    ["notice", "session"],
+    ["notice", "client"],
+    ["notice", "user"],
+    ["notice", "database user"],
+    ["error", "session"],
+    ["error", "user"],
+    ["warning", "a source no server has yet"],
+  ])("%s from %s cannot be decided and fails", (setting, source) => {
+    const violations = clientMinMessagesViolations({ setting, source });
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toContain("cannot be read");
   });
 
   it("refuses the levels above error should a server accept them", () => {

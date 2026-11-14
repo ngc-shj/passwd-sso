@@ -1135,6 +1135,14 @@ protection is off for all grants, not only the one that failed, and the audit of
 every later deploy fails until the function is restored or the deploy carries
 `RLS_REPORT_MODE_ACK`. Reports keep counting after an un-flip.
 
+A deploy that carries the acknowledgement logs one line with
+`_logType: "rls.report_mode_acknowledged"` from the migrate task (app log
+group, stream prefix `migrate`). The `RlsReportModeAcknowledged` metric counts
+it and the `rls-report-mode-acknowledged` alarm fires on `Sum >= 1` in 5
+minutes, on every such deploy, so an acknowledgement left in a pipeline
+variable does not become the steady state unnoticed. Between deploys, and on
+compose, nothing reports an un-flipped database.
+
 CloudWatch: the `RlsBypassNotGranted` metric. There is one filter each on
 the app, audit-outbox-worker, retention-gc-worker, audit-anchor-publisher and
 audit-chain-verify-worker log groups, and the `rls-bypass-not-granted` alarm

@@ -157,13 +157,15 @@ try {
     );
     recordRoleAttributes(attrs);
   }
-  const mismatched = roleUrlMismatches(superuser, roleUrls);
+  // DATABASE_URL itself too: `@/lib/prisma` and the enforcing-mode probe use it,
+  // and with APP_DATABASE_URL set no role URL is derived from it.
+  const mismatched = roleUrlMismatches(superuser, { DATABASE_URL: databaseUrl, ...roleUrls });
   if (mismatched.length > 0) {
     throw new Error(
       [
         `Refusing to run integration tests: a role's connection string names a different host, port or database than the superuser one:`,
         ...mismatched.map((m) => `  ${m}`),
-        `Point APP_DATABASE_URL, OUTBOX_WORKER_DATABASE_URL, RETENTION_GC_DATABASE_URL, AUDIT_ANCHOR_PUBLISHER_DATABASE_URL and AUDIT_CHAIN_VERIFY_DATABASE_URL at the same database, or unset them.`,
+        `Point DATABASE_URL, APP_DATABASE_URL, OUTBOX_WORKER_DATABASE_URL, RETENTION_GC_DATABASE_URL, AUDIT_ANCHOR_PUBLISHER_DATABASE_URL and AUDIT_CHAIN_VERIFY_DATABASE_URL at the same database, or unset them.`,
       ].join("\n"),
     );
   }
@@ -252,7 +254,7 @@ clientProto.query = function (this: PgClientInternals, ...args: unknown[]) {
     Error.stackTraceLimit = limit;
     if (!fromPrismaJoinChildren(stack, readSourceLine)) concurrentQueryReports.push(stack);
   }
-  recordGrantEvidence(this.connectionParameters, args);
+  recordGrantEvidence(this, args);
   return originalQuery.apply(this, args);
 };
 // Positive control: two queries at once on one client must produce exactly one

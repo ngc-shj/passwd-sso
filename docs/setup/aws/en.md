@@ -271,9 +271,17 @@ Do NOT store `ADMIN_API_TOKEN` as a persistent environment variable in ECS task 
 
 ## Migrations
 
-Run Prisma migrations from a one-off task using the SUPERUSER role:
+Deploy with `scripts/deploy.sh` (`docs/operations/deployment.md`): its migrate task runs
+`node scripts/rls-enforce-preflight.mjs`, `npx prisma migrate deploy` and
+`node scripts/audit-db-grants.mjs` in that order, as the migration role.
+
+A bare `npx prisma migrate deploy` from a one-off task skips the preflight and the audit. In
+particular it applies `20261114000100_rls_bypass_enforce` (RLS bypass enforcement) without the
+attestation described in `docs/operations/deployment.md`, "One-time upgrade: audit-chain verifier
+role and RLS enforcement". If you run migrations by hand, run all three commands:
 ```
-MIGRATION_DATABASE_URL='postgresql://SUPERUSER:password@HOST:5432/DB' npx prisma migrate deploy
+export MIGRATION_DATABASE_URL='postgresql://SUPERUSER:password@HOST:5432/DB'
+node scripts/rls-enforce-preflight.mjs && npx prisma migrate deploy && node scripts/audit-db-grants.mjs
 ```
 
 The `MIGRATION_DATABASE_URL` must point to a role with DDL privileges (table owner). The app service `DATABASE_URL` should use a non-SUPERUSER role.

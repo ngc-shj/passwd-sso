@@ -33,6 +33,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { Client } from "pg";
+import { randomBytes } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { resolve, dirname, join } from "node:path";
@@ -856,6 +857,118 @@ describe("audit-db-grants (real DB)", () => {
       const r = runAuditWrite(target, { DB_DENIED_PRIVILEGES: policyPath });
       expect(r.status, r.stderr).toBe(0);
       expect(existsSync(target)).toBe(true);
+    });
+  });
+
+  /**
+   * The RLS mode check reached through the real process, on an empty database
+   * of its own: the function is the only object created, and its answer is the
+   * only thing that varies. The grant findings of an empty database are noise
+   * here, so each cell asserts on the mode lines and not on the exit status
+   * (the one cell that also needs a non-zero status has a finding of its own).
+   */
+  describe("RLS mode check through main()", () => {
+    const ACK_ENV = "RLS_REPORT_MODE_ACK";
+    const modeDb = `audit_mode_${randomBytes(6).toString("hex")}`;
+    let modeUrl: string;
+    let admin: Client;
+    let modeClient: Client;
+
+    function urlFor(database: string): string {
+      const u = new URL(dbUrl());
+      u.pathname = `/${database}`;
+      return u.toString();
+    }
+
+    async function setFunction(body: "true" | "false" | null) {
+      await modeClient.query("DROP FUNCTION IF EXISTS public.rls_bypass_enforced()");
+      if (body === null) return;
+      await modeClient.query(
+        // Unqualified (lands in public of the empty database): the function-rule gate
+        // reads the name after CREATE FUNCTION, and a qualified one reads as its schema.
+        `CREATE FUNCTION rls_bypass_enforced() RETURNS boolean LANGUAGE sql AS 'SELECT ${body}'`,
+      );
+    }
+
+    function runModeAudit(acknowledgement?: string) {
+      // The ack variable is dropped from the inherited environment so a stray
+      // value in the developer's shell cannot turn the unacknowledged cells green.
+      const { [ACK_ENV]: _inherited, ...inherited } = process.env;
+      return spawnSync(process.execPath, [AUDIT], {
+        env: {
+          ...inherited,
+          MIGRATION_DATABASE_URL: modeUrl,
+          DB_GRANTS_MANIFEST: manifestPath,
+          ...(acknowledgement === undefined ? {} : { [ACK_ENV]: acknowledgement }),
+        },
+        encoding: "utf8",
+        timeout: 60_000,
+        cwd: REPO_ROOT,
+      });
+    }
+
+    function lines(r: ReturnType<typeof runModeAudit>): string[] {
+      return (r.stdout + r.stderr).split("\n");
+    }
+
+    beforeAll(async () => {
+      admin = new Client({ connectionString: dbUrl() });
+      await admin.connect();
+      await admin.query(`CREATE DATABASE ${modeDb}`);
+      modeUrl = urlFor(modeDb);
+      modeClient = new Client({ connectionString: modeUrl });
+      await modeClient.connect();
+    });
+
+    afterAll(async () => {
+      try {
+        await modeClient?.end();
+      } finally {
+        try {
+          await admin.query(`DROP DATABASE IF EXISTS ${modeDb} WITH (FORCE)`);
+        } finally {
+          await admin.end();
+        }
+      }
+    });
+
+    it("fails with RLS_ENFORCE_MODE in report mode without an acknowledgement", async () => {
+      await setFunction("false");
+      const r = runModeAudit();
+      expect(lines(r).filter((l) => l.includes("RLS_ENFORCE_MODE:")).join("\n")).toContain("report mode");
+      expect(r.status).not.toBe(0);
+    });
+
+    it("passes the mode check in report mode with an acknowledgement and logs the warning line", async () => {
+      await setFunction("false");
+      const r = runModeAudit("incident 42");
+      expect(lines(r).filter((l) => l.includes("RLS_ENFORCE_MODE:"))).toEqual([]);
+      const ackLine = lines(r).find((l) => l.includes('"_logType":"rls.report_mode_acknowledged"'));
+      expect(ackLine).toBeDefined();
+      expect(JSON.parse(ackLine!).msg).toContain("incident 42");
+    });
+
+    it("does not accept a whitespace-only acknowledgement", async () => {
+      await setFunction("false");
+      const r = runModeAudit("   ");
+      expect(lines(r).filter((l) => l.includes("RLS_ENFORCE_MODE:")).join("\n")).toContain("report mode");
+      expect(lines(r).some((l) => l.includes("rls.report_mode_acknowledged"))).toBe(false);
+    });
+
+    it("fails with RLS_ENFORCE_MODE when the function is absent, even with an acknowledgement", async () => {
+      await setFunction(null);
+      const r = runModeAudit("incident 42");
+      expect(lines(r).filter((l) => l.includes("RLS_ENFORCE_MODE:")).join("\n")).toContain("is absent");
+      expect(lines(r).some((l) => l.includes("rls.report_mode_acknowledged"))).toBe(false);
+    });
+
+    it("raises no RLS_ENFORCE_MODE when the function returns true", async () => {
+      await setFunction("true");
+      const r = runModeAudit();
+      expect(lines(r).filter((l) => l.includes("RLS_ENFORCE_MODE:"))).toEqual([]);
+      // The run did reach the mode check: it fails on the empty database's
+      // other findings, which only exist once the findings loop has run.
+      expect(r.status).not.toBe(0);
     });
   });
 });

@@ -9,9 +9,9 @@
 
 ### F20 — settled in Phase 2
 
-- `clientMinMessagesViolations` treats every `pg_settings.source` other than `client`, `session`, `interactive` and `test` as server-level.
-- Observed on the worktree database: the default reads `notice|default`; a session `SET` reads `session`. PostgreSQL rejects `fatal` and `panic` for this setting, so the levels above `warning` are `error` and `log`.
-- Not observed: a value set in `postgresql.conf` or an RDS parameter group (source `configuration file`). The rule covers it by exclusion, not by a run.
+- `clientMinMessagesViolations` reads the value only from a source every connection inherits (`default`, `configuration file`, `environment variable`, `command line`, `global`, `override`, `database`). Any other source is the audit's own connection, the server default under it is unreadable, and the check fails whatever the value (code review S2; the first build passed a harmless session value).
+- Observed on the worktree database: the default reads `notice|default`; a session `SET` reads `session`. PostgreSQL rejects `fatal` and `panic` for this setting, so `error` is the only level above `warning`.
+- Not observed: a value set in `postgresql.conf` or an RDS parameter group (source `configuration file`). The rule covers it by the source list, not by a run.
 
 ### T21 — settled in Phase 2
 
@@ -34,6 +34,8 @@
 - `src/__tests__/db-integration/user-owned-rows-seed.ts`: seeds one row in each of the 22 models `realign` and `backfill-owning-column` strand. An enforcing bypass is consulted only for a table whose rows a statement examines, so without the rows those two cells would prove nothing for most of their grants.
 - `src/__tests__/db-integration/role-url-consistency.ts`, `probe-role-names.ts`, `rls-grant-evidence-recorder.ts`: the pure halves of the harness checks, split out so they have unit tests.
 - `helpers.ts`: `superuserConnectionString()` and `auditChainVerifierConnectionString()` exports.
+- `scripts/checks/check-raw-sql-usage.mjs`: a measured exemption for the evidence check reading its text baseline.
+- Listed in C12 but unchanged: `src/lib/tenant-rls-purpose.ts` (no sentence about the mode).
 
 ### D-3. C10 covers one more site than listed
 
@@ -49,7 +51,8 @@
 ### D-5. C8: one cell kept, one script run out of process
 
 - The existing `team_member_key_prune` owner-swap cell was left as it is; it already runs the routine under a NOBYPASSRLS owner and asserts the refusal.
-- `migrate-account-tokens-to-encrypted` runs as a child process because its `main()` is not exported. The harness records evidence in-process only, so `ACCOUNT_TOKEN_MIGRATION` is listed as unexercised in the C11 baseline although the cell runs it as the probe role, and the cell has no red proof (the mutation targets a module the child loads itself).
+- `migrate-account-tokens-to-encrypted` runs as a child process because its `main()` is not exported. The harness records evidence in-process only, so `ACCOUNT_TOKEN_MIGRATION` is listed as unexercised in the C11 baseline although the cell runs it as the probe role.
+- Its red proof was run in code review (T3), on a scratch copy of the script whose grant was reduced to `user`: run as the cell runs it, the copy exits 1 with `42501 RLS_BYPASS_NOT_GRANTED: accounts` and the seeded token stays plaintext, so the cell's process call rejects. The real script exits 0 with the token encrypted.
 - `tenantClaimEvent` in `TENANT_CLAIM_BINDING_READ` and `TENANT_CLAIM_BINDING_WRITE` cannot be red-proven: `tenant_claim_events` has no RLS policy, so no bypass is consulted for it.
 
 ### D-6. C11: 33 grants have no restricted-role evidence

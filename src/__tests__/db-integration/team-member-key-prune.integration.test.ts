@@ -396,7 +396,8 @@ describe("team key prune (#1009)", () => {
       const { notices, table } = await expectBypassRefusal(() =>
         callAsWorker(OTHER_GRANT, (tx) => tx.$queryRawUnsafe(`SELECT * FROM team_member_key_prune(1)`)),
       );
-      expect(notices).toEqual([{ table, purpose: "system_maintenance" }]);
+      expect(table).toBe("team_member_keys");
+      expect(notices).toEqual([{ table: "team_member_keys", purpose: "system_maintenance" }]);
       expect(await versions(teamId)).toEqual([1, 2, 3, 4]);
     });
 

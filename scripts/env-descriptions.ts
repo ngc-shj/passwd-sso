@@ -1144,7 +1144,7 @@ export const descriptions: Record<
       "(passwd_audit_chain_verifier). Least privilege: column-level SELECT on\n" +
       "tenants (id), audit_chain_anchors (tenant_id, chain_seq, prev_hash) and\n" +
       "audit_logs (id, tenant_id, created_at, chain_seq, event_hash,\n" +
-      "chain_prev_hash, metadata); no write of any kind.\n" +
+      "chain_prev_hash, metadata); no write to any application table or sequence.\n" +
       "Required by the worker in production (no DATABASE_URL fallback);\n" +
       "outside production it falls back to DATABASE_URL if unset.",
     example: "postgresql://passwd_audit_chain_verifier:pass@localhost:5432/passwd_sso",

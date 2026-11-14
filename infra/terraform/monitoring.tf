@@ -160,6 +160,42 @@ resource "aws_cloudwatch_metric_alarm" "rls_bypass_not_granted" {
   tags          = local.tags
 }
 
+# The migrate task's grant audit passed with the database in report mode because
+# RLS_REPORT_MODE_ACK was set (scripts/audit-db-grants.mjs). The migrate task
+# logs to the app log group. The acknowledgement is an emergency lever: this
+# alarm fires on every deploy that still carries it.
+resource "aws_cloudwatch_log_metric_filter" "rls_report_mode_acknowledged" {
+  count          = var.enable_monitoring ? 1 : 0
+  name           = "${local.name_prefix}-rls-report-mode-acknowledged"
+  log_group_name = aws_cloudwatch_log_group.app.name
+  pattern        = "{ $._logType = \"rls.report_mode_acknowledged\" }"
+
+  metric_transformation {
+    name          = "RlsReportModeAcknowledged"
+    namespace     = "${local.name_prefix}/App"
+    value         = "1"
+    default_value = "0"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "rls_report_mode_acknowledged" {
+  count               = var.enable_monitoring ? 1 : 0
+  alarm_name          = "${local.name_prefix}-rls-report-mode-acknowledged"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = 1
+  metric_name         = "RlsReportModeAcknowledged"
+  namespace           = "${local.name_prefix}/App"
+  period              = 300
+  statistic           = "Sum"
+  threshold           = 1
+  alarm_description   = "A deploy ran with the RLS bypass in report mode, acknowledged by RLS_REPORT_MODE_ACK (rls.report_mode_acknowledged); see docs/operations/alerts.md"
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = [aws_sns_topic.alarms[0].arn]
+  ok_actions    = [aws_sns_topic.alarms[0].arn]
+  tags          = local.tags
+}
+
 # Health check failure alarm (from log metric filter)
 resource "aws_cloudwatch_metric_alarm" "health_check_failure" {
   count               = var.enable_monitoring ? 1 : 0

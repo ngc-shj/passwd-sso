@@ -21,7 +21,8 @@ import {
 import { probeRoleName } from "./probe-role-names";
 import { connectionStringAsRole, createProbeRole, type ProbeRole } from "./rds-probe-role";
 
-const TENANT_ONLY = defineGrant(BYPASS_PURPOSE.SYSTEM_MAINTENANCE, ["tenant"]);
+// Omits users; not a production member's pair, which a refusal cell must not credit.
+const TENANT_AND_SESSIONS = defineGrant(BYPASS_PURPOSE.SYSTEM_MAINTENANCE, ["tenant", "session"]);
 const USERS_AND_TENANTS = defineGrant(BYPASS_PURPOSE.SYSTEM_MAINTENANCE, ["tenant", "user"]);
 
 async function withSuperuser<T>(fn: (client: Client) => Promise<T>): Promise<T> {
@@ -101,7 +102,7 @@ describe("owner-shaped probe role", () => {
     try {
       const { notices, table } = await expectBypassRefusal(() =>
         prisma.$transaction(async (tx) => {
-          await setBypassGucs(tx, TENANT_ONLY);
+          await setBypassGucs(tx, TENANT_AND_SESSIONS);
           return tx.$queryRawUnsafe(`SELECT id FROM users WHERE id = $1::uuid`, userId);
         }),
       );

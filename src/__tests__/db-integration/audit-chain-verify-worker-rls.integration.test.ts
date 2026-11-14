@@ -417,11 +417,11 @@ describe("audit-chain verify worker RLS context", () => {
       await client.end();
     });
 
-    async function refusedCode(sql: string): Promise<string | null> {
+    async function refusal(sql: string): Promise<{ code: string | null; message: string } | null> {
       try {
         await client.query(sql);
       } catch (err) {
-        return pgErrorCode(err);
+        return { code: pgErrorCode(err), message: err instanceof Error ? err.message : String(err) };
       }
       return null;
     }
@@ -451,14 +451,18 @@ describe("audit-chain verify worker RLS context", () => {
       ["a table with no grant at all", "SELECT 1 FROM audit_outbox LIMIT 1", ALLOWED_READS.audit_logs],
     ])("refuses %s with 42501 while the granted read succeeds", async (_name, denied, allowed) => {
       await expect(client.query(allowed)).resolves.toBeDefined();
-      expect(await refusedCode(denied)).toBe("42501");
+      const refused = await refusal(denied);
+      expect(refused?.code).toBe("42501");
+      expect(refused?.message).toMatch(/permission denied for (table|column)/);
       await expect(client.query(allowed)).resolves.toBeDefined();
     });
 
     // WHERE false: privileges are checked at parse time, before any row is
     // examined, so a role that held the privilege would also write nothing
     // here — the paired read shows the table is otherwise reachable, and the
-    // 42501 shows which check refused.
+    // "permission denied" message shows which check refused: an INSERT that
+    // held the privilege would still fail 42501 on the RLS policy check
+    // ("new row violates row-level security policy").
     it.each([
       ["INSERT", "INSERT INTO tenants (id) VALUES (gen_random_uuid())", "tenants"],
       ["UPDATE", "UPDATE tenants SET id = id WHERE false", "tenants"],
@@ -471,7 +475,9 @@ describe("audit-chain verify worker RLS context", () => {
       ["DELETE", "DELETE FROM audit_logs WHERE false", "audit_logs"],
     ] as const)("refuses %s on %s with 42501 while the granted read succeeds", async (_verb, denied, table) => {
       await expect(client.query(ALLOWED_READS[table])).resolves.toBeDefined();
-      expect(await refusedCode(denied)).toBe("42501");
+      const refused = await refusal(denied);
+      expect(refused?.code).toBe("42501");
+      expect(refused?.message).toMatch(/permission denied for (table|column)/);
       await expect(client.query(ALLOWED_READS[table])).resolves.toBeDefined();
     });
   });

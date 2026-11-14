@@ -31,6 +31,8 @@ import { mkdtempSync, rmSync, writeFileSync, chmodSync, readFileSync, existsSync
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
+import { ATTESTATION_ENV, FLIP_MIGRATION } from "../rls-enforce-preflight.mjs";
+import { RLS_REPORT_MODE_ACK_ENV } from "../audit-db-grants.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..", "..");
@@ -584,7 +586,7 @@ describe("deploy.sh image signature enforcement", () => {
 });
 
 describe("deploy.sh migrate-task variable forwarding", () => {
-  const ATTESTED = "20261114000100_rls_bypass_enforce";
+  const ATTESTED = FLIP_MIGRATION;
   // A quote, a backslash and a space: the value must survive as one JSON string.
   const REASON = 'un-flip "INC-1" \\ rollback';
 
@@ -611,49 +613,49 @@ describe("deploy.sh migrate-task variable forwarding", () => {
   it("treats an empty export as not set", () => {
     installStubs();
 
-    const result = runDeploy([], { RLS_ENFORCE_ATTESTED: "", RLS_REPORT_MODE_ACK: "" });
+    const result = runDeploy([], { [ATTESTATION_ENV]: "", [RLS_REPORT_MODE_ACK_ENV]: "" });
 
     expect(result.status).toBe(0);
     expect(runTaskLine()).not.toContain("--overrides");
   });
 
-  it("forwards RLS_ENFORCE_ATTESTED alone to the migrate container", () => {
+  it("forwards the attestation alone to the migrate container", () => {
     installStubs();
 
-    const result = runDeploy([], { RLS_ENFORCE_ATTESTED: ATTESTED });
+    const result = runDeploy([], { [ATTESTATION_ENV]: ATTESTED });
 
     expect(result.status).toBe(0);
     expect(overridesOf(runTaskLine())).toEqual({
-      containerOverrides: [{ name: "migrate", environment: [{ name: "RLS_ENFORCE_ATTESTED", value: ATTESTED }] }],
+      containerOverrides: [{ name: "migrate", environment: [{ name: ATTESTATION_ENV, value: ATTESTED }] }],
     });
-    expect(result.stdout).toContain("Forwarding to the migrate task: RLS_ENFORCE_ATTESTED");
+    expect(result.stdout).toContain(`Forwarding to the migrate task: ${ATTESTATION_ENV}`);
     expect(result.stdout).not.toContain(ATTESTED);
   });
 
-  it("forwards RLS_REPORT_MODE_ACK alone, escaped as one value", () => {
+  it("forwards the acknowledgement alone, escaped as one value", () => {
     installStubs();
 
-    const result = runDeploy([], { RLS_REPORT_MODE_ACK: REASON });
+    const result = runDeploy([], { [RLS_REPORT_MODE_ACK_ENV]: REASON });
 
     expect(result.status).toBe(0);
     expect(overridesOf(runTaskLine())).toEqual({
-      containerOverrides: [{ name: "migrate", environment: [{ name: "RLS_REPORT_MODE_ACK", value: REASON }] }],
+      containerOverrides: [{ name: "migrate", environment: [{ name: RLS_REPORT_MODE_ACK_ENV, value: REASON }] }],
     });
-    expect(result.stdout).toContain("Forwarding to the migrate task: RLS_REPORT_MODE_ACK");
+    expect(result.stdout).toContain(`Forwarding to the migrate task: ${RLS_REPORT_MODE_ACK_ENV}`);
   });
 
   it("forwards both when both are exported", () => {
     installStubs();
 
-    const result = runDeploy([], { RLS_ENFORCE_ATTESTED: ATTESTED, RLS_REPORT_MODE_ACK: "reason" });
+    const result = runDeploy([], { [ATTESTATION_ENV]: ATTESTED, [RLS_REPORT_MODE_ACK_ENV]: "reason" });
 
     expect(result.status).toBe(0);
     expect(overridesOf(runTaskLine()).containerOverrides).toEqual([
       {
         name: "migrate",
         environment: [
-          { name: "RLS_ENFORCE_ATTESTED", value: ATTESTED },
-          { name: "RLS_REPORT_MODE_ACK", value: "reason" },
+          { name: ATTESTATION_ENV, value: ATTESTED },
+          { name: RLS_REPORT_MODE_ACK_ENV, value: "reason" },
         ],
       },
     ]);
@@ -662,10 +664,22 @@ describe("deploy.sh migrate-task variable forwarding", () => {
   it("does not forward on the rollback path, which runs no migration", () => {
     installStubs();
 
-    const result = runDeploy(["--rollback-to", `${ECR_URL}:v0.4.71`], { RLS_ENFORCE_ATTESTED: ATTESTED });
+    const result = runDeploy(["--rollback-to", `${ECR_URL}:v0.4.71`], { [ATTESTATION_ENV]: ATTESTED });
 
     expect(logLines("ecs run-task")).toHaveLength(0);
     expect(result.stdout).not.toContain("Forwarding to the migrate task");
+  });
+
+  it("names exactly the variables and the migration the scripts define", () => {
+    // deploy.sh is bash and cannot import them; a rename in the .mjs files
+    // without the same edit here must go red.
+    const text = readFileSync(SCRIPT, "utf8");
+    const code = text
+      .split("\n")
+      .filter((l) => !/^\s*#/.test(l))
+      .join("\n");
+    expect([...new Set(code.match(/\bRLS_[A-Z_]+\b/g))].sort()).toEqual([ATTESTATION_ENV, RLS_REPORT_MODE_ACK_ENV].sort());
+    expect(text).toContain(FLIP_MIGRATION);
   });
 
   it("never defaults either variable", () => {
@@ -674,7 +688,7 @@ describe("deploy.sh migrate-task variable forwarding", () => {
       .split("\n")
       .filter((l) => !/^\s*#/.test(l))
       .join("\n");
-    for (const name of ["RLS_ENFORCE_ATTESTED", "RLS_REPORT_MODE_ACK"]) {
+    for (const name of [ATTESTATION_ENV, RLS_REPORT_MODE_ACK_ENV]) {
       // `${NAME:-}` (empty default) is the only expansion allowed.
       expect(script, `${name} given a non-empty default`).not.toMatch(
         new RegExp(`\\$\\{${name}:?[-=+?][^}]`),

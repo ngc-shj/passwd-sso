@@ -183,7 +183,8 @@ RLS_REPORT_MODE_ACK="<reason>" ./scripts/deploy.sh
 ```
 
 The audit prints the reason as a `WARNING` line in the task log (one line, 200
-characters at most). `--write` refuses to regenerate the manifest in report mode
+characters at most) and as a JSON line the `rls-report-mode-acknowledged` alarm
+counts (`docs/operations/alerts.md`), so each acknowledged deploy raises it. `--write` refuses to regenerate the manifest in report mode
 whatever is set. The un-flip removes the refusal for every bypass, not only the
 one that failed. To restore it, run the same statement with `SELECT true`: a
 deploy does not, because the flip migration is already applied and
@@ -191,11 +192,16 @@ deploy does not, because the flip migration is already applied and
 through PostgreSQL's plan invalidation; confirm it with the canary rather than
 assuming it is immediate. The audit also fails on `CLIENT_MIN_MESSAGES_SERVER_LEVEL` when a
 server-level source (for example an RDS parameter group) sets `client_min_messages`
-to `error`, which would hide the bypass reports.
+to `error`, which would hide the bypass reports. It fails as well when the audit's
+own connection overrides the setting (a setting on the migration role, or
+`options=-c client_min_messages=…` in `MIGRATION_DATABASE_URL`), whatever the
+value: the server default is then unreadable.
 
-Compose installs run neither the preflight nor the audit. Their database flips
-when the `migrate` service applies the migration, with no attestation and no
-audit; the release is marked breaking. To un-flip one:
+Only the ECS migrate task runs the preflight and the audit. Compose installs,
+and any launcher that runs `prisma migrate deploy` directly (Vercel, GCP, Azure,
+Kubernetes, a hand-run one-off task, `npm run db:migrate`), run neither: their
+database flips when the migration is applied, with no attestation and no audit;
+the release is marked breaking. To un-flip a compose install:
 
 ```bash
 docker compose exec -T db psql -U passwd_user -d passwd_sso -v ON_ERROR_STOP=1 -c \
@@ -385,6 +391,9 @@ change after the window can refuse a statement that never reported. The un-flip
 
 A fresh RDS environment needs none of this: the bootstrap runs before the first
 migration, and the preflight passes on a database with no applied migrations.
+If that first migration run stops partway, the database is no longer fresh and
+the retry is refused: export the attestation for it (there is no production
+window to observe on a new environment).
 
 **If the secret key is missing at step 5:** the verify task cannot resolve its
 secret and does not start. ECS's circuit breaker keeps the previous revision of
@@ -882,7 +891,7 @@ The application uses these database roles with separated privileges:
 | `passwd_outbox_worker` (or equivalent) | NOSUPERUSER NOBYPASSRLS; SELECT/UPDATE/DELETE on `audit_outbox`, INSERT on `audit_logs`, SELECT on `tenants` | Audit outbox drain worker (least privilege) |
 | `passwd_retention_gc_worker` (or equivalent) | NOSUPERUSER NOBYPASSRLS; scoped DELETE/SELECT on the retention-swept tables | Retention GC worker (least privilege) |
 | `passwd_anchor_publisher` | NOSUPERUSER NOBYPASSRLS; SELECT + column-scoped UPDATE on `audit_chain_anchors`, INSERT on `audit_outbox`, SELECT/INSERT/UPDATE on `system_settings`, SELECT on `tenants` | Audit-anchor publisher (least privilege) |
-| `passwd_audit_chain_verifier` | NOSUPERUSER NOBYPASSRLS; column-level SELECT on eleven columns of `tenants` (`id`), `audit_chain_anchors` and `audit_logs`, EXECUTE on the two `rls_bypass_*` functions, connection limit 10; no write of any kind (migration `20261111000000`) | Audit-chain verify worker (read-only) |
+| `passwd_audit_chain_verifier` | NOSUPERUSER NOBYPASSRLS; column-level SELECT on eleven columns of `tenants` (`id`), `audit_chain_anchors` and `audit_logs`, EXECUTE on the two `rls_bypass_*` functions, connection limit 10; no write to any application table or sequence (migration `20261111000000`) | Audit-chain verify worker (read-only) |
 | `passwd_dcr_cleanup_worker` | **Retired** — NOLOGIN, no password, nothing beyond `PUBLIC` (migration `20261023010000`) | None. Kept only so older dumps that name it still restore; the grant audit asserts the retired state |
 
 > **`rds_superuser` is a role MEMBERSHIP, not a role ATTRIBUTE.** On RDS the
@@ -936,8 +945,8 @@ installed. A privilege granted to a worker out of band is therefore **not**
 removed by re-running the bootstrap.
 
 Detection runs automatically on **every deploy**: the migrate task's command is
-`prisma migrate deploy && node scripts/audit-db-grants.mjs`
-(`infra/terraform/ecs.tf`), so a migration that grants more than the manifest
+`node scripts/rls-enforce-preflight.mjs`, `npx prisma migrate deploy`, then
+`node scripts/audit-db-grants.mjs` under `set -e` (`infra/terraform/ecs.tf`), so a migration that grants more than the manifest
 sanctions fails the migrate task — and `deploy.sh` aborts before any service is
 advanced. The audit needs a DDL-capable connection and RDS admits only the ECS
 security group, so the migrate task is the only place it can run.

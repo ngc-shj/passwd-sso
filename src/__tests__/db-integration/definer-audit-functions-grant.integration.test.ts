@@ -24,10 +24,10 @@ import {
 } from "./helpers";
 import { createProbeRole, type ProbeRole } from "./rds-probe-role";
 import { NIL_UUID } from "@/lib/constants/app";
-import { defineGrant, setBypassGucs, type BypassGrant } from "@/lib/tenant-rls-grants";
+import { BYPASS_GRANT, defineGrant, setBypassGucs, type BypassGrant } from "@/lib/tenant-rls-grants";
 import { BYPASS_PURPOSE } from "@/lib/tenant-rls-purpose";
 
-const AUDIT_LOGS = defineGrant(BYPASS_PURPOSE.SYSTEM_MAINTENANCE, ["auditLog"]);
+const AUDIT_LOGS = BYPASS_GRANT.AUDIT_LOG_MAINTENANCE_ACCESS;
 const USERS_ONLY = defineGrant(BYPASS_PURPOSE.SYSTEM_MAINTENANCE, ["user"]);
 const LONG_AGO = "2000-01-01T00:00:00Z";
 // The purge deletes rows strictly older than its cutoff.

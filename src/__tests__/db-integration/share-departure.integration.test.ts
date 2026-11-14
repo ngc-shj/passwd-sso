@@ -874,7 +874,9 @@ describe("share links across a creator's departure — real-DB integration", () 
           if (contextName === "public serve bypass") {
             const { notices, table } = await expectBypassRefusal(() => tx.$queryRawUnsafe(`SELECT count(*) FROM team_members`));
             expect(table).toBe("team_members");
-            expect(notices.length).toBeGreaterThan(0);
+            expect(notices).toEqual([
+              { table: "team_members", purpose: BYPASS_GRANT.SHARE_LINK_PUBLIC_ACCESS.purpose },
+            ]);
           }
           throw ROLLBACK;
         }),

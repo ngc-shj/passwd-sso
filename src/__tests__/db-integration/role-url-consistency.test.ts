@@ -31,6 +31,15 @@ describe("roleUrlMismatches", () => {
     ).toHaveLength(1);
   });
 
+  it("names the entry that mismatches, so DATABASE_URL can be told from a role URL", () => {
+    const found = roleUrlMismatches(SUPER, {
+      DATABASE_URL: "postgresql://passwd_user:x@localhost:5432/passwd_sso",
+      app: "postgresql://passwd_app:x@localhost:5432/passwd_sso_test",
+    });
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatch(/^DATABASE_URL: /);
+  });
+
   it("never prints a password", () => {
     const found = roleUrlMismatches(SUPER, { app: "postgresql://passwd_app:hunter2@localhost:5432/other" });
     expect(found.join("\n")).not.toMatch(/hunter2|s3cret/);

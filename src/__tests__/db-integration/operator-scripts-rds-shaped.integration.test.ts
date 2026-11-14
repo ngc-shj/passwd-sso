@@ -597,7 +597,7 @@ describe("operator scripts as an owner-shaped NOSUPERUSER NOBYPASSRLS role", () 
         expect(granted).toHaveLength(1);
         const { table } = await expectBypassRefusal(() =>
           prisma.$transaction(async (tx) => {
-            await setBypassGucs(tx, defineGrant(BYPASS_PURPOSE.SYSTEM_MAINTENANCE, ["tenant"]));
+            await setBypassGucs(tx, defineGrant(BYPASS_PURPOSE.SYSTEM_MAINTENANCE, ["tenant", "user"]));
             return tx.$queryRawUnsafe(`SELECT id FROM tenant_claims WHERE claim = $1`, claim);
           }),
         );

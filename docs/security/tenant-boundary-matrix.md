@@ -77,7 +77,7 @@ grep -rhoE 'ALTER TABLE "[a-z_]+" ENABLE ROW LEVEL SECURITY' prisma/migrations/ 
 | `webauthn_credentials` |
 
 `system_settings` (added in `prisma/migrations/20260502000000_audit_anchor_publisher_phase2/migration.sql`)
-uses a bypass-only policy — `USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on')` — rather
+uses a bypass-only policy — `USING ((SELECT rls_bypass_admits('system_settings')))`, which also requires `system_settings` in the bypass's `app.bypass_tables` — rather
 than a `tenant_id = current_setting('app.tenant_id')` policy, because the table has no per-tenant rows (it is
 a global key-value store for publisher state). All other tables use the standard tenant-scoped policy shape.
 
@@ -139,7 +139,7 @@ call site legitimately needs to see across tenant boundaries:
 
 ## Worker roles and grants
 
-Three non-application Postgres login roles exist alongside the interactive `passwd_app` role, each
+Four non-application Postgres login roles exist alongside the interactive `passwd_app` role, each
 scoped to the minimum privileges its worker needs, plus one retired role that holds nothing (below).
 All are `NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE` —
 RLS is enforced for every one of them; a worker that needs to see across tenants sets
@@ -242,6 +242,28 @@ audits it on every ECS deploy (`AUDITED_ROLES`, including `ROLEATTR … rolcanlo
 | `tenants` | `SELECT` | chain-enabled tenant enumeration (`audit-anchor-publisher.ts`, under the `AUDIT_ANCHOR_PUBLISH` grant) |
 | `audit_outbox` | `INSERT` | enqueue SYSTEM-attributed publish-event audit rows |
 | `system_settings` | `SELECT, INSERT, UPDATE` | publish-state key-value storage (deployment-ID guard, pause bookkeeping) |
+
+### `passwd_audit_chain_verifier` (audit-chain verify worker)
+
+Migration: `prisma/migrations/20261111000000_audit_chain_verifier_role/migration.sql`. A `LOGIN`
+role: the audit-chain verify worker connects as it (`AUDIT_CHAIN_VERIFY_DATABASE_URL`). The
+migration creates it `NOLOGIN` with connection limit 10; the Docker initdb
+(`infra/postgres/initdb/05-create-audit-chain-verifier-role.sql`) and, on RDS,
+`scripts/bootstrap-rds-roles.mjs` give it `LOGIN` and its password. `scripts/audit-db-grants.mjs`
+audits it on every ECS deploy (`AUDITED_ROLES`).
+
+It holds no table-level privilege, only column-level `SELECT`, plus `EXECUTE` on
+`rls_bypass_enforced()` and `rls_bypass_admits(text)`:
+
+| Table | Columns (`SELECT`) | Reason |
+| --- | --- | --- |
+| `tenants` | `id` | tenant enumeration |
+| `audit_chain_anchors` | `tenant_id`, `chain_seq`, `prev_hash` | the chain head to verify up to |
+| `audit_logs` | `id`, `tenant_id`, `created_at`, `chain_seq`, `event_hash`, `chain_prev_hash`, `metadata` | the hashed payload and the chain links |
+
+The role bounds tables, columns and table writes, not tenant scope: it sets the bypass GUCs itself
+and then reads those columns, `metadata` included, for every tenant. It keeps what PostgreSQL
+grants `PUBLIC` (temporary tables, large objects, `NOTIFY`, advisory locks).
 
 ### `passwd_dcr_cleanup_worker` (retired)
 

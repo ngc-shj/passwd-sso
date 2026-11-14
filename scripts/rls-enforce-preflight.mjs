@@ -41,7 +41,9 @@ function decideFlipPreflight({ tableExists, rows, attestation }) {
     reason:
       `${FLIP_MIGRATION} is not applied on this database and ${ATTESTATION_ENV} is not set to it. ` +
       `Make the production checks listed in docs/operations/deployment.md, then export ` +
-      `${ATTESTATION_ENV}=${FLIP_MIGRATION} and deploy again. No migration was applied.`,
+      `${ATTESTATION_ENV}=${FLIP_MIGRATION} and deploy again. No migration was applied. ` +
+      `(A new environment whose first migration run stopped partway is not fresh any more: ` +
+      `export the variable there too.)`,
   };
 }
 

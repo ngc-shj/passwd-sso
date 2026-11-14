@@ -694,7 +694,7 @@ resource "aws_ecs_task_definition" "audit_chain_verify_worker" {
       }
       # Connects as passwd_audit_chain_verifier (the app secret's
       # AUDIT_CHAIN_VERIFY_DATABASE_URL), which reads eleven columns of three
-      # tables and writes nothing.
+      # tables and writes to none.
       secrets = [
         { name = "AUDIT_CHAIN_VERIFY_DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUDIT_CHAIN_VERIFY_DATABASE_URL::" },
       ]

@@ -28,7 +28,8 @@
  * `--write` refuses in report mode whatever is set. The variable is read from
  * the environment only (scripts/deploy.sh forwards it); no flag sets it.
  * Fails too when client_min_messages is above `warning` from a server-level
- * source (see clientMinMessagesViolations).
+ * source, or when the audit's own connection overrides it so that the
+ * server-level value cannot be read (see clientMinMessagesViolations).
  *
  * Findings:
  *   UNEXPECTED_GRANT: <manifest key>  — live privilege not in the manifest (the
@@ -44,7 +45,8 @@
  *   RLS_ENFORCE_MODE                  — the RLS bypass is not enforcing (see
  *                                       enforceModeViolations)
  *   CLIENT_MIN_MESSAGES_SERVER_LEVEL  — the RLS bypass report channel is closed
- *                                       server-wide (see clientMinMessagesViolations)
+ *                                       server-wide, or cannot be shown open
+ *                                       (see clientMinMessagesViolations)
  */
 import { readFileSync, writeFileSync, existsSync, realpathSync } from "node:fs";
 import { Client } from "pg";
@@ -622,9 +624,17 @@ export function assertRetiredSubset(auditedRoles, retiredRoles) {
 }
 
 /** Env var whose non-empty reason lets the audit pass in report mode. */
-const RLS_REPORT_MODE_ACK_ENV = "RLS_REPORT_MODE_ACK";
+export const RLS_REPORT_MODE_ACK_ENV = "RLS_REPORT_MODE_ACK";
 
 const ACK_MAX_LENGTH = 200;
+
+/** `_logType` of the line an acknowledged report-mode audit emits. */
+const REPORT_MODE_ACK_LOG_TYPE = "rls.report_mode_acknowledged";
+
+/** The JSON line for one acknowledged-report-mode warning. */
+export function reportModeAckLogLine(warning) {
+  return JSON.stringify({ level: "warn", _logType: REPORT_MODE_ACK_LOG_TYPE, msg: warning });
+}
 
 /** One line, no control characters, bounded: the reason goes into the task log. */
 function sanitizeAcknowledgement(reason) {
@@ -685,20 +695,28 @@ async function readEnforceMode(client) {
 }
 
 /**
- * pg_settings sources that belong to the audit's own session, not to the
- * deployment: a startup-packet option (`options=-c ...` in the connection
- * string), a session-level SET (and SET LOCAL), and the interactive and test
- * sources. Observed on PostgreSQL 16: a session SET and SET LOCAL both report
- * `session`; an untouched value reports `default`.
+ * pg_settings sources whose value every other connection to this database
+ * inherits: `default`, `configuration file` (postgresql.conf, an RDS parameter
+ * group), `environment variable`, `command line`, `global`, `override`, and
+ * `database` (ALTER DATABASE ... SET).
  *
- * Every other source applies to connections the audit does not control —
- * `default`, `configuration file` (postgresql.conf, an RDS parameter group),
- * `environment variable`, `command line`, `global`, `override`, and
- * `database` / `user` / `database user` (ALTER DATABASE/ROLE ... SET, which
- * pg_db_role_setting already covers) — so the check treats any source NOT in
- * this set as server-level, and an unknown source therefore fails closed.
+ * Any other source belongs to the audit's own connection — a startup-packet
+ * option (`client`), a SET (`session`; observed on PostgreSQL 16 for SET and
+ * SET LOCAL alike), or a setting on the audit's own role (`user`,
+ * `database user`). pg_settings then shows that value and nothing of the
+ * server default underneath it, so the check cannot decide and fails: a
+ * harmless override on the migration role would otherwise hide a parameter
+ * group that silences every other role. An unknown source fails the same way.
  */
-const SESSION_ONLY_SOURCES = new Set(["client", "session", "interactive", "test"]);
+const SERVER_WIDE_SOURCES = new Set([
+  "default",
+  "configuration file",
+  "environment variable",
+  "command line",
+  "global",
+  "override",
+  "database",
+]);
 
 /**
  * client_min_messages above `warning` closes the channel the RLS bypass reports
@@ -709,8 +727,13 @@ const SESSION_ONLY_SOURCES = new Set(["client", "session", "interactive", "test"
  * @returns {string[]}
  */
 export function clientMinMessagesViolations({ setting, source }) {
+  if (!SERVER_WIDE_SOURCES.has(source)) {
+    return [
+      `client_min_messages = ${setting} comes from source "${source}", the audit's own connection: ` +
+        "the server-level value cannot be read. Remove the override from the migration role or its connection string",
+    ];
+  }
   if (!["error", "fatal", "panic"].includes(setting)) return [];
-  if (SESSION_ONLY_SOURCES.has(source)) return [];
   return [`client_min_messages = ${setting} from source "${source}" silences the RLS bypass reports`];
 }
 
@@ -966,7 +989,13 @@ async function main() {
     ...mode,
     acknowledgement: process.env[RLS_REPORT_MODE_ACK_ENV],
   });
-  for (const w of enforceMode.warnings) console.warn(`WARNING: ${w}`);
+  for (const w of enforceMode.warnings) {
+    console.warn(`WARNING: ${w}`);
+    // One JSON line as well: the migrate task logs to the app log group, where
+    // a metric filter on this _logType raises an alarm (infra/terraform/monitoring.tf),
+    // so an acknowledgement left in a pipeline variable is not silent.
+    console.warn(reportModeAckLogLine(w));
+  }
   for (const v of enforceMode.violations) findings.push(`RLS_ENFORCE_MODE: ${v}`);
   for (const v of clientMinMessagesViolations(clientMinMessages)) {
     findings.push(`CLIENT_MIN_MESSAGES_SERVER_LEVEL: ${v}`);
@@ -994,9 +1023,14 @@ async function main() {
         `\npublic.rls_bypass_enforced() to true, or deploy with` +
         `\n${RLS_REPORT_MODE_ACK_ENV}="<reason>" (docs/operations/deployment.md).` +
         `\nA CLIENT_MIN_MESSAGES_SERVER_LEVEL means a server default (e.g. a parameter` +
-        `\ngroup) hides the bypass reports; set it back to warning or lower.\n`,
+        `\ngroup) hides the bypass reports; set it back to warning or lower. It also` +
+        `\nfires when this audit's own connection overrides the setting, because the` +
+        `\nserver default is then unreadable.\n`,
     );
-    process.exit(1);
+    // Not process.exit(): on a pipe (the migrate task's log driver, a spawning
+    // test) it can cut the report short, and the last findings are the ones lost.
+    process.exitCode = 1;
+    return;
   }
 
   console.log(`db-grants: OK (${live.length} grants match the manifest)`);

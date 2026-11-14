@@ -159,7 +159,7 @@ variable "worker_memory" {
 variable "worker_desired_count" {
   type        = number
   default     = 1
-  description = "Desired task count for each background worker. Set to 0 during first-time bootstrap so no worker starts before the migration; restore to 1 for steady state."
+  description = "Desired task count for each background worker. Set to 0 during first-time bootstrap so no worker starts before the migration; restore to 1 for steady state. Keep it at 2 or below: passwd_audit_chain_verifier has CONNECTION LIMIT 10, sized for two verify tasks (pool of 2, two overlapping revisions each)."
 }
 
 variable "db_username" {

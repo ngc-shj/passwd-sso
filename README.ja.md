@@ -266,7 +266,7 @@ npm run docker:down
 | `PASSWD_OUTBOX_WORKER_PASSWORD` | （`docker compose` 必須）`passwd_outbox_worker` DB ロールのパスワード。initdb 初回起動時に使用。既存クラスタでは `scripts/set-outbox-worker-password.sh` を使用 |
 | `PASSWD_RETENTION_GC_WORKER_PASSWORD` | （`docker compose` 必須）`passwd_retention_gc_worker` DB ロールのパスワード。initdb 初回起動時に使用。既存クラスタでは `scripts/set-retention-gc-worker-password.sh` を使用 |
 | `PASSWD_ANCHOR_PUBLISHER_PASSWORD` | （`docker compose` では任意）`passwd_anchor_publisher` DB ロールのパスワード。initdb 初回起動時に使用し、未設定ならロールは `NOLOGIN` で作成。既存クラスタでは `scripts/set-audit-anchor-publisher-password.sh` を使用 |
-| `PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD` | （`docker compose` では任意）`passwd_audit_chain_verifier` DB ロール（audit-chain verify worker の読み取り専用ロール）のパスワード。initdb 初回起動時に使用し、未設定ならロールは `NOLOGIN` で作成。`AUDIT_CHAIN_VERIFY_DATABASE_URL` と一致させる。既存クラスタでは `scripts/set-audit-chain-verifier-password.sh` を使用 |
+| `PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD` | （`docker compose` では任意）`passwd_audit_chain_verifier` DB ロール（audit-chain verify worker の読み取り専用ロール）のパスワード。initdb 初回起動時に使用し、未設定ならロールは `NOLOGIN` で作成。`AUDIT_CHAIN_VERIFY_DATABASE_URL` と一致させる。既存クラスタではマイグレーションがロールを `NOLOGIN` で作成するため、`scripts/set-audit-chain-verifier-password.sh` でパスワードを設定した後、スーパーユーザーで `ALTER ROLE passwd_audit_chain_verifier WITH LOGIN` を実行 |
 | `OUTBOX_BATCH_SIZE`, `OUTBOX_*` | （任意）監査アウトボックスワーカーの調整。詳細は `.env.example` 参照 |
 | `NEXT_DEV_ALLOWED_ORIGINS` | （任意）dev サーバー向け許可オリジン（例: Tailscale ホスト名） |
 | `NEXT_PUBLIC_CHROME_STORE_URL` | （任意）ブラウザ拡張配布用 Chrome Web Store URL |
