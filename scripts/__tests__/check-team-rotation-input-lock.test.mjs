@@ -840,6 +840,75 @@ async function isLeftover(tx, memberId) {
       });
     }
 
+    // Every exit of a helper must be the predicate's result or a throw.
+    const USE = "if (await isLeftover(tx, memberId)) return;";
+    const helperBody = (body) => `
+async function isLeftover(tx, memberId) {
+  const locked = await tx.teamMember.findFirst({ where: { id: memberId } });
+  ${body}
+}`;
+    const LEAKY_HELPERS = [
+      ["an early return false", `if (!locked) return false;\n  return ${HELPER_PRED};`],
+      ["a catch returning false", `try { return ${HELPER_PRED}; } catch { return false; }`],
+      ["a bare return", `if (!locked) return;\n  return ${HELPER_PRED};`],
+      ["a trailing fall-through", `if (locked) { return ${HELPER_PRED}; }`],
+      ["no return at all (it only throws)", `${HELPER_PRED};\n  throw new MemberChangedError();`],
+    ];
+    for (const [label, body] of LEAKY_HELPERS) {
+      it(`refuses a grant after a helper with ${label}`, () => {
+        write(SUBJECT, `${helperBody(body)}\nexport async function promote(tx, memberId) {\n  ${USE}\n  ${HELPER_GRANT}\n}`);
+        expectDenied(run({ grants: 1 }), uncovered("teamMember.updateMany"));
+      });
+    }
+
+    it("accepts a helper whose two returns are both the predicate", () => {
+      const body = `if (locked.fresh) return ${HELPER_PRED};\n  return !locked || ${HELPER_PRED};`;
+      write(SUBJECT, `${helperBody(body)}\nexport async function promote(tx, memberId) {\n  ${USE}\n  ${HELPER_GRANT}\n}`);
+      expect(run({ grants: 1 }).code).toBe(0);
+    });
+
+    it("accepts a helper with one predicate return and a throw (member PUT's targetIsLeftover)", () => {
+      const body = `if (!locked) throw new MemberChangedError();\n  return ${HELPER_PRED};`;
+      write(SUBJECT, `${helperBody(body)}\nexport async function promote(tx, memberId) {\n  ${USE}\n  ${HELPER_GRANT}\n}`);
+      expect(run({ grants: 1 }).code).toBe(0);
+    });
+
+    it("accepts a concise arrow helper returning the predicate", () => {
+      write(SUBJECT, `const isLeftover = (rows, locked) => ${HELPER_PRED};
+export async function promote(tx, rows, target) {
+  if (isLeftover(rows, target)) return;
+  await tx.teamMember.update({ where: { id: target.id }, data: { role: "ADMIN" } });
+}`);
+      expect(run({ grants: 1 }).code).toBe(0);
+    });
+
+    // Quoted keys are read like bare ones, in every rule that reads a payload.
+    const QUOTED = [
+      ['a quoted "role"', "teamMember.update", 'await tx.teamMember.update({ where: { id: target.id }, data: { "role": "ADMIN" } });', {}],
+      ['a quoted "data"', "teamMember.update", 'await tx.teamMember.update({ where: { id: target.id }, "data": { role: "ADMIN" } });', {}],
+      ['a quoted "keyDistributed"', "teamMember.updateMany", `${LOCK} await tx.teamMember.updateMany({ where: { id: target.id }, data: { "keyDistributed": true } });`, { writes: 2 }],
+      ['a quoted "update" arm', "teamMember.upsert", 'await lockTenantRows(tx, t, [target.userId], "share"); await tx.teamMember.upsert({ where: { id: target.id }, create: {}, "update": { role: "ADMIN" } });', { admissions: 1 }],
+      ['a quoted nested "members"', "team.update", 'await tx.team.update({ where: { id: teamId }, data: { "members": { update: { where: { id: target.id }, data: { role: "ADMIN" } } } } });', {}],
+    ];
+    for (const [label, site, grant, counts] of QUOTED) {
+      it(`refuses an unchecked grant through ${label}`, () => {
+        write(SUBJECT, `export async function promote(tx, rows, target) {\n  ${grant}\n}`);
+        expectDenied(run({ ...counts, grants: 1 }), uncovered(site));
+      });
+
+      it(`accepts the same grant through ${label} after a recipient check`, () => {
+        write(SUBJECT, `export async function promote(tx, rows, target) {\n  ${CHECK}\n  ${grant}\n}`);
+        expect(run({ ...counts, grants: 1 }).code).toBe(0);
+      });
+    }
+
+    it("reads a quoted key in rules 1 and 3 too (a quoted deactivatedAt)", () => {
+      write(SUBJECT, `export async function off(tx) { await tx.teamMember.updateMany({ where: { id }, data: { "deactivatedAt": new Date() } }); }`);
+      expectDenied(run({ writes: 2 }), /member-write::src\/lib\/team\/subject\.ts::off::teamMember\.updateMany/);
+      write(SUBJECT, `export async function back(tx) { await lockTeamsAgainstRotation(tx, [teamId]); await tx.teamMember.updateMany({ where: { id }, data: { "deactivatedAt": null } }); }`);
+      expectDenied(run({ writes: 2, admissions: 1 }), /admission::src\/lib\/team\/subject\.ts::back::teamMember\.updateMany/);
+    });
+
     it("accepts a helper returning the predicate, used fail-closed", () => {
       write(SUBJECT, `${helper(`return ${HELPER_PRED};`)}\nexport async function promote(tx, memberId) {\n  if (await isLeftover(tx, memberId)) return;\n  ${HELPER_GRANT}\n}`);
       expect(run({ grants: 1 }).code).toBe(0);

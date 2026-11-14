@@ -63,7 +63,10 @@
  *
  * 8. GRANT RECIPIENTS (departed-member-leaked-authority-deviation.md D8). A
  *    leftover membership (an active team row whose user's tenant row departed
- *    at or after its admission) receives no grant. A grant is:
+ *    at or after its admission) receives no grant. This rule is a review
+ *    tripwire over the spellings this codebase uses, with the pinned count as
+ *    the backstop for a new site — not a proof (KNOWN LIMITS below). A grant
+ *    is:
  *    - a `teamMember` update/updateMany/updateManyAndReturn whose `data` (an
  *      `upsert`'s `update`) names `role`, has a computed key, or sets
  *      `keyDistributed` to anything but the literal `false`;
@@ -72,7 +75,8 @@
  *    - an update/updateMany/upsert of a parent naming a relation to those
  *      tables (schema.prisma): `team` `members`/`memberKeys`, `user`
  *      `teamMemberships`/`teamMemberKeys`, `tenant` `teamMembers`/
- *      `teamMemberKeys` (a create's nested rows are new ones);
+ *      `teamMemberKeys` (a parent's create is not counted: its nested
+ *      creates are new rows — but see KNOWN LIMITS for `connect`);
  *    - a raw `UPDATE team_members` naming `role =` or `key_distributed =
  *      true`, or `INSERT INTO team_member_keys`.
  *    Read from literals, an update is no grant when it reaches no active row
@@ -85,9 +89,10 @@
  *    same-file caller: a call of `actorDepartedSinceAdmission` that does not
  *    judge the acting member (its row is not keyed `session.user.id`, its
  *    admission is not an `activeTeamAdmission` result), or of a same-file
- *    helper that returns such a call's result (`return pred(...)`, or a
- *    top-level `||` disjunct of the returned value). The check must EXIT ON
- *    TRUE before the grant: the call (awaited or not) is an if-test or a
+ *    helper whose EVERY return returns such a call's result (`return
+ *    pred(...)`, or a top-level `||` disjunct of the returned value), with at
+ *    least one return and a body ending in a `return` or `throw`. The check
+ *    must EXIT ON TRUE before the grant: the call (awaited or not) is an if-test or a
  *    top-level `||` disjunct of one, the consequent is or begins with an
  *    unconditional `return` / `throw`, and the if-statement sits in a block
  *    (or the file) that holds the grant, earlier — not in a branch, loop, try
@@ -103,8 +108,9 @@
  *    unreadable or spread payload, an unbounded `in`, or a
  *    grant with no recipient key at all. The
  *    tenant-row map's declaration is not followed (one lock call holds the
- *    actor's and the target's rows). A check of some other member (the owner
- *    route's "is there an active OWNER") does not cover the grant. Only a
+ *    actor's and the target's rows). A check naming none of a recipient's
+ *    variables (the owner route's "is there an active OWNER", over `o`) does
+ *    not cover it. Only a
  *    plain value, `equals: x` or a one-element `in: [x]` names a recipient: a
  *    `not` / `notIn` / wider `in` / unreadable operator, or a key under `NOT`
  *    / `OR`, names everyone-but or one-of-several, which no check covers.
@@ -112,15 +118,35 @@
  *    literals cannot show, recipients checked by set, and unreadable payloads
  *    read by hand are EXEMPTIONS.
  *
- *    KNOWN LIMITS (rule 8): the tie is by variable name, one declaration deep;
- *    two names for one person are not followed, one name for two is not
- *    split. Raw SQL is seen only as a `$queryRaw` / `$executeRaw` TAGGED
- *    template: the call form `$executeRaw(Prisma.sql\`…\`)`, a `Prisma.sql`
- *    fragment composed elsewhere, and `*Unsafe` are not. Negation left
- *    unseen: an operator object held in a variable (`id: filter` with
- *    `filter = { not: x }`) is read as the name `filter`, so it ties only to
- *    a check that names `filter`. (A whole `where` held in a variable names no
- *    recipient: that site is uncovered, not tied.)
+ *    KNOWN LIMITS (rule 8):
+ *    - Names. The tie is by variable name, one declaration deep; two names
+ *      for one person are not followed, one name for two is not split. An
+ *      `id` under a relation that is not the member's (`team: { id: teamId }`)
+ *      is read as a recipient name. Following the admission argument's
+ *      declaration ties any mention there, a negated one included (`findFirst
+ *      ({ where: { NOT: { id: memberId } } })` ties `memberId`). An operator
+ *      object held in a variable (`id: filter`, `filter = { not: x }`) is
+ *      read as the name `filter`. (A whole `where` held in a variable names
+ *      no recipient: that site is uncovered, not tied.)
+ *    - Raw SQL. Seen only as a `$queryRaw` / `$executeRaw` TAGGED template,
+ *      and only `UPDATE team_members` naming `role =` or `key_distributed =
+ *      true`, and `INSERT INTO team_member_keys`. Not seen: the call form
+ *      `$executeRaw(Prisma.sql\`…\`)`, a `Prisma.sql` fragment composed
+ *      elsewhere, `*Unsafe`; a non-literal `key_distributed = ${x}`; a role
+ *      written by `INSERT … ON CONFLICT DO UPDATE`, `MERGE`, or a
+ *      row-constructor `SET (role, …) = (…)`.
+ *    - Nested writes. Seen one level deep, through `team` / `user` / `tenant`
+ *      update/updateMany/upsert only: a deeper path, another parent model,
+ *      and a parent CREATE are not counted — a create's nested `connect`
+ *      re-parents an existing member row without being a grant here.
+ *    - Model access. Seen only as `x.teamMember.method(...)` (any receiver
+ *      `x`): element access (`tx["teamMember"]`), parentheses, a non-null
+ *      assertion, destructuring, `.call` / `.apply` and an alias are not.
+ *    - Shapes. A role is read by its last name (`X.OWNER` for any `X`). A
+ *      write re-pointing a row (`data: { userId }`) is not a grant here.
+ *    - Callers. Coverage through callers counts same-file call expressions
+ *      only: a function passed by reference, a destructured parameter, and
+ *      callers in other files are not followed.
  *
  * A `data` / `update` that is not an object literal (an identifier, a spread)
  * cannot be read, so it counts: the gate refuses rather than skips what it
@@ -256,11 +282,16 @@ if (unresolved.length > 0) {
   process.exit(1);
 }
 
+/** The property of an object literal keyed `name`, as an identifier or a quoted string (`role` / `"role"`). */
+function findProp(obj, name) {
+  return obj.getProperties().find((p) => !Node.isSpreadAssignment(p) && propertyKeyName(p) === name);
+}
+
 /** The object literal of `prop` in an object, `undefined` when absent, `null` when unreadable. */
 function propOf(obj, prop) {
   if (!obj || !Node.isObjectLiteralExpression(obj)) return null;
   if (obj.getProperties().some((p) => Node.isSpreadAssignment(p))) return null;
-  const p = obj.getProperty(prop);
+  const p = findProp(obj, prop);
   if (!p) return undefined;
   if (Node.isShorthandPropertyAssignment(p)) return null;
   if (!Node.isPropertyAssignment(p)) return null;
@@ -277,7 +308,7 @@ function mayName(literal, keys) {
   if (literal === undefined) return false;
   if (literal === null) return true;
   if (literal.getProperties().some((p) => Node.isSpreadAssignment(p))) return true;
-  return keys.some((k) => literal.getProperty(k) !== undefined);
+  return keys.some((k) => findProp(literal, k) !== undefined);
 }
 
 function modelAndMethod(call) {
@@ -330,7 +361,7 @@ function reactivates(call) {
   const data = argProp(call, "data");
   if (data === undefined) return false;
   if (data === null || data.getProperties().some((p) => Node.isSpreadAssignment(p))) return true;
-  const p = data.getProperty("deactivatedAt");
+  const p = findProp(data, "deactivatedAt");
   if (!p) return false;
   return !Node.isPropertyAssignment(p) || p.getInitializer()?.getText() === "null";
 }
@@ -403,7 +434,7 @@ function passesAlreadyLocked(fn, options) {
     literal = decl?.getInitializer();
   }
   if (!literal || !Node.isObjectLiteralExpression(literal)) return false;
-  const p = literal.getProperty("alreadyLocked");
+  const p = findProp(literal, "alreadyLocked");
   return p !== undefined && Node.isPropertyAssignment(p) && p.getInitializer()?.getText() === "true";
 }
 
@@ -427,7 +458,7 @@ function asObject(node) {
 function rawProp(obj, prop) {
   if (!obj || !Node.isObjectLiteralExpression(obj)) return null;
   if (obj.getProperties().some((p) => Node.isSpreadAssignment(p))) return null;
-  const p = obj.getProperty(prop);
+  const p = findProp(obj, prop);
   if (!p) return undefined;
   if (Node.isShorthandPropertyAssignment(p)) return null;
   if (!Node.isPropertyAssignment(p)) return null;
@@ -495,23 +526,23 @@ function nestedMemberPayloads(call, mm) {
   const scan = (container) => {
     const literal = asObject(container);
     if (!literal) return;
-    const membersProp = literal.getProperty("members");
+    const membersProp = findProp(literal, "members");
     if (!membersProp || !Node.isPropertyAssignment(membersProp)) return;
     const init = membersProp.getInitializer();
     if (!init || !Node.isObjectLiteralExpression(init)) {
       out.push({ literal: null, creating: true, node: membersProp });
       return;
     }
-    const createProp = init.getProperty("create");
+    const createProp = findProp(init, "create");
     if (createProp && Node.isPropertyAssignment(createProp)) {
       out.push({ literal: asObject(createProp.getInitializer()) ?? null, creating: true, node: createProp });
     }
-    const createManyProp = init.getProperty("createMany");
+    const createManyProp = findProp(init, "createMany");
     if (createManyProp && Node.isPropertyAssignment(createManyProp)) {
       const data = rawProp(createManyProp.getInitializer(), "data");
       for (const literal of createElements(data)) out.push({ literal, creating: true, node: createManyProp });
     }
-    const connectOrCreateProp = init.getProperty("connectOrCreate");
+    const connectOrCreateProp = findProp(init, "connectOrCreate");
     if (connectOrCreateProp && Node.isPropertyAssignment(connectOrCreateProp)) {
       const coc = connectOrCreateProp.getInitializer();
       const items = coc && Node.isArrayLiteralExpression(coc) ? coc.getElements() : [coc];
@@ -537,7 +568,7 @@ function checkAdmissionPayload(path, node, { literal, creating }, violations) {
     violations.push(`admission-marker  ${lineOf(path, node)}  unreadable team_members write payload (cannot verify the pending marker)`);
     return;
   }
-  const deactivatedAt = literal.getProperty("deactivatedAt");
+  const deactivatedAt = findProp(literal, "deactivatedAt");
   const namesNull = deactivatedAt !== undefined
     && Node.isPropertyAssignment(deactivatedAt)
     && deactivatedAt.getInitializer()?.getText() === "null";
@@ -545,7 +576,7 @@ function checkAdmissionPayload(path, node, { literal, creating }, violations) {
     violations.push(`admission-marker  ${lineOf(path, node)}  team_members payload names deactivatedAt: null`);
   }
   if (creating) {
-    const marker = literal.getProperty("scimApprovalPending");
+    const marker = findProp(literal, "scimApprovalPending");
     const markerTrue = marker !== undefined && Node.isPropertyAssignment(marker) && marker.getInitializer()?.getText() === "true";
     const hasDeactivatedAt = deactivatedAt !== undefined && !namesNull;
     if (!markerTrue || !hasDeactivatedAt) {
@@ -618,7 +649,7 @@ const ACTOR_ADMISSION_READ = "activeTeamAdmission";
 function grants(literal) {
   if (literal === undefined) return false;
   if (mayNameOrCompute(literal, ["role"])) return true;
-  const p = literal.getProperty("keyDistributed");
+  const p = findProp(literal, "keyDistributed");
   if (!p) return false;
   return !Node.isPropertyAssignment(p) || p.getInitializer()?.getText() !== "false";
 }
@@ -871,10 +902,13 @@ function dominates(guard, node) {
 }
 
 /**
- * Same-file functions that return a recipient check's result (`return
- * pred(...)`, or a top-level `||` disjunct of the returned value), so a TRUE
- * from the helper is a TRUE from the predicate. A helper that calls the
- * predicate and drops or inverts its result is not one.
+ * Same-file functions whose every exit returns a recipient check's result
+ * (`return pred(...)`, or a top-level `||` disjunct of the returned value) or
+ * throws, so a TRUE from the predicate is a TRUE from the helper: at least
+ * one return, every return such a value, and a block body ending in a
+ * `return` or `throw` (no fall-through). A helper with an early `return
+ * false`, a bare `return`, or one that drops or inverts the predicate's
+ * result is not one.
  */
 function recipientCheckHelpers(sourceFile) {
   const names = new Set();
@@ -882,10 +916,15 @@ function recipientCheckHelpers(sourceFile) {
     const name = functionName(fn);
     if (name === "<anonymous>" || name === "<module>") continue;
     const body = fn.getBody();
-    const returned = body && !Node.isBlock(body)
+    if (!body) continue;
+    const concise = !Node.isBlock(body);
+    const returned = concise
       ? [body]
       : fn.getDescendantsOfKind(SyntaxKind.ReturnStatement).filter((r) => enclosingFunction(r) === fn).map((r) => r.getExpression());
-    if (returned.some((e) => e && disjuncts(e).some((d) => d && Node.isCallExpression(d) && isRecipientCheck(d)))) names.add(name);
+    const last = concise ? null : body.getStatements().at(-1);
+    const endsInExit = concise || (last !== undefined && (Node.isReturnStatement(last) || Node.isThrowStatement(last)));
+    const returnsCheck = (e) => e !== undefined && disjuncts(e).some((d) => d && Node.isCallExpression(d) && isRecipientCheck(d));
+    if (returned.length > 0 && returned.every(returnsCheck) && endsInExit) names.add(name);
   }
   return names;
 }

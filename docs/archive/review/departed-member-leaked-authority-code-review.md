@@ -1,6 +1,6 @@
 # Code Review: departed-member-leaked-authority
 Date: 2026-11-14
-Review round: 3
+Review round: 4
 
 ## Changes from Previous Round
 
@@ -221,3 +221,37 @@ Previous findings: all round-2 findings resolved; Testing N3 accepted as unreach
   tenant, judged against their admission to the team" pin it, and were red-proved in round 1
   (promotion check removed → cells fail). Restructuring the route so the gate could prove it would
   either refuse demotions of a leftover (D8 allows them) or split one write into two.
+
+## Round 4 (narrow: gate rule 8, da7a23ebb..87dd62498)
+
+One reviewer tried to break the rule with fixture routes. No evasion exists in the tree; the 9
+exemptions and 4 recipient-checked sites match the code; the member PUT exemption's unit cells
+fail under each mutation of the promotion check.
+
+- **F1 [Major]** A helper counted when any one return was the predicate (an early
+  `return false` evaded).
+- **F2 [Minor]** Quoted property keys were not seen (rules 1–3 and 8).
+- **F3–F7 [Minor]** Narrow raw-SQL arm; an `id` under a non-member relation read as a recipient
+  and a negated mention tied through a declaration; deep nested writes; model-access spellings;
+  caller coverage by call expression only.
+
+### Resolution Status (round 4)
+- F1: a helper counts only when it has a return, every return is the predicate or a top-level
+  `||` disjunct of it, and its body ends in `return`/`throw`. Deny and allow cells; each condition
+  red-proved.
+- F2: every property lookup in the gate goes through one helper matching identifier and
+  string-literal keys. Real-repo counts unchanged (21 / 2 / 7 / 13).
+- F3–F7: stated in the header's KNOWN LIMITS for rule 8, with the header's claims corrected.
+  Anti-Deferral: worst case, a future grant written in one of these spellings is not counted;
+  likelihood low (none of the spellings occurs in `src`, and the house style is
+  `tx.model.method({ literal })`); cost to close, a scope-aware rewrite of the gate's model and
+  recipient resolution, which this PR's rounds showed seeds its own defects. Owner: the SC5
+  follow-up issue.
+
+## Termination
+
+Rule 8 drew findings in four consecutive passes, each inside surface the previous pass added.
+Per the review loop's stopping rule the mechanism is not grown further here: the rule is stated
+in its header as a review tripwire over the spellings this codebase uses, with the pinned site
+count as the backstop for new sites, and its remaining limits are listed there. The production
+changes (C2–C6, D8, D9) had no open finding after round 3.
