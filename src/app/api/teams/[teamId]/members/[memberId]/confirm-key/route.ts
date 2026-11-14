@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { activeTeamRole, hasTeamPermission, requireTeamPermission } from "@/lib/auth/access/team-auth";
+import { activeTeamAdmission, hasTeamPermission, requireTeamPermission } from "@/lib/auth/access/team-auth";
 import { teamMemberKeySchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
@@ -12,8 +12,16 @@ import { withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
-import { errorResponse, handleAuthError, teamBusy, unauthorized } from "@/lib/http/api-response";
-import { lockTeamKeyVersion, TeamRotationInProgressError } from "@/lib/team/team-key-rotation-lock";
+import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
+import { membershipConflictResponse } from "@/lib/http/lock-conflict-response";
+import { TEAM_MEMBERSHIP_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
+import { createLockBudget, lockTeamKeyVersion } from "@/lib/team/team-key-rotation-lock";
+import {
+  actorDepartedSinceAdmission,
+  isMembershipLockConflict,
+  lockTenantRows,
+  readTenantRows,
+} from "@/lib/team/tenant-row-lock";
 
 type Params = { params: Promise<{ teamId: string; memberId: string }> };
 
@@ -88,24 +96,51 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   // Atomic check-and-set: re-verify keyDistributed + deactivatedAt + teamKeyVersion inside transaction (S-12/F-16/S-24)
   let distributed;
   try {
-    distributed = await withTeamTenantRls(teamId, async () =>
-      prisma.$transaction(async (tx) => {
+    distributed = await withTeamTenantRls(
+      teamId,
+      async (tenantId, tx) => {
+        // The distributor's tenant row first (tenant-row-lock.ts lock order):
+        // their departure holds it FOR UPDATE, so the authority re-read below
+        // sees a departure that committed meanwhile.
+        const budget = createLockBudget();
+        const rows = await lockTenantRows(tx, tenantId, [session.user.id], "share", budget);
         // Verify keyVersion matches current team key version (F-16), under the
-        // team lock rotation serialises on, taken first (lock order: teams
-        // before member rows): a distribution racing a rotation that missed
+        // team lock rotation serialises on, taken before member rows: a
+        // distribution racing a rotation that missed
         // this member would otherwise mark them distributed with only the old key.
-        const team = await lockTeamKeyVersion(tx, teamId);
+        const team = await lockTeamKeyVersion(tx, teamId, budget);
         // The distributing member's authority, under the same lock.
-        const actorRole = await activeTeamRole(tx, teamId, session.user.id);
-        if (!actorRole || !hasTeamPermission(actorRole, TEAM_PERMISSION.MEMBER_INVITE)) {
+        const actor = await activeTeamAdmission(tx, teamId, session.user.id);
+        if (
+          !actor ||
+          !hasTeamPermission(actor.role, TEAM_PERMISSION.MEMBER_INVITE) ||
+          actorDepartedSinceAdmission(rows.get(session.user.id), actor.admittedAt)
+        ) {
           return "actor_not_permitted" as const;
         }
 
         const member = await tx.teamMember.findUnique({
           where: { id: memberId },
-          select: { keyDistributed: true, deactivatedAt: true },
+          select: { teamId: true, userId: true, keyDistributed: true, deactivatedAt: true, admittedAt: true, createdAt: true },
         });
-        if (!member || member.deactivatedAt !== null) return "member_not_found" as const;
+        if (
+          !member ||
+          member.deactivatedAt !== null ||
+          member.teamId !== teamId ||
+          member.userId !== targetMember.userId
+        ) {
+          return "member_not_found" as const;
+        }
+        // A recipient whose tenant row departed at or after their admission
+        // holds a leftover membership and is treated as deactivated. Read
+        // unlocked: residue is old state, and locking the recipient's row would
+        // serialise this with every SCIM write to them. A departure in flight
+        // either reaches the member row first (the CAS below misses) or
+        // deactivates the membership after this commits.
+        const recipient = await readTenantRows(tx, tenantId, [targetMember.userId]);
+        if (actorDepartedSinceAdmission(recipient.get(targetMember.userId), member.admittedAt ?? member.createdAt)) {
+          return "member_not_found" as const;
+        }
         if (member.keyDistributed) return "already_distributed" as const;
 
         if (!team || data.keyVersion !== team.teamKeyVersion) {
@@ -167,15 +202,16 @@ async function handlePOST(req: NextRequest, { params }: Params) {
         });
 
         return "success" as const;
-      }),
+      },
+      { timeout: TEAM_MEMBERSHIP_TX_TIMEOUT_MS },
     );
   } catch (e) {
     // The member was deactivated, or received a key, since the check.
     if (e instanceof MemberChangedError) return errorResponse(API_ERROR.MEMBER_NOT_FOUND);
-    // A rotation held the team past the lock timeout: not a version
-    // comparison, so the client is told to retry rather than to refetch.
-    if (!(e instanceof TeamRotationInProgressError)) throw e;
-    distributed = "busy" as const;
+    // A rotation or a tenant-row writer held a lock past the budget: not a
+    // version comparison, so the client is told to retry rather than to refetch.
+    if (isMembershipLockConflict(e)) return membershipConflictResponse(e);
+    throw e;
   }
 
   if (distributed === "actor_not_permitted") {
@@ -186,9 +222,6 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   }
   if (distributed === "already_distributed") {
     return errorResponse(API_ERROR.KEY_ALREADY_DISTRIBUTED);
-  }
-  if (distributed === "busy") {
-    return teamBusy();
   }
   if (distributed === "version_mismatch") {
     return errorResponse(API_ERROR.TEAM_KEY_VERSION_MISMATCH);

@@ -61,7 +61,7 @@ vi.mock("@/lib/auth/access/team-auth", async () => ({
   requireTeamPermission: mockRequireTeamPermission,
   // The real role → permission table: GET lists departed members only to roles that can remove them.
   hasTeamPermission: (await vi.importActual<typeof import("@/lib/auth/access/team-auth")>("@/lib/auth/access/team-auth")).hasTeamPermission,
-  activeTeamRole: (await vi.importActual<typeof import("@/lib/auth/access/team-auth")>("@/lib/auth/access/team-auth")).activeTeamRole,
+  activeTeamAdmission: (await vi.importActual<typeof import("@/lib/auth/access/team-auth")>("@/lib/auth/access/team-auth")).activeTeamAdmission,
   TeamAuthError,
 }));
 const { mockLockTenantRows, mockLockTeamsAgainstRotation } = vi.hoisted(() => ({
@@ -385,7 +385,9 @@ describe("GET /api/teams/[teamId]/members", () => {
   });
 });
 
-const actorRole: { value: { role: string } | null } = { value: null };
+const ACTOR_ADMITTED_AT = new Date("2026-03-01T00:00:00.000Z");
+const actorRole: { value: { role: string; admittedAt: Date; createdAt: Date } | null } = { value: null };
+const asActor = (role: string) => ({ role, admittedAt: ACTOR_ADMITTED_AT, createdAt: ACTOR_ADMITTED_AT });
 const existingTarget: { value: unknown } = { value: null };
 
 describe("POST /api/teams/[teamId]/members", () => {
@@ -396,8 +398,8 @@ describe("POST /api/teams/[teamId]/members", () => {
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
     mockRequireTeamPermission.mockResolvedValue({ id: "actor-row", role: TEAM_ROLE.ADMIN });
     // findFirst serves two reads: the acting member's role under the locks
-    // (activeTeamRole selects `role`) and the target's existing membership.
-    actorRole.value = { role: TEAM_ROLE.ADMIN };
+    // (activeTeamAdmission selects `role`) and the target's existing membership.
+    actorRole.value = asActor(TEAM_ROLE.ADMIN);
     existingTarget.value = null;
     mockPrismaTeamMember.findFirst.mockImplementation(async (args: { select?: { role?: boolean } }) =>
       args?.select?.role ? actorRole.value : existingTarget.value);
@@ -557,7 +559,7 @@ describe("POST /api/teams/[teamId]/members", () => {
     const actorRead = mockPrismaTeamMember.findFirst.mock.calls.findIndex((c) => (c[0] as { select?: { role?: boolean } })?.select?.role);
     expect(mockPrismaTeamMember.findFirst.mock.calls[actorRead][0]).toEqual({
       where: { teamId: TEAM_ID, userId: "test-user-id", deactivatedAt: null },
-      select: { role: true },
+      select: { role: true, admittedAt: true, createdAt: true },
     });
     // Read under the locks, not before them.
     expect(mockLockTeamsAgainstRotation.mock.invocationCallOrder[0]).toBeLessThan(
@@ -566,7 +568,7 @@ describe("POST /api/teams/[teamId]/members", () => {
   });
 
   it("refuses when the acting member was demoted to a role that cannot add members", async () => {
-    actorRole.value = { role: TEAM_ROLE.VIEWER };
+    actorRole.value = asActor(TEAM_ROLE.VIEWER);
 
     const res = await POST(
       createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/members`, { body: { userId: TARGET_USER_ID, role: TEAM_ROLE.MEMBER } }),
@@ -575,6 +577,44 @@ describe("POST /api/teams/[teamId]/members", () => {
 
     expect(res.status).toBe(403);
     expect(mockPrismaTeamMember.create).not.toHaveBeenCalled();
+  });
+
+  describe("an actor who left the tenant, judged against their admission to the team", () => {
+    const targetRow = { hasRow: true, role: null, deactivatedAt: null, departedAt: null };
+    const rowsWithActor = (deactivatedAt: Date | null, departedAt: Date | null = null) =>
+      new Map([
+        [TARGET_USER_ID, targetRow],
+        ["test-user-id", { hasRow: true, role: null, deactivatedAt, departedAt }],
+      ]);
+    const after = (ms: number) => new Date(ACTOR_ADMITTED_AT.getTime() + ms);
+    const add = () =>
+      POST(
+        createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/members`, { body: { userId: TARGET_USER_ID, role: TEAM_ROLE.MEMBER } }),
+        createParams({ teamId: TEAM_ID }),
+      );
+
+    beforeEach(() => {
+      mockPrismaTeamMember.create.mockResolvedValue({ id: "m-new", userId: TARGET_USER_ID, role: TEAM_ROLE.MEMBER });
+    });
+
+    it("refuses an ADMIN adder whose tenant row departed after their admission", async () => {
+      mockLockTenantRows.mockResolvedValue(rowsWithActor(after(1)));
+
+      expect((await add()).status).toBe(403);
+      expect(mockPrismaTeamMember.create).not.toHaveBeenCalled();
+    });
+
+    it("allows a guest adder, an active one, a re-admitted one and a re-provisioned one", async () => {
+      for (const rows of [
+        new Map([[TARGET_USER_ID, targetRow]]),
+        rowsWithActor(null),
+        rowsWithActor(after(-1000)),
+        rowsWithActor(null, after(-1000)),
+      ]) {
+        mockLockTenantRows.mockResolvedValue(rows);
+        expect((await add()).status).toBe(201);
+      }
+    });
   });
 
   it("answers 409 TEAM_BUSY with Retry-After when the team row lock wait times out", async () => {

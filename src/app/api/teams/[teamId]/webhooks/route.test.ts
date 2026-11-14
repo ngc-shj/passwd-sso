@@ -5,6 +5,7 @@ const {
   mockAuth,
   mockPrismaTeamWebhook,
   mockPrismaTeam,
+  mockPrismaTeamMember,
   mockRequireTeamPermission,
   mockWithTeamTenantRls,
   mockLogAudit,
@@ -22,6 +23,9 @@ const {
   },
   mockPrismaTeam: {
     findUniqueOrThrow: vi.fn(),
+  },
+  mockPrismaTeamMember: {
+    findMany: vi.fn(),
   },
   mockExecuteRaw: vi.fn().mockResolvedValue(1),
   mockRequireTeamPermission: vi.fn(),
@@ -44,6 +48,7 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     teamWebhook: mockPrismaTeamWebhook,
     team: mockPrismaTeam,
+    teamMember: mockPrismaTeamMember,
     // The cap-check + create now run under an advisory lock inside one
     // withTeamTenantRls tx (TOCTOU fix); the route calls prisma.$executeRaw
     // for the lock before count/create.
@@ -138,6 +143,7 @@ describe("GET /api/teams/[teamId]/webhooks", () => {
         lastFailedAt: null,
         lastError: null,
         createdAt: new Date(),
+        createdById: null,
       },
     ]);
 
@@ -179,6 +185,18 @@ describe("POST /api/teams/[teamId]/webhooks", () => {
     expect(typeof json.secret).toBe("string");
     expect(res.headers.get("Cache-Control")).toBe("no-store");
     expectAdvisoryLockAcquired(mockExecuteRaw);
+  });
+
+  it("stores the session user as the webhook creator", async () => {
+    const req = createRequest("POST", "http://localhost:3000/api/teams/33333333-3333-4333-8333-333333333333/webhooks", {
+      body: { url: "https://example.com/hook", events: ["ENTRY_CREATE"] },
+    });
+    await POST(req, teamParams());
+    expect(mockPrismaTeamWebhook.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ createdById: "user-1" }),
+      }),
+    );
   });
 
   it("returns 400 on invalid URL", async () => {
@@ -348,6 +366,7 @@ describe("GET /api/teams/[teamId]/webhooks — response shape", () => {
         lastFailedAt: null,
         lastError: null,
         createdAt: new Date(),
+        createdById: null,
       },
     ]);
 
@@ -359,5 +378,77 @@ describe("GET /api/teams/[teamId]/webhooks — response shape", () => {
     expect(webhook).not.toHaveProperty("secretIv");
     expect(webhook).not.toHaveProperty("secretAuthTag");
     expect(webhook).not.toHaveProperty("masterKeyVersion");
+  });
+});
+
+describe("GET /api/teams/[teamId]/webhooks — creatorAuthorized", () => {
+  const baseRow = {
+    url: "https://example.com/hook",
+    events: ["ENTRY_CREATE"],
+    isActive: true,
+    failCount: 0,
+    lastDeliveredAt: null,
+    lastFailedAt: null,
+    lastError: null,
+    createdAt: new Date(),
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAuth.mockResolvedValue({ user: { id: "user-1" } });
+    mockRequireTeamPermission.mockResolvedValue(undefined);
+  });
+
+  it("maps legacy / authorized / unauthorized creators to null / true / false and hides createdById", async () => {
+    mockPrismaTeamWebhook.findMany.mockResolvedValue([
+      { ...baseRow, id: "wh-legacy", createdById: null },
+      { ...baseRow, id: "wh-ok", createdById: "u-admin" },
+      { ...baseRow, id: "wh-gone", createdById: "u-left" },
+      { ...baseRow, id: "wh-demoted", createdById: "u-member" },
+    ]);
+    mockPrismaTeamMember.findMany.mockResolvedValue([
+      { userId: "u-admin", role: "ADMIN", deactivatedAt: null },
+      { userId: "u-member", role: "MEMBER", deactivatedAt: null },
+    ]);
+
+    const req = createRequest("GET", "http://localhost:3000/api/teams/33333333-3333-4333-8333-333333333333/webhooks");
+    const { json } = await parseResponse(await GET(req, teamParams()));
+    const byId = Object.fromEntries(
+      json.webhooks.map((w: { id: string; creatorAuthorized: boolean | null }) => [w.id, w]),
+    );
+    expect(byId["wh-legacy"].creatorAuthorized).toBeNull();
+    expect(byId["wh-ok"].creatorAuthorized).toBe(true);
+    expect(byId["wh-gone"].creatorAuthorized).toBe(false);
+    expect(byId["wh-demoted"].creatorAuthorized).toBe(false);
+    for (const w of json.webhooks) expect(w).not.toHaveProperty("createdById");
+    expect(mockPrismaTeamMember.findMany).toHaveBeenCalledTimes(1);
+    expect(mockPrismaTeamMember.findMany).toHaveBeenCalledWith({
+      where: {
+        teamId: "33333333-3333-4333-8333-333333333333",
+        userId: { in: ["u-admin", "u-left", "u-member"] },
+      },
+      select: { userId: true, role: true, deactivatedAt: true },
+    });
+  });
+
+  it("treats a deactivated ADMIN creator as unauthorized", async () => {
+    mockPrismaTeamWebhook.findMany.mockResolvedValue([
+      { ...baseRow, id: "wh-1", createdById: "u-admin" },
+    ]);
+    mockPrismaTeamMember.findMany.mockResolvedValue([
+      { userId: "u-admin", role: "ADMIN", deactivatedAt: new Date() },
+    ]);
+    const req = createRequest("GET", "http://localhost:3000/api/teams/33333333-3333-4333-8333-333333333333/webhooks");
+    const { json } = await parseResponse(await GET(req, teamParams()));
+    expect(json.webhooks[0].creatorAuthorized).toBe(false);
+  });
+
+  it("skips the member read when every webhook is legacy", async () => {
+    mockPrismaTeamWebhook.findMany.mockResolvedValue([
+      { ...baseRow, id: "wh-1", createdById: null },
+    ]);
+    const req = createRequest("GET", "http://localhost:3000/api/teams/33333333-3333-4333-8333-333333333333/webhooks");
+    await GET(req, teamParams());
+    expect(mockPrismaTeamMember.findMany).not.toHaveBeenCalled();
   });
 });

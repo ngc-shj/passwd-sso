@@ -13,6 +13,7 @@
  *   audit_delivery_targets: SELECT, UPDATE
  *   audit_deliveries: SELECT, INSERT, UPDATE, DELETE
  *   audit_chain_anchors: SELECT, INSERT, UPDATE
+ *   team_members: SELECT (id, team_id, user_id, role, deactivated_at) — columns only
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
@@ -92,6 +93,31 @@ describe("audit-outbox worker role privileges", () => {
       expect(allowedTables.has(tableName), `Unexpected grant on table: ${tableName}`).toBe(true);
     }
     expect(privMap.size).toBe(allowedTables.size);
+  });
+
+  // departed-member-leaked-authority C6: resolveWebhookSubscribers reads the
+  // webhook creator's team membership, and only these columns of it.
+  it("holds SELECT on exactly five team_members columns and no table-level privilege there", async () => {
+    const columns = await ctx.su.prisma.$queryRawUnsafe<{ column_name: string; privilege_type: string }[]>(
+      `SELECT column_name, privilege_type
+       FROM information_schema.column_privileges
+       WHERE grantee = 'passwd_outbox_worker'
+         AND table_schema = 'public'
+         AND table_name = 'team_members'
+       ORDER BY column_name, privilege_type`,
+    );
+    expect(columns).toEqual(
+      ["deactivated_at", "id", "role", "team_id", "user_id"].map((column_name) => ({ column_name, privilege_type: "SELECT" })),
+    );
+
+    const table = await ctx.su.prisma.$queryRawUnsafe<{ privilege_type: string }[]>(
+      `SELECT privilege_type
+       FROM information_schema.table_privileges
+       WHERE grantee = 'passwd_outbox_worker'
+         AND table_schema = 'public'
+         AND table_name = 'team_members'`,
+    );
+    expect(table).toEqual([]);
   });
 
   it("cannot INSERT into password_entries table", async () => {

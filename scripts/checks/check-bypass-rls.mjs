@@ -2980,7 +2980,9 @@ function createdRoutinesOf(input) {
     let j = i + 1;
     if (tokens[j]?.upper === "OR" && tokens[j + 1]?.upper === "REPLACE") j += 2;
     if (tokens[j]?.type === TOKEN.WORD && (tokens[j].upper === "FUNCTION" || tokens[j].upper === "PROCEDURE")) {
-      const name = tokens[j + 1];
+      // `schema.name`: the routine is the part after the dot, not the schema.
+      const qualified = tokens[j + 2]?.type === TOKEN.DOT;
+      const name = tokens[qualified ? j + 3 : j + 1];
       out.push(name ? nameOf(name) ?? name.text : "?");
     }
   }
@@ -3006,6 +3008,7 @@ const CREATE_ROUTINE_TEXT_RE = new RegExp(
 // routine it may create; an entry that matches nothing fails the run.
 const FUNCTION_RULE_ALLOWLIST = [
   { file: "scripts/rls-cross-tenant-negative-test.sh", routine: "rls_negative_secdef_probe", why: "Case 9: a SECURITY DEFINER probe on a throwaway database, dropped by the case itself" },
+  { file: "src/__tests__/db-integration/departed-member-leaked-authority.integration.test.ts", routine: "c5_accept_rollback_probe", why: "C5 rollback cell: a trigger function that only raises, dropped in finally; sets no bypass setting" },
   { prefix: "scripts/__tests__/", why: "gate fixture strings: inputs for the gates that refuse these statements" },
 ];
 const functionAllowed = (file, routine) =>

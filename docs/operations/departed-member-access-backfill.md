@@ -38,9 +38,23 @@ deploy`. Run them with `psql -v ON_ERROR_STOP=1 -f <file>`.
    departure processed by a previous-release instance during the rollout. On a
    role that bypasses RLS it skipped all of them, so section 1 lists every one.
 5. Send each tenant's admin only their tenant's rows. The admin confirms each
-   one. No audit evidence distinguishes a re-admission from a leak: invitation
-   accept writes no audit row, and an ACCEPTED invitation is not evidence.
-6. End the confirmed leaks with the contain script.
+   one. For an admission before `20261114000000_team_member_admitted_at`, no
+   audit evidence distinguishes a re-admission from a leak: invitation accept
+   wrote no audit row then, and an ACCEPTED invitation is not evidence. From
+   that release on, a re-admission is evidenced (see "Re-admission evidence"
+   below) and moves `team_members.admitted_at` past the departure, which takes
+   the membership out of section 1.
+6. End the confirmed leaks with the contain script. Pass only rows whose
+   `containable` is true: one row it cannot end makes the script refuse the
+   whole batch. A `containable` false row (the tenant row was deleted, or
+   re-created after a SCIM DELETE) is ended by a team admin removing the member;
+   the member already cannot act (see "Actors refused since this release"). If
+   that member is the team's OWNER, nobody can remove them: the team counts as
+   ownerless, so the tenant admin first assigns a new OWNER (the leftover row is
+   demoted to ADMIN by that assignment), and the new OWNER then removes them.
+   Confirm the OWNER is a leak first (step 5): an OWNER legitimately re-admitted
+   before `20261114000000_team_member_admitted_at` is listed the same way, and
+   an assignment demotes them; recovering them means removing and re-inviting.
 
 **For every membership the migration or the contain script ended** (found by
 `TEAM_MEMBER_TENANT_DEACTIVATE` records whose `metadata.backfill` is
@@ -88,9 +102,16 @@ Read-only (`BEGIN READ ONLY` ... `ROLLBACK`). It raises
 `report: no tenant_members rows are visible` instead of returning an empty
 report when the grant did not take effect.
 
-- Section 1: the raw candidates, with no exclusion: active memberships of
-  departed members created before the departure (tenant, team, user, role, and
-  whether the user has a deactivation record in either store).
+- Section 1: the raw candidates, with no exclusion: active memberships whose
+  member departed the tenant at or after the membership's admission (tenant,
+  team, user, role, and whether the user has a deactivation record in either
+  store). Admission is `COALESCE(admitted_at, created_at)`; the departure is
+  the later of the tenant row's `deactivated_at` and the SCIM DELETE record in
+  `tenant_member_departures`, so a member whose tenant row was deleted, or
+  re-created after a SCIM DELETE, is listed too. This is the predicate the
+  application's actor check uses (see "Actors refused since this release").
+  `containable` says whether the contain script can end the row: it needs a
+  departed tenant row to stamp the membership with.
 - Section 2: the team webhooks, columns `id, tenant_id, team_id, is_active,
   created_at, updated_at` only (never `url`, secrets or `last_error`). For a
   candidate's team, the webhooks created or updated after the candidate's
@@ -98,12 +119,21 @@ report when the grant did not take effect.
   contain script, every webhook of the team, with no time filter (the member
   may have returned, left again, or had the tenant row deleted since;
   over-inclusion fails closed).
+- Section 3: the team webhooks with no recorded creator (`created_by_id` NULL),
+  columns `id, tenant_id, team_id, is_active, created_at, creator,
+  creator_active_member`. `creator` is the actor of the webhook's latest
+  `WEBHOOK_CREATE` record (`audit_logs`, else a not-yet-drained `audit_outbox`
+  row), or `unknown`; `creator_active_member` says whether that user holds an
+  active membership of the webhook's team. These webhooks keep delivering
+  whatever happens to their creator (see "Paused team webhooks"): review each
+  one, and re-create under a current team admin any whose creator is unknown or
+  no longer an active member.
 
 ```sql
 -- BEGIN SCRIPT departed-member-report
 BEGIN READ ONLY;
 SELECT set_config('app.bypass_rls', 'on', true);
-SELECT set_config('app.bypass_tables', 'tenant_members,team_members,team_webhooks,audit_logs,audit_outbox', true);
+SELECT set_config('app.bypass_tables', 'tenant_members,tenant_member_departures,team_members,team_webhooks,audit_logs,audit_outbox', true);
 SELECT set_config('app.bypass_purpose', 'system_maintenance', true);
 SELECT set_config('app.tenant_id', '00000000-0000-0000-0000-000000000000', true);
 -- BEGIN BODY report
@@ -124,12 +154,13 @@ SELECT tm.tenant_id, tm.team_id, tm.user_id, tm.role,
         OR EXISTS (SELECT 1 FROM audit_outbox o
                     WHERE o.tenant_id = tm.tenant_id
                       AND o.payload->>'action' = 'TEAM_MEMBER_TENANT_DEACTIVATE'
-                      AND o.payload->>'targetId' = tm.user_id::text)) AS has_deactivation_record
+                      AND o.payload->>'targetId' = tm.user_id::text)) AS has_deactivation_record,
+       (tmb.deactivated_at IS NOT NULL) AS containable
   FROM team_members tm
-  JOIN tenant_members tmb ON tmb.tenant_id = tm.tenant_id AND tmb.user_id = tm.user_id
+  LEFT JOIN tenant_members tmb ON tmb.tenant_id = tm.tenant_id AND tmb.user_id = tm.user_id
+  LEFT JOIN tenant_member_departures d ON d.tenant_id = tm.tenant_id AND d.user_id = tm.user_id
  WHERE tm.deactivated_at IS NULL
-   AND tmb.deactivated_at IS NOT NULL
-   AND tm.created_at < tmb.deactivated_at
+   AND COALESCE(tm.admitted_at, tm.created_at) <= GREATEST(tmb.deactivated_at, d.departed_at)
  ORDER BY tm.tenant_id, tm.team_id, tm.user_id;
 
 -- Section 2: webhooks
@@ -138,13 +169,14 @@ SELECT DISTINCT w.id, w.tenant_id, w.team_id, w.is_active, w.created_at, w.updat
  WHERE EXISTS (
          SELECT 1
            FROM team_members tm
-           JOIN tenant_members tmb ON tmb.tenant_id = tm.tenant_id AND tmb.user_id = tm.user_id
+           LEFT JOIN tenant_members tmb ON tmb.tenant_id = tm.tenant_id AND tmb.user_id = tm.user_id
+           LEFT JOIN tenant_member_departures d ON d.tenant_id = tm.tenant_id AND d.user_id = tm.user_id
           WHERE tm.team_id = w.team_id
             AND tm.tenant_id = w.tenant_id
             AND tm.deactivated_at IS NULL
-            AND tmb.deactivated_at IS NOT NULL
-            AND tm.created_at < tmb.deactivated_at
-            AND (w.created_at > tmb.deactivated_at OR w.updated_at > tmb.deactivated_at))
+            AND COALESCE(tm.admitted_at, tm.created_at) <= GREATEST(tmb.deactivated_at, d.departed_at)
+            AND (w.created_at > GREATEST(tmb.deactivated_at, d.departed_at)
+                 OR w.updated_at > GREATEST(tmb.deactivated_at, d.departed_at)))
     OR EXISTS (
          SELECT 1 FROM audit_logs a
           WHERE a.tenant_id = w.tenant_id
@@ -157,6 +189,41 @@ SELECT DISTINCT w.id, w.tenant_id, w.team_id, w.is_active, w.created_at, w.updat
             AND o.payload->>'teamId' = w.team_id::text
             AND o.payload->>'action' = 'TEAM_MEMBER_TENANT_DEACTIVATE'
             AND o.payload->'metadata'->>'backfill' = '20261110000000_rls_backfill_rerun')
+ ORDER BY w.tenant_id, w.team_id, w.id;
+
+-- Section 3: webhooks with no recorded creator
+SELECT w.id, w.tenant_id, w.team_id, w.is_active, w.created_at,
+       COALESCE(c.actor::text, 'unknown') AS creator,
+       (c.actor IS NOT NULL AND EXISTS (
+          SELECT 1 FROM team_members tm
+           WHERE tm.team_id = w.team_id
+             AND tm.user_id = c.actor
+             AND tm.deactivated_at IS NULL)) AS creator_active_member
+  FROM team_webhooks w
+  LEFT JOIN LATERAL (
+    SELECT COALESCE(
+             (SELECT a.user_id
+                FROM audit_logs a
+               WHERE a.action = 'WEBHOOK_CREATE'
+                 AND a.scope = 'TEAM'
+                 AND a.actor_type = 'HUMAN'
+                 AND a.tenant_id = w.tenant_id
+                 AND a.team_id = w.team_id
+                 AND a.metadata->>'webhookId' = w.id::text
+               ORDER BY a.created_at DESC
+               LIMIT 1),
+             (SELECT (o.payload->>'userId')::uuid
+                FROM audit_outbox o
+               WHERE o.tenant_id = w.tenant_id
+                 AND o.payload->>'action' = 'WEBHOOK_CREATE'
+                 AND o.payload->>'scope' = 'TEAM'
+                 AND o.payload->>'actorType' = 'HUMAN'
+                 AND o.payload->>'teamId' = w.team_id::text
+                 AND o.payload->'metadata'->>'webhookId' = w.id::text
+               ORDER BY o.created_at DESC
+               LIMIT 1)) AS actor
+  ) c ON true
+ WHERE w.created_by_id IS NULL
  ORDER BY w.tenant_id, w.team_id, w.id;
 -- END BODY report
 ROLLBACK;
@@ -174,8 +241,10 @@ Ends the confirmed leaks. Edit only the two lines marked `INPUT`:
   webhook receivers see it: it must hold no personal data.
 
 A membership is ended only when its team, membership and tenant row all belong
-to the given tenant, the membership is active, and the member's tenant row is
-departed. It is stamped with the tenant row's departure time and marked as ended
+to the given tenant, the membership is active, the member's tenant row is
+departed, and the membership was admitted (`COALESCE(admitted_at, created_at)`)
+at or before the departure: a member re-admitted since is not a leak, and the
+script refuses the triple. It is stamped with the tenant row's departure time and marked as ended
 by the tenant, so a later return restores it. If any triple does not qualify,
 the script raises and writes nothing. An OWNER membership is ended the same way;
 the team then has no active OWNER, and the tenant admin's owner-assign flow
@@ -218,7 +287,7 @@ BEGIN
     ) d;
 
   PERFORM set_config('app.bypass_rls', 'on', true);
-  PERFORM set_config('app.bypass_tables', 'tenant_members,teams,team_members,audit_outbox', true);
+  PERFORM set_config('app.bypass_tables', 'tenant_members,tenant_member_departures,teams,team_members,audit_outbox', true);
   PERFORM set_config('app.bypass_purpose', 'system_maintenance', true);
   PERFORM set_config('app.tenant_id', '00000000-0000-0000-0000-000000000000', true);
 
@@ -247,7 +316,9 @@ BEGIN
        SET deactivated_at = tmb.deactivated_at,
            deactivated_by_tenant = true,
            updated_at = clock_timestamp()
-      FROM unnest(v_tenants, v_teams, v_users) AS i(tenant_id, team_id, user_id), tenant_members tmb
+      FROM unnest(v_tenants, v_teams, v_users) AS i(tenant_id, team_id, user_id),
+           tenant_members tmb
+           LEFT JOIN tenant_member_departures d ON d.tenant_id = tmb.tenant_id AND d.user_id = tmb.user_id
      WHERE tm.tenant_id = i.tenant_id
        AND tm.team_id = i.team_id
        AND tm.user_id = i.user_id
@@ -255,6 +326,7 @@ BEGIN
        AND tmb.user_id = i.user_id
        AND tm.deactivated_at IS NULL
        AND tmb.deactivated_at IS NOT NULL
+       AND COALESCE(tm.admitted_at, tm.created_at) <= GREATEST(tmb.deactivated_at, d.departed_at)
     RETURNING tm.tenant_id, tm.team_id, tm.user_id, tmb.deactivated_at AS departed_at
   ), enqueued AS (
     INSERT INTO audit_outbox (id, tenant_id, payload)
@@ -282,7 +354,7 @@ BEGIN
   SELECT (SELECT count(*) FROM ended), (SELECT count(*) FROM enqueued) INTO v_ended, v_enqueued;
 
   IF v_ended IS DISTINCT FROM v_input_count THEN
-    RAISE EXCEPTION 'contain: % of % membership(s) qualify (team, membership and tenant row of one tenant; active; member departed); nothing was written',
+    RAISE EXCEPTION 'contain: % of % membership(s) qualify (team, membership and tenant row of one tenant; active; member departed; admitted before the departure); nothing was written',
       v_ended, v_input_count;
   END IF;
 
@@ -292,3 +364,72 @@ $contain$;
 COMMIT;
 -- END SCRIPT departed-member-contain
 ```
+
+## Re-admission evidence
+
+From `20261114000200_team_member_invite_accept_audit_action` on, invitation
+accept writes `TEAM_MEMBER_INVITE_ACCEPT` (scope TEAM, target the invitee) in
+the admission's own transaction, with `metadata.readmitted` true when an
+existing membership row was re-activated and false when one was created. An
+already-active member accepting writes none. A `readmitted: true` record later
+than the member's departure is evidence of a re-admission, as is
+`team_members.admitted_at` later than the departure: the database stamps
+`admitted_at` on every re-activation of a row and the application cannot set it.
+
+## Actors refused since this release
+
+Inviting, accepting an invitation the actor issued, adding a member, approving
+a SCIM-pending member, changing a role or transferring ownership, and
+distributing the team key all refuse an actor who departed the tenant at or
+after their admission to the team, even while their membership row is still
+active (the residue section 1 lists). The refusal is the route's usual one (403,
+or `INVITATION_EXPIRED` for accept). Rotating the team key refuses such an actor
+too.
+
+The same membership is also refused as a **recipient**: it is not given the team
+key (confirm-key answers `MEMBER_NOT_FOUND`), not promoted, and never made OWNER;
+a demotion is still allowed. A team key rotation does not wrap the new version
+for it and clears its `key_distributed`, so it holds only keys it already had.
+The team's pending key distributions still list it, and an admin's browser keeps
+being refused until the membership is ended. A team admin who tries to promote
+such a member, transfer ownership to them, or give them the key sees "member not
+found" for a member the team list still shows: that is this refusal. End the
+membership (or remove the member and invite them again if they belong in the
+team).
+
+This also refuses a member who was legitimately re-admitted **before**
+`20261114000000_team_member_admitted_at`: their row has no `admitted_at`, its
+`created_at` predates the departure, and nothing tells that apart from residue.
+Such a member appears in section 1. Recovery is a re-admission: once the tenant
+admin confirms the member, a team admin removes them and invites them again (or
+a SCIM return restores them); the new admission stamps `admitted_at` and their
+authority comes back. Do not edit `admitted_at`: the trigger ignores it.
+
+## Paused team webhooks
+
+A team webhook is delivered only while its creator holds an active membership
+of the webhook's team with a role that may update the team (OWNER or ADMIN).
+Once the creator is removed, departs, or is demoted, delivery is skipped (not
+counted as a failure), and the team's webhook settings show the webhook as
+paused. Events from the gap are not delivered later; delivery resumes for new
+events when the creator's authority returns. To keep a paused webhook's stream,
+a current team admin re-creates it (and the old one is deleted).
+
+A webhook created before `20261114000300_team_webhook_creator` has a creator
+only if the migration found its `WEBHOOK_CREATE` record; otherwise it keeps
+delivering as before, and section 3 of the report lists it. A creator whose
+membership row survived their departure (the residue section 1 lists) still
+passes the delivery check: end that membership with the contain script.
+
+## What prevents a recurrence, and its limits
+
+Departures end memberships because every departure writer lives in
+`src/lib/team/team-departure.ts` and calls `endTeamMemberships` there. That is
+a convention reviewed by humans. The `check-team-rotation-input-lock` gate fails
+a write to `tenant_members.deactivated_at` outside that file, but it does not
+see the file's own writers, `*Unsafe` raw SQL, aliased receivers, `scripts/`, or
+deletes of tenant rows. A tenant-row change made any other way (a hand-written
+`UPDATE`, a script) can leave memberships active again: run the report after
+any such change. The actor check above refuses such residue at the six admission
+sites, and share links stop on their own; webhook delivery reads only the team
+row, so the report and the contain script remain the control there.

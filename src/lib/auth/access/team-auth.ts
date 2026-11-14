@@ -43,6 +43,26 @@ export async function activeTeamRole(
   return membership?.role ?? null;
 }
 
+/**
+ * activeTeamRole plus when the membership began (admittedAt, or createdAt for
+ * a row admitted before the column existed), for the departed-actor check
+ * (actorDepartedSinceAdmission). The same COALESCE(admitted_at, created_at) is
+ * inlined by the approve route (its read also needs keyDistributed) and by the
+ * departed-member-access-backfill runbook; change them together.
+ */
+export async function activeTeamAdmission(
+  tx: Pick<Prisma.TransactionClient, "teamMember">,
+  teamId: string,
+  userId: string,
+): Promise<{ role: TeamRole; admittedAt: Date } | null> {
+  const membership = await tx.teamMember.findFirst({
+    where: { teamId, userId, deactivatedAt: null },
+    select: { role: true, admittedAt: true, createdAt: true },
+  });
+  if (!membership) return null;
+  return { role: membership.role, admittedAt: membership.admittedAt ?? membership.createdAt };
+}
+
 // Back-compat re-export — see team-role-hierarchy.ts for the pure module.
 export { isRoleAbove } from "@/lib/auth/access/team-role-hierarchy";
 

@@ -51,6 +51,7 @@ import {
   requireTeamMember,
   requireTeamPermission,
   getAdminTeamMemberships,
+  activeTeamAdmission,
   TeamAuthError,
 } from "./team-auth";
 
@@ -318,3 +319,28 @@ describe("getAdminTeamMemberships", () => {
   });
 });
 
+
+describe("activeTeamAdmission", () => {
+  const created = new Date("2026-01-01T00:00:00.000Z");
+  const admitted = new Date("2026-03-01T00:00:00.000Z");
+
+  beforeEach(() => vi.clearAllMocks());
+
+  it("returns admittedAt when the column is set", async () => {
+    mockPrisma.teamMember.findFirst.mockResolvedValue({ role: TEAM_ROLE.ADMIN, admittedAt: admitted, createdAt: created });
+    await expect(activeTeamAdmission(prisma, "t", "u")).resolves.toEqual({ role: TEAM_ROLE.ADMIN, admittedAt: admitted });
+    expect(mockPrisma.teamMember.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { teamId: "t", userId: "u", deactivatedAt: null } }),
+    );
+  });
+
+  it("falls back to createdAt for a row admitted before the column existed", async () => {
+    mockPrisma.teamMember.findFirst.mockResolvedValue({ role: TEAM_ROLE.OWNER, admittedAt: null, createdAt: created });
+    await expect(activeTeamAdmission(prisma, "t", "u")).resolves.toEqual({ role: TEAM_ROLE.OWNER, admittedAt: created });
+  });
+
+  it("returns null without an active membership", async () => {
+    mockPrisma.teamMember.findFirst.mockResolvedValue(null);
+    await expect(activeTeamAdmission(prisma, "t", "u")).resolves.toBeNull();
+  });
+});

@@ -2,8 +2,10 @@ import { describe, it, expect, vi } from "vitest";
 import { Prisma } from "@prisma/client";
 import {
   departedSince,
+  actorDepartedSinceAdmission,
   isMembershipLockConflict,
   lockTenantRows,
+  readTenantRows,
   TenantMemberLockTimeoutError,
 } from "./tenant-row-lock";
 import { createLockBudget, TeamRotationInProgressError } from "./team-key-rotation-lock";
@@ -91,6 +93,56 @@ describe("lockTenantRows", () => {
   });
 });
 
+describe("readTenantRows", () => {
+  const tx = (
+    rows: { userId: string; role: string; deactivatedAt: Date | null }[],
+    records: { userId: string; departedAt: Date }[],
+  ) => ({
+    tenantMember: { findMany: vi.fn().mockResolvedValue(rows) },
+    tenantMemberDeparture: { findMany: vi.fn().mockResolvedValue(records) },
+  });
+
+  it("answers each user as lockTenantRows would: row, departure record, or neither", async () => {
+    const left = new Date("2026-05-01T00:00:00.000Z");
+    const recorded = new Date("2026-06-01T00:00:00.000Z");
+    const t = tx(
+      [{ userId: "a", role: "MEMBER", deactivatedAt: left }],
+      [{ userId: "b", departedAt: recorded }],
+    );
+
+    const result = await readTenantRows(t as unknown as Pick<Prisma.TransactionClient, "tenantMember" | "tenantMemberDeparture">, "tenant-1", ["a", "b", "c"]);
+
+    expect(result.get("a")).toEqual({ hasRow: true, role: "MEMBER", deactivatedAt: left, departedAt: null });
+    expect(result.get("b")).toEqual({ hasRow: false, role: null, deactivatedAt: null, departedAt: recorded });
+    expect(result.get("c")).toEqual({ hasRow: false, role: null, deactivatedAt: null, departedAt: null });
+    expect(t.tenantMember.findMany).toHaveBeenCalledWith({
+      where: { tenantId: "tenant-1", userId: { in: ["a", "b", "c"] } },
+      select: { userId: true, role: true, deactivatedAt: true },
+    });
+  });
+
+  it("matches a caller's upper-case id to the database's lower-case row, answering by the caller's spelling", async () => {
+    const left = new Date("2026-05-01T00:00:00.000Z");
+    const t = tx([{ userId: "abc", role: "MEMBER", deactivatedAt: left }], [{ userId: "abc", departedAt: left }]);
+
+    const result = await readTenantRows(t as unknown as Pick<Prisma.TransactionClient, "tenantMember" | "tenantMemberDeparture">, "tenant-1", ["ABC"]);
+
+    // A miss here would answer as a guest: not departed, so the check would pass.
+    expect(result.get("ABC")).toEqual({ hasRow: true, role: "MEMBER", deactivatedAt: left, departedAt: left });
+    expect(t.tenantMember.findMany).toHaveBeenCalledWith({
+      where: { tenantId: "tenant-1", userId: { in: ["abc"] } },
+      select: { userId: true, role: true, deactivatedAt: true },
+    });
+  });
+
+  it("reads nothing for no users", async () => {
+    const t = tx([], []);
+
+    expect((await readTenantRows(t as unknown as Pick<Prisma.TransactionClient, "tenantMember" | "tenantMemberDeparture">, "tenant-1", [])).size).toBe(0);
+    expect(t.tenantMember.findMany).not.toHaveBeenCalled();
+  });
+});
+
 describe("departedSince", () => {
   const issued = new Date("2026-06-01T00:00:00.000Z");
   const row = (deactivatedAt: Date | null, departedAt: Date | null = null) => ({ hasRow: true, role: null, deactivatedAt, departedAt });
@@ -108,6 +160,47 @@ describe("departedSince", () => {
 
   it("counts a SCIM DELETE record even when the row was re-created active", () => {
     expect(departedSince(row(null, new Date(issued.getTime() + 1)), issued)).toBe(true);
+  });
+});
+
+describe("actorDepartedSinceAdmission", () => {
+  const admitted = new Date("2026-06-01T00:00:00.000Z");
+  const at = (ms: number) => new Date(admitted.getTime() + ms);
+  const row = (deactivatedAt: Date | null, departedAt: Date | null = null) => ({ hasRow: true, role: null, deactivatedAt, departedAt });
+
+  it("is false for a guest with no row or departure record", () => {
+    expect(actorDepartedSinceAdmission(undefined, admitted)).toBe(false);
+    expect(actorDepartedSinceAdmission({ hasRow: false, role: null, deactivatedAt: null, departedAt: null }, admitted)).toBe(false);
+  });
+
+  it("is false for an active row with no departure", () => {
+    expect(actorDepartedSinceAdmission(row(null), admitted)).toBe(false);
+  });
+
+  it("is true for a departure after admission, and when equal", () => {
+    expect(actorDepartedSinceAdmission(row(at(1)), admitted)).toBe(true);
+    expect(actorDepartedSinceAdmission(row(admitted), admitted)).toBe(true);
+  });
+
+  it("is false when the actor was re-admitted after the departure (admittedAt later, not created_at)", () => {
+    // created_at < departure < admitted_at: the caller passes the later admittedAt.
+    const departure = at(-1000);
+    expect(actorDepartedSinceAdmission(row(departure), admitted)).toBe(false);
+    expect(actorDepartedSinceAdmission(row(departure), at(-2000))).toBe(true);
+  });
+
+  it("is false for a departure one millisecond before the admission (the nearest allow case)", () => {
+    expect(actorDepartedSinceAdmission(row(at(-1)), admitted)).toBe(false);
+  });
+
+  it("is true for a deleted tenant row whose departure record follows the admission", () => {
+    // SCIM DELETE residue: no tenant row, the team row kept. C3's SQL refuses the same state.
+    expect(actorDepartedSinceAdmission({ hasRow: false, role: null, deactivatedAt: null, departedAt: at(1) }, admitted)).toBe(true);
+  });
+
+  it("is false for a re-provisioned active row whose old departure record predates the membership", () => {
+    // departedAt() returns the record's stamp for an active row; admission is later, so it does not void.
+    expect(actorDepartedSinceAdmission(row(null, at(-1000)), admitted)).toBe(false);
   });
 });
 

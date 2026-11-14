@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
 import { updateMemberRoleSchema } from "@/lib/validations";
 import {
+  activeTeamAdmission,
   activeTeamRole,
   hasTeamPermission,
   requireTeamPermission,
@@ -17,7 +18,12 @@ import { parseBody } from "@/lib/http/parse-body";
 import { TEAM_PERMISSION, TEAM_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { createLockBudget, lockTeamsAgainstRotation } from "@/lib/team/team-key-rotation-lock";
-import { isMembershipLockConflict, lockTenantRows } from "@/lib/team/tenant-row-lock";
+import {
+  actorDepartedSinceAdmission,
+  isMembershipLockConflict,
+  lockTenantRows,
+  readTenantRows,
+} from "@/lib/team/tenant-row-lock";
 import {
   invalidateUserSessions,
   type InvalidateUserSessionsResult,
@@ -82,7 +88,8 @@ function actorAuthorized(role: TeamRole | null, permission: TeamPermission, targ
  * The acting member's tenant row (FOR SHARE), then the team: the actor's
  * departure holds that row FOR UPDATE, so the active-actor re-check after this
  * reads a departure that committed meanwhile. A guest actor has no row here;
- * the advisory lock still serialises them (tenant-row-lock.ts).
+ * the advisory lock still serialises them (tenant-row-lock.ts). Returns the
+ * locked rows, for actorDepartedSinceAdmission.
  */
 async function lockActorThenTeam(
   tx: Prisma.TransactionClient,
@@ -91,8 +98,37 @@ async function lockActorThenTeam(
   actorUserId: string,
 ) {
   const budget = createLockBudget();
-  await lockTenantRows(tx, tenantId, [actorUserId], "share", budget);
+  const rows = await lockTenantRows(tx, tenantId, [actorUserId], "share", budget);
   await lockTeamsAgainstRotation(tx, [teamId], budget);
+  return rows;
+}
+
+/**
+ * Whether the target's membership, re-read under the team lock, is a leftover:
+ * its tenant row departed at or after its admission to the team. A leftover
+ * is treated as deactivated for every grant (a promotion or an ownership
+ * transfer); a demotion stays allowed. Throws MemberChangedError when the row
+ * is no longer this active member.
+ *
+ * The tenant row is read unlocked: locking it would serialise the change with
+ * every SCIM write to that user, and residue is old state. A departure in
+ * flight either reaches the member row first (the conditional write misses)
+ * or deactivates the membership after this commits.
+ */
+async function targetIsLeftover(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  teamId: string,
+  memberId: string,
+  targetUserId: string,
+): Promise<boolean> {
+  const locked = await tx.teamMember.findFirst({
+    where: { id: memberId, teamId, deactivatedAt: null },
+    select: { userId: true, admittedAt: true, createdAt: true },
+  });
+  if (!locked || locked.userId !== targetUserId) throw new MemberChangedError();
+  const rows = await readTenantRows(tx, tenantId, [targetUserId]);
+  return actorDepartedSinceAdmission(rows.get(targetUserId), locked.admittedAt ?? locked.createdAt);
 }
 
 // PUT /api/teams/[teamId]/members/[memberId] — Change member role
@@ -145,12 +181,18 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     let updated;
     try {
       updated = await withTeamTenantRls(teamId, async (tenantId, tx) => {
-        await lockActorThenTeam(tx, tenantId, teamId, session.user.id);
+        const rows = await lockActorThenTeam(tx, tenantId, teamId, session.user.id);
         // Only the OWNER as it stands now may transfer: a demotion or a
         // departure since the permission check refuses with 403, not 404.
-        if ((await activeTeamRole(tx, teamId, session.user.id)) !== TEAM_ROLE.OWNER) {
+        const actor = await activeTeamAdmission(tx, teamId, session.user.id);
+        if (
+          actor?.role !== TEAM_ROLE.OWNER ||
+          actorDepartedSinceAdmission(rows.get(session.user.id), actor.admittedAt)
+        ) {
           throw new ActorNotPermittedError();
         }
+        // Ownership is never transferred to a leftover membership.
+        if (await targetIsLeftover(tx, tenantId, teamId, memberId, target.userId)) throw new MemberChangedError();
         const demoted = await tx.teamMember.updateMany({
           where: { id: actorMembership.id, teamId, role: TEAM_ROLE.OWNER, deactivatedAt: null },
           data: { role: TEAM_ROLE.ADMIN },
@@ -199,11 +241,21 @@ async function handlePUT(req: NextRequest, { params }: Params) {
   let updated;
   try {
     updated = await withTeamTenantRls(teamId, async (tenantId, tx) => {
-      await lockActorThenTeam(tx, tenantId, teamId, session.user.id);
+      const rows = await lockActorThenTeam(tx, tenantId, teamId, session.user.id);
       // The acting member's authority as it stands now (departure, removal or
       // demotion since the permission check), judged against the target.
-      const actorRole = await activeTeamRole(tx, teamId, session.user.id);
-      if (!actorAuthorized(actorRole, TEAM_PERMISSION.MEMBER_CHANGE_ROLE, target.role)) throw new ActorNotPermittedError();
+      const actor = await activeTeamAdmission(tx, teamId, session.user.id);
+      if (
+        !actor ||
+        !actorAuthorized(actor.role, TEAM_PERMISSION.MEMBER_CHANGE_ROLE, target.role) ||
+        actorDepartedSinceAdmission(rows.get(session.user.id), actor.admittedAt)
+      ) throw new ActorNotPermittedError();
+      // A leftover membership is not promoted; a demotion reduces authority
+      // and stays allowed.
+      if (
+        isRoleAbove(result.data.role, target.role) &&
+        await targetIsLeftover(tx, tenantId, teamId, memberId, target.userId)
+      ) throw new MemberChangedError();
       const changed = await tx.teamMember.updateMany({
         where: { id: memberId, teamId, deactivatedAt: null, role: target.role },
         data: { role: result.data.role },

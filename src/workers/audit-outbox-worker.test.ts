@@ -2318,3 +2318,141 @@ describe("onWebhookDeliveryFailure (Step 0 characterization)", () => {
     ]);
   });
 });
+
+// ─── Team webhook delivery: creator authority ─────────────────────────────────
+//
+// resolveWebhookSubscribers is driven through processWebhookDeliveryBatch. A team
+// webhook is delivered only while its creator is an active member holding
+// TEAM_UPDATE; a NULL creator is a legacy row and still delivers.
+
+describe("team webhook delivery — creator authority", () => {
+  const CREATOR_ID = "00000000-0000-4000-8000-0000000000a1";
+  const WEBHOOK_OK = "00000000-0000-4000-8000-0000000000b1";
+  const WEBHOOK_GONE = "00000000-0000-4000-8000-0000000000b2";
+  const WEBHOOK_LEGACY = "00000000-0000-4000-8000-0000000000b3";
+
+  const webhookRow = (id: string, createdById: string | null) => ({
+    id,
+    url: "https://example.com/hook",
+    secretEncrypted: "e",
+    secretIv: "i",
+    secretAuthTag: "t",
+    masterKeyVersion: 1,
+    secretAadVersion: 2,
+    tenantId: TENANT_ID,
+    teamId: TEAM_ID,
+    failCount: 0,
+    createdById,
+  });
+
+  function setup(opts: {
+    webhooks: ReturnType<typeof webhookRow>[];
+    members: { userId: string; role: string; deactivatedAt: Date | null }[];
+  }) {
+    const teamWebhookFindMany = vi.fn().mockResolvedValue(opts.webhooks);
+    const teamMemberFindMany = vi.fn().mockResolvedValue(opts.members);
+    const executed: string[] = [];
+    const item = {
+      id: "00000000-0000-4000-8000-0000000000c1",
+      outbox_id: "00000000-0000-4000-8000-0000000000c2",
+      tenant_id: TENANT_ID,
+      scope: "TEAM",
+      team_id: TEAM_ID,
+      action: AUDIT_ACTION.ENTRY_CREATE,
+      attempt_count: 0,
+      max_attempts: 8,
+    };
+    mockTransaction.mockImplementation((async (fn: (tx: unknown) => Promise<unknown>) =>
+      fn({
+        $executeRaw: mockExecuteRaw,
+        $executeRawUnsafe: vi.fn(async (sql: string) => {
+          executed.push(sql);
+        }),
+        $queryRawUnsafe: vi.fn(async (sql: string) => {
+          if (sql.includes("SKIP LOCKED")) return [item];
+          if (sql.includes("FROM audit_outbox")) {
+            return [{ created_at: new Date(), payload: { metadata: {} } }];
+          }
+          return [];
+        }),
+        teamWebhook: { findMany: teamWebhookFindMany, update: vi.fn() },
+        teamMember: { findMany: teamMemberFindMany },
+      })) as unknown as Parameters<typeof mockTransaction.mockImplementation>[0],
+    );
+    return { teamWebhookFindMany, teamMemberFindMany, executed };
+  }
+
+  const deliveredIds = () =>
+    (mockDeliverToWebhookRecords.mock.calls[0]?.[0] ?? []).map((w: { id: string }) => w.id);
+
+  beforeEach(resetMocks);
+
+  it("delivers a webhook whose creator is an active ADMIN", async () => {
+    setup({
+      webhooks: [webhookRow(WEBHOOK_OK, CREATOR_ID)],
+      members: [{ userId: CREATOR_ID, role: "ADMIN", deactivatedAt: null }],
+    });
+    await processWebhookDeliveryBatch(new PrismaClient(), 5);
+    expect(deliveredIds()).toEqual([WEBHOOK_OK]);
+  });
+
+  it("skips a webhook whose creator left the team, logs it, and does not fail the work item", async () => {
+    const { executed } = setup({
+      webhooks: [webhookRow(WEBHOOK_GONE, CREATOR_ID)],
+      members: [],
+    });
+    await processWebhookDeliveryBatch(new PrismaClient(), 5);
+    expect(mockDeliverToWebhookRecords).not.toHaveBeenCalled();
+    expect(mockLoggerWarn).toHaveBeenCalledWith(
+      {
+        webhookId: WEBHOOK_GONE,
+        teamId: TEAM_ID,
+        _logType: "outbox.webhook_creator_unauthorized",
+      },
+      "outbox.webhook_creator_unauthorized",
+    );
+    // Marked SENT, never routed to the error/retry path.
+    expect(executed.some((s) => s.includes("status = 'SENT'"))).toBe(true);
+    expect(executed.some((s) => s.includes("last_error = $"))).toBe(false);
+  });
+
+  it("skips a webhook whose creator's membership is deactivated", async () => {
+    setup({
+      webhooks: [webhookRow(WEBHOOK_GONE, CREATOR_ID)],
+      members: [{ userId: CREATOR_ID, role: "ADMIN", deactivatedAt: new Date() }],
+    });
+    await processWebhookDeliveryBatch(new PrismaClient(), 5);
+    expect(mockDeliverToWebhookRecords).not.toHaveBeenCalled();
+  });
+
+  it("delivers a legacy webhook with no creator without reading members", async () => {
+    const { teamMemberFindMany } = setup({
+      webhooks: [webhookRow(WEBHOOK_LEGACY, null)],
+      members: [],
+    });
+    await processWebhookDeliveryBatch(new PrismaClient(), 5);
+    expect(deliveredIds()).toEqual([WEBHOOK_LEGACY]);
+    expect(teamMemberFindMany).not.toHaveBeenCalled();
+  });
+
+  it("filters mixed webhooks and reads all creators in one explicit-select query", async () => {
+    const { teamMemberFindMany } = setup({
+      webhooks: [
+        webhookRow(WEBHOOK_OK, CREATOR_ID),
+        webhookRow(WEBHOOK_GONE, "00000000-0000-4000-8000-0000000000a2"),
+        webhookRow(WEBHOOK_LEGACY, null),
+      ],
+      members: [{ userId: CREATOR_ID, role: "OWNER", deactivatedAt: null }],
+    });
+    await processWebhookDeliveryBatch(new PrismaClient(), 5);
+    expect(deliveredIds()).toEqual([WEBHOOK_OK, WEBHOOK_LEGACY]);
+    expect(teamMemberFindMany).toHaveBeenCalledTimes(1);
+    expect(teamMemberFindMany).toHaveBeenCalledWith({
+      where: {
+        teamId: TEAM_ID,
+        userId: { in: [CREATOR_ID, "00000000-0000-4000-8000-0000000000a2"] },
+      },
+      select: { userId: true, role: true, deactivatedAt: true },
+    });
+  });
+});

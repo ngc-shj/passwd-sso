@@ -12,10 +12,12 @@ const {
   mockTeamMemberFindMany,
   mockTeamMemberKeyFindMany,
   mockUserFindMany,
+  mockTenantMemberFindMany,
+  mockTenantMemberDepartureFindMany,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTeamPermission: vi.fn(),
-  mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
+  mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: (tenantId: string) => unknown) => fn("tenant-1")),
   mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
   MockTeamAuthError: class MockTeamAuthError extends Error {
     status: number;
@@ -30,6 +32,9 @@ const {
   mockTeamMemberFindMany: vi.fn(),
   mockTeamMemberKeyFindMany: vi.fn(),
   mockUserFindMany: vi.fn(),
+  // The key-holders' tenant rows and departure records (readTenantRows).
+  mockTenantMemberFindMany: vi.fn(),
+  mockTenantMemberDepartureFindMany: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -44,6 +49,8 @@ vi.mock("@/lib/prisma", () => ({
     teamMember: { findMany: mockTeamMemberFindMany },
     teamMemberKey: { findMany: mockTeamMemberKeyFindMany },
     user: { findMany: mockUserFindMany },
+    tenantMember: { findMany: mockTenantMemberFindMany },
+    tenantMemberDeparture: { findMany: mockTenantMemberDepartureFindMany },
   },
 }));
 vi.mock("@/lib/tenant-context", () => ({
@@ -97,7 +104,9 @@ describe("GET /api/teams/[teamId]/rotate-key/data", () => {
     mockTeamMemberKeyFindMany.mockResolvedValue([{ userId: "user-1" }]);
     mockUserFindMany.mockResolvedValue([{ id: "user-1", ecdhPublicKey: "public-key-data" }]);
     // withTeamTenantRls is called 3 times: team, entries+members, member keys
-    mockWithTeamTenantRls.mockImplementation(async (_teamId: string, fn: () => unknown) => fn());
+    mockWithTeamTenantRls.mockImplementation(async (_teamId: string, fn: (tenantId: string) => unknown) => fn("tenant-1"));
+    mockTenantMemberFindMany.mockResolvedValue([]);
+    mockTenantMemberDepartureFindMany.mockResolvedValue([]);
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -206,6 +215,63 @@ describe("GET /api/teams/[teamId]/rotate-key/data", () => {
       { userId: "owner-user", ecdhPublicKey: "owner-public-key" },
       { userId: "guest-user", ecdhPublicKey: "guest-public-key" },
     ]);
+  });
+
+  describe("a key-holder who left the tenant, judged against their admission to the team", () => {
+    const ADMITTED_AT = new Date("2026-03-01T00:00:00.000Z");
+    const at = (ms: number) => new Date(ADMITTED_AT.getTime() + ms);
+    const holder = (userId: string, over: Record<string, unknown> = {}) => ({
+      userId, admittedAt: ADMITTED_AT, createdAt: ADMITTED_AT, ...over,
+    });
+    /** user-1 is active; user-2's tenant state is given. */
+    const state = (
+      user2: { deactivatedAt?: Date | null; departedAt?: Date | null; hasRow?: boolean },
+      user2Row = holder("user-2"),
+    ) => {
+      mockTeamMemberFindMany.mockResolvedValue([holder("user-1"), user2Row]);
+      mockTenantMemberFindMany.mockResolvedValue([
+        { userId: "user-1", role: "MEMBER", deactivatedAt: null },
+        ...(user2.hasRow === false ? [] : [{ userId: "user-2", role: "MEMBER", deactivatedAt: user2.deactivatedAt ?? null }]),
+      ]);
+      mockTenantMemberDepartureFindMany.mockResolvedValue(
+        user2.departedAt ? [{ userId: "user-2", departedAt: user2.departedAt }] : [],
+      );
+      mockTeamMemberKeyFindMany.mockImplementation(async ({ where }: { where: { userId: unknown } }) => {
+        const ids = (where.userId as { in?: string[] }).in;
+        return ids ? ids.map((userId) => ({ userId })) : [{ keyVersion: 1 }];
+      });
+      mockUserFindMany.mockImplementation(async ({ where }: { where: { id: { in: string[] } } }) =>
+        where.id.in.map((id) => ({ id, ecdhPublicKey: `pk-${id}` })));
+    };
+    const listed = async () => {
+      const res = await GET(createRequest("team-1"), createParams("team-1"));
+      expect(res.status).toBe(200);
+      return ((await res.json()).members as { userId: string }[]).map((m) => m.userId);
+    };
+
+    it("leaves out a key-holder whose tenant row departed after, or at, their admission", async () => {
+      for (const departed of [{ deactivatedAt: at(1) }, { deactivatedAt: at(0) }, { departedAt: at(1), hasRow: false }]) {
+        state(departed);
+        expect(await listed()).toEqual(["user-1"]);
+      }
+      expect(mockTenantMemberFindMany).toHaveBeenCalledWith({
+        where: { tenantId: "tenant-1", userId: { in: ["user-1", "user-2"] } },
+        select: { userId: true, role: true, deactivatedAt: true },
+      });
+    });
+
+    it("lists a guest, an active, a re-admitted and a re-provisioned key-holder", async () => {
+      for (const [user2, row] of [
+        [{ hasRow: false }, holder("user-2")],
+        [{}, holder("user-2")],
+        // created before the departure, re-admitted after it: admitted_at decides.
+        [{ deactivatedAt: at(-1000) }, holder("user-2", { createdAt: at(-5000) })],
+        [{ departedAt: at(-1000) }, holder("user-2")],
+      ] as const) {
+        state(user2, row);
+        expect(await listed()).toEqual(["user-1", "user-2"]);
+      }
+    });
   });
 
   it("re-throws non-TeamAuthError permission errors", async () => {
