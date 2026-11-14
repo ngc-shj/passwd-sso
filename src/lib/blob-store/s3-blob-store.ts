@@ -62,6 +62,10 @@ export const s3BlobStore: AttachmentBlobStore = {
   async putObject(data, context) {
     const config = loadCloudBlobConfig(BLOB_STORAGE.S3);
     const key = buildObjectKey(context);
+    // Encoded before the upload: a key whose ref would exceed
+    // MAX_OBJECT_REF_BYTES is refused here instead of leaving an object no row
+    // can name.
+    const ref = encodeObjectRef({ key });
     const { client, PutObjectCommand } = await getS3Client(config);
 
     await client.send(
@@ -73,7 +77,7 @@ export const s3BlobStore: AttachmentBlobStore = {
       }),
     );
 
-    return encodeObjectRef({ key });
+    return ref;
   },
   async getObject(stored, context) {
     const config = loadCloudBlobConfig(BLOB_STORAGE.S3);

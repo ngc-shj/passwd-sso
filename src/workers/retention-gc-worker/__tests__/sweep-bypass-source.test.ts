@@ -25,8 +25,10 @@ const WORKER_DIR = path.resolve(__dirname, "..");
 const REPO_ROOT = path.resolve(WORKER_DIR, "../../..");
 const EXEMPT = new Set(["enqueueAuditInWorkerTx", "assertSweepBypass"]);
 const EXPECTED_MEMBERS = [
+  "countAttachmentRows",
   "listTrashRetentionTenants",
   "readAttachmentRefs",
+  "readSmallAttachmentPage",
   "sweepAuditLogs",
   "sweepAuditProvenanceEntry",
   "sweepExpiredAccessRequests",

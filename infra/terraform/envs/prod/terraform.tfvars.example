@@ -63,6 +63,15 @@ enable_cloudfront          = false
 cloudfront_aliases         = []
 cloudfront_certificate_arn = ""
 
+# Attachment backend and the retention-gc orphan sweep. Default: attachments
+# stay in the database and the sweep is off. Switching an existing stack strands
+# the attachments already stored — read docs/operations/deployment.md "Orphan
+# attachment sweep on AWS" first. "s3" needs SSE-S3 (s3_kms_key_arn = "").
+# attachments_blob_backend              = "s3"
+# attachments_blob_backend_empty_db_ack = true      # after --count-db-blobs reports db_stored 0
+# retention_gc_blob_sweep_mode          = "report"  # then "delete" with a grace
+# retention_gc_blob_orphan_grace_ms     = 3024000000 # >= the restore window (here 35 d)
+
 # Backup — production (ransomware-resistant)
 enable_backup                  = true
 backup_vault_lock              = true

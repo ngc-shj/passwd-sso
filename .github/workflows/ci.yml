@@ -105,6 +105,9 @@ jobs:
               - "infra/terraform/*.tf"
               - "infra/terraform/README*.md"
               - "infra/terraform/modules/anchor-prefix/**"
+              # blob-sweep-wiring.test.ts pins the root module's .tftest.hcl
+              # run blocks to its run manifest.
+              - "infra/terraform/tests/**"
               # scripts/__tests__/jackson-probe-images.test.mjs holds the
               # jackson-probe matrix in ci-integration.yml to the Jackson images
               # these reference; a re-tag or a matrix edit alone must run it.
@@ -1077,10 +1080,11 @@ jobs:
       - run: npm run licenses:check:ext:strict
       - run: npm run licenses:check:cli:strict
 
-  # ─── Terraform: fmt → validate → prefix-module tests ──────
-  # No AWS account runs here: nothing is planned or applied, and init skips the
-  # backend. The anchor-prefix module is provider-less, so its variable
-  # validation is exercised for real by `terraform test`.
+  # ─── Terraform: fmt → validate → module and root tests ────
+  # No AWS account runs here: nothing is planned or applied against one, and
+  # init skips the backend. The anchor-prefix module is provider-less, so its
+  # variable validation is exercised for real by `terraform test`; the root
+  # module's test mocks the AWS provider.
   terraform:
     name: "Terraform: fmt, validate, module tests"
     runs-on: ubuntu-latest
@@ -1130,6 +1134,23 @@ jobs:
 
       - name: Check the module test count against the prefix vectors
         run: node scripts/checks/check-terraform-test-count.mjs "$RUNNER_TEMP/anchor-prefix-test.json" infra/terraform/modules/anchor-prefix/prefix-vectors.json
+
+      # The root module under a mocked AWS provider (tests/blob_sweep.tftest.hcl):
+      # no credentials, no account. Uses the init the validate step did.
+      - name: terraform test (root, mocked provider)
+        working-directory: infra/terraform
+        run: |
+          set -euo pipefail
+          status=0
+          terraform test -json > "$RUNNER_TEMP/root-test.json" || status=$?
+          grep -F '"type":"test_summary"' "$RUNNER_TEMP/root-test.json" || true
+          if [ "$status" -ne 0 ]; then
+            echo "::error::terraform test exited $status"
+            exit "$status"
+          fi
+
+      - name: Check the root test runs against their manifest
+        run: node scripts/checks/check-terraform-test-count.mjs "$RUNNER_TEMP/root-test.json" infra/terraform/tests/blob_sweep.runs.json
 
   # ─── Required check ───────────────────────────────────────
   # The one check main's ruleset is to require from this workflow (see
