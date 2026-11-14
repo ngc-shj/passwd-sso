@@ -40,6 +40,12 @@ locals {
     ] : [],
   )
 
+  # Preconditions 1 and 2, on the app AND the retention-gc task definitions
+  # (ecs.tf): both read BLOB_BACKEND, so either one alone would let the other
+  # be planned with a backend it cannot use.
+  attachment_backend_bucket_ready = var.attachments_blob_backend != "s3" || (var.enable_s3_attachments && var.attachments_blob_backend_empty_db_ack)
+  attachment_backend_sse_ready    = var.attachments_blob_backend != "s3" || var.s3_kms_key_arn == ""
+
   # How far back a database restore can reach, in milliseconds (the orphan
   # grace's unit): the RDS automated backups, and AWS Backup's recovery points
   # when it is on.

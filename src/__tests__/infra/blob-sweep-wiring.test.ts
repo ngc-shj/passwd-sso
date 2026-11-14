@@ -73,45 +73,84 @@ describe("default container definitions", () => {
   });
 });
 
-describe("the s3 + report worker env", () => {
+/**
+ * The retention container's env for `vars`, with placeholders for what
+ * Terraform resolves at apply (the bucket id) and for the secrets.
+ */
+function renderedWorkerEnv(tf: TerraformConfig, vars: Record<string, unknown>): Record<string, string> {
+  const [worker] = containers(tf, "retention_gc_worker", vars);
+  const env: Record<string, string> = {};
+  for (const e of worker.environment ?? []) {
+    // The bucket id is resolved at apply; anything else must be a literal.
+    if (e.name === "S3_ATTACHMENTS_BUCKET") {
+      expect(e.value).toBe("<ref:aws_s3_bucket.attachments[*].id>");
+      env[e.name] = "passwd-sso-prod-attachments";
+    } else {
+      expect(typeof e.value === "string" && !e.value.includes("<ref:"), e.name).toBe(true);
+      env[e.name] = e.value as string;
+    }
+  }
+  const placeholders: Record<string, string> = {
+    RETENTION_GC_DATABASE_URL: "postgresql://retention:x@db.internal:5432/passwd_sso",
+    DEPLOYMENT_ID: "550e8400-e29b-41d4-a716-446655440000",
+  };
+  for (const s of worker.secrets ?? []) {
+    expect(placeholders, s.name).toHaveProperty(s.name);
+    env[s.name] = placeholders[s.name];
+  }
+  return env;
+}
+
+/** scripts/retention-gc-worker.ts --validate-env-only with exactly `env`. */
+function validateWorkerEnv(env: Record<string, string>) {
+  return spawnSync("node_modules/.bin/tsx", [join(REPO_ROOT, "scripts/retention-gc-worker.ts"), "--validate-env-only"], {
+    // NODE_ENV as the image sets it; DATABASE_URL="" so a local env file cannot supply one.
+    env: { PATH: process.env.PATH, NODE_ENV: "production", DATABASE_URL: "", ...env },
+    encoding: "utf8",
+    timeout: 30_000,
+    cwd: REPO_ROOT,
+  });
+}
+
+function expectParses(env: Record<string, string>): void {
+  const result = validateWorkerEnv(env);
+  expect(result.stderr).not.toContain("env validation failed");
+  expect(result.status).toBe(0);
+  expect(result.stdout).toContain('"msg":"env validation passed"');
+}
+
+const S3_DELETE = { ...S3_REPORT, retention_gc_blob_sweep_mode: "delete", retention_gc_blob_orphan_grace_ms: 3024000000 };
+const S3_OFF = { ...S3_REPORT, retention_gc_blob_sweep_mode: "off" };
+
+describe("the rendered worker env through the worker's env schema", () => {
   const tf = new TerraformConfig(TERRAFORM_DIR);
 
-  it("parses through the retention-gc worker's env schema", () => {
-    const [worker] = containers(tf, "retention_gc_worker", S3_REPORT);
-    const env: Record<string, string> = {};
-    for (const e of worker.environment ?? []) {
-      // The bucket id is resolved at apply; anything else must be a literal.
-      if (e.name === "S3_ATTACHMENTS_BUCKET") {
-        expect(e.value).toBe("<ref:aws_s3_bucket.attachments[*].id>");
-        env[e.name] = "passwd-sso-prod-attachments";
-      } else {
-        expect(typeof e.value === "string" && !e.value.includes("<ref:"), e.name).toBe(true);
-        env[e.name] = e.value as string;
-      }
-    }
-    // Secrets: placeholders of the right shape.
-    const placeholders: Record<string, string> = {
-      RETENTION_GC_DATABASE_URL: "postgresql://retention:x@db.internal:5432/passwd_sso",
-      DEPLOYMENT_ID: "550e8400-e29b-41d4-a716-446655440000",
-    };
-    for (const s of worker.secrets ?? []) {
-      expect(placeholders, s.name).toHaveProperty(s.name);
-      env[s.name] = placeholders[s.name];
-    }
+  it("parses for s3 + report", () => {
+    const env = renderedWorkerEnv(tf, S3_REPORT);
     expect(Object.keys(env).sort()).toEqual(
       ["AWS_REGION", "BLOB_BACKEND", "DEPLOYMENT_ID", "RETENTION_GC_BLOB_SWEEP_MODE", "RETENTION_GC_DATABASE_URL", "S3_ATTACHMENTS_BUCKET"],
     );
+    expectParses(env);
+  });
 
-    const result = spawnSync("node_modules/.bin/tsx", [join(REPO_ROOT, "scripts/retention-gc-worker.ts"), "--validate-env-only"], {
-      // NODE_ENV as the image sets it; DATABASE_URL="" so a local env file cannot supply one.
-      env: { PATH: process.env.PATH, NODE_ENV: "production", DATABASE_URL: "", ...env },
-      encoding: "utf8",
-      timeout: 30_000,
-      cwd: REPO_ROOT,
-    });
-    expect(result.stderr).not.toContain("env validation failed");
-    expect(result.status).toBe(0);
-    expect(result.stdout).toContain('"msg":"env validation passed"');
+  it("parses for s3 + delete with the maximal grace", () => {
+    const env = renderedWorkerEnv(tf, S3_DELETE);
+    expect(env.RETENTION_GC_BLOB_ORPHAN_GRACE_MS).toBe("3024000000");
+    expectParses(env);
+  });
+
+  it("parses for s3 with the sweep off, with no DEPLOYMENT_ID", () => {
+    const env = renderedWorkerEnv(tf, S3_OFF);
+    expect(env).not.toHaveProperty("DEPLOYMENT_ID");
+    expect(env).not.toHaveProperty("RETENTION_GC_BLOB_SWEEP_MODE");
+    expectParses(env);
+  });
+
+  it("refuses the delete env with the grace removed (the control: the schema really runs)", () => {
+    const { RETENTION_GC_BLOB_ORPHAN_GRACE_MS: _grace, ...env } = renderedWorkerEnv(tf, S3_DELETE);
+    const result = validateWorkerEnv(env);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('"path":"RETENTION_GC_BLOB_ORPHAN_GRACE_MS"');
   });
 
   it("gives the app the same backend keys", () => {
@@ -178,11 +217,31 @@ function expectFailures(run: HclBlock): string[] {
 }
 
 const RETENTION_TASK = "aws_ecs_task_definition.retention_gc_worker";
+const APP_TASK = "aws_ecs_task_definition.app";
 
-/** Each precondition's condition on the retention task, evaluated with `vars`. */
-function preconditionResults(tf: TerraformConfig, vars: Record<string, unknown>): unknown[] {
-  const lifecycle = nested(tf.resource("aws_ecs_task_definition", "retention_gc_worker"), "lifecycle")[0];
+/** Each precondition's condition on a task definition, evaluated with `vars`. */
+function preconditionResults(tf: TerraformConfig, vars: Record<string, unknown>, task = "retention_gc_worker"): unknown[] {
+  const lifecycle = nested(tf.resource("aws_ecs_task_definition", task), "lifecycle")[0];
   return nested(lifecycle, "precondition").map((p) => tf.eval(p.body.attrs.condition, { vars }));
+}
+
+/**
+ * What a run must name in expect_failures: the app too for preconditions 1
+ * and 2 (it carries them as well), the retention task for 3 and 4, the
+ * variable for a validation run (`v_<…>`), nothing for an allow run.
+ */
+function expectedFailures(run: HclBlock): string[] {
+  const name = run.labels[0];
+  if (!name.endsWith("_fails")) return [];
+  if (/^p[12]_/.test(name)) return [APP_TASK, RETENTION_TASK];
+  if (/^p[34]_/.test(name)) return [RETENTION_TASK];
+  if (name.startsWith("v_")) {
+    const own = nested(run, "variables")[0];
+    const keys = Object.keys(own?.body.attrs ?? {});
+    expect(keys, name).toHaveLength(1);
+    return [`var.${keys[0]}`];
+  }
+  throw new Error(`${name}: a failing run of no known kind`);
 }
 
 describe("infra/terraform/tests/blob_sweep.tftest.hcl", () => {
@@ -199,15 +258,13 @@ describe("infra/terraform/tests/blob_sweep.tftest.hcl", () => {
     }
   });
 
-  it("names the retention task as the expected failure of every *_fails run, and nothing else", () => {
-    for (const run of RUNS) {
-      const name = run.labels[0];
-      expect(expectFailures(run), name).toEqual(name.endsWith("_fails") ? [RETENTION_TASK] : []);
-    }
+  it("names exactly the failing object of every *_fails run, and nothing for the rest", () => {
+    for (const run of RUNS) expect(expectFailures(run), run.labels[0]).toEqual(expectedFailures(run));
   });
 
-  it("has four preconditions on the retention task", () => {
+  it("has four preconditions on the retention task and preconditions 1 and 2 on the app", () => {
     expect(preconditionResults(tf, {})).toEqual([true, true, true, true]);
+    expect(preconditionResults(tf, {}, "app")).toEqual([true, true]);
   });
 
   it.each(RUNS.filter((r) => /^p[1-4]_/.test(r.labels[0])).map((r) => [r.labels[0], r] as const))(
@@ -219,6 +276,8 @@ describe("infra/terraform/tests/blob_sweep.tftest.hcl", () => {
       if (name.endsWith("_fails")) expected[own] = false;
       else expect(name.endsWith("_plans"), name).toBe(true);
       expect(results).toEqual(expected);
+      // The app's copies of preconditions 1 and 2 agree with the retention task's.
+      expect(preconditionResults(tf, runVars(run), "app")).toEqual(expected.slice(0, 2));
     },
   );
 
@@ -235,8 +294,9 @@ describe("the name_prefix bound (C5)", () => {
   const rule = tf.resource("aws_cloudwatch_event_rule", "audit_anchor_publisher_family_task_outside_service");
   const [precondition] = nested(nested(rule, "lifecycle")[0], "precondition");
 
-  // terraform test cannot fail it on its own (the provider's own name check
-  // of a sibling rule fails first), so its condition is evaluated here.
+  // terraform test cannot isolate it (past the bound the provider also rejects
+  // a sibling rule's name, which expect_failures does not absorb), so its
+  // condition is evaluated here.
   it.each([
     ["prod-1234", true],
     ["prod-12345", false],

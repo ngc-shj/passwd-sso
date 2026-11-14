@@ -332,13 +332,18 @@ The same procedure gives a clone or a restored copy of a deployment its own valu
    marker still holds the old id, so the sweep refuses every tick with `marker_mismatch`.
    Whether to re-create it depends on who else uses the bucket.
 
-   Inside this Terraform module the attachments bucket belongs to one stack: Terraform creates
-   it, S3 bucket names are global, and the worker's `S3_ATTACHMENTS_BUCKET` is set only from
-   that resource. A clone or restore made with the module therefore has a bucket of its own.
-   The question is whether any deployment **outside** the module reads or writes this bucket —
-   for example a Docker or restored copy given `S3_ATTACHMENTS_BUCKET` and S3 credentials
-   directly. That is an inventory question: check IAM Access Analyzer, or the IAM policy
-   simulator against the bucket ARN, and your own records.
+   Inside this Terraform module the attachments bucket belongs to one stack — Terraform creates
+   it, S3 bucket names are global, and the worker's `S3_ATTACHMENTS_BUCKET` is set only from that
+   resource — **unless** the bucket was imported into another Terraform state, or another
+   stack names it explicitly (`attachments_bucket_name`). The question is whether any deployment
+   other than this stack writes to it — for example a Docker or restored copy given
+   `S3_ATTACHMENTS_BUCKET` and S3 credentials directly. Answer it from positive evidence, not
+   from the absence of a permission: CloudTrail S3 data events, or S3 server access logs, for
+   the bucket over at least one grace period (`retention_gc_blob_orphan_grace_ms`). Any
+   `PutObject` by a principal other than this stack's task roles (`*-ecs-task`,
+   `*-ecs-retention-gc-task`) and your own operator principals means another deployment uses
+   the bucket. Without that evidence
+   — no data-event trail and no access logs for the period — treat the bucket as shared.
 
    - **No other deployment uses the bucket**: as an operator, delete the marker
      (`aws s3api delete-object --bucket <attachments-bucket> --key .passwd-sso-deployment
@@ -348,7 +353,7 @@ The same procedure gives a clone or a restored copy of a deployment its own valu
      refuses with `marker_mismatch` until replaced:
      `aws ecs update-service --cluster <cluster> --service <name_prefix>-retention-gc-worker
      --force-new-deployment --region <region>`.
-   - **Another deployment uses it, or you cannot rule that out**: never touch the marker, and
+   - **Another deployment uses it, or the evidence above is unavailable**: never touch the marker, and
      set the sweep `off`. Re-creating the marker would make this deployment the bucket's owner,
      and every object the other deployment uploads would then look orphaned to this sweep.
 

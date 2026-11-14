@@ -585,8 +585,12 @@ output `retention_gc_worker_task_role_arn`; assumable by this account's ECS
 tasks only). With `"s3"` it holds `s3:ListBucket` on the bucket,
 `s3:DeleteObject` on its objects and `s3:GetObject`/`s3:PutObject` on the marker
 key `.passwd-sso-deployment` only — never `s3:DeleteObjectVersion`, so a
-deletion only adds a delete marker. With `"db"` it holds no policy. The app and
-the outbox worker keep `*-ecs-task`, unchanged.
+deletion only adds a delete marker. With `"db"` it holds no policy. The app runs
+as `*-ecs-task`, whose Get/Put/Delete on the bucket's objects (`*-ecs-s3`) exists
+only with `"s3"` too — on the `db` default no task holds bucket rights. The
+audit-outbox worker has no task role, as the verify worker: it calls no AWS API
+with the task's identity. Both changed in #1020 (before it, the app and the
+outbox worker shared `*-ecs-task` with bucket rights whatever the backend).
 
 `project_name` and `env` together (`<project_name>-<env>`) must be at most 20
 characters: longer names exceed AWS name limits (EventBridge rules 64, target

@@ -91,6 +91,14 @@ export function appConnectionString(): string {
 }
 
 /**
+ * The retention-gc worker role's connection string, for a test that runs the
+ * worker's entrypoint as a child process with the URL production gives it.
+ */
+export function retentionGcConnectionString(): string {
+  return getConnectionString("retention-gc-worker");
+}
+
+/**
  * Fail unless `client` connects as a role that row-level security applies to.
  *
  * For a file that runs PRODUCTION code through the `@/lib/prisma` singleton to

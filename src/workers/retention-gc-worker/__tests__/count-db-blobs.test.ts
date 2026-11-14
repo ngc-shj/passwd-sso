@@ -14,6 +14,20 @@ import { applySetConfigs, isBypassStateRead, sqlText, type GucState } from "@/__
 
 type Row = { id: string; data: Uint8Array };
 
+/**
+ * The size comparison the query's SQL states against its bound parameter,
+ * read from the statement text (the fragment just before the first bound
+ * value), so the fake applies the operator the code wrote rather than one of
+ * its own.
+ */
+function sizeComparison(strings: TemplateStringsArray): (length: number, bound: number) => boolean {
+  const m = /octet_length\(encrypted_data\)\s*(<=|>=|<|>|=)\s*$/.exec(strings[0]);
+  if (!m) throw new Error(`no size comparison before the bound in: ${strings[0]}`);
+  const op = m[1];
+  return (length, bound) =>
+    op === "<=" ? length <= bound : op === ">=" ? length >= bound : op === "<" ? length < bound : op === ">" ? length > bound : length === bound;
+}
+
 interface Tx {
   gucs: GucState;
   queries: Array<{ text: string; values: unknown[] }>;
@@ -37,14 +51,16 @@ function makePrisma(rows: Row[]) {
         state.queries.push({ text, values });
         if (text.includes("count(*)")) {
           const [bound] = values as [number];
-          return [{ total: BigInt(sorted.length), over_bound: BigInt(sorted.filter((r) => r.data.length > bound).length) }];
+          const over = sizeComparison(strings);
+          return [{ total: BigInt(sorted.length), over_bound: BigInt(sorted.filter((r) => over(r.data.length, bound)).length) }];
         }
         if (text.includes("ORDER BY id")) {
           const [bound, afterOrLimit, maybeLimit] = values as [number, string | number, number?];
           const afterId = maybeLimit === undefined ? null : (afterOrLimit as string);
           const limit = maybeLimit ?? (afterOrLimit as number);
+          const within = sizeComparison(strings);
           return sorted
-            .filter((r) => r.data.length <= bound && (afterId === null || r.id > afterId))
+            .filter((r) => within(r.data.length, bound) && (afterId === null || r.id > afterId))
             .slice(0, limit)
             .map((r) => ({ id: r.id, encrypted_data: r.data }));
         }
@@ -66,7 +82,20 @@ const overBound = (): Row => {
   return { id: randomUUID(), data: Buffer.from(JSON.stringify({ key }), "utf8") };
 };
 
+/** A ref of exactly MAX_OBJECT_REF_BYTES: a reference, judged by decoding. */
+const maximalRef = (): Row => ({ id: randomUUID(), data: encodeObjectRef({ key: "a".repeat(MAX_OBJECT_REF_BYTES - '{"key":""}'.length) }) });
+/** Exactly MAX_OBJECT_REF_BYTES of attachment bytes: paged and judged database-stored. */
+const atBoundBlob = (): Row => ({ id: randomUUID(), data: Buffer.alloc(MAX_OBJECT_REF_BYTES, 0xff) });
+
 describe("countDbStoredAttachments", () => {
+  it("judges a row of exactly MAX_OBJECT_REF_BYTES by decoding it, on both sides of the SQL bound", async () => {
+    const rows = [maximalRef(), atBoundBlob()];
+    expect(rows.map((r) => r.data.length)).toEqual([MAX_OBJECT_REF_BYTES, MAX_OBJECT_REF_BYTES]);
+    const { workerPrisma } = makePrisma(rows);
+    // The ref is not database-stored; the blob is, though it is not over the bound.
+    await expect(countDbStoredAttachments(workerPrisma, 10)).resolves.toEqual({ total: 2, dbStored: 1 });
+  });
+
   it("counts every row, and as database-stored the ciphertext rows and the rows over the bound", async () => {
     const rows = [ciphertext(), ciphertext(), ciphertext(), ref(), ref(), overBound()];
     expect(rows[5].data.length).toBe(MAX_OBJECT_REF_BYTES + 1);

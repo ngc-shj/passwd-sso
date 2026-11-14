@@ -5,15 +5,32 @@
  *
  * The database is shared with the other files, so the cells measure deltas:
  * the function's own counts before and after seeding, not absolute totals.
- * Each row sits in a tenant of its own (three tenants), so a count confined
+ * Each row sits in a tenant of its own (five tenants), so a count confined
  * to one tenant cannot pass.
+ *
+ * The rows straddle the SQL size bound (MAX_OBJECT_REF_BYTES): a row over it
+ * is counted database-stored by SQL alone, a row of exactly the bound is read
+ * and judged by decodeObjectRef — this file, not the unit fake, is the
+ * authority on what the real comparison does at the boundary.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { randomBytes, randomUUID } from "node:crypto";
-import { assertRlsApplies, createTestContext, inRetentionSweepTx, setBypassRlsGucs, type TestContext } from "./helpers";
+import { spawnSync } from "node:child_process";
+import { resolve } from "node:path";
+import {
+  assertRlsApplies,
+  createTestContext,
+  inRetentionSweepTx,
+  retentionGcConnectionString,
+  setBypassRlsGucs,
+  type TestContext,
+} from "./helpers";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { countDbStoredAttachments } from "@/workers/retention-gc-worker/sweep";
 import { encodeObjectRef, MAX_OBJECT_REF_BYTES, newBlobGeneration } from "@/lib/blob-store/object-ref";
+
+const REPO_ROOT = resolve(__dirname, "..", "..", "..");
+const WRAPPER = '{"key":""}'.length;
 
 describe("countDbStoredAttachments under the retention-gc role (#1020)", () => {
   let ctx: TestContext;
@@ -54,30 +71,61 @@ describe("countDbStoredAttachments under the retention-gc role (#1020)", () => {
     return tenantId;
   }
 
-  it("counts a ciphertext row, an object-ref row and a row just over the bound as total +3, db_stored +2", async () => {
+  it("counts rows on both sides of the size bound: total +5, db_stored +3", async () => {
     // The principal is the worker role, which RLS applies to.
     await assertRlsApplies(ctx.retentionWorker.prisma);
 
     const before = await countDbStoredAttachments(ctx.retentionWorker.prisma);
 
+    // Database-stored: attachment bytes, small.
     const ciphertext = randomBytes(256);
+    // Not database-stored: a typical ref.
     const objectRef = Buffer.from(
       encodeObjectRef({ key: `personal/${randomUUID()}/${randomUUID()}/${newBlobGeneration()}.bin` }),
     );
-    // Would decode as a ref; only its size makes it database-stored.
-    const overBound = Buffer.from(
-      JSON.stringify({ key: "k".repeat(MAX_OBJECT_REF_BYTES + 1 - '{"key":""}'.length) }),
-      "utf8",
-    );
+    // Not database-stored: the largest ref encodeObjectRef writes, exactly at
+    // the bound, so the page read must include it.
+    const maximalRef = Buffer.from(encodeObjectRef({ key: "a".repeat(MAX_OBJECT_REF_BYTES - WRAPPER) }));
+    expect(maximalRef.length).toBe(MAX_OBJECT_REF_BYTES);
+    // Database-stored: attachment bytes of exactly the bound, read and judged.
+    const atBoundBlob = Buffer.alloc(MAX_OBJECT_REF_BYTES, 0xff);
+    // Database-stored: one byte over. It would decode as a ref; only its size
+    // makes it database-stored.
+    const overBound = Buffer.from(JSON.stringify({ key: "k".repeat(MAX_OBJECT_REF_BYTES + 1 - WRAPPER) }), "utf8");
     expect(overBound.length).toBe(MAX_OBJECT_REF_BYTES + 1);
 
-    const tenantA = await seed(ciphertext);
-    const tenantB = await seed(objectRef);
-    await seed(overBound);
-    expect(tenantA).not.toBe(tenantB);
+    for (const stored of [ciphertext, objectRef, maximalRef, atBoundBlob, overBound]) await seed(stored);
+    expect(new Set(tenants).size).toBe(5);
 
     const after = await countDbStoredAttachments(ctx.retentionWorker.prisma);
-    expect({ total: after.total - before.total, dbStored: after.dbStored - before.dbStored }).toEqual({ total: 3, dbStored: 2 });
+    // total: the five rows. db_stored: ciphertext, atBoundBlob, overBound.
+    expect({ total: after.total - before.total, dbStored: after.dbStored - before.dbStored }).toEqual({ total: 5, dbStored: 3 });
+  });
+
+  it("--count-db-blobs on the worker entrypoint prints one line agreeing with the function", async () => {
+    // Seeded by the cell above (or seeded here when run alone).
+    if (tenants.length === 0) await seed(randomBytes(64));
+    const adjacentBefore = await countDbStoredAttachments(ctx.retentionWorker.prisma);
+    const run = spawnSync("node_modules/.bin/tsx", [resolve(REPO_ROOT, "scripts/retention-gc-worker.ts"), "--count-db-blobs"], {
+      // The worker role's URL, as production injects it; DATABASE_URL="" so a
+      // local env file cannot supply a broader one.
+      env: { PATH: process.env.PATH, NODE_ENV: "test", DATABASE_URL: "", RETENTION_GC_DATABASE_URL: retentionGcConnectionString() },
+      encoding: "utf8",
+      timeout: 60_000,
+      cwd: REPO_ROOT,
+    });
+    const adjacentAfter = await countDbStoredAttachments(ctx.retentionWorker.prisma);
+
+    expect(run.status, run.stderr).toBe(0);
+    const lines = run.stdout.split("\n").filter((l) => l.trim() !== "");
+    expect(lines).toHaveLength(1);
+    const out = JSON.parse(lines[0]) as Record<string, unknown>;
+    expect(Object.keys(out).sort()).toEqual(["db_stored", "level", "msg", "total"]);
+    expect(out).toMatchObject({ level: "info", msg: "count-db-blobs" });
+    // Nothing changed around the child's run, so its answer is the function's.
+    expect(adjacentAfter).toEqual(adjacentBefore);
+    expect(out.db_stored).toBe(adjacentBefore.dbStored);
+    expect(out.total).toBe(adjacentBefore.total);
   });
 
   it("sees none of those rows as the same role without the bypass (the RLS positive control)", async () => {

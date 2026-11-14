@@ -229,7 +229,9 @@ credentials.
 The retention-gc worker runs as its own task role (`*-ecs-retention-gc-task`),
 which holds bucket permissions only with `attachments_blob_backend = "s3"`: list
 the attachments bucket, delete objects, and read and write the deployment
-marker. The app and the outbox worker share `*-ecs-task`.
+marker. The app runs as `*-ecs-task`, which holds Get/Put/Delete on the
+attachments bucket's objects only with `"s3"`; the outbox worker has no task
+role, like the verify worker.
 
 Without audit-outbox-worker, `audit_outbox` rows accumulate as `PENDING` and
 audit logs are never persisted. Without retention-gc-worker, nothing is ever

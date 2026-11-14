@@ -84,12 +84,20 @@ run "defaults" {
     error_message = "the retention task must run as its own role"
   }
   assert {
-    condition     = aws_ecs_task_definition.app.task_role_arn == aws_iam_role.ecs_task.arn && aws_ecs_task_definition.audit_outbox_worker.task_role_arn == aws_iam_role.ecs_task.arn
-    error_message = "the app and the outbox worker must keep ecs_task"
+    condition     = aws_ecs_task_definition.app.task_role_arn == aws_iam_role.ecs_task.arn
+    error_message = "the app must keep ecs_task"
+  }
+  assert {
+    condition     = aws_ecs_task_definition.audit_outbox_worker.task_role_arn == null
+    error_message = "the outbox worker must run with no task role (it calls no AWS API with the task's identity)"
   }
   assert {
     condition     = length(aws_iam_role_policy.ecs_retention_gc_task_s3) == 0
     error_message = "on the db backend the retention role must hold no bucket policy"
+  }
+  assert {
+    condition     = length(aws_iam_role_policy.ecs_s3_access) == 0
+    error_message = "on the db backend the app's role must hold no bucket policy"
   }
 }
 
@@ -121,6 +129,14 @@ run "s3_report" {
   assert {
     condition     = [for e in jsondecode(aws_ecs_task_definition.app.container_definitions)[0].environment : e if contains(["BLOB_BACKEND", "S3_ATTACHMENTS_BUCKET", "AWS_REGION"], e.name)] == [{ name = "BLOB_BACKEND", value = "s3" }, { name = "S3_ATTACHMENTS_BUCKET", value = aws_s3_bucket.attachments[0].id }, { name = "AWS_REGION", value = "ap-northeast-1" }]
     error_message = "the app container must use the same backend and bucket as the worker"
+  }
+  assert {
+    condition     = length(aws_iam_role_policy.ecs_s3_access) == 1 && aws_iam_role_policy.ecs_s3_access[0].role == aws_iam_role.ecs_task.id
+    error_message = "on the s3 backend the app's role must hold its bucket policy"
+  }
+  assert {
+    condition     = jsondecode(aws_iam_role_policy.ecs_s3_access[0].policy).Statement == [{ Effect = "Allow", Action = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"], Resource = "${aws_s3_bucket.attachments[0].arn}/*" }]
+    error_message = "the app's bucket policy must be Get/Put/Delete on the bucket's objects"
   }
 }
 
@@ -194,7 +210,7 @@ run "p1_s3_without_ack_fails" {
     attachments_blob_backend = "s3"
   }
 
-  expect_failures = [aws_ecs_task_definition.retention_gc_worker]
+  expect_failures = [aws_ecs_task_definition.app, aws_ecs_task_definition.retention_gc_worker]
 }
 
 run "p1_s3_without_bucket_fails" {
@@ -206,7 +222,7 @@ run "p1_s3_without_bucket_fails" {
     enable_s3_attachments                 = false
   }
 
-  expect_failures = [aws_ecs_task_definition.retention_gc_worker]
+  expect_failures = [aws_ecs_task_definition.app, aws_ecs_task_definition.retention_gc_worker]
 }
 
 run "p1_s3_with_bucket_and_ack_plans" {
@@ -227,7 +243,7 @@ run "p2_s3_with_cmk_fails" {
     s3_kms_key_arn                        = "arn:aws:kms:ap-northeast-1:123456789012:key/00000000-0000-4000-8000-000000000000"
   }
 
-  expect_failures = [aws_ecs_task_definition.retention_gc_worker]
+  expect_failures = [aws_ecs_task_definition.app, aws_ecs_task_definition.retention_gc_worker]
 }
 
 run "p2_db_with_cmk_plans" {
@@ -243,6 +259,17 @@ run "p3_report_on_db_fails" {
 
   variables {
     retention_gc_blob_sweep_mode = "report"
+  }
+
+  expect_failures = [aws_ecs_task_definition.retention_gc_worker]
+}
+
+run "p3_delete_on_db_fails" {
+  command = plan
+
+  variables {
+    retention_gc_blob_sweep_mode      = "delete"
+    retention_gc_blob_orphan_grace_ms = 3024000000
   }
 
   expect_failures = [aws_ecs_task_definition.retention_gc_worker]
@@ -322,14 +349,86 @@ run "p4_backup_off_grace_below_rds_window_fails" {
   expect_failures = [aws_ecs_task_definition.retention_gc_worker]
 }
 
+# The RDS window longer than AWS Backup's: the larger of the two counts (14 d).
+run "p4_rds_window_over_backup_window_plans" {
+  command = plan
+
+  variables {
+    attachments_blob_backend              = "s3"
+    attachments_blob_backend_empty_db_ack = true
+    retention_gc_blob_sweep_mode          = "delete"
+    retention_gc_blob_orphan_grace_ms     = 1209600000
+    db_backup_retention_days              = 14
+    backup_retention_days                 = 7
+  }
+}
+
+run "p4_rds_window_over_backup_window_fails" {
+  command = plan
+
+  variables {
+    attachments_blob_backend              = "s3"
+    attachments_blob_backend_empty_db_ack = true
+    retention_gc_blob_sweep_mode          = "delete"
+    retention_gc_blob_orphan_grace_ms     = 1209599999
+    db_backup_retention_days              = 14
+    backup_retention_days                 = 7
+  }
+
+  expect_failures = [aws_ecs_task_definition.retention_gc_worker]
+}
+
+# ── Variable validations ─────────────────────────────────────────────────────
+#
+# Real expect_failures on the variables; src/__tests__/infra/blob-sweep-wiring.test.ts
+# also holds the grace bounds to the worker's env schema.
+
+run "v_grace_below_min_fails" {
+  command = plan
+
+  variables {
+    retention_gc_blob_orphan_grace_ms = 3599999
+  }
+
+  expect_failures = [var.retention_gc_blob_orphan_grace_ms]
+}
+
+run "v_grace_at_min_plans" {
+  command = plan
+
+  variables {
+    retention_gc_blob_orphan_grace_ms = 3600000
+  }
+}
+
+run "v_grace_non_integer_fails" {
+  command = plan
+
+  variables {
+    retention_gc_blob_orphan_grace_ms = 3600000.5
+  }
+
+  expect_failures = [var.retention_gc_blob_orphan_grace_ms]
+}
+
+run "v_backend_uppercase_fails" {
+  command = plan
+
+  variables {
+    attachments_blob_backend = "S3"
+  }
+
+  expect_failures = [var.attachments_blob_backend]
+}
+
 # ── C5: name_prefix bound ────────────────────────────────────────────────────
 #
-# No failing run for the bound: past 20 characters the provider's own name
-# validation of aws_cloudwatch_event_rule.audit_anchor_publisher_role_task_definition
-# (44-character suffix, 64 limit) fails the validate walk before any
-# precondition is evaluated, which terraform test reports as an error, not as
-# the expected failure. src/__tests__/infra/blob-sweep-wiring.test.ts evaluates
-# the precondition's condition on both sides of the bound instead.
+# No failing run for the bound: past 20 characters the provider also rejects
+# aws_cloudwatch_event_rule.audit_anchor_publisher_role_task_definition's name
+# (44-character suffix, 64 limit). The precondition fires too, but
+# expect_failures absorbs only its failure, and the provider's error still
+# fails the run. src/__tests__/infra/blob-sweep-wiring.test.ts evaluates the
+# precondition's condition on both sides of the bound instead.
 
 # Exactly 20 characters ("passwd-sso-prod-1234"): every name fits its limit.
 run "c5_name_prefix_at_bound_plans" {

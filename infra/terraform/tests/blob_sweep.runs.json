@@ -12,12 +12,19 @@
     "p2_s3_with_cmk_fails",
     "p2_db_with_cmk_plans",
     "p3_report_on_db_fails",
+    "p3_delete_on_db_fails",
     "p3_report_on_s3_plans",
     "p4_delete_null_grace_fails",
     "p4_delete_grace_below_backup_window_fails",
     "p4_delete_grace_at_backup_window_plans",
     "p4_backup_off_grace_at_rds_window_plans",
     "p4_backup_off_grace_below_rds_window_fails",
+    "p4_rds_window_over_backup_window_plans",
+    "p4_rds_window_over_backup_window_fails",
+    "v_grace_below_min_fails",
+    "v_grace_at_min_plans",
+    "v_grace_non_integer_fails",
+    "v_backend_uppercase_fails",
     "c5_name_prefix_at_bound_plans"
   ]
 }

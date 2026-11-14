@@ -187,3 +187,41 @@ describe("azureBlobStore listing and marker", () => {
     await expect(store.createMarker("dep-2")).resolves.toBe("exists");
   });
 });
+
+// The suffix buildObjectKey appends to BLOB_OBJECT_PREFIX + "/" for this context.
+const KEY_TAIL = "personal/entry-1/att-1/0123456789abcdef0123456789abcdef.bin";
+
+describe("azureBlobStore.putObject and the ref size bound", () => {
+  async function storeWithPrefixOfKeyLength(keyLength: number) {
+    vi.resetModules();
+    vi.stubEnv("AZURE_STORAGE_ACCOUNT", "acct");
+    vi.stubEnv("AZURE_BLOB_CONTAINER", "attachments");
+    vi.stubEnv("AZURE_STORAGE_CONNECTION_STRING", "UseDevelopmentStorage=true;");
+    vi.stubEnv("BLOB_OBJECT_PREFIX", "p".repeat(keyLength - KEY_TAIL.length - 1));
+    const uploadData = vi.fn().mockResolvedValue({});
+    const getBlockBlobClient = vi.fn().mockReturnValue({ uploadData });
+    vi.doMock("./runtime-module", () => ({
+      requireOptionalModule: vi.fn().mockReturnValue({
+        BlobServiceClient: {
+          fromConnectionString: vi.fn().mockReturnValue({ getContainerClient: vi.fn().mockReturnValue({ getBlockBlobClient }) }),
+        },
+      }),
+    }));
+    const { azureBlobStore: store } = await import("./azure-blob-store");
+    const put = () => store.putObject(new Uint8Array([1]), { attachmentId: "att-1", entryId: "entry-1", generation: "0123456789abcdef0123456789abcdef" });
+    return { put, uploadData };
+  }
+
+  it("uploads a maximal valid key (1024 bytes)", async () => {
+    const { put, uploadData } = await storeWithPrefixOfKeyLength(1024);
+    const stored = await put();
+    expect(JSON.parse(Buffer.from(stored).toString("utf8")).key).toHaveLength(1024);
+    expect(uploadData).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a key whose ref is over the bound before uploading anything", async () => {
+    const { put, uploadData } = await storeWithPrefixOfKeyLength(1025);
+    await expect(put()).rejects.toThrow(/Blob object ref exceeds/);
+    expect(uploadData).not.toHaveBeenCalled();
+  });
+});

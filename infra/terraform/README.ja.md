@@ -398,8 +398,12 @@ retention-gc worker は専用タスクロール（`*-ecs-retention-gc-task`、ou
 で動きます。`"s3"` ではバケットへの `s3:ListBucket`、オブジェクトへの
 `s3:DeleteObject`、マーカーキー `.passwd-sso-deployment` だけへの
 `s3:GetObject`/`s3:PutObject` を持ち、`s3:DeleteObjectVersion` は持たないので、削除は
-削除マーカーを追加するだけです。`"db"` ではポリシーを持ちません。app と outbox worker は
-従来どおり `*-ecs-task` です。
+削除マーカーを追加するだけです。`"db"` ではポリシーを持ちません。app は `*-ecs-task` で動き、
+バケットのオブジェクトへの Get/Put/Delete（`*-ecs-s3`）も `"s3"` のときだけ付与されます —
+既定の `db` ではどのタスクもバケット権限を持ちません。audit-outbox worker は verify worker と
+同じくタスクロールを持ちません（タスクの ID で AWS API を呼ばないため）。どちらも #1020 での
+変更です（それ以前は app と outbox worker が backend に関係なくバケット権限付きの
+`*-ecs-task` を共有していました）。
 
 `project_name` と `env` を合わせた `<project_name>-<env>` は 20 文字以内にしてください。
 超えると AWS の名前長制限（EventBridge ルール 64、ターゲットグループ 32）を超えます。

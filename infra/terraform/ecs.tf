@@ -203,6 +203,19 @@ resource "aws_ecs_task_definition" "app" {
     }
   ])
   tags = local.tags
+
+  # Preconditions 1 and 2 of the retention-gc task definition, repeated: the
+  # app reads the same BLOB_BACKEND.
+  lifecycle {
+    precondition {
+      condition     = local.attachment_backend_bucket_ready
+      error_message = "attachments_blob_backend = \"s3\" needs enable_s3_attachments = true and attachments_blob_backend_empty_db_ack = true (run the retention-gc worker with --count-db-blobs first and see db_stored 0; docs/operations/deployment.md \"Orphan attachment sweep on AWS\")."
+    }
+    precondition {
+      condition     = local.attachment_backend_sse_ready
+      error_message = "attachments_blob_backend = \"s3\" needs SSE-S3: set s3_kms_key_arn = \"\" (no task role holds KMS permissions for a CMK)."
+    }
+  }
 }
 
 ################################################################################
@@ -458,7 +471,11 @@ resource "aws_ecs_task_definition" "audit_outbox_worker" {
   cpu                = var.worker_cpu
   memory             = var.worker_memory
   execution_role_arn = aws_iam_role.ecs_task_execution.arn
-  task_role_arn      = aws_iam_role.ecs_task.arn
+  # No task_role_arn, as for the verify worker: the outbox worker calls no AWS
+  # API with the task's identity (its webhook, SIEM and S3-compatible
+  # deliveries carry each destination's own configured credentials), and
+  # without a role the task has no credentials to misuse. It ran as ecs_task
+  # before #1020 and so held the attachment bucket rights only the app uses.
 
   container_definitions = jsonencode([
     {
@@ -547,12 +564,12 @@ resource "aws_ecs_task_definition" "retention_gc_worker" {
     # 1. s3 needs the bucket and the operator's word that the database holds
     #    no attachments (they would become unreadable).
     precondition {
-      condition     = var.attachments_blob_backend != "s3" || (var.enable_s3_attachments && var.attachments_blob_backend_empty_db_ack)
+      condition     = local.attachment_backend_bucket_ready
       error_message = "attachments_blob_backend = \"s3\" needs enable_s3_attachments = true and attachments_blob_backend_empty_db_ack = true (run the retention-gc worker with --count-db-blobs first and see db_stored 0; docs/operations/deployment.md \"Orphan attachment sweep on AWS\")."
     }
     # 2. No role holds KMS permissions; SSE-KMS support is a follow-up.
     precondition {
-      condition     = var.attachments_blob_backend != "s3" || var.s3_kms_key_arn == ""
+      condition     = local.attachment_backend_sse_ready
       error_message = "attachments_blob_backend = \"s3\" needs SSE-S3: set s3_kms_key_arn = \"\" (no task role holds KMS permissions for a CMK)."
     }
     # 3. The sweep only runs against an external store.

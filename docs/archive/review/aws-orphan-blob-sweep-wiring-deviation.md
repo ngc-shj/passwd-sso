@@ -1,19 +1,25 @@
 # Coding Deviation Log: aws-orphan-blob-sweep-wiring
 
-## D1 — The C5 `name_prefix` precondition cannot fire
+## D1 — The C5 `name_prefix` precondition cannot be isolated by `expect_failures`
 
-A `name_prefix` over 20 characters makes the provider reject the sibling rule
-`-audit-anchor-publisher-role-task-definition` (44 characters, 64 limit) during validation, before
-any precondition is evaluated. A `terraform test` `expect_failures` run therefore errors instead of
-matching. The bound is checked in vitest (`blob-sweep-wiring.test.ts`, both sides of 20), and
-`terraform test` has an allow run at exactly 20 characters (`c5_name_prefix_at_bound_plans`).
-Whether the precondition stays is a code-review decision.
+A `name_prefix` over 20 characters also makes the provider reject the sibling rule
+`-audit-anchor-publisher-role-task-definition` (44 characters, 64 limit). The precondition does
+fire: a scratch-copy run at `env = "prod-12345"` (21 characters, no `expect_failures`) reported
+both diagnostics — the provider's `"name" cannot be longer than 64 characters` on
+`aws_cloudwatch_event_rule.audit_anchor_publisher_role_task_definition[0]`, and `Resource
+precondition failed` with this precondition's message. With `expect_failures` naming the rule, the
+precondition's failure is absorbed and the provider error remains, so the run errors. The bound is
+therefore checked in vitest (`blob-sweep-wiring.test.ts`, both sides of 20), and `terraform test`
+has an allow run at exactly 20 characters (`c5_name_prefix_at_bound_plans`). The precondition stays
+(round 1, F5): it names the cause in its own words next to the provider's error.
 
 ## D2 — Null-safe conditions written as conditionals
 
 Precondition 4 and the grace validation use `x == null ? false : …` rather than `x != null && …`:
 `required_version` is `>= 1.5`, and short-circuit evaluation of `&&` is only guaranteed from
-Terraform 1.12.
+Terraform 1.12. The `>= 1.5` floor itself is unverified by CI, which pins
+Terraform 1.15.8; the conditional form is chosen so that it does not depend on short-circuiting,
+not because an older version was run.
 
 ## D3 — "Each precondition fails with its own message"
 
@@ -79,4 +85,60 @@ size below 1 is refused.
 `Static: rls-cross-tenant SQL parse` fails locally only: it runs against the shared dev database,
 which carries the `share_creator_admitted` body of the parallel #1035 branch (seven bypass
 tables), while this branch's verify SQL pins the five of `main`. CI builds the database from this
-branch's migrations. The other 85 gates pass.
+branch's migrations. `Test` also fails locally only: the six `backup-db.test.mjs` Group B cells
+need a real `pg_restore`, which resolves from the main checkout but not from a git worktree; the
+other 22515 unit tests pass. Every other gate passes.
+
+## D11 — Code review round 1 fixes
+
+- **S-1.** `aws_iam_role_policy.ecs_s3_access` (the app's Get/Put/Delete on `<bucket>/*`) now
+  exists only with `attachments_blob_backend = "s3"`; on the `db` default no task holds bucket
+  rights. The outbox worker gets **no task role** rather than a new empty one: `ecs_task`'s only
+  policy was `ecs_s3_access`; ECS Exec is the migrate role's, logs and secrets go through the
+  execution role, no KMS policy exists, and the worker's three deliverers (webhook, SIEM HEC,
+  S3-compatible PUT) sign with each destination's own configured credentials, never the task's.
+  That is the verify worker's pattern ("No task_role_arn"). `terraform test`: defaults assert
+  `ecs_s3_access` length 0 and the outbox `task_role_arn == null`; `s3_report` asserts the app
+  policy's role and exact statement. Manual test M1 lists the outbox task-definition replacement
+  and the `ecs_s3_access[0]` delete; M3 the app role's policy and the outbox's missing role.
+- **S-4.** Preconditions 1 and 2 are shared locals (`attachment_backend_bucket_ready`,
+  `attachment_backend_sse_ready`) evaluated on both the app and the retention task definitions,
+  with the same messages. The `p1_*`/`p2_*` fail runs name both resources in `expect_failures`
+  (an app precondition failing unnamed would error the run); vitest pins which object each
+  `*_fails` run must name and that the app's copies agree with the retention task's.
+- **F1.** Every change goes through `scripts/deploy.sh` with the variables in `$TF_VAR_FILE`
+  (it applies `-var-file="$TF_VAR_FILE" -var app_image=<digest>`); previews are
+  `terraform plan -var-file="$TF_VAR_FILE" -var "app_image=$RUNNING"`, `RUNNING` read from the
+  app service's current task definition. deployment.md (preview, Rollout 1 and 5, Rollback,
+  restore) and the manual test (setup, M1, M2, rollback) say so.
+- **T1/T2/T5.** New runs: the `max()` pair (`db_backup_retention_days = 14`,
+  `backup_retention_days = 7`, grace 1209600000 plans / 1209599999 fails),
+  `p3_delete_on_db_fails`, and `expect_failures = [var.x]` runs for grace below min, grace at
+  min, a non-integer grace and backend `"S3"` (25 runs, `blob_sweep.runs.json` updated). The
+  vitest bound-sync test stays.
+- **T3.** The unit fake now reads the size comparison from the statement text and applies that
+  operator, so `<=`→`<` and `>`→`>=` in `sweep.ts` fail a new at-bound unit cell. The
+  integration test, which runs the real SQL, remains the authority: it seeds five rows in five
+  tenants (ciphertext, a ref, a maximal ref of exactly `MAX_OBJECT_REF_BYTES`, a non-ref blob of
+  exactly that size, a ref-shaped row one byte over) and expects `total +5, db_stored +3`.
+- **T4.** The integration file spawns `scripts/retention-gc-worker.ts --count-db-blobs` with
+  `RETENTION_GC_DATABASE_URL` set to the worker role's URL (`retentionGcConnectionString()`, a
+  new export in `db-integration/helpers.ts`) and asserts exit 0, one stdout line with exactly
+  `{level, msg, total, db_stored}`, and agreement with `countDbStoredAttachments` measured just
+  before and after (which must be equal).
+- **F4.** The S3, GCS and Azure stores encode the ref before the upload, so a key whose ref is
+  over `MAX_OBJECT_REF_BYTES` is refused with nothing written; a 1024-byte key still uploads
+  (store-mock unit tests in each store's test file).
+- **T6.** The worker-schema parse also runs for `s3` + `delete` (grace 3024000000) and `s3` +
+  `off` (no `DEPLOYMENT_ID`), both exit 0; the delete env with the grace removed exits 1 on
+  `RETENTION_GC_BLOB_ORPHAN_GRACE_MS` (the deny control).
+- **Docs (S-2, S-3, S-5, F2, F3).** The delete-marker recovery selects the latest delete marker's
+  id mechanically and refuses unless exactly one comes back, and warns never to delete a
+  `Versions[]` entry. The runbook's ownership check names the exceptions to the 1:1 premise
+  (imported or explicitly named bucket) and asks for positive evidence (CloudTrail S3 data events
+  or server access logs over a grace period); without it the marker is left alone. "Before a
+  database restore" says how the mode takes effect (deploy, or scale to 0) and how to confirm
+  the running task's mode. The release-image precondition and the waiter's failure path in
+  `run_retention_once` are stated; uploads resume only after step 2 on a completed `deploy.sh`,
+  and stay quiesced after a rolled-back one.
+

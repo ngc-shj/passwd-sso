@@ -431,8 +431,43 @@ reads every attachment from the one backend it is configured with, and no
 migration tool exists yet. Attachments stored in the database are unreadable
 under `s3`, and S3-stored ones are unreadable after going back to `db`.
 
+**Task roles.** The app runs as `*-ecs-task`, which holds Get/Put/Delete on the
+attachments bucket's objects only with `s3`; on the `db` default it holds no
+bucket rights. The retention-gc worker runs as its own `*-ecs-retention-gc-task`:
+with `s3`, `s3:ListBucket`, `s3:DeleteObject` and Get/Put on the marker key
+only. The outbox worker has no task role, as the verify worker.
+
+**Every change here goes through `scripts/deploy.sh`.** Set the variables in
+the tfvars file `deploy.sh` reads (`$TF_VAR_FILE`, e.g.
+`envs/prod/terraform.tfvars`) and run `deploy.sh`: its `terraform apply
+-var-file="$TF_VAR_FILE" -var app_image=<signed digest>` is the apply, and its
+`update-service` moves the services, which ignore task-definition changes
+(`ignore_changes = [task_definition]`). Do not run a standalone
+`terraform apply`: it takes `app_image` from the tfvars (a tag, not the running
+digest), so every task definition is replaced, and a `-var` you pass is undone
+by the next `deploy.sh`. To preview, plan against the image that runs now
+(from `infra/terraform`, with `$TF_VAR_FILE` and `<region>` set):
+
+```bash
+CLUSTER=$(terraform output -raw ecs_cluster_name)
+APP_TD=$(aws ecs describe-services --cluster "$CLUSTER" --region <region> \
+  --services "$(terraform output -raw ecs_app_service_name)" \
+  --query 'services[0].taskDefinition' --output text)
+RUNNING=$(aws ecs describe-task-definition --task-definition "$APP_TD" --region <region> \
+  --query "taskDefinition.containerDefinitions[?name=='app'].image | [0]" --output text)
+terraform plan -var-file="$TF_VAR_FILE" -var "app_image=$RUNNING"
+```
+
+The preview differs from what `deploy.sh` applies only by the image: `deploy.sh`
+deploys the commit it builds.
+
 #### Preconditions
 
+- **The stack already runs this release.** The commands below override the
+  command of the registered retention-gc task definition; an image from before
+  `--count-db-blobs` existed ignores the unknown argument and starts a second
+  worker loop instead. Deploy this release with every default first
+  (`deploy.sh`, no variable set), then continue.
 - A new stack, or one whose database holds no attachments: run
   `--count-db-blobs` (below) and see `db_stored: 0`, then set
   `attachments_blob_backend_empty_db_ack = true`. Terraform refuses `s3`
@@ -464,7 +499,12 @@ run_retention_once() {
   [ "$(echo "$RUN" | jq '.failures | length')" = 0 ] || { echo "$RUN" | jq '.failures' >&2; return 1; }
   TASK_ARN=$(echo "$RUN" | jq -r '.tasks[0].taskArn // empty')
   [ -n "$TASK_ARN" ] || { echo "run-task returned no task" >&2; return 1; }
-  aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$TASK_ARN" --region <region>
+  if ! aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$TASK_ARN" --region <region>; then
+    # The waiter gives up after 10 minutes; the task may still be running.
+    echo "task $TASK_ARN has not stopped. Inspect it, and stop it with:" >&2
+    echo "  aws ecs stop-task --cluster $CLUSTER --task $TASK_ARN --region <region>" >&2
+    return 1
+  fi
   aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK_ARN" --region <region> \
     --query 'tasks[0].containers[0].exitCode' --output text
 }
@@ -485,17 +525,18 @@ quiesced: rows written meanwhile can be missed.
 
 #### Rollout
 
-1. **Quiesce uploads**, set `attachments_blob_backend = "s3"`,
+1. **Quiesce uploads.** Set `attachments_blob_backend = "s3"`,
    `attachments_blob_backend_empty_db_ack = true` and
-   `retention_gc_blob_sweep_mode = "report"`, `terraform apply`, then run
-   **`scripts/deploy.sh`**. The services ignore task-definition changes
-   (`ignore_changes = [task_definition]`), so the apply alone moves nothing; the
-   deploy moves the app and the worker. Until the rolling update finishes, old
-   `db` app tasks can still store an attachment in the database.
-2. **After the rollout**, run `--count-db-blobs` again. Expect `total >= 0` and
-   `db_stored: 0`. If `db_stored > 0`, those attachments are unreadable under
-   `s3`: their owners delete and re-upload them, or the stack goes back to `db`
-   before any S3 upload exists.
+   `retention_gc_blob_sweep_mode = "report"` in `$TF_VAR_FILE`, preview if you
+   wish (above), and run **`scripts/deploy.sh`**. Until the rolling update
+   finishes, old `db` app tasks can still store an attachment in the database.
+   If `deploy.sh` reports a rollback, keep uploads quiesced, fix the cause and
+   run it again.
+2. **After `deploy.sh` completes**, run `--count-db-blobs` again. Expect
+   `total >= 0` and `db_stored: 0`; resume uploads only then. If
+   `db_stored > 0`, those attachments are unreadable under `s3`: their owners
+   delete and re-upload them, or the stack goes back to `db` before any S3
+   upload exists.
 3. **Create the bucket marker once**: `run_retention_once --init-blob-marker`.
    Read the result: the function returns no error (`failures[]` empty, a
    task ARN), it prints exit code `0`, and the log (filter
@@ -514,42 +555,70 @@ quiesced: rows written meanwhile can be missed.
    aws logs tail /ecs/<name_prefix>/retention-gc-worker --since 1d --region <region> \
      --filter-pattern '{ ($.msg = "retention-gc.sweep_done") || ($._logType = "retention-gc.blob_sweep_report") || ($._logType = "retention-gc.blob_sweep_refused") || ($._logType = "retention-gc.blob_sweep_list_failed") || ($._logType = "retention-gc.blob_sweep_delete_failed") }'
    ```
-5. **Switch to delete**: `retention_gc_blob_sweep_mode = "delete"` with
-   `retention_gc_blob_orphan_grace_ms` at least the database restore window in
-   milliseconds — the larger of `db_backup_retention_days` and, with
+5. **Switch to delete**: set `retention_gc_blob_sweep_mode = "delete"` and
+   `retention_gc_blob_orphan_grace_ms` to at least the database restore window
+   in milliseconds — the larger of `db_backup_retention_days` and, with
    `enable_backup`, `backup_retention_days` (35 days by default:
-   `3024000000`). Terraform refuses a smaller or unset grace. `terraform apply`,
-   then `scripts/deploy.sh` again.
+   `3024000000`) — in `$TF_VAR_FILE`, then run `scripts/deploy.sh`. Terraform
+   refuses a smaller or unset grace.
 
 #### Rollback
 
-Keep `attachments_blob_backend = "s3"` and set `retention_gc_blob_sweep_mode =
-"off"` (apply, then `deploy.sh`). Going back to `db` strands every S3-stored
-attachment.
+Keep `attachments_blob_backend = "s3"`, set `retention_gc_blob_sweep_mode =
+"off"` in `$TF_VAR_FILE` and run `scripts/deploy.sh`. Going back to `db`
+strands every S3-stored attachment.
 
 #### Before a database restore
 
 Set the sweep mode to `off` or `report` **before** restoring, and keep it there
 until the restored references are reconciled with the bucket. This, not the
-grace period, is the control. A restore to a point `t` days back leaves every
-object uploaded since then unreferenced, and delete mode removes it `grace - t`
-later: with the grace equal to the restore window the margin at the oldest
-restore point is zero. A restore window above 35 days (AWS Backup allows up to
-120 with Vault Lock) cannot be met at all, because the worker caps the grace at
-35 days; such a stack stays on `report`.
+grace period, is the control: set it in `$TF_VAR_FILE` and run
+`scripts/deploy.sh`, or, when a deploy is not possible, stop the sweep by
+scaling the service to 0 (`aws ecs update-service --cluster "$CLUSTER" --service
+<name_prefix>-retention-gc-worker --desired-count 0 --region <region>`; this
+stops the retention purge too, and the next `terraform apply` restores
+`worker_desired_count`). Then confirm what runs:
+
+```bash
+TASK=$(aws ecs list-tasks --cluster "$CLUSTER" --service-name <name_prefix>-retention-gc-worker \
+  --region <region> --query 'taskArns[0]' --output text)
+TD=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK" --region <region> \
+  --query 'tasks[0].taskDefinitionArn' --output text)
+aws ecs describe-task-definition --task-definition "$TD" --region <region> \
+  --query "taskDefinition.containerDefinitions[0].environment[?name=='RETENTION_GC_BLOB_SWEEP_MODE'].value | [0]" --output text
+# expect: report, or None (unset = off); with the service at 0, list-tasks returns None
+```
+
+A restore to a point `t` days back leaves every object uploaded since then
+unreferenced, and delete mode removes it `grace - t` later: with the grace
+equal to the restore window the margin at the oldest restore point is zero. A
+restore window above 35 days (AWS Backup allows up to 120 with Vault Lock)
+cannot be met at all, because the worker caps the grace at 35 days; such a
+stack stays on `report`.
 
 #### Recovering wrongly deleted objects
 
 The bucket is versioned, and the worker's role holds `s3:DeleteObject` but never
 `s3:DeleteObjectVersion`, so a delete only adds a delete marker. An operator
 with `s3:ListBucketVersions` and `s3:DeleteObjectVersion` restores an object by
-deleting its delete marker:
+deleting its current delete marker — and only that:
 
 ```bash
-aws s3api list-object-versions --bucket <attachments-bucket> --prefix <key> --region <region>
-aws s3api delete-object --bucket <attachments-bucket> --key <key> \
-  --version-id <the delete marker's VersionId> --region <region>
+(
+  set -euo pipefail
+  BUCKET=<attachments-bucket>
+  KEY=<key>
+  ID=$(aws s3api list-object-versions --bucket "$BUCKET" --prefix "$KEY" --region <region> \
+    --query "DeleteMarkers[?Key=='$KEY' && IsLatest].VersionId" --output text)
+  # Exactly one id, or stop: none means the object is not deleted (or the key
+  # is wrong), more than one cannot happen for one key.
+  case "$ID" in ""|None|*[[:space:]]*) echo "expected one latest delete marker for $KEY, got: '$ID'" >&2; exit 1;; esac
+  aws s3api delete-object --bucket "$BUCKET" --key "$KEY" --version-id "$ID" --region <region>
+)
 ```
+
+Never pass a `VersionId` from `Versions[]`: deleting an object version removes
+the data permanently, which is the one thing this recovery exists to avoid.
 
 #### Storage is not reclaimed
 
