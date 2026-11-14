@@ -532,7 +532,9 @@ export default function TeamMembersPage({
                       <AlertDialogTitle>
                         {t("bulkRejectButton", { count: bulkRejectRows.length })}
                       </AlertDialogTitle>
-                      <AlertDialogDescription>{t("rejectConfirm")}</AlertDialogDescription>
+                      <AlertDialogDescription>
+                        {t("bulkRejectConfirm", { count: bulkRejectRows.length })}
+                      </AlertDialogDescription>
                     </AlertDialogHeader>
                     {pendingShown.length > bulkRejectRows.length && (
                       <p className="text-sm text-muted-foreground">

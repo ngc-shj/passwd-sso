@@ -528,9 +528,10 @@ function checkRawColumnNameRepoWide(sourceFile, path, violations) {
 function resolveSpecifier(importer, specifier) {
   let resolved;
   if (specifier.startsWith("@/")) resolved = `src/${specifier.slice(2)}`;
-  else if (specifier.startsWith(".")) resolved = posix.normalize(posix.join(posix.dirname(importer), specifier));
+  else if (specifier.startsWith(".")) resolved = posix.join(posix.dirname(importer), specifier);
   else return null;
-  return resolved.replace(/\.(?:[cm]?[jt]sx?)$/, "");
+  // Normalised for both forms: `@/lib/team/../team/x` and `@/lib//team/x` name the same file.
+  return posix.normalize(resolved).replace(/\.(?:[cm]?[jt]sx?)$/, "");
 }
 
 /**

@@ -88,6 +88,7 @@
   "bulkApproveButton": "すべて承認（{count}）",
   "bulkRejectButton": "すべて拒否（{count}）",
   "bulkApproveConfirm": "保留中の {count} 人のメンバーを承認しますか？各メンバーは一覧に表示されているロールで参加します。",
+  "bulkRejectConfirm": "保留中の {count} 件のリクエストを拒否しますか？ID プロバイダーのグループにユーザーが残っている場合、次回の同期でリクエストが再び作成されます。",
   "bulkApproveRoleCount": "{role}：{count} 人",
   "bulkApproveAdminCount": "{role}：{count} 人。管理者はこのチームのメンバーを招待・管理できます。",
   "bulkRemainingNote": "保留中のリクエストがほかに {count} 件あり、今回の対象には含まれません。完了後にもう一度実行してください。",

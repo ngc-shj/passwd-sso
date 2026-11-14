@@ -70,7 +70,13 @@ vi.mock("@/components/ui/alert-dialog", () => ({
   AlertDialogTitle: ({ children }: { children: ReactNode }) => <h2>{children}</h2>,
   AlertDialogDescription: ({ children }: { children: ReactNode }) => <p>{children}</p>,
   AlertDialogFooter: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  AlertDialogCancel: ({ children }: { children: ReactNode }) => <button>{children}</button>,
+  AlertDialogCancel: ({
+    children,
+    onClick,
+  }: {
+    children: ReactNode;
+    onClick?: () => void;
+  }) => <button onClick={onClick}>{children}</button>,
   AlertDialogAction: ({
     children,
     onClick,
@@ -785,11 +791,11 @@ describe("TeamMembersPage (SCIM bulk admission, C5)", () => {
     expect(screen.queryByText(/^bulkRemainingNote/)).not.toBeInTheDocument();
   });
 
-  it("bulk reject posts the shown ids and reuses the single reject explanation", async () => {
+  it("bulk reject posts the shown ids and states the count in its confirmation", async () => {
     await renderPage(pendingRows(3, (i) => (i === 0 ? { pendingTenantInactive: true } : {})), "OWNER", () =>
       okResults([]),
     );
-    expect(bulkDialog("reject")).toHaveTextContent("rejectConfirm");
+    expect(bulkDialog("reject")).toHaveTextContent('bulkRejectConfirm:{"count":3}');
     await confirmBulk("reject");
     await waitFor(() => expect(bulkCalls("reject")).toHaveLength(1));
     expect(bulkBody("reject")).toEqual({ memberIds: ["p-001", "p-002", "p-003"] });
@@ -820,11 +826,15 @@ describe("TeamMembersPage (SCIM bulk admission, C5)", () => {
         { memberId: "p-002", outcome: "rejected" },
       ]),
     );
+    const before = mockFetch.mock.calls.filter((c) => c[0] === "/api/teams/team-1/members").length;
     await confirmBulk("reject");
     await waitFor(() => {
       expect(mockToast.success).toHaveBeenCalledWith('bulkRejected:{"count":2}');
     });
     expect(mockToast.error).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(mockFetch.mock.calls.filter((c) => c[0] === "/api/teams/team-1/members").length).toBeGreaterThan(before);
+    });
   });
 
   it.each(["approve", "reject"] as const)(

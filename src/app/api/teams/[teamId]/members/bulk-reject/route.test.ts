@@ -61,7 +61,8 @@ vi.mock("@/lib/audit/audit", () => ({
 }));
 
 import { POST } from "./route";
-import { TEAM_ROLE } from "@/lib/constants";
+import { TEAM_PERMISSION, TEAM_ROLE } from "@/lib/constants";
+import { TEAM_MEMBERSHIP_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 import { SCIM_REJECT_OUTCOME, SCIM_BULK_ADMISSION_MAX } from "@/lib/constants/team/scim-admission";
 import { TeamRotationInProgressError } from "@/lib/team/team-key-rotation-lock";
 
@@ -281,6 +282,11 @@ describe("POST /api/teams/[teamId]/members/bulk-reject", () => {
       batchId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
     });
     expect(transactionEntered()).toBe(true);
+    expect(mockRequireTeamPermission).toHaveBeenCalledWith(ACTOR_ID, TEAM_ID, TEAM_PERMISSION.MEMBER_INVITE, expect.anything());
+    const txCall = mockWithTeamTenantRls.mock.calls.find((call) => call[2] !== undefined)!;
+    expect(txCall[2]).toEqual({ timeout: TEAM_MEMBERSHIP_TX_TIMEOUT_MS });
+    expect(mockLimiterCheck).toHaveBeenCalledWith(`rl:team_member_bulk_reject:${ACTOR_ID}`);
+    expect(limiterFactorySnapshot.replay().mock.calls[0][0]).toMatchObject({ max: 10 });
   });
 
   it("passes one batchId per request, differing between requests", async () => {

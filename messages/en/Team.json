@@ -88,6 +88,7 @@
   "bulkApproveButton": "Approve all ({count})",
   "bulkRejectButton": "Reject all ({count})",
   "bulkApproveConfirm": "Approve {count, plural, one {# pending member} other {# pending members}}? Each joins at the role shown in the list.",
+  "bulkRejectConfirm": "Reject {count, plural, one {# pending request} other {# pending requests}}? If the identity provider still includes these users in the group, the requests return on its next sync.",
   "bulkApproveRoleCount": "{role}: {count}",
   "bulkApproveAdminCount": "{role}: {count}. An admin can invite and manage members of this team.",
   "bulkRemainingNote": "{count, plural, one {# more pending request is not included.} other {# more pending requests are not included.}} Run this again afterwards to handle them.",

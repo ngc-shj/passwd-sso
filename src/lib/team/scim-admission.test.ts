@@ -71,8 +71,13 @@ beforeEach(() => {
   mockLockTeamsAgainstRotation.mockResolvedValue(undefined);
   mockLogAuditInTx.mockResolvedValue(undefined);
   // The actor read carries no `id` in its where; a target read does.
-  tx.teamMember.findFirst.mockReset().mockImplementation(async (args: { where: { id?: string } }) =>
-    args.where.id === undefined ? actorRow : (pendingRows[args.where.id] ?? null));
+  // Like Prisma, return only the selected columns, so a read that forgets a
+  // column it later uses gets undefined here too.
+  tx.teamMember.findFirst.mockReset().mockImplementation(async (args: { where: { id?: string }; select?: Record<string, boolean> }) => {
+    const row: Record<string, unknown> | null = args.where.id === undefined ? actorRow : (pendingRows[args.where.id] ?? null);
+    if (row === null || args.select === undefined) return row;
+    return Object.fromEntries(Object.entries(row).filter(([key]) => args.select![key] === true));
+  });
   tx.teamMember.updateMany.mockReset().mockResolvedValue({ count: 1 });
   tx.teamMember.deleteMany.mockReset().mockResolvedValue({ count: 1 });
 });

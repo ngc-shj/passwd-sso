@@ -519,6 +519,16 @@ export const POST = async (req) => approveScimPending(tx, t, { ...extractRequest
         expectDenied(run(), /import of the SCIM admission module outside the four admission routes/);
       });
 
+      it("refuses an alias import that detours through a parent segment", () => {
+        write(OTHER, `import { approveScimPending } from "@/lib/team/../team/scim-admission";\nexport const f = approveScimPending;\n`);
+        expectDenied(run(), /import of the SCIM admission module outside the four admission routes/);
+      });
+
+      it("refuses an alias import that doubles a slash", () => {
+        write(OTHER, `import { approveScimPending } from "@/lib//team/scim-admission";\nexport const f = approveScimPending;\n`);
+        expectDenied(run(), /import of the SCIM admission module outside the four admission routes/);
+      });
+
       it("refuses a literal import() of the module", () => {
         write(OTHER, `export const load = () => import("@/lib/team/scim-admission");\n`);
         expectDenied(run(), /dynamic import of the SCIM admission module outside the four admission routes/);
@@ -526,6 +536,11 @@ export const POST = async (req) => approveScimPending(tx, t, { ...extractRequest
 
       it("refuses a literal require() of the module", () => {
         write(OTHER, `export const load = () => require("../team/scim-admission");\n`);
+        expectDenied(run(), /require of the SCIM admission module outside the four admission routes/);
+      });
+
+      it("refuses import x = require() of the module outside the four routes", () => {
+        write(OTHER, `import m = require("../team/scim-admission");\nexport const f = m;\n`);
         expectDenied(run(), /require of the SCIM admission module outside the four admission routes/);
       });
 
@@ -562,6 +577,8 @@ export const POST = async (req) => approveScimPending(tx, t, { ...extractRequest
         ["enqueueAudit from audit-outbox", `import { enqueueAudit } from "@/lib/audit/audit-outbox";`, /import of @\/lib\/audit\/audit-outbox\b(?!-)/],
         ["enqueueAuditInTx from audit-outbox-in-tx", `import { enqueueAuditInTx } from "@/lib/audit/audit-outbox-in-tx";`, /import of @\/lib\/audit\/audit-outbox-in-tx/],
         ["a relative import of the audit module", `import { logAuditInTx } from "../../../../../../../lib/audit/audit";`, /import of logAuditInTx/],
+        ["a namespace import of the bare audit lib directory", `import * as a from "@/lib/audit";`, /admission-audit .*import of @\/lib\/audit\b/],
+        ["an alias import of the audit lib that detours through a parent segment", `import { enqueueAudit } from "@/lib/team/../audit/audit-outbox";`, /admission-audit .*import of @\/lib\/team\/\.\.\/audit\/audit-outbox/],
       ])("refuses an admission route importing %s", (_name, line, pattern) => {
         write(ROUTES[1], `${line}\n`);
         expectDenied(run(), pattern);
