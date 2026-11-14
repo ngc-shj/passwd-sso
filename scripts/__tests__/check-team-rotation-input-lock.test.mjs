@@ -39,6 +39,23 @@ export async function applyAddOperations(tx, ids, teamId, previousRole, role) {
   "src/app/api/teams/[teamId]/route.ts": `
 export const patch = withTeamTenantRls(teamId, async () => prisma.team.update({ where: { id: teamId }, data: updateData }));
 `,
+  // The transfer arm is covered through the helper; the role change's
+  // conjunction is exempted. Their shared key takes each payload's text.
+  "src/app/api/teams/[teamId]/members/[memberId]/route.ts": `
+async function targetIsLeftover(tx, memberId) {
+  const locked = await tx.teamMember.findFirst({ where: { id: memberId } });
+  const rows = await readTenantRows(tx, tenantId, [locked.userId]);
+  return actorDepartedSinceAdmission(rows.get(locked.userId), locked.admittedAt);
+}
+export const transfer = withTeamTenantRls(teamId, async (tenantId, tx) => {
+  if (await targetIsLeftover(tx, memberId)) throw new MemberChangedError();
+  await tx.teamMember.updateMany({ where: { id: memberId, teamId }, data: { role: TEAM_ROLE.OWNER } });
+});
+export const change = withTeamTenantRls(teamId, async (tenantId, tx) => {
+  if (isRoleAbove(result.data.role, target.role) && await targetIsLeftover(tx, memberId)) throw new MemberChangedError();
+  await tx.teamMember.updateMany({ where: { id: memberId, teamId }, data: { role: result.data.role } });
+});
+`,
   "src/app/api/tenant/policy/route.ts": `
 export const put = withTenantRls(prisma, tenantId, async (tx) => tx.tenant.update({ where: { id: tenantId }, data: updateData }));
 `,
@@ -57,7 +74,7 @@ export async function applyVaultRotation(tx, userId, payload) {
 `,
 };
 const EXEMPT_ADMISSIONS = 1;
-const EXEMPT_GRANTS = 8;
+const EXEMPT_GRANTS = 10;
 
 let root;
 
@@ -770,6 +787,67 @@ export async function promote(tx, memberId) {
       const grant = "await tx.user.update({ where: { id: target.userId }, data: { teamMemberships: { updateMany: { where: { id: { not: target.id } }, data: { role: \"ADMIN\" } } } } });";
       write(SUBJECT, `export async function promote(tx, rows, target) {\n  ${CHECK}\n  ${grant}\n}`);
       expectDenied(run({ grants: 1 }), uncovered("user.update"));
+    });
+
+    // A check counts only when its TRUE outcome exits before the grant on
+    // every path: each deny below has an allow twin differing in that alone.
+    const PRED = "actorDepartedSinceAdmission(rows.get(target.userId), target.admittedAt)";
+    const GRANT = 'await tx.teamMember.update({ where: { id: target.id }, data: { role: "ADMIN" } });';
+    const GUARDS = [
+      ["a bare call whose result is ignored", `${PRED};`, `if (${PRED}) return;`],
+      ["an inverted check (!pred)", `if (!${PRED}) return;`, `if (${PRED}) return;`],
+      ["a conjunction (x && pred)", `if (isRoleAbove(a, b) && ${PRED}) throw new Error();`, `if (isRoleAbove(a, b) || ${PRED}) throw new Error();`],
+      ["a check in a branch the grant is outside of", `if (cond) { if (${PRED}) return; }`, `if (cond) { if (${PRED}) return; ${GRANT} return; }`],
+      ["a check in a loop body the grant is outside of", `for (const r of rs) { if (${PRED}) return; }`, `for (const r of rs) { if (${PRED}) return; ${GRANT} }`],
+      ["a consequent that does not exit", `if (${PRED}) { log(); }`, `if (${PRED}) { return; }`],
+      ["a consequent whose first statement does not exit", `if (${PRED}) { log(); return; }`, `if (${PRED}) { throw new Error(); }`],
+      ["a ternary", `const next = ${PRED} ? null : target;`, `if (${PRED}) return;`],
+      ["a stored result", `const leftover = ${PRED}; if (leftover) throw new Error();`, `if (${PRED}) throw new Error();`],
+    ];
+    for (const [label, deny, allow] of GUARDS) {
+      it(`refuses a grant after ${label}`, () => {
+        write(SUBJECT, `export async function promote(tx, rows, target, a, b, cond, rs) {\n  ${deny}\n  ${GRANT}\n}`);
+        expectDenied(run({ grants: 1 }), uncovered("teamMember.update"));
+      });
+
+      it(`accepts the twin of ${label}`, () => {
+        // An allow twin that holds the grant itself does not repeat it after.
+        const body = allow.includes(GRANT) ? allow : `${allow}\n  ${GRANT}`;
+        write(SUBJECT, `export async function promote(tx, rows, target, a, b, cond, rs) {\n  ${body}\n}`);
+        expect(run({ grants: 1 }).code).toBe(0);
+      });
+    }
+
+    const HELPER_PRED = "actorDepartedSinceAdmission(rows.get(locked.userId), locked.admittedAt)";
+    const helper = (body) => `
+async function isLeftover(tx, memberId) {
+  const locked = await tx.teamMember.findFirst({ where: { id: memberId } });
+  const rows = await readTenantRows(tx, tenantId, [locked.userId]);
+  ${body}
+}`;
+    const HELPER_GRANT = 'await tx.teamMember.updateMany({ where: { id: memberId }, data: { role: "ADMIN" } });';
+    const HELPERS = [
+      ["a helper that discards the predicate's result", `${HELPER_PRED}; return false;`, "if (await isLeftover(tx, memberId)) return;"],
+      ["a helper that returns the predicate inverted", `return !${HELPER_PRED};`, "if (await isLeftover(tx, memberId)) return;"],
+      ["a helper used inverted", `return ${HELPER_PRED};`, "if (!(await isLeftover(tx, memberId))) return;"],
+      ["a helper whose result the caller ignores", `return ${HELPER_PRED};`, "await isLeftover(tx, memberId);"],
+      ["a helper used in a conjunction", `return ${HELPER_PRED};`, "if (cond && await isLeftover(tx, memberId)) throw new Error();"],
+    ];
+    for (const [label, body, use] of HELPERS) {
+      it(`refuses a grant after ${label}`, () => {
+        write(SUBJECT, `${helper(body)}\nexport async function promote(tx, memberId, cond) {\n  ${use}\n  ${HELPER_GRANT}\n}`);
+        expectDenied(run({ grants: 1 }), uncovered("teamMember.updateMany"));
+      });
+    }
+
+    it("accepts a helper returning the predicate, used fail-closed", () => {
+      write(SUBJECT, `${helper(`return ${HELPER_PRED};`)}\nexport async function promote(tx, memberId) {\n  if (await isLeftover(tx, memberId)) return;\n  ${HELPER_GRANT}\n}`);
+      expect(run({ grants: 1 }).code).toBe(0);
+    });
+
+    it("accepts a helper returning a disjunction with the predicate, used as a disjunct of a throwing if", () => {
+      write(SUBJECT, `${helper(`return !locked || ${HELPER_PRED};`)}\nexport async function promote(tx, memberId, cond) {\n  if (cond || await isLeftover(tx, memberId)) throw new Error();\n  ${HELPER_GRANT}\n}`);
+      expect(run({ grants: 1 }).code).toBe(0);
     });
 
     // Every recipient a grant names needs its own check; a set the gate

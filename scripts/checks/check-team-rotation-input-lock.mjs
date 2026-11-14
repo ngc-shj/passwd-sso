@@ -85,7 +85,14 @@
  *    same-file caller: a call of `actorDepartedSinceAdmission` that does not
  *    judge the acting member (its row is not keyed `session.user.id`, its
  *    admission is not an `activeTeamAdmission` result), or of a same-file
- *    function that makes one, which JUDGES EVERY RECIPIENT: each value of an
+ *    helper that returns such a call's result (`return pred(...)`, or a
+ *    top-level `||` disjunct of the returned value). The check must EXIT ON
+ *    TRUE before the grant: the call (awaited or not) is an if-test or a
+ *    top-level `||` disjunct of one, the consequent is or begins with an
+ *    unconditional `return` / `throw`, and the if-statement sits in a block
+ *    (or the file) that holds the grant, earlier — not in a branch, loop, try
+ *    or callback the grant is outside of. A bare call, `!pred`, `x && pred`, a
+ *    ternary or a stored result is no check. It JUDGES EVERY RECIPIENT: each value of an
  *    `id` / `userId` key in the grant's where/data/create/update (for a team /
  *    tenant write, inside the nested relation only; a caller's argument for a
  *    parameter), or each interpolation of a raw template, is one recipient, and each needs a check whose arguments, or
@@ -118,7 +125,9 @@
  * A `data` / `update` that is not an object literal (an identifier, a spread)
  * cannot be read, so it counts: the gate refuses rather than skips what it
  * cannot see. Reviewed sites are listed in EXEMPTIONS; each key must match
- * exactly one site.
+ * exactly one site. Two grants sharing a key (one method in one anonymous
+ * callback) carry their payload's text in it: `…::teamMember.updateMany[{
+ * role: result.data.role }]`.
  *
  * KNOWN LIMITS — names and positions, not identities or control flow:
  * "before" is source order; callers are followed one level, in the same file;
@@ -173,8 +182,8 @@ const TRANSITIONS = new Set(["departFromTenant", "returnToTenant"]);
  * approve CAS joined). scim-team-role-raise-approval: member writes +2 (the
  * SCIM raise-hold CAS of an active row and its key delete for the rows that
  * CAS returned).
- * departed-member-leaked-authority (rule 8): grants 13 — 5 recipient-checked,
- * 8 exempted (3 of them `user` / `tenant` updates whose data cannot be read,
+ * departed-member-leaked-authority (rule 8): grants 13 — 4 recipient-checked,
+ * 9 exempted (3 of them `user` / `tenant` updates whose data cannot be read,
  * counted since the nested-relation arm covers those models).
  */
 const EXPECTED = {
@@ -205,6 +214,10 @@ const EXEMPTIONS = new Map([
   [
     "grant::src/app/api/teams/[teamId]/rotate-key/route.ts::<anonymous>::teamMemberKey.createMany",
     "recipients named by the request (memberKeys[].userId), checked by set: every key must name a member of memberUserIds, which excludes the leftoverUserIds its recipient check filters out (rotate-key route.test.ts \"refuses a key supplied for a leftover key-holder\")",
+  ],
+  [
+    "grant::src/app/api/teams/[teamId]/members/[memberId]/route.ts::<anonymous>::teamMember.updateMany[{ role: result.data.role }]",
+    "member PUT role change: `if (isRoleAbove(new, old) && await targetIsLeftover(...)) throw` refuses a leftover only for a promotion; a demotion of a leftover is allowed by design (D8: it reduces authority), so the check is a conjunction rule 8 does not count. Pinned by route.test.ts \"a target who left the tenant, judged against their admission to the team\": \"refuses (404 MEMBER_NOT_FOUND) promoting a target whose tenant row departed after their admission\", \"refuses promoting a target whose departure equals their admission\", \"refuses promoting a target whose departure record (row deleted) postdates their admission\", \"allows demoting a leftover target: it reduces authority\"",
   ],
   [
     "grant::src/app/api/teams/[teamId]/route.ts::<anonymous>::team.update",
@@ -812,13 +825,67 @@ function isRecipientCheck(call) {
   return !(read && Node.isCallExpression(read) && calleeName(read) === ACTOR_ADMISSION_READ);
 }
 
-/** Same-file functions whose body runs a recipient check: calling one is the check (one level down). */
+function unwrap(expr) {
+  let cur = expr;
+  while (cur && (Node.isParenthesizedExpression(cur) || Node.isAwaitExpression(cur))) cur = cur.getExpression();
+  return cur;
+}
+
+/** The top-level `||` disjuncts of an expression, unwrapped (`a || (await b) || c` → a, b, c). */
+function disjuncts(expr) {
+  const e = unwrap(expr);
+  if (e && Node.isBinaryExpression(e) && e.getOperatorToken().getKind() === SyntaxKind.BarBarToken) {
+    return [...disjuncts(e.getLeft()), ...disjuncts(e.getRight())];
+  }
+  return [e];
+}
+
+/**
+ * The if-statement whose TRUE outcome for `call` exits: `call` (awaited or
+ * parenthesised) is the test or a top-level `||` disjunct of it, and the
+ * consequent is, or begins with, an unconditional `return` / `throw`. A
+ * negation, a conjunction, a ternary or a stored result is no such shape.
+ */
+function exitGuard(call) {
+  let cur = call;
+  for (let parent = cur.getParent(); parent; cur = parent, parent = parent.getParent()) {
+    if (Node.isParenthesizedExpression(parent) || Node.isAwaitExpression(parent)) continue;
+    if (Node.isBinaryExpression(parent) && parent.getOperatorToken().getKind() === SyntaxKind.BarBarToken) continue;
+    if (!Node.isIfStatement(parent) || parent.getExpression() !== cur) return null;
+    const then = parent.getThenStatement();
+    const first = Node.isBlock(then) ? then.getStatements()[0] : then;
+    return first && (Node.isReturnStatement(first) || Node.isThrowStatement(first)) ? parent : null;
+  }
+  return null;
+}
+
+/**
+ * Whether a guard runs before `node` on every path: the guard is a statement
+ * of a list (block or file) that also holds `node`, at an earlier position —
+ * not in a branch, loop body, try block or callback `node` is outside of.
+ */
+function dominates(guard, node) {
+  const list = guard.getParent();
+  return (Node.isBlock(list) || Node.isSourceFile(list))
+    && list.containsRange(node.getPos(), node.getEnd()) && guard.getEnd() <= node.getStart();
+}
+
+/**
+ * Same-file functions that return a recipient check's result (`return
+ * pred(...)`, or a top-level `||` disjunct of the returned value), so a TRUE
+ * from the helper is a TRUE from the predicate. A helper that calls the
+ * predicate and drops or inverts its result is not one.
+ */
 function recipientCheckHelpers(sourceFile) {
   const names = new Set();
   for (const fn of sourceFile.getDescendants().filter((n) => Node.isFunctionLikeDeclaration(n))) {
     const name = functionName(fn);
     if (name === "<anonymous>" || name === "<module>") continue;
-    if (fn.getDescendantsOfKind(SyntaxKind.CallExpression).some(isRecipientCheck)) names.add(name);
+    const body = fn.getBody();
+    const returned = body && !Node.isBlock(body)
+      ? [body]
+      : fn.getDescendantsOfKind(SyntaxKind.ReturnStatement).filter((r) => enclosingFunction(r) === fn).map((r) => r.getExpression());
+    if (returned.some((e) => e && disjuncts(e).some((d) => d && Node.isCallExpression(d) && isRecipientCheck(d)))) names.add(name);
   }
   return names;
 }
@@ -841,13 +908,17 @@ function checkedNames(call) {
 
 /**
  * Whether every recipient (a list of the variables it is named by) is judged
- * by a recipient check before `pos` in `fn`: each recipient by a check naming
- * every variable it is named by, so one check covers two recipients only by
- * naming both.
+ * by a recipient check in `fn` that exits on TRUE before `node` on every path
+ * (exitGuard, dominates): each recipient by a check naming every variable it
+ * is named by, so one check covers two recipients only by naming both.
  */
-function checksRecipientsBefore(fn, helpers, pos, recipientList) {
+function checksRecipientsBefore(fn, helpers, node, recipientList) {
   const checks = fn.getDescendantsOfKind(SyntaxKind.CallExpression)
-    .filter((c) => c.getStart() < pos && (isRecipientCheck(c) || helpers.has(calleeName(c))))
+    .filter((c) => isRecipientCheck(c) || helpers.has(calleeName(c)))
+    .filter((c) => {
+      const guard = exitGuard(c);
+      return guard !== null && dominates(guard, node);
+    })
     .map(checkedNames);
   return recipientList.every((names) => checks.some((checked) => names.every((n) => checked.has(n))));
 }
@@ -862,7 +933,7 @@ function recipientChecked(sourceFile, node, helpers) {
   if (fn === null) return false;
   const recipientList = recipients(node);
   if (recipientList.some((names) => names.includes(UNRESOLVED))) return false;
-  if (checksRecipientsBefore(fn, helpers, node.getStart(), recipientList)) return true;
+  if (checksRecipientsBefore(fn, helpers, node, recipientList)) return true;
   const name = functionName(fn);
   if (name === "<anonymous>" || name === "<module>") return false;
   const params = fn.getParameters().map((p) => p.getName());
@@ -871,8 +942,13 @@ function recipientChecked(sourceFile, node, helpers) {
     const caller = enclosingFunction(c);
     const callerList = recipientList.map((names) => names.flatMap((n) => (params.includes(n) ? namesIn(c.getArguments()[params.indexOf(n)]) : [n])));
     if (callerList.some((names) => names.length === 0)) return false;
-    return caller !== null && checksRecipientsBefore(caller, helpers, c.getStart(), callerList);
+    return caller !== null && checksRecipientsBefore(caller, helpers, c, callerList);
   });
+}
+
+/** A node's text on one line, for a site key. */
+function compact(node) {
+  return node ? node.getText().replace(/\s+/g, " ") : "";
 }
 
 const project = createAstProject();
@@ -928,7 +1004,8 @@ for (const { rel: path, sf: sourceFile } of sourceFilesFrom(project, TARGETS, RE
     const grant = classifyGrant(call, mm);
     if (grant) {
       const key = keyOf("grant", path, call, grant);
-      sites.push({ rule: "grants", key, line: lineOf(path, call), ok: recipientChecked(sourceFile, call, checkHelpers) });
+      const payload = rawProp(call.getArguments()[0], mm.method === "upsert" ? "update" : "data");
+      sites.push({ rule: "grants", key, line: lineOf(path, call), ok: recipientChecked(sourceFile, call, checkHelpers), detail: compact(payload) });
     }
 
     if (path === SCIM_GROUP_SERVICE_FILE) {
@@ -953,7 +1030,7 @@ for (const { rel: path, sf: sourceFile } of sourceFilesFrom(project, TARGETS, RE
       : RAW_ROLE_GRANT.test(text) || RAW_KEY_DISTRIBUTED_GRANT.test(text) ? "team_members.raw" : null;
     if (rawGrant) {
       const key = keyOf("grant", path, raw, rawGrant);
-      sites.push({ rule: "grants", key, line: lineOf(path, raw), ok: recipientChecked(sourceFile, raw, checkHelpers) });
+      sites.push({ rule: "grants", key, line: lineOf(path, raw), ok: recipientChecked(sourceFile, raw, checkHelpers), detail: compact(raw.getTemplate()) });
     }
     if (RAW_TENANT_STATE_WRITE.test(text)) {
       violations.push(`tenant-state  ${lineOf(path, raw)}  raw write of tenant_members.deactivated_at outside team-departure.ts`);
@@ -996,6 +1073,14 @@ for (const { rel: path, sf: sourceFile } of sourceFilesFrom(project, TARGETS, RE
       }
     }
   }
+}
+
+// Two grants with one key (the same method in one anonymous callback) are told
+// apart by their payload: `…::teamMember.updateMany[{ role: result.data.role }]`.
+const grantKeyCounts = new Map();
+for (const site of sites.filter((s) => s.rule === "grants")) grantKeyCounts.set(site.key, (grantKeyCounts.get(site.key) ?? 0) + 1);
+for (const site of sites) {
+  if (site.rule === "grants" && grantKeyCounts.get(site.key) > 1) site.key = `${site.key}[${site.detail}]`;
 }
 
 const problems = [];

@@ -203,3 +203,21 @@ Previous findings: all round-2 findings resolved; Testing N3 accepted as unreach
   (mapped or variable `createMany` data, spreads, unbounded `in`, no recipient key) is UNRESOLVED
   and needs a reviewed exemption. Real repo unchanged (grants 13: 5 checked, 8 exempted).
   Red-proved: `every`→`some` fails both partial-check cells; 8 mutants, each failing its cell.
+
+### External review, second pass
+- **[Medium]** Rule 8 counted any call of `actorDepartedSinceAdmission` before the grant: a bare
+  call with the result ignored, an inverted `if (!pred) return`, and helpers that only call the
+  predicate all passed.
+- Action: a recipient check counts only when the predicate (or an awaited helper returning it) is
+  an if-test or a top-level `||` disjunct of one, the consequent begins with an unconditional
+  `return`/`throw`, and the if-statement dominates the grant. Negation, conjunction, ternary and
+  stored results do not count; a helper counts only if it returns the predicate's result and the
+  caller uses it in the same exit shape. Red-proved by six gate mutants (negation, conjunction,
+  dominance, exit, helper-return, helper-caller-use).
+- Consequence, accepted: member PUT's role change refuses only promotions
+  (`isRoleAbove(...) && await targetIsLeftover(...)`), a conjunction the gate cannot prove, so it
+  is a reviewed exemption (grants 13: 4 recipient-checked, 9 exempted). The gate no longer
+  notices that check being removed; the route's four unit cells under "a target who left the
+  tenant, judged against their admission to the team" pin it, and were red-proved in round 1
+  (promotion check removed → cells fail). Restructuring the route so the gate could prove it would
+  either refuse demotions of a leftover (D8 allows them) or split one write into two.

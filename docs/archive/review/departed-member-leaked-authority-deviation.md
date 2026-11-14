@@ -148,3 +148,12 @@ follow. `check-team-rotation-input-lock` counts are unchanged.
   unlocked read may decide.
 - The worker's missing-verdict branch is unreachable with `webhookCreatorVerdicts`, which answers
   every id; it stays as defense in depth and is not separately tested.
+
+## D10 — Rule 8 after the external reviews
+
+Rule 8 was tightened three more times after round 3: every recipient of a grant must be checked
+(not some); a recipient set that cannot be listed one by one needs a reviewed exemption; and a
+check counts only when its true outcome exits before the grant. Final real-repo state: 13 grant
+sites, 4 recipient-checked, 9 exempted. Member PUT's role change is one of the exemptions: it
+refuses only promotions, a conjunction the gate cannot prove, so its guard is held by the
+route's unit tests, not by the gate.
