@@ -199,8 +199,10 @@ verify(jws: string, publicKey: Buffer): Manifest                            // K
   from the archive; else an error naming `--prior-public-key`.
 - Invariant (app-enforced): every signature check binds the `kid`. Member set —
   `git grep -nE "\b(verify|verifyJws)\(" -- src/lib/audit/anchor-manifest.ts src/workers scripts cli/src/commands`
-  → definitions `anchor-manifest.ts:255`, `audit-verify.ts:227`; callers `audit-verify.ts:446`,
-  `:480`. Test callers (`anchor-manifest.unit.test.ts`, the `verifyManifest` alias in
+  → the definitions of `verify` (`anchor-manifest.ts`) and `verifyJws` (`audit-verify.ts`), and
+  `verifyJws`'s two callers in `auditVerifyCommand` (the manifest and the prior manifest); after
+  the change also `anchor-published-state.ts` and `scripts/audit-anchor-keys.ts`, both through
+  `verify`. Test callers (`anchor-manifest.unit.test.ts`, the `verifyManifest` alias in
   `audit-anchor-publisher.integration.test.ts`) go through the same two functions.
 - Tests built on kids or keys the new rules refuse are rewritten: `anchor-manifest.unit.test.ts`
   (8-char kid), `anchor-publisher-fixtures.ts` (12-char kid),
