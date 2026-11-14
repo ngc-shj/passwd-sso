@@ -1028,3 +1028,11 @@ export const AUDIT_ANCHOR_MANIFEST_VERSION = 1;
 export const AUDIT_ANCHOR_TYP = "passwd-sso.audit-anchor.v1";
 export const AUDIT_ANCHOR_TAG_DOMAIN = "audit-anchor-tag-v1";       // HMAC domain separation label
 export const AUDIT_ANCHOR_KID_PREFIX = "audit-anchor-";
+// The only kid a key yields: the prefix plus the public key's first 8 bytes in hex.
+export const AUDIT_ANCHOR_KID_HEX_CHARS = 16;
+// Key-rotation and chain-restart statements; a manifest verify rejects this typ.
+export const AUDIT_ANCHOR_STATEMENT_TYP = "passwd-sso.audit-anchor-statement.v1";
+// Bound on one stored artifact, on write and on read.
+export const AUDIT_ANCHOR_ARTIFACT_MAX_BYTES = 8 * 1024 * 1024;
+// Manifest keys one publishing run copies to a secondary destination that lacks them.
+export const AUDIT_ANCHOR_MIRROR_BACKFILL_MAX = 7;

@@ -9,10 +9,13 @@ import {
 import { z } from "zod/v4";
 import {
   AUDIT_ANCHOR_TYP,
+  AUDIT_ANCHOR_STATEMENT_TYP,
   AUDIT_ANCHOR_TAG_DOMAIN,
   AUDIT_ANCHOR_KID_PREFIX,
+  AUDIT_ANCHOR_KID_HEX_CHARS,
 } from "@/lib/constants/audit/audit";
 import { jcsCanonical } from "@/lib/audit/audit-chain";
+import { isAnchorKid } from "@/lib/audit/anchor-artifact-keys";
 
 // --- Public types ---
 
@@ -56,8 +59,8 @@ export class InvalidAlgorithmError extends Error {
 }
 
 export class InvalidTypError extends Error {
-  constructor(typ: unknown) {
-    super(`Invalid JWS typ: ${typ}; expected ${AUDIT_ANCHOR_TYP}`);
+  constructor(typ: unknown, expected: string = AUDIT_ANCHOR_TYP) {
+    super(`Invalid JWS typ: ${typ}; expected ${expected}`);
     this.name = "InvalidTypError";
   }
 }
@@ -81,9 +84,24 @@ export class InvalidTenantIdFormatError extends Error {
 export class InvalidKidError extends Error {
   constructor(kid: unknown) {
     super(
-      `Invalid kid format: got ${JSON.stringify(kid)}; expected ${AUDIT_ANCHOR_KID_PREFIX}<8-32 chars [a-zA-Z0-9_-]>`,
+      `Invalid kid format: got ${JSON.stringify(kid)}; expected ${AUDIT_ANCHOR_KID_PREFIX}<${AUDIT_ANCHOR_KID_HEX_CHARS} lower-case hex chars>`,
     );
     this.name = "InvalidKidError";
+  }
+}
+
+/** The header names a key other than the one the signature was checked under. */
+export class KidMismatchError extends Error {
+  constructor(headerKid: string, keyKid: string) {
+    super(`JWS kid ${headerKid} does not name the supplied public key (${keyKid})`);
+    this.name = "KidMismatchError";
+  }
+}
+
+export class InvalidPublicKeyError extends Error {
+  constructor() {
+    super("Invalid Ed25519 public key; expected 64 lower-case hex chars (32 bytes)");
+    this.name = "InvalidPublicKeyError";
   }
 }
 
@@ -103,12 +121,19 @@ const tenantEntrySchema = z.object({
   epoch: z.number().int().min(1),
 });
 
+/** `value` is exactly what `Date.prototype.toISOString` writes for its instant. */
+function isIsoTimestamp(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) return false;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) && new Date(ms).toISOString() === value;
+}
+
 const manifestSchema = z.object({
   $schema: z.string(),
   version: z.literal(1),
   issuer: z.literal("passwd-sso"),
   deploymentId: z.string(),
-  anchoredAt: z.string(),
+  anchoredAt: z.string().refine(isIsoTimestamp),
   previousManifest: z
     .object({ uri: z.string(), sha256: z.string() })
     .nullable(),
@@ -220,27 +245,78 @@ export function canonicalize(manifest: Manifest): Buffer {
   return Buffer.from(jcsCanonical(manifest), "utf-8");
 }
 
-/**
- * Sign canonical manifest bytes with an Ed25519 private key seed (32 bytes).
- * Returns JWS compact serialization (RFC 7515).
- */
-export function sign(canonicalBytes: Buffer, signingKey: Buffer, kid: string): string {
-  const kidPattern = new RegExp(`^${AUDIT_ANCHOR_KID_PREFIX}[a-zA-Z0-9_-]{8,32}$`);
-  if (!kidPattern.test(kid)) {
-    throw new InvalidKidError(kid);
+const ED25519_KEY_BYTES = 32;
+const KID_KEY_BYTES = AUDIT_ANCHOR_KID_HEX_CHARS / 2;
+
+function privateKeyObject(signingKey: Buffer): KeyObject {
+  if (signingKey.length !== ED25519_KEY_BYTES) {
+    throw new Error("signing key must be exactly 32 bytes");
   }
-
-  // Property order is intentional: alg, kid, typ (do not reorder)
-  const headerObj = { alg: "EdDSA", kid, typ: AUDIT_ANCHOR_TYP };
-  const headerB64 = b64urlEncode(Buffer.from(JSON.stringify(headerObj), "utf-8"));
-  const payloadB64 = b64urlEncode(canonicalBytes);
-  const signingInput = Buffer.from(`${headerB64}.${payloadB64}`, "utf-8");
-
-  const keyObject = createPrivateKey({
+  return createPrivateKey({
     key: Buffer.concat([ED25519_PKCS8_PREFIX, signingKey]),
     format: "der",
     type: "pkcs8",
   });
+}
+
+/**
+ * The kid of a raw Ed25519 public key: the prefix plus its first 8 bytes in
+ * hex. A 64-bit identifier of the key, not a commitment to it.
+ */
+export function kidForPublicKey(publicKey: Buffer): string {
+  if (publicKey.length !== ED25519_KEY_BYTES) throw new InvalidPublicKeyError();
+  return `${AUDIT_ANCHOR_KID_PREFIX}${publicKey.subarray(0, KID_KEY_BYTES).toString("hex")}`;
+}
+
+/** The raw 32-byte public key of an Ed25519 private key seed (32 bytes). */
+export function publicKeyForSigningKey(seed: Buffer): Buffer {
+  const spki = derivePublicKey(privateKeyObject(seed)).export({ format: "der", type: "spki" });
+  return Buffer.from(spki.subarray(ED25519_SPKI_PREFIX.length));
+}
+
+/**
+ * A raw public key from its archived text: exactly 64 lower-case hex chars
+ * once surrounding whitespace is trimmed. `Buffer.from(text, "hex")` is not
+ * used alone: it stops at the first non-hex char and returns what it had.
+ */
+export function parsePublicKeyHex(text: string): Buffer {
+  const hex = text.trim();
+  if (!/^[0-9a-f]{64}$/.test(hex)) throw new InvalidPublicKeyError();
+  return Buffer.from(hex, "hex");
+}
+
+function decodeHeader(headerB64: string): Record<string, unknown> {
+  let header: unknown;
+  try {
+    header = JSON.parse(b64urlDecode(headerB64).toString("utf-8"));
+  } catch {
+    throw new InvalidSignatureError();
+  }
+  if (typeof header !== "object" || header === null) throw new InvalidSignatureError();
+  return header as Record<string, unknown>;
+}
+
+/**
+ * The `kid` a JWS header names, unverified. Throws InvalidKidError unless it
+ * is the derivable shape, InvalidSignatureError when there is no header to read.
+ */
+export function readJwsKid(jws: string): string {
+  const parts = jws.split(".");
+  if (parts.length !== 3) throw new InvalidSignatureError();
+  const { kid } = decodeHeader(parts[0]);
+  if (!isAnchorKid(kid)) throw new InvalidKidError(kid);
+  return kid;
+}
+
+function signCompact(payload: Buffer, signingKey: Buffer, typ: string): string {
+  const keyObject = privateKeyObject(signingKey);
+  const kid = kidForPublicKey(publicKeyForSigningKey(signingKey));
+
+  // Property order is intentional: alg, kid, typ (do not reorder)
+  const headerObj = { alg: "EdDSA", kid, typ };
+  const headerB64 = b64urlEncode(Buffer.from(JSON.stringify(headerObj), "utf-8"));
+  const payloadB64 = b64urlEncode(payload);
+  const signingInput = Buffer.from(`${headerB64}.${payloadB64}`, "utf-8");
 
   const sig = nodeSign(null, signingInput, keyObject);
   const sigB64 = b64urlEncode(sig);
@@ -249,23 +325,22 @@ export function sign(canonicalBytes: Buffer, signingKey: Buffer, kid: string): s
 }
 
 /**
- * Verify a JWS compact serialization and return the decoded Manifest.
- * Throws typed errors on any verification failure.
+ * Check a JWS compact serialization under `publicKey` and return its payload
+ * bytes. The header's kid must name that key: a signature is accepted only
+ * under the key its kid names, and the kid is checked before the signature.
  */
-export function verify(jws: string, publicKey: Buffer): Manifest {
+function verifyCompact(jws: string, publicKey: Buffer, typ: string): Buffer {
   const parts = jws.split(".");
   if (parts.length !== 3) throw new InvalidSignatureError();
   const [headerB64, payloadB64, sigB64] = parts;
 
-  let header: Record<string, unknown>;
-  try {
-    header = JSON.parse(b64urlDecode(headerB64).toString("utf-8")) as Record<string, unknown>;
-  } catch {
-    throw new InvalidSignatureError();
-  }
+  const header = decodeHeader(headerB64);
 
   if (header.alg !== "EdDSA") throw new InvalidAlgorithmError(header.alg);
-  if (header.typ !== AUDIT_ANCHOR_TYP) throw new InvalidTypError(header.typ);
+  if (header.typ !== typ) throw new InvalidTypError(header.typ, typ);
+  if (!isAnchorKid(header.kid)) throw new InvalidKidError(header.kid);
+  const keyKid = kidForPublicKey(publicKey);
+  if (header.kid !== keyKid) throw new KidMismatchError(header.kid, keyKid);
 
   const keyObject = createPublicKey({
     key: Buffer.concat([ED25519_SPKI_PREFIX, publicKey]),
@@ -280,9 +355,41 @@ export function verify(jws: string, publicKey: Buffer): Manifest {
     throw new InvalidSignatureError();
   }
 
+  return b64urlDecode(payloadB64);
+}
+
+/**
+ * Sign canonical manifest bytes with an Ed25519 private key seed (32 bytes).
+ * Returns JWS compact serialization (RFC 7515); the kid is the signing key's own.
+ */
+export function sign(canonicalBytes: Buffer, signingKey: Buffer): string {
+  return signCompact(canonicalBytes, signingKey, AUDIT_ANCHOR_TYP);
+}
+
+/**
+ * Sign an operator statement (key rotation, chain restart). Its typ is not a
+ * manifest's, so `verify` rejects it with InvalidTypError.
+ */
+export function signStatement(payload: Buffer, signingKey: Buffer): string {
+  return signCompact(payload, signingKey, AUDIT_ANCHOR_STATEMENT_TYP);
+}
+
+/** Verify an operator statement and return its payload bytes. */
+export function verifyStatement(jws: string, publicKey: Buffer): Buffer {
+  return verifyCompact(jws, publicKey, AUDIT_ANCHOR_STATEMENT_TYP);
+}
+
+/**
+ * Verify a JWS compact serialization and return the decoded Manifest.
+ * Throws typed errors on any verification failure; KidMismatchError when the
+ * header's kid is not `kidForPublicKey(publicKey)`.
+ */
+export function verify(jws: string, publicKey: Buffer): Manifest {
+  const payloadBytes = verifyCompact(jws, publicKey, AUDIT_ANCHOR_TYP);
+
   let payloadObj: unknown;
   try {
-    payloadObj = JSON.parse(b64urlDecode(payloadB64).toString("utf-8"));
+    payloadObj = JSON.parse(payloadBytes.toString("utf-8"));
   } catch {
     throw new InvalidSignatureError();
   }
@@ -291,7 +398,6 @@ export function verify(jws: string, publicKey: Buffer): Manifest {
 
   // Re-canonicalize and compare to detect payload modifications that bypass signer canonicalization
   const recanon = canonicalize(manifest);
-  const payloadBytes = b64urlDecode(payloadB64);
   if (!recanon.equals(payloadBytes)) {
     throw new InvalidSignatureError();
   }

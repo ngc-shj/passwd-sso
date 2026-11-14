@@ -8,7 +8,11 @@
 import { readFileSync, openSync, fstatSync, readSync, closeSync } from "node:fs";
 import { createHash, createHmac, createPublicKey, verify as nodeVerify } from "node:crypto";
 import { z } from "zod";
-import { AUDIT_ANCHOR_KID_PREFIX, AUDIT_ANCHOR_TYP } from "../constants/audit-anchor.js";
+import {
+  AUDIT_ANCHOR_KID_HEX_CHARS,
+  AUDIT_ANCHOR_KID_PREFIX,
+  AUDIT_ANCHOR_TYP,
+} from "../constants/audit-anchor.js";
 
 // --- Constants ---
 
@@ -49,9 +53,40 @@ export class InvalidTenantIdFormatError extends Error {
 export class InvalidKidError extends Error {
   constructor(kid: unknown) {
     super(
-      `Invalid kid format; expected ${AUDIT_ANCHOR_KID_PREFIX}<8-32 char> (no path separators): got ${kid}`,
+      `Invalid kid format; expected ${AUDIT_ANCHOR_KID_PREFIX}<${AUDIT_ANCHOR_KID_HEX_CHARS} lower-case hex chars>: got ${kid}`,
     );
     this.name = "InvalidKidError";
+  }
+}
+
+/** The header names a key other than the one the signature was checked under. */
+export class KidMismatchError extends Error {
+  constructor(headerKid: string, keyKid: string) {
+    super(`JWS kid ${headerKid} does not name the supplied public key (${keyKid})`);
+    this.name = "KidMismatchError";
+  }
+}
+
+export class InvalidPublicKeyError extends Error {
+  constructor() {
+    super("Invalid Ed25519 public key; expected 64 lower-case hex chars (32 bytes)");
+    this.name = "InvalidPublicKeyError";
+  }
+}
+
+export class InsecureUrlError extends Error {
+  constructor(what: string) {
+    super(`${what} must be an https:// URL (http:// is accepted for localhost, 127.0.0.1 and [::1] only)`);
+    this.name = "InsecureUrlError";
+  }
+}
+
+export class PriorPublicKeyRequiredError extends Error {
+  constructor(priorKid: string) {
+    super(
+      `The prior manifest is signed under another key (${priorKid}); pass its public key with --prior-public-key`,
+    );
+    this.name = "PriorPublicKeyRequiredError";
   }
 }
 
@@ -165,12 +200,19 @@ const tenantEntrySchema = z.object({
   epoch: z.number().int().min(1),
 });
 
+/** `value` is exactly what `Date.prototype.toISOString` writes for its instant. */
+function isIsoTimestamp(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) return false;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) && new Date(ms).toISOString() === value;
+}
+
 const manifestSchema = z.object({
   $schema: z.string(),
   version: z.literal(1),
   issuer: z.literal("passwd-sso"),
   deploymentId: z.string(),
-  anchoredAt: z.string(),
+  anchoredAt: z.string().refine(isIsoTimestamp),
   previousManifest: z.object({ uri: z.string(), sha256: z.string() }).nullable(),
   tenants: z.array(tenantEntrySchema),
 });
@@ -238,6 +280,11 @@ function verifyJws(jws: string, publicKey: Buffer): Manifest {
 
   if (header.alg !== "EdDSA") throw new InvalidAlgorithmError(header.alg);
   if (header.typ !== AUDIT_ANCHOR_TYP) throw new InvalidTypError(header.typ);
+  // A signature is accepted only under the key its kid names, and the kid is
+  // checked before the signature.
+  if (typeof header.kid !== "string" || !KID_PATTERN.test(header.kid)) throw new InvalidKidError(header.kid);
+  const keyKid = kidForPublicKey(publicKey);
+  if (header.kid !== keyKid) throw new KidMismatchError(header.kid, keyKid);
 
   const keyObject = createPublicKey({
     key: Buffer.concat([ED25519_SPKI_PREFIX, publicKey]),
@@ -301,12 +348,82 @@ function extractKidFromJws(jws: string): string {
   return typeof header.kid === "string" ? header.kid : "";
 }
 
+// The only shape a public key derives: no path separators, percent-encoding, etc.
+const KID_PATTERN = new RegExp(`^${AUDIT_ANCHOR_KID_PREFIX}[0-9a-f]{${AUDIT_ANCHOR_KID_HEX_CHARS}}$`);
+
 function validateKid(kid: string): void {
-  // Strict regex: only alphanumeric + hyphen + underscore — no path separators, percent-encoding, etc.
-  const kidPattern = new RegExp(`^${AUDIT_ANCHOR_KID_PREFIX}[a-zA-Z0-9_-]{8,32}$`);
-  if (!kidPattern.test(kid)) {
+  if (!KID_PATTERN.test(kid)) {
     throw new InvalidKidError(kid);
   }
+}
+
+/** The kid of a raw Ed25519 public key: the prefix plus its first 8 bytes in hex. */
+function kidForPublicKey(publicKey: Buffer): string {
+  return `${AUDIT_ANCHOR_KID_PREFIX}${publicKey.subarray(0, AUDIT_ANCHOR_KID_HEX_CHARS / 2).toString("hex")}`;
+}
+
+/**
+ * A raw public key from its text: exactly 64 lower-case hex chars once
+ * surrounding whitespace is trimmed. `Buffer.from(text, "hex")` is not used
+ * alone: it stops at the first non-hex char and returns what it had.
+ */
+function parsePublicKeyHex(text: string): Buffer {
+  const hex = text.trim();
+  if (!/^[0-9a-f]{64}$/.test(hex)) throw new InvalidPublicKeyError();
+  return Buffer.from(hex, "hex");
+}
+
+const HTTP_LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+function looksLikeUrl(value: string): boolean {
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(value);
+}
+
+/**
+ * `raw` as a URL the verifier may fetch: `https://`, or `http://` to a
+ * loopback host. The scheme is matched on the text as given, and the host on
+ * the parsed URL — a prefix test alone passes `http://127.0.0.1@example.com/`.
+ */
+function fetchableUrl(raw: string, what: string): URL {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new InsecureUrlError(what);
+  }
+  if (raw.startsWith("https://")) return url;
+  if (raw.startsWith("http://") && HTTP_LOOPBACK_HOSTNAMES.has(url.hostname)) return url;
+  throw new InsecureUrlError(what);
+}
+
+/** The public key of `kid` from the archive at `archiveBase`. */
+async function fetchArchivedPublicKey(archiveBase: string, kid: string): Promise<Buffer> {
+  // Three layers of defense for the file-data → outbound-fetch flow:
+  //   1. validateKid() restricts kid to ^audit-anchor-[0-9a-f]{16}$
+  //      (no ".", "/", "%", or other path-special characters).
+  //   2. encodeURIComponent on kid — recognized by CodeQL as a sanitizer for
+  //      URL-path-segment construction. At runtime this is a no-op because
+  //      validateKid already restricted kid to characters that
+  //      encodeURIComponent does not encode, but the call breaks the
+  //      taint-flow CodeQL detects (see PR #419 review #4209883677).
+  //   3. URL constructor with archiveBaseUrl as base — resolution semantics
+  //      pin the host to archiveBase's origin; combined with the explicit
+  //      origin equality check below, kid cannot escape the archive origin.
+  validateKid(kid);
+  const archiveBaseUrl = fetchableUrl(archiveBase, "The public key archive URL");
+  const archivePath = archiveBaseUrl.pathname.replace(/\/$/, "");
+  const safeKid = encodeURIComponent(kid);
+  const pubUrlObj = new URL(`${archivePath}/${safeKid}.pub`, archiveBaseUrl);
+  if (pubUrlObj.origin !== archiveBaseUrl.origin) {
+    // Defense in depth: should be impossible given validateKid + URL semantics,
+    // but explicit reject if URL resolution somehow crosses origins.
+    throw new PublicKeyFetchError(0, pubUrlObj.href);
+  }
+  const resp = await fetch(pubUrlObj.href, { redirect: "manual" });
+  if (resp.status !== 200) {
+    throw new PublicKeyFetchError(resp.status, pubUrlObj.href);
+  }
+  return parsePublicKeyHex(await resp.text());
 }
 
 function sha256Hex(buf: Buffer): string {
@@ -335,6 +452,7 @@ export type AuditVerifyArgs = {
   tagSecret?: string;
   tagSecretFile?: string;
   priorManifest?: string;
+  priorPublicKey?: string;
   archiveUrl?: string;
 };
 
@@ -390,8 +508,9 @@ export async function auditVerifyCommand(args: AuditVerifyArgs): Promise<void> {
 
   // Fetch or read manifest JWS
   let jws: string;
-  if (args.manifest.startsWith("http://") || args.manifest.startsWith("https://")) {
-    const resp = await fetch(args.manifest, { redirect: "manual" });
+  if (looksLikeUrl(args.manifest)) {
+    const manifestUrl = fetchableUrl(args.manifest, "The manifest URL");
+    const resp = await fetch(manifestUrl.href, { redirect: "manual" });
     if (resp.status !== 200) {
       throw new ManifestFetchError(resp.status);
     }
@@ -405,41 +524,15 @@ export async function auditVerifyCommand(args: AuditVerifyArgs): Promise<void> {
   validateKid(kid); // throws InvalidKidError if invalid
 
   // Resolve public key
+  const archiveBase = args.archiveUrl ?? process.env["AUDIT_ANCHOR_PUBLIC_KEY_ARCHIVE_URL"];
   let publicKeyBytes: Buffer;
   if (args.publicKey) {
-    const raw = readFileSync(args.publicKey, "utf-8").trim();
-    publicKeyBytes = Buffer.from(raw, "hex");
+    publicKeyBytes = parsePublicKeyHex(readFileSync(args.publicKey, "utf-8"));
   } else {
-    const archiveBase = args.archiveUrl ?? process.env["AUDIT_ANCHOR_PUBLIC_KEY_ARCHIVE_URL"];
     if (!archiveBase) {
       throw new PublicKeyArchiveUrlMissingError();
     }
-    // Three layers of defense for the file-data → outbound-fetch flow:
-    //   1. validateKid() above restricts kid to ^audit-anchor-[a-zA-Z0-9_-]{8,32}$
-    //      (no ".", "/", "%", or other path-special characters).
-    //   2. encodeURIComponent on kid — recognized by CodeQL as a sanitizer for
-    //      URL-path-segment construction. At runtime this is a no-op because
-    //      validateKid already restricted kid to characters that
-    //      encodeURIComponent does not encode, but the call breaks the
-    //      taint-flow CodeQL detects (see PR #419 review #4209883677).
-    //   3. URL constructor with archiveBaseUrl as base — resolution semantics
-    //      pin the host to archiveBase's origin; combined with the explicit
-    //      origin equality check below, kid cannot escape the archive origin.
-    const archiveBaseUrl = new URL(archiveBase);
-    const archivePath = archiveBaseUrl.pathname.replace(/\/$/, "");
-    const safeKid = encodeURIComponent(kid);
-    const pubUrlObj = new URL(`${archivePath}/${safeKid}.pub`, archiveBaseUrl);
-    if (pubUrlObj.origin !== archiveBaseUrl.origin) {
-      // Defense in depth: should be impossible given validateKid + URL semantics,
-      // but explicit reject if URL resolution somehow crosses origins.
-      throw new PublicKeyFetchError(0, pubUrlObj.href);
-    }
-    const resp = await fetch(pubUrlObj.href, { redirect: "manual" });
-    if (resp.status !== 200) {
-      throw new PublicKeyFetchError(resp.status, pubUrlObj.href);
-    }
-    const raw = (await resp.text()).trim();
-    publicKeyBytes = Buffer.from(raw, "hex");
+    publicKeyBytes = await fetchArchivedPublicKey(archiveBase, kid);
   }
 
   // Verify JWS signature — throws typed errors on failure
@@ -476,8 +569,24 @@ export async function auditVerifyCommand(args: AuditVerifyArgs): Promise<void> {
 
     const priorJws = readFileSync(args.priorManifest, "utf-8").trim();
 
+    // The prior manifest's key. Across a rotation it is not the current one,
+    // and it is taken from the archive only when the current key was too: a
+    // key the caller handed over says nothing about what the archive serves.
+    const priorKid = extractKidFromJws(priorJws);
+    validateKid(priorKid);
+    let priorKeyBytes: Buffer;
+    if (priorKid === kid) {
+      priorKeyBytes = publicKeyBytes;
+    } else if (args.priorPublicKey) {
+      priorKeyBytes = parsePublicKeyHex(readFileSync(args.priorPublicKey, "utf-8"));
+    } else if (!args.publicKey && archiveBase) {
+      priorKeyBytes = await fetchArchivedPublicKey(archiveBase, priorKid);
+    } else {
+      throw new PriorPublicKeyRequiredError(priorKid);
+    }
+
     // Verify prior manifest signature too
-    const priorManifest = verifyJws(priorJws, publicKeyBytes);
+    const priorManifest = verifyJws(priorJws, priorKeyBytes);
 
     // Check prior hash reference
     const priorCanon = canonicalize(priorManifest);

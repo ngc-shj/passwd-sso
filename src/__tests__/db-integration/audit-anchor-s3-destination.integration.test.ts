@@ -6,6 +6,9 @@
  * key (MINIO_KMS_SECRET_KEY) — without one MinIO answers 501 to the SSE-S3
  * header the destination always sends. A missing or unready endpoint fails the
  * suite; it never skips.
+ *
+ * Objects under COMPLIANCE retention cannot be deleted, so every case writes
+ * under a prefix of its own: uniqueness comes from the prefix, never the key.
  */
 
 import { describe, it, expect, beforeAll } from "vitest";
@@ -16,6 +19,7 @@ import {
   GetObjectRetentionCommand,
   HeadBucketCommand,
   HeadObjectCommand,
+  ListObjectVersionsCommand,
   PutObjectCommand,
   S3Client,
   S3ServiceException,
@@ -27,11 +31,16 @@ import {
 } from "@/lib/audit/anchor-destinations/s3-destination";
 import { AUDIT_ANCHOR_RETENTION_YEARS } from "@/lib/constants/audit/audit";
 import { MS_PER_DAY, MS_PER_SECOND } from "@/lib/constants/time";
+import {
+  createArtifact,
+  describeAnchorDestinationContract,
+  expectOneConcurrentCreateWins,
+  manifestKeyFor,
+} from "../helpers/anchor-destination-contract";
 
 const ENDPOINT_ENV = "ANCHOR_TEST_S3_ENDPOINT";
 const LOCKED_BUCKET = "anchor-test-object-lock";
 const UNLOCKED_BUCKET = "anchor-test-no-object-lock";
-const PREFIX = "audit-anchors";
 const CONTENT_TYPE = "application/jose";
 const RETENTION_MS = AUDIT_ANCHOR_RETENTION_YEARS * 365 * MS_PER_DAY;
 
@@ -48,8 +57,17 @@ async function ensureBucket(bucket: string, objectLock: boolean): Promise<void> 
   }
 }
 
-function artifactKey(): string {
-  return `${randomUUID()}.kid-audit-anchor-test.jws`;
+function freshPrefix(): string {
+  return `audit-anchors/${randomUUID()}`;
+}
+
+function lockedDestination(prefix = freshPrefix(), listPageSize?: number): S3Destination {
+  return new S3Destination({ bucket: LOCKED_BUCKET, prefix, clientOptions, listPageSize });
+}
+
+async function versionCount(bucket: string, key: string): Promise<number> {
+  const { Versions } = await admin.send(new ListObjectVersionsCommand({ Bucket: bucket, Prefix: key }));
+  return (Versions ?? []).filter((v) => v.Key === key).length;
 }
 
 beforeAll(async () => {
@@ -79,12 +97,14 @@ beforeAll(async () => {
   await ensureBucket(UNLOCKED_BUCKET, false);
 });
 
+describeAnchorDestinationContract("S3 (MinIO, Object Lock bucket)", () => lockedDestination());
+
 describe("S3Destination — MinIO integration", () => {
   // E2 probe, run with the raw SDK so a gap is reported apart from the
   // destination's own behaviour: does this MinIO release honour the Object
   // Lock retention headers at all?
   it("MinIO honours COMPLIANCE retention headers on an Object Lock bucket (E2 probe)", async () => {
-    const key = artifactKey();
+    const key = joinS3Key(freshPrefix(), manifestKeyFor("2026-05-02"));
     const retainUntil = new Date(Date.now() + MS_PER_DAY);
 
     await admin.send(
@@ -104,16 +124,17 @@ describe("S3Destination — MinIO integration", () => {
     expect(Retention?.RetainUntilDate?.getTime()).toBe(retainUntil.getTime());
   });
 
-  it("upload stores the artifact under COMPLIANCE retention at the default retention date, SSE-S3 encrypted", async () => {
-    const dest = new S3Destination({ bucket: LOCKED_BUCKET, prefix: PREFIX, clientOptions });
-    const key = artifactKey();
+  it("create stores the artifact under COMPLIANCE retention at the default retention date, SSE-S3 encrypted", async () => {
+    const prefix = freshPrefix();
+    const dest = lockedDestination(prefix);
+    const key = manifestKeyFor("2026-05-02");
     const body = Buffer.from(`signed-manifest-${randomUUID()}`);
 
     const before = Date.now();
-    await dest.upload({ artifactBytes: body, artifactKey: key, contentType: CONTENT_TYPE });
+    expect(await dest.create({ artifactBytes: body, artifactKey: key, contentType: CONTENT_TYPE })).toBe("created");
     const after = Date.now();
 
-    const storedKey = joinS3Key(PREFIX, key);
+    const storedKey = joinS3Key(prefix, key);
     const { Retention } = await admin.send(
       new GetObjectRetentionCommand({ Bucket: LOCKED_BUCKET, Key: storedKey }),
     );
@@ -133,12 +154,52 @@ describe("S3Destination — MinIO integration", () => {
     expect(Buffer.from(await got.Body!.transformToByteArray())).toEqual(body);
   });
 
-  it("the same upload to a bucket without Object Lock is refused", async () => {
-    const dest = new S3Destination({ bucket: UNLOCKED_BUCKET, prefix: PREFIX, clientOptions });
-    const key = artifactKey();
+  it("a second create of the key writes no second version", async () => {
+    const prefix = freshPrefix();
+    const dest = lockedDestination(prefix);
+    const key = manifestKeyFor("2026-05-02");
+
+    expect(await createArtifact(dest, key, Buffer.from("first"))).toBe("created");
+    expect(await createArtifact(dest, key, Buffer.from("second"))).toBe("exists");
+
+    expect(await versionCount(LOCKED_BUCKET, joinS3Key(prefix, key))).toBe(1);
+  });
+
+  it("eight concurrent creates of one key: one is created, and the key holds one version", async () => {
+    const prefix = freshPrefix();
+    const key = manifestKeyFor("2026-05-02");
+
+    await expectOneConcurrentCreateWins(lockedDestination(prefix), key);
+
+    expect(await versionCount(LOCKED_BUCKET, joinS3Key(prefix, key))).toBe(1);
+  });
+
+  it("lists every page: 5 keys at page size 2 give the exact set", async () => {
+    const prefix = freshPrefix();
+    const dest = lockedDestination(prefix, 2);
+    const keys = ["2026-05-01", "2026-05-02", "2026-05-03", "2026-05-04", "2026-05-05"].map((d) => manifestKeyFor(d));
+    for (const key of keys) await createArtifact(dest, key, Buffer.from(key));
+
+    expect([...(await dest.list())].sort()).toEqual([...keys].sort());
+  });
+
+  it("lists and reads only under its own prefix, not a sibling that starts with it", async () => {
+    const prefix = freshPrefix();
+    const key = manifestKeyFor("2026-05-02");
+    await createArtifact(lockedDestination(`${prefix}-sibling`), key, Buffer.from("sibling"));
+    const dest = lockedDestination(prefix);
+
+    expect(await dest.list()).toEqual([]);
+    expect(await dest.read(key)).toBeNull();
+  });
+
+  it("the same create to a bucket without Object Lock is refused", async () => {
+    const prefix = freshPrefix();
+    const dest = new S3Destination({ bucket: UNLOCKED_BUCKET, prefix, clientOptions });
+    const key = manifestKeyFor("2026-05-02");
 
     const refusal = await dest
-      .upload({ artifactBytes: Buffer.from("jws"), artifactKey: key, contentType: CONTENT_TYPE })
+      .create({ artifactBytes: Buffer.from("jws"), artifactKey: key, contentType: CONTENT_TYPE })
       .then(
         () => null,
         (error: unknown) => error,
@@ -151,7 +212,7 @@ describe("S3Destination — MinIO integration", () => {
     expect((refusal as S3ServiceException).message).toMatch(/ObjectLockConfiguration/);
 
     const stored = await admin
-      .send(new HeadObjectCommand({ Bucket: UNLOCKED_BUCKET, Key: joinS3Key(PREFIX, key) }))
+      .send(new HeadObjectCommand({ Bucket: UNLOCKED_BUCKET, Key: joinS3Key(prefix, key) }))
       .then(
         () => true,
         () => false,

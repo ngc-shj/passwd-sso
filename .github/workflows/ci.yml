@@ -105,6 +105,11 @@ jobs:
               - "infra/terraform/*.tf"
               - "infra/terraform/README*.md"
               - "infra/terraform/modules/anchor-prefix/**"
+              # The audit-anchor vectors the CLI verifier and the server's
+              # anchor-manifest module are both held to: the server suite reads
+              # this file, so a change to it alone must run the app tests too
+              # (the cli filter below already covers it).
+              - "cli/src/__tests__/fixtures/audit-anchor-vectors.json"
               # scripts/__tests__/jackson-probe-images.test.mjs holds the
               # jackson-probe matrix in ci-integration.yml to the Jackson images
               # these reference; a re-tag or a matrix edit alone must run it.

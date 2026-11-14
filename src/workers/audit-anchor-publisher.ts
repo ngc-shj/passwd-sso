@@ -22,9 +22,12 @@ import { auditLogger, deadLetterLogger } from "@/lib/audit/audit-logger";
 import {
   buildManifest,
   canonicalize,
+  kidForPublicKey,
+  publicKeyForSigningKey,
   sign,
   type AnchorRow,
 } from "@/lib/audit/anchor-manifest";
+import { buildManifestArtifactKey } from "@/lib/audit/anchor-artifact-keys";
 import { WORKER_POOL_IDLE_TIMEOUT_MS, WORKER_POOL_STATEMENT_TIMEOUT_MS } from "@/workers/worker-pool-config";
 import type { AnchorDestination } from "@/lib/audit/anchor-destinations/destination";
 
@@ -129,7 +132,6 @@ export type PublisherConfig = {
   databaseUrl: string;
   deploymentId: string;
   signingKey: Buffer;
-  signingKeyKid: string;
   tagSecret: Buffer;
   destinations: AnchorDestination[];
   cadenceMs: number;
@@ -160,14 +162,6 @@ export function currentCadenceBoundary(now: Date, cadenceMs: number, offsetMs: n
 export function previousCadenceBoundary(now: Date, cadenceMs: number, offsetMs: number): Date {
   const current = currentCadenceBoundary(now, cadenceMs, offsetMs);
   return new Date(current.getTime() - cadenceMs);
-}
-
-/**
- * The manifest's object key, `YYYY-MM-DD.kid-<kid>.jws`. The single source of
- * the key shape: the anchors bucket policy's manifest pattern is pinned to it.
- */
-export function buildManifestArtifactKey(boundary: Date, kid: string): string {
-  return `${boundary.toISOString().slice(0, 10)}.kid-${kid}.jws`;
 }
 
 // --- Internals ---
@@ -657,10 +651,10 @@ export class AuditAnchorPublisher {
         });
 
         const canonicalBytes = canonicalize(manifest);
-        const jws = sign(canonicalBytes, config.signingKey, config.signingKeyKid);
+        const jws = sign(canonicalBytes, config.signingKey);
 
         const manifestSha256 = createHash("sha256").update(canonicalBytes).digest("hex");
-        artifactKey = buildManifestArtifactKey(boundary, config.signingKeyKid);
+        artifactKey = buildManifestArtifactKey(boundary, kidForPublicKey(publicKeyForSigningKey(config.signingKey)));
         const artifactBytes = Buffer.from(jws, "utf-8");
         tenantsInManifest = anchors.map((a) => a.tenantId);
 
@@ -676,7 +670,7 @@ export class AuditAnchorPublisher {
           for (const dest of config.destinations) {
             try {
               await untilAborted(
-                dest.upload({
+                dest.create({
                   artifactBytes,
                   artifactKey,
                   contentType: "application/jose",

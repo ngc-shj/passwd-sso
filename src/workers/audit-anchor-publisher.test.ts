@@ -30,7 +30,6 @@ import {
   SETTING_LAST_PUBLISHED_BOUNDARY,
   SETTING_PREVIOUS_MANIFEST,
   SETTING_UPLOAD_ATTEMPTS,
-  buildManifestArtifactKey,
   createPublisher,
   currentCadenceBoundary,
   previousCadenceBoundary,
@@ -38,6 +37,8 @@ import {
   type PublisherConfig,
 } from "./audit-anchor-publisher";
 import type { AnchorDestination } from "@/lib/audit/anchor-destinations/destination";
+import { buildManifestArtifactKey } from "@/lib/audit/anchor-artifact-keys";
+import { kidForPublicKey, publicKeyForSigningKey } from "@/lib/audit/anchor-manifest";
 
 // ─── Hoisted mocks ───────────────────────────────────────────────────────────
 
@@ -74,7 +75,7 @@ const TENANT_ID_2 = "22222222-2222-4222-8222-222222222222";
 
 const SIGNING_KEY = randomBytes(32);
 const TAG_SECRET = randomBytes(32);
-const KID = "audit-anchor-0123456789abcdef";
+const KID = kidForPublicKey(publicKeyForSigningKey(SIGNING_KEY));
 
 const CADENCE_MS = 24 * 60 * 60 * 1000;
 const OFFSET_MS = 5 * 60 * 1000;
@@ -96,9 +97,9 @@ function lockTimeoutError(): Error {
 
 function makeDestination(
   name: string,
-  upload: AnchorDestination["upload"] = vi.fn().mockResolvedValue(undefined),
+  create: AnchorDestination["create"] = vi.fn().mockResolvedValue("created"),
 ): AnchorDestination {
-  return { name, upload };
+  return { name, create, read: vi.fn().mockResolvedValue(null), list: vi.fn().mockResolvedValue([]) };
 }
 
 function makeConfig(overrides: Partial<PublisherConfig> = {}): PublisherConfig {
@@ -106,7 +107,6 @@ function makeConfig(overrides: Partial<PublisherConfig> = {}): PublisherConfig {
     databaseUrl: "postgresql://test:test@localhost:5432/test",
     deploymentId: "deploy-x",
     signingKey: SIGNING_KEY,
-    signingKeyKid: KID,
     tagSecret: TAG_SECRET,
     destinations: [makeDestination("filesystem")],
     cadenceMs: CADENCE_MS,
@@ -304,14 +304,6 @@ describe("cadence math", () => {
     const now = new Date("2026-01-15T12:00:00Z");
     const boundary = currentCadenceBoundary(now, CADENCE_MS, 0);
     expect(boundary.toISOString()).toBe("2026-01-15T00:00:00.000Z");
-  });
-});
-
-describe("buildManifestArtifactKey", () => {
-  it("builds YYYY-MM-DD.kid-<kid>.jws from the boundary's UTC date", () => {
-    expect(buildManifestArtifactKey(new Date("2026-01-15T00:05:00Z"), KID)).toBe(
-      `2026-01-15.kid-${KID}.jws`,
-    );
   });
 });
 
@@ -773,7 +765,7 @@ describe("AuditAnchorPublisher.runCadence — failures", () => {
     let signal: AbortSignal | undefined;
     const hanging = makeDestination("s3", vi.fn((args: { signal?: AbortSignal }) => {
       signal = args.signal;
-      return new Promise<void>(() => {});
+      return new Promise<never>(() => {});
     }));
     const outcome = await publisherFor(db, { destinations: [hanging], uploadTimeoutMs: 20 }).runCadence(BOUNDARY);
 
@@ -792,7 +784,7 @@ describe("AuditAnchorPublisher.runCadence — failures", () => {
     vi.useFakeTimers();
     vi.setSystemTime(WALL_CLOCK);
     const boundMs = 400;
-    const slow = () => vi.fn(() => new Promise<void>((resolve) => setTimeout(resolve, boundMs * fraction)));
+    const slow = () => vi.fn(() => new Promise<"created">((resolve) => setTimeout(() => resolve("created"), boundMs * fraction)));
     const db = makeDb();
     const run = publisherFor(db, {
       destinations: [makeDestination("filesystem", slow()), makeDestination("s3", slow())],

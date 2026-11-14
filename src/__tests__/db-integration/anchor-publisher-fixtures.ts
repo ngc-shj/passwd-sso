@@ -61,7 +61,6 @@ export function makePublisherConfig(
     databaseUrl: "unused://the-test-passes-its-own-client",
     deploymentId: `test-deploy-${randomBytes(4).toString("hex")}`,
     signingKey: randomBytes(32),
-    signingKeyKid: `audit-anchor-${randomBytes(6).toString("hex")}`,
     tagSecret: randomBytes(32),
     destinations,
     cadenceMs: CADENCE_MS,

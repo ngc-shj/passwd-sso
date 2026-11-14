@@ -1,0 +1,155 @@
+{
+  "generator": "generate-audit-anchor-vectors.mjs",
+  "key": {
+    "seedHex": "4242424242424242424242424242424242424242424242424242424242424242",
+    "publicKeyHex": "2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12",
+    "kid": "audit-anchor-2152f8d19b791d24"
+  },
+  "manifest": {
+    "$schema": "https://passwd-sso.example/schemas/audit-anchor-manifest-v1.json",
+    "version": 1,
+    "issuer": "passwd-sso",
+    "deploymentId": "vector-deployment",
+    "anchoredAt": "2026-01-15T00:05:00.000Z",
+    "previousManifest": null,
+    "tenants": [
+      {
+        "tenantTag": "6db2cb938b211a0b0824844113d78dd8aaafbeb608b6a2fc3903aa5114c03323",
+        "chainSeq": "5",
+        "prevHash": "abababababababababababababababababababababababababababababababab",
+        "epoch": 1
+      }
+    ]
+  },
+  "jws": [
+    {
+      "name": "valid manifest",
+      "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImF1ZGl0LWFuY2hvci0yMTUyZjhkMTliNzkxZDI0IiwidHlwIjoicGFzc3dkLXNzby5hdWRpdC1hbmNob3IudjEifQ.eyIkc2NoZW1hIjoiaHR0cHM6Ly9wYXNzd2Qtc3NvLmV4YW1wbGUvc2NoZW1hcy9hdWRpdC1hbmNob3ItbWFuaWZlc3QtdjEuanNvbiIsImFuY2hvcmVkQXQiOiIyMDI2LTAxLTE1VDAwOjA1OjAwLjAwMFoiLCJkZXBsb3ltZW50SWQiOiJ2ZWN0b3ItZGVwbG95bWVudCIsImlzc3VlciI6InBhc3N3ZC1zc28iLCJwcmV2aW91c01hbmlmZXN0IjpudWxsLCJ0ZW5hbnRzIjpbeyJjaGFpblNlcSI6IjUiLCJlcG9jaCI6MSwicHJldkhhc2giOiJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwidGVuYW50VGFnIjoiNmRiMmNiOTM4YjIxMWEwYjA4MjQ4NDQxMTNkNzhkZDhhYWFmYmViNjA4YjZhMmZjMzkwM2FhNTExNGMwMzMyMyJ9XSwidmVyc2lvbiI6MX0.G7Dd0hr-XfDgXpDKyZhGHD0DTP54cuaFsbW-0U48zu1fp-TiCRLQY-Nuvv8SCbtzzlbt-CFKzjDLAJ3FpaQoCA",
+      "expect": "ok"
+    },
+    {
+      "name": "valid signature under a header naming another key",
+      "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImF1ZGl0LWFuY2hvci0yMmZjMjk3NzkyZjBiNmZmIiwidHlwIjoicGFzc3dkLXNzby5hdWRpdC1hbmNob3IudjEifQ.eyIkc2NoZW1hIjoiaHR0cHM6Ly9wYXNzd2Qtc3NvLmV4YW1wbGUvc2NoZW1hcy9hdWRpdC1hbmNob3ItbWFuaWZlc3QtdjEuanNvbiIsImFuY2hvcmVkQXQiOiIyMDI2LTAxLTE1VDAwOjA1OjAwLjAwMFoiLCJkZXBsb3ltZW50SWQiOiJ2ZWN0b3ItZGVwbG95bWVudCIsImlzc3VlciI6InBhc3N3ZC1zc28iLCJwcmV2aW91c01hbmlmZXN0IjpudWxsLCJ0ZW5hbnRzIjpbeyJjaGFpblNlcSI6IjUiLCJlcG9jaCI6MSwicHJldkhhc2giOiJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwidGVuYW50VGFnIjoiNmRiMmNiOTM4YjIxMWEwYjA4MjQ4NDQxMTNkNzhkZDhhYWFmYmViNjA4YjZhMmZjMzkwM2FhNTExNGMwMzMyMyJ9XSwidmVyc2lvbiI6MX0.lW0vYCpVvCdZ-JIbxECnSMOF0ildQ6ZC9_U8Zk7F7nLF1Zat84qBtWXWaTwltvPlXFsivRvMdTQDaqCSuT5NBw",
+      "expect": "KidMismatchError"
+    },
+    {
+      "name": "another key's kid and a bad signature: the kid is reported first",
+      "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImF1ZGl0LWFuY2hvci0yMmZjMjk3NzkyZjBiNmZmIiwidHlwIjoicGFzc3dkLXNzby5hdWRpdC1hbmNob3IudjEifQ.eyIkc2NoZW1hIjoiaHR0cHM6Ly9wYXNzd2Qtc3NvLmV4YW1wbGUvc2NoZW1hcy9hdWRpdC1hbmNob3ItbWFuaWZlc3QtdjEuanNvbiIsImFuY2hvcmVkQXQiOiIyMDI2LTAxLTE1VDAwOjA1OjAwLjAwMFoiLCJkZXBsb3ltZW50SWQiOiJ2ZWN0b3ItZGVwbG95bWVudCIsImlzc3VlciI6InBhc3N3ZC1zc28iLCJwcmV2aW91c01hbmlmZXN0IjpudWxsLCJ0ZW5hbnRzIjpbeyJjaGFpblNlcSI6IjUiLCJlcG9jaCI6MSwicHJldkhhc2giOiJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwidGVuYW50VGFnIjoiNmRiMmNiOTM4YjIxMWEwYjA4MjQ4NDQxMTNkNzhkZDhhYWFmYmViNjA4YjZhMmZjMzkwM2FhNTExNGMwMzMyMyJ9XSwidmVyc2lvbiI6MX0.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "expect": "KidMismatchError"
+    },
+    {
+      "name": "own kid and a bad signature",
+      "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImF1ZGl0LWFuY2hvci0yMTUyZjhkMTliNzkxZDI0IiwidHlwIjoicGFzc3dkLXNzby5hdWRpdC1hbmNob3IudjEifQ.eyIkc2NoZW1hIjoiaHR0cHM6Ly9wYXNzd2Qtc3NvLmV4YW1wbGUvc2NoZW1hcy9hdWRpdC1hbmNob3ItbWFuaWZlc3QtdjEuanNvbiIsImFuY2hvcmVkQXQiOiIyMDI2LTAxLTE1VDAwOjA1OjAwLjAwMFoiLCJkZXBsb3ltZW50SWQiOiJ2ZWN0b3ItZGVwbG95bWVudCIsImlzc3VlciI6InBhc3N3ZC1zc28iLCJwcmV2aW91c01hbmlmZXN0IjpudWxsLCJ0ZW5hbnRzIjpbeyJjaGFpblNlcSI6IjUiLCJlcG9jaCI6MSwicHJldkhhc2giOiJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwidGVuYW50VGFnIjoiNmRiMmNiOTM4YjIxMWEwYjA4MjQ4NDQxMTNkNzhkZDhhYWFmYmViNjA4YjZhMmZjMzkwM2FhNTExNGMwMzMyMyJ9XSwidmVyc2lvbiI6MX0.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "expect": "InvalidSignatureError"
+    },
+    {
+      "name": "malformed kid: upper-case hex",
+      "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImF1ZGl0LWFuY2hvci0yMTUyRjhEMTlCNzkxRDI0IiwidHlwIjoicGFzc3dkLXNzby5hdWRpdC1hbmNob3IudjEifQ.eyIkc2NoZW1hIjoiaHR0cHM6Ly9wYXNzd2Qtc3NvLmV4YW1wbGUvc2NoZW1hcy9hdWRpdC1hbmNob3ItbWFuaWZlc3QtdjEuanNvbiIsImFuY2hvcmVkQXQiOiIyMDI2LTAxLTE1VDAwOjA1OjAwLjAwMFoiLCJkZXBsb3ltZW50SWQiOiJ2ZWN0b3ItZGVwbG95bWVudCIsImlzc3VlciI6InBhc3N3ZC1zc28iLCJwcmV2aW91c01hbmlmZXN0IjpudWxsLCJ0ZW5hbnRzIjpbeyJjaGFpblNlcSI6IjUiLCJlcG9jaCI6MSwicHJldkhhc2giOiJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwidGVuYW50VGFnIjoiNmRiMmNiOTM4YjIxMWEwYjA4MjQ4NDQxMTNkNzhkZDhhYWFmYmViNjA4YjZhMmZjMzkwM2FhNTExNGMwMzMyMyJ9XSwidmVyc2lvbiI6MX0.nM87wMEXkGoBeJhLknXCQJRFYQrefuQzNR39pZpQsy6-KOy2RwWO6SLRDlA-cHySCiIDdlUAwrzZdWMsg3FzBA",
+      "expect": "InvalidKidError"
+    },
+    {
+      "name": "malformed kid: 8 hex chars",
+      "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImF1ZGl0LWFuY2hvci0yMTUyZjhkMSIsInR5cCI6InBhc3N3ZC1zc28uYXVkaXQtYW5jaG9yLnYxIn0.eyIkc2NoZW1hIjoiaHR0cHM6Ly9wYXNzd2Qtc3NvLmV4YW1wbGUvc2NoZW1hcy9hdWRpdC1hbmNob3ItbWFuaWZlc3QtdjEuanNvbiIsImFuY2hvcmVkQXQiOiIyMDI2LTAxLTE1VDAwOjA1OjAwLjAwMFoiLCJkZXBsb3ltZW50SWQiOiJ2ZWN0b3ItZGVwbG95bWVudCIsImlzc3VlciI6InBhc3N3ZC1zc28iLCJwcmV2aW91c01hbmlmZXN0IjpudWxsLCJ0ZW5hbnRzIjpbeyJjaGFpblNlcSI6IjUiLCJlcG9jaCI6MSwicHJldkhhc2giOiJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwidGVuYW50VGFnIjoiNmRiMmNiOTM4YjIxMWEwYjA4MjQ4NDQxMTNkNzhkZDhhYWFmYmViNjA4YjZhMmZjMzkwM2FhNTExNGMwMzMyMyJ9XSwidmVyc2lvbiI6MX0.pr7bvFlRGLDPeSU6HYuwoK6_UmcWJIJcJLvObvdnPEpTkgO2e6tmYrOrui21A-1maVS-dKEgrv-8VthUzywZDA",
+      "expect": "InvalidKidError"
+    },
+    {
+      "name": "malformed kid: path separator",
+      "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImF1ZGl0LWFuY2hvci0uLi8uLi9ldGMvcGFzc3dkIiwidHlwIjoicGFzc3dkLXNzby5hdWRpdC1hbmNob3IudjEifQ.eyIkc2NoZW1hIjoiaHR0cHM6Ly9wYXNzd2Qtc3NvLmV4YW1wbGUvc2NoZW1hcy9hdWRpdC1hbmNob3ItbWFuaWZlc3QtdjEuanNvbiIsImFuY2hvcmVkQXQiOiIyMDI2LTAxLTE1VDAwOjA1OjAwLjAwMFoiLCJkZXBsb3ltZW50SWQiOiJ2ZWN0b3ItZGVwbG95bWVudCIsImlzc3VlciI6InBhc3N3ZC1zc28iLCJwcmV2aW91c01hbmlmZXN0IjpudWxsLCJ0ZW5hbnRzIjpbeyJjaGFpblNlcSI6IjUiLCJlcG9jaCI6MSwicHJldkhhc2giOiJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwidGVuYW50VGFnIjoiNmRiMmNiOTM4YjIxMWEwYjA4MjQ4NDQxMTNkNzhkZDhhYWFmYmViNjA4YjZhMmZjMzkwM2FhNTExNGMwMzMyMyJ9XSwidmVyc2lvbiI6MX0.kQFfOCzt5cTu8sq3vQr1tfSyS87GcEaW1OZH33yp61QGqad8Mojr3Wzb1BEKw-MwJq-cUnxmk31yl12Y9eQOAw",
+      "expect": "InvalidKidError"
+    },
+    {
+      "name": "anchoredAt not in the toISOString form",
+      "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImF1ZGl0LWFuY2hvci0yMTUyZjhkMTliNzkxZDI0IiwidHlwIjoicGFzc3dkLXNzby5hdWRpdC1hbmNob3IudjEifQ.eyIkc2NoZW1hIjoiaHR0cHM6Ly9wYXNzd2Qtc3NvLmV4YW1wbGUvc2NoZW1hcy9hdWRpdC1hbmNob3ItbWFuaWZlc3QtdjEuanNvbiIsImFuY2hvcmVkQXQiOiIyMDI2LTAxLTE1VDAwOjA1OjAwWiIsImRlcGxveW1lbnRJZCI6InZlY3Rvci1kZXBsb3ltZW50IiwiaXNzdWVyIjoicGFzc3dkLXNzbyIsInByZXZpb3VzTWFuaWZlc3QiOm51bGwsInRlbmFudHMiOlt7ImNoYWluU2VxIjoiNSIsImVwb2NoIjoxLCJwcmV2SGFzaCI6ImFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWIiLCJ0ZW5hbnRUYWciOiI2ZGIyY2I5MzhiMjExYTBiMDgyNDg0NDExM2Q3OGRkOGFhYWZiZWI2MDhiNmEyZmMzOTAzYWE1MTE0YzAzMzIzIn1dLCJ2ZXJzaW9uIjoxfQ.5CziHW7MZ4cr5Uj4jYJ_EmK2jrJ4uy1dGLj0z676fZ2Bi553C1y2LQMPOZkJzu0wFdDNVv3J_kMJfuZhbI92BA",
+      "expect": "ManifestSchemaValidationError"
+    },
+    {
+      "name": "anchoredAt with an expanded year",
+      "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImF1ZGl0LWFuY2hvci0yMTUyZjhkMTliNzkxZDI0IiwidHlwIjoicGFzc3dkLXNzby5hdWRpdC1hbmNob3IudjEifQ.eyIkc2NoZW1hIjoiaHR0cHM6Ly9wYXNzd2Qtc3NvLmV4YW1wbGUvc2NoZW1hcy9hdWRpdC1hbmNob3ItbWFuaWZlc3QtdjEuanNvbiIsImFuY2hvcmVkQXQiOiIrMDEwMDAwLTAxLTAxVDAwOjAwOjAwLjAwMFoiLCJkZXBsb3ltZW50SWQiOiJ2ZWN0b3ItZGVwbG95bWVudCIsImlzc3VlciI6InBhc3N3ZC1zc28iLCJwcmV2aW91c01hbmlmZXN0IjpudWxsLCJ0ZW5hbnRzIjpbeyJjaGFpblNlcSI6IjUiLCJlcG9jaCI6MSwicHJldkhhc2giOiJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwidGVuYW50VGFnIjoiNmRiMmNiOTM4YjIxMWEwYjA4MjQ4NDQxMTNkNzhkZDhhYWFmYmViNjA4YjZhMmZjMzkwM2FhNTExNGMwMzMyMyJ9XSwidmVyc2lvbiI6MX0.nNmyXwV5ZNJEyAydCQt1G3xlu0q3IFtxbRvb_0jWEJbCaxU38MsVX8fx13TKiePE6E1UY6H3pf70ZllmIcuRBw",
+      "expect": "ManifestSchemaValidationError"
+    }
+  ],
+  "publicKeyTexts": [
+    {
+      "name": "64 hex chars",
+      "text": "2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12",
+      "valid": true
+    },
+    {
+      "name": "64 hex chars and a trailing newline",
+      "text": "2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12\n",
+      "valid": true
+    },
+    {
+      "name": "63 hex chars",
+      "text": "2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db1",
+      "valid": false
+    },
+    {
+      "name": "65 hex chars",
+      "text": "2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db120",
+      "valid": false
+    },
+    {
+      "name": "upper-case hex",
+      "text": "2152F8D19B791D24453242E15F2EAB6CB7CFFA7B6A5ED30097960E069881DB12",
+      "valid": false
+    },
+    {
+      "name": "64 chars, one not hex",
+      "text": "2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db1g",
+      "valid": false
+    },
+    {
+      "name": "64 hex chars, then a non-hex tail",
+      "text": "2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12zz",
+      "valid": false
+    }
+  ],
+  "urls": [
+    {
+      "name": "https",
+      "url": "https://anchors.example.com/",
+      "allowed": true
+    },
+    {
+      "name": "http to localhost",
+      "url": "http://localhost:8080/",
+      "allowed": true
+    },
+    {
+      "name": "http to 127.0.0.1",
+      "url": "http://127.0.0.1:8080/",
+      "allowed": true
+    },
+    {
+      "name": "http to [::1]",
+      "url": "http://[::1]:8080/",
+      "allowed": true
+    },
+    {
+      "name": "http to another host",
+      "url": "http://anchors.example.com/",
+      "allowed": false
+    },
+    {
+      "name": "upper-case scheme",
+      "url": "HTTPS://anchors.example.com/",
+      "allowed": false
+    },
+    {
+      "name": "loopback as a subdomain label",
+      "url": "http://127.0.0.1.example.com/",
+      "allowed": false
+    },
+    {
+      "name": "loopback as userinfo",
+      "url": "http://127.0.0.1@example.com/",
+      "allowed": false
+    },
+    {
+      "name": "another scheme",
+      "url": "ftp://localhost/",
+      "allowed": false
+    }
+  ]
+}

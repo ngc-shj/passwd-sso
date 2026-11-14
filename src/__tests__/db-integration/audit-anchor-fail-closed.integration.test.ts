@@ -144,7 +144,12 @@ describe("AuditAnchorPublisher — FR6 fail-closed", () => {
 
   it("the injected upload bound fails a destination that never settles, within the test budget", async () => {
     const boundary = nextBoundary();
-    const hanging: AnchorDestination = { name: "filesystem", upload: () => new Promise<void>(() => {}) };
+    const hanging: AnchorDestination = {
+      name: "filesystem",
+      create: () => new Promise<never>(() => {}),
+      read: async () => null,
+      list: async () => [],
+    };
 
     const started = Date.now();
     const outcome = await publisher(makePublisherConfig([hanging], { uploadTimeoutMs: 500 })).runCadence(boundary);
@@ -157,7 +162,9 @@ describe("AuditAnchorPublisher — FR6 fail-closed", () => {
     const boundary = nextBoundary();
     const slow: AnchorDestination = {
       name: "filesystem",
-      upload: () => new Promise<void>((resolve) => setTimeout(resolve, 2_000)),
+      create: () => new Promise<"created">((resolve) => setTimeout(() => resolve("created"), 2_000)),
+      read: async () => null,
+      list: async () => [],
     };
 
     const started = Date.now();

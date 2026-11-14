@@ -41,7 +41,9 @@ import {
   snapshotPublisherSettings,
   type SettingsSnapshot,
 } from "./anchor-publisher-fixtures";
-import { AuditAnchorPublisher, buildManifestArtifactKey, type PublisherConfig } from "@/workers/audit-anchor-publisher";
+import { AuditAnchorPublisher, type PublisherConfig } from "@/workers/audit-anchor-publisher";
+import { buildManifestArtifactKey } from "@/lib/audit/anchor-artifact-keys";
+import { kidForPublicKey, publicKeyForSigningKey } from "@/lib/audit/anchor-manifest";
 import {
   S3Destination,
   joinS3Key,
@@ -191,7 +193,7 @@ describe("AuditAnchorPublisher — MinIO versions across a lost commit", () => {
     const boundary = nextBoundary();
     const s3 = new S3Destination({ bucket: BUCKET, prefix, clientOptions });
     const config = makePublisherConfig([s3], { now: wallClockAt(boundary) });
-    const key = joinS3Key(prefix, buildManifestArtifactKey(boundary, config.signingKeyKid));
+    const key = joinS3Key(prefix, buildManifestArtifactKey(boundary, kidForPublicKey(publicKeyForSigningKey(config.signingKey))));
 
     const lost = await publisher({
       ...config,
@@ -211,7 +213,7 @@ describe("AuditAnchorPublisher — MinIO versions across a lost commit", () => {
 
     const next = new Date(boundary.getTime() + CADENCE_MS);
     expect((await publisher({ ...config, now: wallClockAt(next) }).runCadence(next)).kind).toBe("published");
-    const nextKey = joinS3Key(prefix, buildManifestArtifactKey(next, config.signingKeyKid));
+    const nextKey = joinS3Key(prefix, buildManifestArtifactKey(next, kidForPublicKey(publicKeyForSigningKey(config.signingKey))));
     const nextVersion = (await versionsOf(nextKey)).find((v) => v.isLatest);
     expect(previousManifestOf(nextVersion?.body ?? "")?.sha256).toBe(latest);
   });
@@ -223,13 +225,15 @@ describe("AuditAnchorPublisher — MinIO versions across a lost commit", () => {
     // aborts it — the object is stored, the run sees an upload failure.
     const storedThenHung: AnchorDestination = {
       name: s3.name,
-      upload: async (args) => {
-        await s3.upload({ ...args, signal: undefined });
-        await new Promise<void>(() => {});
+      create: async (args) => {
+        await s3.create({ ...args, signal: undefined });
+        return new Promise<never>(() => {});
       },
+      read: (key, signal) => s3.read(key, signal),
+      list: (signal) => s3.list(signal),
     };
     const config = makePublisherConfig([s3]);
-    const key = joinS3Key(prefix, buildManifestArtifactKey(boundary, config.signingKeyKid));
+    const key = joinS3Key(prefix, buildManifestArtifactKey(boundary, kidForPublicKey(publicKeyForSigningKey(config.signingKey))));
 
     const aborted = await publisher({ ...config, destinations: [storedThenHung], uploadTimeoutMs: 2_000 }).runCadence(boundary);
     expect(aborted).toMatchObject({ kind: "failed", stage: "upload", reason: "s3-object-lock_UPLOAD_FAILED:UPLOAD_TIMEOUT" });

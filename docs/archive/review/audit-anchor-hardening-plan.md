@@ -666,6 +666,52 @@ done in Phase 2, and the line says what settles it.
   gitleaks run in `scripts/pre-pr.sh`.
 - **Orchestrator sign-off**: in scope of C2.
 
+## Implementation Checklist
+
+Batches (A first; B and C after A; D last):
+
+- **A — C1, C2**
+  - `src/lib/constants/audit/audit.ts` (`AUDIT_ANCHOR_ARTIFACT_MAX_BYTES`, `AUDIT_ANCHOR_STATEMENT_TYP`,
+    `AUDIT_ANCHOR_MIRROR_BACKFILL_MAX`), `cli/src/constants/audit-anchor.ts`
+  - `src/lib/audit/anchor-artifact-keys.ts` (new) + unit test
+  - `src/lib/audit/anchor-manifest.ts` + `anchor-manifest.unit.test.ts`
+  - `src/lib/audit/anchor-destinations/{destination,s3-destination,filesystem-destination,github-release-destination}.ts`,
+    `in-memory-destination.ts` (new, test support), `from-env.ts` (new), their unit tests,
+    one contract suite; `audit-anchor-s3-destination.integration.test.ts`,
+    `audit-anchor-github-release-destination.integration.test.ts`
+  - `cli/src/commands/audit-verify.ts`, `cli/src/index.ts`, `cli/src/__tests__/{unit,integration}/audit-verify*.test.ts`,
+    `cli/src/__tests__/fixtures/audit-anchor-vectors.json` (new), `.github/workflows/ci.yml`
+    (`app` filter entry) + the test that pins it
+  - `src/__tests__/infra/audit-anchor-key-contract.test.ts`
+- **B — C3, C4**
+  - `src/lib/audit/anchor-published-state.ts` (new) + unit test
+  - `src/workers/audit-anchor-publisher.ts`, `audit-anchor-publisher.test.ts`,
+    `audit-anchor-publisher.metric-filter.test.ts`, `src/workers/audit-anchor-scheduler.ts` (header)
+  - `scripts/audit-anchor-publisher.ts` (uses `from-env.ts`, no `signingKeyKid`)
+  - `src/__tests__/db-integration/anchor-publisher-fixtures.ts`, `audit-anchor-publisher.integration.test.ts`,
+    `audit-anchor-publisher-s3.integration.test.ts`, `audit-anchor-fail-closed.integration.test.ts`,
+    `anchor-publisher-key-load.integration.test.ts`
+- **C — C5, C7**
+  - `infra/terraform/iam.tf`; `src/__tests__/infra/audit-anchor-wiring.test.ts`
+  - `scripts/audit-anchor-keys.ts` (new) + tests, `package.json` (five scripts)
+- **D — C6, C8**
+  - the docs listed in C6/C8, `scripts/checks/worker-policy-manifest.json`, `CLAUDE.md`,
+    Terraform comment-only edits, the runbook test, the manual-test record
+
+Reuse (do not reimplement): `jcsCanonical` (`@/lib/audit/audit-chain`), `errorLogFields`
+(`@/lib/logger/error-fields`), `pgErrorCode`, `MS_PER_*` (`@/lib/constants/time`),
+`currentCadenceBoundary`, `joinS3Key`, `computeTenantTag`, `setBypassGucs`/`advisoryXactLock`,
+the CLI's same-fd key-file read, `z.treeifyError`.
+
+Patterns: failure reasons are tokens (tenant-readable metadata), every worker log line
+carries `_logType`, time constants are computed from `MS_PER_*`, 3+ related string literals
+become a const object.
+
+CI parity: `bash ~/.claude/hooks/extract-ci-checks.sh` yields 21 gates; the anchor-relevant
+ones (vitest, integration with MinIO, terraform validate/test, gitleaks, CLI tests) are run
+by `scripts/pre-pr.sh` or by hand in Step 2-4. `terraform validate/test` runs offline (no AWS
+credentials) and is not E1.
+
 ## Go/No-Go Gate
 
 | ID | Subject | Status |

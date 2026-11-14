@@ -1,127 +1,154 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-
-vi.mock("node:fs/promises", () => ({
-  default: {
-    mkdir: vi.fn(),
-    writeFile: vi.fn(),
-  },
-  mkdir: vi.fn(),
-  writeFile: vi.fn(),
-}));
-
+import { describe, it, expect, afterEach } from "vitest";
 import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { FilesystemDestination } from "./filesystem-destination";
+import { publicKeyArtifactKey } from "@/lib/audit/anchor-artifact-keys";
+import { AUDIT_ANCHOR_ARTIFACT_MAX_BYTES } from "@/lib/constants/audit/audit";
+import { ArtifactTooLargeError } from "./destination";
+import {
+  createArtifact,
+  describeAnchorDestinationContract,
+  expectOneConcurrentCreateWins,
+  manifestKeyFor,
+  randomKid,
+} from "@/__tests__/helpers/anchor-destination-contract";
 
-const mockedMkdir = vi.mocked(fs.mkdir);
-const mockedWriteFile = vi.mocked(fs.writeFile);
+const tempDirs: string[] = [];
+
+async function tempDir(): Promise<string> {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "anchor-fs-destination-"));
+  tempDirs.push(dir);
+  return dir;
+}
+
+afterEach(async () => {
+  for (const dir of tempDirs.splice(0)) {
+    await fs.chmod(dir, 0o755).catch(() => undefined);
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+describeAnchorDestinationContract("filesystem", async () => new FilesystemDestination({ basePath: await tempDir() }));
 
 describe("FilesystemDestination", () => {
-  beforeEach(() => {
-    mockedMkdir.mockReset().mockResolvedValue(undefined);
-    mockedWriteFile.mockReset().mockResolvedValue(undefined);
-  });
-
   it("has name 'filesystem'", () => {
-    const dest = new FilesystemDestination({ basePath: "/var/anchors" });
-    expect(dest.name).toBe("filesystem");
+    expect(new FilesystemDestination({ basePath: "/var/anchors" }).name).toBe("filesystem");
   });
 
-  it("creates basePath recursively before writing", async () => {
-    const dest = new FilesystemDestination({ basePath: "/var/anchors" });
+  it("creates the base path recursively and stores the file there with mode 0o644", async () => {
+    const basePath = path.join(await tempDir(), "nested", "anchors");
+    const key = manifestKeyFor("2026-05-02");
 
-    await dest.upload({
-      artifactBytes: Buffer.from("payload"),
-      artifactKey: "2026-05-02.kid-audit-anchor-abc.jws",
-      contentType: "application/jose",
-    });
+    expect(await createArtifact(new FilesystemDestination({ basePath }), key, Buffer.from("payload"))).toBe("created");
 
-    expect(mockedMkdir).toHaveBeenCalledOnce();
-    expect(mockedMkdir).toHaveBeenCalledWith("/var/anchors", { recursive: true });
+    const stored = path.join(basePath, key);
+    expect(await fs.readFile(stored)).toEqual(Buffer.from("payload"));
+    expect((await fs.stat(stored)).mode & 0o777).toBe(0o644);
   });
 
-  it("writes file to basePath/artifactKey with mode 0o644", async () => {
-    const dest = new FilesystemDestination({ basePath: "/var/anchors" });
-    const bytes = Buffer.from("jws-payload");
+  it("stores a public key under public-keys/ and lists it by its full key", async () => {
+    const basePath = await tempDir();
+    const dest = new FilesystemDestination({ basePath });
+    const key = publicKeyArtifactKey(randomKid());
 
-    await dest.upload({
-      artifactBytes: bytes,
-      artifactKey: "artifact.jws",
-      contentType: "application/jose",
-    });
+    await createArtifact(dest, key, Buffer.from("ab".repeat(32)));
 
-    expect(mockedWriteFile).toHaveBeenCalledOnce();
-    expect(mockedWriteFile).toHaveBeenCalledWith(
-      "/var/anchors/artifact.jws",
-      bytes,
-      { mode: 0o644 },
-    );
+    expect(await fs.readFile(path.join(basePath, key), "utf-8")).toBe("ab".repeat(32));
+    expect(await dest.list()).toEqual([key]);
   });
 
-  it("calls mkdir before writeFile (ordering)", async () => {
-    const callOrder: string[] = [];
-    mockedMkdir.mockImplementation(async () => {
-      callOrder.push("mkdir");
-      return undefined;
-    });
-    mockedWriteFile.mockImplementation(async () => {
-      callOrder.push("writeFile");
-      return undefined;
-    });
+  it("leaves no temp file behind, whether the create wrote or found the key taken", async () => {
+    const basePath = await tempDir();
+    const dest = new FilesystemDestination({ basePath });
+    const key = manifestKeyFor("2026-05-02");
 
-    const dest = new FilesystemDestination({ basePath: "/var/anchors" });
-    await dest.upload({
-      artifactBytes: Buffer.from("x"),
-      artifactKey: "k.jws",
-      contentType: "application/jose",
-    });
+    await createArtifact(dest, key, Buffer.from("first"));
+    await createArtifact(dest, key, Buffer.from("second"));
 
-    expect(callOrder).toEqual(["mkdir", "writeFile"]);
+    expect(await fs.readdir(basePath)).toEqual([key]);
   });
 
-  it("propagates EACCES from mkdir", async () => {
-    const err = Object.assign(new Error("permission denied"), { code: "EACCES" });
-    mockedMkdir.mockRejectedValue(err);
+  it("eight concurrent creates of one key: one is created, and one file remains", async () => {
+    const basePath = await tempDir();
+    const key = manifestKeyFor("2026-05-02");
 
-    const dest = new FilesystemDestination({ basePath: "/forbidden" });
+    await expectOneConcurrentCreateWins(new FilesystemDestination({ basePath }), key);
+
+    expect(await fs.readdir(basePath)).toEqual([key]);
+  });
+
+  it("does not replace a file already at the key, even one it did not write", async () => {
+    const basePath = await tempDir();
+    const key = manifestKeyFor("2026-05-02");
+    await fs.writeFile(path.join(basePath, key), "planted");
+
+    expect(await createArtifact(new FilesystemDestination({ basePath }), key, Buffer.from("mine"))).toBe("exists");
+
+    expect(await fs.readFile(path.join(basePath, key), "utf-8")).toBe("planted");
+  });
+
+  it("lists a base path that does not exist yet as empty, and reads null from it", async () => {
+    const dest = new FilesystemDestination({ basePath: path.join(await tempDir(), "not-created") });
+
+    expect(await dest.list()).toEqual([]);
+    expect(await dest.read(manifestKeyFor("2026-05-02"))).toBeNull();
+  });
+
+  it("lists files of any name at the top level and under public-keys/, and no directory or temp file", async () => {
+    const basePath = await tempDir();
+    await fs.mkdir(path.join(basePath, "public-keys"));
+    await fs.mkdir(path.join(basePath, "other-dir"));
+    await fs.writeFile(path.join(basePath, "notes.txt"), "x");
+    await fs.writeFile(path.join(basePath, ".tmp-leftover"), "x");
+    await fs.writeFile(path.join(basePath, "public-keys", "stray.pem"), "x");
+    await fs.writeFile(path.join(basePath, "other-dir", "ignored.jws"), "x");
+
+    const keys = await new FilesystemDestination({ basePath }).list();
+
+    expect([...keys].sort()).toEqual(["notes.txt", "public-keys/stray.pem"]);
+  });
+
+  it("propagates a listing error that is not a missing directory", async () => {
+    const basePath = path.join(await tempDir(), "a-file");
+    await fs.writeFile(basePath, "not a directory");
+
+    await expect(new FilesystemDestination({ basePath }).list()).rejects.toMatchObject({ code: "ENOTDIR" });
+  });
+
+  it("throws on a create into a base path it cannot write, storing nothing", async () => {
+    const basePath = await tempDir();
+    await fs.chmod(basePath, 0o555);
+    const dest = new FilesystemDestination({ basePath });
+
+    await expect(createArtifact(dest, manifestKeyFor("2026-05-02"), Buffer.from("x"))).rejects.toMatchObject({
+      code: "EACCES",
+    });
+    expect(await dest.list()).toEqual([]);
+  });
+
+  it("throws on reading a stored file past the size bound", async () => {
+    const basePath = await tempDir();
+    const key = manifestKeyFor("2026-05-02");
+    await fs.writeFile(path.join(basePath, key), Buffer.alloc(AUDIT_ANCHOR_ARTIFACT_MAX_BYTES + 1));
+
+    await expect(new FilesystemDestination({ basePath }).read(key)).rejects.toBeInstanceOf(ArtifactTooLargeError);
+  });
+
+  it("rejects with the signal's reason when it is already aborted", async () => {
+    const dest = new FilesystemDestination({ basePath: await tempDir() });
+    const reason = new Error("bound fired");
+    const signal = AbortSignal.abort(reason);
+
     await expect(
-      dest.upload({
+      dest.create({
         artifactBytes: Buffer.from("x"),
-        artifactKey: "k.jws",
+        artifactKey: manifestKeyFor("2026-05-02"),
         contentType: "application/jose",
+        signal,
       }),
-    ).rejects.toThrow("permission denied");
-
-    expect(mockedWriteFile).not.toHaveBeenCalled();
-  });
-
-  it("propagates ENOSPC from writeFile", async () => {
-    const err = Object.assign(new Error("disk full"), { code: "ENOSPC" });
-    mockedWriteFile.mockRejectedValue(err);
-
-    const dest = new FilesystemDestination({ basePath: "/var/anchors" });
-    await expect(
-      dest.upload({
-        artifactBytes: Buffer.from("x"),
-        artifactKey: "k.jws",
-        contentType: "application/jose",
-      }),
-    ).rejects.toThrow("disk full");
-  });
-
-  it("joins basePath with artifactKey via path.join semantics", async () => {
-    const dest = new FilesystemDestination({ basePath: "/var/anchors/" });
-
-    await dest.upload({
-      artifactBytes: Buffer.from("x"),
-      artifactKey: "subdir/key.jws",
-      contentType: "application/jose",
-    });
-
-    // path.join normalizes the trailing slash + nested key
-    expect(mockedWriteFile).toHaveBeenCalledWith(
-      "/var/anchors/subdir/key.jws",
-      expect.any(Buffer),
-      { mode: 0o644 },
-    );
+    ).rejects.toBe(reason);
+    await expect(dest.list(signal)).rejects.toBe(reason);
+    expect(await dest.list()).toEqual([]);
   });
 });

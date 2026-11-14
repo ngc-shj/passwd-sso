@@ -4,7 +4,7 @@ import { existsSync, writeFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolve } from "node:path";
-import { generateKeyPairSync, createPrivateKey, sign as nodeSign } from "node:crypto";
+import { generateKeyPairSync, createPrivateKey, createPublicKey, sign as nodeSign } from "node:crypto";
 import { AUDIT_ANCHOR_KID_PREFIX, AUDIT_ANCHOR_TYP } from "../../constants/audit-anchor.js";
 
 // cli/src/__tests__/integration/ → cli/dist/
@@ -52,10 +52,23 @@ function buildMinimalManifest() {
   };
 }
 
+/** The kid a seed's public key derives: the only one the verifier accepts for it. */
+function kidForSeed(privateKeySeed: Buffer): string {
+  const keyObject = createPrivateKey({
+    key: Buffer.concat([ED25519_PKCS8_PREFIX, privateKeySeed]),
+    format: "der",
+    type: "pkcs8",
+  });
+  const publicKey = (createPublicKey(keyObject).export({ type: "spki", format: "der" }) as Buffer).subarray(
+    ED25519_SPKI_PREFIX.length,
+  );
+  return `${AUDIT_ANCHOR_KID_PREFIX}${publicKey.subarray(0, 8).toString("hex")}`;
+}
+
 function signManifest(
   manifest: ReturnType<typeof buildMinimalManifest>,
   privateKeySeed: Buffer,
-  kid: string,
+  kid: string = kidForSeed(privateKeySeed),
 ): string {
   const headerObj = { alg: "EdDSA", kid, typ: AUDIT_ANCHOR_TYP };
   const canonicalBytes = Buffer.from(jcsCanonical(manifest), "utf-8");
@@ -89,9 +102,8 @@ describe("CLI audit-verify subcommand (integration)", () => {
       const pubHex = pubDer.subarray(ED25519_SPKI_PREFIX.length).toString("hex");
 
       // Build and sign manifest
-      const kid = `${AUDIT_ANCHOR_KID_PREFIX}inttest01`;
       const manifest = buildMinimalManifest();
-      const jws = signManifest(manifest, privateKeySeed, kid);
+      const jws = signManifest(manifest, privateKeySeed);
 
       // Write to temp files
       const jwsPath = join(tmpDir, "manifest.jws");
@@ -110,7 +122,7 @@ describe("CLI audit-verify subcommand (integration)", () => {
   );
 
   it.skipIf(!distExists)(
-    "exits non-zero for a JWS with wrong public key",
+    "exits 19 for a JWS checked under a key its kid does not name",
     () => {
       const tmpDir = mkdtempSync(join(tmpdir(), "audit-verify-int-wrong-"));
 
@@ -126,23 +138,83 @@ describe("CLI audit-verify subcommand (integration)", () => {
       const wrongPubHex = wrongPubDer.subarray(ED25519_SPKI_PREFIX.length).toString("hex");
 
       // Build and sign manifest with the real private key
-      const kid = `${AUDIT_ANCHOR_KID_PREFIX}wrongkey1`;
       const manifest = buildMinimalManifest();
-      const jws = signManifest(manifest, privateKeySeed, kid);
+      const jws = signManifest(manifest, privateKeySeed);
 
       const jwsPath = join(tmpDir, "manifest.jws");
       const pubPath = join(tmpDir, "wrong.pub");
       writeFileSync(jwsPath, jws);
       writeFileSync(pubPath, wrongPubHex);
 
-      // Run subprocess — expect non-zero exit
       const result = spawnSync("node", [distEntry, "audit-verify", "--manifest", jwsPath, "--public-key", pubPath], {
         encoding: "utf8",
         timeout: 10000,
       });
 
-      expect(result.status).not.toBe(0);
+      expect(result.status).toBe(19);
+      expect(result.stderr).toContain("does not name the supplied public key");
+      expect(result.stdout).not.toContain("PASS");
+    },
+  );
+
+  it.skipIf(!distExists)(
+    "exits 12 for a JWS under its own key with a signature that does not verify",
+    () => {
+      const tmpDir = mkdtempSync(join(tmpdir(), "audit-verify-int-sig-"));
+
+      const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+      const privateKeySeed = (
+        privateKey.export({ type: "pkcs8", format: "der" }) as Buffer
+      ).subarray(ED25519_PKCS8_PREFIX.length);
+      const pubDer = publicKey.export({ type: "spki", format: "der" }) as Buffer;
+      const pubHex = pubDer.subarray(ED25519_SPKI_PREFIX.length).toString("hex");
+
+      const [headerB64, payloadB64] = signManifest(buildMinimalManifest(), privateKeySeed).split(".");
+      const jwsPath = join(tmpDir, "manifest.jws");
+      const pubPath = join(tmpDir, "key.pub");
+      writeFileSync(jwsPath, `${headerB64}.${payloadB64}.${b64urlEncode(Buffer.alloc(64))}`);
+      writeFileSync(pubPath, pubHex);
+
+      const result = spawnSync("node", [distEntry, "audit-verify", "--manifest", jwsPath, "--public-key", pubPath], {
+        encoding: "utf8",
+        timeout: 10000,
+      });
+
+      expect(result.status).toBe(12);
       expect(result.stderr).toContain("signature");
+    },
+  );
+
+  it.skipIf(!distExists)(
+    "verifies a prior manifest signed under another key with --prior-public-key",
+    () => {
+      const tmpDir = mkdtempSync(join(tmpdir(), "audit-verify-int-prior-"));
+      const seedOf = (pair: ReturnType<typeof generateKeyPairSync>) =>
+        (pair.privateKey.export({ type: "pkcs8", format: "der" }) as Buffer).subarray(ED25519_PKCS8_PREFIX.length);
+      const pubHexOf = (pair: ReturnType<typeof generateKeyPairSync>) =>
+        (pair.publicKey.export({ type: "spki", format: "der" }) as Buffer)
+          .subarray(ED25519_SPKI_PREFIX.length)
+          .toString("hex");
+      const current = generateKeyPairSync("ed25519");
+      const retired = generateKeyPairSync("ed25519");
+
+      const jwsPath = join(tmpDir, "manifest.jws");
+      const priorPath = join(tmpDir, "prior.jws");
+      const pubPath = join(tmpDir, "key.pub");
+      const priorPubPath = join(tmpDir, "retired.pub");
+      writeFileSync(jwsPath, signManifest(buildMinimalManifest(), seedOf(current)));
+      writeFileSync(priorPath, signManifest(buildMinimalManifest(), seedOf(retired)));
+      writeFileSync(pubPath, pubHexOf(current));
+      writeFileSync(priorPubPath, pubHexOf(retired));
+
+      const base = [distEntry, "audit-verify", "--manifest", jwsPath, "--public-key", pubPath, "--prior-manifest", priorPath];
+      const withKey = spawnSync("node", [...base, "--prior-public-key", priorPubPath], { encoding: "utf8", timeout: 10000 });
+      const without = spawnSync("node", base, { encoding: "utf8", timeout: 10000 });
+
+      expect(withKey.status).toBe(0);
+      expect(withKey.stdout).toContain("PASS");
+      expect(without.status).toBe(1);
+      expect(without.stderr).toContain("--prior-public-key");
     },
   );
 });

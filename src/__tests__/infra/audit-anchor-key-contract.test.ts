@@ -14,7 +14,8 @@ import { describe, it, expect } from "vitest";
 import { generateKeyPairSync } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { buildManifestArtifactKey } from "@/workers/audit-anchor-publisher";
+import { buildManifestArtifactKey } from "@/lib/audit/anchor-artifact-keys";
+import { kidForPublicKey } from "@/lib/audit/anchor-manifest";
 import { joinS3Key } from "@/lib/audit/anchor-destinations/s3-destination";
 import { AUDIT_ANCHOR_RETENTION_YEARS } from "@/lib/constants/audit/audit";
 import { TerraformConfig, TERRAFORM_DIR, nested, plain } from "../helpers/hcl-subset";
@@ -29,11 +30,10 @@ function s3PatternToRegExp(pattern: string): RegExp {
   return new RegExp(`^${body}$`, "s");
 }
 
-/** A kid as scripts/audit-anchor-publisher.ts derives it: the public key's first 8 bytes. */
+/** The kid of a fresh key, as the publisher derives it. */
 function realKid(): string {
   const { publicKey } = generateKeyPairSync("ed25519");
-  const raw = (publicKey.export({ format: "der", type: "spki" }) as Buffer).subarray(12);
-  return `audit-anchor-${raw.subarray(0, 8).toString("hex")}`;
+  return kidForPublicKey((publicKey.export({ format: "der", type: "spki" }) as Buffer).subarray(12));
 }
 
 type Statement = { Sid: string; Resource?: string | string[]; NotResource?: string | string[] };

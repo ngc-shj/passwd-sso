@@ -66,6 +66,7 @@ import {
   type PublisherConfig,
 } from "./audit-anchor-publisher";
 import { createAnchorScheduler } from "./audit-anchor-scheduler";
+import type { AnchorDestination } from "@/lib/audit/anchor-destinations/destination";
 
 const BOUNDARY = new Date("2026-01-15T00:05:00.000Z");
 const TENANT = "11111111-1111-4111-8111-111111111111";
@@ -134,14 +135,17 @@ function fakePrisma(db: Db): PrismaClient {
   return prisma as unknown as PrismaClient;
 }
 
+function destination(create: AnchorDestination["create"]): AnchorDestination {
+  return { name: "s3-object-lock", create, read: async () => null, list: async () => [] };
+}
+
 function config(overrides: Partial<PublisherConfig> = {}): PublisherConfig {
   return {
     databaseUrl: "postgresql://test:test@localhost:5432/test",
     deploymentId: "11111111-2222-4333-8444-555555555555",
     signingKey: randomBytes(32),
-    signingKeyKid: "audit-anchor-0123456789abcdef",
     tagSecret: randomBytes(32),
-    destinations: [{ name: "s3-object-lock", upload: async () => undefined }],
+    destinations: [destination(async () => "created")],
     cadenceMs: 24 * 60 * 60 * 1000,
     publishOffsetMs: 5 * 60 * 1000,
     ...overrides,
@@ -163,7 +167,7 @@ const ATTEMPTS = SETTING_UPLOAD_ATTEMPTS;
 const MARKER = SETTING_LAST_PUBLISHED_BOUNDARY;
 const CADENCE = 24 * 60 * 60 * 1000;
 
-const failingUpload = { destinations: [{ name: "s3-object-lock", upload: async () => Promise.reject(Object.assign(new Error("denied"), { code: "AccessDenied" })) }] };
+const failingUpload = { destinations: [destination(async () => Promise.reject(Object.assign(new Error("denied"), { code: "AccessDenied" })))] };
 
 /** Scenario name → the lines it logged. Filled once, before the cases. */
 const lines: Record<string, Record<string, unknown>[]> = {};

@@ -54,15 +54,17 @@ import {
 import {
   ADVISORY_LOCK_KEY,
   AuditAnchorPublisher,
-  buildManifestArtifactKey,
   type PublisherConfig,
 } from "@/workers/audit-anchor-publisher";
+import { buildManifestArtifactKey } from "@/lib/audit/anchor-artifact-keys";
 import { FilesystemDestination } from "@/lib/audit/anchor-destinations/filesystem-destination";
 import type { AnchorDestination } from "@/lib/audit/anchor-destinations/destination";
 import {
   verify as verifyManifest,
   computeTenantTag,
   derivePublicKey as derivePublicKeyObject,
+  kidForPublicKey,
+  publicKeyForSigningKey,
 } from "@/lib/audit/anchor-manifest";
 import { BYPASS_GRANT, setBypassGucs } from "@/lib/tenant-rls-grants";
 import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
@@ -197,7 +199,7 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
     };
     expect(pointer.sha256).toBe(outcome.manifestSha256);
 
-    const key = buildManifestArtifactKey(boundary, config.signingKeyKid);
+    const key = buildManifestArtifactKey(boundary, kidForPublicKey(publicKeyForSigningKey(config.signingKey)));
     const jws = await fs.readFile(path.join(tmpDir, key), "utf-8");
     const manifest = verifyManifest(jws.trim(), derivePublicKey(config.signingKey));
     expect(manifest.anchoredAt).toBe(boundary.toISOString());
@@ -227,7 +229,7 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
 
     expect(await publisher(config).runCadence(boundary)).toMatchObject({ kind: "published" });
 
-    const jws = await fs.readFile(path.join(tmpDir, buildManifestArtifactKey(boundary, config.signingKeyKid)), "utf-8");
+    const jws = await fs.readFile(path.join(tmpDir, buildManifestArtifactKey(boundary, kidForPublicKey(publicKeyForSigningKey(config.signingKey)))), "utf-8");
     const manifest = verifyManifest(jws.trim(), derivePublicKey(config.signingKey));
     expect(manifest.tenants.map((t) => t.tenantTag)).toEqual([
       computeTenantTag(lower!, config.tagSecret),
@@ -324,10 +326,12 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
     const uploads: string[] = [];
     const storing: AnchorDestination = {
       name: "filesystem",
-      upload: async (args) => {
+      create: async (args) => {
         uploads.push(args.artifactKey);
-        await fsDestination().upload(args);
+        return fsDestination().create(args);
       },
+      read: (key, signal) => fsDestination().read(key, signal),
+      list: (signal) => fsDestination().list(signal),
     };
     // Each attempt stores the object, then loses its commit.
     const failingCommit = { afterUpload: async () => { throw new Error("commit lost"); } };
@@ -393,11 +397,14 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
       });
       const blocking: AnchorDestination = {
         name: "filesystem",
-        upload: async (args) => {
-          await fsDestination().upload(args);
+        create: async (args) => {
+          const result = await fsDestination().create(args);
           enteredUpload();
           await gate;
+          return result;
         },
+        read: (key, signal) => fsDestination().read(key, signal),
+        list: (signal) => fsDestination().list(signal),
       };
 
       const configA = makePublisherConfig([blocking], {
