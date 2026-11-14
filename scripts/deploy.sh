@@ -42,6 +42,15 @@ set -Eeuo pipefail
 #   AWS_REGION, ECR_URL (app repo URL), TF_VAR_FILE (e.g. envs/prod/terraform.tfvars)
 # Optional:
 #   TF_DIR (default infra/terraform)
+#   RLS_ENFORCE_ATTESTED  forwarded to the migrate task only when exported. The
+#     migrate task refuses a pending RLS-enforce migration unless this equals
+#     that migration's directory name, e.g.
+#       RLS_ENFORCE_ATTESTED=20261114000100_rls_bypass_enforce scripts/deploy.sh
+#     It attests that the production observations the flip depends on were made
+#     (docs/operations/deployment.md). Never defaulted here or in the task def.
+#   RLS_REPORT_MODE_ACK   forwarded to the migrate task only when exported. A
+#     non-empty reason lets the grant audit pass while the RLS bypass is in
+#     report mode (after an un-flip); the audit prints it. Never defaulted.
 
 # ---- argument parsing --------------------------------------------------------
 ROLLBACK_IMAGE=""
@@ -258,11 +267,29 @@ if [ "$RUN_MIGRATION" = true ]; then
   SUBNETS=$(terraform -chdir="$TF_DIR" output -json private_subnet_ids | jq -r 'join(",")')
   SG=$(terraform -chdir="$TF_DIR" output -raw ecs_security_group_id)
 
+  # Operator-exported variables the migrate task reads. Each is forwarded only
+  # when set and non-empty, never defaulted; with neither set the run-task call
+  # carries no --overrides. jq builds the JSON so values are escaped.
+  MIGRATE_OVERRIDE_ARGS=()
+  FORWARDED=()
+  [ -z "${RLS_ENFORCE_ATTESTED:-}" ] || FORWARDED+=(RLS_ENFORCE_ATTESTED)
+  [ -z "${RLS_REPORT_MODE_ACK:-}" ] || FORWARDED+=(RLS_REPORT_MODE_ACK)
+  if [ "${#FORWARDED[@]}" -gt 0 ]; then
+    MIGRATE_OVERRIDES=$(jq -nc \
+      --arg attested "${RLS_ENFORCE_ATTESTED:-}" --arg ack "${RLS_REPORT_MODE_ACK:-}" \
+      '{containerOverrides: [{name: "migrate", environment: (
+          (if $attested != "" then [{name: "RLS_ENFORCE_ATTESTED", value: $attested}] else [] end)
+          + (if $ack != "" then [{name: "RLS_REPORT_MODE_ACK", value: $ack}] else [] end)
+        )}]}')
+    MIGRATE_OVERRIDE_ARGS=(--overrides "$MIGRATE_OVERRIDES")
+    echo "==> Forwarding to the migrate task: ${FORWARDED[*]}"
+  fi
+
   echo "==> Running migration task"
   RUN=$(aws ecs run-task --cluster "$CLUSTER" --task-definition "$MIGRATE_TD" \
     --launch-type FARGATE --region "$REGION" \
     --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG]}" \
-    --output json)
+    ${MIGRATE_OVERRIDE_ARGS[@]+"${MIGRATE_OVERRIDE_ARGS[@]}"} --output json)
   FAIL=$(echo "$RUN" | jq -r '.failures[0].reason // empty')
   [ -z "$FAIL" ] || { echo "ERROR: run-task failed: $FAIL" >&2; exit 1; }
   TASK_ARN=$(echo "$RUN" | jq -r '.tasks[0].taskArn // empty')

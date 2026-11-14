@@ -133,6 +133,15 @@ describe("audit-db-grants (real DB)", () => {
     expect(r.status).toBe(0);
   });
 
+  it("T1b: the RLS bypass mode check passes against the enforcing database", async () => {
+    const { rows } = await su.query("SELECT public.rls_bypass_enforced() AS enforced");
+    expect(rows[0].enforced).toBe(true);
+    const r = runAudit(manifestPath);
+    expect(r.stdout + r.stderr).not.toContain("RLS_ENFORCE_MODE");
+    expect(r.stdout + r.stderr).not.toContain("CLIENT_MIN_MESSAGES_SERVER_LEVEL");
+    expect(r.status).toBe(0);
+  });
+
   it("T2: detects a direct table grant", async () => {
     try {
       await su.query("GRANT UPDATE ON users TO passwd_outbox_worker");

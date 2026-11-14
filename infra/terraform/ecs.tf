@@ -310,7 +310,11 @@ resource "aws_ecs_task_definition" "migrate" {
       name      = "migrate"
       image     = var.app_image
       essential = true
-      # Migrate, then AUDIT the resulting DB grants in the same task. The audit
+      # Preflight, migrate, then AUDIT the resulting DB grants in the same task.
+      # The preflight runs FIRST: it refuses, before any migration is applied, a
+      # pending RLS-enforce migration the operator has not attested
+      # (RLS_ENFORCE_ATTESTED, forwarded by deploy.sh and never defaulted here).
+      # The audit
       # needs a SUPERUSER connection and the RDS SG admits only the ECS SG, so
       # this task is the sole place it can run — and running it here means a
       # migration that granted more than db-grants-manifest.json sanctions fails
@@ -318,7 +322,7 @@ resource "aws_ecs_task_definition" "migrate" {
       # `set -e` via sh -c so a non-zero audit propagates as the task exit code.
       command = [
         "sh", "-c",
-        "set -e; npx prisma migrate deploy; node scripts/audit-db-grants.mjs"
+        "set -e; node scripts/rls-enforce-preflight.mjs; npx prisma migrate deploy; node scripts/audit-db-grants.mjs"
       ]
       logConfiguration = {
         logDriver = "awslogs"

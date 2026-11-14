@@ -134,6 +134,47 @@ It builds/pushes an immutable git-SHA tag, runs `terraform apply
 > created at `desired_count = 0`, roles created via ECS Exec, migration run, then
 > scale up).
 
+### The migrate task: preflight and mode audit
+
+The migrate task runs `node scripts/rls-enforce-preflight.mjs; npx prisma migrate
+deploy; node scripts/audit-db-grants.mjs`, in that order.
+
+**Preflight.** While migration `20261114000100_rls_bypass_enforce` (the one that
+makes the RLS bypass enforcing) is pending on a database that already holds
+migrations, the preflight refuses before anything is applied unless the operator
+attests that the production observations the flip depends on were made. The
+attestation is the migration's directory name, exported for that one deploy:
+
+```bash
+RLS_ENFORCE_ATTESTED=20261114000100_rls_bypass_enforce ./scripts/deploy.sh
+```
+
+Any other value is refused. A fresh database (no migration table, or an empty one)
+needs none. `deploy.sh` forwards the variable to the migrate task only when it is
+exported; neither `deploy.sh` nor the task definition defaults it.
+
+**Un-flip.** To return to report mode, run this as the migration role:
+
+```sql
+CREATE OR REPLACE FUNCTION public.rls_bypass_enforced() RETURNS boolean LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$ SELECT false $$;
+```
+
+A hand-run statement leaves no migration row, so the audit makes it visible:
+afterwards every deploy's audit fails on `RLS_ENFORCE_MODE` until the function is
+restored to `true`, or the deploy is run with a reason:
+
+```bash
+RLS_REPORT_MODE_ACK="<reason>" ./scripts/deploy.sh
+```
+
+The audit prints the reason as a `WARNING` line in the task log (one line, 200
+characters at most). `--write` refuses to regenerate the manifest in report mode
+whatever is set. The audit also fails on `CLIENT_MIN_MESSAGES_SERVER_LEVEL` when a
+server-level source (for example an RDS parameter group) sets `client_min_messages`
+to `error`, which would hide the bypass reports.
+
+Compose installs run neither the preflight nor the audit.
+
 ### Code-only release (no schema change)
 
 The migration task is idempotent (`prisma migrate deploy` is a no-op when there

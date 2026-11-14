@@ -19,6 +19,8 @@ import {
   roleStateViolations,
   assertRetiredSubset,
   creatorGrantKeys,
+  enforceModeViolations,
+  clientMinMessagesViolations,
   AUDITED_ROLES,
   RETIRED_ROLES,
 } from "../audit-db-grants.mjs";
@@ -241,6 +243,92 @@ describe("assertRetiredSubset", () => {
 
   it("accepts the committed role lists", () => {
     expect(() => assertRetiredSubset(AUDITED_ROLES, RETIRED_ROLES)).not.toThrow();
+  });
+});
+
+describe("enforceModeViolations", () => {
+  const present = { functionPresent: true };
+
+  it("passes silently when enforcing", () => {
+    expect(enforceModeViolations({ ...present, enforced: true, acknowledgement: undefined })).toEqual({
+      violations: [],
+      warnings: [],
+    });
+  });
+
+  it("ignores an acknowledgement when enforcing", () => {
+    const r = enforceModeViolations({ ...present, enforced: true, acknowledgement: "left over" });
+    expect(r).toEqual({ violations: [], warnings: [] });
+  });
+
+  it("fails in report mode without an acknowledgement", () => {
+    const r = enforceModeViolations({ ...present, enforced: false, acknowledgement: undefined });
+    expect(r.violations).toHaveLength(1);
+    expect(r.warnings).toEqual([]);
+  });
+
+  it("fails in report mode when the acknowledgement is empty or whitespace", () => {
+    for (const ack of ["", "   ", "\t\n ", "\u0007\r\n"]) {
+      const r = enforceModeViolations({ ...present, enforced: false, acknowledgement: ack });
+      expect(r.violations).toHaveLength(1);
+    }
+  });
+
+  it("passes in acknowledged report mode and surfaces the reason", () => {
+    const r = enforceModeViolations({
+      ...present,
+      enforced: false,
+      acknowledgement: "un-flipped for incident 123",
+    });
+    expect(r.violations).toEqual([]);
+    expect(r.warnings).toHaveLength(1);
+    expect(r.warnings[0]).toContain("un-flipped for incident 123");
+  });
+
+  it("reduces the reason to one bounded line without control characters", () => {
+    const r = enforceModeViolations({
+      ...present,
+      enforced: false,
+      acknowledgement: `line one\nWARNING: forged\u001b[31m${"x".repeat(1000)}`,
+    });
+    const [warning] = r.warnings;
+    expect(warning).not.toMatch(/[\u0000-\u001f\u007f]/);
+    expect(warning.length).toBeLessThan(300);
+    expect(warning).toContain("line one WARNING: forged");
+  });
+
+  it("fails when the function is absent, acknowledgement or not", () => {
+    for (const acknowledgement of [undefined, "a reason"]) {
+      const r = enforceModeViolations({ functionPresent: false, enforced: null, acknowledgement });
+      expect(r.violations).toHaveLength(1);
+      expect(r.warnings).toEqual([]);
+    }
+  });
+});
+
+describe("clientMinMessagesViolations", () => {
+  it.each([
+    ["notice", "default", false],
+    ["warning", "configuration file", false],
+    ["error", "configuration file", true],
+    ["error", "default", true],
+    ["error", "environment variable", true],
+    ["error", "command line", true],
+    ["error", "database", true],
+    ["error", "user", true],
+    ["error", "database user", true],
+    ["error", "override", true],
+    ["error", "a source no server has yet", true],
+    ["error", "session", false],
+    ["error", "client", false],
+    ["notice", "database", false],
+  ])("%s from %s: violation=%s", (setting, source, isViolation) => {
+    expect(clientMinMessagesViolations({ setting, source }).length > 0).toBe(isViolation);
+  });
+
+  it("refuses the levels above error should a server accept them", () => {
+    expect(clientMinMessagesViolations({ setting: "fatal", source: "configuration file" })).toHaveLength(1);
+    expect(clientMinMessagesViolations({ setting: "panic", source: "configuration file" })).toHaveLength(1);
   });
 });
 
