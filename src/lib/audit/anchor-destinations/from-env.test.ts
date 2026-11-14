@@ -47,10 +47,14 @@ describe("buildDestinationsFromEnv", () => {
     expect(() => buildDestinationsFromEnv({ AUDIT_ANCHOR_DESTINATION_GH_REPO: "owner/repo" })).toThrow(
       /GITHUB_TOKEN or AUDIT_ANCHOR_DESTINATION_GH_TOKEN/,
     );
+    expect(() => buildDestinationsFromEnv({ AUDIT_ANCHOR_DESTINATION_GH_REPO: "owner/repo" })).toThrow(
+      expect.objectContaining({ code: "GITHUB_TOKEN_MISSING" }),
+    );
   });
 
   it("refuses an env that configures no destination", () => {
     expect(() => buildDestinationsFromEnv({})).toThrow(AnchorDestinationConfigError);
+    expect(() => buildDestinationsFromEnv({})).toThrow(expect.objectContaining({ code: "NO_DESTINATION_CONFIGURED" }));
     // A prefix or a token alone names no destination.
     expect(() =>
       buildDestinationsFromEnv({

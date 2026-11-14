@@ -7,6 +7,7 @@ import {
   AUDIT_SCOPE,
   AUDIT_ACTION,
   ACTOR_TYPE,
+  AUDIT_ANCHOR_MIRROR_BACKFILL_MAX,
 } from "@/lib/constants/audit/audit";
 import { SYSTEM_ACTOR_ID, SYSTEM_TENANT_ID } from "@/lib/constants/app";
 import { MS_PER_SECOND } from "@/lib/constants/time";
@@ -22,12 +23,23 @@ import { auditLogger, deadLetterLogger } from "@/lib/audit/audit-logger";
 import {
   buildManifest,
   canonicalize,
+  computeTenantTag,
   kidForPublicKey,
   publicKeyForSigningKey,
   sign,
   type AnchorRow,
+  type Manifest,
 } from "@/lib/audit/anchor-manifest";
-import { buildManifestArtifactKey } from "@/lib/audit/anchor-artifact-keys";
+import { buildManifestArtifactKey, parseManifestArtifactKey } from "@/lib/audit/anchor-artifact-keys";
+import {
+  PublishedObjectUnverifiableError,
+  createAnchorKeyCache,
+  publishedStateFromListing,
+  readVerifiedManifest,
+  type OwnKey,
+  type PublishedState,
+  type VerifiedManifest,
+} from "@/lib/audit/anchor-published-state";
 import { WORKER_POOL_IDLE_TIMEOUT_MS, WORKER_POOL_STATEMENT_TIMEOUT_MS } from "@/workers/worker-pool-config";
 import type { AnchorDestination } from "@/lib/audit/anchor-destinations/destination";
 
@@ -43,40 +55,36 @@ export class DeploymentIdMismatchError extends Error {
   }
 }
 
-/**
- * The boundary marker holds no timestamp in the form a publish writes. It
- * cannot say which boundaries are published, so the run fails closed rather
- * than reading it as published or as absent. Its `code` is what the failure
- * reason carries.
- */
-class BoundaryMarkerUnreadableError extends Error {
-  readonly code = "BOUNDARY_MARKER_UNREADABLE";
-  constructor() {
-    super("audit anchor boundary marker is not an ISO-8601 timestamp");
-    this.name = "BoundaryMarkerUnreadableError";
-  }
-}
-
-/**
- * The boundary marker is past the wall clock's current boundary: no publish
- * this clock allows wrote it. Read as published, it would skip every boundary
- * until its date, unalarmed, so the run fails closed. Its `code` is what the
- * failure reason carries.
- */
-class BoundaryMarkerAheadError extends Error {
-  readonly code = "BOUNDARY_MARKER_AHEAD";
-  constructor() {
-    super("audit anchor boundary marker is past the current cadence boundary");
-    this.name = "BoundaryMarkerAheadError";
-  }
-}
-
-/** The upload bound fired. Its `code` is what the failure reason carries. */
+/** The bound on a run's destination I/O fired. Its `code` is what the failure reason carries. */
 class UploadTimeoutError extends Error {
   readonly code = "UPLOAD_TIMEOUT";
   constructor() {
-    super("anchor upload exceeded its time bound");
+    super("anchor destination I/O exceeded the run's time bound");
     this.name = "UploadTimeoutError";
+  }
+}
+
+/** A failure named by a token: its `code` is what a log line or failure reason carries. */
+class TokenError extends Error {
+  constructor(readonly code: string) {
+    super(code);
+    this.name = "TokenError";
+  }
+}
+
+/**
+ * A run that ends `failed`. Thrown inside the publish transaction so that it
+ * rolls back. `reason` is a token: it reaches audit_logs.metadata.failureReason,
+ * which the tenant reads. `pauseTenantIds` are paused after the rollback.
+ */
+class RunFailure extends Error {
+  constructor(
+    readonly reason: string,
+    readonly stage: FailureStage,
+    readonly pauseTenantIds: string[] = [],
+  ) {
+    super(reason);
+    this.name = "RunFailure";
   }
 }
 
@@ -87,11 +95,9 @@ export const ADVISORY_LOCK_KEY = "audit-anchor-publish";
 const SQLSTATE_LOCK_NOT_AVAILABLE = "55P03";
 
 export const SETTING_DEPLOYMENT_ID = "audit_anchor_deployment_id";
-export const SETTING_PREVIOUS_MANIFEST = "audit_anchor_previous_manifest";
-export const SETTING_LAST_PUBLISHED_BOUNDARY = "audit_anchor_last_published_boundary";
 export const SETTING_UPLOAD_ATTEMPTS = "audit_anchor_upload_attempts";
 
-/** Runs per boundary that may reach the upload; the next one reports the cap. */
+/** Runs per boundary that may reach the publish transaction; the next one reports the cap. */
 export const AUDIT_ANCHOR_UPLOAD_ATTEMPT_CAP = 3;
 
 export const DEFAULT_LOCK_TIMEOUT_MS = 10 * MS_PER_SECOND;
@@ -110,7 +116,7 @@ type TenantCount = { chainEnabledTenantCount: number | null };
 export type FailureStage = "before_upload" | "upload" | "after_upload";
 
 export type CadenceOutcome =
-  | ({ kind: "published"; manifestSha256: string; destinations: string[]; tenantsCount: number } & TenantCount)
+  | ({ kind: "published"; manifestSha256: string; destinations: string[]; tenantsCount: number; adopted: boolean } & TenantCount)
   | ({ kind: "lock_held"; reason: "LOCK_HELD_BY_OTHER_INSTANCE" } & TenantCount)
   | ({ kind: "skipped_already_published"; reason: "BOUNDARY_ALREADY_PUBLISHED" } & TenantCount)
   | ({ kind: "skipped_no_tenants"; reason: "NO_CHAIN_ENABLED_TENANTS"; everChainEnabled: boolean } & TenantCount)
@@ -119,9 +125,10 @@ export type CadenceOutcome =
 
 /**
  * Test seams. Production passes none. `inTx` runs inside the publish
- * transaction once the advisory lock is held; `afterUpload` runs after every
- * destination accepted the artifact and before the commit's writes, so a
- * throw there is a commit lost after the upload.
+ * transaction once the advisory lock is held; `afterUpload` runs once the
+ * primary holds the boundary's object and every mirror holds the same bytes,
+ * before the database writes, so a throw there is a commit lost after the
+ * upload.
  */
 export type PublisherHooks = {
   inTx?: (tx: Prisma.TransactionClient) => Promise<void>;
@@ -138,7 +145,7 @@ export type PublisherConfig = {
   publishOffsetMs: number;
   /** `SET LOCAL lock_timeout` before the advisory lock. Default 10 s. */
   lockTimeoutMs?: number;
-  /** Bound on the upload to every destination, as a whole. Default 60 s. */
+  /** One bound on all destination I/O of a run, armed at its first destination call. Default 60 s. */
   uploadTimeoutMs?: number;
   /** Bound on each transaction. Default 90 s. */
   txTimeoutMs?: number;
@@ -166,11 +173,6 @@ export function previousCadenceBoundary(now: Date, cadenceMs: number, offsetMs: 
 
 // --- Internals ---
 
-const previousManifestSchema = z.object({
-  uri: z.string().url(),
-  sha256: z.string().regex(/^[0-9a-f]{64}$/),
-});
-
 const uploadAttemptsSchema = z.object({
   boundary: z.string(),
   count: z.number().int().positive(),
@@ -192,9 +194,33 @@ function parseUploadAttempts(raw: string): z.infer<typeof uploadAttemptsSchema> 
 type PendingEmit = { action: AuditAction; metadata: Record<string, unknown> };
 
 type AttemptGate =
-  | { kind: "already_published"; chainEnabledTenantCount: number }
-  | { kind: "no_tenants"; everChainEnabled: boolean }
+  | { kind: "no_tenants" }
   | { kind: "counted"; attempts: number; countUnreadable: boolean; chainEnabledTenantCount: number };
+
+/** How the latest manifest on the run's own date differs from this publisher's. */
+type OtherIdentity = { artifactKey: string; kidMatches: boolean; deploymentMatches: boolean };
+
+/** Rows f–j of the decision table; rows a–e are thrown as a RunFailure. */
+type Decision =
+  | { kind: "skip"; otherIdentity?: OtherIdentity }
+  | { kind: "adopt"; state: PublishedState; latest: VerifiedManifest }
+  | { kind: "publish"; state: PublishedState };
+
+type PublishTxResult =
+  | { kind: "no_tenants" }
+  | { kind: "skip"; otherIdentity?: OtherIdentity; chainEnabledTenantCount: number }
+  | {
+      kind: "published";
+      published: VerifiedManifest;
+      /** The primary's bytes were not written by this run. */
+      adopted: boolean;
+      /** The manifest this run chained to, when it built the bytes itself. */
+      chainedTo: VerifiedManifest | null;
+      state: PublishedState;
+      chainEnabledTenantCount: number;
+    };
+
+const ARTIFACT_CONTENT_TYPE = "application/jose";
 
 class LockHeldSignal {
   constructor(readonly chainEnabledTenantCount: number | null) {}
@@ -231,58 +257,53 @@ async function chainEnabledTenantIds(tx: Prisma.TransactionClient): Promise<stri
   return tenants.map((t) => t.id);
 }
 
-/** `value` as the epoch ms a publish wrote it from, or null when it is not one. */
-function parseMarker(value: string): number | null {
-  const ms = Date.parse(value);
-  if (!Number.isFinite(ms) || new Date(ms).toISOString() !== value) return null;
-  return ms;
+/**
+ * The published high-water: the greatest `last_published_at` of ANY anchor
+ * row, whatever its tenant's flag — a disabled tenant's row still records a
+ * publish.
+ */
+async function publishedHighWater(tx: Prisma.TransactionClient): Promise<Date | null> {
+  const rows = await tx.$queryRaw<{ max_published: Date | null }[]>`
+    SELECT MAX(last_published_at) AS max_published FROM audit_chain_anchors
+  `;
+  return rows[0]?.max_published ?? null;
+}
+
+function utcDate(instant: Date): string {
+  return instant.toISOString().slice(0, 10);
+}
+
+/** The manifest key a `previousManifest.uri` names, or null when it names none. */
+function previousManifestKey(manifest: Manifest): { date: string; kid: string } | null {
+  const uri = manifest.previousManifest?.uri;
+  if (uri === undefined) return null;
+  return parseManifestArtifactKey(uri.slice(uri.indexOf("://") + 3));
 }
 
 /**
- * Whether `boundary` is already published. The marker decides, and it is
- * monotonic: a marker at or past the boundary means published, so a marker a
- * later boundary wrote never lets an earlier one publish (and write the marker
- * backwards). One past the boundary is reported as `stale_boundary`. A marker
- * that does not parse throws BoundaryMarkerUnreadableError; one past
- * `wallBoundaryMs`, the wall clock's current boundary, throws
- * BoundaryMarkerAheadError — read as published it would skip every boundary
- * up to its own. An install that predates the marker has none, and there the
- * anchors' `last_published_at` stands in, so an upgrade does not republish the
- * boundary it already published.
+ * One deadline for all destination I/O of a run, armed at the run's first
+ * destination call: the listings, the reads, the creates and the mirror
+ * backfill share it, so a run's worst case does not grow with their number.
  */
-async function isBoundaryPublished(
-  tx: Prisma.TransactionClient,
-  boundary: Date,
-  tenantIds: string[],
-  wallBoundaryMs: number,
-): Promise<boolean> {
-  const marker = await tx.systemSetting.findUnique({
-    where: { key: SETTING_LAST_PUBLISHED_BOUNDARY },
-  });
-  if (marker) {
-    const markerMs = parseMarker(marker.value);
-    if (markerMs === null) throw new BoundaryMarkerUnreadableError();
-    if (markerMs > wallBoundaryMs) throw new BoundaryMarkerAheadError();
-    if (markerMs > boundary.getTime()) {
-      getLogger().warn(
-        {
-          boundary: boundary.toISOString(),
-          marker: marker.value,
-          _logType: "audit-anchor-publisher.stale_boundary",
-        },
-        "audit-anchor-publisher.stale_boundary",
-      );
-    }
-    return markerMs >= boundary.getTime();
+class DestinationBound {
+  private readonly controller = new AbortController();
+  private timer: ReturnType<typeof setTimeout> | null = null;
+
+  constructor(private readonly timeoutMs: number) {}
+
+  /** Run one destination call under the deadline; rejects when it fires, whether or not `work` honours the signal. */
+  run<T>(work: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    const { signal } = this.controller;
+    // Not started at all once the deadline has fired: a call started with an
+    // aborted signal would reject with nobody awaiting it.
+    if (signal.aborted) return Promise.reject(signal.reason);
+    this.timer ??= setTimeout(() => this.controller.abort(new UploadTimeoutError()), this.timeoutMs);
+    return untilAborted((async () => work(signal))(), signal);
   }
-  if (tenantIds.length === 0) return false;
-  const rows = await tx.$queryRaw<{ max_published: Date | null }[]>`
-    SELECT MAX(last_published_at) AS max_published
-    FROM audit_chain_anchors
-    WHERE tenant_id = ANY(${tenantIds}::uuid[])
-  `;
-  const maxPublished = rows[0]?.max_published;
-  return maxPublished != null && maxPublished.getTime() >= boundary.getTime();
+
+  release(): void {
+    if (this.timer !== null) clearTimeout(this.timer);
+  }
 }
 
 // --- Publisher class ---
@@ -291,9 +312,38 @@ export class AuditAnchorPublisher {
   private readonly prisma: PrismaClient;
   private readonly config: PublisherConfig;
 
+  // Per instance, never module-level: two publishers in one process (a test,
+  // a key change) must not share what the other resolved or reported.
+  private derivedOwnKey: OwnKey | null = null;
+  private otherIdentityReportedFor: string | null = null;
+
   constructor(deps: { prisma: PrismaClient; config: PublisherConfig }) {
     this.prisma = deps.prisma;
     this.config = deps.config;
+  }
+
+  /** The source of truth: the first configured destination. */
+  private get primary(): AnchorDestination {
+    const primary = this.config.destinations[0];
+    if (!primary) throw new TokenError("NO_DESTINATION");
+    return primary;
+  }
+
+  private get mirrors(): AnchorDestination[] {
+    return this.config.destinations.slice(1);
+  }
+
+  /** Derived on first use, inside a run: a signing key that is not a key fails the run, not the boot. */
+  private get ownKey(): OwnKey {
+    this.derivedOwnKey ??= {
+      publicKey: publicKeyForSigningKey(this.config.signingKey),
+      keyCache: createAnchorKeyCache(),
+    };
+    return this.derivedOwnKey;
+  }
+
+  private get ownKid(): string {
+    return kidForPublicKey(this.ownKey.publicKey);
   }
 
   private get lockTimeoutMs(): number {
@@ -306,11 +356,6 @@ export class AuditAnchorPublisher {
 
   private wallClock(): Date {
     return new Date((this.config.now ?? Date.now)());
-  }
-
-  /** The wall clock's current boundary. */
-  private wallClockBoundaryMs(): number {
-    return currentCadenceBoundary(this.wallClock(), this.config.cadenceMs, this.config.publishOffsetMs).getTime();
   }
 
   /**
@@ -416,8 +461,8 @@ export class AuditAnchorPublisher {
   /**
    * Count this run against `boundary`, on its own transaction committed before
    * the publish transaction opens — so neither a rollback nor a crash after
-   * the PUT undoes it. Takes the publish lock, re-checks the marker, and does
-   * not count a run with nothing to publish.
+   * the create undoes it. Takes the publish lock, and does not count a run
+   * with nothing to publish.
    */
   private async claimAttempt(boundary: Date): Promise<AttemptGate> {
     let tenantCount: number | null = null;
@@ -429,20 +474,14 @@ export class AuditAnchorPublisher {
         await setLockTimeout(tx, this.lockTimeoutMs);
         await advisoryXactLock(tx, ADVISORY_LOCK_KEY);
 
-        if (await isBoundaryPublished(tx, boundary, tenantIds, this.wallClockBoundaryMs())) {
-          return { kind: "already_published", chainEnabledTenantCount: tenantIds.length };
-        }
-        if (tenantIds.length === 0) {
-          const anyAnchor = await tx.auditChainAnchor.findFirst({ select: { tenantId: true } });
-          return { kind: "no_tenants", everChainEnabled: anyAnchor !== null };
-        }
+        if (tenantIds.length === 0) return { kind: "no_tenants" };
 
         // Read-then-write is safe under the advisory lock every publisher
         // takes. A stored value that does not parse cannot say how many runs
-        // reached the upload, so this boundary is treated as past the cap:
-        // the value is overwritten with the first count past it, and the next
-        // boundary starts again at 1. Failing the run instead would leave the
-        // value in place and wedge every boundary, uncounted.
+        // reached the publish transaction, so this boundary is treated as past
+        // the cap: the value is overwritten with the first count past it, and
+        // the next boundary starts again at 1. Failing the run instead would
+        // leave the value in place and wedge every boundary, uncounted.
         const boundaryIso = boundary.toISOString();
         const storedRow = await tx.systemSetting.findUnique({ where: { key: SETTING_UPLOAD_ATTEMPTS } });
         const previous = storedRow ? parseUploadAttempts(storedRow.value) : null;
@@ -498,11 +537,228 @@ export class AuditAnchorPublisher {
   }
 
   private async runCadenceInner(boundary: Date): Promise<CadenceOutcome> {
+    const bound = new DestinationBound(this.config.uploadTimeoutMs ?? DEFAULT_UPLOAD_TIMEOUT_MS);
+    try {
+      return await this.runBounded(boundary, bound);
+    } finally {
+      bound.release();
+    }
+  }
+
+  private async listPrimary(bound: DestinationBound): Promise<string[]> {
+    const primary = this.primary;
+    try {
+      return await bound.run((signal) => primary.list(signal));
+    } catch (err) {
+      throw this.readFailure(primary, err);
+    }
+  }
+
+  /** Rows a and b: a destination read that failed, or an object that does not verify. */
+  private readFailure(dest: AnchorDestination, err: unknown): RunFailure {
+    if (err instanceof PublishedObjectUnverifiableError) {
+      getLogger().error(
+        {
+          artifactKey: err.artifactKey,
+          detail: err.detail,
+          _logType: "audit-anchor-publisher.published_object_unverifiable",
+        },
+        "audit-anchor-publisher.published_object_unverifiable",
+      );
+      return new RunFailure(`CADENCE_FAILED:${err.code}`, "before_upload");
+    }
+    return new RunFailure(`${dest.name}_READ_FAILED:${errorLogFields(err).code}`, "before_upload");
+  }
+
+  private isOurs(manifest: VerifiedManifest): boolean {
+    return manifest.kid === this.ownKid && manifest.manifest.deploymentId === this.config.deploymentId;
+  }
+
+  private otherIdentityOf(manifest: VerifiedManifest): OtherIdentity {
+    return {
+      artifactKey: manifest.artifactKey,
+      kidMatches: manifest.kid === this.ownKid,
+      deploymentMatches: manifest.manifest.deploymentId === this.config.deploymentId,
+    };
+  }
+
+  /**
+   * The decision table for `boundary`, first match wins, from what the primary
+   * holds (`listedKeys`) and the published high-water. `last_published_at` can
+   * make a run refuse (d1, d2) or adopt again (i); it never produces a skip.
+   * Rows a–e throw a RunFailure.
+   */
+  private async decide(
+    boundary: Date,
+    highWater: Date | null,
+    listedKeys: string[],
+    bound: DestinationBound,
+  ): Promise<Decision> {
+    const { config } = this;
+    const primary = this.primary;
+    const ownKey = this.ownKey;
+    const refuse = (code: string) => new RunFailure(`CADENCE_FAILED:${code}`, "before_upload");
+
+    let state: PublishedState;
+    try {
+      state = await bound.run((signal) => publishedStateFromListing(primary, ownKey, listedKeys, signal));
+    } catch (err) {
+      throw this.readFailure(primary, err);
+    }
+    const { latest } = state;
+
+    const wallBoundary = currentCadenceBoundary(this.wallClock(), config.cadenceMs, config.publishOffsetMs);
+    const highWaterBoundary =
+      highWater === null ? null : currentCadenceBoundary(highWater, config.cadenceMs, config.publishOffsetMs);
+    const date = utcDate(boundary);
+
+    if (latest && latest.date > utcDate(wallBoundary)) throw refuse("PUBLISHED_OBJECT_AHEAD");
+    if (highWaterBoundary) {
+      // No publish this clock allows wrote it.
+      if (highWaterBoundary.getTime() > wallBoundary.getTime()) throw refuse("LAST_PUBLISHED_AHEAD_OF_CLOCK");
+      // The database records a publish the primary does not hold.
+      if (!latest || latest.date < utcDate(highWaterBoundary)) throw refuse("DESTINATION_BEHIND_DATABASE");
+    }
+    if (latest && latest.kid !== this.ownKid && state.ownKidHasPublished) throw refuse("LATEST_UNDER_RETIRED_KEY");
+
+    if (!latest || latest.date < date) return { kind: "publish", state };
+    if (latest.date > date) {
+      getLogger().warn(
+        {
+          boundary: boundary.toISOString(),
+          latestArtifactKey: latest.artifactKey,
+          _logType: "audit-anchor-publisher.stale_boundary",
+        },
+        "audit-anchor-publisher.stale_boundary",
+      );
+      return { kind: "skip" };
+    }
+    if (!this.isOurs(latest)) return { kind: "skip", otherIdentity: this.otherIdentityOf(latest) };
+    const settled = highWaterBoundary !== null && highWaterBoundary.getTime() >= boundary.getTime();
+    return settled ? { kind: "skip" } : { kind: "adopt", state, latest };
+  }
+
+  /**
+   * A skip is never the healthy line. One on an object another identity
+   * published (row g) is warned every run and written as one audit row per
+   * boundary per publisher instance.
+   */
+  private async skipAlreadyPublished(
+    boundary: Date,
+    otherIdentity: OtherIdentity | undefined,
+    chainEnabledTenantCount: number,
+  ): Promise<CadenceOutcome> {
+    const boundaryIso = boundary.toISOString();
+    if (otherIdentity) {
+      getLogger().warn(
+        { boundary: boundaryIso, ...otherIdentity, _logType: "audit-anchor-publisher.published_by_other_identity" },
+        "audit-anchor-publisher.published_by_other_identity",
+      );
+      if (this.otherIdentityReportedFor !== boundaryIso) {
+        this.otherIdentityReportedFor = boundaryIso;
+        await this.emitAudit(AUDIT_ACTION.AUDIT_ANCHOR_PUBLISH_FAILED, {
+          failureReason: "PUBLISHED_BY_OTHER_IDENTITY",
+          artifactKey: otherIdentity.artifactKey,
+          anchoredAt: boundaryIso,
+        });
+      }
+    }
+    return { kind: "skipped_already_published", reason: "BOUNDARY_ALREADY_PUBLISHED", chainEnabledTenantCount };
+  }
+
+  /**
+   * The value a publish for `boundary` writes to `last_published_at`: the wall
+   * clock clamped into [boundary, boundary + cadence), so it always maps to
+   * the boundary whose object was stored — a run that crosses into the next
+   * boundary must not record a publish the destination does not hold.
+   */
+  private publishTime(boundary: Date): Date {
+    const first = boundary.getTime();
+    const last = first + this.config.cadenceMs - 1;
+    return new Date(Math.min(Math.max(this.wallClock().getTime(), first), last));
+  }
+
+  /** Give every mirror the primary's bytes; one holding other bytes for the key fails the run. */
+  private async mirrorToSecondaries(published: VerifiedManifest, coveredTenantIds: string[], bound: DestinationBound): Promise<void> {
+    for (const secondary of this.mirrors) {
+      let result: "created" | "exists";
+      try {
+        result = await bound.run((signal) =>
+          secondary.create({
+            artifactBytes: published.bytes,
+            artifactKey: published.artifactKey,
+            contentType: ARTIFACT_CONTENT_TYPE,
+            signal,
+          }),
+        );
+      } catch (err) {
+        throw this.uploadFailure(secondary, err, coveredTenantIds);
+      }
+      if (result === "created") continue;
+
+      let stored: Buffer | null;
+      try {
+        stored = await bound.run((signal) => secondary.read(published.artifactKey, signal));
+      } catch (err) {
+        throw new RunFailure(`${secondary.name}_READ_FAILED:${errorLogFields(err).code}`, "upload", coveredTenantIds);
+      }
+      if (!stored?.equals(published.bytes)) {
+        throw new RunFailure(`${secondary.name}_MIRROR_DIVERGED`, "upload", coveredTenantIds);
+      }
+    }
+  }
+
+  private uploadFailure(dest: AnchorDestination, err: unknown, pauseTenantIds: string[]): RunFailure {
+    getLogger().error(
+      {
+        destination: dest.name,
+        error: errorLogFields(err),
+        _logType: "audit-anchor-publisher.upload_failed",
+      },
+      "audit-anchor-publisher.upload_failed",
+    );
+    // Which destination failed and with what code is what diagnosis needs;
+    // the line above carries the rest.
+    return new RunFailure(`${dest.name}_UPLOAD_FAILED:${errorLogFields(err).code}`, "upload", pauseTenantIds);
+  }
+
+  private async runBounded(boundary: Date, bound: DestinationBound): Promise<CadenceOutcome> {
     const { config } = this;
     const log = getLogger();
     const boundaryIso = boundary.toISOString();
+    let chainEnabledTenantCount: number | null = null;
 
-    // Step 1: the attempt count, committed before anything is uploaded.
+    // Steps 1 and 2: what only the database knows, read without the lock, then
+    // what the primary holds. Nothing is counted yet.
+    let everChainEnabled: boolean;
+    try {
+      const view = await this.prisma.$transaction(async (tx) => {
+        await setBypassGucs(tx, BYPASS_GRANT.AUDIT_ANCHOR_PUBLISH, { tenantId: SYSTEM_TENANT_ID });
+        return {
+          tenantIds: await chainEnabledTenantIds(tx),
+          highWater: await publishedHighWater(tx),
+          anyAnchor: (await tx.auditChainAnchor.findFirst({ select: { tenantId: true } })) !== null,
+        };
+      }, this.txOptions);
+      chainEnabledTenantCount = view.tenantIds.length;
+
+      const listedKeys = await this.listPrimary(bound);
+      // Every skipped_no_tenants of this run reports this one value. A
+      // manifest key at the primary counts, so deleting the anchor rows does
+      // not turn the skip healthy; the listing alone decides, nothing is read.
+      everChainEnabled = view.anyAnchor || listedKeys.some((key) => parseManifestArtifactKey(key) !== null);
+      if (view.tenantIds.length === 0) return this.noTenants(everChainEnabled);
+
+      const decision = await this.decide(boundary, view.highWater, listedKeys, bound);
+      if (decision.kind === "skip") {
+        return await this.skipAlreadyPublished(boundary, decision.otherIdentity, view.tenantIds.length);
+      }
+    } catch (err) {
+      const reason = err instanceof RunFailure ? err.reason : `CADENCE_FAILED:${errorLogFields(err).code}`;
+      return this.fail(boundary, { reason, stage: "before_upload", chainEnabledTenantCount, artifactKey: null });
+    }
+
+    // Step 3: the attempt count, committed before anything is created.
     let gate: AttemptGate;
     try {
       gate = await this.claimAttempt(boundary);
@@ -511,24 +767,10 @@ export class AuditAnchorPublisher {
         return this.lockHeld(boundary, err.chainEnabledTenantCount);
       }
       const reason = `CADENCE_FAILED:${errorLogFields(err).code}`;
-      return this.fail(boundary, { reason, stage: "before_upload", chainEnabledTenantCount: null, artifactKey: null });
+      return this.fail(boundary, { reason, stage: "before_upload", chainEnabledTenantCount, artifactKey: null });
     }
 
-    if (gate.kind === "already_published") {
-      return {
-        kind: "skipped_already_published",
-        reason: "BOUNDARY_ALREADY_PUBLISHED",
-        chainEnabledTenantCount: gate.chainEnabledTenantCount,
-      };
-    }
-    if (gate.kind === "no_tenants") {
-      return {
-        kind: "skipped_no_tenants",
-        reason: "NO_CHAIN_ENABLED_TENANTS",
-        everChainEnabled: gate.everChainEnabled,
-        chainEnabledTenantCount: 0,
-      };
-    }
+    if (gate.kind === "no_tenants") return this.noTenants(everChainEnabled);
     if (gate.attempts > AUDIT_ANCHOR_UPLOAD_ATTEMPT_CAP) {
       log.error(
         {
@@ -555,18 +797,18 @@ export class AuditAnchorPublisher {
       };
     }
 
-    // Step 2: the publish transaction, upload inside.
-    const now = this.wallClock();
+    // Step 4: the publish transaction. Under the lock the database and the
+    // primary are read again and the table decided again, so a second
+    // instance that waited behind a publish skips.
+    const primary = this.primary;
     const prevBoundary = new Date(boundary.getTime() - config.cadenceMs);
     const pendingEmits: PendingEmit[] = [];
-    let chainEnabledTenantCount: number | null = gate.chainEnabledTenantCount;
-    let tenantsInManifest: string[] = [];
-    let artifactKey = "";
-    let uploadFailedReason: string | null = null;
+    chainEnabledTenantCount = gate.chainEnabledTenantCount;
+    let artifactKey: string | null = null;
     let uploaded = false;
 
     try {
-      const outcome = await this.prisma.$transaction(async (tx): Promise<CadenceOutcome> => {
+      const result = await this.prisma.$transaction(async (tx): Promise<PublishTxResult> => {
         await setBypassGucs(tx, BYPASS_GRANT.AUDIT_ANCHOR_PUBLISH, { tenantId: SYSTEM_TENANT_ID });
         const tenantIds = await chainEnabledTenantIds(tx);
         chainEnabledTenantCount = tenantIds.length;
@@ -574,23 +816,11 @@ export class AuditAnchorPublisher {
         await advisoryXactLock(tx, ADVISORY_LOCK_KEY);
         await config.hooks?.inTx?.(tx);
 
-        // Another run may have published between the two transactions.
-        if (await isBoundaryPublished(tx, boundary, tenantIds, this.wallClockBoundaryMs())) {
-          return {
-            kind: "skipped_already_published",
-            reason: "BOUNDARY_ALREADY_PUBLISHED",
-            chainEnabledTenantCount: tenantIds.length,
-          };
-        }
-        if (tenantIds.length === 0) {
-          const anyAnchor = await tx.auditChainAnchor.findFirst({ select: { tenantId: true } });
-          return {
-            kind: "skipped_no_tenants",
-            reason: "NO_CHAIN_ENABLED_TENANTS",
-            everChainEnabled: anyAnchor !== null,
-            chainEnabledTenantCount: 0,
-          };
-        }
+        if (tenantIds.length === 0) return { kind: "no_tenants" };
+        const highWater = await publishedHighWater(tx);
+        const listedKeys = await this.listPrimary(bound);
+        const decision = await this.decide(boundary, highWater, listedKeys, bound);
+        if (decision.kind === "skip") return { ...decision, chainEnabledTenantCount: tenantIds.length };
 
         // Cadence-end safety net — informational, never aborts.
         if (prevBoundary.getTime() > config.publishOffsetMs) {
@@ -616,157 +846,175 @@ export class AuditAnchorPublisher {
                 failureReason: "MISSING_PRIOR_CADENCE_PUBLICATION",
                 prevCadenceBoundary: prevBoundary.toISOString(),
                 maxPublishedAt: maxPublished?.toISOString() ?? null,
+                anchoredAt: boundaryIso,
               },
             });
           }
         }
 
-        // Every chain-enabled tenant is published. A pause holds chain
-        // advancement in the outbox worker; it no longer holds publishing.
-        // Ordered, so a retry over an unchanged chain signs the same bytes.
-        const anchors = await tx.auditChainAnchor.findMany({
-          where: { tenantId: { in: tenantIds } },
-          orderBy: { tenantId: "asc" },
-        });
-        const rows: AnchorRow[] = anchors.map((a) => ({
-          tenantId: a.tenantId,
-          chainSeq: a.chainSeq,
-          prevHash: Buffer.from(a.prevHash),
-          epoch: a.epoch ?? 1,
-        }));
+        let published: VerifiedManifest;
+        let adopted = true;
+        let chainedTo: VerifiedManifest | null = null;
+        if (decision.kind === "adopt") {
+          published = decision.latest;
+          artifactKey = published.artifactKey;
+        } else {
+          // Every chain-enabled tenant is published. A pause holds chain
+          // advancement in the outbox worker; it does not hold publishing.
+          // Ordered, so a retry over an unchanged chain signs the same bytes.
+          const anchors = await tx.auditChainAnchor.findMany({
+            where: { tenantId: { in: tenantIds } },
+            orderBy: { tenantId: "asc" },
+          });
+          const rows: AnchorRow[] = anchors.map((a) => ({
+            tenantId: a.tenantId,
+            chainSeq: a.chainSeq,
+            prevHash: Buffer.from(a.prevHash),
+            epoch: a.epoch ?? 1,
+          }));
 
-        const prevManifestRow = await tx.systemSetting.findUnique({
-          where: { key: SETTING_PREVIOUS_MANIFEST },
-        });
-        const previousManifest = prevManifestRow
-          ? previousManifestSchema.parse(JSON.parse(prevManifestRow.value))
-          : null;
+          // The prefix holds one chain: a previous manifest from another
+          // deployment id is chained to, and said.
+          const previous = decision.state.latest;
+          if (previous && previous.manifest.deploymentId !== config.deploymentId) {
+            log.warn(
+              {
+                boundary: boundaryIso,
+                previousArtifactKey: previous.artifactKey,
+                _logType: "audit-anchor-publisher.previous_manifest_deployment_changed",
+              },
+              "audit-anchor-publisher.previous_manifest_deployment_changed",
+            );
+          }
 
-        const manifest = buildManifest({
-          tenants: rows,
-          deploymentId: config.deploymentId,
-          anchoredAt: boundary,
-          previousManifest,
-          tagSecret: config.tagSecret,
-        });
+          const manifest = buildManifest({
+            tenants: rows,
+            deploymentId: config.deploymentId,
+            anchoredAt: boundary,
+            previousManifest: previous
+              ? { uri: `${primary.name}://${previous.artifactKey}`, sha256: previous.sha256 }
+              : null,
+            tagSecret: config.tagSecret,
+          });
+          const canonicalBytes = canonicalize(manifest);
+          const artifactBytes = Buffer.from(sign(canonicalBytes, config.signingKey), "utf-8");
+          const key = buildManifestArtifactKey(boundary, this.ownKid);
+          artifactKey = key;
 
-        const canonicalBytes = canonicalize(manifest);
-        const jws = sign(canonicalBytes, config.signingKey);
+          // Create-only. A rollback after this point leaves the object stored;
+          // the retry finds it and adopts it instead of writing a second one.
+          let created: "created" | "exists";
+          try {
+            created = await bound.run((signal) =>
+              primary.create({ artifactBytes, artifactKey: key, contentType: ARTIFACT_CONTENT_TYPE, signal }),
+            );
+          } catch (err) {
+            throw this.uploadFailure(primary, err, anchors.map((a) => a.tenantId));
+          }
 
-        const manifestSha256 = createHash("sha256").update(canonicalBytes).digest("hex");
-        artifactKey = buildManifestArtifactKey(boundary, kidForPublicKey(publicKeyForSigningKey(config.signingKey)));
-        const artifactBytes = Buffer.from(jws, "utf-8");
-        tenantsInManifest = anchors.map((a) => a.tenantId);
-
-        // Upload to all destinations, bounded as a whole. A rollback after
-        // this point leaves the object stored; the marker keeps the retry
-        // idempotent and versioning keeps the earlier PUT.
-        const controller = new AbortController();
-        const timer = setTimeout(
-          () => controller.abort(new UploadTimeoutError()),
-          config.uploadTimeoutMs ?? DEFAULT_UPLOAD_TIMEOUT_MS,
-        );
-        try {
-          for (const dest of config.destinations) {
+          if (created === "created") {
+            published = {
+              artifactKey: key,
+              date: utcDate(boundary),
+              kid: this.ownKid,
+              bytes: artifactBytes,
+              manifest,
+              sha256: createHash("sha256").update(canonicalBytes).digest("hex"),
+            };
+            adopted = false;
+            chainedTo = previous;
+          } else {
+            // The key is taken: what is stored decides, not what this run signed.
             try {
-              await untilAborted(
-                dest.create({
-                  artifactBytes,
-                  artifactKey,
-                  contentType: "application/jose",
-                  signal: controller.signal,
-                }),
-                controller.signal,
+              published = await bound.run((signal) =>
+                readVerifiedManifest(primary, key, this.ownKey, listedKeys, signal),
               );
-            } catch (uploadErr) {
-              log.error(
-                {
-                  destination: dest.name,
-                  error: errorLogFields(uploadErr),
-                  _logType: "audit-anchor-publisher.upload_failed",
-                },
-                "audit-anchor-publisher.upload_failed",
-              );
-              // Token, not narrative: this value is persisted to
-              // audit_logs.metadata.failureReason, which the tenant reads via
-              // /api/tenant/audit-logs. Which destination failed and with what
-              // code is what diagnosis needs; the `error` field and `_logType`
-              // above carry the rest.
-              uploadFailedReason = `${dest.name}_UPLOAD_FAILED:${errorLogFields(uploadErr).code}`;
-              throw new Error(uploadFailedReason);
+            } catch (err) {
+              throw this.readFailure(primary, err);
+            }
+            if (!this.isOurs(published)) {
+              return {
+                kind: "skip",
+                otherIdentity: this.otherIdentityOf(published),
+                chainEnabledTenantCount: tenantIds.length,
+              };
             }
           }
-        } finally {
-          clearTimeout(timer);
         }
+
+        // The anchor rows the stored manifest covers, by tag and whatever
+        // their tenant's flag is now: an adopted manifest may predate a
+        // change to the chain-enabled set.
+        const tags = new Set(published.manifest.tenants.map((t) => t.tenantTag));
+        const anchorRows = await tx.auditChainAnchor.findMany({ select: { tenantId: true } });
+        const coveredTenantIds = anchorRows
+          .map((a) => a.tenantId)
+          .filter((id) => tags.has(computeTenantTag(id, config.tagSecret)));
+
+        await this.mirrorToSecondaries(published, coveredTenantIds, bound);
         uploaded = true;
         await config.hooks?.afterUpload?.();
 
-        // Determine primary URI (first destination)
-        const firstDestination = config.destinations[0];
-        const primaryUri = firstDestination
-          ? `${firstDestination.name}://${artifactKey}`
-          : `local://${artifactKey}`;
-
         await tx.auditChainAnchor.updateMany({
-          where: { tenantId: { in: tenantsInManifest } },
-          data: { lastPublishedAt: now, publishPausedUntil: null },
-        });
-
-        const manifestPtr = JSON.stringify({ uri: primaryUri, sha256: manifestSha256 });
-        await tx.systemSetting.upsert({
-          where: { key: SETTING_PREVIOUS_MANIFEST },
-          update: { value: manifestPtr },
-          create: { key: SETTING_PREVIOUS_MANIFEST, value: manifestPtr },
-        });
-        // Forward only: the re-check above, under the lock, found the marker
-        // absent or before this boundary.
-        await tx.systemSetting.upsert({
-          where: { key: SETTING_LAST_PUBLISHED_BOUNDARY },
-          update: { value: boundaryIso },
-          create: { key: SETTING_LAST_PUBLISHED_BOUNDARY, value: boundaryIso },
+          where: { tenantId: { in: coveredTenantIds } },
+          data: { lastPublishedAt: this.publishTime(boundary), publishPausedUntil: null },
         });
 
         return {
           kind: "published",
-          manifestSha256,
-          destinations: config.destinations.map((d) => d.name),
-          tenantsCount: tenantsInManifest.length,
+          published,
+          adopted,
+          chainedTo,
+          state: decision.state,
           chainEnabledTenantCount: tenantIds.length,
         };
       }, this.txOptions);
 
-      // Success audit event AFTER the transaction commits. The missing-prior
-      // row goes out only with a publish: a failed run would otherwise write
-      // it on every retry, and the run that publishes reports it once.
-      if (outcome.kind === "published") {
-        await this.flushEmits(pendingEmits);
-        await this.emitAudit(AUDIT_ACTION.AUDIT_ANCHOR_PUBLISHED, {
-          manifestSha256: outcome.manifestSha256,
-          destinations: outcome.destinations,
-          tenantsCount: outcome.tenantsCount,
-          artifactKey,
-          anchoredAt: boundaryIso,
-        });
+      if (result.kind === "no_tenants") return this.noTenants(everChainEnabled);
+      if (result.kind === "skip") {
+        return await this.skipAlreadyPublished(boundary, result.otherIdentity, result.chainEnabledTenantCount);
       }
 
-      return outcome;
+      // The rows go out AFTER the transaction commits, and only with a
+      // publish: a failed run would otherwise write them on every retry.
+      const { published } = result;
+      const destinations = config.destinations.map((d) => d.name);
+      pendingEmits.push(...this.publishedEmits(result, boundaryIso), {
+        action: AUDIT_ACTION.AUDIT_ANCHOR_PUBLISHED,
+        metadata: {
+          manifestSha256: published.sha256,
+          destinations,
+          tenantsCount: published.manifest.tenants.length,
+          artifactKey: published.artifactKey,
+          anchoredAt: boundaryIso,
+          adopted: result.adopted,
+          genesis: published.manifest.previousManifest === null,
+        },
+      });
+      await this.flushEmits(pendingEmits);
+      await this.backfillMirrors([...result.state.manifestKeys, published.artifactKey], bound);
+
+      return {
+        kind: "published",
+        manifestSha256: published.sha256,
+        destinations,
+        tenantsCount: published.manifest.tenants.length,
+        adopted: result.adopted,
+        chainEnabledTenantCount: result.chainEnabledTenantCount,
+      };
     } catch (err) {
       if (!uploaded && isLockNotAvailable(err)) {
         return this.lockHeld(boundary, chainEnabledTenantCount);
       }
 
       // The catch covers the WHOLE publish transaction — set_config, every
-      // Prisma read, the previous-manifest parse, the signing step and the
-      // commit — so `err.message` may be a connection string, a query with its
-      // bound parameters, or a parser echoing its input. `reason` reaches
-      // audit_logs.metadata.failureReason, which the tenant reads; it is a
-      // token. `uploadFailedReason` already carries the driver's code, and the
-      // per-destination `upload_failed` line carries the original error.
+      // Prisma read, the signing step and the commit — so `err.message` may be
+      // a connection string or a query with its bound parameters. `reason`
+      // reaches audit_logs.metadata.failureReason, which the tenant reads; it
+      // is a token.
       if (uploaded) {
-        // Stored but not committed: the next manifest will not reference this
-        // version, and the retry for the boundary re-PUTs the key. No pause —
-        // the destination is healthy.
+        // Stored but not committed: the retry for the boundary adopts the
+        // object. No pause — the destinations are healthy.
         const reason = `COMMIT_FAILED_AFTER_UPLOAD:${errorLogFields(err).code}`;
         log.error(
           {
@@ -780,17 +1028,108 @@ export class AuditAnchorPublisher {
         return this.fail(boundary, { reason, stage: "after_upload", chainEnabledTenantCount, artifactKey });
       }
 
-      if (uploadFailedReason && tenantsInManifest.length > 0) {
-        await this.persistPause(tenantsInManifest, now);
+      if (err instanceof RunFailure) {
+        if (err.pauseTenantIds.length > 0) await this.persistPause(err.pauseTenantIds, this.wallClock());
+        return this.fail(boundary, { reason: err.reason, stage: err.stage, chainEnabledTenantCount, artifactKey });
       }
-      const reason = uploadFailedReason ?? `CADENCE_FAILED:${errorLogFields(err).code}`;
-      return this.fail(boundary, {
-        reason,
-        stage: uploadFailedReason ? "upload" : "before_upload",
-        chainEnabledTenantCount,
-        artifactKey: artifactKey || null,
+      const reason = `CADENCE_FAILED:${errorLogFields(err).code}`;
+      return this.fail(boundary, { reason, stage: "before_upload", chainEnabledTenantCount, artifactKey });
+    }
+  }
+
+  /**
+   * The detection rows of one published outcome, computed from the manifests
+   * in hand. Drops and regressions compare against the manifest this run
+   * chained to, so an adopted publish — which built nothing — reports neither.
+   */
+  private publishedEmits(
+    result: Extract<PublishTxResult, { kind: "published" }>,
+    anchoredAt: string,
+  ): PendingEmit[] {
+    const { published, chainedTo, state } = result;
+    const emits: PendingEmit[] = [];
+    const failed = (failureReason: string, extra: Record<string, unknown> = {}) =>
+      emits.push({
+        action: AUDIT_ACTION.AUDIT_ANCHOR_PUBLISH_FAILED,
+        metadata: { failureReason, artifactKey: published.artifactKey, anchoredAt, ...extra },
+      });
+
+    const previousKey = previousManifestKey(published.manifest);
+    if (previousKey && previousKey.kid !== published.kid) {
+      emits.push({
+        action: AUDIT_ACTION.AUDIT_ANCHOR_KEY_ROTATED,
+        metadata: { oldKid: previousKey.kid, newKid: published.kid, anchoredAt, artifactKey: published.artifactKey },
       });
     }
+    if (previousKey) {
+      const count = state.manifestKeys.filter((key) => parseManifestArtifactKey(key)?.date === previousKey.date).length;
+      if (count > 1) failed("MULTIPLE_MANIFESTS_FOR_DATE", { date: previousKey.date, count });
+    }
+    if (!state.ownPublicKeyArchived) failed("OWN_PUBLIC_KEY_NOT_ARCHIVED");
+
+    if (chainedTo) {
+      const current = new Map(published.manifest.tenants.map((t) => [t.tenantTag, t]));
+      let dropped = 0;
+      let regressed = 0;
+      for (const before of chainedTo.manifest.tenants) {
+        const now = current.get(before.tenantTag);
+        if (!now) dropped++;
+        else if (now.epoch === before.epoch && BigInt(now.chainSeq) < BigInt(before.chainSeq)) regressed++;
+      }
+      if (dropped > 0) failed("TENANT_DROPPED_FROM_MANIFEST", { count: dropped });
+      if (regressed > 0) failed("CHAIN_SEQ_REGRESSION", { count: regressed });
+    }
+    return emits;
+  }
+
+  /**
+   * Copy to each mirror the manifest keys the primary holds and it lacks,
+   * newest first and at most AUDIT_ANCHOR_MIRROR_BACKFILL_MAX per run, so
+   * planted old-dated keys cannot starve recent gaps. A byte copy: nothing is
+   * re-verified and an object the mirror already lists is not compared. A
+   * failure is logged and changes nothing; the next publishing run continues.
+   */
+  private async backfillMirrors(primaryManifestKeys: string[], bound: DestinationBound): Promise<void> {
+    const primary = this.primary;
+    for (const mirror of this.mirrors) {
+      try {
+        const held = new Set(await bound.run((signal) => mirror.list(signal)));
+        const missing = [...new Set(primaryManifestKeys)]
+          .filter((key) => !held.has(key))
+          .sort()
+          .reverse()
+          .slice(0, AUDIT_ANCHOR_MIRROR_BACKFILL_MAX);
+        for (const artifactKey of missing) {
+          const artifactBytes = await bound.run((signal) => primary.read(artifactKey, signal));
+          if (artifactBytes === null) throw new TokenError("PRIMARY_OBJECT_MISSING");
+          const result = await bound.run((signal) =>
+            mirror.create({ artifactBytes, artifactKey, contentType: ARTIFACT_CONTENT_TYPE, signal }),
+          );
+          if (result === "exists") {
+            const stored = await bound.run((signal) => mirror.read(artifactKey, signal));
+            if (!stored?.equals(artifactBytes)) throw new TokenError("MIRROR_DIVERGED");
+          }
+        }
+      } catch (err) {
+        getLogger().warn(
+          {
+            destination: mirror.name,
+            error: errorLogFields(err),
+            _logType: "audit-anchor-publisher.mirror_backfill_failed",
+          },
+          "audit-anchor-publisher.mirror_backfill_failed",
+        );
+      }
+    }
+  }
+
+  private noTenants(everChainEnabled: boolean): CadenceOutcome {
+    return {
+      kind: "skipped_no_tenants",
+      reason: "NO_CHAIN_ENABLED_TENANTS",
+      everChainEnabled,
+      chainEnabledTenantCount: 0,
+    };
   }
 
   private lockHeld(boundary: Date, chainEnabledTenantCount: number | null): CadenceOutcome {

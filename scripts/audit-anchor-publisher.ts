@@ -18,6 +18,7 @@ import {
   buildDestinationsFromEnv,
 } from "@/lib/audit/anchor-destinations/from-env";
 import { kidForPublicKey, publicKeyForSigningKey } from "@/lib/audit/anchor-manifest";
+import { errorLogFields } from "@/lib/logger/error-fields";
 import {
   AUDIT_ANCHOR_CADENCE_MS,
   AUDIT_ANCHOR_PUBLISH_OFFSET_MS,
@@ -79,7 +80,11 @@ try {
   destinations = buildDestinationsFromEnv({ ...workerEnv, GITHUB_TOKEN: process.env["GITHUB_TOKEN"] });
 } catch (err) {
   if (!(err instanceof AnchorDestinationConfigError)) throw err;
-  console.error(JSON.stringify({ level: "fatal", msg: err.message }));
+  // A fixed message and the error's token (`code` names what is missing): a
+  // caught error's message is never logged.
+  console.error(
+    JSON.stringify({ level: "fatal", msg: "anchor destination configuration invalid", error: errorLogFields(err) }),
+  );
   process.exit(1);
 }
 

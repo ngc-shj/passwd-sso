@@ -2,16 +2,19 @@
  * Unit tests for AuditAnchorPublisher.
  *
  * Covers:
- *   - cadence math and the manifest key builder
- *   - runCadence(boundary): the attempt-count transaction (marker re-check,
- *     no-tenant skip, the persisted cap), the publish transaction (lock_held
- *     from a nested 55P03, the marker and its absent-marker derivation,
- *     every tenant published whatever its pause, upload / commit failures,
- *     the upload bound), and the cadence / healthy log lines
- *   - the publisher's own audit write: one outbox row per emit site, written
- *     after the publish transaction, never throwing
+ *   - cadence math
+ *   - runCadence(boundary): the decision table (rows a–j) read from what the
+ *     primary destination holds, the zero-tenant path, the persisted attempt
+ *     cap, publish / adopt / mirrors / mirror backfill, the clamp on
+ *     `last_published_at`, the run's one bound on destination I/O, and the
+ *     cadence / healthy log lines
+ *   - the rows a published outcome emits, each with the case that does not
+ *   - the publisher's own audit write: written after the publish transaction,
+ *     never throwing
  *   - DeploymentIdMismatchError and createPublisher
  *
+ * The destinations are the stateful in-memory one (it passes the destination
+ * contract suite), so an object one run stores is what the next run reads.
  * The database is a fake transaction client holding `system_settings` and the
  * anchors in memory; audit rows are asserted at its `auditOutbox.createMany`
  * boundary. anchor-manifest functions run for real (they use `node:crypto`;
@@ -27,8 +30,6 @@ import {
   DeploymentIdMismatchError,
   PUBLISHER_AUDIT_DEAD_LETTER_REASON,
   SETTING_DEPLOYMENT_ID,
-  SETTING_LAST_PUBLISHED_BOUNDARY,
-  SETTING_PREVIOUS_MANIFEST,
   SETTING_UPLOAD_ATTEMPTS,
   createPublisher,
   currentCadenceBoundary,
@@ -37,8 +38,25 @@ import {
   type PublisherConfig,
 } from "./audit-anchor-publisher";
 import type { AnchorDestination } from "@/lib/audit/anchor-destinations/destination";
-import { buildManifestArtifactKey } from "@/lib/audit/anchor-artifact-keys";
-import { kidForPublicKey, publicKeyForSigningKey } from "@/lib/audit/anchor-manifest";
+import { InMemoryDestination } from "@/lib/audit/anchor-destinations/in-memory-destination";
+import { buildManifestArtifactKey, publicKeyArtifactKey } from "@/lib/audit/anchor-artifact-keys";
+import {
+  computeTenantTag,
+  publicKeyForSigningKey,
+  verify,
+  type AnchorRow,
+} from "@/lib/audit/anchor-manifest";
+import { AUDIT_ANCHOR_MIRROR_BACKFILL_MAX } from "@/lib/constants/audit/audit";
+import {
+  archivePublicKey,
+  createCalls,
+  kidOf,
+  signedManifest,
+  storeArtifact,
+  storeManifest,
+  trackDestination,
+  type SignedManifest,
+} from "@/__tests__/helpers/anchor-manifest-fixtures";
 
 // ─── Hoisted mocks ───────────────────────────────────────────────────────────
 
@@ -72,20 +90,29 @@ vi.mock("@/lib/audit/audit-logger", async (importOriginal) => {
 
 const TENANT_ID_1 = "11111111-1111-4111-8111-111111111111";
 const TENANT_ID_2 = "22222222-2222-4222-8222-222222222222";
+const TENANT_ID_3 = "33333333-3333-4333-8333-333333333333";
 
 const SIGNING_KEY = randomBytes(32);
+const PUBLIC_KEY = publicKeyForSigningKey(SIGNING_KEY);
 const TAG_SECRET = randomBytes(32);
-const KID = kidForPublicKey(publicKeyForSigningKey(SIGNING_KEY));
+const KID = kidOf(SIGNING_KEY);
+const DEPLOYMENT_ID = "deploy-x";
+
+const OTHER_KEY = randomBytes(32);
+const OTHER_PUBLIC_KEY = publicKeyForSigningKey(OTHER_KEY);
+const OTHER_KID = kidOf(OTHER_KEY);
 
 const CADENCE_MS = 24 * 60 * 60 * 1000;
 const OFFSET_MS = 5 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
 
 const BOUNDARY = new Date("2026-01-15T00:05:00.000Z");
+const PREV_BOUNDARY = new Date(BOUNDARY.getTime() - CADENCE_MS);
+const NEXT_BOUNDARY = new Date(BOUNDARY.getTime() + CADENCE_MS);
 const WALL_CLOCK = new Date("2026-01-15T01:00:00.000Z");
+const OWN_KEY_AT_BOUNDARY = buildManifestArtifactKey(BOUNDARY, KID);
 
-const MARKER_KEY = SETTING_LAST_PUBLISHED_BOUNDARY;
 const ATTEMPTS_KEY = SETTING_UPLOAD_ATTEMPTS;
-const POINTER_KEY = SETTING_PREVIOUS_MANIFEST;
 
 /** The shape the Prisma pg adapter gives a raw-query 55P03: nested under P2010. */
 function lockTimeoutError(): Error {
@@ -95,20 +122,20 @@ function lockTimeoutError(): Error {
   });
 }
 
-function makeDestination(
-  name: string,
-  create: AnchorDestination["create"] = vi.fn().mockResolvedValue("created"),
-): AnchorDestination {
-  return { name, create, read: vi.fn().mockResolvedValue(null), list: vi.fn().mockResolvedValue([]) };
+function denied(): Error {
+  return Object.assign(new Error("denied"), { code: "AccessDenied" });
 }
+
+const tracked = trackDestination;
+const creates = createCalls;
 
 function makeConfig(overrides: Partial<PublisherConfig> = {}): PublisherConfig {
   return {
     databaseUrl: "postgresql://test:test@localhost:5432/test",
-    deploymentId: "deploy-x",
+    deploymentId: DEPLOYMENT_ID,
     signingKey: SIGNING_KEY,
     tagSecret: TAG_SECRET,
-    destinations: [makeDestination("filesystem")],
+    destinations: [new InMemoryDestination("filesystem")],
     cadenceMs: CADENCE_MS,
     publishOffsetMs: OFFSET_MS,
     ...overrides,
@@ -139,6 +166,9 @@ interface FakeDb {
   /** Index of each $transaction call, in order. */
   txCount: number;
   publishTxIndex: number | null;
+  /** Runs before the chain-enabled tenants are read; `call` is 1-based within the fake's life. */
+  beforeTenantRead: (call: number) => void | Promise<void>;
+  tenantReads: number;
 }
 
 function anchor(tenantId: string, overrides: Partial<FakeAnchor> = {}): FakeAnchor {
@@ -170,9 +200,16 @@ function makeDb(overrides: Partial<FakeDb> = {}): FakeDb {
     outboxFailure: null,
     txCount: 0,
     publishTxIndex: null,
+    beforeTenantRead: () => undefined,
+    tenantReads: 0,
     ...overrides,
   };
 }
+
+type UpdateManyArgs = {
+  where: { tenantId: { in: string[] }; OR?: Array<{ lastPublishedAt: null | { lt: Date } }> };
+  data: Partial<FakeAnchor>;
+};
 
 function makeFakeTx(db: FakeDb, txIndex: number) {
   return {
@@ -193,23 +230,42 @@ function makeFakeTx(db: FakeDb, txIndex: number) {
         return db.storedDeploymentId !== null ? [{ value: db.storedDeploymentId }] : [];
       }
       if (sql.includes("MAX(last_published_at)")) {
-        const ids = values[0] as string[];
+        // The high-water query takes every row; the missing-prior one, the given tenants'.
+        const ids = Array.isArray(values[0]) ? (values[0] as string[]) : null;
         const times = db.anchors
-          .filter((a) => ids.includes(a.tenantId) && a.lastPublishedAt)
+          .filter((a) => (ids === null || ids.includes(a.tenantId)) && a.lastPublishedAt)
           .map((a) => (a.lastPublishedAt as Date).getTime());
         return [{ max_published: times.length > 0 ? new Date(Math.max(...times)) : null }];
       }
       return [];
     }),
     tenant: {
-      findMany: vi.fn(async () => db.tenants.filter((t) => t.auditChainEnabled).map((t) => ({ id: t.id }))),
+      findMany: vi.fn(async () => {
+        await db.beforeTenantRead(++db.tenantReads);
+        return db.tenants.filter((t) => t.auditChainEnabled).map((t) => ({ id: t.id }));
+      }),
     },
     auditChainAnchor: {
-      findMany: vi.fn(async () => db.anchors),
+      findMany: vi.fn(async (args: { where?: { tenantId: { in: string[] } } }) => {
+        const ids = args.where?.tenantId.in;
+        return db.anchors
+          .filter((a) => ids === undefined || ids.includes(a.tenantId))
+          .sort((a, b) => a.tenantId.localeCompare(b.tenantId));
+      }),
       findFirst: vi.fn(async () => (db.anchors[0] ? { tenantId: db.anchors[0].tenantId } : null)),
-      updateMany: vi.fn(async (args: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
+      updateMany: vi.fn(async (args: UpdateManyArgs) => {
         db.updateManyCalls.push(args);
-        return { count: db.anchors.length };
+        const before = args.where.OR?.find((c) => c.lastPublishedAt !== null)?.lastPublishedAt as
+          | { lt: Date }
+          | undefined;
+        let count = 0;
+        for (const row of db.anchors) {
+          if (!args.where.tenantId.in.includes(row.tenantId)) continue;
+          if (before && row.lastPublishedAt !== null && row.lastPublishedAt >= before.lt) continue;
+          Object.assign(row, args.data);
+          count++;
+        }
+        return { count };
       }),
     },
     systemSetting: {
@@ -247,22 +303,80 @@ function publisherFor(db: FakeDb, overrides: Partial<PublisherConfig> = {}): Aud
   return new AuditAnchorPublisher({ prisma: makeFakePrisma(db), config: makeConfig(overrides) });
 }
 
-function outboxActions(db: FakeDb): unknown[] {
-  return db.outboxRows.map((r) => r.payload.action);
+function metadataOf(db: FakeDb, action: string): Array<Record<string, unknown>> {
+  return db.outboxRows
+    .filter((r) => r.payload.action === action)
+    .map((r) => r.payload.metadata as Record<string, unknown>);
 }
 
 function failureReasons(db: FakeDb): unknown[] {
-  return db.outboxRows
-    .filter((r) => r.payload.action === "AUDIT_ANCHOR_PUBLISH_FAILED")
-    .map((r) => (r.payload.metadata as Record<string, unknown>).failureReason);
+  return metadataOf(db, "AUDIT_ANCHOR_PUBLISH_FAILED").map((m) => m.failureReason);
+}
+
+function failureRows(db: FakeDb, reason: string): Array<Record<string, unknown>> {
+  return metadataOf(db, "AUDIT_ANCHOR_PUBLISH_FAILED").filter((m) => m.failureReason === reason);
 }
 
 function logTypes(mock: ReturnType<typeof vi.fn>): unknown[] {
   return mock.mock.calls.map(([fields]) => (fields as { _logType?: unknown })._logType);
 }
 
+function logLines(mock: ReturnType<typeof vi.fn>, logType: string): Array<Record<string, unknown>> {
+  return mock.mock.calls
+    .map(([fields]) => fields as Record<string, unknown>)
+    .filter((f) => f._logType === `audit-anchor-publisher.${logType}`);
+}
+
 function pauseWrites(db: FakeDb) {
   return db.updateManyCalls.filter((c) => c.data.publishPausedUntil instanceof Date);
+}
+
+function publishWrites(db: FakeDb) {
+  return db.updateManyCalls.filter((c) => c.data.lastPublishedAt instanceof Date);
+}
+
+function rowOf(tenantId: string, overrides: Partial<AnchorRow> = {}): AnchorRow {
+  return { tenantId, chainSeq: 1n, prevHash: Buffer.alloc(32, 0xa1), epoch: 1, ...overrides };
+}
+
+/** A manifest this publisher's identity would have published for `boundary`. */
+function ours(boundary: Date, overrides: Partial<Parameters<typeof signedManifest>[0]> = {}): SignedManifest {
+  return signedManifest({
+    signingKey: SIGNING_KEY,
+    boundary,
+    deploymentId: DEPLOYMENT_ID,
+    tagSecret: TAG_SECRET,
+    tenants: [rowOf(TENANT_ID_1), rowOf(TENANT_ID_2)],
+    ...overrides,
+  });
+}
+
+/** A primary with the own public key archived, so only a case that asks sees OWN_PUBLIC_KEY_NOT_ARCHIVED. */
+async function archivedPrimary(name = "filesystem"): Promise<InMemoryDestination> {
+  const dest = new InMemoryDestination(name);
+  await archivePublicKey(dest, PUBLIC_KEY);
+  return dest;
+}
+
+/** What a denied run must leave: nothing stored beyond `before`, no anchor write, no mirror create. */
+async function expectNothingWritten(
+  db: FakeDb,
+  primary: InMemoryDestination,
+  before: string[],
+  mirrorCalls: string[] = [],
+): Promise<void> {
+  expect([...(await primary.list())].sort()).toEqual([...before].sort());
+  expect(publishWrites(db)).toEqual([]);
+  expect(creates(mirrorCalls)).toEqual([]);
+}
+
+function setClock(instant: Date): void {
+  vi.setSystemTime(instant);
+}
+
+/** The wall clock an hour into `boundary`, as on a scheduled run. */
+function clockInto(boundary: Date): void {
+  setClock(new Date(boundary.getTime() + 55 * 60 * 1000));
 }
 
 beforeEach(() => {
@@ -307,9 +421,9 @@ describe("cadence math", () => {
   });
 });
 
-// ─── runCadence: gates ──────────────────────────────────────────────────────
+// ─── runCadence: lock and zero-tenant path ──────────────────────────────────
 
-describe("AuditAnchorPublisher.runCadence — gates", () => {
+describe("AuditAnchorPublisher.runCadence — lock and no tenants", () => {
   it("returns lock_held when the attempt transaction's lock wait raises 55P03 nested under P2010", async () => {
     const db = makeDb({ lockTimeoutOnCall: new Set([1]) });
     const outcome = await publisherFor(db).runCadence(BOUNDARY);
@@ -329,9 +443,10 @@ describe("AuditAnchorPublisher.runCadence — gates", () => {
     expect(pauseWrites(db)).toEqual([]);
   });
 
-  it("returns skipped_no_tenants without counting an attempt, everChainEnabled false when no anchor row exists", async () => {
+  it("with no tenant, an empty primary and no anchor row: the healthy skip, uncounted, nothing read", async () => {
     const db = makeDb({ tenants: [], anchors: [] });
-    const outcome = await publisherFor(db).runCadence(BOUNDARY);
+    const { dest, calls } = tracked(new InMemoryDestination("filesystem"));
+    const outcome = await publisherFor(db, { destinations: [dest] }).runCadence(BOUNDARY);
 
     expect(outcome).toEqual({
       kind: "skipped_no_tenants",
@@ -339,7 +454,9 @@ describe("AuditAnchorPublisher.runCadence — gates", () => {
       everChainEnabled: false,
       chainEnabledTenantCount: 0,
     });
+    expect(calls).toEqual(["list"]);
     expect(db.settings.has(ATTEMPTS_KEY)).toBe(false);
+    expect(logLines(mockLoggerInfo, "cadence_healthy")).toHaveLength(1);
   });
 
   it("reports everChainEnabled true when an anchor row exists but no tenant is chain-enabled", async () => {
@@ -347,182 +464,605 @@ describe("AuditAnchorPublisher.runCadence — gates", () => {
     const outcome = await publisherFor(db).runCadence(BOUNDARY);
 
     expect(outcome).toMatchObject({ kind: "skipped_no_tenants", everChainEnabled: true });
+    expect(logLines(mockLoggerInfo, "cadence_healthy")).toEqual([]);
   });
 
-  it("returns skipped_already_published when the marker equals the boundary and the wall clock's current one", async () => {
-    expect(currentCadenceBoundary(new Date(), CADENCE_MS, OFFSET_MS)).toEqual(BOUNDARY);
-    const db = makeDb();
-    db.settings.set(MARKER_KEY, BOUNDARY.toISOString());
-    const upload = vi.fn().mockResolvedValue(undefined);
-    const outcome = await publisherFor(db, { destinations: [makeDestination("s3", upload)] }).runCadence(BOUNDARY);
+  it("reports everChainEnabled true when the anchor rows are gone but the primary holds a manifest key, without reading it", async () => {
+    const db = makeDb({ tenants: [], anchors: [] });
+    const primary = new InMemoryDestination("filesystem");
+    // Not a manifest at all: the listing decides, the object is not read.
+    await storeArtifact(primary, OWN_KEY_AT_BOUNDARY, Buffer.from("garbage"));
+    const { dest, calls } = tracked(primary);
+    const outcome = await publisherFor(db, { destinations: [dest] }).runCadence(BOUNDARY);
 
-    expect(outcome).toEqual({
-      kind: "skipped_already_published",
-      reason: "BOUNDARY_ALREADY_PUBLISHED",
-      chainEnabledTenantCount: 2,
+    expect(outcome).toMatchObject({ kind: "skipped_no_tenants", everChainEnabled: true });
+    expect(calls).toEqual(["list"]);
+    expect(logLines(mockLoggerInfo, "cadence_healthy")).toEqual([]);
+  });
+
+  it("does not count a non-manifest key at the primary as ever chain-enabled", async () => {
+    const db = makeDb({ tenants: [], anchors: [] });
+    const primary = await archivedPrimary();
+    const outcome = await publisherFor(db, { destinations: [primary] }).runCadence(BOUNDARY);
+
+    expect(outcome).toMatchObject({ kind: "skipped_no_tenants", everChainEnabled: false });
+  });
+
+  it("with no tenant, a listing that fails is a read failure (row a), not a skip", async () => {
+    const db = makeDb({ tenants: [], anchors: [] });
+    const { dest } = tracked(new InMemoryDestination("filesystem"), {
+      list: async () => {
+        throw denied();
+      },
     });
-    expect(upload).not.toHaveBeenCalled();
-    expect(db.settings.has(ATTEMPTS_KEY)).toBe(false);
-  });
-
-  it("skips, uploads nothing and leaves the marker when it holds a later boundary the wall clock has reached, logging stale_boundary", async () => {
-    // A marker only moves forward: publishing an earlier boundary would write
-    // it back. The wall clock is at D+1, the run for D (a late retry).
-    vi.setSystemTime(new Date(WALL_CLOCK.getTime() + CADENCE_MS));
-    const db = makeDb();
-    const later = new Date(BOUNDARY.getTime() + CADENCE_MS).toISOString();
-    db.settings.set(MARKER_KEY, later);
-    const upload = vi.fn().mockResolvedValue(undefined);
-    const outcome = await publisherFor(db, { destinations: [makeDestination("s3", upload)] }).runCadence(BOUNDARY);
-
-    expect(outcome).toEqual({
-      kind: "skipped_already_published",
-      reason: "BOUNDARY_ALREADY_PUBLISHED",
-      chainEnabledTenantCount: 2,
-    });
-    expect(upload).not.toHaveBeenCalled();
-    expect(db.settings.get(MARKER_KEY)).toBe(later);
-    expect(db.settings.has(ATTEMPTS_KEY)).toBe(false);
-    const stale = mockLoggerWarn.mock.calls
-      .map(([fields]) => fields as Record<string, unknown>)
-      .filter((f) => f._logType === "audit-anchor-publisher.stale_boundary");
-    expect(stale).toEqual([{ boundary: BOUNDARY.toISOString(), marker: later, _logType: "audit-anchor-publisher.stale_boundary" }]);
-  });
-
-  it.each([
-    ["the next boundary", CADENCE_MS],
-    ["a year ahead", 365 * CADENCE_MS],
-  ])("fails before the upload, uncounted, when the marker is past the wall clock's current boundary: %s", async (_label, aheadMs) => {
-    // The wall clock's current boundary is BOUNDARY: a marker past it was not
-    // written by any publish this clock allows, and read as published it would
-    // skip every boundary until its date.
-    expect(currentCadenceBoundary(new Date(), CADENCE_MS, OFFSET_MS)).toEqual(BOUNDARY);
-    const db = makeDb();
-    const ahead = new Date(BOUNDARY.getTime() + aheadMs).toISOString();
-    db.settings.set(MARKER_KEY, ahead);
-    const upload = vi.fn().mockResolvedValue(undefined);
-    const outcome = await publisherFor(db, { destinations: [makeDestination("s3", upload)] }).runCadence(BOUNDARY);
+    const outcome = await publisherFor(db, { destinations: [dest] }).runCadence(BOUNDARY);
 
     expect(outcome).toEqual({
       kind: "failed",
-      reason: "CADENCE_FAILED:BOUNDARY_MARKER_AHEAD",
+      reason: "filesystem_READ_FAILED:AccessDenied",
       stage: "before_upload",
-      chainEnabledTenantCount: null,
+      chainEnabledTenantCount: 0,
     });
-    expect(upload).not.toHaveBeenCalled();
-    expect(db.settings.get(MARKER_KEY)).toBe(ahead);
+    expect(logLines(mockLoggerInfo, "cadence_healthy")).toEqual([]);
+  });
+
+  it.each([
+    ["before the attempt is counted", 2],
+    ["inside the publish transaction", 3],
+  ])("a tenant set that empties %s still reports the step-2 everChainEnabled", async (_label, emptiesOnRead) => {
+    // Step 2 saw an anchor row; by the later read the tenants AND the rows are
+    // gone and the primary holds nothing, so a value recomputed there is false.
+    const db = makeDb();
+    db.beforeTenantRead = (call) => {
+      if (call === emptiesOnRead) {
+        db.tenants = [];
+        db.anchors = [];
+      }
+    };
+    const { dest, calls } = tracked(new InMemoryDestination("filesystem"));
+    const outcome = await publisherFor(db, { destinations: [dest] }).runCadence(BOUNDARY);
+
+    expect(outcome).toEqual({
+      kind: "skipped_no_tenants",
+      reason: "NO_CHAIN_ENABLED_TENANTS",
+      everChainEnabled: true,
+      chainEnabledTenantCount: 0,
+    });
+    expect(creates(calls)).toEqual([]);
+  });
+
+  it("fails with a token when no destination is configured", async () => {
+    const db = makeDb();
+    const outcome = await publisherFor(db, { destinations: [] }).runCadence(BOUNDARY);
+
+    expect(outcome).toMatchObject({ kind: "failed", reason: "CADENCE_FAILED:NO_DESTINATION", stage: "before_upload" });
+  });
+});
+
+// ─── runCadence: the decision table ─────────────────────────────────────────
+
+describe("AuditAnchorPublisher.runCadence — decision table", () => {
+  it("row a: a listing error fails before the upload, uncounted, with the destination's read token", async () => {
+    const db = makeDb();
+    const primary = new InMemoryDestination("filesystem");
+    const mirror = tracked(new InMemoryDestination("s3"));
+    let failing = true;
+    const { dest } = tracked(primary, {
+      list: async (signal) => {
+        if (failing) throw denied();
+        return primary.list(signal);
+      },
+    });
+    const publisher = publisherFor(db, { destinations: [dest, mirror.dest] });
+
+    const outcome = await publisher.runCadence(BOUNDARY);
+
+    expect(outcome).toEqual({
+      kind: "failed",
+      reason: "filesystem_READ_FAILED:AccessDenied",
+      stage: "before_upload",
+      chainEnabledTenantCount: 2,
+    });
+    expect(failureReasons(db)).toEqual(["filesystem_READ_FAILED:AccessDenied"]);
     expect(db.settings.has(ATTEMPTS_KEY)).toBe(false);
-    expect(failureReasons(db)).toEqual(["CADENCE_FAILED:BOUNDARY_MARKER_AHEAD"]);
+    expect(pauseWrites(db)).toEqual([]);
+    await expectNothingWritten(db, primary, [], mirror.calls);
     expect(logTypes(mockLoggerError)).toContain("audit-anchor-publisher.cadence_failed");
+
+    // Allow: the same publisher, once the listing answers.
+    failing = false;
+    expect(await publisher.runCadence(BOUNDARY)).toMatchObject({ kind: "published" });
   });
 
-  it("fails closed on a marker one boundary ahead until the wall clock reaches that boundary, then skips", async () => {
-    const next = new Date(BOUNDARY.getTime() + CADENCE_MS);
+  it("row a: a read error on the latest manifest is the same failure", async () => {
     const db = makeDb();
-    db.settings.set(MARKER_KEY, next.toISOString());
+    const primary = new InMemoryDestination("filesystem");
+    await storeManifest(primary, ours(PREV_BOUNDARY));
+    const { dest } = tracked(primary, {
+      read: async () => {
+        throw denied();
+      },
+    });
 
-    vi.setSystemTime(new Date(next.getTime() - 1));
-    expect(await publisherFor(db).runCadence(BOUNDARY)).toMatchObject({ kind: "failed", reason: "CADENCE_FAILED:BOUNDARY_MARKER_AHEAD" });
+    const outcome = await publisherFor(db, { destinations: [dest] }).runCadence(BOUNDARY);
 
-    // At the marker's own boundary, the run for it skips quietly.
-    vi.setSystemTime(next);
-    mockLoggerWarn.mockClear();
-    expect(await publisherFor(db).runCadence(next)).toMatchObject({ kind: "skipped_already_published" });
-    expect(logTypes(mockLoggerWarn)).not.toContain("audit-anchor-publisher.stale_boundary");
+    expect(outcome).toMatchObject({ kind: "failed", reason: "filesystem_READ_FAILED:AccessDenied", stage: "before_upload" });
+    expect(db.settings.has(ATTEMPTS_KEY)).toBe(false);
+    await expectNothingWritten(db, primary, await primary.list());
   });
 
-  it("reads the wall clock from config.now when one is given", async () => {
-    // The default clock (faked to WALL_CLOCK) would call this marker ahead;
-    // the injected one is at D+1, where it is a stale_boundary skip.
-    const next = new Date(BOUNDARY.getTime() + CADENCE_MS);
+  it("row a inside the publish transaction is counted", async () => {
     const db = makeDb();
-    db.settings.set(MARKER_KEY, next.toISOString());
-    const outcome = await publisherFor(db, { now: () => next.getTime() + 60 * 60 * 1000 }).runCadence(BOUNDARY);
+    const primary = new InMemoryDestination("filesystem");
+    let lists = 0;
+    const { dest } = tracked(primary, {
+      list: async (signal) => {
+        if (++lists === 2) throw denied();
+        return primary.list(signal);
+      },
+    });
+
+    const outcome = await publisherFor(db, { destinations: [dest] }).runCadence(BOUNDARY);
+
+    expect(outcome).toMatchObject({ kind: "failed", reason: "filesystem_READ_FAILED:AccessDenied", stage: "before_upload" });
+    expect(JSON.parse(db.settings.get(ATTEMPTS_KEY) ?? "null")).toEqual({ boundary: BOUNDARY.toISOString(), count: 1 });
+    expect(pauseWrites(db)).toEqual([]);
+    await expectNothingWritten(db, primary, []);
+  });
+
+  it("row b: a latest object that is not a manifest fails closed, uncounted", async () => {
+    const db = makeDb();
+    const primary = new InMemoryDestination("filesystem");
+    const garbageKey = buildManifestArtifactKey(PREV_BOUNDARY, KID);
+    await storeArtifact(primary, garbageKey, Buffer.from("garbage"));
+    const mirror = tracked(new InMemoryDestination("s3"));
+
+    const outcome = await publisherFor(db, { destinations: [primary, mirror.dest] }).runCadence(BOUNDARY);
+
+    expect(outcome).toEqual({
+      kind: "failed",
+      reason: "CADENCE_FAILED:PUBLISHED_OBJECT_UNVERIFIABLE",
+      stage: "before_upload",
+      chainEnabledTenantCount: 2,
+    });
+    expect(failureReasons(db)).toEqual(["CADENCE_FAILED:PUBLISHED_OBJECT_UNVERIFIABLE"]);
+    expect(db.settings.has(ATTEMPTS_KEY)).toBe(false);
+    await expectNothingWritten(db, primary, [garbageKey], mirror.calls);
+    expect(logLines(mockLoggerError, "published_object_unverifiable")).toEqual([
+      expect.objectContaining({ artifactKey: garbageKey, detail: "SIGNATURE_INVALID" }),
+    ]);
+  });
+
+  it("row b: a latest manifest under a kid whose public key is not archived fails; archived, the same publisher chains to it", async () => {
+    const db = makeDb();
+    const primary = await archivedPrimary();
+    const previous = signedManifest({ signingKey: OTHER_KEY, boundary: PREV_BOUNDARY, deploymentId: DEPLOYMENT_ID });
+    await storeManifest(primary, previous);
+    const before = await primary.list();
+    const publisher = publisherFor(db, { destinations: [primary] });
+
+    const refused = await publisher.runCadence(BOUNDARY);
+    expect(refused).toMatchObject({ kind: "failed", reason: "CADENCE_FAILED:PUBLISHED_OBJECT_UNVERIFIABLE" });
+    await expectNothingWritten(db, primary, before);
+
+    // The miss is not cached: archiving the key is seen without a new instance.
+    await archivePublicKey(primary, OTHER_PUBLIC_KEY);
+    const published = await publisher.runCadence(BOUNDARY);
+    expect(published).toMatchObject({ kind: "published", adopted: false });
+    const stored = verify((await primary.read(OWN_KEY_AT_BOUNDARY))!.toString("utf-8"), PUBLIC_KEY);
+    expect(stored.previousManifest).toEqual({ uri: `filesystem://${previous.artifactKey}`, sha256: previous.sha256 });
+    expect(metadataOf(db, "AUDIT_ANCHOR_KEY_ROTATED")).toEqual([
+      { oldKid: OTHER_KID, newKid: KID, anchoredAt: BOUNDARY.toISOString(), artifactKey: OWN_KEY_AT_BOUNDARY },
+    ]);
+  });
+
+  it("row c: a latest manifest dated past the wall clock's boundary fails; once the clock reaches its date the run for an earlier boundary skips as stale", async () => {
+    const db = makeDb();
+    const primary = await archivedPrimary();
+    const ahead = ours(NEXT_BOUNDARY);
+    await storeManifest(primary, ahead);
+    const before = await primary.list();
+
+    const refused = await publisherFor(db, { destinations: [primary] }).runCadence(BOUNDARY);
+    expect(refused).toMatchObject({
+      kind: "failed",
+      reason: "CADENCE_FAILED:PUBLISHED_OBJECT_AHEAD",
+      stage: "before_upload",
+    });
+    expect(db.settings.has(ATTEMPTS_KEY)).toBe(false);
+    await expectNothingWritten(db, primary, before);
+
+    clockInto(NEXT_BOUNDARY);
+    const stale = await publisherFor(db, { destinations: [primary] }).runCadence(BOUNDARY);
+    expect(stale.kind).toBe("skipped_already_published");
+  });
+
+  it("row d1: a last_published_at past the wall clock's boundary fails, whatever the primary holds", async () => {
+    const db = makeDb({ anchors: [anchor(TENANT_ID_1, { lastPublishedAt: NEXT_BOUNDARY }), anchor(TENANT_ID_2)] });
+    const primary = new InMemoryDestination("filesystem");
+
+    const outcome = await publisherFor(db, { destinations: [primary] }).runCadence(BOUNDARY);
+
+    // The primary is empty, so d2 would match too: d1 is first.
+    expect(outcome).toMatchObject({
+      kind: "failed",
+      reason: "CADENCE_FAILED:LAST_PUBLISHED_AHEAD_OF_CLOCK",
+      stage: "before_upload",
+    });
+    expect(db.settings.has(ATTEMPTS_KEY)).toBe(false);
+    await expectNothingWritten(db, primary, []);
+  });
+
+  it("row d1 reads the high-water from every anchor row, a disabled tenant's included", async () => {
+    const db = makeDb({
+      tenants: [
+        { id: TENANT_ID_1, auditChainEnabled: true },
+        { id: TENANT_ID_3, auditChainEnabled: false },
+      ],
+      anchors: [anchor(TENANT_ID_1), anchor(TENANT_ID_3, { lastPublishedAt: NEXT_BOUNDARY })],
+    });
+
+    const outcome = await publisherFor(db).runCadence(BOUNDARY);
+
+    expect(outcome).toMatchObject({ kind: "failed", reason: "CADENCE_FAILED:LAST_PUBLISHED_AHEAD_OF_CLOCK" });
+  });
+
+  it("a last_published_at that maps to the wall clock's own boundary is not d1", async () => {
+    // The last instant of the boundary still maps to it.
+    const lastInstant = new Date(NEXT_BOUNDARY.getTime() - 1);
+    const db = makeDb({ anchors: [anchor(TENANT_ID_1, { lastPublishedAt: lastInstant }), anchor(TENANT_ID_2)] });
+    const primary = await archivedPrimary();
+    await storeManifest(primary, ours(BOUNDARY));
+
+    const outcome = await publisherFor(db, { destinations: [primary] }).runCadence(BOUNDARY);
 
     expect(outcome.kind).toBe("skipped_already_published");
-    expect(logTypes(mockLoggerWarn)).toContain("audit-anchor-publisher.stale_boundary");
+    expect(failureReasons(db)).toEqual([]);
   });
 
-  it("fails the publish transaction's re-check on a marker planted ahead between the two transactions", async () => {
+  it.each([
+    ["nothing", null],
+    ["only an earlier date", PREV_BOUNDARY],
+  ])("row d2: last_published_at at the boundary while the primary holds %s fails, and is not a skip", async (_label, held) => {
+    const db = makeDb({ anchors: [anchor(TENANT_ID_1, { lastPublishedAt: BOUNDARY }), anchor(TENANT_ID_2)] });
+    const primary = await archivedPrimary();
+    if (held) await storeManifest(primary, ours(held));
+    const before = await primary.list();
+    const mirror = tracked(new InMemoryDestination("s3"));
+
+    const outcome = await publisherFor(db, { destinations: [primary, mirror.dest] }).runCadence(BOUNDARY);
+
+    expect(outcome).toEqual({
+      kind: "failed",
+      reason: "CADENCE_FAILED:DESTINATION_BEHIND_DATABASE",
+      stage: "before_upload",
+      chainEnabledTenantCount: 2,
+    });
+    expect(db.settings.has(ATTEMPTS_KEY)).toBe(false);
+    await expectNothingWritten(db, primary, before, mirror.calls);
+  });
+
+  it("row d2: an empty new primary fails though a secondary holds the manifests", async () => {
+    const db = makeDb({ anchors: [anchor(TENANT_ID_1, { lastPublishedAt: PREV_BOUNDARY }), anchor(TENANT_ID_2)] });
+    const primary = new InMemoryDestination("s3");
+    const populated = new InMemoryDestination("filesystem");
+    await storeManifest(populated, ours(PREV_BOUNDARY));
+
+    const outcome = await publisherFor(db, { destinations: [primary, populated] }).runCadence(BOUNDARY);
+
+    expect(outcome).toMatchObject({ kind: "failed", reason: "CADENCE_FAILED:DESTINATION_BEHIND_DATABASE" });
+    expect(await primary.list()).toEqual([]);
+  });
+
+  it("a last_published_at on the latest manifest's date is neither d1 nor d2: the boundary publishes", async () => {
+    const db = makeDb({
+      anchors: [anchor(TENANT_ID_1, { lastPublishedAt: new Date(PREV_BOUNDARY.getTime() + HOUR_MS) }), anchor(TENANT_ID_2)],
+    });
+    const primary = await archivedPrimary();
+    await storeManifest(primary, ours(PREV_BOUNDARY));
+
+    const outcome = await publisherFor(db, { destinations: [primary] }).runCadence(BOUNDARY);
+
+    expect(outcome).toMatchObject({ kind: "published", adopted: false });
+  });
+
+  it("no last_published_at and an empty primary is genesis: published with previousManifest null", async () => {
     const db = makeDb();
-    const ahead = new Date(BOUNDARY.getTime() + CADENCE_MS).toISOString();
-    const upload = vi.fn().mockResolvedValue(undefined);
+    const primary = await archivedPrimary();
+
+    const outcome = await publisherFor(db, { destinations: [primary] }).runCadence(BOUNDARY);
+
+    expect(outcome).toMatchObject({ kind: "published", adopted: false });
+    expect(verify((await primary.read(OWN_KEY_AT_BOUNDARY))!.toString("utf-8"), PUBLIC_KEY).previousManifest).toBeNull();
+    expect(metadataOf(db, "AUDIT_ANCHOR_PUBLISHED")).toEqual([expect.objectContaining({ genesis: true, adopted: false })]);
+  });
+
+  it("row e: a latest manifest under another kid while the own kid has published before fails; without that earlier key the publisher chains to it", async () => {
+    const db = makeDb();
+    const primary = await archivedPrimary();
+    await archivePublicKey(primary, OTHER_PUBLIC_KEY);
+    await storeManifest(
+      primary,
+      signedManifest({ signingKey: OTHER_KEY, boundary: PREV_BOUNDARY, deploymentId: DEPLOYMENT_ID }),
+    );
+
+    // Allow: the own kid has never published — a rotation onto this key.
+    const rotatedOnto = new InMemoryDestination("filesystem");
+    for (const key of await primary.list()) await storeArtifact(rotatedOnto, key, (await primary.read(key))!);
+    expect(await publisherFor(makeDb(), { destinations: [rotatedOnto] }).runCadence(BOUNDARY)).toMatchObject({
+      kind: "published",
+    });
+
+    // Deny: an older key NAME carries the own kid — this key was rotated away from.
+    await storeArtifact(primary, buildManifestArtifactKey(new Date(PREV_BOUNDARY.getTime() - CADENCE_MS), KID), Buffer.from("x"));
+    const before = await primary.list();
+    const mirror = tracked(new InMemoryDestination("s3"));
+    const outcome = await publisherFor(db, { destinations: [primary, mirror.dest] }).runCadence(BOUNDARY);
+
+    expect(outcome).toEqual({
+      kind: "failed",
+      reason: "CADENCE_FAILED:LATEST_UNDER_RETIRED_KEY",
+      stage: "before_upload",
+      chainEnabledTenantCount: 2,
+    });
+    expect(db.settings.has(ATTEMPTS_KEY)).toBe(false);
+    await expectNothingWritten(db, primary, before, mirror.calls);
+  });
+
+  it("row f: a latest manifest past the boundary skips, uncounted, logging stale_boundary", async () => {
+    // The wall clock is at D+1, the run for D (a late retry).
+    clockInto(NEXT_BOUNDARY);
+    const db = makeDb({ anchors: [anchor(TENANT_ID_1, { lastPublishedAt: NEXT_BOUNDARY }), anchor(TENANT_ID_2)] });
+    const primary = await archivedPrimary();
+    const later = ours(NEXT_BOUNDARY);
+    await storeManifest(primary, later);
+    const { dest, calls } = tracked(primary);
+
+    const outcome = await publisherFor(db, { destinations: [dest] }).runCadence(BOUNDARY);
+
+    expect(outcome).toEqual({
+      kind: "skipped_already_published",
+      reason: "BOUNDARY_ALREADY_PUBLISHED",
+      chainEnabledTenantCount: 2,
+    });
+    expect(creates(calls)).toEqual([]);
+    expect(db.settings.has(ATTEMPTS_KEY)).toBe(false);
+    expect(logLines(mockLoggerWarn, "stale_boundary")).toEqual([
+      {
+        boundary: BOUNDARY.toISOString(),
+        latestArtifactKey: later.artifactKey,
+        _logType: "audit-anchor-publisher.stale_boundary",
+      },
+    ]);
+  });
+
+  it.each([
+    ["the own kid but another deployment id", SIGNING_KEY, "another-deployment", { kidMatches: true, deploymentMatches: false }],
+    ["another kid and the own deployment id", OTHER_KEY, DEPLOYMENT_ID, { kidMatches: false, deploymentMatches: true }],
+  ])("row g: the boundary's manifest under %s skips, with one audit row for the boundary", async (_label, signingKey, deploymentId, matches) => {
+    const db = makeDb();
+    const primary = await archivedPrimary();
+    await archivePublicKey(primary, OTHER_PUBLIC_KEY);
+    const theirs = signedManifest({ signingKey, boundary: BOUNDARY, deploymentId });
+    await storeManifest(primary, theirs);
+    const before = await primary.list();
+    const mirror = tracked(new InMemoryDestination("s3"));
+    const publisher = publisherFor(db, { destinations: [primary, mirror.dest] });
+
+    const first = await publisher.runCadence(BOUNDARY);
+    const second = await publisher.runCadence(BOUNDARY);
+
+    expect([first, second]).toEqual([
+      { kind: "skipped_already_published", reason: "BOUNDARY_ALREADY_PUBLISHED", chainEnabledTenantCount: 2 },
+      { kind: "skipped_already_published", reason: "BOUNDARY_ALREADY_PUBLISHED", chainEnabledTenantCount: 2 },
+    ]);
+    expect(db.settings.has(ATTEMPTS_KEY)).toBe(false);
+    await expectNothingWritten(db, primary, before, mirror.calls);
+    expect(logLines(mockLoggerWarn, "published_by_other_identity")).toEqual([
+      expect.objectContaining({ boundary: BOUNDARY.toISOString(), artifactKey: theirs.artifactKey, ...matches }),
+      expect.objectContaining(matches),
+    ]);
+    // Once per boundary per instance, however often the run repeats.
+    expect(failureRows(db, "PUBLISHED_BY_OTHER_IDENTITY")).toEqual([
+      { failureReason: "PUBLISHED_BY_OTHER_IDENTITY", artifactKey: theirs.artifactKey, anchoredAt: BOUNDARY.toISOString() },
+    ]);
+    expect(logLines(mockLoggerInfo, "cadence_healthy")).toEqual([]);
+  });
+
+  it("row g's row is deduplicated per publisher instance and per boundary, not per process", async () => {
+    const db = makeDb();
+    const primary = await archivedPrimary();
+    await storeManifest(primary, ours(BOUNDARY, { deploymentId: "another-deployment" }));
+    const config = { destinations: [primary] };
+
+    // A second instance reports for itself; the first is not silenced by it.
+    const one = publisherFor(db, config);
+    const two = publisherFor(db, config);
+    await one.runCadence(BOUNDARY);
+    await two.runCadence(BOUNDARY);
+    await one.runCadence(BOUNDARY);
+    expect(failureRows(db, "PUBLISHED_BY_OTHER_IDENTITY")).toHaveLength(2);
+
+    // The next boundary is reported again by the instance that reported this one.
+    clockInto(NEXT_BOUNDARY);
+    await storeManifest(primary, ours(NEXT_BOUNDARY, { deploymentId: "another-deployment" }));
+    await one.runCadence(NEXT_BOUNDARY);
+    expect(failureRows(db, "PUBLISHED_BY_OTHER_IDENTITY").map((m) => m.anchoredAt)).toEqual([
+      BOUNDARY.toISOString(),
+      BOUNDARY.toISOString(),
+      NEXT_BOUNDARY.toISOString(),
+    ]);
+  });
+
+  it("row h: the boundary's own manifest, settled, skips with no row and nothing counted", async () => {
+    const db = makeDb({ anchors: [anchor(TENANT_ID_1, { lastPublishedAt: WALL_CLOCK }), anchor(TENANT_ID_2)] });
+    const primary = await archivedPrimary();
+    await storeManifest(primary, ours(BOUNDARY));
+    const { dest, calls } = tracked(primary);
+
+    const outcome = await publisherFor(db, { destinations: [dest] }).runCadence(BOUNDARY);
+
+    expect(outcome).toEqual({
+      kind: "skipped_already_published",
+      reason: "BOUNDARY_ALREADY_PUBLISHED",
+      chainEnabledTenantCount: 2,
+    });
+    expect(creates(calls)).toEqual([]);
+    expect(db.outboxRows).toEqual([]);
+    expect(db.settings.has(ATTEMPTS_KEY)).toBe(false);
+    expect(publishWrites(db)).toEqual([]);
+  });
+
+  it.each([
+    ["no last_published_at", null],
+    ["a last_published_at before the boundary", new Date(BOUNDARY.getTime() - 1)],
+  ])("row i: the boundary's own manifest with %s is adopted — no create, the database settled, adopted: true", async (_label, lastPublishedAt) => {
+    const db = makeDb({ anchors: [anchor(TENANT_ID_1, { lastPublishedAt }), anchor(TENANT_ID_2)] });
+    const primary = await archivedPrimary();
+    // The previous date's manifest is there whenever the database says it was published.
+    if (lastPublishedAt) await storeManifest(primary, ours(PREV_BOUNDARY));
+    const planted = ours(BOUNDARY);
+    await storeManifest(primary, planted);
+    const { dest, calls } = tracked(primary);
+
+    const outcome = await publisherFor(db, { destinations: [dest] }).runCadence(BOUNDARY);
+
+    expect(outcome).toEqual({
+      kind: "published",
+      manifestSha256: planted.sha256,
+      destinations: ["filesystem"],
+      tenantsCount: 2,
+      adopted: true,
+      chainEnabledTenantCount: 2,
+    });
+    expect(creates(calls)).toEqual([]);
+    expect(await primary.read(planted.artifactKey)).toEqual(planted.bytes);
+    expect(db.anchors.map((a) => a.lastPublishedAt)).toEqual([WALL_CLOCK, WALL_CLOCK]);
+    expect(metadataOf(db, "AUDIT_ANCHOR_PUBLISHED")).toEqual([
+      expect.objectContaining({ adopted: true, manifestSha256: planted.sha256, artifactKey: planted.artifactKey }),
+    ]);
+    expect(JSON.parse(db.settings.get(ATTEMPTS_KEY) ?? "null")).toEqual({ boundary: BOUNDARY.toISOString(), count: 1 });
+  });
+
+  it("row j: a latest manifest before the boundary is chained to by uri and payload digest", async () => {
+    const db = makeDb();
+    const primary = await archivedPrimary();
+    const previous = ours(PREV_BOUNDARY);
+    await storeManifest(primary, previous);
+
+    const outcome = await publisherFor(db, { destinations: [primary] }).runCadence(BOUNDARY);
+
+    expect(outcome).toMatchObject({ kind: "published", adopted: false });
+    const stored = verify((await primary.read(OWN_KEY_AT_BOUNDARY))!.toString("utf-8"), PUBLIC_KEY);
+    expect(stored.previousManifest).toEqual({ uri: `filesystem://${previous.artifactKey}`, sha256: previous.sha256 });
+    expect(metadataOf(db, "AUDIT_ANCHOR_PUBLISHED")).toEqual([expect.objectContaining({ genesis: false })]);
+    expect(metadataOf(db, "AUDIT_ANCHOR_KEY_ROTATED")).toEqual([]);
+  });
+
+  it("chains to a previous manifest from another deployment id, and says so", async () => {
+    const db = makeDb();
+    const primary = await archivedPrimary();
+    const previous = ours(PREV_BOUNDARY, { deploymentId: "another-deployment" });
+    await storeManifest(primary, previous);
+
+    const outcome = await publisherFor(db, { destinations: [primary] }).runCadence(BOUNDARY);
+
+    expect(outcome.kind).toBe("published");
+    const stored = verify((await primary.read(OWN_KEY_AT_BOUNDARY))!.toString("utf-8"), PUBLIC_KEY);
+    expect(stored.previousManifest?.sha256).toBe(previous.sha256);
+    expect(logLines(mockLoggerWarn, "previous_manifest_deployment_changed")).toEqual([
+      expect.objectContaining({ previousArtifactKey: previous.artifactKey }),
+    ]);
+
+    mockLoggerWarn.mockClear();
+    clockInto(NEXT_BOUNDARY);
+    await publisherFor(db, { destinations: [primary] }).runCadence(NEXT_BOUNDARY);
+    expect(logLines(mockLoggerWarn, "previous_manifest_deployment_changed")).toEqual([]);
+  });
+
+  it("decides again under the lock: an instance that waited behind a publish skips and creates nothing", async () => {
+    const db = makeDb();
+    const primary = await archivedPrimary();
+    const { dest, calls } = tracked(primary);
     const outcome = await publisherFor(db, {
-      destinations: [makeDestination("s3", upload)],
+      destinations: [dest],
       hooks: {
+        // What the other instance committed while this one waited for the lock.
         inTx: async () => {
-          db.settings.set(MARKER_KEY, ahead);
+          await storeManifest(primary, ours(BOUNDARY));
+          for (const row of db.anchors) row.lastPublishedAt = WALL_CLOCK;
         },
       },
     }).runCadence(BOUNDARY);
 
-    expect(outcome).toMatchObject({ kind: "failed", reason: "CADENCE_FAILED:BOUNDARY_MARKER_AHEAD", stage: "before_upload" });
-    expect(upload).not.toHaveBeenCalled();
-    expect(db.settings.get(MARKER_KEY)).toBe(ahead);
-    expect(pauseWrites(db)).toEqual([]);
-  });
-
-  it.each([
-    ["not a timestamp", "yesterday"],
-    ["a timestamp in another form", "2026-01-15T00:05:00Z"],
-  ])("fails before the upload, uncounted, when the marker is %s", async (_label, stored) => {
-    const db = makeDb();
-    db.settings.set(MARKER_KEY, stored);
-    const upload = vi.fn().mockResolvedValue(undefined);
-    const outcome = await publisherFor(db, { destinations: [makeDestination("s3", upload)] }).runCadence(BOUNDARY);
-
-    expect(outcome).toEqual({
-      kind: "failed",
-      reason: "CADENCE_FAILED:BOUNDARY_MARKER_UNREADABLE",
-      stage: "before_upload",
-      chainEnabledTenantCount: null,
-    });
-    expect(upload).not.toHaveBeenCalled();
-    expect(db.settings.get(MARKER_KEY)).toBe(stored);
-    expect(failureReasons(db)).toEqual(["CADENCE_FAILED:BOUNDARY_MARKER_UNREADABLE"]);
-  });
-
-  it("publishes when the marker holds an earlier boundary", async () => {
-    const db = makeDb();
-    db.settings.set(MARKER_KEY, new Date(BOUNDARY.getTime() - CADENCE_MS).toISOString());
-    const outcome = await publisherFor(db).runCadence(BOUNDARY);
-
-    expect(outcome.kind).toBe("published");
-    expect(db.settings.get(MARKER_KEY)).toBe(BOUNDARY.toISOString());
-  });
-
-  it("derives the absent marker from last_published_at at or after the boundary", async () => {
-    const db = makeDb({ anchors: [anchor(TENANT_ID_1, { lastPublishedAt: BOUNDARY }), anchor(TENANT_ID_2)] });
-    const outcome = await publisherFor(db).runCadence(BOUNDARY);
-
     expect(outcome.kind).toBe("skipped_already_published");
+    expect(creates(calls)).toEqual([]);
+    expect(db.outboxRows).toEqual([]);
   });
 
-  it("publishes when the absent marker's last_published_at is below the boundary", async () => {
-    const db = makeDb({
-      anchors: [anchor(TENANT_ID_1, { lastPublishedAt: new Date(BOUNDARY.getTime() - 1) }), anchor(TENANT_ID_2)],
-    });
-    const outcome = await publisherFor(db).runCadence(BOUNDARY);
+  it("decides again under the lock: a high-water planted ahead between the transactions fails, counted", async () => {
+    const db = makeDb();
+    const primary = await archivedPrimary();
+    const before = await primary.list();
+    const outcome = await publisherFor(db, {
+      destinations: [primary],
+      hooks: {
+        inTx: async () => {
+          db.anchors[0]!.lastPublishedAt = NEXT_BOUNDARY;
+        },
+      },
+    }).runCadence(BOUNDARY);
 
-    expect(outcome.kind).toBe("published");
+    expect(outcome).toMatchObject({
+      kind: "failed",
+      reason: "CADENCE_FAILED:LAST_PUBLISHED_AHEAD_OF_CLOCK",
+      stage: "before_upload",
+    });
+    expect(JSON.parse(db.settings.get(ATTEMPTS_KEY) ?? "null")).toEqual({ boundary: BOUNDARY.toISOString(), count: 1 });
+    expect(pauseWrites(db)).toEqual([]);
+    await expectNothingWritten(db, primary, before);
+  });
+
+  it("reads the wall clock from config.now when one is given", async () => {
+    // The default clock (faked to WALL_CLOCK) calls this object ahead; the
+    // injected one is at D+1, where the run for D is a stale skip.
+    const db = makeDb();
+    const primary = await archivedPrimary();
+    await storeManifest(primary, ours(NEXT_BOUNDARY));
+
+    expect(await publisherFor(db, { destinations: [primary] }).runCadence(BOUNDARY)).toMatchObject({
+      reason: "CADENCE_FAILED:PUBLISHED_OBJECT_AHEAD",
+    });
+    const outcome = await publisherFor(db, {
+      destinations: [primary],
+      now: () => NEXT_BOUNDARY.getTime() + HOUR_MS,
+    }).runCadence(BOUNDARY);
+    expect(outcome.kind).toBe("skipped_already_published");
   });
 });
 
 // ─── runCadence: attempt cap ────────────────────────────────────────────────
 
 describe("AuditAnchorPublisher.runCadence — persisted attempt cap", () => {
+  function failingPrimary(): { dest: AnchorDestination; calls: string[] } {
+    return tracked(new InMemoryDestination("s3"), {
+      create: async () => {
+        throw new Error("down");
+      },
+    });
+  }
+
   it("counts each run against the boundary, resetting to 1 for a new boundary", async () => {
     const db = makeDb();
-    const failing = makeDestination("s3", vi.fn().mockRejectedValue(new Error("down")));
-    const publisher = publisherFor(db, { destinations: [failing] });
+    const publisher = publisherFor(db, { destinations: [failingPrimary().dest] });
 
     await publisher.runCadence(BOUNDARY);
     await publisher.runCadence(BOUNDARY);
     expect(JSON.parse(db.settings.get(ATTEMPTS_KEY) ?? "null")).toEqual({ boundary: BOUNDARY.toISOString(), count: 2 });
 
-    const next = new Date(BOUNDARY.getTime() + CADENCE_MS);
-    await publisher.runCadence(next);
-    expect(JSON.parse(db.settings.get(ATTEMPTS_KEY) ?? "null")).toEqual({ boundary: next.toISOString(), count: 1 });
+    clockInto(NEXT_BOUNDARY);
+    await publisher.runCadence(NEXT_BOUNDARY);
+    expect(JSON.parse(db.settings.get(ATTEMPTS_KEY) ?? "null")).toEqual({ boundary: NEXT_BOUNDARY.toISOString(), count: 1 });
   });
 
   it.each([
@@ -531,8 +1071,8 @@ describe("AuditAnchorPublisher.runCadence — persisted attempt cap", () => {
   ])("treats the boundary as past the cap when the stored count %s, overwriting it", async (_label, stored) => {
     const db = makeDb();
     db.settings.set(ATTEMPTS_KEY, stored);
-    const upload = vi.fn().mockResolvedValue(undefined);
-    const outcome = await publisherFor(db, { destinations: [makeDestination("s3", upload)] }).runCadence(BOUNDARY);
+    const { dest, calls } = tracked(new InMemoryDestination("s3"));
+    const outcome = await publisherFor(db, { destinations: [dest] }).runCadence(BOUNDARY);
 
     expect(outcome).toEqual({
       kind: "upload_cap_reached",
@@ -540,39 +1080,38 @@ describe("AuditAnchorPublisher.runCadence — persisted attempt cap", () => {
       attempts: 4,
       chainEnabledTenantCount: 2,
     });
-    expect(upload).not.toHaveBeenCalled();
+    expect(creates(calls)).toEqual([]);
     expect(JSON.parse(db.settings.get(ATTEMPTS_KEY) ?? "null")).toEqual({ boundary: BOUNDARY.toISOString(), count: 4 });
     expect(failureReasons(db)).toEqual(["UPLOAD_ATTEMPT_COUNT_UNREADABLE"]);
-    const capLines = mockLoggerError.mock.calls
-      .map(([fields]) => fields as Record<string, unknown>)
-      .filter((f) => f._logType === "audit-anchor-publisher.upload_cap_reached");
-    expect(capLines).toEqual([expect.objectContaining({ countUnreadable: true, attempts: 4 })]);
+    expect(logLines(mockLoggerError, "upload_cap_reached")).toEqual([
+      expect.objectContaining({ countUnreadable: true, attempts: 4 }),
+    ]);
   });
 
   it("after an unreadable count, writes no second row for the boundary and counts the next boundary from 1", async () => {
     const db = makeDb();
     db.settings.set(ATTEMPTS_KEY, "{not json");
-    const upload = vi.fn().mockResolvedValue(undefined);
-    const publisher = publisherFor(db, { destinations: [makeDestination("s3", upload)] });
+    const { dest, calls } = tracked(await archivedPrimary("s3"));
+    const publisher = publisherFor(db, { destinations: [dest] });
 
     await publisher.runCadence(BOUNDARY);
     const again = await publisher.runCadence(BOUNDARY);
     expect(again).toMatchObject({ kind: "upload_cap_reached", attempts: 5 });
     expect(failureReasons(db)).toEqual(["UPLOAD_ATTEMPT_COUNT_UNREADABLE"]);
-    expect(upload).not.toHaveBeenCalled();
+    expect(creates(calls)).toEqual([]);
 
-    const next = new Date(BOUNDARY.getTime() + CADENCE_MS);
-    const recovered = await publisher.runCadence(next);
+    clockInto(NEXT_BOUNDARY);
+    const recovered = await publisher.runCadence(NEXT_BOUNDARY);
     expect(recovered.kind).toBe("published");
-    expect(JSON.parse(db.settings.get(ATTEMPTS_KEY) ?? "null")).toEqual({ boundary: next.toISOString(), count: 1 });
-    expect(upload).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(db.settings.get(ATTEMPTS_KEY) ?? "null")).toEqual({ boundary: NEXT_BOUNDARY.toISOString(), count: 1 });
+    expect(creates(calls)).toHaveLength(1);
   });
 
-  it("past the cap uploads nothing, logs upload_cap_reached, and writes one failure row per boundary", async () => {
+  it("past the cap creates nothing, logs upload_cap_reached, and writes one failure row per boundary", async () => {
     const db = makeDb();
     db.settings.set(ATTEMPTS_KEY, JSON.stringify({ boundary: BOUNDARY.toISOString(), count: 3 }));
-    const upload = vi.fn().mockResolvedValue(undefined);
-    const publisher = publisherFor(db, { destinations: [makeDestination("s3", upload)] });
+    const { dest, calls } = tracked(new InMemoryDestination("s3"));
+    const publisher = publisherFor(db, { destinations: [dest] });
 
     const fourth = await publisher.runCadence(BOUNDARY);
     expect(fourth).toEqual({
@@ -589,66 +1128,138 @@ describe("AuditAnchorPublisher.runCadence — persisted attempt cap", () => {
     expect(fifth.kind).toBe("upload_cap_reached");
     expect(failureReasons(db)).toEqual(["UPLOAD_ATTEMPT_CAP_REACHED"]);
     expect(logTypes(mockLoggerError)).toContain("audit-anchor-publisher.upload_cap_reached");
-    expect(upload).not.toHaveBeenCalled();
+    expect(creates(calls)).toEqual([]);
+  });
+
+  it("a restart over a settled boundary never counts, so a fourth boot does not report the cap", async () => {
+    const db = makeDb();
+    const primary = await archivedPrimary();
+    expect((await publisherFor(db, { destinations: [primary] }).runCadence(BOUNDARY)).kind).toBe("published");
+
+    for (let boot = 0; boot < 4; boot++) {
+      const outcome = await publisherFor(db, { destinations: [primary] }).runCadence(BOUNDARY);
+      expect(outcome.kind).toBe("skipped_already_published");
+    }
+    expect(JSON.parse(db.settings.get(ATTEMPTS_KEY) ?? "null")).toEqual({ boundary: BOUNDARY.toISOString(), count: 1 });
   });
 });
 
-// ─── runCadence: publish ────────────────────────────────────────────────────
+// ─── runCadence: publish and adopt ──────────────────────────────────────────
 
 describe("AuditAnchorPublisher.runCadence — publish", () => {
-  it("publishes the given boundary: key, marker and anchoredAt from it, lastPublishedAt from the wall clock", async () => {
+  it("publishes the given boundary: key and anchoredAt from it, lastPublishedAt from the wall clock, every destination the same bytes", async () => {
     const db = makeDb();
-    const upload1 = vi.fn().mockResolvedValue(undefined);
-    const upload2 = vi.fn().mockResolvedValue(undefined);
-    const outcome = await publisherFor(db, {
-      destinations: [makeDestination("filesystem", upload1), makeDestination("s3", upload2)],
-    }).runCadence(BOUNDARY);
+    const primary = tracked(await archivedPrimary());
+    const mirrorStore = new InMemoryDestination("s3");
+    const mirror = tracked(mirrorStore);
+    const outcome = await publisherFor(db, { destinations: [primary.dest, mirror.dest] }).runCadence(BOUNDARY);
 
     expect(outcome).toMatchObject({
       kind: "published",
       destinations: ["filesystem", "s3"],
       tenantsCount: 2,
+      adopted: false,
       chainEnabledTenantCount: 2,
     });
-    const expectedKey = buildManifestArtifactKey(BOUNDARY, KID);
-    expect(upload1.mock.calls[0]?.[0]).toMatchObject({ artifactKey: expectedKey, contentType: "application/jose" });
-    expect(upload2).toHaveBeenCalledTimes(1);
-    expect(db.settings.get(MARKER_KEY)).toBe(BOUNDARY.toISOString());
-    expect(JSON.parse(db.settings.get(POINTER_KEY) ?? "null")).toEqual({
-      uri: `filesystem://${expectedKey}`,
-      sha256: outcome.kind === "published" ? outcome.manifestSha256 : "",
-    });
+    expect(creates(primary.calls)).toEqual([`create:${OWN_KEY_AT_BOUNDARY}`]);
+    expect(creates(mirror.calls)).toEqual([`create:${OWN_KEY_AT_BOUNDARY}`]);
+    const stored = await primary.dest.read(OWN_KEY_AT_BOUNDARY);
+    expect(await mirrorStore.read(OWN_KEY_AT_BOUNDARY)).toEqual(stored);
+
+    const manifest = verify(stored!.toString("utf-8"), PUBLIC_KEY);
+    expect(manifest.anchoredAt).toBe(BOUNDARY.toISOString());
+    expect(manifest.tenants.map((t) => t.tenantTag)).toEqual([
+      computeTenantTag(TENANT_ID_1, TAG_SECRET),
+      computeTenantTag(TENANT_ID_2, TAG_SECRET),
+    ]);
     expect(db.updateManyCalls).toContainEqual({
       where: { tenantId: { in: [TENANT_ID_1, TENANT_ID_2] } },
       data: { lastPublishedAt: WALL_CLOCK, publishPausedUntil: null },
     });
 
-    const published = db.outboxRows.find((r) => r.payload.action === "AUDIT_ANCHOR_PUBLISHED");
-    expect(published?.payload.metadata).toMatchObject({ artifactKey: expectedKey, anchoredAt: BOUNDARY.toISOString() });
+    expect(metadataOf(db, "AUDIT_ANCHOR_PUBLISHED")).toEqual([
+      {
+        manifestSha256: outcome.kind === "published" ? outcome.manifestSha256 : "",
+        destinations: ["filesystem", "s3"],
+        tenantsCount: 2,
+        artifactKey: OWN_KEY_AT_BOUNDARY,
+        anchoredAt: BOUNDARY.toISOString(),
+        adopted: false,
+        genesis: true,
+      },
+    ]);
   });
 
-  it("reads lastPublishedAt from config.now, not the process Date", async () => {
-    // Two days past the faked Date: the publish must follow the injected clock.
-    const configNow = WALL_CLOCK.getTime() + 2 * CADENCE_MS;
+  it("two runs for one boundary publish once; the second skips and the object is the first run's", async () => {
     const db = makeDb();
-    const outcome = await publisherFor(db, { now: () => configNow }).runCadence(BOUNDARY);
+    const primary = await archivedPrimary();
+    const publisher = publisherFor(db, { destinations: [primary] });
+
+    const first = await publisher.runCadence(BOUNDARY);
+    const bytes = await primary.read(OWN_KEY_AT_BOUNDARY);
+    db.anchors[0]!.chainSeq = 9n;
+    const second = await publisher.runCadence(BOUNDARY);
+
+    expect([first.kind, second.kind]).toEqual(["published", "skipped_already_published"]);
+    expect(await primary.read(OWN_KEY_AT_BOUNDARY)).toEqual(bytes);
+    expect(metadataOf(db, "AUDIT_ANCHOR_PUBLISHED")).toHaveLength(1);
+  });
+
+  it("passes the run's abort signal to every destination call", async () => {
+    const db = makeDb();
+    const primary = tracked(new InMemoryDestination("filesystem"));
+    const mirror = tracked(new InMemoryDestination("s3"));
+    await publisherFor(db, { destinations: [primary.dest, mirror.dest] }).runCadence(BOUNDARY);
+
+    const signals = [...primary.signals, ...mirror.signals];
+    expect(signals.length).toBeGreaterThan(3);
+    expect(signals.every((s) => s instanceof AbortSignal)).toBe(true);
+    expect(new Set(signals).size).toBe(1);
+  });
+
+  it.each([
+    ["inside the boundary", WALL_CLOCK.getTime(), WALL_CLOCK],
+    ["past the next boundary", NEXT_BOUNDARY.getTime() + HOUR_MS, new Date(NEXT_BOUNDARY.getTime() - 1)],
+    ["before the boundary", BOUNDARY.getTime() - HOUR_MS, BOUNDARY],
+  ])("writes last_published_at from config.now clamped into the boundary: a clock %s", async (_label, clockMs, expected) => {
+    const db = makeDb();
+    // The decision reads a clock inside the boundary; the write, the one under test.
+    let now = WALL_CLOCK.getTime();
+    const outcome = await publisherFor(db, {
+      now: () => now,
+      hooks: {
+        afterUpload: async () => {
+          now = clockMs;
+        },
+      },
+    }).runCadence(BOUNDARY);
 
     expect(outcome.kind).toBe("published");
-    expect(db.updateManyCalls).toContainEqual({
-      where: { tenantId: { in: [TENANT_ID_1, TENANT_ID_2] } },
-      data: { lastPublishedAt: new Date(configNow), publishPausedUntil: null },
-    });
+    expect(publishWrites(db).map((c) => c.data.lastPublishedAt)).toEqual([expected]);
   });
 
-  it("passes an abort signal to every destination", async () => {
+  it("a publish whose clock crosses the next boundary before the database write leaves the next boundary publishable", async () => {
     const db = makeDb();
-    const upload = vi.fn().mockResolvedValue(undefined);
-    await publisherFor(db, { destinations: [makeDestination("s3", upload)] }).runCadence(BOUNDARY);
+    const primary = await archivedPrimary();
+    let now = WALL_CLOCK.getTime();
+    const crossing = await publisherFor(db, {
+      destinations: [primary],
+      now: () => now,
+      hooks: {
+        afterUpload: async () => {
+          now = NEXT_BOUNDARY.getTime() + 60_000;
+        },
+      },
+    }).runCadence(BOUNDARY);
+    expect(crossing.kind).toBe("published");
 
-    expect(upload.mock.calls[0]?.[0].signal).toBeInstanceOf(AbortSignal);
+    // Unclamped, the value maps to the next boundary, which the primary does
+    // not hold: DESTINATION_BEHIND_DATABASE.
+    const next = await publisherFor(db, { destinations: [primary], now: () => now }).runCadence(NEXT_BOUNDARY);
+    expect(next).toMatchObject({ kind: "published", adopted: false });
   });
 
-  it("publishes every tenant when one is paused, with no AUDIT_ANCHOR_PUBLISH_PAUSED emit", async () => {
+  it("publishes every tenant when one is paused, clearing the pause, with no AUDIT_ANCHOR_PUBLISH_PAUSED emit", async () => {
     const db = makeDb({
       anchors: [
         anchor(TENANT_ID_1, { publishPausedUntil: new Date("2026-12-31T00:00:00Z") }),
@@ -658,155 +1269,760 @@ describe("AuditAnchorPublisher.runCadence — publish", () => {
     const outcome = await publisherFor(db).runCadence(BOUNDARY);
 
     expect(outcome).toMatchObject({ kind: "published", tenantsCount: 2 });
-    expect(outboxActions(db)).not.toContain("AUDIT_ANCHOR_PUBLISH_PAUSED");
+    expect(db.anchors.map((a) => a.publishPausedUntil)).toEqual([null, null]);
+    expect(db.outboxRows.map((r) => r.payload.action)).not.toContain("AUDIT_ANCHOR_PUBLISH_PAUSED");
   });
 
-  it("publishes when every tenant is paused", async () => {
-    const pausedUntil = new Date("2026-12-31T00:00:00Z");
-    const db = makeDb({
-      anchors: [anchor(TENANT_ID_1, { publishPausedUntil: pausedUntil }), anchor(TENANT_ID_2, { publishPausedUntil: pausedUntil })],
-    });
-    const outcome = await publisherFor(db).runCadence(BOUNDARY);
-
-    expect(outcome).toMatchObject({ kind: "published", tenantsCount: 2 });
-  });
-
-  it("writes the missing-prior row after the publish transaction, on its own transaction", async () => {
+  it("writes the missing-prior row after the publish transaction, on its own transaction, carrying anchoredAt", async () => {
     const db = makeDb();
     await publisherFor(db).runCadence(BOUNDARY);
 
     const missing = db.outboxRows.find(
       (r) => (r.payload.metadata as Record<string, unknown>).failureReason === "MISSING_PRIOR_CADENCE_PUBLICATION",
     );
-    expect(missing).toBeDefined();
+    expect(missing?.payload.metadata).toEqual({
+      failureReason: "MISSING_PRIOR_CADENCE_PUBLICATION",
+      prevCadenceBoundary: PREV_BOUNDARY.toISOString(),
+      maxPublishedAt: null,
+      anchoredAt: BOUNDARY.toISOString(),
+    });
     expect(db.publishTxIndex).not.toBeNull();
     expect(missing?.txIndex).toBeGreaterThan(db.publishTxIndex ?? Infinity);
   });
 
-  it.each<[string, Partial<PublisherConfig>]>([
-    ["an upload failure", { destinations: [makeDestination("s3", vi.fn().mockRejectedValue(new Error("down")))] }],
-    ["a commit lost after the upload", { hooks: { afterUpload: async () => { throw new Error("connection lost"); } } }],
-  ])("writes no missing-prior row on %s, only the failure row", async (_label, overrides) => {
+  it("writes no missing-prior row when the previous boundary was published", async () => {
+    const db = makeDb({
+      anchors: [anchor(TENANT_ID_1, { lastPublishedAt: new Date(PREV_BOUNDARY.getTime() + HOUR_MS) }), anchor(TENANT_ID_2)],
+    });
+    const primary = await archivedPrimary();
+    await storeManifest(primary, ours(PREV_BOUNDARY));
+
+    expect((await publisherFor(db, { destinations: [primary] }).runCadence(BOUNDARY)).kind).toBe("published");
+    expect(failureReasons(db)).toEqual([]);
+  });
+
+  it.each<[string, () => Partial<PublisherConfig>]>([
+    [
+      "an upload failure",
+      () => ({
+        destinations: [
+          tracked(new InMemoryDestination("s3"), {
+            create: async () => {
+              throw new Error("down");
+            },
+          }).dest,
+        ],
+      }),
+    ],
+    ["a commit lost after the upload", () => ({ hooks: { afterUpload: async () => { throw new Error("connection lost"); } } })],
+  ])("writes no publish row on %s, only the failure row", async (_label, overrides) => {
     // The run that publishes reports the missed boundary once; a failed run
     // would write it again on every retry.
     const db = makeDb();
-    const outcome = await publisherFor(db, overrides).runCadence(BOUNDARY);
+    const outcome = await publisherFor(db, overrides()).runCadence(BOUNDARY);
 
     expect(outcome.kind).toBe("failed");
     expect(logTypes(mockLoggerWarn)).toContain("audit-anchor-publisher.missing_prior_cadence");
-    expect(failureReasons(db)).toEqual([outcome.kind === "failed" ? outcome.reason : ""]);
+    expect(db.outboxRows.map((r) => (r.payload.metadata as Record<string, unknown>).failureReason)).toEqual([
+      outcome.kind === "failed" ? outcome.reason : "",
+    ]);
+  });
+
+  it("a lost commit is adopted by the retry: one object, the first run's bytes though the chain advanced, and the next boundary chains to it", async () => {
+    const db = makeDb();
+    const primary = await archivedPrimary();
+    const { dest, calls } = tracked(primary);
+
+    const lost = await publisherFor(db, {
+      destinations: [dest],
+      hooks: { afterUpload: async () => { throw new Error("commit lost"); } },
+    }).runCadence(BOUNDARY);
+    expect(lost).toMatchObject({ kind: "failed", stage: "after_upload" });
+    const bytes = await primary.read(OWN_KEY_AT_BOUNDARY);
+    expect(db.anchors.map((a) => a.lastPublishedAt)).toEqual([null, null]);
+
+    db.anchors[0]!.chainSeq = 7n;
+    const retry = await publisherFor(db, { destinations: [dest] }).runCadence(BOUNDARY);
+    expect(retry).toMatchObject({ kind: "published", adopted: true });
+    expect(creates(calls)).toEqual([`create:${OWN_KEY_AT_BOUNDARY}`]);
+    expect(await primary.read(OWN_KEY_AT_BOUNDARY)).toEqual(bytes);
+
+    clockInto(NEXT_BOUNDARY);
+    const next = await publisherFor(db, { destinations: [dest] }).runCadence(NEXT_BOUNDARY);
+    expect(next).toMatchObject({ kind: "published", adopted: false });
+    const nextManifest = verify(
+      (await primary.read(buildManifestArtifactKey(NEXT_BOUNDARY, KID)))!.toString("utf-8"),
+      PUBLIC_KEY,
+    );
+    expect(nextManifest.previousManifest?.sha256).toBe(retry.kind === "published" ? retry.manifestSha256 : "");
+    expect(nextManifest.tenants[0]?.chainSeq).toBe("7");
+  });
+
+  describe("create conflict: the key is taken between the decision and the create", () => {
+    /** A primary whose create first lets a competing writer store `competing` at the same key. */
+    function contended(primary: InMemoryDestination, competing: () => Buffer) {
+      return tracked(primary, {
+        create: async (args) => {
+          await storeArtifact(primary, args.artifactKey, competing());
+          return primary.create(args);
+        },
+      });
+    }
+
+    it("an object this identity signed is adopted: the stored bytes are kept and reported", async () => {
+      const db = makeDb();
+      const primary = await archivedPrimary();
+      // Not the bytes this run signs: another chain position.
+      const competing = ours(BOUNDARY, { tenants: [rowOf(TENANT_ID_1, { chainSeq: 40n }), rowOf(TENANT_ID_2)] });
+      const { dest } = contended(primary, () => competing.bytes);
+
+      const outcome = await publisherFor(db, { destinations: [dest] }).runCadence(BOUNDARY);
+
+      expect(outcome).toMatchObject({ kind: "published", adopted: true, manifestSha256: competing.sha256 });
+      expect(await primary.read(OWN_KEY_AT_BOUNDARY)).toEqual(competing.bytes);
+      expect(metadataOf(db, "AUDIT_ANCHOR_PUBLISHED")).toEqual([
+        expect.objectContaining({ adopted: true, manifestSha256: competing.sha256 }),
+      ]);
+      expect(db.anchors.map((a) => a.lastPublishedAt)).toEqual([WALL_CLOCK, WALL_CLOCK]);
+    });
+
+    it.each<[string, () => Buffer]>([
+      ["garbage", () => Buffer.from("garbage")],
+      [
+        "a manifest another archived key signed, stored under the own kid's name",
+        () => signedManifest({ signingKey: OTHER_KEY, boundary: BOUNDARY, deploymentId: DEPLOYMENT_ID }).bytes,
+      ],
+    ])("%s is not adopted: the run fails closed and settles nothing", async (_label, competing) => {
+      const db = makeDb();
+      const primary = await archivedPrimary();
+      await archivePublicKey(primary, OTHER_PUBLIC_KEY);
+      const mirror = tracked(new InMemoryDestination("s3"));
+      const { dest } = contended(primary, competing);
+
+      const outcome = await publisherFor(db, { destinations: [dest, mirror.dest] }).runCadence(BOUNDARY);
+
+      expect(outcome).toMatchObject({
+        kind: "failed",
+        reason: "CADENCE_FAILED:PUBLISHED_OBJECT_UNVERIFIABLE",
+        stage: "before_upload",
+      });
+      expect(await primary.read(OWN_KEY_AT_BOUNDARY)).toEqual(competing());
+      expect(publishWrites(db)).toEqual([]);
+      expect(pauseWrites(db)).toEqual([]);
+      expect(creates(mirror.calls)).toEqual([]);
+    });
+
+    it("an object the own key signed for another deployment id ends as row g", async () => {
+      const db = makeDb();
+      const primary = await archivedPrimary();
+      const competing = ours(BOUNDARY, { deploymentId: "another-deployment" });
+      const mirror = tracked(new InMemoryDestination("s3"));
+      const { dest } = contended(primary, () => competing.bytes);
+
+      const outcome = await publisherFor(db, { destinations: [dest, mirror.dest] }).runCadence(BOUNDARY);
+
+      expect(outcome.kind).toBe("skipped_already_published");
+      expect(failureRows(db, "PUBLISHED_BY_OTHER_IDENTITY")).toHaveLength(1);
+      expect(logLines(mockLoggerWarn, "published_by_other_identity")).toEqual([
+        expect.objectContaining({ kidMatches: true, deploymentMatches: false }),
+      ]);
+      expect(publishWrites(db)).toEqual([]);
+      expect(creates(mirror.calls)).toEqual([]);
+    });
+  });
+
+  it("settles the anchor rows the adopted manifest covers, whatever their tenant's flag is now", async () => {
+    // Published for tenants 1 and 2; since then 2 was disabled and 3 enabled.
+    const db = makeDb({
+      tenants: [
+        { id: TENANT_ID_1, auditChainEnabled: true },
+        { id: TENANT_ID_2, auditChainEnabled: false },
+        { id: TENANT_ID_3, auditChainEnabled: true },
+      ],
+      anchors: [
+        anchor(TENANT_ID_1),
+        anchor(TENANT_ID_2, { publishPausedUntil: new Date("2026-12-31T00:00:00Z") }),
+        anchor(TENANT_ID_3),
+      ],
+    });
+    const primary = await archivedPrimary();
+    await storeManifest(primary, ours(BOUNDARY));
+    const publisher = publisherFor(db, { destinations: [primary] });
+
+    const outcome = await publisher.runCadence(BOUNDARY);
+
+    expect(outcome).toMatchObject({ kind: "published", adopted: true, tenantsCount: 2, chainEnabledTenantCount: 2 });
+    expect(db.anchors.map((a) => [a.tenantId, a.lastPublishedAt, a.publishPausedUntil])).toEqual([
+      [TENANT_ID_1, WALL_CLOCK, null],
+      [TENANT_ID_2, WALL_CLOCK, null],
+      [TENANT_ID_3, null, null],
+    ]);
+
+    // Settled: restarts skip and never count toward the cap.
+    for (let boot = 0; boot < 4; boot++) {
+      expect((await publisherFor(db, { destinations: [primary] }).runCadence(BOUNDARY)).kind).toBe(
+        "skipped_already_published",
+      );
+    }
+    expect(JSON.parse(db.settings.get(ATTEMPTS_KEY) ?? "null")).toEqual({ boundary: BOUNDARY.toISOString(), count: 1 });
+  });
+
+  it("when no row the adopted manifest covers exists any more, nothing settles and restarts adopt up to the cap", async () => {
+    const db = makeDb({
+      tenants: [{ id: TENANT_ID_3, auditChainEnabled: true }],
+      anchors: [anchor(TENANT_ID_3)],
+    });
+    const primary = await archivedPrimary();
+    await storeManifest(primary, ours(BOUNDARY));
+
+    const kinds: string[] = [];
+    for (let boot = 0; boot < 4; boot++) {
+      kinds.push((await publisherFor(db, { destinations: [primary] }).runCadence(BOUNDARY)).kind);
+    }
+    expect(kinds).toEqual(["published", "published", "published", "upload_cap_reached"]);
+    expect(db.anchors[0]?.lastPublishedAt).toBeNull();
   });
 });
 
-// ─── runCadence: failures ───────────────────────────────────────────────────
+// ─── runCadence: mirrors ────────────────────────────────────────────────────
 
-describe("AuditAnchorPublisher.runCadence — failures", () => {
-  it("an upload failure fails at stage upload and pauses until the next boundary by the wall clock", async () => {
+describe("AuditAnchorPublisher.runCadence — mirrors", () => {
+  it("a secondary that is down fails the run at stage upload with the primary holding one object; the retry adopts and mirrors", async () => {
     const db = makeDb();
-    const failing = makeDestination("s3", vi.fn().mockRejectedValue(new Error("S3 unavailable")));
-    const outcome = await publisherFor(db, { destinations: [failing] }).runCadence(BOUNDARY);
+    const primary = tracked(await archivedPrimary());
+    const mirrorStore = new InMemoryDestination("s3");
+    let down = true;
+    const mirror = tracked(mirrorStore, {
+      create: async (args) => {
+        if (down) throw Object.assign(new Error("S3 unavailable"), { code: "ServiceUnavailable" });
+        return mirrorStore.create(args);
+      },
+    });
+    const publisher = publisherFor(db, { destinations: [primary.dest, mirror.dest] });
 
-    expect(outcome).toEqual({
+    const failed = await publisher.runCadence(BOUNDARY);
+
+    expect(failed).toEqual({
       kind: "failed",
       // Token, not the message: it is persisted where the tenant reads it.
-      reason: "s3_UPLOAD_FAILED:unknown",
+      reason: "s3_UPLOAD_FAILED:ServiceUnavailable",
       stage: "upload",
       chainEnabledTenantCount: 2,
     });
     const pauses = pauseWrites(db);
     expect(pauses).toHaveLength(1);
+    expect(pauses[0]?.where.tenantId).toEqual({ in: [TENANT_ID_1, TENANT_ID_2] });
     expect(pauses[0]?.data.publishPausedUntil).toEqual(new Date("2026-01-16T00:05:00.000Z"));
-    expect(failureReasons(db)).toContain("s3_UPLOAD_FAILED:unknown");
-    expect(db.settings.has(MARKER_KEY)).toBe(false);
+    expect(publishWrites(db)).toEqual([]);
+    expect(failureReasons(db)).toEqual(["s3_UPLOAD_FAILED:ServiceUnavailable"]);
+    expect(logLines(mockLoggerError, "upload_failed")).toEqual([
+      {
+        destination: "s3",
+        error: { name: "Error", code: "ServiceUnavailable" },
+        _logType: "audit-anchor-publisher.upload_failed",
+      },
+    ]);
+    const bytes = await primary.dest.read(OWN_KEY_AT_BOUNDARY);
+    expect(bytes).not.toBeNull();
 
-    const uploadLog = mockLoggerError.mock.calls.find(
-      ([, message]) => message === "audit-anchor-publisher.upload_failed",
-    );
-    expect(uploadLog?.[0]).toEqual({
-      destination: "s3",
-      error: { name: "Error", code: "unknown" },
-      _logType: "audit-anchor-publisher.upload_failed",
-    });
+    down = false;
+    const retry = await publisher.runCadence(BOUNDARY);
+    expect(retry).toMatchObject({ kind: "published", adopted: true });
+    expect(creates(primary.calls)).toEqual([`create:${OWN_KEY_AT_BOUNDARY}`]);
+    expect(await mirrorStore.read(OWN_KEY_AT_BOUNDARY)).toEqual(bytes);
+    expect(db.anchors.map((a) => a.publishPausedUntil)).toEqual([null, null]);
   });
 
-  it("an upload failure pauses until the boundary after config.now's, not the process Date's", async () => {
+  it("a primary create failure fails at stage upload and pauses until the boundary after config.now's", async () => {
     const configNow = WALL_CLOCK.getTime() + 2 * CADENCE_MS;
     const db = makeDb();
-    const failing = makeDestination("s3", vi.fn().mockRejectedValue(new Error("S3 unavailable")));
-    const outcome = await publisherFor(db, { destinations: [failing], now: () => configNow }).runCadence(BOUNDARY);
+    const { dest } = tracked(new InMemoryDestination("s3"), {
+      create: async () => {
+        throw new Error("S3 unavailable");
+      },
+    });
+    // The decision's clock is inside the boundary; the failure's, two days on.
+    let now = WALL_CLOCK.getTime();
+    const outcome = await publisherFor(db, {
+      destinations: [dest],
+      now: () => now,
+      hooks: {
+        inTx: async () => {
+          now = configNow;
+        },
+      },
+    }).runCadence(new Date(BOUNDARY.getTime() + 2 * CADENCE_MS));
 
-    expect(outcome).toMatchObject({ kind: "failed", stage: "upload" });
+    expect(outcome).toMatchObject({ kind: "failed", stage: "upload", reason: "s3_UPLOAD_FAILED:unknown" });
     const pauses = pauseWrites(db);
     expect(pauses).toHaveLength(1);
-    expect(pauses[0]?.data.publishPausedUntil).toEqual(
-      new Date(currentCadenceBoundary(new Date(configNow), CADENCE_MS, OFFSET_MS).getTime() + CADENCE_MS),
-    );
     expect(pauses[0]?.data.publishPausedUntil).toEqual(new Date("2026-01-18T00:05:00.000Z"));
   });
 
+  it("a secondary holding other bytes for the key fails as diverged; holding the same bytes, the run publishes", async () => {
+    const db = makeDb();
+    const primary = await archivedPrimary();
+    const diverged = new InMemoryDestination("s3");
+    await storeManifest(diverged, ours(BOUNDARY, { tenants: [rowOf(TENANT_ID_1, { chainSeq: 99n })] }));
+
+    const outcome = await publisherFor(db, { destinations: [primary, diverged] }).runCadence(BOUNDARY);
+
+    expect(outcome).toEqual({
+      kind: "failed",
+      reason: "s3_MIRROR_DIVERGED",
+      stage: "upload",
+      chainEnabledTenantCount: 2,
+    });
+    expect(pauseWrites(db)).toHaveLength(1);
+    expect(publishWrites(db)).toEqual([]);
+    expect(logLines(mockLoggerError, "upload_failed")).toEqual([]);
+
+    // Allow: a secondary that already holds the primary's bytes.
+    const same = new InMemoryDestination("s3");
+    await storeArtifact(same, OWN_KEY_AT_BOUNDARY, (await primary.read(OWN_KEY_AT_BOUNDARY))!);
+    const retry = await publisherFor(db, { destinations: [primary, same] }).runCadence(BOUNDARY);
+    expect(retry).toMatchObject({ kind: "published", adopted: true });
+  });
+
+  it("a secondary that cannot be read back for the compare fails with its read token", async () => {
+    const db = makeDb();
+    const primary = await archivedPrimary();
+    const store = new InMemoryDestination("s3");
+    await storeManifest(store, ours(BOUNDARY));
+    const { dest } = tracked(store, {
+      read: async () => {
+        throw denied();
+      },
+    });
+
+    const outcome = await publisherFor(db, { destinations: [primary, dest] }).runCadence(BOUNDARY);
+
+    expect(outcome).toMatchObject({ kind: "failed", reason: "s3_READ_FAILED:AccessDenied", stage: "upload" });
+    expect(publishWrites(db)).toEqual([]);
+  });
+
+  describe("backfill", () => {
+    const GAP = AUDIT_ANCHOR_MIRROR_BACKFILL_MAX + 1;
+
+    /** A primary holding `GAP` earlier manifests the mirror never received. */
+    async function primaryWithGap(): Promise<{ primary: InMemoryDestination; gapKeys: string[] }> {
+      const primary = await archivedPrimary();
+      const gapKeys: string[] = [];
+      for (let daysBack = GAP; daysBack >= 1; daysBack--) {
+        const planted = ours(new Date(BOUNDARY.getTime() - daysBack * CADENCE_MS));
+        await storeManifest(primary, planted);
+        gapKeys.push(planted.artifactKey);
+      }
+      return { primary, gapKeys };
+    }
+
+    it("copies the newest missing manifest keys first, at most the bound per run, and the rest on the next", async () => {
+      const { primary, gapKeys } = await primaryWithGap();
+      const db = makeDb({
+        anchors: [anchor(TENANT_ID_1, { lastPublishedAt: new Date(PREV_BOUNDARY.getTime() + HOUR_MS) }), anchor(TENANT_ID_2)],
+      });
+      const mirror = new InMemoryDestination("s3");
+      const publisher = publisherFor(db, { destinations: [primary, mirror] });
+
+      expect((await publisher.runCadence(BOUNDARY)).kind).toBe("published");
+      // The boundary's own object, and the seven newest of the eight missing: only the oldest is left.
+      expect([...(await mirror.list())].sort()).toEqual([...gapKeys.slice(1), OWN_KEY_AT_BOUNDARY].sort());
+      for (const key of gapKeys.slice(1)) expect(await mirror.read(key)).toEqual(await primary.read(key));
+
+      clockInto(NEXT_BOUNDARY);
+      expect((await publisher.runCadence(NEXT_BOUNDARY)).kind).toBe("published");
+      expect([...(await mirror.list())].sort()).toEqual(
+        [...gapKeys, OWN_KEY_AT_BOUNDARY, buildManifestArtifactKey(NEXT_BOUNDARY, KID)].sort(),
+      );
+      expect(logTypes(mockLoggerWarn)).not.toContain("audit-anchor-publisher.mirror_backfill_failed");
+    });
+
+    it("copies manifest keys only: the primary's archived public key is not mirrored", async () => {
+      const { primary } = await primaryWithGap();
+      const db = makeDb({
+        anchors: [anchor(TENANT_ID_1, { lastPublishedAt: new Date(PREV_BOUNDARY.getTime() + HOUR_MS) }), anchor(TENANT_ID_2)],
+      });
+      const mirror = new InMemoryDestination("s3");
+
+      await publisherFor(db, { destinations: [primary, mirror] }).runCadence(BOUNDARY);
+
+      expect(await mirror.list()).not.toContain(publicKeyArtifactKey(KID));
+    });
+
+    it("a secondary that throws during the backfill does not change the outcome; the next run completes it", async () => {
+      const { primary, gapKeys } = await primaryWithGap();
+      const db = makeDb({
+        anchors: [anchor(TENANT_ID_1, { lastPublishedAt: new Date(PREV_BOUNDARY.getTime() + HOUR_MS) }), anchor(TENANT_ID_2)],
+      });
+      const store = new InMemoryDestination("s3");
+      let failBackfill = true;
+      const { dest } = tracked(store, {
+        create: async (args) => {
+          if (failBackfill && args.artifactKey !== OWN_KEY_AT_BOUNDARY) throw denied();
+          return store.create(args);
+        },
+      });
+      const publisher = publisherFor(db, { destinations: [primary, dest] });
+
+      const outcome = await publisher.runCadence(BOUNDARY);
+
+      expect(outcome).toMatchObject({ kind: "published", adopted: false });
+      expect(await store.list()).toEqual([OWN_KEY_AT_BOUNDARY]);
+      expect(logLines(mockLoggerWarn, "mirror_backfill_failed")).toEqual([
+        {
+          destination: "s3",
+          error: { name: "Error", code: "AccessDenied" },
+          _logType: "audit-anchor-publisher.mirror_backfill_failed",
+        },
+      ]);
+      expect(logLines(mockLoggerInfo, "cadence_healthy")).toHaveLength(1);
+      expect(failureReasons(db)).toEqual([]);
+
+      failBackfill = false;
+      clockInto(NEXT_BOUNDARY);
+      expect((await publisher.runCadence(NEXT_BOUNDARY)).kind).toBe("published");
+      expect((await store.list()).filter((key) => gapKeys.includes(key))).toHaveLength(AUDIT_ANCHOR_MIRROR_BACKFILL_MAX);
+    });
+
+    it("a backfill create that finds other bytes at the key is logged and overwrites nothing", async () => {
+      const primary = await archivedPrimary();
+      const earlier = ours(PREV_BOUNDARY);
+      await storeManifest(primary, earlier);
+      const db = makeDb({
+        anchors: [anchor(TENANT_ID_1, { lastPublishedAt: new Date(PREV_BOUNDARY.getTime() + HOUR_MS) }), anchor(TENANT_ID_2)],
+      });
+      const store = new InMemoryDestination("s3");
+      await storeArtifact(store, earlier.artifactKey, Buffer.from("other bytes"));
+      // The listing misses the key the store holds, as a listing racing a writer would.
+      const { dest } = tracked(store, {
+        list: async (signal) => (await store.list(signal)).filter((key) => key !== earlier.artifactKey),
+      });
+
+      const outcome = await publisherFor(db, { destinations: [primary, dest] }).runCadence(BOUNDARY);
+
+      expect(outcome.kind).toBe("published");
+      expect(await store.read(earlier.artifactKey)).toEqual(Buffer.from("other bytes"));
+      expect(logLines(mockLoggerWarn, "mirror_backfill_failed")).toEqual([
+        expect.objectContaining({ destination: "s3", error: { name: "TokenError", code: "MIRROR_DIVERGED" } }),
+      ]);
+    });
+  });
+});
+
+// ─── runCadence: the rows a publish emits ───────────────────────────────────
+
+describe("AuditAnchorPublisher.runCadence — rows emitted with a publish", () => {
+  /** Publish PREV_BOUNDARY and BOUNDARY on one primary, changing the database in between. */
+  async function twoPublishes(
+    db: FakeDb,
+    between: (primary: InMemoryDestination) => void | Promise<void>,
+    primary?: InMemoryDestination,
+  ): Promise<{ outcomes: CadenceOutcome[]; primary: InMemoryDestination }> {
+    const dest = primary ?? (await archivedPrimary());
+    clockInto(PREV_BOUNDARY);
+    const first = await publisherFor(db, { destinations: [dest] }).runCadence(PREV_BOUNDARY);
+    db.outboxRows.length = 0;
+    await between(dest);
+    clockInto(BOUNDARY);
+    const second = await publisherFor(db, { destinations: [dest] }).runCadence(BOUNDARY);
+    return { outcomes: [first, second], primary: dest };
+  }
+
+  it("an unchanged tenant set and an advancing chain emit the publish row alone", async () => {
+    const db = makeDb();
+    const { outcomes } = await twoPublishes(db, () => {
+      db.anchors[0]!.chainSeq = 5n;
+    });
+
+    expect(outcomes.map((o) => o.kind)).toEqual(["published", "published"]);
+    expect(db.outboxRows.map((r) => r.payload.action)).toEqual(["AUDIT_ANCHOR_PUBLISHED"]);
+  });
+
+  it("a tenant disabled between two publishes emits one TENANT_DROPPED_FROM_MANIFEST row", async () => {
+    const db = makeDb();
+    await twoPublishes(db, () => {
+      db.tenants[1]!.auditChainEnabled = false;
+    });
+
+    expect(failureRows(db, "TENANT_DROPPED_FROM_MANIFEST")).toEqual([
+      {
+        failureReason: "TENANT_DROPPED_FROM_MANIFEST",
+        artifactKey: OWN_KEY_AT_BOUNDARY,
+        anchoredAt: BOUNDARY.toISOString(),
+        count: 1,
+      },
+    ]);
+    expect(failureReasons(db)).toEqual(["TENANT_DROPPED_FROM_MANIFEST"]);
+  });
+
+  it("a chain_seq below the previous manifest's in the same epoch emits one CHAIN_SEQ_REGRESSION row", async () => {
+    const db = makeDb({ anchors: [anchor(TENANT_ID_1, { chainSeq: 10n }), anchor(TENANT_ID_2, { chainSeq: 10n })] });
+    await twoPublishes(db, () => {
+      db.anchors[0]!.chainSeq = 9n;
+      db.anchors[1]!.chainSeq = 3n;
+    });
+
+    expect(failureRows(db, "CHAIN_SEQ_REGRESSION")).toEqual([
+      { failureReason: "CHAIN_SEQ_REGRESSION", artifactKey: OWN_KEY_AT_BOUNDARY, anchoredAt: BOUNDARY.toISOString(), count: 2 },
+    ]);
+  });
+
+  it.each([
+    ["an equal chain_seq", { chainSeq: 10n, epoch: 1 }],
+    ["a lower chain_seq in a higher epoch", { chainSeq: 0n, epoch: 2 }],
+  ])("%s emits no regression row", async (_label, after) => {
+    const db = makeDb({ anchors: [anchor(TENANT_ID_1, { chainSeq: 10n }), anchor(TENANT_ID_2, { chainSeq: 10n })] });
+    await twoPublishes(db, () => {
+      Object.assign(db.anchors[0]!, after);
+    });
+
+    expect(failureReasons(db)).toEqual([]);
+  });
+
+  it("an adopted publish emits no drop or regression row, though its manifest shows both against the previous one", async () => {
+    const db = makeDb({ anchors: [anchor(TENANT_ID_1, { chainSeq: 10n }), anchor(TENANT_ID_2, { chainSeq: 10n })] });
+    const { outcomes } = await twoPublishes(db, async (primary) => {
+      const previous = (await primary.list()).find((key) => key === buildManifestArtifactKey(PREV_BOUNDARY, KID))!;
+      // What a lost-commit run stored: tenant 2 gone, tenant 1 regressed.
+      await storeManifest(
+        primary,
+        ours(BOUNDARY, {
+          tenants: [rowOf(TENANT_ID_1, { chainSeq: 2n })],
+          previousManifest: { uri: `filesystem://${previous}`, sha256: "0".repeat(64) },
+        }),
+      );
+    });
+
+    expect(outcomes[1]).toMatchObject({ kind: "published", adopted: true });
+    expect(failureReasons(db)).toEqual([]);
+  });
+
+  it("two manifest keys on the chained-to date emit one MULTIPLE_MANIFESTS_FOR_DATE row; one key emits none", async () => {
+    const db = makeDb();
+    await twoPublishes(db, async (primary) => {
+      await archivePublicKey(primary, OTHER_PUBLIC_KEY);
+      await storeManifest(primary, signedManifest({ signingKey: OTHER_KEY, boundary: PREV_BOUNDARY }));
+    });
+
+    expect(failureRows(db, "MULTIPLE_MANIFESTS_FOR_DATE")).toEqual([
+      {
+        failureReason: "MULTIPLE_MANIFESTS_FOR_DATE",
+        artifactKey: OWN_KEY_AT_BOUNDARY,
+        anchoredAt: BOUNDARY.toISOString(),
+        date: "2026-01-14",
+        count: 2,
+      },
+    ]);
+  });
+
+  it("emits OWN_PUBLIC_KEY_NOT_ARCHIVED with every publish until the own key is archived", async () => {
+    const db = makeDb();
+    const primary = new InMemoryDestination("filesystem");
+    await twoPublishes(db, () => undefined, primary);
+    expect(failureRows(db, "OWN_PUBLIC_KEY_NOT_ARCHIVED")).toEqual([
+      { failureReason: "OWN_PUBLIC_KEY_NOT_ARCHIVED", artifactKey: OWN_KEY_AT_BOUNDARY, anchoredAt: BOUNDARY.toISOString() },
+    ]);
+
+    db.outboxRows.length = 0;
+    await archivePublicKey(primary, PUBLIC_KEY);
+    clockInto(NEXT_BOUNDARY);
+    expect((await publisherFor(db, { destinations: [primary] }).runCadence(NEXT_BOUNDARY)).kind).toBe("published");
+    expect(failureReasons(db)).toEqual([]);
+  });
+
+  it("counts an archived file holding another key's content as not archived", async () => {
+    const db = makeDb();
+    const primary = new InMemoryDestination("filesystem");
+    await storeArtifact(primary, publicKeyArtifactKey(KID), Buffer.from(`${OTHER_PUBLIC_KEY.toString("hex")}\n`));
+
+    await publisherFor(db, { destinations: [primary] }).runCadence(BOUNDARY);
+
+    expect(failureRows(db, "OWN_PUBLIC_KEY_NOT_ARCHIVED")).toHaveLength(1);
+  });
+});
+
+// ─── runCadence: failures and the bound ─────────────────────────────────────
+
+describe("AuditAnchorPublisher.runCadence — failures", () => {
   it("a commit lost after the upload fails at stage after_upload, writes no pause, and logs commit_failed_after_upload", async () => {
     const db = makeDb();
-    const upload = vi.fn().mockResolvedValue(undefined);
+    const { dest, calls } = tracked(new InMemoryDestination("s3"));
     const outcome = await publisherFor(db, {
-      destinations: [makeDestination("s3", upload)],
+      destinations: [dest],
       hooks: { afterUpload: async () => { throw new Error("connection lost"); } },
     }).runCadence(BOUNDARY);
 
     expect(outcome).toMatchObject({ kind: "failed", stage: "after_upload", reason: "COMMIT_FAILED_AFTER_UPLOAD:unknown" });
-    expect(upload).toHaveBeenCalledTimes(1);
+    expect(creates(calls)).toHaveLength(1);
     expect(pauseWrites(db)).toEqual([]);
-    expect(logTypes(mockLoggerError)).toContain("audit-anchor-publisher.commit_failed_after_upload");
-    expect(failureReasons(db)).toContain("COMMIT_FAILED_AFTER_UPLOAD:unknown");
+    expect(logLines(mockLoggerError, "commit_failed_after_upload")).toEqual([
+      expect.objectContaining({ artifactKey: OWN_KEY_AT_BOUNDARY }),
+    ]);
+    expect(failureRows(db, "COMMIT_FAILED_AFTER_UPLOAD:unknown")).toEqual([
+      expect.objectContaining({ artifactKey: OWN_KEY_AT_BOUNDARY, anchoredAt: BOUNDARY.toISOString() }),
+    ]);
   });
 
-  it("the upload bound fails a destination that never settles", async () => {
-    vi.useRealTimers();
+  it("afterUpload runs once the primary and every mirror hold the object, before the database write", async () => {
     const db = makeDb();
-    let signal: AbortSignal | undefined;
-    const hanging = makeDestination("s3", vi.fn((args: { signal?: AbortSignal }) => {
-      signal = args.signal;
-      return new Promise<never>(() => {});
-    }));
-    const outcome = await publisherFor(db, { destinations: [hanging], uploadTimeoutMs: 20 }).runCadence(BOUNDARY);
-
-    expect(outcome).toMatchObject({ kind: "failed", stage: "upload", reason: "s3_UPLOAD_FAILED:UPLOAD_TIMEOUT" });
-    expect(signal?.aborted).toBe(true);
-  });
-
-  // The bound is armed before the first upload starts, so at exactly the
-  // bound (0.5 + 0.5) its timer was queued first and fires first: an upload
-  // that would finish at the same instant fails.
-  it.each([
-    ["each 0.6 of the bound fails the upload", 0.6, "failed"],
-    ["each 0.5 of the bound, finishing at the bound itself, fails the upload", 0.5, "failed"],
-    ["each 0.3 of the bound publishes", 0.3, "published"],
-  ])("bounds the upload to every destination as a whole: two destinations %s", async (_label, fraction, kind) => {
-    vi.useFakeTimers();
-    vi.setSystemTime(WALL_CLOCK);
-    const boundMs = 400;
-    const slow = () => vi.fn(() => new Promise<"created">((resolve) => setTimeout(() => resolve("created"), boundMs * fraction)));
-    const db = makeDb();
-    const run = publisherFor(db, {
-      destinations: [makeDestination("filesystem", slow()), makeDestination("s3", slow())],
-      uploadTimeoutMs: boundMs,
+    const primary = new InMemoryDestination("filesystem");
+    const mirror = new InMemoryDestination("s3");
+    const seen: unknown[] = [];
+    await publisherFor(db, {
+      destinations: [primary, mirror],
+      hooks: {
+        afterUpload: async () => {
+          seen.push(await primary.list(), await mirror.list(), publishWrites(db).length);
+        },
+      },
     }).runCadence(BOUNDARY);
-    await vi.advanceTimersByTimeAsync(2 * boundMs);
-    const outcome = await run;
 
-    expect(outcome.kind).toBe(kind);
-    if (outcome.kind === "failed") {
-      expect(outcome).toMatchObject({ stage: "upload", reason: "s3_UPLOAD_FAILED:UPLOAD_TIMEOUT" });
-    }
+    expect(seen).toEqual([[OWN_KEY_AT_BOUNDARY], [OWN_KEY_AT_BOUNDARY], 0]);
+    expect(publishWrites(db)).toHaveLength(1);
   });
 
-  it("a failure before the upload is stage before_upload with a token reason", async () => {
+  it("a signing key that is not a key fails before the upload with a token reason", async () => {
     const db = makeDb();
-    db.settings.set(POINTER_KEY, "{not json");
-    const outcome = await publisherFor(db).runCadence(BOUNDARY);
+    const primary = new InMemoryDestination("filesystem");
+    const outcome = await publisherFor(db, { destinations: [primary], signingKey: Buffer.from([1]) }).runCadence(BOUNDARY);
 
     expect(outcome).toMatchObject({ kind: "failed", stage: "before_upload" });
     if (outcome.kind === "failed") expect(outcome.reason).toMatch(/^CADENCE_FAILED:[A-Za-z0-9_.-]+$/);
     expect(pauseWrites(db)).toEqual([]);
+    expect(await primary.list()).toEqual([]);
+  });
+
+  describe("the run's one bound on destination I/O", () => {
+    const hang = () => new Promise<never>(() => {});
+
+    it.each<[string, Partial<Pick<AnchorDestination, "create" | "read" | "list">>, string, string]>([
+      ["list", { list: hang }, "filesystem_READ_FAILED:UPLOAD_TIMEOUT", "before_upload"],
+      ["read", { read: hang }, "filesystem_READ_FAILED:UPLOAD_TIMEOUT", "before_upload"],
+      ["create", { create: hang }, "filesystem_UPLOAD_FAILED:UPLOAD_TIMEOUT", "upload"],
+    ])("fails a primary whose %s never settles, under the token of the operation it interrupted", async (_op, overrides, reason, stage) => {
+      vi.useRealTimers();
+      const db = makeDb();
+      const primary = new InMemoryDestination("filesystem");
+      await storeManifest(primary, ours(new Date("2020-01-01T00:05:00.000Z")));
+      const { dest, signals } = tracked(primary, overrides);
+
+      const outcome = await publisherFor(db, { destinations: [dest], uploadTimeoutMs: 20 }).runCadence(
+        currentCadenceBoundary(new Date(), CADENCE_MS, OFFSET_MS),
+      );
+
+      expect(outcome).toMatchObject({ kind: "failed", stage, reason });
+      expect(signals.at(-1)?.aborted).toBe(true);
+    });
+
+    // The bound is armed before the first create starts, so at exactly the
+    // bound (0.5 + 0.5) its timer was queued first and fires first: a create
+    // that would finish at the same instant fails.
+    it.each([
+      ["each 0.6 of the bound fails the upload", 0.6, "failed"],
+      ["each 0.5 of the bound, finishing at the bound itself, fails the upload", 0.5, "failed"],
+      ["each 0.3 of the bound publishes", 0.3, "published"],
+    ])("bounds the creates on every destination as a whole: two destinations %s", async (_label, fraction, kind) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(WALL_CLOCK);
+      const boundMs = 400;
+      const slow = (name: string) => {
+        const store = new InMemoryDestination(name);
+        return tracked(store, {
+          create: (args) =>
+            new Promise((resolve) => setTimeout(() => resolve(store.create({ ...args, signal: undefined })), boundMs * fraction)),
+        }).dest;
+      };
+      const db = makeDb();
+      const run = publisherFor(db, {
+        destinations: [slow("filesystem"), slow("s3")],
+        uploadTimeoutMs: boundMs,
+        now: () => WALL_CLOCK.getTime(),
+      }).runCadence(BOUNDARY);
+      await vi.advanceTimersByTimeAsync(2 * boundMs);
+      const outcome = await run;
+
+      expect(outcome.kind).toBe(kind);
+      if (outcome.kind === "failed") {
+        expect(outcome).toMatchObject({ stage: "upload", reason: "s3_UPLOAD_FAILED:UPLOAD_TIMEOUT" });
+      }
+    });
+
+    it.each([
+      ["a listing of 0.6 and a create of 0.6 of the bound fail, each within it", 0.6, "failed"],
+      ["a listing of 0.3 and a create of 0.3 publish", 0.3, "published"],
+    ])("is one deadline for the listing and the create: %s", async (_label, fraction, kind) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(WALL_CLOCK);
+      const boundMs = 400;
+      const delay = () => new Promise<void>((resolve) => setTimeout(resolve, boundMs * fraction));
+      const store = new InMemoryDestination("filesystem");
+      let lists = 0;
+      const { dest } = tracked(store, {
+        // Only the first listing is slow: the deadline it arms is still the
+        // one running when the create starts.
+        list: async () => {
+          if (++lists === 1) await delay();
+          return store.list();
+        },
+        create: async (args) => {
+          await delay();
+          return store.create({ ...args, signal: undefined });
+        },
+      });
+      const db = makeDb();
+      const run = publisherFor(db, {
+        destinations: [dest],
+        uploadTimeoutMs: boundMs,
+        now: () => WALL_CLOCK.getTime(),
+      }).runCadence(BOUNDARY);
+      await vi.advanceTimersByTimeAsync(3 * boundMs);
+      const outcome = await run;
+
+      expect(outcome.kind).toBe(kind);
+      if (outcome.kind === "failed") {
+        expect(outcome).toMatchObject({ stage: "upload", reason: "filesystem_UPLOAD_FAILED:UPLOAD_TIMEOUT" });
+      }
+    });
+
+    it("is armed at the run's first destination call, not at the run's start", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(WALL_CLOCK);
+      const boundMs = 400;
+      const db = makeDb();
+      // The first database read alone outlasts the bound.
+      db.beforeTenantRead = (call) =>
+        call === 1 ? new Promise<void>((resolve) => setTimeout(resolve, 2 * boundMs)) : undefined;
+      const run = publisherFor(db, { uploadTimeoutMs: boundMs, now: () => WALL_CLOCK.getTime() }).runCadence(BOUNDARY);
+      await vi.advanceTimersByTimeAsync(3 * boundMs);
+
+      expect((await run).kind).toBe("published");
+    });
+
+    it("covers the mirror backfill: a backfill that outlasts the bound is logged and the publish stands", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(WALL_CLOCK);
+      const boundMs = 400;
+      const primary = await archivedPrimary();
+      await storeManifest(primary, ours(PREV_BOUNDARY));
+      const db = makeDb({
+        anchors: [anchor(TENANT_ID_1, { lastPublishedAt: new Date(PREV_BOUNDARY.getTime() + HOUR_MS) }), anchor(TENANT_ID_2)],
+      });
+      const store = new InMemoryDestination("s3");
+      const { dest } = tracked(store, {
+        create: (args) => (args.artifactKey === OWN_KEY_AT_BOUNDARY ? store.create(args) : new Promise<never>(() => {})),
+      });
+      const run = publisherFor(db, {
+        destinations: [primary, dest],
+        uploadTimeoutMs: boundMs,
+        now: () => WALL_CLOCK.getTime(),
+      }).runCadence(BOUNDARY);
+      await vi.advanceTimersByTimeAsync(2 * boundMs);
+
+      expect((await run).kind).toBe("published");
+      expect(logLines(mockLoggerWarn, "mirror_backfill_failed")).toEqual([
+        expect.objectContaining({ error: { name: "UploadTimeoutError", code: "UPLOAD_TIMEOUT" } }),
+      ]);
+    });
   });
 });
 
@@ -818,61 +2034,55 @@ describe("AuditAnchorPublisher.runCadence — cadence lines", () => {
     return publisherFor(db, overrides).runCadence(BOUNDARY);
   }
 
-  function cadenceLines(): Array<Record<string, unknown>> {
-    return mockLoggerInfo.mock.calls
-      .map(([fields]) => fields as Record<string, unknown>)
-      .filter((f) => f._logType === "audit-anchor-publisher.cadence");
-  }
-
-  function healthyLines(): Array<Record<string, unknown>> {
-    return mockLoggerInfo.mock.calls
-      .map(([fields]) => fields as Record<string, unknown>)
-      .filter((f) => f._logType === "audit-anchor-publisher.cadence_healthy");
-  }
-
   it("every outcome logs one cadence line carrying the chain-enabled tenant count", async () => {
-    await runWith(makeDb());
-    expect(cadenceLines()).toEqual([
-      expect.objectContaining({ kind: "published", chainEnabledTenantCount: 2, boundary: BOUNDARY.toISOString() }),
+    const db = makeDb();
+    const primary = await archivedPrimary();
+    await runWith(db, { destinations: [primary] });
+    expect(logLines(mockLoggerInfo, "cadence")).toEqual([
+      expect.objectContaining({ kind: "published", adopted: false, chainEnabledTenantCount: 2, boundary: BOUNDARY.toISOString() }),
     ]);
 
-    const db = makeDb();
-    db.settings.set(MARKER_KEY, BOUNDARY.toISOString());
-    await runWith(db);
-    expect(cadenceLines()).toEqual([
+    await runWith(db, { destinations: [primary] });
+    expect(logLines(mockLoggerInfo, "cadence")).toEqual([
       expect.objectContaining({ kind: "skipped_already_published", chainEnabledTenantCount: 2 }),
     ]);
   });
 
-  it("emits the healthy line for published", async () => {
+  it("emits exactly one healthy line for a published run, adopted or not", async () => {
     await runWith(makeDb());
-    expect(healthyLines()).toEqual([expect.objectContaining({ outcome: "published", chainEnabledTenantCount: 2 })]);
-  });
+    expect(logLines(mockLoggerInfo, "cadence_healthy")).toEqual([
+      expect.objectContaining({ outcome: "published", chainEnabledTenantCount: 2 }),
+    ]);
 
-  it("emits the healthy line for skipped_no_tenants only when no tenant was ever chain-enabled", async () => {
-    await runWith(makeDb({ tenants: [], anchors: [] }));
-    expect(healthyLines()).toEqual([expect.objectContaining({ outcome: "skipped_no_tenants" })]);
-
-    await runWith(makeDb({ tenants: [] }));
-    expect(healthyLines()).toEqual([]);
+    const primary = await archivedPrimary();
+    await storeManifest(primary, ours(BOUNDARY));
+    const adopted = await runWith(makeDb(), { destinations: [primary] });
+    expect(adopted).toMatchObject({ kind: "published", adopted: true });
+    expect(logLines(mockLoggerInfo, "cadence_healthy")).toHaveLength(1);
   });
 
   it("emits no healthy line for already-published, failed, cap-reached or lock_held runs", async () => {
-    const already = makeDb();
-    already.settings.set(MARKER_KEY, BOUNDARY.toISOString());
-    await runWith(already);
-    expect(healthyLines()).toEqual([]);
+    const db = makeDb();
+    const primary = await archivedPrimary();
+    await runWith(db, { destinations: [primary] });
+    await runWith(db, { destinations: [primary] });
+    expect(logLines(mockLoggerInfo, "cadence_healthy")).toEqual([]);
 
-    await runWith(makeDb(), { destinations: [makeDestination("s3", vi.fn().mockRejectedValue(new Error("x")))] });
-    expect(healthyLines()).toEqual([]);
+    const failing = tracked(new InMemoryDestination("s3"), {
+      create: async () => {
+        throw new Error("x");
+      },
+    });
+    await runWith(makeDb(), { destinations: [failing.dest] });
+    expect(logLines(mockLoggerInfo, "cadence_healthy")).toEqual([]);
 
     const capped = makeDb();
     capped.settings.set(ATTEMPTS_KEY, JSON.stringify({ boundary: BOUNDARY.toISOString(), count: 3 }));
     await runWith(capped);
-    expect(healthyLines()).toEqual([]);
+    expect(logLines(mockLoggerInfo, "cadence_healthy")).toEqual([]);
 
     await runWith(makeDb({ lockTimeoutOnCall: new Set([1]) }));
-    expect(healthyLines()).toEqual([]);
+    expect(logLines(mockLoggerInfo, "cadence_healthy")).toEqual([]);
   });
 });
 
@@ -896,7 +2106,7 @@ describe("AuditAnchorPublisher — audit write", () => {
 
   it("never throws: a failed outbox write goes to the dead-letter stream and the outcome stands", async () => {
     const db = makeDb({ outboxFailure: new Error("outbox down") });
-    const outcome = await publisherFor(db).runCadence(BOUNDARY);
+    const outcome = await publisherFor(db, { destinations: [await archivedPrimary()] }).runCadence(BOUNDARY);
 
     expect(outcome.kind).toBe("published");
     expect(mockDeadLetterWarn).toHaveBeenCalledWith(

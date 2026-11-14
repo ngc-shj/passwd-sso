@@ -1,12 +1,13 @@
 /**
- * AuditAnchorPublisher against MinIO: what a lost commit or an aborted upload
- * leaves in a versioned bucket, and that the retry for the same boundary
- * commits the version the chain then points to.
+ * AuditAnchorPublisher against MinIO: a manifest key holds one version
+ * whatever is lost or retried — a lost commit, an aborted upload, a competing
+ * writer, a second instance, a secondary that is down — and the next manifest
+ * chains to that version.
  *
  * MinIO is required: set ANCHOR_TEST_S3_ENDPOINT (e.g. http://127.0.0.1:9000)
  * to a MinIO with the root credentials minioadmin/minioadmin and a KMS key.
- * A missing or unready endpoint fails the suite; it never skips. Each run
- * writes under its own prefix of an Object Lock bucket — the objects are
+ * A missing or unready endpoint fails the suite; it never skips. Every case
+ * writes under a prefix of its own in an Object Lock bucket — the objects are
  * locked under COMPLIANCE, so they cannot be deleted and are not.
  *
  * Runs as passwd_anchor_publisher; isolation as in
@@ -14,42 +15,44 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import {
   CreateBucketCommand,
   GetObjectCommand,
   HeadBucketCommand,
   ListObjectVersionsCommand,
+  PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
 import { createTestContext, createPrismaForRole, type PrismaWithPool, type TestContext } from "./helpers";
 import {
-  CADENCE_MS,
-  SETTING,
+  LEGACY_SETTING,
   advanceChain,
   anchorState,
-  assertOnlyChainEnabledTenants,
-  clearPublisherSettings,
-  farFutureBoundary,
-  makePublisherConfig,
-  wallClockAt,
-  publisherOutboxRows,
-  purgePublisherOutboxRows,
-  readSetting,
+  createPublisherCase,
   restorePublisherSettings,
-  seedChainTenant,
+  setLastPublishedAt,
   snapshotPublisherSettings,
+  wallClockAt,
+  writeSetting,
+  type PublisherCase,
   type SettingsSnapshot,
 } from "./anchor-publisher-fixtures";
-import { AuditAnchorPublisher, type PublisherConfig } from "@/workers/audit-anchor-publisher";
-import { buildManifestArtifactKey } from "@/lib/audit/anchor-artifact-keys";
-import { kidForPublicKey, publicKeyForSigningKey } from "@/lib/audit/anchor-manifest";
+import { AuditAnchorPublisher, type CadenceOutcome, type PublisherConfig } from "@/workers/audit-anchor-publisher";
+import { publicKeyArtifactKey } from "@/lib/audit/anchor-artifact-keys";
 import {
   S3Destination,
   joinS3Key,
   type S3DestinationClientOptions,
 } from "@/lib/audit/anchor-destinations/s3-destination";
 import type { AnchorDestination } from "@/lib/audit/anchor-destinations/destination";
+import {
+  archivePublicKey,
+  createCalls,
+  signedManifest,
+  storeArtifact,
+  trackDestination,
+} from "@/__tests__/helpers/anchor-manifest-fixtures";
 
 const ENDPOINT_ENV = "ANCHOR_TEST_S3_ENDPOINT";
 const BUCKET = "anchor-test-publisher";
@@ -57,20 +60,19 @@ const BUCKET = "anchor-test-publisher";
 let clientOptions: S3DestinationClientOptions;
 let admin: S3Client;
 
-/** sha256 of the manifest a JWS carries — what the pointer's sha256 names. */
+/** sha256 of the manifest a JWS carries — what `previousManifest.sha256` names. */
 function manifestSha256(jws: string): string {
   const payload = jws.split(".")[1] ?? "";
   return createHash("sha256").update(Buffer.from(payload, "base64url")).digest("hex");
 }
 
-function previousManifestOf(jws: string): { sha256: string } | null {
+function previousManifestOf(jws: string): { uri: string; sha256: string } | null {
   const payload = jws.split(".")[1] ?? "";
   return (JSON.parse(Buffer.from(payload, "base64url").toString("utf-8")) as {
-    previousManifest: { sha256: string } | null;
+    previousManifest: { uri: string; sha256: string } | null;
   }).previousManifest;
 }
 
-/** Every version of `key`, oldest first, with its body. */
 /**
  * Every stored version of `key`. The latest is the one S3 marks `IsLatest`,
  * not the newest `LastModified`: two PUTs within one second tie on it.
@@ -89,36 +91,58 @@ async function versionsOf(key: string): Promise<Array<{ versionId: string; body:
   return out;
 }
 
-/** The latest version's manifest digest and the other versions', of `key`. */
-async function latestAndEarlierSha(key: string): Promise<{ latest: string; earlier: string[] }> {
-  const versions = await versionsOf(key);
-  const latest = versions.filter((v) => v.isLatest);
-  expect(latest).toHaveLength(1);
-  return {
-    latest: manifestSha256(latest[0]?.body ?? ""),
-    earlier: versions.filter((v) => !v.isLatest).map((v) => manifestSha256(v.body)),
-  };
-}
-
-describe("AuditAnchorPublisher — MinIO versions across a lost commit", () => {
+describe("AuditAnchorPublisher — MinIO: one version per manifest key", () => {
   let ctx: TestContext;
   let pub: PrismaWithPool;
   let snapshot: SettingsSnapshot;
+  let c: PublisherCase;
   let tenantA: string;
   let tenantB: string;
-  let base: Date;
-  let caseIndex = 0;
   let prefix: string;
-  const usedBoundaries: Date[] = [];
+  let s3: S3Destination;
 
-  function nextBoundary(): Date {
-    const b = new Date(base.getTime() + caseIndex++ * 10 * CADENCE_MS);
-    usedBoundaries.push(b, new Date(b.getTime() + CADENCE_MS));
-    return b;
+  function publisher(config: PublisherConfig, client: PrismaWithPool = pub): AuditAnchorPublisher {
+    return new AuditAnchorPublisher({ prisma: client.prisma, config });
   }
 
-  function publisher(config: PublisherConfig): AuditAnchorPublisher {
-    return new AuditAnchorPublisher({ prisma: pub.prisma, config });
+  function runAt(boundary: Date, destinations: AnchorDestination[], overrides: Partial<PublisherConfig> = {}): Promise<CadenceOutcome> {
+    return publisher(c.config(destinations, { now: wallClockAt(boundary), ...overrides })).runCadence(boundary);
+  }
+
+  /** The object key of the case's manifest for `boundary`, as S3 stores it. */
+  function objectKey(boundary: Date = c.boundary): string {
+    return joinS3Key(prefix, c.manifestKey(boundary));
+  }
+
+  async function sortedKeys(dest: AnchorDestination): Promise<string[]> {
+    return [...(await dest.list())].sort();
+  }
+
+  /** A manifest the case's identity would have published for `boundary`. */
+  function ours(boundary: Date, overrides: Partial<Parameters<typeof signedManifest>[0]> = {}) {
+    return signedManifest({
+      signingKey: c.signingKey,
+      boundary,
+      deploymentId: c.deploymentId,
+      tagSecret: c.tagSecret,
+      tenants: [tenantA, tenantB].sort().map((tenantId) => ({
+        tenantId,
+        chainSeq: 77n,
+        prevHash: randomBytes(32),
+        epoch: 1,
+      })),
+      ...overrides,
+    });
+  }
+
+  /** The case's primary whose create first lets a competing writer store `competing` at the same key. */
+  function contended(competing: Buffer) {
+    return trackDestination(s3, {
+      create: async (args) => {
+        await storeArtifact(s3, args.artifactKey, competing);
+        return s3.create(args);
+      },
+    });
   }
 
   beforeAll(async () => {
@@ -151,15 +175,11 @@ describe("AuditAnchorPublisher — MinIO versions across a lost commit", () => {
     }
 
     ctx = await createTestContext();
-    await assertOnlyChainEnabledTenants(ctx.su, []);
     pub = createPrismaForRole("anchor-publisher");
     snapshot = await snapshotPublisherSettings(ctx.su);
-    base = farFutureBoundary();
-    prefix = `publisher-it-${randomUUID()}`;
   });
 
   afterAll(async () => {
-    await purgePublisherOutboxRows(ctx.su, usedBoundaries);
     await restorePublisherSettings(ctx.su, snapshot);
     await pub.prisma.$disconnect();
     await pub.pool.end();
@@ -168,90 +188,186 @@ describe("AuditAnchorPublisher — MinIO versions across a lost commit", () => {
   });
 
   beforeEach(async () => {
-    tenantA = await ctx.createTenant();
-    tenantB = await ctx.createTenant();
-    await seedChainTenant(ctx.su, tenantA, { enabled: true });
-    await seedChainTenant(ctx.su, tenantB, { enabled: true });
-    await assertOnlyChainEnabledTenants(ctx.su, [tenantA, tenantB]);
-    await clearPublisherSettings(ctx.su);
+    c = await createPublisherCase(ctx);
+    tenantA = await c.createTenant();
+    tenantB = await c.createTenant();
+    // Nothing under it can be deleted, so a case never shares one.
+    prefix = `publisher-it-${randomUUID()}`;
+    s3 = new S3Destination({ bucket: BUCKET, prefix, clientOptions });
+    await archivePublicKey(s3, c.publicKey);
   });
 
   afterEach(async () => {
-    await clearPublisherSettings(ctx.su, [SETTING.UPLOAD_ATTEMPTS]);
-    await clearPublisherSettings(ctx.su);
-    await purgePublisherOutboxRows(ctx.su, usedBoundaries);
-    await ctx.deleteTestData(tenantA);
-    await ctx.deleteTestData(tenantB);
+    await c.cleanup();
   });
 
-  async function pointerSha(): Promise<string> {
-    const raw = await readSetting(ctx.su, SETTING.PREVIOUS_MANIFEST);
-    return (JSON.parse(raw ?? "null") as { sha256: string }).sha256;
-  }
-
-  it("lost commit: the retry re-PUTs the key; the latest version is the committed one and the next manifest chains to it", async () => {
-    const boundary = nextBoundary();
-    const s3 = new S3Destination({ bucket: BUCKET, prefix, clientOptions });
-    const config = makePublisherConfig([s3], { now: wallClockAt(boundary) });
-    const key = joinS3Key(prefix, buildManifestArtifactKey(boundary, kidForPublicKey(publicKeyForSigningKey(config.signingKey))));
-
-    const lost = await publisher({
-      ...config,
+  it("lost commit: the retry adopts the stored object — one version, the first run's bytes though the chain advanced — and the next manifest chains to it", async () => {
+    const lost = await runAt(c.boundary, [s3], {
       hooks: { afterUpload: async () => { throw new Error("commit lost"); } },
-    }).runCadence(boundary);
+    });
     expect(lost).toMatchObject({ kind: "failed", stage: "after_upload" });
     expect((await anchorState(ctx.su, [tenantA, tenantB])).map((s) => s.publish_paused_until)).toEqual([null, null]);
+    const stored = await versionsOf(objectKey());
+    expect(stored).toHaveLength(1);
 
     await advanceChain(ctx.su, tenantA);
-    const retry = await publisher(config).runCadence(boundary);
-    expect(retry.kind).toBe("published");
+    const retry = await runAt(c.boundary, [s3]);
+    expect(retry).toMatchObject({ kind: "published", adopted: true, manifestSha256: manifestSha256(stored[0]!.body) });
+    expect(await versionsOf(objectKey())).toEqual(stored);
 
-    const { latest, earlier } = await latestAndEarlierSha(key);
-    expect(earlier).toHaveLength(1);
-    expect(earlier[0]).not.toBe(latest);
-    expect(await pointerSha()).toBe(latest);
-
-    const next = new Date(boundary.getTime() + CADENCE_MS);
-    expect((await publisher({ ...config, now: wallClockAt(next) }).runCadence(next)).kind).toBe("published");
-    const nextKey = joinS3Key(prefix, buildManifestArtifactKey(next, kidForPublicKey(publicKeyForSigningKey(config.signingKey))));
-    const nextVersion = (await versionsOf(nextKey)).find((v) => v.isLatest);
-    expect(previousManifestOf(nextVersion?.body ?? "")?.sha256).toBe(latest);
+    const next = c.boundaryAt(1);
+    expect(await runAt(next, [s3])).toMatchObject({ kind: "published", adopted: false });
+    const nextVersions = await versionsOf(objectKey(next));
+    expect(nextVersions).toHaveLength(1);
+    expect(previousManifestOf(nextVersions[0]!.body)).toEqual({
+      uri: `s3-object-lock://${c.manifestKey()}`,
+      sha256: manifestSha256(stored[0]!.body),
+    });
+    expect(await sortedKeys(s3)).toEqual([c.manifestKey(), c.manifestKey(next), publicKeyArtifactKey(c.kid)].sort());
   });
 
-  it("aborted upload after the object was stored: a pause is written, and the retry publishes and clears it", async () => {
-    const boundary = nextBoundary();
-    const s3 = new S3Destination({ bucket: BUCKET, prefix, clientOptions });
-    // The PUT completes; the destination then hangs until the upload bound
+  it("aborted upload after the object was stored: a pause is written, and the retry adopts the one version and clears it", async () => {
+    // The PUT completes; the destination then hangs until the run's bound
     // aborts it — the object is stored, the run sees an upload failure.
-    const storedThenHung: AnchorDestination = {
-      name: s3.name,
+    const storedThenHung = trackDestination(s3, {
       create: async (args) => {
         await s3.create({ ...args, signal: undefined });
         return new Promise<never>(() => {});
       },
-      read: (key, signal) => s3.read(key, signal),
-      list: (signal) => s3.list(signal),
-    };
-    const config = makePublisherConfig([s3]);
-    const key = joinS3Key(prefix, buildManifestArtifactKey(boundary, kidForPublicKey(publicKeyForSigningKey(config.signingKey))));
+    });
 
-    const aborted = await publisher({ ...config, destinations: [storedThenHung], uploadTimeoutMs: 2_000 }).runCadence(boundary);
+    const aborted = await runAt(c.boundary, [storedThenHung.dest], { uploadTimeoutMs: 2_000 });
     expect(aborted).toMatchObject({ kind: "failed", stage: "upload", reason: "s3-object-lock_UPLOAD_FAILED:UPLOAD_TIMEOUT" });
     const paused = await anchorState(ctx.su, [tenantA, tenantB]);
     expect(paused.every((s) => s.publish_paused_until !== null)).toBe(true);
     // The failure row only: the missing-prior row goes out with a publish.
-    expect((await publisherOutboxRows(ctx.su, [boundary])).map((r) => r.failureReason)).toEqual([
-      "s3-object-lock_UPLOAD_FAILED:UPLOAD_TIMEOUT",
-    ]);
+    expect((await c.outboxRows()).map((r) => r.failureReason)).toEqual(["s3-object-lock_UPLOAD_FAILED:UPLOAD_TIMEOUT"]);
+    const stored = await versionsOf(objectKey());
+    expect(stored).toHaveLength(1);
 
     await advanceChain(ctx.su, tenantA);
-    const retry = await publisher(config).runCadence(boundary);
-    expect(retry.kind).toBe("published");
-
-    const { latest, earlier } = await latestAndEarlierSha(key);
-    expect(earlier).toHaveLength(1);
-    expect(earlier[0]).not.toBe(latest);
-    expect(await pointerSha()).toBe(latest);
+    const retry = await runAt(c.boundary, [s3]);
+    expect(retry).toMatchObject({ kind: "published", adopted: true });
+    expect(await versionsOf(objectKey())).toEqual(stored);
     expect((await anchorState(ctx.su, [tenantA, tenantB])).map((s) => s.publish_paused_until)).toEqual([null, null]);
+  });
+
+  it("create conflict, an object this identity signed: adopted, the planted bytes kept, one version", async () => {
+    const planted = ours(c.boundary);
+    const primary = contended(planted.bytes);
+
+    const outcome = await runAt(c.boundary, [primary.dest]);
+
+    // Create-only: the run's own bytes never became a second version.
+    const versions = await versionsOf(objectKey());
+    expect(versions.map((v) => v.body)).toEqual([planted.bytes.toString("utf-8")]);
+    expect(outcome).toMatchObject({ kind: "published", adopted: true, manifestSha256: planted.sha256 });
+    expect((await anchorState(ctx.su, [tenantA, tenantB])).every((s) => s.last_published_at !== null)).toBe(true);
+  });
+
+  it("create conflict, garbage: fails closed with the garbage as the one version and nothing recorded", async () => {
+    const primary = contended(Buffer.from("garbage"));
+
+    const outcome = await runAt(c.boundary, [primary.dest]);
+
+    expect(outcome).toMatchObject({
+      kind: "failed",
+      reason: "CADENCE_FAILED:PUBLISHED_OBJECT_UNVERIFIABLE",
+      stage: "before_upload",
+    });
+    expect((await versionsOf(objectKey())).map((v) => v.body)).toEqual(["garbage"]);
+    const state = await anchorState(ctx.su, [tenantA, tenantB]);
+    expect(state.map((s) => [s.last_published_at, s.publish_paused_until])).toEqual([[null, null], [null, null]]);
+  });
+
+  it("create conflict, the own key's object for another deployment id: ends as a skip (row g) with one version", async () => {
+    const planted = ours(c.boundary, { deploymentId: "another-deployment" });
+    const primary = contended(planted.bytes);
+
+    const outcome = await runAt(c.boundary, [primary.dest]);
+
+    expect(outcome.kind).toBe("skipped_already_published");
+    expect((await versionsOf(objectKey())).map((v) => v.body)).toEqual([planted.bytes.toString("utf-8")]);
+    expect((await c.outboxRows()).map((r) => r.failureReason)).toEqual(["PUBLISHED_BY_OTHER_IDENTITY"]);
+    expect((await anchorState(ctx.su, [tenantA, tenantB])).map((s) => s.last_published_at)).toEqual([null, null]);
+  });
+
+  it("two instances, one boundary: exactly one publishes, the other makes no create, one version", async () => {
+    const second = createPrismaForRole("anchor-publisher");
+    try {
+      const one = trackDestination(s3);
+      const two = trackDestination(s3);
+
+      const outcomes = await Promise.all([
+        publisher(c.config([one.dest], { lockTimeoutMs: 20_000 })).runCadence(c.boundary),
+        publisher(c.config([two.dest], { lockTimeoutMs: 20_000 }), second).runCadence(c.boundary),
+      ]);
+
+      expect(outcomes.map((o) => o.kind).sort()).toEqual(["published", "skipped_already_published"]);
+      // The lock keeps the second instance from the create at all.
+      expect([...createCalls(one.calls), ...createCalls(two.calls)]).toEqual([`create:${c.manifestKey()}`]);
+      expect(await versionsOf(objectKey())).toHaveLength(1);
+    } finally {
+      await second.prisma.$disconnect();
+      await second.pool.end();
+    }
+  });
+
+  it("upgrade: a key an earlier release PUT twice, with its legacy rows — the same boundary is adopted without a third version and the next chains to the current one", async () => {
+    // What the unconditional PUT of an earlier release left after a lost
+    // commit and its retry: two versions, the later one current.
+    const firstPut = ours(c.boundary);
+    const secondPut = ours(c.boundary);
+    for (const put of [firstPut, secondPut]) {
+      await admin.send(new PutObjectCommand({ Bucket: BUCKET, Key: objectKey(), Body: put.bytes }));
+    }
+    await writeSetting(ctx.su, LEGACY_SETTING.LAST_PUBLISHED_BOUNDARY, c.boundary.toISOString());
+    await writeSetting(
+      ctx.su,
+      LEGACY_SETTING.PREVIOUS_MANIFEST,
+      JSON.stringify({ uri: `s3-object-lock://${c.manifestKey()}`, sha256: firstPut.sha256 }),
+    );
+    const before = await versionsOf(objectKey());
+    expect(before.filter((v) => v.isLatest).map((v) => v.body)).toEqual([secondPut.bytes.toString("utf-8")]);
+    expect(before).toHaveLength(2);
+
+    // The database does not record the boundary (a rewound or lost value).
+    await setLastPublishedAt(ctx.su, [tenantA, tenantB], null);
+    const same = await runAt(c.boundary, [s3]);
+    expect(same).toMatchObject({ kind: "published", adopted: true, manifestSha256: secondPut.sha256 });
+    expect(await versionsOf(objectKey())).toEqual(before);
+
+    const next = c.boundaryAt(1);
+    expect(await runAt(next, [s3])).toMatchObject({ kind: "published", adopted: false });
+    const nextVersions = await versionsOf(objectKey(next));
+    expect(nextVersions).toHaveLength(1);
+    expect(previousManifestOf(nextVersions[0]!.body)?.sha256).toBe(secondPut.sha256);
+  });
+
+  it("secondary down for the boundary: the run fails with one version at the primary; back the same day, the retry adopts and mirrors", async () => {
+    const { dest: store } = await c.filesystem({ archiveOwnKey: false });
+    let down = true;
+    const secondary = trackDestination(store, {
+      create: async (args) => {
+        if (down) throw Object.assign(new Error("unreachable"), { code: "ECONNREFUSED" });
+        return store.create(args);
+      },
+    });
+    const primary = trackDestination(s3);
+
+    const failed = await runAt(c.boundary, [primary.dest, secondary.dest]);
+    expect(failed).toMatchObject({ kind: "failed", stage: "upload", reason: "filesystem_UPLOAD_FAILED:ECONNREFUSED" });
+    const stored = await versionsOf(objectKey());
+    expect(stored).toHaveLength(1);
+    expect(await store.list()).toEqual([]);
+    expect((await anchorState(ctx.su, [tenantA, tenantB])).map((s) => s.last_published_at)).toEqual([null, null]);
+
+    down = false;
+    const retry = await runAt(c.boundary, [primary.dest, secondary.dest]);
+    expect(retry).toMatchObject({ kind: "published", adopted: true });
+    expect(createCalls(primary.calls)).toEqual([`create:${c.manifestKey()}`]);
+    expect(await versionsOf(objectKey())).toEqual(stored);
+    expect(await store.list()).toEqual([c.manifestKey()]);
+    expect((await store.read(c.manifestKey()))?.toString("utf-8")).toBe(stored[0]!.body);
   });
 });

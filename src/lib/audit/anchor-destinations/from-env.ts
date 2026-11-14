@@ -14,9 +14,23 @@ export type AnchorDestinationEnv = {
   GITHUB_TOKEN?: string;
 };
 
-/** The destination variables do not describe a usable set. The message names variables, never values. */
+export const ANCHOR_DESTINATION_CONFIG_ERROR = {
+  GITHUB_TOKEN_MISSING: "GITHUB_TOKEN_MISSING",
+  NO_DESTINATION_CONFIGURED: "NO_DESTINATION_CONFIGURED",
+} as const;
+
+export type AnchorDestinationConfigErrorCode =
+  (typeof ANCHOR_DESTINATION_CONFIG_ERROR)[keyof typeof ANCHOR_DESTINATION_CONFIG_ERROR];
+
+/**
+ * The destination variables do not describe a usable set. The message names
+ * variables, never values; `code` is what a boot log line carries.
+ */
 export class AnchorDestinationConfigError extends Error {
-  constructor(message: string) {
+  constructor(
+    readonly code: AnchorDestinationConfigErrorCode,
+    message: string,
+  ) {
     super(message);
     this.name = "AnchorDestinationConfigError";
   }
@@ -43,6 +57,7 @@ export function buildDestinationsFromEnv(env: AnchorDestinationEnv): AnchorDesti
     const token = env.AUDIT_ANCHOR_DESTINATION_GH_TOKEN ?? env.GITHUB_TOKEN;
     if (!token) {
       throw new AnchorDestinationConfigError(
+        ANCHOR_DESTINATION_CONFIG_ERROR.GITHUB_TOKEN_MISSING,
         "GITHUB_TOKEN or AUDIT_ANCHOR_DESTINATION_GH_TOKEN is required for GitHub release destination",
       );
     }
@@ -55,6 +70,7 @@ export function buildDestinationsFromEnv(env: AnchorDestinationEnv): AnchorDesti
 
   if (destinations.length === 0) {
     throw new AnchorDestinationConfigError(
+      ANCHOR_DESTINATION_CONFIG_ERROR.NO_DESTINATION_CONFIGURED,
       "No destinations configured. Set at least one of: AUDIT_ANCHOR_DESTINATION_S3_BUCKET, AUDIT_ANCHOR_DESTINATION_GH_REPO, AUDIT_ANCHOR_DESTINATION_FS_PATH",
     );
   }
