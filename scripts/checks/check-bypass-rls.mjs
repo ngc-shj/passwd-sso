@@ -3007,6 +3007,7 @@ const CREATE_ROUTINE_TEXT_RE = new RegExp(
 // routine it may create; an entry that matches nothing fails the run.
 const FUNCTION_RULE_ALLOWLIST = [
   { file: "scripts/rls-cross-tenant-negative-test.sh", routine: "rls_negative_secdef_probe", why: "Case 9: a SECURITY DEFINER probe on a throwaway database, dropped by the case itself" },
+  { file: "scripts/rls-cross-tenant-negative-test.sh", routine: "rls_bypass_enforced", why: "Case 19 (RLS_NEGATIVE_MUTATE_REAL_POLICY, CI's ephemeral database only): replaces the enforce-mode function with one returning false and restores the migration's definition in the same case" },
   { prefix: "scripts/__tests__/", why: "gate fixture strings: inputs for the gates that refuse these statements" },
 ];
 const functionAllowed = (file, routine) =>

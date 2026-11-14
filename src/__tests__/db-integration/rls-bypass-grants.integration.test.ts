@@ -1,12 +1,13 @@
 /**
- * #911 report mode and #909/#910 against PostgreSQL, as the application role.
+ * #911 reports, #921 enforcement and #909/#910 against PostgreSQL, as the
+ * application role.
  *
- * - A bypass that reaches a row of a table outside its grant is admitted and
- *   reported (WARNING → pool listener → this suite's sink).
+ * - A bypass that reaches a row of a table outside its grant is reported
+ *   (WARNING → pool listener → this suite's sink) and refused (42501).
  * - Grant membership is exact: `delegation_sessions` does not admit `sessions`.
- * - A statement that examines no row reports nothing.
+ * - A statement that examines no row reports and refuses nothing.
  * - Code that sets the bypass without a grant (old code on the new schema) is
- *   admitted.
+ *   refused.
  * - The reported purpose cannot shape the line.
  * - A refused nested context rolls back the outer transaction's writes.
  */
@@ -18,19 +19,20 @@ import {
   assertRlsApplies,
   appConnectionString,
   expectBypassNotices,
+  expectBypassRefusal,
   type TestContext,
 } from "./helpers";
 import { defineGrant, setBypassGucs, type BypassGrant } from "@/lib/tenant-rls-grants";
 import { createPool, createPrismaClient } from "@/lib/db/pool-factory";
 import { prisma as appPrisma } from "@/lib/prisma";
-import { NIL_UUID } from "@/lib/constants/app";
+import { NIL_UUID, SYSTEM_TENANT_ID } from "@/lib/constants/app";
 import { BYPASS_PURPOSE, type BypassPurpose } from "@/lib/tenant-rls-purpose";
 import { withBypassRls, withTenantRls } from "@/lib/tenant-rls";
 
 const USERS_ONLY = defineGrant(BYPASS_PURPOSE.AUTH_FLOW, ["user"]);
 const SESSIONS_ONLY = defineGrant(BYPASS_PURPOSE.AUTH_FLOW, ["session"]);
 
-describe("RLS bypass grants (report mode)", () => {
+describe("RLS bypass grants (enforcing)", () => {
   let ctx: TestContext;
   let tenantId: string;
   let userId: string;
@@ -55,12 +57,12 @@ describe("RLS bypass grants (report mode)", () => {
     });
   }
 
-  it("admits and reports a read of a row outside the grant", async () => {
-    let found: unknown;
-    const notices = await expectBypassNotices(async () => {
-      found = await underBypass(SESSIONS_ONLY, (tx) => tx.user.findUnique({ where: { id: userId }, select: { id: true } }));
-    });
-    expect(found).toEqual({ id: userId });
+  it("refuses and reports a read of a row outside the grant", async () => {
+    // The refused statement is the transaction's last.
+    const { notices, table } = await expectBypassRefusal(() =>
+      underBypass(SESSIONS_ONLY, (tx) => tx.user.findUnique({ where: { id: userId }, select: { id: true } })),
+    );
+    expect(table).toBe("users");
     // Exact: a report naming another table (e.g. `tenants`, under RLS since
     // C1) would be absorbed by toContainEqual but fails this.
     expect(notices).toEqual([{ table: "users", purpose: "auth_flow" }]);
@@ -68,11 +70,11 @@ describe("RLS bypass grants (report mode)", () => {
 
   // The report's other attach points: the app singleton (the client the
   // production code these suites drive uses) and a pool built with createPool.
-  it("reports through the @/lib/prisma singleton's connections", async () => {
+  it("refuses and reports through the @/lib/prisma singleton's connections", async () => {
     await assertRlsApplies(appPrisma);
-    const denied = await expectBypassNotices(async () => {
-      await withBypassRls(appPrisma, (tx) => tx.user.findUnique({ where: { id: userId }, select: { id: true } }), SESSIONS_ONLY);
-    });
+    const { notices: denied } = await expectBypassRefusal(() =>
+      withBypassRls(appPrisma, (tx) => tx.user.findUnique({ where: { id: userId }, select: { id: true } }), SESSIONS_ONLY),
+    );
     expect(denied).toEqual([{ table: "users", purpose: "auth_flow" }]);
     const allowed = await expectBypassNotices(async () => {
       await withBypassRls(appPrisma, (tx) => tx.user.findUnique({ where: { id: userId }, select: { id: true } }), USERS_ONLY);
@@ -80,24 +82,24 @@ describe("RLS bypass grants (report mode)", () => {
     expect(allowed).toEqual([]);
   });
 
-  it("reports through a pool built with createPool", async () => {
+  it("refuses and reports through a pool built with createPool", async () => {
     const pool = createPool({ connectionString: appConnectionString(), max: 1 });
     try {
-      const notices = await expectBypassNotices(async () => {
-        const client = await pool.connect();
-        try {
-          await client.query("BEGIN");
-          await client.query(
-            "SELECT set_config('app.bypass_rls', 'on', true), set_config('app.bypass_purpose', 'auth_flow', true), set_config('app.tenant_id', $1, true), set_config('app.bypass_tables', 'sessions', true)",
-            [NIL_UUID],
-          );
-          await client.query("SELECT id FROM users WHERE id = $1", [userId]);
-          await client.query("ROLLBACK");
-        } finally {
-          client.release();
-        }
-      });
-      expect(notices).toEqual([{ table: "users", purpose: "auth_flow" }]);
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query(
+          "SELECT set_config('app.bypass_rls', 'on', true), set_config('app.bypass_purpose', 'auth_flow', true), set_config('app.tenant_id', $1, true), set_config('app.bypass_tables', 'sessions', true)",
+          [NIL_UUID],
+        );
+        await client.query("SAVEPOINT refused");
+        const { notices } = await expectBypassRefusal(() => client.query("SELECT id FROM users WHERE id = $1", [userId]));
+        await client.query("ROLLBACK TO SAVEPOINT refused");
+        await client.query("ROLLBACK");
+        expect(notices).toEqual([{ table: "users", purpose: "auth_flow" }]);
+      } finally {
+        client.release();
+      }
     } finally {
       await pool.end();
     }
@@ -110,7 +112,7 @@ describe("RLS bypass grants (report mode)", () => {
     expect(notices).toEqual([]);
   });
 
-  it("reports nothing for an ungranted statement that examines no row", async () => {
+  it("reports and refuses nothing for an ungranted statement that examines no row", async () => {
     // "Examines", not "matches": RLS quals run before the query's own filter,
     // so a seq scan reports a lookup that matches nothing. Whether a lookup
     // reports is plan-dependent; only a statement that scans nothing is not.
@@ -123,27 +125,27 @@ describe("RLS bypass grants (report mode)", () => {
     expect(notices).toEqual([]);
   });
 
-  it("reports an ungranted lookup that matches no row when the plan scans other rows", async () => {
-    const notices = await expectBypassNotices(async () => {
-      // users holds this suite's row, so a forced seq scan examines it.
-      const rows = await underBypass(SESSIONS_ONLY, async (tx) => {
+  it("refuses an ungranted lookup that matches no row when the plan scans other rows", async () => {
+    // users holds this suite's row, so a forced seq scan examines it.
+    const { notices } = await expectBypassRefusal(() =>
+      underBypass(SESSIONS_ONLY, async (tx) => {
         await tx.$executeRawUnsafe(`SET LOCAL enable_indexscan = off`);
         await tx.$executeRawUnsafe(`SET LOCAL enable_bitmapscan = off`);
         return tx.$queryRawUnsafe(`SELECT id FROM users WHERE id = $1::uuid`, randomUUID());
-      });
-      expect(rows).toEqual([]);
-    });
+      }),
+    );
     expect(notices).toEqual([{ table: "users", purpose: "auth_flow" }]);
   });
 
   it.each([
     ["delegationSession", "sessions"],
     ["serviceAccount", "accounts"],
-  ] as const)("a grant naming %s does not admit %s", async (model, table) => {
+  ] as const)("a grant naming %s refuses %s", async (model, table) => {
     const grant = defineGrant(BYPASS_PURPOSE.AUTH_FLOW, [model]);
-    const notices = await expectBypassNotices(async () => {
-      await underBypass(grant, (tx) => tx.$queryRawUnsafe(`SELECT public.rls_bypass_admits($1) AS admitted`, table));
-    });
+    const { notices, table: refused } = await expectBypassRefusal(() =>
+      underBypass(grant, (tx) => tx.$queryRawUnsafe(`SELECT public.rls_bypass_admits($1) AS admitted`, table)),
+    );
+    expect(refused).toBe(table);
     expect(notices).toEqual([{ table, purpose: "auth_flow" }]);
   });
 
@@ -153,14 +155,14 @@ describe("RLS bypass grants (report mode)", () => {
     ["a 200-character purpose with an invalid character", `${"a".repeat(199)}!`, "<invalid>"],
   ])("cannot shape the report with %s", async (_label, purpose, printed) => {
     const grant = defineGrant(purpose as BypassPurpose, ["session"]);
-    const notices = await expectBypassNotices(async () => {
-      await underBypass(grant, (tx) => tx.$queryRawUnsafe(`SELECT public.rls_bypass_admits('users') AS admitted`));
-    });
+    const { notices } = await expectBypassRefusal(() =>
+      underBypass(grant, (tx) => tx.$queryRawUnsafe(`SELECT public.rls_bypass_admits('users') AS admitted`)),
+    );
     // Exactly one: a forged second record would be a second element.
     expect(notices).toEqual([{ table: "users", purpose: printed }]);
   });
 
-  it("admits a bypass set without a grant, as code older than this change does", async () => {
+  it("refuses a bypass set without a grant, as code older than the grant requirement would run", async () => {
     // pool-factory-exempt: stands in for code that predates the factory, so it
     // deliberately has no notice listener.
     const pool = new pg.Pool({ connectionString: appConnectionString(), max: 1 });
@@ -169,9 +171,11 @@ describe("RLS bypass grants (report mode)", () => {
       try {
         await client.query("BEGIN");
         await client.query("SELECT set_config('app.bypass_rls', 'on', true)");
-        const { rows } = await client.query("SELECT id FROM users WHERE id = $1", [userId]);
+        await client.query("SAVEPOINT refused");
+        const { table } = await expectBypassRefusal(() => client.query("SELECT id FROM users WHERE id = $1", [userId]));
+        await client.query("ROLLBACK TO SAVEPOINT refused");
         await client.query("ROLLBACK");
-        expect(rows).toEqual([{ id: userId }]);
+        expect(table).toBe("users");
       } finally {
         client.release();
       }
@@ -180,7 +184,7 @@ describe("RLS bypass grants (report mode)", () => {
     }
   });
 
-  it("admits a bypass without app.tenant_id on a connection where an earlier transaction set it", async () => {
+  it("admits a granted bypass without app.tenant_id on a connection where an earlier transaction set it", async () => {
     // A transaction-local custom GUC reverts to '' (not NULL) on its
     // connection. Planning must not evaluate the tenant branch's ''::uuid
     // while the bypass branch admits the row (migration 20261019000000).
@@ -194,7 +198,7 @@ describe("RLS bypass grants (report mode)", () => {
         await client.query("SELECT set_config('app.tenant_id', $1, true)", [tenantId]);
         await client.query("COMMIT");
         await client.query("BEGIN");
-        await client.query("SELECT set_config('app.bypass_rls', 'on', true)");
+        await client.query("SELECT set_config('app.bypass_rls', 'on', true), set_config('app.bypass_tables', 'users', true)");
         const { rows } = await client.query("SELECT id FROM users WHERE id = $1", [userId]);
         await client.query("ROLLBACK");
         expect(rows).toEqual([{ id: userId }]);
@@ -204,6 +208,36 @@ describe("RLS bypass grants (report mode)", () => {
     } finally {
       await pool.end();
     }
+  });
+
+  // Pins of today's policy evaluation order (D5): the policies read
+  // `(SELECT rls_bypass_admits(t)) OR tenant_id = (SELECT ...)`, and PostgreSQL
+  // does not promise the arm order. Were the tenant arm evaluated first and
+  // matched, the bypass call would not run: no report and no refusal. These
+  // cells record the observed behaviour; no mutation turns them red short of
+  // changing PostgreSQL. rls-smoke's [E-RLS-ARM-ORDER] is the check that can fail.
+  it("refuses a withheld table although app.tenant_id equals the row's tenant", async () => {
+    const { notices, table } = await expectBypassRefusal(() =>
+      ctx.app.prisma.$transaction(async (tx) => {
+        await setBypassGucs(tx, SESSIONS_ONLY);
+        await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true)`;
+        return tx.$queryRawUnsafe(`SELECT id FROM users WHERE id = $1::uuid`, userId);
+      }),
+    );
+    expect(table).toBe("users");
+    expect(notices).toEqual([{ table: "users", purpose: "auth_flow" }]);
+  });
+
+  it("refuses withheld tenants although app.tenant_id is the system sentinel", async () => {
+    const { notices, table } = await expectBypassRefusal(() =>
+      ctx.app.prisma.$transaction(async (tx) => {
+        await setBypassGucs(tx, SESSIONS_ONLY);
+        await tx.$executeRaw`SELECT set_config('app.tenant_id', ${SYSTEM_TENANT_ID}, true)`;
+        return tx.$queryRawUnsafe(`SELECT id FROM tenants WHERE id = $1::uuid`, SYSTEM_TENANT_ID);
+      }),
+    );
+    expect(table).toBe("tenants");
+    expect(notices).toEqual([{ table: "tenants", purpose: "auth_flow" }]);
   });
 
   it.each([

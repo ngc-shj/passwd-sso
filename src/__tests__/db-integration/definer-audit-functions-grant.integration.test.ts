@@ -4,12 +4,12 @@
  *
  * - Outside a bypass: refused (42501, AUDIT_DEFINER_REQUIRES_BYPASS).
  * - Bypass with a grant naming audit_logs: runs, no report.
- * - Bypass with a grant that does not name audit_logs: runs and is reported
- *   (report mode; #921 turns this into a refusal).
+ * - Bypass with a grant that does not name audit_logs: refused (42501,
+ *   RLS_BYPASS_NOT_GRANTED) and reported.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { randomUUID } from "node:crypto";
-import { createTestContext, assertRlsApplies, expectBypassNotices, type TestContext } from "./helpers";
+import { createTestContext, assertRlsApplies, expectBypassNotices, expectBypassRefusal, type TestContext } from "./helpers";
 import { defineGrant, setBypassGucs, type BypassGrant } from "@/lib/tenant-rls-grants";
 import { BYPASS_PURPOSE } from "@/lib/tenant-rls-purpose";
 
@@ -70,11 +70,23 @@ describe("SECURITY DEFINER audit functions check the caller's bypass grant (#922
   it.each([
     ["audit_log_purge", purge],
     ["audit_log_tenant_migrate", migrate],
-  ] as const)("runs %s under a grant without audit_logs, and reports it", async (_name, call) => {
-    const notices = await expectBypassNotices(async () => {
-      await asApp(USERS_ONLY, call);
-    });
-    expect(notices).toContainEqual({ table: "audit_logs", purpose: "system_maintenance" });
+  ] as const)("refuses %s under a grant without audit_logs, and reports it", async (_name, call) => {
+    const marker = randomUUID();
+    await ctx.su.prisma.$executeRawUnsafe(
+      `INSERT INTO audit_logs (id, tenant_id, scope, action, actor_type, user_id, metadata, created_at)
+       VALUES ($1::uuid, $2::uuid, 'PERSONAL', 'AUTH_LOGIN', 'SYSTEM', $3::uuid, '{}'::jsonb, $4::timestamptz)`,
+      marker, tenantId, userId, LONG_AGO,
+    );
+    // The refused call is the transaction's only statement after the grant.
+    const { notices, table } = await expectBypassRefusal(() => asApp(USERS_ONLY, call));
+    expect(table).toBe("audit_logs");
+    expect(notices).toEqual([{ table: "audit_logs", purpose: "system_maintenance" }]);
+    // The transaction ended with the refusal: the row is neither deleted nor moved.
+    const left = await ctx.su.prisma.$queryRawUnsafe<Array<{ tenant_id: string }>>(
+      `SELECT tenant_id FROM audit_logs WHERE id = $1::uuid`,
+      marker,
+    );
+    expect(left).toEqual([{ tenant_id: tenantId }]);
   });
 
   it("still deletes what the purge was asked to delete", async () => {

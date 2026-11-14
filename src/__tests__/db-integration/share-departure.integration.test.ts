@@ -24,7 +24,7 @@ import {
   assertRlsApplies,
   createPrismaForRole,
   createTestContext,
-  expectBypassNotices,
+  expectBypassRefusal,
   setBypassRlsGucs,
   type TestContext,
 } from "./helpers";
@@ -869,9 +869,11 @@ describe("share links across a creator's departure — real-DB integration", () 
             results[name] = ok;
           }
 
-          // The notice sink sees a report on this connection (positive control).
+          // Positive control: this connection is enforcing, so a read outside the
+          // grant is refused and reported. It is the transaction's last statement.
           if (contextName === "public serve bypass") {
-            const notices = await expectBypassNotices(() => tx.$queryRawUnsafe(`SELECT count(*) FROM team_members`));
+            const { notices, table } = await expectBypassRefusal(() => tx.$queryRawUnsafe(`SELECT count(*) FROM team_members`));
+            expect(table).toBe("team_members");
             expect(notices.length).toBeGreaterThan(0);
           }
           throw ROLLBACK;

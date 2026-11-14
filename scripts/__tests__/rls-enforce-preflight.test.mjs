@@ -2,6 +2,8 @@
  * DB-free tests for the flip preflight decision in scripts/rls-enforce-preflight.mjs.
  */
 import { describe, it, expect } from "vitest";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { decideFlipPreflight, FLIP_MIGRATION, ATTESTATION_ENV } from "../rls-enforce-preflight.mjs";
 
 const DONE = new Date("2026-11-01T00:00:00Z");
@@ -67,5 +69,17 @@ describe("decideFlipPreflight", () => {
     expect(reason).toContain(ATTESTATION_ENV);
     expect(reason).toContain(FLIP_MIGRATION);
     expect(reason).toContain("docs/operations/deployment.md");
+  });
+});
+
+describe("migration directories", () => {
+  const migration = (dir) => join(process.cwd(), "prisma/migrations", dir, "migration.sql");
+
+  it("has the flip migration the preflight names", () => {
+    expect(existsSync(migration(FLIP_MIGRATION))).toBe(true);
+  });
+
+  it("has the report-mode migration the flip builds on", () => {
+    expect(existsSync(migration("20261019000000_rls_bypass_admits_report_mode"))).toBe(true);
   });
 });

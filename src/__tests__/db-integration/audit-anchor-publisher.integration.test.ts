@@ -30,6 +30,7 @@ import {
   createTestContext,
   createPrismaForRole,
   expectBypassNotices,
+  expectBypassRefusal,
   setBypassRlsGucs,
   type PrismaWithPool,
   type TestContext,
@@ -235,9 +236,10 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
     ]);
   });
 
-  it("the bypass-notice measurement sees an outbox write under a grant without auditOutbox (control)", async () => {
+  it("refuses an outbox write under a grant without auditOutbox, and reports it (control)", async () => {
     const boundary = nextBoundary();
-    const notices = await expectBypassNotices(() =>
+    // The refused INSERT is the transaction's last statement.
+    const { notices, table } = await expectBypassRefusal(() =>
       pub.prisma.$transaction(async (tx) => {
         // No tenant id: the row's SYSTEM_TENANT_ID cannot be admitted by the
         // policy's tenant branch, so only the grant decides.
@@ -250,7 +252,11 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
         });
       }),
     );
+    expect(table).toBe("audit_outbox");
     expect(notices.map((n) => n.table)).toEqual(["audit_outbox"]);
+    // The transaction ended with the refusal; the allow twin is the first cell,
+    // whose publish writes the same kind of row.
+    expect(await publisherOutboxRows(ctx.su, [boundary])).toEqual([]);
   });
 
   it("two runs for one boundary publish once", async () => {

@@ -5,7 +5,7 @@
  *
  * Each script runs as passwd_app (no BYPASSRLS) on its own connection from the
  * pool factory, so a table missing from a script's bypass list is reported by
- * the notice sink and fails the cell. Fixtures are committed through the
+ * the notice sink and refused (42501). Fixtures are committed through the
  * superuser helper in each cell's own tenants and removed by deleteTestData.
  *
  * Run: docker compose stop audit-outbox-worker retention-gc-worker &&
@@ -24,7 +24,7 @@ import {
   assertRlsApplies,
   collectNotices,
   createTestContext,
-  expectBypassNotices,
+  expectBypassRefusal,
   readBackfillBlock,
   RLS_BACKFILL_RERUN_DIR,
   setBypassRlsGucs,
@@ -492,13 +492,15 @@ describe("departed-member operator scripts — real-DB integration", () => {
       });
     });
 
-    it.each(bypassTables(reportScript()))("table-list control: with %s removed from the script's bypass list a notice names it", async (removed) => {
+    it.each(bypassTables(reportScript()))("table-list control: with %s removed from the script's bypass list the script is refused and the notice names it", async (removed) => {
       await seedWorldForTableControl();
       const script = reportScript();
       const literal = script.match(/set_config\('app\.bypass_tables', '([a-z_,]+)'/)![1];
       const mutated = script.replace(literal, literal.split(",").filter((t) => t !== removed).join(","));
       expect(mutated).not.toBe(script);
-      const notices = await expectBypassNotices(() => runScript(mutated).catch(() => undefined));
+      // The report is read-only, so there is no write to find absent.
+      const { notices, table } = await expectBypassRefusal(() => runScript(mutated));
+      expect(table).toBe(removed);
       expect(notices).toContainEqual({ table: removed, purpose: "system_maintenance" });
     });
 
@@ -807,14 +809,17 @@ describe("departed-member operator scripts — real-DB integration", () => {
       });
     });
 
-    it.each(bypassTables(containScript()))("table-list control: with %s removed from the script's bypass list a notice names it", async (removed) => {
+    it.each(bypassTables(containScript()))("table-list control: with %s removed from the script's bypass list the script is refused and the notice names it", async (removed) => {
       const l = await seedLeak();
       const script = containWith({ triples: goodTriples(l), label: "ops-test" });
       const literal = script.match(/set_config\('app\.bypass_tables', '([a-z_,]+)'/)![1];
       const mutated = script.replace(literal, literal.split(",").filter((t) => t !== removed).join(","));
       expect(mutated).not.toBe(script);
-      const notices = await expectBypassNotices(() => runScript(mutated).catch(() => undefined));
+      const { notices, table } = await expectBypassRefusal(() => runScript(mutated));
+      expect(table).toBe(removed);
       expect(notices).toContainEqual({ table: removed, purpose: "system_maintenance" });
+      // The script's implicit transaction ended with the refusal: nothing was written.
+      expect((await readTeamMembers(l.rows.map((r) => r.rowId))).every((r) => r.deactivated_at === null)).toBe(true);
     });
   });
 });

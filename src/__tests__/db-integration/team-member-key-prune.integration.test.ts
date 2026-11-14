@@ -65,6 +65,7 @@ import {
   createTestContext,
   appConnectionString,
   expectBypassNotices,
+  expectBypassRefusal,
   setBypassRlsGucs,
   type TestContext,
 } from "./helpers";
@@ -362,18 +363,41 @@ describe("team key prune (#1009)", () => {
       ).rejects.toThrow("TEAM_KEY_PRUNE_REQUIRES_BYPASS");
     });
 
+    /**
+     * A team whose body reads reach every table: keys, an entry, a history row
+     * and an attachment. Versions 2 and 3 are kept by the attachment and the
+     * history row, 4 is current, so version 1 is the one pair to prune.
+     */
+    async function seedEveryTable(): Promise<string> {
+      const teamId = await seedTeam(4);
+      const entryId = await seedEntry(teamId, 4);
+      await seedHistory(entryId, 3);
+      await seedAttachment(entryId, 0, 2);
+      return teamId;
+    }
+
     it("runs under the production grant, with no report", async () => {
+      await seedEveryTable();
+      let pruned: PruneRow[] = [];
       const notices = await expectBypassNotices(() =>
-        rolledBack(PRUNE_GRANT, (tx) => tx.$queryRawUnsafe(`SELECT * FROM team_member_key_prune(1)`)),
+        rolledBack(PRUNE_GRANT, async (tx) => {
+          pruned = await tx.$queryRawUnsafe<PruneRow[]>(`SELECT * FROM team_member_key_prune(1)`);
+        }),
       );
       expect(notices).toEqual([]);
+      // The allow twin of the refusal below: the body ran over the seeded rows.
+      expect(pruned).toHaveLength(1);
     });
 
-    it("runs under a grant that does not name team_member_keys, and reports it (report mode, #921)", async () => {
-      const notices = await expectBypassNotices(() =>
-        rolledBack(OTHER_GRANT, (tx) => tx.$queryRawUnsafe(`SELECT * FROM team_member_key_prune(1)`)),
+    it("refuses under a grant that does not name the tables it reads, and reports it", async () => {
+      const teamId = await seedEveryTable();
+      // The refused call is the transaction's last statement; the transaction
+      // ends with the refusal, so the superuser read below sees the committed state.
+      const { notices, table } = await expectBypassRefusal(() =>
+        callAsWorker(OTHER_GRANT, (tx) => tx.$queryRawUnsafe(`SELECT * FROM team_member_key_prune(1)`)),
       );
-      expect(notices).toContainEqual({ table: "team_member_keys", purpose: "system_maintenance" });
+      expect(notices).toEqual([{ table, purpose: "system_maintenance" }]);
+      expect(await versions(teamId)).toEqual([1, 2, 3, 4]);
     });
 
     it("refuses a batch below 1", async () => {
@@ -452,11 +476,9 @@ describe("team key prune (#1009)", () => {
       );
       const probe = "tmk_prune_probe_owner";
       const c = new Client({ connectionString: superuserUrl });
-      // Report mode: a table the body reads outside the caller's grant raises
-      // rls_bypass_not_granted as a WARNING, which this listener collects —
-      // the enforce flip (#921) turns the same check into a refusal. (A test
-      // cannot redefine rls_bypass_enforced(): routines are created only in
-      // migrations, which check-bypass-rls enforces.)
+      // A table the body reads outside the caller's grant raises
+      // rls_bypass_not_granted as a WARNING before the refusal; this listener
+      // collects it (the connection has no suite sink).
       const notGranted: string[] = [];
       c.on("notice", (n) => {
         const m = /rls_bypass_not_granted table=(\S+)/.exec(n.message ?? "");
@@ -519,12 +541,13 @@ describe("team key prune (#1009)", () => {
               [PRUNE_GRANT.purpose, tables],
             );
 
-          // Control: a grant missing a table the body reads is reported, by name.
+          // Control: a grant missing a table the body reads is refused, by name.
           await c.query("SAVEPOINT missing_table");
           await setGrant(PRUNE_GRANT.tables.split(",").filter((t) => t !== "team_password_entry_histories").join(","));
-          await c.query(`SELECT * FROM team_member_key_prune(${BATCH})`);
-          expect(notGranted).toContain("team_password_entry_histories");
+          const refusal = await expectBypassRefusal(() => c.query(`SELECT * FROM team_member_key_prune(${BATCH})`));
           await c.query("ROLLBACK TO SAVEPOINT missing_table");
+          expect(refusal.table).toBe("team_password_entry_histories");
+          expect(notGranted).toContain("team_password_entry_histories");
           notGranted.length = 0;
 
           await setGrant(PRUNE_GRANT.tables);
@@ -554,7 +577,7 @@ describe("team key prune (#1009)", () => {
                   EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1) AS probe`,
           [probe],
         );
-        expect(state).toEqual({ enforced: false, owner: before[0].owner, probe: false });
+        expect(state).toEqual({ enforced: true, owner: before[0].owner, probe: false });
       } finally {
         await fresh.end();
       }
