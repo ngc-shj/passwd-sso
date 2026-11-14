@@ -35,6 +35,7 @@ import {
   ChainSeqRegressionError,
   InvalidTagSecretLengthError,
   KidMismatchError,
+  ChainLocationMismatchError,
 } from "./commands/audit-verify.js";
 import { isUnlocked, lockVault } from "./lib/vault-state.js";
 import { clearPendingClipboard } from "./lib/clipboard.js";
@@ -194,6 +195,7 @@ program
       else if (err instanceof ChainSeqRegressionError) process.exit(17);
       else if (err instanceof InvalidTagSecretLengthError) process.exit(18);
       else if (err instanceof KidMismatchError) process.exit(19);
+      else if (err instanceof ChainLocationMismatchError) process.exit(20);
       else process.exit(1);
     }
   });

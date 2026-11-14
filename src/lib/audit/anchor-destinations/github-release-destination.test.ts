@@ -70,6 +70,18 @@ describe("GitHubReleaseDestination — constructor", () => {
     const dest = new GitHubReleaseDestination({ repo: "owner/repo", token: "ghp_xxx" });
     expect(dest.name).toBe("github-release");
   });
+
+  it("names the repository as its location, whatever the API base", () => {
+    const dest = new GitHubReleaseDestination({ repo: "owner/repo", token: "ghp_xxx" });
+    const elsewhere = new GitHubReleaseDestination({
+      repo: "owner/other",
+      token: "ghp_xxx",
+      apiBaseUrl: "http://127.0.0.1:9",
+    });
+
+    expect(dest.location).toBe("github://owner/repo");
+    expect(elsewhere.location).toBe("github://owner/other");
+  });
 });
 
 describe("githubLocationForKey / keyForGithubAsset", () => {

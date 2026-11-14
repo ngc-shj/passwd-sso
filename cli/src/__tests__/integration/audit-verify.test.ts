@@ -66,7 +66,7 @@ function kidForSeed(privateKeySeed: Buffer): string {
 }
 
 function signManifest(
-  manifest: ReturnType<typeof buildMinimalManifest>,
+  manifest: object,
   privateKeySeed: Buffer,
   kid: string = kidForSeed(privateKeySeed),
 ): string {
@@ -234,6 +234,43 @@ describe("CLI audit-verify subcommand (integration)", () => {
       expect(withKey.stdout).toContain("PASS");
       expect(without.status).toBe(1);
       expect(without.stderr).toContain("--prior-public-key");
+    },
+  );
+
+  it.skipIf(!distExists)(
+    "exits 20 for a prior manifest bound to another chain location, and 0 for one bound to the same",
+    () => {
+      const tmpDir = makeTmpDir("audit-verify-int-location-");
+      const pair = generateKeyPairSync("ed25519");
+      const seed = (pair.privateKey.export({ type: "pkcs8", format: "der" }) as Buffer).subarray(ED25519_PKCS8_PREFIX.length);
+      const pubHex = (pair.publicKey.export({ type: "spki", format: "der" }) as Buffer)
+        .subarray(ED25519_SPKI_PREFIX.length)
+        .toString("hex");
+      const v2 = (chainLocation: string) => ({
+        ...buildMinimalManifest(),
+        $schema: "https://passwd-sso.example/schemas/audit-anchor-manifest-v2.json",
+        version: 2 as const,
+        chainLocation,
+      });
+
+      const jwsPath = join(tmpDir, "manifest.jws");
+      const samePath = join(tmpDir, "prior-same.jws");
+      const otherPath = join(tmpDir, "prior-other.jws");
+      const pubPath = join(tmpDir, "key.pub");
+      writeFileSync(jwsPath, signManifest(v2("a".repeat(64)), seed));
+      writeFileSync(samePath, signManifest(v2("a".repeat(64)), seed));
+      writeFileSync(otherPath, signManifest(v2("b".repeat(64)), seed));
+      writeFileSync(pubPath, pubHex);
+
+      const base = [distEntry, "audit-verify", "--manifest", jwsPath, "--public-key", pubPath, "--prior-manifest"];
+      const same = spawnSync("node", [...base, samePath], { encoding: "utf8", timeout: 10000 });
+      const other = spawnSync("node", [...base, otherPath], { encoding: "utf8", timeout: 10000 });
+
+      expect(same.status).toBe(0);
+      expect(same.stdout).toContain("PASS");
+      expect(other.status).toBe(20);
+      expect(other.stderr).toContain("chain location");
+      expect(other.stdout).not.toContain("PASS");
     },
   );
 });

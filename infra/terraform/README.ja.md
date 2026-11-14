@@ -316,7 +316,14 @@ heartbeat をログに出します。どちらも app イメージで動きま�
 （レプリカはこれらのアクションで書き込まれ `s3:PutObject` ではない。このバケットは
 レプリケーション先にならない）、`s3:PutObjectRetention` は上記 2 ロール以外に拒否、`s3:PutLifecycleConfiguration`
 はバケットに対して拒否、`x-amz-object-lock-mode: COMPLIANCE` のない（ヘッダ欠落を
-含む）`PutObject`、上限を超える保持、`AES256` 以外の SSE は拒否されます。バケット
+含む）`PutObject`、上限を超える保持、`AES256` 以外の SSE は拒否されます。さらに、
+`If-None-Match` を付けずにオブジェクトを作成する `PutObject` は全員に拒否されます
+（`DenyUnconditionalPut`: `Null s3:if-none-match` と `Bool
+s3:ObjectCreationOperation`）。保存済みのキーに 2 つ目のバージョンは作れません。
+このリポジトリの書き込みはすべて `If-None-Match: *` を送ります。手動の PUT も同様に
+必要で（`aws s3api put-object --if-none-match '*'`）、マルチパートアップロードは完了
+リクエストにこのヘッダが必要です。このヘッダを取らない `CopyObject` によるバケット
+へのコピーはできなくなります。バケット
 は Object Lock（`enable_s3_object_lock` に関係なく常に有効）、バージョニング、
 SSE-S3（`s3_kms_key_arn` は使わない。削除予定の CMK はロック中の証跡を読めなく
 する）、`prevent_destroy` を持ちます。ポリシーは誰も置き換えない間だけ有効で、
@@ -371,9 +378,14 @@ Terraform apply は想定内の誤検知）。Object Lock なしで作られた�
 recovery" に従い、専用の接頭辞またはバケットを使います。
 `docs/operations/deployment.md` の "`DEPLOYMENT_ID`" を参照。
 
-**アップグレードの順序。** 上記の読み取り権限は新規で、これを導入したリリースの
-リソース変更はこの 1 点だけです。先に Terraform を apply し、その後で新しいイメージを
-動かします。`scripts/deploy.sh` はこの順で実行します（`terraform apply` がサービス
+**アップグレードの順序。** 上記の読み取り権限とバケットポリシーの
+`DenyUnconditionalPut` ステートメントは新規で、これらを導入したリリースのリソース
+変更はこの 2 点だけです。1 回の apply で両方が入ります（バケットポリシーの変更なので、
+bucket-config-change ルールが 1 回発火します）。1 つ前のリリースの publisher は
+`If-None-Match` なしで PUT するため、この apply から置き換えまでの間、そのアップロード
+は拒否されます（`s3-object-lock_UPLOAD_FAILED:AccessDenied`）。誤った公開は起きず、
+その境界は新しいイメージが公開します。先に Terraform を apply し、その後で新しい
+イメージを動かします。`scripts/deploy.sh` はこの順で実行します（`terraform apply` がサービス
 更新より先）。権限のないまま新しいイメージで動く publisher は何も公開しません —
 権限を apply して publisher を再起動するまで、すべての実行が
 `s3-object-lock_READ_FAILED:<code>` で fail closed し、`cadence_failed` として通知

@@ -6,6 +6,7 @@ import {
   computeTenantTag,
   buildManifest,
   canonicalize,
+  chainLocationFor,
   kidForPublicKey,
   parsePublicKeyHex,
   publicKeyForSigningKey,
@@ -26,7 +27,9 @@ import {
   type BuildManifestInput,
 } from "@/lib/audit/anchor-manifest";
 import {
+  AUDIT_ANCHOR_CHAIN_LOCATION_DOMAIN,
   AUDIT_ANCHOR_KID_PREFIX,
+  AUDIT_ANCHOR_MANIFEST_VERSION,
   AUDIT_ANCHOR_STATEMENT_TYP,
   AUDIT_ANCHOR_TYP,
 } from "@/lib/constants/audit/audit";
@@ -36,6 +39,8 @@ import {
 type Vectors = {
   key: { seedHex: string; publicKeyHex: string; kid: string };
   manifest: Record<string, unknown>;
+  manifestV2: Record<string, unknown> & { chainLocation: string };
+  chainLocations: Array<{ location: string; chainLocation: string }>;
   jws: Array<{ name: string; jws: string; expect: string }>;
   publicKeyTexts: Array<{ name: string; text: string; valid: boolean }>;
 };
@@ -47,6 +52,7 @@ const VECTORS = JSON.parse(
 ) as Vectors;
 
 // Known test fixtures
+const LOCATION = "s3://example-bucket/audit-anchors";
 const KNOWN_UUID = "550e8400-e29b-41d4-a716-446655440000";
 // 32 bytes of 0x42
 const TAG_SECRET_A = Buffer.alloc(32, 0x42);
@@ -77,6 +83,7 @@ function makeMinimalInput(overrides: Partial<BuildManifestInput> = {}): BuildMan
     anchoredAt: new Date("2026-05-01T00:05:00.000Z"),
     previousManifest: null,
     tagSecret: TAG_SECRET_A,
+    location: LOCATION,
     ...overrides,
   };
 }
@@ -168,11 +175,15 @@ describe("buildManifest", () => {
       anchoredAt: new Date("2026-05-01T00:05:00.000Z"),
       previousManifest: null,
       tagSecret: TAG_SECRET_A,
+      location: LOCATION,
     };
 
     const manifest = buildManifest(input);
 
-    expect(manifest.version).toBe(1);
+    expect(manifest.version).toBe(2);
+    expect(manifest.version).toBe(AUDIT_ANCHOR_MANIFEST_VERSION);
+    expect(manifest.$schema).toBe("https://passwd-sso.example/schemas/audit-anchor-manifest-v2.json");
+    expect(manifest.chainLocation).toBe(chainLocationFor(LOCATION));
     expect(manifest.issuer).toBe("passwd-sso");
     expect(manifest.deploymentId).toBe("deploy-test-1");
     expect(manifest.anchoredAt).toBe("2026-05-01T00:05:00.000Z");
@@ -190,6 +201,16 @@ describe("buildManifest", () => {
     // Verify chainSeq serialized as string
     expect(manifest.tenants[0].chainSeq).toBe("5");
     expect(manifest.tenants[1].chainSeq).toBe("10");
+  });
+
+  it("binds the manifest to the location it is given, and to no other", () => {
+    const here = buildManifest(makeMinimalInput());
+    const elsewhere = buildManifest(makeMinimalInput({ location: "s3://example-bucket/other-prefix" }));
+
+    expect(here.chainLocation).toBe(chainLocationFor(LOCATION));
+    expect(elsewhere.chainLocation).toBe(chainLocationFor("s3://example-bucket/other-prefix"));
+    expect(elsewhere.chainLocation).not.toBe(here.chainLocation);
+    expect(canonicalize(elsewhere).equals(canonicalize(here))).toBe(false);
   });
 
   it("produces anchoredAt with Z suffix", () => {
@@ -250,6 +271,36 @@ describe("buildManifest", () => {
   });
 });
 
+describe("chainLocationFor", () => {
+  it.each(VECTORS.chainLocations)("shared vector: $location", ({ location, chainLocation }) => {
+    expect(chainLocationFor(location)).toBe(chainLocation);
+  });
+
+  it("is 64 lower-case hex chars that name no part of the location", () => {
+    const hash = chainLocationFor(LOCATION);
+    expect(hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(hash).not.toContain("example");
+  });
+
+  it("is domain separated: not the bare SHA-256 of the location", async () => {
+    const { createHash } = await import("node:crypto");
+    expect(chainLocationFor(LOCATION)).not.toBe(createHash("sha256").update(LOCATION).digest("hex"));
+    expect(chainLocationFor(LOCATION)).toBe(
+      createHash("sha256").update(`${AUDIT_ANCHOR_CHAIN_LOCATION_DOMAIN}\0${LOCATION}`).digest("hex"),
+    );
+  });
+
+  it("tells a bucket with no prefix from a prefix under it, and one store from another", () => {
+    const hashes = VECTORS.chainLocations.map((v) => v.chainLocation);
+    expect(VECTORS.chainLocations.length).toBeGreaterThanOrEqual(4);
+    expect(new Set(hashes).size).toBe(hashes.length);
+  });
+
+  it("the version 2 vector manifest carries the first location's hash", () => {
+    expect(VECTORS.manifestV2.chainLocation).toBe(VECTORS.chainLocations[0].chainLocation);
+  });
+});
+
 describe("canonicalize", () => {
   it("returns deterministic UTF-8 Buffer of JCS canonical form", () => {
     const manifest = buildManifest(makeMinimalInput());
@@ -275,6 +326,7 @@ describe("sign + verify round-trip", () => {
     const jws = sign(canonical, privateKeyRaw);
     const verified = verify(jws, publicKeyRaw);
 
+    expect(verified).toEqual(manifest);
     expect(verified.version).toBe(manifest.version);
     expect(verified.issuer).toBe(manifest.issuer);
     expect(verified.deploymentId).toBe(manifest.deploymentId);
@@ -434,10 +486,30 @@ describe("verify — kid binding", () => {
 
   it("the vectors cover acceptance, a mismatched kid with and without a valid signature, and a malformed kid", () => {
     const expectations = VECTORS.jws.map((v) => v.expect);
-    expect(expectations.filter((e) => e === "ok")).toHaveLength(1);
+    // One accepted manifest per format version.
+    expect(expectations.filter((e) => e === "ok")).toHaveLength(2);
     expect(expectations.filter((e) => e === "KidMismatchError")).toHaveLength(2);
     expect(expectations).toContain("InvalidSignatureError");
     expect(expectations).toContain("InvalidKidError");
+  });
+
+  it("accepts both format versions: version 1 without a chainLocation, version 2 with one", () => {
+    const seed = Buffer.from(VECTORS.key.seedHex, "hex");
+    const v1 = verify(sign(canonicalize(VECTORS.manifest as ReturnType<typeof buildManifest>), seed), publicKey);
+    const v2 = verify(sign(canonicalize(VECTORS.manifestV2 as ReturnType<typeof buildManifest>), seed), publicKey);
+
+    expect(v1).toEqual(VECTORS.manifest);
+    expect(v1.version).toBe(1);
+    expect("chainLocation" in v1).toBe(false);
+    expect(v2).toEqual(VECTORS.manifestV2);
+    expect(v2.version).toBe(2);
+  });
+
+  it("the vectors refuse a version 2 manifest without a chainLocation and a version 1 manifest with one", () => {
+    const byName = new Map(VECTORS.jws.map((v) => [v.name, v.expect]));
+    expect(byName.get("version 2 without a chainLocation")).toBe("ManifestSchemaValidationError");
+    expect(byName.get("version 1 carrying a chainLocation")).toBe("InvalidSignatureError");
+    expect(byName.get("a version neither implementation knows")).toBe("ManifestSchemaValidationError");
   });
 
   it("rejects a manifest checked under another key with KidMismatchError, not a signature error", () => {

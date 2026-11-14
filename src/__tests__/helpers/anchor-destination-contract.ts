@@ -69,6 +69,15 @@ export function describeAnchorDestinationContract(
       expect(await dest.read(stored)).toEqual(Buffer.from("stored"));
     });
 
+    it("names its location as a URI that does not change with what it stores", async () => {
+      const dest = await makeEmpty();
+      const location = dest.location;
+
+      expect(location).toMatch(/^[a-z][a-z0-9+.-]*:\/\/[^\s]+$/);
+      await createArtifact(dest, manifestKeyFor("2026-05-02"), Buffer.from("stored"));
+      expect(dest.location).toBe(location);
+    });
+
     it("lists nothing when nothing was created", async () => {
       const dest = await makeEmpty();
       expect(await dest.list()).toEqual([]);

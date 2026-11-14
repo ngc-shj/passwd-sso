@@ -80,6 +80,13 @@ function expectedStatements(prefix: string, breakGlass: string): Record<string, 
       resource: objects,
       condition: { StringNotEquals: { "s3:object-lock-mode": ["COMPLIANCE"] } },
     },
+    // Both conditions, on every object and for every principal: a PUT that
+    // creates an object without If-None-Match.
+    DenyUnconditionalPut: {
+      action: ["s3:PutObject"],
+      resource: objects,
+      condition: { Null: { "s3:if-none-match": ["true"] }, Bool: { "s3:ObjectCreationOperation": ["true"] } },
+    },
     DenyRetentionAboveCap: {
       action: ["s3:PutObject", "s3:PutObjectRetention"],
       resource: objects,
@@ -921,6 +928,63 @@ const RED_FIXTURES: RedFixture[] = [
     from: 'StringNotEquals = { "s3:object-lock-mode" = "COMPLIANCE" }',
     to: `StringNotEquals = { "s3:object-lock-mode" = "COMPLIANCE" }\n          ${EXCEPTION}`,
     violation: "DenyNonComplianceLockMode: Condition",
+  },
+  {
+    name: "a missing unconditional-put Deny",
+    file: "storage.tf",
+    from: 'Sid       = "DenyUnconditionalPut"',
+    to: 'Sid       = "DenyUnconditionalPutGone"',
+    violation: "statements:",
+  },
+  {
+    name: "an unconditional-put Deny with its conditions removed (every PUT refused)",
+    file: "storage.tf",
+    from: `        Condition = {
+          Null = { "s3:if-none-match" = "true" }
+          Bool = { "s3:ObjectCreationOperation" = "true" }
+        }
+`,
+    to: "",
+    violation: "DenyUnconditionalPut: Condition",
+  },
+  {
+    name: "an unconditional-put Deny on a misspelled condition key (never matches)",
+    file: "storage.tf",
+    from: 'Null = { "s3:if-none-match" = "true" }',
+    to: 'Null = { "s3:if-none-matches" = "true" }',
+    violation: "DenyUnconditionalPut: Condition",
+  },
+  {
+    name: "an unconditional-put Deny that fires when the header is present",
+    file: "storage.tf",
+    from: 'Null = { "s3:if-none-match" = "true" }',
+    to: 'Null = { "s3:if-none-match" = "false" }',
+    violation: "DenyUnconditionalPut: Condition",
+  },
+  {
+    name: "an unconditional-put Deny without the object-creation test (multipart parts refused)",
+    file: "storage.tf",
+    from: '          Bool = { "s3:ObjectCreationOperation" = "true" }\n',
+    to: "",
+    violation: "DenyUnconditionalPut: Condition",
+  },
+  {
+    name: "an unconditional-put Deny on the manifest path only",
+    file: "storage.tf",
+    from: `Resource  = "\${aws_s3_bucket.audit_anchors[0].arn}/*"
+        Condition = {
+          Null = {`,
+    to: `Resource  = "\${aws_s3_bucket.audit_anchors[0].arn}/\${local.audit_anchor_manifest_pattern}"
+        Condition = {
+          Null = {`,
+    violation: "DenyUnconditionalPut: Resource",
+  },
+  {
+    name: "a principal exception on the unconditional-put Deny",
+    file: "storage.tf",
+    from: 'Bool = { "s3:ObjectCreationOperation" = "true" }',
+    to: `Bool = { "s3:ObjectCreationOperation" = "true" }\n          ${EXCEPTION}`,
+    violation: "DenyUnconditionalPut: Condition",
   },
   {
     name: "a principal exception on the retention-cap Deny",

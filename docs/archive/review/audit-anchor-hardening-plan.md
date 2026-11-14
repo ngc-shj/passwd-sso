@@ -59,8 +59,9 @@ key its `kid` names; and make the rotation runbook executable as written.
   not runnable here (SC6).
 
 Non-functional: no new environment variable (the ECS task enumerates its env in `ecs.tf`);
-the only Terraform resource change is the publisher's IAM policy in `iam.tf` (comment-only
-edits elsewhere are listed in C8); all destination I/O of one run shares one 60 s bound, so
+the Terraform resource changes are the publisher's IAM policy in `iam.tf` and, since the
+addendum's C9, one bucket-policy statement in `storage.tf` (comment-only edits elsewhere are
+listed in C8); all destination I/O of one run shares one 60 s bound, so
 a run's worst case stays what it is today (60 s + two 10 s lock waits, under the task's 120 s
 stop timeout).
 

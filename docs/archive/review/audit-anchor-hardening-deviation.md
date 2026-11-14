@@ -252,3 +252,52 @@ not re-run after the interruption; each fix has a test that names its guard.
   the file passes 239/239 (`npx vitest run scripts/__tests__/backup-db.test.mjs`): from a
   worktree, docker compose derives another project name and finds no `db` service to run
   `pg_restore` in. Anchor integration set on the merged tree: 99 passed.
+
+## Addendum contracts C9–C12 (the former follow-ups, done in this change)
+
+Supersedes D50 (S-7 accepted), D52 and D57 (the residual and its follow-up), SC1 and SC3.
+The plan's C1–C8 text predates these: where it says manifest `version: 1`, exit codes up to
+19, "ours" without a location, rows only after a publish, or `lock_held` on any 55P03 before
+the commit path, the addendum and the entries below are what the code does.
+
+- **D58 — the chain gate runs ahead of rows c, d1 and d2** (C10): a v1 latest whose date
+  differs from the high-water's reports `LEGACY_MANIFEST_UNSETTLED` rather than
+  `DESTINATION_BEHIND_DATABASE` / `PUBLISHED_OBJECT_AHEAD`; the runbook routes it to
+  "Telling which side is wrong".
+- **D59 — `isOurs` carries no location clause:** every caller runs the gate
+  (`assertOfThisChain`) first, so "ours" is kid + deployment over manifests the gate admitted.
+- **D60 — a v1 manifest is never adopted:** acceptance needs it settled, adoption needs it
+  not. The upgrade acceptance "a run for the same boundary adopts without a third version"
+  is replaced: a recorded v1 skips, an unrecorded one fails closed, the next boundary chains
+  in v2.
+- **D61 — `lock_held` only before the primary holds the object:** a 55P03 raised after the
+  create (anyone with UPDATE on `audit_chain_anchors` can lock it) used to return `lock_held`
+  with a stored manifest and no rows; it is now `CADENCE_FAILED:55P03` at stage `upload`
+  with the comparison rows.
+- **D62 — order on a failed run** (C11): pause, the failure row, then the comparison rows, so
+  a hung read-back cannot delay the alarm line. A drop reported by the failed run is reported
+  again by the adopt that settles it.
+- **D63 — C10 residual narrower than the addendum states:** a destination writer alone can
+  get a copied v1 accepted when its date equals the high-water's date, no own-kid key holds
+  that date (a rotation day) and the copied key sorts after the legitimate one; the publish
+  then writes `MULTIPLE_MANIFESTS_FOR_DATE` and `AUDIT_ANCHOR_KEY_ROTATED`. Stated in the
+  threat model.
+- **D64 — C12 upgrade window:** with the pointer row deleted, the PREVIOUS release's
+  publisher, if it publishes between the migration and its replacement, signs a manifest
+  naming no predecessor. On the Terraform bucket C9 refuses its unconditional PUT; elsewhere
+  `deployment.md` says not to let an upgrade span 00:05 UTC.
+- **D65 — CLI:** the location check runs before the hash-link check and also on a genesis
+  current manifest, so "restart at a new location, v2 prior" is exit 20, not PASS with a WARN.
+- **D66 — locations:** GitHub's names the repository only; a filesystem path renamed or
+  reached through another mount is another location; a former secondary promoted to primary
+  is refused (`PUBLISHED_OBJECT_FOREIGN_LOCATION`) — its manifests carry the old primary's
+  location. All documented.
+- **D67 — what stays uncompared after C11:** a manifest whose creator was killed before
+  writing its rows AND whose date the high-water then reached (a database write, or the
+  settling run killed between its commit and its rows). Stated in the threat model.
+- **D68 — C12 route:** a self-granting `DO` block (the precedent of `20261109162613`), no gate
+  baseline entry; tested as `passwd_app` in a rolled-back transaction. While writing it a
+  comment in the already-applied migration was edited; the worktree database's history row
+  was deleted and the migration re-applied, so the recorded checksum matches the file.
+- **D69 — C9 verification:** static tests only; `terraform validate` runs in CI, not here; the
+  live effect is E1 (manual-test record).

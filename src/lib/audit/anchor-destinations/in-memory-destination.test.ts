@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { InMemoryDestination } from "./in-memory-destination";
+import { IN_MEMORY_LOCATION, InMemoryDestination } from "./in-memory-destination";
 import {
   createArtifact,
   describeAnchorDestinationContract,
@@ -12,6 +12,12 @@ describe("InMemoryDestination", () => {
   it("takes its name from the constructor, defaulting to in-memory", () => {
     expect(new InMemoryDestination().name).toBe("in-memory");
     expect(new InMemoryDestination("s3-object-lock").name).toBe("s3-object-lock");
+  });
+
+  it("is the one in-memory location unless given another", () => {
+    expect(new InMemoryDestination().location).toBe(IN_MEMORY_LOCATION);
+    expect(new InMemoryDestination("s3-object-lock").location).toBe(IN_MEMORY_LOCATION);
+    expect(new InMemoryDestination("filesystem", "memory://restarted").location).toBe("memory://restarted");
   });
 
   it("holds its own copy: mutating the buffer handed in or handed out changes nothing stored", async () => {

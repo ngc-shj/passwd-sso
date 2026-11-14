@@ -24,6 +24,7 @@ import { auditLogger, deadLetterLogger } from "@/lib/audit/audit-logger";
 import {
   buildManifest,
   canonicalize,
+  chainLocationFor,
   computeTenantTag,
   kidForPublicKey,
   publicKeyForSigningKey,
@@ -229,24 +230,28 @@ type Decision =
 type PublishTxResult =
   | { kind: "no_tenants"; chainEnabledTenantCount: number }
   | { kind: "skip"; otherIdentity?: OtherIdentity; chainEnabledTenantCount: number }
-  | {
+  | ({
       kind: "published";
-      published: VerifiedManifest;
-      /** The primary's bytes were not written by this run. */
-      adopted: boolean;
-      /** The manifest this run chained to, when it built the bytes itself. */
-      chainedTo: VerifiedManifest | null;
       state: PublishedState;
-      /** The primary's listing the decision was made from. */
-      listedKeys: string[];
       /** The published high-water the decision was made from, before this run's write. */
       highWater: Date | null;
       chainEnabledTenantCount: number;
-    };
+    } & StoredManifest);
 
 /** The previous manifest a stored one names could not be read back and held to its hash. */
 const PREVIOUS_UNAVAILABLE = Symbol("previous manifest unavailable");
 type ComparedTo = VerifiedManifest | null | typeof PREVIOUS_UNAVAILABLE;
+
+/** The boundary's manifest as the primary holds it, written by this run or found there. */
+type StoredManifest = {
+  published: VerifiedManifest;
+  /** The primary's bytes were not written by this run. */
+  adopted: boolean;
+  /** The manifest this run chained to, when it built the bytes itself. */
+  chainedTo: VerifiedManifest | null;
+  /** The primary's listing the decision was made from. */
+  listedKeys: string[];
+};
 
 class LockHeldSignal {
   constructor(readonly chainEnabledTenantCount: number | null) {}
@@ -397,6 +402,11 @@ export class AuditAnchorPublisher {
 
   private get ownKid(): string {
     return kidForPublicKey(this.ownKey.publicKey);
+  }
+
+  /** What a manifest of this publisher's chain carries: the primary's location, hashed. */
+  private get ownChainLocation(): string {
+    return chainLocationFor(this.primary.location);
   }
 
   private get lockTimeoutMs(): number {
@@ -625,6 +635,37 @@ export class AuditAnchorPublisher {
     return new RunFailure(`${dest.name}_READ_FAILED:${destinationFaultCode(err)}`, "before_upload");
   }
 
+  /** The cadence boundary the published high-water maps to; null when no row has one. */
+  private highWaterBoundary(highWater: Date | null): Date | null {
+    const { cadenceMs, publishOffsetMs } = this.config;
+    return highWater === null ? null : currentCadenceBoundary(highWater, cadenceMs, publishOffsetMs);
+  }
+
+  /**
+   * Refuses a manifest at the primary that this location's chain cannot
+   * hold. A version 2 manifest names the location it was published to, so one
+   * copied here from another chain is refused. A version 1 manifest names
+   * none: it stands only while the database vouches for it, its date being
+   * the published high-water's — the last manifest an earlier release
+   * published and recorded. Any other is refused, so a copied one is, and so
+   * is one that release stored and never recorded.
+   */
+  private assertOfThisChain(manifest: VerifiedManifest, highWaterBoundary: Date | null): void {
+    const refuse = (code: string) => new RunFailure(`CADENCE_FAILED:${code}`, "before_upload");
+    if (manifest.manifest.version === 1) {
+      if (highWaterBoundary === null || manifest.date !== utcDate(highWaterBoundary)) {
+        throw refuse("LEGACY_MANIFEST_UNSETTLED");
+      }
+    } else if (manifest.manifest.chainLocation !== this.ownChainLocation) {
+      throw refuse("PUBLISHED_OBJECT_FOREIGN_LOCATION");
+    }
+  }
+
+  /**
+   * Signed under the own kid for the own deployment. Only asked of a manifest
+   * `assertOfThisChain` let through, so "ours" is also of this location: a
+   * version 2 one naming it, or the version 1 one the database vouches for.
+   */
   private isOurs(manifest: VerifiedManifest): boolean {
     return manifest.kid === this.ownKid && manifest.manifest.deploymentId === this.config.deploymentId;
   }
@@ -641,7 +682,8 @@ export class AuditAnchorPublisher {
    * The decision table for `boundary`, first match wins, from what the primary
    * holds (`listedKeys`) and the published high-water. `last_published_at` can
    * make a run refuse (d1, d2) or adopt again (i); it never produces a skip.
-   * Rows a–e throw a RunFailure.
+   * Rows a–e throw a RunFailure, and so does a latest manifest of another
+   * chain (`assertOfThisChain`), ahead of every row that reads it.
    */
   private async decide(
     boundary: Date,
@@ -663,9 +705,10 @@ export class AuditAnchorPublisher {
     const { latest } = state;
 
     const wallBoundary = currentCadenceBoundary(this.wallClock(), config.cadenceMs, config.publishOffsetMs);
-    const highWaterBoundary =
-      highWater === null ? null : currentCadenceBoundary(highWater, config.cadenceMs, config.publishOffsetMs);
+    const highWaterBoundary = this.highWaterBoundary(highWater);
     const date = utcDate(boundary);
+
+    if (latest) this.assertOfThisChain(latest, highWaterBoundary);
 
     if (latest && latest.date > utcDate(wallBoundary)) throw refuse("PUBLISHED_OBJECT_AHEAD");
     if (highWaterBoundary) {
@@ -860,8 +903,10 @@ export class AuditAnchorPublisher {
     const pendingEmits: PendingEmit[] = [];
     chainEnabledTenantCount = gate.chainEnabledTenantCount;
     let artifactKey: string | null = null;
-    // The primary holds the boundary's object, written by this run or found there.
-    let primaryStored = false;
+    // Set once the primary holds the boundary's object. Asserted, not
+    // annotated: it is assigned inside the transaction callback, which the
+    // compiler's narrowing does not follow into the catch below.
+    let stored = null as StoredManifest | null;
     let uploaded = false;
 
     try {
@@ -911,13 +956,9 @@ export class AuditAnchorPublisher {
           }
         }
 
-        let published: VerifiedManifest;
-        let adopted = true;
-        let chainedTo: VerifiedManifest | null = null;
         if (decision.kind === "adopt") {
-          published = decision.latest;
-          artifactKey = published.artifactKey;
-          primaryStored = true;
+          artifactKey = decision.latest.artifactKey;
+          stored = { published: decision.latest, adopted: true, chainedTo: null, listedKeys };
         } else {
           // Every chain-enabled tenant with an anchor row is published. A
           // pause holds chain advancement in the outbox worker; it does not
@@ -956,6 +997,7 @@ export class AuditAnchorPublisher {
               ? { uri: `${primary.name}://${previous.artifactKey}`, sha256: previous.sha256 }
               : null,
             tagSecret: config.tagSecret,
+            location: primary.location,
           });
           const canonicalBytes = canonicalize(manifest);
           const artifactBytes = Buffer.from(sign(canonicalBytes, config.signingKey), "utf-8");
@@ -974,8 +1016,7 @@ export class AuditAnchorPublisher {
           }
 
           if (created === "created") {
-            primaryStored = true;
-            published = {
+            const published: VerifiedManifest = {
               artifactKey: key,
               date: utcDate(boundary),
               kid: this.ownKid,
@@ -983,27 +1024,29 @@ export class AuditAnchorPublisher {
               manifest,
               sha256: createHash("sha256").update(canonicalBytes).digest("hex"),
             };
-            adopted = false;
-            chainedTo = previous;
+            stored = { published, adopted: false, chainedTo: previous, listedKeys };
           } else {
             // The key is taken: what is stored decides, not what this run signed.
+            let found: VerifiedManifest;
             try {
-              published = await bound.run((signal) =>
+              found = await bound.run((signal) =>
                 readVerifiedManifest(primary, key, this.ownKey, listedKeys, signal),
               );
             } catch (err) {
               throw this.readFailure(primary, err);
             }
-            if (!this.isOurs(published)) {
+            this.assertOfThisChain(found, this.highWaterBoundary(highWater));
+            if (!this.isOurs(found)) {
               return {
                 kind: "skip",
-                otherIdentity: this.otherIdentityOf(published),
+                otherIdentity: this.otherIdentityOf(found),
                 chainEnabledTenantCount: tenantCount,
               };
             }
-            primaryStored = true;
+            stored = { published: found, adopted: true, chainedTo: null, listedKeys };
           }
         }
+        const { published } = stored;
 
         // The anchor rows the stored manifest covers, by tag and whatever
         // their tenant's flag is now: an adopted manifest may predate a
@@ -1025,11 +1068,8 @@ export class AuditAnchorPublisher {
 
         return {
           kind: "published",
-          published,
-          adopted,
-          chainedTo,
+          ...stored,
           state: decision.state,
-          listedKeys,
           highWater,
           chainEnabledTenantCount: tenantCount,
         };
@@ -1041,12 +1081,12 @@ export class AuditAnchorPublisher {
       }
 
       // The rows go out AFTER the transaction commits, and only with a
-      // publish: a failed run would otherwise write them on every retry.
+      // publish: a failed run would otherwise write them on every retry. The
+      // one exception is the catch below, which writes a stored manifest's
+      // comparison rows for a run that failed.
       const { published } = result;
       const destinations = config.destinations.map((d) => d.name);
-      const comparedTo = result.adopted
-        ? await this.namedPrevious(published, result.listedKeys, bound)
-        : result.chainedTo;
+      const comparedTo = await this.predecessorOf(result, bound);
       pendingEmits.push(...this.publishedEmits(result, comparedTo, boundaryIso));
       pendingEmits.push({
         action: AUDIT_ACTION.AUDIT_ANCHOR_PUBLISHED,
@@ -1076,39 +1116,84 @@ export class AuditAnchorPublisher {
         chainEnabledTenantCount: result.chainEnabledTenantCount,
       };
     } catch (err) {
-      if (!uploaded && isLockNotAvailable(err)) {
+      // Only while nothing is stored: past that point the run failed with an
+      // object at the primary, whatever the error's code.
+      if (stored === null && isLockNotAvailable(err)) {
         return this.lockHeld(boundary, chainEnabledTenantCount);
       }
-
-      // The catch covers the WHOLE publish transaction — set_config, every
-      // Prisma read, the signing step and the commit — so `err.message` may be
-      // a connection string or a query with its bound parameters. `reason`
-      // reaches audit_logs.metadata.failureReason, which the tenant reads; it
-      // is a token.
-      if (uploaded) {
-        // Stored but not committed: the retry for the boundary adopts the
-        // object. No pause — the destinations are healthy.
-        const reason = `COMMIT_FAILED_AFTER_UPLOAD:${errorLogFields(err).code}`;
-        log.error(
-          {
-            boundary: boundaryIso,
-            artifactKey,
-            error: errorLogFields(err),
-            _logType: "audit-anchor-publisher.commit_failed_after_upload",
-          },
-          "audit-anchor-publisher.commit_failed_after_upload",
-        );
-        return this.fail(boundary, { reason, stage: "after_upload", chainEnabledTenantCount, artifactKey });
+      const outcome = await this.failedPublish(boundary, err, {
+        primaryStored: stored !== null,
+        uploaded,
+        artifactKey,
+        chainEnabledTenantCount,
+      });
+      // The stored manifest is compared with its predecessor by the run that
+      // stored or found it, with the failure row: no later run may ever see
+      // it as unsettled (`last_published_at` can be moved onto its date).
+      // A retry reports the same comparison again, the attempt cap times at
+      // most.
+      if (stored !== null) {
+        const comparedTo = await this.predecessorOf(stored, bound);
+        const { published } = stored;
+        await this.flushEmits(this.comparisonEmits(published, comparedTo, published.artifactKey, boundaryIso));
       }
-
-      if (err instanceof RunFailure) {
-        if (err.pauseTenantIds.length > 0) await this.persistPause(err.pauseTenantIds, this.wallClock());
-        return this.fail(boundary, { reason: err.reason, stage: err.stage, chainEnabledTenantCount, artifactKey });
-      }
-      const reason = `CADENCE_FAILED:${errorLogFields(err).code}`;
-      const stage = primaryStored ? "upload" : "before_upload";
-      return this.fail(boundary, { reason, stage, chainEnabledTenantCount, artifactKey });
+      return outcome;
     }
+  }
+
+  /**
+   * The failed outcome of a publish transaction that threw `err`, with its
+   * log lines, pause and failure row.
+   *
+   * `err` can come from anywhere in that transaction — set_config, every
+   * Prisma read, the signing step and the commit — so `err.message` may be a
+   * connection string or a query with its bound parameters. `reason` reaches
+   * audit_logs.metadata.failureReason, which the tenant reads; it is a token.
+   */
+  private async failedPublish(
+    boundary: Date,
+    err: unknown,
+    at: {
+      /** The primary holds the boundary's object. */
+      primaryStored: boolean;
+      /** Every mirror holds it too. */
+      uploaded: boolean;
+      artifactKey: string | null;
+      chainEnabledTenantCount: number | null;
+    },
+  ): Promise<CadenceOutcome> {
+    const { artifactKey, chainEnabledTenantCount } = at;
+    if (at.uploaded) {
+      // Stored but not committed: the retry for the boundary adopts the
+      // object. No pause — the destinations are healthy.
+      const reason = `COMMIT_FAILED_AFTER_UPLOAD:${errorLogFields(err).code}`;
+      getLogger().error(
+        {
+          boundary: boundary.toISOString(),
+          artifactKey,
+          error: errorLogFields(err),
+          _logType: "audit-anchor-publisher.commit_failed_after_upload",
+        },
+        "audit-anchor-publisher.commit_failed_after_upload",
+      );
+      return this.fail(boundary, { reason, stage: "after_upload", chainEnabledTenantCount, artifactKey });
+    }
+
+    if (err instanceof RunFailure) {
+      if (err.pauseTenantIds.length > 0) await this.persistPause(err.pauseTenantIds, this.wallClock());
+      return this.fail(boundary, { reason: err.reason, stage: err.stage, chainEnabledTenantCount, artifactKey });
+    }
+    const reason = `CADENCE_FAILED:${errorLogFields(err).code}`;
+    const stage = at.primaryStored ? "upload" : "before_upload";
+    return this.fail(boundary, { reason, stage, chainEnabledTenantCount, artifactKey });
+  }
+
+  /**
+   * The manifest a stored one is compared with: the one this run chained to
+   * when it built the bytes, else the one the stored manifest names, read back.
+   */
+  private async predecessorOf(stored: StoredManifest, bound: DestinationBound): Promise<ComparedTo> {
+    return stored.adopted ? this.namedPrevious(stored.published, stored.listedKeys, bound) : stored.chainedTo;
   }
 
   /**
@@ -1116,9 +1201,10 @@ export class AuditAnchorPublisher {
    * fresh publish makes against the manifest it chained to. An adopt can be
    * forced from the database (a commit failed after the create), so it must
    * not be a way around that comparison. Read from the primary and held to
-   * the hash the stored manifest carries; null for a genesis manifest. Never
-   * throws: one that is missing, unverifiable or of another hash is reported
-   * by a row, and the publish stands.
+   * the hash the stored manifest carries and to this chain's location; null
+   * for a genesis manifest. Never throws: one that is missing, unverifiable,
+   * of another hash or of another location is reported by a row, and the
+   * publish stands.
    */
   private async namedPrevious(
     stored: VerifiedManifest,
@@ -1134,8 +1220,11 @@ export class AuditAnchorPublisher {
       const previous = await bound.run((signal) =>
         readVerifiedManifest(primary, previousArtifactKey, this.ownKey, listedKeys, signal),
       );
-      if (previous.sha256 === named.sha256) return previous;
-      detail = "HASH_MISMATCH";
+      if (previous.sha256 !== named.sha256) detail = "HASH_MISMATCH";
+      // A version 1 predecessor names no location and is compared as it is.
+      else if (previous.manifest.version !== 1 && previous.manifest.chainLocation !== this.ownChainLocation) {
+        detail = "FOREIGN_LOCATION";
+      } else return previous;
     } catch (err) {
       detail = err instanceof PublishedObjectUnverifiableError ? err.detail : destinationFaultCode(err);
     }

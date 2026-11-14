@@ -12,7 +12,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { generateKeyPairSync } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   STATEMENT_OP,
@@ -313,5 +313,87 @@ describe("retention contract", () => {
       ),
     });
     expect(retentionContractViolations(tf, AUDIT_ANCHOR_RETENTION_YEARS).join("\n")).toMatch(/retention cap/);
+  });
+});
+
+// The bucket policy refuses a PutObject that creates an object without
+// If-None-Match (DenyUnconditionalPut). That binds the code: the one request
+// that writes the anchors bucket must carry the header on every send.
+
+const REPO_ROOT = join(TERRAFORM_DIR, "..", "..");
+const S3_DESTINATION_SOURCE = "src/lib/audit/anchor-destinations/s3-destination.ts";
+// What writes an S3 object: a PUT, a copy, a multipart upload, the upload helper.
+const S3_WRITE_RE = /\b(PutObjectCommand|CopyObjectCommand|CreateMultipartUploadCommand|UploadPartCommand)\b|@aws-sdk\/lib-storage/;
+// The attachments bucket's writer; it never names the anchors bucket.
+const OTHER_S3_WRITERS = ["src/lib/blob-store/s3-blob-store.ts"];
+
+function sourceFiles(dir: string, out: string[] = []): string[] {
+  for (const entry of readdirSync(join(REPO_ROOT, dir), { withFileTypes: true })) {
+    const path = `${dir}/${entry.name}`;
+    if (entry.isDirectory()) {
+      if (entry.name !== "__tests__" && entry.name !== "node_modules") sourceFiles(path, out);
+    } else if (/\.(ts|tsx|mjs|js)$/.test(entry.name) && !/\.test\./.test(entry.name)) {
+      out.push(path);
+    }
+  }
+  return out;
+}
+
+function conditionalWriteViolations(tf: TerraformConfig, destinationSource: string): string[] {
+  const out: string[] = [];
+  const policy = plain(tf.attr(tf.resource("aws_s3_bucket_policy", "audit_anchors"), "policy")) as {
+    Statement: Array<{ Sid?: string; Condition?: Record<string, Record<string, unknown>> }>;
+  };
+  const deny = policy.Statement.find((s) => s.Sid === "DenyUnconditionalPut");
+  // s3:if-none-match is the condition key of the If-None-Match request header.
+  if (deny?.Condition?.Null?.["s3:if-none-match"] !== "true") {
+    out.push("policy: no Deny on a PutObject whose s3:if-none-match is null");
+  }
+  const puts = [...destinationSource.matchAll(/new PutObjectCommand\(\{([\s\S]*?)\}\)/g)].map((m) => m[1]);
+  if (puts.length !== 1) out.push(`destination: ${puts.length} PutObjectCommand literals, expected 1`);
+  for (const put of puts) {
+    if (!/^\s*IfNoneMatch: "\*",$/m.test(put)) out.push("destination: a PutObjectCommand without IfNoneMatch: \"*\"");
+  }
+  return out;
+}
+
+describe("conditional-write contract", () => {
+  const destinationSource = readFileSync(join(REPO_ROOT, S3_DESTINATION_SOURCE), "utf8");
+  const storage = readFileSync(join(TERRAFORM_DIR, "storage.tf"), "utf8");
+
+  it("holds: the policy denies a PUT without If-None-Match, and the destination's one PUT sends it", () => {
+    expect(conditionalWriteViolations(new TerraformConfig(TERRAFORM_DIR), destinationSource)).toEqual([]);
+  });
+
+  it("catches a destination PUT that drops the header", () => {
+    const header = '            IfNoneMatch: "*",\n';
+    expect(destinationSource.split(header).length - 1).toBe(1);
+    expect(conditionalWriteViolations(new TerraformConfig(TERRAFORM_DIR), destinationSource.replace(header, ""))).toEqual([
+      'destination: a PutObjectCommand without IfNoneMatch: "*"',
+    ]);
+  });
+
+  it("catches a second PUT in the destination", () => {
+    const second = `${destinationSource}\nexport const second = new PutObjectCommand({ Bucket: "b", Key: "k" });\n`;
+    expect(conditionalWriteViolations(new TerraformConfig(TERRAFORM_DIR), second)).toEqual([
+      "destination: 2 PutObjectCommand literals, expected 1",
+      'destination: a PutObjectCommand without IfNoneMatch: "*"',
+    ]);
+  });
+
+  it("catches a policy whose Deny is on another condition key", () => {
+    const key = 'Null = { "s3:if-none-match" = "true" }';
+    expect(storage.split(key).length - 1).toBe(1);
+    const tf = new TerraformConfig(TERRAFORM_DIR, { "storage.tf": storage.replace(key, 'Null = { "s3:if-match" = "true" }') });
+    expect(conditionalWriteViolations(tf, destinationSource)).toEqual([
+      "policy: no Deny on a PutObject whose s3:if-none-match is null",
+    ]);
+  });
+
+  it("no other source writes an S3 object but the attachments blob store", () => {
+    const writers = [...sourceFiles("src"), ...sourceFiles("scripts")].filter((file) =>
+      S3_WRITE_RE.test(readFileSync(join(REPO_ROOT, file), "utf8")),
+    );
+    expect(writers.sort()).toEqual([S3_DESTINATION_SOURCE, ...OTHER_S3_WRITERS].sort());
   });
 });

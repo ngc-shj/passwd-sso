@@ -106,6 +106,7 @@ function storedKeyForAsset(tag: string, assetName: string): string | null {
 
 export class GitHubReleaseDestination implements AnchorDestination {
   readonly name = "github-release";
+  readonly location: string;
 
   private readonly apiBase: string;
   private readonly token: string;
@@ -119,6 +120,7 @@ export class GitHubReleaseDestination implements AnchorDestination {
     }
     this.apiBase = `${config.apiBaseUrl ?? GITHUB_API_BASE_URL}/repos/${config.repo}`;
     this.token = config.token;
+    this.location = `github://${config.repo}`;
     this.listPageSize = config.listPageSize ?? GITHUB_RELEASES_PAGE_SIZE;
   }
 

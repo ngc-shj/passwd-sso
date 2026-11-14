@@ -51,7 +51,8 @@ must verify under the key its `kid` names, and the key's date must be the UTC da
 `anchoredAt`. From that manifest and one database value — the greatest
 `audit_chain_anchors.last_published_at` — the run decides, first match:
 
-- the listing or a read fails, the latest manifest does not verify, it is dated after the
+- the listing or a read fails, the latest manifest does not verify, it is not of this
+  chain location (below), it is dated after the
   wall clock's boundary, `last_published_at` is past the wall clock's boundary or past the
   latest manifest, or the latest manifest is under another `kid` while a manifest key
   named with the own `kid` exists → the run **fails closed** before any write;
@@ -65,6 +66,19 @@ must verify under the key its `kid` names, and the key's date must be the UTC da
 
 `last_published_at` can therefore make a run refuse or adopt again; it cannot make one
 skip, and it does not choose `previousManifest`. A skip never counts as health.
+
+**Chain location.** A manifest of format version 2 — the only one this release writes —
+carries `chainLocation`, the hash of the primary destination's location
+(`s3://<bucket>/<prefix>`, `github://<owner>/<repo>`, `file://<absolute base path>`), under
+the signature. A version 2 manifest at the primary that carries another value was
+published somewhere else and copied: as the latest manifest, or as the object a create
+finds at its key, it fails the run closed (`PUBLISHED_OBJECT_FOREIGN_LOCATION`) and is
+neither chained to nor adopted. A version 1 manifest, written by an earlier release, names
+no location; it is accepted only while the database vouches for it — its date is the date
+of the greatest `last_published_at` — and otherwise fails the run closed
+(`LEGACY_MANIFEST_UNSETTLED`). So an upgrade in place chains to the last version 1
+manifest, and a version 1 manifest is never adopted. Secondaries hold the primary's bytes
+and so the primary's `chainLocation`; a secondary's own location is compared with nothing.
 
 Every manifest write is create-only (`If-None-Match: *` on S3, `link()` on the
 filesystem, the asset name on GitHub Releases). A write that finds the key taken reads
@@ -83,7 +97,8 @@ decides again. A `DEPLOYMENT_ID` value is pinned in `system_settings` at boot
 from booting against this database. It does not serialize two instances of the same
 deployment; the lock and the create-only write do. The `system_settings` rows
 `audit_anchor_last_published_boundary` and `audit_anchor_previous_manifest`, which
-earlier releases decided from, are inert: nothing reads them.
+earlier releases decided from, are read by nothing and removed by the migration
+`20261115000000_remove_audit_anchor_legacy_settings`.
 
 Secondary destinations mirror the primary's bytes: the boundary's own object within the
 run (one that already holds other bytes fails the run), older gaps by a byte copy of at
@@ -312,10 +327,12 @@ a destination.
 destination, not the database:
 
 - *Suppressing a publication by claiming it happened.* No database value produces a
-  skip. The legacy marker row is inert; a `last_published_at` at or past the boundary
+  skip. The marker row earlier releases wrote is gone, and written again it is read by
+  nothing; a `last_published_at` at or past the boundary
   with no manifest at the primary fails the run closed instead.
 - *Redirecting the chain.* `previousManifest` is the latest verified manifest at the
-  primary. The legacy pointer row is inert.
+  primary. The pointer row earlier releases wrote is gone, and written again it is read
+  by nothing.
 - *Forcing a second version of a day's key.* Rewinding `last_published_at` makes the
   next run adopt the stored object again — same bytes, no write to the primary.
 
@@ -328,6 +345,7 @@ restarting the chain:
 | attempt count planted or damaged | that boundary is not published | `upload_cap_reached` |
 | the advisory lock held by a session | runs stand down | `lock_held` |
 | `last_published_at` moved forward | every run fails closed (`LAST_PUBLISHED_AHEAD_OF_CLOCK` or `DESTINATION_BEHIND_DATABASE`) | `cadence_failed` |
+| `last_published_at` moved, or cleared, while the latest manifest is version 1 | every run fails closed (`LEGACY_MANIFEST_UNSETTLED`) until the value is back on that manifest's date | `cadence_failed` |
 | every tenant's `audit_chain_enabled` cleared | `skipped_no_tenants`, unhealthy: an anchor row, or a manifest at the primary, shows the chain was once on — deleting the anchor rows as well does not make the skip healthy | `chain-enabled-fell-to-zero`, then cadence-absent |
 | every chain-enabled tenant's anchor row deleted | `skipped_no_tenants`, unhealthy while the primary holds a manifest: the enabled tenants have nothing to publish until the outbox worker writes each one's next chained event, which recreates the row from the genesis seed (the sequence restarts: `CHAIN_SEQ_REGRESSION` below) | cadence-absent, if it lasts a day |
 | `audit_anchor_deployment_id` changed | the publisher refuses to boot | `publisher-down` |
@@ -346,7 +364,10 @@ log line, which leaves the database's reach:
 
 These rows are written by every run that ends `published`, for the manifest it
 published — signed by it or adopted — and for every earlier manifest that was stored
-and never settled; a run that ends any other way writes none of them. A database
+and never settled; and by every run that **fails once the primary holds the boundary's
+manifest** (a mirror failure, a commit lost after the upload, any error past the create),
+for that manifest, right after its failure row. A run that fails before the primary holds
+the manifest, or skips, writes none of them. A database
 writer can force an adopt — fail the commit after the create (a held row lock), let the
 retry find the stored object — and an adopt signs nothing, so it has no chained-to
 manifest in hand. It reads the previous manifest its stored manifest names back from the
@@ -375,11 +396,27 @@ read-backs and the rows they yield — changes already reported are reported aga
 the truncation row when more than 7 manifests lie after it; that repeats on every publish
 while the value is null or behind, not once. Moving it forward past what the primary
 holds fails every run closed (above); moved onto the date of a manifest that is stored
-and unsettled, it makes that manifest count as settled and its comparison is skipped.
-That does not need a lock held through every attempt of the boundary: one commit failed
-after the create, then the value set, is enough. What remains then is one
-`commit_failed_after_upload` alarm with its `AUDIT_ANCHOR_PUBLISH_FAILED` row, and a day
-without a healthy line.
+and unsettled, it makes that manifest count as settled and the walk skips it.
+
+That no longer hides the manifest's comparison, because the run that stored it has
+already written it. The run that creates a manifest holds the manifest it chained to; a
+run that adopts one reads the predecessor back. When such a run fails — the way a database
+writer forces an unsettled manifest is a commit failed after the create — it writes the
+comparison rows itself, after its failure row and inside the same bound, before it
+returns. A failed commit followed by a write to `last_published_at` therefore leaves the
+drop on record, and so does a process killed between a later publish's commit and its
+walk. A retry of the boundary reports the same comparison again, at most the attempt cap
+(3) times, plus once more by the adopt that settles it.
+
+What remains uncompared is a manifest for which **both** hold: the run that stored it
+was killed after the create and before it wrote its rows (a crash or a stop, which a
+database writer cannot cause; an error is not enough, the failure path writes them), and
+the published high-water then reached that manifest's date before any run compared it —
+a database writer setting `last_published_at` onto it, or the run that settled it or the
+next boundary being killed in turn between its commit and its rows. Without the second,
+the next run adopts the manifest or the next publish walks back to it. The rows are
+written to the database the adversary writes; the same events on the publisher's
+structured log line are not.
 
 **Out of reach.** The publisher signs what the anchor rows hold at the boundary. A
 writer who rewrites `audit_logs` and the tenant's anchor row consistently before a
@@ -395,26 +432,40 @@ Releases, the filesystem, and an S3 bucket without that bucket policy.
 |---|---|---|
 | Database writer | Enforceable boundary: no database grant writes the bucket, and nothing that decides what is published reads the database. | The same. |
 | Writer of the destination without the current signing key | The key archive (`public-keys/*`) is writable only by the break-glass role, so a foreign `kid` resolves only to a key an operator archived: the verification of the latest manifest is a fail-closed gate. Nobody can delete. | The same writer can archive a key of its own, so the foreign-`kid` check is a best-effort tripwire: it catches corruption and misfiling, and a forged predecessor is *detected* — the publish that chains to it writes `AUDIT_ANCHOR_KEY_ROTATED` naming the unknown `kid` — not prevented. The writer can also delete, so `DESTINATION_BEHIND_DATABASE` and `LATEST_UNDER_RETIRED_KEY` are tripwires too. Adoption never rests on a foreign key: only an object the publisher's own key signed is adopted. |
-| Holder of the publisher task role's credentials, without the signing key | Can only wedge publishing: a manifest key holding bytes that do not verify as the latest (`PUBLISHED_OBJECT_UNVERIFIABLE`), a key *named* with a newly archived `kid` (`LATEST_UNDER_RETIRED_KEY`), or a manifest-named key that turns a never-enabled deployment's healthy skip unhealthy. All alarmed; all repeatable, so the reset is the role-credential incident, not a key change. Can also add a version to an existing key (SC1 below). | — (the row above: these stores have one writer) |
+| Holder of the publisher task role's credentials, without the signing key | Can only wedge publishing: a manifest key holding bytes that do not verify as the latest (`PUBLISHED_OBJECT_UNVERIFIABLE`), a key *named* with a newly archived `kid` (`LATEST_UNDER_RETIRED_KEY`), or a manifest-named key that turns a never-enabled deployment's healthy skip unhealthy. All alarmed; all repeatable, so the reset is the role-credential incident, not a key change. Cannot add a version to a stored key: the bucket policy refuses a `PutObject` that creates an object without `If-None-Match` (`DenyUnconditionalPut`), whoever sends it. A manifest copied from another prefix is refused by its `chainLocation`. | — (the row above: these stores have one writer) |
 | Holder of the current signing key | Not bounded by anything here (see the v1 trust-zone caveat). | Not bounded. |
 
 ### Stated limits
 
-- **SC1 — create-only is enforced by the publisher, not by the bucket.** The bucket
-  policy does not require `If-None-Match` on a manifest PUT. A holder of the publisher
-  task role's credentials can add a version to a manifest key; COMPLIANCE keeps the
-  earlier one, and without the signing key the new one does not verify. It is detectable
-  by an operator running `list-object-versions`; nothing runs it automatically
+- **Create-only is platform-enforced on the Terraform bucket only.** There the bucket
+  policy's `DenyUnconditionalPut` refuses every `PutObject` that creates an object
+  without `If-None-Match`, for every principal, so a stored key cannot be given a second
+  version; it holds while the policy does (a change to it is alarmed). On an S3 bucket
+  without that statement the publisher alone keeps the rule, and a holder of its
+  credentials can add a version; an operator running `list-object-versions` sees it
   ([`audit-anchor-verification.md` § Object versions](audit-anchor-verification.md#object-versions)).
-  Enforcing the condition in the policy needs a real-AWS apply and is a follow-up.
-- **A manifest is not bound to the location it is stored at.** Its signature covers its
-  content — `deploymentId`, date, tenants, `previousManifest` — and not the bucket,
-  prefix or repository. A manifest of an abandoned chain copied into a new chain's
-  location verifies there: the publisher adopts it on its own date or chains to it on a
-  later one, and the restarted chain silently continues the old one. On the Terraform
-  bucket only the publisher's task role can place it; on other stores, the one writer.
-  What shows it is the first `AUDIT_ANCHOR_PUBLISHED` row after a chain restart: it must
-  carry `genesis: true`, and the runbook treats anything else as an incident.
+  The statement's effect on real AWS has not been exercised here: MinIO, which the tests
+  run against, evaluates no bucket policy. If it were wrong the publisher's creates would
+  be refused (`s3-object-lock_UPLOAD_FAILED:AccessDenied`, alarmed), not accepted twice.
+- **The chain-location binding rests on `last_published_at` for version 1 manifests.** A
+  version 2 manifest names its location under the signature; a version 1 one names none,
+  and the publisher accepts it when its date is the date of the greatest
+  `last_published_at`. An adversary who can write the destination **and** that column can
+  therefore present an authentic version 1 manifest of another chain as the settled one:
+  copy it in, set the value onto its date, and the next publish chains to it. What shows
+  it is the `AUDIT_ANCHOR_KEY_ROTATED` row and the `previous_manifest_deployment_changed`
+  log line when the copied manifest is under another key or `DEPLOYMENT_ID`, and nothing
+  when it is under the same ones. A destination writer alone can do the same only where a
+  second manifest key on the high-water's date is chosen as the latest: no key of the
+  publisher's own `kid` holds that date (the day of a key rotation) and the copied key
+  sorts after the legitimate one; the publish that chains to it then writes
+  `MULTIPLE_MANIFESTS_FOR_DATE` for that date. Once every manifest a deployment may still
+  chain to is version 2, neither is possible. The first `AUDIT_ANCHOR_PUBLISHED` row
+  after a chain restart must still carry `genesis: true`; the runbook keeps that check.
+- **A `chainLocation` is a hash of the configured location's name.** A filesystem
+  destination reached under another path, or an S3 prefix or repository that was renamed,
+  is another location: its own manifests are then refused as foreign, and the reset is a
+  chain restart. The GitHub location names the repository and not the API host.
 - **SC5 — GitHub Releases and the filesystem do not separate writers or prevent
   deletion.** One credential writes manifests, the key archive and the statements, and
   can remove any of them; the column "Other stores" above is what that leaves

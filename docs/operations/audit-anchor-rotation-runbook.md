@@ -75,7 +75,8 @@ refuses those writes to everyone. The stack manages the bucket policy, not that 
 permissions. The role needs, on the prefix:
 
 - `s3:PutObject` and `s3:PutObjectRetention` on `<bucket>/<prefix>/*` — every write carries
-  COMPLIANCE mode, a 2555-day retain-until and SSE-S3, which the bucket policy requires;
+  COMPLIANCE mode, a 2555-day retain-until, SSE-S3 and `If-None-Match: *`, all of which the
+  bucket policy requires (a PUT sent by hand without them is refused with `AccessDenied`);
 - `s3:GetObject` on `<bucket>/<prefix>/*` and `s3:ListBucket` on the bucket for keys under
   `<prefix>/` — every script reads a key before it writes it and again after a write that
   found the key taken, and `audit-anchor-kid` reads the archive. Without them the script
@@ -377,6 +378,8 @@ and archive keys.
 | `<destination>_READ_FAILED:<code>` (stage `before_upload`) | The primary could not be listed or read. `<code>`: `UPLOAD_TIMEOUT` (the run's 60 s bound on destination I/O), an errno, `HTTP_<status>` from GitHub, the S3 error name for an S3 service error (`AccessDenied` for a denied request), `ARTIFACT_TOO_LARGE` (see the next row), `ARTIFACT_NOT_REGULAR_FILE` (filesystem only: the name of an artifact holds a symlink, a directory or a device — remove it; the publisher only ever creates regular files). | Fix access; nothing stored needs repair. Right after an upgrade it is the missing IAM read grant: apply Terraform (`docs/operations/deployment.md` "Upgrade order"). | Fix the token's access to the repository, or the mount and its permissions. |
 | `<destination>_READ_FAILED:ARTIFACT_TOO_LARGE` (stage `before_upload`) | An object the run must read at the primary — the latest manifest or a public key in the archive — is larger than 8 MiB (`AUDIT_ANCHOR_ARTIFACT_MAX_BYTES`). The publisher never writes one that large, so another writer did. Every run fails the same way until it is gone. | Only the publisher's task role can write a manifest key and only the break-glass role the key archive, so treat it as use of that role's credentials. The bucket's policy lets nobody delete it, so the run cannot recover by itself: after the incident review, move the chain to a new location ("Restarting the chain"). | Remove the object; find what wrote it. |
 | `CADENCE_FAILED:PUBLISHED_OBJECT_UNVERIFIABLE` | The latest manifest at the primary does not verify. The `audit-anchor-publisher.published_object_unverifiable` line carries `artifactKey` and `detail`: `PUBLIC_KEY_NOT_ARCHIVED` (it is under another `kid` whose `public-keys/<kid>.pub` is not there), `PUBLIC_KEY_INVALID` (that file is not 64 hex chars, or not that `kid`'s key), `SIGNATURE_INVALID`, `DATE_MISMATCH` (its `anchoredAt` is another UTC date than its key), `OBJECT_MISSING` (listed, but the read found nothing). | `PUBLIC_KEY_NOT_ARCHIVED`: archive that key (Step 4) — the usual cause is a rotation that skipped it. Anything else is an object nobody can remove: treat the publisher role's credentials as compromised, then restart the chain. | `PUBLIC_KEY_NOT_ARCHIVED`: archive that key. `PUBLIC_KEY_INVALID`: replace the archived file with the right key. Otherwise remove the corrupt object (restore it from a mirror or a backup if one holds it), else restart the chain. |
+| `CADENCE_FAILED:PUBLISHED_OBJECT_FOREIGN_LOCATION` | The latest manifest — or the object a create found at the boundary's key — verifies, is format version 2, and carries another `chainLocation` than this primary's: it was published to another prefix, repository or directory and copied here, or this primary is reached under another name than the one its manifests were published under (a filesystem base path through another mount point or symlink, a renamed repository, a former secondary made the primary). | Nobody but the publisher's task role can write a manifest key and nobody can remove one: role-credential incident, then restart the chain. | The location's name changed: configure the name the chain was published under, or restart the chain. Otherwise remove the copied object and find what wrote it. |
+| `CADENCE_FAILED:LEGACY_MANIFEST_UNSETTLED` | The latest manifest — or the object a create found at the boundary's key — verifies and is format version 1, which a release before format version 2 wrote and which names no location, and its date is not the date of the greatest `last_published_at` (or no row has one). The database does not vouch for it. Causes, in the order to check them: the earlier release stored it and lost the commit just before the upgrade; that release recorded the publish one boundary late (the upgrade note under "Telling which side is wrong"); `last_published_at` was changed or cleared since; the manifest was copied in from another chain. | Decide whether the manifest is the deployment's own: one version, last modified before the upgrade, under the deployment's key and `deploymentId`, chained to the manifest before it (`passwd-sso audit-verify --manifest … --prior-manifest …`). If it is, record it ("Recording a version 1 manifest"). If it is not: role-credential incident, then restart the chain. | The same decision; a copied manifest is removed instead. |
 | `CADENCE_FAILED:PUBLISHED_OBJECT_AHEAD` | The latest manifest verifies and is dated after the wall clock's current boundary. (One that does not verify is the row above, whatever its date.) | Check the task's clock first (`date -u`): a clock that went back makes the publisher's own latest manifest look ahead. With a correct clock it was signed by a publisher whose clock ran ahead, or by someone holding a signing key — a key incident (rotate). Publishing resumes when the wall clock reaches that date; restart the chain to resume sooner. | Check the clock; remove the object. |
 | `CADENCE_FAILED:LAST_PUBLISHED_AHEAD_OF_CLOCK` | The greatest `audit_chain_anchors.last_published_at` belongs to a boundary the wall clock has not reached. No publish writes such a value. | Check the clock; otherwise correct the database value ("Telling which side is wrong"). **Never a chain restart.** | The same. |
 | `CADENCE_FAILED:DESTINATION_BEHIND_DATABASE` | The database records a publish (`last_published_at`) for a later boundary date than the latest manifest at the primary, or the primary holds no manifest at all. | See "Telling which side is wrong". Without a delete marker or a bucket-policy change the database is the wrong side: correct it. | The store's own history decides; restore the lost objects where a backup holds them, else restart the chain. |
@@ -385,7 +388,7 @@ and archive keys.
 | `<destination>_READ_FAILED:<code>` (stage `upload`) | A secondary already held the boundary's key and could not be read back for the compare (`ARTIFACT_TOO_LARGE`: the object there is larger than 8 MiB). Pause as above. | — (a secondary is never the Terraform bucket: S3 is the primary whenever it is configured) | Fix access to the secondary. |
 | `<destination>_MIRROR_DIVERGED` (stage `upload`) | A secondary holds other bytes than the primary at the boundary's key. Pause as above. | — | The primary is authoritative: find out what wrote the secondary's object, remove it, and let the retry copy the primary's bytes. After a chain restart see "Restarting the chain". |
 | `CADENCE_FAILED:<code>` (stage `upload`) | A database or other error after the primary held the boundary's object and before every secondary did. No pause. | Fix what `<code>` names. The retry adopts the stored object. | The same. |
-| `COMMIT_FAILED_AFTER_UPLOAD:<code>` (stage `after_upload`) | Every destination holds the object; the database commit failed. `<code>` is the `error.code` of the `audit-anchor-publisher.commit_failed_after_upload` line. No pause. | Fix the database. The retry adopts the stored object and settles it. If no retry commits before the next boundary, that boundary's publish chains to the stored object and writes the detection rows for it (`comparedArtifactKey` is its key). | The same. |
+| `COMMIT_FAILED_AFTER_UPLOAD:<code>` (stage `after_upload`) | Every destination holds the object; the database commit failed. `<code>` is the `error.code` of the `audit-anchor-publisher.commit_failed_after_upload` line. No pause. | Fix the database. The retry adopts the stored object and settles it. If no retry commits before the next boundary, that boundary's publish chains to the stored object. The failed run wrote the stored object's detection rows after its failure row (`comparedArtifactKey` is its key); the adopt or the next boundary's publish writes them again. | The same. |
 
 Not failures, but never the healthy line either:
 
@@ -403,14 +406,16 @@ Not failures, but never the healthy line either:
 
 Detection rows. A publish that succeeds can still write `AUDIT_ANCHOR_PUBLISH_FAILED` rows
 beside its `AUDIT_ANCHOR_PUBLISHED` row; none fails the run and none is alarmed
-(`docs/operations/alerts.md` has the full table):
+(`docs/operations/alerts.md` has the full table). A run that **fails** with the boundary's
+manifest already at the primary (stage `upload` with the object stored, or `after_upload`)
+writes the first four of them too, after its failure row:
 
 | `failureReason` | Trigger | What to do |
 |---|---|---|
 | `TENANT_DROPPED_FROM_MANIFEST` (`count`) | Tenants of the manifest `comparedArtifactKey` chains to are absent from it. | Expected once after a tag-secret rotation. Otherwise find who cleared the tenant's `audit_chain_enabled` or deleted its anchor row. |
 | `CHAIN_SEQ_REGRESSION` (`count`) | A tenant's `chainSeq` is below the previous manifest's, in the same epoch. | Security incident ("Chain-sequence regression"). |
 | `EPOCH_CHANGED` (`count`) | A tenant's `epoch` differs from the previous manifest's. No code path writes it, and a changed epoch takes the tenant out of the regression check. | Database-write incident: find who changed `audit_chain_anchors.epoch`, and compare the tenant's `chainSeq` across the two manifests by hand. |
-| `PREVIOUS_MANIFEST_UNAVAILABLE_FOR_COMPARISON` | A publish could not read back the previous manifest that `comparedArtifactKey` names (the manifest it adopted, or an earlier one no publish settled), or that object is not the one named, or the read-back failed or hit the run's bound (the `previous_manifest_unavailable` line's `detail` is then an error code): the three rows above were not computed for that manifest. | Expected only after a destination error; fix it. Otherwise find out why the previous manifest is missing or changed (on the Terraform bucket it cannot be, without a delete marker or a policy change). Either way compare the two manifests by hand with `audit-verify --prior-manifest`. |
+| `PREVIOUS_MANIFEST_UNAVAILABLE_FOR_COMPARISON` | A publish could not read back the previous manifest that `comparedArtifactKey` names (the manifest it adopted, or an earlier one no publish settled), or that object is not the one named or is bound to another chain location (`FOREIGN_LOCATION`), or the read-back failed or hit the run's bound (the `previous_manifest_unavailable` line's `detail` is then an error code): the three rows above were not computed for that manifest. | Expected only after a destination error; fix it. Otherwise find out why the previous manifest is missing or changed (on the Terraform bucket it cannot be, without a delete marker or a policy change). Either way compare the two manifests by hand with `audit-verify --prior-manifest`. |
 | `UNSETTLED_WALK_TRUNCATED` (`count`) | More unsettled manifests precede this publish than one run compares (7): `count` were compared, `comparedArtifactKey` being the last, and the ones before it were not. | Compare the remaining manifests by hand, each with the one before it (`passwd-sso audit-verify --prior-manifest`), and find why `last_published_at` is behind: more than 7 boundaries stored and never settled, or a value moved back or cleared in the database (a database-write incident). |
 
 The three comparison rows are written whether the run signed the manifest or adopted one an
@@ -422,6 +427,13 @@ boundary failed after the primary held the object (a secondary failure,
 `COMMIT_FAILED_AFTER_UPLOAD`, a stage-`upload` failure, or the attempt cap): the next
 publish that commits compares each such manifest, back to the last settled one, with the
 manifest it chains to — at most 7 of them, and `UNSETTLED_WALK_TRUNCATED` when more remain.
+
+Each of those failed runs has compared the manifest already, as it failed: a failure row
+of stage `upload` or `after_upload` may be followed by comparison rows for the same
+`anchoredAt`, with `artifactKey` and `comparedArtifactKey` both the stored manifest. So one
+finding can appear several times — once per failed retry (at most three, the attempt cap),
+once with the adopt that settles the manifest, and once from the next boundary's walk when
+nothing settled it. Rows with one `comparedArtifactKey` are one finding.
 
 Where a step waits for the publisher: a failed run is retried every 15 minutes, at most three
 times per process and never within the last 30 minutes before the next boundary. When those
@@ -481,18 +493,48 @@ chain" instead.
 
 **Upgrade note.** Releases before this protocol wrote the wall clock, unclamped, to
 `last_published_at`. A run that began for one boundary and committed after the next one had
-started left a value that maps one boundary late. On the first run after the upgrade that
-value reads as a publish the primary does not hold (`DESTINATION_BEHIND_DATABASE`, or
-`LAST_PUBLISHED_AHEAD_OF_CLOCK` when it is the current day's). It is a database value no
-publish of this release writes, and the statement above corrects it.
+started left a value that maps one boundary late. On the first run after the upgrade the
+latest manifest is a version 1 one dated a day before that value, which reads as
+`LEGACY_MANIFEST_UNSETTLED`. It is a database value no publish of this release writes, and
+the statement above corrects it.
+
+### Recording a version 1 manifest
+
+For `LEGACY_MANIFEST_UNSETTLED`, once the latest manifest is known to be the deployment's
+own (the table above). When `last_published_at` is **later** than the manifest's date, the
+database records a publish the primary does not hold: decide which side is wrong first
+(above), and use the correcting statement there. When it is **earlier or absent** — the
+earlier release stored the manifest and lost the commit — record the publish, as the owner
+role, with `<anchoredAt>` taken from the manifest as above:
+
+```sql
+BEGIN;
+SET LOCAL app.bypass_rls = 'on';
+SET LOCAL app.bypass_tables = 'audit_chain_anchors,tenants';
+SET LOCAL app.bypass_purpose = 'system_maintenance';
+-- The rows that publish would have recorded: every chain-enabled tenant's.
+UPDATE audit_chain_anchors a
+SET last_published_at = '<anchoredAt>', updated_at = now()
+FROM tenants t
+WHERE t.id = a.tenant_id AND t.audit_chain_enabled
+  AND (a.last_published_at IS NULL OR a.last_published_at < '<anchoredAt>');
+COMMIT;
+```
+
+Then restart the publisher: the day of `<anchoredAt>` skips, and the next boundary chains
+to that manifest with a version 2 one. This is the one place an operator vouches for a
+manifest by hand; a version 2 manifest never needs it.
 
 ---
 
 ## Restarting the chain
 
 The reset of last resort for `PUBLISHED_OBJECT_UNVERIFIABLE`, `PUBLISHED_OBJECT_AHEAD`,
-`DESTINATION_BEHIND_DATABASE` (objects really lost) and `LATEST_UNDER_RETIRED_KEY` (a planted
-name) — and the only way to add or change the primary destination. There is no seeding of a
+`PUBLISHED_OBJECT_FOREIGN_LOCATION` and `LEGACY_MANIFEST_UNSETTLED` (a copied manifest that
+cannot be removed), `DESTINATION_BEHIND_DATABASE` (objects really lost) and
+`LATEST_UNDER_RETIRED_KEY` (a planted name) — and the only way to add or change the primary
+destination. Every manifest the new chain publishes carries the new location's
+`chainLocation`, so a manifest of the old chain cannot stand in for one of the new. There is no seeding of a
 new location with old manifests: on the Terraform bucket nobody but the publisher's task
 role can write a manifest key, and copying history out of a weaker store would lock it in
 unverified. The old chain stays where it is; a new one starts at a new location, and a
@@ -560,10 +602,12 @@ signed statement there says where the old one ended.
    with `previousManifest: null`; the `AUDIT_ANCHOR_PUBLISHED` row carries `genesis: true`,
    and one `MISSING_PRIOR_CADENCE_PUBLICATION` row accompanies it, as on any first publish.
    **Check that row.** The first `AUDIT_ANCHOR_PUBLISHED` row after a restart must carry
-   `genesis: true`. Anything else is an incident: a manifest is not bound to the location
-   it is stored at, so an old-chain manifest copied into the new location before this run
-   is adopted (its own date) or chained to (an earlier date) like any other, and the new
-   chain then continues the old one. Stop the publisher, remove what was copied where the
+   `genesis: true`. The publisher refuses an old-chain manifest copied into the new
+   location before this run — a version 2 one by its `chainLocation`
+   (`PUBLISHED_OBJECT_FOREIGN_LOCATION`), a version 1 one because step 5 cleared the value
+   that would vouch for it (`LEGACY_MANIFEST_UNSETTLED`) — so the first run either starts at
+   genesis or fails closed. Keep the check all the same: a first row without
+   `genesis: true` is an incident. Stop the publisher, remove what was copied where the
    store allows it, or start again at another new location.
 9. Tell verifiers the new archive location and point them at the restart statement
    (`docs/security/audit-anchor-verification.md` "Verifying a statement").
@@ -574,7 +618,11 @@ signed statement there says where the old one ended.
   configured one (adding S3 to a GitHub-only deployment makes S3 the primary). The new
   primary is empty, the database records publishes: `DESTINATION_BEHIND_DATABASE` on the
   first run. It is a chain restart; follow the steps above, with the old primary's last
-  manifest as `--previous-manifest`.
+  manifest as `--previous-manifest`. A former secondary made the primary is not empty, and
+  is no shortcut: the manifests it holds are bound to the old primary's location and are
+  refused there (`PUBLISHED_OBJECT_FOREIGN_LOCATION`). The same holds for a filesystem
+  primary whose base path is renamed, or reached through another mount point: the location
+  is the configured path made absolute.
 - **A secondary** — no restart. Each publishing run copies to it up to 7 manifests the
   primary holds and it lacks, newest first, so a long history fills over as many days as it
   takes. The backfill is a log-only byte copy: a failed copy, including an older
@@ -692,8 +740,9 @@ itself: whichever runs second for a boundary skips with `published_by_other_iden
 its cadence-absent alarm fires within a day.
 
 The two `system_settings` rows earlier releases used to decide these questions,
-`audit_anchor_last_published_boundary` and `audit_anchor_previous_manifest`, are inert:
-nothing reads or writes them, and whatever they hold changes nothing.
+`audit_anchor_last_published_boundary` and `audit_anchor_previous_manifest`, are removed by
+the migration `20261115000000_remove_audit_anchor_legacy_settings`. Nothing reads or writes
+them; one that appears again changes nothing.
 
 ---
 
@@ -722,17 +771,18 @@ nothing reads or writes them, and whatever they hold changes nothing.
 - The scheduler retries the boundary every 15 minutes, at most three times per process and not
   later than 30 minutes before the next one. At most three runs per boundary reach the publish
   transaction, across restarts; the fourth reports `upload_cap_reached` (alarmed) and writes
-  one `UPLOAD_ATTEMPT_CAP_REACHED` row. A manifest those runs stored and none settled is
-  compared with its previous one by the next boundary's publish (the detection rows'
-  `comparedArtifactKey`). A retry that finds the boundary's manifest already
+  one `UPLOAD_ATTEMPT_CAP_REACHED` row. A manifest those runs stored and none settled was
+  compared with its previous one by each of them as it failed, and is compared again by
+  the next boundary's publish (the detection rows' `comparedArtifactKey`). A retry that finds the boundary's manifest already
   at the primary adopts it — it writes no second version, copies the same bytes to the
   secondaries, and clears the pause. See `docs/operations/alerts.md` "Audit anchor publisher".
 - A secondary that stays down fails each day's run after the primary holds that day's
   manifest. The chain is unaffected (the next day chains to what the primary holds); once the
   secondary is back, the day's run mirrors its own manifest and the backfill copies the
-  earlier ones, up to 7 per publishing run. None of those days' manifests was settled, so
-  that first publish also writes the comparison rows for them (`comparedArtifactKey`), up
-  to 7 manifests back, and `UNSETTLED_WALK_TRUNCATED` when the outage lasted longer.
+  earlier ones, up to 7 per publishing run. None of those days' manifests was settled: each
+  day's failed run wrote its own manifest's comparison rows, and that first publish writes
+  them again (`comparedArtifactKey`), up to 7 manifests back, and
+  `UNSETTLED_WALK_TRUNCATED` when the outage lasted longer.
 
 ### Manifest build failure
 

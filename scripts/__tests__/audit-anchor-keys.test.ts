@@ -459,6 +459,34 @@ describe("chain-restart", () => {
     expectNoSeed(h, SEED_HEX);
   });
 
+  it.each([
+    ["version 1, as earlier releases wrote it", "valid manifest", 1],
+    ["version 2, bound to its chain location", "valid version 2 manifest", 2],
+  ])("accepts a previous manifest of format %s", async (_label, vector, version) => {
+    const jws = VECTORS.jws.find((v) => v.name === vector)!.jws;
+    expect(verify(jws, publicKeyForSigningKey(Buffer.from(SEED_HEX, "hex"))).version).toBe(version);
+    const file = join(dir, "previous.jws");
+    writeFileSync(file, `${jws}\n`);
+    const out = join(dir, "restart.jws");
+
+    expect(await harness().run("chain-restart", "--key-file", OLD_KEY(), "--previous-manifest", file, "--previous-uri", "u", "--out", out)).toBe(0);
+    expect(payloadOf(out).previousChain).toEqual({
+      uri: "u",
+      sha256: createHash("sha256").update(Buffer.from(jws.split(".")[1], "base64url")).digest("hex"),
+    });
+  });
+
+  it("refuses a version 2 previous manifest that carries no chain location and writes no statement", async () => {
+    const file = join(dir, "previous.jws");
+    writeFileSync(file, `${VECTORS.jws.find((v) => v.name === "version 2 without a chainLocation")!.jws}\n`);
+    const out = join(dir, "restart.jws");
+    const h = harness();
+
+    expect(await h.run("chain-restart", "--key-file", OLD_KEY(), "--previous-manifest", file, "--previous-uri", "u", "--out", out)).toBe(1);
+    expect(h.stderr()).toContain("does not verify");
+    expect(existsSync(out)).toBe(false);
+  });
+
   it("refuses a previous manifest that does not verify and writes no statement", async () => {
     const [header, payload, signature] = MANIFEST_JWS.split(".");
     const tampered = `${header}.${payload}.${signature.slice(0, -2)}${signature.endsWith("AA") ? "BB" : "AA"}`;

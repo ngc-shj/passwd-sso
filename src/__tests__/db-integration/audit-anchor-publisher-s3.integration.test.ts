@@ -40,6 +40,7 @@ import {
 } from "./anchor-publisher-fixtures";
 import { AuditAnchorPublisher, type CadenceOutcome, type PublisherConfig } from "@/workers/audit-anchor-publisher";
 import { publicKeyArtifactKey } from "@/lib/audit/anchor-artifact-keys";
+import { chainLocationFor, verify } from "@/lib/audit/anchor-manifest";
 import {
   S3Destination,
   joinS3Key,
@@ -118,13 +119,14 @@ describe("AuditAnchorPublisher — MinIO: one version per manifest key", () => {
     return [...(await dest.list())].sort();
   }
 
-  /** A manifest the case's identity would have published for `boundary`. */
+  /** A manifest the case's identity would have published to the case's prefix for `boundary`. */
   function ours(boundary: Date, overrides: Partial<Parameters<typeof signedManifest>[0]> = {}) {
     return signedManifest({
       signingKey: c.signingKey,
       boundary,
       deploymentId: c.deploymentId,
       tagSecret: c.tagSecret,
+      location: s3.location,
       tenants: [tenantA, tenantB].sort().map((tenantId) => ({
         tenantId,
         chainSeq: 77n,
@@ -366,11 +368,14 @@ describe("AuditAnchorPublisher — MinIO: one version per manifest key", () => {
     }
   });
 
-  it("upgrade: a key an earlier release PUT twice, with its legacy rows — the same boundary is adopted without a third version and the next chains to the current one", async () => {
-    // What the unconditional PUT of an earlier release left after a lost
-    // commit and its retry: two versions, the later one current.
-    const firstPut = ours(c.boundary);
-    const secondPut = ours(c.boundary);
+  /**
+   * What the unconditional PUT of an earlier release left after a lost commit
+   * and its retry: two versions of one key, the later one current, in the
+   * format that release wrote (version 1), with its two settings rows.
+   */
+  async function putTwiceByEarlierRelease() {
+    const firstPut = ours(c.boundary, { version: 1 });
+    const secondPut = ours(c.boundary, { version: 1 });
     for (const put of [firstPut, secondPut]) {
       await admin.send(new PutObjectCommand({ Bucket: BUCKET, Key: objectKey(), Body: put.bytes }));
     }
@@ -383,11 +388,16 @@ describe("AuditAnchorPublisher — MinIO: one version per manifest key", () => {
     const before = await versionsOf(objectKey());
     expect(before.filter((v) => v.isLatest).map((v) => v.body)).toEqual([secondPut.bytes.toString("utf-8")]);
     expect(before).toHaveLength(2);
+    return { secondPut, before };
+  }
 
-    // The database does not record the boundary (a rewound or lost value).
-    await setLastPublishedAt(ctx.su, [tenantA, tenantB], null);
+  it("upgrade: a key an earlier release PUT twice and recorded, with its legacy rows — the same boundary skips without a third version and the next chains to the current one, in version 2", async () => {
+    const { secondPut, before } = await putTwiceByEarlierRelease();
+    // That release wrote last_published_at with its publish.
+    await setLastPublishedAt(ctx.su, [tenantA, tenantB], new Date(wallClockAt(c.boundary)()));
+
     const same = await runAt(c.boundary, [s3]);
-    expect(same).toMatchObject({ kind: "published", adopted: true, manifestSha256: secondPut.sha256 });
+    expect(same.kind).toBe("skipped_already_published");
     expect(await versionsOf(objectKey())).toEqual(before);
 
     const next = c.boundaryAt(1);
@@ -395,6 +405,55 @@ describe("AuditAnchorPublisher — MinIO: one version per manifest key", () => {
     const nextVersions = await versionsOf(objectKey(next));
     expect(nextVersions).toHaveLength(1);
     expect(previousManifestOf(nextVersions[0]!.body)?.sha256).toBe(secondPut.sha256);
+    expect(verify(nextVersions[0]!.body, c.publicKey)).toMatchObject({
+      version: 2,
+      chainLocation: chainLocationFor(`s3://${BUCKET}/${prefix}`),
+    });
+  });
+
+  it("upgrade: the same key where the database lost that release's record fails closed without a third version; the record restored, it skips", async () => {
+    const { before } = await putTwiceByEarlierRelease();
+    await setLastPublishedAt(ctx.su, [tenantA, tenantB], null);
+
+    const refused = await runAt(c.boundary, [s3]);
+
+    expect(refused).toMatchObject({
+      kind: "failed",
+      reason: "CADENCE_FAILED:LEGACY_MANIFEST_UNSETTLED",
+      stage: "before_upload",
+    });
+    expect(await versionsOf(objectKey())).toEqual(before);
+    expect((await anchorState(ctx.su, [tenantA, tenantB])).map((s) => s.last_published_at)).toEqual([null, null]);
+
+    // The runbook's reset: the operator verifies the object and records it.
+    await setLastPublishedAt(ctx.su, [tenantA, tenantB], new Date(wallClockAt(c.boundary)()));
+    expect((await runAt(c.boundary, [s3])).kind).toBe("skipped_already_published");
+    expect(await versionsOf(objectKey())).toEqual(before);
+  });
+
+  it("a manifest copied from another prefix of the bucket is refused as the latest and is never adopted; the prefix it was published to accepts it", async () => {
+    // An authentic manifest of this identity, published to another prefix.
+    const elsewhere = new S3Destination({ bucket: BUCKET, prefix: `publisher-it-${randomUUID()}`, clientOptions });
+    await archivePublicKey(elsewhere, c.publicKey);
+    expect(await runAt(c.boundary, [elsewhere])).toMatchObject({ kind: "published", adopted: false });
+    const copied = (await elsewhere.read(c.manifestKey()))!;
+    await setLastPublishedAt(ctx.su, [tenantA, tenantB], null);
+
+    await storeArtifact(s3, c.manifestKey(), copied);
+    const before = await sortedKeys(s3);
+    const refused = await runAt(c.boundary, [s3]);
+
+    expect(refused).toMatchObject({
+      kind: "failed",
+      reason: "CADENCE_FAILED:PUBLISHED_OBJECT_FOREIGN_LOCATION",
+      stage: "before_upload",
+    });
+    expect(await sortedKeys(s3)).toEqual(before);
+    expect(await versionsOf(objectKey())).toHaveLength(1);
+    expect((await anchorState(ctx.su, [tenantA, tenantB])).map((s) => s.last_published_at)).toEqual([null, null]);
+
+    // Allow: the same bytes where they were published are this chain's, and adopted.
+    expect(await runAt(c.boundary, [elsewhere])).toMatchObject({ kind: "published", adopted: true });
   });
 
   it("secondary down for the boundary: the run fails with one version at the primary; back the same day, the retry adopts and mirrors", async () => {

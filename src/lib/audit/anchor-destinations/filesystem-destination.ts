@@ -52,11 +52,14 @@ async function fileNames(dir: string): Promise<string[]> {
 
 export class FilesystemDestination implements AnchorDestination {
   readonly name = "filesystem";
+  /** The base path made absolute; a symlink in it is not resolved. */
+  readonly location: string;
 
   private readonly basePath: string;
 
   constructor(config: FilesystemConfig) {
     this.basePath = config.basePath;
+    this.location = `file://${path.resolve(config.basePath)}`;
   }
 
   async create(args: {

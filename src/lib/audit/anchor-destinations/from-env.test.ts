@@ -18,6 +18,11 @@ describe("buildDestinationsFromEnv", () => {
     expect(destinations[0]).toBeInstanceOf(S3Destination);
     expect(destinations[1]).toBeInstanceOf(GitHubReleaseDestination);
     expect(destinations[2]).toBeInstanceOf(FilesystemDestination);
+    expect(destinations.map((d) => d.location)).toEqual([
+      "s3://anchors/audit-anchors",
+      "github://owner/repo",
+      "file:///var/anchors",
+    ]);
   });
 
   it.each([

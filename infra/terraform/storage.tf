@@ -392,6 +392,28 @@ resource "aws_s3_bucket_policy" "audit_anchors" {
         }
       },
       {
+        # Create-only, enforced by S3 itself: a PUT that carries no
+        # If-None-Match is refused, so no writer can put a second version on
+        # a stored key (S3Destination.create sends `If-None-Match: *`, the
+        # only value S3 takes on a PUT). The Null test is on the header's
+        # presence. The Bool keeps the Deny on requests that create the
+        # object: CreateMultipartUpload and UploadPart carry no conditional
+        # header, and the CompleteMultipartUpload that follows must. This is
+        # the Deny of the S3 User Guide's "Enforce conditional writes on
+        # Amazon S3 buckets", written for s3:if-none-match. CopyObject takes
+        # no If-None-Match, so copying into the bucket stops working; nothing
+        # here copies. No exception.
+        Sid       = "DenyUnconditionalPut"
+        Effect    = "Deny"
+        Principal = "*"
+        Action    = "s3:PutObject"
+        Resource  = "${aws_s3_bucket.audit_anchors[0].arn}/*"
+        Condition = {
+          Null = { "s3:if-none-match" = "true" }
+          Bool = { "s3:ObjectCreationOperation" = "true" }
+        }
+      },
+      {
         # COMPLIANCE retention cannot be shortened, so an over-long one is the
         # only retention abuse left: an object nobody can ever remove.
         Sid       = "DenyRetentionAboveCap"

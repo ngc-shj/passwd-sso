@@ -1028,9 +1028,11 @@ export const WEBHOOK_DISPATCH_SUPPRESS: ReadonlySet<string> = new Set([
 export const AUDIT_ANCHOR_CADENCE_MS = MS_PER_DAY;
 export const AUDIT_ANCHOR_PUBLISH_OFFSET_MS = 5 * MS_PER_MINUTE;
 export const AUDIT_ANCHOR_RETENTION_YEARS = 7;
-export const AUDIT_ANCHOR_MANIFEST_VERSION = 1;
+// The version the publisher writes. Version 1 (no chainLocation) still verifies.
+export const AUDIT_ANCHOR_MANIFEST_VERSION = 2;
 export const AUDIT_ANCHOR_TYP = "passwd-sso.audit-anchor.v1";
 export const AUDIT_ANCHOR_TAG_DOMAIN = "audit-anchor-tag-v1";       // HMAC domain separation label
+export const AUDIT_ANCHOR_CHAIN_LOCATION_DOMAIN = "audit-anchor-chain-location-v1"; // SHA-256 domain separation label
 export const AUDIT_ANCHOR_KID_PREFIX = "audit-anchor-";
 // The only kid a key yields: the prefix plus the public key's first 8 bytes in hex.
 export const AUDIT_ANCHOR_KID_HEX_CHARS = 16;

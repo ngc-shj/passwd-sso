@@ -13,7 +13,7 @@
  * The seed is the low-entropy constant the tenant-tag golden vector already
  * uses (0x42 × 32). It signs nothing outside this file.
  */
-import { createPrivateKey, createPublicKey, sign } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey, sign } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -23,6 +23,14 @@ const ED25519_PKCS8_PREFIX = Buffer.from("302e020100300506032b657004220420", "he
 const ED25519_SPKI_PREFIX_LEN = 12;
 const KID_PREFIX = "audit-anchor-";
 const TYP = "passwd-sso.audit-anchor.v1";
+const CHAIN_LOCATION_DOMAIN = "audit-anchor-chain-location-v1";
+
+/** SHA-256 over the domain label, a null byte and the location, in hex. */
+function chainLocation(location) {
+  return createHash("sha256")
+    .update(Buffer.concat([Buffer.from(CHAIN_LOCATION_DOMAIN), Buffer.from([0x00]), Buffer.from(location)]))
+    .digest("hex");
+}
 
 function keyPair(seed) {
   const privateKey = createPrivateKey({
@@ -80,6 +88,17 @@ function buildVectors() {
     ],
   };
   const payload = jcs(manifest);
+  // Format version 2: the same body, bound to the location it was published to.
+  const locations = ["s3://example-bucket/audit-anchors", "s3://example-bucket", "github://example/anchors", "file:///var/lib/anchors"];
+  const manifestV2 = {
+    ...manifest,
+    $schema: "https://passwd-sso.example/schemas/audit-anchor-manifest-v2.json",
+    version: 2,
+    chainLocation: chainLocation(locations[0]),
+  };
+  const manifestV2WithoutLocation = Object.fromEntries(
+    Object.entries(manifestV2).filter(([field]) => field !== "chainLocation"),
+  );
   const header = (kid) => ({ alg: "EdDSA", kid, typ: TYP });
   const publicKeyHex = own.publicKey.toString("hex");
 
@@ -87,10 +106,45 @@ function buildVectors() {
     generator: "generate-audit-anchor-vectors.mjs",
     key: { seedHex: seed.toString("hex"), publicKeyHex, kid: own.kid },
     manifest,
+    manifestV2,
+    // The server derives each hash from its location; a verifier only compares them.
+    chainLocations: locations.map((location) => ({ location, chainLocation: chainLocation(location) })),
     // Every JWS is checked under `key.publicKeyHex`. `expect` is "ok" or the
     // name of the error both implementations raise.
     jws: [
       { name: "valid manifest", jws: jws(own.privateKey, header(own.kid), payload), expect: "ok" },
+      { name: "valid version 2 manifest", jws: jws(own.privateKey, header(own.kid), jcs(manifestV2)), expect: "ok" },
+      {
+        name: "version 2 without a chainLocation",
+        jws: jws(own.privateKey, header(own.kid), jcs(manifestV2WithoutLocation)),
+        expect: "ManifestSchemaValidationError",
+      },
+      {
+        name: "version 2 with an upper-case chainLocation",
+        jws: jws(
+          own.privateKey,
+          header(own.kid),
+          jcs({ ...manifestV2, chainLocation: manifestV2.chainLocation.toUpperCase() }),
+        ),
+        expect: "ManifestSchemaValidationError",
+      },
+      {
+        name: "version 2 with a 63-char chainLocation",
+        jws: jws(own.privateKey, header(own.kid), jcs({ ...manifestV2, chainLocation: manifestV2.chainLocation.slice(1) })),
+        expect: "ManifestSchemaValidationError",
+      },
+      {
+        // The field is not part of version 1: the payload is not the canonical
+        // form of the manifest it parses to.
+        name: "version 1 carrying a chainLocation",
+        jws: jws(own.privateKey, header(own.kid), jcs({ ...manifest, chainLocation: manifestV2.chainLocation })),
+        expect: "InvalidSignatureError",
+      },
+      {
+        name: "a version neither implementation knows",
+        jws: jws(own.privateKey, header(own.kid), jcs({ ...manifestV2, version: 3 })),
+        expect: "ManifestSchemaValidationError",
+      },
       {
         name: "valid signature under a header naming another key",
         jws: jws(own.privateKey, header(other.kid), payload),

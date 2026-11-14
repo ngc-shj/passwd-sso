@@ -62,6 +62,7 @@ function recording(dest: InMemoryDestination): { dest: AnchorDestination; reads:
     reads,
     dest: {
       name: dest.name,
+      location: dest.location,
       create: (args) => dest.create(args),
       read: (key, signal) => {
         reads.push(key);
@@ -213,6 +214,7 @@ describe("readVerifiedManifest", () => {
   it("throws a destination error as it is, not as unverifiable", async () => {
     const failing: AnchorDestination = {
       name: "failing",
+      location: "memory://failing",
       create: async () => "created",
       read: async () => {
         throw Object.assign(new Error("denied"), { code: "AccessDenied" });

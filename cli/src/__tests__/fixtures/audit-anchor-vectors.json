@@ -21,11 +21,76 @@
       }
     ]
   },
+  "manifestV2": {
+    "$schema": "https://passwd-sso.example/schemas/audit-anchor-manifest-v2.json",
+    "version": 2,
+    "issuer": "passwd-sso",
+    "deploymentId": "vector-deployment",
+    "anchoredAt": "2026-01-15T00:05:00.000Z",
+    "previousManifest": null,
+    "tenants": [
+      {
+        "tenantTag": "6db2cb938b211a0b0824844113d78dd8aaafbeb608b6a2fc3903aa5114c03323",
+        "chainSeq": "5",
+        "prevHash": "abababababababababababababababababababababababababababababababab",
+        "epoch": 1
+      }
+    ],
+    "chainLocation": "42046917fd4e02c1d8e1c12fe6cf43aa19f05d297af06cce9c2dfc6558dfcfc1"
+  },
+  "chainLocations": [
+    {
+      "location": "s3://example-bucket/audit-anchors",
+      "chainLocation": "42046917fd4e02c1d8e1c12fe6cf43aa19f05d297af06cce9c2dfc6558dfcfc1"
+    },
+    {
+      "location": "s3://example-bucket",
+      "chainLocation": "f7f966baf8ff88aaecbcb98a97ff98f86453220b079454f02d0a977ee0cbe465"
+    },
+    {
+      "location": "github://example/anchors",
+      "chainLocation": "f11edd1a56dfb5260fbf2808a58ff6bf8a7d28cb8c1e01f6612fcf66d497aca6"
+    },
+    {
+      "location": "file:///var/lib/anchors",
+      "chainLocation": "54e6ea922d55f8821110bb726587785ed0376cfb0ddc009135d9d29a29ad5b67"
+    }
+  ],
   "jws": [
     {
       "name": "valid manifest",
       "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImF1ZGl0LWFuY2hvci0yMTUyZjhkMTliNzkxZDI0IiwidHlwIjoicGFzc3dkLXNzby5hdWRpdC1hbmNob3IudjEifQ.eyIkc2NoZW1hIjoiaHR0cHM6Ly9wYXNzd2Qtc3NvLmV4YW1wbGUvc2NoZW1hcy9hdWRpdC1hbmNob3ItbWFuaWZlc3QtdjEuanNvbiIsImFuY2hvcmVkQXQiOiIyMDI2LTAxLTE1VDAwOjA1OjAwLjAwMFoiLCJkZXBsb3ltZW50SWQiOiJ2ZWN0b3ItZGVwbG95bWVudCIsImlzc3VlciI6InBhc3N3ZC1zc28iLCJwcmV2aW91c01hbmlmZXN0IjpudWxsLCJ0ZW5hbnRzIjpbeyJjaGFpblNlcSI6IjUiLCJlcG9jaCI6MSwicHJldkhhc2giOiJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwidGVuYW50VGFnIjoiNmRiMmNiOTM4YjIxMWEwYjA4MjQ4NDQxMTNkNzhkZDhhYWFmYmViNjA4YjZhMmZjMzkwM2FhNTExNGMwMzMyMyJ9XSwidmVyc2lvbiI6MX0.G7Dd0hr-XfDgXpDKyZhGHD0DTP54cuaFsbW-0U48zu1fp-TiCRLQY-Nuvv8SCbtzzlbt-CFKzjDLAJ3FpaQoCA",
       "expect": "ok"
+    },
+    {
+      "name": "valid version 2 manifest",
+      "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImF1ZGl0LWFuY2hvci0yMTUyZjhkMTliNzkxZDI0IiwidHlwIjoicGFzc3dkLXNzby5hdWRpdC1hbmNob3IudjEifQ.eyIkc2NoZW1hIjoiaHR0cHM6Ly9wYXNzd2Qtc3NvLmV4YW1wbGUvc2NoZW1hcy9hdWRpdC1hbmNob3ItbWFuaWZlc3QtdjIuanNvbiIsImFuY2hvcmVkQXQiOiIyMDI2LTAxLTE1VDAwOjA1OjAwLjAwMFoiLCJjaGFpbkxvY2F0aW9uIjoiNDIwNDY5MTdmZDRlMDJjMWQ4ZTFjMTJmZTZjZjQzYWExOWYwNWQyOTdhZjA2Y2NlOWMyZGZjNjU1OGRmY2ZjMSIsImRlcGxveW1lbnRJZCI6InZlY3Rvci1kZXBsb3ltZW50IiwiaXNzdWVyIjoicGFzc3dkLXNzbyIsInByZXZpb3VzTWFuaWZlc3QiOm51bGwsInRlbmFudHMiOlt7ImNoYWluU2VxIjoiNSIsImVwb2NoIjoxLCJwcmV2SGFzaCI6ImFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWIiLCJ0ZW5hbnRUYWciOiI2ZGIyY2I5MzhiMjExYTBiMDgyNDg0NDExM2Q3OGRkOGFhYWZiZWI2MDhiNmEyZmMzOTAzYWE1MTE0YzAzMzIzIn1dLCJ2ZXJzaW9uIjoyfQ.qM67Bqjw5eJh6D2rb3p_9Xp0IjBdUOU-kv6shNWIV7v-omI_c4O7dT8bxCEqRHpZ4lapygg-RAkmv8hovdOPBg",
+      "expect": "ok"
+    },
+    {
+      "name": "version 2 without a chainLocation",
+      "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImF1ZGl0LWFuY2hvci0yMTUyZjhkMTliNzkxZDI0IiwidHlwIjoicGFzc3dkLXNzby5hdWRpdC1hbmNob3IudjEifQ.eyIkc2NoZW1hIjoiaHR0cHM6Ly9wYXNzd2Qtc3NvLmV4YW1wbGUvc2NoZW1hcy9hdWRpdC1hbmNob3ItbWFuaWZlc3QtdjIuanNvbiIsImFuY2hvcmVkQXQiOiIyMDI2LTAxLTE1VDAwOjA1OjAwLjAwMFoiLCJkZXBsb3ltZW50SWQiOiJ2ZWN0b3ItZGVwbG95bWVudCIsImlzc3VlciI6InBhc3N3ZC1zc28iLCJwcmV2aW91c01hbmlmZXN0IjpudWxsLCJ0ZW5hbnRzIjpbeyJjaGFpblNlcSI6IjUiLCJlcG9jaCI6MSwicHJldkhhc2giOiJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwidGVuYW50VGFnIjoiNmRiMmNiOTM4YjIxMWEwYjA4MjQ4NDQxMTNkNzhkZDhhYWFmYmViNjA4YjZhMmZjMzkwM2FhNTExNGMwMzMyMyJ9XSwidmVyc2lvbiI6Mn0.gAs0WFwkL7alVe-G1RZ7FbPms6GsKmpy09uASz-0TZp0tzu2qBTWcUXFu06ZbdYwjESTasO0TGg3bHHOhG7XAg",
+      "expect": "ManifestSchemaValidationError"
+    },
+    {
+      "name": "version 2 with an upper-case chainLocation",
+      "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImF1ZGl0LWFuY2hvci0yMTUyZjhkMTliNzkxZDI0IiwidHlwIjoicGFzc3dkLXNzby5hdWRpdC1hbmNob3IudjEifQ.eyIkc2NoZW1hIjoiaHR0cHM6Ly9wYXNzd2Qtc3NvLmV4YW1wbGUvc2NoZW1hcy9hdWRpdC1hbmNob3ItbWFuaWZlc3QtdjIuanNvbiIsImFuY2hvcmVkQXQiOiIyMDI2LTAxLTE1VDAwOjA1OjAwLjAwMFoiLCJjaGFpbkxvY2F0aW9uIjoiNDIwNDY5MTdGRDRFMDJDMUQ4RTFDMTJGRTZDRjQzQUExOUYwNUQyOTdBRjA2Q0NFOUMyREZDNjU1OERGQ0ZDMSIsImRlcGxveW1lbnRJZCI6InZlY3Rvci1kZXBsb3ltZW50IiwiaXNzdWVyIjoicGFzc3dkLXNzbyIsInByZXZpb3VzTWFuaWZlc3QiOm51bGwsInRlbmFudHMiOlt7ImNoYWluU2VxIjoiNSIsImVwb2NoIjoxLCJwcmV2SGFzaCI6ImFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWIiLCJ0ZW5hbnRUYWciOiI2ZGIyY2I5MzhiMjExYTBiMDgyNDg0NDExM2Q3OGRkOGFhYWZiZWI2MDhiNmEyZmMzOTAzYWE1MTE0YzAzMzIzIn1dLCJ2ZXJzaW9uIjoyfQ.RrJIS7ZRIpP7bVrUICFmqiFPzcXKxpkaSKiK64EvDhGiJ_v0iJ5kCzpCPCT4-Wo5RhEZ1ZpyzrGCqLFQRE7GBw",
+      "expect": "ManifestSchemaValidationError"
+    },
+    {
+      "name": "version 2 with a 63-char chainLocation",
+      "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImF1ZGl0LWFuY2hvci0yMTUyZjhkMTliNzkxZDI0IiwidHlwIjoicGFzc3dkLXNzby5hdWRpdC1hbmNob3IudjEifQ.eyIkc2NoZW1hIjoiaHR0cHM6Ly9wYXNzd2Qtc3NvLmV4YW1wbGUvc2NoZW1hcy9hdWRpdC1hbmNob3ItbWFuaWZlc3QtdjIuanNvbiIsImFuY2hvcmVkQXQiOiIyMDI2LTAxLTE1VDAwOjA1OjAwLjAwMFoiLCJjaGFpbkxvY2F0aW9uIjoiMjA0NjkxN2ZkNGUwMmMxZDhlMWMxMmZlNmNmNDNhYTE5ZjA1ZDI5N2FmMDZjY2U5YzJkZmM2NTU4ZGZjZmMxIiwiZGVwbG95bWVudElkIjoidmVjdG9yLWRlcGxveW1lbnQiLCJpc3N1ZXIiOiJwYXNzd2Qtc3NvIiwicHJldmlvdXNNYW5pZmVzdCI6bnVsbCwidGVuYW50cyI6W3siY2hhaW5TZXEiOiI1IiwiZXBvY2giOjEsInByZXZIYXNoIjoiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYiIsInRlbmFudFRhZyI6IjZkYjJjYjkzOGIyMTFhMGIwODI0ODQ0MTEzZDc4ZGQ4YWFhZmJlYjYwOGI2YTJmYzM5MDNhYTUxMTRjMDMzMjMifV0sInZlcnNpb24iOjJ9.Xd2VNpEUSNcJ7w2H7fl_u_4VjSjg6lltOZJ1DD412ER6Ah-gmaAby-uQKuZ_mjHn9oGyWqzjziIdGoLmpDbXAw",
+      "expect": "ManifestSchemaValidationError"
+    },
+    {
+      "name": "version 1 carrying a chainLocation",
+      "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImF1ZGl0LWFuY2hvci0yMTUyZjhkMTliNzkxZDI0IiwidHlwIjoicGFzc3dkLXNzby5hdWRpdC1hbmNob3IudjEifQ.eyIkc2NoZW1hIjoiaHR0cHM6Ly9wYXNzd2Qtc3NvLmV4YW1wbGUvc2NoZW1hcy9hdWRpdC1hbmNob3ItbWFuaWZlc3QtdjEuanNvbiIsImFuY2hvcmVkQXQiOiIyMDI2LTAxLTE1VDAwOjA1OjAwLjAwMFoiLCJjaGFpbkxvY2F0aW9uIjoiNDIwNDY5MTdmZDRlMDJjMWQ4ZTFjMTJmZTZjZjQzYWExOWYwNWQyOTdhZjA2Y2NlOWMyZGZjNjU1OGRmY2ZjMSIsImRlcGxveW1lbnRJZCI6InZlY3Rvci1kZXBsb3ltZW50IiwiaXNzdWVyIjoicGFzc3dkLXNzbyIsInByZXZpb3VzTWFuaWZlc3QiOm51bGwsInRlbmFudHMiOlt7ImNoYWluU2VxIjoiNSIsImVwb2NoIjoxLCJwcmV2SGFzaCI6ImFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWIiLCJ0ZW5hbnRUYWciOiI2ZGIyY2I5MzhiMjExYTBiMDgyNDg0NDExM2Q3OGRkOGFhYWZiZWI2MDhiNmEyZmMzOTAzYWE1MTE0YzAzMzIzIn1dLCJ2ZXJzaW9uIjoxfQ.xk6c9X5jI9Pie9LR1q-f08hDHF0WVfhJia8XHzJFQf7nAHmSKp8cjuu6Ykk7HKCeh-ppJJ5prqF6VhHT4RtnAg",
+      "expect": "InvalidSignatureError"
+    },
+    {
+      "name": "a version neither implementation knows",
+      "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImF1ZGl0LWFuY2hvci0yMTUyZjhkMTliNzkxZDI0IiwidHlwIjoicGFzc3dkLXNzby5hdWRpdC1hbmNob3IudjEifQ.eyIkc2NoZW1hIjoiaHR0cHM6Ly9wYXNzd2Qtc3NvLmV4YW1wbGUvc2NoZW1hcy9hdWRpdC1hbmNob3ItbWFuaWZlc3QtdjIuanNvbiIsImFuY2hvcmVkQXQiOiIyMDI2LTAxLTE1VDAwOjA1OjAwLjAwMFoiLCJjaGFpbkxvY2F0aW9uIjoiNDIwNDY5MTdmZDRlMDJjMWQ4ZTFjMTJmZTZjZjQzYWExOWYwNWQyOTdhZjA2Y2NlOWMyZGZjNjU1OGRmY2ZjMSIsImRlcGxveW1lbnRJZCI6InZlY3Rvci1kZXBsb3ltZW50IiwiaXNzdWVyIjoicGFzc3dkLXNzbyIsInByZXZpb3VzTWFuaWZlc3QiOm51bGwsInRlbmFudHMiOlt7ImNoYWluU2VxIjoiNSIsImVwb2NoIjoxLCJwcmV2SGFzaCI6ImFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWIiLCJ0ZW5hbnRUYWciOiI2ZGIyY2I5MzhiMjExYTBiMDgyNDg0NDExM2Q3OGRkOGFhYWZiZWI2MDhiNmEyZmMzOTAzYWE1MTE0YzAzMzIzIn1dLCJ2ZXJzaW9uIjozfQ.xEHo5PInHskmOF3x0cV3zxaL2_ChmKGH30Nt5pXa4fP6scpAftoQ3OyCm5Gz3IJQ6Wm7G27DHzc65nnd0cAWDg",
+      "expect": "ManifestSchemaValidationError"
     },
     {
       "name": "valid signature under a header naming another key",

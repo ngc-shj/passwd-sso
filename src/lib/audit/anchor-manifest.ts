@@ -1,4 +1,5 @@
 import {
+  createHash,
   createHmac,
   createPrivateKey,
   createPublicKey,
@@ -11,6 +12,8 @@ import {
   AUDIT_ANCHOR_TYP,
   AUDIT_ANCHOR_STATEMENT_TYP,
   AUDIT_ANCHOR_TAG_DOMAIN,
+  AUDIT_ANCHOR_CHAIN_LOCATION_DOMAIN,
+  AUDIT_ANCHOR_MANIFEST_VERSION,
   AUDIT_ANCHOR_KID_PREFIX,
   AUDIT_ANCHOR_KID_HEX_CHARS,
 } from "@/lib/constants/audit/audit";
@@ -19,9 +22,8 @@ import { isAnchorKid } from "@/lib/audit/anchor-artifact-keys";
 
 // --- Public types ---
 
-export type Manifest = {
+type ManifestBody = {
   $schema: string;
-  version: 1;
   issuer: "passwd-sso";
   deploymentId: string;
   anchoredAt: string;
@@ -33,6 +35,14 @@ export type Manifest = {
     epoch: number;
   }>;
 };
+
+/** Written by earlier releases: bound to no location. Still verified, never written. */
+export type ManifestV1 = ManifestBody & { version: 1 };
+
+/** `chainLocation` is `chainLocationFor` of the primary destination it was published to. */
+export type ManifestV2 = ManifestBody & { version: 2; chainLocation: string };
+
+export type Manifest = ManifestV1 | ManifestV2;
 
 export type AnchorRow = {
   tenantId: string;
@@ -47,6 +57,8 @@ export type BuildManifestInput = {
   anchoredAt: Date;
   previousManifest: { uri: string; sha256: string } | null;
   tagSecret: Buffer;
+  /** The primary destination's `location`. */
+  location: string;
 };
 
 // --- Typed errors ---
@@ -128,9 +140,8 @@ function isIsoTimestamp(value: string): boolean {
   return Number.isFinite(ms) && new Date(ms).toISOString() === value;
 }
 
-const manifestSchema = z.object({
+const manifestBodyShape = {
   $schema: z.string(),
-  version: z.literal(1),
   issuer: z.literal("passwd-sso"),
   deploymentId: z.string(),
   anchoredAt: z.string().refine(isIsoTimestamp),
@@ -138,7 +149,19 @@ const manifestSchema = z.object({
     .object({ uri: z.string(), sha256: z.string() })
     .nullable(),
   tenants: z.array(tenantEntrySchema),
-});
+};
+
+// A version 1 payload that carries a chainLocation parses without it, and
+// `verify` then refuses it: the payload is not the canonical form of what
+// was parsed.
+const manifestSchema = z.discriminatedUnion("version", [
+  z.object({ ...manifestBodyShape, version: z.literal(1) }),
+  z.object({
+    ...manifestBodyShape,
+    version: z.literal(AUDIT_ANCHOR_MANIFEST_VERSION),
+    chainLocation: z.string().regex(/^[0-9a-f]{64}$/),
+  }),
+]);
 
 function validateManifest(value: unknown): Manifest {
   const result = manifestSchema.safeParse(value);
@@ -211,20 +234,34 @@ export function computeTenantTag(tenantId: string, tagSecret: Buffer): string {
 }
 
 /**
+ * What a manifest carries as `chainLocation`: the SHA-256 of a destination's
+ * `location`, domain separated with AUDIT_ANCHOR_CHAIN_LOCATION_DOMAIN + null
+ * byte. A hash, so the manifest names no bucket, repository or path.
+ */
+export function chainLocationFor(location: string): string {
+  return createHash("sha256")
+    .update(AUDIT_ANCHOR_CHAIN_LOCATION_DOMAIN, "utf-8")
+    .update(Buffer.from([0x00]))
+    .update(location, "utf-8")
+    .digest("hex");
+}
+
+/**
  * Build a Manifest object from AnchorRows and metadata.
  * Validates each tenantId and the resulting manifest via Zod.
  */
-export function buildManifest(input: BuildManifestInput): Manifest {
+export function buildManifest(input: BuildManifestInput): ManifestV2 {
   for (const row of input.tenants) {
     validateTenantIdCanonical(row.tenantId);
   }
 
   const raw = {
-    $schema: "https://passwd-sso.example/schemas/audit-anchor-manifest-v1.json",
-    version: 1 as const,
+    $schema: `https://passwd-sso.example/schemas/audit-anchor-manifest-v${AUDIT_ANCHOR_MANIFEST_VERSION}.json`,
+    version: AUDIT_ANCHOR_MANIFEST_VERSION,
     issuer: "passwd-sso" as const,
     deploymentId: input.deploymentId,
     anchoredAt: input.anchoredAt.toISOString(),
+    chainLocation: chainLocationFor(input.location),
     previousManifest: input.previousManifest,
     tenants: input.tenants.map((row) => ({
       tenantTag: computeTenantTag(row.tenantId, input.tagSecret),
@@ -234,7 +271,7 @@ export function buildManifest(input: BuildManifestInput): Manifest {
     })),
   };
 
-  return validateManifest(raw);
+  return validateManifest(raw) as ManifestV2;
 }
 
 /**

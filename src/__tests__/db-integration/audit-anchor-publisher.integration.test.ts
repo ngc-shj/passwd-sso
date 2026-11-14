@@ -19,7 +19,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import path from "node:path";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -62,6 +62,7 @@ import { buildManifestArtifactKey, publicKeyArtifactKey } from "@/lib/audit/anch
 import type { AnchorDestination } from "@/lib/audit/anchor-destinations/destination";
 import {
   verify as verifyManifest,
+  chainLocationFor,
   computeTenantTag,
   publicKeyForSigningKey,
   type Manifest,
@@ -137,13 +138,14 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
     return verifyManifest(bytes.toString("utf-8"), publicKey);
   }
 
-  /** A manifest the case's identity would have published for `boundary`. */
-  function ours(boundary: Date, overrides: Partial<Parameters<typeof signedManifest>[0]> = {}) {
+  /** A manifest the case's identity would have published to `at` for `boundary`. */
+  function ours(boundary: Date, at: AnchorDestination, overrides: Partial<Parameters<typeof signedManifest>[0]> = {}) {
     return signedManifest({
       signingKey: c.signingKey,
       boundary,
       deploymentId: c.deploymentId,
       tagSecret: c.tagSecret,
+      location: at.location,
       tenants: [tenantA, tenantB].sort().map((tenantId) => ({
         tenantId,
         chainSeq: 5n,
@@ -356,7 +358,7 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
   it("row c: an object dated past the wall clock's boundary fails; the clock at its date, an earlier boundary skips as stale (row f)", async () => {
     const { dest } = await c.filesystem();
     const next = c.boundaryAt(1);
-    await storeManifest(dest, ours(next));
+    await storeManifest(dest, ours(next, dest));
     const mirror = trackDestination((await c.filesystem()).dest);
     const before = await sortedKeys(dest);
 
@@ -377,7 +379,7 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
 
   it("row d1: a last_published_at past the wall clock's boundary fails closed, the object for the boundary notwithstanding", async () => {
     const { dest } = await c.filesystem();
-    await storeManifest(dest, ours(c.boundary));
+    await storeManifest(dest, ours(c.boundary, dest));
     const mirror = trackDestination((await c.filesystem()).dest);
     const before = await sortedKeys(dest);
     const planted = new Date(c.boundaryAt(1).getTime() + 1);
@@ -420,7 +422,7 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
 
   it("row d2's allow twin: last_published_at on the latest manifest's date publishes the next boundary, chained to it", async () => {
     const { dest } = await c.filesystem();
-    const previous = ours(c.boundary);
+    const previous = ours(c.boundary, dest);
     await storeManifest(dest, previous);
     await setLastPublishedAt(ctx.su, [tenantA], wallClockAtDate(c.boundary));
     const next = c.boundaryAt(1);
@@ -452,7 +454,7 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
 
   it("row g: the boundary's object under another identity skips, writes nothing, and reports once per boundary", async () => {
     const { dest } = await c.filesystem();
-    const theirs = ours(c.boundary, { deploymentId: "another-deployment" });
+    const theirs = ours(c.boundary, dest, { deploymentId: "another-deployment" });
     await storeManifest(dest, theirs);
     const mirror = trackDestination((await c.filesystem()).dest);
     const before = await sortedKeys(dest);
@@ -474,7 +476,7 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
 
     // Allow: the same object under this publisher's identity is adopted (row i).
     const { dest: own } = await c.filesystem();
-    const planted = ours(c.boundary);
+    const planted = ours(c.boundary, own);
     await storeManifest(own, planted);
     const adopted = await runAt(c.boundary, [own]);
     expect(adopted).toMatchObject({ kind: "published", adopted: true, manifestSha256: planted.sha256 });
@@ -805,7 +807,7 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
     });
   });
 
-  it("a lost commit after a tenant was disabled: the retry adopts and still emits the one TENANT_DROPPED_FROM_MANIFEST row", async () => {
+  it("a lost commit after a tenant was disabled: the failed run writes the TENANT_DROPPED_FROM_MANIFEST row with its failure row, and the retry that adopts writes it again", async () => {
     const { dest } = await c.filesystem();
     expect((await runAt(c.boundary, [dest])).kind).toBe("published");
     await setChainEnabled(ctx.su, tenantB, false);
@@ -814,17 +816,30 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
 
     const lost = await runAt(next, [storing.dest], { hooks: { afterUpload: async () => { throw new Error("commit lost"); } } });
     expect(lost).toMatchObject({ kind: "failed", stage: "after_upload" });
+    // The run that stored the manifest reports the drop itself; nothing published.
+    const afterLost = await publisherRowsFor(next);
+    expect(afterLost.map((r) => r.action)).toEqual(["AUDIT_ANCHOR_PUBLISH_FAILED", "AUDIT_ANCHOR_PUBLISH_FAILED"]);
+    expect(failureReasons(afterLost)).toEqual(["COMMIT_FAILED_AFTER_UPLOAD:unknown", "TENANT_DROPPED_FROM_MANIFEST"]);
+    const drop = {
+      failureReason: "TENANT_DROPPED_FROM_MANIFEST",
+      count: 1,
+      artifactKey: c.manifestKey(next),
+      anchoredAt: next.toISOString(),
+      comparedArtifactKey: c.manifestKey(next),
+    };
+    expect(afterLost[1]?.metadata).toEqual(drop);
+
     const retry = await runAt(next, [storing.dest]);
 
     expect(retry).toMatchObject({ kind: "published", adopted: true, tenantsCount: 1 });
     expect(createCalls(storing.calls)).toEqual([`create:${c.manifestKey(next)}`]);
     const rows = await publisherRowsFor(next);
-    expect(failureReasons(rows)).toEqual(["COMMIT_FAILED_AFTER_UPLOAD:unknown", "TENANT_DROPPED_FROM_MANIFEST"]);
-    expect(rows.find((r) => r.failureReason === "TENANT_DROPPED_FROM_MANIFEST")?.metadata).toMatchObject({
-      count: 1,
-      artifactKey: c.manifestKey(next),
-      comparedArtifactKey: c.manifestKey(next),
-    });
+    expect(failureReasons(rows)).toEqual([
+      "COMMIT_FAILED_AFTER_UPLOAD:unknown",
+      "TENANT_DROPPED_FROM_MANIFEST",
+      "TENANT_DROPPED_FROM_MANIFEST",
+    ]);
+    expect(rows.filter((r) => r.failureReason === "TENANT_DROPPED_FROM_MANIFEST").map((r) => r.metadata)).toEqual([drop, drop]);
 
     // Allow: the same lost commit and adopt over an unchanged tenant set emits no detection row.
     const third = c.boundaryAt(2);
@@ -863,6 +878,117 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
     expect(failureReasons(await publisherRowsFor(after))).toEqual([]);
   });
 
+  it("a drop stored by a failed commit stays on record when last_published_at is then moved onto its date: the next boundary publishes and never compares it", async () => {
+    const { dest } = await c.filesystem();
+    expect((await runAt(c.boundary, [dest])).kind).toBe("published");
+    await setChainEnabled(ctx.su, tenantB, false);
+    const unsettled = c.boundaryAt(1);
+    const lost = await runAt(unsettled, [dest], { hooks: { afterUpload: async () => { throw new Error("commit lost"); } } });
+    expect(lost).toMatchObject({ kind: "failed", stage: "after_upload" });
+
+    // A database writer makes the stored manifest count as settled.
+    await setLastPublishedAt(ctx.su, [tenantA, tenantB], wallClockAtDate(unsettled));
+    const next = c.boundaryAt(2);
+    expect(await runAt(next, [dest])).toMatchObject({ kind: "published", adopted: false, tenantsCount: 1 });
+
+    expect(failureReasons(await publisherRowsFor(next))).toEqual([]);
+    const recorded = (await publisherRowsFor(unsettled)).filter((r) => r.failureReason === "TENANT_DROPPED_FROM_MANIFEST");
+    expect(recorded.map((r) => r.metadata)).toEqual([
+      {
+        failureReason: "TENANT_DROPPED_FROM_MANIFEST",
+        count: 1,
+        artifactKey: c.manifestKey(unsettled),
+        anchoredAt: unsettled.toISOString(),
+        comparedArtifactKey: c.manifestKey(unsettled),
+      },
+    ]);
+  });
+
+  it("a failure before the primary holds the boundary's object writes no comparison row, a tenant disabled notwithstanding", async () => {
+    const { dest } = await c.filesystem();
+    expect((await runAt(c.boundary, [dest])).kind).toBe("published");
+    await setChainEnabled(ctx.su, tenantB, false);
+    const next = c.boundaryAt(1);
+    const refusing = trackDestination(dest, {
+      create: async () => {
+        throw Object.assign(new Error("denied"), { code: "EACCES" });
+      },
+    });
+
+    const outcome = await runAt(next, [refusing.dest]);
+
+    expect(outcome).toMatchObject({ kind: "failed", stage: "upload", reason: "filesystem_UPLOAD_FAILED:EACCES" });
+    expect(await dest.read(c.manifestKey(next))).toBeNull();
+    expect(failureReasons(await publisherRowsFor(next))).toEqual(["filesystem_UPLOAD_FAILED:EACCES"]);
+  });
+
+  // ─── the chain location a manifest is bound to ────────────────────────────
+
+  it("a manifest copied from another directory is refused as the latest; the directory it was published to chains to it", async () => {
+    const { dest: origin } = await c.filesystem();
+    expect((await runAt(c.boundary, [origin])).kind).toBe("published");
+    const published = (await origin.read(c.manifestKey()))!;
+    expect(await storedManifest(origin, c.manifestKey())).toMatchObject({
+      version: 2,
+      chainLocation: chainLocationFor(origin.location),
+    });
+
+    // The same authentic bytes, copied into a directory that holds no chain.
+    const { dest: copy } = await c.filesystem();
+    await storeArtifact(copy, c.manifestKey(), published);
+    const mirror = trackDestination((await c.filesystem()).dest);
+    const before = await sortedKeys(copy);
+    const next = c.boundaryAt(1);
+
+    const refused = await runAt(next, [copy, mirror.dest]);
+
+    expect(refused).toEqual({
+      kind: "failed",
+      reason: "CADENCE_FAILED:PUBLISHED_OBJECT_FOREIGN_LOCATION",
+      stage: "before_upload",
+      chainEnabledTenantCount: 2,
+    });
+    await expectDenied(copy, before, mirror.calls);
+    // Uncounted: the count is still the first boundary's publish.
+    expect(await attemptsRow()).toEqual({ boundary: c.boundary.toISOString(), count: 1 });
+    expect(failureReasons(await publisherRowsFor(next))).toEqual(["CADENCE_FAILED:PUBLISHED_OBJECT_FOREIGN_LOCATION"]);
+
+    // Allow: where it was published.
+    expect(await runAt(next, [origin])).toMatchObject({ kind: "published", adopted: false });
+    const payload = Buffer.from(published.toString("utf-8").split(".")[1] ?? "", "base64url");
+    expect((await storedManifest(origin, c.manifestKey(next))).previousManifest).toEqual({
+      uri: `filesystem://${c.manifestKey()}`,
+      sha256: createHash("sha256").update(payload).digest("hex"),
+    });
+  });
+
+  it("upgrade in place: an earlier release's version 1 manifest dated on last_published_at is chained to by a version 2 one; with no last_published_at it is refused", async () => {
+    const { dest } = await c.filesystem();
+    const legacy = ours(c.boundary, dest, { version: 1 });
+    await storeManifest(dest, legacy);
+    const before = await sortedKeys(dest);
+    const next = c.boundaryAt(1);
+
+    // Deny: nothing in the database vouches for it.
+    const refused = await runAt(next, [dest]);
+    expect(refused).toMatchObject({
+      kind: "failed",
+      reason: "CADENCE_FAILED:LEGACY_MANIFEST_UNSETTLED",
+      stage: "before_upload",
+    });
+    await expectDenied(dest, before);
+    expect(await attemptsRow()).toBeNull();
+
+    // Allow: the earlier release recorded its publish.
+    await setLastPublishedAt(ctx.su, [tenantA, tenantB], wallClockAtDate(c.boundary));
+    expect(await runAt(next, [dest])).toMatchObject({ kind: "published", adopted: false });
+    expect(await storedManifest(dest, c.manifestKey(next))).toMatchObject({
+      version: 2,
+      chainLocation: chainLocationFor(dest.location),
+      previousManifest: { uri: `filesystem://${legacy.artifactKey}`, sha256: legacy.sha256 },
+    });
+  });
+
   it("a chain_seq lowered between two publishes emits one CHAIN_SEQ_REGRESSION row; an unchanged one, none", async () => {
     const { dest } = await c.filesystem();
     expect(await publishTwice(dest, () => setChainSeq(ctx.su, tenantA, 4))).toEqual(["CHAIN_SEQ_REGRESSION"]);
@@ -879,7 +1005,7 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
 
     const reasons = await publishTwice(dest, async () => {
       await archivePublicKey(dest, publicKeyForSigningKey(otherKey));
-      await storeManifest(dest, signedManifest({ signingKey: otherKey, boundary: c.boundary }));
+      await storeManifest(dest, signedManifest({ signingKey: otherKey, boundary: c.boundary, location: dest.location }));
     });
 
     expect(reasons).toEqual(["MULTIPLE_MANIFESTS_FOR_DATE"]);
@@ -920,7 +1046,7 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
   it("a secondary holding other bytes for the key fails as diverged and records no publish; holding the same bytes, the retry publishes", async () => {
     const { dest: primary } = await c.filesystem();
     const { dest: diverged } = await c.filesystem();
-    await storeArtifact(diverged, c.manifestKey(), ours(c.boundary).bytes);
+    await storeArtifact(diverged, c.manifestKey(), ours(c.boundary, primary).bytes);
     const before = await sortedKeys(diverged);
 
     const outcome = await runAt(c.boundary, [primary, diverged]);

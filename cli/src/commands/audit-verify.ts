@@ -126,6 +126,14 @@ export class ChainBreakError extends Error {
   }
 }
 
+/** The prior and the current manifest are not of one chain location. */
+export class ChainLocationMismatchError extends Error {
+  constructor(prior: string, current: string) {
+    super(`Prior and current manifest are bound to different chain locations; prior=${prior}, current=${current}`);
+    this.name = "ChainLocationMismatchError";
+  }
+}
+
 export class ChainSeqRegressionError extends Error {
   constructor(tenantTag: string, prior: string, current: string) {
     super(
@@ -190,9 +198,8 @@ export class ResponseTooLargeError extends Error {
 
 // --- Manifest type and schema ---
 
-type Manifest = {
+type ManifestBody = {
   $schema: string;
-  version: 1;
   issuer: "passwd-sso";
   deploymentId: string;
   anchoredAt: string;
@@ -204,6 +211,12 @@ type Manifest = {
     epoch: number;
   }>;
 };
+
+/**
+ * Version 1 is bound to no location; version 2 carries `chainLocation`, a
+ * hash naming the destination the manifest was published to.
+ */
+type Manifest = (ManifestBody & { version: 1 }) | (ManifestBody & { version: 2; chainLocation: string });
 
 const tenantEntrySchema = z.object({
   tenantTag: z.string().regex(/^[0-9a-f]{64}$/),
@@ -219,15 +232,22 @@ function isIsoTimestamp(value: string): boolean {
   return Number.isFinite(ms) && new Date(ms).toISOString() === value;
 }
 
-const manifestSchema = z.object({
+const manifestBodyShape = {
   $schema: z.string(),
-  version: z.literal(1),
   issuer: z.literal("passwd-sso"),
   deploymentId: z.string(),
   anchoredAt: z.string().refine(isIsoTimestamp),
   previousManifest: z.object({ uri: z.string(), sha256: z.string() }).nullable(),
   tenants: z.array(tenantEntrySchema),
-});
+};
+
+// A version 1 payload that carries a chainLocation parses without it, and
+// verifyJws then refuses it: the payload is not the canonical form of what
+// was parsed.
+const manifestSchema = z.discriminatedUnion("version", [
+  z.object({ ...manifestBodyShape, version: z.literal(1) }),
+  z.object({ ...manifestBodyShape, version: z.literal(2), chainLocation: z.string().regex(/^[0-9a-f]{64}$/) }),
+]);
 
 // --- SubjectPublicKeyInfo prefix for Ed25519 (RFC 8410) ---
 
@@ -626,6 +646,15 @@ export async function auditVerifyCommand(args: AuditVerifyArgs): Promise<void> {
 
     // Verify prior manifest signature too
     const priorManifest = verifyJws(priorJws, priorKeyBytes);
+
+    // One chain lives at one location. A version 1 prior under a version 2
+    // current is the upgrade; the reverse is a downgrade no publisher makes.
+    if (priorManifest.version === 2) {
+      const currentLocation = manifest.version === 2 ? manifest.chainLocation : "none (version 1)";
+      if (currentLocation !== priorManifest.chainLocation) {
+        throw new ChainLocationMismatchError(priorManifest.chainLocation, currentLocation);
+      }
+    }
 
     // Check prior hash reference
     const priorCanon = canonicalize(priorManifest);

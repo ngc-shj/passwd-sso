@@ -277,3 +277,24 @@ guard is required for convergence.
 Follow-ups recorded (to be filed with the PR): SC1 (bucket-policy `s3:if-none-match`), S-7
 (bind a manifest to its chain location, manifest v2), D57 (creator-side comparison on a
 failed commit).
+
+---
+
+# Addendum — the recorded follow-ups are implemented (2026-11-15)
+
+By the user's decision nothing recorded above is left for a later change. Superseded:
+
+- **S-7 (round 1, Accepted)** — resolved by contract C10: manifest format v2 carries a signed
+  `chainLocation`; a manifest of another location fails closed; a v1 manifest is accepted
+  only while the published high-water vouches for it. The Anti-Deferral entry and its TODO
+  no longer apply.
+- **Round 3's "not done here" (creator-side comparison) and D57** — resolved by C11.
+- **Round 4's observation** — closed for the creating run by C11; what remains is D67.
+- **SC1** — resolved by C9 (bucket policy). **SC3** — resolved by C12 (migration).
+- **"Follow-ups recorded (to be filed with the PR)"** — none are filed.
+
+Environment Verification Report, added row: C9's live effect on real S3 —
+`blocked-deferred`, E1; static tests + `terraform validate` in CI; worst case
+`s3-object-lock_UPLOAD_FAILED:AccessDenied` on every create, alarmed.
+
+These contracts are reviewed in the rounds that follow.

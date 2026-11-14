@@ -7,6 +7,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { AnchorDestination } from "@/lib/audit/anchor-destinations/destination";
 import { ANCHOR_ARTIFACT_CONTENT_TYPE, buildManifestArtifactKey, publicKeyArtifactKey } from "@/lib/audit/anchor-artifact-keys";
+import { IN_MEMORY_LOCATION } from "@/lib/audit/anchor-destinations/in-memory-destination";
 import {
   buildManifest,
   canonicalize,
@@ -15,6 +16,8 @@ import {
   sign,
   type AnchorRow,
   type Manifest,
+  type ManifestV1,
+  type ManifestV2,
 } from "@/lib/audit/anchor-manifest";
 
 export const ANCHOR_CONTENT_TYPE = ANCHOR_ARTIFACT_CONTENT_TYPE.JWS;
@@ -34,7 +37,10 @@ export type SignedManifest = {
 /**
  * A manifest for `boundary` signed by `signingKey`, at the key that signer's
  * publisher would store it under. `artifactKey` overrides the key alone, for
- * an object stored under a name its content does not match.
+ * an object stored under a name its content does not match. `location` is
+ * the destination's the manifest is bound to (default: every in-memory
+ * destination's). `version: 1` gives the format earlier releases wrote,
+ * which names no location.
  */
 export function signedManifest(opts: {
   signingKey: Buffer;
@@ -44,14 +50,18 @@ export function signedManifest(opts: {
   tenants?: AnchorRow[];
   previousManifest?: { uri: string; sha256: string } | null;
   artifactKey?: string;
+  location?: string;
+  version?: Manifest["version"];
 }): SignedManifest {
-  const manifest = buildManifest({
+  const current = buildManifest({
     tenants: opts.tenants ?? [],
     deploymentId: opts.deploymentId ?? "planted-deployment",
     anchoredAt: opts.boundary,
     previousManifest: opts.previousManifest ?? null,
     tagSecret: opts.tagSecret ?? randomBytes(32),
+    location: opts.location ?? IN_MEMORY_LOCATION,
   });
+  const manifest = opts.version === 1 ? legacyManifest(current) : current;
   const canonical = canonicalize(manifest);
   return {
     artifactKey: opts.artifactKey ?? buildManifestArtifactKey(opts.boundary, kidOf(opts.signingKey)),
@@ -59,6 +69,12 @@ export function signedManifest(opts: {
     manifest,
     sha256: createHash("sha256").update(canonical).digest("hex"),
   };
+}
+
+/** `manifest` as a release before format version 2 wrote it. */
+export function legacyManifest(manifest: ManifestV2): ManifestV1 {
+  const { chainLocation: _dropped, ...body } = manifest;
+  return { ...body, $schema: "https://passwd-sso.example/schemas/audit-anchor-manifest-v1.json", version: 1 };
 }
 
 export async function storeArtifact(dest: AnchorDestination, artifactKey: string, artifactBytes: Buffer): Promise<void> {
@@ -99,6 +115,7 @@ export function trackDestination(
   const signals: Array<AbortSignal | undefined> = [];
   const dest: AnchorDestination = {
     name: inner.name,
+    location: inner.location,
     create: (args) => {
       calls.push(`create:${args.artifactKey}`);
       signals.push(args.signal);

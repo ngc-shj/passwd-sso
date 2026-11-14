@@ -117,6 +117,10 @@ passwd-sso audit-verify \
   accepted only when the host is exactly `localhost`, `127.0.0.1` or `[::1]`; any other
   URL is refused before anything is fetched (`InsecureUrlError`, exit 1). Redirects are not
   followed: an answer other than 200 is an error.
+- **One chain location.** With `--prior-manifest`, a version 2 prior manifest and the
+  current one must carry the same `chainLocation`; a version 2 prior under a version 1
+  current is refused as well. Either is exit 20 (`ChainLocationMismatchError`), checked
+  before the hash link. See "Manifest format versions" below.
 - **The prior manifest's key**, in this order: the prior manifest has the same `kid` as the
   current one → the current key; else `--prior-public-key <path>`; else the archive, but
   only when the current key also came from the archive (a key you handed over with
@@ -154,13 +158,14 @@ passwd-sso audit-verify --manifest '<date>.kid-<kid>.jws' --public-key '<kid>.pu
 | 10 | InvalidAlgorithmError | JWS `alg` is not `EdDSA`; possible forgery attempt or wrong file format. |
 | 11 | InvalidTypError | JWS `typ` does not match `passwd-sso.audit-anchor.v1`; wrong artifact type. |
 | 12 | InvalidSignatureError | Signature verification failed; manifest may have been tampered with after signing. |
-| 13 | ManifestSchemaValidationError | Manifest JSON does not match expected schema. |
+| 13 | ManifestSchemaValidationError | Manifest JSON does not match expected schema. A CLI older than format version 2 exits 13 on every version 2 manifest: update the CLI (see "Manifest format versions"). |
 | 14 | InvalidTenantIdFormatError | `--my-tenant-id` is not canonical lower-case UUID (RFC 4122 §3). No automatic case conversion is performed. |
 | 15 | TenantNotInManifestError | Your tenant's derived tag is not present in the manifest. The tenant may not have had `audit_chain_enabled` at snapshot time. |
 | 16 | ChainBreakError | The current manifest's `previousManifest.sha256` does not match the sha256 of the supplied `--prior-manifest`. Manifests are not from the same chain or one has been replaced. |
 | 17 | ChainSeqRegressionError | A tenant's `chainSeq` decreased between prior and current manifest within the same epoch. This is a tamper signal. A tenant whose `epoch` differs between the two is not compared: the CLI prints `WARN: epoch changed for tenantTag=…` on stderr and the exit status is unchanged. Nothing in the product changes a tenant's epoch, so ask the operator about that warning (their side records it as `EPOCH_CHANGED`). |
 | 18 | InvalidTagSecretLengthError | The tag secret is not 32 bytes (64 hex chars). |
 | 19 | KidMismatchError | The JWS header's `kid` does not name the public key the signature was checked under: the wrong key file, a misfiled archive entry, or a manifest relabelled with another `kid`. The signature is not evaluated. |
+| 20 | ChainLocationMismatchError | With `--prior-manifest`: the prior manifest is version 2 and the current one carries another `chainLocation`, or is version 1. The two are not of one chain location: a manifest copied from another prefix, repository or directory, a manifest of a chain that was restarted elsewhere, or a downgrade no publisher makes. A version 1 prior under a version 2 current is the upgrade and passes. |
 | 1 | Unexpected error | All other errors: I/O, a fetch that did not answer 200 (a redirect is not followed), took longer than 30 seconds or returned more than 8 MiB, a `kid` of the wrong shape, a public key that is not 64 lower-case hex characters, a URL that is not `https`, a prior manifest under another key with no `--prior-public-key`. See stderr for details. |
 
 **Note on exit code 14**: the CLI does NOT silently lowercase a provided UUID. If you copy
@@ -265,6 +270,57 @@ first time, and from then on accept a new key only across a rotation you can fol
 
 ---
 
+## Manifest format versions
+
+A manifest's payload carries `"version"`. Both versions verify; the publisher writes
+version 2 only.
+
+| Version | `$schema` ends in | Written by | `chainLocation` |
+|---|---|---|---|
+| 1 | `audit-anchor-manifest-v1.json` | releases before format version 2 | absent |
+| 2 | `audit-anchor-manifest-v2.json` | this release and later | required: 64 lower-case hex characters |
+
+`chainLocation` names the place the chain is published to, without disclosing it. It is the
+SHA-256 of the label `audit-anchor-chain-location-v1`, a null byte, and the location of the
+deployment's **primary** destination:
+
+| Primary destination | Location |
+|---|---|
+| S3 | `s3://<bucket>/<prefix>`, or `s3://<bucket>` when no prefix is configured |
+| GitHub Releases | `github://<owner>/<repo>` |
+| Filesystem | `file://<base path, made absolute>` |
+
+An operator who tells you the location lets you check the value:
+
+```bash
+printf 'audit-anchor-chain-location-v1\0s3://<bucket>/<prefix>' | sha256sum
+```
+
+**What it proves.** Every version 2 manifest of one chain carries the same value, and it is
+signed with the rest of the payload. A manifest moved from another chain — another prefix
+of the same bucket, another repository, the chain a restart abandoned — carries another
+value however authentic its signature. The publisher refuses to chain to or adopt such a
+manifest, and `audit-verify --prior-manifest` exits 20 on the pair.
+
+**What it does not prove.**
+
+- It is a hash of a name, not a secret and not a third party's attestation: whoever holds
+  the signing key can sign any value. It binds a manifest to a location only against a
+  party who can move objects and cannot sign.
+- It does not tell you where you downloaded the manifest from. A secondary destination
+  holds the primary's bytes, so a manifest fetched from a GitHub mirror of an S3 primary
+  carries the S3 location's value.
+- A version 1 manifest carries none. The first version 2 manifest chains to the last
+  version 1 one (`audit-verify` passes that pair); from there on a version 1 manifest
+  that follows a version 2 one is a downgrade and exits 20.
+
+**Breaking change for kit holders.** A `passwd-sso` CLI from before format version 2
+refuses every version 2 manifest with exit 13, because its schema knows version 1 only.
+Update the CLI before verifying a manifest published after your operator's upgrade. The
+openssl recipe checks the signature alone and reads both versions.
+
+---
+
 ## Key rotation
 
 A rotation is a cutover: the last manifest under the old key is followed by the first under
@@ -281,7 +337,9 @@ under both. To follow it:
    its own: either a chain restart, which the operator publishes a `chain-restart`
    statement for (below), or a manifest that does not continue the one you hold. Treat
    a rotation whose first new-key manifest gives this warning as not continuous until a
-   restart statement accounts for it.
+   restart statement accounts for it. A restart into a new location is reported more
+   plainly when both manifests are version 2: they carry different `chainLocation`
+   values and the command exits 20.
 2. Read the operator's rotation statement (below), which the **old** key signed and which
    names the new public key in full.
 
@@ -345,9 +403,13 @@ and a retry — after a failed database commit, a crash, a restart — finds the
 and adopts it instead of writing again. A manifest key therefore has exactly one version,
 and so do the archived public keys and the statements.
 
-More than one version of a key is a write outside the protocol. On the anchors bucket it is
-detectable by an operator running `list-object-versions`; nothing runs it automatically, and
-a plain download returns only the latest version:
+More than one version of a key is a write outside the protocol. On the anchors bucket the
+Terraform stack creates, S3 itself refuses it: the bucket policy denies every `PutObject`
+that creates an object without `If-None-Match` (`DenyUnconditionalPut`), for every
+principal, so a second version cannot be written while that policy stands. On an S3 bucket
+without that statement the rule is kept by the publisher alone. Either way an operator can
+check it with `list-object-versions`; nothing runs that automatically, and a plain download
+returns only the latest version:
 
 ```bash
 # Operator: every version and delete marker under the prefix
@@ -393,15 +455,16 @@ The rules, per key:
 - **A delete marker on an anchor key** is a tamper signal. The bucket policy refuses deletes to
   everyone, so one means the policy was replaced.
 
-**Residual.** The one-version rule is kept by the publisher, not by the bucket: the policy
-lets the publisher's task role PUT a manifest key without the create-only condition, so
-anyone holding that role's credentials can add a version. Without the signing key that
-version does not verify — a verifier who downloads it gets a failure, and when it is the
-newest key the publisher itself stops, since it reads that key before every publish — but
-the versions stay, and only the listing above shows them. Enforcing the condition in the bucket policy is tracked
-as a follow-up (SC1 of `docs/archive/review/audit-anchor-hardening-plan.md`). On GitHub
-Releases and on a filesystem there are no versions to list: a writer there can replace or
-remove an object, and the chain of `previousManifest` hashes is what shows it.
+**Residual.** On the Terraform bucket the one-version rule holds for as long as the bucket
+policy does: whoever can replace the policy (the account root always can) can lift it, and
+a change to the policy is alarmed. A key written before the upgrade keeps the versions it
+had. On an S3 bucket without `DenyUnconditionalPut`, anyone holding the publisher's
+credentials can add a version to a key; without the signing key that version does not
+verify — a verifier who downloads it gets a failure, and when it is the newest key the
+publisher itself stops, since it reads that key before every publish — but the versions
+stay, and only the listing above shows them. On GitHub Releases and on a filesystem there
+are no versions to list: a writer there can replace or remove an object, and the chain of
+`previousManifest` hashes is what shows it.
 
 ---
 

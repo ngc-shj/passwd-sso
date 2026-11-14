@@ -52,8 +52,14 @@ function httpStatusOf(err: unknown): number | undefined {
   return (err as { $metadata?: { httpStatusCode?: number } } | undefined)?.$metadata?.httpStatusCode;
 }
 
+/** The chain location of a bucket and prefix; with no prefix, the bucket alone. */
+export function s3Location(bucket: string, prefix: string): string {
+  return prefix ? `s3://${bucket}/${prefix}` : `s3://${bucket}`;
+}
+
 export class S3Destination implements AnchorDestination {
   readonly name = "s3-object-lock";
+  readonly location: string;
 
   private readonly bucket: string;
   private readonly prefix: string;
@@ -64,6 +70,7 @@ export class S3Destination implements AnchorDestination {
   constructor(config: S3Config) {
     this.bucket = config.bucket;
     this.prefix = config.prefix;
+    this.location = s3Location(config.bucket, config.prefix);
     this.retentionYears = config.retentionYears ?? AUDIT_ANCHOR_RETENTION_YEARS;
     this.listPageSize = config.listPageSize;
     this.client = new S3Client({

@@ -26,7 +26,7 @@ vi.mock("@aws-sdk/client-s3", () => ({
   },
 }));
 
-import { S3Destination, joinS3Key, s3ListPrefix } from "./s3-destination";
+import { S3Destination, joinS3Key, s3ListPrefix, s3Location } from "./s3-destination";
 import { ArtifactTooLargeError } from "./destination";
 import { ANCHOR_ARTIFACT_CONTENT_TYPE, InvalidArtifactKeyError } from "@/lib/audit/anchor-artifact-keys";
 import { AUDIT_ANCHOR_ARTIFACT_MAX_BYTES, AUDIT_ANCHOR_RETENTION_YEARS } from "@/lib/constants/audit/audit";
@@ -367,6 +367,23 @@ describe("S3Destination.list", () => {
     sendSpy.mockResolvedValueOnce({});
 
     expect(await new S3Destination({ bucket: "bucket", prefix: "anchors" }).list()).toEqual([]);
+  });
+});
+
+describe("s3Location", () => {
+  it("names the bucket and the prefix, and the bucket alone for an empty prefix", () => {
+    expect(s3Location("my-bucket", "audit-anchors")).toBe("s3://my-bucket/audit-anchors");
+    expect(s3Location("my-bucket", "env/prod.anchors")).toBe("s3://my-bucket/env/prod.anchors");
+    expect(s3Location("my-bucket", "")).toBe("s3://my-bucket");
+  });
+
+  it("is the destination's location, apart for two prefixes of one bucket", () => {
+    const one = new S3Destination({ bucket: "my-bucket", prefix: "audit-anchors" });
+    const other = new S3Destination({ bucket: "my-bucket", prefix: "audit-anchors-2" });
+
+    expect(one.location).toBe("s3://my-bucket/audit-anchors");
+    expect(other.location).toBe("s3://my-bucket/audit-anchors-2");
+    expect(new S3Destination({ bucket: "my-bucket", prefix: "" }).location).toBe("s3://my-bucket");
   });
 });
 

@@ -17,6 +17,7 @@ import * as auditVerify from "../../commands/audit-verify.js";
 const {
   auditVerifyCommand,
   ChainBreakError,
+  ChainLocationMismatchError,
   InsecureUrlError,
   InvalidPublicKeyError,
   KidMismatchError,
@@ -26,6 +27,8 @@ const {
 type Vectors = {
   key: { seedHex: string; publicKeyHex: string; kid: string };
   manifest: Record<string, unknown>;
+  manifestV2: Record<string, unknown> & { chainLocation: string };
+  chainLocations: Array<{ location: string; chainLocation: string }>;
   jws: Array<{ name: string; jws: string; expect: string }>;
   publicKeyTexts: Array<{ name: string; text: string; valid: boolean }>;
   urls: Array<{ name: string; url: string; allowed: boolean }>;
@@ -380,6 +383,73 @@ describe("audit-verify — the prior manifest's key", () => {
         priorPublicKey: file("retired.pub", retired.publicKeyHex),
       }),
     ).rejects.toBeInstanceOf(ChainBreakError);
+  });
+});
+
+describe("audit-verify — the chain location of the prior and the current manifest", () => {
+  const key = keyFor(0x42);
+  const [here, elsewhere] = VECTORS.chainLocations.map((v) => v.chainLocation);
+  const v1 = VECTORS.manifest;
+  const v2 = (chainLocation: string) => ({ ...VECTORS.manifestV2, chainLocation });
+
+  /** Verify `current`, correctly chained to `prior` dated the day before: only their locations can differ. */
+  async function verifyPair(prior: Record<string, unknown>, current: Record<string, unknown>): Promise<void> {
+    const priorBody = { ...prior, anchoredAt: "2026-01-14T00:05:00.000Z" };
+    const currentBody = {
+      ...current,
+      previousManifest: {
+        uri: "s3-object-lock://prior.jws",
+        sha256: createHash("sha256").update(canonical(priorBody)).digest("hex"),
+      },
+    };
+    await auditVerifyCommand({
+      manifest: file("m.jws", signManifest(currentBody, key)),
+      publicKey: file("key.pub", key.publicKeyHex),
+      priorManifest: file("prior.jws", signManifest(priorBody, key)),
+    });
+  }
+
+  it("the vectors name two different locations", () => {
+    expect(here).toMatch(/^[0-9a-f]{64}$/);
+    expect(elsewhere).toMatch(/^[0-9a-f]{64}$/);
+    expect(elsewhere).not.toBe(here);
+  });
+
+  it.each<[string, Record<string, unknown>, Record<string, unknown>]>([
+    ["both version 2, of one location", v2(here), v2(here)],
+    ["a version 1 prior under a version 2 current: the upgrade", v1, v2(here)],
+    ["both version 1", v1, v1],
+  ])("%s passes", async (_label, prior, current) => {
+    await verifyPair(prior, current);
+
+    expect(printed()).toContain("PASS");
+    expect(warned()).toBe("");
+  });
+
+  it("both version 2, of different locations, is a location mismatch naming both", async () => {
+    const error = await verifyPair(v2(elsewhere), v2(here)).then(
+      () => null,
+      (err: unknown) => err as Error,
+    );
+
+    expect(error).toBeInstanceOf(ChainLocationMismatchError);
+    expect(error?.message).toContain(`prior=${elsewhere}`);
+    expect(error?.message).toContain(`current=${here}`);
+    expect(printed()).not.toContain("PASS");
+  });
+
+  it("a version 2 prior under a version 1 current, a downgrade, is the same error", async () => {
+    await expect(verifyPair(v2(here), v1)).rejects.toBeInstanceOf(ChainLocationMismatchError);
+    expect(printed()).not.toContain("PASS");
+  });
+
+  it("a current manifest alone is not held to any location", async () => {
+    await auditVerifyCommand({
+      manifest: file("m.jws", signManifest(v2(elsewhere), key)),
+      publicKey: file("key.pub", key.publicKeyHex),
+    });
+
+    expect(printed()).toContain("PASS");
   });
 });
 

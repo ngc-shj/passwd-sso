@@ -3,6 +3,12 @@ import { AUDIT_ANCHOR_ARTIFACT_MAX_BYTES } from "@/lib/constants/audit/audit";
 export interface AnchorDestination {
   /** Stable identifier for logs / audit metadata */
   readonly name: string;
+  /**
+   * Where this destination stores a chain, as a URI naming the store and the
+   * place in it. A manifest carries its hash (`chainLocationFor`), so one
+   * copied to another place is not taken for that place's own.
+   */
+  readonly location: string;
   /** Create-only. "exists": the key is already held by a stored object; nothing was written. */
   create(args: {
     artifactBytes: Buffer;

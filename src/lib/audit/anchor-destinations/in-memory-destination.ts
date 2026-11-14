@@ -6,10 +6,16 @@ import { assertArtifactSize, type AnchorDestination } from "./destination";
  * ones keep (create-only, key shapes, the size bound), so a test built on it
  * exercises the protocol and not a mock's canned answers.
  */
+export const IN_MEMORY_LOCATION = "memory://anchors";
+
 export class InMemoryDestination implements AnchorDestination {
   private readonly objects = new Map<string, Buffer>();
 
-  constructor(readonly name = "in-memory") {}
+  /** Every instance is the one location unless a test gives it another. */
+  constructor(
+    readonly name = "in-memory",
+    readonly location = IN_MEMORY_LOCATION,
+  ) {}
 
   async create(args: {
     artifactBytes: Buffer;

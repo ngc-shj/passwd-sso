@@ -7,7 +7,7 @@ Run on 2026-11-14 (JST) in the branch's worktree, against the worktree's own dat
 logs (checked by grepping the logs and statements for both seeds: 0 files).
 
 Runbook under test: `docs/operations/audit-anchor-rotation-runbook.md`, blob
-`ed08a85298a47c933557f5ee4ba0f90de2b31eae` (`git hash-object` of the file committed with this
+`cb73bf56b0c5eaaf9fac21316f0c209ba673b37d` (`git hash-object` of the file committed with this
 record). Its commands were extracted with
 
 ```
@@ -15,7 +15,7 @@ awk '/^[[:space:]]*```(bash|sql)/{f=1; next} /^[[:space:]]*```/{f=0} f' docs/ope
 grep -noE '`npm run [a-z:-]+[^`]*`' docs/operations/audit-anchor-rotation-runbook.md
 ```
 
-71 lines inside `bash`/`sql` fences that are neither blank nor a `#` / `-- ` comment (the
+81 lines inside `bash`/`sql` fences that are neither blank nor a `#` / `-- ` comment (the
 awk output piped through `grep -cvE '^\s*(#|-- |$)'`; continuation lines count), and one inline
 `npm run` span — so an empty extraction would show as 0, not as a clean table. The runs in
 sections 2 and 3 were made before the code-review fixes; the fixes changed two output strings,
@@ -73,6 +73,8 @@ behaving as documented. The publisher role's column grants (`last_published_at`,
 | `npm run generate:audit-anchor-tag-secret -- --out <file>` (inline) | local | exit 0; file mode 600, 65 bytes |
 | `(umask 077; aws secretsmanager get-secret-value … \| jq -r '.AUDIT_ANCHOR_SIGNING_KEY' > old-key.hex)` | local half only | `umask 077` + `jq -r` on a JSON document of that shape gives a mode-600, 65-byte file that `audit-anchor-kid` accepts (exit 0). The `aws secretsmanager` half: `blocked-deferred (E1)` |
 | `export …=$(terraform output -raw audit_anchors_bucket_name)` / `audit_anchor_s3_prefix` / `app_secrets_arn` | not run | `blocked-deferred (E1)`. Static: the three output names exist in `infra/terraform/outputs.tf` |
+| SQL: record a version 1 manifest as settled (`LEGACY_MANIFEST_UNSETTLED` reset) | local, rolled back | parses and runs under the bypass GUCs; matched 0 rows on the empty worktree database (syntax and admission only) |
+| The bucket policy's `DenyUnconditionalPut` (C9) on real S3 | not run | `blocked-deferred (E1)` — MinIO evaluates no bucket policy here. Static: `audit-anchor-wiring.test.ts`, `audit-anchor-key-contract.test.ts`. Worst case if the statement is wrong: every create is refused (`s3-object-lock_UPLOAD_FAILED:AccessDenied`), alarmed; nothing is published wrongly |
 | `aws s3api head-object …` | not run | `blocked-deferred (E1)` — real AWS. Local equivalent: the archived `.pub` is 65 bytes (64 hex + newline), 1 version |
 | `aws s3api get-object-retention …` | not run | `blocked-deferred (E1)`. COMPLIANCE retention on `create` is asserted on MinIO by `audit-anchor-s3-destination.integration.test.ts` |
 | `aws s3api list-object-versions …` (two places) | not run | `blocked-deferred (E1)`. Local equivalent via the SDK: every key in section 1 has 1 version, 0 delete markers |

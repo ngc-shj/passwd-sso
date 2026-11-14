@@ -226,6 +226,8 @@ const FAIL_CLOSED_SCENARIOS = [
   "row_d1_last_published_ahead",
   "row_d2_destination_behind",
   "row_e_retired_key",
+  "foreign_location",
+  "legacy_unsettled",
   "mirror_diverged",
 ];
 
@@ -274,6 +276,21 @@ beforeAll(async () => {
   );
   await archivePublicKey(retired, publicKeyForSigningKey(OTHER_KEY));
   lines.row_e_retired_key = await cadence(makeDb(), { destinations: [retired] });
+  // The latest manifest is of another chain location, or of the format that
+  // names none and that the database does not vouch for. Vouched for, the same
+  // version 1 manifest is chained to.
+  const recordedPrevious = () => makeDb({ highWater: new Date(clockInto(PREV_BOUNDARY)()) });
+  const legacy = () =>
+    signedManifest({ signingKey: SIGNING_KEY, boundary: PREV_BOUNDARY, deploymentId: DEPLOYMENT_ID, tagSecret: TAG_SECRET, version: 1 });
+  lines.foreign_location = await cadence(recordedPrevious(), {
+    destinations: [
+      await primaryHolding(
+        signedManifest({ signingKey: SIGNING_KEY, boundary: PREV_BOUNDARY, deploymentId: DEPLOYMENT_ID, location: "memory://another-chain" }),
+      ),
+    ],
+  });
+  lines.legacy_unsettled = await cadence(makeDb(), { destinations: [await primaryHolding(legacy())] });
+  lines.upgraded_from_version_1 = await cadence(recordedPrevious(), { destinations: [await primaryHolding(legacy())] });
   const divergedMirror = new InMemoryDestination("filesystem");
   await storeArtifact(divergedMirror, buildManifestArtifactKey(BOUNDARY, kidOf(SIGNING_KEY)), Buffer.from("other bytes"));
   lines.mirror_diverged = await cadence(makeDb(), { destinations: [await primary(), divergedMirror] });
@@ -372,8 +389,11 @@ describe("publisher log lines vs their metric filters", () => {
       row_d1_last_published_ahead: [["failed", "CADENCE_FAILED:LAST_PUBLISHED_AHEAD_OF_CLOCK"]],
       row_d2_destination_behind: [["failed", "CADENCE_FAILED:DESTINATION_BEHIND_DATABASE"]],
       row_e_retired_key: [["failed", "CADENCE_FAILED:LATEST_UNDER_RETIRED_KEY"]],
+      foreign_location: [["failed", "CADENCE_FAILED:PUBLISHED_OBJECT_FOREIGN_LOCATION"]],
+      legacy_unsettled: [["failed", "CADENCE_FAILED:LEGACY_MANIFEST_UNSETTLED"]],
       mirror_diverged: [["failed", "filesystem_MIRROR_DIVERGED"]],
     });
+    expect(cadenceLine("upgraded_from_version_1")).toEqual([expect.objectContaining({ kind: "published", adopted: false })]);
     expect(kinds("upload_failed")).toEqual(["failed"]);
     expect(kinds("cap_reached")).toEqual(["upload_cap_reached"]);
     expect(kinds("lock_held")).toEqual(["lock_held"]);
@@ -386,6 +406,7 @@ describe("publisher log lines vs their metric filters", () => {
       "enabled_no_anchor_row",
       "never_enabled",
       "published",
+      "upgraded_from_version_1",
     ]);
   });
 

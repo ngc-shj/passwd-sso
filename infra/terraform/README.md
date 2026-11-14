@@ -502,7 +502,14 @@ everyone; so are `s3:ReplicateObject`, `s3:ReplicateDelete` and
 this bucket is never a replication destination); `s3:PutObjectRetention` is refused to all but those two roles;
 `s3:PutLifecycleConfiguration` is refused on the bucket; a `PutObject` without
 `x-amz-object-lock-mode: COMPLIANCE` (header absent included), with a retention
-past the cap, or with SSE other than `AES256` is refused. The bucket has Object
+past the cap, or with SSE other than `AES256` is refused; and so is, for every
+principal, a `PutObject` that creates an object without `If-None-Match`
+(`DenyUnconditionalPut`: `Null s3:if-none-match` and `Bool
+s3:ObjectCreationOperation`), so a stored key never gets a second version.
+Every writer here sends `If-None-Match: *`; a PUT made by hand must too
+(`aws s3api put-object --if-none-match '*'`), a multipart upload's completing
+request must carry it, and `CopyObject` into the bucket, which takes no such
+header, no longer works. The bucket has Object
 Lock (always, independent of `enable_s3_object_lock`), versioning and SSE-S3
 (never `s3_kms_key_arn`: a CMK scheduled for deletion would make locked evidence
 unreadable), and `prevent_destroy`. The policy holds only while nobody replaces
@@ -558,8 +565,14 @@ clone or a restored copy generates a new one, follows the rotation runbook's
 "DEPLOYMENT_ID change recovery", and gets its own prefix or bucket. See
 `docs/operations/deployment.md` "`DEPLOYMENT_ID`".
 
-**Upgrade order.** The read grant above is new, and it is the only resource
-change of the release that introduced it. Apply Terraform, then run the new
+**Upgrade order.** The read grant above and the bucket policy's
+`DenyUnconditionalPut` statement are new, and they are the only resource
+changes of the release that introduced them; one apply brings both (and, as a
+change to the bucket policy, fires the bucket-config-change rule once). A
+publisher of the release before sends its PUT without `If-None-Match`, so from
+that apply until it is replaced its upload is refused
+(`s3-object-lock_UPLOAD_FAILED:AccessDenied`): nothing is published wrongly,
+and the new image publishes the boundary. Apply Terraform, then run the new
 image: `scripts/deploy.sh` does both in that order (its `terraform apply`
 precedes the service update). A publisher on the new image without the grant
 publishes nothing — every run fails closed with

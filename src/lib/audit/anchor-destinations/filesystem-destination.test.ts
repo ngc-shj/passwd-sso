@@ -39,6 +39,13 @@ describe("FilesystemDestination", () => {
     expect(new FilesystemDestination({ basePath: "/var/anchors" }).name).toBe("filesystem");
   });
 
+  it("names the base path, made absolute, as its location", () => {
+    expect(new FilesystemDestination({ basePath: "/var/anchors" }).location).toBe("file:///var/anchors");
+    expect(new FilesystemDestination({ basePath: "/var/anchors/../anchors/" }).location).toBe("file:///var/anchors");
+    expect(new FilesystemDestination({ basePath: "anchors" }).location).toBe(`file://${path.resolve("anchors")}`);
+    expect(new FilesystemDestination({ basePath: "/var/other" }).location).not.toBe("file:///var/anchors");
+  });
+
   it("creates the base path recursively and stores the file there with mode 0o644", async () => {
     const basePath = path.join(await tempDir(), "nested", "anchors");
     const key = manifestKeyFor("2026-05-02");
