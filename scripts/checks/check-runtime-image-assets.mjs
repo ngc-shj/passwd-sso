@@ -63,7 +63,11 @@ const ROOT = process.env.RUNTIME_IMAGE_ASSETS_ROOT ?? REPO_ROOT;
  * `infra/terraform/ecs.tf`'s task command and the Dockerfile's own comments, not
  * anything derivable from `scripts/`.
  */
-const RUNTIME_SCRIPTS = ["scripts/audit-db-grants.mjs", "scripts/bootstrap-rds-roles.mjs"];
+const RUNTIME_SCRIPTS = [
+  "scripts/audit-db-grants.mjs",
+  "scripts/bootstrap-rds-roles.mjs",
+  "scripts/rls-enforce-preflight.mjs",
+];
 
 /** Data directories whose files are runtime assets rather than build inputs. */
 const ASSET_DIR_RE = /(^|\/)scripts\/(checks|lib)\//;

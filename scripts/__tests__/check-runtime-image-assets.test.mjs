@@ -50,15 +50,19 @@ function dockerfile(paths, { before = [], pairs = [] } = {}) {
   // stage-boundary case is vacuous and its mutation goes undetected.
   for (const p of before) lines.push(`COPY --from=deps /app/${p} ./${p}`);
   lines.push("FROM node:22-alpine AS runner", "WORKDIR /app");
-  for (const p of paths) lines.push(`COPY --from=builder /app/${p} ./${p}`);
+  for (const p of [...paths, PREFLIGHT]) lines.push(`COPY --from=builder /app/${p} ./${p}`);
   for (const [src, dest] of pairs) lines.push(`COPY --from=builder /app/${src} ${dest}`);
   return `${lines.join("\n")}\n`;
 }
 
-/** The two scripts the gate names, with the given bodies. */
+// The third runtime script; no fixture reads an asset through it.
+const PREFLIGHT = "scripts/rls-enforce-preflight.mjs";
+
+/** The scripts the gate names, with the given bodies. */
 function writeRuntimeScripts({ audit = "", bootstrap = "" } = {}) {
   write("scripts/audit-db-grants.mjs", audit);
   write("scripts/bootstrap-rds-roles.mjs", bootstrap);
+  write(PREFLIGHT, "");
 }
 
 beforeEach(() => {
