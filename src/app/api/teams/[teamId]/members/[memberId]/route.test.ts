@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaTeamMember, mockPrismaTeamMemberKey, mockPrismaScimExternalMapping, mockTransaction, mockTeamLockQuery, mockRequireTeamPermission, mockIsRoleAbove, TeamAuthError, mockWithTeamTenantRls, mockInvalidateUserSessions, mockLogger, mockLogAudit, mockBuildTeamMemberDisplayItems, mockRequireRecentSession, mockTenantMemberFindMany, mockTenantMemberDepartureFindMany } = vi.hoisted(() => {
+const { mockAuth, mockPrismaTeamMember, mockPrismaTeamMemberKey, mockPrismaScimExternalMapping, mockTransaction, mockTeamLockQuery, mockRequireTeamPermission, mockIsRoleAbove, TeamAuthError, mockWithTeamTenantRls, mockInvalidateUserSessions, mockLogger, mockLogAudit, mockBuildTeamMemberDisplayItems, mockRequireRecentSession, mockTenantMemberFindMany, mockTenantMemberDepartureFindMany, mockExecuteRaw } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -34,6 +34,8 @@ const { mockAuth, mockPrismaTeamMember, mockPrismaTeamMemberKey, mockPrismaScimE
     mockTransaction: vi.fn(),
     // The removal's team lock (SELECT id FROM teams ... FOR SHARE).
     mockTeamLockQuery: vi.fn(),
+    // The advisory locks (pg_advisory_xact_lock) and lock_timeout set/restore.
+    mockExecuteRaw: vi.fn(),
     mockRequireTeamPermission: vi.fn(),
     mockIsRoleAbove: vi.fn(),
     TeamAuthError: _TeamAuthError,
@@ -42,7 +44,7 @@ const { mockAuth, mockPrismaTeamMember, mockPrismaTeamMemberKey, mockPrismaScimE
       fn("tenant-1", {
         $queryRaw: mockTeamLockQuery,
         // set / restore lock_timeout around the team lock.
-        $executeRaw: vi.fn(),
+        $executeRaw: mockExecuteRaw,
         teamMember: mockPrismaTeamMember,
         teamMemberKey: mockPrismaTeamMemberKey,
         tenantMember: { findMany: mockTenantMemberFindMany },
@@ -435,10 +437,13 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
       select: { role: true, admittedAt: true, createdAt: true },
     });
     const calls = lockQueryCalls(mockTeamLockQuery);
-    const actorRow = calls.find((c) => c.sql.includes("FROM tenant_members"))!;
+    const tenantRowLocks = calls.filter((c) => c.sql.includes("FROM tenant_members"));
     const teamLock = calls.find((c) => c.sql.includes("FROM teams"))!;
-    // Only the actor's tenant row is locked; the target's is read unlocked, after the team lock.
-    expect(actorRow.values).toEqual(["tenant-1", ["test-user-id"]]);
+    // Only the actor's tenant row is locked (row or advisory): a lock on the
+    // target serialises the change behind any SCIM transaction on that user.
+    expect(tenantRowLocks.map((c) => c.values)).toEqual([["tenant-1", ["test-user-id"]]]);
+    const actorRow = tenantRowLocks[0];
+    expect(JSON.stringify(mockExecuteRaw.mock.calls)).not.toContain("target-user");
     expect(actorRow.order).toBeLessThan(teamLock.order);
     expect(teamLock.order).toBeLessThan(mockPrismaTeamMember.findFirst.mock.invocationCallOrder[0]);
     expect(mockTenantMemberFindMany).toHaveBeenCalledWith({

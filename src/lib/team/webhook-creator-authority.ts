@@ -29,8 +29,8 @@ export function webhookCreatorAuthorized(
 
 /**
  * The verdict per webhook id for one team's webhooks, from one read of their
- * creators' memberships. The worker skips `false`; the webhooks GET shows it as
- * paused — one lookup, so the two cannot disagree.
+ * creators' memberships. The worker delivers only on `true` or "legacy"; the
+ * webhooks GET shows `false` as paused — one lookup, so the two cannot disagree.
  */
 export async function webhookCreatorVerdicts(
   tx: Pick<Prisma.TransactionClient, "teamMember">,

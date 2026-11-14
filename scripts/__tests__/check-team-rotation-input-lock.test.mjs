@@ -8,18 +8,44 @@ import { execFileSync } from "node:child_process";
 const GATE = join(dirname(fileURLToPath(import.meta.url)), "..", "checks", "check-team-rotation-input-lock.mjs");
 const SUBJECT = "src/lib/team/subject.ts";
 
-/** The exempted site, so a synthetic root keeps the exemption matched (1 member write). */
+/**
+ * The exempted sites, so a synthetic root keeps every exemption matched: 1
+ * member write, and EXEMPT_ADMISSIONS admissions and EXEMPT_GRANTS grants that
+ * run() adds to the counts a test passes.
+ */
 const EXEMPT_FILES = {
   "src/app/api/teams/[teamId]/rotate-key/route.ts": `
 export const rotate = withTenantRls(prisma, tenantId, async (tx) => {
   await tx.teamMember.updateMany({ where: { teamId }, data: { keyDistributed: false } });
+  await tx.teamMemberKey.createMany({ data: memberKeys.map((k) => ({ teamId, userId: k.userId })) });
 });
 `,
+  "src/app/api/teams/[teamId]/members/route.ts": `
+export const add = withTenantRls(prisma, tenantId, async (tx) => {
+  await tx.teamMember.update({ where: { id: existing.id }, data: { role } });
+});
+`,
+  "src/app/api/teams/invitations/accept/route.ts": `
+export const accept = withTenantRls(prisma, tenantId, async (tx) => {
+  await lockTenantRows(tx, tenantId, [userId], "share");
+  await tx.teamMember.upsert({ where, create: {}, update: { role: invitation.role } });
+});
+`,
+  "src/lib/services/scim-group-service.ts": `
+export async function applyAddOperations(tx, ids, teamId, previousRole, role) {
+  await tx.teamMember.updateManyAndReturn({ where: { id: { in: ids }, teamId, role: previousRole, deactivatedAt: null }, data: { role } });
+}
+`,
+  "src/app/api/teams/[teamId]/route.ts": `
+export const patch = withTeamTenantRls(teamId, async () => prisma.team.update({ where: { id: teamId }, data: updateData }));
+`,
 };
+const EXEMPT_ADMISSIONS = 1;
+const EXEMPT_GRANTS = 5;
 
 let root;
 
-function run({ writes = 1, tenantWrites = 0, admissions = 0 } = {}) {
+function run({ writes = 1, tenantWrites = 0, admissions = 0, grants = 0 } = {}) {
   try {
     return {
       code: 0,
@@ -30,7 +56,8 @@ function run({ writes = 1, tenantWrites = 0, admissions = 0 } = {}) {
           TEAM_ROTATION_INPUT_LOCK_ROOT: root,
           TEAM_ROTATION_INPUT_LOCK_WRITES: String(writes),
           TEAM_ROTATION_INPUT_LOCK_TENANT_WRITES: String(tenantWrites),
-          TEAM_ROTATION_INPUT_LOCK_ADMISSIONS: String(admissions),
+          TEAM_ROTATION_INPUT_LOCK_ADMISSIONS: String(admissions + EXEMPT_ADMISSIONS),
+          TEAM_ROTATION_INPUT_LOCK_GRANTS: String(grants + EXEMPT_GRANTS),
         },
         stdio: ["ignore", "pipe", "pipe"],
       }),
@@ -40,10 +67,12 @@ function run({ writes = 1, tenantWrites = 0, admissions = 0 } = {}) {
   }
 }
 
-function write(rel, body) {
+function writeFile(rel, body) {
   mkdirSync(join(root, dirname(rel)), { recursive: true });
   writeFileSync(join(root, rel), body);
 }
+
+const write = writeFile;
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "team-rotation-input-lock-"));
@@ -100,8 +129,11 @@ describe("check-team-rotation-input-lock", () => {
     });
 
     it("ignores a role-only update", () => {
-      write(SUBJECT, `export async function upd(tx) { await tx.teamMember.update({ where: { id }, data: { role: "ADMIN" } }); }`);
-      expect(run().code).toBe(0);
+      write(SUBJECT, `export async function upd(tx, rows, target) {
+  if (actorDepartedSinceAdmission(rows.get(target.userId), target.admittedAt)) return;
+  await tx.teamMember.update({ where: { id: target.id }, data: { role: "ADMIN" } });
+}`);
+      expect(run({ grants: 1 }).code).toBe(0);
     });
 
     it("covers a write through every same-file caller's lock", () => {
@@ -312,6 +344,8 @@ export const rotate = withTenantRls(prisma, tenantId, async (tx) => {
 
   describe("rule 7: SCIM admission marker", () => {
     const SERVICE = "src/lib/services/scim-group-service.ts";
+    // The service holds an exempted grant site; each cell keeps it beside its own.
+    const write = (rel, body) => writeFile(rel, rel === SERVICE ? `${EXEMPT_FILES[SERVICE]}\n${body}` : body);
     const APPROVE = "src/app/api/teams/[teamId]/members/[memberId]/approve/route.ts";
 
     it("refuses a raw INSERT of team_members in the service", () => {
@@ -452,6 +486,209 @@ export const rotate = withTenantRls(prisma, tenantId, async (tx) => {
   });
 });`);
       expect(run({ writes: 2, admissions: 1 }).code).toBe(0);
+    });
+  });
+
+  describe("rule 8: grant recipients", () => {
+    const CHECK = "if (actorDepartedSinceAdmission(rows.get(target.userId), target.admittedAt ?? target.createdAt)) return;";
+    const GRANT_KEY = /grant::src\/lib\/team\/subject\.ts::promote::/;
+
+    it("refuses an unchecked role update", () => {
+      write(SUBJECT, `export async function promote(tx, target) { await tx.teamMember.update({ where: { id: target.id }, data: { role: "ADMIN" } }); }`);
+      expectDenied(run({ grants: 1 }), /grant::src\/lib\/team\/subject\.ts::promote::teamMember\.update\b/);
+    });
+
+    it("refuses an unchecked keyDistributed: true", () => {
+      write(SUBJECT, `export async function promote(tx, target) {
+  await lockTeamsAgainstRotation(tx, [teamId]);
+  await tx.teamMember.updateMany({ where: { id: target.id, deactivatedAt: null }, data: { keyDistributed: true } });
+}`);
+      expectDenied(run({ writes: 2, grants: 1 }), /grant::src\/lib\/team\/subject\.ts::promote::teamMember\.updateMany/);
+    });
+
+    it("refuses an unchecked teamMemberKey.create", () => {
+      write(SUBJECT, `export async function promote(tx, target) { await tx.teamMemberKey.create({ data: { teamId, userId: target.userId } }); }`);
+      expectDenied(run({ grants: 1 }), /grant::src\/lib\/team\/subject\.ts::promote::teamMemberKey\.create/);
+    });
+
+    it("refuses an unchecked raw UPDATE team_members SET role", () => {
+      write(SUBJECT, "export async function promote(tx, target) { await lockTeamsAgainstRotation(tx, [teamId]); await tx.$executeRaw`UPDATE team_members SET role = 'ADMIN' WHERE id = ${target.id}::uuid`; }");
+      expectDenied(run({ writes: 2, grants: 1 }), /grant::src\/lib\/team\/subject\.ts::promote::team_members\.raw/);
+    });
+
+    it("refuses an unchecked raw INSERT INTO team_member_keys", () => {
+      write(SUBJECT, "export async function promote(tx, target) { await tx.$executeRaw`INSERT INTO team_member_keys (user_id) VALUES (${target.userId}::uuid)`; }");
+      expectDenied(run({ grants: 1 }), /grant::src\/lib\/team\/subject\.ts::promote::team_member_keys\.raw/);
+    });
+
+    it("accepts the role update after a recipient check in its function", () => {
+      write(SUBJECT, `export async function promote(tx, rows, target) {
+  ${CHECK}
+  await tx.teamMember.update({ where: { id: target.id }, data: { role: "ADMIN" } });
+}`);
+      expect(run({ grants: 1 }).code).toBe(0);
+    });
+
+    it("accepts keyDistributed: true, the key create and the raw grants after a recipient check", () => {
+      write(SUBJECT, `export async function promote(tx, rows, target) {
+  ${CHECK}
+  await lockTeamsAgainstRotation(tx, [teamId]);
+  await tx.teamMemberKey.create({ data: { teamId, userId: target.userId } });
+  await tx.teamMember.updateMany({ where: { id: target.id, deactivatedAt: null }, data: { keyDistributed: true } });
+  await tx.$executeRaw\`UPDATE team_members SET role = 'ADMIN' WHERE id = \${target.id}::uuid\`;
+}`);
+      expect(run({ writes: 3, grants: 3 }).code).toBe(0);
+    });
+
+    it("accepts a check whose declaration names the recipient (confirm-key: the member re-read by memberId)", () => {
+      write(SUBJECT, `export async function promote(tx, rows, memberId) {
+  const member = await tx.teamMember.findUnique({ where: { id: memberId } });
+  if (actorDepartedSinceAdmission(rows.get(member.userId), member.admittedAt)) return;
+  await tx.teamMember.update({ where: { id: memberId }, data: { role: "ADMIN" } });
+}`);
+      expect(run({ grants: 1 }).code).toBe(0);
+    });
+
+    it("accepts the grant through every same-file caller's check of the argument it passes", () => {
+      write(SUBJECT, `
+async function promote(tx, memberId) { await tx.teamMember.update({ where: { id: memberId }, data: { role: "ADMIN" } }); }
+export async function outer(tx, rows, target) { ${CHECK} await promote(tx, target.id); }
+`);
+      expect(run({ grants: 1 }).code).toBe(0);
+    });
+
+    it("refuses the grant when one same-file caller checks no recipient", () => {
+      write(SUBJECT, `
+async function promote(tx, memberId) { await tx.teamMember.update({ where: { id: memberId }, data: { role: "ADMIN" } }); }
+export async function outer(tx, rows, target) { ${CHECK} await promote(tx, target.id); }
+export async function bare(tx, target) { await promote(tx, target.id); }
+`);
+      expectDenied(run({ grants: 1 }), GRANT_KEY);
+    });
+
+    it("accepts a same-file helper that makes the check, called with the recipient (member PUT's targetIsLeftover)", () => {
+      write(SUBJECT, `
+async function isLeftover(tx, memberId) {
+  const locked = await tx.teamMember.findFirst({ where: { id: memberId } });
+  const rows = await readTenantRows(tx, tenantId, [locked.userId]);
+  return actorDepartedSinceAdmission(rows.get(locked.userId), locked.admittedAt);
+}
+export async function promote(tx, memberId) {
+  if (await isLeftover(tx, memberId)) return;
+  await tx.teamMember.updateMany({ where: { id: memberId, deactivatedAt: null }, data: { role: "ADMIN" } });
+}`);
+      expect(run({ grants: 1 }).code).toBe(0);
+    });
+
+    it("refuses a grant whose only check judges the acting member", () => {
+      write(SUBJECT, `export async function promote(tx, rows, target) {
+  const actor = await activeTeamAdmission(tx, teamId, session.user.id);
+  if (actorDepartedSinceAdmission(rows.get(session.user.id), actor.admittedAt)) return;
+  await tx.teamMember.update({ where: { id: target.id }, data: { role: "ADMIN" } });
+}`);
+      expectDenied(run({ grants: 1 }), GRANT_KEY);
+    });
+
+    it("refuses an activeTeamAdmission check of the actor even when not keyed by session.user.id (rotate-key)", () => {
+      write(SUBJECT, `export async function promote(tx, actorRows, userId, target) {
+  const actor = await activeTeamAdmission(tx, teamId, userId);
+  if (actorDepartedSinceAdmission(actorRows.get(userId), actor.admittedAt)) return;
+  await tx.teamMember.update({ where: { id: target.id }, data: { role: "ADMIN" } });
+}`);
+      expectDenied(run({ grants: 1 }), GRANT_KEY);
+    });
+
+    it("refuses a grant whose only check judges another member (the owner route's active-OWNER check)", () => {
+      write(SUBJECT, `export async function promote(tx, ownerRows, owners, target) {
+  if (owners.some((o) => !actorDepartedSinceAdmission(ownerRows.get(o.userId), o.admittedAt))) return;
+  await tx.teamMember.update({ where: { id: target.id }, data: { role: TEAM_ROLE.OWNER } });
+}`);
+      expectDenied(run({ grants: 1 }), GRANT_KEY);
+    });
+
+    it("refuses a self-grant whose only check is the actor's activeTeamAdmission re-read (never a recipient check)", () => {
+      write(SUBJECT, `export async function promote(tx, actorRows, userId) {
+  const actor = await activeTeamAdmission(tx, teamId, userId);
+  if (actorDepartedSinceAdmission(actorRows.get(userId), actor.admittedAt)) return;
+  await tx.teamMember.updateMany({ where: { teamId, userId }, data: { role: "ADMIN" } });
+}`);
+      expectDenied(run({ grants: 1 }), GRANT_KEY);
+    });
+
+    it("refuses a self-grant whose only check is keyed by session.user.id (never a recipient check)", () => {
+      write(SUBJECT, `export async function promote(tx, rows) {
+  const approver = await tx.teamMember.findFirst({ where: { teamId, userId: session.user.id } });
+  if (actorDepartedSinceAdmission(rows.get(session.user.id), approver.admittedAt)) return;
+  await tx.teamMember.updateMany({ where: { teamId, userId: session.user.id }, data: { role: "ADMIN" } });
+}`);
+      expectDenied(run({ grants: 1 }), GRANT_KEY);
+    });
+
+    it("does not tie an actor-row check to the target through a shared tenant-row lock", () => {
+      write(SUBJECT, `export async function promote(tx, tenantId, target) {
+  const rows = await lockTenantRows(tx, tenantId, [session.user.id, target.userId], "share");
+  const approver = await tx.teamMember.findFirst({ where: { teamId, userId: session.user.id } });
+  if (actorDepartedSinceAdmission(rows.get(approver.userId), approver.admittedAt)) return;
+  await tx.teamMember.update({ where: { id: target.id }, data: { role: "ADMIN" } });
+}`);
+      expectDenied(run({ grants: 1 }), GRANT_KEY);
+    });
+
+    it("refuses a check that comes after the grant", () => {
+      write(SUBJECT, `export async function promote(tx, rows, target) {
+  await tx.teamMember.update({ where: { id: target.id }, data: { role: "ADMIN" } });
+  ${CHECK}
+}`);
+      expectDenied(run({ grants: 1 }), GRANT_KEY);
+    });
+
+    it("does not count a literal demotion (OWNER to ADMIN), but counts the promotion", () => {
+      write(SUBJECT, `export async function demote(tx, id) {
+  await tx.teamMember.updateMany({ where: { id, role: TEAM_ROLE.OWNER }, data: { role: TEAM_ROLE.ADMIN } });
+}`);
+      expect(run().code).toBe(0);
+      write(SUBJECT, `export async function promote(tx, id) {
+  await tx.teamMember.updateMany({ where: { id, role: TEAM_ROLE.ADMIN }, data: { role: TEAM_ROLE.OWNER } });
+}`);
+      expectDenied(run({ grants: 1 }), GRANT_KEY);
+    });
+
+    it("does not count an update that reaches no active row", () => {
+      write(SUBJECT, `export async function hold(tx, ids, role) {
+  await tx.teamMember.updateMany({ where: { id: { in: ids }, deactivatedAt: { not: null } }, data: { role } });
+  await tx.teamMember.updateMany({ where: { id: { in: ids }, scimApprovalPending: true }, data: { role } });
+}`);
+      expect(run().code).toBe(0);
+    });
+
+    it("does not count keyDistributed: false", () => {
+      write(SUBJECT, `export async function clear(tx, id) {
+  await lockTeamsAgainstRotation(tx, [teamId]);
+  await tx.teamMember.updateMany({ where: { id }, data: { keyDistributed: false } });
+}`);
+      expect(run({ writes: 2 }).code).toBe(0);
+    });
+
+    it("refuses an exempted grant's shape in a sibling file", () => {
+      write("src/app/api/teams/[teamId]/members/sibling.ts", EXEMPT_FILES["src/app/api/teams/[teamId]/members/route.ts"]);
+      expectDenied(run({ grants: 1 }), /grant::src\/app\/api\/teams\/\[teamId\]\/members\/sibling\.ts::<anonymous>::teamMember\.update/);
+    });
+
+    it("fails when a grant exemption matches no site", () => {
+      rmSync(join(root, "src/app/api/teams/[teamId]/members/route.ts"));
+      expectDenied(run({ grants: -1 }), /exemption\(s\) matching no site, or several[^\n]*\n {2}grant::src\/app\/api\/teams\/\[teamId\]\/members\/route\.ts/);
+    });
+
+    it("fails the count when a grant site is added", () => {
+      write(SUBJECT, `export async function promote(tx, rows, target) {
+  ${CHECK}
+  await tx.teamMember.update({ where: { id: target.id }, data: { role: "ADMIN" } });
+}`);
+      expectDenied(run({ grants: 0 }), /differ from the pinned/);
+    });
+
+    it("fails the count when a grant site disappears", () => {
+      expectDenied(run({ grants: 1 }), /differ from the pinned/);
     });
   });
 });

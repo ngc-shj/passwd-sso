@@ -121,6 +121,20 @@ describe("readTenantRows", () => {
     });
   });
 
+  it("matches a caller's upper-case id to the database's lower-case row, answering by the caller's spelling", async () => {
+    const left = new Date("2026-05-01T00:00:00.000Z");
+    const t = tx([{ userId: "abc", role: "MEMBER", deactivatedAt: left }], [{ userId: "abc", departedAt: left }]);
+
+    const result = await readTenantRows(t as unknown as Pick<Prisma.TransactionClient, "tenantMember" | "tenantMemberDeparture">, "tenant-1", ["ABC"]);
+
+    // A miss here would answer as a guest: not departed, so the check would pass.
+    expect(result.get("ABC")).toEqual({ hasRow: true, role: "MEMBER", deactivatedAt: left, departedAt: left });
+    expect(t.tenantMember.findMany).toHaveBeenCalledWith({
+      where: { tenantId: "tenant-1", userId: { in: ["abc"] } },
+      select: { userId: true, role: true, deactivatedAt: true },
+    });
+  });
+
   it("reads nothing for no users", async () => {
     const t = tx([], []);
 
@@ -173,6 +187,10 @@ describe("actorDepartedSinceAdmission", () => {
     const departure = at(-1000);
     expect(actorDepartedSinceAdmission(row(departure), admitted)).toBe(false);
     expect(actorDepartedSinceAdmission(row(departure), at(-2000))).toBe(true);
+  });
+
+  it("is false for a departure one millisecond before the admission (the nearest allow case)", () => {
+    expect(actorDepartedSinceAdmission(row(at(-1)), admitted)).toBe(false);
   });
 
   it("is true for a deleted tenant row whose departure record follows the admission", () => {

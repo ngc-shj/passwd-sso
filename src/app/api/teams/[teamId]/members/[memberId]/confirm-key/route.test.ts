@@ -314,9 +314,13 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
       await distribute();
 
       const calls = lockQueryCalls(mockTeamLockQuery);
-      const tenantRow = calls.find((c) => c.sql.includes("FROM tenant_members"))!;
+      const tenantRowLocks = calls.filter((c) => c.sql.includes("FROM tenant_members"));
       const teamRow = calls.find((c) => c.sql.includes("FROM teams"))!;
-      expect(tenantRow.values).toEqual(["tenant-1", ["admin-user"]]);
+      // Only the distributor's tenant row is locked (row or advisory): a lock on
+      // the recipient serialises distribution behind any SCIM transaction on them.
+      expect(tenantRowLocks.map((c) => c.values)).toEqual([["tenant-1", ["admin-user"]]]);
+      const tenantRow = tenantRowLocks[0];
+      expect(JSON.stringify(txProxy.$executeRaw.mock.calls)).not.toContain("target-user");
       expect(tenantRow.order).toBeLessThan(teamRow.order);
       expect(mockTenantMemberFindMany).toHaveBeenCalledWith({
         where: { tenantId: "tenant-1", userId: { in: ["target-user"] } },
@@ -395,6 +399,13 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
       targetTenantState(null);
 
       expect((await distribute(lockedTarget({ userId: "other-user" }))).status).toBe(404);
+      expectNothingWritten();
+    });
+
+    it("refuses when the locked row belongs to another team", async () => {
+      targetTenantState(null);
+
+      expect((await distribute(lockedTarget({ teamId: "team-OTHER" }))).status).toBe(404);
       expectNothingWritten();
     });
 

@@ -48,7 +48,10 @@ deploy`. Run them with `psql -v ON_ERROR_STOP=1 -f <file>`.
    `containable` is true: one row it cannot end makes the script refuse the
    whole batch. A `containable` false row (the tenant row was deleted, or
    re-created after a SCIM DELETE) is ended by a team admin removing the member;
-   the member already cannot act (see "Actors refused since this release").
+   the member already cannot act (see "Actors refused since this release"). If
+   that member is the team's OWNER, nobody can remove them: the team counts as
+   ownerless, so the tenant admin first assigns a new OWNER (the leftover row is
+   demoted to ADMIN by that assignment), and the new OWNER then removes them.
 
 **For every membership the migration or the contain script ended** (found by
 `TEAM_MEMBER_TENANT_DEACTIVATE` records whose `metadata.backfill` is
@@ -385,7 +388,11 @@ key (confirm-key answers `MEMBER_NOT_FOUND`), not promoted, and never made OWNER
 a demotion is still allowed. A team key rotation does not wrap the new version
 for it and clears its `key_distributed`, so it holds only keys it already had.
 The team's pending key distributions still list it, and an admin's browser keeps
-being refused until the membership is ended.
+being refused until the membership is ended. A team admin who tries to promote
+such a member, transfer ownership to them, or give them the key sees "member not
+found" for a member the team list still shows: that is this refusal. End the
+membership (or remove the member and invite them again if they belong in the
+team).
 
 This also refuses a member who was legitimately re-admitted **before**
 `20261114000000_team_member_admitted_at`: their row has no `admitted_at`, its

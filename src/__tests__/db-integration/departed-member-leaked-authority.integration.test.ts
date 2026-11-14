@@ -9,7 +9,10 @@
  *   tenant-row departure), each deny cell with a positive twin.
  * - C4 recipient: a residue TARGET is treated like a deactivated member by
  *   confirm-key, a promotion or ownership transfer, and key rotation; a
- *   demotion stays allowed.
+ *   demotion stays allowed. confirm-key also on the departure-record arm,
+ *   and rotate-key/data lists exactly the members the rotation wraps for. A leftover OWNER counts as absent for the
+ *   ownerless listing and the tenant admin's owner assignment, and a leftover
+ *   target is refused by that assignment.
  * - C5: accept answers ACCEPTED only inside the locked transaction, and audits
  *   the admission atomically with it.
  * - C6: team webhook delivery requires the creator's current authority, run as
@@ -88,7 +91,10 @@ import { PUT as changeRoleRoute, DELETE as removeMemberRoute } from "@/app/api/t
 import { POST as approveRoute } from "@/app/api/teams/[teamId]/members/[memberId]/approve/route";
 import { POST as confirmKeyRoute } from "@/app/api/teams/[teamId]/members/[memberId]/confirm-key/route";
 import { POST as rotateKeyRoute } from "@/app/api/teams/[teamId]/rotate-key/route";
+import { GET as rotateKeyDataRoute } from "@/app/api/teams/[teamId]/rotate-key/data/route";
 import { GET as listWebhooksRoute, POST as createWebhookRoute } from "@/app/api/teams/[teamId]/webhooks/route";
+import { POST as assignOwnerRoute } from "@/app/api/tenant/teams/[teamId]/owner/route";
+import { GET as listOwnerlessRoute } from "@/app/api/tenant/teams/ownerless/route";
 import { deliverRowWithChain, processWebhookDeliveryBatch, type AuditOutboxRow } from "@/workers/audit-outbox-worker";
 import { enqueueAuditInTx } from "@/lib/audit/audit-outbox";
 import { buildOutboxPayload } from "@/lib/audit/audit-payload";
@@ -265,6 +271,22 @@ describe("departed-member leaked authority — real-DB integration", () => {
       tenantId, userId,
     );
     expect(changed).toHaveLength(1);
+  }
+
+  /**
+   * The re-created state: a departure record (stamped now unless `departedAt`,
+   * SQL, says otherwise) while the user's tenant row stays active (SCIM DELETE,
+   * then re-creation). Unlike residueDepart, the tenant row passes a route's
+   * "active in this tenant" check, so only the leftover predicate refuses.
+   * Exactly one row must be written.
+   */
+  async function recreatedDepart(userId: string, departedAt = "clock_timestamp()") {
+    const written = await sql(
+      `INSERT INTO tenant_member_departures (tenant_id, user_id, departed_at)
+       VALUES ($1::uuid, $2::uuid, ${departedAt}) RETURNING 1`,
+      tenantId, userId,
+    );
+    expect(written).toHaveLength(1);
   }
 
   /** A PENDING invitation inserted directly (created_at = clock_timestamp()). */
@@ -680,6 +702,23 @@ describe("departed-member leaked authority — real-DB integration", () => {
       expect(keys).toHaveLength(departed ? 0 : 1);
     });
 
+    it.each([
+      ["denied when a departure record is dated after the admission (re-created tenant row)", true],
+      ["allowed when the departure record predates the admission (positive twin)", false],
+    ] as const)("confirm-key to the target, departure-record arm: %s", async (_label, departed) => {
+      const { owner, teamId, target, targetRow } = await targetTeam("MEMBER", { keyDistributed: false, withKey: false });
+      await setEcdhKey(target.id);
+      // The target was admitted an hour ago; their tenant row stays active.
+      await recreatedDepart(target.id, departed ? "clock_timestamp()" : "now() - interval '2 hours'");
+
+      const res = await confirmKey(teamId, targetRow, owner);
+
+      expect(res.status).toBe(departed ? 404 : 200);
+      expect(await membership(teamId, target.id)).toMatchObject({ key_distributed: !departed });
+      const keys = await sql(`SELECT 1 FROM team_member_keys WHERE team_id = $1::uuid AND user_id = $2::uuid`, teamId, target.id);
+      expect(keys).toHaveLength(departed ? 0 : 1);
+    });
+
     it.each(twins)("member PUT promotion of the target (MEMBER to ADMIN): %s", async (_label, departed) => {
       const { owner, teamId, target, targetRow } = await targetTeam("MEMBER");
       if (departed) await residueDepart(target.id);
@@ -748,6 +787,34 @@ describe("departed-member leaked authority — real-DB integration", () => {
         expect(await v2Key(teamId, owner)).toHaveLength(1);
       });
 
+      function rotateData(teamId: string, actor: string) {
+        mockAuth.mockResolvedValue({ user: { id: actor } });
+        return rotateKeyDataRoute(new NextRequest(`http://localhost/api/teams/${teamId}/rotate-key/data`), {
+          params: Promise.resolve({ teamId }),
+        });
+      }
+
+      it.each(twins)("rotate-key/data lists the members a rotation wraps for, and the rotation follows it: %s", async (_label, departed) => {
+        const { owner, teamId, target } = await targetTeam("MEMBER", { keyDistributed: true });
+        await setEcdhKey(owner);
+        await setEcdhKey(target.id);
+        if (departed) await residueDepart(target.id);
+
+        const dataRes = await rotateData(teamId, owner);
+        expect(dataRes.status).toBe(200);
+        const listed = ((await dataRes.json()).members as { userId: string }[]).map((m) => m.userId).sort();
+        expect(listed).toEqual((departed ? [owner] : [owner, target.id]).sort());
+
+        // Keys for exactly the listed members.
+        const res = await rotate(teamId, owner, listed);
+
+        expect(res.status).toBe(200);
+        expect(await teamKeyVersion(teamId)).toBe(2);
+        expect(await membership(teamId, target.id)).toMatchObject({ key_distributed: !departed });
+        expect(await v2Key(teamId, target.id)).toHaveLength(departed ? 0 : 1);
+        expect(await v2Key(teamId, owner)).toHaveLength(1);
+      });
+
       it.each(twins)("a key supplied for the target: %s", async (_label, departed) => {
         const { owner, teamId, target } = await targetTeam("MEMBER", { keyDistributed: true });
         if (departed) await residueDepart(target.id);
@@ -760,6 +827,96 @@ describe("departed-member leaked authority — real-DB integration", () => {
         expect(await teamKeyVersion(teamId)).toBe(departed ? 1 : 2);
         expect(await membership(teamId, target.id)).toMatchObject({ key_distributed: true });
       });
+    });
+  });
+
+  // ── C4 recipient: ownerless-team assignment ───────────────────
+
+  describe("C4 recipient: ownerless-team assignment", () => {
+    const seeds = [
+      ["residue (tenant row deactivated)", residueDepart],
+      ["re-created (departure record, tenant row active)", recreatedDepart],
+    ] as const;
+
+    /** A team owned by `owner` (admitted 2 hours ago), with a live ADMIN admitted an hour ago. */
+    async function ownedTeam() {
+      const owner = await member();
+      const teamId = await team(owner.id);
+      const live = await member();
+      await addTeamMember(teamId, live.id, "ADMIN", { createdAt: "now() - interval '1 hour'" });
+      return { owner, teamId, live };
+    }
+
+    async function listed(admin: string) {
+      mockAuth.mockResolvedValue({ user: { id: admin } });
+      const res = await listOwnerlessRoute(new NextRequest("http://localhost/api/tenant/teams/ownerless"));
+      expect(res.status).toBe(200);
+      return ((await res.json()).teams as { id: string; members: { userId: string }[] }[]);
+    }
+
+    function assignOwner(teamId: string, admin: string, userId: string) {
+      mockAuth.mockResolvedValue({ user: { id: admin } });
+      return assignOwnerRoute(jsonRequest(`http://localhost/api/tenant/teams/${teamId}/owner`, "POST", { userId }), {
+        params: Promise.resolve({ teamId }),
+      });
+    }
+
+    async function assignAudits(teamId: string) {
+      return sql(
+        `SELECT 1 FROM audit_outbox WHERE tenant_id = $1::uuid AND payload->>'action' = $2 AND payload->>'teamId' = $3`,
+        tenantId, AUDIT_ACTION.TEAM_OWNER_ASSIGNED_BY_TENANT_ADMIN, teamId,
+      );
+    }
+
+    it.each(seeds)("a team whose only OWNER is leftover (%s) is listed and assignable; the leftover row is demoted", async (_label, depart) => {
+      const admin = await ctx.createUser(tenantId);
+      const { owner, teamId, live } = await ownedTeam();
+      await depart(owner.id);
+
+      const teams = await listed(admin);
+      expect(teams.map((t) => t.id)).toEqual([teamId]);
+      // The leftover OWNER is not offered: the owner route refuses them.
+      expect(teams[0].members.map((m) => m.userId)).toEqual([live.id]);
+
+      const res = await assignOwner(teamId, admin, live.id);
+
+      expect(res.status).toBe(200);
+      expect(await membership(teamId, live.id)).toMatchObject({ role: "OWNER", deactivated_at: null });
+      expect(await membership(teamId, owner.id)).toMatchObject({ role: "ADMIN" });
+      expect(await assignAudits(teamId)).toHaveLength(1);
+      expect(await listed(admin)).toEqual([]);
+    });
+
+    it("a team whose OWNER is live answers HAS_OWNER (409) and is not listed (positive twin)", async () => {
+      const admin = await ctx.createUser(tenantId);
+      const { owner, teamId, live } = await ownedTeam();
+
+      expect(await listed(admin)).toEqual([]);
+
+      const res = await assignOwner(teamId, admin, live.id);
+
+      expect(res.status).toBe(409);
+      expect(await membership(teamId, owner.id)).toMatchObject({ role: "OWNER" });
+      expect(await membership(teamId, live.id)).toMatchObject({ role: "ADMIN" });
+      expect(await assignAudits(teamId)).toHaveLength(0);
+    });
+
+    it.each([
+      ["refused (404) when the target is leftover", true],
+      ["allowed without the departure (positive twin)", false],
+    ] as const)("assignment to a target: %s", async (_label, departed) => {
+      const admin = await ctx.createUser(tenantId);
+      const { owner, teamId, live } = await ownedTeam();
+      await residueDepart(owner.id);
+      if (departed) await recreatedDepart(live.id);
+
+      const res = await assignOwner(teamId, admin, live.id);
+
+      expect(res.status).toBe(departed ? 404 : 200);
+      if (departed) expect((await res.json()).error).toBe("MEMBER_NOT_FOUND");
+      expect(await membership(teamId, live.id)).toMatchObject({ role: departed ? "ADMIN" : "OWNER" });
+      expect(await membership(teamId, owner.id)).toMatchObject({ role: departed ? "OWNER" : "ADMIN" });
+      expect(await assignAudits(teamId)).toHaveLength(departed ? 0 : 1);
     });
   });
 

@@ -1,6 +1,6 @@
 # Code Review: departed-member-leaked-authority
 Date: 2026-11-14
-Review round: 1
+Review round: 2
 
 ## Changes from Previous Round
 
@@ -117,3 +117,48 @@ N/A — no environment constraints declared in Phase 1.
 ### T7 [Minor] Missing verdict
 - Action: the worker delivers only on `true` or `"legacy"`.
 - Modified file: `src/workers/audit-outbox-worker.ts`.
+
+## Round 2 (incremental: f4b8192f4..52c0ae17d)
+
+Previous findings: S1, S2 (route), T1, T2, T4–T6, F1, F2 resolved; T3 not effective (fixed below);
+T7 implemented, unpinned (recorded as unreachable defense in depth, D9).
+
+### Security
+- **N1 [Major]** Ownerless-team owner assignment granted OWNER to a leftover membership.
+- **N2 [Minor]** `readTenantRows` docstring said "never for a decision"; no id lowercasing.
+
+### Functionality
+- **N1 [Major]** A leftover OWNER had no exit: member DELETE refuses an OWNER, the OWNER cannot
+  act, and owner assignment counted it as active.
+- **N2 [Minor]** same as Security N2.
+- **N3 [Minor]** Deviation log's earlier "rotate-key keeps activeTeamRole" line contradicted D8.
+- **N4 [Minor]** A refused promotion surfaces as "member not found" with no explanation.
+
+### Testing
+- **N1 [Major]** An extra recipient lock passed the confirm-key and member PUT unit tests.
+- **N2 [Minor]** No integration cell for the departure-record arm or `rotate-key/data`.
+- **N3 [Minor]** The worker's missing-verdict change was unpinned.
+- **N4 [Minor]** The confirm-key teamId re-check was unpinned; the nearest allow fixture was 1 s
+  from the boundary.
+- **A2 [Minor, adjacent]** Stale "worker skips false" docstring.
+
+### Resolution Status (round 2)
+- Security N1 + Functionality N1: owner route and ownerless listing treat a leftover OWNER as
+  absent and refuse a leftover target; unit cells red-proved per predicate; integration
+  "C4 recipient: ownerless-team assignment" (62/62 in the file). Runbook step 6 names the OWNER
+  path. `src/app/api/tenant/teams/[teamId]/owner/route.ts`, `ownerless/route.ts`.
+- R42 class closure: gate rule 8 (D9), mutation-verified (route-check removals fail it; 14 gate
+  mutations each fail a gate test), wired through `scripts/pre-pr.sh` in CI `static-checks`.
+  `R42 class grant-recipients: member-set expanded 2× — closed by mutation-verified CI guard
+  scripts/checks/check-team-rotation-input-lock.mjs rule 8 (red-proven: removing the recipient
+  check in confirm-key, member PUT or the owner route fails it), wired in CI static-checks via
+  pre-pr.sh.`
+- Security/Functionality N2: docstring restated; ids lowercased; mixed-case unit cell.
+- Functionality N3: annotated. N4: runbook paragraph explains the "member not found".
+- Testing N1: both lock cells assert exactly one tenant-row lock for the actor and no advisory key
+  for the recipient; red-proved (extra row lock and advisory-only lock each fail; controls pass).
+- Testing N2: integration cells for the departure-record arm (confirm-key) and
+  `rotate-key/data` + rotate-key with a residue holder, with twins.
+- Testing N3: recorded unreachable (D9).
+- Testing N4: teamId cell (red-proved); allow case at 1 ms before admission.
+- A2: docstring updated.

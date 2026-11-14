@@ -73,7 +73,7 @@ against `passwd_sso`. Every control was green first.
   departure is refused by the `GREATEST(...) >= s.created_at` clause, so `admitted_at` adds
   nothing there.
 - Skipped: member DELETE and `rotate-key` keep `activeTeamRole` — they reduce authority (plan C4
-  exclusions).
+  exclusions). Superseded for `rotate-key` by D8; member DELETE still keeps it.
 
 ## D8 — Code review round 1: the recipient side of C4
 
@@ -106,3 +106,33 @@ advisory list was not worth it; the confirm-key refusal is the control.
 rotate-key's team lock is no longer the transaction's first statement (the actor's tenant row
 comes first, per the lock order); `team-key-rotation-lock.ts`'s comment and `raw-sql-usage.txt`
 follow. `check-team-rotation-input-lock` counts are unchanged.
+
+## D9 — Code review round 2: owner assignment, and the grant-recipient gate (SC5 partly pulled in)
+
+- `tenant/teams/[teamId]/owner` refused a leftover OWNER neither as an obstacle nor as a target.
+  A leftover OWNER now counts as absent: the team is listed as ownerless, assignment answers
+  `HAS_OWNER` only for a non-leftover OWNER, and the existing demotion turns the leftover row into
+  ADMIN, which a team admin can then remove. A leftover target is refused (`NOT_ACTIVE`). Owner
+  tenant rows are read unlocked (D8). The listing pre-filters in the query to a superset (an OWNER
+  with no deactivated tenant row and no departure record cannot be leftover) and decides exactly
+  in code. The stamped users are read first and passed as `userId: { notIn }`: a filter through
+  the required User relation is refused by `check-required-user-relation`, because a tenant
+  context hides the User row of someone filed under another tenant. The operator-scripts contain
+  cell now expects a team with a leaked OWNER to be listed as ownerless before contain too.
+- **Gate rule 8 (GRANT RECIPIENTS)** in `check-team-rotation-input-lock`. The recipient set grew
+  twice under review (3 sites in round 1, the owner route in round 2), so per the review loop's
+  convergence rule it is closed by a guard derived from the primitive, not by another list. Every
+  grant to an existing membership row (a `role` write, `keyDistributed: true`, a `teamMemberKey`
+  create/upsert, a nested `team.update` of members or keys, and their raw-SQL forms) must be
+  preceded by `actorDepartedSinceAdmission` tied to the recipient by variable name, or be
+  exempted with a reason. 10 grant sites: 5 recipient-checked, 5 exempted (two admissions that
+  refuse an active row first, the SCIM demotion batch, rotate-key's set-checked `createMany`, and
+  `team.update` of name/description). The plan deferred gate growth to SC5 because AST gates had
+  seeded their own defects inside feature PRs; that risk is bounded here by mutation-testing the
+  gate itself (14 gate mutations, each failing a gate test) and red-proving it against the three
+  route checks it guards. SC5's remaining part (the in-file departure writers and tenant-row
+  deletes) stays a follow-up.
+- `readTenantRows` lowercases ids as `lockTenantRows` does; its contract now states when an
+  unlocked read may decide.
+- The worker's missing-verdict branch is unreachable with `webhookCreatorVerdicts`, which answers
+  every id; it stays as defense in depth and is not separately tested.

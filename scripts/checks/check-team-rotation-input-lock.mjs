@@ -61,6 +61,37 @@
  *    KNOWN LIMIT (rule 7): a column name assembled from fragments at runtime
  *    is not seen.
  *
+ * 8. GRANT RECIPIENTS (departed-member-leaked-authority-deviation.md D8). A
+ *    leftover membership (an active team row whose user's tenant row departed
+ *    at or after its admission) receives no grant. A grant is a `teamMember`
+ *    update/updateMany/updateManyAndReturn whose `data` (an `upsert`'s
+ *    `update`) names `role` or sets `keyDistributed` to the literal `true`; a
+ *    `teamMemberKey.create/createMany/createManyAndReturn/upsert`; a `team`
+ *    update/updateMany/upsert whose data names nested `members` /
+ *    `memberKeys`; a raw `UPDATE team_members` naming `role =` or
+ *    `key_distributed = true`, or `INSERT INTO team_member_keys`. Read from
+ *    literals, an update is no grant when it reaches no active row (`where`
+ *    names `deactivatedAt: { not: null }` or `scimApprovalPending: true`, or
+ *    `data` sets `deactivatedAt: new Date(...)`) or only demotes (`where` and
+ *    `data` name literal roles, the data's ranked lower).
+ *
+ *    Each grant must follow a RECIPIENT CHECK in its function, or in every
+ *    same-file caller: a call of `actorDepartedSinceAdmission` that does not
+ *    judge the acting member (its row is not keyed `session.user.id`, its
+ *    admission is not an `activeTeamAdmission` result), or of a same-file
+ *    function that makes one, which JUDGES THE RECIPIENT: a variable its
+ *    arguments read, or one the declaration of its admission argument reads,
+ *    is one the grant names its rows by (the values of `id` / `userId` in its
+ *    where/data/create/update; a caller's argument for a parameter). The
+ *    tenant-row map's declaration is not followed (one lock call holds the
+ *    actor's and the target's rows). A check of some other
+ *    member (the owner route's "is there an active OWNER") does not cover the
+ *    grant. Admissions (a re-activation stamps a fresh admitted_at), demotions
+ *    the literals cannot show, and recipients checked by set are EXEMPTIONS.
+ *
+ *    KNOWN LIMIT (rule 8): the tie is by variable name, one declaration deep.
+ *    Two names for one person are not followed; one name for two is not split.
+ *
  * A `data` / `update` that is not an object literal (an identifier, a spread)
  * cannot be read, so it counts: the gate refuses rather than skips what it
  * cannot see. Reviewed sites are listed in EXEMPTIONS; each key must match
@@ -119,11 +150,14 @@ const TRANSITIONS = new Set(["departFromTenant", "returnToTenant"]);
  * approve CAS joined). scim-team-role-raise-approval: member writes +2 (the
  * SCIM raise-hold CAS of an active row and its key delete for the rows that
  * CAS returned).
+ * departed-member-leaked-authority (rule 8): grants 10 — 5 recipient-checked,
+ * 5 exempted.
  */
 const EXPECTED = {
   memberWrites: Number(process.env.TEAM_ROTATION_INPUT_LOCK_WRITES ?? 21),
   tenantStateWrites: Number(process.env.TEAM_ROTATION_INPUT_LOCK_TENANT_WRITES ?? 2),
   admissions: Number(process.env.TEAM_ROTATION_INPUT_LOCK_ADMISSIONS ?? 7),
+  grants: Number(process.env.TEAM_ROTATION_INPUT_LOCK_GRANTS ?? 10),
 };
 
 /** Sites keyed `<rule>::<path>::<enclosing function>::<site>`, with the review's conclusion. */
@@ -131,6 +165,26 @@ const EXEMPTIONS = new Map([
   [
     "member-write::src/app/api/teams/[teamId]/rotate-key/route.ts::<anonymous>::teamMember.updateMany",
     "rotation itself: its transaction holds the team row FOR NO KEY UPDATE (inline), the lock every other writer waits on",
+  ],
+  [
+    "grant::src/app/api/teams/[teamId]/members/route.ts::<anonymous>::teamMember.update",
+    "admission: re-activates a deactivated row (an active one throws AlreadyMemberError first, under the target's tenant-row lock and the team lock); the re-activation stamps a fresh admitted_at (trigger), so the row is no leftover",
+  ],
+  [
+    "grant::src/app/api/teams/invitations/accept/route.ts::<anonymous>::teamMember.upsert",
+    "admission: creates or re-activates the invitee's row (an active one returns ALREADY_MEMBER first, under the invitee's tenant-row lock and the team lock); the re-activation stamps a fresh admitted_at (trigger)",
+  ],
+  [
+    "grant::src/lib/services/scim-group-service.ts::applyAddOperations::teamMember.updateManyAndReturn",
+    "demotion only: toUpdateRoleByPreviousRole holds the rows whose group role ranks strictly below their current one (a raise goes to toHoldByPreviousRole, which deactivates)",
+  ],
+  [
+    "grant::src/app/api/teams/[teamId]/rotate-key/route.ts::<anonymous>::teamMemberKey.createMany",
+    "recipients named by the request (memberKeys[].userId), checked by set: every key must name a member of memberUserIds, which excludes the leftoverUserIds its recipient check filters out (rotate-key route.test.ts \"refuses a key supplied for a leftover key-holder\")",
+  ],
+  [
+    "grant::src/app/api/teams/[teamId]/route.ts::<anonymous>::team.update",
+    "unreadable data, read by hand: updateData carries name and description only (updateTeamSchema), no nested members or memberKeys",
   ],
 ]);
 
@@ -499,6 +553,196 @@ function checkRawColumnNameRepoWide(sourceFile, path, violations) {
   }
 }
 
+// ── Rule 8: grant recipients (departed-member-leaked-authority-deviation.md D8) ──
+
+const RAW_ROLE_GRANT = /\bUPDATE\s+(?:"?\w+"?\.)?"?team_members"?\b[\s\S]*\b"?role"?\s*=/i;
+const RAW_KEY_DISTRIBUTED_GRANT = /\bUPDATE\s+(?:"?\w+"?\.)?"?team_members"?\b[\s\S]*\b"?key_distributed"?\s*=\s*true\b/i;
+const RAW_MEMBER_KEY_INSERT = /\bINSERT\s+INTO\s+(?:"?\w+"?\.)?"?team_member_keys"?\b/i;
+const RECIPIENT_PREDICATE = "actorDepartedSinceAdmission";
+/** The acting member's re-read (team-auth.ts); a check of its result judges the actor, not a recipient. */
+const ACTOR_ADMISSION_READ = "activeTeamAdmission";
+
+/** Whether a `data` / `update` literal grants: names `role`, or sets `keyDistributed` to the literal `true`. */
+function grants(literal) {
+  if (literal === undefined) return false;
+  if (mayName(literal, ["role"])) return true;
+  const p = literal.getProperty("keyDistributed");
+  if (!p) return false;
+  return !Node.isPropertyAssignment(p) || p.getInitializer()?.getText() === "true";
+}
+
+/**
+ * Whether an update reaches no active row, read from literals only: its
+ * `where` names `deactivatedAt: { not: null }` or `scimApprovalPending: true`
+ * (a pending row is deactivated, CHECK in 20261103000000), or its `data` sets
+ * `deactivatedAt: new Date(...)` (the row it writes ends inactive).
+ */
+function reachesNoActiveRow(call) {
+  const where = rawProp(call.getArguments()[0], "where");
+  if (where && Node.isObjectLiteralExpression(where)) {
+    const deactivatedAt = rawProp(where, "deactivatedAt");
+    if (deactivatedAt && Node.isObjectLiteralExpression(deactivatedAt) && rawProp(deactivatedAt, "not")?.getText() === "null") return true;
+    if (rawProp(where, "scimApprovalPending")?.getText() === "true") return true;
+  }
+  const deactivatedAt = rawProp(argProp(call, "data"), "deactivatedAt");
+  return deactivatedAt !== null && deactivatedAt !== undefined && Node.isNewExpression(deactivatedAt);
+}
+
+const ROLE_RANK = { OWNER: 3, ADMIN: 2, MEMBER: 1, VIEWER: 0 };
+
+/** `TEAM_ROLE.X` or `"X"` as a known role, else null. */
+function roleLiteral(node) {
+  if (!node) return null;
+  const name = Node.isStringLiteral(node) ? node.getLiteralText() : Node.isPropertyAccessExpression(node) ? node.getName() : null;
+  return name !== null && name in ROLE_RANK ? name : null;
+}
+
+/** Whether an update only demotes: its `where` and `data` name literal roles, the data's ranked lower. */
+function demotesOnly(call) {
+  const data = argProp(call, "data");
+  if (!data || mayName(data, ["keyDistributed"])) return false;
+  const from = roleLiteral(rawProp(rawProp(call.getArguments()[0], "where"), "role"));
+  const to = roleLiteral(rawProp(data, "role"));
+  return from !== null && to !== null && ROLE_RANK[to] < ROLE_RANK[from];
+}
+
+function classifyGrant(call, mm) {
+  const { model, method } = mm;
+  const site = `${model}.${method}`;
+  if (model === "teamMemberKey" && ["create", "createMany", "createManyAndReturn", "upsert"].includes(method)) return site;
+  // A nested write from a team that exists (team.create's nested rows are the creator's).
+  if (model === "team" && ["update", "updateMany", "upsert"].includes(method)
+    && mayName(argProp(call, method === "upsert" ? "update" : "data"), ["members", "memberKeys"])) return site;
+  if (model !== "teamMember") return null;
+  if ((method === "update" || method === "updateMany" || method === "updateManyAndReturn")
+    && grants(argProp(call, "data")) && !reachesNoActiveRow(call) && !demotesOnly(call)) return site;
+  if (method === "upsert" && grants(argProp(call, "update"))) return site;
+  return null;
+}
+
+/** The declaration of `name` visible from `node`: the innermost enclosing function that declares it. */
+function declarationOf(node, name) {
+  for (let fn = enclosingFunction(node); fn; fn = enclosingFunction(fn)) {
+    const decl = fn.getDescendantsOfKind(SyntaxKind.VariableDeclaration)
+      .find((d) => d.getName() === name && enclosingFunction(d) === fn);
+    if (decl) return decl;
+  }
+  return node.getSourceFile().getVariableDeclaration(name) ?? null;
+}
+
+function rootIdentifier(expr) {
+  let cur = expr;
+  while (cur && (Node.isPropertyAccessExpression(cur) || Node.isBinaryExpression(cur) || Node.isParenthesizedExpression(cur))) {
+    cur = Node.isBinaryExpression(cur) ? cur.getLeft() : cur.getExpression();
+  }
+  return cur && Node.isIdentifier(cur) ? cur.getText() : null;
+}
+
+/** The variables an expression reads: identifiers that are not a property name or a property key. */
+function namesIn(node) {
+  if (!node) return [];
+  const ids = Node.isIdentifier(node) ? [node] : node.getDescendantsOfKind(SyntaxKind.Identifier);
+  return ids.filter((id) => {
+    const parent = id.getParent();
+    if (Node.isPropertyAccessExpression(parent) && parent.getNameNode() === id) return false;
+    if (Node.isPropertyAssignment(parent) && parent.getNameNode() === id) return false;
+    return true;
+  }).map((id) => id.getText());
+}
+
+const RECIPIENT_KEYS = new Set(["id", "userId"]);
+
+/**
+ * Who a grant reaches, as the variables it names them by: the values of every
+ * `id` / `userId` key in its `where` / `data` / `create` / `update`, or every
+ * interpolation of a raw template.
+ */
+function recipientNames(node) {
+  if (Node.isTaggedTemplateExpression(node)) {
+    const template = node.getTemplate();
+    return new Set(Node.isTemplateExpression(template) ? template.getTemplateSpans().flatMap((sp) => namesIn(sp.getExpression())) : []);
+  }
+  const names = new Set();
+  const arg = node.getArguments()[0];
+  for (const container of ["where", "data", "create", "update"].map((k) => rawProp(arg, k))) {
+    if (!container) continue;
+    for (const p of [...container.getDescendantsOfKind(SyntaxKind.PropertyAssignment), ...container.getDescendantsOfKind(SyntaxKind.ShorthandPropertyAssignment)]) {
+      if (!RECIPIENT_KEYS.has(propertyKeyName(p))) continue;
+      for (const n of Node.isShorthandPropertyAssignment(p) ? [p.getName()] : namesIn(p.getInitializer())) names.add(n);
+    }
+  }
+  return names;
+}
+
+/**
+ * A call of the predicate that judges someone other than the acting member:
+ * not keyed by `session.user.id`, and not of an `activeTeamAdmission` result.
+ */
+function isRecipientCheck(call) {
+  if (calleeName(call) !== RECIPIENT_PREDICATE) return false;
+  const [row, admittedAt] = call.getArguments();
+  if (row && Node.isCallExpression(row) && row.getArguments()[0]?.getText() === "session.user.id") return false;
+  const root = admittedAt ? rootIdentifier(admittedAt) : null;
+  const init = root ? declarationOf(call, root)?.getInitializer() : undefined;
+  const read = init && Node.isAwaitExpression(init) ? init.getExpression() : init;
+  return !(read && Node.isCallExpression(read) && calleeName(read) === ACTOR_ADMISSION_READ);
+}
+
+/** Same-file functions whose body runs a recipient check: calling one is the check (one level down). */
+function recipientCheckHelpers(sourceFile) {
+  const names = new Set();
+  for (const fn of sourceFile.getDescendants().filter((n) => Node.isFunctionLikeDeclaration(n))) {
+    const name = functionName(fn);
+    if (name === "<anonymous>" || name === "<module>") continue;
+    if (fn.getDescendantsOfKind(SyntaxKind.CallExpression).some(isRecipientCheck)) names.add(name);
+  }
+  return names;
+}
+
+/**
+ * Who a check judges: the variables its arguments read, and those the
+ * declaration of its admission argument's root reads (one level: the member
+ * row re-read by `memberId`). The tenant-row map's declaration is not
+ * followed: one lock call reads the actor's and the target's rows together.
+ */
+function checkedNames(call) {
+  const names = new Set(call.getArguments().flatMap(namesIn));
+  if (isRecipientCheck(call)) {
+    const root = rootIdentifier(call.getArguments()[1]);
+    for (const m of root ? namesIn(declarationOf(call, root)?.getInitializer()) : []) names.add(m);
+  }
+  names.delete("tx");
+  return names;
+}
+
+/** A recipient check before `pos` in `fn` that judges one of `names`. */
+function checksRecipientBefore(fn, helpers, pos, names) {
+  return fn.getDescendantsOfKind(SyntaxKind.CallExpression).some((c) => c.getStart() < pos
+    && (isRecipientCheck(c) || helpers.has(calleeName(c)))
+    && [...checkedNames(c)].some((n) => names.has(n)));
+}
+
+/**
+ * Rule 8's `covered`: a check of the grant's recipient precedes it in its
+ * function, or in every same-file caller's (a recipient the function names by
+ * a parameter is named by that caller's argument).
+ */
+function recipientChecked(sourceFile, node, helpers) {
+  const fn = enclosingFunction(node);
+  if (fn === null) return false;
+  const names = recipientNames(node);
+  if (checksRecipientBefore(fn, helpers, node.getStart(), names)) return true;
+  const name = functionName(fn);
+  if (name === "<anonymous>" || name === "<module>") return false;
+  const params = fn.getParameters().map((p) => p.getName());
+  const calls = sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression).filter((c) => calleeName(c) === name);
+  return calls.length > 0 && calls.every((c) => {
+    const caller = enclosingFunction(c);
+    const callerNames = new Set([...names].flatMap((n) => (params.includes(n) ? namesIn(c.getArguments()[params.indexOf(n)]) : [n])));
+    return caller !== null && checksRecipientBefore(caller, helpers, c.getStart(), callerNames);
+  });
+}
+
 const project = createAstProject();
 const sites = [];
 const violations = [];
@@ -513,6 +757,7 @@ for (const { rel: path, sf: sourceFile } of sourceFilesFrom(project, TARGETS, RE
   checkRawColumnNameRepoWide(sourceFile, path, violations);
 
   if (IMPLEMENTATIONS.has(path)) continue;
+  const checkHelpers = recipientCheckHelpers(sourceFile);
 
   for (const call of sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
     const name = calleeName(call);
@@ -548,6 +793,12 @@ for (const { rel: path, sf: sourceFile } of sourceFilesFrom(project, TARGETS, RE
       sites.push({ rule: "admissions", key, line: lineOf(path, call), ok: covered(sourceFile, call, TENANT_LOCK_OR_WRAPPER) });
     }
 
+    const grant = classifyGrant(call, mm);
+    if (grant) {
+      const key = keyOf("grant", path, call, grant);
+      sites.push({ rule: "grants", key, line: lineOf(path, call), ok: recipientChecked(sourceFile, call, checkHelpers) });
+    }
+
     if (path === SCIM_GROUP_SERVICE_FILE) {
       for (const payload of teamMemberWritePayloads(call, mm)) {
         checkAdmissionPayload(path, call, payload, violations);
@@ -564,6 +815,13 @@ for (const { rel: path, sf: sourceFile } of sourceFilesFrom(project, TARGETS, RE
     if (memberRaw) {
       const key = keyOf("member-write", path, raw, `${memberRaw[2]}.raw`);
       sites.push({ rule: "memberWrites", key, line: lineOf(path, raw), ok: covered(sourceFile, raw, LOCK_HELPERS) });
+    }
+    const rawGrant = RAW_MEMBER_KEY_INSERT.test(text)
+      ? "team_member_keys.raw"
+      : RAW_ROLE_GRANT.test(text) || RAW_KEY_DISTRIBUTED_GRANT.test(text) ? "team_members.raw" : null;
+    if (rawGrant) {
+      const key = keyOf("grant", path, raw, rawGrant);
+      sites.push({ rule: "grants", key, line: lineOf(path, raw), ok: recipientChecked(sourceFile, raw, checkHelpers) });
     }
     if (RAW_TENANT_STATE_WRITE.test(text)) {
       violations.push(`tenant-state  ${lineOf(path, raw)}  raw write of tenant_members.deactivated_at outside team-departure.ts`);
@@ -621,7 +879,7 @@ const uncovered = sites.filter((s) => !s.ok && !EXEMPTIONS.has(s.key));
 if (uncovered.length > 0) {
   problems.push(
     `sites without their lock (a member-set write needs a team lock before it; an admission a tenant-row lock; ` +
-      `a tenant active-state write belongs in team-departure.ts):\n` +
+      `a tenant active-state write belongs in team-departure.ts; a grant needs a recipient check before it):\n` +
       uncovered.map((s) => `  ${s.line}  ${s.key}`).join("\n"),
   );
 }

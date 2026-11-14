@@ -765,9 +765,12 @@ describe("departed-member operator scripts — real-DB integration", () => {
       return collected?.messages ?? [];
     }
 
-    it("ends an OWNER and a member at the tenant's stamp with the marker and outbox records; the team becomes ownerless", async () => {
+    it("ends an OWNER and a member at the tenant's stamp with the marker and outbox records; the team stays ownerless", async () => {
       const l = await seedLeak();
-      expect(await ownerlessTeams(l.admin)).not.toContain(l.team);
+      // The leaked OWNER is a leftover membership, which owner assignment
+      // already counts as absent (#1035 D9): the team is assignable before
+      // contain, and stays so once contain ends the row.
+      expect(await ownerlessTeams(l.admin)).toContain(l.team);
 
       const notices = await runContain(containWith({ triples: goodTriples(l), label: "ops-test" }));
 
