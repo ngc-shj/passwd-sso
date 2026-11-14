@@ -241,3 +241,39 @@ Functionality: R29 F3-1; R38/R56/R57 checked for the walk (its range is a functi
 high-water, which every `published` outcome advances). Security: R45/R49 S3-1; R4 resolved
 for the unsettled case with D52 stated; R56, R57, RS3/RS6 checked. Testing: R50 T3-1; RT7
 closed (all nine guards red); R29, R19/RT1 closed.
+
+---
+
+# Round 4
+Date: 2026-11-15
+
+## Changes from Previous Round
+
+Confirmation round on the round-3 fix commit (`09e97ad60`), by the security expert, because
+S3-1's fix changes when audit rows are written (a security-boundary edit forces a round).
+Result: S3-1 resolved; **No findings**; R43 against round 3 — no predicate wider.
+
+Observation recorded, not a finding: the walk's rows are written after the commit that
+settles the new boundary, so a process killed between that commit and the second flush
+leaves those manifests uncompared (they are then behind the high-water). The window existed
+in round 3 and is longer by the backfill's duration; a database writer cannot cause the
+kill. The creator-side comparison follow-up (D57) would close it.
+
+## Tightening-only skip — Round 3 (functionality, testing)
+Findings applied directly, no further review round for these two experts:
+- [F3-1] [Minor] docs named too few causes of an unsettled manifest — `docs/operations/alerts.md`, `docs/operations/audit-anchor-rotation-runbook.md` — wording only
+- [T3-1] [Minor] FIFO test skipped silently in CI — `src/lib/audit/anchor-destinations/filesystem-destination.test.ts` — test-only
+Justification: both are inside round 2's fix range, inline minor (doc wording; a test's skip
+condition), and touch no security boundary. The one finding that does (S3-1) got round 4.
+
+## Termination
+
+Code review converged in four rounds: round 4 returned no findings; no Critical or Major is
+open; one Minor is Accepted with an Anti-Deferral entry (S-7, round 1 Resolution Status).
+No R42 class member-set expanded during review (the verify-caller, destination and
+`system_settings`-reader sets were re-derived unchanged each round), so no additional CI
+guard is required for convergence.
+
+Follow-ups recorded (to be filed with the PR): SC1 (bucket-policy `s3:if-none-match`), S-7
+(bind a manifest to its chain location, manifest v2), D57 (creator-side comparison on a
+failed commit).

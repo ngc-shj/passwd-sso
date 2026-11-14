@@ -236,3 +236,12 @@ not re-run after the interruption; each fix has a test that names its guard.
 - **D57 — the D52 residual is cheaper than first stated** (one failed commit after the create,
   then a write to `last_published_at`); the creator-side comparison that would close it is a
   follow-up, not part of this change.
+
+## Final gates (after code review round 4)
+
+- `scripts/pre-pr.sh` on the committed tree: 97 steps pass; the same two environment-bound
+  steps fail as in Step 2-4 — `Test` (only `scripts/__tests__/backup-db.test.mjs` Group B,
+  6 cases, a git-worktree limitation; 22802 other tests pass, CLI 508 pass) and
+  `Static: rls-cross-tenant SQL parse` (runs against the shared dev database `passwd_sso`,
+  whose schema belongs to another branch; this branch changes no migration or RLS file).
+- `npx next build`: pass. Anchor integration set: 99 passed.
