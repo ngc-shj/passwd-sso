@@ -245,3 +245,10 @@ not re-run after the interruption; each fix has a test that names its guard.
   `Static: rls-cross-tenant SQL parse` (runs against the shared dev database `passwd_sso`,
   whose schema belongs to another branch; this branch changes no migration or RLS file).
 - `npx next build`: pass. Anchor integration set: 99 passed.
+- After merging `origin/main` (which brought the migrations the dev database already had):
+  `scripts/pre-pr.sh` — 98 steps pass, including `Static: rls-cross-tenant SQL parse`; only
+  `Test` fails, on the same six `backup-db.test.mjs` Group B cases (23134 other tests pass).
+  That file and `scripts/backup-db.sh` are byte-identical to the primary checkout's, where
+  the file passes 239/239 (`npx vitest run scripts/__tests__/backup-db.test.mjs`): from a
+  worktree, docker compose derives another project name and finds no `db` service to run
+  `pg_restore` in. Anchor integration set on the merged tree: 99 passed.
