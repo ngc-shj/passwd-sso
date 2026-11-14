@@ -670,6 +670,104 @@ done in Phase 2, and the line says what settles it.
   gitleaks run in `scripts/pre-pr.sh`.
 - **Orchestrator sign-off**: in scope of C2.
 
+## Addendum — no follow-ups left behind (after code review round 4)
+
+The review ended with three recorded follow-ups (SC1, the accepted finding S-7, and D57) and
+one deferred cleanup (SC3). By the user's decision none of them leaves this PR: they are
+contracts C9–C12 below, reviewed like the rest. SC1 and SC3 are thereby withdrawn from the
+scope contract; S-7's "Accepted" disposition and D52/D57's residual are superseded.
+
+### C9 — the bucket refuses an unconditional manifest write (was SC1)
+
+`infra/terraform/storage.tf`, anchors bucket policy: one more statement,
+`DenyUnconditionalPut` — `Effect: Deny`, `Principal: "*"`, `Action: s3:PutObject`, on the
+bucket's objects, with `Null { "s3:if-none-match": "true" }` **and**
+`Bool { "s3:ObjectCreationOperation": "true" }`. This is the shape of the Deny in the S3 User
+Guide's "Enforce conditional writes on Amazon S3 buckets" (its Example 2, written there for
+`s3:if-match`), applied to `s3:if-none-match`; the `ObjectCreationOperation` condition exempts
+`CreateMultipartUpload`/`UploadPart`, which carry no conditional header. Every writer in this
+repository (`S3Destination.create`, used by the publisher and the key scripts) already sends
+`If-None-Match: *`.
+
+- Control class: `enforceable boundary` against the publisher role's credential holder
+  overwriting a stored key (the compromised-publisher case SC1 left open). Authority: S3's
+  policy evaluation.
+- Acceptance: static tests pin the statement and both conditions, with red cases (condition
+  removed; the key misspelled; `Bool` dropped; scoped to one path only). Docs: the one-version
+  rule is platform-enforced on the Terraform bucket.
+- Verification: static + `terraform validate` in CI. The live effect needs a real `terraform
+  apply` (E1) and is a `blocked-deferred` manual-test row: MinIO runs the tests as root and
+  evaluates no bucket policy. Worst case if the statement is wrong: the publisher's creates
+  are refused (`s3-object-lock_UPLOAD_FAILED:AccessDenied`), fail closed and alarmed; nothing
+  is published wrongly. `CopyObject` into the bucket stops working, which nothing here uses.
+
+### C10 — a manifest is bound to its chain location (was S-7, Accepted)
+
+Manifest format version 2: `version: 2`, a v2 `$schema`, and a new signed field
+`chainLocation` — the hex SHA-256 of a domain-separated canonical string naming the primary
+destination (`AnchorDestination.location`: `s3://<bucket>/<prefix>`, `github://<repo>`,
+`file://<resolved base path>`). A hash, so the manifest discloses no bucket name.
+
+- The publisher writes v2 only. `verify` (server and CLI) accepts v1 (no `chainLocation`) and
+  v2 (required, 64 hex).
+- Publisher rules, added to C4's table ahead of the rows that use `latest`:
+  - `latest` is v2 with another `chainLocation` → fail closed
+    `CADENCE_FAILED:PUBLISHED_OBJECT_FOREIGN_LOCATION` (a manifest copied from another chain).
+    Reset: remove the object where the store allows, else restart the chain.
+  - `latest` is v1 (written by an earlier release) → acceptable only while the database
+    vouches for it: its date equals the date of the published high-water `H`. Otherwise fail
+    closed `CADENCE_FAILED:LEGACY_MANIFEST_UNSETTLED`. So an upgrade in place chains to the
+    last v1 manifest, and a v1 manifest copied into a fresh location (no `H`) is refused.
+    Reset (a v1 manifest stored by the old release whose commit was lost just before the
+    upgrade): verify it by hand, then set `last_published_at` by the documented SQL.
+  - "ours" additionally requires the same `chainLocation` (v2), or the settled-v1 case above.
+  - A predecessor read for comparison (C4's adopted compare and the unsettled walk) under
+    another `chainLocation` is "unavailable" (`detail: FOREIGN_LOCATION`).
+- CLI `--prior-manifest`: both v2 with different `chainLocation` → `ChainLocationMismatchError`
+  (a new exit code); prior v2 and current v1 → the same error (a downgrade); prior v1 and
+  current v2 is the upgrade and passes.
+- Control class: `fail-closed verification gate`. What it bounds: a destination writer copying
+  an authentic manifest of another chain into this location (S-7). Not bounded: a writer who
+  also writes `last_published_at` can present a copied v1 manifest as settled — stated in the
+  threat model.
+- Compatibility: verifiers older than this release reject v2 manifests (their schema is
+  strict). Documented as a breaking change for kit holders.
+- Acceptance: vectors for v1 and v2 on both sides; each publisher rule with its allow twin
+  (upgrade in place chains to settled v1; copied v2 → foreign location; copied v1 with no `H`
+  → refused); CLI mismatch/downgrade/upgrade cases; the chain-restart script accepts a v1 or
+  v2 previous manifest.
+
+### C11 — the run that stores a manifest reports its comparison even when its commit fails (was D57)
+
+When a run fails after the primary holds the boundary's object (stage `upload` or
+`after_upload`), it emits the comparison rows for that stored manifest against its
+predecessor (`TENANT_DROPPED_FROM_MANIFEST`, `CHAIN_SEQ_REGRESSION`, `EPOCH_CHANGED`, or
+`PREVIOUS_MANIFEST_UNAVAILABLE_FOR_COMPARISON`) together with its failure row — the creator
+has the predecessor in hand; an adopt reads it back. Rows therefore no longer depend on a
+later run seeing the manifest as unsettled, which closes D52 (moving `last_published_at`
+onto the unsettled date) and the kill window noted in round 4 for the creating run.
+
+- At most once per run, so at most the attempt cap per boundary; the same comparison may be
+  reported again by a later adopt or by the walk (documented; rows carry
+  `comparedArtifactKey`).
+- Never throws; inside the run's destination bound; nothing is emitted when the comparison
+  finds no change.
+- Acceptance: a commit that fails after the create, with a tenant disabled beforehand → the
+  failed run itself writes the drop row; unchanged set → only the failure row; the D52
+  scenario (fail one commit, set `last_published_at` onto that date) now has the drop on
+  record; red proofs per guard.
+
+### C12 — the inert `system_settings` rows are removed (was SC3)
+
+A migration deletes `audit_anchor_previous_manifest` and `audit_anchor_last_published_boundary`
+(the rows no code reads any more), following the repository's rules for data migrations under
+RLS. Docs stop describing them as inert-but-present. A rollback to the previous release was
+already documented as unsafe (D37); without the marker row that release falls back to
+`last_published_at`.
+
+- Acceptance: the migration gates pass (`check-migration-*`), an integration test or the
+  migration's own check shows the rows gone and the other `audit_anchor_*` settings kept.
+
 ## Implementation Checklist
 
 Batches (A first; B and C after A; D last):
@@ -728,3 +826,7 @@ credentials) and is not E1.
 | C6 | Verifier rules and threat model | locked |
 | C7 | Operator scripts | locked |
 | C8 | Runbook, operations docs | locked |
+| C9 | Bucket policy refuses an unconditional write | locked |
+| C10 | Manifest v2 bound to its chain location | locked |
+| C11 | Creator-side comparison on a failed commit | locked |
+| C12 | Inert `system_settings` rows removed | locked |
