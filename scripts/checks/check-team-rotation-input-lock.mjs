@@ -54,12 +54,22 @@
  *    migrations and BEFORE the IMPLEMENTATIONS skip (so team-departure.ts and
  *    the lock modules are covered too): a `scimApprovalPending` property
  *    (identifier, quoted, or shorthand key) whose value is not the literal
- *    `true` is refused unless the file is the approve route; any string or
- *    template literal naming `scim_approval_pending` is refused everywhere (no
- *    code needs raw access to the column).
+ *    `true` is refused unless the file is the admission module
+ *    (src/lib/team/scim-admission.ts); any string or template literal naming
+ *    `scim_approval_pending` is refused everywhere (no code needs raw access to
+ *    the column). The admission module's boundary (docs/archive/review/
+ *    scim-bulk-approve-plan.md C1, V7): only the four admission routes (the
+ *    single and the bulk approve / reject) import it — an import declaration,
+ *    `export … from` (refused for the module outright), literal `import()` or
+ *    literal `require()`, each specifier resolved to a path (`@/` → `src/`, a
+ *    relative one against the importing file); those routes do not call
+ *    `lockTenantRows`; and the routes and the module import from `@/lib/audit/*`
+ *    only `extractRequestMeta` (routes) / `logAuditInTx` (module), both from
+ *    `@/lib/audit/audit`.
  *
  *    KNOWN LIMIT (rule 7): a column name assembled from fragments at runtime
- *    is not seen.
+ *    is not seen; an `import()` / `require()` with a non-literal specifier is
+ *    not followed.
  *
  * 8. GRANT RECIPIENTS (departed-member-leaked-authority-deviation.md D8). A
  *    leftover membership (an active team row whose user's tenant row departed
@@ -173,7 +183,7 @@
  * differ from the pinned ones (a scan that lost sites, or a site to review).
  */
 import { Node, SyntaxKind } from "ts-morph";
-import { join, dirname } from "node:path";
+import { join, dirname, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createAstProject, sourceFilesFrom, unresolvedTargets } from "./lib/ast-project.mjs";
 
@@ -441,7 +451,22 @@ function passesAlreadyLocked(fn, options) {
 // ── Rule 7: SCIM admission marker (scim-team-admission-approval-plan.md, Forbidden patterns) ──
 
 const SCIM_GROUP_SERVICE_FILE = "src/lib/services/scim-group-service.ts";
-const SCIM_APPROVE_ROUTE_FILE = "src/app/api/teams/[teamId]/members/[memberId]/approve/route.ts";
+const SCIM_ADMISSION_MODULE = "src/lib/team/scim-admission";
+const SCIM_ADMISSION_MODULE_FILE = `${SCIM_ADMISSION_MODULE}.ts`;
+const MEMBERS_ROUTE_DIR = "src/app/api/teams/[teamId]/members";
+const SCIM_ADMISSION_ROUTE_FILES = new Set([
+  `${MEMBERS_ROUTE_DIR}/[memberId]/approve/route.ts`,
+  `${MEMBERS_ROUTE_DIR}/[memberId]/reject/route.ts`,
+  `${MEMBERS_ROUTE_DIR}/bulk-approve/route.ts`,
+  `${MEMBERS_ROUTE_DIR}/bulk-reject/route.ts`,
+]);
+const AUDIT_LIB_DIR = "src/lib/audit";
+const AUDIT_EMITTER_MODULE = "src/lib/audit/audit";
+/** What each file in the admission boundary may import from `@/lib/audit/*`. */
+const AUDIT_IMPORT_ALLOWLIST = new Map([
+  ...[...SCIM_ADMISSION_ROUTE_FILES].map((file) => [file, new Set(["extractRequestMeta"])]),
+  [SCIM_ADMISSION_MODULE_FILE, new Set(["logAuditInTx"])],
+]);
 const NON_CREATING_TEAM_MEMBER_METHODS = new Set(["update", "updateMany", "updateManyAndReturn"]);
 const RAW_TEAM_MEMBERS_WRITE = /\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(?:"?\w+"?\.)?"?team_members"?\b/i;
 
@@ -607,13 +632,13 @@ function checkPendingMarkerRepoWide(sourceFile, path, violations) {
   ];
   for (const prop of props) {
     if (propertyKeyName(prop) !== "scimApprovalPending") continue;
-    if (path === SCIM_APPROVE_ROUTE_FILE) continue;
+    if (path === SCIM_ADMISSION_MODULE_FILE) continue;
     // A query filter writes nothing; anything not under a `where` — a write
     // payload, or an object a payload may be built from — is checked.
     if (isInsideWhereFilter(prop)) continue;
     const isTrueLiteral = Node.isPropertyAssignment(prop) && prop.getInitializer()?.getText() === "true";
     if (isTrueLiteral) continue;
-    violations.push(`admission-marker  ${lineOf(path, prop)}  scimApprovalPending set to something other than the literal true outside the approve route`);
+    violations.push(`admission-marker  ${lineOf(path, prop)}  scimApprovalPending set to something other than the literal true outside the admission module`);
   }
 }
 
@@ -629,6 +654,82 @@ function checkRawColumnNameRepoWide(sourceFile, path, violations) {
     const text = Node.isStringLiteral(lit) || Node.isNoSubstitutionTemplateLiteral(lit) ? lit.getLiteralText() : lit.getText();
     if (text.includes("scim_approval_pending")) {
       violations.push(`admission-marker  ${lineOf(path, lit)}  raw access to scim_approval_pending by column name (no code needs it)`);
+    }
+  }
+}
+
+/** A module specifier as a repo-relative extension-less path (`@/` → `src/`, relative against the importer); null for a package. */
+function resolveSpecifier(importer, specifier) {
+  let resolved;
+  if (specifier.startsWith("@/")) resolved = `src/${specifier.slice(2)}`;
+  else if (specifier.startsWith(".")) resolved = posix.join(posix.dirname(importer), specifier);
+  else return null;
+  // Normalised for both forms: `@/lib/team/../team/x` and `@/lib//team/x` name the same file.
+  return posix.normalize(resolved).replace(/\.(?:[cm]?[jt]sx?)$/, "");
+}
+
+/**
+ * Every module reference of a file whose specifier is a literal: import
+ * declarations, `export … from`, `import()`, `require()` and `import x =
+ * require()`. `names` lists what an import declaration binds (`*` for a
+ * default or namespace binding, none for a side-effect import).
+ */
+function moduleReferences(sourceFile) {
+  const refs = [];
+  for (const decl of sourceFile.getImportDeclarations()) {
+    const names = decl.getNamedImports().map((n) => n.getName());
+    if (decl.getDefaultImport() || decl.getNamespaceImport()) names.push("*");
+    refs.push({ node: decl, specifier: decl.getModuleSpecifierValue(), kind: "import", names });
+  }
+  for (const decl of sourceFile.getExportDeclarations()) {
+    const specifier = decl.getModuleSpecifierValue();
+    if (specifier !== undefined) refs.push({ node: decl, specifier, kind: "export", names: [] });
+  }
+  for (const call of sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    const callee = call.getExpression();
+    const isImport = callee.getKind() === SyntaxKind.ImportKeyword;
+    if (!isImport && !(Node.isIdentifier(callee) && callee.getText() === "require")) continue;
+    const arg = call.getArguments()[0];
+    if (arg && (Node.isStringLiteral(arg) || Node.isNoSubstitutionTemplateLiteral(arg))) {
+      refs.push({ node: call, specifier: arg.getLiteralText(), kind: isImport ? "dynamic import" : "require", names: [] });
+    }
+  }
+  for (const ref of sourceFile.getDescendantsOfKind(SyntaxKind.ExternalModuleReference)) {
+    const expr = ref.getExpression();
+    if (expr && Node.isStringLiteral(expr)) refs.push({ node: ref, specifier: expr.getLiteralText(), kind: "require", names: [] });
+  }
+  return refs;
+}
+
+/** Rule 7, admission module boundary (plan C1 V7 b-d), repo-wide and before the IMPLEMENTATIONS skip. */
+function checkAdmissionModuleBoundary(sourceFile, path, violations) {
+  const isRoute = SCIM_ADMISSION_ROUTE_FILES.has(path);
+  const auditAllowed = AUDIT_IMPORT_ALLOWLIST.get(path);
+  for (const ref of moduleReferences(sourceFile)) {
+    const resolved = resolveSpecifier(path, ref.specifier);
+    if (resolved === null) continue;
+    const where = lineOf(path, ref.node);
+    if (resolved === SCIM_ADMISSION_MODULE && path !== SCIM_ADMISSION_MODULE_FILE) {
+      if (ref.kind === "export") {
+        violations.push(`admission-module  ${where}  re-exports the SCIM admission module (export … from)`);
+      } else if (!isRoute) {
+        violations.push(`admission-module  ${where}  ${ref.kind} of the SCIM admission module outside the four admission routes`);
+      }
+    }
+    if (auditAllowed && (resolved === AUDIT_LIB_DIR || resolved.startsWith(`${AUDIT_LIB_DIR}/`))) {
+      const bad = ref.kind !== "import" || resolved !== AUDIT_EMITTER_MODULE
+        ? [`${ref.kind} of ${ref.specifier}`]
+        : ref.names.filter((n) => !auditAllowed.has(n)).map((n) => `import of ${n} from ${ref.specifier}`);
+      for (const what of bad) {
+        violations.push(`admission-audit  ${where}  ${what} (only ${[...auditAllowed].join(", ")} from @/lib/audit/audit is allowed here)`);
+      }
+    }
+  }
+  if (isRoute) {
+    for (const call of sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+      if (calleeName(call) === "lockTenantRows") {
+        violations.push(`admission-module  ${lineOf(path, call)}  admission route calls lockTenantRows (the admission module takes the locks)`);
+      }
     }
   }
 }
@@ -1002,6 +1103,7 @@ for (const { rel: path, sf: sourceFile } of sourceFilesFrom(project, TARGETS, RE
   // skip below, so team-departure.ts and the lock modules stay covered.
   checkPendingMarkerRepoWide(sourceFile, path, violations);
   checkRawColumnNameRepoWide(sourceFile, path, violations);
+  checkAdmissionModuleBoundary(sourceFile, path, violations);
 
   if (IMPLEMENTATIONS.has(path)) continue;
   const checkHelpers = recipientCheckHelpers(sourceFile);
