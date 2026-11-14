@@ -63,34 +63,57 @@
  *
  * 8. GRANT RECIPIENTS (departed-member-leaked-authority-deviation.md D8). A
  *    leftover membership (an active team row whose user's tenant row departed
- *    at or after its admission) receives no grant. A grant is a `teamMember`
- *    update/updateMany/updateManyAndReturn whose `data` (an `upsert`'s
- *    `update`) names `role` or sets `keyDistributed` to the literal `true`; a
- *    `teamMemberKey.create/createMany/createManyAndReturn/upsert`; a `team`
- *    update/updateMany/upsert whose data names nested `members` /
- *    `memberKeys`; a raw `UPDATE team_members` naming `role =` or
- *    `key_distributed = true`, or `INSERT INTO team_member_keys`. Read from
- *    literals, an update is no grant when it reaches no active row (`where`
- *    names `deactivatedAt: { not: null }` or `scimApprovalPending: true`, or
- *    `data` sets `deactivatedAt: new Date(...)`) or only demotes (`where` and
- *    `data` name literal roles, the data's ranked lower).
+ *    at or after its admission) receives no grant. A grant is:
+ *    - a `teamMember` update/updateMany/updateManyAndReturn whose `data` (an
+ *      `upsert`'s `update`) names `role`, has a computed key, or sets
+ *      `keyDistributed` to anything but the literal `false`;
+ *    - any `teamMemberKey` create/createMany/createManyAndReturn/upsert/
+ *      update/updateMany/updateManyAndReturn;
+ *    - an update/updateMany/upsert of a parent naming a relation to those
+ *      tables (schema.prisma): `team` `members`/`memberKeys`, `user`
+ *      `teamMemberships`/`teamMemberKeys`, `tenant` `teamMembers`/
+ *      `teamMemberKeys` (a create's nested rows are new ones);
+ *    - a raw `UPDATE team_members` naming `role =` or `key_distributed =
+ *      true`, or `INSERT INTO team_member_keys`.
+ *    Read from literals, an update is no grant when it reaches no active row
+ *    (`where` names `deactivatedAt: { not: null }` or `scimApprovalPending:
+ *    true`, or `data` sets `deactivatedAt: new Date(...)`) or only demotes
+ *    (`where` and `data` name literal roles, the data's ranked strictly lower;
+ *    an equal rank counts as a grant).
  *
  *    Each grant must follow a RECIPIENT CHECK in its function, or in every
  *    same-file caller: a call of `actorDepartedSinceAdmission` that does not
  *    judge the acting member (its row is not keyed `session.user.id`, its
  *    admission is not an `activeTeamAdmission` result), or of a same-file
- *    function that makes one, which JUDGES THE RECIPIENT: a variable its
- *    arguments read, or one the declaration of its admission argument reads,
- *    is one the grant names its rows by (the values of `id` / `userId` in its
- *    where/data/create/update; a caller's argument for a parameter). The
+ *    function that makes one, which JUDGES EVERY RECIPIENT: each value of an
+ *    `id` / `userId` key in the grant's where/data/create/update (for a team /
+ *    tenant write, inside the nested relation only; a caller's argument for a
+ *    parameter), or each interpolation of a raw template, is one recipient, and each needs a check whose arguments, or
+ *    the declaration of whose admission argument, read every variable that
+ *    value reads; one check covers two recipients only by naming both. A
+ *    recipient set the gate cannot list one by one is UNRESOLVED and covered
+ *    by no check: a `createMany` over a mapped array or a variable, an
+ *    unreadable or spread payload, an unbounded `in`, or a
+ *    grant with no recipient key at all. The
  *    tenant-row map's declaration is not followed (one lock call holds the
- *    actor's and the target's rows). A check of some other
- *    member (the owner route's "is there an active OWNER") does not cover the
- *    grant. Admissions (a re-activation stamps a fresh admitted_at), demotions
- *    the literals cannot show, and recipients checked by set are EXEMPTIONS.
+ *    actor's and the target's rows). A check of some other member (the owner
+ *    route's "is there an active OWNER") does not cover the grant. Only a
+ *    plain value, `equals: x` or a one-element `in: [x]` names a recipient: a
+ *    `not` / `notIn` / wider `in` / unreadable operator, or a key under `NOT`
+ *    / `OR`, names everyone-but or one-of-several, which no check covers.
+ *    Admissions (a re-activation stamps a fresh admitted_at), demotions the
+ *    literals cannot show, recipients checked by set, and unreadable payloads
+ *    read by hand are EXEMPTIONS.
  *
- *    KNOWN LIMIT (rule 8): the tie is by variable name, one declaration deep.
- *    Two names for one person are not followed; one name for two is not split.
+ *    KNOWN LIMITS (rule 8): the tie is by variable name, one declaration deep;
+ *    two names for one person are not followed, one name for two is not
+ *    split. Raw SQL is seen only as a `$queryRaw` / `$executeRaw` TAGGED
+ *    template: the call form `$executeRaw(Prisma.sql\`…\`)`, a `Prisma.sql`
+ *    fragment composed elsewhere, and `*Unsafe` are not. Negation left
+ *    unseen: an operator object held in a variable (`id: filter` with
+ *    `filter = { not: x }`) is read as the name `filter`, so it ties only to
+ *    a check that names `filter`. (A whole `where` held in a variable names no
+ *    recipient: that site is uncovered, not tied.)
  *
  * A `data` / `update` that is not an object literal (an identifier, a spread)
  * cannot be read, so it counts: the gate refuses rather than skips what it
@@ -150,14 +173,15 @@ const TRANSITIONS = new Set(["departFromTenant", "returnToTenant"]);
  * approve CAS joined). scim-team-role-raise-approval: member writes +2 (the
  * SCIM raise-hold CAS of an active row and its key delete for the rows that
  * CAS returned).
- * departed-member-leaked-authority (rule 8): grants 10 — 5 recipient-checked,
- * 5 exempted.
+ * departed-member-leaked-authority (rule 8): grants 13 — 5 recipient-checked,
+ * 8 exempted (3 of them `user` / `tenant` updates whose data cannot be read,
+ * counted since the nested-relation arm covers those models).
  */
 const EXPECTED = {
   memberWrites: Number(process.env.TEAM_ROTATION_INPUT_LOCK_WRITES ?? 21),
   tenantStateWrites: Number(process.env.TEAM_ROTATION_INPUT_LOCK_TENANT_WRITES ?? 2),
   admissions: Number(process.env.TEAM_ROTATION_INPUT_LOCK_ADMISSIONS ?? 7),
-  grants: Number(process.env.TEAM_ROTATION_INPUT_LOCK_GRANTS ?? 10),
+  grants: Number(process.env.TEAM_ROTATION_INPUT_LOCK_GRANTS ?? 13),
 };
 
 /** Sites keyed `<rule>::<path>::<enclosing function>::<site>`, with the review's conclusion. */
@@ -185,6 +209,18 @@ const EXEMPTIONS = new Map([
   [
     "grant::src/app/api/teams/[teamId]/route.ts::<anonymous>::team.update",
     "unreadable data, read by hand: updateData carries name and description only (updateTeamSchema), no nested members or memberKeys",
+  ],
+  [
+    "grant::src/app/api/tenant/policy/route.ts::<anonymous>::tenant.update",
+    "unreadable data, read by hand: updateData is assigned only named policy columns (updateData.<column> = …), never teamMembers or teamMemberKeys",
+  ],
+  [
+    "grant::src/lib/auth/session/auth-adapter.ts::<anonymous>::user.update",
+    "unreadable data, read by hand: updateUser's `rest` is Auth.js's Partial<AdapterUser> (name, email, image, emailVerified), no relation fields",
+  ],
+  [
+    "grant::src/lib/vault/rotate-key-server.ts::applyVaultRotation::user.update",
+    "unreadable data (a conditional spread), read by hand: the spread adds passphraseVerifierHmac/passphraseVerifierVersion only; the rest are vault-wrapping columns, no teamMemberships or teamMemberKeys",
   ],
 ]);
 
@@ -562,13 +598,22 @@ const RECIPIENT_PREDICATE = "actorDepartedSinceAdmission";
 /** The acting member's re-read (team-auth.ts); a check of its result judges the actor, not a recipient. */
 const ACTOR_ADMISSION_READ = "activeTeamAdmission";
 
-/** Whether a `data` / `update` literal grants: names `role`, or sets `keyDistributed` to the literal `true`. */
+/**
+ * Whether a `data` / `update` literal grants: names `role` (or has a computed
+ * key), or sets `keyDistributed` to anything but the literal `false`.
+ */
 function grants(literal) {
   if (literal === undefined) return false;
-  if (mayName(literal, ["role"])) return true;
+  if (mayNameOrCompute(literal, ["role"])) return true;
   const p = literal.getProperty("keyDistributed");
   if (!p) return false;
-  return !Node.isPropertyAssignment(p) || p.getInitializer()?.getText() === "true";
+  return !Node.isPropertyAssignment(p) || p.getInitializer()?.getText() !== "false";
+}
+
+/** `mayName`, also counting a computed key (`{ ["role"]: … }`) as one that may name any of `keys`. */
+function mayNameOrCompute(literal, keys) {
+  if (literal && literal.getProperties().some((p) => Node.isPropertyAssignment(p) && Node.isComputedPropertyName(p.getNameNode()))) return true;
+  return mayName(literal, keys);
 }
 
 /**
@@ -597,7 +642,10 @@ function roleLiteral(node) {
   return name !== null && name in ROLE_RANK ? name : null;
 }
 
-/** Whether an update only demotes: its `where` and `data` name literal roles, the data's ranked lower. */
+/**
+ * Whether an update only demotes: its `where` and `data` name literal roles,
+ * the data's ranked strictly lower. An equal rank counts as a grant.
+ */
 function demotesOnly(call) {
   const data = argProp(call, "data");
   if (!data || mayName(data, ["keyDistributed"])) return false;
@@ -606,13 +654,21 @@ function demotesOnly(call) {
   return from !== null && to !== null && ROLE_RANK[to] < ROLE_RANK[from];
 }
 
+/** The relation fields (schema.prisma) through which a write of the parent writes team_members / team_member_keys. */
+const NESTED_GRANT_RELATIONS = {
+  team: ["members", "memberKeys"],
+  user: ["teamMemberships", "teamMemberKeys"],
+  tenant: ["teamMembers", "teamMemberKeys"],
+};
+
 function classifyGrant(call, mm) {
   const { model, method } = mm;
   const site = `${model}.${method}`;
-  if (model === "teamMemberKey" && ["create", "createMany", "createManyAndReturn", "upsert"].includes(method)) return site;
-  // A nested write from a team that exists (team.create's nested rows are the creator's).
-  if (model === "team" && ["update", "updateMany", "upsert"].includes(method)
-    && mayName(argProp(call, method === "upsert" ? "update" : "data"), ["members", "memberKeys"])) return site;
+  if (model === "teamMemberKey" && ["create", "createMany", "createManyAndReturn", "upsert", "update", "updateMany", "updateManyAndReturn"].includes(method)) return site;
+  // A nested write from a parent that exists (a create's nested rows are new ones).
+  const relations = NESTED_GRANT_RELATIONS[model];
+  if (relations && ["update", "updateMany", "upsert"].includes(method)
+    && mayNameOrCompute(argProp(call, method === "upsert" ? "update" : "data"), relations)) return site;
   if (model !== "teamMember") return null;
   if ((method === "update" || method === "updateMany" || method === "updateManyAndReturn")
     && grants(argProp(call, "data")) && !reachesNoActiveRow(call) && !demotesOnly(call)) return site;
@@ -651,27 +707,95 @@ function namesIn(node) {
 }
 
 const RECIPIENT_KEYS = new Set(["id", "userId"]);
+const NEGATING_FILTERS = new Set(["NOT", "OR"]);
+/** A recipient no variable names (everyone but x, one of several): no check ties to it. */
+const UNRESOLVED = "\u0000unresolved";
 
 /**
- * Who a grant reaches, as the variables it names them by: the values of every
- * `id` / `userId` key in its `where` / `data` / `create` / `update`, or every
- * interpolation of a raw template.
+ * The variables one `id` / `userId` value names: a plain value, `equals: x`,
+ * or `in: [x]` with one element. Any other operator object (`not`, `notIn`,
+ * a wider `in`, a spread, a computed key) is UNRESOLVED.
  */
-function recipientNames(node) {
+function recipientValueNames(value) {
+  if (!value) return [UNRESOLVED];
+  if (!Node.isObjectLiteralExpression(value)) return namesIn(value);
+  const props = value.getProperties();
+  if (props.length !== 1 || !Node.isPropertyAssignment(props[0]) || Node.isComputedPropertyName(props[0].getNameNode())) return [UNRESOLVED];
+  const op = propertyKeyName(props[0]);
+  const operand = props[0].getInitializer();
+  if (op === "equals") return namesIn(operand);
+  if (op === "in" && operand && Node.isArrayLiteralExpression(operand) && operand.getElements().length === 1) {
+    const [el] = operand.getElements();
+    if (Node.isIdentifier(el) || Node.isPropertyAccessExpression(el)) return namesIn(el);
+  }
+  return [UNRESOLVED];
+}
+
+/** Whether a write payload is unreadable: not an object literal (or an array of them) free of spreads. */
+function unreadablePayload(node) {
+  if (node === undefined) return false;
+  const readable = (n) => n && Node.isObjectLiteralExpression(n) && !n.getProperties().some((p) => Node.isSpreadAssignment(p));
+  if (node && Node.isArrayLiteralExpression(node)) return !node.getElements().every(readable);
+  return !readable(node);
+}
+
+/** The containers whose `id` / `userId` keys name a grant's recipients, and whether one cannot be read. */
+function recipientContainers(call) {
+  const mm = modelAndMethod(call);
+  const arg = call.getArguments()[0];
+  const relations = mm && NESTED_GRANT_RELATIONS[mm.model];
+  if (relations && mm.model !== "user") {
+    // A team / tenant write: its own `where` names the parent, not a member.
+    const payload = rawProp(arg, mm.method === "upsert" ? "update" : "data");
+    if (!payload || !Node.isObjectLiteralExpression(payload)) return { containers: [], unreadable: true };
+    const nested = relations.map((r) => rawProp(payload, r)).filter((n) => n !== undefined);
+    return { containers: nested, unreadable: nested.some((n) => n === null || !Node.isObjectLiteralExpression(n)) };
+  }
+  const keys = ["where", "data", "create", "update"];
+  const containers = keys.map((k) => rawProp(arg, k)).filter((n) => n !== undefined);
+  const creating = mm && ["create", "createMany", "createManyAndReturn"].includes(mm.method);
+  const unreadable = containers.includes(null)
+    || unreadablePayload(rawProp(arg, "where"))
+    || (creating && unreadablePayload(rawProp(arg, "data")))
+    || (mm?.method === "upsert" && unreadablePayload(rawProp(arg, "create")));
+  return { containers, unreadable };
+}
+
+/**
+ * Who a grant reaches, one entry per recipient, each the variables it is named
+ * by: the value of every `id` / `userId` key in its `where` / `data` /
+ * `create` / `update` (for a team / tenant write, inside the nested relation
+ * only), or every interpolation of a raw template. UNRESOLVED stands for a
+ * recipient no variable names one by one: a key under `NOT` / `OR`, a value
+ * from recipientValueNames' refusals, a literal, an unreadable payload or
+ * nested write (a mapped or variable array among them), or no recipient key
+ * at all.
+ */
+function recipients(node) {
   if (Node.isTaggedTemplateExpression(node)) {
     const template = node.getTemplate();
-    return new Set(Node.isTemplateExpression(template) ? template.getTemplateSpans().flatMap((sp) => namesIn(sp.getExpression())) : []);
+    const spans = Node.isTemplateExpression(template) ? template.getTemplateSpans().map((sp) => namesIn(sp.getExpression())) : [];
+    return spans.length === 0 ? [[UNRESOLVED]] : spans.map((n) => (n.length === 0 ? [UNRESOLVED] : n));
   }
-  const names = new Set();
-  const arg = node.getArguments()[0];
-  for (const container of ["where", "data", "create", "update"].map((k) => rawProp(arg, k))) {
+  const { containers, unreadable } = recipientContainers(node);
+  const found = unreadable ? [[UNRESOLVED]] : [];
+  for (const container of containers) {
     if (!container) continue;
     for (const p of [...container.getDescendantsOfKind(SyntaxKind.PropertyAssignment), ...container.getDescendantsOfKind(SyntaxKind.ShorthandPropertyAssignment)]) {
-      if (!RECIPIENT_KEYS.has(propertyKeyName(p))) continue;
-      for (const n of Node.isShorthandPropertyAssignment(p) ? [p.getName()] : namesIn(p.getInitializer())) names.add(n);
+      const key = propertyKeyName(p);
+      if ((key === "create" || key === "data") && Node.isPropertyAssignment(p) && unreadablePayload(p.getInitializer())) {
+        found.push([UNRESOLVED]);
+        continue;
+      }
+      if (!RECIPIENT_KEYS.has(key)) continue;
+      const negated = p.getAncestors().some((a) => container.containsRange(a.getPos(), a.getEnd())
+        && Node.isPropertyAssignment(a) && NEGATING_FILTERS.has(propertyKeyName(a)));
+      const value = Node.isShorthandPropertyAssignment(p) ? p.getNameNode() : p.getInitializer();
+      const names = negated ? [UNRESOLVED] : recipientValueNames(value);
+      found.push(names.length === 0 ? [UNRESOLVED] : names);
     }
   }
-  return names;
+  return found.length === 0 ? [[UNRESOLVED]] : found;
 }
 
 /**
@@ -715,31 +839,39 @@ function checkedNames(call) {
   return names;
 }
 
-/** A recipient check before `pos` in `fn` that judges one of `names`. */
-function checksRecipientBefore(fn, helpers, pos, names) {
-  return fn.getDescendantsOfKind(SyntaxKind.CallExpression).some((c) => c.getStart() < pos
-    && (isRecipientCheck(c) || helpers.has(calleeName(c)))
-    && [...checkedNames(c)].some((n) => names.has(n)));
+/**
+ * Whether every recipient (a list of the variables it is named by) is judged
+ * by a recipient check before `pos` in `fn`: each recipient by a check naming
+ * every variable it is named by, so one check covers two recipients only by
+ * naming both.
+ */
+function checksRecipientsBefore(fn, helpers, pos, recipientList) {
+  const checks = fn.getDescendantsOfKind(SyntaxKind.CallExpression)
+    .filter((c) => c.getStart() < pos && (isRecipientCheck(c) || helpers.has(calleeName(c))))
+    .map(checkedNames);
+  return recipientList.every((names) => checks.some((checked) => names.every((n) => checked.has(n))));
 }
 
 /**
- * Rule 8's `covered`: a check of the grant's recipient precedes it in its
- * function, or in every same-file caller's (a recipient the function names by
- * a parameter is named by that caller's argument).
+ * Rule 8's `covered`: a check of each of the grant's recipients precedes it
+ * in its function, or in every same-file caller's (a recipient the function
+ * names by a parameter is named by that caller's argument).
  */
 function recipientChecked(sourceFile, node, helpers) {
   const fn = enclosingFunction(node);
   if (fn === null) return false;
-  const names = recipientNames(node);
-  if (checksRecipientBefore(fn, helpers, node.getStart(), names)) return true;
+  const recipientList = recipients(node);
+  if (recipientList.some((names) => names.includes(UNRESOLVED))) return false;
+  if (checksRecipientsBefore(fn, helpers, node.getStart(), recipientList)) return true;
   const name = functionName(fn);
   if (name === "<anonymous>" || name === "<module>") return false;
   const params = fn.getParameters().map((p) => p.getName());
   const calls = sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression).filter((c) => calleeName(c) === name);
   return calls.length > 0 && calls.every((c) => {
     const caller = enclosingFunction(c);
-    const callerNames = new Set([...names].flatMap((n) => (params.includes(n) ? namesIn(c.getArguments()[params.indexOf(n)]) : [n])));
-    return caller !== null && checksRecipientBefore(caller, helpers, c.getStart(), callerNames);
+    const callerList = recipientList.map((names) => names.flatMap((n) => (params.includes(n) ? namesIn(c.getArguments()[params.indexOf(n)]) : [n])));
+    if (callerList.some((names) => names.length === 0)) return false;
+    return caller !== null && checksRecipientsBefore(caller, helpers, c.getStart(), callerList);
   });
 }
 

@@ -39,9 +39,25 @@ export async function applyAddOperations(tx, ids, teamId, previousRole, role) {
   "src/app/api/teams/[teamId]/route.ts": `
 export const patch = withTeamTenantRls(teamId, async () => prisma.team.update({ where: { id: teamId }, data: updateData }));
 `,
+  "src/app/api/tenant/policy/route.ts": `
+export const put = withTenantRls(prisma, tenantId, async (tx) => tx.tenant.update({ where: { id: tenantId }, data: updateData }));
+`,
+  "src/lib/auth/session/auth-adapter.ts": `
+export const adapter = {
+  async updateUser(data) {
+    const { id, ...rest } = data;
+    return withBypassRls(prisma, async (tx) => tx.user.update({ where: { id }, data: rest }));
+  },
+};
+`,
+  "src/lib/vault/rotate-key-server.ts": `
+export async function applyVaultRotation(tx, userId, payload) {
+  await tx.user.update({ where: { id: userId }, data: { keyVersion: 2, ...(payload.v ? { passphraseVerifierVersion: 1 } : {}) } });
+}
+`,
 };
 const EXEMPT_ADMISSIONS = 1;
-const EXEMPT_GRANTS = 5;
+const EXEMPT_GRANTS = 8;
 
 let root;
 
@@ -653,6 +669,13 @@ export async function promote(tx, memberId) {
       expectDenied(run({ grants: 1 }), GRANT_KEY);
     });
 
+    it("still classifies the owner route's demotion of every other OWNER (id: { not }) as a demotion", () => {
+      write(SUBJECT, `export async function demote(tx, target) {
+  await tx.teamMember.updateMany({ where: { teamId, role: TEAM_ROLE.OWNER, id: { not: target.id } }, data: { role: TEAM_ROLE.ADMIN } });
+}`);
+      expect(run().code).toBe(0);
+    });
+
     it("does not count an update that reaches no active row", () => {
       write(SUBJECT, `export async function hold(tx, ids, role) {
   await tx.teamMember.updateMany({ where: { id: { in: ids }, deactivatedAt: { not: null } }, data: { role } });
@@ -685,6 +708,164 @@ export async function promote(tx, memberId) {
   await tx.teamMember.update({ where: { id: target.id }, data: { role: "ADMIN" } });
 }`);
       expectDenied(run({ grants: 0 }), /differ from the pinned/);
+    });
+
+    // RT10 twins: each grant arm, unchecked (denied on its own site key in the
+    // uncovered list) and the same body behind a recipient check (accepted).
+    const uncovered = (site) => new RegExp(`sites without their lock[^]*grant::src/lib/team/subject\\.ts::promote::${site.replace(/\./g, "\\.")}\\n`);
+    const LOCK = "await lockTeamsAgainstRotation(tx, [teamId]);";
+    const ARMS = [
+      // T8: the nested-relation, key-write and equal-rank arms.
+      { label: "team.update nested memberKeys.create", site: "team.update", grant: "await tx.team.update({ where: { id: teamId }, data: { memberKeys: { create: [{ userId: target.userId, keyVersion: 2 }] } } });" },
+      { label: "team.update nested members.update", site: "team.update", grant: "await tx.team.update({ where: { id: teamId }, data: { members: { update: { where: { id: target.id }, data: { role: \"ADMIN\" } } } } });" },
+      { label: "team.update nested members.create", site: "team.update", grant: "await tx.team.update({ where: { id: teamId }, data: { members: { create: { userId: target.userId, role: \"ADMIN\" } } } });" },
+      { label: "teamMemberKey.createManyAndReturn", site: "teamMemberKey.createManyAndReturn", grant: "await tx.teamMemberKey.createManyAndReturn({ data: [{ teamId, userId: target.userId }] });" },
+      { label: "teamMemberKey.upsert", site: "teamMemberKey.upsert", grant: "await tx.teamMemberKey.upsert({ where: { teamId_userId_keyVersion: { teamId, userId: target.userId, keyVersion: 2 } }, create: { teamId, userId: target.userId }, update: {} });" },
+      { label: "an equal-rank role update (ADMIN to ADMIN)", site: "teamMember.updateMany", grant: "await tx.teamMember.updateMany({ where: { id: target.id, role: \"ADMIN\" }, data: { role: \"ADMIN\" } });" },
+      // R3-N2 (a): keyDistributed set to anything but the literal false.
+      { label: "keyDistributed set from a variable", site: "teamMember.updateMany", writes: 2, grant: `${LOCK} await tx.teamMember.updateMany({ where: { id: target.id }, data: { keyDistributed: distributed } });` },
+      { label: "keyDistributed: !true", site: "teamMember.updateMany", writes: 2, grant: `${LOCK} await tx.teamMember.updateMany({ where: { id: target.id }, data: { keyDistributed: !true } });` },
+      // R3-N2 (b): teamMemberKey updates.
+      { label: "teamMemberKey.update", site: "teamMemberKey.update", grant: "await tx.teamMemberKey.update({ where: { teamId_userId_keyVersion: { teamId, userId: target.userId, keyVersion: 2 } }, data: { encryptedTeamKey } });" },
+      { label: "teamMemberKey.updateMany", site: "teamMemberKey.updateMany", grant: "await tx.teamMemberKey.updateMany({ where: { teamId, userId: target.userId }, data: { encryptedTeamKey } });" },
+      { label: "teamMemberKey.updateManyAndReturn", site: "teamMemberKey.updateManyAndReturn", grant: "await tx.teamMemberKey.updateManyAndReturn({ where: { teamId, userId: target.userId }, data: { encryptedTeamKey } });" },
+      // R3-N2 (c): nested writes through user and tenant (schema.prisma relation fields).
+      { label: "user.update nested teamMemberships", site: "user.update", grant: "await tx.user.update({ where: { id: target.userId }, data: { teamMemberships: { update: { where: { id: target.id }, data: { role: \"ADMIN\" } } } } });" },
+      { label: "user.update nested teamMemberKeys", site: "user.update", grant: "await tx.user.update({ where: { id: target.userId }, data: { teamMemberKeys: { create: { teamId, keyVersion: 2 } } } });" },
+      { label: "tenant.update nested teamMembers", site: "tenant.update", grant: "await tx.tenant.update({ where: { id: tenantId }, data: { teamMembers: { update: { where: { id: target.id }, data: { role: \"ADMIN\" } } } } });" },
+      { label: "tenant.upsert nested teamMemberKeys", site: "tenant.upsert", grant: "await tx.tenant.upsert({ where: { id: tenantId }, create: {}, update: { teamMemberKeys: { create: { teamId, userId: target.userId } } } });" },
+      // R3-N2 (d): a computed key cannot be read, so it counts.
+      { label: "role behind a computed key", site: "teamMember.update", grant: "await tx.teamMember.update({ where: { id: target.id }, data: { [\"role\"]: \"ADMIN\" } });" },
+    ];
+    for (const { label, site, grant, writes = 1 } of ARMS) {
+      it(`refuses an unchecked ${label}`, () => {
+        write(SUBJECT, `export async function promote(tx, rows, target) {\n  ${grant}\n}`);
+        expectDenied(run({ writes, grants: 1 }), uncovered(site));
+      });
+
+      it(`accepts the same ${label} after a recipient check`, () => {
+        write(SUBJECT, `export async function promote(tx, rows, target) {\n  ${CHECK}\n  ${grant}\n}`);
+        expect(run({ writes, grants: 1 }).code).toBe(0);
+      });
+    }
+
+    // R3-N1: only a plain value, `equals` or a one-element `in` names the
+    // recipient; everyone-but or one-of-several is covered by no check. Each
+    // deny follows the same check its allow twin is covered by.
+    const NAMED = [
+      ["a plain id", "{ id: target.id }"],
+      ["equals", "{ id: { equals: target.id } }"],
+      ["a one-element in", "{ id: { in: [target.id] } }"],
+      ["a plain userId", "{ teamId, userId: target.userId }"],
+    ];
+    const NEGATED = [
+      ["not", "{ teamId, id: { not: target.id } }"],
+      ["notIn", "{ teamId, userId: { notIn: [target.userId] } }"],
+      ["NOT", "{ teamId, NOT: { id: target.id } }"],
+      ["OR", "{ teamId, OR: [{ id: target.id }, { id: other.id }] }"],
+      ["a wider in", "{ id: { in: [target.id, other.id] } }"],
+      ["an operator object with a spread", "{ id: { ...filter } }"],
+    ];
+    it("refuses a grant naming target beside a negated recipient (the parent is target, the rows everyone else's)", () => {
+      const grant = "await tx.user.update({ where: { id: target.userId }, data: { teamMemberships: { updateMany: { where: { id: { not: target.id } }, data: { role: \"ADMIN\" } } } } });";
+      write(SUBJECT, `export async function promote(tx, rows, target) {\n  ${CHECK}\n  ${grant}\n}`);
+      expectDenied(run({ grants: 1 }), uncovered("user.update"));
+    });
+
+    // Every recipient a grant names needs its own check; a set the gate
+    // cannot list one by one is UNRESOLVED (only an exemption covers it).
+    const CHECK_OTHER = "if (actorDepartedSinceAdmission(rows.get(other.userId), other.admittedAt ?? other.createdAt)) return;";
+    const MULTI = [
+      ["teamMemberKey.createMany to two recipients", "teamMemberKey.createMany", "await tx.teamMemberKey.createMany({ data: [{ teamId, userId: target.userId }, { teamId, userId: other.userId }] });"],
+      ["team.update nested members.create of two recipients", "team.update", "await tx.team.update({ where: { id: teamId }, data: { members: { create: [{ userId: target.userId, role: \"ADMIN\" }, { userId: other.userId, role: \"ADMIN\" }] } } });"],
+    ];
+    for (const [label, site, grant] of MULTI) {
+      it(`refuses a ${label} with only one checked`, () => {
+        write(SUBJECT, `export async function promote(tx, rows, target, other) {\n  ${CHECK}\n  ${grant}\n}`);
+        expectDenied(run({ grants: 1 }), uncovered(site));
+      });
+
+      it(`accepts a ${label} with both checked`, () => {
+        write(SUBJECT, `export async function promote(tx, rows, target, other) {\n  ${CHECK}\n  ${CHECK_OTHER}\n  ${grant}\n}`);
+        expect(run({ grants: 1 }).code).toBe(0);
+      });
+    }
+
+    const PICKED = "await tx.teamMember.updateMany({ where: { id: pick(target, other).id }, data: { role: \"ADMIN\" } });";
+    it("refuses a recipient named by an expression over two variables when no one check names them all", () => {
+      write(SUBJECT, `export async function promote(tx, rows, target, other) {\n  ${CHECK}\n  ${CHECK_OTHER}\n  ${PICKED}\n}`);
+      expectDenied(run({ grants: 1 }), uncovered("teamMember.updateMany"));
+    });
+
+    it("accepts the same recipient after one check naming every variable it is named by", () => {
+      write(SUBJECT, `export async function promote(tx, rows, target, other) {
+  if (actorDepartedSinceAdmission(rows.get(pick(target, other).userId), pick(target, other).admittedAt)) return;
+  ${PICKED}
+}`);
+      expect(run({ grants: 1 }).code).toBe(0);
+    });
+
+    const UNRESOLVED_SETS = [
+      // The callback parameter shadows the checked `target`: one element's check is not the set's.
+      ["createMany over a mapped array", "teamMemberKey.createMany", "await tx.teamMemberKey.createMany({ data: targets.map((target) => ({ teamId, userId: target.userId })) });"],
+      ["createMany over an array held in a variable", "teamMemberKey.createMany", "await tx.teamMemberKey.createMany({ data: keys });"],
+      ["create whose data is a spread", "teamMemberKey.create", "await tx.teamMemberKey.create({ data: { ...key, userId: target.userId } });"],
+      ["role update over an unbounded in", "teamMember.updateMany", "await tx.teamMember.updateMany({ where: { id: { in: target.teamMemberIds } }, data: { role: \"ADMIN\" } });"],
+      ["role update whose where has a spread", "teamMember.updateMany", "await tx.teamMember.updateMany({ where: { ...filter, id: target.id }, data: { role: \"ADMIN\" } });"],
+      ["role update naming no recipient (the whole team)", "teamMember.updateMany", "await tx.teamMember.updateMany({ where: { teamId }, data: { role: \"ADMIN\" } });"],
+      ["nested members.create whose payload is a variable, beside a named update", "team.update", "await tx.team.update({ where: { id: teamId }, data: { members: { create: rows, update: { where: { id: target.id }, data: { role: \"ADMIN\" } } } } });"],
+    ];
+    for (const [label, site, grant] of UNRESOLVED_SETS) {
+      it(`refuses a ${label} even after a check of target (UNRESOLVED)`, () => {
+        write(SUBJECT, `export async function promote(tx, rows, target, targets, keys, key, ids, filter) {\n  ${CHECK}\n  ${grant}\n}`);
+        expectDenied(run({ grants: 1 }), uncovered(site));
+      });
+    }
+
+    it("accepts the createMany twin over a literal array of checked recipients", () => {
+      write(SUBJECT, `export async function promote(tx, rows, target) {\n  ${CHECK}\n  await tx.teamMemberKey.createMany({ data: [{ teamId, userId: target.userId }] });\n}`);
+      expect(run({ grants: 1 }).code).toBe(0);
+    });
+
+    it("accepts the in twin with one checked element", () => {
+      write(SUBJECT, `export async function promote(tx, rows, target) {\n  ${CHECK}\n  await tx.teamMember.updateMany({ where: { id: { in: [target.id] } }, data: { role: "ADMIN" } });\n}`);
+      expect(run({ grants: 1 }).code).toBe(0);
+    });
+
+    it("accepts the team-wide twin naming its row", () => {
+      write(SUBJECT, `export async function promote(tx, rows, target) {\n  ${CHECK}\n  await tx.teamMember.updateMany({ where: { teamId, id: target.id }, data: { role: "ADMIN" } });\n}`);
+      expect(run({ grants: 1 }).code).toBe(0);
+    });
+
+    for (const [label, where] of NAMED) {
+      it(`ties a check of target to ${label}`, () => {
+        write(SUBJECT, `export async function promote(tx, rows, target, other) {\n  ${CHECK}\n  await tx.teamMember.updateMany({ where: ${where}, data: { role: "ADMIN" } });\n}`);
+        expect(run({ grants: 1 }).code).toBe(0);
+      });
+    }
+    for (const [label, where] of NEGATED) {
+      it(`does not tie a check of target to ${label}`, () => {
+        write(SUBJECT, `export async function promote(tx, rows, target, other) {\n  ${CHECK}\n  await tx.teamMember.updateMany({ where: ${where}, data: { role: "ADMIN" } });\n}`);
+        expectDenied(run({ grants: 1 }), uncovered("teamMember.updateMany"));
+      });
+    }
+
+    const RETURN_LOCKS = "await lockTenantRows(tx, t, [target.userId], \"share\"); await lockTeamsAgainstRotation(tx, [teamId]);";
+
+    it("does not count a role update whose data deactivates the row (deactivatedAt: new Date())", () => {
+      write(SUBJECT, `export async function promote(tx, rows, target) {
+  ${RETURN_LOCKS}
+  await tx.teamMember.update({ where: { id: target.id }, data: { deactivatedAt: new Date(), role: "ADMIN" } });
+}`);
+      expect(run({ writes: 2 }).code).toBe(0);
+    });
+
+    it("counts the same role update with deactivatedAt: null", () => {
+      write(SUBJECT, `export async function promote(tx, rows, target) {
+  ${RETURN_LOCKS}
+  await tx.teamMember.update({ where: { id: target.id }, data: { deactivatedAt: null, role: "ADMIN" } });
+}`);
+      expectDenied(run({ writes: 2, admissions: 1, grants: 1 }), uncovered("teamMember.update"));
     });
 
     it("fails the count when a grant site disappears", () => {

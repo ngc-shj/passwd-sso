@@ -1,6 +1,6 @@
 # Code Review: departed-member-leaked-authority
 Date: 2026-11-14
-Review round: 2
+Review round: 3
 
 ## Changes from Previous Round
 
@@ -162,3 +162,44 @@ T7 implemented, unpinned (recorded as unreachable defense in depth, D9).
 - Testing N3: recorded unreachable (D9).
 - Testing N4: teamId cell (red-proved); allow case at 1 ms before admission.
 - A2: docstring updated.
+
+## Round 3 (incremental: 52c0ae17d..da7a23ebb)
+
+Previous findings: all round-2 findings resolved; Testing N3 accepted as unreachable (D9).
+
+### Security / Functionality (combined)
+- **R3-N1 [Minor]** Rule 8 tied a negated recipient (`id: { not: x }`) to a check of x.
+- **R3-N2 [Minor]** Uncounted grant shapes: non-literal `keyDistributed`, `teamMemberKey.update*`,
+  nested `user`/`tenant` relation writes, computed keys; the header overstated fail-closed.
+- **R3-N3 [Minor]** The ownerless listing bound every stamped user of the tenant as one `notIn`.
+- **R3-N4 [Minor, docs]** The accepted widening for an OWNER re-admitted before
+  `20261114000000` was not written down.
+
+### Testing
+- **T8 [Major]** Rule 8 arms (nested `memberKeys`/`members`, `createManyAndReturn`, `upsert`,
+  the `deactivatedAt: new Date()` shape, the demotion tie) were unproven by self-tests.
+- **T9 [Minor]** The ownerless `notIn` content was `expect.any(Array)`.
+- **T10 [Minor]** The contain cell's post-assertion no longer discriminated contain.
+
+### Resolution Status (round 3)
+- T8, R3-N1, R3-N2: rule 8 extended and self-tested; every arm has a deny cell and an allow twin,
+  each red-proved by its own gate mutant (19 mutants). Negated or unreadable recipients resolve
+  only through a reviewed exemption. Newly counted shapes found no ungated grant; three real sites
+  whose data the gate cannot read (`tenant/policy` `tenant.update`, the auth adapter's
+  `user.update`, `applyVaultRotation`'s `user.update`) were read by hand and exempted. Pinned
+  counts: grants 13 (5 recipient-checked, 8 exempted). Header KNOWN LIMITS restated.
+- R3-N3 / T9: the ownerless listing reads the tenant's active OWNER rows first and queries the
+  ownerless teams plus the teams owned only by leftovers; a unit cell pins that list exactly
+  (red-proved).
+- R3-N4: D9 states the R43 comparison and why it is accepted; the runbook asks the tenant admin to
+  confirm a listed OWNER is a leak first.
+- T10: the post-contain assertion removed; the cell is retitled; `expectContained` pins contain.
+
+### External review (after round 3)
+- **[Medium]** Rule 8 accepted a multi-recipient grant when `some` recipient was checked
+  (e.g. `teamMemberKey.createMany` to target and other with only target checked).
+- Action: recipients are listed one per `id`/`userId` value; coverage requires `every` recipient
+  tied to a check naming all its variables; a recipient set that cannot be listed one by one
+  (mapped or variable `createMany` data, spreads, unbounded `in`, no recipient key) is UNRESOLVED
+  and needs a reviewed exemption. Real repo unchanged (grants 13: 5 checked, 8 exempted).
+  Red-proved: `every`→`some` fails both partial-check cells; 8 mutants, each failing its cell.

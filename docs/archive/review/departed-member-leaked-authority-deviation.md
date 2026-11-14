@@ -115,9 +115,21 @@ follow. `check-team-rotation-input-lock` counts are unchanged.
   ADMIN, which a team admin can then remove. A leftover target is refused (`NOT_ACTIVE`). Owner
   tenant rows are read unlocked (D8). The listing pre-filters in the query to a superset (an OWNER
   with no deactivated tenant row and no departure record cannot be leftover) and decides exactly
-  in code. The stamped users are read first and passed as `userId: { notIn }`: a filter through
-  the required User relation is refused by `check-required-user-relation`, because a tenant
-  context hides the User row of someone filed under another tenant. The operator-scripts contain
+  in code. The listing reads the tenant's active OWNER rows first, judges them, and queries the
+  ownerless teams plus the teams owned only by leftovers (`id: { in }`, a residue-sized list). A
+  filter through the required User relation is refused by `check-required-user-relation`, because
+  a tenant context hides the User row of someone filed under another tenant; an earlier version
+  bound every stamped user of the tenant as `notIn`, which grows with the tenant's history.
+- **Accepted widening (R43).** An OWNER legitimately re-admitted before
+  `20261114000000_team_member_admitted_at` (NULL `admitted_at`, a departure later than
+  `created_at`) is indistinguishable from a leftover, so the team is listed as ownerless and a
+  tenant admin can assign another owner, demoting them. Before, the route answered `HAS_OWNER`.
+  Accepted because C4 already refuses that OWNER as an actor (the team is unmanageable either
+  way), the assignment needs `TEAM_OWNER_ASSIGN` plus step-up, self-assignment stays tenant-OWNER
+  only, the target must be a non-leftover active member, and the demotion is audited in the same
+  transaction. The demotion is not reversible by a transfer (D8 refuses a leftover target):
+  recovery is to remove and re-invite the member. The runbook asks the tenant admin to confirm a
+  listed OWNER is a leak first. The operator-scripts contain
   cell now expects a team with a leaked OWNER to be listed as ownerless before contain too.
 - **Gate rule 8 (GRANT RECIPIENTS)** in `check-team-rotation-input-lock`. The recipient set grew
   twice under review (3 sites in round 1, the owner route in round 2), so per the review loop's

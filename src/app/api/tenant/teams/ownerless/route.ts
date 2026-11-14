@@ -29,28 +29,31 @@ async function handleGET(_req: NextRequest) {
   }
 
   const { teams, tenantRows } = await withTenantRls(prisma, actor.tenantId, async (tx) => {
-    // Candidates: teams with no active OWNER whose user has never left this
-    // tenant. A leftover OWNER (tenant row departed at or after their team
-    // admission) counts as absent, which needs a departure stamp — a
-    // deactivated tenant row or a departure record; the exact comparison with
-    // the admission is made below on these teams only. The stamped users are
-    // read first, not filtered through the User relation, which a tenant
-    // context hides for a user filed under another tenant.
-    const deactivated = await tx.tenantMember.findMany({
-      where: { tenantId: actor.tenantId, deactivatedAt: { not: null } },
-      select: { userId: true },
+    // Candidates: teams with no active OWNER, and teams whose every active
+    // OWNER is a leftover (tenant row departed at or after their team
+    // admission), which counts as absent. The active OWNER rows are at most a
+    // few per team, so they are read and judged first; the teams owned only by
+    // leftovers are residue, a short list. Tenant rows are read by user id, not
+    // through the User relation, which a tenant context hides for a user filed
+    // under another tenant.
+    const owners = await tx.teamMember.findMany({
+      where: { tenantId: actor.tenantId, role: TEAM_ROLE.OWNER, deactivatedAt: null },
+      select: { teamId: true, userId: true, admittedAt: true, createdAt: true },
     });
-    const departures = await tx.tenantMemberDeparture.findMany({
-      where: { tenantId: actor.tenantId },
-      select: { userId: true },
-    });
-    const stamped = [...new Set([...deactivated, ...departures].map((r) => r.userId))];
+    const ownerRows = await readTenantRows(tx, actor.tenantId, [...new Set(owners.map((o) => o.userId))]);
+    const liveOwned = new Set(
+      owners
+        .filter((o) => !actorDepartedSinceAdmission(ownerRows.get(o.userId), o.admittedAt ?? o.createdAt))
+        .map((o) => o.teamId),
+    );
+    const leftoverOwnedOnly = [...new Set(owners.map((o) => o.teamId))].filter((id) => !liveOwned.has(id));
     const teams = await tx.team.findMany({
       where: {
         tenantId: actor.tenantId,
-        members: {
-          none: { role: TEAM_ROLE.OWNER, deactivatedAt: null, userId: { notIn: stamped } },
-        },
+        OR: [
+          { members: { none: { role: TEAM_ROLE.OWNER, deactivatedAt: null } } },
+          { id: { in: leftoverOwnedOnly } },
+        ],
       },
       select: {
         id: true,

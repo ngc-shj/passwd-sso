@@ -52,6 +52,9 @@ deploy`. Run them with `psql -v ON_ERROR_STOP=1 -f <file>`.
    that member is the team's OWNER, nobody can remove them: the team counts as
    ownerless, so the tenant admin first assigns a new OWNER (the leftover row is
    demoted to ADMIN by that assignment), and the new OWNER then removes them.
+   Confirm the OWNER is a leak first (step 5): an OWNER legitimately re-admitted
+   before `20261114000000_team_member_admitted_at` is listed the same way, and
+   an assignment demotes them; recovering them means removing and re-inviting.
 
 **For every membership the migration or the contain script ended** (found by
 `TEAM_MEMBER_TENANT_DEACTIVATE` records whose `metadata.backfill` is

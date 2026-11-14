@@ -5,6 +5,7 @@ const {
   mockAuth,
   mockRequireTenantPermission,
   mockTeamFindMany,
+  mockTeamMemberFindMany,
   mockTenantMemberFindMany,
   mockDepartureFindMany,
   mockBuildDisplay,
@@ -12,6 +13,7 @@ const {
   mockAuth: vi.fn(),
   mockRequireTenantPermission: vi.fn(),
   mockTeamFindMany: vi.fn(),
+  mockTeamMemberFindMany: vi.fn(),
   mockTenantMemberFindMany: vi.fn(),
   mockDepartureFindMany: vi.fn(),
   mockBuildDisplay: vi.fn(),
@@ -25,6 +27,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
   withTenantRls: async (_prisma: unknown, _tenantId: string, fn: (tx: unknown) => unknown) =>
     fn({
       team: { findMany: mockTeamFindMany },
+      teamMember: { findMany: mockTeamMemberFindMany },
       tenantMember: { findMany: mockTenantMemberFindMany },
       tenantMemberDeparture: { findMany: mockDepartureFindMany },
     }),
@@ -61,7 +64,7 @@ function seedTenant(
   rows: { userId: string; deactivatedAt?: Date | null }[],
   departures: { userId: string; departedAt: Date }[] = [],
 ) {
-  // Two shapes: the stamped-user pre-read (no userId filter) and readTenantRows (userId in).
+  // readTenantRows reads by userId; the no-filter shape is tolerated for safety.
   type Args = { where: { userId?: { in: string[] }; deactivatedAt?: unknown } };
   const wanted = (args: Args, userId: string) => args.where.userId === undefined || args.where.userId.in.includes(userId);
   mockTenantMemberFindMany.mockImplementation(async (args: Args) =>
@@ -82,6 +85,13 @@ describe("GET /api/tenant/teams/ownerless", () => {
     mockAuth.mockResolvedValue({ user: { id: "admin-1" } });
     mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant-1", role: "ADMIN" });
     mockTeamFindMany.mockResolvedValue([]);
+    // The active OWNER rows the route reads first: those of the teams a test
+    // seeds (read through the mock's implementation, so no call is recorded).
+    mockTeamMemberFindMany.mockImplementation(async () => {
+      const seeded = ((await mockTeamFindMany.getMockImplementation()?.()) ?? []) as ReturnType<typeof team>[];
+      return seeded.flatMap((t) => t.members.filter((m) => m.role === TEAM_ROLE.OWNER)
+        .map((m) => ({ teamId: t.id, userId: m.userId, admittedAt: m.admittedAt, createdAt: m.createdAt })));
+    });
     seedTenant([]);
     mockBuildDisplay.mockImplementation(async (rows: { userId: string; role: string }[]) =>
       rows.map((r) => ({ userId: r.userId, role: r.role, name: null, email: `${r.userId}@test.com` })));
@@ -111,19 +121,19 @@ describe("GET /api/tenant/teams/ownerless", () => {
     expect(json.teams).toEqual([
       { id: "team-1", name: "Core", slug: "core", members: [{ userId: "u1", role: "ADMIN", name: "Ann", email: "ann@test.com" }] },
     ]);
-    // The query pre-filters on an OWNER who never left this tenant (no
-    // departure stamp), read first rather than through the User relation; the
-    // exact leftover comparison runs on the result.
-    expect(mockTenantMemberFindMany.mock.calls[0][0]).toEqual({
-      where: { tenantId: "tenant-1", deactivatedAt: { not: null } },
-      select: { userId: true },
+    // The active OWNER rows are read first and judged; the team query takes
+    // the ownerless teams plus those owned only by leftovers (none here), and
+    // never filters through the User relation.
+    expect(mockTeamMemberFindMany.mock.calls[0][0]).toEqual({
+      where: { tenantId: "tenant-1", role: TEAM_ROLE.OWNER, deactivatedAt: null },
+      select: { teamId: true, userId: true, admittedAt: true, createdAt: true },
     });
-    expect(mockDepartureFindMany.mock.calls[0][0]).toEqual({ where: { tenantId: "tenant-1" }, select: { userId: true } });
     expect(mockTeamFindMany.mock.calls[0][0].where).toEqual({
       tenantId: "tenant-1",
-      members: {
-        none: { role: TEAM_ROLE.OWNER, deactivatedAt: null, userId: { notIn: expect.any(Array) } },
-      },
+      OR: [
+        { members: { none: { role: TEAM_ROLE.OWNER, deactivatedAt: null } } },
+        { id: { in: [] } },
+      ],
     });
     expect(JSON.stringify(mockTeamFindMany.mock.calls[0][0].where)).not.toContain("user\"");
     expect(mockTeamFindMany.mock.calls[0][0].select.members.where).toEqual({ deactivatedAt: null });
@@ -230,10 +240,24 @@ describe("GET /api/tenant/teams/ownerless", () => {
 
       await listed();
 
-      // One stamped-user pre-read and one readTenantRows for all candidates, not one per team.
-      expect(mockTenantMemberFindMany).toHaveBeenCalledTimes(2);
-      expect(mockDepartureFindMany).toHaveBeenCalledTimes(2);
-      expect(mockDepartureFindMany.mock.calls[1][0].where.userId.in).toEqual(["u1", "u2"]);
+      // No OWNER rows, so the owners' read reads nothing; one read for all
+      // candidates' members, not one per team.
+      expect(mockTenantMemberFindMany).toHaveBeenCalledTimes(1);
+      expect(mockDepartureFindMany).toHaveBeenCalledTimes(1);
+      expect(mockDepartureFindMany.mock.calls[0][0].where.userId.in).toEqual(["u1", "u2"]);
+    });
+
+    it("queries exactly the teams owned only by leftovers besides the ownerless ones", async () => {
+      mockTeamFindMany.mockResolvedValue([
+        team("leftover-owned", [{ userId: "gone", role: "OWNER" }]),
+        team("live-owned", [{ userId: "here", role: "OWNER" }]),
+        team("mixed", [{ userId: "gone", role: "OWNER" }, { userId: "here", role: "OWNER" }]),
+      ]);
+      seedTenant([{ userId: "gone", deactivatedAt: AFTER }, { userId: "here" }]);
+
+      await listed();
+
+      expect(mockTeamFindMany.mock.calls[0][0].where.OR[1]).toEqual({ id: { in: ["leftover-owned"] } });
     });
 
     it("propagates a failed tenant-row read instead of treating it as \"not leftover\"", async () => {
