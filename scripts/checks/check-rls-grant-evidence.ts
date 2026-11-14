@@ -6,20 +6,22 @@
  *
  * A BYPASS_GRANT member has evidence when a connection logged in as a role that
  * is NOSUPERUSER, NOBYPASSRLS and cannot come to run as another role (no
- * CREATEROLE, no membership with SET or ADMIN: `canSetRole` false on its
- * attribute line) set its (purpose, tables) in a suite run that
+ * CREATEROLE, and no SET or ADMIN on any role reachable through its
+ * memberships: `canSetRole` false on its attribute line) set its (purpose, tables) in a suite run that
  * passed — where any report or refusal fails a test. That rests on one
  * PostgreSQL fact: a session whose login role has none of those cannot change
  * `current_user`, so the login user is the role every statement ran as. Two
  * things it does not cover: a SECURITY DEFINER routine, which runs as its owner
  * by design (not seen here), and a role that inherits the table owner (the
- * probe role of rds-probe-role.ts) issuing owner DDL that turns row-level
- * security off for itself, which the cells using it do not do. The recorder files a connection whose startup options set a
- * role under a name no attribute line carries, and an attribute line without
- * `canSetRole` (written before the field existed) does not count as restricted:
- * both fail toward no evidence. The check does not show
- * that a production call site set the grant, or that every table of it was
- * examined. The members without evidence are committed in
+ * probe role of rds-probe-role.ts) issuing DDL on the owner's objects that
+ * turns row-level security off for itself, which the cells using it do not do.
+ *
+ * The recorder files a connection whose startup options set a role under a
+ * name no attribute line carries, and an attribute line without `canSetRole`
+ * (written before the field existed) does not count as restricted: both fail
+ * toward no evidence. The check does not show that a production call site set
+ * the grant, or that every table of it was examined. The members without
+ * evidence are committed in
  * rls-grant-evidence-baseline.txt: a lower bound on what rests on production
  * observation.
  *
@@ -195,7 +197,7 @@ const BASELINE_HEADER = [
   "",
 ];
 
-function formatBaseline(names: readonly string[]): string {
+export function formatBaseline(names: readonly string[]): string {
   return [...BASELINE_HEADER, ...names, ""].join("\n");
 }
 

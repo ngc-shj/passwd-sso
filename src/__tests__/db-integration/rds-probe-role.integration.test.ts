@@ -150,14 +150,18 @@ describe("owner-shaped probe role", () => {
     const rows = await withSuperuser(async (c) => {
       await c.query("BEGIN");
       try {
-        for (const kind of ["group", "settable", "inherit_only", "admin_only"]) {
+        for (const kind of ["group", "settable", "inherit_only", "admin_only", "other", "admin_holder", "inherits_admin"]) {
           await c.query(`CREATE ROLE "${name(kind)}" NOLOGIN`);
         }
         await c.query(`CREATE ROLE "${name("creator")}" NOLOGIN CREATEROLE`);
         await c.query(`GRANT "${name("group")}" TO "${name("settable")}" WITH INHERIT FALSE, SET TRUE`);
         await c.query(`GRANT "${name("group")}" TO "${name("inherit_only")}" WITH INHERIT TRUE, SET FALSE`);
         await c.query(`GRANT "${name("group")}" TO "${name("admin_only")}" WITH ADMIN TRUE, INHERIT FALSE, SET FALSE`);
-        const names = ["group", "settable", "inherit_only", "admin_only", "creator"].map(name);
+        // ADMIN reached through an inherited membership: inherits_admin can
+        // grant itself SET on "other" although its own membership has neither.
+        await c.query(`GRANT "${name("other")}" TO "${name("admin_holder")}" WITH ADMIN TRUE, INHERIT FALSE, SET FALSE`);
+        await c.query(`GRANT "${name("admin_holder")}" TO "${name("inherits_admin")}" WITH INHERIT TRUE, SET FALSE`);
+        const names = ["group", "settable", "inherit_only", "admin_only", "creator", "inherits_admin"].map(name);
         return (await c.query<RoleAttributes>(ROLE_ATTRIBUTES_SQL, [names])).rows;
       } finally {
         await c.query("ROLLBACK");
@@ -169,6 +173,7 @@ describe("owner-shaped probe role", () => {
       inherit_only: false,
       admin_only: true,
       creator: true,
+      inherits_admin: true,
     });
   });
 

@@ -22,14 +22,19 @@ export type RoleAttributes = { name: string; rolsuper: boolean; rolbypassrls: bo
  * `canSetRole`: a session logged in as the role could come to run as another
  * role. True for a superuser, for a membership with SET TRUE, for a membership
  * with ADMIN TRUE (its holder can grant itself SET), and for CREATEROLE (its
- * holder gets ADMIN on the roles it creates). Memberships are not followed
- * transitively: one such membership is enough to distrust. The attributes are
+ * holder gets ADMIN on the roles it creates). Memberships are followed to
+ * every role reachable through them, whatever their INHERIT option: ADMIN held
+ * by a role this one inherits can be used by it. The attributes are
  * read once, when the line is written; a change made later in the run is not
  * seen.
  */
 export const ROLE_ATTRIBUTES_SQL = `SELECT r.rolname AS name, r.rolsuper, r.rolbypassrls,
-  (r.rolsuper OR r.rolcreaterole
-   OR EXISTS (SELECT 1 FROM pg_auth_members m WHERE m.member = r.oid AND (m.set_option OR m.admin_option))) AS "canSetRole"
+  (r.rolsuper OR r.rolcreaterole OR EXISTS (
+    WITH RECURSIVE reach(roleid, set_option, admin_option) AS (
+      SELECT m.roleid, m.set_option, m.admin_option FROM pg_auth_members m WHERE m.member = r.oid
+      UNION
+      SELECT m.roleid, m.set_option, m.admin_option FROM pg_auth_members m JOIN reach x ON m.member = x.roleid)
+    SELECT 1 FROM reach WHERE set_option OR admin_option)) AS "canSetRole"
   FROM pg_roles r WHERE r.rolname = ANY($1::text[])`;
 
 // The text setBypassGucs (src/lib/tenant-rls-grants.ts) sends; its bound values

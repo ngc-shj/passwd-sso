@@ -4,9 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import {
+  BASELINE_PATH,
   HARNESS_ROLES,
   analyzeGrantEvidence,
   compareGrantEvidence,
+  formatBaseline,
   main,
   parseBaseline,
   parseEvidenceFile,
@@ -215,6 +217,11 @@ describe("main", () => {
     expect(main([file, "--write", "--baseline", baseline])).toBe(0);
     expect(parseBaseline(readFileSync(baseline, "utf8"))).toEqual([first[0]]);
     expect(main([file, "--baseline", baseline])).toBe(0);
+  });
+
+  it("the committed baseline is what --write produces for its own entries", () => {
+    const committed = readFileSync(BASELINE_PATH, "utf8");
+    expect(formatBaseline(parseBaseline(committed))).toBe(committed);
   });
 
   it("--write refuses when a harness role has no attribute line, leaving the baseline unwritten", () => {

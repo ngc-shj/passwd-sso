@@ -13,21 +13,20 @@
  * login user without reading statements. Nothing is ever made a member of the
  * probe, and it holds no ACL entries of its own, so DROP ROLE removes it.
  *
- * Where the owner is a superuser (dev and CI), inheriting it makes the probe
- * the owner of everything the bootstrap role owns: it could turn FORCE off on
- * a table or replace a function body, and row-level security would stop
- * applying to what it runs. A cell that uses the probe therefore issues no
- * owner DDL (ALTER TABLE, ALTER or CREATE OR REPLACE FUNCTION); nothing checks
- * this but review.
+ * Inheriting the owner makes the probe the owner of the tables (and, where the
+ * owner is a superuser, as in dev and CI, of everything the bootstrap role
+ * owns): it could add a policy that admits every row, turn FORCE off, or
+ * replace a function body, and row-level security would stop applying to what
+ * it runs. A cell that uses the probe therefore issues no DDL on the owner's
+ * objects (a policy, a table, a function); nothing checks this but review.
  *
  * Roles are cluster-global: callers drop the probe in `finally`, and a sweep at
  * creation removes the leftovers of runs that never reached theirs.
  */
 import { randomBytes } from "node:crypto";
 import { Client } from "pg";
-import { MS_PER_HOUR } from "@/lib/constants/time";
 import { superuserConnectionString } from "./helpers";
-import { PROBE_ROLE_PREFIX, probeRoleName, staleProbeRoles } from "./probe-role-names";
+import { PROBE_ROLE_MAX_AGE_MS, PROBE_ROLE_PREFIX, probeRoleName, staleProbeRoles } from "./probe-role-names";
 import { ROLE_ATTRIBUTES_SQL, recordRoleAttributes, type RoleAttributes } from "./rls-grant-evidence-recorder";
 
 export type ProbeRole = {
@@ -75,7 +74,7 @@ export async function createProbeRole(): Promise<ProbeRole> {
     // One transaction, so a failed GRANT leaves no login role behind; and the
     // password stops working after the sweep's age limit should a run never
     // reach its drop.
-    const validUntil = new Date(Date.now() + MS_PER_HOUR).toISOString();
+    const validUntil = new Date(Date.now() + PROBE_ROLE_MAX_AGE_MS).toISOString();
     await client.query("BEGIN");
     try {
       await client.query(

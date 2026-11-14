@@ -1,7 +1,7 @@
 # Code Review: verify-worker-readonly-role-rls-enforce
 
 Date: 2026-11-15
-Review round: 4
+Review round: 5
 
 ## Changes from Previous Round
 
@@ -373,3 +373,43 @@ Incremental review of the round-3 commit. No Critical or Major finding. The secu
 - Full integration suite with a fresh evidence file: 154 files, 1663 passed, 5 todo, exit 0. Evidence check exit 0: 77 with evidence, 33 without, baseline entries unchanged.
 - Full unit suite on the round-3 commit: 1170 of 1171 files pass (the worktree-only `backup-db` case). Build and typecheck pass. Static gates pass except `rls-cross-tenant SQL parse` against the shared development database, as before.
 - The unit files touched since then, typecheck, lint and the bypass gate pass.
+
+## Round 5
+
+Incremental review of the round-4 commit. No Critical or Major finding. The testing expert's six mutants of the attribute query (constant false, `rolsuper` only, each arm dropped, any membership counted) each redden the positive-control cell.
+
+### Findings
+
+- **S15 — Minor.** `canSetRole` read false for a role that inherits a role holding ADMIN on a third: it granted itself SET and ran as that role (executed). Not following memberships is safe for a true reading, not for a false one. Not reachable with today's roles: the owner and the application roles hold no memberships.
+- **S16 — Minor.** The probe header's list of owner DDL omitted policy DDL, the most direct way to stop row-level security applying (executed: `CREATE POLICY … USING (true)`), and tied ownership to a superuser owner although the probe owns the tables wherever it inherits their owner.
+- **R5-1 — Minor.** A run-on line in the consumer's header.
+- **R5-2 — Minor.** `VALID UNTIL` used the hour constant directly instead of the sweep's own age limit.
+- **R5-T1 — Minor.** Nothing pinned the baseline header constant to the committed file.
+
+### Resolution Status
+
+#### S15
+- Action: the attribute query walks memberships recursively and distrusts SET or ADMIN on any role reached (the reviewer's executed candidate). The control cell gains a role that inherits an ADMIN holder and requires it to read true; the previous query reads false for that shape (checked on the database in a rolled-back transaction), so the cell fails against it.
+- Modified file: `src/__tests__/db-integration/rls-grant-evidence-recorder.ts`, `rds-probe-role.integration.test.ts`, `scripts/checks/check-rls-grant-evidence.ts` (header)
+
+#### S16
+- Action: the header says the probe owns the tables by inheritance, names a policy first among what it could change, and states the rule as "no DDL on the owner's objects".
+- Modified file: `src/__tests__/db-integration/rds-probe-role.ts`, `scripts/checks/check-rls-grant-evidence.ts`
+
+#### R5-1 / R5-2 / R5-T1
+- Action: the header paragraph is split; `VALID UNTIL` uses `PROBE_ROLE_MAX_AGE_MS`; a unit cell requires the committed baseline to equal what `--write` produces for its own entries.
+- Modified file: `scripts/checks/check-rls-grant-evidence.ts`, its test, `src/__tests__/db-integration/rds-probe-role.ts`
+
+### Verification after the round-5 fixes
+- Full integration suite with a fresh evidence file: 154 files, 1663 passed, 5 todo, exit 0. Evidence check exit 0: 77 with evidence, 33 without.
+- The touched unit files, typecheck, lint, the bypass gate and the raw-SQL gate pass.
+
+## Loop stopped after round 5
+
+No sixth round was run. Rounds 2 to 5 found only Minor issues, all inside the previous round's fixes and, from round 3 on, all in the test-evidence tooling (the recorder, the probe role, the evidence check), none in the migration, the worker, the audit's refusal logic or the deploy gate after round 2. The last change is one SQL expression taken from the reviewer's executed candidate, with a control cell that fails against the expression it replaces, and the full suite's evidence is unchanged.
+
+What stays open, each recorded above with its cost and worst case:
+- N1 / N2: the collision guard catches a literal `defineGrant` only; other ways to build a grant are left to review.
+- S11 / S16: the probe role can run DDL on the owner's objects; cells that use it must not, and only review checks that.
+- S6: statements inside a SECURITY DEFINER routine are not attributed.
+- F11: the baseline has not yet been compared with a CI run of this branch.
