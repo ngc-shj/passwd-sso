@@ -517,3 +517,41 @@ Risks:
 | C4 | Database objects defined in SQL files | locked |
 | C5 | pg `.query` and pool importers | locked |
 | C6 | Manifest, header, summary line and self-test | locked |
+
+## Implementation Checklist
+
+Files to change:
+
+- `scripts/checks/check-bearer-passkey-gate.mjs` — C1, C2, C3 static rules, C4, C5, summary
+  line, header.
+- `scripts/checks/bearer-passkey-gate-manifest.json` — new `functions` entries, `sqlObjects`,
+  `pgPools`, `nonBearerHashFields`.
+- `scripts/__tests__/check-bearer-passkey-gate.test.mjs` — base fixture, exact-outcome
+  helper, new cells.
+- `src/lib/prisma/raw-sql.ts` and `src/lib/prisma/raw-sql.test.ts` — `TOKEN_TABLE_NAMES`,
+  `sqlTable`, `sqlIdentifier` refusal, `trustedSql` position check, `joinSql` refusal.
+- `src/workers/retention-gc-worker/sweep.ts`, `index.ts`; `src/workers/audit-outbox-worker.ts`
+  — table mints switch to `sqlTable`. Every test tree that mints a table is updated (R19).
+- `scripts/checks/check-raw-sql-usage.mjs` and its self-test — `sqlTable` joins the names.
+- `docs/archive/review/bearer-passkey-gate-coverage-deviation.md` — measurements, red
+  proofs, deviations.
+
+Shared utilities to reuse, not reimplement:
+
+- `scripts/checks/lib/sql-scan.mjs` — `tokenizeSql`, `sqlInputFromNode`, `TOKEN`, `nameOf`.
+- `scripts/checks/lib/prisma-relation-reach.mjs` — `loadPrismaSchema` (models, handles,
+  tables, columns), `objectLiterals`.
+- `scripts/checks/lib/scope-bindings.mjs` — `visibleBinding`, `bindingIndex`,
+  `resolveLocalFunction`, `unwrapExpression`.
+- `scripts/checks/lib/ast-project.mjs` — `createAstProject`, `sourceFiles`.
+- In the gate: `attribute`, `constString`, `refersToImport`, `importsOf`, `resolveSpecifier`.
+
+Patterns to follow:
+
+- A missing input fails with `fatal()`; a rule violation goes through `failAt` / `failures`.
+- Manifest sections carry a reason of at least `MIN_REASON` characters and fail when stale.
+- Built-ins `raw-sql.ts` relies on are captured at load.
+
+CI parity: the gate runs in `scripts/pre-pr.sh` (static section), which CI's `static-checks`
+job runs with `PRE_PR_STATIC_ONLY=1` and no generated Prisma client. The gate self-test and
+the `raw-sql` tests run in the vitest job. No CI-only gate covers these files.
