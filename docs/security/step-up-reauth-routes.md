@@ -97,6 +97,10 @@ recoverable soft-delete/trash path is friction-free.
 | `/api/teams/[teamId]/members/[memberId]` | PUT, DELETE | identity (role change / removal) |
 | `/api/teams/[teamId]/members` | POST | identity (add member → grants key access) |
 | `/api/teams/[teamId]/members/[memberId]/confirm-key` | POST | key custody (key distribution) |
+| `/api/teams/[teamId]/members/[memberId]/approve` | POST | identity (admits a SCIM-pending member to the team) |
+| `/api/teams/[teamId]/members/[memberId]/reject` | POST | identity (discards a SCIM-pending membership) |
+| `/api/teams/[teamId]/members/bulk-approve` | POST | identity (admits up to SCIM_BULK_ADMISSION_MAX SCIM-pending members) |
+| `/api/teams/[teamId]/members/bulk-reject` | POST | identity (discards up to SCIM_BULK_ADMISSION_MAX SCIM-pending memberships) |
 | `/api/teams/[teamId]/rotate-key` | POST | key custody (key rotation) |
 | `/api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]/migrate` | PUT | key custody (re-wraps a legacy attachment under the entry ItemKey; rewrites its ciphertext) |
 | `/api/teams/[teamId]/passwords/[id]/rekey` | POST | key custody (replaces the entry ItemKey; rewrites the entry, its history and its attachment CEK wraps) |

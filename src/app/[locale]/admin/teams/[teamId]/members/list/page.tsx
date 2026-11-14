@@ -44,6 +44,11 @@ import { Link } from "@/i18n/navigation";
 import { Trash2, Users, Search, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { TEAM_ROLE, API_PATH, apiPath } from "@/lib/constants";
+import {
+  SCIM_BULK_ADMISSION_MAX,
+  SCIM_APPROVE_OUTCOME,
+  SCIM_REJECT_OUTCOME,
+} from "@/lib/constants/team/scim-admission";
 import { fetchApi } from "@/lib/url-helpers";
 import { filterMembers } from "@/lib/filter-members";
 import { handleStepUpError } from "@/lib/http/handle-step-up-error";
@@ -156,7 +161,9 @@ export default function TeamMembersPage({
     | { type: "role"; memberId: string; role: string }
     | { type: "remove"; memberId: string }
     | { type: "approve"; memberId: string; role: string }
-    | { type: "reject"; memberId: string };
+    | { type: "reject"; memberId: string }
+    | { type: "bulkApprove"; members: { memberId: string; expectedRole: string }[] }
+    | { type: "bulkReject"; memberIds: string[] };
   const handleRetryRef = useRef<(arg: ReauthRetry) => Promise<void>>(async () => {});
   const inlineReauth = useInlineReauth<ReauthRetry>((arg) => handleRetryRef.current(arg));
 
@@ -295,12 +302,97 @@ export default function TeamMembersPage({
     }
   };
 
+  // Bulk admission. The list is captured when the dialog is confirmed and is
+  // what a step-up retry replays, so a list that changed in between (search,
+  // refetch) never alters what the approver confirmed.
+  const handleBulkApprove = async (targets: { memberId: string; expectedRole: string }[]) => {
+    try {
+      // @stepup id:team-member-bulk-approve-post
+      const res = await fetchApi(apiPath.teamMembersBulkApprove(teamId), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ members: targets }),
+      });
+      if (!res.ok) {
+        if (await handleStepUpError(res, inlineReauth.triggerOnStaleError, { type: "bulkApprove", members: targets })) return;
+        const error = (await readApiErrorBody(res))?.error;
+        if (error === API_ERROR.FORBIDDEN) {
+          toast.error(t("approveNeedsKey"));
+          return;
+        }
+        if (error === API_ERROR.CONFLICT || error === API_ERROR.TEAM_BUSY) {
+          toast.error(t("approvalBusyRetry"));
+          return;
+        }
+        if (error === API_ERROR.RATE_LIMIT_EXCEEDED) {
+          toast.error(tApi("rateLimitExceeded"));
+          return;
+        }
+        throw new Error("Failed");
+      }
+      const { results } = (await res.json()) as { results: { outcome: string }[] };
+      const approved = results.filter((r) => r.outcome === SCIM_APPROVE_OUTCOME.APPROVED).length;
+      const skipped = results.length - approved;
+      if (approved === 0 && results.every((r) => r.outcome === SCIM_APPROVE_OUTCOME.NOT_FOUND)) {
+        toast.error(t("requestAlreadyHandled"));
+      } else {
+        if (approved > 0) toast.success(t("bulkApproved", { count: approved }));
+        if (skipped > 0) toast.error(t("bulkApproveSkipped", { count: skipped }));
+      }
+      fetchAll();
+    } catch {
+      toast.error(t("networkError"));
+    }
+  };
+
+  const handleBulkReject = async (memberIds: string[]) => {
+    try {
+      // @stepup id:team-member-bulk-reject-post
+      const res = await fetchApi(apiPath.teamMembersBulkReject(teamId), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ memberIds }),
+      });
+      if (!res.ok) {
+        if (await handleStepUpError(res, inlineReauth.triggerOnStaleError, { type: "bulkReject", memberIds })) return;
+        const error = (await readApiErrorBody(res))?.error;
+        if (error === API_ERROR.FORBIDDEN) {
+          toast.error(t("forbidden"));
+          return;
+        }
+        if (error === API_ERROR.CONFLICT || error === API_ERROR.TEAM_BUSY) {
+          toast.error(t("approvalBusyRetry"));
+          return;
+        }
+        if (error === API_ERROR.RATE_LIMIT_EXCEEDED) {
+          toast.error(tApi("rateLimitExceeded"));
+          return;
+        }
+        throw new Error("Failed");
+      }
+      const { results } = (await res.json()) as { results: { outcome: string }[] };
+      const rejected = results.filter((r) => r.outcome === SCIM_REJECT_OUTCOME.REJECTED).length;
+      const skipped = results.length - rejected;
+      if (rejected === 0 && results.every((r) => r.outcome === SCIM_REJECT_OUTCOME.NOT_FOUND)) {
+        toast.error(t("requestAlreadyHandled"));
+      } else {
+        if (rejected > 0) toast.success(t("bulkRejected", { count: rejected }));
+        if (skipped > 0) toast.error(t("bulkRejectSkipped", { count: skipped }));
+      }
+      fetchAll();
+    } catch {
+      toast.error(t("networkError"));
+    }
+  };
+
   useEffect(() => {
     handleRetryRef.current = async (retry) => {
       if (retry.type === "role") await handleChangeRole(retry.memberId, retry.role);
       else if (retry.type === "remove") await handleRemoveMember(retry.memberId);
       else if (retry.type === "approve") await handleApprove(retry.memberId, retry.role);
       else if (retry.type === "reject") await handleReject(retry.memberId);
+      else if (retry.type === "bulkApprove") await handleBulkApprove(retry.members);
+      else if (retry.type === "bulkReject") await handleBulkReject(retry.memberIds);
     };
   });
 
@@ -326,6 +418,23 @@ export default function TeamMembersPage({
       </div>
     );
   }
+
+  // Bulk admission targets: the pending rows the list shows (the search box
+  // narrows them), capped at what one request may carry, in display order.
+  const pendingShown = filteredMembers.filter((m) => m.pendingApproval);
+  const approvableShown = pendingShown.filter((m) => !m.pendingTenantInactive);
+  const bulkApproveRows = approvableShown.slice(0, SCIM_BULK_ADMISSION_MAX);
+  const bulkRejectRows = pendingShown.slice(0, SCIM_BULK_ADMISSION_MAX);
+  const bulkApproveCountOf = (role: string) => bulkApproveRows.filter((m) => m.role === role).length;
+  const bulkApproveAdminCount = bulkApproveCountOf(TEAM_ROLE.ADMIN);
+  const bulkApproveOtherRoleCounts = [TEAM_ROLE.MEMBER, TEAM_ROLE.VIEWER]
+    .map((role) => ({ role, count: bulkApproveCountOf(role) }))
+    .filter(({ count }) => count > 0);
+  const bulkRoleLabel: Record<string, string> = {
+    [TEAM_ROLE.ADMIN]: t("roleAdmin"),
+    [TEAM_ROLE.MEMBER]: t("roleMember"),
+    [TEAM_ROLE.VIEWER]: t("roleViewer"),
+  };
 
   return (
     <div className="space-y-4">
@@ -357,6 +466,91 @@ export default function TeamMembersPage({
           )}
           {isAdmin && members.some((m) => m.pendingApproval) && (
             <p className="mb-2 text-xs text-muted-foreground">{t("approveRoleNote")}</p>
+          )}
+          {isAdmin && (bulkApproveRows.length >= 2 || bulkRejectRows.length >= 2) && (
+            <div className="flex flex-wrap items-center gap-2">
+              {bulkApproveRows.length >= 2 && (
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button size="sm">
+                      {t("bulkApproveButton", { count: bulkApproveRows.length })}
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>
+                        {t("bulkApproveButton", { count: bulkApproveRows.length })}
+                      </AlertDialogTitle>
+                      <AlertDialogDescription>
+                        {t("bulkApproveConfirm", { count: bulkApproveRows.length })}
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <div className="space-y-1 text-sm">
+                      {bulkApproveOtherRoleCounts.map(({ role, count }) => (
+                        <p key={role}>
+                          {t("bulkApproveRoleCount", { role: bulkRoleLabel[role], count })}
+                        </p>
+                      ))}
+                      {bulkApproveAdminCount > 0 && (
+                        <p className="font-semibold text-destructive">
+                          {t("bulkApproveAdminCount", {
+                            role: bulkRoleLabel[TEAM_ROLE.ADMIN],
+                            count: bulkApproveAdminCount,
+                          })}
+                        </p>
+                      )}
+                      {approvableShown.length > bulkApproveRows.length && (
+                        <p className="text-muted-foreground">
+                          {t("bulkRemainingNote", { count: approvableShown.length - bulkApproveRows.length })}
+                        </p>
+                      )}
+                    </div>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+                      <AlertDialogAction
+                        onClick={() =>
+                          handleBulkApprove(
+                            bulkApproveRows.map((m) => ({ memberId: m.id, expectedRole: m.role })),
+                          )
+                        }
+                      >
+                        {t("approveButton")}
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              )}
+              {bulkRejectRows.length >= 2 && (
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="outline" size="sm">
+                      {t("bulkRejectButton", { count: bulkRejectRows.length })}
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>
+                        {t("bulkRejectButton", { count: bulkRejectRows.length })}
+                      </AlertDialogTitle>
+                      <AlertDialogDescription>{t("rejectConfirm")}</AlertDialogDescription>
+                    </AlertDialogHeader>
+                    {pendingShown.length > bulkRejectRows.length && (
+                      <p className="text-sm text-muted-foreground">
+                        {t("bulkRemainingNote", { count: pendingShown.length - bulkRejectRows.length })}
+                      </p>
+                    )}
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+                      <AlertDialogAction
+                        onClick={() => handleBulkReject(bulkRejectRows.map((m) => m.id))}
+                      >
+                        {t("rejectButton")}
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              )}
+            </div>
           )}
           {members.length > 0 && filteredMembers.length === 0 ? (
             <p className="py-4 text-center text-sm text-muted-foreground">
