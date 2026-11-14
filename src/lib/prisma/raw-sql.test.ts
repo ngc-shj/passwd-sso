@@ -51,6 +51,24 @@ describe("sqlIdentifier and token tables", () => {
     expect(() => sqlIdentifier(name)).toThrow(TOKEN_TABLE_REFUSAL);
   });
 
+  it("lists exactly these 13 token tables (pinned apart from the array)", () => {
+    expect([...TOKEN_TABLE_NAMES].sort()).toEqual([
+      "admin_vault_resets",
+      "api_keys",
+      "emergency_access_grants",
+      "extension_bridge_codes",
+      "extension_tokens",
+      "mcp_access_tokens",
+      "mcp_authorization_codes",
+      "mcp_refresh_tokens",
+      "mobile_bridge_codes",
+      "operator_tokens",
+      "password_shares",
+      "scim_tokens",
+      "service_account_tokens",
+    ]);
+  });
+
   it("lists 13 distinct token tables, each a valid table name", () => {
     expect(new Set(TOKEN_TABLE_NAMES).size).toBe(13);
     expect(Object.isFrozen(TOKEN_TABLE_NAMES)).toBe(true);
@@ -164,6 +182,14 @@ describe("trustedSql with a table substitution", () => {
       ["a keyword supplied by a line comment", () => trustedSql`-- FROM
         ${t}`],
       ["a keyword supplied by a block comment", () => trustedSql`/* FROM */ ${t}`],
+      ["a line comment in an earlier part, the keyword after a substitution, a newline before it", () => trustedSql`SELECT to_jsonb( -- ${sqlIdentifier("a")} FROM
+        ${t}) FROM y`],
+      ["a block comment in an earlier part, the keyword after a substitution, a newline before it", () => trustedSql`SELECT to_jsonb( /* ${sqlIdentifier("a")} FROM
+        ${t}) */ FROM y`],
+      ["a harmless line comment in an earlier part (any comment marker before the table)", () => trustedSql`-- note
+        SELECT ${sqlIdentifier("a")} FROM ${t}`],
+      ["a $ before a keyword", () => trustedSql`SELECT 1 ts$from ${t}`],
+      ["a digit before a keyword", () => trustedSql`SELECT 1 x1from ${t}`],
       ["a comment before a qualifier", () => trustedSql`-- x
         ${t}.id`],
       ["a keyword other than the five", () => trustedSql`SELECT 1 WHERE ${t}`],

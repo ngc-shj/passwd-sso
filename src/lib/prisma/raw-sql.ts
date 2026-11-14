@@ -202,7 +202,7 @@ export function sqlTable(name: string): SqlTable {
 const TABLE_RELATION_RE = /[^A-Za-z0-9_$](?:from|join|update|into|only)(?:[ \t\r\n]+"?|")$/i;
 // ... or a dot (or quote and dot) right after it, making it a qualifier.
 const TABLE_QUALIFIER_RE = /^"?\./;
-// A comment marker in the preceding text could supply the keyword.
+// A comment marker in the preceding text (any part up to the table) could supply the keyword.
 const COMMENT_MARKER_RE = /--|\/\*/;
 const tableRelationExec = RegExp.prototype.exec.bind(TABLE_RELATION_RE) as (
   input: string,
@@ -228,7 +228,11 @@ function assertTablePosition(strings: TemplateStringsArray, index: number): void
   const boundedBefore = index === 0 ? " " + before : before;
   const isQualifier = tableQualifierExec(after) !== null;
   const isRelation = tableRelationExec(boundedBefore) !== null;
-  if (commentMarkerExec(before) !== null || (!isQualifier && !isRelation)) {
+  // A comment opened in ANY earlier part can swallow the substitutions between it and the keyword
+  // (`-- ${x} FROM\n ${t}`), so the keyword this part shows would sit inside the comment.
+  let commented = false;
+  for (let i = 0; i <= index; i++) commented ||= commentMarkerExec(strings[i]) !== null;
+  if (commented || (!isQualifier && !isRelation)) {
     throw refusal(
       RAW_SQL_REFUSAL_CODE.TOKEN_TABLE,
       "trustedSql: a table may be substituted only after FROM, JOIN, UPDATE, INTO or ONLY, " +

@@ -2167,7 +2167,7 @@ describe.concurrent("database objects defined in SQL files (A-10)", { timeout: 6
     ["a trigger on a token table", "CREATE TRIGGER trg BEFORE INSERT ON api_keys FOR EACH ROW EXECUTE FUNCTION f();", [[1, "CREATE TRIGGER naming a token table or a digest column"]]],
     ["a rule on a token table", "CREATE RULE r AS ON INSERT TO api_keys DO NOTHING;", [[1, "CREATE RULE naming a token table or a digest column"]]],
     ["a routine body holding EXECUTE", "CREATE FUNCTION g() RETURNS void LANGUAGE plpgsql AS $$ BEGIN EXECUTE 'select 1'; END $$;", [[1, "CREATE FUNCTION whose body holds EXECUTE"]]],
-    ["a DO block creating a view that names a token table", "DO $$ BEGIN EXECUTE 'CREATE VIEW v AS SELECT id FROM api_keys'; END $$;", [[1, "DO block creating a database object and naming a token table or a digest column"]]],
+    ["a DO block creating a view that names a token table", "DO $$ BEGIN EXECUTE 'CREATE VIEW v AS SELECT id FROM api_keys'; END $$;", [[1, "DO block creating a database object and naming a token table or a digest column"], [1, "DO block executing a CREATE or ALTER of a database object"]]],
     ["a copy (CREATE TABLE AS)", "CREATE TABLE copy AS SELECT token_hash FROM notes;", [[1, PLAIN + " (CREATE)"]]],
     ["a copy (INSERT ... SELECT)", "INSERT INTO t SELECT token_hash FROM notes;", [[1, PLAIN + " (INSERT)"]]],
     ["a copy (SELECT INTO)", "SELECT token_hash INTO tmp FROM notes;", [[1, PLAIN + " (SELECT)"]]],
@@ -2293,7 +2293,7 @@ describe.concurrent("schema checks (A-10)", { timeout: 60_000 }, () => {
     await expectPass({ ...addToNote("contentHash String @unique"), nonBearerHashFields: { "Note.contentHash": { reason: REASON } } });
   });
   it("FAILS on a listed field that no longer exists (stale)", async () => {
-    await expectViolations({ nonBearerHashFields: { "Note.contentHash": { reason: REASON } } }, [`STALE_NON_BEARER_HASH: "Note.contentHash" is in "nonBearerHashFields" but names no non-digest String field.`]);
+    await expectViolations({ nonBearerHashFields: { "Note.contentHash": { reason: REASON } } }, [`STALE_NON_BEARER_HASH: "Note.contentHash" is in "nonBearerHashFields" but names no unique non-digest String field ending in hash or digest.`]);
   });
   it("FAILS on a listed field with a short reason", async () => {
     await expectViolations({ ...addToNote("contentHash String @unique"), nonBearerHashFields: { "Note.contentHash": { reason: "short" } } }, [`BAD_ENTRY: "nonBearerHashFields" entry Note.contentHash needs a reason of at least 20 characters.`]);
@@ -2797,6 +2797,301 @@ describe.concurrent("digest-key spelling census — every argument wrapper of a 
   });
   it.each(WRAPPERS)("passes when the same %s wraps a string that is no digest key", async (_kind, call) => {
     await expectPass({ files: { [OTHER]: file(call.replace("tokenHash", "id")) } });
+  });
+});
+
+
+// ─── Code review round 1 ─────────────────────────────────────────────────────────────────────
+
+describe.concurrent("raw SQL: W5 reads a string's body, with its delimiters stripped (S18)", { timeout: 60_000 }, () => {
+  const DENY = [
+    ["a dollar-quoted body ending at the name", "SELECT 1 FROM notes WHERE x = $$ from api_keys$$"],
+    ["a dollar-quoted body that is only the name", "SELECT 1 FROM notes WHERE x = $$api_keys$$"],
+    ["a tagged dollar-quoted body that is only the name", "SELECT 1 FROM notes WHERE x = $q$api_keys$q$"],
+    ["a name followed by a dollar sign", "SELECT 1 FROM notes WHERE x = 'api_keys$1'"],
+  ];
+  it.each(DENY)("FAILS on %s", async (_label, sql) => {
+    await expectViolations(viaUnsafe(sql), [ruleAt("W5", W.string("api_keys"))]);
+  });
+  it("passes on a dollar-quote tag spelled like the table (the delimiters are not the body)", async () => {
+    await expectPass(viaUnsafe("SELECT 1 FROM notes WHERE x = $api_keys$ x $api_keys$"));
+  });
+  it("FAILS on the same tag around a body that does name the table", async () => {
+    await expectViolations(viaUnsafe("SELECT 1 FROM notes WHERE x = $api_keys$ api_keys $api_keys$"), [ruleAt("W5", W.string("api_keys"))]);
+  });
+  const ALLOW = [
+    ["a longer word after the name in a dollar-quoted body", "SELECT 1 FROM notes WHERE x = $$api_keys_old$$"],
+    ["a longer word before the name in a dollar-quoted body", "SELECT 1 FROM notes WHERE x = $$old_api_keys$$"],
+    ["a longer word in a tagged dollar-quoted body", "SELECT 1 FROM notes WHERE x = $q$xapi_keysx$q$"],
+  ];
+  it.each(ALLOW)("passes on %s", async (_label, sql) => {
+    await expectPass(viaUnsafe(sql));
+  });
+});
+
+describe.concurrent("raw SQL: a substitution a comment swallowed (F1, static side)", { timeout: 60_000 }, () => {
+  const SWALLOWED = "a substitution inside a comment is invisible to the lexer";
+  it("FAILS on a line comment that hides a substitution and the keyword after it", async () => {
+    await expectViolations(viaTrusted("SELECT to_jsonb( -- ${x} FROM\n ${tbl}) FROM y"), [ruleAt("W6", SWALLOWED)]);
+  });
+  it("FAILS on a block comment that hides both substitutions (a pair, on two lines)", async () => {
+    await expectViolations(viaTrusted("SELECT to_jsonb( /* ${x} FROM\n ${tbl}) */ FROM y"), [ruleAt("W6", SWALLOWED, 3), ruleAt("W6", SWALLOWED, 4)]);
+  });
+  it("passes on a comment that hides no substitution (the run-time mint is the stricter judge of earlier comments)", async () => {
+    await expectPass(viaTrusted("SELECT 1 -- note\n FROM ${tbl}"));
+  });
+  it("passes on a substitution after the comment has ended", async () => {
+    await expectPass(viaTrusted("SELECT 1 /* note */ FROM ${tbl}"));
+  });
+  it("counts substitutions kept inside a quoted identifier, and a string, as kept", async () => {
+    await expectPass(viaTrusted('SELECT "${tbl}".id FROM ${tbl} WHERE x = \'${parent}\''));
+  });
+});
+
+describe.concurrent("database objects in SQL files: DO blocks and the rest of the review's shapes", { timeout: 60_000 }, () => {
+  const MIG = "prisma/migrations/20240201000000_extra/migration.sql";
+  const withSql = (sql) => ({ files: { [MIG]: sql } });
+  const unlistedLine = (whys) => `SQL_OBJECT_UNLISTED: ${MIG} — ${whys.map(([line, why]) => `line ${line}: ${why}`).join("; ")}. List it in "sqlObjects" in ${MANIFEST} with a reason.`;
+  const PLAIN = (first) => `statement naming a digest column that is not a plain definition, index, drop or seed (${first})`;
+  const DO_EXECUTES = "DO block executing a CREATE or ALTER of a database object";
+
+  it("FAILS on a DO block that EXECUTEs a CREATE of an object naming nothing (S19)", async () => {
+    await expectViolations(withSql("DO $$ BEGIN EXECUTE 'CREATE VIEW v AS SELECT 1'; END $$;"), [unlistedLine([[1, DO_EXECUTES]])]);
+  });
+  it("FAILS on a DO block that EXECUTEs an ALTER of an object", async () => {
+    await expectViolations(withSql("DO $$ BEGIN EXECUTE 'ALTER FUNCTION f() OWNER TO x'; END $$;"), [unlistedLine([[1, DO_EXECUTES]])]);
+  });
+  it("FAILS on a DO block that EXECUTEs a CREATE of an object naming a token table (both reasons, a pair)", async () => {
+    await expectViolations(withSql("DO $$ BEGIN EXECUTE 'CREATE VIEW v AS SELECT id FROM api_keys'; END $$;"), [
+      unlistedLine([[1, "DO block creating a database object and naming a token table or a digest column"], [1, DO_EXECUTES]]),
+    ]);
+  });
+  it("passes on a DO block that EXECUTEs a CREATE of something that is no object kind", async () => {
+    await expectPass(withSql("DO $$ BEGIN EXECUTE 'CREATE TABLE x (a int)'; END $$;"));
+  });
+  it("passes on a DO block that creates a table and only names a token table", async () => {
+    await expectPass(withSql("DO $$ BEGIN CREATE TABLE x (a int); PERFORM 1 FROM api_keys; END $$;"));
+  });
+
+  it("FAILS on ALTER PUBLICATION ... ADD TABLE with a column list naming a digest column", async () => {
+    await expectViolations(withSql("ALTER PUBLICATION p ADD TABLE notes (token_hash);"), [unlistedLine([[1, PLAIN("ALTER")]])]);
+  });
+  it("passes on ALTER PUBLICATION naming no digest column", async () => {
+    await expectPass(withSql("ALTER PUBLICATION p ADD TABLE notes;"));
+  });
+  it("FAILS on a schema-qualified REFERENCES to a digest column", async () => {
+    await expectViolations(withSql("CREATE TABLE t2 (a text REFERENCES public.api_keys (token_hash));"), [unlistedLine([[1, PLAIN("CREATE")]])]);
+  });
+  it("passes on a schema-qualified REFERENCES to another column", async () => {
+    await expectPass(withSql("CREATE TABLE t2 (a text REFERENCES public.api_keys (id));"));
+  });
+  it("FAILS on a CREATE PROCEDURE whose body holds EXECUTE", async () => {
+    await expectViolations(withSql("CREATE PROCEDURE p() LANGUAGE plpgsql AS $$ BEGIN EXECUTE 'select 1'; END $$;"), [unlistedLine([[1, "CREATE PROCEDURE whose body holds EXECUTE"]])]);
+  });
+  it("passes on a CREATE PROCEDURE with no EXECUTE", async () => {
+    await expectPass(withSql("CREATE PROCEDURE p() LANGUAGE plpgsql AS $$ BEGIN PERFORM 1; END $$;"));
+  });
+  it("FAILS on a final statement with no terminating semicolon", async () => {
+    await expectViolations(withSql("SELECT 1;\nUPDATE notes SET token_hash = 'x'"), [unlistedLine([[2, PLAIN("UPDATE")]])]);
+  });
+  it("passes on the same final statement naming no digest column", async () => {
+    await expectPass(withSql("SELECT 1;\nUPDATE notes SET id = 'x'"));
+  });
+  it("passes on a comma inside parentheses in an ALTER ... ADD COLUMN", async () => {
+    await expectPass(withSql("ALTER TABLE notes ADD COLUMN token_hash numeric(10,2);"));
+  });
+  it("passes on a semicolon inside parentheses (it does not end a statement)", async () => {
+    await expectPass(withSql("CREATE INDEX i ON notes (a; token_hash);"));
+  });
+  it("FAILS on a generated column reading a digest column at the end of its expression", async () => {
+    await expectViolations(withSql("ALTER TABLE notes ADD COLUMN h text GENERATED ALWAYS AS (1 + token_hash) STORED;"), [unlistedLine([[1, PLAIN("ALTER")]])]);
+  });
+  it("FAILS on a generated column reading a digest column at the start of its expression", async () => {
+    await expectViolations(withSql("ALTER TABLE notes ADD COLUMN h text GENERATED ALWAYS AS (token_hash + 1) STORED;"), [unlistedLine([[1, PLAIN("ALTER")]])]);
+  });
+  it("FAILS on a function whose E-string body holds an escaped quote before a token table", async () => {
+    await expectViolations(withSql("CREATE FUNCTION f() RETURNS int LANGUAGE sql AS E'SELECT \\'a\\' FROM api_keys';"), [unlistedLine([[1, "CREATE FUNCTION naming a token table or a digest column"]])]);
+  });
+  it("FAILS on a function whose E-string body spells the table with a backslash escape", async () => {
+    await expectViolations(withSql("CREATE FUNCTION f() RETURNS int LANGUAGE sql AS E'SELECT 1 FROM api\\_keys';"), [unlistedLine([[1, "CREATE FUNCTION naming a token table or a digest column"]])]);
+  });
+  it("passes on the same E-string body naming no token table", async () => {
+    await expectPass(withSql("CREATE FUNCTION f() RETURNS int LANGUAGE sql AS E'SELECT \\'a\\' FROM notes';"));
+  });
+});
+
+describe.concurrent("raw SQL: the literal collection and the violation lines (review cells)", { timeout: 60_000 }, () => {
+  const bare = (stmt) => ({ files: { [SQL_FILE]: `export async function q(tx: any) {\n  ${stmt}\n}\n` } });
+  const at2 = (rule, message) => `${SQL_FILE}:2  ${rule}: ${message}`;
+  it("FAILS on a ; before a DO (a DO is statement-initial after a semicolon)", async () => {
+    await expectViolations(viaUnsafe("SELECT 1; DO NOTHING"), [ruleAt("W4", "a DO block runs SQL the lexer cannot read")]);
+  });
+  it("passes on a DO that is no statement start", async () => {
+    await expectPass(viaUnsafe("SELECT 1 DO NOTHING"));
+  });
+  it("reads a $executeRaw template in a file with no trustedSql text (W1)", async () => {
+    await expectViolations(bare("await tx.$executeRaw`SELECT * FROM api_keys`;"), [at2("W1", W.star)]);
+  });
+  it("reads a $queryRaw template in a file with no trustedSql text (W1)", async () => {
+    await expectViolations(bare("await tx.$queryRaw`SELECT * FROM api_keys`;"), [at2("W1", W.star)]);
+  });
+  it("passes on the same two templates naming count(*)", async () => {
+    await expectPass(bare("await tx.$executeRaw`SELECT count(*) FROM api_keys`;\n  await tx.$queryRaw`SELECT count(*) FROM api_keys`;"));
+  });
+  it("counts two identical violations on one line once", async () => {
+    await expectViolations(viaTag("SELECT *, * FROM api_keys"), [ruleAt("W1", W.star)]);
+  });
+  it("FAILS on $queryRawUnsafe used as a tag", async () => {
+    await expectViolations(sqlBody("await tx.$queryRawUnsafe`select 1`;"), [`${SQL_FILE}:3  $queryRawUnsafe is used other than as a template tag / a call with a literal SQL argument: its text cannot be read`]);
+  });
+  it("passes on $queryRaw used as a tag", async () => {
+    await expectPass(sqlBody("await tx.$queryRaw`select 1`;"));
+  });
+  const RENDER_IMPORT = 'import { renderSql, trustedSql } from "@/lib/prisma/raw-sql";';
+  const renderBody = (call) => ({ files: { [SQL_FILE]: `${RENDER_IMPORT}\nexport async function q(tx: any) {\n  ${call}\n}\n` } });
+  it("FAILS on renderSql with a second argument", async () => {
+    await expectViolations(renderBody("await tx.$queryRawUnsafe(renderSql(trustedSql`select 1`, 2));"), [
+      `${SQL_FILE}:3  $queryRawUnsafe's SQL argument is not a literal (nor renderSql(trustedSql\`...\`)): its text cannot be read`,
+    ]);
+  });
+  it("passes on renderSql with one argument", async () => {
+    await expectPass(renderBody("await tx.$queryRawUnsafe(renderSql(trustedSql`select 1`));"));
+  });
+  it("FAILS on count(* followed by something other than a parenthesis", async () => {
+    await expectViolations(viaTag("SELECT count(* x) FROM api_keys"), [ruleAt("W1", W.star)]);
+  });
+  it("reads the SQL of a parenthesised .query callee", async () => {
+    await expectViolations({ files: { [SQL_FILE]: 'export function run(pool: any) {\n  return (pool.query)("SELECT * FROM api_keys");\n}\n' } }, [`${SQL_FILE}:2  W1: ${W.star}`]);
+  });
+  it("passes on the parenthesised callee naming count(*)", async () => {
+    await expectPass({ files: { [SQL_FILE]: 'export function run(pool: any) {\n  return (pool.query)("SELECT count(*) FROM api_keys");\n}\n' } });
+  });
+  const PG = "src/lib/pg.ts";
+  const referenceMessage = "C5: a reference to `query` other than a direct call with a literal SQL argument (a value, .call / .apply / .bind, a destructuring): the pool's SQL cannot be read";
+  const importer = (stmt) => ({ files: { [PG]: `import { createPool } from "@/lib/db/pool-factory";\nexport function run(pool: any) {\n  ${stmt}\n}\n` }, pgPools: { [PG]: { reason: REASON } } });
+  it("FAILS on pool.query passed as an argument in an importer", async () => {
+    await expectViolations(importer("return promisify(pool.query);"), [`${PG}:3  ${referenceMessage}`]);
+  });
+  it("passes on another member passed as an argument", async () => {
+    await expectPass(importer("return promisify(pool.ping);"));
+  });
+});
+
+describe.concurrent("lookups and census: the review's remaining shapes", { timeout: 60_000 }, () => {
+  it("FAILS on a spread under NOT in a token-model where (opaque)", async () => {
+    await expectViolations(inLookup("return tx.apiKey.findFirst({ where: { NOT: { ...t } } });"), [unlisted(LOOKUP_KEY, { lines: [2], opaque: ["line 2: ApiKey where: spread"] })]);
+  });
+  it("passes on NOT with a readable object", async () => {
+    await expectPass(inLookup("return tx.apiKey.findFirst({ where: { NOT: { id: t } } });"));
+  });
+  it("FAILS on a spread element in an array where on a token model (opaque)", async () => {
+    await expectViolations(inLookup("return tx.apiKey.findMany({ where: [...t] });"), [unlisted(LOOKUP_KEY, { lines: [2], opaque: ["line 2: ApiKey where: spread"] })]);
+  });
+  it("passes on an array where of readable objects", async () => {
+    await expectPass(inLookup("return tx.apiKey.findMany({ where: [{ id: t }] });"));
+  });
+  it("FAILS on a bare .length of an unresolved tokenHash", async () => {
+    await expectViolations(inLookup("return tokenHash.length;"), [unlisted(LOOKUP_KEY, { floating: [[2, "unresolved reference"]] })]);
+  });
+  it("passes on a nested updateMany whose data holds a spread (scalar columns only)", async () => {
+    await expectPass(inLookup("return tx.user.update({ where: { id: t }, data: { apiKeys: { updateMany: { where: { id: t }, data: { ...t } } } } });"));
+  });
+  it("FAILS on a nested update whose data holds a spread into a token model", async () => {
+    await expectViolations(inLookup("return tx.user.update({ where: { id: t }, data: { apiKeys: { update: { where: { id: t }, data: { ...t } } } } });"), [
+      unlisted(LOOKUP_KEY, { lines: [2], opaque: ["line 2: ApiKey apiKeys.update.data: spread"] }),
+    ]);
+  });
+  const WITH_KEY = swap(SCHEMA, '  userId String @map("user_id")\n  user   User   @relation(fields: [userId], references: [id])\n\n  @@map("profiles")', '  userId String @map("user_id")\n  user   User   @relation(fields: [userId], references: [id])\n  keyId  String? @map("key_id")\n  key    ApiKey? @relation(fields: [keyId], references: [id])\n\n  @@map("profiles")');
+  it("FAILS on a digest key in a direct to-one filter into a token model", async () => {
+    await expectViolations({ files: { "prisma/schema.prisma": WITH_KEY, [OTHER]: NOTE_FN("  return tx.profile.findFirst({ where: { key: { tokenHash: t } } });") } }, [unlisted(LOOKUP_KEY, { lines: [2], lookups: 1 })]);
+  });
+  it("passes on the same to-one filter by id", async () => {
+    await expectPass({ files: { "prisma/schema.prisma": WITH_KEY, [OTHER]: NOTE_FN("  return tx.profile.findFirst({ where: { key: { id: t } } });") } });
+  });
+  it("FAILS on an opaque to-one filter into a token model", async () => {
+    await expectViolations({ files: { "prisma/schema.prisma": WITH_KEY, [OTHER]: NOTE_FN("  return tx.profile.findFirst({ where: { key: { ...t } } });") } }, [
+      unlisted(LOOKUP_KEY, { lines: [2], opaque: ["line 2: ApiKey relation filter: spread"] }),
+    ]);
+  });
+  it("FAILS on a logical spread inside a direct to-one filter into a token model", async () => {
+    await expectViolations({ files: { "prisma/schema.prisma": WITH_KEY, [OTHER]: NOTE_FN("  return tx.profile.findFirst({ where: { key: { OR: [...t] } } });") } }, [
+      unlisted(LOOKUP_KEY, { lines: [2], opaque: ["line 2: ApiKey where: OR spread"] }),
+    ]);
+  });
+});
+
+describe.concurrent("builders: the review's remaining arms", { timeout: 60_000 }, () => {
+  const BUILD = "function build(h: string) {\n  return { tokenHash: h };\n}\n";
+  const BUILDER_KEY = `${OTHER}#build`;
+  it("FAILS on the caller of a parenthesised builder call", async () => {
+    await expectViolations({ files: { [OTHER]: `${BUILD}export function lookup(t: string) {\n  return x.findFirst({ where: (build)(t) });\n}\n` } }, [
+      unlisted(BUILDER_KEY, { floating: [[2, "property"]] }),
+      unlisted(LOOKUP_KEY, { builderCalls: [[5, "build"]] }),
+    ]);
+  });
+  it("passes on a same-named parameter that shadows the builder", async () => {
+    await expectPass({ files: { [OTHER]: `${BUILD}export function lookup(build: any, t: string) {\n  return x.findFirst({ where: build(t) });\n}\n` }, manifest: { [BUILDER_KEY]: exempt(1) } });
+  });
+  it("FAILS on a call of a builder at module scope (cannot be attributed)", async () => {
+    await expectViolations(
+      { files: { "src/lib/builder.ts": "export function build(h: string) {\n  return { tokenHash: h };\n}\n", [OTHER]: 'import { build } from "./builder";\nconst w = build("a");\nexport const x = w;\n' }, manifest: { "src/lib/builder.ts#build": exempt(1) } },
+      [`${OTHER}:2  call of build, which builds a digest-keyed object (src/lib/builder.ts), cannot be attributed to a named function, method or exported const`],
+    );
+  });
+  it("passes on a builder that calls itself (the recursion is no consumer)", async () => {
+    await expectPass({ files: { [OTHER]: "function build(h: string): unknown {\n  if (!h) return build(\"x\");\n  return { tokenHash: h };\n}\n" }, manifest: { [BUILDER_KEY]: exempt(1) } });
+  });
+  it("FAILS on another function calling that builder (a consumer)", async () => {
+    await expectViolations({ files: { [OTHER]: `${BUILD}export function lookup(t: string) {\n  return x.findFirst({ where: build(t) });\n}\n` } }, [
+      unlisted(BUILDER_KEY, { floating: [[2, "property"]] }),
+      unlisted(LOOKUP_KEY, { builderCalls: [[5, "build"]] }),
+    ]);
+  });
+});
+
+describe.concurrent("schema source: the forms a line scan misses (F2, F3)", { timeout: 60_000 }, () => {
+  const SCHEMA_PREFIX = "prisma/schema.prisma:";
+  const addToNote = (line) => ({ files: { "prisma/schema.prisma": swap(SCHEMA, 'model Note {\n  id    String @id\n  title String\n', `model Note {\n  id    String @id\n  title String\n  ${line}\n`) } });
+  const UNIQUE_HASH = "is a unique String ending in hash/digest but is not a digest key (tokenHash/codeHash/replacedByHash): name it one, or list";
+  const listing = (key) => `${SCHEMA_PREFIX} ${key} ${UNIQUE_HASH} "${key}" in the manifest's "nonBearerHashFields" with a reason.`;
+  const UNIQUE_FORMS = [
+    ["a @@unique(fields: [...], name: ...)", "secretHash String\n  @@unique(fields: [secretHash], name: \"n\")", "slug String\n  @@unique(fields: [slug], name: \"n\")"],
+    ["a multi-line @@unique([...])", "secretHash String\n  @@unique([\n    secretHash\n  ])", "slug String\n  @@unique([\n    slug\n  ])"],
+    ["a @unique on a continuation line", "secretHash String\n    @unique", "slug String\n    @unique"],
+  ];
+  it.each(UNIQUE_FORMS)("is fatal on %s over a hash field", async (_label, deny) => {
+    await expectFatal(addToNote(deny), listing("Note.secretHash"));
+  });
+  it.each(UNIQUE_FORMS)("passes on %s over a field that does not end in hash", async (_label, _deny, allow) => {
+    await expectPass(addToNote(allow));
+  });
+  it("is fatal on a multi-line @@unique after a line with stray closing parentheses", async () => {
+    await expectFatal(addToNote('label String @map("l))")\n  secretHash String\n  @@unique([\n    secretHash\n  ])'), listing("Note.secretHash"));
+  });
+  it("is fatal on a multi-line @relation that references a digest key", async () => {
+    await expectFatal(addToNote("link ApiKey @relation(\n    fields: [title],\n    references: [tokenHash]\n  )"), `${SCHEMA_PREFIX} Note.link references tokenHash: a foreign key gives another column the digest's values.`);
+  });
+  it("passes on a multi-line @relation that references an id", async () => {
+    await expectPass(addToNote("link ApiKey @relation(\n    fields: [title],\n    references: [id]\n  )"));
+  });
+  it("is fatal on a model whose brace is on the next line (the schema reader cannot see it)", async () => {
+    await expectFatal({ files: { "prisma/schema.prisma": `${SCHEMA}\nmodel Z\n{\n  id String @id\n}\n` } }, `${SCHEMA_PREFIX} Z opens its block on a later line: the schema reader cannot see it.`);
+  });
+  const STALE = (key) => `STALE_NON_BEARER_HASH: "${key}" is in "nonBearerHashFields" but names no unique non-digest String field ending in hash or digest.`;
+  it("FAILS on an entry naming a field that is not hash-like (Note.title)", async () => {
+    await expectViolations({ nonBearerHashFields: { "Note.title": { reason: REASON } } }, [STALE("Note.title")]);
+  });
+  it("FAILS on an entry naming a hash-like field that is not unique", async () => {
+    await expectViolations({ ...addToNote("contentHash String"), nonBearerHashFields: { "Note.contentHash": { reason: REASON } } }, [STALE("Note.contentHash")]);
+  });
+  it("FAILS on an entry naming a unique field that does not end in hash", async () => {
+    await expectViolations({ ...addToNote("slug String @unique"), nonBearerHashFields: { "Note.slug": { reason: REASON } } }, [STALE("Note.slug")]);
+  });
+  it("FAILS on an entry naming a digest key", async () => {
+    await expectViolations({ nonBearerHashFields: { "ApiKey.tokenHash": { reason: REASON } } }, [STALE("ApiKey.tokenHash")]);
+  });
+  it("passes on an entry naming a unique hash field", async () => {
+    await expectPass({ ...addToNote("contentHash String @unique"), nonBearerHashFields: { "Note.contentHash": { reason: REASON } } });
   });
 });
 

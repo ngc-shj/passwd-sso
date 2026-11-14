@@ -579,3 +579,91 @@ Base green (181 census cells, 444 SQL cells) and a deliberate syntax error (0 pa
 | w4-called-ts-weaken | weaken | 2 | raw SQL: W4 dynamic SQL and object definitions FAILS on ts_stat(...) in a literal that na…; raw SQL: a quoted function name is the same function (W4, W1) FAILS on a quoted "ts_stat" | 1 |
 | count-qident-weaken | weaken | 1 | raw SQL: a quoted function name is the same function (W4, W1) treats a quoted "count"(*) … | 1 |
 | stringbody-tag-weaken | weaken | 2 | database objects in SQL files: every CREATE modifier FAILS on a tightly glued untagged do…; database objects in SQL files: every CREATE modifier FAILS on a tightly glued tagged doll… | 1 |
+
+# Code review round 1 fixes
+
+Gate self-test cells: 962 before, 1042 after; `raw-sql.test.ts` gained 7 cells (262 tests in `src/lib/prisma`).
+Real-repo summary line unchanged (`... sql-literals=136 token-table-literals=7 sql-files=228 sql-qualifying=5`).
+
+## Findings
+
+- S18 (W5 and `$`): `$` is no longer a word character in the table-name boundary, and the body of a string token is searched with its delimiters stripped
+  (`stringBody`), so `$$api_keys$$` and `$$ from api_keys$$` fail while a dollar-quote tag spelled like the table (`$api_keys$ x $api_keys$`) does not.
+  Header sentence fixed. Cells: four deny, three allow twins, the tag pair.
+- S19 (DO that EXECUTEs a CREATE / ALTER): a DO block whose executed text (a list two strings deep) holds a CREATE or ALTER of an object kind needs an entry whatever
+  it names. Real hits: 0 (55 migration files hold DO blocks; none executes such a statement; `sql-qualifying` stays 5), so no `sqlObjects` entry was added.
+  The existing cell for a DO naming a token table now declares the pair of reasons.
+- F1 (comment marker before a table hole): run-time, `assertTablePosition` now refuses when any of `strings[0..index]` holds `--` or `/*`; static, W6 refuses a
+  substitution a comment swallowed (the lexer drops it, the mint still reads the text around it). An earlier comment that hides no substitution still passes the
+  static gate, and the mint refuses it (the stricter judge). Callers: 21 trustedSql templates in `src`, 10 with a table-like hole, 0 with a comment marker before it,
+  so no caller changed; `src/lib/prisma` and `src/workers` suites pass. Unit cells (token and non-token table): marker in part 0 + keyword in part 1 + newline, for `--` and `/*`;
+  a harmless earlier comment; `$` and a digit before a keyword; plus a pin of the 13 table names apart from the array. Gate cells: line comment (one violation), block comment (a pair on two lines),
+  two passing twins, kept substitutions in a quoted identifier and a string.
+- F2: a `nonBearerHashFields` entry is stale unless it still names a unique non-digest String field ending in hash or digest (`UNIQUE_HASH_FIELDS`, one set shared with the schema check). Message updated; cells for a non-hash field, a non-unique field, a unique non-hash field, a digest key.
+- F3: the schema source is read over logical lines (brackets spanning lines, an attribute on a continuation line), `@@unique(fields: [...])` is accepted, and a `model` / `view` whose brace is on a later line is fatal
+  (the shared loader cannot see it, so it could hide a token model). One cell per form, with an allow twin where one exists, and one for stray closing parentheses.
+- F4: a call of a builder from inside the builder is no consumer site. Cell.
+
+## Testing items
+
+- T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12, T13, T14, T15, T16 (parenthesised callee, shadow parameter, unattributable module-level caller), T19, T20 (to-one filter into a token model, a cell-local schema, plus opaque and logical-spread twins),
+  T22 (renderSql with a second argument, with the import present): cells added, each deny with an allow twin, exact outcome.
+- T8 (U+E000 in a SQL file) already had its cells from the self-check fixes.
+- T17: `createMany` was dead in `SCALAR_WRITE_OPS`: the set is read only where the operation is one of update, updateMany, upsert, connectOrCreate (`WRITE_ARG_OPS`), so `createMany` can never be tested there (a nested createMany has its own branch). Removed; a cell pins nested updateMany data (a spread passes) and a nested update (a spread is opaque).
+- T21: `covered-span` (`g.span !== k.span`): two different spellings never share a span (each span is its own property or the spelling itself), and `g !== k` already excludes self, so the guard was redundant and was removed.
+  `keyspan-shorthand`: a shorthand property contains only its name, so its span can contain no other key; the shorthand branch was removed (span is the spelling itself). `c4-semi-depth`: cell added (`CREATE INDEX i ON notes (a; token_hash);`).
+  `c4-first-nonword`: `first.upper` exists for every token and never equals a statement keyword unless the token is that word, so the non-word guard was dead and removed. `c4-generated-range`: only `GENERATED ALWAYS AS (expr)` has an expression, so the search was narrowed to that offset; cells put the digest column first and last in the expression.
+- Red proofs (scratch `scratchpad/batchR1/slot0..3`, whole self-test): base 1038 green; a deliberate syntax error turned 1037 of 1038 red (the stale-root cell does not run the gate); 48 mutations, each turned at least one cell red; three first survived and got cells
+  (`s18-body-only`: a tag spelled like the table; `c4-escaped`: a backslash-escaped letter in an E-string; `f3-neg`: stray closing parentheses). Mutations of the fixes themselves restore the pre-fix behaviour (`s18-prefix`, `s19-prefix`, `f1-prefix`, `f2-prefix`, `f4-prefix`, `f3-*`).
+  Run-time side (scratch copy of `raw-sql.ts` and its test, 203 tests): base green; pre-fix comment test (marker in `strings[index]` only): 6 red; `$` removed from the boundary class: 2 red; a digit removed: 2 red; the `/*` arm removed: 2 red; a table name renamed in the array: the 13-name pin red.
+
+| Mutation | Direction | Red cells | Examples (cell names) | Exit |
+|----------|-----------|-----------|-----------------------|------|
+| s18-prefix | mutant | 4 | raw SQL: W5 reads a string's body, with its delimiters stripped (S18) FAILS on a dollar-q…; raw SQL: W5 reads a string's body, with its delimiters stripped (S18) FAILS on a dollar-q… | 1 |
+| s18-body-only | mutant | 1 | raw SQL: W5 reads a string's body, with its delimiters stripped (S18) passes on a dollar-… | 1 |
+| s18-dollar-boundary | mutant | 1 | raw SQL: W5 reads a string's body, with its delimiters stripped (S18) FAILS on a name fol… | 1 |
+| s19-prefix | mutant | 4 | database objects defined in SQL files (A-10) FAILS on a DO block creating a view that nam…; database objects in SQL files: DO blocks and the rest of the review's shapes FAILS on a D… | 1 |
+| s19-depth | mutant | 2 | database objects defined in SQL files (A-10) passes on a DO block that creates nothing th…; real repository passes against the real repo | 1 |
+| s19-alter | mutant | 1 | database objects in SQL files: DO blocks and the rest of the review's shapes FAILS on a D… | 1 |
+| s19-kind | mutant | 2 | database objects in SQL files: DO blocks and the rest of the review's shapes passes on a …; real repository passes against the real repo | 1 |
+| f1-prefix | mutant | 2 | raw SQL: a substitution a comment swallowed (F1, static side) FAILS on a line comment tha…; raw SQL: a substitution a comment swallowed (F1, static side) FAILS on a block comment th… | 1 |
+| f1-null-widen | mutant | 4 | raw SQL: W6 the syntax around a substituted table FAILS on a quoted substituted qualifier…; raw SQL: W6 the syntax around a substituted table passes on a quoted substitution as a re… | 1 |
+| f1-qident | mutant | 4 | raw SQL: W6 the syntax around a substituted table FAILS on a quoted substituted qualifier…; raw SQL: W6 the syntax around a substituted table passes on a quoted substitution as a re… | 1 |
+| f1-string | mutant | 1 | raw SQL: a substitution a comment swallowed (F1, static side) counts substitutions kept i… | 1 |
+| f1-text | mutant | 1 | raw SQL: a substitution a comment swallowed (F1, static side) FAILS on a line comment tha… | 1 |
+| f2-prefix | mutant | 4 | schema source: the forms a line scan misses (F2, F3) FAILS on an entry naming a field tha…; schema source: the forms a line scan misses (F2, F3) FAILS on an entry naming a hash-like… | 1 |
+| f2-string | mutant | 1 | schema checks (A-10) passes on a unique field that is not a String | 1 |
+| f3-fields | mutant | 1 | schema source: the forms a line scan misses (F2, F3) is fatal on a @@unique(fields: [...]… | 1 |
+| f3-depth | mutant | 2 | schema source: the forms a line scan misses (F2, F3) is fatal on a multi-line @@unique([.…; schema source: the forms a line scan misses (F2, F3) is fatal on a multi-line @relation t… | 1 |
+| f3-attr | mutant | 1 | schema source: the forms a line scan misses (F2, F3) is fatal on a @unique on a continuat… | 1 |
+| f3-brace | mutant | 1 | schema source: the forms a line scan misses (F2, F3) is fatal on a model whose brace is o… | 1 |
+| f3-brace-fatal | mutant | 1 | schema source: the forms a line scan misses (F2, F3) is fatal on a model whose brace is o… | 1 |
+| f3-neg | mutant | 1 | schema source: the forms a line scan misses (F2, F3) is fatal on a multi-line @@unique af… | 1 |
+| f4-prefix | mutant | 1 | builders: the review's remaining arms passes on a builder that calls itself (the recursio… | 1 |
+| w4-do-initial | mutant | 1 | raw SQL: the literal collection and the violation lines (review cells) FAILS on a ; befor… | 1 |
+| w1-rparen | mutant | 1 | raw SQL: the literal collection and the violation lines (review cells) FAILS on count(* f… | 1 |
+| c4-comma-depth | mutant | 1 | database objects in SQL files: DO blocks and the rest of the review's shapes passes on a … | 1 |
+| c4-alter-notable | mutant | 1 | database objects in SQL files: DO blocks and the rest of the review's shapes FAILS on ALT… | 1 |
+| c4-references-dot | mutant | 1 | database objects in SQL files: DO blocks and the rest of the review's shapes FAILS on a s… | 1 |
+| c4-proc | mutant | 1 | database objects in SQL files: DO blocks and the rest of the review's shapes FAILS on a C… | 1 |
+| c4-do-create | mutant | 1 | database objects in SQL files: DO blocks and the rest of the review's shapes passes on a … | 1 |
+| c4-escaped | mutant | 1 | database objects in SQL files: DO blocks and the rest of the review's shapes FAILS on a f… | 1 |
+| c4-semi-depth | mutant | 1 | database objects in SQL files: DO blocks and the rest of the review's shapes passes on a … | 1 |
+| c4-last-stmt | mutant | 1 | database objects in SQL files: DO blocks and the rest of the review's shapes FAILS on a f… | 1 |
+| c4-generated-offset | mutant | 4 | database objects defined in SQL files (A-10) FAILS on a generated column with no entry; database objects defined in SQL files (A-10) passes on a generated column once listed | 1 |
+| c5-unwrap | mutant | 1 | raw SQL: the literal collection and the violation lines (review cells) reads the SQL of a… | 1 |
+| c5-direct-callee | mutant | 1 | raw SQL: the literal collection and the violation lines (review cells) FAILS on pool.quer… | 1 |
+| c2-direct-to-one | mutant | 1 | lookups and census: the review's remaining shapes FAILS on a logical spread inside a dire… | 1 |
+| scalar-update-many | mutant | 1 | lookups and census: the review's remaining shapes passes on a nested updateMany whose dat… | 1 |
+| logical-not | mutant | 1 | lookups and census: the review's remaining shapes FAILS on a spread under NOT in a token-… | 1 |
+| array-where-spread | mutant | 1 | lookups and census: the review's remaining shapes FAILS on a spread element in an array w… | 1 |
+| render-one-arg | mutant | 1 | raw SQL: the literal collection and the violation lines (review cells) FAILS on renderSql… | 1 |
+| raw-tagged-unsafe | mutant | 1 | raw SQL: the literal collection and the violation lines (review cells) FAILS on $queryRaw… | 1 |
+| sqlpre-execute | mutant | 1 | raw SQL: the literal collection and the violation lines (review cells) reads a $executeRa… | 1 |
+| sqlpre-query | mutant | 1 | raw SQL: the literal collection and the violation lines (review cells) reads a $queryRaw … | 1 |
+| sql-lines-dedupe | mutant | 1 | raw SQL: the literal collection and the violation lines (review cells) counts two identic… | 1 |
+| role-propaccess-ref | mutant | 1 | lookups and census: the review's remaining shapes FAILS on a bare .length of an unresolve… | 1 |
+| builder-samefile | mutant | 1 | builders: the review's remaining arms passes on a same-named parameter that shadows the b… | 1 |
+| builder-callee-unwrap | mutant | 1 | builders: the review's remaining arms FAILS on the caller of a parenthesised builder call | 1 |
+| builder-unattrib | mutant | 1 | builders: the review's remaining arms FAILS on a call of a builder at module scope (canno… | 1 |
+| keyspan-covered-widen | mutant | 121 | lookups, whatever the receiver FAILS on a computed key bound by let (an unpinned key: flo…; lookups, whatever the receiver passes on a digest key outside any filter position once it… | 1 |

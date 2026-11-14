@@ -137,13 +137,16 @@
  *       * W4 (every literal): EXECUTE, PREPARE, a statement-initial DO, a CREATE / ALTER of a
  *         function, procedure, view, trigger or rule, and calls to query_to_xml*,
  *         table_to_xml*, cursor_to_xml*, schema_to_xml*, database_to_xml*, dblink* and ts_stat.
- *       * W5: a token table's name as a whole word, any case, inside a string token fails (SQL
- *         carried as a string argument is invisible to W1-W3).
+ *       * W5: a token table's name as a whole word, any case, inside a string token's body (its
+ *         delimiters stripped, so `$$api_keys$$` counts; only letters, digits and `_` join a
+ *         word) fails: SQL carried as a string argument is invisible to W1-W3.
  *       * W6 (trustedSql templates, whose substituted tables the run-time mint places by the
  *         template's own text): a substitution after a FROM that is no relation FROM; in
  *         relation position followed by `::`, `[` or `(` (not INTO's column list); a
- *         substituted qualifier `${x}.<name>` whose name is no column of any schema model; or
- *         directly adjacent to a letter, digit, `_` or `$` of the template (`api_${x}`).
+ *         substituted qualifier `${x}.<name>` whose name is no column of any schema model;
+ *         directly adjacent to a letter, digit, `_` or `$` of the template (`api_${x}`); or a
+ *         substitution a comment swallowed (the lexer drops it, while the run-time mint still
+ *         reads the text around it: `-- ${x} FROM\n ${t}`).
  *     W1-W3 and W5 apply to a literal that names a token table (as a name or inside a string)
  *     and to every trustedSql template; W4 to every literal; W6 to trustedSql templates only.
  *     Each failure names its rule. A literal holding U+E000 (the lexer's substitution marker,
@@ -161,7 +164,8 @@
  *     holds: a CREATE of a function, procedure, view, materialized view, trigger or rule
  *     whose statement or body names a token table or a digest column, or a function or
  *     procedure whose body holds EXECUTE (a trigger's EXECUTE FUNCTION clause is not one); a
- *     DO block creating such an object and naming a token table or a digest column; or any
+ *     DO block creating such an object and naming a token table or a digest column, or one that
+ *     EXECUTEs a CREATE / ALTER of such an object (whatever it names); or any
  *     statement naming a digest column that is not plain (a CREATE TABLE without AS, an ADD
  *     COLUMN without GENERATED, ADD / DROP CONSTRAINT, CREATE INDEX, DROP, an INSERT ... VALUES
  *     with no SELECT and no ON CONFLICT DO UPDATE) — a REFERENCES or GENERATED clause reading a
@@ -170,7 +174,10 @@
  *     fields' @map columns equal the digest-column set both ways and a field mapped to one is
  *     named a digest key; no `view` block; a unique (or @@unique member) String field named
  *     or mapped ending in hash / digest is a digest key or listed in `nonBearerHashFields`
- *     (`Model.field`, reason); no @relation references a digest key.
+ *     (`Model.field`, reason; an entry that no longer names such a field is stale); no @relation
+ *     references a digest key; no `model` / `view` opens its block on a later line (the shared
+ *     schema reader would not see it). The schema is read over logical lines: attributes
+ *     continued on the next line, and parentheses or brackets spanning lines, are joined first.
  *   - The pg driver (C5): a call of a member named `query` (property, optional chain, pinned
  *     element access) takes a string literal or no-substitution template as its first
  *     argument, which is then a SQL-bearing literal. The files importing createPool or
@@ -331,7 +338,7 @@ const WRITE_ARG_OPS = new Set(["update", "updateMany", "upsert", "connectOrCreat
 // The writes whose `data` can hold nested writes. createMany / updateMany (and their
 // AndReturn forms) take scalar columns only, so their `data` cannot hide a lookup.
 const RELATION_WRITE_METHODS = new Set(["create", "update", "upsert"]);
-const SCALAR_WRITE_OPS = new Set(["createMany", "updateMany"]);
+const SCALAR_WRITE_OPS = new Set(["updateMany"]);
 // A RegExp, not a string literal: check-raw-sql-usage's PRISMA_EXTENDS (the repo-wide control)
 // denies a "$extends" literal in scripts/ too.
 const EXTENDS_RE = /^\$extends$/;
@@ -417,35 +424,63 @@ const scalarColumns = (model) => new Set([...MODELS.get(model).values()].filter(
 const COLUMNS_BY_TABLE = new Map([...MODELS.keys()].map((m) => [schema.tables.get(m), scalarColumns(m)]));
 const ALL_COLUMNS = new Set([...COLUMNS_BY_TABLE.values()].flatMap((cols) => [...cols]));
 
-/** Facts the schema loader does not keep: `view` blocks, unique fields, and `@relation(references: [...])` lists. */
+/**
+ * Facts the schema loader does not keep: `view` blocks, unique fields, `@relation(references: [...])` lists, and
+ * blocks whose brace is on a later line (the loader reads only `model X {` on one line, so it cannot see them).
+ * Physical lines are joined into logical ones first: inside unbalanced parentheses or brackets, and a line that
+ * starts with an attribute (`@unique` under its field).
+ */
 function scanSchemaSource(text) {
-  const out = { views: [], unique: [], references: [] };
-  let model = null;
+  const out = { views: [], unique: [], references: [], braceOnNextLine: [] };
+  const logical = [];
+  let depth = 0;
   for (const raw of text.split("\n")) {
     const line = raw.replace(/\/\/.*$/, "");
+    const continues = depth > 0 || /^[ \t]+@(?!@)/.test(line);
+    if (continues && logical.length > 0) logical[logical.length - 1] += ` ${line.trim()}`;
+    else logical.push(line);
+    for (const c of line) depth += c === "(" || c === "[" ? 1 : c === ")" || c === "]" ? -1 : 0;
+    if (depth < 0) depth = 0;
+  }
+  let model = null;
+  logical.forEach((line, k) => {
+    const lone = /^(model|view)\s+(\w+)\s*$/.exec(line);
+    if (lone && /^\s*\{/.test(logical[k + 1] ?? "")) out.braceOnNextLine.push(lone[2]);
     const open = /^(model|view)\s+(\w+)\s*\{/.exec(line);
     if (open) {
       if (open[1] === "view") out.views.push(open[2]);
       model = open[1] === "model" ? open[2] : null;
-      continue;
+      return;
     }
     if (/^\}/.test(line)) {
       model = null;
-      continue;
+      return;
     }
-    if (!model) continue;
+    if (!model) return;
     const field = /^[ \t]+(\w+)[ \t]+[A-Za-z_]\w*(?:\[\])?\??/.exec(line)?.[1];
     if (field && /@unique\b/.test(line)) out.unique.push({ model, field });
-    const composite = /@@unique\(\s*\[([^\]]*)\]/.exec(line);
+    const composite = /@@unique\(\s*(?:fields:\s*)?\[([^\]]*)\]/.exec(line);
     if (composite) for (const m of composite[1].split(",")) out.unique.push({ model, field: /^\s*(\w+)/.exec(m)?.[1] });
     const references = /@relation\([^)]*references:\s*\[([^\]]*)\]/.exec(line);
     if (references) out.references.push({ model, field, names: references[1].split(",").map((n) => n.trim()) });
-  }
+  });
   return out;
 }
+const SCHEMA_SOURCE = scanSchemaSource(readFileSync(join(ROOT, SCHEMA_PATH), "utf8"));
+const endsHashLike = (name) => /(hash|digest)$/i.test(name);
+/** Unique String fields that end in hash / digest (by name or column) and are not digest keys: `Model.field`. */
+const UNIQUE_HASH_FIELDS = new Set(
+  SCHEMA_SOURCE.unique
+    .filter(({ model, field }) => {
+      const f = MODELS.get(model)?.get(field);
+      return f && f.type === "String" && !DIGEST_KEYS.has(field) && (endsHashLike(field) || endsHashLike(f.column));
+    })
+    .map(({ model, field }) => `${model}.${field}`),
+);
 
 /** The first schema check that fails, as a fatal message, or null. */
 function schemaViolation() {
+  if (SCHEMA_SOURCE.braceOnNextLine.length > 0) return `${SCHEMA_PATH}: ${SCHEMA_SOURCE.braceOnNextLine[0]} opens its block on a later line: the schema reader cannot see it.`;
   const mapped = new Set();
   for (const [model, fields] of MODELS) {
     for (const [name, f] of fields) {
@@ -460,17 +495,13 @@ function schemaViolation() {
   for (const column of DIGEST_COLUMNS) {
     if (!mapped.has(column)) return `${SCHEMA_PATH}: no digest-key field maps to column "${column}": the digest-column set and the schema disagree.`;
   }
-  const source = scanSchemaSource(readFileSync(join(ROOT, SCHEMA_PATH), "utf8"));
-  if (source.views.length > 0) return `${SCHEMA_PATH}: view ${source.views[0]}: a database view can project a digest column without naming it in a query.`;
-  for (const { model, field } of source.unique) {
-    const f = MODELS.get(model)?.get(field);
-    if (!f || f.type !== "String" || DIGEST_KEYS.has(field)) continue;
-    if (!/(hash|digest)$/i.test(field) && !/(hash|digest)$/i.test(f.column)) continue;
-    if (!NON_BEARER_HASH_ENTRIES.has(`${model}.${field}`)) {
-      return `${SCHEMA_PATH}: ${model}.${field} is a unique String ending in hash/digest but is not a digest key (${[...DIGEST_KEYS].join("/")}): name it one, or list "${model}.${field}" in the manifest's "nonBearerHashFields" with a reason.`;
+  if (SCHEMA_SOURCE.views.length > 0) return `${SCHEMA_PATH}: view ${SCHEMA_SOURCE.views[0]}: a database view can project a digest column without naming it in a query.`;
+  for (const key of UNIQUE_HASH_FIELDS) {
+    if (!NON_BEARER_HASH_ENTRIES.has(key)) {
+      return `${SCHEMA_PATH}: ${key} is a unique String ending in hash/digest but is not a digest key (${[...DIGEST_KEYS].join("/")}): name it one, or list "${key}" in the manifest's "nonBearerHashFields" with a reason.`;
     }
   }
-  for (const { model, field, names } of source.references) {
+  for (const { model, field, names } of SCHEMA_SOURCE.references) {
     const digest = names.find((n) => DIGEST_KEYS.has(n));
     if (digest) return `${SCHEMA_PATH}: ${model}${field ? `.${field}` : ""} references ${digest}: a foreign key gives another column the digest's values.`;
   }
@@ -1133,8 +1164,8 @@ function keyRole(occ, file) {
 function keySpan(occ) {
   let p = occ.getParent();
   if (p?.getKind() === SyntaxKind.ComputedPropertyName) p = p.getParent();
-  const isProperty = p?.getKind() === SyntaxKind.PropertyAssignment || p?.getKind() === SyntaxKind.ShorthandPropertyAssignment;
-  return isProperty ? p : occ;
+  // A shorthand property holds nothing but its name, so only a property with a value can contain another key.
+  return p?.getKind() === SyntaxKind.PropertyAssignment ? p : occ;
 }
 
 /** Every key-role spelling of a digest key in the file: `{ occ, label, write, span }`. */
@@ -1188,9 +1219,9 @@ const isSubstitution = (t) => t !== undefined && (t.type === TOKEN.OPAQUE || (t.
 const isNamedToken = (t) => t !== undefined && (t.type === TOKEN.WORD || t.type === TOKEN.QIDENT) && !isSubstitution(t);
 const isTokenTableName = (t) => isNamedToken(t) && TOKEN_TABLES.has(nameOf(t));
 const TOKEN_TABLE_WORD =
-  TOKEN_TABLES.size > 0 ? new RegExp(`(?<![A-Za-z0-9_$])(${[...TOKEN_TABLES].map(escapeRegExp).join("|")})(?![A-Za-z0-9_$])`, "gi") : null;
-/** The token tables a string token names as a whole word, in any case. */
-const tablesInString = (t) => (t.type === TOKEN.STRING && TOKEN_TABLE_WORD ? [...new Set([...t.text.matchAll(TOKEN_TABLE_WORD)].map((m) => m[1].toLowerCase()))] : []);
+  TOKEN_TABLES.size > 0 ? new RegExp(`(?<![A-Za-z0-9_])(${[...TOKEN_TABLES].map(escapeRegExp).join("|")})(?![A-Za-z0-9_])`, "gi") : null;
+/** The token tables a string token's body (delimiters stripped; `$` is no word character there) names as a whole word, in any case. */
+const tablesInString = (t) => (t.type === TOKEN.STRING && TOKEN_TABLE_WORD ? [...new Set([...stringBody(t.text).matchAll(TOKEN_TABLE_WORD)].map((m) => m[1].toLowerCase()))] : []);
 
 /**
  * The relation positions of a token stream: a name chain (`schema.name`) directly after
@@ -1329,10 +1360,19 @@ function checkSqlLiteral(input, trusted) {
       }
     }
   });
-  // A substitution touching a word character assembles a name from parts (`api_${x}`).
+  // A substitution touching a word character assembles a name from parts (`api_${x}`); one a comment swallowed is
+  // invisible here while the run-time mint still reads the text around it (`-- ${x} FROM\n ${t}`).
+  const present = []; // the substitutions the lexer kept, in order: a token's source text, or null inside a quoted token
+  for (const t of tk) {
+    if (t.type === TOKEN.OPAQUE) present.push(t.text);
+    else if (t.type === TOKEN.QIDENT || t.type === TOKEN.STRING) for (const c of t.type === TOKEN.QIDENT ? t.value : t.text) if (c === SQL_SUBSTITUTION) present.push(null);
+  }
+  let kept = 0;
   let line = 0;
   input.substitutions.forEach((substitution, k) => {
     line += [...input.parts[k]].filter((c) => c === "\n").length;
+    if (kept < present.length && (present[kept] === null || present[kept] === substitution)) kept += 1;
+    else add("W6", { line }, "a substitution inside a comment is invisible to the lexer");
     const before = input.parts[k].at(-1);
     const after = input.parts[k + 1][0];
     if ((before && SQL_WORD_CHAR.test(before)) || (after && SQL_WORD_CHAR.test(after))) {
@@ -1359,7 +1399,7 @@ function stringBody(text) {
 
 /** A token stream and, recursively, the stream of every string token in it (a function body, an EXECUTE literal). */
 function nestedStreams(tk, depth = 0) {
-  const out = { lists: [tk], tooDeep: false };
+  const out = { lists: [tk], depths: [depth], tooDeep: false };
   for (const t of tk) {
     if (t.type !== TOKEN.STRING) continue;
     if (depth >= SQL_NESTING_LIMIT) {
@@ -1368,6 +1408,7 @@ function nestedStreams(tk, depth = 0) {
     }
     const inner = nestedStreams(tokenizeSql(stringBody(t.text)), depth + 1);
     out.lists.push(...inner.lists);
+    out.depths.push(...inner.depths);
     out.tooDeep ||= inner.tooDeep;
   }
   return out;
@@ -1395,7 +1436,7 @@ function referencesDigest(tk) {
 function generatesFromDigest(tk) {
   return tk.some((t, i) => {
     if (!isSqlWord(t, "GENERATED")) return false;
-    const as = [1, 2, 3, 4].map((d) => i + d).find((j) => isSqlWord(tk[j], "AS"));
+    const as = isSqlWord(tk[i + 2], "AS") ? i + 2 : undefined; // GENERATED ALWAYS AS (expr)
     const open = as === undefined ? undefined : tk[as + 1];
     return open?.type === TOKEN.LPAREN && open.match !== undefined && tk.slice(as + 2, open.match).some(isDigestColumnName);
   });
@@ -1404,7 +1445,6 @@ function generatesFromDigest(tk) {
 /** Is a statement that names a digest column one of the plain forms (a definition, an index, a drop, a seed)? */
 function isPlainStatement(tk) {
   const first = tk[0];
-  if (first.type !== TOKEN.WORD) return false;
   if (first.upper === "DROP") return true;
   if (first.upper === "INSERT") {
     const hasWord = (w) => tk.some((t) => isSqlWord(t, w));
@@ -1432,7 +1472,7 @@ function isPlainStatement(tk) {
 
 /** Why a statement (top-level tokens, no `;`) makes its file need an entry: `[why, ...]`. */
 function sqlObjectReasons(tk) {
-  const { lists, tooDeep } = nestedStreams(tk);
+  const { lists, depths, tooDeep } = nestedStreams(tk);
   const all = lists.flat();
   const namesDigest = all.some(isDigestColumnName);
   const namesTable = all.some(isTokenTableName);
@@ -1445,8 +1485,13 @@ function sqlObjectReasons(tk) {
     // A trigger's `EXECUTE FUNCTION` clause is no dynamic SQL; a routine's PL/pgSQL EXECUTE is.
     if ((kind === "FUNCTION" || kind === "PROCEDURE") && all.some((t) => isSqlWord(t, "EXECUTE"))) reasons.push(`CREATE ${kind} whose body holds EXECUTE`);
   }
-  if (isSqlWord(first, "DO") && (namesDigest || namesTable) && lists.slice(1).some((l) => l.some((t, i) => isSqlWord(t, "CREATE") && definedKind(l, i)))) {
-    reasons.push("DO block creating a database object and naming a token table or a digest column");
+  if (isSqlWord(first, "DO")) {
+    const creates = (l) => l.some((t, i) => isSqlWord(t, "CREATE") && definedKind(l, i));
+    if ((namesDigest || namesTable) && lists.slice(1).some(creates)) reasons.push("DO block creating a database object and naming a token table or a digest column");
+    // A CREATE / ALTER inside an EXECUTE string (a list two strings deep: body, then the executed text) is built at run time.
+    if (lists.some((l, i) => depths[i] >= 2 && l.some((t, k) => (isSqlWord(t, "CREATE") || isSqlWord(t, "ALTER")) && definedKind(l, k)))) {
+      reasons.push("DO block executing a CREATE or ALTER of a database object");
+    }
   }
   if (namesDigest && (lists.some((l) => referencesDigest(l) || generatesFromDigest(l)) || !isPlainStatement(tk))) {
     reasons.push(`statement naming a digest column that is not a plain definition, index, drop or seed (${first.text})`);
@@ -1603,7 +1648,7 @@ for (const { rel, sf } of sourceFiles(project, join(ROOT, SCAN_ROOT), ROOT)) {
     if (k.write) builders.push({ rel, name: k.owner.at.name, fn: k.owner.at.fn });
     const covered =
       countedCalls.some((c) => c.key === k.owner.key && within(c.call, k.occ)) ||
-      owned.some((g) => g !== k && g.owner?.key === k.owner.key && g.span !== k.span && within(g.span, k.occ));
+      owned.some((g) => g !== k && g.owner?.key === k.owner.key && within(g.span, k.occ));
     if (covered) continue;
     const a = entryFor(rel, k.owner.at, file);
     a.sites += 1;
@@ -1886,6 +1931,7 @@ for (const b of buildersByFn.values()) {
           : refersToImport(callee, file, moduleOf(b.rel), b.name);
       if (!isBuilder) continue;
       const at = attribute(call);
+      if (at?.fn === b.fn) continue; // a builder calling itself is no consumer
       if (!at) {
         failAt(file.rel, call, `call of ${b.name}, which builds a digest-keyed object (${b.rel}), cannot be attributed to a named function, method or exported const`);
         continue;
@@ -1955,11 +2001,9 @@ for (const rel of SQL_OBJECT_ENTRIES.keys()) {
   if (!sqlQualifying.has(rel)) failures.push(`STALE_SQL_OBJECT: ${rel} is in "sqlObjects" but no statement in it (or no such file) needs an entry.`);
 }
 
-// nonBearerHashFields (C4): an entry must still name a unique String ending in hash / digest that is no digest key.
+// nonBearerHashFields (C4): an entry must still name a unique String ending in hash / digest that is no digest key (UNIQUE_HASH_FIELDS).
 for (const [key, entry] of NON_BEARER_HASH_ENTRIES) {
-  const [model, field] = key.split(".");
-  const f = MODELS.get(model)?.get(field);
-  if (!f || f.type !== "String" || DIGEST_KEYS.has(field)) failures.push(`STALE_NON_BEARER_HASH: "${key}" is in "nonBearerHashFields" but names no non-digest String field.`);
+  if (!UNIQUE_HASH_FIELDS.has(key)) failures.push(`STALE_NON_BEARER_HASH: "${key}" is in "nonBearerHashFields" but names no unique non-digest String field ending in hash or digest.`);
   else checkReason(`"nonBearerHashFields" entry ${key}`, entry);
 }
 
