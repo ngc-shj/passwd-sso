@@ -650,7 +650,8 @@ function sanitizeAcknowledgement(reason) {
  * database says (`to_regprocedure('public.rls_bypass_enforced()') IS NOT NULL`
  * and its result); `acknowledgement` is the raw RLS_REPORT_MODE_ACK value.
  * Report mode passes only with a reason that survives sanitising, and then
- * yields a warning so the state is never silent. An absent function is never
+ * yields a warning so the state is never silent. An acknowledgement left set
+ * on an enforcing database yields a warning too. An absent function is never
  * acknowledgeable: nothing says what mode the database is in.
  *
  * @returns {{ violations: string[], warnings: string[] }}
@@ -662,8 +663,17 @@ export function enforceModeViolations({ functionPresent, enforced, acknowledgeme
       warnings: [],
     };
   }
-  if (enforced === true) return { violations: [], warnings: [] };
   const reason = typeof acknowledgement === "string" ? sanitizeAcknowledgement(acknowledgement) : "";
+  if (enforced === true) {
+    // A leftover acknowledgement would let a later un-flip pass unnoticed.
+    return {
+      violations: [],
+      warnings:
+        reason === ""
+          ? []
+          : [`${RLS_REPORT_MODE_ACK_ENV} is set but the RLS bypass is enforcing: remove it (${reason})`],
+    };
+  }
   if (reason === "") {
     return {
       violations: [
@@ -895,7 +905,8 @@ async function main() {
         "REFUSING to regenerate the manifest: the RLS bypass is not enforcing " +
           "(public.rls_bypass_enforced() is absent or not true).",
       );
-      process.exit(1);
+      process.exitCode = 1;
+      return;
     }
     if (
       laundered.length > 0 ||
@@ -929,7 +940,8 @@ async function main() {
           `\nlegitimate (an elevated attribute, a membership, a PUBLIC table` +
           `\ngrant, or a retired role able to act); repair it. Then regenerate.\n`,
       );
-      process.exit(1);
+      process.exitCode = 1;
+      return;
     }
     writeManifest(comparable(live));
     return;

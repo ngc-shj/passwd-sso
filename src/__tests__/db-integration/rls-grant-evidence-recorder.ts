@@ -18,13 +18,27 @@ export type RoleAttributes = { name: string; rolsuper: boolean; rolbypassrls: bo
 const SET_BYPASS_GUCS_RE =
   /^SELECT set_config\('app\.bypass_rls', 'on', true\),\s*set_config\('app\.bypass_purpose', \$1, true\),\s*set_config\('app\.tenant_id', \$2, true\),\s*set_config\('app\.bypass_tables', \$3, true\)$/;
 
-// PostgreSQL applies startup options in order, so the last `role=` wins.
-const ROLE_OPTION_RE = /(?:^|\s)(?:-c\s*|--)role=(\S+)/g;
+// PostgreSQL applies startup options in order, so the last `role=` wins; option
+// names are case-insensitive.
+const ROLE_OPTION_RE = /(?:^|\s)(?:-c\s*|--)role=(\S+)/gi;
+const SESSION_AUTHORIZATION_OPTION_RE = /(?:^|\s)(?:-c\s*|--)session_authorization=/i;
 
-// A statement that can change the role a connection runs as. Over-matching (a
-// string literal that happens to contain the words) only drops evidence.
+// A statement that can change the role a connection runs as, matched anywhere
+// in the text (a DO body, a later statement of a batch, after a comment). It is
+// a spelling match, not a parse, and errs toward marking: a raw
+// `UPDATE … SET role = …`, or a set_config whose setting name is not a plain
+// quoted literal (a bound value, an escape or dollar-quoted string), marks the
+// connection too, which only drops evidence. What it cannot see is a switch
+// made inside a function the statement calls.
 const ROLE_SWITCH_RE =
-  /(?:^|;)\s*(?:SET\s+(?:(?:LOCAL|SESSION)\s+)?(?:ROLE|SESSION\s+AUTHORIZATION)\b|RESET\s+(?:ROLE|SESSION\s+AUTHORIZATION)\b)|set_config\s*\(\s*'(?:role|session_authorization)'/i;
+  /\b(?:SET|RESET)\s+(?:(?:LOCAL|SESSION)\s+)?(?:ROLE|SESSION\s+AUTHORIZATION)\b|\bset_config\s*\(\s*(?!'(?!(?:role|session_authorization)')[a-z_.]+')/i;
+const BLOCK_COMMENT_RE = /\/\*[\s\S]*?\*\//g;
+
+function switchesRole(text: string): boolean {
+  // Both readings: a comment may sit between the keywords, and a `/*` inside a
+  // string literal must not hide what follows it.
+  return ROLE_SWITCH_RE.test(text) || ROLE_SWITCH_RE.test(text.replace(BLOCK_COMMENT_RE, " "));
+}
 
 // Named so that no pg_roles row can match: the consumer counts it as a role
 // with no attribute line, i.e. no evidence.
@@ -87,10 +101,12 @@ export function recordGrantEvidence(
   const connection = client.connectionParameters;
   if (!evidenceFile() || !connection) return;
   const text = statementText(args);
-  if (text !== null && ROLE_SWITCH_RE.test(text)) switchedConnections.add(client);
+  // A statement whose text cannot be read is treated as a switch.
+  if (text === null || switchesRole(text)) switchedConnections.add(client);
   const grant = parseSetBypassGucs(args);
   if (!grant) return;
-  const role = switchedConnections.has(client) ? SWITCHED_ROLE : effectiveRole(connection);
+  const startupRoleKnown = !SESSION_AUTHORIZATION_OPTION_RE.test(connection.options ?? "");
+  const role = startupRoleKnown && !switchedConnections.has(client) ? effectiveRole(connection) : SWITCHED_ROLE;
   // One line per distinct triple per test file; the consumer reads sets.
   const key = `${grant.purpose}\0${grant.tables}\0${role}`;
   if (recorded.has(key)) return;

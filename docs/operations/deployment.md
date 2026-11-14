@@ -198,8 +198,9 @@ own connection overrides the setting (a setting on the migration role, or
 value: the server default is then unreadable.
 
 Only the ECS migrate task runs the preflight and the audit. Compose installs,
-and any launcher that runs `prisma migrate deploy` directly (Vercel, GCP, Azure,
-Kubernetes, a hand-run one-off task, `npm run db:migrate`), run neither: their
+any launcher that runs `prisma migrate deploy` directly (Vercel, GCP, Azure,
+Kubernetes, a hand-run one-off task), and `npm run db:migrate`
+(`prisma migrate dev`) run neither: their
 database flips when the migration is applied, with no attestation and no audit;
 the release is marked breaking. To un-flip a compose install:
 

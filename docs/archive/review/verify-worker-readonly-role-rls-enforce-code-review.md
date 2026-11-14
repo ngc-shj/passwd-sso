@@ -1,7 +1,7 @@
 # Code Review: verify-worker-readonly-role-rls-enforce
 
 Date: 2026-11-15
-Review round: 1
+Review round: 2
 
 ## Changes from Previous Round
 
@@ -233,3 +233,61 @@ None. Each finding names a file and gives evidence; T2 and T8 are marked by thei
 
 ### Verification after the fixes
 - Full integration suite with a fresh evidence file: 154 files, 1658 passed, 5 todo, exit 0; evidence check exit 0.
+
+## Round 2
+
+Incremental review of the round-1 fixes by the same three experts. No Critical or Major finding. The testing expert red-proved, on scratch copies, the cells the fixing pass had left unproven: the verifier denial cells under a granted state (all nine write cells red), every arm of the migrate-task wiring check, twelve mutations of the recorder, six mutations of the audit's mode check, and the role-URL check; the mode cells ran five times without a failure, and three of six runs failed with `process.exit(1)` restored.
+
+### Findings
+
+- **F13 — Minor.** `deployment.md` listed `npm run db:migrate` as a `prisma migrate deploy` launcher; it runs `prisma migrate dev`.
+- **F14 / N7 — Minor.** The `--write` refusals still printed a multi-line report and then called `process.exit(1)`.
+- **S7 — Minor.** The recorder's role-switch match missed a switch after a comment, inside a DO body, through `set_config` with a non-literal name, and an upper-case `-c ROLE=`; each credits the startup role.
+- **S8 — Minor.** An acknowledgement left set while the database is enforcing emitted nothing, so "the alarm fires on every deploy that carries it" held only in report mode, and the leftover variable would pre-authorise a later un-flip.
+- **S9 — Minor.** The boundary matrix said the verifier holds EXECUTE on two functions "only"; four invoker functions are executable through `PUBLIC`.
+- **N1 — Minor.** A listed undecidable `defineGrant` call is excused by its text, and the cell that claimed to check its rows used hand-copied values: a colliding row added to the `it.each` table stayed green (executed).
+- **N2 — Minor.** The collision guard does not follow a local alias, a re-export, `.call`, a spread or object-literal grant, the raw statement, or integration tests outside `db-integration`. Nothing in the tree uses these forms.
+- **N3 — Minor.** The `--write` refusal in report mode had no test; removing it left the file green (executed).
+- **N4 — Minor.** A non-zero status did not show that the run reached the mode check.
+- **N5 — Minor.** The `--role=` and `-crole=` arms of the option pattern had no test.
+- **N6 — Minor.** The `process.exitCode` fix was pinned only by a flake, with a misleading failure message.
+
+### Resolution Status
+
+#### F13
+- Action: sentence corrected.
+- Modified file: `docs/operations/deployment.md`
+
+#### F14 / N7
+- Action: both `--write` refusals set `process.exitCode` and return before the manifest is written. The remaining early exits print one short message.
+- Modified file: `scripts/audit-db-grants.mjs`
+
+#### S7 / N5
+- Action: the switch pattern matches anywhere in the statement, with and without block comments, and treats a `set_config` as a switch when its setting name is `role` or `session_authorization`, or is not a plain quoted literal; a statement whose text cannot be read marks the connection; the option pattern ignores case; a `session_authorization` startup option makes the startup role untrusted. Cells for each spelling, for the two untested option forms, and for the allow side (a Prisma update of a quoted `role` column, a tenant `set_config`, the bypass statement itself).
+- Not covered, stated in the code: a switch made inside a function the statement calls.
+- The first version treated every `set_config` outside `app.` as a switch. The row-lock helpers send `set_config('lock_timeout', …)`, so the full run's evidence check failed with five members losing their evidence (123 unattributed grant lines instead of 7); the rule was narrowed and an allow cell for the timeout statement added.
+- Modified file: `src/__tests__/db-integration/rls-grant-evidence-recorder.ts`, its test
+
+#### S8
+- Action: an enforcing audit with a non-empty acknowledgement warns to remove it and emits the same `_logType` line, so the alarm fires; a whitespace-only value stays silent. The alarm's comment and description and `alerts.md` say what triggers the line. A cell runs it through the real process.
+- Modified file: `scripts/audit-db-grants.mjs`, `scripts/__tests__/audit-db-grants-role-state.test.mjs`, `src/__tests__/db-integration/audit-db-grants.integration.test.ts`, `infra/terraform/monitoring.tf`, `docs/operations/alerts.md`
+
+#### S9
+- Action: the section separates what is granted by name from what `PUBLIC` gives, names the invoker functions and points to the manifest as the complete list.
+- Modified file: `docs/security/tenant-boundary-matrix.md`
+
+#### N3 / N4 / N6
+- Action: two cells run `--write` against a database in report mode (with an acknowledgement) and with the function absent, and require the refusal text, a non-zero status and no file. Every verify cell that depends on the report first requires the findings header, a finding of the empty database and the last line of the help text, so a run that died early or was cut fails by name.
+- The two `--write` cells were not red-proved separately; the reviewer's mutation (refusal removed) writes the file, which the cells' file-absence assertion reads.
+- Modified file: `src/__tests__/db-integration/audit-db-grants.integration.test.ts`
+
+#### N1 / N2 — Accepted, with the guard's reach stated
+- Action: the hand-copied cell is removed, because it claimed a check it did not make. The guard's header now says what it is: a catch for a literal `defineGrant` in a test under `src/__tests__/db-integration` that repeats a member's pair. It lists what it does not follow, and names review of the test change as the control for those.
+- Why not extended: each form the guard would have to follow is another spelling to chase (this round and the last both added spellings to the recorder and the guard). Closing the class needs a different mechanism — crediting evidence by the identity of the `BYPASS_GRANT` object that `setBypassGucs` receives, joined to the connection — not more cases.
+- Anti-Deferral: worst case — a test credits a member with evidence it did not earn, the member leaves the baseline, and a grant that omits a table is refused in production; recovery is the un-flip. Likelihood — low: it needs a test author to build a grant in one of the unusual forms and to repeat a member's pair; none does today. Cost to fix — the identity-based recorder (a wrapper around `setBypassGucs` in the harness and an async context reaching the pg client).
+- Modified file: `scripts/__tests__/integration-test-grants-no-collision.test.mjs`
+
+### Verification after the round-2 fixes
+- Full integration suite with a fresh evidence file: 154 files, 1661 passed, 5 todo, exit 0. Evidence check exit 0: 77 with evidence, 33 without, baseline unchanged.
+- Full unit suite: 1170 of 1171 files pass; the failure is the worktree-only `backup-db` case (one test, the script's own compose call). Production build, typecheck and lint pass.
+- Static gates: all pass except `rls-cross-tenant SQL parse`, which reads the shared development database `passwd_sso`; that database has not had the flip migration applied, so the new `[E-RLS-ENFORCED]` check refuses it. The same SQL passes Block 1 against this worktree's database.

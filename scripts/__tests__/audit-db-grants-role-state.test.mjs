@@ -259,8 +259,16 @@ describe("enforceModeViolations", () => {
     });
   });
 
-  it("ignores an acknowledgement when enforcing", () => {
+  it("passes when enforcing with a leftover acknowledgement, and warns to remove it", () => {
     const r = enforceModeViolations({ ...present, enforced: true, acknowledgement: "left over" });
+    expect(r.violations).toEqual([]);
+    expect(r.warnings).toHaveLength(1);
+    expect(r.warnings[0]).toContain("remove it");
+    expect(r.warnings[0]).toContain("left over");
+  });
+
+  it("stays silent when enforcing with a whitespace-only acknowledgement", () => {
+    const r = enforceModeViolations({ ...present, enforced: true, acknowledgement: " \t " });
     expect(r).toEqual({ violations: [], warnings: [] });
   });
 

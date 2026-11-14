@@ -890,15 +890,15 @@ describe("audit-db-grants (real DB)", () => {
       );
     }
 
-    function runModeAudit(acknowledgement?: string) {
+    function runModeAudit(acknowledgement?: string, extraArgs: string[] = [], manifest = manifestPath) {
       // The ack variable is dropped from the inherited environment so a stray
       // value in the developer's shell cannot turn the unacknowledged cells green.
       const { [ACK_ENV]: _inherited, ...inherited } = process.env;
-      return spawnSync(process.execPath, [AUDIT], {
+      return spawnSync(process.execPath, [AUDIT, ...extraArgs], {
         env: {
           ...inherited,
           MIGRATION_DATABASE_URL: modeUrl,
-          DB_GRANTS_MANIFEST: manifestPath,
+          DB_GRANTS_MANIFEST: manifest,
           ...(acknowledgement === undefined ? {} : { [ACK_ENV]: acknowledgement }),
         },
         encoding: "utf8",
@@ -909,6 +909,16 @@ describe("audit-db-grants (real DB)", () => {
 
     function lines(r: ReturnType<typeof runModeAudit>): string[] {
       return (r.stdout + r.stderr).split("\n");
+    }
+
+    // The verify run printed its whole report: the findings header, a finding
+    // of the empty database, and the last line of the help text. A run that
+    // died before the mode check, or whose output was cut, fails here by name.
+    function expectWholeReport(r: ReturnType<typeof runModeAudit>) {
+      const out = r.stdout + r.stderr;
+      expect(out).toContain("DB grant audit FAILED");
+      expect(out).toContain("MISSING_GRANT:");
+      expect(out.trimEnd().endsWith("server default is then unreadable.")).toBe(true);
     }
 
     beforeAll(async () => {
@@ -935,6 +945,7 @@ describe("audit-db-grants (real DB)", () => {
     it("fails with RLS_ENFORCE_MODE in report mode without an acknowledgement", async () => {
       await setFunction("false");
       const r = runModeAudit();
+      expectWholeReport(r);
       expect(lines(r).filter((l) => l.includes("RLS_ENFORCE_MODE:")).join("\n")).toContain("report mode");
       expect(r.status).not.toBe(0);
     });
@@ -965,10 +976,32 @@ describe("audit-db-grants (real DB)", () => {
     it("raises no RLS_ENFORCE_MODE when the function returns true", async () => {
       await setFunction("true");
       const r = runModeAudit();
+      expectWholeReport(r);
       expect(lines(r).filter((l) => l.includes("RLS_ENFORCE_MODE:"))).toEqual([]);
-      // The run did reach the mode check: it fails on the empty database's
-      // other findings, which only exist once the findings loop has run.
+      expect(lines(r).some((l) => l.includes("rls.report_mode_acknowledged"))).toBe(false);
       expect(r.status).not.toBe(0);
+    });
+
+    it("warns about an acknowledgement left set on an enforcing database", async () => {
+      await setFunction("true");
+      const r = runModeAudit("incident 42");
+      expectWholeReport(r);
+      expect(lines(r).filter((l) => l.includes("RLS_ENFORCE_MODE:"))).toEqual([]);
+      const ackLine = lines(r).find((l) => l.includes('"_logType":"rls.report_mode_acknowledged"'));
+      expect(ackLine).toBeDefined();
+      expect(JSON.parse(ackLine!).msg).toContain("remove it");
+    });
+
+    it.each([
+      ["in report mode, even with an acknowledgement", "false" as const],
+      ["when the function is absent", null],
+    ])("refuses --write %s and writes nothing", async (_name, body) => {
+      await setFunction(body);
+      const refused = join(tmpDir, `mode-refused-${body}.json`);
+      const r = runModeAudit("incident 42", ["--write"], refused);
+      expect(r.stdout + r.stderr).toContain("REFUSING to regenerate the manifest: the RLS bypass is not enforcing");
+      expect(r.status).not.toBe(0);
+      expect(existsSync(refused)).toBe(false);
     });
   });
 });

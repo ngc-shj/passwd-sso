@@ -51,6 +51,12 @@ describe("effectiveRole", () => {
 
   it("is the last role option when several are given", () => {
     expect(effectiveRole({ user: "passwd_user", options: "-c role=first -c role=second" })).toBe("second");
+    expect(effectiveRole({ user: "passwd_user", options: "-c role=first -c ROLE=second" })).toBe("second");
+  });
+
+  it("reads the forms without a space and with two dashes", () => {
+    expect(effectiveRole({ user: "passwd_user", options: "-crole=x" })).toBe("x");
+    expect(effectiveRole({ user: "passwd_user", options: "--role=x" })).toBe("x");
   });
 });
 
@@ -95,11 +101,47 @@ describe("recordGrantEvidence", () => {
     ["SET SESSION AUTHORIZATION", "SET SESSION AUTHORIZATION passwd_user"],
     ["a later statement of a batch", "BEGIN; SET ROLE passwd_user"],
     ["set_config on role", "SELECT set_config('role', 'passwd_user', false)"],
+    ["set_config on role, upper case, after another setting", "SELECT set_config('lock_timeout', $1, true), SET_CONFIG( 'ROLE', $2, false)"],
+    ["set_config on session_authorization", "SELECT set_config('session_authorization', 'passwd_user', false)"],
+    ["a switch after a leading block comment", "/* c */ SET ROLE NONE"],
+    ["a switch after a leading line comment", "-- c\nSET ROLE NONE"],
+    ["a switch with a comment between the keywords", "SET /* c */ ROLE NONE"],
+    ["a switch inside a DO body", "DO $$ BEGIN SET ROLE passwd_user; END $$"],
+    ["set_config with a bound setting name", "SELECT set_config($1, $2, false)"],
+    ["set_config with an escape-string setting name", "SELECT set_config(E'role', 'passwd_user', false)"],
+    ["set_config with a dollar-quoted setting name", "SELECT set_config($q$role$q$, 'passwd_user', false)"],
   ])("does not record the probe role once the connection ran %s", (_name, statement) => {
     const client = probe();
     record(client, [{ text: statement }]);
     record(client, [STATEMENT, GRANT_VALUES]);
     expect(recordedRoles()).toEqual(["<role switched after connect>"]);
+  });
+
+  it("treats a statement it cannot read as a switch", () => {
+    const client = probe();
+    record(client, [{}]);
+    record(client, [STATEMENT, GRANT_VALUES]);
+    expect(recordedRoles()).toEqual(["<role switched after connect>"]);
+  });
+
+  it("does not trust the startup role of a connection that sets session_authorization", () => {
+    const client = { connectionParameters: { user: "passwd_user", options: "-c role=probe -c SESSION_AUTHORIZATION=passwd_user" } };
+    record(client, [STATEMENT, GRANT_VALUES]);
+    expect(recordedRoles()).toEqual(["<role switched after connect>"]);
+  });
+
+  // The allow side: what the application sends on every bypassed transaction
+  // must not mark the connection, or no grant would have evidence.
+  it.each([
+    ["a Prisma update of a quoted role column", 'UPDATE "public"."tenant_members" SET "role" = $1 WHERE "id" = $2'],
+    ["a tenant context set_config", "SELECT set_config('app.tenant_id', $1, true)"],
+    ["a timeout set_config, as the row-lock helpers send", "SELECT set_config('lock_timeout', $1, true), set_config('statement_timeout', $2, true)"],
+    ["the bypass statement itself", STATEMENT],
+  ])("keeps the probe role after %s", (_name, statement) => {
+    const client = probe();
+    record(client, [{ text: statement, values: [] }]);
+    record(client, [STATEMENT, GRANT_VALUES]);
+    expect(recordedRoles()).toEqual(["rls_probe_1_ab"]);
   });
 
   it("marks only the connection that switched", () => {

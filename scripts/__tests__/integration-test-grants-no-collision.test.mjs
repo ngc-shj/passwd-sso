@@ -8,6 +8,14 @@
  * tests from the parse tree and resolves only what is statically decidable: a
  * call whose purpose or models are not literals fails as undecidable unless
  * UNDECIDABLE_ALLOWED lists it with a reason.
+ *
+ * What this is: a catch for the plain mistake, a literal `defineGrant` in a
+ * test under src/__tests__/db-integration that repeats a member's pair. It
+ * does not follow a local alias or re-export of `defineGrant`, a grant built
+ * as an object literal or by spreading a member, the bypass statement sent by
+ * hand, or an integration test outside that directory; and a listed call is
+ * excused as written, so a row added to its `it.each` table is not read. For
+ * those, review of the test change is the control.
  */
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
@@ -29,11 +37,11 @@ const UNDECIDABLE_ALLOWED = new Map([
   ],
   [
     "src/__tests__/db-integration/rls-bypass-grants.integration.test.ts::defineGrant(BYPASS_PURPOSE.AUTH_FLOW, [model])",
-    "it.each over delegationSession and serviceAccount with AUTH_FLOW; those pairs are checked against the members below",
+    "it.each over delegationSession and serviceAccount with AUTH_FLOW; no member has either pair (checked by hand when listed: a new row needs the same check)",
   ],
   [
     "src/__tests__/db-integration/rls-bypass-grants.integration.test.ts::defineGrant(purpose as BypassPurpose, [\"session\"])",
-    "it.each over forged purpose strings with the session table; checked against the purposes below",
+    "it.each over forged purpose strings that are not purposes, with the session table",
   ],
 ]);
 
@@ -134,20 +142,6 @@ describe("test-local defineGrant calls under the integration tests", () => {
     expect(unlisted).toEqual([]);
     // A stale entry would excuse a call that no longer exists.
     expect([...UNDECIDABLE_ALLOWED.keys()].filter((k) => !seen.has(k))).toEqual([]);
-  });
-
-  it("the listed it.each calls cannot reach a member's pair", () => {
-    const pairs = memberPairs();
-    const reached = [];
-    for (const model of ["delegationSession", "serviceAccount"]) {
-      const hit = pairs.get(pairKey(BYPASS_PURPOSE.AUTH_FLOW, MODEL_TABLE[model]));
-      if (hit) reached.push(`AUTH_FLOW/${model} = ${hit}`);
-    }
-    // Forged purposes in rls-bypass-grants.integration.test.ts: none is a real purpose.
-    for (const purpose of ["x\nrls_bypass_not_granted table=users purpose=y", "a".repeat(200), `${"a".repeat(199)}!`]) {
-      if (Object.values(BYPASS_PURPOSE).includes(purpose)) reached.push(purpose);
-    }
-    expect(reached).toEqual([]);
   });
 
   describe("the analyzer", () => {

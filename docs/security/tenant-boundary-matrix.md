@@ -252,7 +252,7 @@ migration creates it `NOLOGIN` with connection limit 10; the Docker initdb
 `scripts/bootstrap-rds-roles.mjs` give it `LOGIN` and its password. `scripts/audit-db-grants.mjs`
 audits it on every ECS deploy (`AUDITED_ROLES`).
 
-It holds no table-level privilege, only column-level `SELECT`, plus `EXECUTE` on
+It holds no table-level privilege. Granted to it by name: column-level `SELECT`, and `EXECUTE` on
 `rls_bypass_enforced()` and `rls_bypass_admits(text)`:
 
 | Table | Columns (`SELECT`) | Reason |
@@ -263,7 +263,10 @@ It holds no table-level privilege, only column-level `SELECT`, plus `EXECUTE` on
 
 The role bounds tables, columns and table writes, not tenant scope: it sets the bypass GUCs itself
 and then reads those columns, `metadata` included, for every tenant. It keeps what PostgreSQL
-grants `PUBLIC` (temporary tables, large objects, `NOTIFY`, advisory locks).
+grants `PUBLIC` (temporary tables, large objects, `NOTIFY`, advisory locks) and `EXECUTE` on the
+schema's `SECURITY INVOKER` functions that `PUBLIC` may call (trigger functions and
+`resolve_tenant_id_from_row`), which run with the role's own privileges.
+`scripts/checks/db-grants-manifest.json` is the complete list.
 
 ### `passwd_dcr_cleanup_worker` (retired)
 
