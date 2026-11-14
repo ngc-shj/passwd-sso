@@ -118,8 +118,9 @@ an exported `const` (F7).
 
 Consumers of a filter builder (S2, S9): a function holding a floating *write* key builds a
 digest-keyed object outside any position the walk reads. A write key is an object-literal
-property, or the target of an assignment (`w.tokenHash = h`, `w["tokenHash"] = h`); a read
-(`row.tokenHash`) is not one. A direct call of that function is one site of the caller. The callee is resolved scope-aware: a local function,
+property, the target of an assignment (`w.tokenHash = h`, `w["tokenHash"] = h`), or a
+string literal passed as a call's argument (`Object.fromEntries([["tokenHash", h]])`,
+`Reflect.set(w, "tokenHash", h)`) (S16); a read (`row.tokenHash`) is not one. A direct call of that function is one site of the caller. The callee is resolved scope-aware: a local function,
 or a named import of the builder's module, by the gate's existing import resolution. One
 level only: the caller then needs its own entry and is classified by a human.
 
@@ -235,7 +236,7 @@ applies to every SQL-bearing literal.
 - W2: a token table's name, or a token relation's alias, fails unless it is in relation
   position or qualifies a declared column: `t.<name>` where `<name>` is a column of that
   table in the schema, or, for the alias of a substitution relation, a column of some
-  schema model or a substitution. `k.to_jsonb` is not a column, so it fails (S1). A
+  schema model. A substitution is not a column name (S14). `k.to_jsonb` is not a column, so it fails (S1). A
   qualifier that is itself a substitution (`${x}.<name>`) is W6's, not W2's (T19).
 - W3: an alias followed by `(` fails (a column alias list renames the digest column).
 - W4: dynamic SQL and object definitions fail: `EXECUTE`, `PREPARE`, a statement-initial
@@ -250,8 +251,7 @@ applies to every SQL-bearing literal.
   one after a `FROM` that is not a relation `FROM` (`DISTINCT FROM`, `trim`, `extract`,
   `substring`, `overlay`); one in relation position followed by `::`, `[` or `(`, the column list after
   `INTO ${t}` excepted as for a literal; a
-  qualifier `${x}.<name>` whose name is neither a column of some schema model nor a
-  substitution; and one directly adjacent to a word character (a letter, a digit, `_` or
+  qualifier `${x}.<name>` whose name is not a column of some schema model (S14); and one directly adjacent to a word character (a letter, a digit, `_` or
   `$`) of the template's text (`api_${x}`), which would assemble a name from parts (S10,
   S11, F12).
 
@@ -266,7 +266,8 @@ Run-time rule (`src/lib/prisma/raw-sql.ts`):
   the template's own text puts it after `FROM`, `JOIN`, `UPDATE`, `INTO` or `ONLY` as a
   whole word in any case, across whitespace and an optional opening quote, or directly
   before `.` as a qualifier. Elsewhere it throws with the same code. `joinSql` does not
-  accept one. The mint decides only "a table sits after a relation keyword or before a
+  accept one. A template part holding a comment marker (`--`, `/*`) directly before a table
+  is refused, so a comment cannot supply the keyword (S15). The mint decides only "a table sits after a relation keyword or before a
   dot"; which keyword contexts and followers are relations is W6's decision, on the same
   template.
 - check-raw-sql-usage's positional rule for the raw-sql names gains `sqlTable`; its
@@ -327,7 +328,8 @@ path, with a reason of at least `MIN_REASON` characters) when it holds
   column (F5);
 - any statement that names a digest column and is not plain: `CREATE TABLE` without `AS`,
   `ALTER TABLE ... ADD COLUMN` without `GENERATED`, `ADD` / `DROP CONSTRAINT`, `CREATE
-  INDEX`, `DROP`, and `INSERT ... VALUES` (a seed). A `REFERENCES` clause naming a digest
+  INDEX`, `DROP`, and an `INSERT ... VALUES` holding no `SELECT` and no `ON CONFLICT ...
+  DO UPDATE` (a seed; S17). A `REFERENCES` clause naming a digest
   column is not plain: it gives another column the digest's values (S12). So this covers a
   copy (`CREATE TABLE AS`, `SELECT INTO`, `INSERT ... SELECT`), a rename, a generated
   column, a foreign key and a policy (S6, F14).
@@ -509,9 +511,9 @@ Risks:
 
 | ID | Subject | Status |
 |----|---------|--------|
-| C1 | Digest-key spelling census | pending |
-| C2 | Unpinned computed key opaque on every model | pending |
-| C3 | Raw SQL whole-row references and dynamic SQL | pending |
-| C4 | Database objects defined in SQL files | pending |
-| C5 | pg `.query` and pool importers | pending |
-| C6 | Manifest, header, summary line and self-test | pending |
+| C1 | Digest-key spelling census | locked |
+| C2 | Unpinned computed key opaque on every model | locked |
+| C3 | Raw SQL whole-row references and dynamic SQL | locked |
+| C4 | Database objects defined in SQL files | locked |
+| C5 | pg `.query` and pool importers | locked |
+| C6 | Manifest, header, summary line and self-test | locked |
