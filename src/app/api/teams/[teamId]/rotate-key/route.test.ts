@@ -36,22 +36,28 @@ const {
 }));
 
 const txMock = {
-  // The in-tx CAS re-read (SELECT team_key_version FROM teams ... FOR UPDATE).
+  // The key-holders' tenant-row lock (tenant_members, tenant_member_departures)
+  // and the in-tx CAS re-read (SELECT team_key_version FROM teams ... FOR NO KEY UPDATE).
   $queryRaw: vi.fn(),
+  // set / restore lock_timeout around the tenant-row lock.
+  $executeRaw: vi.fn(),
   team: { update: vi.fn() },
   teamMember: { findMany: vi.fn(), updateMany: vi.fn().mockResolvedValue({ count: 0 }),
     // The rotating member's role, re-read under the team lock.
-    findFirst: vi.fn().mockResolvedValue({ role: "OWNER" }) },
+    findFirst: vi.fn() },
   teamPasswordEntry: { updateMany: vi.fn(), findMany: vi.fn() },
   // createMany: the new version's rows; findMany: the actor's held versions (carry checks).
   teamMemberKey: { createMany: vi.fn(), findMany: vi.fn() },
+  // The key-holders' tenant rows and departure records, read unlocked (readTenantRows).
+  tenantMember: { findMany: vi.fn() },
+  tenantMemberDeparture: { findMany: vi.fn() },
 };
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/auth/access/team-auth", async () => ({
   requireTeamPermission: mockRequireTeamPermission,
   // The real role reads and permission table: routes re-check the actor under their locks.
-  activeTeamRole: (await vi.importActual<typeof import("@/lib/auth/access/team-auth")>("@/lib/auth/access/team-auth")).activeTeamRole,
+  activeTeamAdmission: (await vi.importActual<typeof import("@/lib/auth/access/team-auth")>("@/lib/auth/access/team-auth")).activeTeamAdmission,
   hasTeamPermission: (await vi.importActual<typeof import("@/lib/auth/access/team-auth")>("@/lib/auth/access/team-auth")).hasTeamPermission,
   TeamAuthError: MockTeamAuthError,
 }));
@@ -95,6 +101,40 @@ import { logAuditAsync, logAuditBulkInTx, logAuditInTx } from "@/lib/audit/audit
 import { TEAM_ROTATE_KEY_FAILURE_LIMIT } from "@/lib/security/rate-limiters";
 import { TEAM_ROTATE_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 import { documentedMetadataKeys } from "@/__tests__/helpers/audit-log-reference";
+import { teamLockQuery, lockQueryCalls } from "@/__tests__/helpers/team-rotation-lock-mock";
+
+const ACTOR = "660e8400-e29b-41d4-a716-446655440001";
+const ADMITTED_AT = new Date("2026-03-01T00:00:00.000Z");
+/** The rotating member's admission, re-read under the team lock. */
+const actorAdmission = (role = "OWNER") => ({ role, admittedAt: ADMITTED_AT, createdAt: ADMITTED_AT });
+/** A key-holder's row as the rotation reads it under the team lock. */
+const keyHolder = (userId: string, over: Record<string, unknown> = {}) => ({
+  userId, admittedAt: ADMITTED_AT, createdAt: ADMITTED_AT, ...over,
+});
+type TenantState = { userId: string; deactivatedAt?: Date | null; departedAt?: Date | null; hasRow?: boolean };
+/** Answer the team's version and the given users' tenant rows / departure records to the real lockTenantRows (the actor's lock). */
+const lockedState = (teamKeyVersion = 1, tenants: TenantState[] = []) =>
+  teamLockQuery((sql) => {
+    if (sql.includes("FROM tenant_members")) {
+      return tenants.filter((t) => t.hasRow !== false)
+        .map((t) => ({ user_id: t.userId, role: "MEMBER", deactivated_at: t.deactivatedAt ?? null }));
+    }
+    if (sql.includes("FROM tenant_member_departures")) {
+      return tenants.filter((t) => t.departedAt).map((t) => ({ user_id: t.userId, departed_at: t.departedAt }));
+    }
+    return [{ team_key_version: teamKeyVersion }];
+  });
+/** The users' tenant state, to both the actor's tenant-row lock and the key-holders' unlocked read. */
+const tenantsAre = (tenants: TenantState[]) => {
+  txMock.$queryRaw.mockImplementation(lockedState(1, tenants));
+  txMock.tenantMember.findMany.mockResolvedValue(
+    tenants.filter((t) => t.hasRow !== false)
+      .map((t) => ({ userId: t.userId, role: "MEMBER", deactivatedAt: t.deactivatedAt ?? null })),
+  );
+  txMock.tenantMemberDeparture.findMany.mockResolvedValue(
+    tenants.filter((t) => t.departedAt).map((t) => ({ userId: t.userId, departedAt: t.departedAt })),
+  );
+};
 
 function createRequest(body: unknown) {
   return new NextRequest("http://localhost/api/teams/team-1/rotate-key", {
@@ -144,7 +184,10 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
       teamKeyVersion: 1,
       tenantId: "tenant-1",
     });
-    txMock.$queryRaw.mockResolvedValue([{ team_key_version: 1 }]);
+    txMock.$queryRaw.mockImplementation(lockedState());
+    txMock.tenantMember.findMany.mockResolvedValue([]);
+    txMock.tenantMemberDeparture.findMany.mockResolvedValue([]);
+    txMock.teamMember.findFirst.mockResolvedValue(actorAdmission());
     txMock.team.update.mockResolvedValue({});
     txMock.teamMember.findMany.mockResolvedValue([{ userId: "660e8400-e29b-41d4-a716-446655440001" }]);
     txMock.teamPasswordEntry.updateMany.mockResolvedValue({ count: 1 });
@@ -285,7 +328,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
 
   it("returns 409 when teamKeyVersion changed concurrently (S-17 optimistic lock)", async () => {
     // Pre-read returns version 1, but inside tx it's already been bumped to 2
-    txMock.$queryRaw.mockResolvedValue([{ team_key_version: 2 }]);
+    txMock.$queryRaw.mockImplementation(lockedState(2));
     const res = await POST(
       createRequest({
         newTeamKeyVersion: 2,
@@ -309,13 +352,15 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
       createParams("team-1"),
     );
     expect(res.status).toBe(200);
-    const [strings, teamId] = txMock.$queryRaw.mock.calls[0] as [TemplateStringsArray, string];
-    expect(strings.join("?")).toMatch(/FROM teams WHERE id = \?::uuid FOR NO KEY UPDATE/);
-    expect(teamId).toBe("team-1");
-    expect(txMock.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
-      txMock.teamMember.findMany.mock.invocationCallOrder[0],
-    );
-    expect(txMock.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+    const calls = lockQueryCalls(txMock.$queryRaw);
+    const tenantRows = calls.find((c) => c.sql.includes("FROM tenant_members"))!;
+    const teamLock = calls.find((c) => c.sql.includes("FROM teams"))!;
+    expect(teamLock.sql).toMatch(/FROM teams WHERE id = \?::uuid FOR NO KEY UPDATE/);
+    expect(teamLock.values).toEqual(["team-1"]);
+    // The actor's tenant row, then the team, then the key-holder set.
+    expect(tenantRows.order).toBeLessThan(teamLock.order);
+    expect(teamLock.order).toBeLessThan(txMock.teamMember.findMany.mock.invocationCallOrder[0]);
+    expect(teamLock.order).toBeLessThan(
       txMock.teamPasswordEntry.findMany.mock.invocationCallOrder[0],
     );
   });
@@ -323,7 +368,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
   it("refuses (403) without bumping the version when the rotating member no longer holds TEAM_UPDATE under the lock", async () => {
     // Departed, removed or demoted since requireTeamPermission: the rotation
     // would otherwise move the team to a key this actor generated and keeps.
-    txMock.teamMember.findFirst.mockResolvedValueOnce({ role: "MEMBER" });
+    txMock.teamMember.findFirst.mockResolvedValueOnce(actorAdmission("MEMBER"));
 
     const res = await POST(
       createRequest({
@@ -340,7 +385,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     expect(txMock.teamMemberKey.createMany).not.toHaveBeenCalled();
     expect(txMock.teamMember.findFirst).toHaveBeenCalledWith({
       where: { teamId: "team-1", userId: "660e8400-e29b-41d4-a716-446655440001", deactivatedAt: null },
-      select: { role: true },
+      select: { role: true, admittedAt: true, createdAt: true },
     });
   });
 
@@ -564,7 +609,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
 
     expect(res.status).toBe(200);
     expect(txMock.teamMember.updateMany).toHaveBeenCalledWith({
-      where: { teamId: "team-1", deactivatedAt: { not: null }, keyDistributed: true },
+      where: { teamId: "team-1", keyDistributed: true, OR: [{ deactivatedAt: { not: null } }, { userId: { in: [] } }] },
       data: { keyDistributed: false },
     });
     expect(txMock.teamMember.updateMany.mock.invocationCallOrder[0]).toBeLessThan(
@@ -700,6 +745,123 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     expect(res.status).toBe(200);
     expect(mockRateLimitCheck).toHaveBeenCalledWith("rl:team_rotate_key:team-1");
     expect(mockRateLimitClear).not.toHaveBeenCalled();
+  });
+
+  describe("a key-holder who left the tenant, judged against their admission to the team", () => {
+    const HOLDER = "660e8400-e29b-41d4-a716-446655440002";
+    const at = (ms: number) => new Date(ADMITTED_AT.getTime() + ms);
+    const ENTRY = "660e8400-e29b-41d4-a716-446655440100";
+    // A team id per request: the real in-memory failure limiter keeps its
+    // count per (team, actor) for the whole file, and these cells refuse often.
+    let teamSeq = 0;
+    let teamId = "";
+    const rotate = (memberUserIds: string[]) => {
+      teamSeq += 1;
+      teamId = `team-leftover-${teamSeq}`;
+      txMock.teamMemberKey.createMany.mockResolvedValue({ count: memberUserIds.length });
+      return POST(
+        createRequest({
+          newTeamKeyVersion: 2,
+          entries: [validEntry(ENTRY)],
+          memberKeys: memberUserIds.map(validMemberKey),
+        }),
+        createParams(teamId),
+      );
+    };
+    const holders = (holder = keyHolder(HOLDER)) =>
+      txMock.teamMember.findMany.mockResolvedValue([keyHolder(ACTOR), holder]);
+    const expectNothingRotated = () => {
+      expect(txMock.teamMemberKey.createMany).not.toHaveBeenCalled();
+      expect(txMock.teamMember.updateMany).not.toHaveBeenCalled();
+      expect(txMock.team.update).not.toHaveBeenCalled();
+    };
+
+    it("rotates without a key for a key-holder whose tenant row departed after their admission, and lists them for distribution", async () => {
+      holders();
+      tenantsAre([{ userId: HOLDER, deactivatedAt: at(1) }]);
+
+      const res = await rotate([ACTOR]);
+
+      expect(res.status).toBe(200);
+      expect(txMock.teamMemberKey.createMany).toHaveBeenCalledWith({
+        data: [expect.objectContaining({ userId: ACTOR, keyVersion: 2 })],
+      });
+      expect(txMock.teamMember.updateMany).toHaveBeenCalledWith({
+        where: { teamId, keyDistributed: true, OR: [{ deactivatedAt: { not: null } }, { userId: { in: [HOLDER] } }] },
+        data: { keyDistributed: false },
+      });
+    });
+
+    it("refuses a key supplied for a leftover key-holder as for a non-member, rotating nothing", async () => {
+      holders();
+      tenantsAre([{ userId: HOLDER, deactivatedAt: at(1) }]);
+
+      const res = await rotate([ACTOR, HOLDER]);
+
+      expect(res.status).toBe(400);
+      expect((await res.json()).details.unknownUserId).toBe(HOLDER);
+      expectNothingRotated();
+    });
+
+    it("treats a departure equal to the admission, or a departure record after it, as leftover", async () => {
+      for (const state of [
+        { userId: HOLDER, deactivatedAt: at(0) },
+        { userId: HOLDER, departedAt: at(1), hasRow: false },
+      ]) {
+        holders();
+        tenantsAre([state]);
+        const res = await rotate([ACTOR, HOLDER]);
+        expect(res.status).toBe(400);
+        expect((await res.json()).details.unknownUserId).toBe(HOLDER);
+      }
+      expectNothingRotated();
+    });
+
+    it("still requires a key for a guest, an active, a re-admitted and a re-provisioned key-holder", async () => {
+      for (const [state, holder] of [
+        [{ userId: HOLDER, hasRow: false }, keyHolder(HOLDER)],
+        [{ userId: HOLDER }, keyHolder(HOLDER)],
+        // created before the departure, re-admitted after it: admitted_at decides.
+        [{ userId: HOLDER, deactivatedAt: at(-1000) }, keyHolder(HOLDER, { createdAt: at(-5000) })],
+        [{ userId: HOLDER, departedAt: at(-1000) }, keyHolder(HOLDER)],
+      ] as const) {
+        holders(holder);
+        tenantsAre([state]);
+        const res = await rotate([ACTOR]);
+        expect(res.status).toBe(400);
+        expect((await res.json()).details.missingKeyFor).toBe(HOLDER);
+      }
+      expectNothingRotated();
+    });
+
+    it("refuses (403) an actor whose own tenant row departed after their admission", async () => {
+      holders();
+      tenantsAre([{ userId: ACTOR, deactivatedAt: at(1) }]);
+
+      const res = await rotate([ACTOR, HOLDER]);
+
+      expect(res.status).toBe(403);
+      expect((await res.json()).error).toBe("ACTOR_NOT_PERMITTED");
+      expectNothingRotated();
+    });
+
+    it("locks only the actor's tenant row before the team row, and reads the key-holders' unlocked after it", async () => {
+      holders();
+
+      expect((await rotate([ACTOR, HOLDER])).status).toBe(200);
+
+      const calls = lockQueryCalls(txMock.$queryRaw);
+      const tenantLocks = calls.filter((c) => c.sql.includes("FROM tenant_members"));
+      const teamLock = calls.find((c) => c.sql.includes("FROM teams"))!;
+      expect(tenantLocks).toHaveLength(1);
+      expect(tenantLocks[0].values).toEqual(["tenant-1", [ACTOR]]);
+      expect(tenantLocks[0].order).toBeLessThan(teamLock.order);
+      expect(txMock.tenantMember.findMany).toHaveBeenCalledWith({
+        where: { tenantId: "tenant-1", userId: { in: [ACTOR, HOLDER] } },
+        select: { userId: true, role: true, deactivatedAt: true },
+      });
+      expect(teamLock.order).toBeLessThan(txMock.tenantMember.findMany.mock.invocationCallOrder[0]);
+    });
   });
 
   describe("failed-attempt limit", () => {

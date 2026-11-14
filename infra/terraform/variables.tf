@@ -412,6 +412,51 @@ variable "cloudfront_certificate_arn" {
   description = "ACM cert ARN (us-east-1) for CloudFront"
 }
 
+# ── Attachment storage backend + orphan-object sweep ──────────────────────────
+# One switch for the app AND the retention-gc worker: they must agree, or every
+# attachment the retention purge removes leaves its object behind. Switching an
+# existing stack in either direction strands the attachments already stored
+# (docs/operations/deployment.md "Orphan attachment sweep on AWS").
+variable "attachments_blob_backend" {
+  type        = string
+  default     = "db"
+  description = "Where the app and the retention-gc worker keep attachment bytes: \"db\" (in the database, the default) or \"s3\" (the attachments bucket). \"s3\" needs enable_s3_attachments, attachments_blob_backend_empty_db_ack and SSE-S3 (s3_kms_key_arn empty)."
+
+  validation {
+    condition     = contains(["db", "s3"], var.attachments_blob_backend)
+    error_message = "attachments_blob_backend must be \"db\" or \"s3\"."
+  }
+}
+
+variable "attachments_blob_backend_empty_db_ack" {
+  type        = bool
+  default     = false
+  description = "Set true to confirm the database holds no attachments before switching to \"s3\": run the retention-gc worker with --count-db-blobs and see db_stored 0. Attachments stored in the database are unreadable once the backend is s3."
+}
+
+variable "retention_gc_blob_sweep_mode" {
+  type        = string
+  default     = "off"
+  description = "RETENTION_GC_BLOB_SWEEP_MODE for the retention-gc worker: \"off\" (default), \"report\" or \"delete\". Anything but off needs attachments_blob_backend = \"s3\"."
+
+  validation {
+    condition     = contains(["off", "report", "delete"], var.retention_gc_blob_sweep_mode)
+    error_message = "retention_gc_blob_sweep_mode must be \"off\", \"report\" or \"delete\"."
+  }
+}
+
+variable "retention_gc_blob_orphan_grace_ms" {
+  type        = number
+  default     = null
+  description = "RETENTION_GC_BLOB_ORPHAN_GRACE_MS: how long an unreferenced object is left before the sweep may delete it. Required for \"delete\", and then at least the database restore window (max of db_backup_retention_days and, with enable_backup, backup_retention_days) in milliseconds. Null leaves it unset (report mode defaults to one day)."
+
+  validation {
+    # The env schema's bounds (src/lib/env-schema.ts): an integer, 1 h to 35 d.
+    condition     = var.retention_gc_blob_orphan_grace_ms == null ? true : (floor(var.retention_gc_blob_orphan_grace_ms) == var.retention_gc_blob_orphan_grace_ms && var.retention_gc_blob_orphan_grace_ms >= 3600000 && var.retention_gc_blob_orphan_grace_ms <= 3024000000)
+    error_message = "retention_gc_blob_orphan_grace_ms must be null or an integer from 3600000 (1 h) to 3024000000 (35 d)."
+  }
+}
+
 variable "log_retention_days" {
   type        = number
   default     = 14

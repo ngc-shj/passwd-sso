@@ -59,6 +59,8 @@ export interface WebhookItem {
   lastFailedAt: string | null;
   lastError: string | null;
   createdAt: string;
+  /** Team webhooks only: false when the creator no longer holds authority; null when legacy. */
+  creatorAuthorized?: boolean | null;
 }
 
 export interface WebhookCardConfig {
@@ -300,6 +302,11 @@ export function BaseWebhookCard({ config }: Props) {
             </div>
           </CollapsibleContent>
         </Collapsible>
+        {w.creatorAuthorized === false && (
+          <p className="text-xs text-amber-600 dark:text-amber-400">
+            {t("creatorPaused")}
+          </p>
+        )}
         <div className="text-xs text-muted-foreground space-x-3">
           {w.failCount > 0 && (
             <span className="text-amber-600 dark:text-amber-400">

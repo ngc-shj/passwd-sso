@@ -59,6 +59,7 @@ export const ACTION_ICONS: Partial<Record<AuditActionValue, React.ReactNode>> = 
   [AUDIT_ACTION.TEAM_MEMBER_SCIM_ROLE_UPDATE]: <ShieldCheck className="h-4 w-4" />,
   [AUDIT_ACTION.TEAM_MEMBER_SCIM_APPROVE]: <UserPlus className="h-4 w-4" />,
   [AUDIT_ACTION.TEAM_MEMBER_SCIM_REJECT]: <ShieldOff className="h-4 w-4" />,
+  [AUDIT_ACTION.TEAM_MEMBER_INVITE_ACCEPT]: <UserPlus className="h-4 w-4" />,
   [AUDIT_ACTION.SHARE_CREATE]: <LinkIcon className="h-4 w-4" />,
   [AUDIT_ACTION.SHARE_REVOKE]: <Link2Off className="h-4 w-4" />,
   [AUDIT_ACTION.EMERGENCY_GRANT_CREATE]: <HeartPulse className="h-4 w-4" />,

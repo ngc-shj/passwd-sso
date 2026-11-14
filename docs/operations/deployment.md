@@ -247,7 +247,8 @@ an operator does.
 #### `DEPLOYMENT_ID`
 
 Every manifest names its deployment by `DEPLOYMENT_ID` (an app-secret key mapped
-into the publisher task only). The publisher stores it in `system_settings`
+into the publisher task, and into the retention-gc worker while its orphan sweep
+runs — see "Orphan attachment sweep on AWS"). The publisher stores it in `system_settings`
 (`audit_anchor_deployment_id`) on its first boot and refuses to boot when the
 value it is given differs (`DeploymentIdMismatchError`, one
 `AUDIT_ANCHOR_PUBLISH_FAILED` row with `DEPLOYMENT_ID_MISMATCH`).
@@ -347,7 +348,7 @@ Five EventBridge rules — `<name_prefix>-ecs-execute-command`,
 `<name_prefix>-audit-anchor-publisher-role-task-definition` and
 `<name_prefix>-audit-anchor-publisher-family-run-task` — match "AWS API Call via
 CloudTrail" events, which EventBridge receives only from an account with a trail
-logging management events. (`<name_prefix>-audit-anchor-publisher-family-task-outside-service`
+logging management events. (`<name_prefix>-anchor-publisher-family-outside-svc`
 matches the native "ECS Task State Change" event and needs no trail.) Terraform
 defines no trail. Before relying on those rules, have one in the region (an
 organisation trail counts) that:
@@ -411,6 +412,243 @@ Check the publisher's lines:
 aws logs tail /ecs/passwd-sso-prod/audit-anchor-publisher --since 2d --region <region> \
   --filter-pattern '{ $._logType = "audit-anchor-publisher.cadence" }'
 ```
+
+### Orphan attachment sweep on AWS
+
+The retention-gc worker's orphan sweep (`RETENTION_GC_BLOB_SWEEP_MODE`) lists the
+attachments bucket and deletes objects no attachments row references. On AWS
+it is wired by four Terraform variables (`infra/terraform/README.md`):
+`attachments_blob_backend` (`db` by default, or `s3`),
+`attachments_blob_backend_empty_db_ack`, `retention_gc_blob_sweep_mode` and
+`retention_gc_blob_orphan_grace_ms`. The backend switch sets `BLOB_BACKEND`,
+`S3_ATTACHMENTS_BUCKET` and `AWS_REGION` on the app **and** the worker: they must
+use the same backend, or every attachment the retention purge removes leaves its
+object behind. Until an operator sets `s3`, every stack keeps attachment bytes
+in the database and nothing below applies.
+
+**Switching an existing stack strands data, in either direction.** The app
+reads every attachment from the one backend it is configured with, and no
+migration tool exists yet. Attachments stored in the database are unreadable
+under `s3`, and S3-stored ones are unreadable after going back to `db`.
+
+**Task roles.** The app runs as `*-ecs-task`, which holds Get/Put/Delete on the
+attachments bucket's objects only with `s3`; on the `db` default it holds no
+bucket rights. The retention-gc worker runs as its own `*-ecs-retention-gc-task`:
+with `s3`, `s3:ListBucket`, `s3:DeleteObject` and Get/Put on the marker key
+only. The outbox worker has no task role, as the verify worker.
+
+**Every change here goes through `scripts/deploy.sh`.** Set the variables in
+the tfvars file `deploy.sh` reads (`$TF_VAR_FILE`, e.g.
+`envs/prod/terraform.tfvars`) and run `deploy.sh`: its `terraform apply
+-var-file="$TF_VAR_FILE" -var app_image=<signed digest>` is the apply, and its
+`update-service` moves the services, which ignore task-definition changes
+(`ignore_changes = [task_definition]`). Do not run a standalone
+`terraform apply`: it takes `app_image` from the tfvars (a tag, not the running
+digest), so every task definition is replaced, and a `-var` you pass is undone
+by the next `deploy.sh`. To preview, plan against the image that runs now
+(from `infra/terraform`, with `$TF_VAR_FILE` and `<region>` set):
+
+```bash
+CLUSTER=$(terraform output -raw ecs_cluster_name)
+APP_TD=$(aws ecs describe-services --cluster "$CLUSTER" --region <region> \
+  --services "$(terraform output -raw ecs_app_service_name)" \
+  --query 'services[0].taskDefinition' --output text)
+RUNNING=$(aws ecs describe-task-definition --task-definition "$APP_TD" --region <region> \
+  --query "taskDefinition.containerDefinitions[?name=='app'].image | [0]" --output text)
+terraform plan -var-file="$TF_VAR_FILE" -var "app_image=$RUNNING"
+```
+
+The preview differs from what `deploy.sh` applies only by the image: `deploy.sh`
+deploys the commit it builds.
+
+#### Preconditions
+
+- **The stack already runs this release.** The commands below override the
+  command of the registered retention-gc task definition; an image from before
+  `--count-db-blobs` existed ignores the unknown argument and starts a second
+  worker loop instead. Deploy this release with every default first
+  (`deploy.sh`, no variable set), then continue.
+- A new stack, or one whose database holds no attachments: run
+  `--count-db-blobs` (below) and see `db_stored: 0`, then set
+  `attachments_blob_backend_empty_db_ack = true`. Terraform refuses `s3`
+  without it.
+- SSE-S3 on the attachments bucket (`s3_kms_key_arn = ""`). No task role holds
+  KMS permissions, so Terraform refuses `s3` with a CMK.
+- `enable_s3_attachments = true` (the default).
+
+#### Running the worker's one-off commands
+
+`--count-db-blobs` and `--init-blob-marker` run the retention-gc task
+definition once with a command override, as `deploy.sh` runs the migration.
+From `infra/terraform`:
+
+```bash
+CLUSTER=$(terraform output -raw ecs_cluster_name)
+RETENTION_TD=$(terraform output -raw retention_gc_worker_task_definition_arn)
+SUBNETS=$(terraform output -json private_subnet_ids | jq -r 'join(",")')
+SG=$(terraform output -raw ecs_security_group_id)
+
+# $1: --count-db-blobs or --init-blob-marker. Prints the container's exit code.
+run_retention_once() {
+  RUN=$(aws ecs run-task --cluster "$CLUSTER" --task-definition "$RETENTION_TD" \
+    --launch-type FARGATE --region <region> \
+    --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG]}" \
+    --overrides "{\"containerOverrides\":[{\"name\":\"retention-gc-worker\",\"command\":[\"node\",\"dist/retention-gc-worker.js\",\"$1\"]}]}" \
+    --output json) || return 1
+  # failures[] must be empty, and a task must exist.
+  [ "$(echo "$RUN" | jq '.failures | length')" = 0 ] || { echo "$RUN" | jq '.failures' >&2; return 1; }
+  TASK_ARN=$(echo "$RUN" | jq -r '.tasks[0].taskArn // empty')
+  [ -n "$TASK_ARN" ] || { echo "run-task returned no task" >&2; return 1; }
+  if ! aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$TASK_ARN" --region <region>; then
+    # The waiter gives up after 10 minutes; the task may still be running.
+    echo "task $TASK_ARN has not stopped. Inspect it, and stop it with:" >&2
+    echo "  aws ecs stop-task --cluster $CLUSTER --task $TASK_ARN --region <region>" >&2
+    return 1
+  fi
+  aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK_ARN" --region <region> \
+    --query 'tasks[0].containers[0].exitCode' --output text
+}
+
+run_retention_once --count-db-blobs     # expect 0
+aws logs tail /ecs/<name_prefix>/retention-gc-worker --since 15m --region <region> \
+  --filter-pattern '{ ($.msg = "count-db-blobs") || ($.msg = "count-db-blobs failed") }'
+# expect: {"level":"info","msg":"count-db-blobs","total":<n>,"db_stored":0}
+```
+
+`--count-db-blobs` reads every attachments row as the worker's database role,
+under the orphan sweep's RLS bypass grant, on any backend and in any sweep mode.
+A plain `SELECT count(*) FROM attachments` is not a substitute: on RDS the
+master user is not a superuser, so FORCE RLS answers 0 whatever the table holds.
+It judges a row by its stored value (an object reference or attachment bytes),
+reading only values small enough to be a reference. Run it with uploads
+quiesced: rows written meanwhile can be missed.
+
+#### Rollout
+
+1. **Quiesce uploads.** Set `attachments_blob_backend = "s3"`,
+   `attachments_blob_backend_empty_db_ack = true` and
+   `retention_gc_blob_sweep_mode = "report"` in `$TF_VAR_FILE`, preview if you
+   wish (above), and run **`scripts/deploy.sh`**. Until the rolling update
+   finishes, old `db` app tasks can still store an attachment in the database.
+   If `deploy.sh` reports a rollback, keep uploads quiesced, fix the cause and
+   run it again.
+2. **After `deploy.sh` completes**, run `--count-db-blobs` again. Expect
+   `total >= 0` and `db_stored: 0`; resume uploads only then. If
+   `db_stored > 0`, those attachments are unreadable under `s3`: their owners
+   delete and re-upload them, or the stack goes back to `db` before any S3
+   upload exists.
+3. **Create the bucket marker once**: `run_retention_once --init-blob-marker`.
+   Read the result: the function returns no error (`failures[]` empty, a
+   task ARN), it prints exit code `0`, and the log (filter
+   `'{ ($.msg = "init-blob-marker") || ($.msg = "init-blob-marker refused") }'`)
+   holds `{"msg":"init-blob-marker","result":"created"}` (or `"exists"` on a
+   re-run), not `init-blob-marker refused`. The sweep deletes nothing in a bucket whose
+   marker does not hold this deployment's `DEPLOYMENT_ID`.
+4. **Watch report mode** for at least one full pass:
+   - `retention-gc.sweep_done` lines: `counts.attachment_objects` is `0` in report
+     mode, `-1` on a refused or failed tick;
+   - `retention-gc.blob_sweep_report`: what delete mode would remove;
+   - refusals and failures: `retention-gc.blob_sweep_refused`,
+     `retention-gc.blob_sweep_list_failed`, `retention-gc.blob_sweep_delete_failed`.
+
+   ```bash
+   aws logs tail /ecs/<name_prefix>/retention-gc-worker --since 1d --region <region> \
+     --filter-pattern '{ ($.msg = "retention-gc.sweep_done") || ($._logType = "retention-gc.blob_sweep_report") || ($._logType = "retention-gc.blob_sweep_refused") || ($._logType = "retention-gc.blob_sweep_list_failed") || ($._logType = "retention-gc.blob_sweep_delete_failed") }'
+   ```
+5. **Switch to delete**: set `retention_gc_blob_sweep_mode = "delete"` and
+   `retention_gc_blob_orphan_grace_ms` to at least the database restore window
+   in milliseconds — the larger of `db_backup_retention_days` and, with
+   `enable_backup`, `backup_retention_days` (35 days by default:
+   `3024000000`) — in `$TF_VAR_FILE`, then run `scripts/deploy.sh`. Terraform
+   refuses a smaller or unset grace.
+
+#### Rollback
+
+Keep `attachments_blob_backend = "s3"`, set `retention_gc_blob_sweep_mode =
+"off"` in `$TF_VAR_FILE` and run `scripts/deploy.sh`. Going back to `db`
+strands every S3-stored attachment.
+
+Going back to `db` is only for the case in rollout step 2, before any S3 upload
+exists and with uploads still quiesced. Its apply removes the app's bucket
+permissions at once, before the services move: an app task still on an `s3`
+revision (during the rolling update, or after `deploy.sh` rolled itself back)
+gets AccessDenied on attachments. If `deploy.sh` rolled back, set the backend
+to `s3` again in `$TF_VAR_FILE` and re-run it.
+
+#### Before a database restore
+
+Set the sweep mode to `off` or `report` **before** restoring, and keep it there
+until the restored references are reconciled with the bucket. This, not the
+grace period, is the control: set it in `$TF_VAR_FILE` and run
+`scripts/deploy.sh`, or, when a deploy is not possible, stop the sweep by
+scaling the service to 0 (`aws ecs update-service --cluster "$CLUSTER" --service
+<name_prefix>-retention-gc-worker --desired-count 0 --region <region>`; this
+stops the retention purge too). Scaling to 0 does not last: the next
+`scripts/deploy.sh` restores `worker_desired_count` and starts the worker in
+whatever mode `$TF_VAR_FILE` holds, so change the mode there to `off` or
+`report` as well, even when you cannot deploy now. Then confirm what runs:
+
+```bash
+TASK=$(aws ecs list-tasks --cluster "$CLUSTER" --service-name <name_prefix>-retention-gc-worker \
+  --region <region> --query 'taskArns[0]' --output text)
+TD=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK" --region <region> \
+  --query 'tasks[0].taskDefinitionArn' --output text)
+aws ecs describe-task-definition --task-definition "$TD" --region <region> \
+  --query "taskDefinition.containerDefinitions[0].environment[?name=='RETENTION_GC_BLOB_SWEEP_MODE'].value | [0]" --output text
+# expect: report, or None (unset = off); with the service at 0, list-tasks returns None
+```
+
+A restore to a point `t` days back leaves every object uploaded since then
+unreferenced, and delete mode removes it `grace - t` later: with the grace
+equal to the restore window the margin at the oldest restore point is zero. A
+restore window above 35 days (AWS Backup allows up to 120 with Vault Lock)
+cannot be met at all, because the worker caps the grace at 35 days; such a
+stack stays on `report`.
+
+#### Recovering wrongly deleted objects
+
+The bucket is versioned, and the worker's role holds `s3:DeleteObject` but never
+`s3:DeleteObjectVersion`, so a delete only adds a delete marker. An operator
+with `s3:ListBucketVersions` and `s3:DeleteObjectVersion` restores an object by
+deleting its current delete marker — and only that:
+
+```bash
+(
+  set -euo pipefail
+  BUCKET=<attachments-bucket>
+  KEY=<key>
+  ID=$(aws s3api list-object-versions --bucket "$BUCKET" --prefix "$KEY" --region <region> \
+    --query "DeleteMarkers[?Key=='$KEY' && IsLatest].VersionId" --output text)
+  # Exactly one id, or stop: none means the object is not deleted (or the key
+  # is wrong), more than one cannot happen for one key.
+  case "$ID" in ""|None|*[[:space:]]*) echo "expected one latest delete marker for $KEY, got: '$ID'" >&2; exit 1;; esac
+  aws s3api delete-object --bucket "$BUCKET" --key "$KEY" --version-id "$ID" --region <region>
+)
+```
+
+Never pass a `VersionId` from `Versions[]`: deleting an object version removes
+the data permanently, which is the one thing this recovery exists to avoid.
+
+#### Storage is not reclaimed
+
+Versioning keeps every deleted object as a noncurrent version, so the sweep
+frees no storage, and deleted ciphertext is kept. A noncurrent-version
+expiration rule is a separate decision (it deletes data permanently) and is not
+configured.
+
+#### CloudFront
+
+With `enable_cloudfront`, the bucket marker (`.passwd-sso-deployment`, whose body
+is the deployment id) is readable through the distribution like any object.
+Accepted: the deployment id is not a secret, and every audit anchor manifest
+names it too.
+
+#### `DEPLOYMENT_ID` changes
+
+Follow the conditional marker step in
+`docs/operations/audit-anchor-rotation-runbook.md` "DEPLOYMENT_ID change
+recovery": until the marker is re-created the sweep refuses with
+`marker_mismatch`.
 
 ## Deploy Flow (Local / Docker Compose)
 

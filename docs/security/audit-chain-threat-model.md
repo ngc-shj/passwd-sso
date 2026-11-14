@@ -141,7 +141,7 @@ publisher service launched. SURFACED, not prevented, route by route: (a) a `RunT
 (`<name_prefix>-audit-anchor-publisher-role-task-definition`) — both match the role's
 full ARN and its bare name; (b2) a task of the publisher's family that is not the
 publisher service's — outside its cluster or with another `group` — from the native ECS
-task state change (`<name_prefix>-audit-anchor-publisher-family-task-outside-service`, no
+task state change (`<name_prefix>-anchor-publisher-family-outside-svc`, no
 trail needed), and any `RunTask` / `StartTask` of that family whatever `group` it claims
 (`<name_prefix>-audit-anchor-publisher-family-run-task`). RESIDUAL: the deploy path
 itself — an `UpdateService` / `CreateService` pointing the publisher service at a revision

@@ -48,6 +48,7 @@ const ALL = [
   // scim-team-admission-approval-plan.md C4.
   "TEAM_MEMBER_SCIM_APPROVE",
   "TEAM_MEMBER_SCIM_REJECT",
+  "TEAM_MEMBER_INVITE_ACCEPT",
   "TEAM_MEMBER_SCIM_PENDING",
   "TEAM_MEMBER_SCIM_PENDING_WITHDRAW",
   "TEAM_MEMBER_SCIM_REMOVE",
@@ -95,7 +96,7 @@ describe("check-critical-audit-atomic.mjs", () => {
     ALL.forEach((a, i) => writeRoute(`crit-${i}/route.ts`, inTx(a)));
     const { exitCode, stdout } = runGuard();
     expect(exitCode, stdout).toBe(0);
-    expect(stdout).toContain("all 20 security-critical actions");
+    expect(stdout).toContain("all 21 security-critical actions");
   });
 
   it("recognizes an action written via an atomic-audit descriptor (delegated to a helper)", () => {

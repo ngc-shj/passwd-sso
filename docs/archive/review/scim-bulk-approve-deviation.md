@@ -132,3 +132,18 @@ Mutated: B8 red (`scim_approval_pending: false` where `true` was expected — th
 before the failing audit call stayed committed), and also B5b (rows committed before the lock
 conflict) and B6 (`expected 'settled' to be 'blocked-on-parked'`: with per-row locks the second
 request no longer queues behind the first).
+
+## D8 — Merge of `main` after #1043 landed (C8 resolution)
+
+`fix/departed-member-leaked-authority` (#1043) merged first, so `main` was merged into this branch.
+Conflicts: the approve route (this branch's route kept), the rotation-input-lock gate and its
+self-test (both sides kept: rule 7's module boundary and rule 8), and one row of the audit-log
+reference. C8 applied in the module: `approveScimPending` selects `admittedAt` / `createdAt` and
+refuses an approver for whom `actorDepartedSinceAdmission` holds, which now covers bulk approve
+too. Reject is unchanged, as on `main` (that plan leaves reject out). The tripwire's conditional
+tests in `scim-admission.test.ts` became plain tests; its absence branch and schema read are gone.
+
+Verification on the merged tree: lint and `npx next build` exit 0; `npx vitest run` 1170 of 1171
+files (`backup-db.test.mjs`, D6); `check-team-rotation-input-lock` exit 0; the six integration
+suites that drive the approve route, `departed-member-leaked-authority` among them, 158/158
+against the worktree database after `prisma migrate deploy`.

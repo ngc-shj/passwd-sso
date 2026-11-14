@@ -25,7 +25,10 @@ const {
   mockLogAuditInTx: vi.fn(),
   tx: {
     team: { findUnique: vi.fn() },
-    teamMember: { count: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), updateMany: vi.fn(), update: vi.fn() },
+    teamMember: { findFirst: vi.fn(), findMany: vi.fn(), updateMany: vi.fn(), update: vi.fn() },
+    // Read by the real readTenantRows for the OWNER rows' tenant rows.
+    tenantMember: { findMany: vi.fn() },
+    tenantMemberDeparture: { findMany: vi.fn() },
     $queryRaw: vi.fn(),
   },
 }));
@@ -77,6 +80,36 @@ const active: LockedTenantRow = { hasRow: true, role: "ADMIN", deactivatedAt: nu
 const left: LockedTenantRow = { hasRow: true, role: "ADMIN", deactivatedAt: new Date(), departedAt: null };
 const activeOwner: LockedTenantRow = { ...active, role: "OWNER" };
 
+const OWNER_ID = "44444444-4444-4444-8444-444444444444";
+const OWNER2_ID = "55555555-5555-4555-8555-555555555555";
+const ADMITTED = new Date("2026-01-01T00:00:00.000Z");
+const BEFORE = new Date("2025-12-01T00:00:00.000Z");
+const AFTER = new Date("2026-02-01T00:00:00.000Z");
+
+type OwnerRow = { userId: string; admittedAt: Date | null; createdAt: Date };
+type TenantFixture = {
+  rows?: { userId: string; deactivatedAt?: Date | null }[];
+  departures?: { userId: string; departedAt: Date }[];
+};
+
+// The team's active OWNER rows (the HAS_OWNER read) and the other OWNER rows
+// demoted on assignment are both teamMember.findMany: told apart by the
+// `deactivatedAt: null` filter only the first carries.
+function seedOwners(owners: OwnerRow[], demoted: { userId: string }[] = owners.map((o) => ({ userId: o.userId }))) {
+  tx.teamMember.findMany.mockImplementation(async (args: { where: { deactivatedAt?: unknown } }) =>
+    "deactivatedAt" in args.where ? owners : demoted);
+}
+
+// The tenant rows readTenantRows reads for the OWNER rows' users.
+function seedTenant({ rows = [], departures = [] }: TenantFixture) {
+  const inIds = (args: { where: { userId: { in: string[] } } }) => args.where.userId.in;
+  tx.tenantMember.findMany.mockImplementation(async (args: { where: { userId: { in: string[] } } }) =>
+    rows.filter((r) => inIds(args).includes(r.userId))
+      .map((r) => ({ userId: r.userId, role: "MEMBER", deactivatedAt: r.deactivatedAt ?? null })));
+  tx.tenantMemberDeparture.findMany.mockImplementation(async (args: { where: { userId: { in: string[] } } }) =>
+    departures.filter((d) => inIds(args).includes(d.userId)));
+}
+
 function assign(userId: string = TARGET_ID) {
   return POST(
     createRequest("POST", `http://localhost:3000/api/tenant/teams/${TEAM_ID}/owner`, { body: { userId } }),
@@ -94,9 +127,9 @@ describe("POST /api/tenant/teams/[teamId]/owner", () => {
     mockLockTenantRows.mockResolvedValue(new Map([[ACTOR_ID, active], [TARGET_ID, active]]));
     mockWithBoundedLockWait.mockImplementation(async (_tx: unknown, lock: () => Promise<unknown>) => lock());
     tx.team.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
-    tx.teamMember.count.mockResolvedValue(0);
-    tx.teamMember.findFirst.mockResolvedValue({ id: "tm-target" });
-    tx.teamMember.findMany.mockResolvedValue([{ userId: "departed-owner" }]);
+    tx.teamMember.findFirst.mockResolvedValue({ id: "tm-target", admittedAt: null, createdAt: ADMITTED });
+    seedOwners([], [{ userId: "departed-owner" }]);
+    seedTenant({});
     tx.teamMember.updateMany.mockResolvedValue({ count: 1 });
     tx.teamMember.update.mockResolvedValue({});
     tx.$queryRaw.mockResolvedValue([{ id: TEAM_ID }]);
@@ -150,7 +183,7 @@ describe("POST /api/tenant/teams/[teamId]/owner", () => {
     expect(mockLockTenantRows).toHaveBeenCalledWith(tx, "tenant-1", [ACTOR_ID, TARGET_ID], "share", expect.anything());
     expect((tx.$queryRaw.mock.calls[0][0] as TemplateStringsArray).join("?")).toMatch(/FROM teams WHERE id = \?::uuid FOR NO KEY UPDATE/);
     expect(mockLockTenantRows.mock.invocationCallOrder[0]).toBeLessThan(tx.$queryRaw.mock.invocationCallOrder[0]);
-    expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(tx.teamMember.count.mock.invocationCallOrder[0]);
+    expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(tx.teamMember.findMany.mock.invocationCallOrder[0]);
   });
 
   describe("refusals change nothing and audit nothing", () => {
@@ -176,9 +209,59 @@ describe("POST /api/tenant/teams/[teamId]/owner", () => {
     });
 
     it("a team that has an active OWNER (409)", async () => {
-      tx.teamMember.count.mockResolvedValue(1);
+      seedOwners([{ userId: OWNER_ID, admittedAt: null, createdAt: ADMITTED }]);
+      seedTenant({ rows: [{ userId: OWNER_ID }] });
 
       expect((await assign()).status).toBe(409);
+      nothingChanged();
+    });
+
+    it("a team whose OWNER was re-admitted after their tenant departure (409: not a leftover)", async () => {
+      seedOwners([{ userId: OWNER_ID, admittedAt: AFTER, createdAt: BEFORE }]);
+      seedTenant({ rows: [{ userId: OWNER_ID }], departures: [{ userId: OWNER_ID, departedAt: ADMITTED }] });
+
+      expect((await assign()).status).toBe(409);
+      nothingChanged();
+    });
+
+    it("a team whose OWNER is a guest with no tenant row here (409: not a leftover)", async () => {
+      seedOwners([{ userId: OWNER_ID, admittedAt: null, createdAt: ADMITTED }]);
+      seedTenant({});
+
+      expect((await assign()).status).toBe(409);
+      nothingChanged();
+    });
+
+    it("a team with a leftover OWNER row AND a live one (409)", async () => {
+      seedOwners([
+        { userId: OWNER_ID, admittedAt: null, createdAt: ADMITTED },
+        { userId: OWNER2_ID, admittedAt: null, createdAt: ADMITTED },
+      ]);
+      seedTenant({ rows: [{ userId: OWNER_ID }, { userId: OWNER2_ID }], departures: [{ userId: OWNER_ID, departedAt: AFTER }] });
+
+      expect((await assign()).status).toBe(409);
+      nothingChanged();
+    });
+
+    it("a target whose membership is a leftover (departed at or after admission)", async () => {
+      mockLockTenantRows.mockResolvedValue(new Map([[ACTOR_ID, active], [TARGET_ID, { ...active, departedAt: AFTER }]]));
+
+      expect((await assign()).status).toBe(404);
+      nothingChanged();
+    });
+
+    it("a target whose departure equals their admission (the boundary counts as leftover)", async () => {
+      mockLockTenantRows.mockResolvedValue(new Map([[ACTOR_ID, active], [TARGET_ID, { ...active, departedAt: ADMITTED }]]));
+
+      expect((await assign()).status).toBe(404);
+      nothingChanged();
+    });
+
+    it("an OWNER-row tenant read that fails propagates, never read as \"not leftover\"", async () => {
+      seedOwners([{ userId: OWNER_ID, admittedAt: null, createdAt: ADMITTED }]);
+      tx.tenantMemberDeparture.findMany.mockRejectedValue(new Error("db down"));
+
+      await expect(assign()).rejects.toThrow("db down");
       nothingChanged();
     });
 
@@ -217,6 +300,49 @@ describe("POST /api/tenant/teams/[teamId]/owner", () => {
       expect(mockLockTenantRows).not.toHaveBeenCalled();
       nothingChanged();
     });
+  });
+
+  describe("a leftover OWNER counts as absent", () => {
+    it("assigns, demoting the leftover OWNER row to ADMIN", async () => {
+      seedOwners([{ userId: OWNER_ID, admittedAt: null, createdAt: ADMITTED }]);
+      seedTenant({ rows: [{ userId: OWNER_ID }], departures: [{ userId: OWNER_ID, departedAt: AFTER }] });
+
+      const res = await assign();
+
+      expect(res.status).toBe(200);
+      expect(tx.tenantMemberDeparture.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: { tenantId: "tenant-1", userId: { in: [OWNER_ID] } },
+      }));
+      expect(tx.teamMember.updateMany).toHaveBeenCalledWith({
+        where: { teamId: TEAM_ID, role: TEAM_ROLE.OWNER, id: { not: "tm-target" } },
+        data: { role: TEAM_ROLE.ADMIN },
+      });
+      expect(mockLogAuditInTx).toHaveBeenCalledWith(tx, "tenant-1", expect.objectContaining({
+        metadata: expect.objectContaining({ demotedUserIds: [OWNER_ID] }),
+      }));
+    });
+
+    it("assigns when the OWNER's departure equals their admission (boundary)", async () => {
+      seedOwners([{ userId: OWNER_ID, admittedAt: ADMITTED, createdAt: BEFORE }]);
+      seedTenant({ rows: [{ userId: OWNER_ID }], departures: [{ userId: OWNER_ID, departedAt: ADMITTED }] });
+
+      expect((await assign()).status).toBe(200);
+    });
+
+    it("assigns when the OWNER's tenant row is deactivated but the team row was missed", async () => {
+      seedOwners([{ userId: OWNER_ID, admittedAt: null, createdAt: ADMITTED }]);
+      seedTenant({ rows: [{ userId: OWNER_ID, deactivatedAt: AFTER }] });
+
+      expect((await assign()).status).toBe(200);
+    });
+  });
+
+  it("assigns a target re-admitted after their tenant departure (not a leftover)", async () => {
+    mockLockTenantRows.mockResolvedValue(new Map([[ACTOR_ID, active], [TARGET_ID, { ...active, departedAt: ADMITTED }]]));
+    tx.teamMember.findFirst.mockResolvedValue({ id: "tm-target", admittedAt: AFTER, createdAt: BEFORE });
+
+    expect((await assign()).status).toBe(200);
+    expect(tx.teamMember.update).toHaveBeenCalledWith({ where: { id: "tm-target" }, data: { role: TEAM_ROLE.OWNER } });
   });
 
   it("answers 409 TEAM_BUSY with Retry-After, changing nothing, when the team row lock wait times out", async () => {

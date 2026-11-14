@@ -1,6 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 
 const { mockLockTenantRows, mockLockTeamsAgainstRotation, mockLogAuditInTx, tx } = vi.hoisted(() => ({
   mockLockTenantRows: vi.fn(),
@@ -10,7 +8,7 @@ const { mockLockTenantRows, mockLockTeamsAgainstRotation, mockLogAuditInTx, tx }
 }));
 
 // Only lockTenantRows is replaced: the module must call the real predicates
-// next to it (see the departed-actor tripwire below).
+// next to it (see the departed-approver tests below).
 vi.mock("@/lib/team/tenant-row-lock", async (importOriginal) => ({
   ...(await importOriginal()) as Record<string, unknown>,
   lockTenantRows: mockLockTenantRows,
@@ -313,74 +311,42 @@ describe("rejectScimPending", () => {
   });
 });
 
-// Departed-actor tripwire (scim-bulk-approve-plan.md C8). The departed-member
-// authority check (actorDepartedSinceAdmission + TeamMember.admittedAt) is not
-// on every branch; whichever branch merges second must carry the condition in
-// approveScimPending's actor check, and this goes red until it does.
-const tenantRowLockActual = await vi.importActual<Record<string, unknown>>("@/lib/team/tenant-row-lock");
+// A leftover membership holds no authority (departed-member-leaked-authority):
+// the approver's tenant departure is judged against their admission time.
+describe("departed approver", () => {
+  const ADMITTED = new Date("2026-03-01T00:00:00.000Z");
+  const BEFORE = new Date("2026-02-01T00:00:00.000Z");
+  const AFTER = new Date("2026-04-01T00:00:00.000Z");
 
-const SCHEMA_PATH = fileURLToPath(new URL("../../../prisma/schema.prisma", import.meta.url));
+  function actorDeparted(departedAt: Date, admittedAt: Date | null, createdAt: Date) {
+    actorRow = { role: TEAM_ROLE.ADMIN, keyDistributed: true, admittedAt, createdAt };
+    setTenantRows({ [ACTOR_ID]: { hasRow: true, role: null, deactivatedAt: null, departedAt: departedAt } });
+  }
 
-function teamMemberModelFields(): string[] {
-  const schema = readFileSync(SCHEMA_PATH, "utf8");
-  const block = /^model TeamMember \{([\s\S]*?)^\}/m.exec(schema);
-  if (!block) throw new Error(`model TeamMember not found in ${SCHEMA_PATH}`);
-  return block[1]
-    .split("\n")
-    .map((line) => line.replace(/\/\/.*$/, "").trim())
-    .filter((line) => line !== "" && !line.startsWith("@@"))
-    .map((line) => line.split(/\s+/)[0]);
-}
+  async function approveOne() {
+    return approveScimPending(txArg, TENANT_ID, ctx, [approveTarget(M1, U1)]);
+  }
 
-const teamMemberFields = teamMemberModelFields();
-const hasDepartedActorCheck =
-  typeof tenantRowLockActual.actorDepartedSinceAdmission === "function" || teamMemberFields.includes("admittedAt");
-
-describe("departed-actor tripwire", () => {
-  it("reads the TeamMember model block of the schema", () => {
-    expect(teamMemberFields).toContain("scimApprovalPending");
+  it("refuses an actor whose tenant departure equals their admission time", async () => {
+    actorDeparted(ADMITTED, ADMITTED, BEFORE);
+    expect(await approveOne()).toBeNull();
+    noWrites();
   });
 
-  describe("departed-actor condition in the actor check", () => {
-    const ADMITTED = new Date("2026-03-01T00:00:00.000Z");
-    const BEFORE = new Date("2026-02-01T00:00:00.000Z");
-    const AFTER = new Date("2026-04-01T00:00:00.000Z");
+  it("refuses an actor who departed after their admission", async () => {
+    actorDeparted(AFTER, ADMITTED, BEFORE);
+    expect(await approveOne()).toBeNull();
+    noWrites();
+  });
 
-    function actorDeparted(departedAt: Date, admittedAt: Date | null, createdAt: Date) {
-      actorRow = { role: TEAM_ROLE.ADMIN, keyDistributed: true, admittedAt, createdAt };
-      setTenantRows({ [ACTOR_ID]: { hasRow: true, role: null, deactivatedAt: null, departedAt: departedAt } });
-    }
+  it("refuses an actor with no admittedAt whose createdAt precedes the departure", async () => {
+    actorDeparted(ADMITTED, null, BEFORE);
+    expect(await approveOne()).toBeNull();
+    noWrites();
+  });
 
-    async function approveOne() {
-      return approveScimPending(txArg, TENANT_ID, ctx, [approveTarget(M1, U1)]);
-    }
-
-    it.runIf(hasDepartedActorCheck)("refuses an actor whose tenant departure equals their admission time", async () => {
-      actorDeparted(ADMITTED, ADMITTED, BEFORE);
-      expect(await approveOne()).toBeNull();
-      noWrites();
-    });
-
-    it.runIf(hasDepartedActorCheck)("refuses an actor who departed after their admission", async () => {
-      actorDeparted(AFTER, ADMITTED, BEFORE);
-      expect(await approveOne()).toBeNull();
-      noWrites();
-    });
-
-    it.runIf(hasDepartedActorCheck)("refuses an actor with no admittedAt whose createdAt precedes the departure", async () => {
-      actorDeparted(ADMITTED, null, BEFORE);
-      expect(await approveOne()).toBeNull();
-      noWrites();
-    });
-
-    it.runIf(hasDepartedActorCheck)("admits for an actor re-admitted after the departure", async () => {
-      actorDeparted(BEFORE, AFTER, BEFORE);
-      expect((await approveOne())?.get(M1)).toBe(SCIM_APPROVE_OUTCOME.APPROVED);
-    });
-
-    it.runIf(!hasDepartedActorCheck)("is pending: neither the predicate nor the admittedAt column exists yet", () => {
-      expect(typeof tenantRowLockActual.actorDepartedSinceAdmission).not.toBe("function");
-      expect(teamMemberFields).not.toContain("admittedAt");
-    });
+  it("admits for an actor re-admitted after the departure", async () => {
+    actorDeparted(BEFORE, AFTER, BEFORE);
+    expect((await approveOne())?.get(M1)).toBe(SCIM_APPROVE_OUTCOME.APPROVED);
   });
 });

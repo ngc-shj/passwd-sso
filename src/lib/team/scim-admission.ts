@@ -9,7 +9,7 @@ import {
 import { hasTeamPermission } from "@/lib/auth/access/team-auth";
 import { logAuditInTx } from "@/lib/audit/audit";
 import { createLockBudget, lockTeamsAgainstRotation } from "@/lib/team/team-key-rotation-lock";
-import { lockTenantRows } from "@/lib/team/tenant-row-lock";
+import { actorDepartedSinceAdmission, lockTenantRows } from "@/lib/team/tenant-row-lock";
 
 /**
  * The adjudicator for admitting or clearing SCIM-pending team memberships
@@ -64,12 +64,18 @@ export async function approveScimPending(
   // MEMBER_INVITE (OWNER/ADMIN only) — a departure, removal or demotion
   // since the route's permission check ends it. Approve additionally needs
   // the current team key: rotation wraps only active distributed members, so
-  // this is "holds the current key version".
+  // this is "holds the current key version". A leftover membership (the
+  // approver left the tenant at or after their admission) holds no authority.
   const actor = await tx.teamMember.findFirst({
     where: { teamId, userId: actorUserId, deactivatedAt: null },
-    select: { role: true, keyDistributed: true },
+    select: { role: true, keyDistributed: true, admittedAt: true, createdAt: true },
   });
-  if (!actor || !hasTeamPermission(actor.role, TEAM_PERMISSION.MEMBER_INVITE) || !actor.keyDistributed) {
+  if (
+    !actor ||
+    !hasTeamPermission(actor.role, TEAM_PERMISSION.MEMBER_INVITE) ||
+    !actor.keyDistributed ||
+    actorDepartedSinceAdmission(rows.get(actorUserId), actor.admittedAt ?? actor.createdAt)
+  ) {
     return null;
   }
 

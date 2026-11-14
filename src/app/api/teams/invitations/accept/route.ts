@@ -6,7 +6,7 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, unauthorized } from "@/lib/http/api-response";
 import { membershipConflictResponse } from "@/lib/http/lock-conflict-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
-import { INVITATION_STATUS, TEAM_PERMISSION } from "@/lib/constants";
+import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE, INVITATION_STATUS, TEAM_PERMISSION } from "@/lib/constants";
 import { withUserTenantRls, withTeamTenantRls } from "@/lib/tenant-context";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
@@ -16,8 +16,9 @@ import { invitationAcceptSchema } from "@/lib/validations";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { TEAM_MEMBERSHIP_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 import { createLockBudget, lockTeamsAgainstRotation } from "@/lib/team/team-key-rotation-lock";
-import { departedSince, isMembershipLockConflict, lockTenantRows } from "@/lib/team/tenant-row-lock";
-import { activeTeamRole, hasTeamPermission } from "@/lib/auth/access/team-auth";
+import { actorDepartedSinceAdmission, departedSince, isMembershipLockConflict, lockTenantRows } from "@/lib/team/tenant-row-lock";
+import { activeTeamAdmission, hasTeamPermission } from "@/lib/auth/access/team-auth";
+import { extractRequestMeta, logAuditInTx } from "@/lib/audit/audit";
 
 const ACCEPT_OUTCOME = {
   ACCEPTED: "accepted",
@@ -103,21 +104,10 @@ async function handlePOST(req: NextRequest) {
     }),
   );
 
-  if (existingMember) {
-    // Active member → already a member
-    if (existingMember.deactivatedAt === null) {
-      await withTeamTenantRls(invitation.teamId, async () =>
-        prisma.teamInvitation.updateMany({
-          where: { id: invitation.id, teamId: invitation.teamId, status: INVITATION_STATUS.PENDING },
-          data: { status: INVITATION_STATUS.ACCEPTED },
-        }),
-      );
-      return NextResponse.json({
-        team: invitation.team,
-        alreadyMember: true,
-      });
-    }
-
+  // An active member is not decided here: ACCEPTED + alreadyMember is answered
+  // only inside the locked transaction below, once the inviter's authority has
+  // been checked, so the pre-checks that follow apply to a deactivated row only.
+  if (existingMember && existingMember.deactivatedAt !== null) {
     // Waiting on a team OWNER/ADMIN's approval (scim-team-admission-approval,
     // C6) — checked before SCIM_MANAGED_MEMBER below, which a pending row
     // would otherwise also trip (it is always scimManaged too). The race
@@ -156,6 +146,7 @@ async function handlePOST(req: NextRequest) {
   // then the invitation. An invitation issued before either of them left the
   // tenant (or before a SCIM DELETE of either) does not admit; the refusal
   // commits the invitation as EXPIRED, so it is returned, not thrown.
+  const { ip, userAgent } = extractRequestMeta(req);
   let outcome: (typeof ACCEPT_OUTCOME)[keyof typeof ACCEPT_OUTCOME];
   try {
     outcome = await withTeamTenantRls(
@@ -191,12 +182,13 @@ async function handlePOST(req: NextRequest) {
         // An invitation speaks for its inviter: refused when the invitee or
         // the inviter left the tenant since it was issued, or the inviter is
         // no longer a member entitled to invite (removed or demoted since).
-        const inviterRole = await activeTeamRole(tx, invitation.teamId, invitation.invitedById);
+        const inviter = await activeTeamAdmission(tx, invitation.teamId, invitation.invitedById);
         if (
           departedSince(rows.get(session.user.id), invitation.createdAt) ||
           departedSince(rows.get(invitation.invitedById), invitation.createdAt) ||
-          !inviterRole ||
-          !hasTeamPermission(inviterRole, TEAM_PERMISSION.MEMBER_INVITE)
+          !inviter ||
+          !hasTeamPermission(inviter.role, TEAM_PERMISSION.MEMBER_INVITE) ||
+          actorDepartedSinceAdmission(rows.get(invitation.invitedById), inviter.admittedAt)
         ) {
           await tx.teamInvitation.update({
             where: { id: invitation.id },
@@ -243,6 +235,20 @@ async function handlePOST(req: NextRequest) {
             deactivatedByTenant: false,
             scimManaged: false,
           },
+        });
+        // Audited in the admission's own transaction: an admission that rolls
+        // back leaves no row, and one that commits cannot lose it.
+        await logAuditInTx(tx, invitation.team.tenantId, {
+          scope: AUDIT_SCOPE.TEAM,
+          action: AUDIT_ACTION.TEAM_MEMBER_INVITE_ACCEPT,
+          userId: session.user.id,
+          tenantId: invitation.team.tenantId,
+          teamId: invitation.teamId,
+          targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
+          targetId: session.user.id,
+          metadata: { invitationId: invitation.id, role: invitation.role, readmitted: current !== null },
+          ip,
+          userAgent,
         });
         // A re-admitted member starts without keys: whatever they held before
         // is distributed again under the current version.

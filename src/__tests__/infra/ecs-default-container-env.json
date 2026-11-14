@@ -1,0 +1,92 @@
+{
+  "app": {
+    "app": {
+      "environment": [
+        "TRUST_PROXY_HEADERS",
+        "HOSTNAME",
+        "JACKSON_URL",
+        "AUDIT_ANCHOR_PUBLISHER_ENABLED",
+        "AUDIT_ANCHOR_DESTINATION_S3_BUCKET"
+      ],
+      "secrets": [
+        "DATABASE_URL",
+        "AUTH_URL",
+        "AUTH_SECRET",
+        "AUTH_JACKSON_ID",
+        "AUTH_JACKSON_SECRET",
+        "SHARE_MASTER_KEY",
+        "SESSION_TOKEN_HMAC_KEY",
+        "REDIS_URL",
+        "VERIFIER_PEPPER_KEY",
+        "AUTH_GOOGLE_ID",
+        "AUTH_GOOGLE_SECRET"
+      ]
+    }
+  },
+  "jackson": {
+    "jackson": {
+      "environment": [
+        "DB_ENGINE",
+        "DB_TYPE",
+        "NEXTAUTH_ACL",
+        "FLATTEN_RAW_CLAIMS"
+      ],
+      "secrets": [
+        "JACKSON_API_KEYS",
+        "DB_URL",
+        "NEXTAUTH_URL",
+        "EXTERNAL_URL",
+        "NEXTAUTH_SECRET"
+      ]
+    }
+  },
+  "migrate": {
+    "migrate": {
+      "environment": null,
+      "secrets": [
+        "MIGRATION_DATABASE_URL",
+        "DATABASE_URL"
+      ]
+    }
+  },
+  "audit_outbox_worker": {
+    "audit-outbox-worker": {
+      "environment": null,
+      "secrets": [
+        "OUTBOX_WORKER_DATABASE_URL"
+      ]
+    }
+  },
+  "retention_gc_worker": {
+    "retention-gc-worker": {
+      "environment": null,
+      "secrets": [
+        "RETENTION_GC_DATABASE_URL"
+      ]
+    }
+  },
+  "audit_anchor_publisher": {
+    "audit-anchor-publisher": {
+      "environment": [
+        "AUDIT_ANCHOR_PUBLISHER_ENABLED",
+        "AUDIT_ANCHOR_DESTINATION_S3_BUCKET",
+        "AUDIT_ANCHOR_DESTINATION_S3_PREFIX",
+        "AWS_REGION"
+      ],
+      "secrets": [
+        "AUDIT_ANCHOR_PUBLISHER_DATABASE_URL",
+        "AUDIT_ANCHOR_SIGNING_KEY",
+        "AUDIT_ANCHOR_TAG_SECRET",
+        "DEPLOYMENT_ID"
+      ]
+    }
+  },
+  "audit_chain_verify_worker": {
+    "audit-chain-verify-worker": {
+      "environment": null,
+      "secrets": [
+        "AUDIT_CHAIN_VERIFY_DATABASE_URL"
+      ]
+    }
+  }
+}

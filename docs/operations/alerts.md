@@ -1070,7 +1070,7 @@ reports a drifted trust or inline policy.
 **Severity**: high
 **Trigger**: either of two EventBridge rules.
 
-- `<name_prefix>-audit-anchor-publisher-family-task-outside-service` — the
+- `<name_prefix>-anchor-publisher-family-outside-svc` — the
   native ECS "ECS Task State Change" event (no trail needed) for a task whose
   `taskDefinitionArn` is a revision of the publisher's family (the family's ARN
   followed by `:`, so a family whose name only starts with it does not match)
@@ -1078,7 +1078,13 @@ reports a drifted trust or inline policy.
   than `service:<name_prefix>-audit-anchor-publisher`. ECS sets `group` to
   `service:<service name>` for a task a service launched and to
   `family:<family>` by default for one started otherwise. A task emits several
-  state changes, so one task can notify more than once.
+  state changes, so one task can notify more than once. Until #1020 it was named
+  `<name_prefix>-audit-anchor-publisher-family-task-outside-service`, which is
+  66 characters with `passwd-sso-prod` (EventBridge allows 64) and failed every
+  plan. On a stack that deployed it under the old name (a `<name_prefix>` of at
+  most 13 characters), the rename replaces the rule: between the old rule's
+  deletion and the new one's creation in that `terraform apply`, a matching task
+  notifies nobody.
 - `<name_prefix>-audit-anchor-publisher-family-run-task` — CloudTrail `RunTask`
   or `StartTask` naming the publisher's family in `taskDefinition` (`family`,
   `family:revision` or the full ARN), in any cluster (needs the trail). `group`

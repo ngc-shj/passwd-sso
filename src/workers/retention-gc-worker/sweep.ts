@@ -5,7 +5,8 @@
  * sweepAuditProvenanceEntry, sweepAuditLogs, sweepPerTenantAge, sweepTrashEntry),
  * the access-request status sweep (sweepExpiredAccessRequests), the team key
  * prune (sweepTeamMemberKeys), the orphan-blob sweep's row read
- * (readAttachmentRefs), the worker-side audit enqueue (enqueueAuditInWorkerTx),
+ * (readAttachmentRefs), the `--count-db-blobs` check (countDbStoredAttachments
+ * and its reads), the worker-side audit enqueue (enqueueAuditInWorkerTx),
  * and sweepOnce, which orchestrates one full registry sweep, the two dedicated
  * sweeps, and the heartbeat audit.
  *
@@ -70,6 +71,7 @@ import {
 } from "@/lib/blob-store/cleanup";
 import { BLOB_STORAGE, getAttachmentBlobStore } from "@/lib/blob-store";
 import { BLOB_SWEEP_MODE } from "@/lib/blob-store/constants";
+import { decodeObjectRef, MAX_OBJECT_REF_BYTES } from "@/lib/blob-store/object-ref";
 import {
   BLOB_SWEEP_PAGE_SIZE,
   sweepOrphanBlobs,
@@ -936,6 +938,90 @@ export async function readAttachmentRefs(
   const rows = await tx.$queryRaw<Array<{ id: string; encrypted_data: Uint8Array }>>`
     SELECT id, encrypted_data FROM attachments WHERE id = ANY(${ids}::uuid[])`;
   return rows.map((row) => ({ id: row.id, encryptedData: row.encrypted_data }));
+}
+
+/** Rows per keyset page of `countDbStoredAttachments`; each page is at most this × MAX_OBJECT_REF_BYTES of data. */
+export const COUNT_DB_BLOBS_PAGE_SIZE = 500;
+
+/**
+ * Every attachments row, and those whose stored value exceeds `bound` bytes —
+ * attachment bytes by construction, since encodeObjectRef refuses a ref above
+ * MAX_OBJECT_REF_BYTES. Counts only: no value is read.
+ */
+export async function countAttachmentRows(
+  tx: Prisma.TransactionClient,
+  bound: number,
+): Promise<{ total: number; overBound: number }> {
+  await assertSweepBypass(tx, true);
+  const [row] = await tx.$queryRaw<Array<{ total: bigint; over_bound: bigint }>>`
+    SELECT count(*) AS total,
+           count(*) FILTER (WHERE octet_length(encrypted_data) > ${bound}::int) AS over_bound
+    FROM attachments`;
+  return { total: Number(row?.total ?? 0), overBound: Number(row?.over_bound ?? 0) };
+}
+
+/**
+ * One keyset page of the attachments rows whose stored value is at most
+ * `bound` bytes, in id order after `afterId` (null: from the start). The bound
+ * keeps a page small however large the database-stored attachments are.
+ */
+export async function readSmallAttachmentPage(
+  tx: Prisma.TransactionClient,
+  afterId: string | null,
+  bound: number,
+  limit: number,
+): Promise<AttachmentRefRow[]> {
+  await assertSweepBypass(tx, true);
+  const rows =
+    afterId === null
+      ? await tx.$queryRaw<Array<{ id: string; encrypted_data: Uint8Array }>>`
+          SELECT id, encrypted_data FROM attachments
+          WHERE octet_length(encrypted_data) <= ${bound}::int
+          ORDER BY id LIMIT ${limit}::int`
+      : await tx.$queryRaw<Array<{ id: string; encrypted_data: Uint8Array }>>`
+          SELECT id, encrypted_data FROM attachments
+          WHERE octet_length(encrypted_data) <= ${bound}::int AND id > ${afterId}::uuid
+          ORDER BY id LIMIT ${limit}::int`;
+  return rows.map((row) => ({ id: row.id, encryptedData: row.encrypted_data }));
+}
+
+/**
+ * How many attachments rows there are, and how many keep their bytes in the
+ * database rather than naming an external object (`--count-db-blobs`, #1020).
+ * The operator reads db_stored = 0 before switching a stack to an external
+ * backend, and again after the rollout. Rows over MAX_OBJECT_REF_BYTES are
+ * counted by SQL alone; the rest are read in keyset pages, each in its own
+ * transaction, and judged by decodeObjectRef. Under the orphan sweep's grant:
+ * without the bypass RLS would show this role no rows, and 0 would read as
+ * "nothing stored in the database".
+ *
+ * The count and the pages are separate transactions, so rows written while it
+ * runs may be counted in one and not the other; the operator runs it with
+ * uploads quiesced.
+ */
+export async function countDbStoredAttachments(
+  workerPrisma: PrismaClient,
+  pageSize: number = COUNT_DB_BLOBS_PAGE_SIZE,
+): Promise<{ total: number; dbStored: number }> {
+  // A page size below 1 would never end the paging loop.
+  if (!Number.isInteger(pageSize) || pageSize < 1) throw new Error("countDbStoredAttachments: pageSize must be a positive integer");
+  const { total, overBound } = await inSweepTx(workerPrisma, BYPASS_GRANT.RETENTION_BLOB_ORPHAN_SWEEP, (tx) =>
+    countAttachmentRows(tx, MAX_OBJECT_REF_BYTES),
+  );
+  let dbStored = overBound;
+  let afterId: string | null = null;
+  for (;;) {
+    const cursor: string | null = afterId;
+    const page: AttachmentRefRow[] = await inSweepTx(workerPrisma, BYPASS_GRANT.RETENTION_BLOB_ORPHAN_SWEEP, (tx) =>
+      readSmallAttachmentPage(tx, cursor, MAX_OBJECT_REF_BYTES, pageSize),
+    );
+    for (const row of page) {
+      if (decodeObjectRef(row.encryptedData) === null) dbStored++;
+    }
+    if (page.length < pageSize) break;
+    afterId = page[page.length - 1].id;
+  }
+  return { total, dbStored };
 }
 
 const BLOB_CURSOR_MISSING_CODE = "RETENTION_GC_BLOB_CURSOR_MISSING";

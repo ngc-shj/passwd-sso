@@ -5,7 +5,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
 import { inviteSchema } from "@/lib/validations";
-import { activeTeamRole, hasTeamPermission, requireTeamPermission } from "@/lib/auth/access/team-auth";
+import { activeTeamAdmission, hasTeamPermission, requireTeamPermission } from "@/lib/auth/access/team-auth";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import { INVITATION_STATUS, TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
@@ -20,7 +20,7 @@ import { TEAM_INVITATION_TTL_MS } from "@/lib/constants/team/invitation";
 import { displayIdentityOf, fetchUserDisplayMap } from "@/lib/audit/audit-user-lookup";
 import { TEAM_MEMBERSHIP_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 import { createLockBudget, lockTeamsAgainstRotation } from "@/lib/team/team-key-rotation-lock";
-import { departedSince, isMembershipLockConflict, lockTenantRows } from "@/lib/team/tenant-row-lock";
+import { actorDepartedSinceAdmission, departedSince, isMembershipLockConflict, lockTenantRows } from "@/lib/team/tenant-row-lock";
 
 const ISSUE_OUTCOME = { ISSUED: "issued", ALREADY_SENT: "already_sent", INVITER_GONE: "inviter_gone" } as const;
 
@@ -167,9 +167,14 @@ async function handlePOST(req: NextRequest, { params }: Params) {
         // The inviter's authority, re-read under those locks: a departure that
         // committed after requireTeamPermission ended their membership and
         // expired their invitations, and an invitation stamped after it would
-        // read as issued after the departure.
-        const inviterRole = await activeTeamRole(tx, teamId, session.user.id);
-        if (!inviterRole || !hasTeamPermission(inviterRole, TEAM_PERMISSION.MEMBER_INVITE)) {
+        // read as issued after the departure. A membership row the departure
+        // missed (departed since admission) grants nothing either.
+        const inviter = await activeTeamAdmission(tx, teamId, session.user.id);
+        if (
+          !inviter ||
+          !hasTeamPermission(inviter.role, TEAM_PERMISSION.MEMBER_INVITE) ||
+          actorDepartedSinceAdmission(rows.get(session.user.id), inviter.admittedAt)
+        ) {
           return { outcome: ISSUE_OUTCOME.INVITER_GONE };
         }
         const pending = await tx.teamInvitation.findMany({

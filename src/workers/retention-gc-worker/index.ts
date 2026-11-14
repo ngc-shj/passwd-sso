@@ -158,16 +158,16 @@ export function validateRegistry(
   }
 }
 
-export function createWorker(config: WorkerConfig) {
-  const { databaseUrl, intervalMs, batchSize, emitHeartbeatAudit, teamKeyPrune, blobSweep } = config;
-
-  // Validate the registry before touching any DB connection.
-  // Throws immediately on misconfigured identifier or missing globalDelete flag (INV-C2b).
-  validateRegistry();
-
+/**
+ * The worker's pool: its timeouts, the application_name the integration
+ * setup looks for, and an error listener that logs the code only (a driver
+ * message can carry the connection target). Shared with the one-shot CLI
+ * subcommands so they are the same identity and fail the same way.
+ */
+export function createRetentionGcPool(databaseUrl: string, max: number) {
   const pool = createPool({
     connectionString: databaseUrl,
-    max: 3,
+    max,
     idleTimeoutMillis: WORKER_POOL_IDLE_TIMEOUT_MS,
     statement_timeout: WORKER_POOL_STATEMENT_TIMEOUT_MS,
     application_name: "passwd-sso-retention-gc-worker",
@@ -182,7 +182,17 @@ export function createWorker(config: WorkerConfig) {
       "retention-gc.pool.error",
     );
   });
+  return pool;
+}
 
+export function createWorker(config: WorkerConfig) {
+  const { databaseUrl, intervalMs, batchSize, emitHeartbeatAudit, teamKeyPrune, blobSweep } = config;
+
+  // Validate the registry before touching any DB connection.
+  // Throws immediately on misconfigured identifier or missing globalDelete flag (INV-C2b).
+  validateRegistry();
+
+  const pool = createRetentionGcPool(databaseUrl, 3);
   const workerPrisma = createPrismaClient(pool);
 
   const controller = new AbortController();

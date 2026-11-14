@@ -91,6 +91,14 @@ export function appConnectionString(): string {
 }
 
 /**
+ * The retention-gc worker role's connection string, for a test that runs the
+ * worker's entrypoint as a child process with the URL production gives it.
+ */
+export function retentionGcConnectionString(): string {
+  return getConnectionString("retention-gc-worker");
+}
+
+/**
  * Fail unless `client` connects as a role that row-level security applies to.
  *
  * For a file that runs PRODUCTION code through the `@/lib/prisma` singleton to
@@ -907,6 +915,19 @@ export async function expectBypassNotices(fn: () => Promise<unknown>): Promise<B
 
 // ─── Backfill-block cells (rls_backfill_rerun, #1033) ───────────
 
+/**
+ * A red-proof override: an env var naming a mutated copy to read instead of the
+ * shipped file. Refused under CI, where a leaked override would test a file
+ * other than the one that ships; announced locally so it is never silent.
+ */
+export function redProofOverride(name: string): string | undefined {
+  const value = process.env[name];
+  if (value === undefined) return undefined;
+  if (process.env.CI) throw new Error(`${name} is a local red-proof override and must not be set in CI`);
+  console.warn(`[red-proof] ${name} overrides the shipped file with ${value}`);
+  return value;
+}
+
 /** The migration C1's two blocks live in. */
 export const RLS_BACKFILL_RERUN_DIR = "20261110000000_rls_backfill_rerun";
 
@@ -917,7 +938,7 @@ export const RLS_BACKFILL_RERUN_DIR = "20261110000000_rls_backfill_rerun";
  * mutated copy, for a red proof outside the source tree).
  */
 export function readBackfillBlock(migrationDir: string, name: string): string {
-  const override = migrationDir === RLS_BACKFILL_RERUN_DIR ? process.env.RLS_BACKFILL_RERUN_SQL : undefined;
+  const override = migrationDir === RLS_BACKFILL_RERUN_DIR ? redProofOverride("RLS_BACKFILL_RERUN_SQL") : undefined;
   const sqlText = readFileSync(
     override ?? join(process.cwd(), "prisma/migrations", migrationDir, "migration.sql"),
     "utf8",

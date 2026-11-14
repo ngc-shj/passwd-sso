@@ -45,7 +45,7 @@ vi.mock("@/lib/auth/access/team-auth", async () => ({
   requireTeamPermission: mockRequireTeamPermission,
   // The real role → permission table: POST re-checks the inviter's role under the lock.
   hasTeamPermission: (await vi.importActual<typeof import("@/lib/auth/access/team-auth")>("@/lib/auth/access/team-auth")).hasTeamPermission,
-  activeTeamRole: (await vi.importActual<typeof import("@/lib/auth/access/team-auth")>("@/lib/auth/access/team-auth")).activeTeamRole,
+  activeTeamAdmission: (await vi.importActual<typeof import("@/lib/auth/access/team-auth")>("@/lib/auth/access/team-auth")).activeTeamAdmission,
   TeamAuthError,
 }));
 const { mockLockTenantRows } = vi.hoisted(() => ({ mockLockTenantRows: vi.fn() }));
@@ -158,6 +158,8 @@ describe("GET /api/teams/[teamId]/invitations", () => {
   });
 });
 
+const ACTOR_ADMITTED_AT = new Date("2026-03-01T00:00:00.000Z");
+
 describe("POST /api/teams/[teamId]/invitations", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -170,7 +172,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     mockPrismaTeamInvitation.updateMany.mockResolvedValue({ count: 0 });
     mockLockTenantRows.mockResolvedValue(new Map());
     // The inviter's membership, re-read under their tenant row: an active ADMIN.
-    mockPrismaTeamMember.findFirst.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
+    mockPrismaTeamMember.findFirst.mockResolvedValue({ role: TEAM_ROLE.ADMIN, admittedAt: ACTOR_ADMITTED_AT, createdAt: ACTOR_ADMITTED_AT });
     mockLockTeamsAgainstRotation.mockResolvedValue(undefined);
   });
 
@@ -383,7 +385,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
       expect(mockPrismaTeamInvitation.create).not.toHaveBeenCalled();
       expect(mockPrismaTeamMember.findFirst).toHaveBeenCalledWith({
         where: { teamId: TEAM_ID, userId: "test-user-id", deactivatedAt: null },
-        select: { role: true },
+        select: { role: true, admittedAt: true, createdAt: true },
       });
       expect(mockLockTenantRows.mock.invocationCallOrder[0]).toBeLessThan(mockPrismaTeamMember.findFirst.mock.invocationCallOrder[0]);
     });
@@ -416,10 +418,55 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     });
 
     it("refuses when the inviter's role no longer allows inviting", async () => {
-      mockPrismaTeamMember.findFirst.mockResolvedValue({ role: TEAM_ROLE.VIEWER });
+      mockPrismaTeamMember.findFirst.mockResolvedValue({ role: TEAM_ROLE.VIEWER, admittedAt: ACTOR_ADMITTED_AT, createdAt: ACTOR_ADMITTED_AT });
 
       expect((await invite()).status).toBe(403);
       expect(mockPrismaTeamInvitation.create).not.toHaveBeenCalled();
+    });
+
+    describe("an inviter who left the tenant, judged against their admission to the team", () => {
+      const actorRow = (deactivatedAt: Date | null, departedAt: Date | null = null) =>
+        new Map([["test-user-id", { hasRow: true, role: null, deactivatedAt, departedAt }]]);
+      const after = (ms: number) => new Date(ACTOR_ADMITTED_AT.getTime() + ms);
+
+      beforeEach(() => {
+        mockPrismaTeamInvitation.create.mockResolvedValue({ id: "new-inv", email: "new@test.com", role: TEAM_ROLE.MEMBER, token: "t", expiresAt: now, createdAt: now });
+      });
+
+      it("refuses an ADMIN inviter whose tenant row departed after their admission", async () => {
+        mockLockTenantRows.mockResolvedValue(actorRow(after(1)));
+
+        const res = await invite("new@test.com");
+
+        expect(res.status).toBe(403);
+        expect(mockPrismaTeamInvitation.create).not.toHaveBeenCalled();
+      });
+
+      it("refuses when the departure equals the admission", async () => {
+        mockLockTenantRows.mockResolvedValue(actorRow(ACTOR_ADMITTED_AT));
+        expect((await invite("new@test.com")).status).toBe(403);
+        expect(mockPrismaTeamInvitation.create).not.toHaveBeenCalled();
+      });
+
+      it("allows a guest inviter with no tenant row", async () => {
+        mockLockTenantRows.mockResolvedValue(new Map());
+        expect((await invite("new@test.com")).status).toBe(201);
+      });
+
+      it("allows an inviter whose tenant row is active", async () => {
+        mockLockTenantRows.mockResolvedValue(actorRow(null));
+        expect((await invite("new@test.com")).status).toBe(201);
+      });
+
+      it("allows an inviter re-admitted after their departure", async () => {
+        mockLockTenantRows.mockResolvedValue(actorRow(after(-1000)));
+        expect((await invite("new@test.com")).status).toBe(201);
+      });
+
+      it("allows an inviter re-provisioned active whose old departure record predates their membership", async () => {
+        mockLockTenantRows.mockResolvedValue(actorRow(null, after(-1000)));
+        expect((await invite("new@test.com")).status).toBe(201);
+      });
     });
 
     it("locks the inviter's and every case variant's tenant row before issuing", async () => {
