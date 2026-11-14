@@ -13,9 +13,13 @@
  * spellings it does not see. It is not a proof that no other lookup exists.
  *
  * What it adjudicates, by syntax alone: Prisma query-builder digest lookups,
- * by the shape of a call's argument; and raw SQL, by the text of its literals
- * (backed at run time by renderSql). It does not follow values across files or
- * through types.
+ * by the shape of a call's argument; every spelling of a digest key, by its role
+ * in the parse tree; raw SQL, by the lexed text of its literals (backed at run
+ * time by renderSql and the raw-sql module's mints); the SQL files that define
+ * database objects; and the pg driver's `.query` and pool factory. It does not
+ * follow values across files or through types.
+ * Plan: docs/archive/review/bearer-passkey-gate-coverage-plan.md (C1-C6; SC1-SC7
+ * name what stays out).
  *
  *   - Digest fields: `tokenHash`, `codeHash`, and `replacedByHash` (the MCP
  *     refresh row's rotation successor); columns `token_hash`, `code_hash`,
@@ -36,6 +40,31 @@
  *     object literal, a conditional of readable values, or a `const` bound to
  *     an object literal (followed, scope-aware); a filter's spread is never
  *     read. A `data: { tokenHash }` is a write, not a lookup.
+ *   - Digest-key spelling census (C1): the lookup rule sees a key only where the walk
+ *     reads it, so every SPELLING of a digest key in non-test src is accounted for, by
+ *     role and not by value: each identifier whose text is a digest key, and each string
+ *     or no-substitution template literal whose cooked value equals one. A binding (a
+ *     declared name, or a reference resolving to a local binding) and a type position
+ *     are not spellings. Every other role is a key: a property (plain, shorthand,
+ *     string-literal, computed and pinned), a member or element access, a destructured
+ *     property, a string in a value position, a reference with no visible binding, and
+ *     any role not listed (an enum member, a JSX attribute, an export alias, a label —
+ *     the default arm errs toward a site). A key is PLACED when the walk read it as a
+ *     lookup (any receiver), a scalar write at a data / create / update position, or a
+ *     select / omit key, the last two only on a receiver that resolves to a model
+ *     declaring the field (createMany / updateMany included; placement is its own channel
+ *     and changes no model the walkers receive). A key not placed is FLOATING: one site of
+ *     the function that spells it, unless it sits inside a counted call, or inside another
+ *     floating key, of the same manifest key. A function holding a floating WRITE key
+ *     (a property, an assignment target `w.tokenHash = h`, a string handed to a call
+ *     `Reflect.set(w, "tokenHash", h)`) builds a digest-keyed object, so a direct call of it
+ *     (a local function, or a named import of its module) is one site of the caller; one
+ *     level only. A floating key attributed to no named function or exported const fails.
+ *   - Computed keys (C2): a computed key this file cannot pin (`[k]` with a parameter, a
+ *     `let`) is opaque in every filter position the walk reaches (where, cursor, having,
+ *     relation and nested-write filters), whatever the model — resolved or not, token or not
+ *     (an unresolved receiver is walked only in a file that spells a digest key or holds a
+ *     backslash). Every other opacity reason below stays scoped to the token models.
  *   - Model coverage: every token model has an analysed lookup whose position
  *     resolves to it, or a manifest `models` entry with a reason; an entry for
  *     a model that has one is stale.
@@ -45,7 +74,8 @@
  *       * a `where` / `cursor` / relation filter on a token model that is not
  *         an object literal (a `const` bound to one is followed) or holds a
  *         spread, a computed key or an accessor — a spread in a filter is
- *         opaque by decision, even when its value could be read;
+ *         opaque by decision, even when its value could be read (a computed
+ *         key is opaque on every model: see C2 above);
  *       * an argument, `select` / `include` (each relation's, recursively)
  *         or `data` (of a create / update / upsert, and their nested writes)
  *         on a token model or a model with a relation to one (one hop) that is
@@ -77,51 +107,117 @@
  *     `$queryRaw`/`$executeRaw` must be the tag of a template (whose
  *     substitutions are bound parameters, never text). Any other spelling of
  *     a raw method fails. The literal parts of a trustedSql template are
- *     scanned here; the identifiers and fragments spliced into it
- *     (`sqlIdentifier`, `joinSql`) exist only as rendered text, so renderSql
+ *     scanned here; the identifiers, tables and fragments spliced into it
+ *     (`sqlIdentifier`, `sqlTable`, `joinSql`) exist only as rendered text, so renderSql
  *     throws at run time when that text names a digest column or holds a
  *     Unicode-escape form (src/lib/prisma/raw-sql.ts; code
  *     RAW_SQL_DIGEST_COLUMN / RAW_SQL_UNICODE_ESCAPE), and the retention-GC
  *     worker refuses a digest-column registry identifier at boot.
  *     check-raw-sql-usage refuses every other way to splice text through
  *     Prisma (Prisma.raw / Prisma.sql / Prisma.join).
+ *   - SQL-bearing literals (C3, rules W1-W6): the template of a `$queryRaw` /
+ *     `$executeRaw` tag, the literal argument of an Unsafe call, a trustedSql template
+ *     (import-resolved) and the literal argument of a `.query(...)` call, lexed with
+ *     lib/sql-scan.mjs. A name compares case-insensitively unquoted and exactly quoted; a
+ *     schema qualifier is skipped; a quoted identifier holding a substitution is judged as
+ *     that substitution. A token table is the @@map table of a model declaring a digest key.
+ *     A RELATION POSITION is a name chain directly after FROM / JOIN / UPDATE / INTO / ONLY
+ *     (not `DISTINCT FROM`, nor the FROM of trim / extract / substring / overlay) followed by
+ *     an alias, a keyword of a closed follow-set (an unlisted word reads as an alias, which
+ *     errs toward refusal), `,`, `)`, `;` or the end; a name followed by `::`, `[` or `(` is a
+ *     value, except the column list after INTO. A token relation is a token table in
+ *     relation position, and in a trustedSql template a substituted relation; its alias is the
+ *     name after it, optionally after AS.
+ *       * W1: a `*` other than `count(*)` fails.
+ *       * W2: a token table's name, or a token relation's alias, fails unless it is in relation
+ *         position or qualifies a declared column (`t.<column>` of that table; for the alias
+ *         of a substituted relation, a column of some schema model; a substitution is no
+ *         column). A name in a comma list, `FOR UPDATE OF`, `LOCK TABLE` or `TABLE t` fails.
+ *       * W3: an alias followed by `(` fails (a column alias list renames the digest column).
+ *       * W4 (every literal): EXECUTE, PREPARE, a statement-initial DO, a CREATE / ALTER of a
+ *         function, procedure, view, trigger or rule, and calls to query_to_xml*,
+ *         table_to_xml*, cursor_to_xml*, schema_to_xml*, database_to_xml*, dblink* and ts_stat.
+ *       * W5: a token table's name as a whole word, any case, inside a string token fails (SQL
+ *         carried as a string argument is invisible to W1-W3).
+ *       * W6 (trustedSql templates, whose substituted tables the run-time mint places by the
+ *         template's own text): a substitution after a FROM that is no relation FROM; in
+ *         relation position followed by `::`, `[` or `(` (not INTO's column list); a
+ *         substituted qualifier `${x}.<name>` whose name is no column of any schema model; or
+ *         directly adjacent to a letter, digit, `_` or `$` of the template (`api_${x}`).
+ *     W1-W3 and W5 apply to a literal that names a token table (as a name or inside a string)
+ *     and to every trustedSql template; W4 to every literal; W6 to trustedSql templates only.
+ *     Each failure names its rule. A literal holding U+E000 (the lexer's substitution marker,
+ *     which would make a quoted identifier look like a substitution) fails as SQL_SENTINEL, as
+ *     does an SQL file holding it. A quoted lower-case function name is the same function as its
+ *     unquoted spelling (W4's calls, count(*)); quoting a keyword makes an identifier, so keyword
+ *     tests read unquoted words only.
+ *   - TOKEN_TABLE_NAMES: src/lib/prisma/raw-sql.ts exports a (frozen) array literal of string
+ *     literals equal, as a set, to the schema's token tables; sqlIdentifier refuses those
+ *     names at run time, so a token table reaches rendered SQL only through sqlTable.
+ *   - SQL files (C4): prisma/migrations/<dir>/migration.sql, infra/postgres/initdb/*.sql and
+ *     scripts/*.sql are lexed (dollar-quoted and single-quoted bodies re-lexed, recursively;
+ *     a non-ASCII dollar tag is rewritten by check-migration-rls-dml's normaliser, an
+ *     unterminated one fails). A file needs a manifest `sqlObjects` entry (reason) when it
+ *     holds: a CREATE of a function, procedure, view, materialized view, trigger or rule
+ *     whose statement or body names a token table or a digest column, or a function or
+ *     procedure whose body holds EXECUTE (a trigger's EXECUTE FUNCTION clause is not one); a
+ *     DO block creating such an object and naming a token table or a digest column; or any
+ *     statement naming a digest column that is not plain (a CREATE TABLE without AS, an ADD
+ *     COLUMN without GENERATED, ADD / DROP CONSTRAINT, CREATE INDEX, DROP, an INSERT ... VALUES
+ *     with no SELECT and no ON CONFLICT DO UPDATE) — a REFERENCES or GENERATED clause reading a
+ *     digest column is never plain, so a copy, a rename, a foreign key and a policy qualify.
+ *     A stale entry fails; no migration read is fatal. Schema checks (fatal): the digest-key
+ *     fields' @map columns equal the digest-column set both ways and a field mapped to one is
+ *     named a digest key; no `view` block; a unique (or @@unique member) String field named
+ *     or mapped ending in hash / digest is a digest key or listed in `nonBearerHashFields`
+ *     (`Model.field`, reason); no @relation references a digest key.
+ *   - The pg driver (C5): a call of a member named `query` (property, optional chain, pinned
+ *     element access) takes a string literal or no-substitution template as its first
+ *     argument, which is then a SQL-bearing literal. The files importing createPool or
+ *     createClient from src/lib/db/pool-factory equal the manifest's `pgPools`; in them and in
+ *     pool-factory, a reference to `query` other than such a direct call fails (a value,
+ *     `.call` / `.apply` / `.bind`, a destructuring). pool-factory is loaded by named imports
+ *     only: a namespace or default import, a re-export, a dynamic import, a require or an
+ *     import-equals of it fails.
  *
  * Residuals — spellings this gate does not see (Anti-Deferral entries: the
- * plan's deviation log, "Code review round 3 — residuals"):
- *   - A digest key inside a filter value this file cannot read — a spread
- *     (whatever its operand: `...(c && {k})`, `...(c ? {k} : {})`, a
- *     `const`-bound literal), a `&&` / `||` / `??` expression, a helper's
- *     return, or a computed key whose name is not a pinned string — in a filter
- *     whose model is unresolved (any receiver the model resolution does not
- *     follow, including a relation filter under such a call's top-level
- *     `where`) or is not a token model (including a relation filter to a model
- *     that is not one). There it is neither a lookup nor refused as opaque.
+ * plan's deviation log, "Code review round 3 — residuals"; the plan's SC1-SC7):
+ *   - A digest key that is never spelled as a key (SC3): built by concatenation or
+ *     character codes, held inside longer string text (`JSON.parse`), or compared
+ *     without naming the field (`Object.values(row)`). A key spelled in a filter value
+ *     this file cannot read (a spread, `&&` / `||` / `??`, a helper's return, a computed
+ *     key pinned by a `const`, a held variable) is no longer a residual: the census
+ *     counts it wherever it is spelled, though it is neither a lookup nor refused as
+ *     opaque on an unresolved or non-token model.
  *   - A delegate reached by a spelling the model resolution does not follow
  *     (`Reflect.get(tx, "apiKey")`, `Object.values(tx)`, a delegate a function
- *     returns, a parameter not named by its handle): its lookups are found only
- *     where the filter is readable (above), and its opaque positions are not
- *     refused.
- *   - An opaque value more than one relation hop from a token model (a `data`
- *     or projection on a model with no token relation that hides a nested
- *     write or filter through one that has).
- *   - Raw SQL whose text never names the column: a whole-row projection
- *     compared or searched as a value (`to_jsonb(t)`, `row_to_json(t)`,
- *     `t::text`, `t.*`), dynamic SQL built inside the statement (`EXECUTE
- *     format(...)` in a DO block or a function), and database objects defined
- *     outside src (a view, function or trigger in prisma/migrations).
- *   - Raw SQL through the pg driver (a `createPool` / `createClient` result's
- *     `.query(...)`): its SQL argument is not constrained, so a column name
- *     split across a concatenation (`"token_" + "hash"`) is not seen, and
- *     renderSql is not on that path. A literal naming the column is still
- *     refused by the literal rule above.
+ *     returns, a parameter not named by its handle) (SC1): its lookups are found only
+ *     where the filter is readable (above) or its key is spelled (census), and its
+ *     opaque positions are not refused.
+ *   - A builder of a digest-keyed object reached other than by a direct call of a local
+ *     function or a named import (a method call, a namespace import, a re-export, a
+ *     builder passed as a value, a builder two calls away) (SC6).
+ *   - An opaque value more than one relation hop from a token model (SC2): a `data` or
+ *     projection on a model with no token relation that hides a nested write or filter
+ *     through one that has (a spelled key there is still counted by the census).
+ *   - SQL the lexer cannot judge (SC4): an alias declared in one trustedSql fragment and
+ *     used as a bare value in another; a table name assembled across two fragments; objects
+ *     created by hand outside the three SQL roots; a database function called by a name that
+ *     says nothing about what it reads (its definition is what `sqlObjects` classifies).
+ *   - TypeScript outside src/ (SC5): scripts/, cli/, extension/, ios/.
+ *   - A pool handed out of an importer file and queried elsewhere through a non-call spelling
+ *     of `query` (SC7), e.g. `pool.query.bind(pool)` in a module that received the pool.
  *
- * Each lookup or opaque site is attributed to the nearest named function,
+ * Each lookup, opaque or floating-key site is attributed to the nearest named function,
  * method, `const`-bound function, or exported `const`; the key is
  * `<repo path>#<name>`; a key that two functions of one file share fails as
  * AMBIGUOUS_KEY. Every key needs a manifest entry
  * (bearer-passkey-gate-manifest.json) with a class, a reason, and `calls` (the
- * number of calls in it that are a lookup or opaque, each counted once).
- * Unlisted key, stale entry, count mismatch, and zero analysed all fail.
+ * number of sites in it: lookup calls, opaque calls, floating digest keys and builder
+ * calls, each counted once). A failure reports the four counts separately, and each
+ * floating key's line and role.
+ * Unlisted key, stale entry, count mismatch, and zero analysed all fail. The summary
+ * line prints the census: digest-keys (key-role spellings), placed, floating.
  *
  *   - per-use-gated: adjudicated on the AST. The function's own body (nested
  *     blocks included, nested functions excluded) returns nothing but an
@@ -161,15 +257,19 @@
  * literal keys (a `select`) are not reads.
  *
  * Fixture-root override: BEARER_PASSKEY_GATE_ROOT relocates the scan root
- * (src/), the schema (prisma/schema.prisma) and the manifest together.
+ * (src/), the schema (prisma/schema.prisma), the SQL file roots and the manifest together.
+ * The summary line prints the SQL counts after the census: sql-literals,
+ * token-table-literals, sql-files, sql-qualifying.
  */
-import { SyntaxKind } from "ts-morph";
-import { existsSync, readFileSync } from "node:fs";
+import { SyntaxKind, ts } from "ts-morph";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createAstProject, sourceFiles } from "./lib/ast-project.mjs";
 import { FILTERING, RELATION_FILTERS, SchemaReadError, WRITING, loadPrismaSchema, objectLiterals } from "./lib/prisma-relation-reach.mjs";
-import { bindingIndex, unwrapExpression, visibleBinding } from "./lib/scope-bindings.mjs";
+import { bindingIndex, resolveLocalFunction, unwrapExpression, visibleBinding } from "./lib/scope-bindings.mjs";
+import { TOKEN, nameOf, sqlInputFromNode, tokenizeSql } from "./lib/sql-scan.mjs";
+import { normalizeDollarTags } from "./check-migration-rls-dml.mjs";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const ROOT = process.env.BEARER_PASSKEY_GATE_ROOT || REPO_ROOT;
@@ -182,6 +282,13 @@ const GATE_MODULE = "src/lib/auth/policy/passkey-gate";
 const GATE_FN = "passkeyGateBlocks";
 const ENFORCEMENT_MODULE = "src/lib/auth/policy/passkey-enforcement";
 const RAW_SQL_MODULE = "src/lib/prisma/raw-sql";
+const POOL_MODULE = "src/lib/db/pool-factory";
+const POOL_FNS = new Set(["createPool", "createClient"]);
+// The raw-sql names this gate reads at a use site. Each is named once here, so
+// check-raw-sql-usage's measured literal exemption for this file (one each) holds.
+const RENDER_SQL_FN = "renderSql";
+const TRUSTED_SQL_TAG = "trustedSql";
+const TOKEN_TABLE_LIST = "TOKEN_TABLE_NAMES";
 const EXT_MODULE = "src/lib/auth/tokens/extension-token";
 const EXT_TYPES_MODULE = "src/lib/auth/tokens/extension-token-types";
 const EXT_FN = "validateExtensionToken";
@@ -194,6 +301,10 @@ const FORBIDDEN_READS = new Set(["requirePasskey", "hasPasskey"]);
 const INLINE_GATES = [[ENFORCEMENT_MODULE, "passkeyEnforcementBlocks"], [GATE_MODULE, GATE_FN]];
 const CLASSES = new Set(["per-use-gated", "refresh-bound", "exempt", "opaque-where"]);
 const MIN_REASON = 20;
+/** A manifest entry's reason must be a string of at least MIN_REASON characters; `what` names the entry in the failure. */
+function checkReason(what, entry) {
+  if (typeof entry?.reason !== "string" || entry.reason.trim().length < MIN_REASON) failures.push(`BAD_ENTRY: ${what} needs a reason of at least ${MIN_REASON} characters.`);
+}
 
 // I3: the only call sites allowed to skip the gate (plan C5). Pinned here, not
 // in the manifest — adding a fourth is a contract change, not a data edit.
@@ -226,6 +337,8 @@ const SCALAR_WRITE_OPS = new Set(["createMany", "updateMany"]);
 const EXTENDS_RE = /^\$extends$/;
 const RAW_METHOD = /^\$(query|execute)Raw(Unsafe)?$/;
 const DIGEST_COLUMN = /token_hash|code_hash|replaced_by_hash/i;
+// The @map columns of the digest-key fields; the schema must map exactly these (see schemaViolation).
+const DIGEST_COLUMNS = new Set(["token_hash", "code_hash", "replaced_by_hash"]);
 // PostgreSQL's Unicode-escape forms (`U&"token\005fhash"`, `UESCAPE`) spell an identifier
 // without its plain text; refused in any literal, like the column names.
 const UNICODE_ESCAPE_SQL = /u&|uescape/i;
@@ -286,8 +399,85 @@ if (!manifest || typeof manifest.functions !== "object" || Array.isArray(manifes
 }
 const ENTRIES = new Map(Object.entries(manifest.functions));
 const isPlainObject = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
-if (manifest.models !== undefined && !isPlainObject(manifest.models)) fatal(`manifest at ${manifestAbs} has a "models" that is not an object.`);
-const MODEL_ENTRIES = new Map(Object.entries(manifest.models ?? {}));
+// An optional manifest section: a missing one is empty, a present one must be an object.
+function manifestSection(name) {
+  if (manifest[name] !== undefined && !isPlainObject(manifest[name])) fatal(`manifest at ${manifestAbs} has a "${name}" that is not an object.`);
+  return new Map(Object.entries(manifest[name] ?? {}));
+}
+const MODEL_ENTRIES = manifestSection("models");
+const SQL_OBJECT_ENTRIES = manifestSection("sqlObjects");
+const PG_POOL_ENTRIES = manifestSection("pgPools");
+const NON_BEARER_HASH_ENTRIES = manifestSection("nonBearerHashFields");
+
+// ─── Schema-derived SQL facts and schema checks (C3, C4) ─────
+
+// A token table is the @@map table of a token model; a column is a scalar field's @map name.
+const TOKEN_TABLES = new Set([...TOKEN_MODELS].map((m) => schema.tables.get(m)));
+const scalarColumns = (model) => new Set([...MODELS.get(model).values()].filter((f) => !MODELS.has(f.type)).map((f) => f.column));
+const COLUMNS_BY_TABLE = new Map([...MODELS.keys()].map((m) => [schema.tables.get(m), scalarColumns(m)]));
+const ALL_COLUMNS = new Set([...COLUMNS_BY_TABLE.values()].flatMap((cols) => [...cols]));
+
+/** Facts the schema loader does not keep: `view` blocks, unique fields, and `@relation(references: [...])` lists. */
+function scanSchemaSource(text) {
+  const out = { views: [], unique: [], references: [] };
+  let model = null;
+  for (const raw of text.split("\n")) {
+    const line = raw.replace(/\/\/.*$/, "");
+    const open = /^(model|view)\s+(\w+)\s*\{/.exec(line);
+    if (open) {
+      if (open[1] === "view") out.views.push(open[2]);
+      model = open[1] === "model" ? open[2] : null;
+      continue;
+    }
+    if (/^\}/.test(line)) {
+      model = null;
+      continue;
+    }
+    if (!model) continue;
+    const field = /^[ \t]+(\w+)[ \t]+[A-Za-z_]\w*(?:\[\])?\??/.exec(line)?.[1];
+    if (field && /@unique\b/.test(line)) out.unique.push({ model, field });
+    const composite = /@@unique\(\s*\[([^\]]*)\]/.exec(line);
+    if (composite) for (const m of composite[1].split(",")) out.unique.push({ model, field: /^\s*(\w+)/.exec(m)?.[1] });
+    const references = /@relation\([^)]*references:\s*\[([^\]]*)\]/.exec(line);
+    if (references) out.references.push({ model, field, names: references[1].split(",").map((n) => n.trim()) });
+  }
+  return out;
+}
+
+/** The first schema check that fails, as a fatal message, or null. */
+function schemaViolation() {
+  const mapped = new Set();
+  for (const [model, fields] of MODELS) {
+    for (const [name, f] of fields) {
+      if (DIGEST_KEYS.has(name)) {
+        if (!DIGEST_COLUMNS.has(f.column)) return `${SCHEMA_PATH}: ${model}.${name} maps to column "${f.column}", which is not a digest column (${[...DIGEST_COLUMNS].join("/")}): map it, or the gate's digest-column set is out of date.`;
+        mapped.add(f.column);
+      } else if (DIGEST_COLUMNS.has(f.column)) {
+        return `${SCHEMA_PATH}: ${model}.${name} is mapped to digest column "${f.column}" but is not named ${[...DIGEST_KEYS].join("/")}: a lookup by it would not be recognised.`;
+      }
+    }
+  }
+  for (const column of DIGEST_COLUMNS) {
+    if (!mapped.has(column)) return `${SCHEMA_PATH}: no digest-key field maps to column "${column}": the digest-column set and the schema disagree.`;
+  }
+  const source = scanSchemaSource(readFileSync(join(ROOT, SCHEMA_PATH), "utf8"));
+  if (source.views.length > 0) return `${SCHEMA_PATH}: view ${source.views[0]}: a database view can project a digest column without naming it in a query.`;
+  for (const { model, field } of source.unique) {
+    const f = MODELS.get(model)?.get(field);
+    if (!f || f.type !== "String" || DIGEST_KEYS.has(field)) continue;
+    if (!/(hash|digest)$/i.test(field) && !/(hash|digest)$/i.test(f.column)) continue;
+    if (!NON_BEARER_HASH_ENTRIES.has(`${model}.${field}`)) {
+      return `${SCHEMA_PATH}: ${model}.${field} is a unique String ending in hash/digest but is not a digest key (${[...DIGEST_KEYS].join("/")}): name it one, or list "${model}.${field}" in the manifest's "nonBearerHashFields" with a reason.`;
+    }
+  }
+  for (const { model, field, names } of source.references) {
+    const digest = names.find((n) => DIGEST_KEYS.has(n));
+    if (digest) return `${SCHEMA_PATH}: ${model}${field ? `.${field}` : ""} references ${digest}: a foreign key gives another column the digest's values.`;
+  }
+  return null;
+}
+const schemaProblem = schemaViolation();
+if (schemaProblem) fatal(schemaProblem);
 
 // ─── Helpers ─────────────────────────────────────────────────
 
@@ -418,6 +608,13 @@ function constString(node, file) {
   return isStringish(init) ? init.getLiteralText() : null;
 }
 
+/** The string literal `constString` read: the literal itself, or the initializer of the `const` it names. Only after a non-null `constString`. */
+function pinningLiteral(node, file) {
+  const v = unwrapExpression(node);
+  if (isStringish(v)) return v;
+  return unwrapExpression(visibleBinding(v.getText(), v, file.bindingsFor).getInitializer());
+}
+
 /** The model whose delegate `id` names when it is bound by destructuring a handle (`const { apiKey: k } = tx`). */
 function destructuredModel(id, file) {
   const decl = visibleBinding(id.getText(), id, file.bindingsFor);
@@ -507,7 +704,9 @@ function literalProps(lit, ctx, onOpaque, followSpreads) {
         continue;
       }
       const value = k === SyntaxKind.ShorthandPropertyAssignment ? prop.getNameNode() : prop.getInitializer();
-      props.push({ name, value });
+      // `occ`: the node that spells the key (the census places it when the walk reads it as one).
+      const occ = nameNode.getKind() === SyntaxKind.ComputedPropertyName ? pinningLiteral(nameNode.getExpression(), ctx) : nameNode;
+      props.push({ name, value, occ });
     } else if (k === SyntaxKind.SpreadAssignment && followSpreads) {
       const spread = spreadLiterals(prop.getExpression(), ctx);
       if (spread) for (const s of spread) props.push(...literalProps(s, ctx, onOpaque, true));
@@ -545,6 +744,22 @@ const opaqueIf = (applies, res, label) => (detail) => {
   if (applies) res.opaque.push(`${label}: ${detail}`);
 };
 
+// A filter's computed key this file cannot pin hides which field the filter names, so it is
+// opaque on every model (C2) — the other reasons stay scoped to the token models.
+const filterOpaque = (model, res, label) => (detail) => {
+  if (TOKEN_MODELS.has(model) || detail === "computed key") res.opaque.push(`${label}: ${detail}`);
+};
+
+/**
+ * Placement (C1) is a channel of its own: a digest key the walk read as a lookup, a scalar write
+ * or a projection is pushed to `res.placed`. The model it is judged against is the call's own
+ * (`pmodel`), not the one the walkers receive — createMany / updateMany walk their `data` with
+ * no model, and the key is still a write to the model that declares it.
+ */
+const placeIfDeclared = (res, pmodel, name, occ) => {
+  if (DIGEST_KEYS.has(name) && MODELS.get(pmodel)?.has(name)) res.placed.push(occ);
+};
+
 /** A call's argument object, or a nested relation's: its filter, projection and write positions. */
 function walkArgs(node, model, res, ctx, what = "argument", writesRelations = true) {
   if (isNullish(node) || isBooleanLiteral(node)) return;
@@ -554,7 +769,9 @@ function walkArgs(node, model, res, ctx, what = "argument", writesRelations = tr
   for (const { name, value } of props) {
     if (FILTER_KEYS.has(name)) walkWhere(value, model, res, ctx, name);
     else if (PROJECTION_KEYS.has(name)) walkProjection(value, model, res, ctx, name);
-    else if (WRITE_KEYS.has(name)) walkData(value, writesRelations ? model : null, res, ctx, name);
+    else if (WRITE_KEYS.has(name)) walkData(value, writesRelations ? model : null, res, ctx, name, model);
+    // `omit` is a projection for placement only: the opacity rules never read it.
+    else if (name === "omit") for (const p of readProps(value, ctx, () => {}, true) ?? []) placeIfDeclared(res, model, p.name, p.occ);
   }
 }
 
@@ -564,7 +781,8 @@ function walkProjection(node, model, res, ctx, what) {
   const opaque = opaqueIf(TOKEN_ADJACENT.has(model), res, `${model} ${what}`);
   const props = readProps(node, ctx, opaque, true);
   if (!props) return opaque("not an object literal");
-  for (const { name, value } of props) {
+  for (const { name, value, occ } of props) {
+    if (what === "select") placeIfDeclared(res, model, name, occ);
     if (name === "_count") walkArgs(value, model, res, ctx, "_count");
     else walkArgs(value, relationOf(model, name)?.type ?? null, res, ctx, name);
   }
@@ -572,7 +790,7 @@ function walkProjection(node, model, res, ctx, what) {
 
 function walkWhere(node, model, res, ctx, what = "where") {
   if (isNullish(node) || isBooleanLiteral(node)) return;
-  const opaque = opaqueIf(TOKEN_MODELS.has(model), res, `${model} ${what}`);
+  const opaque = filterOpaque(model, res, `${model ?? "unresolved"} ${what}`);
   if (isArrayLiteral(node)) {
     for (const el of unwrapExpression(node).getElements()) {
       if (el.getKind() === SyntaxKind.SpreadElement) opaque("spread");
@@ -586,9 +804,10 @@ function walkWhere(node, model, res, ctx, what = "where") {
 }
 
 function walkWhereProps(props, model, res, ctx, opaque) {
-  for (const { name, value } of props) {
+  for (const { name, value, occ } of props) {
     if (DIGEST_KEYS.has(name)) {
       res.lookup = true;
+      res.placed.push(occ);
       if (MODELS.get(model)?.has(name)) res.lookupModels.add(model);
       continue;
     }
@@ -609,7 +828,7 @@ function walkWhereProps(props, model, res, ctx, opaque) {
 
 function readRelationFilter(node, related, res, ctx) {
   if (isNullish(node)) return;
-  const opaque = opaqueIf(TOKEN_MODELS.has(related), res, `${related} relation filter`);
+  const opaque = filterOpaque(related, res, `${related ?? "unresolved"} relation filter`);
   const props = readProps(node, ctx, opaque);
   if (!props) return opaque("not an object literal");
   if (props.length > 0 && props.every((p) => RELATION_FILTERS.has(p.name))) {
@@ -619,20 +838,23 @@ function readRelationFilter(node, related, res, ctx) {
   }
 }
 
-/** A `data` (or an upsert's `create`/`update`): an object, or an array of them, keyed by field. */
-function walkData(node, model, res, ctx, what = "data") {
+/** A `data` (or an upsert's `create`/`update`): an object, or an array of them, keyed by field. `pmodel` is the position's real model (see placeIfDeclared). */
+function walkData(node, model, res, ctx, what = "data", pmodel = model) {
   if (isNullish(node)) return;
   const opaque = opaqueIf(TOKEN_ADJACENT.has(model), res, `${model} ${what}`);
   if (isArrayLiteral(node)) {
     for (const el of unwrapExpression(node).getElements()) {
       if (el.getKind() === SyntaxKind.SpreadElement) opaque("spread");
-      else walkData(el, model, res, ctx, what);
+      else walkData(el, model, res, ctx, what, pmodel);
     }
     return;
   }
   const props = readProps(node, ctx, opaque, true);
   if (!props) return opaque("not an object literal");
-  for (const { name, value } of props) walkNestedWrite(value, relationOf(model, name)?.type ?? null, res, ctx, name);
+  for (const { name, value, occ } of props) {
+    placeIfDeclared(res, pmodel, name, occ);
+    walkNestedWrite(value, relationOf(model, name)?.type ?? null, res, ctx, name);
+  }
 }
 
 /** A field's value in a `data`: for a relation, its nested-write operations. */
@@ -665,16 +887,16 @@ function walkNestedWrite(node, model, res, ctx, field) {
         }
         for (const p of elProps) {
           if (p.name === "where") walkWhere(p.value, model, res, ctx, `${what}.where`);
-          else if (WRITE_KEYS.has(p.name)) walkData(p.value, SCALAR_WRITE_OPS.has(name) ? null : model, res, ctx, `${what}.${p.name}`);
+          else if (WRITE_KEYS.has(p.name)) walkData(p.value, SCALAR_WRITE_OPS.has(name) ? null : model, res, ctx, `${what}.${p.name}`, model);
         }
       }
     }
   }
 }
 
-/** { lookup, lookupModels, opaque[] } for one call: every argument is walked, the first under the delegate's model. */
+/** { lookup, lookupModels, opaque[], placed[] } for one call: every argument is walked, the first under the delegate's model. */
 function readCall(call, target, ctx) {
-  const res = { lookup: false, lookupModels: new Set(), opaque: [] };
+  const res = { lookup: false, lookupModels: new Set(), opaque: [], placed: [] };
   call.getArguments().forEach((arg, i) => {
     const argModel = (i === 0 && target?.model) || null;
     if (arg.getKind() === SyntaxKind.SpreadElement) opaqueIf(TOKEN_ADJACENT.has(argModel), res, `${argModel} argument`)("spread");
@@ -751,13 +973,563 @@ function perUseGatedViolation(fn, file) {
   return null;
 }
 
+// ─── Digest-key spelling census (C1) ─────────────────────────
+
+// Every identifier whose text is a digest key, and every string / no-substitution template
+// literal whose cooked value equals one, has a role. A binding (a declared name, or a reference
+// to a local binding) and a type position are not spellings; every other role is a key, and a
+// role not listed here is a key too: the census errs toward a site.
+const TYPE_DECLARATIONS = new Set([SyntaxKind.InterfaceDeclaration, SyntaxKind.TypeAliasDeclaration, SyntaxKind.TypeParameter]);
+// Parents whose own `name` declares a local binding.
+const DECLARED_NAME_PARENTS = new Set([
+  SyntaxKind.VariableDeclaration,
+  SyntaxKind.Parameter,
+  SyntaxKind.FunctionDeclaration,
+  SyntaxKind.FunctionExpression,
+  SyntaxKind.ClassDeclaration,
+  SyntaxKind.ClassExpression,
+  SyntaxKind.EnumDeclaration,
+  SyntaxKind.ModuleDeclaration,
+  SyntaxKind.ImportClause,
+  SyntaxKind.NamespaceImport,
+  SyntaxKind.ImportEqualsDeclaration,
+]);
+// Parents in which an identifier (other than a name) is an expression, so it refers to a binding.
+const VALUE_PARENTS = new Set([
+  SyntaxKind.CallExpression,
+  SyntaxKind.NewExpression,
+  SyntaxKind.BinaryExpression,
+  SyntaxKind.PrefixUnaryExpression,
+  SyntaxKind.PostfixUnaryExpression,
+  SyntaxKind.ConditionalExpression,
+  SyntaxKind.ParenthesizedExpression,
+  SyntaxKind.AsExpression,
+  SyntaxKind.SatisfiesExpression,
+  SyntaxKind.NonNullExpression,
+  SyntaxKind.TypeAssertionExpression,
+  SyntaxKind.AwaitExpression,
+  SyntaxKind.YieldExpression,
+  SyntaxKind.TypeOfExpression,
+  SyntaxKind.VoidExpression,
+  SyntaxKind.DeleteExpression,
+  SyntaxKind.SpreadElement,
+  SyntaxKind.SpreadAssignment,
+  SyntaxKind.ArrayLiteralExpression,
+  SyntaxKind.ElementAccessExpression,
+  SyntaxKind.TaggedTemplateExpression,
+  SyntaxKind.TemplateSpan,
+  SyntaxKind.ArrowFunction,
+  SyntaxKind.ComputedPropertyName,
+  SyntaxKind.ReturnStatement,
+  SyntaxKind.ThrowStatement,
+  SyntaxKind.ExpressionStatement,
+  SyntaxKind.IfStatement,
+  SyntaxKind.WhileStatement,
+  SyntaxKind.DoStatement,
+  SyntaxKind.ForStatement,
+  SyntaxKind.ForInStatement,
+  SyntaxKind.ForOfStatement,
+  SyntaxKind.SwitchStatement,
+  SyntaxKind.CaseClause,
+  SyntaxKind.ExportAssignment,
+  SyntaxKind.JsxExpression,
+  SyntaxKind.JsxSpreadAttribute,
+  SyntaxKind.Decorator,
+  SyntaxKind.ExpressionWithTypeArguments,
+]);
+// Wrappers a string passes through on its way to being a call's argument (`f([["tokenHash", h]])`).
+const ARGUMENT_WRAPPERS = new Set([
+  SyntaxKind.ArrayLiteralExpression,
+  SyntaxKind.ParenthesizedExpression,
+  SyntaxKind.AsExpression,
+  SyntaxKind.SatisfiesExpression,
+  SyntaxKind.NonNullExpression,
+]);
+
+/** Is `node` inside a type (a type node, an interface / alias body, a type parameter)? A class's `extends` expression is a value. */
+function inType(node) {
+  for (let p = node; p; p = p.getParent()) {
+    const k = p.getKind();
+    if (TYPE_DECLARATIONS.has(k)) return true;
+    if (k === SyntaxKind.ExpressionWithTypeArguments) {
+      const heritage = p.getParent();
+      const isClassExtends = heritage?.getKind() === SyntaxKind.HeritageClause && heritage.getToken() === SyntaxKind.ExtendsKeyword && heritage.getParent()?.getKind() === SyntaxKind.ClassDeclaration;
+      if (!isClassExtends) return true;
+    } else if (ts.isTypeNode(p.compilerNode)) return true;
+  }
+  return false;
+}
+
+/** Is the access `<expr>.k` / `<expr>["k"]` the left side of an assignment (`w.tokenHash = h`)? */
+function isAssignmentTarget(access) {
+  const p = access.getParent();
+  if (p?.getKind() !== SyntaxKind.BinaryExpression || p.getLeft() !== access) return false;
+  const op = p.getOperatorToken().getKind();
+  return op >= SyntaxKind.FirstAssignment && op <= SyntaxKind.LastAssignment;
+}
+
+/** Is the string `lit` a call's argument, directly or inside array / parenthesised wrappers? */
+function isCallArgument(lit) {
+  let n = lit;
+  while (n.getParent() && ARGUMENT_WRAPPERS.has(n.getParent().getKind())) n = n.getParent();
+  const p = n.getParent();
+  return p?.getKind() === SyntaxKind.CallExpression && p.getArguments().includes(n);
+}
+
+/** A reference with a visible local binding is not a spelling; one with none is a key. */
+function referenceRole(id, file) {
+  return visibleBinding(id.getText(), id, file.bindingsFor) ? null : { label: "unresolved reference", write: false };
+}
+
+/**
+ * `null` for a binding or a type position (not a spelling), else `{ label, write }`: the role of
+ * a key. `write` marks a spelling that builds a digest-keyed object (a property, an assignment
+ * target, a string handed to a call) as against one that only reads or names it.
+ */
+function keyRole(occ, file) {
+  if (inType(occ)) return null;
+  const parent = occ.getParent();
+  const pk = parent.getKind();
+  const node = occ.compilerNode;
+  if (occ.getKind() !== SyntaxKind.Identifier) {
+    if (pk === SyntaxKind.PropertyAssignment && parent.compilerNode.name === node) return { label: "property", write: true };
+    if (pk === SyntaxKind.ComputedPropertyName) {
+      return parent.getParent().getKind() === SyntaxKind.PropertyAssignment ? { label: "computed property", write: true } : { label: "computed name", write: false };
+    }
+    if (pk === SyntaxKind.ElementAccessExpression && parent.compilerNode.argumentExpression === node) return { label: "element access", write: isAssignmentTarget(parent) };
+    return { label: "string", write: isCallArgument(occ) };
+  }
+  if (DECLARED_NAME_PARENTS.has(pk) && parent.compilerNode.name === node) return null;
+  switch (pk) {
+    case SyntaxKind.PropertyAssignment:
+      if (parent.compilerNode.name === node) return { label: "property", write: true };
+      break;
+    case SyntaxKind.ShorthandPropertyAssignment:
+      // `{ tokenHash }` names the field whatever the local binding it also reads.
+      if (parent.compilerNode.name === node) return { label: "shorthand property", write: true };
+      break;
+    case SyntaxKind.PropertyAccessExpression:
+      if (parent.compilerNode.name === node) return { label: "member access", write: isAssignmentTarget(parent) };
+      return referenceRole(occ, file);
+    case SyntaxKind.BindingElement: {
+      const isObjectPattern = parent.getParent().getKind() === SyntaxKind.ObjectBindingPattern;
+      if (parent.compilerNode.propertyName === node) return { label: "destructured property", write: false };
+      if (parent.compilerNode.name === node) return parent.compilerNode.propertyName || !isObjectPattern ? null : { label: "destructured property", write: false };
+      break;
+    }
+    case SyntaxKind.ImportSpecifier:
+      if (parent.compilerNode.name === node) return null;
+      break;
+    case SyntaxKind.ExportSpecifier:
+      if (!(parent.compilerNode.propertyName && parent.compilerNode.name === node)) return referenceRole(occ, file);
+      break;
+    default:
+  }
+  if (parent.compilerNode.initializer === node || VALUE_PARENTS.has(pk)) return referenceRole(occ, file);
+  return { label: `other (${parent.getKindName()})`, write: false };
+}
+
+/** The node a key's own property spans: another floating key inside it is part of the same spelling. */
+function keySpan(occ) {
+  let p = occ.getParent();
+  if (p?.getKind() === SyntaxKind.ComputedPropertyName) p = p.getParent();
+  const isProperty = p?.getKind() === SyntaxKind.PropertyAssignment || p?.getKind() === SyntaxKind.ShorthandPropertyAssignment;
+  return isProperty ? p : occ;
+}
+
+/** Every key-role spelling of a digest key in the file: `{ occ, label, write, span }`. */
+function censusKeys(file) {
+  const out = [];
+  const { sf } = file;
+  for (const occ of [
+    ...sf.getDescendantsOfKind(SyntaxKind.Identifier),
+    ...sf.getDescendantsOfKind(SyntaxKind.StringLiteral),
+    ...sf.getDescendantsOfKind(SyntaxKind.NoSubstitutionTemplateLiteral),
+  ]) {
+    const text = occ.getKind() === SyntaxKind.Identifier ? occ.getText() : occ.getLiteralText();
+    if (!DIGEST_KEYS.has(text)) continue;
+    const role = keyRole(occ, file);
+    if (role) out.push({ occ, ...role, span: keySpan(occ) });
+  }
+  return out.sort((a, b) => a.occ.getStart() - b.occ.getStart());
+}
+
+const within = (outer, inner) => outer.getStart() <= inner.getStart() && inner.getEnd() <= outer.getEnd();
+
+// ─── Raw SQL static rules (C3) ───────────────────────────────
+
+// sql-scan keeps a substitution's offset as this private-use character; inside a quoted
+// identifier (`"${t}"`) it is the only trace of the substitution left in the token's value.
+const SQL_SUBSTITUTION = "";
+const RELATION_KEYWORDS = new Set(["FROM", "JOIN", "UPDATE", "INTO", "ONLY"]);
+// Functions whose `FROM` is syntax, not a relation: `trim(x FROM y)`, `extract(f FROM y)`, ...
+const NON_RELATION_FROM_FUNCTIONS = new Set(["trim", "extract", "substring", "overlay"]);
+// `UPDATE` after these is a lock clause, an action or a trigger event, not a relation keyword.
+const NON_RELATION_UPDATE_PREV = new Set(["FOR", "ON", "DO", "KEY", "OF", "OR", "AFTER", "BEFORE"]);
+// What may follow a relation's name without being its alias. A word missing from this closed
+// list is read as an alias, which errs toward refusal.
+const RELATION_FOLLOW = new Set([
+  "WHERE", "SET", "ON", "USING", "VALUES", "RETURNING", "SELECT", "DEFAULT", "OVERRIDING",
+  "JOIN", "INNER", "LEFT", "RIGHT", "FULL", "CROSS", "NATURAL", "LATERAL", "OUTER",
+  "UNION", "INTERSECT", "EXCEPT", "GROUP", "ORDER", "HAVING", "LIMIT", "OFFSET", "FETCH",
+  "FOR", "WINDOW", "WITH", "TABLESAMPLE",
+]);
+// Dynamic SQL and object definitions (W4). `CREATE` / `ALTER` of one of these kinds, after these modifiers.
+const OBJECT_KINDS = new Set(["FUNCTION", "PROCEDURE", "VIEW", "TRIGGER", "RULE"]);
+const OBJECT_MODIFIERS = new Set(["OR", "REPLACE", "TEMP", "TEMPORARY", "RECURSIVE", "MATERIALIZED", "CONSTRAINT", "EVENT", "UNLOGGED", "GLOBAL", "LOCAL"]);
+const XML_AND_LINK_CALL = /^(?:query_to_xml|table_to_xml|cursor_to_xml|schema_to_xml|database_to_xml|dblink)/;
+const SQL_WORD_CHAR = /[\p{L}\p{N}_$]/u;
+const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const isSqlWord = (t, upper) => t !== undefined && t.type === TOKEN.WORD && t.upper === upper;
+const isNameToken = (t) => t !== undefined && (t.type === TOKEN.WORD || t.type === TOKEN.QIDENT || t.type === TOKEN.OPAQUE);
+// A substitution, or a quoted identifier holding one (`"${t}"`), is judged as that substitution.
+const isSubstitution = (t) => t !== undefined && (t.type === TOKEN.OPAQUE || (t.type === TOKEN.QIDENT && t.value.includes(SQL_SUBSTITUTION)));
+const isNamedToken = (t) => t !== undefined && (t.type === TOKEN.WORD || t.type === TOKEN.QIDENT) && !isSubstitution(t);
+const isTokenTableName = (t) => isNamedToken(t) && TOKEN_TABLES.has(nameOf(t));
+const TOKEN_TABLE_WORD =
+  TOKEN_TABLES.size > 0 ? new RegExp(`(?<![A-Za-z0-9_$])(${[...TOKEN_TABLES].map(escapeRegExp).join("|")})(?![A-Za-z0-9_$])`, "gi") : null;
+/** The token tables a string token names as a whole word, in any case. */
+const tablesInString = (t) => (t.type === TOKEN.STRING && TOKEN_TABLE_WORD ? [...new Set([...t.text.matchAll(TOKEN_TABLE_WORD)].map((m) => m[1].toLowerCase()))] : []);
+
+/**
+ * The relation positions of a token stream: a name chain (`schema.name`) directly after
+ * FROM / JOIN / UPDATE / INTO / ONLY, where that FROM is not `DISTINCT FROM`, `trim`, `extract`,
+ * `substring` or `overlay`'s. `table` indexes the chain's last name; a name followed by `::`,
+ * `[` or `(` is a value (`isValue`), except the column list after `INTO t`. `alias` indexes the
+ * name after the relation, optionally after AS, when it is not in the follow-set.
+ * `looseFrom` lists the tokens after a FROM that is no relation.
+ */
+function sqlRelations(tk) {
+  const enclosing = [];
+  const open = [];
+  tk.forEach((t, i) => {
+    if (t.type === TOKEN.RPAREN) open.pop();
+    enclosing[i] = open.at(-1);
+    if (t.type === TOKEN.LPAREN) open.push(i);
+  });
+  const relations = [];
+  const looseFrom = [];
+  tk.forEach((t, i) => {
+    if (t.type !== TOKEN.WORD || !RELATION_KEYWORDS.has(t.upper)) return;
+    if (t.upper === "FROM") {
+      const o = enclosing[i];
+      const fn = o !== undefined && tk[o - 1]?.type === TOKEN.WORD ? tk[o - 1].text.toLowerCase() : null;
+      if (isSqlWord(tk[i - 1], "DISTINCT") || (fn && NON_RELATION_FROM_FUNCTIONS.has(fn))) {
+        looseFrom.push(i + 1);
+        return;
+      }
+    }
+    if (t.upper === "UPDATE" && tk[i - 1]?.type === TOKEN.WORD && NON_RELATION_UPDATE_PREV.has(tk[i - 1].upper)) return;
+    let j = i + 1;
+    if (!isNameToken(tk[j])) return;
+    while (tk[j + 1]?.type === TOKEN.DOT && isNameToken(tk[j + 2])) j += 2;
+    const next = tk[j + 1];
+    let isRelation;
+    if (next === undefined || next.type === TOKEN.COMMA || next.type === TOKEN.RPAREN || next.type === TOKEN.SEMI) isRelation = true;
+    else if (next.type === TOKEN.LPAREN) isRelation = t.upper === "INTO";
+    else isRelation = next.type === TOKEN.WORD || next.type === TOKEN.QIDENT;
+    const isValue = !isRelation && (next.type === TOKEN.LPAREN || (next.type === TOKEN.OP && (next.text === ":" || next.text === "[")));
+    let alias = null;
+    if (isRelation && next !== undefined) {
+      if (isSqlWord(next, "AS") && (tk[j + 2]?.type === TOKEN.WORD || tk[j + 2]?.type === TOKEN.QIDENT)) alias = j + 2;
+      else if ((next.type === TOKEN.WORD && !RELATION_FOLLOW.has(next.upper)) || next.type === TOKEN.QIDENT) alias = j + 1;
+    }
+    if (isRelation || isValue) relations.push({ keyword: t.upper, table: j, alias, isValue });
+  });
+  return { relations, looseFrom };
+}
+
+/** The function a name token calls: an unquoted word folds to lower case, and a quoted lower-case name is the same function. */
+const functionName = (t) => (t?.type === TOKEN.WORD ? t.text.toLowerCase() : t?.type === TOKEN.QIDENT && !isSubstitution(t) ? t.value : null);
+
+/** Is this `*` the one in `count(*)`? */
+const isCountStar = (tk, i) => tk[i - 1]?.type === TOKEN.LPAREN && functionName(tk[i - 2]) === "count" && tk[i + 1]?.type === TOKEN.RPAREN;
+
+/**
+ * W1-W6 over one SQL-bearing literal (`input` is sqlInputFromNode's). `trusted` marks a
+ * trustedSql template, whose substitutions are text, not bound parameters. Returns
+ * `{ names, violations: [{ rule, line, message }] }`; `names` is whether the literal names a
+ * token table (a name token, or a whole word inside a string token).
+ */
+function checkSqlLiteral(input, trusted) {
+  const tk = tokenizeSql(input);
+  const violations = [];
+  const add = (rule, token, message) => violations.push({ rule, line: token.line, message: `${rule}: ${message}` });
+  const inString = tk.map(tablesInString); // the token tables each string token names
+  const names = tk.some((t, i) => isTokenTableName(t) || inString[i].length > 0);
+
+  // W4 — dynamic SQL and object definitions, in every SQL-bearing literal.
+  tk.forEach((t, i) => {
+    const called = tk[i + 1]?.type === TOKEN.LPAREN ? functionName(t) : null;
+    if (called !== null && XML_AND_LINK_CALL.test(called)) add("W4", t, `${called}(...) reads whole rows or runs SQL given as a string`);
+    else if (called === "ts_stat") add("W4", t, "ts_stat(...) runs SQL given as a string");
+    if (t.type !== TOKEN.WORD) return;
+    if (t.upper === "EXECUTE" || t.upper === "PREPARE") add("W4", t, `${t.upper} builds SQL the lexer cannot read`);
+    else if (t.upper === "DO" && (i === 0 || tk[i - 1].type === TOKEN.SEMI)) add("W4", t, "a DO block runs SQL the lexer cannot read");
+    else if (t.upper === "CREATE" || t.upper === "ALTER") {
+      const kind = definedKind(tk, i);
+      if (kind) add("W4", t, `${t.upper} ${kind} defines an object whose body the lexer cannot read`);
+    }
+  });
+
+  if (!names && !trusted) return { names, violations };
+
+  const { relations, looseFrom } = sqlRelations(tk);
+  const asRelation = new Set(relations.filter((r) => !r.isValue).map((r) => r.table));
+  const aliasDeclarations = new Set();
+  const aliases = new Map(); // normalised alias -> columns its qualifier may name
+  for (const r of relations) {
+    if (r.isValue) continue;
+    const table = tk[r.table];
+    const isTokenRelation = isTokenTableName(table) || (trusted && isSubstitution(table));
+    if (!isTokenRelation || r.alias === null) continue;
+    aliasDeclarations.add(r.alias);
+    aliases.set(nameOf(tk[r.alias]), isSubstitution(table) ? ALL_COLUMNS : COLUMNS_BY_TABLE.get(nameOf(table)));
+    // W3 — a column alias list renames the digest column.
+    if (tk[r.alias + 1]?.type === TOKEN.LPAREN) add("W3", tk[r.alias], `alias ${tk[r.alias].text} of a token relation is followed by a column alias list`);
+  }
+
+  // W1 — a whole-row projection reads the digest column without naming it.
+  tk.forEach((t, i) => {
+    if (t.type === TOKEN.OP && t.text === "*" && !isCountStar(tk, i)) add("W1", t, 'a "*" other than count(*) reads whole rows, digest column included');
+  });
+
+  // W2 — a token table's name or a token relation's alias outside relation position that does not qualify a declared column.
+  const qualifiesColumn = (i, columns) => {
+    if (tk[i + 1]?.type !== TOKEN.DOT) return false;
+    const n = tk[i + 2];
+    return (n?.type === TOKEN.OP && n.text === "*") || (isNamedToken(n) && columns.has(nameOf(n)));
+  };
+  tk.forEach((t, i) => {
+    if (!isNamedToken(t) || asRelation.has(i) || aliasDeclarations.has(i)) return;
+    if (isTokenTableName(t)) {
+      if (!qualifiesColumn(i, COLUMNS_BY_TABLE.get(nameOf(t)))) add("W2", t, `token table ${nameOf(t)} outside relation position (and not qualifying one of its columns)`);
+    } else if (aliases.has(nameOf(t)) && tk[i - 1]?.type !== TOKEN.DOT && !qualifiesColumn(i, aliases.get(nameOf(t)))) {
+      add("W2", t, `alias ${t.text} of a token relation outside relation position (and not qualifying a declared column)`);
+    }
+  });
+
+  // W5 — SQL carried as a string argument is invisible to W1-W3.
+  tk.forEach((t, i) => inString[i].forEach((name) => add("W5", t, `a string names token table ${name}: SQL inside a string is not read`)));
+
+  if (!trusted) return { names, violations };
+
+  // W6 — what the run-time mint cannot see: the syntax around a substituted table.
+  const looseFromSet = new Set(looseFrom);
+  const valueRelationTables = new Set(relations.filter((r) => r.isValue && isSubstitution(tk[r.table])).map((r) => r.table));
+  tk.forEach((t, i) => {
+    if (!isSubstitution(t)) return;
+    if (looseFromSet.has(i)) add("W6", t, "a substitution after a FROM that is not a relation FROM");
+    if (valueRelationTables.has(i)) add("W6", t, "a substitution in relation position followed by :: / [ / ( is a value, not a relation");
+    if (tk[i + 1]?.type === TOKEN.DOT) {
+      const n = tk[i + 2];
+      if (!(n?.type === TOKEN.OP && n.text === "*") && !(isNamedToken(n) && ALL_COLUMNS.has(nameOf(n)))) {
+        add("W6", t, `a substituted qualifier names ${n ? (isSubstitution(n) ? "a substitution" : n.text) : "nothing"}, not a column of any schema model`);
+      }
+    }
+  });
+  // A substitution touching a word character assembles a name from parts (`api_${x}`).
+  let line = 0;
+  input.substitutions.forEach((substitution, k) => {
+    line += [...input.parts[k]].filter((c) => c === "\n").length;
+    const before = input.parts[k].at(-1);
+    const after = input.parts[k + 1][0];
+    if ((before && SQL_WORD_CHAR.test(before)) || (after && SQL_WORD_CHAR.test(after))) {
+      add("W6", { line }, "a substitution adjacent to a word character assembles a name from parts");
+    }
+    line += [...substitution].filter((c) => c === "\n").length;
+  });
+  return { names, violations };
+}
+
+// ─── Database objects defined in SQL files (C4) ──────────────
+
+const SQL_NESTING_LIMIT = 8;
+const isDigestColumnName = (t) => isNamedToken(t) && DIGEST_COLUMNS.has(nameOf(t));
+
+/** The text a STRING token holds: a dollar-quoted body, or a quoted one with its escapes undone. */
+function stringBody(text) {
+  const tag = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.exec(text)?.[0];
+  if (tag) return text.slice(tag.length, text.endsWith(tag) && text.length >= 2 * tag.length ? -tag.length : undefined);
+  const escaped = /^[Ee]'/.test(text);
+  const body = text.slice(escaped ? 2 : 1, text.endsWith("'") ? -1 : undefined);
+  return escaped ? body.replace(/\\(.)/gs, "$1") : body.replaceAll("''", "'");
+}
+
+/** A token stream and, recursively, the stream of every string token in it (a function body, an EXECUTE literal). */
+function nestedStreams(tk, depth = 0) {
+  const out = { lists: [tk], tooDeep: false };
+  for (const t of tk) {
+    if (t.type !== TOKEN.STRING) continue;
+    if (depth >= SQL_NESTING_LIMIT) {
+      out.tooDeep = true;
+      continue;
+    }
+    const inner = nestedStreams(tokenizeSql(stringBody(t.text)), depth + 1);
+    out.lists.push(...inner.lists);
+    out.tooDeep ||= inner.tooDeep;
+  }
+  return out;
+}
+
+/** The object kind a `CREATE` / `ALTER` at `tk[i]` defines (after its modifiers), or null. */
+function definedKind(tk, i) {
+  let j = i + 1;
+  while (tk[j]?.type === TOKEN.WORD && OBJECT_MODIFIERS.has(tk[j].upper)) j++;
+  return tk[j]?.type === TOKEN.WORD && OBJECT_KINDS.has(tk[j].upper) ? tk[j].upper : null;
+}
+
+/** Does a `REFERENCES t (cols)` clause in `tk` list a digest column? */
+function referencesDigest(tk) {
+  return tk.some((t, i) => {
+    if (!isSqlWord(t, "REFERENCES")) return false;
+    let j = i + 1;
+    while (tk[j + 1]?.type === TOKEN.DOT && isNameToken(tk[j + 2])) j += 2;
+    const open = tk[j + 1];
+    return open?.type === TOKEN.LPAREN && open.match !== undefined && tk.slice(j + 2, open.match).some(isDigestColumnName);
+  });
+}
+
+/** Does a `GENERATED ... AS (expr)` clause in `tk` read a digest column? */
+function generatesFromDigest(tk) {
+  return tk.some((t, i) => {
+    if (!isSqlWord(t, "GENERATED")) return false;
+    const as = [1, 2, 3, 4].map((d) => i + d).find((j) => isSqlWord(tk[j], "AS"));
+    const open = as === undefined ? undefined : tk[as + 1];
+    return open?.type === TOKEN.LPAREN && open.match !== undefined && tk.slice(as + 2, open.match).some(isDigestColumnName);
+  });
+}
+
+/** Is a statement that names a digest column one of the plain forms (a definition, an index, a drop, a seed)? */
+function isPlainStatement(tk) {
+  const first = tk[0];
+  if (first.type !== TOKEN.WORD) return false;
+  if (first.upper === "DROP") return true;
+  if (first.upper === "INSERT") {
+    const hasWord = (w) => tk.some((t) => isSqlWord(t, w));
+    const upsertsOver = tk.some((t, i) => isSqlWord(t, "DO") && isSqlWord(tk[i + 1], "UPDATE"));
+    return hasWord("VALUES") && !hasWord("SELECT") && !upsertsOver;
+  }
+  let j = 1;
+  if (first.upper === "CREATE") {
+    while (tk[j]?.type === TOKEN.WORD && ["UNIQUE", "GLOBAL", "LOCAL", "TEMP", "TEMPORARY", "UNLOGGED"].includes(tk[j].upper)) j++;
+    if (isSqlWord(tk[j], "INDEX")) return true;
+    // `CREATE TABLE ... AS <query>` copies rows; a column definition's `GENERATED ... AS (...)` sits inside the parentheses.
+    return isSqlWord(tk[j], "TABLE") && !tk.some((t) => t.depth === 0 && isSqlWord(t, "AS"));
+  }
+  if (first.upper === "ALTER" && isSqlWord(tk[1], "TABLE")) {
+    j = 2;
+    if (isSqlWord(tk[j], "IF") && isSqlWord(tk[j + 1], "EXISTS")) j += 2;
+    if (isSqlWord(tk[j], "ONLY")) j++;
+    while (tk[j + 1]?.type === TOKEN.DOT) j += 2;
+    // Every depth-0 action is an ADD or a DROP COLUMN / CONSTRAINT; a rename or a type change is not plain.
+    const starts = [j + 1, ...tk.flatMap((t, i) => (i > j && t.type === TOKEN.COMMA && t.depth === 0 ? [i + 1] : []))];
+    return starts.every((s) => isSqlWord(tk[s], "ADD") || (isSqlWord(tk[s], "DROP") && (isSqlWord(tk[s + 1], "COLUMN") || isSqlWord(tk[s + 1], "CONSTRAINT"))));
+  }
+  return false;
+}
+
+/** Why a statement (top-level tokens, no `;`) makes its file need an entry: `[why, ...]`. */
+function sqlObjectReasons(tk) {
+  const { lists, tooDeep } = nestedStreams(tk);
+  const all = lists.flat();
+  const namesDigest = all.some(isDigestColumnName);
+  const namesTable = all.some(isTokenTableName);
+  const reasons = [];
+  if (tooDeep) reasons.push(`strings nested more than ${SQL_NESTING_LIMIT} deep, which this scan does not read`);
+  const first = tk[0];
+  if (isSqlWord(first, "CREATE")) {
+    const kind = definedKind(tk, 0);
+    if (kind && (namesDigest || namesTable)) reasons.push(`CREATE ${kind} naming a token table or a digest column`);
+    // A trigger's `EXECUTE FUNCTION` clause is no dynamic SQL; a routine's PL/pgSQL EXECUTE is.
+    if ((kind === "FUNCTION" || kind === "PROCEDURE") && all.some((t) => isSqlWord(t, "EXECUTE"))) reasons.push(`CREATE ${kind} whose body holds EXECUTE`);
+  }
+  if (isSqlWord(first, "DO") && (namesDigest || namesTable) && lists.slice(1).some((l) => l.some((t, i) => isSqlWord(t, "CREATE") && definedKind(l, i)))) {
+    reasons.push("DO block creating a database object and naming a token table or a digest column");
+  }
+  if (namesDigest && (lists.some((l) => referencesDigest(l) || generatesFromDigest(l)) || !isPlainStatement(tk))) {
+    reasons.push(`statement naming a digest column that is not a plain definition, index, drop or seed (${first.text})`);
+  }
+  return reasons;
+}
+
+/** `[{ line, why }]` for the statements of one SQL file that need a `sqlObjects` entry. */
+function sqlFileFindings(text) {
+  const { sql, errors } = normalizeDollarTags(text);
+  const findings = errors.map((e) => ({ line: e.line + 1, why: `${e.reason}: the file cannot be read` }));
+  // The lexer's substitution marker: a real one in a file would pass for a substitution.
+  if (text.includes(SQL_SUBSTITUTION)) findings.push({ line: text.slice(0, text.indexOf(SQL_SUBSTITUTION)).split("\n").length, why: "holds U+E000, the lexer's substitution marker: the file cannot be read" });
+  const tk = tokenizeSql(sql);
+  let start = 0;
+  const statement = (end) => {
+    const part = tk.slice(start, end);
+    start = end + 1;
+    if (part.length === 0) return;
+    for (const why of sqlObjectReasons(part)) findings.push({ line: part[0].line + 1, why });
+  };
+  tk.forEach((t, i) => {
+    if (t.type === TOKEN.SEMI && t.depth === 0) statement(i);
+  });
+  statement(tk.length);
+  return findings;
+}
+
+/** Every SQL file the gate reads: migrations (a missing directory is the caller's fatal), initdb and scripts. */
+function sqlFilePaths() {
+  const migrations = [];
+  const migrationsDir = join(ROOT, "prisma/migrations");
+  if (existsSync(migrationsDir)) {
+    for (const d of readdirSync(migrationsDir, { withFileTypes: true }).filter((e) => e.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))) {
+      if (existsSync(join(migrationsDir, d.name, "migration.sql"))) migrations.push(`prisma/migrations/${d.name}/migration.sql`);
+    }
+  }
+  const flat = (dir) =>
+    existsSync(join(ROOT, dir))
+      ? readdirSync(join(ROOT, dir), { withFileTypes: true }).filter((e) => e.isFile() && e.name.endsWith(".sql")).map((e) => `${dir}/${e.name}`).sort()
+      : [];
+  return { migrations, others: [...flat("infra/postgres/initdb"), ...flat("scripts")] };
+}
+
 // ─── Scan ────────────────────────────────────────────────────
 
 const project = createAstProject();
 const files = new Map(); // rel -> { sf, rel, bindingsFor, imports }
-const analysed = new Map(); // key -> { rel, name, fn, fns, owners, file, sites, lookups, opaque: [], lines: [] }
+const analysed = new Map(); // key -> { rel, name, fn, fns, owners, file, sites, lookups, opaque: [], floating: [], builderCalls: [], lines: [] }
 const lookedUpModels = new Set();
 const exemptionPairs = [];
+const census = { keys: 0, placed: 0, floating: 0 };
+const sqlCensus = { literals: 0, naming: 0 }; // SQL-bearing literals read, and those naming a token table
+const poolImporters = new Set(); // files importing createPool / createClient from pool-factory
+
+/** W1-W6 on one SQL-bearing literal; each violation is one line, `<file>:<line>  <rule>: <why>`. */
+function analyseSqlLiteral(rel, node, trusted) {
+  const input = sqlInputFromNode(node);
+  if (!input) return;
+  sqlCensus.literals += 1;
+  // The lexer marks a substitution with U+E000 inside a quoted identifier's value; a real one in the
+  // text would be indistinguishable from it, so such a literal is refused outright.
+  if (input.parts.some((p) => p.includes(SQL_SUBSTITUTION))) {
+    failures.push(`${rel}:${node.getStartLineNumber()}  SQL_SENTINEL: the literal holds U+E000, the lexer's substitution marker: a quoted identifier holding it could not be told from a substitution`);
+    return;
+  }
+  const { names, violations } = checkSqlLiteral(input, trusted);
+  if (names) sqlCensus.naming += 1;
+  const base = node.getStartLineNumber();
+  const lines = new Set(violations.map((v) => `${rel}:${base + v.line}  ${v.message}`));
+  failures.push(...lines);
+}
+const builders = []; // functions holding a floating write key: { rel, name, fn }
+
+/** The analysed entry of the function `at` names, created on first use; a site is added by the caller. */
+function entryFor(rel, at, file) {
+  const key = `${rel}#${at.name}`;
+  if (!analysed.has(key)) analysed.set(key, { rel, name: at.name, fn: at.fn, fns: new Set(), owners: new Set(), file, sites: 0, lookups: 0, opaque: [], floating: [], builderCalls: [], lines: [] });
+  const a = analysed.get(key);
+  a.fns.add(at.fn);
+  a.owners.add(at.owner);
+  return a;
+}
 
 const EXT_FILE_REL = (rel) => moduleOf(rel) === EXT_MODULE;
 
@@ -772,12 +1544,27 @@ for (const { rel, sf } of sourceFiles(project, join(ROOT, SCAN_ROOT), ROOT)) {
 
 
   // Digest lookups (any call) and opaque positions (calls on a resolved delegate).
+  const placed = new Set(); // digest-key spellings the walk read as a lookup, a write or a projection
+  const countedCalls = []; // { call, key }: the calls that count as a site
+  const sqlLiterals = new Map(); // SQL-bearing literal node -> is it a trustedSql template (C3)
+  const addSqlLiteral = (node, trusted) => sqlLiterals.set(node, sqlLiterals.get(node) || trusted);
   for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    // The pg driver's `.query(...)` (C5): its first argument must be a SQL literal, which is then read like any other.
+    const callee = unwrapExpression(call.getExpression());
+    const isQuery =
+      (callee.getKind() === SyntaxKind.PropertyAccessExpression && callee.getName() === "query") ||
+      (callee.getKind() === SyntaxKind.ElementAccessExpression && constString(callee.getArgumentExpression(), file) === "query");
+    if (isQuery) {
+      const arg = call.getArguments()[0];
+      if (isStringish(arg)) addSqlLiteral(arg, false);
+      else failAt(rel, call, `C5: \`.query(...)\` must take a string literal (or a no-substitution template) as its SQL argument: its text cannot be read`);
+    }
     const target = delegateTarget(call, file);
     if (target?.unreadable) {
       failAt(rel, call, `delegate method called on an element access whose key this gate cannot read (\`x[k].<method>(...)\`): name the delegate (\`x.<handle>\`), or bind the key with \`const k = "<handle>"\``);
     }
     const res = readCall(call, target, ctx);
+    for (const n of res.placed) placed.add(n);
     if (!res.lookup && res.opaque.length === 0) continue;
     for (const m of res.lookupModels) lookedUpModels.add(m);
     const at = attribute(call);
@@ -785,16 +1572,43 @@ for (const { rel, sf } of sourceFiles(project, join(ROOT, SCAN_ROOT), ROOT)) {
       failAt(rel, call, `digest lookup or opaque site cannot be attributed to a named function, method or exported const`);
       continue;
     }
-    const key = `${rel}#${at.name}`;
-    if (!analysed.has(key)) analysed.set(key, { rel, name: at.name, fn: at.fn, fns: new Set(), owners: new Set(), file, sites: 0, lookups: 0, opaque: [], lines: [] });
-    const a = analysed.get(key);
-    a.fns.add(at.fn);
-    a.owners.add(at.owner);
+    const a = entryFor(rel, at, file);
+    countedCalls.push({ call, key: `${rel}#${at.name}` });
     // One site per call: a call that is both a lookup and opaque counts once.
     a.sites += 1;
     if (res.lookup) a.lookups += 1;
     if (res.opaque.length > 0) a.opaque.push(`line ${call.getStartLineNumber()}: ${res.opaque.join(", ")}`);
     a.lines.push(call.getStartLineNumber());
+  }
+
+  // Digest-key spellings (C1): a key the walk placed is accounted for; every other one is
+  // floating and adds a site to the function that spells it — unless it sits inside a counted
+  // call, or inside another floating key, of that same manifest key (its function's entry
+  // already covers the construct it is part of).
+  const keys = ctx.mayHoldDigestKey ? censusKeys(file) : [];
+  census.keys += keys.length;
+  const floating = keys.filter((k) => !placed.has(k.occ));
+  census.placed += keys.length - floating.length;
+  census.floating += floating.length;
+  const keyOf = (node) => {
+    const at = attribute(node);
+    return at && { at, key: `${rel}#${at.name}` };
+  };
+  const owned = floating.map((k) => ({ ...k, owner: keyOf(k.occ) }));
+  for (const k of owned) {
+    if (!k.owner) {
+      failAt(rel, k.occ, `digest-key spelling (${k.label}) cannot be attributed to a named function, method or exported const: move it into a named function or an exported const`);
+      continue;
+    }
+    if (k.write) builders.push({ rel, name: k.owner.at.name, fn: k.owner.at.fn });
+    const covered =
+      countedCalls.some((c) => c.key === k.owner.key && within(c.call, k.occ)) ||
+      owned.some((g) => g !== k && g.owner?.key === k.owner.key && g.span !== k.span && within(g.span, k.occ));
+    if (covered) continue;
+    const a = entryFor(rel, k.owner.at, file);
+    a.sites += 1;
+    a.floating.push({ line: k.occ.getStartLineNumber(), label: k.label });
+    a.lines.push(k.occ.getStartLineNumber());
   }
 
   // A lookup through any receiver is found above, but opacity is judged only where the
@@ -871,15 +1685,18 @@ for (const { rel, sf } of sourceFiles(project, join(ROOT, SCAN_ROOT), ROOT)) {
     if (parent.getKind() === SyntaxKind.TaggedTemplateExpression && parent.getTag() === pa && !unsafe) continue;
     if (parent.getKind() === SyntaxKind.CallExpression && parent.getExpression() === pa && unsafe) {
       const arg = parent.getArguments()[0];
-      if (isStringish(arg)) continue;
+      if (isStringish(arg)) {
+        addSqlLiteral(arg, false);
+        continue;
+      }
       const a = unwrapExpression(arg);
       // Both names must be the raw-sql module's own exports, resolved where they are written.
       if (
         a?.getKind() === SyntaxKind.CallExpression &&
-        refersToImport(a.getExpression(), file, RAW_SQL_MODULE, "renderSql") &&
+        refersToImport(a.getExpression(), file, RAW_SQL_MODULE, RENDER_SQL_FN) &&
         a.getArguments().length === 1 &&
         a.getArguments()[0].getKind() === SyntaxKind.TaggedTemplateExpression &&
-        refersToImport(a.getArguments()[0].getTag(), file, RAW_SQL_MODULE, "trustedSql")
+        refersToImport(a.getArguments()[0].getTag(), file, RAW_SQL_MODULE, TRUSTED_SQL_TAG)
       ) continue;
       failAt(rel, pa, `${method}'s SQL argument is not a literal (nor renderSql(trustedSql\`...\`)): its text cannot be read`);
       continue;
@@ -890,6 +1707,18 @@ for (const { rel, sf } of sourceFiles(project, join(ROOT, SCAN_ROOT), ROOT)) {
     const a = unwrapExpression(ea.getArgumentExpression());
     if (isStringish(a) && RAW_METHOD.test(a.getLiteralText())) failAt(rel, ea, `raw SQL method reached by element access: its text cannot be read`);
   }
+
+  // SQL-bearing literals (C3): a `$queryRaw` / `$executeRaw` template, an Unsafe call's literal, a
+  // trustedSql template (import-resolved), a `.query(...)` literal. The Unsafe and `.query`
+  // literals were collected above; the tagged templates are collected here.
+  if (/\$(?:query|execute)Raw|trustedSql/.test(sf.getFullText())) {
+    for (const tagged of sf.getDescendantsOfKind(SyntaxKind.TaggedTemplateExpression)) {
+      const tag = unwrapExpression(tagged.getTag());
+      if (refersToImport(tag, file, RAW_SQL_MODULE, TRUSTED_SQL_TAG)) addSqlLiteral(tagged.getTemplate(), true);
+      else if (tag.getKind() === SyntaxKind.PropertyAccessExpression && RAW_METHOD.test(tag.getName()) && !tag.getName().endsWith("Unsafe")) addSqlLiteral(tagged.getTemplate(), false);
+    }
+  }
+  for (const [node, trusted] of sqlLiterals) analyseSqlLiteral(rel, node, trusted);
 
   // Forbidden reads.
   if (rel.startsWith(TOKEN_DIR)) {
@@ -905,6 +1734,41 @@ for (const { rel, sf } of sourceFiles(project, join(ROOT, SCAN_ROOT), ROOT)) {
       const nameNode = be.getPropertyNameNode() ?? be.getNameNode();
       const name = literalName(nameNode);
       if (name && FORBIDDEN_READS.has(name)) failAt(rel, be, `destructures ${name}`);
+    }
+  }
+
+  // The pg pool factory (C5): the files importing createPool / createClient are the manifest's
+  // "pgPools"; in them, and in the factory, the pool's `query` is only ever called directly; and
+  // the module is loaded by named imports only.
+  const isPoolFile = moduleOf(rel) === POOL_MODULE;
+  if (file.imports.some((i) => i.from === POOL_MODULE && POOL_FNS.has(i.imported) && !i.typeOnly)) poolImporters.add(rel);
+  if (!isPoolFile) {
+    for (const decl of sf.getImportDeclarations()) {
+      if (resolveSpecifier(rel, decl.getModuleSpecifierValue()) !== POOL_MODULE || decl.isTypeOnly()) continue;
+      if (decl.getNamespaceImport()) failAt(rel, decl, `C5: namespace import of pool-factory: its pools cannot be followed`);
+      if (decl.getDefaultImport()) failAt(rel, decl, `C5: default import of pool-factory: its pools cannot be followed`);
+    }
+    for (const decl of sf.getExportDeclarations()) {
+      const spec = decl.getModuleSpecifierValue();
+      if (spec && resolveSpecifier(rel, spec) === POOL_MODULE) failAt(rel, decl, `C5: re-export of pool-factory: its pools cannot be followed`);
+    }
+    for (const ie of sf.getDescendantsOfKind(SyntaxKind.ImportEqualsDeclaration)) {
+      const ref = ie.getModuleReference();
+      const e = ref.getKind() === SyntaxKind.ExternalModuleReference ? ref.getExpression() : null;
+      if (isStringish(e) && resolveSpecifier(rel, e.getLiteralText()) === POOL_MODULE) failAt(rel, ie, `C5: import-equals of pool-factory: its pools cannot be followed`);
+    }
+  }
+  if (isPoolFile || poolImporters.has(rel)) {
+    const isDirectCall = (node) => node.getParent()?.getKind() === SyntaxKind.CallExpression && node.getParent().getExpression() === node;
+    const reference = `C5: a reference to \`query\` other than a direct call with a literal SQL argument (a value, .call / .apply / .bind, a destructuring): the pool's SQL cannot be read`;
+    for (const pa of sf.getDescendantsOfKind(SyntaxKind.PropertyAccessExpression)) {
+      if (pa.getName() === "query" && !isDirectCall(pa)) failAt(rel, pa, reference);
+    }
+    for (const ea of sf.getDescendantsOfKind(SyntaxKind.ElementAccessExpression)) {
+      if (constString(ea.getArgumentExpression(), file) === "query" && !isDirectCall(ea)) failAt(rel, ea, reference);
+    }
+    for (const be of sf.getDescendantsOfKind(SyntaxKind.BindingElement)) {
+      if (be.getParent()?.getKind() === SyntaxKind.ObjectBindingPattern && bindingKey(be) === "query") failAt(rel, be, reference);
     }
   }
 
@@ -941,6 +1805,9 @@ for (const { rel, sf } of sourceFiles(project, join(ROOT, SCAN_ROOT), ROOT)) {
     if (spec === null) {
       failAt(rel, call, `dynamic import/require with a specifier this gate cannot read: it could reach ${EXT_FN}`);
       continue;
+    }
+    if (resolveSpecifier(rel, spec) === POOL_MODULE && !isPoolFile) {
+      failAt(rel, call, `C5: dynamic import/require of pool-factory: its pools cannot be followed`);
     }
     if (resolveSpecifier(rel, spec) === EXT_MODULE && !isExtFile) {
       failAt(rel, call, `dynamic import/require of extension-token: calls through it cannot be followed`);
@@ -1000,6 +1867,37 @@ function recordCallSite(call, file) {
 
 if (files.size === 0) fatal(`scanned zero source files under ${join(ROOT, SCAN_ROOT)}.`);
 
+// Consumers of a builder (C1): a function that spells a digest key outside every position the
+// walk reads builds a digest-keyed object another function can pass to a lookup, so a direct call
+// of it is one site of its caller. The callee resolves scope-aware — a local function, or a
+// named import of the builder's module. One level only: the caller needs its own entry, and a
+// caller of that caller is not followed (a builder reached by a method call, a namespace import
+// or as a value is the plan's SC6).
+const buildersByFn = new Map(builders.map((b) => [b.fn, b]));
+for (const b of buildersByFn.values()) {
+  for (const file of files.values()) {
+    if (!file.sf.getFullText().includes(b.name)) continue;
+    for (const call of file.sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+      const callee = unwrapExpression(call.getExpression());
+      if (callee?.getKind() !== SyntaxKind.Identifier) continue;
+      const isBuilder =
+        file.rel === b.rel
+          ? resolveLocalFunction(callee.getText(), callee, file.bindingsFor) === b.fn
+          : refersToImport(callee, file, moduleOf(b.rel), b.name);
+      if (!isBuilder) continue;
+      const at = attribute(call);
+      if (!at) {
+        failAt(file.rel, call, `call of ${b.name}, which builds a digest-keyed object (${b.rel}), cannot be attributed to a named function, method or exported const`);
+        continue;
+      }
+      const a = entryFor(file.rel, at, file);
+      a.sites += 1;
+      a.builderCalls.push({ line: call.getStartLineNumber(), name: b.name });
+      a.lines.push(call.getStartLineNumber());
+    }
+  }
+}
+
 // The modules the predicate and the pin resolve against must exist as declared.
 const fileByModule = (m) => [...files.values()].find((f) => moduleOf(f.rel) === m);
 const gateFile = fileByModule(GATE_MODULE);
@@ -1007,6 +1905,63 @@ if (!gateFile?.sf.getFunction(GATE_FN)?.hasExportKeyword()) fatal(`${GATE_MODULE
 const extFile = fileByModule(EXT_MODULE);
 if (!extFile?.sf.getFunction(EXT_FN)?.hasExportKeyword()) fatal(`${EXT_MODULE}.ts does not export function ${EXT_FN}.`);
 if (!fileByModule(EXT_TYPES_MODULE)?.sf.getVariableDeclaration(EXEMPTION_CONST)) fatal(`${EXT_TYPES_MODULE}.ts does not declare ${EXEMPTION_CONST}.`);
+
+// TOKEN_TABLE_NAMES (C3): raw-sql refuses these names to sqlIdentifier, so the list is the schema's token tables.
+function checkTokenTableList() {
+  const file = fileByModule(RAW_SQL_MODULE);
+  const decl = file?.sf.getVariableDeclaration(TOKEN_TABLE_LIST);
+  if (!decl?.getVariableStatement()?.hasExportKeyword()) fatal(`${RAW_SQL_MODULE}.ts does not export ${TOKEN_TABLE_LIST}: the list sqlIdentifier refuses.`);
+  let list = unwrapExpression(decl.getInitializer());
+  // The module freezes it through its captured alias (`freeze([...])`) or `Object.freeze([...])`.
+  if (list?.getKind() === SyntaxKind.CallExpression && list.getArguments().length === 1 && ["freeze", "Object.freeze"].includes(list.getExpression().getText())) {
+    list = unwrapExpression(list.getArguments()[0]);
+  }
+  if (list?.getKind() !== SyntaxKind.ArrayLiteralExpression) fatal(`${RAW_SQL_MODULE}.ts: ${TOKEN_TABLE_LIST} is not an array literal of string literals (optionally frozen).`);
+  const listed = new Set();
+  for (const el of list.getElements()) {
+    if (isStringish(el)) listed.add(el.getLiteralText());
+    else failAt(file.rel, el, `${TOKEN_TABLE_LIST} element is not a string literal`);
+  }
+  for (const name of [...TOKEN_TABLES].sort()) if (!listed.has(name)) failAt(file.rel, decl, `${TOKEN_TABLE_LIST} lacks ${name}, a token table of the schema`);
+  for (const name of [...listed].sort()) if (!TOKEN_TABLES.has(name)) failAt(file.rel, decl, `${TOKEN_TABLE_LIST} lists ${name}, which is not a token table of the schema`);
+}
+checkTokenTableList();
+
+// pgPools (C5): the files that can make a pg pool are a human-reviewed copy of the importers.
+for (const rel of [...poolImporters].sort()) {
+  if (!PG_POOL_ENTRIES.has(rel)) failures.push(`PG_POOL_UNLISTED: ${rel} imports createPool / createClient from pool-factory — list it in "pgPools" in ${MANIFEST_PATH} with a reason.`);
+}
+for (const [rel, entry] of PG_POOL_ENTRIES) {
+  if (!poolImporters.has(rel)) failures.push(`STALE_PG_POOL: ${rel} is in "pgPools" but imports neither createPool nor createClient from pool-factory.`);
+  else checkReason(`"pgPools" entry ${rel}`, entry);
+}
+
+// sqlObjects (C4): SQL files that define or copy what a query can reach without naming a digest column.
+const sqlFiles = sqlFilePaths();
+if (sqlFiles.migrations.length === 0) fatal(`no prisma/migrations/<name>/migration.sql under ${ROOT}: no SQL file was read, so no database object could be classified.`);
+const sqlQualifying = new Map();
+for (const rel of [...sqlFiles.migrations, ...sqlFiles.others]) {
+  const findings = sqlFileFindings(readFileSync(join(ROOT, rel), "utf8"));
+  if (findings.length > 0) sqlQualifying.set(rel, findings);
+}
+for (const [rel, findings] of sqlQualifying) {
+  const entry = SQL_OBJECT_ENTRIES.get(rel);
+  if (!entry) {
+    const why = [...new Map(findings.map((f) => [`line ${f.line}: ${f.why}`, 1])).keys()].join("; ");
+    failures.push(`SQL_OBJECT_UNLISTED: ${rel} — ${why}. List it in "sqlObjects" in ${MANIFEST_PATH} with a reason.`);
+  } else checkReason(`"sqlObjects" entry ${rel}`, entry);
+}
+for (const rel of SQL_OBJECT_ENTRIES.keys()) {
+  if (!sqlQualifying.has(rel)) failures.push(`STALE_SQL_OBJECT: ${rel} is in "sqlObjects" but no statement in it (or no such file) needs an entry.`);
+}
+
+// nonBearerHashFields (C4): an entry must still name a unique String ending in hash / digest that is no digest key.
+for (const [key, entry] of NON_BEARER_HASH_ENTRIES) {
+  const [model, field] = key.split(".");
+  const f = MODELS.get(model)?.get(field);
+  if (!f || f.type !== "String" || DIGEST_KEYS.has(field)) failures.push(`STALE_NON_BEARER_HASH: "${key}" is in "nonBearerHashFields" but names no non-digest String field.`);
+  else checkReason(`"nonBearerHashFields" entry ${key}`, entry);
+}
 
 // ─── Manifest adjudication ───────────────────────────────────
 
@@ -1074,9 +2029,17 @@ function isExportedConstRef(ref) {
 for (const [key, a] of analysed) {
   const entry = ENTRIES.get(key);
   const calls = a.sites;
-  const where = `${key} (lines ${a.lines.join(", ")})`;
+  const where = `${key} (lines ${[...a.lines].sort((x, y) => x - y).join(", ")})`;
   if (!entry) {
-    failures.push(`UNLISTED: ${where} — ${a.lookups} digest lookup(s), ${a.opaque.length} opaque site(s)${a.opaque.length ? `: ${a.opaque.join("; ")}` : ""}. Classify it in ${MANIFEST_PATH}.`);
+    // Floating keys and builder calls are named only when there are some; the counts stay separate from the lookups'.
+    const counts = [`${a.lookups} digest lookup(s)`, `${a.opaque.length} opaque site(s)`];
+    if (a.floating.length) counts.push(`${a.floating.length} floating key(s)`);
+    if (a.builderCalls.length) counts.push(`${a.builderCalls.length} builder call(s)`);
+    const details = [];
+    if (a.opaque.length) details.push(a.opaque.join("; "));
+    if (a.floating.length) details.push(`floating: ${a.floating.map((f) => `line ${f.line} ${f.label}`).join(", ")}`);
+    if (a.builderCalls.length) details.push(`builder calls: ${a.builderCalls.map((b) => `line ${b.line} ${b.name}`).join(", ")}`);
+    failures.push(`UNLISTED: ${where} — ${counts.join(", ")}${details.length ? `: ${details.join("; ")}` : ""}. Classify it in ${MANIFEST_PATH}.`);
     continue;
   }
   if (a.owners.size > 1) {
@@ -1087,11 +2050,9 @@ for (const [key, a] of analysed) {
     failures.push(`BAD_ENTRY: ${key} has class ${JSON.stringify(entry.class)}; expected one of ${[...CLASSES].join(", ")}.`);
     continue;
   }
-  if (typeof entry.reason !== "string" || entry.reason.trim().length < MIN_REASON) {
-    failures.push(`BAD_ENTRY: ${key} needs a reason of at least ${MIN_REASON} characters.`);
-  }
+  checkReason(key, entry);
   if (entry.calls !== calls) {
-    failures.push(`COUNT_MISMATCH: ${where} has ${calls} site(s) (${a.lookups} lookup, ${a.opaque.length} opaque call(s)); the manifest says ${entry.calls}.`);
+    failures.push(`COUNT_MISMATCH: ${where} has ${calls} site(s) (${a.lookups} lookup, ${a.opaque.length} opaque call(s), ${a.floating.length} floating key(s), ${a.builderCalls.length} builder call(s)); the manifest says ${entry.calls}.`);
   }
   if (a.opaque.length > 0 && entry.class !== "opaque-where") {
     failures.push(`OPAQUE_WHERE: ${key} has a position this gate cannot read (${a.opaque.join("; ")}) — a human classifies it as opaque-where.`);
@@ -1125,7 +2086,7 @@ for (const [key, a] of analysed) {
   }
 }
 for (const key of ENTRIES.keys()) {
-  if (!analysed.has(key)) failures.push(`STALE_ENTRY: ${key} is in the manifest but no digest lookup or opaque site is attributed to it.`);
+  if (!analysed.has(key)) failures.push(`STALE_ENTRY: ${key} is in the manifest but no digest lookup, opaque site, floating digest key or builder call is attributed to it.`);
 }
 
 // Model coverage: a token model no analysed lookup reaches is looked up some way this gate
@@ -1140,9 +2101,7 @@ for (const model of [...TOKEN_MODELS].sort()) {
 }
 for (const [model, entry] of MODEL_ENTRIES) {
   if (!TOKEN_MODELS.has(model)) failures.push(`BAD_ENTRY: "models" names ${model}, which is not a model declaring ${[...DIGEST_KEYS].join("/")}.`);
-  else if (typeof entry?.reason !== "string" || entry.reason.trim().length < MIN_REASON) {
-    failures.push(`BAD_ENTRY: "models" entry ${model} needs a reason of at least ${MIN_REASON} characters.`);
-  }
+  else checkReason(`"models" entry ${model}`, entry);
 }
 
 // I3: the exemption pin, exactly.
@@ -1156,7 +2115,7 @@ if (JSON.stringify(expected) !== JSON.stringify(actual)) {
 }
 
 console.log(
-  `check-bearer-passkey-gate: files=${files.size} token-models=${TOKEN_MODELS.size} analysed=${analysed.size} manifest=${ENTRIES.size} exemption-sites=${exemptionPairs.length}`,
+  `check-bearer-passkey-gate: files=${files.size} token-models=${TOKEN_MODELS.size} analysed=${analysed.size} manifest=${ENTRIES.size} exemption-sites=${exemptionPairs.length} digest-keys=${census.keys} placed=${census.placed} floating=${census.floating} sql-literals=${sqlCensus.literals} token-table-literals=${sqlCensus.naming} sql-files=${sqlFiles.migrations.length + sqlFiles.others.length} sql-qualifying=${sqlQualifying.size}`,
 );
 if (analysed.size === 0) fatal(`analysed zero functions: no digest lookup was found, so nothing was checked.`);
 

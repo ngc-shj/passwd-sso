@@ -1,5 +1,5 @@
 {
-  "$comment": "Classification of every function holding a tokenHash/codeHash digest lookup (any call whose argument has the key under a filter position, whatever its receiver) or a position this gate cannot read (opaque-where: a where on a token model, or an argument / select / include / data on a token model or a model with a relation to one). Enforced by scripts/checks/check-bearer-passkey-gate.mjs (plan: docs/archive/review/api-key-passkey-requirement-plan.md, C7). calls = the number of calls in the function that are a lookup or opaque. Keys are <repo path>#<function>. refresh-bound entries name lifetime as <repo path>#<exported const> and at least one inlineGate. models: a token model (tokenHash/codeHash column) that no analysed lookup reaches, keyed by model name with a reason; empty while every token model has one.",
+  "$comment": "Classification of every function holding a tokenHash/codeHash/replacedByHash digest lookup (any call whose argument has the key under a filter position, whatever its receiver), a position this gate cannot read (opaque-where: a where on a token model, an argument / select / include / data on a token model or a model with a relation to one, or an unpinned computed key in any filter), or a digest-key spelling the walk did not place (a floating key: a string in a list, a member read, a property outside a lookup, write or projection; or a direct call of a function that builds such an object). Enforced by scripts/checks/check-bearer-passkey-gate.mjs (plan: docs/archive/review/api-key-passkey-requirement-plan.md, C7). calls = the number of sites in the function: lookup calls, opaque calls, floating digest keys and builder calls, each counted once (a floating key inside a counted call of the same function adds none). Keys are <repo path>#<function>. refresh-bound entries name lifetime as <repo path>#<exported const> and at least one inlineGate. models: a token model (tokenHash/codeHash column) that no analysed lookup reaches, keyed by model name with a reason; empty while every token model has one. sqlObjects: SQL files (migrations, initdb, scripts/*.sql) that define or copy what a query can reach without naming a digest column, keyed by repo path with a reason (plan bearer-passkey-gate-coverage, C4). pgPools: the files importing createPool / createClient from src/lib/db/pool-factory, keyed by repo path with a reason (C5). nonBearerHashFields: unique String fields ending in hash / digest that are not bearer digests, keyed Model.field with a reason; empty today.",
   "models": {},
   "functions": {
     "src/lib/auth/tokens/api-key.ts#validateApiKey": {
@@ -43,11 +43,19 @@
     },
     "src/app/api/mobile/token/refresh/route.ts#handlePOST": {
       "class": "refresh-bound",
+      "calls": 2,
+      "refreshRoute": "src/app/api/mobile/token/refresh/route.ts",
+      "lifetime": "src/lib/validations/common.ts#EXTENSION_TOKEN_IDLE_TIMEOUT_MAX",
+      "inlineGate": "src/lib/auth/tokens/mobile-token.ts#refreshIosToken",
+      "reason": "iOS host refresh-token lookup; the rotation is gated inline in refreshIosToken (SC3), the refresh row lives at most the tenant idle limit, and the access row it mints is gated per use by validateExtensionToken. The second site is the row literal handed to refreshIosToken, which spells tokenHash outside any lookup."
+    },
+    "src/lib/auth/tokens/mobile-token.ts#refreshIosToken": {
+      "class": "refresh-bound",
       "calls": 1,
       "refreshRoute": "src/app/api/mobile/token/refresh/route.ts",
       "lifetime": "src/lib/validations/common.ts#EXTENSION_TOKEN_IDLE_TIMEOUT_MAX",
       "inlineGate": "src/lib/auth/tokens/mobile-token.ts#refreshIosToken",
-      "reason": "iOS host refresh-token lookup; the rotation is gated inline in refreshIosToken (SC3), the refresh row lives at most the tenant idle limit, and the access row it mints is gated per use by validateExtensionToken."
+      "reason": "iOS refresh rotation; no digest lookup: it reads oldRow.tokenHash (the row the route already looked up) only as the key of its retry cache. The mint is gated inline by passkeyEnforcementBlocks after replay and family-expiry checks and before issueIosToken."
     },
     "src/app/api/extension/token/refresh/route.ts#detectRefreshReplay": {
       "class": "exempt",
@@ -218,6 +226,53 @@
       "class": "opaque-where",
       "calls": 1,
       "reason": "Retention sweep: the computed select key is the entry's tenantRetentionColumn, a closed union of Tenant retention-day scalar columns from the retention registry; it selects, it never filters by a digest."
+    },
+    "src/lib/emergency-access/emergency-access-state.ts#hasResourceScope": {
+      "class": "exempt",
+      "calls": 1,
+      "reason": "Scope guard of transition / bulkTransition: reads whether the caller's where names an owner, grantee, email or tokenHash so an unscoped state change under bypass RLS is refused; no lookup, grants no API access."
+    },
+    "src/lib/audit/audit-logger.ts#METADATA_BLOCKLIST": {
+      "class": "exempt",
+      "calls": 1,
+      "reason": "Audit metadata blocklist: names tokenHash so the key is stripped from logged metadata; a list of keys to redact, not a lookup."
+    },
+    "src/lib/logger/redact-keys.ts#SECRET_REDACT_KEYS": {
+      "class": "exempt",
+      "calls": 2,
+      "reason": "Logger redaction list: names tokenHash and codeHash so pino redacts them; a list of keys to hide, not a lookup."
     }
-  }
+  },
+  "sqlObjects": {
+    "prisma/migrations/20260227050000_tenant_id_trigger_defaults_phase8/migration.sql": {
+      "reason": "Defines resolve_tenant_id_from_row (a row's tenant from its parent row, found by the user, owner, team, entry, share or grant id inside the row), enforce_tenant_id_from_context (fills or checks tenant_id against the app.tenant_id and bypass settings; for users it also creates a bootstrap tenant) and the owner-membership function, and attaches the trigger to every tenant table, token tables included. They read settings and parent ids, never a digest column, and look no token up."
+    },
+    "prisma/migrations/20260228020000_force_rls_and_scim_trigger_phase9/migration.sql": {
+      "reason": "Redefines resolve_tenant_id_from_row to add scim_group_mappings (scim_tokens is a name in the team-scoped list). It returns the tenant of a row's parent: the user (user_id, created_by_id), owner, team, entry, share or grant found by the id inside the row; no digest column is read and nothing is looked up by a token."
+    },
+    "prisma/migrations/20260321110000_convert_id_columns_to_uuid_type/migration.sql": {
+      "reason": "Re-creates resolve_tenant_id_from_row, enforce_tenant_id_from_context and ensure_tenant_owner_membership_after_user_insert with uuid casts after the id columns change type; same behaviour as phase 8 (a row's tenant from the user, owner, team, entry, share or grant id inside it, the app.tenant_id and bypass settings), token tables only as names in lists; no digest column, no token lookup."
+    },
+    "prisma/migrations/20261102000000_share_creator_admitted/migration.sql": {
+      "reason": "Defines share_creator_admitted(share id): it sets a call-scoped bypass for password_shares, team_password_entries and team_members, reads the one password_shares row by its id plus the team entry and the creator's membership, restores the settings and returns a boolean (may the creator still serve the share). It selects by id, never by the share's digest."
+    },
+    "prisma/migrations/20261108000000_share_admission_policy_and_personal_entry/migration.sql": {
+      "reason": "Replaces share_creator_admitted with two more serve-time rules: the team policy (sharing allowed, share password required, read from team_policies and the share's access_password_hash being null) and the personal entry's trashed state (password_entries). Still reads password_shares by id and returns a boolean; no digest column is named."
+    }
+  },
+  "pgPools": {
+    "src/lib/prisma.ts": {
+      "reason": "The app's Prisma client: builds the pool and hands it to createPrismaClient; the file never calls pool.query."
+    },
+    "src/workers/audit-anchor-publisher.ts": {
+      "reason": "Audit-anchor worker: builds a pool for createPrismaClient and ends it on shutdown; no direct pool query."
+    },
+    "src/workers/audit-outbox-worker.ts": {
+      "reason": "Audit outbox worker: builds a pool for createPrismaClient and ends it on shutdown; no direct pool query."
+    },
+    "src/workers/retention-gc-worker/index.ts": {
+      "reason": "Retention-GC worker: builds a pool for createPrismaClient and ends it on shutdown; no direct pool query."
+    }
+  },
+  "nonBearerHashFields": {}
 }
