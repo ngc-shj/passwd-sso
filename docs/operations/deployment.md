@@ -184,7 +184,7 @@ secret").
 3. Run the new bootstrap through ECS Exec on the migrate task definition step 1
    just registered (`terraform output -raw migrate_task_definition_arn` now names
    it), exactly as in `infra/terraform/README.md` "Creating the DB roles on RDS",
-   with all four passwords exported.
+   with all five passwords exported.
 4. Re-run `./scripts/deploy.sh`. `prisma migrate deploy` is a no-op, the audit
    passes, and the services roll.
 
@@ -680,10 +680,11 @@ The application uses these database roles with separated privileges:
 | Role | Privileges | Purpose |
 |------|-----------|---------|
 | `passwd_user` (or equivalent) | DDL-capable (`rds_superuser`-class on RDS) | Table owner, migrations (`prisma migrate deploy`), one-shot data migrations |
-| `passwd_app` (or equivalent) | NOSUPERUSER NOBYPASSRLS | App runtime (Next.js), RLS enforced. Also the audit-chain verify worker's role on ECS, which needs only reads of `tenants`, `audit_chain_anchors` and `audit_logs` but can read every table the app reads and holds every write the app has; a dedicated read-only role is a follow-up (SC3) |
+| `passwd_app` (or equivalent) | NOSUPERUSER NOBYPASSRLS | App runtime (Next.js), RLS enforced |
 | `passwd_outbox_worker` (or equivalent) | NOSUPERUSER NOBYPASSRLS; SELECT/UPDATE/DELETE on `audit_outbox`, INSERT on `audit_logs`, SELECT on `tenants` | Audit outbox drain worker (least privilege) |
 | `passwd_retention_gc_worker` (or equivalent) | NOSUPERUSER NOBYPASSRLS; scoped DELETE/SELECT on the retention-swept tables | Retention GC worker (least privilege) |
 | `passwd_anchor_publisher` | NOSUPERUSER NOBYPASSRLS; SELECT + column-scoped UPDATE on `audit_chain_anchors`, INSERT on `audit_outbox`, SELECT/INSERT/UPDATE on `system_settings`, SELECT on `tenants` | Audit-anchor publisher (least privilege) |
+| `passwd_audit_chain_verifier` | NOSUPERUSER NOBYPASSRLS; column-level SELECT on eleven columns of `tenants` (`id`), `audit_chain_anchors` and `audit_logs`, EXECUTE on the two `rls_bypass_*` functions, connection limit 10; no write of any kind (migration `20261111000000`) | Audit-chain verify worker (read-only) |
 | `passwd_dcr_cleanup_worker` | **Retired** — NOLOGIN, no password, nothing beyond `PUBLIC` (migration `20261023010000`) | None. Kept only so older dumps that name it still restore; the grant audit asserts the retired state |
 
 > **`rds_superuser` is a role MEMBERSHIP, not a role ATTRIBUTE.** On RDS the
@@ -709,7 +710,7 @@ The application uses these database roles with separated privileges:
 On AWS RDS these roles are NOT auto-created (the `infra/postgres/initdb/*.sql`
 scripts run only on the Docker Postgres image) — create them during bootstrap,
 before the first migration, with `scripts/bootstrap-rds-roles.mjs`, which
-converges the four login roles above (not `passwd_user`, not the retired DCR
+converges the five login roles above (not `passwd_user`, not the retired DCR
 role). See `infra/terraform/README.md` "First-time bootstrap".
 
 ### Ownership of role attributes vs table ACLs
@@ -720,7 +721,7 @@ These are owned by different things, which matters when auditing:
 |--------|-------|------------------------|
 | Role attributes (`NOSUPERUSER`, `NOBYPASSRLS`, `NOREPLICATION`, …), password, role memberships | `scripts/bootstrap-rds-roles.mjs` | Yes — always re-applied and asserted. As a non-superuser (the RDS master) it cannot write `SUPERUSER` / `BYPASSRLS` / `REPLICATION`: those are checked, and the run stops before sending the password if one is set |
 | `passwd_app` schema + table ACLs | `scripts/bootstrap-rds-roles.mjs` | Yes — revoke-then-grant |
-| Worker table ACLs (`passwd_outbox_worker`, `passwd_retention_gc_worker`, `passwd_anchor_publisher`) | The Prisma migrations that create each table | **No** |
+| Worker table ACLs (`passwd_outbox_worker`, `passwd_retention_gc_worker`, `passwd_anchor_publisher`, `passwd_audit_chain_verifier`) | The Prisma migrations that create each table | **No** |
 | The retired `passwd_dcr_cleanup_worker` | Migration `20261023010000_retire_dcr_cleanup_worker_role` | n/a — asserted by the audit (`RETIRED_ROLES`) |
 
 The worker table ACLs cannot be converged by the bootstrap: it runs *before* the
@@ -743,8 +744,8 @@ MIGRATION_DATABASE_URL=<superuser-url> node scripts/audit-db-grants.mjs
 ```
 
 It diffs the live ACLs of every audited role (`AUDITED_ROLES`: `passwd_app`,
-`passwd_outbox_worker`, `passwd_retention_gc_worker`, `passwd_anchor_publisher`
-and the retired `passwd_dcr_cleanup_worker`) against
+`passwd_outbox_worker`, `passwd_retention_gc_worker`, `passwd_anchor_publisher`,
+`passwd_audit_chain_verifier` and the retired `passwd_dcr_cleanup_worker`) against
 `scripts/checks/db-grants-manifest.json` and exits non-zero on any
 `UNEXPECTED_GRANT` (over-privilege) or `MISSING_GRANT` (migrations not applied).
 
@@ -839,6 +840,7 @@ GRANT EXECUTE ON FUNCTION public.share_creator_admitted(uuid) TO passwd_app;
 - `MIGRATION_DATABASE_URL` — Prisma CLI connection (SUPERUSER role, e.g. `passwd_user`)
 - `OUTBOX_WORKER_DATABASE_URL` — audit outbox worker connection (least-privilege role, e.g. `passwd_outbox_worker`). Set the worker role password with `scripts/set-outbox-worker-password.sh`.
 - `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` — audit-anchor publisher connection (`passwd_anchor_publisher`). On RDS the role's password is set by `scripts/bootstrap-rds-roles.mjs` from `PASSWD_ANCHOR_PUBLISHER_PASSWORD`.
+- `AUDIT_CHAIN_VERIFY_DATABASE_URL` — audit-chain verify worker connection (`passwd_audit_chain_verifier`; required in production, no `DATABASE_URL` fallback). On RDS the role's password is set by `scripts/bootstrap-rds-roles.mjs` from `PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD`; on compose, by `infra/postgres/initdb/05-create-audit-chain-verifier-role.sql` from the same variable (unset, the role is `NOLOGIN`), or later with `scripts/set-audit-chain-verifier-password.sh` plus `ALTER ROLE passwd_audit_chain_verifier WITH LOGIN`.
 
 The Docker Compose dev setup enforces the same role separation: the `app` service connects as `passwd_app` (NOSUPERUSER, NOBYPASSRLS) while the `migrate` service connects as `passwd_user` (SUPERUSER). RLS is enforced in all environments.
 

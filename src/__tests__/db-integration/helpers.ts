@@ -27,7 +27,7 @@ import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
 
 // ─── Role connection strings ────────────────────────────────────
 
-type TestRole = "superuser" | "app" | "worker" | "retention-gc-worker" | "anchor-publisher";
+type TestRole = "superuser" | "app" | "worker" | "retention-gc-worker" | "anchor-publisher" | "audit-chain-verifier";
 
 function getConnectionString(role: TestRole): string {
   const base = process.env.DATABASE_URL;
@@ -69,6 +69,14 @@ function getConnectionString(role: TestRole): string {
           "//passwd_anchor_publisher:passwd_anchor_publisher_pass@",
         )
       );
+    case "audit-chain-verifier":
+      return (
+        process.env.AUDIT_CHAIN_VERIFY_DATABASE_URL ??
+        base.replace(
+          /\/\/[^:]+:[^@]+@/,
+          "//passwd_audit_chain_verifier:passwd_audit_chain_verifier_pass@",
+        )
+      );
   }
 }
 
@@ -88,6 +96,11 @@ function getConnectionString(role: TestRole): string {
  */
 export function appConnectionString(): string {
   return getConnectionString("app");
+}
+
+/** The connection string for the audit-chain verify worker's read-only role. */
+export function auditChainVerifierConnectionString(): string {
+  return getConnectionString("audit-chain-verifier");
 }
 
 /**

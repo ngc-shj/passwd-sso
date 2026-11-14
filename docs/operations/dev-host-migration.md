@@ -264,6 +264,7 @@ REVOKE CONNECT ON DATABASE passwd_sso FROM PUBLIC;
 GRANT CONNECT ON DATABASE passwd_sso TO passwd_app;
 GRANT CONNECT ON DATABASE passwd_sso TO passwd_outbox_worker;
 GRANT CONNECT ON DATABASE passwd_sso TO passwd_anchor_publisher;
+GRANT CONNECT ON DATABASE passwd_sso TO passwd_audit_chain_verifier;
 GRANT CONNECT ON DATABASE passwd_sso TO passwd_retention_gc_worker;
 COMMIT;
 SQL

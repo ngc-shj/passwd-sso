@@ -256,3 +256,35 @@ Before reporting complete: `npx vitest run`, `npx next build`, `npm run test:int
 | C10 | Error logging at best-effort catches | locked |
 | C11 | Per-grant evidence record | locked |
 | C12 | Documentation | locked |
+
+## Implementation Checklist
+
+Derived at `e76a958f8` (Phase 2-1). File sets are the member sets stated in each contract; this section adds order, reuse and gate parity.
+
+### Batches
+
+1. **#947 (C1-C4).** Role migration, C2's surfaces, worker env and wiring, verifier cells and boot cell. The role is given LOGIN and the test password in the dev cluster once the migration has run (E5).
+2. **Deploy plumbing (C9, C5's audit).** Preflight decision function and script, `Dockerfile`, `check-runtime-image-assets.mjs`; then the `ecs.tf` migrate command, `deploy.sh` forwarding, the mode and `client_min_messages` checks in `audit-db-grants.mjs`, wiring tests.
+3. **The flip (C5-C7).** Flip migration, `setup.ts`, `expectBypassRefusal`, the converted cells, rls-smoke and the negative test. **D1's stop rule is evaluated here**, on the first full enforced run.
+4. **RDS-shaped cells and evidence (C8, C11).** Probe-role helper, definer cells, script cells, the invalidation cell; recorder, consumer, committed list, CI step.
+5. **Logging and docs (C10, C12).** Catch sites; documentation; manual-test artifact; deviation log.
+
+### Reuse
+
+- `createPool`, `createPrismaClient`, `registerBypassNoticeSink` (`src/lib/db/pool-factory.ts`).
+- `assertRlsApplies`, `createPrismaForRole`, `getConnectionString`, `expectBypassNotices`, `setBypassRlsGucs`, `collectNotices` (`src/__tests__/db-integration/helpers.ts`).
+- `pgErrorCode` for SQLSTATE (the one parser), `errorLogFields`, `getLogger`.
+- `set_role_password` (`scripts/lib/set-role-password.sh`); `ROLES`, `grantWorkerSchemaPrivileges`, `ROUTINE_EXECUTE` (`bootstrap-rds-roles.mjs`); `loadDeniedPolicy` (`scripts/lib/denied-privileges.mjs`).
+- The marked-block reader the backfill cells use (`readBackfillBlock`) for C1's convergence block.
+- The HCL helpers of `src/__tests__/infra/audit-anchor-wiring.test.ts` and `deploy-rollback.test.mjs` for the wiring tests.
+- `rls-verify-run.sh` (`rls_verify_check`) for every rls-smoke runner.
+
+### CI gate parity
+
+`extract-ci-checks.sh` lists 21 gates. `scripts/pre-pr.sh` runs them, except those that need a live database or external tooling, which are run by hand before push:
+
+- the integration suite (`npm run test:integration`, on this worktree's database);
+- rls-smoke and the negative test (through `pre-pr.sh`'s rls section, against the dev container);
+- `terraform fmt -check -recursive`, when `terraform` is installed; otherwise a deferred parity gap (the wiring tests parse the HCL).
+
+New checks added by this plan run in existing jobs: unit tests in the vitest job, integration cells and the evidence consumer in `ci-integration.yml`, rls-smoke changes in `ci.yml`'s `rls-smoke`. None joins a job that skips `prisma generate` unless it imports nothing generated.

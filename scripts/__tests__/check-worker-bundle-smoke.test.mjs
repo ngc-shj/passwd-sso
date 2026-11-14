@@ -229,7 +229,7 @@ describe("check-worker-bundle-smoke.sh: docker runner", () => {
     expect(calls).toHaveLength(4);
     expect(calls).toContainEqual([
       "run", "--rm", "--network", "none",
-      "-e", "AUDIT_CHAIN_VERIFY_DATABASE_URL=postgresql://passwd_app:smoke@127.0.0.1:5432/passwd_sso",
+      "-e", "AUDIT_CHAIN_VERIFY_DATABASE_URL=postgresql://passwd_audit_chain_verifier:smoke@127.0.0.1:5432/passwd_sso",
       "passwd-sso:scan", "node", "dist/audit-chain-verify-worker.js", "--validate-env-only",
     ]);
     for (const task of Object.values(SMOKE_MAP.tasks)) {

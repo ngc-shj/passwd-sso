@@ -261,12 +261,36 @@ describe("committed manifest and role lists", () => {
     expect(manifest.grants).toContain("ROLEATTR:passwd_dcr_cleanup_worker\trolcanlogin\tfalse");
   });
 
+  it("records the audit-chain verifier as LOGIN, connection-limited, holding exactly its eleven columns", () => {
+    const rows = manifest.grants.filter((k) => k.includes("passwd_audit_chain_verifier"));
+    expect(manifest.grants).toContain("ROLEATTR:passwd_audit_chain_verifier\trolcanlogin\ttrue");
+    expect(manifest.grants).toContain("ROLEATTR:passwd_audit_chain_verifier\trolconnlimit\t10");
+    expect(rows.filter((k) => k.startsWith("COLUMN:"))).toEqual(
+      [
+        "public.audit_chain_anchors.chain_seq",
+        "public.audit_chain_anchors.prev_hash",
+        "public.audit_chain_anchors.tenant_id",
+        "public.audit_logs.chain_prev_hash",
+        "public.audit_logs.chain_seq",
+        "public.audit_logs.created_at",
+        "public.audit_logs.event_hash",
+        "public.audit_logs.id",
+        "public.audit_logs.metadata",
+        "public.audit_logs.tenant_id",
+        "public.tenants.id",
+      ].map((c) => `COLUMN:passwd_audit_chain_verifier\t${c}\tSELECT`),
+    );
+    // No table-level, sequence or default-ACL grant: columns only.
+    expect(rows.filter((k) => /^(TABLE|SEQUENCE|DEFAULTACL):/.test(k))).toEqual([]);
+  });
+
   it("converges exactly the audited roles that are not retired", () => {
     const converged = ROLES.map((r) => r.name).sort();
     const expected = AUDITED_ROLES.filter((r) => !RETIRED_ROLES.includes(r)).sort();
     expect(converged).toEqual(expected);
     // Named, so shrinking both lists together cannot pass.
     expect(converged).toContain("passwd_anchor_publisher");
+    expect(converged).toContain("passwd_audit_chain_verifier");
     expect(RETIRED_ROLES).toContain("passwd_dcr_cleanup_worker");
   });
 });

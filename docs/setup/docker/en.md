@@ -131,6 +131,7 @@ Set the following values:
 | `PASSWD_OUTBOX_WORKER_PASSWORD` | Password for the `passwd_outbox_worker` DB role (set during `initdb`). Used by `docker-compose` to wire `OUTBOX_WORKER_DATABASE_URL`. Required when running the audit-outbox-worker. Use `scripts/set-outbox-worker-password.sh` to rotate on existing clusters. | `openssl rand -hex 24` |
 | `PASSWD_RETENTION_GC_WORKER_PASSWORD` | Password for the `passwd_retention_gc_worker` DB role (set during `initdb`). Used by `docker-compose` to wire `RETENTION_GC_DATABASE_URL`. Required when running the retention-gc-worker. Use `scripts/set-retention-gc-worker-password.sh` to rotate on existing clusters. | `openssl rand -hex 24` |
 | `PASSWD_ANCHOR_PUBLISHER_PASSWORD` | Password for the `passwd_anchor_publisher` DB role (set during `initdb`; unset, the role is created `NOLOGIN`). Must match `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL`. Use `scripts/set-audit-anchor-publisher-password.sh` to rotate on existing clusters. | `openssl rand -hex 24` |
+| `PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD` | Password for the `passwd_audit_chain_verifier` DB role, the audit-chain verify worker's read-only role (set during `initdb`; unset, the role is created `NOLOGIN`). Must match `AUDIT_CHAIN_VERIFY_DATABASE_URL`. Use `scripts/set-audit-chain-verifier-password.sh` to rotate on existing clusters. | `openssl rand -hex 24` |
 
 > **Upgrading from a pre-2026-05-16 deployment**: `docker-compose.yml` and
 > `docker-compose.override.yml` previously fell back to the public default
@@ -153,8 +154,9 @@ Set the following values:
 >    `openssl rand -hex 24`, write them to `.env`, then set each role to
 >    match. For the worker roles use the dedicated rotation scripts
 >    `scripts/set-outbox-worker-password.sh`,
->    `scripts/set-retention-gc-worker-password.sh` and
->    `scripts/set-audit-anchor-publisher-password.sh`, which send a verifier,
+>    `scripts/set-retention-gc-worker-password.sh`,
+>    `scripts/set-audit-anchor-publisher-password.sh` and
+>    `scripts/set-audit-chain-verifier-password.sh`, which send a verifier,
 >    never the password. For `passwd_user` and `passwd_app`, use psql's
 >    `\password <role>` in an interactive session after
 >    `SET password_encryption = 'scram-sha-256';` and a `SET … ;` for each setting

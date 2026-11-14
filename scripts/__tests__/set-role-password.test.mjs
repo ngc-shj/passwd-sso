@@ -1,5 +1,5 @@
 /**
- * The three scripts/set-*-password.sh (all through scripts/lib/set-role-password.sh):
+ * The four scripts/set-*-password.sh (all through scripts/lib/set-role-password.sh):
  * the server receives a SCRAM verifier of exactly the password read from stdin,
  * derived with the server's scram_iterations, after the session's statement
  * logging is turned off — and the password reaches no argv, environment or output.
@@ -27,6 +27,7 @@ const MEMBERS = [
   ["set-outbox-worker-password.sh", "passwd_outbox_worker"],
   ["set-retention-gc-worker-password.sh", "passwd_retention_gc_worker"],
   ["set-audit-anchor-publisher-password.sh", "passwd_anchor_publisher"],
+  ["set-audit-chain-verifier-password.sh", "passwd_audit_chain_verifier"],
 ];
 
 describe("the set-*-password.sh member set", () => {

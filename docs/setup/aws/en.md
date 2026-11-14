@@ -76,9 +76,10 @@ Store these in Secrets Manager:
 - `JACKSON_API_KEY` (passed to the Jackson container as `JACKSON_API_KEYS` — note the trailing `S`)
 - `PASSWD_OUTBOX_WORKER_PASSWORD` (sets the `passwd_outbox_worker` DB role password; on AWS rotate it by re-running `scripts/bootstrap-rds-roles.mjs` with the new value — the image has no `psql`, which `scripts/set-*-password.sh` need)
 - `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` (least-privilege role `passwd_anchor_publisher` — used by audit-anchor-publisher; in production it has no `DATABASE_URL` fallback)
+- `AUDIT_CHAIN_VERIFY_DATABASE_URL` (read-only role `passwd_audit_chain_verifier` — used by audit-chain-verify-worker; in production it has no `DATABASE_URL` fallback)
 - `AUDIT_ANCHOR_SIGNING_KEY`, `AUDIT_ANCHOR_TAG_SECRET` (mapped into the publisher task only; the app no longer receives them)
 - `DEPLOYMENT_ID` (a UUID naming this deployment in every manifest; publisher task only — see [Audit anchor publisher](#audit-anchor-publisher))
-- `PASSWD_ANCHOR_PUBLISHER_PASSWORD` is not stored on its own: it is an input to `scripts/bootstrap-rds-roles.mjs` only, taken from the userinfo of `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` (a second stored copy could drift from the URL)
+- `PASSWD_ANCHOR_PUBLISHER_PASSWORD` is not stored on its own: it is an input to `scripts/bootstrap-rds-roles.mjs` only, taken from the userinfo of `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` (a second stored copy could drift from the URL). `PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD` is the same, taken from `AUDIT_CHAIN_VERIFY_DATABASE_URL`
 
 Optional:
 - `AUTH_JACKSON_CONNECTIONS` (further Jackson connections, one provider `saml-jackson-<id>` each; Terraform reads it only with `enable_jackson_connections = true`)
@@ -112,7 +113,8 @@ postgresql://USER:PASSWORD@HOST:5432/DBNAME?sslmode=verify-full&sslrootcert=/app
 
 **Every** DB URL that points at RDS needs those two parameters — `DATABASE_URL`,
 `MIGRATION_DATABASE_URL`, `OUTBOX_WORKER_DATABASE_URL`,
-`RETENTION_GC_DATABASE_URL`, `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL`, and
+`RETENTION_GC_DATABASE_URL`, `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL`,
+`AUDIT_CHAIN_VERIFY_DATABASE_URL`, and
 Jackson's `DB_URL`. Two independent reasons:
 
 - RDS PostgreSQL 15+ ships `rds.force_ssl = 1`, so a plaintext connection is
@@ -214,12 +216,12 @@ populating the secret keys below before apply.
 | `*-audit-outbox-worker` | `node dist/audit-outbox-worker.js` | `OUTBOX_WORKER_DATABASE_URL` (`passwd_outbox_worker`) |
 | `*-retention-gc-worker` | `node dist/retention-gc-worker.js` | `RETENTION_GC_DATABASE_URL` (`passwd_retention_gc_worker`) |
 | `*-audit-anchor-publisher` | `node dist/audit-anchor-publisher.js` | `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` (`passwd_anchor_publisher`) |
-| `*-audit-chain-verify-worker` | `node dist/audit-chain-verify-worker.js` | the app secret's `DATABASE_URL`, as `AUDIT_CHAIN_VERIFY_DATABASE_URL` (`passwd_app`) |
+| `*-audit-chain-verify-worker` | `node dist/audit-chain-verify-worker.js` | `AUDIT_CHAIN_VERIFY_DATABASE_URL` (`passwd_audit_chain_verifier`) |
 
-The verify worker connects as `passwd_app` and so holds far more than it uses:
-it only reads `tenants`, `audit_chain_anchors` and `audit_logs`, but the role
-reads every table the app reads and keeps every write the app has. A dedicated
-read-only role is a follow-up (SC3). It has no task role, so it holds no AWS
+The verify worker connects as `passwd_audit_chain_verifier`, which holds
+column-level `SELECT` on the eleven columns its statements name (`tenants`,
+`audit_chain_anchors`, `audit_logs`) and nothing else. In production it has no
+`DATABASE_URL` fallback. It has no task role, so it holds no AWS
 credentials.
 
 Without audit-outbox-worker, `audit_outbox` rows accumulate as `PENDING` and

@@ -123,6 +123,9 @@ jobs:
               # provider wiring whose security rests on what that probe measures.
               - 'docker-compose.yml'
               - 'infra/terraform/**'
+              # The initdb role files whose creation statements the integration
+              # suite replays and whose role set it pins.
+              - 'infra/postgres/**'
               - 'src/auth.ts'
               - 'src/auth.config.ts'
               - 'src/app/\[locale\]/auth/signin/**'
@@ -193,6 +196,7 @@ jobs:
       PASSWD_OUTBOX_WORKER_PASSWORD: passwd_outbox_pass
       PASSWD_RETENTION_GC_WORKER_PASSWORD: passwd_retention_gc_pass
       PASSWD_ANCHOR_PUBLISHER_PASSWORD: passwd_anchor_publisher_pass
+      PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD: passwd_audit_chain_verifier_pass
       # bootstrap-rds-roles.integration.test.ts T11 replays set-*-password.sh
       # through whichever psql it finds first: the host client, else the
       # compose db service. Pinned so a runner without the client is a red
@@ -256,6 +260,9 @@ jobs:
 
           -- passwd_anchor_publisher: created by migration without password; set it now.
           ALTER ROLE passwd_anchor_publisher WITH LOGIN PASSWORD '${PASSWD_ANCHOR_PUBLISHER_PASSWORD}';
+
+          -- passwd_audit_chain_verifier: created by migration without password; set it now.
+          ALTER ROLE passwd_audit_chain_verifier WITH LOGIN PASSWORD '${PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD}';
 
           -- passwd_app: not created by any migration (lives in initdb only).
           -- Replicate the role + grants the integration tests rely on.

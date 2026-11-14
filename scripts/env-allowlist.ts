@@ -234,6 +234,30 @@ export const ALLOWLIST: readonly AllowlistEntry[] = [
   },
   {
     type: "literal",
+    key: "PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD",
+    justification:
+      "Password for the passwd_audit_chain_verifier NOSUPERUSER DB role used by the audit-chain verify worker. " +
+      "Consumed by docker-compose (forwarded, optional, to the db service for initdb) and by " +
+      "scripts/bootstrap-rds-roles.mjs on RDS. For existing clusters the same value is given to " +
+      "scripts/set-audit-chain-verifier-password.sh on stdin. Not read by the Next.js app.",
+    consumers: [
+      "docker-compose.yml",
+      "infra/postgres/initdb",
+      "scripts/set-audit-chain-verifier-password.sh",
+      "scripts/bootstrap-rds-roles.mjs",
+    ],
+    reviewedAt: "2026-11-14",
+    includeInExample: true,
+    description:
+      "Password for the passwd_audit_chain_verifier least-privilege DB role.\n" +
+      "Used by infra/postgres/initdb to create the role on first boot; unset, the\n" +
+      "role is created NOLOGIN (no published fallback password). Must match the\n" +
+      "password in AUDIT_CHAIN_VERIFY_DATABASE_URL.\n" +
+      "Generate with: openssl rand -hex 24",
+    secret: true,
+  },
+  {
+    type: "literal",
     key: "NEXT_RUNTIME",
     justification:
       "Provided by the Next.js framework at runtime; user configuration has no effect. " +

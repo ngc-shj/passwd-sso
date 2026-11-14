@@ -10,10 +10,14 @@
  *
  * Process lifecycle: long-running (sleep TICK_INTERVAL_MS between rounds).
  * Run as `npm run worker:audit-chain-verify` or `audit-chain-verify-worker`
- * docker-compose service. Uses the standard prisma client (passwd_app role).
+ * docker-compose service. Connects as passwd_audit_chain_verifier (#947), which
+ * holds column-level SELECT on the eleven columns these statements name and
+ * nothing else: no write, no other column or table. In production
+ * AUDIT_CHAIN_VERIFY_DATABASE_URL is required with no DATABASE_URL fallback — a
+ * fallback would silently reinstate passwd_app. A query naming another column
+ * fails with 42501 until a migration grants it.
  *
- * That role retains SELECT on audit_logs after the C13 REVOKE, but SELECT
- * PRIVILEGE IS NOT RLS VISIBILITY: passwd_app is NOBYPASSRLS, and both
+ * SELECT on audit_logs is not RLS visibility: the role is NOBYPASSRLS, and both
  * audit_logs and audit_chain_anchors are FORCE ROW LEVEL SECURITY with
  * `rls_bypass_admits('<table>') OR tenant_id = (SELECT current_setting('app.tenant_id', true)::uuid)`.
  * With the GUC unset the predicate is NULL and every read returns zero rows
@@ -520,6 +524,18 @@ export async function runTick(
   );
 }
 
+/**
+ * The variable the worker's connection string is read from: only
+ * AUDIT_CHAIN_VERIFY_DATABASE_URL in production, where a DATABASE_URL fallback
+ * would connect as passwd_app; elsewhere that one when set, else DATABASE_URL.
+ */
+function databaseUrlName(env: NodeJS.ProcessEnv): "AUDIT_CHAIN_VERIFY_DATABASE_URL" | "DATABASE_URL" {
+  if (env.NODE_ENV === "production" || env.AUDIT_CHAIN_VERIFY_DATABASE_URL !== undefined) {
+    return "AUDIT_CHAIN_VERIFY_DATABASE_URL";
+  }
+  return "DATABASE_URL";
+}
+
 export interface EnvIssue {
   path: string;
   code: "missing" | "invalid_url" | "not_positive_finite" | "not_positive_integer";
@@ -532,7 +548,7 @@ export interface EnvIssue {
  */
 export function validateWorkerEnv(env: NodeJS.ProcessEnv): EnvIssue[] {
   const issues: EnvIssue[] = [];
-  const urlName = env.AUDIT_CHAIN_VERIFY_DATABASE_URL !== undefined ? "AUDIT_CHAIN_VERIFY_DATABASE_URL" : "DATABASE_URL";
+  const urlName = databaseUrlName(env);
   const url = env[urlName];
   if (!url) {
     issues.push({ path: "AUDIT_CHAIN_VERIFY_DATABASE_URL", code: "missing" });
@@ -585,11 +601,13 @@ async function main(): Promise<void> {
     console.log(JSON.stringify({ level: "info", msg: "env validation passed" }));
     process.exit(0);
   }
-  const databaseUrl = process.env.AUDIT_CHAIN_VERIFY_DATABASE_URL ?? process.env.DATABASE_URL;
+  const databaseUrl = process.env[databaseUrlName(process.env)];
   if (!databaseUrl) process.exit(1); // refused by validateWorkerEnv above
 
   registerBypassNoticeSink(stderrBypassNoticeSink);
-  const pool = createPool({ connectionString: databaseUrl });
+  // Two connections: a rolling deploy overlaps two tasks per desired task, and
+  // the role's CONNECTION LIMIT of 10 (migration 20261111000000) must hold.
+  const pool = createPool({ connectionString: databaseUrl, max: 2 });
   const prisma = createPrismaClient(pool);
 
   const states = new Map<string, TenantState>();

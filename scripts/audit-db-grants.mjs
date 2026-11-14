@@ -61,6 +61,7 @@ const AUDITED_ROLES = [
   "passwd_outbox_worker",
   "passwd_retention_gc_worker",
   "passwd_anchor_publisher",
+  "passwd_audit_chain_verifier",
   "passwd_dcr_cleanup_worker",
 ];
 
@@ -116,7 +117,8 @@ const TABLE_PRIVILEGES = ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "R
  *   DEFAULTACL:<owner>\t<schema>\t<type>\t<acl>   pre-authorises objects that do
  *                                                 not exist yet
  *   ROLEATTR:<role>\t<attr>\t<value>              SUPERUSER/BYPASSRLS/REPLICATION/
- *                                                 CREATEDB/CREATEROLE/LOGIN
+ *                                                 CREATEDB/CREATEROLE/LOGIN, and
+ *                                                 the connection limit (rolconnlimit)
  *   ROLESETTING:<role|*>\t<db|*>\t<name>=<value>  a per-role / per-database
  *                                                 default GUC (ALTER ROLE … SET,
  *                                                 ALTER DATABASE … SET); `*` is
@@ -285,7 +287,7 @@ async function readLiveGrants(client) {
   //    the bootstrap-time convergence durable.
   const { rows: attrRows } = await client.query(
     `SELECT rolname, rolsuper, rolbypassrls, rolcreatedb, rolcreaterole,
-            rolreplication, rolcanlogin
+            rolreplication, rolcanlogin, rolconnlimit
        FROM pg_roles WHERE rolname = ANY($1)`,
     [AUDITED_ROLES],
   );

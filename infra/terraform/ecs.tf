@@ -688,11 +688,11 @@ resource "aws_ecs_task_definition" "audit_chain_verify_worker" {
           awslogs-stream-prefix = "ecs"
         }
       }
-      # Connects as passwd_app (the app secret's DATABASE_URL), which reads
-      # every table, not only the chain — a dedicated read-only role is a
-      # follow-up.
+      # Connects as passwd_audit_chain_verifier (the app secret's
+      # AUDIT_CHAIN_VERIFY_DATABASE_URL), which reads eleven columns of three
+      # tables and writes nothing.
       secrets = [
-        { name = "AUDIT_CHAIN_VERIFY_DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:DATABASE_URL::" },
+        { name = "AUDIT_CHAIN_VERIFY_DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUDIT_CHAIN_VERIFY_DATABASE_URL::" },
       ]
     }
   ])
