@@ -95,13 +95,14 @@ built with `defineGrant(purpose, models)`. `withBypassRls(prisma, fn, grant)` an
 `app.bypass_tables` GUC, and every RLS policy admits a bypassed row only through
 `public.rls_bypass_admits('<its own table>')`.
 
-- **Runtime (database), report mode:** a bypassed statement that examines a row of a table outside
-  its grant is admitted, and the database raises
-  `WARNING rls_bypass_not_granted table=<t> purpose=<p>`. The pool listener in
-  `src/lib/db/pool-factory.ts` logs it as `_logType: "rls.bypass_not_granted"`, and CloudWatch
-  counts it (`RlsBypassNotGranted`). Refusing such a statement (enforce mode) is a separate,
-  later step (#911). Until then the grant is observed, not enforced. A statement that examines no
-  row raises nothing. FK cascades, and `SECURITY DEFINER` bodies owned by an RLS-exempt role, are
+- **Runtime (database), enforcing:** a bypassed statement that examines a row of a table outside
+  its grant raises
+  `WARNING rls_bypass_not_granted table=<t> purpose=<p>` and is then refused with SQLSTATE 42501
+  (`RLS_BYPASS_NOT_GRANTED: <t>`), because `public.rls_bypass_enforced()` returns true. The pool
+  listener in `src/lib/db/pool-factory.ts` logs the WARNING as
+  `_logType: "rls.bypass_not_granted"`, and CloudWatch counts it (`RlsBypassNotGranted`). A statement
+  that examines no row raises nothing. FK cascades, and the other cases listed in
+  [security-review.md](./security-review.md) section 1 ("Not covered by the enforcement"), are
   outside this control.
 - **Static (CI), `scripts/checks/check-bypass-rls.mjs`:** a limited, development-time aid.
   1. **File allowlist** (`ALLOWED_USAGE`): a file may call `withBypassRls` only if it is listed.

@@ -62,11 +62,12 @@ resource "aws_cloudwatch_log_metric_filter" "high_latency" {
   }
 }
 
-# RLS bypass reports (#911, report mode): a bypassed statement reached a table
-# outside its grant. One filter per log group that carries a pool built by
-# src/lib/db/pool-factory.ts; the line is emitted with this _logType there.
-# The enforce flip waits for these to read zero over a window, after a canary
-# has shown each one counting.
+# RLS bypass reports (#911, #921): a bypassed statement reached a table outside
+# its grant. The database now refuses such a statement (42501); the WARNING that
+# precedes the refusal is what these filters count. One filter per log group that
+# carries a pool built by src/lib/db/pool-factory.ts; the line is emitted with
+# this _logType there. A canary shows each group counting
+# (docs/operations/deployment.md).
 locals {
   rls_bypass_report_log_groups = {
     app                       = aws_cloudwatch_log_group.app.name
@@ -136,11 +137,11 @@ resource "aws_cloudwatch_log_metric_filter" "rls_bypass_notice_unparsed" {
   }
 }
 
-# Any RLS bypass report. Report mode admits the statement, so without this
-# alarm an ungranted reach is visible only to someone reading the metric. Both
-# filter resources (reports and unparsed reports, one filter per log group
-# each) publish to the same metric, so one alarm covers them; a report line
-# names the table and purpose.
+# Any RLS bypass report, i.e. a statement the database refused. The refusal
+# reaches the caller as an error, but a caller that catches it would otherwise
+# leave nothing an operator reads. Both filter resources (reports and unparsed
+# reports, one filter per log group each) publish to the same metric, so one
+# alarm covers them; a report line names the table and purpose.
 resource "aws_cloudwatch_metric_alarm" "rls_bypass_not_granted" {
   count               = var.enable_monitoring ? 1 : 0
   alarm_name          = "${local.name_prefix}-rls-bypass-not-granted"

@@ -6,10 +6,10 @@
  * ## The class
  *
  * `infra/terraform/ecs.tf` runs the migrate task as
- * `prisma migrate deploy && node scripts/audit-db-grants.mjs`, and
- * `scripts/bootstrap-rds-roles.mjs` is invoked via ECS Exec on a fresh
- * environment. Both read JSON out of `scripts/checks/` and import shared modules
- * out of `scripts/lib/`. The Dockerfile copies those assets one `COPY` line at a
+ * `node scripts/rls-enforce-preflight.mjs; npx prisma migrate deploy; node
+ * scripts/audit-db-grants.mjs`, and `scripts/bootstrap-rds-roles.mjs` is invoked
+ * via ECS Exec on a fresh environment. These read JSON out of `scripts/checks/`
+ * and import shared modules out of `scripts/lib/`. The Dockerfile copies those assets one `COPY` line at a
  * time, so adding a reference to a script and forgetting the `COPY` produces an
  * image that passes every local check while the control it implements is inert
  * in production.
