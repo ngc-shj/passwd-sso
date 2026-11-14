@@ -729,7 +729,9 @@ export async function promote(tx, memberId) {
 
     // RT10 twins: each grant arm, unchecked (denied on its own site key in the
     // uncovered list) and the same body behind a recipient check (accepted).
-    const uncovered = (site) => new RegExp(`sites without their lock[^]*grant::src/lib/team/subject\\.ts::promote::${site.replace(/\./g, "\\.")}\\n`);
+    // Every regex metacharacter, backslash included, so a site key is matched literally.
+    const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const uncovered = (site) => new RegExp(`sites without their lock[^]*grant::src/lib/team/subject\\.ts::promote::${escapeRegExp(site)}\\n`);
     const LOCK = "await lockTeamsAgainstRotation(tx, [teamId]);";
     const ARMS = [
       // T8: the nested-relation, key-write and equal-rank arms.
