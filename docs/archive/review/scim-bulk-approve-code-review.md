@@ -163,3 +163,80 @@ None.
 - Action: the test asserts the members list is fetched again. Red-proved on a scratch copy of
   the page with `fetchAll()` removed from `handleBulkReject`.
 - Modified file: the members page test.
+
+---
+
+# Round 2
+
+Date: 2026-11-14
+Review round: 2 (incremental; the same three experts, on the round 1 fix commit)
+
+## Changes from Previous Round
+
+Round 1's findings resolved: S1 (gate normalises both specifier forms), F1 (counted bulk-reject
+text), T1–T5 (tests). F2 Skipped and S2 Accepted, both confirmed by their reviewers. No new
+finding.
+
+## Functionality Findings
+
+No findings. F1 resolved; the F2 skip accepted (the reviewer withdrew the claim: the row is a
+child of `CardContent className="space-y-4"`). The gate change does not alter the answer for any
+import in the real tree (`check-team-rotation-input-lock` exits 0 with the same counts).
+
+## Security Findings
+
+No findings. S1 resolved. The reviewer enumerated the spelling class rather than sampling it: a
+scratch script ran `ts.resolveModuleName` with the repository's `tsconfig.json` beside the fixed
+`resolveSpecifier` for about fifty spellings (alias and relative; `..`, `./`, `//`, climbing out
+and back, `.ts` / `.js` / `.tsx` extensions). Every spelling TypeScript resolves to the admission
+module or to a file under `src/lib/audit/` maps to the path the gate compares. Spellings
+TypeScript does not resolve (mixed case, trailing slash, URL-encoding, backslashes, `.mjs`) are
+not escapes. R43: the fix only adds deny decisions; besides the gate, the production changes are
+the dialog's text and one message key per locale.
+
+## Testing Findings
+
+No findings. T1–T5 resolved. Dropping the `failClosedOnRedisError` literal from the T3 assertion
+loses no coverage: `assertRedisFailClosed` already runs in both bulk route tests against the
+limiter's factory call.
+
+## Adjacent Findings
+
+None.
+
+## Quality Warnings
+
+None.
+
+## Recurring Issue Check
+
+### Functionality expert
+
+- R1–R57: no finding in scope for the fixes; R43 checked (a tightening); R29 no new references.
+
+### Security expert
+
+- R43 clean; R46/R47 the spelling class enumerated, every TypeScript-resolvable spelling covered;
+  the remaining rules untouched by this commit (N/A). RS1–RS6 untouched by this commit.
+
+### Testing expert
+
+- R3, R19, R36, R42 checked and clean in this delta; R44, R50 checked (unpiped exit codes).
+- RT1 (the `select` projection removes the mock gap), RT2 (the cancel half can fail), RT7 (each
+  new gate test red-proved separately), RT10 (allow-side pairs intact); RT3–RT6, RT8, RT9, RT11
+  checked.
+
+## Environment Verification Report
+
+Unchanged from round 1 (VE1 verified-local; VE2 and VE3 blocked-deferred with their entries).
+Re-verification after the round 1 fixes: `npm run lint` exit 0; `npx next build` exit 0;
+`node scripts/checks/check-team-rotation-input-lock.mjs` exit 0; both integration suites 57/57;
+full `npx vitest run` 1165 of 1167 files, the two failures being `backup-db.test.mjs` (worktree,
+deviation D6) and `check-fail-closed-routes-have-test.test.mjs` — the latter caused by round 1's
+own T3 assertion naming the `failClosedOnRedisError` literal in a test file under `src/app/api`,
+which that gate's instantiation count includes (77 expected, 79 found); the literal was removed
+from the assertion and the gate, its self-test and the members route tests pass.
+
+## Resolution Status
+
+Round 2 raised nothing. Code review closed after two rounds with every expert at "No findings".
