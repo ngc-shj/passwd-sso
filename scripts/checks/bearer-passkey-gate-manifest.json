@@ -258,6 +258,9 @@
     },
     "prisma/migrations/20261108000000_share_admission_policy_and_personal_entry/migration.sql": {
       "reason": "Replaces share_creator_admitted with two more serve-time rules: the team policy (sharing allowed, share password required, read from team_policies and the share's access_password_hash being null) and the personal entry's trashed state (password_entries). Still reads password_shares by id and returns a boolean; no digest column is named."
+    },
+    "prisma/migrations/20261114000100_share_creator_departed/migration.sql": {
+      "reason": "Replaces share_creator_admitted with one more serve-time rule: a team share is refused when its creator departed the tenant at or after creating it (tenant_members.deactivated_at and tenant_member_departures.departed_at, both LEFT JOINed; the call-scoped bypass grows by those two tables). Still reads password_shares by id and returns a boolean; no digest column is named."
     }
   },
   "pgPools": {
