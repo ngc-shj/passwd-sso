@@ -1428,8 +1428,13 @@ Normally a refusal produces both lines, so one refused statement counts twice
 on `RlsBypassNotGranted`; a refusal line without its `rls.bypass_not_granted`
 line in the same group and window means the WARNING is being suppressed.
 Find where `client_min_messages` comes from and remove it: in report mode it
-would silence every report. As the service's role, `SELECT setting, source
-FROM pg_settings WHERE name = 'client_min_messages'` names the source:
+would silence every report. First, from any session, list the catalog
+settings: `SELECT setrole::regrole, setdatabase, setconfig FROM
+pg_db_role_setting WHERE array_to_string(setconfig, ',') ~ 'client_min_messages'`
+(a row with `setrole` and `setdatabase` both 0 is `ALTER ROLE ALL SET`). Then
+log in as the service's role to the service's database — `SET ROLE` does not
+apply role settings — and `SELECT setting, source FROM pg_settings WHERE name =
+'client_min_messages'` names the source:
 
 - `user`, `database`, `database user` or `global`: a catalog setting from
   `ALTER ROLE` / `ALTER DATABASE … SET` (`global` is `ALTER ROLE ALL SET`), all

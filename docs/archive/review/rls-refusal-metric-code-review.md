@@ -107,3 +107,18 @@ Date: 2026-11-16
 ### H-1 [Major] `global` is a catalog setting
 - Action: `global` moved into the catalog bullet (`ALTER ROLE ALL SET`, listed in `pg_db_role_setting`); the server-level bullet keeps `configuration file`, `command line`, `environment variable`; the operator's own `session` added.
 - Modified file: docs/operations/alerts.md.
+
+---
+
+# Round 4
+Date: 2026-11-16
+
+## Findings
+- Functionality: No findings (H-1 verified against the GucSource definitions).
+- Testing: not re-run (no test change since round 3, which returned No findings).
+- **Security N2 [Minor]** "as the service's role" did not say to log in to the service's database (`SET ROLE` applies no role settings); no direct catalog check.
+
+## Tightening-only skip — Round 4
+Findings applied directly (no Round 5 review):
+- [N2] [Minor] alerts.md diagnosis must use a login to the service's database and list `pg_db_role_setting` directly — docs/operations/alerts.md `## rls.bypass_refused` — applied verbatim.
+Justification: scoped within Round 3's fix range (the same paragraph), inline doc wording with no code or behaviour change, no security-boundary edit.
