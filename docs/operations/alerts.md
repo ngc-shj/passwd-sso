@@ -1347,8 +1347,9 @@ per minute, so the metric counts lines, not refused statements.
 The database is enforcing (`public.rls_bypass_enforced()` is true): the
 WARNING this line reports is followed by a refusal, SQLSTATE 42501 with
 `RLS_BYPASS_NOT_GRANTED: <table>`. A statement was **refused**, and the
-request or job that issued it failed unless its code caught the error. The
-line is the only trace of a refusal that was caught.
+request or job that issued it failed unless its code caught the error. This
+line and `rls.bypass_refused` (below) are the only trace of a refusal that was
+caught.
 
 **Severity**: medium
 **Trigger**: any occurrence. The normal count is 0.
@@ -1362,7 +1363,9 @@ soon, un-flip the database (`docs/operations/deployment.md`, "Un-flip"). That
 makes every bypass admitted again until the function is restored: the
 protection is off for all grants, not only the one that failed, and the audit of
 every later deploy fails until the function is restored or the deploy carries
-`RLS_REPORT_MODE_ACK`. Reports keep counting after an un-flip.
+`RLS_REPORT_MODE_ACK`. Reports keep counting after an un-flip, as long as
+`client_min_messages` is at `warning` or below: in report mode there is no
+refusal, so the WARNING is the only signal.
 
 A deploy that carries the acknowledgement logs one line with
 `_logType: "rls.report_mode_acknowledged"` from the migrate task (app log
@@ -1373,27 +1376,62 @@ minutes, on every such deploy, so an acknowledgement left in a pipeline
 variable does not become the steady state unnoticed. Between deploys, and on
 compose, nothing reports an un-flipped database.
 
-CloudWatch: the `RlsBypassNotGranted` metric. There is one filter each on
+CloudWatch: the `RlsBypassNotGranted` metric. There is one filter per `_logType` on
 the app, audit-outbox-worker, retention-gc-worker, audit-anchor-publisher and
 audit-chain-verify-worker log groups, and the `rls-bypass-not-granted` alarm
 fires on `Sum >= 1` in 5 minutes (`infra/terraform/monitoring.tf`). Operator
 scripts write the same record to stderr.
 
-On AWS all five processes have a managed log group, each with both filters
-(`rls.bypass_not_granted` and `rls.bypass_notice_unparsed`). On docker compose
+On AWS all five processes have a managed log group, each with all three filters
+(`rls.bypass_not_granted`, `rls.bypass_refused` and `rls.bypass_notice_unparsed`). On docker compose
 the publisher and the verify worker have no service (the compose files do not
 define them yet); wherever they run, collect their stdout and match the same
 `_logType`. A positive canary for each filter is part of the checklist before a
 deploy that flips the database (`docs/operations/deployment.md`).
 
-Datadog: `{ _logType="rls.bypass_not_granted" OR _logType="rls.bypass_notice_unparsed" }`
+Datadog: `{ _logType="rls.bypass_not_granted" OR _logType="rls.bypass_refused" OR _logType="rls.bypass_notice_unparsed" }`
 
-A line `rls.bypass_notice_unparsed` means a WARNING came from
-`rls_bypass_admits` but did not match the expected text. The listener
-logs it with no content, at most once per process per minute. The likely
-cause is that the function and the listener disagree on the message
-format. It is counted on the same `RlsBypassNotGranted` metric and fires
-the same alarm, so a format drift is not read as zero reports.
+A line `rls.bypass_notice_unparsed` means a WARNING or a refusal came from
+`rls_bypass_admits` but did not match the expected text, or the log sink threw
+while recording a report. The listener logs it with no content, at most once
+per process per minute. The likely causes are that the function and the
+listener disagree on the message format (including the function's frame no
+longer being `public.rls_bypass_admits(text)`, as when its `SET search_path`
+is dropped), or that the logger or its output stream failed: the process's
+other output around that time shows a sink fault. It is counted on the same
+`RlsBypassNotGranted` metric and fires the same alarm, so neither is read as
+zero reports.
+
+## `rls.bypass_refused`
+
+Emitted by the same pool listener in `src/lib/db/pool-factory.ts`, from the
+error that refuses the statement (SQLSTATE 42501, `RLS_BYPASS_NOT_GRANTED:
+<table>`, raised by `public.rls_bypass_admits`) rather than from the WARNING
+before it. The line names `table` and `purpose`, as `rls.bypass_not_granted`
+does, and is rate-limited the same way, separately from it.
+
+It exists because the WARNING can be kept from the client: a
+`client_min_messages` above `warning`, set on the role or database between
+deploys, suppresses it, and a caller that catches the 42501 then leaves no
+trace. The error is always delivered. The line is taken on the connection
+before any caller sees the error, so a swallowed refusal still counts. It
+exists only on an enforcing database; in report mode nothing is refused.
+
+Normally a refusal produces both lines, so one refused statement counts twice
+on `RlsBypassNotGranted`; a refusal line without its `rls.bypass_not_granted`
+line in the same group and window means the WARNING is being suppressed.
+Check `client_min_messages` for the service's role and database
+(`SELECT * FROM pg_db_role_setting`), and remove the setting: in report mode
+it would silence every report.
+
+**Severity**: medium
+**Trigger**: any occurrence. The normal count is 0.
+**Recovery**: as for `rls.bypass_not_granted` above.
+
+CloudWatch: the `RlsBypassNotGranted` metric, one filter per log group
+(`rls_bypass_refused` in `infra/terraform/monitoring.tf`), and the same
+`rls-bypass-not-granted` alarm. Operator scripts write the same record to
+stderr.
 
 ## `auth.tenant_claim.binding_refused`
 

@@ -24,7 +24,15 @@ vi.mock("@/lib/logger", async (importOriginal) => {
   return { ...actual, default: logger, getLogger: () => actual.requestContext.getStore() ?? logger };
 });
 
-import { handleServerNotice, registerBypassNoticeSink, resetBypassNoticeRateLimit } from "@/lib/db/pool-factory";
+import { matchesFilterPattern } from "@/__tests__/helpers/cloudwatch-filter-pattern";
+import { TerraformConfig, TERRAFORM_DIR, nested, plain } from "@/__tests__/helpers/hcl-subset";
+import {
+  handleServerError,
+  handleServerNotice,
+  registerBypassNoticeSink,
+  resetBypassNoticeRateLimit,
+  stderrBypassNoticeSink,
+} from "@/lib/db/pool-factory";
 
 const TF = readFileSync(resolve(__dirname, "../../../infra/terraform/monitoring.tf"), "utf8");
 
@@ -63,7 +71,7 @@ describe("rls.bypass_not_granted line vs its metric filter", () => {
     handleServerNotice({
       code: "01000",
       message: "rls_bypass_not_granted table=sessions purpose=auth_flow",
-      where: "PL/pgSQL function rls_bypass_admits(text) line 17 at RAISE",
+      where: "PL/pgSQL function public.rls_bypass_admits(text) line 19 at RAISE",
     });
     expect(chunks).toHaveLength(1);
     line = chunks[0];
@@ -90,7 +98,7 @@ describe("rls.bypass_not_granted line vs its metric filter", () => {
       handleServerNotice({
         code: "01000",
         message: "rls_bypass_not_granted table=users purpose=auth_flow",
-        where: "PL/pgSQL function rls_bypass_admits(text) line 17 at RAISE",
+        where: "PL/pgSQL function public.rls_bypass_admits(text) line 19 at RAISE",
       }),
     );
     expect(chunks).toHaveLength(1);
@@ -100,7 +108,7 @@ describe("rls.bypass_not_granted line vs its metric filter", () => {
       handleServerNotice({
         code: "01000",
         message: "rls_bypass_not_granted tbl=users",
-        where: "PL/pgSQL function rls_bypass_admits(text) line 17 at RAISE",
+        where: "PL/pgSQL function public.rls_bypass_admits(text) line 19 at RAISE",
       }),
     );
     expect(chunks).toHaveLength(2);
@@ -114,7 +122,7 @@ describe("rls.bypass_not_granted line vs its metric filter", () => {
     handleServerNotice({
       code: "01000",
       message: "rls_bypass_not_granted tbl=users",
-      where: "PL/pgSQL function rls_bypass_admits(text) line 17 at RAISE",
+      where: "PL/pgSQL function public.rls_bypass_admits(text) line 19 at RAISE",
     });
     expect(chunks).toHaveLength(1);
     const block = filterBlock("rls_bypass_notice_unparsed");
@@ -153,5 +161,100 @@ describe("rls.bypass_not_granted line vs its metric filter", () => {
       audit_anchor_publisher: "aws_cloudwatch_log_group.audit_anchor_publisher.name",
       audit_chain_verify_worker: "aws_cloudwatch_log_group.audit_chain_verify_worker.name",
     });
+  });
+});
+
+const tf = new TerraformConfig(TERRAFORM_DIR);
+
+function filterPattern(name: string): string {
+  return String(tf.attr(tf.resource("aws_cloudwatch_log_metric_filter", name), "pattern"));
+}
+
+const REFUSAL = {
+  code: "42501",
+  message: "RLS_BYPASS_NOT_GRANTED: sessions",
+  hint: "bypass purpose auth_flow",
+  where: "PL/pgSQL function public.rls_bypass_admits(text) line 21 at RAISE",
+};
+
+describe("rls.bypass_refused line vs its metric filter", () => {
+  const pattern = filterPattern("rls_bypass_refused");
+
+  /** The refusal as the stderr sink writes it. */
+  function stderrLine(error: Parameters<typeof handleServerError>[0], warning = false): string {
+    registerBypassNoticeSink(stderrBypassNoticeSink);
+    const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      if (warning) {
+        handleServerNotice({ code: "01000", message: "rls_bypass_not_granted table=sessions purpose=auth_flow", where: REFUSAL.where });
+      } else {
+        handleServerError(error);
+      }
+      expect(write).toHaveBeenCalledTimes(1);
+      return String(write.mock.calls[0][0]);
+    } finally {
+      write.mockRestore();
+      registerBypassNoticeSink(null);
+    }
+  }
+
+  function productionLine(emit: () => void): string {
+    registerBypassNoticeSink(null);
+    resetBypassNoticeRateLimit();
+    chunks.length = 0;
+    emit();
+    expect(chunks).toHaveLength(1);
+    return chunks[0];
+  }
+
+  it("matches the line the production sink writes for a refusal", () => {
+    const line = productionLine(() => handleServerError(REFUSAL));
+    expect(line.match(/"_logType"/g)).toHaveLength(1);
+    expect(JSON.parse(line)).toMatchObject({ _logType: "rls.bypass_refused", table: "sessions", purpose: "auth_flow" });
+    expect(matchesFilterPattern(pattern, JSON.parse(line))).toBe(true);
+  });
+
+  it("matches the line the stderr sink writes for a refusal", () => {
+    expect(matchesFilterPattern(pattern, JSON.parse(stderrLine(REFUSAL)))).toBe(true);
+  });
+
+  it("does not match the warning line, from either sink", () => {
+    const line = productionLine(() =>
+      handleServerNotice({ code: "01000", message: "rls_bypass_not_granted table=sessions purpose=auth_flow", where: REFUSAL.where }),
+    );
+    expect(JSON.parse(line)._logType).toBe("rls.bypass_not_granted");
+    expect(matchesFilterPattern(pattern, JSON.parse(line))).toBe(false);
+    expect(matchesFilterPattern(pattern, JSON.parse(stderrLine(REFUSAL, true)))).toBe(false);
+  });
+
+  it("does not match the unparsed line", () => {
+    const line = productionLine(() => handleServerError({ ...REFUSAL, hint: undefined }));
+    expect(JSON.parse(line)._logType).toBe("rls.bypass_notice_unparsed");
+    expect(matchesFilterPattern(pattern, JSON.parse(line))).toBe(false);
+  });
+
+  it("is not counted by the warning filter, so each kind is counted by one filter", () => {
+    const refusalLine = JSON.parse(productionLine(() => handleServerError(REFUSAL)));
+    expect(matchesFilterPattern(filterPattern("rls_bypass_not_granted"), refusalLine)).toBe(false);
+  });
+
+  it("publishes to the metric the alarm watches", () => {
+    const alarm = tf.resource("aws_cloudwatch_metric_alarm", "rls_bypass_not_granted");
+    const filter = tf.resource("aws_cloudwatch_log_metric_filter", "rls_bypass_refused");
+    const [transformation] = nested(filter, "metric_transformation");
+    expect({ name: tf.attr(transformation, "name"), namespace: tf.attr(transformation, "namespace") }).toEqual({
+      name: tf.attr(alarm, "metric_name"),
+      namespace: tf.attr(alarm, "namespace"),
+    });
+  });
+
+  it("iterates the five service log groups, one filter each", () => {
+    const filter = tf.resource("aws_cloudwatch_log_metric_filter", "rls_bypass_refused");
+    const groups = tf.local("rls_bypass_report_log_groups");
+    expect(Object.keys(groups as object)).toHaveLength(5);
+    expect(plain(tf.attr(filter, "for_each", { vars: { enable_monitoring: true } }))).toEqual(plain(groups));
+    expect(tf.attr(filter, "for_each", { vars: { enable_monitoring: false } })).toEqual({});
+    const each = { key: "app", value: (groups as Record<string, unknown>).app };
+    expect(String(tf.attr(filter, "log_group_name", { each }))).toBe(String(each.value));
   });
 });

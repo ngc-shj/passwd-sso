@@ -164,7 +164,7 @@ describe("RLS bypass grants (enforcing)", () => {
 
   it("refuses a bypass set without a grant, as code older than the grant requirement would run", async () => {
     // pool-factory-exempt: stands in for code that predates the factory, so it
-    // deliberately has no notice listener.
+    // deliberately has neither listener, and its refusal must not be counted.
     const pool = new pg.Pool({ connectionString: appConnectionString(), max: 1 });
     try {
       const client = await pool.connect();
@@ -172,7 +172,7 @@ describe("RLS bypass grants (enforcing)", () => {
         await client.query("BEGIN");
         await client.query("SELECT set_config('app.bypass_rls', 'on', true)");
         await client.query("SAVEPOINT refused");
-        const { table } = await expectBypassRefusal(() => client.query("SELECT id FROM users WHERE id = $1", [userId]));
+        const { table } = await expectBypassRefusal(() => client.query("SELECT id FROM users WHERE id = $1", [userId]), { counted: false });
         await client.query("ROLLBACK TO SAVEPOINT refused");
         await client.query("ROLLBACK");
         expect(table).toBe("users");

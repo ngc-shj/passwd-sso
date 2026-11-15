@@ -177,11 +177,20 @@ vi.mock("@prisma/adapter-pg", () => ({
   PrismaPg: MockPrismaPg,
 }));
 
-vi.mock("pg", () => ({
-  // The worker does `import pg from "pg"` then `new pg.Pool(...)`,
-  // so the default export must have Pool as a constructor on it.
-  default: { Pool: MockPool },
-}));
+vi.mock("pg", async () => {
+  const { EventEmitter } = await import("node:events");
+  return {
+    // The worker does `import pg from "pg"` then `new pg.Pool(...)`,
+    // so the default export must have Pool as a constructor on it. The
+    // factory's listener probe also constructs a Client and reads `connection`.
+    default: {
+      Pool: MockPool,
+      Client: class {
+        connection = new EventEmitter();
+      },
+    },
+  };
+});
 
 vi.mock("@/lib/logger", () => ({
   getLogger: function () {

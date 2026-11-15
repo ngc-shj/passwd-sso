@@ -22,18 +22,25 @@ vi.mock("@prisma/adapter-pg", () => ({
   },
 }));
 
-vi.mock("pg", () => ({
-  default: {
-    Pool: class {
-      on() {
-        return this;
-      }
-      end() {
-        return Promise.resolve();
-      }
+vi.mock("pg", async () => {
+  const { EventEmitter } = await import("node:events");
+  return {
+    default: {
+      Pool: class {
+        on() {
+          return this;
+        }
+        end() {
+          return Promise.resolve();
+        }
+      },
+      // The factory's listener probe constructs one and reads `connection`.
+      Client: class {
+        connection = new EventEmitter();
+      },
     },
-  },
-}));
+  };
+});
 
 vi.mock("@/lib/logger", () => ({
   getLogger: () => ({

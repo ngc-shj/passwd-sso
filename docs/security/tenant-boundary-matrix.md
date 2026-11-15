@@ -100,7 +100,9 @@ built with `defineGrant(purpose, models)`. `withBypassRls(prisma, fn, grant)` an
   `WARNING rls_bypass_not_granted table=<t> purpose=<p>` and is then refused with SQLSTATE 42501
   (`RLS_BYPASS_NOT_GRANTED: <t>`), because `public.rls_bypass_enforced()` returns true. The pool
   listener in `src/lib/db/pool-factory.ts` logs the WARNING as
-  `_logType: "rls.bypass_not_granted"`, and CloudWatch counts it (`RlsBypassNotGranted`). A statement
+  `_logType: "rls.bypass_not_granted"` and the refusal as `_logType: "rls.bypass_refused"`, and
+  CloudWatch counts both (`RlsBypassNotGranted`). The refusal line does not depend on the WARNING
+  reaching the client, so a raised `client_min_messages` cannot silence it. A statement
   that examines no row raises nothing. FK cascades, and the other cases listed in
   [security-review.md](./security-review.md) section 1 ("Not covered by the enforcement"), are
   outside this control.

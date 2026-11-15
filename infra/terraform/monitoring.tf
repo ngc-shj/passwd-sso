@@ -62,11 +62,14 @@ resource "aws_cloudwatch_log_metric_filter" "high_latency" {
   }
 }
 
-# RLS bypass reports (#911, #921): a bypassed statement reached a table outside
-# its grant. The database now refuses such a statement (42501); the WARNING that
-# precedes the refusal is what these filters count. One filter per log group that
-# carries a pool built by src/lib/db/pool-factory.ts; the line is emitted with
-# this _logType there. A canary shows each group counting
+# RLS bypass reports (#911, #921, #1048): a bypassed statement reached a table
+# outside its grant. The database raises a WARNING, then (while enforcing)
+# refuses the statement with 42501. src/lib/db/pool-factory.ts logs each as its
+# own line: rls.bypass_not_granted for the WARNING, rls.bypass_refused for the
+# refusal. The refusal line survives a client_min_messages above warning, which
+# keeps the WARNING from the client; the WARNING line is the only one in report
+# mode. One filter per kind per log group that carries a pool built there, all
+# on one metric. A canary shows each group counting
 # (docs/operations/deployment.md).
 locals {
   rls_bypass_report_log_groups = {
@@ -83,6 +86,20 @@ resource "aws_cloudwatch_log_metric_filter" "rls_bypass_not_granted" {
   name           = "${local.name_prefix}-rls-bypass-not-granted-${each.key}"
   log_group_name = each.value
   pattern        = "{ $._logType = \"rls.bypass_not_granted\" }"
+
+  metric_transformation {
+    name          = "RlsBypassNotGranted"
+    namespace     = "${local.name_prefix}/App"
+    value         = "1"
+    default_value = "0"
+  }
+}
+
+resource "aws_cloudwatch_log_metric_filter" "rls_bypass_refused" {
+  for_each       = var.enable_monitoring ? local.rls_bypass_report_log_groups : {}
+  name           = "${local.name_prefix}-rls-bypass-refused-${each.key}"
+  log_group_name = each.value
+  pattern        = "{ $._logType = \"rls.bypass_refused\" }"
 
   metric_transformation {
     name          = "RlsBypassNotGranted"
@@ -120,9 +137,10 @@ resource "aws_cloudwatch_metric_alarm" "alb_5xx" {
   tags          = local.tags
 }
 
-# A WARNING from rls_bypass_admits whose text the listener could not parse
-# (function and listener disagree on the format). Counted on the same metric so
-# a format drift raises the alarm below instead of reading as zero reports.
+# A WARNING or refusal from rls_bypass_admits that the listener could not parse
+# (function and listener disagree on the format), or a report the log sink threw
+# on. Counted on the same metric so a format drift or a failing sink raises the
+# alarm below instead of reading as zero reports.
 resource "aws_cloudwatch_log_metric_filter" "rls_bypass_notice_unparsed" {
   for_each       = var.enable_monitoring ? local.rls_bypass_report_log_groups : {}
   name           = "${local.name_prefix}-rls-bypass-notice-unparsed-${each.key}"
@@ -139,9 +157,10 @@ resource "aws_cloudwatch_log_metric_filter" "rls_bypass_notice_unparsed" {
 
 # Any RLS bypass report, i.e. a statement the database refused. The refusal
 # reaches the caller as an error, but a caller that catches it would otherwise
-# leave nothing an operator reads. Both filter resources (reports and unparsed
-# reports, one filter per log group each) publish to the same metric, so one
-# alarm covers them; a report line names the table and purpose.
+# leave nothing an operator reads. All three filter resources (warnings,
+# refusals and unparsed reports, one filter per log group each) publish to the
+# same metric, so one alarm covers them; one refusal usually counts twice (its
+# WARNING and itself). A report line names the table and purpose.
 resource "aws_cloudwatch_metric_alarm" "rls_bypass_not_granted" {
   count               = var.enable_monitoring ? 1 : 0
   alarm_name          = "${local.name_prefix}-rls-bypass-not-granted"
@@ -152,7 +171,7 @@ resource "aws_cloudwatch_metric_alarm" "rls_bypass_not_granted" {
   period              = 300
   statistic           = "Sum"
   threshold           = 1
-  alarm_description   = "An RLS bypass reached a table outside its grant (rls.bypass_not_granted), or a report could not be parsed (rls.bypass_notice_unparsed); see docs/operations/alerts.md"
+  alarm_description   = "An RLS bypass reached a table outside its grant (rls.bypass_not_granted, rls.bypass_refused), or a report could not be parsed or logged (rls.bypass_notice_unparsed); see docs/operations/alerts.md"
   treat_missing_data  = "notBreaching"
 
   alarm_actions = [aws_sns_topic.alarms[0].arn]

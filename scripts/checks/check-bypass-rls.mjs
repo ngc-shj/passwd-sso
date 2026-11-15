@@ -2859,6 +2859,8 @@ const POOL_RULE_ALLOWLIST = new Map([
   ["src/__tests__/db-integration/rds-probe-role.ts", "superuser clients that create, sweep and drop the owner-shaped probe role; no bypass is set"],
   ["src/__tests__/db-integration/rds-probe-role.integration.test.ts", "superuser clients that list and create probe roles to test the helper's sweep, and one client logged in as the probe to show it cannot become the owner; no bypass is set"],
   ["src/__tests__/db-integration/rls-bypass-grants.integration.test.ts", "the old-code cells: pools deliberately WITHOUT the factory's listener, standing in for code older than the grant requirement (refused without a grant, admitted with one)"],
+  ["src/__tests__/db-integration/bypass-refusal-helper.integration.test.ts", "the helper self-tests' raw pool, deliberately WITHOUT the factory's listeners, to show expectBypassRefusal throws when a refusal was not counted and accepts it under counted: false"],
+  ["src/lib/db/pool-factory.test.ts","unconnected pg.Client instances handed to the factory pool's connect handler, to show the listeners attach to a real client's connection; none is connected and none sets a bypass"],
   ["src/__tests__/db-integration/scim-bulk-approve.integration.test.ts", "spies on Client.prototype.query to count the statements of one route call (the bulk cap's measurement); builds no connection"],
 ]);
 // A regex, as check-raw-sql-usage matches it: a string literal naming a Prisma

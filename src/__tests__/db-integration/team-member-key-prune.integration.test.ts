@@ -545,7 +545,8 @@ describe("team key prune (#1009)", () => {
           // Control: a grant missing a table the body reads is refused, by name.
           await c.query("SAVEPOINT missing_table");
           await setGrant(PRUNE_GRANT.tables.split(",").filter((t) => t !== "team_password_entry_histories").join(","));
-          const refusal = await expectBypassRefusal(() => c.query(`SELECT * FROM team_member_key_prune(${BATCH})`));
+          // `c` is a raw client with no pool-factory listener, so its refusal is not counted.
+          const refusal = await expectBypassRefusal(() => c.query(`SELECT * FROM team_member_key_prune(${BATCH})`), { counted: false });
           await c.query("ROLLBACK TO SAVEPOINT missing_table");
           expect(refusal.table).toBe("team_password_entry_histories");
           expect(notGranted).toContain("team_password_entry_histories");

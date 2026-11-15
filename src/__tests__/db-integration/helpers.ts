@@ -15,8 +15,8 @@
 import type { PrismaClient } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
 import type pg from "pg";
-import { createPool, createPrismaClient, type BypassNotice } from "@/lib/db/pool-factory";
-import { bypassNoticeBuffer } from "./bypass-notice-sink";
+import { createPool, createPrismaClient } from "@/lib/db/pool-factory";
+import { bypassNoticeBuffer, bypassRefusalBuffer, type BypassReport } from "./bypass-notice-sink";
 import { defineGrant, MODEL_TABLE, setBypassGucs, type BypassGrant, type BypassModel } from "@/lib/tenant-rls-grants";
 import { BYPASS_PURPOSE } from "@/lib/tenant-rls-purpose";
 import { randomUUID, randomBytes } from "node:crypto";
@@ -938,7 +938,7 @@ export async function raceTwoClients<A, B>(
  * per-test buffer so setup.ts's afterEach does not fail the cell for them. For
  * a cell whose subject IS a report; every other report fails its test.
  */
-export async function expectBypassNotices(fn: () => Promise<unknown>): Promise<BypassNotice[]> {
+export async function expectBypassNotices(fn: () => Promise<unknown>): Promise<BypassReport[]> {
   const buffer = bypassNoticeBuffer();
   const before = buffer.length;
   await fn();
@@ -947,23 +947,38 @@ export async function expectBypassNotices(fn: () => Promise<unknown>): Promise<B
 
 const BYPASS_REFUSAL_PREFIX = "RLS_BYPASS_NOT_GRANTED: ";
 
+/** Mark both report buffers; the returned function takes what arrived since. */
+function markReports(): () => { warnings: BypassReport[]; refusals: BypassReport[] } {
+  const warnings = bypassNoticeBuffer();
+  const refusals = bypassRefusalBuffer();
+  const warningsBefore = warnings.length;
+  const refusalsBefore = refusals.length;
+  return () => ({ warnings: warnings.splice(warningsBefore), refusals: refusals.splice(refusalsBefore) });
+}
+
 /**
  * Run `fn`, which must be refused by the enforcing bypass check: it rejects
  * with SQLSTATE 42501 and a message naming `RLS_BYPASS_NOT_GRANTED: <table>`.
  * Throws when `fn` resolves or rejects with anything else. The reports raised
- * meanwhile are taken from the per-test buffer whether or not `fn` threw (the
+ * meanwhile are taken from the per-test buffers whether or not `fn` threw (the
  * WARNING is raised before the exception), so a refusal cell does not fail
- * setup.ts's afterEach for the report it caused.
+ * setup.ts's afterEach for the reports it caused.
+ *
+ * The refusal must also have been counted by the pool listener — a refusal
+ * for the same table in the refusal buffer — so every refusal cell checks the
+ * count the RLS alarm relies on. `counted: false` is for a connection built
+ * outside pool-factory on purpose: it asserts that nothing was counted.
  *
  * Where `fn` runs a statement inside a transaction, that statement must be the
  * last one: the refusal aborts the transaction.
  */
 export async function expectBypassRefusal(
   fn: () => Promise<unknown>,
-): Promise<{ notices: BypassNotice[]; error: unknown; table: string }> {
-  const buffer = bypassNoticeBuffer();
-  const before = buffer.length;
-  let notices: BypassNotice[] = [];
+  { counted = true }: { counted?: boolean } = {},
+): Promise<{ notices: BypassReport[]; refusals: BypassReport[]; error: unknown; table: string }> {
+  const take = markReports();
+  let notices: BypassReport[] = [];
+  let refusals: BypassReport[] = [];
   let error: unknown;
   let resolved = false;
   try {
@@ -972,7 +987,7 @@ export async function expectBypassRefusal(
   } catch (e) {
     error = e;
   } finally {
-    notices = buffer.splice(before);
+    ({ warnings: notices, refusals } = take());
   }
   if (resolved) {
     throw new Error("expected the bypass to be refused with RLS_BYPASS_NOT_GRANTED, but the statement succeeded");
@@ -984,7 +999,36 @@ export async function expectBypassRefusal(
     throw new Error(`expected a 42501 RLS_BYPASS_NOT_GRANTED refusal, got SQLSTATE ${code ?? "none"}: ${message}`);
   }
   const table = /^[a-z0-9_]+/.exec(message.slice(at + BYPASS_REFUSAL_PREFIX.length))?.[0] ?? "";
-  return { notices, error, table };
+  if (counted && !refusals.some((r) => r.table === table)) {
+    throw new Error(`the refusal on ${table} was not counted: no rls.bypass_refused report reached the sink (is the connection built by pool-factory?)`);
+  }
+  if (!counted && refusals.length > 0) {
+    throw new Error(`expected no refusal to be counted on a connection outside pool-factory, got: ${refusals.map((r) => r.table).join(", ")}`);
+  }
+  return { notices, refusals, error, table };
+}
+
+/**
+ * Run `fn`, whose code catches an RLS bypass refusal itself, and return the
+ * reports it caused. `fn` must resolve — the refusal is swallowed, which is the
+ * case the refusal count exists for — and at least one refusal must have been
+ * counted.
+ */
+export async function expectSwallowedBypassRefusal(
+  fn: () => Promise<unknown>,
+): Promise<{ warnings: BypassReport[]; refusals: BypassReport[] }> {
+  const take = markReports();
+  let reports: { warnings: BypassReport[]; refusals: BypassReport[] } = { warnings: [], refusals: [] };
+  try {
+    await fn();
+  } finally {
+    reports = take();
+  }
+  const { warnings, refusals } = reports;
+  if (refusals.length === 0) {
+    throw new Error("expected a swallowed RLS bypass refusal to be counted, but no rls.bypass_refused report reached the sink");
+  }
+  return { warnings, refusals };
 }
 
 // ─── Backfill-block cells (rls_backfill_rerun, #1033) ───────────
