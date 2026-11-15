@@ -78,7 +78,11 @@ section 2 of the report is built from them), in this order:
 6. Tell each affected tenant's admin.
 
 Team-entry share links the member created stop being served on their own
-(`share_creator_admitted`). A legitimately re-admitted member the migration ended
+(`share_creator_admitted`): a link is refused when its creator left the tenant
+at or after creating it, and also when they left at or after their membership
+of the team began (`COALESCE(admitted_at, created_at)`, equality refuses), so a
+link created by a leftover membership after the departure is refused too. A
+creator re-admitted after the departure is served. A legitimately re-admitted member the migration ended
 is re-invited. That includes a member the original ended on a role that
 bypassed RLS and who was re-admitted since, when the re-run later ran on a role
 that cannot bypass: the re-admission left no record, so the migration revoked it.
@@ -620,5 +624,6 @@ see the file's own writers, `*Unsafe` raw SQL, aliased receivers, `scripts/`, or
 deletes of tenant rows. A tenant-row change made any other way (a hand-written
 `UPDATE`, a script) can leave memberships active again: run the report after
 any such change. The leftover check above refuses such residue on every team
-route and at webhook delivery, and share links stop on their own; the report and
+route and at webhook delivery, and share links are refused by `share_creator_admitted`
+(including links a leftover membership created after the departure); the report and
 the contain script end the memberships themselves.

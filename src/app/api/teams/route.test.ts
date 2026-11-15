@@ -130,6 +130,18 @@ describe("GET /api/teams", () => {
     expect(json[1].role).toBe(TEAM_ROLE.MEMBER);
     expect(json[1].memberCount).toBe(8);
     expect(json[1].isCrossTenant).toBe(false);
+    // A deactivated team row is not a member.
+    expect(mockPrismaTeamMember.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: {
+          team: {
+            select: expect.objectContaining({
+              _count: { select: { members: { where: { deactivatedAt: null } } } },
+            }),
+          },
+        },
+      }),
+    );
   });
 
   it("returns isCrossTenant true when team belongs to different tenant", async () => {

@@ -53,7 +53,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
           description: true,
           createdAt: true,
           updatedAt: true,
-          _count: { select: { members: true, passwords: { where: { ...ACTIVE_ENTRY_WHERE } } } },
+          _count: { select: { members: { where: { deactivatedAt: null } }, passwords: { where: { ...ACTIVE_ENTRY_WHERE } } } },
           tenant: { select: { name: true } },
         },
       }),

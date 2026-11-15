@@ -1174,6 +1174,23 @@ describe("departed-member operator scripts — real-DB integration", () => {
       await expectReadmitted(l, label);
     });
 
+    it("a residual row left out of the input is left alone: only the listed one is re-admitted, with one audit record", async () => {
+      const l = await seedResidual(1);
+      const [listed, omitted] = l.rows;
+      await runReadmit(readmitWith({ triples: triplesLiteral([tripleOf(l, listed)]), label }));
+
+      const rows = await sql<{ id: string; admitted_at: Date | null }>(
+        `SELECT id, admitted_at FROM team_members WHERE id = ANY($1::uuid[])`, [listed.rowId, omitted.rowId],
+      );
+      const admittedAt = (rowId: string) => rows.find((r) => r.id === rowId)!.admitted_at;
+      expect(admittedAt(listed.rowId)).not.toBeNull();
+      expect(admittedAt(omitted.rowId)).toBeNull();
+      const records = await sql<{ payload: { targetId: string } }>(
+        `SELECT payload FROM audit_outbox WHERE tenant_id = $1::uuid AND payload->>'action' = $2`, l.tenant, READMIT,
+      );
+      expect(records.map((r) => r.payload.targetId)).toEqual([listed.user]);
+    });
+
     it("a 255-character label is accepted and recorded whole", async () => {
       const l = await seedResidual();
       const long = "x".repeat(255);

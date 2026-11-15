@@ -9,11 +9,13 @@
  * handler to its function body and requires a call to one of them, imported
  * from the team-auth module.
  *
- * What this PROVES: a call is present in each handler's body. It does not
+ * What this PROVES: a gate call is present in each handler's own body, not in
+ * a closure nested inside it (a callback that may never run). It does not
  * classify `team_members` reads, so code outside this tree that decides
  * authority from `team_members` itself stays a convention
- * (getTeamMembership's doc comment). Verified without a Program: ts-morph
- * resolves only same-file bindings here.
+ * (getTeamMembership's doc comment). Static limits: a call in a dead branch
+ * or whose result is ignored still counts. Verified without a Program:
+ * ts-morph resolves only same-file bindings here.
  */
 import { describe, expect, it } from "vitest";
 import path from "node:path";
@@ -69,9 +71,21 @@ function resolveFunction(node: Node | undefined, seen = new Set<Node>()): Node |
   return null;
 }
 
-/** Whether `body` calls a gate function that is imported from the team-auth module. */
-function callsGate(body: Node): boolean {
-  return body.getDescendantsOfKind(SyntaxKind.CallExpression).some((call) => {
+/** The innermost function-like node enclosing `node`. */
+function enclosingFunction(node: Node): Node | undefined {
+  return node.getFirstAncestor(
+    (a) =>
+      Node.isArrowFunction(a) ||
+      Node.isFunctionDeclaration(a) ||
+      Node.isFunctionExpression(a) ||
+      Node.isMethodDeclaration(a),
+  );
+}
+
+/** Whether `fn` itself (not a closure nested in it) calls a gate function imported from the team-auth module. */
+function callsGate(fn: Node): boolean {
+  return fn.getDescendantsOfKind(SyntaxKind.CallExpression).some((call) => {
+    if (enclosingFunction(call) !== fn) return false;
     const callee = call.getExpression();
     if (!Node.isIdentifier(callee)) return false;
     return (callee.getSymbol()?.getDeclarations() ?? []).some(
@@ -139,6 +153,7 @@ describe("the reach check itself", () => {
     ["an exported function declaration", `${GATE_IMPORT}export async function PUT() { await requireTeamMember("u", "t"); }`],
     ["a renamed export", `${GATE_IMPORT}async function remove() { await requireTeamMember("u", "t"); }\nexport { remove as DELETE };`],
     ["an aliased gate import", `import { requireTeamMember as gate } from "${GATE_MODULE}";\nexport async function GET() { await gate("u", "t"); }`],
+    ["a top-level gate beside an unrelated nested closure", `${GATE_IMPORT}export async function GET() { await requireTeamMember("u", "t"); const f = () => 1; return f(); }`],
     ["route-segment config beside a handler", `${GATE_IMPORT}export const runtime = "nodejs";\nexport async function GET() { await requireTeamMember("u", "t"); }`],
   ])("accepts %s", (_label, text) => {
     expect(problemsOf(text)).toEqual([]);
@@ -149,6 +164,7 @@ describe("the reach check itself", () => {
     ["a renamed export without the gate call", `async function remove() { return null; }\nexport { remove as DELETE };`, /handler DELETE calls neither/],
     ["a gate name that is not the team-auth import", `const requireTeamMember = async () => null;\nexport async function GET() { await requireTeamMember(); }`, /handler GET calls neither/],
     ["a gate imported from another module", `import { requireTeamMember } from "./local-auth";\nexport async function GET() { await requireTeamMember(); }`, /handler GET calls neither/],
+    ["a gate called only inside a nested closure", `${GATE_IMPORT}async function handleGET() { const f = () => requireTeamMember("u","t"); return null; }\nexport const GET = withRequestLog(handleGET);`, /handler GET calls neither/],
     ["a handler it cannot resolve", `import { handler } from "./elsewhere";\nexport const GET = handler;`, /cannot resolve the function behind handler GET/],
     ["an unknown export", `${GATE_IMPORT}export async function GET() { await requireTeamMember("u", "t"); }\nexport const helper = 1;`, /unknown export "helper"/],
     ["a default export", `${GATE_IMPORT}export default async function () { await requireTeamMember("u", "t"); }`, /unknown export "default"/],

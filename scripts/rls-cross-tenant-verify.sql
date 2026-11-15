@@ -413,7 +413,7 @@ BEGIN
   -- routine that sets app.bypass_rls / app.bypass_tables reads past RLS as any
   -- caller, so it is reviewed like a definer. Allowlist:
   --   - share_creator_admitted(uuid) (#990, 20261102000000; #996/#998, 20261108000000;
-  --     #1035, 20261114000100)
+  --     #1035, 20261114000100; 20261115000300)
   --       Read-only; returns one boolean for one share id. Grants itself exactly
   --       password_shares, team_password_entries, team_members, team_policies,
   --       password_entries, tenant_members, tenant_member_departures for the call,

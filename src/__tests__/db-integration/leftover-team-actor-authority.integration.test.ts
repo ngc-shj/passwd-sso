@@ -606,6 +606,8 @@ describe("leftover team actor authority — real-DB integration", () => {
       it.each(seeds)("a leftover ADMIN is refused 404 before the transaction, nothing removed: %s", async (_label, depart) => {
         const { actor, teamId, target, targetRow } = await removable();
         await depart(actor.id);
+        // Armed: it would fire if the request got past the membership gate.
+        stepUp.hook = async () => {};
 
         const res = await removeMember(teamId, targetRow, actor.id);
 
@@ -650,6 +652,8 @@ describe("leftover team actor authority — real-DB integration", () => {
       it.each(seeds)("a leftover ADMIN is refused 404 before the transaction: %s", async (_label, depart) => {
         const { actor, teamId, target, targetRow } = await pendingTeam();
         await depart(actor.id);
+        // Armed: it would fire if the request got past the membership gate.
+        afterGate.hook = async () => {};
 
         const res = await rejectMember(teamId, targetRow, actor.id);
 
@@ -698,6 +702,8 @@ describe("leftover team actor authority — real-DB integration", () => {
       it.each(seeds)("a leftover ADMIN is refused 404 before the transaction, every row survives: %s", async (_label, depart) => {
         const { actor, teamId, targets, rows } = await pendingRows();
         await depart(actor.id);
+        // Armed: it would fire if the request got past the membership gate.
+        afterGate.hook = async () => {};
 
         const res = await bulkReject(teamId, rows, actor.id);
 
@@ -783,6 +789,8 @@ describe("leftover team actor authority — real-DB integration", () => {
       it.each(seeds)("a leftover ADMIN is refused 404 before the transaction: %s", async (_label, depart) => {
         const { actor, teamId, invId } = await invited();
         await depart(actor.id);
+        // Armed: it would fire if the request got past the membership gate.
+        afterGate.hook = async () => {};
 
         const res = await cancelInvitation(teamId, invId, actor.id);
 

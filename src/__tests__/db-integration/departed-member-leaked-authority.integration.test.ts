@@ -752,8 +752,10 @@ describe("departed-member leaked authority — real-DB integration", () => {
           return res.status;
         }],
       ] as const)("%s", async (_site, run) => {
+        // Armed: it would fire if the request got past the membership gate.
+        afterGate.hook = async () => {};
         expect(await run()).toBe(404);
-        // The hook never armed: the refusal came from the gate, not from a transaction.
+        // The refusal came from the gate, not from a transaction.
         expect(afterGate.fired).toBe(false);
       });
     });

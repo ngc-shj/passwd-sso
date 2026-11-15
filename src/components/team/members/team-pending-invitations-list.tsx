@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import { formatDate } from "@/lib/format/format-datetime";
+import { toastApiError } from "@/lib/http/toast-api-error";
 
 export interface Invitation {
   id: string;
@@ -25,13 +26,18 @@ interface Props {
 
 export function TeamPendingInvitationsList({ invitations, teamId, onCancel }: Props) {
   const t = useTranslations("Team");
+  const tApi = useTranslations("ApiErrors");
   const locale = useLocale();
 
   const handleCancelInvitation = async (invId: string) => {
     try {
-      await fetchApi(apiPath.teamInvitationById(teamId, invId), {
+      const res = await fetchApi(apiPath.teamInvitationById(teamId, invId), {
         method: "DELETE",
       });
+      if (!res.ok) {
+        await toastApiError(res, tApi);
+        return;
+      }
       toast.success(t("invitationCancelled"));
       onCancel();
     } catch {

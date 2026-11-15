@@ -540,7 +540,7 @@ describe("share links across a creator's departure — real-DB integration", () 
 
   it.each([
     ["refused when the record is later than the share", "now() + interval '1 second'", "error:revoked"],
-    ["served when the record is earlier than the share (twin)", "now() - interval '1 hour'", "served"],
+    ["served when the record is earlier than the share and the admission (twin)", "now() - interval '2 hours'", "served"],
   ])("C3: tenant row deleted, team row kept, a departure record: %s", async (_label, departedAt, want) => {
     const t = await teamWithCreator();
     const s = await share({ creatorId: t.creator, teamEntryId: t.entryId });
@@ -550,6 +550,82 @@ describe("share links across a creator's departure — real-DB integration", () 
       tenantId, t.creator,
     );
     expect(await page(s)).toBe(want);
+  });
+
+  // ── SEC-F1: a share created by a leftover membership AFTER the departure ──
+
+  /** Seeds the leftover state: the tenant departure the team row missed. */
+  async function leftoverSeed(kind: "residue" | "re-created", t: { creator: string }, at: string) {
+    if (kind === "residue") {
+      // The tenant row's departure alone, as a hand-written UPDATE leaves it.
+      const rows = await sql(
+        `UPDATE tenant_members SET deactivated_at = ${at} WHERE tenant_id = $1::uuid AND user_id = $2::uuid RETURNING 1 AS hit`,
+        tenantId, t.creator,
+      );
+      expect(rows).toHaveLength(1);
+    } else {
+      // A departure record with the tenant row active again.
+      await sql(
+        `INSERT INTO tenant_member_departures (tenant_id, user_id, departed_at) VALUES ($1::uuid, $2::uuid, ${at})`,
+        tenantId, t.creator,
+      );
+    }
+  }
+
+  it.each(["residue", "re-created"] as const)(
+    "SEC-F1: a share created after the creator's departure by a leftover team row (%s seed) is refused at the page, verify-access and content",
+    async (kind) => {
+      const t = await teamWithCreator();
+      const open = await share({ creatorId: t.creator, teamEntryId: t.entryId, createdAt: "now() - interval '10 minutes'" });
+      const locked = await share({ creatorId: t.creator, teamEntryId: t.entryId, protect: true, createdAt: "now() - interval '10 minutes'" });
+      const revokedControl = await share({ creatorId: t.creator, teamEntryId: t.entryId, protect: true });
+      await sql(`UPDATE password_shares SET revoked_at = now() WHERE id = $1::uuid`, revokedControl.id);
+      // Positive control: with no departure the same shares serve.
+      expect(await page(open)).toBe("served");
+      expect((await verify(locked)).status).toBe(200);
+
+      await leftoverSeed(kind, t, "now() - interval '30 minutes'");
+
+      // Created after the departure (10 min ago > 30 min ago), so only the admission comparison refuses.
+      expect(await page(open)).toBe("error:revoked");
+      expect(await page(locked)).toBe("error:revoked");
+      expect(await verify(locked, generateAccessPassword())).toEqual(await verify(revokedControl));
+      expect(await content(locked)).toEqual(await content(revokedControl));
+      expect((await state(locked.id)).view_count).toBe(0);
+    },
+  );
+
+  it.each(["residue", "re-created"] as const)(
+    "SEC-F1: a creator re-admitted after the departure (%s seed) is served; the same departure with no re-admission refuses (twin)",
+    async (kind) => {
+      const t = await teamWithCreator();
+      const s = await share({ creatorId: t.creator, teamEntryId: t.entryId, createdAt: "now() - interval '10 minutes'" });
+      await leftoverSeed(kind, t, "now() - interval '30 minutes'");
+      expect(await page(s)).toBe("error:revoked");
+
+      // The trigger stamps admitted_at when the row is re-activated.
+      await sql(`UPDATE team_members SET deactivated_at = now() WHERE id = $1::uuid`, t.creatorRow);
+      await sql(`UPDATE team_members SET deactivated_at = NULL WHERE id = $1::uuid`, t.creatorRow);
+      expect(await page(s)).toBe("served");
+    },
+  );
+
+  it("SEC-F1: a departure exactly at the admission refuses", async () => {
+    const t = await teamWithCreator();
+    const s = await share({ creatorId: t.creator, teamEntryId: t.entryId, createdAt: "now() + interval '1 minute'" });
+    // admitted_at is trigger-owned and NULL here, so the admission is created_at.
+    await sql(`UPDATE team_members SET created_at = timestamptz '2026-06-01 00:00:00+00' WHERE id = $1::uuid`, t.creatorRow);
+    await leftoverSeed("re-created", t, "timestamptz '2026-06-01 00:00:00+00'");
+    expect(await page(s)).toBe("error:revoked");
+    await sql(`UPDATE team_members SET created_at = timestamptz '2026-06-01 00:00:00.001+00' WHERE id = $1::uuid`, t.creatorRow);
+    expect(await page(s)).toBe("served");
+  });
+
+  it("SEC-F1: a guest creator (no tenant row in the share's tenant) is served", async () => {
+    const t = await teamWithCreator();
+    await sql(`DELETE FROM tenant_members WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, tenantId, t.creator);
+    const s = await share({ creatorId: t.creator, teamEntryId: t.entryId });
+    expect(await page(s)).toBe("served");
   });
 
   // ── A13 / A14: sharing policy and personal entry state (#996, #998) ──
@@ -863,7 +939,7 @@ describe("share links across a creator's departure — real-DB integration", () 
     }
 
     /** A creator whose membership predates the share, with a tenant-departure state relative to `base`. */
-    async function departureCase(o: { deactivated?: string; restored?: boolean; record?: string; deleteRow?: boolean; guest?: boolean }) {
+    async function departureCase(o: { deactivated?: string; restored?: boolean; record?: string; deleteRow?: boolean; guest?: boolean; readmitted?: boolean }) {
       const user = await member(o.guest ? otherTenantId : tenantId);
       // A guest's tenant row is in another tenant only; the user row is filed
       // here so teardown removes their share with this tenant.
@@ -883,7 +959,7 @@ describe("share links across a creator's departure — real-DB integration", () 
         );
       }
       if (o.deleteRow) await sql(`DELETE FROM tenant_members WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, tenantId, user);
-      if (o.deactivated === "-1 hour") {
+      if (o.readmitted) {
         // Re-admitted after that departure: a later membership.
         await sql(`UPDATE team_members SET created_at = ${base} - interval '1 second' WHERE team_id = $1::uuid AND user_id = $2::uuid`, teamId, user);
       }
@@ -929,10 +1005,13 @@ describe("share links across a creator's departure — real-DB integration", () 
       ["unknown id", randomUUID(), false],
       ["creator departed the tenant 1s after the share (team row left active)", await departureCase({ deactivated: "1 second" }), false],
       ["creator departed the tenant at the share's instant", await departureCase({ deactivated: "0 second" }), false],
-      ["creator departed 1h before the share, with a later membership", await departureCase({ deactivated: "-1 hour" }), true],
+      ["creator departed 1h before the share, with a later membership", await departureCase({ deactivated: "-1 hour", readmitted: true }), true],
       ["creator departed after the share, then restored", await departureCase({ deactivated: "1 second", restored: true }), true],
       ["tenant row deleted, departure record after the share", await departureCase({ record: "1 second", deleteRow: true }), false],
-      ["tenant row re-created, departure record before the share", await departureCase({ record: "-1 hour" }), true],
+      ["tenant row re-created, departure record before the share and after the admission (leftover)", await departureCase({ record: "-1 hour" }), false],
+      ["tenant row re-created, departure record before the share, later re-admission", await departureCase({ record: "-1 hour", readmitted: true }), true],
+      ["residue: tenant row deactivated before the share, team row left active (leftover)", await departureCase({ deactivated: "-1 hour" }), false],
+      ["departure exactly at the admission", await departureCase({ deactivated: "-2 hours" }), false],
       ["guest creator (no tenant row in the share's tenant)", await departureCase({ guest: true }), true],
     ];
     const legacyCreator = await member();
@@ -1008,6 +1087,12 @@ describe("share links across a creator's departure — real-DB integration", () 
       "20261108000000_share_admission_policy_and_personal_entry",
       "20261114000100_share_creator_departed",
     ]],
+    [[
+      "20261102000000_share_creator_admitted",
+      "20261108000000_share_admission_policy_and_personal_entry",
+      "20261114000100_share_creator_departed",
+      "20261115000300_share_creator_leftover",
+    ]],
   ])("A10b: the function's migrations %j apply as a NOSUPERUSER NOBYPASSRLS role (RDS)", async (migrations) => {
     const bodies = migrations.map((migration) => {
       // SHARE_CREATOR_DEPARTED_SQL names a file to read instead of the C3
@@ -1032,6 +1117,11 @@ describe("share links across a creator's departure — real-DB integration", () 
     const departedShare = await share({ creatorId: departed.creator, teamEntryId: departed.entryId, createdAt: "now() - interval '1 minute'" });
     await sql(`UPDATE tenant_members SET deactivated_at = now() WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, tenantId, departed.creator);
     const departureRuleApplied = migrations.includes("20261114000100_share_creator_departed");
+    // A creator who left the tenant before creating the share, their team row left active.
+    const leftover = await teamWithCreator();
+    const leftoverShare = await share({ creatorId: leftover.creator, teamEntryId: leftover.entryId });
+    await sql(`UPDATE tenant_members SET deactivated_at = now() - interval '30 minutes' WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, tenantId, leftover.creator);
+    const leftoverRuleApplied = migrations.includes("20261115000300_share_creator_leftover");
     const role = `probe_rds_${hex(4)}`;
     const client = await side.pool.connect();
     try {
@@ -1055,6 +1145,8 @@ describe("share links across a creator's departure — real-DB integration", () 
       expect(r.rows[0].ok).toBe(true);
       const d = await client.query(`SELECT share_creator_admitted($1::uuid) AS ok`, [departedShare.id]);
       expect(d.rows[0].ok).toBe(!departureRuleApplied);
+      const l = await client.query(`SELECT share_creator_admitted($1::uuid) AS ok`, [leftoverShare.id]);
+      expect(l.rows[0].ok).toBe(!leftoverRuleApplied);
     } finally {
       await client.query("ROLLBACK");
       client.release();

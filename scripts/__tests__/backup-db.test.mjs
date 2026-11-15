@@ -1118,7 +1118,7 @@ describe("Group B — validation by a real pg_restore", () => {
       { encoding: "utf8", cwd, timeout: 20000 });
     const mainWorktree = spawnSync("git", ["worktree", "list", "--porcelain"], { encoding: "utf8", cwd: REPO_ROOT })
       .stdout?.split("\n").find((l) => l.startsWith("worktree "))?.slice("worktree ".length);
-    for (const composeDir of [REPO_ROOT, mainWorktree].filter(Boolean)) {
+    for (const composeDir of [...new Set([REPO_ROOT, mainWorktree].filter(Boolean))]) {
       const svc = probe(composeDir);
       if (svc.status !== 0) continue;
       return {

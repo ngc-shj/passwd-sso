@@ -1545,8 +1545,7 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
         const mainWorktree = spawnSync("git", ["worktree", "list", "--porcelain"], { encoding: "utf8", cwd: REPO_ROOT })
           .stdout?.split("\n").find((l) => l.startsWith("worktree "))?.slice("worktree ".length);
         const composeDir =
-          [REPO_ROOT, mainWorktree]
-            .filter((d): d is string => Boolean(d))
+          [...new Set([REPO_ROOT, mainWorktree].filter((d): d is string => Boolean(d)))]
             .find((d) => spawnSync("docker", ["compose", "exec", "-T", "db", "psql", "--version"], { encoding: "utf8", timeout: 20_000, cwd: d }).status === 0)
           ?? REPO_ROOT;
         return {

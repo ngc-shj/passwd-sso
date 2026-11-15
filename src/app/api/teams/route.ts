@@ -46,7 +46,7 @@ async function handleGET(req: NextRequest) {
             description: true,
             createdAt: true,
             _count: {
-              select: { members: true },
+              select: { members: { where: { deactivatedAt: null } } },
             },
             tenant: {
               select: { id: true, name: true },

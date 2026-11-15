@@ -95,3 +95,31 @@ files with one gate call removed). Thin spots, accepted:
   single-reject route test and the integration bulk-reject cells.
 - `src/__tests__/api/teams/team-entry-rekey.test.ts` / `team-history-restore.test.ts` do not react to
   the holder mutations; the `src/app/...` rekey and restore route tests and `team-item-key.test.ts` do.
+
+## D15 — Checklist files with no diff (code review FN-F2)
+Checked and unaffected:
+- `src/__tests__/audit-outbox.test.ts` — never reaches `resolveWebhookSubscribers` /
+  `webhookCreatorVerdicts` (0 references); the worker's delivery decision is tested in
+  `src/workers/audit-outbox-worker.test.ts`, which changed.
+- `confirm-key/route.test.ts` — mocks `requireTeamPermission`, so `getTeamMembership` never runs; its
+  `findFirst` mock is the actor's in-transaction `activeTeamAdmission` read.
+- `bulk-reject/route.test.ts` — mocks `rejectScimPending`; the clause is pinned by
+  `scim-admission.test.ts`, the single-reject route test and the integration cells (D14).
+- `tenant-row-lock.test.ts` — exercises `readTenantRows` / the predicates through the re-exports,
+  which `tenant-departure-read.test.ts` pins as the same function objects.
+- `mock-team-auth.ts`, `admin/layout.test.tsx`, `team-vault-core.test.tsx`,
+  `vault-context-passkey-gate.test.tsx` — mock `team-auth` or the endpoint at the module boundary.
+- `scim-team-admission-approval` and `team-tenant-departure` integration suites — pass unchanged
+  (46/46, 71/71).
+History restore takes the `(tenantId)` form of `withTeamTenantRls` and keeps its own
+`prisma.$transaction`, which joins the context transaction through the prisma proxy; the holder
+functions receive that `tx` and `tenantId`.
+
+## D16 — The worker's `tenant_members.role` column grant is accepted (code review SEC-F2)
+`readTenantRows` selects `role`, so the worker that reuses it needs the column although the leftover
+decision reads only `deactivated_at` / `departed_at`. Worst case: the outbox worker (which also makes
+outbound HTTP) can read member roles across tenants under its bypass grant; it already reads
+`team_members.role`, and its webhook read and this read are scoped by `item.tenant_id`, so no role
+leaves the worker. Likelihood of misuse requires code execution in the worker. Cost to narrow: a
+second tenant-row reader with a narrower select, which round 1 of the plan review rejected (one
+reader, FN-F2/R48). Accepted.

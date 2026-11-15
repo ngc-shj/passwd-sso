@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import React from "react";
+import { toast } from "sonner";
 
 if (typeof globalThis.ResizeObserver === "undefined") {
   globalThis.ResizeObserver = class {
@@ -48,6 +49,7 @@ vi.mock("@/components/ui/button", () => ({
   ),
 }));
 
+import { apiErrorToI18nKey } from "@/lib/http/api-error-codes";
 import { TeamPendingInvitationsList } from "../team-pending-invitations-list";
 import type { Invitation } from "../team-pending-invitations-list";
 
@@ -101,7 +103,65 @@ describe("TeamPendingInvitationsList", () => {
       );
     });
 
-    expect(onCancel).toHaveBeenCalled();
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(toast.success).toHaveBeenCalledWith("invitationCancelled");
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [403, "FORBIDDEN"],
+    [404, "INVITATION_NOT_FOUND"],
+    [409, "CONFLICT"],
+  ])("shows the mapped API error and does not call onCancel on a %i response", async (status, code) => {
+    mockFetchApi.mockResolvedValue(
+      new Response(JSON.stringify({ error: code }), {
+        status,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    const onCancel = vi.fn();
+
+    render(
+      <TeamPendingInvitationsList
+        invitations={SAMPLE_INVITATIONS}
+        teamId="team-1"
+        onCancel={onCancel}
+      />,
+    );
+
+    const xBtn = screen.getAllByRole("button").find((b) => !b.hasAttribute("data-testid"));
+    await act(async () => {
+      fireEvent.click(xBtn!);
+    });
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(apiErrorToI18nKey(code));
+    });
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+
+  it("shows the network error and does not call onCancel when the request throws", async () => {
+    mockFetchApi.mockRejectedValue(new TypeError("fetch failed"));
+    const onCancel = vi.fn();
+
+    render(
+      <TeamPendingInvitationsList
+        invitations={SAMPLE_INVITATIONS}
+        teamId="team-1"
+        onCancel={onCancel}
+      />,
+    );
+
+    const xBtn = screen.getAllByRole("button").find((b) => !b.hasAttribute("data-testid"));
+    await act(async () => {
+      fireEvent.click(xBtn!);
+    });
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("networkError");
+    });
+    expect(onCancel).not.toHaveBeenCalled();
   });
 
   // The link is shown once, when issued: the server keeps only its digest.
