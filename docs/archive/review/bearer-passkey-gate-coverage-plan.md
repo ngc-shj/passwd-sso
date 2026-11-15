@@ -463,7 +463,10 @@ Scope contract:
   of a position that makes the table a value). The function-call form (`trim(both` +
   ` from ${t})`, or a table-holding fragment embedded in a call) is refused by the run-time
   mint's parenthesis-balance rule (every `trustedSql` result must balance), and comment markers
-  by its assembled-text test; what remains is the keyword-only split, which the mint cannot
+  by its assembled-text test. The balance rule counts characters and does not tell strings
+  apart, so a call split whose balance is faked by a parenthesis inside a string literal
+  (`trim(both ')'` + `'(' || … from ${t}…)`) still passes both layers (code review S26). What
+  remains is that faked-balance split and the keyword-only split, which the mint cannot
   refuse because the retention sweep's real templates place fragments before tables; objects
   created by hand outside the three SQL roots; a
   database function called by a name that says nothing about what it reads (its definition
@@ -471,8 +474,10 @@ Scope contract:
   - Worst case: a whole-row lookup assembled from two fragments.
   - Likelihood: low; every file holding raw SQL is allowlisted one by one
     (`check-raw-sql-usage`) and reviewed.
-  - Cost to fix: a SQL parser with catalog knowledge; for the keyword-only split, a fragment kind in
-    `raw-sql` (identifiers and separators only) so a fragment before a table can be refused.
+  - Cost to fix: a SQL parser with catalog knowledge; for the keyword-only and faked-balance
+    splits, a fragment kind in `raw-sql` (identifiers and separators only) so a fragment
+    before a table can be refused — a string-aware parenthesis count would close only the
+    second, with a second SQL string lexer living in the run-time module.
 - SC5 — TypeScript outside the scan root (`scripts/`, `cli/`, `extension/`, `ios/`).
   - Worst case: an operator script looks a token up by digest. It runs with operator
     credentials outside the request path, so no user-bound bearer is validated there.

@@ -216,7 +216,8 @@ const commentMarkerExec = RegExp.prototype.exec.bind(COMMENT_MARKER_RE) as (
 
 // A fragment is a balanced piece of SQL: a call split across two fragments (`trim(both` + `from ${t})`)
 // would hand the table-position test a keyword that is really an argument. Plain character count, never
-// negative scanning left to right and zero at the end; strings are not told apart (as for comment markers).
+// negative scanning left to right and zero at the end; strings are not told apart (as for comment markers),
+// so a parenthesis inside a string literal can fake the balance: that split stays open.
 // Only trustedSql needs it: joinSql joins balanced fragments and identifiers, which stays balanced.
 function assertBalanced(caller: string, text: string): void {
   let depth = 0;

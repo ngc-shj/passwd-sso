@@ -64,9 +64,29 @@ left as is, the rule is deliberately the simple one).
 | T28 | Minor | No cell detects a `//` comment swallowing the rest of the schema | Cell added |
 | T29 | Minor | No cell for an unterminated string at end of file (mutant loops forever) | Cell added |
 
+Round 4 fixes: commit `9031465cd` (S24 widened membership; S25 parenthesis-balance rule,
+`RAW_SQL_PAREN_BALANCE`, after all 27 real templates were shown to balance).
+
+## Round 5 (final, limited to the round-4 diff)
+
+Functionality: no findings. Testing was not re-run for this round: the round-4 arms were
+mutation-proved by the implementer and the previous testing round found cell gaps only.
+
+| ID | Sev. | Finding | Resolution |
+|---|---|---|---|
+| S26 | Minor | The balance rule counts parentheses inside string literals, so a call split with faked balance (`trim(both ')'` + `'(' \|\| … from ${t}…)`) passes both layers, while SC4 and the header said the function-call form "is refused" | Declared, not closed: SC4, the gate header and the `assertBalanced` comment now state the limit |
+
+Anti-Deferral record for S26 — worst case: a whole-row read of a token table assembled from two
+fragments in a reviewed, allowlisted raw-SQL file; likelihood: low (needs a string-literal
+parenthesis in one fragment and a compensating one in the template — deliberate construction; no
+real template holds a parenthesis in a string); cost to fix: a string-aware SQL lexer inside the
+run-time module, or the fragment kind that also closes the keyword-only split. The review loop
+stops here: rounds 3–5 produced only variations of cross-fragment composition, which SC4 owns.
+
 ## Declared residuals (not findings)
 
-Plan SC1–SC7. SC4 was reworded during review to name the cross-fragment shape that remains open.
+Plan SC1–SC7. SC4 was reworded during review to name the cross-fragment shapes that remain open
+(keyword-only split; faked-balance split).
 
 ## Recurring Issue Checks
 

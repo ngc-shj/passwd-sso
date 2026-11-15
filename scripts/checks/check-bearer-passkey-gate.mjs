@@ -155,10 +155,11 @@
  *         gate sees only the template's own text and the holes' neighbours, and what a hole holds
  *         is a type question it cannot answer. The mint also refuses a trustedSql result whose
  *         parentheses do not balance (code RAW_SQL_PAREN_BALANCE), so a call split across two
- *         fragments (`trim(both` + `from ${t})`) cannot be built; W6 mirrors it on the template's
- *         own text (holes opaque). Composition is otherwise the run-time mint's to adjudicate: a
- *         keyword-only split (`... IS DISTINCT` + ` from ${t}`) is NOT closed (plan SC4).
- *         W6 also refuses a template whose own text (holes opaque) has unbalanced parentheses.
+ *         fragments (`trim(both` + `from ${t})`) is refused; W6 mirrors it on the template's
+ *         own text (holes opaque). Both count characters, so a parenthesis inside a string
+ *         literal can fake the balance. Composition is otherwise the run-time mint's to
+ *         adjudicate: that faked-balance split and a keyword-only split (`... IS DISTINCT` +
+ *         ` from ${t}`) are NOT closed (plan SC4).
  *     W1-W3 and W5 apply to a literal that names a token table (as a name or inside a string)
  *     and to every trustedSql template; W4 to every literal; W6 to trustedSql templates only.
  *     Each failure names its rule. A literal holding U+E000 (the lexer's substitution marker,
