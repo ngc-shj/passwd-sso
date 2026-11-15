@@ -196,7 +196,10 @@ rm -rf ~/passwd-sso-backups/.lock.d
 There is deliberately no flag for this. Every in-script variant raced: two runs
 can each judge the lock stale, and whichever acts second removes the lock the
 first has already re-created. Once the directory is gone the script only ever
-`mkdir`s it, which is atomic.
+creates it and then claims it by creating `.lock.d/pid` exclusively (a shell
+`noclobber` open, which the kernel lets exactly one run win). The claim does not
+trust `mkdir`'s exit status: uutils `mkdir` before 0.11, the default on Ubuntu
+26.04, can report success to two concurrent runs.
 
 Each run produces one directory:
 
