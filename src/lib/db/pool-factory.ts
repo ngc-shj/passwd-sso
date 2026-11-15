@@ -116,31 +116,35 @@ export function resetBypassNoticeRateLimit(): void {
   lastLogged.clear();
 }
 
-// No content to key on, so one shared rate-limit slot.
-function logUnparsed(): void {
-  if (withinRateLimit(UNPARSED_KEY)) {
-    logger.warn({ _logType: REPORT_LOG_TYPE.UNPARSED }, REPORT_LOG_TYPE.UNPARSED);
+// The listeners run inside pg's parser callback, so nothing they write may
+// throw: a throw would leave the query unsettled or escape as an uncaught
+// exception. When a write fails, the constant unparsed line, which the same
+// metric counts, goes to stderr directly (the writer that failed may be the
+// logger), so the failure does not read as zero reports either.
+function writeUnparsedToStderr(): void {
+  try {
+    process.stderr.write(`${JSON.stringify({ _logType: REPORT_LOG_TYPE.UNPARSED })}\n`);
+  } catch {
+    // stderr itself failed; nothing is left to write to.
   }
 }
 
-/**
- * Hand a report to the sink. The listeners run inside pg's parser callback, so
- * a sink that throws must not propagate (it would leave the query unsettled or
- * escape as an uncaught exception), and must not read as zero reports either:
- * the constant unparsed line, which the same metric counts, goes to stderr
- * directly, since the sink that failed may be the logger.
- */
+// No content to key on, so one shared rate-limit slot.
+function logUnparsed(): void {
+  if (!withinRateLimit(UNPARSED_KEY)) return;
+  try {
+    logger.warn({ _logType: REPORT_LOG_TYPE.UNPARSED }, REPORT_LOG_TYPE.UNPARSED);
+  } catch {
+    writeUnparsedToStderr();
+  }
+}
+
+/** Hand a report to the sink; a sink that throws is counted as unparsed. */
 function deliver(notice: BypassNotice): void {
   try {
     (registeredSink ?? productionBypassNoticeSink)(notice);
   } catch {
-    try {
-      if (withinRateLimit(UNPARSED_KEY)) {
-        process.stderr.write(`${JSON.stringify({ _logType: REPORT_LOG_TYPE.UNPARSED })}\n`);
-      }
-    } catch {
-      // stderr itself failed; nothing is left to write to.
-    }
+    if (withinRateLimit(UNPARSED_KEY)) writeUnparsedToStderr();
   }
 }
 

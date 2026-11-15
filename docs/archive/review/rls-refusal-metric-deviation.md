@@ -54,3 +54,8 @@ All mutations were applied to scratch copies under the session scratchpad and ru
 | A8 stderr: script swallowing a refusal (D4) | A8 `not.toMatch` assertion |
 
 Not reddened by the mutation the plan named: forcing `exact` does not affect the A1 other-function look-alike cell, because a `where` that names no `rls_bypass_admits` is dropped before the exact check; that cell guards the `none` branch, which the "delete the frame gate" row reddens at integration level.
+
+## D7 — Step 2-5 self-check: unparsed path guarded too (R3/R49, Major)
+`logUnparsed()` called the logger unguarded, and with `handleServerError` now prepended ahead of pg's own `errorMessage` handler, a logger that throws on an unparsed refusal would have escaped into pg's parser callback — C1's "never throws into pg" covered only the sink call. Both writes now share one guarded path: a failing logger write falls back to the fixed stderr line (`writeUnparsedToStderr`), itself guarded. New cells "a logger that throws on an unparsed report" (refusal and notice listeners, plus a working-logger allow cell). Red-proof: removing the try/catch in `logUnparsed` on a scratch copy reddens both listener cells (exit 1; unmutated control 3 passed, exit 0).
+
+Other self-check findings fixed: the `POOL_RULE_ALLOWLIST` header now names the listener-less test stand-ins it already exempted (R49/R18, Minor); comments and the gate's error text say "report listeners" rather than "notice listener" (R3, Minor); the red-proof record above was added (RT7).

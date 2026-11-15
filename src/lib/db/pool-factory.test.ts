@@ -521,6 +521,37 @@ describe("a sink that throws", () => {
   });
 });
 
+describe("a logger that throws on an unparsed report", () => {
+  let write: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    mockWarn.mockImplementation(() => {
+      throw new Error("log transport down");
+    });
+  });
+
+  afterEach(() => {
+    write.mockRestore();
+  });
+
+  it.each([
+    ["the refusal listener", () => handleServerError(refusal({ message: "RLS_BYPASS_NOT_GRANTED: users trailing" }))],
+    ["the notice listener", () => handleServerNotice(report("rls_bypass_not_granted tbl=users"))],
+  ])("does not throw out of %s, and writes one fixed unparsed line to stderr", (_label, emit) => {
+    expect(emit).not.toThrow();
+    expect(mockWarn).toHaveBeenCalledTimes(1);
+    expect(write.mock.calls).toEqual([[UNPARSED_LINE]]);
+  });
+
+  it("writes nothing to stderr when the logger works", () => {
+    mockWarn.mockReset();
+    handleServerError(refusal({ message: "RLS_BYPASS_NOT_GRANTED: users trailing" }));
+    expect(mockWarn).toHaveBeenCalledTimes(1);
+    expect(write).not.toHaveBeenCalled();
+  });
+});
+
 describe("productionBypassNoticeSink by kind", () => {
   const warning: BypassNotice = { kind: BYPASS_REPORT_KIND.WARNING, table: "sessions", purpose: "auth_flow" };
   const refused: BypassNotice = { kind: BYPASS_REPORT_KIND.REFUSAL, table: "sessions", purpose: "auth_flow" };
