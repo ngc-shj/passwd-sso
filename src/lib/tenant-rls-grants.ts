@@ -209,6 +209,7 @@ export const BYPASS_GRANT = Object.freeze({
   TEAM_MEMBER_DISPLAY_LOOKUP: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["tenantMember", "user", "tenant"]),
   TEAM_PENDING_KEY_DISTRIBUTION: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["teamMember", "tenantMember", "tenantMemberDeparture", "user", "team"]),
   TEAM_TENANT_LOOKUP: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["team", "tenant"]),
+  TENANT_ACCOUNT_REKEY: defineGrant(BYPASS_PURPOSE.SYSTEM_MAINTENANCE, ["account", "auditOutbox", "tenant", "tenantClaim", "tenantClaimEvent", "tenantMember"]),
   TENANT_CLAIM_BINDING_READ: defineGrant(BYPASS_PURPOSE.SYSTEM_MAINTENANCE, ["account", "tenant", "tenantClaim", "tenantClaimEvent", "tenantMember"]),
   TENANT_CLAIM_BINDING_WRITE: defineGrant(BYPASS_PURPOSE.SYSTEM_MAINTENANCE, ["account", "tenant", "tenantClaim", "tenantClaimEvent", "tenantMember"]),
   TENANT_CLAIM_HISTORY: defineGrant(BYPASS_PURPOSE.SYSTEM_MAINTENANCE, ["tenant", "tenantClaim", "tenantClaimEvent"]),

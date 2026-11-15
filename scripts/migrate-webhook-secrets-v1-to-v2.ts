@@ -22,6 +22,7 @@ import {
   getMasterKeyByVersion,
 } from "@/lib/crypto/crypto-server";
 import { buildWebhookSecretAAD } from "@/lib/crypto/webhook-aad";
+import { warmShareMasterKeys } from "@/lib/crypto/share-master-keys";
 import { assertBypassRlsActive } from "./lib/assert-bypass-rls-active";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { attemptInSavepoint } from "@/lib/prisma/savepoint";
@@ -141,6 +142,10 @@ async function migrateInTx(
       masterKeyVersion: true,
     },
   });
+  // Under a cloud KEY_PROVIDER the sync key reads below throw for a version
+  // nobody fetched; this script has no app boot to fetch them. A version that
+  // does not load fails its rows, which are counted as skipped.
+  await warmShareMasterKeys(teamRows.map((r) => r.masterKeyVersion));
 
   for (const row of teamRows) {
     // Under a savepoint: a rejected UPDATE would otherwise abort the
@@ -192,6 +197,7 @@ async function migrateInTx(
       masterKeyVersion: true,
     },
   });
+  await warmShareMasterKeys(tenantRows.map((r) => r.masterKeyVersion));
 
   for (const row of tenantRows) {
     const attempt = await attemptInSavepoint(tx, async () => {

@@ -206,9 +206,10 @@ describe("tenant-domain flag parsing", () => {
     // `backfill-owning-column`'s candidate cap and its apply/dry-run switch;
     // "provider", "claim", "out", "unbound", "accept-unused-provider" and
     // "from-members" are the claim-binding writers' (sso-claim-connection-binding C3);
-    // "single-connection" is `legacy-accounts`' operator attestation.
+    // "single-connection" is `legacy-accounts`' operator attestation; "to" is
+    // `rekey-accounts`' target provider (saml-jackson-account-rekey C5).
     expect([...declared]).toEqual([
-      "tenant", "domain", "by", "from", "days", "after", "user", "limit", "provider", "claim", "out",
+      "tenant", "domain", "by", "from", "days", "after", "user", "limit", "provider", "claim", "out", "to",
       "yes", "apply", "unbound", "accept-unused-provider", "from-members", "single-connection",
     ]);
     expect(read.size).toBeGreaterThan(0);
@@ -251,6 +252,7 @@ describe("tenant-domain flag parsing", () => {
       ["unmapped", ["--out", "/tmp/x"], ["out"]],
       ["measure", ["--yes"], ["yes"]],
       ["legacy-accounts", ["--tenant", "t"], ["tenant"]],
+      ["rekey-accounts", ["--tenant", "t", "--to", "saml-jackson-x", "--by", "ops", "--domain", "d"], ["domain"]],
     ])("%s refuses %j", (subcommand, argv, stray) => {
       expect(strayOf(subcommand, argv)).toEqual(stray);
     });
@@ -270,8 +272,16 @@ describe("tenant-domain flag parsing", () => {
       ["legacy-accounts", []],
       ["legacy-accounts", ["--single-connection"]],
       ["backfill-owning-column", ["--by", "ops", "--apply", "--yes", "--limit", "5"]],
+      ["rekey-accounts", ["--tenant", "t", "--to", "saml-jackson-x", "--by", "ops", "--apply", "--yes"]],
     ])("%s accepts the documented form %j", (subcommand, argv) => {
       expect(strayOf(subcommand, argv)).toEqual([]);
+    });
+
+    it("reports rekey-accounts' --to written without a value, by name", () => {
+      const parsed = parseFlags(["--tenant", "t", "--to", "--by", "ops"], "rekey-accounts");
+      if (!parsed.ok) throw new Error(parsed.error);
+      expect(findValuelessFlag(parsed.flags, "rekey-accounts")).toBe("to");
+      expect(valuelessError("to", "rekey-accounts")).toContain(VALUE_FLAG_HINTS.to);
     });
 
     it("leaves an unknown subcommand to the usage", () => {

@@ -83,4 +83,18 @@ describe("tenant-domain CLI dispatch", () => {
     expect(r.stderr).toContain(MISSING_URL);
     expect(r.stderr).not.toContain("Usage:");
   }, CASE_TIMEOUT_MS);
+
+  it("prints the usage for rekey-accounts without --to, reaching no handler", () => {
+    const r = runCli("rekey-accounts", "--tenant", "t", "--by", "ops");
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("Usage:");
+    expect(r.stderr).not.toContain(MISSING_URL);
+  }, CASE_TIMEOUT_MS);
+
+  it("dispatches rekey-accounts with its full flag set to its handler", () => {
+    const r = runCli("rekey-accounts", "--tenant", "t", "--to", "saml-jackson-x", "--by", "ops");
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(MISSING_URL);
+    expect(r.stderr).not.toContain("Usage:");
+  }, CASE_TIMEOUT_MS);
 });

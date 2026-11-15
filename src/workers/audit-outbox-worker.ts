@@ -23,6 +23,7 @@ import { MS_PER_DAY, MS_PER_HOUR, MS_PER_SECOND } from "@/lib/constants/time";
 import { WORKER_POOL_IDLE_TIMEOUT_MS, WORKER_POOL_STATEMENT_TIMEOUT_MS } from "@/workers/worker-pool-config";
 import { DELIVERERS, type TargetConfig, type DeliveryPayload } from "@/workers/audit-delivery";
 import { decryptServerData, getMasterKeyByVersion } from "@/lib/crypto/crypto-server";
+import { warmShareMasterKeys } from "@/lib/crypto/share-master-keys";
 import { sanitizeErrorForStorage, sanitizeForExternalDelivery } from "@/lib/http/external-http";
 import { buildChainInput, computeCanonicalBytes, computeEventHash } from "@/lib/audit/audit-chain";
 import { sqlTable, trustedSql, renderSql } from "@/lib/prisma/raw-sql";
@@ -832,7 +833,11 @@ async function processOneDelivery(
   }
 
   try {
-    // Decrypt target config
+    // Decrypt target config. Under a cloud KEY_PROVIDER the sync read below
+    // throws for a version this process never fetched, and a worker runs no
+    // app boot to fetch it; a version that does not load fails here and is
+    // recorded like any other delivery error.
+    await warmShareMasterKeys([delivery.target.masterKeyVersion]);
     const masterKey = getMasterKeyByVersion(delivery.target.masterKeyVersion);
     const aad = Buffer.concat([
       Buffer.from(delivery.target.id.replace(/-/g, ""), "hex"),

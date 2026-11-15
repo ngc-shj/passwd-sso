@@ -44,6 +44,7 @@ export const VALUE_FLAG_HINTS = {
   provider: "the full SSO provider id the claim is bound to, e.g. saml-jackson-acme or google",
   claim: "the registered claim whose provider binding changes",
   out: "the path of the bind file to create, outside the git worktree",
+  to: "the saml-jackson-<connection id> provider to move the accounts to",
 } as const satisfies Record<string, string>;
 
 /**
@@ -97,6 +98,7 @@ export const SUBCOMMAND_FLAGS = {
   history: ["domain", "tenant", "after"],
   realign: ["user", "tenant", "by", "yes"],
   measure: [],
+  "rekey-accounts": ["tenant", "to", "by", "apply", "yes"],
   "legacy-accounts": ["single-connection"],
   "backfill-owning-column": ["by", "apply", "yes", "limit"],
 } as const satisfies Record<string, readonly (ValueFlag | ScopedValueFlag | BooleanFlag)[]>;
