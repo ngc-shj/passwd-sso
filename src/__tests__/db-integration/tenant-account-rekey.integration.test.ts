@@ -33,6 +33,7 @@ import {
 } from "@/lib/tenant/tenant-claim-event";
 import { decryptAccountTokenTriple, encryptAccountTokenTriple } from "@/lib/crypto/account-token-crypto";
 import { getCurrentMasterKeyVersion } from "@/lib/crypto/crypto-server";
+import { _resetKeyProvider } from "@/lib/key-provider";
 import { JACKSON_LEGACY_PROVIDER_ID } from "@/lib/auth/jackson-providers";
 import { SYSTEM_ACTOR_ID, SYSTEM_TENANT_ID } from "@/lib/constants/app";
 import { AUDIT_TARGET_TYPE } from "@/lib/constants/audit/audit-target";
@@ -94,6 +95,7 @@ describe.skipIf(SKIP)("tenant-domain rekey-accounts (#954)", () => {
   afterEach(async () => {
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
+    _resetKeyProvider();
     for (const tenantId of tenants) await ctx.deleteTestData(tenantId);
   });
 
@@ -897,7 +899,19 @@ describe.skipIf(SKIP)("tenant-domain rekey-accounts (#954)", () => {
       expect(news).not.toEqual(olds);
       const output = `${text()}\n${r.message}\n${await allOutboxPayloads(s.tenantId)}`;
       expect(await rekeyOutbox(s.tenantId)).toHaveLength(2);
+      // Positive control: the output is not empty or vacuous, it prints what is meant to be printed.
+      for (const a of s.accounts) expect(output).toContain(a.accountId);
       expectNoLeak(output, s, [...olds, ...news]);
+    });
+
+    it("expectNoLeak throws when fed a seeded marker, a providerAccountId, a token or an extra value", async () => {
+      const s = await scenario({ accounts: 1 });
+      const a = s.accounts[0]!;
+      expect(() => expectNoLeak("clean output", s)).not.toThrow();
+      expect(() => expectNoLeak(`x ${marker} y`, s)).toThrow();
+      expect(() => expectNoLeak(`x ${a.pid} y`, s)).toThrow();
+      expect(() => expectNoLeak(`x ${a.plain.refresh_token} y`, s)).toThrow();
+      expect(() => expectNoLeak("x extra-value y", s, ["extra-value"])).toThrow();
     });
 
     it("TAMPERED refusal path", async () => {
@@ -950,6 +964,119 @@ describe.skipIf(SKIP)("tenant-domain rekey-accounts (#954)", () => {
       expectNoLeak(`${text()}\n${r.message}\n${await allOutboxPayloads(s.tenantId)}`, s);
       expect(await snapshot()).toEqual(before);
       expect(await rekeyOutbox(s.tenantId)).toHaveLength(0);
+    });
+  });
+
+  // ─── accounts filed under another tenant (S1) ─────────────────────────
+
+  describe("accounts of active members filed under another tenant", () => {
+    const NOT_MOVED = "Not moved — accounts at saml-jackson of active members, filed under another tenant";
+
+    it("lists them under Not moved, never moves them and writes no audit row; the tenant's own candidates still move", async () => {
+      const s = await scenario({ accounts: 2 });
+      const other = await newTenant();
+      const m = await seedMember(s.tenantId);
+      const foreign = await seedAccount(other, m.userId);
+      const foreignBefore = (await snapshot()).find((r) => r.id === foreign.accountId)!;
+
+      const preview = await expectPreviewAllowed(s);
+      expect(text()).toContain(NOT_MOVED);
+      expect(text()).toContain(foreign.accountId);
+      expect(text()).toContain(`filed under tenant=${other}`);
+      expect(rowIds(preview)).not.toContain(foreign.accountId);
+      expect(rowIds(preview)).toHaveLength(2);
+
+      lines.length = 0;
+      const applied = await run(s, { apply: true, yes: true });
+      expect(applied, applied.message).toMatchObject({ ok: true, code: 0 });
+      expect(rowIds(applied)).not.toContain(foreign.accountId);
+      const after = await snapshot();
+      expect(after.find((r) => r.id === foreign.accountId)).toEqual(foreignBefore);
+      for (const a of s.accounts) expect(after.find((r) => r.id === a.accountId)).toMatchObject({ provider: TO });
+      const audit = await rekeyOutbox(s.tenantId);
+      expect(audit).toHaveLength(2);
+      expect(JSON.stringify(audit.map((r) => r.payload))).not.toContain(m.userId);
+    });
+
+    it("prints no Not moved section when every account is filed under the tenant", async () => {
+      const s = await scenario({ accounts: 1 });
+      await expectPreviewAllowed(s);
+      expect(text()).not.toContain(NOT_MOVED);
+    });
+  });
+
+  // ─── share-master key provider (F1, F2) ───────────────────────────────
+
+  describe("share-master key provider", () => {
+    const CURRENT_REFUSAL = /the current share-master key version \d+ cannot be loaded/;
+
+    /** Candidates whose tokens sit at version 1, below the current one, so the row versions are not the current version. */
+    async function olderVersionScenario() {
+      const current = getCurrentMasterKeyVersion();
+      expect(current, "the cell needs a current version above 1").toBeGreaterThan(1);
+      vi.stubEnv("SHARE_MASTER_KEY_CURRENT_VERSION", "1");
+      let s: Scenario;
+      try {
+        s = await scenario({ accounts: 2 });
+      } finally {
+        vi.stubEnv("SHARE_MASTER_KEY_CURRENT_VERSION", String(current));
+      }
+      expect((await snapshot())[0]!.access_token).toMatch(/^psoenc1:1:/);
+      return { s, current };
+    }
+
+    const reportCurrentUnavailable = (current: number) =>
+      vi.spyOn(shareMasterKeyWarmer, "warm").mockImplementation(async (versions) => {
+        const report = new Map<number, "ok" | "unavailable">([...versions].map((v) => [v, "ok" as const]));
+        report.set(current, "unavailable");
+        return report;
+      });
+
+    it("F1: refuses preview and apply when the current version cannot be loaded although every row version can; nothing is written", async () => {
+      const { s, current } = await olderVersionScenario();
+      reportCurrentUnavailable(current);
+      await expectRefusedBoth(s, [CURRENT_REFUSAL]);
+      expect(text()).not.toContain("(KEY_UNAVAILABLE)");
+    });
+
+    it("F1: the same tenant passes when the warmer reports the current version ok", async () => {
+      const { s } = await olderVersionScenario();
+      await expectPreviewAllowed(s);
+    });
+
+    it("F1: candidates holding no token are not refused for the current version", async () => {
+      const s = await scenario({ accounts: 0 });
+      const noTokens = { refresh_token: null, access_token: null, id_token: null };
+      for (let i = 0; i < 2; i++) s.accounts.push(await seedCandidate(s.tenantId, { plain: noTokens }));
+      reportCurrentUnavailable(getCurrentMasterKeyVersion());
+      await expectPreviewAllowed(s);
+      const applied = await run(s, { apply: true, yes: true });
+      expect(applied, applied.message).toMatchObject({ ok: true, code: 0 });
+      expect(text()).not.toMatch(CURRENT_REFUSAL);
+      expect(await rekeyOutbox(s.tenantId)).toHaveLength(2);
+    });
+
+    it("F2: an unknown KEY_PROVIDER is refused by class before any client is built, without echoing the setting; the paired valid run passes", async () => {
+      const s = await scenario();
+      const create = vi.spyOn(migrationClientFactory, "create");
+      const before = await snapshot();
+      _resetKeyProvider();
+      vi.stubEnv("KEY_PROVIDER", "no-such-provider");
+      for (const flags of [{}, { apply: true, yes: true }] as RunArgs[]) {
+        const r = await run(s, flags);
+        expect(r).toMatchObject({ ok: false, code: 1, message: expect.stringContaining("could not be initialised") });
+        expect(`${r.message}\n${text()}`).not.toContain("no-such-provider");
+      }
+      expect(create).not.toHaveBeenCalled();
+      expect(await snapshot()).toEqual(before);
+      expect(await rekeyOutbox(s.tenantId)).toHaveLength(0);
+
+      vi.unstubAllEnvs();
+      _resetKeyProvider();
+      stubClaimProviderEnv(BASE_ENV);
+      if (!process.env.MIGRATION_DATABASE_URL) vi.stubEnv("MIGRATION_DATABASE_URL", process.env.DATABASE_URL as string);
+      await expectPreviewAllowed(s);
+      expect(create).toHaveBeenCalled();
     });
   });
 
@@ -1030,8 +1157,33 @@ describe.skipIf(SKIP)("tenant-domain rekey-accounts (#954)", () => {
       expect(result.message).toContain(casMessage(victim));
     });
 
+    it("(b2) tenant_id: re-filing the victim under another tenant is caught by the step-9 re-read (S1), not by the CAS", async () => {
+      // A candidate leaving the tenant now changes the snapshot's candidates and
+      // filed-elsewhere sets, so the re-read refuses first; the CAS's tenantId
+      // term is not reachable from outside the transaction.
+      const { s, victim } = await raceScenario();
+      const other = await newTenant();
+      // The accounts trigger denies a tenant_id change unless app.tenant_id names the new tenant.
+      const result = await applyWithRace(s, () =>
+        ctx.su.prisma.$transaction(async (tx) => {
+          await tx.$executeRawUnsafe(`SELECT set_config('app.tenant_id', $1, true)`, other);
+          return tx.$executeRawUnsafe(`UPDATE accounts SET tenant_id = $1::uuid WHERE id = $2`, other, victim);
+        }),
+      );
+      expect(result.message).toContain(CHANGED);
+      expect(result.message).not.toContain("changed after it was read");
+    });
+
+    it("(b3) providerAccountId CAS: a changed account id fails the write, not the re-read", async () => {
+      const { s, victim } = await raceScenario();
+      const result = await applyWithRace(s, async () =>
+        (await ctx.su.prisma.account.updateMany({ where: { id: victim }, data: { providerAccountId: `fresh-${marker}` } })).count,
+      );
+      expect(result.message).toContain(casMessage(victim));
+    });
+
     it("(c) insert at the target key via the second warm call: the unique violation maps to its message, with no pid", async () => {
-      const { s, victim, victimSeed } = await raceScenario();
+      const { s, victimSeed } = await raceScenario();
       const result = await applyWithRace(
         s,
         async () => {
@@ -1044,7 +1196,6 @@ describe.skipIf(SKIP)("tenant-domain rekey-accounts (#954)", () => {
       expect(result.message).toContain(`Another account at "${TO}" appeared during the run`);
       expect(result.message).toContain("nothing was moved");
       expect(`${result.message}\n${text()}`).not.toContain(victimSeed.pid);
-      expect(victim).toBeTruthy();
     });
 
     describe("(d) one cell per compared term of the step-9 re-read", () => {

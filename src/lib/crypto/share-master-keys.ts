@@ -28,13 +28,23 @@ export type KeyWarmStatus = (typeof KEY_WARM_STATUS)[keyof typeof KEY_WARM_STATU
 /**
  * Fetch each given version and the current one, each on its own, and report
  * which loaded. A version that fails is reported, not thrown: the caller knows
- * which stored values it guards and refuses with them named.
+ * which stored values it guards and refuses with them named. A provider that
+ * cannot be initialised at all (an unknown `KEY_PROVIDER`, a missing region or
+ * vault URL, an invalid current version) reports every given version
+ * unavailable rather than throwing: its message names configuration, and the
+ * worker stores what this throws in a tenant-readable delivery error.
  */
 export async function warmShareMasterKeys(versions: Iterable<number>): Promise<Map<number, KeyWarmStatus>> {
-  const provider = await getKeyProvider();
   const wanted = new Set<number>(versions);
-  wanted.add(getCurrentMasterKeyVersion());
   const report = new Map<number, KeyWarmStatus>();
+  let provider: Awaited<ReturnType<typeof getKeyProvider>>;
+  try {
+    provider = await getKeyProvider();
+    wanted.add(getCurrentMasterKeyVersion());
+  } catch {
+    for (const version of wanted) report.set(version, KEY_WARM_STATUS.UNAVAILABLE);
+    return report;
+  }
   for (const version of [...wanted].sort((a, b) => a - b)) {
     try {
       await provider.getKey("share-master", version);

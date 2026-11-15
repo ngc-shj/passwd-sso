@@ -58,7 +58,7 @@ import {
   type TestContext,
 } from "./helpers";
 import { _resetKeyProvider } from "@/lib/key-provider";
-import { encryptServerData } from "@/lib/crypto/crypto-server";
+import { encryptServerData, getCurrentMasterKeyVersion } from "@/lib/crypto/crypto-server";
 import { DELIVERERS } from "@/workers/audit-delivery";
 import { processDeliveryBatch } from "@/workers/audit-outbox-worker";
 import { migrateWebhookSecrets } from "@/../scripts/migrate-webhook-secrets-v1-to-v2";
@@ -80,6 +80,9 @@ describe("cloud KEY_PROVIDER: out-of-app processes warm the keys they use", () =
   let userId: string;
 
   beforeAll(async () => {
+    // The cells prove the row version is warmed in its own right; that is vacuous
+    // if the current-version warm would have covered it anyway.
+    expect(getCurrentMasterKeyVersion()).not.toBe(ROW_VERSION);
     ctx = await createTestContext();
     wp = createPrismaForRole("worker", { max: 1 });
   });

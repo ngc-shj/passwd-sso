@@ -566,10 +566,11 @@ describe("operator scripts as an owner-shaped NOSUPERUSER NOBYPASSRLS role", () 
     });
 
     it("bind attestation (TENANT_CLAIM_BINDING_WRITE) records an operator rebind of a sign-in's binding, and rekey-accounts then passes R-c", async () => {
-      quiet();
+      const out = quiet();
       const t = await seedRekeyTenant("signin");
       const refused = await cmdRekeyAccounts({ tenant: t.tenantId, to: ALPHA, by: "ops" });
       expect(refused).toMatchObject({ ok: false, code: 1 });
+      expect(out.text()).toContain("not bound by an operator");
 
       const attested = await cmdBind({ claim: t.claim, provider: ALPHA, by: "ops", acceptUnusedProvider: true, yes: true });
 

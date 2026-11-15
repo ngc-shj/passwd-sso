@@ -27,3 +27,10 @@
 
 ## D5 addendum — Phase 2 self-check RT7
 - The testing self-check re-raised D5's unexecuted red-proofs as RT7 Major. Disposition unchanged, with the reasoning made explicit: moving `enqueueAuditInTx` after the transaction makes it run outside `withBypassRls`, where `enqueueAuditInTx` throws ("called outside withBypassRls/withTenantRls scope"), so the allow-path cells (ok + exactly two outbox rows) fail; dropping a model from `TENANT_ACCOUNT_REKEY` fails `check-bypass-rls` (a reached model outside the grant) and the RDS-shaped cells (RLS refuses the ungranted table). Both are decided by an adjudicator that runs in CI, not by a test the mutation could leave green.
+
+## D7 — Phase 3 round 1: candidates by account ownership, current key version, provider init
+- C1/F5 narrowed (security review S1): the plan selected every legacy account of an active member. An account whose `Account.tenantId` is another tenant came through that tenant's sign-in, so moving it would let the target's IdP assert an identity it never vouched for. Those accounts are now listed as "not moved" and left as they are — not a refusal, since no command re-files `Account.tenantId` and a refusal would block the tenant for good. The step-9 re-read compares that set too.
+- C6 (functionality review F1): both passes now also require the CURRENT share-master version to load whenever any candidate holds a token, since re-encryption uses it; the preview refuses what the apply would otherwise fail on after the prompt.
+- C1 step 5 (functionality review F2): implemented as planned — the key provider and the current version are read before any client is built, with a fixed refusal naming the settings to check.
+- `warmShareMasterKeys` (security review S2) reports every version unavailable instead of throwing when the provider cannot be initialised, so no configuration text reaches the worker's tenant-readable delivery error.
+- With the step-9 re-read now comparing the filed-elsewhere set, a concurrent change of a candidate's `tenant_id` is caught by the re-read; the CAS `tenantId` predicate stays as defense in depth for a change after the re-read, which no test seam reaches.

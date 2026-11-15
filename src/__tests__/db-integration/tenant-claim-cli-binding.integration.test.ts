@@ -761,11 +761,19 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
     /** A tenant whose one member holds the legacy account, and a claim already bound to ALPHA by `variant`. */
     async function engineBoundClaim(variant: (typeof VARIANTS)[number], arm: string, createdBy = variant.createdBy, label = variant.label) {
       stubClaimProviderEnv(TWO_CONNECTIONS);
-      const tenantId = await tenantWith([JACKSON_LEGACY_PROVIDER_ID]);
-      const claim = freshClaim(`attest-${arm}`);
-      await seedClaim(tenantId, claim, { provider: ALPHA, createdBy });
-      if (label !== null) await appendEvent(claim, tenantId, label, variant.operation);
-      return { tenantId, claim };
+      // The tenant exists before any step that can throw, and a throw deletes it:
+      // the caller's `finally` only starts once this has returned its id.
+      const tenantId = await ctx.createTenant();
+      try {
+        await member(tenantId, [JACKSON_LEGACY_PROVIDER_ID]);
+        const claim = freshClaim(`attest-${arm}`);
+        await seedClaim(tenantId, claim, { provider: ALPHA, createdBy });
+        if (label !== null) await appendEvent(claim, tenantId, label, variant.operation);
+        return { tenantId, claim };
+      } catch (e) {
+        await ctx.deleteTestData(tenantId);
+        throw e;
+      }
     }
 
     const rekey = (tenantId: string) => cmdRekeyAccounts({ tenant: tenantId, to: ALPHA, by: "ops" });

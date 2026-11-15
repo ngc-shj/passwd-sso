@@ -161,6 +161,8 @@ import {
   type DecryptFailureKind,
 } from "@/lib/crypto/account-token-crypto";
 import { isUniqueViolationOn, pgErrorCode } from "@/lib/prisma/prisma-error";
+import { getKeyProvider } from "@/lib/key-provider";
+import { getCurrentMasterKeyVersion } from "@/lib/crypto/crypto-server";
 // `realign`'s I/O, from modules that never import the application's Prisma
 // singleton: it throws at import without DATABASE_URL, and this tool runs on
 // MIGRATION_DATABASE_URL alone (round-7 F-R7-2). `tenant-domain-import-graph.test.ts`
@@ -3435,6 +3437,13 @@ type RekeySnapshot = {
   candidates: RekeyCandidate[];
   /** Candidate account ids blocked by an account already at the target. */
   conflicts: { accountId: string; reason: string }[];
+  /**
+   * Active members' legacy accounts filed under another tenant: not moved. The
+   * account came through that tenant's sign-in, and so likely through its
+   * connection, so moving it would let this tenant's IdP assert an identity it
+   * never vouched for.
+   */
+  filedElsewhere: { accountId: string; userId: string; tenantId: string }[];
 };
 
 const TOKEN_FIELDS = ["refresh_token", "access_token", "id_token"] as const;
@@ -3447,9 +3456,9 @@ function legacyAad(c: RekeyCandidate): { userId: string; provider: string; provi
 /**
  * Everything the listing shows and the move acts on, read in one transaction:
  * the tenant's live claims with the event that bound each, its active
- * members' `saml-jackson` accounts (ordered by id, so a run and its re-read
- * walk them in the same order), and the accounts at the target that would
- * collide with them. No row locks: a write by another connection during the
+ * members' `saml-jackson` accounts filed under this tenant (ordered by id, so a
+ * run and its re-read walk them in the same order) and those filed under
+ * another, and the accounts at the target that would collide with them. No row locks: a write by another connection during the
  * confirmation must not block, it is detected after it instead.
  */
 async function readRekeySnapshot(
@@ -3505,7 +3514,10 @@ async function readRekeySnapshot(
             id_token: true,
           },
         });
-  const candidates = accounts.map((a): RekeyCandidate => {
+  const filedElsewhere = accounts
+    .filter((a) => a.tenantId !== tenant.id)
+    .map((a) => ({ accountId: a.id, userId: a.userId, tenantId: a.tenantId }));
+  const candidates = accounts.filter((a) => a.tenantId === tenant.id).map((a): RekeyCandidate => {
     const memberId = memberOf.get(a.userId);
     // The accounts were read by this map's keys; a miss is a broken read, and
     // the member id is what each audit row targets.
@@ -3546,7 +3558,7 @@ async function readRekeySnapshot(
       }
     }
   }
-  return { tenant, claims, candidates, conflicts };
+  return { tenant, claims, candidates, conflicts, filedElsewhere };
 }
 
 /**
@@ -3564,6 +3576,7 @@ function rekeySnapshotKey(s: RekeySnapshot): string {
       .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
     candidates: s.candidates.map((c) => c.accountId).sort(),
     conflicts: s.conflicts.map((c) => `${c.accountId}:${c.reason}`).sort(),
+    filedElsewhere: s.filedElsewhere.map((a) => `${a.accountId}:${a.tenantId}`).sort(),
   });
 }
 
@@ -3651,6 +3664,24 @@ export async function cmdRekeyAccounts(args: {
     );
   }
 
+  // The key provider before the database (plan C1 step 5): a misconfigured
+  // provider is refused by name, ahead of any read, rather than surfacing as
+  // an unexpected error mid-transaction. Class only — the provider's message
+  // can name a vault URL or a secret path.
+  let currentKeyVersion: number;
+  try {
+    await getKeyProvider();
+    currentKeyVersion = getCurrentMasterKeyVersion();
+  } catch (e) {
+    return {
+      ok: false,
+      code: 1,
+      message:
+        `The share-master key provider could not be initialised (${e instanceof Error ? e.constructor.name : typeof e}); ` +
+        "check KEY_PROVIDER and its settings, and SHARE_MASTER_KEY_CURRENT_VERSION. Nothing was read.",
+    };
+  }
+
   const apply = args.apply === true;
   const prisma = migrationClientFactory.create(url);
   try {
@@ -3717,7 +3748,25 @@ export async function cmdRekeyAccounts(args: {
           );
         }
 
+        if (snapshot.filedElsewhere.length > 0) {
+          console.log(
+            `Not moved — accounts at ${JACKSON_LEGACY_PROVIDER_ID} of active members, filed under another tenant ` +
+              `(${snapshot.filedElsewhere.length}). Each came through that tenant's sign-in, so moving it would let ` +
+              "the IdP behind the target sign in as an identity it never vouched for; they stay as they are:",
+          );
+          for (const a of snapshot.filedElsewhere) {
+            console.log(`  account=${a.accountId}\tuser=${a.userId}\tfiled under tenant=${a.tenantId}`);
+          }
+        }
+
         const refusals: string[] = [];
+        // Every moved token is re-encrypted under the current version.
+        const hasTokens = tokenValues.some((v) => v !== null);
+        if (hasTokens && warmed.get(currentKeyVersion) !== KEY_WARM_STATUS.OK) {
+          refusals.push(
+            `the current share-master key version ${currentKeyVersion} cannot be loaded, so the moved tokens could not be re-encrypted`,
+          );
+        }
         if (claimCheck.boundToTarget.length === 0) {
           refusals.push(
             `no live claim of the tenant is bound to "${escapeUnsafeDisplayChars(args.to)}" by an operator; ` +
@@ -3781,12 +3830,13 @@ export async function cmdRekeyAccounts(args: {
             ok: false,
             code: 1,
             message:
-              "The tenant's claims, its accounts to move, or the accounts at the target changed during the " +
+              "The tenant's claims, its accounts to move or left in place, or the accounts at the target changed during the " +
               "confirmation; nothing was moved. Re-run the command to see the current state.",
           });
         }
 
         const versions = collectEnvelopeVersions(tokenValues);
+        if (hasTokens) versions.add(currentKeyVersion);
         const report = await shareMasterKeyWarmer.warm(versions);
         const unavailable = [...versions].filter((v) => report.get(v) !== KEY_WARM_STATUS.OK);
         if (unavailable.length > 0) {

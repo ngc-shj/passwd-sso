@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { _resetKeyProvider } from "@/lib/key-provider";
+import { _resetKeyProvider, getKeyProvider } from "@/lib/key-provider";
 import { getMasterKeyByVersion } from "@/lib/crypto/crypto-server";
 import { encryptWithKey, SENTINEL } from "@/lib/crypto/envelope";
 import {
@@ -55,8 +55,10 @@ afterEach(() => {
 
 describe("warmShareMasterKeys", () => {
   it("makes getMasterKeyByVersion serve the requested and the current version", async () => {
-    // Negative control: without warming, the production reader cannot serve the key.
-    expect(() => getMasterKeyByVersion(1)).toThrow();
+    // Negative control: a provider that was initialised but never asked for the
+    // key cannot serve it synchronously.
+    await getKeyProvider();
+    expect(() => getMasterKeyByVersion(1)).toThrow(/key 1 not loaded/);
     _resetKeyProvider();
 
     const report = await warmShareMasterKeys([1]);
@@ -65,6 +67,23 @@ describe("warmShareMasterKeys", () => {
     expect(report.get(CURRENT)).toBe(KEY_WARM_STATUS.OK);
     expect(getMasterKeyByVersion(1)).toEqual(Buffer.alloc(32, 1));
     expect(getMasterKeyByVersion(CURRENT)).toEqual(Buffer.alloc(32, CURRENT));
+  });
+
+  it("reports every version unavailable, without throwing, when KEY_PROVIDER is unknown", async () => {
+    vi.stubEnv("KEY_PROVIDER", "no-such-provider");
+
+    const report = await warmShareMasterKeys([1, 3]);
+
+    expect(report).toEqual(new Map([[1, KEY_WARM_STATUS.UNAVAILABLE], [3, KEY_WARM_STATUS.UNAVAILABLE]]));
+  });
+
+  it("reports every version unavailable, without throwing, when the current version is invalid", async () => {
+    vi.stubEnv("SHARE_MASTER_KEY_CURRENT_VERSION", "not-a-number");
+
+    const report = await warmShareMasterKeys([1, 3]);
+
+    expect(report).toEqual(new Map([[1, KEY_WARM_STATUS.UNAVAILABLE], [3, KEY_WARM_STATUS.UNAVAILABLE]]));
+    expect(fake.calls).toEqual([]);
   });
 
   it("reports a rejecting version as unavailable while the others stay ok", async () => {
