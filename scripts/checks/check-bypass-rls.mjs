@@ -38,7 +38,7 @@
  *
  * Pool rule: `new pg.Pool`, `new Pool`, `new pg.Client`, `new Client` and `new
  * PrismaPg` (by spelling or by a binding from "pg"/the adapter package) appear
- * only in src/lib/db/pool-factory.ts, whose pools carry the notice listener;
+ * only in src/lib/db/pool-factory.ts, whose pools carry the report listeners;
  * read by AST over every code file under src/ and scripts/, tests included.
  * POOL_RULE_ALLOWLIST names the superuser and no-bypass exceptions.
  *
@@ -2605,7 +2605,7 @@ for (const file of ALLOWED_USAGE) {
 // Check 3 judges what a bypass reaches; these three judge who can turn one on.
 // The database adjudicates a bypassed statement against `app.bypass_tables`,
 // so a path that writes the bypass GUCs itself, a pool that skips the factory's
-// notice listener, or a function created outside the migrations would each
+// report listeners, or a function created outside the migrations would each
 // step around that report. Each rule is a writer check against honest code:
 // SQL built at run time from values this gate cannot fold is outside its reach.
 
@@ -2843,8 +2843,10 @@ function walkFiles(root) {
 }
 
 const POOL_FACTORY = "src/lib/db/pool-factory.ts";
-// Constructions outside the factory, each a superuser or no-bypass site with no
-// bypass to report (R5-M2). An entry that matches no construction fails the run.
+// Constructions outside the factory: superuser or no-bypass sites with no bypass
+// to report (R5-M2), and test cells that stand in for listener-less app-role code
+// on purpose — their reports and refusals are expected to go uncounted. An entry
+// that matches no construction fails the run.
 const POOL_RULE_ALLOWLIST = new Map([
   ["scripts/bootstrap-rds-roles.mjs", "operator DB-role tooling: connects as the superuser to create roles, runs no application code"],
   ["scripts/audit-db-grants.mjs", "operator DB-role tooling: reads the catalog as the superuser, runs no application code"],
@@ -3184,7 +3186,7 @@ if (poolViolations.length > 0) {
   failed = true;
   console.error("");
   console.error(`a pg Pool/Client or PrismaPg adapter is built outside ${POOL_FACTORY}, so the`);
-  console.error("factory's notice listener never sees what its bypasses reach. Use createPool /");
+  console.error("factory's report listeners never see what its bypasses reach. Use createPool /");
   console.error("createClient / createPrismaClient, or add a superuser or no-bypass site to");
   console.error("POOL_RULE_ALLOWLIST with its reason:");
   console.error("");

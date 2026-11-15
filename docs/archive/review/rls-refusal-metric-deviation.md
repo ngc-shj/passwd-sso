@@ -22,3 +22,35 @@ The full unit suite (`npx vitest run`, exit 1) fails only `scripts/__tests__/bac
 - check-hardcoded-reuse: `"_logType"` (JSON key in test assertions) and `"name"` coincide in bytes with `LOGTYPE_PROP` in a lint gate and `AC_NAME` in the extension's form detector; different concepts, not replaced.
 - check-orphaned-checks: `src/workers/audit-outbox-worker.test.ts` is a unit test whose name matches the hook's `audit` keyword, not a gate script.
 - check-deployment-artifact (R35, Tier-1 for `monitoring.tf`): `rls-refusal-metric-manual-test.md` added.
+
+## Red-proof record (A9)
+All mutations were applied to scratch copies under the session scratchpad and run through a scratch vitest config (`mergeConfig` over the repo's unit or integration config, `root` = repo, `resolve.alias` pointing the module at the mutated copy, test paths on the CLI). The unmutated copy through the same config ran green first: unit 110 tests exit 0, integration 18 tests exit 0. Each row below exited 1 unless stated.
+
+| Mutation | Cell(s) that went red |
+|---|---|
+| drop the `code` check | A1 P0001 cell; "no SQLSTATE" cell |
+| force `exact` (drop the exact-frame check) | A1 outer-frame cell; A1 unqualified-frame cell |
+| delete the frame gate in `handleServerError` (`exact` forced, `none` not returned) | A5 look-alike "does not count a look-alike raised from another function" (integration) |
+| message regex without `^` / without `$` | A1 "text before the message" / 64-char table, text after table, newline after table |
+| hint regex without `^` / without `$` | A1 "text before the hint" / 65-char purpose, newline in hint, trailing newline |
+| drop the hint check | A1 missing-hint cell (+13 others) |
+| `mentioned` only after the first line | A1 unqualified-frame cells, refusal and warning |
+| remove the catch's fixed stderr line | A1 throwing sink (refusal listener), throwing sink (notice listener), two-failures-in-a-window |
+| drop the fallback's rate-limit gate | A1 two failures in one window / later window |
+| rate-limit key without kind | A3 warning then refusal → two lines |
+| skip the rate limit on refusals | A3 repeated refusal → one line |
+| drop the `createClient` attach | A2 single-client ErrorResponse |
+| drop the pool attach | A2 both pool refusal cells; pooled-notice cell |
+| `prependListener` → `.on` on the pool path | A2 pool cell with the preceding throwing listener |
+| remove the probe from `createPool` | A7 createPool throws; probe-runs-once; throws-twice |
+| memoize before probing | A7 "throws again on a second createPool call" |
+| probe a property pg lacks | A7 real-pg allow cell (and every cell that builds a pool or client) |
+| drop the refusal arm of `failOnReports` | unit "throws, naming both refusal helpers"; integration "failOnReports fails on a refusal no cell took" |
+| drop the `counted` check in `expectBypassRefusal` | A6 "throws when the refusal was not counted, on a connection outside pool-factory" |
+| drop the ≥1-refusal check in `expectSwallowedBypassRefusal` | A6 "throws when the statement resolves after a granted statement" |
+| `SET` before `BEGIN` in A5 (D1) | A5 post-ROLLBACK baseline check ("expected 'error' to be 'notice'") |
+| delete the `rls_bypass_refused` TF resource (scratch copy of monitoring.tf) | A4 file errors at describe time ("no resource …") |
+| change the resource's `for_each` | A4 "iterates the five service log groups" |
+| A8 stderr: script swallowing a refusal (D4) | A8 `not.toMatch` assertion |
+
+Not reddened by the mutation the plan named: forcing `exact` does not affect the A1 other-function look-alike cell, because a `where` that names no `rls_bypass_admits` is dropped before the exact check; that cell guards the `none` branch, which the "delete the frame gate" row reddens at integration level.

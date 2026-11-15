@@ -332,7 +332,7 @@ export function createClient(config: pg.ClientConfig): pg.Client {
  * pools themselves on shutdown (ending twice throws), wrong for a script that
  * only calls `$disconnect()`. With `ownsPool`, do not query after
  * `$disconnect()`: the adapter would reconnect through a pool it builds itself,
- * which has neither the notice listener nor the options check.
+ * which has neither the report listeners nor the options check.
  */
 export function createPrismaClient(
   pool: pg.Pool,
