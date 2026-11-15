@@ -61,6 +61,9 @@ describe("RLS bypass refusal count (enforcing)", () => {
     try {
       return await fn(client);
     } finally {
+      // A cell that fails mid-transaction must not hand the max: 1 pool an
+      // aborted transaction with its SET LOCAL still in force.
+      await client.query("ROLLBACK").catch(() => {});
       client.release();
     }
   }

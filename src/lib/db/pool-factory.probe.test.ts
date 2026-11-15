@@ -94,14 +94,22 @@ describe("listener support probe", () => {
   });
 });
 
-describe("checkedConfig refuses a Client or native override", () => {
+describe("checkedConfig refuses a Client, native or onConnect override", () => {
   it.each([
     ["Client", { Client: class extends EventEmitter {} }],
     ["native", { native: true }],
+    // pg-pool runs onConnect before it emits `connect`, so before the listeners attach.
+    ["onConnect", { onConnect: async () => {} }],
   ])("%s, in createPool and createClient", async (name, extra) => {
     const { createPool, createClient } = await import("@/lib/db/pool-factory");
     const config = { connectionString: URL, ...extra } as never;
     expect(() => createPool(config)).toThrow(`must not set ${name}`);
     expect(() => createClient(config)).toThrow(`must not set ${name}`);
+  });
+
+  it("accepts the keys when undefined", async () => {
+    const { createPool } = await import("@/lib/db/pool-factory");
+    const pool = createPool({ connectionString: URL, Client: undefined, onConnect: undefined } as never);
+    await pool.end();
   });
 });

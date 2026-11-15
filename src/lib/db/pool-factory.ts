@@ -52,6 +52,21 @@ const REPORT_LOG_TYPE = {
   UNPARSED: "rls.bypass_notice_unparsed",
 } as const;
 
+/**
+ * Write one report line at warn. A LOG_LEVEL above warn (error, fatal, silent —
+ * all accepted by the env schema, and changeable between deploys like
+ * client_min_messages) would make pino drop it without throwing, and the RLS
+ * metric would read zero; the line then goes to stderr directly, where the same
+ * filters match it.
+ */
+function warnReportLine(fields: { _logType: string; table?: string; purpose?: string }): void {
+  if (logger.isLevelEnabled?.("warn") === false) {
+    process.stderr.write(`${JSON.stringify(fields)}\n`);
+    return;
+  }
+  logger.warn(fields, fields._logType);
+}
+
 const logTypeOf = (kind: BypassReportKind): string =>
   kind === BYPASS_REPORT_KIND.REFUSAL ? REPORT_LOG_TYPE.REFUSAL : REPORT_LOG_TYPE.WARNING;
 
@@ -93,7 +108,7 @@ function withinRateLimit(key: string): boolean {
 export const productionBypassNoticeSink: BypassNoticeSink = ({ kind, table, purpose }) => {
   if (!withinRateLimit(`${kind}\u0000${table}\u0000${purpose}`)) return;
   const _logType = logTypeOf(kind);
-  logger.warn({ _logType, table, purpose }, _logType);
+  warnReportLine({ _logType, table, purpose });
 };
 
 export const stderrBypassNoticeSink: BypassNoticeSink = ({ kind, table, purpose }) => {
@@ -133,7 +148,7 @@ function writeUnparsedToStderr(): void {
 function logUnparsed(): void {
   if (!withinRateLimit(UNPARSED_KEY)) return;
   try {
-    logger.warn({ _logType: REPORT_LOG_TYPE.UNPARSED }, REPORT_LOG_TYPE.UNPARSED);
+    warnReportLine({ _logType: REPORT_LOG_TYPE.UNPARSED });
   } catch {
     writeUnparsedToStderr();
   }
@@ -219,11 +234,6 @@ function assertListenerSupport(): void {
   listenerSupportVerified = true;
 }
 
-/** Test seam: forget that the listener-support probe passed. */
-export function resetListenerSupportProbe(): void {
-  listenerSupportVerified = false;
-}
-
 // pg's own `errorMessage` handler settles the query, and runs a callback-style
 // query's callback synchronously, so a listener behind it can be skipped by a
 // throw. Prepending makes the count independent of what a caller does.
@@ -281,9 +291,11 @@ function checkedConfig<T extends pg.ClientConfig>(config: T): T {
   const fields = snapshot as Record<string, unknown>;
   // The listener probe checks pg.Client; a pool building another class would
   // hand `connect` clients the probe never saw.
-  for (const name of ["Client", "native"]) {
+  // `onConnect` runs queries on a new client before pg-pool emits `connect`, so
+  // before the listeners attach: its reports and refusals would go uncounted.
+  for (const name of ["Client", "native", "onConnect"]) {
     if (fields[name] !== undefined) {
-      throw new Error(`database connection config must not set ${name}: the RLS bypass listeners are checked against pg.Client`);
+      throw new Error(`database connection config must not set ${name}: the RLS bypass listeners must see every client the pool builds`);
     }
   }
   for (const name of STARTUP_STRING_PARAMS) {

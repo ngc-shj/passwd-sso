@@ -10,6 +10,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { Writable } from "node:stream";
 import pino from "pino";
+import logger from "@/lib/logger";
 
 const chunks: string[] = [];
 vi.mock("@/lib/logger", async (importOriginal) => {
@@ -256,5 +257,48 @@ describe("rls.bypass_refused line vs its metric filter", () => {
     expect(tf.attr(filter, "for_each", { vars: { enable_monitoring: false } })).toEqual({});
     const each = { key: "app", value: (groups as Record<string, unknown>).app };
     expect(String(tf.attr(filter, "log_group_name", { each }))).toBe(String(each.value));
+  });
+});
+
+describe("report lines under a LOG_LEVEL above warn", () => {
+  // LOG_LEVEL is a task-definition variable the env schema accepts as "error",
+  // "fatal" or "silent"; pino would drop a warn line without throwing.
+  function stderrLines(level: string, emit: () => void): string[] {
+    registerBypassNoticeSink(null);
+    resetBypassNoticeRateLimit();
+    chunks.length = 0;
+    const previous = logger.level;
+    const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      logger.level = level;
+      emit();
+      return write.mock.calls.map((c) => String(c[0]));
+    } finally {
+      write.mockRestore();
+      logger.level = previous;
+    }
+  }
+
+  it.each(["error", "fatal", "silent"])("writes each kind to stderr, matched by its filter, at %s", (level) => {
+    const refusal = stderrLines(level, () => handleServerError(REFUSAL));
+    const warning = stderrLines(level, () =>
+      handleServerNotice({ code: "01000", message: "rls_bypass_not_granted table=sessions purpose=auth_flow", where: REFUSAL.where }),
+    );
+    const unparsed = stderrLines(level, () => handleServerError({ ...REFUSAL, hint: undefined }));
+    expect(chunks).toEqual([]);
+    for (const [lines, filter] of [
+      [refusal, "rls_bypass_refused"],
+      [warning, "rls_bypass_not_granted"],
+      [unparsed, "rls_bypass_notice_unparsed"],
+    ] as const) {
+      expect(lines).toHaveLength(1);
+      expect(matchesFilterPattern(filterPattern(filter), JSON.parse(lines[0]))).toBe(true);
+    }
+    expect(JSON.parse(refusal[0])).toEqual({ _logType: "rls.bypass_refused", table: "sessions", purpose: "auth_flow" });
+  });
+
+  it("logs through the logger, not stderr, at warn", () => {
+    expect(stderrLines("warn", () => handleServerError(REFUSAL))).toEqual([]);
+    expect(chunks).toHaveLength(1);
   });
 });

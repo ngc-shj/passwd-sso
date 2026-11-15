@@ -1413,16 +1413,26 @@ does, and is rate-limited the same way, separately from it.
 It exists because the WARNING can be kept from the client: a
 `client_min_messages` above `warning`, set on the role or database between
 deploys, suppresses it, and a caller that catches the 42501 then leaves no
-trace. The error is always delivered. The line is taken on the connection
-before any caller sees the error, so a swallowed refusal still counts. It
-exists only on an enforcing database; in report mode nothing is refused.
+trace. The error is always delivered to the client, unless SQL itself catches
+it in an `EXCEPTION` handler that does not re-raise (none does today). The
+line is taken on the connection before any caller sees the error, so a
+swallowed refusal still counts. It exists only on an enforcing database; in
+report mode nothing is refused.
+
+All three RLS lines are written at warn. When `LOG_LEVEL` is above `warn`
+(`error`, `fatal`, `silent`), the pool listener writes them straight to stderr
+as the same JSON line, so the filters still match.
 
 Normally a refusal produces both lines, so one refused statement counts twice
 on `RlsBypassNotGranted`; a refusal line without its `rls.bypass_not_granted`
 line in the same group and window means the WARNING is being suppressed.
-Check `client_min_messages` for the service's role and database
-(`SELECT * FROM pg_db_role_setting`), and remove the setting: in report mode
-it would silence every report.
+Find where `client_min_messages` comes from and remove it: in report mode it
+would silence every report. As the service's role, `SELECT setting, source
+FROM pg_settings WHERE name = 'client_min_messages'` names the source: `user`,
+`database` or `database user` for a role or database setting (also listed in
+`pg_db_role_setting`), `session` when code ran `SET client_min_messages`
+itself (search the code for it), and a server-level source otherwise (an RDS
+parameter group).
 
 **Severity**: medium
 **Trigger**: any occurrence. The normal count is 0.

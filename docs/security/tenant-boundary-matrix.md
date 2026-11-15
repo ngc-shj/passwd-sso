@@ -102,7 +102,9 @@ built with `defineGrant(purpose, models)`. `withBypassRls(prisma, fn, grant)` an
   listener in `src/lib/db/pool-factory.ts` logs the WARNING as
   `_logType: "rls.bypass_not_granted"` and the refusal as `_logType: "rls.bypass_refused"`, and
   CloudWatch counts both (`RlsBypassNotGranted`). The refusal line does not depend on the WARNING
-  reaching the client, so a raised `client_min_messages` cannot silence it. A statement
+  reaching the client, so a raised `client_min_messages` cannot silence it (unless the refusal is
+  caught in SQL by a handler that does not re-raise; see security-review.md section 1). Both lines
+  are written to stderr when `LOG_LEVEL` is above `warn`. A statement
   that examines no row raises nothing. FK cascades, and the other cases listed in
   [security-review.md](./security-review.md) section 1 ("Not covered by the enforcement"), are
   outside this control.

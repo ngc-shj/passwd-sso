@@ -183,9 +183,12 @@ describe("productionBypassNoticeSink", () => {
 describe("stderrBypassNoticeSink", () => {
   it("writes the report as a JSON line to stderr", () => {
     const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-    stderrBypassNoticeSink({ kind: BYPASS_REPORT_KIND.WARNING, table: "users", purpose: "system_maintenance" });
-    expect(write).toHaveBeenCalledWith('{"_logType":"rls.bypass_not_granted","table":"users","purpose":"system_maintenance"}\n');
-    write.mockRestore();
+    try {
+      stderrBypassNoticeSink({ kind: BYPASS_REPORT_KIND.WARNING, table: "users", purpose: "system_maintenance" });
+      expect(write).toHaveBeenCalledWith('{"_logType":"rls.bypass_not_granted","table":"users","purpose":"system_maintenance"}\n');
+    } finally {
+      write.mockRestore();
+    }
   });
 });
 
@@ -378,7 +381,9 @@ describe("handleServerError", () => {
     ["a trailing newline in the hint", refusal({ hint: "bypass purpose auth_flow\n" })],
     ["a missing hint", refusal({ hint: undefined })],
     ["a missing message", refusal({ message: undefined })],
-    ["a non-string hint", refusal({ hint: 42 })],
+    // Coerced, these would match: only the typeof guards refuse them.
+    ["a non-string hint", refusal({ hint: { toString: () => "bypass purpose auth_flow" } })],
+    ["a non-string message", refusal({ message: { toString: () => "RLS_BYPASS_NOT_GRANTED: users" } })],
   ])("logs one constant line, with no content, for %s", (_label, error) => {
     const seen: BypassNotice[] = [];
     registerBypassNoticeSink((n) => seen.push(n));
