@@ -2442,35 +2442,71 @@ exit 0`);
   });
 
   // The errno is read from bash's wording, which the script pins with LC_ALL=C.
-  // The second locale is any translated one this host has; without one, only
-  // the C-locale run exists (the translation would be inert anyway).
-  const translatedLocale = (spawnSync("locale", ["-a"], { encoding: "utf8" }).stdout ?? "")
-    .split("\n").find((l) => /^(ja_JP|de_DE|fr_FR)\.utf-?8$/i.test(l));
-  for (const locale of ["C", ...(translatedLocale ? [translatedLocale] : [])]) {
-  it(`still reports a race when the racer's pid is gone by the time rmdir fails (${locale})`, () => {
-    // The claim met a racer's pid (EEXIST); the racer then released with rm -rf,
-    // which had unlinked pid but not yet the directory when this run's rmdir
-    // ran. What the directory looks like afterwards does not make that this
-    // run's own failure.
-    mkdirSync(backupDir, { recursive: true, mode: 0o700 });
-    chmodSync(backupDir, 0o700);
-    const realMkdir = spawnSync("sh", ["-c", "command -v mkdir"], { encoding: "utf8" }).stdout.trim();
-    stub("mkdir", `
-"${realMkdir}" "$@" || exit $?
+  // That pin is only observable under a locale in which bash really translates
+  // both messages: a locale can be listed by `locale -a` while bash's catalogue
+  // is not installed. The candidate is accepted only when bash, run under it,
+  // words neither error in English. Without one (the stock CI runner) the
+  // translated cases are reported as skipped, not silently left out.
+  const translatingLocale = (() => {
+    const probeDir = mkdtempSync(join(tmpdir(), "backup-db-locale-"));
+    try {
+      writeFileSync(join(probeDir, "existing"), "", "utf8");
+      const candidates = (spawnSync("locale", ["-a"], { encoding: "utf8" }).stdout ?? "")
+        .split("\n").filter((l) => /\.utf-?8$/i.test(l) && !/^(C|POSIX|en_)/i.test(l));
+      return candidates.find((loc) => {
+        const p = spawnSync("bash", ["-c", "set -C; : > existing; : > missing/x"], {
+          cwd: probeDir, encoding: "utf8", env: { PATH: process.env.PATH, LANG: loc, LC_ALL: loc },
+        });
+        return p.stderr.split("\n").filter(Boolean).length === 2
+          && !/cannot overwrite existing file|No such file or directory/.test(p.stderr);
+      });
+    } finally {
+      rmSync(probeDir, { recursive: true, force: true });
+    }
+  })();
+
+  // Two contention shapes that leave an empty-looking lock behind, so only the
+  // claim's errno tells them from this run's own failure:
+  //   EEXIST — a racer's pid, unlinked by the racer's own rm -rf before the
+  //            directory went, by the time this run's rmdir ran;
+  //   ENOENT — the lock was released before the claim, and a third run's fresh,
+  //            still-empty lock is there by the time this run looks.
+  // Absolute paths: both mkdir and rmdir are stubbed in these cases, and each
+  // stub must reach the real other one, not its sibling stub.
+  const realBin = (name) => spawnSync("sh", ["-c", `command -v ${name}`], { encoding: "utf8" }).stdout.trim();
+  const contentionShapes = [
+    { errno: "EEXIST", onLock: () => `: > "$a/pid"`, onRmdir: () => `rm -f -- "$last/pid"` },
+    { errno: "ENOENT", onLock: () => `"${realBin("rmdir")}" -- "$a"`, onRmdir: () => `"${realBin("mkdir")}" -- "$last"` },
+  ];
+  for (const { errno, onLock, onRmdir } of contentionShapes) {
+    for (const translated of [false, true]) {
+      const locale = translated ? translatingLocale : "C";
+      it.skipIf(translated && !translatingLocale)(
+        `still reports a race when the claim met ${errno} and the lock looks empty${translated ? " (translated locale)" : ""}`, () => {
+        mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+        chmodSync(backupDir, 0o700);
+        stub("mkdir", `
+"${realBin("mkdir")}" "$@" || exit $?
 for a in "$@"; do
   case "$a" in
-    */.lock.d) : > "$a/pid" ;;
+    */.lock.d) ${onLock()} ;;
   esac
 done
 exit 0`);
-    stub("rmdir", `
+        stub("rmdir", `
 for a in "$@"; do last="$a"; done
-rm -f -- "$last/pid"
+${onRmdir()}
 exit 1`);
-    const r = run({ LANG: locale, LC_ALL: locale });
-    expect(err(r)).toBe("LOCKED");
-    expect(r.stderr).toMatch(/claimed .* at the same moment/);
-  });
+        const r = run({ LANG: locale, LC_ALL: locale });
+        // The state the case is about, or it tests nothing: a lock still there,
+        // with no pid in it.
+        const lock = join(backupDir, ".lock.d");
+        expect(existsSync(lock), "the lock must look present").toBe(true);
+        expect(existsSync(join(lock, "pid")), "the lock must look unclaimed").toBe(false);
+        expect(err(r)).toBe("LOCKED");
+        expect(r.stderr).toMatch(/claimed .* at the same moment/);
+      });
+    }
   }
 
   it.skipIf(!existsSync("/dev/full"))(
