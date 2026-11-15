@@ -70,3 +70,46 @@ R12 OK; R42 OK; R44/R50 OK; R57 OK; RT1 m5; RT2 OK; RT3 OK; RT4 m3; RT5 OK; RT6 
 - `npx tsc --noEmit` 0; eslint on touched files 0; unit (972) 0; integration on the touched files (309) 0.
 - `scripts/pre-pr.sh` via `check-pre-pr.sh run`: 94 passed, 1 failed — `Test`, only `scripts/__tests__/backup-db.test.mjs` Group B (6 cells: no `pg_restore` reachable from a git worktree's compose project; environmental, unchanged by this branch).
 - Full `npm run test:integration` (before round 1): failures only in environment-bound files — S3/MinIO not running (`audit-anchor-*`, `team-rekey-pass`, `team-attachment-rekey`, `retention-gc-blob-orphans`) and this worktree database's cluster-role state (`retire-dcr-cleanup-worker`, `revoke-public-connect`, `audit-db-grants`, `bootstrap-rds-roles`: the retired `passwd_dcr_cleanup_worker` holds CONNECT on `passwd_sso_wt_954`). None touches this diff.
+
+---
+
+# Round 2
+Date: 2026-11-16
+
+## Changes from Previous Round
+Round-1 fixes (commit `review(1)`): ownership-scoped candidates with a listed "not moved" set, current-key-version refusal, provider initialisation before any read, fail-soft warm helper, and the review-flagged test cells.
+
+## Functionality Findings
+No findings. F1, F2, S1, S2 verified resolved; S3 skip and S4 rejection unchanged.
+
+## Security Findings
+No findings. S1 verified closed (the realign path is filtered; the only non-CLI writer of `Account.tenantId`, `src/auth.ts`, re-files onto the tenant signed into). R43: no predicate widened — the candidate set is strictly narrower, the re-read compares more, the new refusal and the post-confirmation current-version check only add denials, and the warm helper's no-throw path reports every version unavailable, which every caller treats as fail-closed. The operator-facing "not moved" listing prints opaque ids only. S3 skip and S4 rejection agreed.
+
+## Testing Findings
+- m-R2-1 Minor — the CAS `tenantId` predicate has no cell that can fail: since S1 the step-9 re-read catches a re-filed account first.
+- m-R2-2 Minor (optional) — the F2 cell's closing valid run rebuilds the env by hand after `vi.unstubAllEnvs()`.
+- M1, m1, m3, m4, m5 resolved; m2 partly (b3 covers `providerAccountId`; `tenantId` is m-R2-1).
+
+## Recurring Issue Check
+### Functionality expert
+R1–R57: no issues.
+### Security expert
+R1–R57 OK (R31 closed by ownership scoping; R43 checked, no widening); RS1–RS6 OK.
+### Testing expert
+R1–R57 no new FAIL; RT7 m-R2-1; other RT OK.
+
+## Resolution Status (round 2)
+### m-R2-1 Minor — CAS `tenantId` predicate unreachable by a test — Accepted
+- **Anti-Deferral check**: acceptable risk.
+- **Justification**:
+  - Worst case: the predicate is removed later and nobody notices; a candidate whose `tenant_id` changes in the milliseconds between the step-9 re-read and its own write is then moved. The trigger on `accounts` already refuses a `tenant_id` change unless the writer sets `app.tenant_id` to the new tenant, so such a change is itself an RLS-context write, not an ordinary one.
+  - Likelihood: low — it needs a concurrent, deliberately-scoped re-file inside a window with no seam, after a refactor that drops the term.
+  - Cost to fix: a seam between the re-read and the write that exists only for this test, i.e. production code shaped for one assertion; the re-read cells (b2) already pin the observable contract for every reachable change.
+- **Orchestrator sign-off**: acceptable-risk exception satisfied; recorded beside D7, which keeps the predicate as defense in depth.
+### m-R2-2 Minor — F2 env rebuild — Skipped
+- **Anti-Deferral check**: acceptable risk.
+- **Justification**: Worst case — a future `beforeEach` stub is missing from the F2 cell's closing allow run, which then fails loudly or passes for a narrower reason. Likelihood — low; the cell passes today and its allow run is a true positive control. Cost to fix — restructuring the cell into two cells, a test-only refactor with no change in what is proven.
+- **Orchestrator sign-off**: acceptable-risk exception satisfied.
+
+## Termination
+Round 2: no Critical, Major, or new behavioural finding from any expert; both remaining findings are test-only Minors recorded above. Loop ends at round 2.
