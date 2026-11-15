@@ -32,17 +32,18 @@ export function TeamInviteByEmailSection({ teamId, onSuccess }: Props) {
   const [invRole, setInvRole] = useState<string>(TEAM_ROLE.MEMBER);
   const [inviting, setInviting] = useState(false);
   // The link is shown once: the server keeps only the token's digest.
-  const [issuedLink, setIssuedLink] = useState<string | null>(null);
+  const [issuedLink, setIssuedLink] = useState<{ email: string; url: string } | null>(null);
 
   const handleInvite = async () => {
-    if (!invEmail.trim()) return;
+    const email = invEmail.trim();
+    if (!email) return;
     setInviting(true);
     setIssuedLink(null);
     try {
       const res = await fetchApi(apiPath.teamInvitations(teamId), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: invEmail.trim(), role: invRole }),
+        body: JSON.stringify({ email, role: invRole }),
       });
       if (res.status === 409) {
         const body = await readApiErrorBody(res);
@@ -61,7 +62,7 @@ export function TeamInviteByEmailSection({ teamId, onSuccess }: Props) {
       }
       const data = await res.json();
       const inviteUrl = appUrl(`/dashboard/teams/invite/${data.token}`);
-      setIssuedLink(inviteUrl);
+      setIssuedLink({ email, url: inviteUrl });
       setInvEmail("");
       onSuccess();
       // The invitation exists from here on: a clipboard refusal, or no
@@ -122,10 +123,15 @@ export function TeamInviteByEmailSection({ teamId, onSuccess }: Props) {
       </div>
       {issuedLink && (
         <div className="space-y-2">
-          <p className="text-sm font-medium">{t("inviteLinkShownOnce")}</p>
+          <p className="text-sm font-medium">{t("inviteLinkShownOnce", { email: issuedLink.email })}</p>
           <div className="flex items-center gap-2">
-            <Input value={issuedLink} readOnly aria-label={t("inviteLinkShownOnce")} className="font-mono text-xs" />
-            <CopyButton getValue={() => issuedLink} />
+            <Input
+              value={issuedLink.url}
+              readOnly
+              aria-label={t("inviteLinkShownOnce", { email: issuedLink.email })}
+              className="font-mono text-xs"
+            />
+            <CopyButton getValue={() => issuedLink.url} />
           </div>
         </div>
       )}

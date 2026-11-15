@@ -1001,7 +1001,7 @@ describe("TeamMembersPage (invite by email: the link is shown once)", () => {
 
     // jsdom has no clipboard (as on a non-secure origin): the invitation is
     // still reported as sent, and its link is on screen to copy by hand.
-    expect(await screen.findByLabelText("inviteLinkShownOnce")).toHaveValue(
+    expect(await screen.findByLabelText('inviteLinkShownOnce:{"email":"bob@example.com"}')).toHaveValue(
       "https://example.com/dashboard/teams/invite/abc123",
     );
     expect(mockToast.success).toHaveBeenCalledWith("invitedLinkNotCopied");

@@ -61,7 +61,7 @@
   "invitedWithLink": "招待を送信しました。招待URLをクリップボードにコピーしました。",
   "inviteFailed": "招待の送信に失敗しました",
   "invitedLinkNotCopied": "招待を送信しました。下の招待リンクをコピーしてください。",
-  "inviteLinkShownOnce": "招待リンクです。再表示できないため、今コピーしてください。",
+  "inviteLinkShownOnce": "{email} への招待リンクです。再表示できないため、今コピーしてください。",
   "alreadyMember": "このユーザーは既にメンバーです",
   "alreadyInvited": "既に招待済みです",
   "pendingInvitations": "保留中の招待",

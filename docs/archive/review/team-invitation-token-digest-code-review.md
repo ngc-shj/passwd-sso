@@ -179,3 +179,25 @@ the same pattern as the SCIM token and API keys).
 - Action: one render issues an invite (link shown), then a refused invite (link
   gone). Removing `setIssuedLink(null)` fails it.
 - Modified file: `src/components/team/members/__tests__/team-invite-by-email-section.test.tsx`
+
+## Round 3 (incremental: ad20d6f13..42e8fc5c2)
+
+Security: no findings (the link lives in the issuing admin's own component
+state, cleared by the next invite, by closing the dialog and by leaving the page;
+the test's temporary role, grants and ownership are all inside the rolled-back
+transaction). Testing: no findings; F5, T2 and T3 red-proofs re-run on the
+committed files, each mutation failing a different assertion. Functionality: F5
+resolved (the add-from-tenant section still closes the dialog; no other caller
+and no E2E test relies on the dialog closing).
+
+- **F6 [Minor]** The shown link did not name the invitee, and stayed beside the
+  next email typed, so it could be copied as another person's link.
+
+### Resolution Status (round 3)
+
+#### F6 [Minor] Link without its invitee
+- Action: the section keeps `{ email, url }`; the label and the field's
+  accessible name read "Invite link for {email}" (en and ja). Rendering the
+  label without the email fails four component tests.
+- Modified file: `src/components/team/members/team-invite-by-email-section.tsx`,
+  `messages/{en,ja}/Team.json`, the component and page tests

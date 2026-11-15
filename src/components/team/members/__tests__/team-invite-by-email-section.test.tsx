@@ -15,7 +15,8 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 const { mockFetchApi } = vi.hoisted(() => ({ mockFetchApi: vi.fn() }));
 
 vi.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
+  useTranslations: () => (key: string, params?: Record<string, unknown>) =>
+    params ? `${key}:${JSON.stringify(params)}` : key,
 }));
 
 vi.mock("sonner", () => ({
@@ -115,6 +116,8 @@ describe("TeamInviteByEmailSection", () => {
 
   describe("the issued link (shown once: the server keeps only its digest)", () => {
     const LINK = "https://example.com/dashboard/teams/invite/abc123";
+    // The label names the invitee the link belongs to.
+    const BOB_LINK_LABEL = 'inviteLinkShownOnce:{"email":"bob@example.com"}';
 
     async function invite() {
       mockFetchApi.mockResolvedValue({ ok: true, status: 201, json: async () => ({ token: "abc123" }) });
@@ -131,7 +134,7 @@ describe("TeamInviteByEmailSection", () => {
 
     it("is displayed and copied after a successful invite", async () => {
       await invite();
-      expect(screen.getByLabelText("inviteLinkShownOnce")).toHaveValue(LINK);
+      expect(screen.getByLabelText(BOB_LINK_LABEL)).toHaveValue(LINK);
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith(LINK);
       expect(toast.success).toHaveBeenCalledWith("invitedWithLink");
     });
@@ -139,7 +142,7 @@ describe("TeamInviteByEmailSection", () => {
     it("stays displayed when the clipboard refuses, and the invite is not reported as failed", async () => {
       vi.mocked(navigator.clipboard.writeText).mockRejectedValueOnce(new Error("denied"));
       const onSuccess = await invite();
-      expect(screen.getByLabelText("inviteLinkShownOnce")).toHaveValue(LINK);
+      expect(screen.getByLabelText(BOB_LINK_LABEL)).toHaveValue(LINK);
       expect(toast.success).toHaveBeenCalledWith("invitedLinkNotCopied");
       expect(toast.error).not.toHaveBeenCalled();
       expect(onSuccess).toHaveBeenCalled();
@@ -153,14 +156,14 @@ describe("TeamInviteByEmailSection", () => {
       } finally {
         Object.defineProperty(navigator, "clipboard", { value: clipboard, configurable: true });
       }
-      expect(screen.getByLabelText("inviteLinkShownOnce")).toHaveValue(LINK);
+      expect(screen.getByLabelText(BOB_LINK_LABEL)).toHaveValue(LINK);
       expect(toast.success).toHaveBeenCalledWith("invitedLinkNotCopied");
       expect(toast.error).not.toHaveBeenCalled();
     });
 
     it("is cleared when the next invite is refused", async () => {
       await invite();
-      expect(screen.getByLabelText("inviteLinkShownOnce")).toHaveValue(LINK);
+      expect(screen.getByLabelText(BOB_LINK_LABEL)).toHaveValue(LINK);
 
       mockFetchApi.mockResolvedValue(new Response(JSON.stringify({ error: "INVITATION_ALREADY_SENT" }), { status: 409 }));
       fireEvent.change(screen.getByPlaceholderText("inviteEmailPlaceholder"), {
@@ -169,7 +172,7 @@ describe("TeamInviteByEmailSection", () => {
       await act(async () => {
         fireEvent.click(screen.getByText("inviteSend"));
       });
-      expect(screen.queryByLabelText("inviteLinkShownOnce")).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/^inviteLinkShownOnce/)).not.toBeInTheDocument();
     });
 
     it("is not displayed when the invite is refused", async () => {
@@ -181,7 +184,7 @@ describe("TeamInviteByEmailSection", () => {
       await act(async () => {
         fireEvent.click(screen.getByText("inviteSend"));
       });
-      expect(screen.queryByLabelText("inviteLinkShownOnce")).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/^inviteLinkShownOnce/)).not.toBeInTheDocument();
     });
   });
 
