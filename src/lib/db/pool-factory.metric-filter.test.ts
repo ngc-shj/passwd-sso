@@ -261,8 +261,10 @@ describe("rls.bypass_refused line vs its metric filter", () => {
 });
 
 describe("report lines under a LOG_LEVEL above warn", () => {
-  // LOG_LEVEL is a task-definition variable the env schema accepts as "error",
-  // "fatal" or "silent"; pino would drop a warn line without throwing.
+  // LOG_LEVEL is a task-definition variable; "error" and "fatal" are the env
+  // schema's values above warn, and pino's "silent" takes the same path. Each
+  // would drop a warn line without throwing.
+  /** The stderr lines `emit` wrote at `level`; nothing may also go through the logger. */
   function stderrLines(level: string, emit: () => void): string[] {
     registerBypassNoticeSink(null);
     resetBypassNoticeRateLimit();
@@ -272,6 +274,7 @@ describe("report lines under a LOG_LEVEL above warn", () => {
     try {
       logger.level = level;
       emit();
+      if (level !== "warn") expect(chunks).toEqual([]);
       return write.mock.calls.map((c) => String(c[0]));
     } finally {
       write.mockRestore();
@@ -285,7 +288,6 @@ describe("report lines under a LOG_LEVEL above warn", () => {
       handleServerNotice({ code: "01000", message: "rls_bypass_not_granted table=sessions purpose=auth_flow", where: REFUSAL.where }),
     );
     const unparsed = stderrLines(level, () => handleServerError({ ...REFUSAL, hint: undefined }));
-    expect(chunks).toEqual([]);
     for (const [lines, filter] of [
       [refusal, "rls_bypass_refused"],
       [warning, "rls_bypass_not_granted"],

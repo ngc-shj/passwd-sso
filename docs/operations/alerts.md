@@ -1420,7 +1420,8 @@ swallowed refusal still counts. It exists only on an enforcing database; in
 report mode nothing is refused.
 
 All three RLS lines are written at warn. When `LOG_LEVEL` is above `warn`
-(`error`, `fatal`, `silent`), the pool listener writes them straight to stderr
+(`error` or `fatal`, the env schema's values above `warn`; pino's `silent`
+takes the same path), the pool listener writes them straight to stderr
 as the same JSON line, so the filters still match.
 
 Normally a refusal produces both lines, so one refused statement counts twice
@@ -1428,11 +1429,18 @@ on `RlsBypassNotGranted`; a refusal line without its `rls.bypass_not_granted`
 line in the same group and window means the WARNING is being suppressed.
 Find where `client_min_messages` comes from and remove it: in report mode it
 would silence every report. As the service's role, `SELECT setting, source
-FROM pg_settings WHERE name = 'client_min_messages'` names the source: `user`,
-`database` or `database user` for a role or database setting (also listed in
-`pg_db_role_setting`), `session` when code ran `SET client_min_messages`
-itself (search the code for it), and a server-level source otherwise (an RDS
-parameter group).
+FROM pg_settings WHERE name = 'client_min_messages'` names the source:
+
+- `user`, `database` or `database user`: a role or database setting (also
+  listed in `pg_db_role_setting`);
+- `client`: the connection's startup options (`PGOPTIONS`, or `options=` in the
+  connection string). The service's own pools refuse these, so this is your own
+  psql session's setting; check its shell and connection string;
+- `configuration file`, `command line`, `environment variable` or `global`: a
+  server-level setting, such as an RDS parameter group;
+- `default`: no persistent setting. The remaining cause is a `SET
+  client_min_messages` run by the service's code, which no other session can
+  see: search the code for `client_min_messages`.
 
 **Severity**: medium
 **Trigger**: any occurrence. The normal count is 0.

@@ -53,11 +53,11 @@ const REPORT_LOG_TYPE = {
 } as const;
 
 /**
- * Write one report line at warn. A LOG_LEVEL above warn (error, fatal, silent —
- * all accepted by the env schema, and changeable between deploys like
- * client_min_messages) would make pino drop it without throwing, and the RLS
- * metric would read zero; the line then goes to stderr directly, where the same
- * filters match it.
+ * Write one report line at warn. A LOG_LEVEL above warn (error or fatal, the
+ * env schema's values above warn, changeable between deploys like
+ * client_min_messages; pino's silent alike) would make pino drop it without
+ * throwing, and the RLS metric would read zero; the line then goes to stderr
+ * directly, where the same filters match it.
  */
 function warnReportLine(fields: { _logType: string; table?: string; purpose?: string }): void {
   if (logger.isLevelEnabled?.("warn") === false) {

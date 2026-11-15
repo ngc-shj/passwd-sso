@@ -67,3 +67,28 @@ R3 OK · R19 OK · R33 OK (integration paths-filter covers the touched paths) ·
 ### T-4 [Minor] stderr spy restored outside finally
 - Action: wrapped in `try/finally`.
 - Modified file: `src/lib/db/pool-factory.test.ts`.
+
+---
+
+# Round 2
+Date: 2026-11-16
+
+## Changes from Previous Round
+Round-1 fixes (124b44c43) verified by all three experts; no regressions, no boundary widening (R43: the stderr fallback writes only the regex-bounded `table`/`purpose` and the fixed `_logType`, to the same log group, and leaves the default level unchanged).
+
+## Findings
+- **Functionality G-1 [Major]** alerts.md's `pg_settings.source` diagnosis was wrong in two places, shown by a three-connection probe on the worktree DB: a `session` source is visible only inside the session that ran the `SET` (another connection reads `default`), and `client` (startup options) was filed under "server-level". (Security N1 [Minor] reported the `client` half.)
+- **Functionality G-2 [Minor]** `silent` was described as accepted by the env schema; `LOG_LEVEL` is `trace`..`fatal`.
+- **Security [Adjacent → testing]** the LOG_LEVEL cell asserted "nothing went through the logger" only after the last emission.
+- **Testing**: No findings (own red-proof of the undefined-keys allow cell: `name in fields` reddens only that cell).
+
+## Resolution Status
+### G-1 / N1 [Major] pg_settings.source mapping
+- Action: the alerts.md paragraph maps each documented source value: `user`/`database`/`database user` → role or database setting; `client` → startup options (the service's pools refuse them, so the operator's own psql); `configuration file`/`command line`/`environment variable`/`global` → server level; `default` → no persistent setting, the remaining cause a runtime `SET` in service code, invisible from another session, found by searching the code.
+- Modified file: docs/operations/alerts.md.
+### G-2 [Minor] silent and the env schema
+- Action: code comment, test comment and alerts.md say error/fatal are the schema's values above warn and pino's silent takes the same path; the silent cell is kept.
+- Modified file: src/lib/db/pool-factory.ts, src/lib/db/pool-factory.metric-filter.test.ts, docs/operations/alerts.md.
+### Adjacent [Minor] per-emission logger check
+- Action: `stderrLines` asserts nothing went through the logger after each emission at a level above warn.
+- Modified file: src/lib/db/pool-factory.metric-filter.test.ts.
