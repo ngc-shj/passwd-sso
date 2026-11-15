@@ -214,6 +214,24 @@ const commentMarkerExec = RegExp.prototype.exec.bind(COMMENT_MARKER_RE) as (
   input: string,
 ) => RegExpExecArray | null;
 
+// A fragment is a balanced piece of SQL: a call split across two fragments (`trim(both` + `from ${t})`)
+// would hand the table-position test a keyword that is really an argument. Plain character count, never
+// negative scanning left to right and zero at the end; strings are not told apart (as for comment markers).
+// Only trustedSql needs it: joinSql joins balanced fragments and identifiers, which stays balanced.
+function assertBalanced(caller: string, text: string): void {
+  let depth = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === "(") depth++;
+    else if (text[i] === ")" && --depth < 0) break;
+  }
+  if (depth !== 0) {
+    throw refusal(
+      RAW_SQL_REFUSAL_CODE.PAREN_BALANCE,
+      caller + ": assembled text must have balanced parentheses",
+    );
+  }
+}
+
 function assertNoCommentMarker(caller: string, text: string): void {
   if (commentMarkerExec(text) !== null) {
     throw refusal(
@@ -304,6 +322,7 @@ export function trustedSql(
   // a marker in a template's own text (W6). A template with a table substitution met the position test
   // above first, so it keeps that code.
   assertNoCommentMarker("trustedSql", text);
+  assertBalanced("trustedSql", text);
   const obj = createGenuineObject();
   fragmentSet(obj, text);
   return obj as unknown as SqlFragment;
@@ -350,6 +369,7 @@ export const RAW_SQL_REFUSAL_CODE = freeze({
   UNICODE_ESCAPE: "RAW_SQL_UNICODE_ESCAPE",
   TOKEN_TABLE: "RAW_SQL_TOKEN_TABLE",
   COMMENT_MARKER: "RAW_SQL_COMMENT_MARKER",
+  PAREN_BALANCE: "RAW_SQL_PAREN_BALANCE",
 } as const);
 
 type RawSqlRefusalCode = (typeof RAW_SQL_REFUSAL_CODE)[keyof typeof RAW_SQL_REFUSAL_CODE];

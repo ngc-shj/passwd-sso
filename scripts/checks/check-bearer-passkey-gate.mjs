@@ -153,9 +153,12 @@
  *         (`${c} from\n ${t}`); no src template holds one. The mint tests the ASSEMBLED text
  *         (trustedSql and joinSql results), so a marker built across a hole is refused there; the
  *         gate sees only the template's own text and the holes' neighbours, and what a hole holds
- *         is a type question it cannot answer. Composition (a fragment before a table, a
- *         table-holding fragment embedded in another template) is therefore the run-time
- *         mint's to adjudicate and is NOT closed: see the deviation log, round 3.
+ *         is a type question it cannot answer. The mint also refuses a trustedSql result whose
+ *         parentheses do not balance (code RAW_SQL_PAREN_BALANCE), so a call split across two
+ *         fragments (`trim(both` + `from ${t})`) cannot be built; W6 mirrors it on the template's
+ *         own text (holes opaque). Composition is otherwise the run-time mint's to adjudicate: a
+ *         keyword-only split (`... IS DISTINCT` + ` from ${t}`) is NOT closed (plan SC4).
+ *         W6 also refuses a template whose own text (holes opaque) has unbalanced parentheses.
  *     W1-W3 and W5 apply to a literal that names a token table (as a name or inside a string)
  *     and to every trustedSql template; W4 to every literal; W6 to trustedSql templates only.
  *     Each failure names its rule. A literal holding U+E000 (the lexer's substitution marker,
@@ -501,9 +504,11 @@ function scanSchemaSource(text) {
     }
     if (!model) return;
     const field = /^[ \t]+(\w+)[ \t]+[A-Za-z_]\w*(?:\[\])?\??/.exec(line)?.[1];
-    if (field && /@unique\b/.test(line)) out.unique.push({ model, field });
-    const composite = /@@unique\(\s*(?:fields:\s*)?\[([^\]]*)\]/.exec(line);
-    if (composite) for (const m of composite[1].split(",")) out.unique.push({ model, field: /^\s*(\w+)/.exec(m)?.[1] });
+    // Unique as a database fact: `@unique` or `@id` on a field, and the members of `@@unique` / `@@id` (their one
+    // bracket list, wherever it sits among the arguments; strings are already empty, so a list is never inside one).
+    if (field && /@(?:unique|id)\b/.test(line)) out.unique.push({ model, field });
+    const members = /@@(?:unique|id)\(.*?\[([^\]]*)\]/.exec(line)?.[1];
+    if (members !== undefined) for (const m of members.split(",")) out.unique.push({ model, field: /^\s*(\w+)/.exec(m)?.[1] });
     const references = /@relation\([^)]*references:\s*\[([^\]]*)\]/.exec(line);
     if (references) out.references.push({ model, field, names: references[1].split(",").map((n) => n.trim()) });
   });
@@ -1419,6 +1424,26 @@ function checkSqlLiteral(input, trusted) {
       break;
     }
     markerLine += newlines(part) + newlines(input.substitutions[k] ?? "");
+  }
+  // Parentheses in the template's own text (holes opaque) must balance, as the mint requires of the assembled text:
+  // a call split across two fragments (`trim(both` + `from ${t})`) would hand the table-position test a keyword that
+  // is really an argument. The first closing parenthesis with none open, or the end of the template, is reported.
+  {
+    let open = 0;
+    let at = 0;
+    let reported = false;
+    input.parts.forEach((part, k) => {
+      for (const c of part) {
+        if (c === "\n") at += 1;
+        else if (c === "(") open += 1;
+        else if (c === ")" && --open < 0 && !reported) {
+          add("W6", { line: at }, "a trustedSql template's own text has unbalanced parentheses: the run-time mint refuses it");
+          reported = true;
+        }
+      }
+      at += newlines(input.substitutions[k] ?? "");
+    });
+    if (open > 0 && !reported) add("W6", { line: at }, "a trustedSql template's own text has unbalanced parentheses: the run-time mint refuses it");
   }
   // A substitution touching a word character assembles a name from parts (`api_${x}`).
   let line = 0;

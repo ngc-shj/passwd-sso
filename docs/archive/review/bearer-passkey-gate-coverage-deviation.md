@@ -810,3 +810,57 @@ the assembled test throwing the wrong code 11 red; the marker pattern reduced to
 | adj-slash | weaken | 2 | raw SQL: a comment marker in a trustedSql template (F1, S21, static side) FAILS on a slas…; raw SQL: a comment marker in a trustedSql template (F1, S21, static side) FAILS on a slas… | 1 |
 | adj-widen | widen | 37 | raw SQL: W2 a token table's name or alias outside relation position FAILS on an alias of …; raw SQL: W2 a token table's name or alias outside relation position FAILS on an alias of … | 1 |
 | t25-attr-composite | widen | 1 | schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) passes… | 1 |
+
+# Code review round 4 fixes
+
+Gate self-test cells: 1105 before, 1129 after; `raw-sql.test.ts` +10 tests. Real-repo summary line unchanged
+(`... sql-literals=136 token-table-literals=7 sql-files=228 sql-qualifying=5`).
+
+## S24: unique membership
+
+`@id` on a field and the members of `@@id([...])` count as unique, and the members of `@@unique` / `@@id` come from the bracket list wherever it sits among the arguments
+(`@@unique(name: "n", fields: [a, secretHash])`, a member with an argument such as `slug(sort: Desc)`). One deny cell per form, each with an allow twin.
+Real schema: the unique set grew from 75 to 136 (`@id` and `@@id` members); no hash-like String field that is not a digest key appeared, the gate still exits 0, and no manifest entry was added.
+Simplifications proved by mutation (restoring each leaves all 1124 cells green, `eq-*` rows): no lookbehind on `@id` / `@unique`, the `fields:` list is simply the first bracket list, and no reset after the first stray parenthesis in W6.
+
+## S25: parenthesis balance
+
+Enumeration first: all 27 non-test `trustedSql` templates (21 in `src`, 6 in `scripts/migrate-account-tokens-to-encrypted.ts`) have balanced parentheses in their own text, counted by plain
+character (so a parenthesis inside a string counts, as the rule does); the key lists, predicates, guards and the `INSERT`-style pieces are among them, and `joinSql` only joins identifiers and
+fragments with `, ` / ` AND ` separators. Every fragment is a template or a join of templates, so each balances. The `src/workers` suites (the real templates through the new rule) stay green.
+So the rule was added.
+
+- Run time: `trustedSql` refuses a result whose parentheses do not balance (never negative scanning left to right, zero at the end; plain character count; code `RAW_SQL_PAREN_BALANCE`, added to the pinned-values test).
+  This refuses `trim(both` and `from ${t})` as fragments, and the table-holding fragment embedded in a call. `joinSql` is not checked: it joins balanced fragments and identifiers, so its result cannot be unbalanced; adding the check there changes no outcome
+  (mutation `JOINSQL-CHECK-ADDED-REDUNDANT`, 229 of 229 green), so it would be an untestable arm.
+  The round-3 F7 cells used unbalanced fragments (`SELECT to_jsonb( -`); they now use balanced ones.
+- Static: W6 refuses a trustedSql template whose own text (holes opaque) has unbalanced parentheses; real tree hits: 0.
+- Plan SC4 is updated (the function-call form is refused by the balance rule; what remains is the keyword-only split, cost: a fragment kind in `raw-sql`), and the gate header sentence on composition.
+
+## T28, T29 (schemaCode)
+
+- T28: a `//` and a `///` comment on a field line followed by a unique hash field on a later line (fatal), with a `slug` allow twin. Red against `i = text.length` and against dropping the `\n` stop (2 cells each).
+- T29: an unterminated string at the very end of the file with no trailing newline is fatal ("still open at the end of the file"). The mutant without the `i < text.length` bound never ends: reproduced on the extracted
+  function under `timeout 10` (original returns at once; mutant exits 124, a timeout), so the proof is recorded as a timeout, not as red cells.
+
+## Red proofs (scratch `scratchpad/batchR4`, whole self-test, base 1124 green then; a syntax error turned 1123 of 1124 red)
+
+Run-time (scratch copy of `raw-sql.ts`, 229 tests, base green): balance call removed 6 red; negative check removed 1 red (`) (`); end check weakened to negative-only 3 red; `PAREN_BALANCE` given another code's value 1 red (the pin);
+the balance refusal thrown with the wrong code 6 red.
+
+| Mutation | Direction | Red cells | Examples (cell names) | Exit |
+|----------|-----------|-----------|-----------------------|------|
+| eq-lookbehind | equiv | 0 |  | 0 |
+| eq-fields-first | equiv | 0 |  | 0 |
+| eq-reset | equiv | 0 |  | 0 |
+| s24-id | weaken | 1 | schema source: the forms a line scan misses (F2, F3) is fatal on a field @id over a hash … | 1 |
+| s24-unique-field | weaken | 12 | schema checks (A-10) is fatal on a unique String field ending in hash; schema checks (A-10) is fatal on a unique String field whose column ends in hash | 1 |
+| s24-atat-id | weaken | 1 | schema source: the forms a line scan misses (F2, F3) is fatal on a @@id([...]) over a has… | 1 |
+| s24-atat-unique | weaken | 6 | schema checks (A-10) is fatal on a @@unique member ending in digest; schema source: the forms a line scan misses (F2, F3) is fatal on a @@unique(fields: [...]… | 1 |
+| s24-list-anywhere | weaken | 2 | schema source: the forms a line scan misses (F2, F3) is fatal on a @@unique(fields: [...]…; schema source: the forms a line scan misses (F2, F3) is fatal on a @@unique with fields: … | 1 |
+| w6p-negative | weaken | 8 | raw SQL: unbalanced parentheses in a trustedSql template (S25) FAILS on a closing fragmen…; raw SQL: unbalanced parentheses in a trustedSql template (S25) FAILS once on a closing pa… | 1 |
+| w6p-end | weaken | 3 | raw SQL: unbalanced parentheses in a trustedSql template (S25) FAILS on an opening fragme…; raw SQL: unbalanced parentheses in a trustedSql template (S25) FAILS on both templates of… | 1 |
+| w6p-reported | widen | 1 | raw SQL: unbalanced parentheses in a trustedSql template (S25) reports two stray closing … | 1 |
+| w6p-reported-end | widen | 1 | raw SQL: unbalanced parentheses in a trustedSql template (S25) reports a stray closing pa… | 1 |
+| w6p-newline | weaken | 2 | raw SQL: unbalanced parentheses in a trustedSql template (S25) reports the line where the…; raw SQL: unbalanced parentheses in a trustedSql template (S25) reports the line after a m… | 1 |
+| w6p-sub-newlines | weaken | 1 | raw SQL: unbalanced parentheses in a trustedSql template (S25) reports the line after a m… | 1 |

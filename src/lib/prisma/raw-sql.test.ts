@@ -16,6 +16,7 @@ import {
 
 const TOKEN_TABLE_REFUSAL = expect.objectContaining({ code: RAW_SQL_REFUSAL_CODE.TOKEN_TABLE });
 const COMMENT_REFUSAL = expect.objectContaining({ code: RAW_SQL_REFUSAL_CODE.COMMENT_MARKER });
+const BALANCE_REFUSAL = expect.objectContaining({ code: RAW_SQL_REFUSAL_CODE.PAREN_BALANCE });
 // One token table and one ordinary table: a position rule that only held for a
 // token table, or only for another, would pass one of the two.
 const TABLE_KINDS = [
@@ -292,15 +293,15 @@ describe("trustedSql refuses a comment marker anywhere in a template's own text"
   });
 
   it("refuses a `--` assembled across a substitution (F7)", () => {
-    const f = trustedSql`SELECT to_jsonb( -`;
+    const f = trustedSql`SELECT x -`;
     expect(() => trustedSql`${f}- ${sqlIdentifier("a")} FROM
-        ${sqlTable("api_keys")})`).toThrow(COMMENT_REFUSAL);
+        ${sqlTable("api_keys")}`).toThrow(COMMENT_REFUSAL);
   });
 
   it("refuses a `/*` assembled across a substitution", () => {
-    const f = trustedSql`SELECT to_jsonb( /`;
+    const f = trustedSql`SELECT x /`;
     expect(() => trustedSql`${f}* ${sqlIdentifier("a")} FROM
-        ${sqlTable("api_keys")}) */`).toThrow(COMMENT_REFUSAL);
+        ${sqlTable("api_keys")} */`).toThrow(COMMENT_REFUSAL);
   });
 
   it("refuses a marker that joinSql assembles from a part and a separator", () => {
@@ -314,8 +315,8 @@ describe("trustedSql refuses a comment marker anywhere in a template's own text"
   });
 
   it("accepts the same fragments joined and assembled without a marker", () => {
-    const f = trustedSql`SELECT to_jsonb( -`;
-    expect(() => trustedSql`${f} 1 FROM ${sqlTable("api_keys")})`).not.toThrow();
+    const f = trustedSql`SELECT x -`;
+    expect(() => trustedSql`${f} 1 FROM ${sqlTable("api_keys")}`).not.toThrow();
     expect(() => joinSql([trustedSql`a-`, trustedSql`b`], trustedSql`, `)).not.toThrow();
   });
 
@@ -323,6 +324,34 @@ describe("trustedSql refuses a comment marker anywhere in a template's own text"
     ["a single dash and a division", () => trustedSql`SELECT 1 - 2, 4 / 2`],
     ["a slash and a star that do not touch", () => trustedSql`SELECT 2 / * 3`],
     ["a template with no marker and a table", () => trustedSql`SELECT 1 FROM ${sqlTable("notes")}`],
+  ])("accepts %s", (_label, build) => {
+    expect(build).not.toThrow();
+  });
+});
+
+describe("trustedSql refuses unbalanced parentheses in its assembled text (S25)", () => {
+  it.each([
+    ["an opening fragment (the call split before `from`)", () => trustedSql`SELECT trim(both`],
+    ["a closing fragment (the mirror form)", () => trustedSql`from ${sqlTable("api_keys")})`],
+    ["a closing parenthesis before an opening one", () => trustedSql`) (`],
+    ["a lone closing parenthesis", () => trustedSql`)`],
+    ["an opening parenthesis closed only by a substitution's text", () => trustedSql`SELECT (${sqlIdentifier("a")}`],
+  ])("refuses %s", (_label, build) => {
+    expect(build).toThrow(BALANCE_REFUSAL);
+  });
+
+  it("cannot build the trim(both ... from table) split across two fragments", () => {
+    expect(() => {
+      const head = trustedSql`SELECT trim(both`;
+      return trustedSql`${head} from ${sqlTable("api_keys")})`;
+    }).toThrow(BALANCE_REFUSAL);
+  });
+
+  it.each([
+    ["a call with its argument and a table", () => trustedSql`SELECT trim(both x from ${sqlTable("notes")})`],
+    ["nested balanced groups", () => trustedSql`SELECT ((1 + 2) * (3))`],
+    ["a template with no parenthesis", () => trustedSql`SELECT 1`],
+    ["balanced fragments embedded in a balanced template", () => trustedSql`SELECT (${trustedSql`1 + (2)`})`],
   ])("accepts %s", (_label, build) => {
     expect(build).not.toThrow();
   });
@@ -756,6 +785,7 @@ describe("refusal codes", () => {
       UNICODE_ESCAPE: "RAW_SQL_UNICODE_ESCAPE",
       TOKEN_TABLE: "RAW_SQL_TOKEN_TABLE",
       COMMENT_MARKER: "RAW_SQL_COMMENT_MARKER",
+      PAREN_BALANCE: "RAW_SQL_PAREN_BALANCE",
     });
   });
 });

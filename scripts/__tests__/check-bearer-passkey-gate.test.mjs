@@ -2829,6 +2829,43 @@ describe.concurrent("raw SQL: W5 reads a string's body, with its delimiters stri
   });
 });
 
+describe.concurrent("raw SQL: unbalanced parentheses in a trustedSql template (S25)", { timeout: 60_000 }, () => {
+  const UNBALANCED = "a trustedSql template's own text has unbalanced parentheses: the run-time mint refuses it";
+  it("FAILS on an opening fragment (the call split before from)", async () => {
+    await expectViolations(viaTrusted("SELECT trim(both"), [ruleAt("W6", UNBALANCED)]);
+  });
+  it("FAILS on a closing fragment (the mirror form)", async () => {
+    await expectViolations(viaTrusted("from ${tbl})"), [ruleAt("W6", UNBALANCED)]);
+  });
+  it("FAILS once on a closing parenthesis before an opening one", async () => {
+    await expectViolations(viaTrusted(") ("), [ruleAt("W6", UNBALANCED)]);
+  });
+  it("FAILS on a parenthesis inside a string (strings are not told apart, as for comment markers)", async () => {
+    await expectViolations(viaTrusted("SELECT ')' FROM notes"), [ruleAt("W6", UNBALANCED)]);
+  });
+  it("reports the line where the parenthesis closes with none open", async () => {
+    await expectViolations(viaTrusted("SELECT 1\n  FROM notes )"), [ruleAt("W6", UNBALANCED, 4)]);
+  });
+  it("reports two stray closing parentheses once (the first)", async () => {
+    await expectViolations(viaTrusted(")\n )"), [ruleAt("W6", UNBALANCED)]);
+  });
+  it("reports a stray closing parenthesis followed by unclosed ones once", async () => {
+    await expectViolations(viaTrusted(")\n (("), [ruleAt("W6", UNBALANCED)]);
+  });
+  it("reports the line after a multi-line substitution", async () => {
+    await expectViolations(viaTrusted("SELECT ${(\n tbl\n )}\n )"), [ruleAt("W6", UNBALANCED, 6)]);
+  });
+  it("FAILS on both templates of the split call (a pair)", async () => {
+    await expectViolations(sqlBody("const head = trustedSql`SELECT trim(both`;\n  return trustedSql`${head} from ${tbl})`;"), [ruleAt("W6", UNBALANCED, 3), ruleAt("W6", UNBALANCED, 4)]);
+  });
+  it("FAILS on both templates of the mirror form (a pair)", async () => {
+    await expectViolations(sqlBody("const inner = trustedSql`from ${tbl})`;\n  return trustedSql`SELECT trim(both ${inner}`;"), [ruleAt("W6", UNBALANCED, 3), ruleAt("W6", UNBALANCED, 4)]);
+  });
+  it("passes on balanced and nested parentheses with a table", async () => {
+    await expectPass(viaTrusted("SELECT ((1 + 2) + (3)) FROM ${tbl}"));
+  });
+});
+
 describe.concurrent("raw SQL: a comment marker in a trustedSql template (F1, S21, static side)", { timeout: 60_000 }, () => {
   const MARKER = "a comment marker (-- or /*) in a trustedSql template: the run-time mint refuses it";
   it("FAILS on a line comment that hides a substitution and the keyword after it", async () => {
@@ -3098,6 +3135,10 @@ describe.concurrent("schema source: the forms a line scan misses (F2, F3)", { ti
     ["a multi-line @@unique([...])", "secretHash String\n  @@unique([\n    secretHash\n  ])", "slug String\n  @@unique([\n    slug\n  ])"],
     ["a @unique on a continuation line", "secretHash String\n    @unique", "slug String\n    @unique"],
     ["a @unique at column 0 on a continuation line", "secretHash String\n@unique", "slug String\n@unique"],
+    ["a field @id", "secretHash String @id", "slug String @id"],
+    ["a @@id([...])", "secretHash String\n  @@id([secretHash])", "slug String\n  @@id([slug])"],
+    ["a @@unique with fields: after another argument", "secretHash String\n  slug String\n  @@unique(name: \"n\", fields: [slug, secretHash])", "secretHash String @map(\"s\")\n  slug String\n  @@unique(name: \"n\", fields: [slug, title])"],
+    ["a @@unique member with an argument in its list", "secretHash String\n  slug String\n  @@unique([slug(sort: Desc), secretHash])", "secretHash String @map(\"s\")\n  slug String\n  @@unique([slug(sort: Desc), title])"],
   ];
   it.each(UNIQUE_FORMS)("is fatal on %s over a hash field", async (_label, deny) => {
     await expectFatal(addToNote(deny), listing("Note.secretHash"));
@@ -3226,6 +3267,19 @@ describe.concurrent("schema source: strings, unbalanced brackets and the remaini
   ];
   it.each(READABLE)("passes on %s", async (_label, block) => {
     await expectPass({ files: { "prisma/schema.prisma": `${SCHEMA}\n${block}` } });
+  });
+  const COMMENTS = [
+    ["a // comment", "label String // a note"],
+    ["a /// doc comment", "label String /// a note"],
+  ];
+  it.each(COMMENTS)("still sees a unique hash field on a later line after %s", async (_label, field) => {
+    await expectFatal(addToNote(`${field}\n  secretHash String @unique`), listing("Note.secretHash"));
+  });
+  it.each(COMMENTS)("passes after %s when the later unique field is no hash", async (_label, field) => {
+    await expectPass(addToNote(`${field}\n  slug String @unique`));
+  });
+  it("is fatal on an unterminated string at the very end of the file (no trailing newline)", async () => {
+    await expectFatal({ files: { "prisma/schema.prisma": `${SCHEMA}\nmodel Y {\n  id String @id @default("abc` } }, `${SCHEMA_PREFIX} a parenthesis or bracket is still open at the end of the file: the schema cannot be read reliably.`);
   });
   it("is fatal on a bracket still open at the end of the file", async () => {
     await expectFatal({ files: { "prisma/schema.prisma": `${SCHEMA}\nmodel Y {\n  id String @id @default([1` } }, `${SCHEMA_PREFIX} a parenthesis or bracket is still open at the end of the file: the schema cannot be read reliably.`);
