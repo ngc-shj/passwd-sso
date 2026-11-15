@@ -35,10 +35,12 @@ browser.
    → equals `printf %s "$T" | sha256sum`; `$T` itself appears in no column of the row.
 3. **The link is gone after closing.** Close the dialog and reopen it: no link is shown.
    Sending a second invite to `$DANA` answers "already invited" and shows no link.
-4. **Accept by the link.** As Dana, open `…/dashboard/teams/invite/$T` and accept.
+4. **Accept by the link.** As Dana, open `…/dashboard/teams/invite/$T` (it accepts
+   automatically once her vault is unlocked).
    - Dana joins **T**; the invitation's status becomes `ACCEPTED`.
-5. **The digest is not a token.** As Owner, invite another address and note its token; read its
-   `token_hash`. As that invitee, open `…/dashboard/teams/invite/<token_hash>`.
+5. **The digest is not a token.** As Owner, invite another address and read its `token_hash`.
+   As Dana (any signed-in user with an unlocked vault: the lookup refuses before the email is
+   compared), open `…/dashboard/teams/invite/<token_hash>`.
    - Refused as an invalid invitation; the row stays `PENDING`.
 6. **Non-secure origin (optional).** Open the admin console over plain HTTP on a LAN address
    (no `navigator.clipboard`), invite a third address.

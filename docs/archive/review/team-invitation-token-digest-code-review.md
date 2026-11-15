@@ -201,3 +201,25 @@ and no E2E test relies on the dialog closing).
   label without the email fails four component tests.
 - Modified file: `src/components/team/members/team-invite-by-email-section.tsx`,
   `messages/{en,ja}/Team.json`, the component and page tests
+
+## Round 4 (incremental: 42e8fc5c2..13fc8e0b1)
+
+Security: no findings (the email is the admin's own input, rendered as escaped
+text; next-intl parses ICU only in the message, not in the values). Testing: no
+findings; red-proofs on scratch copies: the label without the email, or reading
+the live input instead of the captured email, fails the four component tests
+and the page test; a link rendered when none was issued fails both absence
+checks. Functionality: F6 resolved; manual-test steps checked against the code.
+
+- **F-R4-1 [Minor]** Manual test: the accept page accepts automatically (no
+  button), and step 5 named an account the pre-conditions do not create.
+
+## Tightening-only skip — Round 4
+Findings applied directly (no Round 5 review):
+- [F-R4-1] [Minor] manual-test steps 4 and 5 — `team-invitation-token-digest-manual-test.md` — applied verbatim
+Justification: every finding scoped within Round 3's fix range, inline minor (documentation), no security-boundary touch.
+
+## Termination
+
+Four rounds. All Critical and Major findings resolved; the last round's only
+finding was a documentation correction.
