@@ -53,8 +53,8 @@ export async function createProbeRole(): Promise<ProbeRole> {
     }
 
     const { rows: existing } = await client.query<{ rolname: string }>(
-      `SELECT rolname FROM pg_roles WHERE rolname LIKE $1`,
-      [`${PROBE_ROLE_PREFIX.replace(/_/g, "\\_")}%`],
+      `SELECT rolname FROM pg_roles WHERE starts_with(rolname, $1)`,
+      [PROBE_ROLE_PREFIX],
     );
     for (const leftover of staleProbeRoles(existing.map((r) => r.rolname), Date.now())) {
       await client.query(`DROP ROLE IF EXISTS ${quoteIdent(leftover)}`);
