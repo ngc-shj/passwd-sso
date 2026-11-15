@@ -12,14 +12,19 @@ const { mockOn, mockEnd, mockPoolConstructor, mockWarn, mockError, mockInfo } =
     mockInfo: vi.fn(),
   }));
 
-vi.mock("pg", () => {
+vi.mock("pg", async () => {
+  const { EventEmitter } = await import("node:events");
   // Use regular function (not arrow) so it can be called with `new`
   function Pool(this: Record<string, unknown>, ...args: unknown[]) {
     mockPoolConstructor(...args);
     this.on = mockOn;
     this.end = mockEnd;
   }
-  return { default: { Pool }, Pool };
+  // The factory's listener probe constructs one and reads `connection`.
+  function Client(this: Record<string, unknown>) {
+    this.connection = new EventEmitter();
+  }
+  return { default: { Pool, Client }, Pool, Client };
 });
 
 vi.mock("@prisma/adapter-pg", () => {
@@ -126,14 +131,14 @@ describe("prisma pool configuration", () => {
     const seen: unknown[] = [];
     registerBypassNoticeSink((n) => seen.push(n));
     try {
-      const connection = new EventEmitter();
-      connectHandler?.(connection);
-      connection.emit("notice", {
+      const client = Object.assign(new EventEmitter(), { connection: new EventEmitter() });
+      connectHandler?.(client);
+      client.emit("notice", {
         code: "01000",
         message: "rls_bypass_not_granted table=users purpose=auth_flow",
-        where: "PL/pgSQL function rls_bypass_admits(text) line 17 at RAISE",
+        where: "PL/pgSQL function public.rls_bypass_admits(text) line 19 at RAISE",
       });
-      expect(seen).toEqual([{ table: "users", purpose: "auth_flow" }]);
+      expect(seen).toEqual([{ kind: "warning", table: "users", purpose: "auth_flow" }]);
     } finally {
       registerBypassNoticeSink(null);
     }

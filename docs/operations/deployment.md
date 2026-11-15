@@ -163,7 +163,8 @@ enforcement".
 statement that examines a row of an RLS table not named in `app.bypass_tables`
 raises `WARNING rls_bypass_not_granted table=… purpose=…` and is then refused
 with SQLSTATE 42501, `RLS_BYPASS_NOT_GRANTED: <table>`. The report is still
-logged (`rls.bypass_not_granted`) and still counts on `RlsBypassNotGranted`
+logged (`rls.bypass_not_granted`), and so is the refusal (`rls.bypass_refused`);
+both count on `RlsBypassNotGranted`
 (`docs/operations/alerts.md`). The `migrate` run does not leave the mode to
 chance: the audit fails when the function is absent or not true.
 
@@ -195,7 +196,9 @@ un-flip pass. The change reaches other sessions
 through PostgreSQL's plan invalidation; confirm it with the canary rather than
 assuming it is immediate. The audit also fails on `CLIENT_MIN_MESSAGES_SERVER_LEVEL` when a
 server-level source (for example an RDS parameter group) sets `client_min_messages`
-to `error`, which would hide the bypass reports. It fails as well when the audit's
+to `error`, which would hide the bypass reports: in report mode the WARNING is
+the only signal (an enforcing database's refusals are still counted, from the
+error itself). It fails as well when the audit's
 own connection overrides the setting (a setting on the migration role, or
 `options=-c client_min_messages=…` in `MIGRATION_DATABASE_URL`), whatever the
 value: the server default is then unreadable.
@@ -346,8 +349,8 @@ preflight checks that the operator attested, not that the observations are true.
   armed for all of it.
 - [ ] Before that window started, a positive canary was observed in each of the
   five log groups — app, audit-outbox-worker, retention-gc-worker,
-  audit-anchor-publisher and audit-chain-verify-worker — each having both metric
-  filters (`infra/terraform/monitoring.tf`). Without it a zero proves nothing
+  audit-anchor-publisher and audit-chain-verify-worker — each having all three
+  metric filters (`infra/terraform/monitoring.tf`). Without it a zero proves nothing
   (see "Canary on an enforcing database").
 - [ ] Production, and the image any rollback would return to, run at or above the
   release carrying migration `20261019000000_rls_bypass_admits_report_mode`. Older
@@ -407,9 +410,9 @@ service to its pre-deploy revision. Add the key and re-run.
 
 #### Canary on an enforcing database
 
-A canary shows that a log group's metric filter counts. On an enforcing database
-the canary statement is refused, and the WARNING that precedes the refusal still
-reaches the log and counts. As `passwd_app`:
+A canary shows that a log group's metric filters count. On an enforcing database
+the canary statement is refused; the WARNING that precedes the refusal and the
+refusal itself each reach the log and count. As `passwd_app`:
 
 ```sql
 BEGIN;
@@ -430,8 +433,14 @@ whose grant omits a table), then check the group:
 ```bash
 aws logs filter-log-events --region <region> \
   --log-group-name /ecs/<name_prefix>/<group> \
-  --filter-pattern '{ $._logType = "rls.bypass_not_granted" }'
+  --filter-pattern '{ ($._logType = "rls.bypass_not_granted") || ($._logType = "rls.bypass_refused") }'
 ```
+
+Expect one line of each `_logType` per group. To see the refusal count survive a
+suppressed WARNING, run the same reach with `SET LOCAL client_min_messages = error`
+first in the transaction: only `rls.bypass_refused` appears. This holds on an
+enforcing database only; in report mode there is no refusal, and that setting
+silences the report entirely.
 
 `<group>` is `app`, `audit-outbox-worker`, `retention-gc-worker`,
 `audit-anchor-publisher` or `audit-chain-verify-worker`. All filters publish to the

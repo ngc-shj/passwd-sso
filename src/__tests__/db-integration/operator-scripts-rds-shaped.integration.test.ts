@@ -53,6 +53,7 @@ import {
   assertRlsApplies,
   createTestContext,
   expectBypassRefusal,
+  redProofOverride,
   setBypassRlsGucs,
   type TestContext,
 } from "./helpers";
@@ -553,13 +554,15 @@ describe("operator scripts as an owner-shaped NOSUPERUSER NOBYPASSRLS role", () 
       // A child process: the script's main() is not exported, and the cell runs it as an operator does.
       const { stdout, stderr } = await execFileAsync(
         process.execPath,
-        ["--import", "tsx", "scripts/migrate-account-tokens-to-encrypted.ts"],
+        ["--import", "tsx", redProofOverride("MIGRATE_ACCOUNT_TOKENS_SCRIPT") ?? "scripts/migrate-account-tokens-to-encrypted.ts"],
         { cwd: process.cwd(), env: { ...process.env, MIGRATION_DATABASE_URL: probe.connectionString }, timeout: 120_000 },
       );
 
       expect(stdout).toMatch(/rewritten\s+: [1-9]\d*/);
       expect(stdout).toMatch(/failed\s+: 0\b/);
-      expect(stderr).not.toContain("rls_bypass_not_granted");
+      // The stderr sink writes `"_logType":"rls.bypass_…"`, with a dot: matching the
+      // SQL function's underscore spelling could never fail.
+      expect(stderr).not.toMatch(/"_logType":"rls\.bypass_(not_granted|refused|notice_unparsed)"/);
       const [row] = await ctx.su.prisma.$transaction(async (tx) => {
         await setBypassRlsGucs(tx);
         return tx.$queryRawUnsafe<Array<{ refresh_token: string; access_token: string }>>(

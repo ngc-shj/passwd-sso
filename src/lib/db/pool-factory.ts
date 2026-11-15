@@ -11,21 +11,78 @@ import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 /**
  * The only place production code builds a database pool, client or Prisma
- * client (check-bypass-rls's pool rule). Every connection gets the listener
- * that turns `public.rls_bypass_admits`'s report into a log line: when a
+ * client (check-bypass-rls's pool rule). Every connection gets the listeners
+ * that turn `public.rls_bypass_admits`'s reports into log lines: when a
  * bypassed statement reaches a table outside its grant the database raises a
  * WARNING naming the table and purpose, then refuses the statement (42501).
- * The log line and its metric are how an operator learns of a refusal a caller
- * caught.
+ * The log lines and their metric are how an operator learns of a refusal a
+ * caller caught.
+ *
+ * Both are counted because they fail differently. The WARNING is the only
+ * signal in report mode, but a `client_min_messages` above `warning` (a role or
+ * database setting changed between deploys) keeps it from reaching the client.
+ * The refusal is always delivered, since a statement-ending error is sent
+ * whatever that setting says, but it only exists while the database enforces.
  */
 
-/** A report from `rls_bypass_admits`: the table reached and the bypass purpose. */
-export type BypassNotice = { table: string; purpose: string };
+export const BYPASS_REPORT_KIND = { WARNING: "warning", REFUSAL: "refusal" } as const;
+export type BypassReportKind = (typeof BYPASS_REPORT_KIND)[keyof typeof BYPASS_REPORT_KIND];
+
+/** A report from `rls_bypass_admits`: which signal, the table reached and the bypass purpose. */
+export type BypassNotice = { kind: BypassReportKind; table: string; purpose: string };
 export type BypassNoticeSink = (notice: BypassNotice) => void;
 
 // The function's own text, matched whole; `purpose` is sanitised in SQL.
 const REPORT_RE = /^rls_bypass_not_granted table=([a-z0-9_]{1,63}) purpose=([a-z0-9_-]{1,64}|<invalid>)$/;
+const REFUSAL_RE = /^RLS_BYPASS_NOT_GRANTED: ([a-z0-9_]{1,63})$/;
+const REFUSAL_HINT_RE = /^bypass purpose ([a-z0-9_-]{1,64}|<invalid>)$/;
 const REPORT_SOURCE = "rls_bypass_admits";
+// The function runs with `SET search_path = pg_catalog, pg_temp`, so `public` is
+// not visible while its context line is formatted and PostgreSQL schema-qualifies
+// the name. Should that setting ever be dropped the frame reads
+// `rls_bypass_admits(text)` unqualified: every real report then lands on the
+// unparsed line, which raises the alarm, instead of reading as zero.
+const REPORT_FRAME = "public.rls_bypass_admits(text)";
+const UNPARSED_KEY = "\u0000unparsed";
+
+// The `_logType` of each line; infra/terraform/monitoring.tf counts all three.
+const REPORT_LOG_TYPE = {
+  WARNING: "rls.bypass_not_granted",
+  REFUSAL: "rls.bypass_refused",
+  UNPARSED: "rls.bypass_notice_unparsed",
+} as const;
+
+/**
+ * Write one report line at warn. A LOG_LEVEL above warn (error or fatal, the
+ * env schema's values above warn, changeable between deploys like
+ * client_min_messages; pino's silent alike) would make pino drop it without
+ * throwing, and the RLS metric would read zero; the line then goes to stderr
+ * directly, where the same filters match it.
+ */
+function warnReportLine(fields: { _logType: string; table?: string; purpose?: string }): void {
+  if (logger.isLevelEnabled?.("warn") === false) {
+    process.stderr.write(`${JSON.stringify(fields)}\n`);
+    return;
+  }
+  logger.warn(fields, fields._logType);
+}
+
+const logTypeOf = (kind: BypassReportKind): string =>
+  kind === BYPASS_REPORT_KIND.REFUSAL ? REPORT_LOG_TYPE.REFUSAL : REPORT_LOG_TYPE.WARNING;
+
+/**
+ * Where a server message came from. `exact`: the innermost frame (the first
+ * line of `where`) is the function itself. `mentioned`: the name appears, but
+ * not as the innermost frame — an outer `SQL statement "…"` frame, a function
+ * in another schema, or the unqualified form above — so the message is counted
+ * as unparsed rather than trusted or dropped. The context line is localized
+ * around the signature, never inside it.
+ */
+function bypassAdmitsFrame(where: unknown): "exact" | "mentioned" | "none" {
+  if (typeof where !== "string" || !where.includes(REPORT_SOURCE)) return "none";
+  const innermost = where.split("\n", 1)[0];
+  return innermost.includes(REPORT_FRAME) ? "exact" : "mentioned";
+}
 
 // Per process, at most one line per (table, purpose) per window; the map is
 // bounded so a flood of distinct pairs cannot grow it without limit.
@@ -46,13 +103,16 @@ function withinRateLimit(key: string): boolean {
   return true;
 }
 
-export const productionBypassNoticeSink: BypassNoticeSink = ({ table, purpose }) => {
-  if (!withinRateLimit(`${table}\u0000${purpose}`)) return;
-  logger.warn({ _logType: "rls.bypass_not_granted", table, purpose }, "rls.bypass_not_granted");
+// Keyed by kind too: a refusal arrives right after its WARNING for the same
+// pair, and must not find its slot already taken.
+export const productionBypassNoticeSink: BypassNoticeSink = ({ kind, table, purpose }) => {
+  if (!withinRateLimit(`${kind}\u0000${table}\u0000${purpose}`)) return;
+  const _logType = logTypeOf(kind);
+  warnReportLine({ _logType, table, purpose });
 };
 
-export const stderrBypassNoticeSink: BypassNoticeSink = ({ table, purpose }) => {
-  process.stderr.write(`${JSON.stringify({ _logType: "rls.bypass_not_granted", table, purpose })}\n`);
+export const stderrBypassNoticeSink: BypassNoticeSink = ({ kind, table, purpose }) => {
+  process.stderr.write(`${JSON.stringify({ _logType: logTypeOf(kind), table, purpose })}\n`);
 };
 
 let registeredSink: BypassNoticeSink | null = null;
@@ -71,35 +131,115 @@ export function resetBypassNoticeRateLimit(): void {
   lastLogged.clear();
 }
 
+// The listeners run inside pg's parser callback, so nothing they write may
+// throw: a throw would leave the query unsettled or escape as an uncaught
+// exception. When a write fails, the constant unparsed line, which the same
+// metric counts, goes to stderr directly (the writer that failed may be the
+// logger), so the failure does not read as zero reports either.
+function writeUnparsedToStderr(): void {
+  try {
+    process.stderr.write(`${JSON.stringify({ _logType: REPORT_LOG_TYPE.UNPARSED })}\n`);
+  } catch {
+    // stderr itself failed; nothing is left to write to.
+  }
+}
+
+// No content to key on, so one shared rate-limit slot.
+function logUnparsed(): void {
+  if (!withinRateLimit(UNPARSED_KEY)) return;
+  try {
+    warnReportLine({ _logType: REPORT_LOG_TYPE.UNPARSED });
+  } catch {
+    writeUnparsedToStderr();
+  }
+}
+
+/** Hand a report to the sink; a sink that throws is counted as unparsed. */
+function deliver(notice: BypassNotice): void {
+  try {
+    (registeredSink ?? productionBypassNoticeSink)(notice);
+  } catch {
+    if (withinRateLimit(UNPARSED_KEY)) writeUnparsedToStderr();
+  }
+}
+
 // SQLSTATE of a plain RAISE WARNING. Matched instead of `severity`, which is
 // the localized S field: under a non-English lc_messages it is not "WARNING".
 const WARNING_SQLSTATE = "01000";
+// The function's refusal (`ERRCODE = '42501'`); a plain `permission denied`
+// carries the same SQLSTATE, so the source frame decides.
+const REFUSAL_SQLSTATE = "42501";
 
 /**
  * Turn one server notice into a report, or drop it. Only a 01000 warning whose
- * context names `rls_bypass_admits` and whose text matches the report exactly
- * is accepted (code that can issue arbitrary SQL can still raise a look-alike,
- * which is outside this control);
- * anything else — statement logging, other functions' notices — is dropped
- * without any part of it being logged. Every field compared is
- * locale-independent: the SQLSTATE, the function name (substituted into the
- * localized context line), and the message the function formats itself.
+ * innermost frame is `public.rls_bypass_admits(text)` and whose text matches
+ * the report exactly is accepted (code that can issue arbitrary SQL can still
+ * raise a look-alike, which is outside this control); one that only mentions
+ * the function is logged as unparsed, with no content. Anything else —
+ * statement logging, other functions' notices — is dropped without any part of
+ * it being logged. Every field compared is locale-independent: the SQLSTATE,
+ * the function signature (substituted into the localized context line), and
+ * the message the function formats itself.
  */
 export function handleServerNotice(notice: { code?: string; message?: string; where?: string }): void {
-  if (notice.code !== WARNING_SQLSTATE || !notice.where?.includes(REPORT_SOURCE)) return;
-  const match = REPORT_RE.exec(notice.message ?? "");
+  if (notice.code !== WARNING_SQLSTATE) return;
+  const frame = bypassAdmitsFrame(notice.where);
+  if (frame === "none") return;
+  const match = frame === "exact" && typeof notice.message === "string" ? REPORT_RE.exec(notice.message) : null;
   if (!match) {
-    // No content to key on, so one shared rate-limit slot.
-    if (withinRateLimit("\u0000unparsed")) {
-      logger.warn({ _logType: "rls.bypass_notice_unparsed" }, "rls.bypass_notice_unparsed");
-    }
+    logUnparsed();
     return;
   }
-  (registeredSink ?? productionBypassNoticeSink)({ table: match[1], purpose: match[2] });
+  deliver({ kind: BYPASS_REPORT_KIND.WARNING, table: match[1], purpose: match[2] });
 }
 
-function attachNoticeListener(client: pg.Client | pg.PoolClient): void {
+/**
+ * Turn one server error into a refusal report, or drop it: the same rules as
+ * the notice, over the function's `RAISE EXCEPTION` — SQLSTATE 42501, the
+ * message `RLS_BYPASS_NOT_GRANTED: <table>` and the hint `bypass purpose
+ * <purpose>`, all the function's own text.
+ */
+export function handleServerError(error: { code?: string; message?: string; hint?: string; where?: string }): void {
+  if (error.code !== REFUSAL_SQLSTATE) return;
+  const frame = bypassAdmitsFrame(error.where);
+  if (frame === "none") return;
+  const exact = frame === "exact";
+  const table = exact && typeof error.message === "string" ? REFUSAL_RE.exec(error.message)?.[1] : undefined;
+  const purpose = exact && typeof error.hint === "string" ? REFUSAL_HINT_RE.exec(error.hint)?.[1] : undefined;
+  if (table === undefined || purpose === undefined) {
+    logUnparsed();
+    return;
+  }
+  deliver({ kind: BYPASS_REPORT_KIND.REFUSAL, table, purpose });
+}
+
+// Set only once the probe passes, so a failed probe throws on every call: a
+// caller that retries after a caught startup error must not get a pool whose
+// refusals go uncounted.
+let listenerSupportVerified = false;
+
+/**
+ * Refuse to build a pool or client when pg no longer exposes the connection's
+ * event emitter, where `errorMessage` is emitted. Attaching would throw inside
+ * pg-pool's `connect` emit, or worse, a missing hook would read as zero
+ * refusals. This proves the listener API is there, not that pg still emits
+ * `errorMessage`; the integration suite's refusal cells catch an event rename.
+ */
+function assertListenerSupport(): void {
+  if (listenerSupportVerified) return;
+  const probe = new pg.Client() as { connection?: { prependListener?: unknown } };
+  if (typeof probe.connection?.prependListener !== "function") {
+    throw new Error("pg.Client exposes no connection event emitter: RLS bypass refusals could not be counted");
+  }
+  listenerSupportVerified = true;
+}
+
+// pg's own `errorMessage` handler settles the query, and runs a callback-style
+// query's callback synchronously, so a listener behind it can be skipped by a
+// throw. Prepending makes the count independent of what a caller does.
+function attachListeners(client: pg.Client): void {
   client.on("notice", handleServerNotice);
+  client.connection.prependListener("errorMessage", handleServerError);
 }
 
 // PostgreSQL's option parser folds `-` into `_`, so `client-min-messages`
@@ -149,6 +289,15 @@ const STARTUP_STRING_PARAMS = [
 function checkedConfig<T extends pg.ClientConfig>(config: T): T {
   const snapshot = { ...config };
   const fields = snapshot as Record<string, unknown>;
+  // The listener probe checks pg.Client; a pool building another class would
+  // hand `connect` clients the probe never saw.
+  // `onConnect` runs queries on a new client before pg-pool emits `connect`, so
+  // before the listeners attach: its reports and refusals would go uncounted.
+  for (const name of ["Client", "native", "onConnect"]) {
+    if (fields[name] !== undefined) {
+      throw new Error(`database connection config must not set ${name}: the RLS bypass listeners must see every client the pool builds`);
+    }
+  }
   for (const name of STARTUP_STRING_PARAMS) {
     const value = fields[name];
     if (value === undefined || value === null) continue;
@@ -178,14 +327,17 @@ function checkedConfig<T extends pg.ClientConfig>(config: T): T {
 }
 
 export function createPool(config: pg.PoolConfig): pg.Pool {
+  assertListenerSupport();
   const pool = new pg.Pool(checkedConfig(config));
-  pool.on("connect", attachNoticeListener);
+  // pg-pool builds pg.Client instances (checkedConfig refuses another class).
+  pool.on("connect", (client) => attachListeners(client as unknown as pg.Client));
   return pool;
 }
 
 export function createClient(config: pg.ClientConfig): pg.Client {
+  assertListenerSupport();
   const client = new pg.Client(checkedConfig(config));
-  attachNoticeListener(client);
+  attachListeners(client);
   return client;
 }
 
@@ -196,7 +348,7 @@ export function createClient(config: pg.ClientConfig): pg.Client {
  * pools themselves on shutdown (ending twice throws), wrong for a script that
  * only calls `$disconnect()`. With `ownsPool`, do not query after
  * `$disconnect()`: the adapter would reconnect through a pool it builds itself,
- * which has neither the notice listener nor the options check.
+ * which has neither the report listeners nor the options check.
  */
 export function createPrismaClient(
   pool: pg.Pool,

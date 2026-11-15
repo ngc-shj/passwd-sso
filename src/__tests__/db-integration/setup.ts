@@ -170,23 +170,13 @@ try {
   await probe.end().catch(() => {});
 }
 
-// Every RLS bypass report goes to this suite's buffer, never to the logger;
-// a test that caused one fails unless it took it with expectBypassNotices.
+// Every RLS bypass report goes to this suite's buffers, never to the logger;
+// a test that caused one fails unless it took it (see bypass-notice-sink.ts).
 const { registerBypassNoticeSink } = await import("@/lib/db/pool-factory");
-const { bypassNoticeBuffer, recordBypassNotice } = await import("./bypass-notice-sink");
+const { failOnReports, recordBypassNotice } = await import("./bypass-notice-sink");
 registerBypassNoticeSink(recordBypassNotice);
 
 const { afterEach, afterAll } = await import("vitest");
-function failOnReports(when: string): void {
-  const reports = bypassNoticeBuffer().splice(0);
-  if (reports.length > 0) {
-    throw new Error(
-      `RLS bypass reached tables outside its grant ${when}: ` +
-        reports.map((r) => `${r.table} (purpose ${r.purpose})`).join(", ") +
-        ". Add the table to the grant the code passes, or take the report with expectBypassNotices.",
-    );
-  }
-}
 
 // Runtime backstop for check-tx-concurrent-queries (issue #975): a query issued
 // on a pg client that is still executing one is two statements at once on one
