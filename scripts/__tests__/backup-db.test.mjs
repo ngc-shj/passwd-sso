@@ -2223,11 +2223,21 @@ exit 0`);
     // deterministically.
     mkdirSync(backupDir, { recursive: true, mode: 0o700 });
     chmodSync(backupDir, 0o700);
+    //
+    // Both runs must also be in that window at once. On a loaded host the
+    // second spawn started after the first had released the lock, and both
+    // took it in turn. So each attempt is recorded and waits (bounded) until
+    // the other has arrived before it sleeps and creates.
     const realMkdir = spawnSync("sh", ["-c", "command -v mkdir"], { encoding: "utf8" }).stdout.trim();
+    const attempts = join(tmpDir, "lock-attempts");
     stub("mkdir", `
 for a in "$@"; do
   case "$a" in
-    */.lock.d) sleep 0.3 ;;
+    */.lock.d)
+      echo x >> "${attempts}"
+      i=0
+      while [ "$(wc -l < "${attempts}")" -lt 2 ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
+      sleep 0.3 ;;
   esac
 done
 exec "${realMkdir}" "$@"`);
