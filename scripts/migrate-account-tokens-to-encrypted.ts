@@ -31,6 +31,8 @@ import {
   isEncryptedAccountToken,
 } from "@/lib/crypto/account-token-crypto";
 import { assertBypassRlsActive } from "./lib/assert-bypass-rls-active";
+import { KEY_WARM_STATUS, warmShareMasterKeys } from "./lib/share-master-keys";
+import { getCurrentMasterKeyVersion } from "@/lib/crypto/crypto-server";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { attemptInSavepoint } from "@/lib/prisma/savepoint";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
@@ -95,6 +97,23 @@ export function buildAccountUpdateSql(cols: string[]): SqlFragment {
   return trustedSql`UPDATE accounts SET ${setClauses} WHERE id = $${cols.length + 1}::uuid`;
 }
 
+/**
+ * Load the current `share-master` key before the first batch. Every encrypt
+ * below reads it through `getKeyProviderSync()`, which throws under a cloud
+ * `KEY_PROVIDER` until the provider is initialised and the version fetched —
+ * this script has no app boot to do that for it. Refuses rather than starting
+ * a run whose first encrypt would fail.
+ */
+export async function prepareMigration(): Promise<void> {
+  const current = getCurrentMasterKeyVersion();
+  const report = await warmShareMasterKeys([current]);
+  if (report.get(current) !== KEY_WARM_STATUS.OK) {
+    throw new Error(
+      `The share-master key version ${current} could not be loaded from the configured key provider; nothing was migrated.`,
+    );
+  }
+}
+
 async function main(): Promise<void> {
   // No DATABASE_URL fallback. That fallback is what made running this against
   // the app credential possible in the first place, and the failure it produced
@@ -106,6 +125,8 @@ async function main(): Promise<void> {
       "Set MIGRATION_DATABASE_URL to a DDL-capable connection string before running this script.",
     );
   }
+
+  await prepareMigration();
 
   registerBypassNoticeSink(stderrBypassNoticeSink);
   const pool = createPool({ connectionString: url });

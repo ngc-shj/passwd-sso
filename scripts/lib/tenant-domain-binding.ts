@@ -4,7 +4,8 @@
  * string, the majority rule, the bind file's format, the worktree check
  * `bind --from-members --out` applies to its target, the mapping of a
  * stored sign-in provider ref back to a provider id, and `legacy-accounts`'
- * grouping and verdict.
+ * grouping and verdict, and `rekey-accounts`' claim check with the binding
+ * attestation it shares with `bind`.
  *
  * In its own module for the same reason as `tenant-domain-flags.ts`: it can be
  * unit-tested without importing the CLI (which pulls in Prisma, the driver
@@ -19,13 +20,14 @@
 import { realpathSync } from "node:fs";
 import { dirname, resolve, sep } from "node:path";
 import { UUID_RE } from "@/lib/constants/app";
-import { isProviderIdShape } from "@/lib/auth/jackson-providers";
+import { GOOGLE_PROVIDER_ID, isProviderIdShape } from "@/lib/auth/jackson-providers";
 import { providerRef } from "@/lib/audit/identifier-pepper";
 import {
   escapeUnsafeDisplayChars,
   UNSAFE_DISPLAY_CHARS_RE,
 } from "@/lib/security/unsafe-display-chars";
 import { storableClaimSchema } from "@/lib/tenant/tenant-claim-registry";
+import { ENGINE_WRITTEN_LABELS } from "@/lib/tenant/tenant-claim-event";
 
 // ─── evidence ────────────────────────────────────────────────────
 
@@ -426,4 +428,121 @@ export function legacyAccountVerdict(
     return singleConnection ? LEGACY_ACCOUNT_VERDICT.ATTESTED_UNCONFIGURED : LEGACY_ACCOUNT_VERDICT.UNRESOLVED;
   }
   return singleConnection ? LEGACY_ACCOUNT_VERDICT.ATTESTED : LEGACY_ACCOUNT_VERDICT.UNATTESTED;
+}
+
+// ─── binding attestation ─────────────────────────────────────────
+
+/** One `tenant_claim_events` row, as far as the binding attestation reads it. */
+export type BindingEvent = {
+  readonly seq: bigint;
+  readonly newProvider: string | null;
+  readonly actorLabel: string;
+};
+
+export type BindingAttestation = {
+  /** The provider the deciding event set. */
+  readonly provider: string;
+  /** Whether a person (an `--by` label) wrote it, rather than the engine. */
+  readonly operator: boolean;
+  readonly seq: bigint;
+  readonly actorLabel: string;
+};
+
+/**
+ * Who bound a claim to its provider: the latest event, by `seq`, that set a
+ * provider decides. Events carrying none (the deregister trigger) are skipped.
+ * `operator` is false for an engine-written label, normalised the way
+ * `validateActorLabel` normalises `--by`, so a label an operator cannot type is
+ * the label this treats as the engine's. Null when no event set a provider.
+ *
+ * One adjudicator for "an operator bound this claim to X", read by
+ * `rekey-accounts`' claim check and by `bind`'s attestation path, so the two
+ * cannot disagree on which claims still need an attestation (R48).
+ *
+ * CLASS: tripwire, not a boundary. `actor_label` is whatever the writer
+ * supplied, and a direct writer with INSERT on the table (the app role
+ * included) can supply any label; `db_user`, assigned by the trigger, is the
+ * real attribution and is printed for the operator, not adjudicated here.
+ */
+export function bindingAttestation(events: readonly BindingEvent[]): BindingAttestation | null {
+  let deciding: BindingEvent | null = null;
+  for (const event of events) {
+    if (event.newProvider === null) continue;
+    if (deciding === null || event.seq > deciding.seq) deciding = event;
+  }
+  if (deciding === null || deciding.newProvider === null) return null;
+  const label = deciding.actorLabel.trim().toLowerCase();
+  return {
+    provider: deciding.newProvider,
+    operator: !(ENGINE_WRITTEN_LABELS as readonly string[]).includes(label),
+    seq: deciding.seq,
+    actorLabel: deciding.actorLabel,
+  };
+}
+
+/** Whether an operator, not the engine, recorded the binding of a claim to `provider`. */
+export function isOperatorBoundTo(attestation: BindingAttestation | null, provider: string): boolean {
+  return attestation !== null && attestation.provider === provider && attestation.operator;
+}
+
+// ─── rekey-accounts' claim check ─────────────────────────────────
+
+/** One non-revoked claim of the tenant being re-keyed. */
+export type RekeyClaim = {
+  readonly claim: string;
+  readonly provider: string | null;
+  readonly attestation: BindingAttestation | null;
+};
+
+export const REKEY_CLAIM_REFUSAL = {
+  /** No provider: refused in strict mode at sign-in, and evidence of nothing here. */
+  UNBOUND: "unbound",
+  /** Bound to a provider other than the target and Google. */
+  OTHER_PROVIDER: "bound to another provider",
+  /** Bound to the target, but no operator recorded that binding. */
+  NOT_OPERATOR_BOUND: "not bound by an operator",
+} as const;
+
+export type RekeyClaimRefusalReason = (typeof REKEY_CLAIM_REFUSAL)[keyof typeof REKEY_CLAIM_REFUSAL];
+
+export type RekeyClaimRefusal = { claim: string; provider: string | null; reason: RekeyClaimRefusalReason };
+
+export type RekeyClaimCheck = {
+  /** The claims bound to the target by an operator (R-a's witnesses). */
+  readonly boundToTarget: readonly string[];
+  readonly refusals: readonly RekeyClaimRefusal[];
+};
+
+/**
+ * `rekey-accounts`' claim check (plan saml-jackson-account-rekey, C2) over the
+ * tenant's non-revoked claims. The move passes only when at least one claim is
+ * bound to `target` (R-a), every claim is bound to `target` or to Google (R-b),
+ * and an operator recorded each binding to `target` (R-c).
+ *
+ * R-b is what makes the move usable: sign-in compares the asserted claim's
+ * provider with the sign-in provider, so a claim bound elsewhere refuses the
+ * moved users, and an unbound one refuses them in strict mode. A Google-bound
+ * claim governs Google sign-ins only, which never resolve a SAML account.
+ *
+ * A consistency check against the recorded bindings, not proof that the
+ * tenant's IdP sits behind `target`: a sign-in presenting no claim reaches a
+ * moved account through the existing-user path whatever this says.
+ */
+export function rekeyClaimCheck(claims: readonly RekeyClaim[], target: string): RekeyClaimCheck {
+  const boundToTarget: string[] = [];
+  const refusals: RekeyClaimRefusal[] = [];
+  for (const c of claims) {
+    if (c.provider === null) {
+      refusals.push({ claim: c.claim, provider: null, reason: REKEY_CLAIM_REFUSAL.UNBOUND });
+    } else if (c.provider === GOOGLE_PROVIDER_ID) {
+      continue;
+    } else if (c.provider !== target) {
+      refusals.push({ claim: c.claim, provider: c.provider, reason: REKEY_CLAIM_REFUSAL.OTHER_PROVIDER });
+    } else if (!isOperatorBoundTo(c.attestation, target)) {
+      refusals.push({ claim: c.claim, provider: c.provider, reason: REKEY_CLAIM_REFUSAL.NOT_OPERATOR_BOUND });
+    } else {
+      boundToTarget.push(c.claim);
+    }
+  }
+  return { boundToTarget, refusals };
 }

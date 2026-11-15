@@ -69,6 +69,8 @@ import {
   DEREGISTER_ACTOR_LABEL,
   SIGNIN_ACTOR_LABEL,
   TENANT_CLAIM_EVENT_OPERATION,
+  recordTenantClaimEvent,
+  type TenantClaimEventOperation,
 } from "@/lib/tenant/tenant-claim-event";
 import {
   BIND_LINE_OUTCOME,
@@ -79,6 +81,7 @@ import {
   cmdHistory,
   cmdLegacyAccounts,
   cmdList,
+  cmdRekeyAccounts,
   cmdRemove,
   cmdUnmapped,
   migrationClientFactory,
@@ -723,6 +726,173 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
       expect((await claimRow(claim))?.provider).toBe(BRAVO);
       expect(await events(claim)).toHaveLength(0);
       await ctx.deleteTestData(tenantId);
+    });
+  });
+
+  // ─── bind attestation (plan saml-jackson-account-rekey, C7) ────────────
+
+  describe("bind --claim attestation", () => {
+    const REKEY_MARKER = "attested after sign-in registration";
+    /** The deciding event each variant leaves on a claim already bound to ALPHA. */
+    const VARIANTS: ReadonlyArray<{ name: string; label: string | null; operation: TenantClaimEventOperation; createdBy: string }> = [
+      { name: "signin", label: SIGNIN_ACTOR_LABEL, operation: TENANT_CLAIM_EVENT_OPERATION.REGISTER, createdBy: "signin" },
+      { name: "backfill", label: BACKFILL_CREATED_BY_LABEL, operation: TENANT_CLAIM_EVENT_OPERATION.REGISTER, createdBy: "backfill" },
+      { name: "db-delete", label: DEREGISTER_ACTOR_LABEL, operation: TENANT_CLAIM_EVENT_OPERATION.DEREGISTER, createdBy: "signin" },
+      { name: "no event", label: null, operation: TENANT_CLAIM_EVENT_OPERATION.REGISTER, createdBy: "signin" },
+    ];
+
+    async function appendEvent(claim: string, tenantId: string, label: string, operation: TenantClaimEventOperation) {
+      await ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        await recordTenantClaimEvent(tx, {
+          claim,
+          operation,
+          oldTenantId: tenantId,
+          newTenantId: tenantId,
+          oldRevokedAt: null,
+          newRevokedAt: null,
+          actorLabel: label,
+          oldProvider: null,
+          newProvider: ALPHA,
+        });
+      });
+    }
+
+    /** A tenant whose one member holds the legacy account, and a claim already bound to ALPHA by `variant`. */
+    async function engineBoundClaim(variant: (typeof VARIANTS)[number], arm: string, createdBy = variant.createdBy, label = variant.label) {
+      stubClaimProviderEnv(TWO_CONNECTIONS);
+      const tenantId = await tenantWith([JACKSON_LEGACY_PROVIDER_ID]);
+      const claim = freshClaim(`attest-${arm}`);
+      await seedClaim(tenantId, claim, { provider: ALPHA, createdBy });
+      if (label !== null) await appendEvent(claim, tenantId, label, variant.operation);
+      return { tenantId, claim };
+    }
+
+    const rekey = (tenantId: string) => cmdRekeyAccounts({ tenant: tenantId, to: ALPHA, by: "ops" });
+
+    it.each(VARIANTS)("$name: attestation records one rebind with the provider unchanged, then the rekey preview passes R-c", async (variant) => {
+      const { tenantId, claim } = await engineBoundClaim(variant, variant.name.replace(" ", "-"));
+      const out = captureOutput();
+      try {
+        // Before: the claim is bound but no operator recorded it.
+        const refused = await rekey(tenantId);
+        expect(refused).toMatchObject({ ok: false, code: 1 });
+        expect(out.text()).toContain("not bound by an operator");
+
+        const priorEvents = await events(claim);
+        const deciding = priorEvents.at(-1);
+
+        // The majority check refuses first, expected before a rekey; nothing is written.
+        out.lines.length = 0;
+        const withoutAccept = await cmdBind({ claim, provider: ALPHA, by: "ops", yes: true });
+        expect(withoutAccept).toMatchObject({ ok: false, code: 1, message: expect.stringContaining("not a majority") });
+        expect(await events(claim)).toHaveLength(priorEvents.length);
+
+        let prompted = false;
+        out.lines.length = 0;
+        const attested = await cmdBind({
+          claim,
+          provider: ALPHA,
+          by: "ops",
+          acceptUnusedProvider: true,
+          confirm: async () => {
+            prompted = true;
+            return true;
+          },
+        });
+        expect(prompted).toBe(true);
+        expect(attested).toMatchObject({ ok: true, code: 0, tenantId, claim });
+
+        const text = out.text();
+        expect(text).toContain(`Claim "${claim}" is already bound to this provider, but no operator event records that binding.`);
+        expect(text).toContain(`created by:      ${variant.createdBy}`);
+        if (variant.label === null) {
+          expect(deciding).toBeUndefined();
+          expect(text).toContain("no recorded event binds this claim");
+        } else {
+          expect(text).toContain(`seq=${deciding!.seq} by "${variant.label}" (engine-written, not an operator)`);
+          expect(text).toContain(`db_user=${deciding!.dbUser}`);
+        }
+        expect(text).toContain(`Attesting this binding lets \`rekey-accounts --to ${ALPHA}\` move this tenant's members onto that provider`);
+        expect(text).toContain("a shortfall here is expected");
+        expect(text).toContain(`Recorded your attestation that claim "${claim}" is bound to "${ALPHA}".`);
+
+        // Exactly one new event: a rebind, old = new = ALPHA, labelled with --by; the row's provider is unchanged.
+        const after = await events(claim);
+        expect(after).toHaveLength(priorEvents.length + 1);
+        expect(after.at(-1)).toMatchObject({
+          operation: TENANT_CLAIM_EVENT_OPERATION.REBIND,
+          oldProvider: ALPHA,
+          newProvider: ALPHA,
+          oldTenantId: tenantId,
+          newTenantId: tenantId,
+          actorLabel: "ops",
+        });
+        expect((await claimRow(claim))?.provider).toBe(ALPHA);
+
+        // The rekey preview now passes R-c. The marker needs an engine binding to attest after.
+        out.lines.length = 0;
+        const preview = await rekey(tenantId);
+        expect(preview, preview.message).toMatchObject({ ok: true, code: 0 });
+        expect(out.text()).toContain(`claim=${claim}\tprovider=${ALPHA}`);
+        if (variant.label === null) expect(out.text()).not.toContain(REKEY_MARKER);
+        else expect(out.text()).toContain(REKEY_MARKER);
+
+        // A second bind is a no-op.
+        out.lines.length = 0;
+        const again = await cmdBind({ claim, provider: ALPHA, by: "ops", acceptUnusedProvider: true, yes: true });
+        expect(again).toMatchObject({ ok: true, message: expect.stringContaining("No change made") });
+        expect(await events(claim)).toHaveLength(after.length);
+      } finally {
+        await ctx.deleteTestData(tenantId);
+      }
+    });
+
+    it("a claim an operator bound directly: bind writes nothing and the rekey preview shows no attestation marker", async () => {
+      stubClaimProviderEnv(TWO_CONNECTIONS);
+      const tenantId = await ctx.createTenant();
+      const claim = freshClaim("attest-direct");
+      const out = captureOutput();
+      try {
+        expect(await cmdAdd({ tenant: tenantId, domain: claim, by: "ops", provider: ALPHA, yes: true })).toMatchObject({ ok: true });
+        await member(tenantId, [JACKSON_LEGACY_PROVIDER_ID]);
+        const before = await events(claim);
+        expect(before).toHaveLength(1);
+
+        const bound = await cmdBind({ claim, provider: ALPHA, by: "someone-else", acceptUnusedProvider: true, yes: true });
+        expect(bound).toMatchObject({ ok: true, message: expect.stringContaining("No change made") });
+        expect(await events(claim)).toEqual(before);
+
+        out.lines.length = 0;
+        const preview = await rekey(tenantId);
+        expect(preview, preview.message).toMatchObject({ ok: true, code: 0 });
+        expect(out.text()).toContain(`claim=${claim}\tprovider=${ALPHA}`);
+        expect(out.text()).not.toContain(REKEY_MARKER);
+      } finally {
+        await ctx.deleteTestData(tenantId);
+      }
+    });
+
+    it("a control character seeded in actor_label and in created_by prints escaped", async () => {
+      // \u000b (VT) is trimmed by the label normalisation, so the event still reads as `signin`'s.
+      const variant = VARIANTS[0]!;
+      const { tenantId, claim } = await engineBoundClaim(variant, "ctrl", "mallory\u001b[2Jx", "\u000bsignin");
+      const out = captureOutput();
+      try {
+        const attested = await cmdBind({ claim, provider: ALPHA, by: "ops", acceptUnusedProvider: true, yes: true });
+        expect(attested, attested.message).toMatchObject({ ok: true });
+        const text = out.text();
+        expect(text).not.toMatch(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/);
+        expect(text).toContain("created by:      mallory<U+001B>[2Jx");
+        expect(text).toContain('by "<U+000B>signin" (engine-written, not an operator)');
+        // The rekey listing escapes both the same way.
+        out.lines.length = 0;
+        await rekey(tenantId);
+        expect(out.text()).not.toMatch(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/);
+        expect(out.text()).toContain("created_by=mallory<U+001B>[2Jx");
+      } finally {
+        await ctx.deleteTestData(tenantId);
+      }
     });
   });
 

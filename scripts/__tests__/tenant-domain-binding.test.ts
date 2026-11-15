@@ -13,13 +13,19 @@ import {
   isInsideWorktree,
   isMajority,
   LEGACY_ACCOUNT_VERDICT,
+  REKEY_CLAIM_REFUSAL,
+  bindingAttestation,
+  rekeyClaimCheck,
   legacyAccountVerdict,
   parseBindFile,
   parseEvidence,
   refMappingFor,
   suggestedProvider,
   type BindFileRow,
+  type BindingAttestation,
+  type BindingEvent,
   type ClaimEvidence,
+  type RekeyClaim,
 } from "../lib/tenant-domain-binding";
 import {
   deriveIdentifierPepper,
@@ -341,4 +347,125 @@ describe("legacy-accounts grouping and verdict", () => {
       expect(legacyAccountVerdict(groups, true, true)).toBe(V.ATTESTED);
     },
   );
+});
+
+function ev(seq: number, newProvider: string | null, actorLabel: string): BindingEvent {
+  return { seq: BigInt(seq), newProvider, actorLabel };
+}
+
+describe("bindingAttestation", () => {
+  it("lets the latest event by seq decide, whichever order the list is in", () => {
+    const early = ev(1, A, "alice");
+    const late = ev(2, B, "bob");
+    expect(bindingAttestation([early, late])?.provider).toBe(B);
+    expect(bindingAttestation([late, early])?.provider).toBe(B);
+  });
+
+  it("skips events with a null newProvider", () => {
+    const att = bindingAttestation([ev(1, A, "alice"), ev(2, null, "deregister")]);
+    expect(att).toEqual({ provider: A, operator: true, seq: 1n, actorLabel: "alice" });
+  });
+
+  it.each(["signin", "backfill", "db-delete", " SignIn ", "BACKFILL"])(
+    "treats the engine label %j as not an operator",
+    (label) => {
+      expect(bindingAttestation([ev(1, A, label)])?.operator).toBe(false);
+    },
+  );
+
+  it("treats an operator label as an operator", () => {
+    expect(bindingAttestation([ev(1, A, "alice")])?.operator).toBe(true);
+  });
+
+  it("returns the deciding event's seq, actorLabel and provider", () => {
+    const att = bindingAttestation([ev(5, A, "alice"), ev(9, B, " SignIn ")]);
+    expect(att).toEqual({ provider: B, operator: false, seq: 9n, actorLabel: " SignIn " });
+  });
+
+  it("returns null for an empty list", () => {
+    expect(bindingAttestation([])).toBeNull();
+  });
+
+  it("returns null when no event carries a provider", () => {
+    expect(bindingAttestation([ev(1, null, "x"), ev(2, null, "y")])).toBeNull();
+  });
+});
+
+describe("rekeyClaimCheck", () => {
+  const TARGET = "saml-jackson-alpha";
+  const R = REKEY_CLAIM_REFUSAL;
+  const opAtt: BindingAttestation = { provider: TARGET, operator: true, seq: 1n, actorLabel: "alice" };
+  const claim = (name: string, provider: string | null, attestation: BindingAttestation | null): RekeyClaim => ({
+    claim: name,
+    provider,
+    attestation,
+  });
+
+  it("reports no witness and no refusal when the tenant has no claim (R-a is the caller's)", () => {
+    expect(rekeyClaimCheck([], TARGET)).toEqual({ boundToTarget: [], refusals: [] });
+  });
+
+  it("refuses an unbound claim", () => {
+    expect(rekeyClaimCheck([claim("a.example", null, null)], TARGET).refusals).toEqual([
+      { claim: "a.example", provider: null, reason: R.UNBOUND },
+    ]);
+  });
+
+  it.each(["saml-jackson", "saml-jackson-other"])("refuses a claim bound to %s", (provider) => {
+    expect(rekeyClaimCheck([claim("a.example", provider, opAtt)], TARGET).refusals).toEqual([
+      { claim: "a.example", provider, reason: R.OTHER_PROVIDER },
+    ]);
+  });
+
+  it("ignores a google-bound claim: no refusal, not a witness", () => {
+    expect(rekeyClaimCheck([claim("g.example", "google", null)], TARGET)).toEqual({
+      boundToTarget: [],
+      refusals: [],
+    });
+  });
+
+  it.each([
+    ["no attestation", null],
+    ["an engine-written attestation", { ...opAtt, operator: false, actorLabel: "signin" }],
+    ["an attestation for another provider", { ...opAtt, provider: B }],
+  ])("refuses a target-bound claim with %s", (_case, attestation) => {
+    const out = rekeyClaimCheck([claim("a.example", TARGET, attestation)], TARGET);
+    expect(out.refusals).toEqual([{ claim: "a.example", provider: TARGET, reason: R.NOT_OPERATOR_BOUND }]);
+    expect(out.boundToTarget).toEqual([]);
+  });
+
+  it("counts a target-bound claim with an operator attestation as a witness", () => {
+    expect(rekeyClaimCheck([claim("a.example", TARGET, opAtt)], TARGET)).toEqual({
+      boundToTarget: ["a.example"],
+      refusals: [],
+    });
+  });
+
+  it("lists every refusal in a mixed tenant", () => {
+    const out = rekeyClaimCheck(
+      [
+        claim("ok.example", TARGET, opAtt),
+        claim("unbound.example", null, null),
+        claim("other.example", B, opAtt),
+        claim("engine.example", TARGET, { ...opAtt, operator: false }),
+        claim("g.example", "google", null),
+      ],
+      TARGET,
+    );
+    expect(out.boundToTarget).toEqual(["ok.example"]);
+    expect(out.refusals.map((r) => [r.claim, r.reason])).toEqual([
+      ["unbound.example", R.UNBOUND],
+      ["other.example", R.OTHER_PROVIDER],
+      ["engine.example", R.NOT_OPERATOR_BOUND],
+    ]);
+  });
+
+  it("has no refusal when every target claim is operator-bound beside a google claim", () => {
+    const out = rekeyClaimCheck(
+      [claim("a.example", TARGET, opAtt), claim("b.example", TARGET, opAtt), claim("g.example", "google", null)],
+      TARGET,
+    );
+    expect(out.refusals).toEqual([]);
+    expect(out.boundToTarget).toEqual(["a.example", "b.example"]);
+  });
 });

@@ -45,6 +45,7 @@
 //   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- measure
 //   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- legacy-accounts [--single-connection]
 //   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- backfill-owning-column --by <label> [--apply] [--yes] [--limit <n>]
+//   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- rekey-accounts --tenant <ref> --to <saml-jackson-id> --by <label> [--apply] [--yes]
 //
 // `measure` prints the three counts docs/archive/review/audit-tenant-adjudicator-design.md's
 // "Measurements" section specifies — divergent column, multi-active-membership
@@ -86,6 +87,12 @@
 // — an account does not record its connection — so with that provider
 // configured and any account at it, the command refuses without the flag.
 //
+// `rekey-accounts` (#954) is the one command that also needs the
+// `share-master` key — from the env, or the cloud key provider's credentials
+// (`KEY_PROVIDER`) — because it decrypts the moved accounts' OAuth tokens and
+// re-encrypts them under the new provider's AAD. Everything else here needs
+// only the database access an operator already has.
+//
 // `history` also reports a `deregister` operation now: deleting a row from
 // `tenant_claims` — directly, or by cascade from a tenant deletion — fires a
 // trigger that appends one of these. `actor_label` is the fixed string
@@ -104,6 +111,7 @@ loadEnv();
 import type { PrismaClient } from "@prisma/client";
 import { Prisma } from "@prisma/client";
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { closeSync, fchmodSync, openSync, readFileSync, unlinkSync, writeSync, realpathSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -144,7 +152,15 @@ import {
 } from "@/lib/auth/jackson-providers";
 import { deriveIdentifierPepper } from "@/lib/audit/identifier-pepper";
 import { isUnusableUnderStrict } from "@/lib/tenant/claim-binding";
-import { ACTOR_TYPE, AUDIT_OUTBOX } from "@/lib/constants/audit/audit";
+import { ACTOR_TYPE, AUDIT_ACTION, AUDIT_OUTBOX, AUDIT_SCOPE } from "@/lib/constants/audit/audit";
+import { AUDIT_TARGET_TYPE } from "@/lib/constants/audit/audit-target";
+import {
+  DECRYPT_FAILURE_KIND,
+  decryptAccountTokenTriple,
+  encryptAccountTokenTriple,
+  type DecryptFailureKind,
+} from "@/lib/crypto/account-token-crypto";
+import { isUniqueViolationOn, pgErrorCode } from "@/lib/prisma/prisma-error";
 // `realign`'s I/O, from modules that never import the application's Prisma
 // singleton: it throws at import without DATABASE_URL, and this tool runs on
 // MIGRATION_DATABASE_URL alone (round-7 F-R7-2). `tenant-domain-import-graph.test.ts`
@@ -182,7 +198,9 @@ import {
   type UnmappedBucket,
 } from "./lib/tenant-domain-buckets";
 import {
+  bindingAttestation,
   describeSignInProviderRef,
+  isOperatorBoundTo,
   evidenceOf,
   formatBindFile,
   formatEvidence,
@@ -197,10 +215,16 @@ import {
   parseEvidence,
   refMappingFor,
   suggestedProvider,
+  REKEY_CLAIM_REFUSAL,
+  rekeyClaimCheck,
   type BindFileRow,
+  type BindingAttestation,
+  type BindingEvent,
   type BindRowFlags,
   type ClaimEvidence,
+  type RekeyClaim,
 } from "./lib/tenant-domain-binding";
+import { collectEnvelopeVersions, envelopeVersionOf, KEY_WARM_STATUS, warmShareMasterKeys } from "./lib/share-master-keys";
 
 type TxClient = Prisma.TransactionClient;
 
@@ -2194,12 +2218,69 @@ async function rebindInTx(
   return true;
 }
 
+/** A claim's provider-carrying history, for `bindingAttestation` and for the operator to read. */
+type ClaimBindingEvent = BindingEvent & { readonly dbUser: string; readonly createdAt: Date };
+
+async function readBindingEvents(tx: TxClient, claim: string): Promise<ClaimBindingEvent[]> {
+  return tx.tenantClaimEvent.findMany({
+    where: { claim },
+    orderBy: { seq: "asc" },
+    select: { seq: true, newProvider: true, actorLabel: true, dbUser: true, createdAt: true },
+  });
+}
+
+/** How many of a tenant's active members still hold an account at the legacy provider. */
+async function legacyAccountHolders(tx: TxClient, tenantId: string): Promise<number> {
+  const members = await tx.tenantMember.findMany({ where: { tenantId, deactivatedAt: null }, select: { userId: true } });
+  if (members.length === 0) return 0;
+  const accounts = await tx.account.findMany({
+    where: { provider: JACKSON_LEGACY_PROVIDER_ID, userId: { in: members.map((m) => m.userId) } },
+    select: { userId: true },
+  });
+  return new Set(accounts.map((a) => a.userId)).size;
+}
+
+/**
+ * What `bind`'s attestation path is about to vouch for: the event that bound
+ * the claim, and who wrote it. Every field is read back from the database and
+ * none is CHECK-constrained, so each is escaped for display.
+ */
+function printAttestationOrigin(
+  claim: string,
+  createdBy: string | null,
+  attestation: BindingAttestation | null,
+  events: readonly ClaimBindingEvent[],
+): void {
+  console.log(
+    `Claim "${escapeUnsafeDisplayChars(claim)}" is already bound to this provider, but no operator event records that binding.`,
+  );
+  console.log(`  created by:      ${escapeUnsafeDisplayChars(createdBy ?? "-")}`);
+  if (attestation === null) {
+    console.log("  binding event:   none — no recorded event binds this claim");
+  } else {
+    const event = events.find((e) => e.seq === attestation.seq);
+    console.log(
+      `  binding event:   seq=${attestation.seq} by "${escapeUnsafeDisplayChars(attestation.actorLabel)}" ` +
+        (attestation.operator
+          ? `(an operator's, but it set "${escapeUnsafeDisplayChars(attestation.provider)}", not this provider)`
+          : "(engine-written, not an operator)") +
+        (event ? ` at ${event.createdAt.toISOString()}, db_user=${escapeUnsafeDisplayChars(event.dbUser)}` : ""),
+    );
+  }
+  console.log("");
+}
+
 /**
  * `tenant-domain bind --claim <c> --provider <id> --by <label>`: bind one
  * active claim to a provider, or move its binding (plan
- * sso-claim-connection-binding, C3). The same evidence check as `add`; the
- * same-provider case is a no-op; a revoked or absent claim is refused — `add`
- * is how a claim is registered or un-revoked, and it takes `--provider` too.
+ * sso-claim-connection-binding, C3). The same evidence check as `add`; a
+ * revoked or absent claim is refused — `add` is how a claim is registered or
+ * un-revoked, and it takes `--provider` too.
+ *
+ * The same-provider case is a no-op when an operator recorded the binding, and
+ * otherwise records the operator's attestation of it as a `rebind` with the
+ * provider unchanged (plan saml-jackson-account-rekey, C7), behind the same
+ * evidence check and confirmation.
  */
 export async function cmdBind(args: {
   claim: string;
@@ -2259,14 +2340,25 @@ export async function cmdBind(args: {
               "bind changes an active claim's binding only; `add --provider <id>` un-revokes it with its binding.",
           };
         }
-        if (row.provider === args.provider) {
-          return {
-            ok: true,
-            code: 0,
-            tenantId: row.tenantId,
-            claim,
-            message: `Claim "${escapeUnsafeDisplayChars(claim)}" is already bound to "${escapeUnsafeDisplayChars(args.provider)}". No change made.`,
-          };
+        // Already bound to this provider: a no-op when an operator recorded the
+        // binding, otherwise an attestation (plan saml-jackson-account-rekey,
+        // C7). `rekey-accounts` requires an operator binding, and a binding a
+        // sign-in wrote cannot otherwise gain one — `bind` and `add` would
+        // both report it already bound.
+        const attesting = row.provider === args.provider;
+        if (attesting) {
+          const events = await readBindingEvents(tx, claim);
+          const attestation = bindingAttestation(events);
+          if (isOperatorBoundTo(attestation, args.provider)) {
+            return {
+              ok: true,
+              code: 0,
+              tenantId: row.tenantId,
+              claim,
+              message: `Claim "${escapeUnsafeDisplayChars(claim)}" is already bound to "${escapeUnsafeDisplayChars(args.provider)}". No change made.`,
+            };
+          }
+          printAttestationOrigin(claim, row.createdBy, attestation, events);
         }
 
         const tenant = await tx.tenant.findUnique({
@@ -2277,17 +2369,29 @@ export async function cmdBind(args: {
         console.log("Target claim row:");
         console.log(`  claim:    ${escapeUnsafeDisplayChars(claim)}`);
         console.log(
-          `  provider: ${row.provider === null ? "none" : escapeUnsafeDisplayChars(row.provider)} → ${escapeUnsafeDisplayChars(args.provider)}`,
+          attesting
+            ? `  provider: ${escapeUnsafeDisplayChars(args.provider)} (unchanged; this records your attestation of it)`
+            : `  provider: ${row.provider === null ? "none" : escapeUnsafeDisplayChars(row.provider)} → ${escapeUnsafeDisplayChars(args.provider)}`,
         );
         console.log("");
         const evidence = await readMemberEvidence(tx, row.tenantId, app.env, args.provider);
         printEvidence(row.tenantId, evidence, await readProvenance(tx, claim, row.tenantId, row.createdBy));
+        if (attesting) {
+          console.log(
+            `  Before rekey-accounts moves them, this tenant's members still hold their pre-upgrade accounts at ` +
+              `${JACKSON_LEGACY_PROVIDER_ID} (${await legacyAccountHolders(tx, row.tenantId)} of ${evidence.total} ` +
+              "active member(s)), so few or none hold one at the provider above: a shortfall here is expected.",
+          );
+        }
         const refusal = majorityRefusal(evidence, args.provider, args.acceptUnusedProvider === true);
         if (refusal) return refusal;
         console.log("");
         console.log(
-          "From now on, a sign-in presenting this claim selects this tenant only through the provider above " +
-            "(in strict mode); a sign-in through any other provider is refused.",
+          attesting
+            ? `Attesting this binding lets \`rekey-accounts --to ${escapeUnsafeDisplayChars(args.provider)}\` move this ` +
+                "tenant's members onto that provider, after which the IdP behind it can sign in as them."
+            : "From now on, a sign-in presenting this claim selects this tenant only through the provider above " +
+                "(in strict mode); a sign-in through any other provider is refused.",
         );
 
         const confirmed = args.yes === true ? true : await (args.confirm ?? defaultConfirm)("Proceed?");
@@ -2303,8 +2407,11 @@ export async function cmdBind(args: {
           };
         }
         console.log(
-          `Bound claim "${escapeUnsafeDisplayChars(claim)}" to "${escapeUnsafeDisplayChars(args.provider)}" ` +
-            `(was ${row.provider === null ? "unbound" : `"${escapeUnsafeDisplayChars(row.provider)}"`}).`,
+          attesting
+            ? `Recorded your attestation that claim "${escapeUnsafeDisplayChars(claim)}" is bound to ` +
+                `"${escapeUnsafeDisplayChars(args.provider)}".`
+            : `Bound claim "${escapeUnsafeDisplayChars(claim)}" to "${escapeUnsafeDisplayChars(args.provider)}" ` +
+                `(was ${row.provider === null ? "unbound" : `"${escapeUnsafeDisplayChars(row.provider)}"`}).`,
         );
         return { ok: true, code: 0, tenantId: row.tenantId, claim };
       },
@@ -3278,6 +3385,531 @@ export async function cmdBackfillOwningColumn(args: {
   }
 }
 
+// ─── rekey-accounts ──────────────────────────────────────────────
+
+/** How many of the target's claims each audit row names; the rest are counted (`claimsOmitted`). */
+export const REKEY_AUDIT_MAX_CLAIMS = 10;
+
+/** The `@@unique([provider, providerAccountId])` index on `accounts` (`20260208091726_init_e2e`). */
+const ACCOUNTS_PROVIDER_ACCOUNT_INDEX = "accounts_provider_provider_account_id_key";
+
+/**
+ * The key warming `rekey-accounts` runs before its verify pass and again after
+ * the confirmation. An object rather than a bare import so it is a seam, like
+ * `migrationClientFactory`: the integration test observes both calls and
+ * injects a concurrent write between the post-confirmation re-read and the
+ * first account write.
+ */
+export const shareMasterKeyWarmer = {
+  warm: warmShareMasterKeys,
+};
+
+/** A refusal raised inside the transaction, so that throwing it rolls back whatever was written. */
+class RekeyAbort extends Error {
+  constructor(readonly result: CmdResult) {
+    super(result.message);
+  }
+}
+
+type RekeyCandidate = {
+  accountId: string;
+  userId: string;
+  tenantId: string;
+  providerAccountId: string;
+  memberId: string;
+  refresh_token: string | null;
+  access_token: string | null;
+  id_token: string | null;
+};
+
+type RekeySnapshotClaim = RekeyClaim & {
+  claimId: string;
+  createdBy: string | null;
+  /** Bound to the target by an operator who attested a binding the engine had written. */
+  attestedAfterEngine: boolean;
+};
+
+type RekeySnapshot = {
+  tenant: { id: string; name: string; slug: string };
+  claims: RekeySnapshotClaim[];
+  candidates: RekeyCandidate[];
+  /** Candidate account ids blocked by an account already at the target. */
+  conflicts: { accountId: string; reason: string }[];
+};
+
+const TOKEN_FIELDS = ["refresh_token", "access_token", "id_token"] as const;
+
+/** The AAD a candidate's tokens were encrypted under, at the legacy provider. */
+function legacyAad(c: RekeyCandidate): { userId: string; provider: string; providerAccountId: string } {
+  return { userId: c.userId, provider: JACKSON_LEGACY_PROVIDER_ID, providerAccountId: c.providerAccountId };
+}
+
+/**
+ * Everything the listing shows and the move acts on, read in one transaction:
+ * the tenant's live claims with the event that bound each, its active
+ * members' `saml-jackson` accounts (ordered by id, so a run and its re-read
+ * walk them in the same order), and the accounts at the target that would
+ * collide with them. No row locks: a write by another connection during the
+ * confirmation must not block, it is detected after it instead.
+ */
+async function readRekeySnapshot(
+  tx: TxClient,
+  tenant: { id: string; name: string; slug: string },
+  to: string,
+): Promise<RekeySnapshot> {
+  const claimRows = await tx.tenantClaim.findMany({
+    where: { tenantId: tenant.id, revokedAt: null },
+    orderBy: { claim: "asc" },
+    select: { id: true, claim: true, provider: true, createdBy: true },
+  });
+  const events =
+    claimRows.length === 0
+      ? []
+      : await tx.tenantClaimEvent.findMany({
+          where: { claim: { in: claimRows.map((c) => c.claim) } },
+          select: { claim: true, seq: true, newProvider: true, actorLabel: true },
+        });
+  const claims = claimRows.map((c): RekeySnapshotClaim => {
+    const own = events.filter((e) => e.claim === c.claim);
+    const attestation = bindingAttestation(own);
+    const prior = attestation === null ? null : bindingAttestation(own.filter((e) => e.seq < attestation.seq));
+    return {
+      claimId: c.id,
+      claim: c.claim,
+      provider: c.provider,
+      createdBy: c.createdBy,
+      attestation,
+      attestedAfterEngine:
+        attestation !== null && attestation.operator && prior !== null && !prior.operator && prior.provider === to,
+    };
+  });
+
+  const members = await tx.tenantMember.findMany({
+    where: { tenantId: tenant.id, deactivatedAt: null },
+    select: { id: true, userId: true },
+  });
+  const memberOf = new Map(members.map((m) => [m.userId, m.id]));
+  const accounts =
+    members.length === 0
+      ? []
+      : await tx.account.findMany({
+          where: { provider: JACKSON_LEGACY_PROVIDER_ID, userId: { in: members.map((m) => m.userId) } },
+          orderBy: { id: "asc" },
+          select: {
+            id: true,
+            userId: true,
+            tenantId: true,
+            providerAccountId: true,
+            refresh_token: true,
+            access_token: true,
+            id_token: true,
+          },
+        });
+  const candidates = accounts.map((a): RekeyCandidate => {
+    const memberId = memberOf.get(a.userId);
+    // The accounts were read by this map's keys; a miss is a broken read, and
+    // the member id is what each audit row targets.
+    if (memberId === undefined) throw new Error("rekey-accounts: an account read by member has no member");
+    return {
+      accountId: a.id,
+      userId: a.userId,
+      tenantId: a.tenantId,
+      providerAccountId: a.providerAccountId,
+      memberId,
+      refresh_token: a.refresh_token,
+      access_token: a.access_token,
+      id_token: a.id_token,
+    };
+  });
+
+  const atTarget =
+    candidates.length === 0
+      ? []
+      : await tx.account.findMany({
+          where: {
+            provider: to,
+            OR: [
+              { providerAccountId: { in: candidates.map((c) => c.providerAccountId) } },
+              { userId: { in: candidates.map((c) => c.userId) } },
+            ],
+          },
+          orderBy: { id: "asc" },
+          select: { id: true, userId: true, providerAccountId: true },
+        });
+  const conflicts: { accountId: string; reason: string }[] = [];
+  for (const c of candidates) {
+    for (const row of atTarget) {
+      if (row.providerAccountId === c.providerAccountId) {
+        conflicts.push({ accountId: c.accountId, reason: `account ${row.id} at the target already has its account id` });
+      } else if (row.userId === c.userId) {
+        conflicts.push({ accountId: c.accountId, reason: `its user already holds account ${row.id} at the target` });
+      }
+    }
+  }
+  return { tenant, claims, candidates, conflicts };
+}
+
+/**
+ * What the post-confirmation re-read compares (plan C1 step 9): the live claim
+ * set with each claim's provider and deciding event, the candidate SET and the
+ * conflict set. A candidate's own columns are the write's compare-and-swap, not
+ * this — the two are disjoint, so each concurrent change meets exactly one.
+ * `revokedAt` is implied: only live claims are in the set.
+ */
+function rekeySnapshotKey(s: RekeySnapshot): string {
+  return JSON.stringify({
+    tenant: s.tenant.id,
+    claims: s.claims
+      .map((c) => [c.claimId, c.provider, c.attestation === null ? null : c.attestation.seq.toString()])
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+    candidates: s.candidates.map((c) => c.accountId).sort(),
+    conflicts: s.conflicts.map((c) => `${c.accountId}:${c.reason}`).sort(),
+  });
+}
+
+function printRekeyClaims(claims: readonly RekeySnapshotClaim[]): void {
+  console.log("Live claims of the tenant, with the event that bound each:");
+  if (claims.length === 0) console.log("  (none)");
+  for (const c of claims) {
+    const binding =
+      c.attestation === null
+        ? "no binding event"
+        : `seq=${c.attestation.seq} by "${escapeUnsafeDisplayChars(c.attestation.actorLabel)}"` +
+          (c.attestation.operator ? "" : " (engine-written)");
+    console.log(
+      `  claim=${escapeUnsafeDisplayChars(c.claim)}\tprovider=${c.provider === null ? "none" : escapeUnsafeDisplayChars(c.provider)}` +
+        `\tcreated_by=${escapeUnsafeDisplayChars(c.createdBy ?? "-")}\t${binding}` +
+        (c.attestedAfterEngine ? "\tattested after sign-in registration" : ""),
+    );
+  }
+}
+
+/**
+ * `tenant-domain rekey-accounts --tenant <ref> --to saml-jackson-<id> --by <label> [--apply] [--yes]`
+ * (#954, plan saml-jackson-account-rekey C1): move the tenant's active members'
+ * accounts at the legacy `saml-jackson` provider onto the per-connection
+ * provider their tenant's claims are bound to.
+ *
+ * A raw `UPDATE accounts SET provider` does not do this: the stored OAuth
+ * tokens are encrypted with the provider in their AAD (`account-token-crypto`),
+ * so each token is decrypted under the old AAD and re-encrypted under the new
+ * one, in one transaction with the provider change and the audit rows.
+ *
+ * Lists by default. Refused, with nothing written: an unconfigured or
+ * non-connection target; the claim check (`rekeyClaimCheck`); any token that
+ * does not decrypt; an account already at the target that collides; and any
+ * change, during the confirmation, to what the listing showed. The write is a
+ * compare-and-swap on every column the AAD and ciphertext came from, so a row
+ * changed after the read rolls the whole run back rather than being
+ * overwritten.
+ *
+ * What it does not establish: that the tenant's IdP sits behind the target.
+ * That is the operator's attestation, recorded with `--by`. A sign-in that
+ * presents no claim reaches a moved account through the existing-user path,
+ * and the accounts do not record which connection each user came through, so
+ * the move trusts the target's IdP with every listed member.
+ *
+ * Messages never carry a token, a ciphertext, a provider account id or an
+ * error's text: an unexpected error is reported by class and SQLSTATE only.
+ */
+export async function cmdRekeyAccounts(args: {
+  tenant: string;
+  to: string;
+  by: string;
+  apply?: boolean;
+  yes?: boolean;
+  confirm?: ConfirmFn;
+}): Promise<CmdResult> {
+  const url = process.env.MIGRATION_DATABASE_URL;
+  if (!url) return missingUrlResult();
+
+  const byError = validateActorLabel(args.by);
+  if (byError) return byError;
+
+  const app = readAppEnv("rekey-accounts");
+  if (!app.ok) return app.result;
+  if (!app.env.present) return appEnvRequiredResult("rekey-accounts");
+  if (!args.to.startsWith(JACKSON_CONNECTION_PROVIDER_ID_PREFIX) || !app.env.claimProviders.includes(args.to)) {
+    const connections = app.env.claimProviders.filter((p) => p.startsWith(JACKSON_CONNECTION_PROVIDER_ID_PREFIX));
+    return {
+      ok: false,
+      code: 1,
+      message:
+        `--to "${escapeUnsafeDisplayChars(args.to)}" is not a configured Jackson connection provider ` +
+        `(${JACKSON_CONNECTION_PROVIDER_ID_PREFIX}<id>, listed in AUTH_JACKSON_CONNECTIONS). ` +
+        `Configured: ${connections.length === 0 ? "none" : connections.join(", ")}.`,
+    };
+  }
+  console.log(
+    `"${escapeUnsafeDisplayChars(args.to)}" is configured in this process's env. The app's runtime env (its task ` +
+      "definition and secrets) must list it in AUTH_JACKSON_CONNECTIONS too, or the moved users stay refused.",
+  );
+  if (app.env.claimProviders.includes(JACKSON_LEGACY_PROVIDER_ID)) {
+    console.log(
+      `${JACKSON_LEGACY_PROVIDER_ID} is configured in this process's env: the accounts this run does not move ` +
+        "stay governed by it; run `legacy-accounts` after this.",
+    );
+  }
+
+  const apply = args.apply === true;
+  const prisma = migrationClientFactory.create(url);
+  try {
+    return await withBypassRls(
+      prisma,
+      async (tx) => {
+        const tenant = await resolveTenantRef(tx, args.tenant);
+        if (!tenant) {
+          return { ok: false, code: 1, message: `Tenant not found: ${escapeUnsafeDisplayChars(args.tenant)}` };
+        }
+        if (tenant.id === SYSTEM_TENANT_ID) {
+          return {
+            ok: false,
+            code: 1,
+            message: "The tenant is the sentinel tenant, which encodes \"no owning tenant\" and must hold no accounts.",
+          };
+        }
+
+        const snapshot = await readRekeySnapshot(tx, tenant, args.to);
+        const { candidates } = snapshot;
+        printTenantSummary(tenant, await activeMemberCount(tx, tenant.id));
+        printRekeyClaims(snapshot.claims);
+        const claimCheck = rekeyClaimCheck(snapshot.claims, args.to);
+
+        // Verify pass: every token must decrypt under the old AAD. The
+        // plaintext is dropped here; the apply pass decrypts again after the
+        // confirmation, so none is held across the prompt.
+        const tokenValues = candidates.flatMap((c) => TOKEN_FIELDS.map((f) => c[f]));
+        const warmed = await shareMasterKeyWarmer.warm(collectEnvelopeVersions(tokenValues));
+        const decryptFailures: { accountId: string; field: string; kind: DecryptFailureKind }[] = [];
+        for (const c of candidates) {
+          // A version the provider could not load refuses every field it
+          // encrypts, even if this process can still read a cached copy: the
+          // apply pass warms again and would fail on it after the prompt.
+          const unloadable = TOKEN_FIELDS.filter((f) => {
+            const version = envelopeVersionOf(c[f]);
+            return version !== null && warmed.get(version) !== KEY_WARM_STATUS.OK;
+          });
+          for (const field of unloadable) {
+            decryptFailures.push({ accountId: c.accountId, field, kind: DECRYPT_FAILURE_KIND.KEY_UNAVAILABLE });
+          }
+          decryptAccountTokenTriple(
+            c,
+            legacyAad(c),
+            {
+              onFieldError: (field, _err, kind) => {
+                if (!(unloadable as readonly string[]).includes(field)) {
+                  decryptFailures.push({ accountId: c.accountId, field, kind });
+                }
+              },
+            },
+          );
+        }
+
+        console.log(
+          `Accounts at ${JACKSON_LEGACY_PROVIDER_ID} of the tenant's active members (${candidates.length}), ` +
+            `to move to ${escapeUnsafeDisplayChars(args.to)}:`,
+        );
+        const rows = candidates.map(rekeyRow);
+        if (rows.length === 0) console.log("  (none)");
+        for (const r of rows) {
+          console.log(
+            `  account=${r.accountId}\tuser=${r.userId}\tmember=${r.memberId}\ttokens=${r.tokens.length === 0 ? "-" : r.tokens.join(",")}`,
+          );
+        }
+
+        const refusals: string[] = [];
+        if (claimCheck.boundToTarget.length === 0) {
+          refusals.push(
+            `no live claim of the tenant is bound to "${escapeUnsafeDisplayChars(args.to)}" by an operator; ` +
+              "bind the tenant's SAML claim to it first (`bind --claim <claim> --provider <id>`)",
+          );
+        }
+        for (const r of claimCheck.refusals) {
+          const provider = r.provider === null ? "none" : `"${escapeUnsafeDisplayChars(r.provider)}"`;
+          const remedy =
+            r.reason === REKEY_CLAIM_REFUSAL.NOT_OPERATOR_BOUND
+              ? "review it and run `bind --claim` with this provider to record your attestation"
+              : r.reason === REKEY_CLAIM_REFUSAL.UNBOUND
+                ? `bind it — to ${GOOGLE_PROVIDER_ID} if it is a Google domain, to this provider if it is this tenant's SAML claim — or revoke it`
+                : "a claim bound to another connection refuses the moved users at sign-in; rebind it or revoke it";
+          refusals.push(`claim ${escapeUnsafeDisplayChars(r.claim)} (provider ${provider}): ${r.reason}; ${remedy}`);
+        }
+        for (const f of decryptFailures) {
+          refusals.push(`account ${f.accountId}: ${f.field} does not decrypt (${f.kind})`);
+        }
+        for (const c of snapshot.conflicts) {
+          refusals.push(`account ${c.accountId}: ${c.reason}`);
+        }
+        if (refusals.length > 0) {
+          console.log("Refused (a refusal writes nothing, and no audit row):");
+          for (const r of refusals) console.log(`  - ${r}`);
+          return {
+            ok: false,
+            code: 1,
+            tenantId: tenant.id,
+            rows,
+            message: `Refusing: ${refusals.length} reason(s) above. Nothing was moved.`,
+          };
+        }
+
+        if (!apply) {
+          return {
+            ok: true,
+            code: 0,
+            tenantId: tenant.id,
+            rows,
+            message: `${candidates.length} account(s) listed. Dry run — no writes made. Re-run with --apply to move them.`,
+          };
+        }
+        if (candidates.length === 0) {
+          return { ok: true, code: 0, tenantId: tenant.id, rows: [], message: "No account to move; nothing to apply." };
+        }
+
+        console.log(
+          `This moves ${candidates.length} account(s) to "${escapeUnsafeDisplayChars(args.to)}": the IdP behind it can ` +
+            "then sign in as each of these users. Each move is recorded as an ACCOUNT_PROVIDER_REKEYED audit row " +
+            "with your --by label.",
+        );
+        const confirmed = args.yes === true ? true : await (args.confirm ?? defaultConfirm)("Proceed?");
+        if (!confirmed) {
+          return { ok: false, code: 1, message: "Aborted: not confirmed." };
+        }
+
+        const reread = await readRekeySnapshot(tx, tenant, args.to);
+        if (rekeySnapshotKey(reread) !== rekeySnapshotKey(snapshot)) {
+          throw new RekeyAbort({
+            ok: false,
+            code: 1,
+            message:
+              "The tenant's claims, its accounts to move, or the accounts at the target changed during the " +
+              "confirmation; nothing was moved. Re-run the command to see the current state.",
+          });
+        }
+
+        const versions = collectEnvelopeVersions(tokenValues);
+        const report = await shareMasterKeyWarmer.warm(versions);
+        const unavailable = [...versions].filter((v) => report.get(v) !== KEY_WARM_STATUS.OK);
+        if (unavailable.length > 0) {
+          throw new RekeyAbort({
+            ok: false,
+            code: 1,
+            message: `share-master key version(s) ${unavailable.join(", ")} could not be loaded after the confirmation; nothing was moved.`,
+          });
+        }
+
+        const runId = randomUUID();
+        const claims = claimCheck.boundToTarget;
+        for (const c of candidates) {
+          const plain = decryptAccountTokenTriple(c, legacyAad(c));
+          const encrypted = encryptAccountTokenTriple(plain, {
+            userId: c.userId,
+            provider: args.to,
+            providerAccountId: c.providerAccountId,
+          });
+          // Compare-and-swap on every column the AAD and the ciphertexts came
+          // from (null compiles to IS NULL): a row changed after the read is
+          // not overwritten with tokens re-encrypted from stale values.
+          const moved = await tx.account.updateMany({
+            where: {
+              id: c.accountId,
+              userId: c.userId,
+              tenantId: c.tenantId,
+              providerAccountId: c.providerAccountId,
+              provider: JACKSON_LEGACY_PROVIDER_ID,
+              refresh_token: c.refresh_token,
+              access_token: c.access_token,
+              id_token: c.id_token,
+            },
+            data: {
+              provider: args.to,
+              refresh_token: encrypted.refresh_token,
+              access_token: encrypted.access_token,
+              id_token: encrypted.id_token,
+            },
+          });
+          if (moved.count !== 1) {
+            throw new RekeyAbort({
+              ok: false,
+              code: 1,
+              message:
+                `Account ${c.accountId} changed after it was read; nothing was moved. ` +
+                "Re-run the command to see the current state.",
+            });
+          }
+          await enqueueAuditInTx(
+            tx,
+            tenant.id,
+            buildOutboxPayload({
+              scope: AUDIT_SCOPE.TENANT,
+              action: AUDIT_ACTION.ACCOUNT_PROVIDER_REKEYED,
+              userId: SYSTEM_ACTOR_ID,
+              actorType: ACTOR_TYPE.SYSTEM,
+              tenantId: tenant.id,
+              targetType: AUDIT_TARGET_TYPE.TENANT_MEMBER,
+              targetId: c.memberId,
+              metadata: {
+                movedUserId: c.userId,
+                previousProvider: JACKSON_LEGACY_PROVIDER_ID,
+                provider: args.to,
+                claims: claims.slice(0, REKEY_AUDIT_MAX_CLAIMS),
+                claimsOmitted: Math.max(0, claims.length - REKEY_AUDIT_MAX_CLAIMS),
+                runId,
+                by: args.by,
+              },
+            }),
+          );
+        }
+        return {
+          ok: true,
+          code: 0,
+          tenantId: tenant.id,
+          rows,
+          message:
+            `Moved ${candidates.length} account(s) of tenant ${tenant.id} from ${JACKSON_LEGACY_PROVIDER_ID} to ` +
+            `"${escapeUnsafeDisplayChars(args.to)}" (run ${runId}).`,
+        };
+      },
+      BYPASS_GRANT.TENANT_ACCOUNT_REKEY,
+      confirmationTransaction.options(),
+    );
+  } catch (e) {
+    if (e instanceof RekeyAbort) return e.result;
+    const timedOut = confirmationTimeoutResult(e);
+    if (timedOut) return timedOut;
+    if (isUniqueViolationOn(e, ACCOUNTS_PROVIDER_ACCOUNT_INDEX)) {
+      return {
+        ok: false,
+        code: 1,
+        message:
+          `Another account at "${escapeUnsafeDisplayChars(args.to)}" appeared during the run with an account id ` +
+          "being moved; nothing was moved. Re-run the command to see the current state.",
+      };
+    }
+    // Never the message or its cause: a driver error can quote the row it
+    // failed on — a provider account id, a ciphertext (NF3).
+    const sqlState = pgErrorCode(e);
+    return {
+      ok: false,
+      code: 1,
+      message:
+        `rekey-accounts failed; nothing was moved (${e instanceof Error ? e.constructor.name : typeof e}` +
+        `${sqlState ? `, SQLSTATE ${sqlState}` : ""}).`,
+    };
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
+/** A candidate as `CmdResult.rows` reports it: no provider account id, no token. */
+function rekeyRow(c: RekeyCandidate): { accountId: string; userId: string; memberId: string; tokens: string[] } {
+  return {
+    accountId: c.accountId,
+    userId: c.userId,
+    memberId: c.memberId,
+    tokens: TOKEN_FIELDS.filter((f) => c[f] !== null),
+  };
+}
+
 // ─── CLI wrapper ─────────────────────────────────────────────────
 
 function printUsage(): void {
@@ -3297,6 +3929,7 @@ function printUsage(): void {
       "  tenant-domain measure",
       "  tenant-domain legacy-accounts [--single-connection]",
       `  tenant-domain backfill-owning-column --by <label> [--apply] [--yes] [--limit <n>]  (default ${DEFAULT_BACKFILL_LIMIT}, max ${MAX_BACKFILL_LIMIT})`,
+      "  tenant-domain rekey-accounts --tenant <ref> --to <saml-jackson-id> --by <label> [--apply] [--yes]",
       "",
       "<ref> is a tenant UUID or one of its registered claims (not its slug).",
       "--from moves a claim off the tenant that currently owns it; it takes that tenant's",
@@ -3309,6 +3942,8 @@ function printUsage(): void {
       "saml-jackson-<connection id>). In strict binding mode add requires it; otherwise",
       "add needs --provider or an explicit --unbound. add and bind refuse a provider whose",
       "users are not a majority of the tenant's active members unless --accept-unused-provider.",
+      "bind on a claim already bound to the provider, whose binding no operator recorded (a sign-in",
+      "registered it), records your attestation of that binding instead of reporting it already bound.",
       "bind --from-members writes a review file of every unbound claim (outside the git",
       "worktree, never overwriting); bind --apply binds the lines whose provider you kept.",
       "Both need the app's SSO provider env. list --unbound lists the claims strict refuses.",
@@ -3331,6 +3966,12 @@ function printUsage(): void {
       "and saml-jackson not configured, --single-connection exits non-zero: the attestation",
       "is about a client this env does not build. The listing is evidence and decides",
       "nothing. Needs the app's SSO env.",
+      "",
+      "rekey-accounts lists (default) or, with --apply, moves the tenant's active members'",
+      "accounts at saml-jackson onto --to, a configured saml-jackson-<id> provider, re-encrypting",
+      "their tokens. It refuses unless every live claim of the tenant is bound to --to or to",
+      "google and an operator recorded each binding to --to, and on any token that does not",
+      "decrypt or account already at --to. Needs the app's SSO env and the share-master key.",
       "",
       "MIGRATION_DATABASE_URL must be set to a privileged connection string.",
       "Example: MIGRATION_DATABASE_URL=postgresql://... npm run tenant-domain -- add --tenant acmecorp --domain alias.example --by ops-oncall",
@@ -3502,6 +4143,18 @@ async function main(): Promise<void> {
     case "measure":
       result = await cmdMeasure();
       break;
+    case "rekey-accounts": {
+      const tenant = getStringFlag(flags, "tenant");
+      const to = getStringFlag(flags, "to");
+      const by = getStringFlag(flags, "by");
+      if (!tenant || !to || !by) {
+        printUsage();
+        process.exitCode = 1;
+        return;
+      }
+      result = await cmdRekeyAccounts({ tenant, to, by, apply: flags.get("apply") === true, yes });
+      break;
+    }
     case "legacy-accounts":
       result = await cmdLegacyAccounts({ singleConnection: flags.get("single-connection") === true });
       break;

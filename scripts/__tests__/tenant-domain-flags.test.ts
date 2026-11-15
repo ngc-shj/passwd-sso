@@ -206,9 +206,10 @@ describe("tenant-domain flag parsing", () => {
     // `backfill-owning-column`'s candidate cap and its apply/dry-run switch;
     // "provider", "claim", "out", "unbound", "accept-unused-provider" and
     // "from-members" are the claim-binding writers' (sso-claim-connection-binding C3);
-    // "single-connection" is `legacy-accounts`' operator attestation.
+    // "single-connection" is `legacy-accounts`' operator attestation; "to" is
+    // `rekey-accounts`' target provider (saml-jackson-account-rekey C5).
     expect([...declared]).toEqual([
-      "tenant", "domain", "by", "from", "days", "after", "user", "limit", "provider", "claim", "out",
+      "tenant", "domain", "by", "from", "days", "after", "user", "limit", "provider", "claim", "out", "to",
       "yes", "apply", "unbound", "accept-unused-provider", "from-members", "single-connection",
     ]);
     expect(read.size).toBeGreaterThan(0);

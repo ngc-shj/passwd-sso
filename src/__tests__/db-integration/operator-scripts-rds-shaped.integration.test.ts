@@ -15,7 +15,7 @@
  * that an ungranted bypassed read on the same kind of connection is refused. The
  * proof that a cell can fail is a grant that drops a model its script reads.
  *
- * tenant-domain subcommand per BYPASS_GRANT member (the ten the CLI names):
+ * tenant-domain subcommand per BYPASS_GRANT member (the eleven the CLI names):
  *   TENANT_CLAIM_LIST              list
  *   TENANT_CLAIM_BINDING_READ      list --unbound, bind --from-members
  *   TENANT_DOMAIN_UNMAPPED_REPORT  unmapped
@@ -26,6 +26,9 @@
  *   TENANT_DOMAIN_DIVERGENCE_READ  measure, backfill-owning-column (listing)
  *   TENANT_DOMAIN_BACKFILL_APPLY   backfill-owning-column --apply
  *   TENANT_LEGACY_ACCOUNT_READ     legacy-accounts
+ *   TENANT_ACCOUNT_REKEY           rekey-accounts (preview and --apply)
+ * bind's attestation path (a claim already bound, whose binding no operator
+ * recorded) runs under TENANT_CLAIM_BINDING_WRITE.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { randomUUID } from "node:crypto";
@@ -40,9 +43,17 @@ import { createPool, createPrismaClient } from "@/lib/db/pool-factory";
 import { defineGrant, setBypassGucs } from "@/lib/tenant-rls-grants";
 import { BYPASS_PURPOSE } from "@/lib/tenant-rls-purpose";
 import { JACKSON_LEGACY_PROVIDER_ID } from "@/lib/auth/jackson-providers";
-import { TENANT_CLAIM_EVENT_OPERATION } from "@/lib/tenant/tenant-claim-event";
+import {
+  SIGNIN_ACTOR_LABEL,
+  TENANT_CLAIM_EVENT_OPERATION,
+  recordTenantClaimEvent,
+} from "@/lib/tenant/tenant-claim-event";
 import { getCurrentMasterKeyVersion, getMasterKeyByVersion } from "@/lib/crypto/crypto-server";
-import { isEncryptedAccountToken } from "@/lib/crypto/account-token-crypto";
+import {
+  decryptAccountTokenTriple,
+  encryptAccountTokenTriple,
+  isEncryptedAccountToken,
+} from "@/lib/crypto/account-token-crypto";
 import {
   ALIAS_CLAIM,
   runToken,
@@ -70,6 +81,7 @@ import {
   cmdList,
   cmdMeasure,
   cmdRealign,
+  cmdRekeyAccounts,
   cmdRemove,
   cmdUnmapped,
   migrationClientFactory,
@@ -471,6 +483,109 @@ describe("operator scripts as an owner-shaped NOSUPERUSER NOBYPASSRLS role", () 
 
       expect(result).toMatchObject({ ok: true, code: 0 });
       expect(result.rows).toEqual(expect.arrayContaining([expect.objectContaining({ tenantId, users: 1, accounts: 1 })]));
+    });
+
+    /**
+     * A tenant with a member holding a legacy account with real encrypted
+     * tokens. The claim is bound to ALPHA by the operator path under the probe
+     * (`add`), or by a sign-in's event written through `ctx.su`.
+     */
+    async function seedRekeyTenant(binding: "operator" | "signin") {
+      stubClaimProviderEnv(TWO_CONNECTIONS);
+      const tenantId = await tenant();
+      const claim = freshClaim("rekey");
+      if (binding === "operator") {
+        const added = await cmdAdd({ tenant: tenantId, domain: claim, by: "ops", provider: ALPHA, yes: true });
+        expect(added, added.message).toMatchObject({ ok: true });
+      } else {
+        await seedClaim(tenantId, claim, ALPHA);
+        await ctx.su.prisma.$transaction(async (tx) => {
+          await setBypassRlsGucs(tx);
+          await recordTenantClaimEvent(tx, {
+            claim,
+            operation: TENANT_CLAIM_EVENT_OPERATION.REGISTER,
+            oldTenantId: null,
+            newTenantId: tenantId,
+            oldRevokedAt: null,
+            newRevokedAt: null,
+            actorLabel: SIGNIN_ACTOR_LABEL,
+            oldProvider: null,
+            newProvider: ALPHA,
+          });
+        });
+      }
+      const userId = await member(tenantId, []);
+      const pid = `subject-${randomUUID()}`;
+      const plain = { refresh_token: `refresh-${pid}`, access_token: `access-${pid}`, id_token: `id-${pid}` };
+      const account = await ctx.su.prisma.account.create({
+        data: {
+          userId,
+          tenantId,
+          type: "oidc",
+          provider: LEGACY,
+          providerAccountId: pid,
+          ...encryptAccountTokenTriple(plain, { userId, provider: LEGACY, providerAccountId: pid }),
+        },
+      });
+      return { tenantId, claim, userId, pid, plain, accountId: account.id };
+    }
+
+    const outboxActions = async (tenantId: string) =>
+      (
+        await ctx.su.prisma.$transaction(async (tx) => {
+          await setBypassRlsGucs(tx);
+          return tx.auditOutbox.findMany({ where: { tenantId } });
+        })
+      ).map((r) => (r.payload as { action?: string }).action);
+
+    it("rekey-accounts preview (TENANT_ACCOUNT_REKEY) reads accounts, claims, events and members and decrypts the seeded tokens", async () => {
+      const out = quiet();
+      const t = await seedRekeyTenant("operator");
+
+      const result = await cmdRekeyAccounts({ tenant: t.tenantId, to: ALPHA, by: "ops" });
+
+      expect(result, result.message).toMatchObject({ ok: true, code: 0, tenantId: t.tenantId });
+      expect((result.rows as Array<{ accountId: string }>).map((r) => r.accountId)).toEqual([t.accountId]);
+      expect(out.text()).toContain(`claim=${t.claim}\tprovider=${ALPHA}`);
+      const row = await ctx.su.prisma.account.findUniqueOrThrow({ where: { id: t.accountId } });
+      expect(row.provider).toBe(LEGACY);
+      expect(await outboxActions(t.tenantId)).not.toContain("ACCOUNT_PROVIDER_REKEYED");
+    });
+
+    it("rekey-accounts --apply (TENANT_ACCOUNT_REKEY) moves the account and enqueues its audit row through enqueueAuditInTx", async () => {
+      quiet();
+      const t = await seedRekeyTenant("operator");
+
+      const result = await cmdRekeyAccounts({ tenant: t.tenantId, to: ALPHA, by: "ops", apply: true, yes: true });
+
+      expect(result, result.message).toMatchObject({ ok: true, code: 0, tenantId: t.tenantId });
+      const row = await ctx.su.prisma.account.findUniqueOrThrow({ where: { id: t.accountId } });
+      expect(row.provider).toBe(ALPHA);
+      expect(decryptAccountTokenTriple(row, { userId: t.userId, provider: ALPHA, providerAccountId: t.pid })).toEqual(t.plain);
+      expect(await outboxActions(t.tenantId)).toEqual(["ACCOUNT_PROVIDER_REKEYED"]);
+    });
+
+    it("bind attestation (TENANT_CLAIM_BINDING_WRITE) records an operator rebind of a sign-in's binding, and rekey-accounts then passes R-c", async () => {
+      quiet();
+      const t = await seedRekeyTenant("signin");
+      const refused = await cmdRekeyAccounts({ tenant: t.tenantId, to: ALPHA, by: "ops" });
+      expect(refused).toMatchObject({ ok: false, code: 1 });
+
+      const attested = await cmdBind({ claim: t.claim, provider: ALPHA, by: "ops", acceptUnusedProvider: true, yes: true });
+
+      expect(attested, attested.message).toMatchObject({ ok: true, code: 0, tenantId: t.tenantId, claim: t.claim });
+      expect((await claimRow(t.claim))?.provider).toBe(ALPHA);
+      const events = await eventsOf(t.claim);
+      expect(events).toHaveLength(2);
+      expect(events[1]).toMatchObject({
+        operation: TENANT_CLAIM_EVENT_OPERATION.REBIND,
+        oldProvider: ALPHA,
+        newProvider: ALPHA,
+        actorLabel: "ops",
+        dbUser: probe.name,
+      });
+      const preview = await cmdRekeyAccounts({ tenant: t.tenantId, to: ALPHA, by: "ops" });
+      expect(preview, preview.message).toMatchObject({ ok: true, code: 0 });
     });
   });
 
