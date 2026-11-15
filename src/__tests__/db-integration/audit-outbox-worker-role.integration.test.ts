@@ -13,7 +13,9 @@
  *   audit_delivery_targets: SELECT, UPDATE
  *   audit_deliveries: SELECT, INSERT, UPDATE, DELETE
  *   audit_chain_anchors: SELECT, INSERT, UPDATE
- *   team_members: SELECT (id, team_id, user_id, role, deactivated_at) — columns only
+ *   team_members: SELECT (id, team_id, user_id, role, deactivated_at, admitted_at, created_at) — columns only
+ *   tenant_members: SELECT (id, tenant_id, user_id, role, deactivated_at) — columns only
+ *   tenant_member_departures: SELECT (tenant_id, user_id, departed_at) — columns only
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
@@ -95,27 +97,33 @@ describe("audit-outbox worker role privileges", () => {
     expect(privMap.size).toBe(allowedTables.size);
   });
 
-  // departed-member-leaked-authority C6: resolveWebhookSubscribers reads the
-  // webhook creator's team membership, and only these columns of it.
-  it("holds SELECT on exactly five team_members columns and no table-level privilege there", async () => {
+  // resolveWebhookSubscribers reads the webhook creator's team membership and
+  // tenant rows (departed-member-leaked-authority C6, leftover-team-actor C4),
+  // and only these columns of them. Prisma adds "id" to the tenant_members and
+  // team_members selects; tenant_member_departures has no id.
+  it.each([
+    ["team_members", ["admitted_at", "created_at", "deactivated_at", "id", "role", "team_id", "user_id"]],
+    ["tenant_members", ["deactivated_at", "id", "role", "tenant_id", "user_id"]],
+    ["tenant_member_departures", ["departed_at", "tenant_id", "user_id"]],
+  ])("holds SELECT on exactly the read columns of %s and no table-level privilege there", async (tableName, expected) => {
     const columns = await ctx.su.prisma.$queryRawUnsafe<{ column_name: string; privilege_type: string }[]>(
       `SELECT column_name, privilege_type
        FROM information_schema.column_privileges
        WHERE grantee = 'passwd_outbox_worker'
          AND table_schema = 'public'
-         AND table_name = 'team_members'
+         AND table_name = $1
        ORDER BY column_name, privilege_type`,
+      tableName,
     );
-    expect(columns).toEqual(
-      ["deactivated_at", "id", "role", "team_id", "user_id"].map((column_name) => ({ column_name, privilege_type: "SELECT" })),
-    );
+    expect(columns).toEqual(expected.map((column_name) => ({ column_name, privilege_type: "SELECT" })));
 
     const table = await ctx.su.prisma.$queryRawUnsafe<{ privilege_type: string }[]>(
       `SELECT privilege_type
        FROM information_schema.table_privileges
        WHERE grantee = 'passwd_outbox_worker'
          AND table_schema = 'public'
-         AND table_name = 'team_members'`,
+         AND table_name = $1`,
+      tableName,
     );
     expect(table).toEqual([]);
   });

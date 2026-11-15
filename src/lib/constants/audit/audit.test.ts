@@ -237,6 +237,15 @@ describe("audit constants", () => {
     );
   });
 
+  it.each([
+    AUDIT_ACTION.TEAM_MEMBER_INVITE_CANCEL,
+    AUDIT_ACTION.TEAM_MEMBER_OPERATOR_READMIT,
+  ])("delivers %s in the team group and to team webhooks", (action) => {
+    expect(AUDIT_ACTION_VALUES).toContain(action);
+    expect(TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS).toContain(action);
+    expect(AUDIT_ACTION_GROUPS_TEAM[AUDIT_ACTION_GROUP.TEAM]).toContain(action);
+  });
+
   it("delivers the team re-key actions in the team admin group and to team webhooks", () => {
     const rekeyActions = [
       AUDIT_ACTION.TEAM_KEY_ROTATION_CARRY,

@@ -144,6 +144,7 @@ describe("GET /api/teams/[teamId]", () => {
         select: expect.objectContaining({
           _count: expect.objectContaining({
             select: expect.objectContaining({
+              members: { where: { deactivatedAt: null } },
               passwords: expect.objectContaining({
                 where: expect.objectContaining({ deletedAt: null, isArchived: false }),
               }),

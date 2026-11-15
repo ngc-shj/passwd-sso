@@ -2330,6 +2330,8 @@ describe("team webhook delivery — creator authority", () => {
   const WEBHOOK_OK = "00000000-0000-4000-8000-0000000000b1";
   const WEBHOOK_GONE = "00000000-0000-4000-8000-0000000000b2";
   const WEBHOOK_LEGACY = "00000000-0000-4000-8000-0000000000b3";
+  const MEMBER_SINCE = new Date("2026-01-01T00:00:00Z");
+  const DEPARTED_AT = new Date("2026-02-01T00:00:00Z");
 
   const webhookRow = (id: string, createdById: string | null) => ({
     id,
@@ -2347,10 +2349,22 @@ describe("team webhook delivery — creator authority", () => {
 
   function setup(opts: {
     webhooks: ReturnType<typeof webhookRow>[];
-    members: { userId: string; role: string; deactivatedAt: Date | null }[];
+    members: {
+      userId: string;
+      role: string;
+      deactivatedAt: Date | null;
+      admittedAt?: Date | null;
+      createdAt?: Date;
+    }[];
+    /** Creators who left the tenant (tenant_member_departures). */
+    departures?: { userId: string; departedAt: Date }[];
   }) {
     const teamWebhookFindMany = vi.fn().mockResolvedValue(opts.webhooks);
-    const teamMemberFindMany = vi.fn().mockResolvedValue(opts.members);
+    const teamMemberFindMany = vi
+      .fn()
+      .mockResolvedValue(opts.members.map((m) => ({ admittedAt: null, createdAt: MEMBER_SINCE, ...m })));
+    const tenantMemberFindMany = vi.fn().mockResolvedValue([]);
+    const departureFindMany = vi.fn().mockResolvedValue(opts.departures ?? []);
     const executed: string[] = [];
     const item = {
       id: "00000000-0000-4000-8000-0000000000c1",
@@ -2377,9 +2391,11 @@ describe("team webhook delivery — creator authority", () => {
         }),
         teamWebhook: { findMany: teamWebhookFindMany, update: vi.fn() },
         teamMember: { findMany: teamMemberFindMany },
+        tenantMember: { findMany: tenantMemberFindMany },
+        tenantMemberDeparture: { findMany: departureFindMany },
       })) as unknown as Parameters<typeof mockTransaction.mockImplementation>[0],
     );
-    return { teamWebhookFindMany, teamMemberFindMany, executed };
+    return { teamWebhookFindMany, teamMemberFindMany, tenantMemberFindMany, departureFindMany, executed };
   }
 
   const deliveredIds = () =>
@@ -2452,7 +2468,43 @@ describe("team webhook delivery — creator authority", () => {
         teamId: TEAM_ID,
         userId: { in: [CREATOR_ID, "00000000-0000-4000-8000-0000000000a2"] },
       },
-      select: { userId: true, role: true, deactivatedAt: true },
+      select: { userId: true, role: true, deactivatedAt: true, admittedAt: true, createdAt: true },
     });
+  });
+
+  it("skips a webhook whose creator left the tenant after joining the team (leftover), reading the item's tenant", async () => {
+    const { tenantMemberFindMany, departureFindMany } = setup({
+      webhooks: [webhookRow(WEBHOOK_GONE, CREATOR_ID)],
+      members: [{ userId: CREATOR_ID, role: "ADMIN", deactivatedAt: null }],
+      departures: [{ userId: CREATOR_ID, departedAt: DEPARTED_AT }],
+    });
+    await processWebhookDeliveryBatch(new PrismaClient(), 5);
+    expect(mockDeliverToWebhookRecords).not.toHaveBeenCalled();
+    expect(tenantMemberFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { tenantId: TENANT_ID, userId: { in: [CREATOR_ID] } } }),
+    );
+    expect(departureFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { tenantId: TENANT_ID, userId: { in: [CREATOR_ID] } } }),
+    );
+  });
+
+  it("delivers for a re-admitted creator: the departure predates admittedAt", async () => {
+    setup({
+      webhooks: [webhookRow(WEBHOOK_OK, CREATOR_ID)],
+      members: [{ userId: CREATOR_ID, role: "ADMIN", deactivatedAt: null, admittedAt: new Date("2026-03-01T00:00:00Z") }],
+      departures: [{ userId: CREATOR_ID, departedAt: DEPARTED_AT }],
+    });
+    await processWebhookDeliveryBatch(new PrismaClient(), 5);
+    expect(deliveredIds()).toEqual([WEBHOOK_OK]);
+  });
+
+  it("does not read tenant rows for a legacy webhook", async () => {
+    const { tenantMemberFindMany, departureFindMany } = setup({
+      webhooks: [webhookRow(WEBHOOK_LEGACY, null)],
+      members: [],
+    });
+    await processWebhookDeliveryBatch(new PrismaClient(), 5);
+    expect(tenantMemberFindMany).not.toHaveBeenCalled();
+    expect(departureFindMany).not.toHaveBeenCalled();
   });
 });

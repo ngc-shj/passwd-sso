@@ -37,6 +37,7 @@ const mockAuth = vi.fn();
 vi.mock("@/auth", () => ({ auth: (...args: unknown[]) => mockAuth(...args) }));
 
 import { GET as listOwnerless } from "@/app/api/tenant/teams/ownerless/route";
+import { GET as memberKeyRoute } from "@/app/api/teams/[teamId]/member-key/route";
 import { departFromTenant, returnToTenant, TENANT_MEMBERSHIP_SOURCE } from "@/lib/team/team-departure";
 import { advisoryKey } from "@/lib/team/tenant-row-lock";
 import { createPool } from "@/lib/db/pool-factory";
@@ -51,6 +52,7 @@ const hex = (n: number) => randomBytes(n).toString("hex");
 const SECOND = 1000;
 const DEACTIVATE = "TEAM_MEMBER_TENANT_DEACTIVATE";
 const RESTORE = "TEAM_MEMBER_TENANT_RESTORE";
+const READMIT = "TEAM_MEMBER_OPERATOR_READMIT";
 const TEMPLATE_LABEL = "REPLACE-WITH-OPERATOR-LABEL";
 
 // ── Runbook extraction ──────────────────────────────────────────
@@ -81,6 +83,7 @@ function extract(kind: "SCRIPT" | "BODY", name: string): string {
 const reportScript = () => extract("SCRIPT", "departed-member-report");
 const reportBody = () => extract("BODY", "report");
 const containScript = () => extract("SCRIPT", "departed-member-contain");
+const readmitScript = () => extract("SCRIPT", "departed-member-readmit");
 
 /** Replaces the single line ending in `marker`; throws unless exactly one matches. */
 function replaceLine(script: string, marker: string, line: string): string {
@@ -90,12 +93,21 @@ function replaceLine(script: string, marker: string, line: string): string {
   return script.replace(pattern, () => line);
 }
 
-/** The runbook's contain script with its two INPUT lines filled in. */
-function containWith(input: { triples: string; label: string }): string {
-  let script = containScript();
-  script = replaceLine(script, "-- INPUT:triples", `  v_input uuid[] := '${input.triples}'::uuid[]; -- INPUT:triples`);
-  script = replaceLine(script, "-- INPUT:label", `  v_label text := $label$${input.label}$label$; -- INPUT:label`);
-  return script;
+/** A runbook script with its two INPUT lines filled in. */
+function inputsFilled(script: string, input: { triples: string; label: string }): string {
+  let filled = replaceLine(script, "-- INPUT:triples", `  v_input uuid[] := '${input.triples}'::uuid[]; -- INPUT:triples`);
+  filled = replaceLine(filled, "-- INPUT:label", `  v_label text := $label$${input.label}$label$; -- INPUT:label`);
+  return filled;
+}
+
+const containWith = (input: { triples: string; label: string }) => inputsFilled(containScript(), input);
+const readmitWith = (input: { triples: string; label: string }) => inputsFilled(readmitScript(), input);
+
+/** `SET LOCAL lock_timeout` goes right after the script's own BEGIN, where it takes effect. */
+function withLockTimeout(script: string): string {
+  const begins = script.match(/^BEGIN;$/gm) ?? [];
+  if (begins.length !== 1) throw new Error(`expected one top-level BEGIN, found ${begins.length}`);
+  return script.replace(/^BEGIN;$/m, "BEGIN;\nSET LOCAL lock_timeout = '1500ms';");
 }
 
 /** A uuid[] literal of (tenant, team, user) rows. */
@@ -238,6 +250,27 @@ describe("departed-member operator scripts — real-DB integration", () => {
   // ── Script runners (passwd_app) ─────────────────────────────
 
   type Results = pg.QueryResult[];
+
+  /**
+   * Runs `script` (with a lock timeout) while `holder` is held on another
+   * connection: it must fail with 55P03 inside the statement `statementText`.
+   */
+  async function blockedByLock(script: string, holder: string, params: unknown[], statementText: string): Promise<void> {
+    const a = await ctx.su.pool.connect();
+    const b = await appPool.connect();
+    try {
+      await a.query("BEGIN");
+      await a.query(holder, params);
+      const error = await b.query(withLockTimeout(script)).then(() => null, (e: unknown) => e as { code?: string; where?: string });
+      expect(error?.code).toBe("55P03");
+      expect(error?.where).toContain(statementText);
+    } finally {
+      await b.query("ROLLBACK").catch(() => {});
+      await a.query("ROLLBACK").catch(() => {});
+      b.release();
+      a.release();
+    }
+  }
 
   /**
    * Runs `text` as one simple-protocol query on its own connection; rolls back after a raise.
@@ -466,6 +499,7 @@ describe("departed-member operator scripts — real-DB integration", () => {
     it("extraction fails unless exactly one marker pair is found", () => {
       expect(reportScript()).toContain("BEGIN READ ONLY");
       expect(containScript()).toContain("$contain$");
+      expect(readmitScript()).toContain("$readmit$");
       expect(reportBody()).toContain("Section 1");
       expect(() => extract("SCRIPT", "no-such-script")).toThrow(/exactly one SCRIPT no-such-script marker pair, found 0 BEGIN and 0 END/);
     });
@@ -931,30 +965,8 @@ describe("departed-member operator scripts — real-DB integration", () => {
     });
 
     describe("locks: each held alone makes the script fail on that statement with 55P03", () => {
-      /** `SET LOCAL lock_timeout` goes right after the script's own BEGIN, where it takes effect. */
-      function withLockTimeout(script: string): string {
-        const begins = script.match(/^BEGIN;$/gm) ?? [];
-        if (begins.length !== 1) throw new Error(`expected one top-level BEGIN, found ${begins.length}`);
-        return script.replace(/^BEGIN;$/m, "BEGIN;\nSET LOCAL lock_timeout = '1500ms';");
-      }
-
-      async function blockedBy(l: Leak, holder: string, params: unknown[], statementText: string): Promise<void> {
-        const a = await ctx.su.pool.connect();
-        const b = await appPool.connect();
-        try {
-          await a.query("BEGIN");
-          await a.query(holder, params);
-          const script = withLockTimeout(containWith({ triples: goodTriples(l), label: "ops-test" }));
-          const error = await b.query(script).then(() => null, (e: unknown) => e as { code?: string; where?: string });
-          expect(error?.code).toBe("55P03");
-          expect(error?.where).toContain(statementText);
-        } finally {
-          await b.query("ROLLBACK").catch(() => {});
-          await a.query("ROLLBACK").catch(() => {});
-          b.release();
-          a.release();
-        }
-      }
+      const blockedBy = (l: Leak, holder: string, params: unknown[], statementText: string) =>
+        blockedByLock(containWith({ triples: goodTriples(l), label: "ops-test" }), holder, params, statementText);
 
       it("the advisory lock of an input (tenant, user), key built by the app's helper", async () => {
         const l = await seedLeak();
@@ -987,6 +999,413 @@ describe("departed-member operator scripts — real-DB integration", () => {
       expect(notices).toContainEqual({ table: removed, purpose: "system_maintenance" });
       // The script's implicit transaction ended with the refusal: nothing was written.
       expect((await readTeamMembers(l.rows.map((r) => r.rowId))).every((r) => r.deactivated_at === null)).toBe(true);
+    });
+  });
+  // ── Re-admit ────────────────────────────────────────────────
+
+  describe("readmit", () => {
+    type Residual = {
+      tenant: string;
+      stamp: Date;
+      team: string;
+      /** The residual members: user id, team_members row id, role, created_at and their team key. */
+      rows: { user: string; rowId: string; role: string; createdAt: Date; key: string }[];
+    };
+
+    /**
+     * A team whose members (an OWNER and `members` MEMBERs) departed the tenant
+     * at `stamp` after their admission, were re-activated afterwards without
+     * `admitted_at` (the pre-#1043 residual): `team_members.updated_at` is set
+     * after the departure with a raw UPDATE that leaves `deactivated_at` alone,
+     * as a re-activation's `@updatedAt` did. Each holds a team key.
+     */
+    async function seedResidual(members = 1, o: { withRecord?: boolean } = {}): Promise<Residual> {
+      const tenant = await newTenant();
+      const stamp = newStamp();
+      expect(Date.now() - stamp.getTime()).toBeGreaterThanOrEqual(3_600_000);
+      await ctx.createUser(tenant);
+      const team = await mkTeam(tenant);
+      const rows: Residual["rows"] = [];
+      for (const role of ["OWNER", ...Array.from({ length: members }, () => "MEMBER")]) {
+        const user = await mkMember(tenant);
+        await departIn(tenant, user, stamp);
+        if (o.withRecord) {
+          // A record older than the membership: the script must still read the table.
+          await sql(
+            `INSERT INTO tenant_member_departures (tenant_id, user_id, departed_at) VALUES ($1::uuid, $2::uuid, $3::timestamptz)`,
+            tenant, user, iso(stamp, -60 * SECOND),
+          );
+        }
+        const createdAt = new Date(stamp.getTime() - SECOND);
+        const rowId = await addMembership(team, user, tenant, { role, createdAt: createdAt.toISOString() });
+        await sql(`UPDATE team_members SET updated_at = $2::timestamptz WHERE id = $1::uuid`, rowId, iso(stamp, SECOND));
+        const key = hex(32);
+        await sql(
+          `INSERT INTO team_member_keys (id, team_id, tenant_id, user_id, encrypted_team_key, team_key_iv, team_key_auth_tag,
+             ephemeral_public_key, hkdf_salt, key_version, wrap_version, created_at, updated_at)
+           VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, 1, 1, now(), now())`,
+          randomUUID(), team, tenant, user, key, hex(12), hex(16), hex(32), hex(32),
+        );
+        rows.push({ user, rowId, role, createdAt, key });
+      }
+      return { tenant, stamp, team, rows };
+    }
+
+    const tripleOf = (l: Residual, r: Residual["rows"][number]) => [l.tenant, l.team, r.user];
+    const goodTriples = (l: Residual) => triplesLiteral(l.rows.map((r) => tripleOf(l, r)));
+    const label = "ops-test";
+
+    async function readState(l: Residual) {
+      const members = await sql<{ id: string; deactivated_at: Date | null; admitted_at: Date | null; updated_at: Date; deactivated_by_tenant: boolean }>(
+        `SELECT id, deactivated_at, admitted_at, updated_at, deactivated_by_tenant FROM team_members WHERE tenant_id = $1::uuid ORDER BY id`, l.tenant,
+      );
+      const keys = await sql(`SELECT id, user_id, encrypted_team_key, key_version FROM team_member_keys WHERE tenant_id = $1::uuid ORDER BY id`, l.tenant);
+      const outbox = await sql(`SELECT id FROM audit_outbox WHERE tenant_id = $1::uuid AND payload->>'action' = $2 ORDER BY id`, l.tenant, READMIT);
+      return { members, keys, outbox };
+    }
+
+    /** What a refusal must leave untouched, in every tenant the cell created. */
+    async function snapshot() {
+      const members = await sql(
+        `SELECT id, deactivated_at, admitted_at, deactivated_by_tenant, updated_at FROM team_members WHERE tenant_id = ANY($1::uuid[]) ORDER BY id`, tenants,
+      );
+      const keys = await sql(`SELECT id, user_id FROM team_member_keys WHERE tenant_id = ANY($1::uuid[]) ORDER BY id`, tenants);
+      const outbox = await sql(`SELECT id FROM audit_outbox WHERE tenant_id = ANY($1::uuid[]) AND payload->>'action' = $2 ORDER BY id`, tenants, READMIT);
+      return { members, keys, outbox };
+    }
+
+    async function runReadmit(text: string): Promise<string[]> {
+      let collected: ReturnType<typeof collectNotices> | undefined;
+      await runScript(text, async (client) => {
+        collected = collectNotices(client);
+        return collected.stop;
+      });
+      return collected?.messages ?? [];
+    }
+
+    async function expectReadmitted(l: Residual, operator: string, notices?: string[]) {
+      const after = await sql<{ id: string; deactivated_at: Date | null; admitted_at: Date | null; deactivated_by_tenant: boolean }>(
+        `SELECT id, deactivated_at, admitted_at, deactivated_by_tenant FROM team_members WHERE id = ANY($1::uuid[]) ORDER BY id`, l.rows.map((r) => r.rowId),
+      );
+      const [{ now }] = await sql<{ now: Date }>(`SELECT clock_timestamp() AS now`);
+      for (const row of after) {
+        expect(row.deactivated_at).toBeNull();
+        expect(row.deactivated_by_tenant).toBe(false);
+        // Stamped by the trigger after the departure, within the run.
+        expect(row.admitted_at!.getTime()).toBeGreaterThan(l.stamp.getTime());
+        expect(row.admitted_at!.getTime()).toBeLessThanOrEqual(now.getTime());
+      }
+      // The team keys are untouched.
+      for (const r of l.rows) {
+        const keys = await sql<{ encrypted_team_key: string }>(
+          `SELECT encrypted_team_key FROM team_member_keys WHERE team_id = $1::uuid AND user_id = $2::uuid`, l.team, r.user,
+        );
+        expect(keys.map((k) => k.encrypted_team_key)).toEqual([r.key]);
+      }
+      const records = await sql<{ payload: { targetId: string } }>(
+        `SELECT payload FROM audit_outbox WHERE tenant_id = $1::uuid AND payload->>'action' = $2`, l.tenant, READMIT,
+      );
+      expect(records.map((r) => r.payload.targetId).sort()).toEqual(l.rows.map((r) => r.user).sort());
+      for (const r of l.rows) {
+        const record = records.find((x) => x.payload.targetId === r.user)!.payload;
+        expect(record).toEqual(buildOutboxPayload({
+          scope: AUDIT_SCOPE.TEAM,
+          action: AUDIT_ACTION.TEAM_MEMBER_OPERATOR_READMIT,
+          userId: SYSTEM_ACTOR_ID,
+          actorType: ACTOR_TYPE.SYSTEM,
+          serviceAccountId: null,
+          teamId: l.team,
+          targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
+          targetId: r.user,
+          metadata: {
+            operator,
+            readmitted: true,
+            createdAt: r.createdAt.toISOString(),
+            tenantDeactivatedAt: l.stamp.toISOString(),
+          },
+          ip: null,
+          userAgent: null,
+        }));
+        expect(JSON.stringify(record)).not.toContain("passwd_app");
+      }
+      if (notices) expect(notices).toContain(`readmit: re-admitted ${l.rows.length} membership(s) as database user passwd_app`);
+    }
+
+    function memberKey(teamId: string, userId: string) {
+      mockAuth.mockResolvedValue({ user: { id: userId } });
+      return memberKeyRoute(new NextRequest(`http://localhost/api/teams/${teamId}/member-key`), { params: Promise.resolve({ teamId }) });
+    }
+
+    it("a residual member is refused by the application, re-admitted by the script, then served their same team key, with one audit record", async () => {
+      const l = await seedResidual();
+      const [owner, member] = l.rows;
+      expect((await memberKey(l.team, member.user)).status).toBe(404);
+      expect((await memberKey(l.team, owner.user)).status).toBe(404);
+
+      const notices = await runReadmit(readmitWith({ triples: goodTriples(l), label }));
+
+      await expectReadmitted(l, label, notices);
+      const res = await memberKey(l.team, member.user);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ encryptedTeamKey: member.key });
+      expect((await memberKey(l.team, owner.user)).status).toBe(200);
+    });
+
+    it("a second run on the same rows is refused: they are no longer leftover", async () => {
+      const l = await seedResidual();
+      await runReadmit(readmitWith({ triples: goodTriples(l), label }));
+      const before = await readState(l);
+
+      await expect(runScript(readmitWith({ triples: goodTriples(l), label }))).rejects.toThrow(/membership\(s\) qualify .*nothing was written/);
+
+      expect(await readState(l)).toEqual(before);
+    });
+
+    it("a user id in upper case is re-admitted", async () => {
+      const l = await seedResidual();
+      await runReadmit(readmitWith({ triples: goodTriples(l).toUpperCase(), label }));
+      await expectReadmitted(l, label);
+    });
+
+    it("a duplicated triple counts once", async () => {
+      const l = await seedResidual();
+      const rows = l.rows.map((r) => tripleOf(l, r));
+      await runReadmit(readmitWith({ triples: triplesLiteral([...rows, rows[0]]), label }));
+      await expectReadmitted(l, label);
+    });
+
+    it("a residual row left out of the input is left alone: only the listed one is re-admitted, with one audit record", async () => {
+      const l = await seedResidual(1);
+      const [listed, omitted] = l.rows;
+      await runReadmit(readmitWith({ triples: triplesLiteral([tripleOf(l, listed)]), label }));
+
+      const rows = await sql<{ id: string; admitted_at: Date | null }>(
+        `SELECT id, admitted_at FROM team_members WHERE id = ANY($1::uuid[])`, [listed.rowId, omitted.rowId],
+      );
+      const admittedAt = (rowId: string) => rows.find((r) => r.id === rowId)!.admitted_at;
+      expect(admittedAt(listed.rowId)).not.toBeNull();
+      expect(admittedAt(omitted.rowId)).toBeNull();
+      const records = await sql<{ payload: { targetId: string } }>(
+        `SELECT payload FROM audit_outbox WHERE tenant_id = $1::uuid AND payload->>'action' = $2`, l.tenant, READMIT,
+      );
+      expect(records.map((r) => r.payload.targetId)).toEqual([listed.user]);
+    });
+
+    it("a 255-character label is accepted and recorded whole", async () => {
+      const l = await seedResidual();
+      const long = "x".repeat(255);
+      await runReadmit(readmitWith({ triples: goodTriples(l), label: long }));
+      await expectReadmitted(l, long);
+    });
+
+    describe("boundaries that qualify", () => {
+      it("created_at equal to the tenant row's deactivated_at", async () => {
+        const l = await seedResidual(0);
+        await sql(`UPDATE team_members SET created_at = $2::timestamptz WHERE id = $1::uuid`, l.rows[0].rowId, iso(l.stamp));
+        l.rows[0].createdAt = l.stamp;
+        await runReadmit(readmitWith({ triples: goodTriples(l), label }));
+        await expectReadmitted(l, label);
+      });
+
+      it("a departure record dated before created_at (the tenant row deactivated after it)", async () => {
+        const l = await seedResidual(0);
+        await sql(
+          `INSERT INTO tenant_member_departures (tenant_id, user_id, departed_at) VALUES ($1::uuid, $2::uuid, $3::timestamptz)`,
+          l.tenant, l.rows[0].user, iso(l.stamp, -2 * SECOND),
+        );
+        await runReadmit(readmitWith({ triples: goodTriples(l), label }));
+        await expectReadmitted(l, label);
+      });
+    });
+
+    describe("refusals write nothing", () => {
+      async function expectRefused(text: string, expected: { message?: RegExp; code?: string }) {
+        const before = await snapshot();
+        const error = await runScript(text).then(() => null, (e: unknown) => e as { message: string; code?: string });
+        expect(error).not.toBeNull();
+        if (expected.message) expect(error!.message).toMatch(expected.message);
+        if (expected.code) expect(error!.code).toBe(expected.code);
+        expect(await snapshot()).toEqual(before);
+      }
+      const QUALIFY = /membership\(s\) qualify .*nothing was written/;
+      const oneTriple = (l: Residual) => triplesLiteral([tripleOf(l, l.rows[0])]);
+
+      it("the baseline (all conjuncts hold) succeeds, so each refusal below differs from it in one field", async () => {
+        const l = await seedResidual(0);
+        await runReadmit(readmitWith({ triples: oneTriple(l), label }));
+        await expectReadmitted(l, label);
+      });
+
+      it("admitted_at is stamped (re-activated since the column exists)", async () => {
+        const l = await seedResidual(0);
+        await sql(`UPDATE team_members SET deactivated_at = $2::timestamptz WHERE id = $1::uuid`, l.rows[0].rowId, iso(l.stamp));
+        await sql(`UPDATE team_members SET deactivated_at = NULL WHERE id = $1::uuid`, l.rows[0].rowId);
+        const [stamped] = await sql<{ admitted_at: Date | null }>(`SELECT admitted_at FROM team_members WHERE id = $1::uuid`, l.rows[0].rowId);
+        expect(stamped.admitted_at).not.toBeNull();
+        await expectRefused(readmitWith({ triples: oneTriple(l), label }), { message: QUALIFY });
+      });
+
+      it("the member is leftover by a departure record alone (tenant row active)", async () => {
+        const l = await seedResidual(0);
+        await sql(`UPDATE tenant_members SET deactivated_at = NULL WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, l.tenant, l.rows[0].user);
+        await sql(
+          `INSERT INTO tenant_member_departures (tenant_id, user_id, departed_at) VALUES ($1::uuid, $2::uuid, $3::timestamptz)`,
+          l.tenant, l.rows[0].user, iso(l.stamp),
+        );
+        await expectRefused(readmitWith({ triples: oneTriple(l), label }), { message: QUALIFY });
+      });
+
+      it("the member is a guest (no tenant row, no departure record)", async () => {
+        const l = await seedResidual(0);
+        await sql(`DELETE FROM tenant_members WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, l.tenant, l.rows[0].user);
+        await expectRefused(readmitWith({ triples: oneTriple(l), label }), { message: QUALIFY });
+      });
+
+      it("the member is re-provisioned (active tenant row, an older departure record)", async () => {
+        const l = await seedResidual(0);
+        await sql(`UPDATE tenant_members SET deactivated_at = NULL WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, l.tenant, l.rows[0].user);
+        await sql(
+          `INSERT INTO tenant_member_departures (tenant_id, user_id, departed_at) VALUES ($1::uuid, $2::uuid, $3::timestamptz)`,
+          l.tenant, l.rows[0].user, iso(l.stamp, -2 * SECOND),
+        );
+        await expectRefused(readmitWith({ triples: oneTriple(l), label }), { message: QUALIFY });
+      });
+
+      it("the departure was before the membership began (created_at after the tenant row's deactivated_at)", async () => {
+        const l = await seedResidual(0);
+        await sql(`UPDATE team_members SET created_at = $2::timestamptz WHERE id = $1::uuid`, l.rows[0].rowId, iso(l.stamp, SECOND / 2));
+        await expectRefused(readmitWith({ triples: oneTriple(l), label }), { message: QUALIFY });
+      });
+
+      it("the membership is already ended", async () => {
+        const l = await seedResidual(0);
+        await endMembership(l.rows[0].rowId, l.stamp);
+        await expectRefused(readmitWith({ triples: oneTriple(l), label }), { message: QUALIFY });
+      });
+
+      it("the membership belongs to another tenant than the triple's (the user has a departed row there too)", async () => {
+        const l = await seedResidual(0);
+        const other = await newTenant();
+        await departIn(other, l.rows[0].user, l.stamp);
+        await expectRefused(readmitWith({ triples: triplesLiteral([[other, l.team, l.rows[0].user]]), label }), { message: QUALIFY });
+      });
+
+      it("a departure record is dated exactly at created_at", async () => {
+        const l = await seedResidual(0);
+        await sql(
+          `INSERT INTO tenant_member_departures (tenant_id, user_id, departed_at) VALUES ($1::uuid, $2::uuid, $3::timestamptz)`,
+          l.tenant, l.rows[0].user, l.rows[0].createdAt.toISOString(),
+        );
+        await expectRefused(readmitWith({ triples: oneTriple(l), label }), { message: QUALIFY });
+      });
+
+      it("the row was not updated since the departure (updated_at equal to it; pins the strict comparison)", async () => {
+        const l = await seedResidual(0);
+        await sql(`UPDATE team_members SET updated_at = $2::timestamptz WHERE id = $1::uuid`, l.rows[0].rowId, iso(l.stamp));
+        await expectRefused(readmitWith({ triples: oneTriple(l), label }), { message: QUALIFY });
+      });
+
+      it("a mixed list (one qualifying, one not) re-admits neither: admitted_at stays NULL and no audit record is written", async () => {
+        const l = await seedResidual(1);
+        await sql(`UPDATE team_members SET updated_at = $2::timestamptz WHERE id = $1::uuid`, l.rows[1].rowId, iso(l.stamp));
+        await expectRefused(readmitWith({ triples: goodTriples(l), label }), { message: QUALIFY });
+        const [qualifying] = await sql<{ admitted_at: Date | null; deactivated_at: Date | null }>(
+          `SELECT admitted_at, deactivated_at FROM team_members WHERE id = $1::uuid`, l.rows[0].rowId,
+        );
+        expect(qualifying).toEqual({ admitted_at: null, deactivated_at: null });
+        expect(await sql(`SELECT 1 FROM audit_outbox WHERE tenant_id = $1::uuid AND payload->>'action' = $2`, l.tenant, READMIT)).toEqual([]);
+      });
+
+      it("a null id in a triple is refused by name, before the qualify count", async () => {
+        const l = await seedResidual(0);
+        await expectRefused(readmitWith({ triples: `{{${l.tenant},${l.team},NULL}}`, label }), { message: /holds a null id/ });
+      });
+
+      it("an empty array", async () => {
+        await seedResidual(0);
+        await expectRefused(readmitWith({ triples: "{}", label }), { message: /two-dimensional uuid array/ });
+      });
+
+      it("a one-dimensional array", async () => {
+        const l = await seedResidual(0);
+        await expectRefused(readmitWith({ triples: `{${tripleOf(l, l.rows[0]).join(",")}}`, label }), { message: /two-dimensional uuid array/ });
+      });
+
+      it("a two-dimensional array with two columns", async () => {
+        const l = await seedResidual(0);
+        await expectRefused(readmitWith({ triples: triplesLiteral([[l.tenant, l.team]]), label }), { message: /two-dimensional uuid array/ });
+      });
+
+      it("a three-dimensional array whose second dimension has three entries", async () => {
+        const l = await seedResidual(0);
+        const [t, m, u] = tripleOf(l, l.rows[0]);
+        await expectRefused(readmitWith({ triples: `{{{${t}},{${m}},{${u}}}}`, label }), { message: /two-dimensional uuid array/ });
+      });
+
+      it.each([
+        ["empty", ""],
+        ["256 characters", "x".repeat(256)],
+        ["the template token", TEMPLATE_LABEL],
+      ])("a label that is %s", async (_name, bad) => {
+        const l = await seedResidual(0);
+        await expectRefused(readmitWith({ triples: oneTriple(l), label: bad }), { message: /operator label must be 1 to 255 characters/ });
+      });
+
+      it("a malformed id raises 22P02 at the cast", async () => {
+        const l = await seedResidual(0);
+        await expectRefused(readmitWith({ triples: `{{${l.tenant},${l.team},not-a-uuid}}`, label }), { code: "22P02" });
+      });
+    });
+
+    describe("locks: each held alone makes the script fail on that statement with 55P03", () => {
+      const blockedBy = (l: Residual, holder: string, params: unknown[], statementText: string) =>
+        blockedByLock(readmitWith({ triples: goodTriples(l), label }), holder, params, statementText);
+
+      async function expectUntouched(l: Residual) {
+        expect((await readState(l)).members.every((m) => m.admitted_at === null && m.deactivated_at === null)).toBe(true);
+      }
+
+      it("the advisory lock of an input (tenant, user), key built by the app's helper", async () => {
+        const l = await seedResidual();
+        await blockedBy(l, `SELECT pg_advisory_xact_lock(hashtext($1::text))`, [advisoryKey(l.tenant, l.rows[1].user)], "pg_advisory_xact_lock");
+        await expectUntouched(l);
+      });
+
+      it("an input user's tenant_members row", async () => {
+        const l = await seedResidual();
+        await blockedBy(
+          l, `SELECT 1 FROM tenant_members WHERE tenant_id = $1::uuid AND user_id = $2::uuid FOR NO KEY UPDATE`,
+          [l.tenant, l.rows[1].user], "FOR SHARE OF tmb",
+        );
+        await expectUntouched(l);
+      });
+
+      it("an input team's row", async () => {
+        const l = await seedResidual();
+        await blockedBy(l, `SELECT 1 FROM teams WHERE id = $1::uuid FOR NO KEY UPDATE`, [l.team], "FROM teams WHERE id = ANY");
+        await expectUntouched(l);
+      });
+    });
+
+    it("the script's bypass list names exactly the tables it touches, audit_outbox included", () => {
+      expect(bypassTables(readmitScript()).sort()).toEqual(
+        ["audit_outbox", "team_members", "teams", "tenant_member_departures", "tenant_members"],
+      );
+    });
+
+    it.each(bypassTables(readmitScript()))("table-list control: with %s removed from the script's bypass list the script is refused and the notice names it", async (removed) => {
+      const l = await seedResidual(1, { withRecord: true });
+      const script = readmitWith({ triples: goodTriples(l), label });
+      const literal = script.match(/set_config\('app\.bypass_tables', '([a-z_,]+)'/)![1];
+      const mutated = script.replace(literal, literal.split(",").filter((t) => t !== removed).join(","));
+      expect(mutated).not.toBe(script);
+      const { notices, table } = await expectBypassRefusal(() => runScript(mutated));
+      expect(table).toBe(removed);
+      expect(notices).toContainEqual({ table: removed, purpose: "system_maintenance" });
+      // The script's implicit transaction ended with the refusal: nothing was written.
+      const state = await readState(l);
+      expect(state.members.every((m) => m.admitted_at === null && m.deactivated_at === null)).toBe(true);
+      expect(state.outbox).toEqual([]);
     });
   });
 });

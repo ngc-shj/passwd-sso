@@ -1111,15 +1111,23 @@ describe("Group B — validation by a real pg_restore", () => {
     if (host.status === 0) {
       return { kind: "host", list: (f) => spawnSync("pg_restore", ["--list", f], { encoding: "utf8" }), version: host.stdout.trim() };
     }
-    const svc = spawnSync("docker", ["compose", "exec", "-T", "--", "db", "pg_restore", "--version"],
-      { encoding: "utf8", cwd: REPO_ROOT, timeout: 20000 });
-    if (svc.status === 0) {
+    // Compose derives its project name from the working directory, so from a
+    // git worktree it finds no running `db`; the service runs under the main
+    // checkout. Try REPO_ROOT first, then the main worktree.
+    const probe = (cwd) => spawnSync("docker", ["compose", "exec", "-T", "--", "db", "pg_restore", "--version"],
+      { encoding: "utf8", cwd, timeout: 20000 });
+    const mainWorktree = spawnSync("git", ["worktree", "list", "--porcelain"], { encoding: "utf8", cwd: REPO_ROOT })
+      .stdout?.split("\n").find((l) => l.startsWith("worktree "))?.slice("worktree ".length);
+    for (const composeDir of [...new Set([REPO_ROOT, mainWorktree].filter(Boolean))]) {
+      const svc = probe(composeDir);
+      if (svc.status !== 0) continue;
       return {
         kind: "compose",
+        composeDir,
         version: svc.stdout.trim(),
         list: (f) => spawnSync("docker",
           ["compose", "exec", "-T", "--", "db", "pg_restore", "--list"],
-          { encoding: "utf8", cwd: REPO_ROOT, timeout: 20000, input: readFileSync(f) }),
+          { encoding: "utf8", cwd: composeDir, timeout: 20000, input: readFileSync(f) }),
       };
     }
     return null;
@@ -1135,7 +1143,7 @@ describe("Group B — validation by a real pg_restore", () => {
     // Recorded, because WHICH reader was discovered decides how the delegating
     // cases run, and "115 passed" locally and in CI otherwise describe two
     // different suites with no way to tell them apart from the log.
-    console.log(`[Group B] reader kind=${reader.kind} version=${JSON.stringify(reader.version)}`);
+    console.log(`[Group B] reader kind=${reader.kind} composeDir=${reader.composeDir ?? "-"} version=${JSON.stringify(reader.version)}`);
     // And asserted when CI declares what it expects, so a runner image that
     // drops the client is a red rather than a silent change of shape.
     const expected = process.env.BACKUP_DB_EXPECT_READER;
@@ -1171,6 +1179,7 @@ describe("Group B — validation by a real pg_restore", () => {
    * available would make the case a no-op in whichever environment has the
    * other one, and CI is the environment with the host binary.
    */
+  const shQuote = (p) => `'${p.replaceAll("'", "'\\''")}'`;
   const delegatingStub = (archive) => {
     const realDocker = spawnSync("sh", ["-c", "command -v docker"], { encoding: "utf8" }).stdout.trim();
     const hostRestore = spawnSync("sh", ["-c", "command -v pg_restore"], { encoding: "utf8" }).stdout.trim();
@@ -1206,6 +1215,7 @@ for a in "$@"; do
         done
         exec "${hostRestore}" "\${args[@]}"
       fi
+      ${reader?.composeDir ? `cd ${shQuote(reader.composeDir)} || exit 1` : ""}
       exec env "DOCKER_CONFIG=${dockerConfig}" "${realDocker}" "$@" ;;
   esac
 done
@@ -2213,11 +2223,21 @@ exit 0`);
     // deterministically.
     mkdirSync(backupDir, { recursive: true, mode: 0o700 });
     chmodSync(backupDir, 0o700);
+    //
+    // Both runs must also be in that window at once. On a loaded host the
+    // second spawn started after the first had released the lock, and both
+    // took it in turn. So each attempt is recorded and waits (bounded) until
+    // the other has arrived before it sleeps and creates.
     const realMkdir = spawnSync("sh", ["-c", "command -v mkdir"], { encoding: "utf8" }).stdout.trim();
+    const attempts = join(tmpDir, "lock-attempts");
     stub("mkdir", `
 for a in "$@"; do
   case "$a" in
-    */.lock.d) sleep 0.3 ;;
+    */.lock.d)
+      echo x >> "${attempts}"
+      i=0
+      while [ "$(wc -l < "${attempts}")" -lt 2 ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
+      sleep 0.3 ;;
   esac
 done
 exec "${realMkdir}" "$@"`);

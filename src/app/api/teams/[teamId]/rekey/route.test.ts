@@ -31,7 +31,9 @@ const txMock = {
   team: { findUnique: vi.fn() },
   teamPasswordEntry: { count: vi.fn(), findMany: vi.fn(), groupBy: vi.fn() },
   teamMemberKey: { findMany: vi.fn() },
-  teamMember: { findMany: vi.fn(), count: vi.fn() },
+  teamMember: { findMany: vi.fn() },
+  tenantMember: { findMany: vi.fn() },
+  tenantMemberDeparture: { findMany: vi.fn() },
 };
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -70,6 +72,11 @@ type Holder = { userId: string; role: string };
 
 /** Member-key holders per team key version; the real holder rule reads these. */
 let holdersByVersion: Map<number, Holder[]>;
+/** Holders whose team membership is deactivated, and holders who left the tenant but kept an active row. */
+let deactivatedUsers: Set<string>;
+let leftoverUsers: Set<string>;
+const MEMBER_SINCE = new Date("2026-01-01T00:00:00Z");
+const DEPARTED_AT = new Date("2026-02-01T00:00:00Z");
 
 function request(query = "") {
   return new NextRequest(`http://localhost/api/teams/${TEAM}/rekey${query}`);
@@ -97,12 +104,25 @@ describe("GET /api/teams/[teamId]/rekey", () => {
     txMock.teamMemberKey.findMany.mockImplementation(async ({ where }: { where: { keyVersion: number } }) =>
       (holdersByVersion.get(where.keyVersion) ?? []).map((h) => ({ userId: h.userId })),
     );
-    txMock.teamMember.findMany.mockImplementation(async ({ where }: { where: { userId: { in: string[] } } }) =>
-      [...holdersByVersion.values()].flat().filter((h, i, all) =>
-        where.userId.in.includes(h.userId) && all.findIndex((o) => o.userId === h.userId) === i,
-      ),
+    deactivatedUsers = new Set();
+    leftoverUsers = new Set();
+    txMock.teamMember.findMany.mockImplementation(
+      async ({ where }: { where: { userId: { in: string[] }; deactivatedAt?: null } }) =>
+        [...holdersByVersion.values()]
+          .flat()
+          .filter((h, i, all) => where.userId.in.includes(h.userId) && all.findIndex((o) => o.userId === h.userId) === i)
+          .filter((h) => where.deactivatedAt !== null || !deactivatedUsers.has(h.userId))
+          .map((h) => ({
+            ...h,
+            deactivatedAt: deactivatedUsers.has(h.userId) ? DEPARTED_AT : null,
+            admittedAt: null,
+            createdAt: MEMBER_SINCE,
+          })),
     );
-    txMock.teamMember.count.mockResolvedValue(0);
+    txMock.tenantMember.findMany.mockResolvedValue([]);
+    txMock.tenantMemberDeparture.findMany.mockImplementation(async ({ where }: { where: { userId: { in: string[] } } }) =>
+      [...leftoverUsers].filter((u) => where.userId.in.includes(u)).map((userId) => ({ userId, departedAt: DEPARTED_AT })),
+    );
     txMock.$queryRaw.mockResolvedValue([{ count: BigInt(0) }]);
     mockFetchUserDisplayMap.mockImplementation(async (ids: string[]) =>
       new Map(ids.map((id) => [id, { id, name: `name-${id.slice(-2)}`, email: `${id.slice(-2)}@example.com`, image: null }])),
@@ -252,10 +272,13 @@ describe("GET /api/teams/[teamId]/rekey", () => {
       { teamKeyVersion: 3, _count: { _all: 1 } },
     ]);
     holdersByVersion.set(2, [{ userId: ME, role: "ADMIN" }, { userId: MEMBER, role: "MEMBER" }, { userId: ADMIN, role: "ADMIN" }]);
-    holdersByVersion.set(3, [{ userId: ME, role: "ADMIN" }]);
-    txMock.teamMember.count.mockImplementation(async ({ where }: { where: { userId: { in: string[] } } }) =>
-      where.userId.in.length === 3 ? 0 : 2,
-    );
+    holdersByVersion.set(3, [
+      { userId: ME, role: "ADMIN" },
+      { userId: "00000000-0000-4000-8000-0000000000c1", role: "ADMIN" },
+      { userId: "00000000-0000-4000-8000-0000000000c2", role: "MEMBER" },
+    ]);
+    deactivatedUsers.add("00000000-0000-4000-8000-0000000000c1");
+    deactivatedUsers.add("00000000-0000-4000-8000-0000000000c2");
 
     const { res, json } = await list();
 
@@ -274,9 +297,50 @@ describe("GET /api/teams/[teamId]/rekey", () => {
       // The caller is the only active holder.
       3: { callerHolds: true, activeHolderCount: 1, holders: [], deactivatedHolderCount: 2 },
     });
-    expect(txMock.teamMember.count).toHaveBeenCalledWith({
-      where: { teamId: TEAM, userId: { in: [ME] }, deactivatedAt: { not: null } },
+  });
+
+  it("does not name a leftover holder as a re-keyer and counts it as an inactive holder", async () => {
+    txMock.teamPasswordEntry.groupBy.mockResolvedValue([{ teamKeyVersion: 2, _count: { _all: 1 } }]);
+    holdersByVersion.set(2, [
+      { userId: MEMBER, role: "MEMBER" },
+      { userId: ADMIN, role: "ADMIN" },
+    ]);
+    leftoverUsers.add(ADMIN);
+
+    const { json } = await list();
+
+    expect(json.versionHolders[2]).toEqual({
+      callerHolds: false,
+      activeHolderCount: 1,
+      holders: [{ id: MEMBER, name: "name-b1", email: "b1@example.com", canRekey: false }],
+      deactivatedHolderCount: 1,
     });
+    expect(json.holders[2]).toBeUndefined();
+    expect(txMock.tenantMemberDeparture.findMany).toHaveBeenCalledWith({
+      where: { tenantId: "tenant-1", userId: { in: [MEMBER, ADMIN] } },
+      select: { userId: true, departedAt: true },
+    });
+  });
+
+  it("reports a version held only by a leftover as unrecoverable with the inactive holder counted", async () => {
+    txMock.teamPasswordEntry.groupBy.mockResolvedValue([{ teamKeyVersion: 2, _count: { _all: 1 } }]);
+    holdersByVersion.set(2, [{ userId: ADMIN, role: "ADMIN" }]);
+    leftoverUsers.add(ADMIN);
+
+    const { json } = await list();
+
+    expect(json.stateCounts.unrecoverable).toBe(1);
+    expect(json.versionHolders[2]).toMatchObject({ activeHolderCount: 0, deactivatedHolderCount: 1 });
+  });
+
+  it("keeps a version held by an active holder out of the leftover path (same-seed twin)", async () => {
+    txMock.teamPasswordEntry.groupBy.mockResolvedValue([{ teamKeyVersion: 2, _count: { _all: 1 } }]);
+    holdersByVersion.set(2, [{ userId: ADMIN, role: "ADMIN" }]);
+
+    const { json } = await list();
+
+    expect(json.stateCounts.unrecoverable).toBe(0);
+    expect(json.versionHolders[2]).toMatchObject({ activeHolderCount: 1, deactivatedHolderCount: 0 });
   });
 
   it(`lists at most ${REKEY_HOLDERS_LISTED_MAX} other holders per version but counts them all`, async () => {

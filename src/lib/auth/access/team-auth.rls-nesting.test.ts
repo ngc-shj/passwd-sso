@@ -25,6 +25,7 @@ const { mockTx, mockTeamMemberFindFirst } = vi.hoisted(() => {
     $executeRaw: vi.fn(),
     team: { findUnique: vi.fn() },
     tenantMember: { findMany: vi.fn() },
+    tenantMemberDeparture: { findMany: vi.fn() },
     teamMember: { findFirst: mockTeamMemberFindFirst },
   };
   return { mockTx, mockTeamMemberFindFirst };
@@ -47,7 +48,8 @@ beforeEach(() => {
   mockTx.$executeRaw.mockResolvedValue(undefined);
   mockTx.team.findUnique.mockResolvedValue({ tenantId: TENANT_ID });
   mockTx.tenantMember.findMany.mockResolvedValue([{ tenantId: TENANT_ID }]);
-  mockTeamMemberFindFirst.mockResolvedValue({ userId: USER_ID, teamId: TEAM_ID, role: TEAM_ROLE.OWNER });
+  mockTx.tenantMemberDeparture.findMany.mockResolvedValue([]);
+  mockTeamMemberFindFirst.mockResolvedValue({ userId: USER_ID, teamId: TEAM_ID, role: TEAM_ROLE.OWNER, admittedAt: null, createdAt: new Date("2026-01-01T00:00:00Z") });
 });
 
 const checkPermission = () =>

@@ -157,17 +157,22 @@ export async function rejectScimPending(
 
   // Same lock order as approveScimPending.
   const budget = createLockBudget();
-  await lockTenantRows(tx, tenantId, [actorUserId, ...targets.map((t) => t.userId)], "share", budget);
+  const rows = await lockTenantRows(tx, tenantId, [actorUserId, ...targets.map((t) => t.userId)], "share", budget);
   await lockTeamsAgainstRotation(tx, [teamId], budget);
 
   // The actor's authority as it stands now: active, and holding
   // MEMBER_INVITE (OWNER/ADMIN only). No key requirement: a team without a
-  // key holder can still clear requests.
+  // key holder can still clear requests. A leftover membership (the actor left
+  // the tenant at or after their admission) holds no authority.
   const actor = await tx.teamMember.findFirst({
     where: { teamId, userId: actorUserId, deactivatedAt: null },
-    select: { role: true },
+    select: { role: true, admittedAt: true, createdAt: true },
   });
-  if (!actor || !hasTeamPermission(actor.role, TEAM_PERMISSION.MEMBER_INVITE)) {
+  if (
+    !actor ||
+    !hasTeamPermission(actor.role, TEAM_PERMISSION.MEMBER_INVITE) ||
+    actorDepartedSinceAdmission(rows.get(actorUserId), actor.admittedAt ?? actor.createdAt)
+  ) {
     return null;
   }
 

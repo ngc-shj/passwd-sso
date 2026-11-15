@@ -8,7 +8,7 @@ import {
   nextItemKeyVersion,
   normalizeTeamKeyVersion,
   teamKeyVersionHolders,
-  deactivatedTeamKeyVersionHolderCount,
+  inactiveTeamKeyVersionHolderCount,
 } from "./team-item-key";
 import * as resolution from "./team-key-resolution";
 
@@ -47,17 +47,44 @@ describe("itemKeyIvReused", () => {
   });
 });
 
-describe("teamKeyVersionHolders", () => {
-  function fakeTx(keys: { userId: string }[], members: { userId: string; role: TeamRole }[]) {
-    return {
-      teamMemberKey: { findMany: vi.fn().mockResolvedValue(keys) },
-      teamMember: { findMany: vi.fn().mockResolvedValue(members) },
-    };
-  }
+const T1 = new Date("2026-02-01T00:00:00Z");
+const T2 = new Date("2026-03-01T00:00:00Z");
 
+type FakeMember = {
+  userId: string;
+  role?: TeamRole;
+  deactivatedAt?: Date | null;
+  admittedAt?: Date | null;
+  createdAt?: Date;
+};
+
+/** A tx with the team's keys and members and the tenant's rows and departures. */
+function fakeTx(
+  keys: { userId: string }[],
+  members: FakeMember[],
+  departures: { userId: string; departedAt: Date }[] = [],
+  tenantMembers: { userId: string; deactivatedAt?: Date | null }[] = [],
+) {
+  return {
+    teamMemberKey: { findMany: vi.fn().mockResolvedValue(keys) },
+    teamMember: {
+      findMany: vi.fn().mockResolvedValue(
+        members.map((m) => ({ role: "MEMBER", deactivatedAt: null, admittedAt: null, createdAt: T1, ...m })),
+      ),
+    },
+    tenantMember: {
+      findMany: vi
+        .fn()
+        .mockResolvedValue(tenantMembers.map((m) => ({ role: "MEMBER", deactivatedAt: null, ...m }))),
+    },
+    tenantMemberDeparture: { findMany: vi.fn().mockResolvedValue(departures) },
+  };
+}
+
+describe("teamKeyVersionHolders", () => {
   it("returns the active members holding a key at the version", async () => {
     const tx = fakeTx([{ userId: "u1" }, { userId: "u2" }], [{ userId: "u1", role: "ADMIN" }]);
-    const holders = await teamKeyVersionHolders(tx as never, "team-1", 3);
+    const holders = await teamKeyVersionHolders(tx as never, "tenant-1", "team-1", 3);
 
     expect(holders).toEqual([{ userId: "u1", role: "ADMIN" }]);
     expect(tx.teamMemberKey.findMany).toHaveBeenCalledWith({
@@ -67,13 +94,13 @@ describe("teamKeyVersionHolders", () => {
     // Only active memberships count: a departed member's key row does not.
     expect(tx.teamMember.findMany).toHaveBeenCalledWith({
       where: { teamId: "team-1", userId: { in: ["u1", "u2"] }, deactivatedAt: null },
-      select: { userId: true, role: true },
+      select: { userId: true, role: true, admittedAt: true, createdAt: true },
     });
   });
 
   it("looks up a version below 1 as version 1", async () => {
     const tx = fakeTx([], []);
-    await teamKeyVersionHolders(tx as never, "team-1", 0);
+    await teamKeyVersionHolders(tx as never, "tenant-1", "team-1", 0);
     expect(tx.teamMemberKey.findMany).toHaveBeenCalledWith({
       where: { teamId: "team-1", keyVersion: 1 },
       select: { userId: true },
@@ -82,28 +109,73 @@ describe("teamKeyVersionHolders", () => {
 
   it("returns no holder without reading memberships when no key row exists", async () => {
     const tx = fakeTx([], [{ userId: "u1", role: "OWNER" }]);
-    expect(await teamKeyVersionHolders(tx as never, "team-1", 2)).toEqual([]);
+    expect(await teamKeyVersionHolders(tx as never, "tenant-1", "team-1", 2)).toEqual([]);
     expect(tx.teamMember.findMany).not.toHaveBeenCalled();
+  });
+
+  it("excludes a leftover holder: an active member who left the tenant after admission", async () => {
+    const tx = fakeTx(
+      [{ userId: "leftover" }, { userId: "active" }],
+      [{ userId: "leftover", role: "ADMIN" }, { userId: "active", role: "ADMIN" }],
+      [{ userId: "leftover", departedAt: T2 }],
+      [{ userId: "leftover" }, { userId: "active" }],
+    );
+    expect(await teamKeyVersionHolders(tx as never, "tenant-1", "team-1", 1)).toEqual([
+      { userId: "active", role: "ADMIN" },
+    ]);
+    expect(tx.tenantMember.findMany.mock.calls[0][0].where.tenantId).toBe("tenant-1");
+  });
+
+  it("keeps a guest holder (no tenant row) and a re-admitted holder (departure before admittedAt)", async () => {
+    const tx = fakeTx(
+      [{ userId: "guest" }, { userId: "readmitted" }],
+      [{ userId: "guest" }, { userId: "readmitted", admittedAt: T2 }],
+      [{ userId: "readmitted", departedAt: T1 }],
+      [{ userId: "readmitted" }],
+    );
+    const holders = await teamKeyVersionHolders(tx as never, "tenant-1", "team-1", 1);
+    expect(holders.map((h) => h.userId)).toEqual(["guest", "readmitted"]);
   });
 });
 
-describe("deactivatedTeamKeyVersionHolderCount", () => {
+describe("inactiveTeamKeyVersionHolderCount", () => {
   it("counts key holders at the version whose membership is deactivated", async () => {
-    const tx = {
-      teamMemberKey: { findMany: vi.fn().mockResolvedValue([{ userId: "u1" }, { userId: "u2" }]) },
-      teamMember: { count: vi.fn().mockResolvedValue(1) },
-    };
-    expect(await deactivatedTeamKeyVersionHolderCount(tx as never, "team-1", 0)).toBe(1);
+    const tx = fakeTx(
+      [{ userId: "u1" }, { userId: "u2" }],
+      [{ userId: "u1", deactivatedAt: T2 }, { userId: "u2" }],
+    );
+    expect(await inactiveTeamKeyVersionHolderCount(tx as never, "tenant-1", "team-1", 0)).toBe(1);
     expect(tx.teamMemberKey.findMany).toHaveBeenCalledWith({ where: { teamId: "team-1", keyVersion: 1 }, select: { userId: true } });
-    expect(tx.teamMember.count).toHaveBeenCalledWith({
-      where: { teamId: "team-1", userId: { in: ["u1", "u2"] }, deactivatedAt: { not: null } },
+    expect(tx.teamMember.findMany).toHaveBeenCalledWith({
+      where: { teamId: "team-1", userId: { in: ["u1", "u2"] } },
+      select: { userId: true, deactivatedAt: true, admittedAt: true, createdAt: true },
     });
   });
 
+  it("counts a leftover holder too, so a leftover-only version still reads as held by someone who could return", async () => {
+    const tx = fakeTx(
+      [{ userId: "leftover" }],
+      [{ userId: "leftover" }],
+      [{ userId: "leftover", departedAt: T2 }],
+      [{ userId: "leftover" }],
+    );
+    expect(await inactiveTeamKeyVersionHolderCount(tx as never, "tenant-1", "team-1", 1)).toBe(1);
+  });
+
+  it("does not count an active holder, a guest or a re-admitted holder", async () => {
+    const tx = fakeTx(
+      [{ userId: "active" }, { userId: "guest" }, { userId: "readmitted" }],
+      [{ userId: "active" }, { userId: "guest" }, { userId: "readmitted", admittedAt: T2 }],
+      [{ userId: "readmitted", departedAt: T1 }],
+      [{ userId: "active" }, { userId: "readmitted" }],
+    );
+    expect(await inactiveTeamKeyVersionHolderCount(tx as never, "tenant-1", "team-1", 1)).toBe(0);
+  });
+
   it("is 0 without reading memberships when no key row exists", async () => {
-    const tx = { teamMemberKey: { findMany: vi.fn().mockResolvedValue([]) }, teamMember: { count: vi.fn() } };
-    expect(await deactivatedTeamKeyVersionHolderCount(tx as never, "team-1", 2)).toBe(0);
-    expect(tx.teamMember.count).not.toHaveBeenCalled();
+    const tx = fakeTx([], []);
+    expect(await inactiveTeamKeyVersionHolderCount(tx as never, "tenant-1", "team-1", 2)).toBe(0);
+    expect(tx.teamMember.findMany).not.toHaveBeenCalled();
   });
 });
 

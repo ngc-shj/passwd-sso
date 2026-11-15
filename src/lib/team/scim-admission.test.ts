@@ -350,3 +350,65 @@ describe("departed approver", () => {
     expect((await approveOne())?.get(M1)).toBe(SCIM_APPROVE_OUTCOME.APPROVED);
   });
 });
+
+describe("departed rejecter", () => {
+  const ADMITTED = new Date("2026-03-01T00:00:00.000Z");
+  const BEFORE = new Date("2026-02-01T00:00:00.000Z");
+  const AFTER = new Date("2026-04-01T00:00:00.000Z");
+
+  function actorDeparted(departedAt: Date | null, admittedAt: Date | null, createdAt: Date, tenantRow: Record<string, unknown> = {}) {
+    actorRow = { role: TEAM_ROLE.ADMIN, admittedAt, createdAt };
+    setTenantRows({ [ACTOR_ID]: { hasRow: true, role: null, deactivatedAt: null, departedAt, ...tenantRow } });
+  }
+
+  const rejectOne = () => rejectScimPending(txArg, TENANT_ID, ctx, [{ memberId: M1, userId: U1 }]);
+
+  it("refuses an actor whose tenant departure equals their admission time", async () => {
+    actorDeparted(ADMITTED, ADMITTED, BEFORE);
+    expect(await rejectOne()).toBeNull();
+    noWrites();
+  });
+
+  it("refuses an actor who departed after their admission", async () => {
+    actorDeparted(AFTER, ADMITTED, BEFORE);
+    expect(await rejectOne()).toBeNull();
+    noWrites();
+  });
+
+  it("refuses an actor whose deactivated tenant row follows their admission", async () => {
+    actorDeparted(null, ADMITTED, BEFORE, { deactivatedAt: AFTER });
+    expect(await rejectOne()).toBeNull();
+    noWrites();
+  });
+
+  it("refuses an actor with no admittedAt whose createdAt precedes the departure", async () => {
+    actorDeparted(ADMITTED, null, BEFORE);
+    expect(await rejectOne()).toBeNull();
+    noWrites();
+  });
+
+  it("rejects for an active actor", async () => {
+    actorDeparted(null, ADMITTED, BEFORE);
+    expect((await rejectOne())?.get(M1)).toBe(SCIM_REJECT_OUTCOME.REJECTED);
+  });
+
+  it("rejects for a guest actor (no tenant row, no departure record)", async () => {
+    actorRow = { role: TEAM_ROLE.ADMIN, admittedAt: ADMITTED, createdAt: BEFORE };
+    setTenantRows({ [ACTOR_ID]: { hasRow: false, role: null, deactivatedAt: null, departedAt: null } });
+    expect((await rejectOne())?.get(M1)).toBe(SCIM_REJECT_OUTCOME.REJECTED);
+  });
+
+  it("rejects for an actor re-admitted after the departure", async () => {
+    actorDeparted(BEFORE, AFTER, BEFORE);
+    expect((await rejectOne())?.get(M1)).toBe(SCIM_REJECT_OUTCOME.REJECTED);
+  });
+
+  it("selects the admission columns the departed check reads", async () => {
+    actorDeparted(null, ADMITTED, BEFORE);
+    await rejectOne();
+    expect(tx.teamMember.findFirst).toHaveBeenCalledWith({
+      where: { teamId: TEAM_ID, userId: ACTOR_ID, deactivatedAt: null },
+      select: { role: true, admittedAt: true, createdAt: true },
+    });
+  });
+});

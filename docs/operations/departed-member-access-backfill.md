@@ -54,7 +54,8 @@ deploy`. Run them with `psql -v ON_ERROR_STOP=1 -f <file>`.
    demoted to ADMIN by that assignment), and the new OWNER then removes them.
    Confirm the OWNER is a leak first (step 5): an OWNER legitimately re-admitted
    before `20261114000000_team_member_admitted_at` is listed the same way, and
-   an assignment demotes them; recovering them means removing and re-inviting.
+   an assignment demotes them. Recover such a member with the re-admit script
+   (see "Re-admit"), which keeps their team key and works for a sole OWNER too.
 
 **For every membership the migration or the contain script ended** (found by
 `TEAM_MEMBER_TENANT_DEACTIVATE` records whose `metadata.backfill` is
@@ -77,7 +78,11 @@ section 2 of the report is built from them), in this order:
 6. Tell each affected tenant's admin.
 
 Team-entry share links the member created stop being served on their own
-(`share_creator_admitted`). A legitimately re-admitted member the migration ended
+(`share_creator_admitted`): a link is refused when its creator left the tenant
+at or after creating it, and also when they left at or after their membership
+of the team began (`COALESCE(admitted_at, created_at)`, equality refuses), so a
+link created by a leftover membership after the departure is refused too. A
+creator re-admitted after the departure is served. A legitimately re-admitted member the migration ended
 is re-invited. That includes a member the original ended on a role that
 bypassed RLS and who was re-admitted since, when the re-run later ran on a role
 that cannot bypass: the re-admission left no record, so the migration revoked it.
@@ -365,6 +370,173 @@ COMMIT;
 -- END SCRIPT departed-member-contain
 ```
 
+## Re-admit
+
+Restores the team access of a member the tenant admin confirmed was legitimately
+re-admitted before `20261114000000_team_member_admitted_at`, in place and with
+the member's team key intact. Such a member is refused on every team route (see
+"Actors refused since this release") and listed in section 1, and the contain
+script would end them. Use this script **only after step 5**: the tenant admin
+must have confirmed the row. The script's check is necessary, not sufficient: it
+refuses a membership no one touched since the departure, but a leaked row
+touched later (a role or key update) passes it, so the confirmation is what
+tells the two apart.
+
+Edit only the two lines marked `INPUT`, as for the contain script. A membership
+is re-admitted only when all of these hold, and the script refuses the whole
+batch otherwise:
+
+- the team, membership and tenant row belong to the given tenant, and the
+  membership is active with `admitted_at` unset (never re-activated since the
+  column exists);
+- the member's tenant row exists and is departed, and the membership was created
+  at or before that departure;
+- no `tenant_member_departures` record is dated at or after the membership's
+  `created_at`;
+- the membership row was updated after the departure (`updated_at` later than
+  the tenant row's `deactivated_at`): a legitimate re-admission re-activated the
+  row, and every re-activation writes `updated_at`. `updated_at` is the
+  application clock and `deactivated_at` the database clock, so a clock skew
+  only refuses a re-admission made within the skew of the departure.
+
+A stamped `admitted_at` that is still leftover is a missed departure writer, and
+a leftover by departure record alone survived a SCIM DELETE; both are leaks the
+database can prove. End them with the contain script or a team admin's removal.
+Never re-admit them.
+
+The script ends the membership's lockout by re-activating the row (two updates
+of the same row, so the database stamps `admitted_at` after the departure) and
+touches nothing else: the member's team keys are kept. Each re-admitted
+membership gets one `TEAM_MEMBER_OPERATOR_READMIT` audit record, with
+`metadata.operator` the label, `readmitted` true, `createdAt` and
+`tenantDeactivatedAt`. A second run on the same row is refused: it is no longer
+leftover.
+
+```sql
+-- BEGIN SCRIPT departed-member-readmit
+BEGIN;
+DO $readmit$
+DECLARE
+  v_input uuid[] := '{{tenant-uuid,team-uuid,user-uuid}}'::uuid[]; -- INPUT:triples
+  v_label text := $label$REPLACE-WITH-OPERATOR-LABEL$label$; -- INPUT:label
+  v_tenants uuid[];
+  v_teams uuid[];
+  v_users uuid[];
+  v_input_count integer;
+  v_ids uuid[];
+  v_readmitted integer;
+  v_enqueued integer;
+BEGIN
+  IF array_ndims(v_input) IS DISTINCT FROM 2 OR array_length(v_input, 2) IS DISTINCT FROM 3
+     OR COALESCE(array_length(v_input, 1), 0) < 1 THEN
+    RAISE EXCEPTION 'readmit: the input must be a two-dimensional uuid array of (tenant_id, team_id, user_id) rows, at least one';
+  END IF;
+  IF EXISTS (SELECT 1 FROM unnest(v_input) AS x WHERE x IS NULL) THEN
+    RAISE EXCEPTION 'readmit: the input holds a null id';
+  END IF;
+  IF v_label IS NULL OR btrim(v_label) = '' OR length(v_label) > 255 OR v_label = 'REPLACE-WITH-OPERATOR-LABEL' THEN
+    RAISE EXCEPTION 'readmit: the operator label must be 1 to 255 characters and not the template';
+  END IF;
+
+  SELECT array_agg(d.t ORDER BY d.t, d.m, d.u), array_agg(d.m ORDER BY d.t, d.m, d.u),
+         array_agg(d.u ORDER BY d.t, d.m, d.u), count(*)
+    INTO v_tenants, v_teams, v_users, v_input_count
+    FROM (
+      SELECT DISTINCT v_input[g.i][1] AS t, v_input[g.i][2] AS m, v_input[g.i][3] AS u
+        FROM generate_subscripts(v_input, 1) AS g(i)
+    ) d;
+
+  PERFORM set_config('app.bypass_rls', 'on', true);
+  PERFORM set_config('app.bypass_tables', 'tenant_members,tenant_member_departures,teams,team_members,audit_outbox', true);
+  PERFORM set_config('app.bypass_purpose', 'system_maintenance', true);
+  PERFORM set_config('app.tenant_id', '00000000-0000-0000-0000-000000000000', true);
+
+  -- The app's order (src/lib/team/tenant-row-lock.ts): advisory lock per
+  -- (tenant, user) in byte order of the key, then the tenant rows, then teams.
+  PERFORM pg_advisory_xact_lock(hashtext(k))
+    FROM (
+      SELECT k FROM (
+        SELECT DISTINCT 'tenant-member:' || d.t::text || ':' || d.u::text AS k
+          FROM unnest(v_tenants, v_users) AS d(t, u)
+      ) AS keys
+       ORDER BY k COLLATE "C"
+    ) ordered;
+
+  PERFORM 1
+    FROM tenant_members tmb
+    JOIN (SELECT DISTINCT d.t, d.u FROM unnest(v_tenants, v_users) AS d(t, u)) i
+      ON i.t = tmb.tenant_id AND i.u = tmb.user_id
+   ORDER BY tmb.tenant_id, tmb.user_id
+     FOR SHARE OF tmb;
+
+  PERFORM 1 FROM teams WHERE id = ANY (v_teams) ORDER BY id FOR SHARE;
+
+  -- The residual class only, read under the locks above.
+  SELECT array_agg(tm.id ORDER BY tm.id)
+    INTO v_ids
+    FROM unnest(v_tenants, v_teams, v_users) AS i(tenant_id, team_id, user_id)
+    JOIN team_members tm
+      ON tm.tenant_id = i.tenant_id AND tm.team_id = i.team_id AND tm.user_id = i.user_id
+    JOIN tenant_members tmb
+      ON tmb.tenant_id = i.tenant_id AND tmb.user_id = i.user_id
+   WHERE tm.deactivated_at IS NULL
+     AND tm.admitted_at IS NULL
+     AND tmb.deactivated_at IS NOT NULL
+     AND tm.created_at <= tmb.deactivated_at
+     AND NOT EXISTS (SELECT 1 FROM tenant_member_departures d
+                      WHERE d.tenant_id = tm.tenant_id AND d.user_id = tm.user_id
+                        AND d.departed_at >= tm.created_at)
+     AND tm.updated_at > tmb.deactivated_at;
+
+  IF COALESCE(array_length(v_ids, 1), 0) IS DISTINCT FROM v_input_count THEN
+    RAISE EXCEPTION 'readmit: % of % membership(s) qualify (team, membership and tenant row of one tenant; active, never re-activated; member departed after the membership began; no later departure record; row updated since the departure); nothing was written',
+      COALESCE(array_length(v_ids, 1), 0), v_input_count;
+  END IF;
+
+  -- Two updates of the same row: the trigger stamps admitted_at on the
+  -- re-activating one. The team keys are not touched.
+  UPDATE team_members SET deactivated_at = clock_timestamp() WHERE id = ANY (v_ids);
+  UPDATE team_members SET deactivated_at = NULL, updated_at = clock_timestamp() WHERE id = ANY (v_ids);
+  GET DIAGNOSTICS v_readmitted = ROW_COUNT;
+
+  WITH enqueued AS (
+    INSERT INTO audit_outbox (id, tenant_id, payload)
+    SELECT gen_random_uuid(), tm.tenant_id,
+           jsonb_build_object(
+             'scope', 'TEAM',
+             'action', 'TEAM_MEMBER_OPERATOR_READMIT',
+             'userId', '00000000-0000-4000-8000-000000000001',
+             'actorType', 'SYSTEM',
+             'serviceAccountId', NULL,
+             'teamId', tm.team_id,
+             'targetType', 'TeamMember',
+             'targetId', tm.user_id,
+             'metadata', jsonb_build_object(
+               'operator', v_label,
+               'readmitted', true,
+               'createdAt', to_char(tm.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+               'tenantDeactivatedAt', to_char(tmb.deactivated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')),
+             'ip', NULL,
+             'userAgent', NULL)
+      FROM team_members tm
+      JOIN tenant_members tmb ON tmb.tenant_id = tm.tenant_id AND tmb.user_id = tm.user_id
+     WHERE tm.id = ANY (v_ids)
+    RETURNING 1
+  )
+  SELECT count(*) INTO v_enqueued FROM enqueued;
+
+  IF v_readmitted IS DISTINCT FROM v_input_count OR v_enqueued IS DISTINCT FROM v_input_count THEN
+    RAISE EXCEPTION 'readmit: % membership(s) re-admitted and % audit record(s) written for % input row(s); nothing was written',
+      v_readmitted, v_enqueued, v_input_count;
+  END IF;
+
+  RAISE NOTICE 'readmit: re-admitted % membership(s) as database user %', v_readmitted, session_user;
+END
+$readmit$;
+COMMIT;
+-- END SCRIPT departed-member-readmit
+```
+
 ## Re-admission evidence
 
 From `20261114000200_team_member_invite_accept_audit_action` on, invitation
@@ -378,32 +550,52 @@ than the member's departure is evidence of a re-admission, as is
 
 ## Actors refused since this release
 
-Inviting, accepting an invitation the actor issued, adding a member, approving
-a SCIM-pending member, changing a role or transferring ownership, and
-distributing the team key all refuse an actor who departed the tenant at or
-after their admission to the team, even while their membership row is still
-active (the residue section 1 lists). The refusal is the route's usual one (403,
-or `INVITATION_EXPIRED` for accept). Rotating the team key refuses such an actor
-too.
+A **leftover membership** is an active team membership whose member departed the
+team's tenant at or after their admission to the team (the residue section 1
+lists). It grants no team authority of any kind:
+
+- **Every team route** refuses it as it refuses a non-member: team data, tags,
+  folders, policy, webhooks, the team's settings and deletion, removing members,
+  clearing SCIM-pending admissions, cancelling invitations, and fetching the team
+  key all answer `NOT_FOUND`, and the admin pages answer not found. A request
+  already past that check when a normal removal or departure commits is refused
+  by the in-transaction re-check (403).
+- The team no longer appears in the member's team list or admin shell, and the
+  membership is not counted as a key holder: a team key version held only by
+  such members is reported as unrecoverable by the re-key pass, and a history
+  entry sealed under it cannot be restored.
+- Team **webhook** delivery skips a webhook whose creator is such a member.
+- As an **actor** it is also refused, in the transaction, at the sites that grant
+  authority to others: inviting, accepting an invitation the actor issued
+  (`INVITATION_EXPIRED`), adding a member, approving a SCIM-pending member,
+  changing a role or transferring ownership, and distributing the team key.
+  Rotating the team key refuses such an actor too.
 
 The same membership is also refused as a **recipient**: it is not given the team
 key (confirm-key answers `MEMBER_NOT_FOUND`), not promoted, and never made OWNER;
 a demotion is still allowed. A team key rotation does not wrap the new version
 for it and clears its `key_distributed`, so it holds only keys it already had.
-The team's pending key distributions still list it, and an admin's browser keeps
-being refused until the membership is ended. A team admin who tries to promote
-such a member, transfer ownership to them, or give them the key sees "member not
-found" for a member the team list still shows: that is this refusal. End the
-membership (or remove the member and invite them again if they belong in the
-team).
+A team admin who tries to promote such a member, transfer ownership to them, or
+give them the key sees "member not found" for a member the team list still
+shows: that is this refusal. End the membership.
+
+The predicate reads the tenant row and the SCIM DELETE record. A tenant row
+deleted without a departure record reads as a guest, not as departed: none of
+this applies to it, and the report does not list it. Tenant-row deletions stay a
+blind spot of this control (see the last section).
 
 This also refuses a member who was legitimately re-admitted **before**
 `20261114000000_team_member_admitted_at`: their row has no `admitted_at`, its
 `created_at` predates the departure, and nothing tells that apart from residue.
-Such a member appears in section 1. Recovery is a re-admission: once the tenant
-admin confirms the member, a team admin removes them and invites them again (or
-a SCIM return restores them); the new admission stamps `admitted_at` and their
-authority comes back. Do not edit `admitted_at`: the trigger ignores it.
+Such a member appears in section 1 and is refused on every team route, including
+their own team key. Once the tenant admin confirms the member (step 5), restore
+them with the re-admit script (see "Re-admit"): it re-activates the row in place,
+the database stamps `admitted_at` after the departure, and their team key is
+kept. Do not recover them by having a team admin remove them and invite them
+again unless you mean to discard their team key: member removal deletes the
+member's team keys and ends their sessions and tokens, and cannot run at all when
+the member is the team's sole OWNER and no other in-tenant member can take
+ownership. Do not edit `admitted_at`: the trigger ignores it.
 
 ## Paused team webhooks
 
@@ -418,8 +610,9 @@ a current team admin re-creates it (and the old one is deleted).
 A webhook created before `20261114000300_team_webhook_creator` has a creator
 only if the migration found its `WEBHOOK_CREATE` record; otherwise it keeps
 delivering as before, and section 3 of the report lists it. A creator whose
-membership row survived their departure (the residue section 1 lists) still
-passes the delivery check: end that membership with the contain script.
+membership row survived their departure (the residue section 1 lists) is a
+leftover membership and does not pass the delivery check either (see "Actors
+refused since this release").
 
 ## What prevents a recurrence, and its limits
 
@@ -430,6 +623,7 @@ a write to `tenant_members.deactivated_at` outside that file, but it does not
 see the file's own writers, `*Unsafe` raw SQL, aliased receivers, `scripts/`, or
 deletes of tenant rows. A tenant-row change made any other way (a hand-written
 `UPDATE`, a script) can leave memberships active again: run the report after
-any such change. The actor check above refuses such residue at the six admission
-sites, and share links stop on their own; webhook delivery reads only the team
-row, so the report and the contain script remain the control there.
+any such change. The leftover check above refuses such residue on every team
+route and at webhook delivery, and share links are refused by `share_creator_admitted`
+(including links a leftover membership created after the departure); the report and
+the contain script end the memberships themselves.

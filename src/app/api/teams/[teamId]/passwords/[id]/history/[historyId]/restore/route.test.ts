@@ -17,7 +17,7 @@ const {
   mockHistoryFindUnique: vi.fn(),
   mockTransaction: vi.fn(),
   mockLogAudit: vi.fn(),
-  mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
+  mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: (tenantId: string) => unknown) => fn("tenant-1")),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -128,6 +128,8 @@ type TxOptions = {
   history?: Record<string, unknown> | null;
   holderKeys?: { userId: string }[];
   holderMembers?: { userId: string; role: string }[];
+  /** Holders who left the tenant after their admission but kept an active team row. */
+  leftoverHolders?: string[];
   /** The actor's membership re-read under the team lock (null: gone). */
   actor?: { role: string } | null;
 };
@@ -160,13 +162,25 @@ function setupTx(options: TxOptions = {}) {
     },
     teamMemberKey: { findMany: vi.fn().mockResolvedValue(options.holderKeys ?? [{ userId: "holder-1" }]) },
     teamMember: {
-      findMany: vi.fn().mockResolvedValue(options.holderMembers ?? [{ userId: "holder-1", role: "MEMBER" }]),
+      findMany: vi.fn().mockResolvedValue(
+        (options.holderMembers ?? [{ userId: "holder-1", role: "MEMBER" }]).map((m) => ({
+          ...m,
+          admittedAt: null,
+          createdAt: new Date("2025-01-01"),
+        })),
+      ),
       findFirst: vi.fn(async () => {
         calls.push("actorRole");
         return "actor" in options ? options.actor : { role: "MEMBER" };
       }),
     },
     teamPasswordEntry: { update: vi.fn() },
+    tenantMember: { findMany: vi.fn().mockResolvedValue([]) },
+    tenantMemberDeparture: {
+      findMany: vi.fn().mockResolvedValue(
+        (options.leftoverHolders ?? []).map((userId) => ({ userId, departedAt: new Date("2025-06-01") })),
+      ),
+    },
   };
   mockTransaction.mockImplementation(async (fn: (t: unknown) => Promise<unknown>) => fn(tx));
   return { tx, calls };
@@ -500,8 +514,44 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
       expect(res.status).toBe(409);
       expect(tx.teamMember.findMany).toHaveBeenCalledWith({
         where: { teamId: TEAM_ID, userId: { in: ["departed"] }, deactivatedAt: null },
-        select: { userId: true, role: true },
+        select: { userId: true, role: true, admittedAt: true, createdAt: true },
       });
+    });
+
+    it("refuses a row whose only key holder is a leftover (409 HISTORY_KEY_UNAVAILABLE), writing nothing", async () => {
+      preChecksPass();
+      const { tx } = setupTx({
+        holderKeys: [{ userId: "leftover" }],
+        holderMembers: [{ userId: "leftover", role: "ADMIN" }],
+        leftoverHolders: ["leftover"],
+      });
+
+      const res = await POST(restoreRequest(), makeParams());
+      const { status, json } = await parseResponse(res);
+
+      expect(status).toBe(409);
+      expect(json.error).toBe("HISTORY_KEY_UNAVAILABLE");
+      expect(tx.tenantMemberDeparture.findMany).toHaveBeenCalledWith({
+        where: { tenantId: "tenant-1", userId: { in: ["leftover"] } },
+        select: { userId: true, departedAt: true },
+      });
+      expect(tx.teamPasswordEntryHistory.create).not.toHaveBeenCalled();
+      expect(tx.teamPasswordEntry.update).not.toHaveBeenCalled();
+    });
+
+    it("restores a row held by an active member while another holder is a leftover (control)", async () => {
+      preChecksPass();
+      setupTx({
+        holderKeys: [{ userId: "leftover" }, { userId: "holder-1" }],
+        holderMembers: [
+          { userId: "leftover", role: "ADMIN" },
+          { userId: "holder-1", role: "MEMBER" },
+        ],
+        leftoverHolders: ["leftover"],
+      });
+
+      const res = await POST(restoreRequest(), makeParams());
+      expect(res.status).toBe(200);
     });
 
     it("accepts a row an active member holds (control) and looks the holder up at the row's normalised version", async () => {

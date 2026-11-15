@@ -8,22 +8,32 @@
 
 import { TEAM_PERMISSION } from "@/lib/constants";
 import { hasTeamPermission } from "@/lib/auth/access/team-permissions";
+import { actorDepartedSinceAdmission, readTenantRows } from "@/lib/team/tenant-departure-read";
+import type { LockedTenantRow } from "@/lib/team/tenant-departure-read";
 import type { Prisma, TeamRole } from "@prisma/client";
 
 /**
  * "legacy" — the webhook predates created_by_id (NULL), so no creator to check.
  * true / false — the creator has / has not current authority in the webhook's
- * team (an active membership whose role holds TEAM_UPDATE).
+ * team (an active membership whose role holds TEAM_UPDATE, and who has not
+ * left the tenant since the membership began: a leftover grants no authority).
  */
 export function webhookCreatorAuthorized(
   createdById: string | null,
-  member: { role: TeamRole; deactivatedAt: Date | null } | null,
+  member: {
+    role: TeamRole;
+    deactivatedAt: Date | null;
+    admittedAt: Date | null;
+    createdAt: Date;
+  } | null,
+  tenantRow: LockedTenantRow | undefined,
 ): "legacy" | boolean {
   if (createdById === null) return "legacy";
   return (
     member !== null &&
     member.deactivatedAt === null &&
-    hasTeamPermission(member.role, TEAM_PERMISSION.TEAM_UPDATE)
+    hasTeamPermission(member.role, TEAM_PERMISSION.TEAM_UPDATE) &&
+    !actorDepartedSinceAdmission(tenantRow, member.admittedAt ?? member.createdAt)
   );
 }
 
@@ -33,7 +43,8 @@ export function webhookCreatorAuthorized(
  * webhooks GET shows `false` as paused — one lookup, so the two cannot disagree.
  */
 export async function webhookCreatorVerdicts(
-  tx: Pick<Prisma.TransactionClient, "teamMember">,
+  tx: Pick<Prisma.TransactionClient, "teamMember" | "tenantMember" | "tenantMemberDeparture">,
+  tenantId: string,
   teamId: string,
   webhooks: readonly { id: string; createdById: string | null }[],
 ): Promise<Map<string, "legacy" | boolean>> {
@@ -45,8 +56,9 @@ export async function webhookCreatorVerdicts(
       ? []
       : await tx.teamMember.findMany({
           where: { teamId, userId: { in: creatorIds } },
-          select: { userId: true, role: true, deactivatedAt: true },
+          select: { userId: true, role: true, deactivatedAt: true, admittedAt: true, createdAt: true },
         });
+  const tenantRows = await readTenantRows(tx, tenantId, creatorIds);
   const memberByUserId = new Map(members.map((m) => [m.userId, m]));
   return new Map(
     webhooks.map((w) => [
@@ -54,6 +66,7 @@ export async function webhookCreatorVerdicts(
       webhookCreatorAuthorized(
         w.createdById,
         w.createdById === null ? null : (memberByUserId.get(w.createdById) ?? null),
+        w.createdById === null ? undefined : tenantRows.get(w.createdById),
       ),
     ]),
   );

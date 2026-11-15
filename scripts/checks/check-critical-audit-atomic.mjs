@@ -80,6 +80,8 @@ const CRITICAL_ACTIONS = new Set([
   "TEAM_MEMBER_SCIM_APPROVE",
   "TEAM_MEMBER_SCIM_REJECT",
   "TEAM_MEMBER_INVITE_ACCEPT",
+  // leftover-team-actor-authority C2: the cancel commits with its audit row.
+  "TEAM_MEMBER_INVITE_CANCEL",
   "TEAM_MEMBER_SCIM_PENDING",
   "TEAM_MEMBER_SCIM_PENDING_WITHDRAW",
   "TEAM_MEMBER_SCIM_REMOVE",

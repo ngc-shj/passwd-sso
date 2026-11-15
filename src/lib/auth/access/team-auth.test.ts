@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { NextRequest } from "next/server";
 import type { MockPrisma } from "@/__tests__/helpers/mock-prisma";
 
 // vi.mock is hoisted — factory must not reference outer variables
@@ -27,7 +28,10 @@ const { mockResolveUserTenantId } = vi.hoisted(() => ({
   mockResolveUserTenantId: vi.fn(),
 }));
 vi.mock("@/lib/tenant-context", () => ({
-  withTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
+  withTeamTenantRls: vi.fn(async (_teamId: string, fn: (tenantId: string, tx: unknown) => unknown) => {
+    const { prisma: tx } = await import("@/lib/prisma");
+    return fn("tenant-1", tx);
+  }),
   resolveUserTenantIdFromClient: mockResolveUserTenantId,
 }));
 
@@ -42,6 +46,7 @@ vi.mock("@/lib/team/team-policy", () => ({
 }));
 
 import { prisma } from "@/lib/prisma";
+import { withTeamIpRestriction } from "@/lib/team/team-policy";
 import { TEAM_PERMISSION, TEAM_ROLE } from "@/lib/constants";
 import {
   canWriteTeamEntry,
@@ -153,13 +158,32 @@ describe("isRoleAbove", () => {
   });
 });
 
+const ADMITTED = new Date("2026-01-10T00:00:00Z");
+const BEFORE = new Date("2026-01-01T00:00:00Z");
+const AFTER = new Date("2026-02-01T00:00:00Z");
+
+/** The tenant rows readTenantRows sees for the actor: the tenant row and/or a departure record. */
+function seedTenantRows(opts: { row?: { deactivatedAt: Date | null }; departedAt?: Date } = {}) {
+  mockPrisma.tenantMember.findMany.mockResolvedValue(
+    opts.row ? [{ userId: "u-1", role: "MEMBER", deactivatedAt: opts.row.deactivatedAt }] : [],
+  );
+  mockPrisma.tenantMemberDeparture.findMany.mockResolvedValue(
+    opts.departedAt ? [{ userId: "u-1", departedAt: opts.departedAt }] : [],
+  );
+}
+
 describe("getTeamMembership", () => {
+  const membership = {
+    id: "m-1", teamId: "team-1", userId: "u-1", role: TEAM_ROLE.MEMBER,
+    admittedAt: ADMITTED, createdAt: BEFORE,
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
+    seedTenantRows({ row: { deactivatedAt: null } });
   });
 
   it("returns membership when found (active member)", async () => {
-    const membership = { id: "m-1", teamId: "team-1", userId: "u-1", role: TEAM_ROLE.MEMBER };
     mockPrisma.teamMember.findFirst.mockResolvedValue(membership);
 
     const result = await getTeamMembership("u-1", "team-1");
@@ -169,20 +193,88 @@ describe("getTeamMembership", () => {
     });
   });
 
-  it("returns null when not found", async () => {
+  it("returns null when not found, without reading tenant rows", async () => {
     mockPrisma.teamMember.findFirst.mockResolvedValue(null);
     const result = await getTeamMembership("u-1", "team-1");
     expect(result).toBeNull();
+    expect(mockPrisma.tenantMember.findMany).not.toHaveBeenCalled();
+    expect(mockPrisma.tenantMemberDeparture.findMany).not.toHaveBeenCalled();
+  });
+
+  it("reads the actor's tenant rows in the team's tenant", async () => {
+    mockPrisma.teamMember.findFirst.mockResolvedValue(membership);
+    await getTeamMembership("u-1", "team-1");
+    expect(mockPrisma.tenantMember.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { tenantId: "tenant-1", userId: { in: ["u-1"] } } }),
+    );
+    expect(mockPrisma.tenantMemberDeparture.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { tenantId: "tenant-1", userId: { in: ["u-1"] } } }),
+    );
+  });
+
+  it("returns null for a leftover whose tenant row is deactivated after admission", async () => {
+    mockPrisma.teamMember.findFirst.mockResolvedValue(membership);
+    seedTenantRows({ row: { deactivatedAt: AFTER } });
+    expect(await getTeamMembership("u-1", "team-1")).toBeNull();
+  });
+
+  it("returns null for a leftover known only by its departure record (tenant row active)", async () => {
+    mockPrisma.teamMember.findFirst.mockResolvedValue(membership);
+    seedTenantRows({ row: { deactivatedAt: null }, departedAt: AFTER });
+    expect(await getTeamMembership("u-1", "team-1")).toBeNull();
+  });
+
+  it("returns null for a leftover known only by its departure record (tenant row absent)", async () => {
+    mockPrisma.teamMember.findFirst.mockResolvedValue(membership);
+    seedTenantRows({ departedAt: AFTER });
+    expect(await getTeamMembership("u-1", "team-1")).toBeNull();
+  });
+
+  it("returns null when the departure equals the admission instant", async () => {
+    mockPrisma.teamMember.findFirst.mockResolvedValue(membership);
+    seedTenantRows({ departedAt: ADMITTED });
+    expect(await getTeamMembership("u-1", "team-1")).toBeNull();
+  });
+
+  it("returns the membership of a guest (no tenant row, no departure record)", async () => {
+    mockPrisma.teamMember.findFirst.mockResolvedValue(membership);
+    seedTenantRows();
+    expect(await getTeamMembership("u-1", "team-1")).toEqual(membership);
+  });
+
+  it("returns the membership of a member re-admitted after the departure", async () => {
+    mockPrisma.teamMember.findFirst.mockResolvedValue(membership);
+    // created_at < departure < admitted_at
+    seedTenantRows({ row: { deactivatedAt: new Date("2026-01-05T00:00:00Z") } });
+    expect(await getTeamMembership("u-1", "team-1")).toEqual(membership);
+  });
+
+  it("returns the membership of a re-provisioned user (active tenant row, older departure record)", async () => {
+    mockPrisma.teamMember.findFirst.mockResolvedValue(membership);
+    seedTenantRows({ row: { deactivatedAt: null }, departedAt: new Date("2026-01-05T00:00:00Z") });
+    expect(await getTeamMembership("u-1", "team-1")).toEqual(membership);
+  });
+
+  it("anchors a row without admittedAt to createdAt: refused when the departure follows it", async () => {
+    // The #1043-C2 residual: re-admitted before admitted_at existed.
+    mockPrisma.teamMember.findFirst.mockResolvedValue({ ...membership, admittedAt: null, createdAt: BEFORE });
+    seedTenantRows({ row: { deactivatedAt: new Date("2026-01-05T00:00:00Z") } });
+    expect(await getTeamMembership("u-1", "team-1")).toBeNull();
   });
 });
 
 describe("requireTeamMember", () => {
+  const membership = {
+    id: "m-1", teamId: "team-1", userId: "u-1", role: TEAM_ROLE.OWNER,
+    admittedAt: ADMITTED, createdAt: BEFORE,
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
+    seedTenantRows({ row: { deactivatedAt: null } });
   });
 
   it("returns membership when found", async () => {
-    const membership = { id: "m-1", teamId: "team-1", userId: "u-1", role: TEAM_ROLE.OWNER };
     mockPrisma.teamMember.findFirst.mockResolvedValue(membership);
 
     const result = await requireTeamMember("u-1", "team-1");
@@ -200,11 +292,22 @@ describe("requireTeamMember", () => {
       expect((err as TeamAuthError).status).toBe(404);
     }
   });
+
+  it("throws TeamAuthError(404) for a leftover membership, before the IP restriction check", async () => {
+    mockPrisma.teamMember.findFirst.mockResolvedValue(membership);
+    seedTenantRows({ row: { deactivatedAt: AFTER } });
+
+    const err = await requireTeamMember("u-1", "team-1", {} as NextRequest).catch((e) => e);
+    expect(err).toBeInstanceOf(TeamAuthError);
+    expect((err as TeamAuthError).status).toBe(404);
+    expect(withTeamIpRestriction).not.toHaveBeenCalled();
+  });
 });
 
 describe("requireTeamPermission", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    seedTenantRows({ row: { deactivatedAt: null } });
   });
 
   it("returns membership when permission is granted", async () => {
@@ -244,6 +347,21 @@ describe("requireTeamPermission", () => {
 describe("getAdminTeamMemberships", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockPrisma.tenantMember.findMany.mockResolvedValue([]);
+    mockPrisma.tenantMemberDeparture.findMany.mockResolvedValue([]);
+  });
+
+  const created = new Date("2026-01-01T00:00:00.000Z");
+  const departed = new Date("2026-02-01T00:00:00.000Z");
+  const adminRow = (id: string, tenantId: string, extra: Record<string, unknown> = {}) => ({
+    id: `m-${id}`,
+    userId: "u-1",
+    tenantId,
+    role: TEAM_ROLE.ADMIN,
+    admittedAt: null,
+    createdAt: created,
+    team: { id: `team-${id}`, name: id, slug: id, tenant: { id: tenantId, name: tenantId } },
+    ...extra,
   });
 
   it("flags isCrossTenant=false for teams in the user's home tenant", async () => {
@@ -252,6 +370,9 @@ describe("getAdminTeamMemberships", () => {
       {
         id: "m-1",
         userId: "u-1",
+        tenantId: "home-tenant",
+        admittedAt: null,
+        createdAt: created,
         role: TEAM_ROLE.OWNER,
         team: {
           id: "team-1",
@@ -280,6 +401,9 @@ describe("getAdminTeamMemberships", () => {
       {
         id: "m-2",
         userId: "u-1",
+        tenantId: "other-tenant",
+        admittedAt: null,
+        createdAt: created,
         role: TEAM_ROLE.ADMIN,
         team: {
           id: "team-2",
@@ -317,8 +441,39 @@ describe("getAdminTeamMemberships", () => {
       }),
     );
   });
-});
 
+  it("omits a leftover admin membership: the user left the team's tenant after admission", async () => {
+    mockResolveUserTenantId.mockResolvedValue("home-tenant");
+    mockPrisma.teamMember.findMany.mockResolvedValue([adminRow("left", "t-1")]);
+    mockPrisma.tenantMemberDeparture.findMany.mockResolvedValue([{ userId: "u-1", departedAt: departed }]);
+
+    expect(await getAdminTeamMemberships("u-1")).toEqual([]);
+    expect(mockPrisma.tenantMemberDeparture.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { tenantId: "t-1", userId: { in: ["u-1"] } } }),
+    );
+  });
+
+  it("matches each (tenant, user) pair: departed from t-1 but a guest of t-2 keeps the t-2 team", async () => {
+    mockResolveUserTenantId.mockResolvedValue("home-tenant");
+    mockPrisma.teamMember.findMany.mockResolvedValue([adminRow("one", "t-1"), adminRow("two", "t-2")]);
+    mockPrisma.tenantMemberDeparture.findMany.mockImplementation((async ({ where }: { where: { tenantId: string } }) =>
+      where.tenantId === "t-1" ? [{ userId: "u-1", departedAt: departed }] : []) as never);
+
+    const result = await getAdminTeamMemberships("u-1");
+
+    expect(result.map((m) => m.team.id)).toEqual(["team-two"]);
+  });
+
+  it("lists a re-admitted admin: the departure predates admittedAt", async () => {
+    mockResolveUserTenantId.mockResolvedValue("home-tenant");
+    mockPrisma.teamMember.findMany.mockResolvedValue([
+      adminRow("back", "t-1", { admittedAt: new Date("2026-03-01T00:00:00.000Z") }),
+    ]);
+    mockPrisma.tenantMemberDeparture.findMany.mockResolvedValue([{ userId: "u-1", departedAt: departed }]);
+
+    expect((await getAdminTeamMemberships("u-1")).map((m) => m.team.id)).toEqual(["team-back"]);
+  });
+});
 
 describe("activeTeamAdmission", () => {
   const created = new Date("2026-01-01T00:00:00.000Z");
