@@ -340,3 +340,15 @@ the commit path, the addendum and the entries below are what the code does.
   to the `DenyUnconditionalPut` statement; the scratch-bucket procedure's cleanup line; the
   threat model lists the second-key wedge during the first day after an upgrade; `alerts.md`
   states the lock-timeout behaviour as in D61.
+
+## Final gates (after code review round 6, `origin/main` merged again)
+
+- `scripts/pre-pr.sh`: 99 steps pass; `Test` fails only on the six `backup-db.test.mjs`
+  Group B cases (23390 other tests pass; CLI 527 pass). The test file and
+  `scripts/backup-db.sh` are byte-identical to the primary checkout's, where the file passes
+  239/239 — the failure is the git-worktree limitation recorded above, not this change.
+- Anchor integration set (8 files, real Postgres + MinIO): 113 passed. `npx next build`: pass
+  (inside the pre-PR run).
+- The first integration run after the merge failed to load one file
+  (`SyntaxError` in the generated Prisma client): the pre-PR run was regenerating the client
+  at that moment. Re-run once it had finished: 113 passed.
