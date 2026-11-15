@@ -1,4 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { JACKSON_CONNECTION_PROVIDER_ID_PREFIX, JACKSON_LEGACY_PROVIDER_ID } from "@/lib/auth/jackson-providers";
+import {
+  BACKFILL_CREATED_BY_LABEL,
+  DEREGISTER_ACTOR_LABEL,
+  SIGNIN_ACTOR_LABEL,
+} from "@/lib/tenant/tenant-claim-event";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -366,7 +372,7 @@ describe("bindingAttestation", () => {
     expect(att).toEqual({ provider: A, operator: true, seq: 1n, actorLabel: "alice" });
   });
 
-  it.each(["signin", "backfill", "db-delete", " SignIn ", "BACKFILL"])(
+  it.each([SIGNIN_ACTOR_LABEL, BACKFILL_CREATED_BY_LABEL, DEREGISTER_ACTOR_LABEL, " SignIn ", "BACKFILL"])(
     "treats the engine label %j as not an operator",
     (label) => {
       expect(bindingAttestation([ev(1, A, label)])?.operator).toBe(false);
@@ -411,7 +417,7 @@ describe("rekeyClaimCheck", () => {
     ]);
   });
 
-  it.each(["saml-jackson", "saml-jackson-other"])("refuses a claim bound to %s", (provider) => {
+  it.each([JACKSON_LEGACY_PROVIDER_ID, `${JACKSON_CONNECTION_PROVIDER_ID_PREFIX}other`])("refuses a claim bound to %s", (provider) => {
     expect(rekeyClaimCheck([claim("a.example", provider, opAtt)], TARGET).refusals).toEqual([
       { claim: "a.example", provider, reason: R.OTHER_PROVIDER },
     ]);
@@ -426,7 +432,7 @@ describe("rekeyClaimCheck", () => {
 
   it.each([
     ["no attestation", null],
-    ["an engine-written attestation", { ...opAtt, operator: false, actorLabel: "signin" }],
+    ["an engine-written attestation", { ...opAtt, operator: false, actorLabel: SIGNIN_ACTOR_LABEL }],
     ["an attestation for another provider", { ...opAtt, provider: B }],
   ])("refuses a target-bound claim with %s", (_case, attestation) => {
     const out = rekeyClaimCheck([claim("a.example", TARGET, attestation)], TARGET);

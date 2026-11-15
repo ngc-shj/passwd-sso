@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { _resetKeyProvider } from "@/lib/key-provider";
 import { getMasterKeyByVersion } from "@/lib/crypto/crypto-server";
-import { encryptWithKey } from "@/lib/crypto/envelope";
+import { encryptWithKey, SENTINEL } from "@/lib/crypto/envelope";
 import {
   KEY_WARM_STATUS,
   collectEnvelopeVersions,
@@ -102,18 +102,18 @@ describe("collectEnvelopeVersions", () => {
     expect(collectEnvelopeVersions(["plain-token", "2:abcd"])).toEqual(new Set());
   });
 
-  it.each(["psoenc1:nocolon", "psoenc1:x:AAAA", "psoenc1:3:AA"])("skips the malformed envelope %j", (value) => {
+  it.each([`${SENTINEL}nocolon`, `${SENTINEL}x:AAAA`, `${SENTINEL}3:AA`])("skips the malformed envelope %j", (value) => {
     expect(collectEnvelopeVersions([value])).toEqual(new Set());
   });
 
   it("skips a well-formed body behind the wrong prefix", () => {
     const real = encryptWithKey("a", 5, key, aad);
-    expect(collectEnvelopeVersions([real.replace("psoenc1:", "xxxxxxx:")])).toEqual(new Set());
+    expect(collectEnvelopeVersions([real.replace(SENTINEL, "xxxxxxx:")])).toEqual(new Set());
   });
 
   it("keeps the valid versions beside skipped values", () => {
     const good = encryptWithKey("a", 5, key, aad);
-    expect(collectEnvelopeVersions([null, "plain", "psoenc1:bad", good])).toEqual(new Set([5]));
+    expect(collectEnvelopeVersions([null, "plain", `${SENTINEL}bad`, good])).toEqual(new Set([5]));
   });
 });
 
