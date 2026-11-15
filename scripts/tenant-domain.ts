@@ -224,7 +224,7 @@ import {
   type ClaimEvidence,
   type RekeyClaim,
 } from "./lib/tenant-domain-binding";
-import { collectEnvelopeVersions, envelopeVersionOf, KEY_WARM_STATUS, warmShareMasterKeys } from "./lib/share-master-keys";
+import { collectEnvelopeVersions, envelopeVersionOf, KEY_WARM_STATUS, warmShareMasterKeys } from "@/lib/crypto/share-master-keys";
 
 type TxClient = Prisma.TransactionClient;
 

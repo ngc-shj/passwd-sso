@@ -6,8 +6,8 @@ import {
   KEY_WARM_STATUS,
   collectEnvelopeVersions,
   warmShareMasterKeys,
-} from "../lib/share-master-keys";
-import { prepareMigration } from "../migrate-account-tokens-to-encrypted";
+} from "@/lib/crypto/share-master-keys";
+import { prepareMigration } from "../../../scripts/migrate-account-tokens-to-encrypted";
 
 // Stateful stand-in for the cloud provider: getKey fills a cache, getKeySync
 // serves only what getKey fetched, like the real base-cloud-provider.

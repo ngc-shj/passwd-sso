@@ -31,7 +31,7 @@ import {
   isEncryptedAccountToken,
 } from "@/lib/crypto/account-token-crypto";
 import { assertBypassRlsActive } from "./lib/assert-bypass-rls-active";
-import { KEY_WARM_STATUS, warmShareMasterKeys } from "./lib/share-master-keys";
+import { KEY_WARM_STATUS, warmShareMasterKeys } from "@/lib/crypto/share-master-keys";
 import { getCurrentMasterKeyVersion } from "@/lib/crypto/crypto-server";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { attemptInSavepoint } from "@/lib/prisma/savepoint";

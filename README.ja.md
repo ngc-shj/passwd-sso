@@ -310,7 +310,7 @@ npm run docker:down
 
 **破壊的なアップグレードです。** 各テナントクレームを、それを提示してよい SSO プロバイダーに紐づけ、各 Jackson プロバイダーを 1 つの Jackson 接続に紐づけます。背景は [SAML サインイン — テナントは接続そのものに紐づける](#saml-sign-in--bind-the-tenant-to-the-connection) を参照してください。
 
-**既知のロックアウトがあり、このリリースにはアプリ内の復旧手段がありません。** 次の 3 つをすべて満たすデプロイが対象です:
+**既知のロックアウトがあり、`tenant-domain rekey-accounts`（手順 10）で復旧します。** 次の 3 つをすべて満たすデプロイが対象です:
 
 - `AUTH_JACKSON_ID` が `dummy`、または `tenant=…&product=…` 形式のクライアント ID である。
 - `AUTH_REDIRECT_PROXY_URL` が設定されている。設定がなければ従来プロバイダーは Jackson が必須とする `state` を送らず、サインインを完了できなかったため、SAML ユーザーは存在しません。
@@ -318,9 +318,9 @@ npm run docker:down
 
 このようなデプロイでは、SAML ユーザー全員の `Account` 行が、どの接続から来たかにかかわらず `provider = 'saml-jackson'` です。アップグレード後、アプリはこれらのクライアント ID では起動せず、`saml-jackson` が指せるのは高々 1 つの接続自身のクライアントです。
 
-**アップグレード後は `AUTH_JACKSON_ID` / `AUTH_JACKSON_SECRET` を設定しないでください。** 従来のペアがクライアントを指せたはずの接続も含め、すべての接続を `AUTH_JACKSON_CONNECTIONS` に列挙します。こうすれば、アップグレード前の `saml-jackson` アカウントを解決するクライアントはなくなります。従来のペアが接続 X のクライアントを指していると、X の背後の IdP は、別の接続から来たユーザーの `providerAccountId` を主張できます。テナントクレームがなければ、そのサインインは既存ユーザーの経路で許可されるため、IdP はそのユーザーとしてサインインできます。`tenant-domain legacy-accounts`（手順 10）はこの構成を拒否します。従来のペアが設定され、`saml-jackson` のアカウントが 1 件でもあれば、オペレーターが `--single-connection` で証明しない限り 0 以外で終了します。このようなデプロイでは、その証明は事実に反します。
+**アップグレード後は `AUTH_JACKSON_ID` / `AUTH_JACKSON_SECRET` を設定しないでください。** 従来のペアがクライアントを指せたはずの接続も含め、すべての接続を `AUTH_JACKSON_CONNECTIONS` に列挙します。こうすれば、アップグレード前の `saml-jackson` アカウントを解決するクライアントはなくなります。従来のペアが接続 X のクライアントを指していると、X の背後の IdP は、別の接続から来たユーザーの `providerAccountId` を主張できます。テナントクレームがなければ、そのサインインは既存ユーザーの経路で許可されるため、IdP はそのユーザーとしてサインインできます。`tenant-domain legacy-accounts`（手順 11）はこの構成を拒否します。従来のペアが設定され、`saml-jackson` のアカウントが 1 件でもあれば、オペレーターが `--single-connection` で証明しない限り 0 以外で終了します。このようなデプロイでは、その証明は事実に反します。
 
-すべての接続を列挙すると、これらのユーザーは自分の接続のプロバイダー（`saml-jackson-<id>`）でサインインしますが、そのプロバイダーに紐づくアカウントがないため `account_not_linked` で拒否されます。このリリースには、そのアカウントを移す手段がありません。`UPDATE accounts SET provider = …` を直接実行しても移せません。保存されている OAuth トークンはプロバイダーを AAD に含めて暗号化されている（`src/lib/crypto/account-token-crypto.ts`）ため、書き換えた行は復号できなくなります。`bind --from-members` が数えるのは設定済みのプロバイダーのアカウントだけです。`saml-jackson` を設定しなければ、これらのユーザーは evidence で `none` に数えられ、そのテナントには候補が入りません。テナントの本来の接続を紐づけようとすると、過半数チェックで拒否されることがあります（接続を確認したうえで `bind --claim` に `--accept-unused-provider` を付けます）。紐づけてもこれらのユーザーは解除されません。アカウントに記録されているのは `saml-jackson` のままだからです。再キー化コマンドが提供されるまで、これらのユーザーは既存アカウントにアクセスできず、再プロビジョニングが必要です。旧バージョンのまま運用を続けるのは安全な代替策ではありません。どの接続からも接続をまたいだ乗っ取りが可能なままになります（[SAML サインイン — テナントは接続そのものに紐づける](#saml-sign-in--bind-the-tenant-to-the-connection) の「この変更以前の露出」を参照）。
+すべての接続を列挙すると、これらのユーザーは自分の接続のプロバイダー（`saml-jackson-<id>`）でサインインしますが、そのプロバイダーに紐づくアカウントがないため `account_not_linked` で拒否されます。`UPDATE accounts SET provider = …` を直接実行しても移せません。保存されている OAuth トークンはプロバイダーを AAD に含めて暗号化されている（`src/lib/crypto/account-token-crypto.ts`）ため、書き換えた行は復号できなくなります。`tenant-domain rekey-accounts`（手順 10）が、テナント単位でアカウントを移し、トークンを再暗号化します。`bind --from-members` が数えるのは設定済みのプロバイダーのアカウントだけです。`saml-jackson` を設定しなければ、これらのユーザーは evidence で `none` に数えられ、そのテナントには候補が入りません。テナントの本来の接続を紐づけようとすると、ユーザーを移すまでは過半数チェックで拒否されます（接続を確認したうえで `bind --claim` に `--accept-unused-provider` を付けます）。旧バージョンのまま運用を続けるのは安全な代替策ではありません。どの接続からも接続をまたいだ乗っ取りが可能なままになります（[SAML サインイン — テナントは接続そのものに紐づける](#saml-sign-in--bind-the-tenant-to-the-connection) の「この変更以前の露出」を参照）。
 
 変わる点は 2 つです:
 
@@ -336,14 +336,21 @@ npm run docker:down
 7. 残りのクレームを 1 つずつ解決します。紐づけは `bind --claim` で行います。`--accept-unused-provider` は接続を確認してからだけ付けてください。別のカスタマーのテナントに先取りされたクレームは紐づけません。`add --from … --provider <正当な側のプロバイダー>` で正当なテナントに付け替えます。**正当なプロバイダーを先取りした側のテナントに `bind` しないでください。**
 8. ファイルを削除します。全テナントのクレームが載っています。
 9. 旧バージョンが完全に止まったら、もう一度 `list --unbound` を実行します。クレームが 1 件も出なければ完了です。
-10. アプリが起動時に使う環境変数で `legacy-accounts` を実行します。書き込みは行いません。`saml-jackson` のアカウントを、そのユーザーがアクティブなテナントごとに一覧表示します。どのテナントでもアクティブでないユーザーは `(no active tenant)` として表示されます。アカウントには、ユーザーがどの Jackson 接続から来たかが記録されていません。そのため一覧は何も判定しません。アップグレード前の接続について把握していることと照らし合わせるための材料です。次の 2 つの場合は 0 で終了します:
+10. **ロックアウト対象のデプロイのみ:** 対象の各テナントのアカウントを `rekey-accounts` で移します。アプリが起動時に使う環境変数と、`share-master` 鍵（環境変数、またはクラウドの鍵プロバイダーの資格情報）を用意して実行します。テナントのアクティブメンバーが持つ `saml-jackson` のアカウントを、`AUTH_JACKSON_CONNECTIONS` に列挙された `saml-jackson-<id>` プロバイダー（`--to`）へ移し、トークンを再暗号化します。既定では一覧表示だけで書き込みは行いません。`--apply` を付けると確認のうえ 1 トランザクションで移し、アカウントごとに `ACCOUNT_PROVIDER_REKEYED` 監査ログを記録します。次の場合は何も書き込まずに拒否します:
+    - テナントの有効なクレームがすべて `--to` か `google` に紐づいていない。Google ドメインのクレームは `google` に、テナントの SAML クレームはその接続に紐づけ、別の接続のクレームは取り消します。
+    - `--to` への紐づけをオペレーターが記録していない。サインインで登録されたクレームは紐づけ済みですが、記録したのはエンジンです。`bind` が表示する経緯を確認し、`bind --claim <claim> --provider <id> --accept-unused-provider --by <label>` で紐づけを証明します。移す前のメンバーは `--to` ではなく `saml-jackson` にアカウントを持つので、このフラグはここでは想定どおりです。
+    - 復号できないトークンがある。または、移すアカウントの ID を持つアカウントや、移すユーザーが持つアカウントが `--to` にすでにある。
+    - 一覧の表示から確認までの間に、表示した内容が変わった。
+
+    この確認は、記録した紐づけと移動が一致することを確かめるもので、テナントの IdP が `--to` の背後にいることを証明するものではありません。アカウントにはユーザーがどの接続から来たかが記録されていないため、移動は一覧の全メンバーについて `--to` の背後の IdP を信頼することになり、その IdP はクレームを提示しなくてもそのメンバーとしてサインインできます。どのテナントでもアクティブでないユーザー（`legacy-accounts` の `(no active tenant)`）は移しません。先に `realign` でテナントへ戻してください。
+11. アプリが起動時に使う環境変数で `legacy-accounts` を実行します。書き込みは行いません。`saml-jackson` のアカウントを、そのユーザーがアクティブなテナントごとに一覧表示します。どのテナントでもアクティブでないユーザーは `(no active tenant)` として表示されます。アカウントには、ユーザーがどの Jackson 接続から来たかが記録されていません。そのため一覧は何も判定しません。アップグレード前の接続について把握していることと照らし合わせるための材料です。次の 2 つの場合は 0 で終了します:
     - `saml-jackson` を記録したアカウントがない。
     - コマンドが読み込んだ環境変数で `saml-jackson` が設定されていない。これは CLI の環境変数であり、アプリの環境変数と同じとは限りません。そのため出力の最後に、アプリの実行時の環境変数（タスク定義とシークレット）に `AUTH_JACKSON_ID` も `AUTH_JACKSON_SECRET` も設定されていないことを確認するよう指示します。先に進む前に確認してください。`saml-jackson` のアカウントがある状態でここに `--single-connection` を付けると、0 以外で終了します。このフラグは設定済みの `saml-jackson` クライアントについての証明なので、コマンドがアプリとは別の環境変数で実行されたことになるためです。アプリの環境変数で実行してください。
 
     `saml-jackson` が設定されていて、そのアカウントが 1 件でもあれば、`--single-connection` を付けない限り 0 以外で終了します。このフラグは、アップグレード前の Jackson が `saml-jackson` の背後にちょうど 1 つの接続、つまりいま `AUTH_JACKSON_ID` が指す接続だけを持っていたことを証明するものです。そのようなデプロイの場合だけ付けてください。2 つ以上の接続を持っていた場合は上記のロックアウトの対象です。フラグは付けず、従来のペアを外し、すべての接続を `AUTH_JACKSON_CONNECTIONS` に列挙してから再実行します。手順 3 の露出の確認もそのデプロイが対象です。プロバイダー設定を読めない場合や、プロバイダーが 1 つも設定されていない場合も、フラグの有無にかかわらず 0 以外で終了します。
-11. `AUTH_CLAIM_BINDING=strict` を設定してから、アプリを起動します。
+12. `AUTH_CLAIM_BINDING=strict` を設定してから、アプリを起動します。
 
-どのコマンドにも `MIGRATION_DATABASE_URL` が必要です。`bind` と `legacy-accounts` には、さらにアプリが起動時に使う SSO プロバイダーの環境変数（`AUTH_GOOGLE_*`、`AUTH_JACKSON_*`、`JACKSON_URL`）が必要です。それがない場合、`list --unbound` はプロバイダーのない行だけを表示し、その旨を出力します。
+どのコマンドにも `MIGRATION_DATABASE_URL` が必要です。`bind`、`rekey-accounts`、`legacy-accounts` には、さらにアプリが起動時に使う SSO プロバイダーの環境変数（`AUTH_GOOGLE_*`、`AUTH_JACKSON_*`、`JACKSON_URL`）が必要です。それがない場合、`list --unbound` はプロバイダーのない行だけを表示し、その旨を出力します。
 
 ```bash
 # 3. 露出の確認
@@ -363,8 +370,14 @@ MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add --tenant <rightful-ten
 # 9. クレームが 1 件も出ないこと
 MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- list --unbound
 
-# 10. 終了コードが 0 であること。--single-connection は、アップグレード前の Jackson が
-#     saml-jackson の背後に接続を 1 つだけ持っていた場合にだけ付ける（手順 10）
+# 10. ロックアウト対象のデプロイ: サインインで登録された紐づけを証明し、一覧を確認してから移す
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- bind --claim <claim> --provider <saml-jackson-id> \
+  --accept-unused-provider --by <operator-label>
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- rekey-accounts --tenant <tenant-ref> --to <saml-jackson-id> --by <operator-label>
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- rekey-accounts --tenant <tenant-ref> --to <saml-jackson-id> --by <operator-label> --apply
+
+# 11. 終了コードが 0 であること。--single-connection は、アップグレード前の Jackson が
+#     saml-jackson の背後に接続を 1 つだけ持っていた場合にだけ付ける（手順 11）
 MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- legacy-accounts
 ```
 

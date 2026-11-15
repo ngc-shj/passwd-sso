@@ -1,17 +1,17 @@
 /**
- * Loading the `share-master` key versions an operator script is about to use,
- * before it uses them.
+ * Loading the `share-master` key versions a process outside the app is about to
+ * use — an operator script, a worker — before it uses them.
  *
  * `account-token-crypto` reads keys through `getKeyProviderSync()`. With a
  * cloud `KEY_PROVIDER` that throws until `getKeyProvider()` has run, and then
  * serves only the versions fetched since: `getKey` caches an entry, refetches it
  * once it is older than the provider's TTL, and `getKeySync` throws on a miss or
  * past the stale limit. The app warms the current version at boot
- * (`instrumentation.ts`); a script runs no boot, so it warms here. The env
- * provider needs none of this and passes through.
+ * (`instrumentation.ts`); a script or a worker runs no such boot, so it warms
+ * here. The env provider needs none of this and passes through.
  *
- * Prisma-free, like the other `scripts/lib` modules, so `tenant-domain` can
- * import it on MIGRATION_DATABASE_URL alone.
+ * Prisma-free, so `tenant-domain` can import it on MIGRATION_DATABASE_URL
+ * alone.
  */
 
 import { getKeyProvider } from "@/lib/key-provider";
