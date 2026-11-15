@@ -65,6 +65,7 @@ export function TeamPendingInvitationsList({ invitations, teamId, onCancel }: Pr
               variant="ghost"
               size="icon"
               className="h-8 w-8"
+              aria-label={t("cancelInvitation")}
               onClick={() => handleCancelInvitation(inv.id)}
             >
               <X className="h-4 w-4" />

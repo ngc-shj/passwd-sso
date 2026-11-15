@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { CopyButton } from "@/components/passwords/shared/copy-button";
 import {
   Select,
   SelectContent,
@@ -30,10 +31,13 @@ export function TeamInviteByEmailSection({ teamId, onSuccess }: Props) {
   const [invEmail, setInvEmail] = useState("");
   const [invRole, setInvRole] = useState<string>(TEAM_ROLE.MEMBER);
   const [inviting, setInviting] = useState(false);
+  // The link is shown once: the server keeps only the token's digest.
+  const [issuedLink, setIssuedLink] = useState<string | null>(null);
 
   const handleInvite = async () => {
     if (!invEmail.trim()) return;
     setInviting(true);
+    setIssuedLink(null);
     try {
       const res = await fetchApi(apiPath.teamInvitations(teamId), {
         method: "POST",
@@ -57,10 +61,13 @@ export function TeamInviteByEmailSection({ teamId, onSuccess }: Props) {
       }
       const data = await res.json();
       const inviteUrl = appUrl(`/dashboard/teams/invite/${data.token}`);
-      await navigator.clipboard.writeText(inviteUrl);
-      toast.success(t("invitedWithLink"));
+      setIssuedLink(inviteUrl);
       setInvEmail("");
       onSuccess();
+      // The invitation exists from here on: a clipboard refusal must not be
+      // reported as a failed invitation.
+      const copied = await navigator.clipboard.writeText(inviteUrl).then(() => true, () => false);
+      toast.success(t(copied ? "invitedWithLink" : "invitedLinkNotCopied"));
     } catch {
       toast.error(t("inviteFailed"));
     } finally {
@@ -110,6 +117,15 @@ export function TeamInviteByEmailSection({ teamId, onSuccess }: Props) {
           {t("inviteSend")}
         </Button>
       </div>
+      {issuedLink && (
+        <div className="space-y-2">
+          <p className="text-sm font-medium">{t("inviteLinkShownOnce")}</p>
+          <div className="flex items-center gap-2">
+            <Input value={issuedLink} readOnly aria-label={t("inviteLinkShownOnce")} className="font-mono text-xs" />
+            <CopyButton getValue={() => issuedLink} />
+          </div>
+        </div>
+      )}
     </section>
   );
 }

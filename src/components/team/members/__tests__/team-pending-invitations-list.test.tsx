@@ -43,8 +43,8 @@ vi.mock("@/components/team/management/team-role-badge", () => ({
 }));
 
 vi.mock("@/components/ui/button", () => ({
-  Button: ({ children, onClick, disabled }: React.ComponentProps<"button">) => (
-    <button onClick={onClick} disabled={disabled}>{children}</button>
+  Button: ({ children, onClick, disabled, "aria-label": ariaLabel }: React.ComponentProps<"button">) => (
+    <button onClick={onClick} disabled={disabled} aria-label={ariaLabel}>{children}</button>
   ),
 }));
 
@@ -89,9 +89,7 @@ describe("TeamPendingInvitationsList", () => {
 
     expect(screen.getByText("charlie@example.com")).toBeInTheDocument();
 
-    // The row's only button is cancel: the link is shown once, when issued
-    // (the server keeps only its digest).
-    const [xBtn] = screen.getAllByRole("button");
+    const xBtn = screen.getByRole("button", { name: "cancelInvitation" });
     await act(async () => {
       fireEvent.click(xBtn);
     });
@@ -106,6 +104,7 @@ describe("TeamPendingInvitationsList", () => {
     expect(onCancel).toHaveBeenCalled();
   });
 
+  // The link is shown once, when issued: the server keeps only its digest.
   it("offers no link to copy for a pending invitation", () => {
     render(
       <TeamPendingInvitationsList

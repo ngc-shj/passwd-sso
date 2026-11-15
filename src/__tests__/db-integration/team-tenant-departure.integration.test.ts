@@ -388,6 +388,59 @@ describe("team membership across a tenant departure — real-DB integration", ()
       );
       expect(hashed).toBe(hashToken(token));
     });
+
+    it("the migration, run as a NOBYPASSRLS owner over the old column, keeps a PENDING invitation acceptable", async () => {
+      const owner = await ctx.createUser(tenantId);
+      const invitee = await member();
+      const teamId = await team(owner);
+      const migration = readFileSync(
+        join(process.cwd(), "prisma/migrations/20261115100000_team_invitation_token_digest/migration.sql"),
+        "utf8",
+      );
+      // Its own BEGIN/COMMIT are dropped so the run stays inside this test's
+      // transaction, which is always rolled back.
+      expect(migration.match(/^(BEGIN|COMMIT);$/gm)).toEqual(["BEGIN;", "COMMIT;"]);
+      const body = migration.replace(/^(BEGIN|COMMIT);$/gm, "");
+      const token = randomBytes(32).toString("hex");
+      const migrateRole = `mig_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+
+      const client = await side.pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query(
+          `INSERT INTO team_invitations (id, team_id, tenant_id, email, role, status, token_hash, expires_at, invited_by_id, updated_at)
+           VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'MEMBER', 'PENDING', $5, now() + interval '1 day', $6::uuid, now())`,
+          [randomUUID(), teamId, tenantId, invitee.email, token, owner],
+        );
+        // Back to the shape before the migration, holding the plaintext.
+        await client.query(`ALTER TABLE team_invitations RENAME COLUMN token_hash TO token`);
+        await client.query(`ALTER TABLE team_invitations ALTER COLUMN token TYPE text`);
+        await client.query(`ALTER INDEX team_invitations_token_hash_key RENAME TO team_invitations_token_key`);
+        const [{ n: before }] = (await client.query<{ n: string }>(`SELECT count(*) AS n FROM team_invitations`)).rows;
+
+        // As on RDS: the table owner, without superuser or BYPASSRLS.
+        await client.query(`CREATE ROLE ${migrateRole} NOLOGIN NOSUPERUSER NOBYPASSRLS`);
+        await client.query(`GRANT USAGE, CREATE ON SCHEMA public TO ${migrateRole}`);
+        await client.query(`ALTER TABLE team_invitations OWNER TO ${migrateRole}`);
+        await client.query(`SET LOCAL ROLE ${migrateRole}`);
+        await client.query(body);
+        await client.query(`RESET ROLE`);
+
+        const [{ n: after }] = (await client.query<{ n: string }>(`SELECT count(*) AS n FROM team_invitations`)).rows;
+        expect(after).toBe(before);
+        const lookup = (digest: string) =>
+          client.query(`SELECT id FROM team_invitations WHERE token_hash = $1 AND status = 'PENDING'`, [digest]);
+        expect((await lookup(hashToken(token))).rowCount).toBe(1);
+        expect((await lookup(hashToken(hashToken(token)))).rowCount).toBe(0);
+        const index = await client.query(
+          `SELECT indexdef FROM pg_indexes WHERE tablename = 'team_invitations' AND indexname = 'team_invitations_token_hash_key'`,
+        );
+        expect(index.rows[0]?.indexdef).toMatch(/UNIQUE INDEX .*\(token_hash\)/);
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    });
   });
 
   // ── A2: admission at accept ───────────────────────────────────

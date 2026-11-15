@@ -44,6 +44,12 @@ vi.mock("@/components/ui/input", () => ({
   Input: (props: React.ComponentProps<"input">) => <input {...props} />,
 }));
 
+vi.mock("@/components/passwords/shared/copy-button", () => ({
+  CopyButton: ({ getValue }: { getValue: () => string }) => (
+    <button data-copy-value={getValue()}>copy</button>
+  ),
+}));
+
 vi.mock("@/components/ui/label", () => ({
   Label: ({ children }: React.ComponentProps<"label">) => <label>{children}</label>,
 }));
@@ -106,6 +112,52 @@ describe("TeamInviteByEmailSection", () => {
 
     expect(onSuccess).toHaveBeenCalled();
   });
+
+  describe("the issued link (shown once: the server keeps only its digest)", () => {
+    const LINK = "https://example.com/dashboard/teams/invite/abc123";
+
+    async function invite() {
+      mockFetchApi.mockResolvedValue({ ok: true, status: 201, json: async () => ({ token: "abc123" }) });
+      const onSuccess = vi.fn();
+      render(<TeamInviteByEmailSection teamId="team-1" onSuccess={onSuccess} />);
+      fireEvent.change(screen.getByPlaceholderText("inviteEmailPlaceholder"), {
+        target: { value: "bob@example.com" },
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText("inviteSend"));
+      });
+      return onSuccess;
+    }
+
+    it("is displayed and copied after a successful invite", async () => {
+      await invite();
+      expect(screen.getByLabelText("inviteLinkShownOnce")).toHaveValue(LINK);
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(LINK);
+      expect(toast.success).toHaveBeenCalledWith("invitedWithLink");
+    });
+
+    it("stays displayed when the clipboard refuses, and the invite is not reported as failed", async () => {
+      vi.mocked(navigator.clipboard.writeText).mockRejectedValueOnce(new Error("denied"));
+      const onSuccess = await invite();
+      expect(screen.getByLabelText("inviteLinkShownOnce")).toHaveValue(LINK);
+      expect(toast.success).toHaveBeenCalledWith("invitedLinkNotCopied");
+      expect(toast.error).not.toHaveBeenCalled();
+      expect(onSuccess).toHaveBeenCalled();
+    });
+
+    it("is not displayed when the invite is refused", async () => {
+      mockFetchApi.mockResolvedValue(new Response(JSON.stringify({ error: "INVITATION_ALREADY_SENT" }), { status: 409 }));
+      render(<TeamInviteByEmailSection teamId="team-1" onSuccess={vi.fn()} />);
+      fireEvent.change(screen.getByPlaceholderText("inviteEmailPlaceholder"), {
+        target: { value: "bob@example.com" },
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText("inviteSend"));
+      });
+      expect(screen.queryByLabelText("inviteLinkShownOnce")).not.toBeInTheDocument();
+    });
+  });
+
   describe("409 refusals", () => {
     async function inviteWith(res: Response) {
       mockFetchApi.mockResolvedValue(res);

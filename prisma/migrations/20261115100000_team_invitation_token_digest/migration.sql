@@ -11,6 +11,8 @@
 -- app, so until the rollout completes the previous release's instances fail
 -- to issue or accept an invitation (they name a column that no longer exists).
 
+BEGIN;
+
 ALTER TABLE "team_invitations" RENAME COLUMN "token" TO "token_hash";
 
 ALTER TABLE "team_invitations"
@@ -18,3 +20,5 @@ ALTER TABLE "team_invitations"
   USING encode(sha256(convert_to("token_hash", 'UTF8')), 'hex');
 
 ALTER INDEX "team_invitations_token_key" RENAME TO "team_invitations_token_hash_key";
+
+COMMIT;

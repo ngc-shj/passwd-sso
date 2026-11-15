@@ -124,7 +124,8 @@ describe("GET /api/teams/[teamId]/invitations", () => {
     expect(res.status).toBe(200);
     expect(json).toHaveLength(1);
     expect(json[0].email).toBe("user@test.com");
-    expect(json[0]).not.toHaveProperty("token");
+    // An explicit key set: neither the token nor its digest is listed.
+    expect(Object.keys(json[0]).sort()).toEqual(["createdAt", "email", "expiresAt", "id", "invitedBy", "role", "status"]);
     expect(json[0].invitedBy).toEqual({ id: "u1", name: "Admin", email: "admin@test.com" });
     expect(mockWithBypassRls).toHaveBeenCalledWith(
       expect.anything(),
@@ -301,6 +302,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     expect(res.status).toBe(201);
     expect(json.email).toBe("new@test.com");
     expect(json.token).toMatch(/^[0-9a-f]{64}$/);
+    expect(Object.keys(json).sort()).toEqual(["createdAt", "email", "expiresAt", "id", "role", "token"]);
     expect(res.headers.get("Cache-Control")).toBe("no-store");
   });
 
@@ -324,7 +326,6 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     const { data } = mockPrismaTeamInvitation.create.mock.calls[0][0];
     expect(data).not.toHaveProperty("token");
     expect(data.tokenHash).toBe(createHash("sha256").update(token).digest("hex"));
-    expect(data.tokenHash).not.toBe(token);
   });
   describe("re-invitation after a tenant departure", () => {
     const invite = (email = "left@test.com") =>
