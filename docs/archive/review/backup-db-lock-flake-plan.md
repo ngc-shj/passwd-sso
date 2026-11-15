@@ -263,3 +263,16 @@ measure false barrier timeouts under load (expected 0). Then the full file, full
 | C3 | barrier-forced overlap, positive control, uutils cell | locked |
 | C4 | claim-branch cells, foreign `.partial`, allow side | locked |
 | C5 | comments/docs stop calling mkdir(1) exclusive | locked |
+
+## Implementation Checklist
+
+- `scripts/backup-db.sh` — "Mutual exclusion" (claim, rmdir arm, comments), post-claim
+  rollback comment, "Run directory" (`RUN_PARTIAL` after mkdir), Publish comment.
+- `scripts/__tests__/backup-db.test.mjs` — `run()` `killSignal`; dump-failure `.partial`
+  assertion; concurrency describe (helpers, barrier cells, uutils cell, regular-pid,
+  chmod-0500, /dev/full, foreign `.partial`, mode-check `.partial`); old FREE-lock cell
+  removed.
+- `docs/operations/backup-recovery/{en,ja}.md` — lock paragraph.
+- Reused: `assert_root_unchanged`, `fail`, `assert_mode_private`, harness `stub()`/`run()`.
+- CI gate parity: the touched code is covered by the vitest job (`scripts/__tests__/**`)
+  and lint; no CI-only gate reads these files (the gitleaks/static jobs read docs as text).

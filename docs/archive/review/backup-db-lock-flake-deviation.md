@@ -28,3 +28,14 @@
   permission layer. Evidence instead: the primitive probe (5/30 vs 0/30), the upstream
   fix commit, CI's error wording, and the deterministic emulation cell; this PR's CI run
   on ubuntu-26.04 exercises the barrier cell against real uutils.
+
+## D7 — Child-process "exit" → "close" in three test files (found during red-proof)
+- Not in the plan. The red-proof sweep showed the pre-existing stale-lock cell failing
+  on 3 of 9 unrelated mutants with `out === ""`: the cell resolved on "exit", which can
+  fire before the stdout/stderr pipes drain. Same class (await "exit", then assert on
+  piped output), derived with `git grep -l -E '\.on\("exit"|\.once\("exit"' -- '*.test.*' '**/__tests__/**'`
+  and reading each hit: backup-db.test.mjs (stale-lock cell, SIGHUP cell, the new
+  contention helper), audit-chain-verify-worker-env.test.mjs (SIGTERM shutdown line),
+  audit-chain-verify-worker-rls.integration.test.ts (shutdown line). The load-test
+  seeder hit asserts no output after exit and is not a member. The rls integration
+  file was run against this worktree's database: 29/29.
