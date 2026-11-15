@@ -123,7 +123,7 @@ describe("GET /api/teams/[teamId]/invitations", () => {
         id: "inv-1",
         email: "new@test.com",
         role: "MEMBER",
-        token: "tok",
+        tokenHash: "a".repeat(64),
         status: "PENDING",
         expiresAt: new Date(),
         invitedById: "u1",
@@ -228,7 +228,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
       id: "inv-1",
       email: "new@test.com",
       role: "MEMBER",
-      token: "abc",
+      tokenHash: "a".repeat(64),
       expiresAt: new Date(),
       createdAt: new Date(),
     };
@@ -248,7 +248,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
       id: "inv-2",
       email: "nonmember@test.com",
       role: "MEMBER",
-      token: "def",
+      tokenHash: "a".repeat(64),
       expiresAt: new Date(),
       createdAt: new Date(),
     };
@@ -266,7 +266,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     const invite = async () => {
       mockAuth.mockResolvedValue(DEFAULT_SESSION);
       mockRequireTeamPermission.mockResolvedValue(undefined);
-      mockInvitationCreate.mockResolvedValue({ id: "inv-3", email: "new@test.com", role: "MEMBER", token: "t", expiresAt: new Date(), createdAt: new Date() });
+      mockInvitationCreate.mockResolvedValue({ id: "inv-3", email: "new@test.com", role: "MEMBER", tokenHash: "a".repeat(64), expiresAt: new Date(), createdAt: new Date() });
       const req = createRequest("POST", undefined, { body: { email: "new@test.com", role: "MEMBER" } });
       return (await parseResponse(await POST(req, createParams({ teamId: "o1" })))).status;
     };
@@ -291,7 +291,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
       id: "inv-new",
       email: "new@test.com",
       role: "MEMBER",
-      token: "abc",
+      tokenHash: "a".repeat(64),
       expiresAt: clock,
       createdAt: clock,
     };

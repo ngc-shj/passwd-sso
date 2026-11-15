@@ -92,6 +92,11 @@
       "calls": 2,
       "reason": "One-time emergency access invitation token, rejected under a session: the digest lookup and the CAS transition({ where: { id, tokenHash } }) on the row it found; not a reusable bearer API credential."
     },
+    "src/app/api/teams/invitations/accept/route.ts#handlePOST": {
+      "class": "exempt",
+      "calls": 1,
+      "reason": "One-time team invitation token, accepted under a session whose email must match the invitation's; not a reusable bearer API credential."
+    },
     "src/app/api/share-links/verify-access/route.ts#handlePOST": {
       "class": "exempt",
       "calls": 1,
@@ -255,6 +260,9 @@
     },
     "prisma/migrations/20261102000000_share_creator_admitted/migration.sql": {
       "reason": "Defines share_creator_admitted(share id): it sets a call-scoped bypass for password_shares, team_password_entries and team_members, reads the one password_shares row by its id plus the team entry and the creator's membership, restores the settings and returns a boolean (may the creator still serve the share). It selects by id, never by the share's digest."
+    },
+    "prisma/migrations/20261115100000_team_invitation_token_digest/migration.sql": {
+      "reason": "Renames team_invitations.token to token_hash and rewrites each stored value to its SHA-256 hex in place (ALTER COLUMN ... TYPE ... USING), then renames the unique index. A one-time schema change over every row; nothing is looked up by a token."
     },
     "prisma/migrations/20261108000000_share_admission_policy_and_personal_entry/migration.sql": {
       "reason": "Replaces share_creator_admitted with two more serve-time rules: the team policy (sharing allowed, share password required, read from team_policies and the share's access_password_hash being null) and the personal entry's trashed state (password_entries). Still reads password_shares by id and returns a boolean; no digest column is named."

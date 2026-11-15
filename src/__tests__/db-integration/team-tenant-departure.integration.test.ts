@@ -40,6 +40,7 @@ import {
 } from "./helpers";
 import { createRaceHelpers } from "./race-helpers";
 import { TEAM_KEY_LOCK_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
+import { hashToken } from "@/lib/crypto/crypto-server";
 
 const { scimTenant, stalePermission } = vi.hoisted(() => ({
   scimTenant: { id: "" },
@@ -341,6 +342,116 @@ describe("team membership across a tenant departure — real-DB integration", ()
 
     const audits = await auditActions("TEAM_MEMBER_TENANT_DEACTIVATE", teamId);
     expect(audits).toEqual([{ targetId: leaver.id, metadata: { source: "TENANT_DEACTIVATION" } }]);
+  });
+
+  // ── A0: the invitation token is stored as its digest (#1054) ──
+
+  describe("A0: the invitation token is stored as its digest", () => {
+    it("stores the SHA-256 of the token it returns, and never the token", async () => {
+      const owner = await ctx.createUser(tenantId);
+      const invitee = await member();
+      const teamId = await team(owner);
+      const inv = await invite(teamId, owner, invitee.email);
+      expect(inv.status).toBe(201);
+
+      const [row] = await sql<Record<string, unknown>>(`SELECT * FROM team_invitations WHERE id = $1::uuid`, inv.id);
+      expect(row.token_hash).toBe(hashToken(inv.token!));
+      expect(Object.values(row)).not.toContain(inv.token);
+    });
+
+    it("accepts the token, and refuses the stored digest presented as one", async () => {
+      const owner = await ctx.createUser(tenantId);
+      const invitee = await member();
+      const teamId = await team(owner);
+      const inv = await invite(teamId, owner, invitee.email);
+
+      const byDigest = await accept(invitee, hashToken(inv.token!));
+      expect(byDigest.status).toBe(404);
+      expect(await invitationStatus(inv.id!)).toBe("PENDING");
+
+      const byToken = await accept(invitee, inv.token!);
+      expect(byToken.status).toBe(200);
+      expect(await invitationStatus(inv.id!)).toBe("ACCEPTED");
+    });
+
+    it("the migration hashes an existing token to the value accept looks up", async () => {
+      const migration = readFileSync(
+        join(process.cwd(), "prisma/migrations/20261115100000_team_invitation_token_digest/migration.sql"),
+        "utf8",
+      );
+      const using = /USING (.+);/.exec(migration)?.[1];
+      expect(using).toBeDefined();
+      const token = randomBytes(32).toString("hex");
+      const [{ hashed }] = await sql<{ hashed: string }>(
+        `SELECT ${using!.replace(`"token_hash"`, "$1::text")} AS hashed`,
+        token,
+      );
+      expect(hashed).toBe(hashToken(token));
+    });
+
+    it("the migration, run as a NOBYPASSRLS owner over the old column, keeps a PENDING invitation acceptable", async () => {
+      const owner = await ctx.createUser(tenantId);
+      const invitee = await member();
+      const teamId = await team(owner);
+      const migration = readFileSync(
+        join(process.cwd(), "prisma/migrations/20261115100000_team_invitation_token_digest/migration.sql"),
+        "utf8",
+      );
+      // Its own BEGIN/COMMIT are dropped so the run stays inside this test's
+      // transaction, which is always rolled back.
+      expect(migration.match(/^(BEGIN|COMMIT);$/gm)).toEqual(["BEGIN;", "COMMIT;"]);
+      const body = migration.replace(/^(BEGIN|COMMIT);$/gm, "");
+      // Any other transaction control left in the body would commit this
+      // test's changes (role, ownership, column) on the shared database.
+      expect(body).not.toMatch(/^\s*(BEGIN|COMMIT|END|ROLLBACK|ABORT|START\s+TRANSACTION)\b/im);
+      const token = randomBytes(32).toString("hex");
+      const migrateRole = `mig_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+
+      const client = await side.pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query(
+          `INSERT INTO team_invitations (id, team_id, tenant_id, email, role, status, token_hash, expires_at, invited_by_id, updated_at)
+           VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'MEMBER', 'PENDING', $5, now() + interval '1 day', $6::uuid, now())`,
+          [randomUUID(), teamId, tenantId, invitee.email, token, owner],
+        );
+        // Back to the shape before the migration, holding the plaintext.
+        await client.query(`ALTER TABLE team_invitations RENAME COLUMN token_hash TO token`);
+        await client.query(`ALTER TABLE team_invitations ALTER COLUMN token TYPE text`);
+        await client.query(`ALTER INDEX team_invitations_token_hash_key RENAME TO team_invitations_token_key`);
+        const [{ n: before }] = (await client.query<{ n: string }>(`SELECT count(*) AS n FROM team_invitations`)).rows;
+
+        // As on RDS: the table owner, without superuser or BYPASSRLS.
+        await client.query(`CREATE ROLE ${migrateRole} NOLOGIN NOSUPERUSER NOBYPASSRLS`);
+        await client.query(`GRANT USAGE, CREATE ON SCHEMA public TO ${migrateRole}`);
+        // The table's policy calls it; the RLS control below reads through the policy.
+        await client.query(`GRANT EXECUTE ON FUNCTION public.rls_bypass_admits(text) TO ${migrateRole}`);
+        await client.query(`ALTER TABLE team_invitations OWNER TO ${migrateRole}`);
+        await client.query(`SET LOCAL ROLE ${migrateRole}`);
+        const [self] = (await client.query<{ name: string; rolsuper: boolean; rolbypassrls: boolean }>(
+          `SELECT current_user AS name, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user`,
+        )).rows;
+        expect(self).toEqual({ name: migrateRole, rolsuper: false, rolbypassrls: false });
+        // Row-level security applies to this role: it sees none of the rows it is about to convert.
+        expect((await client.query(`SELECT 1 FROM team_invitations`)).rowCount).toBe(0);
+        await client.query(body);
+        await client.query(`RESET ROLE`);
+
+        const [{ n: after }] = (await client.query<{ n: string }>(`SELECT count(*) AS n FROM team_invitations`)).rows;
+        expect(after).toBe(before);
+        const lookup = (digest: string) =>
+          client.query(`SELECT id FROM team_invitations WHERE token_hash = $1 AND status = 'PENDING'`, [digest]);
+        expect((await lookup(hashToken(token))).rowCount).toBe(1);
+        expect((await lookup(hashToken(hashToken(token)))).rowCount).toBe(0);
+        const index = await client.query(
+          `SELECT indexdef FROM pg_indexes WHERE tablename = 'team_invitations' AND indexname = 'team_invitations_token_hash_key'`,
+        );
+        expect(index.rows[0]?.indexdef).toMatch(/UNIQUE INDEX .*\(token_hash\)/);
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    });
   });
 
   // ── A2: admission at accept ───────────────────────────────────
@@ -1522,7 +1633,7 @@ describe("team membership across a tenant departure — real-DB integration", ()
       const invitationAt = async (name: string, teamId: string, inviterId: string, email: string, createdAt: string, status = "PENDING") => {
         const id = randomUUID();
         await sql(
-          `INSERT INTO team_invitations (id, team_id, tenant_id, email, role, status, token, expires_at, invited_by_id, created_at, updated_at)
+          `INSERT INTO team_invitations (id, team_id, tenant_id, email, role, status, token_hash, expires_at, invited_by_id, created_at, updated_at)
            VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'MEMBER', $5::"InvitationStatus", $6, now() + interval '7 days', $7::uuid, $8::timestamptz, now())`,
           id, teamId, tenantId, email, status, hex(16), inviterId, createdAt,
         );

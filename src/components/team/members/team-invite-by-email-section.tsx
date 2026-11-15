@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { CopyButton } from "@/components/passwords/shared/copy-button";
 import {
   Select,
   SelectContent,
@@ -30,15 +31,19 @@ export function TeamInviteByEmailSection({ teamId, onSuccess }: Props) {
   const [invEmail, setInvEmail] = useState("");
   const [invRole, setInvRole] = useState<string>(TEAM_ROLE.MEMBER);
   const [inviting, setInviting] = useState(false);
+  // The link is shown once: the server keeps only the token's digest.
+  const [issuedLink, setIssuedLink] = useState<{ email: string; url: string } | null>(null);
 
   const handleInvite = async () => {
-    if (!invEmail.trim()) return;
+    const email = invEmail.trim();
+    if (!email) return;
     setInviting(true);
+    setIssuedLink(null);
     try {
       const res = await fetchApi(apiPath.teamInvitations(teamId), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: invEmail.trim(), role: invRole }),
+        body: JSON.stringify({ email, role: invRole }),
       });
       if (res.status === 409) {
         const body = await readApiErrorBody(res);
@@ -57,10 +62,16 @@ export function TeamInviteByEmailSection({ teamId, onSuccess }: Props) {
       }
       const data = await res.json();
       const inviteUrl = appUrl(`/dashboard/teams/invite/${data.token}`);
-      await navigator.clipboard.writeText(inviteUrl);
-      toast.success(t("invitedWithLink"));
+      setIssuedLink({ email, url: inviteUrl });
       setInvEmail("");
       onSuccess();
+      // The invitation exists from here on: a clipboard refusal, or no
+      // clipboard at all (a non-secure origin), must not be reported as a
+      // failed invitation.
+      const copied = await Promise.resolve()
+        .then(() => navigator.clipboard.writeText(inviteUrl))
+        .then(() => true, () => false);
+      toast.success(t(copied ? "invitedWithLink" : "invitedLinkNotCopied"));
     } catch {
       toast.error(t("inviteFailed"));
     } finally {
@@ -110,6 +121,20 @@ export function TeamInviteByEmailSection({ teamId, onSuccess }: Props) {
           {t("inviteSend")}
         </Button>
       </div>
+      {issuedLink && (
+        <div className="space-y-2">
+          <p className="text-sm font-medium">{t("inviteLinkShownOnce", { email: issuedLink.email })}</p>
+          <div className="flex items-center gap-2">
+            <Input
+              value={issuedLink.url}
+              readOnly
+              aria-label={t("inviteLinkShownOnce", { email: issuedLink.email })}
+              className="font-mono text-xs"
+            />
+            <CopyButton getValue={() => issuedLink.url} />
+          </div>
+        </div>
+      )}
     </section>
   );
 }

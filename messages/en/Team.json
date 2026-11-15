@@ -60,6 +60,8 @@
   "invited": "Invitation sent",
   "invitedWithLink": "Invitation sent. Invite URL copied to clipboard.",
   "inviteFailed": "Failed to send invitation",
+  "invitedLinkNotCopied": "Invitation sent. Copy the invite link below.",
+  "inviteLinkShownOnce": "Invite link for {email}. Copy it now — it won't be shown again.",
   "alreadyMember": "User is already a member",
   "alreadyInvited": "Invitation already sent",
   "pendingInvitations": "Pending Invitations",

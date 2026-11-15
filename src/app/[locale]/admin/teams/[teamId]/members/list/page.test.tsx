@@ -31,6 +31,7 @@ vi.mock("sonner", () => ({ toast: mockToast }));
 
 vi.mock("@/lib/url-helpers", () => ({
   fetchApi: (...args: unknown[]) => mockFetch(...args),
+  appUrl: (path: string) => `https://example.com${path}`,
 }));
 
 vi.mock("@/i18n/navigation", () => ({
@@ -967,4 +968,43 @@ describe("TeamMembersPage (SCIM bulk admission, C5)", () => {
       }
     },
   );
+});
+
+describe("TeamMembersPage (invite by email: the link is shown once)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockCanUsePasskeyRecovery.mockResolvedValue(false);
+  });
+
+  it("keeps the add dialog open after an invite, so the issued link is visible", async () => {
+    setupFetchReady();
+    const baseImpl = mockFetch.getMockImplementation()!;
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === "/api/teams/team-1/invitations" && init?.method === "POST") {
+        return Promise.resolve({ ok: true, status: 201, json: () => Promise.resolve({ token: "abc123" }) });
+      }
+      return baseImpl(url, init);
+    });
+
+    await act(async () => {
+      render(<TeamMembersPage params={Promise.resolve({ teamId: "team-1" })} />);
+    });
+    await act(async () => {
+      fireEvent.click(await screen.findByText("memberAddButton"));
+    });
+    fireEvent.change(screen.getByPlaceholderText("inviteEmailPlaceholder"), {
+      target: { value: "bob@example.com" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText("inviteSend"));
+    });
+
+    // jsdom has no clipboard (as on a non-secure origin): the invitation is
+    // still reported as sent, and its link is on screen to copy by hand.
+    expect(await screen.findByLabelText('inviteLinkShownOnce:{"email":"bob@example.com"}')).toHaveValue(
+      "https://example.com/dashboard/teams/invite/abc123",
+    );
+    expect(mockToast.success).toHaveBeenCalledWith("invitedLinkNotCopied");
+    expect(mockToast.error).not.toHaveBeenCalled();
+  });
 });

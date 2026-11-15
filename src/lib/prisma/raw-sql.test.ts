@@ -53,7 +53,7 @@ describe("sqlIdentifier and token tables", () => {
     expect(() => sqlIdentifier(name)).toThrow(TOKEN_TABLE_REFUSAL);
   });
 
-  it("lists exactly these 13 token tables (pinned apart from the array)", () => {
+  it("lists exactly these 14 token tables (pinned apart from the array)", () => {
     expect([...TOKEN_TABLE_NAMES].sort()).toEqual([
       "admin_vault_resets",
       "api_keys",
@@ -68,11 +68,12 @@ describe("sqlIdentifier and token tables", () => {
       "password_shares",
       "scim_tokens",
       "service_account_tokens",
+      "team_invitations",
     ]);
   });
 
-  it("lists 13 distinct token tables, each a valid table name", () => {
-    expect(new Set(TOKEN_TABLE_NAMES).size).toBe(13);
+  it("lists 14 distinct token tables, each a valid table name", () => {
+    expect(new Set(TOKEN_TABLE_NAMES).size).toBe(14);
     expect(Object.isFrozen(TOKEN_TABLE_NAMES)).toBe(true);
     for (const name of TOKEN_TABLE_NAMES) {
       expect(() => sqlTable(name)).not.toThrow();

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { createHash } from "node:crypto";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
 const { mockAuth, mockPrismaTeamInvitation, mockPrismaUser, mockPrismaTeam, mockPrismaTeamMember, mockRequireTeamPermission, TeamAuthError, mockWithTeamTenantRls, mockWithBypassRls } = vi.hoisted(() => {
@@ -106,7 +107,7 @@ describe("GET /api/teams/[teamId]/invitations", () => {
         id: "inv-1",
         email: "user@test.com",
         role: TEAM_ROLE.MEMBER,
-        token: "abc123",
+        tokenHash: "a".repeat(64),
         status: INVITATION_STATUS.PENDING,
         expiresAt: now,
         createdAt: now,
@@ -123,7 +124,8 @@ describe("GET /api/teams/[teamId]/invitations", () => {
     expect(res.status).toBe(200);
     expect(json).toHaveLength(1);
     expect(json[0].email).toBe("user@test.com");
-    expect(json[0]).not.toHaveProperty("token");
+    // An explicit key set: neither the token nor its digest is listed.
+    expect(Object.keys(json[0]).sort()).toEqual(["createdAt", "email", "expiresAt", "id", "invitedBy", "role", "status"]);
     expect(json[0].invitedBy).toEqual({ id: "u1", name: "Admin", email: "admin@test.com" });
     expect(mockWithBypassRls).toHaveBeenCalledWith(
       expect.anything(),
@@ -138,7 +140,7 @@ describe("GET /api/teams/[teamId]/invitations", () => {
         id: "inv-1",
         email: "user@test.com",
         role: TEAM_ROLE.MEMBER,
-        token: "abc123",
+        tokenHash: "a".repeat(64),
         status: INVITATION_STATUS.PENDING,
         expiresAt: now,
         createdAt: now,
@@ -285,7 +287,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
       id: "new-inv",
       email: "new@test.com",
       role: TEAM_ROLE.MEMBER,
-      token: "generated-token",
+      tokenHash: "a".repeat(64),
       expiresAt: now,
       createdAt: now,
     });
@@ -299,8 +301,31 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     const json = await res.json();
     expect(res.status).toBe(201);
     expect(json.email).toBe("new@test.com");
-    expect(json.token).toBeDefined();
+    expect(json.token).toMatch(/^[0-9a-f]{64}$/);
+    expect(Object.keys(json).sort()).toEqual(["createdAt", "email", "expiresAt", "id", "role", "token"]);
     expect(res.headers.get("Cache-Control")).toBe("no-store");
+  });
+
+  it("stores only the digest of the token it returns", async () => {
+    mockPrismaTeamInvitation.create.mockResolvedValue({
+      id: "new-inv",
+      email: "new@test.com",
+      role: TEAM_ROLE.MEMBER,
+      tokenHash: "a".repeat(64),
+      expiresAt: now,
+      createdAt: now,
+    });
+
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/invitations`, {
+        body: { email: "new@test.com", role: TEAM_ROLE.MEMBER },
+      }),
+      createParams({ teamId: TEAM_ID }),
+    );
+    const { token } = await res.json();
+    const { data } = mockPrismaTeamInvitation.create.mock.calls[0][0];
+    expect(data).not.toHaveProperty("token");
+    expect(data.tokenHash).toBe(createHash("sha256").update(token).digest("hex"));
   });
   describe("re-invitation after a tenant departure", () => {
     const invite = (email = "left@test.com") =>
@@ -313,7 +338,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
 
     beforeEach(() => {
       mockPrismaUser.findMany.mockResolvedValue([{ id: "left-user" }]);
-      mockPrismaTeamInvitation.create.mockResolvedValue({ id: "new-inv", email: "left@test.com", role: TEAM_ROLE.MEMBER, token: "t", expiresAt: now, createdAt: now });
+      mockPrismaTeamInvitation.create.mockResolvedValue({ id: "new-inv", email: "left@test.com", role: TEAM_ROLE.MEMBER, tokenHash: "a".repeat(64), expiresAt: now, createdAt: now });
     });
 
     it("expires a pending invitation issued before the invitee left and issues a new one", async () => {
@@ -430,7 +455,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
       const after = (ms: number) => new Date(ACTOR_ADMITTED_AT.getTime() + ms);
 
       beforeEach(() => {
-        mockPrismaTeamInvitation.create.mockResolvedValue({ id: "new-inv", email: "new@test.com", role: TEAM_ROLE.MEMBER, token: "t", expiresAt: now, createdAt: now });
+        mockPrismaTeamInvitation.create.mockResolvedValue({ id: "new-inv", email: "new@test.com", role: TEAM_ROLE.MEMBER, tokenHash: "a".repeat(64), expiresAt: now, createdAt: now });
       });
 
       it("refuses an ADMIN inviter whose tenant row departed after their admission", async () => {
@@ -492,7 +517,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     beforeEach(() => {
       vi.useFakeTimers({ toFake: ["Date"] });
       vi.setSystemTime(clock);
-      mockPrismaTeamInvitation.create.mockResolvedValue({ id: "new-inv", email: "pending@test.com", role: TEAM_ROLE.MEMBER, token: "t", expiresAt: now, createdAt: now });
+      mockPrismaTeamInvitation.create.mockResolvedValue({ id: "new-inv", email: "pending@test.com", role: TEAM_ROLE.MEMBER, tokenHash: "a".repeat(64), expiresAt: now, createdAt: now });
     });
     afterEach(() => {
       vi.useRealTimers();

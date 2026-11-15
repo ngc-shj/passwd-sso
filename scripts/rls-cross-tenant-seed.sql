@@ -225,7 +225,7 @@ INSERT INTO team_folders (id, tenant_id, team_id, name, updated_at) VALUES
   (gen_random_uuid(), '00000000-0000-0000-0000-0000000000A0', '00000000-0000-0000-0000-0000000000A2', 'rls-x-a-tf', NOW()),
   (gen_random_uuid(), '00000000-0000-0000-0000-0000000000B0', '00000000-0000-0000-0000-0000000000B2', 'rls-x-b-tf', NOW());
 
-INSERT INTO team_invitations (id, tenant_id, team_id, email, token, expires_at, invited_by_id, updated_at) VALUES
+INSERT INTO team_invitations (id, tenant_id, team_id, email, token_hash, expires_at, invited_by_id, updated_at) VALUES
   (gen_random_uuid(), '00000000-0000-0000-0000-0000000000A0', '00000000-0000-0000-0000-0000000000A2', 'invitee-a@test.local', md5('rls-x-a-inv')::text, NOW() + interval '1 day', '00000000-0000-0000-0000-0000000000A1', NOW()),
   (gen_random_uuid(), '00000000-0000-0000-0000-0000000000B0', '00000000-0000-0000-0000-0000000000B2', 'invitee-b@test.local', md5('rls-x-b-inv')::text, NOW() + interval '1 day', '00000000-0000-0000-0000-0000000000B1', NOW());
 

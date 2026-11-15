@@ -860,7 +860,7 @@ model TeamInvitation {
   email     String
   role      TeamRole         @default(MEMBER)
   status    InvitationStatus @default(PENDING)
-  token     String           @unique
+  tokenHash String           @unique @map("token_hash") @db.VarChar(64)
   expiresAt DateTime         @map("expires_at") @db.Timestamptz(3)
 
   invitedById String @map("invited_by_id") @db.Uuid

@@ -138,6 +138,7 @@ export const TOKEN_TABLE_NAMES: readonly string[] = freeze([
   "scim_tokens",
   "password_shares",
   "emergency_access_grants",
+  "team_invitations",
   "admin_vault_resets",
   "service_account_tokens",
   "operator_tokens",

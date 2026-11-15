@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { hashToken } from "@/lib/crypto/crypto-server";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, unauthorized } from "@/lib/http/api-response";
@@ -61,7 +62,7 @@ async function handlePOST(req: NextRequest) {
   // Invitation lookup must bypass RLS: the invitee is not yet in the team's tenant
   const invitation = await withBypassRls(prisma, async (tx) =>
     tx.teamInvitation.findUnique({
-      where: { token },
+      where: { tokenHash: hashToken(token) },
       include: { team: { select: { id: true, name: true, slug: true, tenantId: true } } },
     }),
   BYPASS_GRANT.TEAM_INVITATION_ACCEPT);
