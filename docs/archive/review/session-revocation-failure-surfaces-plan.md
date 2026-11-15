@@ -331,3 +331,38 @@ Both `npx vitest run` and `npm run test:integration` must exit 0. Each new test 
 | C6  | Response semantics                                          | locked |
 | C7  | admin-reset revokes before the token is spent               | locked |
 | C8  | AST gate rule 9: a membership end revokes in its function   | locked |
+
+## Implementation Checklist
+
+Production (C1–C7):
+- `src/lib/auth/session/user-session-invalidation.ts`: add `revokeUsersAuthArtifactsInTx`; make `revokeUserAuthArtifactsInTx` delegate; export `UserAuthArtifactCounts`; add `tombstoneRevokedSessions`; `invalidateUserSessions` uses the helper; update the doc comments.
+- `src/lib/auth/session/user-auth-serialization.ts`: add `lockUsersAuthArtifacts` and `UserAuthLockTimeoutError`; update the doc comment.
+- `src/lib/team/tenant-row-lock.ts`: add `UserAuthLockTimeoutError` to `isMembershipLockConflict` and `membershipConflictMessage`.
+- `src/lib/team/team-departure.ts`: `departFromTenant` and `departCreatedMembership` revoke and return the revocation.
+- `src/lib/services/scim-user-service.ts`: replace `needsSessionInvalidation` with `revocation`; `deactivateScimUser` revokes in its transaction.
+- `src/app/api/scim/v2/Users/[id]/route.ts`, `src/app/api/scim/v2/Users/route.ts`, `src/app/api/teams/[teamId]/members/[memberId]/route.ts`, `src/lib/directory-sync/engine.ts`, `src/app/api/vault/admin-reset/route.ts`.
+- `src/lib/tenant/member-passkey-revoke.ts`, `src/auth.ts`: adopt the C5 helper.
+- `docs/security/cryptography-whitepaper.md`: fix the "revoked via `invalidateUserSessions`" line.
+
+Gate (C8): `scripts/checks/check-team-rotation-input-lock.mjs` rule 9 + `scripts/__tests__/check-team-rotation-input-lock.test.mjs`. `scripts/checks/check-bypass-rls.mjs` `FUNCTION_RULE_ALLOWLIST` gets entries for the new integration test routines.
+
+Shared utilities to reuse (no reimplementation):
+- `withBoundedLockWait`, `createLockBudget` (`team-key-rotation-lock.ts`)
+- `userAuthLockKey` (`user-auth-serialization.ts`)
+- `invalidateCachedSessions` (`session-cache-helpers.ts`)
+- `errorLogFields` (`logger/error-fields`)
+- `isMembershipLockConflict` / `membershipConflictMessage` / `membershipConflictResponse`
+- `TEAM_MEMBERSHIP_TX_TIMEOUT_MS`
+- `personalAuditBase` + `AUDIT_ACTION.SESSION_REVOKE_ALL`
+- the gate's `enclosingFunction` / `functionName` / `keyOf` / `EXEMPTIONS` / `classifyTenantStateWrite` / `mayName`
+- `scripts/checks/lib/sql-scan.mjs` `analyzeSql`
+- integration helpers in `src/__tests__/db-integration/helpers.ts` (`createTestContext`, `assertRlsApplies`, race helpers)
+
+Test trees touched (R19, from `grep -rl` across `src` and `scripts`):
+- `departFromTenant`: `team-tenant-departure.integration`, `departed-member-operator-scripts.integration`, `scim/v2/Users/[id]/route.test`, `scim-user-service.test`, `directory-sync/engine.test`, `check-team-rotation-input-lock.test.mjs`
+- `departCreatedMembership`: `team-tenant-departure-directory-sync.integration`, `scim/v2/Users/route.test`, `engine.test`, the gate test
+- `deactivateScimUser`: `team-key-version-guard.integration`, `scim-user-service.test`, the gate test
+- `revokeUserAuthArtifactsInTx`: `user-auth-serialization.integration`, `tenant/members/[userId]/passkeys{,/[credentialId]}/route.test`, `user-auth-artifacts.member-set.test`
+- `invalidateUserSessions`: all 20 test files listed by `grep -rl invalidateUserSessions`, which must stay green
+
+CI parity: `scripts/pre-pr.sh` already queues `check-team-rotation-input-lock` and `check-bypass-rls`, plus the other static gates CI runs. No gap found. `npm run test:integration` is not part of pre-pr and runs separately on `passwd_sso_wt_1047`.
