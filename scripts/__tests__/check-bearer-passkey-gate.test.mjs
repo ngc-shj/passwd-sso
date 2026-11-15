@@ -1920,7 +1920,7 @@ const W = {
   looseFrom: "a substitution after a FROM that is not a relation FROM",
   valueRelation: "a substitution in relation position followed by :: / [ / ( is a value, not a relation",
   qualifier: (name) => `a substituted qualifier names ${name}, not a column of any schema model`,
-  adjacent: "a substitution adjacent to a word character assembles a name from parts",
+  adjacent: "a substitution adjacent to a word character, - or / assembles a name or a comment marker from parts",
 };
 
 describe.concurrent("raw SQL: W1 whole-row projections", { timeout: 60_000 }, () => {
@@ -2864,13 +2864,25 @@ describe.concurrent("raw SQL: a comment marker in a trustedSql template (F1, S21
   it("FAILS on a comment fragment that would hide the keyword of the next template (S21)", async () => {
     await expectViolations(sqlBody("const c = trustedSql`-- `;\n  return trustedSql`SELECT to_jsonb(${c} from\n ${tbl})`;"), [ruleAt("W6", MARKER)]);
   });
+  const ADJACENT_DENY = [
+    ["a dash directly before a substitution", "SELECT 4 -${parent} FROM notes"],
+    ["a dash directly after a substitution", "SELECT ${parent}- 4 FROM notes"],
+    ["a slash directly before a substitution", "SELECT 4 /${parent} FROM notes"],
+    ["a slash directly after a substitution", "SELECT ${parent}/ 4 FROM notes"],
+  ];
+  it.each(ADJACENT_DENY)("FAILS on %s (it could complete a comment marker)", async (_label, sql) => {
+    await expectViolations(viaTrusted(sql), [ruleAt("W6", W.adjacent)]);
+  });
+  it("passes on the same operators spaced from the substitution", async () => {
+    await expectPass(viaTrusted("SELECT 4 - ${parent} - 1, ${parent} / 2 FROM notes"));
+  });
   it("passes on a single dash and a division (no marker)", async () => {
     await expectPass(viaTrusted("SELECT 1 - 2, 4 / 2 FROM notes"));
   });
   it("passes on the same comments in a $queryRaw template (only trustedSql refuses them)", async () => {
     await expectPass(viaTag("SELECT 1 -- note\n FROM notes /* more */"));
   });
-  it("counts substitutions kept inside a quoted identifier, and a string, as kept", async () => {
+  it("passes on substitutions inside a quoted identifier and a string (no marker anywhere)", async () => {
     await expectPass(viaTrusted('SELECT "${tbl}".id FROM ${tbl} WHERE x = \'${parent}\''));
   });
 });
@@ -3172,6 +3184,49 @@ describe.concurrent("schema source: strings, unbalanced brackets and the remaini
   it("passes on a parenthesis inside a trailing // comment (comments are read outside strings only)", async () => {
     await expectPass({ files: { "prisma/schema.prisma": `${SCHEMA}\nmodel Y {\n  id String @id // see (note\n}\n` } });
   });
+  const addToNote = (line) => ({ files: { "prisma/schema.prisma": swap(SCHEMA, 'model Note {\n  id    String @id\n  title String\n', `model Note {\n  id    String @id\n  title String\n  ${line}\n`) } });
+  const ATTRIBUTE_WITH_PAREN = [
+    ["a ) inside a string", '@relation(\n    name: "a)",\n    fields: [title],\n    references: [tokenHash]\n  )'],
+    ["a ] inside a string", '@relation(\n    name: "a]",\n    fields: [title],\n    references: [tokenHash]\n  )'],
+  ];
+  it.each(ATTRIBUTE_WITH_PAREN)("still sees a relation that references a digest key after %s", async (_label, attribute) => {
+    await expectFatal(addToNote(`link ApiKey ${attribute}`), `${SCHEMA_PREFIX} Note.link references tokenHash: a foreign key gives another column the digest's values.`);
+  });
+  it("still sees a relation that references a digest key after an escaped quote and a ) inside a string", async () => {
+    await expectFatal(addToNote('link ApiKey @relation(\n    name: "a\\")",\n    fields: [title],\n    references: [tokenHash]\n  )'), `${SCHEMA_PREFIX} Note.link references tokenHash: a foreign key gives another column the digest's values.`);
+  });
+  it("does not let an unterminated string swallow the rest of the file (the open bracket is reported where the next block starts)", async () => {
+    const text = `${SCHEMA}\nmodel Early {\n  id String @id @default("abc\n}\n\nmodel Later {\n  id String @id\n}\n`;
+    const line = text.split("\n").findIndex((l, i, all) => l === "}" && all[i - 1] === '  id String @id @default("abc') + 1;
+    await expectFatal({ files: { "prisma/schema.prisma": text } }, `${SCHEMA_PREFIX} a parenthesis or bracket is still open at line ${line}: the schema cannot be read reliably.`);
+  });
+  it("passes on the same relation naming id", async () => {
+    await expectPass(addToNote('link ApiKey @relation(\n    name: "a)",\n    fields: [title],\n    references: [id]\n  )'));
+  });
+  const INDENTED_BLOCKS = [
+    ["an indented view", "  view V {\n  id String @id\n}\n", "V"],
+    ["an indented model with a unique hash field", "  model Foo {\n  id String @id\n  secretHash String @unique\n}\n", "Foo"],
+    ["an indented digest model", '  model Tok {\n  id String @id\n  tokenHash String @unique @map("token_hash")\n}\n', "Tok"],
+    ["an indented enum", "  enum E {\n  A\n}\n", "E"],
+    ["an indented type", "  type T {\n  a String\n}\n", "T"],
+    ["an indented datasource", "  datasource db {\n  provider = \"postgresql\"\n}\n", "db"],
+    ["an indented generator", "  generator g {\n  provider = \"x\"\n}\n", "g"],
+  ];
+  it.each(INDENTED_BLOCKS)("is fatal on %s (the schema reader sees column-0 blocks only)", async (_label, block, name) => {
+    await expectFatal({ files: { "prisma/schema.prisma": `${SCHEMA}\n${block}` } }, `${SCHEMA_PREFIX} ${name} opens an indented block: the schema reader sees blocks that start at column 0 only (run prisma format).`);
+  });
+  it("is fatal on a closing brace that is not at column 0", async () => {
+    await expectFatal({ files: { "prisma/schema.prisma": `${SCHEMA}\nmodel Y {\n  id String @id\n  }\n` } }, `${SCHEMA_PREFIX} a closing brace is not at column 0: the schema reader would not end its block there (run prisma format).`);
+  });
+  const READABLE = [
+    ["a string holding a closing brace", 'model Y {\n  id String @id @default(\n    "}"\n  )\n}\n'],
+    ["a column-0 string line holding a closing brace", 'model Y {\n  id String @id @default(\n"}"\n)\n}\n'],
+    ["a string holding a block header", 'model Y {\n  id String @id @default(\n    "model Q {"\n  )\n}\n'],
+    ["fields named type and model inside a multi-line attribute", "model Y {\n  id String @id\n  type String\n  model String\n  @@index([\n    type,\n    model\n  ])\n}\n"],
+  ];
+  it.each(READABLE)("passes on %s", async (_label, block) => {
+    await expectPass({ files: { "prisma/schema.prisma": `${SCHEMA}\n${block}` } });
+  });
   it("is fatal on a bracket still open at the end of the file", async () => {
     await expectFatal({ files: { "prisma/schema.prisma": `${SCHEMA}\nmodel Y {\n  id String @id @default([1` } }, `${SCHEMA_PREFIX} a parenthesis or bracket is still open at the end of the file: the schema cannot be read reliably.`);
   });
@@ -3179,7 +3234,7 @@ describe.concurrent("schema source: strings, unbalanced brackets and the remaini
     await expectFatal({ files: { "prisma/schema.prisma": `${SCHEMA}\nmodel Z\n  {\n  id String @id\n}\n` } }, `${SCHEMA_PREFIX} Z opens its block on a later line: the schema reader cannot see it.`);
   });
   it("passes on a non-unique hash field followed by a composite @@unique that does not name it", async () => {
-    await expectPass({ files: { "prisma/schema.prisma": swap(SCHEMA, 'model Note {\n  id    String @id\n  title String\n', 'model Note {\n  id    String @id\n  title String\n  contentHash String\n  slug String\n  @@unique([slug, title])\n') } });
+    await expectPass({ files: { "prisma/schema.prisma": swap(SCHEMA, 'model Note {\n  id    String @id\n  title String\n', 'model Note {\n  id    String @id\n  title String\n  slug String\n  contentHash String\n  @@unique([slug, title])\n') } });
   });
 
   const MIG = "prisma/migrations/20240201000000_extra/migration.sql";

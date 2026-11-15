@@ -291,6 +291,34 @@ describe("trustedSql refuses a comment marker anywhere in a template's own text"
     }).toThrow(COMMENT_REFUSAL);
   });
 
+  it("refuses a `--` assembled across a substitution (F7)", () => {
+    const f = trustedSql`SELECT to_jsonb( -`;
+    expect(() => trustedSql`${f}- ${sqlIdentifier("a")} FROM
+        ${sqlTable("api_keys")})`).toThrow(COMMENT_REFUSAL);
+  });
+
+  it("refuses a `/*` assembled across a substitution", () => {
+    const f = trustedSql`SELECT to_jsonb( /`;
+    expect(() => trustedSql`${f}* ${sqlIdentifier("a")} FROM
+        ${sqlTable("api_keys")}) */`).toThrow(COMMENT_REFUSAL);
+  });
+
+  it("refuses a marker that joinSql assembles from a part and a separator", () => {
+    const a = trustedSql`a-`;
+    const b = trustedSql`b`;
+    expect(() => joinSql([a, b], trustedSql`-`)).toThrow(COMMENT_REFUSAL);
+  });
+
+  it("refuses a marker that joinSql assembles from two parts and an empty separator", () => {
+    expect(() => joinSql([trustedSql`/`, trustedSql`*`], trustedSql``)).toThrow(COMMENT_REFUSAL);
+  });
+
+  it("accepts the same fragments joined and assembled without a marker", () => {
+    const f = trustedSql`SELECT to_jsonb( -`;
+    expect(() => trustedSql`${f} 1 FROM ${sqlTable("api_keys")})`).not.toThrow();
+    expect(() => joinSql([trustedSql`a-`, trustedSql`b`], trustedSql`, `)).not.toThrow();
+  });
+
   it.each([
     ["a single dash and a division", () => trustedSql`SELECT 1 - 2, 4 / 2`],
     ["a slash and a star that do not touch", () => trustedSql`SELECT 2 / * 3`],
@@ -718,6 +746,17 @@ describe("namesDigestColumn", () => {
 
   it.each(["token", "hash", "tokenhash", "token hash"])("is false for %j", (text) => {
     expect(namesDigestColumn(text)).toBe(false);
+  });
+});
+
+describe("refusal codes", () => {
+  it("has exactly these code values (a collision would let one refusal pass for another)", () => {
+    expect(RAW_SQL_REFUSAL_CODE).toEqual({
+      DIGEST_COLUMN: "RAW_SQL_DIGEST_COLUMN",
+      UNICODE_ESCAPE: "RAW_SQL_UNICODE_ESCAPE",
+      TOKEN_TABLE: "RAW_SQL_TOKEN_TABLE",
+      COMMENT_MARKER: "RAW_SQL_COMMENT_MARKER",
+    });
   });
 });
 

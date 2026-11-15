@@ -458,7 +458,12 @@ Scope contract:
   - Likelihood: low; each needs deliberate indirection in a reviewed validator.
   - Cost to fix: dataflow across files and types; a different control.
 - SC4 — SQL the lexer cannot judge: an alias declared in one `trustedSql` fragment and used
-  as a bare value in another; a table name assembled across two fragments; objects created by hand outside the three SQL roots; a
+  as a bare value in another; a table name assembled across two fragments; a table read as a
+  value because another fragment supplies its context (a fragment before the table opening a
+  FROM-syntax function, `trim(both` + ` from ${t})`, or a table-holding fragment embedded in
+  another template) — the run-time mint judges each template's own text and does not refuse
+  it, and the retention sweep's real templates place fragments before tables, so a rule
+  forbidding that needs a fragment kind (code review S23); objects created by hand outside the three SQL roots; a
   database function called by a name that says nothing about what it reads (its definition
   is what C4 classifies).
   - Worst case: a whole-row lookup assembled from two fragments.

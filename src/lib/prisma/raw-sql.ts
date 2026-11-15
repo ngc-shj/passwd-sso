@@ -214,6 +214,15 @@ const commentMarkerExec = RegExp.prototype.exec.bind(COMMENT_MARKER_RE) as (
   input: string,
 ) => RegExpExecArray | null;
 
+function assertNoCommentMarker(caller: string, text: string): void {
+  if (commentMarkerExec(text) !== null) {
+    throw refusal(
+      RAW_SQL_REFUSAL_CODE.COMMENT_MARKER,
+      caller + ": assembled text may not hold a comment marker (-- or /*)",
+    );
+  }
+}
+
 /**
  * Throws unless the table substitution between `strings[index]` and
  * `strings[index + 1]` sits after a relation keyword or before a dot. Only the
@@ -288,18 +297,13 @@ export function trustedSql(
     );
   }
   text += strings[partsLength];
-  // No template may hold a comment marker, in a comment, a string or a quoted identifier alike: a
-  // fragment holding `-- ` would otherwise comment out the keyword that the enclosing template's
-  // text shows to the table-position test (`${c} from\n ${t}`). The static gate refuses the same text (W6). A
-  // template with a table substitution met the position test above first, so it keeps that code.
-  for (let i = 0; i <= partsLength; i++) {
-    if (commentMarkerExec(strings[i]) !== null) {
-      throw refusal(
-        RAW_SQL_REFUSAL_CODE.COMMENT_MARKER,
-        "trustedSql: a template may not hold a comment marker (-- or /*)",
-      );
-    }
-  }
+  // The comment-marker test runs on the ASSEMBLED text, not on the parts: a marker can be built across a
+  // substitution (`${f}- ${x}` with a fragment ending in `-`) just as across fragments joined by joinSql.
+  // Text that holds one in a comment, a string or a quoted identifier alike is refused, so no fragment can
+  // comment out the keyword that a later template's text shows to the table-position test. The static gate refuses
+  // a marker in a template's own text (W6). A template with a table substitution met the position test
+  // above first, so it keeps that code.
+  assertNoCommentMarker("trustedSql", text);
   const obj = createGenuineObject();
   fragmentSet(obj, text);
   return obj as unknown as SqlFragment;
@@ -333,6 +337,7 @@ export function joinSql(
     }
     text += partText;
   }
+  assertNoCommentMarker("joinSql", text);
   const obj = createGenuineObject();
   fragmentSet(obj, text);
   return obj as unknown as SqlFragment;

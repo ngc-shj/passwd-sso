@@ -732,3 +732,81 @@ Gate self-test cells: 1042 before, 1083 after; `raw-sql.test.ts` +9 cells. Real-
 | s21-line-sub | weaken | 1 | raw SQL: a comment marker in a trustedSql template (F1, S21, static side) reports the lin… | 1 |
 | s21-line-part | weaken | 1 | raw SQL: a comment marker in a trustedSql template (F1, S21, static side) reports the lin… | 1 |
 | s21-line-in-part | weaken | 2 | raw SQL: a comment marker in a trustedSql template (F1, S21, static side) reports the lin…; raw SQL: a comment marker in a trustedSql template (F1, S21, static side) reports the lin… | 1 |
+
+# Code review round 3 fixes
+
+Gate self-test cells: 1083 before, 1105 after; `raw-sql.test.ts` +6 tests (219 in the file). Real-repo summary line unchanged
+(`... sql-literals=136 token-table-literals=7 sql-files=228 sql-qualifying=5`); real schema still unique 75, references 138, views 0.
+
+## Why the mechanism changed
+
+Two areas were bypassed in three consecutive rounds each by adding cases to a per-part or per-line reader. Both are now judged by one reading of the whole object.
+
+- Table position / comment markers: the run-time mint now tests the ASSEMBLED text (the result of `trustedSql` and of `joinSql`), not each part. A marker built across a hole
+  (`${f}- ${x}` with a fragment ending in `-`, or `/` then `*`) or across a joinSql part and separator is in the assembled text however it was composed. The per-part template-wide loop is gone
+  (proof: restoring it leaves all 219 raw-sql tests green; removing the assembled test turns 9 red). The loop in `assertTablePosition` stays, and is not redundant: removing it turns 10 cells red
+  because they pin the refusal code (`RAW_SQL_TOKEN_TABLE`) for a comment before a table; the assembled test would report `RAW_SQL_COMMENT_MARKER` instead.
+- Schema: one pre-pass (`schemaCode`) reduces the schema to code (comments removed, every string emptied to `""`, line numbers kept); logical-line joining, depth, block headers and every field / unique / composite / references
+  pattern read that text only, so no pattern can meet string content. It fails closed on shapes the shared loader cannot see (indented block header, a closing brace not at column 0, a header with its brace on a later line, an unclosed bracket).
+
+## Findings
+
+- F7: closed at run time by the assembled-text test (unit cells: `--` across a substitution, `/*` across a substitution, joinSql part + separator, joinSql `/` + `*`, and an allow twin).
+  Static: W6 cannot see what a hole holds (a type question), so the gate header now says the mint adjudicates composition; W6's hole adjacency was extended with `-` and `/` (a hole beside either could complete a marker).
+  Real-tree false positives from the extension: 0 (checked on the real src before applying).
+- S23 (a fragment before a table: `trim(both ${...} from ${t})`, and the mirror form): **not closed, by instruction.** Rules 1 and 2 are violated by real code (table below), so they were not implemented.
+- T27: `RAW_SQL_REFUSAL_CODE` is pinned with `toEqual` on its literals; a mutant giving `COMMENT_MARKER` the `TOKEN_TABLE` value is red.
+- T26: closed by `schemaCode` (cells: `)` and `]` inside a string in a relation name, an escaped quote, a twin naming `id`, an unterminated string).
+- S22: indented `model`, `view`, `enum`, `type`, `datasource`, `generator` headers and an indented closing brace are fatal (message: run `prisma format`). Cells: each header, a view, a model with a unique hash field, a digest model.
+- T27 passes (must pass): `@default("}")` on its own line, the same at column 0, a string holding `model Q {`, and fields named `type` / `model` inside a multi-line `@@index`.
+- The vacuous T25 allow cell now puts the hash-like field last (`@(?!@)` to `@` goes red). The orphan cell was renamed to say what it checks (substitutions inside a quoted identifier and a string pass).
+
+## Real `trustedSql` / `joinSql` uses against rules 1 and 2
+
+Rule 1: a template that substitutes a table may not have a FRAGMENT substitution before that table. Rule 2: a fragment holding a table substitution may not be substituted into another template or joinSql.
+
+| Site | Table substitution | Rule 1 | Rule 2 |
+|------|--------------------|--------|--------|
+| `audit-outbox-worker.ts` markFailed UPDATE | `"${sqlTable(table)}"` first in the template | ok | ok (goes to renderSql) |
+| `retention-gc-worker/sweep.ts` sweepExpiryEntry | `FROM ${tableIdent}` after `${keyList}` (a joinSql fragment); `DELETE FROM ${tableIdent}` after `${keyList}` and `${predicateSql}` | VIOLATED | ok (the fragments hold no table) |
+| sweepGuardedExpiryEntry | same shape, plus `guardSql = GUARD_SQL[...](tableIdent)` embedded | VIOLATED | VIOLATED (a table-holding fragment embedded) |
+| provenance sweep | `DELETE FROM ${tableIdent}` after `${cutoffSql}` and `${guardSql}` | VIOLATED | VIOLATED (`guardSql` wraps a GUARD_SQL fragment) |
+| sweepPerTenantAge | two tables, only identifiers before them | ok | ok |
+| `GUARD_SQL` fragments | `${parent}.id` (a table as qualifier) | ok | the fragments are the table-holding ones embedded above |
+| `predicate.ts` | none | n/a | n/a |
+| `scripts/migrate-account-tokens-to-encrypted.ts` (outside the gate's scan root) | none | n/a | n/a |
+
+Three sweeps violate rule 1 and two violate rule 2, so S23 stays open and rules 1-2 were not touched. A rule that fits the real code would have to tell a fragment of identifiers and commas (`keyList`, `projection`) from an
+arbitrary one; that needs a fragment kind (or a registry bit for "built only from identifiers and separators"), which is a design change for the other agent's module, not a gate fix.
+
+Proposed wording for plan SC4 (to stay truthful; the plan is locked and was not edited): "...a table name assembled across two fragments (a fragment before a table that supplies a keyword, `trim(both ${f} from ${t})`, or a table-holding fragment embedded in another template) is adjudicated by the run-time mint only, which does not yet refuse it; ..."
+
+## Red proofs (scratch `scratchpad/batchR3`, whole self-test, base 1105 green; a syntax error turned 1104 of 1105 red)
+
+Run-time (scratch copy of `raw-sql.ts` and its test, 219 tests, base green): assembled test in trustedSql removed 9 red; in joinSql removed 2 red; `COMMENT_MARKER` given the `TOKEN_TABLE` value 1 red (the pin);
+the assembled test throwing the wrong code 11 red; the marker pattern reduced to `--` only 6 red, to `/*` only 15 red; restoring the per-part loop 0 red (redundancy); removing the `assertTablePosition` loop 10 red.
+
+| Mutation | Direction | Red cells | Examples (cell names) | Exit |
+|----------|-----------|-----------|-----------------------|------|
+| sc-identity | weaken | 10 | schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) still …; schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) still … | 1 |
+| sc-string-off | weaken | 11 | schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) still …; schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) still … | 1 |
+| sc-comment-off | weaken | 1 | schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) passes… | 1 |
+| sc-newline-reset | weaken | 1 | schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) does n… | 1 |
+| sc-escape | weaken | 4 | schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) still …; schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) passes… | 1 |
+| sc-newline-keep | weaken | 1 | schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) does n… | 1 |
+| ih-off | weaken | 7 | schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) is fat…; schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) is fat… | 1 |
+| ih-fatal | weaken | 7 | schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) is fat…; schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) is fat… | 1 |
+| ih-model | weaken | 2 | schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) is fat…; schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) is fat… | 1 |
+| ih-view | weaken | 1 | schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) is fat… | 1 |
+| ih-enum | weaken | 1 | schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) is fat… | 1 |
+| ih-type | weaken | 1 | schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) is fat… | 1 |
+| ih-datasource | weaken | 1 | schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) is fat… | 1 |
+| ih-generator | weaken | 1 | schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) is fat… | 1 |
+| ib-off | weaken | 1 | schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) is fat… | 1 |
+| ib-fatal | weaken | 1 | schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) is fat… | 1 |
+| ih-brace-required | widen | 2 | schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) passes…; real repository passes against the real repo | 1 |
+| ib-indent-widen | widen | 1076 | inputs passes on the base fixture and prints the analysed count; inputs FAILS when no source file is scanned | 1 |
+| adj-dash | weaken | 2 | raw SQL: a comment marker in a trustedSql template (F1, S21, static side) FAILS on a dash…; raw SQL: a comment marker in a trustedSql template (F1, S21, static side) FAILS on a dash… | 1 |
+| adj-slash | weaken | 2 | raw SQL: a comment marker in a trustedSql template (F1, S21, static side) FAILS on a slas…; raw SQL: a comment marker in a trustedSql template (F1, S21, static side) FAILS on a slas… | 1 |
+| adj-widen | widen | 37 | raw SQL: W2 a token table's name or alias outside relation position FAILS on an alias of …; raw SQL: W2 a token table's name or alias outside relation position FAILS on an alias of … | 1 |
+| t25-attr-composite | widen | 1 | schema source: strings, unbalanced brackets and the remaining forms (S20, F6, T25) passes… | 1 |

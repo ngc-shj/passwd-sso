@@ -144,12 +144,18 @@
  *         template's own text): a substitution after a FROM that is no relation FROM; in
  *         relation position followed by `::`, `[` or `(` (not INTO's column list); a
  *         substituted qualifier `${x}.<name>` whose name is no column of any schema model;
- *         directly adjacent to a letter, digit, `_` or `$` of the template (`api_${x}`); or a
+ *         directly adjacent to a letter, digit, `_`, `$`, `-` or `/` of the template (`api_${x}`,
+ *         `${f}- ${x}`); or a
  *         comment marker (`--` or `/*`) anywhere in the template's own text, in a comment, a
  *         string or a quoted identifier alike. The run-time mint refuses every such template
  *         (code RAW_SQL_COMMENT_MARKER), because a comment would hide a keyword the mint's text
  *         test still sees, and a fragment holding `-- ` could do it across templates
- *         (`${c} from\n ${t}`); no src template holds one.
+ *         (`${c} from\n ${t}`); no src template holds one. The mint tests the ASSEMBLED text
+ *         (trustedSql and joinSql results), so a marker built across a hole is refused there; the
+ *         gate sees only the template's own text and the holes' neighbours, and what a hole holds
+ *         is a type question it cannot answer. Composition (a fragment before a table, a
+ *         table-holding fragment embedded in another template) is therefore the run-time
+ *         mint's to adjudicate and is NOT closed: see the deviation log, round 3.
  *     W1-W3 and W5 apply to a literal that names a token table (as a name or inside a string)
  *     and to every trustedSql template; W4 to every literal; W6 to trustedSql templates only.
  *     Each failure names its rule. A literal holding U+E000 (the lexer's substitution marker,
@@ -178,12 +184,15 @@
  *     named a digest key; no `view` block; a unique (or @@unique member) String field named
  *     or mapped ending in hash / digest is a digest key or listed in `nonBearerHashFields`
  *     (`Model.field`, reason; an entry that no longer names such a field is stale); no @relation
- *     references a digest key; no `model` / `view` opens its block on a later line (the shared
- *     schema reader would not see it). The schema is read over logical lines: attributes
- *     continued on the next line (indented or not), and parentheses or brackets spanning lines,
- *     are joined first; comments and brackets count outside double-quoted strings only
- *     (`@default("a//b")`), and a bracket still open at the next block header or `}` at column 0,
- *     or at the end of the file, makes the schema unreadable (fatal).
+ *     references a digest key. The schema is first reduced to code (`//` comments removed, every
+ *     double-quoted string emptied to `""`), and everything else reads that text only, so no
+ *     pattern can meet string content (`name: "a)"`, `@default("}")`). It is then read over
+ *     logical lines: attributes continued on the next line (indented or not), and parentheses or
+ *     brackets spanning lines, are joined first. It fails closed on shapes the shared schema
+ *     reader cannot see (it reads `model X {` and `}` at column 0, brace on the same line): a
+ *     block header whose brace is on a later line, an indented block header (any of model, view,
+ *     enum, type, datasource, generator), a closing brace that is not at column 0, and a bracket
+ *     still open at the next column-0 block header or `}` or at the end of the file.
  *   - The pg driver (C5): a call of a member named `query` (property, optional chain, pinned
  *     element access) takes a string literal or no-substitution template as its first
  *     argument, which is then a SQL-bearing literal. The files importing createPool or
@@ -431,53 +440,55 @@ const COLUMNS_BY_TABLE = new Map([...MODELS.keys()].map((m) => [schema.tables.ge
 const ALL_COLUMNS = new Set([...COLUMNS_BY_TABLE.values()].flatMap((cols) => [...cols]));
 
 /**
- * Facts the schema loader does not keep: `view` blocks, unique fields, `@relation(references: [...])` lists, and
- * blocks whose brace is on a later line (the loader reads only `model X {` on one line, so it cannot see them).
- * Physical lines are joined into logical ones first: inside open parentheses or brackets, and a line that
- * starts with an attribute (`@unique` under its field, indented or not). Comments and brackets are read
- * outside double-quoted strings only (`@default("a//b")`); a block header or `}` at column 0 reached with a
- * bracket still open, or the end of the file, makes the file unreadable (`unbalanced`).
+ * The schema as code only: `//` comments removed and every double-quoted string replaced by an empty `""`
+ * (escapes honoured; a string never spans a line), newlines kept so line numbers hold. Every later reading of the
+ * schema — joining, bracket depth, block headers, attribute patterns — runs on this text, so no pattern can
+ * meet string content (`name: "a)"`, `@default("}")`, `@default("a//b")`).
  */
-/** One physical line without its `//` comment, and its net bracket depth change, both read outside strings. */
-function scanSchemaLine(raw) {
-  let code = "";
-  let delta = 0;
-  let inString = false;
-  for (let i = 0; i < raw.length; i++) {
-    const c = raw[i];
-    if (inString) {
-      code += c;
-      if (c === "\\") code += raw[++i] ?? "";
-      else if (c === '"') inString = false;
-      continue;
-    }
-    if (c === '"') inString = true;
-    else if (c === "/" && raw[i + 1] === "/") break;
-    else if (c === "(" || c === "[") delta += 1;
-    else if (c === ")" || c === "]") delta -= 1;
-    code += c;
+function schemaCode(text) {
+  let out = "";
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === '"') {
+      out += '""';
+      for (i++; i < text.length && text[i] !== '"' && text[i] !== "\n"; i++) if (text[i] === "\\") i++;
+      if (text[i] === "\n") out += "\n";
+    } else if (c === "/" && text[i + 1] === "/") {
+      while (i + 1 < text.length && text[i + 1] !== "\n") i++;
+    } else out += c;
   }
-  return { code, delta };
+  return out;
 }
 
+/**
+ * Facts the schema loader does not keep: `view` blocks, unique fields, `@relation(references: [...])` lists, and the
+ * shapes the loader cannot see (it reads `model X {` and `}` only at column 0, with the brace on the same line), which
+ * fail closed: a block header whose brace is on a later line or that is indented, a closing brace that is not at column 0,
+ * and brackets still open at a column-0 block header or `}` or at the end of the file (`unbalanced`).
+ * Physical lines are joined into logical ones first: inside open parentheses or brackets, and a line that
+ * starts with an attribute (`@unique` under its field, indented or not).
+ */
 function scanSchemaSource(text) {
-  const out = { views: [], unique: [], references: [], braceOnNextLine: [], unbalanced: null };
+  const out = { views: [], unique: [], references: [], braceOnNextLine: [], indentedHeader: [], indentedBrace: false, unbalanced: null };
   const logical = [];
   let depth = 0;
-  text.split("\n").forEach((raw, n) => {
+  schemaCode(text).split("\n").forEach((line, n) => {
     // A block header (or its closing brace) at column 0 cannot sit inside an open attribute: the file is unreadable here.
-    if (depth > 0 && out.unbalanced === null && /^(\}|model\b|view\b|enum\b|type\b|datasource\b|generator\b)/.test(raw)) out.unbalanced = `line ${n + 1}`;
-    const { code: line, delta } = scanSchemaLine(raw);
+    if (depth > 0 && out.unbalanced === null && /^(\}|model\b|view\b|enum\b|type\b|datasource\b|generator\b)/.test(line)) out.unbalanced = `line ${n + 1}`;
     const continues = depth > 0 || /^[ \t]*@(?!@)/.test(line);
     if (continues && logical.length > 0) logical[logical.length - 1] += ` ${line.trim()}`;
     else logical.push(line);
-    depth = Math.max(0, depth + delta);
+    for (const c of line) depth += c === "(" || c === "[" ? 1 : c === ")" || c === "]" ? -1 : 0;
+    if (depth < 0) depth = 0;
   });
   if (depth > 0 && out.unbalanced === null) out.unbalanced = "the end of the file";
   let model = null;
   logical.forEach((line, k) => {
     const lone = /^(model|view)\s+(\w+)\s*$/.exec(line);
     if (lone && /^\s*\{/.test(logical[k + 1] ?? "")) out.braceOnNextLine.push(lone[2]);
+    const indented = /^[ \t]+(?:model|view|enum|type|datasource|generator)\s+(\w+)\s*\{/.exec(line);
+    if (indented) out.indentedHeader.push(indented[1]);
+    if (/^[ \t]+\}/.test(line)) out.indentedBrace = true;
     const open = /^(model|view)\s+(\w+)\s*\{/.exec(line);
     if (open) {
       if (open[1] === "view") out.views.push(open[2]);
@@ -513,6 +524,8 @@ const UNIQUE_HASH_FIELDS = new Set(
 /** The first schema check that fails, as a fatal message, or null. */
 function schemaViolation() {
   if (SCHEMA_SOURCE.unbalanced) return `${SCHEMA_PATH}: a parenthesis or bracket is still open at ${SCHEMA_SOURCE.unbalanced}: the schema cannot be read reliably.`;
+  if (SCHEMA_SOURCE.indentedHeader.length > 0) return `${SCHEMA_PATH}: ${SCHEMA_SOURCE.indentedHeader[0]} opens an indented block: the schema reader sees blocks that start at column 0 only (run prisma format).`;
+  if (SCHEMA_SOURCE.indentedBrace) return `${SCHEMA_PATH}: a closing brace is not at column 0: the schema reader would not end its block there (run prisma format).`;
   if (SCHEMA_SOURCE.braceOnNextLine.length > 0) return `${SCHEMA_PATH}: ${SCHEMA_SOURCE.braceOnNextLine[0]} opens its block on a later line: the schema reader cannot see it.`;
   const mapped = new Set();
   for (const [model, fields] of MODELS) {
@@ -1242,7 +1255,8 @@ const RELATION_FOLLOW = new Set([
 const OBJECT_KINDS = new Set(["FUNCTION", "PROCEDURE", "VIEW", "TRIGGER", "RULE"]);
 const OBJECT_MODIFIERS = new Set(["OR", "REPLACE", "TEMP", "TEMPORARY", "RECURSIVE", "MATERIALIZED", "CONSTRAINT", "EVENT", "UNLOGGED", "GLOBAL", "LOCAL"]);
 const XML_AND_LINK_CALL = /^(?:query_to_xml|table_to_xml|cursor_to_xml|schema_to_xml|database_to_xml|dblink)/;
-const SQL_WORD_CHAR = /[\p{L}\p{N}_$]/u;
+// A word character, or a `-` / `/` (which a substitution can complete into a comment marker).
+const SQL_WORD_CHAR = /[\p{L}\p{N}_$\-/]/u;
 const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const isSqlWord = (t, upper) => t !== undefined && t.type === TOKEN.WORD && t.upper === upper;
@@ -1413,7 +1427,7 @@ function checkSqlLiteral(input, trusted) {
     const before = input.parts[k].at(-1);
     const after = input.parts[k + 1][0];
     if ((before && SQL_WORD_CHAR.test(before)) || (after && SQL_WORD_CHAR.test(after))) {
-      add("W6", { line }, "a substitution adjacent to a word character assembles a name from parts");
+      add("W6", { line }, "a substitution adjacent to a word character, - or / assembles a name or a comment marker from parts");
     }
     line += newlines(substitution);
   });
