@@ -133,14 +133,19 @@ describe("team route handlers reach the membership gate", () => {
     const files = walkRouteFiles(TEAM_ROUTES_DIR);
     expect(files.length, "the walk found no route.ts").toBeGreaterThan(0);
 
-    const project = new Project({ skipAddingFilesFromTsConfig: true });
+    // Syntax only: the check reads each route file's own handlers, so the
+    // files' imports are not loaded (resolving them parsed much of src/ and
+    // ran past the default timeout under CI coverage).
+    const project = new Project({ skipAddingFilesFromTsConfig: true, skipFileDependencyResolution: true });
     project.addSourceFilesAtPaths(files);
     expect(project.getSourceFiles().map((sf) => sf.getFilePath()).sort()).toEqual(
       files.map((file) => file.split(path.sep).join("/")).sort(),
     );
 
     expect(project.getSourceFiles().flatMap(reachProblems)).toEqual([]);
-  });
+    // Parsing 40-odd route files takes several seconds under coverage
+    // instrumentation, past vitest's 10 s default on a CI shard.
+  }, 60_000);
 });
 
 describe("the reach check itself", () => {
