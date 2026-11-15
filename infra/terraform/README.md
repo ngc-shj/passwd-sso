@@ -651,6 +651,9 @@ would fail closed. Whatever step 5 answers, a key it leaves behind (`d` in
 the listing) means a writer can pass the Deny with a header value that does
 not make the write conditional — report that too. Keep the five answers with
 the deployment's records; they are the evidence the static tests cannot give.
+The cleanup deletes only key `a`: delete every other object the listing shows
+before `delete-bucket`. A key from a step that unexpectedly succeeded is the
+signal above, and it blocks the bucket's removal.
 
 **Outputs** used by the runbooks and `scripts/deploy.sh`:
 `audit_anchors_bucket_name`, `audit_anchor_s3_prefix`,

@@ -3132,6 +3132,20 @@ describe("AuditAnchorPublisher.runCadence — a manifest naming no predecessor",
     expect(metadataOf(db, "AUDIT_ANCHOR_PUBLISH_FAILED")).toEqual(reported.map((key) => rowAbout(key)));
   });
 
+  it("the manifest a run adopts names a previous one that names none while an earlier key is listed: one row about the previous one", async () => {
+    const db = publishedDuring(PREV_BOUNDARY);
+    const primary = await archivedPrimary();
+    const previous = ours(PREV_BOUNDARY);
+    await storeManifest(primary, ours(EARLIER));
+    await storeManifest(primary, previous);
+    await storeManifest(primary, ours(BOUNDARY, naming(previous)));
+
+    const outcome = await publisherFor(db, { destinations: [primary] }).runCadence(BOUNDARY);
+
+    expect(outcome).toMatchObject({ kind: "published", adopted: true });
+    expect(metadataOf(db, "AUDIT_ANCHOR_PUBLISH_FAILED")).toEqual([rowAbout(PREV_KEY)]);
+  });
+
   it("a run that fails with its manifest stored writes the row after its failure row; chained to a first manifest it writes the failure row alone", async () => {
     const lostCommit = { hooks: { afterUpload: async () => { throw new Error("commit lost"); } } };
     const failureRow = { failureReason: "COMMIT_FAILED_AFTER_UPLOAD:unknown", artifactKey: OWN_KEY_AT_BOUNDARY, anchoredAt: BOUNDARY.toISOString() };

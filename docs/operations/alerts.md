@@ -1068,13 +1068,18 @@ also written to the `AUDIT_ANCHOR_PUBLISH_FAILED` row) and `stage`:
   raised once the primary held the boundary's object and before every
   secondary did (`<code>` as for `before_upload`); it writes no pause, and the
   retry adopts the stored object. The one database statement in that interval
-  is the read of the anchor rows the manifest covers, so `<code>` is `55P03`
-  (lock timeout) there only under a table-level lock on `audit_chain_anchors`
-  (`LOCK TABLE … IN ACCESS EXCLUSIVE MODE`, or DDL), which blocks reads. A
-  **row** lock — what an `UPDATE` or `SELECT … FOR UPDATE` on the anchor rows
-  holds — does not block that read: it times out the anchor-row update, which
-  runs after every destination holds the object, so it is
-  `COMMIT_FAILED_AFTER_UPLOAD:55P03` at stage `after_upload`. Neither is
+  is a read of the anchor rows the manifest covers, and the code handles a lock
+  timeout there as `CADENCE_FAILED:55P03` at stage `upload`. In practice it does
+  not occur: the transaction has read `audit_chain_anchors` before it stores
+  anything, so it already holds a read lock on the table until it ends, a later
+  `LOCK TABLE … IN ACCESS EXCLUSIVE MODE` (or DDL) queues behind it, and the
+  transaction's own later read returns at once. A lock timeout after the create
+  is the anchor-row update's, which runs after every destination holds the
+  object: `COMMIT_FAILED_AFTER_UPLOAD:55P03` at stage `after_upload`, whether
+  the lock is a table lock queued ahead of the update or a **row** lock (what an
+  `UPDATE` or `SELECT … FOR UPDATE` on the anchor rows holds). A table lock held
+  *before* the transaction's first read fails that read, before anything is
+  stored, so it is a `before_upload` failure. Neither is
   `lock_held`: once the object is stored a lock timeout is a failed run with
   its rows; `lock_held` is the publish lock only, before anything is created.
   Every failure of this stage with the object stored, and every `after_upload`

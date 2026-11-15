@@ -272,11 +272,16 @@ the commit path, the addendum and the entries below are what the code does.
   in v2.
 - **D61 — `lock_held` only before the primary holds the object:** a 55P03 raised after the
   create used to return `lock_held` with a stored manifest and no rows; it is now a failed run
-  with the comparison rows — `COMMIT_FAILED_AFTER_UPLOAD:55P03` at stage `after_upload` when a
-  row lock on `audit_chain_anchors` (which anyone with UPDATE can hold) times out the
-  anchor-row update, and `CADENCE_FAILED:55P03` at stage `upload` only when a table-level lock
-  (`LOCK TABLE … IN ACCESS EXCLUSIVE MODE`, or DDL) blocks the read of the anchor rows that
-  precedes mirroring (both observed on the worktree database with two rolled-back sessions).
+  with the comparison rows. In practice that is `COMMIT_FAILED_AFTER_UPLOAD:55P03` at stage
+  `after_upload`: a row lock on `audit_chain_anchors` (which anyone with UPDATE can hold)
+  times out the anchor-row update. The code also handles a lock timeout between the create
+  and that update as `CADENCE_FAILED:55P03` at stage `upload`, but the publish transaction
+  already holds a read lock on the table from its earlier reads, so a table-level lock cannot
+  make its later read wait (probed on the worktree database: with a prior read in the same
+  transaction the later read returned at once while the other session's `LOCK TABLE … ACCESS
+  EXCLUSIVE` timed out; a table lock taken before the transaction's first read fails the run
+  before anything is stored). An earlier version of this entry and of `alerts.md` stated the
+  table-lock arm as reachable; the functionality reviewer was right that it is not.
 - **D62 — order on a failed run** (C11): pause, the failure row, then the comparison rows, so
   a hung read-back cannot delay the alarm line. A drop reported by the failed run is reported
   again by the adopt that settles it.
@@ -327,3 +332,11 @@ the commit path, the addendum and the entries below are what the code does.
 - **D74 — the manual test was repeated on the final code** (manual-test record, section 5):
   the built bundle writes format version 2 with the expected `chainLocation`; the
   `LEGACY_MANIFEST_UNSETTLED` state and its runbook SQL were exercised end to end.
+
+## Phase 3, round 6 (confirmation) — inline minors applied
+
+- **D75 — tests and wording only:** a test for the adopt's predecessor check in
+  `genesisEmits` (red-proven); a test pinning the README's hand-copied policy JSON (en and ja)
+  to the `DenyUnconditionalPut` statement; the scratch-bucket procedure's cleanup line; the
+  threat model lists the second-key wedge during the first day after an upgrade; `alerts.md`
+  states the lock-timeout behaviour as in D61.

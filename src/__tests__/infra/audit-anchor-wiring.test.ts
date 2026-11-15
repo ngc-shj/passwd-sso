@@ -759,6 +759,35 @@ function edited(file: string, from: string, to: string): TerraformConfig {
   return new TerraformConfig(TERRAFORM_DIR, { [file]: text.replace(from, to) });
 }
 
+/**
+ * The hand-copied policy of the README's "Verify the conditional-write policy
+ * once" procedure against the DenyUnconditionalPut statement Terraform renders.
+ * Principal and Resource differ on purpose (a scratch bucket); the rest must
+ * not, or the check on AWS verifies a policy that is not the deployed one.
+ */
+function readmePolicyViolations(tf: TerraformConfig, readme: string): string[] {
+  const m = /--policy "(\{[\s\S]*?\n\})"/.exec(readme);
+  if (!m) return ["readme: no --policy block"];
+  let copied: Statement | undefined;
+  try {
+    const policy = JSON.parse(m[1].replaceAll('\\"', '"').replaceAll("$SCRATCH", "scratch")) as { Statement: Statement[] };
+    copied = policy.Statement.find((s) => s.Sid === "DenyUnconditionalPut");
+  } catch (err) {
+    return [`readme: the --policy block is not JSON (${(err as Error).message})`];
+  }
+  if (!copied) return ["readme: no DenyUnconditionalPut statement"];
+  const policy = plain(tf.attr(tf.resource("aws_s3_bucket_policy", "audit_anchors"), "policy")) as { Statement: Statement[] };
+  const real = policy.Statement.find((s) => s.Sid === "DenyUnconditionalPut");
+  if (!real) return ["terraform: no DenyUnconditionalPut statement"];
+  const out: string[] = [];
+  if (copied.Effect !== real.Effect) out.push(`readme: Effect ${String(copied.Effect)}`);
+  if (JSON.stringify(asSortedList(copied.Action)) !== JSON.stringify(asSortedList(real.Action))) out.push(`readme: Action ${JSON.stringify(copied.Action)}`);
+  if (JSON.stringify(normalizeCondition(copied.Condition)) !== JSON.stringify(normalizeCondition(real.Condition))) {
+    out.push(`readme: Condition ${JSON.stringify(copied.Condition)}`);
+  }
+  return out;
+}
+
 const real = new TerraformConfig(TERRAFORM_DIR);
 const withBreakGlass = { vars: { audit_anchor_break_glass_role_arn: BREAK_GLASS_ARN } };
 
@@ -1394,6 +1423,27 @@ describe("the EventBridge matcher", () => {
   it("refuses an empty $or and an unknown matcher", () => {
     expect(() => matchesEventPattern({ $or: [] }, {})).toThrow(/\$or/);
     expect(() => matchesEventPattern({ a: [{ wildcard: "*" }] }, { a: "x" })).toThrow(/unsupported matcher/);
+  });
+});
+
+describe("the README's conditional-write verification policy", () => {
+  const readmes = ["README.md", "README.ja.md"].map((name) => [name, readFileSync(join(TERRAFORM_DIR, name), "utf8")] as const);
+
+  it.each(readmes)("%s carries the DenyUnconditionalPut statement Terraform renders", (_name, text) => {
+    expect(readmePolicyViolations(real, text)).toEqual([]);
+  });
+
+  it.each<[string, (text: string) => string, string]>([
+    ["a plain Bool", (t) => t.replace('\\"BoolIfExists\\"', '\\"Bool\\"'), "readme: Condition"],
+    ["a missing object-creation condition", (t) => t.replace(/,\n\s*\\"BoolIfExists\\": \{[^}]*\}/, ""), "readme: Condition"],
+    ["a Null condition fired on the wrong value", (t) => t.replace('\\"s3:if-none-match\\": \\"true\\"', '\\"s3:if-none-match\\": \\"false\\"'), "readme: Condition"],
+    ["an Allow", (t) => t.replace('\\"Effect\\": \\"Deny\\"', '\\"Effect\\": \\"Allow\\"'), "readme: Effect"],
+  ])("reports %s", (_label, mutate, violation) => {
+    const text = readmes[0][1];
+    const mutated = mutate(text);
+    expect(mutated).not.toBe(text);
+    const violations = readmePolicyViolations(real, mutated);
+    expect(violations.some((v) => v.startsWith(violation)), JSON.stringify(violations)).toBe(true);
   });
 });
 

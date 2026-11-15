@@ -327,3 +327,48 @@ missing) and reddened a test with each of 42 scratch-copy mutations.
 Security: R29/R35/R49/R50 S5-1; R49 S5-4; checked R38, R48, R55, RS3, RS4; R43 no widening.
 Functionality: R47/R51 F5-1; R29 F5-2; R32/R35 F5-4; checked R15/R24, R33, R38, R40, R43.
 Testing: R29 T5-1; RT7 all 42 mutations red; checked R14, R33, R40/R48, R42, RT1, RT9, RT10, RT11.
+
+---
+
+# Round 6 (confirmation of the round-5 fixes)
+Date: 2026-11-15
+
+## Changes from Previous Round
+
+Confirmation of commit `60ed11a8f` by the three reviewers.
+
+- **Security: No findings.** S5-1..S5-4 resolved; R43 against round 5 — nothing wider. Three
+  observations, applied: the procedure's cleanup line, a pin between the README's policy JSON
+  and `storage.tf`, and the threat model naming the second-key wedge after an upgrade.
+- **Functionality:** F5-1, F5-3, F5-4 resolved. F5-2 continuing as wording: the reviewer held
+  that `CADENCE_FAILED:55P03` at stage `upload` is not reachable through a table lock because
+  the publish transaction already holds a read lock on `audit_chain_anchors`. A two-session
+  probe on the worktree database confirmed the reviewer (a later read in a transaction that
+  already read the table returns at once; a lock taken before the first read fails the run
+  before anything is stored). `alerts.md` and D61 corrected. No new finding.
+- **Testing:** T5-1, T5-2 resolved; 15 mutations on the round's guards — 13 red, one
+  equivalent (the create-found-the-key call site of the shared-date clause is unreachable
+  for a v1 object: the date clause refuses first), one green → T6-1.
+
+| ID | Sev | Finding | Resolution |
+|----|-----|---------|------------|
+| T6-1 | Minor | The adopt's predecessor check in `genesisEmits` stayed green when removed | Fixed — a third adopt case, red-proven |
+| F5-2 | Minor | (continuing) lock-timeout wording | Fixed — as above |
+
+## Tightening-only skip — Round 6
+Findings applied directly (no Round 7 review):
+- [T6-1] [Minor] missing reddening test — `src/workers/audit-anchor-publisher.test.ts` — test added
+- [F5-2] [Minor] doc wording about an unreachable arm — `docs/operations/alerts.md`, deviation D61 — reworded
+- [security observations] README cleanup line, README↔`storage.tf` pin test, threat-model wording — docs and a test
+Justification: every item is inside round 5's fix range, is a test addition or documentation
+wording, and changes no production code — no security-boundary predicate is touched.
+
+## Termination (supersedes the round-4 termination)
+
+Code review converged in six rounds. No Critical or Major is open. Nothing is Accepted,
+Skipped or deferred to a follow-up: the round-1 acceptance (S-7), SC1, SC3 and the round-3
+recommendation were implemented as contracts C9–C12 and reviewed in rounds 5–6. What cannot
+be verified in this environment stays `blocked-deferred` with its constraint (E1/E2/E3) in
+the manual-test record: the bucket policy and IAM grant on real AWS (with a documented
+one-time scratch-bucket check), S3's 409, GitHub's real asset behaviour, and the runbook's
+`aws`/`terraform` lines.

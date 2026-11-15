@@ -461,6 +461,9 @@ aws s3api delete-bucket --bucket "$SCRATCH" --region "$REGION"
 ある）は、書き込みを条件付きにしないヘッダ値で Deny を通過できることを意味します。
 これも報告してください。5 つの応答はデプロイメントの記録として保管してください。
 静的テストでは得られない証拠です。
+後片付けで削除するのはキー `a` だけです。`delete-bucket` の前に、一覧に表示された
+ほかのオブジェクトもすべて削除してください。想定外に成功した手順のキーは上記の
+兆候であり、バケットの削除を妨げます。
 
 **Outputs**（runbook と `scripts/deploy.sh` が使う）: `audit_anchors_bucket_name`、
 `audit_anchor_s3_prefix`、`audit_anchor_publisher_task_role_arn`、
