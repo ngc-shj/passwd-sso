@@ -989,6 +989,65 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
     });
   });
 
+  it("a second manifest key on the date of the recorded version 1 manifest is refused; the same manifest alone on its date is chained to", async () => {
+    const otherKey = randomBytes(32);
+    const next = c.boundaryAt(1);
+    await setLastPublishedAt(ctx.su, [tenantA, tenantB], wallClockAtDate(c.boundary));
+
+    // Deny: a version 1 manifest of another chain, copied onto the recorded date.
+    const { dest } = await c.filesystem();
+    await storeManifest(dest, ours(c.boundary, dest, { version: 1 }));
+    await archivePublicKey(dest, publicKeyForSigningKey(otherKey));
+    await storeManifest(dest, signedManifest({ signingKey: otherKey, boundary: c.boundary, version: 1 }));
+    const before = await sortedKeys(dest);
+
+    const refused = await runAt(next, [dest]);
+
+    expect(refused).toMatchObject({
+      kind: "failed",
+      reason: "CADENCE_FAILED:LEGACY_MANIFEST_UNSETTLED",
+      stage: "before_upload",
+    });
+    await expectDenied(dest, before);
+    expect(await attemptsRow()).toBeNull();
+
+    // Allow: the one key on that date.
+    const { dest: alone } = await c.filesystem();
+    await storeManifest(alone, ours(c.boundary, alone, { version: 1 }));
+    await archivePublicKey(alone, publicKeyForSigningKey(otherKey));
+    expect(await runAt(next, [alone])).toMatchObject({ kind: "published", adopted: false });
+  });
+
+  it("a manifest naming no predecessor after earlier ones: its recorded day skips and writes nothing, and the publish that chains to it writes the row", async () => {
+    const { dest } = await c.filesystem();
+    expect((await runAt(c.boundary, [dest])).kind).toBe("published");
+    // What an earlier release's publisher stores and records once its pointer row is gone.
+    const slippedAt = c.boundaryAt(1);
+    const slipped = ours(slippedAt, dest, { version: 1 });
+    await storeManifest(dest, slipped);
+    await setLastPublishedAt(ctx.su, [tenantA, tenantB], wallClockAtDate(slippedAt));
+
+    expect((await runAt(slippedAt, [dest])).kind).toBe("skipped_already_published");
+    expect(await publisherRowsFor(slippedAt)).toEqual([]);
+
+    const next = c.boundaryAt(2);
+    expect(await runAt(next, [dest])).toMatchObject({ kind: "published", adopted: false });
+    const failures = (await publisherRowsFor(next)).filter((r) => r.failureReason !== null);
+    expect(failures.map((r) => r.metadata)).toEqual([
+      {
+        failureReason: "GENESIS_AFTER_EARLIER_MANIFESTS",
+        artifactKey: c.manifestKey(next),
+        anchoredAt: next.toISOString(),
+        comparedArtifactKey: slipped.artifactKey,
+      },
+    ]);
+
+    // Allow: the publish after it chains to a manifest that names its predecessor.
+    const after = c.boundaryAt(3);
+    expect((await runAt(after, [dest])).kind).toBe("published");
+    expect(failureReasons(await publisherRowsFor(after))).toEqual([]);
+  });
+
   it("a chain_seq lowered between two publishes emits one CHAIN_SEQ_REGRESSION row; an unchanged one, none", async () => {
     const { dest } = await c.filesystem();
     expect(await publishTwice(dest, () => setChainSeq(ctx.su, tenantA, 4))).toEqual(["CHAIN_SEQ_REGRESSION"]);

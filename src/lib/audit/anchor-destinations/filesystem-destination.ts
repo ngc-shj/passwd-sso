@@ -52,7 +52,11 @@ async function fileNames(dir: string): Promise<string[]> {
 
 export class FilesystemDestination implements AnchorDestination {
   readonly name = "filesystem";
-  /** The base path made absolute; a symlink in it is not resolved. */
+  /**
+   * The base path normalised — a trailing slash, `.` and `..` segments do not
+   * make another location — and not resolved through symlinks. Built from the
+   * environment it is absolute already (`buildDestinationsFromEnv`).
+   */
   readonly location: string;
 
   private readonly basePath: string;

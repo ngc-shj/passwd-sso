@@ -7,7 +7,7 @@ Run on 2026-11-14 (JST) in the branch's worktree, against the worktree's own dat
 logs (checked by grepping the logs and statements for both seeds: 0 files).
 
 Runbook under test: `docs/operations/audit-anchor-rotation-runbook.md`, blob
-`cb73bf56b0c5eaaf9fac21316f0c209ba673b37d` (`git hash-object` of the file committed with this
+`2e313220cd92e55a499ba03e0a4bb1e98c4f304c` (`git hash-object` of the file committed with this
 record). Its commands were extracted with
 
 ```
@@ -73,8 +73,8 @@ behaving as documented. The publisher role's column grants (`last_published_at`,
 | `npm run generate:audit-anchor-tag-secret -- --out <file>` (inline) | local | exit 0; file mode 600, 65 bytes |
 | `(umask 077; aws secretsmanager get-secret-value … \| jq -r '.AUDIT_ANCHOR_SIGNING_KEY' > old-key.hex)` | local half only | `umask 077` + `jq -r` on a JSON document of that shape gives a mode-600, 65-byte file that `audit-anchor-kid` accepts (exit 0). The `aws secretsmanager` half: `blocked-deferred (E1)` |
 | `export …=$(terraform output -raw audit_anchors_bucket_name)` / `audit_anchor_s3_prefix` / `app_secrets_arn` | not run | `blocked-deferred (E1)`. Static: the three output names exist in `infra/terraform/outputs.tf` |
-| SQL: record a version 1 manifest as settled (`LEGACY_MANIFEST_UNSETTLED` reset) | local, rolled back | parses and runs under the bypass GUCs; matched 0 rows on the empty worktree database (syntax and admission only) |
-| The bucket policy's `DenyUnconditionalPut` (C9) on real S3 | not run | `blocked-deferred (E1)` — MinIO evaluates no bucket policy here. Static: `audit-anchor-wiring.test.ts`, `audit-anchor-key-contract.test.ts`. Worst case if the statement is wrong: every create is refused (`s3-object-lock_UPLOAD_FAILED:AccessDenied`), alarmed; nothing is published wrongly |
+| SQL: record a version 1 manifest as settled (`LEGACY_MANIFEST_UNSETTLED` reset) | local, as a NOBYPASSRLS role, against the state of section 5 | without the three `SET LOCAL` lines `UPDATE 0`; with them `UPDATE 1`, committed; the publisher then skips (section 5) |
+| The bucket policy's `DenyUnconditionalPut` (C9) on real S3, and the scratch-bucket procedure "Verify the conditional-write policy once" in `infra/terraform/README.md` | not run | `blocked-deferred (E1)` — MinIO evaluates no bucket policy here, and the `aws` commands of the procedure were not executed. Static: `audit-anchor-wiring.test.ts`, `audit-anchor-key-contract.test.ts`. Two ways the statement can be wrong: the conditional key misnamed → every create refused (`s3-object-lock_UPLOAD_FAILED:AccessDenied`), alarmed; the statement not binding → no refusal and no alarm, which only the procedure shows. Until it is run the policy is enforced on paper only |
 | `aws s3api head-object …` | not run | `blocked-deferred (E1)` — real AWS. Local equivalent: the archived `.pub` is 65 bytes (64 hex + newline), 1 version |
 | `aws s3api get-object-retention …` | not run | `blocked-deferred (E1)`. COMPLIANCE retention on `create` is asserted on MinIO by `audit-anchor-s3-destination.integration.test.ts` |
 | `aws s3api list-object-versions …` (two places) | not run | `blocked-deferred (E1)`. Local equivalent via the SDK: every key in section 1 has 1 version, 0 delete markers |
@@ -114,6 +114,23 @@ red proofs), listed here because they are the reason for the change:
 
 Not exercised anywhere (E1/E2): the IAM read grant and the bucket policy on real S3, S3's
 `409 ConditionalRequestConflict`, GitHub's real asset-upload behaviour.
+
+## 5. Final code: the built bundle writes format version 2, and the version 1 reset works
+
+Repeated after the last review fixes (bundle rebuilt from the tree committed with this
+record), fresh prefixes, the publisher's database role.
+
+| # | Step | Expected | Observed |
+|---|------|----------|----------|
+| 5.1 | First boot, empty prefix | `published`; the object is format version 2 bound to this location | `kind: published, adopted: false`, healthy line; stored payload `version: 2`, `chainLocation` equal to `printf 'audit-anchor-chain-location-v1\0s3://<bucket>/<prefix>' \| sha256sum`, `previousManifest: null` |
+| 5.2 | Restart | skip | `skipped_already_published` |
+| 5.3 | `last_published_at` set to NULL, restart | adopt | `published, adopted: true`, same `manifestSha256`; 1 version, 0 delete markers |
+| 5.4 | A format version 1 manifest for today's boundary planted under the deployment's key and id (as an earlier release stores one), anchors unrecorded; boot, and boot again | fail closed, twice | `CADENCE_FAILED:LEGACY_MANIFEST_UNSETTLED`, stage `before_upload`, `cadence_failed` line, one failure row each; nothing written to the prefix |
+| 5.5 | The runbook's "Recording a version 1 manifest" SQL, `<anchoredAt>` = the manifest's boundary | records the publish | without the `SET LOCAL` lines `UPDATE 0`; with them `UPDATE 1` |
+| 5.6 | Restart | skip; the version 1 object untouched | `skipped_already_published`; 1 version of the key |
+
+Not observed here (needs the next boundary): the first version 2 manifest chaining to that
+version 1 one — covered on real Postgres by `audit-anchor-publisher.integration.test.ts`.
 
 ## Rollback
 

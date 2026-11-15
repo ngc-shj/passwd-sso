@@ -349,6 +349,11 @@ function conditionalWriteViolations(tf: TerraformConfig, destinationSource: stri
   if (deny?.Condition?.Null?.["s3:if-none-match"] !== "true") {
     out.push("policy: no Deny on a PutObject whose s3:if-none-match is null");
   }
+  // IfExists: plain Bool is false on a request that does not carry the key,
+  // so the Deny would apply to nothing and say nothing.
+  if (deny?.Condition?.BoolIfExists?.["s3:ObjectCreationOperation"] !== "true" || deny.Condition.Bool !== undefined) {
+    out.push("policy: the Deny's object-creation test is not BoolIfExists");
+  }
   const puts = [...destinationSource.matchAll(/new PutObjectCommand\(\{([\s\S]*?)\}\)/g)].map((m) => m[1]);
   if (puts.length !== 1) out.push(`destination: ${puts.length} PutObjectCommand literals, expected 1`);
   for (const put of puts) {
@@ -382,11 +387,22 @@ describe("conditional-write contract", () => {
   });
 
   it("catches a policy whose Deny is on another condition key", () => {
-    const key = 'Null = { "s3:if-none-match" = "true" }';
+    const key = 'Null         = { "s3:if-none-match" = "true" }';
     expect(storage.split(key).length - 1).toBe(1);
     const tf = new TerraformConfig(TERRAFORM_DIR, { "storage.tf": storage.replace(key, 'Null = { "s3:if-match" = "true" }') });
     expect(conditionalWriteViolations(tf, destinationSource)).toEqual([
       "policy: no Deny on a PutObject whose s3:if-none-match is null",
+    ]);
+  });
+
+  it("catches a policy whose object-creation test is a plain Bool", () => {
+    const operator = 'BoolIfExists = { "s3:ObjectCreationOperation" = "true" }';
+    expect(storage.split(operator).length - 1).toBe(1);
+    const tf = new TerraformConfig(TERRAFORM_DIR, {
+      "storage.tf": storage.replace(operator, 'Bool = { "s3:ObjectCreationOperation" = "true" }'),
+    });
+    expect(conditionalWriteViolations(tf, destinationSource)).toEqual([
+      "policy: the Deny's object-creation test is not BoolIfExists",
     ]);
   });
 

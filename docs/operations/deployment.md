@@ -320,10 +320,15 @@ image runs:
    policy (`aws_iam_role_policy.ecs_audit_anchor_publisher_s3`) gains
    `s3:GetObject` on `<bucket>/<prefix>/*` and `s3:ListBucket` on the bucket
    for the prefix; and the anchors bucket policy gains `DenyUnconditionalPut`,
-   which refuses any `PutObject` that creates an object without
+   a statement that denies any `PutObject` that creates an object without
    `If-None-Match`. Being a change to the bucket policy, the apply fires
    `<name_prefix>-audit-anchor-bucket-config-change` once — the expected false
-   positive.
+   positive. Static tests pin the statement; that S3 enforces it as written
+   has not been exercised on AWS by this repository. Run the one-time check on
+   a scratch bucket at the first apply (`infra/terraform/README.md`, "Verify
+   the conditional-write policy once"): a statement that refuses too much
+   stops every PUT and is alarmed, one that does not bind refuses nothing and
+   alarms nothing, and only that check tells the second from a working one.
 2. **Then the migration and the image.** The migration
    `20261115000000_remove_audit_anchor_legacy_settings` deletes the two
    `system_settings` rows the earlier publisher decided from.
@@ -332,16 +337,32 @@ image runs:
 apply and the publisher's replacement the earlier release is still running
 against the new policy and, after the migration, without its two rows:
 
-- On the Terraform bucket its PUT carries no `If-None-Match` and is refused:
-  a publish attempted in that interval fails with
+- On the Terraform bucket its PUT carries no `If-None-Match` and the policy
+  denies it: a publish attempted in that interval fails with
   `s3-object-lock_UPLOAD_FAILED:AccessDenied` (alarmed, and it pauses the
   manifest's tenants until the next boundary). Nothing is stored; the new
-  image publishes the boundary.
+  image publishes the boundary. This holds only where the statement binds
+  (step 1): do not count on it before the one-time check has been run.
 - On a destination without that policy (GitHub Releases, a filesystem, another
   S3 bucket) nothing refuses it: with the pointer row gone, a manifest the
   earlier release publishes in that interval names **no previous manifest**,
   and the chain's link is broken at that day. Stop the earlier publisher
   before migrating if the interval could reach the publish time.
+
+If an earlier publisher did slip a manifest in and recorded it, this release
+does not refuse it: the manifest is a version 1 one on the date the database
+records, so the new publisher skips that day and chains to it at the next
+boundary. (Stored but not recorded, it fails the runs with
+`CADENCE_FAILED:LEGACY_MANIFEST_UNSETTLED`; the row below then comes with the
+publish after it is recorded.) What the
+operator sees is one `AUDIT_ANCHOR_PUBLISH_FAILED` row with
+`GENESIS_AFTER_EARLIER_MANIFESTS` beside that next publish's
+`AUDIT_ANCHOR_PUBLISHED` row, `comparedArtifactKey` naming the manifest — not
+on the day itself, whose run only skips and writes nothing. Nothing alarms;
+look for the row after any upgrade that ran close to 00:05 UTC
+(`docs/operations/alerts.md`, "Rows a publish writes"). The break cannot be
+repaired: record it, and tell verifiers that `audit-verify --prior-manifest`
+on that manifest and the one before it passes with the genesis `WARN`.
 
 `./scripts/deploy.sh` run from this release's checkout does both in that
 order: its `terraform apply` (step 3) applies the whole configuration, the
@@ -381,12 +402,33 @@ After the upgrade:
   records it: the earlier release wrote `last_published_at` with every publish,
   and the latest manifest's date must be that value's date. Where it is not,
   the runs fail with `CADENCE_FAILED:LEGACY_MANIFEST_UNSETTLED`
-  (the runbook's "Recording a version 1 manifest"). A day's key that earlier
+  (the runbook's "Recording a version 1 manifest"); they fail the same way
+  when a second manifest key holds that date. A day's key that earlier
   releases wrote more than once keeps its versions
   (`docs/security/audit-anchor-verification.md` "Object versions").
 - If the first runs fail with `CADENCE_FAILED:LEGACY_MANIFEST_UNSETTLED`,
   `DESTINATION_BEHIND_DATABASE` or `LAST_PUBLISHED_AHEAD_OF_CLOCK`, see the
   runbook's upgrade note under "Telling which side is wrong".
+
+#### Destination names and the chain location
+
+Version 2 manifests are bound to the primary destination's location
+(`chainLocation`), which is built from the configured name. Changing the name
+after the first publish makes the chain's own manifests foreign
+(`CADENCE_FAILED:PUBLISHED_OBJECT_FOREIGN_LOCATION`), so set it once:
+
+- **S3** — the bucket and prefix exactly as configured.
+- **GitHub Releases** — `AUDIT_ANCHOR_DESTINATION_GH_REPO`, compared in lower
+  case: `Owner/Repo` and `owner/repo` are one location (requests use the
+  spelling you configure). A renamed or transferred repository is another.
+- **Filesystem** — `AUDIT_ANCHOR_DESTINATION_FS_PATH` must be an **absolute**
+  path. A relative one would resolve against the working directory and change
+  with where the process starts, so the publisher refuses it at boot
+  (`anchor destination configuration invalid`, `error.code:
+  FS_PATH_NOT_ABSOLUTE`), and so do the `audit-anchor-*` key scripts. A
+  trailing slash and `.`/`..` segments do not matter; symlinks are not
+  resolved, so the same directory through a symlink or another mount point is
+  another location.
 
 #### GitHub Releases destination
 

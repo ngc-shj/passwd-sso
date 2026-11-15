@@ -35,6 +35,24 @@ function migrationBlock(): string {
   return found[0][1];
 }
 
+/**
+ * The keys the block deletes: the list of its one DELETE, which must be
+ * `WHERE key IN (…)` over string literals and nothing else. The planted rows
+ * below cannot show a key deleted beyond them.
+ */
+function deletedKeys(block: string): string[] {
+  const deletes = [...block.matchAll(/\bDELETE\s+FROM\s+(\S+)\s+WHERE\s+([^;]*);/g)];
+  if (deletes.length !== 1) throw new Error(`expected exactly one DELETE in the block, found ${deletes.length}`);
+  const [, table, predicate] = deletes[0];
+  const list = /^key\s+IN\s+\(([^()]*)\)$/.exec(predicate.trim());
+  if (table !== TABLE || !list) throw new Error(`the block's DELETE is not "DELETE FROM ${TABLE} WHERE key IN (…)"`);
+  return list[1].split(",").map((item) => {
+    const literal = /^'([^']*)'$/.exec(item.trim());
+    if (!literal) throw new Error(`not a string literal in the DELETE's key list: ${item.trim()}`);
+    return literal[1];
+  });
+}
+
 /** Run `work` as the application role inside a transaction that is rolled back. */
 async function inRolledBackAppTransaction(work: (client: pg.PoolClient) => Promise<void>): Promise<void> {
   const pool = createPool({ connectionString: appConnectionString(), max: 1 });
@@ -85,10 +103,10 @@ async function plantedKeys(client: pg.PoolClient, keys: readonly string[]): Prom
 describe("migration: remove the audit-anchor publisher's legacy settings rows", () => {
   const ALL_KEYS = [...LEGACY_KEYS, ...KEPT_KEYS, UNRELATED_KEY];
 
-  it("names the two rows the earlier publisher decided from, and neither row the publisher still uses", () => {
+  it("deletes exactly the two rows the earlier publisher decided from, and names neither row the publisher still uses", () => {
     expect([...LEGACY_KEYS].sort()).toEqual(["audit_anchor_last_published_boundary", "audit_anchor_previous_manifest"]);
     const block = migrationBlock();
-    for (const key of LEGACY_KEYS) expect(block).toContain(`'${key}'`);
+    expect(deletedKeys(block).sort()).toEqual([...LEGACY_KEYS].sort());
     for (const key of KEPT_KEYS) expect(block).not.toContain(key);
   });
 

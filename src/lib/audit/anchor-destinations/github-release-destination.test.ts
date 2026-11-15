@@ -82,6 +82,16 @@ describe("GitHubReleaseDestination — constructor", () => {
     expect(dest.location).toBe("github://owner/repo");
     expect(elsewhere.location).toBe("github://owner/other");
   });
+
+  it("lower-cases the repository in its location only: the requests keep the configured spelling", async () => {
+    const dest = new GitHubReleaseDestination({ repo: "Owner/Repo", token: "ghp_xxx" });
+    fetchSpy.mockResolvedValueOnce(makeOkResponse([]));
+
+    await dest.list();
+
+    expect(dest.location).toBe("github://owner/repo");
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe("https://api.github.com/repos/Owner/Repo/releases?per_page=100&page=1");
+  });
 });
 
 describe("githubLocationForKey / keyForGithubAsset", () => {

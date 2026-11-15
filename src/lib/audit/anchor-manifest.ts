@@ -236,7 +236,8 @@ export function computeTenantTag(tenantId: string, tagSecret: Buffer): string {
 /**
  * What a manifest carries as `chainLocation`: the SHA-256 of a destination's
  * `location`, domain separated with AUDIT_ANCHOR_CHAIN_LOCATION_DOMAIN + null
- * byte. A hash, so the manifest names no bucket, repository or path.
+ * byte. The manifest does not state the location. The hash is unsalted and a
+ * location is a guessable name, so anyone can confirm a guess by computing it.
  */
 export function chainLocationFor(location: string): string {
   return createHash("sha256")

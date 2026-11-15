@@ -683,7 +683,8 @@ scope contract; S-7's "Accepted" disposition and D52/D57's residual are supersed
 `infra/terraform/storage.tf`, anchors bucket policy: one more statement,
 `DenyUnconditionalPut` — `Effect: Deny`, `Principal: "*"`, `Action: s3:PutObject`, on the
 bucket's objects, with `Null { "s3:if-none-match": "true" }` **and**
-`Bool { "s3:ObjectCreationOperation": "true" }`. This is the shape of the Deny in the S3 User
+`BoolIfExists { "s3:ObjectCreationOperation": "true" }` (code review S5-1: plain `Bool` on
+an absent key is false, which would leave the statement binding nothing, silently). This is the shape of the Deny in the S3 User
 Guide's "Enforce conditional writes on Amazon S3 buckets" (its Example 2, written there for
 `s3:if-match`), applied to `s3:if-none-match`; the `ObjectCreationOperation` condition exempts
 `CreateMultipartUpload`/`UploadPart`, which carry no conditional header. Every writer in this

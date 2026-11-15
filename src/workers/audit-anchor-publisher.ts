@@ -647,13 +647,23 @@ export class AuditAnchorPublisher {
    * copied here from another chain is refused. A version 1 manifest names
    * none: it stands only while the database vouches for it, its date being
    * the published high-water's — the last manifest an earlier release
-   * published and recorded. Any other is refused, so a copied one is, and so
-   * is one that release stored and never recorded.
+   * published and recorded — and only while it is the one manifest key on
+   * that date in `listedKeys`. Any other is refused, so a copied one is, and
+   * so is one that release stored and never recorded. An upgrade in place
+   * leaves one key on the high-water's date; where stored keys cannot be
+   * removed, a version 1 manifest copied onto that date is always a second.
    */
-  private assertOfThisChain(manifest: VerifiedManifest, highWaterBoundary: Date | null): void {
+  private assertOfThisChain(
+    manifest: VerifiedManifest,
+    highWaterBoundary: Date | null,
+    listedKeys: readonly string[],
+  ): void {
     const refuse = (code: string) => new RunFailure(`CADENCE_FAILED:${code}`, "before_upload");
     if (manifest.manifest.version === 1) {
-      if (highWaterBoundary === null || manifest.date !== utcDate(highWaterBoundary)) {
+      const sharesDate = listedKeys.some(
+        (key) => key !== manifest.artifactKey && parseManifestArtifactKey(key)?.date === manifest.date,
+      );
+      if (highWaterBoundary === null || manifest.date !== utcDate(highWaterBoundary) || sharesDate) {
         throw refuse("LEGACY_MANIFEST_UNSETTLED");
       }
     } else if (manifest.manifest.chainLocation !== this.ownChainLocation) {
@@ -708,7 +718,7 @@ export class AuditAnchorPublisher {
     const highWaterBoundary = this.highWaterBoundary(highWater);
     const date = utcDate(boundary);
 
-    if (latest) this.assertOfThisChain(latest, highWaterBoundary);
+    if (latest) this.assertOfThisChain(latest, highWaterBoundary, listedKeys);
 
     if (latest && latest.date > utcDate(wallBoundary)) throw refuse("PUBLISHED_OBJECT_AHEAD");
     if (highWaterBoundary) {
@@ -1035,7 +1045,7 @@ export class AuditAnchorPublisher {
             } catch (err) {
               throw this.readFailure(primary, err);
             }
-            this.assertOfThisChain(found, this.highWaterBoundary(highWater));
+            this.assertOfThisChain(found, this.highWaterBoundary(highWater), listedKeys);
             if (!this.isOurs(found)) {
               return {
                 kind: "skip",
@@ -1088,6 +1098,7 @@ export class AuditAnchorPublisher {
       const destinations = config.destinations.map((d) => d.name);
       const comparedTo = await this.predecessorOf(result, bound);
       pendingEmits.push(...this.publishedEmits(result, comparedTo, boundaryIso));
+      pendingEmits.push(...this.genesisEmits(result, comparedTo, boundaryIso));
       pendingEmits.push({
         action: AUDIT_ACTION.AUDIT_ANCHOR_PUBLISHED,
         metadata: {
@@ -1129,13 +1140,17 @@ export class AuditAnchorPublisher {
       });
       // The stored manifest is compared with its predecessor by the run that
       // stored or found it, with the failure row: no later run may ever see
-      // it as unsettled (`last_published_at` can be moved onto its date).
+      // it as unsettled (`last_published_at` can be moved onto its date). The
+      // row for a predecessor-less manifest goes with them for the same reason.
       // A retry reports the same comparison again, the attempt cap times at
       // most.
       if (stored !== null) {
         const comparedTo = await this.predecessorOf(stored, bound);
         const { published } = stored;
-        await this.flushEmits(this.comparisonEmits(published, comparedTo, published.artifactKey, boundaryIso));
+        await this.flushEmits([
+          ...this.comparisonEmits(published, comparedTo, published.artifactKey, boundaryIso),
+          ...this.genesisEmits(stored, comparedTo, boundaryIso),
+        ]);
       }
       return outcome;
     }
@@ -1329,6 +1344,34 @@ export class AuditAnchorPublisher {
       if (epochChanged > 0) failed("EPOCH_CHANGED", { count: epochChanged });
     }
     return emits;
+  }
+
+  /**
+   * The row for a manifest that names no predecessor although the primary
+   * lists a manifest key dated before it: the chain's link is broken there.
+   * Asked of the manifest this run adopted and of the one the stored manifest
+   * chains to, so at most one row; the first manifest of a location has no
+   * earlier key and yields none. An earlier release's publisher that ran
+   * after its pointer row was deleted writes such a manifest, and so does
+   * anyone holding the signing key.
+   */
+  private genesisEmits(stored: StoredManifest, comparedTo: ComparedTo, anchoredAt: string): PendingEmit[] {
+    const candidates = [
+      ...(stored.adopted ? [stored.published] : []),
+      ...(comparedTo !== null && comparedTo !== PREVIOUS_UNAVAILABLE ? [comparedTo] : []),
+    ];
+    const dates = stored.listedKeys.map((key) => parseManifestArtifactKey(key)?.date);
+    return candidates
+      .filter((m) => m.manifest.previousManifest === null && dates.some((date) => date !== undefined && date < m.date))
+      .map((m) => ({
+        action: AUDIT_ACTION.AUDIT_ANCHOR_PUBLISH_FAILED,
+        metadata: {
+          failureReason: "GENESIS_AFTER_EARLIER_MANIFESTS",
+          artifactKey: stored.published.artifactKey,
+          anchoredAt,
+          comparedArtifactKey: m.artifactKey,
+        },
+      }));
   }
 
   /**

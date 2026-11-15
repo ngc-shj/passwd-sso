@@ -504,8 +504,12 @@ this bucket is never a replication destination); `s3:PutObjectRetention` is refu
 `x-amz-object-lock-mode: COMPLIANCE` (header absent included), with a retention
 past the cap, or with SSE other than `AES256` is refused; and so is, for every
 principal, a `PutObject` that creates an object without `If-None-Match`
-(`DenyUnconditionalPut`: `Null s3:if-none-match` and `Bool
-s3:ObjectCreationOperation`), so a stored key never gets a second version.
+(`DenyUnconditionalPut`: `Null s3:if-none-match` and `BoolIfExists
+s3:ObjectCreationOperation`), so that by policy a stored key gets no second
+version. Static tests pin the statement; what S3 does with it has not been
+exercised on AWS by this repository — run "Verify the conditional-write policy
+once" below at the first apply, and until then treat the one-version rule as
+checked by `list-object-versions` only.
 Every writer here sends `If-None-Match: *`; a PUT made by hand must too
 (`aws s3api put-object --if-none-match '*'`), a multipart upload's completing
 request must carry it, and `CopyObject` into the bucket, which takes no such
@@ -570,9 +574,11 @@ clone or a restored copy generates a new one, follows the rotation runbook's
 changes of the release that introduced them; one apply brings both (and, as a
 change to the bucket policy, fires the bucket-config-change rule once). A
 publisher of the release before sends its PUT without `If-None-Match`, so from
-that apply until it is replaced its upload is refused
+that apply until it is replaced the policy denies its upload
 (`s3-object-lock_UPLOAD_FAILED:AccessDenied`): nothing is published wrongly,
-and the new image publishes the boundary. Apply Terraform, then run the new
+and the new image publishes the boundary. That rests on the statement binding
+(the check below); where it does not, the old publisher's upload goes through
+— see `docs/operations/deployment.md` "Upgrade order" for what that leaves. Apply Terraform, then run the new
 image: `scripts/deploy.sh` does both in that order (its `terraform apply`
 precedes the service update). A publisher on the new image without the grant
 publishes nothing — every run fails closed with
@@ -581,6 +587,70 @@ grant is applied and the publisher restarted. The break-glass role's own
 permissions are not managed here: besides the writes, the runbook's scripts
 need `s3:GetObject` and `s3:ListBucket` on the prefix for it. See
 `docs/operations/deployment.md` "Upgrade order".
+
+**Verify the conditional-write policy once.** The statement can be wrong in
+two ways, and only one of them shows. A condition key that refuses too much
+(a wrong `s3:if-none-match` key, say) refuses every PUT: the publisher fails
+with `s3-object-lock_UPLOAD_FAILED:AccessDenied` and the `cadence_failed`
+alarm fires. A statement that does not bind — a condition S3 never evaluates
+to true — refuses nothing and alarms nothing: the publisher sends the header
+anyway, so its runs look the same. Only a request made without the header
+tells the two apart, so make one, once per AWS partition you deploy to, on a
+**scratch bucket** carrying the same statement. Never on the anchors bucket:
+under COMPLIANCE retention an object that lands there unexpectedly is
+permanent.
+
+```bash
+REGION=<region>
+SCRATCH=<a new bucket name>
+aws s3api create-bucket --bucket "$SCRATCH" --region "$REGION" \
+  --create-bucket-configuration "LocationConstraint=$REGION"   # omit the last flag in us-east-1
+aws s3api put-bucket-policy --bucket "$SCRATCH" --region "$REGION" --policy "{
+  \"Version\": \"2012-10-17\",
+  \"Statement\": [{
+    \"Sid\": \"DenyUnconditionalPut\", \"Effect\": \"Deny\", \"Principal\": \"*\",
+    \"Action\": \"s3:PutObject\", \"Resource\": \"arn:aws:s3:::$SCRATCH/*\",
+    \"Condition\": {
+      \"Null\": { \"s3:if-none-match\": \"true\" },
+      \"BoolIfExists\": { \"s3:ObjectCreationOperation\": \"true\" }
+    }
+  }]
+}"
+printf 'x' > /tmp/cw-check
+
+# 1. Must succeed (200): a PUT with If-None-Match: * on a new key.
+aws s3api put-object --bucket "$SCRATCH" --region "$REGION" --key a --body /tmp/cw-check --if-none-match '*'
+# 2. Must be refused (403 AccessDenied): the same PUT without the header.
+aws s3api put-object --bucket "$SCRATCH" --region "$REGION" --key b --body /tmp/cw-check
+# 3. Must be refused (412 PreconditionFailed): a second PUT with the header on the key of step 1.
+aws s3api put-object --bucket "$SCRATCH" --region "$REGION" --key a --body /tmp/cw-check --if-none-match '*'
+# 4. Must be refused (403 AccessDenied): a multipart upload completed without the header.
+#    CreateMultipartUpload and UploadPart themselves must succeed.
+UPLOAD_ID=$(aws s3api create-multipart-upload --bucket "$SCRATCH" --region "$REGION" --key c \
+  --query UploadId --output text)
+ETAG=$(aws s3api upload-part --bucket "$SCRATCH" --region "$REGION" --key c --upload-id "$UPLOAD_ID" \
+  --part-number 1 --body /tmp/cw-check --query ETag --output text)
+aws s3api complete-multipart-upload --bucket "$SCRATCH" --region "$REGION" --key c --upload-id "$UPLOAD_ID" \
+  --multipart-upload "{\"Parts\": [{\"ETag\": $ETAG, \"PartNumber\": 1}]}"
+# 5. Record the answer: If-None-Match with a value other than *.
+aws s3api put-object --bucket "$SCRATCH" --region "$REGION" --key d --body /tmp/cw-check --if-none-match '"0"'
+
+# Afterwards: only key a exists.
+aws s3api list-objects-v2 --bucket "$SCRATCH" --region "$REGION" --query 'Contents[].Key'
+aws s3api abort-multipart-upload --bucket "$SCRATCH" --region "$REGION" --key c --upload-id "$UPLOAD_ID"
+aws s3api delete-object --bucket "$SCRATCH" --region "$REGION" --key a
+aws s3api delete-bucket --bucket "$SCRATCH" --region "$REGION"
+```
+
+These need an AWS CLI recent enough to have `--if-none-match` on
+`put-object`. Step 2 or step 4 succeeding means the statement does not bind:
+do not rely on it, keep the `list-object-versions` check
+(`docs/security/audit-anchor-verification.md` "Object versions"), and report
+it. Step 1 refused means the statement refuses too much and the publisher
+would fail closed. Whatever step 5 answers, a key it leaves behind (`d` in
+the listing) means a writer can pass the Deny with a header value that does
+not make the write conditional — report that too. Keep the five answers with
+the deployment's records; they are the evidence the static tests cannot give.
 
 **Outputs** used by the runbooks and `scripts/deploy.sh`:
 `audit_anchors_bucket_name`, `audit_anchor_s3_prefix`,

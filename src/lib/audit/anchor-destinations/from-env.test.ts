@@ -57,6 +57,34 @@ describe("buildDestinationsFromEnv", () => {
     );
   });
 
+  it("refuses a relative filesystem path, whatever else is configured; the absolute path builds", () => {
+    for (const relative of ["anchors", "./anchors", "../var/anchors"]) {
+      const env = { AUDIT_ANCHOR_DESTINATION_S3_BUCKET: "anchors", AUDIT_ANCHOR_DESTINATION_FS_PATH: relative };
+      expect(() => buildDestinationsFromEnv(env)).toThrow(AnchorDestinationConfigError);
+      expect(() => buildDestinationsFromEnv(env)).toThrow(expect.objectContaining({ code: "FS_PATH_NOT_ABSOLUTE" }));
+      // The message names the variable, never its value.
+      expect(() => buildDestinationsFromEnv(env)).toThrow("AUDIT_ANCHOR_DESTINATION_FS_PATH must be an absolute path");
+    }
+    expect(
+      buildDestinationsFromEnv({ AUDIT_ANCHOR_DESTINATION_FS_PATH: "/var/anchors" }).map((d) => d.location),
+    ).toEqual(["file:///var/anchors"]);
+  });
+
+  it("gives one location to two spellings of one place", () => {
+    const locationOf = (env: Parameters<typeof buildDestinationsFromEnv>[0]) => buildDestinationsFromEnv(env)[0]!.location;
+    expect(locationOf({ AUDIT_ANCHOR_DESTINATION_FS_PATH: "/var/anchors/" })).toBe(
+      locationOf({ AUDIT_ANCHOR_DESTINATION_FS_PATH: "/var/anchors" }),
+    );
+    const token = { AUDIT_ANCHOR_DESTINATION_GH_TOKEN: "ghp_xxx" };
+    expect(locationOf({ AUDIT_ANCHOR_DESTINATION_GH_REPO: "Owner/Repo", ...token })).toBe(
+      locationOf({ AUDIT_ANCHOR_DESTINATION_GH_REPO: "owner/repo", ...token }),
+    );
+    // Not every difference is spelling.
+    expect(locationOf({ AUDIT_ANCHOR_DESTINATION_GH_REPO: "owner/other", ...token })).not.toBe(
+      locationOf({ AUDIT_ANCHOR_DESTINATION_GH_REPO: "owner/repo", ...token }),
+    );
+  });
+
   it("refuses an env that configures no destination", () => {
     expect(() => buildDestinationsFromEnv({})).toThrow(AnchorDestinationConfigError);
     expect(() => buildDestinationsFromEnv({})).toThrow(expect.objectContaining({ code: "NO_DESTINATION_CONFIGURED" }));

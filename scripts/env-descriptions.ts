@@ -1129,7 +1129,9 @@ export const descriptions: Record<
     order: 11,
     description:
       "Local filesystem path for self-hosted operators without AWS/GitHub.\n" +
-      "Operator's responsibility to mirror to their own immutable store.",
+      "Must be absolute: manifests are bound to this path, so the publisher\n" +
+      "refuses a relative one at boot. Operator's responsibility to mirror to\n" +
+      "their own immutable store.",
     example: "/var/audit-anchors",
   },
 

@@ -298,3 +298,32 @@ Environment Verification Report, added row: C9's live effect on real S3 —
 `s3-object-lock_UPLOAD_FAILED:AccessDenied` on every create, alarmed.
 
 These contracts are reviewed in the rounds that follow.
+
+---
+
+# Round 5 (contracts C9–C12)
+Date: 2026-11-15
+
+## Changes from Previous Round
+
+Full-depth review of the addendum's implementation (`9295015ea`) by the three reviewers.
+No Critical. The testing expert mapped every acceptance item of C9–C12 to a test (none
+missing) and reddened a test with each of 42 scratch-copy mutations.
+
+| ID | Sev | Finding | Resolution |
+|----|-----|---------|------------|
+| S5-1 | Major | C9's `Bool` on `s3:ObjectCreationOperation` is false on an absent key, so the Deny could bind nothing, silently, while the docs said a wrong statement can only fail closed and stated enforcement as fact | Fixed — `BoolIfExists`; a plain-`Bool` red fixture; every claim reworded to "by policy, statically pinned, not yet exercised on AWS" with both failure modes; a scratch-bucket verification procedure documented (not run: E1) |
+| S5-2 | Minor | The D63 residual had a cheap closure | Fixed — a v1 latest sharing its date with another manifest key is refused |
+| S5-3 | Minor | A mid-chain manifest naming no predecessor (C12's upgrade window) was chained to without a row | Fixed — `GENESIS_AFTER_EARLIER_MANIFESTS` |
+| S5-4 | Minor | `chainLocation` described as not disclosing the location | Fixed — "not stated in the manifest; a guess can be confirmed" |
+| F5-1 | Minor | A relative filesystem path (cwd-dependent) or a repository name in another case changed the chain location | Fixed — relative path refused at destination construction; GitHub location lower-cased |
+| F5-2 | Minor | Docs/D61 described `CADENCE_FAILED:55P03` at stage `upload` as the result of a lock after the create | Corrected, not as proposed: both tokens exist (a row lock → `COMMIT_FAILED_AFTER_UPLOAD:55P03`; a table-level lock → `CADENCE_FAILED:55P03` at `upload`), verified on the database; docs and D61 state both |
+| F5-3 | Minor | A retry failing on the run's bound writes the UNAVAILABLE row; undocumented | Fixed — alerts |
+| F5-4 | Minor | The manual test was not repeated on the final bundle; the v1 SQL was syntax-checked only | Fixed — manual-test record section 5 |
+| T5-1 | Minor | The v1-SQL row claimed admission on 0 matched rows | Fixed — re-run against a real unsettled v1 state (`UPDATE 0` / `UPDATE 1`) |
+| T5-2 | Minor | The C12 test did not pin the DELETE's key list | Fixed — exact-list assertion, red-proven |
+
+## Recurring Issue Check (round-5 delta)
+Security: R29/R35/R49/R50 S5-1; R49 S5-4; checked R38, R48, R55, RS3, RS4; R43 no widening.
+Functionality: R47/R51 F5-1; R29 F5-2; R32/R35 F5-4; checked R15/R24, R33, R38, R40, R43.
+Testing: R29 T5-1; RT7 all 42 mutations red; checked R14, R33, R40/R48, R42, RT1, RT9, RT10, RT11.

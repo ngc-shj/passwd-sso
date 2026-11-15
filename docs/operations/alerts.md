@@ -769,11 +769,11 @@ manifest this run published) and `anchoredAt`. The four comparison rows —
 `TENANT_DROPPED_FROM_MANIFEST` to `PREVIOUS_MANIFEST_UNAVAILABLE_FOR_COMPARISON`
 — also carry `comparedArtifactKey`, the manifest the row is about: equal to
 `artifactKey`, or an earlier manifest no publish settled (below);
-`UNSETTLED_WALK_TRUNCATED` carries it too. None stops
-the publish and none is alarmed; read them with the query under Step 7 of the
-rotation runbook. The four comparison rows are also written by a run that
-**fails** once the primary holds the boundary's manifest, right after its
-failure row (below):
+`UNSETTLED_WALK_TRUNCATED` and `GENESIS_AFTER_EARLIER_MANIFESTS` carry it too.
+None stops the publish and none is alarmed; read them with the query under
+Step 7 of the rotation runbook. The four comparison rows and
+`GENESIS_AFTER_EARLIER_MANIFESTS` are also written by a run that **fails** once
+the primary holds the boundary's manifest, right after its failure row (below):
 
 | `failureReason` | Meaning | Expected when |
 |---|---|---|
@@ -784,6 +784,7 @@ failure row (below):
 | `EPOCH_CHANGED` (`count`) | Tenants whose `epoch` differs from the previous manifest's, in either direction. A `chainSeq` is compared within one epoch only, so for these tenants `CHAIN_SEQ_REGRESSION` says nothing. | Never: no code path writes `audit_chain_anchors.epoch`. The column was changed in the database directly — a database-write incident; compare the tenant's `chainSeq` in the two manifests by hand. |
 | `PREVIOUS_MANIFEST_UNAVAILABLE_FOR_COMPARISON` | The previous manifest that `comparedArtifactKey` names — the manifest this run adopted, or an earlier one no publish settled — is missing at the primary, does not verify, is not the object its `sha256` names, or is bound to another chain location; or the read-back failed or hit the run's bound (the `previous_manifest_unavailable` line's `detail` is then an error code: `AccessDenied`, `HTTP_5xx`, `UPLOAD_TIMEOUT`). The three rows above could not be computed for that manifest. | Only after a destination error; otherwise never on a store nothing deletes from. The `previous_manifest_unavailable` line says which; then compare the two manifests by hand (`audit-verify --prior-manifest`). |
 | `UNSETTLED_WALK_TRUNCATED` (`count`) | More manifests lie between the published high-water and this publish than one run compares (7). `count` were compared, the last of them `comparedArtifactKey`; the unsettled manifests before it were not, and no row speaks for them. | Never in normal operation: it takes more than 7 boundaries stored and not settled, or a `last_published_at` that is null or behind while the chain is longer than that. Compare the remaining manifests by hand, each with the one before it (`passwd-sso audit-verify --prior-manifest`), and find why `last_published_at` is behind — a value nobody's runs explain is a database-write incident. |
+| `GENESIS_AFTER_EARLIER_MANIFESTS` | The manifest `comparedArtifactKey` names — the one this run adopted, or the one its manifest chains to — carries `previousManifest: null` although the primary lists a manifest key dated before it. The chain's link is broken at that manifest: `audit-verify --prior-manifest` on it and the manifest before it passes with the genesis `WARN` instead of checking a link. | Never, except once after an upgrade that spanned the publish time: the earlier release's publisher ran after the migration removed its pointer row (`docs/operations/deployment.md` "Upgrade order"). Then record it as the known break and tell verifiers which two manifests it lies between. Otherwise a manifest signed with the publisher's key outside the publisher: a signing-key incident. A run that skips a boundary already recorded writes no row; the row comes with the next publish, which chains to that manifest, and once more if that publish's commit fails and is retried. The first manifest of a location has no earlier key and gets none. |
 | `MISSING_PRIOR_CADENCE_PUBLICATION` | See `missing_prior_cadence` below. | |
 
 The three comparison rows are computed against the manifest the published one
@@ -809,6 +810,18 @@ writes the failure row alone. Each retry of the boundary that fails the same
 way writes them again — at most three times, the attempt cap — and the adopt
 that settles the manifest writes them once more. Read repeated rows with one
 `comparedArtifactKey` as one finding.
+
+The run that created the object compares it with the manifest it has in hand
+and reads nothing. A retry found the object there and must read the
+predecessor back, inside the same 60 s bound as the rest of the run. So a
+retry that fails **on that bound** — a secondary that hangs, say
+(`<destination>_UPLOAD_FAILED:UPLOAD_TIMEOUT`) — has no time left for the
+read: it writes `PREVIOUS_MANIFEST_UNAVAILABLE_FOR_COMPARISON` after its
+failure row instead of the comparison rows, and its
+`previous_manifest_unavailable` line carries `detail: UPLOAD_TIMEOUT`. That
+row says the retry could not compare, not that the predecessor is gone: the
+rows the creating run wrote for the same `comparedArtifactKey` stand, and the
+adopt that settles the manifest compares it again.
 
 A manifest that was stored but never settled — every run of its boundary failed
 after the primary held the object, or the attempt cap stopped them — is also
@@ -1037,8 +1050,10 @@ also written to the `AUDIT_ANCHOR_PUBLISH_FAILED` row) and `stage`:
   and carries `error` (`name: AccessDenied` usually means the bucket policy or
   the task role drifted from Terraform; the line's `code` is `unknown` for an S3
   service error, while the reason token carries the name). The anchors bucket
-  policy also refuses, with `AccessDenied`, a PUT that carries no
-  `If-None-Match` (`DenyUnconditionalPut`): this release always sends it, so
+  policy is also written to refuse, with `AccessDenied`, a PUT that carries no
+  `If-None-Match` (`DenyUnconditionalPut`; its effect on AWS is checked once by
+  hand, `infra/terraform/README.md` "Verify the conditional-write policy
+  once"): this release always sends it, so
   `s3-object-lock_UPLOAD_FAILED:AccessDenied` right after the Terraform apply
   of an upgrade is the previous release's publisher, still running, whose PUT is
   unconditional (`docs/operations/deployment.md` "Upgrade order"). Two more reasons have this stage and no `upload_failed` line, both
@@ -1051,9 +1066,17 @@ also written to the `AUDIT_ANCHOR_PUBLISH_FAILED` row) and `stage`:
   that publishes clears it. The retry adopts what the primary already holds.
   A `CADENCE_FAILED:<code>` reason at this stage is a database or other error
   raised once the primary held the boundary's object and before every
-  secondary did (`<code>` as for `before_upload`; `55P03` is a lock timeout
-  there, which is a failure and not `lock_held` once the object is stored); it
-  writes no pause, and the retry adopts the stored object.
+  secondary did (`<code>` as for `before_upload`); it writes no pause, and the
+  retry adopts the stored object. The one database statement in that interval
+  is the read of the anchor rows the manifest covers, so `<code>` is `55P03`
+  (lock timeout) there only under a table-level lock on `audit_chain_anchors`
+  (`LOCK TABLE … IN ACCESS EXCLUSIVE MODE`, or DDL), which blocks reads. A
+  **row** lock — what an `UPDATE` or `SELECT … FOR UPDATE` on the anchor rows
+  holds — does not block that read: it times out the anchor-row update, which
+  runs after every destination holds the object, so it is
+  `COMMIT_FAILED_AFTER_UPLOAD:55P03` at stage `after_upload`. Neither is
+  `lock_held`: once the object is stored a lock timeout is a failed run with
+  its rows; `lock_held` is the publish lock only, before anything is created.
   Every failure of this stage with the object stored, and every `after_upload`
   one, is followed by the stored manifest's comparison rows when it differs
   from its predecessor (see "Rows a publish writes" above).
@@ -1063,7 +1086,8 @@ also written to the `AUDIT_ANCHOR_PUBLISH_FAILED` row) and `stage`:
 Rows per boundary: the persisted count admits at most three counted runs across
 restarts, each writing at most one failure row — and, when it failed with the
 manifest stored, at most three comparison rows after it (or the one
-unavailable row) — plus the one cap row (either reason). A failure before the count is written is not counted, so the count
+unavailable row) and at most one `GENESIS_AFTER_EARLIER_MANIFESTS` row — plus
+the one cap row (either reason). A failure before the count is written is not counted, so the count
 does not bound it; the scheduler does: each process runs a boundary at most
 four times (the first run and at most three retries), and so writes at most
 that many failure rows for it per process start, counted runs included.

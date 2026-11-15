@@ -318,8 +318,12 @@ heartbeat をログに出します。どちらも app イメージで動きま�
 はバケットに対して拒否、`x-amz-object-lock-mode: COMPLIANCE` のない（ヘッダ欠落を
 含む）`PutObject`、上限を超える保持、`AES256` 以外の SSE は拒否されます。さらに、
 `If-None-Match` を付けずにオブジェクトを作成する `PutObject` は全員に拒否されます
-（`DenyUnconditionalPut`: `Null s3:if-none-match` と `Bool
-s3:ObjectCreationOperation`）。保存済みのキーに 2 つ目のバージョンは作れません。
+（`DenyUnconditionalPut`: `Null s3:if-none-match` と `BoolIfExists
+s3:ObjectCreationOperation`）。ポリシー上は、保存済みのキーに 2 つ目のバージョンは
+作れません。このステートメントは静的テストで固定していますが、S3 が実際にどう評価
+するかは、このリポジトリでは AWS 上で確認していません。最初の apply のときに下記の
+「条件付き書き込みポリシーを一度確認する」を実行し、それまでは 1 キー 1 バージョンの
+規則を `list-object-versions` だけが確認しているものとして扱ってください。
 このリポジトリの書き込みはすべて `If-None-Match: *` を送ります。手動の PUT も同様に
 必要で（`aws s3api put-object --if-none-match '*'`）、マルチパートアップロードは完了
 リクエストにこのヘッダが必要です。このヘッダを取らない `CopyObject` によるバケット
@@ -383,8 +387,10 @@ recovery" に従い、専用の接頭辞またはバケットを使います。
 変更はこの 2 点だけです。1 回の apply で両方が入ります（バケットポリシーの変更なので、
 bucket-config-change ルールが 1 回発火します）。1 つ前のリリースの publisher は
 `If-None-Match` なしで PUT するため、この apply から置き換えまでの間、そのアップロード
-は拒否されます（`s3-object-lock_UPLOAD_FAILED:AccessDenied`）。誤った公開は起きず、
-その境界は新しいイメージが公開します。先に Terraform を apply し、その後で新しい
+はポリシーにより拒否されます（`s3-object-lock_UPLOAD_FAILED:AccessDenied`）。誤った
+公開は起きず、その境界は新しいイメージが公開します。これはステートメントが効いて
+いることが前提です（下記の確認手順）。効いていない場合、旧 publisher のアップロード
+は通ります — その結果は `docs/operations/deployment.md` の "Upgrade order" を参照。先に Terraform を apply し、その後で新しい
 イメージを動かします。`scripts/deploy.sh` はこの順で実行します（`terraform apply` がサービス
 更新より先）。権限のないまま新しいイメージで動く publisher は何も公開しません —
 権限を apply して publisher を再起動するまで、すべての実行が
@@ -392,6 +398,69 @@ bucket-config-change ルールが 1 回発火します）。1 つ前のリリー
 されます。break-glass ロール自体の権限はここでは管理しません。書き込みに加えて、
 runbook のスクリプトはそのロールに接頭辞への `s3:GetObject` と `s3:ListBucket` を
 必要とします。`docs/operations/deployment.md` の "Upgrade order" を参照。
+
+**条件付き書き込みポリシーを一度確認する。** このステートメントの誤り方は 2 通り
+あり、表に出るのは片方だけです。拒否しすぎる条件（たとえば `s3:if-none-match` の
+キー名の誤り）はすべての PUT を拒否します。publisher は
+`s3-object-lock_UPLOAD_FAILED:AccessDenied` で失敗し、`cadence_failed` アラームが
+発火します。一方、効いていないステートメント（S3 が決して真と評価しない条件）は
+何も拒否せず、何も通知しません。publisher は常にヘッダを送るので、実行結果は
+変わりません。両者を区別できるのはヘッダなしのリクエストだけです。デプロイ先の AWS
+パーティションごとに 1 回、同じステートメントを付けた**スクラッチバケット**で実行
+してください。アンカーバケットでは決して実行しないでください。COMPLIANCE 保持の
+もとでは、意図せず書き込まれたオブジェクトは消せません。
+
+```bash
+REGION=<region>
+SCRATCH=<a new bucket name>
+aws s3api create-bucket --bucket "$SCRATCH" --region "$REGION" \
+  --create-bucket-configuration "LocationConstraint=$REGION"   # omit the last flag in us-east-1
+aws s3api put-bucket-policy --bucket "$SCRATCH" --region "$REGION" --policy "{
+  \"Version\": \"2012-10-17\",
+  \"Statement\": [{
+    \"Sid\": \"DenyUnconditionalPut\", \"Effect\": \"Deny\", \"Principal\": \"*\",
+    \"Action\": \"s3:PutObject\", \"Resource\": \"arn:aws:s3:::$SCRATCH/*\",
+    \"Condition\": {
+      \"Null\": { \"s3:if-none-match\": \"true\" },
+      \"BoolIfExists\": { \"s3:ObjectCreationOperation\": \"true\" }
+    }
+  }]
+}"
+printf 'x' > /tmp/cw-check
+
+# 1. Must succeed (200): a PUT with If-None-Match: * on a new key.
+aws s3api put-object --bucket "$SCRATCH" --region "$REGION" --key a --body /tmp/cw-check --if-none-match '*'
+# 2. Must be refused (403 AccessDenied): the same PUT without the header.
+aws s3api put-object --bucket "$SCRATCH" --region "$REGION" --key b --body /tmp/cw-check
+# 3. Must be refused (412 PreconditionFailed): a second PUT with the header on the key of step 1.
+aws s3api put-object --bucket "$SCRATCH" --region "$REGION" --key a --body /tmp/cw-check --if-none-match '*'
+# 4. Must be refused (403 AccessDenied): a multipart upload completed without the header.
+#    CreateMultipartUpload and UploadPart themselves must succeed.
+UPLOAD_ID=$(aws s3api create-multipart-upload --bucket "$SCRATCH" --region "$REGION" --key c \
+  --query UploadId --output text)
+ETAG=$(aws s3api upload-part --bucket "$SCRATCH" --region "$REGION" --key c --upload-id "$UPLOAD_ID" \
+  --part-number 1 --body /tmp/cw-check --query ETag --output text)
+aws s3api complete-multipart-upload --bucket "$SCRATCH" --region "$REGION" --key c --upload-id "$UPLOAD_ID" \
+  --multipart-upload "{\"Parts\": [{\"ETag\": $ETAG, \"PartNumber\": 1}]}"
+# 5. Record the answer: If-None-Match with a value other than *.
+aws s3api put-object --bucket "$SCRATCH" --region "$REGION" --key d --body /tmp/cw-check --if-none-match '"0"'
+
+# Afterwards: only key a exists.
+aws s3api list-objects-v2 --bucket "$SCRATCH" --region "$REGION" --query 'Contents[].Key'
+aws s3api abort-multipart-upload --bucket "$SCRATCH" --region "$REGION" --key c --upload-id "$UPLOAD_ID"
+aws s3api delete-object --bucket "$SCRATCH" --region "$REGION" --key a
+aws s3api delete-bucket --bucket "$SCRATCH" --region "$REGION"
+```
+
+`put-object` に `--if-none-match` がある新しめの AWS CLI が必要です。手順 2 または
+手順 4 が成功した場合、ステートメントは効いていません。これに頼らず、
+`list-object-versions` による確認
+（`docs/security/audit-anchor-verification.md` の "Object versions"）を続け、報告
+してください。手順 1 が拒否された場合、ステートメントは拒否しすぎており、publisher
+は fail closed します。手順 5 の応答が何であれ、キーが残った場合（一覧に `d` が
+ある）は、書き込みを条件付きにしないヘッダ値で Deny を通過できることを意味します。
+これも報告してください。5 つの応答はデプロイメントの記録として保管してください。
+静的テストでは得られない証拠です。
 
 **Outputs**（runbook と `scripts/deploy.sh` が使う）: `audit_anchors_bucket_name`、
 `audit_anchor_s3_prefix`、`audit_anchor_publisher_task_role_arn`、

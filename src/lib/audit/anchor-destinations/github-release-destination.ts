@@ -120,7 +120,10 @@ export class GitHubReleaseDestination implements AnchorDestination {
     }
     this.apiBase = `${config.apiBaseUrl ?? GITHUB_API_BASE_URL}/repos/${config.repo}`;
     this.token = config.token;
-    this.location = `github://${config.repo}`;
+    // GitHub matches owner and repository names without regard to case, so
+    // two spellings of one repository are one location. The API calls keep
+    // the configured spelling.
+    this.location = `github://${config.repo.toLowerCase()}`;
     this.listPageSize = config.listPageSize ?? GITHUB_RELEASES_PAGE_SIZE;
   }
 

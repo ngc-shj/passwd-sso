@@ -271,9 +271,12 @@ the commit path, the addendum and the entries below are what the code does.
   is replaced: a recorded v1 skips, an unrecorded one fails closed, the next boundary chains
   in v2.
 - **D61 — `lock_held` only before the primary holds the object:** a 55P03 raised after the
-  create (anyone with UPDATE on `audit_chain_anchors` can lock it) used to return `lock_held`
-  with a stored manifest and no rows; it is now `CADENCE_FAILED:55P03` at stage `upload`
-  with the comparison rows.
+  create used to return `lock_held` with a stored manifest and no rows; it is now a failed run
+  with the comparison rows — `COMMIT_FAILED_AFTER_UPLOAD:55P03` at stage `after_upload` when a
+  row lock on `audit_chain_anchors` (which anyone with UPDATE can hold) times out the
+  anchor-row update, and `CADENCE_FAILED:55P03` at stage `upload` only when a table-level lock
+  (`LOCK TABLE … IN ACCESS EXCLUSIVE MODE`, or DDL) blocks the read of the anchor rows that
+  precedes mirroring (both observed on the worktree database with two rolled-back sessions).
 - **D62 — order on a failed run** (C11): pause, the failure row, then the comparison rows, so
   a hung read-back cannot delay the alarm line. A drop reported by the failed run is reported
   again by the adopt that settles it.
@@ -301,3 +304,26 @@ the commit path, the addendum and the entries below are what the code does.
   was deleted and the migration re-applied, so the recorded checksum matches the file.
 - **D69 — C9 verification:** static tests only; `terraform validate` runs in CI, not here; the
   live effect is E1 (manual-test record).
+
+## Phase 3, round 5 fixes (on C9–C12)
+
+- **D70 — C9 uses `BoolIfExists`**, so an absent `s3:ObjectCreationOperation` cannot leave the
+  Deny binding nothing. The docs state both ways the statement can be wrong (every create
+  refused; or no refusal and no alarm) and say the policy is statically pinned, not yet
+  exercised on AWS; a one-time scratch-bucket procedure is in `infra/terraform/README.md`
+  (its `aws` commands were not run here). Supersedes D69's wording.
+- **D71 — a v1 latest is refused when another manifest key shares its date** (closes D63 on
+  stores where the legitimate key cannot be deleted). Cost: two v1 keys on the high-water's
+  date wedge the publisher, and on the Terraform bucket the reset is a chain restart; the
+  earlier release never wrote two manifests for one boundary, so this is not an upgrade path.
+- **D72 — `GENESIS_AFTER_EARLIER_MANIFESTS`**: a manifest naming no predecessor while an
+  earlier manifest key exists is reported with the publish that chains to or adopts it (and
+  by a failing run that stored the object). On an adopt the predecessor the adopted manifest
+  names is checked too. This is what D64's upgrade window now leaves on record.
+- **D73 — location spelling:** a relative `AUDIT_ANCHOR_DESTINATION_FS_PATH` is refused where
+  destinations are built from the environment (`FS_PATH_NOT_ABSOLUTE`; the publisher and the
+  key scripts share that code, the env schema is not involved); the GitHub location is
+  lower-cased while API calls keep the configured spelling. Supersedes part of D66.
+- **D74 — the manual test was repeated on the final code** (manual-test record, section 5):
+  the built bundle writes format version 2 with the expected `chainLocation`; the
+  `LEGACY_MANIFEST_UNSETTLED` state and its runbook SQL were exercised end to end.

@@ -396,21 +396,27 @@ resource "aws_s3_bucket_policy" "audit_anchors" {
         # If-None-Match is refused, so no writer can put a second version on
         # a stored key (S3Destination.create sends `If-None-Match: *`, the
         # only value S3 takes on a PUT). The Null test is on the header's
-        # presence. The Bool keeps the Deny on requests that create the
-        # object: CreateMultipartUpload and UploadPart carry no conditional
-        # header, and the CompleteMultipartUpload that follows must. This is
-        # the Deny of the S3 User Guide's "Enforce conditional writes on
-        # Amazon S3 buckets", written for s3:if-none-match. CopyObject takes
-        # no If-None-Match, so copying into the bucket stops working; nothing
-        # here copies. No exception.
+        # presence. The BoolIfExists keeps the Deny on requests that create
+        # the object: CreateMultipartUpload and UploadPart carry no
+        # conditional header, and the CompleteMultipartUpload that follows
+        # must. IfExists, not plain Bool: Bool on a key the request does not
+        # carry is false, so a request S3 did not populate the key for would
+        # pass the Deny with nothing refused and nothing alarmed; with
+        # IfExists an absent key leaves the Deny applying. This is the Deny
+        # of the S3 User Guide's "Enforce conditional writes on Amazon S3
+        # buckets", written for s3:if-none-match. CopyObject takes no
+        # If-None-Match, so copying into the bucket stops working; nothing
+        # here copies. No exception. Static tests pin the statement; its
+        # effect on AWS is checked once by hand (README, "Verify the
+        # conditional-write policy once").
         Sid       = "DenyUnconditionalPut"
         Effect    = "Deny"
         Principal = "*"
         Action    = "s3:PutObject"
         Resource  = "${aws_s3_bucket.audit_anchors[0].arn}/*"
         Condition = {
-          Null = { "s3:if-none-match" = "true" }
-          Bool = { "s3:ObjectCreationOperation" = "true" }
+          Null         = { "s3:if-none-match" = "true" }
+          BoolIfExists = { "s3:ObjectCreationOperation" = "true" }
         }
       },
       {

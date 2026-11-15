@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { AnchorDestination } from "./destination";
 import { S3Destination } from "./s3-destination";
 import { GitHubReleaseDestination } from "./github-release-destination";
@@ -16,6 +17,7 @@ export type AnchorDestinationEnv = {
 
 export const ANCHOR_DESTINATION_CONFIG_ERROR = {
   GITHUB_TOKEN_MISSING: "GITHUB_TOKEN_MISSING",
+  FS_PATH_NOT_ABSOLUTE: "FS_PATH_NOT_ABSOLUTE",
   NO_DESTINATION_CONFIGURED: "NO_DESTINATION_CONFIGURED",
 } as const;
 
@@ -65,6 +67,15 @@ export function buildDestinationsFromEnv(env: AnchorDestinationEnv): AnchorDesti
   }
 
   if (env.AUDIT_ANCHOR_DESTINATION_FS_PATH) {
+    // A relative path resolves against the working directory, so the chain
+    // location a manifest is bound to would change with where the process
+    // was started.
+    if (!path.isAbsolute(env.AUDIT_ANCHOR_DESTINATION_FS_PATH)) {
+      throw new AnchorDestinationConfigError(
+        ANCHOR_DESTINATION_CONFIG_ERROR.FS_PATH_NOT_ABSOLUTE,
+        "AUDIT_ANCHOR_DESTINATION_FS_PATH must be an absolute path",
+      );
+    }
     destinations.push(new FilesystemDestination({ basePath: env.AUDIT_ANCHOR_DESTINATION_FS_PATH }));
   }
 

@@ -280,15 +280,18 @@ version 2 only.
 | 1 | `audit-anchor-manifest-v1.json` | releases before format version 2 | absent |
 | 2 | `audit-anchor-manifest-v2.json` | this release and later | required: 64 lower-case hex characters |
 
-`chainLocation` names the place the chain is published to, without disclosing it. It is the
-SHA-256 of the label `audit-anchor-chain-location-v1`, a null byte, and the location of the
-deployment's **primary** destination:
+`chainLocation` binds a manifest to the place the chain is published to. The location is
+not stated in the manifest: the field is the SHA-256 of the label
+`audit-anchor-chain-location-v1`, a null byte, and the location of the deployment's
+**primary** destination. The hash is unsalted and a location is a guessable name, so this
+is not confidentiality: anyone who guesses the bucket, repository or path can confirm the
+guess with the line below.
 
 | Primary destination | Location |
 |---|---|
 | S3 | `s3://<bucket>/<prefix>`, or `s3://<bucket>` when no prefix is configured |
-| GitHub Releases | `github://<owner>/<repo>` |
-| Filesystem | `file://<base path, made absolute>` |
+| GitHub Releases | `github://<owner>/<repo>`, in lower case whatever the configured spelling |
+| Filesystem | `file://<base path>`: absolute (the publisher refuses a relative one), without a trailing slash or `.`/`..` segments |
 
 An operator who tells you the location lets you check the value:
 
@@ -404,12 +407,16 @@ and adopts it instead of writing again. A manifest key therefore has exactly one
 and so do the archived public keys and the statements.
 
 More than one version of a key is a write outside the protocol. On the anchors bucket the
-Terraform stack creates, S3 itself refuses it: the bucket policy denies every `PutObject`
-that creates an object without `If-None-Match` (`DenyUnconditionalPut`), for every
-principal, so a second version cannot be written while that policy stands. On an S3 bucket
-without that statement the rule is kept by the publisher alone. Either way an operator can
-check it with `list-object-versions`; nothing runs that automatically, and a plain download
-returns only the latest version:
+Terraform stack creates, the bucket policy refuses an unconditional write **by policy**:
+its `DenyUnconditionalPut` statement denies, for every principal, a `PutObject` that
+creates an object without `If-None-Match`. That statement is pinned by static tests and
+has not yet been exercised on AWS. It can be wrong in two ways: a wrong `s3:if-none-match`
+key refuses every PUT, which stops the publisher and is alarmed; a statement that does not
+bind refuses nothing and alarms nothing, since the publisher sends the header either way.
+Until the operator has run the one-time check (`infra/terraform/README.md`, "Verify the
+conditional-write policy once"), and on an S3 bucket without that statement, the rule is
+kept by the publisher alone and the operator check with `list-object-versions` stands.
+Nothing runs that automatically, and a plain download returns only the latest version:
 
 ```bash
 # Operator: every version and delete marker under the prefix
@@ -455,11 +462,12 @@ The rules, per key:
 - **A delete marker on an anchor key** is a tamper signal. The bucket policy refuses deletes to
   everyone, so one means the policy was replaced.
 
-**Residual.** On the Terraform bucket the one-version rule holds for as long as the bucket
-policy does: whoever can replace the policy (the account root always can) can lift it, and
-a change to the policy is alarmed. A key written before the upgrade keeps the versions it
-had. On an S3 bucket without `DenyUnconditionalPut`, anyone holding the publisher's
-credentials can add a version to a key; without the signing key that version does not
+**Residual.** On the Terraform bucket the one-version rule is the policy's, with the
+caveat above, and holds for as long as the bucket policy does: whoever can replace the
+policy (the account root always can) can lift it, and a change to the policy is alarmed.
+A key written before the upgrade keeps the versions it had. On an S3 bucket without
+`DenyUnconditionalPut`, or where that statement turns out not to bind, anyone holding the
+publisher's credentials can add a version to a key; without the signing key that version does not
 verify — a verifier who downloads it gets a failure, and when it is the newest key the
 publisher itself stops, since it reads that key before every publish — but the versions
 stay, and only the listing above shows them. On GitHub Releases and on a filesystem there
