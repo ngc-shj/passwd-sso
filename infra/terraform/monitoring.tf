@@ -382,8 +382,8 @@ resource "aws_cloudwatch_metric_alarm" "audit_anchor_publisher_down" {
 
 # One line per healthy boundary: a published manifest, or nothing to publish on
 # an install where no tenant has ever enabled the chain. A skip of any other
-# kind never counts — the boundary marker is a database row, so a
-# database-writable way to make runs skip must not read as health.
+# kind never counts — a run that skipped published nothing, so no way to make
+# runs skip may read as health.
 resource "aws_cloudwatch_log_metric_filter" "audit_anchor_cadence_healthy" {
   count          = var.enable_monitoring ? 1 : 0
   name           = "${local.name_prefix}-audit-anchor-cadence-healthy"
@@ -462,10 +462,13 @@ resource "aws_cloudwatch_metric_alarm" "audit_anchor_chain_enabled_fell_to_zero"
 # on ECS the service runs one task and stops the old one before starting the
 # new, so a held lock means a second publisher against this database.
 # stale_boundary is a skip, not a failure, but on ECS it has no legitimate
-# cause: the marker is past the run's boundary yet not past the wall clock's,
-# so another writer moved it — a second publisher, or a database write. A clock
-# that went back reads the marker as ahead instead (BOUNDARY_MARKER_AHEAD,
-# under cadence_failed).
+# cause: the bucket holds a manifest dated past the run's boundary yet not past
+# the wall clock's, so another writer published it — a second publisher. A
+# clock that went back reads that manifest as ahead instead
+# (PUBLISHED_OBJECT_AHEAD, under cadence_failed). Every fail-closed state of
+# the publisher's protocol reaches cadence_failed; none has a filter of its own.
+# The mirror backfill is not one: it is a log-only copy (mirror_backfill_failed)
+# with no filter and no alarm.
 locals {
   audit_anchor_publisher_failure_log_types = {
     cadence_failed             = "audit-anchor-publisher.cadence_failed"

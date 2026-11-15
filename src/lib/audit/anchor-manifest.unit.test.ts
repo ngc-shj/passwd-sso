@@ -1,23 +1,58 @@
 import { describe, it, expect } from "vitest";
 import { generateKeyPairSync } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
   computeTenantTag,
   buildManifest,
   canonicalize,
+  chainLocationFor,
+  kidForPublicKey,
+  parsePublicKeyHex,
+  publicKeyForSigningKey,
+  readJwsKid,
   sign,
+  signStatement,
   verify,
+  verifyStatement,
   validateTenantIdCanonical,
   InvalidAlgorithmError,
   InvalidTypError,
   InvalidSignatureError,
   InvalidTenantIdFormatError,
   InvalidKidError,
+  InvalidPublicKeyError,
+  KidMismatchError,
   ManifestSchemaValidationError,
   type BuildManifestInput,
 } from "@/lib/audit/anchor-manifest";
-import { AUDIT_ANCHOR_KID_PREFIX } from "@/lib/constants/audit/audit";
+import {
+  AUDIT_ANCHOR_CHAIN_LOCATION_DOMAIN,
+  AUDIT_ANCHOR_KID_PREFIX,
+  AUDIT_ANCHOR_MANIFEST_VERSION,
+  AUDIT_ANCHOR_STATEMENT_TYP,
+  AUDIT_ANCHOR_TYP,
+} from "@/lib/constants/audit/audit";
+
+// The vectors the CLI verifier is held to as well
+// (cli/src/__tests__/unit/audit-verify-vectors.test.ts reads the same file).
+type Vectors = {
+  key: { seedHex: string; publicKeyHex: string; kid: string };
+  manifest: Record<string, unknown>;
+  manifestV2: Record<string, unknown> & { chainLocation: string };
+  chainLocations: Array<{ location: string; chainLocation: string }>;
+  jws: Array<{ name: string; jws: string; expect: string }>;
+  publicKeyTexts: Array<{ name: string; text: string; valid: boolean }>;
+};
+const VECTORS = JSON.parse(
+  readFileSync(
+    fileURLToPath(new URL("../../../cli/src/__tests__/fixtures/audit-anchor-vectors.json", import.meta.url)),
+    "utf8",
+  ),
+) as Vectors;
 
 // Known test fixtures
+const LOCATION = "s3://example-bucket/audit-anchors";
 const KNOWN_UUID = "550e8400-e29b-41d4-a716-446655440000";
 // 32 bytes of 0x42
 const TAG_SECRET_A = Buffer.alloc(32, 0x42);
@@ -34,8 +69,6 @@ const GOLDEN_TAG_A = "6db2cb938b211a0b0824844113d78dd8aaafbeb608b6a2fc3903aa5114
 // Result: fa44a6be534429d07f571d2399828ad8e65f469519e3ab6aa7465329ffd099dc
 const GOLDEN_TAG_B = "fa44a6be534429d07f571d2399828ad8e65f469519e3ab6aa7465329ffd099dc";
 
-const VALID_KID = `${AUDIT_ANCHOR_KID_PREFIX}abcd1234`;
-
 function makeMinimalInput(overrides: Partial<BuildManifestInput> = {}): BuildManifestInput {
   return {
     tenants: [
@@ -50,6 +83,7 @@ function makeMinimalInput(overrides: Partial<BuildManifestInput> = {}): BuildMan
     anchoredAt: new Date("2026-05-01T00:05:00.000Z"),
     previousManifest: null,
     tagSecret: TAG_SECRET_A,
+    location: LOCATION,
     ...overrides,
   };
 }
@@ -141,11 +175,15 @@ describe("buildManifest", () => {
       anchoredAt: new Date("2026-05-01T00:05:00.000Z"),
       previousManifest: null,
       tagSecret: TAG_SECRET_A,
+      location: LOCATION,
     };
 
     const manifest = buildManifest(input);
 
-    expect(manifest.version).toBe(1);
+    expect(manifest.version).toBe(2);
+    expect(manifest.version).toBe(AUDIT_ANCHOR_MANIFEST_VERSION);
+    expect(manifest.$schema).toBe("https://passwd-sso.example/schemas/audit-anchor-manifest-v2.json");
+    expect(manifest.chainLocation).toBe(chainLocationFor(LOCATION));
     expect(manifest.issuer).toBe("passwd-sso");
     expect(manifest.deploymentId).toBe("deploy-test-1");
     expect(manifest.anchoredAt).toBe("2026-05-01T00:05:00.000Z");
@@ -163,6 +201,16 @@ describe("buildManifest", () => {
     // Verify chainSeq serialized as string
     expect(manifest.tenants[0].chainSeq).toBe("5");
     expect(manifest.tenants[1].chainSeq).toBe("10");
+  });
+
+  it("binds the manifest to the location it is given, and to no other", () => {
+    const here = buildManifest(makeMinimalInput());
+    const elsewhere = buildManifest(makeMinimalInput({ location: "s3://example-bucket/other-prefix" }));
+
+    expect(here.chainLocation).toBe(chainLocationFor(LOCATION));
+    expect(elsewhere.chainLocation).toBe(chainLocationFor("s3://example-bucket/other-prefix"));
+    expect(elsewhere.chainLocation).not.toBe(here.chainLocation);
+    expect(canonicalize(elsewhere).equals(canonicalize(here))).toBe(false);
   });
 
   it("produces anchoredAt with Z suffix", () => {
@@ -223,6 +271,36 @@ describe("buildManifest", () => {
   });
 });
 
+describe("chainLocationFor", () => {
+  it.each(VECTORS.chainLocations)("shared vector: $location", ({ location, chainLocation }) => {
+    expect(chainLocationFor(location)).toBe(chainLocation);
+  });
+
+  it("is 64 lower-case hex chars that name no part of the location", () => {
+    const hash = chainLocationFor(LOCATION);
+    expect(hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(hash).not.toContain("example");
+  });
+
+  it("is domain separated: not the bare SHA-256 of the location", async () => {
+    const { createHash } = await import("node:crypto");
+    expect(chainLocationFor(LOCATION)).not.toBe(createHash("sha256").update(LOCATION).digest("hex"));
+    expect(chainLocationFor(LOCATION)).toBe(
+      createHash("sha256").update(`${AUDIT_ANCHOR_CHAIN_LOCATION_DOMAIN}\0${LOCATION}`).digest("hex"),
+    );
+  });
+
+  it("tells a bucket with no prefix from a prefix under it, and one store from another", () => {
+    const hashes = VECTORS.chainLocations.map((v) => v.chainLocation);
+    expect(VECTORS.chainLocations.length).toBeGreaterThanOrEqual(4);
+    expect(new Set(hashes).size).toBe(hashes.length);
+  });
+
+  it("the version 2 vector manifest carries the first location's hash", () => {
+    expect(VECTORS.manifestV2.chainLocation).toBe(VECTORS.chainLocations[0].chainLocation);
+  });
+});
+
 describe("canonicalize", () => {
   it("returns deterministic UTF-8 Buffer of JCS canonical form", () => {
     const manifest = buildManifest(makeMinimalInput());
@@ -245,9 +323,10 @@ describe("sign + verify round-trip", () => {
     const { publicKeyRaw, privateKeyRaw } = makeEd25519Keypair();
     const manifest = buildManifest(makeMinimalInput());
     const canonical = canonicalize(manifest);
-    const jws = sign(canonical, privateKeyRaw, VALID_KID);
+    const jws = sign(canonical, privateKeyRaw);
     const verified = verify(jws, publicKeyRaw);
 
+    expect(verified).toEqual(manifest);
     expect(verified.version).toBe(manifest.version);
     expect(verified.issuer).toBe(manifest.issuer);
     expect(verified.deploymentId).toBe(manifest.deploymentId);
@@ -259,26 +338,259 @@ describe("sign + verify round-trip", () => {
   it("JWS has 3 dot-separated parts", () => {
     const { privateKeyRaw } = makeEd25519Keypair();
     const manifest = buildManifest(makeMinimalInput());
-    const jws = sign(canonicalize(manifest), privateKeyRaw, VALID_KID);
+    const jws = sign(canonicalize(manifest), privateKeyRaw);
     expect(jws.split(".")).toHaveLength(3);
   });
 });
 
-describe("sign — invalid kid", () => {
-  it("rejects kid without required prefix", () => {
-    const { privateKeyRaw } = makeEd25519Keypair();
-    const canonical = canonicalize(buildManifest(makeMinimalInput()));
-    expect(() => sign(canonical, privateKeyRaw, "bad-kid-xyz")).toThrow(
-      InvalidKidError,
+function decodeHeader(jws: string): Record<string, unknown> {
+  return JSON.parse(Buffer.from(jws.split(".")[0], "base64url").toString("utf-8")) as Record<string, unknown>;
+}
+
+function withHeader(jws: string, overrides: Record<string, unknown>): string {
+  const [, payloadB64, sigB64] = jws.split(".");
+  const header = Buffer.from(JSON.stringify({ ...decodeHeader(jws), ...overrides }), "utf-8").toString("base64url");
+  return `${header}.${payloadB64}.${sigB64}`;
+}
+
+describe("kid derivation", () => {
+  const seed = Buffer.from(VECTORS.key.seedHex, "hex");
+  const publicKey = Buffer.from(VECTORS.key.publicKeyHex, "hex");
+
+  it("derives the vector's public key from its seed", () => {
+    expect(publicKeyForSigningKey(seed).toString("hex")).toBe(VECTORS.key.publicKeyHex);
+  });
+
+  it("derives the vector's kid: the prefix and the public key's first 8 bytes in hex", () => {
+    expect(kidForPublicKey(publicKey)).toBe(VECTORS.key.kid);
+    expect(VECTORS.key.kid).toBe(`${AUDIT_ANCHOR_KID_PREFIX}${VECTORS.key.publicKeyHex.slice(0, 16)}`);
+  });
+
+  it("derives the kid from the public key, not the seed", () => {
+    expect(kidForPublicKey(publicKey)).not.toBe(`${AUDIT_ANCHOR_KID_PREFIX}${VECTORS.key.seedHex.slice(0, 16)}`);
+  });
+
+  it("matches a generated key pair's own public key", () => {
+    const { publicKeyRaw, privateKeyRaw } = makeEd25519Keypair();
+    expect(publicKeyForSigningKey(privateKeyRaw)).toEqual(publicKeyRaw);
+  });
+
+  it.each([31, 33, 0])("refuses a public key of %d bytes", (length) => {
+    expect(() => kidForPublicKey(Buffer.alloc(length, 1))).toThrow(InvalidPublicKeyError);
+  });
+
+  it.each([31, 33, 64])("refuses a seed of %d bytes", (length) => {
+    expect(() => publicKeyForSigningKey(Buffer.alloc(length, 1))).toThrow("signing key must be exactly 32 bytes");
+    expect(() => sign(Buffer.from("{}"), Buffer.alloc(length, 1))).toThrow("signing key must be exactly 32 bytes");
+  });
+});
+
+describe("parsePublicKeyHex — shared vectors", () => {
+  it.each(VECTORS.publicKeyTexts.filter((v) => v.valid))("accepts $name", ({ text }) => {
+    expect(parsePublicKeyHex(text).toString("hex")).toBe(VECTORS.key.publicKeyHex);
+  });
+
+  it.each(VECTORS.publicKeyTexts.filter((v) => !v.valid))("refuses $name", ({ text }) => {
+    expect(() => parsePublicKeyHex(text)).toThrow(InvalidPublicKeyError);
+  });
+
+  it("covers both outcomes", () => {
+    expect(VECTORS.publicKeyTexts.filter((v) => v.valid).length).toBeGreaterThanOrEqual(2);
+    expect(VECTORS.publicKeyTexts.filter((v) => !v.valid).length).toBeGreaterThanOrEqual(4);
+  });
+});
+
+describe("sign — the header", () => {
+  it("names the signing key's own kid and the manifest typ, in the order alg, kid, typ", () => {
+    const { publicKeyRaw, privateKeyRaw } = makeEd25519Keypair();
+    const jws = sign(canonicalize(buildManifest(makeMinimalInput())), privateKeyRaw);
+
+    expect(decodeHeader(jws)).toEqual({ alg: "EdDSA", kid: kidForPublicKey(publicKeyRaw), typ: AUDIT_ANCHOR_TYP });
+    expect(Object.keys(decodeHeader(jws))).toEqual(["alg", "kid", "typ"]);
+  });
+
+  it("reproduces the vector's JWS from its seed and manifest", () => {
+    const jws = sign(
+      canonicalize(VECTORS.manifest as ReturnType<typeof buildManifest>),
+      Buffer.from(VECTORS.key.seedHex, "hex"),
+    );
+    expect(jws).toBe(VECTORS.jws.find((v) => v.expect === "ok")?.jws);
+  });
+});
+
+describe("readJwsKid", () => {
+  const { privateKeyRaw, publicKeyRaw } = makeEd25519Keypair();
+  const jws = sign(canonicalize(buildManifest(makeMinimalInput())), privateKeyRaw);
+
+  it("returns the header's kid without checking the signature", () => {
+    const [headerB64, payloadB64] = jws.split(".");
+    expect(readJwsKid(jws)).toBe(kidForPublicKey(publicKeyRaw));
+    expect(readJwsKid(`${headerB64}.${payloadB64}.AAAA`)).toBe(kidForPublicKey(publicKeyRaw));
+  });
+
+  it.each([
+    ["the 8-char form the old pattern admitted", `${AUDIT_ANCHOR_KID_PREFIX}abcd1234`],
+    ["upper-case hex", `${AUDIT_ANCHOR_KID_PREFIX}0123456789ABCDEF`],
+    ["a path", `${AUDIT_ANCHOR_KID_PREFIX}../../etc/passwd`],
+    ["no prefix", "0123456789abcdef"],
+    ["a number", 7],
+    ["a missing kid", undefined],
+  ])("throws InvalidKidError for %s", (_label, kid) => {
+    expect(() => readJwsKid(withHeader(jws, { kid }))).toThrow(InvalidKidError);
+  });
+
+  it.each([
+    ["two parts", "a.b"],
+    ["a header that is not base64url JSON", "!!!.e30.AAAA"],
+    ["a header that is JSON null", `${Buffer.from("null").toString("base64url")}.e30.AAAA`],
+  ])("throws InvalidSignatureError for %s", (_label, malformed) => {
+    expect(() => readJwsKid(malformed)).toThrow(InvalidSignatureError);
+  });
+});
+
+describe("verify — kid binding", () => {
+  const publicKey = Buffer.from(VECTORS.key.publicKeyHex, "hex");
+  const controlCharsOf = (text: string) => [...text].filter((c) => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f);
+  const outcome = (jws: string): string => {
+    try {
+      verify(jws, publicKey);
+      return "ok";
+    } catch (err) {
+      return (err as Error).name;
+    }
+  };
+
+  it.each(VECTORS.jws)("shared vector: $name → $expect", ({ jws, expect: expected }) => {
+    expect(outcome(jws)).toBe(expected);
+  });
+
+  it.each(VECTORS.jws.filter((v) => v.expect !== "ok"))("shared vector: $name — the error message carries no control character", ({ jws }) => {
+    let message: string | null = null;
+    try {
+      verify(jws, publicKey);
+    } catch (err) {
+      message = (err as Error).message;
+    }
+
+    expect(message).not.toBeNull();
+    expect(controlCharsOf(message ?? "")).toEqual([]);
+  });
+
+  it("the vectors include a kid that carries control characters", () => {
+    const kids = VECTORS.jws.map((v) => {
+      const header = JSON.parse(Buffer.from(v.jws.split(".")[0] ?? "", "base64url").toString("utf8")) as { kid?: unknown } | null;
+      return typeof header?.kid === "string" ? header.kid : "";
+    });
+    expect(kids.filter((kid) => controlCharsOf(kid).length > 0)).toHaveLength(1);
+  });
+
+  it("the vectors cover acceptance, a mismatched kid with and without a valid signature, and a malformed kid", () => {
+    const expectations = VECTORS.jws.map((v) => v.expect);
+    // One accepted manifest per format version.
+    expect(expectations.filter((e) => e === "ok")).toHaveLength(2);
+    expect(expectations.filter((e) => e === "KidMismatchError")).toHaveLength(2);
+    expect(expectations).toContain("InvalidSignatureError");
+    expect(expectations).toContain("InvalidKidError");
+  });
+
+  it("accepts both format versions: version 1 without a chainLocation, version 2 with one", () => {
+    const seed = Buffer.from(VECTORS.key.seedHex, "hex");
+    const v1 = verify(sign(canonicalize(VECTORS.manifest as ReturnType<typeof buildManifest>), seed), publicKey);
+    const v2 = verify(sign(canonicalize(VECTORS.manifestV2 as ReturnType<typeof buildManifest>), seed), publicKey);
+
+    expect(v1).toEqual(VECTORS.manifest);
+    expect(v1.version).toBe(1);
+    expect("chainLocation" in v1).toBe(false);
+    expect(v2).toEqual(VECTORS.manifestV2);
+    expect(v2.version).toBe(2);
+  });
+
+  it("the vectors refuse a version 2 manifest without a chainLocation and a version 1 manifest with one", () => {
+    const byName = new Map(VECTORS.jws.map((v) => [v.name, v.expect]));
+    expect(byName.get("version 2 without a chainLocation")).toBe("ManifestSchemaValidationError");
+    expect(byName.get("version 1 carrying a chainLocation")).toBe("InvalidSignatureError");
+    expect(byName.get("a version neither implementation knows")).toBe("ManifestSchemaValidationError");
+  });
+
+  it("rejects a manifest checked under another key with KidMismatchError, not a signature error", () => {
+    const signer = makeEd25519Keypair();
+    const other = makeEd25519Keypair();
+    const jws = sign(canonicalize(buildManifest(makeMinimalInput())), signer.privateKeyRaw);
+
+    expect(() => verify(jws, other.publicKeyRaw)).toThrow(KidMismatchError);
+    expect(verify(jws, signer.publicKeyRaw).deploymentId).toBe("deploy-test-1");
+  });
+
+  it("rejects a header renamed to the verifying key's kid: the signature no longer covers it", () => {
+    const signer = makeEd25519Keypair();
+    const other = makeEd25519Keypair();
+    const jws = sign(canonicalize(buildManifest(makeMinimalInput())), signer.privateKeyRaw);
+
+    expect(() => verify(withHeader(jws, { kid: kidForPublicKey(other.publicKeyRaw) }), other.publicKeyRaw)).toThrow(
+      InvalidSignatureError,
     );
   });
 
-  it("rejects kid with suffix shorter than 8 chars", () => {
+  it("refuses a public key that is not 32 bytes", () => {
     const { privateKeyRaw } = makeEd25519Keypair();
-    const canonical = canonicalize(buildManifest(makeMinimalInput()));
-    expect(() =>
-      sign(canonical, privateKeyRaw, `${AUDIT_ANCHOR_KID_PREFIX}abc`),
-    ).toThrow(InvalidKidError);
+    const jws = sign(canonicalize(buildManifest(makeMinimalInput())), privateKeyRaw);
+
+    expect(() => verify(jws, Buffer.alloc(16, 1))).toThrow(InvalidPublicKeyError);
+  });
+});
+
+describe("verify — anchoredAt", () => {
+  const { publicKeyRaw, privateKeyRaw } = makeEd25519Keypair();
+  const signed = (anchoredAt: string) =>
+    sign(canonicalize({ ...buildManifest(makeMinimalInput()), anchoredAt }), privateKeyRaw);
+
+  it("accepts the form toISOString writes", () => {
+    expect(verify(signed("2026-05-01T00:05:00.000Z"), publicKeyRaw).anchoredAt).toBe("2026-05-01T00:05:00.000Z");
+  });
+
+  it.each([
+    ["no milliseconds", "2026-05-01T00:05:00Z"],
+    ["an offset instead of Z", "2026-05-01T00:05:00.000+00:00"],
+    ["a date only", "2026-05-01"],
+    ["a day that does not exist", "2026-02-30T00:05:00.000Z"],
+    ["an hour 24", "2026-05-01T24:00:00.000Z"],
+    ["trailing text", "2026-05-01T00:05:00.000Z "],
+    ["an expanded year, which toISOString round-trips", "+010000-01-01T00:00:00.000Z"],
+    ["not a timestamp", "yesterday"],
+  ])("rejects %s", (_label, anchoredAt) => {
+    expect(() => verify(signed(anchoredAt), publicKeyRaw)).toThrow(ManifestSchemaValidationError);
+  });
+});
+
+describe("signStatement / verifyStatement", () => {
+  const { publicKeyRaw, privateKeyRaw } = makeEd25519Keypair();
+  const payload = Buffer.from(JSON.stringify({ op: "rotation", issuedAt: "2026-05-01T00:00:00.000Z" }), "utf-8");
+
+  it("signs under the statement typ and the signing key's own kid, and verifies to the payload bytes", () => {
+    const jws = signStatement(payload, privateKeyRaw);
+
+    expect(decodeHeader(jws)).toEqual({
+      alg: "EdDSA",
+      kid: kidForPublicKey(publicKeyRaw),
+      typ: AUDIT_ANCHOR_STATEMENT_TYP,
+    });
+    expect(verifyStatement(jws, publicKeyRaw)).toEqual(payload);
+  });
+
+  it("a manifest verify rejects a statement, and a statement verify rejects a manifest, with InvalidTypError", () => {
+    const manifestJws = sign(canonicalize(buildManifest(makeMinimalInput())), privateKeyRaw);
+
+    expect(() => verify(signStatement(payload, privateKeyRaw), publicKeyRaw)).toThrow(InvalidTypError);
+    expect(() => verifyStatement(manifestJws, publicKeyRaw)).toThrow(InvalidTypError);
+  });
+
+  it("binds the kid and the signature like a manifest", () => {
+    const jws = signStatement(payload, privateKeyRaw);
+    const [headerB64, , sigB64] = jws.split(".");
+    const tampered = `${headerB64}.${Buffer.from("{}").toString("base64url")}.${sigB64}`;
+
+    expect(() => verifyStatement(jws, makeEd25519Keypair().publicKeyRaw)).toThrow(KidMismatchError);
+    expect(() => verifyStatement(tampered, publicKeyRaw)).toThrow(InvalidSignatureError);
   });
 });
 
@@ -306,7 +618,6 @@ describe("verify — algorithm rejection", () => {
     const jws = sign(
       canonicalize(buildManifest(makeMinimalInput())),
       privateKeyRaw,
-      VALID_KID,
     );
     const tampered = tamperHeader(jws, { alg: "none" });
     expect(() => verify(tampered, publicKeyRaw)).toThrow(InvalidAlgorithmError);
@@ -317,7 +628,6 @@ describe("verify — algorithm rejection", () => {
     const jws = sign(
       canonicalize(buildManifest(makeMinimalInput())),
       privateKeyRaw,
-      VALID_KID,
     );
     const tampered = tamperHeader(jws, { alg: "HS256" });
     expect(() => verify(tampered, publicKeyRaw)).toThrow(InvalidAlgorithmError);
@@ -328,7 +638,6 @@ describe("verify — algorithm rejection", () => {
     const jws = sign(
       canonicalize(buildManifest(makeMinimalInput())),
       privateKeyRaw,
-      VALID_KID,
     );
     const tampered = tamperHeader(jws, { alg: "RS256" });
     expect(() => verify(tampered, publicKeyRaw)).toThrow(InvalidAlgorithmError);
@@ -339,7 +648,6 @@ describe("verify — algorithm rejection", () => {
     const jws = sign(
       canonicalize(buildManifest(makeMinimalInput())),
       privateKeyRaw,
-      VALID_KID,
     );
     // Remove alg field
     const [headerB64, payloadB64, sigB64] = jws.split(".");
@@ -365,7 +673,6 @@ describe("verify — algorithm rejection", () => {
     const jws = sign(
       canonicalize(buildManifest(makeMinimalInput())),
       privateKeyRaw,
-      VALID_KID,
     );
     const tampered = tamperHeader(jws, { alg: "ES256" });
     expect(() => verify(tampered, publicKeyRaw)).toThrow(InvalidAlgorithmError);
@@ -376,7 +683,6 @@ describe("verify — algorithm rejection", () => {
     const jws = sign(
       canonicalize(buildManifest(makeMinimalInput())),
       privateKeyRaw,
-      VALID_KID,
     );
     const tampered = tamperHeader(jws, { alg: null });
     expect(() => verify(tampered, publicKeyRaw)).toThrow(InvalidAlgorithmError);
@@ -387,10 +693,26 @@ describe("verify — algorithm rejection", () => {
     const jws = sign(
       canonicalize(buildManifest(makeMinimalInput())),
       privateKeyRaw,
-      VALID_KID,
     );
     const tampered = tamperHeader(jws, { typ: "wrong-typ" });
     expect(() => verify(tampered, publicKeyRaw)).toThrow(InvalidTypError);
+  });
+
+  it("keeps control characters of an unverified alg and typ out of the error message", () => {
+    const { publicKeyRaw, privateKeyRaw } = makeEd25519Keypair();
+    const jws = sign(canonicalize(buildManifest(makeMinimalInput())), privateKeyRaw);
+    const hostile = "\u001b[31mred\nline";
+
+    for (const overrides of [{ alg: hostile }, { typ: hostile }]) {
+      let message = "";
+      try {
+        verify(tamperHeader(jws, overrides), publicKeyRaw);
+      } catch (err) {
+        message = (err as Error).message;
+      }
+      expect(message).toContain("Invalid JWS");
+      expect([...message].filter((c) => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f)).toEqual([]);
+    }
   });
 });
 
@@ -398,7 +720,7 @@ describe("verify — payload tampering", () => {
   it("rejects tampered payload", () => {
     const { publicKeyRaw, privateKeyRaw } = makeEd25519Keypair();
     const manifest = buildManifest(makeMinimalInput());
-    const jws = sign(canonicalize(manifest), privateKeyRaw, VALID_KID);
+    const jws = sign(canonicalize(manifest), privateKeyRaw);
     const [headerB64, , sigB64] = jws.split(".");
 
     // Replace payload with a modified manifest
@@ -418,7 +740,7 @@ describe("verify — payload tampering", () => {
   it("rejects bad signature bytes", () => {
     const { publicKeyRaw, privateKeyRaw } = makeEd25519Keypair();
     const manifest = buildManifest(makeMinimalInput());
-    const jws = sign(canonicalize(manifest), privateKeyRaw, VALID_KID);
+    const jws = sign(canonicalize(manifest), privateKeyRaw);
     const [headerB64, payloadB64] = jws.split(".");
 
     // Replace signature with 64 zero bytes

@@ -3,19 +3,20 @@
  *
  * The boundary is fixed when a timer is armed, not recomputed when it fires.
  * A timer that fires before its deadline re-arms for the remainder instead of
- * running: a run for a boundary the wall clock has not reached would write a
- * marker ahead of the clock, which the next run fails closed on
- * (BOUNDARY_MARKER_AHEAD).
+ * running: a run for a boundary the wall clock has not reached would store an
+ * object dated ahead of the clock, which the next run fails closed on
+ * (PUBLISHED_OBJECT_AHEAD).
  * The next timer is computed from the wall clock after each run (no
  * setInterval, which drifts and keeps firing on the old phase across a long
  * run). A failed run, or one that found the publish lock held, is retried for
  * the same boundary, at most ANCHOR_MAX_RETRIES_PER_BOUNDARY times and never
  * closer than shortly before the next one — a database outage at the boundary
  * must not cost the day, and a lock holder that never publishes must not
- * either (when it does publish, the retry's marker re-check skips). The
- * publisher's persisted attempt count bounds how many runs reach the
- * destination across restarts; this in-process bound covers the failures that
- * stop before the count is written, which the persisted count never sees.
+ * either (when it does publish, the retry finds the object at the primary
+ * destination and skips). The publisher's persisted attempt count bounds how
+ * many runs reach the publish transaction across restarts; this in-process
+ * bound covers the failures that stop before the count is written, which the
+ * persisted count never sees.
  */
 import { getLogger } from "@/lib/logger";
 import { errorLogFields } from "@/lib/logger/error-fields";

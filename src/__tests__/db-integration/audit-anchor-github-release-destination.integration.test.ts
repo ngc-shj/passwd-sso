@@ -1,291 +1,321 @@
 /**
- * Integration tests for GitHubReleaseDestination using a node:http fake server.
- *
- * Tests (T8):
- *   1. Create-or-get release flow — POST /repos/{owner}/{repo}/releases succeeds,
- *      then asset upload via the upload_url.
- *   2. When release already exists (POST returns 422), the destination falls back
- *      to GET /repos/{owner}/{repo}/releases/tags/{tag} and proceeds with asset upload.
- *   3. DESTINATION_DIVERGENCE adversarial — two runs upload different bytes;
- *      verify the verifier detects divergence via SHA-256 comparison.
- *      NOTE: this test is at the destination layer; for a full verifier-layer
- *      DESTINATION_DIVERGENCE test, see the DESTINATION_DIVERGENCE it.todo in
- *      audit-anchor-publisher.integration.test.ts.
+ * GitHubReleaseDestination against a node:http fake of the Releases API
+ * (src/__tests__/helpers/fake-github-release-server.ts). The real API is not
+ * reachable here: the fake is shaped from its documented behaviour, and what
+ * the tests pin is the destination's handling of each answer — the destination
+ * contract, the mapping of a taken asset name, and the paginated listing.
  */
 
-import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
-import http from "node:http";
-import { createHash } from "node:crypto";
-import { AddressInfo } from "node:net";
-import { GitHubReleaseDestination } from "@/lib/audit/anchor-destinations/github-release-destination";
+import { describe, it, expect, afterEach } from "vitest";
+import {
+  GITHUB_ASSET_RESERVATION_STALE_MS,
+  GitHubAssetReservedError,
+  GitHubReleaseDestination,
+  GitHubRequestError,
+} from "@/lib/audit/anchor-destinations/github-release-destination";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
+import {
+  ANCHOR_CONTENT_TYPE,
+  createArtifact,
+  describeAnchorDestinationContract,
+  manifestKeyFor,
+  randomKid,
+} from "../helpers/anchor-destination-contract";
+import { FAKE_GITHUB_REPO, startFakeGitHub, type FakeGitHub } from "../helpers/fake-github-release-server";
+import { publicKeyArtifactKey } from "@/lib/audit/anchor-artifact-keys";
 
-// ── Fake GitHub API server ───────────────────────────────────────────────────
+const fakes: FakeGitHub[] = [];
 
-type FakeReleaseServerState = {
-  existingTags: Set<string>;
-  uploadedAssets: Map<string, Buffer>;
-  createCallCount: number;
-  getByTagCallCount: number;
-  uploadCallCount: number;
-};
-
-/**
- * Creates a minimal fake GitHub API HTTP server that handles:
- *   POST /repos/{owner}/{repo}/releases → 201 (new) or 422 (duplicate)
- *   GET  /repos/{owner}/{repo}/releases/tags/{tag} → 200
- *   POST /upload/assets?name={filename} → 201 (fake upload endpoint)
- */
-function createFakeGitHubServer(state: FakeReleaseServerState): http.Server {
-  const server = http.createServer((req, res) => {
-    let body = "";
-    req.on("data", (chunk: Buffer) => {
-      body += chunk.toString();
-    });
-    req.on("end", () => {
-      const url = req.url ?? "";
-      const method = req.method ?? "GET";
-
-      // POST /repos/owner/repo/releases → create release
-      const createReleaseMatch = url.match(/^\/repos\/([^/]+)\/([^/]+)\/releases$/);
-      if (method === "POST" && createReleaseMatch) {
-        state.createCallCount++;
-        let tag = "unknown-tag";
-        try {
-          const payload = JSON.parse(body) as { tag_name?: string };
-          tag = payload.tag_name ?? "unknown-tag";
-        } catch {
-          // ignore parse error
-        }
-        if (state.existingTags.has(tag)) {
-          // Simulate "already exists" — GitHub returns 422
-          res.writeHead(422, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ message: "Validation Failed" }));
-          return;
-        }
-        state.existingTags.add(tag);
-        const releaseId = Math.floor(Math.random() * 100000);
-        const host = req.headers["host"] ?? "localhost";
-        res.writeHead(201, { "Content-Type": "application/json" });
-        res.end(
-          JSON.stringify({
-            id: releaseId,
-            tag_name: tag,
-            upload_url: `http://${host}/upload/assets{?name,label}`,
-          }),
-        );
-        return;
-      }
-
-      // GET /repos/owner/repo/releases/tags/{tag} → get existing release
-      const getByTagMatch = url.match(/^\/repos\/([^/]+)\/([^/]+)\/releases\/tags\/(.+)$/);
-      if (method === "GET" && getByTagMatch) {
-        state.getByTagCallCount++;
-        const tag = decodeURIComponent(getByTagMatch[3] ?? "");
-        const host = req.headers["host"] ?? "localhost";
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(
-          JSON.stringify({
-            id: 99999,
-            tag_name: tag,
-            upload_url: `http://${host}/upload/assets{?name,label}`,
-          }),
-        );
-        return;
-      }
-
-      // POST /upload/assets?name=filename → fake asset upload
-      const uploadMatch = url.match(/^\/upload\/assets/);
-      if (method === "POST" && uploadMatch) {
-        state.uploadCallCount++;
-        const urlObj = new URL(url, "http://localhost");
-        const name = urlObj.searchParams.get("name") ?? "unknown";
-        // Body already consumed via 'end' event above — store empty for now.
-        // For binary bodies we need to collect from the raw socket;
-        // in this fake the body variable has accumulated text so convert to buffer.
-        state.uploadedAssets.set(name, Buffer.from(body));
-        res.writeHead(201, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ id: 1, name, size: body.length }));
-        return;
-      }
-
-      // Default: 404
-      res.writeHead(404);
-      res.end("Not Found");
-    });
-  });
-
-  return server;
+async function freshFake(): Promise<FakeGitHub> {
+  const fake = await startFakeGitHub();
+  fakes.push(fake);
+  return fake;
 }
 
-function startServer(state: FakeReleaseServerState): Promise<{ server: http.Server; port: number }> {
-  return new Promise((resolve, reject) => {
-    const server = createFakeGitHubServer(state);
-    server.listen(0, "127.0.0.1", () => {
-      const addr = server.address() as AddressInfo;
-      resolve({ server, port: addr.port });
-    });
-    server.on("error", reject);
+function destinationFor(fake: FakeGitHub, listPageSize?: number): GitHubReleaseDestination {
+  return new GitHubReleaseDestination({
+    repo: FAKE_GITHUB_REPO,
+    token: "fake-token",
+    apiBaseUrl: fake.baseUrl,
+    listPageSize,
   });
 }
 
-function stopServer(server: http.Server): Promise<void> {
-  return new Promise((resolve, reject) => {
-    server.close((err) => (err ? reject(err) : resolve()));
-  });
+afterEach(async () => {
+  await Promise.all(fakes.splice(0).map((fake) => fake.close()));
+});
+
+describeAnchorDestinationContract("GitHub Releases (fake server)", async () => destinationFor(await freshFake()));
+
+const UPLOAD = /^POST \/upload\/\d+\/assets$/;
+const DELETE = /^DELETE /;
+const DATE = "2026-05-02";
+const TAG = `audit-anchor-${DATE}`;
+
+function agedIso(ageMs: number): string {
+  return new Date(Date.now() - ageMs).toISOString();
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
+describe("GitHubReleaseDestination — release and asset placement", () => {
+  it("creates the dated release, uploads the manifest as its asset, and reuses the release for a second kid", async () => {
+    const fake = await freshFake();
+    const dest = destinationFor(fake);
+    const first = manifestKeyFor(DATE);
+    const second = manifestKeyFor(DATE);
 
-describe("GitHubReleaseDestination — fake server integration", () => {
-  let state: FakeReleaseServerState;
-  let server: http.Server;
-  let port: number;
-  let dest: GitHubReleaseDestination;
-  let realFetch: typeof global.fetch;
+    expect(await createArtifact(dest, first, Buffer.from("one"))).toBe("created");
+    expect(await createArtifact(dest, second, Buffer.from("two"))).toBe("created");
 
-  beforeAll(async () => {
-    state = {
-      existingTags: new Set(),
-      uploadedAssets: new Map(),
-      createCallCount: 0,
-      getByTagCallCount: 0,
-      uploadCallCount: 0,
+    expect(fake.releases.map((r) => r.tag_name)).toEqual([TAG]);
+    expect(fake.releases[0]?.assets.map((a) => a.name).sort()).toEqual([first, second].sort());
+    // The second create found the tag taken and fetched the release.
+    expect(fake.count("POST /repos/test-org/test-repo/releases")).toBe(2);
+    expect(fake.count(`GET /repos/test-org/test-repo/releases/tags/${TAG}`)).toBe(1);
+  });
+
+  it("stores binary bytes unchanged", async () => {
+    const fake = await freshFake();
+    const dest = destinationFor(fake);
+    const key = manifestKeyFor(DATE);
+    const bytes = Buffer.from([0x00, 0xff, 0x80, 0x0a, 0xc3, 0x28]);
+
+    await createArtifact(dest, key, bytes);
+
+    expect(fake.releases[0]?.assets[0]?.content).toEqual(bytes);
+    expect(await dest.read(key)).toEqual(bytes);
+  });
+
+  it("stores a public key under the public-keys release, by its file name", async () => {
+    const fake = await freshFake();
+    const dest = destinationFor(fake);
+    const kid = randomKid();
+
+    await createArtifact(dest, publicKeyArtifactKey(kid), Buffer.from("ab".repeat(32)));
+
+    expect(fake.releases.map((r) => r.tag_name)).toEqual(["audit-anchor-public-keys"]);
+    expect(fake.releases[0]?.assets.map((a) => a.name)).toEqual([`${kid}.pub`]);
+  });
+});
+
+describe("GitHubReleaseDestination — a taken asset name", () => {
+  it("answers exists for an uploaded holder, deleting nothing and leaving its bytes", async () => {
+    const fake = await freshFake();
+    const key = manifestKeyFor(DATE);
+    const holder = fake.addAsset(TAG, { name: key, state: "uploaded", content: Buffer.from("first-writer") });
+
+    expect(await createArtifact(destinationFor(fake), key, Buffer.from("second-writer"))).toBe("exists");
+
+    expect(fake.count(DELETE)).toBe(0);
+    expect(fake.count(UPLOAD)).toBe(1);
+    expect(fake.releases[0]?.assets).toEqual([holder]);
+    expect(holder.content).toEqual(Buffer.from("first-writer"));
+  });
+
+  it("removes a stale reservation, exactly that asset id, then uploads once more", async () => {
+    const fake = await freshFake();
+    const key = manifestKeyFor(DATE);
+    const stale = fake.addAsset(TAG, {
+      name: key,
+      state: "open",
+      created_at: agedIso(GITHUB_ASSET_RESERVATION_STALE_MS + MS_PER_MINUTE),
+    });
+    const dest = destinationFor(fake);
+
+    expect(await createArtifact(dest, key, Buffer.from("content"))).toBe("created");
+
+    expect(fake.deletedAssetIds).toEqual([stale.id]);
+    expect(fake.count(DELETE)).toBe(1);
+    expect(fake.count(UPLOAD)).toBe(2);
+    expect(await dest.read(key)).toEqual(Buffer.from("content"));
+  });
+
+  it("answers exists, deleting nothing, when a stale reservation is uploaded by the time it is read again", async () => {
+    const fake = await freshFake();
+    const key = manifestKeyFor(DATE);
+    const holder = fake.addAsset(TAG, {
+      name: key,
+      state: "open",
+      created_at: agedIso(GITHUB_ASSET_RESERVATION_STALE_MS + MS_PER_MINUTE),
+      content: Buffer.from("other-writer"),
+    });
+    // The other writer's upload finishes between the first look and the re-read.
+    fake.beforeRequest = (method, path) => {
+      if (method === "GET" && path.endsWith(`/releases/assets/${holder.id}`)) holder.state = "uploaded";
     };
-    const result = await startServer(state);
-    server = result.server;
-    port = result.port;
+    const dest = destinationFor(fake);
 
-    // Patch the destination to use our fake server instead of api.github.com.
-    // GitHubReleaseDestination hard-codes https://api.github.com — we monkey-patch
-    // the global fetch to redirect to our local server for test isolation.
-    realFetch = global.fetch;
-    global.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-      const rewritten = url
-        .replace("https://api.github.com", `http://127.0.0.1:${port}`)
-        .replace("https://uploads.github.com", `http://127.0.0.1:${port}`);
-      return realFetch(rewritten, init);
+    expect(await createArtifact(dest, key, Buffer.from("mine"))).toBe("exists");
+
+    expect(fake.count(DELETE)).toBe(0);
+    expect(fake.count(UPLOAD)).toBe(1);
+    expect(await dest.read(key)).toEqual(Buffer.from("other-writer"));
+  });
+
+  it("throws for a reservation younger than the stale bound, deleting nothing", async () => {
+    const fake = await freshFake();
+    const key = manifestKeyFor(DATE);
+    fake.addAsset(TAG, {
+      name: key,
+      state: "open",
+      created_at: agedIso(GITHUB_ASSET_RESERVATION_STALE_MS - MS_PER_MINUTE),
+    });
+
+    await expect(createArtifact(destinationFor(fake), key, Buffer.from("content"))).rejects.toBeInstanceOf(
+      GitHubAssetReservedError,
+    );
+
+    expect(fake.count(DELETE)).toBe(0);
+    expect(fake.count(UPLOAD)).toBe(1);
+  });
+
+  it("throws on a second 422 after the re-upload, without a second delete", async () => {
+    const fake = await freshFake();
+    const key = manifestKeyFor(DATE);
+    const stale = fake.addAsset(TAG, {
+      name: key,
+      state: "open",
+      created_at: agedIso(GITHUB_ASSET_RESERVATION_STALE_MS + MS_PER_MINUTE),
+    });
+    // Another writer reserves the name again right after the delete.
+    fake.beforeRequest = (method) => {
+      if (method === "POST" && fake.deletedAssetIds.length === 1 && fake.releases[0]?.assets.length === 0) {
+        fake.addAsset(TAG, { name: key, state: "open" });
+      }
     };
+
+    const error = await createArtifact(destinationFor(fake), key, Buffer.from("content")).then(
+      () => null,
+      (err: unknown) => err,
+    );
+
+    expect(error).toBeInstanceOf(GitHubRequestError);
+    expect((error as GitHubRequestError).code).toBe("HTTP_422");
+    expect(fake.deletedAssetIds).toEqual([stale.id]);
+    expect(fake.count(UPLOAD)).toBe(2);
   });
 
-  afterAll(async () => {
-    // Restore global.fetch BEFORE stopping the server (closes RT2-1).
-    // Order matters: any in-flight fetch must complete via the local server
-    // before we redirect back to the real fetch.
-    global.fetch = realFetch;
-    await stopServer(server);
+  it("throws when the reservation's delete fails, and does not upload again", async () => {
+    const fake = await freshFake();
+    const key = manifestKeyFor(DATE);
+    fake.addAsset(TAG, {
+      name: key,
+      state: "open",
+      created_at: agedIso(GITHUB_ASSET_RESERVATION_STALE_MS + MS_PER_MINUTE),
+    });
+    fake.deleteStatus = 403;
+
+    const error = await createArtifact(destinationFor(fake), key, Buffer.from("content")).then(
+      () => null,
+      (err: unknown) => err,
+    );
+
+    expect(error).toBeInstanceOf(GitHubRequestError);
+    expect((error as GitHubRequestError).code).toBe("HTTP_403");
+    expect(fake.count(DELETE)).toBe(1);
+    expect(fake.count(UPLOAD)).toBe(1);
+    expect(fake.releases[0]?.assets).toHaveLength(1);
   });
 
-  afterEach(() => {
-    // Reset call counters AND existing tags between tests — closes RT2-4.
-    // Each test must seed its own pre-existing tags explicitly to avoid
-    // ordering dependencies (vitest may run with --sequence.shuffle).
-    state.createCallCount = 0;
-    state.getByTagCallCount = 0;
-    state.uploadCallCount = 0;
-    state.existingTags.clear();
-    state.uploadedAssets.clear();
+  it("throws on a 422 that no asset of that name explains", async () => {
+    const fake = await freshFake();
+    const key = manifestKeyFor(DATE);
+    fake.rejectNextUpload = true;
+    const dest = destinationFor(fake);
+
+    const error = await createArtifact(dest, key, Buffer.from("content")).then(
+      () => null,
+      (err: unknown) => err,
+    );
+
+    expect(error).toBeInstanceOf(GitHubRequestError);
+    expect((error as GitHubRequestError).code).toBe("HTTP_422");
+    expect(fake.count(DELETE)).toBe(0);
+    expect(fake.count(UPLOAD)).toBe(1);
+    // The same create, not refused, stores the artifact.
+    expect(await createArtifact(dest, key, Buffer.from("content"))).toBe("created");
+  });
+});
+
+describe("GitHubReleaseDestination — read and list", () => {
+  it("follows a download redirect to another origin, and sends the token to the API only", async () => {
+    const fake = await freshFake();
+    const key = manifestKeyFor(DATE);
+    const asset = fake.addAsset(TAG, { name: key, state: "uploaded", content: Buffer.from("redirected") });
+
+    expect(await destinationFor(fake).read(key)).toEqual(Buffer.from("redirected"));
+
+    expect(fake.downloads).toEqual([{ path: `/download/${asset.id}`, authorization: undefined }]);
+    // The header the redirect target must not see is the one the API did.
+    expect(fake.apiAuthorization).toBe("token fake-token");
   });
 
-  it("Test 1: create-or-get release flow — POST creates new release, asset upload succeeds", async () => {
-    dest = new GitHubReleaseDestination({
-      repo: "test-org/test-repo",
-      token: "fake-token",
-    });
+  it("reads a download the API streams directly", async () => {
+    const fake = await freshFake();
+    fake.downloadRedirect = false;
+    const key = manifestKeyFor(DATE);
+    fake.addAsset(TAG, { name: key, state: "uploaded", content: Buffer.from("direct") });
 
-    const artifactKey = "2026-05-01.kid-audit-anchor-test123456.jws";
-    const artifactBytes = Buffer.from("jws-payload-for-test-1", "utf-8");
+    expect(await destinationFor(fake).read(key)).toEqual(Buffer.from("direct"));
 
-    await dest.upload({
-      artifactBytes,
-      artifactKey,
-      contentType: "application/jose",
-    });
-
-    // POST /releases was called once (new release created)
-    expect(state.createCallCount).toBe(1);
-    // GET /releases/tags/... was NOT called (release was new)
-    expect(state.getByTagCallCount).toBe(0);
-    // Asset upload was called once
-    expect(state.uploadCallCount).toBe(1);
-    // The uploaded asset name matches the artifactKey
-    expect(state.uploadedAssets.has(artifactKey)).toBe(true);
+    expect(fake.downloads).toEqual([]);
   });
 
-  it("Test 2: POST 422 fallback — when release exists, falls back to GET by tag and uploads asset", async () => {
-    dest = new GitHubReleaseDestination({
-      repo: "test-org/test-repo",
-      token: "fake-token",
-    });
+  it("does not read or list an asset that is not uploaded", async () => {
+    const fake = await freshFake();
+    const reserved = manifestKeyFor(DATE);
+    const stored = manifestKeyFor(DATE);
+    fake.addAsset(TAG, { name: reserved, state: "open", content: Buffer.from("partial") });
+    fake.addAsset(TAG, { name: stored, state: "uploaded", content: Buffer.from("whole") });
+    const dest = destinationFor(fake);
 
-    // Use a date that produces the same tag as test 1 (same date prefix)
-    // so the server's existingTags set triggers a 422.
-    const artifactKey = "2026-05-01.kid-audit-anchor-secondrun.jws";
-    const artifactBytes = Buffer.from("jws-payload-for-test-2-second-run", "utf-8");
-
-    // Pre-register the tag so the server responds with 422 on POST
-    const expectedTag = "audit-anchor-2026-05-01";
-    state.existingTags.add(expectedTag);
-
-    await dest.upload({
-      artifactBytes,
-      artifactKey,
-      contentType: "application/jose",
-    });
-
-    // POST /releases was called (returned 422)
-    expect(state.createCallCount).toBe(1);
-    // Fallback GET /releases/tags/... was called
-    expect(state.getByTagCallCount).toBe(1);
-    // Asset upload was called once after fallback
-    expect(state.uploadCallCount).toBe(1);
+    expect(await dest.read(reserved)).toBeNull();
+    expect(await dest.read(stored)).toEqual(Buffer.from("whole"));
+    expect(await dest.list()).toEqual([stored]);
   });
 
-  it("Test 3: DESTINATION_DIVERGENCE adversarial — two uploads of different bytes produce different SHA-256 hashes", async () => {
-    // This test is at the destination layer: it verifies that uploading different
-    // byte content to the same artifact key produces detectably different SHA-256
-    // digests, which is the primitive the verifier uses for divergence detection.
-    //
-    // TODO (full DESTINATION_DIVERGENCE): a complete verifier-layer test would:
-    //   1. Upload artifact A to destination 1 (primary).
-    //   2. Upload a tampered artifact B to destination 2 (secondary).
-    //   3. Run the verifier which cross-checks primary vs secondary SHA-256.
-    //   4. Assert the verifier returns a DESTINATION_DIVERGENCE error.
-    // This requires the verifier CLI sub-command which is not yet implemented.
-    // Tracked as the DESTINATION_DIVERGENCE it.todo in audit-anchor-publisher.integration.test.ts.
+  it("lists every page: 5 dated releases at page size 2 give the exact set in 3 requests", async () => {
+    const fake = await freshFake();
+    const dest = destinationFor(fake, 2);
+    const keys = ["2026-05-01", "2026-05-02", "2026-05-03", "2026-05-04", "2026-05-05"].map((d) => manifestKeyFor(d));
+    for (const key of keys) {
+      await dest.create({ artifactBytes: Buffer.from(key), artifactKey: key, contentType: ANCHOR_CONTENT_TYPE });
+    }
+    fake.requests.length = 0;
 
-    const artifactBytes1 = Buffer.from("original-signed-manifest-bytes", "utf-8");
-    const artifactBytes2 = Buffer.from("tampered-manifest-bytes-after-signing", "utf-8");
+    expect([...(await dest.list())].sort()).toEqual([...keys].sort());
+    expect(fake.count("GET /repos/test-org/test-repo/releases")).toBe(3);
+  });
 
-    const sha256_1 = createHash("sha256").update(artifactBytes1).digest("hex");
-    const sha256_2 = createHash("sha256").update(artifactBytes2).digest("hex");
+  it("lists a full last page and then an empty one", async () => {
+    const fake = await freshFake();
+    const dest = destinationFor(fake, 2);
+    const keys = ["2026-05-01", "2026-05-02"].map((d) => manifestKeyFor(d));
+    for (const key of keys) await createArtifact(dest, key, Buffer.from(key));
+    fake.requests.length = 0;
 
-    // Divergent bytes MUST produce different SHA-256 digests
-    expect(sha256_1).not.toBe(sha256_2);
+    expect([...(await dest.list())].sort()).toEqual([...keys].sort());
+    expect(fake.count("GET /repos/test-org/test-repo/releases")).toBe(2);
+  });
 
-    // Simulate two separate "upload" calls (as a destination would do)
-    dest = new GitHubReleaseDestination({
-      repo: "test-org/test-repo",
-      token: "fake-token",
-    });
+  it("leaves out releases that are not anchor ones", async () => {
+    const fake = await freshFake();
+    const dest = destinationFor(fake);
+    const key = manifestKeyFor(DATE);
+    await createArtifact(dest, key, Buffer.from("manifest"));
+    fake.addAsset("v1.2.3", { name: "app.tar.gz", state: "uploaded" });
 
-    const key1 = "2026-04-30.kid-audit-anchor-original.jws";
-    const key2 = "2026-04-29.kid-audit-anchor-tampered.jws";
+    expect(await dest.list()).toEqual([key]);
+  });
 
-    // afterEach clears existingTags, so both creates start fresh.
-    await dest.upload({ artifactBytes: artifactBytes1, artifactKey: key1, contentType: "application/jose" });
-    await dest.upload({ artifactBytes: artifactBytes2, artifactKey: key2, contentType: "application/jose" });
+  it("throws on a listing the API refuses", async () => {
+    const fake = await freshFake();
+    const dest = new GitHubReleaseDestination({ repo: "other/repo", token: "fake-token", apiBaseUrl: fake.baseUrl });
 
-    // Both uploads landed at distinct paths on the fake server.
-    expect(state.uploadedAssets.get(key1)).toBeDefined();
-    expect(state.uploadedAssets.get(key2)).toBeDefined();
-    expect(state.uploadedAssets.size).toBe(2);
-
-    // Phase 3 R2 RT2-2 acknowledged limitation: the fake server collects body
-    // as a UTF-8 string, so byte-level content equality of binary JWS artifacts
-    // cannot be verified here. The input-side SHA-256 difference (line 263)
-    // proves divergence at the source. Full DESTINATION_DIVERGENCE detection
-    // (server-A receives X, server-B receives Y, verifier compares) belongs at
-    // the verifier layer and is tracked as continuing work in the deviation log.
+    const error = await dest.list().then(
+      () => null,
+      (err: unknown) => err,
+    );
+    expect(error).toBeInstanceOf(GitHubRequestError);
+    expect((error as GitHubRequestError).code).toBe("HTTP_404");
   });
 });
