@@ -145,6 +145,33 @@ describe("TeamInviteByEmailSection", () => {
       expect(onSuccess).toHaveBeenCalled();
     });
 
+    it("stays displayed when there is no clipboard (a non-secure origin)", async () => {
+      const clipboard = navigator.clipboard;
+      Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
+      try {
+        await invite();
+      } finally {
+        Object.defineProperty(navigator, "clipboard", { value: clipboard, configurable: true });
+      }
+      expect(screen.getByLabelText("inviteLinkShownOnce")).toHaveValue(LINK);
+      expect(toast.success).toHaveBeenCalledWith("invitedLinkNotCopied");
+      expect(toast.error).not.toHaveBeenCalled();
+    });
+
+    it("is cleared when the next invite is refused", async () => {
+      await invite();
+      expect(screen.getByLabelText("inviteLinkShownOnce")).toHaveValue(LINK);
+
+      mockFetchApi.mockResolvedValue(new Response(JSON.stringify({ error: "INVITATION_ALREADY_SENT" }), { status: 409 }));
+      fireEvent.change(screen.getByPlaceholderText("inviteEmailPlaceholder"), {
+        target: { value: "carol@example.com" },
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText("inviteSend"));
+      });
+      expect(screen.queryByLabelText("inviteLinkShownOnce")).not.toBeInTheDocument();
+    });
+
     it("is not displayed when the invite is refused", async () => {
       mockFetchApi.mockResolvedValue(new Response(JSON.stringify({ error: "INVITATION_ALREADY_SENT" }), { status: 409 }));
       render(<TeamInviteByEmailSection teamId="team-1" onSuccess={vi.fn()} />);

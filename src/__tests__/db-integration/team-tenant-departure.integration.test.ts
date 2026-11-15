@@ -401,6 +401,9 @@ describe("team membership across a tenant departure — real-DB integration", ()
       // transaction, which is always rolled back.
       expect(migration.match(/^(BEGIN|COMMIT);$/gm)).toEqual(["BEGIN;", "COMMIT;"]);
       const body = migration.replace(/^(BEGIN|COMMIT);$/gm, "");
+      // Any other transaction control left in the body would commit this
+      // test's changes (role, ownership, column) on the shared database.
+      expect(body).not.toMatch(/^\s*(BEGIN|COMMIT|END|ROLLBACK|ABORT|START\s+TRANSACTION)\b/im);
       const token = randomBytes(32).toString("hex");
       const migrateRole = `mig_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
 
@@ -421,8 +424,16 @@ describe("team membership across a tenant departure — real-DB integration", ()
         // As on RDS: the table owner, without superuser or BYPASSRLS.
         await client.query(`CREATE ROLE ${migrateRole} NOLOGIN NOSUPERUSER NOBYPASSRLS`);
         await client.query(`GRANT USAGE, CREATE ON SCHEMA public TO ${migrateRole}`);
+        // The table's policy calls it; the RLS control below reads through the policy.
+        await client.query(`GRANT EXECUTE ON FUNCTION public.rls_bypass_admits(text) TO ${migrateRole}`);
         await client.query(`ALTER TABLE team_invitations OWNER TO ${migrateRole}`);
         await client.query(`SET LOCAL ROLE ${migrateRole}`);
+        const [self] = (await client.query<{ name: string; rolsuper: boolean; rolbypassrls: boolean }>(
+          `SELECT current_user AS name, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user`,
+        )).rows;
+        expect(self).toEqual({ name: migrateRole, rolsuper: false, rolbypassrls: false });
+        // Row-level security applies to this role: it sees none of the rows it is about to convert.
+        expect((await client.query(`SELECT 1 FROM team_invitations`)).rowCount).toBe(0);
         await client.query(body);
         await client.query(`RESET ROLE`);
 

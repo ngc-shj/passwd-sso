@@ -64,9 +64,12 @@ export function TeamInviteByEmailSection({ teamId, onSuccess }: Props) {
       setIssuedLink(inviteUrl);
       setInvEmail("");
       onSuccess();
-      // The invitation exists from here on: a clipboard refusal must not be
-      // reported as a failed invitation.
-      const copied = await navigator.clipboard.writeText(inviteUrl).then(() => true, () => false);
+      // The invitation exists from here on: a clipboard refusal, or no
+      // clipboard at all (a non-secure origin), must not be reported as a
+      // failed invitation.
+      const copied = await Promise.resolve()
+        .then(() => navigator.clipboard.writeText(inviteUrl))
+        .then(() => true, () => false);
       toast.success(t(copied ? "invitedWithLink" : "invitedLinkNotCopied"));
     } catch {
       toast.error(t("inviteFailed"));

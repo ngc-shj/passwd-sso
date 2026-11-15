@@ -121,3 +121,61 @@ deployed database.
 ### Testing F2 [Minor] Responses could expose `tokenHash` unnoticed
 - Action: the GET item and the 201 are pinned to their exact key sets.
 - Modified file: `src/app/api/teams/[teamId]/invitations/route.test.ts`
+
+## Round 2 (incremental: 600641a30..ad20d6f13)
+
+All round-1 items re-verified: functionality F1–F3 resolved (the baseline's
+"issue, list, cancel or accept" checked against each old-code path), testing F1
+and F2 resolved (key-set assertions red under a digest added to either response
+or a spread row). Security: no findings; displaying the link widens nothing (it
+is the issuing admin's own client state, unmounted with the dialog, no replay,
+the same pattern as the SCIM token and API keys).
+
+### Functionality
+- **F5 [Major]** (also raised by security as Adjacent) The link shown once was
+  never seen: the page's `onSuccess` closed the add dialog in the same render
+  that set it, unmounting the section. On a clipboard refusal the toast pointed
+  to a link that was not there. The component tests rendered the section alone.
+
+### Testing
+- **T1 [Minor]** Nothing pinned that the migration ran as a NOSUPERUSER
+  NOBYPASSRLS role: deleting `SET LOCAL ROLE` stayed green.
+- **T2 [Minor]** The BEGIN/COMMIT strip let a second, differently spelled
+  transaction-control statement through, which would commit the test's role,
+  ownership and column changes on the shared database.
+- **T3 [Minor]** Clearing the shown link on the next invite was untested.
+
+### Resolution Status (round 2)
+
+#### F5 [Major] The issued link was unmounted before it rendered
+- Action: the email-invite section's `onSuccess` refreshes the list and leaves
+  the dialog open; adding an existing tenant member still closes it. Found while
+  fixing: on a non-secure origin `navigator.clipboard` is undefined and the call
+  threw synchronously into the failure path; the copy is now attempted inside a
+  promise chain, so a missing clipboard is reported like a refused one. Tests: a
+  page-level test with the real section inside the dialog (jsdom has no
+  clipboard) asserts the link is on screen and no error toast; a component test
+  removes the clipboard. Red-proved on scratch copies: closing the dialog again
+  fails the page test; a direct `navigator.clipboard.writeText` fails both.
+- Modified file: `src/app/[locale]/admin/teams/[teamId]/members/list/page.tsx`,
+  `src/components/team/members/team-invite-by-email-section.tsx`, their tests
+
+#### T1 [Minor] Migration role unpinned
+- Action: after `SET LOCAL ROLE` the cell asserts the current role is the
+  temporary one with `rolsuper` and `rolbypassrls` false, and that it sees no
+  rows through the table's policy (it is granted `EXECUTE` on
+  `rls_bypass_admits`, inside the rolled-back transaction). Without the role
+  switch the assertion reads `passwd_user | t | t`.
+- Modified file: `src/__tests__/db-integration/team-tenant-departure.integration.test.ts`
+
+#### T2 [Minor] Residual transaction control
+- Action: the stripped body is refused when any statement starts with BEGIN,
+  COMMIT, END, ROLLBACK, ABORT or START TRANSACTION (any case), before a
+  connection is taken. Checked: the real file is admitted; the canonical pair
+  plus a lowercase pair, `END;` and `START TRANSACTION;` are refused.
+- Modified file: `src/__tests__/db-integration/team-tenant-departure.integration.test.ts`
+
+#### T3 [Minor] Link reset untested
+- Action: one render issues an invite (link shown), then a refused invite (link
+  gone). Removing `setIssuedLink(null)` fails it.
+- Modified file: `src/components/team/members/__tests__/team-invite-by-email-section.test.tsx`

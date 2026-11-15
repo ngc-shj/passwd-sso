@@ -686,10 +686,8 @@ export default function TeamMembersPage({
               onSuccess={() => { fetchAll(); setAddDialogOpen(false); }}
             />
             <Separator />
-            <TeamInviteByEmailSection
-              teamId={teamId}
-              onSuccess={() => { fetchAll(); setAddDialogOpen(false); }}
-            />
+            {/* Stays open: the issued link is shown once, in this dialog. */}
+            <TeamInviteByEmailSection teamId={teamId} onSuccess={fetchAll} />
           </div>
         </DialogContent>
       </Dialog>
