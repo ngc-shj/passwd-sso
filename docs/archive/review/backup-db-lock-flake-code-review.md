@@ -148,3 +148,65 @@ by the respective experts.
 Mutation sweep after round 2 (concurrency describe, scratch copies via BACKUP_DB_SCRIPT):
 fixed 26/26 green; m10, m11, m12, m13, m14, m15 each red on exactly their target cell;
 m0 (pre-fix) red on 10 cells.
+
+---
+
+# Code Review: backup-db-lock-flake — Round 3
+Date: 2026-11-16
+Review round: 3
+
+## Changes from Previous Round
+Round-2 fixes (acdcefee9): errno-gated own-failure arm under LC_ALL=C, rmdir hint, and
+the T2 test fixes. Functionality and security verified F3/S3 resolved and returned No
+findings (functionality probed the wording for EEXIST incl. a dangling symlink,
+ENOENT, EISDIR under ja/de locales and LANGUAGE overrides; security confirmed both
+wording-mismatch directions fail closed).
+
+## Functionality Findings
+No findings.
+
+## Security Findings
+No findings.
+
+## Testing Findings
+- **T3-1 Minor** — the translated-locale cell was picked from `locale -a` by name, not
+  by whether bash translates; on the stock CI runner it disappeared silently, so m14 is
+  never exercised in CI and nothing said so.
+- **T3-2 Minor** — the ENOENT alternative of the errno gate was unpinned (m16 survived).
+- **T3-3 Minor** — the pid-gone cell did not assert it reached the state it describes.
+
+## Recurring Issue Check
+### Functionality expert
+- R1-R3: clean · R4-R15: N/A · R16: clean · R17-R28: N/A · R29: clean · R30: N/A · R31: clean · R32-R33: N/A · R34: clean · R35: N/A · R36-R37: clean · R38: clean · R39-R41: N/A · R42: clean · R43: clean · R44: clean · R45-R46: N/A · R47-R51: clean · R52-R54: N/A · R55: clean · R56-R57: N/A
+
+### Security expert
+- R1-R30: N/A · R31: clean · R32-R37: N/A/clean · R38: clean · R39-R42: N/A · R43: clean · R44-R46: N/A · R47: clean · R48: N/A · R49-R51: clean · R52-R57: N/A
+- RS1-RS3: N/A · RS4: clean · RS5-RS6: N/A
+
+### Testing expert
+- R1: clean · R2-R15: N/A · R16: clean · R17-R28: N/A · R29: clean · R30-R41: N/A · R42: T3-2 · R43-R48: N/A · R49: clean · R50: T3-1 · R51-R57: N/A
+- RT1-RT2: clean · RT3: N/A · RT4-RT5: clean · RT6: N/A · RT7: T3-2 · RT8: T3-1, T3-3 · RT9: N/A · RT10-RT11: clean
+
+## Resolution Status
+### T3-1 Minor translated-locale selection
+- Action: the locale is accepted only if bash, run under it, words neither error in English; the translated cells are always declared under a stable title and `it.skipIf` when none exists. Simulated stock-runner locale list (C, C.utf8, POSIX, en_US.utf8): cell count unchanged (252), the C cells pass, the translated ones report as skipped.
+- Recorded limit: m14 (dropping LC_ALL=C) is caught only on hosts with a translating locale (this dev host: de_DE.utf8); CI provisioning is not changed in this PR. On a host without a translation the pin has nothing to correct, so the gap is coverage, not behaviour.
+
+### T3-2 Minor ENOENT alternative unpinned
+- Action: contention shapes parametrised — EEXIST (racer's pid unlinked before rmdir) and ENOENT (lock released before the claim; a third run's fresh empty lock recreated by the rmdir stub). Mutant m16 (drop the ENOENT pattern) reddens exactly the two ENOENT cells.
+
+### T3-3 Minor state positive control
+- Action: every contention-shape cell asserts the lock is present and has no pid after the run before asserting LOCKED.
+
+Sweep after round 3: fixed 28/28 (concurrency describe); m12 red on all four shape cells; m14 red on the two translated cells; m16 red on the two ENOENT cells.
+
+## Tightening-only skip — Round 3
+Findings applied directly (no Round 4 review):
+- [T3-1] [Minor] translated-locale selection/visibility — scripts/__tests__/backup-db.test.mjs — applied
+- [T3-2] [Minor] ENOENT gate cell — scripts/__tests__/backup-db.test.mjs — applied
+- [T3-3] [Minor] state assertions — scripts/__tests__/backup-db.test.mjs — applied
+Justification: all three are test-only, inside the Round-2 fix scope (the contention
+cells added in acdcefee9), change no production behaviour, and touch no security
+boundary; each was red-proven by a mutant (m12/m14/m16) or by its own positive control.
+Note: they add test cells rather than reword text, so "inline minor" is read as
+"no observable product behaviour change" here — recorded so the call can be checked.
