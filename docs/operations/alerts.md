@@ -1431,13 +1431,15 @@ Find where `client_min_messages` comes from and remove it: in report mode it
 would silence every report. As the service's role, `SELECT setting, source
 FROM pg_settings WHERE name = 'client_min_messages'` names the source:
 
-- `user`, `database` or `database user`: a role or database setting (also
-  listed in `pg_db_role_setting`);
+- `user`, `database`, `database user` or `global`: a catalog setting from
+  `ALTER ROLE` / `ALTER DATABASE … SET` (`global` is `ALTER ROLE ALL SET`), all
+  listed in `pg_db_role_setting`;
 - `client`: the connection's startup options (`PGOPTIONS`, or `options=` in the
   connection string). The service's own pools refuse these, so this is your own
   psql session's setting; check its shell and connection string;
-- `configuration file`, `command line`, `environment variable` or `global`: a
+- `configuration file`, `command line` or `environment variable`: a
   server-level setting, such as an RDS parameter group;
+- `session`: your own session ran `SET`; reconnect and query again;
 - `default`: no persistent setting. The remaining cause is a `SET
   client_min_messages` run by the service's code, which no other session can
   see: search the code for `client_min_messages`.

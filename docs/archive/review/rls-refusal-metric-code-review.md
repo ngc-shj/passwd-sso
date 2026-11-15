@@ -92,3 +92,18 @@ Round-1 fixes (124b44c43) verified by all three experts; no regressions, no boun
 ### Adjacent [Minor] per-emission logger check
 - Action: `stderrLines` asserts nothing went through the logger after each emission at a level above warn.
 - Modified file: src/lib/db/pool-factory.metric-filter.test.ts.
+
+---
+
+# Round 3
+Date: 2026-11-16
+
+## Findings
+- Security: No findings (R43: source change is comment-only; `warnReportLine` byte-identical).
+- Testing: see below.
+- **Functionality H-1 [Major]** the round-2 mapping filed `global` as server-level; `PGC_S_GLOBAL` is the `pg_db_role_setting` row with `setdatabase = 0, setrole = 0` (`ALTER ROLE ALL SET`), applied in `postinit.c` `process_settings()`.
+
+## Resolution Status
+### H-1 [Major] `global` is a catalog setting
+- Action: `global` moved into the catalog bullet (`ALTER ROLE ALL SET`, listed in `pg_db_role_setting`); the server-level bullet keeps `configuration file`, `command line`, `environment variable`; the operator's own `session` added.
+- Modified file: docs/operations/alerts.md.
