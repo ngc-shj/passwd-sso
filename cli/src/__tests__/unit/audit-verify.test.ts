@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { writeFileSync, chmodSync, mkdtempSync } from "node:fs";
+import { writeFileSync, chmodSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createPrivateKey, generateKeyPairSync, sign as nodeSign } from "node:crypto";
+import { createPrivateKey, createPublicKey, generateKeyPairSync, sign as nodeSign } from "node:crypto";
 import { AUDIT_ANCHOR_KID_PREFIX, AUDIT_ANCHOR_TYP } from "../../constants/audit-anchor.js";
 
 // --- Helpers for building a minimal signed JWS ---
@@ -46,10 +46,23 @@ function buildMinimalManifest() {
   };
 }
 
+/** The kid a seed's public key derives: the only one the verifier accepts for it. */
+function kidForSeed(privateKeySeed: Buffer): string {
+  const keyObject = createPrivateKey({
+    key: Buffer.concat([ED25519_PKCS8_PREFIX, privateKeySeed]),
+    format: "der",
+    type: "pkcs8",
+  });
+  const publicKey = (createPublicKey(keyObject).export({ type: "spki", format: "der" }) as Buffer).subarray(
+    ED25519_SPKI_PREFIX.length,
+  );
+  return `${AUDIT_ANCHOR_KID_PREFIX}${publicKey.subarray(0, 8).toString("hex")}`;
+}
+
 function signManifest(
   manifest: ReturnType<typeof buildMinimalManifest>,
   privateKeySeed: Buffer,
-  kid: string,
+  kid: string = kidForSeed(privateKeySeed),
 ): string {
   const headerObj = { alg: "EdDSA", kid, typ: AUDIT_ANCHOR_TYP };
   const canonicalBytes = Buffer.from(jcsCanonical(manifest), "utf-8");
@@ -110,6 +123,7 @@ describe("auditVerifyCommand", () => {
 
   afterEach(() => {
     stderrSilence.mockRestore();
+    rmSync(tmpDir, { recursive: true, force: true });
   });
 
   describe("tag-secret-file mode 0644 rejected (closes TF4)", () => {
@@ -152,9 +166,8 @@ describe("auditVerifyCommand", () => {
       const privateKeySeed = privateKey.export({ type: "pkcs8", format: "der" }).subarray(
         ED25519_PKCS8_PREFIX.length,
       );
-      const kid = `${AUDIT_ANCHOR_KID_PREFIX}testkey01`;
       const manifest = buildMinimalManifest();
-      const jws = signManifest(manifest, privateKeySeed, kid);
+      const jws = signManifest(manifest, privateKeySeed);
 
       const jwsPath = join(tmpDir, "manifest.jws");
       writeFileSync(jwsPath, jws);
@@ -165,8 +178,6 @@ describe("auditVerifyCommand", () => {
         format: "der",
         type: "pkcs8",
       });
-      // Import the real private key and get matching public
-      const { createPublicKey } = await import("node:crypto");
       const pubKeyObj = createPublicKey(signingPriv);
       const pubDer = pubKeyObj.export({ type: "spki", format: "der" }) as Buffer;
       const pubHex = pubDer.subarray(ED25519_SPKI_PREFIX.length).toString("hex");
@@ -199,9 +210,8 @@ describe("auditVerifyCommand", () => {
       const pubDer = publicKey.export({ type: "spki", format: "der" }) as Buffer;
       const pubHex = pubDer.subarray(ED25519_SPKI_PREFIX.length).toString("hex");
 
-      const kid = `${AUDIT_ANCHOR_KID_PREFIX}warntest1`;
       const manifest = buildMinimalManifest();
-      const jws = signManifest(manifest, privateKeySeed, kid);
+      const jws = signManifest(manifest, privateKeySeed);
 
       const jwsPath = join(tmpDir, "manifest-warn.jws");
       const pubPath = join(tmpDir, "key-warn.pub");
@@ -289,9 +299,8 @@ describe("auditVerifyCommand", () => {
       const pubDer = publicKey.export({ type: "spki", format: "der" }) as Buffer;
       const pubHex = pubDer.subarray(ED25519_SPKI_PREFIX.length).toString("hex");
 
-      const kid = `${AUDIT_ANCHOR_KID_PREFIX}tnidtest1`;
       const manifest = buildMinimalManifest();
-      const jws = signManifest(manifest, privateKeySeed, kid);
+      const jws = signManifest(manifest, privateKeySeed);
 
       const jwsPath = join(tmpDir, "manifest-tnid.jws");
       const pubPath = join(tmpDir, "key-tnid.pub");
@@ -318,9 +327,8 @@ describe("auditVerifyCommand", () => {
       const pubDer = publicKey.export({ type: "spki", format: "der" }) as Buffer;
       const pubHex = pubDer.subarray(ED25519_SPKI_PREFIX.length).toString("hex");
 
-      const kid = `${AUDIT_ANCHOR_KID_PREFIX}tnidtest2`;
       const manifest = buildMinimalManifest();
-      const jws = signManifest(manifest, privateKeySeed, kid);
+      const jws = signManifest(manifest, privateKeySeed);
 
       const jwsPath = join(tmpDir, "manifest-tnid2.jws");
       const pubPath = join(tmpDir, "key-tnid2.pub");
@@ -361,9 +369,8 @@ describe("auditVerifyCommand", () => {
       const pubDer = publicKey.export({ type: "spki", format: "der" }) as Buffer;
       const pubHex = pubDer.subarray(ED25519_SPKI_PREFIX.length).toString("hex");
 
-      const kid = `${AUDIT_ANCHOR_KID_PREFIX}redacttest`;
       const manifest = buildMinimalManifest();
-      const jws = signManifest(manifest, privateKeySeed, kid);
+      const jws = signManifest(manifest, privateKeySeed);
 
       const jwsPath = join(tmpDir, "manifest-redact.jws");
       const pubPath = join(tmpDir, "key-redact.pub");
@@ -400,9 +407,8 @@ describe("auditVerifyCommand", () => {
       const pubDer = publicKey.export({ type: "spki", format: "der" }) as Buffer;
       const pubHex = pubDer.subarray(ED25519_SPKI_PREFIX.length).toString("hex");
 
-      const kid = `${AUDIT_ANCHOR_KID_PREFIX}shortkey1`;
       const manifest = buildMinimalManifest();
-      const jws = signManifest(manifest, privateKeySeed, kid);
+      const jws = signManifest(manifest, privateKeySeed);
 
       const jwsPath = join(tmpDir, "short-secret.jws");
       const pubPath = join(tmpDir, "short-secret.pub");
@@ -432,9 +438,8 @@ describe("auditVerifyCommand", () => {
       const pubDer = publicKey.export({ type: "spki", format: "der" }) as Buffer;
       const pubHex = pubDer.subarray(ED25519_SPKI_PREFIX.length).toString("hex");
 
-      const kid = `${AUDIT_ANCHOR_KID_PREFIX}parsepath1`;
       const manifest = buildMinimalManifest();
-      const jws = signManifest(manifest, privateKeySeed, kid);
+      const jws = signManifest(manifest, privateKeySeed);
 
       const jwsPath = join(tmpDir, "happy.jws");
       const pubPath = join(tmpDir, "happy.pub");

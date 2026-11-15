@@ -80,6 +80,14 @@ function expectedStatements(prefix: string, breakGlass: string): Record<string, 
       resource: objects,
       condition: { StringNotEquals: { "s3:object-lock-mode": ["COMPLIANCE"] } },
     },
+    // Both conditions, on every object and for every principal: a PUT that
+    // creates an object without If-None-Match. IfExists: plain Bool is false
+    // on a request that does not carry the key, and the Deny would not apply.
+    DenyUnconditionalPut: {
+      action: ["s3:PutObject"],
+      resource: objects,
+      condition: { Null: { "s3:if-none-match": ["true"] }, BoolIfExists: { "s3:ObjectCreationOperation": ["true"] } },
+    },
     DenyRetentionAboveCap: {
       action: ["s3:PutObject", "s3:PutObjectRetention"],
       resource: objects,
@@ -237,9 +245,23 @@ function roleViolations(tf: TerraformConfig, opts: EvalOptions = {}): string[] {
     } catch {
       out.push("publisher role: prefix module output does not evaluate");
     }
-    const want = [{ Effect: "Allow", Action: ["s3:PutObject", "s3:PutObjectRetention"], Resource: [`${BUCKET_ARN}/${prefix}/*`] }];
-    const got = policy.Statement.map((s) => ({ Effect: s.Effect, Action: asSortedList(s.Action), Resource: asSortedList(s.Resource) }));
-    if (JSON.stringify(got) !== JSON.stringify(want) || policy.Statement.some((s) => "Condition" in s || "NotAction" in s)) {
+    const want = [
+      { Effect: "Allow", Action: ["s3:PutObject", "s3:PutObjectRetention"], Resource: [`${BUCKET_ARN}/${prefix}/*`] },
+      { Effect: "Allow", Action: ["s3:GetObject"], Resource: [`${BUCKET_ARN}/${prefix}/*`] },
+      {
+        Effect: "Allow",
+        Action: ["s3:ListBucket"],
+        Resource: [BUCKET_ARN],
+        Condition: { StringLike: { "s3:prefix": [`${prefix}/*`] } },
+      },
+    ];
+    const got = policy.Statement.map((s) => ({
+      Effect: s.Effect,
+      Action: asSortedList(s.Action),
+      Resource: asSortedList(s.Resource),
+      ...(s.Condition === undefined ? {} : { Condition: normalizeCondition(s.Condition) }),
+    }));
+    if (JSON.stringify(got) !== JSON.stringify(want) || policy.Statement.some((s) => "NotAction" in s || "NotResource" in s)) {
       out.push(`publisher role: statements ${JSON.stringify(policy.Statement)}`);
     }
   }
@@ -737,6 +759,35 @@ function edited(file: string, from: string, to: string): TerraformConfig {
   return new TerraformConfig(TERRAFORM_DIR, { [file]: text.replace(from, to) });
 }
 
+/**
+ * The hand-copied policy of the README's "Verify the conditional-write policy
+ * once" procedure against the DenyUnconditionalPut statement Terraform renders.
+ * Principal and Resource differ on purpose (a scratch bucket); the rest must
+ * not, or the check on AWS verifies a policy that is not the deployed one.
+ */
+function readmePolicyViolations(tf: TerraformConfig, readme: string): string[] {
+  const m = /--policy "(\{[\s\S]*?\n\})"/.exec(readme);
+  if (!m) return ["readme: no --policy block"];
+  let copied: Statement | undefined;
+  try {
+    const policy = JSON.parse(m[1].replaceAll('\\"', '"').replaceAll("$SCRATCH", "scratch")) as { Statement: Statement[] };
+    copied = policy.Statement.find((s) => s.Sid === "DenyUnconditionalPut");
+  } catch (err) {
+    return [`readme: the --policy block is not JSON (${(err as Error).message})`];
+  }
+  if (!copied) return ["readme: no DenyUnconditionalPut statement"];
+  const policy = plain(tf.attr(tf.resource("aws_s3_bucket_policy", "audit_anchors"), "policy")) as { Statement: Statement[] };
+  const real = policy.Statement.find((s) => s.Sid === "DenyUnconditionalPut");
+  if (!real) return ["terraform: no DenyUnconditionalPut statement"];
+  const out: string[] = [];
+  if (copied.Effect !== real.Effect) out.push(`readme: Effect ${String(copied.Effect)}`);
+  if (JSON.stringify(asSortedList(copied.Action)) !== JSON.stringify(asSortedList(real.Action))) out.push(`readme: Action ${JSON.stringify(copied.Action)}`);
+  if (JSON.stringify(normalizeCondition(copied.Condition)) !== JSON.stringify(normalizeCondition(real.Condition))) {
+    out.push(`readme: Condition ${JSON.stringify(copied.Condition)}`);
+  }
+  return out;
+}
+
 const real = new TerraformConfig(TERRAFORM_DIR);
 const withBreakGlass = { vars: { audit_anchor_break_glass_role_arn: BREAK_GLASS_ARN } };
 
@@ -909,6 +960,70 @@ const RED_FIXTURES: RedFixture[] = [
     violation: "DenyNonComplianceLockMode: Condition",
   },
   {
+    name: "a missing unconditional-put Deny",
+    file: "storage.tf",
+    from: 'Sid       = "DenyUnconditionalPut"',
+    to: 'Sid       = "DenyUnconditionalPutGone"',
+    violation: "statements:",
+  },
+  {
+    name: "an unconditional-put Deny with its conditions removed (every PUT refused)",
+    file: "storage.tf",
+    from: `        Condition = {
+          Null         = { "s3:if-none-match" = "true" }
+          BoolIfExists = { "s3:ObjectCreationOperation" = "true" }
+        }
+`,
+    to: "",
+    violation: "DenyUnconditionalPut: Condition",
+  },
+  {
+    name: "an unconditional-put Deny on a misspelled condition key (never matches)",
+    file: "storage.tf",
+    from: 'Null         = { "s3:if-none-match" = "true" }',
+    to: 'Null         = { "s3:if-none-matches" = "true" }',
+    violation: "DenyUnconditionalPut: Condition",
+  },
+  {
+    name: "an unconditional-put Deny that fires when the header is present",
+    file: "storage.tf",
+    from: 'Null         = { "s3:if-none-match" = "true" }',
+    to: 'Null         = { "s3:if-none-match" = "false" }',
+    violation: "DenyUnconditionalPut: Condition",
+  },
+  {
+    name: "an unconditional-put Deny without the object-creation test (multipart parts refused)",
+    file: "storage.tf",
+    from: '          BoolIfExists = { "s3:ObjectCreationOperation" = "true" }\n',
+    to: "",
+    violation: "DenyUnconditionalPut: Condition",
+  },
+  {
+    name: "an unconditional-put Deny on a plain Bool (an absent key refuses nothing)",
+    file: "storage.tf",
+    from: 'BoolIfExists = { "s3:ObjectCreationOperation" = "true" }',
+    to: 'Bool = { "s3:ObjectCreationOperation" = "true" }',
+    violation: "DenyUnconditionalPut: Condition",
+  },
+  {
+    name: "an unconditional-put Deny on the manifest path only",
+    file: "storage.tf",
+    from: `Resource  = "\${aws_s3_bucket.audit_anchors[0].arn}/*"
+        Condition = {
+          Null         = {`,
+    to: `Resource  = "\${aws_s3_bucket.audit_anchors[0].arn}/\${local.audit_anchor_manifest_pattern}"
+        Condition = {
+          Null         = {`,
+    violation: "DenyUnconditionalPut: Resource",
+  },
+  {
+    name: "a principal exception on the unconditional-put Deny",
+    file: "storage.tf",
+    from: 'BoolIfExists = { "s3:ObjectCreationOperation" = "true" }',
+    to: `BoolIfExists = { "s3:ObjectCreationOperation" = "true" }\n          ${EXCEPTION}`,
+    violation: "DenyUnconditionalPut: Condition",
+  },
+  {
     name: "a principal exception on the retention-cap Deny",
     file: "storage.tf",
     from: 'NumericGreaterThan = { "s3:object-lock-remaining-retention-days" = tostring(local.audit_anchor_retention_cap_days) }',
@@ -980,17 +1095,35 @@ const RED_FIXTURES: RedFixture[] = [
     violation: "publisher task: stopTimeout undefined, not 120",
   },
   {
-    name: "a publisher role that can also read",
+    name: "GetObject granted on the bucket root",
+    file: "iam.tf",
+    from: `        Action   = ["s3:GetObject"]
+        Resource = "\${aws_s3_bucket.audit_anchors[0].arn}/\${local.audit_anchor_prefix}/*"`,
+    to: `        Action   = ["s3:GetObject"]
+        Resource = "\${aws_s3_bucket.audit_anchors[0].arn}/*"`,
+    violation: "publisher role: statements",
+  },
+  {
+    name: "ListBucket without the prefix condition",
+    file: "iam.tf",
+    from: '        Condition = { StringLike = { "s3:prefix" = "${local.audit_anchor_prefix}/*" } }\n',
+    to: "",
+    violation: "publisher role: statements",
+  },
+  {
+    name: "a write action beyond PutObject and PutObjectRetention",
     file: "iam.tf",
     from: 'Action   = ["s3:PutObject", "s3:PutObjectRetention"]',
-    to: 'Action   = ["s3:PutObject", "s3:PutObjectRetention", "s3:GetObject"]',
+    to: 'Action   = ["s3:PutObject", "s3:PutObjectRetention", "s3:DeleteObject"]',
     violation: "publisher role: statements",
   },
   {
     name: "a publisher role granted outside the prefix",
     file: "iam.tf",
-    from: 'Resource = "${aws_s3_bucket.audit_anchors[0].arn}/${local.audit_anchor_prefix}/*"',
-    to: 'Resource = "${aws_s3_bucket.audit_anchors[0].arn}/*"',
+    from: `Action   = ["s3:PutObject", "s3:PutObjectRetention"]
+        Resource = "\${aws_s3_bucket.audit_anchors[0].arn}/\${local.audit_anchor_prefix}/*"`,
+    to: `Action   = ["s3:PutObject", "s3:PutObjectRetention"]
+        Resource = "\${aws_s3_bucket.audit_anchors[0].arn}/*"`,
     violation: "publisher role: statements",
   },
   {
@@ -1290,6 +1423,27 @@ describe("the EventBridge matcher", () => {
   it("refuses an empty $or and an unknown matcher", () => {
     expect(() => matchesEventPattern({ $or: [] }, {})).toThrow(/\$or/);
     expect(() => matchesEventPattern({ a: [{ wildcard: "*" }] }, { a: "x" })).toThrow(/unsupported matcher/);
+  });
+});
+
+describe("the README's conditional-write verification policy", () => {
+  const readmes = ["README.md", "README.ja.md"].map((name) => [name, readFileSync(join(TERRAFORM_DIR, name), "utf8")] as const);
+
+  it.each(readmes)("%s carries the DenyUnconditionalPut statement Terraform renders", (_name, text) => {
+    expect(readmePolicyViolations(real, text)).toEqual([]);
+  });
+
+  it.each<[string, (text: string) => string, string]>([
+    ["a plain Bool", (t) => t.replace('\\"BoolIfExists\\"', '\\"Bool\\"'), "readme: Condition"],
+    ["a missing object-creation condition", (t) => t.replace(/,\n\s*\\"BoolIfExists\\": \{[^}]*\}/, ""), "readme: Condition"],
+    ["a Null condition fired on the wrong value", (t) => t.replace('\\"s3:if-none-match\\": \\"true\\"', '\\"s3:if-none-match\\": \\"false\\"'), "readme: Condition"],
+    ["an Allow", (t) => t.replace('\\"Effect\\": \\"Deny\\"', '\\"Effect\\": \\"Allow\\"'), "readme: Effect"],
+  ])("reports %s", (_label, mutate, violation) => {
+    const text = readmes[0][1];
+    const mutated = mutate(text);
+    expect(mutated).not.toBe(text);
+    const violations = readmePolicyViolations(real, mutated);
+    expect(violations.some((v) => v.startsWith(violation)), JSON.stringify(violations)).toBe(true);
   });
 });
 

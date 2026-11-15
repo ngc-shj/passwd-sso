@@ -34,6 +34,8 @@ import {
   ChainBreakError,
   ChainSeqRegressionError,
   InvalidTagSecretLengthError,
+  KidMismatchError,
+  ChainLocationMismatchError,
 } from "./commands/audit-verify.js";
 import { isUnlocked, lockVault } from "./lib/vault-state.js";
 import { clearPendingClipboard } from "./lib/clipboard.js";
@@ -166,6 +168,7 @@ program
   .option("--tag-secret-file <path>", "Path to file containing hex tag secret (recommended; must be mode 0600)")
   .option("--tag-secret <hex>", "Hex tag secret on the CLI (discouraged — recorded in shell history)")
   .option("--prior-manifest <path>", "Prior manifest JWS file for regression check")
+  .option("--prior-public-key <path>", "Path to the prior manifest's .pub file, when it was signed under another key")
   .option("--archive-url <url>", "Override AUDIT_ANCHOR_PUBLIC_KEY_ARCHIVE_URL for public key fetch")
   .action(async (opts) => {
     try {
@@ -176,6 +179,7 @@ program
         tagSecret: opts.tagSecret,
         tagSecretFile: opts.tagSecretFile,
         priorManifest: opts.priorManifest,
+        priorPublicKey: opts.priorPublicKey,
         archiveUrl: opts.archiveUrl,
       });
     } catch (err) {
@@ -190,6 +194,8 @@ program
       else if (err instanceof ChainBreakError) process.exit(16);
       else if (err instanceof ChainSeqRegressionError) process.exit(17);
       else if (err instanceof InvalidTagSecretLengthError) process.exit(18);
+      else if (err instanceof KidMismatchError) process.exit(19);
+      else if (err instanceof ChainLocationMismatchError) process.exit(20);
       else process.exit(1);
     }
   });

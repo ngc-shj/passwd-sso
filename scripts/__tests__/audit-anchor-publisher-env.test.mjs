@@ -111,6 +111,25 @@ describe("audit-anchor-publisher --validate-env-only", () => {
     expect(result.stderr).not.toContain("a//b");
   });
 
+  it("exits 1 on a relative filesystem path, by its token and without echoing it; the absolute path boots", () => {
+    const result = spawnPublisher({ ...TASK_ENV, AUDIT_ANCHOR_DESTINATION_FS_PATH: "relative-anchors" });
+
+    expect(result.status).toBe(1);
+    expect(jsonLines(result.stderr)).toEqual([
+      {
+        level: "fatal",
+        msg: "anchor destination configuration invalid",
+        error: { name: "AnchorDestinationConfigError", code: "FS_PATH_NOT_ABSOLUTE" },
+      },
+    ]);
+    expect(result.stderr).not.toContain("relative-anchors");
+    expect(jsonLines(result.stdout)).toEqual([]);
+
+    const absolute = spawnPublisher({ ...TASK_ENV, AUDIT_ANCHOR_DESTINATION_FS_PATH: join(cwd, "anchors") });
+    expect(absolute.status).toBe(0);
+    expect(jsonLines(absolute.stdout)[0]).toMatchObject({ destinations: ["s3-object-lock", "filesystem"] });
+  });
+
   it("exits 0 when the flag is the string false, with nothing else set", () => {
     const result = spawnPublisher({ AUDIT_ANCHOR_PUBLISHER_ENABLED: "false" });
 

@@ -1,10 +1,17 @@
 import { describe, it, expect } from "vitest";
 import { computeTenantTag } from "../../commands/audit-verify";
-import { AUDIT_ANCHOR_KID_PREFIX, AUDIT_ANCHOR_TYP } from "../../constants/audit-anchor.js";
+import {
+  AUDIT_ANCHOR_ARTIFACT_MAX_BYTES,
+  AUDIT_ANCHOR_KID_HEX_CHARS,
+  AUDIT_ANCHOR_KID_PREFIX,
+  AUDIT_ANCHOR_TYP,
+} from "../../constants/audit-anchor.js";
 
 // Canonical server-side values used as drift-detection baseline
 const SERVER_AUDIT_ANCHOR_KID_PREFIX = "audit-anchor-";
+const SERVER_AUDIT_ANCHOR_KID_HEX_CHARS = 16;
 const SERVER_AUDIT_ANCHOR_TYP = "passwd-sso.audit-anchor.v1";
+const SERVER_AUDIT_ANCHOR_ARTIFACT_MAX_BYTES = 8 * 1024 * 1024;
 
 describe("CLI computeTenantTag matches server golden vector (cross-implementation parity)", () => {
   it("computeTenantTag matches server golden vector", () => {
@@ -17,6 +24,8 @@ describe("CLI computeTenantTag matches server golden vector (cross-implementatio
 
   it("CLI constants match server canonical values (drift detection)", () => {
     expect(AUDIT_ANCHOR_KID_PREFIX).toBe(SERVER_AUDIT_ANCHOR_KID_PREFIX);
+    expect(AUDIT_ANCHOR_KID_HEX_CHARS).toBe(SERVER_AUDIT_ANCHOR_KID_HEX_CHARS);
     expect(AUDIT_ANCHOR_TYP).toBe(SERVER_AUDIT_ANCHOR_TYP);
+    expect(AUDIT_ANCHOR_ARTIFACT_MAX_BYTES).toBe(SERVER_AUDIT_ANCHOR_ARTIFACT_MAX_BYTES);
   });
 });

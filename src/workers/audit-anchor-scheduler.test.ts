@@ -47,6 +47,7 @@ const PUBLISHED: CadenceOutcome = {
   manifestSha256: "0".repeat(64),
   destinations: ["s3"],
   tenantsCount: 1,
+  adopted: false,
   chainEnabledTenantCount: 1,
 };
 const UPLOAD_FAILED: CadenceOutcome = {
@@ -292,7 +293,7 @@ describe("createAnchorScheduler", () => {
     expect(linesOf(mockWarn, EXHAUSTED)).toEqual([]);
   });
 
-  it("retries lock_held for the same boundary, and the marker re-check ends it when the holder published", async () => {
+  it("retries lock_held for the same boundary, and the skip ends it when the holder published", async () => {
     h.setOutcome((_, run) => (run === 1 ? LOCK_HELD : ALREADY_PUBLISHED));
     await h.scheduler.start();
 

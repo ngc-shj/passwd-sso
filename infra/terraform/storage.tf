@@ -179,13 +179,14 @@ locals {
   audit_anchor_prefix = module.anchor_prefix.prefix
 
   # The manifest key shape, `YYYY-MM-DD.kid-<kid>.jws`, from
-  # buildManifestArtifactKey (src/workers/audit-anchor-publisher.ts), joined to
+  # buildManifestArtifactKey (src/lib/audit/anchor-artifact-keys.ts), joined to
   # the prefix as joinS3Key does. S3 policy wildcards: `?` is one character,
   # `*` any sequence (including `/`). Pinned to the builder by
   # src/__tests__/infra/audit-anchor-key-contract.test.ts.
   audit_anchor_manifest_pattern = "${local.audit_anchor_prefix}/????-??-??.kid-*.jws"
-  # The rotation runbook's operator writes (Steps 4-5): the rotation advisory
-  # and the public-key archive the verifiers read.
+  # The rotation runbook's operator writes (Steps 4-5): the public-key archive
+  # the verifiers and the publisher read, and the signed rotation and
+  # chain-restart statements.
   audit_anchor_break_glass_patterns = [
     "${local.audit_anchor_prefix}/key-rotation-*",
     "${local.audit_anchor_prefix}/public-keys/*",
@@ -305,7 +306,7 @@ resource "aws_s3_bucket_policy" "audit_anchors" {
       },
       merge(
         {
-          # Rotation advisory and public-key archive: the break-glass operator
+          # Signed statements and public-key archive: the break-glass operator
           # only. With no operator role configured, nobody — an unconditional
           # Deny, never a condition with an empty value list.
           Sid       = "DenyBreakGlassPathWriteExceptOperator"
@@ -380,7 +381,7 @@ resource "aws_s3_bucket_policy" "audit_anchors" {
       },
       {
         # Also refuses a PUT without the header, so every writer must send it
-        # (S3Destination.upload does).
+        # (S3Destination.create does).
         Sid       = "DenyNonComplianceLockMode"
         Effect    = "Deny"
         Principal = "*"
@@ -388,6 +389,34 @@ resource "aws_s3_bucket_policy" "audit_anchors" {
         Resource  = "${aws_s3_bucket.audit_anchors[0].arn}/*"
         Condition = {
           StringNotEquals = { "s3:object-lock-mode" = "COMPLIANCE" }
+        }
+      },
+      {
+        # Create-only, enforced by S3 itself: a PUT that carries no
+        # If-None-Match is refused, so no writer can put a second version on
+        # a stored key (S3Destination.create sends `If-None-Match: *`, the
+        # only value S3 takes on a PUT). The Null test is on the header's
+        # presence. The BoolIfExists keeps the Deny on requests that create
+        # the object: CreateMultipartUpload and UploadPart carry no
+        # conditional header, and the CompleteMultipartUpload that follows
+        # must. IfExists, not plain Bool: Bool on a key the request does not
+        # carry is false, so a request S3 did not populate the key for would
+        # pass the Deny with nothing refused and nothing alarmed; with
+        # IfExists an absent key leaves the Deny applying. This is the Deny
+        # of the S3 User Guide's "Enforce conditional writes on Amazon S3
+        # buckets", written for s3:if-none-match. CopyObject takes no
+        # If-None-Match, so copying into the bucket stops working; nothing
+        # here copies. No exception. Static tests pin the statement; its
+        # effect on AWS is checked once by hand (README, "Verify the
+        # conditional-write policy once").
+        Sid       = "DenyUnconditionalPut"
+        Effect    = "Deny"
+        Principal = "*"
+        Action    = "s3:PutObject"
+        Resource  = "${aws_s3_bucket.audit_anchors[0].arn}/*"
+        Condition = {
+          Null         = { "s3:if-none-match" = "true" }
+          BoolIfExists = { "s3:ObjectCreationOperation" = "true" }
         }
       },
       {
