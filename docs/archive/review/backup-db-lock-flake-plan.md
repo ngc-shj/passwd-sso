@@ -233,8 +233,13 @@ Red proofs (each run with `BACKUP_DB_SCRIPT=<scratch mutant>`, one mutation per 
 | lock path renamed (barrier pattern no longer matches) | arrival-count assertion |
 | barrier lets a run through on one arrival (test-side mutant) | seen-on-leaving assertion |
 
-`LOCK_DIR` assigned before the claim has no behavioural test: the trap's `pid == $$`
-check masks it. It is enforced by the forbidden-pattern grep only (T2-F4).
+| `LOCK_DIR` assigned before the claim | source-level order cell |
+| `RUN_PARTIAL` assigned before the mkdir | foreign `.partial` cell, source-level order cell |
+
+`LOCK_DIR` assigned before the claim has no behavioural test (the trap's `pid == $$`
+check masks it), and a diff grep cannot see position (the C1/C2 "forbidden patterns"
+also match the correct lines). Both ordering clauses are therefore pinned by a
+source-level cell that compares line positions in the script (self-check R49/RT7).
 
 Stress: the barrier cells and the uutils cell, `taskset -c 0-1`, 8 parallel × 10, to
 measure false barrier timeouts under load (expected 0). Then the full file, full

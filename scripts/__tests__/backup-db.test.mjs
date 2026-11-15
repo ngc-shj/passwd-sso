@@ -1050,6 +1050,24 @@ describe("source-level contracts", () => {
     });
   }
 
+  it("takes ownership of the lock and the run directory only after creating them", () => {
+    // Order, not presence, so the forbidden list above cannot express it. The
+    // lock half has no behavioural test: a LOCK_DIR set before the claim is
+    // masked by the trap's own pid == $$ check, until a later edit relies on it.
+    const lines = src().split("\n");
+    const at = (name, re) => {
+      const i = lines.findIndex((l) => re.test(l));
+      expect(i, `${name} not found in the script`).toBeGreaterThan(-1);
+      return i;
+    };
+    const claim = at("the noclobber claim", /set -C; : > "\$LOCK_CANDIDATE\/pid"/);
+    const lockOwned = at("LOCK_DIR assignment", /^\s*LOCK_DIR="\$LOCK_CANDIDATE"/);
+    const partialMkdir = at("the .partial mkdir", /^\s*mkdir -- "\$BACKUP_ROOT\/\$STAMP\.partial"/);
+    const partialOwned = at("RUN_PARTIAL assignment", /^\s*RUN_PARTIAL="\$BACKUP_ROOT\//);
+    expect(lockOwned, "LOCK_DIR must be set only after the claim succeeded").toBeGreaterThan(claim);
+    expect(partialOwned, "RUN_PARTIAL must be set only after the mkdir created it").toBeGreaterThan(partialMkdir);
+  });
+
   it("validates every environment variable its usage header documents", () => {
     // Raw source: the documented member set lives in the usage comment block,
     // which the forbidden-pattern reader deliberately strips.
