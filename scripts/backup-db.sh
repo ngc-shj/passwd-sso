@@ -1529,8 +1529,9 @@ fi
 # The claim's own error is kept for the INTERNAL arm: ENOSPC and EACCES need
 # different fixes, and the LOCKED arm does not print it. Tracing is switched off
 # inside the capture, or a `bash -x` run folds its trace lines into the one
-# BACKUP_ERR line.
-if ! claim_err="$( ( { set +x; } 2>/dev/null; set -C; : > "$LOCK_CANDIDATE/pid" ) 2>&1 )"; then
+# BACKUP_ERR line. LC_ALL=C fixes the wording the case below reads the errno
+# from; bash re-reads the locale when the variable is assigned.
+if ! claim_err="$( ( { set +x; } 2>/dev/null; LC_ALL=C; set -C; : > "$LOCK_CANDIDATE/pid" ) 2>&1 )"; then
   # rmdir decides, not a test of what pid is followed by a removal: it removes
   # the directory only if it is empty, i.e. nobody has claimed the directory now
   # at that path. A racer's pid (ENOTEMPTY) or a holder that already released
@@ -1542,14 +1543,21 @@ if ! claim_err="$( ( { set +x; } 2>/dev/null; set -C; : > "$LOCK_CANDIDATE/pid" 
   if rmdir -- "$LOCK_CANDIDATE" 2>/dev/null; then
     fail INTERNAL "could not record the lock holder: $claim_err"
   fi
-  # rmdir failed. A racer's claim (pid present) or a released lock (directory
-  # gone) is contention. A directory still there with no pid is not: the claim
-  # and the removal both failed on their own (EROFS, EIO), and the empty lock
-  # stays — say so, with the cause and the recovery, rather than report a race.
-  # Advisory only: nothing is removed on this reading.
-  if [ -d "$LOCK_CANDIDATE" ] && [ ! -e "$LOCK_CANDIDATE/pid" ] && [ ! -L "$LOCK_CANDIDATE/pid" ]; then
-    fail INTERNAL "could not record the lock holder ($claim_err), and could not remove the lock either. Confirm no backup is running, then: rm -rf $(printf '%q' "$LOCK_CANDIDATE")"
-  fi
+  # rmdir failed. The claim's errno says whether that is contention: EEXIST is a
+  # racer's pid, ENOENT a lock already released — LOCKED, whatever the directory
+  # looks like by now (a racer part-way through its own rm -rf has no pid left).
+  # Any other errno with the directory still there and no pid is this run's own
+  # failure (EROFS, EIO): say so, with the cause, rather than report a race.
+  # Advisory only: nothing is removed on this reading, and the hint is rmdir,
+  # which refuses a lock somebody has claimed since.
+  case "$claim_err" in
+    *": cannot overwrite existing file"|*": No such file or directory") ;;
+    *)
+      if [ -d "$LOCK_CANDIDATE" ] && [ ! -e "$LOCK_CANDIDATE/pid" ] && [ ! -L "$LOCK_CANDIDATE/pid" ]; then
+        fail INTERNAL "could not record the lock holder ($claim_err), and could not remove the lock either. Confirm no backup is running, then: rmdir $(printf '%q' "$LOCK_CANDIDATE")"
+      fi
+      ;;
+  esac
   fail LOCKED "another backup run claimed $LOCK_CANDIDATE at the same moment"
 fi
 LOCK_DIR="$LOCK_CANDIDATE"

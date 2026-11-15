@@ -80,3 +80,71 @@ None.
 ### T1 Minor overlap not held past the loser's mkdir
 - Action: a second two-party barrier after the real mkdir (both mkdirs return before either run proceeds); arrivals, timeout and seen-on-leaving asserted for both barriers.
 - Modified file: scripts/__tests__/backup-db.test.mjs (contendedLockRun, expectForcedOverlap)
+
+---
+
+# Code Review: backup-db-lock-flake — Round 2
+Date: 2026-11-16
+Review round: 2
+
+## Changes from Previous Round
+Round-1 fixes (69df13cb9) reviewed incrementally: F1, F2, S1, S2, T1 verified resolved
+by the respective experts.
+
+## Functionality Findings
+- **F3 Minor (new)** — the S2 own-failure arm read "directory present, no pid" as this
+  run's own failure, but a racer part-way through its `rm -rf` (pid unlinked, host
+  still there) or a third run's fresh empty lock produces the same state; contention
+  was reported as INTERNAL with an `rm -rf` hint (R43: the LOCKED set shrank).
+
+## Security Findings
+- **S3 Minor (new)** — the own-failure arm's recovery hint was `rm -rf`, wider than its
+  own condition (an empty lock); in the uutils release-race window it could direct an
+  operator at a lock claimed since.
+
+## Testing Findings
+- **T2-1 Minor** — the bash -x cell had no positive control that xtrace is live at the claim.
+- **T2-2 Minor** — the own-failure arm's "directory gone" and dangling-pid cases were unpinned.
+- **T2-3 Minor** — stale-lock cell title/comment still claimed simultaneity; dead slow-dump stub.
+- **T2-4 Minor** — `unclaimableLockStub` duplicated the preceding cell's inline stub.
+- **T2-5 Minor** — bash -x cell could exceed spawnSync's 1 MiB default buffer on mount-heavy hosts.
+
+## Recurring Issue Check
+### Functionality expert
+- R1-R2: clean · R3: clean · R4-R15: N/A · R16: clean · R17-R28: N/A · R29: clean · R30: N/A · R31: clean · R32-R33: N/A · R34: clean · R35: N/A · R36-R37: clean · R38: F3 (fails closed) · R39-R41: N/A · R42: clean · R43: F3 · R44: clean · R45-R46: N/A · R47-R51: clean · R52-R54: N/A · R55: clean · R56-R57: N/A
+
+### Security expert
+- R1-R30: N/A · R31: S3 (advisory text only) · R32-R37: N/A/clean · R38: clean · R39-R42: N/A · R43: clean · R44-R48: N/A · R49: clean · R50: clean · R51: clean · R52-R57: N/A
+- RS1-RS3: N/A · RS4: clean · RS5-RS6: N/A
+
+### Testing expert
+- R1: T2-4 · R2-R15: N/A · R16: clean · R17-R28: N/A · R29: clean · R30-R41: N/A · R42: T2-2 · R43-R48: N/A · R49: T2-3 · R50: clean · R51-R57: N/A
+- RT1: clean · RT2: clean · RT3: N/A · RT4: clean · RT5: clean · RT6: N/A · RT7: clean · RT8: T2-1 · RT9: N/A · RT10: T2-5 · RT11: clean
+
+## Resolution Status
+### F3 Minor contention misread as own failure
+- Action: the claim runs with `LC_ALL=C` (probe: under `LC_ALL=ja_JP.UTF-8` the wording is English only with the in-subshell assignment) and the arm is entered only when the claim's errno is neither EEXIST ("cannot overwrite existing file") nor ENOENT. New cell: EEXIST claim, rmdir stub that unlinks the racer's pid and fails → LOCKED; run under C and under a translated locale when the host has one. Mutants m12 (no errno gate) and m14 (no C locale, caught by the translated-locale run).
+- Modified file: scripts/backup-db.sh (claim, claim-failure arm), scripts/__tests__/backup-db.test.mjs
+
+### S3 Minor rm -rf hint wider than the arm's condition
+- Action: hint is `rmdir`, which refuses a lock claimed since; the cell asserts it. Mutant m13.
+- Modified file: scripts/backup-db.sh, scripts/__tests__/backup-db.test.mjs
+
+### T2-1 Minor xtrace positive control
+- Action: the cell asserts a `+ rmdir -- …/.lock.d` trace line before reading the BACKUP_ERR line.
+
+### T2-2 Minor unpinned arm conditions
+- Action: cells for "lock gone by the time rmdir fails" (LOCKED; mutant m15 drops `[ -d ]`) and "dangling pid symlink" (EEXIST → LOCKED; with the errno gate the `! -L` test is defensive only and is pinned end to end by this cell).
+
+### T2-3 Minor stale-lock cell overclaim
+- Action: renamed "refuses to reclaim a stale lock; neither of two runs takes it"; dead slow-dump stub removed, comment states timing does not matter.
+
+### T2-4 Minor duplicated stub
+- Action: `unclaimableLockStub` moved above and used by all three claim-failure cells.
+
+### T2-5 Minor maxBuffer
+- Action: `maxBuffer: 16 MiB` on the bash -x spawn.
+
+Mutation sweep after round 2 (concurrency describe, scratch copies via BACKUP_DB_SCRIPT):
+fixed 26/26 green; m10, m11, m12, m13, m14, m15 each red on exactly their target cell;
+m0 (pre-fix) red on 10 cells.
