@@ -1,0 +1,134 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: audit-anchor-publisher
+  labels:
+    app: passwd-sso
+    component: audit-anchor-publisher
+  annotations:
+    # REQUIRED substitution at deploy time: the IAM role the publisher assumes
+    # through IRSA to write the S3 anchor destination (scoped as the
+    # infra/terraform iam.tf publisher task role). Not needed for other
+    # destinations or non-EKS credentials — patch the Deployment instead.
+    eks.amazonaws.com/role-arn: "REPLACE_WITH_IRSA_ROLE_ARN"
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: audit-anchor-publisher
+  labels:
+    app: passwd-sso
+    component: audit-anchor-publisher
+spec:
+  # Exactly one, stopped before the next starts: a second publisher is harmless
+  # (advisory lock + create-only write), not useful, and the down alarm is sized
+  # past the zero-pod gap Recreate leaves (the ECS service does the same).
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: passwd-sso
+      component: audit-anchor-publisher
+  template:
+    metadata:
+      labels:
+        app: passwd-sso
+        component: audit-anchor-publisher
+    spec:
+      # = the ECS stopTimeout. SIGTERM stops the scheduler arming and waits for
+      # an in-flight run (its transaction is bounded at 90 s); the default 30 s
+      # would SIGKILL a run mid-write.
+      terminationGracePeriodSeconds: 120
+      serviceAccountName: audit-anchor-publisher
+      # Least-privilege: the publisher connects via its scoped
+      # AUDIT_ANCHOR_PUBLISHER_DATABASE_URL only — the broad app DATABASE_URL is
+      # deliberately NOT injected here.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: worker
+          # REQUIRED substitution at deploy time. This is an unresolved
+          # placeholder — replace with the full immutable ref (ECR registry +
+          # @sha256 digest or :vX.Y.Z tag) via Kustomize images: or sed. (Not
+          # envsubst — it only substitutes $VAR/${VAR}, not literal placeholders.)
+          # It is intentionally NOT a runnable :latest so a manifest applied
+          # without substitution fails fast instead of pulling a mutable image.
+          image: "REPLACE_WITH_IMMUTABLE_IMAGE_REF" # e.g. <ACCOUNT>.dkr.ecr.<region>.amazonaws.com/passwd-sso-app@sha256:...
+          command: ["node", "dist/audit-anchor-publisher.js"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            # The signing key and tag secret live in a Secret that no other
+            # workload references (namespace RBAC is the control on k8s).
+            - name: AUDIT_ANCHOR_PUBLISHER_ENABLED
+              value: "true"
+            - name: AUDIT_ANCHOR_PUBLISHER_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: audit-anchor-publisher
+                  key: database-url
+            - name: AUDIT_ANCHOR_SIGNING_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: audit-anchor-publisher
+                  key: signing-key
+            - name: AUDIT_ANCHOR_TAG_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: audit-anchor-publisher
+                  key: tag-secret
+            # Shared with the app and retention-gc: a Secret that holds no key.
+            - name: DEPLOYMENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: passwd-sso-deployment
+                  key: deployment-id
+            - name: AUDIT_ANCHOR_DESTINATION_S3_BUCKET
+              valueFrom:
+                configMapKeyRef:
+                  name: audit-anchor-publisher
+                  key: s3-bucket
+            - name: AUDIT_ANCHOR_DESTINATION_S3_PREFIX
+              valueFrom:
+                configMapKeyRef:
+                  name: audit-anchor-publisher
+                  key: s3-prefix
+            - name: AWS_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: audit-anchor-publisher
+                  key: aws-region
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          livenessProbe:
+            # Re-parse env + re-exec the binary in a SEPARATE process. This is
+            # strictly better than a tautological `process.exit(0)` (it catches
+            # a broken image / unparseable env), but note its LIMITATION: it does
+            # NOT observe the running publisher — a hung scheduler or a DB outage
+            # will NOT fail this probe. A heartbeat/last-success liveness is the
+            # tracked follow-up; alert on the anchor publication age until then.
+            exec:
+              command: ["node", "dist/audit-anchor-publisher.js", "--validate-env-only"]
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            failureThreshold: 3
+          startupProbe:
+            exec:
+              command: ["node", "dist/audit-anchor-publisher.js", "--validate-env-only"]
+            failureThreshold: 3
+            periodSeconds: 5

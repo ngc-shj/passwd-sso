@@ -204,6 +204,19 @@ describe("check-worker-bundle-smoke.sh: host runner", () => {
   });
 });
 
+const HARDENING_ARGV = ["--read-only", "--user", "1001:1001", "--cap-drop", "ALL"];
+
+/** The hardening flags a recorded `docker run` argv lacks (flag with its expected value). */
+function missingHardening(argv) {
+  const missing = [];
+  if (!argv.includes("--read-only")) missing.push("--read-only");
+  for (const [flag, value] of [["--user", "1001:1001"], ["--cap-drop", "ALL"]]) {
+    const at = argv.indexOf(flag);
+    if (at === -1 || argv[at + 1] !== value) missing.push(flag);
+  }
+  return missing;
+}
+
 describe("check-worker-bundle-smoke.sh: docker runner", () => {
   /** A docker CLI stand-in: records its argv as one JSON line, prints `output`. */
   function stubDocker(output) {
@@ -229,19 +242,43 @@ describe("check-worker-bundle-smoke.sh: docker runner", () => {
     expect(calls).toHaveLength(4);
     expect(calls).toContainEqual([
       "run", "--rm", "--network", "none",
+      "--read-only", "--user", "1001:1001", "--cap-drop", "ALL",
       "-e", "AUDIT_CHAIN_VERIFY_DATABASE_URL=postgresql://passwd_audit_chain_verifier:smoke@127.0.0.1:5432/passwd_sso",
       "passwd-sso:scan", "node", "dist/audit-chain-verify-worker.js", "--validate-env-only",
     ]);
     for (const task of Object.values(SMOKE_MAP.tasks)) {
       const call = calls.find((c) => c.includes(task.bundle));
       expect(call.slice(0, 4)).toEqual(["run", "--rm", "--network", "none"]);
+      expect(call.slice(4, 9)).toEqual(HARDENING_ARGV);
       expect(call.slice(-4)).toEqual(["passwd-sso:scan", "node", task.bundle, "--validate-env-only"]);
-      const envArgs = call.slice(4, -4);
+      const envArgs = call.slice(9, -4);
       expect(envArgs.filter((_, i) => i % 2 === 0).every((a) => a === "-e")).toBe(true);
       const names = envArgs.filter((_, i) => i % 2 === 1).map((a) => a.slice(0, a.indexOf("=")));
       expect(names.sort()).toEqual(Object.keys(task.env).sort());
     }
     expect(JSON.stringify(calls)).not.toContain("must-not-reach-the-container");
+  });
+
+  it("passes each hardening flag to docker, and a call missing one is reported", () => {
+    const docker = stubDocker(BOTH_MARKERS);
+    const { exitCode, stdout, stderr } = runGuard({
+      WORKER_BUNDLE_SMOKE_RUNNER: "docker:passwd-sso:scan",
+      WORKER_BUNDLE_SMOKE_DOCKER_BIN: docker.bin,
+    });
+    expect(exitCode, stdout + stderr).toBe(0);
+    for (const call of docker.calls()) expect(missingHardening(call)).toEqual([]);
+
+    // Red: removing exactly one flag (with its value) is named, and only that one.
+    const call = docker.calls()[0];
+    for (const [flag, width] of [["--read-only", 1], ["--user", 2], ["--cap-drop", 2]]) {
+      const at = call.indexOf(flag);
+      expect(at, flag).toBeGreaterThan(-1);
+      const without = [...call.slice(0, at), ...call.slice(at + width)];
+      expect(missingHardening(without), flag).toEqual([flag]);
+    }
+    // A flag present with a different value is also drift.
+    expect(missingHardening(call.map((a) => (a === "1001:1001" ? "0:0" : a)))).toEqual(["--user"]);
+    expect(missingHardening(call.map((a) => (a === "ALL" ? "NET_RAW" : a)))).toEqual(["--cap-drop"]);
   });
 
   it("FAILS in docker mode when a container exits 0 without the publisher's second marker", () => {

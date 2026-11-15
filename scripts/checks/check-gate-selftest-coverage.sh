@@ -15,7 +15,7 @@
 # evade the meta-gate by being written inline in pre-pr.sh instead of as a
 # scripts/checks/ file):
 #
-#   (1) `ls scripts/checks/*.sh scripts/checks/*.mjs` — each file must have a
+#   (1) `ls scripts/checks/*.sh scripts/checks/*.mjs scripts/checks/*.ts` — each file must have a
 #       sibling `scripts/__tests__/<base>.test.mjs` or `.test.ts`, OR a
 #       reasoned entry in the debt file.
 #   (2) inline `run_step "Static: ..." bash -c '...'` gates in
@@ -112,7 +112,7 @@ is_debt() {
 }
 
 # ---------------------------------------------------------------------------
-# Member set (1): scripts/checks/*.sh + *.mjs, each needs a sibling test or
+# Member set (1): scripts/checks/*.sh + *.mjs + *.ts, each needs a sibling test or
 # a debt entry keyed by its repo-relative path (scripts/checks/<file>).
 # ---------------------------------------------------------------------------
 fail=0
@@ -120,7 +120,9 @@ checks=()
 while IFS= read -r f; do
   [ -n "$f" ] && checks+=("$f")
 done < <(
-  { ls "$CHECKS_DIR"/*.sh 2>/dev/null; ls "$CHECKS_DIR"/*.mjs 2>/dev/null; } | sort
+  # `|| true`: under `set -e` an `ls` with no match would end the group and
+  # hide every later extension.
+  { ls "$CHECKS_DIR"/*.sh 2>/dev/null || true; ls "$CHECKS_DIR"/*.mjs 2>/dev/null || true; ls "$CHECKS_DIR"/*.ts 2>/dev/null || true; } | sort
 )
 
 check_keys=""
@@ -128,6 +130,7 @@ for check in ${checks[@]+"${checks[@]}"}; do
   base="$(basename "$check")"
   base_noext="${base%.sh}"
   base_noext="${base_noext%.mjs}"
+  base_noext="${base_noext%.ts}"
   rel_key="scripts/checks/$base"
   check_keys="${check_keys}${rel_key}
 "
@@ -208,6 +211,7 @@ while IFS= read -r debt_entry; do
         debt_base="$(basename "$debt_entry")"
         debt_noext="${debt_base%.sh}"
         debt_noext="${debt_noext%.mjs}"
+        debt_noext="${debt_noext%.ts}"
         if [ -f "$TESTS_DIR/${debt_noext}.test.mjs" ] || [ -f "$TESTS_DIR/${debt_noext}.test.ts" ]; then
           echo "STALE_DEBT_ENTRY: $debt_entry (a sibling self-test now exists — remove the debt entry)"
           DEBT_DRIFT=1

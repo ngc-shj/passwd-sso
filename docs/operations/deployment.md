@@ -771,6 +771,117 @@ aws logs tail /ecs/passwd-sso-prod/audit-anchor-publisher --since 2d --region <r
   --filter-pattern '{ $._logType = "audit-anchor-publisher.cadence" }'
 ```
 
+### Audit anchor publisher on Compose and Kubernetes
+
+The same two workers as on ECS, run from `docker-compose.workers.yml` or
+`infra/k8s/`. `DEPLOYMENT_ID`, the destination rules, the key procedures and the
+alarms are the ECS section's; this section is what differs.
+
+#### Compose
+
+**The workers overlay now requires `PASSWD_ANCHOR_PUBLISHER_PASSWORD`,
+`PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD`, `AUDIT_ANCHOR_SIGNING_KEY`,
+`AUDIT_ANCHOR_TAG_SECRET` and `DEPLOYMENT_ID`.** An unset one fails
+`docker compose config` and `up` naming the variable, so an existing
+`-f docker-compose.yml -f docker-compose.workers.yml` deployment stops
+upgrading until they are set. This is a breaking change for those operators.
+Upgrade in this order:
+
+1. Set `PASSWD_ANCHOR_PUBLISHER_PASSWORD` and `PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD`
+   in `.env` (`openssl rand -hex 24` each).
+2. Existing volumes keep the roles as they were. Both roles must end up `LOGIN`
+   with these passwords: a `NOLOGIN` role (a volume initialised without the
+   variable, or the verifier's role on any older volume) is given its password
+   and `LOGIN` by the procedures under "Database User Permissions" — "Existing
+   dev volumes" for the publisher, the
+   `scripts/set-audit-chain-verifier-password.sh` path in the
+   `AUDIT_CHAIN_VERIFY_DATABASE_URL` entry for the verifier. A publisher role
+   that is already `LOGIN` with the formerly published password is rotated by
+   "Existing self-hosted volumes: the anchor publisher's published password".
+   A fresh volume needs neither. A role left at the wrong state shows as an
+   authentication failure loop in the worker's log.
+3. Set `DEPLOYMENT_ID` (see "`DEPLOYMENT_ID`" above for when to generate and when
+   to reuse). The publisher and `retention-gc-worker` read the same value.
+4. Generate the keys and set them: `npm run generate:audit-anchor-signing-key`,
+   `npm run generate:audit-anchor-tag-secret`, then `AUDIT_ANCHOR_SIGNING_KEY`
+   and `AUDIT_ANCHOR_TAG_SECRET` in `.env`.
+5. Archive the signing key's public key at every destination before the first
+   publish (`docs/operations/audit-anchor-rotation-runbook.md` Step 4;
+   `npm run audit-anchor-kid -- --key-file <path>` shows the `kid` and whether
+   it is archived).
+6. `docker compose -f docker-compose.yml -f docker-compose.workers.yml up -d`
+
+Destination keys, in `.env`; set the destinations in use and leave the rest empty:
+
+- **S3**: `AUDIT_ANCHOR_DESTINATION_S3_BUCKET`, optionally
+  `AUDIT_ANCHOR_DESTINATION_S3_PREFIX`, and `AUDIT_ANCHOR_AWS_REGION` (the
+  publisher refuses to boot with a bucket and no region). Credentials are
+  `AUDIT_ANCHOR_AWS_ACCESS_KEY_ID` / `AUDIT_ANCHOR_AWS_SECRET_ACCESS_KEY`, or
+  none, in which case the SDK's default chain on the host (an instance role)
+  applies. Scope either to the publisher policy in `infra/terraform/iam.tf`
+  (`s3:PutObject` and `s3:PutObjectRetention` and `s3:GetObject` on
+  `<bucket>/<prefix>/*`, `s3:ListBucket` on the bucket for that prefix, no
+  delete).
+- **GitHub Releases**: `AUDIT_ANCHOR_DESTINATION_GH_REPO` and
+  `AUDIT_ANCHOR_DESTINATION_GH_TOKEN`.
+- **Filesystem**: `AUDIT_ANCHOR_DESTINATION_FS_PATH`, an absolute path, backed by
+  a named volume you add to the publisher service. Discouraged on the database
+  host: an anchor on the disk an attacker can rewrite witnesses nothing.
+
+**Withheld keys.** `.env` is loaded by several containers, so each one that loads
+it lists the secrets and other principals' database URLs with an empty value
+(`environment:` wins over `env_file:`); the signing key, tag secret and
+`AUDIT_ANCHOR_AWS_*` reach the publisher alone, by interpolation. A key that was
+in `.env` therefore reaches another container only as a blank. In the dev
+override the `.:/app` bind mount keeps `.env` readable, so there it is env-shape
+parity, not isolation. **`docker compose config` prints the interpolated
+secrets**, the signing key included: do not paste its output or run it where the
+output is logged.
+
+**The key CLI on Compose.** The `npm run audit-anchor-*` commands run on the
+operator host, not in a container. They read the destination names from `.env`
+but never the `AUDIT_ANCHOR_AWS_*` credentials: take `AWS_REGION` and the
+credentials from the operator's shell (`AWS_PROFILE`, as in the rotation
+runbook's "Prerequisites"), and `AUDIT_ANCHOR_DESTINATION_GH_TOKEN` or
+`GITHUB_TOKEN` likewise.
+
+**Stop and restart.** `docker compose -f docker-compose.yml -f docker-compose.workers.yml stop audit-anchor-publisher`;
+start it again, or apply a changed `.env`, with `up -d audit-anchor-publisher`
+(`restart` keeps the container's old environment). The service has a 120 s
+`stop_grace_period` so a stop waits for an in-flight run.
+
+#### Kubernetes
+
+`infra/k8s/audit-anchor-publisher.yaml` and `infra/k8s/audit-chain-verify-worker.yaml`
+need, in the workers' namespace, before they are applied (the image placeholder
+is substituted as for the other manifests):
+
+| Object | Keys | Holds |
+|---|---|---|
+| Secret `audit-anchor-publisher` | `database-url`, `signing-key`, `tag-secret` | `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL`, `AUDIT_ANCHOR_SIGNING_KEY`, `AUDIT_ANCHOR_TAG_SECRET` |
+| Secret `passwd-sso-deployment` | `deployment-id` | `DEPLOYMENT_ID`, shared with the app and `retention-gc-worker` |
+| ConfigMap `audit-anchor-publisher` | `s3-bucket`, `s3-prefix`, `aws-region` | the S3 destination |
+| Secret `audit-chain-verify-worker-db` | `database-url` | `AUDIT_CHAIN_VERIFY_DATABASE_URL` |
+
+The publisher's ServiceAccount carries the IRSA annotation
+`eks.amazonaws.com/role-arn`, which must be replaced. The role's trust policy is
+conditioned on `sub` = `system:serviceaccount:<namespace>:audit-anchor-publisher`
+and `aud` = `sts.amazonaws.com` against the cluster's OIDC provider, and its
+permissions mirror the publisher policy in `infra/terraform/iam.tf` (as in the
+Compose list above). On EKS Pod Identity, create an association for that
+ServiceAccount instead of the annotation. Other destinations, or credentials
+outside EKS, go in an operator Kustomize patch on the Deployment's `env`.
+
+The signing key is protected on Kubernetes by namespace RBAC: whoever can read
+Secrets in the namespace can read it. Keep the publisher's Secret out of any
+workload that does not need it and restrict `get` on Secrets accordingly; the
+manifests do not enforce this.
+
+The publisher runs one replica with `strategy: Recreate`, so a rollout stops the
+old pod (up to the 120 s grace) before the new one starts. Stop it with
+`kubectl -n <namespace> scale deployment/audit-anchor-publisher --replicas=0`;
+apply a changed Secret with `kubectl -n <namespace> rollout restart deployment/audit-anchor-publisher`.
+
 ### Orphan attachment sweep on AWS
 
 The retention-gc worker's orphan sweep (`RETENTION_GC_BLOB_SWEEP_MODE`) lists the
@@ -1040,10 +1151,13 @@ and `retention-gc-worker` (enforces retention / hard-deletes). On AWS they are
 dedicated Terraform-managed ECS services (`infra/terraform/ecs.tf`); on Docker
 Compose they are in `docker-compose.workers.yml` (production) /
 `docker-compose.override.yml` (dev tsx). Without them, audit events accumulate as
-`PENDING` and retention is never enforced. On AWS two more run as ECS services,
+`PENDING` and retention is never enforced. Two more run as ECS services,
 `audit-anchor-publisher` and `audit-chain-verify-worker` ("Audit anchor publisher
-on ECS" above); the compose files do not define them yet (SC1) — run them with
-`npm run worker:audit-anchor-publisher` and `npm run worker:audit-chain-verify`.
+on ECS" above); `docker-compose.workers.yml` defines both too, and `infra/k8s/`
+carries all four as Deployments. Their setup on Compose and Kubernetes is
+"Audit anchor publisher on Compose and Kubernetes" above; outside both, run
+them with `npm run worker:audit-anchor-publisher` and
+`npm run worker:audit-chain-verify`.
 
 ## Migration Compatibility Rules
 
@@ -1778,7 +1892,7 @@ leave an existing container on the unbounded default.
 Run it with **the same `-f` set the stack was deployed with**. A bare
 `docker compose up -d` resolves only `docker-compose.yml`, so on the production
 topology (`-f docker-compose.yml -f docker-compose.workers.yml`, see
-`docs/setup/docker/en.md`) it has no definition for the two workers and cannot
+`docs/setup/docker/en.md`) it has no definition for the four workers and cannot
 recreate them — they keep the unbounded config while `docker compose ps` still
 lists them, and re-running the bare command changes nothing.
 

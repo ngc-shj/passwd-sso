@@ -82,6 +82,35 @@ describe("check-gate-selftest-coverage.sh", () => {
     expect(exitCode).toBe(0);
   });
 
+  it("FAILS (MISSING_GATE_SELFTEST) when a .ts check has no test and no debt entry", () => {
+    writeFileSync(join(checksDir, "check-baz.ts"), "// fixture check\n", "utf8");
+    const { exitCode, stdout } = runGuard();
+    expect(exitCode).toBe(1);
+    expect(stdout).toContain("MISSING_GATE_SELFTEST: scripts/checks/check-baz.ts");
+  });
+
+  it("passes when a .ts check has a sibling .test.ts", () => {
+    writeFileSync(join(checksDir, "check-baz.ts"), "// fixture check\n", "utf8");
+    writeFileSync(join(testsDir, "check-baz.test.ts"), "// fixture test\n", "utf8");
+    const { exitCode } = runGuard();
+    expect(exitCode).toBe(0);
+  });
+
+  it("FAILS (STALE_DEBT_ENTRY) when a debt-listed .ts check has SINCE gained a sibling test", () => {
+    writeFileSync(join(checksDir, "check-baz.ts"), "// fixture check\n", "utf8");
+    writeFileSync(join(testsDir, "check-baz.test.ts"), "// fixture test\n", "utf8");
+    writeFileSync(
+      debtFile,
+      "scripts/checks/check-baz.ts  # reason: was untested, debt entry now stale\n",
+      "utf8",
+    );
+    const { exitCode, stdout } = runGuard();
+    expect(exitCode).toBe(1);
+    expect(stdout).toContain(
+      "STALE_DEBT_ENTRY: scripts/checks/check-baz.ts (a sibling self-test now exists",
+    );
+  });
+
   it("passes when a check has a reasoned debt entry instead of a test", () => {
     writeFileSync(join(checksDir, "check-foo.sh"), "#!/usr/bin/env bash\nexit 0\n", "utf8");
     writeFileSync(

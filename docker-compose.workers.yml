@@ -3,7 +3,7 @@
 # Usage: docker compose -f docker-compose.yml -f docker-compose.workers.yml up -d
 #
 # The base docker-compose.yml ships only the five core services (app, db,
-# jackson, redis, migrate). The two background workers are NOT dev-only
+# jackson, redis, migrate). The four background workers are NOT dev-only
 # conveniences — without them, production silently loses guarantees:
 #
 #   audit-outbox-worker  — drains audit_outbox → audit_logs. Without it, audit
@@ -15,13 +15,34 @@
 #                          emergency access, vault history, audit retention).
 #                          Without it, nothing is ever purged — data-minimisation
 #                          and deletion guarantees do not hold.
+#   audit-anchor-publisher
+#                        — signs the audit-chain heads and publishes them to the
+#                          configured anchor destinations. Without it, a rewrite
+#                          of audit_logs has no outside witness. Run ONE replica:
+#                          a second is harmless (advisory lock + create-only
+#                          write), not useful, and stop_grace_period covers an
+#                          in-flight run.
+#   audit-chain-verify-worker
+#                        — re-verifies the audit hash chain on a schedule and
+#                          reports a break. Without it, tampering is found only
+#                          when someone runs the verifier by hand.
 #
-# This overlay is the production home for both. It runs the esbuild-bundled
+# This overlay is the production home for all four. It runs the esbuild-bundled
 # artifacts (`node dist/<worker>.js`) from the same runner image as `app`
 # (NOT the tsx source used by docker-compose.override.yml in dev), and connects
 # each worker via its dedicated least-privilege DB role — the broad app
 # DATABASE_URL is blanked out (empty → normalised to unset) so a regression that
 # reintroduces the app credential is caught.
+#
+# One .env, withheld per service. A service with `env_file: .env` receives every
+# key in it, so each such service lists the withheld set (every secret, the other
+# principals' DB URLs, the publisher-only credentials) with an empty value; the
+# one key it may hold is its own DB URL. `environment:` wins over `env_file:`, so
+# the container sees "". The publisher and the verify worker load no env_file:
+# they get exactly their own names, and the signing key reaches only the
+# publisher. The set is derived in scripts/checks/lib/withheld-env.ts and checked by
+# src/__tests__/infra/worker-deploy-parity.test.ts. A key from .env reaches a
+# service only by being blanked here or interpolated into it.
 #
 # Do NOT combine this with docker-compose.override.yml in production — the dev
 # override exposes DB/Jackson/Redis ports to the host and runs the tsx source.
@@ -49,6 +70,26 @@ services:
       # broad app DATABASE_URL that env_file: .env injects (worker schema
       # normalises empty → unset and uses the dedicated URL).
       - DATABASE_URL=
+      - AUDIT_ANCHOR_AWS_ACCESS_KEY_ID=
+      - AUDIT_ANCHOR_AWS_REGION=
+      - AUDIT_ANCHOR_AWS_SECRET_ACCESS_KEY=
+      - AUDIT_ANCHOR_DESTINATION_GH_TOKEN=
+      - AUDIT_ANCHOR_PUBLISHER_DATABASE_URL=
+      - AUDIT_ANCHOR_SIGNING_KEY=
+      - AUDIT_ANCHOR_TAG_SECRET=
+      - AUDIT_CHAIN_VERIFY_DATABASE_URL=
+      - GITHUB_TOKEN=
+      - JACKSON_API_KEY=
+      - MIGRATION_DATABASE_URL=
+      - PASSWD_ANCHOR_PUBLISHER_PASSWORD=
+      - PASSWD_APP_PASSWORD=
+      - PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD=
+      - PASSWD_JACKSON_PASSWORD=
+      - PASSWD_OUTBOX_WORKER_PASSWORD=
+      - PASSWD_RETENTION_GC_WORKER_PASSWORD=
+      - PASSWD_SUPERUSER_PASSWORD=
+      - RETENTION_GC_DATABASE_URL=
+      - SENTRY_AUTH_TOKEN=
     depends_on:
       db:
         condition: service_healthy
@@ -78,6 +119,27 @@ services:
       # broad app DATABASE_URL that env_file: .env injects (worker schema
       # normalises empty → unset and uses the dedicated URL).
       - DATABASE_URL=
+      - AUDIT_ANCHOR_AWS_ACCESS_KEY_ID=
+      - AUDIT_ANCHOR_AWS_REGION=
+      - AUDIT_ANCHOR_AWS_SECRET_ACCESS_KEY=
+      - AUDIT_ANCHOR_DESTINATION_GH_TOKEN=
+      - AUDIT_ANCHOR_PUBLISHER_DATABASE_URL=
+      - AUDIT_ANCHOR_SIGNING_KEY=
+      - AUDIT_ANCHOR_TAG_SECRET=
+      - AUDIT_CHAIN_VERIFY_DATABASE_URL=
+      - GITHUB_TOKEN=
+      - JACKSON_API_KEY=
+      - MIGRATION_DATABASE_URL=
+      - OUTBOX_WORKER_DATABASE_URL=
+      - PASSWD_ANCHOR_PUBLISHER_PASSWORD=
+      - PASSWD_APP_PASSWORD=
+      - PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD=
+      - PASSWD_JACKSON_PASSWORD=
+      - PASSWD_OUTBOX_WORKER_PASSWORD=
+      - PASSWD_RETENTION_GC_WORKER_PASSWORD=
+      - PASSWD_SUPERUSER_PASSWORD=
+      - SENTRY_AUTH_TOKEN=
+      - DEPLOYMENT_ID=${DEPLOYMENT_ID:-}
     depends_on:
       db:
         condition: service_healthy
@@ -85,6 +147,68 @@ services:
         condition: service_completed_successfully
         required: false
     command: ["node", "dist/retention-gc-worker.js"]
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - internal
+
+  audit-anchor-publisher:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        DATABASE_URL: postgresql://build:build@localhost:5432/passwd_sso
+    # No env_file: the publisher gets exactly the names ECS gives it, by
+    # interpolation from .env, so nothing else in .env reaches it.
+    environment:
+      - AUDIT_ANCHOR_PUBLISHER_ENABLED=true
+      - AUDIT_ANCHOR_PUBLISHER_DATABASE_URL=postgresql://passwd_anchor_publisher:${PASSWD_ANCHOR_PUBLISHER_PASSWORD:?PASSWD_ANCHOR_PUBLISHER_PASSWORD is required}@db:5432/passwd_sso
+      - AUDIT_ANCHOR_SIGNING_KEY=${AUDIT_ANCHOR_SIGNING_KEY:?AUDIT_ANCHOR_SIGNING_KEY is required}
+      - AUDIT_ANCHOR_TAG_SECRET=${AUDIT_ANCHOR_TAG_SECRET:?AUDIT_ANCHOR_TAG_SECRET is required}
+      - DEPLOYMENT_ID=${DEPLOYMENT_ID:?DEPLOYMENT_ID is required}
+      # Destinations: set the ones in use, leave the rest empty (empty → unset).
+      - AUDIT_ANCHOR_DESTINATION_S3_BUCKET=${AUDIT_ANCHOR_DESTINATION_S3_BUCKET:-}
+      - AUDIT_ANCHOR_DESTINATION_S3_PREFIX=${AUDIT_ANCHOR_DESTINATION_S3_PREFIX:-}
+      - AUDIT_ANCHOR_DESTINATION_GH_REPO=${AUDIT_ANCHOR_DESTINATION_GH_REPO:-}
+      - AUDIT_ANCHOR_DESTINATION_GH_TOKEN=${AUDIT_ANCHOR_DESTINATION_GH_TOKEN:-}
+      - AUDIT_ANCHOR_DESTINATION_FS_PATH=${AUDIT_ANCHOR_DESTINATION_FS_PATH:-}
+      # Publisher-specific names for the SDK's own variables, so the app (which
+      # blanks them) never holds them. Unset → the SDK's default credential chain.
+      - AWS_ACCESS_KEY_ID=${AUDIT_ANCHOR_AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AUDIT_ANCHOR_AWS_SECRET_ACCESS_KEY:-}
+      - AWS_REGION=${AUDIT_ANCHOR_AWS_REGION:-}
+      - DATABASE_URL=
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+        required: false
+    command: ["node", "dist/audit-anchor-publisher.js"]
+    restart: unless-stopped
+    # ECS stopTimeout (the Fargate maximum): a SIGTERM waits for an in-flight run.
+    stop_grace_period: 120s
+    logging: *default-logging
+    networks:
+      - internal
+
+  audit-chain-verify-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        DATABASE_URL: postgresql://build:build@localhost:5432/passwd_sso
+    # No env_file: the verifier needs only its read-only role URL.
+    environment:
+      - AUDIT_CHAIN_VERIFY_DATABASE_URL=postgresql://passwd_audit_chain_verifier:${PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD:?PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD is required}@db:5432/passwd_sso
+      - DATABASE_URL=
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+        required: false
+    command: ["node", "dist/audit-chain-verify-worker.js"]
     restart: unless-stopped
     logging: *default-logging
     networks:

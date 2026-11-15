@@ -118,6 +118,9 @@ jobs:
               # these reference; a re-tag or a matrix edit alone must run it.
               - "infra/terraform/**/terraform.tfvars.example"
               - ".github/workflows/ci-integration.yml"
+              # worker-deploy-parity.test.ts pins these manifests to ecs.tf and
+              # the compose files; a manifest-only PR must run it.
+              - "infra/k8s/**"
               - "CLAUDE.md"
             extension:
               - "extension/**"

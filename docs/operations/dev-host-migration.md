@@ -172,6 +172,8 @@ On the **source** host, with the app stopped so no writes race the dump:
 # taken at different instants either way, so a live writer between them can
 # leave the pair mutually inconsistent.
 docker compose stop audit-outbox-worker retention-gc-worker
+# on a host running the workers overlay, also stop the anchor publisher:
+#   docker compose -f docker-compose.yml -f docker-compose.workers.yml stop audit-anchor-publisher
 # also stop the host dev server (Ctrl-C)
 
 BACKUP_DIR="$HOME/passwd-sso-migration" BACKUP_RETAIN=1 scripts/backup-db.sh

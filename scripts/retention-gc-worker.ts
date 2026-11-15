@@ -6,7 +6,7 @@ loadEnv();
 // Import from env-schema (side-effect-free) — not @/lib/env, which would run
 // parseEnv() on the full schema at module load and fail the worker boot when
 // non-worker vars (auth providers, WebAuthn, etc.) are absent.
-import { envObject } from "@/lib/env-schema";
+import { emptyAsUnset, envObject } from "@/lib/env-schema";
 import { createRetentionGcPool, createWorker } from "@/workers/retention-gc-worker";
 import { countDbStoredAttachments } from "@/workers/retention-gc-worker/sweep";
 import { createPrismaClient } from "@/lib/db/pool-factory";
@@ -15,15 +15,6 @@ import { BLOB_SWEEP_MODE } from "@/lib/blob-store/constants";
 import { BLOB_STORAGE, getAttachmentBlobStore, resolveBlobBackend } from "@/lib/blob-store";
 import { blobErrorStatus } from "@/lib/blob-store/errors";
 import { errorLogFields } from "@/lib/logger/error-fields";
-
-/**
- * An optional variable that is present but empty reads as unset — what the
- * blob store does at run time (src/lib/blob-store/config.ts trims and treats
- * "" as missing), so a `KEY=` line in an env file does not fail the boot.
- */
-function emptyAsUnset<T extends z.ZodType>(schema: T) {
-  return z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? undefined : v), schema);
-}
 
 // --init-blob-marker writes the bucket marker and exits without connecting to
 // the database, so the database-URL rules below do not apply to it.

@@ -35,7 +35,7 @@ tested invariants.
   key, tag secret, `DEPLOYMENT_ID`. Verify worker: `AUDIT_CHAIN_VERIFY_DATABASE_URL` only.
 - Stop timeout and single-replica stop-before-start: `ecs.tf`
   (`stopTimeout`, `deployment_maximum_percent = 100` +
-  `deployment_minimum_healthy_percent = 0`), read with hcl-subset (moved to `scripts/lib/hcl-subset.ts`, see C7).
+  `deployment_minimum_healthy_percent = 0`), read with hcl-subset (moved to `scripts/checks/lib/hcl-subset.ts`, see C7).
 - Worker requirements (code): publisher schema requires keys + `DEPLOYMENT_ID` when
   enabled and its role URL in production; verify worker requires its URL in
   production; runner image sets `NODE_ENV=production`; publisher writes to disk
@@ -52,7 +52,7 @@ key of the **withheld set** with an empty value — or, for the one service that
 its legitimate consumer, with its value. `environment:` wins over `env_file:` in
 compose, so the container holds `""`.
 
-Withheld set W, derived once in `scripts/lib/withheld-env.ts` (imported by C3, C7
+Withheld set W, derived once in `scripts/checks/lib/withheld-env.ts` (imported by C3, C7
 and the C6 pin; not hand-listed):
 - (a) every `scripts/env-allowlist.ts` entry with `secret: true` (today: the seven
   `PASSWD_*_PASSWORD`, `JACKSON_API_KEY`, `SENTRY_AUTH_TOKEN`, and the three new
@@ -362,3 +362,44 @@ honestly: the bundle smoke boots with the smoke map's env, not the YAML's;
 | C7 | Compose render step | locked |
 | C8 | Docker smoke hardening | locked |
 | C9 | Self-test meta-gate reaches .ts checks | locked |
+
+## Implementation Checklist
+
+Batches (sequential A → B → C ∥ D):
+- **A (C6 + shared derivation)**: `src/lib/env-schema.ts` (emptyAsUnset export,
+  `APP_WITHHELD_ENV_KEYS`, envSchema object preprocess, GH_REPO-only production
+  check, publisher pick `AWS_REGION` + S3⇒region refine + emptyAsUnset on
+  pass-through fields), `src/lib/env-schema.test.ts`, `scripts/retention-gc-worker.ts`
+  (import emptyAsUnset), `scripts/env-allowlist.ts` (three `AUDIT_ANCHOR_AWS_*`
+  secret entries; password-entry descriptions/consumers), regenerated
+  `.env.example`, `scripts/checks/lib/hcl-subset.ts` (moved; `TERRAFORM_DIR` depth) +
+  shim `src/__tests__/helpers/hcl-subset.ts` + `scripts/__tests__/hcl-subset.test.ts`
+  (moved test, TERRAFORM_DIR assertion), `scripts/checks/lib/withheld-env.ts` (W derivation,
+  holder table, role-user pins) + its tests.
+- **B (C1, C2, C3, C4)**: `docker-compose.yml` (app blanks W),
+  `docker-compose.override.yml` (worker blanks), `docker-compose.workers.yml`
+  (two services, existing workers' blanks, retention-gc DEPLOYMENT_ID),
+  `infra/k8s/audit-anchor-publisher.yaml`, `infra/k8s/audit-chain-verify-worker.yaml`,
+  `src/__tests__/infra/worker-deploy-parity.test.ts`, `.github/workflows/ci.yml`,
+  `scripts/pre-pr.sh` (`app_paths`).
+- **C (C7, C8, C9)**: `scripts/checks/check-compose-render.ts` +
+  `scripts/__tests__/check-compose-render.test.ts` + fixtures, `scripts/pre-pr.sh`
+  queue_step, `scripts/checks/lib/worker-bundle-smoke.mjs` +
+  `scripts/__tests__/check-worker-bundle-smoke.test.mjs`,
+  `scripts/checks/check-gate-selftest-coverage.sh` +
+  `scripts/__tests__/check-gate-selftest-coverage.test.mjs`.
+- **D (C5)**: docs listed in C5, `CLAUDE.md`, `CONTRIBUTING.md`,
+  `src/__tests__/db-integration/setup.ts`, `scripts/audit-chain-verify-worker.ts`
+  comment, `scripts/checks/check-compose-log-caps.mjs` count comment.
+
+Shared utilities to reuse: `createComposeYamlLoader` and compose file discovery
+(`scripts/checks/check-compose-log-caps.mjs`), `TerraformConfig`/`HclUnknown`
+(hcl-subset), `envObject`/`emptyAsUnset` (env-schema), allowlist entries
+(`scripts/env-allowlist.ts`), smoke map (`scripts/checks/worker-bundle-smoke.json`),
+fixture harness env vars of `check-gate-selftest-coverage.test.mjs`, `queue_step`
+in `scripts/pre-pr.sh`, ci.yml filter parsing in
+`scripts/__tests__/check-required-aggregate.test.mjs`, `app_paths` extraction in
+`scripts/__tests__/backup-db.test.mjs`.
+
+CI gate parity: the 23 CI-extracted gates are already in pre-pr.sh or run by
+`npm run`; the new C7 check is added to pre-pr.sh (static-checks runs it in CI).

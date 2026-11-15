@@ -1,4 +1,8 @@
 import { describe, it, expect } from "vitest";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import {
   auditAnchorPublisherEnvSchema,
   envObject,
@@ -6,6 +10,8 @@ import {
   getSchemaShape,
   isValidAnchorS3Prefix,
 } from "./env-schema";
+import { buildDestinationsFromEnv, AnchorDestinationConfigError } from "@/lib/audit/anchor-destinations/from-env";
+import { deriveWithheldEnv } from "../../scripts/checks/lib/withheld-env";
 
 const VALID_HEX_64 = "a".repeat(64);
 const SHORT_HEX = "a".repeat(63);
@@ -875,5 +881,279 @@ describe("getSchemaShape", () => {
 
   it("returns the same shape as envObject.shape", () => {
     expect(getSchemaShape()).toBe(envObject.shape);
+  });
+});
+
+// ─── Withheld env (docker-compose blanks other principals' secrets) ───────────
+
+const REPO_ROOT = resolve(__dirname, "../..");
+const WITHHELD = deriveWithheldEnv();
+
+/** Every W key as compose renders a blanked one, except those named in `keep`. */
+function blankedWithheld(keep: readonly string[] = []): Record<string, string> {
+  return Object.fromEntries(WITHHELD.filter((k) => !keep.includes(k)).map((k) => [k, ""]));
+}
+
+const PROD_APP = {
+  NODE_ENV: "production",
+  AUTH_SECRET: "x".repeat(32),
+  AUTH_URL: "https://app.example.com",
+  VERIFIER_PEPPER_KEY: VALID_HEX_64,
+  SESSION_TOKEN_HMAC_KEY: VALID_HEX_64,
+  REDIS_URL: "redis://localhost:6379",
+  AUTH_GOOGLE_ID: "id",
+  AUTH_GOOGLE_SECRET: "secret",
+  AUDIT_ANCHOR_PUBLISHER_ENABLED: "true",
+  AUDIT_ANCHOR_DESTINATION_FS_PATH: "/var/anchors",
+};
+
+describe("envSchema: withheld keys blanked by compose", () => {
+  it("parses a production app env with every withheld key \"\"", () => {
+    const result = envSchema.safeParse(baseEnv({ ...PROD_APP, ...blankedWithheld() }));
+    expect(result.success).toBe(true);
+  });
+
+  it("refuses the same blank on envObject, so the preprocess is what admits it", () => {
+    expect(envObject.safeParse(baseEnv({ OUTBOX_WORKER_DATABASE_URL: "" })).success).toBe(false);
+  });
+
+  it("still rejects a non-blank invalid value for a withheld key", () => {
+    const result = envSchema.safeParse(
+      baseEnv({ ...PROD_APP, ...blankedWithheld(["OUTBOX_WORKER_DATABASE_URL"]), OUTBOX_WORKER_DATABASE_URL: "not a url" }),
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.issues.map((i) => i.path.join("."))).toEqual(["OUTBOX_WORKER_DATABASE_URL"]);
+  });
+
+  it("does not mutate the input it was given", () => {
+    const input = Object.freeze({ ...baseEnv(), OUTBOX_WORKER_DATABASE_URL: "" });
+    expect(envSchema.safeParse(input).success).toBe(true);
+    expect(input.OUTBOX_WORKER_DATABASE_URL).toBe("");
+  });
+
+  it("drops only the listed keys: a blank non-withheld URL is still refused", () => {
+    expect(envSchema.safeParse(baseEnv({ APP_URL: "" })).success).toBe(false);
+  });
+
+  it("accepts production with a GitHub repo and no token (the token is the publisher's)", () => {
+    const { AUDIT_ANCHOR_DESTINATION_FS_PATH: _fs, ...withoutFs } = PROD_APP;
+    const result = envSchema.safeParse(baseEnv({ ...withoutFs, AUDIT_ANCHOR_DESTINATION_GH_REPO: "owner/repo" }));
+    expect(result.success).toBe(true);
+  });
+
+  it("refuses production with no destination at all", () => {
+    const { AUDIT_ANCHOR_DESTINATION_FS_PATH: _fs, ...withoutFs } = PROD_APP;
+    const result = envSchema.safeParse(baseEnv(withoutFs));
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.issues.map((i) => i.path.join("."))).toEqual(["AUDIT_ANCHOR_DESTINATION_S3_BUCKET"]);
+  });
+
+});
+
+// ─── Worker schemas, through the workers' own --validate-env-only ─────────────
+
+describe("worker env validation with withheld keys blanked", () => {
+  const TSX = join(REPO_ROOT, "node_modules/.bin/tsx");
+  let cwd: string;
+
+  /** The worker with `env` and nothing else of the parent's, from an empty cwd so no .env file supplies a value. */
+  function runWorker(script: string, env: Record<string, string>) {
+    cwd = mkdtempSync(join(tmpdir(), "env-schema-worker-"));
+    try {
+      return spawnSync(
+        TSX,
+        ["--tsconfig", join(REPO_ROOT, "tsconfig.json"), join(REPO_ROOT, "scripts", script), "--validate-env-only"],
+        { env: { PATH: process.env.PATH ?? "", NODE_ENV: "production", ...env }, encoding: "utf8", timeout: 60_000, cwd },
+      );
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  }
+
+  const OUTBOX_URL = "postgresql://passwd_outbox_worker:p@db:5432/passwd_sso";
+  const RETENTION_URL = "postgresql://passwd_retention_gc_worker:p@db:5432/passwd_sso";
+  const APP_URL = "postgresql://passwd_app:p@db:5432/passwd_sso";
+  const PASSED = { level: "info", msg: "env validation passed" };
+
+  /** The JSON lines of a stream; dotenv may print a non-JSON banner around them. */
+  function stdoutJson(stream: string | null): unknown[] {
+    return (stream ?? "").split("\n").filter((l) => l.startsWith("{")).map((l) => JSON.parse(l));
+  }
+
+  it("the outbox worker parses with every withheld key \"\" except its own URL", () => {
+    const r = runWorker("audit-outbox-worker.ts", {
+      NODE_ENV: "production",
+      ...blankedWithheld(["OUTBOX_WORKER_DATABASE_URL"]),
+      OUTBOX_WORKER_DATABASE_URL: OUTBOX_URL,
+      DATABASE_URL: "",
+    });
+    expect(r.status).toBe(0);
+    expect(stdoutJson(r.stdout)).toEqual([PASSED]);
+  }, 60_000);
+
+  it("the retention-gc worker parses with every withheld key \"\" except its own URL", () => {
+    const r = runWorker("retention-gc-worker.ts", {
+      NODE_ENV: "production",
+      ...blankedWithheld(["RETENTION_GC_DATABASE_URL"]),
+      RETENTION_GC_DATABASE_URL: RETENTION_URL,
+      DATABASE_URL: "",
+    });
+    expect(r.status).toBe(0);
+    expect(stdoutJson(r.stdout)).toEqual([PASSED]);
+  }, 60_000);
+
+  it("the outbox worker refuses an empty own URL outside production even with DATABASE_URL set", () => {
+    const r = runWorker("audit-outbox-worker.ts", {
+      NODE_ENV: "development",
+      ...blankedWithheld(),
+      DATABASE_URL: APP_URL,
+    });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('"path":"OUTBOX_WORKER_DATABASE_URL"');
+  }, 60_000);
+
+  it("the retention-gc worker refuses an empty own URL outside production even with DATABASE_URL set", () => {
+    const r = runWorker("retention-gc-worker.ts", {
+      NODE_ENV: "development",
+      ...blankedWithheld(),
+      DATABASE_URL: APP_URL,
+    });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('"path":"RETENTION_GC_DATABASE_URL"');
+  }, 60_000);
+
+  it("the verify worker refuses a blank URL in production, and accepts a valued one", () => {
+    const blank = runWorker("audit-chain-verify-worker.ts", {
+      NODE_ENV: "production",
+      ...blankedWithheld(),
+    });
+    expect(blank.status).toBe(1);
+    expect(stdoutJson(blank.stderr)).toEqual([
+      { level: "error", msg: "env validation failed", path: "AUDIT_CHAIN_VERIFY_DATABASE_URL", code: "missing" },
+    ]);
+
+    const valued = runWorker("audit-chain-verify-worker.ts", {
+      NODE_ENV: "production",
+      ...blankedWithheld(["AUDIT_CHAIN_VERIFY_DATABASE_URL"]),
+      AUDIT_CHAIN_VERIFY_DATABASE_URL: "postgresql://passwd_audit_chain_verifier:p@db:5432/passwd_sso",
+    });
+    expect(valued.status).toBe(0);
+    expect(stdoutJson(valued.stdout)).toEqual([PASSED]);
+  }, 60_000);
+});
+
+// ─── The publisher's schema, as compose renders its env ───────────────────────
+
+describe("auditAnchorPublisherEnvSchema: compose-shaped env", () => {
+  const DEPLOYMENT_ID = "550e8400-e29b-41d4-a716-446655440000";
+  const PUBLISHER_URL = "postgresql://passwd_anchor_publisher:p@db:5432/passwd_sso";
+  /** Every optional pass-through name as `${NAME:-}` renders an unset one. */
+  const blankPassThrough = {
+    AUDIT_ANCHOR_DESTINATION_S3_BUCKET: "",
+    AUDIT_ANCHOR_DESTINATION_S3_PREFIX: "",
+    AUDIT_ANCHOR_DESTINATION_GH_REPO: "",
+    AUDIT_ANCHOR_DESTINATION_GH_TOKEN: "",
+    AUDIT_ANCHOR_DESTINATION_FS_PATH: "",
+    AWS_REGION: "",
+  };
+  const base = {
+    NODE_ENV: "production",
+    AUDIT_ANCHOR_PUBLISHER_ENABLED: "true",
+    DEPLOYMENT_ID,
+    AUDIT_ANCHOR_SIGNING_KEY: VALID_HEX_64,
+    AUDIT_ANCHOR_TAG_SECRET: VALID_HEX_64,
+    AUDIT_ANCHOR_PUBLISHER_DATABASE_URL: PUBLISHER_URL,
+    DATABASE_URL: "",
+  };
+
+  function destinationNames(env: Record<string, unknown>): string[] {
+    const parsed = auditAnchorPublisherEnvSchema.safeParse(env);
+    if (!parsed.success) throw new Error(JSON.stringify(parsed.error.issues));
+    return buildDestinationsFromEnv({ ...parsed.data, GITHUB_TOKEN: undefined }).map((d) => d.name);
+  }
+
+  function issues(env: Record<string, unknown>): Array<{ path: string; message: string }> {
+    const parsed = auditAnchorPublisherEnvSchema.safeParse(env);
+    return parsed.success ? [] : parsed.error.issues.map((i) => ({ path: i.path.join("."), message: i.message }));
+  }
+
+  it("accepts an S3-only env", () => {
+    expect(
+      destinationNames({
+        ...base,
+        ...blankPassThrough,
+        AUDIT_ANCHOR_DESTINATION_S3_BUCKET: "anchors",
+        AUDIT_ANCHOR_DESTINATION_S3_PREFIX: "audit-anchors",
+        AWS_REGION: "us-east-1",
+      }),
+    ).toEqual(["s3-object-lock"]);
+  });
+
+  it("accepts a GitHub-only env", () => {
+    expect(
+      destinationNames({
+        ...base,
+        ...blankPassThrough,
+        AUDIT_ANCHOR_DESTINATION_GH_REPO: "owner/repo",
+        AUDIT_ANCHOR_DESTINATION_GH_TOKEN: "ghp_x",
+      }),
+    ).toEqual(["github-release"]);
+  });
+
+  it("reads a blank GitHub token as unset, so GITHUB_TOKEN still supplies it", () => {
+    const env = { ...base, ...blankPassThrough, AUDIT_ANCHOR_DESTINATION_GH_REPO: "owner/repo" };
+    const parsed = auditAnchorPublisherEnvSchema.parse(env);
+    expect(buildDestinationsFromEnv({ ...parsed, GITHUB_TOKEN: "ghp_y" }).map((d) => d.name)).toEqual(["github-release"]);
+    expect(() => buildDestinationsFromEnv({ ...parsed, GITHUB_TOKEN: undefined })).toThrow(AnchorDestinationConfigError);
+  });
+
+  it("accepts a filesystem-only env", () => {
+    expect(destinationNames({ ...base, ...blankPassThrough, AUDIT_ANCHOR_DESTINATION_FS_PATH: "/var/anchors" })).toEqual([
+      "filesystem",
+    ]);
+  });
+
+  it("refuses an S3 bucket with a blank AWS_REGION", () => {
+    expect(
+      issues({ ...base, ...blankPassThrough, AUDIT_ANCHOR_DESTINATION_S3_BUCKET: "anchors" }),
+    ).toEqual([{ path: "AWS_REGION", message: "AWS_REGION is required when AUDIT_ANCHOR_DESTINATION_S3_BUCKET is set" }]);
+  });
+
+  it("does not require a region when no bucket is set", () => {
+    expect(issues({ ...base, ...blankPassThrough, AUDIT_ANCHOR_DESTINATION_FS_PATH: "/var/anchors" })).toEqual([]);
+  });
+
+  it("refuses a blank production role URL with the required error", () => {
+    const found = issues({
+      ...base,
+      ...blankPassThrough,
+      AUDIT_ANCHOR_DESTINATION_FS_PATH: "/var/anchors",
+      AUDIT_ANCHOR_PUBLISHER_DATABASE_URL: "",
+    });
+    expect(found.map((i) => i.message)).toContain(
+      "AUDIT_ANCHOR_PUBLISHER_DATABASE_URL is required in production (no DATABASE_URL fallback).",
+    );
+  });
+
+  it("refuses a blank signing key", () => {
+    expect(
+      issues({ ...base, ...blankPassThrough, AUDIT_ANCHOR_DESTINATION_FS_PATH: "/var/anchors", AUDIT_ANCHOR_SIGNING_KEY: "" }).map(
+        (i) => i.path,
+      ),
+    ).toContain("AUDIT_ANCHOR_SIGNING_KEY");
+  });
+});
+
+describe("buildDestinationsFromEnv: GitHub token", () => {
+  const repo = { AUDIT_ANCHOR_DESTINATION_GH_REPO: "owner/repo" };
+
+  it("refuses a GitHub repo without a token", () => {
+    expect(() => buildDestinationsFromEnv(repo)).toThrow(AnchorDestinationConfigError);
+  });
+
+  it("accepts a GitHub repo with a token", () => {
+    expect(buildDestinationsFromEnv({ ...repo, AUDIT_ANCHOR_DESTINATION_GH_TOKEN: "ghp_x" }).map((d) => d.name)).toEqual([
+      "github-release",
+    ]);
   });
 });

@@ -66,7 +66,7 @@ surfaces as an unrelated assertion failure. `npm run docker:up` starts
 `audit-outbox-worker` against the dev database, so the normal local state is the
 racing one. `src/__tests__/db-integration/setup.ts` detects this by
 `application_name` in `pg_stat_activity` and refuses to run, naming each
-detected worker and how to stop that one. Both compose workers touch these
+detected worker and how to stop that one. The dev compose workers touch these
 tables, so stop both:
 
 ```bash
@@ -75,8 +75,9 @@ npm run test:integration
 docker compose start audit-outbox-worker retention-gc-worker
 ```
 
-The audit-anchor-publisher has no compose service; if you started one by hand,
-stop that process.
+The audit-anchor-publisher is a compose service only in `docker-compose.workers.yml`; if that overlay
+is running on this host, stop it with `docker compose -f docker-compose.yml -f docker-compose.workers.yml stop audit-anchor-publisher`,
+or stop the process if you started one by hand.
 
 CI runs no worker container alongside the integration job, so the check is silent there.
 
@@ -84,6 +85,7 @@ Docker (dev): `npm run docker:up` (wraps `docker compose -f docker-compose.yml -
 
 Notes on env files:
 - The canonical file is `.env`. Both Docker Compose (auto-load) and the Next.js app (`src/lib/load-env.ts`) read it natively.
+- In the dev override, container-set values (the blanks for withheld keys such as the `PASSWD_*_PASSWORD`s and other principals' DB URLs) shadow `.env.local` for those keys; set them in `.env` or the compose file, not `.env.local`.
 - `.env.local` is loaded second by load-env.ts, matching the Next.js precedence rule (`.env` base, `.env.local` per-developer override). Leave canonical config in `.env`; use `.env.local` for personal tweaks only.
 - `init:env` writes `.env`. If a legacy `.env.local` exists from older clones, it remains valid as override; the script prints a one-time NOTE recommending `mv .env.local .env` for the canonical move.
 - `JACKSON_API_KEY`, `PASSWD_OUTBOX_WORKER_PASSWORD`, `SENTRY_AUTH_TOKEN`, `NEXT_DEV_ALLOWED_ORIGINS` are NOT in the Zod schema (operators set them for their deployment path). `npm run init:env` prompts for them alongside the app vars; they live in the "External / Build-time" section at the bottom of `.env.example` / `.env`.
@@ -510,6 +512,8 @@ All password data is encrypted **client-side** before reaching the server. The s
 Six containers: `app` (Next.js, connects as `passwd_app` — NOSUPERUSER), `db` (PostgreSQL 16), `jackson` (BoxyHQ SAML Jackson), `redis` (Redis 7), `migrate` (one-shot Prisma migration, connects as `passwd_user` — SUPERUSER), `audit-outbox-worker` (outbox drain worker, connects as `passwd_outbox_worker` — NOSUPERUSER, least privilege)
 
 Dev override adds: `mailpit` (local email testing on port 8025), `audit-outbox-worker` (outbox drain)
+
+`docker-compose.workers.yml` (production) runs the bundled workers: `audit-outbox-worker`, `retention-gc-worker`, `audit-anchor-publisher` (`passwd_anchor_publisher`) and `audit-chain-verify-worker` (`passwd_audit_chain_verifier`, read-only); the last two load no `.env` and need their role passwords, the anchor keys and `DEPLOYMENT_ID` set. Kubernetes manifests for all four are in `infra/k8s/`.
 
 **Database role separation**: The `app` service connects as `passwd_app` (NOSUPERUSER, NOBYPASSRLS) so RLS is enforced in dev. The `migrate` service connects as `passwd_user` (SUPERUSER, table owner) for DDL. The `audit-outbox-worker` service connects as `passwd_outbox_worker` (NOSUPERUSER, NOBYPASSRLS, least privilege — SELECT/UPDATE/DELETE on `audit_outbox`, INSERT on `audit_logs`, SELECT on `tenants` only). For local `npm run db:migrate`, set `MIGRATION_DATABASE_URL` in `.env.local` pointing to `passwd_user`.
 

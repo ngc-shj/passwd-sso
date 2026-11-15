@@ -213,11 +213,13 @@ export const ALLOWLIST: readonly AllowlistEntry[] = [
     key: "PASSWD_ANCHOR_PUBLISHER_PASSWORD",
     justification:
       "Password for the passwd_anchor_publisher NOSUPERUSER DB role used by the audit-anchor publisher. " +
-      "Consumed by docker-compose (forwarded, optional, to the db service for initdb) and by " +
+      "Consumed by docker-compose (forwarded, optional, to the db service for initdb; required by " +
+      "docker-compose.workers.yml for the publisher's database URL) and by " +
       "scripts/bootstrap-rds-roles.mjs on RDS. For existing clusters the same value is given to " +
       "scripts/set-audit-anchor-publisher-password.sh on stdin. Not read by the Next.js app.",
     consumers: [
       "docker-compose.yml",
+      "docker-compose.workers.yml",
       "infra/postgres/initdb",
       "scripts/set-audit-anchor-publisher-password.sh",
       "scripts/bootstrap-rds-roles.mjs",
@@ -227,8 +229,9 @@ export const ALLOWLIST: readonly AllowlistEntry[] = [
     description:
       "Password for the passwd_anchor_publisher least-privilege DB role.\n" +
       "Used by infra/postgres/initdb to create the role on first boot; unset, the\n" +
-      "role is created NOLOGIN (no published fallback password). Must match the\n" +
-      "password in AUDIT_ANCHOR_PUBLISHER_DATABASE_URL.\n" +
+      "role is created NOLOGIN (no published fallback password). Required when\n" +
+      "docker-compose.workers.yml is used (it builds the publisher's database URL\n" +
+      "from it); optional for the base file.\n" +
       "Generate with: openssl rand -hex 24",
     secret: true,
   },
@@ -237,11 +240,13 @@ export const ALLOWLIST: readonly AllowlistEntry[] = [
     key: "PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD",
     justification:
       "Password for the passwd_audit_chain_verifier NOSUPERUSER DB role used by the audit-chain verify worker. " +
-      "Consumed by docker-compose (forwarded, optional, to the db service for initdb) and by " +
+      "Consumed by docker-compose (forwarded, optional, to the db service for initdb; required by " +
+      "docker-compose.workers.yml for the verify worker's database URL) and by " +
       "scripts/bootstrap-rds-roles.mjs on RDS. For existing clusters the same value is given to " +
       "scripts/set-audit-chain-verifier-password.sh on stdin. Not read by the Next.js app.",
     consumers: [
       "docker-compose.yml",
+      "docker-compose.workers.yml",
       "infra/postgres/initdb",
       "scripts/set-audit-chain-verifier-password.sh",
       "scripts/bootstrap-rds-roles.mjs",
@@ -251,10 +256,58 @@ export const ALLOWLIST: readonly AllowlistEntry[] = [
     description:
       "Password for the passwd_audit_chain_verifier least-privilege DB role.\n" +
       "Used by infra/postgres/initdb to create the role on first boot; unset, the\n" +
-      "role is created NOLOGIN (no published fallback password). Must match the\n" +
-      "password in AUDIT_CHAIN_VERIFY_DATABASE_URL.\n" +
+      "role is created NOLOGIN (no published fallback password). Required when\n" +
+      "docker-compose.workers.yml is used (it builds the verify worker's database\n" +
+      "URL from it); optional for the base file.\n" +
       "Generate with: openssl rand -hex 24",
     secret: true,
+  },
+  {
+    type: "literal",
+    key: "AUDIT_ANCHOR_AWS_ACCESS_KEY_ID",
+    justification:
+      "Publisher-only name for the AWS access key id: docker-compose.workers.yml passes it to the " +
+      "audit-anchor-publisher container as AWS_ACCESS_KEY_ID, so no other container holds an AWS " +
+      "credential by that name. Never read by the app or a worker under this name.",
+    consumers: ["docker-compose.workers.yml"],
+    reviewedAt: "2026-11-16",
+    includeInExample: true,
+    description:
+      "AWS access key id for the audit-anchor publisher's S3 destination.\n" +
+      "Only docker-compose.workers.yml reads it (as AWS_ACCESS_KEY_ID of the\n" +
+      "publisher container). Leave unset to use the host's instance role.",
+    secret: true,
+  },
+  {
+    type: "literal",
+    key: "AUDIT_ANCHOR_AWS_SECRET_ACCESS_KEY",
+    justification:
+      "Publisher-only name for the AWS secret access key: docker-compose.workers.yml passes it to the " +
+      "audit-anchor publisher container as AWS_SECRET_ACCESS_KEY, so no other container holds an AWS " +
+      "credential by that name. Never read by the app or a worker under this name.",
+    consumers: ["docker-compose.workers.yml"],
+    reviewedAt: "2026-11-16",
+    includeInExample: true,
+    description:
+      "AWS secret access key for the audit-anchor publisher's S3 destination.\n" +
+      "Only docker-compose.workers.yml reads it (as AWS_SECRET_ACCESS_KEY of the\n" +
+      "publisher container). Leave unset to use the host's instance role.",
+    secret: true,
+  },
+  {
+    type: "literal",
+    key: "AUDIT_ANCHOR_AWS_REGION",
+    justification:
+      "Publisher-only name for the AWS region: docker-compose.workers.yml passes it to the " +
+      "audit-anchor publisher container as AWS_REGION. Not a credential, so not secret, but still " +
+      "withheld from every other container (scripts/checks/lib/withheld-env.ts lists it by name).",
+    consumers: ["docker-compose.workers.yml"],
+    reviewedAt: "2026-11-16",
+    includeInExample: true,
+    description:
+      "AWS region of the audit-anchor publisher's S3 bucket.\n" +
+      "Only docker-compose.workers.yml reads it (as AWS_REGION of the publisher\n" +
+      "container); required when AUDIT_ANCHOR_DESTINATION_S3_BUCKET is set.",
   },
   {
     type: "literal",

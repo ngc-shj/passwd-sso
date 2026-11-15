@@ -53,7 +53,8 @@ A team's encryption key may have been exposed.
 PostgreSQL-level encryption at rest is compromised.
 
 1. Stop the writers (`docker compose stop audit-outbox-worker retention-gc-worker`
-   plus the app), leaving the database itself up — the export needs to connect
+   plus the app, and on the workers overlay `docker compose -f docker-compose.yml -f docker-compose.workers.yml stop audit-anchor-publisher`;
+   on Kubernetes `kubectl scale --replicas=0` the worker Deployments), leaving the database itself up — the export needs to connect
 2. Export data: `BACKUP_DIR=/secure/path scripts/backup-db.sh`
 
    Not a bare `pg_dump passwd_sso`: that captures one of three members —

@@ -14,13 +14,10 @@ import { describe, it, expect } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { TerraformConfig, TERRAFORM_DIR, HclUnknown } from "../helpers/hcl-subset";
+import { readSmokeMap, type SmokeMap } from "../../../scripts/checks/lib/withheld-env";
 
 const REPO_ROOT = resolve(__dirname, "../../..");
-const MAP_PATH = join(REPO_ROOT, "scripts/checks/worker-bundle-smoke.json");
 const ECS_TF = readFileSync(join(TERRAFORM_DIR, "ecs.tf"), "utf8");
-
-type SmokeTask = { bundle: string; env: Record<string, string>; markers: string[]; forbiddenInputs: string[] };
-type SmokeMap = { tasks: Record<string, SmokeTask> };
 
 /** An env value Terraform resolves at apply: no literal to compare against. */
 const UNKNOWN = Symbol("unknown");
@@ -131,7 +128,7 @@ const PUBLISHER_COMMAND = 'command   = ["node", "dist/audit-anchor-publisher.js"
 
 describe("worker-bundle-smoke.json vs the ECS task definitions", () => {
   const tf = new TerraformConfig(TERRAFORM_DIR);
-  const map = JSON.parse(readFileSync(MAP_PATH, "utf8")) as SmokeMap;
+  const map = readSmokeMap();
 
   it("finds exactly the four worker task definitions", () => {
     expect(Object.keys(workerTasks(tf)).sort()).toEqual([

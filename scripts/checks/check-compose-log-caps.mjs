@@ -78,7 +78,8 @@ const UNIT_BYTES = { "": 1, k: 1e3, kb: 1e3, m: 1e6, mb: 1e6, g: 1e9, gb: 1e9 };
  *
  * 1 GiB. The incident that produced this gate was 4.5 GB across two containers;
  * the guarantee being bought is "worst case is a function of container count",
- * and at 15 service blocks this ceiling puts that worst case at 15 GiB — large,
+ * and the worst case is this ceiling times the number of service blocks across
+ * the compose files — large,
  * but bounded and far below the disk. Raise it deliberately if a service really
  * needs more, and say why in the same commit.
  */

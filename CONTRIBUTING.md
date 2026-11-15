@@ -18,7 +18,7 @@ The following files must NOT move out of the repository root:
 
 The following must NOT move into any `scripts/<subdir>/`:
 
-- **Runtime entrypoints** (baked into the image / referenced by compose `command:`): `audit-outbox-worker.ts` (`Dockerfile:39`, `docker-compose.override.yml:42`), `dcr-cleanup-worker.ts` (`Dockerfile:45`, `docker-compose.override.yml:73`), `audit-chain-verify-worker.ts` (`package.json` `worker:audit-chain-verify`)
+- **Runtime entrypoints** (baked into the image / referenced by compose `command:`): `audit-outbox-worker.ts` (`Dockerfile:134`, `docker-compose.override.yml:81`), `retention-gc-worker.ts` (`Dockerfile:140`, `docker-compose.override.yml:143`), `audit-anchor-publisher.ts` (`Dockerfile:148`, `docker-compose.workers.yml:187`), `audit-chain-verify-worker.ts` (`Dockerfile:154`, `docker-compose.workers.yml:211`)
 - **Operator / incident-response**: `purge-history.sh`, `purge-audit-logs.sh`, `rotate-master-key.sh`, `set-outbox-worker-password.sh`, `set-dcr-cleanup-worker-password.sh` (the latter referenced by `scripts/env-allowlist.ts` and `scripts/__tests__/set-dcr-cleanup-worker-password.test.mjs`)
 - **Other operational**: `deploy.sh`, `dev.sh`, `scim-smoke.sh`, `mcp-reauth.sh`, `generate-icons.sh`, `bump-version.sh`
 - **Data fixtures**: `rls-smoke-*.sql`, `rls-cross-tenant-*` (`*.sql` / `*.sh` / `*.manifest`, consumed by `.github/workflows/ci.yml` + `scripts/pre-pr.sh`), `tenant-team-*.sql`, `license-allowlist.json` (read by `scripts/checks/check-licenses.mjs` via `../license-allowlist.json`)

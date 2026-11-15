@@ -16,7 +16,7 @@ Any SAML 2.0 compliant IdP can be used via the SAML Jackson bridge.
 | DB | PostgreSQL 16 + Prisma 7 |
 | Encryption | AES-256-GCM (Web Crypto API, client-side) |
 | UI | Tailwind CSS v4 + shadcn/ui + Lucide Icons |
-| Deployment | Docker Compose — 5 base services (`app`, `db`, `jackson`, `redis`, `migrate`) + `audit-outbox-worker` & `retention-gc-worker` (production: `docker-compose.workers.yml`; dev: override) |
+| Deployment | Docker Compose — 5 base services (`app`, `db`, `jackson`, `redis`, `migrate`) + `audit-outbox-worker`, `retention-gc-worker`, `audit-anchor-publisher` & `audit-chain-verify-worker` (production: `docker-compose.workers.yml`; dev: override for the first two) |
 
 ## Architecture
 
@@ -59,6 +59,8 @@ Services:
 - `migrate` — one-shot Prisma migration container (profile-gated: `--profile migrate`); connects as `passwd_user` (SUPERUSER)
 - `audit-outbox-worker` — drains `audit_outbox` rows into `audit_logs`; production definition in `docker-compose.workers.yml` (dev tsx source in `docker-compose.override.yml`) — see [Production Deployment](#production-deployment)
 - `retention-gc-worker` — enforces retention limits and hard-deletes expired records; production definition in `docker-compose.workers.yml` (dev tsx source in `docker-compose.override.yml`) — see [Production Deployment](#production-deployment)
+- `audit-anchor-publisher` — signs the audit-chain heads and publishes them to the configured anchor destinations; `docker-compose.workers.yml` only. Setup: `docs/operations/deployment.md` "Audit anchor publisher on Compose and Kubernetes"
+- `audit-chain-verify-worker` — re-verifies the audit hash chain hourly as a read-only role; `docker-compose.workers.yml` only
 
 ### About SAML Jackson
 
@@ -130,8 +132,8 @@ Set the following values:
 | `PASSWD_APP_PASSWORD` | Password for the `passwd_app` NOSUPERUSER DB role (Next.js runtime). Used by `docker-compose` for `DATABASE_URL` AND forwarded to `initdb` for role creation. Container fails to start if unset. | `openssl rand -hex 24` |
 | `PASSWD_OUTBOX_WORKER_PASSWORD` | Password for the `passwd_outbox_worker` DB role (set during `initdb`). Used by `docker-compose` to wire `OUTBOX_WORKER_DATABASE_URL`. Required when running the audit-outbox-worker. Use `scripts/set-outbox-worker-password.sh` to rotate on existing clusters. | `openssl rand -hex 24` |
 | `PASSWD_RETENTION_GC_WORKER_PASSWORD` | Password for the `passwd_retention_gc_worker` DB role (set during `initdb`). Used by `docker-compose` to wire `RETENTION_GC_DATABASE_URL`. Required when running the retention-gc-worker. Use `scripts/set-retention-gc-worker-password.sh` to rotate on existing clusters. | `openssl rand -hex 24` |
-| `PASSWD_ANCHOR_PUBLISHER_PASSWORD` | Password for the `passwd_anchor_publisher` DB role (set during `initdb`; unset, the role is created `NOLOGIN`). Must match `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL`. Use `scripts/set-audit-anchor-publisher-password.sh` to rotate on existing clusters. | `openssl rand -hex 24` |
-| `PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD` | Password for the `passwd_audit_chain_verifier` DB role, the audit-chain verify worker's read-only role (set during `initdb`; unset, the role is created `NOLOGIN`). Must match `AUDIT_CHAIN_VERIFY_DATABASE_URL`. Use `scripts/set-audit-chain-verifier-password.sh` to rotate on existing clusters; a cluster that predates the role has it `NOLOGIN` after the migration, so also run `ALTER ROLE passwd_audit_chain_verifier WITH LOGIN` as the superuser. | `openssl rand -hex 24` |
+| `PASSWD_ANCHOR_PUBLISHER_PASSWORD` | Password for the `passwd_anchor_publisher` DB role (set during `initdb`; unset, the role is created `NOLOGIN`). Required by `docker-compose.workers.yml`, which builds the publisher's database URL from it. Use `scripts/set-audit-anchor-publisher-password.sh` to rotate on existing clusters. | `openssl rand -hex 24` |
+| `PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD` | Password for the `passwd_audit_chain_verifier` DB role, the audit-chain verify worker's read-only role (set during `initdb`; unset, the role is created `NOLOGIN`). Required by `docker-compose.workers.yml`, which builds the verify worker's database URL from it. Use `scripts/set-audit-chain-verifier-password.sh` to rotate on existing clusters; a cluster that predates the role has it `NOLOGIN` after the migration, so also run `ALTER ROLE passwd_audit_chain_verifier WITH LOGIN` as the superuser. | `openssl rand -hex 24` |
 
 > **Upgrading from a pre-2026-05-16 deployment**: `docker-compose.yml` and
 > `docker-compose.override.yml` previously fell back to the public default
@@ -310,14 +312,16 @@ The base compose does NOT start the background workers. Run them in production w
 docker compose -f docker-compose.yml -f docker-compose.workers.yml up -d
 ```
 
-> **Important: background workers are REQUIRED in production.** Both workers are defined for production in `docker-compose.workers.yml` (and, for dev with the tsx source, in `docker-compose.override.yml`). They are NOT started by a bare `docker compose up -d`. Each runs the esbuild-bundled artifact from the same runner image and connects via its own least-privilege DB role.
+> **Important: background workers are REQUIRED in production.** All four workers are defined for production in `docker-compose.workers.yml` (and, for dev with the tsx source, in `docker-compose.override.yml`). They are NOT started by a bare `docker compose up -d`. Each runs the esbuild-bundled artifact from the same runner image and connects via its own least-privilege DB role.
 >
 > - **`audit-outbox-worker`** — drains `audit_outbox` → `audit_logs` (`OUTBOX_WORKER_DATABASE_URL` → `passwd_outbox_worker` role). Without it, audit events accumulate as `PENDING` rows and never reach `audit_logs`.
 > - **`retention-gc-worker`** — enforces retention limits and performs hard deletes across sessions, verification/bridge/API/MCP tokens, reset & rotation records, shares, invitations, emergency access, vault history, and audit retention (`RETENTION_GC_DATABASE_URL` → `passwd_retention_gc_worker` role). Without it, **nothing is ever purged** — data-minimisation and deletion guarantees do not hold.
 >
-> Alternative to the overlay: run either worker as a systemd unit or sidecar via `npm run worker:audit-outbox` / `npm run worker:retention-gc` with the corresponding `*_DATABASE_URL` set.
+> - **`audit-anchor-publisher`** and **`audit-chain-verify-worker`** — the audit-chain anchoring and verification workers. The overlay requires `PASSWD_ANCHOR_PUBLISHER_PASSWORD`, `PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD`, `AUDIT_ANCHOR_SIGNING_KEY`, `AUDIT_ANCHOR_TAG_SECRET` and `DEPLOYMENT_ID`: an overlay deployment that predates them fails to render until they are set. Upgrade order and destination keys: `docs/operations/deployment.md` "Audit anchor publisher on Compose and Kubernetes".
 >
-> **Monitor both workers.** Because a stalled or crash-looping worker fails silently (the app keeps serving), alert on: process liveness / restart count, worker heartbeat log lines (`retention-gc.loop_start`, outbox drain progress), `audit_outbox` PENDING-row age and depth, and retention queue age. A worker that boots but makes no progress is as harmful as one that never starts.
+> Alternative to the overlay: run any worker as a systemd unit or sidecar via `npm run worker:audit-outbox` / `npm run worker:retention-gc` / `npm run worker:audit-anchor-publisher` / `npm run worker:audit-chain-verify` with the corresponding `*_DATABASE_URL` set.
+>
+> **Monitor every worker.** Because a stalled or crash-looping worker fails silently (the app keeps serving), alert on: process liveness / restart count, worker heartbeat log lines (`retention-gc.loop_start`, outbox drain progress), `audit_outbox` PENDING-row age and depth, and retention queue age. A worker that boots but makes no progress is as harmful as one that never starts.
 >
 > In production, do NOT place `docker-compose.override.yml` (that file exposes DB/Jackson/Redis ports to the host and runs the tsx source — dev-only). Use `docker-compose.workers.yml` instead.
 
@@ -467,6 +471,8 @@ docker compose stop audit-outbox-worker retention-gc-worker
 ANCHOR_TEST_S3_ENDPOINT=http://127.0.0.1:9000 npm run test:integration
 docker compose start audit-outbox-worker retention-gc-worker
 ```
+
+On a host running the workers overlay, also stop `audit-anchor-publisher` (with the overlay's `-f` set) while a suite that writes anchors runs.
 
 `scripts/pre-pr.sh` probes `${ANCHOR_TEST_S3_ENDPOINT:-http://127.0.0.1:9000}/minio/health/ready`
 before its integration step and refuses that step when MinIO is not ready.

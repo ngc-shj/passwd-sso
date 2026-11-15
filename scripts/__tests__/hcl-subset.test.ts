@@ -5,7 +5,9 @@
  * else.
  */
 import { describe, it, expect } from "vitest";
-import { evaluate, parseHcl, HclUnknown } from "./hcl-subset";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { evaluate, parseHcl, HclUnknown, TERRAFORM_DIR } from "../checks/lib/hcl-subset";
 
 const SCOPE = { vars: () => undefined, local: () => undefined, module: () => undefined };
 
@@ -48,5 +50,11 @@ describe("floor()", () => {
 
   it("refuses a value that is not a number", () => {
     expect(() => run('floor("1")')).toThrow("floor: not a number");
+  });
+});
+
+describe("TERRAFORM_DIR", () => {
+  it("contains ecs.tf", () => {
+    expect(existsSync(join(TERRAFORM_DIR, "ecs.tf"))).toBe(true);
   });
 });
