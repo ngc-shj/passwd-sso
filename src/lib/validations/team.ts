@@ -33,6 +33,7 @@ import {
   hexSalt,
 } from "./common";
 import { entryTypeSchema, BULK_IMPORT_MAX_ENTRIES } from "./entry";
+import { SCIM_BULK_ADMISSION_MAX } from "@/lib/constants/team/scim-admission";
 
 // ─── Team Schemas ──────────────────────────────────────────
 
@@ -188,6 +189,27 @@ export const approveMemberSchema = z.object({
   expectedRole: z.enum(TEAM_INVITE_ROLE_VALUES),
 });
 
+// Bulk approve / reject (scim-bulk-approve C2/C3): ids are lowercased by the
+// schema so uniqueness — and the response keys — hold on one canonical form.
+const bulkMemberIdSchema = z.string().uuid().toLowerCase();
+const hasUniqueIds = (ids: readonly string[]) => new Set(ids).size === ids.length;
+
+export const bulkApproveMembersSchema = z.strictObject({
+  members: z
+    .array(z.strictObject({ memberId: bulkMemberIdSchema, expectedRole: z.enum(TEAM_INVITE_ROLE_VALUES) }))
+    .min(1)
+    .max(SCIM_BULK_ADMISSION_MAX)
+    .refine((members) => hasUniqueIds(members.map((m) => m.memberId)), { message: "Duplicate memberId" }),
+});
+
+export const bulkRejectMembersSchema = z.strictObject({
+  memberIds: z
+    .array(bulkMemberIdSchema)
+    .min(1)
+    .max(SCIM_BULK_ADMISSION_MAX)
+    .refine(hasUniqueIds, { message: "Duplicate memberId" }),
+});
+
 export const updateTenantMemberRoleSchema = z.object({
   role: z.enum(TENANT_ROLE_VALUES),
 });
@@ -238,6 +260,8 @@ export type InviteInput = z.infer<typeof inviteSchema>;
 export type AddMemberInput = z.infer<typeof addMemberSchema>;
 export type UpdateMemberRoleInput = z.infer<typeof updateMemberRoleSchema>;
 export type ApproveMemberInput = z.infer<typeof approveMemberSchema>;
+export type BulkApproveMembersInput = z.infer<typeof bulkApproveMembersSchema>;
+export type BulkRejectMembersInput = z.infer<typeof bulkRejectMembersSchema>;
 export type UpdateTenantMemberRoleInput = z.infer<typeof updateTenantMemberRoleSchema>;
 export type CreateTeamTagInput = z.infer<typeof createTeamTagSchema>;
 export type UpdateTeamTagInput = z.infer<typeof updateTeamTagSchema>;

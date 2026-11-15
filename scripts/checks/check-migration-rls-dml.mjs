@@ -810,13 +810,17 @@ export function scanTree(root) {
   return result;
 }
 
+// Exits go through process.exitCode, never process.exit(): on a pipe the
+// kernel has shrunk (a busy CI runner) a write is queued, and process.exit()
+// drops what is still queued — a truncated list with exit 0.
 function main() {
   if (process.env.CI && ROOT_OVERRIDE && process.env.MIGRATION_RLS_DML_CHECK_FIXTURE !== "1") {
     console.error(
       "migration-rls-dml: MIGRATION_RLS_DML_CHECK_ROOT is set under CI without " +
         "MIGRATION_RLS_DML_CHECK_FIXTURE=1; refusing to check a tree other than the repo's.",
     );
-    process.exit(2);
+    process.exitCode = 2;
+    return;
   }
 
   const { entries, errors: baselineErrors } = existsSync(BASELINE_FILE)
@@ -830,7 +834,8 @@ function main() {
     for (const d of scan.dynamic) console.log(`MIGRATION_RLS_DML_DYNAMIC: ${d.dir}:${d.line}`);
     console.log(`FORCE_STATEMENTS=${scan.forceStatements} FORCED_TABLES=${scan.forcedTables.size}`);
     for (const e of scan.errors) console.error(`MIGRATION_RLS_DML_UNPARSED: ${e.dir}:${e.line}: ${e.reason}`);
-    process.exit(scan.errors.length > 0 ? 1 : 0);
+    process.exitCode = scan.errors.length > 0 ? 1 : 0;
+    return;
   }
 
   const hitDirs = new Set([...scan.hits, ...scan.dynamic].map((h) => h.dir));
@@ -860,7 +865,8 @@ function main() {
         `\nAn already-shipped migration may be baselined in ${BASELINE_FILE}:` +
         `\n  <migration_dir_name>  # reason of at least ${MIN_REASON_LENGTH} characters\n`,
     );
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
   console.log(`migration-rls-dml: OK (${hitDirs.size} baselined migrations, no new hits)`);
 }

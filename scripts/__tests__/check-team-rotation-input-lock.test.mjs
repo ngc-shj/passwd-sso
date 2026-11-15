@@ -377,6 +377,7 @@ export const rotate = withTenantRls(prisma, tenantId, async (tx) => {
 
   describe("rule 7: SCIM admission marker", () => {
     const SERVICE = "src/lib/services/scim-group-service.ts";
+    const MODULE = "src/lib/team/scim-admission.ts";
     // The service holds an exempted grant site; each cell keeps it beside its own.
     const write = (rel, body) => writeFile(rel, rel === SERVICE ? `${EXEMPT_FILES[SERVICE]}\n${body}` : body);
     const APPROVE = "src/app/api/teams/[teamId]/members/[memberId]/approve/route.ts";
@@ -452,7 +453,7 @@ export const rotate = withTenantRls(prisma, tenantId, async (tx) => {
 
     it("refuses scimApprovalPending: false outside the approve route", () => {
       write(SUBJECT, "export async function off(tx, id) { await tx.teamMember.update({ where: { id }, data: { scimApprovalPending: false } }); }");
-      expectDenied(run(), /scimApprovalPending set to something other than the literal true outside the approve route/);
+      expectDenied(run(), /scimApprovalPending set to something other than the literal true outside the admission module/);
     });
 
     it("passes scimApprovalPending: false in a where filter outside the approve route", () => {
@@ -462,17 +463,17 @@ export const rotate = withTenantRls(prisma, tenantId, async (tx) => {
 
     it("refuses a variable value for scimApprovalPending outside the approve route", () => {
       write(SUBJECT, "export async function off(tx, id, pending) { await tx.teamMember.update({ where: { id }, data: { scimApprovalPending: pending } }); }");
-      expectDenied(run(), /scimApprovalPending set to something other than the literal true outside the approve route/);
+      expectDenied(run(), /scimApprovalPending set to something other than the literal true outside the admission module/);
     });
 
     it("refuses a shorthand scimApprovalPending outside the approve route", () => {
       write(SUBJECT, "export async function off(tx, id, scimApprovalPending) { await tx.teamMember.update({ where: { id }, data: { scimApprovalPending } }); }");
-      expectDenied(run(), /scimApprovalPending set to something other than the literal true outside the approve route/);
+      expectDenied(run(), /scimApprovalPending set to something other than the literal true outside the admission module/);
     });
 
     it("refuses a quoted scimApprovalPending key outside the approve route", () => {
       write(SUBJECT, 'export async function off(tx, id) { await tx.teamMember.update({ where: { id }, data: { "scimApprovalPending": false } }); }');
-      expectDenied(run(), /scimApprovalPending set to something other than the literal true outside the approve route/);
+      expectDenied(run(), /scimApprovalPending set to something other than the literal true outside the admission module/);
     });
 
     it("refuses a parameterised raw template naming scim_approval_pending", () => {
@@ -509,7 +510,32 @@ export const rotate = withTenantRls(prisma, tenantId, async (tx) => {
       expect(run({ admissions: 1 }).code).toBe(0);
     });
 
-    it("passes the approve route's CAS (literal true in the where, literal false in the data)", () => {
+    it("passes the admission module's approve CAS (literal true in the where, literal false in the data)", () => {
+      write(MODULE, `export async function approve(tx, tenantId, ctx, targets) {
+  await lockTenantRows(tx, tenantId, [actorId, ...userIds], "share");
+  await lockTeamsAgainstRotation(tx, [teamId]);
+  for (const { memberId, expectedRole } of targets) {
+    await tx.teamMember.updateMany({
+      where: { id: memberId, teamId, role: expectedRole, scimApprovalPending: true, deactivatedAt: { not: null } },
+      data: { deactivatedAt: null, scimApprovalPending: false, keyDistributed: false },
+    });
+  }
+}`);
+      expect(run({ writes: 2, admissions: 1 }).code).toBe(0);
+    });
+
+    it("passes the admission module's reject delete", () => {
+      write(MODULE, `export async function reject(tx, tenantId, ctx, targets) {
+  await lockTenantRows(tx, tenantId, [actorId, ...userIds], "share");
+  await lockTeamsAgainstRotation(tx, [teamId]);
+  for (const { memberId } of targets) {
+    await tx.teamMember.deleteMany({ where: { id: memberId, teamId, scimApprovalPending: true } });
+  }
+}`);
+      expect(run({ writes: 2 }).code).toBe(0);
+    });
+
+    it("refuses the approve CAS's scimApprovalPending: false in the old home, the approve route", () => {
       write(APPROVE, `export const approve = withTenantRls(prisma, tenantId, async (tx) => {
   await lockTenantRows(tx, tenantId, [approverId, targetId], "share");
   await lockTeamsAgainstRotation(tx, [teamId]);
@@ -518,7 +544,137 @@ export const rotate = withTenantRls(prisma, tenantId, async (tx) => {
     data: { deactivatedAt: null, scimApprovalPending: false, keyDistributed: false },
   });
 });`);
-      expect(run({ writes: 2, admissions: 1 }).code).toBe(0);
+      expectDenied(run({ writes: 2, admissions: 1 }), /scimApprovalPending set to something other than the literal true outside the admission module/);
+    });
+
+    describe("admission module boundary", () => {
+      const MEMBERS = "src/app/api/teams/[teamId]/members";
+      const ROUTES = [
+        `${MEMBERS}/[memberId]/approve/route.ts`,
+        `${MEMBERS}/[memberId]/reject/route.ts`,
+        `${MEMBERS}/bulk-approve/route.ts`,
+        `${MEMBERS}/bulk-reject/route.ts`,
+      ];
+      const OTHER = "src/lib/other/importer.ts";
+      const ROUTE_BODY = `import { extractRequestMeta } from "@/lib/audit/audit";
+import { approveScimPending } from "@/lib/team/scim-admission";
+export const POST = async (req) => approveScimPending(tx, t, { ...extractRequestMeta(req) }, []);
+`;
+
+      it("accepts the four admission routes importing the module and only extractRequestMeta from the audit lib", () => {
+        for (const route of ROUTES) write(route, ROUTE_BODY);
+        expect(run().code).toBe(0);
+      });
+
+      it("accepts a page importing the near-named constants file", () => {
+        write("src/app/page.tsx", `import { SCIM_BULK_ADMISSION_MAX } from "@/lib/constants/team/scim-admission";\nexport const max = SCIM_BULK_ADMISSION_MAX;\n`);
+        expect(run().code).toBe(0);
+      });
+
+      it("refuses a fifth file importing the module by alias", () => {
+        write(OTHER, `import { approveScimPending } from "@/lib/team/scim-admission";\nexport const f = approveScimPending;\n`);
+        expectDenied(run(), /admission-module  src\/lib\/other\/importer\.ts:1  import of the SCIM admission module outside the four admission routes/);
+      });
+
+      it("refuses a fifth file importing the module by relative path", () => {
+        write(OTHER, `import { approveScimPending } from "../team/scim-admission";\nexport const f = approveScimPending;\n`);
+        expectDenied(run(), /import of the SCIM admission module outside the four admission routes/);
+      });
+
+      it("refuses a relative import that spells the extension", () => {
+        write(OTHER, `import { approveScimPending } from "../team/scim-admission.js";\nexport const f = approveScimPending;\n`);
+        expectDenied(run(), /import of the SCIM admission module outside the four admission routes/);
+      });
+
+      it("refuses an alias import that detours through a parent segment", () => {
+        write(OTHER, `import { approveScimPending } from "@/lib/team/../team/scim-admission";\nexport const f = approveScimPending;\n`);
+        expectDenied(run(), /import of the SCIM admission module outside the four admission routes/);
+      });
+
+      it("refuses an alias import that doubles a slash", () => {
+        write(OTHER, `import { approveScimPending } from "@/lib//team/scim-admission";\nexport const f = approveScimPending;\n`);
+        expectDenied(run(), /import of the SCIM admission module outside the four admission routes/);
+      });
+
+      it("refuses a literal import() of the module", () => {
+        write(OTHER, `export const load = () => import("@/lib/team/scim-admission");\n`);
+        expectDenied(run(), /dynamic import of the SCIM admission module outside the four admission routes/);
+      });
+
+      it("refuses a literal require() of the module", () => {
+        write(OTHER, `export const load = () => require("../team/scim-admission");\n`);
+        expectDenied(run(), /require of the SCIM admission module outside the four admission routes/);
+      });
+
+      it("refuses import x = require() of the module outside the four routes", () => {
+        write(OTHER, `import m = require("../team/scim-admission");\nexport const f = m;\n`);
+        expectDenied(run(), /require of the SCIM admission module outside the four admission routes/);
+      });
+
+      it("refuses export * from the module", () => {
+        write(OTHER, `export * from "@/lib/team/scim-admission";\n`);
+        expectDenied(run(), /re-exports the SCIM admission module/);
+      });
+
+      it("refuses export { … } from the module", () => {
+        write(OTHER, `export { approveScimPending } from "../team/scim-admission";\n`);
+        expectDenied(run(), /re-exports the SCIM admission module/);
+      });
+
+      it("refuses a re-export of the module even from an admission route", () => {
+        write(ROUTES[2], `export { approveScimPending } from "@/lib/team/scim-admission";\n`);
+        expectDenied(run(), /re-exports the SCIM admission module/);
+      });
+
+      it("refuses an admission route calling lockTenantRows", () => {
+        write(ROUTES[0], `${ROUTE_BODY}export const lock = (tx) => lockTenantRows(tx, t, [u], "share");\n`);
+        expectDenied(run(), /admission route calls lockTenantRows/);
+      });
+
+      it("accepts lockTenantRows outside the four admission routes", () => {
+        write(OTHER, `export const lock = (tx) => lockTenantRows(tx, t, [u], "share");\n`);
+        expect(run().code).toBe(0);
+      });
+
+      it.each([
+        ["logAuditInTx from the audit module", `import { extractRequestMeta, logAuditInTx } from "@/lib/audit/audit";`, /import of logAuditInTx from @\/lib\/audit\/audit/],
+        ["logAuditAsyncBothScopes from the audit module", `import { logAuditAsyncBothScopes } from "@/lib/audit/audit";`, /import of logAuditAsyncBothScopes/],
+        ["a renamed logAuditInTx", `import { logAuditInTx as emit } from "@/lib/audit/audit";`, /import of logAuditInTx/],
+        ["a namespace import of the audit module", `import * as audit from "@/lib/audit/audit";`, /import of \* from/],
+        ["enqueueAudit from audit-outbox", `import { enqueueAudit } from "@/lib/audit/audit-outbox";`, /import of @\/lib\/audit\/audit-outbox\b(?!-)/],
+        ["enqueueAuditInTx from audit-outbox-in-tx", `import { enqueueAuditInTx } from "@/lib/audit/audit-outbox-in-tx";`, /import of @\/lib\/audit\/audit-outbox-in-tx/],
+        ["a relative import of the audit module", `import { logAuditInTx } from "../../../../../../../lib/audit/audit";`, /import of logAuditInTx/],
+        ["a namespace import of the bare audit lib directory", `import * as a from "@/lib/audit";`, /admission-audit .*import of @\/lib\/audit\b/],
+        ["an alias import of the audit lib that detours through a parent segment", `import { enqueueAudit } from "@/lib/team/../audit/audit-outbox";`, /admission-audit .*import of @\/lib\/team\/\.\.\/audit\/audit-outbox/],
+      ])("refuses an admission route importing %s", (_name, line, pattern) => {
+        write(ROUTES[1], `${line}\n`);
+        expectDenied(run(), pattern);
+      });
+
+      it("refuses an admission route loading the audit lib through import()", () => {
+        write(ROUTES[3], `export const load = () => import("@/lib/audit/audit");\n`);
+        expectDenied(run(), /admission-audit .*dynamic import of @\/lib\/audit\/audit/);
+      });
+
+      it("refuses the module importing logAuditAsync", () => {
+        write(MODULE, `import { logAuditAsync } from "@/lib/audit/audit";\nexport const f = logAuditAsync;\n`);
+        expectDenied(run(), /admission-audit .*import of logAuditAsync from @\/lib\/audit\/audit/);
+      });
+
+      it("refuses the module importing extractRequestMeta (not its allowance)", () => {
+        write(MODULE, `import { extractRequestMeta } from "@/lib/audit/audit";\nexport const f = extractRequestMeta;\n`);
+        expectDenied(run(), /import of extractRequestMeta/);
+      });
+
+      it("accepts the module importing logAuditInTx", () => {
+        write(MODULE, `import { logAuditInTx } from "@/lib/audit/audit";\nexport const f = logAuditInTx;\n`);
+        expect(run().code).toBe(0);
+      });
+
+      it("accepts a file outside the boundary importing any audit emitter", () => {
+        write(OTHER, `import { logAuditInTx, logAuditAsync } from "@/lib/audit/audit";\nexport const f = [logAuditInTx, logAuditAsync];\n`);
+        expect(run().code).toBe(0);
+      });
     });
   });
 
