@@ -105,3 +105,38 @@ RT10 OK · RT11 OK
 ### TEST-F4 Minor — readmit sibling untouched
 - Action: new readmit cell — two qualifying rows, one in the input; the other keeps
   `admitted_at IS NULL`, one READMIT outbox row.
+
+---
+
+# Round 2
+Date: 2026-11-16
+Review round: 2 (incremental, `343976def..7295710a0`)
+
+## Changes from Previous Round
+All round-1 findings resolved: SEC-F1, FN-F1, FN-F3, TEST-F1..F4 fixed; SEC-F2 accepted (D16);
+FN-F2 recorded (D15).
+
+## Functionality Findings
+No findings. Every code the cancel route returns maps to an existing `ApiErrors` key in en/ja;
+`memberCount` matches the active members list; guest, re-admitted and never-departed creators'
+shares are still admitted.
+
+## Security Findings
+No findings. The new function body differs from `20261114000100` by the one clause; the flipped A10
+row is a leftover by the C1 predicate (its re-admitted twin is served). SQL-side authority readers of
+`team_members` re-derived across all migrations (functions, views, policies, triggers): only
+`share_creator_admitted` decides team authority — the class is closed. No fix widens a boundary (R43).
+
+## Testing Findings
+No findings. share-departure 48/48; component and unit files 66/66; A10b's four variants each pinned
+by the probe their migration flips.
+
+## Recurring Issue Check (round 2)
+All three experts: R1–R57 (+RS1–RS6 / RT1–RT11) OK or N/A; R3, R29, R42, R48, R49 resolved (SEC-F1);
+R14 accepted (D16).
+
+## Termination
+All three experts returned "No findings" in round 2. R42 class expansion: the leftover-authority class
+gained one member in review (the SQL `share_creator_admitted`), the worktree-compose class one in
+Phase 2 (bootstrap-rds-roles) — neither expanded twice, so the expanding-class guard condition does
+not fire.
