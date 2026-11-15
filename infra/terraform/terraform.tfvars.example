@@ -47,6 +47,8 @@ jackson_image = "<ACCOUNT_ID>.dkr.ecr.ap-northeast-1.amazonaws.com/passwd-sso-de
 #   #   // Audit-anchor publisher (the only container that receives these; the shared
 #   #   // task execution role can still read the whole secret):
 #   #   "AUDIT_ANCHOR_PUBLISHER_DATABASE_URL": "postgresql://passwd_anchor_publisher:PASSWORD@HOST:5432/passwd_sso",
+#   #   // Audit-chain verify worker (read-only role; required in production, no DATABASE_URL fallback):
+#   #   "AUDIT_CHAIN_VERIFY_DATABASE_URL": "postgresql://passwd_audit_chain_verifier:PASSWORD@HOST:5432/passwd_sso",
 #   #   "AUDIT_ANCHOR_SIGNING_KEY": "<REPLACE>",  // npm run generate:audit-anchor-signing-key
 #   #   "AUDIT_ANCHOR_TAG_SECRET": "<REPLACE>",   // npm run generate:audit-anchor-tag-secret
 #   #   "DEPLOYMENT_ID": "<REPLACE>"              // a new UUID per deployment; reuse only for a successor of the same deployment (see docs/operations/deployment.md); also read by the retention-gc worker while its orphan sweep runs

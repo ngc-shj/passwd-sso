@@ -47,6 +47,10 @@ const {
   };
 });
 
+const { mockLogger } = vi.hoisted(() => ({
+  mockLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+
 // The user's credential lock and the in-transaction session re-read
 // (user-auth-serialization.ts, tested on its own): a live session by default.
 const { mockIsSessionRowLive } = vi.hoisted(() => ({ mockIsSessionRowLive: vi.fn() }));
@@ -91,7 +95,7 @@ vi.mock("@/lib/http/with-request-log", () => ({
 vi.mock("@/lib/logger", () => ({
   default: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) },
   requestContext: { run: (_l: unknown, fn: () => unknown) => fn() },
-  getLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
+  getLogger: () => mockLogger,
 }));
 
 import { lockUserAuthArtifacts } from "@/lib/auth/session/user-auth-serialization";
@@ -592,6 +596,25 @@ describe("POST /api/vault/delegation", () => {
     expect(mockLogAudit).toHaveBeenCalledTimes(2);
     const json = await res.json();
     expect(json.delegationSessionId).toBe(SESSION_ID);
+    // A swallowed DB revocation failure is an operator signal, not a warning.
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ oldSessionId: "old-session-id", userId: USER_ID }),
+      "delegation.create.revoke_old_db_failed",
+    );
+  });
+
+  it("logs at error and still returns 503 when the rollback delete throws", async () => {
+    mockStoreDelegationEntries.mockRejectedValue(new Error("Redis unavailable"));
+    mockPrismaDelegationSession.deleteMany.mockRejectedValueOnce(new Error("DB delete transient"));
+
+    const res = await POST(makePostRequest(VALID_POST_BODY));
+
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toBe("DELEGATION_STORE_FAILED");
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: SESSION_ID, userId: USER_ID }),
+      "delegation.create.rollback_delete_failed",
+    );
   });
 });
 

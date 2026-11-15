@@ -5,7 +5,7 @@
 // a verifier (the bootstrap, scripts/set-*-password.sh) is recorded.
 //
 // One list, three spellings: scripts/bootstrap-rds-roles.mjs imports it;
-// scripts/lib/set-role-password.sh and infra/postgres/initdb/0{1,2,4}*.sql
+// scripts/lib/set-role-password.sh and infra/postgres/initdb/0{1,2,4,5}*.sql
 // cannot import, so scripts/__tests__/statement-text-settings.test.mjs pins
 // their SET lines to it.
 //

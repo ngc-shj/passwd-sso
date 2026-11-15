@@ -75,7 +75,7 @@ export type BypassModel = keyof typeof MODEL_TABLE;
 
 /**
  * What a bypass may reach: its purpose and the models it touches. The
- * database reports (and, once enforced, refuses) a bypassed statement that
+ * database reports and then refuses (42501) a bypassed statement that
  * examines a row of an RLS table outside `tables` — see
  * `public.rls_bypass_admits` in the migrations.
  */

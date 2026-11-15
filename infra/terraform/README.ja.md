@@ -240,6 +240,7 @@ ECS タスク定義は `{secret_arn}:KEY::` 形式で個別キーを参照し、
 | `SMTP_USER` | マジックリンクメール用 SMTP ユーザー名。`smtp_host` 設定かつ `smtp_auth_enabled = true` のときのみ参照。認証なしリレーは空文字列で表す（キー欠落は ECS が起動拒否）。 |
 | `SMTP_PASS` | SMTP パスワード。条件は `SMTP_USER` と同じ。 |
 | `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` | audit-anchor publisher ECS サービス用の最小権限 DB URL（`passwd_anchor_publisher` ロール）。`bootstrap-rds-roles.mjs` がこのパスワードでロールに `LOGIN` を付与するため、このシークレットが唯一の控え。 |
+| `AUDIT_CHAIN_VERIFY_DATABASE_URL` | audit-chain verify worker ECS サービス用の読み取り専用 DB URL（`passwd_audit_chain_verifier` ロール: 11 カラムへのカラム単位 `SELECT` のみ、書き込みなし）。必須: 本番でこのキーがないと worker は起動を拒否し、キーがなければタスクの secret 参照が解決できず、直前のタスクが動き続ける。`bootstrap-rds-roles.mjs` がこのパスワードでロールに `LOGIN` を与える。secret が唯一の控え。 |
 | `AUDIT_ANCHOR_SIGNING_KEY` | publisher がマニフェスト署名に使う Ed25519 シード (32-byte hex)。publisher タスクにのみマッピング。`npm run generate:audit-anchor-signing-key` で生成。 |
 | `AUDIT_ANCHOR_TAG_SECRET` | マニフェスト内テナントタグ用 HMAC シークレット (32-byte hex)。publisher タスクにのみマッピング。`npm run generate:audit-anchor-tag-secret` で生成。 |
 | `DEPLOYMENT_ID` | 全マニフェストでこのデプロイメントを示す UUID。初回起動時に保存した値と異なると publisher は起動を拒否する。デプロイメントごとに 1 回生成し、保存済みの値を再利用するのは前任が既に存在しない同一デプロイメントの後継のみ — クローンや復元コピーは新しい値を生成する。publisher タスクと、`retention_gc_blob_sweep_mode` が `off` 以外の間は retention-gc worker にもマッピング（orphan sweep のバケットマーカーがこの値を保持する）。 |
@@ -347,10 +348,13 @@ Terraform apply は想定内の誤検知）。Object Lock なしで作られた�
   境界が未公開のときだけ公開します。ロググループ
   `/ecs/<name_prefix>/audit-anchor-publisher`。
 - verify worker: タスクロールなし（AWS API を呼ばない）。secret は app シークレット
-  の `DATABASE_URL` だけで、`AUDIT_CHAIN_VERIFY_DATABASE_URL` として渡される。これは
-  `passwd_app` ロールで、app が読む全テーブルを読め、app の書き込み権限もすべて
-  持つが、worker が読むのは `tenants`、`audit_chain_anchors`、`audit_logs` だけ —
-  専用の読み取り専用ロールはフォローアップ（SC3）。ロググループ
+  の `AUDIT_CHAIN_VERIFY_DATABASE_URL` キーだけ。この URL は
+  `passwd_audit_chain_verifier` を指し、`tenants`、`audit_chain_anchors`、
+  `audit_logs` の 11 カラムに対するカラム単位の `SELECT` だけを持つ
+  （マイグレーション `20261114000400_audit_chain_verifier_role`。接続数上限は 10、
+  worker のプールは 2）。bootstrap はこのロールのパスワードを URL の userinfo から
+  取るため、両者は食い違わない。worker は本番でこのキーがないと起動を拒否する
+  （`DATABASE_URL` へのフォールバックなし）。ロググループ
   `/ecs/<name_prefix>/audit-chain-verify-worker`。
 - 両ロググループは RLS bypass レポートのメトリクスフィルタ対象。
 - クラスタは ECS Exec のセッションログを明示的に `NONE` にしている: bootstrap の

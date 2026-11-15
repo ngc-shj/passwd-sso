@@ -77,7 +77,7 @@ grep -rhoE 'ALTER TABLE "[a-z_]+" ENABLE ROW LEVEL SECURITY' prisma/migrations/ 
 | `webauthn_credentials` |
 
 `system_settings` (added in `prisma/migrations/20260502000000_audit_anchor_publisher_phase2/migration.sql`)
-uses a bypass-only policy — `USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on')` — rather
+uses a bypass-only policy — `USING ((SELECT rls_bypass_admits('system_settings')))`, which also requires `system_settings` in the bypass's `app.bypass_tables` — rather
 than a `tenant_id = current_setting('app.tenant_id')` policy, because the table has no per-tenant rows (it is
 a global key-value store for publisher state). All other tables use the standard tenant-scoped policy shape.
 
@@ -95,13 +95,14 @@ built with `defineGrant(purpose, models)`. `withBypassRls(prisma, fn, grant)` an
 `app.bypass_tables` GUC, and every RLS policy admits a bypassed row only through
 `public.rls_bypass_admits('<its own table>')`.
 
-- **Runtime (database), report mode:** a bypassed statement that examines a row of a table outside
-  its grant is admitted, and the database raises
-  `WARNING rls_bypass_not_granted table=<t> purpose=<p>`. The pool listener in
-  `src/lib/db/pool-factory.ts` logs it as `_logType: "rls.bypass_not_granted"`, and CloudWatch
-  counts it (`RlsBypassNotGranted`). Refusing such a statement (enforce mode) is a separate,
-  later step (#911). Until then the grant is observed, not enforced. A statement that examines no
-  row raises nothing. FK cascades, and `SECURITY DEFINER` bodies owned by an RLS-exempt role, are
+- **Runtime (database), enforcing:** a bypassed statement that examines a row of a table outside
+  its grant raises
+  `WARNING rls_bypass_not_granted table=<t> purpose=<p>` and is then refused with SQLSTATE 42501
+  (`RLS_BYPASS_NOT_GRANTED: <t>`), because `public.rls_bypass_enforced()` returns true. The pool
+  listener in `src/lib/db/pool-factory.ts` logs the WARNING as
+  `_logType: "rls.bypass_not_granted"`, and CloudWatch counts it (`RlsBypassNotGranted`). A statement
+  that examines no row raises nothing. FK cascades, and the other cases listed in
+  [security-review.md](./security-review.md) section 1 ("Not covered by the enforcement"), are
   outside this control.
 - **Static (CI), `scripts/checks/check-bypass-rls.mjs`:** a limited, development-time aid.
   1. **File allowlist** (`ALLOWED_USAGE`): a file may call `withBypassRls` only if it is listed.
@@ -138,7 +139,7 @@ call site legitimately needs to see across tenant boundaries:
 
 ## Worker roles and grants
 
-Three non-application Postgres login roles exist alongside the interactive `passwd_app` role, each
+Four non-application Postgres login roles exist alongside the interactive `passwd_app` role, each
 scoped to the minimum privileges its worker needs, plus one retired role that holds nothing (below).
 All are `NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE` —
 RLS is enforced for every one of them; a worker that needs to see across tenants sets
@@ -241,6 +242,31 @@ audits it on every ECS deploy (`AUDITED_ROLES`, including `ROLEATTR … rolcanlo
 | `tenants` | `SELECT` | chain-enabled tenant enumeration (`audit-anchor-publisher.ts`, under the `AUDIT_ANCHOR_PUBLISH` grant) |
 | `audit_outbox` | `INSERT` | enqueue SYSTEM-attributed publish-event audit rows |
 | `system_settings` | `SELECT, INSERT, UPDATE` | publish-state key-value storage (deployment-ID guard, pause bookkeeping) |
+
+### `passwd_audit_chain_verifier` (audit-chain verify worker)
+
+Migration: `prisma/migrations/20261114000400_audit_chain_verifier_role/migration.sql`. A `LOGIN`
+role: the audit-chain verify worker connects as it (`AUDIT_CHAIN_VERIFY_DATABASE_URL`). The
+migration creates it `NOLOGIN` with connection limit 10; the Docker initdb
+(`infra/postgres/initdb/05-create-audit-chain-verifier-role.sql`) and, on RDS,
+`scripts/bootstrap-rds-roles.mjs` give it `LOGIN` and its password. `scripts/audit-db-grants.mjs`
+audits it on every ECS deploy (`AUDITED_ROLES`).
+
+It holds no table-level privilege. Granted to it by name: column-level `SELECT`, and `EXECUTE` on
+`rls_bypass_enforced()` and `rls_bypass_admits(text)`:
+
+| Table | Columns (`SELECT`) | Reason |
+| --- | --- | --- |
+| `tenants` | `id` | tenant enumeration |
+| `audit_chain_anchors` | `tenant_id`, `chain_seq`, `prev_hash` | the chain head to verify up to |
+| `audit_logs` | `id`, `tenant_id`, `created_at`, `chain_seq`, `event_hash`, `chain_prev_hash`, `metadata` | the hashed payload and the chain links |
+
+The role bounds tables, columns and table writes, not tenant scope: it sets the bypass GUCs itself
+and then reads those columns, `metadata` included, for every tenant. It keeps what PostgreSQL
+grants `PUBLIC` (temporary tables, large objects, `NOTIFY`, advisory locks) and `EXECUTE` on the
+schema's `SECURITY INVOKER` functions that `PUBLIC` may call (trigger functions and
+`resolve_tenant_id_from_row`), which run with the role's own privileges.
+`scripts/checks/db-grants-manifest.json` is the complete list.
 
 ### `passwd_dcr_cleanup_worker` (retired)
 

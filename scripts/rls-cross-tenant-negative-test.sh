@@ -2,12 +2,14 @@
 # rls-cross-tenant-negative-test.sh — gate self-check
 #
 # Runs a Case 0 pre-flight calibration (canonical policy → exit 0) plus
-# 16 distinct failure shapes to verify the cross-tenant verify SQL correctly
-# detects each: cases 1-14 mutate an ephemeral throwaway table's own policy;
-# cases 15-16 ALTER the REAL tenants_tenant_isolation policy itself (there is
-# no throwaway stand-in for `tenants`) and run only with
+# 19 distinct failure shapes to verify the cross-tenant verify SQL correctly
+# detects each: cases 1-14 and 17-18 mutate an ephemeral throwaway table's own
+# policy; cases 15-16 ALTER the REAL tenants_tenant_isolation policy itself
+# (there is no throwaway stand-in for `tenants`) and case 19 replaces the REAL
+# public.rls_bypass_enforced(); they run only with
 # RLS_NEGATIVE_MUTATE_REAL_POLICY=1, which only the CI rls job sets — locally
-# they SKIP rather than mutate a shared/persistent dev DB's tenants policy.
+# they SKIP rather than mutate a shared/persistent dev DB's tenants policy or
+# bypass mode.
 #   0. canonical policy + correct manifest (sanity: harness calibrated)
 #   1. permissive symmetric → [E-RLS-COUNT-A]
 #   2. asymmetric USING/WITH CHECK → [E-RLS-SYM]
@@ -25,6 +27,9 @@
 #   14. the same cast commuted to the left of `=` → [E-RLS-TENANT-INITPLAN]
 #   15. tenants_tenant_isolation's tenant branch dropped (#923) → [E-RLS-TENANTS-SEED]
 #   16. tenants_tenant_isolation admits every row (#923) → [E-RLS-TENANTS]
+#   17. bypass call is the second OR arm, tenant arm first (#921) → [E-RLS-ARM-ORDER]
+#   18. a withheld table is admitted instead of refused (#921) → [E-RLS-REFUSAL]
+#   19. rls_bypass_enforced() returns false, restored in the case (#921) → [E-RLS-ENFORCED]
 #
 # Codes NOT exercised here (acceptable coverage gaps):
 #   - [E-RLS-COUNT-B]: structurally identical to [E-RLS-COUNT-A] (Block 3 mirrors Block 2).
@@ -106,9 +111,22 @@ cleanup() {
         WITH CHECK ($TENANTS_POLICY_CHECK_SNAPSHOT);
     " >/dev/null 2>&1 || true
   fi
+  # Case 19 fallback: it replaces the REAL public.rls_bypass_enforced() with a
+  # function returning false. If the script exited between that and the case's
+  # own restore, put the migration's definition back so a crashed run never
+  # leaves the database in report mode. No-op (same text back) otherwise.
+  if [[ -n "${MIG_URL:-}" && "${ENFORCED_MUTATED:-0}" == "1" ]]; then
+    psql_safe "$MIG_URL" -v ON_ERROR_STOP=0 -q -c "$RESTORE_ENFORCED_SQL" >/dev/null 2>&1 || true
+  fi
   # Last: the DROP above authenticates through the passfile.
   psql_safe_cleanup
 }
+# The definition of the migration 20261114000500_rls_bypass_enforce, and the
+# same function returning false: the only statements of this script that touch
+# the mode, both inside case 19.
+RESTORE_ENFORCED_SQL="CREATE OR REPLACE FUNCTION public.rls_bypass_enforced() RETURNS boolean LANGUAGE sql IMMUTABLE PARALLEL SAFE AS \$\$ SELECT true \$\$"
+UNENFORCE_SQL="CREATE OR REPLACE FUNCTION public.rls_bypass_enforced() RETURNS boolean LANGUAGE sql IMMUTABLE PARALLEL SAFE AS \$\$ SELECT false \$\$"
+ENFORCED_MUTATED=0
 trap cleanup EXIT INT TERM
 psql_safe_url MIG_URL "$MIGRATION_DATABASE_URL"
 psql_safe_url APP_URL "$APP_DATABASE_URL"
@@ -438,6 +456,44 @@ run_negative_case 14 \
   "[E-RLS-TENANT-INITPLAN]" \
   "no" || total_failures=$((total_failures + 1))
 
+# Case 17: the bypass call is the second arm, the tenant arm first, in a
+# symmetric policy (so [E-RLS-SYM] passes). The call is still named and in a
+# sub-SELECT ([E-RLS-BYPASS-TABLE] passes) → Block 1 [E-RLS-ARM-ORDER].
+run_negative_case 17 \
+  "CREATE POLICY rls_negative_test_tenant_isolation ON rls_negative_test FOR ALL USING (tenant_id = (SELECT current_setting('app.tenant_id', true)::uuid) OR (SELECT public.rls_bypass_admits('rls_negative_test'))) WITH CHECK (tenant_id = (SELECT current_setting('app.tenant_id', true)::uuid) OR (SELECT public.rls_bypass_admits('rls_negative_test')))" \
+  "[E-RLS-ARM-ORDER]" \
+  "no" || total_failures=$((total_failures + 1))
+
+# Case 18: a policy that admits under a bypass whose grant withholds the table
+# instead of reaching the grant check. Its first arm names the call (so
+# [E-RLS-BYPASS-TABLE] and [E-RLS-ARM-ORDER] pass) but only evaluates it when
+# the grant names the table; its second arm admits whenever any grant is set.
+# Blocks 2-4 behave as for a canonical policy, so Block 4b's withheld-table
+# sub-block sees no exception → [E-RLS-REFUSAL]. Custom helper: the withheld
+# table's region raises no WARNING, which rls_verify_check would report before
+# the code is matched.
+run_case_18_not_refused() {
+  local arms="((SELECT public.rls_bypass_admits('rls_negative_test') WHERE current_setting('app.bypass_tables', true) ~ 'rls_negative_test') OR current_setting('app.bypass_tables', true) <> '' OR tenant_id = (SELECT current_setting('app.tenant_id', true)::uuid))"
+  psql_safe "$MIG_URL" -v ON_ERROR_STOP=1 -q \
+    -c "DROP POLICY IF EXISTS rls_negative_test_tenant_isolation ON rls_negative_test; CREATE POLICY rls_negative_test_tenant_isolation ON rls_negative_test FOR ALL USING $arms WITH CHECK $arms;"
+  local expected_tables="${manifest_entries},rls_negative_test"
+  local out ec
+  out=$(psql_safe "$APP_URL" -v ON_ERROR_STOP=1 \
+    -v expected_tables="$expected_tables" \
+    -f "$VERIFY_SQL" 2>&1) && ec=0 || ec=$?
+  if (( ec == 0 )); then
+    printf 'FAIL case 18: verify exited 0 with a policy that admits a withheld table — gate is broken\n'
+    return 1
+  fi
+  if ! grep -qF -- "[E-RLS-REFUSAL]" <<<"$out"; then
+    printf 'FAIL case 18: verify failed but expected code [E-RLS-REFUSAL] not found in output:\n%s\n' "$out"
+    return 1
+  fi
+  assert_only_expected_code "$out" "[E-RLS-REFUSAL]" 18 || return 1
+  printf 'PASS case 18 (matched [E-RLS-REFUSAL])\n'
+}
+run_case_18_not_refused || total_failures=$((total_failures + 1))
+
 # Cases 15 and 16 ALTER the REAL tenants_tenant_isolation policy (#923) — there
 # is no throwaway stand-in for `tenants`. Each keeps USING and WITH CHECK
 # identical and keeps the bypass sub-SELECT, so Block 1's [E-RLS-SYM] /
@@ -525,7 +581,7 @@ run_tenants_policy_case() {
 }
 
 # Cases 15/16 mutate the REAL tenants policy (case 16 opens every tenant row to
-# a no-context session), so they need an explicit opt-in that only the CI rls
+# a no-context session) and case 19 the REAL enforce mode, so they need an explicit opt-in that only the CI rls
 # job sets: a crashed run between an ALTER and its restore on a shared or
 # persistent dev DB would leave the live tenants table running a broken
 # policy, and CI=true alone is commonly exported locally. The trap's fallback
@@ -535,10 +591,10 @@ run_tenants_policy_case() {
 # variable cannot report "examined nothing" as green.
 if [[ "${RLS_NEGATIVE_MUTATE_REAL_POLICY:-}" != "1" ]]; then
   if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
-    printf 'FAIL cases 15/16: RLS_NEGATIVE_MUTATE_REAL_POLICY=1 is not set in CI\n'
+    printf 'FAIL cases 15/16/19: RLS_NEGATIVE_MUTATE_REAL_POLICY=1 is not set in CI\n'
     total_failures=$((total_failures + 1))
   else
-    printf 'SKIP cases 15/16: tenants-policy mutation cases need RLS_NEGATIVE_MUTATE_REAL_POLICY=1 (CI only)\n'
+    printf 'SKIP cases 15/16/19: tenants-policy and enforce-mode mutation cases need RLS_NEGATIVE_MUTATE_REAL_POLICY=1 (CI only)\n'
   fi
 else
   # Snapshot the canonical tenants policy text ONCE, before either case.
@@ -602,6 +658,46 @@ else
       else
         printf 'SKIP case 16: case 15 left the tenants policy restore unverified — refusing a further mutation on top of it\n'
       fi
+
+      # Case 19: public.rls_bypass_enforced() returns false (report mode) →
+      # Block 1 [E-RLS-ENFORCED], before any block that would run bypassed
+      # statements. Replaces the REAL function, so it is gated like 15/16 and
+      # restores in the same case; the trap restores if the script dies in
+      # between. The throwaway policy is reset to canonical first (cases 17
+      # and 18 left theirs mutated), so [E-RLS-ARM-ORDER] cannot fire first.
+      run_case_19_enforced() {
+        psql_safe "$MIG_URL" -v ON_ERROR_STOP=1 -q \
+          -c "DROP POLICY IF EXISTS rls_negative_test_tenant_isolation ON rls_negative_test; $CANONICAL_POLICY_SQL;"
+        ENFORCED_MUTATED=1
+        psql_safe "$MIG_URL" -v ON_ERROR_STOP=1 -q -c "$UNENFORCE_SQL"
+        local out ec
+        out=$(psql_safe "$APP_URL" -v ON_ERROR_STOP=1 \
+          -v expected_tables="${manifest_entries},rls_negative_test" \
+          -f "$VERIFY_SQL" 2>&1) && ec=0 || ec=$?
+        # Restore IMMEDIATELY, before any assertion below can return early.
+        psql_safe "$MIG_URL" -v ON_ERROR_STOP=1 -q -c "$RESTORE_ENFORCED_SQL"
+        ENFORCED_MUTATED=0
+        local restored
+        restored=$(psql_safe "$MIG_URL" -v ON_ERROR_STOP=1 -q -t -A -c "
+          SELECT public.rls_bypass_enforced() AND p.provolatile = 'i' AND p.proparallel = 's'
+          FROM pg_catalog.pg_proc p WHERE p.oid = 'public.rls_bypass_enforced()'::regprocedure;
+        ")
+        if [[ "$restored" != "t" ]]; then
+          printf 'FAIL case 19: public.rls_bypass_enforced() is not true, IMMUTABLE and PARALLEL SAFE after the restore (got %s)\n' "$restored"
+          return 1
+        fi
+        if (( ec == 0 )); then
+          printf 'FAIL case 19: verify exited 0 with rls_bypass_enforced() returning false — gate is broken\n'
+          return 1
+        fi
+        if ! grep -qF -- "[E-RLS-ENFORCED]" <<<"$out"; then
+          printf 'FAIL case 19: verify failed but expected code [E-RLS-ENFORCED] not found in output:\n%s\n' "$out"
+          return 1
+        fi
+        assert_only_expected_code "$out" "[E-RLS-ENFORCED]" 19 || return 1
+        printf 'PASS case 19 (matched [E-RLS-ENFORCED])\n'
+      }
+      run_case_19_enforced || total_failures=$((total_failures + 1))
     fi
   fi
 fi

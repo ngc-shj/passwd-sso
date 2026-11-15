@@ -326,7 +326,11 @@ resource "aws_ecs_task_definition" "migrate" {
       name      = "migrate"
       image     = var.app_image
       essential = true
-      # Migrate, then AUDIT the resulting DB grants in the same task. The audit
+      # Preflight, migrate, then AUDIT the resulting DB grants in the same task.
+      # The preflight runs FIRST: it refuses, before any migration is applied, a
+      # pending RLS-enforce migration the operator has not attested
+      # (RLS_ENFORCE_ATTESTED, forwarded by deploy.sh and never defaulted here).
+      # The audit
       # needs a SUPERUSER connection and the RDS SG admits only the ECS SG, so
       # this task is the sole place it can run — and running it here means a
       # migration that granted more than db-grants-manifest.json sanctions fails
@@ -334,7 +338,7 @@ resource "aws_ecs_task_definition" "migrate" {
       # `set -e` via sh -c so a non-zero audit propagates as the task exit code.
       command = [
         "sh", "-c",
-        "set -e; npx prisma migrate deploy; node scripts/audit-db-grants.mjs"
+        "set -e; node scripts/rls-enforce-preflight.mjs; npx prisma migrate deploy; node scripts/audit-db-grants.mjs"
       ]
       logConfiguration = {
         logDriver = "awslogs"
@@ -749,11 +753,11 @@ resource "aws_ecs_task_definition" "audit_chain_verify_worker" {
           awslogs-stream-prefix = "ecs"
         }
       }
-      # Connects as passwd_app (the app secret's DATABASE_URL), which reads
-      # every table, not only the chain — a dedicated read-only role is a
-      # follow-up.
+      # Connects as passwd_audit_chain_verifier (the app secret's
+      # AUDIT_CHAIN_VERIFY_DATABASE_URL), which reads eleven columns of three
+      # tables and writes to none.
       secrets = [
-        { name = "AUDIT_CHAIN_VERIFY_DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:DATABASE_URL::" },
+        { name = "AUDIT_CHAIN_VERIFY_DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUDIT_CHAIN_VERIFY_DATABASE_URL::" },
       ]
     }
   ])

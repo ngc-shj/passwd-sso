@@ -237,7 +237,12 @@ async function handlePOST(request: NextRequest) {
       tx.delegationSession.deleteMany({
         where: { id: delegationSession.id, revokedAt: null },
       }),
-    BYPASS_GRANT.DELEGATION_SESSION_LOOKUP).catch(() => {});
+    BYPASS_GRANT.DELEGATION_SESSION_LOOKUP).catch((rollbackErr) => {
+      getLogger().error(
+        { error: errorLogFields(rollbackErr), sessionId: delegationSession.id, userId },
+        "delegation.create.rollback_delete_failed",
+      );
+    });
     return errorResponse(API_ERROR.DELEGATION_STORE_FAILED);
   }
 
@@ -275,7 +280,7 @@ async function handlePOST(request: NextRequest) {
         }),
       BYPASS_GRANT.DELEGATION_SESSION_LOOKUP);
     } catch (err) {
-      getLogger().warn(
+      getLogger().error(
         { error: errorLogFields(err), oldSessionId: existingSession.id, userId },
         "delegation.create.revoke_old_db_failed",
       );

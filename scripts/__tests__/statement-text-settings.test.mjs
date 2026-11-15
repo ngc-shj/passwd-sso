@@ -42,6 +42,7 @@ describe("statement-text settings", () => {
     "01-create-jackson-db.sql",
     "02-create-app-role.sql",
     "04-create-retention-gc-worker-role.sql",
+    "05-create-audit-chain-verifier-role.sql",
   ])("infra/postgres/initdb/%s sets exactly the list, in order", (f) => {
     const src = readFileSync(join(REPO_ROOT, "infra/postgres/initdb", f), "utf8");
     expect(setLines(src)).toEqual(LIST);

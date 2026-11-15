@@ -74,8 +74,8 @@ single `terraform apply` cannot satisfy on its own:
   their endpoints + the AWS-managed RDS master password are known.
 - **RDS does NOT run the `infra/postgres/initdb/*.sql` scripts** (those are for
   the Docker Postgres image only), so the least-privilege roles — `passwd_app`,
-  `passwd_outbox_worker`, `passwd_retention_gc_worker`, `passwd_anchor_publisher`
-  — must be created manually on RDS. `passwd_app` must exist BEFORE `prisma migrate deploy`, because some
+  `passwd_outbox_worker`, `passwd_retention_gc_worker`, `passwd_anchor_publisher`,
+  `passwd_audit_chain_verifier` — must be created manually on RDS. `passwd_app` must exist BEFORE `prisma migrate deploy`, because some
   migrations conditionally GRANT/REVOKE privileges to it.
 - The app/worker services start their tasks as soon as they exist, so their
   secrets and roles must be ready first.
@@ -112,8 +112,8 @@ MASTER_PW=$(aws secretsmanager get-secret-value --secret-id "$MASTER_ARN" \
 # Push the image (step 3), then inject ALL secret values built from the above:
 #   app-secrets.json: DATABASE_URL (passwd_app@$DB_HOST), MIGRATION_DATABASE_URL
 #   (master@$DB_HOST), REDIS_URL ($REDIS_HOST), OUTBOX_WORKER_DATABASE_URL,
-#   RETENTION_GC_DATABASE_URL, AUDIT_ANCHOR_PUBLISHER_DATABASE_URL (password from
-#   `openssl rand -hex 32`), the publisher's AUDIT_ANCHOR_SIGNING_KEY,
+#   RETENTION_GC_DATABASE_URL, AUDIT_ANCHOR_PUBLISHER_DATABASE_URL and
+#   AUDIT_CHAIN_VERIFY_DATABASE_URL (passwords from `openssl rand -hex 32`), the publisher's AUDIT_ANCHOR_SIGNING_KEY,
 #   AUDIT_ANCHOR_TAG_SECRET and DEPLOYMENT_ID (see "Audit anchor publisher"),
 #   plus the app secrets (AUTH_*, SHARE_MASTER_KEY, SESSION_TOKEN_HMAC_KEY, …).
 scripts/put-terraform-secrets.sh --name-prefix passwd-sso-prod \
@@ -211,16 +211,18 @@ aws ecs execute-command --cluster "$CLUSTER" --task "$TASK" \
   --container migrate --interactive --command "/bin/sh" --region <region>
 ```
 
-Inside the shell, export the four role passwords (the SAME values used to build
-the `DATABASE_URL`, `OUTBOX_WORKER_DATABASE_URL`, `RETENTION_GC_DATABASE_URL` and
-`AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` secrets injected in Phase B) and run the
-bootstrap script. It exits before connecting if any of the four is unset:
+Inside the shell, export the five role passwords (the SAME values used to build
+the `DATABASE_URL`, `OUTBOX_WORKER_DATABASE_URL`, `RETENTION_GC_DATABASE_URL`,
+`AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` and `AUDIT_CHAIN_VERIFY_DATABASE_URL`
+secrets injected in Phase B) and run the bootstrap script. It exits before
+connecting if any of the five is unset:
 
 ```sh
 export PASSWD_APP_PASSWORD='…'
 export PASSWD_OUTBOX_WORKER_PASSWORD='…'
 export PASSWD_RETENTION_GC_WORKER_PASSWORD='…'
 export PASSWD_ANCHOR_PUBLISHER_PASSWORD='…'
+export PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD='…'
 node scripts/bootstrap-rds-roles.mjs   # idempotent; MIGRATION_DATABASE_URL is already in env
 ```
 
@@ -424,6 +426,7 @@ userinfo of that URL — the secret is its only copy.
 | `SMTP_USER` | SMTP username for magic-link email. Read only when `smtp_host` is set and `smtp_auth_enabled = true`; an empty string means an unauthenticated relay (ECS refuses a missing key). |
 | `SMTP_PASS` | SMTP password, under the same conditions as `SMTP_USER`. |
 | `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` | Least-privilege DB URL for the audit-anchor publisher ECS service (`passwd_anchor_publisher` role). `bootstrap-rds-roles.mjs` gives the role `LOGIN` with this password; the secret is its only copy. |
+| `AUDIT_CHAIN_VERIFY_DATABASE_URL` | Read-only DB URL for the audit-chain verify worker ECS service (`passwd_audit_chain_verifier` role: column-level `SELECT` on eleven columns, no write). Required: the worker refuses to start in production without it, and the task's secret reference fails to resolve when the key is absent, so the previous task keeps running. `bootstrap-rds-roles.mjs` gives the role `LOGIN` with this password; the secret is its only copy. |
 | `AUDIT_ANCHOR_SIGNING_KEY` | Ed25519 seed the publisher signs manifests with (32-byte hex). Mapped into the publisher task only. Generate with `npm run generate:audit-anchor-signing-key`. |
 | `AUDIT_ANCHOR_TAG_SECRET` | HMAC secret for tenant tags in manifests (32-byte hex). Mapped into the publisher task only. Generate with `npm run generate:audit-anchor-tag-secret`. |
 | `DEPLOYMENT_ID` | UUID naming this deployment in every manifest; the publisher refuses to boot when it differs from the one stored on its first boot. Generate once per deployment; reuse a stored value only for a successor of the same deployment whose predecessor is gone — a clone or a restored copy gets a new one. Mapped into the publisher task, and into the retention-gc worker while `retention_gc_blob_sweep_mode` is not `off` (the orphan sweep's bucket marker holds it). |
@@ -533,11 +536,13 @@ created without Object Lock needs an in-place step before the next plan — see
   boundary only if it is unpublished. Log group
   `/ecs/<name_prefix>/audit-anchor-publisher`.
 - Verify worker: no task role (it calls no AWS API); its only secret is the app
-  secret's `DATABASE_URL`, passed as `AUDIT_CHAIN_VERIFY_DATABASE_URL`. That is
-  the `passwd_app` role, which reads every table the app reads and keeps every
-  write the app has, though the worker reads only `tenants`,
-  `audit_chain_anchors` and `audit_logs` — a dedicated read-only role is a
-  follow-up (SC3). Log group `/ecs/<name_prefix>/audit-chain-verify-worker`.
+  secret's `AUDIT_CHAIN_VERIFY_DATABASE_URL` key. That URL names
+  `passwd_audit_chain_verifier`, which holds column-level `SELECT` on eleven
+  columns of `tenants`, `audit_chain_anchors` and `audit_logs` and nothing else
+  (migration `20261114000400_audit_chain_verifier_role`; its connection limit is
+  10 and the worker's pool holds 2). The bootstrap takes that role's password
+  from the URL's userinfo, so the two cannot differ. The worker refuses to start
+  in production without the key (no `DATABASE_URL` fallback). Log group `/ecs/<name_prefix>/audit-chain-verify-worker`.
 - Both log groups are in the RLS bypass-report metric filters.
 - The cluster sets ECS Exec session logging to `NONE` explicitly: the bootstrap's
   operator shell handles role passwords, and a transcript would keep them. The

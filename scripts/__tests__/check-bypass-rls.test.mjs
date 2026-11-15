@@ -4077,14 +4077,38 @@ describe("function rule: routines are created in migrations", () => {
     expect(stdout).toContain("check-bypass-rls: OK");
   });
 
-  it("passes the negative test's Case 9 probe and a gate fixture string, and nothing else there", () => {
+  it("passes the negative test's Case 9 probe and Case 19 replacement and a gate fixture string, and nothing else there", () => {
     const negative = "scripts/rls-cross-tenant-negative-test.sh";
-    const probe = "psql <<SQL\n    CREATE OR REPLACE FUNCTION rls_negative_secdef_probe() RETURNS int AS \\$\\$ SELECT 1 \\$\\$ LANGUAGE sql SECURITY DEFINER;\nSQL\n";
+    // Both entries must match something: an allowlist entry that matches nothing fails the run.
+    const probe = "psql <<SQL\n    CREATE OR REPLACE FUNCTION rls_negative_secdef_probe() RETURNS int AS \\$\\$ SELECT 1 \\$\\$ LANGUAGE sql SECURITY DEFINER;\nSQL\npsql -c \"CREATE OR REPLACE FUNCTION public.rls_bypass_enforced() RETURNS boolean AS 'SELECT false' LANGUAGE sql\"\n";
     const allowed = runMulti([[negative, probe], ["scripts/__tests__/zz.test.mjs", `export const s = "CREATE FUNCTION fixture() RETURNS int";`]]);
     expect(allowed.code, allowed.stderr).toBe(0);
     const other = runMulti([[negative, `${probe}psql -c "CREATE FUNCTION another() RETURNS int AS 'SELECT 1' LANGUAGE sql"\n`]]);
     expect(other.code).toBe(1);
-    expect(other.stderr).toContain(`${negative}:4  creates another`);
+    expect(other.stderr).toContain(`${negative}:5  creates another`);
+  });
+});
+
+describe("function rule: the enforce-mode function is migration-owned", () => {
+  const negative = "scripts/rls-cross-tenant-negative-test.sh";
+  const probe = "psql -c \"CREATE OR REPLACE FUNCTION rls_negative_secdef_probe() RETURNS int AS 'SELECT 1' LANGUAGE sql SECURITY DEFINER\"\n";
+  const replace = (value) => `psql -c "CREATE OR REPLACE FUNCTION public.rls_bypass_enforced() RETURNS boolean AS 'SELECT ${value}' LANGUAGE sql"\n`;
+
+  it("passes the negative test's Case 19 replacement of it, false and restored", () => {
+    const { code, stderr } = runMulti([[negative, probe + replace("false") + replace("true")]]);
+    expect(code, stderr).toBe(0);
+  });
+
+  it.each([
+    ["another script", "scripts/zz-flip.sh"],
+    ["application code", "src/lib/zz/flip.ts"],
+    ["a workflow", ".github/workflows/zz.yml"],
+  ])("refuses replacing it from %s", (_label, path) => {
+    const text = path.endsWith(".ts") ? `export const q = "CREATE OR REPLACE FUNCTION public.rls_bypass_enforced() RETURNS boolean AS 'SELECT true' LANGUAGE sql";` : replace("true");
+    const { code, stderr } = runMulti([[path, text]]);
+    expect(code, stderr).toBe(1);
+    expect(stderr).toContain("a routine is created outside prisma/migrations");
+    expect(stderr).toContain(`${path}:1  creates`);
   });
 
   it("names a schema-qualified routine by its own name, not its schema", () => {
@@ -4095,7 +4119,8 @@ describe("function rule: routines are created in migrations", () => {
 
   it("admits a schema-qualified CREATE of an allowlisted routine in its allowlisted file", () => {
     const negative = "scripts/rls-cross-tenant-negative-test.sh";
-    const probe = "psql <<SQL\n    CREATE OR REPLACE FUNCTION public.rls_negative_secdef_probe() RETURNS int AS \\$\\$ SELECT 1 \\$\\$ LANGUAGE sql SECURITY DEFINER;\nSQL\n";
+    // Both routines the allowlist names for this file: an entry that matches nothing fails the run.
+    const probe = "psql <<SQL\n    CREATE OR REPLACE FUNCTION public.rls_negative_secdef_probe() RETURNS int AS \\$\\$ SELECT 1 \\$\\$ LANGUAGE sql SECURITY DEFINER;\n    CREATE OR REPLACE FUNCTION public.rls_bypass_enforced() RETURNS boolean LANGUAGE sql AS \\$\\$ SELECT false \\$\\$;\nSQL\n";
     const { code, stderr } = runMulti([[negative, probe]]);
     expect(code, stderr).toBe(0);
   });

@@ -115,13 +115,55 @@ try {
   const { rows: exec } = await probe.query<{ role: string }>(
     `SELECT r.rolname AS role
        FROM pg_roles r
-      WHERE (r.rolname = current_user OR r.rolname IN ('passwd_app', 'passwd_outbox_worker', 'passwd_retention_gc_worker'))
+      WHERE (r.rolname = current_user OR r.rolname IN ('passwd_app', 'passwd_outbox_worker', 'passwd_retention_gc_worker', 'passwd_anchor_publisher', 'passwd_audit_chain_verifier'))
         AND NOT (has_function_privilege(r.rolname, 'public.rls_bypass_admits(text)', 'EXECUTE')
              AND has_function_privilege(r.rolname, 'public.rls_bypass_enforced()', 'EXECUTE'))`,
   );
   if (exec.length > 0) {
     throw new Error(
       `role(s) lacking EXECUTE on public.rls_bypass_admits / rls_bypass_enforced: ${exec.map((r) => r.role).join(", ")}`,
+    );
+  }
+  // The suite is the enforce pass (#921): a bypass that reaches a table outside
+  // its grant must be refused, so a database still in report mode would turn
+  // every refusal cell into a vacuous or failing one.
+  const { rows: mode } = await probe.query<{ enforced: boolean }>(
+    `SELECT public.rls_bypass_enforced() AS enforced`,
+  );
+  if (mode[0]?.enforced !== true) {
+    throw new Error(
+      `Refusing to run integration tests: public.rls_bypass_enforced() is not true on this database ` +
+        `(report mode). Apply the pending migrations with \`npx prisma migrate deploy\`, then re-run.`,
+    );
+  }
+  // Seeding goes through the superuser and assertions through the role clients;
+  // a role URL naming another database would run them against different data.
+  const { allRoleConnectionStrings } = await import("./helpers");
+  const { roleUrlMismatches } = await import("./role-url-consistency");
+  const { superuser, ...roleUrls } = allRoleConnectionStrings();
+  if (process.env.RLS_GRANT_EVIDENCE_FILE) {
+    // The attributes of every role the harness connects as, for the evidence
+    // consumer to tell a restricted connection from an exempt one.
+    const { HARNESS_ROLES } = await import("../../../scripts/checks/check-rls-grant-evidence");
+    const { ROLE_ATTRIBUTES_SQL, connectionUser, recordRoleAttributes } = await import("./rls-grant-evidence-recorder");
+    const names = new Set<string>([
+      ...HARNESS_ROLES,
+      ...Object.values({ superuser, ...roleUrls }).map(connectionUser),
+      new URL(databaseUrl).username,
+    ]);
+    const { rows: attrs } = await probe.query(ROLE_ATTRIBUTES_SQL, [[...names]]);
+    recordRoleAttributes(attrs);
+  }
+  // DATABASE_URL itself too: `@/lib/prisma` and the enforcing-mode probe use it,
+  // and with APP_DATABASE_URL set no role URL is derived from it.
+  const mismatched = roleUrlMismatches(superuser, { DATABASE_URL: databaseUrl, ...roleUrls });
+  if (mismatched.length > 0) {
+    throw new Error(
+      [
+        `Refusing to run integration tests: a role's connection string names a different host, port or database than the superuser one:`,
+        ...mismatched.map((m) => `  ${m}`),
+        `Point DATABASE_URL, APP_DATABASE_URL, OUTBOX_WORKER_DATABASE_URL, RETENTION_GC_DATABASE_URL, AUDIT_ANCHOR_PUBLISHER_DATABASE_URL and AUDIT_CHAIN_VERIFY_DATABASE_URL at the same database, or unset them.`,
+      ].join("\n"),
     );
   }
 } finally {
@@ -169,6 +211,7 @@ function failOnReports(when: string): void {
 const CONCURRENT_QUERY = "client is already executing a query";
 const concurrentQueryReports: string[] = [];
 type PgClientInternals = {
+  connectionParameters?: { user?: string; options?: string };
   _activeQuery?: unknown;
   _queryQueue?: unknown[];
   pipeline?: boolean;
@@ -184,6 +227,7 @@ if (!("_activeQuery" in shape) || !Array.isArray(shape._queryQueue)) {
 const { readFileSync } = await import("node:fs");
 const { fileURLToPath } = await import("node:url");
 const { fromPrismaJoinChildren } = await import("./prisma-join-children");
+const { recordGrantEvidence } = await import("./rls-grant-evidence-recorder");
 const sourceLines = new Map<string, string[]>();
 function readSourceLine(location: string, line: number): string | null {
   const path = location.startsWith("file://") ? fileURLToPath(location) : location;
@@ -207,6 +251,7 @@ clientProto.query = function (this: PgClientInternals, ...args: unknown[]) {
     Error.stackTraceLimit = limit;
     if (!fromPrismaJoinChildren(stack, readSourceLine)) concurrentQueryReports.push(stack);
   }
+  recordGrantEvidence(this.connectionParameters, args);
   return originalQuery.apply(this, args);
 };
 // Positive control: two queries at once on one client must produce exactly one

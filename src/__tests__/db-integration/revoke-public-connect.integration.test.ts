@@ -65,6 +65,13 @@ describe("REVOKE CONNECT FROM PUBLIC (C3 migration)", () => {
     expect(rows[0].can_connect).toBe(true);
   });
 
+  it("T2: passwd_audit_chain_verifier retains explicit GRANT CONNECT", async () => {
+    const rows = await ctx.su.prisma.$queryRaw<Array<{ can_connect: boolean }>>`
+      SELECT has_database_privilege('passwd_audit_chain_verifier', current_database(), 'CONNECT') AS can_connect
+    `;
+    expect(rows[0].can_connect).toBe(true);
+  });
+
   it("T2: passwd_retention_gc_worker retains explicit GRANT CONNECT", async () => {
     const rows = await ctx.su.prisma.$queryRaw<Array<{ can_connect: boolean }>>`
       SELECT has_database_privilege('passwd_retention_gc_worker', current_database(), 'CONNECT') AS can_connect

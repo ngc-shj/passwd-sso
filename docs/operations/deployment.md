@@ -134,6 +134,87 @@ It builds/pushes an immutable git-SHA tag, runs `terraform apply
 > created at `desired_count = 0`, roles created via ECS Exec, migration run, then
 > scale up).
 
+### The migrate task: preflight and mode audit
+
+The migrate task runs `node scripts/rls-enforce-preflight.mjs; npx prisma migrate
+deploy; node scripts/audit-db-grants.mjs`, in that order.
+
+**Preflight.** While migration `20261114000500_rls_bypass_enforce` (the one that
+makes the RLS bypass enforcing) is pending on a database that already holds
+migrations, the preflight refuses before anything is applied unless the operator
+attests that the production observations the flip depends on were made. The
+attestation is the migration's directory name, exported for that one deploy:
+
+```bash
+RLS_ENFORCE_ATTESTED=20261114000500_rls_bypass_enforce ./scripts/deploy.sh
+```
+
+Any other value is refused, and so is no value: the preflight exits non-zero
+before `prisma migrate deploy` runs, so nothing is migrated, and `deploy.sh`
+stops at the migrate step with the services untouched. A fresh database (no
+migration table, or an empty one) and one that already applied the migration
+need none. `deploy.sh` forwards the variable to the migrate task only when it is
+exported; neither `deploy.sh` nor the task definition defaults it. The checklist
+the attestation stands for, and the order of the two runs on an existing
+deployment, are in "One-time upgrade: audit-chain verifier role and RLS
+enforcement".
+
+**Enforcing mode.** `public.rls_bypass_enforced()` returns true: a bypassed
+statement that examines a row of an RLS table not named in `app.bypass_tables`
+raises `WARNING rls_bypass_not_granted table=… purpose=…` and is then refused
+with SQLSTATE 42501, `RLS_BYPASS_NOT_GRANTED: <table>`. The report is still
+logged (`rls.bypass_not_granted`) and still counts on `RlsBypassNotGranted`
+(`docs/operations/alerts.md`). The `migrate` run does not leave the mode to
+chance: the audit fails when the function is absent or not true.
+
+**Un-flip.** The emergency lever for a production path refused by an incomplete
+grant. To return to report mode, run this as the migration role:
+
+```sql
+CREATE OR REPLACE FUNCTION public.rls_bypass_enforced() RETURNS boolean LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$ SELECT false $$;
+```
+
+A hand-run statement leaves no migration row, so the audit makes it visible:
+afterwards every deploy's audit fails on `RLS_ENFORCE_MODE` until the function is
+restored to `true`, or the deploy is run with a reason:
+
+```bash
+RLS_REPORT_MODE_ACK="<reason>" ./scripts/deploy.sh
+```
+
+The audit prints the reason as a `WARNING` line in the task log (one line, 200
+characters at most) and as a JSON line the `rls-report-mode-acknowledged` alarm
+counts (`docs/operations/alerts.md`), so each acknowledged deploy raises it. `--write` refuses to regenerate the manifest in report mode
+whatever is set. The un-flip removes the refusal for every bypass, not only the
+one that failed. To restore it, run the same statement with `SELECT true`: a
+deploy does not, because the flip migration is already applied and
+`prisma migrate deploy` does not re-run it. Then stop exporting
+`RLS_REPORT_MODE_ACK`: a deploy that still carries it passes, but warns and
+raises the same alarm, because a leftover acknowledgement would let a later
+un-flip pass. The change reaches other sessions
+through PostgreSQL's plan invalidation; confirm it with the canary rather than
+assuming it is immediate. The audit also fails on `CLIENT_MIN_MESSAGES_SERVER_LEVEL` when a
+server-level source (for example an RDS parameter group) sets `client_min_messages`
+to `error`, which would hide the bypass reports. It fails as well when the audit's
+own connection overrides the setting (a setting on the migration role, or
+`options=-c client_min_messages=…` in `MIGRATION_DATABASE_URL`), whatever the
+value: the server default is then unreadable.
+
+Only the ECS migrate task runs the preflight and the audit. Compose installs,
+any launcher that runs `prisma migrate deploy` directly (Vercel, GCP, Azure,
+Kubernetes, a hand-run one-off task), and `npm run db:migrate`
+(`prisma migrate dev`) run neither: their
+database flips when the migration is applied, with no attestation and no audit;
+the release is marked breaking. To un-flip a compose install:
+
+```bash
+docker compose exec -T db psql -U passwd_user -d passwd_sso -v ON_ERROR_STOP=1 -c \
+  "CREATE OR REPLACE FUNCTION public.rls_bypass_enforced() RETURNS boolean LANGUAGE sql IMMUTABLE PARALLEL SAFE AS \$\$ SELECT false \$\$"
+```
+
+and the same with `SELECT true` to restore it. Nothing on compose reports the
+state afterwards.
+
 ### Code-only release (no schema change)
 
 The migration task is idempotent (`prisma migrate deploy` is a no-op when there
@@ -184,7 +265,7 @@ secret").
 3. Run the new bootstrap through ECS Exec on the migrate task definition step 1
    just registered (`terraform output -raw migrate_task_definition_arn` now names
    it), exactly as in `infra/terraform/README.md` "Creating the DB roles on RDS",
-   with all four passwords exported.
+   with all five passwords exported.
 4. Re-run `./scripts/deploy.sh`. `prisma migrate deploy` is a no-op, the audit
    passes, and the services roll.
 
@@ -234,6 +315,129 @@ below). For any RDS deployment where an earlier bootstrap ran:
   did, keep the new secret. A connection lost during the final commit is the one
   ambiguous case: check which of the two passwords a role accepts before
   choosing.
+
+### One-time upgrade: audit-chain verifier role and RLS enforcement
+
+The release carrying migrations `20261114000400_audit_chain_verifier_role` and
+`20261114000500_rls_bypass_enforce` does two things to an existing RDS
+deployment:
+
+- the audit-chain verify worker moves from `passwd_app` to the new read-only role
+  `passwd_audit_chain_verifier`. The migration creates the role `NOLOGIN`; only
+  `scripts/bootstrap-rds-roles.mjs` gives it `LOGIN` and a password, and the
+  worker takes its URL from the app-secret key `AUDIT_CHAIN_VERIFY_DATABASE_URL`
+  (in production there is no `DATABASE_URL` fallback);
+- the second migration makes `public.rls_bypass_enforced()` return true: a bypass
+  that reaches a table outside its grant is now refused (42501) instead of
+  reported. From the moment it is applied, every task still running the previous
+  revision serves an enforcing database, and so does the rollback target.
+
+The flip is gated by an attestation (see "The migrate task: preflight and mode
+audit" above). A deploy without it is refused by the preflight before any
+migration is applied: nothing is migrated and no service is touched.
+
+#### Pre-deploy checklist (the attestation)
+
+`RLS_ENFORCE_ATTESTED` states that the operator made these observations. The
+preflight checks that the operator attested, not that the observations are true.
+
+- [ ] `RlsBypassNotGranted` (namespace `<name_prefix>/App`) was 0 over the window
+  the operator agreed on, with the `<name_prefix>-rls-bypass-not-granted` alarm
+  armed for all of it.
+- [ ] Before that window started, a positive canary was observed in each of the
+  five log groups — app, audit-outbox-worker, retention-gc-worker,
+  audit-anchor-publisher and audit-chain-verify-worker — each having both metric
+  filters (`infra/terraform/monitoring.tf`). Without it a zero proves nothing
+  (see "Canary on an enforcing database").
+- [ ] Production, and the image any rollback would return to, run at or above the
+  release carrying migration `20261019000000_rls_bypass_admits_report_mode`. Older
+  code has no report listener, so its reports reach no metric.
+- [ ] The follow-up issue `#1047` (SCIM deprovisioning and team member removal do
+  not fail or retry when revoking a session or token fails) is filed.
+- [ ] `AUDIT_CHAIN_VERIFY_DATABASE_URL` is in the app secret (step 1 below).
+
+What the window does not measure: a refusal depends on the query plan, so a plan
+change after the window can refuse a statement that never reported. The un-flip
+(above) is the recovery.
+
+#### Steps
+
+1. Add `AUDIT_CHAIN_VERIFY_DATABASE_URL` to the app secret, read-merge-write as in
+   `infra/terraform/README.md` "Adding a key to an existing app secret" (run from
+   `infra/terraform`). The URL names `passwd_audit_chain_verifier`, a new password
+   (`openssl rand -hex 32`) and the same host, database and TLS parameters as the
+   other worker URLs. The bootstrap in step 4 takes the role's password from this
+   URL's userinfo; keep the value out of the terminal's scrollback.
+2. Sign off the checklist above.
+3. Run the deploy with the attestation:
+
+   ```bash
+   RLS_ENFORCE_ATTESTED=20261114000500_rls_bypass_enforce ./scripts/deploy.sh
+   ```
+
+   Its migrate task applies the role migration and the flip, then fails the grant
+   audit because the new role is still `NOLOGIN`. By design, `deploy.sh` exits at
+   the migrate step, before any `update-service`. Read the task log as in the
+   anchor-publisher upgrade (step 2 there) and proceed only if the findings are
+   the `rolcanlogin` pair for `passwd_audit_chain_verifier` (`UNEXPECTED_GRANT:
+   ROLEATTR:passwd_audit_chain_verifier rolcanlogin false` and `MISSING_GRANT:
+   ROLEATTR:passwd_audit_chain_verifier rolcanlogin true`). **From this point the
+   previous tasks serve an enforcing database.**
+4. Run the bootstrap through ECS Exec on the migrate task definition step 3
+   registered (`infra/terraform/README.md` "Creating the DB roles on RDS"), with
+   all five passwords exported: `PASSWD_APP_PASSWORD`,
+   `PASSWD_OUTBOX_WORKER_PASSWORD`, `PASSWD_RETENTION_GC_WORKER_PASSWORD`,
+   `PASSWD_ANCHOR_PUBLISHER_PASSWORD` and `PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD`.
+5. Re-run `./scripts/deploy.sh` (no attestation is needed once the flip is
+   applied). The migration is a no-op, the audit passes and the services roll.
+   The verify worker's first heartbeat (`_logType:
+   "audit-chain-verify-heartbeat"`) should show `erroredTenantCount` 0.
+
+A fresh RDS environment needs none of this: the bootstrap runs before the first
+migration, and the preflight passes on a database with no applied migrations.
+If that first migration run stops partway, the database is no longer fresh and
+the retry is refused: export the attestation for it (there is no production
+window to observe on a new environment).
+
+**If the secret key is missing at step 5:** the verify task cannot resolve its
+secret and does not start. ECS's circuit breaker keeps the previous revision of
+the verify service (which still connects as `passwd_app`), and `deploy.sh` treats
+the settled-on-the-old-revision service as a failed deploy and restores every
+service to its pre-deploy revision. Add the key and re-run.
+
+#### Canary on an enforcing database
+
+A canary shows that a log group's metric filter counts. On an enforcing database
+the canary statement is refused, and the WARNING that precedes the refusal still
+reaches the log and counts. As `passwd_app`:
+
+```sql
+BEGIN;
+SET LOCAL app.bypass_rls = 'on';
+SET LOCAL app.bypass_tables = 'users';
+SELECT id FROM sessions LIMIT 1;   -- expect: ERROR 42501 RLS_BYPASS_NOT_GRANTED: sessions
+ROLLBACK;
+```
+
+The client also receives `WARNING: rls_bypass_not_granted table=sessions
+purpose=…` before the error. The `sessions` table must hold a row for the
+statement to examine one (a statement that examines no row raises nothing). A
+`psql` session reaches only the database; the metric counts a line a service's own
+pool logs. Per log group, run the same reach through that service's pool (for
+example a one-off task of its task definition, with a command that opens a bypass
+whose grant omits a table), then check the group:
+
+```bash
+aws logs filter-log-events --region <region> \
+  --log-group-name /ecs/<name_prefix>/<group> \
+  --filter-pattern '{ $._logType = "rls.bypass_not_granted" }'
+```
+
+`<group>` is `app`, `audit-outbox-worker`, `retention-gc-worker`,
+`audit-anchor-publisher` or `audit-chain-verify-worker`. All filters publish to the
+same undimensioned metric, so the log line, not the metric, says which group
+counted. The `<name_prefix>-rls-bypass-not-granted` alarm goes to ALARM on
+`Sum >= 1` in 5 minutes and returns to OK afterwards.
 
 ### Audit anchor publisher on ECS
 
@@ -777,6 +981,12 @@ The target image must already exist in ECR (it is a prior release — `deploy.sh
 verifies this before touching any service). It then applies with that image,
 skips the migration, advances the services, and waits for them to stabilize.
 
+A code rollback does not touch the database: it stays enforcing, and the
+previous tasks must work against that (checklist item on the rollback target).
+Un-flip only through the statement under "The migrate task: preflight and mode
+audit". The verify service's previous revision connects as `passwd_app` through
+`DATABASE_URL`, which still works.
+
 ### Schema rollback
 
 Prisma Migrate does not support automatic down migrations. To roll back a schema change:
@@ -833,6 +1043,7 @@ location ~ ^/api/(teams/[^/]+/passwords/[^/]+/(rekey|attachments(/[^/]+/migrate)
 - [ ] Build succeeds (`npm run build`)
 - [ ] Worktree clean (no uncommitted OR untracked files — `deploy.sh` rejects both)
 - [ ] `AWS_REGION`, `ECR_URL`, `TF_VAR_FILE` exported
+- [ ] A release that carries an unapplied `rls_bypass_enforce` migration: the checklist in "One-time upgrade: audit-chain verifier role and RLS enforcement" is signed off and `RLS_ENFORCE_ATTESTED` is exported
 - [ ] `deploy.sh` completed successfully (apply → migrate → roll services → services-stable)
 - [ ] Ingress limits request bodies (low default; 20 MB only on the paths in [Request Body Size Limit](#request-body-size-limit-ingress-requirement))
 - [ ] Health check passes after deployment
@@ -918,10 +1129,11 @@ The application uses these database roles with separated privileges:
 | Role | Privileges | Purpose |
 |------|-----------|---------|
 | `passwd_user` (or equivalent) | DDL-capable (`rds_superuser`-class on RDS) | Table owner, migrations (`prisma migrate deploy`), one-shot data migrations |
-| `passwd_app` (or equivalent) | NOSUPERUSER NOBYPASSRLS | App runtime (Next.js), RLS enforced. Also the audit-chain verify worker's role on ECS, which needs only reads of `tenants`, `audit_chain_anchors` and `audit_logs` but can read every table the app reads and holds every write the app has; a dedicated read-only role is a follow-up (SC3) |
+| `passwd_app` (or equivalent) | NOSUPERUSER NOBYPASSRLS | App runtime (Next.js), RLS enforced |
 | `passwd_outbox_worker` (or equivalent) | NOSUPERUSER NOBYPASSRLS; SELECT/UPDATE/DELETE on `audit_outbox`, INSERT on `audit_logs`, SELECT on `tenants` | Audit outbox drain worker (least privilege) |
 | `passwd_retention_gc_worker` (or equivalent) | NOSUPERUSER NOBYPASSRLS; scoped DELETE/SELECT on the retention-swept tables | Retention GC worker (least privilege) |
 | `passwd_anchor_publisher` | NOSUPERUSER NOBYPASSRLS; SELECT + column-scoped UPDATE on `audit_chain_anchors`, INSERT on `audit_outbox`, SELECT/INSERT/UPDATE on `system_settings`, SELECT on `tenants` | Audit-anchor publisher (least privilege) |
+| `passwd_audit_chain_verifier` | NOSUPERUSER NOBYPASSRLS; column-level SELECT on eleven columns of `tenants` (`id`), `audit_chain_anchors` and `audit_logs`, EXECUTE on the two `rls_bypass_*` functions, connection limit 10; no write to any application table or sequence (migration `20261114000400`) | Audit-chain verify worker (read-only) |
 | `passwd_dcr_cleanup_worker` | **Retired** — NOLOGIN, no password, nothing beyond `PUBLIC` (migration `20261023010000`) | None. Kept only so older dumps that name it still restore; the grant audit asserts the retired state |
 
 > **`rds_superuser` is a role MEMBERSHIP, not a role ATTRIBUTE.** On RDS the
@@ -943,11 +1155,18 @@ The application uses these database roles with separated privileges:
 > like a read of any other RLS table — never session-wide (`ALTER ROLE …
 > SET app.*` / `ALTER DATABASE … SET app.*`, which `audit-db-grants.mjs`
 > already flags as drift).
+>
+> **A bypass names its tables.** The database is enforcing: ad-hoc SQL as the
+> table owner on RDS that sets `app.bypass_rls = 'on'` must also set
+> `app.bypass_tables` to the comma-joined tables it reads or writes (no spaces,
+> e.g. `SET LOCAL app.bypass_tables = 'tenants,users'`). A bypass with no
+> `app.bypass_tables`, or one that omits a table the statement examines, is
+> refused with 42501.
 
 On AWS RDS these roles are NOT auto-created (the `infra/postgres/initdb/*.sql`
 scripts run only on the Docker Postgres image) — create them during bootstrap,
 before the first migration, with `scripts/bootstrap-rds-roles.mjs`, which
-converges the four login roles above (not `passwd_user`, not the retired DCR
+converges the five login roles above (not `passwd_user`, not the retired DCR
 role). See `infra/terraform/README.md` "First-time bootstrap".
 
 ### Ownership of role attributes vs table ACLs
@@ -958,7 +1177,7 @@ These are owned by different things, which matters when auditing:
 |--------|-------|------------------------|
 | Role attributes (`NOSUPERUSER`, `NOBYPASSRLS`, `NOREPLICATION`, …), password, role memberships | `scripts/bootstrap-rds-roles.mjs` | Yes — always re-applied and asserted. As a non-superuser (the RDS master) it cannot write `SUPERUSER` / `BYPASSRLS` / `REPLICATION`: those are checked, and the run stops before sending the password if one is set |
 | `passwd_app` schema + table ACLs | `scripts/bootstrap-rds-roles.mjs` | Yes — revoke-then-grant |
-| Worker table ACLs (`passwd_outbox_worker`, `passwd_retention_gc_worker`, `passwd_anchor_publisher`) | The Prisma migrations that create each table | **No** |
+| Worker table ACLs (`passwd_outbox_worker`, `passwd_retention_gc_worker`, `passwd_anchor_publisher`, `passwd_audit_chain_verifier`) | The Prisma migrations that create each table | **No** |
 | The retired `passwd_dcr_cleanup_worker` | Migration `20261023010000_retire_dcr_cleanup_worker_role` | n/a — asserted by the audit (`RETIRED_ROLES`) |
 
 The worker table ACLs cannot be converged by the bootstrap: it runs *before* the
@@ -968,8 +1187,8 @@ installed. A privilege granted to a worker out of band is therefore **not**
 removed by re-running the bootstrap.
 
 Detection runs automatically on **every deploy**: the migrate task's command is
-`prisma migrate deploy && node scripts/audit-db-grants.mjs`
-(`infra/terraform/ecs.tf`), so a migration that grants more than the manifest
+`node scripts/rls-enforce-preflight.mjs`, `npx prisma migrate deploy`, then
+`node scripts/audit-db-grants.mjs` under `set -e` (`infra/terraform/ecs.tf`), so a migration that grants more than the manifest
 sanctions fails the migrate task — and `deploy.sh` aborts before any service is
 advanced. The audit needs a DDL-capable connection and RDS admits only the ECS
 security group, so the migrate task is the only place it can run.
@@ -981,8 +1200,8 @@ MIGRATION_DATABASE_URL=<superuser-url> node scripts/audit-db-grants.mjs
 ```
 
 It diffs the live ACLs of every audited role (`AUDITED_ROLES`: `passwd_app`,
-`passwd_outbox_worker`, `passwd_retention_gc_worker`, `passwd_anchor_publisher`
-and the retired `passwd_dcr_cleanup_worker`) against
+`passwd_outbox_worker`, `passwd_retention_gc_worker`, `passwd_anchor_publisher`,
+`passwd_audit_chain_verifier` and the retired `passwd_dcr_cleanup_worker`) against
 `scripts/checks/db-grants-manifest.json` and exits non-zero on any
 `UNEXPECTED_GRANT` (over-privilege) or `MISSING_GRANT` (migrations not applied).
 
@@ -1077,6 +1296,7 @@ GRANT EXECUTE ON FUNCTION public.share_creator_admitted(uuid) TO passwd_app;
 - `MIGRATION_DATABASE_URL` — Prisma CLI connection (SUPERUSER role, e.g. `passwd_user`)
 - `OUTBOX_WORKER_DATABASE_URL` — audit outbox worker connection (least-privilege role, e.g. `passwd_outbox_worker`). Set the worker role password with `scripts/set-outbox-worker-password.sh`.
 - `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` — audit-anchor publisher connection (`passwd_anchor_publisher`). On RDS the role's password is set by `scripts/bootstrap-rds-roles.mjs` from `PASSWD_ANCHOR_PUBLISHER_PASSWORD`.
+- `AUDIT_CHAIN_VERIFY_DATABASE_URL` — audit-chain verify worker connection (`passwd_audit_chain_verifier`; required in production, no `DATABASE_URL` fallback). On RDS the role's password is set by `scripts/bootstrap-rds-roles.mjs` from `PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD`; on compose, by `infra/postgres/initdb/05-create-audit-chain-verifier-role.sql` from the same variable (unset, the role is `NOLOGIN`), or later with `scripts/set-audit-chain-verifier-password.sh` plus `ALTER ROLE passwd_audit_chain_verifier WITH LOGIN`.
 
 The Docker Compose dev setup enforces the same role separation: the `app` service connects as `passwd_app` (NOSUPERUSER, NOBYPASSRLS) while the `migrate` service connects as `passwd_user` (SUPERUSER). RLS is enforced in all environments.
 

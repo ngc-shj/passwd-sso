@@ -18,6 +18,7 @@ export const GROUPS = [
   "Outbox worker",
   "Retention GC worker",
   "Audit anchor publisher",
+  "Audit chain verify worker",
   "Key provider",
   "DB pool",
   "Reverse proxy",
@@ -1131,6 +1132,22 @@ export const descriptions: Record<
       "Local filesystem path for self-hosted operators without AWS/GitHub.\n" +
       "Operator's responsibility to mirror to their own immutable store.",
     example: "/var/audit-anchors",
+  },
+
+  // ── Audit chain verify worker ────────────────────────────────────────────
+
+  AUDIT_CHAIN_VERIFY_DATABASE_URL: {
+    group: "Audit chain verify worker",
+    order: 1,
+    description:
+      "PostgreSQL connection URL for the audit-chain verify worker role\n" +
+      "(passwd_audit_chain_verifier). Least privilege: column-level SELECT on\n" +
+      "tenants (id), audit_chain_anchors (tenant_id, chain_seq, prev_hash) and\n" +
+      "audit_logs (id, tenant_id, created_at, chain_seq, event_hash,\n" +
+      "chain_prev_hash, metadata); no write to any application table or sequence.\n" +
+      "Required by the worker in production (no DATABASE_URL fallback);\n" +
+      "outside production it falls back to DATABASE_URL if unset.",
+    example: "postgresql://passwd_audit_chain_verifier:pass@localhost:5432/passwd_sso",
   },
 
   // ── Break Glass ───────────────────────────────────────────────────────────

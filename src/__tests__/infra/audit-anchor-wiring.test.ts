@@ -647,7 +647,7 @@ function verifyWorkerViolations(tf: TerraformConfig, opts: EvalOptions = {}): st
   const defs = containers(tf, "audit_chain_verify_worker", opts);
   if (defs.length !== 1) return [...out, "verify task: not exactly one container"];
   if (JSON.stringify(defs[0].command) !== JSON.stringify(["node", "dist/audit-chain-verify-worker.js"])) out.push("verify task: command");
-  if (JSON.stringify(defs[0].secrets) !== JSON.stringify([{ name: "AUDIT_CHAIN_VERIFY_DATABASE_URL", valueFrom: appSecret("DATABASE_URL") }])) {
+  if (JSON.stringify(defs[0].secrets) !== JSON.stringify([{ name: "AUDIT_CHAIN_VERIFY_DATABASE_URL", valueFrom: appSecret("AUDIT_CHAIN_VERIFY_DATABASE_URL") }])) {
     out.push(`verify task: secrets ${JSON.stringify(defs[0].secrets)}`);
   }
   if (tf.attr(tf.resource("aws_ecs_service", "audit_chain_verify_worker"), "desired_count", { vars: { worker_desired_count: 3 } }) !== 3) {

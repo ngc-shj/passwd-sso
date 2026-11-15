@@ -149,6 +149,7 @@ describe("app-role denied privileges (live database)", () => {
     expect(AUDITED_ROLES).toContain("passwd_outbox_worker");
     expect(AUDITED_ROLES).toContain("passwd_retention_gc_worker");
     expect(AUDITED_ROLES).toContain("passwd_anchor_publisher");
+    expect(AUDITED_ROLES).toContain("passwd_audit_chain_verifier");
     expect(AUDITED_ROLES).toContain("passwd_dcr_cleanup_worker");
     for (const role of AUDITED_ROLES) {
       for (const privilege of TENANT_CLAIM_EVENTS_DENIED_PRIVILEGES) {
