@@ -63,9 +63,20 @@ import { DELIVERERS } from "@/workers/audit-delivery";
 import { processDeliveryBatch } from "@/workers/audit-outbox-worker";
 import { migrateWebhookSecrets } from "@/../scripts/migrate-webhook-secrets-v1-to-v2";
 
-// A version below the current one (2 in dev/CI env), so the row version is
-// not covered merely by the current-version warm.
+// A version below the current one, so the row version is not covered merely
+// by the current-version warm. The two versions are stubbed per test rather
+// than read from the host: CI configures a single key (version 1 only).
 const ROW_VERSION = 1;
+const CURRENT_VERSION = 2;
+const TEST_V2_KEY = "2".repeat(64);
+
+function stubTwoKeyVersions(): void {
+  const v1 = process.env.SHARE_MASTER_KEY_V1 || process.env.SHARE_MASTER_KEY;
+  if (!v1) throw new Error("SHARE_MASTER_KEY (version 1) not set");
+  vi.stubEnv("SHARE_MASTER_KEY_V1", v1);
+  vi.stubEnv("SHARE_MASTER_KEY_V2", TEST_V2_KEY);
+  vi.stubEnv("SHARE_MASTER_KEY_CURRENT_VERSION", String(CURRENT_VERSION));
+}
 
 function envKey(version: number): Buffer {
   const hex = process.env[`SHARE_MASTER_KEY_V${version}`];
@@ -80,21 +91,22 @@ describe("cloud KEY_PROVIDER: out-of-app processes warm the keys they use", () =
   let userId: string;
 
   beforeAll(async () => {
-    // The cells prove the row version is warmed in its own right; that is vacuous
-    // if the current-version warm would have covered it anyway.
-    expect(getCurrentMasterKeyVersion()).not.toBe(ROW_VERSION);
     ctx = await createTestContext();
     wp = createPrismaForRole("worker", { max: 1 });
   });
   afterAll(async () => {
-    await wp.prisma.$disconnect();
-    await wp.pool.end();
-    await ctx.cleanup();
+    await wp?.prisma.$disconnect();
+    await wp?.pool.end();
+    await ctx?.cleanup();
   });
   beforeEach(async () => {
     tenantId = await ctx.createTenant();
     userId = await ctx.createUser(tenantId);
     _resetKeyProvider();
+    stubTwoKeyVersions();
+    // The cells prove the row version is warmed in its own right; that is vacuous
+    // if the current-version warm would have covered it anyway.
+    expect(getCurrentMasterKeyVersion()).not.toBe(ROW_VERSION);
     vi.stubEnv("KEY_PROVIDER", "aws-sm");
     vi.stubEnv("AWS_REGION", "us-east-1");
   });

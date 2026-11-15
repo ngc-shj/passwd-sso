@@ -1010,10 +1010,18 @@ describe.skipIf(SKIP)("tenant-domain rekey-accounts (#954)", () => {
   describe("share-master key provider", () => {
     const CURRENT_REFUSAL = /the current share-master key version \d+ cannot be loaded/;
 
-    /** Candidates whose tokens sit at version 1, below the current one, so the row versions are not the current version. */
+    /**
+     * Candidates whose tokens sit at version 1, below the current one, so the
+     * row versions are not the current version. Version 2 is a test key stubbed
+     * here, not read from the host: CI configures a single key (version 1).
+     */
     async function olderVersionScenario() {
-      const current = getCurrentMasterKeyVersion();
-      expect(current, "the cell needs a current version above 1").toBeGreaterThan(1);
+      const v1 = process.env.SHARE_MASTER_KEY_V1 || process.env.SHARE_MASTER_KEY;
+      if (!v1) throw new Error("SHARE_MASTER_KEY (version 1) not set");
+      vi.stubEnv("SHARE_MASTER_KEY_V1", v1);
+      vi.stubEnv("SHARE_MASTER_KEY_V2", "2".repeat(64));
+      _resetKeyProvider();
+      const current = 2;
       vi.stubEnv("SHARE_MASTER_KEY_CURRENT_VERSION", "1");
       let s: Scenario;
       try {
