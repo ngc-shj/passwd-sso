@@ -428,3 +428,70 @@ entitled to take it. The same holds for every team route, so the primary control
 | C6 | Runbook, audit reference, #1045/#1032 | locked |
 | C7 | pre-pr from a worktree (backup-db Group B; deps setup) | locked |
 | C8 | In-place re-admission operator script | locked |
+
+## Implementation Checklist
+
+Phase 2, Step 2-1. Batches: B1 and B4 in parallel, then B2, then B3.
+
+**B1 — C1, C2, C5, audit actions**
+- `src/lib/team/tenant-departure-read.ts` (new, pure): move `readTenantRows`, `departedAt`,
+  `departedSince`, `actorDepartedSinceAdmission`, the `LockedTenantRow` type; `tenant-row-lock.ts`
+  re-exports all of them. Existing callers keep importing from `tenant-row-lock` (16 test files
+  `vi.mock` that module; a caller switching its import would escape those mocks).
+- `src/lib/auth/access/team-auth.ts`: `getTeamMembership` (C1) + doc comment (C5 convention).
+- `src/app/api/teams/[teamId]/members/[memberId]/route.ts` (member DELETE), `src/lib/team/scim-admission.ts`
+  (`rejectScimPending`), `src/app/api/teams/[teamId]/invitations/[invId]/route.ts` (C2).
+- Audit actions `TEAM_MEMBER_INVITE_CANCEL`, `TEAM_MEMBER_OPERATOR_READMIT`: `prisma/schema.prisma`
+  enum, `ADD VALUE` migration, `src/lib/constants/audit/audit.ts`, `messages/{en,ja}/AuditLog.json`,
+  `src/components/audit/audit-action-icons.tsx`, `docs/operations/audit-log-reference.md`, audit
+  enumeration tests, `check-critical-audit-atomic` (decide; record).
+- `src/__tests__/team-route-auth-reach.test.ts` (C5).
+- Unit tests: `team-auth.test.ts`, `team-auth.rls-nesting.test.ts`, `src/__tests__/helpers/mock-team-auth.ts`
+  (check), `confirm-key/route.test.ts` (its `getTeamMembership` findFirst mock), `members/[memberId]/route.test.ts`,
+  `scim-admission.test.ts`, `reject` / `bulk-reject` route tests, `invitations/[invId]/route.test.ts`,
+  `tenant-row-lock.test.ts`, new `tenant-departure-read` import-safety cell.
+
+**B2 — C3, C4**
+- `src/app/api/teams/route.ts` (GET), `getAdminTeamMemberships`, `src/app/api/teams/pending-key-distributions/route.ts`,
+  `src/lib/team/team-item-key.ts` (`teamKeyVersionHolders`, rename to `inactiveTeamKeyVersionHolderCount`),
+  `src/app/api/teams/[teamId]/rekey/route.ts`, `src/app/api/teams/[teamId]/passwords/[id]/history/[historyId]/restore/route.ts`
+  (`(tenantId, tx)` form).
+- `src/lib/team/webhook-creator-authority.ts`, `src/workers/audit-outbox-worker.ts`,
+  `src/app/api/teams/[teamId]/webhooks/route.ts` (GET `(tenantId, tx)` form).
+- `src/lib/tenant-rls-grants.ts`: `TEAM_ADMIN_MEMBERSHIP_LOOKUP`, `TEAM_PENDING_KEY_DISTRIBUTION`,
+  `OUTBOX_WEBHOOK_SUBSCRIBER_RESOLVE`.
+- Migration: worker column grants (exact set from the worker cell run); `scripts/checks/db-grants-manifest.json`
+  via `audit-db-grants --write`.
+- Unit tests: `src/app/api/teams/route.test.ts`, `pending-key-distributions/route.test.ts`,
+  `team-item-key.test.ts`, rekey and restore route tests, `webhook-creator-authority.test.ts`,
+  `src/__tests__/audit-outbox.test.ts`, `webhooks/route.test.ts`, `src/app/[locale]/admin/layout.test.tsx`
+  (check), `team-vault-core.test.tsx` / `vault-context-passkey-gate.test.tsx` (check; consume
+  pending-key-distributions).
+
+**B3 — integration tests, C8, C6**
+- New `src/__tests__/db-integration/leftover-team-actor-authority.integration.test.ts` (C1–C4).
+- `departed-member-leaked-authority.integration.test.ts`: the six #1043 actor-deny cells converted.
+- `audit-outbox-worker-role*.integration.test.ts` (column privileges).
+- `departed-member-operator-scripts.integration.test.ts` (C8 matrix); C8 script block and C6 text in
+  `docs/operations/departed-member-access-backfill.md`.
+- Check `scim-team-admission-approval` and `team-tenant-departure` integration suites (reference
+  pending-key-distributions).
+- Comments on `#1045` and `#1032` (orchestrator, at PR time).
+
+**B4 — C7**
+- `scripts/__tests__/backup-db.test.mjs` Group B only.
+
+**Reuse (do not reimplement):** `lockTenantRows`, `readTenantRows`, `actorDepartedSinceAdmission`,
+`activeTeamAdmission`, `createLockBudget`, `lockTeamsAgainstRotation`, `isMembershipLockConflict`,
+`membershipConflictResponse` (`src/lib/http/lock-conflict-response.ts`), `TEAM_MEMBERSHIP_TX_TIMEOUT_MS`,
+`logAuditInTx`, `hasTeamPermission`, `withTeamTenantRls` `(tenantId, tx)` form, `withBypassRls`,
+`BYPASS_GRANT`, `setBypassGucs`; integration helpers `residueDepart`, `recreatedDepart`,
+`assertRlsApplies`, `ctx.worker.prisma`; the runbook script-extraction helper used by
+`departed-member-operator-scripts.integration.test.ts`.
+
+**CI parity (Step 2-1 item 7).** Gates CI runs that pre-pr does not:
+- `npm run check:rls-grant-evidence` — reads the integration run's evidence record; run locally after
+  `npm run test:integration` in Step 2-4 (this diff changes bypass grants).
+- `bash scripts/check-state-mutation-centralization.sh` — run locally in Step 2-4.
+- `check-npm-audit`, `licenses:check*`, `check-terraform-test-count` — no dependency or infra change
+  in this diff; not applicable.

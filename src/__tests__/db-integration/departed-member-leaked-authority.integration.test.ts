@@ -6,7 +6,11 @@
  * - C2: team_members.admitted_at, owned by a same-row trigger.
  * - C4: one actor predicate on the six sites that grant authority to others,
  *   proven on the residue state (an active team row left behind by a raw
- *   tenant-row departure), each deny cell with a positive twin.
+ *   tenant-row departure), each deny cell with a positive twin. getTeamMembership
+ *   now refuses such an actor with 404 before these transactions run
+ *   (leftover-team-actor-authority-plan.md C1), so the deny cells inject the
+ *   departure AFTER that gate, through the team IP-restriction hook, and keep
+ *   asserting the in-transaction 403; the gate's own 404 is asserted separately.
  * - C4 recipient: a residue TARGET is treated like a deactivated member by
  *   confirm-key, a promotion or ownership transfer, and key rotation; a
  *   demotion stays allowed. confirm-key also on the departure-record arm,
@@ -47,12 +51,33 @@ import {
   type TestContext,
 } from "./helpers";
 
-const { scimTenant } = vi.hoisted(() => ({ scimTenant: { id: "" } }));
+const { scimTenant, afterGate } = vi.hoisted(() => ({
+  scimTenant: { id: "" },
+  afterGate: { hook: null as (() => Promise<void>) | null, fired: false },
+}));
 const mockAuth = vi.fn();
 vi.mock("@/auth", () => ({ auth: (...args: unknown[]) => mockAuth(...args) }));
 vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
   requireRecentCurrentAuthMethod: async () => null,
 }));
+// requireTeamMember calls withTeamIpRestriction once the membership resolved, so
+// a one-shot hook here runs strictly after the getTeamMembership gate. It passes
+// through to the real policy check, and is disarmed in afterEach.
+vi.mock("@/lib/team/team-policy", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/team/team-policy")>();
+  return {
+    ...actual,
+    withTeamIpRestriction: async (...args: Parameters<typeof actual.withTeamIpRestriction>) => {
+      const hook = afterGate.hook;
+      afterGate.hook = null;
+      if (hook) {
+        afterGate.fired = true;
+        await hook();
+      }
+      return actual.withTeamIpRestriction(...args);
+    },
+  };
+});
 vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({
     check: async () => ({ allowed: true, retryAfterMs: 0 }),
@@ -158,9 +183,12 @@ describe("departed-member leaked authority — real-DB integration", () => {
     otherTenantId = await ctx.createTenant();
     scimTenant.id = tenantId;
     vi.clearAllMocks();
+    afterGate.hook = null;
+    afterGate.fired = false;
   });
 
   afterEach(async () => {
+    afterGate.hook = null;
     await ctx.deleteTestData(tenantId);
     await ctx.deleteTestData(otherTenantId);
     vi.unstubAllEnvs();
@@ -287,6 +315,20 @@ describe("departed-member leaked authority — real-DB integration", () => {
       tenantId, userId,
     );
     expect(written).toHaveLength(1);
+  }
+
+  /**
+   * Arm the one-shot hook: `departure` runs after the actor passed
+   * getTeamMembership, before the route's transaction. The twin passes a no-op,
+   * so both arms take the same path and differ only in the departure.
+   */
+  function departAfterGate(departure: () => Promise<void>) {
+    afterGate.hook = departure;
+  }
+
+  /** The hook ran, i.e. the request got past the C1 gate (not refused by it). */
+  function expectGatePassed() {
+    expect(afterGate.fired).toBe(true);
   }
 
   /** A PENDING invitation inserted directly (created_at = clock_timestamp()). */
@@ -549,11 +591,12 @@ describe("departed-member leaked authority — real-DB integration", () => {
 
     it.each(twins)("invitations POST: %s", async (_label, departed) => {
       const { actor, teamId } = await actorTeam("ADMIN");
-      if (departed) await residueDepart(actor.id);
+      departAfterGate(async () => { if (departed) await residueDepart(actor.id); });
       const invitee = await member();
 
       const res = await invite(teamId, actor.id, invitee.email);
 
+      expectGatePassed();
       expect(res.status).toBe(departed ? 403 : 201);
       const rows = await sql(`SELECT 1 FROM team_invitations WHERE team_id = $1::uuid AND email = $2`, teamId, invitee.email);
       expect(rows).toHaveLength(departed ? 0 : 1);
@@ -581,35 +624,38 @@ describe("departed-member leaked authority — real-DB integration", () => {
 
     it.each(twins)("members POST: %s", async (_label, departed) => {
       const { actor, teamId } = await actorTeam("ADMIN");
-      if (departed) await residueDepart(actor.id);
+      departAfterGate(async () => { if (departed) await residueDepart(actor.id); });
       const target = await member();
 
       const res = await addMember(teamId, actor.id, target.id);
 
+      expectGatePassed();
       expect(res.status).toBe(departed ? 403 : 201);
       expect(await membership(teamId, target.id)).toEqual(departed ? null : expect.objectContaining({ deactivated_at: null }));
     });
 
     it.each(twins)("SCIM approve (approver holds the key): %s", async (_label, departed) => {
       const { actor, teamId } = await actorTeam("ADMIN");
-      if (departed) await residueDepart(actor.id);
+      departAfterGate(async () => { if (departed) await residueDepart(actor.id); });
       const target = await member();
       const rowId = await addTeamMember(teamId, target.id, "MEMBER", { pending: true, keyDistributed: false, withKey: false });
 
       const res = await approve(teamId, rowId, actor.id, "MEMBER");
 
+      expectGatePassed();
       expect(res.status).toBe(departed ? 403 : 200);
       expect(await membership(teamId, target.id)).toMatchObject({ scim_approval_pending: departed });
     });
 
     it.each(twins)("member PUT role change: %s", async (_label, departed) => {
       const { actor, teamId } = await actorTeam("ADMIN");
-      if (departed) await residueDepart(actor.id);
+      departAfterGate(async () => { if (departed) await residueDepart(actor.id); });
       const target = await member();
       const rowId = await addTeamMember(teamId, target.id, "MEMBER");
 
       const res = await changeRole(teamId, rowId, actor.id, "VIEWER");
 
+      expectGatePassed();
       expect(res.status).toBe(departed ? 403 : 200);
       expect(await membership(teamId, target.id)).toMatchObject({ role: departed ? "MEMBER" : "VIEWER" });
     });
@@ -623,12 +669,13 @@ describe("departed-member leaked authority — real-DB integration", () => {
         teamId, tenantId, `team-${teamId.slice(0, 8)}`,
       );
       await addTeamMember(teamId, actor.id, "OWNER", { createdAt: "now() - interval '1 hour'" });
-      if (departed) await residueDepart(actor.id);
+      departAfterGate(async () => { if (departed) await residueDepart(actor.id); });
       const successor = await member();
       const rowId = await addTeamMember(teamId, successor.id, "ADMIN");
 
       const res = await changeRole(teamId, rowId, actor.id, "OWNER");
 
+      expectGatePassed();
       expect(res.status).toBe(departed ? 403 : 200);
       expect(await membership(teamId, successor.id)).toMatchObject({ role: departed ? "ADMIN" : "OWNER" });
       expect(await membership(teamId, actor.id)).toMatchObject({ role: departed ? "OWNER" : "ADMIN" });
@@ -636,15 +683,79 @@ describe("departed-member leaked authority — real-DB integration", () => {
 
     it.each(twins)("confirm-key: %s", async (_label, departed) => {
       const { actor, teamId } = await actorTeam("ADMIN");
-      if (departed) await residueDepart(actor.id);
+      departAfterGate(async () => { if (departed) await residueDepart(actor.id); });
       const target = await member();
       await setEcdhKey(target.id);
       const rowId = await addTeamMember(teamId, target.id, "MEMBER", { keyDistributed: false, withKey: false });
 
       const res = await confirmKey(teamId, rowId, actor.id);
 
+      expectGatePassed();
       expect(res.status).toBe(departed ? 403 : 200);
       expect(await membership(teamId, target.id)).toMatchObject({ key_distributed: !departed });
+    });
+
+    describe("C1: the same actor is refused with 404 before any transaction when the departure precedes the request", () => {
+      it.each([
+        ["invitations POST", async () => {
+          const { actor, teamId } = await actorTeam("ADMIN");
+          await residueDepart(actor.id);
+          const invitee = await member();
+          const res = await invite(teamId, actor.id, invitee.email);
+          expect(await sql(`SELECT 1 FROM team_invitations WHERE team_id = $1::uuid AND email = $2`, teamId, invitee.email)).toHaveLength(0);
+          return res.status;
+        }],
+        ["members POST", async () => {
+          const { actor, teamId } = await actorTeam("ADMIN");
+          await residueDepart(actor.id);
+          const target = await member();
+          const res = await addMember(teamId, actor.id, target.id);
+          expect(await membership(teamId, target.id)).toBeNull();
+          return res.status;
+        }],
+        ["SCIM approve", async () => {
+          const { actor, teamId } = await actorTeam("ADMIN");
+          await residueDepart(actor.id);
+          const target = await member();
+          const rowId = await addTeamMember(teamId, target.id, "MEMBER", { pending: true, keyDistributed: false, withKey: false });
+          const res = await approve(teamId, rowId, actor.id, "MEMBER");
+          expect(await membership(teamId, target.id)).toMatchObject({ scim_approval_pending: true });
+          return res.status;
+        }],
+        ["member PUT role change", async () => {
+          const { actor, teamId } = await actorTeam("ADMIN");
+          await residueDepart(actor.id);
+          const target = await member();
+          const rowId = await addTeamMember(teamId, target.id, "MEMBER");
+          const res = await changeRole(teamId, rowId, actor.id, "VIEWER");
+          expect(await membership(teamId, target.id)).toMatchObject({ role: "MEMBER" });
+          return res.status;
+        }],
+        ["member PUT ownership transfer", async () => {
+          const { actor, teamId } = await actorTeam("OWNER");
+          await residueDepart(actor.id);
+          const successor = await member();
+          const rowId = await addTeamMember(teamId, successor.id, "ADMIN");
+          const res = await changeRole(teamId, rowId, actor.id, "OWNER");
+          expect(await membership(teamId, successor.id)).toMatchObject({ role: "ADMIN" });
+          expect(await membership(teamId, actor.id)).toMatchObject({ role: "OWNER" });
+          return res.status;
+        }],
+        ["confirm-key", async () => {
+          const { actor, teamId } = await actorTeam("ADMIN");
+          await residueDepart(actor.id);
+          const target = await member();
+          await setEcdhKey(target.id);
+          const rowId = await addTeamMember(teamId, target.id, "MEMBER", { keyDistributed: false, withKey: false });
+          const res = await confirmKey(teamId, rowId, actor.id);
+          expect(await membership(teamId, target.id)).toMatchObject({ key_distributed: false });
+          return res.status;
+        }],
+      ] as const)("%s", async (_site, run) => {
+        expect(await run()).toBe(404);
+        // The hook never armed: the refusal came from the gate, not from a transaction.
+        expect(afterGate.fired).toBe(false);
+      });
     });
 
     it("a member re-admitted by accept after a SCIM departure (created_at < departure < admitted_at) invites successfully", async () => {

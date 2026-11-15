@@ -1157,10 +1157,10 @@ async function resolveWebhookSubscribers(
         },
       });
       // A webhook runs on its creator's authority: skip it (not a failure) once
-      // the creator is no longer an active member holding TEAM_UPDATE. Only the
-      // team_id match scopes this read — the worker has no tenant_id grant on
-      // team_members.
-      const verdicts = await webhookCreatorVerdicts(tx, item.team_id, rows);
+      // the creator is no longer an active member holding TEAM_UPDATE, or has
+      // left the tenant since joining the team. Only the team_id match scopes
+      // the team_members read — the worker has no tenant_id grant on it.
+      const verdicts = await webhookCreatorVerdicts(tx, item.tenant_id, item.team_id, rows);
       const authorizedRows = rows.filter((r) => {
         // Deliver only on a positive verdict; a missing one fails closed.
         const authorized = verdicts.get(r.id) === true || verdicts.get(r.id) === "legacy";

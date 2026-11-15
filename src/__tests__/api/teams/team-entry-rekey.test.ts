@@ -39,9 +39,10 @@ const txMock = {
   attachment: { count: vi.fn(async () => 0) },
   teamMemberKey: { findMany: vi.fn(async () => [] as { userId: string }[]) },
   teamMember: {
-    findMany: vi.fn(async () => [] as { userId: string; role: string }[]),
-    count: vi.fn(async () => 0),
+    findMany: vi.fn(async () => [] as { userId: string; role?: string; deactivatedAt?: Date | null }[]),
   },
+  tenantMember: { findMany: vi.fn(async () => []) },
+  tenantMemberDeparture: { findMany: vi.fn(async () => []) },
   $queryRaw: vi.fn(async () => [{ count: BigInt(0) }]),
 };
 
@@ -205,8 +206,13 @@ describe("GET …/rekey holders per pending version (D36)", () => {
   it("returns 200 with the other active holders and the deactivated count", async () => {
     const me = DEFAULT_SESSION.user.id;
     txMock.teamMemberKey.findMany.mockResolvedValue([{ userId: me }, { userId: "y" }, { userId: "gone" }]);
-    txMock.teamMember.findMany.mockResolvedValue([{ userId: me, role: "ADMIN" }, { userId: "y", role: "ADMIN" }]);
-    txMock.teamMember.count.mockResolvedValue(1);
+    const active = [{ userId: me, role: "ADMIN" }, { userId: "y", role: "ADMIN" }];
+    // The holder read filters on deactivatedAt: null; the inactive count reads every holder's row.
+    txMock.teamMember.findMany.mockImplementation(async (args?: { where?: { deactivatedAt?: null } }) =>
+      args?.where?.deactivatedAt === null
+        ? active
+        : [...active.map((m) => ({ ...m, deactivatedAt: null })), { userId: "gone", deactivatedAt: new Date("2026-01-01") }],
+    );
 
     const { status, json } = await getList();
 
@@ -222,7 +228,9 @@ describe("GET …/rekey holders per pending version (D36)", () => {
   it("bounds the listed holders", async () => {
     const many = Array.from({ length: 25 }, (_, i) => ({ userId: `u${String(i).padStart(2, "0")}`, role: "MEMBER" }));
     txMock.teamMemberKey.findMany.mockResolvedValue(many.map((m) => ({ userId: m.userId })));
-    txMock.teamMember.findMany.mockResolvedValue(many);
+    txMock.teamMember.findMany.mockImplementation(async (args?: { where?: { deactivatedAt?: null } }) =>
+      args?.where?.deactivatedAt === null ? many : many.map((m) => ({ ...m, deactivatedAt: null })),
+    );
 
     const { json } = await getList();
 

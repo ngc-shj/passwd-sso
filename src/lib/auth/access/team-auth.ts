@@ -15,6 +15,8 @@ import { hasTeamPermission, type TeamPermission } from "@/lib/auth/access/team-p
 import { resolveUserTenantIdFromClient, withTeamTenantRls } from "@/lib/tenant-context";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
+import { readTenantRows, actorDepartedSinceAdmission } from "@/lib/team/tenant-departure-read";
+import { withoutLeftoverMemberships } from "@/lib/team/leftover-memberships";
 import { withTeamIpRestriction, PolicyViolationError } from "@/lib/team/team-policy";
 import type { Prisma, TeamRole } from "@prisma/client";
 import type { NextRequest } from "next/server";
@@ -71,22 +73,32 @@ export { isTeamAdminRole } from "@/lib/constants";
 
 /**
  * Get the membership record for a user in a team.
- * Returns null if the user is not a member (or is deactivated).
+ * Returns null if the user is not a member, is deactivated, or is a leftover:
+ * an active row whose user left the team's tenant at or after their admission
+ * (actorDepartedSinceAdmission). A leftover grants no team authority, so every
+ * route behind requireTeamMember / requireTeamPermission refuses it like a
+ * non-member. Any other code that reads `team_members` to decide authority
+ * itself must apply actorDepartedSinceAdmission or call this function.
  *
  * Uses findFirst instead of findUnique because Prisma's findUnique
  * cannot include non-unique-index fields (deactivatedAt) in the where clause.
  * The @@unique([teamId, userId]) constraint ensures at most one row per team+user.
+ *
+ * The tenant rows are read without a lock: leftover state is old state, and a
+ * departure committing mid-request is caught by the in-transaction re-checks.
  */
-async function getTeamMembershipInRlsContext(userId: string, teamId: string) {
-  return prisma.teamMember.findFirst({
-    where: { teamId: teamId, userId, deactivatedAt: null },
-  });
-}
-
 export async function getTeamMembership(userId: string, teamId: string) {
-  return withTeamTenantRls(teamId, async () =>
-    getTeamMembershipInRlsContext(userId, teamId),
-  );
+  return withTeamTenantRls(teamId, async (tenantId, tx) => {
+    const membership = await tx.teamMember.findFirst({
+      where: { teamId, userId, deactivatedAt: null },
+    });
+    if (!membership) return null;
+    const rows = await readTenantRows(tx, tenantId, [userId]);
+    if (actorDepartedSinceAdmission(rows.get(userId), membership.admittedAt ?? membership.createdAt)) {
+      return null;
+    }
+    return membership;
+  });
 }
 
 /**
@@ -168,7 +180,7 @@ export async function getAdminTeamMemberships(userId: string) {
       },
     });
 
-    return memberships.map((membership) => ({
+    return (await withoutLeftoverMemberships(tx, memberships)).map((membership) => ({
       ...membership,
       team: {
         id: membership.team.id,

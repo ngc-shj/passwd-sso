@@ -18,6 +18,7 @@ import { getLogger } from "@/lib/logger";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { TEAM_MEMBERSHIP_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 import { isMembershipLockConflict, lockTenantRows } from "@/lib/team/tenant-row-lock";
+import { withoutLeftoverMemberships } from "@/lib/team/leftover-memberships";
 
 /** The creator's tenant membership ended after the permission check. */
 class CreatorDepartedError extends Error {
@@ -55,7 +56,7 @@ async function handleGET(req: NextRequest) {
       },
       orderBy: { team: { name: "asc" } },
     });
-    return { userTenantId: uid, memberships: data };
+    return { userTenantId: uid, memberships: await withoutLeftoverMemberships(tx, data) };
   }, BYPASS_GRANT.TEAM_ADMIN_MEMBERSHIP_LOOKUP);
 
   const teams = memberships.map((m) => ({

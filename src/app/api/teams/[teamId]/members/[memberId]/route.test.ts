@@ -17,7 +17,7 @@ const { mockAuth, mockPrismaTeamMember, mockPrismaTeamMemberKey, mockPrismaScimE
       // The conditional writes under the team lock, and the re-read of the
       // changed row for the response.
       findUniqueOrThrow: vi.fn(),
-      // The acting member's role, re-read under the locks (activeTeamAdmission for PUT, activeTeamRole for DELETE).
+      // The acting member's role, re-read under the locks (activeTeamAdmission).
       findFirst: vi.fn(),
       update: vi.fn(),
       updateMany: vi.fn(),
@@ -77,7 +77,6 @@ vi.mock("@/lib/auth/access/team-auth", async () => ({
   isRoleAbove: mockIsRoleAbove,
   // The real role reads and permission table: routes re-check the actor under their locks.
   activeTeamAdmission: (await vi.importActual<typeof import("@/lib/auth/access/team-auth")>("@/lib/auth/access/team-auth")).activeTeamAdmission,
-  activeTeamRole: (await vi.importActual<typeof import("@/lib/auth/access/team-auth")>("@/lib/auth/access/team-auth")).activeTeamRole,
   hasTeamPermission: (await vi.importActual<typeof import("@/lib/auth/access/team-auth")>("@/lib/auth/access/team-auth")).hasTeamPermission,
   TeamAuthError,
 }));
@@ -814,7 +813,7 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
     mockRequireTeamPermission.mockResolvedValue(ownerMembership);
     mockIsRoleAbove.mockReturnValue(true);
     mockPrismaTeamMember.deleteMany.mockResolvedValue({ count: 1 });
-    mockPrismaTeamMember.findFirst.mockResolvedValue({ role: TEAM_ROLE.OWNER });
+    mockPrismaTeamMember.findFirst.mockResolvedValue(asActor(TEAM_ROLE.OWNER));
   });
 
   it("returns TeamAuthError status when DELETE permission denied", async () => {
@@ -1001,7 +1000,7 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
     expect(res.status).toBe(200);
     expect(mockPrismaTeamMember.findFirst).toHaveBeenCalledWith({
       where: { teamId: TEAM_ID, userId: "test-user-id", deactivatedAt: null },
-      select: { role: true },
+      select: { role: true, admittedAt: true, createdAt: true },
     });
     const teamLock = lockQueryCalls(mockTeamLockQuery).find((c) => c.sql.includes("FROM teams"))!;
     expect(teamLock.order).toBeLessThan(mockPrismaTeamMember.findFirst.mock.invocationCallOrder[0]);
@@ -1012,7 +1011,7 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
     mockPrismaTeamMember.findUnique.mockResolvedValue({
       id: MEMBER_ID, teamId: TEAM_ID, tenantId: "tenant-1", userId: "target-user", role: TEAM_ROLE.ADMIN, deactivatedAt: null,
     });
-    mockPrismaTeamMember.findFirst.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
+    mockPrismaTeamMember.findFirst.mockResolvedValue(asActor(TEAM_ROLE.ADMIN));
     mockIsRoleAbove.mockImplementation((a: string, b: string) => a === "OWNER" && b !== "OWNER");
 
     const res = await DELETE(
@@ -1240,5 +1239,78 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
         }),
       }),
     );
+  });
+});
+
+describe("DELETE: an acting member who left the tenant, judged against their admission to the team", () => {
+  const after = (ms: number) => new Date(ACTOR_ADMITTED_AT.getTime() + ms);
+  /** Answer the actor's tenant row and departure record to the real lockTenantRows. */
+  const actorTenantState = (deactivatedAt: Date | null, departedAt: Date | null = null, hasRow = true) =>
+    mockTeamLockQuery.mockImplementation(teamLockQuery((sql) => {
+      if (sql.includes("FROM tenant_members")) {
+        return hasRow ? [{ user_id: "test-user-id", role: "MEMBER", deactivated_at: deactivatedAt }] : [];
+      }
+      if (sql.includes("FROM tenant_member_departures")) {
+        return departedAt ? [{ user_id: "test-user-id", departed_at: departedAt }] : [];
+      }
+      return [{ id: TEAM_ID }];
+    }));
+  const remove = () =>
+    DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
+    );
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
+    mockRequireTeamPermission.mockResolvedValue(ownerMembership);
+    mockRequireRecentSession.mockResolvedValue(null);
+    mockIsRoleAbove.mockReturnValue(true);
+    mockPrismaTeamMember.deleteMany.mockResolvedValue({ count: 1 });
+    mockPrismaTeamMember.findFirst.mockResolvedValue(asActor(TEAM_ROLE.OWNER));
+    mockPrismaTeamMember.findUnique.mockResolvedValue({
+      id: MEMBER_ID, teamId: TEAM_ID, tenantId: "tenant-1", userId: "target-user", role: TEAM_ROLE.MEMBER, deactivatedAt: null,
+    });
+  });
+
+  it("refuses (403) a departure after admission by a deactivated tenant row, removing nothing and writing no audit", async () => {
+    actorTenantState(after(1));
+
+    expect((await remove()).status).toBe(403);
+    expect(mockPrismaTeamMember.deleteMany).not.toHaveBeenCalled();
+    expect(mockPrismaTeamMemberKey.deleteMany).not.toHaveBeenCalled();
+    expect(mockInvalidateUserSessions).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  it("refuses (403) a departure known only by its record, removing nothing and writing no audit", async () => {
+    actorTenantState(null, after(1));
+
+    expect((await remove()).status).toBe(403);
+    expect(mockPrismaTeamMember.deleteMany).not.toHaveBeenCalled();
+    expect(mockPrismaTeamMemberKey.deleteMany).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  it("refuses (403) a departure at exactly the admission instant", async () => {
+    actorTenantState(after(0));
+
+    expect((await remove()).status).toBe(403);
+    expect(mockPrismaTeamMember.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("allows a guest actor, an active one, a re-admitted one and a re-provisioned one to remove", async () => {
+    for (const setup of [
+      () => actorTenantState(null, null, false),
+      () => actorTenantState(null),
+      () => actorTenantState(after(-1000)),
+      () => actorTenantState(null, after(-1000)),
+    ]) {
+      setup();
+      mockPrismaTeamMember.deleteMany.mockClear();
+      expect((await remove()).status).toBe(200);
+      expect(mockPrismaTeamMember.deleteMany).toHaveBeenCalledTimes(1);
+    }
   });
 });

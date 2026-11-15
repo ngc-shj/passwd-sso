@@ -1539,13 +1539,23 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
             },
           };
         }
+        // Compose derives its project name from the working directory, so from a
+        // git worktree it finds no running `db`; the service runs under the main
+        // checkout. Try REPO_ROOT first, then the main worktree.
+        const mainWorktree = spawnSync("git", ["worktree", "list", "--porcelain"], { encoding: "utf8", cwd: REPO_ROOT })
+          .stdout?.split("\n").find((l) => l.startsWith("worktree "))?.slice("worktree ".length);
+        const composeDir =
+          [REPO_ROOT, mainWorktree]
+            .filter((d): d is string => Boolean(d))
+            .find((d) => spawnSync("docker", ["compose", "exec", "-T", "db", "psql", "--version"], { encoding: "utf8", timeout: 20_000, cwd: d }).status === 0)
+          ?? REPO_ROOT;
         return {
           kind: "compose",
           run: (user, _password, input, args) =>
             spawnSync(
               "docker",
               ["compose", "exec", "-T", "db", "psql", "-X", "-U", user, "-d", url.pathname.slice(1), ...args],
-              { input, encoding: "utf8", timeout: 30_000, cwd: REPO_ROOT },
+              { input, encoding: "utf8", timeout: 30_000, cwd: composeDir },
             ),
         };
       }

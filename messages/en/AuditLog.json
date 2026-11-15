@@ -55,6 +55,8 @@
   "TEAM_MEMBER_SCIM_APPROVE": "Approved SCIM admission",
   "TEAM_MEMBER_SCIM_REJECT": "Rejected SCIM admission",
   "TEAM_MEMBER_INVITE_ACCEPT": "Team invitation accepted",
+  "TEAM_MEMBER_INVITE_CANCEL": "Team invitation cancelled",
+  "TEAM_MEMBER_OPERATOR_READMIT": "Team membership re-admitted by operator",
   "SHARE_CREATE": "Created share link",
   "SHARE_REVOKE": "Revoked share link",
   "SHARE_ACCESS_VERIFY_SUCCESS": "Share password verified",

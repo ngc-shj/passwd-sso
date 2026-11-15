@@ -16,7 +16,7 @@ const {
   mockEntryFindUnique: vi.fn(),
   mockHistoryFindUnique: vi.fn(),
   mockTransaction: vi.fn(),
-  mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
+  mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: (tenantId: string) => unknown) => fn("tenant-1")),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -192,6 +192,8 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
           // The actor's membership, re-read under the team lock.
           findFirst: vi.fn().mockResolvedValue(actor),
         },
+        tenantMember: { findMany: vi.fn().mockResolvedValue([]) },
+        tenantMemberDeparture: { findMany: vi.fn().mockResolvedValue([]) },
         teamPasswordEntry: { update: entryUpdate },
       }),
     );

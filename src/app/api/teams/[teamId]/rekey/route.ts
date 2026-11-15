@@ -18,7 +18,7 @@ import { teamRekeyReadLimiter } from "@/lib/security/rate-limiters";
 import { displayIdentityOf, fetchUserDisplayMap } from "@/lib/audit/audit-user-lookup";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import {
-  deactivatedTeamKeyVersionHolderCount,
+  inactiveTeamKeyVersionHolderCount,
   isRekeyerHolder,
   normalizeTeamKeyVersion,
   rekeyPendingWhere,
@@ -71,7 +71,7 @@ async function handleGET(req: NextRequest, { params }: RouteContext) {
   if (!query.ok) return query.response;
   const { after, limit } = query.data;
 
-  const result = await withTeamTenantRls(teamId, async (_tenantId, tx) => {
+  const result = await withTeamTenantRls(teamId, async (tenantId, tx) => {
     const team = await tx.team.findUnique({ where: { id: teamId }, select: { teamKeyVersion: true } });
     if (!team) return null;
     const pendingWhere = { teamId, ...rekeyPendingWhere(team.teamKeyVersion) };
@@ -105,7 +105,7 @@ async function handleGET(req: NextRequest, { params }: RouteContext) {
     const rekeyersByVersion: Record<number, string[]> = {};
     const holdersByVersion: Record<number, VersionHolders> = {};
     for (const [version, count] of [...pendingPerVersion].sort(([a], [b]) => a - b)) {
-      const holders = await teamKeyVersionHolders(tx, teamId, version);
+      const holders = await teamKeyVersionHolders(tx, tenantId, teamId, version);
       const rekeyers = holders.filter(isRekeyerHolder);
       holdersByVersion[version] = {
         callerHolds: holders.some((h) => h.userId === userId),
@@ -115,7 +115,7 @@ async function handleGET(req: NextRequest, { params }: RouteContext) {
           .map((h) => ({ userId: h.userId, canRekey: isRekeyerHolder(h) }))
           .sort((a, b) => Number(b.canRekey) - Number(a.canRekey) || a.userId.localeCompare(b.userId))
           .slice(0, REKEY_HOLDERS_LISTED_MAX),
-        deactivatedHolderCount: await deactivatedTeamKeyVersionHolderCount(tx, teamId, version),
+        deactivatedHolderCount: await inactiveTeamKeyVersionHolderCount(tx, tenantId, teamId, version),
       };
       let state: RekeyEntryState;
       if (holders.some((h) => h.userId === userId)) {

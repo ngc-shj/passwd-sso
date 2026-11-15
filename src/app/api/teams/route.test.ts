@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Prisma } from "@prisma/client";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockCheckAuth, mockPrismaTeamMember, mockPrismaTeam, mockWithUserTenantRls, mockWithBypassRls, mockResolveUserTenantIdFromClient, mockGetLogger, mockLoggerInfo, mockRequireTenantPermission, MockTenantAuthError } = vi.hoisted(() => {
+const { mockAuth, mockCheckAuth, mockPrismaTeamMember, mockPrismaTenantMember, mockPrismaTenantMemberDeparture, mockPrismaTeam, mockWithUserTenantRls, mockWithBypassRls, mockResolveUserTenantIdFromClient, mockGetLogger, mockLoggerInfo, mockRequireTenantPermission, MockTenantAuthError } = vi.hoisted(() => {
   const loggerInfo = vi.fn();
   class _TenantAuthError extends Error {
     status: number;
@@ -16,6 +16,8 @@ const { mockAuth, mockCheckAuth, mockPrismaTeamMember, mockPrismaTeam, mockWithU
     mockAuth: vi.fn(),
     mockCheckAuth: vi.fn(),
     mockPrismaTeamMember: { findMany: vi.fn() },
+    mockPrismaTenantMember: { findMany: vi.fn() },
+    mockPrismaTenantMemberDeparture: { findMany: vi.fn() },
     mockPrismaTeam: { findUnique: vi.fn(), create: vi.fn() },
     mockWithUserTenantRls: vi.fn(),
     mockWithBypassRls: vi.fn(),
@@ -31,6 +33,8 @@ vi.mock("@/lib/auth/session/check-auth", () => ({ checkAuth: mockCheckAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     teamMember: mockPrismaTeamMember,
+    tenantMember: mockPrismaTenantMember,
+    tenantMemberDeparture: mockPrismaTenantMemberDeparture,
     team: mockPrismaTeam,
   },
 }));
@@ -62,12 +66,15 @@ const now = new Date("2025-01-01T00:00:00Z");
 
 describe("GET /api/teams", () => {
   const makeReq = () => createRequest("GET", "http://localhost/api/teams");
+  const membershipBase = { userId: "test-user-id", tenantId: "tenant-1", admittedAt: null, createdAt: now };
 
   beforeEach(() => {
     vi.resetAllMocks();
     mockCheckAuth.mockResolvedValue({ ok: true, auth: { type: "session", userId: "test-user-id" } });
     mockWithBypassRls.mockImplementation(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma));
     mockResolveUserTenantIdFromClient.mockResolvedValue("tenant-1");
+    mockPrismaTenantMember.findMany.mockResolvedValue([]);
+    mockPrismaTenantMemberDeparture.findMany.mockResolvedValue([]);
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -85,6 +92,7 @@ describe("GET /api/teams", () => {
   it("returns list of teams with role and tenant info", async () => {
     mockPrismaTeamMember.findMany.mockResolvedValue([
       {
+        ...membershipBase,
         role: TEAM_ROLE.OWNER,
         team: {
           id: "team-1",
@@ -97,6 +105,7 @@ describe("GET /api/teams", () => {
         },
       },
       {
+        ...membershipBase,
         role: TEAM_ROLE.MEMBER,
         team: {
           id: "team-2",
@@ -126,6 +135,7 @@ describe("GET /api/teams", () => {
   it("returns isCrossTenant true when team belongs to different tenant", async () => {
     mockPrismaTeamMember.findMany.mockResolvedValue([
       {
+        ...membershipBase,
         role: TEAM_ROLE.MEMBER,
         team: {
           id: "team-ext",
@@ -148,6 +158,7 @@ describe("GET /api/teams", () => {
   it("logs cross-tenant team memberships", async () => {
     mockPrismaTeamMember.findMany.mockResolvedValue([
       {
+        ...membershipBase,
         role: TEAM_ROLE.MEMBER,
         team: {
           id: "team-ext",
@@ -171,6 +182,7 @@ describe("GET /api/teams", () => {
   it("does not log when all teams are same tenant", async () => {
     mockPrismaTeamMember.findMany.mockResolvedValue([
       {
+        ...membershipBase,
         role: TEAM_ROLE.OWNER,
         team: {
           id: "team-1",
@@ -210,6 +222,7 @@ describe("GET /api/teams", () => {
     mockCheckAuth.mockResolvedValue({ ok: true, auth: { type: "token", userId: "ext-user-id", scopes: ["passwords:read"] } });
     mockPrismaTeamMember.findMany.mockResolvedValue([
       {
+        ...membershipBase,
         role: TEAM_ROLE.MEMBER,
         team: {
           id: "team-1",
@@ -241,6 +254,63 @@ describe("GET /api/teams", () => {
     });
     const res = await GET(req);
     expect(res.status).toBe(401);
+  });
+
+  const teamOf = (id: string, tenantId: string) => ({
+    id,
+    name: id,
+    slug: id,
+    description: null,
+    createdAt: now,
+    _count: { members: 1 },
+    tenant: { id: tenantId, name: tenantId },
+  });
+
+  it("omits a leftover membership: the user left the team's tenant after joining the team", async () => {
+    mockPrismaTeamMember.findMany.mockResolvedValue([
+      { ...membershipBase, role: TEAM_ROLE.ADMIN, team: teamOf("team-left", "tenant-1") },
+      { ...membershipBase, tenantId: "tenant-3", role: TEAM_ROLE.MEMBER, team: teamOf("team-kept", "tenant-3") },
+    ]);
+    mockPrismaTenantMemberDeparture.findMany.mockImplementation(async ({ where }: { where: { tenantId: string } }) =>
+      where.tenantId === "tenant-1" ? [{ userId: "test-user-id", departedAt: new Date("2025-06-01T00:00:00Z") }] : [],
+    );
+
+    const res = await GET(makeReq());
+    const json = await res.json();
+    expect(json.map((t: { id: string }) => t.id)).toEqual(["team-kept"]);
+  });
+
+  it("matches each (tenant, user) pair: departed from T1 but a guest in T2 stays listed in T2", async () => {
+    mockPrismaTeamMember.findMany.mockResolvedValue([
+      { ...membershipBase, tenantId: "tenant-1", role: TEAM_ROLE.MEMBER, team: teamOf("team-t1", "tenant-1") },
+      { ...membershipBase, tenantId: "tenant-2", role: TEAM_ROLE.MEMBER, team: teamOf("team-t2", "tenant-2") },
+    ]);
+    mockPrismaTenantMemberDeparture.findMany.mockImplementation(async ({ where }: { where: { tenantId: string } }) =>
+      where.tenantId === "tenant-1" ? [{ userId: "test-user-id", departedAt: new Date("2025-06-01T00:00:00Z") }] : [],
+    );
+
+    const res = await GET(makeReq());
+    const json = await res.json();
+    expect(json.map((t: { id: string }) => t.id)).toEqual(["team-t2"]);
+    expect(mockPrismaTenantMember.findMany).toHaveBeenCalledTimes(2);
+  });
+
+  it("lists a re-admitted member: the departure predates admittedAt", async () => {
+    mockPrismaTeamMember.findMany.mockResolvedValue([
+      {
+        ...membershipBase,
+        admittedAt: new Date("2025-07-01T00:00:00Z"),
+        role: TEAM_ROLE.MEMBER,
+        team: teamOf("team-back", "tenant-1"),
+      },
+    ]);
+    mockPrismaTenantMemberDeparture.findMany.mockResolvedValue([
+      { userId: "test-user-id", departedAt: new Date("2025-06-01T00:00:00Z") },
+    ]);
+
+    const res = await GET(makeReq());
+    const json = await res.json();
+    expect(json.map((t: { id: string }) => t.id)).toEqual(["team-back"]);
   });
 });
 

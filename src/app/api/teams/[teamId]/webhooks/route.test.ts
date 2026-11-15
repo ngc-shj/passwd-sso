@@ -6,6 +6,9 @@ const {
   mockPrismaTeamWebhook,
   mockPrismaTeam,
   mockPrismaTeamMember,
+  mockPrismaTenantMember,
+  mockPrismaTenantMemberDeparture,
+  mockTx,
   mockRequireTeamPermission,
   mockWithTeamTenantRls,
   mockLogAudit,
@@ -27,11 +30,13 @@ const {
   mockPrismaTeamMember: {
     findMany: vi.fn(),
   },
+  mockPrismaTenantMember: { findMany: vi.fn() },
+  mockPrismaTenantMemberDeparture: { findMany: vi.fn() },
+  // The tx the (tenantId, tx) callback form receives; filled from the model mocks below.
+  mockTx: {} as Record<string, unknown>,
   mockExecuteRaw: vi.fn().mockResolvedValue(1),
   mockRequireTeamPermission: vi.fn(),
-  mockWithTeamTenantRls: vi.fn(
-    async (_teamId: string, fn: (tenantId: string) => unknown) => fn("22222222-2222-4222-8222-222222222222"),
-  ),
+  mockWithTeamTenantRls: vi.fn(),
   mockLogAudit: vi.fn(),
   mockEncryptServerData: vi.fn(() => ({
     ciphertext: "encrypted-secret",
@@ -42,6 +47,17 @@ const {
   mockGetMasterKeyByVersion: vi.fn(() => Buffer.alloc(32)),
   mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
+
+Object.assign(mockTx, {
+  teamWebhook: mockPrismaTeamWebhook,
+  teamMember: mockPrismaTeamMember,
+  tenantMember: mockPrismaTenantMember,
+  tenantMemberDeparture: mockPrismaTenantMemberDeparture,
+});
+const TENANT_ID = "22222222-2222-4222-8222-222222222222";
+mockWithTeamTenantRls.mockImplementation(
+  async (_teamId: string, fn: (tenantId: string, tx: unknown) => unknown) => fn(TENANT_ID, mockTx),
+);
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
@@ -397,6 +413,18 @@ describe("GET /api/teams/[teamId]/webhooks — creatorAuthorized", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockPrismaTenantMember.findMany.mockResolvedValue([]);
+    mockPrismaTenantMemberDeparture.findMany.mockResolvedValue([]);
+  });
+
+  const created = new Date("2026-01-01T00:00:00Z");
+  const member = (userId: string, role: string, extra: Record<string, unknown> = {}) => ({
+    userId,
+    role,
+    deactivatedAt: null,
+    admittedAt: null,
+    createdAt: created,
+    ...extra,
   });
 
   it("maps legacy / authorized / unauthorized creators to null / true / false and hides createdById", async () => {
@@ -407,8 +435,8 @@ describe("GET /api/teams/[teamId]/webhooks — creatorAuthorized", () => {
       { ...baseRow, id: "wh-demoted", createdById: "u-member" },
     ]);
     mockPrismaTeamMember.findMany.mockResolvedValue([
-      { userId: "u-admin", role: "ADMIN", deactivatedAt: null },
-      { userId: "u-member", role: "MEMBER", deactivatedAt: null },
+      member("u-admin", "ADMIN"),
+      member("u-member", "MEMBER"),
     ]);
 
     const req = createRequest("GET", "http://localhost:3000/api/teams/33333333-3333-4333-8333-333333333333/webhooks");
@@ -427,7 +455,7 @@ describe("GET /api/teams/[teamId]/webhooks — creatorAuthorized", () => {
         teamId: "33333333-3333-4333-8333-333333333333",
         userId: { in: ["u-admin", "u-left", "u-member"] },
       },
-      select: { userId: true, role: true, deactivatedAt: true },
+      select: { userId: true, role: true, deactivatedAt: true, admittedAt: true, createdAt: true },
     });
   });
 
@@ -436,7 +464,7 @@ describe("GET /api/teams/[teamId]/webhooks — creatorAuthorized", () => {
       { ...baseRow, id: "wh-1", createdById: "u-admin" },
     ]);
     mockPrismaTeamMember.findMany.mockResolvedValue([
-      { userId: "u-admin", role: "ADMIN", deactivatedAt: new Date() },
+      member("u-admin", "ADMIN", { deactivatedAt: new Date() }),
     ]);
     const req = createRequest("GET", "http://localhost:3000/api/teams/33333333-3333-4333-8333-333333333333/webhooks");
     const { json } = await parseResponse(await GET(req, teamParams()));
@@ -450,5 +478,33 @@ describe("GET /api/teams/[teamId]/webhooks — creatorAuthorized", () => {
     const req = createRequest("GET", "http://localhost:3000/api/teams/33333333-3333-4333-8333-333333333333/webhooks");
     await GET(req, teamParams());
     expect(mockPrismaTeamMember.findMany).not.toHaveBeenCalled();
+    expect(mockPrismaTenantMember.findMany).not.toHaveBeenCalled();
+  });
+
+  it("reads the creators' tenant rows in the team's tenant and reports a leftover creator as unauthorized", async () => {
+    mockPrismaTeamWebhook.findMany.mockResolvedValue([
+      { ...baseRow, id: "wh-leftover", createdById: "u-leftover" },
+      { ...baseRow, id: "wh-guest", createdById: "u-guest" },
+      { ...baseRow, id: "wh-back", createdById: "u-back" },
+    ]);
+    mockPrismaTeamMember.findMany.mockResolvedValue([
+      member("u-leftover", "ADMIN"),
+      member("u-guest", "ADMIN"),
+      member("u-back", "ADMIN", { admittedAt: new Date("2026-03-01T00:00:00Z") }),
+    ]);
+    mockPrismaTenantMemberDeparture.findMany.mockResolvedValue([
+      { userId: "u-leftover", departedAt: new Date("2026-02-01T00:00:00Z") },
+      { userId: "u-back", departedAt: new Date("2026-02-01T00:00:00Z") },
+    ]);
+
+    const req = createRequest("GET", "http://localhost:3000/api/teams/33333333-3333-4333-8333-333333333333/webhooks");
+    const { json } = await parseResponse(await GET(req, teamParams()));
+    const byId = Object.fromEntries(
+      json.webhooks.map((w: { id: string; creatorAuthorized: boolean | null }) => [w.id, w.creatorAuthorized]),
+    );
+    expect(byId).toEqual({ "wh-leftover": false, "wh-guest": true, "wh-back": true });
+    expect(mockPrismaTenantMember.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ tenantId: TENANT_ID }) }),
+    );
   });
 });

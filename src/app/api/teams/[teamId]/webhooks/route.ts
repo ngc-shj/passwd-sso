@@ -60,8 +60,8 @@ async function handleGET(req: NextRequest, { params }: Params) {
     return handleAuthError(e);
   }
 
-  const webhooks = await withTeamTenantRls(teamId, async () => {
-    const rows = await prisma.teamWebhook.findMany({
+  const webhooks = await withTeamTenantRls(teamId, async (tenantId, tx) => {
+    const rows = await tx.teamWebhook.findMany({
       where: { teamId },
       select: {
         id: true,
@@ -77,7 +77,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
       },
       orderBy: { createdAt: "desc" },
     });
-    const verdicts = await webhookCreatorVerdicts(prisma, teamId, rows);
+    const verdicts = await webhookCreatorVerdicts(tx, tenantId, teamId, rows);
     // createdById itself stays server-side; only the verdict is exposed.
     // A NULL creator is legacy: null, not a verdict.
     return rows.map(({ createdById, ...rest }) => ({

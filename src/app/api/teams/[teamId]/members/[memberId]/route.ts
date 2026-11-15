@@ -7,7 +7,6 @@ import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
 import { updateMemberRoleSchema } from "@/lib/validations";
 import {
   activeTeamAdmission,
-  activeTeamRole,
   hasTeamPermission,
   requireTeamPermission,
   isRoleAbove,
@@ -336,11 +335,15 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
       // Serialise with key rotation first: a removal committing after a
       // rotation read the member set would leave the removed member a key to
       // the new version (team-key-rotation-lock.ts).
-      await lockActorThenTeam(tx, tenantId, teamId, session.user.id);
+      const rows = await lockActorThenTeam(tx, tenantId, teamId, session.user.id);
       // The acting member's authority as it stands now (departure, removal or
       // demotion since the permission check), judged against the target.
-      const actorRole = await activeTeamRole(tx, teamId, session.user.id);
-      if (!actorAuthorized(actorRole, TEAM_PERMISSION.MEMBER_REMOVE, target.role)) throw new ActorNotPermittedError();
+      const actor = await activeTeamAdmission(tx, teamId, session.user.id);
+      if (
+        !actor ||
+        !actorAuthorized(actor.role, TEAM_PERMISSION.MEMBER_REMOVE, target.role) ||
+        actorDepartedSinceAdmission(rows.get(session.user.id), actor.admittedAt)
+      ) throw new ActorNotPermittedError();
       // Re-read under the lock: the row is still active or departed (a return
       // or a group removal since the check above changes what is removed).
       const removed = await tx.teamMember.deleteMany({

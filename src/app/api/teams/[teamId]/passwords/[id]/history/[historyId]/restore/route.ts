@@ -72,7 +72,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   if (!body.ok) return body.response;
   const { encryptedBlob, encryptedOverview, snapshotBlobIv } = body.data;
 
-  const outcome = await withTeamTenantRls(teamId, async () =>
+  const outcome = await withTeamTenantRls(teamId, async (tenantId) =>
     prisma.$transaction(async (tx): Promise<RestoreOutcome> => {
     // Lock order: teams FOR SHARE (serialises with rotation, member removal
     // and departure, so the holder check below reads a settled member set),
@@ -145,7 +145,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
 
     // A row whose team key version no active member holds cannot be opened
     // by anyone: restoring it would leave the entry unreadable.
-    if ((await teamKeyVersionHolders(tx, teamId, row.teamKeyVersion)).length === 0) {
+    if ((await teamKeyVersionHolders(tx, tenantId, teamId, row.teamKeyVersion)).length === 0) {
       return { ok: false, code: API_ERROR.HISTORY_KEY_UNAVAILABLE };
     }
 

@@ -1,6 +1,7 @@
 import type { Prisma, TeamRole } from "@prisma/client";
 import { hasTeamPermission } from "@/lib/auth/access/team-auth";
 import { TEAM_PERMISSION } from "@/lib/constants";
+import { actorDepartedSinceAdmission, readTenantRows } from "./tenant-departure-read";
 import { normalizeTeamKeyVersion } from "./team-key-resolution";
 
 /**
@@ -55,14 +56,22 @@ export async function itemKeyIvReused(
 
 export type TeamKeyVersionHolder = { userId: string; role: TeamRole };
 
+type HolderTx = Pick<
+  Prisma.TransactionClient,
+  "teamMemberKey" | "teamMember" | "tenantMember" | "tenantMemberDeparture"
+>;
+
 /**
  * Holders of team key version `version` (normalised): users with a
- * `team_member_keys` row at that version whose team membership is active.
- * Authoritative only under a lock that membership removal and departure
- * also take (the team row, see team-key-rotation-lock.ts).
+ * `team_member_keys` row at that version whose team membership is active and
+ * who are not leftovers (left the tenant at or after their admission, see
+ * actorDepartedSinceAdmission). Authoritative only under a lock that
+ * membership removal and departure also take (the team row, see
+ * team-key-rotation-lock.ts); `tx` is the team's own RLS context.
  */
 export async function teamKeyVersionHolders(
-  tx: Pick<Prisma.TransactionClient, "teamMemberKey" | "teamMember">,
+  tx: HolderTx,
+  tenantId: string,
   teamId: string,
   version: number,
 ): Promise<TeamKeyVersionHolder[]> {
@@ -71,20 +80,26 @@ export async function teamKeyVersionHolders(
     select: { userId: true },
   });
   if (keys.length === 0) return [];
-  return tx.teamMember.findMany({
+  const members = await tx.teamMember.findMany({
     where: { teamId, userId: { in: keys.map((k) => k.userId) }, deactivatedAt: null },
-    select: { userId: true, role: true },
+    select: { userId: true, role: true, admittedAt: true, createdAt: true },
   });
+  const tenantRows = await readTenantRows(tx, tenantId, members.map((m) => m.userId));
+  return members
+    .filter((m) => !actorDepartedSinceAdmission(tenantRows.get(m.userId), m.admittedAt ?? m.createdAt))
+    .map((m) => ({ userId: m.userId, role: m.role }));
 }
 
 /**
- * Members holding a key at team key version `version` (normalised) whose
- * team membership is deactivated (tenant departure, IdP removal): not
- * holders, but they would hold the version again if reactivated. Read in the
- * team's own RLS context, like teamKeyVersionHolders.
+ * Members holding a key at team key version `version` (normalised) who are
+ * not holders but would hold the version again: a deactivated team membership
+ * (tenant departure, IdP removal) or a leftover active one (see
+ * teamKeyVersionHolders). Read in the team's own RLS context, like
+ * teamKeyVersionHolders.
  */
-export async function deactivatedTeamKeyVersionHolderCount(
-  tx: Pick<Prisma.TransactionClient, "teamMemberKey" | "teamMember">,
+export async function inactiveTeamKeyVersionHolderCount(
+  tx: HolderTx,
+  tenantId: string,
   teamId: string,
   version: number,
 ): Promise<number> {
@@ -93,9 +108,16 @@ export async function deactivatedTeamKeyVersionHolderCount(
     select: { userId: true },
   });
   if (keys.length === 0) return 0;
-  return tx.teamMember.count({
-    where: { teamId, userId: { in: keys.map((k) => k.userId) }, deactivatedAt: { not: null } },
+  const members = await tx.teamMember.findMany({
+    where: { teamId, userId: { in: keys.map((k) => k.userId) } },
+    select: { userId: true, deactivatedAt: true, admittedAt: true, createdAt: true },
   });
+  const tenantRows = await readTenantRows(tx, tenantId, members.map((m) => m.userId));
+  return members.filter(
+    (m) =>
+      m.deactivatedAt !== null ||
+      actorDepartedSinceAdmission(tenantRows.get(m.userId), m.admittedAt ?? m.createdAt),
+  ).length;
 }
 
 /** A holder who may re-key: their role carries TEAM_UPDATE. */

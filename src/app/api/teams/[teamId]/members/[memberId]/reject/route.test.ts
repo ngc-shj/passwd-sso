@@ -224,6 +224,32 @@ describe("POST /api/teams/[teamId]/members/[memberId]/reject", () => {
     expect(tx.teamMember.deleteMany).not.toHaveBeenCalled();
   });
 
+  it("returns 403, changing nothing, for an actor who left the tenant at or after their admission", async () => {
+    const admittedAt = new Date("2026-03-01T00:00:00.000Z");
+    tx.teamMember.findFirst.mockResolvedValueOnce({ role: TEAM_ROLE.ADMIN, admittedAt, createdAt: admittedAt });
+    mockLockTenantRows.mockResolvedValue(new Map([
+      [ACTOR_ID, { hasRow: true, deactivatedAt: null, departedAt: admittedAt }],
+      [TARGET_USER_ID, { hasRow: true, deactivatedAt: null, departedAt: null }],
+    ]));
+
+    const res = await reject();
+
+    expect(res.status).toBe(403);
+    expect(tx.teamMember.deleteMany).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
+  });
+
+  it("rejects for an actor re-admitted after their departure", async () => {
+    const admittedAt = new Date("2026-03-01T00:00:00.000Z");
+    tx.teamMember.findFirst.mockResolvedValueOnce({ role: TEAM_ROLE.ADMIN, admittedAt, createdAt: admittedAt });
+    mockLockTenantRows.mockResolvedValue(new Map([
+      [ACTOR_ID, { hasRow: true, deactivatedAt: null, departedAt: new Date("2026-02-01T00:00:00.000Z") }],
+      [TARGET_USER_ID, { hasRow: true, deactivatedAt: null, departedAt: null }],
+    ]));
+
+    expect((await reject()).status).toBe(200);
+  });
+
   it("returns 404 when the target is no longer pending under the lock (findFirst re-read)", async () => {
     tx.teamMember.findFirst
       .mockResolvedValueOnce({ role: TEAM_ROLE.ADMIN }) // actor
