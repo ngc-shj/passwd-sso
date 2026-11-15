@@ -22,6 +22,7 @@ import {
   assertRlsApplies,
   appConnectionString,
   expectBypassNotices,
+  expectBypassRefusal,
   sqlStateOf,
   type TestContext,
 } from "./helpers";
@@ -223,7 +224,7 @@ describe("tenants RLS (C1 / C4 / C5)", () => {
   });
 
   it("(d) a bypass grant naming `tenant` admits both tenants with no report", async () => {
-    const grant = defineGrant(BYPASS_PURPOSE.SYSTEM_MAINTENANCE, ["tenant"]);
+    const grant = BYPASS_GRANT.SYSTEM_MAINTENANCE_TENANT_LOOKUP;
     let rows: Array<{ id: string }> = [];
     const notices = await expectBypassNotices(async () => {
       rows = await ctx.app.prisma.$transaction(async (tx) => {
@@ -238,19 +239,18 @@ describe("tenants RLS (C1 / C4 / C5)", () => {
     expect(notices).toEqual([]);
   });
 
-  it("(e) a bypass grant not naming `tenant` still admits both tenants, but reports exactly one notice", async () => {
+  it("(e) a bypass grant not naming `tenant` refuses the read, with exactly one report", async () => {
     const grant = defineGrant(BYPASS_PURPOSE.SYSTEM_MAINTENANCE, ["user"]);
-    let rows: Array<{ id: string }> = [];
-    const notices = await expectBypassNotices(async () => {
-      rows = await ctx.app.prisma.$transaction(async (tx) => {
+    const { notices, table } = await expectBypassRefusal(() =>
+      ctx.app.prisma.$transaction(async (tx) => {
         await setBypassGucs(tx, grant);
         return tx.tenant.findMany({
           where: { id: { in: [tenantA, tenantB] } },
           select: { id: true },
         });
-      });
-    });
-    expect(rows.map((r) => r.id).sort()).toEqual([tenantA, tenantB].sort());
+      }),
+    );
+    expect(table).toBe("tenants");
     // The policy's bypass branch is an uncorrelated sub-SELECT
     // ([E-RLS-TENANT-INITPLAN]), hoisted to one evaluation per statement —
     // one notice, not one per row scanned.

@@ -10,6 +10,7 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { readJsonWithCap } from "@/lib/http/parse-body";
 import { getLogger } from "@/lib/logger";
+import { errorLogFields } from "@/lib/logger/error-fields";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { z } from "zod";
 import { withUserTenantRls } from "@/lib/tenant-context";
@@ -244,7 +245,13 @@ async function handlePOST(request: NextRequest) {
   const invalidationResult = await invalidateUserSessions(userId, {
     tenantId: user.tenantId,
     reason: "KEY_ROTATION",
-  }).catch(() => null);
+  }).catch((err) => {
+    getLogger().error(
+      { userId, error: errorLogFields(err) },
+      "vault.rotateKey.invalidateFailed",
+    );
+    return null;
+  });
 
   await logAuditAsync({
     ...personalAuditBase(request, userId),

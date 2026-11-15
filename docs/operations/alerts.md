@@ -485,9 +485,12 @@ the resulting always-firing alarm gets muted.
 **Trigger**: no event for > 2 hours
 **Recovery**: restart the verify worker (on ECS the `*-audit-chain-verify-worker`
 service; elsewhere `npm run worker:audit-chain-verify`); check DB SELECT
-permissions on `audit_logs` and `tenants`. On ECS it connects as `passwd_app`
-through the app secret's `DATABASE_URL`, so a rotated app password reaches it
-only when its task restarts.
+permissions on `audit_logs` and `tenants`. It connects as
+`passwd_audit_chain_verifier` (column-level SELECT only), through the app
+secret's `AUDIT_CHAIN_VERIFY_DATABASE_URL`; in production it has no
+`DATABASE_URL` fallback and does not start without that key. A rotated
+password reaches it only when its task restarts. A verifier query that names a
+column outside the role's grant fails with 42501 and counts as an errored tick.
 
 CloudWatch (`infra/terraform/monitoring.tf`): filter
 `<name_prefix>-audit-chain-verify-heartbeat` on
@@ -579,8 +582,8 @@ reason:
 
 - `TENANT_ENUMERATION_FAILED` — the read threw (the line carries the
   error code), e.g. 42501 when a role lacks EXECUTE on
-  `public.rls_bypass_admits` or, once enforce mode ships (#921), when
-  the grant does not name `tenants`.
+  `public.rls_bypass_admits`, or when the grant does not name `tenants`
+  (`RLS_BYPASS_NOT_GRANTED: tenants`).
 - `TENANT_ENUMERATION_EMPTY` — the read returned no tenants at all.
 - `TENANT_ENUMERATION_INCOMPLETE` — it returned tenants but not
   `__system__`, i.e. a tenant-scoped rather than a bypass read. The
@@ -1070,7 +1073,7 @@ reports a drifted trust or inline policy.
 **Severity**: high
 **Trigger**: either of two EventBridge rules.
 
-- `<name_prefix>-audit-anchor-publisher-family-task-outside-service` — the
+- `<name_prefix>-anchor-publisher-family-outside-svc` — the
   native ECS "ECS Task State Change" event (no trail needed) for a task whose
   `taskDefinitionArn` is a revision of the publisher's family (the family's ARN
   followed by `:`, so a family whose name only starts with it does not match)
@@ -1078,7 +1081,13 @@ reports a drifted trust or inline policy.
   than `service:<name_prefix>-audit-anchor-publisher`. ECS sets `group` to
   `service:<service name>` for a task a service launched and to
   `family:<family>` by default for one started otherwise. A task emits several
-  state changes, so one task can notify more than once.
+  state changes, so one task can notify more than once. Until #1020 it was named
+  `<name_prefix>-audit-anchor-publisher-family-task-outside-service`, which is
+  66 characters with `passwd-sso-prod` (EventBridge allows 64) and failed every
+  plan. On a stack that deployed it under the old name (a `<name_prefix>` of at
+  most 13 characters), the rename replaces the rule: between the old rule's
+  deletion and the new one's creation in that `terraform apply`, a matching task
+  notifies nobody.
 - `<name_prefix>-audit-anchor-publisher-family-run-task` — CloudTrail `RunTask`
   or `StartTask` naming the publisher's family in `taskDefinition` (`family`,
   `family:revision` or the full ARN), in any cluster (needs the trail). `group`
@@ -1110,18 +1119,36 @@ Emitted by the pool listener in `src/lib/db/pool-factory.ts`. The database
 raised it when a bypassed statement examined a row of a table that is not
 in the bypass's grant (`app.bypass_tables`). The line names `table` and
 `purpose`. It is rate-limited to one line per (table, purpose) per process
-per minute.
+per minute, so the metric counts lines, not refused statements.
 
-In report mode the statement was **admitted**. The line records a grant that
-is missing a table. Once enforce mode ships (#911), the same reach is
-refused.
+The database is enforcing (`public.rls_bypass_enforced()` is true): the
+WARNING this line reports is followed by a refusal, SQLSTATE 42501 with
+`RLS_BYPASS_NOT_GRANTED: <table>`. A statement was **refused**, and the
+request or job that issued it failed unless its code caught the error. The
+line is the only trace of a refusal that was caught.
 
 **Severity**: medium
 **Trigger**: any occurrence. The normal count is 0.
 **Recovery**: find the code path that serves `purpose` and reaches
-`table`. Then either add the table's model to that grant in
-`BYPASS_GRANT`, or stop the path from reaching the table. Do this before
-enforce mode is turned on.
+`table`: the same time window in the same log group holds the failing request
+or job (a 42501 whose message names the table). Then either add the table's
+model to that grant in `BYPASS_GRANT`, or stop the path from reaching the table,
+and deploy the fix.
+**Emergency lever**: if a production path is failing and the fix cannot ship
+soon, un-flip the database (`docs/operations/deployment.md`, "Un-flip"). That
+makes every bypass admitted again until the function is restored: the
+protection is off for all grants, not only the one that failed, and the audit of
+every later deploy fails until the function is restored or the deploy carries
+`RLS_REPORT_MODE_ACK`. Reports keep counting after an un-flip.
+
+A deploy that carries the acknowledgement logs one line with
+`_logType: "rls.report_mode_acknowledged"` from the migrate task (app log
+group, stream prefix `migrate`), whether the database is in report mode or
+enforcing again: a variable left behind would let a later un-flip pass. The `RlsReportModeAcknowledged` metric counts
+it and the `rls-report-mode-acknowledged` alarm fires on `Sum >= 1` in 5
+minutes, on every such deploy, so an acknowledgement left in a pipeline
+variable does not become the steady state unnoticed. Between deploys, and on
+compose, nothing reports an un-flipped database.
 
 CloudWatch: the `RlsBypassNotGranted` metric. There is one filter each on
 the app, audit-outbox-worker, retention-gc-worker, audit-anchor-publisher and
@@ -1129,10 +1156,12 @@ audit-chain-verify-worker log groups, and the `rls-bypass-not-granted` alarm
 fires on `Sum >= 1` in 5 minutes (`infra/terraform/monitoring.tf`). Operator
 scripts write the same record to stderr.
 
-**Not covered:** outside AWS the publisher and the verify worker have no
-managed log group (the compose files do not define them yet); wherever they
-run, collect their stdout and match the same `_logType`. A positive canary for
-each filter is a precondition of enforce mode.
+On AWS all five processes have a managed log group, each with both filters
+(`rls.bypass_not_granted` and `rls.bypass_notice_unparsed`). On docker compose
+the publisher and the verify worker have no service (the compose files do not
+define them yet); wherever they run, collect their stdout and match the same
+`_logType`. A positive canary for each filter is part of the checklist before a
+deploy that flips the database (`docs/operations/deployment.md`).
 
 Datadog: `{ _logType="rls.bypass_not_granted" OR _logType="rls.bypass_notice_unparsed" }`
 

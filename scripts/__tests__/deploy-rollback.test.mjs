@@ -20,6 +20,10 @@
  *   T6 — every output the script asks terraform for is declared in
  *        infra/terraform/outputs.tf (the stub refuses an unknown name, as
  *        terraform does).
+ *   T7 — RLS_ENFORCE_ATTESTED / RLS_REPORT_MODE_ACK reach the migrate task as
+ *        containerOverrides only when exported (each independently), and the
+ *        script never defaults either. The overrides JSON is built by the REAL
+ *        jq (the stub's minimal jq cannot build it).
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
@@ -27,10 +31,14 @@ import { mkdtempSync, rmSync, writeFileSync, chmodSync, readFileSync, existsSync
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
+import { ATTESTATION_ENV, FLIP_MIGRATION } from "../rls-enforce-preflight.mjs";
+import { RLS_REPORT_MODE_ACK_ENV } from "../audit-db-grants.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..", "..");
 const SCRIPT = resolve(REPO_ROOT, "scripts", "deploy.sh");
+
+const REAL_JQ = spawnSync("sh", ["-c", "command -v jq"], { encoding: "utf8" }).stdout.trim();
 
 const ECR_URL = "111122223333.dkr.ecr.ap-northeast-1.amazonaws.com/passwd-sso-prod-app";
 const KMS_KEY_ARN =
@@ -303,7 +311,11 @@ case "$1" in
 esac
 exit 0`,
   );
-  stub("jq", `exec ${JSON.stringify(process.execPath)} ${JSON.stringify(resolve(binDir, "jq.mjs"))} "$@"`);
+  stub(
+    "jq",
+    `if [ "\${1:-}" = -nc ]; then exec ${JSON.stringify(REAL_JQ)} "$@"; fi
+exec ${JSON.stringify(process.execPath)} ${JSON.stringify(resolve(binDir, "jq.mjs"))} "$@"`,
+  );
   // Minimal jq: only the two filters deploy.sh uses.
   writeFileSync(
     resolve(binDir, "jq.mjs"),
@@ -332,9 +344,10 @@ exit 0`,
   );
 }
 
-function runDeploy(args = []) {
+function runDeploy(args = [], extraEnv = {}) {
   return spawnSync("bash", [SCRIPT, ...args], {
     env: {
+      ...extraEnv,
       PATH: `${binDir}:${process.env.PATH}`,
       HOME: tmpDir,
       AWS_REGION: "ap-northeast-1",
@@ -569,5 +582,118 @@ describe("deploy.sh image signature enforcement", () => {
       ),
       "expected terraform apply to receive the digest ref",
     ).toBe(true);
+  });
+});
+
+describe("deploy.sh migrate-task variable forwarding", () => {
+  const ATTESTED = FLIP_MIGRATION;
+  // A quote, a backslash and a space: the value must survive as one JSON string.
+  const REASON = 'un-flip "INC-1" \\ rollback';
+
+  function runTaskLine() {
+    const [line] = logLines("ecs run-task");
+    return line;
+  }
+
+  function overridesOf(line) {
+    const m = /--overrides (\{.*\}) --output/.exec(line);
+    return m ? JSON.parse(m[1]) : null;
+  }
+
+  it("passes no --overrides when neither variable is exported", () => {
+    installStubs();
+
+    const result = runDeploy();
+
+    expect(result.status).toBe(0);
+    expect(runTaskLine()).not.toContain("--overrides");
+    expect(result.stdout).not.toContain("Forwarding to the migrate task");
+  });
+
+  it("treats an empty export as not set", () => {
+    installStubs();
+
+    const result = runDeploy([], { [ATTESTATION_ENV]: "", [RLS_REPORT_MODE_ACK_ENV]: "" });
+
+    expect(result.status).toBe(0);
+    expect(runTaskLine()).not.toContain("--overrides");
+  });
+
+  it("forwards the attestation alone to the migrate container", () => {
+    installStubs();
+
+    const result = runDeploy([], { [ATTESTATION_ENV]: ATTESTED });
+
+    expect(result.status).toBe(0);
+    expect(overridesOf(runTaskLine())).toEqual({
+      containerOverrides: [{ name: "migrate", environment: [{ name: ATTESTATION_ENV, value: ATTESTED }] }],
+    });
+    expect(result.stdout).toContain(`Forwarding to the migrate task: ${ATTESTATION_ENV}`);
+    expect(result.stdout).not.toContain(ATTESTED);
+  });
+
+  it("forwards the acknowledgement alone, escaped as one value", () => {
+    installStubs();
+
+    const result = runDeploy([], { [RLS_REPORT_MODE_ACK_ENV]: REASON });
+
+    expect(result.status).toBe(0);
+    expect(overridesOf(runTaskLine())).toEqual({
+      containerOverrides: [{ name: "migrate", environment: [{ name: RLS_REPORT_MODE_ACK_ENV, value: REASON }] }],
+    });
+    expect(result.stdout).toContain(`Forwarding to the migrate task: ${RLS_REPORT_MODE_ACK_ENV}`);
+  });
+
+  it("forwards both when both are exported", () => {
+    installStubs();
+
+    const result = runDeploy([], { [ATTESTATION_ENV]: ATTESTED, [RLS_REPORT_MODE_ACK_ENV]: "reason" });
+
+    expect(result.status).toBe(0);
+    expect(overridesOf(runTaskLine()).containerOverrides).toEqual([
+      {
+        name: "migrate",
+        environment: [
+          { name: ATTESTATION_ENV, value: ATTESTED },
+          { name: RLS_REPORT_MODE_ACK_ENV, value: "reason" },
+        ],
+      },
+    ]);
+  });
+
+  it("does not forward on the rollback path, which runs no migration", () => {
+    installStubs();
+
+    const result = runDeploy(["--rollback-to", `${ECR_URL}:v0.4.71`], { [ATTESTATION_ENV]: ATTESTED });
+
+    expect(logLines("ecs run-task")).toHaveLength(0);
+    expect(result.stdout).not.toContain("Forwarding to the migrate task");
+  });
+
+  it("names exactly the variables and the migration the scripts define", () => {
+    // deploy.sh is bash and cannot import them; a rename in the .mjs files
+    // without the same edit here must go red.
+    const text = readFileSync(SCRIPT, "utf8");
+    const code = text
+      .split("\n")
+      .filter((l) => !/^\s*#/.test(l))
+      .join("\n");
+    expect([...new Set(code.match(/\bRLS_[A-Z_]+\b/g))].sort()).toEqual([ATTESTATION_ENV, RLS_REPORT_MODE_ACK_ENV].sort());
+    expect(text).toContain(FLIP_MIGRATION);
+  });
+
+  it("never defaults either variable", () => {
+    // Comment lines document the usage (`NAME=value scripts/deploy.sh`) and are not code.
+    const script = readFileSync(SCRIPT, "utf8")
+      .split("\n")
+      .filter((l) => !/^\s*#/.test(l))
+      .join("\n");
+    for (const name of [ATTESTATION_ENV, RLS_REPORT_MODE_ACK_ENV]) {
+      // `${NAME:-}` (empty default) is the only expansion allowed.
+      expect(script, `${name} given a non-empty default`).not.toMatch(
+        new RegExp(`\\$\\{${name}:?[-=+?][^}]`),
+      );
+      expect(script, `${name} assigned`).not.toMatch(new RegExp(`(^|[\\s;])(export\\s+)?${name}=`, "m"));
+    }
   });
 });

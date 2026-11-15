@@ -27,7 +27,7 @@ import {
   createPrismaForRole,
   createTestContext,
   enterBypassRole,
-  expectBypassNotices,
+  expectBypassRefusal,
   gucSentinels,
   parseNoticeCounts,
   readBackfillBlock,
@@ -1952,15 +1952,19 @@ describe("team membership across a tenant departure — real-DB integration", ()
       }]);
     });
 
-    it.each(BLOCK_TABLES)("table-list control: with %s removed from app.bypass_tables the block reports it under system_maintenance", async (removed) => {
+    it.each(BLOCK_TABLES)("table-list control: with %s removed from app.bypass_tables the block is refused and reports it under system_maintenance", async (removed) => {
       const block = rerunDeparture();
       const literal = /'(tenant_members,[a-z_,]+)'/.exec(block);
       expect(literal).not.toBeNull();
       const mutated = block.replace(literal![1], literal![1].split(",").filter((t) => t !== removed).join(","));
       expect(mutated).not.toBe(block);
-      const notices = await expectBypassNotices(() => asApp(async (client) => {
+      // The block is the transaction's last statement; asApp rolls the
+      // transaction back, so the proof of "no write" is the refusal plus the
+      // allow twin (the block applying as passwd_app below).
+      const { notices, table } = await expectBypassRefusal(() => asApp(async (client) => {
         await runBlock(client, mutated);
       }));
+      expect(table).toBe(removed);
       expect(notices).toContainEqual({ table: removed, purpose: "system_maintenance" });
     });
 

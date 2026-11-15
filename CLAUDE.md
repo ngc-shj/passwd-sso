@@ -46,7 +46,7 @@ Audit outbox worker (separate process):
 npm run worker:audit-outbox    # Run the outbox worker (requires OUTBOX_WORKER_DATABASE_URL)
 npm run worker:retention-gc    # Run the retention GC worker (requires RETENTION_GC_DATABASE_URL)
 npm run worker:audit-anchor-publisher  # Run the audit-anchor publisher (AUDIT_ANCHOR_PUBLISHER_ENABLED=true + DEPLOYMENT_ID, AUDIT_ANCHOR_SIGNING_KEY, AUDIT_ANCHOR_TAG_SECRET, a destination; production requires AUDIT_ANCHOR_PUBLISHER_DATABASE_URL)
-npm run worker:audit-chain-verify      # Run the audit-chain verify worker (AUDIT_CHAIN_VERIFY_DATABASE_URL, else DATABASE_URL)
+npm run worker:audit-chain-verify      # Run the audit-chain verify worker (AUDIT_CHAIN_VERIFY_DATABASE_URL — passwd_audit_chain_verifier; DATABASE_URL fallback outside production only)
 npm run test:integration       # Run real-DB integration tests (requires running Postgres)
 ```
 
@@ -284,6 +284,8 @@ All password data is encrypted **client-side** before reaching the server. The s
 | `/api/teams/[teamId]/members/[memberId]/confirm-key` | POST | Confirm member key distribution |
 | `/api/teams/[teamId]/members/[memberId]/approve` | POST | Approve a SCIM-pending membership (step-up; key-holding OWNER/ADMIN) |
 | `/api/teams/[teamId]/members/[memberId]/reject` | POST | Reject a SCIM-pending membership (step-up) |
+| `/api/teams/[teamId]/members/bulk-approve` | POST | Bulk approve SCIM-pending memberships (step-up; key-holding OWNER/ADMIN) |
+| `/api/teams/[teamId]/members/bulk-reject` | POST | Bulk reject SCIM-pending memberships (step-up) |
 | `/api/teams/[teamId]/member-key` | GET, POST | Get/submit member encryption key |
 | `/api/teams/[teamId]/rotate-key` | POST | Rotate team encryption key |
 | `/api/teams/[teamId]/rotate-key/data` | GET | Bulk fetch entries for team key rotation |

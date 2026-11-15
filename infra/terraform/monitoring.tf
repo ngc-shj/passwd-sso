@@ -62,11 +62,12 @@ resource "aws_cloudwatch_log_metric_filter" "high_latency" {
   }
 }
 
-# RLS bypass reports (#911, report mode): a bypassed statement reached a table
-# outside its grant. One filter per log group that carries a pool built by
-# src/lib/db/pool-factory.ts; the line is emitted with this _logType there.
-# The enforce flip waits for these to read zero over a window, after a canary
-# has shown each one counting.
+# RLS bypass reports (#911, #921): a bypassed statement reached a table outside
+# its grant. The database now refuses such a statement (42501); the WARNING that
+# precedes the refusal is what these filters count. One filter per log group that
+# carries a pool built by src/lib/db/pool-factory.ts; the line is emitted with
+# this _logType there. A canary shows each group counting
+# (docs/operations/deployment.md).
 locals {
   rls_bypass_report_log_groups = {
     app                       = aws_cloudwatch_log_group.app.name
@@ -136,11 +137,11 @@ resource "aws_cloudwatch_log_metric_filter" "rls_bypass_notice_unparsed" {
   }
 }
 
-# Any RLS bypass report. Report mode admits the statement, so without this
-# alarm an ungranted reach is visible only to someone reading the metric. Both
-# filter resources (reports and unparsed reports, one filter per log group
-# each) publish to the same metric, so one alarm covers them; a report line
-# names the table and purpose.
+# Any RLS bypass report, i.e. a statement the database refused. The refusal
+# reaches the caller as an error, but a caller that catches it would otherwise
+# leave nothing an operator reads. Both filter resources (reports and unparsed
+# reports, one filter per log group each) publish to the same metric, so one
+# alarm covers them; a report line names the table and purpose.
 resource "aws_cloudwatch_metric_alarm" "rls_bypass_not_granted" {
   count               = var.enable_monitoring ? 1 : 0
   alarm_name          = "${local.name_prefix}-rls-bypass-not-granted"
@@ -152,6 +153,43 @@ resource "aws_cloudwatch_metric_alarm" "rls_bypass_not_granted" {
   statistic           = "Sum"
   threshold           = 1
   alarm_description   = "An RLS bypass reached a table outside its grant (rls.bypass_not_granted), or a report could not be parsed (rls.bypass_notice_unparsed); see docs/operations/alerts.md"
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = [aws_sns_topic.alarms[0].arn]
+  ok_actions    = [aws_sns_topic.alarms[0].arn]
+  tags          = local.tags
+}
+
+# The migrate task's grant audit ran with RLS_REPORT_MODE_ACK set
+# (scripts/audit-db-grants.mjs): the database is in report mode and the audit
+# let it pass, or it is enforcing and the variable was left behind. The migrate
+# task logs to the app log group. The acknowledgement is an emergency lever:
+# this alarm fires on every deploy that still carries it.
+resource "aws_cloudwatch_log_metric_filter" "rls_report_mode_acknowledged" {
+  count          = var.enable_monitoring ? 1 : 0
+  name           = "${local.name_prefix}-rls-report-mode-acknowledged"
+  log_group_name = aws_cloudwatch_log_group.app.name
+  pattern        = "{ $._logType = \"rls.report_mode_acknowledged\" }"
+
+  metric_transformation {
+    name          = "RlsReportModeAcknowledged"
+    namespace     = "${local.name_prefix}/App"
+    value         = "1"
+    default_value = "0"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "rls_report_mode_acknowledged" {
+  count               = var.enable_monitoring ? 1 : 0
+  alarm_name          = "${local.name_prefix}-rls-report-mode-acknowledged"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = 1
+  metric_name         = "RlsReportModeAcknowledged"
+  namespace           = "${local.name_prefix}/App"
+  period              = 300
+  statistic           = "Sum"
+  threshold           = 1
+  alarm_description   = "A deploy carried RLS_REPORT_MODE_ACK: the RLS bypass is in report mode, or the variable was left set (rls.report_mode_acknowledged); see docs/operations/alerts.md"
   treat_missing_data  = "notBreaching"
 
   alarm_actions = [aws_sns_topic.alarms[0].arn]
@@ -760,8 +798,12 @@ resource "aws_cloudwatch_event_target" "audit_anchor_publisher_role_task_definit
 # task emits several state changes (PROVISIONING … STOPPED), so one such task
 # can notify more than once.
 resource "aws_cloudwatch_event_rule" "audit_anchor_publisher_family_task_outside_service" {
-  count       = var.enable_monitoring ? 1 : 0
-  name        = "${local.name_prefix}-audit-anchor-publisher-family-task-outside-service"
+  count = var.enable_monitoring ? 1 : 0
+  # EventBridge allows 64 characters. The suffix is sized to the precondition's
+  # 20-character name_prefix bound below (20 + 36 = 56); the original
+  # "-audit-anchor-publisher-family-task-outside-service" was 66 characters
+  # with the shipped prod tfvars and failed every plan.
+  name        = "${local.name_prefix}-anchor-publisher-family-outside-svc"
   description = "A task of the audit-anchor publisher's family ran outside the publisher service"
 
   event_pattern = jsonencode({
@@ -777,6 +819,18 @@ resource "aws_cloudwatch_event_rule" "audit_anchor_publisher_family_task_outside
   })
 
   tags = local.tags
+
+  lifecycle {
+    # The name budget across the configuration: this rule and
+    # "-audit-anchor-publisher-role-task-definition" (44 characters) under
+    # EventBridge's 64, and "-jackson-tg" under the target group's 32. A
+    # precondition, not a variable validation: one validation reading both
+    # project_name and env needs Terraform 1.9.
+    precondition {
+      condition     = length(local.name_prefix) <= 20
+      error_message = "\"<project_name>-<env>\" must be at most 20 characters: longer names exceed AWS name limits (EventBridge rules 64, target groups 32)."
+    }
+  }
 }
 
 resource "aws_cloudwatch_event_target" "audit_anchor_publisher_family_task_outside_service_sns" {

@@ -84,12 +84,14 @@ export const azureBlobStore: AttachmentBlobStore = {
   },
   async putObject(data, context) {
     const key = buildObjectKey(context);
+    // Encoded before the upload, as in the S3 store.
+    const ref = encodeObjectRef({ key });
     const containerClient = await getAzureContainerClient();
     const blobClient = containerClient.getBlockBlobClient(key);
     await blobClient.uploadData(Buffer.from(data), {
       blobHTTPHeaders: { blobContentType: BLOB_CONTENT_TYPE.OCTET_STREAM },
     });
-    return encodeObjectRef({ key });
+    return ref;
   },
   async getObject(stored, context) {
     const key = resolveObjectRefKey(stored, context);

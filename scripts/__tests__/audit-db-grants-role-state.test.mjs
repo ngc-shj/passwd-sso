@@ -19,11 +19,16 @@ import {
   roleStateViolations,
   assertRetiredSubset,
   creatorGrantKeys,
+  enforceModeViolations,
+  clientMinMessagesViolations,
+  reportModeAckLogLine,
   AUDITED_ROLES,
   RETIRED_ROLES,
 } from "../audit-db-grants.mjs";
 // Has a main guard, so importing it does not connect.
 import { ROLES } from "../bootstrap-rds-roles.mjs";
+import { matchesFilterPattern } from "@/__tests__/helpers/cloudwatch-filter-pattern";
+import { TerraformConfig, TERRAFORM_DIR, plain, nested } from "@/__tests__/helpers/hcl-subset";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MANIFEST = resolve(__dirname, "..", "checks", "db-grants-manifest.json");
@@ -244,6 +249,141 @@ describe("assertRetiredSubset", () => {
   });
 });
 
+describe("enforceModeViolations", () => {
+  const present = { functionPresent: true };
+
+  it("passes silently when enforcing", () => {
+    expect(enforceModeViolations({ ...present, enforced: true, acknowledgement: undefined })).toEqual({
+      violations: [],
+      warnings: [],
+    });
+  });
+
+  it("passes when enforcing with a leftover acknowledgement, and warns to remove it", () => {
+    const r = enforceModeViolations({ ...present, enforced: true, acknowledgement: "left over" });
+    expect(r.violations).toEqual([]);
+    expect(r.warnings).toHaveLength(1);
+    expect(r.warnings[0]).toContain("remove it");
+    expect(r.warnings[0]).toContain("left over");
+  });
+
+  it("stays silent when enforcing with a whitespace-only acknowledgement", () => {
+    const r = enforceModeViolations({ ...present, enforced: true, acknowledgement: " \t " });
+    expect(r).toEqual({ violations: [], warnings: [] });
+  });
+
+  it("fails in report mode without an acknowledgement", () => {
+    const r = enforceModeViolations({ ...present, enforced: false, acknowledgement: undefined });
+    expect(r.violations).toHaveLength(1);
+    expect(r.warnings).toEqual([]);
+  });
+
+  it("fails in report mode when the acknowledgement is empty or whitespace", () => {
+    for (const ack of ["", "   ", "\t\n ", "\u0007\r\n"]) {
+      const r = enforceModeViolations({ ...present, enforced: false, acknowledgement: ack });
+      expect(r.violations).toHaveLength(1);
+    }
+  });
+
+  it("passes in acknowledged report mode and surfaces the reason", () => {
+    const r = enforceModeViolations({
+      ...present,
+      enforced: false,
+      acknowledgement: "un-flipped for incident 123",
+    });
+    expect(r.violations).toEqual([]);
+    expect(r.warnings).toHaveLength(1);
+    expect(r.warnings[0]).toContain("un-flipped for incident 123");
+  });
+
+  it("reduces the reason to one bounded line without control characters", () => {
+    const r = enforceModeViolations({
+      ...present,
+      enforced: false,
+      acknowledgement: `line one\nWARNING: forged\u001b[31m${"x".repeat(1000)}`,
+    });
+    const [warning] = r.warnings;
+    expect(warning).not.toMatch(/[\u0000-\u001f\u007f]/);
+    expect(warning.length).toBeLessThan(300);
+    expect(warning).toContain("line one WARNING: forged");
+  });
+
+  it("fails when the function is absent, acknowledgement or not", () => {
+    for (const acknowledgement of [undefined, "a reason"]) {
+      const r = enforceModeViolations({ functionPresent: false, enforced: null, acknowledgement });
+      expect(r.violations).toHaveLength(1);
+      expect(r.warnings).toEqual([]);
+    }
+  });
+});
+
+describe("acknowledged report mode reaches an alarm", () => {
+  const tf = new TerraformConfig(TERRAFORM_DIR);
+  const filter = tf.resource("aws_cloudwatch_log_metric_filter", "rls_report_mode_acknowledged");
+  const warning = enforceModeViolations({ functionPresent: true, enforced: false, acknowledgement: "incident 42" })
+    .warnings[0];
+
+  it("emits a line the metric filter matches", () => {
+    const line = JSON.parse(reportModeAckLogLine(warning));
+    expect(line.msg).toContain("incident 42");
+    expect(matchesFilterPattern(String(tf.attr(filter, "pattern")), line)).toBe(true);
+    expect(matchesFilterPattern(String(tf.attr(filter, "pattern")), { ...line, _logType: "rls.bypass_not_granted" })).toBe(false);
+  });
+
+  it("filters the log group the migrate task writes to", () => {
+    const ALL_ON = { vars: { smtp_host: "smtp.example.com", smtp_auth_enabled: true, enable_google_auth: true, enable_jackson_connections: true, email_from: "a@example.com" } };
+    const migrate = plain(tf.attr(tf.resource("aws_ecs_task_definition", "migrate"), "container_definitions", ALL_ON))
+      .find((c) => c.name === "migrate");
+    expect(migrate.logConfiguration.options["awslogs-group"]).toBe(String(tf.attr(filter, "log_group_name")));
+  });
+
+  it("alarms on the metric the filter publishes", () => {
+    const alarm = tf.resource("aws_cloudwatch_metric_alarm", "rls_report_mode_acknowledged");
+    const [transformation] = nested(filter, "metric_transformation");
+    expect(String(tf.attr(alarm, "metric_name"))).toBe(String(tf.attr(transformation, "name")));
+    expect(String(tf.attr(alarm, "namespace"))).toBe(String(tf.attr(transformation, "namespace")));
+    expect(String(tf.attr(alarm, "metric_name"))).toBe("RlsReportModeAcknowledged");
+  });
+});
+
+describe("clientMinMessagesViolations", () => {
+  it.each([
+    ["notice", "default", false],
+    ["warning", "configuration file", false],
+    ["error", "configuration file", true],
+    ["error", "default", true],
+    ["error", "environment variable", true],
+    ["error", "command line", true],
+    ["error", "database", true],
+    ["error", "override", true],
+    ["notice", "database", false],
+    ["notice", "global", false],
+  ])("%s from %s: violation=%s", (setting, source, isViolation) => {
+    expect(clientMinMessagesViolations({ setting, source }).length > 0).toBe(isViolation);
+  });
+
+  // The audit's own connection overrides the setting: the server default under
+  // it is unreadable, so a harmless value must not pass.
+  it.each([
+    ["notice", "session"],
+    ["notice", "client"],
+    ["notice", "user"],
+    ["notice", "database user"],
+    ["error", "session"],
+    ["error", "user"],
+    ["warning", "a source no server has yet"],
+  ])("%s from %s cannot be decided and fails", (setting, source) => {
+    const violations = clientMinMessagesViolations({ setting, source });
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toContain("cannot be read");
+  });
+
+  it("refuses the levels above error should a server accept them", () => {
+    expect(clientMinMessagesViolations({ setting: "fatal", source: "configuration file" })).toHaveLength(1);
+    expect(clientMinMessagesViolations({ setting: "panic", source: "configuration file" })).toHaveLength(1);
+  });
+});
+
 describe("committed manifest and role lists", () => {
   const manifest = JSON.parse(readFileSync(MANIFEST, "utf8"));
 
@@ -261,12 +401,36 @@ describe("committed manifest and role lists", () => {
     expect(manifest.grants).toContain("ROLEATTR:passwd_dcr_cleanup_worker\trolcanlogin\tfalse");
   });
 
+  it("records the audit-chain verifier as LOGIN, connection-limited, holding exactly its eleven columns", () => {
+    const rows = manifest.grants.filter((k) => k.includes("passwd_audit_chain_verifier"));
+    expect(manifest.grants).toContain("ROLEATTR:passwd_audit_chain_verifier\trolcanlogin\ttrue");
+    expect(manifest.grants).toContain("ROLEATTR:passwd_audit_chain_verifier\trolconnlimit\t10");
+    expect(rows.filter((k) => k.startsWith("COLUMN:"))).toEqual(
+      [
+        "public.audit_chain_anchors.chain_seq",
+        "public.audit_chain_anchors.prev_hash",
+        "public.audit_chain_anchors.tenant_id",
+        "public.audit_logs.chain_prev_hash",
+        "public.audit_logs.chain_seq",
+        "public.audit_logs.created_at",
+        "public.audit_logs.event_hash",
+        "public.audit_logs.id",
+        "public.audit_logs.metadata",
+        "public.audit_logs.tenant_id",
+        "public.tenants.id",
+      ].map((c) => `COLUMN:passwd_audit_chain_verifier\t${c}\tSELECT`),
+    );
+    // No table-level, sequence or default-ACL grant: columns only.
+    expect(rows.filter((k) => /^(TABLE|SEQUENCE|DEFAULTACL):/.test(k))).toEqual([]);
+  });
+
   it("converges exactly the audited roles that are not retired", () => {
     const converged = ROLES.map((r) => r.name).sort();
     const expected = AUDITED_ROLES.filter((r) => !RETIRED_ROLES.includes(r)).sort();
     expect(converged).toEqual(expected);
     // Named, so shrinking both lists together cannot pass.
     expect(converged).toContain("passwd_anchor_publisher");
+    expect(converged).toContain("passwd_audit_chain_verifier");
     expect(RETIRED_ROLES).toContain("passwd_dcr_cleanup_worker");
   });
 });

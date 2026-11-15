@@ -13,6 +13,8 @@ import {
   addMemberSchema,
   updateMemberRoleSchema,
   approveMemberSchema,
+  bulkApproveMembersSchema,
+  bulkRejectMembersSchema,
   updateTenantMemberRoleSchema,
   createTeamTagSchema,
   updateTeamTagSchema,
@@ -47,6 +49,7 @@ import {
   TENANT_ROLE_VALUES,
 } from "@/lib/constants";
 import { BULK_IMPORT_MAX_ENTRIES } from "@/lib/validations/entry";
+import { SCIM_BULK_ADMISSION_MAX } from "@/lib/constants/team/scim-admission";
 
 const VALID_UUID = "00000000-0000-4000-a000-000000000001";
 const VALID_UUID_2 = "00000000-0000-4000-a000-000000000002";
@@ -742,6 +745,112 @@ describe("approveMemberSchema", () => {
 
   it("rejects when expectedRole is missing (no default — the caller must echo what it saw)", () => {
     expect(approveMemberSchema.safeParse({}).success).toBe(false);
+  });
+});
+
+// ─── bulkApproveMembersSchema / bulkRejectMembersSchema ──────
+
+/** Distinct, valid v4 uuids: 00000000-0000-4000-a000-<12 hex digits of i>. */
+const memberIdAt = (i: number) => `00000000-0000-4000-a000-${i.toString(16).padStart(12, "0")}`;
+const approveEntries = (n: number) =>
+  Array.from({ length: n }, (_, i) => ({ memberId: memberIdAt(i + 1), expectedRole: TEAM_ROLE.MEMBER }));
+const rejectIds = (n: number) => Array.from({ length: n }, (_, i) => memberIdAt(i + 1));
+
+describe("bulkApproveMembersSchema", () => {
+  it("rejects an empty list", () => {
+    expect(bulkApproveMembersSchema.safeParse({ members: [] }).success).toBe(false);
+  });
+
+  it("accepts one entry", () => {
+    expect(bulkApproveMembersSchema.safeParse({ members: approveEntries(1) }).success).toBe(true);
+  });
+
+  it("accepts exactly SCIM_BULK_ADMISSION_MAX entries", () => {
+    expect(bulkApproveMembersSchema.safeParse({ members: approveEntries(SCIM_BULK_ADMISSION_MAX) }).success).toBe(true);
+  });
+
+  it("rejects SCIM_BULK_ADMISSION_MAX + 1 entries", () => {
+    expect(bulkApproveMembersSchema.safeParse({ members: approveEntries(SCIM_BULK_ADMISSION_MAX + 1) }).success).toBe(false);
+  });
+
+  it("rejects a duplicate memberId", () => {
+    const entry = { memberId: VALID_UUID, expectedRole: TEAM_ROLE.MEMBER };
+    expect(bulkApproveMembersSchema.safeParse({ members: [entry, entry] }).success).toBe(false);
+  });
+
+  it("rejects a duplicate that differs only in case", () => {
+    const upper = "ABCDEF00-0000-4000-A000-000000000001";
+    const result = bulkApproveMembersSchema.safeParse({
+      members: [
+        { memberId: upper, expectedRole: TEAM_ROLE.MEMBER },
+        { memberId: upper.toLowerCase(), expectedRole: TEAM_ROLE.ADMIN },
+      ],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("lowercases memberId in the parsed output", () => {
+    const result = bulkApproveMembersSchema.safeParse({
+      members: [{ memberId: "ABCDEF00-0000-4000-A000-000000000001", expectedRole: TEAM_ROLE.ADMIN }],
+    });
+    expect(result.success && result.data.members[0].memberId).toBe("abcdef00-0000-4000-a000-000000000001");
+  });
+
+  it("rejects an unknown key on the body and on an entry", () => {
+    expect(bulkApproveMembersSchema.safeParse({ members: approveEntries(1), extra: 1 }).success).toBe(false);
+    expect(
+      bulkApproveMembersSchema.safeParse({
+        members: [{ memberId: VALID_UUID, expectedRole: TEAM_ROLE.MEMBER, extra: 1 }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects OWNER and unknown roles", () => {
+    for (const expectedRole of [TEAM_ROLE.OWNER, "GOD"]) {
+      expect(bulkApproveMembersSchema.safeParse({ members: [{ memberId: VALID_UUID, expectedRole }] }).success).toBe(false);
+    }
+  });
+
+  it("rejects a non-uuid memberId", () => {
+    expect(
+      bulkApproveMembersSchema.safeParse({ members: [{ memberId: "nope", expectedRole: TEAM_ROLE.MEMBER }] }).success,
+    ).toBe(false);
+  });
+});
+
+describe("bulkRejectMembersSchema", () => {
+  it("rejects an empty list", () => {
+    expect(bulkRejectMembersSchema.safeParse({ memberIds: [] }).success).toBe(false);
+  });
+
+  it("accepts one id", () => {
+    expect(bulkRejectMembersSchema.safeParse({ memberIds: rejectIds(1) }).success).toBe(true);
+  });
+
+  it("accepts exactly SCIM_BULK_ADMISSION_MAX ids", () => {
+    expect(bulkRejectMembersSchema.safeParse({ memberIds: rejectIds(SCIM_BULK_ADMISSION_MAX) }).success).toBe(true);
+  });
+
+  it("rejects SCIM_BULK_ADMISSION_MAX + 1 ids", () => {
+    expect(bulkRejectMembersSchema.safeParse({ memberIds: rejectIds(SCIM_BULK_ADMISSION_MAX + 1) }).success).toBe(false);
+  });
+
+  it("rejects a duplicate id", () => {
+    expect(bulkRejectMembersSchema.safeParse({ memberIds: [VALID_UUID, VALID_UUID] }).success).toBe(false);
+  });
+
+  it("rejects a duplicate that differs only in case", () => {
+    const upper = "ABCDEF00-0000-4000-A000-000000000001";
+    expect(bulkRejectMembersSchema.safeParse({ memberIds: [upper, upper.toLowerCase()] }).success).toBe(false);
+  });
+
+  it("lowercases ids in the parsed output", () => {
+    const result = bulkRejectMembersSchema.safeParse({ memberIds: ["ABCDEF00-0000-4000-A000-000000000001"] });
+    expect(result.success && result.data.memberIds[0]).toBe("abcdef00-0000-4000-a000-000000000001");
+  });
+
+  it("rejects an unknown key", () => {
+    expect(bulkRejectMembersSchema.safeParse({ memberIds: rejectIds(1), extra: 1 }).success).toBe(false);
   });
 });
 

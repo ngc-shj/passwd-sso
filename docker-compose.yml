@@ -93,6 +93,8 @@ services:
       # Optional (existing .env files predate it): unset, the initdb creates
       # passwd_anchor_publisher NOLOGIN rather than with a published password.
       PASSWD_ANCHOR_PUBLISHER_PASSWORD: ${PASSWD_ANCHOR_PUBLISHER_PASSWORD:-}
+      # Optional for the same reason: unset, passwd_audit_chain_verifier is created NOLOGIN.
+      PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD: ${PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD:-}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./infra/postgres/initdb:/docker-entrypoint-initdb.d:ro

@@ -1,8 +1,9 @@
 /**
  * Self-test for scripts/checks/check-terraform-test-count.mjs — the count check
- * behind the terraform CI job's `terraform test -json` step. Fixtures are
+ * behind the terraform CI job's `terraform test -json` steps. Fixtures are
  * shaped as Terraform 1.15 prints them (one JSON record per line); the vector
- * file is a fixture too, so the expected count comes from it, as in CI.
+ * and run-manifest files are fixtures too, so the expected runs come from
+ * them, as in CI.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
@@ -123,5 +124,93 @@ describe("check-terraform-test-count.mjs", () => {
     const r = spawnSync(process.execPath, [CHECK, join(dir, "absent.json"), vectorsPath], { encoding: "utf8" });
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("cannot read");
+  });
+});
+
+describe("check-terraform-test-count.mjs — run manifest mode", () => {
+  const PATH = "tests/blob_sweep.tftest.hcl";
+  let runsPath;
+
+  function runRecord(run, fields = {}) {
+    return JSON.stringify({ "@level": "info", "@message": `  "${run}"... pass`, type: "test_run", test_run: { path: PATH, run, progress: "complete", status: "pass", ...fields } });
+  }
+
+  function checkRuns(lines) {
+    writeFileSync(outputPath, lines.join("\n") + "\n", "utf8");
+    return spawnSync(process.execPath, [CHECK, outputPath, runsPath], { encoding: "utf8" });
+  }
+
+  beforeEach(() => {
+    runsPath = join(dir, "blob_sweep.runs.json");
+    writeFileSync(runsPath, JSON.stringify({ path: PATH, runs: ["defaults", "s3_report"] }), "utf8");
+  });
+
+  it("passes when exactly the listed runs passed", () => {
+    // A teardown record has no status and is not counted.
+    const teardown = JSON.stringify({ type: "test_run", test_run: { path: PATH, run: "s3_report", progress: "teardown", elapsed: 0 } });
+    const r = checkRuns([runRecord("defaults"), runRecord("s3_report"), teardown, summary({ passed: 2 })]);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain("2/2 runs passed");
+  });
+
+  it("fails when a listed run is missing from the passed set", () => {
+    const r = checkRuns([runRecord("defaults"), summary({ passed: 1 })]);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(`not passed: ${PATH} run s3_report`);
+  });
+
+  it("fails when a run was swapped for one the manifest does not list, at the same count", () => {
+    const r = checkRuns([runRecord("defaults"), runRecord("renamed"), summary({ passed: 2 })]);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(`not passed: ${PATH} run s3_report`);
+  });
+
+  it("fails when an extra run passed", () => {
+    const r = checkRuns([runRecord("defaults"), runRecord("s3_report"), runRecord("extra"), summary({ passed: 3 })]);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(`passed but not in ${runsPath}: ${PATH} run extra`);
+  });
+
+  it("does not count a run that completed with another status", () => {
+    const r = checkRuns([runRecord("defaults"), runRecord("s3_report", { status: "skip" }), summary({ passed: 1, skipped: 1 })]);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(`not passed: ${PATH} run s3_report`);
+  });
+
+  it("keys a run by its file: the same name in another file does not count", () => {
+    const other = JSON.stringify({ type: "test_run", test_run: { path: "tests/other.tftest.hcl", run: "s3_report", progress: "complete", status: "pass" } });
+    const r = checkRuns([runRecord("defaults"), other, summary({ passed: 2 })]);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(`not passed: ${PATH} run s3_report`);
+  });
+
+  it("fails when the same run of the same file passed twice", () => {
+    const r = checkRuns([runRecord("defaults"), runRecord("s3_report"), runRecord("s3_report"), summary({ passed: 3 })]);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("a run passed twice");
+  });
+
+  it("fails when the summary count disagrees with the passed set", () => {
+    const r = checkRuns([runRecord("defaults"), runRecord("s3_report"), summary({ passed: 3 })]);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("passed=3, but");
+  });
+
+  it("still requires a passing summary", () => {
+    const r = checkRuns([runRecord("defaults"), runRecord("s3_report"), summary({ passed: 2, status: "fail", failed: 1 })]);
+    expect(r.status).toBe(1);
+  });
+
+  it.each([
+    ["no path", { runs: ["defaults"] }, 'has no "path" string'],
+    ["an empty list", { path: PATH, runs: [] }, "lists no runs"],
+    ["a duplicate", { path: PATH, runs: ["defaults", "defaults"] }, "lists a run twice"],
+    ["a non-string run", { path: PATH, runs: ["defaults", 1] }, "is not an array of run names"],
+    ["both keys", { path: PATH, runs: ["defaults"], vectors: [] }, 'has both "vectors" and "runs"'],
+  ])("refuses a manifest with %s", (_name, manifest, message) => {
+    writeFileSync(runsPath, JSON.stringify(manifest), "utf8");
+    const r = checkRuns([runRecord("defaults"), summary({ passed: 1 })]);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(message);
   });
 });

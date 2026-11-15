@@ -377,6 +377,9 @@ COPY --from=builder --chown=nextjs:nodejs /app/scripts/bootstrap-rds-roles.mjs .
 # connection, and only tasks in the ECS SG can reach RDS.
 COPY --from=builder --chown=nextjs:nodejs /app/scripts/audit-db-grants.mjs ./scripts/audit-db-grants.mjs
 COPY --from=builder --chown=nextjs:nodejs /app/scripts/checks/db-grants-manifest.json ./scripts/checks/db-grants-manifest.json
+# Pre-migration attestation gate for the RLS-enforce flip. The migrate task runs it
+# BEFORE `prisma migrate deploy` (see infra/terraform/ecs.tf); it needs only `pg`.
+COPY --from=builder --chown=nextjs:nodejs /app/scripts/rls-enforce-preflight.mjs ./scripts/rls-enforce-preflight.mjs
 # The PRESCRIPTIVE half of the same audit — privileges that must never be held,
 # whatever the live database says. Both consumers above read it, and both now
 # fail closed without it: shipping the scripts and the descriptive manifest but

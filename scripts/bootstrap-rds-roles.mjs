@@ -47,6 +47,7 @@
 //   PASSWD_OUTBOX_WORKER_PASSWORD   — passwd_outbox_worker role password
 //   PASSWD_RETENTION_GC_WORKER_PASSWORD — passwd_retention_gc_worker role password
 //   PASSWD_ANCHOR_PUBLISHER_PASSWORD — passwd_anchor_publisher role password
+//   PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD — passwd_audit_chain_verifier role password
 //
 // RDS: the master user is NOT a superuser. It may CREATE a role with any of the
 // attributes below, but `ALTER ROLE … NOSUPERUSER / NOBYPASSRLS / NOREPLICATION`
@@ -95,6 +96,7 @@ export const ROLES = [
   { name: "passwd_outbox_worker", pwEnv: "PASSWD_OUTBOX_WORKER_PASSWORD" },
   { name: "passwd_retention_gc_worker", pwEnv: "PASSWD_RETENTION_GC_WORKER_PASSWORD" },
   { name: "passwd_anchor_publisher", pwEnv: "PASSWD_ANCHOR_PUBLISHER_PASSWORD" },
+  { name: "passwd_audit_chain_verifier", pwEnv: "PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD" },
 ];
 
 // The attribute set every role above must END UP with: written in full on

@@ -107,6 +107,12 @@ describe("API_PATH", () => {
     expect(apiPath.teamMemberReject("team-1", "mem-1")).toBe(
       "/api/teams/team-1/members/mem-1/reject"
     );
+    expect(apiPath.teamMembersBulkApprove("team-1")).toBe(
+      "/api/teams/team-1/members/bulk-approve"
+    );
+    expect(apiPath.teamMembersBulkReject("team-1")).toBe(
+      "/api/teams/team-1/members/bulk-reject"
+    );
     expect(apiPath.teamInvitations("team-1")).toBe("/api/teams/team-1/invitations");
     expect(apiPath.teamInvitationById("team-1", "inv-1")).toBe(
       "/api/teams/team-1/invitations/inv-1"

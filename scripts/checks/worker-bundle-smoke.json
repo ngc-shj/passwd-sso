@@ -35,7 +35,7 @@
     "audit_chain_verify_worker": {
       "bundle": "dist/audit-chain-verify-worker.js",
       "env": {
-        "AUDIT_CHAIN_VERIFY_DATABASE_URL": "postgresql://passwd_app:smoke@127.0.0.1:5432/passwd_sso"
+        "AUDIT_CHAIN_VERIFY_DATABASE_URL": "postgresql://passwd_audit_chain_verifier:smoke@127.0.0.1:5432/passwd_sso"
       },
       "markers": ["env validation passed"],
       "forbiddenInputs": []

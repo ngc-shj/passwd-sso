@@ -4,8 +4,8 @@
 # RLS-MARKER-delimited region of the SQL promises.
 #
 # #911 put every policy's bypass branch behind
-# `(SELECT public.rls_bypass_admits('<table>'))`, which RAISE WARNINGs (and,
-# in report mode, still admits) a read of a table the session's
+# `(SELECT public.rls_bypass_admits('<table>'))`, which RAISE WARNINGs and then
+# (since #921) refuses with 42501 a read of a table the session's
 # app.bypass_tables grant does not name. Two regions of
 # rls-cross-tenant-verify.sql make claims about that WARNING that only the
 # psql client side can check (a DO block cannot read back its own RAISE
@@ -15,7 +15,8 @@
 #   - Block 4b (RLS-MARKER:block=report table=<t>, .. block=report-end):
 #     each marker withholds exactly one table's grant, so the region between
 #     it and the next marker must raise rls_bypass_not_granted for that one
-#     table and no other.
+#     table and no other (the refusal itself is asserted in the SQL, which
+#     catches it in a sub-block; the WARNING still reaches the client first).
 # A gate whose assertion lives only in bash output-matching (not the SQL
 # itself) is otherwise invisible to someone reading the .sql file in
 # isolation — this file is that other half, kept separate because psql

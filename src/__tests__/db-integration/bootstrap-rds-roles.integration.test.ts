@@ -750,6 +750,7 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
     );
     // Named, so the derivation above cannot pass by ROLES losing the role.
     expect(usageGrantees).toContain("passwd_anchor_publisher");
+    expect(usageGrantees).toContain("passwd_audit_chain_verifier");
     expect(statements.filter((s) => /\bpasswd_app\b/.test(s))).toEqual([]);
   });
 
@@ -766,6 +767,7 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
         PASSWD_RETENTION_GC_WORKER_PASSWORD: "c",
         // Explicitly empty: CI sets it job-wide.
         PASSWD_ANCHOR_PUBLISHER_PASSWORD: "",
+        PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD: "e",
       },
     });
     expect(r.status).toBe(1);
@@ -1379,10 +1381,14 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
           expect(granted).toContain(`GRANT EXECUTE ON FUNCTION ${signature} TO ${name}`);
         }
         expect(granted).toContain(`GRANT EXECUTE ON FUNCTION ${signature} TO passwd_anchor_publisher`);
+        expect(granted).toContain(`GRANT EXECUTE ON FUNCTION ${signature} TO passwd_audit_chain_verifier`);
       }
       // The definer audit routines stay with the roles that call them.
       expect(granted.filter((g) => g.endsWith(" TO passwd_anchor_publisher"))).toEqual(
         bypassFunctions.map((s) => `GRANT EXECUTE ON FUNCTION ${s} TO passwd_anchor_publisher`),
+      );
+      expect(granted.filter((g) => g.endsWith(" TO passwd_audit_chain_verifier"))).toEqual(
+        bypassFunctions.map((s) => `GRANT EXECUTE ON FUNCTION ${s} TO passwd_audit_chain_verifier`),
       );
     });
   });
@@ -1474,7 +1480,7 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
     });
 
     it("refuses a non-ASCII password in the last variable before connecting, naming only the variable", () => {
-      const spawnBootstrap = (anchorPassword: string) =>
+      const spawnBootstrap = (verifierPassword: string) =>
         spawnSync(process.execPath, [resolve(REPO_ROOT, "scripts/bootstrap-rds-roles.mjs")], {
           encoding: "utf8",
           timeout: 30_000,
@@ -1484,12 +1490,13 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
             PASSWD_APP_PASSWORD: "a",
             PASSWD_OUTBOX_WORKER_PASSWORD: "b",
             PASSWD_RETENTION_GC_WORKER_PASSWORD: "c",
-            PASSWD_ANCHOR_PUBLISHER_PASSWORD: anchorPassword,
+            PASSWD_ANCHOR_PUBLISHER_PASSWORD: "d",
+            PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD: verifierPassword,
           },
         });
       const refused = spawnBootstrap("s3ntinel-é");
       expect(refused.status).toBe(1);
-      expect(refused.stderr).toContain("PASSWD_ANCHOR_PUBLISHER_PASSWORD: password contains a non-ASCII character");
+      expect(refused.stderr).toContain("PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD: password contains a non-ASCII character");
       expect(`${refused.stdout}${refused.stderr}`).not.toMatch(/ECONNREFUSED|connect/i);
       expect(`${refused.stdout}${refused.stderr}`).not.toContain("s3ntinel");
       // Allow side: an ASCII value gets as far as the (unreachable) connection.

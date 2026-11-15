@@ -41,10 +41,13 @@ SET app.expected_tables TO :'expected_tables';
 --                                 rls_bypass_admits('<own table>') in a
 --                                 sub-SELECT bypass branch and carries no
 --                                 leftover app.bypass_rls admit-everything
---                                 branch (#911 report mode, migration
---                                 20261019000000)
+--                                 branch (#911, migration 20261019000000)
 --   5b. [E-RLS-TENANT-INITPLAN]   no policy casts app.tenant_id outside a
 --                                 sub-SELECT (migration 20261019000000)
+--   5c. [E-RLS-ARM-ORDER]         in every policy the bypass call is the first
+--                                 operand evaluated (#921)
+--   5d. [E-RLS-ENFORCED]          rls_bypass_enforced() is true and still
+--                                 IMMUTABLE PARALLEL SAFE (#921)
 --   6. [E-RLS-COLPARITY]          column count vs discovery count parity
 --   7. [E-RLS-MANIFEST-EXTRA]     manifest \ discovery
 --   8. [E-RLS-MANIFEST-MISSING]   discovery \ manifest
@@ -121,7 +124,7 @@ BEGIN
   ),
     '[E-RLS-SYM] A tenant_isolation policy has asymmetric USING vs WITH CHECK — add INSERT/UPDATE/DELETE assertions OR normalise the policy.';
 
-  -- 5. [E-RLS-BYPASS-TABLE] #911 report-mode bypass branch, every policy in
+  -- 5. [E-RLS-BYPASS-TABLE] #911 bypass branch, every policy in
   --    public (migration 20261019000000 rewrote all of them, including
   --    system_settings_bypass which has no tenant_id and so is invisible to
   --    every tenant_isolation-scoped check above). Mirrors the migration's
@@ -183,6 +186,51 @@ BEGIN
           OR pg_get_expr(p.polwithcheck, p.polrelid) ~ '(?<!SELECT )\(current_setting\(''app\.tenant_id''::text, true\)\)::uuid'
         )
     ));
+
+  -- 5c. [E-RLS-ARM-ORDER] The bypass call is the first operand of every
+  --    policy expression, so the planner's left-to-right evaluation reaches the
+  --    grant check before the tenant arm can admit the row (PostgreSQL does not
+  --    promise the order; the integration suite pins the behaviour it shows
+  --    today, this pins the policy shape that relies on it). pg_get_expr
+  --    deparses a policy as `(( SELECT rls_bypass_admits('t'::text) AS
+  --    rls_bypass_admits) OR (tenant_id = ...))`, or as the bare sub-SELECT for
+  --    the bypass-only policy (system_settings); leading parentheses and spaces
+  --    are skipped, so a neutered first arm `((bypass AND false) OR ...)` is
+  --    still a first call (its own control is [E-RLS-BYPASS]).
+  ASSERT NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_policy p
+    JOIN pg_catalog.pg_class c ON c.oid = p.polrelid
+    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public'
+      AND (
+        pg_get_expr(p.polqual, p.polrelid) !~ ('^[( ]*SELECT rls_bypass_admits\(''' || c.relname || '''::text\)')
+        OR pg_get_expr(p.polwithcheck, p.polrelid) !~ ('^[( ]*SELECT rls_bypass_admits\(''' || c.relname || '''::text\)')
+      )
+  ),
+    format('[E-RLS-ARM-ORDER] policies whose first operand is not rls_bypass_admits(<own table>): %s', (
+      SELECT string_agg(c.relname || '.' || p.polname, ', ')
+      FROM pg_catalog.pg_policy p
+      JOIN pg_catalog.pg_class c ON c.oid = p.polrelid
+      JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public'
+        AND (
+          pg_get_expr(p.polqual, p.polrelid) !~ ('^[( ]*SELECT rls_bypass_admits\(''' || c.relname || '''::text\)')
+          OR pg_get_expr(p.polwithcheck, p.polrelid) !~ ('^[( ]*SELECT rls_bypass_admits\(''' || c.relname || '''::text\)')
+        )
+    ));
+
+  -- 5d. [E-RLS-ENFORCED] A bypassed statement that examines a row outside its
+  --    grant is refused, not admitted (#921). The migration-owned function
+  --    must return true, and must stay IMMUTABLE PARALLEL SAFE: the policies
+  --    call it through rls_bypass_admits under parallel scans.
+  ASSERT public.rls_bypass_enforced(),
+    '[E-RLS-ENFORCED] public.rls_bypass_enforced() is not true — the database is in report mode (migration 20261114000500_rls_bypass_enforce not applied, or un-flipped)';
+  ASSERT (
+    SELECT provolatile = 'i' AND proparallel = 's'
+    FROM pg_catalog.pg_proc
+    WHERE oid = 'public.rls_bypass_enforced()'::regprocedure
+  ),
+    '[E-RLS-ENFORCED] public.rls_bypass_enforced() must be IMMUTABLE PARALLEL SAFE';
 
   -- 6. Column parity: every discovered policy table has a tenant_id column,
   --    and every public.tenant_id column (other than `tenants`) has a policy.
@@ -364,10 +412,11 @@ BEGIN
   -- 10b. Routines that grant themselves an RLS bypass. A SECURITY INVOKER
   -- routine that sets app.bypass_rls / app.bypass_tables reads past RLS as any
   -- caller, so it is reviewed like a definer. Allowlist:
-  --   - share_creator_admitted(uuid) (#990, 20261102000000; #996/#998, 20261108000000)
+  --   - share_creator_admitted(uuid) (#990, 20261102000000; #996/#998, 20261108000000;
+  --     #1035, 20261114000100)
   --       Read-only; returns one boolean for one share id. Grants itself exactly
   --       password_shares, team_password_entries, team_members, team_policies,
-  --       password_entries for the call,
+  --       password_entries, tenant_members, tenant_member_departures for the call,
   --       saves and restores the caller's settings, EXECUTE to passwd_app only.
   -- A review tripwire for accidents, not a boundary — any role may set these
   -- settings itself. Known bypasses: dynamic names (EXECUTE, variables), a
@@ -393,16 +442,16 @@ BEGIN
              OR EXISTS (SELECT 1 FROM unnest(pr.proconfig) c WHERE c LIKE 'app.bypass\_%'))
         AND pr.oid <> 'public.share_creator_admitted(uuid)'::regprocedure
     ));
-  -- The allowlisted routine's bypass stays exactly its five tables: it writes
+  -- The allowlisted routine's bypass stays exactly its seven tables: it writes
   -- app.bypass_tables exactly twice, and those two writes are the grant of this
   -- list and the restore of the caller's value (a widened restore would carry the
   -- wider grant into the caller's transaction).
   ASSERT (SELECT regexp_count(pr.prosrc, $re$set_config\s*\(\s*'app\.bypass_tables'$re$, 1, 'i') = 2
-                 AND strpos(pr.prosrc, $t$set_config('app.bypass_tables', 'password_shares,team_password_entries,team_members,team_policies,password_entries', true)$t$) > 0
+                 AND strpos(pr.prosrc, $t$set_config('app.bypass_tables', 'password_shares,team_password_entries,team_members,team_policies,password_entries,tenant_members,tenant_member_departures', true)$t$) > 0
                  AND strpos(pr.prosrc, $t$set_config('app.bypass_tables', COALESCE(v_prev_tables, ''), true)$t$) > 0
             FROM pg_catalog.pg_proc pr
            WHERE pr.oid = 'public.share_creator_admitted(uuid)'::regprocedure),
-    '[E-RLS-BYPASS-ROUTINE] share_creator_admitted no longer sets exactly password_shares,team_password_entries,team_members,team_policies,password_entries';
+    '[E-RLS-BYPASS-ROUTINE] share_creator_admitted no longer sets exactly password_shares,team_password_entries,team_members,team_policies,password_entries,tenant_members,tenant_member_departures';
 END $$;
 
 -- =====================================================================
@@ -679,13 +728,12 @@ DECLARE
 BEGIN
   SET LOCAL client_min_messages = 'NOTICE';
 
-  -- #911: every policy's bypass branch now checks app.bypass_tables
-  -- membership before admitting (report mode: ungranted still admits, but
-  -- warns). Grant every discovered table up front so this block's "both
-  -- seeded rows visible" assertions test the OR-bypass clause itself, not
-  -- the report-mode fallback — and so it raises no rls_bypass_not_granted
-  -- WARNING (the report block right after this one covers the ungranted
-  -- case deliberately).
+  -- #911: every policy's bypass branch checks app.bypass_tables membership
+  -- before admitting (#921: an ungranted table is refused, after the WARNING).
+  -- Grant every discovered table up front so this block's "both seeded rows
+  -- visible" assertions test the OR-bypass clause itself, not the refusal —
+  -- and so it raises no rls_bypass_not_granted WARNING (the withheld-table
+  -- block right after this one covers the ungranted case deliberately).
   SELECT string_agg(c.relname, ',' ORDER BY c.relname) INTO bypass_table_list
   FROM pg_catalog.pg_policy p
   JOIN pg_catalog.pg_class c ON c.oid = p.polrelid
@@ -771,15 +819,20 @@ BEGIN
 END $$;
 
 -- =====================================================================
--- Block 4b: #911 report-mode grant boundary. With app.bypass_rls=on and a
--- grant naming every OTHER discovered table, a bypassed read of the table
--- LEFT OUT must still be admitted (report mode does not enforce) and must
--- raise the `rls_bypass_not_granted` WARNING naming that table. The
--- RLS-MARKER lines let scripts/rls-verify-run.sh (reading psql's combined
--- stderr) attribute the WARNING lines that follow each marker to the table
--- whose grant was withheld for that iteration — this block cannot read its
--- own RAISE WARNING text back, so attribution happens at the psql-output
--- layer, not in SQL.
+-- Block 4b: #921 grant boundary. With app.bypass_rls=on and a grant naming
+-- every OTHER discovered table, a bypassed read of the table LEFT OUT must be
+-- refused: SQLSTATE 42501 (insufficient_privilege) with the message
+-- `RLS_BYPASS_NOT_GRANTED: <table>`. The WARNING naming the table is raised
+-- first and still reaches the client. The RLS-MARKER lines let
+-- scripts/rls-verify-run.sh (reading psql's combined stderr) attribute the
+-- WARNING lines that follow each marker to the table whose grant was withheld
+-- for that iteration — this block cannot read its own RAISE WARNING text
+-- back, so attribution happens at the psql-output layer, not in SQL.
+--
+-- Each table runs in its own sub-block with an exception handler, so one
+-- table's refusal does not end the loop. The handler's pass is exactly 42501
+-- with this table's refusal message; no exception, or another 42501, raises
+-- [E-RLS-REFUSAL]. Any other SQLSTATE propagates uncaught.
 --
 -- system_settings has no tenant_id (bypass-only policy, not named
 -- `tenant_isolation`) so it is unioned in explicitly rather than discovered
@@ -789,13 +842,15 @@ END $$;
 -- elsewhere in this file: tenants_tenant_isolation matches the
 -- `%_tenant_isolation` naming convention directly, and this block's per-table
 -- loop only does a bare row count (no tenant_id column needed), so tenants
--- falls into the same report-mode coverage as every other discovered table.
+-- falls into the same coverage as every other discovered table.
 -- =====================================================================
 DO $$
 DECLARE
   all_tables text[];
   t text;
   n bigint;
+  refused boolean;
+  refusal_message text;
   plan_json text;
   nil_sentinel constant uuid := '00000000-0000-0000-0000-000000000000';
 BEGIN
@@ -816,9 +871,9 @@ BEGIN
   SET LOCAL app.bypass_rls = 'on';
   PERFORM set_config('app.bypass_tables', array_to_string(all_tables, ','), true);
 
-  -- T3-11: must be seeded (scripts/rls-cross-tenant-seed.sql), or "still
-  -- admitted without a grant" below would hold vacuously — a table with zero
-  -- rows can never fail the n = 0 check either way.
+  -- T3-11: must be seeded (scripts/rls-cross-tenant-seed.sql), or the refusal
+  -- below would hold vacuously — a table with zero rows is never examined, so
+  -- its policy never runs and nothing is refused either way.
   ASSERT (SELECT count(*) FROM system_settings) > 0,
     '[E-RLS-REPORT] system_settings has no seeded rows — scripts/rls-cross-tenant-seed.sql must insert at least one row';
 
@@ -831,10 +886,20 @@ BEGIN
 
     RAISE NOTICE 'RLS-MARKER:block=report table=%', t;
 
-    EXECUTE format('SELECT count(*) FROM %I', t) INTO n;
+    refused := false;
+    refusal_message := NULL;
+    BEGIN
+      EXECUTE format('SELECT count(*) FROM %I', t) INTO n;
+    EXCEPTION WHEN insufficient_privilege THEN
+      refused := true;
+      GET STACKED DIAGNOSTICS refusal_message = MESSAGE_TEXT;
+    END;
 
-    IF n = 0 THEN
-      RAISE EXCEPTION '[E-RLS-REPORT] table=% not admitted under report-mode bypass without its own grant (enforcement regressed?)', t;
+    IF NOT refused THEN
+      RAISE EXCEPTION '[E-RLS-REFUSAL] table=% was not refused under an enforced bypass without its own grant (enforcement regressed?)', t;
+    END IF;
+    IF refusal_message IS DISTINCT FROM ('RLS_BYPASS_NOT_GRANTED: ' || t) THEN
+      RAISE EXCEPTION '[E-RLS-REFUSAL] table=% was refused with 42501 but not by the bypass check: %', t, refusal_message;
     END IF;
 
     -- Restore the full grant before the next iteration's marker, so only the

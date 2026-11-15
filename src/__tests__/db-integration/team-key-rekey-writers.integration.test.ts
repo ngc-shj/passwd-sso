@@ -25,7 +25,7 @@ import {
   collectNotices,
   createTestContext,
   enterBypassRole,
-  expectBypassNotices,
+  expectBypassRefusal,
   gucSentinels,
   parseNoticeCounts,
   readBackfillBlock,
@@ -1043,15 +1043,19 @@ describe("team entry key identity writers — real-DB integration", () => {
       });
     });
 
-    it.each(BLOCK_TABLES)("table-list control: with %s removed from app.bypass_tables the block reports it under system_maintenance", async (removed) => {
+    it.each(BLOCK_TABLES)("table-list control: with %s removed from app.bypass_tables the block is refused and reports it under system_maintenance", async (removed) => {
       const block = rerunRekey();
       const literal = /'(teams,[a-z_,]+)'/.exec(block);
       expect(literal).not.toBeNull();
       const mutated = block.replace(literal![1], literal![1].split(",").filter((t) => t !== removed).join(","));
       expect(mutated).not.toBe(block);
-      const notices = await expectBypassNotices(() => asApp(async (client) => {
+      // The block is the transaction's last statement; asApp rolls the
+      // transaction back, so the proof of "no write" is the refusal plus the
+      // allow twin ("C1 as passwd_app"), whose same block writes the fixtures.
+      const { notices, table } = await expectBypassRefusal(() => asApp(async (client) => {
         await runBlock(client, mutated);
       }));
+      expect(table).toBe(removed);
       expect(notices).toContainEqual({ table: removed, purpose: "system_maintenance" });
     });
 

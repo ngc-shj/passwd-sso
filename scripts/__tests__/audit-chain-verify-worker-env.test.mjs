@@ -73,12 +73,29 @@ describe("audit-chain-verify-worker --validate-env-only: database URL", () => {
     expectPassed(validate({ AUDIT_CHAIN_VERIFY_DATABASE_URL: VALID_URL }));
   });
 
-  it("passes with the DATABASE_URL fallback", () => {
+  it("passes with the DATABASE_URL fallback outside production", () => {
     expectPassed(validate({ DATABASE_URL: VALID_URL }));
+    expectPassed(validate({ NODE_ENV: "development", DATABASE_URL: VALID_URL }));
   });
 
-  it("fails when neither URL is set", () => {
+  it("fails outside production when neither URL is set", () => {
     const r = validate({});
+    expect(r.status).toBe(1);
+    expect(failures(r)).toEqual([{ path: "AUDIT_CHAIN_VERIFY_DATABASE_URL", code: "missing" }]);
+  });
+
+  it("passes in production with AUDIT_CHAIN_VERIFY_DATABASE_URL", () => {
+    expectPassed(validate({ NODE_ENV: "production", AUDIT_CHAIN_VERIFY_DATABASE_URL: VALID_URL }));
+  });
+
+  it("refuses the DATABASE_URL fallback in production", () => {
+    const r = validate({ NODE_ENV: "production", DATABASE_URL: VALID_URL });
+    expect(r.status).toBe(1);
+    expect(failures(r)).toEqual([{ path: "AUDIT_CHAIN_VERIFY_DATABASE_URL", code: "missing" }]);
+  });
+
+  it("refuses an empty AUDIT_CHAIN_VERIFY_DATABASE_URL in production whatever DATABASE_URL holds", () => {
+    const r = validate({ NODE_ENV: "production", AUDIT_CHAIN_VERIFY_DATABASE_URL: "", DATABASE_URL: VALID_URL });
     expect(r.status).toBe(1);
     expect(failures(r)).toEqual([{ path: "AUDIT_CHAIN_VERIFY_DATABASE_URL", code: "missing" }]);
   });
@@ -90,7 +107,7 @@ describe("audit-chain-verify-worker --validate-env-only: database URL", () => {
     expect(r.stdout + r.stderr).not.toContain("secret-pw");
   });
 
-  it("names DATABASE_URL when the fallback is the unparseable one", () => {
+  it("names DATABASE_URL when the fallback is the unparseable one outside production", () => {
     const r = validate({ DATABASE_URL: "::" });
     expect(r.status).toBe(1);
     expect(failures(r)).toEqual([{ path: "DATABASE_URL", code: "invalid_url" }]);

@@ -525,8 +525,9 @@ if command -v docker >/dev/null 2>&1 && docker exec passwd-sso-db-1 pg_isready -
     # state, seeded or not.
     #
     # Every OTHER code stays fatal here. Block 1 of rls-cross-tenant-verify.sql
-    # (ROLE, DISCOVER, NULL, SYM, COLPARITY, MANIFEST-EXTRA, MANIFEST-MISSING,
-    # FORCE, SECDEF) is pure pg_catalog inspection with NO seed dependency — it
+    # (ROLE, DISCOVER, NULL, SYM, BYPASS-TABLE, TENANT-INITPLAN, ARM-ORDER,
+    # ENFORCED, COLPARITY, MANIFEST-EXTRA, MANIFEST-MISSING, FORCE, SECDEF) is
+    # pure pg_catalog inspection with NO seed dependency — it
     # runs and passes locally today. Whitelisting those would green a dropped
     # FORCE ROW LEVEL SECURITY, a new SECURITY DEFINER function in public, or a
     # tenant_id column added without a policy. COVERAGE belongs to

@@ -85,6 +85,8 @@ src/app/api/share-links/[id]/content/route.ts	1
 src/app/api/share-links/verify-access/route.ts	2
 src/app/api/teams/[teamId]/members/[memberId]/approve/route.ts	1
 src/app/api/teams/[teamId]/members/[memberId]/reject/route.ts	1
+src/app/api/teams/[teamId]/members/bulk-approve/route.ts	1
+src/app/api/teams/[teamId]/members/bulk-reject/route.ts	1
 src/app/api/teams/invitations/accept/route.ts	1
 src/app/api/tenant/access-requests/[id]/approve/route.ts	1
 src/app/api/tenant/access-requests/[id]/deny/route.ts	1

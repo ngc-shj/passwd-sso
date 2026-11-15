@@ -36,6 +36,7 @@ import type { WebhookRecord } from "@/lib/webhook-dispatcher";
 import { WEBHOOK_MAX_RETRIES, WEBHOOK_AUTO_DISABLE_THRESHOLD, WEBHOOK_DELIVERY_CONCURRENCY, AUDIT_IP_MAX_LENGTH, USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
 import { maskUrlForDisplay } from "@/lib/url/url-validation";
 import { errorLogFields } from "@/lib/logger/error-fields";
+import { webhookCreatorVerdicts } from "@/lib/team/webhook-creator-authority";
 
 export interface AuditOutboxRow {
   id: string;
@@ -1134,14 +1135,14 @@ async function processOneWebhookDelivery(
  * Read the live webhook rows for this work item whose `events` array includes
  * the action and that are active, mapped to WebhookRecord for the delivery
  * core. TenantWebhook rows pass teamId: undefined (not null) to keep the AAD
- * byte-identical to the app dispatcher path (buildWebhookSecretAAD).
+ * byte-identical to the app's tenant dispatcher path (buildWebhookSecretAAD).
  */
 async function resolveWebhookSubscribers(
   workerPrisma: PrismaClient,
   item: WebhookDeliveryRow,
 ): Promise<WebhookRecord[]> {
   return workerPrisma.$transaction(async (tx) => {
-    await setBypassGucs(tx, BYPASS_GRANT.OUTBOX_WEBHOOK_DELIVERY);
+    await setBypassGucs(tx, BYPASS_GRANT.OUTBOX_WEBHOOK_SUBSCRIBER_RESOLVE);
     if (item.scope === "TEAM" && item.team_id) {
       const rows = await tx.teamWebhook.findMany({
         // Scope by tenantId too (defense-in-depth): delivery runs under bypass
@@ -1155,7 +1156,27 @@ async function resolveWebhookSubscribers(
           events: { has: item.action },
         },
       });
-      return rows.map((r) => ({
+      // A webhook runs on its creator's authority: skip it (not a failure) once
+      // the creator is no longer an active member holding TEAM_UPDATE. Only the
+      // team_id match scopes this read — the worker has no tenant_id grant on
+      // team_members.
+      const verdicts = await webhookCreatorVerdicts(tx, item.team_id, rows);
+      const authorizedRows = rows.filter((r) => {
+        // Deliver only on a positive verdict; a missing one fails closed.
+        const authorized = verdicts.get(r.id) === true || verdicts.get(r.id) === "legacy";
+        if (!authorized) {
+          getLogger().warn(
+            {
+              webhookId: r.id,
+              teamId: item.team_id,
+              _logType: "outbox.webhook_creator_unauthorized",
+            },
+            "outbox.webhook_creator_unauthorized",
+          );
+        }
+        return authorized;
+      });
+      return authorizedRows.map((r) => ({
         id: r.id,
         url: r.url,
         secretEncrypted: r.secretEncrypted,

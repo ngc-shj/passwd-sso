@@ -115,7 +115,7 @@
  *     the N1 scan), and a measured PER-(file, literal value) table with
  *     exact occurrence counts (UNSCANNED_LITERAL_EXEMPTIONS: a CSS import,
  *     the extension crypto golden-fixture generator, a test-helper module
- *     name held as data); any other such literal in an exempted file, or a
+ *     name held as data, a gate's text baseline); any other such literal in an exempted file, or a
  *     count drift, still denies.
  *   - RAW_METHOD: any spelling of `/^\$(query|execute)Raw\w*$/` — identifier,
  *     property-access name, or decoded literal value (string OR
@@ -1463,6 +1463,11 @@ const UNSCANNED_LITERAL_EXEMPTIONS = new Map([
     // names the shared fail-closed test helper it classifies OTHER files
     // against — never itself loads it.
     new Map([["@/__tests__/helpers/fail-closed", 1]]),
+  ],
+  [
+    "scripts/checks/check-rls-grant-evidence.ts",
+    // reads its baseline (a list of grant names) as text; never executes it.
+    new Map([["./rls-grant-evidence-baseline.txt", 1]]),
   ],
   [
     "scripts/generate-team-key-fixture.ts",

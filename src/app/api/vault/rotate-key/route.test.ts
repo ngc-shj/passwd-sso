@@ -26,6 +26,10 @@ const { mockAuth, mockPrismaUser, mockTransaction, mockApplyVaultRotation, mockW
   };
 });
 
+const { mockLogger } = vi.hoisted(() => ({
+  mockLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+
 // Transaction mock (txMock) for advisory lock assertion
 const txMock = {
   $executeRaw: vi.fn(),
@@ -112,7 +116,7 @@ vi.mock("@/lib/security/rate-limit", () => ({
 vi.mock("@/lib/logger", () => ({
   default: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) },
   requestContext: { run: (_l: unknown, fn: () => unknown) => fn() },
-  getLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
+  getLogger: () => mockLogger,
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
@@ -636,6 +640,26 @@ describe("POST /api/vault/rotate-key", () => {
           invalidatedDelegationSessions: 0,
           cacheTombstoneFailures: 0,
         }),
+      }),
+    );
+  });
+
+  it("logs at error, records invalidationFailed and still returns 200 when invalidation rejects", async () => {
+    mockInvalidateUserSessions.mockRejectedValueOnce(new Error("bypass refused"));
+    const mockLogAudit = vi.mocked((await import("@/lib/audit/audit")).logAuditAsync);
+
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/vault/rotate-key", { body: validBody }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: expect.any(String), error: expect.anything() }),
+      "vault.rotateKey.invalidateFailed",
+    );
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ invalidationFailed: true, invalidatedSessions: null }),
       }),
     );
   });

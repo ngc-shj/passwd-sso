@@ -707,6 +707,11 @@ model TeamMember {
   // plan, C1). CHECKs: only on a deactivated, scim_managed, non-OWNER row,
   // and never also departure-marked.
   scimApprovalPending Boolean @default(false) @map("scim_approval_pending")
+  // Set by a trigger when a deactivated row is re-activated (departed-member-
+  // leaked-authority plan, C2); never written by the application. NULL means
+  // never re-activated: the effective admission time is
+  // COALESCE(admitted_at, created_at).
+  admittedAt DateTime? @map("admitted_at") @db.Timestamptz(3)
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
@@ -987,6 +992,7 @@ enum AuditAction {
   TEAM_MEMBER_SCIM_ROLE_UPDATE
   TEAM_MEMBER_SCIM_APPROVE
   TEAM_MEMBER_SCIM_REJECT
+  TEAM_MEMBER_INVITE_ACCEPT
   SHARE_CREATE
   SHARE_REVOKE
   SEND_CREATE
@@ -1682,6 +1688,9 @@ model TeamWebhook {
   failCount        Int       @default(0) @map("fail_count")
   lastDeliveredAt  DateTime? @map("last_delivered_at") @db.Timestamptz(3)
   lastFailedAt     DateTime? @map("last_failed_at") @db.Timestamptz(3)
+  // The user who created it; NULL for a webhook created before this column.
+  // No relation: it outlives the user row, and delivery checks live authority.
+  createdById      String?   @map("created_by_id") @db.Uuid
   createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 

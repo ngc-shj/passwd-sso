@@ -594,6 +594,25 @@ export const envObject = z.object({
       ),
     )
     .optional(),
+  // Dedicated DB URL for the audit-chain verify worker role (passwd_audit_chain_verifier).
+  // Required by the worker in production (no DATABASE_URL fallback); the worker validates it itself.
+  AUDIT_CHAIN_VERIFY_DATABASE_URL: z
+    .string()
+    .transform((s) => s.trim())
+    .pipe(
+      z.string().refine(
+        (s) => {
+          try {
+            new URL(s);
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        { message: "AUDIT_CHAIN_VERIFY_DATABASE_URL must be a valid URL" },
+      ),
+    )
+    .optional(),
 });
 
 // envSchema — envObject with cross-field superRefine rules. Refined schemas

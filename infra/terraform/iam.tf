@@ -106,9 +106,9 @@ data "aws_caller_identity" "current" {}
 # Audit-anchor publisher task role. Its OWN role, not the shared ecs_task one:
 # the anchors bucket policy (storage.tf) denies s3:PutObject on the manifest key
 # shape to every principal but this role's ARN, and the replication write
-# actions to every principal, so a compromised app or worker task — which runs
-# as ecs_task — cannot write a manifest by either route. The verify worker has
-# no task role at all.
+# actions to every principal, so a compromised app or retention worker task —
+# which run as ecs_task or ecs_retention_gc_task — cannot write a manifest by
+# either route. The outbox and verify workers have no task role at all.
 ################################################################################
 
 # Assumable only by ECS tasks in this account (the confused-deputy guard). That
@@ -148,8 +148,10 @@ resource "aws_iam_role_policy" "ecs_audit_anchor_publisher_s3" {
   })
 }
 
+# The app's attachment reads and writes, only when it stores attachments in the
+# bucket. On the db backend no task holds rights on the bucket.
 resource "aws_iam_role_policy" "ecs_s3_access" {
-  count = var.enable_s3_attachments ? 1 : 0
+  count = var.attachments_blob_backend == "s3" && var.enable_s3_attachments ? 1 : 0
   name  = "${local.name_prefix}-ecs-s3"
   role  = aws_iam_role.ecs_task.id
   policy = jsonencode({
@@ -159,5 +161,66 @@ resource "aws_iam_role_policy" "ecs_s3_access" {
       Action   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
       Resource = "${aws_s3_bucket.attachments[0].arn}/*"
     }]
+  })
+}
+
+################################################################################
+# Retention-gc worker task role. Its OWN role, not ecs_task: the orphan-object
+# sweep needs s3:ListBucket (without it a missing marker reads as 403, not 404)
+# and the marker's Get/Put, which the app has no use for. The app keeps
+# ecs_task; the outbox worker has no task role (ecs.tf).
+#
+# No override detection (unlike the publisher's role): this role holds no
+# authority a bucket policy reserves to it. On the s3 backend its rights are a
+# subset of ecs_task's (Get/Put/Delete on every object) plus ListBucket, so a
+# task run with it as an override gains only the listing of object keys.
+################################################################################
+
+resource "aws_iam_role" "ecs_retention_gc_task" {
+  name = "${local.name_prefix}-ecs-retention-gc-task"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "ecs-tasks.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+      Condition = { StringEquals = { "aws:SourceAccount" = data.aws_caller_identity.current.account_id } }
+    }]
+  })
+  tags = local.tags
+}
+
+# Only with the s3 backend and a bucket; the count keeps one() out of the
+# templates when there is no bucket (precondition 1 on the retention task then
+# reports instead). Never DeleteObjectVersion, PutObjectRetention,
+# BypassGovernanceRetention, PutLifecycleConfiguration or PutBucket*: with
+# versioning on, DeleteObject without a version only adds a delete marker, so
+# an operator can undo a wrong sweep.
+resource "aws_iam_role_policy" "ecs_retention_gc_task_s3" {
+  count = var.attachments_blob_backend == "s3" && var.enable_s3_attachments ? 1 : 0
+  name  = "${local.name_prefix}-ecs-retention-gc-task-s3"
+  role  = aws_iam_role.ecs_retention_gc_task.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
+        Resource = one(aws_s3_bucket.attachments[*].arn)
+      },
+      # The retention purge and the orphan sweep.
+      {
+        Effect   = "Allow"
+        Action   = ["s3:DeleteObject"]
+        Resource = "${one(aws_s3_bucket.attachments[*].arn)}/*"
+      },
+      # The deployment marker only: read every sweep, written once by
+      # --init-blob-marker.
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:PutObject"]
+        Resource = "${one(aws_s3_bucket.attachments[*].arn)}/${local.blob_marker_key}"
+      },
+    ]
   })
 }

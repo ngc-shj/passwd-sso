@@ -91,6 +91,8 @@ export const NON_PRODUCTION_SCRIPTS = [
   // no application code.
   "scripts/audit-db-grants.mjs",
   "scripts/bootstrap-rds-roles.mjs",
+  // Deploy preflight: reads _prisma_migrations as the migration role.
+  "scripts/rls-enforce-preflight.mjs",
   "scripts/lib/denied-privileges.mjs",
   // Repository maintenance and fixture generators, outside the Program.
   "scripts/check-blame-ignore-revs.mjs",

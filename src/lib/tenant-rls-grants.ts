@@ -75,7 +75,7 @@ export type BypassModel = keyof typeof MODEL_TABLE;
 
 /**
  * What a bypass may reach: its purpose and the models it touches. The
- * database reports (and, once enforced, refuses) a bypassed statement that
+ * database reports and then refuses (42501) a bypassed statement that
  * examines a row of an RLS table outside `tables` — see
  * `public.rls_bypass_admits` in the migrations.
  */
@@ -188,6 +188,7 @@ export const BYPASS_GRANT = Object.freeze({
   OUTBOX_REAPER: defineGrant(BYPASS_PURPOSE.AUDIT_WRITE, ["auditOutbox", "auditLog", "auditDelivery", "webhookDelivery"]),
   OUTBOX_RETENTION_PURGE: defineGrant(BYPASS_PURPOSE.AUDIT_WRITE, ["auditOutbox", "auditLog", "auditDelivery", "webhookDelivery"]),
   OUTBOX_WEBHOOK_DELIVERY: defineGrant(BYPASS_PURPOSE.AUDIT_WRITE, ["webhookDelivery", "teamWebhook", "tenantWebhook", "auditOutbox", "auditLog"]),
+  OUTBOX_WEBHOOK_SUBSCRIBER_RESOLVE: defineGrant(BYPASS_PURPOSE.AUDIT_WRITE, ["teamWebhook", "tenantWebhook", "teamMember"]),
   PASSKEY_EMAIL_OPTIONS: defineGrant(BYPASS_PURPOSE.AUTH_FLOW, ["webAuthnCredential"]),
   PASSKEY_ENFORCEMENT_STATE: defineGrant(BYPASS_PURPOSE.AUTH_FLOW, ["tenant", "webAuthnCredential"]),
   PASSWORD_HISTORY_PURGE: defineGrant(BYPASS_PURPOSE.SYSTEM_MAINTENANCE, ["passwordEntryHistory"]),
@@ -208,7 +209,6 @@ export const BYPASS_GRANT = Object.freeze({
   TEAM_MEMBER_DISPLAY_LOOKUP: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["tenantMember", "user", "tenant"]),
   TEAM_PENDING_KEY_DISTRIBUTION: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["teamMember", "user", "team"]),
   TEAM_TENANT_LOOKUP: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["team", "tenant"]),
-  TEAM_WEBHOOK_DISPATCH: defineGrant(BYPASS_PURPOSE.WEBHOOK_DISPATCH, ["teamWebhook"]),
   TENANT_CLAIM_BINDING_READ: defineGrant(BYPASS_PURPOSE.SYSTEM_MAINTENANCE, ["account", "tenant", "tenantClaim", "tenantClaimEvent", "tenantMember"]),
   TENANT_CLAIM_BINDING_WRITE: defineGrant(BYPASS_PURPOSE.SYSTEM_MAINTENANCE, ["account", "tenant", "tenantClaim", "tenantClaimEvent", "tenantMember"]),
   TENANT_CLAIM_HISTORY: defineGrant(BYPASS_PURPOSE.SYSTEM_MAINTENANCE, ["tenant", "tenantClaim", "tenantClaimEvent"]),
