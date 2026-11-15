@@ -1527,8 +1527,10 @@ fi
 # O_EXCL applies only while pid is absent: a pre-existing non-regular pid is
 # opened without it, and only the owner of the audited 0700 root can plant one.
 # The claim's own error is kept for the INTERNAL arm: ENOSPC and EACCES need
-# different fixes, and the LOCKED arm does not print it.
-if ! claim_err="$( ( set -C; : > "$LOCK_CANDIDATE/pid" ) 2>&1 )"; then
+# different fixes, and the LOCKED arm does not print it. Tracing is switched off
+# inside the capture, or a `bash -x` run folds its trace lines into the one
+# BACKUP_ERR line.
+if ! claim_err="$( ( { set +x; } 2>/dev/null; set -C; : > "$LOCK_CANDIDATE/pid" ) 2>&1 )"; then
   # rmdir decides, not a test of what pid is followed by a removal: it removes
   # the directory only if it is empty, i.e. nobody has claimed the directory now
   # at that path. A racer's pid (ENOTEMPTY) or a holder that already released
@@ -1539,6 +1541,14 @@ if ! claim_err="$( ( set -C; : > "$LOCK_CANDIDATE/pid" ) 2>&1 )"; then
   assert_root_unchanged
   if rmdir -- "$LOCK_CANDIDATE" 2>/dev/null; then
     fail INTERNAL "could not record the lock holder: $claim_err"
+  fi
+  # rmdir failed. A racer's claim (pid present) or a released lock (directory
+  # gone) is contention. A directory still there with no pid is not: the claim
+  # and the removal both failed on their own (EROFS, EIO), and the empty lock
+  # stays — say so, with the cause and the recovery, rather than report a race.
+  # Advisory only: nothing is removed on this reading.
+  if [ -d "$LOCK_CANDIDATE" ] && [ ! -e "$LOCK_CANDIDATE/pid" ] && [ ! -L "$LOCK_CANDIDATE/pid" ]; then
+    fail INTERNAL "could not record the lock holder ($claim_err), and could not remove the lock either. Confirm no backup is running, then: rm -rf $(printf '%q' "$LOCK_CANDIDATE")"
   fi
   fail LOCKED "another backup run claimed $LOCK_CANDIDATE at the same moment"
 fi

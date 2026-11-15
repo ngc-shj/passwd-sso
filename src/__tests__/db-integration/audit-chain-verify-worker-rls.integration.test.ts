@@ -556,7 +556,7 @@ describe("audit-chain verify worker boots as the verifier role", () => {
           }
         };
         child.stdout.on("data", onData);
-        child.once("exit", () => rej(new Error(`worker exited before a heartbeat\nstdout: ${stdout}\nstderr: ${stderr}`)));
+        child.once("close", () => rej(new Error(`worker exited before a heartbeat\nstdout: ${stdout}\nstderr: ${stderr}`)));
       });
 
       expect(heartbeat.verifiedTenantCount, stderr).toBeGreaterThanOrEqual(1);

@@ -2107,11 +2107,12 @@ describe("ignore-rule coverage", () => {
 
 
 describe("concurrency and destination ownership", () => {
-  it("lets exactly one of two runs reclaim the same stale lock", { timeout: 30000 }, async () => {
+  it("refuses to reclaim a stale lock, even when two runs see it at once", { timeout: 30000 }, async () => {
     // Two runs can judge the same lock stale simultaneously. rm-then-mkdir let
     // the later one delete the earlier one's FRESH lock, so both proceeded into
-    // one root and each swept the other's residue. The claim is a rename now,
-    // which exactly one can win.
+    // one root and each swept the other's residue. No automatic reclaim survived
+    // that race, so there is none: both runs fail closed and the operator
+    // removes the lock.
     mkdirSync(backupDir, { recursive: true, mode: 0o700 });
     chmodSync(backupDir, 0o700);
     const lock = join(backupDir, ".lock.d");
@@ -2204,21 +2205,26 @@ exit 0`);
   // before the other arrived (both published, under consecutive stamps).
   //
   // The mkdir stub holds every call on the lock directory at a two-party
-  // barrier, then runs the real mkdir. `falseSuccess` models uutils mkdir
-  // before 0.11 (uutils#13970): an existence pre-check that fails for a path
-  // that is already there, then a create whose EEXIST is reported as success
-  // when the path is a directory. The pre-check sits BEFORE the barrier, so
-  // both runs pass it before either creates — the window the CI runner hit.
+  // barrier, runs the real mkdir, then holds both runs at a second barrier until
+  // both mkdirs have returned. The first makes the two creates race; the second
+  // keeps the winner from claiming, dumping and releasing before the loser's
+  // mkdir has even run, which would let both publish with every arrival check
+  // green. `falseSuccess` models uutils mkdir before 0.11 (uutils#13970): an
+  // existence pre-check that fails for a path that is already there, then a
+  // create whose EEXIST is reported as success when the path is a directory.
+  // The pre-check sits BEFORE the first barrier, so both runs pass it before
+  // either creates — the window the CI runner hit.
   function contendedLockRun({ falseSuccess = false } = {}) {
     mkdirSync(backupDir, { recursive: true, mode: 0o700 });
     chmodSync(backupDir, 0o700);
-    const barrier = join(tmpDir, "barrier");
-    mkdirSync(barrier);
-    // What each run saw when it left the barrier, kept apart from the arrivals so
-    // it cannot inflate their count.
-    const barrierLeft = join(tmpDir, "barrier-left");
-    mkdirSync(barrierLeft);
-    const barrierTimeout = join(tmpDir, "barrier-timeout");
+    // Per barrier: an arrivals directory, and beside it what each run saw when it
+    // left (kept apart so it cannot inflate the arrival count).
+    const barriers = ["barrier-acquire", "barrier-created"].map((name) => {
+      const dir = join(tmpDir, name);
+      mkdirSync(dir);
+      mkdirSync(`${dir}-left`);
+      return dir;
+    });
     const falseSuccessFired = join(tmpDir, "false-success");
     const realMkdir = spawnSync("sh", ["-c", "command -v mkdir"], { encoding: "utf8" }).stdout.trim();
     stub("mkdir", `
@@ -2227,19 +2233,24 @@ for a in "$@"; do
   case "$a" in */.lock.d) lock="$a" ;; esac
 done
 [ -n "$lock" ] || exec "${realMkdir}" "$@"
-${falseSuccess ? `[ -e "$lock" ] && { printf 'mkdir: %s: File exists\\n' "$lock" >&2; exit 1; }` : ""}
-: > "${barrier}/$$"
 shopt -s nullglob
-while arrived=("${barrier}"/*); [ "\${#arrived[@]}" -lt 2 ]; do
-  [ "$SECONDS" -ge 10 ] && { : > "${barrierTimeout}"; break; }
-  sleep 0.01
-done
-printf '%s' "\${#arrived[@]}" > "${barrierLeft}/$$"
+barrier() {
+  : > "$1/$$"
+  while arrived=("$1"/*); [ "\${#arrived[@]}" -lt 2 ]; do
+    [ "$SECONDS" -ge 10 ] && { : > "$1.timeout"; break; }
+    sleep 0.01
+  done
+  printf '%s' "\${#arrived[@]}" > "$1-left/$$"
+}
+${falseSuccess ? `[ -e "$lock" ] && { printf 'mkdir: %s: File exists\\n' "$lock" >&2; exit 1; }` : ""}
+barrier "${barriers[0]}"
 ${falseSuccess
-    ? `"${realMkdir}" "$@" 2>/dev/null && exit 0
-[ -d "$lock" ] && { : > "${falseSuccessFired}"; exit 0; }
-exit 1`
-    : `exec "${realMkdir}" "$@"`}`);
+    ? `if "${realMkdir}" "$@" 2>/dev/null; then status=0
+elif [ -d "$lock" ]; then : > "${falseSuccessFired}"; status=0
+else status=1; fi`
+    : `"${realMkdir}" "$@"; status=$?`}
+barrier "${barriers[1]}"
+exit "$status"`);
     const env = { PATH: `${binDir}:${process.env.PATH}`, HOME: homeDir, LANG: "C", BACKUP_DIR: backupDir };
     const one = () => new Promise((res) => {
       const c = spawn(BASH, [SCRIPT], { env, stdio: ["ignore", "pipe", "pipe"] });
@@ -2253,9 +2264,12 @@ exit 1`
     });
     return Promise.all([one(), one()]).then((runs) => ({
       runs,
-      arrivals: readdirSync(barrier).length,
-      seenOnLeaving: readdirSync(barrierLeft).map((n) => readFileSync(join(barrierLeft, n), "utf8")),
-      timedOut: existsSync(barrierTimeout),
+      barriers: barriers.map((dir) => ({
+        name: dir.slice(tmpDir.length + 1),
+        arrivals: readdirSync(dir).length,
+        seenOnLeaving: readdirSync(`${dir}-left`).map((n) => readFileSync(join(`${dir}-left`, n), "utf8")),
+        timedOut: existsSync(`${dir}.timeout`),
+      })),
       falseSuccessFired: existsSync(falseSuccessFired),
     }));
   }
@@ -2263,11 +2277,13 @@ exit 1`
   // Checked before the outcome: a barrier that never engaged (a renamed lock
   // path, a stub that no longer matches) would otherwise pass on scheduling.
   function expectForcedOverlap(c) {
-    expect(c.arrivals, `both runs must reach the lock's mkdir; runs: ${JSON.stringify(c.runs)}`).toBe(2);
-    expect(c.timedOut, "the barrier expired, so the runs did not overlap").toBe(false);
-    // Arriving is not waiting: a loop that let a run through early would still
-    // leave two arrival files behind.
-    expect(c.seenOnLeaving, "each run must leave the barrier only once both arrived").toEqual(["2", "2"]);
+    for (const b of c.barriers) {
+      expect(b.arrivals, `${b.name}: both runs must arrive; runs: ${JSON.stringify(c.runs)}`).toBe(2);
+      expect(b.timedOut, `${b.name} expired, so the runs did not overlap`).toBe(false);
+      // Arriving is not waiting: a loop that let a run through early would still
+      // leave two arrival files behind.
+      expect(b.seenOnLeaving, `${b.name}: each run must leave only once both arrived`).toEqual(["2", "2"]);
+    }
   }
 
   it("lets exactly one of two runs take a FREE lock, under real contention",
@@ -2347,6 +2363,56 @@ exit 0`);
     expect(r.stderr).toMatch(/could not record the lock holder: .*Permission denied/);
     if (existsSync(lock)) chmodSync(lock, 0o700);
     expect(existsSync(lock), "a lock nobody can attribute must not survive").toBe(false);
+  });
+
+  // Shared by the two cases below: the lock's mkdir succeeds, then the claim
+  // fails with the directory still empty.
+  function unclaimableLockStub() {
+    const realMkdir = spawnSync("sh", ["-c", "command -v mkdir"], { encoding: "utf8" }).stdout.trim();
+    stub("mkdir", `
+"${realMkdir}" "$@" || exit $?
+for a in "$@"; do
+  case "$a" in
+    */.lock.d) chmod 0500 -- "$a" ;;
+  esac
+done
+exit 0`);
+  }
+
+  it.skipIf(process.getuid?.() === 0)(
+    "keeps the claim's error on the BACKUP_ERR line under bash -x", () => {
+    // The error is captured from a subshell; with xtrace on, the subshell's own
+    // trace lines were captured with it, and the cause landed on a later line
+    // that no longer starts with BACKUP_ERR.
+    mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+    chmodSync(backupDir, 0o700);
+    unclaimableLockStub();
+    const r = spawnSync("bash", ["-x", SCRIPT], {
+      encoding: "utf8", timeout: 8000, cwd: REPO_ROOT,
+      env: { PATH: `${binDir}:${process.env.PATH}`, HOME: homeDir, LANG: "C", BACKUP_DIR: backupDir },
+    });
+    const errLine = r.stderr.split("\n").find((l) => l.startsWith("BACKUP_ERR:"));
+    expect(errLine).toMatch(/^BACKUP_ERR:INTERNAL could not record the lock holder: .*Permission denied$/);
+    const lock = join(backupDir, ".lock.d");
+    if (existsSync(lock)) chmodSync(lock, 0o700);
+  });
+
+  it.skipIf(process.getuid?.() === 0)(
+    "reports a lock it could neither claim nor remove as its own failure, not a race", () => {
+    // rmdir failing is read as contention only when there is contention to see:
+    // a racer's pid, or a lock already released. An empty lock still in place is
+    // this run's own leftover (EROFS, EIO), and every later run will refuse it.
+    mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+    chmodSync(backupDir, 0o700);
+    unclaimableLockStub();
+    stub("rmdir", "exit 1");
+    const r = run();
+    expect(err(r)).toBe("INTERNAL");
+    expect(r.stderr).toMatch(/could not record the lock holder \(.*Permission denied\), and could not remove the lock either/);
+    expect(r.stderr).toMatch(/rm -rf .*\.lock\.d/);
+    const lock = join(backupDir, ".lock.d");
+    expect(existsSync(lock), "the empty lock is left for the operator, as the message says").toBe(true);
+    chmodSync(lock, 0o700);
   });
 
   it.skipIf(!existsSync("/dev/full"))(
