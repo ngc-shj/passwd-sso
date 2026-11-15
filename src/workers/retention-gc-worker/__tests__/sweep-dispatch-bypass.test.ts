@@ -125,6 +125,26 @@ describe("sweepOnce dispatch sets the bypass each entry declares (C1)", () => {
     expect(logError).not.toHaveBeenCalled();
   });
 
+  // I-C3b: the table is minted by sqlTable and spliced after DELETE FROM, so a
+  // registry table the position rule refuses would render no statement at all.
+  it("every registry entry that splices a table renders a DELETE FROM it", async () => {
+    const { workerPrisma, txs } = makeDispatchPrisma();
+    await sweepOnce(workerPrisma, 100, { intervalMs: 1, emitHeartbeatAudit: false });
+
+    const rendered = txs.flatMap((t) =>
+      t.calls
+        .filter((c) => c.name === "$executeRawUnsafe" || c.name === "$queryRawUnsafe")
+        .map((c) => String(c.args[0])),
+    );
+    const SPLICING_KINDS = ["EXPIRY", "EXPIRY_GUARDED", "EXPIRY_AUDIT_PROVENANCE", "PER_TENANT_AGE"];
+    const splicing = RETENTION_REGISTRY.filter((e) => SPLICING_KINDS.includes(e.kind));
+    expect(splicing.length).toBeGreaterThan(0);
+    const missing = splicing
+      .filter((e) => !rendered.some((sql) => sql.includes(`DELETE FROM ${e.table}`)))
+      .map((e) => e.table);
+    expect(missing).toEqual([]);
+  });
+
   it("set_config('app.bypass_rls', 'on', true) is the first call on every bypass transaction", async () => {
     const { workerPrisma, txs } = makeDispatchPrisma();
     await sweepOnce(workerPrisma, 100, { intervalMs: 1, emitHeartbeatAudit: true });

@@ -25,7 +25,7 @@ import { DELIVERERS, type TargetConfig, type DeliveryPayload } from "@/workers/a
 import { decryptServerData, getMasterKeyByVersion } from "@/lib/crypto/crypto-server";
 import { sanitizeErrorForStorage, sanitizeForExternalDelivery } from "@/lib/http/external-http";
 import { buildChainInput, computeCanonicalBytes, computeEventHash } from "@/lib/audit/audit-chain";
-import { sqlIdentifier, trustedSql, renderSql } from "@/lib/prisma/raw-sql";
+import { sqlTable, trustedSql, renderSql } from "@/lib/prisma/raw-sql";
 // NOTE: @/lib/webhook-dispatcher is imported LAZILY inside processOneWebhookDelivery
 // (not at module scope) — it transitively pulls in the @/lib/prisma singleton,
 // which throws at import time when DATABASE_URL is unset. Eager-importing it here
@@ -1273,7 +1273,7 @@ export async function onWebhookDeliveryFailure(
   const updated = await workerPrisma.$transaction(async (tx) => {
     await setBypassGucs(tx, BYPASS_GRANT.OUTBOX_WEBHOOK_DELIVERY);
     const rows = await tx.$queryRawUnsafe<{ fail_count: number }[]>(
-      renderSql(trustedSql`UPDATE "${sqlIdentifier(table)}"
+      renderSql(trustedSql`UPDATE "${sqlTable(table)}"
        SET fail_count = fail_count + 1,
            last_failed_at = now(),
            last_error = $1,
