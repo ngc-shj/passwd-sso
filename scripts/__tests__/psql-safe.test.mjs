@@ -173,6 +173,7 @@ describe("scripts that run psql against an operator URL", () => {
       "migrate-prf-per-credential-salt.sh",
       "rls-cross-tenant-negative-test.sh",
       "set-audit-anchor-publisher-password.sh",
+      "set-audit-chain-verifier-password.sh",
       "set-outbox-worker-password.sh",
       "set-retention-gc-worker-password.sh",
     ]);

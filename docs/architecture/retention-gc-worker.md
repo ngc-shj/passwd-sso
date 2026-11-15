@@ -49,8 +49,8 @@ such writer of a locked team as committed, decides and deletes, bounded to
 `RETENTION_GC_BATCH_SIZE` (team, version) pairs per tick. The team locks last
 only for that statement, the audit rows and the commit, because every team
 writer gives up after a 3 s wait. The worker role holds EXECUTE on it and no table grant; the
-function refuses outside the RLS bypass, and while enforcement (`#921`) is off a
-bypass whose grant omits `team_member_keys` is reported rather than refused.
+function refuses outside the RLS bypass, and a bypass whose grant omits
+`team_member_keys` is reported and then refused (42501; `#921`).
 Grant: `BYPASS_GRANT.RETENTION_TEAM_KEY_PRUNE`. Policy and the concurrency
 argument: `docs/security/key-retention-policy.md` §1.
 

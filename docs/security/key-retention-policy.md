@@ -75,7 +75,7 @@ deleted. It applies to both automated systems and manual maintenance operations.
 - The worker role holds EXECUTE on the function and no table grant. The
   function refuses unless the caller's RLS bypass is on; a bypass whose grant
   does not name `team_member_keys` is reported (`rls_bypass_not_granted`) and
-  becomes a refusal once enforcement is switched on (`#921`).
+  then refused (42501), as the database enforces every bypass grant (`#921`).
 - Each tick writes one `TEAM_MEMBER_KEY_PRUNED` audit row per team (team
   scope, SYSTEM actor) carrying the versions, the row count and the holders'
   user ids (section 3).

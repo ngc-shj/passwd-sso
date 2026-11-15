@@ -22,6 +22,16 @@
  *
  * Exit codes: 0 = live ACLs match the manifest; 1 = drift (surplus or missing).
  *
+ * Also fails when the RLS bypass is not enforcing (public.rls_bypass_enforced()
+ * absent or false), unless RLS_REPORT_MODE_ACK carries a non-empty reason, which
+ * is printed as a WARNING so a deploy in report mode is visible in the task log;
+ * a reason left set on an enforcing database is warned about too.
+ * `--write` refuses in report mode whatever is set. The variable is read from
+ * the environment only (scripts/deploy.sh forwards it); no flag sets it.
+ * Fails too when client_min_messages is above `warning` from a server-level
+ * source, or when the audit's own connection overrides it so that the
+ * server-level value cannot be read (see clientMinMessagesViolations).
+ *
  * Findings:
  *   UNEXPECTED_GRANT: <manifest key>  — live privilege not in the manifest (the
  *                                       security-relevant direction: over-privilege)
@@ -33,6 +43,11 @@
  *                                       log_min_messages, row_security)
  *   ROLE_STATE_VIOLATION / _IN_MANIFEST — a role state that is never legitimate
  *                                       (see roleStateViolations)
+ *   RLS_ENFORCE_MODE                  — the RLS bypass is not enforcing (see
+ *                                       enforceModeViolations)
+ *   CLIENT_MIN_MESSAGES_SERVER_LEVEL  — the RLS bypass report channel is closed
+ *                                       server-wide, or cannot be shown open
+ *                                       (see clientMinMessagesViolations)
  */
 import { readFileSync, writeFileSync, existsSync, realpathSync } from "node:fs";
 import { Client } from "pg";
@@ -61,6 +76,7 @@ const AUDITED_ROLES = [
   "passwd_outbox_worker",
   "passwd_retention_gc_worker",
   "passwd_anchor_publisher",
+  "passwd_audit_chain_verifier",
   "passwd_dcr_cleanup_worker",
 ];
 
@@ -116,7 +132,8 @@ const TABLE_PRIVILEGES = ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "R
  *   DEFAULTACL:<owner>\t<schema>\t<type>\t<acl>   pre-authorises objects that do
  *                                                 not exist yet
  *   ROLEATTR:<role>\t<attr>\t<value>              SUPERUSER/BYPASSRLS/REPLICATION/
- *                                                 CREATEDB/CREATEROLE/LOGIN
+ *                                                 CREATEDB/CREATEROLE/LOGIN, and
+ *                                                 the connection limit (rolconnlimit)
  *   ROLESETTING:<role|*>\t<db|*>\t<name>=<value>  a per-role / per-database
  *                                                 default GUC (ALTER ROLE … SET,
  *                                                 ALTER DATABASE … SET); `*` is
@@ -285,7 +302,7 @@ async function readLiveGrants(client) {
   //    the bootstrap-time convergence durable.
   const { rows: attrRows } = await client.query(
     `SELECT rolname, rolsuper, rolbypassrls, rolcreatedb, rolcreaterole,
-            rolreplication, rolcanlogin
+            rolreplication, rolcanlogin, rolconnlimit
        FROM pg_roles WHERE rolname = ANY($1)`,
     [AUDITED_ROLES],
   );
@@ -607,6 +624,137 @@ export function assertRetiredSubset(auditedRoles, retiredRoles) {
   }
 }
 
+/** Env var whose non-empty reason lets the audit pass in report mode. */
+export const RLS_REPORT_MODE_ACK_ENV = "RLS_REPORT_MODE_ACK";
+
+const ACK_MAX_LENGTH = 200;
+
+/** `_logType` of the line an acknowledged report-mode audit emits. */
+const REPORT_MODE_ACK_LOG_TYPE = "rls.report_mode_acknowledged";
+
+/** The JSON line for one acknowledged-report-mode warning. */
+export function reportModeAckLogLine(warning) {
+  return JSON.stringify({ level: "warn", _logType: REPORT_MODE_ACK_LOG_TYPE, msg: warning });
+}
+
+/** One line, no control characters, bounded: the reason goes into the task log. */
+function sanitizeAcknowledgement(reason) {
+  return reason
+    .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, ACK_MAX_LENGTH);
+}
+
+/**
+ * Decide the RLS bypass mode. `functionPresent` and `enforced` are what the
+ * database says (`to_regprocedure('public.rls_bypass_enforced()') IS NOT NULL`
+ * and its result); `acknowledgement` is the raw RLS_REPORT_MODE_ACK value.
+ * Report mode passes only with a reason that survives sanitising, and then
+ * yields a warning so the state is never silent. An acknowledgement left set
+ * on an enforcing database yields a warning too. An absent function is never
+ * acknowledgeable: nothing says what mode the database is in.
+ *
+ * @returns {{ violations: string[], warnings: string[] }}
+ */
+export function enforceModeViolations({ functionPresent, enforced, acknowledgement }) {
+  if (!functionPresent) {
+    return {
+      violations: ["public.rls_bypass_enforced() is absent: the RLS bypass mode is unknown"],
+      warnings: [],
+    };
+  }
+  const reason = typeof acknowledgement === "string" ? sanitizeAcknowledgement(acknowledgement) : "";
+  if (enforced === true) {
+    // A leftover acknowledgement would let a later un-flip pass unnoticed.
+    return {
+      violations: [],
+      warnings:
+        reason === ""
+          ? []
+          : [`${RLS_REPORT_MODE_ACK_ENV} is set but the RLS bypass is enforcing: remove it (${reason})`],
+    };
+  }
+  if (reason === "") {
+    return {
+      violations: [
+        "public.rls_bypass_enforced() is not true: the RLS bypass is in report mode " +
+          `(set ${RLS_REPORT_MODE_ACK_ENV} to a reason to deploy anyway)`,
+      ],
+      warnings: [],
+    };
+  }
+  return {
+    violations: [],
+    warnings: [`RLS bypass is in REPORT mode, acknowledged: ${reason}`],
+  };
+}
+
+/** True only when the mode is enforcing; what `--write` requires. */
+function isEnforcing({ functionPresent, enforced }) {
+  return functionPresent && enforced === true;
+}
+
+async function readEnforceMode(client) {
+  const { rows } = await client.query(
+    "SELECT to_regprocedure('public.rls_bypass_enforced()') IS NOT NULL AS present",
+  );
+  const functionPresent = rows[0].present === true;
+  if (!functionPresent) return { functionPresent, enforced: null };
+  const res = await client.query("SELECT public.rls_bypass_enforced() AS enforced");
+  return { functionPresent, enforced: res.rows[0].enforced };
+}
+
+/**
+ * pg_settings sources whose value every other connection to this database
+ * inherits: `default`, `configuration file` (postgresql.conf, an RDS parameter
+ * group), `environment variable`, `command line`, `global`, `override`, and
+ * `database` (ALTER DATABASE ... SET).
+ *
+ * Any other source belongs to the audit's own connection — a startup-packet
+ * option (`client`), a SET (`session`; observed on PostgreSQL 16 for SET and
+ * SET LOCAL alike), or a setting on the audit's own role (`user`,
+ * `database user`). pg_settings then shows that value and nothing of the
+ * server default underneath it, so the check cannot decide and fails: a
+ * harmless override on the migration role would otherwise hide a parameter
+ * group that silences every other role. An unknown source fails the same way.
+ */
+const SERVER_WIDE_SOURCES = new Set([
+  "default",
+  "configuration file",
+  "environment variable",
+  "command line",
+  "global",
+  "override",
+  "database",
+]);
+
+/**
+ * client_min_messages above `warning` closes the channel the RLS bypass reports
+ * travel on. Its enum tops out at `error` (`fatal` and `panic` are rejected),
+ * but they are refused here too should a later server accept them.
+ *
+ * @param {{ setting: string, source: string }} row  from pg_settings
+ * @returns {string[]}
+ */
+export function clientMinMessagesViolations({ setting, source }) {
+  if (!SERVER_WIDE_SOURCES.has(source)) {
+    return [
+      `client_min_messages = ${setting} comes from source "${source}", the audit's own connection: ` +
+        "the server-level value cannot be read. Remove the override from the migration role or its connection string",
+    ];
+  }
+  if (!["error", "fatal", "panic"].includes(setting)) return [];
+  return [`client_min_messages = ${setting} from source "${source}" silences the RLS bypass reports`];
+}
+
+async function readClientMinMessages(client) {
+  const { rows } = await client.query(
+    "SELECT setting, source FROM pg_settings WHERE name = 'client_min_messages'",
+  );
+  return rows[0];
+}
+
 function readManifest() {
   if (!existsSync(MANIFEST_FILE)) {
     console.error(
@@ -691,8 +839,12 @@ async function main() {
   await client.connect();
   let live;
   let subjectKinds;
+  let mode;
+  let clientMinMessages;
   try {
     live = await readLiveGrants(client);
+    mode = await readEnforceMode(client);
+    clientMinMessages = await readClientMinMessages(client);
     // The kind of each declared subject, so an entry that names a sequence as a
     // table (or the reverse) is a hard error rather than an entry that quietly
     // matches no key. `assertSubjectKind` holds the rule; this only fetches.
@@ -747,6 +899,16 @@ async function main() {
     const erased = missingDeclaredColumnGrants(live, denied, existingSubjects);
     const settings = deniedSettings(live);
     const roleState = roleStateViolations(live, roleScope);
+    // Whatever RLS_REPORT_MODE_ACK says: a manifest written from a database that
+    // is not enforcing would record the un-flip as the baseline.
+    if (!isEnforcing(mode)) {
+      console.error(
+        "REFUSING to regenerate the manifest: the RLS bypass is not enforcing " +
+          "(public.rls_bypass_enforced() is absent or not true).",
+      );
+      process.exitCode = 1;
+      return;
+    }
     if (
       laundered.length > 0 ||
       erased.length > 0 ||
@@ -779,7 +941,8 @@ async function main() {
           `\nlegitimate (an elevated attribute, a membership, a PUBLIC table` +
           `\ngrant, or a retired role able to act); repair it. Then regenerate.\n`,
       );
-      process.exit(1);
+      process.exitCode = 1;
+      return;
     }
     writeManifest(comparable(live));
     return;
@@ -835,6 +998,22 @@ async function main() {
     }
   }
 
+  const enforceMode = enforceModeViolations({
+    ...mode,
+    acknowledgement: process.env[RLS_REPORT_MODE_ACK_ENV],
+  });
+  for (const w of enforceMode.warnings) {
+    console.warn(`WARNING: ${w}`);
+    // One JSON line as well: the migrate task logs to the app log group, where
+    // a metric filter on this _logType raises an alarm (infra/terraform/monitoring.tf),
+    // so an acknowledgement left in a pipeline variable is not silent.
+    console.warn(reportModeAckLogLine(w));
+  }
+  for (const v of enforceMode.violations) findings.push(`RLS_ENFORCE_MODE: ${v}`);
+  for (const v of clientMinMessagesViolations(clientMinMessages)) {
+    findings.push(`CLIENT_MIN_MESSAGES_SERVER_LEVEL: ${v}`);
+  }
+
   if (findings.length > 0) {
     console.error("DB grant audit FAILED:\n");
     for (const f of findings) console.error(`  ${f}`);
@@ -852,9 +1031,19 @@ async function main() {
         `\nA ROLE_STATE_VIOLATION is a role state that is never legitimate: an` +
         `\nelevated attribute or a membership on an audited role, a PUBLIC table` +
         `\ngrant, or a retired role that can log in, be acted as, or hold anything` +
-        `\nbeyond PUBLIC's privileges. _IN_MANIFEST means the manifest records one.\n`,
+        `\nbeyond PUBLIC's privileges. _IN_MANIFEST means the manifest records one.` +
+        `\nAn RLS_ENFORCE_MODE means the bypass is not enforcing: restore` +
+        `\npublic.rls_bypass_enforced() to true, or deploy with` +
+        `\n${RLS_REPORT_MODE_ACK_ENV}="<reason>" (docs/operations/deployment.md).` +
+        `\nA CLIENT_MIN_MESSAGES_SERVER_LEVEL means a server default (e.g. a parameter` +
+        `\ngroup) hides the bypass reports; set it back to warning or lower. It also` +
+        `\nfires when this audit's own connection overrides the setting, because the` +
+        `\nserver default is then unreadable.\n`,
     );
-    process.exit(1);
+    // Not process.exit(): on a pipe (the migrate task's log driver, a spawning
+    // test) it can cut the report short, and the last findings are the ones lost.
+    process.exitCode = 1;
+    return;
   }
 
   console.log(`db-grants: OK (${live.length} grants match the manifest)`);

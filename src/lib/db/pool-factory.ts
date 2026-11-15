@@ -12,9 +12,11 @@ import { MS_PER_MINUTE } from "@/lib/constants/time";
 /**
  * The only place production code builds a database pool, client or Prisma
  * client (check-bypass-rls's pool rule). Every connection gets the listener
- * that turns `public.rls_bypass_admits`'s report into a log line: in report
- * mode the database admits a bypassed statement that reached a table outside
- * its grant and raises a WARNING naming the table and purpose.
+ * that turns `public.rls_bypass_admits`'s report into a log line: when a
+ * bypassed statement reaches a table outside its grant the database raises a
+ * WARNING naming the table and purpose, then refuses the statement (42501).
+ * The log line and its metric are how an operator learns of a refusal a caller
+ * caught.
  */
 
 /** A report from `rls_bypass_admits`: the table reached and the bypass purpose. */
@@ -141,7 +143,8 @@ const STARTUP_STRING_PARAMS = [
  * connection string (which accepts strings `new URL` rejects) and for the PG*
  * environment — and every source is checked, a superset of the one pg applies.
  * A connection string pg cannot parse throws here, as it would on connect. A
- * role-level setting is not visible here (SC5's canary detects it).
+ * role-level setting is not visible here (the grant audit reads it from
+ * pg_db_role_setting).
  */
 function checkedConfig<T extends pg.ClientConfig>(config: T): T {
   const snapshot = { ...config };

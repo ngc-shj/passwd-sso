@@ -75,9 +75,10 @@ Store these in Secrets Manager:
 - `JACKSON_API_KEY` (passed to the Jackson container as `JACKSON_API_KEYS` — note the trailing `S`)
 - `PASSWD_OUTBOX_WORKER_PASSWORD` (sets the `passwd_outbox_worker` DB role password; on AWS rotate it by re-running `scripts/bootstrap-rds-roles.mjs` with the new value — the image has no `psql`, which `scripts/set-*-password.sh` need)
 - `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` (least-privilege role `passwd_anchor_publisher` — used by audit-anchor-publisher; in production it has no `DATABASE_URL` fallback)
+- `AUDIT_CHAIN_VERIFY_DATABASE_URL` (read-only role `passwd_audit_chain_verifier` — used by audit-chain-verify-worker; in production it has no `DATABASE_URL` fallback)
 - `AUDIT_ANCHOR_SIGNING_KEY`, `AUDIT_ANCHOR_TAG_SECRET` (mapped into the publisher task only; the app no longer receives them)
 - `DEPLOYMENT_ID` (a UUID naming this deployment in every manifest; mapped into the publisher task, and into the retention-gc worker while its orphan sweep runs — see [Audit anchor publisher](#audit-anchor-publisher))
-- `PASSWD_ANCHOR_PUBLISHER_PASSWORD` is not stored on its own: it is an input to `scripts/bootstrap-rds-roles.mjs` only, taken from the userinfo of `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` (a second stored copy could drift from the URL)
+- `PASSWD_ANCHOR_PUBLISHER_PASSWORD` is not stored on its own: it is an input to `scripts/bootstrap-rds-roles.mjs` only, taken from the userinfo of `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` (a second stored copy could drift from the URL). `PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD` is the same, taken from `AUDIT_CHAIN_VERIFY_DATABASE_URL`
 
 Optional:
 - `AUTH_JACKSON_CONNECTIONS` (further Jackson connections, one provider `saml-jackson-<id>` each; Terraform reads it only with `enable_jackson_connections = true`)
@@ -117,7 +118,8 @@ postgresql://USER:PASSWORD@HOST:5432/DBNAME?sslmode=verify-full&sslrootcert=/app
 
 **Every** DB URL that points at RDS needs those two parameters — `DATABASE_URL`,
 `MIGRATION_DATABASE_URL`, `OUTBOX_WORKER_DATABASE_URL`,
-`RETENTION_GC_DATABASE_URL`, `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL`, and
+`RETENTION_GC_DATABASE_URL`, `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL`,
+`AUDIT_CHAIN_VERIFY_DATABASE_URL`, and
 Jackson's `DB_URL`. Two independent reasons:
 
 - RDS PostgreSQL 15+ ships `rds.force_ssl = 1`, so a plaintext connection is
@@ -218,12 +220,12 @@ populating the secret keys below before apply.
 | `*-audit-outbox-worker` | `node dist/audit-outbox-worker.js` | `OUTBOX_WORKER_DATABASE_URL` (`passwd_outbox_worker`) |
 | `*-retention-gc-worker` | `node dist/retention-gc-worker.js` | `RETENTION_GC_DATABASE_URL` (`passwd_retention_gc_worker`); also `DEPLOYMENT_ID` while the orphan sweep runs |
 | `*-audit-anchor-publisher` | `node dist/audit-anchor-publisher.js` | `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` (`passwd_anchor_publisher`) |
-| `*-audit-chain-verify-worker` | `node dist/audit-chain-verify-worker.js` | the app secret's `DATABASE_URL`, as `AUDIT_CHAIN_VERIFY_DATABASE_URL` (`passwd_app`) |
+| `*-audit-chain-verify-worker` | `node dist/audit-chain-verify-worker.js` | `AUDIT_CHAIN_VERIFY_DATABASE_URL` (`passwd_audit_chain_verifier`) |
 
-The verify worker connects as `passwd_app` and so holds far more than it uses:
-it only reads `tenants`, `audit_chain_anchors` and `audit_logs`, but the role
-reads every table the app reads and keeps every write the app has. A dedicated
-read-only role is a follow-up (SC3). It has no task role, so it holds no AWS
+The verify worker connects as `passwd_audit_chain_verifier`, which holds
+column-level `SELECT` on the eleven columns its statements name (`tenants`,
+`audit_chain_anchors`, `audit_logs`) and nothing else. In production it has no
+`DATABASE_URL` fallback. It has no task role, so it holds no AWS
 credentials.
 
 The retention-gc worker runs as its own task role (`*-ecs-retention-gc-task`),
@@ -282,9 +284,17 @@ Do NOT store `ADMIN_API_TOKEN` as a persistent environment variable in ECS task 
 
 ## Migrations
 
-Run Prisma migrations from a one-off task using the SUPERUSER role:
+Deploy with `scripts/deploy.sh` (`docs/operations/deployment.md`): its migrate task runs
+`node scripts/rls-enforce-preflight.mjs`, `npx prisma migrate deploy` and
+`node scripts/audit-db-grants.mjs` in that order, as the migration role.
+
+A bare `npx prisma migrate deploy` from a one-off task skips the preflight and the audit. In
+particular it applies `20261114000500_rls_bypass_enforce` (RLS bypass enforcement) without the
+attestation described in `docs/operations/deployment.md`, "One-time upgrade: audit-chain verifier
+role and RLS enforcement". If you run migrations by hand, run all three commands:
 ```
-MIGRATION_DATABASE_URL='postgresql://SUPERUSER:password@HOST:5432/DB' npx prisma migrate deploy
+export MIGRATION_DATABASE_URL='postgresql://SUPERUSER:password@HOST:5432/DB'
+node scripts/rls-enforce-preflight.mjs && npx prisma migrate deploy && node scripts/audit-db-grants.mjs
 ```
 
 The `MIGRATION_DATABASE_URL` must point to a role with DDL privileges (table owner). The app service `DATABASE_URL` should use a non-SUPERUSER role.

@@ -117,6 +117,7 @@ describe("infra/postgres/initdb statement logging", () => {
       "01-create-jackson-db.sql",
       "02-create-app-role.sql",
       "04-create-retention-gc-worker-role.sql",
+      "05-create-audit-chain-verifier-role.sql",
     ]);
   });
 

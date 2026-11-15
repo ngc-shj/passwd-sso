@@ -148,6 +148,24 @@
       "reason": "Claim routing must not be reachable from this role (#935); listed prescriptively for the same reason as the other worker roles' tenant_claims entries."
     },
     {
+      "role": "passwd_audit_chain_verifier",
+      "table": "public.tenant_claim_events",
+      "privileges": ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"],
+      "reason": "The audit-chain verify worker reads eleven columns of three tables (migration 20261114000400) and has no business with claim routing. Listed prescriptively (#935) for the same reason as the other worker roles' tenant_claim_events entries: absence alone is enforced only by the descriptive manifest, which `--write` regenerates from whatever the database currently holds. INSERT is denied outright: no writer here needs it, and a table-level grant reaches `seq`."
+    },
+    {
+      "role": "passwd_audit_chain_verifier",
+      "sequence": "public.tenant_claim_events_seq_seq",
+      "privileges": ["USAGE", "SELECT", "UPDATE"],
+      "reason": "Listed for the same reason as this role's tenant_claim_events entry above (#935)."
+    },
+    {
+      "role": "passwd_audit_chain_verifier",
+      "table": "public.tenant_claims",
+      "privileges": ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"],
+      "reason": "Claim routing must not be reachable from this role (#935); listed prescriptively for the same reason as the other worker roles' tenant_claims entries."
+    },
+    {
       "role": "passwd_dcr_cleanup_worker",
       "table": "public.tenant_claim_events",
       "privileges": ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"],

@@ -996,6 +996,7 @@ describe("check-migration-rls-dml: real tree", () => {
     "20260618000000_add_retention_gc_worker_role": 1,
     "20261019000000_rls_bypass_admits_report_mode": 4,
     "20261023010000_retire_dcr_cleanup_worker_role": 7,
+    "20261114000400_audit_chain_verifier_role": 2,
   };
 
   const baselineDirs = () =>
@@ -1046,7 +1047,7 @@ describe("check-migration-rls-dml: real tree", () => {
       .split("\n")
       .filter((l) => l.trim() !== "" && !l.trim().startsWith("#"));
 
-    expect(entries.length).toBe(22);
+    expect(entries.length).toBe(23);
     for (const e of entries) expect(e.slice(e.indexOf("#") + 1).trim().length).toBeGreaterThanOrEqual(10);
   });
 

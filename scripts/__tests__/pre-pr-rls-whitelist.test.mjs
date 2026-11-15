@@ -122,15 +122,17 @@ describe("pre-pr rls-cross-tenant whitelist", () => {
 
   // DENY side: Block 1 needs no seed, so these are real control regressions.
   //
-  // BYPASS-TABLE is also Block 1 (pure pg_catalog inspection) — a policy
-  // whose bypass branch reverted to the pre-#911 app.bypass_rls form, named
-  // the wrong table, or dropped the sub-SELECT wrapper. REPORT and INITPLAN
-  // (Block 4b) are seed-dependent in the other direction from COUNT-A/
-  // COUNT-B/BYPASS: ON_ERROR_STOP=1 means Block 4b is reachable at all only
-  // once Block 2/3/4 (which themselves need the cross-tenant seed) already
-  // passed, so seeing either code here means the DB was effectively fully
-  // seeded and Block 4b still failed — a real regression, never the
-  // unseeded-dev-DB shape this whitelist exists to tolerate.
+  // BYPASS-TABLE, ARM-ORDER and ENFORCED are also Block 1 (pure pg_catalog
+  // inspection) — a policy whose bypass branch reverted to the pre-#911
+  // app.bypass_rls form, named the wrong table, dropped the sub-SELECT
+  // wrapper or put the tenant arm before the bypass call, and a database
+  // whose rls_bypass_enforced() is not true (report mode, #921). REPORT,
+  // REFUSAL and INITPLAN (Block 4b) are seed-dependent in the other direction
+  // from COUNT-A/COUNT-B/BYPASS: ON_ERROR_STOP=1 means Block 4b is reachable
+  // at all only once Block 2/3/4 (which themselves need the cross-tenant
+  // seed) already passed, so seeing any of them here means the DB was
+  // effectively fully seeded and Block 4b still failed — a real regression,
+  // never the unseeded-dev-DB shape this whitelist exists to tolerate.
   it.each([
     "FORCE",
     "SECDEF",
@@ -142,7 +144,10 @@ describe("pre-pr rls-cross-tenant whitelist", () => {
     "MANIFEST-EXTRA",
     "MANIFEST-MISSING",
     "BYPASS-TABLE",
+    "ARM-ORDER",
+    "ENFORCED",
     "REPORT",
+    "REFUSAL",
     "INITPLAN",
     // The tenants block's seed-independent half (#923): no-context read and
     // the ENABLE/FORCE flags. Not a prefix of TENANTS-SEED's match.

@@ -27,7 +27,21 @@ import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
 
 // ─── Role connection strings ────────────────────────────────────
 
-type TestRole = "superuser" | "app" | "worker" | "retention-gc-worker" | "anchor-publisher";
+type TestRole = "superuser" | "app" | "worker" | "retention-gc-worker" | "anchor-publisher" | "audit-chain-verifier";
+
+const TEST_ROLES: readonly TestRole[] = [
+  "superuser",
+  "app",
+  "worker",
+  "retention-gc-worker",
+  "anchor-publisher",
+  "audit-chain-verifier",
+];
+
+/** Every role's connection string, for setup.ts's same-database check. */
+export function allRoleConnectionStrings(): Record<TestRole, string> {
+  return Object.fromEntries(TEST_ROLES.map((r) => [r, getConnectionString(r)])) as Record<TestRole, string>;
+}
 
 function getConnectionString(role: TestRole): string {
   const base = process.env.DATABASE_URL;
@@ -69,6 +83,14 @@ function getConnectionString(role: TestRole): string {
           "//passwd_anchor_publisher:passwd_anchor_publisher_pass@",
         )
       );
+    case "audit-chain-verifier":
+      return (
+        process.env.AUDIT_CHAIN_VERIFY_DATABASE_URL ??
+        base.replace(
+          /\/\/[^:]+:[^@]+@/,
+          "//passwd_audit_chain_verifier:passwd_audit_chain_verifier_pass@",
+        )
+      );
   }
 }
 
@@ -88,6 +110,16 @@ function getConnectionString(role: TestRole): string {
  */
 export function appConnectionString(): string {
   return getConnectionString("app");
+}
+
+/** The connection string the harness seeds and cleans up through: the migration role. */
+export function superuserConnectionString(): string {
+  return getConnectionString("superuser");
+}
+
+/** The connection string for the audit-chain verify worker's read-only role. */
+export function auditChainVerifierConnectionString(): string {
+  return getConnectionString("audit-chain-verifier");
 }
 
 /**
@@ -899,7 +931,7 @@ export async function raceTwoClients<A, B>(
   return Promise.all([opA(clientA), opB(clientB)]) as Promise<[A, B]>;
 }
 
-// ─── RLS bypass reports (report mode, #911) ─────────────────────
+// ─── RLS bypass reports and refusals (#911, #921) ───────────────
 
 /**
  * Run `fn` and return the bypass reports it caused, removing them from the
@@ -911,6 +943,48 @@ export async function expectBypassNotices(fn: () => Promise<unknown>): Promise<B
   const before = buffer.length;
   await fn();
   return buffer.splice(before);
+}
+
+const BYPASS_REFUSAL_PREFIX = "RLS_BYPASS_NOT_GRANTED: ";
+
+/**
+ * Run `fn`, which must be refused by the enforcing bypass check: it rejects
+ * with SQLSTATE 42501 and a message naming `RLS_BYPASS_NOT_GRANTED: <table>`.
+ * Throws when `fn` resolves or rejects with anything else. The reports raised
+ * meanwhile are taken from the per-test buffer whether or not `fn` threw (the
+ * WARNING is raised before the exception), so a refusal cell does not fail
+ * setup.ts's afterEach for the report it caused.
+ *
+ * Where `fn` runs a statement inside a transaction, that statement must be the
+ * last one: the refusal aborts the transaction.
+ */
+export async function expectBypassRefusal(
+  fn: () => Promise<unknown>,
+): Promise<{ notices: BypassNotice[]; error: unknown; table: string }> {
+  const buffer = bypassNoticeBuffer();
+  const before = buffer.length;
+  let notices: BypassNotice[] = [];
+  let error: unknown;
+  let resolved = false;
+  try {
+    await fn();
+    resolved = true;
+  } catch (e) {
+    error = e;
+  } finally {
+    notices = buffer.splice(before);
+  }
+  if (resolved) {
+    throw new Error("expected the bypass to be refused with RLS_BYPASS_NOT_GRANTED, but the statement succeeded");
+  }
+  const code = pgErrorCode(error);
+  const message = error instanceof Error ? error.message : String(error);
+  const at = message.indexOf(BYPASS_REFUSAL_PREFIX);
+  if (code !== "42501" || at === -1) {
+    throw new Error(`expected a 42501 RLS_BYPASS_NOT_GRANTED refusal, got SQLSTATE ${code ?? "none"}: ${message}`);
+  }
+  const table = /^[a-z0-9_]+/.exec(message.slice(at + BYPASS_REFUSAL_PREFIX.length))?.[0] ?? "";
+  return { notices, error, table };
 }
 
 // ─── Backfill-block cells (rls_backfill_rerun, #1033) ───────────
