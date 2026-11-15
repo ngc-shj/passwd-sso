@@ -16,3 +16,9 @@ The first mutant (grant narrowed to `user`) made the script exit non-zero, so th
 `npm run test:integration` on the worktree database reports failures in `retire-dcr-cleanup-worker`, `revoke-public-connect`, `audit-db-grants` (`passwd_dcr_cleanup_worker` still holds CONNECT on `passwd_sso_wt_1048`) and `bootstrap-rds-roles` (no compose `db` service for this worktree). The same four files fail on origin/main `27968fb28` against the same database (18 failed, verified in a detached checkout), so they are the worktree database's state, not this change. CI runs on a fresh database.
 
 The full unit suite (`npx vitest run`, exit 1) fails only `scripts/__tests__/backup-db.test.mjs` Group B (6 cells, "no pg_restore reachable"): a known limit of running that file from a git worktree, independent of this change. 24648 other tests pass, no unhandled errors.
+
+## D6 — Step 2-5 mechanical hook dispositions
+- check-propagation: `expectBypassNotices` / `expectBypassRefusal` signature changes (return type renamed to `BypassReport`, optional second parameter) are source-compatible; every caller typechecks and passes.
+- check-hardcoded-reuse: `"_logType"` (JSON key in test assertions) and `"name"` coincide in bytes with `LOGTYPE_PROP` in a lint gate and `AC_NAME` in the extension's form detector; different concepts, not replaced.
+- check-orphaned-checks: `src/workers/audit-outbox-worker.test.ts` is a unit test whose name matches the hook's `audit` keyword, not a gate script.
+- check-deployment-artifact (R35, Tier-1 for `monitoring.tf`): `rls-refusal-metric-manual-test.md` added.
