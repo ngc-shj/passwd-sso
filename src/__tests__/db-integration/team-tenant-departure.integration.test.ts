@@ -40,6 +40,7 @@ import {
 } from "./helpers";
 import { createRaceHelpers } from "./race-helpers";
 import { TEAM_KEY_LOCK_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
+import { hashToken } from "@/lib/crypto/crypto-server";
 
 const { scimTenant, stalePermission } = vi.hoisted(() => ({
   scimTenant: { id: "" },
@@ -341,6 +342,52 @@ describe("team membership across a tenant departure — real-DB integration", ()
 
     const audits = await auditActions("TEAM_MEMBER_TENANT_DEACTIVATE", teamId);
     expect(audits).toEqual([{ targetId: leaver.id, metadata: { source: "TENANT_DEACTIVATION" } }]);
+  });
+
+  // ── A0: the invitation token is stored as its digest (#1054) ──
+
+  describe("A0: the invitation token is stored as its digest", () => {
+    it("stores the SHA-256 of the token it returns, and never the token", async () => {
+      const owner = await ctx.createUser(tenantId);
+      const invitee = await member();
+      const teamId = await team(owner);
+      const inv = await invite(teamId, owner, invitee.email);
+      expect(inv.status).toBe(201);
+
+      const [row] = await sql<Record<string, unknown>>(`SELECT * FROM team_invitations WHERE id = $1::uuid`, inv.id);
+      expect(row.token_hash).toBe(hashToken(inv.token!));
+      expect(Object.values(row)).not.toContain(inv.token);
+    });
+
+    it("accepts the token, and refuses the stored digest presented as one", async () => {
+      const owner = await ctx.createUser(tenantId);
+      const invitee = await member();
+      const teamId = await team(owner);
+      const inv = await invite(teamId, owner, invitee.email);
+
+      const byDigest = await accept(invitee, hashToken(inv.token!));
+      expect(byDigest.status).toBe(404);
+      expect(await invitationStatus(inv.id!)).toBe("PENDING");
+
+      const byToken = await accept(invitee, inv.token!);
+      expect(byToken.status).toBe(200);
+      expect(await invitationStatus(inv.id!)).toBe("ACCEPTED");
+    });
+
+    it("the migration hashes an existing token to the value accept looks up", async () => {
+      const migration = readFileSync(
+        join(process.cwd(), "prisma/migrations/20261115100000_team_invitation_token_digest/migration.sql"),
+        "utf8",
+      );
+      const using = /USING (.+);/.exec(migration)?.[1];
+      expect(using).toBeDefined();
+      const token = randomBytes(32).toString("hex");
+      const [{ hashed }] = await sql<{ hashed: string }>(
+        `SELECT ${using!.replace(`"token_hash"`, "$1::text")} AS hashed`,
+        token,
+      );
+      expect(hashed).toBe(hashToken(token));
+    });
   });
 
   // ── A2: admission at accept ───────────────────────────────────
@@ -1522,7 +1569,7 @@ describe("team membership across a tenant departure — real-DB integration", ()
       const invitationAt = async (name: string, teamId: string, inviterId: string, email: string, createdAt: string, status = "PENDING") => {
         const id = randomUUID();
         await sql(
-          `INSERT INTO team_invitations (id, team_id, tenant_id, email, role, status, token, expires_at, invited_by_id, created_at, updated_at)
+          `INSERT INTO team_invitations (id, team_id, tenant_id, email, role, status, token_hash, expires_at, invited_by_id, created_at, updated_at)
            VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'MEMBER', $5::"InvitationStatus", $6, now() + interval '7 days', $7::uuid, $8::timestamptz, now())`,
           id, teamId, tenantId, email, status, hex(16), inviterId, createdAt,
         );

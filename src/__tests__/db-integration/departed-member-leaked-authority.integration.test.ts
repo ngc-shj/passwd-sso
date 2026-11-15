@@ -109,7 +109,7 @@ import {
 } from "@/lib/constants/audit/audit";
 import { AUDIT_TARGET_TYPE } from "@/lib/constants/audit/audit-target";
 import { WEBHOOK_AUTO_DISABLE_THRESHOLD } from "@/lib/validations/common.server";
-import { encryptServerData, getMasterKeyByVersion } from "@/lib/crypto/crypto-server";
+import { encryptServerData, getMasterKeyByVersion, hashToken } from "@/lib/crypto/crypto-server";
 import { buildWebhookSecretAAD, WEBHOOK_SECRET_AAD_VERSION_CURRENT } from "@/lib/crypto/webhook-aad";
 
 const hex = (n: number) => randomBytes(n).toString("hex");
@@ -294,9 +294,9 @@ describe("departed-member leaked authority — real-DB integration", () => {
     const id = randomUUID();
     const token = hex(32);
     await sql(
-      `INSERT INTO team_invitations (id, team_id, tenant_id, email, role, status, token, expires_at, invited_by_id, updated_at)
+      `INSERT INTO team_invitations (id, team_id, tenant_id, email, role, status, token_hash, expires_at, invited_by_id, updated_at)
        VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5::"TeamRole", 'PENDING', $6, now() + interval '1 day', $7::uuid, now())`,
-      id, teamId, tenantId, email, role, token, inviter,
+      id, teamId, tenantId, email, role, hashToken(token), inviter,
     );
     return { id, token };
   }

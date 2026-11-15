@@ -26,7 +26,6 @@ vi.mock("sonner", () => ({
 
 vi.mock("@/lib/url-helpers", () => ({
   fetchApi: mockFetchApi,
-  appUrl: (path: string) => `https://example.com${path}`,
 }));
 
 vi.mock("@/lib/constants", () => ({
@@ -43,12 +42,6 @@ vi.mock("@/components/team/management/team-role-badge", () => ({
   TeamRoleBadge: ({ role }: { role: string }) => <span data-testid="role-badge">{role}</span>,
 }));
 
-vi.mock("@/components/passwords/shared/copy-button", () => ({
-  CopyButton: ({ getValue }: { getValue: () => string }) => (
-    <button data-testid="copy-btn" onClick={() => getValue()}>copy</button>
-  ),
-}));
-
 vi.mock("@/components/ui/button", () => ({
   Button: ({ children, onClick, disabled }: React.ComponentProps<"button">) => (
     <button onClick={onClick} disabled={disabled}>{children}</button>
@@ -63,7 +56,6 @@ const SAMPLE_INVITATIONS: Invitation[] = [
     id: "inv-1",
     email: "charlie@example.com",
     role: "MEMBER",
-    token: "tok-abc",
     expiresAt: "2026-06-01T00:00:00Z",
     invitedBy: { name: "Admin" },
   },
@@ -97,11 +89,11 @@ describe("TeamPendingInvitationsList", () => {
 
     expect(screen.getByText("charlie@example.com")).toBeInTheDocument();
 
-    const cancelButtons = screen.getAllByRole("button");
-    // The X button (last one in row, after copy-btn)
-    const xBtn = cancelButtons.find((b) => !b.hasAttribute("data-testid"));
+    // The row's only button is cancel: the link is shown once, when issued
+    // (the server keeps only its digest).
+    const [xBtn] = screen.getAllByRole("button");
     await act(async () => {
-      fireEvent.click(xBtn!);
+      fireEvent.click(xBtn);
     });
 
     await waitFor(() => {
@@ -112,5 +104,16 @@ describe("TeamPendingInvitationsList", () => {
     });
 
     expect(onCancel).toHaveBeenCalled();
+  });
+
+  it("offers no link to copy for a pending invitation", () => {
+    render(
+      <TeamPendingInvitationsList
+        invitations={SAMPLE_INVITATIONS}
+        teamId="team-1"
+        onCancel={vi.fn()}
+      />,
+    );
+    expect(screen.getAllByRole("button")).toHaveLength(1);
   });
 });

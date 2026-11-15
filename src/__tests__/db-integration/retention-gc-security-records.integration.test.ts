@@ -136,13 +136,13 @@ describe("retention-gc security-record GC (SC6)", () => {
     await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
       await tx.$executeRawUnsafe(
-        `INSERT INTO team_invitations (id, team_id, tenant_id, email, role, status, token, expires_at, invited_by_id, created_at, updated_at)
+        `INSERT INTO team_invitations (id, team_id, tenant_id, email, role, status, token_hash, expires_at, invited_by_id, created_at, updated_at)
          VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'MEMBER', 'PENDING', $5, ${expiresAt}, $6::uuid, now(), now())`,
         id,
         teamId,
         tenantId,
         `invitee-${id.slice(0, 8)}@example.com`,
-        `tok-${id.slice(0, 16)}`,
+        id.replace(/-/g, "").padEnd(64, "0"),
         userId,
       );
     });

@@ -99,7 +99,7 @@ export function makeTeamInvitation(overrides: Record<string, unknown> = {}) {
     email: "invited@example.com",
     role: TEAM_ROLE.MEMBER,
     status: INVITATION_STATUS.PENDING,
-    token: "token-abc-123",
+    tokenHash: "a".repeat(64),
     expiresAt: new Date(Date.now() + 7 * MS_PER_DAY),
     invitedById: "test-user-id",
     createdAt: new Date(),

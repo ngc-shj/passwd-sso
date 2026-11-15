@@ -3,18 +3,16 @@
 import { useLocale, useTranslations } from "next-intl";
 import { TeamRoleBadge } from "@/components/team/management/team-role-badge";
 import { Button } from "@/components/ui/button";
-import { CopyButton } from "@/components/passwords/shared/copy-button";
 import { LinkIcon, X } from "lucide-react";
 import { toast } from "sonner";
 import { apiPath } from "@/lib/constants";
-import { fetchApi, appUrl } from "@/lib/url-helpers";
+import { fetchApi } from "@/lib/url-helpers";
 import { formatDate } from "@/lib/format/format-datetime";
 
 export interface Invitation {
   id: string;
   email: string;
   role: string;
-  token: string;
   expiresAt: string;
   invitedBy: { name: string | null };
 }
@@ -63,9 +61,6 @@ export function TeamPendingInvitationsList({ invitations, teamId, onCancel }: Pr
               </p>
             </div>
             <TeamRoleBadge role={inv.role} />
-            <CopyButton
-              getValue={() => appUrl(`/dashboard/teams/invite/${inv.token}`)}
-            />
             <Button
               variant="ghost"
               size="icon"

@@ -289,7 +289,7 @@ describe.skipIf(SKIP)("read-then-create races — route locks", () => {
       await tx.$executeRawUnsafe(`SELECT pg_sleep(0.3)`);
       await tx.$executeRawUnsafe(
         `INSERT INTO team_invitations
-           (id, team_id, tenant_id, email, token, expires_at, invited_by_id, updated_at)
+           (id, team_id, tenant_id, email, token_hash, expires_at, invited_by_id, updated_at)
          VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, now() + interval '7 days', $6::uuid, now())`,
         randomUUID(),
         teamId,

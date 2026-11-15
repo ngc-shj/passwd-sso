@@ -3,6 +3,7 @@ import type { TeamInvitation } from "@prisma/client";
 import { randomBytes } from "node:crypto";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { hashToken } from "@/lib/crypto/crypto-server";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
 import { inviteSchema } from "@/lib/validations";
 import { activeTeamAdmission, hasTeamPermission, requireTeamPermission } from "@/lib/auth/access/team-auth";
@@ -138,6 +139,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     }
   }
 
+  // Stored as its digest only; the plaintext leaves once, in the 201 below.
   const token = randomBytes(32).toString("hex");
   const expiresAt = new Date(Date.now() + TEAM_INVITATION_TTL_MS);
 
@@ -204,7 +206,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
             tenantId: team.tenantId,
             email,
             role,
-            token,
+            tokenHash: hashToken(token),
             expiresAt,
             invitedById: session.user.id,
           },
@@ -239,7 +241,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       id: invitation.id,
       email: invitation.email,
       role: invitation.role,
-      token: invitation.token,
+      token,
       expiresAt: invitation.expiresAt,
       createdAt: invitation.createdAt,
     },

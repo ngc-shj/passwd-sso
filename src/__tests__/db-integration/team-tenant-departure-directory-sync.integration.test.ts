@@ -10,6 +10,7 @@
 
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { randomUUID, randomBytes } from "node:crypto";
+import { hashToken } from "@/lib/crypto/crypto-server";
 import { NextRequest } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { assertRlsApplies, createPrismaForRole, createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
@@ -223,9 +224,9 @@ describe("directory sync across a tenant departure — real-DB integration", () 
     const invitationId = randomUUID();
     const token = randomBytes(32).toString("hex");
     await sql(
-      `INSERT INTO team_invitations (id, team_id, tenant_id, email, role, status, token, expires_at, invited_by_id, updated_at)
+      `INSERT INTO team_invitations (id, team_id, tenant_id, email, role, status, token_hash, expires_at, invited_by_id, updated_at)
        VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'MEMBER', 'PENDING', $5, now() + interval '1 day', $6::uuid, now())`,
-      invitationId, teamId, tenantId, invitee.email, token, inviter.id,
+      invitationId, teamId, tenantId, invitee.email, hashToken(token), inviter.id,
     );
     mockFetchOktaUsers.mockResolvedValue([
       oktaUser(inviter.ext, inviter.email, "Inviter", false),

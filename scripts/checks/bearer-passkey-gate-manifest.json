@@ -92,6 +92,11 @@
       "calls": 2,
       "reason": "One-time emergency access invitation token, rejected under a session: the digest lookup and the CAS transition({ where: { id, tokenHash } }) on the row it found; not a reusable bearer API credential."
     },
+    "src/app/api/teams/invitations/accept/route.ts#handlePOST": {
+      "class": "exempt",
+      "calls": 1,
+      "reason": "One-time team invitation token, accepted under a session whose email must match the invitation's; not a reusable bearer API credential."
+    },
     "src/app/api/share-links/verify-access/route.ts#handlePOST": {
       "class": "exempt",
       "calls": 1,

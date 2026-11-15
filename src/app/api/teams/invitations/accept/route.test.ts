@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { createHash } from "node:crypto";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
@@ -110,7 +111,7 @@ const validInvitation = {
   createdAt: issuedAt,
   email: "user@test.com",
   role: TEAM_ROLE.MEMBER,
-  token: "valid-token",
+  tokenHash: createHash("sha256").update("valid-token").digest("hex"),
   status: INVITATION_STATUS.PENDING,
   expiresAt: futureDate,
   team: { id: "team-1", name: "My Team", slug: "my-team", tenantId: "tenant-1" },
@@ -195,6 +196,16 @@ describe("POST /api/teams/invitations/accept", () => {
       body: { token: "invalid" },
     }));
     expect(res.status).toBe(404);
+  });
+
+  it("looks the invitation up by the digest of the presented token", async () => {
+    mockPrismaTeamInvitation.findUnique.mockResolvedValue(null);
+    await POST(createRequest("POST", "http://localhost:3000/api/teams/invitations/accept", {
+      body: { token: "valid-token" },
+    }));
+    expect(mockPrismaTeamInvitation.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { tokenHash: createHash("sha256").update("valid-token").digest("hex") } }),
+    );
   });
 
   it("returns 410 when invitation already used", async () => {
