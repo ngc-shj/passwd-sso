@@ -106,3 +106,34 @@ R1 T5 · R2 ok · R3 ok · R10 ok · R16 ok · R17 ok · R18 ok · R19 ok · R25
   round-trip and whitespace tests, guarded JSON.parse).
 - Verification: full `npx vitest run` 1193 files / 25025 tests pass; `npx next build`
   pass; render check, env-docs, bypass-rls, meta-gate, lint, typecheck pass.
+
+### Round 2
+Findings: func-N1 [Minor] FS volume ownership step; func-N2 [Minor] systemd
+`--abort-on-container-exit`; sec-N1 [Major] file channels still open (configs.content,
+absolute/`~` binds, symlinks, build.secrets/ssh/additional_contexts, external entries);
+sec-N2 [Minor] compose header wording; sec-N3 [Minor] RBAC verb class; sec-N4 [Minor]
+optional `s3-bucket` ref (R43 widening); test-R1 [Major] relative `device` named volume
+missed by the render check, adjudicators diverged; test-R2 [Minor] render-set completeness
+not reached for nested compose files; test-R3 [Minor] freshness projection omitted
+mounts/secrets/configs.
+
+- R42 class "file channel to a container": member-set expanded in round 1 (bind/.env,
+  secrets/configs file) and again in round 2 (content, absolute, `~`, symlink, build.*,
+  external, relative device). Closed by changing the mechanism to default-deny:
+  `FILE_CHANNEL_ALLOWLIST` (infra/postgres/initdb, infra/fluent-bit/fluent-bit.conf,
+  infra/fluent-bit/parsers.conf, infra/redis/sentinel.conf) plus plain named volumes and
+  tmpfs; every other bind, `driver`/`driver_opts`, referenced secrets/configs, external
+  entry and build file key is refused, in both adjudicators through one predicate set in
+  `scripts/checks/lib/withheld-env.ts`. Allowlist entries are pinned (exist, realpath has
+  no symlink, not `.env*`, mounted by a production file). Red-proven per channel against
+  real compose on scratch copies (configs.content, /opt, ~/x, device ., build.secrets,
+  external) and the symlink case in the parity test. Wired: render check in static-checks
+  (pre-pr `Static: compose-render`, CI=true), parity test in app-test.
+- func-N1, func-N2 — Fixed (deployment.md chown step; systemd README `--exit-code-from app`).
+- sec-N2, sec-N3 — Fixed (header wording, RBAC as a class).
+- sec-N4 — Fixed: `s3-bucket` ref non-optional again, pinned with a red case.
+- test-R2 — Fixed: compose-file discovery moved to `scripts/checks/lib/compose-files.mjs`
+  (no top-level await); the render check enforces render-set completeness on every run.
+- test-R3 — Fixed: projection includes per-service and top-level volumes/secrets/configs.
+- Verification: full suite 1193 files / 25045 tests pass; build pass; render, log-caps,
+  image-pin, bypass-rls, meta-gate, doc-paths, lint, typecheck pass.

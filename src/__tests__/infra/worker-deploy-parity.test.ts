@@ -8,9 +8,11 @@
  *         env set W comes from scripts/checks/lib/withheld-env.ts, not from a list here);
  *   I2.x  k8s: command, probes, env names, hardening, rollout shape.
  *
- * No service outside the dev override gets `.env` as a file either (a bind mount
- * of the project directory, an ancestor or a `.env*` file; a `secrets:`/`configs:`
- * entry with such a `file:`); a volume shape it does not model is reported.
+ * No service outside the dev override gets a host file by anything but
+ * default-deny (FILE_CHANNEL_ALLOWLIST in withheld-env.ts: a bind source only if
+ * allowlisted, a named volume only if plain, never a referenced secrets/configs
+ * entry, an `external` entry or build.secrets/ssh/additional_contexts); a volume
+ * shape it does not model is reported.
  *
  * Every check is a pure function over parsed YAML plus a context read from
  * ecs.tf, so each invariant has a single-step red case on a cloned model and the
@@ -18,10 +20,11 @@
  * command, `envFrom`-less env from a file, an unknown workload kind) throws
  * rather than being read as something else.
  */
-import { describe, it, expect } from "vitest";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { afterEach, describe, it, expect } from "vitest";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
-import { join, posix, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, posix, relative, resolve } from "node:path";
 import { CORE_SCHEMA, load, loadAll } from "js-yaml";
 import { ALLOWLIST } from "../../../scripts/env-allowlist";
 import { createComposeYamlLoader, findComposeFiles } from "../../../scripts/checks/check-compose-log-caps.mjs";
@@ -30,11 +33,16 @@ import { ROLES } from "../../../scripts/bootstrap-rds-roles.mjs";
 import { TerraformConfig, TERRAFORM_DIR, type HclExpr } from "../../../scripts/checks/lib/hcl-subset";
 import {
   SHARED_PUBLISHER_NAME,
+  BUILD_FILE_CHANNEL_KEYS,
+  FILE_CHANNEL_ALLOWLIST,
+  FILE_CHANNEL_REFUSAL,
   deriveWithheldEnv,
-  envFileSourceKind,
   derivePublisherOnlyEnv,
   ecsContainerDefinitions,
   ecsSecretNames,
+  externalEntryProblems,
+  isAllowlistedFileSource,
+  namedVolumeProblem,
   ownDatabaseUrlKey,
   ownRoleUser,
   readSmokeMap,
@@ -75,6 +83,7 @@ const COMPOSE_PASS_THROUGH: Record<string, string[]> = {
 const REQUIRED_INTERPOLATION_KEYS = ["AUDIT_ANCHOR_SIGNING_KEY", "AUDIT_ANCHOR_TAG_SECRET", SHARED_PUBLISHER_NAME];
 const FORBIDDEN_OPTIONAL_INTERPOLATION = /(SIGNING_KEY|TAG_SECRET|_PASSWORD)(:-|\?)[^:]/;
 const SIGNING_ENV_NAMES = ["AUDIT_ANCHOR_SIGNING_KEY", "AUDIT_ANCHOR_TAG_SECRET"];
+const S3_BUCKET_ENV = "AUDIT_ANCHOR_DESTINATION_S3_BUCKET";
 
 const sortStrings = (xs: Iterable<string>): string[] => [...xs].sort();
 
@@ -473,10 +482,21 @@ function composeDrift(model: ComposeModel, ctx: Ctx, workersText: string): strin
   // string of the service (environment, command, healthcheck, labels, ...), by any
   // interpolation form.
   const holders = withheldHolders(ctx.withheld, ctx.publisherOnly, ctx.passwordBinding);
+  const topLevelEntries = (kind: "secrets" | "configs"): Record<string, unknown> =>
+    Object.assign({}, ...Object.values(model).map((d) => (isRecord(d) && isRecord(d[kind]) ? d[kind] : {})));
   for (const file of sortStrings(Object.keys(model))) {
     const doc = model[file] as { services?: Record<string, unknown> };
     for (const [service, spec] of Object.entries(doc.services ?? {})) {
-      for (const [field, value] of Object.entries(spec as Record<string, unknown>)) {
+      // The top-level secrets/configs entries a service references are its own values too (inline `content`, say).
+      const referenced: Array<[string, unknown]> = [];
+      for (const kind of ["secrets", "configs"] as const) {
+        const refs = (spec as Record<string, unknown>)[kind];
+        for (const ref of Array.isArray(refs) ? refs : []) {
+          const name = typeof ref === "string" ? ref : isRecord(ref) ? ref.source : undefined;
+          if (typeof name === "string") referenced.push([`${kind} entry ${name}`, topLevelEntries(kind)[name]]);
+        }
+      }
+      for (const [field, value] of [...Object.entries(spec as Record<string, unknown>), ...referenced]) {
         for (const text of stringValues(value)) {
           for (const r of references(text)) {
             if (Object.hasOwn(holders, r.name) && !holders[r.name].includes(service)) {
@@ -497,14 +517,16 @@ function composeDrift(model: ComposeModel, ctx: Ctx, workersText: string): strin
 const isNamedVolume = (source: string): boolean => /^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(source);
 
 /**
- * Every way `.env` could reach a service as a file, in every compose file but
- * the dev override: a bind source that is the project directory, an ancestor of
- * it or a `.env*` file; a named volume backed by such a bind; a referenced
- * top-level `secrets:`/`configs:` entry with such a `file:`. A form the model
- * does not cover (a variable in a source, a `~` source, a volume or secret
- * shape it does not know) is reported rather than skipped.
+ * Every way a host file could reach a service outside the dev override, by
+ * default-deny: a bind source only if, resolved against the project root, it is
+ * exactly one of FILE_CHANNEL_ALLOWLIST (an absolute, `~` or variable source is
+ * refused as written); a named volume only if plain and docker-managed; a
+ * referenced top-level `secrets:`/`configs:` entry, any `external` entry,
+ * `build.secrets`, `build.ssh` and `build.additional_contexts` never. A form the
+ * model does not cover (a volume or secret shape it does not know) is reported
+ * rather than skipped.
  */
-function fileChannelDrift(model: ComposeModel): string[] {
+function fileChannelDrift(model: ComposeModel, allowlist: ReadonlyArray<{ path: string }> = FILE_CHANNEL_ALLOWLIST): string[] {
   const drift: string[] = [];
   const docs = sortStrings(Object.keys(model)).map((file) => ({ file, doc: model[file] as Record<string, unknown> }));
   const topLevel = (kind: "volumes" | "secrets" | "configs"): Record<string, unknown> =>
@@ -512,19 +534,22 @@ function fileChannelDrift(model: ComposeModel): string[] {
   const named = topLevel("volumes");
 
   for (const { file, doc } of docs) {
-    if (file === DEV_OVERRIDE_FILE || !isRecord(doc.services)) continue;
+    if (file === DEV_OVERRIDE_FILE) continue;
+    for (const problem of externalEntryProblems(doc)) drift.push(`(top level): ${file} ${FILE_CHANNEL_REFUSAL}: ${problem}`);
+    if (!isRecord(doc.services)) continue;
     for (const [service, spec] of Object.entries(doc.services)) {
       if (!isRecord(spec)) continue;
       const at = (message: string) => drift.push(`${service}: ${file} ${message}`);
-      /** A path source, as the service's file would resolve it. */
-      const path = (source: string, via: string) => {
-        if (source.includes("$") || source.startsWith("~")) return at(`${via} "${source}" is not modelled (variable or home path)`);
-        const kind = envFileSourceKind(resolve(REPO_ROOT, source), REPO_ROOT);
-        if (kind !== null) at(`holds .env by file mount: ${via} "${source}" is ${kind}`);
+      const refuse = (what: string) => at(`${FILE_CHANNEL_REFUSAL}: ${what}`);
+      /** A bind source, as compose would resolve it against the project directory. */
+      const bind = (source: string) => {
+        if (source.includes("$") || source.startsWith("~") || isAbsolute(source) || !isAllowlistedFileSource(resolve(REPO_ROOT, source), REPO_ROOT, allowlist)) {
+          refuse(`a bind source "${source}" is not allowlisted`);
+        }
       };
       const volume = (name: string) => {
-        const opts = isRecord(named[name]) && isRecord(named[name].driver_opts) ? named[name].driver_opts : undefined;
-        if (typeof opts?.device === "string") path(opts.device, `the device of named volume ${name}`);
+        const problem = namedVolumeProblem(named[name]);
+        if (problem !== null) refuse(`named volume ${name} ${problem}`);
       };
 
       if (spec.volumes !== undefined && !Array.isArray(spec.volumes)) at("has an unmodelled volumes value");
@@ -533,14 +558,14 @@ function fileChannelDrift(model: ComposeModel): string[] {
           const source = v.split(":")[0];
           if (!v.includes(":")) continue; // an anonymous volume: a target only
           if (isNamedVolume(source)) volume(source);
-          else path(source, "a bind source");
+          else bind(source);
         } else if (isRecord(v) && typeof v.type === "string") {
           if (v.type === "bind") {
-            if (typeof v.source === "string" && v.source !== "") path(v.source, "a bind source");
+            if (typeof v.source === "string" && v.source !== "") bind(v.source);
             else at("has a bind volume without a source");
           } else if (v.type === "volume") {
             if (typeof v.source === "string") volume(v.source);
-          } else if (v.type !== "tmpfs" && v.type !== "image") at(`has a volume of unmodelled type ${v.type}`);
+          } else if (v.type !== "tmpfs") at(`has a volume of unmodelled type ${v.type}`);
         } else at("has an unmodelled volume entry");
       }
 
@@ -548,13 +573,47 @@ function fileChannelDrift(model: ComposeModel): string[] {
         if (spec[kind] !== undefined && !Array.isArray(spec[kind])) at(`has an unmodelled ${kind} value`);
         for (const ref of Array.isArray(spec[kind]) ? (spec[kind] as unknown[]) : []) {
           const name = typeof ref === "string" ? ref : isRecord(ref) ? ref.source : undefined;
-          const entry = typeof name === "string" ? topLevel(kind)[name] : undefined;
-          if (typeof name !== "string" || !isRecord(entry)) at(`references a ${kind} entry no compose file defines`);
-          else if (typeof entry.file === "string") path(entry.file, `the file of ${kind} entry ${name}`);
-          else if ("environment" in entry) at(`holds .env by file mount: ${kind} entry ${name} is filled from an environment variable`);
+          if (typeof name !== "string") at(`has an unmodelled ${kind} entry`);
+          else refuse(`${kind} entry ${name} is referenced`);
         }
       }
+
+      if (isRecord(spec.build)) {
+        for (const key of BUILD_FILE_CHANNEL_KEYS) if (key in spec.build) refuse(`build.${key} is set`);
+      }
     }
+  }
+  return drift;
+}
+
+/**
+ * Every way FILE_CHANNEL_ALLOWLIST itself falls short: an entry that is not a
+ * plain repo-relative path, that is missing, that is or sits under a symlink (the
+ * check is lexical, so a link would let an allowlisted name point at `.env`),
+ * whose basename starts `.env`, or that no production compose file mounts
+ * (a stale entry).
+ */
+function allowlistDrift(model: ComposeModel, root: string, allowlist: ReadonlyArray<{ path: string }> = FILE_CHANNEL_ALLOWLIST): string[] {
+  const drift: string[] = [];
+  const mounted = new Set<string>();
+  for (const [file, doc] of Object.entries(model)) {
+    if (file === DEV_OVERRIDE_FILE || !isRecord(doc) || !isRecord(doc.services)) continue;
+    for (const spec of Object.values(doc.services)) {
+      if (!isRecord(spec) || !Array.isArray(spec.volumes)) continue;
+      for (const v of spec.volumes) {
+        const source = typeof v === "string" ? v.split(":")[0] : isRecord(v) && v.type === "bind" ? v.source : undefined;
+        if (typeof source === "string" && !isAbsolute(source)) mounted.add(resolve(root, source));
+      }
+    }
+  }
+  for (const { path } of allowlist) {
+    const at = (message: string) => drift.push(`allowlist ${path}: ${message}`);
+    const abs = resolve(root, path);
+    if (isAbsolute(path) || path.startsWith("..") || path !== relative(root, abs)) at("is not a normalised repo-relative path");
+    else if (!existsSync(abs)) at("does not exist");
+    else if (realpathSync(abs) !== join(realpathSync(root), path)) at("is, or sits under, a symlink");
+    if (basename(path).startsWith(".env")) at("has a .env* basename");
+    if (!mounted.has(abs)) at("is mounted by no production compose file");
   }
   return drift;
 }
@@ -563,7 +622,7 @@ function fileChannelDrift(model: ComposeModel): string[] {
 
 type K8sInput = { files: string[]; docs: Record<string, unknown[]> }; // repo-relative paths under infra/k8s
 
-type EnvEntry = { name: string; value?: unknown; from?: { kind: "secret" | "configMap"; name: string; key: string } };
+type EnvEntry = { name: string; value?: unknown; from?: { kind: "secret" | "configMap"; name: string; key: string; optional: boolean } };
 type Deployment = {
   file: string;
   name: string;
@@ -654,7 +713,7 @@ function normaliseDeployment(file: string, doc: Record<string, unknown>): Deploy
       if (!isRecord(vf) || Object.keys(vf).length !== 1 || !isRecord(ref) || typeof ref.name !== "string" || typeof ref.key !== "string") {
         throw new Error(`${where}: ${e.name} has an unmodelled valueFrom`);
       }
-      env.push({ name: e.name, from: { kind: secret ? "secret" : "configMap", name: ref.name, key: ref.key } });
+      env.push({ name: e.name, from: { kind: secret ? "secret" : "configMap", name: ref.name, key: ref.key, optional: ref.optional === true } });
     } else {
       env.push({ name: e.name, value: e.value });
     }
@@ -762,6 +821,9 @@ function k8sDrift(input: K8sInput, ctx: Ctx): string[] {
         if (e.value !== literal) drift.push(`${d.name}: ${e.name} must be the string ${JSON.stringify(literal)}`);
       } else if (e.from === undefined) drift.push(`${d.name}: ${e.name} must come from a ConfigMap or Secret`);
     }
+    // The bucket reference is the one that must resolve: with it optional, a missing ConfigMap leaves a publisher with no destination until the boot check.
+    const bucket = d.env.find((e) => e.name === S3_BUCKET_ENV);
+    if (bucket?.from?.kind === "configMap" && bucket.from.optional) drift.push(`${d.name}: ${S3_BUCKET_ENV} must not be an optional configMapKeyRef`);
 
     // I2.4
     if (ctx.stopBeforeStart.includes(label)) {
@@ -1183,34 +1245,47 @@ describe("compose: the isolated services keep the k8s hardening", () => {
   });
 });
 
-describe("compose: .env as a file reaches no service outside the dev override", () => {
-  const MOUNT = "holds .env by file mount";
+describe("compose: a host file reaches no service outside the dev override except by FILE_CHANNEL_ALLOWLIST", () => {
+  const REFUSED = FILE_CHANNEL_REFUSAL;
+  const BASE = "docker-compose.yml";
   const topLevel = (c: ComposeModel, file: string) => c[file] as Record<string, unknown>;
+  const flagged = (edit: (c: ComposeModel) => void) => composeDrift(mutated(compose.model, edit), ctx, compose.workersText);
+  const bindOn = (source: unknown) => (c: ComposeModel) => {
+    svc(c, BASE, "app").volumes = [source];
+  };
+  const notAllowlisted = (source: string) => [`app: ${BASE} ${REFUSED}: a bind source "${source}" is not allowlisted`];
 
-  it("flags a bind mount of the project directory, an ancestor and a .env file on app, in short and long syntax", () => {
+  it("flags a bind source that is not exactly an allowlisted path, in short and long syntax", () => {
     const cases: Array<[unknown, string]> = [
-      [".:/x", `a bind source "." is the project directory`],
-      ["./:/x:ro", `a bind source "./" is the project directory`],
-      ["..:/x", `a bind source ".." is an ancestor of the project directory`],
-      ["./.env:/x", `a bind source "./.env" is a .env file`],
-      ["./infra/.env.production:/x", `a bind source "./infra/.env.production" is a .env file`],
-      [{ type: "bind", source: ".", target: "/x" }, `a bind source "." is the project directory`],
+      [".:/x", "."],
+      ["./:/x:ro", "./"],
+      ["..:/x", ".."],
+      ["./.env:/x", "./.env"],
+      ["./infra/.env.production:/x", "./infra/.env.production"],
+      ["./infra:/x", "./infra"],
+      ["./infra/postgres/initdb/../../../.env:/x", "./infra/postgres/initdb/../../../.env"],
+      ["/opt/x:/x", "/opt/x"],
+      ["~/x:/x", "~/x"],
+      ["${DATA_DIR}:/x", "${DATA_DIR}"],
+      [{ type: "bind", source: ".", target: "/x" }, "."],
+      [{ type: "bind", source: "/opt/x", target: "/x" }, "/opt/x"],
     ];
-    for (const [volume, kind] of cases) {
-      const m = mutated(compose.model, (c) => {
-        svc(c, "docker-compose.yml", "app").volumes = [volume];
-      });
-      expect(composeDrift(m, ctx, compose.workersText), JSON.stringify(volume)).toEqual([`app: docker-compose.yml ${MOUNT}: ${kind}`]);
-    }
+    for (const [volume, shown] of cases) expect(flagged(bindOn(volume)), JSON.stringify(volume)).toEqual(notAllowlisted(shown));
   });
 
-  it("allows the mounts the stack ships: the db initdb directory and the fluent-bit config files", () => {
-    expect(svc(compose.model, "docker-compose.yml", "db").volumes).toContain("./infra/postgres/initdb:/docker-entrypoint-initdb.d:ro");
+  it("allows the mounts the stack ships: the initdb directory, the fluent-bit configs and the sentinel template", () => {
+    expect(svc(compose.model, BASE, "db").volumes).toContain("./infra/postgres/initdb:/docker-entrypoint-initdb.d:ro");
     expect(svc(compose.model, "docker-compose.logging.yml", "fluent-bit").volumes).toEqual([
       "./infra/fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro",
       "./infra/fluent-bit/parsers.conf:/fluent-bit/etc/parsers.conf:ro",
     ]);
     expect(composeDrift(compose.model, ctx, compose.workersText)).toEqual([]);
+    for (const { path } of FILE_CHANNEL_ALLOWLIST) {
+      for (const spelling of [`./${path}`, `./${path}/`, `./infra/../${path}`]) {
+        expect(flagged(bindOn(`${spelling}:/x:ro`)), spelling).toEqual([]);
+        expect(flagged(bindOn({ type: "bind", source: spelling, target: "/x" })), spelling).toEqual([]);
+      }
+    }
   });
 
   it("allows the dev override's project mount, and flags the same mount anywhere else", () => {
@@ -1218,86 +1293,171 @@ describe("compose: .env as a file reaches no service outside the dev override", 
     const prod = mutated(compose.model, (c) => {
       svc(c, WORKERS_FILE, "audit-outbox-worker").volumes = [".:/app"];
     });
-    expect(composeDrift(prod, ctx, compose.workersText)).toEqual([`audit-outbox-worker: ${WORKERS_FILE} ${MOUNT}: a bind source "." is the project directory`]);
+    expect(composeDrift(prod, ctx, compose.workersText)).toEqual([`audit-outbox-worker: ${WORKERS_FILE} ${REFUSED}: a bind source "." is not allowlisted`]);
   });
 
-  it("flags a top-level secrets entry whose file is .env, referenced by the outbox worker, in short and long syntax", () => {
-    for (const ref of ["signing", { source: "signing", target: "signing" }]) {
-      const m = mutated(compose.model, (c) => {
-        topLevel(c, WORKERS_FILE).secrets = { signing: { file: "./.env" } };
-        svc(c, WORKERS_FILE, "audit-outbox-worker").secrets = [ref];
+  it("flags every referenced secrets and configs entry, whatever it is filled from, and ignores one no service references", () => {
+    const entries: Array<[string, Record<string, unknown>]> = [
+      ["a .env file", { file: "./.env" }],
+      ["another file", { file: "./secrets/token" }],
+      ["an allowlisted file", { file: "./infra/fluent-bit/parsers.conf" }],
+      ["inline content", { content: "x" }],
+      ["an environment variable", { environment: "AUDIT_ANCHOR_SIGNING_KEY" }],
+      ["an external entry", { external: true }],
+    ];
+    for (const kind of ["secrets", "configs"] as const) {
+      for (const [what, entry] of entries) {
+        for (const ref of ["x", { source: "x", target: "x" }]) {
+          const m = mutated(compose.model, (c) => {
+            topLevel(c, WORKERS_FILE)[kind] = { x: entry };
+            svc(c, WORKERS_FILE, "audit-outbox-worker")[kind] = [ref];
+          });
+          const external = "external" in entry ? [`(top level): ${WORKERS_FILE} ${REFUSED}: ${kind} entry x is external`] : [];
+          expect(composeDrift(m, ctx, compose.workersText), `${kind} ${what} ${JSON.stringify(ref)}`).toEqual([
+            ...external,
+            `audit-outbox-worker: ${WORKERS_FILE} ${REFUSED}: ${kind} entry x is referenced`,
+          ]);
+        }
+      }
+      const unreferenced = mutated(compose.model, (c) => {
+        topLevel(c, WORKERS_FILE)[kind] = { x: { file: "./.env" } };
       });
-      expect(composeDrift(m, ctx, compose.workersText), JSON.stringify(ref)).toEqual([
-        `audit-outbox-worker: ${WORKERS_FILE} ${MOUNT}: the file of secrets entry signing "./.env" is a .env file`,
-      ]);
+      expect(composeDrift(unreferenced, ctx, compose.workersText)).toEqual([]);
     }
   });
 
-  it("allows a secrets entry whose file is elsewhere, and ignores an entry no service references", () => {
-    const elsewhere = mutated(compose.model, (c) => {
-      topLevel(c, WORKERS_FILE).secrets = { token: { file: "./secrets/token" } };
-      svc(c, WORKERS_FILE, "audit-outbox-worker").secrets = ["token"];
+  it("attributes a withheld value in a referenced entry's inline content to the service that references it", () => {
+    const m = mutated(compose.model, (c) => {
+      topLevel(c, WORKERS_FILE).configs = { cfg: { content: "${AUDIT_ANCHOR_SIGNING_KEY}" } };
+      svc(c, WORKERS_FILE, "retention-gc-worker").configs = ["cfg"];
     });
-    expect(composeDrift(elsewhere, ctx, compose.workersText)).toEqual([]);
+    expect(composeDrift(m, ctx, compose.workersText)).toEqual([
+      `retention-gc-worker: ${WORKERS_FILE} configs entry cfg references withheld AUDIT_ANCHOR_SIGNING_KEY, which is not given to this service`,
+      `retention-gc-worker: ${WORKERS_FILE} ${REFUSED}: configs entry cfg is referenced`,
+    ]);
     const unreferenced = mutated(compose.model, (c) => {
-      topLevel(c, WORKERS_FILE).secrets = { signing: { file: "./.env" } };
+      topLevel(c, WORKERS_FILE).configs = { cfg: { content: "${AUDIT_ANCHOR_SIGNING_KEY}" } };
     });
     expect(composeDrift(unreferenced, ctx, compose.workersText)).toEqual([]);
   });
 
-  it("flags a top-level configs entry whose file is the project directory", () => {
-    const m = mutated(compose.model, (c) => {
-      topLevel(c, WORKERS_FILE).configs = { cfg: { file: "." } };
-      svc(c, WORKERS_FILE, "retention-gc-worker").configs = [{ source: "cfg" }];
-    });
-    expect(composeDrift(m, ctx, compose.workersText)).toEqual([
-      `retention-gc-worker: ${WORKERS_FILE} ${MOUNT}: the file of configs entry cfg "." is the project directory`,
+  it("flags a named volume with a driver or driver_opts, and an external volume, and allows the plain ones the stack ships", () => {
+    const redefine = (entry: unknown) => (c: ComposeModel) => {
+      topLevel(c, BASE).volumes = { ...(topLevel(c, BASE).volumes as object), redis_data: entry };
+    };
+    expect(flagged(redefine({ driver_opts: { type: "none", o: "bind", device: "." } }))).toEqual([`redis: ${BASE} ${REFUSED}: named volume redis_data sets driver_opts`]);
+    expect(flagged(redefine({ driver_opts: { type: "none", o: "bind", device: "./infra/fluent-bit/parsers.conf" } }))).toEqual([
+      `redis: ${BASE} ${REFUSED}: named volume redis_data sets driver_opts`,
     ]);
-    const elsewhere = mutated(m, (c) => {
-      topLevel(c, WORKERS_FILE).configs = { cfg: { file: "./infra/fluent-bit/parsers.conf" } };
-    });
-    expect(composeDrift(elsewhere, ctx, compose.workersText)).toEqual([]);
+    expect(flagged(redefine({ driver: "local" }))).toEqual([`redis: ${BASE} ${REFUSED}: named volume redis_data sets driver`]);
+    expect(flagged(redefine({ external: true }))).toEqual([`(top level): ${BASE} ${REFUSED}: volumes entry redis_data is external`]);
+    expect(flagged(redefine(5))).toEqual([`redis: ${BASE} ${REFUSED}: named volume redis_data has an unmodelled definition`]);
+    expect(topLevel(compose.model, BASE).volumes).toEqual({ postgres_data: null, redis_data: null });
+    expect(flagged(redefine({ name: "redis_data" }))).toEqual([]);
+    expect(composeDrift(compose.model, ctx, compose.workersText)).toEqual([]);
   });
 
-  it("flags a named volume backed by a bind of the project directory, and allows one backed elsewhere", () => {
-    const back = (device: string) =>
-      mutated(compose.model, (c) => {
-        topLevel(c, "docker-compose.yml").volumes = { ...(topLevel(c, "docker-compose.yml").volumes as object), redis_data: { driver_opts: { type: "none", o: "bind", device } } };
+  it("flags a named volume no compose file defines", () => {
+    expect(flagged((c) => (svc(c, BASE, "app").volumes = ["nowhere:/x"]))).toEqual([`app: ${BASE} ${REFUSED}: named volume nowhere is not defined by any compose file`]);
+  });
+
+  it("flags build.secrets, build.ssh and build.additional_contexts, and allows a build without them", () => {
+    for (const key of BUILD_FILE_CHANNEL_KEYS) {
+      const m = mutated(compose.model, (c) => {
+        (svc(c, BASE, "app").build as Record<string, unknown>)[key] = key === "additional_contexts" ? { x: "." } : ["default"];
       });
-    expect(composeDrift(back("."), ctx, compose.workersText)).toEqual([
-      `redis: docker-compose.yml ${MOUNT}: the device of named volume redis_data "." is the project directory`,
-    ]);
-    expect(composeDrift(back("./data/redis"), ctx, compose.workersText)).toEqual([]);
+      expect(composeDrift(m, ctx, compose.workersText), key).toEqual([`app: ${BASE} ${REFUSED}: build.${key} is set`]);
+    }
+    expect(Object.keys(svc(compose.model, BASE, "app").build as object)).toEqual(["context", "dockerfile", "args"]);
+    expect(composeDrift(compose.model, ctx, compose.workersText)).toEqual([]);
   });
 
   it("flags a volume or entry shape it does not model instead of skipping it", () => {
-    const flagged = (edit: (c: ComposeModel) => void) => composeDrift(mutated(compose.model, edit), ctx, compose.workersText);
-    expect(flagged((c) => (svc(c, "docker-compose.yml", "app").volumes = [42]))).toEqual(["app: docker-compose.yml has an unmodelled volume entry"]);
-    expect(flagged((c) => (svc(c, "docker-compose.yml", "app").volumes = "./x:/x"))).toEqual(["app: docker-compose.yml has an unmodelled volumes value"]);
-    expect(flagged((c) => (svc(c, "docker-compose.yml", "app").volumes = ["${DATA_DIR}:/x"]))).toEqual([
-      'app: docker-compose.yml a bind source "${DATA_DIR}" is not modelled (variable or home path)',
-    ]);
-    expect(flagged((c) => (svc(c, "docker-compose.yml", "app").volumes = ["~/x:/x"]))).toEqual([
-      'app: docker-compose.yml a bind source "~/x" is not modelled (variable or home path)',
-    ]);
-    expect(flagged((c) => (svc(c, "docker-compose.yml", "app").volumes = [{ type: "bind", target: "/x" }]))).toEqual(["app: docker-compose.yml has a bind volume without a source"]);
-    expect(flagged((c) => (svc(c, "docker-compose.yml", "app").volumes = [{ type: "npipe", source: "a", target: "b" }]))).toEqual([
-      "app: docker-compose.yml has a volume of unmodelled type npipe",
-    ]);
-    expect(flagged((c) => (svc(c, "docker-compose.yml", "app").secrets = ["nowhere"]))).toEqual(["app: docker-compose.yml references a secrets entry no compose file defines"]);
-    expect(
-      flagged((c) => {
-        topLevel(c, WORKERS_FILE).secrets = { fromEnv: { environment: "AUDIT_ANCHOR_SIGNING_KEY" } };
-        svc(c, WORKERS_FILE, "audit-outbox-worker").secrets = ["fromEnv"];
-      }),
-    ).toEqual([`audit-outbox-worker: ${WORKERS_FILE} ${MOUNT}: secrets entry fromEnv is filled from an environment variable`]);
+    expect(flagged(bindOn(42))).toEqual([`app: ${BASE} has an unmodelled volume entry`]);
+    expect(flagged((c) => (svc(c, BASE, "app").volumes = "./x:/x"))).toEqual([`app: ${BASE} has an unmodelled volumes value`]);
+    expect(flagged(bindOn({ type: "bind", target: "/x" }))).toEqual([`app: ${BASE} has a bind volume without a source`]);
+    expect(flagged(bindOn({ type: "npipe", source: "a", target: "b" }))).toEqual([`app: ${BASE} has a volume of unmodelled type npipe`]);
+    expect(flagged(bindOn({ type: "image", source: "x", target: "/y" }))).toEqual([`app: ${BASE} has a volume of unmodelled type image`]);
+    expect(flagged((c) => (svc(c, BASE, "app").secrets = [42]))).toEqual([`app: ${BASE} has an unmodelled secrets entry`]);
+    expect(flagged((c) => (svc(c, BASE, "app").configs = "cfg"))).toEqual([`app: ${BASE} has an unmodelled configs value`]);
   });
 
-  it("allows an anonymous volume, a named volume, a tmpfs and an image mount", () => {
-    const m = mutated(compose.model, (c) => {
-      svc(c, "docker-compose.yml", "app").volumes = ["/cache", "redis_data:/data", { type: "tmpfs", target: "/tmp" }, { type: "image", source: "x", target: "/y" }];
-    });
-    expect(composeDrift(m, ctx, compose.workersText)).toEqual([]);
+  it("allows an anonymous volume, a named volume and a tmpfs", () => {
+    expect(flagged(bindOn("/cache"))).toEqual([]);
+    expect(flagged((c) => (svc(c, BASE, "app").volumes = ["/cache", "redis_data:/data", { type: "tmpfs", target: "/tmp" }]))).toEqual([]);
+  });
+});
+
+describe("compose: FILE_CHANNEL_ALLOWLIST itself", () => {
+  const scratchRoots: string[] = [];
+  afterEach(() => {
+    for (const d of scratchRoots.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  /** A scratch tree: `.env` and the named files, with `link` symlinks, and a model that mounts `mounted`. */
+  function scratchTree(files: string[], links: Record<string, string>) {
+    const root = mkdtempSync(join(tmpdir(), "file-channel-allowlist-"));
+    scratchRoots.push(root);
+    writeFileSync(join(root, ".env"), "");
+    for (const f of files) {
+      mkdirSync(dirname(join(root, f)), { recursive: true });
+      writeFileSync(join(root, f), "");
+    }
+    for (const [name, target] of Object.entries(links)) {
+      mkdirSync(dirname(join(root, name)), { recursive: true });
+      symlinkSync(target, join(root, name));
+    }
+    return root;
+  }
+  const mounting = (...sources: string[]): ComposeModel => ({
+    "docker-compose.yml": { services: { app: { volumes: sources.map((s) => `${s}:/x:ro`) } } },
+  });
+
+  it("is clean for the real tree: every entry exists, is symlink-free, is not .env*, and is mounted", () => {
+    expect(allowlistDrift(compose.model, REPO_ROOT)).toEqual([]);
+    expect(FILE_CHANNEL_ALLOWLIST.length).toBeGreaterThan(0);
+    for (const { path, reason } of FILE_CHANNEL_ALLOWLIST) {
+      expect(reason, path).not.toBe("");
+      expect(realpathSync(join(REPO_ROOT, path)), path).toBe(join(realpathSync(REPO_ROOT), path));
+    }
+  });
+
+  it("flags an allowlisted name that is a symlink to .env, though the lexical check allows the mount", () => {
+    const root = scratchTree([], { "infra/x": "../.env" });
+    const allowlist = [{ path: "infra/x" }];
+    const model = mounting("./infra/x");
+    expect(allowlistDrift(model, root, allowlist)).toEqual(["allowlist infra/x: is, or sits under, a symlink"]);
+    expect(fileChannelDrift(model, allowlist)).toEqual([]);
+  });
+
+  it("flags an entry under a symlinked directory, and allows the same entry as a real file", () => {
+    const allowlist = [{ path: "infra/dir/y" }];
+    const linked = scratchTree([], { "infra/dir": "../elsewhere" });
+    mkdirSync(join(linked, "elsewhere"));
+    writeFileSync(join(linked, "elsewhere/y"), "");
+    expect(allowlistDrift(mounting("./infra/dir/y"), linked, allowlist)).toEqual(["allowlist infra/dir/y: is, or sits under, a symlink"]);
+    const real = scratchTree(["infra/dir/y"], {});
+    expect(allowlistDrift(mounting("./infra/dir/y"), real, allowlist)).toEqual([]);
+  });
+
+  it("flags a missing entry, a .env* basename, an unmounted entry and a path that is not normalised", () => {
+    const root = scratchTree(["infra/a", "infra/.env.example"], {});
+    expect(allowlistDrift(mounting("./infra/a"), root, [{ path: "infra/gone" }, { path: "infra/a" }])).toEqual([
+      "allowlist infra/gone: does not exist",
+      "allowlist infra/gone: is mounted by no production compose file",
+    ]);
+    expect(allowlistDrift(mounting("./infra/.env.example"), root, [{ path: "infra/.env.example" }])).toEqual(["allowlist infra/.env.example: has a .env* basename"]);
+    expect(allowlistDrift(mounting("./infra/a"), root, [{ path: "infra/a" }])).toEqual([]);
+    expect(allowlistDrift(mounting("./infra/a"), root, [{ path: "infra/b" }, { path: "infra/a" }]).filter((d) => d.startsWith("allowlist infra/a"))).toEqual([]);
+    for (const path of ["./infra/a", "infra//a", "../infra/a", "infra/a/"]) {
+      expect(allowlistDrift(mounting("./infra/a"), root, [{ path }]), path).toContain(`allowlist ${path}: is not a normalised repo-relative path`);
+    }
+  });
+
+  it("does not count the dev override's mounts as a production mount", () => {
+    const root = scratchTree(["infra/a"], {});
+    const model: ComposeModel = { [DEV_OVERRIDE_FILE]: { services: { app: { volumes: ["./infra/a:/x"] } } } };
+    expect(allowlistDrift(model, root, [{ path: "infra/a" }])).toEqual(["allowlist infra/a: is mounted by no production compose file"]);
   });
 });
 
@@ -1457,6 +1617,29 @@ describe("k8s: I2.2 env set", () => {
       e.value = "us-east-1";
     });
     expect(k8sDrift(m, ctx)).toEqual([`${PUBLISHER}: AWS_REGION must come from a ConfigMap or Secret`]);
+  });
+});
+
+describe("k8s: I2.2 the S3 bucket reference is not optional", () => {
+  const envEntry = (k: K8sInput, name: string) => (container(dep(k, PUBLISHER)).env as Array<Record<string, unknown>>).find((x) => x.name === name)!;
+  const configMapRef = (k: K8sInput, name: string) => (envEntry(k, name).valueFrom as { configMapKeyRef: Record<string, unknown> }).configMapKeyRef;
+
+  it("flags optional: true on s3-bucket", () => {
+    const m = mutated(k8s, (k) => {
+      configMapRef(k, S3_BUCKET_ENV).optional = true;
+    });
+    expect(k8sDrift(m, ctx)).toEqual([`${PUBLISHER}: ${S3_BUCKET_ENV} must not be an optional configMapKeyRef`]);
+  });
+
+  it("allows s3-prefix and aws-region optional, as shipped, and s3-bucket with optional: false", () => {
+    expect(configMapRef(k8s, S3_BUCKET_ENV).optional).toBeUndefined();
+    expect(configMapRef(k8s, "AUDIT_ANCHOR_DESTINATION_S3_PREFIX").optional).toBe(true);
+    expect(configMapRef(k8s, "AWS_REGION").optional).toBe(true);
+    expect(k8sDrift(k8s, ctx)).toEqual([]);
+    const explicit = mutated(k8s, (k) => {
+      configMapRef(k, S3_BUCKET_ENV).optional = false;
+    });
+    expect(k8sDrift(explicit, ctx)).toEqual([]);
   });
 });
 

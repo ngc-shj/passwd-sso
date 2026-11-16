@@ -25,7 +25,12 @@ set the variables the overlay requires in `.env` (see the "Audit anchor
 publisher on Compose and Kubernetes" section of
 `docs/operations/deployment.md`). `TimeoutStopSec` must then be at least 120 s
 plus margin for `docker compose down`, because the publisher's
-`stop_grace_period` is 120 s; the unit's 90 s would kill it mid-run.
+`stop_grace_period` is 120 s; the unit's 90 s would kill it mid-run. Also
+replace `--abort-on-container-exit` with `--exit-code-from app`: with the
+overlay, the former tears the whole stack down (the app included) whenever any
+worker exits — a publisher with no destination exits at boot by design — while
+the latter ties the unit to the app and leaves each worker to its own
+`restart: unless-stopped`.
 
 ## Prerequisites
 

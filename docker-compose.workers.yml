@@ -42,15 +42,20 @@
 # they get exactly their own names, and the signing key reaches only the
 # publisher. The set is derived in scripts/checks/lib/withheld-env.ts and checked by
 # src/__tests__/infra/worker-deploy-parity.test.ts. A W key reaches only its
-# declared holders (withheldHolders there). App secrets the workers already shared
-# (AUTH_SECRET, REDIS_PASSWORD, SHARE_MASTER_KEY_*) are not in W and still reach
-# every service that loads .env.
+# declared holders (withheldHolders there). Every other secret in .env, for
+# example AUTH_SECRET, REDIS_PASSWORD and SHARE_MASTER_KEY_*, is not in W and
+# still reaches every service that loads .env; jackson also receives AUTH_SECRET
+# as NEXTAUTH_SECRET.
 #
-# The same checks refuse the other ways .env could reach a container as a file: a
-# bind mount of the project directory (or an ancestor) or of a `.env*` file, and a
-# top-level `secrets:` / `configs:` entry whose `file:` is one of those. Only the
-# dev override is exempt (it mounts `.:/app`, see docker-compose.override.yml). A volume shape the checks
-# do not model fails them rather than being skipped.
+# The same checks apply default-deny to host files. Outside the dev override
+# (docker-compose.override.yml, whose `.:/app` mount is the dev shape), a bind
+# source is allowed only if it is one of the repo-relative paths in
+# FILE_CHANNEL_ALLOWLIST (scripts/checks/lib/withheld-env.ts: the initdb
+# directory, the fluent-bit configs, sentinel.conf); a named volume only if it is
+# plain and docker-managed (no driver, driver_opts or external); a top-level
+# `secrets:` or `configs:` entry a service references, `external: true` and
+# build.secrets, build.ssh and build.additional_contexts never. A volume type or
+# key the checks do not model fails them rather than being skipped.
 #
 # Do NOT combine this with docker-compose.override.yml in production — the dev
 # override exposes DB/Jackson/Redis ports to the host and runs the tsx source.

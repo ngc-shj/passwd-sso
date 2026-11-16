@@ -325,23 +325,76 @@ export function withheldHolders(
 
 // ─── File channels ──────────────────────────────────────────
 
-/** What a file source hands a container: the whole `.env`'s directory, or the file. */
-export type EnvFileSourceKind = "the project directory" | "an ancestor of the project directory" | "a .env file";
+/**
+ * The host paths a container may receive as a file outside the dev override,
+ * repo-relative, each with why. A default-deny list: a source that is not
+ * exactly one of these (resolved against the project root) is refused, whatever
+ * it spells — a path, a `~`, an absolute path, a symlink, `.`. The parity test
+ * requires each entry to exist, to be free of symlinks, to avoid a `.env*`
+ * basename and to be referenced by a production compose file.
+ */
+export const FILE_CHANNEL_ALLOWLIST: ReadonlyArray<{ path: string; reason: string }> = [
+  { path: "infra/postgres/initdb", reason: "db runs these init scripts once, on an empty data directory" },
+  { path: "infra/fluent-bit/fluent-bit.conf", reason: "fluent-bit's main configuration (docker-compose.logging.yml)" },
+  { path: "infra/fluent-bit/parsers.conf", reason: "fluent-bit's parsers configuration (docker-compose.logging.yml)" },
+  { path: "infra/redis/sentinel.conf", reason: "the sentinel template the redis-sentinel services copy (docker-compose.ha.yml)" },
+];
 
 const stripTrailingSlash = (p: string): string => (p.length > 1 ? p.replace(/\/+$/, "") : p);
 
 /**
- * Whether mounting `source` into a container (a bind mount, or the `file:` of a
- * top-level `secrets:`/`configs:` entry) delivers `.env` as a file: the source
- * is the project directory, one of its ancestors, or a `.env*` file. Both paths
- * are compared as written, in one form (both absolute, or both relative to the
- * same directory); null when the source is none of those.
+ * Whether `source`, a host path as compose renders it (or as the caller
+ * resolved it against the project root), is exactly `<projectRoot>/<an
+ * allowlisted path>`, both in one form. A relative `source` is never resolved
+ * here, so against a real (absolute) root it is refused: compose leaves a named
+ * volume's `driver_opts.device` unresolved, so a relative spelling is the one
+ * the render and the file disagree on.
  */
-export function envFileSourceKind(source: string, projectRoot: string): EnvFileSourceKind | null {
+export function isAllowlistedFileSource(
+  source: string,
+  projectRoot: string,
+  allowlist: ReadonlyArray<{ path: string }> = FILE_CHANNEL_ALLOWLIST,
+): boolean {
   const s = stripTrailingSlash(posix.normalize(source));
   const root = stripTrailingSlash(posix.normalize(projectRoot));
-  if (s === root) return "the project directory";
-  if (root.startsWith(s === "/" ? "/" : `${s}/`)) return "an ancestor of the project directory";
-  if (posix.basename(s).startsWith(".env")) return "a .env file";
-  return null;
+  return allowlist.some((e) => s === posix.join(root, e.path));
+}
+
+/** The top-level `volumes:` keys that make a named volume anything but plain and docker-managed (`external` is judged for every kind, below). */
+const NAMED_VOLUME_REFUSED_KEYS = ["driver", "driver_opts"] as const;
+
+/**
+ * Why a named volume is not plain docker-managed, or null: an entry with no
+ * `driver` or `driver_opts` (`postgres_data:` as written, or with the `name`
+ * compose adds). `undefined` is an entry no file defines.
+ */
+export function namedVolumeProblem(entry: unknown): string | null {
+  if (entry === undefined) return "is not defined by any compose file";
+  if (entry === null) return null;
+  if (typeof entry !== "object" || Array.isArray(entry)) return "has an unmodelled definition";
+  const keys = NAMED_VOLUME_REFUSED_KEYS.filter((k) => k in entry);
+  return keys.length === 0 ? null : `sets ${keys.join(", ")}`;
+}
+
+/** The `build:` keys that hand the builder a host file or an extra context. */
+export const BUILD_FILE_CHANNEL_KEYS = ["secrets", "ssh", "additional_contexts"] as const;
+
+/** The prefix both adjudicators put on a refused file channel. */
+export const FILE_CHANNEL_REFUSAL = "has a file channel outside FILE_CHANNEL_ALLOWLIST";
+
+/**
+ * Every top-level `volumes:`, `secrets:` or `configs:` entry that is `external`
+ * — compose reads it from outside the project's files — as `<kind> entry <name>`.
+ * Any `external` key counts, so `external: false` spellings are not a way round.
+ */
+export function externalEntryProblems(top: Partial<Record<"volumes" | "secrets" | "configs", unknown>>): string[] {
+  const out: string[] = [];
+  for (const kind of ["volumes", "secrets", "configs"] as const) {
+    const entries = top[kind];
+    if (typeof entries !== "object" || entries === null) continue;
+    for (const [name, entry] of Object.entries(entries)) {
+      if (typeof entry === "object" && entry !== null && "external" in entry) out.push(`${kind} entry ${name} is external`);
+    }
+  }
+  return out;
 }

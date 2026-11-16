@@ -14,10 +14,16 @@
  *     a role password where bound, a publisher-only key in the publisher,
  *     JACKSON_API_KEY in jackson, any other W key nowhere;
  *   - no service outside base+override (whose `.:/app` mount is the dev shape)
- *     gets `.env` as a file: a bind mount whose source is the project directory,
- *     an ancestor of it or a `.env*` file, a named volume backed by such a bind,
- *     or a top-level `secrets:`/`configs:` entry whose `file:` is one; a volume
- *     or entry shape the check does not model fails instead of being skipped;
+ *     gets a host file by anything but default-deny: a bind source only if it is
+ *     <project>/<a FILE_CHANNEL_ALLOWLIST path> (withheld-env.ts); a named volume
+ *     only if plain and docker-managed (no driver, driver_opts); a referenced
+ *     top-level `secrets:`/`configs:` entry, any `external` entry,
+ *     `build.secrets`, `build.ssh` and `build.additional_contexts` never; a
+ *     volume type or key the check does not model fails instead of being skipped;
+ *   - an inline `configs:` content or `secrets:` entry a service references is
+ *     scanned for withheld values as that service's own;
+ *   - every compose file findComposeFiles discovers is in some render set (an
+ *     empty discovery is refused);
  *   - the publisher's rendered env passes auditAnchorPublisherEnvSchema and
  *     buildDestinationsFromEnv, the verify worker holds its URL and nothing
  *     else, and neither loads `.env`;
@@ -42,15 +48,19 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { auditAnchorPublisherEnvSchema } from "@/lib/env-schema";
 import { buildDestinationsFromEnv } from "@/lib/audit/anchor-destinations/from-env";
 import {
   deriveWithheldEnv,
   derivePublisherOnlyEnv,
-  envFileSourceKind,
+  BUILD_FILE_CHANNEL_KEYS,
+  externalEntryProblems,
+  FILE_CHANNEL_REFUSAL,
+  isAllowlistedFileSource,
   isDatabaseUrlKey,
+  namedVolumeProblem,
   ownDatabaseUrlKey,
   PUBLISHER_SERVICE,
   readSmokeMap,
@@ -62,6 +72,7 @@ import {
   workerServiceName,
   type SmokeMap,
 } from "./lib/withheld-env";
+import { findComposeFiles } from "./lib/compose-files.mjs";
 
 const REPO_ROOT = resolve(fileURLToPath(import.meta.url), "../../..");
 
@@ -86,9 +97,8 @@ const FILE_CHANNEL_EXEMPT_SET = RENDER_SETS[0].name;
 /**
  * The compose files (root-relative, fixtures excluded) that no RENDER_SETS
  * entry renders. An empty list is refused: it means the discovery found nothing,
- * not that nothing is unrendered. The caller discovers the files (the self-test
- * does, with findComposeFiles): that helper is an ES module with a top-level
- * await, which this check, run by tsx as CommonJS, cannot import.
+ * not that nothing is unrendered. The caller discovers the files, with
+ * findComposeFiles (runChecks does, on every run).
  */
 export function composeFilesOutsideRenderSets(found: readonly string[], sets: ReadonlyArray<{ files: readonly string[] }> = RENDER_SETS): string[] {
   if (found.length === 0) throw new Error("no compose files were found, so none can be checked against the render sets");
@@ -250,20 +260,34 @@ export function publisherEnvProblems(env: Record<string, string | null | undefin
   return [];
 }
 
-/** Volume types that mount no host path (a `volume` is judged by its backing device). */
-const HOSTLESS_VOLUME_TYPES = ["tmpfs", "image"];
+/** The keys a rendered volume entry may carry; another is a shape this check does not model. */
+const VOLUME_ENTRY_KEYS = ["type", "source", "target", "read_only", "bind", "volume", "tmpfs", "consistency"];
+
+/** The top-level `secrets:`/`configs:` entries `service` references, by name (a name the render does not define is absent). */
+function referencedEntries(service: ComposeService, render: ComposeRender): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const kind of ["secrets", "configs"] as const) {
+    const refs = service[kind];
+    for (const ref of Array.isArray(refs) ? refs : []) {
+      const name = typeof ref === "string" ? ref : (ref as { source?: unknown } | null)?.source;
+      const entry = typeof name === "string" ? render[kind]?.[name] : undefined;
+      if (entry) out[`${kind}:${String(name)}`] = entry;
+    }
+  }
+  return out;
+}
 
 /**
- * How `.env` could reach `service` as a file (bind mounts, named volumes backed
- * by a bind, referenced secrets/configs with a file source). A shape not
- * modelled is reported, not skipped.
+ * How a host file could reach `service`, by default-deny: a bind source only if
+ * it is `<projectRoot>/<a FILE_CHANNEL_ALLOWLIST path>`; a named volume only if
+ * plain and docker-managed; a referenced secrets/configs entry, `build.secrets`,
+ * `build.ssh` and `build.additional_contexts` never; a tmpfs is fine. A shape
+ * not modelled is reported, not skipped.
  */
 function fileChannelProblems(service: ComposeService, render: ComposeRender, projectRoot: string): string[] {
   const problems: string[] = [];
-  const channel = (source: string, via: string) => {
-    const kind = envFileSourceKind(source, projectRoot);
-    if (kind !== null) problems.push(`holds .env by file mount: ${via} is ${kind}`);
-  };
+  const refuse = (what: string) => problems.push(`${FILE_CHANNEL_REFUSAL}: ${what}`);
+  const shown = (path: string) => (path === projectRoot ? "<root>" : path.startsWith(`${projectRoot}/`) ? `<root>${path.slice(projectRoot.length)}` : path);
 
   const volumes = service.volumes;
   if (volumes !== undefined && !Array.isArray(volumes)) problems.push("has an unmodelled volumes value");
@@ -271,14 +295,18 @@ function fileChannelProblems(service: ComposeService, render: ComposeRender, pro
     const entry = v as { type?: unknown; source?: unknown } | null;
     if (typeof entry !== "object" || entry === null || typeof entry.type !== "string") {
       problems.push("has an unmodelled volume entry");
-    } else if (entry.type === "bind") {
+      continue;
+    }
+    for (const key of Object.keys(entry)) if (!VOLUME_ENTRY_KEYS.includes(key)) problems.push(`has a volume with unmodelled key ${key}`);
+    if (entry.type === "bind") {
       if (typeof entry.source !== "string" || entry.source === "") problems.push("has a bind volume without a source");
-      else channel(entry.source, "a bind source");
+      else if (!isAllowlistedFileSource(entry.source, projectRoot)) refuse(`a bind source "${shown(entry.source)}" is not allowlisted`);
     } else if (entry.type === "volume") {
-      const device = typeof entry.source === "string" ? render.volumes?.[entry.source]?.driver_opts : undefined;
-      const path = (device as { device?: unknown } | undefined)?.device;
-      if (typeof path === "string") channel(path, `the device of named volume ${String(entry.source)}`);
-    } else if (!HOSTLESS_VOLUME_TYPES.includes(entry.type)) {
+      if (typeof entry.source === "string") {
+        const problem = namedVolumeProblem(render.volumes?.[entry.source]);
+        if (problem !== null) refuse(`named volume ${entry.source} ${problem}`);
+      }
+    } else if (entry.type !== "tmpfs") {
       problems.push(`has a volume of unmodelled type ${entry.type}`);
     }
   }
@@ -288,15 +316,14 @@ function fileChannelProblems(service: ComposeService, render: ComposeRender, pro
     if (refs !== undefined && !Array.isArray(refs)) problems.push(`has an unmodelled ${kind} value`);
     for (const ref of Array.isArray(refs) ? refs : []) {
       const name = typeof ref === "string" ? ref : (ref as { source?: unknown } | null)?.source;
-      const entry = typeof name === "string" ? render[kind]?.[name] : undefined;
-      if (typeof name !== "string" || !entry) {
-        problems.push(`references a ${kind} entry the render does not define`);
-      } else if (typeof entry.file === "string") {
-        channel(entry.file, `the file of ${kind} entry ${name}`);
-      } else if ("environment" in entry) {
-        problems.push(`holds .env by file mount: ${kind} entry ${name} is filled from an environment variable`);
-      }
+      if (typeof name !== "string") problems.push(`has an unmodelled ${kind} entry`);
+      else refuse(`${kind} entry ${name} is referenced`);
     }
+  }
+
+  const build = service.build;
+  if (typeof build === "object" && build !== null) {
+    for (const key of BUILD_FILE_CHANNEL_KEYS) if (key in build) refuse(`build.${key} is set`);
   }
   return problems;
 }
@@ -338,10 +365,15 @@ export function analyzeRender(setName: string, render: ComposeRender, ctx: Analy
       for (const problem of fileChannelProblems(service, render, ctx.projectRoot)) at(name, problem);
     }
 
-    const text = JSON.stringify(service);
+    // A referenced secrets/configs entry is part of what the service holds: its inline `content` is a value too.
+    const text = JSON.stringify([service, referencedEntries(service, render)]);
     for (const key of ctx.withheld) {
       if (!(holders[key] ?? []).includes(name) && holds(text, ctx, key)) at(name, `holds withheld ${key}, which is not given to this service`);
     }
+  }
+
+  if (setName !== FILE_CHANNEL_EXEMPT_SET) {
+    for (const problem of externalEntryProblems(render)) at("(top level)", `${FILE_CHANNEL_REFUSAL}: ${problem}`);
   }
 
   const publisher = render.services[PUBLISHER];
@@ -485,6 +517,14 @@ export function runChecks(opts: RunOptions, log: (line: string) => void): string
     }
   }
   if (failures.length > 0) return failures;
+
+  // A compose file no set renders is a stack no check here has looked at.
+  try {
+    const found = findComposeFiles(opts.root).map((f) => relative(opts.root, f));
+    for (const f of composeFilesOutsideRenderSets(found)) failures.push(`${f}: a compose file no render set renders`);
+  } catch (e) {
+    failures.push((e as Error).message);
+  }
 
   const required = requiredVariables([...fileTexts.values()]);
   // Variables that must be `:?` whatever the files say now, so weakening one to

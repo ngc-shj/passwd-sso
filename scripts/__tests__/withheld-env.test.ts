@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, posix, resolve } from "node:path";
 import { ALLOWLIST } from "../env-allowlist";
 import { APP_WITHHELD_ENV_KEYS, envObject } from "@/lib/env-schema";
 import { buildDestinationsFromEnv } from "@/lib/audit/anchor-destinations/from-env";
@@ -15,7 +15,10 @@ import {
   appDatabaseUrlFromCompose,
   deriveWithheldEnv,
   derivePublisherOnlyEnv,
-  envFileSourceKind,
+  FILE_CHANNEL_ALLOWLIST,
+  externalEntryProblems,
+  isAllowlistedFileSource,
+  namedVolumeProblem,
   ownDatabaseUrlKey,
   ownRoleUser,
   readSmokeMap,
@@ -129,29 +132,83 @@ describe("the GitHub token names", () => {
   });
 });
 
-describe("envFileSourceKind", () => {
+describe("isAllowlistedFileSource", () => {
   const root = "/srv/app";
 
-  it("names the project directory, its ancestors and .env* files", () => {
-    expect(envFileSourceKind("/srv/app", root)).toBe("the project directory");
-    expect(envFileSourceKind("/srv/app/", root)).toBe("the project directory");
-    expect(envFileSourceKind("/srv/app/./", root)).toBe("the project directory");
-    expect(envFileSourceKind("/srv", root)).toBe("an ancestor of the project directory");
-    expect(envFileSourceKind("/", root)).toBe("an ancestor of the project directory");
-    expect(envFileSourceKind("/srv/app/.env", root)).toBe("a .env file");
-    expect(envFileSourceKind("/elsewhere/.env.local", root)).toBe("a .env file");
+  it("allows exactly <project>/<an allowlisted path>, in any spelling of that path", () => {
+    for (const { path } of FILE_CHANNEL_ALLOWLIST) {
+      expect(isAllowlistedFileSource(`/srv/app/${path}`, root), path).toBe(true);
+      expect(isAllowlistedFileSource(`/srv/app/${path}/`, root), path).toBe(true);
+      expect(isAllowlistedFileSource(`/srv/app/./infra/../${path}`, root), path).toBe(true);
+    }
   });
 
-  it("allows paths beside and below the project directory", () => {
-    expect(envFileSourceKind("/srv/app/infra/postgres/initdb", root)).toBeNull();
-    expect(envFileSourceKind("/srv/app/infra/fluent-bit/fluent-bit.conf", root)).toBeNull();
-    expect(envFileSourceKind("/srv/app-data", root)).toBeNull();
-    expect(envFileSourceKind("/srv/environment", root)).toBeNull();
+  it("refuses the project directory, its ancestors, .env* files and any path not on the list", () => {
+    for (const source of ["/srv/app", "/srv/app/", "/srv", "/", "/srv/app/.env", "/elsewhere/.env.local", "/srv/app/infra", "/srv/app/infra/postgres", "/srv/app-data", "/opt/x"]) {
+      expect(isAllowlistedFileSource(source, root), source).toBe(false);
+    }
   });
 
-  it("compares paths in whatever one form they are written in", () => {
-    expect(envFileSourceKind("<stub>", "<stub>")).toBe("the project directory");
-    expect(envFileSourceKind("<stub>/infra/x", "<stub>")).toBeNull();
+  it("refuses an allowlisted path under another root, and one with a longer name", () => {
+    expect(isAllowlistedFileSource("/other/infra/postgres/initdb", root)).toBe(false);
+    expect(isAllowlistedFileSource("/srv/app/infra/postgres/initdb.d", root)).toBe(false);
+    expect(isAllowlistedFileSource("/srv/app/infra/postgres/initdb/01-create-jackson-db.sql", root)).toBe(false);
+  });
+
+  it("refuses a relative source, as compose leaves a named volume's device unresolved", () => {
+    for (const source of [".", "./infra/postgres/initdb", "infra/postgres/initdb", "~/x", "${X}"]) {
+      expect(isAllowlistedFileSource(source, root), source).toBe(false);
+    }
+  });
+
+  it("compares paths in whatever one absolute form they are written in, and takes another list", () => {
+    expect(isAllowlistedFileSource("/tmp/compose-render-x/infra/redis/sentinel.conf", "/tmp/compose-render-x")).toBe(true);
+    expect(isAllowlistedFileSource("/srv/app/infra/x", root)).toBe(false);
+    expect(isAllowlistedFileSource("/srv/app/infra/x", root, [{ path: "infra/x" }])).toBe(true);
+  });
+});
+
+describe("FILE_CHANNEL_ALLOWLIST", () => {
+  it("names each entry as a normalised repo-relative path with a reason, and none of them .env*", () => {
+    expect(FILE_CHANNEL_ALLOWLIST.map((e) => e.path)).toEqual([
+      "infra/postgres/initdb",
+      "infra/fluent-bit/fluent-bit.conf",
+      "infra/fluent-bit/parsers.conf",
+      "infra/redis/sentinel.conf",
+    ]);
+    for (const { path, reason } of FILE_CHANNEL_ALLOWLIST) {
+      expect(posix.normalize(path), path).toBe(path);
+      expect(reason, path).not.toBe("");
+      expect(posix.basename(path).startsWith(".env"), path).toBe(false);
+    }
+  });
+});
+
+describe("namedVolumeProblem", () => {
+  it("allows a plain docker-managed volume, as written or as compose renders it", () => {
+    expect(namedVolumeProblem(null)).toBeNull();
+    expect(namedVolumeProblem({})).toBeNull();
+    expect(namedVolumeProblem({ name: "compose-render_postgres_data" })).toBeNull();
+  });
+
+  it("names a driver, driver_opts, an unmodelled definition and an undefined volume", () => {
+    expect(namedVolumeProblem({ driver: "local" })).toBe("sets driver");
+    expect(namedVolumeProblem({ driver_opts: { device: "." } })).toBe("sets driver_opts");
+    expect(namedVolumeProblem(5)).toBe("has an unmodelled definition");
+    expect(namedVolumeProblem([])).toBe("has an unmodelled definition");
+    expect(namedVolumeProblem(undefined)).toBe("is not defined by any compose file");
+  });
+});
+
+describe("externalEntryProblems", () => {
+  it("names an external entry of each kind, in the kind order, and none of a plain one", () => {
+    expect(externalEntryProblems({ volumes: { v: { external: true } }, secrets: { s: { external: true } }, configs: { c: { external: false } } })).toEqual([
+      "volumes entry v is external",
+      "secrets entry s is external",
+      "configs entry c is external",
+    ]);
+    expect(externalEntryProblems({ volumes: { v: null, w: { name: "x" } }, secrets: { s: { file: "./x" } }, configs: undefined })).toEqual([]);
+    expect(externalEntryProblems({})).toEqual([]);
   });
 });
 

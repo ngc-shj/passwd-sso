@@ -832,7 +832,11 @@ Destination keys, in `.env`; set the destinations in use and leave the rest empt
   `AUDIT_ANCHOR_DESTINATION_GH_TOKEN`.
 - **Filesystem**: `AUDIT_ANCHOR_DESTINATION_FS_PATH`, an absolute path, backed by
   a named volume you add to the publisher service. The volume must be writable
-  by uid 1001, the image's user. Discouraged on the database
+  by uid 1001, the image's user: a new volume mounted at a path the image does
+  not contain is created `root:root`, and the publisher (read-only, no
+  capabilities) cannot change that, so give it to uid 1001 once before `up -d`:
+  `docker run --rm -v <volume>:/anchors alpine chown 1001:1001 /anchors`.
+  Discouraged on the database
   host: an anchor on the disk an attacker can rewrite witnesses nothing.
 
 **Withheld keys.** `.env` is loaded by several containers, so each one that loads
@@ -841,9 +845,16 @@ it lists the withheld set with an empty value (`environment:` wins over
 publisher-only secrets and the remaining secret keys of the env allowlist. The
 signing key, tag secret and `AUDIT_ANCHOR_AWS_*` reach the publisher alone, by
 interpolation. The parity test and the compose render check verify that a withheld key
-reaches only its declared holders through env, command and file mounts (a
-`.env` or project-root bind mount, a `secrets:` or `configs:` file source).
-Every other secret in `.env` (for example `AUTH_SECRET`, `REDIS_PASSWORD`,
+reaches only its declared holders through env and command, and that `.env` reaches
+no container as a file by default-deny: outside the dev override, a host path a
+container receives as a file (a bind source) is allowed only if it is one of the
+repo-relative paths in `FILE_CHANNEL_ALLOWLIST`
+(`scripts/checks/lib/withheld-env.ts`: the initdb directory, the fluent-bit
+configs, `sentinel.conf`); a named volume only if it is plain docker-managed (no
+`driver`, `driver_opts` or `external`); a service-referenced top-level `secrets:`
+or `configs:` entry, `external: true`, and `build.secrets`, `build.ssh` and
+`build.additional_contexts` never; a volume type or key the checks do not model
+fails them. Every other secret in `.env` (for example `AUTH_SECRET`, `REDIS_PASSWORD`,
 `SHARE_MASTER_KEY_*`) is not in the set and still reaches every container that
 loads `.env`; jackson also receives `AUTH_SECRET`, by interpolation, as
 `NEXTAUTH_SECRET`. In the dev
@@ -874,7 +885,7 @@ is substituted as for the other manifests):
 |---|---|---|
 | Secret `audit-anchor-publisher` | `database-url`, `signing-key`, `tag-secret` | `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL`, `AUDIT_ANCHOR_SIGNING_KEY`, `AUDIT_ANCHOR_TAG_SECRET` |
 | Secret `passwd-sso-deployment` | `deployment-id` | `DEPLOYMENT_ID`; the same value the app and, when its blob sweep is enabled, `retention-gc-worker` must also be given (the shipped retention-gc manifest does not reference it) |
-| ConfigMap `audit-anchor-publisher` | `s3-bucket`, `s3-prefix`, `aws-region` | the S3 destination (optional references) |
+| ConfigMap `audit-anchor-publisher` | `s3-bucket`, `s3-prefix`, `aws-region` | the S3 destination (`s3-prefix` and `aws-region` are optional references) |
 | Secret `audit-chain-verify-worker-db` | `database-url` | `AUDIT_CHAIN_VERIFY_DATABASE_URL` |
 
 The publisher's ServiceAccount carries the IRSA annotation
@@ -885,18 +896,22 @@ permissions mirror the publisher policy in `infra/terraform/iam.tf` (as in the
 Compose list above). On EKS Pod Identity, create an association for that
 ServiceAccount instead of the annotation. Other destinations, or credentials
 outside EKS, go in an operator Kustomize patch on the Deployment's `env`. The
-ConfigMap references are `optional`, so a GitHub-only deployment needs no
-ConfigMap, but it needs its own Kustomize patch for the
-`AUDIT_ANCHOR_DESTINATION_GH_*` variables. As on Compose, at least one
+`s3-prefix` and `aws-region` references are `optional`; the `s3-bucket` reference
+is not, so the Deployment needs the ConfigMap as shipped. A GitHub-only
+deployment removes the three S3 entries in its Kustomize patch and adds the
+`AUDIT_ANCHOR_DESTINATION_GH_*` variables there. As on Compose, at least one
 destination must be configured or the publisher exits at boot.
 
 The signing key is protected on Kubernetes by namespace RBAC: whoever can read
 Secrets in the namespace can read it. Keep the publisher's Secret out of any
-workload that does not need it. `get`, `list` and `watch` on Secrets all yield
-it, and so does anything that runs code with the Secret mounted: `create` on
-pods, deployments or jobs in the namespace, and `pods/exec` on the publisher
-pod. Run the publisher in a dedicated namespace and restrict those verbs
-there; the manifests do not enforce this.
+workload that does not need it. Four classes of access yield it: any verb that
+creates or modifies a pod or a pod-owning controller (`pods`, `deployments`,
+`replicasets`, `statefulsets`, `daemonsets`, `jobs`, `cronjobs`: `create`,
+`update` or `patch`, including `patch` on the publisher Deployment), since that
+runs code with the Secret mounted; attaching to or debugging the publisher pod
+(`pods/exec`, `pods/attach`, `pods/ephemeralcontainers`); `get`, `list` and
+`watch` on Secrets; and `impersonate`. Run the publisher in a dedicated namespace
+and restrict those verbs there; the manifests do not enforce this.
 
 The publisher runs one replica with `strategy: Recreate`, so a rollout stops the
 old pod (up to the 120 s grace) before the new one starts. Stop it with

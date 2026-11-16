@@ -10,7 +10,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { spawnSync } from "node:child_process";
-import { chmodSync, cpSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import {
@@ -32,7 +32,7 @@ import {
   type ComposeRender,
   type Sentinels,
 } from "../checks/check-compose-render";
-import { findComposeFiles } from "../checks/check-compose-log-caps.mjs";
+import { findComposeFiles } from "../checks/lib/compose-files.mjs";
 import {
   derivePublisherOnlyEnv,
   deriveWithheldEnv,
@@ -253,82 +253,132 @@ describe("analyzeRender", () => {
   });
 });
 
-describe("analyzeRender: .env delivered as a file", () => {
-  const MOUNT = "holds .env by file mount";
+describe("analyzeRender: a host file reaches a service only by FILE_CHANNEL_ALLOWLIST", () => {
+  const REFUSED = "has a file channel outside FILE_CHANNEL_ALLOWLIST";
   const bind = (source: string) => ({ type: "bind", source, target: "/mnt/x", read_only: true, bind: {} });
+  const notAllowlisted = (shown: string) => [`[${SET}] app: ${REFUSED}: a bind source "${shown}" is not allowlisted`];
+  const onApp = (...volumes: unknown[]) => (r: ComposeRender) => void (r.services.app.volumes = volumes);
 
-  it("names a bind mount of the project directory on app", () => {
-    expect(drift((r) => (r.services.app.volumes = [bind("<stub>")]))).toEqual([`[${SET}] app: ${MOUNT}: a bind source is the project directory`]);
+  it("names a bind source that is not exactly an allowlisted path", () => {
+    const cases: Array<[string, string]> = [
+      ["<stub>", "<root>"],
+      ["<stub>/.env", "<root>/.env"],
+      ["<stub>/infra", "<root>/infra"],
+      ["<stub>/infra/postgres/initdb/../../../.env", "<root>/infra/postgres/initdb/../../../.env"],
+      ["/srv/other/.env.production", "/srv/other/.env.production"],
+      ["/opt", "/opt"],
+      ["/home/someone/x", "/home/someone/x"],
+      [".", "."],
+    ];
+    for (const [source, shown] of cases) expect(drift(onApp(bind(source))), source).toEqual(notAllowlisted(shown));
   });
 
-  it("names a bind mount of the project's .env and of any .env* file, and allows the mounts the stack ships", () => {
-    expect(drift((r) => (r.services.app.volumes = [bind("<stub>/.env")]))).toEqual([`[${SET}] app: ${MOUNT}: a bind source is a .env file`]);
-    expect(drift((r) => (r.services.app.volumes = [bind("/srv/other/.env.production")]))).toEqual([`[${SET}] app: ${MOUNT}: a bind source is a .env file`]);
-    // The fluent-bit config mounts, the db initdb mount (already in the render) and a tmpfs.
-    expect(
-      drift((r) => {
-        r.services.app.volumes = [bind("<stub>/infra/fluent-bit/fluent-bit.conf"), bind("<stub>/infra/fluent-bit/parsers.conf"), { type: "tmpfs", target: "/tmp" }];
-      }),
-    ).toEqual([]);
+  it("allows the mounts the stack ships (initdb, fluent-bit, sentinel) and a tmpfs", () => {
+    expect(drift(onApp(bind("<stub>/infra/postgres/initdb"), bind("<stub>/infra/fluent-bit/fluent-bit.conf"), bind("<stub>/infra/fluent-bit/parsers.conf"), bind("<stub>/infra/redis/sentinel.conf"), { type: "tmpfs", target: "/tmp" }))).toEqual([]);
+    expect(baseline().services.db.volumes).toContainEqual({ ...bind("<stub>/infra/postgres/initdb"), target: "/docker-entrypoint-initdb.d" });
   });
 
-  it("names a bind mount of an ancestor of the project directory, and allows a sibling directory", () => {
+  it("names an ancestor of the project directory and a sibling, and allows an allowlisted path under another root", () => {
     const withRoot = (source: string) => {
-      const r = baseline();
+      const r = JSON.parse(JSON.stringify(baseline()).split("<stub>").join("/srv/app")) as ComposeRender;
       r.services.app.volumes = [bind(source)];
       return analyzeRender(SET, r, { ...ctx, projectRoot: "/srv/app" });
     };
-    expect(withRoot("/srv")).toEqual([`[${SET}] app: ${MOUNT}: a bind source is an ancestor of the project directory`]);
-    expect(withRoot("/")).toEqual([`[${SET}] app: ${MOUNT}: a bind source is an ancestor of the project directory`]);
-    expect(withRoot("/srv/app-data")).toEqual([]);
+    expect(withRoot("/srv")).toEqual(notAllowlisted("/srv"));
+    expect(withRoot("/")).toEqual(notAllowlisted("/"));
+    expect(withRoot("/srv/app-data")).toEqual(notAllowlisted("/srv/app-data"));
+    expect(withRoot("/srv/app/infra/redis/sentinel.conf")).toEqual([]);
   });
 
-  it("names a secrets entry whose file is the .env, on the outbox worker, and allows a file beside it", () => {
-    const give = (file: string) => (r: ComposeRender) => {
-      r.secrets = { signing: { file } };
-      r.services["audit-outbox-worker"].secrets = [{ source: "signing", target: "signing" }];
-    };
-    expect(drift(give("<stub>/.env"))).toEqual([`[${SET}] audit-outbox-worker: ${MOUNT}: the file of secrets entry signing is a .env file`]);
-    expect(drift(give("<stub>/secrets/token"))).toEqual([]);
+  it("names every referenced secrets and configs entry, whatever it is filled from, and ignores one no service references", () => {
+    const entries: Array<[string, Record<string, unknown>]> = [
+      ["a .env file", { name: "compose-render_x", file: "<stub>/.env" }],
+      ["another file", { name: "compose-render_x", file: "<stub>/secrets/token" }],
+      ["an allowlisted file", { name: "compose-render_x", file: "<stub>/infra/fluent-bit/parsers.conf" }],
+      ["inline content", { name: "compose-render_x", content: "x" }],
+      ["an environment variable", { name: "compose-render_x", environment: "AUDIT_ANCHOR_SIGNING_KEY" }],
+    ];
+    for (const kind of ["secrets", "configs"] as const) {
+      for (const [what, entry] of entries) {
+        const found = drift((r) => {
+          r[kind] = { x: entry };
+          r.services["audit-outbox-worker"][kind] = [{ source: "x" }];
+        });
+        expect(found, `${kind} ${what}`).toEqual([`[${SET}] audit-outbox-worker: ${REFUSED}: ${kind} entry x is referenced`]);
+      }
+      expect(drift((r) => void (r[kind] = { x: { file: "<stub>/.env" } })), kind).toEqual([]);
+    }
   });
 
-  it("names a configs entry whose file is the project directory, and ignores an entry no service references", () => {
+  it("names a secrets or configs reference the render does not define, and an external entry", () => {
+    expect(drift((r) => (r.services.app.secrets = [{ source: "gone" }]))).toEqual([`[${SET}] app: ${REFUSED}: secrets entry gone is referenced`]);
     expect(
       drift((r) => {
-        r.configs = { cfg: { file: "<stub>" } };
-        r.services.app.configs = [{ source: "cfg" }];
+        r.configs = { x: { name: "x", external: true } };
+        r.services.app.configs = [{ source: "x" }];
       }),
-    ).toEqual([`[${SET}] app: ${MOUNT}: the file of configs entry cfg is the project directory`]);
-    expect(drift((r) => (r.configs = { cfg: { file: "<stub>" } }))).toEqual([]);
+    ).toEqual([`[${SET}] app: ${REFUSED}: configs entry x is referenced`, `[${SET}] (top level): ${REFUSED}: configs entry x is external`]);
   });
 
-  it("names a named volume backed by a bind of the project directory, and allows one backed by another path", () => {
-    const back = (device: string) => (r: ComposeRender) => {
-      r.volumes = { ...r.volumes, postgres_data: { driver_opts: { type: "none", o: "bind", device } } };
+  it("attributes a withheld value in a referenced entry's inline content to the service that references it", () => {
+    const give = (r: ComposeRender) => {
+      r.configs = { cfg: { name: "compose-render_cfg", content: sentinel("AUDIT_ANCHOR_SIGNING_KEY") } };
+      r.services.app.configs = [{ source: "cfg" }];
     };
-    expect(drift(back("<stub>"))).toEqual([`[${SET}] db: ${MOUNT}: the device of named volume postgres_data is the project directory`]);
-    expect(drift(back("<stub>/data"))).toEqual([]);
+    expect(drift(give)).toEqual([`[${SET}] app: ${REFUSED}: configs entry cfg is referenced`, `[${SET}] app: holds withheld AUDIT_ANCHOR_SIGNING_KEY${NOT_GIVEN}`]);
+    expect(drift((r) => void (r.configs = { cfg: { name: "compose-render_cfg", content: sentinel("AUDIT_ANCHOR_SIGNING_KEY") } }))).toEqual([]);
+  });
+
+  it("names a named volume with driver_opts, as compose renders a relative device, and allows the plain ones", () => {
+    const redefine = (entry: Record<string, unknown>) => (r: ComposeRender) => void (r.volumes = { ...r.volumes, redis_data: entry });
+    expect(drift(redefine({ name: "compose-render_redis_data", driver_opts: { device: ".", o: "bind", type: "none" } }))).toEqual([
+      `[${SET}] redis: ${REFUSED}: named volume redis_data sets driver_opts`,
+    ]);
+    expect(drift(redefine({ name: "compose-render_redis_data", driver: "local" }))).toEqual([`[${SET}] redis: ${REFUSED}: named volume redis_data sets driver`]);
+    expect(drift(redefine({ name: "compose-render_redis_data", labels: { a: "b" } }))).toEqual([]);
+    const r = baseline();
+    expect(r.volumes).toEqual({ postgres_data: { name: "compose-render_postgres_data" }, redis_data: { name: "compose-render_redis_data" } });
+    expect(analyzeRender(SET, r, ctx)).toEqual([]);
+  });
+
+  it("names an external volume, and a named volume the render does not define", () => {
+    expect(drift((r) => void (r.volumes = { ...r.volumes, redis_data: { name: "redis_data", external: true } }))).toEqual([
+      `[${SET}] (top level): ${REFUSED}: volumes entry redis_data is external`,
+    ]);
+    expect(drift(onApp({ type: "volume", source: "nowhere", target: "/x", volume: {} }))).toEqual([`[${SET}] app: ${REFUSED}: named volume nowhere is not defined by any compose file`]);
+  });
+
+  it("names build.secrets, build.ssh and build.additional_contexts, and allows the build the stack ships", () => {
+    for (const [key, value] of [["secrets", [{ source: "envf" }]], ["ssh", [{ id: "default" }]], ["additional_contexts", { x: "<stub>" }]] as const) {
+      const found = drift((r) => {
+        r.secrets = { envf: { name: "compose-render_envf", file: "<stub>/.env" } };
+        r.services.app.build = { ...(r.services.app.build as object), [key]: value };
+      });
+      expect(found, key).toEqual([`[${SET}] app: ${REFUSED}: build.${key} is set`]);
+    }
+    expect(Object.keys(baseline().services.app.build as object)).toEqual(["context", "dockerfile", "args"]);
   });
 
   it("names a shape it does not model instead of skipping it", () => {
-    expect(drift((r) => (r.services.app.volumes = ["<stub>:/x"]))).toEqual([`[${SET}] app: has an unmodelled volume entry`]);
-    expect(drift((r) => (r.services.app.volumes = [{ type: "bind", target: "/x" }]))).toEqual([`[${SET}] app: has a bind volume without a source`]);
-    expect(drift((r) => (r.services.app.volumes = [{ type: "npipe", source: "a", target: "b" }]))).toEqual([`[${SET}] app: has a volume of unmodelled type npipe`]);
+    expect(drift(onApp("<stub>:/x"))).toEqual([`[${SET}] app: has an unmodelled volume entry`]);
+    expect(drift(onApp({ type: "bind", target: "/x" }))).toEqual([`[${SET}] app: has a bind volume without a source`]);
+    expect(drift(onApp({ type: "npipe", source: "a", target: "b" }))).toEqual([`[${SET}] app: has a volume of unmodelled type npipe`]);
+    expect(drift(onApp({ type: "image", source: "a", target: "b" }))).toEqual([`[${SET}] app: has a volume of unmodelled type image`]);
+    expect(drift(onApp({ type: "tmpfs", target: "/x", extra: 1 }))).toEqual([`[${SET}] app: has a volume with unmodelled key extra`]);
     expect(drift((r) => (r.services.app.volumes = { x: 1 }))).toEqual([`[${SET}] app: has an unmodelled volumes value`]);
-    expect(drift((r) => (r.services.app.secrets = [{ source: "gone" }]))).toEqual([`[${SET}] app: references a secrets entry the render does not define`]);
-    expect(
-      drift((r) => {
-        r.secrets = { fromEnv: { environment: "AUDIT_ANCHOR_SIGNING_KEY" } };
-        r.services.app.secrets = [{ source: "fromEnv" }];
-      }),
-    ).toEqual([`[${SET}] app: ${MOUNT}: secrets entry fromEnv is filled from an environment variable`]);
+    expect(drift((r) => (r.services.app.secrets = [42]))).toEqual([`[${SET}] app: has an unmodelled secrets entry`]);
+    expect(drift((r) => (r.services.app.configs = "cfg"))).toEqual([`[${SET}] app: has an unmodelled configs value`]);
   });
 
   it("does not judge the dev set, whose workers mount the project directory", () => {
     const r = baseline();
     r.services.app.volumes = [bind("<stub>")];
+    r.volumes = { ...r.volumes, redis_data: { name: "redis_data", external: true } };
     expect(analyzeRender("base+override", r, ctx)).toEqual([]);
-    expect(analyzeRender("base+workers+logging", r, ctx)).toEqual([`[base+workers+logging] app: ${MOUNT}: a bind source is the project directory`]);
+    expect(analyzeRender("base+workers+logging", r, ctx)).toEqual([
+      `[base+workers+logging] app: ${REFUSED}: a bind source "<root>" is not allowlisted`,
+      `[base+workers+logging] (top level): ${REFUSED}: volumes entry redis_data is external`,
+    ]);
   });
 });
 
@@ -564,10 +614,21 @@ describe("docker availability", () => {
 
 const dockerAvailable = spawnSync("docker", ["compose", "version"], { encoding: "utf8" }).status === 0;
 
-/** Each service's environment and the service-name set: what the fixture pins, with the compose version left out. */
+/**
+ * What the fixture pins, with the compose version left out: the service-name set,
+ * each service's environment, volumes, secrets and configs, and the top-level
+ * volumes, secrets and configs.
+ */
 function renderProjection(render: ComposeRender) {
   const names = Object.keys(render.services).sort();
-  return { services: names, environment: Object.fromEntries(names.map((n) => [n, render.services[n].environment ?? {}])) };
+  return {
+    services: names,
+    environment: Object.fromEntries(names.map((n) => [n, render.services[n].environment ?? {}])),
+    fileChannels: Object.fromEntries(names.map((n) => [n, { volumes: render.services[n].volumes ?? [], secrets: render.services[n].secrets ?? [], configs: render.services[n].configs ?? [] }])),
+    volumes: render.volumes ?? {},
+    secrets: render.secrets ?? {},
+    configs: render.configs ?? {},
+  };
 }
 
 /** A recorded file, hydrated with sentinels covering every key it was recorded with. */
@@ -580,7 +641,7 @@ function recordedProjection(path: string) {
 describe("real docker compose", () => {
   let out: string[];
   let err: string[];
-  let scratch: string | undefined;
+  const scratches: string[] = [];
   beforeEach(() => {
     out = [];
     err = [];
@@ -589,15 +650,15 @@ describe("real docker compose", () => {
   });
   afterEach(() => {
     vi.restoreAllMocks();
-    if (scratch) rmSync(scratch, { recursive: true, force: true });
-    scratch = undefined;
+    for (const d of scratches.splice(0)) rmSync(d, { recursive: true, force: true });
   });
 
   /** The compose files copied to a scratch dir, so a mutation never touches the tree. */
   function scratchCopy(): string {
-    scratch = mkdtempSync(join(tmpdir(), "compose-render-test-"));
-    for (const f of readdirSync(REPO_ROOT).filter((n) => /^docker-compose.*\.yml$/.test(n))) cpSync(join(REPO_ROOT, f), join(scratch, f));
-    return scratch;
+    const dir = mkdtempSync(join(tmpdir(), "compose-render-test-"));
+    scratches.push(dir);
+    for (const f of readdirSync(REPO_ROOT).filter((n) => /^docker-compose.*\.yml$/.test(n))) cpSync(join(REPO_ROOT, f), join(dir, f));
+    return dir;
   }
 
   function requireDocker(skip: () => void): boolean {
@@ -635,6 +696,64 @@ describe("real docker compose", () => {
     expect(fresh.environment.app).toHaveProperty("COMPOSE_RENDER_EXTRA", "1");
     expect(fresh).not.toEqual(recordedProjection(FIXTURE_PATH));
   }, 120_000);
+
+  it("finds the committed fixture stale against a scratch copy whose app gains an allowlisted bind", (t) => {
+    if (!requireDocker(() => t.skip())) return;
+    const dir = scratchCopy();
+    const path = join(dir, "docker-compose.yml");
+    const text = readFileSync(path, "utf8");
+    expect(text).toContain("services:\n  app:\n");
+    writeFileSync(path, text.replace("services:\n  app:\n", "services:\n  app:\n    volumes:\n      - ./infra/redis/sentinel.conf:/mnt/sentinel.conf:ro\n"));
+    const record = join(dir, "record.json");
+    expect(main(["--root", dir, "--record", record]), err.join("\n")).toBe(0);
+    const fresh = recordedProjection(record);
+    expect(fresh.fileChannels.app.volumes).toEqual([{ type: "bind", source: "<stub>/infra/redis/sentinel.conf", target: "/mnt/sentinel.conf", read_only: true, bind: {} }]);
+    expect(recordedProjection(FIXTURE_PATH).fileChannels.app.volumes).toEqual([]);
+    expect(fresh).not.toEqual(recordedProjection(FIXTURE_PATH));
+  }, 120_000);
+
+  it("fails a scratch copy with a compose file no render set renders, and passes the copy without it", (t) => {
+    if (!requireDocker(() => t.skip())) return;
+    const dir = scratchCopy();
+    expect(main(["--root", dir]), err.join("\n")).toBe(0);
+    mkdirSync(join(dir, "deploy"));
+    writeFileSync(join(dir, "deploy/compose.yaml"), "services: {}\n");
+    err.length = 0;
+    expect(main(["--root", dir])).toBe(1);
+    expect(err.join("\n")).toContain("1 failure(s):\n  - deploy/compose.yaml: a compose file no render set renders");
+  }, 120_000);
+
+  /** The tree's compose files with `edit` applied to docker-compose.yml; main() must fail, naming `expected` among its failures. */
+  function expectChannelRefused(edit: (text: string) => string, expected: string) {
+    const dir = scratchCopy();
+    const path = join(dir, "docker-compose.yml");
+    const text = readFileSync(path, "utf8");
+    writeFileSync(path, edit(text));
+    err.length = 0;
+    expect(main(["--root", dir])).toBe(1);
+    expect(err.join("\n")).toContain(expected);
+  }
+  const onApp = (extra: string) => (text: string) => text.replace("services:\n  app:\n", `services:\n  app:\n${extra}`);
+  const REFUSED = "has a file channel outside FILE_CHANNEL_ALLOWLIST";
+
+  it("fails scratch copies of the tree that open each file channel the allowlist closes", (t) => {
+    if (!requireDocker(() => t.skip())) return;
+    expectChannelRefused(
+      (x) => onApp("    configs:\n      - cfg\n")(x) + "\nconfigs:\n  cfg:\n    content: ${AUDIT_ANCHOR_SIGNING_KEY}\n",
+      `[base+workers] app: holds withheld AUDIT_ANCHOR_SIGNING_KEY, which is not given to this service`,
+    );
+    expectChannelRefused(onApp("    volumes:\n      - /opt:/mnt/x:ro\n"), `[base+workers] app: ${REFUSED}: a bind source "/opt" is not allowlisted`);
+    expectChannelRefused(onApp("    volumes:\n      - ~/x:/mnt/x:ro\n"), `[base+workers] app: ${REFUSED}: a bind source "`);
+    expectChannelRefused(
+      (x) => x.replace("  redis_data:\n", "  redis_data:\n    driver_opts:\n      type: none\n      o: bind\n      device: .\n"),
+      `[base+workers] redis: ${REFUSED}: named volume redis_data sets driver_opts`,
+    );
+    expectChannelRefused(
+      (x) => x.replace("  app:\n    build:\n      context: .\n", "  app:\n    build:\n      context: .\n      secrets:\n        - envf\n") + "\nsecrets:\n  envf:\n    file: ./.env\n",
+      `[base+workers] app: ${REFUSED}: build.secrets is set`,
+    );
+    expectChannelRefused((x) => x.replace("  redis_data:\n", "  redis_data:\n    external: true\n"), `[base+workers] (top level): ${REFUSED}: volumes entry redis_data is external`);
+  }, 600_000);
 
   it("fails a scratch copy of the tree that stops blanking a withheld key in app", (t) => {
     if (!requireDocker(() => t.skip())) return;
