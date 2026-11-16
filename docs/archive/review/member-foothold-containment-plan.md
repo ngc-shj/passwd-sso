@@ -1,4 +1,4 @@
-# Plan: member-foothold-containment (#1032, folds in #1045 SC1)
+# Plan: member-foothold-containment (`#1032`, folds in `#1045` SC1)
 
 ## Project context
 
@@ -11,9 +11,9 @@
 
 ## Objective
 
-#1031 (#1016) lets an admin contain a compromised member's footholds that carry a stored creator
-column. #1032 asks, per remaining kind, for a creator column plus containment or an audit-based
-review; #1045 SC1 asks what happens to the same footholds when their creator departs the tenant.
+`#1031` (`#1016`) lets an admin contain a compromised member's footholds that carry a stored creator
+column. `#1032` asks, per remaining kind, for a creator column plus containment or an audit-based
+review; `#1045` SC1 asks what happens to the same footholds when their creator departs the tenant.
 
 ## Foothold kinds (derived from the code, not the issue's table)
 
@@ -27,9 +27,9 @@ its creator departs (`departFromTenant`, `src/lib/team/team-departure.ts`).
 
 | Kind | Why closed |
 |---|---|
-| API keys, extension tokens, MCP access/refresh tokens, delegation sessions, operator tokens, bridge/auth codes | Subject is the user: `revokeUsersAuthArtifactsInTx` revokes them on every departure (#1064) and on revoke-all. Operator tokens: the mint route sets `createdByUserId` = `subjectUserId`. |
-| Team webhooks | Paused at delivery once the creator lost team authority (`webhook-creator-authority.ts`, #1043). |
-| Team share links | `share_creator_admitted()` refuses after the creator's departure (#1055). |
+| API keys, extension tokens, MCP access/refresh tokens, delegation sessions, operator tokens, bridge/auth codes | Subject is the user: `revokeUsersAuthArtifactsInTx` revokes them on every departure (`#1064`) and on revoke-all. Operator tokens: the mint route sets `createdByUserId` = `subjectUserId`. |
+| Team webhooks | Paused at delivery once the creator lost team authority (`webhook-creator-authority.ts`, `#1043`). |
+| Team share links | `share_creator_admitted()` refuses after the creator's departure (`#1055`). |
 | Team invitations | Expired on departure (`endTeamMemberships`); accept re-checks the inviter. |
 | Break-glass grants | The logs route requires an active membership with `AUDIT_LOG_VIEW`. Containment revokes them. |
 | JIT access requests | Approvable after the requester leaves, but the token goes to the approver. |
@@ -46,7 +46,7 @@ its creator departs (`departFromTenant`, `src/lib/team/team-departure.ts`).
 | K5 | Audit delivery targets (no creator) | Add `created_by_id`; containment only, no auto pause (would cut security monitoring) | SC1 |
 | K6 | Admin vault resets the member initiated, not yet approved | Revoke on departure; containment can revoke | yes (C4, C5, C7) |
 | K7 | Personal share links and Sends | Serve until expiry (≤ 30 days) after departure; containment can revoke | SC2 |
-| K8 | Team share-link access logs via `shareLinkManagerOf` (#1032 comment) | Creator path requires current team membership | yes (C8) |
+| K8 | Team share-link access logs via `shareLinkManagerOf` (`#1032` comment) | Creator path requires current team membership | yes (C8) |
 | K9 | Audit-only changes (role/policy, directory-sync configs, SCIM group mappings, edits to others' rows) | Actor filter on tenant audit logs, linked from containment | SC3 |
 | — | Service accounts themselves; directory-sync credentials | No action: a service account holds no credential (its tokens are K1); directory-sync credentials are the IdP's | — |
 
@@ -186,7 +186,7 @@ The member set is a CLASS, enforced default-deny by C10 (SEC-12, F1-r5, F2-r5, F
   with a `tenantId` and a relation field to `User` other than its own subject `userId` (derived from
   the parsed schema, not a column-name list — F1-r7-sec) to be in that map or in a keyed "not
   containable" list citing its reason or SC id (seeded: operator tokens — subject-bound; team
-  invitations / team webhooks — team domain, #1043; access requests — token goes to the approver;
+  invitations / team webhooks — team domain, `#1043`; access requests — token goes to the approver;
   master-key rotation — operator; password shares — SC2; …), so SC1/SC2 must touch both (F2-r6).
 - Sites: EVERY call of a write method (`create`, `createMany`, `createManyAndReturn`, `upsert`,
   `update`, `updateMany`, `updateManyAndReturn`) on those delegates, whatever `data` holds, is a
@@ -427,6 +427,17 @@ and access-logs tests. Full `vitest`, `test:integration`, `next build`.
    the existing kinds.
 3. The SCIM token's minter leaves: provisioning continues; the token list says its creator no longer
    has access, so an admin rotates it.
+
+## Implementation Checklist
+- C1 `src/lib/auth/access/tenant-permissions.ts`, `tenant-auth.ts` re-export.
+- C2 `src/lib/tenant/creator-authority.ts` (reuses `readTenantRows`, `departedSince`).
+- C3 schema + `20261116300100_tenant_webhook_creator`, tenant webhooks route, worker tenant branch, `webhook-dispatcher.ts`, `TENANT_WEBHOOK_DISPATCH`, `TenantWebhook.json`.
+- C4 `src/lib/tenant/departure-footholds.ts`; `team-departure.ts` (3 writers), `scim-user-service.ts` + SCIM Users/[id] DELETE.
+- C5 `src/lib/tenant/foothold-write-gate.ts` at the 13 sites of the C5 table; `auth.ts` bootstrap lock; `MCP_CLIENT_CONSENT`, `AUTH_TENANT_CLAIM_MEMBERSHIP`; `admin-reset-eligibility.ts`; `footholdWriteErrorResponse`.
+- C6 SCIM-token / MCP-client / SA-token GETs and their three components; `Team.json`, `MachineIdentity.json`.
+- C7 `member-containment.ts`, validation, `member-passkey-revoke.ts`, dialog, `TENANT_MEMBER_PASSKEY_LIST/REVOKE`, `TenantAdmin.json`.
+- C8 `share-link-manager.ts`, access-logs route.
+- C10 `src/__tests__/foothold-member-set.test.ts`; rule 9 of `check-team-rotation-input-lock.mjs`.
 
 ## Go/No-Go Gate
 | ID | Subject | Status |
