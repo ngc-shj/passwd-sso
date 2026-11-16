@@ -227,3 +227,8 @@ Same method. Unit and integration mutants are scratch copies aliased in through 
 | Functionality F4, SCIM POST | The `scim.credentials-revoked` line removed; separately, logged unconditionally | Only "logs the residue a creation revoked …"; only "logs no credentials-revoked line …" |
 | Functionality F1, SCIM POST | The tombstone reverts to `scim_deprovision` | The two tombstone-context cells fail (created deactivated, created active) |
 | Functionality F1, directory sync | One tombstone call over all three lists, as `directory_sync_deprovision` | 3 cells fail: the departures' split-context cell, the return cell (`directory_sync_return`) and the admission cell (`directory_sync_admission`) |
+
+## D14: grant-evidence baseline after the grant split (CI `check:rls-grant-evidence`)
+The evidence gate matches a grant by its (purpose, tables) shape. `AUTH_DELETE_USER` (auth_flow, session + user) never had evidence of its own. It shared the shape of the old `AUTH_SESSION_LIFECYCLE`, whose suite runs counted for it. Narrowing `AUTH_SESSION_LIFECYCLE` to (session) in round 3 left it with none.
+
+No cell can supply it: the adapter's `deleteUser` is forbidden to every caller by `check-team-rotation-input-lock` rule 5. It is therefore listed in `rls-grant-evidence-baseline.txt`. `ADMIN_VAULT_RESET_LOOKUP` and `VAULT_RESET_SCOPE_CHECK` now have evidence from the T7 admin-reset integration cells, which drive the route as `passwd_app`, so they leave the baseline.
