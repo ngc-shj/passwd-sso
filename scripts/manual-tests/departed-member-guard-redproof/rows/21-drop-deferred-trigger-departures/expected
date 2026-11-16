@@ -1,0 +1,2 @@
+departure_active	departed-member DB invariants — real-DB integration T4: departure refused at COMMIT, not at the statement a record INSERT that leaves a guest an active row
+departure_active	departed-member DB invariants — real-DB integration T4: departure refused at COMMIT, not at the statement a record UPDATE that leaves a guest an active row

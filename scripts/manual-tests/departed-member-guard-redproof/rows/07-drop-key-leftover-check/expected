@@ -1,0 +1,3 @@
+key_leftover	departed-member DB invariants — real-DB integration T2: keys deny: a key INSERT for a leftover recipient
+key_leftover	departed-member DB invariants — real-DB integration T2: keys deny: a key UPDATE for a leftover recipient
+key_leftover	departed-member DB invariants — real-DB integration T2: keys deny: a key ON CONFLICT DO UPDATE for a leftover recipient

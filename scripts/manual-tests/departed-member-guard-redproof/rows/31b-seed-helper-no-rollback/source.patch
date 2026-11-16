@@ -1,0 +1,12 @@
+--- a/src/__tests__/db-integration/helpers.ts
++++ b/src/__tests__/db-integration/helpers.ts
+@@ -876,9 +876,6 @@
+       await client.query("COMMIT");
+       return rows as T[];
+     } catch (e) {
+-      await client.query("ROLLBACK").catch((rollbackError: unknown) => {
+-        broken = rollbackError instanceof Error ? rollbackError : new Error(String(rollbackError));
+-      });
+       throw e;
+     }
+   } finally {

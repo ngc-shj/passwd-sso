@@ -1,0 +1,11 @@
+--- a/function.sql
++++ b/function.sql
+@@ -46,7 +46,7 @@
+           RAISE EXCEPTION 'DEPARTED_MEMBER_GUARD:unknown_role: team membership % (tenant %, user %)', NEW.id, NEW.tenant_id, NEW.user_id
+             USING ERRCODE = 'check_violation';
+         END IF;
+-        v_grant := v_new_rank > v_old_rank OR (NEW.key_distributed AND NOT OLD.key_distributed);
++        v_grant := v_new_rank > v_old_rank;
+       END IF;
+     END IF;
+   END IF;

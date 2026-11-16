@@ -1,0 +1,29 @@
+--- a/function.sql
++++ b/function.sql
+@@ -83,7 +83,7 @@
+       ELSIF v_activation AND v_row_departed THEN
+         v_refusal := 'activation_departed';
+       ELSIF (v_activation OR v_grant)
+-            AND (v_departed_at >= COALESCE(NEW.admitted_at, NEW.created_at)) IS TRUE THEN
++            AND (v_departed_at > COALESCE(NEW.admitted_at, NEW.created_at)) IS TRUE THEN
+         v_refusal := CASE WHEN v_activation THEN 'activation_leftover' ELSE 'grant_leftover' END;
+       END IF;
+     ELSIF TG_TABLE_NAME = 'team_member_keys' THEN
+@@ -98,7 +98,7 @@
+               SELECT 1 FROM team_members m
+                WHERE m.team_id = NEW.team_id AND m.user_id = v_user AND m.tenant_id = v_tenant
+                  AND m.deactivated_at IS NULL
+-                 AND (v_departed_at >= COALESCE(m.admitted_at, m.created_at)) IS TRUE) THEN
++                 AND (v_departed_at > COALESCE(m.admitted_at, m.created_at)) IS TRUE) THEN
+         v_refusal := 'key_leftover';
+       END IF;
+     ELSE
+@@ -112,7 +112,7 @@
+       ELSIF EXISTS (
+               SELECT 1 FROM team_members m
+                WHERE m.tenant_id = v_tenant AND m.user_id = v_user AND m.deactivated_at IS NULL
+-                 AND (v_departed_at >= COALESCE(m.admitted_at, m.created_at)) IS TRUE) THEN
++                 AND (v_departed_at > COALESCE(m.admitted_at, m.created_at)) IS TRUE) THEN
+         v_refusal := 'departure_leftover';
+       END IF;
+     END IF;

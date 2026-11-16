@@ -722,6 +722,8 @@ model TeamMember {
 
   @@unique([teamId, userId])
   @@index([tenantId])
+  // The departed-member guard's commit-time check (20261117000000).
+  @@index([tenantId, userId])
   @@map("team_members")
 }
 

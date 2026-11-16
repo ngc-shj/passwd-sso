@@ -1,0 +1,1 @@
+-	departed-member DB invariants — real-DB integration T6: bypass and seeds writeRefusedState leaves its connection as it found it after a refused call (the statement fails): session_replication_role = origin, and the guard refuses a violating write

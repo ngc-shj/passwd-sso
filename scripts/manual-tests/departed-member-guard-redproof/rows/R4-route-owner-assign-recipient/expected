@@ -1,0 +1,3 @@
+-	POST /api/tenant/teams/[teamId]/owner refusals change nothing and audit nothing a target whose membership is a leftover (departed at or after admission)
+-	POST /api/tenant/teams/[teamId]/owner refusals change nothing and audit nothing a target whose departure equals their admission (the boundary counts as leftover)
+-	departed-member leaked authority — real-DB integration C4 recipient: ownerless-team assignment assignment to a target: refused (404) when the target is leftover

@@ -1,0 +1,1 @@
+departure_leftover	departed-member DB invariants — real-DB integration T4: departure allowed a return of a user whose row a later record keeps leftover (undoing a departure; not judged, Q3)

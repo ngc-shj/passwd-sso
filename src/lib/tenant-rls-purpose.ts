@@ -14,7 +14,9 @@ export const BYPASS_PURPOSE = {
 
 export type BypassPurpose = (typeof BYPASS_PURPOSE)[keyof typeof BYPASS_PURPOSE];
 
-// Database-side purpose, not a BypassPurpose: "share_admission" is set inside
+// Database-side purposes, not BypassPurposes: "share_admission" is set inside
 // public.share_creator_admitted(uuid) for the duration of its call (migrations
-// 20261102000000, 20261108000000), never by TypeScript. Recorded here so the full set of
-// purposes that can appear in an rls_bypass_not_granted report stays in one place.
+// 20261102000000, 20261108000000), and "departed_member_guard" inside the trigger
+// function public.departed_member_guard() (migration 20261117000000), never by
+// TypeScript. Recorded here so the full set of purposes that can appear in an
+// rls_bypass_not_granted report stays in one place.

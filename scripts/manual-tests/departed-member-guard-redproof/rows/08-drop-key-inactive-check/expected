@@ -1,0 +1,2 @@
+key_inactive	departed-member DB invariants — real-DB integration T2: keys deny: a key INSERT for an ended, non-leftover member (key_inactive is the only refusal)
+key_inactive	departed-member DB invariants — real-DB integration T2: keys deny: a key UPDATE for an ended, non-leftover member

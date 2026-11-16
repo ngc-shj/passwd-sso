@@ -1,0 +1,11 @@
+--- a/src/app/api/teams/[teamId]/members/[memberId]/route.ts
++++ b/src/app/api/teams/[teamId]/members/[memberId]/route.ts
+@@ -251,7 +251,7 @@
+       // A leftover membership is not promoted; a demotion reduces authority
+       // and stays allowed.
+       if (
+-        isRoleAbove(result.data.role, target.role) &&
++        false && isRoleAbove(result.data.role, target.role) &&
+         await targetIsLeftover(tx, tenantId, teamId, memberId, target.userId)
+       ) throw new MemberChangedError();
+       const changed = await tx.teamMember.updateMany({

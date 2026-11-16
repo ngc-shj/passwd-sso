@@ -43,6 +43,9 @@
  *                                       log_min_messages, row_security)
  *   ROLE_STATE_VIOLATION / _IN_MANIFEST — a role state that is never legitimate
  *                                       (see roleStateViolations)
+ *   PARAMETER_PRIVILEGE_HELD / _IN_MANIFEST — an audited role able to disable
+ *                                       triggers through session_replication_role
+ *                                       (see parameterViolations)
  *   RLS_ENFORCE_MODE                  — the RLS bypass is not enforcing (see
  *                                       enforceModeViolations)
  *   CLIENT_MIN_MESSAGES_SERVER_LEVEL  — the RLS bypass report channel is closed
@@ -87,6 +90,14 @@ const AUDITED_ROLES = [
  * list is what keeps them there (see roleStateViolations).
  */
 const RETIRED_ROLES = ["passwd_dcr_cleanup_worker"];
+
+/**
+ * Parameter privileges that matter for these roles, on the one parameter whose
+ * SET disables triggers (constraint triggers included), and with them the
+ * departed-member guard. Superuser-only unless granted.
+ */
+const GUARDED_PARAMETER = "session_replication_role";
+const PARAMETER_PRIVILEGES = ["SET", "ALTER SYSTEM"];
 
 /** Table privileges that matter for these roles. */
 const TABLE_PRIVILEGES = ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"];
@@ -138,6 +149,10 @@ const TABLE_PRIVILEGES = ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "R
  *                                                 default GUC (ALTER ROLE … SET,
  *                                                 ALTER DATABASE … SET); `*` is
  *                                                 "every role" / "every database"
+ *   PARAMETER:<role>\t<parameter>\t<priv>         SET / ALTER SYSTEM on session_replication_role
+ *                                                 (direct, PUBLIC or inherited), or
+ *                                                 ROLE_DEFAULT when the role carries it
+ *                                                 as a session default; never expected
  *
  * Columns are keyed individually on purpose: a table that legitimately carries
  * `UPDATE (fail_count)` must still fail when `UPDATE (secret_encrypted)` appears.
@@ -161,6 +176,19 @@ const AUDITABLE_SCHEMAS = `n.nspname NOT IN ('pg_catalog', 'information_schema')
         AND n.nspname NOT LIKE 'pg_toast%'
         AND n.nspname NOT LIKE 'pg_temp%'
         AND n.nspname NOT LIKE 'pg_toast_temp%'`;
+
+/** Audit key for a parameter privilege (or role default) held by an audited role. */
+export function parameterKey(role, parameter, privilege) {
+  return `PARAMETER:${role}\t${parameter}\t${privilege}`;
+}
+
+/**
+ * Every PARAMETER key. No audited role may hold one, so there is no allow-list:
+ * any key is a violation, live or in the manifest, and `--write` refuses it.
+ */
+export function parameterViolations(keys) {
+  return keys.filter((k) => k.startsWith("PARAMETER:"));
+}
 
 async function readLiveGrants(client) {
   // 1. Effective TABLE privileges.
@@ -322,6 +350,25 @@ async function readLiveGrants(client) {
     [AUDITED_ROLES],
   );
 
+  // 11. Parameter privileges (PG15+). has_parameter_privilege covers direct,
+  //     PUBLIC and inherited grants. A role default naming the parameter is the
+  //     other route to the same state, so it is read from pg_db_role_setting in
+  //     any database. Neither is expected for an audited role.
+  const { rows: parameterRows } = await client.query(
+    `SELECT r.rolname AS role, p.priv AS privilege_type
+       FROM unnest($1::text[]) AS r(rolname)
+       CROSS JOIN unnest($3::text[]) AS p(priv)
+      WHERE has_parameter_privilege(r.rolname, $2, p.priv)
+     UNION
+     SELECT r.rolname AS role, 'ROLE_DEFAULT' AS privilege_type
+       FROM pg_db_role_setting s
+       JOIN pg_roles r ON r.oid = s.setrole
+       CROSS JOIN unnest(s.setconfig) AS c(setting)
+      WHERE r.rolname = ANY($1)
+        AND split_part(c.setting, '=', 1) = $2`,
+    [AUDITED_ROLES, GUARDED_PARAMETER, PARAMETER_PRIVILEGES],
+  );
+
   const keys = [
     ...tableRows.map(
       (r) => `TABLE:${r.role}\t${r.schema_name}.${r.table_name}\t${r.privilege_type}`,
@@ -356,6 +403,7 @@ async function readLiveGrants(client) {
         .map(([attr, value]) => `ROLEATTR:${r.rolname}\t${attr}\t${value}`),
     ),
     ...settingRows.map((r) => `ROLESETTING:${r.role}\t${r.db}\t${r.setting}`),
+    ...parameterRows.map((r) => parameterKey(r.role, GUARDED_PARAMETER, r.privilege_type)),
   ];
   return [...new Set(keys)].sort();
 }
@@ -899,6 +947,7 @@ async function main() {
     const erased = missingDeclaredColumnGrants(live, denied, existingSubjects);
     const settings = deniedSettings(live);
     const roleState = roleStateViolations(live, roleScope);
+    const parameters = parameterViolations(live);
     // Whatever RLS_REPORT_MODE_ACK says: a manifest written from a database that
     // is not enforcing would record the un-flip as the baseline.
     if (!isEnforcing(mode)) {
@@ -913,7 +962,8 @@ async function main() {
       laundered.length > 0 ||
       erased.length > 0 ||
       settings.length > 0 ||
-      roleState.length > 0
+      roleState.length > 0 ||
+      parameters.length > 0
     ) {
       console.error("REFUSING to regenerate the manifest:\n");
       for (const k of laundered) {
@@ -921,6 +971,9 @@ async function main() {
       }
       for (const k of roleState) {
         console.error(`  ROLE_STATE_VIOLATION: ${k.replace(/\t/g, " ")}`);
+      }
+      for (const k of parameters) {
+        console.error(`  PARAMETER_PRIVILEGE_HELD: ${k.replace(/\t/g, " ")}`);
       }
       for (const k of settings) {
         console.error(`  DENIED_SETTING_HELD: ${k.replace(/\t/g, " ")}`);
@@ -968,6 +1021,12 @@ async function main() {
   }
   for (const key of violatesDenied([...expected], denied)) {
     findings.push(`DENIED_PRIVILEGE_IN_MANIFEST: ${key.replace(/\t/g, " ")}`);
+  }
+  for (const key of parameterViolations(live)) {
+    findings.push(`PARAMETER_PRIVILEGE_HELD: ${key.replace(/\t/g, " ")}`);
+  }
+  for (const key of parameterViolations([...expected])) {
+    findings.push(`PARAMETER_PRIVILEGE_IN_MANIFEST: ${key.replace(/\t/g, " ")}`);
   }
   for (const key of roleStateViolations(live, roleScope)) {
     findings.push(`ROLE_STATE_VIOLATION: ${key.replace(/\t/g, " ")}`);
@@ -1032,6 +1091,9 @@ async function main() {
         `\nelevated attribute or a membership on an audited role, a PUBLIC table` +
         `\ngrant, or a retired role that can log in, be acted as, or hold anything` +
         `\nbeyond PUBLIC's privileges. _IN_MANIFEST means the manifest records one.` +
+        `\nA PARAMETER_PRIVILEGE_HELD means an audited role can set` +
+        `\nsession_replication_role (SET or ALTER SYSTEM, or a role default), which` +
+        `\ndisables triggers; revoke it. _IN_MANIFEST means the manifest records one.` +
         `\nAn RLS_ENFORCE_MODE means the bypass is not enforcing: restore` +
         `\npublic.rls_bypass_enforced() to true, or deploy with` +
         `\n${RLS_REPORT_MODE_ACK_ENV}="<reason>" (docs/operations/deployment.md).` +

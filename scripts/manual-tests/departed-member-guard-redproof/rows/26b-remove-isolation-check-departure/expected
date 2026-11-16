@@ -1,0 +1,1 @@
+isolation	departed-member DB invariants — real-DB integration T4: departure refused at COMMIT, not at the statement a departure under REPEATABLE READ, even one that ends its rows

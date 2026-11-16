@@ -1,0 +1,13 @@
+--- a/function.sql
++++ b/function.sql
+@@ -23,10 +23,6 @@
+   v_refusal text;
+ BEGIN
+   IF TG_TABLE_NAME = 'tenant_member_departures' AND TG_WHEN = 'BEFORE' THEN
+-    IF NEW.departed_at < OLD.departed_at THEN
+-      RAISE EXCEPTION 'DEPARTED_MEMBER_GUARD:record_lowered: departure record (tenant %, user %)', NEW.tenant_id, NEW.user_id
+-        USING ERRCODE = 'check_violation';
+-    END IF;
+     RETURN NEW;
+   END IF;
+ 

@@ -40,6 +40,7 @@
     "node_modules",
     "extension",
     "cli",
-    "scripts/generate-team-key-fixture.ts"
+    "scripts/generate-team-key-fixture.ts",
+    "scripts/manual-tests/departed-member-guard-redproof"
   ]
 }

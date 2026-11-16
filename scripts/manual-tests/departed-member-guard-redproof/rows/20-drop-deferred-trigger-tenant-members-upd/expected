@@ -1,0 +1,1 @@
+departure_active	departed-member DB invariants — real-DB integration T4: departure refused at COMMIT, not at the statement a stamp that leaves an active row

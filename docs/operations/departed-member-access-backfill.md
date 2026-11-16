@@ -494,10 +494,23 @@ BEGIN
   END IF;
 
   -- Two updates of the same row: the trigger stamps admitted_at on the
-  -- re-activating one. The team keys are not touched.
+  -- re-activating one. The team keys are not touched. The member's tenant row
+  -- is still departed, which the departed-member guard refuses to re-activate
+  -- (20261117000000), so the guard is disabled around the re-activation only,
+  -- inside this transaction: no other session ever sees it disabled, and an
+  -- error rolls the disable back with everything else. Only the table owner can
+  -- do this. team_members writers wait for this transaction while it holds the
+  -- trigger change, so the wait for it is bounded.
   UPDATE team_members SET deactivated_at = clock_timestamp() WHERE id = ANY (v_ids);
+  IF (SELECT tgenabled FROM pg_trigger
+       WHERE tgrelid = 'team_members'::regclass AND tgname = 'trg_team_members_departed_member_guard') IS DISTINCT FROM 'O' THEN
+    RAISE EXCEPTION 'readmit: trg_team_members_departed_member_guard is not in its enabled state; nothing was written';
+  END IF;
+  PERFORM set_config('lock_timeout', '5s', true);
+  ALTER TABLE team_members DISABLE TRIGGER trg_team_members_departed_member_guard;
   UPDATE team_members SET deactivated_at = NULL, updated_at = clock_timestamp() WHERE id = ANY (v_ids);
   GET DIAGNOSTICS v_readmitted = ROW_COUNT;
+  ALTER TABLE team_members ENABLE TRIGGER trg_team_members_departed_member_guard;
 
   WITH enqueued AS (
     INSERT INTO audit_outbox (id, tenant_id, payload)
@@ -670,21 +683,51 @@ the `delivery.dead_lettered` alert (see `alerts.md`).
 
 ## What prevents a recurrence, and its limits
 
-Departures end memberships because every departure writer lives in
-`src/lib/team/team-departure.ts` and calls `endTeamMemberships` there. That is
-a convention reviewed by humans. The `check-team-rotation-input-lock` gate fails
-a write to `tenant_members.deactivated_at` outside that file, and inside it
-requires each such write to clear the column or be followed by
-`endTeamMemberships` in the same function (three writers, pinned). It scans
-`scripts/` `.ts` files, and pins tenant-row deletes (`tenantMember.delete` /
-`deleteMany`, raw `DELETE FROM tenant_members`) to two reviewed sites: the
-bootstrap migration and `deactivateScimUser`. It does not see `*Unsafe` raw SQL,
-aliased receivers, element access, migrations, `.sh` / `.sql` files (such as
-`scripts/manual-tests/run-pr-379-test-plan.sh`), or the operator SQL in this
-runbook. A database-enforced form is tracked in
-[issue 1060](https://github.com/ngc-shj/passwd-sso/issues/1060). A tenant-row change made any
-other way (a hand-written `UPDATE`, a script) can leave memberships active again: run the report after
-any such change. The leftover check above refuses such residue on every team
-route and at webhook delivery, and share links are refused by `share_creator_admitted`
-(including links a leftover membership created after the departure); the report and
-the contain script end the memberships themselves.
+The database holds the departed-member invariants
+(`20261117000000_departed_member_guard`, plan
+`docs/archive/review/departed-member-db-invariants-plan.md`). Whatever writes
+them — the app, a script, this runbook's SQL — it refuses the following, with
+SQLSTATE `23514` and a message starting `DEPARTED_MEMBER_GUARD:<reason>`:
+
+- a role raise or `key_distributed = true` on a leftover membership, and a
+  `team_member_keys` row written for a leftover or ended membership;
+- activating a membership (insert, re-activation, or moving a row to another
+  user or team) while the user's tenant row is departed, or one that is
+  leftover from birth;
+- a commit that departs a user (stamps `tenant_members.deactivated_at`, or
+  writes a `tenant_member_departures` record) while that user still holds an
+  active membership of the tenant's teams. The check runs at COMMIT, so a
+  hand-written stamp must end the memberships in the same transaction, as the
+  contain script and `endTeamMemberships` do;
+- lowering a `tenant_member_departures.departed_at`.
+
+Run section 1 of the report before deploying that migration: existing leftovers
+stay leftover (refused as before), and the migration does not list them.
+
+It does not judge:
+
+- **undoing a departure.** A return (`deactivated_at` back to NULL) or deleting
+  the tenant row looks like a legitimate return or the bootstrap migration. The
+  `check-team-rotation-input-lock` gate keeps those writes in
+  `src/lib/team/team-departure.ts` and pins tenant-row deletes to two reviewed
+  sites. It does not see `*Unsafe` raw SQL, aliases, migrations, `.sh` / `.sql`
+  files or this runbook's SQL, so run the report after any hand-written
+  tenant-row change;
+- `TRUNCATE`, FK cascades, and a change of `teams.tenant_id`;
+- a key row for a user with no membership row in that team;
+- a session that disables triggers: a superuser's
+  `session_replication_role = replica`, or the table owner's
+  `ALTER TABLE … DISABLE TRIGGER`.
+
+If the guard ever blocks a remediation that must happen, the table owner
+disables the named trigger and re-enables it inside the same transaction as the
+fix, with `ON_ERROR_STOP`, and records why. The re-admit script above does
+exactly this for its re-activation. A restore is unaffected:
+`pg_dump`/`pg_restore` create triggers after loading rows, and a data-only
+restore takes `--disable-triggers`.
+
+Within those limits, the leftover check above refuses residue on every team
+route and at webhook delivery, and share links are refused by
+`share_creator_admitted` (including links a leftover membership created after
+the departure); the report and the contain script end the memberships
+themselves.

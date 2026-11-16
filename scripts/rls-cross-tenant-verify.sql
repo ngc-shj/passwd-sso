@@ -61,6 +61,7 @@ SET app.expected_tables TO :'expected_tables';
 --   10b. [E-RLS-BYPASS-ROUTINE]   no routine sets an app.bypass_* setting in
 --                                 its body or its SET clause, except the
 --                                 allowlisted share_creator_admitted (#990)
+--                                 and departed_member_guard (#1060)
 -- =====================================================================
 DO $$
 DECLARE
@@ -418,6 +419,12 @@ BEGIN
   --       password_shares, team_password_entries, team_members, team_policies,
   --       password_entries, tenant_members, tenant_member_departures for the call,
   --       saves and restores the caller's settings, EXECUTE to passwd_app only.
+  --   - departed_member_guard() (#1060, 20261117000000)
+  --       Trigger function (not callable directly) on team_members,
+  --       team_member_keys, tenant_members and tenant_member_departures. Reads
+  --       only; grants itself exactly teams, team_members, tenant_members,
+  --       tenant_member_departures for its reads, saves and restores the
+  --       caller's settings before any RAISE, EXECUTE revoked from PUBLIC.
   -- A review tripwire for accidents, not a boundary — any role may set these
   -- settings itself. Known bypasses: dynamic names (EXECUTE, variables), a
   -- double-quoted setting name, E'' / dollar-quoted literals, concatenation.
@@ -431,6 +438,7 @@ BEGIN
            OR pr.prosrc ~* $re$\mSET\s+((LOCAL|SESSION)\s+)?app\.bypass_$re$
            OR EXISTS (SELECT 1 FROM unnest(pr.proconfig) c WHERE c LIKE 'app.bypass\_%'))
       AND pr.oid <> 'public.share_creator_admitted(uuid)'::regprocedure
+      AND pr.oid <> 'public.departed_member_guard()'::regprocedure
   ),
     format('[E-RLS-BYPASS-ROUTINE] routines set an app.bypass_* setting: %s — each reads past RLS for every caller. Add an allowlist entry + justification next to this ASSERT before merging.', (
       SELECT string_agg(pr.oid::regprocedure::text, ',')
@@ -441,6 +449,7 @@ BEGIN
              OR pr.prosrc ~* $re$\mSET\s+((LOCAL|SESSION)\s+)?app\.bypass_$re$
              OR EXISTS (SELECT 1 FROM unnest(pr.proconfig) c WHERE c LIKE 'app.bypass\_%'))
         AND pr.oid <> 'public.share_creator_admitted(uuid)'::regprocedure
+        AND pr.oid <> 'public.departed_member_guard()'::regprocedure
     ));
   -- The allowlisted routine's bypass stays exactly its seven tables: it writes
   -- app.bypass_tables exactly twice, and those two writes are the grant of this
@@ -452,6 +461,14 @@ BEGIN
             FROM pg_catalog.pg_proc pr
            WHERE pr.oid = 'public.share_creator_admitted(uuid)'::regprocedure),
     '[E-RLS-BYPASS-ROUTINE] share_creator_admitted no longer sets exactly password_shares,team_password_entries,team_members,team_policies,password_entries,tenant_members,tenant_member_departures';
+  -- The same shape for the departed-member guard: its four tables, granted once
+  -- and restored once.
+  ASSERT (SELECT regexp_count(pr.prosrc, $re$set_config\s*\(\s*'app\.bypass_tables'$re$, 1, 'i') = 2
+                 AND strpos(pr.prosrc, $t$set_config('app.bypass_tables', 'teams,team_members,tenant_members,tenant_member_departures', true)$t$) > 0
+                 AND strpos(pr.prosrc, $t$set_config('app.bypass_tables', COALESCE(v_prev_tables, ''), true)$t$) > 0
+            FROM pg_catalog.pg_proc pr
+           WHERE pr.oid = 'public.departed_member_guard()'::regprocedure),
+    '[E-RLS-BYPASS-ROUTINE] departed_member_guard no longer sets exactly teams,team_members,tenant_members,tenant_member_departures';
 END $$;
 
 -- =====================================================================

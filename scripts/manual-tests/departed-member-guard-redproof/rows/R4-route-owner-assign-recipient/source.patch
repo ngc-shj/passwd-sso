@@ -1,0 +1,11 @@
+--- a/src/app/api/tenant/teams/[teamId]/owner/route.ts
++++ b/src/app/api/tenant/teams/[teamId]/owner/route.ts
+@@ -140,7 +140,7 @@
+         // A leftover membership (the target's tenant row departed at or after
+         // their admission, e.g. SCIM DELETE then re-creation) is treated as
+         // deactivated for every grant.
+-        if (!target || actorDepartedSinceAdmission(rows.get(targetUserId), target.admittedAt ?? target.createdAt)) {
++        if (!target) {
+           return ASSIGN_OUTCOME.NOT_ACTIVE;
+         }
+ 

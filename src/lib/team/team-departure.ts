@@ -24,7 +24,10 @@ import {
  * `key_distributed = false`: admin browsers redistribute that state.
  *
  * These are the only writers that move `tenant_members.deactivated_at`
- * (scripts/checks/check-team-rotation-input-lock.mjs).
+ * (scripts/checks/check-team-rotation-input-lock.mjs). The database refuses a
+ * commit that departs a user while leaving them an active membership of the
+ * tenant's teams (departed_member_guard, migration 20261117000000), so every
+ * departure here ends all of them, not only those admitted before it.
  *
  * Every departure and every return revokes the users' sessions and tokens in
  * the tenant in its own transaction, as its last step, so it cannot commit

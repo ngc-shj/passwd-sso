@@ -5,8 +5,13 @@
  *
  * Each script runs as passwd_app (no BYPASSRLS) on its own connection from the
  * pool factory, so a table missing from a script's bypass list is reported by
- * the notice sink and refused (42501). Fixtures are committed through the
- * superuser helper in each cell's own tenants and removed by deleteTestData.
+ * the notice sink and refused (42501). The re-admit script disables the
+ * departed-member guard around its re-activation, which only the table owner
+ * can do, so it runs as an owner-shaped NOSUPERUSER NOBYPASSRLS probe role
+ * (rds-probe-role.ts), as the migration role is on RDS. Fixtures are committed
+ * through the superuser helper in each cell's own tenants and removed by
+ * deleteTestData; the memberships over departed tenant rows they exist for are
+ * refused by that guard, so those go through writeRefusedState.
  *
  * Run: docker compose stop audit-outbox-worker retention-gc-worker &&
  *      npx vitest run --config vitest.integration.config.ts departed-member-operator-scripts
@@ -31,7 +36,9 @@ import {
   setTestBypass,
   type TestContext,
   redProofOverride,
+  writeRefusedState,
 } from "./helpers";
+import { createProbeRole, type ProbeRole } from "./rds-probe-role";
 
 const mockAuth = vi.fn();
 vi.mock("@/auth", () => ({ auth: (...args: unknown[]) => mockAuth(...args) }));
@@ -181,17 +188,34 @@ describe("departed-member operator scripts — real-DB integration", () => {
     return id;
   }
 
+  /**
+   * An active membership. Most are the states the scripts exist for, an active
+   * row over a departed tenant row or admitted before a departure record, which
+   * the departed-member guard refuses to create (pre-guard databases hold
+   * them), so every one is written through writeRefusedState. That skips the
+   * BEFORE triggers too; the row carries what they would give it: tenant_id is
+   * given, and admitted_at is NULL, as the INSERT trigger forces.
+   */
   async function addMembership(
     team: string, user: string, tenant: string, o: { role?: string; createdAt?: string } = {},
   ): Promise<string> {
     const id = randomUUID();
-    await sql(
+    await writeRefusedState(
+      ctx.su,
       `INSERT INTO team_members (id, team_id, user_id, tenant_id, role, key_distributed, created_at, updated_at)
        VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::"TeamRole", true, COALESCE($6::timestamptz, now()), now())`,
-      id, team, user, tenant, o.role ?? "MEMBER", o.createdAt ?? null,
+      [id, team, user, tenant, o.role ?? "MEMBER", o.createdAt ?? null],
     );
     return id;
   }
+
+  /**
+   * Re-activate a membership whose tenant row is departed, as accept did before
+   * the departed-member guard: refused since, so written through
+   * writeRefusedState with the admitted_at the re-activation trigger stamps.
+   */
+  const readmitWhileDeparted = (rowId: string) =>
+    writeRefusedState(ctx.su, `UPDATE team_members SET deactivated_at = NULL, admitted_at = clock_timestamp() WHERE id = $1::uuid`, [rowId]);
 
   /** The user's row in `tenant`, departed at `stamp` (created if the user has none there). */
   async function departIn(tenant: string, user: string, stamp: Date): Promise<void> {
@@ -255,9 +279,9 @@ describe("departed-member operator scripts — real-DB integration", () => {
    * Runs `script` (with a lock timeout) while `holder` is held on another
    * connection: it must fail with 55P03 inside the statement `statementText`.
    */
-  async function blockedByLock(script: string, holder: string, params: unknown[], statementText: string): Promise<void> {
+  async function blockedByLock(script: string, holder: string, params: unknown[], statementText: string, pool: pg.Pool = appPool): Promise<void> {
     const a = await ctx.su.pool.connect();
-    const b = await appPool.connect();
+    const b = await pool.connect();
     try {
       await a.query("BEGIN");
       await a.query(holder, params);
@@ -273,11 +297,16 @@ describe("departed-member operator scripts — real-DB integration", () => {
   }
 
   /**
-   * Runs `text` as one simple-protocol query on its own connection; rolls back after a raise.
-   * `setup` may return a teardown, run before the connection goes back to the pool.
+   * Runs `text` as one simple-protocol query on its own connection (passwd_app's
+   * unless `pool` says otherwise); rolls back after a raise. `setup` may return
+   * a teardown, run before the connection goes back to the pool.
    */
-  async function runScript(text: string, setup?: (client: pg.PoolClient) => Promise<(() => void) | void>): Promise<Results> {
-    const client = await appPool.connect();
+  async function runScript(
+    text: string,
+    setup?: (client: pg.PoolClient) => Promise<(() => void) | void>,
+    pool: pg.Pool = appPool,
+  ): Promise<Results> {
+    const client = await pool.connect();
     let teardown: (() => void) | void = undefined;
     try {
       const { rows } = await client.query<{ rolsuper: boolean; rolbypassrls: boolean }>(
@@ -389,7 +418,7 @@ describe("departed-member operator scripts — real-DB integration", () => {
       await candidate("readmitted");
       delete expected.readmitted;
       await sql(`UPDATE team_members SET deactivated_at = $2::timestamptz WHERE id = $1::uuid`, rowIds.readmitted, iso(stamp));
-      await sql(`UPDATE team_members SET deactivated_at = NULL WHERE id = $1::uuid`, rowIds.readmitted);
+      await readmitWhileDeparted(rowIds.readmitted);
       const [stamped] = await sql<{ admitted_at: Date | null }>(`SELECT admitted_at FROM team_members WHERE id = $1::uuid`, rowIds.readmitted);
       expect(stamped.admitted_at!.getTime()).toBeGreaterThan(stamp.getTime());
 
@@ -688,10 +717,12 @@ describe("departed-member operator scripts — real-DB integration", () => {
       const unrecorded = await mkMember(tenant);
       await departIn(tenant, unrecorded, stamp);
       await addMembership(team, unrecorded, tenant, { createdAt: iso(stamp, -SECOND) });
-      // A SCIM DELETE record, so the departures join examines a row.
-      await sql(
+      // A SCIM DELETE record, so the departures join examines a row (over an
+      // active membership: refused since the departed-member guard).
+      await writeRefusedState(
+        ctx.su,
         `INSERT INTO tenant_member_departures (tenant_id, user_id, departed_at) VALUES ($1::uuid, $2::uuid, $3::timestamptz)`,
-        tenant, unrecorded, iso(stamp, -SECOND),
+        [tenant, unrecorded, iso(stamp, -SECOND)],
       );
     }
   });
@@ -892,14 +923,14 @@ describe("departed-member operator scripts — real-DB integration", () => {
 
       it("the membership was created after the departure", async () => {
         const l = await seedLeak();
-        await sql(`UPDATE team_members SET created_at = $2::timestamptz WHERE id = $1::uuid`, l.rows[1].rowId, iso(l.stamp, SECOND));
+        await writeRefusedState(ctx.su, `UPDATE team_members SET created_at = $2::timestamptz WHERE id = $1::uuid`, [l.rows[1].rowId, iso(l.stamp, SECOND)]);
         await expectRefused(containWith({ triples: triplesLiteral([tripleOf(l, l.rows[1])]), label }), { message: QUALIFY });
       });
 
       it("the membership was re-admitted on the same row after the departure (admitted_at)", async () => {
         const l = await seedLeak();
         await sql(`UPDATE team_members SET deactivated_at = $2::timestamptz WHERE id = $1::uuid`, l.rows[1].rowId, iso(l.stamp));
-        await sql(`UPDATE team_members SET deactivated_at = NULL WHERE id = $1::uuid`, l.rows[1].rowId);
+        await readmitWhileDeparted(l.rows[1].rowId);
         await expectRefused(containWith({ triples: triplesLiteral([tripleOf(l, l.rows[1])]), label }), { message: QUALIFY });
       });
 
@@ -1004,6 +1035,25 @@ describe("departed-member operator scripts — real-DB integration", () => {
   // ── Re-admit ────────────────────────────────────────────────
 
   describe("readmit", () => {
+    // The table owner, as the runbook requires, shaped as on RDS: the owner's
+    // privileges by inheritance, NOSUPERUSER NOBYPASSRLS, so the script's
+    // bypass grant is enforced as it is for the other scripts.
+    let owner: ProbeRole;
+    let ownerPool: pg.Pool;
+
+    beforeAll(async () => {
+      owner = await createProbeRole();
+      ownerPool = createPool({ connectionString: owner.connectionString, max: 2 });
+    });
+
+    afterAll(async () => {
+      await ownerPool?.end();
+      await owner?.drop();
+    });
+
+    const runAsOwner = (text: string, setup?: (client: pg.PoolClient) => Promise<(() => void) | void>) =>
+      runScript(text, setup, ownerPool);
+
     type Residual = {
       tenant: string;
       stamp: Date;
@@ -1040,11 +1090,13 @@ describe("departed-member operator scripts — real-DB integration", () => {
         const rowId = await addMembership(team, user, tenant, { role, createdAt: createdAt.toISOString() });
         await sql(`UPDATE team_members SET updated_at = $2::timestamptz WHERE id = $1::uuid`, rowId, iso(stamp, SECOND));
         const key = hex(32);
-        await sql(
+        // A key for a leftover member: refused since the guard (key_leftover).
+        await writeRefusedState(
+          ctx.su,
           `INSERT INTO team_member_keys (id, team_id, tenant_id, user_id, encrypted_team_key, team_key_iv, team_key_auth_tag,
              ephemeral_public_key, hkdf_salt, key_version, wrap_version, created_at, updated_at)
            VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, 1, 1, now(), now())`,
-          randomUUID(), team, tenant, user, key, hex(12), hex(16), hex(32), hex(32),
+          [randomUUID(), team, tenant, user, key, hex(12), hex(16), hex(32), hex(32)],
         );
         rows.push({ user, rowId, role, createdAt, key });
       }
@@ -1076,7 +1128,7 @@ describe("departed-member operator scripts — real-DB integration", () => {
 
     async function runReadmit(text: string): Promise<string[]> {
       let collected: ReturnType<typeof collectNotices> | undefined;
-      await runScript(text, async (client) => {
+      await runAsOwner(text, async (client) => {
         collected = collectNotices(client);
         return collected.stop;
       });
@@ -1126,9 +1178,9 @@ describe("departed-member operator scripts — real-DB integration", () => {
           ip: null,
           userAgent: null,
         }));
-        expect(JSON.stringify(record)).not.toContain("passwd_app");
+        expect(JSON.stringify(record)).not.toContain(owner.name);
       }
-      if (notices) expect(notices).toContain(`readmit: re-admitted ${l.rows.length} membership(s) as database user passwd_app`);
+      if (notices) expect(notices).toContain(`readmit: re-admitted ${l.rows.length} membership(s) as database user ${owner.name}`);
     }
 
     function memberKey(teamId: string, userId: string) {
@@ -1156,7 +1208,7 @@ describe("departed-member operator scripts — real-DB integration", () => {
       await runReadmit(readmitWith({ triples: goodTriples(l), label }));
       const before = await readState(l);
 
-      await expect(runScript(readmitWith({ triples: goodTriples(l), label }))).rejects.toThrow(/membership\(s\) qualify .*nothing was written/);
+      await expect(runAsOwner(readmitWith({ triples: goodTriples(l), label }))).rejects.toThrow(/membership\(s\) qualify .*nothing was written/);
 
       expect(await readState(l)).toEqual(before);
     });
@@ -1201,7 +1253,7 @@ describe("departed-member operator scripts — real-DB integration", () => {
     describe("boundaries that qualify", () => {
       it("created_at equal to the tenant row's deactivated_at", async () => {
         const l = await seedResidual(0);
-        await sql(`UPDATE team_members SET created_at = $2::timestamptz WHERE id = $1::uuid`, l.rows[0].rowId, iso(l.stamp));
+        await writeRefusedState(ctx.su, `UPDATE team_members SET created_at = $2::timestamptz WHERE id = $1::uuid`, [l.rows[0].rowId, iso(l.stamp)]);
         l.rows[0].createdAt = l.stamp;
         await runReadmit(readmitWith({ triples: goodTriples(l), label }));
         await expectReadmitted(l, label);
@@ -1209,9 +1261,10 @@ describe("departed-member operator scripts — real-DB integration", () => {
 
       it("a departure record dated before created_at (the tenant row deactivated after it)", async () => {
         const l = await seedResidual(0);
-        await sql(
+        await writeRefusedState(
+          ctx.su,
           `INSERT INTO tenant_member_departures (tenant_id, user_id, departed_at) VALUES ($1::uuid, $2::uuid, $3::timestamptz)`,
-          l.tenant, l.rows[0].user, iso(l.stamp, -2 * SECOND),
+          [l.tenant, l.rows[0].user, iso(l.stamp, -2 * SECOND)],
         );
         await runReadmit(readmitWith({ triples: goodTriples(l), label }));
         await expectReadmitted(l, label);
@@ -1221,7 +1274,7 @@ describe("departed-member operator scripts — real-DB integration", () => {
     describe("refusals write nothing", () => {
       async function expectRefused(text: string, expected: { message?: RegExp; code?: string }) {
         const before = await snapshot();
-        const error = await runScript(text).then(() => null, (e: unknown) => e as { message: string; code?: string });
+        const error = await runAsOwner(text).then(() => null, (e: unknown) => e as { message: string; code?: string });
         expect(error).not.toBeNull();
         if (expected.message) expect(error!.message).toMatch(expected.message);
         if (expected.code) expect(error!.code).toBe(expected.code);
@@ -1239,7 +1292,7 @@ describe("departed-member operator scripts — real-DB integration", () => {
       it("admitted_at is stamped (re-activated since the column exists)", async () => {
         const l = await seedResidual(0);
         await sql(`UPDATE team_members SET deactivated_at = $2::timestamptz WHERE id = $1::uuid`, l.rows[0].rowId, iso(l.stamp));
-        await sql(`UPDATE team_members SET deactivated_at = NULL WHERE id = $1::uuid`, l.rows[0].rowId);
+        await readmitWhileDeparted(l.rows[0].rowId);
         const [stamped] = await sql<{ admitted_at: Date | null }>(`SELECT admitted_at FROM team_members WHERE id = $1::uuid`, l.rows[0].rowId);
         expect(stamped.admitted_at).not.toBeNull();
         await expectRefused(readmitWith({ triples: oneTriple(l), label }), { message: QUALIFY });
@@ -1248,9 +1301,10 @@ describe("departed-member operator scripts — real-DB integration", () => {
       it("the member is leftover by a departure record alone (tenant row active)", async () => {
         const l = await seedResidual(0);
         await sql(`UPDATE tenant_members SET deactivated_at = NULL WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, l.tenant, l.rows[0].user);
-        await sql(
+        await writeRefusedState(
+          ctx.su,
           `INSERT INTO tenant_member_departures (tenant_id, user_id, departed_at) VALUES ($1::uuid, $2::uuid, $3::timestamptz)`,
-          l.tenant, l.rows[0].user, iso(l.stamp),
+          [l.tenant, l.rows[0].user, iso(l.stamp)],
         );
         await expectRefused(readmitWith({ triples: oneTriple(l), label }), { message: QUALIFY });
       });
@@ -1273,7 +1327,7 @@ describe("departed-member operator scripts — real-DB integration", () => {
 
       it("the departure was before the membership began (created_at after the tenant row's deactivated_at)", async () => {
         const l = await seedResidual(0);
-        await sql(`UPDATE team_members SET created_at = $2::timestamptz WHERE id = $1::uuid`, l.rows[0].rowId, iso(l.stamp, SECOND / 2));
+        await writeRefusedState(ctx.su, `UPDATE team_members SET created_at = $2::timestamptz WHERE id = $1::uuid`, [l.rows[0].rowId, iso(l.stamp, SECOND / 2)]);
         await expectRefused(readmitWith({ triples: oneTriple(l), label }), { message: QUALIFY });
       });
 
@@ -1292,9 +1346,10 @@ describe("departed-member operator scripts — real-DB integration", () => {
 
       it("a departure record is dated exactly at created_at", async () => {
         const l = await seedResidual(0);
-        await sql(
+        await writeRefusedState(
+          ctx.su,
           `INSERT INTO tenant_member_departures (tenant_id, user_id, departed_at) VALUES ($1::uuid, $2::uuid, $3::timestamptz)`,
-          l.tenant, l.rows[0].user, l.rows[0].createdAt.toISOString(),
+          [l.tenant, l.rows[0].user, l.rows[0].createdAt.toISOString()],
         );
         await expectRefused(readmitWith({ triples: oneTriple(l), label }), { message: QUALIFY });
       });
@@ -1359,7 +1414,7 @@ describe("departed-member operator scripts — real-DB integration", () => {
 
     describe("locks: each held alone makes the script fail on that statement with 55P03", () => {
       const blockedBy = (l: Residual, holder: string, params: unknown[], statementText: string) =>
-        blockedByLock(readmitWith({ triples: goodTriples(l), label }), holder, params, statementText);
+        blockedByLock(readmitWith({ triples: goodTriples(l), label }), holder, params, statementText, ownerPool);
 
       async function expectUntouched(l: Residual) {
         expect((await readState(l)).members.every((m) => m.admitted_at === null && m.deactivated_at === null)).toBe(true);
@@ -1399,7 +1454,7 @@ describe("departed-member operator scripts — real-DB integration", () => {
       const literal = script.match(/set_config\('app\.bypass_tables', '([a-z_,]+)'/)![1];
       const mutated = script.replace(literal, literal.split(",").filter((t) => t !== removed).join(","));
       expect(mutated).not.toBe(script);
-      const { notices, table } = await expectBypassRefusal(() => runScript(mutated));
+      const { notices, table } = await expectBypassRefusal(() => runAsOwner(mutated));
       expect(table).toBe(removed);
       expect(notices).toContainEqual({ table: removed, purpose: "system_maintenance" });
       // The script's implicit transaction ended with the refusal: nothing was written.

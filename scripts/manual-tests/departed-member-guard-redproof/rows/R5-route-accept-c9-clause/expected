@@ -1,0 +1,2 @@
+-	POST /api/teams/invitations/accept admission after a tenant departure refuses, and commits EXPIRED, an invitation issued after the departure while the invitee's tenant row is still departed
+-	departed-member DB invariants — real-DB integration T3: activation invitation accept (C9) an invitee departed before the invitation is answered INVITATION_EXPIRED, the invitation EXPIRED, no membership

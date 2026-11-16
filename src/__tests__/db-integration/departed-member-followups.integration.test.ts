@@ -21,7 +21,7 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } 
 import { randomUUID, randomBytes } from "node:crypto";
 import { NextRequest } from "next/server";
 import type { Prisma } from "@prisma/client";
-import { assertRlsApplies, createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
+import { assertRlsApplies, createTestContext, setBypassRlsGucs, writeRefusedState, type TestContext } from "./helpers";
 
 const mockAuth = vi.fn();
 vi.mock("@/auth", () => ({ auth: (...args: unknown[]) => mockAuth(...args) }));
@@ -94,13 +94,18 @@ describe("departed-member follow-ups — real-DB integration", () => {
     return { id, email: row.email };
   }
 
-  async function seedKey(teamId: string, userId: string) {
-    await sql(
-      `INSERT INTO team_member_keys (id, team_id, tenant_id, user_id, encrypted_team_key, team_key_iv,
+  /**
+   * A key row. For an ended member (`ended`) the database refuses writing one
+   * (departed_member_guard, key_inactive): such a member holds the keys written
+   * before the row ended, so that state is seeded through writeRefusedState.
+   */
+  async function seedKey(teamId: string, userId: string, ended = false) {
+    const text = `INSERT INTO team_member_keys (id, team_id, tenant_id, user_id, encrypted_team_key, team_key_iv,
          team_key_auth_tag, ephemeral_public_key, hkdf_salt, key_version, wrap_version, created_at, updated_at)
-       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, 1, 1, now(), now())`,
-      randomUUID(), teamId, tenantId, userId, hex(32), hex(12), hex(16), hex(32), hex(32),
-    );
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, 1, 1, now(), now())`;
+    const params = [randomUUID(), teamId, tenantId, userId, hex(32), hex(12), hex(16), hex(32), hex(32)];
+    if (ended) await writeRefusedState(ctx.su, text, params);
+    else await sql(text, ...params);
   }
 
   type RowOpts = { createdAt?: string; deactivated?: boolean; pending?: boolean };
@@ -115,7 +120,7 @@ describe("departed-member follow-ups — real-DB integration", () => {
          $6, $6, $7, ${o.createdAt ?? "now()"}, now())`,
       rowId, teamId, userId, tenantId, role, o.pending ?? false, keyed,
     );
-    if (keyed) await seedKey(teamId, userId);
+    if (keyed) await seedKey(teamId, userId, Boolean(o.deactivated));
     return rowId;
   }
 

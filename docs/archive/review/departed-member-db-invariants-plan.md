@@ -507,8 +507,10 @@ member whose key rows stay untouched.
   ungranted `advisory` row for the waiter, and the waiting statement is the expected one.
 - Pre-state and `SHOW transaction_isolation` are asserted.
 - R1 and R2 run in both commit orders. The held side takes the key through `lockTenantRows` /
-  `lockTenantMemberCreation` with **upper-case** ids, so the TypeScript and SQL keys are
-  cross-checked.
+  `lockTenantMemberCreation` with **upper-case** ids. The TypeScript and SQL keys are
+  cross-checked only where the held write is a stamp ("stamp holds", "departure holds"): a held
+  activation takes the lowercase key again in its own trigger, so the other two orders wait on it
+  whatever `advisoryKey` produced (deviation D5).
 - R3 runs as in the probe.
 - Scenario 5: rotate-key's transaction against `deactivateScimUser` of a key holder; both commit,
   with no 40P01.
@@ -547,15 +549,15 @@ source mode applies them to a scratchpad copy of the tree, never the worktree.
 | I2 departed-now arm | leftover only | T4 back-dated stamp |
 | I2 not-departed-now arm | drop it | T4 stamp-and-return, T4 record with re-created row |
 | each deferred trigger | drop it (three rows) | its T4 deny cell |
-| `WHEN` transition filter | fire on every UPDATE / fire on `→ NULL` | T4 non-transition allow / T4 return allow |
-| activation lock | remove | T5 R1, both orders |
-| departure-check lock | remove | T5 R2, both orders |
+| `WHEN` transition filter | fire on every UPDATE / fire on `→ NULL` | T4 non-transition allow / T4 return of a user a later record keeps leftover |
+| activation lock | remove | T5 R1 "stamp holds", R2 "departure holds" (the activation waits) |
+| departure-check lock | remove | T5 R1 "re-activation holds", R2 "INSERT holds" (the COMMIT waits) |
 | a lock on the grant arm | add | T5 R3 waits, scenario 5 |
 | isolation check | remove, per branch | T3 / T4 REPEATABLE READ |
-| bypass restore | remove | T6 |
+| bypass restore | remove | T6 passing cells (the refused cells' savepoint rollback reverts the settings either way) |
 | trigger order | rename to sort first | T3 omitted-`tenant_id` allow (`tenant_mismatch` on a NULL tenant); T1 "grant after a return" |
 | index | drop | T4 catalog cell |
-| `advisoryKey` lowercase | revert | T5 upper-case witness |
+| `advisoryKey` lowercase | revert | T5 R1 "stamp holds", R2 "departure holds" |
 | seed helper scope | `SET` instead of `SET LOCAL` / no ROLLBACK | T6 `origin` cell |
 | parameter class | three throwaway runs (C4) | the audit exits 1 on each, with its key |
 
@@ -693,3 +695,51 @@ status.
 | C7 | Integration cells T1–T6 and the red-proof matrix | locked |
 | C8 | Rule 8 retired; gate header and runbook | locked |
 | C9 | Invitation accept refuses an invitee departed before the invite | locked |
+
+## Implementation Checklist
+
+Phase 2, Step 2-1 (impact analysis recorded).
+
+- **B0 (orchestrator):**
+  - the migration and the `schema.prisma` index (done; deployed to `passwd_sso_wt_1060`; drift,
+    transaction and RLS-DML gates green);
+  - `advisoryKey` lowercasing and its unit test;
+  - C9 accept clause and its route unit test;
+  - `tenant-rls-purpose.ts`;
+  - the comments in `tenant-departure-read.ts` and `team-departure.ts`;
+  - `rls-cross-tenant-verify.sql` 10b and its header;
+  - `rls-cross-tenant-seed.sql` record date;
+  - the runbook: re-admit script and C8 limits;
+  - the `sentinel-tenant-membership.md` note.
+- **B1 (sub-agent):** C8 gate retirement. Files: `scripts/checks/check-team-rotation-input-lock.mjs`
+  and `scripts/__tests__/check-team-rotation-input-lock.test.mjs`. Any `TEAM_ROTATION_INPUT_LOCK_GRANTS`
+  reference: `grep -rn TEAM_ROTATION_INPUT_LOCK_GRANTS` finds only those two files.
+- **B2 (sub-agent):** the C4 parameter class. Files: `scripts/audit-db-grants.mjs`, its
+  `scripts/__tests__/audit-db-grants-*.test.mjs`, and the manifest if regenerated.
+- **B3 (sub-agent, after B0):** C6 and C7 —
+  - `helpers.ts` `writeRefusedState`, the new integration file, and the adopters found by the full
+    run;
+  - the baseline run on a scratch copy without the migration;
+  - the 20× loop.
+- **B4 (sub-agent, after B3):** the VE4 red-proof runner
+  `scripts/manual-tests/departed-member-guard-redproof.sh` and the matrix run. Results go to the
+  deviation log.
+- **Reuse:**
+  - `createRaceHelpers` (`race-helpers.ts`);
+  - `createTestContext`, `assertRlsApplies`, `sqlStateOf` / `pgErrorCode`;
+  - `withTenantRls`, `departFromTenant` / `returnToTenant` / `departCreatedMembership` /
+    `deactivateScimUser`;
+  - `lockTenantRows` / `lockTenantMemberCreation`;
+  - the save/set/restore spelling of `share_creator_admitted`.
+- **R19 test trees:**
+  - `tenant-row-lock` is tested in `src/lib/team/tenant-row-lock.test.ts` (check for twins with
+    `grep -rl advisoryKey src`);
+  - the accept route is tested in its colocated `route.test.ts` and in
+    `src/__tests__/api/teams/team-invitations.test.ts` (check).
+- **CI parity:**
+  - the integration job runs the new file;
+  - the `rls` job runs seed, coverage, verify and the negative test on a fresh migrate;
+  - `check:migration-drift`, `check-migration-transaction` and `check-migration-rls-dml` are in
+    pre-pr;
+  - the integration suite and the RLS verify on a migrated database are not in pre-pr for this
+    branch (VE3), so they are run by hand.

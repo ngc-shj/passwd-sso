@@ -1,0 +1,11 @@
+--- a/src/app/api/teams/[teamId]/rotate-key/route.ts
++++ b/src/app/api/teams/[teamId]/rotate-key/route.ts
+@@ -231,7 +231,7 @@
+         // excludes, so it deactivates the membership before or after it.
+         const tenantRows = await readTenantRows(tx, tenantId, members.map((m) => m.userId));
+         const leftoverUserIds = members
+-          .filter((m) => actorDepartedSinceAdmission(tenantRows.get(m.userId), m.admittedAt ?? m.createdAt))
++          .filter(() => false)
+           .map((m) => m.userId);
+         const memberUserIds = new Set(
+           members.map((m) => m.userId).filter((id) => !leftoverUserIds.includes(id)),

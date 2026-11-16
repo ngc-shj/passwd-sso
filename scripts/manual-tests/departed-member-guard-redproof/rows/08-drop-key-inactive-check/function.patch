@@ -1,0 +1,11 @@
+--- a/function.sql
++++ b/function.sql
+@@ -92,8 +92,6 @@
+         FROM team_members m WHERE m.team_id = NEW.team_id AND m.user_id = v_user;
+       IF v_team_tenant IS DISTINCT FROM v_tenant THEN
+         v_refusal := 'tenant_mismatch';
+-      ELSIF v_member_ended THEN
+-        v_refusal := 'key_inactive';
+       ELSIF EXISTS (
+               SELECT 1 FROM team_members m
+                WHERE m.team_id = NEW.team_id AND m.user_id = v_user AND m.tenant_id = v_tenant

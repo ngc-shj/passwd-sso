@@ -1,0 +1,2 @@
+-	departed-member DB invariants — real-DB integration T5: races R1: a re-activation against a raw stamp the stamp holds the key: the re-activation waits, then is refused
+-	departed-member DB invariants — real-DB integration T5: races R2: an INSERT against a departure the departure holds the key: the INSERT waits, then is refused

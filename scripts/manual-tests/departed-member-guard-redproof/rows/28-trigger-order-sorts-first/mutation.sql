@@ -1,0 +1,1 @@
+ALTER TRIGGER trg_team_members_departed_member_guard ON team_members RENAME TO a_team_members_departed_member_guard;

@@ -1,0 +1,15 @@
+--- a/function.sql
++++ b/function.sql
+@@ -94,12 +94,6 @@
+         v_refusal := 'tenant_mismatch';
+       ELSIF v_member_ended THEN
+         v_refusal := 'key_inactive';
+-      ELSIF EXISTS (
+-              SELECT 1 FROM team_members m
+-               WHERE m.team_id = NEW.team_id AND m.user_id = v_user AND m.tenant_id = v_tenant
+-                 AND m.deactivated_at IS NULL
+-                 AND (v_departed_at >= COALESCE(m.admitted_at, m.created_at)) IS TRUE) THEN
+-        v_refusal := 'key_leftover';
+       END IF;
+     ELSE
+       -- Deferred departure check, against the state at commit. Departed now: the

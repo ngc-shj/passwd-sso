@@ -1,0 +1,11 @@
+--- a/src/app/api/teams/[teamId]/members/[memberId]/route.ts
++++ b/src/app/api/teams/[teamId]/members/[memberId]/route.ts
+@@ -191,7 +191,7 @@
+           throw new ActorNotPermittedError();
+         }
+         // Ownership is never transferred to a leftover membership.
+-        if (await targetIsLeftover(tx, tenantId, teamId, memberId, target.userId)) throw new MemberChangedError();
++        if (false) throw new MemberChangedError();
+         const demoted = await tx.teamMember.updateMany({
+           where: { id: actorMembership.id, teamId, role: TEAM_ROLE.OWNER, deactivatedAt: null },
+           data: { role: TEAM_ROLE.ADMIN },

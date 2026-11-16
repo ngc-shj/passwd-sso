@@ -1,0 +1,1 @@
+DROP INDEX team_members_tenant_id_user_id_idx;

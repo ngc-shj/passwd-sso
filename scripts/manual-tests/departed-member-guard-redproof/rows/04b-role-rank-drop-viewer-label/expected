@@ -1,0 +1,1 @@
+unknown_role	departed-member DB invariants — real-DB integration T1: grants every pg_enum label of TeamRole is ranked: an UPDATE between each pair does not raise unknown_role

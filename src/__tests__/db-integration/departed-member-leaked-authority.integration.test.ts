@@ -50,6 +50,7 @@ import {
   setBypassRlsGucs,
   setGucs,
   setTestBypass,
+  writeRefusedState,
   type TestContext,
 } from "./helpers";
 
@@ -241,13 +242,18 @@ describe("departed-member leaked authority — real-DB integration", () => {
     await sql(`UPDATE users SET ecdh_public_key = $2 WHERE id = $1::uuid`, userId, hex(32));
   }
 
-  async function seedKey(teamId: string, userId: string, tenant = tenantId) {
-    await sql(
-      `INSERT INTO team_member_keys (id, team_id, tenant_id, user_id, encrypted_team_key, team_key_iv,
+  /**
+   * A key row. For an ended member (`ended`) the database refuses writing one
+   * (departed_member_guard, key_inactive): such a member holds the keys written
+   * before the row ended, so that state is seeded through writeRefusedState.
+   */
+  async function seedKey(teamId: string, userId: string, tenant = tenantId, ended = false) {
+    const text = `INSERT INTO team_member_keys (id, team_id, tenant_id, user_id, encrypted_team_key, team_key_iv,
          team_key_auth_tag, ephemeral_public_key, hkdf_salt, key_version, wrap_version, created_at, updated_at)
-       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, 1, 1, now(), now())`,
-      randomUUID(), teamId, tenant, userId, hex(32), hex(12), hex(16), hex(32), hex(32),
-    );
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, 1, 1, now(), now())`;
+    const params = [randomUUID(), teamId, tenant, userId, hex(32), hex(12), hex(16), hex(32), hex(32)];
+    if (ended) await writeRefusedState(ctx.su, text, params);
+    else await sql(text, ...params);
   }
 
   type RowOpts = {
@@ -271,7 +277,7 @@ describe("departed-member leaked authority — real-DB integration", () => {
       rowId, teamId, userId, o.tenant ?? tenantId, role, o.scimManaged ?? o.pending ?? false, o.pending ?? false,
       o.keyDistributed ?? true,
     );
-    if (o.withKey ?? o.keyDistributed ?? true) await seedKey(teamId, userId, o.tenant);
+    if (o.withKey ?? o.keyDistributed ?? true) await seedKey(teamId, userId, o.tenant, Boolean(o.deactivated || o.pending));
     return rowId;
   }
 
@@ -300,14 +306,16 @@ describe("departed-member leaked authority — real-DB integration", () => {
 
   /**
    * The residue state: the user's tenant row departed by a raw UPDATE that
-   * bypasses endTeamMemberships, so their team rows stay active. Exactly one
-   * row must change.
+   * bypasses endTeamMemberships, so their team rows stay active. The database
+   * refuses writing it since departed_member_guard, so it is seeded through
+   * writeRefusedState (pre-guard databases hold it). Exactly one row must change.
    */
   async function residueDepart(userId: string) {
-    const changed = await sql(
+    const changed = await writeRefusedState(
+      ctx.su,
       `UPDATE tenant_members SET deactivated_at = clock_timestamp()
         WHERE tenant_id = $1::uuid AND user_id = $2::uuid RETURNING 1`,
-      tenantId, userId,
+      [tenantId, userId],
     );
     expect(changed).toHaveLength(1);
   }
@@ -317,13 +325,15 @@ describe("departed-member leaked authority — real-DB integration", () => {
    * SQL, says otherwise) while the user's tenant row stays active (SCIM DELETE,
    * then re-creation). Unlike residueDepart, the tenant row passes a route's
    * "active in this tenant" check, so only the leftover predicate refuses.
-   * Exactly one row must be written.
+   * Seeded through writeRefusedState, as residueDepart. Exactly one row must be
+   * written.
    */
   async function recreatedDepart(userId: string, departedAt = "clock_timestamp()") {
-    const written = await sql(
+    const written = await writeRefusedState(
+      ctx.su,
       `INSERT INTO tenant_member_departures (tenant_id, user_id, departed_at)
        VALUES ($1::uuid, $2::uuid, ${departedAt}) RETURNING 1`,
-      tenantId, userId,
+      [tenantId, userId],
     );
     expect(written).toHaveLength(1);
   }
@@ -461,13 +471,14 @@ describe("departed-member leaked authority — real-DB integration", () => {
       expect(await admittedAt(await addTeamMember(teamId, (await member()).id, "MEMBER"))).toBeNull();
     });
 
-    it("accept's upsert re-activating a departed member stamps it within the call", async () => {
+    it("accept's upsert re-activating a removed member stamps it within the call", async () => {
+      // Removed from the team, still in the tenant. A member departed from the
+      // tenant is no longer re-admitted by accept (C9: INVITATION_EXPIRED; the
+      // database refuses activating a departed user's membership).
       const owner = await ctx.createUser(tenantId);
       const leaver = await member();
       const teamId = await team(owner);
-      const rowId = await addTeamMember(teamId, leaver.id, "MEMBER", { createdAt: "now() - interval '1 hour'" });
-      expect((await scimActive(leaver.id, false)).status).toBe(200);
-      await moveAway(leaver.id);
+      const rowId = await addTeamMember(teamId, leaver.id, "MEMBER", { createdAt: "now() - interval '1 hour'", deactivated: true });
       const inv = await invite(teamId, owner, leaver.email);
       expect(inv.status).toBe(201);
 
@@ -771,7 +782,7 @@ describe("departed-member leaked authority — real-DB integration", () => {
       });
     });
 
-    it("a member re-admitted by accept after a SCIM departure (created_at < departure < admitted_at) invites successfully", async () => {
+    it("a member re-admitted after a SCIM departure (created_at < departure < admitted_at) invites successfully", async () => {
       const owner = await ctx.createUser(tenantId);
       const actor = await member();
       const teamId = await team(owner);
@@ -780,7 +791,21 @@ describe("departed-member leaked authority — real-DB integration", () => {
       await moveAway(actor.id);
       const inv = await invite(teamId, owner, actor.email, "ADMIN");
       expect(inv.status).toBe(201);
-      expect((await accept(actor, inv.token!)).status).toBe(200);
+      // Accept no longer re-admits a member whose tenant row is departed (C9),
+      // and the database refuses that activation; the state is the one accept
+      // wrote before the guard (and the runbook re-admit script writes), seeded
+      // as accept wrote it: admitted_at stamped by the re-activation.
+      const refused = await accept(actor, inv.token!);
+      expect(refused.status).toBe(410);
+      expect((await refused.json()).error).toBe("INVITATION_EXPIRED");
+      const readmitted = await writeRefusedState(
+        ctx.su,
+        `UPDATE team_members SET deactivated_at = NULL, deactivated_by_tenant = false, role = 'ADMIN',
+                admitted_at = clock_timestamp(), updated_at = clock_timestamp()
+          WHERE team_id = $1::uuid AND user_id = $2::uuid AND deactivated_at IS NOT NULL RETURNING 1`,
+        [teamId, actor.id],
+      );
+      expect(readmitted).toHaveLength(1);
 
       // The state the COALESCE must read: still departed, created before, admitted after.
       const row = await membership(teamId, actor.id);
@@ -1101,12 +1126,11 @@ describe("departed-member leaked authority — real-DB integration", () => {
     });
 
     it("a re-activated membership writes one row with readmitted true", async () => {
+      // A member removed from the team (a departed one is refused, C9).
       const owner = await ctx.createUser(tenantId);
       const leaver = await member();
       const teamId = await team(owner);
-      await addTeamMember(teamId, leaver.id, "MEMBER");
-      expect((await scimActive(leaver.id, false)).status).toBe(200);
-      await moveAway(leaver.id);
+      await addTeamMember(teamId, leaver.id, "MEMBER", { deactivated: true });
       const inv = await invite(teamId, owner, leaver.email, "ADMIN");
 
       expect((await accept(leaver, inv.token!)).status).toBe(200);

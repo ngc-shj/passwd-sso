@@ -1,0 +1,2 @@
+activation_leftover	departed-member DB invariants — real-DB integration T3: activation deny: an INSERT born leftover, tenant_id given
+activation_leftover	departed-member DB invariants — real-DB integration T3: activation deny: an INSERT born leftover, tenant_id omitted (derived by the tenant-context trigger)

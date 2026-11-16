@@ -1,0 +1,12 @@
+grant_leftover	departed-member DB invariants — real-DB integration T1: grants deny VIEWER→MEMBER on a leftover row (departure equal to admission) via UPDATE
+grant_leftover	departed-member DB invariants — real-DB integration T1: grants deny VIEWER→MEMBER on a leftover row (departure equal to admission) via ON CONFLICT DO UPDATE
+grant_leftover	departed-member DB invariants — real-DB integration T1: grants deny VIEWER→MEMBER on a leftover row (departure equal to admission) via MERGE
+grant_leftover	departed-member DB invariants — real-DB integration T1: grants deny MEMBER→ADMIN on a leftover row (departure equal to admission) via UPDATE
+grant_leftover	departed-member DB invariants — real-DB integration T1: grants deny MEMBER→ADMIN on a leftover row (departure equal to admission) via ON CONFLICT DO UPDATE
+grant_leftover	departed-member DB invariants — real-DB integration T1: grants deny MEMBER→ADMIN on a leftover row (departure equal to admission) via MERGE
+grant_leftover	departed-member DB invariants — real-DB integration T1: grants deny ADMIN→OWNER on a leftover row (departure equal to admission) via UPDATE
+grant_leftover	departed-member DB invariants — real-DB integration T1: grants deny ADMIN→OWNER on a leftover row (departure equal to admission) via ON CONFLICT DO UPDATE
+grant_leftover	departed-member DB invariants — real-DB integration T1: grants deny ADMIN→OWNER on a leftover row (departure equal to admission) via MERGE
+grant_leftover	departed-member DB invariants — real-DB integration T1: grants deny key_distributed false→true on a leftover row (departure equal to admission) via UPDATE
+grant_leftover	departed-member DB invariants — real-DB integration T1: grants deny key_distributed false→true on a leftover row (departure equal to admission) via ON CONFLICT DO UPDATE
+grant_leftover	departed-member DB invariants — real-DB integration T1: grants deny key_distributed false→true on a leftover row (departure equal to admission) via MERGE

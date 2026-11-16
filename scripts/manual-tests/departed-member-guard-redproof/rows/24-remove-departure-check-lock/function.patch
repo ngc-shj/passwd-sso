@@ -1,0 +1,13 @@
+--- a/function.sql
++++ b/function.sql
+@@ -60,7 +60,9 @@
+       RAISE EXCEPTION 'DEPARTED_MEMBER_GUARD:isolation: % must run under READ COMMITTED (tenant %, user %)', TG_TABLE_NAME, v_tenant, v_user
+         USING ERRCODE = 'check_violation';
+     END IF;
+-    PERFORM pg_advisory_xact_lock(hashtext('tenant-member:' || v_tenant::text || ':' || v_user::text));
++    IF v_activation THEN
++      PERFORM pg_advisory_xact_lock(hashtext('tenant-member:' || v_tenant::text || ':' || v_user::text));
++    END IF;
+   END IF;
+ 
+   BEGIN

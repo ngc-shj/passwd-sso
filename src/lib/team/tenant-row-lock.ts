@@ -40,8 +40,14 @@ export class TenantMemberLockTimeoutError extends Error {
 const LOCK_MODE = { share: "share", update: "update" } as const;
 export type TenantRowLockMode = (typeof LOCK_MODE)[keyof typeof LOCK_MODE];
 
+/**
+ * The key spelled exactly as the database guard spells it
+ * (`'tenant-member:' || tenant_id::text || ':' || user_id::text`, migration
+ * 20261117000000): uuid text is lowercase there, so it is lowercase here
+ * whatever case the caller passes.
+ */
 export function advisoryKey(tenantId: string, userId: string): string {
-  return `tenant-member:${tenantId}:${userId}`;
+  return `tenant-member:${tenantId.toLowerCase()}:${userId.toLowerCase()}`;
 }
 
 /**

@@ -1,0 +1,5 @@
+-	POST /api/teams/[teamId]/members/[memberId]/confirm-key a recipient who left the tenant, judged against their admission to the team refuses (404 MEMBER_NOT_FOUND) a recipient whose tenant row was deactivated after their admission, writing no key
+-	POST /api/teams/[teamId]/members/[memberId]/confirm-key a recipient who left the tenant, judged against their admission to the team refuses a recipient whose departure record (row deleted) postdates their admission
+-	POST /api/teams/[teamId]/members/[memberId]/confirm-key a recipient who left the tenant, judged against their admission to the team refuses a recipient whose departure equals their admission
+-	departed-member leaked authority — real-DB integration C4 recipient: a target whose tenant row departed after their admission receives nothing confirm-key to the target: denied when the target's tenant row departed after admission (residue)
+-	departed-member leaked authority — real-DB integration C4 recipient: a target whose tenant row departed after their admission receives nothing confirm-key to the target, departure-record arm: denied when a departure record is dated after the admission (re-created tenant row)

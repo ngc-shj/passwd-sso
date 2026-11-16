@@ -85,6 +85,12 @@ SET deactivated_at = now()
 WHERE id = '<the id from step 1>';
 ```
 
+If the member holds active memberships of that tenant's teams, the database
+refuses this stamp at COMMIT (`DEPARTED_MEMBER_GUARD:departure_active`,
+migration `20261117000000`). End those memberships in the same transaction, as
+the departed-member runbook's contain script does
+([departed-member-access-backfill.md](departed-member-access-backfill.md)).
+
 Both membership resolvers filter on `deactivated_at IS NULL`, so this removes the
 read path immediately. It destroys no evidence: the row, its `role` and its
 `created_at` all survive for the investigation.

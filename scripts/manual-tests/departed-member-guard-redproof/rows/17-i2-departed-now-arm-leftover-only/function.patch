@@ -1,0 +1,12 @@
+--- a/function.sql
++++ b/function.sql
+@@ -106,7 +106,8 @@
+       -- tenant row is deactivated, or there is no row and a record exists.
+       IF v_row_departed OR (NOT v_has_row AND v_has_record) THEN
+         IF EXISTS (SELECT 1 FROM team_members m
+-                    WHERE m.tenant_id = v_tenant AND m.user_id = v_user AND m.deactivated_at IS NULL) THEN
++                    WHERE m.tenant_id = v_tenant AND m.user_id = v_user AND m.deactivated_at IS NULL
++                      AND (v_departed_at >= COALESCE(m.admitted_at, m.created_at)) IS TRUE) THEN
+           v_refusal := 'departure_active';
+         END IF;
+       ELSIF EXISTS (

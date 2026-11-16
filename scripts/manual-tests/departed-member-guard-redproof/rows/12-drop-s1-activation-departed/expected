@@ -1,0 +1,2 @@
+activation_departed	departed-member DB invariants — real-DB integration T3: activation deny: an INSERT while the tenant row is departed (S1), admission after the departure
+activation_departed	departed-member DB invariants — real-DB integration T3: activation deny: a re-activation while the tenant row is departed

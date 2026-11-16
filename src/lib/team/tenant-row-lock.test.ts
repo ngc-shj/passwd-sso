@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { Prisma } from "@prisma/client";
 import {
+  advisoryKey,
   departedSince,
   actorDepartedSinceAdmission,
   isMembershipLockConflict,
@@ -259,6 +260,12 @@ describe("lockTenantRows — timeouts and id spelling", () => {
     expect(result.get(upper)).toMatchObject({ hasRow: true, deactivatedAt: null });
     const rowLock = statements.findIndex((s) => s.includes("FROM tenant_members"));
     expect(values[rowLock][1]).toEqual([upper.toLowerCase()]);
+  });
+
+  it("builds the advisory key from lowercase ids, as the database guard does", () => {
+    expect(advisoryKey("AAAAAAAA-0000-4000-8000-0000000000A0", "BBBBBBBB-0000-4000-8000-0000000000B1")).toBe(
+      "tenant-member:aaaaaaaa-0000-4000-8000-0000000000a0:bbbbbbbb-0000-4000-8000-0000000000b1",
+    );
   });
 });
 
