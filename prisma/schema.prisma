@@ -1285,6 +1285,9 @@ model AuditDeliveryTarget {
   failCount        Int                     @default(0) @map("fail_count")
   lastError        String?                 @map("last_error") @db.VarChar(1024)
   lastDeliveredAt  DateTime?               @map("last_delivered_at") @db.Timestamptz(3)
+  // Who created the target (no FK, as tenant_webhooks.created_by_id): containment
+  // lists and deactivates a member's targets. NULL = created before the column.
+  createdById      String?                 @map("created_by_id") @db.Uuid
 
   tenant     Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   deliveries AuditDelivery[]

@@ -351,3 +351,30 @@ delivery-target routes, `audit-delivery-target-endpoint.ts`, `audit-outbox-worke
 | C7 | Actor filter, shared list/download filter | locked |
 | C8 | Member activity link | locked |
 | C9 | Docs | locked |
+
+## Implementation Checklist
+- Schema + migration `20261117000000_audit_delivery_target_creator` (orchestrator, first; then `prisma generate`).
+- Writers (C3/C4): `src/app/api/share-links/route.ts`, `src/app/api/sends/route.ts`, `src/app/api/sends/file/route.ts`,
+  `src/app/api/tenant/audit-delivery-targets/route.ts`, `…/[id]/route.ts`. Reuse `lockFootholdWriter`,
+  `footholdWriteErrorResponse` (`src/lib/http/lock-conflict-response.ts`), `withUserTenantRls(userId, (tenantId, tx) => …)`.
+- Containment (C2/C5): `src/lib/tenant/member-containment.ts`, `src/lib/validations/member-containment.ts`,
+  `src/lib/tenant-rls-grants.ts`, `src/app/api/tenant/members/[userId]/passkeys/route.ts`,
+  `src/components/settings/security/tenant-member-passkeys-dialog.tsx`, `src/lib/constants/audit/audit.ts`,
+  `src/components/settings/account/tenant-audit-log-card.tsx` (`GROUP_LABEL_MAP`), new
+  `src/lib/audit/audit-delivery-target-endpoint.ts` (moved out of the settings GET),
+  `src/__tests__/foothold-member-set.test.ts`, `messages/{en,ja}/TenantAdmin.json`, `messages/{en,ja}/AuditLog.json`.
+- Worker (C6): `src/workers/audit-outbox-worker.ts` (`claimDeliveriesInTx`, new `expireInactiveTargetDeliveriesInTx`
+  wired into `purgeRetention`), `OUTBOX_DELIVERY_EXPIRY` grant, `scripts/checks/rls-grant-evidence-baseline.txt` if
+  required, `scripts/checks/worker-policy-manifest.json` if it enumerates worker functions.
+- K9 (C7/C8): `src/lib/audit/audit-query.ts`, new `src/lib/audit/tenant-audit-filter.ts`, both tenant audit-log
+  routes, `src/hooks/vault/use-audit-logs.ts`, `tenant-audit-log-card.tsx`, dialog link.
+- Test trees (R19, both trees where two exist): `src/__tests__/api/share-links/route.test.ts` +
+  `src/app/api/share-links/route.test.ts`; `src/__tests__/api/sends/route.test.ts` + `src/app/api/sends/route.test.ts`;
+  `src/__tests__/api/sends/file.test.ts` (+ co-located if present); delivery-target route tests (co-located);
+  `src/__tests__/api/tenant/tenant-audit-logs.test.ts` + `src/app/api/tenant/audit-logs/route.test.ts` (+ download);
+  `member-containment.test.ts`, passkeys `route.test.ts`, dialog / members-card / card / hook tests,
+  `audit-outbox-worker.test.ts`, `src/__tests__/workers/worker-policy-manifest.test.ts`; integration:
+  `foothold-write-gate`, `tenant-member-passkey-revoke`, `departed-member-leaked-authority` (backfill),
+  `share-departure`, new worker / audit-log cells.
+- CI parity: CI-only gates `check-npm-audit.mjs`, `check-terraform-test-count.mjs` — not affected (no dependency or
+  Terraform change).
