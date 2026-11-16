@@ -252,7 +252,7 @@ describe("TenantMemberPasskeysDialog", () => {
       fireEvent.click(screen.getByLabelText(/ci-token/));
       fireEvent.click(screen.getByLabelText(/unknown@example.net/));
       fireEvent.click(screen.getByLabelText("agent-client"));
-      fireEvent.click(screen.getByLabelText(/hooks.example.com/));
+      fireEvent.click(screen.getByLabelText("hooks.example.com", { exact: false }));
       fireEvent.click(screen.getByLabelText(/Bob Target/));
       fireEvent.click(screen.getByRole("button", { name: "revokeAllPasskeys" }));
 
