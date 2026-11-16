@@ -627,8 +627,9 @@ requires each such write to clear the column or be followed by
 bootstrap migration and `deactivateScimUser`. It does not see `*Unsafe` raw SQL,
 aliased receivers, element access, migrations, `.sh` / `.sql` files (such as
 `scripts/manual-tests/run-pr-379-test-plan.sh`), or the operator SQL in this
-runbook. A database-enforced form is tracked in #1060. A tenant-row change made any other way (a hand-written
-`UPDATE`, a script) can leave memberships active again: run the report after
+runbook. A database-enforced form is tracked in
+[issue 1060](https://github.com/ngc-shj/passwd-sso/issues/1060). A tenant-row change made any
+other way (a hand-written `UPDATE`, a script) can leave memberships active again: run the report after
 any such change. The leftover check above refuses such residue on every team
 route and at webhook delivery, and share links are refused by `share_creator_admitted`
 (including links a leftover membership created after the departure); the report and
