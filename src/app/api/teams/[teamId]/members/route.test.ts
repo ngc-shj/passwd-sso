@@ -15,8 +15,11 @@ const {
   mockWithTeamTenantRls,
   mockWithBypassRls,
   mockLogAudit,
+  mockLogAuditInTx,
+  txSentinel,
   mockRequireRecentSession,
 } = vi.hoisted(() => {
+  const _txSentinel: { current: unknown } = { current: null };
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -36,11 +39,18 @@ const {
     mockRequireTeamMember: vi.fn(),
     mockRequireTeamPermission: vi.fn(),
     TeamAuthError: _TeamAuthError,
-    // The admission transaction runs as fn(tenantId, tx); tx is the prisma mock.
-    mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: (tenantId: string, tx: unknown) => unknown) =>
-      fn("tenant-1", (await import("@/lib/prisma")).prisma)),
+    // The admission transaction runs as fn(tenantId, tx); tx delegates to the
+    // prisma mock but is a distinct object, so an audit written through the
+    // transaction is told apart from one written on the module client.
+    mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: (tenantId: string, tx: unknown) => unknown) => {
+      const prisma = (await import("@/lib/prisma")).prisma;
+      _txSentinel.current = Object.create(prisma);
+      return fn("tenant-1", _txSentinel.current);
+    }),
     mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
     mockLogAudit: vi.fn(),
+    mockLogAuditInTx: vi.fn(),
+    txSentinel: _txSentinel,
     mockRequireRecentSession: vi.fn().mockResolvedValue(null),
   };
 });
@@ -84,6 +94,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
+  logAuditInTx: mockLogAuditInTx,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
   teamAuditBase: vi.fn((_, userId, teamId) => ({ scope: "TEAM", userId, teamId })),
 }));
@@ -159,6 +170,28 @@ describe("GET /api/teams/[teamId]/members", () => {
     expect(json[0].tenantName).toBe("Acme Corp");
     expect(json[1].role).toBe(TEAM_ROLE.MEMBER);
     expect(json[1].tenantName).toBe("External Org");
+  });
+
+  it("selects admittedAt and reports it as joinedAt over createdAt", async () => {
+    const admittedAt = new Date("2025-06-01T00:00:00Z");
+    mockPrismaTeamMember.findMany.mockResolvedValue([
+      { id: "m1", userId: "u1", role: TEAM_ROLE.OWNER, createdAt: now, admittedAt, deactivatedByTenant: false, scimApprovalPending: false },
+      { id: "m2", userId: "u2", role: TEAM_ROLE.MEMBER, createdAt: now, admittedAt: null, deactivatedByTenant: false, scimApprovalPending: false },
+    ]);
+    mockPrismaUser.findMany.mockResolvedValue([
+      { id: "u1", name: "Back", email: "back@test.com", image: null },
+      { id: "u2", name: "Stayed", email: "stayed@test.com", image: null },
+    ]);
+    mockPrismaTenantMember.findMany.mockResolvedValue([]);
+
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/members`),
+      createParams({ teamId: TEAM_ID }),
+    );
+    const json = await res.json();
+
+    expect(mockPrismaTeamMember.findMany.mock.calls[0][0].select).toEqual(expect.objectContaining({ admittedAt: true }));
+    expect(json.map((m: { joinedAt: string }) => m.joinedAt)).toEqual([admittedAt.toISOString(), now.toISOString()]);
   });
 
   it("lists members who left the tenant, flagged departed, and SCIM-pending members, flagged pendingApproval, to a role that can invite and remove", async () => {
@@ -403,6 +436,7 @@ describe("POST /api/teams/[teamId]/members", () => {
     existingTarget.value = null;
     mockPrismaTeamMember.findFirst.mockImplementation(async (args: { select?: { role?: boolean } }) =>
       args?.select?.role ? actorRole.value : existingTarget.value);
+    mockLogAuditInTx.mockResolvedValue(undefined);
     mockPrismaTeam.findUnique.mockResolvedValue({ tenantId: TENANT_ID });
     mockPrismaUser.findFirst.mockResolvedValue({ id: TARGET_USER_ID });
     mockPrismaTenantMember.findFirst.mockResolvedValue({ id: "tm-1" });
@@ -477,7 +511,10 @@ describe("POST /api/teams/[teamId]/members", () => {
     expect(res.status).toBe(201);
     expect(json.userId).toBe(TARGET_USER_ID);
     expect(json.reactivated).toBe(false);
-    expect(mockLogAudit).toHaveBeenCalledWith(
+    expect(mockLogAuditInTx).toHaveBeenCalledTimes(1);
+    expect(mockLogAuditInTx).toHaveBeenCalledWith(
+      txSentinel.current,
+      "tenant-1",
       expect.objectContaining({
         action: "TEAM_MEMBER_ADD",
         targetType: "TeamMember",
@@ -489,6 +526,7 @@ describe("POST /api/teams/[teamId]/members", () => {
         }),
       }),
     );
+    expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
   it("reactivates a deactivated member", async () => {
@@ -515,6 +553,46 @@ describe("POST /api/teams/[teamId]/members", () => {
     expect(mockPrismaTeamMember.update).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ deactivatedAt: null, deactivatedByTenant: false, keyDistributed: false }),
     }));
+    expect(mockLogAuditInTx).toHaveBeenCalledTimes(1);
+    expect(mockLogAuditInTx).toHaveBeenCalledWith(
+      txSentinel.current,
+      "tenant-1",
+      expect.objectContaining({
+        action: "TEAM_MEMBER_ADD",
+        targetId: "existing-m-1",
+        metadata: expect.objectContaining({ userId: TARGET_USER_ID, role: TEAM_ROLE.MEMBER, reactivated: true }),
+      }),
+    );
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  it("propagates a failing in-transaction audit instead of mapping it to a 4xx", async () => {
+    mockPrismaTeamMember.create.mockResolvedValue({ id: "new-m-1", userId: TARGET_USER_ID, role: TEAM_ROLE.MEMBER });
+    mockLogAuditInTx.mockRejectedValue(new Error("audit_outbox insert failed"));
+
+    await expect(
+      POST(
+        createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/members`, {
+          body: { userId: TARGET_USER_ID, role: TEAM_ROLE.MEMBER },
+        }),
+        createParams({ teamId: TEAM_ID }),
+      ),
+    ).rejects.toThrow("audit_outbox insert failed");
+  });
+
+  it("writes no audit when the acting member's authority ended (positive control: the create emits)", async () => {
+    mockPrismaTeamMember.create.mockResolvedValue({ id: "new-m-1", userId: TARGET_USER_ID, role: TEAM_ROLE.MEMBER });
+    const body = { userId: TARGET_USER_ID, role: TEAM_ROLE.MEMBER };
+    const url = `http://localhost:3000/api/teams/${TEAM_ID}/members`;
+
+    expect((await POST(createRequest("POST", url, { body }), createParams({ teamId: TEAM_ID }))).status).toBe(201);
+    expect(mockLogAuditInTx).toHaveBeenCalledTimes(1);
+
+    mockLogAuditInTx.mockClear();
+    actorRole.value = null;
+    expect((await POST(createRequest("POST", url, { body }), createParams({ teamId: TEAM_ID }))).status).toBe(403);
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
   it("re-adds a SCIM-managed membership the tenant departure ended", async () => {
@@ -770,6 +848,8 @@ describe("POST /api/teams/[teamId]/members", () => {
       createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(409);
+    // The create that raced wrote nothing, so neither does its audit.
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 
   it("re-throws P2002 with no meta.target (unknown constraint)", async () => {

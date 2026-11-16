@@ -619,10 +619,17 @@ refused since this release").
 Departures end memberships because every departure writer lives in
 `src/lib/team/team-departure.ts` and calls `endTeamMemberships` there. That is
 a convention reviewed by humans. The `check-team-rotation-input-lock` gate fails
-a write to `tenant_members.deactivated_at` outside that file, but it does not
-see the file's own writers, `*Unsafe` raw SQL, aliased receivers, `scripts/`, or
-deletes of tenant rows. A tenant-row change made any other way (a hand-written
-`UPDATE`, a script) can leave memberships active again: run the report after
+a write to `tenant_members.deactivated_at` outside that file, and inside it
+requires each such write to clear the column or be followed by
+`endTeamMemberships` in the same function (three writers, pinned). It scans
+`scripts/` `.ts` files, and pins tenant-row deletes (`tenantMember.delete` /
+`deleteMany`, raw `DELETE FROM tenant_members`) to two reviewed sites: the
+bootstrap migration and `deactivateScimUser`. It does not see `*Unsafe` raw SQL,
+aliased receivers, element access, migrations, `.sh` / `.sql` files (such as
+`scripts/manual-tests/run-pr-379-test-plan.sh`), or the operator SQL in this
+runbook. A database-enforced form is tracked in
+[issue 1060](https://github.com/ngc-shj/passwd-sso/issues/1060). A tenant-row change made any
+other way (a hand-written `UPDATE`, a script) can leave memberships active again: run the report after
 any such change. The leftover check above refuses such residue on every team
 route and at webhook delivery, and share links are refused by `share_creator_admitted`
 (including links a leftover membership created after the departure); the report and

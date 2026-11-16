@@ -3,7 +3,7 @@ import type { Prisma, TeamRole } from "@prisma/client";
 import type { TeamPermission } from "@/lib/auth/access/team-auth";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
+import { logAuditAsync, logAuditInTx, teamAuditBase } from "@/lib/audit/audit";
 import { updateMemberRoleSchema } from "@/lib/validations";
 import {
   activeTeamAdmission,
@@ -59,6 +59,7 @@ async function buildMemberRoleResponse(member: {
   userId: string;
   role: string;
   createdAt: Date;
+  admittedAt: Date | null;
 }) {
   const [display] = await buildTeamMemberDisplayItems([member]);
 
@@ -197,11 +198,18 @@ async function handlePUT(req: NextRequest, { params }: Params) {
           data: { role: TEAM_ROLE.ADMIN },
         });
         const promoted = await tx.teamMember.updateMany({
-          where: { id: memberId, teamId, deactivatedAt: null },
+          where: { id: memberId, teamId, role: target.role, deactivatedAt: null },
           data: { role: TEAM_ROLE.OWNER },
         });
         if (demoted.count !== 1 || promoted.count !== 1) throw new MemberChangedError();
-        return tx.teamMember.findUniqueOrThrow({ where: { id: memberId }, select: { id: true, userId: true, role: true, createdAt: true } });
+        await logAuditInTx(tx, tenantId, {
+          ...teamAuditBase(req, session.user.id, teamId),
+          action: AUDIT_ACTION.TEAM_ROLE_UPDATE,
+          targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
+          targetId: memberId,
+          metadata: { newRole: TEAM_ROLE.OWNER, previousRole: target.role, transfer: true },
+        });
+        return tx.teamMember.findUniqueOrThrow({ where: { id: memberId }, select: { id: true, userId: true, role: true, createdAt: true, admittedAt: true } });
       });
     } catch (e) {
       if (e instanceof MemberChangedError) return errorResponse(API_ERROR.MEMBER_NOT_FOUND);
@@ -209,14 +217,6 @@ async function handlePUT(req: NextRequest, { params }: Params) {
       if (isMembershipLockConflict(e)) return membershipConflictResponse(e);
       throw e;
     }
-
-    await logAuditAsync({
-      ...teamAuditBase(req, session.user.id, teamId),
-      action: AUDIT_ACTION.TEAM_ROLE_UPDATE,
-      targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
-      targetId: memberId,
-      metadata: { newRole: TEAM_ROLE.OWNER, previousRole: target.role, transfer: true },
-    });
 
     return NextResponse.json(await buildMemberRoleResponse(updated));
   }
@@ -260,7 +260,14 @@ async function handlePUT(req: NextRequest, { params }: Params) {
         data: { role: result.data.role },
       });
       if (changed.count !== 1) throw new MemberChangedError();
-      return tx.teamMember.findUniqueOrThrow({ where: { id: memberId }, select: { id: true, userId: true, role: true, createdAt: true } });
+      await logAuditInTx(tx, tenantId, {
+        ...teamAuditBase(req, session.user.id, teamId),
+        action: AUDIT_ACTION.TEAM_ROLE_UPDATE,
+        targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
+        targetId: memberId,
+        metadata: { newRole: result.data.role, previousRole: target.role },
+      });
+      return tx.teamMember.findUniqueOrThrow({ where: { id: memberId }, select: { id: true, userId: true, role: true, createdAt: true, admittedAt: true } });
     });
   } catch (e) {
     if (e instanceof MemberChangedError) return errorResponse(API_ERROR.MEMBER_NOT_FOUND);
@@ -268,14 +275,6 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     if (isMembershipLockConflict(e)) return membershipConflictResponse(e);
     throw e;
   }
-
-  await logAuditAsync({
-    ...teamAuditBase(req, session.user.id, teamId),
-    action: AUDIT_ACTION.TEAM_ROLE_UPDATE,
-    targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
-    targetId: memberId,
-    metadata: { newRole: result.data.role, previousRole: target.role },
-  });
 
   return NextResponse.json(await buildMemberRoleResponse(updated));
 }

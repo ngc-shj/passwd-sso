@@ -63,7 +63,17 @@ const ALL = [
   "TEAM_ATTACHMENT_MIGRATE",
   // team-key-rotation-rekey C2.
   "TEAM_ENTRY_REKEY",
+  // departed-member-followups C1.
+  "TEAM_MEMBER_ADD",
+  "TEAM_MEMBER_INVITE",
+  "TEAM_ROLE_UPDATE",
 ];
+
+// Must match IN_TX_ONLY_ACTIONS in the gate: action -> pinned direct logAuditInTx count.
+const PINS = { TEAM_MEMBER_ADD: 1, TEAM_MEMBER_INVITE: 1, TEAM_ROLE_UPDATE: 2 };
+// An action outside PINS, which the revert/missing cells take away and put back
+// in another form.
+const LAST = "TEAM_ENTRY_REKEY";
 
 const inTx = (a) =>
   `await logAuditInTx(tx, tenantId, {\n  ...base,\n  action: AUDIT_ACTION.${a},\n});\n`;
@@ -85,6 +95,16 @@ const bulkTernary = (a, b) =>
 const bulkSpreadOfMap = (a) =>
   `await logAuditBulkInTx(tx, tenantId, [\n  ...items.map((item) => ({ ...base, action: AUDIT_ACTION.${a} })),\n]);\n`;
 
+// Every critical action once, the pinned ones their pinned number of times,
+// except `skip`. `pins` overrides a pinned count (to go one below or above).
+function writeAllExcept(skip, pins = {}) {
+  ALL.forEach((a, i) => {
+    if (a === skip) return;
+    const n = pins[a] ?? PINS[a] ?? 1;
+    writeRoute(`crit-${i}/route.ts`, inTx(a).repeat(n));
+  });
+}
+
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "critical-audit-atomic-"));
 });
@@ -94,25 +114,25 @@ afterEach(() => {
 
 describe("check-critical-audit-atomic.mjs", () => {
   it("passes when every critical action is written via logAuditInTx", () => {
-    ALL.forEach((a, i) => writeRoute(`crit-${i}/route.ts`, inTx(a)));
+    writeAllExcept();
     const { exitCode, stdout } = runGuard();
     expect(exitCode, stdout).toBe(0);
-    expect(stdout).toContain("all 22 security-critical actions");
+    expect(stdout).toContain(`all ${ALL.length} security-critical actions`);
   });
 
   it("recognizes an action written via an atomic-audit descriptor (delegated to a helper)", () => {
     // All but one via logAuditInTx; the last via the { params: { action } }
     // descriptor passed to a shared helper (executeVaultReset).
-    ALL.slice(0, -1).forEach((a, i) => writeRoute(`crit-${i}/route.ts`, inTx(a)));
-    writeRoute("vault/reset/route.ts", descriptor(ALL[ALL.length - 1]));
+    writeAllExcept(LAST);
+    writeRoute("vault/reset/route.ts", descriptor(LAST));
     const { exitCode, stdout } = runGuard();
     expect(exitCode, stdout).toBe(0);
   });
 
   it("FAILS when a critical action is only in logAuditAsync (regression)", () => {
     // All but the last via logAuditInTx; the last reverted to async-only.
-    ALL.slice(0, -1).forEach((a, i) => writeRoute(`crit-${i}/route.ts`, inTx(a)));
-    const reverted = ALL[ALL.length - 1];
+    writeAllExcept(LAST);
+    const reverted = LAST;
     writeRoute("recover/route.ts", asyncCall(reverted));
     const { exitCode, stdout, stderr } = runGuard();
     expect(exitCode).toBe(1);
@@ -120,8 +140,8 @@ describe("check-critical-audit-atomic.mjs", () => {
   });
 
   it("is action-based, not proximity-based: an action next to (not inside) logAuditInTx does not count", () => {
-    ALL.slice(0, -1).forEach((a, i) => writeRoute(`crit-${i}/route.ts`, inTx(a)));
-    const reverted = ALL[ALL.length - 1];
+    writeAllExcept(LAST);
+    const reverted = LAST;
     // logAuditInTx present but with a DIFFERENT action; the critical action sits
     // in a sibling logAuditAsync a few lines away.
     writeRoute(
@@ -134,44 +154,44 @@ describe("check-critical-audit-atomic.mjs", () => {
 
   describe("logAuditBulkInTx (C4: SCIM team admission approval)", () => {
     it("passes with the last critical action via a bulk array literal", () => {
-      ALL.slice(0, -1).forEach((a, i) => writeRoute(`crit-${i}/route.ts`, inTx(a)));
-      writeRoute("scim/bulk-array/route.ts", bulkArray(ALL[ALL.length - 1]));
+      writeAllExcept(LAST);
+      writeRoute("scim/bulk-array/route.ts", bulkArray(LAST));
       const { exitCode, stdout } = runGuard();
       expect(exitCode, stdout).toBe(0);
     });
 
     it("passes with the last critical action via a bulk .map call", () => {
-      ALL.slice(0, -1).forEach((a, i) => writeRoute(`crit-${i}/route.ts`, inTx(a)));
-      writeRoute("scim/bulk-map/route.ts", bulkMap(ALL[ALL.length - 1]));
+      writeAllExcept(LAST);
+      writeRoute("scim/bulk-map/route.ts", bulkMap(LAST));
       const { exitCode, stdout } = runGuard();
       expect(exitCode, stdout).toBe(0);
     });
 
     it("FAILS (missing-action) when the last critical action has no bulk call either", () => {
-      ALL.slice(0, -1).forEach((a, i) => writeRoute(`crit-${i}/route.ts`, inTx(a)));
+      writeAllExcept(LAST);
       const { exitCode, stdout, stderr } = runGuard();
       expect(exitCode).toBe(1);
-      expect(stdout + stderr).toContain(ALL[ALL.length - 1]);
+      expect(stdout + stderr).toContain(LAST);
     });
 
     it("FAILS (missing-action) when the bulk array literal writes an already-present action instead", () => {
-      ALL.slice(0, -1).forEach((a, i) => writeRoute(`crit-${i}/route.ts`, inTx(a)));
+      writeAllExcept(LAST);
       writeRoute("scim/bulk-array/route.ts", bulkArray(ALL[0]));
       const { exitCode, stdout, stderr } = runGuard();
       expect(exitCode).toBe(1);
-      expect(stdout + stderr).toContain(ALL[ALL.length - 1]);
+      expect(stdout + stderr).toContain(LAST);
     });
 
     it("FAILS (missing-action) when the bulk .map writes an already-present action instead", () => {
-      ALL.slice(0, -1).forEach((a, i) => writeRoute(`crit-${i}/route.ts`, inTx(a)));
+      writeAllExcept(LAST);
       writeRoute("scim/bulk-map/route.ts", bulkMap(ALL[0]));
       const { exitCode, stdout, stderr } = runGuard();
       expect(exitCode).toBe(1);
-      expect(stdout + stderr).toContain(ALL[ALL.length - 1]);
+      expect(stdout + stderr).toContain(LAST);
     });
 
     it("FAILS with the refusal message on a ternary action in a bulk .map, even when every critical action is otherwise present", () => {
-      ALL.forEach((a, i) => writeRoute(`crit-${i}/route.ts`, inTx(a)));
+      writeAllExcept();
       writeRoute("scim/bulk-ternary/route.ts", bulkTernary(ALL[0], ALL[1]));
       const { exitCode, stdout, stderr } = runGuard();
       expect(exitCode).toBe(1);
@@ -179,7 +199,7 @@ describe("check-critical-audit-atomic.mjs", () => {
     });
 
     it("refuses a spread of .map() inside a bulk array literal", () => {
-      ALL.forEach((a, i) => writeRoute(`crit-${i}/route.ts`, inTx(a)));
+      writeAllExcept();
       writeRoute("scim/bulk-spread/route.ts", bulkSpreadOfMap(ALL[0]));
       const { exitCode, stdout, stderr } = runGuard();
       expect(exitCode).toBe(1);
@@ -187,11 +207,92 @@ describe("check-critical-audit-atomic.mjs", () => {
     });
 
     it("does not count logAuditBulkAsync toward the atomic action set", () => {
-      ALL.slice(0, -1).forEach((a, i) => writeRoute(`crit-${i}/route.ts`, inTx(a)));
-      writeRoute("scim/bulk-async/route.ts", bulkAsync(ALL[ALL.length - 1]));
+      writeAllExcept(LAST);
+      writeRoute("scim/bulk-async/route.ts", bulkAsync(LAST));
       const { exitCode, stdout, stderr } = runGuard();
       expect(exitCode).toBe(1);
-      expect(stdout + stderr).toContain(ALL[ALL.length - 1]);
+      expect(stdout + stderr).toContain(LAST);
+    });
+  });
+
+  describe("IN_TX_ONLY_ACTIONS emitter pinning (C1)", () => {
+    const asyncTernary = (a) =>
+      `await logAuditAsync({\n  action: flag ? AUDIT_ACTION.${a} : AUDIT_ACTION.TEAM_MEMBER_REMOVE,\n});\n`;
+    const bulkAsyncMapped = (a) =>
+      `await logAuditBulkAsync(items.map((item) => ({\n  ...base,\n  action: AUDIT_ACTION.${a},\n})));\n`;
+
+    it("passes on the pinned baseline", () => {
+      writeAllExcept();
+      const { exitCode, stdout, stderr } = runGuard();
+      expect(exitCode, stdout + stderr).toBe(0);
+    });
+
+    it.each(Object.keys(PINS))("FAILS on a direct logAuditAsync emit of %s", (a) => {
+      writeAllExcept();
+      writeRoute("extra/route.ts", asyncCall(a));
+      const { exitCode, stderr } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain(`AUDIT_ACTION.${a} in a logAuditAsync call`);
+    });
+
+    it("FAILS on a ternary arm naming a listed action in logAuditAsync", () => {
+      writeAllExcept();
+      writeRoute("extra/route.ts", asyncTernary("TEAM_ROLE_UPDATE"));
+      const { exitCode, stderr } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("AUDIT_ACTION.TEAM_ROLE_UPDATE in a logAuditAsync call");
+    });
+
+    it("FAILS on a mapped logAuditBulkAsync element naming a listed action", () => {
+      writeAllExcept();
+      writeRoute("extra/route.ts", bulkAsyncMapped("TEAM_MEMBER_ADD"));
+      const { exitCode, stderr } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("AUDIT_ACTION.TEAM_MEMBER_ADD in a logAuditBulkAsync call");
+    });
+
+    it("FAILS when an action has one emit fewer than its pin", () => {
+      writeAllExcept(undefined, { TEAM_ROLE_UPDATE: 1 });
+      const { exitCode, stderr } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("AUDIT_ACTION.TEAM_ROLE_UPDATE has 1 direct logAuditInTx emitter(s), pinned at 2");
+    });
+
+    it("FAILS when an action has one emit more than its pin", () => {
+      writeAllExcept(undefined, { TEAM_MEMBER_INVITE: 2 });
+      const { exitCode, stderr } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("AUDIT_ACTION.TEAM_MEMBER_INVITE has 2 direct logAuditInTx emitter(s), pinned at 1");
+    });
+
+    it("FAILS when the pin is met only through the descriptor form", () => {
+      writeAllExcept("TEAM_MEMBER_ADD");
+      writeRoute("extra/route.ts", descriptor("TEAM_MEMBER_ADD"));
+      const { exitCode, stderr } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("AUDIT_ACTION.TEAM_MEMBER_ADD has 0 direct logAuditInTx emitter(s), pinned at 1");
+    });
+
+    it("allows an identifier-valued async action (stated limit)", () => {
+      writeAllExcept();
+      writeRoute("extra/route.ts", "await logAuditAsync({\n  action: auditAction,\n});\n");
+      const { exitCode, stdout, stderr } = runGuard();
+      expect(exitCode, stdout + stderr).toBe(0);
+    });
+
+    it("allows an async TEAM_MEMBER_INVITE_CANCEL (exact name equality)", () => {
+      writeAllExcept();
+      writeRoute("extra/route.ts", asyncCall("TEAM_MEMBER_INVITE_CANCEL"));
+      const { exitCode, stdout, stderr } = runGuard();
+      expect(exitCode, stdout + stderr).toBe(0);
+    });
+
+    it("does not count an in-tx TEAM_MEMBER_INVITE_ACCEPT toward TEAM_MEMBER_INVITE", () => {
+      // The accept emit exists (via ALL), but INVITE itself is absent: still a failure.
+      writeAllExcept("TEAM_MEMBER_INVITE");
+      const { exitCode, stderr } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("AUDIT_ACTION.TEAM_MEMBER_INVITE has 0 direct logAuditInTx emitter(s), pinned at 1");
     });
   });
 

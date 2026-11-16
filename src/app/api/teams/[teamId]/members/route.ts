@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
+import { logAuditInTx, teamAuditBase } from "@/lib/audit/audit";
 import { addMemberSchema } from "@/lib/validations";
 import { activeTeamAdmission, hasTeamPermission, requireTeamMember, requireTeamPermission, TeamAuthError } from "@/lib/auth/access/team-auth";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
@@ -58,6 +58,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
         userId: true,
         role: true,
         createdAt: true,
+        admittedAt: true,
         deactivatedByTenant: true,
         scimApprovalPending: true,
       },
@@ -152,6 +153,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
           where: { teamId, userId },
         });
 
+        let added: MemberResult;
         if (existing) {
           if (existing.deactivatedAt === null) {
             throw new AlreadyMemberError();
@@ -180,20 +182,29 @@ async function handlePOST(req: NextRequest, { params }: Params) {
               scimManaged: false,
             },
           });
-          return { id: updated.id, userId: updated.userId, role: updated.role, reactivated: true };
+          added = { id: updated.id, userId: updated.userId, role: updated.role, reactivated: true };
+        } else {
+          // Create new TeamMember
+          const created = await tx.teamMember.create({
+            data: {
+              teamId,
+              userId,
+              tenantId,
+              role,
+              keyDistributed: false,
+            },
+          });
+          added = { id: created.id, userId: created.userId, role: created.role, reactivated: false };
         }
 
-        // Create new TeamMember
-        const created = await tx.teamMember.create({
-          data: {
-            teamId,
-            userId,
-            tenantId,
-            role,
-            keyDistributed: false,
-          },
+        await logAuditInTx(tx, tenantId, {
+          ...teamAuditBase(req, session.user.id, teamId),
+          action: AUDIT_ACTION.TEAM_MEMBER_ADD,
+          targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
+          targetId: added.id,
+          metadata: { userId, role, reactivated: added.reactivated },
         });
-        return { id: created.id, userId: created.userId, role: created.role, reactivated: false };
+        return added;
       },
       { timeout: TEAM_MEMBERSHIP_TX_TIMEOUT_MS },
     );
@@ -216,14 +227,6 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     }
     return handleAuthError(e);
   }
-
-  await logAuditAsync({
-    ...teamAuditBase(req, session.user.id, teamId),
-    action: AUDIT_ACTION.TEAM_MEMBER_ADD,
-    targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
-    targetId: member.id,
-    metadata: { userId, role, reactivated: member.reactivated },
-  });
 
   return NextResponse.json(member, { status: 201 });
 }

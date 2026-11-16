@@ -4,7 +4,7 @@ import { randomBytes } from "node:crypto";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { hashToken } from "@/lib/crypto/crypto-server";
-import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
+import { logAuditInTx, teamAuditBase } from "@/lib/audit/audit";
 import { inviteSchema } from "@/lib/validations";
 import { activeTeamAdmission, hasTeamPermission, requireTeamPermission } from "@/lib/auth/access/team-auth";
 import { API_ERROR } from "@/lib/http/api-error-codes";
@@ -156,7 +156,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   try {
     issued = await withTeamTenantRls(
       teamId,
-      async (_tenantId, tx) => {
+      async (tenantId, tx) => {
         const budget = createLockBudget();
         const rows = await lockTenantRows(tx, team.tenantId, [session.user.id, ...inviteeIds], "share", budget);
         // The team too (after the tenant rows, as every writer orders them), so
@@ -211,6 +211,13 @@ async function handlePOST(req: NextRequest, { params }: Params) {
             invitedById: session.user.id,
           },
         });
+        await logAuditInTx(tx, tenantId, {
+          ...teamAuditBase(req, session.user.id, teamId),
+          action: AUDIT_ACTION.TEAM_MEMBER_INVITE,
+          targetType: AUDIT_TARGET_TYPE.TEAM_INVITATION,
+          targetId: invitation.id,
+          metadata: { email, role },
+        });
         return { outcome: ISSUE_OUTCOME.ISSUED, invitation };
       },
       { timeout: TEAM_MEMBERSHIP_TX_TIMEOUT_MS },
@@ -227,14 +234,6 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     return errorResponse(API_ERROR.INVITATION_ALREADY_SENT);
   }
   const { invitation } = issued;
-
-  await logAuditAsync({
-    ...teamAuditBase(req, session.user.id, teamId),
-    action: AUDIT_ACTION.TEAM_MEMBER_INVITE,
-    targetType: AUDIT_TARGET_TYPE.TEAM_INVITATION,
-    targetId: invitation.id,
-    metadata: { email, role },
-  });
 
   return NextResponse.json(
     {
