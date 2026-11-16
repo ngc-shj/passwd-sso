@@ -15,8 +15,12 @@ const {
   mockInvalidateCachedSessions,
   mockInvalidateCachedSessionsBulkByDigest,
   mockExecuteRaw,
+  mockLoggerError,
+  mockSentryCaptureMessage,
 } = vi.hoisted(() => ({
-  mockExecuteRaw: vi.fn(async () => 0),
+  mockExecuteRaw: vi.fn(async (..._args: unknown[]) => 0),
+  mockLoggerError: vi.fn(),
+  mockSentryCaptureMessage: vi.fn(),
   mockSession: { deleteMany: vi.fn(), findMany: vi.fn() },
   mockExtensionToken: { updateMany: vi.fn() },
   mockApiKey: { updateMany: vi.fn() },
@@ -58,6 +62,10 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 vi.mock("@/lib/auth/session/session-cache-helpers", () => ({
   invalidateCachedSessions: mockInvalidateCachedSessions,
 }));
+vi.mock("@/lib/logger", () => ({
+  getLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: mockLoggerError }),
+}));
+vi.mock("@sentry/nextjs", () => ({ captureMessage: mockSentryCaptureMessage }));
 vi.mock("@/lib/auth/session/session-cache", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/auth/session/session-cache")>()),
   invalidateCachedSessionsBulkByDigest: mockInvalidateCachedSessionsBulkByDigest,
@@ -66,8 +74,11 @@ vi.mock("@/lib/auth/session/session-cache", async (importOriginal) => ({
 import {
   invalidateUserSessions,
   invalidateUserSessionsCache,
+  revokeUsersAuthArtifactsInTx,
+  tombstoneRevokedSessions,
   type InvalidateUserSessionsOptions,
 } from "./user-session-invalidation";
+import { UserAuthLockTimeoutError, userAuthLockKey } from "@/lib/auth/session/user-auth-serialization";
 import { hashSessionToken } from "@/lib/auth/session/session-cache";
 import {
   expectInvalidatedAfterCommit,
@@ -97,26 +108,26 @@ describe("invalidateUserSessions", () => {
     const result = await invalidateUserSessions("user-1", { tenantId: "tenant-1" });
 
     expect(mockSession.deleteMany).toHaveBeenCalledWith({
-      where: { userId: "user-1", tenantId: "tenant-1" },
+      where: { userId: { in: ["user-1"] }, tenantId: "tenant-1" },
     });
     expect(mockExtensionToken.updateMany).toHaveBeenCalledWith({
-      where: { userId: "user-1", revokedAt: null, tenantId: "tenant-1" },
+      where: { userId: { in: ["user-1"] }, revokedAt: null, tenantId: "tenant-1" },
       data: { revokedAt: expect.any(Date) },
     });
     expect(mockApiKey.updateMany).toHaveBeenCalledWith({
-      where: { userId: "user-1", revokedAt: null, tenantId: "tenant-1" },
+      where: { userId: { in: ["user-1"] }, revokedAt: null, tenantId: "tenant-1" },
       data: { revokedAt: expect.any(Date) },
     });
     expect(mockMcpAccessToken.updateMany).toHaveBeenCalledWith({
-      where: { userId: "user-1", revokedAt: null, tenantId: "tenant-1" },
+      where: { userId: { in: ["user-1"] }, revokedAt: null, tenantId: "tenant-1" },
       data: { revokedAt: expect.any(Date) },
     });
     expect(mockMcpRefreshToken.updateMany).toHaveBeenCalledWith({
-      where: { userId: "user-1", revokedAt: null, tenantId: "tenant-1" },
+      where: { userId: { in: ["user-1"] }, revokedAt: null, tenantId: "tenant-1" },
       data: { revokedAt: expect.any(Date) },
     });
     expect(mockDelegationSession.updateMany).toHaveBeenCalledWith({
-      where: { userId: "user-1", revokedAt: null, tenantId: "tenant-1" },
+      where: { userId: { in: ["user-1"] }, revokedAt: null, tenantId: "tenant-1" },
       data: { revokedAt: expect.any(Date) },
     });
     // H4: OperatorToken uses subjectUserId (NOT userId) as the bound column.
@@ -124,7 +135,7 @@ describe("invalidateUserSessions", () => {
     // session-invalidation that was supposed to lock them out, and they can
     // still call rotate-master-key / purge-audit-logs / purge-history.
     expect(mockOperatorToken.updateMany).toHaveBeenCalledWith({
-      where: { subjectUserId: "user-1", revokedAt: null, tenantId: "tenant-1" },
+      where: { subjectUserId: { in: ["user-1"] }, revokedAt: null, tenantId: "tenant-1" },
       data: { revokedAt: expect.any(Date) },
     });
     expect(result).toEqual({
@@ -147,7 +158,7 @@ describe("invalidateUserSessions", () => {
 
     for (const m of [mockExtensionBridgeCode, mockMobileBridgeCode, mockMcpAuthorizationCode]) {
       expect(m.updateMany).toHaveBeenCalledWith({
-        where: { userId: "user-1", usedAt: null, tenantId: "tenant-1" },
+        where: { userId: { in: ["user-1"] }, usedAt: null, tenantId: "tenant-1" },
         data: { usedAt: expect.any(Date) },
       });
     }
@@ -158,9 +169,9 @@ describe("invalidateUserSessions", () => {
 
     const exclusion = { sessionToken: { not: hashSessionToken("raw-current") } };
     expect(mockSession.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { userId: "user-1", tenantId: "tenant-1", ...exclusion } }),
+      expect.objectContaining({ where: { userId: { in: ["user-1"] }, tenantId: "tenant-1", ...exclusion } }),
     );
-    expect(mockSession.deleteMany).toHaveBeenCalledWith({ where: { userId: "user-1", tenantId: "tenant-1", ...exclusion } });
+    expect(mockSession.deleteMany).toHaveBeenCalledWith({ where: { userId: { in: ["user-1"] }, tenantId: "tenant-1", ...exclusion } });
   });
 
   it("takes the user's credential lock before revoking anything", async () => {
@@ -186,7 +197,7 @@ describe("invalidateUserSessions", () => {
     await invalidateUserSessions("user-1", { tenantId: "tenant-2" });
 
     expect(mockSession.deleteMany).toHaveBeenCalledWith({
-      where: { userId: "user-1", tenantId: "tenant-2" },
+      where: { userId: { in: ["user-1"] }, tenantId: "tenant-2" },
     });
     for (const m of [
       mockExtensionToken,
@@ -196,32 +207,34 @@ describe("invalidateUserSessions", () => {
       mockDelegationSession,
     ]) {
       expect(m.updateMany).toHaveBeenCalledWith({
-        where: { userId: "user-1", revokedAt: null, tenantId: "tenant-2" },
+        where: { userId: { in: ["user-1"] }, revokedAt: null, tenantId: "tenant-2" },
         data: { revokedAt: expect.any(Date) },
       });
     }
     // OperatorToken keys on subjectUserId instead of userId.
     expect(mockOperatorToken.updateMany).toHaveBeenCalledWith({
-      where: { subjectUserId: "user-1", revokedAt: null, tenantId: "tenant-2" },
+      where: { subjectUserId: { in: ["user-1"] }, revokedAt: null, tenantId: "tenant-2" },
       data: { revokedAt: expect.any(Date) },
     });
   });
 
   it("propagates error when a database operation fails", async () => {
-    // This throw is the SCIM fail-open trigger: the SCIM handler catches it, logs
-    // "session-invalidation-failed", records sessionInvalidationFailed:true in the
-    // audit, and still returns 200 — leaving existing tokens un-revoked.
+    // The vault routes that call this answer the failure (admin reset before
+    // the token is spent; passphrase change and recovery with
+    // SESSION_INVALIDATE_FAILED). Departures revoke in their own transaction.
     mockSession.deleteMany.mockRejectedValue(new Error("db error"));
     await expect(
       invalidateUserSessions("user-1", { tenantId: "tenant-1" }),
     ).rejects.toThrow("db error");
   });
 
-  // L2 — residual lockout surface (documentation test). When
-  // invalidateUserSessions throws (fail-open), revokedAt writes do not land. The
-  // deactivation IS still committed, so token classes whose validators
-  // INDEPENDENTLY re-check tenantMember.deactivatedAt fail closed on the next
-  // request regardless of revokedAt:
+  // L2 — residual lockout surface (documentation test). A SCIM deactivation
+  // or team removal no longer commits without its revocation (the revocation
+  // runs in the departure's transaction, docs/archive/review/
+  // session-revocation-failure-surfaces-plan.md). Should a deactivation commit
+  // through some other path with the revokedAt writes missing, token classes
+  // whose validators INDEPENDENTLY re-check tenantMember.deactivatedAt fail
+  // closed on the next request regardless of revokedAt:
   //   - api_key            (api-key.ts C13)
   //   - extension_token    (extension-token.ts C13)
   //   - mcp_access_token + refresh rotation (oauth-server.ts checkTenantMembership)
@@ -247,11 +260,11 @@ describe("invalidateUserSessions", () => {
   it("revokes DelegationSession and OperatorToken (revokedAt write; route-level membership is the fail-open backstop)", async () => {
     await invalidateUserSessions("user-1", { tenantId: "tenant-1" });
     expect(mockDelegationSession.updateMany).toHaveBeenCalledWith({
-      where: { userId: "user-1", revokedAt: null, tenantId: "tenant-1" },
+      where: { userId: { in: ["user-1"] }, revokedAt: null, tenantId: "tenant-1" },
       data: { revokedAt: expect.any(Date) },
     });
     expect(mockOperatorToken.updateMany).toHaveBeenCalledWith({
-      where: { subjectUserId: "user-1", revokedAt: null, tenantId: "tenant-1" },
+      where: { subjectUserId: { in: ["user-1"] }, revokedAt: null, tenantId: "tenant-1" },
       data: { revokedAt: expect.any(Date) },
     });
   });
@@ -306,11 +319,11 @@ describe("invalidateUserSessions", () => {
 
     // No tenant filter on any sub-query.
     expect(mockSession.findMany).toHaveBeenCalledWith({
-      where: { userId: "user-1" },
+      where: { userId: { in: ["user-1"] } },
       select: { sessionToken: true },
     });
     expect(mockSession.deleteMany).toHaveBeenCalledWith({
-      where: { userId: "user-1" },
+      where: { userId: { in: ["user-1"] } },
     });
     for (const m of [
       mockExtensionToken,
@@ -320,12 +333,12 @@ describe("invalidateUserSessions", () => {
       mockDelegationSession,
     ]) {
       expect(m.updateMany).toHaveBeenCalledWith({
-        where: { userId: "user-1", revokedAt: null },
+        where: { userId: { in: ["user-1"] }, revokedAt: null },
         data: { revokedAt: expect.any(Date) },
       });
     }
     expect(mockOperatorToken.updateMany).toHaveBeenCalledWith({
-      where: { subjectUserId: "user-1", revokedAt: null },
+      where: { subjectUserId: { in: ["user-1"] }, revokedAt: null },
       data: { revokedAt: expect.any(Date) },
     });
 
@@ -390,6 +403,266 @@ describe("invalidateUserSessions", () => {
       // @ts-expect-error mutually exclusive: tenantId and allTenants cannot both be set
       invalidateUserSessions("user-1", { tenantId: "x", allTenants: true });
     expect(typeof _typeCheckOnly).toBe("function");
+  });
+});
+
+describe("revokeUsersAuthArtifactsInTx", () => {
+  const MODELS = [
+    mockExtensionToken,
+    mockApiKey,
+    mockMcpAccessToken,
+    mockMcpRefreshToken,
+    mockDelegationSession,
+    mockOperatorToken,
+    mockExtensionBridgeCode,
+    mockMobileBridgeCode,
+    mockMcpAuthorizationCode,
+  ];
+  const tx = () =>
+    ({
+      session: mockSession,
+      extensionToken: mockExtensionToken,
+      apiKey: mockApiKey,
+      mcpAccessToken: mockMcpAccessToken,
+      mcpRefreshToken: mockMcpRefreshToken,
+      delegationSession: mockDelegationSession,
+      operatorToken: mockOperatorToken,
+      extensionBridgeCode: mockExtensionBridgeCode,
+      mobileBridgeCode: mockMobileBridgeCode,
+      mcpAuthorizationCode: mockMcpAuthorizationCode,
+      $executeRaw: mockExecuteRaw,
+      $queryRaw: vi.fn(async () => [{ lock_timeout: "0", statement_timeout: "0" }]),
+    }) as never;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockExecuteRaw.mockImplementation(async () => 0);
+    mockSession.findMany.mockResolvedValue([{ sessionToken: "tok-a" }, { sessionToken: "tok-b" }]);
+    mockSession.deleteMany.mockResolvedValue({ count: 2 });
+    for (const m of MODELS) m.updateMany.mockResolvedValue({ count: 1 });
+  });
+
+  it("makes no call and returns zero counts for an empty list", async () => {
+    const result = await revokeUsersAuthArtifactsInTx(tx(), [], { tenantFilter: { tenantId: "tenant-1" } });
+
+    expect(mockExecuteRaw).not.toHaveBeenCalled();
+    expect(mockSession.findMany).not.toHaveBeenCalled();
+    expect(mockSession.deleteMany).not.toHaveBeenCalled();
+    for (const m of MODELS) expect(m.updateMany).not.toHaveBeenCalled();
+    expect(result.sessionTokens).toEqual([]);
+    expect(Object.values(result.counts).every((count) => count === 0)).toBe(true);
+    expect(Object.keys(result.counts)).toHaveLength(10);
+  });
+
+  it("locks every user in one statement, keyed byte for byte as a mint keys it, ordered by key in byte order", async () => {
+    await revokeUsersAuthArtifactsInTx(tx(), ["user-b", "user-a"], { tenantFilter: { tenantId: "tenant-1" } });
+
+    expect(mockExecuteRaw).toHaveBeenCalledTimes(1);
+    const sql = String(mockExecuteRaw.mock.calls[0]![0]);
+    expect(sql).toContain("pg_advisory_xact_lock(hashtext(k))");
+    expect(sql).toContain('ORDER BY k COLLATE "C"');
+    expect(mockExecuteRaw.mock.calls[0]![1]).toEqual([userAuthLockKey("user-b"), userAuthLockKey("user-a")]);
+  });
+
+  it("filters every model by the users with `in` and carries the tenant filter", async () => {
+    await revokeUsersAuthArtifactsInTx(tx(), ["user-a", "user-b"], { tenantFilter: { tenantId: "tenant-1" } });
+
+    const users = { in: ["user-a", "user-b"] };
+    expect(mockSession.deleteMany).toHaveBeenCalledWith({ where: { userId: users, tenantId: "tenant-1" } });
+    for (const m of [mockExtensionToken, mockApiKey, mockMcpAccessToken, mockMcpRefreshToken, mockDelegationSession]) {
+      expect(m.updateMany).toHaveBeenCalledWith({
+        where: { userId: users, revokedAt: null, tenantId: "tenant-1" },
+        data: { revokedAt: expect.any(Date) },
+      });
+    }
+    expect(mockOperatorToken.updateMany).toHaveBeenCalledWith({
+      where: { subjectUserId: users, revokedAt: null, tenantId: "tenant-1" },
+      data: { revokedAt: expect.any(Date) },
+    });
+    for (const m of [mockExtensionBridgeCode, mockMobileBridgeCode, mockMcpAuthorizationCode]) {
+      expect(m.updateMany).toHaveBeenCalledWith({
+        where: { userId: users, usedAt: null, tenantId: "tenant-1" },
+        data: { usedAt: expect.any(Date) },
+      });
+    }
+  });
+
+  it("returns the summed counts and the deleted sessions' digests", async () => {
+    const result = await revokeUsersAuthArtifactsInTx(tx(), ["user-a", "user-b"], { tenantFilter: { tenantId: "tenant-1" } });
+
+    expect(result.sessionTokens).toEqual(["tok-a", "tok-b"]);
+    expect(result.counts).toMatchObject({ sessions: 2, extensionTokens: 1, operatorTokens: 1, mcpAuthorizationCodes: 1 });
+  });
+
+  it("bounds the lock wait when asked, raising UserAuthLockTimeoutError past it and revoking nothing", async () => {
+    const lockTimeout = Object.assign(new Error("canceling statement due to lock timeout"), { code: "55P03" });
+    mockExecuteRaw.mockImplementation(async (...args: unknown[]) => {
+      if (String(args[0]).includes("pg_advisory_xact_lock")) throw lockTimeout;
+      return 0;
+    });
+
+    await expect(
+      revokeUsersAuthArtifactsInTx(tx(), ["user-a"], { tenantFilter: { tenantId: "tenant-1" }, boundedLockWait: true }),
+    ).rejects.toBeInstanceOf(UserAuthLockTimeoutError);
+    expect(mockSession.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("without boundedLockWait, waits as a mint does: no lock_timeout is set around the lock", async () => {
+    await revokeUsersAuthArtifactsInTx(tx(), ["user-a"], { tenantFilter: { tenantId: "tenant-1" } });
+
+    expect(mockExecuteRaw).toHaveBeenCalledTimes(1);
+    expect(String(mockExecuteRaw.mock.calls[0]![0])).toContain("pg_advisory_xact_lock");
+  });
+
+  it("with boundedLockWait, sets lock_timeout around the one lock statement", async () => {
+    await revokeUsersAuthArtifactsInTx(tx(), ["user-a"], { tenantFilter: { tenantId: "tenant-1" }, boundedLockWait: true });
+
+    const statements = mockExecuteRaw.mock.calls.map((call) => String(call[0]));
+    const lockAt = statements.findIndex((sql) => sql.includes("pg_advisory_xact_lock"));
+    expect(statements.filter((sql) => sql.includes("pg_advisory_xact_lock"))).toHaveLength(1);
+    expect(statements[lockAt - 1]).toContain("lock_timeout");
+    expect(statements[lockAt + 1]).toContain("lock_timeout");
+  });
+});
+
+describe("tombstoneRevokedSessions", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockInvalidateCachedSessions.mockResolvedValue({ total: 0, failed: 0 });
+  });
+
+  it("does nothing for no tokens", async () => {
+    expect(await tombstoneRevokedSessions([], { reason: "r", operation: "op" })).toBe(0);
+    expect(mockInvalidateCachedSessions).not.toHaveBeenCalled();
+    expect(mockLoggerError).not.toHaveBeenCalled();
+  });
+
+  it("raises no signal when every tombstone lands", async () => {
+    mockInvalidateCachedSessions.mockResolvedValueOnce({ total: 2, failed: 0 });
+
+    expect(await tombstoneRevokedSessions(["a", "b"], { reason: "r", operation: "op", userId: "u" })).toBe(0);
+    expect(mockInvalidateCachedSessions).toHaveBeenCalledWith(["a", "b"]);
+    expect(mockLoggerError).not.toHaveBeenCalled();
+    expect(mockSentryCaptureMessage).not.toHaveBeenCalled();
+  });
+
+  it("reports partial failures as the one on-call signal", async () => {
+    mockInvalidateCachedSessions.mockResolvedValueOnce({ total: 3, failed: 2 });
+
+    const failures = await tombstoneRevokedSessions(["a", "b", "c"], {
+      reason: "scim_deprovision",
+      operation: "SCIM user deprovisioning",
+      userId: "u",
+      extra: { tenantScope: "t" },
+    });
+
+    expect(failures).toBe(2);
+    expect(mockLoggerError).toHaveBeenCalledWith(
+      { tenantScope: "t", userId: "u", failures: 2, reason: "scim_deprovision", _logType: "session.cache_tombstone_failures" },
+      "session.cache_tombstone_failures",
+    );
+    expect(mockSentryCaptureMessage).toHaveBeenCalledWith("session cache tombstone failures during SCIM user deprovisioning", {
+      level: "error",
+      tags: { reason: "scim_deprovision" },
+      extra: { userId: "u", failures: 2, tenantScope: "t" },
+    });
+  });
+
+  it("never throws: a Redis throw counts every token as failed and logs the error", async () => {
+    mockInvalidateCachedSessions.mockRejectedValueOnce(new Error("redis down"));
+
+    const failures = await tombstoneRevokedSessions(["a", "b"], {
+      reason: "tenant_member_passkey_revoke",
+      operation: "tenant member passkey revoke",
+      extra: { targetUserId: "target" },
+    });
+
+    expect(failures).toBe(2);
+    const [fields, message] = mockLoggerError.mock.calls[0]!;
+    expect(message).toBe("session.cache_tombstone_failures");
+    expect(fields).toMatchObject({
+      targetUserId: "target",
+      failures: 2,
+      _logType: "session.cache_tombstone_failures",
+      error: expect.anything(),
+    });
+    // No userId when none is given.
+    expect(fields).not.toHaveProperty("userId");
+    expect(mockSentryCaptureMessage).toHaveBeenCalledWith(
+      "session cache tombstone failures during tenant member passkey revoke",
+      expect.objectContaining({ extra: { failures: 2, targetUserId: "target" } }),
+    );
+  });
+
+  it("logs the context's extra fields without letting them replace the signal's own", async () => {
+    mockInvalidateCachedSessions.mockResolvedValueOnce({ total: 1, failed: 1 });
+
+    await tombstoneRevokedSessions(["a"], {
+      reason: "directory_sync_deprovision",
+      operation: "directory sync",
+      userId: "u",
+      extra: { tenantId: "t", configId: "c", userId: "spoofed", failures: 99, _logType: "other" },
+    });
+
+    expect(mockLoggerError).toHaveBeenCalledWith(
+      {
+        tenantId: "t",
+        configId: "c",
+        userId: "u",
+        failures: 1,
+        reason: "directory_sync_deprovision",
+        _logType: "session.cache_tombstone_failures",
+      },
+      "session.cache_tombstone_failures",
+    );
+    expect(mockSentryCaptureMessage).toHaveBeenCalledWith("session cache tombstone failures during directory sync", {
+      level: "error",
+      tags: { reason: "directory_sync_deprovision" },
+      extra: { tenantId: "t", configId: "c", userId: "u", failures: 1, _logType: "other" },
+    });
+  });
+
+  it("tags a missing reason as unspecified and logs it as null", async () => {
+    mockInvalidateCachedSessions.mockResolvedValueOnce({ total: 1, failed: 1 });
+
+    await tombstoneRevokedSessions(["a"], { reason: null, operation: "invalidateUserSessions", userId: "u" });
+
+    expect(mockLoggerError).toHaveBeenCalledWith(expect.objectContaining({ reason: null }), "session.cache_tombstone_failures");
+    expect(mockSentryCaptureMessage).toHaveBeenCalledWith(
+      "session cache tombstone failures during invalidateUserSessions",
+      expect.objectContaining({ tags: { reason: "unspecified" } }),
+    );
+  });
+
+  // The adopters' signal (plan C5 table): invalidateUserSessions keeps the
+  // exact log fields, message and Sentry payload it raised before the helper.
+  it("raises invalidateUserSessions' signal unchanged", async () => {
+    mockSession.findMany.mockResolvedValue([{ sessionToken: "tok-a" }]);
+    mockSession.deleteMany.mockResolvedValue({ count: 1 });
+    for (const m of [
+      mockExtensionToken,
+      mockApiKey,
+      mockMcpAccessToken,
+      mockMcpRefreshToken,
+      mockDelegationSession,
+      mockOperatorToken,
+      mockExtensionBridgeCode,
+      mockMobileBridgeCode,
+      mockMcpAuthorizationCode,
+    ]) m.updateMany.mockResolvedValue({ count: 0 });
+    mockInvalidateCachedSessions.mockResolvedValueOnce({ total: 1, failed: 1 });
+
+    await invalidateUserSessions("user-1", { allTenants: true, reason: "admin_vault_reset" });
+
+    expect(mockLoggerError).toHaveBeenCalledWith(
+      { tenantScope: "all", userId: "user-1", failures: 1, reason: "admin_vault_reset", _logType: "session.cache_tombstone_failures" },
+      "session.cache_tombstone_failures",
+    );
+    expect(mockSentryCaptureMessage).toHaveBeenCalledWith("session cache tombstone failures during invalidateUserSessions", {
+      level: "error",
+      tags: { reason: "admin_vault_reset" },
+      extra: { userId: "user-1", failures: 1, tenantScope: "all" },
+    });
   });
 });
 

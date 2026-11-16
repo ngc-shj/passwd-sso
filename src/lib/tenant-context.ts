@@ -46,7 +46,7 @@ export async function resolveUserTenantId(userId: string): Promise<string | null
  * `auth.ts`'s tenant-claim handler. Its MIGRATION branch does move both (a
  * `user.update` alongside the membership write), but its NO-MEMBERSHIP branch
  * — reached when the user holds no active membership anywhere — writes only
- * `tenantMember.upsert` into the claimed tenant and leaves the column naming
+ * a membership row into the claimed tenant and leaves the column naming
  * whichever tenant last owned the row. `auth.ts`'s own comment already
  * distinguishes those two writers. So: a user deactivated or SCIM-deleted in
  * tenant B, then signing in through an IdP whose claim resolves to tenant A,

@@ -121,6 +121,9 @@ const CRITICAL_ACTIONS = new Set([
   "TEAM_MEMBER_ADD",
   "TEAM_MEMBER_INVITE",
   "TEAM_ROLE_UPDATE",
+  // session-revocation-failure-surfaces: the removal, its credential
+  // revocation and its audit row commit together.
+  "TEAM_MEMBER_REMOVE",
 ]);
 
 // Actions with a pinned number of direct logAuditInTx emitters and no
@@ -129,6 +132,7 @@ const IN_TX_ONLY_ACTIONS = new Map([
   ["TEAM_MEMBER_ADD", 1],
   ["TEAM_MEMBER_INVITE", 1],
   ["TEAM_ROLE_UPDATE", 2],
+  ["TEAM_MEMBER_REMOVE", 1],
 ]);
 
 const ASYNC_AUDIT_HELPERS = new Set(["logAuditAsync", "logAuditBulkAsync", "logAuditAsyncBothScopes"]);

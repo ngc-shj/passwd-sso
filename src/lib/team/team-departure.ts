@@ -8,6 +8,10 @@ import {
   lockTeamsAgainstRotation,
 } from "@/lib/team/team-key-rotation-lock";
 import { lockTenantRows } from "@/lib/team/tenant-row-lock";
+import {
+  type UserAuthArtifactCounts,
+  revokeUsersAuthArtifactsInTx,
+} from "@/lib/auth/session/user-session-invalidation";
 
 /**
  * A user's membership of a tenant is the gate to their memberships of that
@@ -20,6 +24,14 @@ import { lockTenantRows } from "@/lib/team/tenant-row-lock";
  *
  * These are the only writers that move `tenant_members.deactivated_at`
  * (scripts/checks/check-team-rotation-input-lock.mjs).
+ *
+ * Every departure and every return revokes the users' sessions and tokens in
+ * the tenant in its own transaction, as its last step, so it cannot commit
+ * without the revocation (docs/archive/review/session-revocation-failure-surfaces-plan.md
+ * C2). The credential lock is taken last within each call. A transaction that
+ * calls several times (directory sync) or writes after the call (SCIM PUT's
+ * external mapping) holds it across those later writes; what holds is that no
+ * mint holding it waits on a row these transactions hold.
  */
 
 export const TENANT_MEMBERSHIP_SOURCE = {
@@ -45,6 +57,17 @@ export type TenantTransitionOptions = {
 };
 
 type Tx = Prisma.TransactionClient;
+
+/**
+ * What a departure revoked. The caller tombstones `sessionTokens` in the
+ * session cache after its transaction commits (tombstoneRevokedSessions).
+ */
+export type DepartureRevocation = { counts: UserAuthArtifactCounts; sessionTokens: string[] };
+
+/** The departing users' credentials in this tenant, waiting on their lock for a bounded time. */
+function revokeInTenant(tenantId: string) {
+  return { tenantFilter: { tenantId }, boundedLockWait: true };
+}
 
 async function activeMembershipTeams(tx: Tx, tenantId: string, userIds: readonly string[]): Promise<string[]> {
   const rows = await tx.$queryRaw<{ team_id: string }[]>`
@@ -103,11 +126,12 @@ async function endTeamMemberships(
 
 /**
  * Deactivate the users' memberships of `tenantId` (tenant OWNER excepted)
- * and, with them, their memberships of the tenant's teams. Returns the users
- * that transitioned; callers derive audit, session invalidation and counters
- * from it, not from a pre-read. Re-deactivating a deactivated user is a
- * no-op: the stamp is written once, so a membership re-admitted after the
- * departure stays.
+ * and, with them, their memberships of the tenant's teams, and revoke the
+ * credentials of exactly the users that transitioned. Returns those users;
+ * callers derive audit and counters from them, not from a pre-read.
+ * Re-deactivating a deactivated user is a no-op that revokes nothing: the
+ * stamp is written once, so a membership re-admitted after the departure
+ * stays.
  *
  * MUST run inside a transaction under the tenant's RLS context.
  */
@@ -116,8 +140,10 @@ export async function departFromTenant(
   tenantId: string,
   userIds: readonly string[],
   options: TenantTransitionOptions,
-): Promise<string[]> {
-  if (userIds.length === 0) return [];
+): Promise<{ userIds: string[]; revocation: DepartureRevocation }> {
+  if (userIds.length === 0) {
+    return { userIds: [], revocation: await revokeUsersAuthArtifactsInTx(tx, [], revokeInTenant(tenantId)) };
+  }
   if (!options.alreadyLocked) await lockTenantRows(tx, tenantId, userIds, "update", options.budget);
 
   // clock_timestamp(), not now(): the stamp is compared with invitations'
@@ -132,15 +158,17 @@ export async function departFromTenant(
       RETURNING user_id
     `
   ).map((row) => row.user_id);
-  if (transitioned.length === 0) return [];
-  await endTeamMemberships(tx, tenantId, transitioned, options);
-  return transitioned;
+  if (transitioned.length > 0) await endTeamMemberships(tx, tenantId, transitioned, options);
+  // Last, after the team locks and writes (C1 lock order), on a budget of its
+  // own: a directory-sync run spends the transition budget on its own work.
+  const revocation = await revokeUsersAuthArtifactsInTx(tx, transitioned, revokeInTenant(tenantId));
+  return { userIds: transitioned, revocation };
 }
 
 /**
  * Reactivate the users' memberships of `tenantId` and restore the team
- * memberships their departure ended (the marked ones). Returns the users
- * that transitioned.
+ * memberships their departure ended (the marked ones), then revoke the
+ * credentials of exactly the users that transitioned. Returns those users.
  *
  * MUST run inside a transaction under the tenant's RLS context.
  */
@@ -149,8 +177,10 @@ export async function returnToTenant(
   tenantId: string,
   userIds: readonly string[],
   options: TenantTransitionOptions,
-): Promise<string[]> {
-  if (userIds.length === 0) return [];
+): Promise<{ userIds: string[]; revocation: DepartureRevocation }> {
+  if (userIds.length === 0) {
+    return { userIds: [], revocation: await revokeUsersAuthArtifactsInTx(tx, [], revokeInTenant(tenantId)) };
+  }
   if (!options.alreadyLocked) await lockTenantRows(tx, tenantId, userIds, "update", options.budget);
 
   const transitioned = (
@@ -161,7 +191,9 @@ export async function returnToTenant(
       RETURNING user_id
     `
   ).map((row) => row.user_id);
-  if (transitioned.length === 0) return [];
+  if (transitioned.length === 0) {
+    return { userIds: [], revocation: await revokeUsersAuthArtifactsInTx(tx, [], revokeInTenant(tenantId)) };
+  }
 
   const teamRows = await tx.$queryRaw<{ team_id: string }[]>`
     SELECT DISTINCT team_id FROM team_members
@@ -190,7 +222,13 @@ export async function returnToTenant(
       metadata: { source: TENANT_MEMBERSHIP_SOURCE.TENANT_REACTIVATION },
     });
   }
-  return transitioned;
+  // Whatever the user holds in this tenant now was minted before the departure
+  // or without an active membership: departures made before revocation was
+  // atomic (every directory-sync one, swallowed SCIM/team failures) left such
+  // credentials alive, and the return would otherwise revive them.
+  // Last, as in departFromTenant (C1 lock order).
+  const revocation = await revokeUsersAuthArtifactsInTx(tx, transitioned, revokeInTenant(tenantId));
+  return { userIds: transitioned, revocation };
 }
 
 /**
@@ -200,19 +238,21 @@ export async function returnToTenant(
  * The row cannot be created active first (`tenant_members_one_active_per_user`
  * refuses a user active elsewhere), so the caller inserts it deactivated
  * after lockTenantMemberCreation, and this restamps it with the database
- * clock and ends the team memberships.
+ * clock, ends the team memberships and revokes what the user holds in the
+ * tenant.
  */
 export async function departCreatedMembership(
   tx: Tx,
   tenantId: string,
   userIds: readonly string[],
   options: Omit<TenantTransitionOptions, "alreadyLocked">,
-): Promise<void> {
-  if (userIds.length === 0) return;
+): Promise<DepartureRevocation> {
+  if (userIds.length === 0) return revokeUsersAuthArtifactsInTx(tx, [], revokeInTenant(tenantId));
   const stamped = await tx.$executeRaw`
     UPDATE tenant_members SET deactivated_at = clock_timestamp(), updated_at = clock_timestamp()
      WHERE tenant_id = ${tenantId}::uuid AND user_id = ANY(${[...userIds]}::uuid[]) AND deactivated_at IS NOT NULL
   `;
   if (stamped !== userIds.length) throw new Error("departCreatedMembership: a created row is not deactivated");
   await endTeamMemberships(tx, tenantId, userIds, options);
+  return revokeUsersAuthArtifactsInTx(tx, userIds, revokeInTenant(tenantId));
 }

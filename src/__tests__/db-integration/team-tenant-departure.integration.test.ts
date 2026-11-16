@@ -991,7 +991,8 @@ describe("team membership across a tenant departure — real-DB integration", ()
       try {
         departing = withTenantRls(prisma, tenantId, async (tx) => {
           await tx.$queryRaw`SELECT id FROM tenants WHERE id = ${tenantId}::uuid FOR NO KEY UPDATE`;
-          return departFromTenant(tx, tenantId, [leaver.id], { actor: { userId: SYSTEM_ACTOR_ID, actorType: ACTOR_TYPE.SYSTEM } });
+          const departed = await departFromTenant(tx, tenantId, [leaver.id], { actor: { userId: SYSTEM_ACTOR_ID, actorType: ACTOR_TYPE.SYSTEM } });
+          return departed.userIds;
         }, { timeout: 15_000 });
         await race.waitForBackendBlockedBy(blocker.pid);
         const issued = await invite(teamId, owner, leaver.email);
@@ -1076,11 +1077,12 @@ describe("team membership across a tenant departure — real-DB integration", ()
         departing = withTenantRls(prisma, tenantId, async (tx) => {
           const budget = createLockBudget(8_000);
           await lockTenantRows(tx, tenantId, [b.id, a.id], "update", budget);
-          return departFromTenant(tx, tenantId, [b.id, a.id], {
+          const departed = await departFromTenant(tx, tenantId, [b.id, a.id], {
             actor: { userId: SYSTEM_ACTOR_ID, actorType: ACTOR_TYPE.SYSTEM },
             budget,
             alreadyLocked: true,
           });
+          return departed.userIds;
         }, { timeout: 15_000 });
         const departPid = await race.waitForBackendBlockedBy(standIn.pid);
         accepting = accept(a, inv.token!);

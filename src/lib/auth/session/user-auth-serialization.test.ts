@@ -2,7 +2,13 @@ import { describe, it, expect, vi } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 import { TEST_SESSION_TOKEN } from "@/__tests__/helpers/fixtures";
 import { hashSessionToken } from "@/lib/auth/session/session-cache";
-import { isSessionRowLive, isTokenRowLive, lockUserAuthArtifacts } from "./user-auth-serialization";
+import {
+  isSessionRowLive,
+  isTokenRowLive,
+  lockUserAuthArtifacts,
+  lockUsersAuthArtifacts,
+  userAuthLockKey,
+} from "./user-auth-serialization";
 
 const USER = "user-1";
 
@@ -21,6 +27,25 @@ describe("lockUserAuthArtifacts", () => {
     // One statement, the lock: callers (and the bootstrap migration's write
     // walk) rely on it writing no row.
     expect($executeRaw).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("lockUsersAuthArtifacts", () => {
+  it("takes every user's credential lock in one statement, ordered by key in byte order, each key as a mint builds it", async () => {
+    const $executeRaw = vi.fn().mockResolvedValue(1);
+    await lockUsersAuthArtifacts({ $executeRaw, $queryRaw: vi.fn() } as never, ["user-b", "user-a", "user-b"]);
+
+    expect($executeRaw).toHaveBeenCalledTimes(1);
+    const sql = String($executeRaw.mock.calls[0][0]);
+    expect(sql).toContain("pg_advisory_xact_lock(hashtext(k))");
+    expect(sql).toContain('ORDER BY k COLLATE "C"');
+    expect($executeRaw.mock.calls[0][1]).toEqual([userAuthLockKey("user-b"), userAuthLockKey("user-a")]);
+  });
+
+  it("makes no statement for no users", async () => {
+    const $executeRaw = vi.fn();
+    await lockUsersAuthArtifacts({ $executeRaw, $queryRaw: vi.fn() } as never, []);
+    expect($executeRaw).not.toHaveBeenCalled();
   });
 });
 

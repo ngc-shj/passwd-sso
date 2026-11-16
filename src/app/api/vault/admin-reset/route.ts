@@ -6,7 +6,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { getAppOrigin } from "@/lib/url-helpers";
-import { logAuditAsync, teamAuditBase, tenantAuditBase } from "@/lib/audit/audit";
+import { logAuditAsync, personalAuditBase, teamAuditBase, tenantAuditBase } from "@/lib/audit/audit";
 import {
   executeVaultReset,
   findVaultRowsOutsideTenant,
@@ -120,6 +120,33 @@ async function handlePOST(req: NextRequest) {
     return errorResponse(API_ERROR.VAULT_RESET_DATA_OUTSIDE_TENANT);
   }
 
+  // Invalidate every authentication artifact for the target across ALL
+  // tenants (FR7 + F3+S2). The target may hold Session rows in tenants
+  // other than the initiating one; those are stale-by-policy after a
+  // vault reset and must not survive. session.user.id is the target by
+  // construction (the route-level forbidden() guard above ensures
+  // resetRecord.targetUserId === session.user.id).
+  //
+  // Before the token is spent and the vault wiped, so a failure here leaves
+  // both intact and the user retries the same link; a revocation after them
+  // had no retry. A later refusal leaves the user signed out with the vault
+  // intact — the safe direction — and this record names what was revoked on
+  // every exit from here on. The target user is the actor and its audience.
+  const invalidationResult = await invalidateUserSessions(session.user.id, {
+    allTenants: true,
+    reason: "admin_vault_reset",
+  });
+  await logAuditAsync({
+    ...personalAuditBase(req, session.user.id),
+    action: AUDIT_ACTION.SESSION_REVOKE_ALL,
+    metadata: {
+      reason: "admin_vault_reset",
+      resetId: resetRecord.id,
+      revokedCount: invalidationResult.sessions,
+      ...invalidationResult,
+    },
+  });
+
   // TOCTOU prevention: atomically mark the token as executed BEFORE deleting
   // vault data. This ensures a concurrent revoke cannot succeed after data
   // deletion has already started. NULL `encryptedToken` so the at-rest
@@ -182,21 +209,11 @@ async function handlePOST(req: NextRequest) {
     throw err;
   }
 
-  // Invalidate every authentication artifact for the target across ALL
-  // tenants (FR7 + F3+S2). The target may hold Session rows in tenants
-  // other than the initiating one; those are stale-by-policy after a
-  // vault reset and must not survive. session.user.id is the target by
-  // construction (the route-level forbidden() guard above ensures
-  // resetRecord.targetUserId === session.user.id).
-  const invalidationResult = await invalidateUserSessions(session.user.id, {
-    allTenants: true,
-    reason: "admin_vault_reset",
-  });
-
-  // Completion detail (best-effort): invalidation counts known only after the
-  // transaction. Losing this on a crash loses cleanup metadata, NOT the
-  // fact-of-reset (captured atomically above). TENANT scope for tenant-level
-  // resets (teamId null); tenantId preserved on TEAM emit for the JSON log line.
+  // Completion detail (best-effort): the invalidation counts come from the
+  // revocation above, which ran before the transaction. Losing this on a
+  // crash loses cleanup metadata, NOT the fact-of-reset (captured atomically
+  // above). TENANT scope for tenant-level resets (teamId null); tenantId
+  // preserved on TEAM emit for the JSON log line.
   await logAuditAsync({
     ...(resetRecord.teamId
       ? teamAuditBase(req, session.user.id, resetRecord.teamId)

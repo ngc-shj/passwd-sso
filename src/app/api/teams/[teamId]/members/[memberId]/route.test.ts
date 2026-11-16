@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaTeamMember, mockPrismaTeamMemberKey, mockPrismaScimExternalMapping, mockTransaction, mockTeamLockQuery, mockRequireTeamPermission, mockIsRoleAbove, TeamAuthError, mockWithTeamTenantRls, mockInvalidateUserSessions, mockLogger, mockLogAudit, mockLogAuditInTx, txSentinel, mockBuildTeamMemberDisplayItems, mockRequireRecentSession, mockTenantMemberFindMany, mockTenantMemberDepartureFindMany, mockExecuteRaw } = vi.hoisted(() => {
+const { mockAuth, mockPrismaTeamMember, mockPrismaTeamMemberKey, mockPrismaScimExternalMapping, mockTransaction, mockTeamLockQuery, mockRequireTeamPermission, mockIsRoleAbove, TeamAuthError, mockWithTeamTenantRls, mockRevokeUserAuthArtifactsInTx, mockTombstoneRevokedSessions, mockLogger, mockLogAudit, mockLogAuditInTx, txSentinel, mockBuildTeamMemberDisplayItems, mockRequireRecentSession, mockTenantMemberFindMany, mockTenantMemberDepartureFindMany, mockExecuteRaw, mockCommit } = vi.hoisted(() => {
   const _txSentinel: { current: unknown } = { current: null };
   class _TeamAuthError extends Error {
     status: number;
@@ -11,6 +11,7 @@ const { mockAuth, mockPrismaTeamMember, mockPrismaTeamMemberKey, mockPrismaScimE
       this.status = status;
     }
   }
+  const _commit = vi.fn();
   return {
     mockAuth: vi.fn(),
     mockPrismaTeamMember: {
@@ -40,8 +41,9 @@ const { mockAuth, mockPrismaTeamMember, mockPrismaTeamMemberKey, mockPrismaScimE
     mockRequireTeamPermission: vi.fn(),
     mockIsRoleAbove: vi.fn(),
     TeamAuthError: _TeamAuthError,
-    // The change runs on the context's transaction client (fn's second argument),
-    // kept in txSentinel so an audit written through it is told apart.
+    // The change or removal runs on the context's transaction client (fn's
+    // second argument), kept in txSentinel so an audit written through it is
+    // told apart.
     mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: (tenantId: string, tx: unknown) => unknown) => {
       _txSentinel.current = {
         $queryRaw: mockTeamLockQuery,
@@ -52,9 +54,14 @@ const { mockAuth, mockPrismaTeamMember, mockPrismaTeamMemberKey, mockPrismaScimE
         tenantMember: { findMany: mockTenantMemberFindMany },
         tenantMemberDeparture: { findMany: mockTenantMemberDepartureFindMany },
       };
-      return fn("tenant-1", _txSentinel.current);
+      const result = await fn("tenant-1", _txSentinel.current);
+      _commit();
+      return result;
     }),
-    mockInvalidateUserSessions: vi.fn().mockResolvedValue({ sessions: 1, extensionTokens: 0, apiKeys: 0 }),
+    // Called by the transaction double once its callback resolved: the commit.
+    mockCommit: _commit,
+    mockRevokeUserAuthArtifactsInTx: vi.fn(),
+    mockTombstoneRevokedSessions: vi.fn(),
     mockLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     mockLogAudit: vi.fn(),
     mockLogAuditInTx: vi.fn(),
@@ -89,7 +96,8 @@ vi.mock("@/lib/tenant-context", () => ({
   withTeamTenantRls: mockWithTeamTenantRls,
 }));
 vi.mock("@/lib/auth/session/user-session-invalidation", () => ({
-  invalidateUserSessions: mockInvalidateUserSessions,
+  revokeUserAuthArtifactsInTx: mockRevokeUserAuthArtifactsInTx,
+  tombstoneRevokedSessions: mockTombstoneRevokedSessions,
 }));
 vi.mock("@/lib/logger", () => ({
   getLogger: () => mockLogger,
@@ -110,6 +118,13 @@ vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
 import { PUT, DELETE } from "./route";
 import { teamLockQuery, lockQueryCalls } from "@/__tests__/helpers/team-rotation-lock-mock";
 import { TEAM_ROLE } from "@/lib/constants";
+import { TEAM_MEMBERSHIP_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
+import { UserAuthLockTimeoutError } from "@/lib/auth/session/user-auth-serialization";
+
+/** The removal's revocation, as revokeUserAuthArtifactsInTx returns it. */
+function revokedFor(userId: string) {
+  return { counts: { sessions: 1, extensionTokens: 0, apiKeys: 0 }, sessionTokens: [`digest-of-${userId}`] };
+}
 
 const TEAM_ID = "team-123";
 const MEMBER_ID = "member-target";
@@ -888,6 +903,8 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
 describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockRevokeUserAuthArtifactsInTx.mockImplementation(async (_tx: unknown, userId: string) => revokedFor(userId));
+    mockTombstoneRevokedSessions.mockResolvedValue(0);
     mockTeamLockQuery.mockImplementation(teamLockQuery([{ id: TEAM_ID }]));
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
     mockRequireTeamPermission.mockResolvedValue(ownerMembership);
@@ -1141,7 +1158,7 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
     expect((await res.json()).error).toBe("TEAM_BUSY");
     expect(res.headers.get("Retry-After")).toBe("3");
     expect(mockPrismaTeamMember.deleteMany).not.toHaveBeenCalled();
-    expect(mockLogAudit).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 
   it("answers 404, removing nothing, when the row changed between the check and the team lock", async () => {
@@ -1157,7 +1174,7 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
 
     expect(res.status).toBe(404);
     expect(mockPrismaTeamMemberKey.deleteMany).not.toHaveBeenCalled();
-    expect(mockInvalidateUserSessions).not.toHaveBeenCalled();
+    expect(mockRevokeUserAuthArtifactsInTx).not.toHaveBeenCalled();
   });
 
   it("locks the team against key rotation before deleting the member's keys", async () => {
@@ -1212,112 +1229,128 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
     expect(mockPrismaTeamMember.deleteMany).not.toHaveBeenCalled();
   });
 
-  it("triggers invalidateUserSessions with tenantId on member removal", async () => {
-    mockPrismaTeamMember.findUnique.mockResolvedValue({
-      id: MEMBER_ID,
-      teamId: TEAM_ID,
-      tenantId: "tenant-1",
-      userId: "target-user",
-      role: TEAM_ROLE.MEMBER,
-      deactivatedAt: null,
-    });
+  const removableTarget = {
+    id: MEMBER_ID,
+    teamId: TEAM_ID,
+    tenantId: "tenant-1",
+    userId: "target-user",
+    role: TEAM_ROLE.MEMBER,
+    deactivatedAt: null,
+  };
 
-    await DELETE(
-      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`),
-      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
-    );
-
-    expect(mockInvalidateUserSessions).toHaveBeenCalledWith("target-user", { tenantId: "tenant-1" });
-  });
-
-  it("returns 200 even if session invalidation fails", async () => {
-    mockPrismaTeamMember.findUnique.mockResolvedValue({
-      id: MEMBER_ID,
-      teamId: TEAM_ID,
-      tenantId: "tenant-1",
-      userId: "target-user",
-      role: TEAM_ROLE.MEMBER,
-      deactivatedAt: null,
-    });
-    mockInvalidateUserSessions.mockRejectedValue(new Error("db error"));
+  it("revokes the removed member's credentials in the tenant inside the removal's transaction, last", async () => {
+    mockPrismaTeamMember.findUnique.mockResolvedValue(removableTarget);
 
     const res = await DELETE(
       createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`),
       createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
     );
+
     expect(res.status).toBe(200);
+    // On the context's transaction client, scoped to the callback's tenant.
+    const removal = mockWithTeamTenantRls.mock.calls.at(-1) as unknown[];
+    expect(mockRevokeUserAuthArtifactsInTx).toHaveBeenCalledWith(
+      expect.objectContaining({ teamMemberKey: mockPrismaTeamMemberKey }),
+      "target-user",
+      { tenantFilter: { tenantId: "tenant-1" }, boundedLockWait: true },
+    );
+    // After the member and key deletes.
+    expect(mockPrismaTeamMemberKey.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(
+      mockRevokeUserAuthArtifactsInTx.mock.invocationCallOrder[0]!,
+    );
+    // Under the membership transaction timeout, not the 5 s default.
+    expect(removal[2]).toEqual({ timeout: TEAM_MEMBERSHIP_TX_TIMEOUT_MS });
   });
 
-  it("logs error when session invalidation fails", async () => {
-    mockPrismaTeamMember.findUnique.mockResolvedValue({
-      id: MEMBER_ID,
-      teamId: TEAM_ID,
-      tenantId: "tenant-1",
-      userId: "target-user",
-      role: TEAM_ROLE.MEMBER,
-      deactivatedAt: null,
-    });
-    const dbError = new Error("db error");
-    mockInvalidateUserSessions.mockRejectedValue(dbError);
+  it("answers no 2xx, records and tombstones nothing when the revocation fails inside the transaction", async () => {
+    mockPrismaTeamMember.findUnique.mockResolvedValue(removableTarget);
+    mockRevokeUserAuthArtifactsInTx.mockRejectedValueOnce(new Error("revocation failed"));
 
-    await DELETE(
+    await expect(
+      DELETE(
+        createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`),
+        createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
+      ),
+    ).rejects.toThrow("revocation failed");
+    expect(mockLogAudit).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
+    expect(mockTombstoneRevokedSessions).not.toHaveBeenCalled();
+  });
+
+  it("propagates a failing in-transaction TEAM_MEMBER_REMOVE audit instead of answering 2xx", async () => {
+    mockPrismaTeamMember.findUnique.mockResolvedValue(removableTarget);
+    mockLogAuditInTx.mockRejectedValueOnce(new Error("audit write failed"));
+
+    await expect(
+      DELETE(
+        createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`),
+        createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
+      ),
+    ).rejects.toThrow("audit write failed");
+    // The removal's transaction is the last one opened, and it did not commit.
+    expect(mockLogAuditInTx).toHaveBeenCalledTimes(1);
+    expect(mockCommit).toHaveBeenCalledTimes(mockWithTeamTenantRls.mock.calls.length - 1);
+    expect(mockTombstoneRevokedSessions).not.toHaveBeenCalled();
+  });
+
+  it("answers 409 CONFLICT when the member's credential lock is held past the wait", async () => {
+    mockPrismaTeamMember.findUnique.mockResolvedValue(removableTarget);
+    mockRevokeUserAuthArtifactsInTx.mockRejectedValueOnce(new UserAuthLockTimeoutError());
+
+    const res = await DELETE(
       createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`),
       createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
     );
 
-    expect(mockLogger.error).toHaveBeenCalledWith(
-      { userId: "target-user", error: { name: "Error", code: "unknown" } },
-      "session-invalidation-failed",
-    );
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("CONFLICT");
+    expect(mockLogAudit).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
+    expect(mockTombstoneRevokedSessions).not.toHaveBeenCalled();
   });
 
-  it("includes sessionInvalidationFailed in audit metadata on failure", async () => {
-    mockPrismaTeamMember.findUnique.mockResolvedValue({
-      id: MEMBER_ID,
-      teamId: TEAM_ID,
-      tenantId: "tenant-1",
-      userId: "target-user",
-      role: TEAM_ROLE.MEMBER,
-      deactivatedAt: null,
-    });
-    mockInvalidateUserSessions.mockRejectedValue(new Error("db error"));
+  it("records the removal and its revocation counts in the removal's transaction, then tombstones after the commit", async () => {
+    mockPrismaTeamMember.findUnique.mockResolvedValue(removableTarget);
+    mockRevokeUserAuthArtifactsInTx.mockImplementationOnce(async (_tx: unknown, userId: string) => ({
+      counts: { sessions: 2, extensionTokens: 1, apiKeys: 0 },
+      sessionTokens: [`digest-of-${userId}-1`, `digest-of-${userId}-2`],
+    }));
+    mockTombstoneRevokedSessions.mockResolvedValueOnce(1);
 
-    await DELETE(
+    const res = await DELETE(
       createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`),
       createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
     );
 
-    expect(mockLogAudit).toHaveBeenCalledWith(
+    expect(res.status).toBe(200);
+    expect(mockLogAuditInTx).toHaveBeenCalledWith(
+      txSentinel.current,
+      "tenant-1",
       expect.objectContaining({
-        metadata: expect.objectContaining({ sessionInvalidationFailed: true }),
-      }),
-    );
-  });
-
-  it("includes invalidation counts in audit metadata on success", async () => {
-    mockPrismaTeamMember.findUnique.mockResolvedValue({
-      id: MEMBER_ID,
-      teamId: TEAM_ID,
-      tenantId: "tenant-1",
-      userId: "target-user",
-      role: TEAM_ROLE.MEMBER,
-      deactivatedAt: null,
-    });
-    mockInvalidateUserSessions.mockResolvedValue({ sessions: 2, extensionTokens: 1, apiKeys: 0 });
-
-    await DELETE(
-      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`),
-      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
-    );
-
-    expect(mockLogAudit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        metadata: expect.objectContaining({
+        action: "TEAM_MEMBER_REMOVE",
+        targetType: "TeamMember",
+        targetId: MEMBER_ID,
+        metadata: {
+          removedUserId: "target-user",
+          removedRole: TEAM_ROLE.MEMBER,
           sessions: 2,
           extensionTokens: 1,
           apiKeys: 0,
-        }),
+        },
       }),
+    );
+    // In the transaction, after the revocation whose counts it records.
+    expect(mockRevokeUserAuthArtifactsInTx.mock.invocationCallOrder[0]).toBeLessThan(
+      mockLogAuditInTx.mock.invocationCallOrder.at(-1)!,
+    );
+    expect(mockLogAuditInTx.mock.invocationCallOrder.at(-1)).toBeLessThan(mockCommit.mock.invocationCallOrder.at(-1)!);
+    expect(mockLogAudit).not.toHaveBeenCalled();
+    expect(mockTombstoneRevokedSessions).toHaveBeenCalledWith(
+      ["digest-of-target-user-1", "digest-of-target-user-2"],
+      { reason: "team_member_remove", operation: "team member removal", userId: "target-user" },
+    );
+    expect(mockCommit.mock.invocationCallOrder.at(-1)).toBeLessThan(
+      mockTombstoneRevokedSessions.mock.invocationCallOrder[0]!,
     );
   });
 });
@@ -1352,6 +1385,8 @@ describe("DELETE: an acting member who left the tenant, judged against their adm
     mockPrismaTeamMember.findUnique.mockResolvedValue({
       id: MEMBER_ID, teamId: TEAM_ID, tenantId: "tenant-1", userId: "target-user", role: TEAM_ROLE.MEMBER, deactivatedAt: null,
     });
+    mockRevokeUserAuthArtifactsInTx.mockImplementation(async (_tx: unknown, userId: string) => revokedFor(userId));
+    mockTombstoneRevokedSessions.mockResolvedValue(0);
   });
 
   it("refuses (403) a departure after admission by a deactivated tenant row, removing nothing and writing no audit", async () => {
@@ -1360,8 +1395,8 @@ describe("DELETE: an acting member who left the tenant, judged against their adm
     expect((await remove()).status).toBe(403);
     expect(mockPrismaTeamMember.deleteMany).not.toHaveBeenCalled();
     expect(mockPrismaTeamMemberKey.deleteMany).not.toHaveBeenCalled();
-    expect(mockInvalidateUserSessions).not.toHaveBeenCalled();
-    expect(mockLogAudit).not.toHaveBeenCalled();
+    expect(mockRevokeUserAuthArtifactsInTx).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 
   it("refuses (403) a departure known only by its record, removing nothing and writing no audit", async () => {
@@ -1370,7 +1405,7 @@ describe("DELETE: an acting member who left the tenant, judged against their adm
     expect((await remove()).status).toBe(403);
     expect(mockPrismaTeamMember.deleteMany).not.toHaveBeenCalled();
     expect(mockPrismaTeamMemberKey.deleteMany).not.toHaveBeenCalled();
-    expect(mockLogAudit).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 
   it("refuses (403) a departure at exactly the admission instant", async () => {
@@ -1389,8 +1424,11 @@ describe("DELETE: an acting member who left the tenant, judged against their adm
     ]) {
       setup();
       mockPrismaTeamMember.deleteMany.mockClear();
+      mockLogAuditInTx.mockClear();
       expect((await remove()).status).toBe(200);
       expect(mockPrismaTeamMember.deleteMany).toHaveBeenCalledTimes(1);
+      // Positive control for the refusal cells' "no audit": an allowed removal writes one.
+      expect(mockLogAuditInTx).toHaveBeenCalledTimes(1);
     }
   });
 });

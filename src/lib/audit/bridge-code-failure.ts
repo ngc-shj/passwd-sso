@@ -29,7 +29,7 @@ export type BridgeCodeFailureReason =
   | "origin_disallowed"
   | "body_schema_invalid"
   | "unauthenticated"
-  | "user_not_found"
+  | "no_active_membership"
   | "tenant_access_restricted"
   | "step_up_required"
   | "rate_limit"

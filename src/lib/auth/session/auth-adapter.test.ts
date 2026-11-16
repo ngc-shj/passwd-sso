@@ -1481,6 +1481,101 @@ describe("createCustomAdapter", () => {
     });
   });
 
+  describe("getSessionAndUser", () => {
+    const USER = { id: "u-1", name: "Test", email: "test@example.com", image: null, emailVerified: null };
+
+    function sessionRow(sessionTenantId: string, activeTenantIds: string[]) {
+      return {
+        sessionToken: "hashed:raw-token",
+        userId: USER.id,
+        tenantId: sessionTenantId,
+        expires,
+        user: { ...USER, tenantMemberships: activeTenantIds.map((tenantId) => ({ tenantId })) },
+      };
+    }
+
+    it("returns the session when its tenant is the user's active membership", async () => {
+      mockPrismaSession.findUnique.mockResolvedValue(sessionRow("tenant-a", ["tenant-a"]));
+      const adapter = createCustomAdapter();
+
+      const result = await adapter.getSessionAndUser!("raw-token");
+
+      expect(result).toEqual({
+        session: { sessionToken: "raw-token", userId: USER.id, expires },
+        user: USER,
+      });
+      expect(mockPrismaSession.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { sessionToken: "hashed:raw-token" },
+          select: expect.objectContaining({
+            tenantId: true,
+            user: expect.objectContaining({
+              select: expect.objectContaining({
+                tenantMemberships: { where: { deactivatedAt: null }, select: { tenantId: true } },
+              }),
+            }),
+          }),
+        }),
+      );
+    });
+
+    it("returns no session when its tenant is not one the user is active in", async () => {
+      mockPrismaSession.findUnique.mockResolvedValue(sessionRow("tenant-a", ["tenant-b"]));
+      const adapter = createCustomAdapter();
+
+      expect(await adapter.getSessionAndUser!("raw-token")).toBeNull();
+    });
+
+    it("returns no session when the user is active in no tenant", async () => {
+      mockPrismaSession.findUnique.mockResolvedValue(sessionRow("tenant-a", []));
+      const adapter = createCustomAdapter();
+
+      expect(await adapter.getSessionAndUser!("raw-token")).toBeNull();
+    });
+
+    it("propagates a failing session read instead of answering", async () => {
+      mockPrismaSession.findUnique.mockRejectedValue(new Error("db down"));
+      const adapter = createCustomAdapter();
+
+      await expect(adapter.getSessionAndUser!("raw-token")).rejects.toThrow("db down");
+    });
+
+    // The throw does not reach auth()'s caller: Auth.js's session action catches
+    // it (SessionTokenError) and answers 200 with a null body, which a route
+    // handler reads as no session (401) and the proxy gate caches as invalid
+    // for NEGATIVE_CACHE_TTL_MS.
+    it("leaves Auth.js answering a session request with no session when the read throws", async () => {
+      mockPrismaSession.findUnique.mockRejectedValue(new Error("db down"));
+      const loggedErrors: unknown[] = [];
+      const { Auth } = await import("@auth/core");
+
+      const res = await Auth(
+        new Request("http://localhost:3000/api/auth/session", { headers: { cookie: "authjs.session-token=raw-token" } }),
+        {
+          adapter: createCustomAdapter(),
+          providers: [],
+          session: { strategy: "database" },
+          secret: "s".repeat(32),
+          trustHost: true,
+          basePath: "/api/auth",
+          logger: { error: (error) => loggedErrors.push(error), warn: () => {}, debug: () => {} },
+        },
+      );
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toBeNull();
+      expect(mockPrismaSession.findUnique).toHaveBeenCalled();
+      expect(loggedErrors).toContainEqual(expect.objectContaining({ name: "SessionTokenError" }));
+    });
+
+    it("returns null when no session row matches", async () => {
+      mockPrismaSession.findUnique.mockResolvedValue(null);
+      const adapter = createCustomAdapter();
+
+      expect(await adapter.getSessionAndUser!("raw-token")).toBeNull();
+    });
+  });
+
   describe("getUser", () => {
     it("returns user when found with email", async () => {
       mockPrismaUser.findUnique.mockResolvedValue({

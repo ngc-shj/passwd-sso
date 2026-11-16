@@ -218,6 +218,7 @@ export function createCustomAdapter(): Adapter {
           select: {
             sessionToken: true,
             userId: true,
+            tenantId: true,
             expires: true,
             user: {
               select: {
@@ -226,12 +227,36 @@ export function createCustomAdapter(): Adapter {
                 email: true,
                 image: true,
                 emailVerified: true,
+                // At most one row (`tenant_members_one_active_per_user`).
+                tenantMemberships: {
+                  where: { deactivatedAt: null },
+                  select: { tenantId: true },
+                },
               },
             },
           },
         }),
-      BYPASS_GRANT.AUTH_SESSION_LIFECYCLE);
+      BYPASS_GRANT.AUTH_SESSION_LOOKUP);
       if (!result || !result.user.email) return null;
+
+      // A session is valid only in a tenant where its user is an ACTIVE member.
+      // Departure revokes the user's sessions, but a revocation that fails, or
+      // an older release still serving during a rollout, can leave a session
+      // filed under a tenant the user has since left. The proxy gate asks only
+      // "active anywhere", so without this check such a session revives the
+      // moment the user is active in some other tenant — and route-handler-auth
+      // paths (/api/vault/*, ...) do not pass the proxy gate at all. Every
+      // `auth()` reaches this method, so binding here covers them all.
+      //
+      // Compared against the membership, never the `User.tenantId` column: the
+      // column can legitimately diverge from the membership (tenant-domain
+      // realign / backfill move only the column), and createSession stamps
+      // sessions from the membership. The bootstrap migration in src/auth.ts
+      // moves sessions together with the membership, so those stay bound.
+      if (!result.user.tenantMemberships.some((m) => m.tenantId === result.tenantId)) {
+        logger.warn({ userId: result.userId }, "auth.session.tenant_not_active_membership");
+        return null;
+      }
 
       return {
         session: {

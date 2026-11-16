@@ -3,7 +3,7 @@ import type { Prisma, TeamRole } from "@prisma/client";
 import type { TeamPermission } from "@/lib/auth/access/team-auth";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, logAuditInTx, teamAuditBase } from "@/lib/audit/audit";
+import { logAuditInTx, teamAuditBase } from "@/lib/audit/audit";
 import { updateMemberRoleSchema } from "@/lib/validations";
 import {
   activeTeamAdmission,
@@ -24,15 +24,14 @@ import {
   readTenantRows,
 } from "@/lib/team/tenant-row-lock";
 import {
-  invalidateUserSessions,
-  type InvalidateUserSessionsResult,
+  revokeUserAuthArtifactsInTx,
+  tombstoneRevokedSessions,
 } from "@/lib/auth/session/user-session-invalidation";
-import { getLogger } from "@/lib/logger";
+import { TEAM_MEMBERSHIP_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
 import { membershipConflictResponse } from "@/lib/http/lock-conflict-response";
 import { buildTeamMemberDisplayItems } from "@/lib/team/team-member-display";
-import { errorLogFields } from "@/lib/logger/error-fields";
 
 type Params = { params: Promise<{ teamId: string; memberId: string }> };
 
@@ -329,8 +328,9 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
     return errorResponse(API_ERROR.CANNOT_REMOVE_HIGHER_ROLE);
   }
 
+  let revocation;
   try {
-    await withTeamTenantRls(teamId, async (tenantId, tx) => {
+    revocation = await withTeamTenantRls(teamId, async (tenantId, tx) => {
       // Serialise with key rotation first: a removal committing after a
       // rotation read the member set would leave the removed member a key to
       // the new version (team-key-rotation-lock.ts).
@@ -350,38 +350,34 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
       });
       if (removed.count !== 1) throw new MemberChangedError();
       await tx.teamMemberKey.deleteMany({ where: { teamId: teamId, userId: target.userId } });
-    });
+      // The removed member's sessions and tokens in the tenant end with the
+      // removal, or neither commits. Last (user-auth-serialization.ts): the
+      // credential lock after every row write.
+      const revoked = await revokeUserAuthArtifactsInTx(tx, target.userId, { tenantFilter: { tenantId }, boundedLockWait: true });
+      await logAuditInTx(tx, tenantId, {
+        ...teamAuditBase(req, session.user.id, teamId),
+        action: AUDIT_ACTION.TEAM_MEMBER_REMOVE,
+        targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
+        targetId: memberId,
+        metadata: { removedUserId: target.userId, removedRole: target.role, ...revoked.counts },
+      });
+      return revoked;
+    }, { timeout: TEAM_MEMBERSHIP_TX_TIMEOUT_MS });
   } catch (e) {
     if (e instanceof MemberChangedError) return errorResponse(API_ERROR.MEMBER_NOT_FOUND);
     if (e instanceof ActorNotPermittedError) return errorResponse(API_ERROR.FORBIDDEN);
-    // A rotation of this team held it past the lock wait; nothing was removed.
+    // A rotation of this team, or a change to the member's credentials, held a
+    // lock past the wait; nothing was removed.
     if (isMembershipLockConflict(e)) return membershipConflictResponse(e);
     throw e;
   }
 
-  // Session/token invalidation — outside transaction (fail-open)
-  let invalidationCounts: InvalidateUserSessionsResult | undefined;
-  let sessionInvalidationFailed = false;
-  try {
-    invalidationCounts = await invalidateUserSessions(target.userId, {
-      tenantId: target.tenantId,
-    });
-  } catch (error) {
-    sessionInvalidationFailed = true;
-    getLogger().error({ userId: target.userId, error: errorLogFields(error) }, "session-invalidation-failed");
-  }
-
-  await logAuditAsync({
-    ...teamAuditBase(req, session.user.id, teamId),
-    action: AUDIT_ACTION.TEAM_MEMBER_REMOVE,
-    targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
-    targetId: memberId,
-    metadata: {
-      removedUserId: target.userId,
-      removedRole: target.role,
-      ...(invalidationCounts ?? {}),
-      ...(sessionInvalidationFailed ? { sessionInvalidationFailed: true } : {}),
-    },
+  // A tombstone that did not land is reported by the helper (error log and
+  // Sentry); the audit row committed with the removal cannot carry it.
+  await tombstoneRevokedSessions(revocation.sessionTokens, {
+    reason: "team_member_remove",
+    operation: "team member removal",
+    userId: target.userId,
   });
 
   return NextResponse.json({ success: true });

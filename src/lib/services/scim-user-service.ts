@@ -14,7 +14,13 @@ import {
   lockMemberTeamsAgainstRotation,
 } from "@/lib/team/team-key-rotation-lock";
 import { lockTenantRows } from "@/lib/team/tenant-row-lock";
-import { type DepartureAuditActor, departFromTenant, returnToTenant } from "@/lib/team/team-departure";
+import {
+  type DepartureAuditActor,
+  type DepartureRevocation,
+  departFromTenant,
+  returnToTenant,
+} from "@/lib/team/team-departure";
+import { revokeUserAuthArtifactsInTx } from "@/lib/auth/session/user-session-invalidation";
 import type { AuditAction } from "@prisma/client";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { userToScimUser, type ScimUserInput, type ScimUserResource } from "@/lib/scim/serializers";
@@ -43,22 +49,26 @@ export interface ScimUserReplaceResult {
   snapshot: ScimUserSnapshot;
   userId: string;
   auditAction: AuditAction;
-  /** When true, the route handler must call invalidateUserSessions(userId, { tenantId }). */
-  needsSessionInvalidation: boolean;
+  /**
+   * What the deactivation or reactivation revoked in its transaction; non-null
+   * exactly when `auditAction` is SCIM_USER_DEACTIVATE or SCIM_USER_REACTIVATE.
+   * The route tombstones its sessions.
+   */
+  revocation: DepartureRevocation | null;
 }
 
 export interface ScimUserPatchResult {
   snapshot: ScimUserSnapshot;
   userId: string;
   auditAction: AuditAction;
-  /** When true, the route handler must call invalidateUserSessions(userId, { tenantId }). */
-  needsSessionInvalidation: boolean;
+  /** As in ScimUserReplaceResult. */
+  revocation: DepartureRevocation | null;
 }
 
 export interface DeactivateResult {
   userId: string;
-  /** Always true — the route handler must call invalidateUserSessions(userId, { tenantId }). */
-  needsSessionInvalidation: true;
+  /** What the deletion revoked in its transaction. The route tombstones its sessions. */
+  revocation: DepartureRevocation;
 }
 
 /**
@@ -69,6 +79,16 @@ export interface DeactivateResult {
  * (round-6 R6-S4, and for PUT/PATCH round-7 R7-S3).
  */
 export const SCIM_USER_NOT_PROVISIONABLE_DETAIL = "User cannot be provisioned by this organization";
+
+/** The session-cache tombstone signal of a SCIM deprovisioning: one alert key for the `Users/[id]` routes. */
+export const SCIM_DEPROVISION_TOMBSTONE = { reason: "scim_deprovision", operation: "SCIM user deprovisioning" } as const;
+
+/**
+ * The same signal for SCIM POST, which creates a membership: what it revokes is
+ * the residue of an earlier one (deviation D13), or, for a row created
+ * deactivated, the user's guest team memberships' tenant credentials.
+ */
+export const SCIM_CREATE_TOMBSTONE = { reason: "scim_membership_create", operation: "SCIM user creation" } as const;
 
 // ── Error classes ─────────────────────────────────────────────
 
@@ -216,9 +236,9 @@ export async function replaceScimUser(
   if (!member) throw new ScimUserNotFoundError();
   if (member.role === TENANT_ROLE.OWNER && active === false) throw new ScimOwnerProtectedError();
 
-  let auditAction: AuditAction;
+  let transition: { auditAction: AuditAction; revocation: DepartureRevocation | null };
   try {
-    auditAction = await prisma.$transaction(async (tx) => {
+    transition = await prisma.$transaction(async (tx) => {
       // The active state moves only through team-departure.ts, which ends or
       // restores the user's memberships of the tenant's teams with it; the
       // returned ids, not the pre-read above, decide the audit action.
@@ -232,14 +252,21 @@ export async function replaceScimUser(
           lastScimSyncedAt: new Date(),
         },
       });
-      const transition = { actor, budget, alreadyLocked: true };
+      const transitionOptions = { actor, budget, alreadyLocked: true };
       let action: AuditAction = AUDIT_ACTION.SCIM_USER_UPDATE;
+      let revocation: DepartureRevocation | null = null;
       if (active === false) {
-        if ((await departFromTenant(tx, tenantId, [userId], transition)).length > 0) {
+        const departed = await departFromTenant(tx, tenantId, [userId], transitionOptions);
+        if (departed.userIds.length > 0) {
           action = AUDIT_ACTION.SCIM_USER_DEACTIVATE;
+          revocation = departed.revocation;
         }
-      } else if ((await returnToTenant(tx, tenantId, [userId], transition)).length > 0) {
-        action = AUDIT_ACTION.SCIM_USER_REACTIVATE;
+      } else {
+        const returned = await returnToTenant(tx, tenantId, [userId], transitionOptions);
+        if (returned.userIds.length > 0) {
+          action = AUDIT_ACTION.SCIM_USER_REACTIVATE;
+          revocation = returned.revocation;
+        }
       }
 
       if (externalId) {
@@ -262,7 +289,7 @@ export async function replaceScimUser(
           where: { tenantId, internalId: userId, resourceType: "User" },
         });
       }
-      return action;
+      return { auditAction: action, revocation };
     });
   } catch (e) {
     if (e instanceof Error && e.message === "SCIM_EXTERNAL_ID_CONFLICT") {
@@ -276,12 +303,7 @@ export async function replaceScimUser(
 
   const snapshot = await loadScimUserSnapshot(tenantId, userId);
   if (!snapshot) throw new ScimUserNotFoundError();
-  return {
-    snapshot,
-    userId,
-    auditAction,
-    needsSessionInvalidation: auditAction === AUDIT_ACTION.SCIM_USER_DEACTIVATE,
-  };
+  return { snapshot, userId, ...transition };
 }
 
 /**
@@ -307,7 +329,10 @@ export async function patchScimUser(
 
   if (member.role === TENANT_ROLE.OWNER && operations.active === false) throw new ScimOwnerProtectedError();
 
-  const auditAction = await prisma.$transaction(async (tx) => {
+  const transition = await prisma.$transaction(async (tx): Promise<{
+    auditAction: AuditAction;
+    revocation: DepartureRevocation | null;
+  }> => {
     // As in replaceScimUser: the active state moves only through
     // team-departure.ts, and its returned ids decide the audit action.
     const budget = createLockBudget();
@@ -316,30 +341,31 @@ export async function patchScimUser(
       where: { id: member.id },
       data: { scimManaged: true, provisioningSource: "SCIM", lastScimSyncedAt: new Date() },
     });
-    if (operations.active === undefined) return AUDIT_ACTION.SCIM_USER_UPDATE;
-    const transition = { actor, budget, alreadyLocked: true };
+    const unchanged = { auditAction: AUDIT_ACTION.SCIM_USER_UPDATE, revocation: null };
+    if (operations.active === undefined) return unchanged;
+    const transitionOptions = { actor, budget, alreadyLocked: true };
     if (operations.active) {
-      const returned = await returnToTenant(tx, tenantId, [userId], transition);
-      return returned.length > 0 ? AUDIT_ACTION.SCIM_USER_REACTIVATE : AUDIT_ACTION.SCIM_USER_UPDATE;
+      const returned = await returnToTenant(tx, tenantId, [userId], transitionOptions);
+      return returned.userIds.length > 0
+        ? { auditAction: AUDIT_ACTION.SCIM_USER_REACTIVATE, revocation: returned.revocation }
+        : unchanged;
     }
-    const departed = await departFromTenant(tx, tenantId, [userId], transition);
-    return departed.length > 0 ? AUDIT_ACTION.SCIM_USER_DEACTIVATE : AUDIT_ACTION.SCIM_USER_UPDATE;
+    const departed = await departFromTenant(tx, tenantId, [userId], transitionOptions);
+    return departed.userIds.length > 0
+      ? { auditAction: AUDIT_ACTION.SCIM_USER_DEACTIVATE, revocation: departed.revocation }
+      : unchanged;
   });
 
   const snapshot = await loadScimUserSnapshot(tenantId, userId);
   if (!snapshot) throw new ScimUserNotFoundError();
-  return {
-    snapshot,
-    userId,
-    auditAction,
-    needsSessionInvalidation: auditAction === AUDIT_ACTION.SCIM_USER_DEACTIVATE,
-  };
+  return { snapshot, userId, ...transition };
 }
 
 /**
  * Soft-delete (deactivate + remove) a SCIM-managed user from a tenant.
  *
- * Deletes the tenant membership and all related rows in a single transaction.
+ * Deletes the tenant membership and all related rows in a single transaction,
+ * and revokes the user's sessions and tokens in the tenant in it.
  *
  * Throws:
  * - `ScimUserNotFoundError` — member not found
@@ -357,8 +383,9 @@ export async function deactivateScimUser(
   if (!member) throw new ScimUserNotFoundError();
   if (member.role === TENANT_ROLE.OWNER) throw new ScimOwnerProtectedError();
 
+  let revocation: DepartureRevocation;
   try {
-    await prisma.$transaction(async (tx) => {
+    revocation = await prisma.$transaction(async (tx) => {
       // Lock order (tenant-row-lock.ts): the tenant row, then the teams being
       // left, before any invitation, member row or key is touched.
       const budget = createLockBudget();
@@ -390,6 +417,9 @@ export async function deactivateScimUser(
       await tx.tenantMember.delete({
         where: { tenantId_userId: { tenantId, userId } },
       });
+      // Last (user-auth-serialization.ts): the credential lock after every row
+      // write, so no mint holding it waits on this transaction.
+      return revokeUserAuthArtifactsInTx(tx, userId, { tenantFilter: { tenantId }, boundedLockWait: true });
     });
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2003") {
@@ -398,8 +428,5 @@ export async function deactivateScimUser(
     throw e;
   }
 
-  return {
-    userId,
-    needsSessionInvalidation: true,
-  };
+  return { userId, revocation };
 }

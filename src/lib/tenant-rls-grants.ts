@@ -146,7 +146,9 @@ export const BYPASS_GRANT = Object.freeze({
   AUTH_DELETE_USER: defineGrant(BYPASS_PURPOSE.AUTH_FLOW, ["session", "user"]),
   AUTH_LINK_ACCOUNT: defineGrant(BYPASS_PURPOSE.AUTH_FLOW, ["account", "user", "tenantMember"]),
   AUTH_SESSION_CAPPING: defineGrant(BYPASS_PURPOSE.AUTH_FLOW, ["session", "tenant", "webAuthnCredential"]),
-  AUTH_SESSION_LIFECYCLE: defineGrant(BYPASS_PURPOSE.AUTH_FLOW, ["session", "user"]),
+  AUTH_SESSION_LIFECYCLE: defineGrant(BYPASS_PURPOSE.AUTH_FLOW, ["session"]),
+  // getSessionAndUser: the session, its user, and the user's active membership the session is bound to.
+  AUTH_SESSION_LOOKUP: defineGrant(BYPASS_PURPOSE.AUTH_FLOW, ["session", "user", "tenantMember"]),
   AUTH_SESSION_PASSKEY_RECOVERY: defineGrant(BYPASS_PURPOSE.AUTH_FLOW, ["session", "webAuthnCredential"]),
   AUTH_SESSION_PASSKEY_STATUS: defineGrant(BYPASS_PURPOSE.AUTH_FLOW, ["tenant", "user", "webAuthnCredential", "tenantMember"]),
   AUTH_SIGNIN_TENANT_LOOKUP: defineGrant(BYPASS_PURPOSE.AUTH_FLOW, ["tenant", "user", "tenantMember", "teamMember", "team", "teamPolicy"]),

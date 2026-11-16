@@ -492,12 +492,11 @@ describe("validateExtensionToken", () => {
 
   // ── C13: deactivated-user rejection ───────────────────────
   //
-  // L2 — SCIM deactivation fail-open backstop: SCIM deactivation calls
-  // invalidateUserSessions, which sets revokedAt on this extension token. If that
-  // throws (the SCIM handler logs + returns 200 — a fail-open window), revokedAt
-  // stays null. C13(a) below IS that scenario: revokedAt:null (token never
-  // revoked) + member deactivated → EXTENSION_TOKEN_INVALID via the membership
-  // check alone, BEFORE DPoP dispatch. This is what makes the SCIM fail-open safe.
+  // L2 — deactivation backstop: a SCIM deactivation revokes this extension token
+  // in the transaction that deactivates the member, so the two commit together.
+  // C13(a) below pins the independent check should a deactivation ever commit
+  // with revokedAt still null: member deactivated → EXTENSION_TOKEN_INVALID via
+  // the membership check alone, BEFORE DPoP dispatch.
 
   it("C13(a): deactivated-in-token-tenant ⇒ EXTENSION_TOKEN_INVALID (BROWSER_EXTENSION)", async () => {
     mockFindUnique.mockResolvedValue({

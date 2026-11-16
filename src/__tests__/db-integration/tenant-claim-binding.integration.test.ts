@@ -15,6 +15,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { randomBytes, randomUUID } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
+import type { PoolClient } from "pg";
 import { NextRequest } from "next/server";
 
 const { nextAuthConfigs, mockFetchOktaUsers, scimTenant } = vi.hoisted(() => ({
@@ -63,9 +64,11 @@ import {
   createTestContext,
   raceTwoClients,
   setBypassRlsGucs,
+  setTestBypass,
   type PrismaWithPool,
   type TestContext,
 } from "./helpers";
+import { createRaceHelpers } from "./race-helpers";
 import {
   runToken,
   stubClaimProviderEnv,
@@ -86,6 +89,7 @@ import { providerRef, resetIdentifierPepperForTests } from "@/lib/audit/identifi
 import { hashToken } from "@/lib/crypto/crypto-server";
 import { validateExtensionToken } from "@/lib/auth/tokens/extension-token";
 import { validateApiKey } from "@/lib/auth/tokens/api-key";
+import { hashSessionToken } from "@/lib/auth/session/session-cache";
 import { DELETE as scimDeleteUser } from "@/app/api/scim/v2/Users/[id]/route";
 import { runDirectorySync } from "@/lib/directory-sync/engine";
 import { withBypassRls } from "@/lib/tenant-rls";
@@ -1087,6 +1091,199 @@ describe("tenant claim binding (C3/C4/C5)", () => {
   });
 
   /**
+   * Row 4 creates a membership row for a user who already exists. A user
+   * removed from the claimed tenant by an old-release SCIM DELETE whose
+   * revocation failed still holds credentials there, and the new active row
+   * would revive them (the session binding and the token checks accept a
+   * credential of an active membership's tenant). The join revokes them in
+   * its own transaction; the sign-in's own session is created afterwards and
+   * authenticates (code-review round-4 S-R4-1, deviation D13).
+   */
+  describe("row 4: the join revokes what the user still holds in the joined tenant", () => {
+    async function su(text: string, ...params: unknown[]): Promise<void> {
+      await ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        await tx.$executeRawUnsafe(text, ...params);
+      });
+    }
+
+    /** A session, an API key and an extension token of `userId` under `tenantId`; returns the session's raw token and the ids. */
+    async function seedResidue(userId: string, tenantId: string) {
+      const raw = randomUUID();
+      const sessionId = randomUUID();
+      const apiKeyId = randomUUID();
+      const extensionTokenId = randomUUID();
+      await su(
+        `INSERT INTO sessions (id, session_token, user_id, tenant_id, expires, created_at, last_active_at)
+         VALUES ($1::uuid, $2, $3::uuid, $4::uuid, now() + interval '1 day', now(), now())`,
+        sessionId, hashSessionToken(raw), userId, tenantId,
+      );
+      await su(
+        `INSERT INTO api_keys (id, user_id, tenant_id, token_hash, prefix, name, scope, expires_at)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'api_test', 'residue', 'passwords:read', now() + interval '1 day')`,
+        apiKeyId, userId, tenantId, hashToken(`api_residue_${apiKeyId}`),
+      );
+      await su(
+        `INSERT INTO extension_tokens (id, user_id, tenant_id, token_hash, scope, expires_at, family_id, cnf_jkt)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'passwords:read', now() + interval '1 day', $5::uuid, $6)`,
+        extensionTokenId, userId, tenantId, hashToken(`ext_residue_${extensionTokenId}`), randomUUID(), hex(16),
+      );
+      return { raw, sessionId, apiKeyId, extensionTokenId };
+    }
+
+    async function residueState(ids: { sessionId: string; apiKeyId: string; extensionTokenId: string }) {
+      const [row] = await ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        return tx.$queryRawUnsafe<{ session: boolean; api_key: boolean; extension_token: boolean }[]>(
+          `SELECT EXISTS (SELECT 1 FROM sessions WHERE id = $1::uuid) AS session,
+                  EXISTS (SELECT 1 FROM api_keys WHERE id = $2::uuid AND revoked_at IS NULL) AS api_key,
+                  EXISTS (SELECT 1 FROM extension_tokens WHERE id = $3::uuid AND revoked_at IS NULL) AS extension_token`,
+          ids.sessionId, ids.apiKeyId, ids.extensionTokenId,
+        );
+      });
+      return { session: row!.session, apiKey: row!.api_key, extensionToken: row!.extension_token };
+    }
+
+    const LIVE = { session: true, apiKey: true, extensionToken: true };
+    const REVOKED = { session: false, apiKey: false, extensionToken: false };
+
+    it.each([CLAIM_BINDING_MODE.OFF, CLAIM_BINDING_MODE.STRICT])(
+      "%s mode: the residue in the joined tenant is revoked, the home tenant's is not, and the sign-in's new session authenticates",
+      async (mode) => {
+        stubModeEnv(mode);
+        const target = await attackerTenant(mode);
+        let victim: Victim | null = null;
+        try {
+          victim = await seedVictim(VICTIM_STATE.DEPARTED, OTHER_PROVIDER);
+          const own = await linkAccount(victim.userId, victim.home, SIGN_IN_PROVIDER);
+          const residue = await seedResidue(victim.userId, target.tenantId);
+          const home = await seedResidue(victim.userId, victim.home);
+          expect(await residueState(residue)).toEqual(LIVE);
+          expect(await residueState(home)).toEqual(LIVE);
+
+          expect(await capturedSignIn()(signInParams(victim.email, target.claim, SIGN_IN_PROVIDER, own))).toBe(true);
+
+          expect(await ctx.su.prisma.tenantMember.count({
+            where: { userId: victim.userId, tenantId: target.tenantId, deactivatedAt: null },
+          })).toBe(1);
+          expect(await residueState(residue)).toEqual(REVOKED);
+          expect(await residueState(home)).toEqual(LIVE);
+          const adapter = createCustomAdapter();
+          expect(await adapter.getSessionAndUser!(residue.raw)).toBeNull();
+
+          // What Auth.js does next: createSession, stamped with the joined tenant.
+          const raw = randomUUID();
+          await sessionMetaStorage.run(
+            { ip: null, userAgent: null, acceptLanguage: null, provider: SIGN_IN_PROVIDER },
+            () => adapter.createSession!({ sessionToken: raw, userId: victim!.userId, expires: new Date(Date.now() + 60_000) }),
+          );
+          const session = await ctx.su.prisma.session.findUniqueOrThrow({
+            where: { sessionToken: hashSessionToken(raw) },
+            select: { tenantId: true },
+          });
+          expect(session.tenantId).toBe(target.tenantId);
+          expect(await adapter.getSessionAndUser!(raw)).toMatchObject({ session: { userId: victim.userId }, user: { id: victim.userId } });
+        } finally {
+          await teardown(victim, ...(victim ? [victim.home] : []), target.tenantId);
+        }
+      },
+    );
+
+    /** A tenant_members row of `userId` in `tenantId`, inserted on `client` (inside its open transaction). */
+    async function insertMembership(client: PoolClient, userId: string, tenantId: string, deactivated: boolean) {
+      await setTestBypass(client, ["tenant_members", "sessions"]);
+      await client.query(
+        `INSERT INTO tenant_members (id, tenant_id, user_id, role, deactivated_at, created_at, updated_at)
+         VALUES (gen_random_uuid(), $1::uuid, $2::uuid, 'MEMBER', CASE WHEN $3 THEN now() END, now(), now())`,
+        [tenantId, userId, deactivated],
+      );
+    }
+
+    // The race the insert-or-find primitive closes: two first sign-ins of one
+    // user. The winner's INSERT is uncommitted when the loser's arrives, so the
+    // loser waits on it; the winner commits its row and then creates its
+    // session. The loser's INSERT then conflicts and inserts nothing, so it
+    // revokes nothing, and the winner's session survives. Here a blocker
+    // transaction stands in for the winner, its session written before the
+    // commit so that a loser that revoked could not miss it.
+    it("the race loser of two first sign-ins revokes nothing: the winner's session survives", async () => {
+      stubModeEnv(CLAIM_BINDING_MODE.OFF);
+      const target = await attackerTenant(CLAIM_BINDING_MODE.OFF);
+      const race = createRaceHelpers(ctx.su.pool);
+      let victim: Victim | null = null;
+      try {
+        victim = await seedVictim(VICTIM_STATE.DEPARTED, OTHER_PROVIDER);
+        const own = await linkAccount(victim.userId, victim.home, SIGN_IN_PROVIDER);
+        const winner = randomUUID();
+        const winnerSessionId = randomUUID();
+        const blocker = await ctx.su.pool.connect();
+        let committed = false;
+        try {
+          await blocker.query("BEGIN");
+          await insertMembership(blocker, victim.userId, target.tenantId, false);
+          await blocker.query(
+            `INSERT INTO sessions (id, session_token, user_id, tenant_id, expires, created_at, last_active_at)
+             VALUES ($1::uuid, $2, $3::uuid, $4::uuid, now() + interval '1 day', now(), now())`,
+            [winnerSessionId, hashSessionToken(winner), victim.userId, target.tenantId],
+          );
+          const { rows: [{ pid }] } = await blocker.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+          const loser = capturedSignIn()(signInParams(victim.email, target.claim, SIGN_IN_PROVIDER, own));
+          loser.catch(() => {});
+          // The loser's INSERT parks on the winner's uncommitted row.
+          const parked = await race.waitForBackendBlockedBy(pid);
+          expect(await race.waitingQueryOf(parked)).toMatch(/INSERT INTO tenant_members/);
+          await blocker.query("COMMIT");
+          committed = true;
+          expect(await loser).toBe(true);
+        } finally {
+          if (!committed) await blocker.query("ROLLBACK").catch(() => {});
+          blocker.release();
+        }
+
+        expect(await ctx.su.prisma.tenantMember.count({
+          where: { userId: victim.userId, tenantId: target.tenantId },
+        })).toBe(1);
+        expect(await ctx.su.prisma.session.count({ where: { id: winnerSessionId } })).toBe(1);
+        expect(await createCustomAdapter().getSessionAndUser!(winner)).toMatchObject({ user: { id: victim.userId } });
+      } finally {
+        await teardown(victim, ...(victim ? [victim.home] : []), target.tenantId);
+      }
+    });
+
+    // The same boundary without the timing: a row the user already holds in the
+    // target when the INSERT runs is found, and nothing of theirs is revoked.
+    it("finds a row the user already holds in the target and revokes nothing there", async () => {
+      stubModeEnv(CLAIM_BINDING_MODE.OFF);
+      const target = await attackerTenant(CLAIM_BINDING_MODE.OFF);
+      let victim: Victim | null = null;
+      try {
+        victim = await seedVictim(VICTIM_STATE.DEPARTED, OTHER_PROVIDER);
+        const own = await linkAccount(victim.userId, victim.home, SIGN_IN_PROVIDER);
+        const client = await ctx.su.pool.connect();
+        try {
+          await client.query("BEGIN");
+          // Deactivated: an active row would make the user a member (row 5),
+          // where this one keeps them active nowhere and the sign-in on row 4.
+          await insertMembership(client, victim.userId, target.tenantId, true);
+          await client.query("COMMIT");
+        } finally {
+          client.release();
+        }
+        const residue = await seedResidue(victim.userId, target.tenantId);
+
+        expect(await capturedSignIn()(signInParams(victim.email, target.claim, SIGN_IN_PROVIDER, own))).toBe(true);
+
+        expect(await ctx.su.prisma.tenantMember.count({
+          where: { userId: victim.userId, tenantId: target.tenantId },
+        })).toBe(1);
+        expect(await residueState(residue)).toEqual(LIVE);
+      } finally {
+        await teardown(victim, ...(victim ? [victim.home] : []), target.tenantId);
+      }
+    });
+  });
+
+  /**
    * Rows 6 / 9a: a bootstrap member signing in with a claim moves to the
    * claimed tenant — every row of theirs, and their one active membership.
    * The migration deletes the bootstrap membership before creating the new
@@ -1295,10 +1492,22 @@ describe("tenant claim binding (C3/C4/C5)", () => {
           // Revoked before the sign-in: the migration's revocation must not restamp it.
           const earlierRevokedAt = new Date("2026-01-02T03:04:05.000Z");
           const revokedKey = await seedApiKey(member.userId, member.home, `api_revoked_${member.userId}`, earlierRevokedAt);
+          // A session the member already holds: the migration moves it with
+          // their membership, so it stays bound to an active membership and
+          // keeps authenticating (getSessionAndUser's tenant binding).
+          const sessionToken = randomUUID();
+          await createCustomAdapter().createSession!({
+            sessionToken,
+            userId: member.userId,
+            expires: new Date(Date.now() + 60_000),
+          });
+          expect(await createCustomAdapter().getSessionAndUser!(sessionToken)).toMatchObject({ session: { userId: member.userId } });
 
           expect(
             await capturedSignIn()(signInParams(member.email, target.claim, SIGN_IN_PROVIDER, member.providerAccountId)),
           ).toBe(true);
+
+          expect(await createCustomAdapter().getSessionAndUser!(sessionToken)).toMatchObject({ session: { userId: member.userId } });
 
           expect(await placement(member.userId)).toEqual(movedTo(target.tenantId, member.home));
           expect(await ctx.su.prisma.tenantMember.count({ where: { tenantId: member.home } })).toBe(0);

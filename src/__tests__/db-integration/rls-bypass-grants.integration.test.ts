@@ -30,7 +30,10 @@ import { BYPASS_PURPOSE, type BypassPurpose } from "@/lib/tenant-rls-purpose";
 import { withBypassRls, withTenantRls } from "@/lib/tenant-rls";
 
 const USERS_ONLY = defineGrant(BYPASS_PURPOSE.AUTH_FLOW, ["user"]);
-const SESSIONS_ONLY = defineGrant(BYPASS_PURPOSE.AUTH_FLOW, ["session"]);
+// Not `users`. Two tables, because (auth_flow, sessions) alone is
+// BYPASS_GRANT.AUTH_SESSION_LIFECYCLE's pair, and a test-local grant must not
+// credit a member with evidence (integration-test-grants-no-collision).
+const SESSIONS_AND_ACCOUNTS = defineGrant(BYPASS_PURPOSE.AUTH_FLOW, ["session", "account"]);
 
 describe("RLS bypass grants (enforcing)", () => {
   let ctx: TestContext;
@@ -60,7 +63,7 @@ describe("RLS bypass grants (enforcing)", () => {
   it("refuses and reports a read of a row outside the grant", async () => {
     // The refused statement is the transaction's last.
     const { notices, table } = await expectBypassRefusal(() =>
-      underBypass(SESSIONS_ONLY, (tx) => tx.user.findUnique({ where: { id: userId }, select: { id: true } })),
+      underBypass(SESSIONS_AND_ACCOUNTS, (tx) => tx.user.findUnique({ where: { id: userId }, select: { id: true } })),
     );
     expect(table).toBe("users");
     // Exact: a report naming another table (e.g. `tenants`, under RLS since
@@ -73,7 +76,7 @@ describe("RLS bypass grants (enforcing)", () => {
   it("refuses and reports through the @/lib/prisma singleton's connections", async () => {
     await assertRlsApplies(appPrisma);
     const { notices: denied } = await expectBypassRefusal(() =>
-      withBypassRls(appPrisma, (tx) => tx.user.findUnique({ where: { id: userId }, select: { id: true } }), SESSIONS_ONLY),
+      withBypassRls(appPrisma, (tx) => tx.user.findUnique({ where: { id: userId }, select: { id: true } }), SESSIONS_AND_ACCOUNTS),
     );
     expect(denied).toEqual([{ table: "users", purpose: "auth_flow" }]);
     const allowed = await expectBypassNotices(async () => {
@@ -128,7 +131,7 @@ describe("RLS bypass grants (enforcing)", () => {
   it("refuses an ungranted lookup that matches no row when the plan scans other rows", async () => {
     // users holds this suite's row, so a forced seq scan examines it.
     const { notices } = await expectBypassRefusal(() =>
-      underBypass(SESSIONS_ONLY, async (tx) => {
+      underBypass(SESSIONS_AND_ACCOUNTS, async (tx) => {
         await tx.$executeRawUnsafe(`SET LOCAL enable_indexscan = off`);
         await tx.$executeRawUnsafe(`SET LOCAL enable_bitmapscan = off`);
         return tx.$queryRawUnsafe(`SELECT id FROM users WHERE id = $1::uuid`, randomUUID());
@@ -219,7 +222,7 @@ describe("RLS bypass grants (enforcing)", () => {
   it("refuses a withheld table although app.tenant_id equals the row's tenant", async () => {
     const { notices, table } = await expectBypassRefusal(() =>
       ctx.app.prisma.$transaction(async (tx) => {
-        await setBypassGucs(tx, SESSIONS_ONLY);
+        await setBypassGucs(tx, SESSIONS_AND_ACCOUNTS);
         await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true)`;
         return tx.$queryRawUnsafe(`SELECT id FROM users WHERE id = $1::uuid`, userId);
       }),
@@ -231,7 +234,7 @@ describe("RLS bypass grants (enforcing)", () => {
   it("refuses withheld tenants although app.tenant_id is the system sentinel", async () => {
     const { notices, table } = await expectBypassRefusal(() =>
       ctx.app.prisma.$transaction(async (tx) => {
-        await setBypassGucs(tx, SESSIONS_ONLY);
+        await setBypassGucs(tx, SESSIONS_AND_ACCOUNTS);
         await tx.$executeRaw`SELECT set_config('app.tenant_id', ${SYSTEM_TENANT_ID}, true)`;
         return tx.$queryRawUnsafe(`SELECT id FROM tenants WHERE id = $1::uuid`, SYSTEM_TENANT_ID);
       }),

@@ -16,6 +16,7 @@ const {
   mockCreateNotification,
   mockSendEmail,
   mockSentryCapture,
+  mockLoggerError,
   calls,
   committed,
 } = vi.hoisted(() => {
@@ -36,6 +37,7 @@ const {
     mockCreateNotification: vi.fn(),
     mockSendEmail: vi.fn(),
     mockSentryCapture: vi.fn(),
+    mockLoggerError: vi.fn(),
     calls,
     committed: { value: false },
   };
@@ -62,7 +64,9 @@ vi.mock("@/lib/tenant-rls", () => ({
     return result;
   },
 }));
-vi.mock("@/lib/auth/session/user-session-invalidation", () => ({
+// The real tombstone helper, over the cache and Sentry mocks below.
+vi.mock("@/lib/auth/session/user-session-invalidation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth/session/user-session-invalidation")>()),
   revokeUserAuthArtifactsInTx: mockRevokeArtifacts,
 }));
 vi.mock("@/lib/auth/session/user-auth-serialization", () => ({
@@ -88,6 +92,10 @@ vi.mock("@/lib/audit/audit", () => ({
 vi.mock("@/lib/notification", () => ({ createNotification: mockCreateNotification }));
 vi.mock("@/lib/email", () => ({ sendEmail: mockSendEmail }));
 vi.mock("@sentry/nextjs", () => ({ captureMessage: mockSentryCapture }));
+vi.mock("@/lib/logger", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/logger")>()),
+  getLogger: () => ({ error: mockLoggerError, warn: vi.fn(), info: vi.fn(), debug: vi.fn() }),
+}));
 
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { DELETE } from "./route";
@@ -181,6 +189,22 @@ describe("DELETE /api/tenant/members/[userId]/passkeys/[credentialId]", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ cacheTombstoneFailures: 2 });
     expect(mockSentryCapture).toHaveBeenCalledTimes(1);
+    // The one tombstone signal (tombstoneRevokedSessions), with this operation's text.
+    expect(mockSentryCapture).toHaveBeenCalledWith("session cache tombstone failures during tenant member passkey revoke", {
+      level: "error",
+      tags: { reason: "tenant_member_passkey_revoke" },
+      extra: { failures: 2, targetUserId: TARGET },
+    });
+    // The error log names the member too (its `extra`), not only Sentry.
+    expect(mockLoggerError).toHaveBeenCalledWith(
+      {
+        targetUserId: TARGET,
+        failures: 2,
+        reason: "tenant_member_passkey_revoke",
+        _logType: "session.cache_tombstone_failures",
+      },
+      "session.cache_tombstone_failures",
+    );
   });
 
   it("a thrown cache eviction after commit still answers 200, counts every session as unevicted, and tells the member", async () => {

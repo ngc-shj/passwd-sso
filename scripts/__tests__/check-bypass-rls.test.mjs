@@ -4180,7 +4180,7 @@ describe("relation reach: models a query's argument reaches are charged to the g
   });
 
   it("passes the same reach under a grant that lists it", () => {
-    const { code, stdout, stderr } = cell(`tx.session.findMany({ include: { user: true } })`, "AUTH_SESSION_LIFECYCLE");
+    const { code, stdout, stderr } = cell(`tx.session.findMany({ include: { user: true } })`, "AUTH_DELETE_USER");
     expect(code, stderr).toBe(0);
     expect(stdout).toContain("check-bypass-rls: OK");
   });

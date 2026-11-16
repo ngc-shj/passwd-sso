@@ -83,6 +83,42 @@ const URL = "http://localhost/api/vault/admin-reset";
 const TOKEN = "a".repeat(64);
 const TOKEN_HASH = createHash("sha256").update(TOKEN).digest("hex");
 
+const REVOKED_COUNTS = {
+  sessions: 2,
+  extensionTokens: 1,
+  apiKeys: 0,
+  mcpAccessTokens: 4,
+  mcpRefreshTokens: 5,
+  delegationSessions: 6,
+  cacheTombstoneFailures: 0,
+};
+
+/** The audit calls of one action, in order. */
+function auditCalls(action: string): Array<Record<string, unknown>> {
+  return mockLogAudit.mock.calls
+    .map((call) => call[0] as Record<string, unknown>)
+    .filter((params) => params.action === action);
+}
+
+/**
+ * The revocation's own record, written before the token is spent: the one
+ * SESSION_REVOKE_ALL row, personal scope, naming the reset (plan C7).
+ */
+function expectOneRevokeAllRecord() {
+  const records = auditCalls("SESSION_REVOKE_ALL");
+  expect(records).toHaveLength(1);
+  expect(records[0]).toMatchObject({
+    scope: "PERSONAL",
+    userId: "user-1",
+    metadata: {
+      reason: "admin_vault_reset",
+      resetId: RESET_RECORD.id,
+      revokedCount: REVOKED_COUNTS.sessions,
+      ...REVOKED_COUNTS,
+    },
+  });
+}
+
 const RESET_RECORD = {
   id: "reset-1",
   tenantId: "tenant-1",
@@ -107,15 +143,7 @@ describe("POST /api/vault/admin-reset", () => {
     mockFindVaultRowsOutsideTenant.mockResolvedValue({});
     mockAdminVaultResetUpdateMany.mockResolvedValue({ count: 1 });
     mockRateLimitCheck.mockResolvedValue({ allowed: true });
-    mockInvalidateUserSessions.mockResolvedValue({
-      sessions: 2,
-      extensionTokens: 1,
-      apiKeys: 0,
-      mcpAccessTokens: 4,
-      mcpRefreshTokens: 5,
-      delegationSessions: 6,
-      cacheTombstoneFailures: 0,
-    });
+    mockInvalidateUserSessions.mockResolvedValue(REVOKED_COUNTS);
   });
 
   afterEach(() => {
@@ -235,6 +263,46 @@ describe("POST /api/vault/admin-reset", () => {
     expect(json.error).toBe("VAULT_RESET_TOKEN_USED");
     // Vault reset must NOT execute when atomic mark fails
     expect(mockExecuteVaultReset).not.toHaveBeenCalled();
+    // The revocation already ran, before the CAS: its record is the only one,
+    // and no reset is claimed.
+    expect(mockInvalidateUserSessions).toHaveBeenCalledTimes(1);
+    expectOneRevokeAllRecord();
+    expect(auditCalls("ADMIN_VAULT_RESET_EXECUTE")).toHaveLength(0);
+  });
+
+  it("revokes once, after every pre-check and before the token is spent", async () => {
+    const res = await POST(createRequest("POST", URL, {
+      body: { token: TOKEN, confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT },
+    }));
+
+    expect(res.status).toBe(200);
+    expect(mockInvalidateUserSessions).toHaveBeenCalledTimes(1);
+    expect(mockInvalidateUserSessions).toHaveBeenCalledWith("user-1", { allTenants: true, reason: "admin_vault_reset" });
+    const revoked = mockInvalidateUserSessions.mock.invocationCallOrder[0]!;
+    expect(mockFindVaultRowsOutsideTenant.mock.invocationCallOrder[0]).toBeLessThan(revoked);
+    expect(revoked).toBeLessThan(mockAdminVaultResetUpdateMany.mock.invocationCallOrder[0]!);
+    // Its record precedes the CAS too, so every later exit has one.
+    const revokeAllAudit = mockLogAudit.mock.calls.findIndex(
+      (call) => (call[0] as { action: string }).action === "SESSION_REVOKE_ALL",
+    );
+    expect(mockLogAudit.mock.invocationCallOrder[revokeAllAudit]).toBeLessThan(
+      mockAdminVaultResetUpdateMany.mock.invocationCallOrder[0]!,
+    );
+    expectOneRevokeAllRecord();
+  });
+
+  it("leaves the token unspent and the vault intact when the revocation fails", async () => {
+    mockInvalidateUserSessions.mockRejectedValue(new Error("revocation failed"));
+
+    await expect(
+      POST(createRequest("POST", URL, {
+        body: { token: TOKEN, confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT },
+      })),
+    ).rejects.toThrow("revocation failed");
+    // The same link works on a retry.
+    expect(mockAdminVaultResetUpdateMany).not.toHaveBeenCalled();
+    expect(mockExecuteVaultReset).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
   it("refuses before spending the token when vault rows are held under another tenant", async () => {
@@ -253,6 +321,7 @@ describe("POST /api/vault/admin-reset", () => {
     // The token survives, so the same reset can run once the data is resolved.
     expect(mockAdminVaultResetUpdateMany).not.toHaveBeenCalled();
     expect(mockExecuteVaultReset).not.toHaveBeenCalled();
+    expect(mockInvalidateUserSessions).not.toHaveBeenCalled();
   });
 
   it("refuses when the in-transaction check fires after the token was spent", async () => {
@@ -270,9 +339,10 @@ describe("POST /api/vault/admin-reset", () => {
     expect(res.status).toBe(409);
     expect((await res.json()).error).toBe("VAULT_RESET_DATA_OUTSIDE_TENANT");
     expect(mockAdminVaultResetUpdateMany).toHaveBeenCalled();
-    // Sessions are revoked only for a reset that happened.
-    expect(mockInvalidateUserSessions).not.toHaveBeenCalled();
-    expect(mockLogAudit).not.toHaveBeenCalled();
+    // The revocation ran before the token was spent; its record is the only
+    // one, and no reset is claimed.
+    expectOneRevokeAllRecord();
+    expect(auditCalls("ADMIN_VAULT_RESET_EXECUTE")).toHaveLength(0);
   });
 
   it("answers CONFLICT, not TEAM_BUSY, when a team row lock wait times out after the token was spent", async () => {
@@ -288,8 +358,8 @@ describe("POST /api/vault/admin-reset", () => {
     expect(res.status).toBe(409);
     expect((await res.json()).error).toBe("CONFLICT");
     expect(res.headers.get("Retry-After")).toBeNull();
-    expect(mockInvalidateUserSessions).not.toHaveBeenCalled();
-    expect(mockLogAudit).not.toHaveBeenCalled();
+    expectOneRevokeAllRecord();
+    expect(auditCalls("ADMIN_VAULT_RESET_EXECUTE")).toHaveLength(0);
   });
 
   it("rethrows a reset failure that is not a tenant-scope refusal", async () => {
@@ -302,6 +372,8 @@ describe("POST /api/vault/admin-reset", () => {
         body: { token: TOKEN, confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT },
       })),
     ).rejects.toThrow("connection reset");
+    expectOneRevokeAllRecord();
+    expect(auditCalls("ADMIN_VAULT_RESET_EXECUTE")).toHaveLength(0);
   });
 
   it("marks token via updateMany BEFORE executing vault reset, and logs audit on success", async () => {
@@ -353,11 +425,13 @@ describe("POST /api/vault/admin-reset", () => {
     const resetOrder = mockExecuteVaultReset.mock.invocationCallOrder[0];
     expect(updateOrder).toBeLessThan(resetOrder);
 
-    // Cross-tenant session invalidation
+    // Cross-tenant session invalidation, before the token is spent
     expect(mockInvalidateUserSessions).toHaveBeenCalledWith("user-1", {
       allTenants: true,
       reason: "admin_vault_reset",
     });
+    expect(mockInvalidateUserSessions.mock.invocationCallOrder[0]).toBeLessThan(updateOrder);
+    expectOneRevokeAllRecord();
 
     // Audit log with TEAM scope (teamId is not null) — invalidation counts
     // are mapped to audit metadata (T5).

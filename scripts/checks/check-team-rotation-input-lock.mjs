@@ -172,9 +172,79 @@
  *      only: a function passed by reference, a destructured parameter, and
  *      callers in other files are not followed.
  *
+ * 9. A TENANT-MEMBERSHIP END REVOKES IN ITS FUNCTION
+ *    (docs/archive/review/session-revocation-failure-surfaces-plan.md C2/C8).
+ *    Runs for every file BEFORE the IMPLEMENTATIONS skip: team-departure.ts
+ *    holds two of its sites. A membership end is:
+ *    - a `tenantMember.delete/deleteMany` (any receiver);
+ *    - a raw template whose target is `tenant_members`, classified from
+ *      lib/sql-scan.mjs tokens: a DELETE; an UPDATE, or an upsert's `ON
+ *      CONFLICT DO UPDATE`, whose SET list assigns `deactivated_at` anything
+ *      but the literal `NULL` or holds an assignment it cannot read (a row
+ *      constructor, a `${…}` fragment); an INSERT, plain (read from the
+ *      tokens here: sql-scan's WRITE_KIND has no plain INSERT and its other
+ *      consumers read that set) or an upsert's insert half, whose column list
+ *      names `deactivated_at`, cannot be read, or is absent; a MERGE with a
+ *      `THEN DELETE`, a `THEN INSERT` with no column list, or any mention of
+ *      `deactivated_at` after its target (its conditions are not told from
+ *      its SETs);
+ *    - failing closed: a raw write whose target is a `${…}` (any table), and
+ *      an UPDATE/DELETE/MERGE word sql-scan cannot place in a template naming
+ *      `tenant_members`;
+ *    - inside the IMPLEMENTATIONS files only, a Prisma write rule 2's
+ *      classifyTenantStateWrite would classify whose payload names
+ *      `deactivatedAt` with anything but `null` (a spread or an unreadable
+ *      payload counts, as in mayName). Rule 2 runs there too, but in
+ *      team-departure.ts its cover is an `endTeamMemberships` call, not a
+ *      revocation. Elsewhere rule 2 is the one adjudicator: no update may name
+ *      it, and a create must be followed by `departCreatedMembership`, which
+ *      revokes.
+ *    Each must be followed by a call of `revokeUsersAuthArtifactsInTx` or
+ *    `revokeUserAuthArtifactsInTx` in its innermost enclosing function itself
+ *    (not a nested callback; for a `$transaction(async (tx) => …)` callback,
+ *    inside that callback). The sites are pinned by key in
+ *    EXPECTED_MEMBERSHIP_ENDS: a missing one fails as loudly as an unexpected
+ *    one. The bootstrap migration in src/auth.ts is exempted (it moves the
+ *    sessions rather than revoking them). A `tenantMember.delete/deleteMany`
+ *    or raw `DELETE FROM tenant_members` is also a tenant-row delete site: it
+ *    needs that class's reviewed exemption (team memberships) AND this rule's
+ *    revocation (sessions/tokens); the two classes pin the same two Prisma
+ *    deletes under their own key prefixes.
+ *
+ *    KNOWN LIMITS (rule 9): a review tripwire over source order, with the
+ *    pinned site set as its backstop, not a proof. "After" is source order:
+ *    an early return or a branch between the write and the revocation is not
+ *    seen, nor whether the revocation names the departed users. Raw SQL is
+ *    seen only as a `$queryRaw` / `$executeRaw` tagged template (not the call
+ *    form, a composed `Prisma.sql` fragment, or `*Unsafe`); a membership end
+ *    inside a database function or a trigger, and the model reached by
+ *    element access or an alias, are not seen.
+ *
+ * 10. A TENANT-MEMBERSHIP CREATION REVOKES IN ITS FUNCTION
+ *    (session-revocation-failure-surfaces deviation D13). A row created for a
+ *    user who already existed would revive what they still hold in that
+ *    tenant from an earlier membership (a SCIM DELETE whose revocation
+ *    failed), so the creating function revokes the user's credentials in
+ *    that tenant after the write. A creation is a
+ *    `tenantMember.create/createMany/createManyAndReturn/upsert` (any
+ *    receiver), or a raw `INSERT INTO tenant_members` / `MERGE INTO
+ *    tenant_members` template. Each must be followed by a rule-9 revoker call
+ *    in its innermost enclosing function itself, as in rule 9, or carry a
+ *    reviewed exemption: a brand-new user (the adapter's createUser) and the
+ *    bootstrap migration (no credential can exist under its target).
+ *    `departCreatedMembership` (which revokes a row created deactivated)
+ *    counts only for a Prisma create/upsert whose `deactivatedAt` is always
+ *    non-null (a `new …` expression or a literal): SCIM POST and directory
+ *    sync call it on their deactivated arm only, so a conditional
+ *    `deactivatedAt` needs the active arm's revoker too. The sites are pinned
+ *    by key in EXPECTED_MEMBERSHIP_CREATIONS; two creations sharing a key
+ *    carry their payload's text in it. Its known limits are rule 9's: source
+ *    order, not control flow (a revoker on one branch covers the other), and
+ *    not whether the revocation names the created users or their tenant.
+ *
  * Scanned: TARGETS, which include scripts/ (its `.ts` files; `__tests__` and
- * `*.test.*` excluded by the walker). NOT seen by rules 2, 5, 6 or the delete
- * class: aliases of the model, element access, `*Unsafe` raw calls, migrations,
+ * `*.test.*` excluded by the walker). NOT seen by rules 2, 5, 6, 9 or the
+ * delete class: aliases of the model, element access, `*Unsafe` raw calls, migrations,
  * and `.sh` / `.sql` files (scripts/manual-tests/run-pr-379-test-plan.sh deletes
  * tenant rows in a manual test; the runbook's operator SQL writes them by hand).
  * A database-enforced form of these rules, and of rule 8, is tracked in #1060.
@@ -200,13 +270,15 @@
  * team-member-key-prune.integration.test.ts (its statement order is checked
  * by check-team-key-version-refs.mjs).
  *
- * Exit 0 = clean. Exit 1 = a violation, a stale exemption, or site counts that
- * differ from the pinned ones (a scan that lost sites, or a site to review).
+ * Exit 0 = clean. Exit 1 = a violation, a stale exemption, or site counts (rule
+ * 9: site keys) that differ from the pinned ones (a scan that lost sites, or a
+ * site to review).
  */
 import { Node, SyntaxKind } from "ts-morph";
 import { join, dirname, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createAstProject, sourceFilesFrom, unresolvedTargets } from "./lib/ast-project.mjs";
+import { TOKEN, WRITE_KIND, analyzeSql, nameOf, sqlInputFromNode } from "./lib/sql-scan.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = process.env.TEAM_ROTATION_INPUT_LOCK_ROOT ?? join(__dirname, "..", "..");
@@ -310,7 +382,44 @@ const EXEMPTIONS = new Map([
     "grant::src/lib/vault/rotate-key-server.ts::applyVaultRotation::user.update",
     "unreadable data (a conditional spread), read by hand: the spread adds passphraseVerifierHmac/passphraseVerifierVersion only; the rest are vault-wrapping columns, no teamMemberships or teamMemberKeys",
   ],
+  [
+    "membership-create::src/auth.ts::<anonymous>::tenantMember.create",
+    "bootstrap → SSO tenant migration: the user's only path into the target is this migration (the target holds no row of theirs, checked above), so no credential of theirs can exist under the target to revive; what they hold is the bootstrap tenant's, whose tokens the migration revokes and whose sessions it moves. A revocation scoped to the target would find nothing before the session move, and would delete the moved sessions after it",
+  ],
+  [
+    "membership-create::src/lib/auth/session/auth-adapter.ts::<anonymous>::tenantMember.create",
+    "createUser: the row is for the user the same transaction has just created, who holds no credential anywhere",
+  ],
+  [
+    "membership-end::src/auth.ts::<anonymous>::tenantMember.deleteMany",
+    "bootstrap → SSO tenant migration: revokes the source tenant's tokens inline in the same transaction and MOVES the sessions to the new tenant instead of deleting them, which the revocation primitive would contradict (session-revocation-failure-surfaces-plan.md C2)",
+  ],
 ]);
+
+/**
+ * Rule 9's positive control: the membership ends of the real tree, by gate
+ * key. A missing one fails as loudly as an unexpected one.
+ */
+const EXPECTED_MEMBERSHIP_ENDS = [
+  "membership-end::src/lib/team/team-departure.ts::departFromTenant::tenant_members.raw",
+  "membership-end::src/lib/team/team-departure.ts::departCreatedMembership::tenant_members.raw",
+  "membership-end::src/lib/services/scim-user-service.ts::<anonymous>::tenantMember.delete",
+  "membership-end::src/auth.ts::<anonymous>::tenantMember.deleteMany",
+];
+
+/**
+ * Rule 10's positive control: the membership creations of the real tree, by
+ * gate key (the revoking ones and the exempted ones alike).
+ */
+const EXPECTED_MEMBERSHIP_CREATIONS = [
+  // The self-test's synthetic sites, as a JSON array of keys (as the counts above take env overrides).
+  ...JSON.parse(process.env.TEAM_ROTATION_INPUT_LOCK_EXTRA_CREATIONS ?? "[]"),
+  "membership-create::src/app/api/scim/v2/Users/route.ts::<anonymous>::tenantMember.create",
+  "membership-create::src/lib/directory-sync/engine.ts::<anonymous>::tenantMember.create",
+  "membership-create::src/auth.ts::joinClaimedTenant::tenant_members.raw",
+  "membership-create::src/auth.ts::<anonymous>::tenantMember.create",
+  "membership-create::src/lib/auth/session/auth-adapter.ts::<anonymous>::tenantMember.create",
+];
 
 const RAW_MEMBER_WRITE = /\b(DELETE\s+FROM|UPDATE)\s+(?:"?\w+"?\.)?"?(team_members|team_member_keys)"?\b/i;
 const RAW_TENANT_STATE_WRITE = /\b(UPDATE|INSERT\s+INTO)\s+(?:"?\w+"?\.)?"?tenant_members"?\b[\s\S]*\bdeactivated_at\b/i;
@@ -1136,6 +1245,272 @@ function recipientChecked(sourceFile, node, helpers) {
   });
 }
 
+// ── Rule 9: a tenant-membership end revokes in its function (session-revocation-failure-surfaces-plan.md C8) ──
+
+const REVOKERS = new Set(["revokeUsersAuthArtifactsInTx", "revokeUserAuthArtifactsInTx"]);
+const MEMBERSHIP_TABLE = "tenant_members";
+const END_COLUMN = "deactivated_at";
+const SET_LIST_ENDS = new Set(["FROM", "WHERE", "RETURNING"]);
+
+const isKeyword = (t, upper) => t !== undefined && t.type === TOKEN.WORD && t.upper === upper;
+const isSqlName = (t) => t !== undefined && (t.type === TOKEN.WORD || t.type === TOKEN.QIDENT || t.type === TOKEN.OPAQUE);
+const namesColumn = (t, name) => t !== undefined && (t.type === TOKEN.WORD || t.type === TOKEN.QIDENT) && nameOf(t) === name;
+
+/**
+ * Whether a Prisma payload names `deactivatedAt` with anything but the
+ * literal `null`, judged as mayName judges (a spread or an unreadable payload
+ * may name it, so it counts).
+ */
+function endsByPayload(literal) {
+  if (!mayName(literal, ["deactivatedAt"])) return false;
+  if (literal === null || literal.getProperties().some((p) => Node.isSpreadAssignment(p))) return true;
+  const p = findProp(literal, "deactivatedAt");
+  return !Node.isPropertyAssignment(p) || p.getInitializer()?.getText() !== "null";
+}
+
+/**
+ * The site of a Prisma membership end: a `tenantMember` delete/deleteMany,
+ * and — inside the IMPLEMENTATIONS files only, where rule 2 does not run — a
+ * write rule 2 would classify whose payload names a non-null `deactivatedAt`.
+ * Elsewhere rule 2 adjudicates those writes.
+ */
+function prismaMembershipEnd(path, call, mm) {
+  const site = `tenantMember.${mm.method}`;
+  if (mm.model === "tenantMember" && (mm.method === "delete" || mm.method === "deleteMany")) return site;
+  if (!IMPLEMENTATIONS.has(path) || !classifyTenantStateWrite(call, mm)) return null;
+  const arms = mm.method === "upsert" ? ["update", "create"] : ["data"];
+  return arms.some((arm) => endsByPayload(argProp(call, arm))) ? site : null;
+}
+
+/** First token after the statement holding token `i` at depth `depth`. */
+function sqlStatementEnd(tokens, i, depth) {
+  for (let j = i; j < tokens.length; j++) {
+    const t = tokens[j];
+    if ((t.type === TOKEN.SEMI && t.depth <= depth) || (t.type === TOKEN.RPAREN && t.depth < depth)) return j;
+  }
+  return tokens.length;
+}
+
+/** `[ONLY] [schema.]name` at `i`: `{ name, end }` (`name` null for a `${…}` table), or null. */
+function readTable(tokens, i) {
+  let j = isKeyword(tokens[i], "ONLY") ? i + 1 : i;
+  if (!isSqlName(tokens[j])) return null;
+  let last = tokens[j];
+  j++;
+  while (tokens[j]?.type === TOKEN.DOT && isSqlName(tokens[j + 1])) {
+    last = tokens[j + 1];
+    j += 2;
+  }
+  return { name: last.type === TOKEN.OPAQUE ? null : nameOf(last), end: j };
+}
+
+/**
+ * Whether a SET list ends a membership. Each assignment from `from` up to the
+ * list's end (FROM / WHERE / RETURNING / the statement end, at `depth`) must
+ * read `column = value`; one that does not (a row constructor, a `${…}`
+ * fragment, a subscript) counts, and so does `deactivated_at = <anything but
+ * NULL>`.
+ */
+function setListEnds(tokens, from, depth) {
+  const assignmentEnds = (s, e) => {
+    const [column, eq] = [tokens[s], tokens[s + 1]];
+    if (e - s < 3 || !(column.type === TOKEN.WORD || column.type === TOKEN.QIDENT) || eq.type !== TOKEN.OP || eq.text !== "=") return true;
+    return nameOf(column) === END_COLUMN && !(e - s === 3 && isKeyword(tokens[s + 2], "NULL"));
+  };
+  let start = from;
+  for (let j = from; ; j++) {
+    const t = tokens[j];
+    const atEnd = t === undefined || t.depth < depth
+      || (t.depth === depth && (t.type === TOKEN.SEMI || (t.type === TOKEN.WORD && SET_LIST_ENDS.has(t.upper))));
+    if (atEnd || (t.type === TOKEN.COMMA && t.depth === depth)) {
+      if (assignmentEnds(start, j)) return true;
+      if (atEnd) return false;
+      start = j + 1;
+    }
+  }
+}
+
+/**
+ * An `INSERT INTO tenant_members` head at `i` (plain, or an upsert's insert
+ * half), read from tokens — analyzeSql has no plain-INSERT kind. It ends a
+ * membership when its column list names deactivated_at or cannot be read, or
+ * it has none; an `ON CONFLICT … DO UPDATE SET` ends one as an UPDATE's SET
+ * list does.
+ */
+function insertEnds(tokens, i, table, reasons) {
+  const depth = tokens[i].depth;
+  const end = sqlStatementEnd(tokens, i + 1, depth);
+  let j = table.end;
+  if (isKeyword(tokens[j], "AS") && isSqlName(tokens[j + 1])) j += 2;
+  const open = tokens[j];
+  if (open?.type !== TOKEN.LPAREN || open.match === undefined) {
+    reasons.push("INSERT with no column list");
+  } else {
+    const columns = tokens.slice(j + 1, open.match);
+    const readable = columns.length % 2 === 1
+      && columns.every((t, k) => (k % 2 === 0 ? t.type === TOKEN.WORD || t.type === TOKEN.QIDENT : t.type === TOKEN.COMMA));
+    if (!readable) reasons.push("INSERT whose column list cannot be read");
+    else if (columns.some((t) => namesColumn(t, END_COLUMN))) reasons.push(`INSERT naming ${END_COLUMN}`);
+  }
+  for (let k = j; k < end; k++) {
+    if (tokens[k].depth !== depth || !isKeyword(tokens[k], "ON") || !isKeyword(tokens[k + 1], "CONFLICT")) continue;
+    for (let d = k + 2; d < end; d++) {
+      if (tokens[d].depth === depth && isKeyword(tokens[d], "DO") && isKeyword(tokens[d + 1], "UPDATE") && isKeyword(tokens[d + 2], "SET")) {
+        if (setListEnds(tokens, d + 3, depth)) reasons.push(`ON CONFLICT DO UPDATE SET assigning ${END_COLUMN}`);
+        break;
+      }
+    }
+    break;
+  }
+}
+
+/**
+ * A `MERGE INTO tenant_members` at `i` ends a membership when it has a `THEN
+ * DELETE`, a `THEN INSERT` with no column list, or names deactivated_at
+ * anywhere after its target — its conditions are not told from its SETs and
+ * INSERT arms, so a mention anywhere counts.
+ */
+function mergeEnds(tokens, i, table, reasons) {
+  const depth = tokens[i].depth;
+  const end = sqlStatementEnd(tokens, i + 1, depth);
+  for (let k = table.end; k < end; k++) {
+    const t = tokens[k];
+    if (namesColumn(t, END_COLUMN)) reasons.push(`MERGE naming ${END_COLUMN}`);
+    if (t.depth !== depth || !isKeyword(t, "THEN")) continue;
+    if (isKeyword(tokens[k + 1], "DELETE")) reasons.push("MERGE … THEN DELETE");
+    if (isKeyword(tokens[k + 1], "INSERT") && tokens[k + 2]?.type !== TOKEN.LPAREN) reasons.push("MERGE … THEN INSERT with no column list");
+  }
+}
+
+/**
+ * Why a raw template ends a membership (empty when it does not), from
+ * sql-scan tokens: a DELETE of tenant_members; an UPDATE whose SET list ends
+ * one (setListEnds); an INSERT or MERGE read by insertEnds / mergeEnds; and,
+ * failing closed, a write whose target is a `${…}` (any table), or an
+ * UPDATE/DELETE/MERGE word sql-scan cannot place in a template that names
+ * tenant_members.
+ */
+function rawMembershipEndReasons(raw) {
+  const input = sqlInputFromNode(raw.getTemplate());
+  if (input === null) return [];
+  const { tokens, writes, unrecognisedWrites } = analyzeSql(input);
+  const reasons = [];
+  for (const w of writes) {
+    if (w.target.name === null) {
+      reasons.push(`${w.kind} of a \${…} target`);
+      continue;
+    }
+    if (w.target.name !== MEMBERSHIP_TABLE) continue;
+    if (w.kind === WRITE_KIND.DELETE) reasons.push("DELETE");
+    if (w.kind === WRITE_KIND.UPDATE) {
+      const set = tokens.findIndex((t, k) => k > w.token && k < w.end && t.depth === w.depth && isKeyword(t, "SET"));
+      if (set === -1 || setListEnds(tokens, set + 1, w.depth)) reasons.push(`UPDATE assigning ${END_COLUMN}`);
+    }
+    // An UPSERT's halves and a MERGE are read from their heads below (a
+    // MERGE whose actions are only INSERT is no analyzeSql write).
+  }
+  for (let i = 0; i < tokens.length; i++) {
+    const head = isKeyword(tokens[i], "INSERT") ? insertEnds : isKeyword(tokens[i], "MERGE") ? mergeEnds : null;
+    if (head === null || !isKeyword(tokens[i + 1], "INTO")) continue;
+    const table = readTable(tokens, i + 2);
+    if (table === null) continue;
+    if (table.name === null) reasons.push(`${tokens[i].upper} into a \${…} target`);
+    else if (table.name === MEMBERSHIP_TABLE) head(tokens, i, table, reasons);
+  }
+  if (unrecognisedWrites.length > 0 && tokens.some((t) => namesColumn(t, MEMBERSHIP_TABLE))) {
+    reasons.push(`${unrecognisedWrites.map((u) => u.word).join("/")} the scanner cannot place, beside ${MEMBERSHIP_TABLE}`);
+  }
+  return [...new Set(reasons)];
+}
+
+/** Rule 9's sites in one file: `{ node, site, detail }`. */
+function membershipEnds(sourceFile, path) {
+  const out = [];
+  for (const call of sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    const mm = modelAndMethod(call);
+    const site = mm && prismaMembershipEnd(path, call, mm);
+    if (site) out.push({ node: call, site, detail: site });
+  }
+  for (const raw of rawWrites(sourceFile)) {
+    const reasons = rawMembershipEndReasons(raw);
+    if (reasons.length === 0) continue;
+    const namesTable = /\btenant_members\b/.test(raw.getTemplate().getText());
+    out.push({ node: raw, site: namesTable ? `${MEMBERSHIP_TABLE}.raw` : "opaque.raw", detail: reasons.join("; ") });
+  }
+  return out;
+}
+
+// ── Rule 10: a tenant-membership creation revokes in its function (deviation D13) ──
+
+const CREATE_METHODS = new Set(["create", "createMany", "createManyAndReturn", "upsert"]);
+/**
+ * departCreatedMembership revokes the users whose rows were created
+ * deactivated, so it covers only a creation whose row is ALWAYS created
+ * deactivated: in SCIM POST and directory sync it runs on the deactivated arm
+ * only, and the active arm's revocation is a rule-9 revoker's.
+ */
+const CREATION_REVOKERS = new Set([...REVOKERS, "departCreatedMembership"]);
+
+/**
+ * Whether a Prisma creation always creates its row deactivated: its payload
+ * (`data`, an upsert's `create`) is an object literal whose `deactivatedAt` is
+ * a `new …` expression or a string or numeric literal. A conditional, an
+ * identifier, a call, `null`, an absent key, a spread, a `createMany*` and an
+ * unreadable payload are not (a row it creates may be active).
+ */
+function createsDeactivated(call, mm) {
+  if (mm.method !== "create" && mm.method !== "upsert") return false;
+  const value = rawProp(argProp(call, mm.method === "upsert" ? "create" : "data"), "deactivatedAt");
+  if (!value) return false;
+  return Node.isNewExpression(value) || Node.isStringLiteral(value)
+    || Node.isNoSubstitutionTemplateLiteral(value) || Node.isNumericLiteral(value);
+}
+
+/** Whether a raw template inserts into tenant_members: an INSERT head, or a MERGE with an INSERT action. */
+function rawCreatesMembership(raw) {
+  const input = sqlInputFromNode(raw.getTemplate());
+  if (input === null) return false;
+  const { tokens } = analyzeSql(input);
+  for (let i = 0; i < tokens.length; i++) {
+    const head = isKeyword(tokens[i], "INSERT") ? "INSERT" : isKeyword(tokens[i], "MERGE") ? "MERGE" : null;
+    if (head === null || !isKeyword(tokens[i + 1], "INTO")) continue;
+    const table = readTable(tokens, i + 2);
+    if (table?.name !== MEMBERSHIP_TABLE) continue;
+    if (head === "INSERT") return true;
+    const end = sqlStatementEnd(tokens, i + 1, tokens[i].depth);
+    if (tokens.slice(table.end, end).some((t, k, rest) => isKeyword(t, "THEN") && isKeyword(rest[k + 1], "INSERT"))) return true;
+  }
+  return false;
+}
+
+/**
+ * Rule 10's sites in one file: `{ node, site, detail, revokers }`, `detail`
+ * the created row's payload text, `revokers` the calls that cover it (a raw
+ * creation's row is never read as always deactivated).
+ */
+function membershipCreations(sourceFile) {
+  const out = [];
+  for (const call of sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    const mm = modelAndMethod(call);
+    if (!mm || mm.model !== "tenantMember" || !CREATE_METHODS.has(mm.method)) continue;
+    const payload = argProp(call, mm.method === "upsert" ? "create" : "data");
+    const revokers = createsDeactivated(call, mm) ? CREATION_REVOKERS : REVOKERS;
+    out.push({ node: call, site: `tenantMember.${mm.method}`, detail: payload ? compact(payload) : "<unreadable>", revokers });
+  }
+  for (const raw of rawWrites(sourceFile)) {
+    if (rawCreatesMembership(raw)) {
+      out.push({ node: raw, site: `${MEMBERSHIP_TABLE}.raw`, detail: compact(raw.getTemplate()), revokers: REVOKERS });
+    }
+  }
+  return out;
+}
+
+/** Whether a revoker is called after `node`, in `node`'s innermost enclosing function itself (not a nested callback). */
+function revokesAfter(node, revokers = REVOKERS) {
+  const fn = enclosingFunction(node);
+  return fn !== null && callsIn(fn).some((c) => revokers.has(calleeName(c)) && c.getStart() >= node.getEnd());
+}
+
 /** A node's text on one line, for a site key. */
 function compact(node) {
   return node ? node.getText().replace(/\s+/g, " ") : "";
@@ -1220,6 +1595,16 @@ for (const { rel: path, sf: sourceFile } of sourceFilesFrom(project, TARGETS, RE
   checkAdmissionModuleBoundary(sourceFile, path, violations);
 
   checkDepartureClasses(sourceFile, path);
+  // Rule 9, also before the skip: team-departure.ts holds two of its sites.
+  for (const { node, site, detail } of membershipEnds(sourceFile, path)) {
+    const key = keyOf("membership-end", path, node, site);
+    sites.push({ rule: "membershipEnds", key, line: lineOf(path, node), ok: revokesAfter(node), detail });
+  }
+
+  for (const { node, site, detail, revokers } of membershipCreations(sourceFile)) {
+    const key = keyOf("membership-create", path, node, site);
+    sites.push({ rule: "membershipCreations", key, line: lineOf(path, node), ok: revokesAfter(node, revokers), detail });
+  }
 
   if (IMPLEMENTATIONS.has(path)) continue;
   const checkHelpers = recipientCheckHelpers(sourceFile);
@@ -1308,6 +1693,12 @@ for (const site of sites.filter((s) => s.rule === "grants")) grantKeyCounts.set(
 for (const site of sites) {
   if (site.rule === "grants" && grantKeyCounts.get(site.key) > 1) site.key = `${site.key}[${site.detail}]`;
 }
+// The same for two membership creations with one key (one method in one anonymous callback).
+const creationKeyCounts = new Map();
+for (const site of sites.filter((s) => s.rule === "membershipCreations")) creationKeyCounts.set(site.key, (creationKeyCounts.get(site.key) ?? 0) + 1);
+for (const site of sites) {
+  if (site.rule === "membershipCreations" && creationKeyCounts.get(site.key) > 1) site.key = `${site.key}[${site.detail}]`;
+}
 
 const problems = [];
 const counts = Object.fromEntries(Object.keys(EXPECTED).map((rule) => [rule, sites.filter((s) => s.rule === rule).length]));
@@ -1318,7 +1709,43 @@ if (Object.keys(EXPECTED).some((rule) => counts[rule] !== EXPECTED[rule])) {
       sites.map((s) => `  ${s.line}  ${s.key}`).join("\n"),
   );
 }
-const uncovered = sites.filter((s) => !s.ok && !EXEMPTIONS.has(s.key));
+const membershipEndSites = sites.filter((s) => s.rule === "membershipEnds");
+for (const s of membershipEndSites.filter((m) => !m.ok && !EXEMPTIONS.has(m.key))) {
+  violations.push(`membership-end  ${s.line}  ${s.key}  ends a tenant membership (${s.detail}) with no revokeUsersAuthArtifactsInTx / revokeUserAuthArtifactsInTx call after it in its function`);
+}
+const foundEnds = membershipEndSites.map((s) => s.key);
+const unexpectedEnds = foundEnds.filter((k) => !EXPECTED_MEMBERSHIP_ENDS.includes(k));
+const missingEnds = EXPECTED_MEMBERSHIP_ENDS.filter((k) => !foundEnds.includes(k));
+const repeatedEnds = [...new Set(foundEnds.filter((k, i) => foundEnds.indexOf(k) !== i))];
+if (unexpectedEnds.length + missingEnds.length + repeatedEnds.length > 0) {
+  problems.push(
+    `membership-end sites differ from the pinned set (EXPECTED_MEMBERSHIP_ENDS). Review each, then update it:\n` +
+      [
+        ...unexpectedEnds.map((k) => `  unexpected: ${k}`),
+        ...missingEnds.map((k) => `  missing: ${k}`),
+        ...repeatedEnds.map((k) => `  repeated: ${k}`),
+      ].join("\n"),
+  );
+}
+const membershipCreationSites = sites.filter((s) => s.rule === "membershipCreations");
+for (const s of membershipCreationSites.filter((m) => !m.ok && !EXEMPTIONS.has(m.key))) {
+  violations.push(`membership-create  ${s.line}  ${s.key}  creates a tenant membership with no revokeUsersAuthArtifactsInTx / revokeUserAuthArtifactsInTx call after it in its function (an existing user's residue in the tenant would come back with the row; departCreatedMembership covers only a row always created deactivated)`);
+}
+const foundCreations = membershipCreationSites.map((s) => s.key);
+const unexpectedCreations = foundCreations.filter((k) => !EXPECTED_MEMBERSHIP_CREATIONS.includes(k));
+const missingCreations = EXPECTED_MEMBERSHIP_CREATIONS.filter((k) => !foundCreations.includes(k));
+const repeatedCreations = [...new Set(foundCreations.filter((k, i) => foundCreations.indexOf(k) !== i))];
+if (unexpectedCreations.length + missingCreations.length + repeatedCreations.length > 0) {
+  problems.push(
+    `membership-create sites differ from the pinned set (EXPECTED_MEMBERSHIP_CREATIONS). Review each, then update it:\n` +
+      [
+        ...unexpectedCreations.map((k) => `  unexpected: ${k}`),
+        ...missingCreations.map((k) => `  missing: ${k}`),
+        ...repeatedCreations.map((k) => `  repeated: ${k}`),
+      ].join("\n"),
+  );
+}
+const uncovered = sites.filter((s) => !s.ok && !EXEMPTIONS.has(s.key) && s.rule !== "membershipEnds" && s.rule !== "membershipCreations");
 if (uncovered.length > 0) {
   problems.push(
     `sites without their lock (a member-set write needs a team lock before it; an admission a tenant-row lock; ` +
@@ -1336,4 +1763,4 @@ if (problems.length > 0) {
   for (const p of problems) console.error(`\nFAIL: ${p}`);
   process.exit(1);
 }
-console.log(`check-team-rotation-input-lock: OK ${JSON.stringify(counts)}`);
+console.log(`check-team-rotation-input-lock: OK ${JSON.stringify({ ...counts, membershipEnds: foundEnds.length, membershipCreations: foundCreations.length })}`);

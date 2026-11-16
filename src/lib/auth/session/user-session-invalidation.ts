@@ -6,14 +6,15 @@ import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
 import { invalidateCachedSessionsBulkByDigest, hashSessionToken } from "@/lib/auth/session/session-cache";
 import { getLogger } from "@/lib/logger";
-import { lockUserAuthArtifacts } from "@/lib/auth/session/user-auth-serialization";
+import { errorLogFields } from "@/lib/logger/error-fields";
+import { lockUsersAuthArtifacts } from "@/lib/auth/session/user-auth-serialization";
 
 /**
  * Options for {@link invalidateUserSessions}.
  *
  * Discriminated union — `tenantId` and `allTenants: true` are mutually
  * exclusive at compile time (F18 + F20). Pass `tenantId` for the standard
- * tenant-scoped invalidation (team removal, SCIM deletion). Pass
+ * tenant-scoped invalidation. Pass
  * `allTenants: true` only for cross-tenant flows like admin vault reset,
  * where the target user's Session rows in OTHER tenants are still
  * authentication artifacts that survive the wipe (F3+S2).
@@ -68,9 +69,12 @@ export type InvalidateUserSessionsResult = {
 };
 
 /**
- * Invalidate all sessions and tokens for a user.
- * Called on: team member removal, SCIM user deletion/deactivation,
- * and admin vault reset (cross-tenant via `allTenants: true`).
+ * Invalidate all sessions and tokens for a user, in a transaction of its own.
+ * Called on: admin vault reset (cross-tenant via `allTenants: true`, before
+ * the reset token is spent), self-service vault reset, passphrase change,
+ * recovery and key rotation. A tenant departure or member removal revokes
+ * inside the transaction that ends the membership instead
+ * ({@link revokeUsersAuthArtifactsInTx}), so it cannot commit without it.
  *
  * Covers every user-bound auth artifact:
  *   - Session (DB row delete + cache tombstone)
@@ -127,119 +131,130 @@ export async function invalidateUserSessions(
       now,
     });
 
-    let cacheTombstoneFailures = 0;
-    if (sessionTokens.length > 0) {
-      const cacheResult = await invalidateCachedSessions(sessionTokens);
-      cacheTombstoneFailures = cacheResult.failed;
-    }
-
     // A07-5: failures previously surfaced only in the per-caller audit
     // metadata. Operators have to grep audit logs to notice a Redis
-    // outage during a revocation. Capture to Sentry centrally so it
-    // reaches the standard on-call channel.
-    if (cacheTombstoneFailures > 0) {
-      getLogger().error(
-        {
-          userId,
-          failures: cacheTombstoneFailures,
-          reason: options.reason ?? null,
-          _logType: "session.cache_tombstone_failures",
-        },
-        "session.cache_tombstone_failures",
-      );
-      Sentry.captureMessage(
-        "session cache tombstone failures during invalidateUserSessions",
-        {
-          level: "error",
-          tags: {
-            reason: options.reason ?? "unspecified",
-          },
-          extra: {
-            userId,
-            failures: cacheTombstoneFailures,
-            tenantScope: allTenants ? "all" : options.tenantId,
-          },
-        },
-      );
-    }
+    // outage during a revocation; the helper reports it to on-call. Inside
+    // the callback, before commit: a tombstone that precedes a rollback only
+    // evicts a cache entry.
+    const cacheTombstoneFailures = await tombstoneRevokedSessions(sessionTokens, {
+      reason: options.reason ?? null,
+      operation: "invalidateUserSessions",
+      userId,
+      extra: { tenantScope: allTenants ? "all" : options.tenantId },
+    });
 
     return { ...counts, cacheTombstoneFailures };
   }, BYPASS_GRANT.USER_SESSION_INVALIDATION);
 }
 
-type UserAuthArtifactCounts = Omit<InvalidateUserSessionsResult, "cacheTombstoneFailures">;
+export type UserAuthArtifactCounts = Omit<InvalidateUserSessionsResult, "cacheTombstoneFailures">;
 
 /**
- * The database half of `invalidateUserSessions`, on the caller's
- * transaction: delete the user's sessions and revoke every user-bound token
- * (the same models, same scope rules). Lets a caller make the revocation
- * atomic with its own write — the admin passkey revoke deletes the credential
- * and its possible sign-ins together, or neither. Returns the deleted
- * sessions' token digests: the caller tombstones them in the session cache
- * AFTER its transaction commits.
- *
- * The caller's bypass grant must cover session, extensionToken, apiKey,
- * mcpAccessToken, mcpRefreshToken, delegationSession, operatorToken,
- * extensionBridgeCode, mobileBridgeCode and mcpAuthorizationCode.
+ * The database half of `invalidateUserSessions` for one user, on the caller's
+ * transaction. See {@link revokeUsersAuthArtifactsInTx}.
  */
 export async function revokeUserAuthArtifactsInTx(
   tx: Prisma.TransactionClient,
   userId: string,
-  options: {
-    tenantFilter: { tenantId?: string };
-    excludeSessionDigest?: string | null;
-    now?: Date;
-  },
+  options: RevokeUsersAuthArtifactsOptions,
+): Promise<{ counts: UserAuthArtifactCounts; sessionTokens: string[] }> {
+  return revokeUsersAuthArtifactsInTx(tx, [userId], options);
+}
+
+type RevokeUsersAuthArtifactsOptions = {
+  tenantFilter: { tenantId?: string };
+  excludeSessionDigest?: string | null;
+  now?: Date;
+  /**
+   * Wait for the credential lock at most TEAM_KEY_LOCK_TIMEOUT_MS and throw
+   * UserAuthLockTimeoutError past it, for a departure or removal that must
+   * answer within its transaction timeout.
+   */
+  boundedLockWait?: boolean;
+};
+
+/**
+ * The database half of `invalidateUserSessions`, on the caller's
+ * transaction: delete the users' sessions and revoke every user-bound token
+ * (the same models, same scope rules). Lets a caller make the revocation
+ * atomic with its own write — a departure, a member removal, the admin
+ * passkey revoke — so both commit or neither does. Returns the summed counts
+ * and the deleted sessions' token digests: the caller tombstones them in the
+ * session cache AFTER its transaction commits (tombstoneRevokedSessions).
+ *
+ * The caller's context must reach session, extensionToken, apiKey,
+ * mcpAccessToken, mcpRefreshToken, delegationSession, operatorToken,
+ * extensionBridgeCode, mobileBridgeCode and mcpAuthorizationCode for these
+ * users: a bypass grant covering them, or the tenant context `tenantFilter`
+ * names (each has a NOT NULL tenant_id under tenant isolation).
+ */
+export async function revokeUsersAuthArtifactsInTx(
+  tx: Prisma.TransactionClient,
+  userIds: readonly string[],
+  options: RevokeUsersAuthArtifactsOptions,
 ): Promise<{ counts: UserAuthArtifactCounts; sessionTokens: string[] }> {
   const { tenantFilter, excludeSessionDigest = null } = options;
+  if (userIds.length === 0) {
+    return {
+      counts: {
+        sessions: 0,
+        extensionTokens: 0,
+        apiKeys: 0,
+        mcpAccessTokens: 0,
+        mcpRefreshTokens: 0,
+        delegationSessions: 0,
+        operatorTokens: 0,
+        extensionBridgeCodes: 0,
+        mobileBridgeCodes: 0,
+        mcpAuthorizationCodes: 0,
+      },
+      sessionTokens: [],
+    };
+  }
+  const ids = [...userIds];
   const now = options.now ?? new Date();
   // Serialized against every mint of a user-bound credential
   // (user-auth-serialization.ts): a mint that waited on this revocation finds
   // its proof gone; one that went first is revoked below.
-  await lockUserAuthArtifacts(tx, userId);
+  await lockUsersAuthArtifacts(tx, ids, { bounded: options.boundedLockWait });
   // SELECT tokens before deleteMany so we can invalidate the cache after
   // the DB delete commits (R3 / S-6 sequencing).
+  const sessionWhere = {
+    userId: { in: ids },
+    ...tenantFilter,
+    ...(excludeSessionDigest ? { sessionToken: { not: excludeSessionDigest } } : {}),
+  };
   const targetSessions = await tx.session.findMany({
-    where: {
-      userId,
-      ...tenantFilter,
-      ...(excludeSessionDigest ? { sessionToken: { not: excludeSessionDigest } } : {}),
-    },
+    where: sessionWhere,
     select: { sessionToken: true },
   });
 
-  const sessionsResult = await tx.session.deleteMany({
-    where: {
-      userId,
-      ...tenantFilter,
-      ...(excludeSessionDigest ? { sessionToken: { not: excludeSessionDigest } } : {}),
-    },
-  });
+  const sessionsResult = await tx.session.deleteMany({ where: sessionWhere });
   const extensionTokensResult = await tx.extensionToken.updateMany({
-    where: { userId, revokedAt: null, ...tenantFilter },
+    where: { userId: { in: ids }, revokedAt: null, ...tenantFilter },
     data: { revokedAt: now },
   });
   const apiKeysResult = await tx.apiKey.updateMany({
-    where: { userId, revokedAt: null, ...tenantFilter },
+    where: { userId: { in: ids }, revokedAt: null, ...tenantFilter },
     data: { revokedAt: now },
   });
   const mcpAccessTokensResult = await tx.mcpAccessToken.updateMany({
-    where: { userId, revokedAt: null, ...tenantFilter },
+    where: { userId: { in: ids }, revokedAt: null, ...tenantFilter },
     data: { revokedAt: now },
   });
   const mcpRefreshTokensResult = await tx.mcpRefreshToken.updateMany({
-    where: { userId, revokedAt: null, ...tenantFilter },
+    where: { userId: { in: ids }, revokedAt: null, ...tenantFilter },
     data: { revokedAt: now },
   });
   const delegationSessionsResult = await tx.delegationSession.updateMany({
-    where: { userId, revokedAt: null, ...tenantFilter },
+    where: { userId: { in: ids }, revokedAt: null, ...tenantFilter },
     data: { revokedAt: now },
   });
   // OperatorToken uses subjectUserId (not userId) as the "authenticates
   // as" column. Same tenantFilter semantics — all-tenants for vault
   // reset, single-tenant for member removal.
   const operatorTokensResult = await tx.operatorToken.updateMany({
-    where: { subjectUserId: userId, revokedAt: null, ...tenantFilter },
+    where: { subjectUserId: { in: ids }, revokedAt: null, ...tenantFilter },
     data: { revokedAt: now },
   });
 
@@ -248,15 +263,15 @@ export async function revokeUserAuthArtifactsInTx(
   // before this revocation would mint a fresh extension, iOS or MCP token after
   // it. The bootstrap migration consumes the same three (src/auth.ts).
   const extensionBridgeCodesResult = await tx.extensionBridgeCode.updateMany({
-    where: { userId, usedAt: null, ...tenantFilter },
+    where: { userId: { in: ids }, usedAt: null, ...tenantFilter },
     data: { usedAt: now },
   });
   const mobileBridgeCodesResult = await tx.mobileBridgeCode.updateMany({
-    where: { userId, usedAt: null, ...tenantFilter },
+    where: { userId: { in: ids }, usedAt: null, ...tenantFilter },
     data: { usedAt: now },
   });
   const mcpAuthorizationCodesResult = await tx.mcpAuthorizationCode.updateMany({
-    where: { userId, usedAt: null, ...tenantFilter },
+    where: { userId: { in: ids }, usedAt: null, ...tenantFilter },
     data: { usedAt: now },
   });
 
@@ -275,6 +290,51 @@ export async function revokeUserAuthArtifactsInTx(
     },
     sessionTokens: targetSessions.map((session) => session.sessionToken),
   };
+}
+
+/**
+ * Tombstone revoked sessions in the session cache, after the revocation's
+ * transaction commits (Redis is not transactional with Postgres). Never
+ * throws: the cache never authenticates on its own — handlers re-read the
+ * session row through auth() — so an entry a failure leaves behind lets the
+ * proxy pass a request the handler then refuses, until SESSION_CACHE_TTL_MS.
+ * Every failure is still raised as the one on-call signal: the
+ * `session.cache_tombstone_failures` error log and a Sentry error. Returns
+ * the number of tokens whose tombstone did not land, for audit metadata.
+ */
+export async function tombstoneRevokedSessions(
+  sessionTokens: readonly string[],
+  context: { reason: string | null; operation: string; userId?: string; extra?: Record<string, unknown> },
+): Promise<number> {
+  if (sessionTokens.length === 0) return 0;
+  let failures: number;
+  let error: unknown;
+  try {
+    failures = (await invalidateCachedSessions(sessionTokens)).failed;
+  } catch (err) {
+    failures = sessionTokens.length;
+    error = err;
+  }
+  if (failures === 0) return 0;
+
+  const userField = context.userId === undefined ? {} : { userId: context.userId };
+  getLogger().error(
+    {
+      ...context.extra,
+      ...userField,
+      failures,
+      reason: context.reason,
+      ...(error === undefined ? {} : { error: errorLogFields(error) }),
+      _logType: "session.cache_tombstone_failures",
+    },
+    "session.cache_tombstone_failures",
+  );
+  Sentry.captureMessage(`session cache tombstone failures during ${context.operation}`, {
+    level: "error",
+    tags: { reason: context.reason ?? "unspecified" },
+    extra: { ...context.extra, ...userField, failures },
+  });
+  return failures;
 }
 
 /**

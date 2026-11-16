@@ -4,7 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { extractRequestMeta, logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { createLockBudget } from "@/lib/team/team-key-rotation-lock";
 import { isMembershipLockConflict, lockTenantMemberCreation, membershipConflictMessage } from "@/lib/team/tenant-row-lock";
-import { departCreatedMembership } from "@/lib/team/team-departure";
+import { type DepartureRevocation, departCreatedMembership } from "@/lib/team/team-departure";
+import { revokeUsersAuthArtifactsInTx, tombstoneRevokedSessions } from "@/lib/auth/session/user-session-invalidation";
 import { TEAM_MEMBERSHIP_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 import {
   scimResponse,
@@ -28,7 +29,7 @@ import { resolveExistingUsersForTenant } from "@/lib/tenant-context";
 import { isUniqueViolationOn, ONE_ACTIVE_MEMBERSHIP_INDEX } from "@/lib/prisma/prisma-error";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { REALIGNMENT_SOURCE, realignAfterActivation } from "@/lib/tenant/tenant-realignment";
-import { SCIM_USER_NOT_PROVISIONABLE_DETAIL, toScimUserResource } from "@/lib/services/scim-user-service";
+import { SCIM_CREATE_TOMBSTONE, SCIM_USER_NOT_PROVISIONABLE_DETAIL, toScimUserResource } from "@/lib/services/scim-user-service";
 import { getLogger } from "@/lib/logger";
 import { errorLogFields } from "@/lib/logger/error-fields";
 import { scimParseBody } from "@/lib/scim/parse-body";
@@ -197,6 +198,7 @@ async function handlePOST(req: NextRequest) {
       // ends those memberships.
       const budget = createLockBudget();
       if (active === false) await lockTenantMemberCreation(tx, tenantId, user.id, budget);
+      let revocation: DepartureRevocation | null = null;
       const member = await tx.tenantMember.create({
         data: {
           tenantId,
@@ -210,7 +212,7 @@ async function handlePOST(req: NextRequest) {
       });
       if (active === false) {
         const { ip, userAgent } = extractRequestMeta(req);
-        await departCreatedMembership(tx, tenantId, [user.id], {
+        revocation = await departCreatedMembership(tx, tenantId, [user.id], {
           actor: { userId: auditUserId, actorType, ip, userAgent },
           budget,
         });
@@ -246,8 +248,34 @@ async function handlePOST(req: NextRequest) {
         }
       }
 
-      return { user, member, externalId };
+      // An ACTIVE row created for a user who already existed: with no row here
+      // before, anything they still hold in this tenant is the residue of an
+      // earlier membership (a SCIM DELETE whose revocation failed), and the new
+      // row would revive it. Revoked last, so the credential lock is this
+      // transaction's last lock. A user created above holds nothing, and
+      // departCreatedMembership has revoked for a row created deactivated.
+      if (existingUserId && active !== false) {
+        revocation = await revokeUsersAuthArtifactsInTx(tx, [user.id], { tenantFilter: { tenantId }, boundedLockWait: true });
+      }
+
+      return { user, member, externalId, revocation };
     }, { timeout: TEAM_MEMBERSHIP_TX_TIMEOUT_MS });
+
+    if (created.revocation) {
+      const cacheTombstoneFailures = await tombstoneRevokedSessions(created.revocation.sessionTokens, {
+        ...SCIM_CREATE_TOMBSTONE,
+        userId: created.user.id,
+      });
+      // In directory sync's `credentials-revoked` shape: a non-zero count on a
+      // creation for an existing user (either arm) is the residue of an earlier
+      // failed deprovision.
+      if (Object.values(created.revocation.counts).some((count) => count > 0)) {
+        getLogger().info(
+          { tenantId, userId: created.user.id, ...created.revocation.counts, cacheTombstoneFailures },
+          "scim.credentials-revoked",
+        );
+      }
+    }
 
     await logAuditAsync({
       ...tenantAuditBase(req, auditUserId, tenantId),

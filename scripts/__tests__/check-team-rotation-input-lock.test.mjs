@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,8 +11,8 @@ const SUBJECT = "src/lib/team/subject.ts";
 /**
  * The exempted sites, so a synthetic root keeps every exemption matched: 1
  * member write, and EXEMPT_ADMISSIONS admissions, EXEMPT_GRANTS grants and
- * EXEMPT_TENANT_DELETES tenant-row deletes that run() adds to the counts a
- * test passes.
+ * EXEMPT_TENANT_DELETES tenant-row deletes (seeded in MEMBERSHIP_END_FILES)
+ * that run() adds to the counts a test passes.
  */
 const EXEMPT_FILES = {
   "src/app/api/teams/[teamId]/rotate-key/route.ts": `
@@ -66,20 +66,12 @@ export const adapter = {
     const { id, ...rest } = data;
     return withBypassRls(prisma, async (tx) => tx.user.update({ where: { id }, data: rest }));
   },
+  async createUser(user) {
+    return withBypassRls(prisma, async (tx) => {
+      await tx.tenantMember.create({ data: { tenantId: tenant.id, userId: createdUser.id, role } });
+    });
+  },
 };
-`,
-  // The bootstrap migration and deactivateScimUser: the two reviewed tenant-row deletes.
-  "src/auth.ts": `
-export const migrate = (userId, existingTenantId) => prisma.$transaction(async (tx) => {
-  await tx.tenantMember.deleteMany({ where: { userId, tenantId: existingTenantId } });
-});
-`,
-  "src/lib/services/scim-user-service.ts": `
-export async function deactivateScimUser(tenantId, userId) {
-  await prisma.$transaction(async (tx) => {
-    await tx.tenantMember.delete({ where: { tenantId_userId: { tenantId, userId } } });
-  });
-}
 `,
   "src/lib/vault/rotate-key-server.ts": `
 export async function applyVaultRotation(tx, userId, payload) {
@@ -90,10 +82,109 @@ export async function applyVaultRotation(tx, userId, payload) {
 const EXEMPT_ADMISSIONS = 1;
 const EXEMPT_GRANTS = 10;
 const EXEMPT_TENANT_DELETES = 2;
+/** departFromTenant's and departCreatedMembership's UPDATEs in the MEMBERSHIP_END_FILES seed. */
+const SEEDED_DEPARTURE_WRITERS = 2;
+/** The SCIM POST and directory-sync creates in the MEMBERSHIP_END_FILES seed: rule 2 sites, as in the real tree. */
+const SEEDED_TENANT_WRITES = 2;
+
+const DEPARTURE = "src/lib/team/team-departure.ts";
+const SCIM_USER_SERVICE = "src/lib/services/scim-user-service.ts";
+const AUTH = "src/auth.ts";
+const SCIM_POST = "src/app/api/scim/v2/Users/route.ts";
+const DIRECTORY_SYNC = "src/lib/directory-sync/engine.ts";
+
+/**
+ * Rule 9's pinned membership ends (EXPECTED_MEMBERSHIP_ENDS), each revoking
+ * after its write, and the exempted auth.ts migration shape. The auth.ts and
+ * deactivateScimUser deletes are also the two exempted tenant-row deletes,
+ * and team-departure.ts's two UPDATEs the SEEDED_DEPARTURE_WRITERS, each with
+ * endTeamMemberships after it. writeFile keeps a seeded file's seed and adds
+ * to it, so a red cannot pass on a missing pinned site.
+ *
+ * Rule 10's pinned membership creations (EXPECTED_MEMBERSHIP_CREATIONS) are
+ * seeded here too, in production's shape: the SCIM POST and directory-sync
+ * creates, whose `deactivatedAt` is conditional, with departCreatedMembership
+ * on the deactivated arm and the revocation on the active one (so they are
+ * also the SEEDED_TENANT_WRITES), and sign-in's joinClaimedTenant INSERT, each
+ * revoking after its write; the migration's create (auth.ts), exempted. The
+ * adapter's exempted createUser is in EXEMPT_FILES.
+ */
+const MEMBERSHIP_END_FILES = {
+  [DEPARTURE]: `
+export async function departFromTenant(tx, tenantId, userIds, options) {
+  const transitioned = await tx.$queryRaw\`
+    UPDATE tenant_members SET deactivated_at = clock_timestamp(), updated_at = clock_timestamp()
+     WHERE tenant_id = \${tenantId}::uuid AND user_id = ANY(\${[...userIds]}::uuid[]) AND deactivated_at IS NULL
+    RETURNING user_id\`;
+  await endTeamMemberships(tx, tenantId, transitioned, options);
+  const revocation = await revokeUsersAuthArtifactsInTx(tx, transitioned, { tenantFilter: { tenantId }, boundedLockWait: true });
+  return { userIds: transitioned, revocation };
+}
+export async function departCreatedMembership(tx, tenantId, userIds, options) {
+  await tx.$executeRaw\`
+    UPDATE tenant_members SET deactivated_at = clock_timestamp(), updated_at = clock_timestamp()
+     WHERE tenant_id = \${tenantId}::uuid AND user_id = ANY(\${[...userIds]}::uuid[]) AND deactivated_at IS NOT NULL\`;
+  await endTeamMemberships(tx, tenantId, userIds, options);
+  return revokeUsersAuthArtifactsInTx(tx, userIds, { tenantFilter: { tenantId }, boundedLockWait: true });
+}
+`,
+  [SCIM_USER_SERVICE]: `
+export async function deactivateScimUser(tenantId, userId) {
+  return prisma.$transaction(async (tx) => {
+    await tx.tenantMember.delete({ where: { tenantId_userId: { tenantId, userId } } });
+    return revokeUserAuthArtifactsInTx(tx, userId, { tenantFilter: { tenantId }, boundedLockWait: true });
+  });
+}
+`,
+  [AUTH]: `
+export async function migrateBootstrapTenant(userId, existingTenantId, target) {
+  await withBypassRls(prisma, async (tx) => {
+    await tx.tenantMember.deleteMany({ where: { userId, tenantId: existingTenantId } });
+    await tx.tenantMember.create({ data: { tenantId: target.id, userId, role: TENANT_ROLE.MEMBER } });
+  });
+}
+async function joinClaimedTenant(tx, userId, tenantId) {
+  const inserted = await tx.$queryRaw\`
+    INSERT INTO tenant_members (id, tenant_id, user_id, role, created_at, updated_at)
+    VALUES (gen_random_uuid(), \${tenantId}::uuid, \${userId}::uuid, \${TENANT_ROLE.MEMBER}::"TenantRole", clock_timestamp(), clock_timestamp())
+    ON CONFLICT (tenant_id, user_id) DO NOTHING
+    RETURNING id\`;
+  const memberId = inserted[0]?.id ?? (await tx.tenantMember.findUniqueOrThrow({ where, select: { id: true } })).id;
+  await realignToMembershipInTx(tx, { userId, memberId, tenantId });
+  if (inserted.length === 0) return null;
+  return revokeUsersAuthArtifactsInTx(tx, [userId], { tenantFilter: { tenantId }, boundedLockWait: true });
+}
+`,
+  [SCIM_POST]: `
+export const createScimUser = withTenantRls(prisma, tenantId, async (tx) => {
+  if (active === false) await lockTenantMemberCreation(tx, tenantId, user.id, budget);
+  const member = await tx.tenantMember.create({
+    data: { tenantId, userId: user.id, role: TENANT_ROLE.MEMBER, deactivatedAt: active === false ? new Date() : null },
+  });
+  if (active === false) revocation = await departCreatedMembership(tx, tenantId, [user.id], { actor, budget });
+  if (existingUserId && active !== false) {
+    revocation = await revokeUsersAuthArtifactsInTx(tx, [user.id], { tenantFilter: { tenantId }, boundedLockWait: true });
+  }
+});
+`,
+  [DIRECTORY_SYNC]: `
+export const apply = withTenantRls(prisma, tenantId, async (tx) => {
+  await lockTenantRows(tx, tenantId, userIds, "update", budget);
+  for (const pu of toCreate) {
+    const createsDeactivated = !pu.active || activeInAnother;
+    await tx.tenantMember.create({
+      data: { tenantId, userId: pu.userId, role: TENANT_ROLE.MEMBER, deactivatedAt: createsDeactivated ? new Date() : null },
+    });
+  }
+  departures.push({ userIds: createdDeactivated, revocation: await departCreatedMembership(tx, tenantId, createdDeactivated, { actor, budget }) });
+  admissions.push({ userIds: createdActive, revocation: await revokeUsersAuthArtifactsInTx(tx, createdActive, { tenantFilter: { tenantId }, boundedLockWait: true }) });
+});
+`,
+};
 
 let root;
 
-function run({ writes = 1, tenantWrites = 0, admissions = 0, grants = 0, departureWriters = 0, tenantDeletes = 0 } = {}) {
+function run({ writes = 1, tenantWrites = 0, admissions = 0, grants = 0, departureWriters = 0, tenantDeletes = 0, creations = [] } = {}) {
   try {
     return {
       code: 0,
@@ -103,11 +194,12 @@ function run({ writes = 1, tenantWrites = 0, admissions = 0, grants = 0, departu
           ...process.env,
           TEAM_ROTATION_INPUT_LOCK_ROOT: root,
           TEAM_ROTATION_INPUT_LOCK_WRITES: String(writes),
-          TEAM_ROTATION_INPUT_LOCK_TENANT_WRITES: String(tenantWrites),
+          TEAM_ROTATION_INPUT_LOCK_TENANT_WRITES: String(tenantWrites + SEEDED_TENANT_WRITES),
           TEAM_ROTATION_INPUT_LOCK_ADMISSIONS: String(admissions + EXEMPT_ADMISSIONS),
           TEAM_ROTATION_INPUT_LOCK_GRANTS: String(grants + EXEMPT_GRANTS),
-          TEAM_ROTATION_INPUT_LOCK_DEPARTURE_WRITERS: String(departureWriters),
+          TEAM_ROTATION_INPUT_LOCK_DEPARTURE_WRITERS: String(departureWriters + SEEDED_DEPARTURE_WRITERS),
           TEAM_ROTATION_INPUT_LOCK_TENANT_DELETES: String(tenantDeletes + EXEMPT_TENANT_DELETES),
+          TEAM_ROTATION_INPUT_LOCK_EXTRA_CREATIONS: JSON.stringify(creations),
         },
         stdio: ["ignore", "pipe", "pipe"],
       }),
@@ -117,9 +209,14 @@ function run({ writes = 1, tenantWrites = 0, admissions = 0, grants = 0, departu
   }
 }
 
-function writeFile(rel, body) {
+/** Writes `body` as the whole file, dropping any seed. */
+function replaceFile(rel, body) {
   mkdirSync(join(root, dirname(rel)), { recursive: true });
   writeFileSync(join(root, rel), body);
+}
+
+function writeFile(rel, body) {
+  replaceFile(rel, rel in MEMBERSHIP_END_FILES ? `${MEMBERSHIP_END_FILES[rel]}\n${body}` : body);
 }
 
 const write = writeFile;
@@ -131,9 +228,9 @@ beforeEach(() => {
   write("src/app/layout.ts", "export {};\n");
   write("src/lib/util.ts", "export {};\n");
   write("src/workers/worker.ts", "export {};\n");
-  write("src/auth.ts", "export {};\n");
   write("scripts/x.ts", "export {};\n");
   for (const [rel, body] of Object.entries(EXEMPT_FILES)) write(rel, body);
+  for (const [rel, body] of Object.entries(MEMBERSHIP_END_FILES)) replaceFile(rel, body);
 });
 
 /** A deny: the gate fails (exit 1) AND names the reason. */
@@ -257,13 +354,18 @@ export const rotate = withTenantRls(prisma, tenantId, async (tx) => {
       expect(run().code).toBe(0);
     });
 
+    // Each create is also a rule-10 membership creation, pinned here through
+    // `creations`; departCreatedMembership is its revocation.
+    const SUBJECT_CREATE = ["membership-create::src/lib/team/subject.ts::create::tenantMember.create"];
+    const unlockedCreate = /tenant-state::src\/lib\/team\/subject\.ts::create::tenantMember\.create/;
+
     it("accepts a create-deactivated arm with the creation lock before and the departure after", () => {
       write(SUBJECT, `export async function create(tx) {
   await lockTenantMemberCreation(tx, t, u);
   await tx.tenantMember.create({ data: { tenantId: t, userId: u, deactivatedAt: new Date() } });
   await departCreatedMembership(tx, t, u, { actor });
 }`);
-      expect(run({ tenantWrites: 1 }).code).toBe(0);
+      expect(run({ tenantWrites: 1, creations: SUBJECT_CREATE }).code).toBe(0);
     });
 
     it("refuses a create-deactivated arm without the departure after it", () => {
@@ -271,7 +373,7 @@ export const rotate = withTenantRls(prisma, tenantId, async (tx) => {
   await lockTenantMemberCreation(tx, t, u);
   await tx.tenantMember.create({ data: { tenantId: t, userId: u, deactivatedAt: new Date() } });
 }`);
-      expect(run({ tenantWrites: 1 }).code).toBe(1);
+      expectDenied(run({ tenantWrites: 1, creations: SUBJECT_CREATE }), unlockedCreate);
     });
 
     it("refuses a create-deactivated arm without the creation lock before it", () => {
@@ -279,7 +381,9 @@ export const rotate = withTenantRls(prisma, tenantId, async (tx) => {
   await tx.tenantMember.create({ data: { tenantId: t, userId: u, deactivatedAt: new Date() } });
   await departCreatedMembership(tx, t, u, { actor });
 }`);
-      expect(run({ tenantWrites: 1 }).code).toBe(1);
+      const r = run({ tenantWrites: 1, creations: SUBJECT_CREATE });
+      expectDenied(r, unlockedCreate);
+      expect(r.out).not.toMatch(/membership-create/);
     });
 
     it("refuses a raw UPDATE of tenant_members.deactivated_at", () => {
@@ -374,7 +478,7 @@ export const rotate = withTenantRls(prisma, tenantId, async (tx) => {
     });
 
     it("accepts the record's INSERT inside deactivateScimUser's transaction callback", () => {
-      write("src/lib/services/scim-user-service.ts", "export async function deactivateScimUser() { await prisma.$transaction(async (tx) => { await tx.tenantMember.delete({ where }); await tx.$executeRaw`INSERT INTO tenant_member_departures (tenant_id, user_id, departed_at) VALUES (${t}::uuid, ${u}::uuid, clock_timestamp())`; }); }");
+      write("src/lib/services/scim-user-service.ts", "export async function deactivateScimUser() { await prisma.$transaction(async (tx) => { await tx.$executeRaw`INSERT INTO tenant_member_departures (tenant_id, user_id, departed_at) VALUES (${t}::uuid, ${u}::uuid, clock_timestamp())`; }); }");
       expect(run().code).toBe(0);
     });
 
@@ -394,9 +498,21 @@ export const rotate = withTenantRls(prisma, tenantId, async (tx) => {
       expectDenied(run({ departureWriters: 1 }), SITE);
     });
 
+    // A deactivating write is also a rule-9 membership end: it must revoke
+    // after it and be a pinned site, so the accepting cells put it in the
+    // pinned departFromTenant, in place of the seeded one.
+    const REVOKE_AFTER = "await revokeUsersAuthArtifactsInTx(tx, [u], { tenantFilter: { tenantId: t } });";
+    const asDepartFromTenant = (body) => MEMBERSHIP_END_FILES[DEPARTURE]
+      .replace(/export async function departFromTenant[\s\S]*?\n}\n/, `export async function departFromTenant(tx) { ${body} }\n`);
+
     it("accepts the same UPDATE with endTeamMemberships after it", () => {
-      write(DEPARTURE, `export async function off(tx) { ${rawOff} await endTeamMemberships(tx, t, [u], options); }`);
-      expect(run({ departureWriters: 1 }).code).toBe(0);
+      replaceFile(DEPARTURE, asDepartFromTenant(`${rawOff} await endTeamMemberships(tx, t, [u], options); ${REVOKE_AFTER}`));
+      expect(run().code).toBe(0);
+    });
+
+    it("refuses the departFromTenant UPDATE when endTeamMemberships is dropped (positive control)", () => {
+      replaceFile(DEPARTURE, asDepartFromTenant(`${rawOff} ${REVOKE_AFTER}`));
+      expectDenied(run(), /departure-writer::src\/lib\/team\/team-departure\.ts::departFromTenant::tenant_members\.raw/);
     });
 
     it("refuses an endTeamMemberships call that comes before the write", () => {
@@ -421,8 +537,9 @@ export async function other(tx) { await endTeamMemberships(tx, t, [u], options);
     });
 
     it("accepts a Prisma upsert whose update arm clears deactivatedAt without the call", () => {
-      write(DEPARTURE, `export async function back(tx) { await tx.tenantMember.upsert({ where, create: { role }, update: { deactivatedAt: null } }); }`);
-      expect(run({ departureWriters: 1 }).code).toBe(0);
+      // The revocation and the pinned key are rule 10's: the upsert may create a row.
+      write(DEPARTURE, `export async function back(tx) { await tx.tenantMember.upsert({ where, create: { role }, update: { deactivatedAt: null } }); ${REVOKE_AFTER} }`);
+      expect(run({ departureWriters: 1, creations: ["membership-create::src/lib/team/team-departure.ts::back::tenantMember.upsert"] }).code).toBe(0);
     });
 
     it("refuses a Prisma deactivating write with no later endTeamMemberships", () => {
@@ -430,9 +547,12 @@ export async function other(tx) { await endTeamMemberships(tx, t, [u], options);
       expectDenied(run({ departureWriters: 1 }), /departure-writer::src\/lib\/team\/team-departure\.ts::off::tenantMember\.update/);
     });
 
-    it("accepts a Prisma deactivating write with endTeamMemberships after it", () => {
-      write(DEPARTURE, `export async function off(tx) { await tx.tenantMember.update({ where: { id }, data: { deactivatedAt: new Date() } }); await endTeamMemberships(tx, t, [u], options); }`);
-      expect(run({ departureWriters: 1 }).code).toBe(0);
+    it("passes the departure-writer rule for a Prisma deactivating write with endTeamMemberships after it, while rule 9 refuses it as an unpinned membership end", () => {
+      write(DEPARTURE, `export async function off(tx) { await tx.tenantMember.update({ where: { id }, data: { deactivatedAt: new Date() } }); await endTeamMemberships(tx, t, [u], options); ${REVOKE_AFTER} }`);
+      const r = run({ departureWriters: 1 });
+      expectDenied(r, /unexpected: membership-end::src\/lib\/team\/team-departure\.ts::off::tenantMember\.update/);
+      expect(r.out).not.toMatch(/departure-writer::/);
+      expect(r.out).not.toMatch(/ends a tenant membership/);
     });
 
     it("accepts a Prisma write that clears deactivatedAt without the call", () => {
@@ -1334,6 +1454,334 @@ export async function promote(tx, rows, target) {
 
     it("fails the count when a grant site disappears", () => {
       expectDenied(run({ grants: 1 }), /differ from the pinned/);
+    });
+  });
+
+  describe("rule 9: a tenant-membership end revokes in its function", () => {
+    const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    /** Rule 9's own violation for the site `fn::site` in `path`. */
+    const ended = (fn, site, path = DEPARTURE) =>
+      new RegExp(`membership-end  ${esc(path)}:\\d+  membership-end::${esc(path)}::${esc(fn)}::${esc(site)}  ends a tenant membership`);
+    const REVOKE = "await revokeUsersAuthArtifactsInTx(tx, ids, { tenantFilter: { tenantId }, boundedLockWait: true });";
+
+    it("passes the pinned sites, each revoking after its write, and the exempted migration", () => {
+      const r = run();
+      expect(r.code).toBe(0);
+      expect(r.out).not.toMatch(/membership-end/);
+    });
+
+    // Each red adds one write, with no revocation after it, to the seeded
+    // team-departure.ts (an IMPLEMENTATIONS file, so rule 9 runs before the skip).
+    const RAW = (sql) => `await tx.$executeRaw\`${sql}\`;`;
+    const REDS = [
+      ["a Prisma delete", "tenantMember.delete", "await tx.tenantMember.delete({ where: { id } });"],
+      ["a Prisma updateMany with deactivatedAt: new Date()", "tenantMember.updateMany", "await tx.tenantMember.updateMany({ where: { tenantId }, data: { deactivatedAt: new Date() } });"],
+      ["a Prisma updateManyAndReturn with deactivatedAt: new Date()", "tenantMember.updateManyAndReturn", "await tx.tenantMember.updateManyAndReturn({ where: { tenantId }, data: { deactivatedAt: new Date() } });"],
+      ["a Prisma create with deactivatedAt: new Date()", "tenantMember.create", "await tx.tenantMember.create({ data: { tenantId, userId, deactivatedAt: new Date() } });"],
+      ["a Prisma update whose data is a spread", "tenantMember.update", "await tx.tenantMember.update({ where: { id }, data: { ...patch } });"],
+      ["a column-less INSERT INTO tenant_members VALUES (…)", "tenant_members.raw", RAW("INSERT INTO tenant_members VALUES (${id}::uuid, ${tenantId}::uuid, ${userId}::uuid)")],
+      ["an upsert whose INSERT columns name deactivated_at and whose DO UPDATE SET does not", "tenant_members.raw", RAW("INSERT INTO tenant_members (tenant_id, user_id, deactivated_at) VALUES (${tenantId}::uuid, ${userId}::uuid, now()) ON CONFLICT (tenant_id, user_id) DO UPDATE SET updated_at = now()")],
+      ["a raw DELETE", "tenant_members.raw", RAW("DELETE FROM tenant_members WHERE tenant_id = ${tenantId}::uuid AND user_id = ${userId}::uuid")],
+      ["a raw UPDATE = clock_timestamp()", "tenant_members.raw", RAW("UPDATE tenant_members SET deactivated_at = clock_timestamp() WHERE tenant_id = ${tenantId}::uuid")],
+      ["a raw UPDATE with an interpolated value", "tenant_members.raw", RAW("UPDATE tenant_members SET updated_at = now(), deactivated_at = ${at} WHERE tenant_id = ${tenantId}::uuid")],
+      ["a raw INSERT … deactivated_at", "tenant_members.raw", RAW("INSERT INTO tenant_members (tenant_id, user_id, deactivated_at) VALUES (${tenantId}::uuid, ${userId}::uuid, now())")],
+      ["an ON CONFLICT DO UPDATE SET deactivated_at", "tenant_members.raw", RAW("INSERT INTO tenant_members (tenant_id, user_id) VALUES (${tenantId}::uuid, ${userId}::uuid) ON CONFLICT (tenant_id, user_id) DO UPDATE SET deactivated_at = now()")],
+      ["a raw UPDATE whose SET list cannot be read (a fragment)", "tenant_members.raw", RAW("UPDATE tenant_members SET ${assignments} WHERE tenant_id = ${tenantId}::uuid")],
+      ["a raw UPDATE of a ${…} target", "opaque.raw", RAW("UPDATE ${table} SET role = 'MEMBER' WHERE tenant_id = ${tenantId}::uuid")],
+      ["a raw INSERT into a ${…} target", "opaque.raw", RAW("INSERT INTO ${table} (tenant_id, user_id) VALUES (${tenantId}::uuid, ${userId}::uuid)")],
+      ["a write word the scanner cannot place, beside tenant_members", "tenant_members.raw", RAW("EXPLAIN ANALYZE UPDATE tenant_members SET role = 'MEMBER' WHERE tenant_id = ${tenantId}::uuid")],
+      ["a MERGE whose INSERT arm names deactivated_at", "tenant_members.raw", RAW("MERGE INTO tenant_members t USING incoming s ON t.user_id = s.user_id WHEN NOT MATCHED THEN INSERT (tenant_id, user_id, deactivated_at) VALUES (s.tenant_id, s.user_id, now())")],
+      ["a MERGE … THEN DELETE", "tenant_members.raw", RAW("MERGE INTO tenant_members t USING incoming s ON t.user_id = s.user_id WHEN MATCHED THEN DELETE")],
+    ];
+    for (const [label, site, body] of REDS) {
+      it(`refuses ${label} with no revocation after it`, () => {
+        write(DEPARTURE, `export async function redEnd(tx, tenantId, userId, id, at, patch, ids, table, assignments) {\n  ${body}\n}`);
+        expectDenied(run(), ended("redEnd", site));
+      });
+    }
+
+    it("refuses a revocation called before the write", () => {
+      write(DEPARTURE, `export async function redEnd(tx, tenantId, ids, id) {\n  ${REVOKE}\n  await tx.tenantMember.delete({ where: { id } });\n}`);
+      expectDenied(run(), ended("redEnd", "tenantMember.delete"));
+    });
+
+    it("refuses a revocation inside a nested callback (not the write's own function)", () => {
+      write(DEPARTURE, `export async function redEnd(tx, tenantId, ids, id) {
+  await tx.tenantMember.delete({ where: { id } });
+  await Promise.all([ids].map(async (batch) => revokeUsersAuthArtifactsInTx(tx, batch, { tenantFilter: { tenantId } })));
+}`);
+      expectDenied(run(), ended("redEnd", "tenantMember.delete"));
+    });
+
+    it("refuses a revocation placed after the $transaction whose callback ends the membership", () => {
+      write(SCIM_USER_SERVICE, `export async function deactivateLate(tenantId, userId) {
+  await prisma.$transaction(async (tx) => {
+    await tx.tenantMember.delete({ where: { tenantId_userId: { tenantId, userId } } });
+  });
+  await revokeUserAuthArtifactsInTx(prisma, userId, { tenantFilter: { tenantId } });
+}`);
+      expectDenied(run(), ended("<anonymous>", "tenantMember.delete", SCIM_USER_SERVICE));
+    });
+
+    it("refuses a Prisma deleteMany outside the IMPLEMENTATIONS files", () => {
+      write(SUBJECT, "export async function purge(tx, tenantId) { await tx.tenantMember.deleteMany({ where: { tenantId } }); }");
+      expectDenied(run(), ended("purge", "tenantMember.deleteMany", SUBJECT));
+    });
+
+    it("allows the returnToTenant shape (deactivated_at = NULL)", () => {
+      write(DEPARTURE, `export async function returnToTenant(tx, tenantId, userIds) {
+  await tx.$queryRaw\`
+    UPDATE tenant_members SET deactivated_at = NULL, updated_at = clock_timestamp()
+     WHERE tenant_id = \${tenantId}::uuid AND user_id = ANY(\${[...userIds]}::uuid[])
+       AND deactivated_at IS NOT NULL
+    RETURNING user_id\`;
+}`);
+      // A departureWriters site (#1062), covered by its clearing.
+      expect(run({ departureWriters: 1 }).code).toBe(0);
+    });
+
+    it("allows a reactivation's deactivatedAt: null in an IMPLEMENTATIONS file", () => {
+      write(DEPARTURE, "export async function back(tx, tenantId) { await tx.tenantMember.updateMany({ where: { tenantId }, data: { deactivatedAt: null } }); }");
+      expect(run({ departureWriters: 1 }).code).toBe(0);
+    });
+
+    const scimPost = (after) => `export const create = withTenantRls(prisma, tenantId, async (tx) => {
+  await lockTenantMemberCreation(tx, tenantId, userId);
+  await tx.tenantMember.create({ data: { tenantId, userId, deactivatedAt: active ? null : new Date() } });
+  ${after}
+});`;
+    // Rule 10's revocation of the active arm, so only rules 2 and 9 are under test.
+    const ACTIVE_ARM_REVOKE = "if (active) await revokeUsersAuthArtifactsInTx(tx, [userId], { tenantFilter: { tenantId }, boundedLockWait: true });";
+
+    it("allows the SCIM-POST shape outside the IMPLEMENTATIONS files (rule 2 adjudicates it)", () => {
+      // In place of the seed (one of the SEEDED_TENANT_WRITES), so this create is the pinned rule-10 site.
+      replaceFile(SCIM_POST, scimPost(`if (!active) await departCreatedMembership(tx, tenantId, [userId], { actor });\n  ${ACTIVE_ARM_REVOKE}`));
+      const r = run();
+      expect(r.code).toBe(0);
+      expect(r.out).not.toMatch(/membership-end/);
+    });
+
+    it("leaves the SCIM-POST shape without departCreatedMembership to rule 2, not rule 9", () => {
+      replaceFile(SCIM_POST, scimPost(ACTIVE_ARM_REVOKE));
+      const r = run();
+      expectDenied(r, /tenant-state::src\/app\/api\/scim\/v2\/Users\/route\.ts::<anonymous>::tenantMember\.create/);
+      expect(r.out).not.toMatch(/membership-end/);
+    });
+
+    it("fails when a pinned site is missing", () => {
+      replaceFile(DEPARTURE, MEMBERSHIP_END_FILES[DEPARTURE].replace(/export async function departCreatedMembership[\s\S]*$/, ""));
+      expectDenied(run(), /missing: membership-end::src\/lib\/team\/team-departure\.ts::departCreatedMembership::tenant_members\.raw/);
+    });
+
+    it("fails on an unexpected site even when it revokes", () => {
+      write(DEPARTURE, `export async function newEnd(tx, tenantId, ids, id) {\n  await tx.tenantMember.delete({ where: { id } });\n  ${REVOKE}\n}`);
+      const r = run();
+      expectDenied(r, /unexpected: membership-end::src\/lib\/team\/team-departure\.ts::newEnd::tenantMember\.delete/);
+      expect(r.out).not.toMatch(/ends a tenant membership/);
+    });
+
+    it("refuses a second migration-shaped delete beside the exempted one", () => {
+      write(AUTH, `export async function again(userId, tenantId) {
+  await withBypassRls(prisma, async (tx) => { await tx.tenantMember.deleteMany({ where: { userId, tenantId } }); });
+}`);
+      expectDenied(run(), /exemption\(s\) matching no site, or several[\s\S]*membership-end::src\/auth\.ts::<anonymous>::tenantMember\.deleteMany/);
+    });
+  });
+
+  describe("rule 10: a tenant-membership creation revokes in its function", () => {
+    const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const key = (fn, site, path = SUBJECT) => `membership-create::${path}::${fn}::${site}`;
+    /** Rule 10's own violation for the site `fn::site` in `path`. */
+    const created = (fn, site, path = SUBJECT) =>
+      new RegExp(`membership-create  ${esc(path)}:\\d+  ${esc(key(fn, site, path))}  creates a tenant membership`);
+    const REVOKE = "await revokeUsersAuthArtifactsInTx(tx, ids, { tenantFilter: { tenantId }, boundedLockWait: true });";
+    const RAW = (sql) => `await tx.$executeRaw\`${sql}\`;`;
+
+    it("passes the pinned sites, the revoking ones and the exempted ones", () => {
+      const r = run();
+      expect(r.code).toBe(0);
+      expect(r.out).toMatch(/"membershipCreations":5/);
+      expect(r.out).not.toMatch(/membership-create/);
+    });
+
+    const REDS = [
+      ["a Prisma create", "tenantMember.create", "await tx.tenantMember.create({ data: { tenantId, userId, role } });"],
+      ["a Prisma createMany", "tenantMember.createMany", "await tx.tenantMember.createMany({ data: rows });"],
+      ["a Prisma createManyAndReturn", "tenantMember.createManyAndReturn", "await tx.tenantMember.createManyAndReturn({ data: rows });"],
+      ["a Prisma upsert", "tenantMember.upsert", "await tx.tenantMember.upsert({ where, create: { tenantId, userId, role }, update: {} });"],
+      ["a raw INSERT INTO tenant_members", "tenant_members.raw", RAW("INSERT INTO tenant_members (tenant_id, user_id, role) VALUES (${tenantId}::uuid, ${userId}::uuid, 'MEMBER')")],
+      ["a raw MERGE … THEN INSERT", "tenant_members.raw", RAW("MERGE INTO tenant_members t USING incoming s ON t.user_id = s.user_id WHEN NOT MATCHED THEN INSERT (tenant_id, user_id) VALUES (s.tenant_id, s.user_id)")],
+    ];
+    for (const [label, site, body] of REDS) {
+      it(`refuses ${label} with no revocation after it`, () => {
+        write(SUBJECT, `export async function admit(tx, tenantId, userId, role, rows, where, ids) {\n  ${body}\n}`);
+        expectDenied(run({ creations: [key("admit", site)] }), created("admit", site));
+      });
+    }
+
+    it("accepts the same create with a revocation after it", () => {
+      write(SUBJECT, `export async function admit(tx, tenantId, userId, role, ids) {\n  await tx.tenantMember.create({ data: { tenantId, userId, role } });\n  ${REVOKE}\n}`);
+      expect(run({ creations: [key("admit", "tenantMember.create")] }).code).toBe(0);
+    });
+
+    // departCreatedMembership revokes only the rows created deactivated. Each
+    // create below names deactivatedAt, so it is also a rule-2 site, with the
+    // creation lock before it.
+    const createThenDepart = (deactivatedAt) => `export async function admit(tx, tenantId, userId, role) {
+  await lockTenantMemberCreation(tx, tenantId, userId);
+  await tx.tenantMember.create({ data: { tenantId, userId, role, deactivatedAt: ${deactivatedAt} } });
+  await departCreatedMembership(tx, tenantId, [userId], { actor });
+}`;
+
+    it("accepts departCreatedMembership after a create that always creates the row deactivated", () => {
+      write(SUBJECT, createThenDepart("new Date()"));
+      const r = run({ tenantWrites: 1, creations: [key("admit", "tenantMember.create")] });
+      expect(r.code).toBe(0);
+      expect(r.out).not.toMatch(/membership-create/);
+    });
+
+    for (const [label, deactivatedAt] of [
+      ["a conditional", "active ? null : new Date()"],
+      ["an identifier", "stamp"],
+      ["null", "null"],
+    ]) {
+      it(`refuses departCreatedMembership as the only revocation after a create whose deactivatedAt is ${label}`, () => {
+        write(SUBJECT, createThenDepart(deactivatedAt));
+        expectDenied(run({ tenantWrites: 1, creations: [key("admit", "tenantMember.create")] }), created("admit", "tenantMember.create"));
+      });
+    }
+
+    it("refuses departCreatedMembership as the only revocation after a create not naming deactivatedAt", () => {
+      write(SUBJECT, `export async function admit(tx, tenantId, userId, role) {\n  await tx.tenantMember.create({ data: { tenantId, userId, role } });\n  await departCreatedMembership(tx, tenantId, [userId], { actor });\n}`);
+      expectDenied(run({ creations: [key("admit", "tenantMember.create")] }), created("admit", "tenantMember.create"));
+    });
+
+    it("refuses departCreatedMembership as the only revocation after a raw INSERT, even one naming deactivated_at", () => {
+      write(SUBJECT, `export async function admit(tx, tenantId, userId) {
+  await lockTenantMemberCreation(tx, tenantId, userId);
+  ${RAW("INSERT INTO tenant_members (tenant_id, user_id) VALUES (${tenantId}::uuid, ${userId}::uuid)")}
+  await departCreatedMembership(tx, tenantId, [userId], { actor });
+}`);
+      expectDenied(run({ creations: [key("admit", "tenant_members.raw")] }), created("admit", "tenant_members.raw"));
+    });
+
+    it("ignores a raw INSERT into another table", () => {
+      write(SUBJECT, `export async function other(tx, tenantId) {\n  ${RAW("INSERT INTO tenant_claims (tenant_id, claim) VALUES (${tenantId}::uuid, 'x')")}\n}`);
+      const r = run();
+      expect(r.code).toBe(0);
+      expect(r.out).not.toMatch(/membership-create/);
+    });
+
+    it("refuses a revocation called before the write", () => {
+      write(SUBJECT, `export async function admit(tx, tenantId, userId, role, ids) {\n  ${REVOKE}\n  await tx.tenantMember.create({ data: { tenantId, userId, role } });\n}`);
+      expectDenied(run({ creations: [key("admit", "tenantMember.create")] }), created("admit", "tenantMember.create"));
+    });
+
+    it("refuses a revocation inside a nested callback (not the write's own function)", () => {
+      write(SUBJECT, `export async function admit(tx, tenantId, userId, role, ids) {
+  await tx.tenantMember.create({ data: { tenantId, userId, role } });
+  await Promise.all([ids].map(async (batch) => revokeUsersAuthArtifactsInTx(tx, batch, { tenantFilter: { tenantId } })));
+}`);
+      expectDenied(run({ creations: [key("admit", "tenantMember.create")] }), created("admit", "tenantMember.create"));
+    });
+
+    it("fails on an unexpected site even when it revokes", () => {
+      write(SUBJECT, `export async function admit(tx, tenantId, userId, role, ids) {\n  await tx.tenantMember.create({ data: { tenantId, userId, role } });\n  ${REVOKE}\n}`);
+      const r = run();
+      expectDenied(r, /unexpected: membership-create::src\/lib\/team\/subject\.ts::admit::tenantMember\.create/);
+      expect(r.out).not.toMatch(/creates a tenant membership/);
+    });
+
+    it("fails when a pinned site is missing", () => {
+      replaceFile(DIRECTORY_SYNC, "export {};\n");
+      // The seed's create was also one of the SEEDED_TENANT_WRITES.
+      expectDenied(run({ tenantWrites: -1 }), /missing: membership-create::src\/lib\/directory-sync\/engine\.ts::<anonymous>::tenantMember\.create/);
+    });
+
+    // The removal cells mutate the seeds, which have production's shape, so
+    // each one is the real site losing its real revocation.
+    it("refuses sign-in's joinClaimedTenant INSERT without its revocation", () => {
+      const seed = MEMBERSHIP_END_FILES[AUTH];
+      const mutated = seed.replace(/\n\s*return revokeUsersAuthArtifactsInTx\(tx, \[userId\][^\n]*/, "\n  return null;");
+      expect(mutated).not.toBe(seed);
+      replaceFile(AUTH, mutated);
+      expectDenied(run(), created("joinClaimedTenant", "tenant_members.raw", AUTH));
+    });
+
+    it("refuses the SCIM POST create without its active arm's revocation (departCreatedMembership stays)", () => {
+      const seed = MEMBERSHIP_END_FILES[SCIM_POST];
+      const mutated = seed.replace(/\n\s*if \(existingUserId && active !== false\) \{[^}]*\}/, "");
+      expect(mutated).not.toBe(seed);
+      expect(mutated).toMatch(/departCreatedMembership/);
+      replaceFile(SCIM_POST, mutated);
+      expectDenied(run(), created("<anonymous>", "tenantMember.create", SCIM_POST));
+    });
+
+    it("refuses the directory-sync create without the admissions' revocation (departCreatedMembership stays)", () => {
+      const seed = MEMBERSHIP_END_FILES[DIRECTORY_SYNC];
+      const mutated = seed.replace(/\n\s*admissions\.push\([^\n]*/, "");
+      expect(mutated).not.toBe(seed);
+      expect(mutated).toMatch(/departCreatedMembership/);
+      replaceFile(DIRECTORY_SYNC, mutated);
+      expectDenied(run(), created("<anonymous>", "tenantMember.create", DIRECTORY_SYNC));
+    });
+
+    // The seeds above are hand copies of production's shape, so a revocation
+    // that moved or changed shape in the real file would leave them green.
+    // These cells put the REAL files in the seeded root instead; the rest of
+    // the root is the seed, so the whole gate runs as it does on every cell.
+    describe("on the real files", () => {
+      const REPO = join(dirname(GATE), "..", "..");
+      const real = (rel) => readFileSync(join(REPO, rel), "utf8");
+      /** Each real creation's revocation, renamed to a non-revoker so only the call's name changes. */
+      const REAL_REVOCATIONS = [
+        [SCIM_POST, "revokeUsersAuthArtifactsInTx(tx, [user.id],", "<anonymous>", "tenantMember.create"],
+        [DIRECTORY_SYNC, "revokeUsersAuthArtifactsInTx(tx, createdActive,", "<anonymous>", "tenantMember.create"],
+        [AUTH, "return revokeUsersAuthArtifactsInTx(tx, [userId],", "joinClaimedTenant", "tenant_members.raw"],
+      ];
+
+      beforeEach(() => {
+        for (const [rel] of REAL_REVOCATIONS) replaceFile(rel, real(rel));
+      });
+
+      it("passes the real SCIM POST, directory-sync and sign-in creations", () => {
+        const r = run();
+        expect(r.code).toBe(0);
+        expect(r.out).toMatch(/"membershipCreations":5/);
+        expect(r.out).not.toMatch(/membership-create/);
+      });
+
+      for (const [rel, call, fn, site] of REAL_REVOCATIONS) {
+        it(`refuses the real ${rel} creation without its revocation`, () => {
+          const source = real(rel);
+          // Exactly one match, so the mutation cannot miss and pass vacuously.
+          expect(source.split(call)).toHaveLength(2);
+          replaceFile(rel, source.replace(call, call.replace("revokeUsersAuthArtifactsInTx", "skipRevocation")));
+          const r = run();
+          expectDenied(r, created(fn, site, rel));
+          expect(r.out.match(/membership-create  /g)).toHaveLength(1);
+        });
+      }
+    });
+
+    it("refuses the directory-sync create when the revocation moves into the loop's callback", () => {
+      replaceFile(DIRECTORY_SYNC, `
+export const apply = withTenantRls(prisma, tenantId, async (tx) => {
+  await Promise.all(toCreate.map(async (pu) => {
+    await tx.tenantMember.create({ data: { tenantId, userId: pu.userId, role: TENANT_ROLE.MEMBER } });
+  }));
+  await revokeUsersAuthArtifactsInTx(tx, createdActive, { tenantFilter: { tenantId }, boundedLockWait: true });
+});
+`);
+      // No deactivatedAt here, so not one of the SEEDED_TENANT_WRITES.
+      expectDenied(run({ tenantWrites: -1 }), created("<anonymous>", "tenantMember.create", DIRECTORY_SYNC));
+    });
+
+    it("refuses a second creation sharing the migration's key", () => {
+      write(AUTH, `export async function again(userId, target) {
+  await withBypassRls(prisma, async (tx) => { await tx.tenantMember.create({ data: { tenantId: target.id, userId, role: TENANT_ROLE.MEMBER } }); });
+}`);
+      expectDenied(run(), /repeated: membership-create::src\/auth\.ts::<anonymous>::tenantMember\.create\[\{ tenantId: target\.id/);
     });
   });
 });
