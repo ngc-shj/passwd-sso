@@ -29,6 +29,9 @@ import { assertQuotaAvailable, QuotaExceededError } from "@/lib/quota/resource-q
 import { MAX_WEBHOOKS, WEBHOOK_URL_MAX_LENGTH } from "@/lib/validations/common";
 import { isSsrfSafeWebhookUrl, SSRF_URL_VALIDATION_MESSAGE, maskUrlForDisplay } from "@/lib/url/url-validation";
 import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
+import { creatorAuthorizedOf, creatorVerdicts } from "@/lib/tenant/creator-authority";
+import { lockFootholdWriter } from "@/lib/tenant/foothold-write-gate";
+import { footholdWriteErrorResponse } from "@/lib/http/lock-conflict-response";
 
 // Sentinel thrown inside the locked transaction when the re-checked tenant
 // webhook count is at the cap. Mapped to the MAX_WEBHOOKS validation error
@@ -59,8 +62,8 @@ async function handleGET(_req: NextRequest) {
     return handleAuthError(e);
   }
 
-  const webhooks = await withTenantRls(prisma, actor.tenantId, async (tx) =>
-    tx.tenantWebhook.findMany({
+  const webhooks = await withTenantRls(prisma, actor.tenantId, async (tx) => {
+    const rows = await tx.tenantWebhook.findMany({
       where: { tenantId: actor.tenantId },
       select: {
         id: true,
@@ -71,11 +74,24 @@ async function handleGET(_req: NextRequest) {
         lastDeliveredAt: true,
         lastFailedAt: true,
         lastError: true,
+        createdById: true,
         createdAt: true,
       },
       orderBy: { createdAt: "desc" },
-    }),
-  );
+    });
+    const verdicts = await creatorVerdicts(
+      tx,
+      actor.tenantId,
+      rows,
+      TENANT_PERMISSION.WEBHOOK_MANAGE,
+    );
+    // createdById itself stays server-side; only the verdict is exposed.
+    // A NULL creator is legacy: null, not a verdict.
+    return rows.map(({ createdById: _createdById, ...rest }) => ({
+      ...rest,
+      creatorAuthorized: creatorAuthorizedOf(verdicts.get(rest.id)),
+    }));
+  });
 
   return NextResponse.json({ webhooks });
 }
@@ -141,6 +157,11 @@ async function handlePOST(req: NextRequest) {
   let webhook;
   try {
     webhook = await withTenantRls(prisma, actor.tenantId, async (tx) => {
+      await lockFootholdWriter(tx, req, {
+        tenantId: actor.tenantId,
+        actorId: session.user.id,
+        permission: TENANT_PERMISSION.WEBHOOK_MANAGE,
+      });
       await advisoryXactLock(tx, actor.tenantId);
       const existingCount = await tx.tenantWebhook.count({
         where: { tenantId: actor.tenantId },
@@ -159,6 +180,7 @@ async function handlePOST(req: NextRequest) {
           masterKeyVersion: version,
           secretAadVersion: WEBHOOK_SECRET_AAD_VERSION_CURRENT,
           events: data.events,
+          createdById: session.user.id,
         },
       });
     });
@@ -168,6 +190,8 @@ async function handlePOST(req: NextRequest) {
         limit: `Maximum ${MAX_WEBHOOKS} webhooks per tenant`,
       });
     }
+    const footholdResponse = footholdWriteErrorResponse(e);
+    if (footholdResponse) return footholdResponse;
     throw e;
   }
 

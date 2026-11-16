@@ -76,7 +76,12 @@ const {
 
 // ─── Module mocks ─────────────────────────────────────────────
 
+const { mockLockFootholdWriter } = vi.hoisted(() => ({
+  mockLockFootholdWriter: vi.fn(async () => new Map()),
+}));
+
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/tenant/foothold-write-gate", () => ({ lockFootholdWriter: mockLockFootholdWriter }));
 
 vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
   requireRecentCurrentAuthMethod: mockRequireRecentSession,
@@ -184,6 +189,8 @@ const makeClient = (overrides: Record<string, unknown> = {}) => ({
   redirectUris: ["https://example.com/callback"],
   allowedScopes: "credentials:list,credentials:use",
   isActive: true,
+  isDcr: false,
+  createdById: null,
   createdAt: new Date("2026-01-01T00:00:00Z"),
   updatedAt: new Date("2026-01-01T00:00:00Z"),
   accessTokens: [],
@@ -237,6 +244,11 @@ describe("Scenario 1: MCP Client Registration", () => {
     // clientSecret present only at creation time
     expect(typeof json.client.clientSecret).toBe("string");
     expect(json.client.clientSecret.length).toBeGreaterThan(0);
+    expect(mockLockFootholdWriter).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ actorId: DEFAULT_SESSION.user.id, permission: "tenant:serviceAccount:manage" }),
+    );
   });
 
   it("GET /api/tenant/mcp-clients lists clients without clientSecret", async () => {

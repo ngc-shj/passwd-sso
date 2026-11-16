@@ -53,7 +53,12 @@ const { mockUserFindMany, mockWithBypassRls } = vi.hoisted(() => ({
   mockWithBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
 }));
 
+const { mockLockFootholdWriter } = vi.hoisted(() => ({
+  mockLockFootholdWriter: vi.fn(async () => new Map()),
+}));
+
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/tenant/foothold-write-gate", () => ({ lockFootholdWriter: mockLockFootholdWriter }));
 vi.mock("@/lib/auth/access/tenant-auth", () => ({
   requireTenantPermission: mockRequireTenantPermission,
   TenantAuthError,
@@ -106,6 +111,8 @@ vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
 import { GET, POST } from "./route";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { MS_PER_DAY } from "@/lib/constants/time";
+import { footholdGateCells } from "@/__tests__/helpers/foothold-gate-cells";
+import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 
 // Module-scope snapshot: route.ts's `rateLimiter = createRateLimiter(...)` runs
 // at import time above, before any beforeEach's vi.clearAllMocks() can wipe it.
@@ -300,6 +307,33 @@ describe("POST /api/tenant/breakglass", () => {
     mockGrantFindFirst.mockResolvedValue(null); // no duplicate
     mockGrantCreate.mockResolvedValue(createdGrant);
     mockExecuteRaw.mockResolvedValue(undefined);
+  });
+
+  footholdGateCells({
+    gate: mockLockFootholdWriter,
+    permission: TENANT_PERMISSION.BREAKGLASS_REQUEST,
+    actorId: DEFAULT_SESSION.user.id,
+    tenantId: TENANT_ID,
+    okStatus: 201,
+    arrange: () => {},
+    call: () =>
+      POST(createRequest("POST", "http://localhost/api/tenant/breakglass", {
+        body: validBody,
+        headers: { origin: "http://localhost" },
+      })),
+    assertNoWrite: () => expect(mockGrantCreate).not.toHaveBeenCalled(),
+  });
+
+  it("takes the foothold write gate before the breakglass advisory lock", async () => {
+    await POST(
+      createRequest("POST", "http://localhost/api/tenant/breakglass", {
+        body: validBody,
+        headers: { origin: "http://localhost" },
+      }),
+    );
+    expect(mockLockFootholdWriter.mock.invocationCallOrder[0]).toBeLessThan(
+      mockExecuteRaw.mock.invocationCallOrder[0],
+    );
   });
 
   it("takes the (tenant, requester, target) lock before the member, duplicate and cooling-off reads", async () => {

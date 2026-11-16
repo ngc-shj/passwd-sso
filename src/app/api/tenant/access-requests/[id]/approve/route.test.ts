@@ -53,7 +53,12 @@ const {
   };
 });
 
+const { mockLockFootholdWriter } = vi.hoisted(() => ({
+  mockLockFootholdWriter: vi.fn(async () => new Map()),
+}));
+
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/tenant/foothold-write-gate", () => ({ lockFootholdWriter: mockLockFootholdWriter }));
 vi.mock("@/lib/auth/access/tenant-auth", () => {
   class TenantAuthError extends Error {
     status: number;
@@ -116,6 +121,8 @@ vi.mock("@/lib/security/rate-limit", () => ({
 import { POST } from "@/app/api/tenant/access-requests/[id]/approve/route";
 import { TenantAuthError } from "@/lib/auth/access/tenant-auth";
 import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
+import { footholdGateCells } from "@/__tests__/helpers/foothold-gate-cells";
+import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 
 // The route constructs its rate limiter once at module load
 // (`const approveLimiter = createRateLimiter({...})`). `beforeEach` clears
@@ -175,6 +182,30 @@ describe("POST /api/tenant/access-requests/[id]/approve", () => {
     mockRateLimiterCheck.mockResolvedValue({ allowed: true });
     mockRequireRecentSession.mockResolvedValue(null);
     mockSaExecuteRaw.mockResolvedValue(0);
+  });
+
+  footholdGateCells({
+    gate: mockLockFootholdWriter,
+    permission: TENANT_PERMISSION.SERVICE_ACCOUNT_MANAGE,
+    actorId: DEFAULT_SESSION.user.id,
+    tenantId: "tenant-1",
+    okStatus: 200,
+    arrange: () => {
+      mockAuth.mockResolvedValue(DEFAULT_SESSION);
+      mockRequireTenantPermission.mockResolvedValue(ACTOR);
+      mockAccessRequestFindUnique.mockResolvedValue(makeAccessRequest());
+      mockTenantFindUnique.mockResolvedValue(null);
+      makeTransactionSuccess();
+    },
+    call: () =>
+      POST(
+        createRequest("POST", `http://localhost/api/tenant/access-requests/${REQUEST_ID}/approve`),
+        createParams({ id: REQUEST_ID }),
+      ),
+    assertNoWrite: () => {
+      expect(mockSaTokenCreate).not.toHaveBeenCalled();
+      expect(mockAccessRequestUpdateMany).not.toHaveBeenCalled();
+    },
   });
 
   it("acquires the per-SA advisory lock before the limit count (serializes issuance)", async () => {

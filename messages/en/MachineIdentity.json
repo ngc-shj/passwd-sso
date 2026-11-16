@@ -3,6 +3,8 @@
   "saCardTitle": "Accounts",
   "saCardDescription": "Create and manage service accounts for automated API access. Service accounts use token-based authentication.",
   "saRegisteredAccounts": "Registered service accounts",
+  "creatorUnauthorized": "The creator of this client no longer has access to manage it in this tenant. An admin should replace it with a new client.",
+  "tokenCreatorUnauthorized": "The creator of this token no longer has access to manage it in this tenant. An admin should rotate it: create a new token, then revoke this one.",
   "mcpCardTitle": "MCP Clients",
   "mcpCardDescription": "Register and manage MCP (Model Context Protocol) clients for AI agent integration.",
   "mcpRegisteredClients": "Registered MCP clients",

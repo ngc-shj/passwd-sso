@@ -23,6 +23,8 @@ import { AUDIT_ACTION } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/audit/notification";
 import { MS_PER_DAY, MS_PER_HOUR, MS_PER_SECOND } from "@/lib/constants/time";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
+import { lockFootholdWriter } from "@/lib/tenant/foothold-write-gate";
+import { footholdWriteErrorResponse } from "@/lib/http/lock-conflict-response";
 
 export const runtime = "nodejs";
 
@@ -100,6 +102,11 @@ async function handlePOST(req: NextRequest) {
   let result: GrantResult;
   try {
     result = await withTenantRls(prisma, actor.tenantId, async (tx) => {
+      await lockFootholdWriter(tx, req, {
+        tenantId: actor.tenantId,
+        actorId: userId,
+        permission: TENANT_PERMISSION.BREAKGLASS_REQUEST,
+      });
       // Serialize grant creation per (tenant, requester, target) before the
       // duplicate and cooling-off reads. Without it two concurrent POSTs under
       // READ COMMITTED can both miss the duplicate, and the second can then see
@@ -174,7 +181,9 @@ async function handlePOST(req: NextRequest) {
 
       return { status: "created" as const, grant, targetUser: member.user };
     });
-  } catch {
+  } catch (e) {
+    const footholdResponse = footholdWriteErrorResponse(e);
+    if (footholdResponse) return footholdResponse;
     return errorResponse(API_ERROR.SERVICE_UNAVAILABLE);
   }
 

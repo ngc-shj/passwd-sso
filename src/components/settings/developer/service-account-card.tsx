@@ -71,6 +71,8 @@ interface SaToken {
   expiresAt: string | null;
   lastUsedAt: string | null;
   revokedAt: string | null;
+  /** false: the creator no longer holds service-account management in this tenant; null: no creator on record. */
+  creatorAuthorized?: boolean | null;
 }
 
 export function ServiceAccountCard() {
@@ -589,6 +591,9 @@ export function ServiceAccountCard() {
                                     : t("tokenNeverExpires")}
                                 </span>
                               </div>
+                              {!token.revokedAt && token.creatorAuthorized === false && (
+                                <p className="text-[10px] text-amber-600 dark:text-amber-400">{t("tokenCreatorUnauthorized")}</p>
+                              )}
                             </div>
                             {!token.revokedAt && (
                               <AlertDialog>
@@ -763,6 +768,9 @@ export function ServiceAccountCard() {
                                           : t("tokenNeverExpires")}
                                       </span>
                                     </div>
+                                    {!token.revokedAt && token.creatorAuthorized === false && (
+                                      <p className="text-[10px] text-amber-600 dark:text-amber-400">{t("tokenCreatorUnauthorized")}</p>
+                                    )}
                                   </div>
                                   {!token.revokedAt && (
                                     <AlertDialog>

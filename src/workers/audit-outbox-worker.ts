@@ -38,6 +38,8 @@ import { WEBHOOK_MAX_RETRIES, WEBHOOK_AUTO_DISABLE_THRESHOLD, WEBHOOK_DELIVERY_C
 import { maskUrlForDisplay } from "@/lib/url/url-validation";
 import { errorLogFields } from "@/lib/logger/error-fields";
 import { webhookCreatorVerdicts } from "@/lib/team/webhook-creator-authority";
+import { creatorVerdicts } from "@/lib/tenant/creator-authority";
+import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 
 export interface AuditOutboxRow {
   id: string;
@@ -1198,7 +1200,28 @@ async function resolveWebhookSubscribers(
     const rows = await tx.tenantWebhook.findMany({
       where: { tenantId: item.tenant_id, isActive: true, events: { has: item.action } },
     });
-    return rows.map((r) => ({
+    // Same creator-authority rule as the team branch, on WEBHOOK_MANAGE.
+    const verdicts = await creatorVerdicts(
+      tx,
+      item.tenant_id,
+      rows,
+      TENANT_PERMISSION.WEBHOOK_MANAGE,
+    );
+    const authorizedRows = rows.filter((r) => {
+      const authorized = verdicts.get(r.id) === true || verdicts.get(r.id) === "legacy";
+      if (!authorized) {
+        getLogger().warn(
+          {
+            webhookId: r.id,
+            scope: "TENANT",
+            _logType: "outbox.webhook_creator_unauthorized",
+          },
+          "outbox.webhook_creator_unauthorized",
+        );
+      }
+      return authorized;
+    });
+    return authorizedRows.map((r) => ({
       id: r.id,
       url: r.url,
       secretEncrypted: r.secretEncrypted,

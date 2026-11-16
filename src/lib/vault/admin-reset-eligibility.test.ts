@@ -12,6 +12,7 @@ describe("computeApproveEligibility", () => {
         actorRole: "OWNER",
         targetRole: "MEMBER",
         initiatedById: A,
+        initiatorAuthorized: true,
       }),
     ).toBe("initiator");
   });
@@ -23,6 +24,7 @@ describe("computeApproveEligibility", () => {
         actorRole: "ADMIN",
         targetRole: "ADMIN",
         initiatedById: B,
+        initiatorAuthorized: true,
       }),
     ).toBe("insufficient_role");
   });
@@ -34,6 +36,7 @@ describe("computeApproveEligibility", () => {
         actorRole: "ADMIN",
         targetRole: "ADMIN",
         initiatedById: B,
+        initiatorAuthorized: true,
       }),
     ).toBe("insufficient_role");
   });
@@ -45,6 +48,7 @@ describe("computeApproveEligibility", () => {
         actorRole: "OWNER",
         targetRole: "ADMIN",
         initiatedById: B,
+        initiatorAuthorized: true,
       }),
     ).toBe("eligible");
   });
@@ -56,7 +60,32 @@ describe("computeApproveEligibility", () => {
         actorRole: "ADMIN",
         targetRole: "ADMIN",
         initiatedById: A,
+        initiatorAuthorized: true,
       }),
     ).toBe("initiator");
+  });
+
+  it("returns 'initiator_unauthorized' when the initiator no longer holds the authority", () => {
+    expect(
+      computeApproveEligibility({
+        actorId: A,
+        actorRole: "OWNER",
+        targetRole: "MEMBER",
+        initiatedById: B,
+        initiatorAuthorized: false,
+      }),
+    ).toBe("initiator_unauthorized");
+  });
+
+  it("insufficient_role wins over initiator_unauthorized", () => {
+    expect(
+      computeApproveEligibility({
+        actorId: A,
+        actorRole: "ADMIN",
+        targetRole: "ADMIN",
+        initiatedById: B,
+        initiatorAuthorized: false,
+      }),
+    ).toBe("insufficient_role");
   });
 });

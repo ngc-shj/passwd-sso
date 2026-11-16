@@ -59,7 +59,7 @@ export interface WebhookItem {
   lastFailedAt: string | null;
   lastError: string | null;
   createdAt: string;
-  /** Team webhooks only: false when the creator no longer holds authority; null when legacy. */
+  /** Team and tenant webhooks: false when the creator no longer holds authority; null when legacy. */
   creatorAuthorized?: boolean | null;
 }
 

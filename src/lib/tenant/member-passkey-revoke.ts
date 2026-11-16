@@ -155,7 +155,7 @@ export async function revokeMemberPasskeys(
     // rolls all of it back.
     const contained =
       !single && containment
-        ? await containMemberInTx(tx, { req, actorUserId, tenantId, targetUserId, request: containment })
+        ? await containMemberInTx(tx, { req, actorUserId, tenantId, targetUserId, request: containment, role: actorRow.role })
         : null;
 
     // The passkeys a row names: one, or a bounded list with the rest counted.
@@ -257,7 +257,7 @@ export async function revokeMemberPasskeys(
     ok: true,
     sessionsRevoked: counts.sessions,
     cacheTombstoneFailures,
-    ...(contained ? { contained: contained.contained } : {}),
+    ...(contained ? { contained: contained.contained, remaining: contained.remaining } : {}),
   });
 }
 

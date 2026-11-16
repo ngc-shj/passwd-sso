@@ -24,6 +24,8 @@ export const memberContainmentSchema = z
         serviceAccountTokenIds: containmentIds.optional(),
         mcpClientIds: containmentIds.optional(),
         breakglassGrantIds: containmentIds.optional(),
+        tenantWebhookIds: containmentIds.optional(),
+        vaultResetIds: containmentIds.optional(),
         emergencyAccessGrantIds: containmentIds.optional(),
       })
       .strict()

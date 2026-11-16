@@ -266,6 +266,14 @@ vi.mock("./auth.config", () => ({
   allowsDangerousEmailAccountLinking: mockAllowsDangerousEmailAccountLinking,
 }));
 
+// The bootstrap migration locks the user's bootstrap tenant row before its
+// credential lock; the transaction mock here has no row-lock statements.
+const { mockLockTenantRows } = vi.hoisted(() => ({ mockLockTenantRows: vi.fn(async () => new Map()) }));
+vi.mock("@/lib/team/tenant-row-lock", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/team/tenant-row-lock")>()),
+  lockTenantRows: mockLockTenantRows,
+}));
+
 import type { Account } from "next-auth";
 import { ensureTenantMembershipForSignIn, assertBootstrapSingleMember } from "./auth";
 import { UserAuthLockTimeoutError } from "@/lib/auth/session/user-auth-serialization";
@@ -961,6 +969,12 @@ describe("ensureTenantMembershipForSignIn", () => {
 
     expect(result.ok).toBe(true);
     expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+    // The user's bootstrap tenant row is locked FOR UPDATE before the migration writes.
+    expect(mockLockTenantRows).toHaveBeenCalledTimes(1);
+    expect(mockLockTenantRows).toHaveBeenCalledWith(expect.anything(), TENANT_BOOTSTRAP, ["user-1"], "update");
+    expect(mockLockTenantRows.mock.invocationCallOrder[0]).toBeLessThan(
+      mockPrisma.user.update.mock.invocationCallOrder[0],
+    );
     expect(mockPrisma.user.update).toHaveBeenCalledWith({
       where: { id: "user-1" },
       data: { tenantId: TENANT_CLAIMED },

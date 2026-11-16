@@ -50,8 +50,8 @@ const FUNCTION_NAME = "claimedTenantMembership";
 const WRITE_METHODS = new Set(["create", "createMany", "update", "updateMany", "upsert", "delete", "deleteMany"]);
 const READ_METHODS = new Set(["findMany", "findUnique", "findFirst", "count"]);
 const AUDIT_MIGRATE_CALL = "CALL audit_log_tenant_migrate(";
-/** Helpers the transaction may hand `tx` to: each reads, or only takes an advisory lock, and writes no row. */
-const READ_ONLY_TX_HELPERS = new Set(["assertBootstrapSingleMember", "lockUserAuthArtifacts"]);
+/** Helpers the transaction may hand `tx` to: each reads, or only takes a row or advisory lock, and writes no row. */
+const READ_ONLY_TX_HELPERS = new Set(["assertBootstrapSingleMember", "lockTenantRows", "lockUserAuthArtifacts"]);
 /**
  * Calls and constructors the transaction may make that are not the client, by
  * exact callee text: only what the real body needs. A pure call's arguments
@@ -371,15 +371,17 @@ describe("bootstrap migration member set", () => {
     expect(check.map((c) => c.getArguments()[1]?.getText())).toEqual([BOOTSTRAP_TENANT_ID]);
   });
 
-  it("takes the user's credential lock first, so a mint cannot commit a credential around its revocations", () => {
+  it("locks the bootstrap tenant row, then the user's credential lock, so a mint cannot commit a credential around its revocations", () => {
     const tx = auth
       .getFunctionOrThrow(FUNCTION_NAME)
       .getDescendantsOfKind(SyntaxKind.CallExpression)
       .find((c) => c.getExpression().getText() === "prisma.$transaction");
     const callback = tx?.getArguments()[0];
     if (!callback || !Node.isArrowFunction(callback)) throw new Error("no prisma.$transaction callback");
-    const [first] = callback.getStatements();
-    expect(first?.getText()).toBe("await lockUserAuthArtifacts(tx, userId);");
+    const [first, second] = callback.getStatements();
+    // Tenant row before credential lock: the order of every departure writer.
+    expect(first?.getText()).toBe('await lockTenantRows(tx, existingTenantId, [userId], "update");');
+    expect(second?.getText()).toBe("await lockUserAuthArtifacts(tx, userId);");
   });
 
   it("writes each non-counter with exactly the data keys pinned for it", () => {

@@ -22,7 +22,8 @@ async function handleGET(req: NextRequest, { params }: Params) {
 
   // The link's creator only: the log holds viewers' IP addresses and user
   // agents, which a team admin's revoke right (#995) does not extend to. A team
-  // link's creator is held to the team's IP restriction.
+  // link's creator is held to the team's IP restriction and must still be a
+  // member of the team.
   const share = await withUserTenantRls(session.user.id, async () =>
     prisma.passwordShare.findUnique({
       where: { id },
@@ -30,7 +31,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
     }),
   );
 
-  if (!share || (await shareLinkManagerOf(session.user.id, share, req)) !== SHARE_LINK_MANAGER.CREATOR) {
+  if (!share || (await shareLinkManagerOf(session.user.id, share, req, { requireMembership: true })) !== SHARE_LINK_MANAGER.CREATOR) {
     return notFound();
   }
 

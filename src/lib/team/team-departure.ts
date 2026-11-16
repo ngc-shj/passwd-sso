@@ -8,6 +8,7 @@ import {
   lockTeamsAgainstRotation,
 } from "@/lib/team/team-key-rotation-lock";
 import { lockTenantRows } from "@/lib/team/tenant-row-lock";
+import { endCreatorFootholdsInTx } from "@/lib/tenant/departure-footholds";
 import {
   type UserAuthArtifactCounts,
   revokeUsersAuthArtifactsInTx,
@@ -28,7 +29,8 @@ import {
  * Every departure and every return revokes the users' sessions and tokens in
  * the tenant in its own transaction, as its last step, so it cannot commit
  * without the revocation (docs/archive/review/session-revocation-failure-surfaces-plan.md
- * C2). The credential lock is taken last within each call. A transaction that
+ * C2). The credential lock is taken last within each call, then the rows of the
+ * footholds the users minted (endCreatorFootholdsInTx). A transaction that
  * calls several times (directory sync) or writes after the call (SCIM PUT's
  * external mapping) holds it across those later writes; what holds is that no
  * mint holding it waits on a row these transactions hold.
@@ -162,6 +164,7 @@ export async function departFromTenant(
   // Last, after the team locks and writes (C1 lock order), on a budget of its
   // own: a directory-sync run spends the transition budget on its own work.
   const revocation = await revokeUsersAuthArtifactsInTx(tx, transitioned, revokeInTenant(tenantId));
+  await endCreatorFootholdsInTx(tx, tenantId, transitioned, options.actor);
   return { userIds: transitioned, revocation };
 }
 
@@ -228,6 +231,7 @@ export async function returnToTenant(
   // credentials alive, and the return would otherwise revive them.
   // Last, as in departFromTenant (C1 lock order).
   const revocation = await revokeUsersAuthArtifactsInTx(tx, transitioned, revokeInTenant(tenantId));
+  await endCreatorFootholdsInTx(tx, tenantId, transitioned, options.actor);
   return { userIds: transitioned, revocation };
 }
 
@@ -254,5 +258,7 @@ export async function departCreatedMembership(
   `;
   if (stamped !== userIds.length) throw new Error("departCreatedMembership: a created row is not deactivated");
   await endTeamMemberships(tx, tenantId, userIds, options);
-  return revokeUsersAuthArtifactsInTx(tx, userIds, revokeInTenant(tenantId));
+  const revocation = await revokeUsersAuthArtifactsInTx(tx, userIds, revokeInTenant(tenantId));
+  await endCreatorFootholdsInTx(tx, tenantId, userIds, options.actor);
+  return revocation;
 }

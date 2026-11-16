@@ -98,6 +98,7 @@ src/lib/team/team-key-rotation-lock.ts # teams FOR SHARE locks (and lock_timeout
 src/lib/team/tenant-row-lock.ts # tenant_members FOR SHARE / FOR UPDATE row locks (ORDER BY user_id) and the departure-record read, under the bounded lock wait
 src/lib/tenant-rls-grants.ts # the single writer and reader of the bypass GUCs (set_config for app.bypass_rls / app.bypass_purpose / app.tenant_id / app.bypass_tables) and setLockTimeout
 src/lib/tenant-rls.ts # defines the RLS context helpers: set_config for app.tenant_id, and the shared pg_advisory_xact_lock helper
+src/lib/tenant/foothold-write-gate.ts # passes the writing transaction to lockTenantRows and the batch credential lock (raw row and advisory locks); issues no SQL of its own
 src/lib/tenant/tenant-claim-event.ts # append-only routing-history INSERT with no RETURNING (passwd_app holds INSERT but not SELECT)
 src/lib/tenant/tenant-management.ts # SAVEPOINT-protected slug-collision retry when creating a tenant + claim row
 src/lib/vault/key-version-guard.ts # row lock (FOR SHARE) reading users.key_version for the personal-vault stale-write guard

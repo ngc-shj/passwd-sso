@@ -244,11 +244,14 @@ export function TenantResetHistoryDialog({
               const status = r.status;
               const isInitiator =
                 r.approveEligibility === APPROVE_ELIGIBILITY.INITIATOR;
-              // Hide (vs. disable) for INSUFFICIENT_ROLE — server would 403 anyway.
+              // Hide (vs. disable) for INSUFFICIENT_ROLE and INITIATOR_UNAUTHORIZED —
+              // the server would refuse both anyway.
               const showApprove =
                 status === RESET_STATUS.PENDING_APPROVAL &&
                 r.approveEligibility !==
-                  APPROVE_ELIGIBILITY.INSUFFICIENT_ROLE;
+                  APPROVE_ELIGIBILITY.INSUFFICIENT_ROLE &&
+                r.approveEligibility !==
+                  APPROVE_ELIGIBILITY.INITIATOR_UNAUTHORIZED;
 
               return (
                 <div

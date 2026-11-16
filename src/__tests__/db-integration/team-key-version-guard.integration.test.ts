@@ -61,6 +61,8 @@ import { executeVaultReset } from "@/lib/vault/vault-reset";
 import { prisma } from "@/lib/prisma";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { deactivateScimUser } from "@/lib/services/scim-user-service";
+import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
+import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { patchScimGroup } from "@/lib/services/scim-group-service";
 
 function hex(nBytes: number): string {
@@ -812,7 +814,7 @@ describe("team key rotation serialisation — real-DB integration", () => {
       // would otherwise wait on the blocker rather than on the rotation.
       const res = await raceAgainstParkedRotation(
         seed,
-        () => withTenantRls(prisma, tenantId, () => deactivateScimUser(tenantId, seed.memberId)),
+        () => withTenantRls(prisma, tenantId, () => deactivateScimUser(tenantId, seed.memberId, { userId: SYSTEM_ACTOR_ID, actorType: ACTOR_TYPE.SYSTEM })),
         seed.ownerId,
       );
 

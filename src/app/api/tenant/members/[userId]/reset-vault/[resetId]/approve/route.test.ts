@@ -66,7 +66,12 @@ const {
   };
 });
 
+const { mockLockFootholdWriter } = vi.hoisted(() => ({
+  mockLockFootholdWriter: vi.fn(async () => new Map()),
+}));
+
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/tenant/foothold-write-gate", () => ({ lockFootholdWriter: mockLockFootholdWriter }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     adminVaultReset: {
@@ -125,6 +130,8 @@ vi.mock("@/lib/logger", () => ({
 }));
 
 import { POST } from "./route";
+import { footholdGateCells } from "@/__tests__/helpers/foothold-gate-cells";
+import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 
 // Module-scope snapshot (route.ts:47 `const approveLimiter = createRateLimiter(...)`
 // then :55 `const approveTargetLimiter = createRateLimiter(...)` run at
@@ -183,6 +190,22 @@ const RESET_RECORD = {
   expiresAt: new Date(Date.now() + 23 * 60 * 60_000),
 };
 
+// The rows lockFootholdWriter returns: the actor an OWNER, the target a MEMBER,
+// the initiator an ADMIN who still holds the authority.
+function lockedRows(over: { initiator?: Record<string, unknown>; target?: Record<string, unknown> } = {}) {
+  const row = (extra: Record<string, unknown>) => ({
+    hasRow: true,
+    deactivatedAt: null,
+    departedAt: null,
+    ...extra,
+  });
+  return new Map<string, unknown>([
+    [ACTOR_USER_ID, row({ role: "OWNER" })],
+    [TARGET_USER_ID, row({ role: "MEMBER", ...over.target })],
+    [INITIATOR_ID, row({ role: "ADMIN", ...over.initiator })],
+  ]);
+}
+
 function buildReq() {
   return createRequest(
     "POST",
@@ -206,6 +229,7 @@ describe("POST /api/tenant/members/[userId]/reset-vault/[resetId]/approve", () =
     });
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     mockIsTenantRoleAbove.mockReturnValue(true);
+    mockLockFootholdWriter.mockResolvedValue(lockedRows());
     // Step-up passes by default (null = recent enough). Denial tests override.
     mockRequireRecentSession.mockResolvedValue(null);
     mockPrismaAdminVaultResetFindFirst.mockResolvedValue(RESET_RECORD);
@@ -225,6 +249,64 @@ describe("POST /api/tenant/members/[userId]/reset-vault/[resetId]/approve", () =
     mockNotificationBody.mockReturnValue(
       "A tenant admin has initiated a vault reset for your account.",
     );
+  });
+
+  footholdGateCells({
+    gate: mockLockFootholdWriter,
+    permission: TENANT_PERMISSION.MEMBER_VAULT_RESET,
+    actorId: ACTOR_USER_ID,
+    tenantId: TENANT_ID,
+    okStatus: 200,
+    arrange: () => {},
+    call: () => POST(buildReq(), buildParams()),
+    assertNoWrite: () => expect(mockPrismaAdminVaultResetUpdateMany).not.toHaveBeenCalled(),
+  });
+
+  it("locks the initiator's and the target's rows with the actor's, before the CAS", async () => {
+    expect((await POST(buildReq(), buildParams())).status).toBe(200);
+    expect(mockLockFootholdWriter).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ alsoLock: [INITIATOR_ID, TARGET_USER_ID] }),
+    );
+    expect(mockLockFootholdWriter.mock.invocationCallOrder[0]).toBeLessThan(
+      mockPrismaAdminVaultResetUpdateMany.mock.invocationCallOrder[0],
+    );
+  });
+
+  it.each([
+    ["deactivated", { role: "ADMIN", deactivatedAt: new Date() }],
+    ["demoted below MEMBER_VAULT_RESET", { role: "MEMBER", deactivatedAt: null }],
+    ["gone (no tenant row)", { hasRow: false, role: null, deactivatedAt: null }],
+    ["departed after the reset was filed", { role: "ADMIN", deactivatedAt: null, departedAt: new Date() }],
+  ])("returns 409 RESET_NOT_APPROVABLE and leaves the reset unapproved when the initiator is %s", async (_label, initiator) => {
+    mockLockFootholdWriter.mockResolvedValue(lockedRows({ initiator }));
+    const res = await POST(buildReq(), buildParams());
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("RESET_NOT_APPROVABLE");
+    expect(mockPrismaAdminVaultResetUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("approves when the initiator left the tenant before filing the reset (an earlier departure does not void it)", async () => {
+    mockLockFootholdWriter.mockResolvedValue(
+      lockedRows({ initiator: { role: "ADMIN", deactivatedAt: null, departedAt: new Date(RESET_RECORD.createdAt.getTime() - 60_000) } }),
+    );
+    expect((await POST(buildReq(), buildParams())).status).toBe(200);
+  });
+
+  it("returns 404 when the locked target row is deactivated", async () => {
+    mockLockFootholdWriter.mockResolvedValue(lockedRows({ target: { role: "MEMBER", deactivatedAt: new Date() } }));
+    expect((await POST(buildReq(), buildParams())).status).toBe(404);
+    expect(mockPrismaAdminVaultResetUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 FORBIDDEN_INSUFFICIENT_ROLE when the locked roles no longer put the actor above the target", async () => {
+    // Passes the pre-lock eligibility on committed state, fails on the locked rows.
+    mockIsTenantRoleAbove.mockReturnValueOnce(true).mockReturnValueOnce(false);
+    const res = await POST(buildReq(), buildParams());
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe("FORBIDDEN_INSUFFICIENT_ROLE");
+    expect(mockPrismaAdminVaultResetUpdateMany).not.toHaveBeenCalled();
   });
 
   it("returns 401 when unauthenticated", async () => {

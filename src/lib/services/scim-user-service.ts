@@ -21,6 +21,7 @@ import {
   returnToTenant,
 } from "@/lib/team/team-departure";
 import { revokeUserAuthArtifactsInTx } from "@/lib/auth/session/user-session-invalidation";
+import { endCreatorFootholdsInTx } from "@/lib/tenant/departure-footholds";
 import type { AuditAction } from "@prisma/client";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { userToScimUser, type ScimUserInput, type ScimUserResource } from "@/lib/scim/serializers";
@@ -375,6 +376,7 @@ export async function patchScimUser(
 export async function deactivateScimUser(
   tenantId: string,
   userId: string,
+  actor: DepartureAuditActor,
 ): Promise<DeactivateResult> {
   const member = await prisma.tenantMember.findUnique({
     where: { tenantId_userId: { tenantId, userId } },
@@ -419,7 +421,9 @@ export async function deactivateScimUser(
       });
       // Last (user-auth-serialization.ts): the credential lock after every row
       // write, so no mint holding it waits on this transaction.
-      return revokeUserAuthArtifactsInTx(tx, userId, { tenantFilter: { tenantId }, boundedLockWait: true });
+      const revoked = await revokeUserAuthArtifactsInTx(tx, userId, { tenantFilter: { tenantId }, boundedLockWait: true });
+      await endCreatorFootholdsInTx(tx, tenantId, [userId], actor);
+      return revoked;
     });
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2003") {

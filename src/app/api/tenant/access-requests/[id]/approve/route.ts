@@ -21,6 +21,8 @@ import { randomBytes } from "node:crypto";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { MS_PER_MINUTE, MS_PER_SECOND, SEC_PER_HOUR } from "@/lib/constants/time";
 import { JIT_TOKEN_TTL_MAX } from "@/lib/validations/common";
+import { lockFootholdWriter } from "@/lib/tenant/foothold-write-gate";
+import { footholdWriteErrorResponse } from "@/lib/http/lock-conflict-response";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -137,6 +139,11 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   let result: { plaintext: string; expiresAt: Date; tokenId: string };
   try {
     result = await withTenantRls(prisma, actor.tenantId, async (tx) => {
+      await lockFootholdWriter(tx, req, {
+        tenantId: actor.tenantId,
+        actorId: session.user.id,
+        permission: TENANT_PERMISSION.SERVICE_ACCOUNT_MANAGE,
+      });
       // Serialize concurrent token issuance for the same SA (this approve path
       // AND the direct token-create route share this lock key) so the
       // count→create limit check cannot be raced past MAX_SA_TOKENS_PER_ACCOUNT
@@ -220,6 +227,8 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     if (err instanceof Error && err.message === "No valid scopes after re-validation") {
       return errorResponseWithMessage(API_ERROR.SA_INVALID_SCOPE, "No valid scopes remain after re-validation");
     }
+    const footholdResponse = footholdWriteErrorResponse(err);
+    if (footholdResponse) return footholdResponse;
     throw err;
   }
 

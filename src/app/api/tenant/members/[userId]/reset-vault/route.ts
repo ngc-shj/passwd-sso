@@ -11,6 +11,7 @@ import { resolveUserLocale } from "@/lib/locale";
 import {
   requireTenantPermission,
   isTenantRoleAbove,
+  TenantAuthError,
 } from "@/lib/auth/access/tenant-auth";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { withTenantRls, advisoryXactLock } from "@/lib/tenant-rls";
@@ -34,12 +35,21 @@ import {
   type ApproveEligibility,
 } from "@/lib/vault/admin-reset-eligibility";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
+import { creatorVerdicts, holdsTenantAuthority } from "@/lib/tenant/creator-authority";
+import { lockFootholdWriter } from "@/lib/tenant/foothold-write-gate";
+import { UserAuthRevokedError } from "@/lib/auth/session/user-auth-serialization";
+import { isMembershipLockConflict } from "@/lib/team/tenant-row-lock";
+import { footholdWriteErrorResponse } from "@/lib/http/lock-conflict-response";
 
 export const runtime = "nodejs";
 
 // Sentinel thrown inside the locked transaction when the re-checked pending
 // reset count is at the cap. Mapped to a 429 outside the tx.
 class PendingResetLimitError extends Error {}
+
+// Thrown inside the locked transaction when the target's locked row is gone or
+// deactivated. Mapped to a 404 outside the tx.
+class ResetTargetUnavailableError extends Error {}
 
 const adminResetLimiter = createRateLimiter({
   windowMs: MS_PER_DAY,
@@ -175,6 +185,20 @@ async function handlePOST(
   let resetRecord;
   try {
     resetRecord = await withTenantRls(prisma, actor.tenantId, async (tx) => {
+      const lockedRows = await lockFootholdWriter(tx, req, {
+        tenantId: actor.tenantId,
+        actorId: session.user.id,
+        permission: TENANT_PERMISSION.MEMBER_VAULT_RESET,
+        alsoLock: [targetUserId],
+      });
+      const lockedActor = lockedRows.get(session.user.id);
+      const lockedTarget = lockedRows.get(targetUserId);
+      if (!holdsTenantAuthority(lockedTarget, null)) {
+        throw new ResetTargetUnavailableError();
+      }
+      if (!lockedActor?.role || !isTenantRoleAbove(lockedActor.role, lockedTarget.role)) {
+        throw new TenantAuthError(API_ERROR.FORBIDDEN, 403);
+      }
       await advisoryXactLock(tx, actor.tenantId);
       const pendingCount = await tx.adminVaultReset.count({
         where: {
@@ -205,6 +229,20 @@ async function handlePOST(
     if (e instanceof PendingResetLimitError) {
       return rateLimited();
     }
+    const isFootholdRefusal =
+      e instanceof ResetTargetUnavailableError ||
+      e instanceof TenantAuthError ||
+      e instanceof UserAuthRevokedError ||
+      isMembershipLockConflict(e);
+    if (isFootholdRefusal) {
+      // The request passed the per-target limiter (max 1) so its key was empty:
+      // clearing it restores the state before this refused attempt. No other
+      // key is cleared — the per-admin key counts the admin's other attempts.
+      await targetResetLimiter.clear(`rl:admin-reset:target:${targetUserId}`);
+    }
+    if (e instanceof ResetTargetUnavailableError) return notFound();
+    const footholdResponse = footholdWriteErrorResponse(e);
+    if (footholdResponse) return footholdResponse;
     throw e;
   }
 
@@ -304,7 +342,7 @@ async function handleGET(
 
   // Fetch reset rows + target's role under a single RLS transaction (vs.
   // opening two separate tenant contexts).
-  const { resets, targetMember } = await withTenantRls(
+  const { resets, targetMember, initiatorVerdicts } = await withTenantRls(
     prisma,
     actor.tenantId,
     async (tx) => {
@@ -325,7 +363,13 @@ async function handleGET(
         },
         select: { role: true },
       });
-      return { resets, targetMember };
+      const initiatorVerdicts = await creatorVerdicts(
+        tx,
+        actor.tenantId,
+        resets.map((r) => ({ id: r.id, createdById: r.initiatedById, createdAt: r.createdAt })),
+        TENANT_PERMISSION.MEMBER_VAULT_RESET,
+      );
+      return { resets, targetMember, initiatorVerdicts };
     },
   );
 
@@ -345,6 +389,7 @@ async function handleGET(
           actorRole: actor.role,
           targetRole,
           initiatedById: r.initiatedById,
+          initiatorAuthorized: initiatorVerdicts.get(r.id) === true,
         })
       : APPROVE_ELIGIBILITY.INSUFFICIENT_ROLE;
 

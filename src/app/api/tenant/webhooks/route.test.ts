@@ -10,6 +10,8 @@ const {
   mockTenantWebhookFindMany,
   mockTenantWebhookCount,
   mockTenantWebhookCreate,
+  mockTenantMemberFindMany,
+  mockDepartureFindMany,
   mockExecuteRaw,
   mockGetCurrentMasterKeyVersion,
   mockGetMasterKeyByVersion,
@@ -23,6 +25,8 @@ const {
   mockTenantWebhookFindMany: vi.fn(),
   mockTenantWebhookCount: vi.fn(),
   mockTenantWebhookCreate: vi.fn(),
+  mockTenantMemberFindMany: vi.fn(),
+  mockDepartureFindMany: vi.fn(),
   mockExecuteRaw: vi.fn().mockResolvedValue(1),
   mockGetCurrentMasterKeyVersion: vi.fn().mockReturnValue(1),
   mockGetMasterKeyByVersion: vi.fn(() => Buffer.alloc(32)),
@@ -34,7 +38,12 @@ const {
   mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
+const { mockLockFootholdWriter } = vi.hoisted(() => ({
+  mockLockFootholdWriter: vi.fn(async () => new Map()),
+}));
+
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/tenant/foothold-write-gate", () => ({ lockFootholdWriter: mockLockFootholdWriter }));
 vi.mock("@/lib/auth/access/tenant-auth", () => {
   class TenantAuthError extends Error {
     status: number;
@@ -56,6 +65,8 @@ vi.mock("@/lib/prisma", () => ({
       count: mockTenantWebhookCount,
       create: mockTenantWebhookCreate,
     },
+    tenantMember: { findMany: mockTenantMemberFindMany },
+    tenantMemberDeparture: { findMany: mockDepartureFindMany },
     // The cap-check + create now run under an advisory lock inside one
     // withTenantRls tx (TOCTOU fix); the route calls tx.$executeRaw for the
     // lock before count/create. The mock passes prisma as tx.
@@ -95,6 +106,8 @@ vi.mock("@/lib/quota/resource-quotas", () => ({
 }));
 
 import { TenantAuthError } from "@/lib/auth/access/tenant-auth";
+import { footholdGateCells } from "@/__tests__/helpers/foothold-gate-cells";
+import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 
 vi.mock("@/lib/quota/resource-quotas", () => ({
   assertQuotaAvailable: vi.fn().mockResolvedValue(undefined),
@@ -130,7 +143,8 @@ const makeWebhookSelectResult = (overrides: Record<string, unknown> = {}) => ({
   lastDeliveredAt: null,
   lastFailedAt: null,
   lastError: null,
-  createdAt: new Date(),
+  createdById: null,
+  createdAt: new Date("2026-02-01T00:00:00Z"),
   ...overrides,
 });
 
@@ -140,7 +154,51 @@ vi.mock("@/lib/quota/resource-quotas", () => ({
 }));
 
 describe("GET /api/tenant/webhooks", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockTenantMemberFindMany.mockResolvedValue([]);
+    mockDepartureFindMany.mockResolvedValue([]);
+  });
+
+  it("reports creatorAuthorized per webhook (true / false / null for legacy) and never createdById", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockTenantWebhookFindMany.mockResolvedValue([
+      makeWebhookSelectResult({ id: "wh-ok", createdById: "u-admin" }),
+      makeWebhookSelectResult({ id: "wh-demoted", createdById: "u-demoted" }),
+      makeWebhookSelectResult({ id: "wh-gone", createdById: "u-gone" }),
+      makeWebhookSelectResult({ id: "wh-legacy", createdById: null }),
+    ]);
+    mockTenantMemberFindMany.mockResolvedValue([
+      { userId: "u-admin", role: "ADMIN", deactivatedAt: null },
+      { userId: "u-demoted", role: "MEMBER", deactivatedAt: null },
+    ]);
+
+    const res = await GET(createRequest("GET", "http://localhost/api/tenant/webhooks"));
+    const { json } = await parseResponse(res);
+
+    expect(Object.fromEntries(json.webhooks.map((w: { id: string; creatorAuthorized: boolean | null }) => [w.id, w.creatorAuthorized]))).toEqual({
+      "wh-ok": true,
+      "wh-demoted": false,
+      "wh-gone": false,
+      "wh-legacy": null,
+    });
+    for (const w of json.webhooks) expect(w).not.toHaveProperty("createdById");
+    expect(mockTenantMemberFindMany.mock.calls[0][0].where.tenantId).toBe(ACTOR.tenantId);
+  });
+
+  it("reports false for a creator recorded as departed after the webhook was created", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockTenantWebhookFindMany.mockResolvedValue([makeWebhookSelectResult({ createdById: "u-admin" })]);
+    mockTenantMemberFindMany.mockResolvedValue([{ userId: "u-admin", role: "ADMIN", deactivatedAt: null }]);
+    mockDepartureFindMany.mockResolvedValue([{ userId: "u-admin", departedAt: new Date("2026-03-01T00:00:00Z") }]);
+
+    const res = await GET(createRequest("GET", "http://localhost/api/tenant/webhooks"));
+    const { json } = await parseResponse(res);
+
+    expect(json.webhooks[0].creatorAuthorized).toBe(false);
+  });
 
   it("returns list of webhooks", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
@@ -218,6 +276,32 @@ vi.mock("@/lib/quota/resource-quotas", () => ({
 describe("POST /api/tenant/webhooks", () => {
   beforeEach(() => vi.clearAllMocks());
 
+  footholdGateCells({
+    gate: mockLockFootholdWriter,
+    permission: TENANT_PERMISSION.WEBHOOK_MANAGE,
+    actorId: DEFAULT_SESSION.user.id,
+    tenantId: ACTOR.tenantId,
+    okStatus: 201,
+    arrange: () => {
+      mockAuth.mockResolvedValue(DEFAULT_SESSION);
+      mockRequireTenantPermission.mockResolvedValue(ACTOR);
+      mockTenantWebhookCount.mockResolvedValue(0);
+      mockTenantWebhookCreate.mockResolvedValue({
+        id: "wh-new",
+        url: "https://example.com/hook",
+        events: ["ADMIN_VAULT_RESET_INITIATE"],
+        isActive: true,
+        createdAt: new Date(),
+      });
+    },
+    call: () =>
+      POST(createRequest("POST", "http://localhost/api/tenant/webhooks", {
+        body: { url: "https://example.com/hook", events: ["ADMIN_VAULT_RESET_INITIATE"] },
+        headers: { origin: "http://localhost" },
+      })),
+    assertNoWrite: () => expect(mockTenantWebhookCreate).not.toHaveBeenCalled(),
+  });
+
   it("creates webhook successfully and returns secret", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
@@ -258,6 +342,11 @@ describe("POST /api/tenant/webhooks", () => {
     expect(json.webhook).not.toHaveProperty("secretIv");
     expect(json.webhook).not.toHaveProperty("secretAuthTag");
     expect(json.webhook).not.toHaveProperty("masterKeyVersion");
+    expect(mockTenantWebhookCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ createdById: DEFAULT_SESSION.user.id }),
+      }),
+    );
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "TENANT_WEBHOOK_CREATE",

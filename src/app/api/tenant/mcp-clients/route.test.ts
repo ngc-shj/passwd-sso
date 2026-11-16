@@ -12,6 +12,8 @@ const {
   mockMcpClientCount,
   mockMcpClientFindFirst,
   mockMcpClientCreate,
+  mockTenantMemberFindMany,
+  mockDepartureFindMany,
   mockExecuteRaw,
   mockHashToken,
   mockUserFindMany,
@@ -26,13 +28,20 @@ const {
   mockMcpClientCount: vi.fn(),
   mockMcpClientFindFirst: vi.fn(),
   mockMcpClientCreate: vi.fn(),
+  mockTenantMemberFindMany: vi.fn(),
+  mockDepartureFindMany: vi.fn(),
   mockExecuteRaw: vi.fn().mockResolvedValue(1),
   mockHashToken: vi.fn((token: string) => `hashed:${token}`),
   mockUserFindMany: vi.fn().mockResolvedValue([]),
   mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
+const { mockLockFootholdWriter } = vi.hoisted(() => ({
+  mockLockFootholdWriter: vi.fn(async () => new Map()),
+}));
+
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/tenant/foothold-write-gate", () => ({ lockFootholdWriter: mockLockFootholdWriter }));
 vi.mock("@/lib/auth/access/tenant-auth", () => {
   class TenantAuthError extends Error {
     status: number;
@@ -58,6 +67,8 @@ vi.mock("@/lib/prisma", () => ({
     user: {
       findMany: mockUserFindMany,
     },
+    tenantMember: { findMany: mockTenantMemberFindMany },
+    tenantMemberDeparture: { findMany: mockDepartureFindMany },
     // The cap-check + name-check + create now run under an advisory lock inside
     // one withTenantRls tx (TOCTOU fix); the route calls tx.$executeRaw for the
     // lock before count/create. The withTenantRls mock passes prisma as tx.
@@ -92,6 +103,8 @@ vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
 import { GET, POST } from "@/app/api/tenant/mcp-clients/route";
 import { TenantAuthError } from "@/lib/auth/access/tenant-auth";
 import { MAX_MCP_CLIENTS_PER_TENANT, MCP_SCOPES } from "@/lib/constants/auth/mcp";
+import { footholdGateCells } from "@/__tests__/helpers/foothold-gate-cells";
+import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 
 const ACTOR = { tenantId: "tenant-1", role: "ADMIN" };
 
@@ -113,14 +126,57 @@ const makeClient = (overrides: Record<string, unknown> = {}) => ({
   allowedScopes: "credentials:list,credentials:use",
   isActive: true,
   isDcr: false,
-  createdAt: new Date(),
+  createdById: null,
+  createdAt: new Date("2026-02-01T00:00:00Z"),
   updatedAt: new Date(),
   accessTokens: [],
   ...overrides,
 });
 
 describe("GET /api/tenant/mcp-clients", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockTenantMemberFindMany.mockResolvedValue([]);
+    mockDepartureFindMany.mockResolvedValue([]);
+  });
+
+  it("reports creatorAuthorized per client (true / false / null for a legacy or DCR client) and never createdById", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockMcpClientFindMany.mockResolvedValue([
+      makeClient({ id: "ok", createdById: "u-admin" }),
+      makeClient({ id: "demoted", createdById: "u-demoted" }),
+      makeClient({ id: "gone", createdById: "u-gone" }),
+      makeClient({ id: "legacy", createdById: null }),
+      // A DCR client's createdById is whoever claimed it, an authorized admin here.
+      makeClient({ id: "dcr", createdById: "u-admin", isDcr: true }),
+    ]);
+    mockTenantMemberFindMany.mockResolvedValue([
+      { userId: "u-admin", role: "ADMIN", deactivatedAt: null },
+      { userId: "u-demoted", role: "MEMBER", deactivatedAt: null },
+    ]);
+
+    const res = await GET(createRequest("GET", "http://localhost/api/tenant/mcp-clients"));
+    const { json } = await parseResponse(res);
+
+    expect(Object.fromEntries(json.clients.map((c: { id: string; creatorAuthorized: boolean | null }) => [c.id, c.creatorAuthorized]))).toEqual({
+      ok: true, demoted: false, gone: false, legacy: null, dcr: null,
+    });
+    for (const c of json.clients) expect(c).not.toHaveProperty("createdById");
+    expect(mockTenantMemberFindMany.mock.calls[0][0].where.tenantId).toBe(ACTOR.tenantId);
+  });
+
+  it("reports false for a creator recorded as departed after the client was created", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockMcpClientFindMany.mockResolvedValue([makeClient({ createdById: "u-admin" })]);
+    mockTenantMemberFindMany.mockResolvedValue([{ userId: "u-admin", role: "ADMIN", deactivatedAt: null }]);
+    mockDepartureFindMany.mockResolvedValue([{ userId: "u-admin", departedAt: new Date("2026-03-01T00:00:00Z") }]);
+
+    const res = await GET(createRequest("GET", "http://localhost/api/tenant/mcp-clients"));
+    const { json } = await parseResponse(res);
+    expect(json.clients[0].creatorAuthorized).toBe(false);
+  });
 
   it("returns list of MCP clients for tenant", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
@@ -190,6 +246,30 @@ describe("POST /api/tenant/mcp-clients", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockRequireRecentSession.mockResolvedValue(null);
+  });
+
+  footholdGateCells({
+    gate: mockLockFootholdWriter,
+    permission: TENANT_PERMISSION.SERVICE_ACCOUNT_MANAGE,
+    actorId: DEFAULT_SESSION.user.id,
+    tenantId: "tenant-1",
+    okStatus: 201,
+    arrange: () => {
+      mockAuth.mockResolvedValue(DEFAULT_SESSION);
+      mockRequireTenantPermission.mockResolvedValue(ACTOR);
+      mockMcpClientCount.mockResolvedValue(0);
+      mockMcpClientFindFirst.mockResolvedValue(null);
+      mockMcpClientCreate.mockResolvedValue(makeClient({ id: "client-new" }));
+    },
+    call: () =>
+      POST(createRequest("POST", "http://localhost/api/tenant/mcp-clients", {
+        body: {
+          name: "my-mcp-client",
+          redirectUris: ["https://example.com/callback"],
+          allowedScopes: ["credentials:list"],
+        },
+      })),
+    assertNoWrite: () => expect(mockMcpClientCreate).not.toHaveBeenCalled(),
   });
 
   it("creates a MCP client and returns clientSecret once", async () => {

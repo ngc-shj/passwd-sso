@@ -19,6 +19,8 @@ import { parseBody } from "@/lib/http/parse-body";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { z } from "zod";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { lockFootholdWriter } from "@/lib/tenant/foothold-write-gate";
+import { footholdWriteErrorResponse } from "@/lib/http/lock-conflict-response";
 
 const updateSchema = z.object({
   name: z.string().min(1).max(100).optional(),
@@ -104,14 +106,25 @@ async function handlePUT(
 
   let updated;
   try {
-    updated = await withTenantRls(prisma, actor.tenantId, async (tx) =>
-      tx.mcpClient.update({
+    updated = await withTenantRls(prisma, actor.tenantId, async (tx) => {
+      // Re-activation and any scope or redirect change grant or widen access;
+      // deactivation and display-only edits stay ungated.
+      if (data.isActive === true || data.allowedScopes !== undefined || data.redirectUris !== undefined) {
+        await lockFootholdWriter(tx, req, {
+          tenantId: actor.tenantId,
+          actorId: session.user.id,
+          permission: TENANT_PERMISSION.SERVICE_ACCOUNT_MANAGE,
+        });
+      }
+      return tx.mcpClient.update({
         where: { id, tenantId: actor.tenantId },
         data: updateData,
         select: { id: true, clientId: true, name: true, redirectUris: true, allowedScopes: true, isActive: true, isDcr: true, updatedAt: true },
-      }),
-    );
+      });
+    });
   } catch (err) {
+    const footholdResponse = footholdWriteErrorResponse(err);
+    if (footholdResponse) return footholdResponse;
     if (
       err instanceof Prisma.PrismaClientKnownRequestError &&
       err.code === "P2002"

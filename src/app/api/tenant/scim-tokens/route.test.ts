@@ -7,6 +7,8 @@ import { __resetThrottleForTests } from "@/lib/security/rate-limit-audit";
 const {
   mockAuth,
   mockPrismaScimToken,
+  mockTenantMemberFindMany,
+  mockDepartureFindMany,
   mockExecuteRaw,
   mockRequireTenantPermission,
   mockWithTenantRls,
@@ -33,6 +35,8 @@ const {
       count: vi.fn(),
       create: vi.fn(),
     },
+    mockTenantMemberFindMany: vi.fn(),
+    mockDepartureFindMany: vi.fn(),
     mockExecuteRaw: vi.fn().mockResolvedValue(1),
     mockRequireTenantPermission: vi.fn(),
     mockWithTenantRls: vi.fn((p: unknown, _t: unknown, fn: (tx: unknown) => unknown) => fn(p)),
@@ -49,10 +53,17 @@ const {
   };
 });
 
+const { mockLockFootholdWriter } = vi.hoisted(() => ({
+  mockLockFootholdWriter: vi.fn(async () => new Map()),
+}));
+
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/tenant/foothold-write-gate", () => ({ lockFootholdWriter: mockLockFootholdWriter }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     scimToken: mockPrismaScimToken,
+    tenantMember: { findMany: mockTenantMemberFindMany },
+    tenantMemberDeparture: { findMany: mockDepartureFindMany },
     // The cap-check + create now run under an advisory lock inside one
     // withTenantRls tx (TOCTOU fix); the route calls tx.$executeRaw for the
     // lock before count/create. The withTenantRls mock passes prisma as tx.
@@ -85,6 +96,8 @@ vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
 }));
 
 import { GET, POST } from "./route";
+import { footholdGateCells } from "@/__tests__/helpers/foothold-gate-cells";
+import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 
 // Module-scope snapshot: route.ts's module-level `createRateLimiter(...)`
 // call runs at import time above. Must be captured before any
@@ -112,6 +125,8 @@ describe("GET /api/tenant/scim-tokens", () => {
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     mockRateLimitCheck.mockResolvedValue({ allowed: true });
+    mockTenantMemberFindMany.mockResolvedValue([]);
+    mockDepartureFindMany.mockResolvedValue([]);
   });
 
   it("returns 401 when not authenticated", async () => {
@@ -139,15 +154,46 @@ describe("GET /api/tenant/scim-tokens", () => {
   });
 
   it("returns token list for authorized user", async () => {
-    const tokens = [
-      { id: "tok-1", description: "CI", createdAt: "2025-01-01", lastUsedAt: null, expiresAt: null, revokedAt: null, createdBy: null },
-    ];
-    mockPrismaScimToken.findMany.mockResolvedValue(tokens);
+    const token = { id: "tok-1", description: "CI", createdAt: new Date("2025-01-01"), lastUsedAt: null, expiresAt: null, revokedAt: null, createdById: null, createdBy: null };
+    mockPrismaScimToken.findMany.mockResolvedValue([token]);
 
     const res = await GET(createRequest("GET", "http://localhost/api/tenant/scim-tokens"));
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toEqual(tokens);
+    expect(body).toEqual([
+      { id: "tok-1", description: "CI", createdAt: "2025-01-01T00:00:00.000Z", lastUsedAt: null, expiresAt: null, revokedAt: null, createdBy: null, creatorAuthorized: null },
+    ]);
+  });
+
+  it("reports creatorAuthorized per token (true / false / null for a token with no creator) and never createdById", async () => {
+    const row = (id: string, createdById: string | null) => ({
+      id, description: null, createdAt: new Date("2026-02-01T00:00:00Z"), lastUsedAt: null, expiresAt: null, revokedAt: null, createdById, createdBy: null,
+    });
+    mockPrismaScimToken.findMany.mockResolvedValue([row("ok", "u-admin"), row("demoted", "u-demoted"), row("gone", "u-gone"), row("legacy", null)]);
+    mockTenantMemberFindMany.mockResolvedValue([
+      { userId: "u-admin", role: "ADMIN", deactivatedAt: null },
+      { userId: "u-demoted", role: "MEMBER", deactivatedAt: null },
+    ]);
+
+    const res = await GET(createRequest("GET", "http://localhost/api/tenant/scim-tokens"));
+    const body = await res.json();
+
+    expect(Object.fromEntries(body.map((t: { id: string; creatorAuthorized: boolean | null }) => [t.id, t.creatorAuthorized]))).toEqual({
+      ok: true, demoted: false, gone: false, legacy: null,
+    });
+    for (const t of body) expect(t).not.toHaveProperty("createdById");
+    expect(mockTenantMemberFindMany.mock.calls[0][0].where.tenantId).toBe(TENANT_ID);
+  });
+
+  it("reports false for a creator recorded as departed after the token was created", async () => {
+    mockPrismaScimToken.findMany.mockResolvedValue([
+      { id: "t", description: null, createdAt: new Date("2026-02-01T00:00:00Z"), lastUsedAt: null, expiresAt: null, revokedAt: null, createdById: "u-admin", createdBy: null },
+    ]);
+    mockTenantMemberFindMany.mockResolvedValue([{ userId: "u-admin", role: "ADMIN", deactivatedAt: null }]);
+    mockDepartureFindMany.mockResolvedValue([{ userId: "u-admin", departedAt: new Date("2026-03-01T00:00:00Z") }]);
+
+    const res = await GET(createRequest("GET", "http://localhost/api/tenant/scim-tokens"));
+    expect((await res.json())[0].creatorAuthorized).toBe(false);
   });
 });
 
@@ -163,6 +209,27 @@ describe("POST /api/tenant/scim-tokens", () => {
     mockPrismaScimToken.count.mockResolvedValue(0);
     mockRateLimitCheck.mockResolvedValue({ allowed: true });
     mockRequireRecentSession.mockResolvedValue(null);
+  });
+
+  footholdGateCells({
+    gate: mockLockFootholdWriter,
+    permission: TENANT_PERMISSION.SCIM_MANAGE,
+    actorId: "user-1",
+    tenantId: TENANT_ID,
+    okStatus: 201,
+    arrange: () => {
+      mockPrismaScimToken.create.mockResolvedValue({
+        id: "tok-new",
+        description: "CI token",
+        expiresAt: null,
+        createdAt: new Date("2025-01-01"),
+      });
+    },
+    call: () =>
+      POST(createRequest("POST", "http://localhost/api/tenant/scim-tokens", {
+        body: { description: "CI token" },
+      })),
+    assertNoWrite: () => expect(mockPrismaScimToken.create).not.toHaveBeenCalled(),
   });
 
   it("returns 401 when not authenticated", async () => {

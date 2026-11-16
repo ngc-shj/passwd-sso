@@ -211,6 +211,14 @@
  *    revocation (sessions/tokens); the two classes pin the same two Prisma
  *    deletes under their own key prefixes.
  *
+ *    The same function must then call `endCreatorFootholdsInTx` AFTER that
+ *    revoker call, in the same block (the credential lock comes before the
+ *    foothold rows; a call in another branch from the revoker does not count),
+ *    or carry an exemption under its own `foothold-end::` key prefix, so no
+ *    other family's exemption satisfies it. Only the bootstrap migration in
+ *    src/auth.ts has one: its sole member is that tenant's OWNER, whose moves
+ *    are not a member foothold.
+ *
  *    KNOWN LIMITS (rule 9): a review tripwire over source order, with the
  *    pinned site set as its backstop, not a proof. "After" is source order:
  *    an early return or a branch between the write and the revocation is not
@@ -389,6 +397,10 @@ const EXEMPTIONS = new Map([
   [
     "membership-create::src/lib/auth/session/auth-adapter.ts::<anonymous>::tenantMember.create",
     "createUser: the row is for the user the same transaction has just created, who holds no credential anywhere",
+  ],
+  [
+    "foothold-end::src/auth.ts::<anonymous>::tenantMember.deleteMany",
+    "bootstrap → SSO tenant migration: the sole member of the bootstrap tenant is its OWNER, and the migration's move is not a member foothold (the tokens and resets they minted there stay theirs; departFromTenant never departs an OWNER either)",
   ],
   [
     "membership-end::src/auth.ts::<anonymous>::tenantMember.deleteMany",
@@ -1248,6 +1260,7 @@ function recipientChecked(sourceFile, node, helpers) {
 // ── Rule 9: a tenant-membership end revokes in its function (session-revocation-failure-surfaces-plan.md C8) ──
 
 const REVOKERS = new Set(["revokeUsersAuthArtifactsInTx", "revokeUserAuthArtifactsInTx"]);
+const FOOTHOLD_ENDERS = new Set(["endCreatorFootholdsInTx"]);
 const MEMBERSHIP_TABLE = "tenant_members";
 const END_COLUMN = "deactivated_at";
 const SET_LIST_ENDS = new Set(["FROM", "WHERE", "RETURNING"]);
@@ -1511,6 +1524,25 @@ function revokesAfter(node, revokers = REVOKERS) {
   return fn !== null && callsIn(fn).some((c) => revokers.has(calleeName(c)) && c.getStart() >= node.getEnd());
 }
 
+/** The statement list holding `node`: the closest block, case clause or file. */
+function enclosingBlock(node) {
+  return node.getFirstAncestor((a) => Node.isBlock(a) || Node.isCaseClause(a) || Node.isDefaultClause(a) || Node.isSourceFile(a)) ?? null;
+}
+
+/**
+ * Whether a foothold ender is called after a revoker that itself follows
+ * `node`, in `node`'s innermost enclosing function, with both in one block (a
+ * revoker in one branch and the ender in another is not the lock order).
+ */
+function footholdsEndAfter(node) {
+  const fn = enclosingFunction(node);
+  if (fn === null) return false;
+  const calls = callsIn(fn);
+  const revokes = calls.filter((c) => REVOKERS.has(calleeName(c)) && c.getStart() >= node.getEnd());
+  return calls.some((f) => FOOTHOLD_ENDERS.has(calleeName(f))
+    && revokes.some((r) => f.getStart() >= r.getEnd() && enclosingBlock(f) === enclosingBlock(r)));
+}
+
 /** A node's text on one line, for a site key. */
 function compact(node) {
   return node ? node.getText().replace(/\s+/g, " ") : "";
@@ -1599,6 +1631,7 @@ for (const { rel: path, sf: sourceFile } of sourceFilesFrom(project, TARGETS, RE
   for (const { node, site, detail } of membershipEnds(sourceFile, path)) {
     const key = keyOf("membership-end", path, node, site);
     sites.push({ rule: "membershipEnds", key, line: lineOf(path, node), ok: revokesAfter(node), detail });
+    sites.push({ rule: "footholdEnds", key: keyOf("foothold-end", path, node, site), line: lineOf(path, node), ok: footholdsEndAfter(node), detail });
   }
 
   for (const { node, site, detail, revokers } of membershipCreations(sourceFile)) {
@@ -1727,6 +1760,9 @@ if (unexpectedEnds.length + missingEnds.length + repeatedEnds.length > 0) {
       ].join("\n"),
   );
 }
+for (const s of sites.filter((m) => m.rule === "footholdEnds" && !m.ok && !EXEMPTIONS.has(m.key))) {
+  violations.push(`foothold-end  ${s.line}  ${s.key}  ends a tenant membership (${s.detail}) with no endCreatorFootholdsInTx call after its revoker call in the same block of its function (the service-account tokens and unapproved vault resets the member minted would stay live)`);
+}
 const membershipCreationSites = sites.filter((s) => s.rule === "membershipCreations");
 for (const s of membershipCreationSites.filter((m) => !m.ok && !EXEMPTIONS.has(m.key))) {
   violations.push(`membership-create  ${s.line}  ${s.key}  creates a tenant membership with no revokeUsersAuthArtifactsInTx / revokeUserAuthArtifactsInTx call after it in its function (an existing user's residue in the tenant would come back with the row; departCreatedMembership covers only a row always created deactivated)`);
@@ -1745,7 +1781,7 @@ if (unexpectedCreations.length + missingCreations.length + repeatedCreations.len
       ].join("\n"),
   );
 }
-const uncovered = sites.filter((s) => !s.ok && !EXEMPTIONS.has(s.key) && s.rule !== "membershipEnds" && s.rule !== "membershipCreations");
+const uncovered = sites.filter((s) => !s.ok && !EXEMPTIONS.has(s.key) && s.rule !== "membershipEnds" && s.rule !== "membershipCreations" && s.rule !== "footholdEnds");
 if (uncovered.length > 0) {
   problems.push(
     `sites without their lock (a member-set write needs a team lock before it; an admission a tenant-row lock; ` +
@@ -1763,4 +1799,4 @@ if (problems.length > 0) {
   for (const p of problems) console.error(`\nFAIL: ${p}`);
   process.exit(1);
 }
-console.log(`check-team-rotation-input-lock: OK ${JSON.stringify({ ...counts, membershipEnds: foundEnds.length, membershipCreations: foundCreations.length })}`);
+console.log(`check-team-rotation-input-lock: OK ${JSON.stringify({ ...counts, membershipEnds: foundEnds.length, footholdEnds: sites.filter((s) => s.rule === "footholdEnds").length, membershipCreations: foundCreations.length })}`);

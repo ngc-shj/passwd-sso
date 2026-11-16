@@ -25,5 +25,6 @@
   "validationError": "Invalid input",
   "inactiveWebhooks": "Inactive webhooks ({count})",
   "noActiveWebhooks": "No active webhooks",
-  "registeredWebhooks": "Registered webhooks"
+  "registeredWebhooks": "Registered webhooks",
+  "creatorPaused": "Paused — its creator no longer has webhook management access in this tenant. Delivery resumes if they regain webhook management access while remaining a member; otherwise re-create the webhook as a current admin. Events during the pause are not sent."
 }

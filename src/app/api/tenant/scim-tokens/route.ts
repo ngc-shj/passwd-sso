@@ -24,6 +24,9 @@ import {
 } from "@/lib/validations/common";
 import { MS_PER_DAY, MS_PER_HOUR } from "@/lib/constants/time";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
+import { creatorAuthorizedOf, creatorVerdicts } from "@/lib/tenant/creator-authority";
+import { lockFootholdWriter } from "@/lib/tenant/foothold-write-gate";
+import { footholdWriteErrorResponse } from "@/lib/http/lock-conflict-response";
 
 const scimTokenCreateLimiter = createRateLimiter({
   windowMs: MS_PER_HOUR,
@@ -65,8 +68,8 @@ async function handleGET(req: NextRequest) {
     return handleAuthError(err);
   }
 
-  const tokens = await withTenantRls(prisma, actor.tenantId, async (tx) =>
-    tx.scimToken.findMany({
+  const tokens = await withTenantRls(prisma, actor.tenantId, async (tx) => {
+    const rows = await tx.scimToken.findMany({
       where: { tenantId: actor.tenantId },
       select: {
         id: true,
@@ -75,11 +78,18 @@ async function handleGET(req: NextRequest) {
         lastUsedAt: true,
         expiresAt: true,
         revokedAt: true,
+        createdById: true,
         createdBy: { select: { id: true, name: true, email: true } },
       },
       orderBy: { createdAt: "desc" },
-    }),
-  );
+    });
+    const verdicts = await creatorVerdicts(tx, actor.tenantId, rows, TENANT_PERMISSION.SCIM_MANAGE);
+    // A NULL creator is legacy: null, not a verdict.
+    return rows.map(({ createdById: _createdById, ...rest }) => ({
+      ...rest,
+      creatorAuthorized: creatorAuthorizedOf(verdicts.get(rest.id)),
+    }));
+  });
 
   return NextResponse.json(tokens);
 }
@@ -133,6 +143,11 @@ async function handlePOST(req: NextRequest) {
   let token;
   try {
     token = await withTenantRls(prisma, actor.tenantId, async (tx) => {
+      await lockFootholdWriter(tx, req, {
+        tenantId: actor.tenantId,
+        actorId: session.user.id,
+        permission: TENANT_PERMISSION.SCIM_MANAGE,
+      });
       await advisoryXactLock(tx, actor.tenantId);
       const tokenCount = await tx.scimToken.count({
         where: {
@@ -158,6 +173,8 @@ async function handlePOST(req: NextRequest) {
     if (e instanceof ScimTokenLimitError) {
       return errorResponse(API_ERROR.SCIM_TOKEN_LIMIT_EXCEEDED);
     }
+    const footholdResponse = footholdWriteErrorResponse(e);
+    if (footholdResponse) return footholdResponse;
     throw e;
   }
 

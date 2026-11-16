@@ -94,6 +94,8 @@ vi.mock("@/lib/team/team-departure", () => ({
   departFromTenant: mockDepartFromTenant,
   returnToTenant: mockReturnToTenant,
 }));
+const { mockEndCreatorFootholds } = vi.hoisted(() => ({ mockEndCreatorFootholds: vi.fn() }));
+vi.mock("@/lib/tenant/departure-footholds", () => ({ endCreatorFootholdsInTx: mockEndCreatorFootholds }));
 vi.mock("@/lib/team/tenant-row-lock", async (importOriginal) => ({
   ...(await importOriginal()) as Record<string, unknown>,
   lockTenantRows: mockLockTenantRows,
@@ -1411,6 +1413,15 @@ describe("DELETE /api/scim/v2/Users/[id]", () => {
       { reason: "scim_deprovision", operation: "SCIM user deprovisioning", userId: "user-1" },
     );
     expectTombstoneAfterCommitFollowing(mockRevokeUserAuthArtifactsInTx);
+    expect(mockEndCreatorFootholds).toHaveBeenCalledExactlyOnceWith(
+      expect.anything(),
+      "tenant-1",
+      ["user-1"],
+      expect.objectContaining({ userId: SCIM_TOKEN_DATA.data.auditUserId, actorType: SCIM_TOKEN_DATA.data.actorType }),
+    );
+    expect(mockEndCreatorFootholds.mock.invocationCallOrder[0]).toBeGreaterThan(
+      mockRevokeUserAuthArtifactsInTx.mock.invocationCallOrder[0]!,
+    );
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "SCIM_USER_DELETE",

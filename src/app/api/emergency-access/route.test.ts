@@ -12,11 +12,16 @@ const { mockAuth, mockPrismaGrant, mockPrismaUser, mockExecuteRaw, mockCheck, mo
   mockExecuteRaw: vi.fn().mockResolvedValue(undefined),
   mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockSendEmail: vi.fn(),
-  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: (tenantId: string, tx: unknown) => unknown) => fn("tenant-1", {})),
   mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
 }));
 
+const { mockLockFootholdWriter } = vi.hoisted(() => ({
+  mockLockFootholdWriter: vi.fn(async () => new Map()),
+}));
+
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/tenant/foothold-write-gate", () => ({ lockFootholdWriter: mockLockFootholdWriter }));
 vi.mock("@/lib/prisma", () => ({
   prisma: { emergencyAccessGrant: mockPrismaGrant, user: mockPrismaUser, $executeRaw: mockExecuteRaw },
 }));
@@ -42,6 +47,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 
 import { POST, GET } from "./route";
 import { EA_STATUS } from "@/lib/constants";
+import { footholdGateCells } from "@/__tests__/helpers/foothold-gate-cells";
 
 describe("POST /api/emergency-access", () => {
   beforeEach(() => {
@@ -57,6 +63,30 @@ describe("POST /api/emergency-access", () => {
     });
     mockPrismaUser.findUnique.mockResolvedValue({ email: "owner@test.com", name: "Owner Name" });
     mockExecuteRaw.mockResolvedValue(undefined);
+  });
+
+  footholdGateCells({
+    gate: mockLockFootholdWriter,
+    // A grantor needs only an active membership; no role permission.
+    permission: null,
+    actorId: "owner-1",
+    tenantId: "tenant-1",
+    okStatus: 201,
+    arrange: () => {},
+    call: () =>
+      POST(createRequest("POST", "http://localhost/api/emergency-access", {
+        body: { granteeEmail: "grantee@test.com", waitDays: 7 },
+      })),
+    assertNoWrite: () => expect(mockPrismaGrant.create).not.toHaveBeenCalled(),
+  });
+
+  it("takes the foothold write gate first in the callback, before the (owner, grantee) lock", async () => {
+    await POST(createRequest("POST", "http://localhost/api/emergency-access", {
+      body: { granteeEmail: "grantee@test.com", waitDays: 7 },
+    }));
+    expect(mockLockFootholdWriter.mock.invocationCallOrder[0]).toBeLessThan(
+      mockExecuteRaw.mock.invocationCallOrder[0],
+    );
   });
 
   it("returns 401 when unauthenticated", async () => {

@@ -59,6 +59,11 @@ import { validateMcpToken } from "@/lib/mcp/oauth-server";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { pgErrorCode } from "@/lib/prisma/prisma-error";
 import { MEMBER_CONTAINMENT_MAX_IDS } from "@/lib/validations/member-containment";
+import { requestWithSession, seedSession } from "./session-request";
+import { prisma } from "@/lib/prisma";
+import { withTenantRls } from "@/lib/tenant-rls";
+import { departFromTenant } from "@/lib/team/team-departure";
+import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
 
 describe("tenant admin revokes a member's passkey — real-DB integration", () => {
   let ctx: TestContext;
@@ -152,9 +157,14 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
     return { status: res.status, body: (await res.json().catch(() => null)) as { passkeys?: { id: string }[] } | null };
   }
 
-  async function exists(table: "webauthn_credentials" | "sessions", id: string): Promise<boolean> {
+  async function exists(table: "webauthn_credentials" | "sessions" | "tenant_webhooks", id: string): Promise<boolean> {
     const [row] = await sql<{ n: number }>(`SELECT count(*)::int AS n FROM ${table} WHERE id = $1::uuid`, id);
     return row.n === 1;
+  }
+
+  async function tokenRevokedAt(id: string): Promise<boolean> {
+    const [row] = await sql<{ revoked: boolean }>(`SELECT revoked_at IS NOT NULL AS revoked FROM service_account_tokens WHERE id = $1::uuid`, id);
+    return row.revoked;
   }
 
   async function tokenRevoked(id: string): Promise<boolean> {
@@ -511,6 +521,37 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
     return id;
   }
 
+  async function tenantWebhook(creator: string | null, tenant = tenantId): Promise<string> {
+    const id = randomUUID();
+    await sql(
+      `INSERT INTO tenant_webhooks (id, tenant_id, url, secret_encrypted, secret_iv, secret_auth_tag, events, created_by_id, created_at, updated_at)
+       VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, ARRAY['ENTRY_CREATE']::text[], $7::uuid, now(), now())`,
+      id, tenant, `https://hooks.example.com/${id}?token=secret-${id}`, `enc-${hex()}`, "a".repeat(24), "b".repeat(32), creator,
+    );
+    return id;
+  }
+
+  /** A reset `initiator` started against `subject`; `state` picks the one column that makes it not pending. */
+  async function vaultReset(
+    initiator: string,
+    subject: string,
+    tenant = tenantId,
+    state: "pending" | "approved" | "executed" | "dead" | "expired" = "pending",
+  ): Promise<string> {
+    const id = randomUUID();
+    await sql(
+      `INSERT INTO admin_vault_resets (id, tenant_id, target_user_id, initiated_by_id, token_hash, encrypted_token, target_email_at_initiate,
+                                       expires_at, approved_at, executed_at, revoked_at, created_at)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, 'victim@example.net',
+               CASE WHEN $7 = 'expired' THEN now() - interval '1 hour' ELSE now() + interval '1 day' END,
+               CASE WHEN $7 = 'approved' THEN now() ELSE NULL END,
+               CASE WHEN $7 = 'executed' THEN now() ELSE NULL END,
+               CASE WHEN $7 = 'dead' THEN now() - interval '1 hour' ELSE NULL END, now())`,
+      id, tenant, subject, initiator, hex(), `etok-${hex()}`, state,
+    );
+    return id;
+  }
+
   /** The row as JSON text, to show a skipped row is byte-unchanged. */
   async function rowText(table: string, id: string): Promise<string> {
     const [row] = await sql<{ r: string }>(`SELECT row_to_json(t)::text AS r FROM ${table} t WHERE id = $1::uuid`, id);
@@ -617,6 +658,11 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
     const bg = { live: await breakglassGrant(target, bystander), future: await breakglassGrant(target, bystander, tenantId, "future"),
       bystander: await breakglassGrant(bystander, target), elsewhere: await breakglassGrant(target, bystander, otherTenantId),
       revoked: await breakglassGrant(target, bystander, tenantId, "dead"), expired: await breakglassGrant(target, bystander, tenantId, "expired") };
+    const wh = { live: await tenantWebhook(target), bystander: await tenantWebhook(bystander), elsewhere: await tenantWebhook(target, otherTenantId),
+      unowned: await tenantWebhook(null) };
+    const vr = { live: await vaultReset(target, bystander), bystander: await vaultReset(bystander, target), elsewhere: await vaultReset(target, bystander, otherTenantId),
+      approved: await vaultReset(target, bystander, tenantId, "approved"), executed: await vaultReset(target, bystander, tenantId, "executed"),
+      revoked: await vaultReset(target, bystander, tenantId, "dead"), expired: await vaultReset(target, bystander, tenantId, "expired") };
     // Emergency-access grants are the user's: one filed under the other tenant is listed too.
     const ea = { here: await emergencyGrant(target, tenantId, { status: "IDLE", escrow: true }), there: await emergencyGrant(target, otherTenantId),
       bystander: await emergencyGrant(bystander), revoked: await emergencyGrant(target, tenantId, { status: "REVOKED" }),
@@ -635,7 +681,8 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
     for (const secret of [here.providerAccountId, here.accessToken, here.refreshToken, there.providerAccountId, there.accessToken, there.refreshToken]) {
       expect(text).not.toContain(secret);
     }
-    expect(text).not.toMatch(/providerAccountId|access_token|refresh_token|encryptedSecretKey|tokenHash/);
+    expect(text).not.toMatch(/providerAccountId|access_token|refresh_token|encryptedSecretKey|tokenHash|encryptedToken|secretEncrypted|targetEmailAtInitiate/);
+    expect(text).not.toContain("victim@example.net");
 
     const ids = (kind: string) => (body.createdFootholds[kind] as { id: string }[]).map((r) => r.id).sort();
     expect(ids("scimTokens")).toEqual([scim.live]);
@@ -643,6 +690,9 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
     expect(ids("serviceAccountTokens")).toEqual([saTok.live.id]);
     expect(ids("mcpClients")).toEqual([mcp.live]);
     expect(ids("breakglassGrants")).toEqual([bg.live, bg.future].sort());
+    expect(ids("tenantWebhooks")).toEqual([wh.live]);
+    expect(ids("vaultResets")).toEqual([vr.live]);
+    expect(body.createdFootholds.vaultResets[0]).toMatchObject({ targetUserId: bystander, targetUser: { email: expect.any(String) } });
     expect(ids("emergencyAccessGrants")).toEqual([ea.here, ea.there].sort());
     expect(body.createdFootholds.emergencyAccessGrants.find((g: { id: string }) => g.id === ea.here)).toMatchObject({ hasEscrow: true, status: "IDLE" });
     expect(body.createdFootholds.serviceAccountTokens[0]).toMatchObject({ serviceAccount: { name: expect.any(String) } });
@@ -747,6 +797,23 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
       }),
     },
     {
+      bodyKey: "vaultResetIds", kind: "vaultResets", table: "admin_vault_resets", action: "ADMIN_VAULT_RESET_REVOKE", deadColumn: "revoked_at",
+      written: isRevoked("admin_vault_resets"),
+      // The row's targetId is the member the reset was aimed at.
+      seed: async ({ target, bystander }) => ({
+        live: await vaultReset(target, bystander),
+        skipped: [
+          await vaultReset(bystander, target),
+          await vaultReset(target, bystander, otherTenantId),
+          await vaultReset(target, bystander, tenantId, "approved"),
+          await vaultReset(target, bystander, tenantId, "executed"),
+          await vaultReset(target, bystander, tenantId, "expired"),
+        ],
+        dead: await vaultReset(target, bystander, tenantId, "dead"),
+        auditTargetId: bystander,
+      }),
+    },
+    {
       bodyKey: "emergencyAccessGrantIds", kind: "emergencyAccessGrants", table: "emergency_access_grants", action: "EMERGENCY_ACCESS_REVOKE", deadColumn: "revoked_at",
       written: async (id) => (await sql<{ s: string }>(`SELECT status::text AS s FROM emergency_access_grants WHERE id = $1::uuid`, id))[0].s === "REVOKED",
       // The user's grants, wherever filed: no other-tenant skip row for this kind.
@@ -784,6 +851,131 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
     if (kind === "breakglassGrants") expect(rows[0].metadata.grantId).toBe(live);
     const revokeAll = (await auditRows(tenantId)).find((r) => r.action === "TENANT_MEMBER_PASSKEY_REVOKE_ALL");
     expect(revokeAll?.metadata).toMatchObject({ [`${kind}Contained`]: 1, [`${kind}Skipped`]: skipped.length + 1 });
+  });
+
+  it("cell 3 (tenantWebhooks): only the target's webhook in this tenant is deleted, audited with the url masked; the rest are byte-unchanged and counted as skipped", async () => {
+    const owner = await memberWithRole("OWNER");
+    const target = await memberWithRole("ADMIN");
+    const bystander = await memberWithRole("ADMIN");
+    const live = await tenantWebhook(target);
+    const skipped = [await tenantWebhook(bystander), await tenantWebhook(target, otherTenantId), await tenantWebhook(null)];
+    const before = await Promise.all(skipped.map((id) => rowText("tenant_webhooks", id)));
+
+    const res = await containAs(owner, target, { revoke: { tenantWebhookIds: [live, ...skipped, randomUUID()] } });
+    expect(res.status).toBe(200);
+    expect((await res.json()).contained).toEqual({ tenantWebhooks: { revoked: 1, skipped: 4 } });
+
+    expect(await exists("tenant_webhooks", live)).toBe(false);
+    expect(await Promise.all(skipped.map((id) => rowText("tenant_webhooks", id)))).toEqual(before);
+    const rows = (await auditRows(tenantId)).filter((r) => r.action === "TENANT_WEBHOOK_DELETE");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ userId: owner, metadata: { webhookId: live, url: `https://hooks.example.com/${live}`, targetUserId: target } });
+    expect(JSON.stringify(rows[0])).not.toContain("secret-");
+  });
+
+  it("cell 3 (vaultResets): a revoked reset's token is cleared, and the target is not notified", async () => {
+    const owner = await memberWithRole("OWNER");
+    const target = await memberWithRole("ADMIN");
+    const victim = await memberWithRole("MEMBER");
+    const reset = await vaultReset(target, victim);
+
+    expect((await containAs(owner, target, { revoke: { vaultResetIds: [reset] } })).status).toBe(200);
+
+    const [row] = await sql<{ encrypted_token: string | null; revoked: boolean }>(
+      `SELECT encrypted_token, revoked_at IS NOT NULL AS revoked FROM admin_vault_resets WHERE id = $1::uuid`, reset,
+    );
+    expect(row).toEqual({ encrypted_token: null, revoked: true });
+    const [audit] = (await auditRows(tenantId)).filter((r) => r.action === "ADMIN_VAULT_RESET_REVOKE");
+    expect(audit.metadata).toEqual({ resetId: reset, initiatedById: target, revokedById: owner });
+    expect(await sql(`SELECT 1 FROM notifications WHERE user_id = $1::uuid`, victim)).toHaveLength(0);
+  });
+
+  it("remaining: counts the member's live footholds the request did not name, and none of those it wrote", async () => {
+    const owner = await memberWithRole("OWNER");
+    const target = await memberWithRole("ADMIN");
+    const bystander = await memberWithRole("ADMIN");
+    const chosenWebhook = await tenantWebhook(target);
+    await tenantWebhook(target);
+    await tenantWebhook(target);
+    await tenantWebhook(bystander);
+    await scimToken(target);
+    await vaultReset(target, bystander);
+    await vaultReset(target, bystander, tenantId, "approved");
+    await mcpClient(bystander);
+
+    const res = await containAs(owner, target, { revoke: { tenantWebhookIds: [chosenWebhook] } });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.contained).toEqual({ tenantWebhooks: { revoked: 1, skipped: 0 } });
+    expect(body.remaining).toEqual({
+      scimTokens: 1, serviceAccounts: 0, serviceAccountTokens: 0, mcpClients: 0, breakglassGrants: 0,
+      tenantWebhooks: 2, vaultResets: 1, emergencyAccessGrants: 0,
+    });
+  });
+
+  it("remaining: counts a foothold created after the listing, which the request could not have named", async () => {
+    const owner = await memberWithRole("OWNER");
+    const target = await memberWithRole("ADMIN");
+    const listed = await tenantWebhook(target);
+
+    const listing = await listRaw(owner, target);
+    expect(listing.status).toBe(200);
+    expect(listing.text).toContain(listed);
+    const late = await tenantWebhook(target);
+    expect(listing.text).not.toContain(late);
+
+    const res = await containAs(owner, target, { revoke: { tenantWebhookIds: [listed] } });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.contained).toEqual({ tenantWebhooks: { revoked: 1, skipped: 0 } });
+    expect(body.remaining).toMatchObject({ tenantWebhooks: 1 });
+    expect(await exists("tenant_webhooks", late)).toBe(true);
+  });
+
+  // Not an ordering proof (the foothold-write-gate cells hold a transaction for
+  // that): the two writers take their locks in the order production does, so
+  // neither may fail. A deadlock victim on the containment side rejects or
+  // answers an error status, never a 40P01 in the body, so the containment
+  // answer must be a decision: 200, or 404 when the departure committed first
+  // (containment reaches active members only). Several pairs, so the
+  // interleaving is exercised more than once.
+  it("containment and the member's departure run concurrently with no deadlock under the real order", async () => {
+    const owner = await memberWithRole("OWNER");
+    for (let pair = 0; pair < 5; pair++) {
+      const target = await memberWithRole("ADMIN");
+      const sa = await serviceAccount(target);
+      const token = await saToken(sa, target);
+
+      const [contained, departed] = await Promise.allSettled([
+        containAs(owner, target, { revoke: { serviceAccountTokenIds: [token.id] } }),
+        withTenantRls(prisma, tenantId, (tx) =>
+          departFromTenant(tx, tenantId, [target], { actor: { userId: SYSTEM_ACTOR_ID, actorType: ACTOR_TYPE.SYSTEM } }),
+        ),
+      ]);
+
+      expect(departed.status).toBe("fulfilled");
+      expect(contained.status).toBe("fulfilled");
+      if (contained.status === "fulfilled") expect([200, 404]).toContain(contained.value.status);
+
+      const [member] = await sql<{ departed: boolean }>(
+        `SELECT deactivated_at IS NOT NULL AS departed FROM tenant_members WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, tenantId, target,
+      );
+      expect(member.departed).toBe(true);
+      expect(await tokenRevokedAt(token.id)).toBe(true);
+      const revokes = (await auditRows(tenantId)).filter((r) => r.action === "SERVICE_ACCOUNT_TOKEN_REVOKE" && r.targetId === token.id);
+      expect(revokes).toHaveLength(1);
+    }
+  });
+
+  it("remaining: an ADMIN actor's answer leaves out break-glass grants, which only an OWNER may contain", async () => {
+    const actor = await memberWithRole("ADMIN");
+    const target = await memberWithRole("MEMBER");
+    await tenantWebhook(target);
+    const res = await containAs(actor, target, { revoke: { scimTokenIds: [await scimToken(target)] } });
+    expect(res.status).toBe(200);
+    const { remaining } = await res.json();
+    expect(remaining).not.toHaveProperty("breakglassGrants");
+    expect(remaining).toMatchObject({ tenantWebhooks: 1, scimTokens: 0 });
   });
 
   it("cell 3: a contained service account's tokens are refused by the production validator; a contained MCP client's access token too, and its refresh token is revoked", async () => {
@@ -1087,7 +1279,7 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
     );
     mockAuth.mockResolvedValue({ user: { id: approver } });
     const res = await approveAccessRequest(
-      new NextRequest(`http://localhost/api/tenant/access-requests/${requestId}/approve`, { method: "POST" }),
+      requestWithSession(await seedSession(ctx, approver, tenantId), `http://localhost/api/tenant/access-requests/${requestId}/approve`),
       { params: Promise.resolve({ id: requestId }) },
     );
     expect(res.status).toBe(200);

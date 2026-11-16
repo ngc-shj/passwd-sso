@@ -32,9 +32,14 @@ const {
   mockDerivePasskeyState: vi.fn(),
 }));
 
+const { mockLockFootholdWriter } = vi.hoisted(() => ({
+  mockLockFootholdWriter: vi.fn(async () => new Map()),
+}));
+
 vi.mock("@/auth", () => ({
   auth: mockAuth,
 }));
+vi.mock("@/lib/tenant/foothold-write-gate", () => ({ lockFootholdWriter: mockLockFootholdWriter }));
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -132,6 +137,8 @@ import { API_PATH } from "@/lib/constants/auth/api-path";
 import { PKCE_CODE_CHALLENGE_SCHEMA } from "@/lib/validations/common.server";
 import { UserAuthRevokedError } from "@/lib/auth/session/user-auth-serialization";
 import { TEST_SESSION_TOKEN } from "@/__tests__/helpers/fixtures";
+import { footholdGateCells } from "@/__tests__/helpers/foothold-gate-cells";
+import { TenantAuthError } from "@/lib/auth/access/tenant-auth";
 
 const VALID_SESSION = { user: { id: "user-uuid-123" } };
 
@@ -216,6 +223,50 @@ describe("POST /api/mcp/authorize/consent", () => {
       requirePasskeyEnabledAt: null,
       passkeyGracePeriodDays: null,
     });
+  });
+
+  // The DCR claim arm sets tenantId and createdById on an unclaimed client: it
+  // runs the foothold write gate for the consenting user in their owning tenant.
+  const claimConsent = () =>
+    POST(
+      createFormRequest("http://localhost/api/mcp/authorize/consent", VALID_FORM_FIELDS) as unknown as import("next/server").NextRequest,
+    );
+  const arrangeUnclaimedDcrClient = () =>
+    mockFindFirst.mockResolvedValueOnce({ ...VALID_CLIENT, isDcr: true, tenantId: null });
+
+  footholdGateCells({
+    gate: mockLockFootholdWriter,
+    permission: null,
+    actorId: VALID_SESSION.user.id,
+    tenantId: VALID_USER.tenantId,
+    okStatus: 302,
+    arrange: arrangeUnclaimedDcrClient,
+    call: claimConsent,
+    assertNoWrite: () => {
+      expect(mockMcpClientUpdateMany).not.toHaveBeenCalled();
+      expect(mockCreateAuthorizationCode).not.toHaveBeenCalled();
+    },
+  });
+
+  it("takes the foothold write gate before the claim's per-tenant advisory lock", async () => {
+    arrangeUnclaimedDcrClient();
+    await claimConsent();
+    expect(mockLockFootholdWriter.mock.invocationCallOrder[0]).toBeLessThan(
+      mockExecuteRaw.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("answers a gate refusal with the access_denied JSON body, not the P2002 name_conflict", async () => {
+    arrangeUnclaimedDcrClient();
+    mockLockFootholdWriter.mockRejectedValueOnce(new TenantAuthError("FORBIDDEN", 403));
+    const res = await claimConsent();
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe("access_denied");
+  });
+
+  it("does not take the gate for a client that is already claimed (no claim arm, no write)", async () => {
+    expect((await claimConsent()).status).toBe(302);
+    expect(mockLockFootholdWriter).not.toHaveBeenCalled();
   });
 
   it("returns 403 when Origin header is missing (CSRF check)", async () => {

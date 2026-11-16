@@ -325,7 +325,7 @@ async function handleDELETE(req: NextRequest, { params }: Params): Promise<Respo
     serviceResult = await withTenantRls(prisma, tenantId, (tx) =>
       resolveUserId(tenantId, id, tx).then((userId) => {
         if (!userId) throw new ScimUserNotFoundError();
-        return deactivateScimUser(tenantId, userId);
+        return deactivateScimUser(tenantId, userId, departureActor(req, auditUserId, deleteActorType));
       }),
       { timeout: TEAM_MEMBERSHIP_TX_TIMEOUT_MS },
     );

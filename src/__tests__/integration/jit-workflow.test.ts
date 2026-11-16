@@ -53,7 +53,12 @@ const {
   mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
+const { mockLockFootholdWriter } = vi.hoisted(() => ({
+  mockLockFootholdWriter: vi.fn(async () => new Map()),
+}));
+
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/tenant/foothold-write-gate", () => ({ lockFootholdWriter: mockLockFootholdWriter }));
 vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
   requireRecentCurrentAuthMethod: mockRequireRecentSession,
 }));
@@ -216,6 +221,11 @@ describe("Scenario 1: Full JIT workflow", () => {
     expect(typeof approveJson.token).toBe("string");
     expect(approveJson.token).toMatch(/^sa_/);
     expect(approveJson.ttlSec).toBeGreaterThan(0);
+    expect(mockLockFootholdWriter).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ actorId: DEFAULT_SESSION.user.id, permission: "tenant:serviceAccount:manage" }),
+    );
 
     // Step 3: Verify parseSaTokenScopes filters only valid scopes
     const tokenScope = "passwords:read,passwords:list";

@@ -18,6 +18,8 @@ import { MAX_SERVICE_ACCOUNTS_PER_TENANT } from "@/lib/constants/auth/service-ac
 import { serviceAccountCreateSchema } from "@/lib/validations/service-account";
 import { MS_PER_HOUR } from "@/lib/constants/time";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
+import { lockFootholdWriter } from "@/lib/tenant/foothold-write-gate";
+import { footholdWriteErrorResponse } from "@/lib/http/lock-conflict-response";
 
 const saCreateLimiter = createRateLimiter({
   windowMs: MS_PER_HOUR,
@@ -128,6 +130,11 @@ async function handlePOST(req: NextRequest) {
   let sa;
   try {
     sa = await withTenantRls(prisma, actor.tenantId, async (tx) => {
+      await lockFootholdWriter(tx, req, {
+        tenantId: actor.tenantId,
+        actorId: session.user.id,
+        permission: TENANT_PERMISSION.SERVICE_ACCOUNT_MANAGE,
+      });
       await advisoryXactLock(tx, actor.tenantId);
       const count = await tx.serviceAccount.count({
         where: { tenantId: actor.tenantId, isActive: true },
@@ -160,6 +167,8 @@ async function handlePOST(req: NextRequest) {
     if (err instanceof ServiceAccountLimitError) {
       return errorResponse(API_ERROR.SA_LIMIT_EXCEEDED);
     }
+    const footholdResponse = footholdWriteErrorResponse(err);
+    if (footholdResponse) return footholdResponse;
     if (
       err instanceof Prisma.PrismaClientKnownRequestError &&
       err.code === "P2002"

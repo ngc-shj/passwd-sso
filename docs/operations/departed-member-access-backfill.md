@@ -614,6 +614,22 @@ membership row survived their departure (the residue section 1 lists) is a
 leftover membership and does not pass the delivery check either (see "Actors
 refused since this release").
 
+## Tenant webhooks and the footholds a departure leaves
+
+A tenant webhook is delivered only while its creator holds webhook management
+(`WEBHOOK_MANAGE`) in the tenant. Once the creator departs, is deactivated or is
+demoted below it, delivery is skipped (not counted as a failure) and the tenant
+webhook settings show the webhook as paused; events from the gap are not sent
+later. On upgrade, a webhook whose backfilled creator had already left pauses.
+A legacy webhook with no recorded creator keeps delivering, as before. To keep a
+paused stream, a current admin re-creates the webhook.
+
+A departure also revokes, in the departure's own transaction, the service-account
+tokens the member minted and the vault resets they started that no other admin
+has approved. SCIM tokens and MCP clients whose creator left are flagged in their
+lists, not revoked: review them there, and delete or deactivate what should not
+stay.
+
 ## What prevents a recurrence, and its limits
 
 Departures end memberships because every departure writer lives in

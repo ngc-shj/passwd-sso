@@ -6,11 +6,13 @@ const {
   mockPrismaPasswordShare,
   mockPrismaShareAccessLog,
   mockWithUserTenantRls,
+  mockGetTeamMembership,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaPasswordShare: { findUnique: vi.fn() },
   mockPrismaShareAccessLog: { findMany: vi.fn() },
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+  mockGetTeamMembership: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -22,6 +24,15 @@ vi.mock("@/lib/prisma", () => ({
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
+}));
+vi.mock("@/lib/auth/access/team-auth", () => ({
+  getTeamMembership: mockGetTeamMembership,
+  requireTeamPermission: vi.fn(),
+  TeamAuthError: class TeamAuthError extends Error {},
+}));
+vi.mock("@/lib/team/team-policy", () => ({
+  withTeamIpRestriction: vi.fn().mockResolvedValue(undefined),
+  PolicyViolationError: class PolicyViolationError extends Error {},
 }));
 vi.mock("@/lib/logger", () => ({
   default: {
@@ -79,6 +90,28 @@ describe("GET /api/share-links/[id]/access-logs", () => {
       createParams({ id: SHARE_ID }),
     );
     expect(res.status).toBe(404);
+  });
+
+  it("returns the access logs of a team link to its creator who is still a member", async () => {
+    mockPrismaPasswordShare.findUnique.mockResolvedValue({ createdById: "user-1", teamPasswordEntry: { teamId: "team-1" } });
+    mockGetTeamMembership.mockResolvedValue({ id: "membership-1" });
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/share-links/${SHARE_ID}/access-logs`),
+      createParams({ id: SHARE_ID }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockGetTeamMembership).toHaveBeenCalledWith("user-1", "team-1");
+  });
+
+  it("returns 404 for a team link whose creator is no longer a member (or is a leftover), without reading the logs", async () => {
+    mockPrismaPasswordShare.findUnique.mockResolvedValue({ createdById: "user-1", teamPasswordEntry: { teamId: "team-1" } });
+    mockGetTeamMembership.mockResolvedValue(null);
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/share-links/${SHARE_ID}/access-logs`),
+      createParams({ id: SHARE_ID }),
+    );
+    expect(res.status).toBe(404);
+    expect(mockPrismaShareAccessLog.findMany).not.toHaveBeenCalled();
   });
 
   it("returns access logs successfully", async () => {

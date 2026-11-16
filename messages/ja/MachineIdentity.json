@@ -3,6 +3,8 @@
   "saCardTitle": "アカウント",
   "saCardDescription": "自動化された API アクセス用のサービスアカウントを作成・管理します。サービスアカウントはトークンベース認証を使用します。",
   "saRegisteredAccounts": "登録済みサービスアカウント",
+  "creatorUnauthorized": "このクライアントを作成したメンバーは、このテナントで管理する権限を失っています。管理者は新しいクライアントに置き換えてください。",
+  "tokenCreatorUnauthorized": "このトークンを作成したメンバーは、このテナントで管理する権限を失っています。管理者は新しいトークンを作成して切り替え、このトークンを失効してください。",
   "mcpCardTitle": "MCP クライアント",
   "mcpCardDescription": "AI エージェント統合用の MCP（Model Context Protocol）クライアントを登録・管理します。",
   "mcpRegisteredClients": "登録済み MCP クライアント",

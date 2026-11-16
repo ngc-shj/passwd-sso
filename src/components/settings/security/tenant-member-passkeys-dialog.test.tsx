@@ -207,6 +207,8 @@ describe("TenantMemberPasskeysDialog", () => {
         serviceAccountTokens: [{ id: "sat-1", name: "ci-token", serviceAccount: { name: "prod-sa" } }],
         mcpClients: [{ id: "mcp-1", name: "agent-client" }],
         breakglassGrants: [{ id: "bg-1", reason: "incident 42", expiresAt: "2026-02-01T00:00:00Z" }],
+        tenantWebhooks: [{ id: "wh-1", url: "https://hooks.example.com/in", createdAt: "2026-01-02T00:00:00Z" }],
+        vaultResets: [{ id: "vr-1", targetUser: { name: "Bob Target", email: "bob@example.com" }, expiresAt: "2026-02-02T00:00:00Z" }],
         emergencyAccessGrants: [{ id: "ea-1", granteeEmail: "unknown@example.net", status: "ACCEPTED", hasEscrow: true }],
       },
     };
@@ -220,13 +222,13 @@ describe("TenantMemberPasskeysDialog", () => {
     it("lists linked accounts and every foothold kind with an unchecked checkbox each", async () => {
       open();
       expect(await screen.findByText("google")).toBeInTheDocument();
-      for (const label of ["saml-jackson", "Okta provisioning", "deploy-bot", "ci-token", "agent-client", "incident 42", "unknown@example.net"]) {
+      for (const label of ["saml-jackson", "Okta provisioning", "deploy-bot", "ci-token", "agent-client", "incident 42", "https://hooks.example.com/in", "Bob Target", "unknown@example.net"]) {
         expect(screen.getByText(label)).toBeInTheDocument();
       }
       expect(screen.getByText("containmentLinkedAccountOtherTenant")).toBeInTheDocument();
       expect(screen.getByText("containmentEscrowed")).toBeInTheDocument();
       const boxes = screen.getAllByRole("checkbox");
-      expect(boxes).toHaveLength(8);
+      expect(boxes).toHaveLength(10);
       for (const box of boxes) expect(box).not.toBeChecked();
       expect(screen.getByText("containmentDeactivateNote")).toBeInTheDocument();
       expect(screen.getByText("containmentScope")).toBeInTheDocument();
@@ -250,6 +252,8 @@ describe("TenantMemberPasskeysDialog", () => {
       fireEvent.click(screen.getByLabelText(/ci-token/));
       fireEvent.click(screen.getByLabelText(/unknown@example.net/));
       fireEvent.click(screen.getByLabelText("agent-client"));
+      fireEvent.click(screen.getByLabelText("hooks.example.com", { exact: false }));
+      fireEvent.click(screen.getByLabelText(/Bob Target/));
       fireEvent.click(screen.getByRole("button", { name: "revokeAllPasskeys" }));
 
       const chosen = screen.getByTestId("containment-chosen");
@@ -257,6 +261,8 @@ describe("TenantMemberPasskeysDialog", () => {
         "google",
         "ci-token",
         "agent-client",
+        "https://hooks.example.com/in",
+        "Bob Target",
         "unknown@example.net",
       ]);
       expect(screen.getByText(/^containmentUnlinkWarning/)).toBeInTheDocument();
@@ -273,7 +279,7 @@ describe("TenantMemberPasskeysDialog", () => {
       expect(init.method).toBe("DELETE");
       expect(JSON.parse(init.body as string)).toEqual({
         unlinkAccountIds: ["acc-1"],
-        revoke: { serviceAccountTokenIds: ["sat-1"], mcpClientIds: ["mcp-1"], emergencyAccessGrantIds: ["ea-1"] },
+        revoke: { serviceAccountTokenIds: ["sat-1"], mcpClientIds: ["mcp-1"], tenantWebhookIds: ["wh-1"], vaultResetIds: ["vr-1"], emergencyAccessGrantIds: ["ea-1"] },
       });
     });
 
@@ -306,6 +312,26 @@ describe("TenantMemberPasskeysDialog", () => {
       expect(mockToast.success).toHaveBeenCalledWith('revokeAllPasskeysDone:{"name":"Alice"}');
     });
 
+    it("warns with the total of live rows left, unticked ones included", async () => {
+      open();
+      fireEvent.click(await screen.findByLabelText("deploy-bot"));
+      fireEvent.click(screen.getByRole("button", { name: "revokeAllPasskeys" }));
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ok: true,
+          contained: { serviceAccounts: { revoked: 1, skipped: 0 } },
+          remaining: { scimTokens: 2, tenantWebhooks: 1, vaultResets: 0 },
+        }),
+      });
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => LISTING });
+      fireEvent.click(screen.getAllByRole("button", { name: "revokeAllPasskeys" }).at(-1)!);
+
+      await waitFor(() => expect(mockToast.warning).toHaveBeenCalledTimes(1));
+      expect(mockToast.warning).toHaveBeenCalledWith('containmentRemaining:{"count":3}', expect.anything());
+    });
+
     it("does not warn when nothing was skipped", async () => {
       open();
       fireEvent.click(await screen.findByLabelText("deploy-bot"));
@@ -313,7 +339,7 @@ describe("TenantMemberPasskeysDialog", () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         status: 200,
-        json: async () => ({ ok: true, contained: { serviceAccounts: { revoked: 1, skipped: 0 } } }),
+        json: async () => ({ ok: true, contained: { serviceAccounts: { revoked: 1, skipped: 0 } }, remaining: { scimTokens: 0 } }),
       });
       mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => LISTING });
       fireEvent.click(screen.getAllByRole("button", { name: "revokeAllPasskeys" }).at(-1)!);
