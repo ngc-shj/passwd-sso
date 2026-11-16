@@ -14,6 +14,7 @@ import {
   WITHHELD_PASS_THROUGH_NAMES,
   appDatabaseUrlFromCompose,
   deriveWithheldEnv,
+  derivePublisherOnlyEnv,
   ownDatabaseUrlKey,
   ownRoleUser,
   readSmokeMap,
@@ -23,6 +24,7 @@ import {
   rolePasswordBinding,
   roleUserFromComposeUrl,
   smokeMapRoleDrift,
+  withheldHolders,
   withheldEnvObjectKeys,
   workerServiceName,
   assertSmokeMapRolesLeastPrivilege,
@@ -289,5 +291,26 @@ describe("role-password binding", () => {
       "audit-anchor-publisher",
       "audit-chain-verify-worker",
     ]);
+  });
+});
+
+describe("withheldHolders", () => {
+  const inputs = realWithheldInputs();
+  const withheld = deriveWithheldEnv(inputs);
+  const holders = withheldHolders(withheld, derivePublisherOnlyEnv(inputs), rolePasswordBinding(realRolePasswordInputs()));
+
+  it("names a holder list for every W key", () => {
+    expect(Object.keys(holders)).toEqual(withheld);
+  });
+
+  it("gives a role password to the services bound to it, and the publisher-only keys to the publisher", () => {
+    expect(holders.PASSWD_OUTBOX_WORKER_PASSWORD).toEqual(["audit-outbox-worker", "db"]);
+    expect(holders.AUDIT_ANCHOR_SIGNING_KEY).toEqual(["audit-anchor-publisher"]);
+  });
+
+  it("gives JACKSON_API_KEY to jackson and the other principals' URLs and SENTRY_AUTH_TOKEN to nobody", () => {
+    expect(holders.JACKSON_API_KEY).toEqual(["jackson"]);
+    expect(holders.MIGRATION_DATABASE_URL).toEqual([]);
+    expect(holders.SENTRY_AUTH_TOKEN).toEqual([]);
   });
 });

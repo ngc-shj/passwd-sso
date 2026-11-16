@@ -291,3 +291,34 @@ export function rolePasswordBinding(input: RolePasswordInputs): Record<string, s
 export function realRolePasswordInputs(): RolePasswordInputs {
   return { smoke: readSmokeMap(), roles: ROLES, allowlist: ALLOWLIST };
 }
+
+// ─── Who may hold each W key ────────────────────────────────
+
+/** The compose services that legitimately receive a W key by name. */
+export const PUBLISHER_SERVICE = "audit-anchor-publisher";
+export const JACKSON_SERVICE = "jackson";
+/** The one W key a non-worker service receives that is not a role password: the container reads it as JACKSON_API_KEYS. */
+const JACKSON_API_KEY = "JACKSON_API_KEY";
+
+/**
+ * W key → the compose services whose values may contain it; the one table the
+ * parity test and the render check both adjudicate against. A role password goes
+ * to the services bound to its role; a publisher-only key to the publisher;
+ * JACKSON_API_KEY to jackson. Every other key (the other principals' URLs,
+ * SENTRY_AUTH_TOKEN, ...) goes to no service: compose builds each URL from its
+ * password and never forwards the `.env` URL, so a value of one in any service
+ * is a leak.
+ */
+export function withheldHolders(
+  withheld: readonly string[],
+  publisherOnly: readonly string[],
+  binding: Record<string, readonly string[]>,
+): Record<string, readonly string[]> {
+  const table: Record<string, readonly string[]> = {};
+  for (const key of withheld) {
+    if (publisherOnly.includes(key)) table[key] = [PUBLISHER_SERVICE];
+    else if (key === JACKSON_API_KEY) table[key] = [JACKSON_SERVICE];
+    else table[key] = Object.entries(binding).filter(([, vars]) => vars.includes(key)).map(([service]) => service).sort();
+  }
+  return table;
+}

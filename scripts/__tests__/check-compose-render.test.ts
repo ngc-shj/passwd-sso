@@ -41,6 +41,7 @@ import {
 const REPO_ROOT = resolve(__dirname, "../..");
 const FIXTURE_PATH = join(__dirname, "fixtures/compose-render/workers-render.json");
 const SET = "base+workers";
+const NOT_GIVEN = ", which is not given to this service";
 
 type Recorded = { composeVersion: string | null; set: string; withheld: string[]; render: ComposeRender };
 const recorded = JSON.parse(readFileSync(FIXTURE_PATH, "utf8")) as Recorded;
@@ -93,6 +94,7 @@ describe("analyzeRender", () => {
   it("names a service that loads .env and does not blank a withheld key", () => {
     expect(drift((r) => (env(r, "app").SENTRY_AUTH_TOKEN = sentinel("SENTRY_AUTH_TOKEN")))).toEqual([
       `[${SET}] app: SENTRY_AUTH_TOKEN is not blanked (loads .env, so it holds the .env value)`,
+      `[${SET}] app: holds withheld SENTRY_AUTH_TOKEN${NOT_GIVEN}`,
     ]);
   });
 
@@ -105,13 +107,13 @@ describe("analyzeRender", () => {
   it("names a publisher-only value reaching a service that loads .env, on both counts", () => {
     expect(drift((r) => (env(r, "app").AUDIT_ANCHOR_SIGNING_KEY = sentinel("AUDIT_ANCHOR_SIGNING_KEY")))).toEqual([
       `[${SET}] app: AUDIT_ANCHOR_SIGNING_KEY is not blanked (loads .env, so it holds the .env value)`,
-      `[${SET}] app: holds the publisher-only AUDIT_ANCHOR_SIGNING_KEY`,
+      `[${SET}] app: holds withheld AUDIT_ANCHOR_SIGNING_KEY${NOT_GIVEN}`,
     ]);
   });
 
   it("names a publisher-only value reaching a service that does not load .env", () => {
     expect(drift((r) => (env(r, "jackson").LEAK = sentinel("GITHUB_TOKEN")))).toEqual([
-      `[${SET}] jackson: holds the publisher-only GITHUB_TOKEN`,
+      `[${SET}] jackson: holds withheld GITHUB_TOKEN${NOT_GIVEN}`,
     ]);
   });
 
@@ -121,7 +123,7 @@ describe("analyzeRender", () => {
 
   it("names a role password in a service bound to another role", () => {
     expect(drift((r) => (env(r, "redis").LEAK = sentinel("PASSWD_APP_PASSWORD")))).toEqual([
-      `[${SET}] redis: holds PASSWD_APP_PASSWORD, bound to another service`,
+      `[${SET}] redis: holds withheld PASSWD_APP_PASSWORD${NOT_GIVEN}`,
     ]);
   });
 
@@ -136,8 +138,55 @@ describe("analyzeRender", () => {
       }),
     ).toEqual([
       `[${SET}] audit-outbox-worker: OUTBOX_WORKER_DATABASE_URL does not carry the password of its role (PASSWD_OUTBOX_WORKER_PASSWORD)`,
-      `[${SET}] audit-outbox-worker: holds PASSWD_SUPERUSER_PASSWORD, bound to another service`,
+      `[${SET}] audit-outbox-worker: holds withheld PASSWD_SUPERUSER_PASSWORD${NOT_GIVEN}`,
     ]);
+  });
+
+  it("names another principal's DB URL forwarded to app under a new name", () => {
+    expect(drift((r) => (env(r, "app").ADMIN_DB_URL = sentinel("MIGRATION_DATABASE_URL")))).toEqual([
+      `[${SET}] app: holds withheld MIGRATION_DATABASE_URL${NOT_GIVEN}`,
+    ]);
+  });
+
+  it("names a withheld value in a healthcheck and in a command", () => {
+    expect(
+      drift((r) => {
+        r.services.redis.healthcheck = { test: ["CMD-SHELL", `redis-cli -a ${sentinel("AUDIT_ANCHOR_TAG_SECRET")} ping`] };
+        r.services.app.command = ["sh", "-c", `echo ${sentinel("SENTRY_AUTH_TOKEN")}`];
+      }),
+    ).toEqual([
+      `[${SET}] app: holds withheld SENTRY_AUTH_TOKEN${NOT_GIVEN}`,
+      `[${SET}] redis: holds withheld AUDIT_ANCHOR_TAG_SECRET${NOT_GIVEN}`,
+    ]);
+  });
+
+  it("allows jackson its API key and db its role passwords (the unmutated render holds them)", () => {
+    const r = baseline();
+    expect(JSON.stringify(r.services.jackson)).toContain(sentinels.JACKSON_API_KEY.token);
+    for (const pw of ctx.binding.db) expect(JSON.stringify(r.services.db), pw).toContain(sentinels[pw].token);
+    expect(analyzeRender(SET, r, ctx)).toEqual([]);
+  });
+
+  it("names JACKSON_API_KEY in a service other than jackson", () => {
+    expect(drift((r) => (env(r, "redis").LEAK = sentinel("JACKSON_API_KEY")))).toEqual([`[${SET}] redis: holds withheld JACKSON_API_KEY${NOT_GIVEN}`]);
+  });
+
+  it("names a publisher whose own URL does not carry its role's password", () => {
+    expect(drift((r) => (env(r, "audit-anchor-publisher").AUDIT_ANCHOR_PUBLISHER_DATABASE_URL = "postgresql://passwd_anchor_publisher:x@db:5432/passwd_sso"))).toEqual([
+      `[${SET}] audit-anchor-publisher: AUDIT_ANCHOR_PUBLISHER_DATABASE_URL does not carry the password of its role (PASSWD_ANCHOR_PUBLISHER_PASSWORD)`,
+    ]);
+  });
+
+  it("names a verify worker whose own URL does not carry its role's password", () => {
+    expect(drift((r) => (env(r, "audit-chain-verify-worker").AUDIT_CHAIN_VERIFY_DATABASE_URL = "postgresql://passwd_audit_chain_verifier:x@db:5432/passwd_sso"))).toEqual([
+      `[${SET}] audit-chain-verify-worker: AUDIT_CHAIN_VERIFY_DATABASE_URL does not carry the password of its role (PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD)`,
+    ]);
+  });
+
+  it("names a verify worker that has gone through .env", () => {
+    const found = drift((r) => (env(r, "audit-chain-verify-worker").COMPOSE_RENDER_CANARY = CANARY_TOKEN));
+    expect(found).toContain(`[${SET}] audit-chain-verify-worker: loads .env`);
+    expect(found).toContain(`[${SET}] audit-chain-verify-worker: env names are not exactly AUDIT_CHAIN_VERIFY_DATABASE_URL, DATABASE_URL`);
   });
 
   it("names a worker whose own URL is blanked", () => {

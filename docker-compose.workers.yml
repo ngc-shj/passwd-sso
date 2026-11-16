@@ -35,14 +35,16 @@
 # reintroduces the app credential is caught.
 #
 # One .env, withheld per service. A service with `env_file: .env` receives every
-# key in it, so each such service lists the withheld set (every secret, the other
-# principals' DB URLs, the publisher-only credentials) with an empty value; the
-# one key it may hold is its own DB URL. `environment:` wins over `env_file:`, so
+# key in it, so each such service lists the withheld set W (the role passwords, the
+# other principals' DB URLs, the publisher-only credentials, the allowlist's other
+# secret keys) with an empty value; the one key it may hold is its own DB URL. `environment:` wins over `env_file:`, so
 # the container sees "". The publisher and the verify worker load no env_file:
 # they get exactly their own names, and the signing key reaches only the
 # publisher. The set is derived in scripts/checks/lib/withheld-env.ts and checked by
-# src/__tests__/infra/worker-deploy-parity.test.ts. A key from .env reaches a
-# service only by being blanked here or interpolated into it.
+# src/__tests__/infra/worker-deploy-parity.test.ts. A W key reaches only its
+# declared holders (withheldHolders there). App secrets the workers already shared
+# (AUTH_SECRET, REDIS_PASSWORD, SHARE_MASTER_KEY_*) are not in W and still reach
+# every service that loads .env.
 #
 # Do NOT combine this with docker-compose.override.yml in production — the dev
 # override exposes DB/Jackson/Redis ports to the host and runs the tsx source.

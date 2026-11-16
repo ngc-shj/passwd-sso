@@ -829,10 +829,13 @@ Destination keys, in `.env`; set the destinations in use and leave the rest empt
   host: an anchor on the disk an attacker can rewrite witnesses nothing.
 
 **Withheld keys.** `.env` is loaded by several containers, so each one that loads
-it lists the secrets and other principals' database URLs with an empty value
-(`environment:` wins over `env_file:`); the signing key, tag secret and
-`AUDIT_ANCHOR_AWS_*` reach the publisher alone, by interpolation. A key that was
-in `.env` therefore reaches another container only as a blank. In the dev
+it lists the withheld set with an empty value (`environment:` wins over
+`env_file:`): the role passwords, the other principals' database URLs, the
+publisher-only secrets and the remaining secret keys of the env allowlist. The
+signing key, tag secret and `AUDIT_ANCHOR_AWS_*` reach the publisher alone, by
+interpolation. A withheld key reaches only its declared holders; app secrets the
+workers already shared (`AUTH_SECRET`, `REDIS_PASSWORD`, `SHARE_MASTER_KEY_*`)
+are not in the set and still reach every container that loads `.env`. In the dev
 override the `.:/app` bind mount keeps `.env` readable, so there it is env-shape
 parity, not isolation. **`docker compose config` prints the interpolated
 secrets**, the signing key included: do not paste its output or run it where the

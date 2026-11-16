@@ -60,6 +60,7 @@ const WORKERS: ReadonlyArray<{
     // name it; a publisher run by hand has no container to stop.
     applicationName: "passwd-sso-audit-anchor-publisher",
     stop: "docker compose -f docker-compose.yml -f docker-compose.workers.yml stop audit-anchor-publisher (or stop the process you started by hand)",
+    restart: "docker compose -f docker-compose.yml -f docker-compose.workers.yml start audit-anchor-publisher",
   },
 ];
 

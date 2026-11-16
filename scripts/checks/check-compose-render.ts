@@ -9,8 +9,10 @@
  *   - a service that loads `.env` holds "" for every W key but its own DB URL
  *     (the stub `.env` carries a canary key, so loading is observed, not read
  *     from the YAML's spelling of `env_file`);
- *   - no service but the publisher holds a publisher-only sentinel, and a
- *     role-password sentinel appears only in the services bound to that role;
+ *   - every W sentinel, in any value of any service (command and healthcheck
+ *     included), appears only in the services withheldHolders() names for it:
+ *     a role password where bound, a publisher-only key in the publisher,
+ *     JACKSON_API_KEY in jackson, any other W key nowhere;
  *   - the publisher's rendered env passes auditAnchorPublisherEnvSchema and
  *     buildDestinationsFromEnv, the verify worker holds its URL and nothing
  *     else, and neither loads `.env`;
@@ -44,18 +46,20 @@ import {
   derivePublisherOnlyEnv,
   isDatabaseUrlKey,
   ownDatabaseUrlKey,
+  PUBLISHER_SERVICE,
   readSmokeMap,
   realRolePasswordInputs,
   realWithheldInputs,
   rolePasswordBinding,
   SHARED_PUBLISHER_NAME,
+  withheldHolders,
   workerServiceName,
   type SmokeMap,
 } from "./lib/withheld-env";
 
 const REPO_ROOT = resolve(fileURLToPath(import.meta.url), "../../..");
 
-const PUBLISHER = "audit-anchor-publisher";
+const PUBLISHER = PUBLISHER_SERVICE;
 const VERIFY_WORKER = "audit-chain-verify-worker";
 const RETENTION_GC = "retention-gc-worker";
 
@@ -221,7 +225,7 @@ export function analyzeRender(setName: string, render: ComposeRender, ctx: Analy
   const drift: string[] = [];
   const at = (service: string, message: string) => drift.push(`[${setName}] ${service}: ${message}`);
   const workers = workerBindings(ctx);
-  const passwordVars = ctx.binding.db ?? [];
+  const holders = withheldHolders(ctx.withheld, ctx.publisherOnly, ctx.binding);
   const canary = CANARY_TOKEN;
   const roleUrlDrift = (service: string, env: Record<string, string | null | undefined>) => {
     const w = workers[service];
@@ -250,14 +254,8 @@ export function analyzeRender(setName: string, render: ComposeRender, ctx: Analy
     if ((name === PUBLISHER || name === VERIFY_WORKER) && loadsEnv) at(name, "loads .env");
 
     const text = JSON.stringify(service);
-    if (name !== PUBLISHER) {
-      for (const key of ctx.publisherOnly) {
-        if (holds(text, ctx, key)) at(name, `holds the publisher-only ${key}`);
-      }
-    }
-    const allowed = new Set(ctx.binding[name] ?? []);
-    for (const pw of passwordVars) {
-      if (!allowed.has(pw) && holds(text, ctx, pw)) at(name, `holds ${pw}, bound to another service`);
+    for (const key of ctx.withheld) {
+      if (!(holders[key] ?? []).includes(name) && holds(text, ctx, key)) at(name, `holds withheld ${key}, which is not given to this service`);
     }
   }
 

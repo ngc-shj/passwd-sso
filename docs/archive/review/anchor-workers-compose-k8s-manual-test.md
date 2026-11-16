@@ -49,5 +49,22 @@ release's compose files. k8s: `kubectl delete -f infra/k8s/audit-anchor-publishe
 -f infra/k8s/audit-chain-verify-worker.yaml`. No schema change to revert.
 
 ## Status in this PR
-Not run: steps 1–7 need a disposable host/cluster (constraints E1, E2). The
-rendered-config equivalents of steps 2–4 run in CI via `check-compose-render.ts`.
+Run on 2026-11-16 (dev host, Docker Compose v5.0.2) in an isolated compose project
+(`-p anchor946smoke`, its own Postgres volume, no published ports, a stub env file
+with random throwaway values; the repo `.env` and the shared dev database were not
+used), with the image built from this branch:
+- Step 1: `db` healthy, `migrate` exited 0 on the fresh volume; the publisher
+  logged `destinations ready` then `audit-anchor-publisher.cadence_healthy`
+  (it connected as `passwd_anchor_publisher` and read the chain); the verify
+  worker logged `starting (tick=3600000ms)` and an
+  `audit-chain-verify-heartbeat` with `tenantCount` 1, `verifiedTenantCount` 1,
+  `erroredTenantCount` 0 (the read-only role works end to end).
+- Steps 2–3 (publisher/verifier containers): uid 1001; signing key length 64 in
+  the publisher, 0 in the verifier; `DATABASE_URL` empty in both. The `app` and
+  `.env`-loading workers were not started; their blanks are covered by
+  `check-compose-render.ts` on the rendered config.
+- Step 5: `StopTimeout` 120; `up -d --force-recreate audit-anchor-publisher`
+  recreated the single container (old stopped before the new one started).
+- Not run: step 4 as a real `up` (covered by the render check's `:?` cases),
+  step 6 (no legacy volume), step 7 (no cluster — E1).
+

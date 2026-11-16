@@ -35,6 +35,7 @@ import {
   realWithheldInputs,
   rolePasswordBinding,
   roleUserFromComposeUrl,
+  withheldHolders,
   workerServiceName,
   type SmokeMap,
   type SmokeTask,
@@ -294,6 +295,14 @@ function references(value: string): Array<{ name: string; rest: string | null }>
   );
 }
 
+/** Every string under `node`, at any depth. */
+function stringValues(node: unknown): string[] {
+  if (typeof node === "string") return [node];
+  if (Array.isArray(node)) return node.flatMap(stringValues);
+  if (isRecord(node)) return Object.values(node).flatMap(stringValues);
+  return [];
+}
+
 function mergedEnv(fragments: Fragment[]): Record<string, EnvState> {
   return Object.assign({}, ...fragments.map((f) => f.env));
 }
@@ -440,15 +449,19 @@ function composeDrift(model: ComposeModel, ctx: Ctx, workersText: string): strin
     }
   }
 
-  // Publisher-only names appear in no other service's values; role passwords only where bound.
-  for (const [service, fragments] of services) {
-    for (const f of fragments) {
-      for (const [key, state] of Object.entries(f.env)) {
-        if (state.kind !== "value") continue;
-        for (const r of references(state.value)) {
-          if (service !== "audit-anchor-publisher" && ctx.publisherOnly.includes(r.name)) drift.push(`${service}: ${key} references publisher-only ${r.name}`);
-          if (/^PASSWD_/.test(r.name) && !(ctx.passwordBinding[service] ?? []).includes(r.name)) {
-            drift.push(`${service}: ${key} references ${r.name}, not bound to this service`);
+  // A W key is referenced only by the services withheldHolders() names for it, in any
+  // string of the service (environment, command, healthcheck, labels, ...), by any
+  // interpolation form.
+  const holders = withheldHolders(ctx.withheld, ctx.publisherOnly, ctx.passwordBinding);
+  for (const file of sortStrings(Object.keys(model))) {
+    const doc = model[file] as { services?: Record<string, unknown> };
+    for (const [service, spec] of Object.entries(doc.services ?? {})) {
+      for (const [field, value] of Object.entries(spec as Record<string, unknown>)) {
+        for (const text of stringValues(value)) {
+          for (const r of references(text)) {
+            if (Object.hasOwn(holders, r.name) && !holders[r.name].includes(service)) {
+              drift.push(`${service}: ${file} ${field} references withheld ${r.name}, which is not given to this service`);
+            }
           }
         }
       }
@@ -988,15 +1001,50 @@ describe("compose: I1.4 services loading .env blank the withheld set", () => {
     ]);
   });
 
+  const NOT_GIVEN = "which is not given to this service";
+
   it("flags a publisher-only name and an unbound role password in another service's value", () => {
     const m = mutated(compose.model, (c) => {
       asList(svc(c, "docker-compose.yml", "app")).push("X=${AUDIT_ANCHOR_TAG_SECRET}");
       (svc(c, "docker-compose.yml", "jackson").environment as Record<string, string>).Y = "${PASSWD_APP_PASSWORD}";
     });
     expect(composeDrift(m, ctx, compose.workersText)).toEqual([
-      "app: X references publisher-only AUDIT_ANCHOR_TAG_SECRET",
-      "jackson: Y references PASSWD_APP_PASSWORD, not bound to this service",
+      `app: docker-compose.yml environment references withheld AUDIT_ANCHOR_TAG_SECRET, ${NOT_GIVEN}`,
+      `jackson: docker-compose.yml environment references withheld PASSWD_APP_PASSWORD, ${NOT_GIVEN}`,
     ]);
+  });
+
+  it("flags another principal's DB URL forwarded under a new name, whichever the interpolation form", () => {
+    for (const ref of ["${MIGRATION_DATABASE_URL}", "$MIGRATION_DATABASE_URL", "${MIGRATION_DATABASE_URL:-x}", "${MIGRATION_DATABASE_URL:?m}"]) {
+      const m = mutated(compose.model, (c) => asList(svc(c, "docker-compose.yml", "app")).push(`ADMIN_DB_URL=${ref}`));
+      expect(composeDrift(m, ctx, compose.workersText), ref).toEqual([
+        `app: docker-compose.yml environment references withheld MIGRATION_DATABASE_URL, ${NOT_GIVEN}`,
+      ]);
+    }
+  });
+
+  it("flags a withheld reference in a command and in a healthcheck", () => {
+    const m = mutated(compose.model, (c) => {
+      svc(c, "docker-compose.yml", "app").command = ["sh", "-c", "echo ${SENTRY_AUTH_TOKEN}"];
+      svc(c, "docker-compose.yml", "redis").healthcheck = { test: ["CMD-SHELL", "redis-cli -a ${AUDIT_ANCHOR_SIGNING_KEY} ping"] };
+    });
+    expect(composeDrift(m, ctx, compose.workersText)).toEqual([
+      `app: docker-compose.yml command references withheld SENTRY_AUTH_TOKEN, ${NOT_GIVEN}`,
+      `redis: docker-compose.yml healthcheck references withheld AUDIT_ANCHOR_SIGNING_KEY, ${NOT_GIVEN}`,
+    ]);
+  });
+
+  it("allows jackson its API key and db every role password", () => {
+    const m = mutated(compose.model, (c) => {
+      (svc(c, "docker-compose.yml", "jackson").environment as Record<string, string>).Z = "${JACKSON_API_KEY}";
+      for (const pw of ctx.passwordBinding.db) (svc(c, "docker-compose.yml", "db").environment as Record<string, string>)[`COPY_${pw}`] = `\${${pw}}`;
+    });
+    expect(composeDrift(m, ctx, compose.workersText)).toEqual([]);
+  });
+
+  it("flags JACKSON_API_KEY given to a service other than jackson", () => {
+    const m = mutated(compose.model, (c) => asList(svc(c, "docker-compose.yml", "app")).push("K=${JACKSON_API_KEY}"));
+    expect(composeDrift(m, ctx, compose.workersText)).toEqual([`app: docker-compose.yml environment references withheld JACKSON_API_KEY, ${NOT_GIVEN}`]);
   });
 });
 

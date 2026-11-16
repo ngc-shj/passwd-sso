@@ -60,8 +60,9 @@ rendered environment, which covers every `env_file` spelling without parsing it.
 The entrypoint list also carried stale `Dockerfile:` / override line numbers.
 
 ## Carried items
-- R35 manual-test plan: `anchor-workers-compose-k8s-manual-test.md`; the real `up`
-  (SC2/E2) and cluster apply (SC1/E1) remain unrun.
+- R35 manual-test plan: `anchor-workers-compose-k8s-manual-test.md`. A real `up` of the
+  two services ran in an isolated compose project (own volume, stub env), so SC2 is
+  resolved without touching the shared dev DB; the cluster apply (SC1/E1) remains unrun.
 
 ## D13 — Helpers live in `scripts/checks/lib/`, not `scripts/lib/`
 The plan placed `hcl-subset.ts` and `withheld-env.ts` in `scripts/lib/`, which
@@ -88,3 +89,16 @@ Full `npx vitest run`: 6 failures, all in `scripts/__tests__/backup-db.test.mjs`
 Group B (no `pg_restore` on this host; compose fallback from a worktree finds no
 `db` service) — pre-existing environment limitation, untouched by this change.
 `npx next build`: pass.
+
+## D16 — Phase 2 self-R-check fixes
+- R42 (security): both gates now judge every W value in any field of any service
+  against one `withheldHolders()` table (was: name-only for W keys, substring only
+  for publisher-only and role-password sentinels).
+- R49 (security): compose header and deployment.md state what is enforced; app
+  secrets the workers already shared (AUTH_SECRET, REDIS_PASSWORD,
+  SHARE_MASTER_KEY_*) are named as not covered.
+- RT7 (testing): deny cases for `roleUrlDrift` at both call sites and for the
+  verify worker loading `.env`.
+- R3 (functionality): setup.ts gains the publisher `restart` hint.
+- R32 (functionality): real boot of both services in an isolated compose project
+  (manual-test.md "Status in this PR").

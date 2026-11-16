@@ -1,4 +1,4 @@
-# Plan: anchor-workers-compose-k8s (issue #946)
+# Plan: anchor-workers-compose-k8s (issue `#946`)
 
 Branch: `feat/anchor-workers-compose-k8s` (cut from `origin/main` 27968fb28).
 Revision 7 (after plan-review rounds 1-6; dispositions in `-review.md`).
