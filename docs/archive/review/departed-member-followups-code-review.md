@@ -82,7 +82,8 @@ RT10 T-1/T-4 · RT11 OK
   - Worst case: a future `team-departure.ts` template holding two statements, one deactivating and one
     clearing, is covered without `endTeamMemberships`, and a departure leaves memberships active.
   - Likelihood: low — every writer there is one statement per template; the `departureWriters` pin (3)
-    fails on a fourth writer, and the integration suites assert that departures end memberships.
+    fails on a fourth writer, but not on an existing template edited into two statements; the
+    integration suites asserting that departures end memberships are the backstop for that edit.
   - Cost to fix: splitting templates by statement (the SQL lexer) inside the gate — the analyser growth
     the issue asked not to repeat; the database form is `#1060`.
 - **Orchestrator sign-off**: acceptable-risk quantified; owner `#1060`.
@@ -106,3 +107,32 @@ RT10 T-1/T-4 · RT11 OK
     no-audit cell (red-proved in Phase 2).
   - Likelihood: n/a. Cost to fix: a duplicate cell.
 - **Orchestrator sign-off**: reviewer marked it optional.
+
+---
+
+# Round 2
+Date: 2026-11-16
+Review round: 2 (incremental, the review(1) commit)
+
+## Changes from Previous Round
+S1, T-1, T-2, T-3 resolved; S2, S3 accepted (owner `#1060`); T-4 skipped.
+
+## Findings
+- Functionality: No findings (the `callsIn` cover, D4 and D7 verified against the code).
+- Testing: No findings (the new cells discriminate and are paired).
+- Security: S1 resolved; S2/S3 accepted. **N1 Minor (R49, docs)** — S2's likelihood line overstated
+  what the `departureWriters` pin catches (an existing template edited into two statements keeps the
+  count). Applied below.
+
+## Recurring Issue Check (round 2)
+All three experts: R1–R57 (+RS1–RS6 / RT1–RT11) clean or not triggered; R49 N1 (docs).
+
+## Tightening-only skip — Round 2
+Findings applied directly (no Round 3 review):
+- [N1] [Minor] S2 likelihood overstated the pin — `departed-member-followups-code-review.md` (S2 entry) — applied verbatim
+Justification: scoped within the Round 1 resolution text, review-log wording only, no code and no
+security-boundary touch.
+
+## Termination
+Functionality and Testing returned "No findings" in round 2; Security's only finding was review-log
+wording, applied under the tightening-only skip. No R42 class expanded twice in this review.
