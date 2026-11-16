@@ -848,6 +848,8 @@ describe("POST /api/teams/[teamId]/members", () => {
       createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(409);
+    // The create that raced wrote nothing, so neither does its audit.
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 
   it("re-throws P2002 with no meta.target (unknown constraint)", async () => {

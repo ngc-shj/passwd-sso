@@ -355,6 +355,9 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.role).toBe(TEAM_ROLE.OWNER);
+    expect(mockPrismaTeamMember.findUniqueOrThrow).toHaveBeenCalledWith(
+      expect.objectContaining({ select: expect.objectContaining({ admittedAt: true }) }),
+    );
     // Actor should be demoted to ADMIN, the target promoted — each only
     // while still an active member, under the team lock.
     expect(mockPrismaTeamMember.updateMany).toHaveBeenCalledWith({

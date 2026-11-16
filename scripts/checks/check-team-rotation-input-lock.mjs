@@ -1159,7 +1159,8 @@ function checkDepartureClasses(sourceFile, path) {
   const tenantStateSite = (node, site, create, nulls) => {
     const fn = enclosingFunction(node);
     if (inDeparture) {
-      const ok = nulls || (fn !== null && callsAfter(fn, END_MEMBERSHIPS, node.getStart()));
+      // A call in the function's own body: one nested in a callback it may never run does not count.
+      const ok = nulls || (fn !== null && callsIn(fn).some((c) => END_MEMBERSHIPS.has(calleeName(c)) && c.getStart() > node.getStart()));
       sites.push({ rule: "departureWriters", key: keyOf("departure-writer", path, node, site), line: lineOf(path, node), ok });
       return;
     }

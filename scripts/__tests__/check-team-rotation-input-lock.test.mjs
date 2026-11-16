@@ -410,6 +410,21 @@ export async function other(tx) { await endTeamMemberships(tx, t, [u], options);
       expectDenied(run({ departureWriters: 1 }), SITE);
     });
 
+    it("refuses an endTeamMemberships call nested in a callback of the writer's function", () => {
+      write(DEPARTURE, `export async function off(tx) { ${rawOff} const later = async () => { await endTeamMemberships(tx, t, [u], options); }; }`);
+      expectDenied(run({ departureWriters: 1 }), SITE);
+    });
+
+    it("refuses a Prisma upsert whose create arm deactivates, with no later endTeamMemberships", () => {
+      write(DEPARTURE, `export async function off(tx) { await tx.tenantMember.upsert({ where, create: { deactivatedAt: new Date() }, update: {} }); }`);
+      expectDenied(run({ departureWriters: 1 }), /departure-writer::src\/lib\/team\/team-departure\.ts::off::tenantMember\.upsert/);
+    });
+
+    it("accepts a Prisma upsert whose update arm clears deactivatedAt without the call", () => {
+      write(DEPARTURE, `export async function back(tx) { await tx.tenantMember.upsert({ where, create: { role }, update: { deactivatedAt: null } }); }`);
+      expect(run({ departureWriters: 1 }).code).toBe(0);
+    });
+
     it("refuses a Prisma deactivating write with no later endTeamMemberships", () => {
       write(DEPARTURE, `export async function off(tx) { await tx.tenantMember.update({ where: { id }, data: { deactivatedAt: new Date() } }); }`);
       expectDenied(run({ departureWriters: 1 }), /departure-writer::src\/lib\/team\/team-departure\.ts::off::tenantMember\.update/);
