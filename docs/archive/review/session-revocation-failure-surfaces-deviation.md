@@ -90,3 +90,12 @@ This leaves no revocation gap:
 - The C9 migration's consumption of such a code therefore removes nothing usable.
 
 Aligning the whole route to the active membership belongs to the owning-column work (`resolveOwningTenantIdFromClient` adoption, `tenant-domain measure/backfill-owning-column`). It changes that route's policy and audit tenant and is not a revocation change. No edit is made in this PR.
+
+## D11: TEAM_MEMBER_REMOVE commits with the removal (handoff from #1062)
+#1062 moved the members POST, invitations POST and member PUT audits into their transactions and pinned them in `check-critical-audit-atomic`. Its session handed the member DELETE to this branch, because this branch rewrites that handler.
+
+The DELETE now writes `TEAM_MEMBER_REMOVE` with `logAuditInTx` inside the removal's transaction, after the revocation, carrying `removedUserId`, `removedRole` and the revocation counts. The action is in `CRITICAL_ACTIONS` and in `IN_TX_ONLY_ACTIONS` (pinned at 1 emitter, async emits refused), and the gate self-test fixture lists it.
+
+`cacheTombstoneFailures` is no longer in this row. It is known only after the commit, so it is reported by the tombstone helper's error log and Sentry signal (C5). A second audit row for it was not added: it would need a new audit action (R12 surface) to say what the helper's on-call signal already says.
+
+The merge with origin/main (#1062) was resolved in `check-team-rotation-input-lock.mjs` and its self-test (rule 9 coexists with #1062's departureWriters / tenant-row-delete classes; no renumbering), in `check-bypass-rls.mjs` (both allowlist entries) and in the member route test.

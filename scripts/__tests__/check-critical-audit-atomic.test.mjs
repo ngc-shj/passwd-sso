@@ -67,10 +67,12 @@ const ALL = [
   "TEAM_MEMBER_ADD",
   "TEAM_MEMBER_INVITE",
   "TEAM_ROLE_UPDATE",
+  // session-revocation-failure-surfaces.
+  "TEAM_MEMBER_REMOVE",
 ];
 
 // Must match IN_TX_ONLY_ACTIONS in the gate: action -> pinned direct logAuditInTx count.
-const PINS = { TEAM_MEMBER_ADD: 1, TEAM_MEMBER_INVITE: 1, TEAM_ROLE_UPDATE: 2 };
+const PINS = { TEAM_MEMBER_ADD: 1, TEAM_MEMBER_INVITE: 1, TEAM_ROLE_UPDATE: 2, TEAM_MEMBER_REMOVE: 1 };
 // An action outside PINS, which the revert/missing cells take away and put back
 // in another form.
 const LAST = "TEAM_ENTRY_REKEY";

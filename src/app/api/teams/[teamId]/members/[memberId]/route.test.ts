@@ -1273,6 +1273,7 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
       ),
     ).rejects.toThrow("revocation failed");
     expect(mockLogAudit).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
     expect(mockTombstoneRevokedSessions).not.toHaveBeenCalled();
   });
 
@@ -1288,10 +1289,11 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
     expect(res.status).toBe(409);
     expect((await res.json()).error).toBe("CONFLICT");
     expect(mockLogAudit).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
     expect(mockTombstoneRevokedSessions).not.toHaveBeenCalled();
   });
 
-  it("tombstones the revoked sessions after the commit and records the counts in the audit metadata", async () => {
+  it("records the removal and its revocation counts in the removal's transaction, then tombstones after the commit", async () => {
     mockPrismaTeamMember.findUnique.mockResolvedValue(removableTarget);
     mockRevokeUserAuthArtifactsInTx.mockImplementationOnce(async (_tx: unknown, userId: string) => ({
       counts: { sessions: 2, extensionTokens: 1, apiKeys: 0 },
@@ -1305,25 +1307,34 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
     );
 
     expect(res.status).toBe(200);
-    expect(mockTombstoneRevokedSessions).toHaveBeenCalledWith(
-      ["digest-of-target-user-1", "digest-of-target-user-2"],
-      { reason: "team_member_remove", operation: "team member removal", userId: "target-user" },
-    );
-    expect(mockCommit.mock.invocationCallOrder.at(-1)).toBeLessThan(
-      mockTombstoneRevokedSessions.mock.invocationCallOrder[0]!,
-    );
-    expect(mockLogAudit).toHaveBeenCalledWith(
+    expect(mockLogAuditInTx).toHaveBeenCalledWith(
+      txSentinel.current,
+      "tenant-1",
       expect.objectContaining({
         action: "TEAM_MEMBER_REMOVE",
+        targetType: "TeamMember",
+        targetId: MEMBER_ID,
         metadata: {
           removedUserId: "target-user",
           removedRole: TEAM_ROLE.MEMBER,
           sessions: 2,
           extensionTokens: 1,
           apiKeys: 0,
-          cacheTombstoneFailures: 1,
         },
       }),
+    );
+    // In the transaction, after the revocation whose counts it records.
+    expect(mockRevokeUserAuthArtifactsInTx.mock.invocationCallOrder[0]).toBeLessThan(
+      mockLogAuditInTx.mock.invocationCallOrder.at(-1)!,
+    );
+    expect(mockLogAuditInTx.mock.invocationCallOrder.at(-1)).toBeLessThan(mockCommit.mock.invocationCallOrder.at(-1)!);
+    expect(mockLogAudit).not.toHaveBeenCalled();
+    expect(mockTombstoneRevokedSessions).toHaveBeenCalledWith(
+      ["digest-of-target-user-1", "digest-of-target-user-2"],
+      { reason: "team_member_remove", operation: "team member removal", userId: "target-user" },
+    );
+    expect(mockCommit.mock.invocationCallOrder.at(-1)).toBeLessThan(
+      mockTombstoneRevokedSessions.mock.invocationCallOrder[0]!,
     );
   });
 });
