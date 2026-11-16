@@ -63,5 +63,10 @@
     "disposition": "active-membership",
     "reason": "loadGroupMembers requires an active membership in the tenant as a relation filter; the same restriction as the Groups route entry.",
     "calls": 1
+  },
+  "src/lib/tenant/member-containment.ts": {
+    "disposition": "caller-bypass",
+    "reason": "listMemberContainment's only caller, GET api/tenant/members/[userId]/passkeys, runs it inside withBypassRls(TENANT_MEMBER_PASSKEY_LIST), whose grant includes user, and hands it that transaction; the pending resets' targetUser is read there.",
+    "calls": 1
   }
 }
