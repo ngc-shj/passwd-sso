@@ -600,19 +600,26 @@ describe("tombstoneRevokedSessions", () => {
     await tombstoneRevokedSessions(["a"], {
       reason: "directory_sync_deprovision",
       operation: "directory sync",
-      extra: { tenantId: "t", configId: "c", failures: 99, _logType: "other" },
+      userId: "u",
+      extra: { tenantId: "t", configId: "c", userId: "spoofed", failures: 99, _logType: "other" },
     });
 
     expect(mockLoggerError).toHaveBeenCalledWith(
       {
         tenantId: "t",
         configId: "c",
+        userId: "u",
         failures: 1,
         reason: "directory_sync_deprovision",
         _logType: "session.cache_tombstone_failures",
       },
       "session.cache_tombstone_failures",
     );
+    expect(mockSentryCaptureMessage).toHaveBeenCalledWith("session cache tombstone failures during directory sync", {
+      level: "error",
+      tags: { reason: "directory_sync_deprovision" },
+      extra: { tenantId: "t", configId: "c", userId: "u", failures: 1, _logType: "other" },
+    });
   });
 
   it("tags a missing reason as unspecified and logs it as null", async () => {

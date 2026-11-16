@@ -141,6 +141,9 @@ async function writeSyncError(
 /** The users one departure or return call transitioned, and what it revoked for them. */
 type RevokingTransition = { userIds: string[]; revocation: DepartureRevocation };
 
+/** Per list: a large deprovisioning run must not turn one log line into an unbounded one. */
+const REVOKED_USER_IDS_LOG_CAP = 100;
+
 /**
  * After a run's departures and returns committed (their revocations with
  * them): evict the revoked sessions from the session cache, and log what was
@@ -165,12 +168,18 @@ async function reportRevocations(
     transitions.flatMap((t) => t.revocation.sessionTokens),
     { reason: "directory_sync_deprovision", operation: "directory sync", extra: { tenantId, configId } },
   );
+  const departedUserIds = departures.flatMap((t) => t.userIds);
+  const returnedUserIds = returns.flatMap((t) => t.userIds);
   getLogger().info(
     {
       tenantId,
       configId,
-      departedUserIds: departures.flatMap((t) => t.userIds),
-      returnedUserIds: returns.flatMap((t) => t.userIds),
+      departedUserIds: departedUserIds.slice(0, REVOKED_USER_IDS_LOG_CAP),
+      returnedUserIds: returnedUserIds.slice(0, REVOKED_USER_IDS_LOG_CAP),
+      departedUserCount: departedUserIds.length,
+      returnedUserCount: returnedUserIds.length,
+      userIdsTruncated:
+        departedUserIds.length > REVOKED_USER_IDS_LOG_CAP || returnedUserIds.length > REVOKED_USER_IDS_LOG_CAP,
       ...counts,
       cacheTombstoneFailures,
     },

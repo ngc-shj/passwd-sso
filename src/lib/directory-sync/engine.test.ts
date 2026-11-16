@@ -847,6 +847,9 @@ describe("runDirectorySync", () => {
           configId: CONFIG_ID,
           departedUserIds: expect.arrayContaining(["user-a", "user-b"]),
           returnedUserIds: [],
+          departedUserCount: 2,
+          returnedUserCount: 0,
+          userIdsTruncated: false,
           sessions: 2,
           extensionTokens: 4,
           apiKeys: 0,
@@ -854,6 +857,77 @@ describe("runDirectorySync", () => {
         },
         "directory-sync.credentials-revoked",
       );
+    });
+
+    /** A run in which `count` mapped members vanished from the provider. */
+    async function runWithVanishedMembers(count: number) {
+      setupAcquiredLock();
+      setupTransaction();
+      mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
+      mockFetchOktaUsers.mockResolvedValue([]);
+      const ids = Array.from({ length: count }, (_, i) => `user-${String(i).padStart(3, "0")}`);
+      mockScimMapping.findMany.mockResolvedValue(ids.map((id) => ({ externalId: `ext-${id}`, internalId: id })));
+      mockTenantMember.findMany.mockResolvedValue(ids.map((id) => makeMember({ id: `member-${id}`, userId: id })));
+      setApplyTx(makeApplyTx({
+        tenantMember: { findMany: vi.fn().mockResolvedValue([]), create: vi.fn(), update: vi.fn(), updateMany: vi.fn().mockResolvedValue({ count }) },
+      }));
+      const result = await runDirectorySync({ ...BASE_OPTIONS, force: true });
+      expect(result.success).toBe(true);
+      const call = mockLoggerInfo.mock.calls.find(([, message]) => message === "directory-sync.credentials-revoked");
+      expect(call).toBeDefined();
+      return { ids, fields: call![0] as Record<string, unknown> };
+    }
+
+    it("logs every departed user id when there are exactly 100, not truncated", async () => {
+      const { ids, fields } = await runWithVanishedMembers(100);
+
+      expect([...(fields.departedUserIds as string[])].sort()).toEqual(ids);
+      expect(fields).toMatchObject({ departedUserCount: 100, returnedUserCount: 0, userIdsTruncated: false });
+    });
+
+    it("caps the logged departed user ids at 100 and marks the line truncated past that", async () => {
+      const { ids, fields } = await runWithVanishedMembers(101);
+
+      const logged = fields.departedUserIds as string[];
+      expect(logged).toHaveLength(100);
+      expect(new Set(logged).size).toBe(100);
+      for (const id of logged) expect(ids).toContain(id);
+      expect(fields).toMatchObject({ departedUserCount: 101, returnedUserCount: 0, userIdsTruncated: true });
+    });
+
+    it("caps the logged returned user ids at 100 and marks the line truncated past that", async () => {
+      setupAcquiredLock();
+      setApplyTx(makeApplyTx({
+        tenantMember: {
+          findMany: vi.fn().mockResolvedValue([]),
+          create: vi.fn(),
+          update: vi.fn().mockResolvedValue({}),
+          updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        },
+      }));
+      mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
+      const ids = Array.from({ length: 101 }, (_, i) => `user-${String(i).padStart(3, "0")}`);
+      const email = (id: string) => `${id}@example.com`;
+      mockFetchOktaUsers.mockResolvedValue(
+        ids.map((id) => makeOktaUser({ id: `ext-${id}`, email: email(id), displayName: id, status: "ACTIVE" })),
+      );
+      mockScimMapping.findMany.mockResolvedValue(ids.map((id) => ({ externalId: `ext-${id}`, internalId: id })));
+      mockTenantMember.findMany.mockResolvedValue(
+        ids.map((id) => makeMember({ id: `member-${id}`, userId: id, role: "MEMBER", deactivatedAt: new Date("2025-01-01"), email: email(id), name: id })),
+      );
+      mockGuardUserFindMany.mockResolvedValue(ids.map((id) => ownershipRow(id, email(id), TENANT_ID)));
+
+      const result = await runDirectorySync(BASE_OPTIONS);
+
+      expect(result.success).toBe(true);
+      const call = mockLoggerInfo.mock.calls.find(([, message]) => message === "directory-sync.credentials-revoked");
+      expect(call).toBeDefined();
+      const fields = call![0] as Record<string, unknown>;
+      const logged = fields.returnedUserIds as string[];
+      expect(logged).toHaveLength(100);
+      expect(new Set(logged).size).toBe(100);
+      for (const id of logged) expect(ids).toContain(id);
+      expect(fields).toMatchObject({ departedUserIds: [], departedUserCount: 0, returnedUserCount: 101, userIdsTruncated: true });
     });
 
     it("tombstones and logs nothing when the run departed nobody", async () => {

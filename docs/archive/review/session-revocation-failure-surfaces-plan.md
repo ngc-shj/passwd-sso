@@ -219,6 +219,22 @@ All deltas are recorded in the deviation log.
   - harness (round-5 T-R5-2): `scripts/__tests__/check-team-rotation-input-lock.test.mjs` seeds the pinned rule-9 sites and the `auth.ts` migration shape. Each red **adds** its write to the seeded file rather than replacing it, and asserts its own rule-9 violation text, so a red cannot pass on "missing expected site".
   - allow: the `returnToTenant` shape (`SET deactivated_at = NULL … WHERE … deactivated_at IS NOT NULL`), and the SCIM-POST shape outside the IMPLEMENTATIONS files (a conditional `deactivatedAt` create followed by `departCreatedMembership`). The latter passes rule 9 and still fails rule 2 without the `departCreatedMembership` call.
 
+### C9: one-time revocation of pre-change residue (code-review round-2 F5/S3)
+
+Before this change, a directory-sync departure revoked nothing, and a SCIM or team departure whose post-commit revocation failed only logged the failure. Both left live credentials filed under a tenant the user had left. D8's return-time revocation covers only a return to that same tenant. Every other admission still revives them: a SCIM POST or directory-sync create of the existing user, an SSO sign-in's row-4 upsert, or an active membership in another tenant (the proxy session gate checks "active anywhere"). From this release on, every membership end revokes atomically (C2, C8 rule 9), so the residue is finite and is removed once:
+
+- Migration `20261116200000_revoke_departed_member_credential_residue`, a single `-- BEGIN BACKFILL departed-member-credential-residue` DO block.
+- Residue: a row of the ten models `revokeUsersAuthArtifactsInTx` covers whose `(user, tenant_id)` has no `tenant_members` row with `deactivated_at IS NULL`. The user is `subject_user_id` for operator tokens. Same semantics as the helper: sessions are deleted, tokens and delegation sessions get `revoked_at`, bridge and authorization codes get `used_at`. Only rows still unrevoked or unused are written, so a second run changes nothing. A row with a NULL user (a service account's or client's MCP grant) is not touched.
+- Invariant it relies on, verified per mint site:
+  - Sessions take `resolveOwningTenantIdFromClient` (auth-adapter `createSession`, passkey verify), or are moved with the membership (bootstrap migration).
+  - Extension and iOS tokens, API keys, delegations, mobile bridge codes and operator tokens take the active-membership tenant (`withUserTenantRls` / `resolveUserTenantId` / `requireTenantPermission`), or the tenant of an active-membership-checked parent row.
+  - MCP codes and tokens take the active-membership tenant at consent, then their parent row's tenant.
+  - Every mint stamps the tenant of the user's one active membership (`tenant_members_one_active_per_user`), except where the user is active nowhere. That exception is `owningTenantOf`'s `User.tenantId` fallback, and the extension bridge code, which stamps the column. A credential stamped there is refused at use: the proxy gate refuses a user active nowhere, and the C13 membership check refuses an extension token outside the user's active tenant. So no row the migration revokes is one that still works.
+- Concurrency: first the credential lock (`user-auth:<id>`, `lockUsersAuthArtifacts`' statement and order) of every user holding unexpired residue. A concurrent refresh or code exchange of a residue row therefore either committed first, and its new row is revoked, or finds its proof gone.
+- Session cache: no tombstone. The auth gate never caches a user active nowhere, and any other entry expires within `SESSION_CACHE_TTL_MS`.
+- Out of scope: binding `Session.tenantId` in the auth gate.
+- Test: `src/__tests__/db-integration/session-revocation-residue-migration.integration.test.ts` runs the block as `passwd_app` in a rolled-back transaction. It seeds residue for all ten models under tenant A for a user deactivated in A (and active in B) and for a user with no A row. The controls are that user's artifacts in B, an active member's artifacts in A and a service account's MCP rows. A second run reports zero for every model.
+
 ### Forbidden patterns
 
 - `pattern: invalidateUserSessions\( — reason: must not appear in scim/v2/Users/[id]/route.ts or teams/[teamId]/members/[memberId]/route.ts`
@@ -333,6 +349,7 @@ Both `npx vitest run` and `npm run test:integration` must exit 0. Each new test 
 | C6  | Response semantics                                          | locked |
 | C7  | admin-reset revokes before the token is spent               | locked |
 | C8  | AST gate rule 9: a membership end revokes in its function   | locked |
+| C9  | One-time revocation of pre-change residue (round-2 F5/S3)   | locked |
 
 ## Implementation Checklist
 

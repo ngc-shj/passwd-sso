@@ -332,7 +332,7 @@ export async function tombstoneRevokedSessions(
   Sentry.captureMessage(`session cache tombstone failures during ${context.operation}`, {
     level: "error",
     tags: { reason: context.reason ?? "unspecified" },
-    extra: { ...userField, failures, ...context.extra },
+    extra: { ...context.extra, ...userField, failures },
   });
   return failures;
 }

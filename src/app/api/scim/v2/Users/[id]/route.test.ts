@@ -27,7 +27,13 @@ const {
   mockScimExternalMapping: { findFirst: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
   mockTeamMemberKey: { deleteMany: vi.fn() },
   mockTransaction: vi.fn(),
-  mockWithTenantRls: vi.fn(async (prisma: unknown, _tenantId: string, fn: (tx: unknown) => unknown) => fn(prisma)),
+  // The route's tenant context is the outermost transaction: the service's
+  // `$transaction` joins it in production, so its commit is here.
+  mockWithTenantRls: vi.fn(async (prisma: unknown, _tenantId: string, fn: (tx: unknown) => unknown) => {
+    const result = await fn(prisma);
+    mockCommit();
+    return result;
+  }),
   // The reactivation guard's reads live on their OWN client: it resolves the
   // SCIM id and reads the active-membership set in one bypass, and handing it the
   // shared prisma mock would consume from the `mockResolvedValueOnce` sequences
@@ -38,7 +44,7 @@ const {
   // SCIM DELETE's revocation, inside deactivateScimUser's transaction.
   mockRevokeUserAuthArtifactsInTx: vi.fn(),
   mockTombstoneRevokedSessions: vi.fn(),
-  // Called by the transaction doubles once their callback resolved: the commit.
+  // Called by the tenant-context double once its callback resolved: the commit.
   mockCommit: vi.fn(),
   mockLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
@@ -170,6 +176,18 @@ function makeReq(options: { method?: string; body?: unknown } = {}) {
     init.headers = { "content-type": "application/json" };
   }
   return new NextRequest("http://localhost/api/scim/v2/Users/user-1", init as ConstructorParameters<typeof NextRequest>[1]);
+}
+
+/**
+ * The tombstone follows the commit of the transaction holding `transition`:
+ * the first commit after that call, not merely some earlier one.
+ */
+function expectTombstoneAfterCommitFollowing(transition: { mock: { invocationCallOrder: number[] } }) {
+  const transitionOrder = transition.mock.invocationCallOrder[0];
+  expect(transitionOrder).toBeDefined();
+  const commit = mockCommit.mock.invocationCallOrder.find((order) => order > transitionOrder!);
+  expect(commit).toBeDefined();
+  expect(commit!).toBeLessThan(mockTombstoneRevokedSessions.mock.invocationCallOrder[0]!);
 }
 
 describe("GET /api/scim/v2/Users/[id]", () => {
@@ -842,7 +860,6 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
           create: mockScimExternalMapping.create,
         },
       });
-      mockCommit();
       return result;
     });
     mockScimExternalMapping.deleteMany.mockResolvedValue({ count: 0 });
@@ -863,9 +880,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
       ["digest-of-user-1-1", "digest-of-user-1-2"],
       { reason: "scim_deprovision", operation: "SCIM user deprovisioning", userId: "user-1" },
     );
-    expect(mockCommit.mock.invocationCallOrder[0]).toBeLessThan(
-      mockTombstoneRevokedSessions.mock.invocationCallOrder[0]!,
-    );
+    expectTombstoneAfterCommitFollowing(mockDepartFromTenant);
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "SCIM_USER_DEACTIVATE",
@@ -884,9 +899,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
       ["digest-of-user-1-1", "digest-of-user-1-2"],
       { reason: "scim_deprovision", operation: "SCIM user deprovisioning", userId: "user-1" },
     );
-    expect(mockCommit.mock.invocationCallOrder[0]).toBeLessThan(
-      mockTombstoneRevokedSessions.mock.invocationCallOrder[0]!,
-    );
+    expectTombstoneAfterCommitFollowing(mockReturnToTenant);
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "SCIM_USER_REACTIVATE",
@@ -1220,7 +1233,6 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
     mockScimExternalMapping.findFirst.mockResolvedValue(null);
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
       const result = await fn({ tenantMember: { update: mockTenantMember.update } });
-      mockCommit();
       return result;
     });
     return PATCH(
@@ -1243,9 +1255,7 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
       ["digest-of-user-1-1", "digest-of-user-1-2"],
       { reason: "scim_deprovision", operation: "SCIM user deprovisioning", userId: "user-1" },
     );
-    expect(mockCommit.mock.invocationCallOrder[0]).toBeLessThan(
-      mockTombstoneRevokedSessions.mock.invocationCallOrder[0]!,
-    );
+    expectTombstoneAfterCommitFollowing(mockDepartFromTenant);
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "SCIM_USER_DEACTIVATE",
@@ -1262,9 +1272,7 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
       ["digest-of-user-1-1", "digest-of-user-1-2"],
       { reason: "scim_deprovision", operation: "SCIM user deprovisioning", userId: "user-1" },
     );
-    expect(mockCommit.mock.invocationCallOrder[0]).toBeLessThan(
-      mockTombstoneRevokedSessions.mock.invocationCallOrder[0]!,
-    );
+    expectTombstoneAfterCommitFollowing(mockReturnToTenant);
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "SCIM_USER_REACTIVATE",
@@ -1381,7 +1389,6 @@ describe("DELETE /api/scim/v2/Users/[id]", () => {
         scimExternalMapping: { deleteMany: mockScimExternalMapping.deleteMany },
         tenantMember: { delete: mockTenantMember.delete },
       });
-      mockCommit();
       return result;
     });
   }
@@ -1403,9 +1410,7 @@ describe("DELETE /api/scim/v2/Users/[id]", () => {
       ["digest-of-user-1-1", "digest-of-user-1-2"],
       { reason: "scim_deprovision", operation: "SCIM user deprovisioning", userId: "user-1" },
     );
-    expect(mockCommit.mock.invocationCallOrder[0]).toBeLessThan(
-      mockTombstoneRevokedSessions.mock.invocationCallOrder[0]!,
-    );
+    expectTombstoneAfterCommitFollowing(mockRevokeUserAuthArtifactsInTx);
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "SCIM_USER_DELETE",
