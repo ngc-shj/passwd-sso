@@ -5,7 +5,7 @@ import { extractRequestMeta, logAuditAsync, tenantAuditBase } from "@/lib/audit/
 import { createLockBudget } from "@/lib/team/team-key-rotation-lock";
 import { isMembershipLockConflict, lockTenantMemberCreation, membershipConflictMessage } from "@/lib/team/tenant-row-lock";
 import { type DepartureRevocation, departCreatedMembership } from "@/lib/team/team-departure";
-import { tombstoneRevokedSessions } from "@/lib/auth/session/user-session-invalidation";
+import { revokeUsersAuthArtifactsInTx, tombstoneRevokedSessions } from "@/lib/auth/session/user-session-invalidation";
 import { TEAM_MEMBERSHIP_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 import {
   scimResponse,
@@ -246,6 +246,16 @@ async function handlePOST(req: NextRequest) {
             },
           });
         }
+      }
+
+      // An ACTIVE row created for a user who already existed: with no row here
+      // before, anything they still hold in this tenant is the residue of an
+      // earlier membership (a SCIM DELETE whose revocation failed), and the new
+      // row would revive it. Revoked last, so the credential lock is this
+      // transaction's last lock. A user created above holds nothing, and
+      // departCreatedMembership has revoked for a row created deactivated.
+      if (existingUserId && active !== false) {
+        revocation = await revokeUsersAuthArtifactsInTx(tx, [user.id], { tenantFilter: { tenantId }, boundedLockWait: true });
       }
 
       return { user, member, externalId, revocation };

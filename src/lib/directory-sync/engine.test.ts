@@ -136,6 +136,7 @@ const {
   mockReturnToTenant,
   mockDepartCreatedMembership,
   mockTombstoneRevokedSessions,
+  mockRevokeUsersAuthArtifactsInTx,
   mockLoggerInfo,
 } = vi.hoisted(() => ({
   mockLockTenantRows: vi.fn(),
@@ -143,10 +144,12 @@ const {
   mockReturnToTenant: vi.fn(),
   mockDepartCreatedMembership: vi.fn(),
   mockTombstoneRevokedSessions: vi.fn(),
+  mockRevokeUsersAuthArtifactsInTx: vi.fn(),
   mockLoggerInfo: vi.fn(),
 }));
 vi.mock("@/lib/auth/session/user-session-invalidation", () => ({
   tombstoneRevokedSessions: mockTombstoneRevokedSessions,
+  revokeUsersAuthArtifactsInTx: mockRevokeUsersAuthArtifactsInTx,
 }));
 /** What a departure of these users revokes, derived from them. */
 function revokedFor(ids: readonly string[]) {
@@ -181,6 +184,8 @@ beforeEach(() => {
     revocation: revokedFor(ids),
   }));
   mockDepartCreatedMembership.mockImplementation(async (_tx: unknown, _tenantId: string, ids: string[]) => revokedFor(ids));
+  // An admission's revocation of an existing user's residue in the tenant.
+  mockRevokeUsersAuthArtifactsInTx.mockImplementation(async (_tx: unknown, ids: string[]) => revokedFor(ids));
   mockTombstoneRevokedSessions.mockResolvedValue(0);
 });
 
@@ -847,8 +852,10 @@ describe("runDirectorySync", () => {
           configId: CONFIG_ID,
           departedUserIds: expect.arrayContaining(["user-a", "user-b"]),
           returnedUserIds: [],
+          admittedUserIds: [],
           departedUserCount: 2,
           returnedUserCount: 0,
+          admittedUserCount: 0,
           userIdsTruncated: false,
           sessions: 2,
           extensionTokens: 4,
@@ -1904,6 +1911,83 @@ describe("runDirectorySync", () => {
         expect.objectContaining({ data: expect.objectContaining({ userId: "user-5", deactivatedAt: null }) }),
       );
       expect(mockRealignAfterActivation).toHaveBeenCalledWith("user-5", TENANT_ID, { source: "directory_sync", actorUserId: USER_ID, actorType: "HUMAN" });
+    });
+
+    // An active row created for a user who already existed would revive the
+    // residue of an earlier membership in this tenant (deviation D13).
+    it("revokes an attached existing user's residue in the tenant, last, then tombstones and logs it after the commit", async () => {
+      setupAcquiredLock();
+      const applyTx = makeApplyTx();
+      setApplyTx(applyTx);
+      mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
+      mockFetchOktaUsers.mockResolvedValue([
+        makeOktaUser({ id: "ext-5", email: "erin@example.com", displayName: "Erin", status: "ACTIVE" }),
+      ]);
+      mockScimMapping.findMany.mockResolvedValue([]);
+      mockTenantMember.findMany.mockResolvedValue([]);
+      mockGuardUserFindMany.mockResolvedValue([ownershipRow("user-5", "Erin@Example.com", TENANT_ID)]);
+
+      const result = await runDirectorySync(BASE_OPTIONS);
+
+      expect(result).toMatchObject({ success: true, usersCreated: 1 });
+      expect(mockRevokeUsersAuthArtifactsInTx).toHaveBeenCalledTimes(1);
+      expect(mockRevokeUsersAuthArtifactsInTx).toHaveBeenCalledWith(expect.anything(), ["user-5"], {
+        tenantFilter: { tenantId: TENANT_ID },
+        boundedLockWait: true,
+      });
+      const revokedAt = mockRevokeUsersAuthArtifactsInTx.mock.invocationCallOrder[0]!;
+      expect(applyTx.tenantMember.create.mock.invocationCallOrder[0]).toBeLessThan(revokedAt);
+      for (const transition of [mockDepartFromTenant, mockReturnToTenant, mockDepartCreatedMembership]) {
+        expect(Math.max(...transition.mock.invocationCallOrder)).toBeLessThan(revokedAt);
+      }
+      expect(mockTombstoneRevokedSessions).toHaveBeenCalledWith(["digest-of-user-5"], expect.anything());
+      const applyCommit = mockCommit.mock.invocationCallOrder.find((order) => order > revokedAt);
+      expect(applyCommit).toBeDefined();
+      expect(applyCommit!).toBeLessThan(mockTombstoneRevokedSessions.mock.invocationCallOrder[0]!);
+      expect(mockLoggerInfo).toHaveBeenCalledWith(
+        expect.objectContaining({ admittedUserIds: ["user-5"], admittedUserCount: 1, sessions: 1 }),
+        "directory-sync.credentials-revoked",
+      );
+    });
+
+    it("revokes nothing for a user the run created or a member it created deactivated", async () => {
+      setupAcquiredLock();
+      const applyTx = makeApplyTx();
+      applyTx.user.create.mockResolvedValue({ id: "user-new" });
+      setApplyTx(applyTx);
+      mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
+      mockFetchOktaUsers.mockResolvedValue([
+        makeOktaUser({ id: "ext-new", email: "new@example.com", displayName: "New", status: "ACTIVE" }),
+        makeOktaUser({ id: "ext-5", email: "erin@example.com", displayName: "Erin", status: "SUSPENDED" }),
+      ]);
+      mockScimMapping.findMany.mockResolvedValue([]);
+      mockTenantMember.findMany.mockResolvedValue([]);
+      mockGuardUserFindMany.mockResolvedValue([ownershipRow("user-5", "Erin@Example.com", TENANT_ID)]);
+
+      const result = await runDirectorySync(BASE_OPTIONS);
+
+      expect(result).toMatchObject({ success: true, usersCreated: 2 });
+      expect(mockRevokeUsersAuthArtifactsInTx).toHaveBeenCalledWith(expect.anything(), [], expect.anything());
+      expect(mockDepartCreatedMembership).toHaveBeenCalledWith(expect.anything(), TENANT_ID, ["user-5"], expect.anything());
+    });
+
+    it("fails the run, tombstoning nothing, when the existing user's credential lock is held past the bounded wait", async () => {
+      setupAcquiredLock();
+      setApplyTx(makeApplyTx());
+      mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
+      mockFetchOktaUsers.mockResolvedValue([
+        makeOktaUser({ id: "ext-5", email: "erin@example.com", displayName: "Erin", status: "ACTIVE" }),
+      ]);
+      mockScimMapping.findMany.mockResolvedValue([]);
+      mockTenantMember.findMany.mockResolvedValue([]);
+      mockGuardUserFindMany.mockResolvedValue([ownershipRow("user-5", "Erin@Example.com", TENANT_ID)]);
+      mockRevokeUsersAuthArtifactsInTx.mockRejectedValueOnce(new Error("User sign-in state is being changed"));
+
+      const result = await runDirectorySync(BASE_OPTIONS);
+
+      expect(result.success).toBe(false);
+      expect(mockTombstoneRevokedSessions).not.toHaveBeenCalled();
+      expect(mockRealignAfterActivation).not.toHaveBeenCalled();
     });
 
     it("does not fail a sync whose writes committed when the realignment fails", async () => {

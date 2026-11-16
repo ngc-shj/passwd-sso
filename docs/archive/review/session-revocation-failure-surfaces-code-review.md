@@ -145,3 +145,24 @@ Verification:
 - eslint: 0.
 - 36 static gates: 0.
 - `npm run test:integration` on the session and revocation suites (17 files, 218 passed) and the bypass-grant suites (29 passed): 0.
+
+### Round 4
+Reviewed 3851d2463. No Critical or Major findings.
+- S-R4-1 (Security, Minor): fixed. The path D12 had accepted is now closed.
+  - Every creation of a tenant_members row for an existing user revokes that user's residue in the tenant, as the last step of the creating transaction. The three sites are SCIM POST attaching an existing user, directory-sync create, and sign-in row 4. The sessions are tombstoned after the commit.
+  - Pinned by gate rule 10 (`EXPECTED_MEMBERSHIP_CREATIONS`: 3 revoking sites, 3 exempted with reasons). D13.
+- S-R4-2 (Security, Minor): fixed in D12. A throwing binding lookup is caught by Auth.js, which returns a null session; the proxy caches the negative result for 5 s. An adapter-throw cell pins this. (The round-3 entry above, "A failed lookup propagates", is superseded by this correction.)
+- F-R4-1 (Functionality, Minor): fixed. The operator signal is PostgreSQL's `out of shared memory` (53200) with its HINT. `prisma migrate deploy` was shown not to print server NOTICEs.
+- F-R4-2 (Functionality, Minor): not changed. Refused session rows are not deleted on read: a same-tenant re-creation now revokes them (S-R4-1), and a cross-tenant one stays dead under the binding. Recorded in D13.
+  - Worst case: a dead row persists until it expires.
+  - Likelihood: every refused residue session.
+  - Cost to change: a write on the auth read path.
+- T-4 (Testing, Minor): fixed. The bridge-code stamping cell was re-proved with runnable mutants (code create and IP check stamped with another tenant).
+
+Verification:
+- `npx tsc --noEmit`: 0.
+- Full `npx vitest run` (24982 passed): 0.
+- `npx next build`: 0.
+- eslint: 0.
+- 11 static gates: 0.
+- `npm run test:integration` on the session, tenant-claim, scim, directory-sync and departure suites (17 files, 488 passed): 0.

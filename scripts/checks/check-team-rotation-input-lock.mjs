@@ -220,6 +220,24 @@
  *    inside a database function or a trigger, and the model reached by
  *    element access or an alias, are not seen.
  *
+ * 10. A TENANT-MEMBERSHIP CREATION REVOKES IN ITS FUNCTION
+ *    (session-revocation-failure-surfaces deviation D13). A row created for a
+ *    user who already existed would revive what they still hold in that
+ *    tenant from an earlier membership (a SCIM DELETE whose revocation
+ *    failed), so the creating function revokes the user's credentials in
+ *    that tenant after the write. A creation is a
+ *    `tenantMember.create/createMany/createManyAndReturn/upsert` (any
+ *    receiver), or a raw `INSERT INTO tenant_members` / `MERGE INTO
+ *    tenant_members` template. Each must be followed by a revoker call in its
+ *    innermost enclosing function itself, as in rule 9 (or by
+ *    departCreatedMembership, which revokes a row created deactivated), or carry a reviewed
+ *    exemption: a brand-new user (the adapter's createUser), a row the user
+ *    already holds (sign-in row 5), and the bootstrap migration (it moves the
+ *    sessions). The sites are pinned by key in EXPECTED_MEMBERSHIP_CREATIONS;
+ *    two creations sharing a key carry their payload's text in it. Its known
+ *    limits are rule 9's: source order, not control flow, and not whether the
+ *    revocation names the created users or their tenant.
+ *
  * Scanned: TARGETS, which include scripts/ (its `.ts` files; `__tests__` and
  * `*.test.*` excluded by the walker). NOT seen by rules 2, 5, 6, 9 or the
  * delete class: aliases of the model, element access, `*Unsafe` raw calls, migrations,
@@ -361,6 +379,18 @@ const EXEMPTIONS = new Map([
     "unreadable data (a conditional spread), read by hand: the spread adds passphraseVerifierHmac/passphraseVerifierVersion only; the rest are vault-wrapping columns, no teamMemberships or teamMemberKeys",
   ],
   [
+    "membership-create::src/auth.ts::<anonymous>::tenantMember.upsert[{ tenantId: lookup.id, userId, role: TENANT_ROLE.MEMBER }]",
+    "sign-in row 5: the user is already an active member of this tenant (resolveUserTenantIdFromClient answered it), so the upsert finds their row and creates none; a revocation here would end the member's legitimate sessions and tokens",
+  ],
+  [
+    "membership-create::src/auth.ts::<anonymous>::tenantMember.create",
+    "bootstrap → SSO tenant migration: the target holds no row of the user (checked above), and the migration moves the user's sessions into the target in the same transaction, which a revocation in the target would delete (rule 9's exemption, the same transaction)",
+  ],
+  [
+    "membership-create::src/lib/auth/session/auth-adapter.ts::<anonymous>::tenantMember.create",
+    "createUser: the row is for the user the same transaction has just created, who holds no credential anywhere",
+  ],
+  [
     "membership-end::src/auth.ts::<anonymous>::tenantMember.deleteMany",
     "bootstrap → SSO tenant migration: revokes the source tenant's tokens inline in the same transaction and MOVES the sessions to the new tenant instead of deleting them, which the revocation primitive would contradict (session-revocation-failure-surfaces-plan.md C2)",
   ],
@@ -375,6 +405,21 @@ const EXPECTED_MEMBERSHIP_ENDS = [
   "membership-end::src/lib/team/team-departure.ts::departCreatedMembership::tenant_members.raw",
   "membership-end::src/lib/services/scim-user-service.ts::<anonymous>::tenantMember.delete",
   "membership-end::src/auth.ts::<anonymous>::tenantMember.deleteMany",
+];
+
+/**
+ * Rule 10's positive control: the membership creations of the real tree, by
+ * gate key (the revoking ones and the exempted ones alike).
+ */
+const EXPECTED_MEMBERSHIP_CREATIONS = [
+  // The self-test's synthetic sites, as a JSON array of keys (as the counts above take env overrides).
+  ...JSON.parse(process.env.TEAM_ROTATION_INPUT_LOCK_EXTRA_CREATIONS ?? "[]"),
+  "membership-create::src/app/api/scim/v2/Users/route.ts::<anonymous>::tenantMember.create",
+  "membership-create::src/lib/directory-sync/engine.ts::<anonymous>::tenantMember.create",
+  "membership-create::src/auth.ts::<anonymous>::tenantMember.upsert[{ tenantId: target.id, userId, role: TENANT_ROLE.MEMBER }]",
+  "membership-create::src/auth.ts::<anonymous>::tenantMember.upsert[{ tenantId: lookup.id, userId, role: TENANT_ROLE.MEMBER }]",
+  "membership-create::src/auth.ts::<anonymous>::tenantMember.create",
+  "membership-create::src/lib/auth/session/auth-adapter.ts::<anonymous>::tenantMember.create",
 ];
 
 const RAW_MEMBER_WRITE = /\b(DELETE\s+FROM|UPDATE)\s+(?:"?\w+"?\.)?"?(team_members|team_member_keys)"?\b/i;
@@ -1396,10 +1441,48 @@ function membershipEnds(sourceFile, path) {
   return out;
 }
 
+// ── Rule 10: a tenant-membership creation revokes in its function (deviation D13) ──
+
+const CREATE_METHODS = new Set(["create", "createMany", "createManyAndReturn", "upsert"]);
+/** departCreatedMembership revokes the users whose rows were created deactivated. */
+const CREATION_REVOKERS = new Set([...REVOKERS, "departCreatedMembership"]);
+
+/** Whether a raw template inserts into tenant_members: an INSERT head, or a MERGE with an INSERT action. */
+function rawCreatesMembership(raw) {
+  const input = sqlInputFromNode(raw.getTemplate());
+  if (input === null) return false;
+  const { tokens } = analyzeSql(input);
+  for (let i = 0; i < tokens.length; i++) {
+    const head = isKeyword(tokens[i], "INSERT") ? "INSERT" : isKeyword(tokens[i], "MERGE") ? "MERGE" : null;
+    if (head === null || !isKeyword(tokens[i + 1], "INTO")) continue;
+    const table = readTable(tokens, i + 2);
+    if (table?.name !== MEMBERSHIP_TABLE) continue;
+    if (head === "INSERT") return true;
+    const end = sqlStatementEnd(tokens, i + 1, tokens[i].depth);
+    if (tokens.slice(table.end, end).some((t, k, rest) => isKeyword(t, "THEN") && isKeyword(rest[k + 1], "INSERT"))) return true;
+  }
+  return false;
+}
+
+/** Rule 10's sites in one file: `{ node, site, detail }`, `detail` the created row's payload text. */
+function membershipCreations(sourceFile) {
+  const out = [];
+  for (const call of sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    const mm = modelAndMethod(call);
+    if (!mm || mm.model !== "tenantMember" || !CREATE_METHODS.has(mm.method)) continue;
+    const payload = argProp(call, mm.method === "upsert" ? "create" : "data");
+    out.push({ node: call, site: `tenantMember.${mm.method}`, detail: payload ? compact(payload) : "<unreadable>" });
+  }
+  for (const raw of rawWrites(sourceFile)) {
+    if (rawCreatesMembership(raw)) out.push({ node: raw, site: `${MEMBERSHIP_TABLE}.raw`, detail: compact(raw.getTemplate()) });
+  }
+  return out;
+}
+
 /** Whether a revoker is called after `node`, in `node`'s innermost enclosing function itself (not a nested callback). */
-function revokesAfter(node) {
+function revokesAfter(node, revokers = REVOKERS) {
   const fn = enclosingFunction(node);
-  return fn !== null && callsIn(fn).some((c) => REVOKERS.has(calleeName(c)) && c.getStart() >= node.getEnd());
+  return fn !== null && callsIn(fn).some((c) => revokers.has(calleeName(c)) && c.getStart() >= node.getEnd());
 }
 
 /** A node's text on one line, for a site key. */
@@ -1492,6 +1575,11 @@ for (const { rel: path, sf: sourceFile } of sourceFilesFrom(project, TARGETS, RE
     sites.push({ rule: "membershipEnds", key, line: lineOf(path, node), ok: revokesAfter(node), detail });
   }
 
+  for (const { node, site, detail } of membershipCreations(sourceFile)) {
+    const key = keyOf("membership-create", path, node, site);
+    sites.push({ rule: "membershipCreations", key, line: lineOf(path, node), ok: revokesAfter(node, CREATION_REVOKERS), detail });
+  }
+
   if (IMPLEMENTATIONS.has(path)) continue;
   const checkHelpers = recipientCheckHelpers(sourceFile);
 
@@ -1579,6 +1667,12 @@ for (const site of sites.filter((s) => s.rule === "grants")) grantKeyCounts.set(
 for (const site of sites) {
   if (site.rule === "grants" && grantKeyCounts.get(site.key) > 1) site.key = `${site.key}[${site.detail}]`;
 }
+// The same for two membership creations with one key (sign-in rows 4 and 5).
+const creationKeyCounts = new Map();
+for (const site of sites.filter((s) => s.rule === "membershipCreations")) creationKeyCounts.set(site.key, (creationKeyCounts.get(site.key) ?? 0) + 1);
+for (const site of sites) {
+  if (site.rule === "membershipCreations" && creationKeyCounts.get(site.key) > 1) site.key = `${site.key}[${site.detail}]`;
+}
 
 const problems = [];
 const counts = Object.fromEntries(Object.keys(EXPECTED).map((rule) => [rule, sites.filter((s) => s.rule === rule).length]));
@@ -1607,7 +1701,25 @@ if (unexpectedEnds.length + missingEnds.length + repeatedEnds.length > 0) {
       ].join("\n"),
   );
 }
-const uncovered = sites.filter((s) => !s.ok && !EXEMPTIONS.has(s.key) && s.rule !== "membershipEnds");
+const membershipCreationSites = sites.filter((s) => s.rule === "membershipCreations");
+for (const s of membershipCreationSites.filter((m) => !m.ok && !EXEMPTIONS.has(m.key))) {
+  violations.push(`membership-create  ${s.line}  ${s.key}  creates a tenant membership with no revokeUsersAuthArtifactsInTx / revokeUserAuthArtifactsInTx call after it in its function (an existing user's residue in the tenant would come back with the row)`);
+}
+const foundCreations = membershipCreationSites.map((s) => s.key);
+const unexpectedCreations = foundCreations.filter((k) => !EXPECTED_MEMBERSHIP_CREATIONS.includes(k));
+const missingCreations = EXPECTED_MEMBERSHIP_CREATIONS.filter((k) => !foundCreations.includes(k));
+const repeatedCreations = [...new Set(foundCreations.filter((k, i) => foundCreations.indexOf(k) !== i))];
+if (unexpectedCreations.length + missingCreations.length + repeatedCreations.length > 0) {
+  problems.push(
+    `membership-create sites differ from the pinned set (EXPECTED_MEMBERSHIP_CREATIONS). Review each, then update it:\n` +
+      [
+        ...unexpectedCreations.map((k) => `  unexpected: ${k}`),
+        ...missingCreations.map((k) => `  missing: ${k}`),
+        ...repeatedCreations.map((k) => `  repeated: ${k}`),
+      ].join("\n"),
+  );
+}
+const uncovered = sites.filter((s) => !s.ok && !EXEMPTIONS.has(s.key) && s.rule !== "membershipEnds" && s.rule !== "membershipCreations");
 if (uncovered.length > 0) {
   problems.push(
     `sites without their lock (a member-set write needs a team lock before it; an admission a tenant-row lock; ` +
@@ -1625,4 +1737,4 @@ if (problems.length > 0) {
   for (const p of problems) console.error(`\nFAIL: ${p}`);
   process.exit(1);
 }
-console.log(`check-team-rotation-input-lock: OK ${JSON.stringify({ ...counts, membershipEnds: foundEnds.length })}`);
+console.log(`check-team-rotation-input-lock: OK ${JSON.stringify({ ...counts, membershipEnds: foundEnds.length, membershipCreations: foundCreations.length })}`);

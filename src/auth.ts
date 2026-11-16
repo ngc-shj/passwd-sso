@@ -19,7 +19,7 @@ import {
 } from "@/lib/tenant/tenant-management";
 import type { ClaimRefusalDiagnosis } from "@/lib/tenant/claim-refusal";
 import { classifySentinelTenantConstraint } from "@/lib/tenant/sentinel-tenant-constraint";
-import { tombstoneRevokedSessions } from "@/lib/auth/session/user-session-invalidation";
+import { revokeUsersAuthArtifactsInTx, tombstoneRevokedSessions } from "@/lib/auth/session/user-session-invalidation";
 import { lockUserAuthArtifacts } from "@/lib/auth/session/user-auth-serialization";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
@@ -403,7 +403,10 @@ async function claimedTenantMembership(
   signInProvider: string,
   mode: ClaimBindingMode,
 ): Promise<SignInTenantResult> {
-  return withBypassRls(prisma, async (tx) => {
+  // The sessions row 4's join revoked, tombstoned after its transaction commits.
+  let joinRevokedSessionTokens: string[] = [];
+  let joinedTenantId: string | null = null;
+  const result = await withBypassRls(prisma, async (tx): Promise<SignInTenantResult> => {
     // Both lookups run inside this single withBypassRls callback, in this
     // order, and neither may move. Resolving before creating is D2: the old
     // findOrCreateSsoTenant committed a tenants row before the denial check
@@ -477,6 +480,20 @@ async function claimedTenantMembership(
         tenantId: target.id,
         cause: realignmentBySignIn(userId),
       });
+      // The user is active in no tenant, so whatever they still hold in the
+      // target is the residue of an earlier membership there (a SCIM DELETE
+      // whose revocation failed), and this join would revive it. Revoked in the
+      // join's transaction, last, so the credential lock is its last lock. The
+      // sign-in's own session is created after this commits (Auth.js calls
+      // createSession after the signIn callback), so it is not among them. A
+      // lock held past the bounded wait throws: the callback refuses the
+      // sign-in as `provider_error`, and nothing of the join commits.
+      const residue = await revokeUsersAuthArtifactsInTx(tx, [userId], {
+        tenantFilter: { tenantId: target.id },
+        boundedLockWait: true,
+      });
+      joinRevokedSessionTokens = residue.sessionTokens;
+      joinedTenantId = target.id;
       return { ok: true };
     }
 
@@ -793,6 +810,14 @@ async function claimedTenantMembership(
 
     return { ok: true };
   }, BYPASS_GRANT.AUTH_TENANT_CLAIM_MEMBERSHIP);
+
+  await tombstoneRevokedSessions(joinRevokedSessionTokens, {
+    reason: "sign_in_membership_join",
+    operation: "the sign-in membership join",
+    userId,
+    extra: { tenantScope: joinedTenantId },
+  });
+  return result;
 }
 
 // One instance, shared by NextAuth and the signIn callback's subject lookup

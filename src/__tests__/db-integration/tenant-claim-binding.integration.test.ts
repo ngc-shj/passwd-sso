@@ -86,6 +86,7 @@ import { providerRef, resetIdentifierPepperForTests } from "@/lib/audit/identifi
 import { hashToken } from "@/lib/crypto/crypto-server";
 import { validateExtensionToken } from "@/lib/auth/tokens/extension-token";
 import { validateApiKey } from "@/lib/auth/tokens/api-key";
+import { hashSessionToken } from "@/lib/auth/session/session-cache";
 import { DELETE as scimDeleteUser } from "@/app/api/scim/v2/Users/[id]/route";
 import { runDirectorySync } from "@/lib/directory-sync/engine";
 import { withBypassRls } from "@/lib/tenant-rls";
@@ -1093,6 +1094,106 @@ describe("tenant claim binding (C3/C4/C5)", () => {
    * one; the other order is refused by `tenant_members_one_active_per_user`,
    * which unit tests with a mocked Prisma cannot see.
    */
+  /**
+   * Row 4 creates a membership row for a user who already exists. A user
+   * removed from the claimed tenant by an old-release SCIM DELETE whose
+   * revocation failed still holds credentials there, and the new active row
+   * would revive them (the session binding and the token checks accept a
+   * credential of an active membership's tenant). The join revokes them in
+   * its own transaction; the sign-in's own session is created afterwards and
+   * authenticates (code-review round-4 S-R4-1, deviation D13).
+   */
+  describe("row 4: the join revokes what the user still holds in the joined tenant", () => {
+    async function su(text: string, ...params: unknown[]): Promise<void> {
+      await ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        await tx.$executeRawUnsafe(text, ...params);
+      });
+    }
+
+    /** A session, an API key and an extension token of `userId` under `tenantId`; returns the session's raw token and the ids. */
+    async function seedResidue(userId: string, tenantId: string) {
+      const raw = randomUUID();
+      const sessionId = randomUUID();
+      const apiKeyId = randomUUID();
+      const extensionTokenId = randomUUID();
+      await su(
+        `INSERT INTO sessions (id, session_token, user_id, tenant_id, expires, created_at, last_active_at)
+         VALUES ($1::uuid, $2, $3::uuid, $4::uuid, now() + interval '1 day', now(), now())`,
+        sessionId, hashSessionToken(raw), userId, tenantId,
+      );
+      await su(
+        `INSERT INTO api_keys (id, user_id, tenant_id, token_hash, prefix, name, scope, expires_at)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'api_test', 'residue', 'passwords:read', now() + interval '1 day')`,
+        apiKeyId, userId, tenantId, hashToken(`api_residue_${apiKeyId}`),
+      );
+      await su(
+        `INSERT INTO extension_tokens (id, user_id, tenant_id, token_hash, scope, expires_at, family_id, cnf_jkt)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'passwords:read', now() + interval '1 day', $5::uuid, $6)`,
+        extensionTokenId, userId, tenantId, hashToken(`ext_residue_${extensionTokenId}`), randomUUID(), hex(16),
+      );
+      return { raw, sessionId, apiKeyId, extensionTokenId };
+    }
+
+    async function residueState(ids: { sessionId: string; apiKeyId: string; extensionTokenId: string }) {
+      const [row] = await ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        return tx.$queryRawUnsafe<{ session: boolean; api_key: boolean; extension_token: boolean }[]>(
+          `SELECT EXISTS (SELECT 1 FROM sessions WHERE id = $1::uuid) AS session,
+                  EXISTS (SELECT 1 FROM api_keys WHERE id = $2::uuid AND revoked_at IS NULL) AS api_key,
+                  EXISTS (SELECT 1 FROM extension_tokens WHERE id = $3::uuid AND revoked_at IS NULL) AS extension_token`,
+          ids.sessionId, ids.apiKeyId, ids.extensionTokenId,
+        );
+      });
+      return { session: row!.session, apiKey: row!.api_key, extensionToken: row!.extension_token };
+    }
+
+    const LIVE = { session: true, apiKey: true, extensionToken: true };
+    const REVOKED = { session: false, apiKey: false, extensionToken: false };
+
+    it.each([CLAIM_BINDING_MODE.OFF, CLAIM_BINDING_MODE.STRICT])(
+      "%s mode: the residue in the joined tenant is revoked, the home tenant's is not, and the sign-in's new session authenticates",
+      async (mode) => {
+        stubModeEnv(mode);
+        const target = await attackerTenant(mode);
+        let victim: Victim | null = null;
+        try {
+          victim = await seedVictim(VICTIM_STATE.DEPARTED, OTHER_PROVIDER);
+          const own = await linkAccount(victim.userId, victim.home, SIGN_IN_PROVIDER);
+          const residue = await seedResidue(victim.userId, target.tenantId);
+          const home = await seedResidue(victim.userId, victim.home);
+          expect(await residueState(residue)).toEqual(LIVE);
+          expect(await residueState(home)).toEqual(LIVE);
+
+          expect(await capturedSignIn()(signInParams(victim.email, target.claim, SIGN_IN_PROVIDER, own))).toBe(true);
+
+          expect(await ctx.su.prisma.tenantMember.count({
+            where: { userId: victim.userId, tenantId: target.tenantId, deactivatedAt: null },
+          })).toBe(1);
+          expect(await residueState(residue)).toEqual(REVOKED);
+          expect(await residueState(home)).toEqual(LIVE);
+          const adapter = createCustomAdapter();
+          expect(await adapter.getSessionAndUser!(residue.raw)).toBeNull();
+
+          // What Auth.js does next: createSession, stamped with the joined tenant.
+          const raw = randomUUID();
+          await sessionMetaStorage.run(
+            { ip: null, userAgent: null, acceptLanguage: null, provider: SIGN_IN_PROVIDER },
+            () => adapter.createSession!({ sessionToken: raw, userId: victim!.userId, expires: new Date(Date.now() + 60_000) }),
+          );
+          const session = await ctx.su.prisma.session.findUniqueOrThrow({
+            where: { sessionToken: hashSessionToken(raw) },
+            select: { tenantId: true },
+          });
+          expect(session.tenantId).toBe(target.tenantId);
+          expect(await adapter.getSessionAndUser!(raw)).toMatchObject({ session: { userId: victim.userId }, user: { id: victim.userId } });
+        } finally {
+          await teardown(victim, ...(victim ? [victim.home] : []), target.tenantId);
+        }
+      },
+    );
+  });
+
   describe("rows 6 / 9a: the bootstrap migration", () => {
     /** Where each of the member's rows is filed, per moved table, and their memberships. */
     async function placement(userId: string) {

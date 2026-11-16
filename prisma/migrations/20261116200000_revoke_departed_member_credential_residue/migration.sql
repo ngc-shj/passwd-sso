@@ -14,12 +14,13 @@
 -- leave residue behind. That residue is made unusable elsewhere: a session
 -- is refused unless its tenant is one where its user is an active
 -- member (the auth adapter's getSessionAndUser binding), a reactivation
--- revokes in the returning tenant (returnToTenant), and tokens are already
--- checked against the membership in their own tenant. One path remains: an
--- old-release SCIM DELETE whose revocation fails during the rollout, followed
--- by a later re-creation of that membership in the same tenant. It is
--- recorded, with its worst case, likelihood and cost, as D12 in
--- docs/archive/review/session-revocation-failure-surfaces-deviation.md.
+-- revokes in the returning tenant (returnToTenant), a membership row created
+-- for an existing user revokes in its tenant (SCIM POST, directory-sync
+-- create, sign-in row 4; check-team-rotation-input-lock.mjs rule 10), and
+-- tokens are already checked against the membership in their own tenant.
+-- D12 and D13 in
+-- docs/archive/review/session-revocation-failure-surfaces-deviation.md record
+-- the rollout analysis.
 --
 -- Residue: a row of one of the ten models revokeUsersAuthArtifactsInTx revokes
 -- (src/lib/auth/session/user-session-invalidation.ts) whose (user, tenant_id)
@@ -40,10 +41,15 @@
 --
 -- That is one advisory lock per residue user, all held by this one
 -- transaction. The shared lock table holds max_locks_per_transaction *
--- (max_connections + max_prepared_transactions) entries, and running out
--- aborts the block (it rolls back whole). The block NOTICEs the user count
--- before it takes the locks; if that count is near the bound, raise
--- max_locks_per_transaction and run the migration again.
+-- (max_connections + max_prepared_transactions) entries. Running out fails the
+-- migration with PostgreSQL's own error, `out of shared memory`, whose HINT is
+-- `You might need to increase max_locks_per_transaction.` (SQLSTATE 53200);
+-- the block rolls back whole and `prisma migrate deploy` fails on it. That
+-- failure is the operator's signal: raise max_locks_per_transaction, restart
+-- PostgreSQL, and deploy again. The block also NOTICEs the user count before
+-- it takes the locks, as a supporting diagnostic only: `prisma migrate deploy`
+-- does not print server NOTICEs, so it is seen in the server log (at
+-- log_min_messages = notice or lower) or when the block is run through psql.
 --
 -- Session cache: a deleted session's cached entry is either never there (the
 -- auth gate does not cache a user active nowhere) or expires within

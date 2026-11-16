@@ -102,7 +102,7 @@ The merge with origin/main (#1062) was resolved in `check-team-rotation-input-lo
 
 Cost, measured by counting statements on the pg client: 5 statements before (BEGIN, GUCs, sessions, users, COMMIT), 6 after. The extra statement is an indexed `tenant_members` read by `user_id`, in the same transaction and on the same connection. Prisma issues relation selects as separate statements here (no `relationJoins`), so folding the read into the session read leaves the same round trip. Collapsing it to one statement would need raw SQL in the adapter.
 
-A lookup that throws propagates out of `getSessionAndUser`, so `auth()` fails and nothing is cached. The proxy gate needs no change of its own: on a cache miss it reads `/api/auth/session`, which goes through the adapter, so a residue session is answered `valid: false` and cached only negatively. A positive entry written before this release, or by an old-release instance during the rollout, lasts at most `SESSION_CACHE_TTL_MS` (30 s). It only lets the request past the proxy; the route handler's own `auth()` goes through the binding.
+A lookup that throws propagates out of `getSessionAndUser`, but not out of `auth()` (corrected in code-review round 4, S-R4-2). Auth.js's session action catches it, logs a `SessionTokenError` and answers 200 with a null body (`@auth/core/lib/actions/session.js`). A route handler's `auth()` therefore sees no session (401), and the proxy gate's `/api/auth/session` read sees no user and caches `valid: false` for `NEGATIVE_CACHE_TTL_MS` (5 s). Both fail closed. The adapter unit test "leaves Auth.js answering a session request with no session when the read throws" runs `@auth/core`'s `Auth` over the real adapter with the read throwing and pins the 200, the null body and the `SessionTokenError`. The proxy gate needs no change of its own: on a cache miss it reads `/api/auth/session`, which goes through the adapter, so a residue session is answered `valid: false` and cached only negatively. A positive entry written before this release, or by an old-release instance during the rollout, lasts at most `SESSION_CACHE_TTL_MS` (30 s). It only lets the request past the proxy; the route handler's own `auth()` goes through the binding.
 
 F2: `createSession` resolves the tenant before it takes the credential lock, so a departure that commits in between can leave a session stamped with the tenant just left. Under the binding that session authenticates nowhere: its tenant has no active membership for the user. A return to that tenant goes through `returnToTenant`, which revokes it. `session-concurrency.ts` is unchanged.
 
@@ -111,7 +111,7 @@ Rollout window (F1/F8). The C9 migration commits before the old release's instan
 - Reactivations of a deactivated row: `returnToTenant` revokes in the returning tenant (D8).
 - Tokens: each is checked against the membership in its own tenant.
 
-One path is left open:
+One path was left open in round 3. Code-review round 4 (S-R4-1) closed it: every creation of a membership row for an existing user now revokes in that tenant (D13). The round-3 analysis is kept below.
 
 | Field | Content |
 |-------|---------|
@@ -120,8 +120,33 @@ One path is left open:
 | Likelihood | Low. It needs all three: the DELETE lands on an old-release instance during the rollout (minutes), the revocation after its commit fails (a DB or lock fault, which was logged as `session-invalidation-failed`), and the same tenant re-creates that user before the credentials expire. |
 | Cost to close | A revocation on every membership-creation path, scoped to the tenant: SCIM POST, directory-sync create and sign-in row 4. Each is a new writer in the C8 rule-9 class, with its own integration cell. Running the C9 block again after the rollout would also close it, but there is no operator command for that today. |
 | Detection | The old release logs the failed revocation (`session-invalidation-failed`). |
+| Status | Closed in code-review round 4 by the first option (D13). |
 
-F9: the migration raises `departed-member-credential-residue-locks: users=<n>` before taking the locks. Its header and plan C9 state the bound: `max_locks_per_transaction × (max_connections + max_prepared_transactions)`. The migration is unreleased, so its checksum changed with the edit. On this worktree's database (`passwd_sso_wt_1047` only), its `_prisma_migrations` rows were deleted and `prisma migrate deploy` re-applied it. Two rows were present and deleted. The block is idempotent.
+F9: the migration raises `departed-member-credential-residue-locks: users=<n>` before taking the locks. Its header and plan C9 state the bound: `max_locks_per_transaction × (max_connections + max_prepared_transactions)`. Round 4 (F-R4-1) corrected which of the two is the operator's signal; see D13. The migration is unreleased, so its checksum changed with the edit. On this worktree's database (`passwd_sso_wt_1047` only), its `_prisma_migrations` rows were deleted and `prisma migrate deploy` re-applied it. Two rows were present and deleted. The block is idempotent.
+
+## D13: a membership creation revokes the residue an earlier membership left (code-review round 4)
+S-R4-1. Every transaction that creates a `tenant_members` row for a user who already existed revokes that user's credentials in the row's tenant, as its last step, with `revokeUsersAuthArtifactsInTx(tx, [userId], { tenantFilter: { tenantId }, boundedLockWait: true })`. With no row in that tenant before, anything the user holds there is residue of an earlier membership, so nothing legitimate is revoked. This closes D12's open path (an old-release SCIM DELETE whose revocation failed, then a same-tenant re-creation).
+
+Sites, from `grep` of `tenantMember.create/createMany/upsert` and raw `INSERT INTO tenant_members` over `src` and `scripts` (migrations and the `.sql` seed excluded):
+
+| Site | Revokes | Notes |
+|------|---------|-------|
+| SCIM POST (`src/app/api/scim/v2/Users/route.ts`) | An existing user created active | After the mapping writes. A user created by the same request holds nothing; a row created deactivated already revokes through `departCreatedMembership`, so neither calls it again. The revocation reuses the route's `revocation` slot, so the post-commit tombstone (`scim_deprovision`) covers it. A lock held past the bounded wait is a 409 through `isMembershipLockConflict`, and nothing commits. Audit metadata is unchanged. |
+| Directory-sync create (`src/lib/directory-sync/engine.ts`) | Existing users created active (`createdActive`) | One call after all transitions. Collected as `admissions` and tombstoned with the departures and returns after the commit. `directory-sync.credentials-revoked` gains `admittedUserIds` (capped at 100), `admittedUserCount`, and `userIdsTruncated` covers all three lists. A lock timeout fails the run into its ERROR path. |
+| Sign-in row 4 (`src/auth.ts` `claimedTenantMembership`) | The signing-in user, in the joined tenant | After the upsert and the realignment. Tombstoned after the bypass transaction commits (`sign_in_membership_join`). The upsert is unconditional: the user is active in no tenant, so a deactivated row it finds (and leaves deactivated) holds only residue too. Auth.js calls `createSession` after the signIn callback returns, so the sign-in's own session is created after the revocation commits and is not touched; the integration cell creates it through the adapter and authenticates it. A lock held past the bounded wait throws, the signIn callback's catch refuses the sign-in as `provider_error` (fail closed), and the join rolls back. |
+| Sign-in row 5 (`src/auth.ts`) | No | The user is already an active member of that tenant, so the upsert creates nothing; revoking would end a member's own credentials. Exempted in the gate. |
+| Adapter `createUser` (`src/lib/auth/session/auth-adapter.ts`) | No | A brand-new user created in the same transaction holds nothing. Exempted. |
+| Bootstrap migration (`src/auth.ts`) | No | Moves the user's sessions into the target first, so a revocation would delete them (as rule 9's exemption). Exempted. |
+
+Lock order: the user-auth lock is the last lock in each transaction, as C1 requires.
+
+Gate. C8 gains rule 10 in `check-team-rotation-input-lock.mjs`: each creation (`tenantMember.create/createMany/createManyAndReturn/upsert`, any receiver, or a raw `INSERT INTO` / `MERGE … THEN INSERT` into `tenant_members`) needs a revoker after it in its innermost function. The revokers are rule 9's two plus `departCreatedMembership`. Otherwise it needs a reviewed exemption. The six real sites are pinned by key in `EXPECTED_MEMBERSHIP_CREATIONS` (3 revoking, 3 exempted). Rows 4 and 5 share an anonymous callback, so a repeated key carries its `create` payload's text, as grants do. The self-test passes synthetic creation keys through `TEAM_ROTATION_INPUT_LOCK_EXTRA_CREATIONS`, as it passes the counts. Two existing rule-2 cells that only checked `code === 1` now assert their own `tenant-state` reason. One departure-writer cell adds the revocation its upsert now needs.
+
+S-R4-2 and F-R4-1 are recorded in D12 and plan C9. The migration header and plan C9 now name the operator signal as the failure itself: PostgreSQL's `out of shared memory` with the HINT to raise `max_locks_per_transaction`. The NOTICE is only a supporting diagnostic. Evidence that `prisma migrate deploy` does not print server NOTICEs: on `passwd_sso_wt_1047`, the migration's `_prisma_migrations` row was deleted (one row each time, twice) and `npx prisma migrate deploy` re-applied it (exit 0). Its output has no NOTICE line, although the block raises two unconditionally. The edit changed the unreleased migration's checksum, and the re-apply recorded the new one.
+
+F-R4-2, not changing: deleting session rows the binding refuses. With D13, a residue session in a tenant whose membership is re-created is revoked by that creation. A residue session in a tenant the user is not active in stays dead under the binding (D12). So a refused row has no path back to authenticating, and deleting it on read would add a write to the session read path for no security gain.
+
+T-4: the round-3 F3 stamping cell is re-proved with mutations that keep the route runnable (round-4 table below). The round-3 row, which used the pre-change route (`HEAD`), is replaced there.
 
 ## Red-proof record (code-review round 3)
 Same method: scratch copies outside the repository, aliased in through a scratch vitest config (unit and integration), or read through `RESIDUE_MIGRATION_SQL`. Each unmutated control passed through the same config.
@@ -135,7 +160,7 @@ Same method: scratch copies outside the repository, aliased in through a scratch
 | F1 integration, allow (normal) | Always refuse | The normal, the positive-control and the divergent-column cells fail |
 | F1 bootstrap migration (tenant-claim-binding, row 6) | `src/auth.ts` without the migration's `session.updateMany` | Both modes fail at the new post-migration `getSessionAndUser` assertion (`expected null to match object`) |
 | F3 bridge code, no membership | The `!tenantId` refusal removed | Only the `no_active_membership` cell fails |
-| F3 bridge code, stamping | The pre-change route (`HEAD`), which reads `User.tenantId` | 20/27 fail, among them the new "stamps the code … with the active membership's tenant" and "refuses issuance when the membership lookup throws" |
+| F3 bridge code, stamping | Superseded in round 4 (T-4). The pre-change route (`HEAD`) changed the tenant read and every stamp at once, and 20 of 27 cells failed, so the row did not show that the stamping cell fails on a wrong stamp alone. See the round-4 table. |
 | Q-1 lock held | The block's `PERFORM pg_advisory_xact_lock` replaced by `PERFORM hashtext(k)` | The lock cell fails (`departed: true, rowless: true`), and so does the expiry cell's `rowless` control |
 | Q-1 expiry filter | The `expires > v_now` / `expires_at > v_now` filters dropped from the lock set | Only the expiry cell fails (`expiredOnly: false`) |
 | Q-3 operator token subject | Operator tokens matched on `created_by_user_id` | The main cell fails (subject token `live`, creator token `revoked`), and so does the idempotency cell (`users: 1`) |
@@ -143,3 +168,32 @@ Same method: scratch copies outside the repository, aliased in through a scratch
 | F9 lock NOTICE | The `-locks` NOTICE removed | All four cells fail in `runBlock` (`expected [] to have a length of 1`) |
 | Q-2 member DELETE audit | The `TEAM_MEMBER_REMOVE` `logAuditInTx` wrapped in `.catch(() => {})` | Only the new "propagates a failing in-transaction TEAM_MEMBER_REMOVE audit" cell fails |
 | Q-4 positive control | The `TEAM_MEMBER_REMOVE` write skipped | The guest-actor allow loop fails, and so do the audit cell and the Q-2 cell |
+
+## Red-proof record (code-review round 4)
+Same method. Unit and integration mutants are scratch copies aliased in through a scratch vitest config, one module at a time. The gate mutants are scratch copies of the gate, each run by the unchanged self-test from its own scratch directory. Each unmutated control passed through the same config: auth 94/94, SCIM route 35/35, engine 57/57, bridge code 27/27, the two integration blocks 2/2 each, gate self-test 302/302.
+
+| Cell | Mutation | Observed failure |
+|------|----------|------------------|
+| S-R4-1 sign-in, unit | Row 4 revokes `[]` | Only "row 4: revokes what the user still holds in the joined tenant, last, with a bounded wait" fails |
+| S-R4-1 sign-in, unit (scope) | Row 4 revokes with `tenantFilter: {}` | Only the same cell fails |
+| S-R4-1 sign-in, unit (order) | The revocation moved before the upsert | Only the same cell fails (order assertion) |
+| S-R4-1 sign-in, unit (after commit) | The tombstone moved into the bypass transaction | Only "row 4: tombstones the revoked sessions after the join's transaction commits" fails |
+| S-R4-1 sign-in, integration | Row 4 revokes `[]` | Both modes fail: `expected { session: true, apiKey: true, … } to deeply equal { session: false, apiKey: false, … }` |
+| S-R4-1 sign-in, integration (scope) | Row 4 revokes with `tenantFilter: {}` | Both modes fail on the home tenant's control: `expected { session: false, … } to deeply equal { session: true, … }` |
+| S-R4-1 sign-in, integration (order) | The revocation moved before the upsert | Stays green, as expected: the order only matters for lock order, and the unit order cell holds it |
+| S-R4-1 SCIM POST, unit | The creation's revocation removed (`if (false)`) | The "revokes an existing user's residue …" cell and the 409 lock-timeout cell fail |
+| S-R4-1 SCIM POST, unit (scope / order) | `tenantFilter: {}`; separately, the revocation moved before the mapping writes | Only the "revokes an existing user's residue …" cell fails in each |
+| S-R4-1 SCIM POST, integration | The creation's revocation removed | Only the SCIM POST cell fails: `expected { session: true, … } to deeply equal { session: false, … }` |
+| S-R4-1 SCIM POST, integration (scope) | `tenantFilter: {}` | Stays green. The route runs in the tenant's RLS context, where another tenant's rows are invisible, so the scope also holds without the filter. The other-tenant control does red the sign-in mutant, which runs under a bypass |
+| S-R4-1 directory sync, unit | The admission revokes `[]` | Only the "revokes an attached existing user's residue …" cell fails |
+| S-R4-1 directory sync, unit (users created by the run) | `createdActive` also takes users the run created | Only "revokes nothing for a user the run created or a member it created deactivated" fails |
+| S-R4-1 directory sync, unit (order) | The admission's revocation moved before the departures | Only the "revokes an attached existing user's residue …" cell fails (`expected 1940 to be less than 1939`) |
+| S-R4-1 directory sync, integration | The admission revokes `[]` | Only the directory-sync cell fails, on the residue state |
+| C8 rule 10 (gate) | The rule-10 violation not raised | 11 cells fail: the 6 REDS, the before/nested cells, and the row-4, SCIM POST and directory-sync removal cells |
+| C8 rule 10 (gate) | Raw templates not read | Only the raw INSERT and MERGE … THEN INSERT cells fail |
+| C8 rule 10 (gate) | `departCreatedMembership` not a revoker | 4 cells fail: the two accepting rule-2 cells, the SCIM-POST shape cell, and the departCreatedMembership cell. The rule-2 "without the creation lock" cell also fails, on its `not.toMatch(/membership-create/)` |
+| C8 rule 10 (gate) | Repeated keys not disambiguated | 97 cells fail: the real row-4/5 keys collide, so every run reports the pinned set as differing |
+| C8 rule 10 (gate) | The pinned-set comparison skipped | The unexpected-site, missing-site and repeated-key cells fail |
+| C8 rule 10 (gate) | A revoker anywhere in the file counts | The before-the-write, nested-callback and directory-sync-in-callback cells fail |
+| T-4 bridge code, stamping (replaces the round-3 row) | `extensionBridgeCode.create` stamped `tenantId: "tenant-other"`; the route still runs and answers 201 | "stamps the code … with the active membership's tenant" and "issues a bridge code on success and emits ONLY the success audit" fail. Both check the create's `data.tenantId` (`+ "tenantId": "tenant-other"`) |
+| T-4 bridge code, IP restriction | `checkAccessRestrictionWithAudit` given `"tenant-other"`; the route still runs | Only the stamping cell fails, on the restriction call's arguments. The `tenant_access_restricted` cell stays green because its mock denies whatever tenant it is given |

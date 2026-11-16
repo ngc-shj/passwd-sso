@@ -615,6 +615,37 @@ describe("session revocation is atomic with the departure — real-DB integratio
     expect(await artifactState(artifacts)).toEqual(REVOKED);
   });
 
+  async function apiKey(userId: string, tenant: string): Promise<string> {
+    const id = randomUUID();
+    await sql(
+      `INSERT INTO api_keys (id, user_id, tenant_id, token_hash, prefix, name, scope, expires_at, created_at)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'api_test', $5, 'passwords:read', now() + interval '1 day', now())`,
+      id, userId, tenant, hex(32), `key-${id.slice(0, 8)}`,
+    );
+    return id;
+  }
+
+  async function apiKeyLive(id: string): Promise<boolean> {
+    const [row] = await sql<{ revoked_at: Date | null }>(`SELECT revoked_at FROM api_keys WHERE id = $1::uuid`, id);
+    return row.revoked_at === null;
+  }
+
+  /** A session and an API key of `userId` in `tenant`, the user's own there; returns their ids. */
+  async function otherTenantCredentials(userId: string, tenant: string) {
+    const otherSessionId = randomUUID();
+    await sql(
+      `INSERT INTO sessions (id, session_token, user_id, tenant_id, expires, created_at, last_active_at)
+       VALUES ($1::uuid, $2, $3::uuid, $4::uuid, now() + interval '1 day', now(), now())`,
+      otherSessionId, hashSessionToken(`sess-${randomUUID()}`), userId, tenant,
+    );
+    return { otherSessionId, otherKey: await apiKey(userId, tenant) };
+  }
+
+  async function otherTenantLive(otherSessionId: string, otherKey: string) {
+    const [{ n }] = await sql<{ n: number }>(`SELECT count(*)::int AS n FROM sessions WHERE id = $1::uuid`, otherSessionId);
+    return { session: n === 1, apiKey: await apiKeyLive(otherKey) };
+  }
+
   // ── Reactivation revokes leftovers (code-review round-1 S1) ──
   //
   // Departures made before revocation was atomic (every directory-sync one,
@@ -637,21 +668,6 @@ describe("session revocation is atomic with the departure — real-DB integratio
       await ctx.deleteTestData(otherTenantId);
     });
 
-    async function apiKey(userId: string, tenant: string): Promise<string> {
-      const id = randomUUID();
-      await sql(
-        `INSERT INTO api_keys (id, user_id, tenant_id, token_hash, prefix, name, scope, expires_at, created_at)
-         VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'api_test', $5, 'passwords:read', now() + interval '1 day', now())`,
-        id, userId, tenant, hex(32), `key-${id.slice(0, 8)}`,
-      );
-      return id;
-    }
-
-    async function apiKeyLive(id: string): Promise<boolean> {
-      const [row] = await sql<{ revoked_at: Date | null }>(`SELECT revoked_at FROM api_keys WHERE id = $1::uuid`, id);
-      return row.revoked_at === null;
-    }
-
     /**
      * A mapped member deactivated without a revocation (the residue of a
      * pre-change departure), still holding the four artifacts and an API key in
@@ -666,21 +682,10 @@ describe("session revocation is atomic with the departure — real-DB integratio
         `UPDATE tenant_members SET deactivated_at = now() - interval '1 hour' WHERE tenant_id = $1::uuid AND user_id = $2::uuid`,
         tenantId, user.id,
       );
-      const otherSessionId = randomUUID();
-      await sql(
-        `INSERT INTO sessions (id, session_token, user_id, tenant_id, expires, created_at, last_active_at)
-         VALUES ($1::uuid, $2, $3::uuid, $4::uuid, now() + interval '1 day', now(), now())`,
-        otherSessionId, hashSessionToken(`sess-${randomUUID()}`), user.id, otherTenantId,
-      );
-      const otherKey = await apiKey(user.id, otherTenantId);
+      const { otherSessionId, otherKey } = await otherTenantCredentials(user.id, otherTenantId);
       expect(await artifactState(artifacts)).toEqual(LIVE);
       expect(await apiKeyLive(key)).toBe(true);
       return { user, artifacts, key, otherSessionId, otherKey };
-    }
-
-    async function otherTenantLive(otherSessionId: string, otherKey: string) {
-      const [{ n }] = await sql<{ n: number }>(`SELECT count(*)::int AS n FROM sessions WHERE id = $1::uuid`, otherSessionId);
-      return { session: n === 1, apiKey: await apiKeyLive(otherKey) };
     }
 
     it("SCIM PATCH active=true revokes them, records the counts on SCIM_USER_REACTIVATE, and leaves another tenant's alone", async () => {
@@ -721,6 +726,84 @@ describe("session revocation is atomic with the departure — real-DB integratio
       const result = await runDirectorySync({ configId, tenantId, force: true });
 
       expect(result.success).toBe(true);
+      expect(await tenantStamp(user.id)).toBeNull();
+      expect(await artifactState(artifacts)).toEqual(REVOKED);
+      expect(await apiKeyLive(key)).toBe(false);
+      expect(await otherTenantLive(otherSessionId, otherKey)).toEqual({ session: true, apiKey: true });
+    });
+  });
+
+  // ── A membership creation revokes leftovers (code-review round-4 S-R4-1, deviation D13) ──
+  //
+  // An old-release SCIM DELETE whose revocation failed leaves the user with no
+  // row and live credentials in the tenant. Re-creating the row is not a
+  // reactivation, so returnToTenant never runs; the creating transaction
+  // revokes what the user holds there instead.
+
+  describe("a membership creation revokes the credentials an earlier membership left behind", () => {
+    let otherTenantId: string;
+
+    beforeEach(async () => {
+      otherTenantId = await ctx.createTenant();
+    });
+
+    afterEach(async () => {
+      await sql(`DELETE FROM sessions WHERE tenant_id = $1::uuid`, otherTenantId);
+      await sql(`DELETE FROM api_keys WHERE tenant_id = $1::uuid`, otherTenantId);
+      await ctx.deleteTestData(otherTenantId);
+    });
+
+    /**
+     * A user this tenant owns whose row was deleted (the SCIM DELETE) while
+     * the revocation failed: the four artifacts and an API key still live
+     * here, and a session and an API key of theirs in another tenant.
+     */
+    async function removedWithLeftovers() {
+      const owner = await ctx.createUser(tenantId);
+      const user = await ownedWithoutRow();
+      const artifacts = await seedArtifacts(user.id, owner);
+      const key = await apiKey(user.id, tenantId);
+      const other = await otherTenantCredentials(user.id, otherTenantId);
+      expect(await tenantStamp(user.id)).toBe("absent");
+      expect(await artifactState(artifacts)).toEqual(LIVE);
+      expect(await apiKeyLive(key)).toBe(true);
+      return { user, artifacts, key, ...other };
+    }
+
+    it("a SCIM POST creating the user active revokes them, and leaves another tenant's alone", async () => {
+      const { user, artifacts, key, otherSessionId, otherKey } = await removedWithLeftovers();
+
+      const res = await scimPostUser(jsonRequest("http://localhost/api/scim/v2/Users", "POST", {
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
+        userName: user.email,
+        active: true,
+      }));
+
+      expect(res.status).toBe(201);
+      expect(await tenantStamp(user.id)).toBeNull();
+      expect(await artifactState(artifacts)).toEqual(REVOKED);
+      expect(await apiKeyLive(key)).toBe(false);
+      expect(await otherTenantLive(otherSessionId, otherKey)).toEqual({ session: true, apiKey: true });
+    });
+
+    it("a directory-sync run creating the user active revokes them, and leaves another tenant's alone", async () => {
+      const { user, artifacts, key, otherSessionId, otherKey } = await removedWithLeftovers();
+      const configId = randomUUID();
+      await sql(
+        `INSERT INTO directory_sync_configs
+           (id, tenant_id, provider, display_name, enabled, sync_interval_minutes,
+            encrypted_credentials, credentials_iv, credentials_auth_tag, status, created_at, updated_at)
+         VALUES ($1::uuid, $2::uuid, 'OKTA'::"DirectorySyncProvider", 'test-config', true, 60,
+            'cipher', 'iv', 'tag', 'IDLE'::"DirectorySyncStatus", now(), now())`,
+        configId, tenantId,
+      );
+      mockFetchOktaUsers.mockReset();
+      mockFetchOktaUsers.mockResolvedValue([oktaUser(`ext-${user.id.slice(0, 8)}`, user.email, "User", true)]);
+
+      const result = await runDirectorySync({ configId, tenantId, force: true });
+
+      expect(result.success).toBe(true);
+      expect(result.usersCreated).toBe(1);
       expect(await tenantStamp(user.id)).toBeNull();
       expect(await artifactState(artifacts)).toEqual(REVOKED);
       expect(await apiKeyLive(key)).toBe(false);

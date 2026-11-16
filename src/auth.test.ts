@@ -204,6 +204,16 @@ vi.mock("@sentry/nextjs", () => ({
   captureMessage: mockSentryCaptureMessage,
 }));
 
+// Row 4's revocation is replaced (it takes the credential lock through raw SQL
+// this file's Prisma double does not speak); tombstoneRevokedSessions stays real.
+const { mockRevokeUsersAuthArtifactsInTx } = vi.hoisted(() => ({
+  mockRevokeUsersAuthArtifactsInTx: vi.fn(async () => ({ counts: {}, sessionTokens: [] as string[] })),
+}));
+vi.mock("@/lib/auth/session/user-session-invalidation", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
+  revokeUsersAuthArtifactsInTx: mockRevokeUsersAuthArtifactsInTx,
+}));
+
 vi.mock("@/lib/prisma", () => ({
   prisma: mockPrisma,
 }));
@@ -254,6 +264,7 @@ vi.mock("./auth.config", () => ({
 
 import type { Account } from "next-auth";
 import { ensureTenantMembershipForSignIn, assertBootstrapSingleMember } from "./auth";
+import { UserAuthLockTimeoutError } from "@/lib/auth/session/user-auth-serialization";
 import { CLAIM_BINDING_MODE } from "@/lib/auth/jackson-providers";
 import { toAuditProvider } from "@/lib/audit/auth-failure-mapping";
 import type { ClaimLookup, ClaimTenantResolution } from "@/lib/tenant/tenant-management";
@@ -659,6 +670,49 @@ describe("ensureTenantMembershipForSignIn", () => {
     });
   });
 
+  // Row 4 creates a membership row for a user who already exists, so it revokes
+  // the residue of an earlier membership in that tenant (deviation D13).
+  it("row 4: revokes what the user still holds in the joined tenant, last, with a bounded wait", async () => {
+    mockPrisma.user.findUnique.mockResolvedValue({ tenantId: TENANT_OTHER });
+
+    const result = await ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {});
+
+    expect(result).toEqual({ ok: true });
+    expect(mockRevokeUsersAuthArtifactsInTx).toHaveBeenCalledTimes(1);
+    expect(mockRevokeUsersAuthArtifactsInTx).toHaveBeenCalledWith(mockPrisma, ["user-1"], {
+      tenantFilter: { tenantId: TENANT_CLAIMED },
+      boundedLockWait: true,
+    });
+    const revokedAt = mockRevokeUsersAuthArtifactsInTx.mock.invocationCallOrder[0]!;
+    expect(mockPrisma.tenantMember.upsert.mock.invocationCallOrder[0]).toBeLessThan(revokedAt);
+    expect(mockPrisma.user.update.mock.invocationCallOrder[0]).toBeLessThan(revokedAt);
+    expect(mockLogAuditInTx.mock.invocationCallOrder[0]).toBeLessThan(revokedAt);
+  });
+
+  it("row 4: tombstones the revoked sessions after the join's transaction commits", async () => {
+    const commit = vi.fn();
+    mockWithBypassRls.mockImplementationOnce(async (prisma: unknown, fn: (tx: unknown) => unknown) => {
+      const value = await fn(prisma);
+      commit();
+      return value;
+    });
+    mockRevokeUsersAuthArtifactsInTx.mockResolvedValueOnce({ counts: { sessions: 2 }, sessionTokens: ["digest-a", "digest-b"] });
+    mockInvalidateCachedSessions.mockResolvedValueOnce({ total: 2, failed: 0 });
+
+    const result = await ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {});
+
+    expect(result).toEqual({ ok: true });
+    expect(mockInvalidateCachedSessions).toHaveBeenCalledWith(["digest-a", "digest-b"]);
+    expect(commit.mock.invocationCallOrder[0]).toBeLessThan(mockInvalidateCachedSessions.mock.invocationCallOrder[0]!);
+  });
+
+  it("row 4: a credential lock held past the bounded wait fails the join and tombstones nothing", async () => {
+    mockRevokeUsersAuthArtifactsInTx.mockRejectedValueOnce(new UserAuthLockTimeoutError());
+
+    await expect(ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {})).rejects.toBeInstanceOf(UserAuthLockTimeoutError);
+    expect(mockInvalidateCachedSessions).not.toHaveBeenCalled();
+  });
+
   // Row 4, the divergent half: the branch that PRODUCES the column/membership
   // divergence the whole adjudicator exists to survive.
 
@@ -771,6 +825,8 @@ describe("ensureTenantMembershipForSignIn", () => {
     // The column already agrees: the realignment is one read and no write.
     expect(mockPrisma.user.update).not.toHaveBeenCalled();
     expect(mockLogAuditInTx).not.toHaveBeenCalled();
+    // An active member's credentials are theirs, not residue.
+    expect(mockRevokeUsersAuthArtifactsInTx).not.toHaveBeenCalled();
   });
 
   it("row 5: realigns a column that still names another tenant, and records it", async () => {
