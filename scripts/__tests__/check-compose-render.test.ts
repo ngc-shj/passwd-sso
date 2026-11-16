@@ -13,6 +13,7 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
+import { load } from "js-yaml";
 import {
   CANARY_TOKEN,
   COMPOSE_PROJECT_NAME,
@@ -1096,4 +1097,79 @@ describe("real docker compose", () => {
     expect(main(["--root", dir])).toBe(1);
     expect(err.join("\n")).toContain("retention-gc-worker: DEPLOYMENT_ID is not the one");
   }, 120_000);
+});
+
+/**
+ * fixtureComparison hard-fails under CI=true when the runner's compose differs
+ * from the fixture's, so the workflow installs one pinned version. These pin
+ * that version, per job, to the fixture's.
+ */
+const COMPOSE_PIN_JOBS = ["static-checks", "app-test"];
+const COMPOSE_PIN_STEP = "Install docker compose (pinned)";
+const realCiText = readFileSync(join(REPO_ROOT, ".github/workflows/ci.yml"), "utf8");
+
+/** Problems with the compose pin in a ci.yml text, against the fixture's recorded version line. */
+function composePinProblems(ciText: string, fixtureVersion: string | null): string[] {
+  const jobs = (load(ciText) as { jobs: Record<string, { steps: { name?: string; run?: string }[] }> }).jobs;
+  const problems: string[] = [];
+  const pins: Record<string, { version: string; sha: string }> = {};
+  for (const job of COMPOSE_PIN_JOBS) {
+    const steps = (jobs[job]?.steps ?? []).filter((s) => s.name === COMPOSE_PIN_STEP);
+    if (steps.length !== 1) {
+      problems.push(`${job} has ${steps.length} "${COMPOSE_PIN_STEP}" steps, not 1`);
+      continue;
+    }
+    const version = /^\s*COMPOSE_VERSION=(\S+)$/m.exec(steps[0].run ?? "")?.[1];
+    const sha = /^\s*COMPOSE_SHA256=([0-9a-f]{64})$/m.exec(steps[0].run ?? "")?.[1];
+    if (!version || !sha) problems.push(`${job} does not set COMPOSE_VERSION and a 64-hex COMPOSE_SHA256`);
+    else pins[job] = { version, sha };
+  }
+  const found = Object.values(pins);
+  if (new Set(found.map((p) => `${p.version} ${p.sha}`)).size > 1) problems.push("the jobs pin different compose versions or checksums");
+  for (const [job, pin] of Object.entries(pins)) {
+    if (fixtureVersion !== `Docker Compose version ${pin.version}`) problems.push(`${job} pins ${pin.version}, the fixture was recorded under "${fixtureVersion}"`);
+  }
+  return problems;
+}
+
+describe("CI compose pin", () => {
+  it("matches the fixture's composeVersion in both jobs, with one version and checksum", () => {
+    expect(composePinProblems(realCiText, recorded.composeVersion)).toEqual([]);
+  });
+
+  it("is refused when ci.yml alone moves to another version", () => {
+    const text = realCiText.replaceAll("COMPOSE_VERSION=v5.0.2", "COMPOSE_VERSION=v5.0.3");
+    expect(text).not.toBe(realCiText);
+    expect(composePinProblems(text, recorded.composeVersion)).toEqual([
+      `static-checks pins v5.0.3, the fixture was recorded under "${recorded.composeVersion}"`,
+      `app-test pins v5.0.3, the fixture was recorded under "${recorded.composeVersion}"`,
+    ]);
+  });
+
+  it("is refused when only the fixture's version changes", () => {
+    expect(composePinProblems(realCiText, "Docker Compose version v5.0.3")).toEqual([
+      'static-checks pins v5.0.2, the fixture was recorded under "Docker Compose version v5.0.3"',
+      'app-test pins v5.0.2, the fixture was recorded under "Docker Compose version v5.0.3"',
+    ]);
+  });
+
+  it("is refused when the two jobs disagree on the version or the checksum", () => {
+    const first = realCiText.indexOf("COMPOSE_VERSION=v5.0.2");
+    const second = realCiText.indexOf("COMPOSE_VERSION=v5.0.2", first + 1);
+    expect(second).toBeGreaterThan(first);
+    const versionSkew = realCiText.slice(0, second) + "COMPOSE_VERSION=v5.0.3" + realCiText.slice(second + "COMPOSE_VERSION=v5.0.2".length);
+    expect(composePinProblems(versionSkew, recorded.composeVersion)).toEqual([
+      "the jobs pin different compose versions or checksums",
+      `app-test pins v5.0.3, the fixture was recorded under "${recorded.composeVersion}"`,
+    ]);
+    const sha = /COMPOSE_SHA256=([0-9a-f]{64})/.exec(realCiText)![1];
+    const at = realCiText.lastIndexOf(sha);
+    const shaSkew = realCiText.slice(0, at) + "0".repeat(64) + realCiText.slice(at + 64);
+    expect(composePinProblems(shaSkew, recorded.composeVersion)).toEqual(["the jobs pin different compose versions or checksums"]);
+  });
+
+  it("is refused when a job loses the step", () => {
+    const text = realCiText.replace(`- name: ${COMPOSE_PIN_STEP}`, "- name: Something else");
+    expect(composePinProblems(text, recorded.composeVersion)).toEqual([`static-checks has 0 "${COMPOSE_PIN_STEP}" steps, not 1`]);
+  });
 });

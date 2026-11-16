@@ -586,6 +586,9 @@ export function loggingProblems(logging: unknown): string[] {
     if (!isRecord(logging.options)) problems.push("logging.options is not a mapping");
     else {
       for (const key of Object.keys(logging.options)) if (!LOGGING_OPTION_ALLOWLIST.includes(key)) problems.push(`logging.options.${key} is not in LOGGING_OPTION_ALLOWLIST`);
+      for (const [key, value] of Object.entries(logging.options)) {
+        if (typeof value === "string" && value.includes("$")) problems.push(`logging.options.${key} contains an interpolation, which the stub .env hides from the render`);
+      }
       const tag = logging.options.tag;
       if (typeof tag === "string" && tag.includes("{{")) problems.push("logging.options.tag contains a template, which can expose the container's environment (every template is refused)");
     }

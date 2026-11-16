@@ -217,3 +217,18 @@ not a W channel.
   with both versions and the re-record command; locally it warns and compares the
   projection. Stub-docker red/allow cases.
 - Verification: full suite 1193 files / 25097 tests pass; build pass; gates pass.
+
+### Round 6
+Security: No findings (tag templates refused; awslogs options copy no environment).
+Functionality: No findings. Testing: H1 [Major] the CI hard-fail tied app-test to the
+runner's unpinned compose version; H2 [Minor, Adjacent] a `${VAR}` logging option value
+escapes both gates.
+
+- H1 — Fixed: `Install docker compose (pinned)` in static-checks and app-test
+  (v5.0.2, SHA-256 from the release's checksums.txt, installed as the user CLI plugin,
+  step fails unless `docker compose version` is exactly the fixture's string); a test pins
+  both jobs' version/SHA to each other and to the fixture's `composeVersion`.
+  User-plugin precedence verified locally with a fake plugin under `DOCKER_CONFIG`.
+- H2 — Fixed: `loggingProblems` refuses any logging option value containing `$`.
+- Verification: full suite 1193 files / 25103 tests pass; build pass; actions-sha-pinned,
+  workflow-supply-chain, required-aggregate, compose-render, typecheck, lint pass.

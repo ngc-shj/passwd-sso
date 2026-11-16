@@ -298,6 +298,13 @@ describe("loggingProblems", () => {
     }
   });
 
+  it("refuses an interpolation in any option value, and allows the shipped literals", () => {
+    const refusal = (key: string) => `logging.options.${key} contains an interpolation, which the stub .env hides from the render`;
+    expect(loggingProblems({ driver: "fluentd", options: { tag: "${LOG_TAG}" } })).toEqual([refusal("tag")]);
+    expect(loggingProblems({ driver: "awslogs", options: { "awslogs-group": "${G}" } })).toEqual([refusal("awslogs-group")]);
+    expect(loggingProblems({ driver: "awslogs", options: { "awslogs-group": "/passwd-sso/app", "awslogs-region": "us-east-1" } })).toEqual([]);
+  });
+
   it("refuses an unlisted or missing driver, a stray logging key and a shape it does not model", () => {
     expect(loggingProblems({ driver: "gelf" })).toEqual(["logging.driver gelf is not in LOGGING_DRIVER_ALLOWLIST"]);
     expect(loggingProblems({ options: { "max-size": "20m" } })).toEqual(["logging.driver is not set"]);
