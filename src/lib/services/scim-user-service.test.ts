@@ -123,7 +123,7 @@ describe("patchScimUser", () => {
     mockTenantMemberUpdate.mockResolvedValue({});
     mockQueryRaw.mockImplementation(lockAnswers());
     mockDepartFromTenant.mockResolvedValue(NOBODY_DEPARTED);
-    mockReturnToTenant.mockResolvedValue([]);
+    mockReturnToTenant.mockResolvedValue(NOBODY_DEPARTED);
     runTransactionOverMocks();
   });
 
@@ -223,12 +223,13 @@ describe("patchScimUser", () => {
       deactivatedAt: new Date("2024-01-01T00:00:00.000Z"),
     });
     mockSnapshotRead();
-    mockReturnToTenant.mockResolvedValueOnce([USER_ID]);
+    mockReturnToTenant.mockResolvedValueOnce({ userIds: [USER_ID], revocation: REVOCATION });
 
     const result = await patchScimUser(TENANT_ID, USER_ID, { active: true }, ACTOR);
 
     expect(result.auditAction).toBe("SCIM_USER_REACTIVATE");
-    expect(result.revocation).toBeNull();
+    // What the return revoked (leftover credentials), for the route to tombstone.
+    expect(result.revocation).toBe(REVOCATION);
   });
 
   it("carries no revocation when updating an already-active member", async () => {

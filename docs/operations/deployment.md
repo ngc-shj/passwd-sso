@@ -356,7 +356,9 @@ preflight checks that the operator attested, not that the observations are true.
   release carrying migration `20261019000000_rls_bypass_admits_report_mode`. Older
   code has no report listener, so its reports reach no metric.
 - [ ] The follow-up issue `#1047` (SCIM deprovisioning and team member removal do
-  not fail or retry when revoking a session or token fails) is filed.
+  not fail or retry when revoking a session or token fails) is filed. From the
+  release that fixes it, the revocation commits with the departure or not at all;
+  older releases commit the departure and only log the failure.
 - [ ] `AUDIT_CHAIN_VERIFY_DATABASE_URL` is in the app secret (step 1 below).
 
 What the window does not measure: a refusal depends on the query plan, so a plan

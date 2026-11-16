@@ -320,6 +320,7 @@ export async function tombstoneRevokedSessions(
   const userField = context.userId === undefined ? {} : { userId: context.userId };
   getLogger().error(
     {
+      ...context.extra,
       ...userField,
       failures,
       reason: context.reason,

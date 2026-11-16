@@ -4,7 +4,7 @@ import type { Prisma } from "@prisma/client";
 const { mockLogAuditInTx } = vi.hoisted(() => ({ mockLogAuditInTx: vi.fn() }));
 vi.mock("@/lib/audit/audit", () => ({ logAuditInTx: mockLogAuditInTx }));
 
-import { departCreatedMembership, departFromTenant } from "./team-departure";
+import { departCreatedMembership, departFromTenant, returnToTenant } from "./team-departure";
 import { createLockBudget } from "./team-key-rotation-lock";
 import { userAuthLockKey } from "@/lib/auth/session/user-auth-serialization";
 
@@ -165,5 +165,64 @@ describe("departCreatedMembership", () => {
     expect(raw.$executeRaw).not.toHaveBeenCalled();
     expect(raw.$queryRaw).not.toHaveBeenCalled();
     expect(revocation.sessionTokens).toEqual([]);
+  });
+});
+
+// A return revokes what the user holds in the tenant: it was minted before the
+// departure or without an active membership (code-review round-1 S1).
+describe("returnToTenant", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("revokes the returned users' credentials in the tenant, last, after restoring their team memberships", async () => {
+    const { tx, raw, statements } = departureTx(["team-1"]);
+
+    const result = await returnToTenant(tx, TENANT, [USER], {
+      actor: ACTOR,
+      budget: createLockBudget(),
+      alreadyLocked: true,
+    });
+
+    const restored = statements.findIndex((s) => s.sql.includes("UPDATE team_members"));
+    const lockAt = userAuthLock(statements);
+    expect(restored).toBeGreaterThanOrEqual(0);
+    expect(lockAt).toBeGreaterThan(restored);
+    expect(statements[lockAt]!.values).toEqual([[userAuthLockKey(USER)]]);
+    // Bounded: lock_timeout is set around the lock statement.
+    expect(statements[lockAt - 1]!.sql).toContain("lock_timeout");
+    expect(raw.session.deleteMany).toHaveBeenCalledWith({ where: { userId: { in: [USER] }, tenantId: TENANT } });
+    expect(raw.session.deleteMany.mock.invocationCallOrder[0]).toBeGreaterThan(
+      mockLogAuditInTx.mock.invocationCallOrder[0]!,
+    );
+    expect(result.userIds).toEqual([USER]);
+    expect(result.revocation.sessionTokens).toEqual(["digest-1"]);
+    expect(result.revocation.counts).toMatchObject({ sessions: 1, apiKeys: 1, extensionTokens: 1 });
+  });
+
+  it("revokes nothing when nobody returns", async () => {
+    const { tx, raw, statements } = departureTx([]);
+    raw.$queryRaw.mockImplementation(async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      statements.push({ sql: strings.join("?"), values });
+      return [];
+    });
+
+    const result = await returnToTenant(tx, TENANT, [USER], { actor: ACTOR, alreadyLocked: true });
+
+    expect(result.userIds).toEqual([]);
+    expect(result.revocation.sessionTokens).toEqual([]);
+    expect(userAuthLock(statements)).toBe(-1);
+    expect(raw.session.deleteMany).not.toHaveBeenCalled();
+    expect(raw.apiKey.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("makes no statement for no users", async () => {
+    const { tx, raw } = departureTx([]);
+
+    const result = await returnToTenant(tx, TENANT, [], { actor: ACTOR });
+
+    expect(raw.$executeRaw).not.toHaveBeenCalled();
+    expect(raw.$queryRaw).not.toHaveBeenCalled();
+    expect(result).toEqual({ userIds: [], revocation: expect.objectContaining({ sessionTokens: [] }) });
   });
 });

@@ -21,10 +21,13 @@
  * The per-user credential caps (session cap, extension/iOS family caps, API
  * keys, bridge codes) serialize on this same lock, so a cap and a revocation
  * are one lock and no ordering between them can deadlock. A mint takes it
- * first in its transaction, before any row lock. A departure or removal
- * (team-departure.ts, SCIM DELETE, team member DELETE) revokes in the
- * transaction that ends the membership and takes it LAST, after its row
- * writes: a mint holding it waits on no row those transactions hold.
+ * first in its transaction, before any row lock. A departure, return or
+ * removal (team-departure.ts, SCIM DELETE, team member DELETE) revokes in the
+ * transaction that changes the membership and takes it last within each such
+ * call, after that call's row writes. A transaction that makes several calls
+ * (directory sync) or writes after one (SCIM PUT's external mapping) holds it
+ * across those later writes. What holds is that a mint holding it waits on no
+ * row those transactions hold.
  *
  * Its key is namespaced (`user-auth:<userId>`), apart from the bare-user-id
  * lock that vault data paths hold (key rotation for up to its 2-minute

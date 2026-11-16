@@ -107,10 +107,12 @@ export class UserAuthLockTimeoutError extends Error {}
 export type DepartureRevocation = { counts: UserAuthArtifactCounts; sessionTokens: string[] };
 export async function departFromTenant(tx, tenantId, userIds, options): Promise<{ userIds: string[]; revocation: DepartureRevocation }>;
 export async function departCreatedMembership(tx, tenantId, userIds, options): Promise<DepartureRevocation>;
+export async function returnToTenant(tx, tenantId, userIds, options): Promise<{ userIds: string[]; revocation: DepartureRevocation }>;
 ```
 
 - `departFromTenant` revokes, scoped `{ tenantId }`, for exactly the transitioned ids, after `endTeamMemberships`, with `boundedLockWait: true`. A non-transition revokes nothing. This is the same set that today decides `needsSessionInvalidation`.
 - `departCreatedMembership` revokes for its ids, so the invariant is "every membership end revokes" without exceptions to argue.
+- `returnToTenant` revokes too (code-review round-1 S1), scoped `{ tenantId }` with `boundedLockWait: true`, for exactly the transitioned ids, as its last step after the team-membership restore. A non-transition revokes nothing. Whatever the user holds in the tenant when they return was minted before the departure or without an active membership. Departures made before this change (every directory-sync one, and every SCIM/team failure that was swallowed) left such credentials alive, and a reactivation would otherwise revive them. Directory sync collects the return's revocation with the departures' (C5), and the SCIM routes tombstone and record it on `SCIM_USER_REACTIVATE` (C3).
 - Directory sync takes no extra lock: each departure call revokes its own ids last (C1). It collects every `sessionTokens` list and tombstones them once after the commit (C5). It logs the summed counts in a structured `directory-sync.credentials-revoked` line; the per-team `TEAM_MEMBER_TENANT_DEACTIVATE` audit rows and the sync log's `usersDeactivated` already record the departures (round-1 S7). The rest of directory sync is unchanged.
 - Lock order: the revocation runs after `lockTenantRows` and the team locks. No holder of the user-auth lock waits on a lock these transactions hold:
   - Explicit locks: every file calling `lockUserAuthArtifacts` has 0 matches for `lockTenantRows|lockTenantMemberCreation|lockMemberTeams|lockTeamKeyVersion|lockActorThenTeam|FOR UPDATE|FOR SHARE` (loop over `grep -rl lockUserAuthArtifacts src --include='*.ts' | grep -v '\.test\.'`).
@@ -124,7 +126,7 @@ export async function departCreatedMembership(tx, tenantId, userIds, options): P
 ### C3: SCIM `Users/[id]` PUT / PATCH / DELETE, and SCIM POST
 
 - `deactivateScimUser` revokes (C1, `{ tenantId }`, `boundedLockWait: true`) inside its transaction, after the membership delete. `DeactivateResult` becomes `{ userId; revocation: DepartureRevocation }`.
-- `replaceScimUser` / `patchScimUser` results replace `needsSessionInvalidation` with `revocation: DepartureRevocation | null`. It is non-null exactly when the action is `SCIM_USER_DEACTIVATE`.
+- `replaceScimUser` / `patchScimUser` results replace `needsSessionInvalidation` with `revocation: DepartureRevocation | null`. It is non-null exactly when the action is `SCIM_USER_DEACTIVATE` or, since code-review round-1 S1, `SCIM_USER_REACTIVATE` (C2: the return revokes).
 - The routes stop calling `invalidateUserSessions`. After the commit they call `tombstoneRevokedSessions(revocation.sessionTokens, …)` and record `{ ...revocation.counts, cacheTombstoneFailures }` in the audit metadata. Those are the same keys as today; `sessionInvalidationFailed` is gone.
 - SCIM POST tombstones `departCreatedMembership`'s `sessionTokens` after its commit. Its audit metadata is unchanged.
 - A revocation failure propagates out of the transaction.

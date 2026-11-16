@@ -39,9 +39,9 @@ import { REALIGNMENT_SOURCE, realignAfterActivation, type RealignmentCause } fro
 type Params = { params: Promise<{ id: string }> };
 
 /**
- * After the deprovisioning committed (its revocation with it), evict the
- * revoked sessions from the session cache, and return the audit metadata
- * fields recording what was revoked. Null: nothing was deprovisioned.
+ * After the deactivation, reactivation or deletion committed (its revocation
+ * with it), evict the revoked sessions from the session cache, and return the
+ * audit metadata fields recording what was revoked. Null: nothing transitioned.
  */
 async function revocationAuditFields(
   revocation: DepartureRevocation | null,

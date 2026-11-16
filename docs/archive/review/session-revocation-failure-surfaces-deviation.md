@@ -5,6 +5,7 @@
 - `member-passkey-revoke.ts`: on a partial failure it gains the `session.cache_tombstone_failures` error log. A Redis throw is now logged as `session.cache_tombstone_failures` with `error` fields, not as `tenant.member_passkey_revoke_cache_invalidation_failed`.
 - SCIM `Users/[id]` and POST, and team DELETE: Sentry text and tag changed from `…during invalidateUserSessions` / `unspecified` to `…during SCIM user deprovisioning` / `scim_deprovision` and `…during team member removal` / `team_member_remove`. The `_logType` and level are unchanged.
 - Directory sync: a new signal, `directory_sync_deprovision`, with `extra { tenantId, configId }`.
+- Code-review round-1 F2: the error log now also carries `context.extra`, spread first so it cannot replace `failures`, `reason` or `_logType`. The message and Sentry payload are unchanged. The log fields of `invalidateUserSessions` and `src/auth.ts` therefore gain `tenantScope`, and the passkey-revoke and directory-sync lines gain their subject ids (`targetUserId`; `tenantId`, `configId`), so they are no longer byte-identical to the pre-change fields.
 
 ## D2: single-user lock statement
 `revokeUserAuthArtifactsInTx(tx, id)` now takes its lock through the batch `unnest` statement of `lockUsersAuthArtifacts` instead of `advisoryXactLock`. It uses the same key (`userAuthLockKey`) and the same `hashtext`, so it serializes against mints exactly as before. T6's lock-identity cell pins this.
@@ -24,6 +25,13 @@ In `replaceScimUser`, the `scimExternalMapping` writes run after `departFromTena
 ## D7: comment-only updates in four token tests
 `extension-token.test.ts`, `api-key.test.ts`, `tenant-context.test.ts` and `mcp/oauth-server.test.ts` carried "L2" comments describing the old fail-open SCIM path (logged and answered 200). The comments now describe the atomic revocation. Test names and assertions are unchanged.
 
+## D8: `returnToTenant` revokes (code-review round-1 S1)
+Not in the plan's C2 as first written, which revoked only on membership ends. A return now revokes, scoped `{ tenantId }` with `boundedLockWait: true`, for exactly the transitioned ids, as its last step after the team-membership restore, and returns `{ userIds, revocation }` like `departFromTenant`. Departures made before this change (every directory-sync one, swallowed SCIM/team failures) left credentials alive in the tenant, and a reactivation would otherwise revive them. Consequences:
+- `replaceScimUser` / `patchScimUser` return a non-null `revocation` for `SCIM_USER_REACTIVATE` too. The SCIM `[id]` route already tombstones and records the counts whenever `revocation !== null`, so the `SCIM_USER_REACTIVATE` audit row now carries them, and the tombstone signal is the existing `scim_deprovision` one.
+- Directory sync collects the return's revocation with the departures', tombstones it after the commit and sums it into `directory-sync.credentials-revoked`. That line now also names the users (`departedUserIds`, `returnedUserIds`; round-1 S2), since a departed user with no team membership has no `TEAM_MEMBER_TENANT_DEACTIVATE` row.
+- A return can now be refused with 409 (`UserAuthLockTimeoutError`) when the user's credential lock is held past the bounded wait, as a departure can.
+- Lock order is unchanged: the credential lock is the last lock of the return, after the team locks and the restore writes.
+
 ## Red-proof record (Phase 2)
 Every mutation ran on a scratch copy, outside the repository, through a scratch vitest alias config. Production files were never mutated, and each unmutated control passed through the same config.
 
@@ -37,3 +45,15 @@ Every mutation ran on a scratch copy, outside the repository, through a scratch 
 | C8 rule 9 (gate self-test) | 22 single-clause mutations of the gate (m01–m22: each subject arm, the fail-closed cases, source order, innermost function, before-skip placement, missing/unexpected checks, the exemption) | Each reddens its own cells; listed per mutation in the C8 implementer's report |
 
 T1's "unseeded faulted table" red was not run as a separate mutation. `expectSeeded` (row counts before the snapshot) and the touch of the code row while the fault is armed, which proves the trigger passes while the session exists, cover the same failure.
+
+## Red-proof record (code-review round 1)
+Same method as Phase 2: scratch copies outside the repository, aliased in through a scratch vitest config; each unmutated control passed through the same config.
+
+| Cell | Mutation | Observed failure |
+|------|----------|------------------|
+| T-1 team member DELETE "tombstones … after the commit" | Tombstone moved inside the `withTeamTenantRls` callback | Only that cell fails: `expected 1336 to be less than 1335` (commit after tombstone) |
+| T-1 SCIM `[id]` PUT/PATCH deactivation, PUT/PATCH reactivation, DELETE | `scim-user-service.ts` tombstones inside each transaction callback (the route's post-commit call gets no tokens) | Exactly those 5 cells fail, each on the commit-order assertion |
+| T-1 SCIM POST created-deactivated | Tombstone moved inside the `withTenantRls` callback | Only that cell fails, on the commit-order assertion |
+| T-1 directory sync (departures; reactivation) | `reportRevocations` moved inside the apply transaction | Exactly those 2 cells fail, on the commit-order assertion |
+| S1 unit "revokes the returned users' credentials … last" | `returnToTenant` revokes `[]`; separately, revokes before the team-membership restore | Only that cell fails in each (`expected -1 to be greater than 6`; `expected 3 to be greater than 10`) |
+| S1 integration (SCIM PATCH active=true; directory-sync reactivation) | `returnToTenant` revokes `[]` | Both cells fail: `expected { session: true, … } to deeply equal { session: false, … }` |

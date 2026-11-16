@@ -558,7 +558,7 @@ describe("tombstoneRevokedSessions", () => {
 
     expect(failures).toBe(2);
     expect(mockLoggerError).toHaveBeenCalledWith(
-      { userId: "u", failures: 2, reason: "scim_deprovision", _logType: "session.cache_tombstone_failures" },
+      { tenantScope: "t", userId: "u", failures: 2, reason: "scim_deprovision", _logType: "session.cache_tombstone_failures" },
       "session.cache_tombstone_failures",
     );
     expect(mockSentryCaptureMessage).toHaveBeenCalledWith("session cache tombstone failures during SCIM user deprovisioning", {
@@ -580,12 +580,38 @@ describe("tombstoneRevokedSessions", () => {
     expect(failures).toBe(2);
     const [fields, message] = mockLoggerError.mock.calls[0]!;
     expect(message).toBe("session.cache_tombstone_failures");
-    expect(fields).toMatchObject({ failures: 2, _logType: "session.cache_tombstone_failures", error: expect.anything() });
+    expect(fields).toMatchObject({
+      targetUserId: "target",
+      failures: 2,
+      _logType: "session.cache_tombstone_failures",
+      error: expect.anything(),
+    });
     // No userId when none is given.
     expect(fields).not.toHaveProperty("userId");
     expect(mockSentryCaptureMessage).toHaveBeenCalledWith(
       "session cache tombstone failures during tenant member passkey revoke",
       expect.objectContaining({ extra: { failures: 2, targetUserId: "target" } }),
+    );
+  });
+
+  it("logs the context's extra fields without letting them replace the signal's own", async () => {
+    mockInvalidateCachedSessions.mockResolvedValueOnce({ total: 1, failed: 1 });
+
+    await tombstoneRevokedSessions(["a"], {
+      reason: "directory_sync_deprovision",
+      operation: "directory sync",
+      extra: { tenantId: "t", configId: "c", failures: 99, _logType: "other" },
+    });
+
+    expect(mockLoggerError).toHaveBeenCalledWith(
+      {
+        tenantId: "t",
+        configId: "c",
+        failures: 1,
+        reason: "directory_sync_deprovision",
+        _logType: "session.cache_tombstone_failures",
+      },
+      "session.cache_tombstone_failures",
     );
   });
 
@@ -622,7 +648,7 @@ describe("tombstoneRevokedSessions", () => {
     await invalidateUserSessions("user-1", { allTenants: true, reason: "admin_vault_reset" });
 
     expect(mockLoggerError).toHaveBeenCalledWith(
-      { userId: "user-1", failures: 1, reason: "admin_vault_reset", _logType: "session.cache_tombstone_failures" },
+      { tenantScope: "all", userId: "user-1", failures: 1, reason: "admin_vault_reset", _logType: "session.cache_tombstone_failures" },
       "session.cache_tombstone_failures",
     );
     expect(mockSentryCaptureMessage).toHaveBeenCalledWith("session cache tombstone failures during invalidateUserSessions", {

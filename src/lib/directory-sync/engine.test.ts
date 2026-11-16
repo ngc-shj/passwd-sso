@@ -23,6 +23,7 @@ const {
   memberNames,
   mockRealignAfterActivation,
   mockLoggerError,
+  mockCommit,
 } = vi.hoisted(() => {
   return {
     mockExecuteRaw: vi.fn(),
@@ -55,6 +56,8 @@ const {
     memberNames: new Map<string, string>(),
     mockRealignAfterActivation: vi.fn(),
     mockLoggerError: vi.fn(),
+    // Called by the withTenantRls double once a callback resolved: its commit.
+    mockCommit: vi.fn(),
   };
 });
 
@@ -81,7 +84,12 @@ const mockGuardUserFindMany = vi.fn().mockResolvedValue([]);
 
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withTenantRls: vi.fn(async (prisma, _tenantId, fn) => {
-    if (!applyTxHolder.current) return fn(prisma);
+    const commit = async (result: unknown) => {
+      const value = await result;
+      mockCommit();
+      return value;
+    };
+    if (!applyTxHolder.current) return commit(fn(prisma));
     // Per-model deep merge: the apply-phase tx and the top-level prisma mock
     // each supply a slice of a model's methods (e.g. the apply tx supplies
     // scimExternalMapping.upsert / user.create; prisma supplies the load-phase
@@ -99,7 +107,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
           : methods;
     }
     tx.$executeRaw = mockExecuteRaw;
-    return fn(tx);
+    return commit(fn(tx));
   }),
   // The cross-tenant reactivation guard opens its own bypass BEFORE the tenant
   // context. It gets its OWN client rather than the shared prisma mock: both
@@ -168,7 +176,10 @@ beforeEach(() => {
     userIds: [...ids],
     revocation: revokedFor(ids),
   }));
-  mockReturnToTenant.mockImplementation(async (_tx: unknown, _tenantId: string, ids: string[]) => [...ids]);
+  mockReturnToTenant.mockImplementation(async (_tx: unknown, _tenantId: string, ids: string[]) => ({
+    userIds: [...ids],
+    revocation: revokedFor(ids),
+  }));
   mockDepartCreatedMembership.mockImplementation(async (_tx: unknown, _tenantId: string, ids: string[]) => revokedFor(ids));
   mockTombstoneRevokedSessions.mockResolvedValue(0);
 });
@@ -825,12 +836,22 @@ describe("runDirectorySync", () => {
         operation: "directory sync",
         extra: { tenantId: TENANT_ID, configId: CONFIG_ID },
       });
-      // After the last departure call of the transaction.
-      expect(mockDepartCreatedMembership.mock.invocationCallOrder[0]).toBeLessThan(
-        mockTombstoneRevokedSessions.mock.invocationCallOrder[0]!,
-      );
+      // After the commit of the transaction holding the last departure call.
+      const lastDeparture = mockDepartCreatedMembership.mock.invocationCallOrder[0]!;
+      const applyCommit = mockCommit.mock.invocationCallOrder.find((order) => order > lastDeparture);
+      expect(applyCommit).toBeDefined();
+      expect(applyCommit!).toBeLessThan(mockTombstoneRevokedSessions.mock.invocationCallOrder[0]!);
       expect(mockLoggerInfo).toHaveBeenCalledWith(
-        { tenantId: TENANT_ID, configId: CONFIG_ID, sessions: 2, extensionTokens: 4, apiKeys: 0, cacheTombstoneFailures: 1 },
+        {
+          tenantId: TENANT_ID,
+          configId: CONFIG_ID,
+          departedUserIds: expect.arrayContaining(["user-a", "user-b"]),
+          returnedUserIds: [],
+          sessions: 2,
+          extensionTokens: 4,
+          apiKeys: 0,
+          cacheTombstoneFailures: 1,
+        },
         "directory-sync.credentials-revoked",
       );
     });
@@ -1606,6 +1627,16 @@ describe("runDirectorySync", () => {
       // After the commit: the apply ran in this tenant's context, which cannot
       // write a users row filed under another tenant.
       expect(mockRealignAfterActivation).toHaveBeenCalledWith("user-1", TENANT_ID, { source: "directory_sync", actorUserId: USER_ID, actorType: "HUMAN" });
+      // What the return revoked (credentials left over from the departure) is
+      // tombstoned after the commit and logged against the returned user.
+      const returned = mockReturnToTenant.mock.invocationCallOrder[0]!;
+      const applyCommit = mockCommit.mock.invocationCallOrder.find((order) => order > returned);
+      expect(mockTombstoneRevokedSessions).toHaveBeenCalledWith(["digest-of-user-1"], expect.anything());
+      expect(applyCommit!).toBeLessThan(mockTombstoneRevokedSessions.mock.invocationCallOrder[0]!);
+      expect(mockLoggerInfo).toHaveBeenCalledWith(
+        expect.objectContaining({ departedUserIds: [], returnedUserIds: ["user-1"], sessions: 1 }),
+        "directory-sync.credentials-revoked",
+      );
     });
 
     /** A mapped, deactivated member the provider now sends as active, filed under `owner`. */

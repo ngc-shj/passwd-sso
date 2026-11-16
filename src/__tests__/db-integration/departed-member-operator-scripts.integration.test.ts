@@ -573,7 +573,7 @@ describe("departed-member operator scripts — real-DB integration", () => {
         expect(await listed()).toEqual([hook]);
 
         const returned = await withTenantRls(prisma, tenant, (tx) => returnToTenant(tx, tenant, [user], { actor }));
-        expect(returned).toEqual([user]);
+        expect(returned.userIds).toEqual([user]);
         const [back] = await sql<{ deactivated_at: Date | null }>(
           `SELECT deactivated_at FROM team_members WHERE team_id = $1::uuid AND user_id = $2::uuid`, team, user,
         );

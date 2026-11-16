@@ -16,6 +16,7 @@ const {
   mockGuardMapping,
   mockRevokeUserAuthArtifactsInTx,
   mockTombstoneRevokedSessions,
+  mockCommit,
   mockLogger,
 } = vi.hoisted(() => ({
   mockValidateScimToken: vi.fn(),
@@ -37,6 +38,8 @@ const {
   // SCIM DELETE's revocation, inside deactivateScimUser's transaction.
   mockRevokeUserAuthArtifactsInTx: vi.fn(),
   mockTombstoneRevokedSessions: vi.fn(),
+  // Called by the transaction doubles once their callback resolved: the commit.
+  mockCommit: vi.fn(),
   mockLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
@@ -75,7 +78,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 // real-DB cells in team-tenant-departure.integration.test.ts. Here the helpers
 // answer as the database's conditional UPDATE does, from the membership
 // pre-read: a departure transitions an active member, a return an inactive one.
-// A departure revokes what its transitioned ids hold, derived from its arguments.
+// A departure or return revokes what its transitioned ids hold, derived from its arguments.
 const { mockDepartFromTenant, mockReturnToTenant, mockLockTenantRows } = vi.hoisted(() => ({
   mockDepartFromTenant: vi.fn(),
   mockReturnToTenant: vi.fn(),
@@ -130,9 +133,10 @@ beforeEach(() => {
   });
   mockRevokeUserAuthArtifactsInTx.mockImplementation(async (_tx: unknown, userId: string) => revokedFor([userId]));
   mockTombstoneRevokedSessions.mockResolvedValue(0);
-  mockReturnToTenant.mockImplementation(async (_tx: unknown, _tenantId: string, ids: string[]) =>
-    (await memberPreRead())?.deactivatedAt != null ? ids : [],
-  );
+  mockReturnToTenant.mockImplementation(async (_tx: unknown, _tenantId: string, ids: string[]) => {
+    const userIds = (await memberPreRead())?.deactivatedAt != null ? ids : [];
+    return { userIds, revocation: revokedFor(userIds) };
+  });
 });
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
@@ -829,16 +833,18 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
       .mockResolvedValueOnce({ userId: "user-1" })
       .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: wasDeactivated ? new Date() : null })
       .mockResolvedValueOnce({ userId: "user-1", deactivatedAt: active ? null : new Date() });
-    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
-      fn({
+    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
+      const result = await fn({
         tenantMember: { update: mockTenantMember.update },
         scimExternalMapping: {
           findFirst: mockScimExternalMapping.findFirst,
           deleteMany: mockScimExternalMapping.deleteMany,
           create: mockScimExternalMapping.create,
         },
-      }),
-    );
+      });
+      mockCommit();
+      return result;
+    });
     mockScimExternalMapping.deleteMany.mockResolvedValue({ count: 0 });
     return PUT(
       makeReq({
@@ -857,7 +863,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
       ["digest-of-user-1-1", "digest-of-user-1-2"],
       { reason: "scim_deprovision", operation: "SCIM user deprovisioning", userId: "user-1" },
     );
-    expect(mockTransaction.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(mockCommit.mock.invocationCallOrder[0]).toBeLessThan(
       mockTombstoneRevokedSessions.mock.invocationCallOrder[0]!,
     );
     expect(mockLogAudit).toHaveBeenCalledWith(
@@ -868,10 +874,32 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
     );
   });
 
-  it("tombstones nothing and records no counts on PUT reactivation", async () => {
+  // The return revokes what the user still holds in the tenant (leftovers of a
+  // departure that did not revoke), so a reactivation cannot revive them.
+  it("tombstones what the PUT reactivation revoked, after the commit, and records the counts", async () => {
     const res = await putActive(true, true);
 
     expect(res!.status).toBe(200);
+    expect(mockTombstoneRevokedSessions).toHaveBeenCalledWith(
+      ["digest-of-user-1-1", "digest-of-user-1-2"],
+      { reason: "scim_deprovision", operation: "SCIM user deprovisioning", userId: "user-1" },
+    );
+    expect(mockCommit.mock.invocationCallOrder[0]).toBeLessThan(
+      mockTombstoneRevokedSessions.mock.invocationCallOrder[0]!,
+    );
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "SCIM_USER_REACTIVATE",
+        metadata: expect.objectContaining({ sessions: 2, extensionTokens: 1, apiKeys: 0, cacheTombstoneFailures: 0 }),
+      }),
+    );
+  });
+
+  it("tombstones nothing and records no counts on a PUT active=true of a member already active", async () => {
+    const res = await putActive(true, false);
+
+    expect(res!.status).toBe(200);
+    expect(mockLogAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "SCIM_USER_UPDATE" }));
     expect(mockTombstoneRevokedSessions).not.toHaveBeenCalled();
     expect(mockLogAudit.mock.calls[0][0].metadata).not.toHaveProperty("sessions");
   });
@@ -907,6 +935,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
     expect(res!.status).toBe(409);
     expect((await res!.json()).detail).toBe("The user's sign-in state is being changed; retry later");
     expect(mockLogAudit).not.toHaveBeenCalled();
+    expect(mockTombstoneRevokedSessions).not.toHaveBeenCalled();
   });
 });
 
@@ -1189,9 +1218,11 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
       .mockResolvedValueOnce({ userId: "user-1", deactivatedAt: active ? null : new Date() });
     mockTenantMember.update.mockResolvedValue({});
     mockScimExternalMapping.findFirst.mockResolvedValue(null);
-    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
-      fn({ tenantMember: { update: mockTenantMember.update } }),
-    );
+    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
+      const result = await fn({ tenantMember: { update: mockTenantMember.update } });
+      mockCommit();
+      return result;
+    });
     return PATCH(
       makeReq({
         method: "PATCH",
@@ -1212,6 +1243,9 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
       ["digest-of-user-1-1", "digest-of-user-1-2"],
       { reason: "scim_deprovision", operation: "SCIM user deprovisioning", userId: "user-1" },
     );
+    expect(mockCommit.mock.invocationCallOrder[0]).toBeLessThan(
+      mockTombstoneRevokedSessions.mock.invocationCallOrder[0]!,
+    );
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "SCIM_USER_DEACTIVATE",
@@ -1220,10 +1254,30 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
     );
   });
 
-  it("tombstones nothing and records no counts on PATCH reactivation", async () => {
+  it("tombstones what the PATCH reactivation revoked, after the commit, and records the counts", async () => {
     const res = await patchActive(true, true);
 
     expect(res!.status).toBe(200);
+    expect(mockTombstoneRevokedSessions).toHaveBeenCalledWith(
+      ["digest-of-user-1-1", "digest-of-user-1-2"],
+      { reason: "scim_deprovision", operation: "SCIM user deprovisioning", userId: "user-1" },
+    );
+    expect(mockCommit.mock.invocationCallOrder[0]).toBeLessThan(
+      mockTombstoneRevokedSessions.mock.invocationCallOrder[0]!,
+    );
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "SCIM_USER_REACTIVATE",
+        metadata: expect.objectContaining({ sessions: 2, extensionTokens: 1, apiKeys: 0, cacheTombstoneFailures: 0 }),
+      }),
+    );
+  });
+
+  it("tombstones nothing and records no counts on a PATCH active=true of a member already active", async () => {
+    const res = await patchActive(true, false);
+
+    expect(res!.status).toBe(200);
+    expect(mockLogAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "SCIM_USER_UPDATE" }));
     expect(mockTombstoneRevokedSessions).not.toHaveBeenCalled();
     expect(mockLogAudit.mock.calls[0][0].metadata).not.toHaveProperty("sessions");
   });
@@ -1319,15 +1373,17 @@ describe("DELETE /api/scim/v2/Users/[id]", () => {
 
   /** deactivateScimUser's transaction running its callback over the lock and delete statements. */
   function runDeleteTransaction() {
-    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
-      fn({
+    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
+      const result = await fn({
         $queryRaw: teamLockQuery((sql) => (sql.includes("FROM teams") ? [{ id: "team-1" }] : [{ team_id: "team-1" }])),
         $executeRaw: vi.fn().mockResolvedValue(0),
         teamMemberKey: { deleteMany: mockTeamMemberKey.deleteMany },
         scimExternalMapping: { deleteMany: mockScimExternalMapping.deleteMany },
         tenantMember: { delete: mockTenantMember.delete },
-      }),
-    );
+      });
+      mockCommit();
+      return result;
+    });
   }
 
   it("revokes inside the deletion's transaction, then tombstones and records the counts", async () => {
@@ -1346,6 +1402,9 @@ describe("DELETE /api/scim/v2/Users/[id]", () => {
     expect(mockTombstoneRevokedSessions).toHaveBeenCalledWith(
       ["digest-of-user-1-1", "digest-of-user-1-2"],
       { reason: "scim_deprovision", operation: "SCIM user deprovisioning", userId: "user-1" },
+    );
+    expect(mockCommit.mock.invocationCallOrder[0]).toBeLessThan(
+      mockTombstoneRevokedSessions.mock.invocationCallOrder[0]!,
     );
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1383,6 +1442,7 @@ describe("DELETE /api/scim/v2/Users/[id]", () => {
     expect(res!.status).toBe(409);
     expect((await res!.json()).detail).toBe("The user's sign-in state is being changed; retry later");
     expect(mockLogAudit).not.toHaveBeenCalled();
+    expect(mockTombstoneRevokedSessions).not.toHaveBeenCalled();
   });
 
   it("records the email read after the tenant context, not through the membership's relation", async () => {

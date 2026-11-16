@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaTeamMember, mockPrismaTeamMemberKey, mockPrismaScimExternalMapping, mockTransaction, mockTeamLockQuery, mockRequireTeamPermission, mockIsRoleAbove, TeamAuthError, mockWithTeamTenantRls, mockRevokeUserAuthArtifactsInTx, mockTombstoneRevokedSessions, mockLogger, mockLogAudit, mockBuildTeamMemberDisplayItems, mockRequireRecentSession, mockTenantMemberFindMany, mockTenantMemberDepartureFindMany, mockExecuteRaw } = vi.hoisted(() => {
+const { mockAuth, mockPrismaTeamMember, mockPrismaTeamMemberKey, mockPrismaScimExternalMapping, mockTransaction, mockTeamLockQuery, mockRequireTeamPermission, mockIsRoleAbove, TeamAuthError, mockWithTeamTenantRls, mockRevokeUserAuthArtifactsInTx, mockTombstoneRevokedSessions, mockLogger, mockLogAudit, mockBuildTeamMemberDisplayItems, mockRequireRecentSession, mockTenantMemberFindMany, mockTenantMemberDepartureFindMany, mockExecuteRaw, mockCommit } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -10,6 +10,7 @@ const { mockAuth, mockPrismaTeamMember, mockPrismaTeamMemberKey, mockPrismaScimE
       this.status = status;
     }
   }
+  const _commit = vi.fn();
   return {
     mockAuth: vi.fn(),
     mockPrismaTeamMember: {
@@ -40,8 +41,8 @@ const { mockAuth, mockPrismaTeamMember, mockPrismaTeamMemberKey, mockPrismaScimE
     mockIsRoleAbove: vi.fn(),
     TeamAuthError: _TeamAuthError,
     // The removal runs on the context's transaction client (fn's second argument).
-    mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: (tenantId: string, tx: unknown) => unknown) =>
-      fn("tenant-1", {
+    mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: (tenantId: string, tx: unknown) => unknown) => {
+      const result = await fn("tenant-1", {
         $queryRaw: mockTeamLockQuery,
         // set / restore lock_timeout around the team lock.
         $executeRaw: mockExecuteRaw,
@@ -49,8 +50,12 @@ const { mockAuth, mockPrismaTeamMember, mockPrismaTeamMemberKey, mockPrismaScimE
         teamMemberKey: mockPrismaTeamMemberKey,
         tenantMember: { findMany: mockTenantMemberFindMany },
         tenantMemberDeparture: { findMany: mockTenantMemberDepartureFindMany },
-      }),
-    ),
+      });
+      _commit();
+      return result;
+    }),
+    // Called by the transaction double once its callback resolved: the commit.
+    mockCommit: _commit,
     mockRevokeUserAuthArtifactsInTx: vi.fn(),
     mockTombstoneRevokedSessions: vi.fn(),
     mockLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -1223,7 +1228,7 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
       ["digest-of-target-user-1", "digest-of-target-user-2"],
       { reason: "team_member_remove", operation: "team member removal", userId: "target-user" },
     );
-    expect(mockWithTeamTenantRls.mock.invocationCallOrder.at(-1)).toBeLessThan(
+    expect(mockCommit.mock.invocationCallOrder.at(-1)).toBeLessThan(
       mockTombstoneRevokedSessions.mock.invocationCallOrder[0]!,
     );
     expect(mockLogAudit).toHaveBeenCalledWith(

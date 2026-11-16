@@ -12,6 +12,7 @@ const {
   mockWithTenantRls,
   mockGuardUser,
   mockGuardMember,
+  mockCommit,
   applyTxHolder,
 } = vi.hoisted(() => ({
   mockValidateScimToken: vi.fn(),
@@ -31,6 +32,8 @@ const {
   // and nobody is active anywhere else.
   mockGuardUser: { findUnique: vi.fn(), findMany: vi.fn() },
   mockGuardMember: { findMany: vi.fn(), count: vi.fn() },
+  // Called by the withTenantRls double once its callback resolved: the commit.
+  mockCommit: vi.fn(),
 }));
 
 // The bypass seam: the POST guard's reads and the GET list both run through it.
@@ -49,7 +52,9 @@ const { mockWithBypassRls } = vi.hoisted(() => ({
 // rejection) through it; GET callbacks fall back to the top-level prisma mock.
 mockWithTenantRls.mockImplementation(async (prisma: unknown, _tenantId: string, fn: (tx: unknown) => unknown) => {
   if (applyTxHolder.reject) throw applyTxHolder.reject;
-  return fn(applyTxHolder.current ?? prisma);
+  const result = await fn(applyTxHolder.current ?? prisma);
+  mockCommit();
+  return result;
 });
 
 vi.mock("@/lib/auth/tokens/scim-token", () => ({ validateScimToken: mockValidateScimToken }));
@@ -652,7 +657,7 @@ describe("POST /api/scim/v2/Users", () => {
       operation: "SCIM user deprovisioning",
       userId: "user-1",
     });
-    expect(mockWithTenantRls.mock.invocationCallOrder.at(-1)).toBeLessThan(
+    expect(mockCommit.mock.invocationCallOrder.at(-1)).toBeLessThan(
       mockTombstoneRevokedSessions.mock.invocationCallOrder[0]!,
     );
   });

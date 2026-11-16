@@ -615,6 +615,119 @@ describe("session revocation is atomic with the departure — real-DB integratio
     expect(await artifactState(artifacts)).toEqual(REVOKED);
   });
 
+  // ── Reactivation revokes leftovers (code-review round-1 S1) ──
+  //
+  // Departures made before revocation was atomic (every directory-sync one,
+  // a SCIM/team failure that was swallowed) left the user's credentials in the
+  // tenant alive. A return revokes what the user holds there, so it cannot
+  // bring them back.
+
+  describe("a reactivation revokes the credentials a departure left behind", () => {
+    let otherTenantId: string;
+
+    beforeEach(async () => {
+      otherTenantId = await ctx.createTenant();
+    });
+
+    afterEach(async () => {
+      // The user belongs to this tenant, so deleteTestData(otherTenantId) does
+      // not reach their rows there.
+      await sql(`DELETE FROM sessions WHERE tenant_id = $1::uuid`, otherTenantId);
+      await sql(`DELETE FROM api_keys WHERE tenant_id = $1::uuid`, otherTenantId);
+      await ctx.deleteTestData(otherTenantId);
+    });
+
+    async function apiKey(userId: string, tenant: string): Promise<string> {
+      const id = randomUUID();
+      await sql(
+        `INSERT INTO api_keys (id, user_id, tenant_id, token_hash, prefix, name, scope, expires_at, created_at)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'api_test', $5, 'passwords:read', now() + interval '1 day', now())`,
+        id, userId, tenant, hex(32), `key-${id.slice(0, 8)}`,
+      );
+      return id;
+    }
+
+    async function apiKeyLive(id: string): Promise<boolean> {
+      const [row] = await sql<{ revoked_at: Date | null }>(`SELECT revoked_at FROM api_keys WHERE id = $1::uuid`, id);
+      return row.revoked_at === null;
+    }
+
+    /**
+     * A mapped member deactivated without a revocation (the residue of a
+     * pre-change departure), still holding the four artifacts and an API key in
+     * this tenant, and a session and an API key in another tenant.
+     */
+    async function departedWithLeftovers() {
+      const owner = await ctx.createUser(tenantId);
+      const user = await mapped();
+      const artifacts = await seedArtifacts(user.id, owner);
+      const key = await apiKey(user.id, tenantId);
+      await sql(
+        `UPDATE tenant_members SET deactivated_at = now() - interval '1 hour' WHERE tenant_id = $1::uuid AND user_id = $2::uuid`,
+        tenantId, user.id,
+      );
+      const otherSessionId = randomUUID();
+      await sql(
+        `INSERT INTO sessions (id, session_token, user_id, tenant_id, expires, created_at, last_active_at)
+         VALUES ($1::uuid, $2, $3::uuid, $4::uuid, now() + interval '1 day', now(), now())`,
+        otherSessionId, hashSessionToken(`sess-${randomUUID()}`), user.id, otherTenantId,
+      );
+      const otherKey = await apiKey(user.id, otherTenantId);
+      expect(await artifactState(artifacts)).toEqual(LIVE);
+      expect(await apiKeyLive(key)).toBe(true);
+      return { user, artifacts, key, otherSessionId, otherKey };
+    }
+
+    async function otherTenantLive(otherSessionId: string, otherKey: string) {
+      const [{ n }] = await sql<{ n: number }>(`SELECT count(*)::int AS n FROM sessions WHERE id = $1::uuid`, otherSessionId);
+      return { session: n === 1, apiKey: await apiKeyLive(otherKey) };
+    }
+
+    it("SCIM PATCH active=true revokes them, records the counts on SCIM_USER_REACTIVATE, and leaves another tenant's alone", async () => {
+      const { user, artifacts, key, otherSessionId, otherKey } = await departedWithLeftovers();
+
+      const res = await scimPatch(user.id, true);
+
+      expect(res.status).toBe(200);
+      expect(await tenantStamp(user.id)).toBeNull();
+      expect(await artifactState(artifacts)).toEqual(REVOKED);
+      expect(await apiKeyLive(key)).toBe(false);
+      const reactivate = (await outbox()).filter((r) => r.action === AUDIT_ACTION.SCIM_USER_REACTIVATE);
+      expect(reactivate).toHaveLength(1);
+      expect(reactivate[0].metadata).toMatchObject({
+        sessions: 1,
+        extensionTokens: 1,
+        apiKeys: 1,
+        mcpAccessTokens: 1,
+        mcpAuthorizationCodes: 1,
+      });
+      expect(await otherTenantLive(otherSessionId, otherKey)).toEqual({ session: true, apiKey: true });
+    });
+
+    it("a directory-sync run reactivating the user revokes them, and leaves another tenant's alone", async () => {
+      const { user, artifacts, key, otherSessionId, otherKey } = await departedWithLeftovers();
+      const configId = randomUUID();
+      await sql(
+        `INSERT INTO directory_sync_configs
+           (id, tenant_id, provider, display_name, enabled, sync_interval_minutes,
+            encrypted_credentials, credentials_iv, credentials_auth_tag, status, created_at, updated_at)
+         VALUES ($1::uuid, $2::uuid, 'OKTA'::"DirectorySyncProvider", 'test-config', true, 60,
+            'cipher', 'iv', 'tag', 'IDLE'::"DirectorySyncStatus", now(), now())`,
+        configId, tenantId,
+      );
+      mockFetchOktaUsers.mockReset();
+      mockFetchOktaUsers.mockResolvedValue([oktaUser(user.ext, user.email, "User", true)]);
+
+      const result = await runDirectorySync({ configId, tenantId, force: true });
+
+      expect(result.success).toBe(true);
+      expect(await tenantStamp(user.id)).toBeNull();
+      expect(await artifactState(artifacts)).toEqual(REVOKED);
+      expect(await apiKeyLive(key)).toBe(false);
+      expect(await otherTenantLive(otherSessionId, otherKey)).toEqual({ session: true, apiKey: true });
+    });
+  });
+
   // ── T7: admin vault reset (AC6) ──────────────────────────────
 
   describe("T7: admin vault reset", () => {

@@ -78,7 +78,7 @@ import { configuredSessionCookieName } from "@/lib/auth/session/cookie-name";
 import { prisma } from "@/lib/prisma";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
-import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
+import { ACTOR_TYPE, AUDIT_ACTION } from "@/lib/constants/audit/audit";
 
 const hex = (n: number) => randomBytes(n).toString("hex");
 
@@ -159,6 +159,14 @@ describe("departure revocation: models, lock identity, bounded wait, lock order 
       tenantId, userId,
     );
     return row.deactivated_at;
+  }
+
+  async function outboxActions(): Promise<string[]> {
+    const rows = await sql<{ action: string }>(
+      `SELECT payload->>'action' AS action FROM audit_outbox WHERE tenant_id = $1::uuid ORDER BY created_at`,
+      tenantId,
+    );
+    return rows.map((row) => row.action);
   }
 
   function scimPatch(userId: string, active: boolean) {
@@ -452,6 +460,7 @@ describe("departure revocation: models, lock identity, bounded wait, lock order 
       expect(elapsed).toBeLessThan(TEAM_MEMBERSHIP_TX_TIMEOUT_MS);
       expect(await tenantStamp(user.id)).toBeNull();
       expect(await sessionExists(live.id)).toBe(true);
+      expect(await outboxActions()).toEqual([]);
     });
 
     it("released within the budget: the same PATCH waits, then deactivates and revokes", async () => {
@@ -471,6 +480,7 @@ describe("departure revocation: models, lock identity, bounded wait, lock order 
       expect((await pending).status).toBe(200);
       expect(await tenantStamp(user.id)).toBeInstanceOf(Date);
       expect(await sessionExists(live.id)).toBe(false);
+      expect((await outboxActions()).filter((action) => action === AUDIT_ACTION.SCIM_USER_DEACTIVATE)).toHaveLength(1);
     });
   });
 

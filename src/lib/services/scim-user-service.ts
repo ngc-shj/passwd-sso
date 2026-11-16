@@ -50,8 +50,9 @@ export interface ScimUserReplaceResult {
   userId: string;
   auditAction: AuditAction;
   /**
-   * What the deactivation revoked in its transaction; non-null exactly when
-   * `auditAction` is SCIM_USER_DEACTIVATE. The route tombstones its sessions.
+   * What the deactivation or reactivation revoked in its transaction; non-null
+   * exactly when `auditAction` is SCIM_USER_DEACTIVATE or SCIM_USER_REACTIVATE.
+   * The route tombstones its sessions.
    */
   revocation: DepartureRevocation | null;
 }
@@ -253,8 +254,12 @@ export async function replaceScimUser(
           action = AUDIT_ACTION.SCIM_USER_DEACTIVATE;
           revocation = departed.revocation;
         }
-      } else if ((await returnToTenant(tx, tenantId, [userId], transitionOptions)).length > 0) {
-        action = AUDIT_ACTION.SCIM_USER_REACTIVATE;
+      } else {
+        const returned = await returnToTenant(tx, tenantId, [userId], transitionOptions);
+        if (returned.userIds.length > 0) {
+          action = AUDIT_ACTION.SCIM_USER_REACTIVATE;
+          revocation = returned.revocation;
+        }
       }
 
       if (externalId) {
@@ -334,7 +339,9 @@ export async function patchScimUser(
     const transitionOptions = { actor, budget, alreadyLocked: true };
     if (operations.active) {
       const returned = await returnToTenant(tx, tenantId, [userId], transitionOptions);
-      return returned.length > 0 ? { auditAction: AUDIT_ACTION.SCIM_USER_REACTIVATE, revocation: null } : unchanged;
+      return returned.userIds.length > 0
+        ? { auditAction: AUDIT_ACTION.SCIM_USER_REACTIVATE, revocation: returned.revocation }
+        : unchanged;
     }
     const departed = await departFromTenant(tx, tenantId, [userId], transitionOptions);
     return departed.userIds.length > 0

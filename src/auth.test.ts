@@ -1128,7 +1128,12 @@ describe("ensureTenantMembershipForSignIn", () => {
     expect(result.ok).toBe(true);
     expect(mockInvalidateCachedSessions).toHaveBeenCalledWith(["digest-1", "digest-2"]);
     expect(mockLoggerError).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: "user-1", failures: 1, _logType: "session.cache_tombstone_failures" }),
+      expect.objectContaining({
+        tenantScope: expect.any(String),
+        userId: "user-1",
+        failures: 1,
+        _logType: "session.cache_tombstone_failures",
+      }),
       "session.cache_tombstone_failures",
     );
     // The signal it raised before tombstoneRevokedSessions, unchanged (plan C5).
