@@ -82,11 +82,15 @@ vi.mock("@/lib/tenant/tenant-realignment", async (importOriginal) => ({
 }));
 // The creation lock and the departure of a row created deactivated have their
 // own tests and real-DB cells (team-tenant-departure.integration.test.ts).
-const { mockDepartCreatedMembership, mockLockTenantMemberCreation } = vi.hoisted(() => ({
+const { mockDepartCreatedMembership, mockLockTenantMemberCreation, mockTombstoneRevokedSessions } = vi.hoisted(() => ({
   mockDepartCreatedMembership: vi.fn(),
   mockLockTenantMemberCreation: vi.fn(),
+  mockTombstoneRevokedSessions: vi.fn(),
 }));
 vi.mock("@/lib/team/team-departure", () => ({ departCreatedMembership: mockDepartCreatedMembership }));
+vi.mock("@/lib/auth/session/user-session-invalidation", () => ({
+  tombstoneRevokedSessions: mockTombstoneRevokedSessions,
+}));
 vi.mock("@/lib/team/tenant-row-lock", async (importOriginal) => ({
   ...(await importOriginal()) as Record<string, unknown>,
   lockTenantMemberCreation: mockLockTenantMemberCreation,
@@ -322,6 +326,12 @@ describe("POST /api/scim/v2/Users", () => {
           : (where.id?.in ?? []).map((id) => ({ id, email: `${id}@example.com`, name: null, image: null })),
     );
     mockRealignAfterActivation.mockResolvedValue(null);
+    // The departure of a row created deactivated revokes what its ids hold.
+    mockDepartCreatedMembership.mockImplementation(async (_tx: unknown, _tenantId: string, ids: string[]) => ({
+      counts: { sessions: ids.length },
+      sessionTokens: ids.map((id) => `digest-of-${id}`),
+    }));
+    mockTombstoneRevokedSessions.mockResolvedValue(0);
   });
 
   it("refuses to provision a user who is already active in another tenant", async () => {
@@ -636,6 +646,34 @@ describe("POST /api/scim/v2/Users", () => {
     expect(mockDepartCreatedMembership).toHaveBeenCalledWith(expect.anything(), "tenant-1", ["user-1"], expect.objectContaining({ actor: expect.objectContaining({ userId: expect.any(String) }) }));
     expect(mockLockTenantMemberCreation.mock.invocationCallOrder[0]).toBeLessThan(create.mock.invocationCallOrder[0]);
     expect(create.mock.invocationCallOrder[0]).toBeLessThan(mockDepartCreatedMembership.mock.invocationCallOrder[0]);
+    // What the departure revoked is tombstoned after the commit.
+    expect(mockTombstoneRevokedSessions).toHaveBeenCalledWith(["digest-of-user-1"], {
+      reason: "scim_deprovision",
+      operation: "SCIM user deprovisioning",
+      userId: "user-1",
+    });
+    expect(mockWithTenantRls.mock.invocationCallOrder.at(-1)).toBeLessThan(
+      mockTombstoneRevokedSessions.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("creates nothing, audits nothing and tombstones nothing when the created member's revocation fails", async () => {
+    existingUsers = [ownedUser("user-1", "inactive@example.com")];
+    applyTxHolder.current = {
+      user: { findUnique: vi.fn() },
+      tenantMember: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockImplementation(({ data }) => ({ id: "tm1", deactivatedAt: data.deactivatedAt })),
+      },
+      scimExternalMapping: { findFirst: vi.fn(), deleteMany: vi.fn(), create: vi.fn() },
+    };
+    mockDepartCreatedMembership.mockRejectedValueOnce(new Error("revocation failed"));
+
+    await expect(
+      POST(makeReq({ body: { schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"], userName: "inactive@example.com", active: false } })),
+    ).rejects.toThrow("revocation failed");
+    expect(mockLogAudit).not.toHaveBeenCalled();
+    expect(mockTombstoneRevokedSessions).not.toHaveBeenCalled();
   });
 
   it("does not depart or take the creation lock for a member created active", async () => {
@@ -656,6 +694,7 @@ describe("POST /api/scim/v2/Users", () => {
     expect(res.status).toBe(201);
     expect(mockLockTenantMemberCreation).not.toHaveBeenCalled();
     expect(mockDepartCreatedMembership).not.toHaveBeenCalled();
+    expect(mockTombstoneRevokedSessions).not.toHaveBeenCalled();
   });
 
   it("reuses an existing externalId mapping for the same user", async () => {

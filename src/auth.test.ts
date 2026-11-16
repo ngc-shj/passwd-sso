@@ -1131,9 +1131,14 @@ describe("ensureTenantMembershipForSignIn", () => {
       expect.objectContaining({ userId: "user-1", failures: 1, _logType: "session.cache_tombstone_failures" }),
       "session.cache_tombstone_failures",
     );
+    // The signal it raised before tombstoneRevokedSessions, unchanged (plan C5).
     expect(mockSentryCaptureMessage).toHaveBeenCalledWith(
-      expect.stringContaining("tombstone failures"),
-      expect.objectContaining({ level: "error", extra: expect.objectContaining({ userId: "user-1", failures: 1 }) }),
+      "session cache tombstone failures during the bootstrap tenant migration",
+      {
+        level: "error",
+        tags: { reason: "bootstrap_tenant_migration" },
+        extra: { userId: "user-1", failures: 1, tenantScope: expect.any(String) },
+      },
     );
   });
 

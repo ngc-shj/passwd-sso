@@ -1,5 +1,6 @@
 /**
- * The set of models `revokeUserAuthArtifactsInTx` revokes is derived, not
+ * The set of models `revokeUsersAuthArtifactsInTx` revokes (and through it
+ * `revokeUserAuthArtifactsInTx`, every departure and `invalidateUserSessions`) is derived, not
  * remembered: every user-bound model (prisma/schema.prisma) with a revocation or
  * single-use column (`revokedAt` / `usedAt`) is either revoked by it, or named
  * below with the reason it does not authenticate as the user. A model added
@@ -12,7 +13,7 @@ import { describe, it, expect, vi } from "vitest";
 vi.mock("@/lib/prisma", () => ({ prisma: {} }));
 
 import { parseSchemaModels, userBoundModels, handleOf } from "@/__tests__/helpers/user-bound-models";
-import { revokeUserAuthArtifactsInTx } from "./user-session-invalidation";
+import { revokeUsersAuthArtifactsInTx } from "./user-session-invalidation";
 
 /** User-bound rows with such a column that are not a way to act as the user. */
 const NOT_AUTH_ARTIFACTS: Record<string, string> = {
@@ -32,7 +33,9 @@ function recordingTx() {
     {},
     {
       get: (_t, model: string) => {
+        // The credential lock and its bounded wait are raw statements, not models.
         if (model === "$executeRaw") return async () => 0;
+        if (model === "$queryRaw") return async () => [{ lock_timeout: "0", statement_timeout: "0" }];
         touched.add(model);
         return {
           findMany: async () => [],
@@ -45,7 +48,7 @@ function recordingTx() {
   return { tx, touched };
 }
 
-describe("revokeUserAuthArtifactsInTx member set", () => {
+describe("revokeUsersAuthArtifactsInTx member set", () => {
   it("revokes every user-bound model with a revocation or single-use column, except the named non-credentials", async () => {
     const models = parseSchemaModels();
     const candidates = [...userBoundModels(models).keys()]
@@ -54,7 +57,7 @@ describe("revokeUserAuthArtifactsInTx member set", () => {
     expect(candidates.length).toBeGreaterThan(0);
 
     const { tx, touched } = recordingTx();
-    await revokeUserAuthArtifactsInTx(tx as never, "user-1", { tenantFilter: {} });
+    await revokeUsersAuthArtifactsInTx(tx as never, ["user-1", "user-2"], { tenantFilter: {}, boundedLockWait: true });
 
     const expected = candidates.filter((h) => !(h in NOT_AUTH_ARTIFACTS));
     expect([...touched].filter((h) => h !== "session").sort()).toEqual(expected.sort());

@@ -9,16 +9,13 @@ import { withTenantRls, withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { usersOwnedByAnotherTenant } from "@/lib/tenant-context";
 import { isUniqueViolationOn, ONE_ACTIVE_MEMBERSHIP_INDEX } from "@/lib/prisma/prisma-error";
-import {
-  invalidateUserSessions,
-  type InvalidateUserSessionsResult,
-} from "@/lib/auth/session/user-session-invalidation";
+import { tombstoneRevokedSessions } from "@/lib/auth/session/user-session-invalidation";
 import { getLogger } from "@/lib/logger";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { scimParseBody } from "@/lib/scim/parse-body";
 import { prisma } from "@/lib/prisma";
 import { isMembershipLockConflict, membershipConflictMessage } from "@/lib/team/tenant-row-lock";
-import type { DepartureAuditActor } from "@/lib/team/team-departure";
+import type { DepartureAuditActor, DepartureRevocation } from "@/lib/team/team-departure";
 import { TEAM_MEMBERSHIP_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 import { authorizeScim } from "@/lib/scim/with-scim-auth";
 import {
@@ -39,6 +36,24 @@ import { fetchUserContact } from "@/lib/audit/audit-user-lookup";
 import { REALIGNMENT_SOURCE, realignAfterActivation, type RealignmentCause } from "@/lib/tenant/tenant-realignment";
 
 type Params = { params: Promise<{ id: string }> };
+
+/**
+ * After the deprovisioning committed (its revocation with it), evict the
+ * revoked sessions from the session cache, and return the audit metadata
+ * fields recording what was revoked. Null: nothing was deprovisioned.
+ */
+async function revocationAuditFields(
+  revocation: DepartureRevocation | null,
+  userId: string,
+): Promise<Record<string, number>> {
+  if (!revocation) return {};
+  const cacheTombstoneFailures = await tombstoneRevokedSessions(revocation.sessionTokens, {
+    reason: "scim_deprovision",
+    operation: "SCIM user deprovisioning",
+    userId,
+  });
+  return { ...revocation.counts, cacheTombstoneFailures };
+}
 
 /**
  * Move a reactivated member's owning column after the tenant context commits.
@@ -176,22 +191,11 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
     throw e;
   }
 
-  const { snapshot, userId, auditAction, needsSessionInvalidation } = serviceResult;
+  const { snapshot, userId, auditAction, revocation } = serviceResult;
   if (auditAction === AUDIT_ACTION.SCIM_USER_REACTIVATE) {
     await realignReactivatedMember(userId, tenantId, { actorUserId: auditUserId, actorType: putActorType });
   }
-
-  // Session invalidation on deactivation (fail-open)
-  let invalidationCounts: InvalidateUserSessionsResult | undefined;
-  let sessionInvalidationFailed = false;
-  if (needsSessionInvalidation) {
-    try {
-      invalidationCounts = await invalidateUserSessions(userId, { tenantId });
-    } catch (error) {
-      sessionInvalidationFailed = true;
-      getLogger().error({ userId, error: errorLogFields(error) }, "session-invalidation-failed");
-    }
-  }
+  const revocationFields = await revocationAuditFields(revocation, userId);
 
   await logAuditAsync({
     ...tenantAuditBase(req, auditUserId, tenantId),
@@ -203,8 +207,7 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
       active,
       externalId,
       name: name?.formatted,
-      ...(invalidationCounts ?? {}),
-      ...(sessionInvalidationFailed ? { sessionInvalidationFailed: true } : {}),
+      ...revocationFields,
     },
   });
 
@@ -285,22 +288,11 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
     throw e;
   }
 
-  const { snapshot, userId, auditAction, needsSessionInvalidation } = serviceResult;
+  const { snapshot, userId, auditAction, revocation } = serviceResult;
   if (auditAction === AUDIT_ACTION.SCIM_USER_REACTIVATE) {
     await realignReactivatedMember(userId, tenantId, { actorUserId: auditUserId, actorType: patchActorType });
   }
-
-  // Session invalidation on deactivation (fail-open)
-  let patchInvalidationCounts: InvalidateUserSessionsResult | undefined;
-  let patchSessionInvalidationFailed = false;
-  if (needsSessionInvalidation) {
-    try {
-      patchInvalidationCounts = await invalidateUserSessions(userId, { tenantId });
-    } catch (error) {
-      patchSessionInvalidationFailed = true;
-      getLogger().error({ userId, error: errorLogFields(error) }, "session-invalidation-failed");
-    }
-  }
+  const revocationFields = await revocationAuditFields(revocation, userId);
 
   await logAuditAsync({
     ...tenantAuditBase(req, auditUserId, tenantId),
@@ -311,8 +303,7 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
     metadata: {
       active: patchOps.active,
       name: patchOps.name,
-      ...(patchInvalidationCounts ?? {}),
-      ...(patchSessionInvalidationFailed ? { sessionInvalidationFailed: true } : {}),
+      ...revocationFields,
     },
   });
 
@@ -351,25 +342,14 @@ async function handleDELETE(req: NextRequest, { params }: Params): Promise<Respo
     if (e instanceof ScimDeleteConflictError) {
       return scimError(409, "Cannot delete user: related resources exist");
     }
-    // A rotation of an affected team, or another change to the membership,
-    // held a row past the lock wait; nothing changed.
+    // A rotation of an affected team, another change to the membership, or a
+    // change to the user's credentials held a lock past the wait; nothing changed.
     if (isMembershipLockConflict(e)) return scimError(409, membershipConflictMessage(e));
     throw e;
   }
 
-  const { userId, needsSessionInvalidation } = serviceResult;
-
-  // Session invalidation after deletion (fail-open)
-  let deleteInvalidationCounts: InvalidateUserSessionsResult | undefined;
-  let deleteSessionInvalidationFailed = false;
-  if (needsSessionInvalidation) {
-    try {
-      deleteInvalidationCounts = await invalidateUserSessions(userId, { tenantId });
-    } catch (error) {
-      deleteSessionInvalidationFailed = true;
-      getLogger().error({ userId, error: errorLogFields(error) }, "session-invalidation-failed");
-    }
-  }
+  const { userId, revocation } = serviceResult;
+  const revocationFields = await revocationAuditFields(revocation, userId);
 
   // Read after the tenant context closes: the membership read inside it can no
   // longer reach the email of a member whose users row names another tenant. A
@@ -390,8 +370,7 @@ async function handleDELETE(req: NextRequest, { params }: Params): Promise<Respo
     targetId: userId,
     metadata: {
       email: contact?.email ?? null,
-      ...(deleteInvalidationCounts ?? {}),
-      ...(deleteSessionInvalidationFailed ? { sessionInvalidationFailed: true } : {}),
+      ...revocationFields,
     },
   });
 

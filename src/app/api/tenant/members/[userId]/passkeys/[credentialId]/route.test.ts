@@ -62,7 +62,9 @@ vi.mock("@/lib/tenant-rls", () => ({
     return result;
   },
 }));
-vi.mock("@/lib/auth/session/user-session-invalidation", () => ({
+// The real tombstone helper, over the cache and Sentry mocks below.
+vi.mock("@/lib/auth/session/user-session-invalidation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth/session/user-session-invalidation")>()),
   revokeUserAuthArtifactsInTx: mockRevokeArtifacts,
 }));
 vi.mock("@/lib/auth/session/user-auth-serialization", () => ({
@@ -181,6 +183,12 @@ describe("DELETE /api/tenant/members/[userId]/passkeys/[credentialId]", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ cacheTombstoneFailures: 2 });
     expect(mockSentryCapture).toHaveBeenCalledTimes(1);
+    // The one tombstone signal (tombstoneRevokedSessions), with this operation's text.
+    expect(mockSentryCapture).toHaveBeenCalledWith("session cache tombstone failures during tenant member passkey revoke", {
+      level: "error",
+      tags: { reason: "tenant_member_passkey_revoke" },
+      extra: { failures: 2, targetUserId: TARGET },
+    });
   });
 
   it("a thrown cache eviction after commit still answers 200, counts every session as unevicted, and tells the member", async () => {

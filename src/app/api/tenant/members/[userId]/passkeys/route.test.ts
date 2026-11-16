@@ -105,7 +105,9 @@ vi.mock("@/lib/tenant-rls", () => ({
     return result;
   },
 }));
-vi.mock("@/lib/auth/session/user-session-invalidation", () => ({
+// The real tombstone helper, over the cache and Sentry mocks below.
+vi.mock("@/lib/auth/session/user-session-invalidation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth/session/user-session-invalidation")>()),
   revokeUserAuthArtifactsInTx: mockRevokeArtifacts,
 }));
 vi.mock("@/lib/auth/session/user-auth-serialization", () => ({

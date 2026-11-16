@@ -122,12 +122,31 @@ vi.mock("@/lib/audit/audit", () => ({
 // real-DB cells (team-tenant-departure.integration.test.ts); here they are
 // seams. A fake transition reports every user it was given as transitioned —
 // cells that need "already in that state" override it.
-const { mockLockTenantRows, mockDepartFromTenant, mockReturnToTenant, mockDepartCreatedMembership } = vi.hoisted(() => ({
+const {
+  mockLockTenantRows,
+  mockDepartFromTenant,
+  mockReturnToTenant,
+  mockDepartCreatedMembership,
+  mockTombstoneRevokedSessions,
+  mockLoggerInfo,
+} = vi.hoisted(() => ({
   mockLockTenantRows: vi.fn(),
   mockDepartFromTenant: vi.fn(),
   mockReturnToTenant: vi.fn(),
   mockDepartCreatedMembership: vi.fn(),
+  mockTombstoneRevokedSessions: vi.fn(),
+  mockLoggerInfo: vi.fn(),
 }));
+vi.mock("@/lib/auth/session/user-session-invalidation", () => ({
+  tombstoneRevokedSessions: mockTombstoneRevokedSessions,
+}));
+/** What a departure of these users revokes, derived from them. */
+function revokedFor(ids: readonly string[]) {
+  return {
+    counts: { sessions: ids.length, extensionTokens: ids.length * 2, apiKeys: 0 },
+    sessionTokens: ids.map((id) => `digest-of-${id}`),
+  };
+}
 vi.mock("@/lib/team/tenant-row-lock", () => ({ lockTenantRows: mockLockTenantRows }));
 // Distinct budget objects in creation order, so a cell can tell which deadline
 // each lock call was given.
@@ -145,9 +164,13 @@ beforeEach(() => {
   let budgets = 0;
   mockCreateLockBudget.mockImplementation(() => ({ deadline: Date.now() + 3_000, seq: ++budgets }));
   mockLockTenantRows.mockResolvedValue(new Map());
-  mockDepartFromTenant.mockImplementation(async (_tx: unknown, _tenantId: string, ids: string[]) => [...ids]);
+  mockDepartFromTenant.mockImplementation(async (_tx: unknown, _tenantId: string, ids: string[]) => ({
+    userIds: [...ids],
+    revocation: revokedFor(ids),
+  }));
   mockReturnToTenant.mockImplementation(async (_tx: unknown, _tenantId: string, ids: string[]) => [...ids]);
-  mockDepartCreatedMembership.mockResolvedValue(undefined);
+  mockDepartCreatedMembership.mockImplementation(async (_tx: unknown, _tenantId: string, ids: string[]) => revokedFor(ids));
+  mockTombstoneRevokedSessions.mockResolvedValue(0);
 });
 
 vi.mock("@/lib/webhook-dispatcher", () => ({
@@ -179,7 +202,7 @@ vi.mock("@/lib/tenant/tenant-realignment", async (importOriginal) => ({
 
 vi.mock("@/lib/logger", async (importOriginal) => ({
   ...(await importOriginal()) as Record<string, unknown>,
-  getLogger: () => ({ error: mockLoggerError, warn: vi.fn(), info: vi.fn(), debug: vi.fn() }),
+  getLogger: () => ({ error: mockLoggerError, warn: vi.fn(), info: mockLoggerInfo, debug: vi.fn() }),
 }));
 
 import { runDirectorySync } from "./engine";
@@ -760,7 +783,10 @@ describe("runDirectorySync", () => {
         tenantMember: { findMany: vi.fn().mockResolvedValue([]), create: vi.fn(), update: vi.fn(), updateMany: vi.fn().mockResolvedValue({ count: 2 }) },
       }));
       // user-b was already inactive: the departure transitions user-a only.
-      mockDepartFromTenant.mockImplementation(async (_tx: unknown, _t: string, ids: string[]) => ids.filter((id) => id !== "user-b"));
+      mockDepartFromTenant.mockImplementation(async (_tx: unknown, _t: string, ids: string[]) => {
+        const userIds = ids.filter((id) => id !== "user-b");
+        return { userIds, revocation: revokedFor(userIds) };
+      });
 
       const result = await runDirectorySync({ ...BASE_OPTIONS, force: true });
 
@@ -768,6 +794,78 @@ describe("runDirectorySync", () => {
       expect(result.usersDeactivated).toBe(1);
       const batchCall = mockDepartFromTenant.mock.calls.find((call) => (call[2] as string[]).length === 2);
       expect(batchCall?.[3]).toMatchObject({ alreadyLocked: true });
+    });
+
+    it("tombstones every departure's revoked sessions after the commit, and logs the summed counts", async () => {
+      setupAcquiredLock();
+      setupTransaction();
+      mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
+      mockFetchOktaUsers.mockResolvedValue([]);
+      mockScimMapping.findMany.mockResolvedValue([
+        { externalId: "ext-a", internalId: "user-a" },
+        { externalId: "ext-b", internalId: "user-b" },
+      ]);
+      mockTenantMember.findMany.mockResolvedValue([
+        makeMember({ id: "member-a", userId: "user-a" }),
+        makeMember({ id: "member-b", userId: "user-b" }),
+      ]);
+      setApplyTx(makeApplyTx({
+        tenantMember: { findMany: vi.fn().mockResolvedValue([]), create: vi.fn(), update: vi.fn(), updateMany: vi.fn().mockResolvedValue({ count: 2 }) },
+      }));
+      mockTombstoneRevokedSessions.mockResolvedValueOnce(1);
+
+      const result = await runDirectorySync({ ...BASE_OPTIONS, force: true });
+
+      expect(result.success).toBe(true);
+      expect(mockTombstoneRevokedSessions).toHaveBeenCalledTimes(1);
+      const [tokens, context] = mockTombstoneRevokedSessions.mock.calls[0]!;
+      expect([...tokens].sort()).toEqual(["digest-of-user-a", "digest-of-user-b"]);
+      expect(context).toEqual({
+        reason: "directory_sync_deprovision",
+        operation: "directory sync",
+        extra: { tenantId: TENANT_ID, configId: CONFIG_ID },
+      });
+      // After the last departure call of the transaction.
+      expect(mockDepartCreatedMembership.mock.invocationCallOrder[0]).toBeLessThan(
+        mockTombstoneRevokedSessions.mock.invocationCallOrder[0]!,
+      );
+      expect(mockLoggerInfo).toHaveBeenCalledWith(
+        { tenantId: TENANT_ID, configId: CONFIG_ID, sessions: 2, extensionTokens: 4, apiKeys: 0, cacheTombstoneFailures: 1 },
+        "directory-sync.credentials-revoked",
+      );
+    });
+
+    it("tombstones and logs nothing when the run departed nobody", async () => {
+      setupAcquiredLock();
+      setupTransaction();
+      mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
+      mockFetchOktaUsers.mockResolvedValue([]);
+      mockScimMapping.findMany.mockResolvedValue([]);
+      mockTenantMember.findMany.mockResolvedValue([]);
+
+      const result = await runDirectorySync({ ...BASE_OPTIONS, force: true });
+
+      expect(result.success).toBe(true);
+      expect(mockTombstoneRevokedSessions).not.toHaveBeenCalled();
+      expect(mockLoggerInfo).not.toHaveBeenCalledWith(expect.anything(), "directory-sync.credentials-revoked");
+    });
+
+    it("fails the run, tombstoning nothing, when a departure's revocation fails inside the transaction", async () => {
+      setupAcquiredLock();
+      setupTransaction();
+      mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
+      mockFetchOktaUsers.mockResolvedValue([]);
+      mockScimMapping.findMany.mockResolvedValue([{ externalId: "ext-a", internalId: "user-a" }]);
+      mockTenantMember.findMany.mockResolvedValue([makeMember({ id: "member-a", userId: "user-a" })]);
+      setApplyTx(makeApplyTx({
+        tenantMember: { findMany: vi.fn().mockResolvedValue([]), create: vi.fn(), update: vi.fn(), updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      }));
+      mockDepartFromTenant.mockRejectedValueOnce(new Error("revocation failed"));
+
+      const result = await runDirectorySync({ ...BASE_OPTIONS, force: true });
+
+      expect(result.success).toBe(false);
+      expect(mockTombstoneRevokedSessions).not.toHaveBeenCalled();
     });
 
     it("locks every tenant row the run touches in one call, before any transition", async () => {

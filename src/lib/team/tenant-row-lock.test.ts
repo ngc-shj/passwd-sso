@@ -4,11 +4,13 @@ import {
   departedSince,
   actorDepartedSinceAdmission,
   isMembershipLockConflict,
+  membershipConflictMessage,
   lockTenantRows,
   readTenantRows,
   TenantMemberLockTimeoutError,
 } from "./tenant-row-lock";
 import { createLockBudget, TeamRotationInProgressError } from "./team-key-rotation-lock";
+import { UserAuthLockTimeoutError } from "@/lib/auth/session/user-auth-serialization";
 
 /** A tx recording every raw statement in order, answering the row and record reads. */
 function recordingTx(rows: { user_id: string; role?: string; deactivated_at: Date | null }[] = [], timeouts = { lock_timeout: "0", statement_timeout: "0" }, records: { user_id: string; departed_at: Date }[] = []) {
@@ -257,5 +259,23 @@ describe("lockTenantRows — timeouts and id spelling", () => {
     expect(result.get(upper)).toMatchObject({ hasRow: true, deactivatedAt: null });
     const rowLock = statements.findIndex((s) => s.includes("FROM tenant_members"));
     expect(values[rowLock][1]).toEqual([upper.toLowerCase()]);
+  });
+});
+
+describe("a revocation's credential-lock timeout", () => {
+  // A departure that waited on the user's credential lock past its budget
+  // rolled back whole, like any other membership lock conflict (plan C1).
+  it("is a membership lock conflict", () => {
+    expect(isMembershipLockConflict(new UserAuthLockTimeoutError())).toBe(true);
+  });
+
+  it("has its own reason, not a key rotation's", () => {
+    expect(membershipConflictMessage(new UserAuthLockTimeoutError())).toBe(
+      "The user's sign-in state is being changed; retry later",
+    );
+    expect(membershipConflictMessage(new TenantMemberLockTimeoutError())).toBe(
+      "The user's membership is being changed; retry later",
+    );
+    expect(membershipConflictMessage(new TeamRotationInProgressError())).toBe("Team key rotation in progress; retry later");
   });
 });

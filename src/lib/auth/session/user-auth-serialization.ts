@@ -20,25 +20,69 @@
  *
  * The per-user credential caps (session cap, extension/iOS family caps, API
  * keys, bridge codes) serialize on this same lock, so a cap and a revocation
- * are one lock and no ordering between them can deadlock. Take it first in the
- * transaction, before any row lock.
+ * are one lock and no ordering between them can deadlock. A mint takes it
+ * first in its transaction, before any row lock. A departure or removal
+ * (team-departure.ts, SCIM DELETE, team member DELETE) revokes in the
+ * transaction that ends the membership and takes it LAST, after its row
+ * writes: a mint holding it waits on no row those transactions hold.
  *
  * Its key is namespaced (`user-auth:<userId>`), apart from the bare-user-id
  * lock that vault data paths hold (key rotation for up to its 2-minute
  * transaction, attachments, file sends): a revocation must not queue behind a
- * key rotation and time out — its callers on SCIM deactivation and team
- * removal carry on when it fails.
+ * key rotation. A departure that waits on it past the bounded wait rolls back
+ * whole (UserAuthLockTimeoutError) and is retried; nothing commits without
+ * the revocation.
  */
 import type { NextRequest } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { advisoryXactLock } from "@/lib/tenant-rls";
 import { getSessionTokenDigest } from "@/app/api/sessions/helpers";
+import { createLockBudget, withBoundedLockWait } from "@/lib/team/team-key-rotation-lock";
 
 export async function lockUserAuthArtifacts(
   tx: Parameters<typeof advisoryXactLock>[0],
   userId: string,
 ): Promise<void> {
   await advisoryXactLock(tx, userAuthLockKey(userId));
+}
+
+/** A revocation gave up waiting for a concurrent change to the user's credentials. */
+export class UserAuthLockTimeoutError extends Error {
+  constructor() {
+    super("User sign-in state is being changed");
+    this.name = "UserAuthLockTimeoutError";
+  }
+}
+
+/**
+ * The credential lock of every user in `userIds`, in ONE statement, in byte
+ * order of the key (COLLATE "C"), so two batch revocations cannot deadlock on
+ * their own ordering. Ids are taken as given: callers pass ids the database
+ * returned, which are lowercase like the ones every mint locks.
+ *
+ * `bounded`: wait at most TEAM_KEY_LOCK_TIMEOUT_MS, on a budget created here
+ * — never a caller's, which its own earlier work may have spent — and throw
+ * UserAuthLockTimeoutError past it.
+ */
+export async function lockUsersAuthArtifacts(
+  tx: Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw">,
+  userIds: readonly string[],
+  options: { bounded?: boolean } = {},
+): Promise<void> {
+  const keys = [...new Set(userIds)].map(userAuthLockKey);
+  if (keys.length === 0) return;
+  // $executeRaw: the lock function returns void, which $queryRaw cannot read.
+  const lock = () => tx.$executeRaw`
+    SELECT pg_advisory_xact_lock(hashtext(k)) FROM (SELECT k FROM unnest(${keys}::text[]) AS u(k) ORDER BY k COLLATE "C") AS ordered
+  `;
+  if (!options.bounded) {
+    await lock();
+    return;
+  }
+  await withBoundedLockWait(tx, lock, {
+    budget: createLockBudget(),
+    timeoutError: () => new UserAuthLockTimeoutError(),
+  });
 }
 
 /** The credential lock's key; namespaced apart from the vault-data lock on the bare user id. */

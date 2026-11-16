@@ -1,5 +1,4 @@
 import NextAuth from "next-auth";
-import * as Sentry from "@sentry/nextjs";
 import type { Account } from "next-auth";
 import { createCustomAdapter } from "@/lib/auth/session/auth-adapter";
 import { logAuditAsync } from "@/lib/audit/audit";
@@ -20,7 +19,7 @@ import {
 } from "@/lib/tenant/tenant-management";
 import type { ClaimRefusalDiagnosis } from "@/lib/tenant/claim-refusal";
 import { classifySentinelTenantConstraint } from "@/lib/tenant/sentinel-tenant-constraint";
-import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
+import { tombstoneRevokedSessions } from "@/lib/auth/session/user-session-invalidation";
 import { lockUserAuthArtifacts } from "@/lib/auth/session/user-auth-serialization";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
@@ -783,30 +782,14 @@ async function claimedTenantMembership(
     // R3 site #10: Session.tenantId is part of cached SessionInfo;
     // tombstone the migrated tokens so the proxy stops serving the
     // stale (pre-migration) tenantId for up to SESSION_CACHE_TTL_MS.
-    if (migratedSessionTokens.length > 0) {
-      const { failed } = await invalidateCachedSessions(migratedSessionTokens);
-      // Same signal invalidateUserSessions raises: a tombstone that did not
-      // land leaves the pre-migration SessionInfo cached on workers.
-      if (failed > 0) {
-        getLogger().error(
-          {
-            userId,
-            failures: failed,
-            reason: "bootstrap_tenant_migration",
-            _logType: "session.cache_tombstone_failures",
-          },
-          "session.cache_tombstone_failures",
-        );
-        Sentry.captureMessage(
-          "session cache tombstone failures during the bootstrap tenant migration",
-          {
-            level: "error",
-            tags: { reason: "bootstrap_tenant_migration" },
-            extra: { userId, failures: failed, tenantScope: target.id },
-          },
-        );
-      }
-    }
+    // A tombstone that did not land leaves the pre-migration SessionInfo
+    // cached on workers; the helper raises the on-call signal for it.
+    await tombstoneRevokedSessions(migratedSessionTokens, {
+      reason: "bootstrap_tenant_migration",
+      operation: "the bootstrap tenant migration",
+      userId,
+      extra: { tenantScope: target.id },
+    });
 
     return { ok: true };
   }, BYPASS_GRANT.AUTH_TENANT_CLAIM_MEMBERSHIP);

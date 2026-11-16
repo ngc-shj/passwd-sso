@@ -14,7 +14,8 @@ const {
   mockWithTenantRls,
   mockGuardMember,
   mockGuardMapping,
-  mockInvalidateUserSessions,
+  mockRevokeUserAuthArtifactsInTx,
+  mockTombstoneRevokedSessions,
   mockLogger,
 } = vi.hoisted(() => ({
   mockValidateScimToken: vi.fn(),
@@ -33,7 +34,9 @@ const {
   // to make the guard fire.
   mockGuardMember: { findUnique: vi.fn(), findMany: vi.fn() },
   mockGuardMapping: { findFirst: vi.fn() },
-  mockInvalidateUserSessions: vi.fn().mockResolvedValue({ sessions: 1, extensionTokens: 0, apiKeys: 0 }),
+  // SCIM DELETE's revocation, inside deactivateScimUser's transaction.
+  mockRevokeUserAuthArtifactsInTx: vi.fn(),
+  mockTombstoneRevokedSessions: vi.fn(),
   mockLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
@@ -72,6 +75,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 // real-DB cells in team-tenant-departure.integration.test.ts. Here the helpers
 // answer as the database's conditional UPDATE does, from the membership
 // pre-read: a departure transitions an active member, a return an inactive one.
+// A departure revokes what its transitioned ids hold, derived from its arguments.
 const { mockDepartFromTenant, mockReturnToTenant, mockLockTenantRows } = vi.hoisted(() => ({
   mockDepartFromTenant: vi.fn(),
   mockReturnToTenant: vi.fn(),
@@ -93,7 +97,8 @@ async function memberPreRead(): Promise<{ deactivatedAt: Date | null } | null> {
 }
 
 vi.mock("@/lib/auth/session/user-session-invalidation", () => ({
-  invalidateUserSessions: mockInvalidateUserSessions,
+  revokeUserAuthArtifactsInTx: mockRevokeUserAuthArtifactsInTx,
+  tombstoneRevokedSessions: mockTombstoneRevokedSessions,
 }));
 vi.mock("@/lib/tenant/tenant-realignment", async (importOriginal) => ({
   ...(await importOriginal()) as Record<string, unknown>,
@@ -107,12 +112,24 @@ vi.mock("@/lib/logger", () => ({
 }));
 
 import { GET, PUT, PATCH, DELETE } from "./route";
+import { teamLockQuery } from "@/__tests__/helpers/team-rotation-lock-mock";
+
+/** What a revocation of these users returns, as the database would derive it from them. */
+function revokedFor(ids: readonly string[]) {
+  return {
+    counts: { sessions: ids.length * 2, extensionTokens: ids.length, apiKeys: 0 },
+    sessionTokens: ids.flatMap((id) => [`digest-of-${id}-1`, `digest-of-${id}-2`]),
+  };
+}
 
 beforeEach(() => {
   mockLockTenantRows.mockResolvedValue(new Map());
-  mockDepartFromTenant.mockImplementation(async (_tx: unknown, _tenantId: string, ids: string[]) =>
-    (await memberPreRead())?.deactivatedAt == null ? ids : [],
-  );
+  mockDepartFromTenant.mockImplementation(async (_tx: unknown, _tenantId: string, ids: string[]) => {
+    const userIds = (await memberPreRead())?.deactivatedAt == null ? ids : [];
+    return { userIds, revocation: revokedFor(userIds) };
+  });
+  mockRevokeUserAuthArtifactsInTx.mockImplementation(async (_tx: unknown, userId: string) => revokedFor([userId]));
+  mockTombstoneRevokedSessions.mockResolvedValue(0);
   mockReturnToTenant.mockImplementation(async (_tx: unknown, _tenantId: string, ids: string[]) =>
     (await memberPreRead())?.deactivatedAt != null ? ids : [],
   );
@@ -806,14 +823,12 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
     expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
-  it("triggers invalidateUserSessions on PUT deactivation", async () => {
+  /** A PUT of `active` against the member's pre-read state, its transaction running its callback. */
+  async function putActive(active: boolean, wasDeactivated: boolean) {
     mockTenantMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" })
-      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: null })
-      .mockResolvedValueOnce({
-        userId: "user-1",
-        deactivatedAt: new Date(),
-      });
+      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: wasDeactivated ? new Date() : null })
+      .mockResolvedValueOnce({ userId: "user-1", deactivatedAt: active ? null : new Date() });
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
       fn({
         tenantMember: { update: mockTenantMember.update },
@@ -825,115 +840,73 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
       }),
     );
     mockScimExternalMapping.deleteMany.mockResolvedValue({ count: 0 });
-
-    await PUT(
+    return PUT(
       makeReq({
         method: "PUT",
-        body: {
-          schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
-          userName: "u@example.com",
-          active: false,
-        },
+        body: { schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"], userName: "u@example.com", active },
       }),
       makeParams("user-1"),
     );
+  }
 
-    expect(mockInvalidateUserSessions).toHaveBeenCalledWith("user-1", { tenantId: "tenant-1" });
-  });
-
-  it("does NOT trigger invalidateUserSessions on PUT reactivation", async () => {
-    mockTenantMember.findUnique
-      .mockResolvedValueOnce({ userId: "user-1" })
-      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: new Date() })
-      .mockResolvedValueOnce({
-        userId: "user-1",
-        deactivatedAt: null,
-      });
-    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
-      fn({
-        tenantMember: { update: mockTenantMember.update },
-        scimExternalMapping: {
-          findFirst: mockScimExternalMapping.findFirst,
-          deleteMany: mockScimExternalMapping.deleteMany,
-          create: mockScimExternalMapping.create,
-        },
-      }),
-    );
-    mockScimExternalMapping.deleteMany.mockResolvedValue({ count: 0 });
-
-    await PUT(
-      makeReq({
-        method: "PUT",
-        body: {
-          schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
-          userName: "u@example.com",
-          active: true,
-        },
-      }),
-      makeParams("user-1"),
-    );
-
-    expect(mockInvalidateUserSessions).not.toHaveBeenCalled();
-  });
-
-  // L2 — SCIM deactivation fail-open backstop.
-  // When invalidateUserSessions throws, the handler logs + returns 200 (fail-open:
-  // existing sessions/tokens are NOT revoked in that window). This is safe ONLY
-  // because the deactivation itself is committed (tenantMember.update with
-  // deactivatedAt) BEFORE the invalidation attempt, and every long-lived
-  // user-bound token validator independently re-checks tenantMember.deactivatedAt
-  // and fails closed — see the "SCIM fail-open backstop" tests in
-  // api-key.test.ts, extension-token.test.ts (C13a), oauth-server.test.ts (C13a).
-  // This test pins the producer half: the fail-open path still persists the
-  // deactivation the backstop depends on.
-  it("returns 200, persists deactivation, and logs error when PUT invalidation fails (fail-open backstop)", async () => {
-    mockTenantMember.findUnique
-      .mockResolvedValueOnce({ userId: "user-1" })
-      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: null })
-      .mockResolvedValueOnce({
-        userId: "user-1",
-        deactivatedAt: new Date(),
-      });
-    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
-      fn({
-        tenantMember: { update: mockTenantMember.update },
-        scimExternalMapping: {
-          findFirst: mockScimExternalMapping.findFirst,
-          deleteMany: mockScimExternalMapping.deleteMany,
-          create: mockScimExternalMapping.create,
-        },
-      }),
-    );
-    mockScimExternalMapping.deleteMany.mockResolvedValue({ count: 0 });
-    mockInvalidateUserSessions.mockRejectedValue(new Error("db error"));
-
-    const res = await PUT(
-      makeReq({
-        method: "PUT",
-        body: {
-          schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
-          userName: "u@example.com",
-          active: false,
-        },
-      }),
-      makeParams("user-1"),
-    );
+  it("tombstones what the PUT deactivation revoked, after the commit, and records the counts", async () => {
+    const res = await putActive(false, false);
 
     expect(res!.status).toBe(200);
-    // The deactivation IS committed even though invalidation failed — this is the
-    // state the validator backstop reads to reject the un-revoked token next time.
-    expect(mockTenantMember.update).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: "tm1" } }),
+    expect(mockTombstoneRevokedSessions).toHaveBeenCalledWith(
+      ["digest-of-user-1-1", "digest-of-user-1-2"],
+      { reason: "scim_deprovision", operation: "SCIM user deprovisioning", userId: "user-1" },
     );
-    expect(mockLogger.error).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: "user-1" }),
-      "session-invalidation-failed",
+    expect(mockTransaction.mock.invocationCallOrder[0]).toBeLessThan(
+      mockTombstoneRevokedSessions.mock.invocationCallOrder[0]!,
     );
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
-        metadata: expect.objectContaining({ sessionInvalidationFailed: true }),
+        action: "SCIM_USER_DEACTIVATE",
+        metadata: expect.objectContaining({ sessions: 2, extensionTokens: 1, apiKeys: 0, cacheTombstoneFailures: 0 }),
       }),
     );
+  });
+
+  it("tombstones nothing and records no counts on PUT reactivation", async () => {
+    const res = await putActive(true, true);
+
+    expect(res!.status).toBe(200);
+    expect(mockTombstoneRevokedSessions).not.toHaveBeenCalled();
+    expect(mockLogAudit.mock.calls[0][0].metadata).not.toHaveProperty("sessions");
+  });
+
+  it("tombstones nothing on a PUT active=false of a member already inactive (nothing transitioned)", async () => {
+    const res = await putActive(false, true);
+
+    expect(res!.status).toBe(200);
+    expect(mockLogAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "SCIM_USER_UPDATE" }));
+    expect(mockTombstoneRevokedSessions).not.toHaveBeenCalled();
+  });
+
+  // The deactivation and its revocation are one transaction: a revocation
+  // failure inside the departure rolls the deactivation back, so the IdP's
+  // retry transitions and revokes again (plan C3).
+  it("answers no 2xx, audits nothing and tombstones nothing when the revocation fails inside the PUT's transaction", async () => {
+    mockDepartFromTenant.mockImplementationOnce(async () => {
+      expect(mockTransaction).toHaveBeenCalled();
+      throw new Error("revocation failed");
+    });
+
+    await expect(putActive(false, false)).rejects.toThrow("revocation failed");
+    expect(mockLogAudit).not.toHaveBeenCalled();
+    expect(mockTombstoneRevokedSessions).not.toHaveBeenCalled();
+  });
+
+  it("answers 409 with the sign-in reason when the user's credential lock is held past the wait on PUT", async () => {
+    const { UserAuthLockTimeoutError } = await vi.importActual<typeof import("@/lib/auth/session/user-auth-serialization")>("@/lib/auth/session/user-auth-serialization");
+    mockDepartFromTenant.mockRejectedValueOnce(new UserAuthLockTimeoutError());
+
+    const res = await putActive(false, false);
+
+    expect(res!.status).toBe(409);
+    expect((await res!.json()).detail).toBe("The user's sign-in state is being changed; retry later");
+    expect(mockLogAudit).not.toHaveBeenCalled();
   });
 });
 
@@ -1208,89 +1181,62 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
     expect(res!.status).toBe(429);
   });
 
-  it("triggers invalidateUserSessions on PATCH deactivation", async () => {
+  /** A PATCH of `active` against the member's pre-read state, its transaction running its callback. */
+  async function patchActive(active: boolean, wasDeactivated: boolean) {
     mockTenantMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" })
-      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: null })
-      .mockResolvedValueOnce({
-        userId: "user-1",
-        deactivatedAt: new Date(),
-      });
+      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: wasDeactivated ? new Date() : null })
+      .mockResolvedValueOnce({ userId: "user-1", deactivatedAt: active ? null : new Date() });
     mockTenantMember.update.mockResolvedValue({});
     mockScimExternalMapping.findFirst.mockResolvedValue(null);
-
-    await PATCH(
+    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
+      fn({ tenantMember: { update: mockTenantMember.update } }),
+    );
+    return PATCH(
       makeReq({
         method: "PATCH",
         body: {
           schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
-          Operations: [{ op: "replace", path: "active", value: false }],
+          Operations: [{ op: "replace", path: "active", value: active }],
         },
       }),
       makeParams("user-1"),
     );
+  }
 
-    expect(mockInvalidateUserSessions).toHaveBeenCalledWith("user-1", { tenantId: "tenant-1" });
-  });
-
-  it("does NOT trigger invalidateUserSessions on PATCH reactivation", async () => {
-    mockTenantMember.findUnique
-      .mockResolvedValueOnce({ userId: "user-1" })
-      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: new Date() })
-      .mockResolvedValueOnce({
-        userId: "user-1",
-        deactivatedAt: null,
-      });
-    mockTenantMember.update.mockResolvedValue({});
-    mockScimExternalMapping.findFirst.mockResolvedValue(null);
-
-    await PATCH(
-      makeReq({
-        method: "PATCH",
-        body: {
-          schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
-          Operations: [{ op: "replace", path: "active", value: true }],
-        },
-      }),
-      makeParams("user-1"),
-    );
-
-    expect(mockInvalidateUserSessions).not.toHaveBeenCalled();
-  });
-
-  it("returns 200 and logs error when PATCH deactivation invalidation fails", async () => {
-    mockTenantMember.findUnique
-      .mockResolvedValueOnce({ userId: "user-1" })
-      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: null })
-      .mockResolvedValueOnce({
-        userId: "user-1",
-        deactivatedAt: new Date(),
-      });
-    mockTenantMember.update.mockResolvedValue({});
-    mockScimExternalMapping.findFirst.mockResolvedValue(null);
-    mockInvalidateUserSessions.mockRejectedValue(new Error("db error"));
-
-    const res = await PATCH(
-      makeReq({
-        method: "PATCH",
-        body: {
-          schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
-          Operations: [{ op: "replace", path: "active", value: false }],
-        },
-      }),
-      makeParams("user-1"),
-    );
+  it("tombstones what the PATCH deactivation revoked, after the commit, and records the counts", async () => {
+    const res = await patchActive(false, false);
 
     expect(res!.status).toBe(200);
-    expect(mockLogger.error).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: "user-1" }),
-      "session-invalidation-failed",
+    expect(mockTombstoneRevokedSessions).toHaveBeenCalledWith(
+      ["digest-of-user-1-1", "digest-of-user-1-2"],
+      { reason: "scim_deprovision", operation: "SCIM user deprovisioning", userId: "user-1" },
     );
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
-        metadata: expect.objectContaining({ sessionInvalidationFailed: true }),
+        action: "SCIM_USER_DEACTIVATE",
+        metadata: expect.objectContaining({ sessions: 2, extensionTokens: 1, apiKeys: 0, cacheTombstoneFailures: 0 }),
       }),
     );
+  });
+
+  it("tombstones nothing and records no counts on PATCH reactivation", async () => {
+    const res = await patchActive(true, true);
+
+    expect(res!.status).toBe(200);
+    expect(mockTombstoneRevokedSessions).not.toHaveBeenCalled();
+    expect(mockLogAudit.mock.calls[0][0].metadata).not.toHaveProperty("sessions");
+  });
+
+  it("answers no 2xx, audits nothing and tombstones nothing when the revocation fails inside the PATCH's transaction", async () => {
+    mockDepartFromTenant.mockImplementationOnce(async () => {
+      expect(mockTransaction).toHaveBeenCalled();
+      throw new Error("revocation failed");
+    });
+
+    await expect(patchActive(false, false)).rejects.toThrow("revocation failed");
+    expect(mockLogAudit).not.toHaveBeenCalled();
+    expect(mockTombstoneRevokedSessions).not.toHaveBeenCalled();
   });
 });
 
@@ -1323,7 +1269,7 @@ describe("DELETE /api/scim/v2/Users/[id]", () => {
     mockTenantMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" })
       .mockResolvedValueOnce({ id: "tm1", role: "MEMBER" });
-    mockTransaction.mockResolvedValue([]);
+    mockTransaction.mockResolvedValue(revokedFor(["user-1"]));
 
     const res = await DELETE(makeReq({ method: "DELETE" }), makeParams("user-1"));
     expect(res!.status).toBe(204);
@@ -1371,58 +1317,79 @@ describe("DELETE /api/scim/v2/Users/[id]", () => {
     expect(res!.status).toBe(429);
   });
 
-  it("triggers invalidateUserSessions on SCIM DELETE", async () => {
+  /** deactivateScimUser's transaction running its callback over the lock and delete statements. */
+  function runDeleteTransaction() {
+    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
+      fn({
+        $queryRaw: teamLockQuery((sql) => (sql.includes("FROM teams") ? [{ id: "team-1" }] : [{ team_id: "team-1" }])),
+        $executeRaw: vi.fn().mockResolvedValue(0),
+        teamMemberKey: { deleteMany: mockTeamMemberKey.deleteMany },
+        scimExternalMapping: { deleteMany: mockScimExternalMapping.deleteMany },
+        tenantMember: { delete: mockTenantMember.delete },
+      }),
+    );
+  }
+
+  it("revokes inside the deletion's transaction, then tombstones and records the counts", async () => {
     mockTenantMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" })
       .mockResolvedValueOnce({ id: "tm1", role: "MEMBER" });
-    mockTransaction.mockResolvedValue([]);
-
-    await DELETE(makeReq({ method: "DELETE" }), makeParams("user-1"));
-
-    expect(mockInvalidateUserSessions).toHaveBeenCalledWith("user-1", { tenantId: "tenant-1" });
-  });
-
-  it("returns 204 even if session invalidation fails on DELETE", async () => {
-    mockTenantMember.findUnique
-      .mockResolvedValueOnce({ userId: "user-1" })
-      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER" });
-    mockTransaction.mockResolvedValue([]);
-    mockInvalidateUserSessions.mockRejectedValue(new Error("db error"));
+    runDeleteTransaction();
 
     const res = await DELETE(makeReq({ method: "DELETE" }), makeParams("user-1"));
+
     expect(res!.status).toBe(204);
-    expect(mockLogger.error).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: "user-1" }),
-      "session-invalidation-failed",
+    expect(mockRevokeUserAuthArtifactsInTx).toHaveBeenCalledWith(expect.anything(), "user-1", {
+      tenantFilter: { tenantId: "tenant-1" },
+      boundedLockWait: true,
+    });
+    expect(mockTombstoneRevokedSessions).toHaveBeenCalledWith(
+      ["digest-of-user-1-1", "digest-of-user-1-2"],
+      { reason: "scim_deprovision", operation: "SCIM user deprovisioning", userId: "user-1" },
     );
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
-        metadata: expect.objectContaining({ sessionInvalidationFailed: true }),
+        action: "SCIM_USER_DELETE",
+        metadata: expect.objectContaining({ sessions: 2, extensionTokens: 1, apiKeys: 0, cacheTombstoneFailures: 0 }),
       }),
     );
   });
 
-  it("includes invalidation counts in audit metadata on DELETE success", async () => {
+  // A retry finds the member still there (no 404), because the deletion
+  // rolled back with the revocation (plan C3).
+  it("answers no 2xx, audits nothing and tombstones nothing when the revocation fails inside the transaction", async () => {
     mockTenantMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" })
       .mockResolvedValueOnce({ id: "tm1", role: "MEMBER" });
-    mockTransaction.mockResolvedValue([]);
-    mockInvalidateUserSessions.mockResolvedValue({ sessions: 2, extensionTokens: 1, apiKeys: 0 });
+    runDeleteTransaction();
+    mockRevokeUserAuthArtifactsInTx.mockRejectedValueOnce(new Error("revocation failed"));
 
-    await DELETE(makeReq({ method: "DELETE" }), makeParams("user-1"));
+    await expect(DELETE(makeReq({ method: "DELETE" }), makeParams("user-1"))).rejects.toThrow("revocation failed");
+    expect(mockTenantMember.delete).toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
+    expect(mockTombstoneRevokedSessions).not.toHaveBeenCalled();
+  });
 
-    expect(mockLogAudit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        metadata: expect.objectContaining({ sessions: 2, extensionTokens: 1, apiKeys: 0 }),
-      }),
-    );
+  it("answers 409 with the sign-in reason when the user's credential lock is held past the wait on DELETE", async () => {
+    const { UserAuthLockTimeoutError } = await vi.importActual<typeof import("@/lib/auth/session/user-auth-serialization")>("@/lib/auth/session/user-auth-serialization");
+    mockTenantMember.findUnique
+      .mockResolvedValueOnce({ userId: "user-1" })
+      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER" });
+    runDeleteTransaction();
+    mockRevokeUserAuthArtifactsInTx.mockRejectedValueOnce(new UserAuthLockTimeoutError());
+
+    const res = await DELETE(makeReq({ method: "DELETE" }), makeParams("user-1"));
+
+    expect(res!.status).toBe(409);
+    expect((await res!.json()).detail).toBe("The user's sign-in state is being changed; retry later");
+    expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
   it("records the email read after the tenant context, not through the membership's relation", async () => {
     mockTenantMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" })
       .mockResolvedValueOnce({ id: "tm1", role: "MEMBER" });
-    mockTransaction.mockResolvedValue([]);
+    mockTransaction.mockResolvedValue(revokedFor(["user-1"]));
     mockGuardUser.findUnique.mockResolvedValue({ email: "moved@example.com", name: "Moved", locale: null });
 
     await DELETE(makeReq({ method: "DELETE" }), makeParams("user-1"));
@@ -1440,7 +1407,7 @@ describe("DELETE /api/scim/v2/Users/[id]", () => {
     mockTenantMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" })
       .mockResolvedValueOnce({ id: "tm1", role: "MEMBER" });
-    mockTransaction.mockResolvedValue([]);
+    mockTransaction.mockResolvedValue(revokedFor(["user-1"]));
     mockGuardUser.findUnique.mockRejectedValue(new Error("bypass unavailable"));
 
     const res = await DELETE(makeReq({ method: "DELETE" }), makeParams("user-1"));

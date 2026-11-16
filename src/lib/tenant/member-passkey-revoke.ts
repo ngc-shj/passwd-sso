@@ -1,12 +1,13 @@
-import * as Sentry from "@sentry/nextjs";
 import { NextResponse, type NextRequest } from "next/server";
 import type { TenantRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { logAuditInTx, tenantAuditBase } from "@/lib/audit/audit";
 import { canRevokeMemberPasskey } from "@/lib/auth/access/tenant-role-hierarchy";
-import { revokeUserAuthArtifactsInTx } from "@/lib/auth/session/user-session-invalidation";
+import {
+  revokeUserAuthArtifactsInTx,
+  tombstoneRevokedSessions,
+} from "@/lib/auth/session/user-session-invalidation";
 import { lockUserAuthArtifacts } from "@/lib/auth/session/user-auth-serialization";
-import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
 import { withBypassRls, withTenantRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE, NOTIFICATION_TYPE } from "@/lib/constants";
@@ -18,8 +19,6 @@ import { notificationBody, notificationTitle } from "@/lib/notification/notifica
 import { sendEmail } from "@/lib/email";
 import { passkeyRevokedByAdminEmail, type PasskeyRevokeExtent } from "@/lib/email/templates/passkey-revoked-by-admin";
 import { resolveUserLocale } from "@/lib/locale";
-import { getLogger } from "@/lib/logger";
-import { errorLogFields } from "@/lib/logger/error-fields";
 import { AUDIT_CREDENTIAL_ID_MAX_LENGTH } from "@/lib/validations/common.server";
 import { MEMBER_PASSKEY_REVOKE_TX_TIMEOUT_MS } from "@/lib/constants/auth/member-containment";
 import {
@@ -233,25 +232,11 @@ export async function revokeMemberPasskeys(
   // re-reads the session row through auth()), so an entry a Redis failure
   // leaves behind only lets the proxy pass a request the handler then refuses,
   // until its TTL; the failure is still logged and reported, not hidden.
-  let cacheTombstoneFailures = 0;
-  try {
-    cacheTombstoneFailures = (await invalidateCachedSessions(sessionTokens)).failed;
-  } catch (err) {
-    cacheTombstoneFailures = sessionTokens.length;
-    getLogger().error(
-      { error: errorLogFields(err), targetUserId, _logType: "tenant.member_passkey_revoke_cache_invalidation_failed" },
-      "tenant member passkey revoke: session cache invalidation failed",
-    );
-  }
-  if (cacheTombstoneFailures > 0) {
-    // The same on-call signal invalidateUserSessions raises for a tombstone
-    // that did not land.
-    Sentry.captureMessage("session cache tombstone failures during tenant member passkey revoke", {
-      level: "error",
-      tags: { reason: "tenant_member_passkey_revoke" },
-      extra: { targetUserId, failures: cacheTombstoneFailures },
-    });
-  }
+  const cacheTombstoneFailures = await tombstoneRevokedSessions(sessionTokens, {
+    reason: "tenant_member_passkey_revoke",
+    operation: "tenant member passkey revoke",
+    extra: { targetUserId },
+  });
 
   // The member learns of it in the app and by email, as of a vault reset.
   const notificationKey = NOTIFICATION_KEY[extent];

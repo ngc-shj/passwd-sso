@@ -7,6 +7,7 @@ import {
   withBoundedLockWait,
 } from "@/lib/team/team-key-rotation-lock";
 import type { LockedTenantRow } from "@/lib/team/tenant-departure-read";
+import { UserAuthLockTimeoutError } from "@/lib/auth/session/user-auth-serialization";
 
 export {
   type LockedTenantRow,
@@ -140,20 +141,25 @@ const PRISMA_TX_EXPIRED = "P2028";
 
 /**
  * The refusals a membership transaction raises against a concurrent one:
- * rotation conflicts, a tenant-row wait past the budget, a deadlock, or the
+ * rotation conflicts, a tenant-row wait past the budget, a wait for the
+ * departing user's credential lock past its budget, a deadlock, or the
  * transaction expiring. Each rolled the transaction back and is safe to
  * retry, so routes answer 409. (Directory sync reaches the lock through
  * team-departure.ts and fails on the thrown error, not through this helper.)
  */
 export function isMembershipLockConflict(e: unknown): boolean {
-  if (isTeamRotationConflict(e) || e instanceof TenantMemberLockTimeoutError) return true;
+  if (
+    isTeamRotationConflict(e) ||
+    e instanceof TenantMemberLockTimeoutError ||
+    e instanceof UserAuthLockTimeoutError
+  ) return true;
   if (pgErrorCode(e) === DEADLOCK_DETECTED) return true;
   return e instanceof Prisma.PrismaClientKnownRequestError && e.code === PRISMA_TX_EXPIRED;
 }
 
 /** The client-facing reason for a membership lock conflict (always a 409). */
 export function membershipConflictMessage(e: unknown): string {
-  return e instanceof TenantMemberLockTimeoutError
-    ? "The user's membership is being changed; retry later"
-    : "Team key rotation in progress; retry later";
+  if (e instanceof TenantMemberLockTimeoutError) return "The user's membership is being changed; retry later";
+  if (e instanceof UserAuthLockTimeoutError) return "The user's sign-in state is being changed; retry later";
+  return "Team key rotation in progress; retry later";
 }

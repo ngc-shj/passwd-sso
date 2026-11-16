@@ -384,9 +384,10 @@ describe("withUserTenantRls", () => {
     expect(fn).toHaveBeenCalledWith("tenant-abc", tx);
   });
 
-  // L2 — session-auth fail-open backstop. If SCIM deactivation's
-  // invalidateUserSessions throws, a session may survive un-deleted. This pins
-  // the helper-level backstop for session-auth routes that resolve tenant
+  // L2 — session-auth backstop. A SCIM deactivation deletes the member's
+  // sessions in its own transaction; should a deactivation ever commit with a
+  // session surviving, this pins the helper-level backstop for session-auth
+  // routes that resolve tenant
   // context from the CURRENT USER via withUserTenantRls() / resolveUserTenantId():
   // active membership is resolved with the deactivatedAt:null filter
   // (resolveUserTenantIdFromClient), so a deactivated member has no active tenant

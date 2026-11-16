@@ -4,7 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { extractRequestMeta, logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { createLockBudget } from "@/lib/team/team-key-rotation-lock";
 import { isMembershipLockConflict, lockTenantMemberCreation, membershipConflictMessage } from "@/lib/team/tenant-row-lock";
-import { departCreatedMembership } from "@/lib/team/team-departure";
+import { type DepartureRevocation, departCreatedMembership } from "@/lib/team/team-departure";
+import { tombstoneRevokedSessions } from "@/lib/auth/session/user-session-invalidation";
 import { TEAM_MEMBERSHIP_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 import {
   scimResponse,
@@ -197,6 +198,7 @@ async function handlePOST(req: NextRequest) {
       // ends those memberships.
       const budget = createLockBudget();
       if (active === false) await lockTenantMemberCreation(tx, tenantId, user.id, budget);
+      let revocation: DepartureRevocation | null = null;
       const member = await tx.tenantMember.create({
         data: {
           tenantId,
@@ -210,7 +212,7 @@ async function handlePOST(req: NextRequest) {
       });
       if (active === false) {
         const { ip, userAgent } = extractRequestMeta(req);
-        await departCreatedMembership(tx, tenantId, [user.id], {
+        revocation = await departCreatedMembership(tx, tenantId, [user.id], {
           actor: { userId: auditUserId, actorType, ip, userAgent },
           budget,
         });
@@ -246,8 +248,16 @@ async function handlePOST(req: NextRequest) {
         }
       }
 
-      return { user, member, externalId };
+      return { user, member, externalId, revocation };
     }, { timeout: TEAM_MEMBERSHIP_TX_TIMEOUT_MS });
+
+    if (created.revocation) {
+      await tombstoneRevokedSessions(created.revocation.sessionTokens, {
+        reason: "scim_deprovision",
+        operation: "SCIM user deprovisioning",
+        userId: created.user.id,
+      });
+    }
 
     await logAuditAsync({
       ...tenantAuditBase(req, auditUserId, tenantId),

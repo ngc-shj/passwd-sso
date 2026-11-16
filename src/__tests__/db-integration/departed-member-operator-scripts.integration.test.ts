@@ -581,7 +581,7 @@ describe("departed-member operator scripts — real-DB integration", () => {
         expect(await listed()).toEqual([hook]);
 
         const departed = await withTenantRls(prisma, tenant, (tx) => departFromTenant(tx, tenant, [user], { actor }));
-        expect(departed).toEqual([user]);
+        expect(departed.userIds).toEqual([user]);
         expect(await listed()).toEqual([hook]);
 
         await sql(`DELETE FROM tenant_members WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, tenant, user);

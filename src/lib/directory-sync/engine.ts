@@ -14,7 +14,13 @@ import { prisma } from "@/lib/prisma";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { createLockBudget } from "@/lib/team/team-key-rotation-lock";
 import { lockTenantRows } from "@/lib/team/tenant-row-lock";
-import { departCreatedMembership, departFromTenant, returnToTenant } from "@/lib/team/team-departure";
+import {
+  type DepartureRevocation,
+  departCreatedMembership,
+  departFromTenant,
+  returnToTenant,
+} from "@/lib/team/team-departure";
+import { tombstoneRevokedSessions } from "@/lib/auth/session/user-session-invalidation";
 import { TEAM_MEMBERSHIP_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 import {
   resolveExistingUsersForTenant,
@@ -130,6 +136,32 @@ async function writeSyncError(
   } catch {
     // best-effort
   }
+}
+
+/**
+ * After a run's departures committed (their revocations with them): evict the
+ * revoked sessions from the session cache, and log what was revoked. The
+ * per-team TEAM_MEMBER_TENANT_DEACTIVATE audit rows and the sync log's
+ * usersDeactivated already record the departures themselves.
+ */
+async function reportRevocations(
+  tenantId: string,
+  configId: string,
+  revocations: readonly DepartureRevocation[],
+): Promise<void> {
+  const counts: Record<string, number> = {};
+  for (const { counts: each } of revocations) {
+    for (const [model, count] of Object.entries(each)) counts[model] = (counts[model] ?? 0) + count;
+  }
+  if (!Object.values(counts).some((count) => count > 0)) return;
+  const cacheTombstoneFailures = await tombstoneRevokedSessions(
+    revocations.flatMap((r) => r.sessionTokens),
+    { reason: "directory_sync_deprovision", operation: "directory sync", extra: { tenantId, configId } },
+  );
+  getLogger().info(
+    { tenantId, configId, ...counts, cacheTombstoneFailures },
+    "directory-sync.credentials-revoked",
+  );
 }
 
 // ─── Provider Fetch ──────────────────────────────────────────
@@ -527,6 +559,9 @@ export async function runDirectorySync(
       // the commit. A race backstop since round 6: the ownership checks let through
       // only users this tenant owns, whose column already names it (round-7 F-R7-5).
       const activated: string[] = [];
+      // What each departure revoked in the transaction, tombstoned and logged
+      // after it commits.
+      const revocations: DepartureRevocation[] = [];
       await withTenantRls(prisma, tenantId, async (tx) => {
         const userByEmail = new Map<string, { id: string }>();
         for (const [email, resolution] of existingUsers) {
@@ -775,16 +810,28 @@ export async function runDirectorySync(
             });
             const batch = toDeactivate.filter((userId) => memberByUserId.has(userId));
             // Counts transitions: a member already inactive is not deactivated again.
-            usersDeactivated = (
-              await departFromTenant(tx, tenantId, batch, { actor, budget: transitionBudget, alreadyLocked: true })
-            ).length;
+            const departed = await departFromTenant(tx, tenantId, batch, {
+              actor,
+              budget: transitionBudget,
+              alreadyLocked: true,
+            });
+            usersDeactivated = departed.userIds.length;
+            revocations.push(departed.revocation);
           }
         }
 
-        await departFromTenant(tx, tenantId, departIds, { actor, budget: transitionBudget, alreadyLocked: true });
+        const departed = await departFromTenant(tx, tenantId, departIds, {
+          actor,
+          budget: transitionBudget,
+          alreadyLocked: true,
+        });
+        revocations.push(departed.revocation);
         await returnToTenant(tx, tenantId, returnIds, { actor, budget: transitionBudget, alreadyLocked: true });
-        await departCreatedMembership(tx, tenantId, createdDeactivated, { actor, budget: transitionBudget });
+        revocations.push(
+          await departCreatedMembership(tx, tenantId, createdDeactivated, { actor, budget: transitionBudget }),
+        );
       }, { timeout: TEAM_MEMBERSHIP_TX_TIMEOUT_MS });
+      await reportRevocations(tenantId, configId, revocations);
       // After the commit, so a rolled-back run cannot leave a refusal in the
       // trail. Best-effort, like every other emit on this path — the durable
       // record of the count is the sync log row written below.

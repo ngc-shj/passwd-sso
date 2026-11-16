@@ -147,10 +147,10 @@
       "calls": 1,
       "reason": "where is the caller's args.where spread (same as transition); a grant state change that grants no API access."
     },
-    "src/lib/auth/session/user-session-invalidation.ts#revokeUserAuthArtifactsInTx": {
+    "src/lib/auth/session/user-session-invalidation.ts#revokeUsersAuthArtifactsInTx": {
       "class": "opaque-where",
       "calls": 8,
-      "reason": "Revokes every token row of a user and consumes their unused single-use codes (the database half of invalidateUserSessions, also run in the admin passkey revoke's transaction); the spread is a tenantFilter keyed by userId/tenantId, not a digest. Revocation only."
+      "reason": "Revokes every token row of a batch of users and consumes their unused single-use codes (the database half of invalidateUserSessions, also run in the departure, SCIM delete, team removal and admin passkey revoke transactions); the spread is a tenantFilter keyed by userId/tenantId, not a digest. Revocation only."
     },
     "src/lib/tenant/member-containment.ts#containMemberInTx": {
       "class": "opaque-where",
