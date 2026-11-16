@@ -534,12 +534,18 @@ export function namedVolumeAllowlistDrift(model: Record<string, unknown>, allowl
   return drift;
 }
 
-/** The `logging.driver` values a production service may use: the capped json-file default, and the fluentd driver docker-compose.logging.yml gives app. */
-export const LOGGING_DRIVER_ALLOWLIST: readonly string[] = ["json-file", "fluentd"];
+/**
+ * The `logging.driver` values a production service may use: the capped json-file
+ * default, the fluentd driver docker-compose.logging.yml gives app, and awslogs
+ * (the CloudWatch step in docs/operations/audit-log-forwarding.md).
+ */
+export const LOGGING_DRIVER_ALLOWLIST: readonly string[] = ["json-file", "fluentd", "awslogs"];
 
 /**
  * The `logging.options` keys a production service may set, exactly the ones the
- * x-logging anchors and docker-compose.logging.yml's fluentd block write. Default-deny
+ * x-logging anchors, docker-compose.logging.yml's fluentd block and the
+ * documented awslogs step write (the awslogs-* options only name a region, group
+ * and stream, and none copies the container's environment). Default-deny
  * because `env`, `env-regex`, `labels` and `labels-regex` copy the container's own
  * environment (the signing key) into every log record, and their value is a
  * key name or a regex, so the sentinel scan cannot see it.
@@ -552,13 +558,21 @@ export const LOGGING_OPTION_ALLOWLIST: readonly string[] = [
   "fluentd-retry-wait",
   "fluentd-max-retries",
   "tag",
+  "awslogs-region",
+  "awslogs-group",
+  "awslogs-stream",
+  "awslogs-create-group",
 ];
 
 /**
  * Every way a service's `logging` block falls outside LOGGING_DRIVER_ALLOWLIST
  * and LOGGING_OPTION_ALLOWLIST: a key other than `driver` and `options`, a
  * missing or unlisted driver (the default driver also honours `env`), options
- * that are not a mapping, and each unlisted option, by name.
+ * that are not a mapping, each unlisted option, by name, and a `tag` containing
+ * a template: docker renders `tag` as a Go template over the container's info,
+ * which exposes ContainerEnv, ContainerArgs and ContainerLabels, so a template
+ * writes the signing key into every record. Every template is refused, not only
+ * the ones that name those fields.
  */
 export function loggingProblems(logging: unknown): string[] {
   if (!isRecord(logging)) return ["logging is not a mapping"];
@@ -570,7 +584,11 @@ export function loggingProblems(logging: unknown): string[] {
   }
   if (logging.options !== undefined) {
     if (!isRecord(logging.options)) problems.push("logging.options is not a mapping");
-    else for (const key of Object.keys(logging.options)) if (!LOGGING_OPTION_ALLOWLIST.includes(key)) problems.push(`logging.options.${key} is not in LOGGING_OPTION_ALLOWLIST`);
+    else {
+      for (const key of Object.keys(logging.options)) if (!LOGGING_OPTION_ALLOWLIST.includes(key)) problems.push(`logging.options.${key} is not in LOGGING_OPTION_ALLOWLIST`);
+      const tag = logging.options.tag;
+      if (typeof tag === "string" && tag.includes("{{")) problems.push("logging.options.tag contains a template, which can expose the container's environment (every template is refused)");
+    }
   }
   return problems;
 }

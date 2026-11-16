@@ -195,3 +195,25 @@ test-F2 [Minor] render behaviour unverified on CI's compose version.
 - test-F2 — Mitigated: an unknown render-time key fails the check naming it (stub-docker
   test). CI's compose version is verified on push (recorded below after CI runs).
 - Verification: full suite 1193 files / 25091 tests pass; build pass; all gates pass.
+
+### Round 5
+Findings: sec-S1 / test-G2 [Major, converged] `logging.options.tag` is a Go template
+over the logger info (ContainerEnv, ContainerArgs, ContainerLabels), so an allowlisted
+`tag` could write the publisher's signing key into every record; func-F-R5-1 [Minor]
+documented awslogs step refused; func-F-R5-2 [Minor] extension route documented for two
+of five allowlists; test-G1 [Minor] full-render freshness never runs in CI on a different
+compose version. Security's per-key verdicts for every other allowlisted key: covered or
+not a W channel.
+
+- sec-S1 / test-G2 — Fixed: any `tag` containing `{{` is refused in both gates (the
+  shipped literal `app.passwd-sso` passes); red cases include `{{.ContainerEnv}}`,
+  whitespace and `index` spellings, and `{{.Name}}`. Mutation-proved.
+- func-F-R5-1 — Fixed: `awslogs` driver and its four options allowlisted; env,
+  env-regex, labels, labels-regex stay refused for every driver; forwarding doc notes
+  that a committed awslogs block also needs an `OFF_HOST_ALLOW` entry in log-caps.
+- func-F-R5-2 — Fixed: one extension-route sentence for all five allowlists in
+  deployment.md and a pointer in audit-log-forwarding.md.
+- test-G1 — Fixed: under `CI=true` a compose-version mismatch or unknown version fails
+  with both versions and the re-record command; locally it warns and compares the
+  projection. Stub-docker red/allow cases.
+- Verification: full suite 1193 files / 25097 tests pass; build pass; gates pass.

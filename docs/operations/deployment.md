@@ -871,15 +871,19 @@ mounted by a service its entry names and read-only where it says so; a named
 volume only if it is plain docker-managed (no `driver`, `driver_opts`, `external`
 or explicit `name:`) and mounted by a service its `NAMED_VOLUME_ALLOWLIST` entry
 names (`postgres_data` by `db`, `redis_data` by `redis`); a `logging` block only
-with a driver in `LOGGING_DRIVER_ALLOWLIST` (`json-file`, `fluentd`) and option
-keys in `LOGGING_OPTION_ALLOWLIST` (`max-size`, `max-file`, `fluentd-address`,
-`fluentd-async`, `fluentd-retry-wait`, `fluentd-max-retries`, `tag`), because
-`env`, `env-regex`, `labels` and `labels-regex` copy a container's environment,
-the signing key included, into every log record and their values are key names
-the withheld-value scan cannot see; a service-referenced top-level `secrets:` or `configs:`
+with a driver in `LOGGING_DRIVER_ALLOWLIST` (`json-file`, `fluentd`, `awslogs`) and
+option keys in `LOGGING_OPTION_ALLOWLIST` (`max-size`, `max-file`,
+`fluentd-address`, `fluentd-async`, `fluentd-retry-wait`, `fluentd-max-retries`,
+`tag`, `awslogs-region`, `awslogs-group`, `awslogs-stream`,
+`awslogs-create-group`), and a `tag` with no `{{` template in it, because `env`,
+`env-regex`, `labels` and `labels-regex` copy a container's environment, the
+signing key included, into every log record and their values are key names the
+withheld-value scan cannot see, and docker renders `tag` as a Go template over
+the container's info (`{{.ContainerEnv}}`), so every template is refused, not
+only the ones that name an environment field; a service-referenced top-level `secrets:` or `configs:`
 entry and `external: true` never. The render check also verifies that each
 allowlist entry exists, is not a symlink, is not an `.env*` file and is mounted by
-a production file. A volume type or key the checks do not model fails them; a key outside `SERVICE_KEY_ALLOWLIST` is added there, with its reason, in the change that needs it. Every other secret in `.env` (for example `AUTH_SECRET`, `REDIS_PASSWORD`,
+a production file. A volume type or key the checks do not model fails them; a key, build key, file channel, named volume, or logging driver or option the checks refuse is added to the matching list in `scripts/checks/lib/withheld-env.ts`, with its reason, in the change that needs it: `SERVICE_KEY_ALLOWLIST`, `BUILD_KEY_ALLOWLIST`, `FILE_CHANNEL_ALLOWLIST` (path, services, readOnly), `NAMED_VOLUME_ALLOWLIST` (name, services), and `LOGGING_DRIVER_ALLOWLIST` / `LOGGING_OPTION_ALLOWLIST` (with the reason the option copies no environment). `env`, `env-regex`, `labels`, `labels-regex` and `tag` templates are never added. Every other secret in `.env` (for example `AUTH_SECRET`, `REDIS_PASSWORD`,
 `SHARE_MASTER_KEY_*`) is not in the set and still reaches every container that
 loads `.env`; jackson also receives `AUTH_SECRET`, by interpolation, as
 `NEXTAUTH_SECRET`. In the dev

@@ -60,9 +60,10 @@
 # where it says so; a named volume only if it is plain and docker-managed (no
 # driver, driver_opts, external or explicit name:) and mounted by a service
 # NAMED_VOLUME_ALLOWLIST names for it; a `logging` block only with a driver in
-# LOGGING_DRIVER_ALLOWLIST (json-file, fluentd) and option keys in
+# LOGGING_DRIVER_ALLOWLIST (json-file, fluentd, awslogs) and option keys in
 # LOGGING_OPTION_ALLOWLIST (so `env`, `env-regex`, `labels` and `labels-regex`,
-# which copy the signing key into log records, are refused by name); a top-level
+# which copy the signing key into log records, are refused by name) and a `tag`
+# with no `{{` template (docker renders it over the container's env); a top-level
 # `secrets:` or `configs:` entry a service references, and `external: true`,
 # never. A volume type or key the checks do not model fails them rather than being
 # skipped.

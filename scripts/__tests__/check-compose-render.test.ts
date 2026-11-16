@@ -422,6 +422,14 @@ describe("analyzeRender: a host file reaches a service only by FILE_CHANNEL_ALLO
         refused(`logging.options.${key} is not in LOGGING_OPTION_ALLOWLIST`),
       );
     }
+    const tagRefusal = "logging.options.tag contains a template, which can expose the container's environment (every template is refused)";
+    for (const tag of ["{{.ContainerEnv}}", "{{ .ContainerEnv }}", "{{index .ContainerEnv 0}}", "{{.Name}}"]) {
+      expect(drift(onPublisher({ driver: "json-file", options: { ...capped, tag } })), tag).toEqual(refused(tagRefusal));
+    }
+    expect(drift(onPublisher({ driver: "json-file", options: { ...capped, tag: "app.passwd-sso" } }))).toEqual([]);
+    const awslogs = { "awslogs-region": "ap-northeast-1", "awslogs-group": "/passwd-sso/audit", "awslogs-stream": "app", "awslogs-create-group": "true" };
+    expect(drift(onPublisher({ driver: "awslogs", options: awslogs }))).toEqual([]);
+    expect(drift(onPublisher({ driver: "awslogs", options: { ...awslogs, env: "AUDIT_ANCHOR_SIGNING_KEY" } }))).toEqual(refused("logging.options.env is not in LOGGING_OPTION_ALLOWLIST"));
     expect(drift(onPublisher({ driver: "gelf", options: capped }))).toEqual(refused("logging.driver gelf is not in LOGGING_DRIVER_ALLOWLIST"));
     expect(drift(onPublisher({ driver: "json-file", options: "env=X" }))).toEqual(refused("logging.options is not a mapping"));
     expect(baseline().services[PUBLISHER].logging).toEqual({ driver: "json-file", options: capped });
@@ -774,6 +782,21 @@ function recordedProjection(path: string) {
   return renderProjection(hydrateRecordedRender(file.render, buildSentinels([...withheld, ...file.withheld, ...keys, "DEPLOYMENT_ID"])));
 }
 
+const RE_RECORD_COMMAND = "npx tsx scripts/checks/check-compose-render.ts --record scripts/__tests__/fixtures/compose-render/workers-render.json";
+
+/**
+ * How a re-record of the tree is compared to the committed fixture. Under
+ * CI=true a compose version other than the fixture's (or none) fails: the full
+ * comparison would otherwise silently degrade to the projection for good.
+ * Locally it warns and compares the projection.
+ */
+function fixtureComparison(running: string | null, recordedVersion: string | null, ci: boolean): { mode: "full" } | { mode: "projection"; warning: string } | { mode: "fail"; message: string } {
+  if (running !== null && running === recordedVersion) return { mode: "full" };
+  const note = `compose-render fixture: recorded under "${recordedVersion}", running "${running}"`;
+  if (ci) return { mode: "fail", message: `${note}: CI must run the fixture's compose version for the full comparison; re-record with: ${RE_RECORD_COMMAND}` };
+  return { mode: "projection", warning: `${note}: comparing the projection only, not the full render` };
+}
+
 /**
  * The whole recorded file but its compose version: the set, W, and every service
  * and top-level key of the render, hydrated.
@@ -783,6 +806,32 @@ function recordedFull(path: string) {
   const keys = [...new Set([...JSON.stringify(file.render).matchAll(/\{\{([A-Z0-9_]+)\}\}/g)].map((m) => m[1]))];
   return { ...file, render: hydrateRecordedRender(file.render, buildSentinels([...withheld, ...file.withheld, ...keys, "DEPLOYMENT_ID"])) };
 }
+
+describe("fixtureComparison", () => {
+  const V = "Docker Compose version v5.0.2";
+  it("runs the full comparison on the fixture's version, in CI or not", () => {
+    expect(fixtureComparison(V, V, true)).toEqual({ mode: "full" });
+    expect(fixtureComparison(V, V, false)).toEqual({ mode: "full" });
+  });
+
+  it("fails in CI, naming both versions and the re-record command, on a different or null version", () => {
+    for (const running of ["Docker Compose version v9.9.9", null]) {
+      expect(fixtureComparison(running, V, true)).toEqual({
+        mode: "fail",
+        message: `compose-render fixture: recorded under "${V}", running "${running}": CI must run the fixture's compose version for the full comparison; re-record with: ${RE_RECORD_COMMAND}`,
+      });
+    }
+  });
+
+  it("warns and compares the projection locally on a different or null version", () => {
+    for (const running of ["Docker Compose version v9.9.9", null]) {
+      expect(fixtureComparison(running, V, false)).toEqual({
+        mode: "projection",
+        warning: `compose-render fixture: recorded under "${V}", running "${running}": comparing the projection only, not the full render`,
+      });
+    }
+  });
+});
 
 describe("real docker compose", () => {
   let out: string[];
@@ -825,21 +874,47 @@ describe("real docker compose", () => {
     for (const set of RENDER_SETS) expect(out.join("\n")).toContain(`${set.name}:`);
   }, 120_000);
 
-  // CI's compose version is verified on push: when it is not the fixture's, the
-  // note below shows in the job log and the projection is what is compared.
-  it("re-records the render of the tree as the committed fixture holds it", (t) => {
-    if (!requireDocker(() => t.skip())) return;
+  /** Re-records the tree under `env` and compares it to the committed fixture as fixtureComparison says. */
+  function compareToFixture(env: NodeJS.ProcessEnv): void {
     const record = join(scratchCopy(), "record.json");
-    expect(main(["--record", record]), err.join("\n")).toBe(0);
+    expect(main(["--record", record], env), err.join("\n")).toBe(0);
     const running = (JSON.parse(readFileSync(record, "utf8")) as Recorded).composeVersion;
-    if (running === recorded.composeVersion) {
+    const verdict = fixtureComparison(running, recorded.composeVersion, env.CI === "true");
+    if (verdict.mode === "fail") throw new Error(verdict.message);
+    if (verdict.mode === "full") {
       // Same compose: every service, every key and the top-level keys, so a key the projection does not list is compared too.
       expect(recordedFull(record)).toEqual(recordedFull(FIXTURE_PATH));
     } else {
-      console.warn(`compose-render fixture: recorded under "${recorded.composeVersion}", running "${running}": comparing the projection only, not the full render`);
+      console.warn(verdict.warning);
       expect(recordedProjection(record)).toEqual(recordedProjection(FIXTURE_PATH));
     }
+  }
+
+  it("re-records the render of the tree as the committed fixture holds it", (t) => {
+    if (!requireDocker(() => t.skip())) return;
+    compareToFixture(process.env);
   }, 120_000);
+
+  it("fails under CI=true and only warns locally when the compose in use is not the fixture's version", (t) => {
+    if (!requireDocker(() => t.skip())) return;
+    const real = spawnSync("sh", ["-c", "command -v docker"], { encoding: "utf8" }).stdout.trim();
+    const dir = mkdtempSync(join(tmpdir(), "compose-render-fake-docker-"));
+    try {
+      const fake = join(dir, "docker");
+      writeFileSync(fake, `#!/bin/sh\nif [ "$2" = "version" ]; then echo "Docker Compose version v0.0.0"; exit 0; fi\nexec ${real} "$@"\n`);
+      chmodSync(fake, 0o755);
+      expect(recorded.composeVersion).not.toBe("Docker Compose version v0.0.0");
+      const env = { ...process.env, COMPOSE_RENDER_DOCKER_BIN: fake };
+      expect(() => compareToFixture({ ...env, CI: "true" })).toThrow(
+        `recorded under "${recorded.composeVersion}", running "Docker Compose version v0.0.0": CI must run the fixture's compose version for the full comparison; re-record with: ${RE_RECORD_COMMAND}`,
+      );
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      compareToFixture({ ...env, CI: "" });
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(`running "Docker Compose version v0.0.0": comparing the projection only`));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 240_000);
 
   it("finds the committed fixture stale under the full comparison against a scratch copy whose app gains read_only, which the projection does not list", (t) => {
     if (!requireDocker(() => t.skip())) return;

@@ -138,6 +138,8 @@ services:
         tag: passwd-sso.app
 ```
 
+A Docker log-driver option the production-compose checks do not list (see `LOGGING_OPTION_ALLOWLIST` in `scripts/checks/lib/withheld-env.ts`, and the allowlist sentence in [deployment.md](./deployment.md)) is added there, with the reason it copies no environment, in the same change; `env`, `env-regex`, `labels`, `labels-regex` and `tag` templates are never added.
+
 ### Datadog Agent — Docker stdout collection
 
 Add labels to the app container so the Datadog Agent picks up and parses the JSON stream:
@@ -171,6 +173,8 @@ services:
         awslogs-group: /passwd-sso/audit
         awslogs-stream: app
 ```
+
+`awslogs-create-group` is also accepted. The production-compose checks refuse any other option (notably `env`, `env-regex`, `labels`, `labels-regex` and a `tag` template, which copy the container's environment, the signing key included, into every record). `scripts/checks/check-compose-log-caps.mjs` treats `awslogs` as an off-host driver, so on a service in a committed compose file it also needs an `OFF_HOST_ALLOW` entry naming where the logs go; in an operator's own override file outside the repo no entry is needed.
 
 Use a CloudWatch Logs Insights query to extract audit events:
 

@@ -1474,6 +1474,17 @@ describe("compose: a service outside the dev override carries only SERVICE_KEY_A
         refusedOnPublisher(`logging.options.${key} is not in LOGGING_OPTION_ALLOWLIST`),
       );
     }
+    const tagRefusal = "logging.options.tag contains a template, which can expose the container's environment (every template is refused)";
+    for (const tag of ["{{.ContainerEnv}}", "{{ .ContainerEnv }}", "{{index .ContainerEnv 0}}", "{{.Name}}"]) {
+      expect(onPublisher({ driver: "json-file", options: { ...capped, tag } }), tag).toEqual(refusedOnPublisher(tagRefusal));
+    }
+    expect(onPublisher({ driver: "json-file", options: { ...capped, tag: "app.passwd-sso" } })).toEqual([]);
+    const awslogs = { "awslogs-region": "ap-northeast-1", "awslogs-group": "/passwd-sso/audit", "awslogs-stream": "app" };
+    expect(flagged(onApp((spec) => void (spec.logging = { driver: "awslogs", options: awslogs })))).toEqual([]);
+    expect(flagged(onApp((spec) => void (spec.logging = { driver: "awslogs", options: { ...awslogs, "awslogs-create-group": "true" } })))).toEqual([]);
+    expect(flagged(onApp((spec) => void (spec.logging = { driver: "awslogs", options: { ...awslogs, env: "AUDIT_ANCHOR_SIGNING_KEY" } })))).toEqual(
+      refusedOnApp("logging.options.env is not in LOGGING_OPTION_ALLOWLIST"),
+    );
     expect(onPublisher({ driver: "gelf", options: capped })).toEqual(refusedOnPublisher("logging.driver gelf is not in LOGGING_DRIVER_ALLOWLIST"));
     expect(onPublisher({ options: capped })).toEqual(refusedOnPublisher("logging.driver is not set"));
     expect(onPublisher({ driver: "json-file", options: capped, extra: 1 })).toEqual(refusedOnPublisher("logging.extra is set"));
@@ -1493,8 +1504,20 @@ describe("compose: a service outside the dev override carries only SERVICE_KEY_A
         tag: "app.passwd-sso",
       },
     });
-    expect(LOGGING_DRIVER_ALLOWLIST).toEqual(["json-file", "fluentd"]);
-    expect(LOGGING_OPTION_ALLOWLIST).toEqual(["max-size", "max-file", "fluentd-address", "fluentd-async", "fluentd-retry-wait", "fluentd-max-retries", "tag"]);
+    expect(LOGGING_DRIVER_ALLOWLIST).toEqual(["json-file", "fluentd", "awslogs"]);
+    expect(LOGGING_OPTION_ALLOWLIST).toEqual([
+      "max-size",
+      "max-file",
+      "fluentd-address",
+      "fluentd-async",
+      "fluentd-retry-wait",
+      "fluentd-max-retries",
+      "tag",
+      "awslogs-region",
+      "awslogs-group",
+      "awslogs-stream",
+      "awslogs-create-group",
+    ]);
     expect(composeDrift(compose.model, ctx, compose.workersText)).toEqual([]);
   });
 

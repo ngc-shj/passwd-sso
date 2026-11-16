@@ -284,6 +284,20 @@ describe("loggingProblems", () => {
     }
   });
 
+  it("allows the awslogs block the CloudWatch step documents, and refuses env on it", () => {
+    const options = { "awslogs-region": "ap-northeast-1", "awslogs-group": "/passwd-sso/audit", "awslogs-stream": "app", "awslogs-create-group": "true" };
+    expect(loggingProblems({ driver: "awslogs", options })).toEqual([]);
+    expect(loggingProblems({ driver: "awslogs", options: { ...options, env: "AUDIT_ANCHOR_SIGNING_KEY" } })).toEqual(["logging.options.env is not in LOGGING_OPTION_ALLOWLIST"]);
+  });
+
+  it("refuses every tag template, and allows the shipped literal tag", () => {
+    const refusal = "logging.options.tag contains a template, which can expose the container's environment (every template is refused)";
+    expect(loggingProblems({ driver: "fluentd", options: { tag: "app.passwd-sso" } })).toEqual([]);
+    for (const tag of ["{{.ContainerEnv}}", "{{ .ContainerEnv }}", "{{index .ContainerEnv 0}}", "{{.Name}}", "app.{{.Name}}"]) {
+      expect(loggingProblems({ driver: "fluentd", options: { tag } }), tag).toEqual([refusal]);
+    }
+  });
+
   it("refuses an unlisted or missing driver, a stray logging key and a shape it does not model", () => {
     expect(loggingProblems({ driver: "gelf" })).toEqual(["logging.driver gelf is not in LOGGING_DRIVER_ALLOWLIST"]);
     expect(loggingProblems({ options: { "max-size": "20m" } })).toEqual(["logging.driver is not set"]);
