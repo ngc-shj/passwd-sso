@@ -762,6 +762,25 @@ describe("POST /api/scim/v2/Users", () => {
     );
   });
 
+  it("logs the residue departCreatedMembership revoked when the existing user's row is created deactivated", async () => {
+    existingUsers = [ownedUser("user-1", "inactive@example.com")];
+    applyTxHolder.current = {
+      tenantMember: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockImplementation(({ data }) => ({ id: "tm1", deactivatedAt: data.deactivatedAt })),
+      },
+      scimExternalMapping: { findFirst: vi.fn().mockResolvedValue(null), deleteMany: vi.fn(), create: vi.fn() },
+    };
+
+    expect((await POST(postReq("inactive@example.com", { active: false }))).status).toBe(201);
+
+    expect(mockRevokeUsersAuthArtifactsInTx).not.toHaveBeenCalled();
+    expect(mockLoggerInfo).toHaveBeenCalledWith(
+      { tenantId: "tenant-1", userId: "user-1", sessions: 1, cacheTombstoneFailures: 0 },
+      "scim.credentials-revoked",
+    );
+  });
+
   it("logs no credentials-revoked line when the creation revoked nothing", async () => {
     existingUsers = [ownedUser("user-1", "active@example.com")];
     applyTxHolder.current = {

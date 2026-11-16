@@ -266,8 +266,9 @@ async function handlePOST(req: NextRequest) {
         ...SCIM_CREATE_TOMBSTONE,
         userId: created.user.id,
       });
-      // In directory sync's `credentials-revoked` shape: a non-zero count on an
-      // active creation is the residue of an earlier failed deprovision.
+      // In directory sync's `credentials-revoked` shape: a non-zero count on a
+      // creation for an existing user (either arm) is the residue of an earlier
+      // failed deprovision.
       if (Object.values(created.revocation.counts).some((count) => count > 0)) {
         getLogger().info(
           { tenantId, userId: created.user.id, ...created.revocation.counts, cacheTombstoneFailures },

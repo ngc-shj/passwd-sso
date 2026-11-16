@@ -1230,7 +1230,8 @@ describe("tenant claim binding (C3/C4/C5)", () => {
           const loser = capturedSignIn()(signInParams(victim.email, target.claim, SIGN_IN_PROVIDER, own));
           loser.catch(() => {});
           // The loser's INSERT parks on the winner's uncommitted row.
-          await race.waitForBackendBlockedBy(pid);
+          const parked = await race.waitForBackendBlockedBy(pid);
+          expect(await race.waitingQueryOf(parked)).toMatch(/INSERT INTO tenant_members/);
           await blocker.query("COMMIT");
           committed = true;
           expect(await loser).toBe(true);

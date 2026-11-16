@@ -184,3 +184,23 @@ Verification:
 - eslint: 0.
 - 10 static gates: 0.
 - `npm run test:integration` on 18 files (493 passed): 0.
+
+### Round 6
+Reviewed 91b2ad3f3. Security: No findings. Functionality and Testing: Minor only, no Critical or Major.
+
+## Tightening-only skip — Round 6
+Findings applied directly (no Round 7 review). None changes production behaviour: the production edits are a comment reword in the SCIM POST route and a comment reflow in `src/auth.ts`. The rest are documentation and test additions.
+- F-R6-1 [Minor]: deviation D13 and plan C5 state that directory sync files a created-deactivated user's revocation under its deprovision signal, while SCIM POST uses `scim_membership_create` for both arms.
+- F-R6-2 / T-R6-3 [Minor]: the SCIM POST residue-log comment covers both arms, and a unit cell pins that the deactivated arm logs.
+- Nit: comment reflow in `ensureTenantMembershipForSignIn`.
+- T-R6-1 [Minor]: the sign-in race cell asserts that the loser is parked in the membership INSERT (`waitingQueryOf`).
+- T-R6-2 [Minor]: the rule-10 self-test runs the gate on the real SCIM POST, directory-sync and auth files. Removing each one's revocation reds the gate, and each replace is asserted to have matched. Red-proved by disabling rule 10's revoker requirement on a scratch copy of the gate.
+
+Justification: every finding is test, comment or documentation scope, adjusts the prior round's fix, and touches no security-boundary behaviour.
+
+Verification:
+- `npx tsc --noEmit`: 0.
+- Full `npx vitest run` (25001 passed): 0.
+- Gate: OK (`membershipCreations` 5).
+- `npm run test:integration -- tenant-claim-binding`, run twice: 61 passed each time.
+- eslint: 0.

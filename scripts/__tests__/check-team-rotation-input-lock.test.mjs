@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1724,6 +1724,44 @@ export async function promote(tx, rows, target) {
       expect(mutated).toMatch(/departCreatedMembership/);
       replaceFile(DIRECTORY_SYNC, mutated);
       expectDenied(run(), created("<anonymous>", "tenantMember.create", DIRECTORY_SYNC));
+    });
+
+    // The seeds above are hand copies of production's shape, so a revocation
+    // that moved or changed shape in the real file would leave them green.
+    // These cells put the REAL files in the seeded root instead; the rest of
+    // the root is the seed, so the whole gate runs as it does on every cell.
+    describe("on the real files", () => {
+      const REPO = join(dirname(GATE), "..", "..");
+      const real = (rel) => readFileSync(join(REPO, rel), "utf8");
+      /** Each real creation's revocation, renamed to a non-revoker so only the call's name changes. */
+      const REAL_REVOCATIONS = [
+        [SCIM_POST, "revokeUsersAuthArtifactsInTx(tx, [user.id],", "<anonymous>", "tenantMember.create"],
+        [DIRECTORY_SYNC, "revokeUsersAuthArtifactsInTx(tx, createdActive,", "<anonymous>", "tenantMember.create"],
+        [AUTH, "return revokeUsersAuthArtifactsInTx(tx, [userId],", "joinClaimedTenant", "tenant_members.raw"],
+      ];
+
+      beforeEach(() => {
+        for (const [rel] of REAL_REVOCATIONS) replaceFile(rel, real(rel));
+      });
+
+      it("passes the real SCIM POST, directory-sync and sign-in creations", () => {
+        const r = run();
+        expect(r.code).toBe(0);
+        expect(r.out).toMatch(/"membershipCreations":5/);
+        expect(r.out).not.toMatch(/membership-create/);
+      });
+
+      for (const [rel, call, fn, site] of REAL_REVOCATIONS) {
+        it(`refuses the real ${rel} creation without its revocation`, () => {
+          const source = real(rel);
+          // Exactly one match, so the mutation cannot miss and pass vacuously.
+          expect(source.split(call)).toHaveLength(2);
+          replaceFile(rel, source.replace(call, call.replace("revokeUsersAuthArtifactsInTx", "skipRevocation")));
+          const r = run();
+          expectDenied(r, created(fn, site, rel));
+          expect(r.out.match(/membership-create  /g)).toHaveLength(1);
+        });
+      }
     });
 
     it("refuses the directory-sync create when the revocation moves into the loop's callback", () => {

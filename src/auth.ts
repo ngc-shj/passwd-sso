@@ -356,9 +356,9 @@ export async function ensureTenantMembershipForSignIn(
     // (CF13). Two writers below can reach it: joinClaimedTenant's membership
     // INSERT on the no-membership path and the `user.update` on the migration
     // path, raising `tenant_members_not_system_tenant` and
-    // `users_not_system_tenant` respectively. Turned into a REFUSAL rather than emitted here, so the
-    // single emit at the signIn callback stays the only one — a second emit
-    // site is what round 1 of #812 spent itself on.
+    // `users_not_system_tenant` respectively. Turned into a REFUSAL rather
+    // than emitted here, so the single emit at the signIn callback stays the
+    // only one — a second emit site is what round 1 of #812 spent itself on.
     //
     // The state is reachable only out of band: `tenant-domain add` refuses a
     // sentinel target on the resolved id, so no operator command creates the
