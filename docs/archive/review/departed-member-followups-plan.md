@@ -292,3 +292,15 @@ Phase 2, Step 2-1. B1 and B2 in parallel, then B3.
 **Reuse:** `logAuditInTx`, `teamAuditBase`, `withTeamTenantRls` `(tenantId, tx)` form; integration
 helpers in `src/__tests__/db-integration/helpers.ts`; the route-driving and audit-probe patterns of
 `departed-member-leaked-authority.integration.test.ts`.
+
+**Step 2-1 impact analysis (recorded).**
+- Test trees (R19): colocated `members/route.test.ts`, `invitations/route.test.ts`,
+  `members/[memberId]/route.test.ts`, `team-member-display.test.ts`, `tenant/teams/ownerless/route.test.ts`
+  (mocks the display helper; check only); centralized `src/__tests__/api/teams/team-invitations.test.ts`;
+  integration suites driving these routes (re-run): `departed-member-leaked-authority`,
+  `leftover-team-actor-authority`, `team-tenant-departure*`, `scim-team-admission-approval`,
+  `team-key-version-guard`, `share-departure`, `concurrent-grant-serialization`.
+- CI parity: no migration, grant, bypass or dependency change, so the CI-only gates
+  (`check:rls-grant-evidence`, `check:migration-drift`, licenses, npm audit, terraform) are not
+  affected; `lint`, `typecheck`, `typecheck:test`, `check:rls-nesting`, `check:bypass-rls` and
+  `check-state-mutation-centralization.sh` are run locally in Step 2-4.

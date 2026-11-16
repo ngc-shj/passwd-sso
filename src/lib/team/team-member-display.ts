@@ -5,7 +5,7 @@ import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 /**
  * Input shape consumed by `buildTeamMemberDisplayItems`.
  *
- * Only the four fields below are read by the helper. Plan C1 listed
+ * Only the fields below are read by the helper. Plan C1 listed
  * `keyDistributed` and `deactivatedAt` as inputs in spirit, but no consumer
  * needs them — list/update routes already filter on `deactivatedAt: null`,
  * and `keyDistributed` lives on `teamMemberKey`, not `teamMember`. See
@@ -16,6 +16,8 @@ export interface TeamMemberDisplayRow {
   userId: string;
   role: string;
   createdAt: Date;
+  /** Last (re-)admission; null on a row never re-admitted, where `createdAt` is the admission. */
+  admittedAt: Date | null;
   /** The membership ended with the user's departure from the tenant (members GET only). */
   departed?: boolean;
   /**
@@ -120,7 +122,7 @@ export async function buildTeamMemberDisplayItems(
       name: user.name,
       email: user.email,
       image: user.image,
-      joinedAt: member.createdAt,
+      joinedAt: member.admittedAt ?? member.createdAt,
       tenantName: tenantByUserId.get(member.userId) ?? null,
       departed: member.departed ?? false,
       pendingApproval,
