@@ -415,9 +415,9 @@ and access-logs tests. Full `vitest`, `test:integration`, `next build`.
   departure, but their kinds stay flag-only on departure (SC4).
 
 ### Scope contract
-- SC1: K5 audit delivery targets (creator column + containment) — follow-up issue.
-- SC2: K7 personal share links and Sends in containment — follow-up issue.
-- SC3: K9 actor filter / activity view on tenant audit logs — follow-up issue.
+- SC1: K5 audit delivery targets (creator column + containment) — `#1069`.
+- SC2: K7 personal share links and Sends in containment — `#1069`.
+- SC3: K9 actor filter / activity view on tenant audit logs — `#1069`.
 - SC4: K2/K3 auto action — decided against (owner).
 
 ## User operation scenarios
