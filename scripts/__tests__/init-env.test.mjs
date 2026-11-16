@@ -182,6 +182,43 @@ describe("init-env.ts run()", () => {
     }
   }, 120_000);
 
+  it("offers no random generation for the AWS credentials, and still offers it for the other external secrets", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "init-env-aws-"));
+    try {
+      process.chdir(tmpDir);
+
+      const stdin = new DelayedAnswerStream([], "");
+      const stdout = new PassThrough();
+      const stderr = new PassThrough();
+      const getStdout = collectStream(stdout);
+
+      const code = await run({
+        stdin,
+        stdout,
+        stderr,
+        now: () => new Date("2026-04-24T00:00:00Z"),
+        args: ["--profile=dev"],
+      });
+      stdin.destroy();
+      expect(code).toBe(0);
+
+      const stdoutText = getStdout();
+      const parsed = dotenv.parse(readFileSync(join(tmpDir, ".env"), "utf8"));
+      for (const key of ["AUDIT_ANCHOR_AWS_ACCESS_KEY_ID", "AUDIT_ANCHOR_AWS_SECRET_ACCESS_KEY"]) {
+        // The entry is still prompted for (its value prompt), only the generate offer is gone.
+        expect(stdoutText).toContain(`--- ${key} ---`);
+        expect(stdoutText).not.toContain(`Generate a random value for ${key}?`);
+        expect(parsed[key]).toBeUndefined();
+      }
+      for (const key of ["PASSWD_OUTBOX_WORKER_PASSWORD", "JACKSON_API_KEY"]) {
+        expect(stdoutText).toContain(`Generate a random value for ${key}?`);
+        expect(parsed[key]).toMatch(/^[0-9a-f]{48,64}$/);
+      }
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it.skipIf(platform === "win32")("sets file mode 0600 on the written .env (POSIX-only)", async () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "init-env-mode-"));
     try {

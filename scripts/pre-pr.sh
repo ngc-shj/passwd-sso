@@ -33,7 +33,7 @@ detect_web_changes() {
   # match `eslint.extension.config.mjs`, so without it a PR editing only that file
   # (which is what adding an entry to its two-file override audit surface looks
   # like) would skip the self-test that proves the gate can still fail.
-  local app_paths='^(Dockerfile|docker-compose.*\.yml|src/|prisma/|proxy\.ts|instrumentation\.ts|messages/|package\.json|package-lock\.json|tsconfig.*\.json|vitest\.config\.|eslint\.config\.|eslint\.extension\.config\.|next\.config\.|scripts/|docs/operations/|CLAUDE\.md)'
+  local app_paths='^(Dockerfile|docker-compose.*\.yml|src/|prisma/|proxy\.ts|instrumentation\.ts|messages/|package\.json|package-lock\.json|tsconfig.*\.json|vitest\.config\.|eslint\.config\.|eslint\.extension\.config\.|next\.config\.|scripts/|docs/operations/|infra/k8s/|infra/terraform/|CLAUDE\.md)'
   local base diff ref
   # Prefer origin/main (CI's base; survives a stale local main) and fall back to
   # local main only if the remote ref is absent.
@@ -385,6 +385,7 @@ queue_step "Static: crypto-auth-deps-classified" node scripts/checks/check-crypt
 queue_step "Static: override-key-disjointness" node scripts/checks/check-override-key-disjointness.mjs
 queue_step "Static: compose-log-caps" node scripts/checks/check-compose-log-caps.mjs
 queue_step "Static: compose-image-pin" node scripts/checks/check-compose-image-pin.mjs
+queue_step "Static: compose-render" npx tsx scripts/checks/check-compose-render.ts
 queue_step "Static: dockerfile-prisma-pin" bash scripts/checks/check-dockerfile-prisma-pin.sh
 queue_step "Static: dockerfile-ignore-scripts" bash scripts/checks/check-dockerfile-ignore-scripts.sh
 queue_step "Static: dockerignore-secrets" bash scripts/checks/check-dockerignore-secrets.sh

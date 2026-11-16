@@ -30,7 +30,9 @@
  *      already in the image, run as the ECS command under the image's own
  *      WORKDIR and ENV, with `-e` for each task variable and no network.
  *      The host's environment never reaches the container: `docker run`
- *      passes only what `-e` names.
+ *      passes only what `-e` names. Runs with the k8s securityContext
+ *      (--read-only --user 1001:1001 --cap-drop ALL), so a boot that writes to
+ *      disk or needs a capability fails here rather than in a pod.
  *
  * Env:
  *   WORKER_BUNDLE_SMOKE_DOCKERFILE   Dockerfile path (fixtures)
@@ -176,10 +178,13 @@ export function setProblems({ tasks, manifestEntrypoints, invocations, copies })
   return [...new Set(problems)];
 }
 
+/** The pod securityContext of infra/k8s/*.yaml (non-root, read-only rootfs, no capabilities), as `docker run` flags. */
+export const DOCKER_HARDENING_ARGS = ["--read-only", "--user", "1001:1001", "--cap-drop", "ALL"];
+
 /** `docker run` arguments for one task: the ECS command, the task env, nothing from the host. */
 export function dockerRunArgs(image, task) {
   const envArgs = Object.entries(task.env).flatMap(([k, v]) => ["-e", `${k}=${v}`]);
-  return ["run", "--rm", "--network", "none", ...envArgs, image, "node", task.bundle, "--validate-env-only"];
+  return ["run", "--rm", "--network", "none", ...DOCKER_HARDENING_ARGS, ...envArgs, image, "node", task.bundle, "--validate-env-only"];
 }
 
 /** The markers `output` lacks, matched on the `msg` of its JSON lines. */

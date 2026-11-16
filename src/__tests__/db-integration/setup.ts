@@ -56,10 +56,11 @@ const WORKERS: ReadonlyArray<{
     restart: "docker compose start retention-gc-worker",
   },
   {
-    // No compose service — run directly, so there is no container to stop and
-    // no `docker compose start` to hand back.
+    // A compose service only in docker-compose.workers.yml, so the -f set must
+    // name it; a publisher run by hand has no container to stop.
     applicationName: "passwd-sso-audit-anchor-publisher",
-    stop: "stop the audit-anchor-publisher process you started",
+    stop: "docker compose -f docker-compose.yml -f docker-compose.workers.yml stop audit-anchor-publisher (or stop the process you started by hand)",
+    restart: "docker compose -f docker-compose.yml -f docker-compose.workers.yml start audit-anchor-publisher",
   },
 ];
 

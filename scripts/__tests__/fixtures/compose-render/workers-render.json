@@ -1,0 +1,539 @@
+{
+  "composeVersion": "Docker Compose version v5.0.2",
+  "set": "base+workers",
+  "withheld": [
+    "AUDIT_ANCHOR_AWS_ACCESS_KEY_ID",
+    "AUDIT_ANCHOR_AWS_REGION",
+    "AUDIT_ANCHOR_AWS_SECRET_ACCESS_KEY",
+    "AUDIT_ANCHOR_DESTINATION_GH_TOKEN",
+    "AUDIT_ANCHOR_PUBLISHER_DATABASE_URL",
+    "AUDIT_ANCHOR_SIGNING_KEY",
+    "AUDIT_ANCHOR_TAG_SECRET",
+    "AUDIT_CHAIN_VERIFY_DATABASE_URL",
+    "GITHUB_TOKEN",
+    "JACKSON_API_KEY",
+    "MIGRATION_DATABASE_URL",
+    "OUTBOX_WORKER_DATABASE_URL",
+    "PASSWD_ANCHOR_PUBLISHER_PASSWORD",
+    "PASSWD_APP_PASSWORD",
+    "PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD",
+    "PASSWD_JACKSON_PASSWORD",
+    "PASSWD_OUTBOX_WORKER_PASSWORD",
+    "PASSWD_RETENTION_GC_WORKER_PASSWORD",
+    "PASSWD_SUPERUSER_PASSWORD",
+    "RETENTION_GC_DATABASE_URL",
+    "SENTRY_AUTH_TOKEN"
+  ],
+  "render": {
+    "name": "compose-render",
+    "networks": {
+      "internal": {
+        "name": "compose-render_internal",
+        "driver": "bridge",
+        "ipam": {}
+      }
+    },
+    "services": {
+      "app": {
+        "build": {
+          "context": "<stub>",
+          "dockerfile": "Dockerfile",
+          "args": {
+            "DATABASE_URL": "postgresql://build:build@localhost:5432/passwd_sso"
+          }
+        },
+        "command": null,
+        "depends_on": {
+          "db": {
+            "condition": "service_healthy",
+            "required": true
+          },
+          "jackson": {
+            "condition": "service_healthy",
+            "required": true
+          },
+          "redis": {
+            "condition": "service_healthy",
+            "required": true
+          }
+        },
+        "entrypoint": null,
+        "environment": {
+          "AUDIT_ANCHOR_AWS_ACCESS_KEY_ID": "",
+          "AUDIT_ANCHOR_AWS_REGION": "",
+          "AUDIT_ANCHOR_AWS_SECRET_ACCESS_KEY": "",
+          "AUDIT_ANCHOR_DESTINATION_GH_TOKEN": "",
+          "AUDIT_ANCHOR_DESTINATION_S3_BUCKET": "stub-audit-anchors",
+          "AUDIT_ANCHOR_DESTINATION_S3_PREFIX": "stub-prefix",
+          "AUDIT_ANCHOR_PUBLISHER_DATABASE_URL": "",
+          "AUDIT_ANCHOR_SIGNING_KEY": "",
+          "AUDIT_ANCHOR_TAG_SECRET": "",
+          "AUDIT_CHAIN_VERIFY_DATABASE_URL": "",
+          "AUTH_SECRET": "{{AUTH_SECRET}}",
+          "COMPOSE_RENDER_CANARY": "{{COMPOSE_RENDER_CANARY}}",
+          "DATABASE_URL": "postgresql://passwd_app:{{PASSWD_APP_PASSWORD}}@db:5432/passwd_sso",
+          "DEPLOYMENT_ID": "{{DEPLOYMENT_ID}}",
+          "GITHUB_TOKEN": "",
+          "JACKSON_API_KEY": "",
+          "JACKSON_URL": "http://jackson:5225",
+          "MIGRATION_DATABASE_URL": "",
+          "OUTBOX_WORKER_DATABASE_URL": "",
+          "PASSWD_ANCHOR_PUBLISHER_PASSWORD": "",
+          "PASSWD_APP_PASSWORD": "",
+          "PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD": "",
+          "PASSWD_JACKSON_PASSWORD": "",
+          "PASSWD_OUTBOX_WORKER_PASSWORD": "",
+          "PASSWD_RETENTION_GC_WORKER_PASSWORD": "",
+          "PASSWD_SUPERUSER_PASSWORD": "",
+          "REDIS_PASSWORD": "{{REDIS_PASSWORD}}",
+          "REDIS_URL": "redis://:{{REDIS_PASSWORD}}@redis:6379",
+          "RETENTION_GC_DATABASE_URL": "",
+          "SENTRY_AUTH_TOKEN": ""
+        },
+        "logging": {
+          "driver": "json-file",
+          "options": {
+            "max-file": "5",
+            "max-size": "20m"
+          }
+        },
+        "networks": {
+          "internal": null
+        },
+        "ports": [
+          {
+            "mode": "ingress",
+            "target": 3000,
+            "published": "3000",
+            "protocol": "tcp"
+          }
+        ],
+        "restart": "unless-stopped"
+      },
+      "audit-anchor-publisher": {
+        "build": {
+          "context": "<stub>",
+          "dockerfile": "Dockerfile",
+          "args": {
+            "DATABASE_URL": "postgresql://build:build@localhost:5432/passwd_sso"
+          }
+        },
+        "cap_drop": [
+          "ALL"
+        ],
+        "command": [
+          "node",
+          "dist/audit-anchor-publisher.js"
+        ],
+        "depends_on": {
+          "db": {
+            "condition": "service_healthy",
+            "required": true
+          },
+          "migrate": {
+            "condition": "service_completed_successfully",
+            "required": false
+          }
+        },
+        "entrypoint": null,
+        "environment": {
+          "AUDIT_ANCHOR_DESTINATION_FS_PATH": "",
+          "AUDIT_ANCHOR_DESTINATION_GH_REPO": "",
+          "AUDIT_ANCHOR_DESTINATION_GH_TOKEN": "{{AUDIT_ANCHOR_DESTINATION_GH_TOKEN}}",
+          "AUDIT_ANCHOR_DESTINATION_S3_BUCKET": "stub-audit-anchors",
+          "AUDIT_ANCHOR_DESTINATION_S3_PREFIX": "stub-prefix",
+          "AUDIT_ANCHOR_PUBLISHER_DATABASE_URL": "postgresql://passwd_anchor_publisher:{{PASSWD_ANCHOR_PUBLISHER_PASSWORD}}@db:5432/passwd_sso",
+          "AUDIT_ANCHOR_PUBLISHER_ENABLED": "true",
+          "AUDIT_ANCHOR_SIGNING_KEY": "{{AUDIT_ANCHOR_SIGNING_KEY}}",
+          "AUDIT_ANCHOR_TAG_SECRET": "{{AUDIT_ANCHOR_TAG_SECRET}}",
+          "AWS_ACCESS_KEY_ID": "{{AUDIT_ANCHOR_AWS_ACCESS_KEY_ID}}",
+          "AWS_REGION": "us-east-1",
+          "AWS_SECRET_ACCESS_KEY": "{{AUDIT_ANCHOR_AWS_SECRET_ACCESS_KEY}}",
+          "DATABASE_URL": "",
+          "DEPLOYMENT_ID": "{{DEPLOYMENT_ID}}"
+        },
+        "logging": {
+          "driver": "json-file",
+          "options": {
+            "max-file": "5",
+            "max-size": "20m"
+          }
+        },
+        "networks": {
+          "internal": null
+        },
+        "read_only": true,
+        "restart": "unless-stopped",
+        "security_opt": [
+          "no-new-privileges:true"
+        ],
+        "stop_grace_period": "2m0s"
+      },
+      "audit-chain-verify-worker": {
+        "build": {
+          "context": "<stub>",
+          "dockerfile": "Dockerfile",
+          "args": {
+            "DATABASE_URL": "postgresql://build:build@localhost:5432/passwd_sso"
+          }
+        },
+        "cap_drop": [
+          "ALL"
+        ],
+        "command": [
+          "node",
+          "dist/audit-chain-verify-worker.js"
+        ],
+        "depends_on": {
+          "db": {
+            "condition": "service_healthy",
+            "required": true
+          },
+          "migrate": {
+            "condition": "service_completed_successfully",
+            "required": false
+          }
+        },
+        "entrypoint": null,
+        "environment": {
+          "AUDIT_CHAIN_VERIFY_DATABASE_URL": "postgresql://passwd_audit_chain_verifier:{{PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD}}@db:5432/passwd_sso",
+          "DATABASE_URL": ""
+        },
+        "logging": {
+          "driver": "json-file",
+          "options": {
+            "max-file": "5",
+            "max-size": "20m"
+          }
+        },
+        "networks": {
+          "internal": null
+        },
+        "read_only": true,
+        "restart": "unless-stopped",
+        "security_opt": [
+          "no-new-privileges:true"
+        ]
+      },
+      "audit-outbox-worker": {
+        "build": {
+          "context": "<stub>",
+          "dockerfile": "Dockerfile",
+          "args": {
+            "DATABASE_URL": "postgresql://build:build@localhost:5432/passwd_sso"
+          }
+        },
+        "command": [
+          "node",
+          "dist/audit-outbox-worker.js"
+        ],
+        "depends_on": {
+          "db": {
+            "condition": "service_healthy",
+            "required": true
+          },
+          "migrate": {
+            "condition": "service_completed_successfully",
+            "required": false
+          }
+        },
+        "entrypoint": null,
+        "environment": {
+          "AUDIT_ANCHOR_AWS_ACCESS_KEY_ID": "",
+          "AUDIT_ANCHOR_AWS_REGION": "",
+          "AUDIT_ANCHOR_AWS_SECRET_ACCESS_KEY": "",
+          "AUDIT_ANCHOR_DESTINATION_GH_TOKEN": "",
+          "AUDIT_ANCHOR_DESTINATION_S3_BUCKET": "stub-audit-anchors",
+          "AUDIT_ANCHOR_DESTINATION_S3_PREFIX": "stub-prefix",
+          "AUDIT_ANCHOR_PUBLISHER_DATABASE_URL": "",
+          "AUDIT_ANCHOR_SIGNING_KEY": "",
+          "AUDIT_ANCHOR_TAG_SECRET": "",
+          "AUDIT_CHAIN_VERIFY_DATABASE_URL": "",
+          "AUTH_SECRET": "{{AUTH_SECRET}}",
+          "COMPOSE_RENDER_CANARY": "{{COMPOSE_RENDER_CANARY}}",
+          "DATABASE_URL": "",
+          "DEPLOYMENT_ID": "{{DEPLOYMENT_ID}}",
+          "GITHUB_TOKEN": "",
+          "JACKSON_API_KEY": "",
+          "MIGRATION_DATABASE_URL": "",
+          "OUTBOX_WORKER_DATABASE_URL": "postgresql://passwd_outbox_worker:{{PASSWD_OUTBOX_WORKER_PASSWORD}}@db:5432/passwd_sso",
+          "PASSWD_ANCHOR_PUBLISHER_PASSWORD": "",
+          "PASSWD_APP_PASSWORD": "",
+          "PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD": "",
+          "PASSWD_JACKSON_PASSWORD": "",
+          "PASSWD_OUTBOX_WORKER_PASSWORD": "",
+          "PASSWD_RETENTION_GC_WORKER_PASSWORD": "",
+          "PASSWD_SUPERUSER_PASSWORD": "",
+          "REDIS_PASSWORD": "{{REDIS_PASSWORD}}",
+          "RETENTION_GC_DATABASE_URL": "",
+          "SENTRY_AUTH_TOKEN": ""
+        },
+        "logging": {
+          "driver": "json-file",
+          "options": {
+            "max-file": "5",
+            "max-size": "20m"
+          }
+        },
+        "networks": {
+          "internal": null
+        },
+        "restart": "unless-stopped"
+      },
+      "db": {
+        "command": null,
+        "entrypoint": null,
+        "environment": {
+          "PASSWD_ANCHOR_PUBLISHER_PASSWORD": "{{PASSWD_ANCHOR_PUBLISHER_PASSWORD}}",
+          "PASSWD_APP_PASSWORD": "{{PASSWD_APP_PASSWORD}}",
+          "PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD": "{{PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD}}",
+          "PASSWD_JACKSON_PASSWORD": "{{PASSWD_JACKSON_PASSWORD}}",
+          "PASSWD_OUTBOX_WORKER_PASSWORD": "{{PASSWD_OUTBOX_WORKER_PASSWORD}}",
+          "PASSWD_RETENTION_GC_WORKER_PASSWORD": "{{PASSWD_RETENTION_GC_WORKER_PASSWORD}}",
+          "POSTGRES_DB": "passwd_sso",
+          "POSTGRES_PASSWORD": "{{PASSWD_SUPERUSER_PASSWORD}}",
+          "POSTGRES_USER": "passwd_user"
+        },
+        "healthcheck": {
+          "test": [
+            "CMD-SHELL",
+            "pg_isready -U passwd_user -d passwd_sso"
+          ],
+          "timeout": "5s",
+          "interval": "5s",
+          "retries": 5
+        },
+        "image": "postgres:16-alpine",
+        "logging": {
+          "driver": "json-file",
+          "options": {
+            "max-file": "5",
+            "max-size": "20m"
+          }
+        },
+        "networks": {
+          "internal": null
+        },
+        "restart": "unless-stopped",
+        "volumes": [
+          {
+            "type": "volume",
+            "source": "postgres_data",
+            "target": "/var/lib/postgresql/data",
+            "volume": {}
+          },
+          {
+            "type": "bind",
+            "source": "<stub>/infra/postgres/initdb",
+            "target": "/docker-entrypoint-initdb.d",
+            "read_only": true,
+            "bind": {}
+          }
+        ]
+      },
+      "jackson": {
+        "command": null,
+        "depends_on": {
+          "db": {
+            "condition": "service_healthy",
+            "required": true
+          }
+        },
+        "entrypoint": null,
+        "environment": {
+          "DB_ENGINE": "sql",
+          "DB_TYPE": "postgres",
+          "DB_URL": "postgresql://jackson_user:{{PASSWD_JACKSON_PASSWORD}}@db:5432/jackson",
+          "EXTERNAL_URL": "http://localhost:5225",
+          "JACKSON_API_KEYS": "{{JACKSON_API_KEY}}",
+          "NEXTAUTH_ACL": "*",
+          "NEXTAUTH_SECRET": "{{AUTH_SECRET}}",
+          "NEXTAUTH_URL": "http://localhost:5225"
+        },
+        "healthcheck": {
+          "test": [
+            "CMD-SHELL",
+            "node -e \"const http=require('http');const os=require('os');http.get('http://'+os.hostname()+':5225/api/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))\""
+          ],
+          "timeout": "10s",
+          "interval": "15s",
+          "retries": 10,
+          "start_period": "1m0s"
+        },
+        "image": "boxyhq/jackson:1.52.2",
+        "logging": {
+          "driver": "json-file",
+          "options": {
+            "max-file": "5",
+            "max-size": "20m"
+          }
+        },
+        "networks": {
+          "internal": null
+        },
+        "restart": "unless-stopped"
+      },
+      "migrate": {
+        "profiles": [
+          "migrate"
+        ],
+        "build": {
+          "context": "<stub>",
+          "dockerfile": "Dockerfile",
+          "args": {
+            "DATABASE_URL": "postgresql://build:build@localhost:5432/passwd_sso"
+          }
+        },
+        "command": [
+          "npx",
+          "prisma",
+          "migrate",
+          "deploy"
+        ],
+        "depends_on": {
+          "db": {
+            "condition": "service_healthy",
+            "required": true
+          }
+        },
+        "entrypoint": null,
+        "environment": {
+          "MIGRATION_DATABASE_URL": "postgresql://passwd_user:{{PASSWD_SUPERUSER_PASSWORD}}@db:5432/passwd_sso"
+        },
+        "logging": {
+          "driver": "json-file",
+          "options": {
+            "max-file": "5",
+            "max-size": "20m"
+          }
+        },
+        "networks": {
+          "internal": null
+        },
+        "restart": "no"
+      },
+      "redis": {
+        "command": [
+          "redis-server",
+          "--appendonly",
+          "yes",
+          "--requirepass",
+          "{{REDIS_PASSWORD}}"
+        ],
+        "entrypoint": null,
+        "environment": {
+          "REDISCLI_AUTH": "{{REDIS_PASSWORD}}"
+        },
+        "healthcheck": {
+          "test": [
+            "CMD-SHELL",
+            "redis-cli ping | grep PONG"
+          ],
+          "timeout": "3s",
+          "interval": "5s",
+          "retries": 5
+        },
+        "image": "redis:7-alpine",
+        "logging": {
+          "driver": "json-file",
+          "options": {
+            "max-file": "5",
+            "max-size": "20m"
+          }
+        },
+        "networks": {
+          "internal": null
+        },
+        "restart": "unless-stopped",
+        "volumes": [
+          {
+            "type": "volume",
+            "source": "redis_data",
+            "target": "/data",
+            "volume": {}
+          }
+        ]
+      },
+      "retention-gc-worker": {
+        "build": {
+          "context": "<stub>",
+          "dockerfile": "Dockerfile",
+          "args": {
+            "DATABASE_URL": "postgresql://build:build@localhost:5432/passwd_sso"
+          }
+        },
+        "command": [
+          "node",
+          "dist/retention-gc-worker.js"
+        ],
+        "depends_on": {
+          "db": {
+            "condition": "service_healthy",
+            "required": true
+          },
+          "migrate": {
+            "condition": "service_completed_successfully",
+            "required": false
+          }
+        },
+        "entrypoint": null,
+        "environment": {
+          "AUDIT_ANCHOR_AWS_ACCESS_KEY_ID": "",
+          "AUDIT_ANCHOR_AWS_REGION": "",
+          "AUDIT_ANCHOR_AWS_SECRET_ACCESS_KEY": "",
+          "AUDIT_ANCHOR_DESTINATION_GH_TOKEN": "",
+          "AUDIT_ANCHOR_DESTINATION_S3_BUCKET": "stub-audit-anchors",
+          "AUDIT_ANCHOR_DESTINATION_S3_PREFIX": "stub-prefix",
+          "AUDIT_ANCHOR_PUBLISHER_DATABASE_URL": "",
+          "AUDIT_ANCHOR_SIGNING_KEY": "",
+          "AUDIT_ANCHOR_TAG_SECRET": "",
+          "AUDIT_CHAIN_VERIFY_DATABASE_URL": "",
+          "AUTH_SECRET": "{{AUTH_SECRET}}",
+          "COMPOSE_RENDER_CANARY": "{{COMPOSE_RENDER_CANARY}}",
+          "DATABASE_URL": "",
+          "DEPLOYMENT_ID": "{{DEPLOYMENT_ID}}",
+          "GITHUB_TOKEN": "",
+          "JACKSON_API_KEY": "",
+          "MIGRATION_DATABASE_URL": "",
+          "OUTBOX_WORKER_DATABASE_URL": "",
+          "PASSWD_ANCHOR_PUBLISHER_PASSWORD": "",
+          "PASSWD_APP_PASSWORD": "",
+          "PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD": "",
+          "PASSWD_JACKSON_PASSWORD": "",
+          "PASSWD_OUTBOX_WORKER_PASSWORD": "",
+          "PASSWD_RETENTION_GC_WORKER_PASSWORD": "",
+          "PASSWD_SUPERUSER_PASSWORD": "",
+          "REDIS_PASSWORD": "{{REDIS_PASSWORD}}",
+          "RETENTION_GC_DATABASE_URL": "postgresql://passwd_retention_gc_worker:{{PASSWD_RETENTION_GC_WORKER_PASSWORD}}@db:5432/passwd_sso",
+          "SENTRY_AUTH_TOKEN": ""
+        },
+        "logging": {
+          "driver": "json-file",
+          "options": {
+            "max-file": "5",
+            "max-size": "20m"
+          }
+        },
+        "networks": {
+          "internal": null
+        },
+        "restart": "unless-stopped"
+      }
+    },
+    "volumes": {
+      "postgres_data": {
+        "name": "compose-render_postgres_data"
+      },
+      "redis_data": {
+        "name": "compose-render_redis_data"
+      }
+    },
+    "x-logging": {
+      "driver": "json-file",
+      "options": {
+        "max-file": "5",
+        "max-size": "20m"
+      }
+    }
+  }
+}

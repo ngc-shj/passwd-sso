@@ -15,7 +15,8 @@
  *               throws on .pick() of a refined schema, so the worker
  *               and tests MUST import envObject, not envSchema (F16).
  *   envSchema — envObject.superRefine(...) — adds cross-field production
- *               requirements. Used by parseEnv() at server boot.
+ *               requirements, behind a preprocess that drops blank
+ *               APP_WITHHELD_ENV_KEYS. Used by parseEnv() at server boot.
  */
 
 import { z } from "zod";
@@ -54,6 +55,15 @@ const hex64 = z
       .string()
       .regex(HEX64_RE, "Must be a 64-character hex string (256 bits)"),
   );
+
+/**
+ * An optional variable that is present but empty reads as unset — what the
+ * blob store does at run time (src/lib/blob-store/config.ts trims and treats
+ * "" as missing), so a `KEY=` line in an env file does not fail the boot.
+ */
+export function emptyAsUnset<T extends z.ZodType>(schema: T) {
+  return z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? undefined : v), schema);
+}
 
 const ANCHOR_S3_PREFIX_SEGMENT_RE = /^[A-Za-z0-9._-]+$/;
 
@@ -615,10 +625,41 @@ export const envObject = z.object({
     .optional(),
 });
 
-// envSchema — envObject with cross-field superRefine rules. Refined schemas
-// cannot be .pick()'d in Zod 4 (F16), so tests and the worker MUST import
-// envObject, not envSchema.
-export const envSchema = envObject.superRefine((data, ctx) => {
+/**
+ * The envObject keys the app never reads but compose may hand it as `""`: other
+ * principals' DB URLs and the publisher-only secrets. docker-compose blanks
+ * them in the app container (they would otherwise arrive from `.env`), and the
+ * app schema reads a blank one as absent rather than as an invalid value.
+ * Hand-listed because this module's import closure is a public contract; the
+ * pin to scripts/checks/lib/withheld-env.ts's derivation (W ∩ envObject keys) is
+ * scripts/__tests__/withheld-env.test.ts.
+ */
+export const APP_WITHHELD_ENV_KEYS = [
+  "OUTBOX_WORKER_DATABASE_URL",
+  "RETENTION_GC_DATABASE_URL",
+  "MIGRATION_DATABASE_URL",
+  "AUDIT_ANCHOR_PUBLISHER_DATABASE_URL",
+  "AUDIT_CHAIN_VERIFY_DATABASE_URL",
+  "AUDIT_ANCHOR_SIGNING_KEY",
+  "AUDIT_ANCHOR_TAG_SECRET",
+  "AUDIT_ANCHOR_DESTINATION_GH_TOKEN",
+] as const;
+
+const appWithheldEnvKeys: ReadonlySet<string> = new Set(APP_WITHHELD_ENV_KEYS);
+
+/** A copy of `input` without the withheld keys whose value is `""`; never mutates it (it is process.env). */
+function dropBlankWithheldKeys(input: unknown): unknown {
+  if (typeof input !== "object" || input === null) return input;
+  return Object.fromEntries(
+    Object.entries(input).filter(([key, value]) => !(appWithheldEnvKeys.has(key) && value === "")),
+  );
+}
+
+// envSchema — envObject with cross-field superRefine rules, behind the
+// withheld-key preprocess. Refined schemas cannot be .pick()'d in Zod 4 (F16),
+// so tests and the worker MUST import envObject, not envSchema. Worker schemas
+// are deliberately not wrapped: an empty own-URL there must still be refused.
+export const envSchema = z.preprocess(dropBlankWithheldKeys, envObject.superRefine((data, ctx) => {
   const isProd = data.NODE_ENV === "production";
 
   // ── SSO provider set (always enforced) ──────────────────
@@ -758,12 +799,10 @@ export const envSchema = envObject.superRefine((data, ctx) => {
       // When enabled, at least one destination must be configured. The
       // signing key and tag secret are the publisher's alone: it validates
       // them in auditAnchorPublisherEnvSchema, and the app neither reads nor
-      // receives them.
+      // receives them. The GitHub token is the publisher's too, so the repo
+      // alone names the destination.
       const hasS3 = !!data.AUDIT_ANCHOR_DESTINATION_S3_BUCKET;
-      const hasGh = !!(
-        data.AUDIT_ANCHOR_DESTINATION_GH_REPO &&
-        data.AUDIT_ANCHOR_DESTINATION_GH_TOKEN
-      );
+      const hasGh = !!data.AUDIT_ANCHOR_DESTINATION_GH_REPO;
       const hasFs = !!data.AUDIT_ANCHOR_DESTINATION_FS_PATH;
       if (!hasS3 && !hasGh && !hasFs) {
         ctx.addIssue({
@@ -773,8 +812,7 @@ export const envSchema = envObject.superRefine((data, ctx) => {
             "At least one anchor destination must be configured when " +
             "AUDIT_ANCHOR_PUBLISHER_ENABLED=true in production: " +
             "S3 (AUDIT_ANCHOR_DESTINATION_S3_BUCKET), " +
-            "GitHub (AUDIT_ANCHOR_DESTINATION_GH_REPO + " +
-            "AUDIT_ANCHOR_DESTINATION_GH_TOKEN), or " +
+            "GitHub (AUDIT_ANCHOR_DESTINATION_GH_REPO; the token is the publisher's), or " +
             "filesystem (AUDIT_ANCHOR_DESTINATION_FS_PATH).",
         });
       }
@@ -861,7 +899,7 @@ export const envSchema = envObject.superRefine((data, ctx) => {
   // checks here. See:
   //   - src/lib/blob-store/config.ts (blob backend)
   //   - src/lib/key-provider/*.ts (key provider)
-});
+}));
 
 // ─── Audit anchor publisher worker ──────────────────────────
 
@@ -885,6 +923,7 @@ export const auditAnchorPublisherEnvSchema = envObject
     AUDIT_ANCHOR_DESTINATION_GH_REPO: true,
     AUDIT_ANCHOR_DESTINATION_GH_TOKEN: true,
     AUDIT_ANCHOR_DESTINATION_FS_PATH: true,
+    AWS_REGION: true,
     NODE_ENV: true,
     DB_POOL_MAX: true,
     DB_POOL_CONNECTION_TIMEOUT_MS: true,
@@ -903,9 +942,27 @@ export const auditAnchorPublisherEnvSchema = envObject
       .transform((s) => s.trim())
       .transform((s) => (s.length === 0 ? undefined : s))
       .optional(),
+    // docker-compose renders these pass-through names as "" when unset
+    // (`${NAME:-}`); a blank reads as unset. The role URL and the keys are not
+    // listed: a blank one stays an error.
+    AUDIT_ANCHOR_DESTINATION_S3_BUCKET: emptyAsUnset(envObject.shape.AUDIT_ANCHOR_DESTINATION_S3_BUCKET),
+    AUDIT_ANCHOR_DESTINATION_S3_PREFIX: emptyAsUnset(envObject.shape.AUDIT_ANCHOR_DESTINATION_S3_PREFIX),
+    AUDIT_ANCHOR_DESTINATION_GH_REPO: emptyAsUnset(envObject.shape.AUDIT_ANCHOR_DESTINATION_GH_REPO),
+    AUDIT_ANCHOR_DESTINATION_GH_TOKEN: emptyAsUnset(envObject.shape.AUDIT_ANCHOR_DESTINATION_GH_TOKEN),
+    AUDIT_ANCHOR_DESTINATION_FS_PATH: emptyAsUnset(envObject.shape.AUDIT_ANCHOR_DESTINATION_FS_PATH),
+    AWS_REGION: emptyAsUnset(envObject.shape.AWS_REGION),
   })
   .superRefine((data, ctx) => {
     if (!data.AUDIT_ANCHOR_PUBLISHER_ENABLED) return;
+
+    // Without a region every PUT to the bucket fails; refuse at boot instead.
+    if (data.AUDIT_ANCHOR_DESTINATION_S3_BUCKET && !data.AWS_REGION) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["AWS_REGION"],
+        message: "AWS_REGION is required when AUDIT_ANCHOR_DESTINATION_S3_BUCKET is set",
+      });
+    }
 
     const required = [
       ["DEPLOYMENT_ID", data.DEPLOYMENT_ID],

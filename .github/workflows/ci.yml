@@ -118,6 +118,9 @@ jobs:
               # these reference; a re-tag or a matrix edit alone must run it.
               - "infra/terraform/**/terraform.tfvars.example"
               - ".github/workflows/ci-integration.yml"
+              # worker-deploy-parity.test.ts pins these manifests to ecs.tf and
+              # the compose files; a manifest-only PR must run it.
+              - "infra/k8s/**"
               - "CLAUDE.md"
             extension:
               - "extension/**"
@@ -265,6 +268,30 @@ jobs:
           set -euo pipefail
           if ! git rev-parse --verify main >/dev/null 2>&1; then
             git fetch origin main:main
+          fi
+
+      # scripts/__tests__/check-compose-render.test.ts compares a live
+      # `docker compose config` render with a fixture recorded under one compose
+      # version, and hard-fails under CI=true when the runner's differs. The
+      # runner image does not pin compose, so a silent image update would turn
+      # this job red; pin it here instead (a test keeps this in step with the
+      # fixture's composeVersion). A user CLI plugin shadows the system one.
+      - name: Install docker compose (pinned)
+        run: |
+          set -euo pipefail
+          # From the release's published checksums.txt. When bumping the
+          # version, re-read that file — do not hand-edit this value.
+          COMPOSE_VERSION=v5.0.2
+          COMPOSE_SHA256=2d880f723d3da7c779c54fdaea91a842fca8af55d1397f1ed8d7cbab3dd7af67
+          curl -fsSL -o /tmp/docker-compose \
+            "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-x86_64"
+          echo "${COMPOSE_SHA256}  /tmp/docker-compose" | sha256sum -c -
+          mkdir -p ~/.docker/cli-plugins
+          install -m 0755 /tmp/docker-compose ~/.docker/cli-plugins/docker-compose
+          got="$(docker compose version)"
+          if [ "${got}" != "Docker Compose version ${COMPOSE_VERSION}" ]; then
+            echo "expected Docker Compose version ${COMPOSE_VERSION}, got: ${got}" >&2
+            exit 1
           fi
 
       # check-cosign-kms-uri.sh needs the real binary: it is the only gate that
@@ -446,6 +473,30 @@ jobs:
           cache: "npm"
 
       - run: npm ci
+
+      # scripts/__tests__/check-compose-render.test.ts compares a live
+      # `docker compose config` render with a fixture recorded under one compose
+      # version, and hard-fails under CI=true when the runner's differs. The
+      # runner image does not pin compose, so a silent image update would turn
+      # this job red; pin it here instead (a test keeps this in step with the
+      # fixture's composeVersion). A user CLI plugin shadows the system one.
+      - name: Install docker compose (pinned)
+        run: |
+          set -euo pipefail
+          # From the release's published checksums.txt. When bumping the
+          # version, re-read that file — do not hand-edit this value.
+          COMPOSE_VERSION=v5.0.2
+          COMPOSE_SHA256=2d880f723d3da7c779c54fdaea91a842fca8af55d1397f1ed8d7cbab3dd7af67
+          curl -fsSL -o /tmp/docker-compose \
+            "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-x86_64"
+          echo "${COMPOSE_SHA256}  /tmp/docker-compose" | sha256sum -c -
+          mkdir -p ~/.docker/cli-plugins
+          install -m 0755 /tmp/docker-compose ~/.docker/cli-plugins/docker-compose
+          got="$(docker compose version)"
+          if [ "${got}" != "Docker Compose version ${COMPOSE_VERSION}" ]; then
+            echo "expected Docker Compose version ${COMPOSE_VERSION}, got: ${got}" >&2
+            exit 1
+          fi
 
       - name: Generate Prisma client
         run: npx prisma generate

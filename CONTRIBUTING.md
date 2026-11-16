@@ -18,7 +18,7 @@ The following files must NOT move out of the repository root:
 
 The following must NOT move into any `scripts/<subdir>/`:
 
-- **Runtime entrypoints** (baked into the image / referenced by compose `command:`): `audit-outbox-worker.ts` (`Dockerfile:39`, `docker-compose.override.yml:42`), `dcr-cleanup-worker.ts` (`Dockerfile:45`, `docker-compose.override.yml:73`), `audit-chain-verify-worker.ts` (`package.json` `worker:audit-chain-verify`)
+- **Runtime entrypoints** (baked into the image / referenced by compose `command:`): `audit-outbox-worker.ts` (the `esbuild` step in the `Dockerfile`, the `audit-outbox-worker` service's `command:` in `docker-compose.override.yml`), `retention-gc-worker.ts` (the `Dockerfile` `esbuild` step, the `retention-gc-worker` service's `command:` in `docker-compose.override.yml`), `audit-anchor-publisher.ts` (the `Dockerfile` `esbuild` step, the `audit-anchor-publisher` service's `command:` in `docker-compose.workers.yml`), `audit-chain-verify-worker.ts` (the `Dockerfile` `esbuild` step, the `audit-chain-verify-worker` service's `command:` in `docker-compose.workers.yml`)
 - **Operator / incident-response**: `purge-history.sh`, `purge-audit-logs.sh`, `rotate-master-key.sh`, `set-outbox-worker-password.sh`, `set-dcr-cleanup-worker-password.sh` (the latter referenced by `scripts/env-allowlist.ts` and `scripts/__tests__/set-dcr-cleanup-worker-password.test.mjs`)
 - **Other operational**: `deploy.sh`, `dev.sh`, `scim-smoke.sh`, `mcp-reauth.sh`, `generate-icons.sh`, `bump-version.sh`
 - **Data fixtures**: `rls-smoke-*.sql`, `rls-cross-tenant-*` (`*.sql` / `*.sh` / `*.manifest`, consumed by `.github/workflows/ci.yml` + `scripts/pre-pr.sh`), `tenant-team-*.sql`, `license-allowlist.json` (read by `scripts/checks/check-licenses.mjs` via `../license-allowlist.json`)
@@ -39,7 +39,7 @@ The following stay at `src/lib/` root. Moving any of them requires updating the 
 | `redis.ts` | Singleton Redis client; also preserves integration-test gate regex |
 | `env.ts` | Bootstrap-sequence-sensitive |
 | `load-env.ts` | 6 out-of-`src` importers (2 `e2e/*`, 4 `scripts/*`) depend on the `@/lib/load-env` alias path |
-| `notification.ts` | RLS-bypass-allowlisted (`scripts/checks/check-bypass-rls.mjs:67`, CI-gated) |
+| `notification.ts` | RLS-bypass-allowlisted (listed in `ALLOWED_USAGE` in `scripts/checks/check-bypass-rls.mjs`, CI-gated) |
 | `webhook-dispatcher.ts` | Pinned by `.github/workflows/ci.yml` hardcoded `grep -v` |
 | `url-helpers.ts` | Pinned by `.github/workflows/ci.yml` hardcoded `grep -v` |
 

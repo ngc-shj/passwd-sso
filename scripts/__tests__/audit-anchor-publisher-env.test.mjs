@@ -9,7 +9,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,21 +18,16 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..", "..");
 const WORKER = resolve(REPO_ROOT, "scripts", "audit-anchor-publisher.ts");
 
-const HEX_A = "a".repeat(64);
-const HEX_B = "b".repeat(64);
-const DEPLOYMENT_ID = "550e8400-e29b-41d4-a716-446655440000";
-const PUBLISHER_URL = "postgresql://passwd_anchor_publisher:p@db:5432/passwd_sso";
+const SMOKE_MAP = resolve(REPO_ROOT, "scripts", "checks", "worker-bundle-smoke.json");
 
-/** The publisher task's env, as production gives it: no DATABASE_URL, the publisher URL is its own. */
+/**
+ * The publisher task's env, as production gives it (the smoke map pins it to
+ * ecs.tf): no DATABASE_URL, the publisher URL is its own, and the runner image
+ * sets NODE_ENV=production.
+ */
 const TASK_ENV = {
   NODE_ENV: "production",
-  AUDIT_ANCHOR_PUBLISHER_ENABLED: "true",
-  DEPLOYMENT_ID,
-  AUDIT_ANCHOR_SIGNING_KEY: HEX_A,
-  AUDIT_ANCHOR_TAG_SECRET: HEX_B,
-  AUDIT_ANCHOR_PUBLISHER_DATABASE_URL: PUBLISHER_URL,
-  AUDIT_ANCHOR_DESTINATION_S3_BUCKET: "anchors",
-  AUDIT_ANCHOR_DESTINATION_S3_PREFIX: "audit-anchors",
+  ...JSON.parse(readFileSync(SMOKE_MAP, "utf8")).tasks.audit_anchor_publisher.env,
 };
 
 let cwd;
@@ -102,6 +97,14 @@ describe("audit-anchor-publisher --validate-env-only", () => {
       expect(errorPaths(result)).toEqual([name]);
     },
   );
+
+  it("exits 1 naming AWS_REGION with a bucket and no region", () => {
+    const { AWS_REGION: _omit, ...env } = TASK_ENV;
+    const result = spawnPublisher(env);
+
+    expect(result.status).toBe(1);
+    expect(errorPaths(result)).toEqual(["AWS_REGION"]);
+  });
 
   it("exits 1 on a prefix the segment rule refuses, without echoing it", () => {
     const result = spawnPublisher({ ...TASK_ENV, AUDIT_ANCHOR_DESTINATION_S3_PREFIX: "a//b" });

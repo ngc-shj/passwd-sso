@@ -484,7 +484,7 @@ the resulting always-firing alarm gets muted.
 **Severity**: high
 **Trigger**: no event for > 2 hours
 **Recovery**: restart the verify worker (on ECS the `*-audit-chain-verify-worker`
-service; elsewhere `npm run worker:audit-chain-verify`); check DB SELECT
+service; on Compose `docker compose -f docker-compose.yml -f docker-compose.workers.yml restart audit-chain-verify-worker` (`up -d` instead after an `.env` change); on Kubernetes `kubectl -n <namespace> rollout restart deployment/audit-chain-verify-worker`; elsewhere `npm run worker:audit-chain-verify`); check DB SELECT
 permissions on `audit_logs` and `tenants`. It connects as
 `passwd_audit_chain_verifier` (column-level SELECT only), through the app
 secret's `AUDIT_CHAIN_VERIFY_DATABASE_URL`; in production it has no
@@ -676,6 +676,8 @@ otherwise wait for — restart the service on the same task definition:
 aws ecs update-service --cluster <cluster> --service <name_prefix>-audit-anchor-publisher \
   --force-new-deployment --region <region>
 ```
+
+On Compose, `docker compose -f docker-compose.yml -f docker-compose.workers.yml restart audit-anchor-publisher` (`up -d` instead after an `.env` change, which `restart` does not pick up); on Kubernetes, `kubectl -n <namespace> rollout restart deployment/audit-anchor-publisher`.
 
 **What decides a run.** Not a database row: the publisher lists its primary
 destination (the first configured: S3, else GitHub Releases, else the

@@ -242,11 +242,14 @@ describe("env validation", () => {
     await expect(import("./env")).rejects.toThrow("MIGRATION_DATABASE_URL");
   });
 
-  it("rejects empty MIGRATION_DATABASE_URL", async () => {
+  // docker-compose blanks the withheld keys in the app container
+  // (APP_WITHHELD_ENV_KEYS), so an empty one reads as unset, not as invalid.
+  it("reads an empty MIGRATION_DATABASE_URL as unset", async () => {
     process.env = buildMinimalEnv({
       MIGRATION_DATABASE_URL: "",
     });
-    await expect(import("./env")).rejects.toThrow("Invalid environment variables");
+    const { env } = await import("./env");
+    expect(env.MIGRATION_DATABASE_URL).toBeUndefined();
   });
 });
 
