@@ -22,7 +22,9 @@ import {
   bindSourceProblem,
   externalEntryProblems,
   isAllowlistedFileSource,
+  loggingProblems,
   namedVolumeProblem,
+  namedVolumeServiceProblem,
   serviceKeyProblems,
   shortVolumeIsReadOnly,
   ownDatabaseUrlKey,
@@ -247,6 +249,47 @@ describe("namedVolumeProblem", () => {
     expect(namedVolumeProblem(5, null)).toBe("has an unmodelled definition");
     expect(namedVolumeProblem([], null)).toBe("has an unmodelled definition");
     expect(namedVolumeProblem(undefined, null)).toBe("is not defined by any compose file");
+  });
+});
+
+describe("namedVolumeServiceProblem", () => {
+  it("allows a volume from the service its entry names", () => {
+    expect(namedVolumeServiceProblem("postgres_data", "db")).toBeNull();
+    expect(namedVolumeServiceProblem("redis_data", "redis")).toBeNull();
+  });
+
+  it("refuses a listed volume from another service, and an unlisted volume", () => {
+    expect(namedVolumeServiceProblem("postgres_data", "app")).toBe("is not allowlisted for this service");
+    expect(namedVolumeServiceProblem("postgres_data", "redis")).toBe("is not allowlisted for this service");
+    expect(namedVolumeServiceProblem("anchors", "audit-anchor-publisher")).toBe("is not allowlisted");
+    expect(namedVolumeServiceProblem("anchors", "audit-anchor-publisher", [{ name: "anchors", services: ["audit-anchor-publisher"] }])).toBeNull();
+  });
+});
+
+describe("loggingProblems", () => {
+  it("allows the blocks the stack ships: capped json-file, and the overlay's fluentd", () => {
+    expect(loggingProblems({ driver: "json-file", options: { "max-size": "20m", "max-file": "5" } })).toEqual([]);
+    expect(loggingProblems({ driver: "json-file" })).toEqual([]);
+    expect(
+      loggingProblems({
+        driver: "fluentd",
+        options: { "fluentd-address": "localhost:24224", "fluentd-async": "true", "fluentd-retry-wait": "1s", "fluentd-max-retries": "30", tag: "app.passwd-sso" },
+      }),
+    ).toEqual([]);
+  });
+
+  it("refuses each option that copies the container's env or labels into the log record, by name", () => {
+    for (const key of ["env", "env-regex", "labels", "labels-regex"]) {
+      expect(loggingProblems({ driver: "json-file", options: { "max-size": "20m", [key]: "AUDIT_ANCHOR_SIGNING_KEY" } }), key).toEqual([`logging.options.${key} is not in LOGGING_OPTION_ALLOWLIST`]);
+    }
+  });
+
+  it("refuses an unlisted or missing driver, a stray logging key and a shape it does not model", () => {
+    expect(loggingProblems({ driver: "gelf" })).toEqual(["logging.driver gelf is not in LOGGING_DRIVER_ALLOWLIST"]);
+    expect(loggingProblems({ options: { "max-size": "20m" } })).toEqual(["logging.driver is not set"]);
+    expect(loggingProblems({ driver: "json-file", x: 1 })).toEqual(["logging.x is set"]);
+    expect(loggingProblems({ driver: "json-file", options: [] })).toEqual(["logging.options is not a mapping"]);
+    expect(loggingProblems(null)).toEqual(["logging is not a mapping"]);
   });
 });
 

@@ -37,6 +37,8 @@ import { findComposeFiles } from "../checks/lib/compose-files.mjs";
 import {
   BUILD_KEY_ALLOWLIST,
   FILE_CHANNEL_ALLOWLIST,
+  NAMED_VOLUME_ALLOWLIST,
+  SERVICE_KEY_ALLOWLIST,
   SERVICE_KEY_REFUSAL,
   derivePublisherOnlyEnv,
   deriveWithheldEnv,
@@ -389,6 +391,47 @@ describe("analyzeRender: a host file reaches a service only by FILE_CHANNEL_ALLO
     expect(drift(onApp({ type: "volume", source: "nowhere", target: "/x", volume: {} }))).toEqual([`[${SET}] app: ${REFUSED}: named volume nowhere is not defined by any compose file`]);
   });
 
+  it("names a named volume mounted by a service its allowlist entry does not name, or by no entry, and allows today's mounts", () => {
+    const volume = (source: string) => ({ type: "volume", source, target: "/x", volume: {} });
+    const notForService = (service: string, name: string) => [`[${SET}] ${service}: ${REFUSED}: named volume ${name} is not allowlisted for this service`];
+    expect(NAMED_VOLUME_ALLOWLIST).toEqual([
+      { name: "postgres_data", services: ["db"] },
+      { name: "redis_data", services: ["redis"] },
+    ]);
+    expect(drift(onApp(volume("postgres_data")))).toEqual(notForService("app", "postgres_data"));
+    expect(drift((r) => void (r.services.redis.volumes = [volume("postgres_data")]))).toEqual(notForService("redis", "postgres_data"));
+    expect(drift((r) => void (r.services.db.volumes = [volume("redis_data")]))).toEqual(notForService("db", "redis_data"));
+    expect(
+      drift((r) => {
+        r.volumes = { ...r.volumes, anchors: { name: "compose-render_anchors" } };
+        r.services.app.volumes = [volume("anchors")];
+      }),
+    ).toEqual([`[${SET}] app: ${REFUSED}: named volume anchors is not allowlisted`]);
+    expect(baseline().services.db.volumes).toContainEqual({ type: "volume", source: "postgres_data", target: "/var/lib/postgresql/data", volume: {} });
+    expect(baseline().services.redis.volumes).toEqual([{ type: "volume", source: "redis_data", target: "/data", volume: {} }]);
+    expect(drift((r) => void (r.services.redis.volumes = [volume("redis_data"), { type: "tmpfs", target: "/tmp" }]))).toEqual([]);
+  });
+
+  it("names a logging driver or option outside the allowlists, by name, and allows the blocks the stack ships", () => {
+    const PUBLISHER = "audit-anchor-publisher";
+    const onPublisher = (logging: unknown) => (r: ComposeRender) => void (r.services[PUBLISHER].logging = logging);
+    const refused = (what: string) => [`[${SET}] ${PUBLISHER}: ${SERVICE_KEY_REFUSAL}: ${what}`];
+    const capped = { "max-file": "5", "max-size": "20m" };
+    for (const key of ["env", "env-regex", "labels", "labels-regex"]) {
+      expect(drift(onPublisher({ driver: "json-file", options: { ...capped, [key]: "AUDIT_ANCHOR_SIGNING_KEY" } })), key).toEqual(
+        refused(`logging.options.${key} is not in LOGGING_OPTION_ALLOWLIST`),
+      );
+    }
+    expect(drift(onPublisher({ driver: "gelf", options: capped }))).toEqual(refused("logging.driver gelf is not in LOGGING_DRIVER_ALLOWLIST"));
+    expect(drift(onPublisher({ driver: "json-file", options: "env=X" }))).toEqual(refused("logging.options is not a mapping"));
+    expect(baseline().services[PUBLISHER].logging).toEqual({ driver: "json-file", options: capped });
+    const fluentd = {
+      driver: "fluentd",
+      options: { "fluentd-address": "localhost:24224", "fluentd-async": "true", "fluentd-retry-wait": "1s", "fluentd-max-retries": "30", tag: "app.passwd-sso" },
+    };
+    expect(drift(onPublisher(fluentd))).toEqual([]);
+  });
+
   it("names build.secrets, build.ssh and build.additional_contexts, and allows the build the stack ships", () => {
     for (const [key, value] of [["secrets", [{ source: "envf" }]], ["ssh", [{ id: "default" }]], ["additional_contexts", { x: "<stub>" }]] as const) {
       const found = drift((r) => {
@@ -420,6 +463,11 @@ describe("analyzeRender: a host file reaches a service only by FILE_CHANNEL_ALLO
     for (const [key, value] of cases) expect(drift((r) => void (r.services.app[key] = value)), `${key}: ${JSON.stringify(value)}`).toEqual(refusedKey(key));
     expect(Object.keys(baseline().services["audit-anchor-publisher"]).sort()).toContain("security_opt");
     expect(analyzeRender(SET, baseline(), ctx)).toEqual([]);
+  });
+
+  it("names a service key that is neither written in a production file nor in SERVICE_KEY_ALLOWLIST, so a render-time key from a newer compose is refused by name", () => {
+    expect(SERVICE_KEY_ALLOWLIST).not.toContain("render_time_key");
+    expect(drift((r) => void (r.services.app.render_time_key = true))).toEqual([`[${SET}] app: ${SERVICE_KEY_REFUSAL}: render_time_key`]);
   });
 
   it("names a security_opt that is not exactly no-new-privileges:true, and allows the publisher's and the verifier's", () => {
@@ -726,6 +774,16 @@ function recordedProjection(path: string) {
   return renderProjection(hydrateRecordedRender(file.render, buildSentinels([...withheld, ...file.withheld, ...keys, "DEPLOYMENT_ID"])));
 }
 
+/**
+ * The whole recorded file but its compose version: the set, W, and every service
+ * and top-level key of the render, hydrated.
+ */
+function recordedFull(path: string) {
+  const { composeVersion: _version, ...file } = JSON.parse(readFileSync(path, "utf8")) as Recorded;
+  const keys = [...new Set([...JSON.stringify(file.render).matchAll(/\{\{([A-Z0-9_]+)\}\}/g)].map((m) => m[1]))];
+  return { ...file, render: hydrateRecordedRender(file.render, buildSentinels([...withheld, ...file.withheld, ...keys, "DEPLOYMENT_ID"])) };
+}
+
 describe("real docker compose", () => {
   let out: string[];
   let err: string[];
@@ -767,11 +825,56 @@ describe("real docker compose", () => {
     for (const set of RENDER_SETS) expect(out.join("\n")).toContain(`${set.name}:`);
   }, 120_000);
 
+  // CI's compose version is verified on push: when it is not the fixture's, the
+  // note below shows in the job log and the projection is what is compared.
   it("re-records the render of the tree as the committed fixture holds it", (t) => {
     if (!requireDocker(() => t.skip())) return;
     const record = join(scratchCopy(), "record.json");
     expect(main(["--record", record]), err.join("\n")).toBe(0);
+    const running = (JSON.parse(readFileSync(record, "utf8")) as Recorded).composeVersion;
+    if (running === recorded.composeVersion) {
+      // Same compose: every service, every key and the top-level keys, so a key the projection does not list is compared too.
+      expect(recordedFull(record)).toEqual(recordedFull(FIXTURE_PATH));
+    } else {
+      console.warn(`compose-render fixture: recorded under "${recorded.composeVersion}", running "${running}": comparing the projection only, not the full render`);
+      expect(recordedProjection(record)).toEqual(recordedProjection(FIXTURE_PATH));
+    }
+  }, 120_000);
+
+  it("finds the committed fixture stale under the full comparison against a scratch copy whose app gains read_only, which the projection does not list", (t) => {
+    if (!requireDocker(() => t.skip())) return;
+    const dir = scratchCopy();
+    const path = join(dir, "docker-compose.yml");
+    const text = readFileSync(path, "utf8");
+    expect(text).toContain("services:\n  app:\n");
+    writeFileSync(path, text.replace("services:\n  app:\n", "services:\n  app:\n    read_only: true\n"));
+    const record = join(dir, "record.json");
+    expect(main(["--root", dir, "--record", record]), err.join("\n")).toBe(0);
+    expect(recordedFull(record).render.services.app).toHaveProperty("read_only", true);
     expect(recordedProjection(record)).toEqual(recordedProjection(FIXTURE_PATH));
+    expect(recordedFull(record)).not.toEqual(recordedFull(FIXTURE_PATH));
+  }, 120_000);
+
+  it("fails, naming the key, when the compose in use renders a service key no production file writes and SERVICE_KEY_ALLOWLIST does not list", (t) => {
+    if (!requireDocker(() => t.skip())) return;
+    const real = spawnSync("sh", ["-c", "command -v docker"], { encoding: "utf8" }).stdout.trim();
+    const dir = mkdtempSync(join(tmpdir(), "compose-render-fake-docker-"));
+    try {
+      const inject = 'const j = JSON.parse(require("fs").readFileSync(0, "utf8")); j.services.app.render_time_key = true; process.stdout.write(JSON.stringify(j));';
+      const fake = join(dir, "docker");
+      writeFileSync(
+        fake,
+        `#!/bin/sh\nif [ "$2" = "version" ]; then exec ${real} "$@"; fi\nout=$(${real} "$@"); rc=$?\nif [ $rc -eq 0 ]; then printf '%s' "$out" | ${process.execPath} -e '${inject}'; else printf '%s' "$out"; fi\nexit $rc\n`,
+      );
+      chmodSync(fake, 0o755);
+      expect(SERVICE_KEY_ALLOWLIST).not.toContain("render_time_key");
+      expect(main([], { ...process.env, COMPOSE_RENDER_DOCKER_BIN: fake, CI: "true" })).toBe(1);
+      const text = err.join("\n");
+      for (const set of RENDER_SETS.filter((s) => s.name !== "base+override")) expect(text).toContain(`[${set.name}] app: ${SERVICE_KEY_REFUSAL}: render_time_key`);
+      expect(text).not.toContain("[base+override] app");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   }, 120_000);
 
   it("finds the committed fixture stale against a scratch copy whose app gains an env entry", (t) => {

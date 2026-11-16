@@ -42,6 +42,9 @@ import {
   DEV_OVERRIDE_FILE,
   FILE_CHANNEL_ALLOWLIST,
   FILE_CHANNEL_REFUSAL,
+  LOGGING_DRIVER_ALLOWLIST,
+  LOGGING_OPTION_ALLOWLIST,
+  NAMED_VOLUME_ALLOWLIST,
   type FileChannelEntry,
   SERVICE_KEY_ALLOWLIST,
   SERVICE_KEY_REFUSAL,
@@ -52,7 +55,9 @@ import {
   ecsSecretNames,
   externalEntryProblems,
   fileChannelAllowlistDrift,
+  namedVolumeAllowlistDrift,
   namedVolumeProblem,
+  namedVolumeServiceProblem,
   ownDatabaseUrlKey,
   ownRoleUser,
   readSmokeMap,
@@ -533,8 +538,9 @@ const isNamedVolume = (source: string): boolean => /^[A-Za-z0-9][A-Za-z0-9_.-]*$
  * only if, resolved against the project root, it is exactly one of
  * FILE_CHANNEL_ALLOWLIST (an absolute, `~` or variable source is refused as
  * written), for a service that entry names, read-only where it says so; a named
- * volume only if plain, docker-managed and with no explicit `name:` (the render
- * check, which knows the project name, allows exactly `<project>_<key>`); a
+ * volume only if plain, docker-managed, with no explicit `name:` (the render
+ * check, which knows the project name, allows exactly `<project>_<key>`) and
+ * mounted by a service NAMED_VOLUME_ALLOWLIST names; a
  * referenced top-level `secrets:`/`configs:` entry and any `external` entry
  * never. A form the model does not cover (a volume or secret shape it does not
  * know) is reported rather than skipped.
@@ -564,7 +570,7 @@ function fileChannelDrift(model: ComposeModel, allowlist: ReadonlyArray<FileChan
         if (problem !== null) refuse(`a bind source "${source}" ${problem}`);
       };
       const volume = (name: string) => {
-        const problem = namedVolumeProblem(named[name], null);
+        const problem = namedVolumeProblem(named[name], null) ?? namedVolumeServiceProblem(name, service);
         if (problem !== null) refuse(`named volume ${name} ${problem}`);
       };
 
@@ -1417,7 +1423,29 @@ describe("compose: a host file reaches no service outside the dev override excep
 
   it("allows an anonymous volume, a named volume and a tmpfs", () => {
     expect(flagged(bindOn("/cache"))).toEqual([]);
-    expect(flagged((c) => (svc(c, BASE, "app").volumes = ["/cache", "redis_data:/data", { type: "tmpfs", target: "/tmp" }]))).toEqual([]);
+    expect(mountedOn("redis", "/cache", "redis_data:/data", { type: "tmpfs", target: "/tmp" })).toEqual([]);
+    expect(mountedOn("redis", { type: "volume", source: "redis_data", target: "/data" })).toEqual([]);
+  });
+
+  it("flags a named volume mounted by a service its allowlist entry does not name, or by no entry, and allows the mounts the stack ships", () => {
+    expect(NAMED_VOLUME_ALLOWLIST).toEqual([
+      { name: "postgres_data", services: ["db"] },
+      { name: "redis_data", services: ["redis"] },
+    ]);
+    const notForService = (service: string, name: string) => [`${service}: ${BASE} ${REFUSED}: named volume ${name} is not allowlisted for this service`];
+    expect(mountedOn("app", "postgres_data:/x")).toEqual(notForService("app", "postgres_data"));
+    expect(mountedOn("app", { type: "volume", source: "postgres_data", target: "/x" })).toEqual(notForService("app", "postgres_data"));
+    expect(mountedOn("redis", "postgres_data:/x")).toEqual(notForService("redis", "postgres_data"));
+    expect(mountedOn("db", "redis_data:/x")).toEqual(notForService("db", "redis_data"));
+    const withAnchors = (c: ComposeModel) => {
+      topLevel(c, BASE).volumes = { ...(topLevel(c, BASE).volumes as object), anchors: null };
+      svc(c, BASE, "app").volumes = ["anchors:/x"];
+    };
+    expect(flagged(withAnchors)).toEqual([`app: ${BASE} ${REFUSED}: named volume anchors is not allowlisted`]);
+    expect(svc(compose.model, BASE, "db").volumes).toContain("postgres_data:/var/lib/postgresql/data");
+    expect(svc(compose.model, BASE, "redis").volumes).toContain("redis_data:/data");
+    expect(mountedOn("db", "postgres_data:/mnt/other")).toEqual([]);
+    expect(composeDrift(compose.model, ctx, compose.workersText)).toEqual([]);
   });
 });
 
@@ -1428,6 +1456,47 @@ describe("compose: a service outside the dev override carries only SERVICE_KEY_A
   const onApp = (edit: (spec: ServiceSpec) => void) => (c: ComposeModel) => edit(svc(c, BASE, "app"));
   const refusedOnApp = (what: string) => [`app: ${BASE} ${REFUSED}: ${what}`];
   const buildOf = (c: ComposeModel) => svc(c, BASE, "app").build as Record<string, unknown>;
+
+  it("allows labels, but still flags a withheld reference inside one", () => {
+    expect(flagged(onApp((spec) => (spec.labels = { "com.datadoghq.ad.logs": '[{"source":"passwd-sso"}]' })))).toEqual([]);
+    expect(flagged(onApp((spec) => (spec.labels = { leak: "${AUDIT_ANCHOR_SIGNING_KEY}" })))).toEqual([
+      `app: ${BASE} labels references withheld AUDIT_ANCHOR_SIGNING_KEY, which is not given to this service`,
+    ]);
+  });
+
+  it("flags a logging driver or option outside the allowlists, by name, and allows every logging block the stack ships", () => {
+    const PUBLISHER = "audit-anchor-publisher";
+    const onPublisher = (logging: unknown) => flagged((c) => void (svc(c, WORKERS_FILE, PUBLISHER).logging = logging));
+    const refusedOnPublisher = (what: string) => [`${PUBLISHER}: ${WORKERS_FILE} ${REFUSED}: ${what}`];
+    const capped = { "max-size": "20m", "max-file": "5" };
+    for (const key of ["env", "env-regex", "labels", "labels-regex"]) {
+      expect(onPublisher({ driver: "json-file", options: { ...capped, [key]: "AUDIT_ANCHOR_SIGNING_KEY" } }), key).toEqual(
+        refusedOnPublisher(`logging.options.${key} is not in LOGGING_OPTION_ALLOWLIST`),
+      );
+    }
+    expect(onPublisher({ driver: "gelf", options: capped })).toEqual(refusedOnPublisher("logging.driver gelf is not in LOGGING_DRIVER_ALLOWLIST"));
+    expect(onPublisher({ options: capped })).toEqual(refusedOnPublisher("logging.driver is not set"));
+    expect(onPublisher({ driver: "json-file", options: capped, extra: 1 })).toEqual(refusedOnPublisher("logging.extra is set"));
+    expect(onPublisher({ driver: "json-file", options: "env=X" })).toEqual(refusedOnPublisher("logging.options is not a mapping"));
+    expect(onPublisher("json-file")).toEqual(refusedOnPublisher("logging is not a mapping"));
+
+    expect(svc(compose.model, WORKERS_FILE, PUBLISHER).logging).toEqual({ driver: "json-file", options: capped });
+    const overlayLogging = svc(compose.model, "docker-compose.logging.yml", "app").logging as { options: unknown };
+    expect(onPublisher({ driver: "fluentd", options: overlayLogging.options })).toEqual([]);
+    expect(overlayLogging).toEqual({
+      driver: "fluentd",
+      options: {
+        "fluentd-address": "localhost:24224",
+        "fluentd-async": "true",
+        "fluentd-retry-wait": "1s",
+        "fluentd-max-retries": "30",
+        tag: "app.passwd-sso",
+      },
+    });
+    expect(LOGGING_DRIVER_ALLOWLIST).toEqual(["json-file", "fluentd"]);
+    expect(LOGGING_OPTION_ALLOWLIST).toEqual(["max-size", "max-file", "fluentd-address", "fluentd-async", "fluentd-retry-wait", "fluentd-max-retries", "tag"]);
+    expect(composeDrift(compose.model, ctx, compose.workersText)).toEqual([]);
+  });
 
   it("flags each key that lets a container reach another container, the host or the .env, by name", () => {
     const cases: Array<[string, unknown]> = [
@@ -1497,8 +1566,21 @@ describe("compose: a service outside the dev override carries only SERVICE_KEY_A
       for (const spec of Object.values((doc as { services: Record<string, object> }).services)) for (const key of Object.keys(spec)) written.add(key);
     }
     for (const key of written) expect(SERVICE_KEY_ALLOWLIST, key).toContain(key);
-    expect(SERVICE_KEY_ALLOWLIST.filter((k) => !written.has(k)).sort()).toEqual(["configs", "secrets"]);
+    expect(SERVICE_KEY_ALLOWLIST.filter((k) => !written.has(k)).sort()).toEqual(["configs", "labels", "secrets"]);
     expect(composeDrift(compose.model, ctx, compose.workersText)).toEqual([]);
+  });
+});
+
+describe("compose: NAMED_VOLUME_ALLOWLIST itself", () => {
+  it("is defined and mounted by its services in a production file, and names a stale entry", () => {
+    expect(namedVolumeAllowlistDrift(compose.model)).toEqual([]);
+    const stale = [...NAMED_VOLUME_ALLOWLIST, { name: "anchors", services: ["audit-anchor-publisher"] }];
+    expect(namedVolumeAllowlistDrift(compose.model, stale)).toEqual([
+      "named volume allowlist anchors: is defined by no production compose file",
+      "named volume allowlist anchors: is not mounted by audit-anchor-publisher in any production compose file",
+    ]);
+    const wrongService = [{ name: "redis_data", services: ["redis", "app"] }];
+    expect(namedVolumeAllowlistDrift(compose.model, wrongService)).toEqual(["named volume allowlist redis_data: is not mounted by app in any production compose file"]);
   });
 });
 
@@ -1529,6 +1611,7 @@ describe("compose: FILE_CHANNEL_ALLOWLIST itself", () => {
 
   it("is clean for the real tree: every entry exists, is symlink-free, is not .env*, and is mounted", () => {
     expect(fileChannelAllowlistDrift(compose.model, REPO_ROOT)).toEqual([]);
+    expect(namedVolumeAllowlistDrift(compose.model)).toEqual([]);
     expect(FILE_CHANNEL_ALLOWLIST.length).toBeGreaterThan(0);
     for (const { path, reason } of FILE_CHANNEL_ALLOWLIST) {
       expect(reason, path).not.toBe("");

@@ -837,7 +837,10 @@ Destination keys, in `.env`; set the destinations in use and leave the rest empt
   capabilities) cannot change that, so give it to uid 1001 once before `up -d`.
   Compose names the volume `<project>_<key>`; the checks refuse an explicit
   `name:` on a named volume (it can alias an existing host-bound volume), so do
-  not set one. Create the volume first and chown the `<project>_<key>` name
+  not set one. Also add the volume, with `audit-anchor-publisher` as its service,
+  to `NAMED_VOLUME_ALLOWLIST` in `scripts/checks/lib/withheld-env.ts`, in the same
+  change: the checks refuse a named volume that is not listed, or that a service
+  its entry does not name mounts. Create the volume first and chown the `<project>_<key>` name
   compose created:
   `docker compose -f docker-compose.yml -f docker-compose.workers.yml up --no-start audit-anchor-publisher`,
   then `docker run --rm -v <name from docker volume ls>:/anchors alpine chown 1001:1001 /anchors`.
@@ -866,10 +869,17 @@ a file (a bind source) is allowed only if it is one of the repo-relative paths i
 fluent-bit configs for `fluent-bit`, `sentinel.conf` for the sentinel services),
 mounted by a service its entry names and read-only where it says so; a named
 volume only if it is plain docker-managed (no `driver`, `driver_opts`, `external`
-or explicit `name:`); a service-referenced top-level `secrets:` or `configs:`
+or explicit `name:`) and mounted by a service its `NAMED_VOLUME_ALLOWLIST` entry
+names (`postgres_data` by `db`, `redis_data` by `redis`); a `logging` block only
+with a driver in `LOGGING_DRIVER_ALLOWLIST` (`json-file`, `fluentd`) and option
+keys in `LOGGING_OPTION_ALLOWLIST` (`max-size`, `max-file`, `fluentd-address`,
+`fluentd-async`, `fluentd-retry-wait`, `fluentd-max-retries`, `tag`), because
+`env`, `env-regex`, `labels` and `labels-regex` copy a container's environment,
+the signing key included, into every log record and their values are key names
+the withheld-value scan cannot see; a service-referenced top-level `secrets:` or `configs:`
 entry and `external: true` never. The render check also verifies that each
 allowlist entry exists, is not a symlink, is not an `.env*` file and is mounted by
-a production file. A volume type or key the checks do not model fails them. fails them. Every other secret in `.env` (for example `AUTH_SECRET`, `REDIS_PASSWORD`,
+a production file. A volume type or key the checks do not model fails them; a key outside `SERVICE_KEY_ALLOWLIST` is added there, with its reason, in the change that needs it. Every other secret in `.env` (for example `AUTH_SECRET`, `REDIS_PASSWORD`,
 `SHARE_MASTER_KEY_*`) is not in the set and still reaches every container that
 loads `.env`; jackson also receives `AUTH_SECRET`, by interpolation, as
 `NEXTAUTH_SECRET`. In the dev

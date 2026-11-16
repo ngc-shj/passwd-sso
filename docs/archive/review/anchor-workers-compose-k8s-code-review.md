@@ -171,3 +171,27 @@ mismatch.
   name; comment reworded).
 - Render fixture re-recorded (it predated the round-1 hardening keys).
 - Verification: full suite 1193 files / 25077 tests pass; build pass; all gates pass.
+
+### Round 4
+Findings: sec-Q1 [Major] `logging` contents unjudged (`env`/`env-regex`/`labels`/
+`labels-regex` export the publisher's env into log records and the fluentd pipeline);
+sec-Q2 [Minor] named volumes not bound to services; func-F-R4-1 [Minor] `labels`
+refused although audit-log-forwarding.md tells operators to add it, no extension route;
+func-F-R4-2 [Minor] duplicated phrase; test-F1 [Minor] freshness projection partial;
+test-F2 [Minor] render behaviour unverified on CI's compose version.
+
+- sec-Q1 — Fixed: `LOGGING_DRIVER_ALLOWLIST` (json-file, fluentd) and
+  `LOGGING_OPTION_ALLOWLIST` (max-size, max-file, fluentd-address, fluentd-async,
+  fluentd-retry-wait, fluentd-max-retries, tag) in `loggingProblems()`, called from
+  `serviceKeyProblems` (both gates); every other driver/option/key refused by name.
+  Red per option and for `gelf`; predicate mutations red.
+- sec-Q2 — Fixed: `NAMED_VOLUME_ALLOWLIST` (postgres_data→db, redis_data→redis) with a
+  pin; deployment.md tells operators to add an FS anchor volume to it with its service.
+- func-F-R4-1 — Fixed: `labels` allowed (metadata only; values still scanned for W, with
+  a deny test); deployment.md states how to extend `SERVICE_KEY_ALLOWLIST`.
+- func-F-R4-2 — Fixed.
+- test-F1 — Fixed: full hydrated render compared when the compose version matches the
+  fixture's; otherwise the projection with a visible warning naming both versions.
+- test-F2 — Mitigated: an unknown render-time key fails the check naming it (stub-docker
+  test). CI's compose version is verified on push (recorded below after CI runs).
+- Verification: full suite 1193 files / 25091 tests pass; build pass; all gates pass.

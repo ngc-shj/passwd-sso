@@ -58,9 +58,14 @@
 # (the initdb directory for db, the fluent-bit configs for fluent-bit, sentinel.conf
 # for the sentinel services), mounted by a service its entry names and read-only
 # where it says so; a named volume only if it is plain and docker-managed (no
-# driver, driver_opts, external or explicit name:); a top-level `secrets:` or
-# `configs:` entry a service references, and `external: true`, never. A volume type
-# or key the checks do not model fails them rather than being skipped.
+# driver, driver_opts, external or explicit name:) and mounted by a service
+# NAMED_VOLUME_ALLOWLIST names for it; a `logging` block only with a driver in
+# LOGGING_DRIVER_ALLOWLIST (json-file, fluentd) and option keys in
+# LOGGING_OPTION_ALLOWLIST (so `env`, `env-regex`, `labels` and `labels-regex`,
+# which copy the signing key into log records, are refused by name); a top-level
+# `secrets:` or `configs:` entry a service references, and `external: true`,
+# never. A volume type or key the checks do not model fails them rather than being
+# skipped.
 #
 # Do NOT combine this with docker-compose.override.yml in production — the dev
 # override exposes DB/Jackson/Redis ports to the host and runs the tsx source.

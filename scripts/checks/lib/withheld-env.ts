@@ -478,6 +478,103 @@ export function namedVolumeProblem(entry: unknown, expectedName: string | null):
   return sets.length === 0 ? null : `sets ${sets.join(", ")}`;
 }
 
+/** One named volume and the only services that may mount it. */
+export type NamedVolumeEntry = { name: string; services: readonly string[] };
+
+/**
+ * The named volumes a production service may mount, each with the services that
+ * may: a default-deny list like FILE_CHANNEL_ALLOWLIST, so a volume that holds
+ * one principal's data cannot be mounted by another service. A volume an
+ * operator adds (the anchor destination's, say) is added here with its service
+ * in the same change; `namedVolumeAllowlistDrift` requires each entry to be
+ * defined and mounted by its services in a production file.
+ */
+export const NAMED_VOLUME_ALLOWLIST: ReadonlyArray<NamedVolumeEntry> = [
+  { name: "postgres_data", services: ["db"] },
+  { name: "redis_data", services: ["redis"] },
+];
+
+/** Why `service` may not mount the named volume `name`, or null: the volume must be listed, and the service one its entry names. */
+export function namedVolumeServiceProblem(name: string, service: string, allowlist: ReadonlyArray<NamedVolumeEntry> = NAMED_VOLUME_ALLOWLIST): string | null {
+  const entry = allowlist.find((e) => e.name === name);
+  if (entry === undefined) return "is not allowlisted";
+  if (!entry.services.includes(service)) return "is not allowlisted for this service";
+  return null;
+}
+
+/**
+ * Every way NAMED_VOLUME_ALLOWLIST itself falls short, against the production
+ * compose files in `model` (file name -> parsed document; the dev override is
+ * not one): an entry no file defines at the top level, or one a listed service
+ * does not mount (a stale entry).
+ */
+export function namedVolumeAllowlistDrift(model: Record<string, unknown>, allowlist: ReadonlyArray<NamedVolumeEntry> = NAMED_VOLUME_ALLOWLIST): string[] {
+  const defined = new Set<string>();
+  const mountedBy = new Map<string, Set<string>>();
+  for (const [file, doc] of Object.entries(model)) {
+    if (file === DEV_OVERRIDE_FILE || !isRecord(doc)) continue;
+    if (isRecord(doc.volumes)) for (const name of Object.keys(doc.volumes)) defined.add(name);
+    if (!isRecord(doc.services)) continue;
+    for (const [service, spec] of Object.entries(doc.services)) {
+      if (!isRecord(spec) || !Array.isArray(spec.volumes)) continue;
+      for (const v of spec.volumes) {
+        const source = typeof v === "string" ? (v.includes(":") ? v.split(":")[0] : undefined) : isRecord(v) && v.type === "volume" ? v.source : undefined;
+        if (typeof source !== "string") continue;
+        mountedBy.set(source, (mountedBy.get(source) ?? new Set()).add(service));
+      }
+    }
+  }
+  const drift: string[] = [];
+  for (const { name, services } of allowlist) {
+    if (!defined.has(name)) drift.push(`named volume allowlist ${name}: is defined by no production compose file`);
+    for (const service of services) {
+      if (!mountedBy.get(name)?.has(service)) drift.push(`named volume allowlist ${name}: is not mounted by ${service} in any production compose file`);
+    }
+  }
+  return drift;
+}
+
+/** The `logging.driver` values a production service may use: the capped json-file default, and the fluentd driver docker-compose.logging.yml gives app. */
+export const LOGGING_DRIVER_ALLOWLIST: readonly string[] = ["json-file", "fluentd"];
+
+/**
+ * The `logging.options` keys a production service may set, exactly the ones the
+ * x-logging anchors and docker-compose.logging.yml's fluentd block write. Default-deny
+ * because `env`, `env-regex`, `labels` and `labels-regex` copy the container's own
+ * environment (the signing key) into every log record, and their value is a
+ * key name or a regex, so the sentinel scan cannot see it.
+ */
+export const LOGGING_OPTION_ALLOWLIST: readonly string[] = [
+  "max-size",
+  "max-file",
+  "fluentd-address",
+  "fluentd-async",
+  "fluentd-retry-wait",
+  "fluentd-max-retries",
+  "tag",
+];
+
+/**
+ * Every way a service's `logging` block falls outside LOGGING_DRIVER_ALLOWLIST
+ * and LOGGING_OPTION_ALLOWLIST: a key other than `driver` and `options`, a
+ * missing or unlisted driver (the default driver also honours `env`), options
+ * that are not a mapping, and each unlisted option, by name.
+ */
+export function loggingProblems(logging: unknown): string[] {
+  if (!isRecord(logging)) return ["logging is not a mapping"];
+  const problems: string[] = [];
+  for (const key of Object.keys(logging)) if (key !== "driver" && key !== "options") problems.push(`logging.${key} is set`);
+  if (logging.driver === undefined) problems.push("logging.driver is not set");
+  else if (typeof logging.driver !== "string" || !LOGGING_DRIVER_ALLOWLIST.includes(logging.driver)) {
+    problems.push(`logging.driver ${String(logging.driver)} is not in LOGGING_DRIVER_ALLOWLIST`);
+  }
+  if (logging.options !== undefined) {
+    if (!isRecord(logging.options)) problems.push("logging.options is not a mapping");
+    else for (const key of Object.keys(logging.options)) if (!LOGGING_OPTION_ALLOWLIST.includes(key)) problems.push(`logging.options.${key} is not in LOGGING_OPTION_ALLOWLIST`);
+  }
+  return problems;
+}
+
 /**
  * Service keys outside the dev override are default-deny: a service may carry
  * only these top-level keys. Derived from what docker-compose.yml,
@@ -489,8 +586,11 @@ export function namedVolumeProblem(entry: unknown, expectedName: string | null):
  * `ipc`, `userns_mode`, `cgroup`, `volumes_from`, `extends`, `network_mode`,
  * `x-*`), is refused rather than skipped. `secrets` and `configs` are listed
  * because the file-channel check refuses every reference to one by name, with a
- * better message; an empty list is harmless. `tmpfs`, `container_name` and a
- * build `target` are dev-override keys.
+ * better message; an empty list is harmless. `labels` is listed for the
+ * documented audit-log-forwarding step (container metadata only: no host path,
+ * namespace, device or capability; its values are still scanned for W). `tmpfs`,
+ * `container_name` and a build `target` are dev-override keys. A key outside the
+ * list is added here, with its reason, in the change that needs it.
  */
 export const SERVICE_KEY_ALLOWLIST: readonly string[] = [
   "build",
@@ -503,6 +603,7 @@ export const SERVICE_KEY_ALLOWLIST: readonly string[] = [
   "environment",
   "healthcheck",
   "image",
+  "labels",
   "logging",
   "networks",
   "ports",
@@ -533,7 +634,8 @@ export const SERVICE_KEY_REFUSAL = "has a service key outside SERVICE_KEY_ALLOWL
  * `security_opt` other than exactly `["no-new-privileges:true"]`, a `build` that
  * is not a mapping of context/dockerfile/args, a `build.context` that
  * `isProjectRoot` does not accept (an escape from .dockerignore) and a
- * `build.dockerfile` other than `Dockerfile`. The render check accepts the stub
+ * `build.dockerfile` other than `Dockerfile`, and a `logging` block outside
+ * LOGGING_DRIVER_ALLOWLIST / LOGGING_OPTION_ALLOWLIST. The render check accepts the stub
  * path as the project root, the parity test `.`.
  */
 export function serviceKeyProblems(service: unknown, isProjectRoot: (context: string) => boolean): string[] {
@@ -541,6 +643,7 @@ export function serviceKeyProblems(service: unknown, isProjectRoot: (context: st
   const problems: string[] = [];
   const refuse = (what: string) => problems.push(`${SERVICE_KEY_REFUSAL}: ${what}`);
   for (const key of Object.keys(service)) if (!SERVICE_KEY_ALLOWLIST.includes(key)) refuse(key);
+  if ("logging" in service) for (const problem of loggingProblems(service.logging)) refuse(problem);
   if ("security_opt" in service && JSON.stringify(service.security_opt) !== JSON.stringify(SECURITY_OPT_ALLOWED)) {
     refuse(`security_opt is not exactly ${JSON.stringify(SECURITY_OPT_ALLOWED)}`);
   }

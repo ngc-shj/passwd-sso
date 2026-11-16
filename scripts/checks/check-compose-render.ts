@@ -19,12 +19,15 @@
  *     `userns_mode` and any unknown key are refused by name), a `security_opt`
  *     other than exactly `["no-new-privileges:true"]`, or a `build` with a key
  *     outside context/dockerfile/args, a context other than the project root or
- *     a dockerfile other than `Dockerfile`;
+ *     a dockerfile other than `Dockerfile`, or a `logging` block whose driver or
+ *     option key is outside LOGGING_DRIVER_ALLOWLIST / LOGGING_OPTION_ALLOWLIST
+ *     (`env`, `env-regex`, `labels` and `labels-regex` would copy the signing key
+ *     into log records, and their value is a key name the sentinel scan cannot see);
  *   - and none gets a host file by anything but default-deny: a bind source only
  *     if it is <project>/<a FILE_CHANNEL_ALLOWLIST path> from a service that entry
  *     names, read-only where it says so; a named volume only if plain,
  *     docker-managed and named <project>_<key> (no driver, driver_opts or other
- *     `name`); a referenced top-level `secrets:`/`configs:` entry and any
+ *     `name`), and only from a service NAMED_VOLUME_ALLOWLIST names for it; a referenced top-level `secrets:`/`configs:` entry and any
  *     `external` entry never; a volume type or key the check does not model fails
  *     instead of being skipped;
  *   - the allowlist itself holds on the tree under --root: each entry exists, is
@@ -70,7 +73,9 @@ import {
   FILE_CHANNEL_REFUSAL,
   fileChannelAllowlistDrift,
   isDatabaseUrlKey,
+  namedVolumeAllowlistDrift,
   namedVolumeProblem,
+  namedVolumeServiceProblem,
   ownDatabaseUrlKey,
   PUBLISHER_SERVICE,
   readSmokeMap,
@@ -297,7 +302,8 @@ function referencedEntries(service: ComposeService, render: ComposeRender): Reco
  * How a host file could reach `service` (named `name`), by default-deny: a bind
  * source only if it is `<projectRoot>/<a FILE_CHANNEL_ALLOWLIST path>`, from a
  * service that entry names, read-only where it says so; a named volume only if
- * plain, docker-managed and named `<project>_<key>`; a referenced secrets/configs
+ * plain, docker-managed, named `<project>_<key>` and mounted by a service
+ * NAMED_VOLUME_ALLOWLIST names; a referenced secrets/configs
  * entry never; a tmpfs is fine. A shape not modelled is reported, not skipped.
  * (`build` keys are judged by serviceKeyProblems.)
  */
@@ -324,7 +330,7 @@ function fileChannelProblems(name: string, service: ComposeService, render: Comp
       }
     } else if (entry.type === "volume") {
       if (typeof entry.source === "string") {
-        const problem = namedVolumeProblem(render.volumes?.[entry.source], `${projectName}_${entry.source}`);
+        const problem = namedVolumeProblem(render.volumes?.[entry.source], `${projectName}_${entry.source}`) ?? namedVolumeServiceProblem(entry.source, name);
         if (problem !== null) refuse(`named volume ${entry.source} ${problem}`);
       }
     } else if (entry.type !== "tmpfs") {
@@ -546,6 +552,7 @@ export function runChecks(opts: RunOptions, log: (line: string) => void): string
     }
   }
   failures.push(...fileChannelAllowlistDrift(model, opts.root));
+  failures.push(...namedVolumeAllowlistDrift(model));
 
   // A compose file no set renders is a stack no check here has looked at.
   try {
