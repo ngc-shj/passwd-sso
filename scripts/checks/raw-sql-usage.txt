@@ -82,6 +82,7 @@ src/app/s/[token]/page.tsx # atomic view_count increment + revocation/expiry/cre
 src/auth.ts # SECURITY DEFINER call to migrate audit_logs rows during tenant merge
 src/lib/audit/audit-outbox.ts # tenant-existence check before enqueueing audit outbox rows (the bypass is set through setBypassGucs)
 src/lib/auth/policy/account-lockout.ts # row lock (FOR UPDATE) + lock_timeout for atomic failed-login counter update
+src/lib/auth/session/user-auth-serialization.ts # the batch credential lock: every user's user-auth pg_advisory_xact_lock in one statement, ordered by key, so two batch revocations cannot deadlock on their ordering
 src/lib/auth/webauthn/webauthn-authorize.ts # CAS counter update on WebAuthn credential to prevent replay/clone
 src/lib/auth/webauthn/webauthn-server.ts # CAS counter update on WebAuthn credential within caller's tx
 src/lib/directory-sync/engine.ts # conditional status-transition UPDATE guarding concurrent directory sync runs
