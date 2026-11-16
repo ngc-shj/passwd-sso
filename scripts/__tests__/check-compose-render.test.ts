@@ -10,17 +10,20 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import {
   CANARY_TOKEN,
   RENDER_SETS,
   analyzeRender,
   buildSentinels,
+  composeFilesOutsideRenderSets,
   deploymentIdDrift,
   hydrateRecordedRender,
   main,
+  parseRender,
+  placeholderizeRender,
   publisherEnvProblems,
   requiredVariables,
   scrubbedEnv,
@@ -29,6 +32,7 @@ import {
   type ComposeRender,
   type Sentinels,
 } from "../checks/check-compose-render";
+import { findComposeFiles } from "../checks/check-compose-log-caps.mjs";
 import {
   derivePublisherOnlyEnv,
   deriveWithheldEnv,
@@ -57,6 +61,7 @@ const ctx: AnalysisContext = {
   sentinels,
   binding: rolePasswordBinding(realRolePasswordInputs()),
   smoke: readSmokeMap(),
+  projectRoot: "<stub>",
 };
 const baseline = (): ComposeRender => hydrateRecordedRender(structuredClone(recorded.render), sentinels);
 
@@ -71,6 +76,10 @@ function drift(mutate: (r: ComposeRender) => void): string[] {
 
 const env = (r: ComposeRender, service: string) => r.services[service].environment as Record<string, string | undefined>;
 const sentinel = (key: string) => sentinels[key].value;
+const NOT_BLANKED = "is not blanked (loads .env, so it holds the .env value)";
+/** What a service that loads .env but blanks nothing is named for: every W key except its own URL, in W's order. */
+const unblanked = (service: string, ownUrlKey: string): string[] =>
+  withheld.filter((k) => k !== ownUrlKey).map((k) => `[${SET}] ${service}: ${k} ${NOT_BLANKED}`);
 
 describe("recorded render", () => {
   it("records the compose version it came from", () => {
@@ -185,8 +194,11 @@ describe("analyzeRender", () => {
 
   it("names a verify worker that has gone through .env", () => {
     const found = drift((r) => (env(r, "audit-chain-verify-worker").COMPOSE_RENDER_CANARY = CANARY_TOKEN));
-    expect(found).toContain(`[${SET}] audit-chain-verify-worker: loads .env`);
-    expect(found).toContain(`[${SET}] audit-chain-verify-worker: env names are not exactly AUDIT_CHAIN_VERIFY_DATABASE_URL, DATABASE_URL`);
+    expect(found).toEqual([
+      ...unblanked("audit-chain-verify-worker", "AUDIT_CHAIN_VERIFY_DATABASE_URL"),
+      `[${SET}] audit-chain-verify-worker: loads .env`,
+      `[${SET}] audit-chain-verify-worker: env names are not exactly AUDIT_CHAIN_VERIFY_DATABASE_URL, DATABASE_URL`,
+    ]);
   });
 
   it("names a worker whose own URL is blanked", () => {
@@ -197,8 +209,10 @@ describe("analyzeRender", () => {
 
   it("names a publisher that has gone through .env", () => {
     const found = drift((r) => (env(r, "audit-anchor-publisher").COMPOSE_RENDER_CANARY = CANARY_TOKEN));
-    expect(found).toContain(`[${SET}] audit-anchor-publisher: loads .env`);
-    expect(found).toContain(`[${SET}] audit-anchor-publisher: SENTRY_AUTH_TOKEN is not blanked (loads .env, so it holds the .env value)`);
+    expect(found).toEqual([
+      ...unblanked("audit-anchor-publisher", "AUDIT_ANCHOR_PUBLISHER_DATABASE_URL"),
+      `[${SET}] audit-anchor-publisher: loads .env`,
+    ]);
   });
 
   it("names a verify worker with an extra variable", () => {
@@ -209,11 +223,11 @@ describe("analyzeRender", () => {
 
   it("names a publisher missing an ECS name, and the schema refusal that follows", () => {
     const found = drift((r) => delete env(r, "audit-anchor-publisher").DEPLOYMENT_ID);
-    expect(found.slice(0, 2)).toEqual([
+    expect(found).toEqual([
       `[${SET}] audit-anchor-publisher: DEPLOYMENT_ID (an ECS name) is absent`,
       `[${SET}] audit-anchor-publisher: DEPLOYMENT_ID does not carry the .env value`,
+      `[${SET}] audit-anchor-publisher: fails auditAnchorPublisherEnvSchema at DEPLOYMENT_ID: DEPLOYMENT_ID is required when AUDIT_ANCHOR_PUBLISHER_ENABLED=true`,
     ]);
-    expect(found.some((f) => f.startsWith(`[${SET}] audit-anchor-publisher: fails auditAnchorPublisherEnvSchema at DEPLOYMENT_ID`))).toBe(true);
   });
 
   it("names a publisher whose signing key is not the .env value", () => {
@@ -223,8 +237,9 @@ describe("analyzeRender", () => {
   });
 
   it("names a publisher that is not enabled", () => {
-    const found = drift((r) => (env(r, "audit-anchor-publisher").AUDIT_ANCHOR_PUBLISHER_ENABLED = "false"));
-    expect(found[0]).toBe(`[${SET}] audit-anchor-publisher: AUDIT_ANCHOR_PUBLISHER_ENABLED is not true`);
+    expect(drift((r) => (env(r, "audit-anchor-publisher").AUDIT_ANCHOR_PUBLISHER_ENABLED = "false"))).toEqual([
+      `[${SET}] audit-anchor-publisher: AUDIT_ANCHOR_PUBLISHER_ENABLED is not true`,
+    ]);
   });
 
   it("names a publisher with an S3 bucket and a blank region (the schema refuses it)", () => {
@@ -232,8 +247,88 @@ describe("analyzeRender", () => {
       env(r, "audit-anchor-publisher").AUDIT_ANCHOR_DESTINATION_S3_BUCKET = "b";
       env(r, "audit-anchor-publisher").AWS_REGION = "";
     });
-    expect(found).toHaveLength(1);
-    expect(found[0]).toContain("fails auditAnchorPublisherEnvSchema at AWS_REGION");
+    expect(found).toEqual([
+      `[${SET}] audit-anchor-publisher: fails auditAnchorPublisherEnvSchema at AWS_REGION: AWS_REGION is required when AUDIT_ANCHOR_DESTINATION_S3_BUCKET is set`,
+    ]);
+  });
+});
+
+describe("analyzeRender: .env delivered as a file", () => {
+  const MOUNT = "holds .env by file mount";
+  const bind = (source: string) => ({ type: "bind", source, target: "/mnt/x", read_only: true, bind: {} });
+
+  it("names a bind mount of the project directory on app", () => {
+    expect(drift((r) => (r.services.app.volumes = [bind("<stub>")]))).toEqual([`[${SET}] app: ${MOUNT}: a bind source is the project directory`]);
+  });
+
+  it("names a bind mount of the project's .env and of any .env* file, and allows the mounts the stack ships", () => {
+    expect(drift((r) => (r.services.app.volumes = [bind("<stub>/.env")]))).toEqual([`[${SET}] app: ${MOUNT}: a bind source is a .env file`]);
+    expect(drift((r) => (r.services.app.volumes = [bind("/srv/other/.env.production")]))).toEqual([`[${SET}] app: ${MOUNT}: a bind source is a .env file`]);
+    // The fluent-bit config mounts, the db initdb mount (already in the render) and a tmpfs.
+    expect(
+      drift((r) => {
+        r.services.app.volumes = [bind("<stub>/infra/fluent-bit/fluent-bit.conf"), bind("<stub>/infra/fluent-bit/parsers.conf"), { type: "tmpfs", target: "/tmp" }];
+      }),
+    ).toEqual([]);
+  });
+
+  it("names a bind mount of an ancestor of the project directory, and allows a sibling directory", () => {
+    const withRoot = (source: string) => {
+      const r = baseline();
+      r.services.app.volumes = [bind(source)];
+      return analyzeRender(SET, r, { ...ctx, projectRoot: "/srv/app" });
+    };
+    expect(withRoot("/srv")).toEqual([`[${SET}] app: ${MOUNT}: a bind source is an ancestor of the project directory`]);
+    expect(withRoot("/")).toEqual([`[${SET}] app: ${MOUNT}: a bind source is an ancestor of the project directory`]);
+    expect(withRoot("/srv/app-data")).toEqual([]);
+  });
+
+  it("names a secrets entry whose file is the .env, on the outbox worker, and allows a file beside it", () => {
+    const give = (file: string) => (r: ComposeRender) => {
+      r.secrets = { signing: { file } };
+      r.services["audit-outbox-worker"].secrets = [{ source: "signing", target: "signing" }];
+    };
+    expect(drift(give("<stub>/.env"))).toEqual([`[${SET}] audit-outbox-worker: ${MOUNT}: the file of secrets entry signing is a .env file`]);
+    expect(drift(give("<stub>/secrets/token"))).toEqual([]);
+  });
+
+  it("names a configs entry whose file is the project directory, and ignores an entry no service references", () => {
+    expect(
+      drift((r) => {
+        r.configs = { cfg: { file: "<stub>" } };
+        r.services.app.configs = [{ source: "cfg" }];
+      }),
+    ).toEqual([`[${SET}] app: ${MOUNT}: the file of configs entry cfg is the project directory`]);
+    expect(drift((r) => (r.configs = { cfg: { file: "<stub>" } }))).toEqual([]);
+  });
+
+  it("names a named volume backed by a bind of the project directory, and allows one backed by another path", () => {
+    const back = (device: string) => (r: ComposeRender) => {
+      r.volumes = { ...r.volumes, postgres_data: { driver_opts: { type: "none", o: "bind", device } } };
+    };
+    expect(drift(back("<stub>"))).toEqual([`[${SET}] db: ${MOUNT}: the device of named volume postgres_data is the project directory`]);
+    expect(drift(back("<stub>/data"))).toEqual([]);
+  });
+
+  it("names a shape it does not model instead of skipping it", () => {
+    expect(drift((r) => (r.services.app.volumes = ["<stub>:/x"]))).toEqual([`[${SET}] app: has an unmodelled volume entry`]);
+    expect(drift((r) => (r.services.app.volumes = [{ type: "bind", target: "/x" }]))).toEqual([`[${SET}] app: has a bind volume without a source`]);
+    expect(drift((r) => (r.services.app.volumes = [{ type: "npipe", source: "a", target: "b" }]))).toEqual([`[${SET}] app: has a volume of unmodelled type npipe`]);
+    expect(drift((r) => (r.services.app.volumes = { x: 1 }))).toEqual([`[${SET}] app: has an unmodelled volumes value`]);
+    expect(drift((r) => (r.services.app.secrets = [{ source: "gone" }]))).toEqual([`[${SET}] app: references a secrets entry the render does not define`]);
+    expect(
+      drift((r) => {
+        r.secrets = { fromEnv: { environment: "AUDIT_ANCHOR_SIGNING_KEY" } };
+        r.services.app.secrets = [{ source: "fromEnv" }];
+      }),
+    ).toEqual([`[${SET}] app: ${MOUNT}: secrets entry fromEnv is filled from an environment variable`]);
+  });
+
+  it("does not judge the dev set, whose workers mount the project directory", () => {
+    const r = baseline();
+    r.services.app.volumes = [bind("<stub>")];
+    expect(analyzeRender("base+override", r, ctx)).toEqual([]);
+    expect(analyzeRender("base+workers+logging", r, ctx)).toEqual([`[base+workers+logging] app: ${MOUNT}: a bind source is the project directory`]);
   });
 });
 
@@ -271,6 +366,87 @@ describe("publisherEnvProblems", () => {
     const problems = publisherEnvProblems(e);
     expect(problems).toHaveLength(1);
     expect(problems[0]).toContain("fails auditAnchorPublisherEnvSchema at AUDIT_ANCHOR_SIGNING_KEY");
+  });
+});
+
+describe("placeholderizeRender and hydrateRecordedRender", () => {
+  const STUB = "/tmp/compose-render-AbCd12";
+  const keys = ["AUDIT_ANCHOR_SIGNING_KEY", "PASSWD_APP_PASSWORD", "DEPLOYMENT_ID"];
+  const sents = buildSentinels(keys);
+  const live = (): ComposeRender => ({
+    services: {
+      app: {
+        environment: { COMPOSE_RENDER_CANARY: CANARY_TOKEN, AUDIT_ANCHOR_SIGNING_KEY: sents.AUDIT_ANCHOR_SIGNING_KEY.value, DEPLOYMENT_ID: "" },
+        volumes: [{ type: "bind", source: `${STUB}/infra/postgres/initdb`, target: "/x" }],
+        command: ["sh", "-c", `psql postgresql://u:${sents.PASSWD_APP_PASSWORD.token}@db/x`],
+      },
+    },
+  });
+
+  it("holds neither the stub path nor a sentinel once placeholderized", () => {
+    const text = JSON.stringify(placeholderizeRender(live(), sents, STUB));
+    expect(text).not.toContain(STUB);
+    for (const s of Object.values(sents)) expect(text).not.toContain(s.token);
+    expect(text).not.toContain(CANARY_TOKEN);
+    for (const k of ["AUDIT_ANCHOR_SIGNING_KEY", "PASSWD_APP_PASSWORD", "COMPOSE_RENDER_CANARY"]) expect(text).toContain(`{{${k}}}`);
+    expect(text).toContain("<stub>/infra/postgres/initdb");
+  });
+
+  it("hydrates back to the live render, but for the stub path", () => {
+    const back = hydrateRecordedRender(placeholderizeRender(live(), sents, STUB), sents);
+    const expected = live();
+    (expected.services.app.volumes as Array<{ source: string }>)[0].source = "<stub>/infra/postgres/initdb";
+    expect(back).toEqual(expected);
+  });
+});
+
+describe("parseRender", () => {
+  it("returns a render with a services mapping", () => {
+    expect(parseRender('{"services":{"app":{}}}')).toEqual({ services: { app: {} } });
+  });
+
+  it("names output that is not JSON, by size, without quoting it", () => {
+    const stdout = "services: {AUDIT_ANCHOR_SIGNING_KEY: topsecretvalue";
+    let message = "";
+    try {
+      parseRender(stdout);
+    } catch (e) {
+      message = (e as Error).message;
+    }
+    expect(message).toBe(`compose config printed output that is not valid JSON (${stdout.length} bytes, not shown)`);
+    expect(message).not.toContain("topsecretvalue");
+  });
+
+  it("names JSON with no services mapping", () => {
+    for (const bad of ["null", "[]", '{"name":"x"}', '{"services":[]}', '{"services":null}']) {
+      expect(() => parseRender(bad), bad).toThrow("compose config printed JSON with no services mapping (output not shown)");
+    }
+  });
+});
+
+describe("composeFilesOutsideRenderSets", () => {
+  const sets = [{ files: ["docker-compose.yml", "docker-compose.a.yml"] }, { files: ["docker-compose.yml", "docker-compose.b.yml"] }];
+
+  it("is empty when every file is in some set", () => {
+    expect(composeFilesOutsideRenderSets(["docker-compose.a.yml", "docker-compose.b.yml", "docker-compose.yml"], sets)).toEqual([]);
+  });
+
+  it("names a file no set renders", () => {
+    expect(composeFilesOutsideRenderSets(["docker-compose.yml", "docker-compose.z.yml", "deploy/docker-compose.yml"], sets)).toEqual([
+      "deploy/docker-compose.yml",
+      "docker-compose.z.yml",
+    ]);
+  });
+
+  it("refuses an empty list instead of reporting it clean", () => {
+    expect(() => composeFilesOutsideRenderSets([], sets)).toThrow("no compose files were found");
+  });
+
+  it("renders every non-fixture compose file of the tree", () => {
+    const found = findComposeFiles(REPO_ROOT).map((f) => relative(REPO_ROOT, f));
+    expect(found.length).toBeGreaterThan(0);
+    expect(composeFilesOutsideRenderSets(found)).toEqual([]);
+    expect(composeFilesOutsideRenderSets([...found, "docker-compose.extra.yml"])).toEqual(["docker-compose.extra.yml"]);
   });
 });
 
@@ -366,11 +542,40 @@ describe("docker availability", () => {
     expect(main([], { ...noDocker, CI: "" })).toBe(0);
     expect(out.join("\n")).toContain("SKIPPED");
   });
+
+  it("names a compose that prints output that is not JSON, without printing it", () => {
+    const dir = mkdtempSync(join(tmpdir(), "compose-render-fake-docker-"));
+    try {
+      const fake = join(dir, "docker");
+      writeFileSync(fake, '#!/bin/sh\nif [ "$2" = "version" ]; then echo "Docker Compose version v0.0.0"; exit 0; fi\necho "AUDIT_ANCHOR_SIGNING_KEY=topsecretvalue"\n');
+      chmodSync(fake, 0o755);
+      expect(main([], { ...process.env, COMPOSE_RENDER_DOCKER_BIN: fake, CI: "true" })).toBe(1);
+      const text = err.join("\n");
+      for (const set of RENDER_SETS) expect(text).toContain(`[${set.name}] compose config printed output that is not valid JSON (`);
+      expect(text).toContain("[base+workers] under a DEPLOYMENT_ID override: compose config printed output that is not valid JSON (");
+      expect(text).not.toContain("topsecretvalue");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 // ─── Real compose ───────────────────────────────────────────
 
 const dockerAvailable = spawnSync("docker", ["compose", "version"], { encoding: "utf8" }).status === 0;
+
+/** Each service's environment and the service-name set: what the fixture pins, with the compose version left out. */
+function renderProjection(render: ComposeRender) {
+  const names = Object.keys(render.services).sort();
+  return { services: names, environment: Object.fromEntries(names.map((n) => [n, render.services[n].environment ?? {}])) };
+}
+
+/** A recorded file, hydrated with sentinels covering every key it was recorded with. */
+function recordedProjection(path: string) {
+  const file = JSON.parse(readFileSync(path, "utf8")) as Recorded;
+  const keys = [...new Set([...JSON.stringify(file.render).matchAll(/\{\{([A-Z0-9_]+)\}\}/g)].map((m) => m[1]))];
+  return renderProjection(hydrateRecordedRender(file.render, buildSentinels([...withheld, ...file.withheld, ...keys, "DEPLOYMENT_ID"])));
+}
 
 describe("real docker compose", () => {
   let out: string[];
@@ -407,6 +612,28 @@ describe("real docker compose", () => {
     expect(main([]), err.join("\n")).toBe(0);
     expect(out.join("\n")).toMatch(/Docker Compose version/);
     for (const set of RENDER_SETS) expect(out.join("\n")).toContain(`${set.name}:`);
+  }, 120_000);
+
+  it("re-records the render of the tree as the committed fixture holds it", (t) => {
+    if (!requireDocker(() => t.skip())) return;
+    const record = join(scratchCopy(), "record.json");
+    expect(main(["--record", record]), err.join("\n")).toBe(0);
+    expect(recordedProjection(record)).toEqual(recordedProjection(FIXTURE_PATH));
+  }, 120_000);
+
+  it("finds the committed fixture stale against a scratch copy whose app gains an env entry", (t) => {
+    if (!requireDocker(() => t.skip())) return;
+    const dir = scratchCopy();
+    const path = join(dir, "docker-compose.yml");
+    const text = readFileSync(path, "utf8");
+    const anchor = "      - AUDIT_ANCHOR_SIGNING_KEY=\n";
+    expect(text).toContain(anchor);
+    writeFileSync(path, text.replace(anchor, `${anchor}      - COMPOSE_RENDER_EXTRA=1\n`));
+    const record = join(dir, "record.json");
+    expect(main(["--root", dir, "--record", record]), err.join("\n")).toBe(0);
+    const fresh = recordedProjection(record);
+    expect(fresh.environment.app).toHaveProperty("COMPOSE_RENDER_EXTRA", "1");
+    expect(fresh).not.toEqual(recordedProjection(FIXTURE_PATH));
   }, 120_000);
 
   it("fails a scratch copy of the tree that stops blanking a withheld key in app", (t) => {

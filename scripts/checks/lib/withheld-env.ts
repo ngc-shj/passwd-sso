@@ -17,7 +17,7 @@
  * readers are the only functions that touch the tree.
  */
 import { readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, posix, resolve } from "node:path";
 import { ALLOWLIST } from "../../env-allowlist";
 import { ROLES } from "../../bootstrap-rds-roles.mjs";
 import { envObject } from "@/lib/env-schema";
@@ -321,4 +321,27 @@ export function withheldHolders(
     else table[key] = Object.entries(binding).filter(([, vars]) => vars.includes(key)).map(([service]) => service).sort();
   }
   return table;
+}
+
+// ─── File channels ──────────────────────────────────────────
+
+/** What a file source hands a container: the whole `.env`'s directory, or the file. */
+export type EnvFileSourceKind = "the project directory" | "an ancestor of the project directory" | "a .env file";
+
+const stripTrailingSlash = (p: string): string => (p.length > 1 ? p.replace(/\/+$/, "") : p);
+
+/**
+ * Whether mounting `source` into a container (a bind mount, or the `file:` of a
+ * top-level `secrets:`/`configs:` entry) delivers `.env` as a file: the source
+ * is the project directory, one of its ancestors, or a `.env*` file. Both paths
+ * are compared as written, in one form (both absolute, or both relative to the
+ * same directory); null when the source is none of those.
+ */
+export function envFileSourceKind(source: string, projectRoot: string): EnvFileSourceKind | null {
+  const s = stripTrailingSlash(posix.normalize(source));
+  const root = stripTrailingSlash(posix.normalize(projectRoot));
+  if (s === root) return "the project directory";
+  if (root.startsWith(s === "/" ? "/" : `${s}/`)) return "an ancestor of the project directory";
+  if (posix.basename(s).startsWith(".env")) return "a .env file";
+  return null;
 }

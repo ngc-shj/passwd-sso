@@ -13,6 +13,11 @@
  *     included), appears only in the services withheldHolders() names for it:
  *     a role password where bound, a publisher-only key in the publisher,
  *     JACKSON_API_KEY in jackson, any other W key nowhere;
+ *   - no service outside base+override (whose `.:/app` mount is the dev shape)
+ *     gets `.env` as a file: a bind mount whose source is the project directory,
+ *     an ancestor of it or a `.env*` file, a named volume backed by such a bind,
+ *     or a top-level `secrets:`/`configs:` entry whose `file:` is one; a volume
+ *     or entry shape the check does not model fails instead of being skipped;
  *   - the publisher's rendered env passes auditAnchorPublisherEnvSchema and
  *     buildDestinationsFromEnv, the verify worker holds its URL and nothing
  *     else, and neither loads `.env`;
@@ -44,6 +49,7 @@ import { buildDestinationsFromEnv } from "@/lib/audit/anchor-destinations/from-e
 import {
   deriveWithheldEnv,
   derivePublisherOnlyEnv,
+  envFileSourceKind,
   isDatabaseUrlKey,
   ownDatabaseUrlKey,
   PUBLISHER_SERVICE,
@@ -73,6 +79,22 @@ export const RENDER_SETS: ReadonlyArray<{ name: string; files: readonly string[]
 
 /** The set the DEPLOYMENT_ID shell-override case renders. */
 const WORKERS_SET = RENDER_SETS[1];
+
+/** The dev set: its workers bind-mount `.:/app`, so file channels are not judged there. */
+const FILE_CHANNEL_EXEMPT_SET = RENDER_SETS[0].name;
+
+/**
+ * The compose files (root-relative, fixtures excluded) that no RENDER_SETS
+ * entry renders. An empty list is refused: it means the discovery found nothing,
+ * not that nothing is unrendered. The caller discovers the files (the self-test
+ * does, with findComposeFiles): that helper is an ES module with a top-level
+ * await, which this check, run by tsx as CommonJS, cannot import.
+ */
+export function composeFilesOutsideRenderSets(found: readonly string[], sets: ReadonlyArray<{ files: readonly string[] }> = RENDER_SETS): string[] {
+  if (found.length === 0) throw new Error("no compose files were found, so none can be checked against the render sets");
+  const rendered = new Set(sets.flatMap((s) => s.files));
+  return found.filter((f) => !rendered.has(f)).sort();
+}
 
 // ─── Sentinels ──────────────────────────────────────────────
 
@@ -168,7 +190,13 @@ export function requiredVariables(texts: readonly string[]): string[] {
 // ─── Analysis of a rendered config ──────────────────────────
 
 export type ComposeService = { environment?: Record<string, string | null | undefined> } & Record<string, unknown>;
-export type ComposeRender = { services: Record<string, ComposeService> };
+type TopLevelEntries = Record<string, Record<string, unknown> | null | undefined>;
+export type ComposeRender = {
+  services: Record<string, ComposeService>;
+  volumes?: TopLevelEntries;
+  secrets?: TopLevelEntries;
+  configs?: TopLevelEntries;
+};
 
 export type AnalysisContext = {
   withheld: readonly string[];
@@ -177,6 +205,8 @@ export type AnalysisContext = {
   /** Service → the role-password variables its values may contain. */
   binding: Record<string, readonly string[]>;
   smoke: SmokeMap;
+  /** The `--project-directory` the render ran in: where `.` in a compose file resolves. */
+  projectRoot: string;
 };
 
 function envOf(service: ComposeService): Record<string, string | null | undefined> {
@@ -220,6 +250,57 @@ export function publisherEnvProblems(env: Record<string, string | null | undefin
   return [];
 }
 
+/** Volume types that mount no host path (a `volume` is judged by its backing device). */
+const HOSTLESS_VOLUME_TYPES = ["tmpfs", "image"];
+
+/**
+ * How `.env` could reach `service` as a file (bind mounts, named volumes backed
+ * by a bind, referenced secrets/configs with a file source). A shape not
+ * modelled is reported, not skipped.
+ */
+function fileChannelProblems(service: ComposeService, render: ComposeRender, projectRoot: string): string[] {
+  const problems: string[] = [];
+  const channel = (source: string, via: string) => {
+    const kind = envFileSourceKind(source, projectRoot);
+    if (kind !== null) problems.push(`holds .env by file mount: ${via} is ${kind}`);
+  };
+
+  const volumes = service.volumes;
+  if (volumes !== undefined && !Array.isArray(volumes)) problems.push("has an unmodelled volumes value");
+  for (const v of Array.isArray(volumes) ? volumes : []) {
+    const entry = v as { type?: unknown; source?: unknown } | null;
+    if (typeof entry !== "object" || entry === null || typeof entry.type !== "string") {
+      problems.push("has an unmodelled volume entry");
+    } else if (entry.type === "bind") {
+      if (typeof entry.source !== "string" || entry.source === "") problems.push("has a bind volume without a source");
+      else channel(entry.source, "a bind source");
+    } else if (entry.type === "volume") {
+      const device = typeof entry.source === "string" ? render.volumes?.[entry.source]?.driver_opts : undefined;
+      const path = (device as { device?: unknown } | undefined)?.device;
+      if (typeof path === "string") channel(path, `the device of named volume ${String(entry.source)}`);
+    } else if (!HOSTLESS_VOLUME_TYPES.includes(entry.type)) {
+      problems.push(`has a volume of unmodelled type ${entry.type}`);
+    }
+  }
+
+  for (const kind of ["secrets", "configs"] as const) {
+    const refs = service[kind];
+    if (refs !== undefined && !Array.isArray(refs)) problems.push(`has an unmodelled ${kind} value`);
+    for (const ref of Array.isArray(refs) ? refs : []) {
+      const name = typeof ref === "string" ? ref : (ref as { source?: unknown } | null)?.source;
+      const entry = typeof name === "string" ? render[kind]?.[name] : undefined;
+      if (typeof name !== "string" || !entry) {
+        problems.push(`references a ${kind} entry the render does not define`);
+      } else if (typeof entry.file === "string") {
+        channel(entry.file, `the file of ${kind} entry ${name}`);
+      } else if ("environment" in entry) {
+        problems.push(`holds .env by file mount: ${kind} entry ${name} is filled from an environment variable`);
+      }
+    }
+  }
+  return problems;
+}
+
 /** Every way one rendered set falls short of the contract (C1 I1.2-I1.4 as rendered, C7). */
 export function analyzeRender(setName: string, render: ComposeRender, ctx: AnalysisContext): string[] {
   const drift: string[] = [];
@@ -252,6 +333,10 @@ export function analyzeRender(setName: string, render: ComposeRender, ctx: Analy
       }
     }
     if ((name === PUBLISHER || name === VERIFY_WORKER) && loadsEnv) at(name, "loads .env");
+
+    if (setName !== FILE_CHANNEL_EXEMPT_SET) {
+      for (const problem of fileChannelProblems(service, render, ctx.projectRoot)) at(name, problem);
+    }
 
     const text = JSON.stringify(service);
     for (const key of ctx.withheld) {
@@ -358,8 +443,22 @@ function dockerComposeVersion(docker: string, env: Record<string, string>): stri
   return r.stdout.trim();
 }
 
-function loadRender(result: ComposeResult): ComposeRender {
-  return JSON.parse(result.stdout) as ComposeRender;
+/**
+ * The render compose printed. The stdout is never quoted: it is the whole
+ * config, secrets included, so a parse failure names only its size.
+ */
+export function parseRender(stdout: string): ComposeRender {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    throw new Error(`compose config printed output that is not valid JSON (${stdout.length} bytes, not shown)`);
+  }
+  const services = (parsed as { services?: unknown } | null)?.services;
+  if (typeof services !== "object" || services === null || Array.isArray(services)) {
+    throw new Error("compose config printed JSON with no services mapping (output not shown)");
+  }
+  return parsed as ComposeRender;
 }
 
 export type RunOptions = { root: string; docker: string; sourceEnv: EnvMap; recordTo?: string };
@@ -396,10 +495,10 @@ export function runChecks(opts: RunOptions, log: (line: string) => void): string
     ...Object.values(smoke.tasks).map((t) => binding[workerServiceName(t)][0]),
   ];
   const sentinels = buildSentinels([...withheld, ...required, ...mustRequire, SHARED_PUBLISHER_NAME]);
-  const ctx: AnalysisContext = { withheld, publisherOnly, sentinels, binding, smoke };
   const env = scrubbedEnv(opts.sourceEnv);
 
   const stub = mkdtempSync(join(tmpdir(), "compose-render-"));
+  const ctx: AnalysisContext = { withheld, publisherOnly, sentinels, binding, smoke, projectRoot: stub };
   try {
     writeFileSync(join(stub, ".env"), stubEnvText(sentinels), { mode: 0o600 });
 
@@ -410,7 +509,13 @@ export function runChecks(opts: RunOptions, log: (line: string) => void): string
         failures.push(`[${set.name}] compose config failed: ${redact(result.stderr.trim() || String(result.error), sentinels)}`);
         continue;
       }
-      const render = loadRender(result);
+      let render: ComposeRender;
+      try {
+        render = parseRender(result.stdout);
+      } catch (e) {
+        failures.push(`[${set.name}] ${(e as Error).message}`);
+        continue;
+      }
       renders.set(set.name, render);
       const drift = analyzeRender(set.name, render, ctx);
       failures.push(...drift);
@@ -436,9 +541,13 @@ export function runChecks(opts: RunOptions, log: (line: string) => void): string
     if (overridden.status !== 0) {
       failures.push(`[${WORKERS_SET.name}] compose config failed under a DEPLOYMENT_ID override: ${redact(overridden.stderr.trim(), sentinels)}`);
     } else {
-      const drift = deploymentIdDrift(`${WORKERS_SET.name} + shell DEPLOYMENT_ID`, loadRender(overridden), shellId);
-      failures.push(...drift);
-      log(`  DEPLOYMENT_ID under a shell override: ${drift.length === 0 ? "equal in publisher and retention-gc" : "split"}`);
+      try {
+        const drift = deploymentIdDrift(`${WORKERS_SET.name} + shell DEPLOYMENT_ID`, parseRender(overridden.stdout), shellId);
+        failures.push(...drift);
+        log(`  DEPLOYMENT_ID under a shell override: ${drift.length === 0 ? "equal in publisher and retention-gc" : "split"}`);
+      } catch (e) {
+        failures.push(`[${WORKERS_SET.name}] under a DEPLOYMENT_ID override: ${(e as Error).message}`);
+      }
     }
 
     // Each required variable, removed, must fail the render and be named.

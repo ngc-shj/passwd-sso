@@ -15,6 +15,7 @@ import {
   appDatabaseUrlFromCompose,
   deriveWithheldEnv,
   derivePublisherOnlyEnv,
+  envFileSourceKind,
   ownDatabaseUrlKey,
   ownRoleUser,
   readSmokeMap,
@@ -125,6 +126,32 @@ describe("the GitHub token names", () => {
       "AUDIT_ANCHOR_DESTINATION_GH_TOKEN",
       "GITHUB_TOKEN",
     ]);
+  });
+});
+
+describe("envFileSourceKind", () => {
+  const root = "/srv/app";
+
+  it("names the project directory, its ancestors and .env* files", () => {
+    expect(envFileSourceKind("/srv/app", root)).toBe("the project directory");
+    expect(envFileSourceKind("/srv/app/", root)).toBe("the project directory");
+    expect(envFileSourceKind("/srv/app/./", root)).toBe("the project directory");
+    expect(envFileSourceKind("/srv", root)).toBe("an ancestor of the project directory");
+    expect(envFileSourceKind("/", root)).toBe("an ancestor of the project directory");
+    expect(envFileSourceKind("/srv/app/.env", root)).toBe("a .env file");
+    expect(envFileSourceKind("/elsewhere/.env.local", root)).toBe("a .env file");
+  });
+
+  it("allows paths beside and below the project directory", () => {
+    expect(envFileSourceKind("/srv/app/infra/postgres/initdb", root)).toBeNull();
+    expect(envFileSourceKind("/srv/app/infra/fluent-bit/fluent-bit.conf", root)).toBeNull();
+    expect(envFileSourceKind("/srv/app-data", root)).toBeNull();
+    expect(envFileSourceKind("/srv/environment", root)).toBeNull();
+  });
+
+  it("compares paths in whatever one form they are written in", () => {
+    expect(envFileSourceKind("<stub>", "<stub>")).toBe("the project directory");
+    expect(envFileSourceKind("<stub>/infra/x", "<stub>")).toBeNull();
   });
 });
 

@@ -65,6 +65,11 @@ used), with the image built from this branch:
   `check-compose-render.ts` on the rendered config.
 - Step 5: `StopTimeout` 120; `up -d --force-recreate audit-anchor-publisher`
   recreated the single container (old stopped before the new one started).
+- Re-run after code-review round 1 added `read_only: true`, `cap_drop: [ALL]` and
+  `no-new-privileges` to both services: `docker inspect` showed
+  `ReadonlyRootfs=true`, `CapDrop=[ALL]`, `SecurityOpt=[no-new-privileges:true]`;
+  the publisher again logged `destinations ready` and `cadence_healthy`, and the
+  verify worker a heartbeat with 1 verified / 0 errored tenant.
 - Not run: step 4 as a real `up` (covered by the render check's `:?` cases),
   step 6 (no legacy volume), step 7 (no cluster — E1).
 

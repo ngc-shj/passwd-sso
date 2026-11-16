@@ -16,6 +16,17 @@ The unit deliberately omits `docker-compose.override.yml`. The override is a
 expose internal datastores. The base `docker-compose.yml` keeps those services
 on the internal Docker network only.
 
+The unit therefore runs none of the four workers (`audit-outbox-worker`,
+`retention-gc-worker`, `audit-anchor-publisher`, `audit-chain-verify-worker`),
+which the header of `docker-compose.workers.yml` calls required in production.
+To run them, add `-f docker-compose.workers.yml` after `-f docker-compose.yml`
+in each of the unit's `ExecStartPre`, `ExecStart` and `ExecStop` commands, and
+set the variables the overlay requires in `.env` (see the "Audit anchor
+publisher on Compose and Kubernetes" section of
+`docs/operations/deployment.md`). `TimeoutStopSec` must then be at least 120 s
+plus margin for `docker compose down`, because the publisher's
+`stop_grace_period` is 120 s; the unit's 90 s would kill it mid-run.
+
 ## Prerequisites
 
 - Docker Engine with the Compose v2 plugin (`docker compose`, not

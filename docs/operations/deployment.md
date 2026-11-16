@@ -805,11 +805,13 @@ Upgrade in this order:
 4. Generate the keys and set them: `npm run generate:audit-anchor-signing-key`,
    `npm run generate:audit-anchor-tag-secret`, then `AUDIT_ANCHOR_SIGNING_KEY`
    and `AUDIT_ANCHOR_TAG_SECRET` in `.env`.
-5. Archive the signing key's public key at every destination before the first
+5. Configure at least one destination (below). With none, the publisher exits at
+   boot and compose restarts it in a loop.
+6. Archive the signing key's public key at every destination before the first
    publish (`docs/operations/audit-anchor-rotation-runbook.md` Step 4;
    `npm run audit-anchor-kid -- --key-file <path>` shows the `kid` and whether
    it is archived).
-6. `docker compose -f docker-compose.yml -f docker-compose.workers.yml up -d`
+7. `docker compose -f docker-compose.yml -f docker-compose.workers.yml up -d`
 
 Destination keys, in `.env`; set the destinations in use and leave the rest empty:
 
@@ -818,14 +820,19 @@ Destination keys, in `.env`; set the destinations in use and leave the rest empt
   publisher refuses to boot with a bucket and no region). Credentials are
   `AUDIT_ANCHOR_AWS_ACCESS_KEY_ID` / `AUDIT_ANCHOR_AWS_SECRET_ACCESS_KEY`, or
   none, in which case the SDK's default chain on the host (an instance role)
-  applies. Scope either to the publisher policy in `infra/terraform/iam.tf`
+  applies. Prefer explicit `AUDIT_ANCHOR_AWS_*` credentials. The instance role
+  is reachable through IMDS by every container on the host when the metadata
+  hop limit is 2 or more, and unreachable from containers at hop limit 1; use
+  it only on a host that runs nothing else that should not hold those rights.
+  Scope either to the publisher policy in `infra/terraform/iam.tf`
   (`s3:PutObject` and `s3:PutObjectRetention` and `s3:GetObject` on
   `<bucket>/<prefix>/*`, `s3:ListBucket` on the bucket for that prefix, no
   delete).
 - **GitHub Releases**: `AUDIT_ANCHOR_DESTINATION_GH_REPO` and
   `AUDIT_ANCHOR_DESTINATION_GH_TOKEN`.
 - **Filesystem**: `AUDIT_ANCHOR_DESTINATION_FS_PATH`, an absolute path, backed by
-  a named volume you add to the publisher service. Discouraged on the database
+  a named volume you add to the publisher service. The volume must be writable
+  by uid 1001, the image's user. Discouraged on the database
   host: an anchor on the disk an attacker can rewrite witnesses nothing.
 
 **Withheld keys.** `.env` is loaded by several containers, so each one that loads
@@ -833,9 +840,13 @@ it lists the withheld set with an empty value (`environment:` wins over
 `env_file:`): the role passwords, the other principals' database URLs, the
 publisher-only secrets and the remaining secret keys of the env allowlist. The
 signing key, tag secret and `AUDIT_ANCHOR_AWS_*` reach the publisher alone, by
-interpolation. A withheld key reaches only its declared holders; app secrets the
-workers already shared (`AUTH_SECRET`, `REDIS_PASSWORD`, `SHARE_MASTER_KEY_*`)
-are not in the set and still reach every container that loads `.env`. In the dev
+interpolation. The parity test and the compose render check verify that a withheld key
+reaches only its declared holders through env, command and file mounts (a
+`.env` or project-root bind mount, a `secrets:` or `configs:` file source).
+Every other secret in `.env` (for example `AUTH_SECRET`, `REDIS_PASSWORD`,
+`SHARE_MASTER_KEY_*`) is not in the set and still reaches every container that
+loads `.env`; jackson also receives `AUTH_SECRET`, by interpolation, as
+`NEXTAUTH_SECRET`. In the dev
 override the `.:/app` bind mount keeps `.env` readable, so there it is env-shape
 parity, not isolation. **`docker compose config` prints the interpolated
 secrets**, the signing key included: do not paste its output or run it where the
@@ -862,8 +873,8 @@ is substituted as for the other manifests):
 | Object | Keys | Holds |
 |---|---|---|
 | Secret `audit-anchor-publisher` | `database-url`, `signing-key`, `tag-secret` | `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL`, `AUDIT_ANCHOR_SIGNING_KEY`, `AUDIT_ANCHOR_TAG_SECRET` |
-| Secret `passwd-sso-deployment` | `deployment-id` | `DEPLOYMENT_ID`, shared with the app and `retention-gc-worker` |
-| ConfigMap `audit-anchor-publisher` | `s3-bucket`, `s3-prefix`, `aws-region` | the S3 destination |
+| Secret `passwd-sso-deployment` | `deployment-id` | `DEPLOYMENT_ID`; the same value the app and, when its blob sweep is enabled, `retention-gc-worker` must also be given (the shipped retention-gc manifest does not reference it) |
+| ConfigMap `audit-anchor-publisher` | `s3-bucket`, `s3-prefix`, `aws-region` | the S3 destination (optional references) |
 | Secret `audit-chain-verify-worker-db` | `database-url` | `AUDIT_CHAIN_VERIFY_DATABASE_URL` |
 
 The publisher's ServiceAccount carries the IRSA annotation
@@ -873,12 +884,19 @@ and `aud` = `sts.amazonaws.com` against the cluster's OIDC provider, and its
 permissions mirror the publisher policy in `infra/terraform/iam.tf` (as in the
 Compose list above). On EKS Pod Identity, create an association for that
 ServiceAccount instead of the annotation. Other destinations, or credentials
-outside EKS, go in an operator Kustomize patch on the Deployment's `env`.
+outside EKS, go in an operator Kustomize patch on the Deployment's `env`. The
+ConfigMap references are `optional`, so a GitHub-only deployment needs no
+ConfigMap, but it needs its own Kustomize patch for the
+`AUDIT_ANCHOR_DESTINATION_GH_*` variables. As on Compose, at least one
+destination must be configured or the publisher exits at boot.
 
 The signing key is protected on Kubernetes by namespace RBAC: whoever can read
 Secrets in the namespace can read it. Keep the publisher's Secret out of any
-workload that does not need it and restrict `get` on Secrets accordingly; the
-manifests do not enforce this.
+workload that does not need it. `get`, `list` and `watch` on Secrets all yield
+it, and so does anything that runs code with the Secret mounted: `create` on
+pods, deployments or jobs in the namespace, and `pods/exec` on the publisher
+pod. Run the publisher in a dedicated namespace and restrict those verbs
+there; the manifests do not enforce this.
 
 The publisher runs one replica with `strategy: Recreate`, so a rollout stops the
 old pod (up to the 120 s grace) before the new one starts. Stop it with

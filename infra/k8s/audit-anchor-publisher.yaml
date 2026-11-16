@@ -87,27 +87,37 @@ spec:
                 secretKeyRef:
                   name: audit-anchor-publisher
                   key: tag-secret
-            # Shared with the app and retention-gc: a Secret that holds no key.
+            # The value the app must be given too (and retention-gc, when its blob
+            # sweep is enabled): a Secret that holds no key. This manifest set
+            # ships no app Deployment, and the shipped retention-gc manifest does
+            # not reference it; the operator wires those to the same Secret.
             - name: DEPLOYMENT_ID
               valueFrom:
                 secretKeyRef:
                   name: passwd-sso-deployment
                   key: deployment-id
+            # The three ConfigMap references are optional so a non-S3 destination
+            # (patched in, see above) does not need an S3 ConfigMap. A missing
+            # destination still fails at boot: the publisher refuses to start with
+            # none configured, and so does the --validate-env-only startup probe.
             - name: AUDIT_ANCHOR_DESTINATION_S3_BUCKET
               valueFrom:
                 configMapKeyRef:
                   name: audit-anchor-publisher
                   key: s3-bucket
+                  optional: true
             - name: AUDIT_ANCHOR_DESTINATION_S3_PREFIX
               valueFrom:
                 configMapKeyRef:
                   name: audit-anchor-publisher
                   key: s3-prefix
+                  optional: true
             - name: AWS_REGION
               valueFrom:
                 configMapKeyRef:
                   name: audit-anchor-publisher
                   key: aws-region
+                  optional: true
           resources:
             requests:
               cpu: 50m

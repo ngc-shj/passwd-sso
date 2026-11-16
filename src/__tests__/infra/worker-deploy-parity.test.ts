@@ -8,6 +8,10 @@
  *         env set W comes from scripts/checks/lib/withheld-env.ts, not from a list here);
  *   I2.x  k8s: command, probes, env names, hardening, rollout shape.
  *
+ * No service outside the dev override gets `.env` as a file either (a bind mount
+ * of the project directory, an ancestor or a `.env*` file; a `secrets:`/`configs:`
+ * entry with such a `file:`); a volume shape it does not model is reported.
+ *
  * Every check is a pure function over parsed YAML plus a context read from
  * ecs.tf, so each invariant has a single-step red case on a cloned model and the
  * exact drift list is compared whole. A form the model does not cover (a string
@@ -18,14 +22,16 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join, posix, relative, resolve } from "node:path";
-import { CORE_SCHEMA, load, loadAll, mergeTag } from "js-yaml";
+import { CORE_SCHEMA, load, loadAll } from "js-yaml";
 import { ALLOWLIST } from "../../../scripts/env-allowlist";
-import { findComposeFiles } from "../../../scripts/checks/check-compose-log-caps.mjs";
+import { createComposeYamlLoader, findComposeFiles } from "../../../scripts/checks/check-compose-log-caps.mjs";
+import { DOCKER_HARDENING_ARGS } from "../../../scripts/checks/lib/worker-bundle-smoke.mjs";
 import { ROLES } from "../../../scripts/bootstrap-rds-roles.mjs";
 import { TerraformConfig, TERRAFORM_DIR, type HclExpr } from "../../../scripts/checks/lib/hcl-subset";
 import {
   SHARED_PUBLISHER_NAME,
   deriveWithheldEnv,
+  envFileSourceKind,
   derivePublisherOnlyEnv,
   ecsContainerDefinitions,
   ecsSecretNames,
@@ -48,6 +54,8 @@ const REPO_ROOT = resolve(__dirname, "../../..");
 const WORKERS_FILE = "docker-compose.workers.yml";
 const K8S_DIR = "infra/k8s";
 const IMAGE_PLACEHOLDER = "REPLACE_WITH_IMMUTABLE_IMAGE_REF";
+/** The one compose file whose `.:/app` mounts are the dev shape, not a file channel (C1). */
+const DEV_OVERRIDE_FILE = "docker-compose.override.yml";
 
 /** Compose services that carry the signing material or read the chain, and so load no `.env` (C1). */
 const ISOLATED_SERVICES = ["audit-anchor-publisher", "audit-chain-verify-worker"];
@@ -79,6 +87,9 @@ type Fragment = {
   env: Record<string, EnvState>;
   command: string[] | undefined;
   stopGraceSeconds: number | undefined;
+  readOnly: unknown;
+  capDrop: unknown;
+  securityOpt: unknown;
 };
 type ComposeModel = Record<string, unknown>; // file name → parsed document
 
@@ -175,6 +186,9 @@ function composeServices(model: ComposeModel): Map<string, Fragment[]> {
         env: normaliseEnvironment(where, spec.environment),
         command: normaliseCommand(where, spec),
         stopGraceSeconds: spec.stop_grace_period === undefined ? undefined : parseGoDuration(where, spec.stop_grace_period),
+        readOnly: spec.read_only,
+        capDrop: spec.cap_drop,
+        securityOpt: spec.security_opt,
       };
       services.set(name, [...(services.get(name) ?? []), fragment]);
     }
@@ -377,6 +391,12 @@ function composeDrift(model: ComposeModel, ctx: Ctx, workersText: string): strin
       }
     }
 
+    // The k8s pod's hardening (I2.5), as compose spells it.
+    const own = fragments.find((f) => f.file === WORKERS_FILE);
+    if (own?.readOnly !== true) drift.push(`${service}: read_only must be true`);
+    if (JSON.stringify(own?.capDrop) !== JSON.stringify(["ALL"])) drift.push(`${service}: cap_drop must be ["ALL"]`);
+    if (JSON.stringify(own?.securityOpt) !== JSON.stringify(["no-new-privileges:true"])) drift.push(`${service}: security_opt must be ["no-new-privileges:true"]`);
+
     const floor = ctx.stopTimeout[t.label];
     if (floor !== undefined) {
       const grace = fragments.find((f) => f.file === WORKERS_FILE)?.stopGraceSeconds;
@@ -467,7 +487,76 @@ function composeDrift(model: ComposeModel, ctx: Ctx, workersText: string): strin
       }
     }
   }
+  drift.push(...fileChannelDrift(model));
   return sortStrings(new Set(drift));
+}
+
+// ─── Compose file channels ──────────────────────────────────
+
+/** A volume source with no path separator and no leading `.`/`~`: compose reads it as a named volume. */
+const isNamedVolume = (source: string): boolean => /^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(source);
+
+/**
+ * Every way `.env` could reach a service as a file, in every compose file but
+ * the dev override: a bind source that is the project directory, an ancestor of
+ * it or a `.env*` file; a named volume backed by such a bind; a referenced
+ * top-level `secrets:`/`configs:` entry with such a `file:`. A form the model
+ * does not cover (a variable in a source, a `~` source, a volume or secret
+ * shape it does not know) is reported rather than skipped.
+ */
+function fileChannelDrift(model: ComposeModel): string[] {
+  const drift: string[] = [];
+  const docs = sortStrings(Object.keys(model)).map((file) => ({ file, doc: model[file] as Record<string, unknown> }));
+  const topLevel = (kind: "volumes" | "secrets" | "configs"): Record<string, unknown> =>
+    Object.assign({}, ...docs.map(({ doc }) => (isRecord(doc[kind]) ? doc[kind] : {})));
+  const named = topLevel("volumes");
+
+  for (const { file, doc } of docs) {
+    if (file === DEV_OVERRIDE_FILE || !isRecord(doc.services)) continue;
+    for (const [service, spec] of Object.entries(doc.services)) {
+      if (!isRecord(spec)) continue;
+      const at = (message: string) => drift.push(`${service}: ${file} ${message}`);
+      /** A path source, as the service's file would resolve it. */
+      const path = (source: string, via: string) => {
+        if (source.includes("$") || source.startsWith("~")) return at(`${via} "${source}" is not modelled (variable or home path)`);
+        const kind = envFileSourceKind(resolve(REPO_ROOT, source), REPO_ROOT);
+        if (kind !== null) at(`holds .env by file mount: ${via} "${source}" is ${kind}`);
+      };
+      const volume = (name: string) => {
+        const opts = isRecord(named[name]) && isRecord(named[name].driver_opts) ? named[name].driver_opts : undefined;
+        if (typeof opts?.device === "string") path(opts.device, `the device of named volume ${name}`);
+      };
+
+      if (spec.volumes !== undefined && !Array.isArray(spec.volumes)) at("has an unmodelled volumes value");
+      for (const v of Array.isArray(spec.volumes) ? spec.volumes : []) {
+        if (typeof v === "string") {
+          const source = v.split(":")[0];
+          if (!v.includes(":")) continue; // an anonymous volume: a target only
+          if (isNamedVolume(source)) volume(source);
+          else path(source, "a bind source");
+        } else if (isRecord(v) && typeof v.type === "string") {
+          if (v.type === "bind") {
+            if (typeof v.source === "string" && v.source !== "") path(v.source, "a bind source");
+            else at("has a bind volume without a source");
+          } else if (v.type === "volume") {
+            if (typeof v.source === "string") volume(v.source);
+          } else if (v.type !== "tmpfs" && v.type !== "image") at(`has a volume of unmodelled type ${v.type}`);
+        } else at("has an unmodelled volume entry");
+      }
+
+      for (const kind of ["secrets", "configs"] as const) {
+        if (spec[kind] !== undefined && !Array.isArray(spec[kind])) at(`has an unmodelled ${kind} value`);
+        for (const ref of Array.isArray(spec[kind]) ? (spec[kind] as unknown[]) : []) {
+          const name = typeof ref === "string" ? ref : isRecord(ref) ? ref.source : undefined;
+          const entry = typeof name === "string" ? topLevel(kind)[name] : undefined;
+          if (typeof name !== "string" || !isRecord(entry)) at(`references a ${kind} entry no compose file defines`);
+          else if (typeof entry.file === "string") path(entry.file, `the file of ${kind} entry ${name}`);
+          else if ("environment" in entry) at(`holds .env by file mount: ${kind} entry ${name} is filled from an environment variable`);
+        }
+      }
+    }
+  }
+  return drift;
 }
 
 // ─── k8s normalisation ──────────────────────────────────────
@@ -490,6 +579,8 @@ type Deployment = {
   serviceAccountName: unknown;
   podAutomount: unknown;
   podRunAsNonRoot: unknown;
+  podRunAsUser: unknown;
+  podRunAsGroup: unknown;
   container: { allowPrivilegeEscalation: unknown; readOnlyRootFilesystem: unknown; capsDrop: unknown };
   selector: Record<string, string>;
   labels: Record<string, string>;
@@ -587,6 +678,8 @@ function normaliseDeployment(file: string, doc: Record<string, unknown>): Deploy
     serviceAccountName: pod.serviceAccountName,
     podAutomount: pod.automountServiceAccountToken,
     podRunAsNonRoot: podSec.runAsNonRoot,
+    podRunAsUser: podSec.runAsUser,
+    podRunAsGroup: podSec.runAsGroup,
     container: { allowPrivilegeEscalation: sec.allowPrivilegeEscalation, readOnlyRootFilesystem: sec.readOnlyRootFilesystem, capsDrop: caps.drop },
     selector: stringMap(where, selector.matchLabels ?? {}),
     labels: stringMap(where, isRecord(meta) ? meta.labels ?? {} : {}),
@@ -621,10 +714,19 @@ function k8sModel(input: K8sInput): K8sModel {
 
 // ─── k8s invariants ─────────────────────────────────────────
 
+/** The uid:gid of the docker smoke's `--user`, which the pod securityContext must equal. Unparseable throws. */
+function smokeUser(args: readonly string[] = DOCKER_HARDENING_ARGS): { uid: number; gid: number } {
+  const at = args.indexOf("--user");
+  const m = at === -1 ? null : /^(\d+):(\d+)$/.exec(args[at + 1] ?? "");
+  if (!m) throw new Error("DOCKER_HARDENING_ARGS has no parseable --user <uid>:<gid>");
+  return { uid: Number(m[1]), gid: Number(m[2]) };
+}
+
 function k8sDrift(input: K8sInput, ctx: Ctx): string[] {
   const drift: string[] = [];
   const model = k8sModel(input);
   for (const f of model.nonYaml) drift.push(`${f}: not a .yaml file`);
+  const user = smokeUser();
   const bundleToTask = new Map(Object.entries(ctx.smoke.tasks).map(([label, t]) => [t.bundle, { label, task: t }]));
 
   for (const [bundle, { task }] of bundleToTask) {
@@ -671,6 +773,9 @@ function k8sDrift(input: K8sInput, ctx: Ctx): string[] {
 
     // I2.5
     if (d.podRunAsNonRoot !== true) drift.push(`${d.name}: pod runAsNonRoot must be true`);
+    if (d.podRunAsUser !== user.uid || d.podRunAsGroup !== user.gid) {
+      drift.push(`${d.name}: pod runAsUser:runAsGroup must be ${user.uid}:${user.gid}, the docker smoke's --user`);
+    }
     if (d.container.readOnlyRootFilesystem !== true) drift.push(`${d.name}: readOnlyRootFilesystem must be true`);
     if (d.container.allowPrivilegeEscalation !== false) drift.push(`${d.name}: allowPrivilegeEscalation must be false`);
     if (JSON.stringify(d.container.capsDrop) !== JSON.stringify(["ALL"])) drift.push(`${d.name}: capabilities.drop must be ["ALL"]`);
@@ -702,10 +807,7 @@ function k8sDrift(input: K8sInput, ctx: Ctx): string[] {
 
 // ─── Loading the real tree ──────────────────────────────────
 
-const loadCompose = (() => {
-  const schema = CORE_SCHEMA.withTags(mergeTag);
-  return (text: string): unknown => load(text, { schema });
-})();
+const loadCompose = (await createComposeYamlLoader()) as (text: string) => unknown;
 const loadK8sDocs = (text: string): unknown[] => loadAll(text, { schema: CORE_SCHEMA }) as unknown[];
 
 function realComposeModel(): { model: ComposeModel; workersText: string } {
@@ -775,7 +877,7 @@ type DeploymentDoc = {
         terminationGracePeriodSeconds?: number;
         serviceAccountName?: string;
         automountServiceAccountToken?: boolean;
-        securityContext: { runAsNonRoot: boolean };
+        securityContext: { runAsNonRoot: boolean; runAsUser?: number; runAsGroup?: number };
         containers: ContainerDoc[];
         volumes?: unknown[];
       };
@@ -841,11 +943,12 @@ describe("compose: I1.2 secrets use only ${NAME:?message}", () => {
     const i = list.findIndex((e) => e.startsWith(from));
     list[i] = list[i].replace(":?", to);
   };
-  for (const [label, key, operator] of [
-    ["signing key with :-", "AUDIT_ANCHOR_SIGNING_KEY=", ":-"],
-    ["tag secret with ?", "AUDIT_ANCHOR_TAG_SECRET=", "?"],
-    ["DEPLOYMENT_ID with :-", "DEPLOYMENT_ID=", ":-"],
-    ["role URL password with :-", "AUDIT_ANCHOR_PUBLISHER_DATABASE_URL=", ":-"],
+  // The last column is the text-level hit of the forbidden optional-interpolation pattern, if the name is one it covers.
+  for (const [label, key, operator, textHit] of [
+    ["signing key with :-", "AUDIT_ANCHOR_SIGNING_KEY=", ":-", "SIGNING_KEY:-A"],
+    ["tag secret with ?", "AUDIT_ANCHOR_TAG_SECRET=", "?", "TAG_SECRET?A"],
+    ["DEPLOYMENT_ID with :-", "DEPLOYMENT_ID=", ":-", null],
+    ["role URL password with :-", "AUDIT_ANCHOR_PUBLISHER_DATABASE_URL=", ":-", "_PASSWORD:-P"],
   ] as const) {
     it(`flags the ${label}`, () => {
       const name = key.slice(0, -1);
@@ -853,8 +956,13 @@ describe("compose: I1.2 secrets use only ${NAME:?message}", () => {
       const m = mutated(compose.model, swap(key, operator));
       const text = compose.workersText.replace(`\${${variable}:?`, `\${${variable}${operator}`);
       expect(text).not.toBe(compose.workersText);
-      const drift = composeDrift(m, ctx, text);
-      expect(drift).toContain(`${PUBLISHER}: ${name} must use \${${variable}:?message}`);
+      expect(composeDrift(m, ctx, text)).toEqual(
+        sortStrings([
+          `${PUBLISHER}: ${name} must use \${${variable}:?message}`,
+          `${PUBLISHER}: ${name} references ${variable} without :?`,
+          ...(textHit === null ? [] : [`${WORKERS_FILE}: optional interpolation of a secret near "${textHit}"`]),
+        ]),
+      );
     });
   }
 
@@ -904,7 +1012,7 @@ describe("compose: I1.3 env names", () => {
     expect(composeDrift(m, ctx, compose.workersText)).toEqual([`${PUBLISHER}: env GITHUB_TOKEN is not in the ECS set or the declared pass-throughs`]);
   });
 
-  it("flags a missing ECS name and an extra name on the verify worker", () => {
+  it("flags a missing ECS name on the publisher", () => {
     const missing = mutated(compose.model, (c) => {
       const list = asList(svc(c, WORKERS_FILE, PUBLISHER));
       list.splice(list.findIndex((e) => e.startsWith("AUDIT_ANCHOR_TAG_SECRET=")), 1);
@@ -913,6 +1021,9 @@ describe("compose: I1.3 env names", () => {
       `${PUBLISHER}: AUDIT_ANCHOR_TAG_SECRET must use \${AUDIT_ANCHOR_TAG_SECRET:?message}`,
       `${PUBLISHER}: env AUDIT_ANCHOR_TAG_SECRET missing`,
     ]);
+  });
+
+  it("flags an extra name on the verify worker", () => {
     const extra = mutated(compose.model, (c) => {
       asList(svc(c, WORKERS_FILE, VERIFY)).push("EXTRA=1");
     });
@@ -1048,6 +1159,148 @@ describe("compose: I1.4 services loading .env blank the withheld set", () => {
   });
 });
 
+describe("compose: the isolated services keep the k8s hardening", () => {
+  const keys: Array<[string, (s: ServiceSpec) => void, string]> = [
+    ["read_only", (s) => (s.read_only = false), "read_only must be true"],
+    ["cap_drop", (s) => (s.cap_drop = ["NET_RAW"]), 'cap_drop must be ["ALL"]'],
+    ["security_opt", (s) => delete s.security_opt, 'security_opt must be ["no-new-privileges:true"]'],
+  ];
+  for (const service of ISOLATED_SERVICES) {
+    for (const [key, edit, message] of keys) {
+      it(`flags ${key} changed on ${service}`, () => {
+        const m = mutated(compose.model, (c) => edit(svc(c, WORKERS_FILE, service)));
+        expect(composeDrift(m, ctx, compose.workersText)).toEqual([`${service}: ${message}`]);
+      });
+    }
+  }
+
+  it("allows the shipped hardening on both", () => {
+    for (const service of ISOLATED_SERVICES) {
+      const spec = svc(compose.model, WORKERS_FILE, service);
+      expect([spec.read_only, spec.cap_drop, spec.security_opt]).toEqual([true, ["ALL"], ["no-new-privileges:true"]]);
+    }
+    expect(composeDrift(compose.model, ctx, compose.workersText)).toEqual([]);
+  });
+});
+
+describe("compose: .env as a file reaches no service outside the dev override", () => {
+  const MOUNT = "holds .env by file mount";
+  const topLevel = (c: ComposeModel, file: string) => c[file] as Record<string, unknown>;
+
+  it("flags a bind mount of the project directory, an ancestor and a .env file on app, in short and long syntax", () => {
+    const cases: Array<[unknown, string]> = [
+      [".:/x", `a bind source "." is the project directory`],
+      ["./:/x:ro", `a bind source "./" is the project directory`],
+      ["..:/x", `a bind source ".." is an ancestor of the project directory`],
+      ["./.env:/x", `a bind source "./.env" is a .env file`],
+      ["./infra/.env.production:/x", `a bind source "./infra/.env.production" is a .env file`],
+      [{ type: "bind", source: ".", target: "/x" }, `a bind source "." is the project directory`],
+    ];
+    for (const [volume, kind] of cases) {
+      const m = mutated(compose.model, (c) => {
+        svc(c, "docker-compose.yml", "app").volumes = [volume];
+      });
+      expect(composeDrift(m, ctx, compose.workersText), JSON.stringify(volume)).toEqual([`app: docker-compose.yml ${MOUNT}: ${kind}`]);
+    }
+  });
+
+  it("allows the mounts the stack ships: the db initdb directory and the fluent-bit config files", () => {
+    expect(svc(compose.model, "docker-compose.yml", "db").volumes).toContain("./infra/postgres/initdb:/docker-entrypoint-initdb.d:ro");
+    expect(svc(compose.model, "docker-compose.logging.yml", "fluent-bit").volumes).toEqual([
+      "./infra/fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro",
+      "./infra/fluent-bit/parsers.conf:/fluent-bit/etc/parsers.conf:ro",
+    ]);
+    expect(composeDrift(compose.model, ctx, compose.workersText)).toEqual([]);
+  });
+
+  it("allows the dev override's project mount, and flags the same mount anywhere else", () => {
+    expect(svc(compose.model, DEV_OVERRIDE_FILE, "audit-outbox-worker").volumes).toEqual([".:/app", "/app/node_modules"]);
+    const prod = mutated(compose.model, (c) => {
+      svc(c, WORKERS_FILE, "audit-outbox-worker").volumes = [".:/app"];
+    });
+    expect(composeDrift(prod, ctx, compose.workersText)).toEqual([`audit-outbox-worker: ${WORKERS_FILE} ${MOUNT}: a bind source "." is the project directory`]);
+  });
+
+  it("flags a top-level secrets entry whose file is .env, referenced by the outbox worker, in short and long syntax", () => {
+    for (const ref of ["signing", { source: "signing", target: "signing" }]) {
+      const m = mutated(compose.model, (c) => {
+        topLevel(c, WORKERS_FILE).secrets = { signing: { file: "./.env" } };
+        svc(c, WORKERS_FILE, "audit-outbox-worker").secrets = [ref];
+      });
+      expect(composeDrift(m, ctx, compose.workersText), JSON.stringify(ref)).toEqual([
+        `audit-outbox-worker: ${WORKERS_FILE} ${MOUNT}: the file of secrets entry signing "./.env" is a .env file`,
+      ]);
+    }
+  });
+
+  it("allows a secrets entry whose file is elsewhere, and ignores an entry no service references", () => {
+    const elsewhere = mutated(compose.model, (c) => {
+      topLevel(c, WORKERS_FILE).secrets = { token: { file: "./secrets/token" } };
+      svc(c, WORKERS_FILE, "audit-outbox-worker").secrets = ["token"];
+    });
+    expect(composeDrift(elsewhere, ctx, compose.workersText)).toEqual([]);
+    const unreferenced = mutated(compose.model, (c) => {
+      topLevel(c, WORKERS_FILE).secrets = { signing: { file: "./.env" } };
+    });
+    expect(composeDrift(unreferenced, ctx, compose.workersText)).toEqual([]);
+  });
+
+  it("flags a top-level configs entry whose file is the project directory", () => {
+    const m = mutated(compose.model, (c) => {
+      topLevel(c, WORKERS_FILE).configs = { cfg: { file: "." } };
+      svc(c, WORKERS_FILE, "retention-gc-worker").configs = [{ source: "cfg" }];
+    });
+    expect(composeDrift(m, ctx, compose.workersText)).toEqual([
+      `retention-gc-worker: ${WORKERS_FILE} ${MOUNT}: the file of configs entry cfg "." is the project directory`,
+    ]);
+    const elsewhere = mutated(m, (c) => {
+      topLevel(c, WORKERS_FILE).configs = { cfg: { file: "./infra/fluent-bit/parsers.conf" } };
+    });
+    expect(composeDrift(elsewhere, ctx, compose.workersText)).toEqual([]);
+  });
+
+  it("flags a named volume backed by a bind of the project directory, and allows one backed elsewhere", () => {
+    const back = (device: string) =>
+      mutated(compose.model, (c) => {
+        topLevel(c, "docker-compose.yml").volumes = { ...(topLevel(c, "docker-compose.yml").volumes as object), redis_data: { driver_opts: { type: "none", o: "bind", device } } };
+      });
+    expect(composeDrift(back("."), ctx, compose.workersText)).toEqual([
+      `redis: docker-compose.yml ${MOUNT}: the device of named volume redis_data "." is the project directory`,
+    ]);
+    expect(composeDrift(back("./data/redis"), ctx, compose.workersText)).toEqual([]);
+  });
+
+  it("flags a volume or entry shape it does not model instead of skipping it", () => {
+    const flagged = (edit: (c: ComposeModel) => void) => composeDrift(mutated(compose.model, edit), ctx, compose.workersText);
+    expect(flagged((c) => (svc(c, "docker-compose.yml", "app").volumes = [42]))).toEqual(["app: docker-compose.yml has an unmodelled volume entry"]);
+    expect(flagged((c) => (svc(c, "docker-compose.yml", "app").volumes = "./x:/x"))).toEqual(["app: docker-compose.yml has an unmodelled volumes value"]);
+    expect(flagged((c) => (svc(c, "docker-compose.yml", "app").volumes = ["${DATA_DIR}:/x"]))).toEqual([
+      'app: docker-compose.yml a bind source "${DATA_DIR}" is not modelled (variable or home path)',
+    ]);
+    expect(flagged((c) => (svc(c, "docker-compose.yml", "app").volumes = ["~/x:/x"]))).toEqual([
+      'app: docker-compose.yml a bind source "~/x" is not modelled (variable or home path)',
+    ]);
+    expect(flagged((c) => (svc(c, "docker-compose.yml", "app").volumes = [{ type: "bind", target: "/x" }]))).toEqual(["app: docker-compose.yml has a bind volume without a source"]);
+    expect(flagged((c) => (svc(c, "docker-compose.yml", "app").volumes = [{ type: "npipe", source: "a", target: "b" }]))).toEqual([
+      "app: docker-compose.yml has a volume of unmodelled type npipe",
+    ]);
+    expect(flagged((c) => (svc(c, "docker-compose.yml", "app").secrets = ["nowhere"]))).toEqual(["app: docker-compose.yml references a secrets entry no compose file defines"]);
+    expect(
+      flagged((c) => {
+        topLevel(c, WORKERS_FILE).secrets = { fromEnv: { environment: "AUDIT_ANCHOR_SIGNING_KEY" } };
+        svc(c, WORKERS_FILE, "audit-outbox-worker").secrets = ["fromEnv"];
+      }),
+    ).toEqual([`audit-outbox-worker: ${WORKERS_FILE} ${MOUNT}: secrets entry fromEnv is filled from an environment variable`]);
+  });
+
+  it("allows an anonymous volume, a named volume, a tmpfs and an image mount", () => {
+    const m = mutated(compose.model, (c) => {
+      svc(c, "docker-compose.yml", "app").volumes = ["/cache", "redis_data:/data", { type: "tmpfs", target: "/tmp" }, { type: "image", source: "x", target: "/y" }];
+    });
+    expect(composeDrift(m, ctx, compose.workersText)).toEqual([]);
+  });
+});
+
 describe("compose: I1.5 stop_grace_period", () => {
   it("flags a grace below the ECS stopTimeout, allows the floor in any Go duration spelling", () => {
     const set = (v: string) =>
@@ -1100,7 +1353,7 @@ describe("compose: the member set", () => {
     const m = mutated(compose.model, (c) => {
       delete (c[WORKERS_FILE] as { services: Record<string, unknown> }).services["audit-outbox-worker"];
     });
-    expect(composeDrift(m, ctx, compose.workersText)).toContain(`audit-outbox-worker: expected exactly one definition in ${WORKERS_FILE}, found 0`);
+    expect(composeDrift(m, ctx, compose.workersText)).toEqual([`audit-outbox-worker: expected exactly one definition in ${WORKERS_FILE}, found 0`]);
   });
 
   it("flags a service running a bundle the smoke map does not have, and refuses a string command", () => {
@@ -1213,11 +1466,17 @@ describe("k8s: I2.3 the signing-key Secret is read by the publisher only", () =>
     const viaKey = mutated(k8s, (k) => {
       container(dep(k, VERIFY)).env.push({ name: "X", valueFrom: { secretKeyRef: { name: SECRET, key: "signing-key" } } });
     });
-    expect(k8sDrift(viaKey, ctx)).toContain(`${VERIFY}: references Secret ${SECRET}, which holds the signing key`);
+    expect(k8sDrift(viaKey, ctx)).toEqual([
+      `${VERIFY}: env X is not in the ECS set`,
+      `${VERIFY}: references Secret ${SECRET}, which holds the signing key`,
+    ]);
     const viaEnvFrom = mutated(k8s, (k) => {
       container(dep(k, "audit-outbox-worker")).envFrom = [{ secretRef: { name: SECRET } }];
     });
-    expect(k8sDrift(viaEnvFrom, ctx)).toContain(`audit-outbox-worker: references Secret ${SECRET}, which holds the signing key`);
+    expect(k8sDrift(viaEnvFrom, ctx)).toEqual([
+      "audit-outbox-worker: envFrom is not allowed",
+      `audit-outbox-worker: references Secret ${SECRET}, which holds the signing key`,
+    ]);
     const viaVolume = mutated(k8s, (k) => {
       dep(k, "retention-gc-worker").spec.template.spec.volumes = [{ name: "s", projected: { sources: [{ secret: { name: SECRET } }] } }];
     });
@@ -1289,6 +1548,28 @@ describe("k8s: I2.5 hardening", () => {
     });
   }
 
+  it("flags a pod uid:gid other than the docker smoke's --user, and allows the same pair", () => {
+    expect(smokeUser()).toEqual({ uid: 1001, gid: 1001 });
+    for (const d of [dep(k8s, VERIFY), dep(k8s, PUBLISHER)]) {
+      expect(d.spec.template.spec.securityContext).toMatchObject({ runAsUser: 1001, runAsGroup: 1001 });
+    }
+    const uid = mutated(k8s, (k) => {
+      (dep(k, VERIFY).spec.template.spec.securityContext as Record<string, unknown>).runAsUser = 2000;
+    });
+    expect(k8sDrift(uid, ctx)).toEqual([`${VERIFY}: pod runAsUser:runAsGroup must be 1001:1001, the docker smoke's --user`]);
+    const gid = mutated(k8s, (k) => {
+      (dep(k, VERIFY).spec.template.spec.securityContext as Record<string, unknown>).runAsGroup = 2000;
+    });
+    expect(k8sDrift(gid, ctx)).toEqual([`${VERIFY}: pod runAsUser:runAsGroup must be 1001:1001, the docker smoke's --user`]);
+  });
+
+  it("fails loudly when the smoke's --user cannot be read", () => {
+    for (const args of [["--read-only"], ["--user"], ["--user", "root"], ["--user", "1001"], ["--user", "a:b"]]) {
+      expect(() => smokeUser(args), args.join(" ")).toThrow("DOCKER_HARDENING_ARGS has no parseable --user <uid>:<gid>");
+    }
+    expect(smokeUser(["--user", "2000:3000"])).toEqual({ uid: 2000, gid: 3000 });
+  });
+
   it("flags a ServiceAccount that mounts its token", () => {
     const m = mutated(k8s, (k) => {
       (k.docs[K8S_PUBLISHER][0] as Record<string, unknown>).automountServiceAccountToken = true;
@@ -1327,7 +1608,10 @@ describe("k8s: the member set", () => {
     const other = mutated(k8s, (k) => {
       dep(k, "audit-outbox-worker").spec.template.spec.containers[0].command = ["node", "dist/other-worker.js"];
     });
-    expect(k8sDrift(other, ctx)).toContain("audit-outbox-worker: runs unmodelled command [\"node\",\"dist/other-worker.js\"]");
+    expect(k8sDrift(other, ctx)).toEqual([
+      "audit-outbox-worker: runs unmodelled command [\"node\",\"dist/other-worker.js\"]",
+      "dist/audit-outbox-worker.js: expected exactly one Deployment, found 0 (audit-outbox-worker)",
+    ]);
   });
 });
 

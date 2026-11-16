@@ -64,6 +64,13 @@ export type LiteralAllowlistEntry = {
    * the entry is optional from the operator's perspective.
    */
   requiredForConsumer?: boolean;
+  /**
+   * Set to false for a secret whose value is an externally issued credential
+   * (e.g. an AWS key pair): init:env then never offers to generate a random
+   * one, since a random value would shadow the documented fallback and fail
+   * every call. Default true (a secret entry is offered generation).
+   */
+  generate?: boolean;
 };
 
 export type RegexAllowlistEntry = {
@@ -275,8 +282,10 @@ export const ALLOWLIST: readonly AllowlistEntry[] = [
     description:
       "AWS access key id for the audit-anchor publisher's S3 destination.\n" +
       "Only docker-compose.workers.yml reads it (as AWS_ACCESS_KEY_ID of the\n" +
-      "publisher container). Leave unset to use the host's instance role.",
+      "publisher container). Preferred over the host's instance role: leave unset\n" +
+      "only if you accept that every container on the host can reach that role.",
     secret: true,
+    generate: false,
   },
   {
     type: "literal",
@@ -291,8 +300,10 @@ export const ALLOWLIST: readonly AllowlistEntry[] = [
     description:
       "AWS secret access key for the audit-anchor publisher's S3 destination.\n" +
       "Only docker-compose.workers.yml reads it (as AWS_SECRET_ACCESS_KEY of the\n" +
-      "publisher container). Leave unset to use the host's instance role.",
+      "publisher container). Preferred over the host's instance role: leave unset\n" +
+      "only if you accept that every container on the host can reach that role.",
     secret: true,
+    generate: false,
   },
   {
     type: "literal",

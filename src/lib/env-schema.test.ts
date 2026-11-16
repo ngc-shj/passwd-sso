@@ -1113,6 +1113,13 @@ describe("auditAnchorPublisherEnvSchema: compose-shaped env", () => {
     ]);
   });
 
+  it("reads a whitespace-only filesystem path as unset, and accepts an absolute one", () => {
+    const blank = auditAnchorPublisherEnvSchema.parse({ ...base, ...blankPassThrough, AUDIT_ANCHOR_DESTINATION_FS_PATH: "  " });
+    expect(blank.AUDIT_ANCHOR_DESTINATION_FS_PATH).toBeUndefined();
+    expect(() => buildDestinationsFromEnv({ ...blank, GITHUB_TOKEN: undefined })).toThrow(AnchorDestinationConfigError);
+    expect(destinationNames({ ...base, ...blankPassThrough, AUDIT_ANCHOR_DESTINATION_FS_PATH: "/var/anchors" })).toEqual(["filesystem"]);
+  });
+
   it("refuses an S3 bucket with a blank AWS_REGION", () => {
     expect(
       issues({ ...base, ...blankPassThrough, AUDIT_ANCHOR_DESTINATION_S3_BUCKET: "anchors" }),

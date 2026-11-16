@@ -650,8 +650,8 @@ export async function run(opts: RunOptions): Promise<number> {
         stdout.write(`  ${line}\n`);
       }
 
-      // Offer generate-random for secret entries.
-      if (entry.secret) {
+      // Offer generate-random for secret entries, except credentials issued elsewhere.
+      if (entry.secret && entry.generate !== false) {
         const generate = await prompter.askYesNo(
           `Generate a random value for ${entry.key}?`,
           true,

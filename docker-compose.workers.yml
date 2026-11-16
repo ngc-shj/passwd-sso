@@ -46,6 +46,12 @@
 # (AUTH_SECRET, REDIS_PASSWORD, SHARE_MASTER_KEY_*) are not in W and still reach
 # every service that loads .env.
 #
+# The same checks refuse the other ways .env could reach a container as a file: a
+# bind mount of the project directory (or an ancestor) or of a `.env*` file, and a
+# top-level `secrets:` / `configs:` entry whose `file:` is one of those. Only the
+# dev override is exempt (it mounts `.:/app`, see docker-compose.override.yml). A volume shape the checks
+# do not model fails them rather than being skipped.
+#
 # Do NOT combine this with docker-compose.override.yml in production — the dev
 # override exposes DB/Jackson/Redis ports to the host and runs the tsx source.
 
@@ -175,7 +181,11 @@ services:
       - AUDIT_ANCHOR_DESTINATION_GH_TOKEN=${AUDIT_ANCHOR_DESTINATION_GH_TOKEN:-}
       - AUDIT_ANCHOR_DESTINATION_FS_PATH=${AUDIT_ANCHOR_DESTINATION_FS_PATH:-}
       # Publisher-specific names for the SDK's own variables, so the app (which
-      # blanks them) never holds them. Unset → the SDK's default credential chain.
+      # blanks them) never holds them.
+      # Unset → the SDK's default credential chain, which on an EC2 host is the
+      # instance role: shared by every container on the host (IMDS is reachable
+      # from all of them), not only this one. Set the AUDIT_ANCHOR_AWS_* pair
+      # instead; an explicit key pair is the preferred setup.
       - AWS_ACCESS_KEY_ID=${AUDIT_ANCHOR_AWS_ACCESS_KEY_ID:-}
       - AWS_SECRET_ACCESS_KEY=${AUDIT_ANCHOR_AWS_SECRET_ACCESS_KEY:-}
       - AWS_REGION=${AUDIT_ANCHOR_AWS_REGION:-}
@@ -186,6 +196,14 @@ services:
       migrate:
         condition: service_completed_successfully
         required: false
+    # Same hardening as the k8s manifests. The bundle boots with a read-only root
+    # filesystem and no tmpfs (the docker smoke runs it that way); the filesystem
+    # destination needs a writable volume of its own.
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     command: ["node", "dist/audit-anchor-publisher.js"]
     restart: unless-stopped
     # ECS stopTimeout (the Fargate maximum): a SIGTERM waits for an in-flight run.
@@ -210,6 +228,12 @@ services:
       migrate:
         condition: service_completed_successfully
         required: false
+    # Same hardening as the k8s manifests (see the publisher).
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     command: ["node", "dist/audit-chain-verify-worker.js"]
     restart: unless-stopped
     logging: *default-logging
