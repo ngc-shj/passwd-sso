@@ -188,6 +188,7 @@
   "scimCreatedBy": "{name} が作成",
   "scimLastUsed": "最終使用: {date}",
   "scimNeverUsed": "未使用",
+  "scimCreatorUnauthorized": "このトークンを作成したメンバーは、このテナントで SCIM を管理する権限を失っています。管理者は新しいトークンを作成して切り替え、このトークンを失効してください。",
   "scimExpiresAt": "有効期限: {date}",
   "cancel": "キャンセル",
   "externalTenant": "外部テナント",

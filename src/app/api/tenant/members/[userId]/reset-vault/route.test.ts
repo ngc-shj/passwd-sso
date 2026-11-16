@@ -12,6 +12,8 @@ const {
   mockPrismaAdminVaultResetFindMany,
   mockAdminLimiterCheck,
   mockTargetLimiterCheck,
+  mockTargetLimiterClear,
+  mockAdminLimiterClear,
   mockCreateRateLimiter,
   mockLogAudit,
   mockCreateNotification,
@@ -27,6 +29,7 @@ const {
   mockEncryptResetToken,
   mockRequireRecentSession,
   mockFindVaultRowsOutsideTenant,
+  mockDepartureFindMany,
   TenantAuthError,
 } = vi.hoisted(() => {
   class _TenantAuthError extends Error {
@@ -42,6 +45,8 @@ const {
   // approve-route sibling test).
   const mockAdminLimiterCheck = vi.fn();
   const mockTargetLimiterCheck = vi.fn();
+  const mockTargetLimiterClear = vi.fn();
+  const mockAdminLimiterClear = vi.fn();
   return {
     mockAuth: vi.fn(),
     mockPrismaTenantMemberFindFirst: vi.fn(),
@@ -57,10 +62,12 @@ const {
     // HELPER_CALLS_BELOW_LIMITER_COUNT distinct-arg rule (declared count 2).
     mockAdminLimiterCheck,
     mockTargetLimiterCheck,
+    mockTargetLimiterClear,
+    mockAdminLimiterClear,
     mockCreateRateLimiter: vi
       .fn()
-      .mockImplementationOnce((_opts: unknown) => ({ check: mockAdminLimiterCheck, clear: vi.fn() }))
-      .mockImplementationOnce((_opts: unknown) => ({ check: mockTargetLimiterCheck, clear: vi.fn() })),
+      .mockImplementationOnce((_opts: unknown) => ({ check: mockAdminLimiterCheck, clear: mockAdminLimiterClear }))
+      .mockImplementationOnce((_opts: unknown) => ({ check: mockTargetLimiterCheck, clear: mockTargetLimiterClear })),
     mockLogAudit: vi.fn(),
     mockCreateNotification: vi.fn(),
     mockSendEmail: vi.fn(),
@@ -81,6 +88,7 @@ const {
     mockEncryptResetToken: vi.fn(),
     mockRequireRecentSession: vi.fn().mockResolvedValue(null),
     mockFindVaultRowsOutsideTenant: vi.fn(),
+    mockDepartureFindMany: vi.fn().mockResolvedValue([]),
     TenantAuthError: _TenantAuthError,
   };
 });
@@ -90,7 +98,12 @@ const { mockUserFindMany, mockWithBypassRls } = vi.hoisted(() => ({
   mockWithBypassRls: vi.fn((p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
 }));
 
+const { mockLockFootholdWriter } = vi.hoisted(() => ({
+  mockLockFootholdWriter: vi.fn(async () => new Map()),
+}));
+
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/tenant/foothold-write-gate", () => ({ lockFootholdWriter: mockLockFootholdWriter }));
 vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
   requireRecentCurrentAuthMethod: mockRequireRecentSession,
 }));
@@ -109,6 +122,7 @@ vi.mock("@/lib/prisma", () => ({
     // withTenantRls tx (TOCTOU fix); the route calls tx.$executeRaw for the lock
     // before count/create. mockWithTenantRls passes this prisma object as tx.
     $executeRaw: mockExecuteRaw,
+    tenantMemberDeparture: { findMany: mockDepartureFindMany },
     user: { findMany: mockUserFindMany },
   },
 }));
@@ -160,6 +174,8 @@ vi.mock("@/lib/logger", () => ({
 import { POST, GET } from "./route";
 import { MS_PER_DAY } from "@/lib/constants/time";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
+import { footholdGateCells } from "@/__tests__/helpers/foothold-gate-cells";
+import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 
 // Module-scope snapshot: route.ts:40 `adminResetLimiter = createRateLimiter(...)`
 // then :46 `targetResetLimiter = createRateLimiter(...)` run at import time above,
@@ -217,6 +233,7 @@ describe("POST /api/tenant/members/[userId]/reset-vault", () => {
     mockAuth.mockResolvedValue({ user: { id: ACTOR_USER_ID, name: "Admin User", email: "admin@example.com" } });
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     mockIsTenantRoleAbove.mockReturnValue(true);
+    mockLockFootholdWriter.mockResolvedValue(lockedRows());
     mockPrismaTenantMemberFindFirst.mockResolvedValue(TARGET_MEMBER);
     // Default: one other admin eligible to approve.
     mockPrismaTenantMemberFindMany.mockResolvedValue([
@@ -251,6 +268,73 @@ describe("POST /api/tenant/members/[userId]/reset-vault", () => {
     mockNotificationBody.mockReturnValue(
       "An admin has initiated a vault reset for target@example.com.",
     );
+  });
+
+  const lockedRows = (target: Record<string, unknown> | null = { role: "MEMBER", deactivatedAt: null }) =>
+    new Map<string, unknown>([
+      [ACTOR_USER_ID, { hasRow: true, role: "OWNER", deactivatedAt: null, departedAt: null }],
+      [TARGET_USER_ID, target ? { hasRow: true, departedAt: null, ...target } : { hasRow: false, role: null, deactivatedAt: null, departedAt: null }],
+    ]);
+  const postInitiate = () =>
+    POST(
+      createRequest("POST", `http://localhost/api/tenant/members/${TARGET_USER_ID}/reset-vault`),
+      createParams({ userId: TARGET_USER_ID }),
+    );
+  // A C5 refusal restores only the per-target key it spent (max 1, so the key
+  // was empty when this request passed it); the per-admin key counts the
+  // admin's other attempts and stays.
+  const expectOnlyTargetKeyCleared = () => {
+    expect(mockTargetLimiterClear).toHaveBeenCalledTimes(1);
+    expect(mockTargetLimiterClear).toHaveBeenCalledWith(`rl:admin-reset:target:${TARGET_USER_ID}`);
+    expect(mockAdminLimiterClear).not.toHaveBeenCalled();
+  };
+
+  footholdGateCells({
+    gate: mockLockFootholdWriter,
+    permission: TENANT_PERMISSION.MEMBER_VAULT_RESET,
+    actorId: ACTOR_USER_ID,
+    tenantId: TENANT_ID,
+    okStatus: 200,
+    arrange: () => {},
+    call: postInitiate,
+    assertNoWrite: () => expect(mockPrismaAdminVaultResetCreate).not.toHaveBeenCalled(),
+    afterRefusal: expectOnlyTargetKeyCleared,
+  });
+
+  it("locks the target's row with the actor's (alsoLock) and writes after the gate", async () => {
+    expect((await postInitiate()).status).toBe(200);
+    expect(mockLockFootholdWriter).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ alsoLock: [TARGET_USER_ID] }),
+    );
+    expect(mockLockFootholdWriter.mock.invocationCallOrder[0]).toBeLessThan(
+      mockExecuteRaw.mock.invocationCallOrder[0],
+    );
+    expect(mockTargetLimiterClear).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 and clears the target key when the locked target row is deactivated", async () => {
+    mockLockFootholdWriter.mockResolvedValue(lockedRows({ role: "MEMBER", deactivatedAt: new Date() }));
+    expect((await postInitiate()).status).toBe(404);
+    expect(mockPrismaAdminVaultResetCreate).not.toHaveBeenCalled();
+    expectOnlyTargetKeyCleared();
+  });
+
+  it("returns 404 and clears the target key when the target has no locked row", async () => {
+    mockLockFootholdWriter.mockResolvedValue(lockedRows(null));
+    expect((await postInitiate()).status).toBe(404);
+    expect(mockPrismaAdminVaultResetCreate).not.toHaveBeenCalled();
+    expectOnlyTargetKeyCleared();
+  });
+
+  it("returns 403 and clears the target key when the locked roles no longer put the actor above the target", async () => {
+    mockLockFootholdWriter.mockResolvedValue(lockedRows());
+    // Passes the pre-lock check on committed state, fails on the locked rows.
+    mockIsTenantRoleAbove.mockReturnValueOnce(true).mockReturnValueOnce(false);
+    expect((await postInitiate()).status).toBe(403);
+    expect(mockPrismaAdminVaultResetCreate).not.toHaveBeenCalled();
+    expectOnlyTargetKeyCleared();
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -635,6 +719,9 @@ describe("GET /api/tenant/members/[userId]/reset-vault", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: ACTOR_USER_ID } });
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    // The initiator's tenant row, read for the Approve verdict (default: the actor, an OWNER).
+    mockPrismaTenantMemberFindMany.mockResolvedValue([{ userId: ACTOR_USER_ID, role: "OWNER", deactivatedAt: null }]);
+    mockDepartureFindMany.mockResolvedValue([]);
     mockPrismaAdminVaultResetFindMany.mockResolvedValue([BASE_RESET]);
     mockUserFindMany.mockResolvedValue([
       { id: ACTOR_USER_ID, name: "Admin User", email: "admin@example.com", image: null },
@@ -831,6 +918,27 @@ describe("GET /api/tenant/members/[userId]/reset-vault", () => {
     expect(json).toHaveLength(1);
     // ACTION is hierarchy-gated: the row is not approvable by this actor.
     expect(json[0].approveEligibility).toBe("insufficient_role");
+  });
+
+  it.each([
+    ["an admin who still holds the authority", [{ userId: "other-admin", role: "ADMIN", deactivatedAt: null }], [], "eligible"],
+    ["a deactivated admin", [{ userId: "other-admin", role: "ADMIN", deactivatedAt: new Date() }], [], "initiator_unauthorized"],
+    ["a demoted admin", [{ userId: "other-admin", role: "MEMBER", deactivatedAt: null }], [], "initiator_unauthorized"],
+    ["an admin who left after filing the reset", [{ userId: "other-admin", role: "ADMIN", deactivatedAt: null }], [{ userId: "other-admin", departedAt: new Date("2024-06-01T00:00:00Z") }], "initiator_unauthorized"],
+    ["an admin with no tenant row", [], [], "initiator_unauthorized"],
+  ])("offers Approve only while the initiator holds the authority: %s", async (_label, memberRows, departures, expected) => {
+    mockPrismaAdminVaultResetFindMany.mockResolvedValue([{ ...BASE_RESET, initiatedById: "other-admin" }]);
+    mockPrismaTenantMemberFindFirst.mockResolvedValue({ role: "MEMBER" });
+    mockIsTenantRoleAbove.mockReturnValue(true);
+    mockPrismaTenantMemberFindMany.mockResolvedValue(memberRows);
+    mockDepartureFindMany.mockResolvedValue(departures);
+
+    const res = await GET(
+      createRequest("GET", `http://localhost/api/tenant/members/${TARGET_USER_ID}/reset-vault`),
+      createParams({ userId: TARGET_USER_ID }),
+    );
+    expect(res.status).toBe(200);
+    expect((await res.json())[0].approveEligibility).toBe(expected);
   });
 
   it("returns the history when the initiator's users row is hidden, with an id-only initiator, and reads no user relation in the tenant context", async () => {

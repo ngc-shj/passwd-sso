@@ -15,6 +15,8 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
 import { serviceAccountUpdateSchema } from "@/lib/validations/service-account";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
+import { lockFootholdWriter } from "@/lib/tenant/foothold-write-gate";
+import { footholdWriteErrorResponse } from "@/lib/http/lock-conflict-response";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -122,8 +124,16 @@ async function handlePUT(req: NextRequest, { params }: Params) {
 
   let sa;
   try {
-    sa = await withTenantRls(prisma, actor.tenantId, async (tx) =>
-      tx.serviceAccount.update({
+    sa = await withTenantRls(prisma, actor.tenantId, async (tx) => {
+      // Re-activation undoes a containment; deactivating stays ungated.
+      if (result.data.isActive === true) {
+        await lockFootholdWriter(tx, req, {
+          tenantId: actor.tenantId,
+          actorId: session.user.id,
+          permission: TENANT_PERMISSION.SERVICE_ACCOUNT_MANAGE,
+        });
+      }
+      return tx.serviceAccount.update({
         where: { id, tenantId: actor.tenantId },
         data: {
           ...(result.data.name !== undefined && { name: result.data.name }),
@@ -141,9 +151,11 @@ async function handlePUT(req: NextRequest, { params }: Params) {
           updatedAt: true,
           createdById: true,
         },
-      }),
-    );
+      });
+    });
   } catch (err) {
+    const footholdResponse = footholdWriteErrorResponse(err);
+    if (footholdResponse) return footholdResponse;
     if (
       err instanceof Prisma.PrismaClientKnownRequestError &&
       err.code === "P2002"

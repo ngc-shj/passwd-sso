@@ -15,9 +15,12 @@ const {
   mockServiceAccountTokenFindMany,
   mockServiceAccountTokenCount,
   mockServiceAccountTokenCreate,
+  mockTenantMemberFindMany,
+  mockDepartureFindMany,
   mockSaExecuteRaw,
   mockHashToken,
   mockRequireRecentSession,
+  mockLockFootholdWriter,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTenantPermission: vi.fn(),
@@ -31,12 +34,16 @@ const {
   mockServiceAccountTokenFindMany: vi.fn(),
   mockServiceAccountTokenCount: vi.fn(),
   mockServiceAccountTokenCreate: vi.fn(),
+  mockTenantMemberFindMany: vi.fn(),
+  mockDepartureFindMany: vi.fn(),
   mockSaExecuteRaw: vi.fn().mockResolvedValue(0),
   mockHashToken: vi.fn().mockReturnValue("hashed-token"),
   mockRequireRecentSession: vi.fn().mockResolvedValue(null),
+  mockLockFootholdWriter: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/tenant/foothold-write-gate", () => ({ lockFootholdWriter: mockLockFootholdWriter }));
 vi.mock("@/lib/auth/access/tenant-auth", () => {
   class TenantAuthError extends Error {
     status: number;
@@ -61,6 +68,8 @@ vi.mock("@/lib/prisma", () => ({
       count: mockServiceAccountTokenCount,
       create: mockServiceAccountTokenCreate,
     },
+    tenantMember: { findMany: mockTenantMemberFindMany },
+    tenantMemberDeparture: { findMany: mockDepartureFindMany },
     // Advisory lock used to serialize concurrent SA token issuance.
     $executeRaw: mockSaExecuteRaw,
   },
@@ -85,6 +94,8 @@ vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
 
 import { GET, POST } from "@/app/api/tenant/service-accounts/[id]/tokens/route";
 import { MAX_SA_TOKENS_PER_ACCOUNT } from "@/lib/constants/auth/service-account";
+import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
+import { footholdGateCells } from "@/__tests__/helpers/foothold-gate-cells";
 
 const ACTOR = { tenantId: "tenant-1", role: "ADMIN" };
 const SA_ID = "sa-00000001";
@@ -96,9 +107,10 @@ const makeToken = (overrides: Record<string, unknown> = {}) => ({
   scope: "passwords:read",
   prefix: "sa_abcd",
   expiresAt: new Date(Date.now() + 90 * 24 * 3600 * 1000),
-  createdAt: new Date(),
+  createdAt: new Date("2026-02-01T00:00:00Z"),
   revokedAt: null,
   lastUsedAt: null,
+  createdById: null,
   ...overrides,
 });
 
@@ -122,6 +134,46 @@ describe("GET /api/tenant/service-accounts/[id]/tokens", () => {
     vi.clearAllMocks();
     mockRequireRecentSession.mockReset();
     mockRequireRecentSession.mockResolvedValue(null);
+    mockTenantMemberFindMany.mockResolvedValue([]);
+    mockDepartureFindMany.mockResolvedValue([]);
+  });
+
+  it("reports creatorAuthorized per token (true / false / null for a legacy token) and never createdById", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockServiceAccountFindUnique.mockResolvedValue({ id: SA_ID, tenantId: "tenant-1" });
+    mockServiceAccountTokenFindMany.mockResolvedValue([
+      makeToken({ id: "ok", createdById: "u-admin" }),
+      makeToken({ id: "demoted", createdById: "u-demoted" }),
+      makeToken({ id: "gone", createdById: "u-gone" }),
+      makeToken({ id: "legacy", createdById: null }),
+    ]);
+    mockTenantMemberFindMany.mockResolvedValue([
+      { userId: "u-admin", role: "ADMIN", deactivatedAt: null },
+      { userId: "u-demoted", role: "MEMBER", deactivatedAt: null },
+    ]);
+
+    const res = await GET(createRequest("GET", `http://localhost/api/tenant/service-accounts/${SA_ID}/tokens`), createParams({ id: SA_ID }));
+    const { json } = await parseResponse(res);
+
+    expect(Object.fromEntries(json.map((t: { id: string; creatorAuthorized: boolean | null }) => [t.id, t.creatorAuthorized]))).toEqual({
+      ok: true, demoted: false, gone: false, legacy: null,
+    });
+    for (const t of json) expect(t).not.toHaveProperty("createdById");
+    expect(mockTenantMemberFindMany.mock.calls[0][0].where.tenantId).toBe(ACTOR.tenantId);
+  });
+
+  it("reports false for a creator recorded as departed after the token was created", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockServiceAccountFindUnique.mockResolvedValue({ id: SA_ID, tenantId: "tenant-1" });
+    mockServiceAccountTokenFindMany.mockResolvedValue([makeToken({ createdById: "u-admin" })]);
+    mockTenantMemberFindMany.mockResolvedValue([{ userId: "u-admin", role: "ADMIN", deactivatedAt: null }]);
+    mockDepartureFindMany.mockResolvedValue([{ userId: "u-admin", departedAt: new Date("2026-03-01T00:00:00Z") }]);
+
+    const res = await GET(createRequest("GET", `http://localhost/api/tenant/service-accounts/${SA_ID}/tokens`), createParams({ id: SA_ID }));
+    const { json } = await parseResponse(res);
+    expect(json[0].creatorAuthorized).toBe(false);
   });
 
   it("returns list of tokens for a service account", async () => {
@@ -199,6 +251,45 @@ describe("POST /api/tenant/service-accounts/[id]/tokens", () => {
     mockRequireRecentSession.mockReset();
     mockRequireRecentSession.mockResolvedValue(null);
     mockSaExecuteRaw.mockResolvedValue(0);
+    mockLockFootholdWriter.mockResolvedValue(new Map());
+  });
+
+  const postMint = () =>
+    POST(
+      createRequest("POST", `http://localhost/api/tenant/service-accounts/${SA_ID}/tokens`, {
+        body: {
+          name: "deploy-token",
+          scope: ["passwords:read"],
+          expiresAt: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(),
+        },
+      }),
+      createParams({ id: SA_ID }),
+    );
+
+  const arrangeMint = () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockServiceAccountFindUnique.mockResolvedValue({ id: SA_ID, tenantId: "tenant-1", isActive: true });
+    makeTransactionSuccess();
+  };
+
+  footholdGateCells({
+    gate: mockLockFootholdWriter,
+    permission: TENANT_PERMISSION.SERVICE_ACCOUNT_MANAGE,
+    actorId: DEFAULT_SESSION.user.id,
+    tenantId: "tenant-1",
+    okStatus: 201,
+    arrange: arrangeMint,
+    call: postMint,
+    assertNoWrite: () => expect(mockServiceAccountTokenCreate).not.toHaveBeenCalled(),
+  });
+
+  it("takes the foothold write gate before the advisory lock", async () => {
+    arrangeMint();
+    await postMint();
+    expect(mockLockFootholdWriter.mock.invocationCallOrder[0]).toBeLessThan(
+      mockSaExecuteRaw.mock.invocationCallOrder[0],
+    );
   });
 
   it("creates a token and returns plaintext once", async () => {

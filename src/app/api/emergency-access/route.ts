@@ -19,6 +19,8 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { EMERGENCY_ACCESS_INVITE_TTL_MS } from "@/lib/constants/emergency-access";
 import { duplicateGrantWhere } from "@/lib/emergency-access/emergency-access-server";
+import { lockFootholdWriter } from "@/lib/tenant/foothold-write-gate";
+import { footholdWriteErrorResponse } from "@/lib/http/lock-conflict-response";
 
 const createLimiter = createRateLimiter({ windowMs: 15 * MS_PER_MINUTE, max: 5 });
 
@@ -50,26 +52,38 @@ async function handlePOST(req: NextRequest) {
   // (owner, grantee): no unique index can express "one live grant per grantee"
   // (liveness depends on the clock), so two concurrent POSTs would otherwise
   // both pass the check and leave a second grant behind when one is revoked.
-  const grant = await withUserTenantRls(session.user.id, async (tenantId) => {
-    await advisoryXactLock(
-      prisma,
-      `emergency-grant:${session.user.id}:${granteeEmail.toLowerCase()}`,
-    );
-    const existing = await prisma.emergencyAccessGrant.findFirst({
-      where: duplicateGrantWhere(session.user.id, granteeEmail, new Date()),
-    });
-    if (existing) return null;
-    return prisma.emergencyAccessGrant.create({
-      data: {
-        ownerId: session.user.id,
+  let grant;
+  try {
+    grant = await withUserTenantRls(session.user.id, async (tenantId, tx) => {
+      await lockFootholdWriter(tx, req, {
         tenantId,
-        granteeEmail,
-        waitDays,
-        tokenHash: hashToken(token),
-        tokenExpiresAt,
-      },
+        actorId: session.user.id,
+        permission: null,
+      });
+      await advisoryXactLock(
+        prisma,
+        `emergency-grant:${session.user.id}:${granteeEmail.toLowerCase()}`,
+      );
+      const existing = await prisma.emergencyAccessGrant.findFirst({
+        where: duplicateGrantWhere(session.user.id, granteeEmail, new Date()),
+      });
+      if (existing) return null;
+      return prisma.emergencyAccessGrant.create({
+        data: {
+          ownerId: session.user.id,
+          tenantId,
+          granteeEmail,
+          waitDays,
+          tokenHash: hashToken(token),
+          tokenExpiresAt,
+        },
+      });
     });
-  });
+  } catch (e) {
+    const footholdResponse = footholdWriteErrorResponse(e);
+    if (footholdResponse) return footholdResponse;
+    throw e;
+  }
 
   if (!grant) {
     return errorResponse(API_ERROR.DUPLICATE_GRANT);

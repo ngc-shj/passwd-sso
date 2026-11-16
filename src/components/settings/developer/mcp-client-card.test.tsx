@@ -11,7 +11,7 @@ if (typeof globalThis.ResizeObserver === "undefined") {
   } as unknown as typeof ResizeObserver;
 }
 
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 
 const { mockFetch, mockToast, mockCanUsePasskeyRecovery, mockReauthenticateWithPasskey } = vi.hoisted(() => ({
@@ -371,6 +371,34 @@ describe("McpClientCard", () => {
     const badges = screen.getAllByTestId("badge");
     expect(badges.some((b) => b.textContent === "mcpActive")).toBe(true);
     expect(badges.some((b) => b.textContent === "mcpInactive")).toBe(true);
+  });
+
+  it("notes a client whose creator lost access only for false: not for true, null (DCR or legacy) or an absent flag", async () => {
+    const client = (id: string, name: string, extra: Record<string, unknown>) => ({
+      ...sampleClients[0],
+      id,
+      name,
+      clientId: `mcpc_${id}`,
+      ...extra,
+    });
+    setupFetchClients([
+      client("c-false", "Orphaned", { creatorAuthorized: false }),
+      client("c-true", "Healthy", { creatorAuthorized: true }),
+      client("c-null", "Claimed DCR", { isDcr: true, creatorAuthorized: null }),
+      client("c-absent", "Older server", {}),
+    ]);
+
+    await act(async () => {
+      render(<McpClientCard />);
+    });
+    await waitFor(() => expect(screen.getByText("Orphaned")).toBeInTheDocument());
+
+    const rowOf = (name: string) => screen.getByText(name).closest(".border") as HTMLElement;
+    expect(within(rowOf("Orphaned")).getByText("creatorUnauthorized")).toBeInTheDocument();
+    for (const name of ["Healthy", "Claimed DCR", "Older server"]) {
+      expect(within(rowOf(name)).queryByText("creatorUnauthorized")).not.toBeInTheDocument();
+    }
+    expect(screen.getAllByText("creatorUnauthorized")).toHaveLength(1);
   });
 
   it("renders DCR badge for clients with isDcr: true", async () => {

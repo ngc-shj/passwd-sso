@@ -60,6 +60,8 @@ interface McpClient {
   createdAt: string;
   lastUsedAt: string | null;
   connectedUsers?: { name: string | null; email: string | null }[];
+  /** false: the creator no longer holds service-account management in this tenant; null: a DCR client or no creator on record. */
+  creatorAuthorized?: boolean | null;
 }
 
 interface NewClientCredentials {
@@ -455,6 +457,9 @@ const toastUpdateApiError = (errorCode: unknown) => {
             <Users className="h-3 w-3" />
             {client.connectedUsers.map((u) => u.name ?? u.email ?? t("mcpUnknownUser")).join(", ")}
           </div>
+        )}
+        {client.isActive && client.creatorAuthorized === false && (
+          <p className="text-xs text-amber-600 dark:text-amber-400">{t("creatorUnauthorized")}</p>
         )}
       </div>
       <div className="flex flex-col items-end gap-1 shrink-0">

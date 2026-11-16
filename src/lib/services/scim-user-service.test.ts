@@ -15,6 +15,7 @@ const {
   mockDepartFromTenant,
   mockReturnToTenant,
   mockRevokeUserAuthArtifactsInTx,
+  mockEndCreatorFootholds,
 } = vi.hoisted(() => ({
   mockTenantMemberFindUnique: vi.fn(),
   mockTenantMemberUpdate: vi.fn(),
@@ -31,11 +32,15 @@ const {
   mockDepartFromTenant: vi.fn(),
   mockReturnToTenant: vi.fn(),
   mockRevokeUserAuthArtifactsInTx: vi.fn(),
+  mockEndCreatorFootholds: vi.fn(),
 }));
 
 vi.mock("@/lib/team/team-departure", () => ({
   departFromTenant: mockDepartFromTenant,
   returnToTenant: mockReturnToTenant,
+}));
+vi.mock("@/lib/tenant/departure-footholds", () => ({
+  endCreatorFootholdsInTx: mockEndCreatorFootholds,
 }));
 vi.mock("@/lib/auth/session/user-session-invalidation", () => ({
   revokeUserAuthArtifactsInTx: mockRevokeUserAuthArtifactsInTx,
@@ -292,7 +297,7 @@ describe("deactivateScimUser", () => {
     mockTenantMemberFindUnique.mockResolvedValueOnce(null);
     mockScimExternalMappingFindFirst.mockResolvedValue(null);
 
-    await expect(deactivateScimUser(TENANT_ID, USER_ID)).rejects.toThrow(ScimUserNotFoundError);
+    await expect(deactivateScimUser(TENANT_ID, USER_ID, ACTOR)).rejects.toThrow(ScimUserNotFoundError);
   });
 
   it("throws ScimOwnerProtectedError when deleting the tenant OWNER", async () => {
@@ -301,14 +306,14 @@ describe("deactivateScimUser", () => {
       role: "OWNER",
     });
 
-    await expect(deactivateScimUser(TENANT_ID, USER_ID)).rejects.toThrow(ScimOwnerProtectedError);
+    await expect(deactivateScimUser(TENANT_ID, USER_ID, ACTOR)).rejects.toThrow(ScimOwnerProtectedError);
     expect(mockTransaction).not.toHaveBeenCalled();
   });
 
   it("returns userId and reads no user relation", async () => {
     mockTenantMemberFindUnique.mockResolvedValueOnce({ id: "tm1", role: "MEMBER" });
 
-    const result = await deactivateScimUser(TENANT_ID, USER_ID);
+    const result = await deactivateScimUser(TENANT_ID, USER_ID, ACTOR);
 
     expect(result).toEqual({ userId: USER_ID, revocation: REVOCATION });
     expect(mockTenantMemberFindUnique.mock.calls[0][0].select).toEqual({ id: true, role: true });
@@ -320,7 +325,7 @@ describe("deactivateScimUser", () => {
       role: "MEMBER",
     });
 
-    await deactivateScimUser(TENANT_ID, USER_ID);
+    await deactivateScimUser(TENANT_ID, USER_ID, ACTOR);
 
     expect(mockTransaction).toHaveBeenCalledWith(expect.any(Function));
     expect(mockTeamMemberKeyDeleteMany).toHaveBeenCalledWith({ where: { tenantId: TENANT_ID, userId: USER_ID } });
@@ -332,7 +337,7 @@ describe("deactivateScimUser", () => {
   it("locks the user's teams in this tenant against key rotation before deleting member keys", async () => {
     mockTenantMemberFindUnique.mockResolvedValueOnce({ id: "tm1", role: "MEMBER" });
 
-    await deactivateScimUser(TENANT_ID, USER_ID);
+    await deactivateScimUser(TENANT_ID, USER_ID, ACTOR);
 
     const calls = lockQueryCalls(mockQueryRaw);
     const membership = calls.find((c) => c.sql.includes("SELECT DISTINCT team_id FROM team_members"))!;
@@ -349,7 +354,7 @@ describe("deactivateScimUser", () => {
   it("locks the tenant row, then records the departure, before locking teams", async () => {
     mockTenantMemberFindUnique.mockResolvedValueOnce({ id: "tm1", role: "MEMBER" });
 
-    await deactivateScimUser(TENANT_ID, USER_ID);
+    await deactivateScimUser(TENANT_ID, USER_ID, ACTOR);
 
     const calls = lockQueryCalls(mockQueryRaw);
     const rowLock = calls.find((c) => c.sql.includes("FROM tenant_members"))!;
@@ -364,7 +369,7 @@ describe("deactivateScimUser", () => {
   it("expires the pending invitations the user issued, after the team lock", async () => {
     mockTenantMemberFindUnique.mockResolvedValueOnce({ id: "tm1", role: "MEMBER" });
 
-    await deactivateScimUser(TENANT_ID, USER_ID);
+    await deactivateScimUser(TENANT_ID, USER_ID, ACTOR);
 
     const teamLock = lockQueryCalls(mockQueryRaw).find((c) => c.sql.includes("FROM teams"))!;
     const expiry = executedSql().find((c) => c.sql.includes("UPDATE team_invitations"))!;
@@ -378,7 +383,7 @@ describe("deactivateScimUser", () => {
     mockTenantMemberFindUnique.mockResolvedValueOnce({ id: "tm1", role: "MEMBER" });
     mockQueryRaw.mockImplementation(lockAnswers({ deleted: ["team-1", "team-2"] }));
 
-    await expect(deactivateScimUser(TENANT_ID, USER_ID)).rejects.toThrow(
+    await expect(deactivateScimUser(TENANT_ID, USER_ID, ACTOR)).rejects.toThrow(
       "Could not lock 1 team row(s) against key rotation",
     );
     expect(mockTenantMemberDelete).not.toHaveBeenCalled();
@@ -389,7 +394,7 @@ describe("deactivateScimUser", () => {
     mockTenantMemberFindUnique.mockResolvedValueOnce({ id: "tm1", role: "MEMBER" });
     mockQueryRaw.mockImplementation(lockAnswers({ memberships: ["team-1", "team-2"] }));
 
-    await expect(deactivateScimUser(TENANT_ID, USER_ID)).resolves.toMatchObject({ userId: USER_ID });
+    await expect(deactivateScimUser(TENANT_ID, USER_ID, ACTOR)).resolves.toMatchObject({ userId: USER_ID });
     expect(mockTenantMemberDelete).toHaveBeenCalledOnce();
   });
   it("revokes the user's credentials in the tenant inside its transaction, after the membership delete", async () => {
@@ -415,7 +420,7 @@ describe("deactivateScimUser", () => {
       return REVOCATION;
     });
 
-    await deactivateScimUser(TENANT_ID, USER_ID);
+    await deactivateScimUser(TENANT_ID, USER_ID, ACTOR);
 
     expect(mockRevokeUserAuthArtifactsInTx).toHaveBeenCalledWith(expect.anything(), USER_ID, {
       tenantFilter: { tenantId: TENANT_ID },
@@ -426,10 +431,29 @@ describe("deactivateScimUser", () => {
     );
   });
 
+  it("ends the user's creator footholds with the actor, after the credential revocation", async () => {
+    mockTenantMemberFindUnique.mockResolvedValueOnce({ id: "tm1", role: "MEMBER" });
+
+    await deactivateScimUser(TENANT_ID, USER_ID, ACTOR);
+
+    expect(mockEndCreatorFootholds).toHaveBeenCalledExactlyOnceWith(expect.anything(), TENANT_ID, [USER_ID], ACTOR);
+    expect(mockEndCreatorFootholds.mock.invocationCallOrder[0]).toBeGreaterThan(
+      mockRevokeUserAuthArtifactsInTx.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("does not end creator footholds when the revocation fails", async () => {
+    mockTenantMemberFindUnique.mockResolvedValueOnce({ id: "tm1", role: "MEMBER" });
+    mockRevokeUserAuthArtifactsInTx.mockRejectedValueOnce(new Error("revocation failed"));
+
+    await expect(deactivateScimUser(TENANT_ID, USER_ID, ACTOR)).rejects.toThrow("revocation failed");
+    expect(mockEndCreatorFootholds).not.toHaveBeenCalled();
+  });
+
   it("propagates a revocation failure out of the transaction", async () => {
     mockTenantMemberFindUnique.mockResolvedValueOnce({ id: "tm1", role: "MEMBER" });
     mockRevokeUserAuthArtifactsInTx.mockRejectedValueOnce(new Error("revocation failed"));
 
-    await expect(deactivateScimUser(TENANT_ID, USER_ID)).rejects.toThrow("revocation failed");
+    await expect(deactivateScimUser(TENANT_ID, USER_ID, ACTOR)).rejects.toThrow("revocation failed");
   });
 });

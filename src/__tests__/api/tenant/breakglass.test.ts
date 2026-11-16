@@ -39,7 +39,12 @@ const { mockUserFindMany, mockWithBypassRls } = vi.hoisted(() => ({
   mockWithBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
 }));
 
+const { mockLockFootholdWriter } = vi.hoisted(() => ({
+  mockLockFootholdWriter: vi.fn(async () => new Map()),
+}));
+
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/tenant/foothold-write-gate", () => ({ lockFootholdWriter: mockLockFootholdWriter }));
 vi.mock("@/lib/auth/access/tenant-auth", () => {
   class TenantAuthError extends Error {
     status: number;
@@ -110,6 +115,7 @@ import { DELETE } from "@/app/api/tenant/breakglass/[id]/route";
 import { TenantAuthError } from "@/lib/auth/access/tenant-auth";
 import { GRANT_STATUS } from "@/lib/constants/integrations/breakglass";
 import { MS_PER_DAY, MS_PER_HOUR, MS_PER_MINUTE } from "@/lib/constants/time";
+import { footholdGateCells } from "@/__tests__/helpers/foothold-gate-cells";
 
 const ACTOR = { tenantId: "tenant1", role: "ADMIN" };
 const TARGET_USER_ID = "00000000-0000-4000-a000-000000000001";
@@ -137,6 +143,26 @@ const makeMember = () => ({
 
 describe("POST /api/tenant/breakglass", () => {
   beforeEach(() => vi.clearAllMocks());
+
+  footholdGateCells({
+    gate: mockLockFootholdWriter,
+    permission: "BREAKGLASS_REQUEST",
+    actorId: DEFAULT_SESSION.user.id,
+    tenantId: "tenant1",
+    okStatus: 201,
+    arrange: () => {
+      mockAuth.mockResolvedValue(DEFAULT_SESSION);
+      mockRequireTenantPermission.mockResolvedValue(ACTOR);
+      mockTenantMemberFindFirst.mockResolvedValue(makeMember());
+      mockPersonalLogAccessGrantFindFirst.mockResolvedValue(null);
+      mockPersonalLogAccessGrantCreate.mockResolvedValue(makeGrant());
+    },
+    call: () =>
+      POST(createRequest("POST", "http://localhost/api/tenant/breakglass", {
+        body: { targetUserId: TARGET_USER_ID, reason: "Valid reason for incident" },
+      })),
+    assertNoWrite: () => expect(mockPersonalLogAccessGrantCreate).not.toHaveBeenCalled(),
+  });
 
   it("returns 401 without session", async () => {
     mockAuth.mockResolvedValue(null);

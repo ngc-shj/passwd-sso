@@ -70,6 +70,7 @@ function containmentModel(name: string, row: Record<string, unknown> = {}) {
       calls.push(name);
       return { count: args.where.id?.in.length ?? 1 };
     }),
+    count: vi.fn(async () => 0),
   };
 }
 
@@ -84,6 +85,8 @@ const tx = {
   mcpAccessToken: containmentModel("mcpAccessToken"),
   mcpRefreshToken: containmentModel("mcpRefreshToken"),
   personalLogAccessGrant: containmentModel("personalLogAccessGrant", { targetUserId: "someone" }),
+  tenantWebhook: containmentModel("tenantWebhook", { url: "https://hooks.example.com/in" }),
+  adminVaultReset: containmentModel("adminVaultReset", { targetUserId: "someone" }),
   emergencyAccessGrant: containmentModel("emergencyAccessGrant", { granteeId: "grantee-1" }),
 };
 
@@ -91,6 +94,10 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({ prisma: {} }));
 vi.mock("@/lib/auth/access/tenant-auth", () => ({
   requireTenantPermission: mockRequireTenantPermission,
+  hasTenantPermission: mockHasTenantPermission,
+}));
+vi.mock("@/lib/auth/access/tenant-permissions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth/access/tenant-permissions")>()),
   hasTenantPermission: mockHasTenantPermission,
 }));
 vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
@@ -399,12 +406,14 @@ describe("DELETE /api/tenant/members/[userId]/passkeys", () => {
         serviceAccountTokenIds: [uuid(4)],
         mcpClientIds: [uuid(5)],
         breakglassGrantIds: [uuid(6)],
+        tenantWebhookIds: [uuid(8)],
+        vaultResetIds: [uuid(9)],
         emergencyAccessGrantIds: [uuid(7)],
       },
     };
     const CONTAINMENT_MODELS = [
       "account", "scimToken", "serviceAccount", "serviceAccountToken", "mcpClient",
-      "mcpAccessToken", "mcpRefreshToken", "personalLogAccessGrant", "emergencyAccessGrant",
+      "mcpAccessToken", "mcpRefreshToken", "personalLogAccessGrant", "tenantWebhook", "adminVaultReset", "emergencyAccessGrant",
     ] as const;
 
     it.each([
@@ -419,6 +428,7 @@ describe("DELETE /api/tenant/members/[userId]/passkeys", () => {
       for (const model of CONTAINMENT_MODELS) {
         expect(tx[model].findMany).not.toHaveBeenCalled();
         expect(tx[model].updateMany).not.toHaveBeenCalled();
+        expect(tx[model].count).not.toHaveBeenCalled();
       }
     });
 
@@ -438,6 +448,7 @@ describe("DELETE /api/tenant/members/[userId]/passkeys", () => {
       ["a non-uuid id", { unlinkAccountIds: ["not-a-uuid"] }],
       ["an unknown top-level key", { unlinkAccountIds: [], revokeAll: true }],
       ["an unknown kind", { revoke: { webhookIds: [uuid(1)] } }],
+      ["a webhook id that is not a uuid", { revoke: { tenantWebhookIds: ["x"] } }],
       ["a non-object", ["x"]],
     ])("refuses %s with 400 before the step-up, and revokes nothing", async (_label, body) => {
       const res = await revokeAll(body);
@@ -476,7 +487,19 @@ describe("DELETE /api/tenant/members/[userId]/passkeys", () => {
           serviceAccountTokens: one,
           mcpClients: one,
           breakglassGrants: one,
+          tenantWebhooks: one,
+          vaultResets: one,
           emergencyAccessGrants: one,
+        },
+        remaining: {
+          scimTokens: 0,
+          serviceAccounts: 0,
+          serviceAccountTokens: 0,
+          mcpClients: 0,
+          breakglassGrants: 0,
+          tenantWebhooks: 0,
+          vaultResets: 0,
+          emergencyAccessGrants: 0,
         },
       });
       const writes = calls.filter((c) => !["lock", "roles", "credentials", "cache-after-commit"].includes(c));
@@ -488,6 +511,8 @@ describe("DELETE /api/tenant/members/[userId]/passkeys", () => {
         "serviceAccountToken",
         "mcpClient", "mcpAccessToken", "mcpRefreshToken",
         "personalLogAccessGrant",
+        "tenantWebhook",
+        "adminVaultReset",
         "emergencyAccessGrant",
       ]);
       // The revoke-all row comes after every containment write, carrying the counts.
@@ -513,11 +538,24 @@ describe("DELETE /api/tenant/members/[userId]/passkeys", () => {
         "SERVICE_ACCOUNT_TOKEN_REVOKE",
         "MCP_CLIENT_UPDATE",
         "PERSONAL_LOG_ACCESS_REVOKE",
+        "TENANT_WEBHOOK_DELETE",
+        "ADMIN_VAULT_RESET_REVOKE",
         "EMERGENCY_ACCESS_REVOKE",
         "TENANT_MEMBER_PASSKEY_REVOKE_ALL",
         "TENANT_MEMBER_PASSKEY_REVOKE_ALL",
       ]);
       expect(committed.value).toBe(true);
+    });
+
+    it("answers with the live rows left per kind, counted after the writes", async () => {
+      tx.scimToken.count.mockResolvedValueOnce(2);
+      tx.tenantWebhook.count.mockResolvedValueOnce(1);
+
+      const res = await revokeAll({ revoke: { vaultResetIds: [uuid(9)] } });
+      expect((await res.json()).remaining).toMatchObject({ scimTokens: 2, tenantWebhooks: 1, vaultResets: 0 });
+      expect(tx.adminVaultReset.updateManyAndReturn.mock.invocationCallOrder[0]).toBeLessThan(
+        tx.adminVaultReset.count.mock.invocationCallOrder[0],
+      );
     });
 
     it("a containment write that fails fails the request: no commit, the member is not told", async () => {
@@ -545,6 +583,8 @@ describe("DELETE /api/tenant/members/[userId]/passkeys", () => {
       ["serviceAccountTokenIds", "tenant:serviceAccount:manage"],
       ["mcpClientIds", "tenant:serviceAccount:manage"],
       ["breakglassGrantIds", "tenant:breakglass:request"],
+      ["tenantWebhookIds", "tenant:webhook:manage"],
+      ["vaultResetIds", "tenant:member:vaultReset"],
     ])("%s: refused 403 before the step-up without %s, allowed with it", async (key, permission) => {
       mockHasTenantPermission.mockImplementation((_role: string, p: string) => p !== permission);
       const refused = await revokeAll({ revoke: { [key]: [uuid(9)] } });
@@ -591,6 +631,8 @@ describe("DELETE /api/tenant/members/[userId]/passkeys", () => {
       ["serviceAccountTokens", "tenant:serviceAccount:manage"],
       ["mcpClients", "tenant:serviceAccount:manage"],
       ["breakglassGrants", "tenant:breakglass:request"],
+      ["tenantWebhooks", "tenant:webhook:manage"],
+      ["vaultResets", "tenant:member:vaultReset"],
     ])("omits %s without %s, lists it with it", async (kind, permission) => {
       mockHasTenantPermission.mockImplementation((_role: string, p: string) => p !== permission);
       const without = await (await list()).json();

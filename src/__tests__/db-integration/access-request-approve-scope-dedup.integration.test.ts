@@ -43,6 +43,7 @@ import {
 } from "@/__tests__/helpers/request-builder";
 import { SA_TOKEN_SCOPE, SA_TOKEN_SCOPES } from "@/lib/constants/auth/service-account";
 import { varCharWidth } from "@/__tests__/helpers/schema-column-width";
+import { requestWithSession, seedSession } from "./session-request";
 
 /** service_account_tokens.scope's width — the bound CF16's failure mode crosses. */
 const SCOPE_COLUMN_WIDTH = varCharWidth("ServiceAccountToken", "scope");
@@ -116,8 +117,9 @@ describe.skipIf(!hasDatabase)("access-request approve: scope dedup (real DB)", (
     expect(created.requestedScope).toBe(SA_TOKEN_SCOPES.join(","));
 
     mockAuth.mockResolvedValue({ user: { id: approverId } });
-    const approveReq = createRequest(
-      "POST",
+    // The approve gate re-reads the approver's own session row.
+    const approveReq = requestWithSession(
+      await seedSession(ctx, approverId, tenantId),
       `http://localhost/api/tenant/access-requests/${created.id}/approve`,
     );
     const approveRes = await approveAccessRequest(approveReq, createParams({ id: created.id }));
@@ -163,8 +165,8 @@ describe.skipIf(!hasDatabase)("access-request approve: scope dedup (real DB)", (
     });
 
     mockAuth.mockResolvedValue({ user: { id: approverId } });
-    const approveReq = createRequest(
-      "POST",
+    const approveReq = requestWithSession(
+      await seedSession(ctx, approverId, tenantId),
       `http://localhost/api/tenant/access-requests/${reqId}/approve`,
     );
     const approveRes = await approveAccessRequest(approveReq, createParams({ id: reqId }));

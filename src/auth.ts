@@ -25,6 +25,7 @@ import {
   type UserAuthArtifactCounts,
 } from "@/lib/auth/session/user-session-invalidation";
 import { lockUserAuthArtifacts } from "@/lib/auth/session/user-auth-serialization";
+import { lockTenantRows } from "@/lib/team/tenant-row-lock";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import {
@@ -601,9 +602,12 @@ async function claimedTenantMembership(
     // updateMany would otherwise leave stale cache entries up to TTL).
     let migratedSessionTokens: string[] = [];
     await prisma.$transaction(async (tx) => {
-      // The user's credential lock first (user-auth-serialization.ts): this
-      // migration revokes the user's tokens and consumes their pending codes,
-      // so a mint must not commit a credential around it.
+      // The user's bootstrap tenant row first (the tenant row → credential lock
+      // order of every departure writer; this migration later deletes the row),
+      // then the credential lock (user-auth-serialization.ts): this migration
+      // revokes the user's tokens and consumes their pending codes, so a mint
+      // must not commit a credential around it.
+      await lockTenantRows(tx, existingTenantId, [userId], "update");
       await lockUserAuthArtifacts(tx, userId);
       await assertBootstrapSingleMember(tx, existingTenantId); // row 6b throw
 

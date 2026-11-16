@@ -61,7 +61,12 @@ const {
 
 // ─── Module mocks ─────────────────────────────────────────────────────────────
 
+const { mockLockFootholdWriter } = vi.hoisted(() => ({
+  mockLockFootholdWriter: vi.fn(async () => new Map()),
+}));
+
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/tenant/foothold-write-gate", () => ({ lockFootholdWriter: mockLockFootholdWriter }));
 vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
   requireRecentCurrentAuthMethod: mockRequireRecentSession,
 }));
@@ -216,6 +221,11 @@ describe("Scenario 1: SA CRUD lifecycle", () => {
     expect(json.id).toBe(SA_ID);
     expect(json.name).toBe("ci-bot");
     expect(json.isActive).toBe(true);
+    expect(mockLockFootholdWriter).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ actorId: DEFAULT_SESSION.user.id, permission: "tenant:serviceAccount:manage" }),
+    );
   });
 
   it("step 2: retrieves SA via GET and verifies fields", async () => {
@@ -314,6 +324,11 @@ describe("Scenario 2: SA token issuance and authentication", () => {
     expect(json.token).toMatch(/^sa_/);
     expect(typeof json.token).toBe("string");
     expect(json.id).toBe(TOKEN_ID);
+    expect(mockLockFootholdWriter).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ actorId: DEFAULT_SESSION.user.id, permission: "tenant:serviceAccount:manage" }),
+    );
     // Token response must have Cache-Control: no-store
     expect(res.headers.get("Cache-Control")).toBe("no-store");
   });

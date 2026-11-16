@@ -10,7 +10,7 @@ if (typeof globalThis.ResizeObserver === "undefined") {
   } as unknown as typeof ResizeObserver;
 }
 
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 
 const { mockFetch, mockToast, mockCanUsePasskeyRecovery, mockReauthenticateWithPasskey } = vi.hoisted(() => ({
@@ -367,6 +367,37 @@ describe("ServiceAccountCard", () => {
     const badges = screen.getAllByTestId("badge");
     expect(badges.some((b) => b.textContent === "saActive")).toBe(true);
     expect(badges.some((b) => b.textContent === "saInactive")).toBe(true);
+  });
+
+  it("notes a token whose creator lost access only for false, and not on a revoked one", async () => {
+    const token = (id: string, name: string, extra: Record<string, unknown>) => ({ ...sampleTokens[0], id, name, ...extra });
+    const tokens = [
+      token("t-false", "orphaned-token", { creatorAuthorized: false }),
+      token("t-true", "healthy-token", { creatorAuthorized: true }),
+      token("t-null", "legacy-token", { creatorAuthorized: null }),
+      token("t-absent", "older-server-token", {}),
+      token("t-revoked", "revoked-token", { creatorAuthorized: false, revokedAt: "2025-12-01T00:00:00Z" }),
+    ];
+    mockFetch.mockImplementation((url: string) =>
+      Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve(url.includes("/tokens") ? { tokens } : { serviceAccounts: sampleAccounts }),
+      }),
+    );
+
+    await act(async () => {
+      render(<ServiceAccountCard />);
+    });
+    await waitFor(() => expect(screen.getByText("deploy-bot")).toBeInTheDocument());
+    await expandSa("deploy-bot");
+    await waitFor(() => expect(screen.getByText("orphaned-token")).toBeInTheDocument());
+
+    const rowOf = (name: string) => screen.getByText(name).closest(".border") as HTMLElement;
+    expect(within(rowOf("orphaned-token")).getByText("tokenCreatorUnauthorized")).toBeInTheDocument();
+    for (const name of ["healthy-token", "legacy-token", "older-server-token", "revoked-token"]) {
+      expect(within(rowOf(name)).queryByText("tokenCreatorUnauthorized")).not.toBeInTheDocument();
+    }
+    expect(screen.getAllByText("tokenCreatorUnauthorized")).toHaveLength(1);
   });
 
   it("creates SA — calls fetchApi POST with correct body", async () => {

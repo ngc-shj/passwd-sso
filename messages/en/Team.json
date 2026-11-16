@@ -188,6 +188,7 @@
   "scimCreatedBy": "Created by {name}",
   "scimLastUsed": "Last used {date}",
   "scimNeverUsed": "Never used",
+  "scimCreatorUnauthorized": "The creator of this token no longer has access to manage SCIM in this tenant. An admin should rotate it: create a new token, then revoke this one.",
   "scimExpiresAt": "Expires {date}",
   "cancel": "Cancel",
   "externalTenant": "External tenant",

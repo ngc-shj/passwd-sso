@@ -22,7 +22,12 @@ const {
   mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
+const { mockLockFootholdWriter } = vi.hoisted(() => ({
+  mockLockFootholdWriter: vi.fn(async () => new Map()),
+}));
+
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/tenant/foothold-write-gate", () => ({ lockFootholdWriter: mockLockFootholdWriter }));
 vi.mock("@/lib/auth/access/tenant-auth", () => {
   class TenantAuthError extends Error {
     status: number;
@@ -67,6 +72,8 @@ vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
 
 import { GET, PUT, DELETE } from "@/app/api/tenant/mcp-clients/[id]/route";
 import { MCP_SCOPES } from "@/lib/constants/auth/mcp";
+import { footholdGateCells } from "@/__tests__/helpers/foothold-gate-cells";
+import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 
 const ACTOR = { tenantId: "tenant-1", role: "ADMIN" };
 
@@ -123,6 +130,38 @@ describe("GET /api/tenant/mcp-clients/[id]", () => {
 
 describe("PUT /api/tenant/mcp-clients/[id]", () => {
   beforeEach(() => vi.clearAllMocks());
+
+  // Re-activation undoes a containment, so it takes the foothold write gate;
+  // deactivation (and a plain edit) stays ungated.
+  const arrangePut = () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockMcpClientFindFirst.mockResolvedValue(makeClient());
+    mockMcpClientUpdate.mockResolvedValue(makeClient({ updatedAt: new Date() }));
+  };
+  const putBody = (body: Record<string, unknown>) =>
+    PUT(createRequest("PUT", "http://localhost/api/tenant/mcp-clients/client-1", { body }), createParams({ id: "client-1" }));
+
+  footholdGateCells({
+    gate: mockLockFootholdWriter,
+    permission: TENANT_PERMISSION.SERVICE_ACCOUNT_MANAGE,
+    actorId: DEFAULT_SESSION.user.id,
+    tenantId: "tenant-1",
+    okStatus: 200,
+    arrange: arrangePut,
+    call: () => putBody({ isActive: true }),
+    assertNoWrite: () => expect(mockMcpClientUpdate).not.toHaveBeenCalled(),
+  });
+
+  it.each([
+    ["deactivation", { isActive: false }],
+    ["a plain edit", { name: "updated-client" }],
+  ])("does not take the foothold write gate for %s", async (_label, body) => {
+    arrangePut();
+    expect((await putBody(body)).status).toBe(200);
+    expect(mockLockFootholdWriter).not.toHaveBeenCalled();
+    expect(mockMcpClientUpdate).toHaveBeenCalledTimes(1);
+  });
 
   it("updates a MCP client successfully", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);

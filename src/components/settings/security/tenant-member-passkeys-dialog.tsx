@@ -56,6 +56,8 @@ interface CreatedFootholds {
   serviceAccountTokens?: { id: string; name: string; serviceAccount: { name: string } }[];
   mcpClients?: { id: string; name: string }[];
   breakglassGrants?: { id: string; reason: string; expiresAt: string }[];
+  tenantWebhooks?: { id: string; url: string; createdAt: string }[];
+  vaultResets?: { id: string; targetUser: { name: string | null; email: string | null }; expiresAt: string }[];
   emergencyAccessGrants?: { id: string; granteeEmail: string; status: string; hasEscrow: boolean }[];
 }
 
@@ -68,6 +70,8 @@ const FOOTHOLD_KINDS = [
   ["serviceAccountTokens", "serviceAccountTokenIds", "containmentKindServiceAccountTokens"],
   ["mcpClients", "mcpClientIds", "containmentKindMcpClients"],
   ["breakglassGrants", "breakglassGrantIds", "containmentKindBreakglassGrants"],
+  ["tenantWebhooks", "tenantWebhookIds", "containmentKindTenantWebhooks"],
+  ["vaultResets", "vaultResetIds", "containmentKindVaultResets"],
   ["emergencyAccessGrants", "emergencyAccessGrantIds", "containmentKindEmergencyAccessGrants"],
 ] as const satisfies readonly (readonly [FootholdKind, string, string])[];
 
@@ -89,11 +93,16 @@ const CONTAINMENT_KIND_NAME = {
   serviceAccountTokens: "containmentNameServiceAccountTokens",
   mcpClients: "containmentNameMcpClients",
   breakglassGrants: "containmentNameBreakglassGrants",
+  tenantWebhooks: "containmentNameTenantWebhooks",
+  vaultResets: "containmentNameVaultResets",
   emergencyAccessGrants: "containmentNameEmergencyAccessGrants",
 } as const satisfies Record<ContainmentItem["kind"], string>;
 
 /** Per kind the request named, as DELETE answers it (member-containment.ts). */
 type ContainedCounts = Partial<Record<ContainmentItem["kind"], { revoked: number; skipped: number }>>;
+
+/** Per kind, the member's live rows left after the request (member-containment.ts). */
+type RemainingCounts = Partial<Record<FootholdKind, number>>;
 
 interface TenantMemberPasskeysDialogProps {
   userId: string;
@@ -196,6 +205,20 @@ export function TenantMemberPasskeysDialog({ userId, memberName, disabled }: Ten
           label: r.reason,
           detail: t("containmentExpires", { date: formatDateTime(r.expiresAt, locale) }),
         }));
+      case "tenantWebhooks":
+        return (footholds.tenantWebhooks ?? []).map((r) => ({
+          kind,
+          id: r.id,
+          label: r.url,
+          detail: t("containmentCreated", { date: formatDateTime(r.createdAt, locale) }),
+        }));
+      case "vaultResets":
+        return (footholds.vaultResets ?? []).map((r) => ({
+          kind,
+          id: r.id,
+          label: r.targetUser.name ?? r.targetUser.email ?? r.id,
+          detail: t("containmentExpires", { date: formatDateTime(r.expiresAt, locale) }),
+        }));
       case "emergencyAccessGrants":
         return (footholds.emergencyAccessGrants ?? []).map((r) => ({
           kind,
@@ -247,6 +270,12 @@ export function TenantMemberPasskeysDialog({ userId, memberName, disabled }: Ten
     toast.warning(t("containmentSkipped", { kinds: names }), { duration: Infinity });
   };
 
+  // Live rows of the member the request left (deliberately unticked ones too).
+  const warnRemaining = (body: { remaining?: RemainingCounts } | null) => {
+    const total = Object.values(body?.remaining ?? {}).reduce((n, c) => n + (c ?? 0), 0);
+    if (total > 0) toast.warning(t("containmentRemaining", { count: total }), { duration: Infinity });
+  };
+
   const handleRevoke = async () => {
     if (!target) return;
     setRevoking(true);
@@ -267,7 +296,11 @@ export function TenantMemberPasskeysDialog({ userId, memberName, disabled }: Ten
       if (res.ok) {
         // Neutral: revoke-all succeeds for a member with no passkeys too.
         toast.success(revokeAll ? t("revokeAllPasskeysDone", { name: memberName }) : t("revokePasskeySuccess"));
-        if (revokeAll) warnSkipped(await res.json().catch(() => null));
+        if (revokeAll) {
+          const answer = await res.json().catch(() => null);
+          warnSkipped(answer);
+          warnRemaining(answer);
+        }
         setTarget(null);
         await load();
         return;

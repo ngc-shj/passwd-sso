@@ -20,6 +20,9 @@ import { readFormWithCap } from "@/lib/http/parse-body";
 import { MAX_JSON_BODY_BYTES, PKCE_CODE_CHALLENGE_SCHEMA } from "@/lib/validations/common.server";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { isSessionRowLive, UserAuthRevokedError } from "@/lib/auth/session/user-auth-serialization";
+import { TenantAuthError } from "@/lib/auth/access/tenant-auth";
+import { lockFootholdWriter } from "@/lib/tenant/foothold-write-gate";
+import { isMembershipLockConflict } from "@/lib/team/tenant-row-lock";
 import { serverAppUrl, getAppOrigin } from "@/lib/url-helpers";
 import { API_PATH } from "@/lib/constants/auth/api-path";
 import {
@@ -257,6 +260,14 @@ export async function POST(req: NextRequest) {
       claimResult = await withBypassRls(
         prisma,
         async (tx) => {
+          // The claim sets tenantId and createdById: only a present, active
+          // member of userTenantId may bind a client into it. First, before the
+          // advisory lock below (tenant row → credential lock → this order).
+          await lockFootholdWriter(tx, req, {
+            tenantId: userTenantId,
+            actorId: session.user.id,
+            permission: null,
+          });
           // Serialize count → cap-check → claim under a per-tenant advisory
           // lock. The claim below is a create-equivalent (it flips an unclaimed
           // client's tenantId null → userTenantId, bumping this tenant's client
@@ -318,6 +329,13 @@ export async function POST(req: NextRequest) {
         BYPASS_GRANT.MCP_CLIENT_CONSENT,
       );
     } catch (err) {
+      if (err instanceof TenantAuthError) {
+        return NextResponse.json({ error: "access_denied" }, { status: 403 });
+      }
+      if (err instanceof UserAuthRevokedError) return unauthorized();
+      if (isMembershipLockConflict(err)) {
+        return NextResponse.json({ error: "conflict" }, { status: 409 });
+      }
       // C7: a concurrent foreign claim can win the race and cause a P2002 unique
       // violation on (tenantId, name). Map to the same consent error — not a 500.
       if (

@@ -9,7 +9,14 @@ import { sendEmail } from "@/lib/email";
 import { adminVaultResetEmail } from "@/lib/email/templates/admin-vault-reset";
 import { serverAppUrl } from "@/lib/url-helpers";
 import { resolveUserLocale } from "@/lib/locale";
-import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
+import {
+  requireTenantPermission,
+} from "@/lib/auth/access/tenant-auth";
+import { isTenantRoleAbove } from "@/lib/auth/access/tenant-role-hierarchy";
+import { holdsTenantAuthority } from "@/lib/tenant/creator-authority";
+import { lockFootholdWriter } from "@/lib/tenant/foothold-write-gate";
+import { departedSince } from "@/lib/team/tenant-row-lock";
+import { footholdWriteErrorResponse } from "@/lib/http/lock-conflict-response";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import {
   APPROVE_ELIGIBILITY,
@@ -114,6 +121,9 @@ async function handlePOST(
     actorRole: actor.role,
     targetRole: targetMember.role,
     initiatedById: resetRecord.initiatedById,
+    // The authoritative initiator check runs on locked rows in the CAS
+    // transaction below; this pre-read only feeds the shared helper.
+    initiatorAuthorized: true,
   });
   if (eligibility === APPROVE_ELIGIBILITY.INITIATOR) {
     // Forensic audit on failed self-approval — suspicious-behavior signal.
@@ -227,27 +237,62 @@ async function handlePOST(
     Math.min(ttlCap.getTime(), now.getTime() + EXECUTE_TTL_MS),
   );
 
-  const result = await withTenantRls(prisma, actor.tenantId, async (tx) =>
-    tx.adminVaultReset.updateMany({
-      where: {
-        id: resetId,
+  let result: { kind: "ok" | "not_approvable" | "target_gone" | "insufficient_role" };
+  try {
+    result = await withTenantRls(prisma, actor.tenantId, async (tx) => {
+      const lockedRows = await lockFootholdWriter(tx, req, {
         tenantId: actor.tenantId,
-        targetUserId,
-        approvedAt: null,
-        executedAt: null,
-        revokedAt: null,
-        expiresAt: { gt: now },
-        initiatedById: { not: session.user.id },
-      },
-      data: {
-        approvedAt: now,
-        approvedById: session.user.id,
-        expiresAt: newExpiresAt,
-      },
-    }),
-  );
+        actorId: session.user.id,
+        permission: TENANT_PERMISSION.MEMBER_VAULT_RESET,
+        alsoLock: [resetRecord.initiatedById, targetUserId],
+      });
+      const lockedActor = lockedRows.get(session.user.id);
+      const lockedTarget = lockedRows.get(targetUserId);
+      const lockedInitiator = lockedRows.get(resetRecord.initiatedById);
+      if (!holdsTenantAuthority(lockedTarget, null)) {
+        return { kind: "target_gone" as const };
+      }
+      if (!lockedActor?.role || !isTenantRoleAbove(lockedActor.role, lockedTarget.role)) {
+        return { kind: "insufficient_role" as const };
+      }
+      // The initiator must still hold the authority the reset was filed under;
+      // a reset by a demoted, deactivated or departed admin is not approvable.
+      if (
+        !holdsTenantAuthority(lockedInitiator, TENANT_PERMISSION.MEMBER_VAULT_RESET) ||
+        departedSince(lockedInitiator, resetRecord.createdAt)
+      ) {
+        return { kind: "not_approvable" as const };
+      }
+      const cas = await tx.adminVaultReset.updateMany({
+        where: {
+          id: resetId,
+          tenantId: actor.tenantId,
+          targetUserId,
+          approvedAt: null,
+          executedAt: null,
+          revokedAt: null,
+          expiresAt: { gt: now },
+          initiatedById: { not: session.user.id },
+        },
+        data: {
+          approvedAt: now,
+          approvedById: session.user.id,
+          expiresAt: newExpiresAt,
+        },
+      });
+      return { kind: cas.count === 0 ? ("not_approvable" as const) : ("ok" as const) };
+    });
+  } catch (e) {
+    const footholdResponse = footholdWriteErrorResponse(e);
+    if (footholdResponse) return footholdResponse;
+    throw e;
+  }
 
-  if (result.count === 0) {
+  if (result.kind === "target_gone") return notFound();
+  if (result.kind === "insufficient_role") {
+    return errorResponse(API_ERROR.FORBIDDEN_INSUFFICIENT_ROLE);
+  }
+  if (result.kind === "not_approvable") {
     // Generic 409 — covers race-lost / already-approved / revoked / expired
     // / self-approval. Distinct causes are NOT leaked.
     return errorResponse(API_ERROR.RESET_NOT_APPROVABLE);

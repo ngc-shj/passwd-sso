@@ -21,6 +21,8 @@
  *   the admission atomically with it.
  * - C6: team webhook delivery requires the creator's current authority, run as
  *   the real outbox worker role; plus the creator backfill block.
+ * - member-foothold-containment C3: the same for tenant webhooks (WEBHOOK_MANAGE),
+ *   on both delivery readers: the worker and the app's dispatchTenantWebhook.
  *
  * Production routes run on the app role under FORCE RLS; only auth, step-up,
  * rate limits, the SCIM token and the SSRF IP resolution (the mock receiver is
@@ -118,11 +120,14 @@ import { POST as confirmKeyRoute } from "@/app/api/teams/[teamId]/members/[membe
 import { POST as rotateKeyRoute } from "@/app/api/teams/[teamId]/rotate-key/route";
 import { GET as rotateKeyDataRoute } from "@/app/api/teams/[teamId]/rotate-key/data/route";
 import { GET as listWebhooksRoute, POST as createWebhookRoute } from "@/app/api/teams/[teamId]/webhooks/route";
+import { GET as listTenantWebhooksRoute, POST as createTenantWebhookRoute } from "@/app/api/tenant/webhooks/route";
 import { POST as assignOwnerRoute } from "@/app/api/tenant/teams/[teamId]/owner/route";
 import { GET as listOwnerlessRoute } from "@/app/api/tenant/teams/ownerless/route";
 import { deliverRowWithChain, processWebhookDeliveryBatch, type AuditOutboxRow } from "@/workers/audit-outbox-worker";
 import { enqueueAuditInTx } from "@/lib/audit/audit-outbox";
 import { buildOutboxPayload } from "@/lib/audit/audit-payload";
+import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
+import { requestWithSession, seedSession } from "./session-request";
 import { createPool } from "@/lib/db/pool-factory";
 import { prisma } from "@/lib/prisma";
 import {
@@ -130,6 +135,7 @@ import {
   AUDIT_ACTION,
   AUDIT_SCOPE,
   TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS,
+  TENANT_WEBHOOK_SUBSCRIBABLE_ACTIONS,
   WEBHOOK_DISPATCH_SUPPRESS,
 } from "@/lib/constants/audit/audit";
 import { AUDIT_TARGET_TYPE } from "@/lib/constants/audit/audit-target";
@@ -139,8 +145,11 @@ import { buildWebhookSecretAAD, WEBHOOK_SECRET_AAD_VERSION_CURRENT } from "@/lib
 
 const hex = (n: number) => randomBytes(n).toString("hex");
 const WEBHOOK_CREATOR_DIR = "20261114000300_team_webhook_creator";
+const TENANT_WEBHOOK_CREATOR_DIR = "20261116300100_tenant_webhook_creator";
 /** A team-webhook-subscribable action the dispatcher does not suppress. */
 const EVENT = AUDIT_ACTION.ENTRY_CREATE;
+/** A tenant-webhook-subscribable action the dispatcher does not suppress. */
+const TENANT_EVENT = AUDIT_ACTION.SHARE_CREATE;
 
 function jsonRequest(url: string, method: string, body?: unknown): NextRequest {
   return new NextRequest(url, {
@@ -1496,6 +1505,370 @@ describe("departed-member leaked authority — real-DB integration", () => {
       );
       expect(Object.fromEntries(after.map((r) => [r.id, r.created_by_id]))).toEqual({
         [latestWins]: null, [otherTeamOnly]: null, [otherTenantOnly]: null, [fromOutbox]: null, [nonNull]: kept.id,
+      });
+    });
+  });
+
+  // ── member-foothold-containment C3: tenant webhook delivery ────
+
+  describe("C3: tenant webhook delivery", () => {
+    let server: http.Server;
+    let port: number;
+    /** Request paths the mock receiver saw: /hook/<webhookId>. */
+    let received: string[];
+
+    beforeEach(async () => {
+      received = [];
+      server = http.createServer((req, res) => {
+        req.resume();
+        req.on("end", () => {
+          received.push(req.url ?? "");
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end("{}");
+        });
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      port = (server.address() as AddressInfo).port;
+    });
+
+    afterEach(async () => {
+      await new Promise<void>((resolve, reject) => server.close((e) => (e ? reject(e) : resolve())));
+    });
+
+    it("the chosen event is tenant-subscribable and not suppressed", () => {
+      expect(TENANT_WEBHOOK_SUBSCRIBABLE_ACTIONS).toContain(TENANT_EVENT);
+      expect(WEBHOOK_DISPATCH_SUPPRESS.has(TENANT_EVENT)).toBe(false);
+    });
+
+    async function assertPrincipal(client: { $queryRawUnsafe: <T>(q: string) => Promise<T> }, name: string) {
+      const [p] = await client.$queryRawUnsafe<{ name: string; rolsuper: boolean; rolbypassrls: boolean }[]>(
+        `SELECT current_user AS name, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user`,
+      );
+      expect(p).toEqual({ name, rolsuper: false, rolbypassrls: false });
+    }
+
+    /** A tenant ADMIN: createUser makes OWNERs and member() MEMBERs. */
+    async function admin(): Promise<{ id: string }> {
+      const user = await member();
+      await sql(`UPDATE tenant_members SET role = 'ADMIN' WHERE user_id = $1::uuid`, user.id);
+      return user;
+    }
+
+    /** POST through the route as `actor`, then point it at the mock receiver (url is not in the AAD). */
+    async function routeWebhook(actor: string): Promise<string> {
+      mockAuth.mockResolvedValue({ user: { id: actor } });
+      // The foothold write gate re-reads the actor's own session row.
+      const res = await createTenantWebhookRoute(
+        requestWithSession(await seedSession(ctx, actor, tenantId), "http://localhost/api/tenant/webhooks", {
+          body: { url: "https://hooks.example.com/x", events: [TENANT_EVENT] },
+        }),
+      );
+      expect(res.status).toBe(201);
+      const { webhook } = (await res.json()) as { webhook: { id: string } };
+      await sql(`UPDATE tenant_webhooks SET url = $2 WHERE id = $1::uuid`, webhook.id, `http://127.0.0.1:${port}/hook/${webhook.id}`);
+      return webhook.id;
+    }
+
+    /** A legacy webhook (created_by_id NULL), seeded by INSERT as before the column existed. */
+    async function legacyWebhook(): Promise<string> {
+      const id = randomUUID();
+      const masterKeyVersion = 1;
+      const aad = buildWebhookSecretAAD({
+        tableName: "TenantWebhook", version: WEBHOOK_SECRET_AAD_VERSION_CURRENT, webhookId: id, tenantId,
+      });
+      const enc = encryptServerData(hex(32), getMasterKeyByVersion(masterKeyVersion), aad);
+      await sql(
+        `INSERT INTO tenant_webhooks (id, tenant_id, url, secret_encrypted, secret_iv, secret_auth_tag,
+           master_key_version, secret_aad_version, events, is_active, created_at, updated_at)
+         VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9::text[], true, now(), now())`,
+        id, tenantId, `http://127.0.0.1:${port}/hook/${id}`, enc.ciphertext, enc.iv, enc.authTag,
+        masterKeyVersion, WEBHOOK_SECRET_AAD_VERSION_CURRENT, [TENANT_EVENT],
+      );
+      return id;
+    }
+
+    async function hook(id: string) {
+      const [row] = await sql<{ fail_count: number; is_active: boolean; last_delivered_at: Date | null; created_by_id: string | null }>(
+        `SELECT fail_count, is_active, last_delivered_at, created_by_id FROM tenant_webhooks WHERE id = $1::uuid`, id,
+      );
+      return row;
+    }
+
+    /** One TENANT event, enqueued as the worker's drain would: returns its work item id. */
+    async function tenantEvent(actor: string): Promise<string> {
+      const marker = randomUUID();
+      const payload = buildOutboxPayload({
+        scope: AUDIT_SCOPE.TENANT, action: TENANT_EVENT, userId: actor, metadata: { marker },
+      });
+      await ctx.su.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        await setBypassRlsGucs(tx);
+        await enqueueAuditInTx(tx, tenantId, payload);
+      });
+      const [row] = await sql<AuditOutboxRow>(
+        `SELECT id, tenant_id, payload, status, attempt_count, max_attempts, created_at, next_retry_at,
+                processing_started_at, sent_at, last_error
+           FROM audit_outbox WHERE tenant_id = $1::uuid AND payload->'metadata'->>'marker' = $2`,
+        tenantId, marker,
+      );
+      expect((await deliverRowWithChain(ctx.su.prisma, row, payload)).inserted).toBe(true);
+      const [item] = await sql<{ id: string }>(
+        `SELECT id FROM webhook_deliveries WHERE outbox_id = $1::uuid AND scope = 'TENANT'`, row.id,
+      );
+      return item.id;
+    }
+
+    async function drain() {
+      await assertPrincipal(ctx.worker.prisma, "passwd_outbox_worker");
+      await processWebhookDeliveryBatch(ctx.worker.prisma, 50);
+    }
+
+    async function item(id: string) {
+      const [row] = await sql<{ status: string; last_error: string | null; attempt_count: number }>(
+        `SELECT status, last_error, attempt_count FROM webhook_deliveries WHERE id = $1::uuid`, id,
+      );
+      return row;
+    }
+
+    /**
+     * dispatchTenantWebhook is fire-and-forget: wait until the control webhook
+     * (always authorized) was delivered. A skipped webhook shares that read and
+     * that delivery loop, so by then its absence is settled.
+     */
+    async function dispatchAndWait(control: string) {
+      await assertPrincipal(prisma, "passwd_app");
+      dispatchTenantWebhook({ type: TENANT_EVENT, tenantId, timestamp: new Date().toISOString(), data: {} });
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        if ((await hook(control)).last_delivered_at !== null) return;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      throw new Error("dispatchTenantWebhook did not deliver the control webhook");
+    }
+
+    /** The GET's computed verdict for one webhook, as a tenant owner sees it. */
+    async function creatorAuthorized(viewer: string, webhookId: string): Promise<boolean | null | undefined> {
+      mockAuth.mockResolvedValue({ user: { id: viewer } });
+      const res = await listTenantWebhooksRoute(new NextRequest("http://localhost/api/tenant/webhooks"));
+      expect(res.status).toBe(200);
+      const { webhooks } = (await res.json()) as { webhooks: { id: string; creatorAuthorized: boolean | null; createdById?: string }[] };
+      const found = webhooks.find((w) => w.id === webhookId);
+      expect(found).toBeDefined();
+      expect(found).not.toHaveProperty("createdById");
+      return found?.creatorAuthorized;
+    }
+
+    const lost = [
+      ["deactivated (SCIM active=false)", "deactivate"],
+      ["demoted to MEMBER", "demote"],
+      ["recorded as departed at or after the webhook was created", "departed"],
+    ] as const;
+
+    async function loseAuthority(userId: string, how: (typeof lost)[number][1]) {
+      if (how === "deactivate") expect((await scimActive(userId, false)).status).toBe(200);
+      if (how === "demote") await sql(`UPDATE tenant_members SET role = 'MEMBER' WHERE user_id = $1::uuid`, userId);
+      if (how === "departed") await recreatedDepart(userId);
+    }
+
+    it("a route-created webhook stores the session user as its creator", async () => {
+      const owner = await ctx.createUser(tenantId);
+      const creator = await admin();
+      const id = await routeWebhook(creator.id);
+      expect((await hook(id)).created_by_id).toBe(creator.id);
+      expect(await creatorAuthorized(owner, id)).toBe(true);
+    });
+
+    it("worker positive twin: a current admin's webhook is delivered", async () => {
+      const owner = await ctx.createUser(tenantId);
+      const creator = await admin();
+      const id = await routeWebhook(creator.id);
+      const work = await tenantEvent(owner);
+
+      await drain();
+
+      expect(received).toEqual([`/hook/${id}`]);
+      expect(await item(work)).toEqual({ status: "SENT", last_error: null, attempt_count: 0 });
+    });
+
+    it.each(lost)("worker skips a webhook whose creator is %s: SENT, no error or failure counted", async (_label, how) => {
+      const owner = await ctx.createUser(tenantId);
+      const creator = await admin();
+      const id = await routeWebhook(creator.id);
+      const control = await legacyWebhook();
+      await loseAuthority(creator.id, how);
+      const work = await tenantEvent(owner);
+
+      await drain();
+
+      expect(received).toEqual([`/hook/${control}`]);
+      expect(await item(work)).toEqual({ status: "SENT", last_error: null, attempt_count: 0 });
+      expect(await hook(id)).toMatchObject({ fail_count: 0, is_active: true, last_delivered_at: null });
+      expect(await creatorAuthorized(owner, id)).toBe(false);
+    });
+
+    it("worker delivers when the creator's departure record predates the webhook", async () => {
+      const owner = await ctx.createUser(tenantId);
+      const creator = await admin();
+      await recreatedDepart(creator.id, "now() - interval '1 hour'");
+      const id = await routeWebhook(creator.id);
+      await tenantEvent(owner);
+
+      await drain();
+
+      expect(received).toEqual([`/hook/${id}`]);
+      expect(await creatorAuthorized(owner, id)).toBe(true);
+    });
+
+    it("worker delivers a legacy NULL-creator webhook and the GET reports null", async () => {
+      const owner = await ctx.createUser(tenantId);
+      const id = await legacyWebhook();
+      await tenantEvent(owner);
+
+      await drain();
+
+      expect(received).toEqual([`/hook/${id}`]);
+      expect((await hook(id)).last_delivered_at).not.toBeNull();
+      expect(await creatorAuthorized(owner, id)).toBeNull();
+    });
+
+    it("dispatchTenantWebhook, as the app role: delivers a current admin's and a legacy webhook", async () => {
+      const creator = await admin();
+      const current = await routeWebhook(creator.id);
+      const legacy = await legacyWebhook();
+
+      await dispatchAndWait(legacy);
+      const deadline = Date.now() + 10_000;
+      while (received.length < 2 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+
+      expect([...received].sort()).toEqual([`/hook/${current}`, `/hook/${legacy}`].sort());
+    });
+
+    it.each(lost)("dispatchTenantWebhook, as the app role, skips a webhook whose creator is %s", async (_label, how) => {
+      const creator = await admin();
+      const id = await routeWebhook(creator.id);
+      const control = await legacyWebhook();
+      await loseAuthority(creator.id, how);
+
+      await dispatchAndWait(control);
+
+      expect(received).toEqual([`/hook/${control}`]);
+      expect(await hook(id)).toMatchObject({ fail_count: 0, is_active: true, last_delivered_at: null });
+    });
+
+    it("dispatchTenantWebhook delivers when the creator's departure record predates the webhook", async () => {
+      const creator = await admin();
+      await recreatedDepart(creator.id, "now() - interval '1 hour'");
+      const id = await routeWebhook(creator.id);
+
+      await dispatchAndWait(id);
+
+      expect(received).toEqual([`/hook/${id}`]);
+    });
+
+    // ── backfill ───────────────────────────────────────────────
+
+    it("backfill: as the NOBYPASSRLS app role, the latest HUMAN TENANT audit row wins, other tenants/actors/scopes are ignored, the outbox fallback works, non-NULL is untouched, a second run is a no-op", async () => {
+      const [older, newer, outboxActor, kept, stranger] = await Promise.all([member(), member(), member(), member(), member()]);
+      const insertHook = async (createdBy: string | null) => {
+        const id = randomUUID();
+        await sql(
+          `INSERT INTO tenant_webhooks (id, tenant_id, url, secret_encrypted, secret_iv, secret_auth_tag, events,
+             is_active, created_by_id, created_at, updated_at)
+           VALUES ($1::uuid, $2::uuid, 'https://example.invalid/hook', $3, $4, $5, ARRAY[]::text[], true, $6::uuid, now(), now())`,
+          id, tenantId, hex(16), hex(12), hex(16), createdBy,
+        );
+        return id;
+      };
+      const auditCreate = (o: { tenant: string; webhookId: string; user: string; at: string; actorType?: string; scope?: string }) =>
+        sql(
+          `INSERT INTO audit_logs (id, tenant_id, scope, action, user_id, actor_type, metadata, outbox_id, created_at)
+           VALUES ($1::uuid, $2::uuid, $7::"AuditScope", 'TENANT_WEBHOOK_CREATE', $3::uuid, $4::"ActorType", $5::jsonb, $6::uuid, ${o.at})`,
+          randomUUID(), o.tenant, o.user, o.actorType ?? "HUMAN", JSON.stringify({ webhookId: o.webhookId }), randomUUID(),
+          o.scope ?? "TENANT",
+        );
+
+      const latestWins = await insertHook(null);
+      await auditCreate({ tenant: tenantId, webhookId: latestWins, user: older.id, at: "now() - interval '2 minutes'" });
+      await auditCreate({ tenant: tenantId, webhookId: latestWins, user: newer.id, at: "now() - interval '1 minute'" });
+      // A newer non-human or non-TENANT row must not displace the human one.
+      await auditCreate({ tenant: tenantId, webhookId: latestWins, user: stranger.id, at: "now()", actorType: "SYSTEM" });
+      await auditCreate({ tenant: tenantId, webhookId: latestWins, user: stranger.id, at: "now()", scope: "PERSONAL" });
+      const systemOnly = await insertHook(null);
+      await auditCreate({ tenant: tenantId, webhookId: systemOnly, user: stranger.id, at: "now()", actorType: "SYSTEM" });
+      const otherTenantOnly = await insertHook(null);
+      await auditCreate({ tenant: otherTenantId, webhookId: otherTenantOnly, user: stranger.id, at: "now()" });
+      const fromOutbox = await insertHook(null);
+      await ctx.su.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        await setBypassRlsGucs(tx);
+        await enqueueAuditInTx(tx, tenantId, buildOutboxPayload({
+          scope: AUDIT_SCOPE.TENANT, action: AUDIT_ACTION.TENANT_WEBHOOK_CREATE, userId: outboxActor.id,
+          metadata: { webhookId: fromOutbox, url: "https://example.invalid/***" },
+        }));
+      });
+      const nonNull = await insertHook(kept.id);
+      await auditCreate({ tenant: tenantId, webhookId: nonNull, user: stranger.id, at: "now()" });
+      const none = await insertHook(null);
+      const all = [latestWins, systemOnly, otherTenantOnly, fromOutbox, nonNull, none];
+      const expected = {
+        [latestWins]: newer.id, [systemOnly]: null, [otherTenantOnly]: null, [fromOutbox]: outboxActor.id,
+        [nonNull]: kept.id, [none]: null,
+      };
+
+      const block = readBackfillBlock(TENANT_WEBHOOK_CREATOR_DIR, "tenant-webhook-creator");
+      const pool = createPool({ connectionString: appConnectionString(), max: 1 });
+      try {
+        const client = await pool.connect();
+        try {
+          const [principal] = (await client.query<{ bypass: boolean; superuser: boolean }>(
+            `SELECT rolbypassrls AS bypass, rolsuper AS superuser FROM pg_roles WHERE rolname = current_user`,
+          )).rows;
+          expect(principal).toEqual({ bypass: false, superuser: false });
+          await client.query("BEGIN");
+          try {
+            const sentinels = gucSentinels();
+            await setGucs(client, sentinels);
+            // The subject: without the block's own bypass the rows are invisible to this role.
+            expect((await client.query(`SELECT id FROM tenant_webhooks WHERE id = ANY($1::uuid[])`, [all])).rows).toEqual([]);
+
+            const read = async () => {
+              await setTestBypass(client, ["tenant_webhooks"]);
+              const rows = (await client.query<{ id: string; created_by_id: string | null }>(
+                `SELECT id, created_by_id FROM tenant_webhooks WHERE id = ANY($1::uuid[])`, [all],
+              )).rows;
+              await setGucs(client, sentinels);
+              return Object.fromEntries(rows.map((r) => [r.id, r.created_by_id]));
+            };
+
+            const first = collectNotices(client);
+            await client.query(block);
+            first.stop();
+            expect(await readGucs(client)).toEqual(sentinels);
+            expect(first.messages.some((m) => m.startsWith("tenant-webhook-creator backfill:"))).toBe(true);
+            expect(await read()).toEqual(expected);
+
+            const second = collectNotices(client);
+            await client.query(block);
+            second.stop();
+            expect(second.messages).toContain(
+              "tenant-webhook-creator backfill: 0 webhook(s) attributed from audit_logs, 0 from audit_outbox",
+            );
+            expect(await readGucs(client)).toEqual(sentinels);
+            expect(await read()).toEqual(expected);
+          } finally {
+            await client.query("ROLLBACK");
+          }
+        } finally {
+          client.release();
+        }
+      } finally {
+        await pool.end();
+      }
+
+      // Nothing committed.
+      const after = await sql<{ id: string; created_by_id: string | null }>(
+        `SELECT id, created_by_id FROM tenant_webhooks WHERE id = ANY($1::uuid[])`, all,
+      );
+      expect(Object.fromEntries(after.map((r) => [r.id, r.created_by_id]))).toEqual({
+        [latestWins]: null, [systemOnly]: null, [otherTenantOnly]: null, [fromOutbox]: null, [nonNull]: kept.id, [none]: null,
       });
     });
   });

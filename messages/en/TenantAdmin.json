@@ -282,12 +282,15 @@
   "containmentKindServiceAccountTokens": "Service account tokens they issued (revoked)",
   "containmentKindMcpClients": "MCP clients (deactivated, and their tokens revoked)",
   "containmentKindBreakglassGrants": "Break-glass access they requested (revoked)",
+  "containmentKindTenantWebhooks": "Webhooks they created (deleted)",
+  "containmentKindVaultResets": "Pending vault resets they started (revoked)",
   "containmentKindEmergencyAccessGrants": "Their emergency access grants (revoked)",
   "containmentScimTokenUnnamed": "Unnamed token",
+  "containmentCreated": "Created: {date}",
   "containmentExpires": "Expires: {date}",
   "containmentEscrowed": "Their vault key is shared with this contact",
   "containmentDeactivateNote": "Contain a compromised member before deactivating them at your identity provider: a deactivated member can no longer be contained here.",
-  "containmentScope": "Not covered here: share links and sends they created, team invitations they sent, vault resets they started or approved, role and policy changes, webhooks, directory sync and audit delivery settings, and changes they made to items other admins created. Review the audit log for those.",
+  "containmentScope": "Not covered here: share links and sends they created, team invitations they sent, vault resets that were already approved, role and policy changes, directory sync and audit delivery settings, and changes they made to items other admins created. Review the audit log for those.",
   "containmentChosen": "Also, in the same step:",
   "containmentUnlinkWarning": "Unlinking may stop {name} from signing in if it is their only way to sign in (SSO). It does not stop a provider that links accounts by email (Google with allowed domains) from linking an account that asserts their email again; contain that at the identity provider.",
   "containmentIntegrationsWarning": "Deactivating a service account or MCP client stops the integrations that use it.",
@@ -298,6 +301,9 @@
   "containmentNameServiceAccountTokens": "service account tokens",
   "containmentNameMcpClients": "MCP clients",
   "containmentNameBreakglassGrants": "break-glass access",
+  "containmentNameTenantWebhooks": "webhooks",
+  "containmentNameVaultResets": "pending vault resets",
   "containmentNameEmergencyAccessGrants": "emergency access grants",
-  "containmentSkipped": "Some ticked items were not changed because they are no longer active or no longer theirs: {kinds}. Review the list and the audit log."
+  "containmentSkipped": "Some ticked items were not changed because they are no longer active or no longer theirs: {kinds}. Review the list and the audit log.",
+  "containmentRemaining": "{count, plural, one {# live item created by this member remains} other {# live items created by this member remain}}, including any you did not tick. Review the list and the audit log."
 }

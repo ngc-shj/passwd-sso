@@ -1723,6 +1723,9 @@ model TenantWebhook {
   failCount        Int       @default(0) @map("fail_count")
   lastDeliveredAt  DateTime? @map("last_delivered_at") @db.Timestamptz(3)
   lastFailedAt     DateTime? @map("last_failed_at") @db.Timestamptz(3)
+  // The user who created it; NULL for a webhook created before this column.
+  // No relation: it outlives the user row, and delivery checks live authority.
+  createdById      String?   @map("created_by_id") @db.Uuid
   createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 

@@ -2517,3 +2517,152 @@ describe("team webhook delivery — creator authority", () => {
     expect(departureFindMany).not.toHaveBeenCalled();
   });
 });
+
+// ─── Tenant webhook delivery: creator authority ───────────────────────────────
+//
+// A tenant webhook is delivered only while its creator's tenant row is active
+// and holds WEBHOOK_MANAGE, and they have not left the tenant since creating it;
+// a NULL creator is a legacy row and still delivers.
+
+describe("tenant webhook delivery — creator authority", () => {
+  const CREATOR_ID = "00000000-0000-4000-8000-0000000000a1";
+  const WEBHOOK_OK = "00000000-0000-4000-8000-0000000000b1";
+  const WEBHOOK_GONE = "00000000-0000-4000-8000-0000000000b2";
+  const WEBHOOK_LEGACY = "00000000-0000-4000-8000-0000000000b3";
+  const CREATED_AT = new Date("2026-02-01T00:00:00Z");
+
+  const webhookRow = (id: string, createdById: string | null) => ({
+    id,
+    url: "https://example.com/hook",
+    secretEncrypted: "e",
+    secretIv: "i",
+    secretAuthTag: "t",
+    masterKeyVersion: 1,
+    secretAadVersion: 2,
+    tenantId: TENANT_ID,
+    failCount: 0,
+    createdById,
+    createdAt: CREATED_AT,
+  });
+
+  function setup(opts: {
+    webhooks: ReturnType<typeof webhookRow>[];
+    members: { userId: string; role: string; deactivatedAt: Date | null }[];
+    departures?: { userId: string; departedAt: Date }[];
+  }) {
+    const tenantWebhookFindMany = vi.fn().mockResolvedValue(opts.webhooks);
+    const tenantMemberFindMany = vi.fn().mockResolvedValue(opts.members);
+    const departureFindMany = vi.fn().mockResolvedValue(opts.departures ?? []);
+    const executed: string[] = [];
+    const item = {
+      id: "00000000-0000-4000-8000-0000000000c1",
+      outbox_id: "00000000-0000-4000-8000-0000000000c2",
+      tenant_id: TENANT_ID,
+      scope: "TENANT",
+      team_id: null,
+      action: AUDIT_ACTION.SHARE_CREATE,
+      attempt_count: 0,
+      max_attempts: 8,
+    };
+    mockTransaction.mockImplementation((async (fn: (tx: unknown) => Promise<unknown>) =>
+      fn({
+        $executeRaw: mockExecuteRaw,
+        $executeRawUnsafe: vi.fn(async (sql: string) => {
+          executed.push(sql);
+        }),
+        $queryRawUnsafe: vi.fn(async (sql: string) => {
+          if (sql.includes("SKIP LOCKED")) return [item];
+          if (sql.includes("FROM audit_outbox")) {
+            return [{ created_at: new Date(), payload: { metadata: {} } }];
+          }
+          return [];
+        }),
+        tenantWebhook: { findMany: tenantWebhookFindMany, update: vi.fn() },
+        tenantMember: { findMany: tenantMemberFindMany },
+        tenantMemberDeparture: { findMany: departureFindMany },
+      })) as unknown as Parameters<typeof mockTransaction.mockImplementation>[0],
+    );
+    return { tenantMemberFindMany, departureFindMany, executed };
+  }
+
+  const deliveredIds = () =>
+    (mockDeliverToWebhookRecords.mock.calls[0]?.[0] ?? []).map((w: { id: string }) => w.id);
+
+  beforeEach(resetMocks);
+
+  it("delivers a webhook whose creator is an active ADMIN", async () => {
+    setup({
+      webhooks: [webhookRow(WEBHOOK_OK, CREATOR_ID)],
+      members: [{ userId: CREATOR_ID, role: "ADMIN", deactivatedAt: null }],
+    });
+    await processWebhookDeliveryBatch(new PrismaClient(), 5);
+    expect(deliveredIds()).toEqual([WEBHOOK_OK]);
+  });
+
+  it.each([
+    ["has no tenant row", []],
+    ["is deactivated", [{ userId: CREATOR_ID, role: "ADMIN", deactivatedAt: new Date() }]],
+    ["was demoted to MEMBER", [{ userId: CREATOR_ID, role: "MEMBER", deactivatedAt: null }]],
+  ])("skips a webhook whose creator %s, logs it, and does not fail the work item", async (_label, members) => {
+    const { executed } = setup({ webhooks: [webhookRow(WEBHOOK_GONE, CREATOR_ID)], members });
+    await processWebhookDeliveryBatch(new PrismaClient(), 5);
+    expect(mockDeliverToWebhookRecords).not.toHaveBeenCalled();
+    expect(mockLoggerWarn).toHaveBeenCalledWith(
+      { webhookId: WEBHOOK_GONE, scope: "TENANT", _logType: "outbox.webhook_creator_unauthorized" },
+      "outbox.webhook_creator_unauthorized",
+    );
+    // Marked SENT, never routed to the error/retry path.
+    expect(executed.some((s) => s.includes("status = 'SENT'"))).toBe(true);
+    expect(executed.some((s) => s.includes("last_error = $"))).toBe(false);
+  });
+
+  it("skips a webhook whose creator is recorded as departed at or after its creation", async () => {
+    setup({
+      webhooks: [webhookRow(WEBHOOK_GONE, CREATOR_ID)],
+      members: [{ userId: CREATOR_ID, role: "ADMIN", deactivatedAt: null }],
+      departures: [{ userId: CREATOR_ID, departedAt: CREATED_AT }],
+    });
+    await processWebhookDeliveryBatch(new PrismaClient(), 5);
+    expect(mockDeliverToWebhookRecords).not.toHaveBeenCalled();
+  });
+
+  it("delivers when the creator's departure predates the webhook", async () => {
+    setup({
+      webhooks: [webhookRow(WEBHOOK_OK, CREATOR_ID)],
+      members: [{ userId: CREATOR_ID, role: "ADMIN", deactivatedAt: null }],
+      departures: [{ userId: CREATOR_ID, departedAt: new Date("2026-01-01T00:00:00Z") }],
+    });
+    await processWebhookDeliveryBatch(new PrismaClient(), 5);
+    expect(deliveredIds()).toEqual([WEBHOOK_OK]);
+  });
+
+  it("delivers a legacy webhook with no creator without reading tenant rows", async () => {
+    const { tenantMemberFindMany, departureFindMany } = setup({
+      webhooks: [webhookRow(WEBHOOK_LEGACY, null)],
+      members: [],
+    });
+    await processWebhookDeliveryBatch(new PrismaClient(), 5);
+    expect(deliveredIds()).toEqual([WEBHOOK_LEGACY]);
+    expect(tenantMemberFindMany).not.toHaveBeenCalled();
+    expect(departureFindMany).not.toHaveBeenCalled();
+  });
+
+  it("filters mixed webhooks and reads the item's tenant once", async () => {
+    const { tenantMemberFindMany } = setup({
+      webhooks: [
+        webhookRow(WEBHOOK_OK, CREATOR_ID),
+        webhookRow(WEBHOOK_GONE, "00000000-0000-4000-8000-0000000000a2"),
+        webhookRow(WEBHOOK_LEGACY, null),
+      ],
+      members: [{ userId: CREATOR_ID, role: "OWNER", deactivatedAt: null }],
+    });
+    await processWebhookDeliveryBatch(new PrismaClient(), 5);
+    expect(deliveredIds()).toEqual([WEBHOOK_OK, WEBHOOK_LEGACY]);
+    expect(tenantMemberFindMany).toHaveBeenCalledTimes(1);
+    expect(tenantMemberFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { tenantId: TENANT_ID, userId: { in: [CREATOR_ID, "00000000-0000-4000-8000-0000000000a2"] } },
+      }),
+    );
+  });
+});

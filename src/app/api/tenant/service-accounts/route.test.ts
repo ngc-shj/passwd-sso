@@ -38,7 +38,12 @@ const { mockUserFindMany, mockWithBypassRls } = vi.hoisted(() => ({
   mockWithBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
 }));
 
+const { mockLockFootholdWriter } = vi.hoisted(() => ({
+  mockLockFootholdWriter: vi.fn(async () => new Map()),
+}));
+
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/tenant/foothold-write-gate", () => ({ lockFootholdWriter: mockLockFootholdWriter }));
 vi.mock("@/lib/auth/access/tenant-auth", () => {
   class TenantAuthError extends Error {
     status: number;
@@ -90,6 +95,8 @@ import { GET, POST } from "@/app/api/tenant/service-accounts/route";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { TenantAuthError } from "@/lib/auth/access/tenant-auth";
 import { MAX_SERVICE_ACCOUNTS_PER_TENANT } from "@/lib/constants/auth/service-account";
+import { footholdGateCells } from "@/__tests__/helpers/foothold-gate-cells";
+import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 
 // Module-scope snapshot: route.ts's module-level `createRateLimiter(...)`
 // call runs at import time above. Must be captured before any
@@ -200,6 +207,25 @@ describe("POST /api/tenant/service-accounts", () => {
     // stub removed); reset its module-scoped throttle so a prior test's
     // emission does not swallow this test's (5-min window, per-scope key).
     __resetThrottleForTests();
+  });
+
+  footholdGateCells({
+    gate: mockLockFootholdWriter,
+    permission: TENANT_PERMISSION.SERVICE_ACCOUNT_MANAGE,
+    actorId: DEFAULT_SESSION.user.id,
+    tenantId: "tenant-1",
+    okStatus: 201,
+    arrange: () => {
+      mockAuth.mockResolvedValue(DEFAULT_SESSION);
+      mockRequireTenantPermission.mockResolvedValue(ACTOR);
+      mockServiceAccountCount.mockResolvedValue(0);
+      mockServiceAccountCreate.mockResolvedValue(makeSA({ id: "sa-new" }));
+    },
+    call: () =>
+      POST(createRequest("POST", "http://localhost/api/tenant/service-accounts", {
+        body: { name: "ci-bot", description: "CI pipeline bot" },
+      })),
+    assertNoWrite: () => expect(mockServiceAccountCreate).not.toHaveBeenCalled(),
   });
 
   it("creates a service account successfully", async () => {

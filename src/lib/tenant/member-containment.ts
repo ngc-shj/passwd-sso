@@ -2,9 +2,10 @@ import type { NextRequest } from "next/server";
 import type { Prisma, TenantRole } from "@prisma/client";
 import { logAuditBulkInTx, tenantAuditBase } from "@/lib/audit/audit";
 import type { AuditLogParams } from "@/lib/audit/audit-payload";
-import { hasTenantPermission, type TenantPermission } from "@/lib/auth/access/tenant-auth";
+import { hasTenantPermission, type TenantPermission } from "@/lib/auth/access/tenant-permissions";
 import { transition } from "@/lib/emergency-access/emergency-access-state";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE, EA_ACTOR, EA_STATUS, TENANT_ROLE } from "@/lib/constants";
+import { maskUrlForDisplay } from "@/lib/url/url-validation";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import type { MemberContainmentInput } from "@/lib/validations/member-containment";
 
@@ -30,6 +31,8 @@ export const FOOTHOLD_KIND = {
   SERVICE_ACCOUNT_TOKENS: "serviceAccountTokens",
   MCP_CLIENTS: "mcpClients",
   BREAKGLASS_GRANTS: "breakglassGrants",
+  TENANT_WEBHOOKS: "tenantWebhooks",
+  VAULT_RESETS: "vaultResets",
   EMERGENCY_ACCESS_GRANTS: "emergencyAccessGrants",
 } as const;
 
@@ -37,6 +40,18 @@ export type FootholdKind = (typeof FOOTHOLD_KIND)[keyof typeof FOOTHOLD_KIND];
 
 /** In the pinned write order: emergency-access grants last. */
 const FOOTHOLD_KINDS: readonly FootholdKind[] = Object.values(FOOTHOLD_KIND);
+
+/** The Prisma model delegate each kind's rows live in. */
+export const FOOTHOLD_MODEL: Record<FootholdKind, string> = {
+  scimTokens: "scimToken",
+  serviceAccounts: "serviceAccount",
+  serviceAccountTokens: "serviceAccountToken",
+  mcpClients: "mcpClient",
+  breakglassGrants: "personalLogAccessGrant",
+  tenantWebhooks: "tenantWebhook",
+  vaultResets: "adminVaultReset",
+  emergencyAccessGrants: "emergencyAccessGrant",
+};
 
 // What managing each kind takes outside this flow. MEMBER_MANAGE (which the
 // route already requires) is the gate; these are defence in depth — OWNER and
@@ -48,6 +63,8 @@ const KIND_PERMISSION: Record<FootholdKind, TenantPermission | null> = {
   serviceAccountTokens: TENANT_PERMISSION.SERVICE_ACCOUNT_MANAGE,
   mcpClients: TENANT_PERMISSION.SERVICE_ACCOUNT_MANAGE,
   breakglassGrants: TENANT_PERMISSION.BREAKGLASS_REQUEST,
+  tenantWebhooks: TENANT_PERMISSION.WEBHOOK_MANAGE,
+  vaultResets: TENANT_PERMISSION.MEMBER_VAULT_RESET,
   emergencyAccessGrants: null,
 };
 
@@ -81,6 +98,8 @@ export function toContainmentRequest(input: MemberContainmentInput | null): Memb
       serviceAccountTokens: unique(revoke.serviceAccountTokenIds),
       mcpClients: unique(revoke.mcpClientIds),
       breakglassGrants: unique(revoke.breakglassGrantIds),
+      tenantWebhooks: unique(revoke.tenantWebhookIds),
+      vaultResets: unique(revoke.vaultResetIds),
       emergencyAccessGrants: unique(revoke.emergencyAccessGrantIds),
     },
   };
@@ -107,6 +126,9 @@ export function refusedContainmentKinds(role: TenantRole, request: MemberContain
 // - Break-glass grant: the admin's tenant, requested by the member, not
 //   revoked, not expired — one still in its cooling-off (effectiveAt in the
 //   future) is live: it becomes usable by itself.
+// - Tenant webhook: the admin's tenant, created by the member.
+// - Vault reset: the admin's tenant, initiated by the member, not yet
+//   approved, executed or revoked, not expired.
 // - Emergency-access grant: the member's own, in whichever tenant it was
 //   filed under, not revoked or rejected.
 
@@ -129,6 +151,8 @@ export async function listMemberContainment(
   const saTokenLive = { tenantId, createdById: targetUserId, revokedAt: null, expiresAt: { gt: now } };
   const mcpLive = { tenantId, createdById: targetUserId, isActive: true };
   const breakglassLive = { tenantId, requesterId: targetUserId, revokedAt: null, expiresAt: { gt: now } };
+  const webhookLive = { tenantId, createdById: targetUserId };
+  const resetLive = { tenantId, initiatedById: targetUserId, approvedAt: null, executedAt: null, revokedAt: null, expiresAt: { gt: now } };
   const eaLive = { ownerId: targetUserId, status: { notIn: [EA_STATUS.REVOKED, EA_STATUS.REJECTED] } };
   const accounts = await tx.account.findMany({
     where: { userId: targetUserId },
@@ -175,6 +199,24 @@ export async function listMemberContainment(
         select: { id: true, targetUserId: true, reason: true, effectiveAt: true, expiresAt: true, createdAt: true },
         orderBy: { createdAt: "asc" },
       }),
+    tenantWebhooks: () =>
+      tx.tenantWebhook.findMany({
+        where: webhookLive,
+        select: { id: true, url: true, isActive: true, createdAt: true },
+        orderBy: { createdAt: "asc" },
+      }),
+    vaultResets: () =>
+      tx.adminVaultReset.findMany({
+        where: resetLive,
+        select: {
+          id: true,
+          targetUserId: true,
+          targetUser: { select: { name: true, email: true } },
+          createdAt: true,
+          expiresAt: true,
+        },
+        orderBy: { createdAt: "asc" },
+      }),
     emergencyAccessGrants: async () => {
       const grants = await tx.emergencyAccessGrant.findMany({
         where: eaLive,
@@ -214,6 +256,12 @@ export interface OtherTenantContainment {
 
 export interface MemberContainmentResult {
   contained: ContainedCounts;
+  /**
+   * Per kind the actor may contain, the member's live rows once the writes are
+   * done: what the request did not name, or could not write. Zero kinds are
+   * kept, so a kind the actor may contain is distinguishable from one it may not.
+   */
+  remaining: Partial<Record<FootholdKind, number>>;
   unlinkedAccountIds: string[];
   /** Keyed by tenant id; never the admin's tenant. */
   otherTenants: Map<string, OtherTenantContainment>;
@@ -244,6 +292,7 @@ export async function containMemberInTx(
     tenantId,
     targetUserId,
     request,
+    role,
     now = new Date(),
   }: {
     req: NextRequest;
@@ -251,6 +300,7 @@ export async function containMemberInTx(
     tenantId: string;
     targetUserId: string;
     request: MemberContainmentRequest;
+    role: TenantRole;
     now?: Date;
   },
 ): Promise<MemberContainmentResult> {
@@ -259,9 +309,11 @@ export async function containMemberInTx(
   const saTokenLive = { tenantId, createdById: targetUserId, revokedAt: null, expiresAt: { gt: now } };
   const mcpLive = { tenantId, createdById: targetUserId, isActive: true };
   const breakglassLive = { tenantId, requesterId: targetUserId, revokedAt: null, expiresAt: { gt: now } };
+  const webhookLive = { tenantId, createdById: targetUserId };
+  const resetLive = { tenantId, initiatedById: targetUserId, approvedAt: null, executedAt: null, revokedAt: null, expiresAt: { gt: now } };
   const eaLive = { ownerId: targetUserId, status: { notIn: [EA_STATUS.REVOKED, EA_STATUS.REJECTED] } };
   const base = tenantAuditBase(req, actorUserId, tenantId);
-  const audit = (rows: Required<Pick<AuditLogParams, "action" | "targetType" | "targetId" | "metadata">>[]) =>
+  const audit = (rows: (Required<Pick<AuditLogParams, "action" | "metadata">> & Pick<AuditLogParams, "targetType" | "targetId">)[]) =>
     logAuditBulkInTx(tx, tenantId, rows.map((params) => ({ ...base, ...params })));
   const contained: ContainedCounts = {};
   const otherTenants = new Map<string, OtherTenantContainment>();
@@ -433,6 +485,49 @@ export async function containMemberInTx(
     count(FOOTHOLD_KIND.BREAKGLASS_GRANTS, breakglassIds, revoked.length);
   }
 
+  // Webhooks: read on the predicate, then deleted by exactly those ids (a
+  // delete returns no rows), as the accounts step: a count that differs means
+  // one went meanwhile and rolls the containment back for a retry rather than
+  // audit a row it did not delete.
+  const webhookIds = request.revoke.tenantWebhooks;
+  if (webhookIds.length > 0) {
+    const webhooks = await tx.tenantWebhook.findMany({
+      where: { id: { in: [...webhookIds] }, ...webhookLive },
+      select: { id: true, url: true },
+    });
+    if (webhooks.length > 0) {
+      const { count: deleted } = await tx.tenantWebhook.deleteMany({
+        where: { id: { in: webhooks.map((w) => w.id) }, ...webhookLive },
+      });
+      if (deleted !== webhooks.length) {
+        throw new Error(`member containment: ${deleted} of ${webhooks.length} webhooks read were deleted`);
+      }
+    }
+    await audit(webhooks.map((webhook) => ({
+      action: AUDIT_ACTION.TENANT_WEBHOOK_DELETE,
+      metadata: { webhookId: webhook.id, url: maskUrlForDisplay(webhook.url), targetUserId },
+    })));
+    count(FOOTHOLD_KIND.TENANT_WEBHOOKS, webhookIds, webhooks.length);
+  }
+
+  // Resets the member initiated that nobody approved: revoked, the token
+  // cleared. The target is not told — an unapproved reset was never announced.
+  const resetIds = request.revoke.vaultResets;
+  if (resetIds.length > 0) {
+    const revoked = await tx.adminVaultReset.updateManyAndReturn({
+      where: { id: { in: [...resetIds] }, ...resetLive },
+      data: { revokedAt: now, encryptedToken: null },
+      select: { id: true, targetUserId: true },
+    });
+    await audit(revoked.map((reset) => ({
+      action: AUDIT_ACTION.ADMIN_VAULT_RESET_REVOKE,
+      targetType: "User",
+      targetId: reset.targetUserId,
+      metadata: { resetId: reset.id, initiatedById: targetUserId, revokedById: actorUserId },
+    })));
+    count(FOOTHOLD_KIND.VAULT_RESETS, resetIds, revoked.length);
+  }
+
   // Last: the member's emergency-access grants, through the state machine's
   // single writer, clearing what the owner's permanent revoke clears — one by
   // one (at most MEMBER_CONTAINMENT_MAX_IDS), as transition() writes a single
@@ -474,5 +569,23 @@ export async function containMemberInTx(
     count(FOOTHOLD_KIND.EMERGENCY_ACCESS_GRANTS, eaIds, revoked.length);
   }
 
-  return { contained, unlinkedAccountIds, otherTenants };
+  // What is still live after the writes, in the same transaction under the
+  // same credential lock: no timestamp baseline, so no clock skew and no gap
+  // between the claim and the count. Counts rows the request did not select.
+  const counters: Record<FootholdKind, () => Promise<number>> = {
+    scimTokens: () => tx.scimToken.count({ where: scimLive }),
+    serviceAccounts: () => tx.serviceAccount.count({ where: saLive }),
+    serviceAccountTokens: () => tx.serviceAccountToken.count({ where: saTokenLive }),
+    mcpClients: () => tx.mcpClient.count({ where: mcpLive }),
+    breakglassGrants: () => tx.personalLogAccessGrant.count({ where: breakglassLive }),
+    tenantWebhooks: () => tx.tenantWebhook.count({ where: webhookLive }),
+    vaultResets: () => tx.adminVaultReset.count({ where: resetLive }),
+    emergencyAccessGrants: () => tx.emergencyAccessGrant.count({ where: eaLive }),
+  };
+  const remaining: Partial<Record<FootholdKind, number>> = {};
+  for (const kind of FOOTHOLD_KINDS) {
+    if (mayContainKind(role, kind)) remaining[kind] = await counters[kind]();
+  }
+
+  return { contained, remaining, unlinkedAccountIds, otherTenants };
 }

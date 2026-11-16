@@ -10,7 +10,7 @@ if (typeof globalThis.ResizeObserver === "undefined") {
   } as unknown as typeof ResizeObserver;
 }
 
-import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, act, fireEvent, within } from "@testing-library/react";
 
 const { mockFetch, mockToast, mockCanUsePasskeyRecovery, mockReauthenticateWithPasskey } = vi.hoisted(() => ({
   mockCanUsePasskeyRecovery: vi.fn(),
@@ -133,6 +133,49 @@ describe("ScimTokenManager", () => {
       expect(screen.getByText("Production")).toBeInTheDocument();
       expect(screen.getByText("scimTokenActive")).toBeInTheDocument();
     });
+  });
+
+  it("notes a token whose creator lost access only for false: not for true, null or an absent flag", async () => {
+    const token = (id: string, description: string, creatorAuthorized?: boolean | null) => ({
+      ...ACTIVE_TOKEN,
+      id,
+      description,
+      ...(creatorAuthorized === undefined ? {} : { creatorAuthorized }),
+    });
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve([
+          token("t-false", "Orphaned", false),
+          token("t-true", "Healthy", true),
+          token("t-null", "Legacy", null),
+          token("t-absent", "Older server"),
+        ]),
+    });
+    await act(async () => {
+      render(<ScimTokenManager locale="en" />);
+    });
+    await waitFor(() => expect(screen.getByText("Orphaned")).toBeInTheDocument());
+
+    // Each note is scoped to its own row: one note on one row.
+    const rowOf = (name: string) => screen.getByText(name).closest(".border") as HTMLElement;
+    expect(within(rowOf("Orphaned")).getByText("scimCreatorUnauthorized")).toBeInTheDocument();
+    for (const name of ["Healthy", "Legacy", "Older server"]) {
+      expect(within(rowOf(name)).queryByText("scimCreatorUnauthorized")).not.toBeInTheDocument();
+    }
+    expect(screen.getAllByText("scimCreatorUnauthorized")).toHaveLength(1);
+  });
+
+  it("does not note a revoked token even when its creator lost access", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve([{ ...REVOKED_TOKEN, creatorAuthorized: false }]),
+    });
+    await act(async () => {
+      render(<ScimTokenManager locale="en" />);
+    });
+    await waitFor(() => expect(mockFetch).toHaveBeenCalled());
+    expect(screen.queryByText("scimCreatorUnauthorized")).not.toBeInTheDocument();
   });
 
   it("classifies revoked token correctly", async () => {

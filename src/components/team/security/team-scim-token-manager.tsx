@@ -64,6 +64,8 @@ interface ScimToken {
   expiresAt: string | null;
   revokedAt: string | null;
   createdBy: { id: string; name: string | null; email: string | null } | null;
+  /** false: the creator no longer holds SCIM management in this tenant; null: no creator on record. */
+  creatorAuthorized?: boolean | null;
 }
 
 interface Props {
@@ -237,6 +239,11 @@ export function ScimTokenManager({ locale }: Props) {
               </span>
             )}
           </div>
+          {status === "active" && token.creatorAuthorized === false && (
+            <p className="text-xs text-amber-600 dark:text-amber-400">
+              {t("scimCreatorUnauthorized")}
+            </p>
+          )}
         </div>
         {status === "active" && (
           <AlertDialog>

@@ -28,6 +28,8 @@ import {
   createPinnedDispatcher,
 } from "@/lib/http/external-http";
 import { maskUrlForDisplay } from "@/lib/url/url-validation";
+import { creatorVerdicts } from "@/lib/tenant/creator-authority";
+import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 
 /**
  * Raised when a webhook row's secretAadVersion is below the supported floor.
@@ -272,15 +274,35 @@ export async function deliverToWebhookRecords(
  */
 export function dispatchTenantWebhook(event: TenantWebhookEvent): void {
   void (async () => {
-    const rows = await withBypassRls(prisma, async (tx) =>
-      tx.tenantWebhook.findMany({
+    const rows = await withBypassRls(prisma, async (tx) => {
+      const candidates = await tx.tenantWebhook.findMany({
         where: {
           tenantId: event.tenantId,
           isActive: true,
           events: { has: event.type },
         },
-      }),
-    BYPASS_GRANT.TENANT_WEBHOOK_DISPATCH);
+      });
+      // A webhook runs on its creator's authority: skip it (not a failure) once
+      // the creator no longer holds WEBHOOK_MANAGE in the tenant or has left it
+      // since creating the webhook.
+      const verdicts = await creatorVerdicts(
+        tx,
+        event.tenantId,
+        candidates,
+        TENANT_PERMISSION.WEBHOOK_MANAGE,
+      );
+      return candidates.filter((r) => {
+        // Deliver only on a positive verdict; a missing one fails closed.
+        const authorized = verdicts.get(r.id) === true || verdicts.get(r.id) === "legacy";
+        if (!authorized) {
+          getLogger().warn(
+            { webhookId: r.id, tenantId: event.tenantId, _logType: "webhook_dispatch.creator_unauthorized" },
+            "webhook_dispatch.creator_unauthorized",
+          );
+        }
+        return authorized;
+      });
+    }, BYPASS_GRANT.TENANT_WEBHOOK_DISPATCH);
 
     if (rows.length === 0) return;
 

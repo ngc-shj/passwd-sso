@@ -20,6 +20,9 @@ import {
 import { saTokenCreateSchema } from "@/lib/validations/service-account";
 import { MS_PER_DAY } from "@/lib/constants/time";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
+import { creatorAuthorizedOf, creatorVerdicts } from "@/lib/tenant/creator-authority";
+import { lockFootholdWriter } from "@/lib/tenant/foothold-write-gate";
+import { footholdWriteErrorResponse } from "@/lib/http/lock-conflict-response";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -57,8 +60,8 @@ async function handleGET(req: NextRequest, { params }: Params) {
     return notFound();
   }
 
-  const tokens = await withTenantRls(prisma, actor.tenantId, async (tx) =>
-    tx.serviceAccountToken.findMany({
+  const tokens = await withTenantRls(prisma, actor.tenantId, async (tx) => {
+    const rows = await tx.serviceAccountToken.findMany({
       where: { serviceAccountId: id },
       select: {
         id: true,
@@ -69,10 +72,17 @@ async function handleGET(req: NextRequest, { params }: Params) {
         createdAt: true,
         revokedAt: true,
         lastUsedAt: true,
+        createdById: true,
       },
       orderBy: { createdAt: "desc" },
-    }),
-  );
+    });
+    const verdicts = await creatorVerdicts(tx, actor.tenantId, rows, TENANT_PERMISSION.SERVICE_ACCOUNT_MANAGE);
+    // createdById itself stays server-side; a NULL creator is legacy: null.
+    return rows.map(({ createdById: _createdById, ...rest }) => ({
+      ...rest,
+      creatorAuthorized: creatorAuthorizedOf(verdicts.get(rest.id)),
+    }));
+  });
 
   return NextResponse.json(tokens);
 }
@@ -136,6 +146,11 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   let token;
   try {
     token = await withTenantRls(prisma, actor.tenantId, async (tx) => {
+      await lockFootholdWriter(tx, req, {
+        tenantId: actor.tenantId,
+        actorId: session.user.id,
+        permission: TENANT_PERMISSION.SERVICE_ACCOUNT_MANAGE,
+      });
       // Serialize concurrent token issuance for the same SA so the count→create
       // limit check cannot be raced past MAX_SA_TOKENS_PER_ACCOUNT under
       // READ COMMITTED (two issuers seeing the same pre-insert count).
@@ -167,6 +182,8 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     if (err instanceof Error && err.message === "Token limit exceeded") {
       return errorResponse(API_ERROR.SA_TOKEN_LIMIT_EXCEEDED);
     }
+    const footholdResponse = footholdWriteErrorResponse(err);
+    if (footholdResponse) return footholdResponse;
     throw err;
   }
 

@@ -23,6 +23,9 @@ import { z } from "zod";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
+import { creatorAuthorizedOf, creatorVerdicts } from "@/lib/tenant/creator-authority";
+import { lockFootholdWriter } from "@/lib/tenant/foothold-write-gate";
+import { footholdWriteErrorResponse } from "@/lib/http/lock-conflict-response";
 
 // Sentinels thrown inside the locked transaction. Mapped outside the tx:
 // the limit error to MCP_CLIENT_LIMIT_EXCEEDED, the name conflict to
@@ -52,8 +55,8 @@ async function handleGET(_req: NextRequest) {
     return handleAuthError(err);
   }
 
-  const clients = await withTenantRls(prisma, actor.tenantId, async (tx) =>
-    tx.mcpClient.findMany({
+  const clients = await withTenantRls(prisma, actor.tenantId, async (tx) => {
+    const rows = await tx.mcpClient.findMany({
       where: { tenantId: actor.tenantId },
       select: {
         id: true,
@@ -63,6 +66,7 @@ async function handleGET(_req: NextRequest) {
         allowedScopes: true,
         isActive: true,
         isDcr: true,
+        createdById: true,
         createdAt: true,
         updatedAt: true,
         accessTokens: {
@@ -72,8 +76,15 @@ async function handleGET(_req: NextRequest) {
         },
       },
       orderBy: { createdAt: "desc" },
-    }),
-  );
+    });
+    const verdicts = await creatorVerdicts(tx, actor.tenantId, rows, TENANT_PERMISSION.SERVICE_ACCOUNT_MANAGE);
+    // createdById itself stays server-side. null: a DCR client's createdById is
+    // whoever claimed it, not a creator; a NULL creator is legacy.
+    return rows.map(({ createdById: _createdById, ...rest }) => ({
+      ...rest,
+      creatorAuthorized: rest.isDcr ? null : creatorAuthorizedOf(verdicts.get(rest.id)),
+    }));
+  });
 
   // Batch-fetch connected user names
   const allUserIds = [...new Set(clients.flatMap((c) => c.accessTokens.map((t) => t.userId!)))];
@@ -148,6 +159,11 @@ async function handlePOST(req: NextRequest) {
   let client;
   try {
     client = await withTenantRls(prisma, actor.tenantId, async (tx) => {
+      await lockFootholdWriter(tx, req, {
+        tenantId: actor.tenantId,
+        actorId: session.user.id,
+        permission: TENANT_PERMISSION.SERVICE_ACCOUNT_MANAGE,
+      });
       await advisoryXactLock(tx, actor.tenantId);
       const count = await tx.mcpClient.count({ where: { tenantId: actor.tenantId } });
       if (count >= MAX_MCP_CLIENTS_PER_TENANT) {
@@ -186,6 +202,8 @@ async function handlePOST(req: NextRequest) {
     if (e instanceof McpClientNameConflictError) {
       return errorResponse(API_ERROR.MCP_CLIENT_NAME_CONFLICT);
     }
+    const footholdResponse = footholdWriteErrorResponse(e);
+    if (footholdResponse) return footholdResponse;
     throw e;
   }
 

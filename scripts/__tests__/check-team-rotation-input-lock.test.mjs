@@ -95,7 +95,7 @@ const DIRECTORY_SYNC = "src/lib/directory-sync/engine.ts";
 
 /**
  * Rule 9's pinned membership ends (EXPECTED_MEMBERSHIP_ENDS), each revoking
- * after its write, and the exempted auth.ts migration shape. The auth.ts and
+ * after its write and then calling endCreatorFootholdsInTx, and the exempted auth.ts migration shape. The auth.ts and
  * deactivateScimUser deletes are also the two exempted tenant-row deletes,
  * and team-departure.ts's two UPDATEs the SEEDED_DEPARTURE_WRITERS, each with
  * endTeamMemberships after it. writeFile keeps a seeded file's seed and adds
@@ -118,6 +118,7 @@ export async function departFromTenant(tx, tenantId, userIds, options) {
     RETURNING user_id\`;
   await endTeamMemberships(tx, tenantId, transitioned, options);
   const revocation = await revokeUsersAuthArtifactsInTx(tx, transitioned, { tenantFilter: { tenantId }, boundedLockWait: true });
+  await endCreatorFootholdsInTx(tx, tenantId, transitioned, options.actor);
   return { userIds: transitioned, revocation };
 }
 export async function departCreatedMembership(tx, tenantId, userIds, options) {
@@ -125,14 +126,18 @@ export async function departCreatedMembership(tx, tenantId, userIds, options) {
     UPDATE tenant_members SET deactivated_at = clock_timestamp(), updated_at = clock_timestamp()
      WHERE tenant_id = \${tenantId}::uuid AND user_id = ANY(\${[...userIds]}::uuid[]) AND deactivated_at IS NOT NULL\`;
   await endTeamMemberships(tx, tenantId, userIds, options);
-  return revokeUsersAuthArtifactsInTx(tx, userIds, { tenantFilter: { tenantId }, boundedLockWait: true });
+  const revocation = await revokeUsersAuthArtifactsInTx(tx, userIds, { tenantFilter: { tenantId }, boundedLockWait: true });
+  await endCreatorFootholdsInTx(tx, tenantId, userIds, options.actor);
+  return revocation;
 }
 `,
   [SCIM_USER_SERVICE]: `
-export async function deactivateScimUser(tenantId, userId) {
+export async function deactivateScimUser(tenantId, userId, actor) {
   return prisma.$transaction(async (tx) => {
     await tx.tenantMember.delete({ where: { tenantId_userId: { tenantId, userId } } });
-    return revokeUserAuthArtifactsInTx(tx, userId, { tenantFilter: { tenantId }, boundedLockWait: true });
+    const revoked = await revokeUserAuthArtifactsInTx(tx, userId, { tenantFilter: { tenantId }, boundedLockWait: true });
+    await endCreatorFootholdsInTx(tx, tenantId, [userId], actor);
+    return revoked;
   });
 }
 `,
@@ -501,7 +506,7 @@ export const rotate = withTenantRls(prisma, tenantId, async (tx) => {
     // A deactivating write is also a rule-9 membership end: it must revoke
     // after it and be a pinned site, so the accepting cells put it in the
     // pinned departFromTenant, in place of the seeded one.
-    const REVOKE_AFTER = "await revokeUsersAuthArtifactsInTx(tx, [u], { tenantFilter: { tenantId: t } });";
+    const REVOKE_AFTER = "await revokeUsersAuthArtifactsInTx(tx, [u], { tenantFilter: { tenantId: t } }); await endCreatorFootholdsInTx(tx, t, [u], actor);";
     const asDepartFromTenant = (body) => MEMBERSHIP_END_FILES[DEPARTURE]
       .replace(/export async function departFromTenant[\s\S]*?\n}\n/, `export async function departFromTenant(tx) { ${body} }\n`);
 
@@ -1463,6 +1468,7 @@ export async function promote(tx, rows, target) {
     const ended = (fn, site, path = DEPARTURE) =>
       new RegExp(`membership-end  ${esc(path)}:\\d+  membership-end::${esc(path)}::${esc(fn)}::${esc(site)}  ends a tenant membership`);
     const REVOKE = "await revokeUsersAuthArtifactsInTx(tx, ids, { tenantFilter: { tenantId }, boundedLockWait: true });";
+    const ENDER = "await endCreatorFootholdsInTx(tx, tenantId, ids, actor);";
 
     it("passes the pinned sites, each revoking after its write, and the exempted migration", () => {
       const r = run();
@@ -1574,10 +1580,84 @@ export async function promote(tx, rows, target) {
     });
 
     it("fails on an unexpected site even when it revokes", () => {
-      write(DEPARTURE, `export async function newEnd(tx, tenantId, ids, id) {\n  await tx.tenantMember.delete({ where: { id } });\n  ${REVOKE}\n}`);
+      write(DEPARTURE, `export async function newEnd(tx, tenantId, ids, id) {\n  await tx.tenantMember.delete({ where: { id } });\n  ${REVOKE}\n  ${ENDER}\n}`);
       const r = run();
       expectDenied(r, /unexpected: membership-end::src\/lib\/team\/team-departure\.ts::newEnd::tenantMember\.delete/);
       expect(r.out).not.toMatch(/ends a tenant membership/);
+    });
+
+    describe("the creator footholds follow the revoker (foothold-end)", () => {
+      /** The foothold-end violation for the site `fn::site` in `path`. */
+      const footholdEnded = (fn, site, path = DEPARTURE) =>
+        new RegExp(`foothold-end  ${esc(path)}:\\d+  foothold-end::${esc(path)}::${esc(fn)}::${esc(site)}  ends a tenant membership`);
+      const ENDER_LINE = "  await endCreatorFootholdsInTx(tx, tenantId, transitioned, options.actor);\n";
+      const DEPART = MEMBERSHIP_END_FILES[DEPARTURE];
+      const SCIM = MEMBERSHIP_END_FILES[SCIM_USER_SERVICE];
+      const SCIM_ENDER = "    await endCreatorFootholdsInTx(tx, tenantId, [userId], actor);\n";
+
+      it("passes the seeded sites, each calling it after its revoker, and the exempted migration", () => {
+        const r = run();
+        expect(r.code).toBe(0);
+        expect(r.out).not.toMatch(/foothold-end/);
+      });
+
+      it("refuses a membership end whose function never calls it", () => {
+        expect(DEPART).toContain(ENDER_LINE);
+        replaceFile(DEPARTURE, DEPART.replace(ENDER_LINE, ""));
+        expectDenied(run(), footholdEnded("departFromTenant", "tenant_members.raw"));
+      });
+
+      it("refuses the call placed before the revoker", () => {
+        const revokeLine = /  const revocation = await revokeUsersAuthArtifactsInTx\(tx, transitioned[^\n]*\n/;
+        const revoke = DEPART.match(revokeLine)[0];
+        replaceFile(DEPARTURE, DEPART.replace(ENDER_LINE, "").replace(revoke, ENDER_LINE + revoke));
+        expectDenied(run(), footholdEnded("departFromTenant", "tenant_members.raw"));
+      });
+
+      it("is not satisfied by another family's exemption on the same site", () => {
+        // deactivateScimUser's tenant-row-delete is exempted, under its own key prefix.
+        expect(SCIM).toContain(SCIM_ENDER);
+        replaceFile(SCIM_USER_SERVICE, SCIM.replace(SCIM_ENDER, ""));
+        const r = run();
+        expectDenied(r, footholdEnded("<anonymous>", "tenantMember.delete", SCIM_USER_SERVICE));
+        expect(r.out).not.toMatch(/tenant-row-delete::src\/lib\/services\/scim-user-service\.ts/);
+      });
+
+      it("refuses the call in a different branch from the revoker (the deactivateScimUser shape)", () => {
+        replaceFile(SCIM_USER_SERVICE, `export async function deactivateScimUser(tenantId, userId, actor) {
+  return prisma.$transaction(async (tx) => {
+    await tx.tenantMember.delete({ where: { tenantId_userId: { tenantId, userId } } });
+    if (actor) {
+      return revokeUserAuthArtifactsInTx(tx, userId, { tenantFilter: { tenantId }, boundedLockWait: true });
+    }
+    await endCreatorFootholdsInTx(tx, tenantId, [userId], actor);
+  });
+}
+`);
+        expectDenied(run(), footholdEnded("<anonymous>", "tenantMember.delete", SCIM_USER_SERVICE));
+      });
+
+      it("accepts both calls inside one nested block", () => {
+        replaceFile(SCIM_USER_SERVICE, `export async function deactivateScimUser(tenantId, userId, actor) {
+  return prisma.$transaction(async (tx) => {
+    await tx.tenantMember.delete({ where: { tenantId_userId: { tenantId, userId } } });
+    if (actor) {
+      const revoked = await revokeUserAuthArtifactsInTx(tx, userId, { tenantFilter: { tenantId }, boundedLockWait: true });
+      await endCreatorFootholdsInTx(tx, tenantId, [userId], actor);
+      return revoked;
+    }
+  });
+}
+`);
+        expect(run().code).toBe(0);
+      });
+
+      it("exempts only the migration: a second migration-shaped delete is not covered by its foothold-end key", () => {
+        write(AUTH, `export async function again(userId, tenantId) {
+  await withBypassRls(prisma, async (tx) => { await tx.tenantMember.deleteMany({ where: { userId, tenantId } }); });
+}`);
+        expectDenied(run(), /exemption\(s\) matching no site, or several[\s\S]*foothold-end::src\/auth\.ts::<anonymous>::tenantMember\.deleteMany/);
+      });
     });
 
     it("refuses a second migration-shaped delete beside the exempted one", () => {

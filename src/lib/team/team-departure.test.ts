@@ -3,6 +3,8 @@ import type { Prisma } from "@prisma/client";
 
 const { mockLogAuditInTx } = vi.hoisted(() => ({ mockLogAuditInTx: vi.fn() }));
 vi.mock("@/lib/audit/audit", () => ({ logAuditInTx: mockLogAuditInTx }));
+const { mockEndCreatorFootholds } = vi.hoisted(() => ({ mockEndCreatorFootholds: vi.fn() }));
+vi.mock("@/lib/tenant/departure-footholds", () => ({ endCreatorFootholdsInTx: mockEndCreatorFootholds }));
 
 import { departCreatedMembership, departFromTenant, returnToTenant } from "./team-departure";
 import { createLockBudget } from "./team-key-rotation-lock";
@@ -136,6 +138,26 @@ describe("departFromTenant", () => {
     expect(raw.session.deleteMany).not.toHaveBeenCalled();
   });
 
+  it("ends the creator footholds of exactly the transitioned users, after the revocation", async () => {
+    const { tx, raw } = departureTx([]);
+
+    await departFromTenant(tx, TENANT, [USER, "user-already-inactive"], { actor: ACTOR, alreadyLocked: true });
+
+    expect(mockEndCreatorFootholds).toHaveBeenCalledExactlyOnceWith(tx, TENANT, [USER], ACTOR);
+    expect(mockEndCreatorFootholds.mock.invocationCallOrder[0]).toBeGreaterThan(
+      raw.session.deleteMany.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("ends the footholds of no one when nobody transitions", async () => {
+    const { tx, raw } = departureTx([]);
+    raw.$queryRaw.mockImplementation(async () => []);
+
+    await departFromTenant(tx, TENANT, [USER], { actor: ACTOR, alreadyLocked: true });
+
+    expect(mockEndCreatorFootholds).toHaveBeenCalledExactlyOnceWith(tx, TENANT, [], ACTOR);
+  });
+
   it("propagates a revocation failure", async () => {
     const { tx, raw } = departureTx([]);
     raw.session.deleteMany.mockRejectedValueOnce(new Error("revocation failed"));
@@ -157,10 +179,22 @@ describe("departCreatedMembership", () => {
     expect(revocation.sessionTokens).toEqual(["digest-1"]);
   });
 
+  it("ends the creator footholds of the created users, after the revocation", async () => {
+    const { tx, raw } = departureTx(["team-1"]);
+
+    await departCreatedMembership(tx, TENANT, [USER], { actor: ACTOR, budget: createLockBudget() });
+
+    expect(mockEndCreatorFootholds).toHaveBeenCalledExactlyOnceWith(tx, TENANT, [USER], ACTOR);
+    expect(mockEndCreatorFootholds.mock.invocationCallOrder[0]).toBeGreaterThan(
+      raw.session.deleteMany.mock.invocationCallOrder[0]!,
+    );
+  });
+
   it("makes no statement for no users", async () => {
     const { tx, raw } = departureTx([]);
 
     const revocation = await departCreatedMembership(tx, TENANT, [], { actor: ACTOR });
+    expect(mockEndCreatorFootholds).not.toHaveBeenCalled();
 
     expect(raw.$executeRaw).not.toHaveBeenCalled();
     expect(raw.$queryRaw).not.toHaveBeenCalled();
@@ -198,6 +232,26 @@ describe("returnToTenant", () => {
     expect(result.userIds).toEqual([USER]);
     expect(result.revocation.sessionTokens).toEqual(["digest-1"]);
     expect(result.revocation.counts).toMatchObject({ sessions: 1, apiKeys: 1, extensionTokens: 1 });
+  });
+
+  it("ends the creator footholds of the returned users, after the revocation", async () => {
+    const { tx, raw } = departureTx(["team-1"]);
+
+    await returnToTenant(tx, TENANT, [USER], { actor: ACTOR, budget: createLockBudget(), alreadyLocked: true });
+
+    expect(mockEndCreatorFootholds).toHaveBeenCalledExactlyOnceWith(tx, TENANT, [USER], ACTOR);
+    expect(mockEndCreatorFootholds.mock.invocationCallOrder[0]).toBeGreaterThan(
+      raw.session.deleteMany.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("does not end creator footholds when nobody returns", async () => {
+    const { tx, raw } = departureTx([]);
+    raw.$queryRaw.mockImplementation(async () => []);
+
+    await returnToTenant(tx, TENANT, [USER], { actor: ACTOR, alreadyLocked: true });
+
+    expect(mockEndCreatorFootholds).not.toHaveBeenCalled();
   });
 
   it("revokes nothing when nobody returns", async () => {

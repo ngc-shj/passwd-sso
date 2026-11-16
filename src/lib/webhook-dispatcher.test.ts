@@ -3,6 +3,9 @@ import { IDENTIFIER_HASH_SCOPE } from "@/lib/audit/auth-failure";
 
 const {
   mockPrismaTenantWebhook,
+  mockTenantMemberFindMany,
+  mockDepartureFindMany,
+  mockLoggerWarn,
   mockWithBypassRls,
   mockLogAudit,
   mockGetMasterKeyByVersion,
@@ -16,6 +19,9 @@ const {
     findMany: vi.fn(),
     update: vi.fn(),
   },
+  mockTenantMemberFindMany: vi.fn(),
+  mockDepartureFindMany: vi.fn(),
+  mockLoggerWarn: vi.fn(),
   mockWithBypassRls: vi.fn(
     async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma),
   ),
@@ -32,6 +38,8 @@ const {
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     tenantWebhook: mockPrismaTenantWebhook,
+    tenantMember: { findMany: mockTenantMemberFindMany },
+    tenantMemberDeparture: { findMany: mockDepartureFindMany },
   },
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
@@ -56,10 +64,10 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
 }));
 vi.mock("@/lib/logger", () => ({
   default: {
-    child: () => ({ info: vi.fn(), warn: vi.fn(), error: mockLoggerError }),
+    child: () => ({ info: vi.fn(), warn: mockLoggerWarn, error: mockLoggerError }),
   },
   requestContext: { run: (_l: unknown, fn: () => unknown) => fn() },
-  getLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: mockLoggerError }),
+  getLogger: () => ({ info: vi.fn(), warn: mockLoggerWarn, error: mockLoggerError }),
 }));
 
 vi.mock("node:dns/promises", () => ({
@@ -73,6 +81,7 @@ vi.stubGlobal("fetch", mockFetch);
 import { dispatchTenantWebhook } from "./webhook-dispatcher";
 import { createHmac } from "node:crypto";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 const TENANT_WEBHOOK = {
   id: "22222222-2222-2222-2222-222222222222",
@@ -89,6 +98,7 @@ const TENANT_WEBHOOK = {
   failCount: 0,
   lastDeliveredAt: null,
   lastFailedAt: null,
+  createdById: null,
   createdAt: new Date(),
   updatedAt: new Date(),
 };
@@ -403,6 +413,8 @@ describe("SSRF defense (resolveAndValidateIps)", () => {
 describe("dispatchTenantWebhook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockTenantMemberFindMany.mockResolvedValue([]);
+    mockDepartureFindMany.mockResolvedValue([]);
     vi.useFakeTimers();
   });
 
@@ -653,6 +665,93 @@ describe("dispatchTenantWebhook", () => {
 });
 
 // T3.6: delivery-failed audit logs use SYSTEM_ACTOR_ID + SYSTEM actorType
+describe("dispatchTenantWebhook creator authority", () => {
+  const CREATOR = "55555555-5555-5555-5555-555555555555";
+  const CREATED_AT = new Date("2026-02-01T00:00:00Z");
+  const created = { ...TENANT_WEBHOOK, createdById: CREATOR, createdAt: CREATED_AT };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockTenantMemberFindMany.mockResolvedValue([]);
+    mockDepartureFindMany.mockResolvedValue([]);
+    mockFetch.mockResolvedValue({ ok: true });
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const dispatch = async () => {
+    mockPrismaTenantWebhook.findMany.mockResolvedValue([created]);
+    dispatchTenantWebhook(TENANT_EVENT);
+    await vi.advanceTimersByTimeAsync(100);
+  };
+
+  it("delivers when the creator is an active admin with no departure", async () => {
+    mockTenantMemberFindMany.mockResolvedValue([{ userId: CREATOR, role: "ADMIN", deactivatedAt: null }]);
+
+    await dispatch();
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockWithBypassRls).toHaveBeenCalledWith(expect.anything(), expect.any(Function), BYPASS_GRANT.TENANT_WEBHOOK_DISPATCH);
+  });
+
+  it.each([
+    ["deactivated", [{ userId: CREATOR, role: "ADMIN", deactivatedAt: new Date("2026-03-01T00:00:00Z") }], []],
+    ["demoted to MEMBER", [{ userId: CREATOR, role: "MEMBER", deactivatedAt: null }], []],
+    ["no longer a member", [], []],
+    [
+      "recorded as departed after the webhook was created",
+      [{ userId: CREATOR, role: "ADMIN", deactivatedAt: null }],
+      [{ userId: CREATOR, departedAt: new Date("2026-03-01T00:00:00Z") }],
+    ],
+  ])("skips the webhook and logs a warning when its creator is %s", async (_label, members, departures) => {
+    mockTenantMemberFindMany.mockResolvedValue(members);
+    mockDepartureFindMany.mockResolvedValue(departures);
+
+    await dispatch();
+
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockPrismaTenantWebhook.update).not.toHaveBeenCalled();
+    expect(mockLoggerWarn).toHaveBeenCalledWith(
+      expect.objectContaining({ webhookId: created.id, _logType: "webhook_dispatch.creator_unauthorized" }),
+      "webhook_dispatch.creator_unauthorized",
+    );
+  });
+
+  it("delivers when the creator's departure predates the webhook", async () => {
+    mockTenantMemberFindMany.mockResolvedValue([{ userId: CREATOR, role: "ADMIN", deactivatedAt: null }]);
+    mockDepartureFindMany.mockResolvedValue([{ userId: CREATOR, departedAt: new Date("2026-01-01T00:00:00Z") }]);
+
+    await dispatch();
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("delivers a legacy NULL-creator webhook without reading memberships", async () => {
+    mockPrismaTenantWebhook.findMany.mockResolvedValue([TENANT_WEBHOOK]);
+
+    dispatchTenantWebhook(TENANT_EVENT);
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockTenantMemberFindMany).not.toHaveBeenCalled();
+  });
+
+  it("delivers only the authorized webhooks of a mixed set", async () => {
+    const other = { ...created, id: "66666666-6666-6666-6666-666666666666", createdById: "77777777-7777-7777-7777-777777777777", url: "https://example.com/other" };
+    mockPrismaTenantWebhook.findMany.mockResolvedValue([created, other]);
+    mockTenantMemberFindMany.mockResolvedValue([{ userId: CREATOR, role: "ADMIN", deactivatedAt: null }]);
+
+    dispatchTenantWebhook(TENANT_EVENT);
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockFetch.mock.calls[0][0]).toBe("https://example.com/tenant-hook");
+  });
+});
+
 describe("webhook delivery-failed audit sentinel", () => {
   beforeEach(() => {
     vi.clearAllMocks();

@@ -152,7 +152,7 @@ export const BYPASS_GRANT = Object.freeze({
   AUTH_SESSION_PASSKEY_RECOVERY: defineGrant(BYPASS_PURPOSE.AUTH_FLOW, ["session", "webAuthnCredential"]),
   AUTH_SESSION_PASSKEY_STATUS: defineGrant(BYPASS_PURPOSE.AUTH_FLOW, ["tenant", "user", "webAuthnCredential", "tenantMember"]),
   AUTH_SIGNIN_TENANT_LOOKUP: defineGrant(BYPASS_PURPOSE.AUTH_FLOW, ["tenant", "user", "tenantMember", "teamMember", "team", "teamPolicy"]),
-  AUTH_TENANT_CLAIM_MEMBERSHIP: defineGrant(BYPASS_PURPOSE.AUTH_FLOW, ["account", "apiKey", "attachment", "auditLog", "auditOutbox", "delegationSession", "emergencyAccessGrant", "emergencyAccessKeyPair", "extensionBridgeCode", "extensionToken", "folder", "mcpAccessToken", "mcpAuthorizationCode", "mcpRefreshToken", "mobileBridgeCode", "notification", "operatorToken", "passwordEntry", "passwordEntryHistory", "passwordShare", "session", "shareAccessLog", "tag", "teamMemberKey", "teamPasswordFavorite", "tenant", "tenantClaim", "tenantMember", "user", "vaultKey", "webAuthnCredential"]),
+  AUTH_TENANT_CLAIM_MEMBERSHIP: defineGrant(BYPASS_PURPOSE.AUTH_FLOW, ["account", "apiKey", "attachment", "auditLog", "auditOutbox", "delegationSession", "emergencyAccessGrant", "emergencyAccessKeyPair", "extensionBridgeCode", "extensionToken", "folder", "mcpAccessToken", "mcpAuthorizationCode", "mcpRefreshToken", "mobileBridgeCode", "notification", "operatorToken", "passwordEntry", "passwordEntryHistory", "passwordShare", "session", "shareAccessLog", "tag", "teamMemberKey", "teamPasswordFavorite", "tenant", "tenantClaim", "tenantMember", "tenantMemberDeparture", "user", "vaultKey", "webAuthnCredential"]),
   AUTH_USER_LOOKUP: defineGrant(BYPASS_PURPOSE.AUTH_FLOW, ["user", "tenantMember"]),
   CROSS_TENANT_USER_LOOKUP: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["user", "tenantMember"]),
   DELEGATION_MCP_TOKEN_CHECK: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["mcpAccessToken", "mcpClient"]),
@@ -172,7 +172,7 @@ export const BYPASS_GRANT = Object.freeze({
   MCP_ACCESS_TOKEN_VALIDATE: defineGrant(BYPASS_PURPOSE.TOKEN_LIFECYCLE, ["mcpAccessToken", "mcpClient"]),
   MCP_AUTH_CODE_ISSUE: defineGrant(BYPASS_PURPOSE.TOKEN_LIFECYCLE, ["mcpAuthorizationCode", "session"]),
   MCP_AUTH_CODE_LIFECYCLE: defineGrant(BYPASS_PURPOSE.TOKEN_LIFECYCLE, ["mcpAuthorizationCode"]),
-  MCP_CLIENT_CONSENT: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["mcpClient", "mcpAccessToken"]),
+  MCP_CLIENT_CONSENT: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["mcpClient", "mcpAccessToken", "tenantMember", "tenantMemberDeparture", "session"]),
   MCP_CLIENT_LOOKUP: defineGrant(BYPASS_PURPOSE.AUTH_FLOW, ["mcpClient"]),
   MCP_CODE_EXCHANGE: defineGrant(BYPASS_PURPOSE.TOKEN_LIFECYCLE, ["mcpAccessToken", "mcpAuthorizationCode", "tenant", "webAuthnCredential", "mcpClient"]),
   MCP_REFRESH_EXCHANGE: defineGrant(BYPASS_PURPOSE.TOKEN_LIFECYCLE, ["mcpAccessToken", "mcpRefreshToken", "tenant", "tenantMember", "webAuthnCredential", "mcpClient"]),
@@ -227,17 +227,17 @@ export const BYPASS_GRANT = Object.freeze({
   TENANT_REALIGN_MEMBERSHIP: defineGrant(BYPASS_PURPOSE.SYSTEM_MAINTENANCE, ["account", "apiKey", "attachment", "auditOutbox", "delegationSession", "emergencyAccessGrant", "extensionBridgeCode", "extensionToken", "folder", "mcpAccessToken", "mcpAuthorizationCode", "mcpRefreshToken", "mobileBridgeCode", "notification", "operatorToken", "passwordEntry", "passwordShare", "session", "tag", "teamMemberKey", "teamPasswordFavorite", "tenant", "tenantClaim", "tenantMember", "user", "vaultKey", "webAuthnCredential"]),
   TENANT_SESSION_CACHE_INVALIDATION: defineGrant(BYPASS_PURPOSE.TOKEN_LIFECYCLE, ["session"]),
   TENANT_TEAM_POLICY_LOOKUP: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["teamPolicy", "tenant", "team"]),
-  TENANT_WEBHOOK_DISPATCH: defineGrant(BYPASS_PURPOSE.WEBHOOK_DISPATCH, ["tenantWebhook"]),
+  TENANT_WEBHOOK_DISPATCH: defineGrant(BYPASS_PURPOSE.WEBHOOK_DISPATCH, ["tenantMember", "tenantMemberDeparture", "tenantWebhook"]),
   // A tenant admin's view and revoke of a member's passkeys (#974): passkeys are
   // user-global, so one registered under the member's previous tenant still
   // signs them in here. The member is checked active in the admin's tenant first.
   // Also the member's linked accounts and the footholds they created
   // (member-containment.ts, #1016).
-  TENANT_MEMBER_PASSKEY_LIST: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["account", "emergencyAccessGrant", "mcpClient", "personalLogAccessGrant", "scimToken", "serviceAccount", "serviceAccountToken", "tenantMember", "webAuthnCredential"]),
+  TENANT_MEMBER_PASSKEY_LIST: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["account", "adminVaultReset", "emergencyAccessGrant", "mcpClient", "personalLogAccessGrant", "scimToken", "serviceAccount", "serviceAccountToken", "tenantMember", "tenantWebhook", "user", "webAuthnCredential"]),
   // The revoke, in one transaction: the member's sessions and tokens in every
   // tenant are revoked with the user-global credential, and audited; with a
   // containment request, the chosen accounts and footholds too.
-  TENANT_MEMBER_PASSKEY_REVOKE: defineGrant(BYPASS_PURPOSE.TOKEN_LIFECYCLE, ["account", "apiKey", "auditOutbox", "delegationSession", "emergencyAccessGrant", "extensionBridgeCode", "extensionToken", "mcpAccessToken", "mcpAuthorizationCode", "mcpClient", "mcpRefreshToken", "mobileBridgeCode", "operatorToken", "personalLogAccessGrant", "scimToken", "serviceAccount", "serviceAccountToken", "session", "tenantMember", "user", "webAuthnCredential"]),
+  TENANT_MEMBER_PASSKEY_REVOKE: defineGrant(BYPASS_PURPOSE.TOKEN_LIFECYCLE, ["account", "adminVaultReset", "apiKey", "auditOutbox", "delegationSession", "emergencyAccessGrant", "extensionBridgeCode", "extensionToken", "mcpAccessToken", "mcpAuthorizationCode", "mcpClient", "mcpRefreshToken", "mobileBridgeCode", "operatorToken", "personalLogAccessGrant", "scimToken", "serviceAccount", "serviceAccountToken", "session", "tenantMember", "tenantWebhook", "user", "webAuthnCredential"]),
   TOKEN_TENANT_LOOKUP: defineGrant(BYPASS_PURPOSE.TOKEN_LIFECYCLE, ["tenant"]),
   TOKEN_TENANT_MEMBERSHIP_CHECK: defineGrant(BYPASS_PURPOSE.TOKEN_LIFECYCLE, ["tenantMember"]),
   USER_SESSION_CACHE_INVALIDATION: defineGrant(BYPASS_PURPOSE.TOKEN_LIFECYCLE, ["session"]),

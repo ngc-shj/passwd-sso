@@ -30,7 +30,12 @@ const {
   mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
+const { mockLockFootholdWriter } = vi.hoisted(() => ({
+  mockLockFootholdWriter: vi.fn(async () => new Map()),
+}));
+
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/tenant/foothold-write-gate", () => ({ lockFootholdWriter: mockLockFootholdWriter }));
 vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
   requireRecentCurrentAuthMethod: mockRequireRecentSession,
 }));
@@ -61,6 +66,9 @@ vi.mock("@/lib/prisma", () => ({
     // The cap check + create run under an advisory lock in one withTenantRls tx
     // (TOCTOU fix); the route calls tx.$executeRaw for the lock.
     $executeRaw: vi.fn().mockResolvedValue(1),
+    // The list reads the creators' tenant rows for creatorAuthorized.
+    tenantMember: { findMany: vi.fn().mockResolvedValue([]) },
+    tenantMemberDeparture: { findMany: vi.fn().mockResolvedValue([]) },
   },
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
@@ -93,6 +101,7 @@ vi.mock("@/lib/http/api-response", async (importOriginal) => ({
 import { GET, POST } from "@/app/api/tenant/scim-tokens/route";
 import { DELETE } from "@/app/api/tenant/scim-tokens/[tokenId]/route";
 import { MS_PER_DAY } from "@/lib/constants/time";
+import { footholdGateCells } from "@/__tests__/helpers/foothold-gate-cells";
 
 const ACTOR = { tenantId: "tenant-abc", role: "ADMIN" };
 const TOKEN_ID = "scim-token-id-001";
@@ -136,7 +145,7 @@ describe("GET /api/tenant/scim-tokens", () => {
         lastUsedAt: token.lastUsedAt,
         expiresAt: token.expiresAt,
         revokedAt: token.revokedAt,
-        createdBy: { id: DEFAULT_SESSION.user.id, name: "Test User", email: "user@example.com" },
+        createdById: null,
       },
     ]);
     const req = createRequest("GET", "http://localhost/api/tenant/scim-tokens");
@@ -145,6 +154,7 @@ describe("GET /api/tenant/scim-tokens", () => {
     expect(status).toBe(200);
     expect(Array.isArray(json)).toBe(true);
     expect(json[0].id).toBe(TOKEN_ID);
+    expect(json[0].creatorAuthorized).toBeNull();
   });
 });
 
@@ -152,6 +162,25 @@ describe("POST /api/tenant/scim-tokens", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockRateLimitCheck.mockResolvedValue({ allowed: true });
+  });
+
+  footholdGateCells({
+    gate: mockLockFootholdWriter,
+    permission: "SCIM_MANAGE",
+    actorId: DEFAULT_SESSION.user.id,
+    tenantId: "tenant-abc",
+    okStatus: 201,
+    arrange: () => {
+      mockAuth.mockResolvedValue(DEFAULT_SESSION);
+      mockRequireTenantPermission.mockResolvedValue(ACTOR);
+      mockScimTokenCount.mockResolvedValue(0);
+      mockScimTokenCreate.mockResolvedValue(makeToken());
+    },
+    call: () =>
+      POST(createRequest("POST", "http://localhost/api/tenant/scim-tokens", {
+        body: { description: "CI token" },
+      })),
+    assertNoWrite: () => expect(mockScimTokenCreate).not.toHaveBeenCalled(),
   });
 
   it("returns 401 without session", async () => {

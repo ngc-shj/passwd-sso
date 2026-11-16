@@ -6,11 +6,12 @@ import {
   parseResponse,
 } from "../../helpers/request-builder";
 
-const { mockAuth, mockFindUnique, mockFindMany, mockWithUserTenantRls } = vi.hoisted(() => ({
+const { mockAuth, mockFindUnique, mockFindMany, mockWithUserTenantRls, mockGetTeamMembership } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockFindUnique: vi.fn(),
   mockFindMany: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+  mockGetTeamMembership: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -22,6 +23,16 @@ vi.mock("@/lib/prisma", () => ({
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
+}));
+
+vi.mock("@/lib/auth/access/team-auth", () => ({
+  getTeamMembership: mockGetTeamMembership,
+  requireTeamPermission: vi.fn(),
+  TeamAuthError: class TeamAuthError extends Error {},
+}));
+vi.mock("@/lib/team/team-policy", () => ({
+  withTeamIpRestriction: vi.fn().mockResolvedValue(undefined),
+  PolicyViolationError: class PolicyViolationError extends Error {},
 }));
 
 import { GET } from "@/app/api/share-links/[id]/access-logs/route";
@@ -73,6 +84,21 @@ describe("GET /api/share-links/[id]/access-logs", () => {
 
     expect(status).toBe(404);
     expect(json.error).toBe("NOT_FOUND");
+  });
+
+  it("returns 404 for a team link whose creator is no longer a member of the team", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockFindUnique.mockResolvedValue({ createdById: DEFAULT_SESSION.user.id, teamPasswordEntry: { teamId: "team-1" } });
+    mockGetTeamMembership.mockResolvedValue(null);
+
+    const res = await GET(
+      createRequest("GET", "http://localhost/api/share-links/s1/access-logs") as never,
+      createParams({ id: "s1" }),
+    );
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(404);
+    expect(mockFindMany).not.toHaveBeenCalled();
   });
 
   it("returns access logs for own share link", async () => {
