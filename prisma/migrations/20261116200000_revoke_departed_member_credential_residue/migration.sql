@@ -6,8 +6,20 @@
 -- user, an SSO sign-in's membership upsert, or an active membership in another
 -- tenant (the proxy session gate checks "active anywhere", not "active here").
 -- From this release on every membership end revokes in its own transaction
--- (check-team-rotation-input-lock.mjs rule 9), so the residue is finite and
--- this block removes it once.
+-- (check-team-rotation-input-lock.mjs rule 9), and this block removes the
+-- residue that exists when it commits.
+--
+-- It does not stop residue from growing back during the rollout: this block
+-- commits before the old release's instances stop serving, and those can still
+-- leave residue behind. That residue is made unusable elsewhere: a session
+-- is refused unless its tenant is one where its user is an active
+-- member (the auth adapter's getSessionAndUser binding), a reactivation
+-- revokes in the returning tenant (returnToTenant), and tokens are already
+-- checked against the membership in their own tenant. One path remains: an
+-- old-release SCIM DELETE whose revocation fails during the rollout, followed
+-- by a later re-creation of that membership in the same tenant. It is
+-- recorded, with its worst case, likelihood and cost, as D12 in
+-- docs/archive/review/session-revocation-failure-surfaces-deviation.md.
 --
 -- Residue: a row of one of the ten models revokeUsersAuthArtifactsInTx revokes
 -- (src/lib/auth/session/user-session-invalidation.ts) whose (user, tenant_id)
@@ -25,6 +37,13 @@
 -- concurrent refresh or code exchange of a residue row either committed
 -- before (and its new row is revoked below) or waits and finds its proof
 -- gone. Expired rows cannot be a mint's proof, so they need no lock.
+--
+-- That is one advisory lock per residue user, all held by this one
+-- transaction. The shared lock table holds max_locks_per_transaction *
+-- (max_connections + max_prepared_transactions) entries, and running out
+-- aborts the block (it rolls back whole). The block NOTICEs the user count
+-- before it takes the locks; if that count is near the bound, raise
+-- max_locks_per_transaction and run the migration again.
 --
 -- Session cache: a deleted session's cached entry is either never there (the
 -- auth gate does not cache a user active nowhere) or expires within
@@ -79,6 +98,8 @@ BEGIN
      AND NOT EXISTS (
        SELECT 1 FROM tenant_members tm
         WHERE tm.tenant_id = r.tenant_id AND tm.user_id = r.user_id AND tm.deactivated_at IS NULL);
+
+  RAISE NOTICE 'departed-member-credential-residue-locks: users=%', cardinality(v_users);
 
   -- lockUsersAuthArtifacts' statement: one lock per user, in byte order of the key.
   PERFORM pg_advisory_xact_lock(hashtext(k))

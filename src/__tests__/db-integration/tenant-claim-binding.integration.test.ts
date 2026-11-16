@@ -1295,10 +1295,22 @@ describe("tenant claim binding (C3/C4/C5)", () => {
           // Revoked before the sign-in: the migration's revocation must not restamp it.
           const earlierRevokedAt = new Date("2026-01-02T03:04:05.000Z");
           const revokedKey = await seedApiKey(member.userId, member.home, `api_revoked_${member.userId}`, earlierRevokedAt);
+          // A session the member already holds: the migration moves it with
+          // their membership, so it stays bound to an active membership and
+          // keeps authenticating (getSessionAndUser's tenant binding).
+          const sessionToken = randomUUID();
+          await createCustomAdapter().createSession!({
+            sessionToken,
+            userId: member.userId,
+            expires: new Date(Date.now() + 60_000),
+          });
+          expect(await createCustomAdapter().getSessionAndUser!(sessionToken)).toMatchObject({ session: { userId: member.userId } });
 
           expect(
             await capturedSignIn()(signInParams(member.email, target.claim, SIGN_IN_PROVIDER, member.providerAccountId)),
           ).toBe(true);
+
+          expect(await createCustomAdapter().getSessionAndUser!(sessionToken)).toMatchObject({ session: { userId: member.userId } });
 
           expect(await placement(member.userId)).toEqual(movedTo(target.tenantId, member.home));
           expect(await ctx.su.prisma.tenantMember.count({ where: { tenantId: member.home } })).toBe(0);

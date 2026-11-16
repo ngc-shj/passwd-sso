@@ -10,12 +10,11 @@ const {
   mockBridgeCodeCreate,
   mockBridgeCodeFindMany,
   mockBridgeCodeUpdateMany,
-  mockUserFindUnique,
   mockExecuteRaw,
   mockIpCheck,
   mockUserCheck,
   mockCreateRateLimiter,
-  mockWithUserTenantRls,
+  mockResolveUserTenantId,
   mockWithBypassRls,
   mockLogAudit,
   mockExtractClientIp,
@@ -31,7 +30,6 @@ const {
     mockBridgeCodeCreate: vi.fn(),
     mockBridgeCodeFindMany: vi.fn(),
     mockBridgeCodeUpdateMany: vi.fn(),
-    mockUserFindUnique: vi.fn(),
     mockExecuteRaw: vi.fn().mockResolvedValue(1),
     mockIpCheck,
     mockUserCheck,
@@ -45,7 +43,7 @@ const {
       .fn()
       .mockReturnValueOnce({ check: mockIpCheck, clear: vi.fn() })
       .mockReturnValueOnce({ check: mockUserCheck, clear: vi.fn() }),
-    mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+    mockResolveUserTenantId: vi.fn(),
     mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
     mockLogAudit: vi.fn(),
     mockExtractClientIp: vi.fn(() => "1.2.3.4"),
@@ -71,9 +69,6 @@ vi.mock("@/lib/prisma", () => ({
       updateMany: mockBridgeCodeUpdateMany,
       create: mockBridgeCodeCreate,
     },
-    user: {
-      findUnique: mockUserFindUnique,
-    },
     // withBypassRls passes `prisma` as the tx; the route acquires a
     // pg_advisory_xact_lock via tx.$executeRaw before the count-then-create.
     $executeRaw: mockExecuteRaw,
@@ -94,7 +89,7 @@ vi.mock("@/lib/redis", () => ({
   validateRedisConfig: () => {},
 }));
 vi.mock("@/lib/tenant-context", () => ({
-  withUserTenantRls: mockWithUserTenantRls,
+  resolveUserTenantId: mockResolveUserTenantId,
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
   ...((await importOriginal()) as Record<string, unknown>),
@@ -185,8 +180,7 @@ describe("POST /api/extension/bridge-code", () => {
     mockExtractClientIp.mockReturnValue("1.2.3.4");
     mockCheckAccessRestrictionWithAudit.mockResolvedValue({ allowed: true });
     mockWithBypassRls.mockImplementation(async (p, fn) => fn(p));
-    mockWithUserTenantRls.mockImplementation(async (_u, fn) => fn());
-    mockUserFindUnique.mockResolvedValue({ tenantId: "tenant-1" });
+    mockResolveUserTenantId.mockResolvedValue("tenant-1");
     mockBridgeCodeFindMany.mockResolvedValue([]);
     mockBridgeCodeCreate.mockResolvedValue({});
     mockRequireRecentCurrentAuthMethod.mockResolvedValue(null);
@@ -300,15 +294,44 @@ describe("POST /api/extension/bridge-code", () => {
     expectFailureEmit("unauthenticated");
   });
 
-  it("returns 401 and emits failure audit with user_not_found when user record is missing", async () => {
+  it("returns 401 and emits failure audit with no_active_membership when the user is active in no tenant", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockUserFindUnique.mockResolvedValueOnce(null);
+    mockResolveUserTenantId.mockResolvedValueOnce(null);
     const res = await POST(makeRequest());
     const { status, json } = await parseResponse(res);
     expect(status).toBe(401);
     expect(json.error).toBe("UNAUTHORIZED");
     expect(mockBridgeCodeCreate).not.toHaveBeenCalled();
-    expectFailureEmit("user_not_found", { userId: DEFAULT_SESSION.user.id, tenantId: null });
+    expectFailureEmit("no_active_membership", { userId: DEFAULT_SESSION.user.id, tenantId: null });
+  });
+
+  it("refuses issuance when the membership lookup throws", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockResolveUserTenantId.mockRejectedValueOnce(new Error("MULTI_TENANT_MEMBERSHIP_NOT_SUPPORTED"));
+    await expect(POST(makeRequest())).rejects.toThrow("MULTI_TENANT_MEMBERSHIP_NOT_SUPPORTED");
+    expect(mockCheckAccessRestrictionWithAudit).not.toHaveBeenCalled();
+    expect(mockBridgeCodeCreate).not.toHaveBeenCalled();
+  });
+
+  // The code is filed under the active membership's tenant, which is also the
+  // tenant whose IP restriction and passkey policy govern the issuance.
+  it("stamps the code, the IP restriction, the passkey state and the audit with the active membership's tenant", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockResolveUserTenantId.mockResolvedValue("tenant-membership");
+    const res = await POST(makeRequest());
+    expect(res.status).toBe(201);
+    expect(mockResolveUserTenantId).toHaveBeenCalledWith(DEFAULT_SESSION.user.id);
+    expect(mockCheckAccessRestrictionWithAudit).toHaveBeenCalledWith(
+      "tenant-membership", "1.2.3.4", DEFAULT_SESSION.user.id, expect.anything(),
+    );
+    expect(mockDerivePasskeyState).toHaveBeenCalledWith({ userId: DEFAULT_SESSION.user.id, tenantId: "tenant-membership" });
+    expect(mockBridgeCodeCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({ tenantId: "tenant-membership" }),
+    });
+    expect(mockLogAudit).toHaveBeenCalledWith(expect.objectContaining({
+      action: "EXTENSION_BRIDGE_CODE_ISSUE",
+      tenantId: "tenant-membership",
+    }));
   });
 
   it("returns 403 and emits failure audit with tenant_access_restricted when tenant IP denies", async () => {
@@ -358,7 +381,25 @@ describe("POST /api/extension/bridge-code", () => {
     mockUserCheck.mockResolvedValueOnce({ allowed: false, redisErrored: true });
     const res = await POST(makeRequest());
     expect(res.status).toBe(503);
-    expectFailureEmit("rate_limit_redis_fail", { userId: DEFAULT_SESSION.user.id, tenantId: "tenant-1" });
+    // checkRateLimitOrFail also files its own RATE_LIMIT_FAIL_CLOSED row under
+    // the tenant it resolves for the user.
+    await vi.waitFor(() =>
+      expect(mockLogAudit).toHaveBeenCalledWith(expect.objectContaining({
+        action: "RATE_LIMIT_FAIL_CLOSED",
+        tenantId: "tenant-1",
+      })),
+    );
+    const failures = mockLogAudit.mock.calls
+      .map(([call]) => call)
+      .filter((call) => call.action === "EXTENSION_BRIDGE_CODE_ISSUE_FAILURE");
+    expect(failures).toEqual([
+      expect.objectContaining({
+        userId: DEFAULT_SESSION.user.id,
+        tenantId: "tenant-1",
+        metadata: { reason: "rate_limit_redis_fail" },
+      }),
+    ]);
+    expect(mockLogAudit).toHaveBeenCalledTimes(2);
   });
 
   it("returns 401 and emits failure audit with dpop_invalid when DPoP verify fails", async () => {

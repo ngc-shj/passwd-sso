@@ -485,7 +485,7 @@ export async function other(tx) { await endTeamMemberships(tx, t, [u], options);
       expectDenied(run({ departureWriters: 1 }), /departure-writer::src\/lib\/team\/team-departure\.ts::off::tenantMember\.update/);
     });
 
-    it("accepts a Prisma deactivating write with endTeamMemberships after it (rule 9 still pins it as a new membership end)", () => {
+    it("passes the departure-writer rule for a Prisma deactivating write with endTeamMemberships after it, while rule 9 refuses it as an unpinned membership end", () => {
       write(DEPARTURE, `export async function off(tx) { await tx.tenantMember.update({ where: { id }, data: { deactivatedAt: new Date() } }); await endTeamMemberships(tx, t, [u], options); ${REVOKE_AFTER} }`);
       const r = run({ departureWriters: 1 });
       expectDenied(r, /unexpected: membership-end::src\/lib\/team\/team-departure\.ts::off::tenantMember\.update/);

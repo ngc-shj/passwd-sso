@@ -44,7 +44,7 @@ import { checkAccessRestrictionWithAudit } from "@/lib/auth/policy/access-restri
 import { withBypassRls } from "@/lib/tenant-rls";
 import { isSessionRowLive, lockUserAuthArtifacts, UserAuthRevokedError } from "@/lib/auth/session/user-auth-serialization";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
-import { withUserTenantRls } from "@/lib/tenant-context";
+import { resolveUserTenantId } from "@/lib/tenant-context";
 import { logAuditAsync, extractRequestMeta, personalAuditBase, tenantAuditBase } from "@/lib/audit/audit";
 import { emitBridgeCodeIssueFailure } from "@/lib/audit/bridge-code-failure";
 import { parseBody } from "@/lib/http/parse-body";
@@ -171,37 +171,36 @@ async function handlePOST(req: NextRequest) {
   // 4a) Tenant IP access restriction. The proxy early-return for
   //     API_EXTENSION_BRIDGE_CODE skipped the normal IP gate — restore it
   //     here, scoped to the authenticated user's tenant.
-  const userRecord = await withUserTenantRls(userId, async () =>
-    prisma.user.findUnique({
-      where: { id: userId },
-      select: { tenantId: true },
-    }),
-  );
-  if (!userRecord) {
+  //
+  //     The tenant is the user's ACTIVE membership (mobile/authorize resolves
+  //     it the same way), not the `User.tenantId` column: the column can
+  //     diverge from the membership, and the code — and the extension token
+  //     exchanged from it — is filed under this tenant.
+  //     No active membership: the user has left, so nothing is issued.
+  const tenantId = await resolveUserTenantId(userId);
+  if (!tenantId) {
     await emitBridgeCodeIssueFailure({
       req,
       userId,
       tenantId: null,
-      reason: "user_not_found",
+      reason: "no_active_membership",
     });
     return unauthorized();
   }
-  if (userRecord.tenantId) {
-    const access = await checkAccessRestrictionWithAudit(
-      userRecord.tenantId,
-      clientIp,
-      userId,
+  const access = await checkAccessRestrictionWithAudit(
+    tenantId,
+    clientIp,
+    userId,
+    req,
+  );
+  if (!access.allowed) {
+    await emitBridgeCodeIssueFailure({
       req,
-    );
-    if (!access.allowed) {
-      await emitBridgeCodeIssueFailure({
-        req,
-        userId,
-        tenantId: userRecord.tenantId,
-        reason: "tenant_access_restricted",
-      });
-      return errorResponse(API_ERROR.ACCESS_DENIED);
-    }
+      userId,
+      tenantId,
+      reason: "tenant_access_restricted",
+    });
+    return errorResponse(API_ERROR.ACCESS_DENIED);
   }
 
   // 5) Step-up gate.
@@ -211,7 +210,7 @@ async function handlePOST(req: NextRequest) {
     await emitBridgeCodeIssueFailure({
       req,
       userId,
-      tenantId: userRecord.tenantId,
+      tenantId,
       reason: "step_up_required",
     });
     return stepUpError;
@@ -219,12 +218,12 @@ async function handlePOST(req: NextRequest) {
 
   // 5a) Passkey enforcement gate. Re-derives state from DB (fail-closed);
   //     a throw propagates and refuses issuance — never fails open. tenantId is
-  //     NOT NULL (used unconditionally above); gate unconditionally — never skip.
-  const pkState = await derivePasskeyState({ userId, tenantId: userRecord.tenantId });
+  //     non-null here (refused above); gate unconditionally — never skip.
+  const pkState = await derivePasskeyState({ userId, tenantId });
   if (passkeyEnforcementBlocks(pkState)) {
     if (recordPasskeyAuditEmit(userId, "/api/extension/bridge-code", Date.now())) {
       await logAuditAsync({
-        ...tenantAuditBase(req, userId, userRecord.tenantId),
+        ...tenantAuditBase(req, userId, tenantId),
         action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
         metadata: { blockedPath: "/api/extension/bridge-code" },
       });
@@ -245,7 +244,7 @@ async function handlePOST(req: NextRequest) {
     await emitBridgeCodeIssueFailure({
       req,
       userId,
-      tenantId: userRecord.tenantId,
+      tenantId,
       reason: rl.redisErrored ? "rate_limit_redis_fail" : "rate_limit",
     });
     return blocked;
@@ -266,7 +265,7 @@ async function handlePOST(req: NextRequest) {
     await emitBridgeCodeIssueFailure({
       req,
       userId,
-      tenantId: userRecord.tenantId,
+      tenantId,
       reason: "dpop_invalid",
       dpopError: dpopResult.error,
     });
@@ -309,7 +308,7 @@ async function handlePOST(req: NextRequest) {
         data: {
           codeHash,
           userId,
-          tenantId: userRecord.tenantId,
+          tenantId,
           scope: EXTENSION_TOKEN_DEFAULT_SCOPES.join(","),
           expiresAt,
           cnfJkt,
@@ -324,7 +323,7 @@ async function handlePOST(req: NextRequest) {
     await emitBridgeCodeIssueFailure({
       req,
       userId,
-      tenantId: userRecord.tenantId,
+      tenantId,
       reason: "db_error",
     });
     getLogger().error(
@@ -342,7 +341,7 @@ async function handlePOST(req: NextRequest) {
   await logAuditAsync({
     ...personalAuditBase(req, userId),
     action: AUDIT_ACTION.EXTENSION_BRIDGE_CODE_ISSUE,
-    tenantId: userRecord.tenantId,
+    tenantId,
   });
 
   return NextResponse.json(

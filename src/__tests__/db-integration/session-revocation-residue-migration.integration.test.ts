@@ -18,6 +18,7 @@ import { join } from "node:path";
 import type pg from "pg";
 import type { Prisma } from "@prisma/client";
 import { createPool } from "@/lib/db/pool-factory";
+import { userAuthLockKey } from "@/lib/auth/session/user-auth-serialization";
 import {
   appConnectionString,
   createTestContext,
@@ -89,11 +90,16 @@ async function inRolledBackAppTransaction(work: (client: pg.PoolClient) => Promi
   }
 }
 
-/** Run the block once; returns its report NOTICE's counts. */
+/**
+ * Run the block once; returns its report NOTICE's counts. The lock-count NOTICE
+ * it raises before locking must name the same user count as the report.
+ */
 async function runBlock(client: pg.PoolClient): Promise<Record<string, number>> {
   const notices: string[] = [];
+  const lockNotices: string[] = [];
   const onNotice = (notice: { message?: string }) => {
     if (notice.message?.startsWith(`${BLOCK_NAME}:`)) notices.push(notice.message);
+    if (notice.message?.startsWith(`${BLOCK_NAME}-locks:`)) lockNotices.push(notice.message);
   };
   client.on("notice", onNotice);
   try {
@@ -102,7 +108,10 @@ async function runBlock(client: pg.PoolClient): Promise<Record<string, number>> 
     client.removeListener("notice", onNotice);
   }
   expect(notices).toHaveLength(1);
-  return parseNoticeCounts(notices[0]);
+  expect(lockNotices).toHaveLength(1);
+  const report = parseNoticeCounts(notices[0]);
+  expect(parseNoticeCounts(lockNotices[0])).toEqual({ users: report.users });
+  return report;
 }
 
 type Seeded = Record<Table, string>;
@@ -280,6 +289,26 @@ describe("migration: revoke credentials filed under a tenant their user has left
     await ctx.deleteTestData(tenantA);
   });
 
+  /**
+   * Two operator tokens under A whose creator is not their subject. The block
+   * matches operator tokens by subject, so the departed user's token as subject
+   * is residue and the member's token they merely created is not.
+   */
+  async function seedCrossOperatorTokens(client: pg.PoolClient) {
+    const ids = { departedSubject: randomUUID(), departedCreator: randomUUID() };
+    for (const [id, subject, creator] of [
+      [ids.departedSubject, departed, member],
+      [ids.departedCreator, member, departed],
+    ] as const) {
+      await client.query(
+        `INSERT INTO operator_tokens (id, token_hash, prefix, name, tenant_id, subject_user_id, created_by_user_id, scope, expires_at, created_at)
+         VALUES ($1::uuid, $2, 'op_XXXXX', 'k', $3::uuid, $4::uuid, $5::uuid, 'maintenance', now() + interval '30 days', now())`,
+        [id, hex(32), tenantA, subject, creator],
+      );
+    }
+    return ids;
+  }
+
   async function seedScenario(client: pg.PoolClient) {
     await setTestBypass(client, SEED_TABLES);
     const clientA = await seedClient(client, tenantA, member);
@@ -290,6 +319,7 @@ describe("migration: revoke credentials filed under a tenant their user has left
       departedInB: await seedArtifacts(client, departed, tenantB, clientB),
       memberInA: await seedArtifacts(client, member, tenantA, clientA),
       userlessInA: await seedUserlessMcp(client, tenantA, clientA, member),
+      crossOperatorTokensInA: await seedCrossOperatorTokens(client),
     };
   }
 
@@ -300,7 +330,23 @@ describe("migration: revoke credentials filed under a tenant their user has left
       departedInB: await states(client, seeded.departedInB),
       memberInA: await states(client, seeded.memberInA),
       userlessInA: await states(client, seeded.userlessInA),
+      departedAsOperatorSubject: await states(client, { operator_tokens: seeded.crossOperatorTokensInA.departedSubject }),
+      departedAsOperatorCreator: await states(client, { operator_tokens: seeded.crossOperatorTokensInA.departedCreator }),
     };
+  }
+
+  /**
+   * Whether a second connection can take `userId`'s credential lock right now.
+   * Asked while the block's transaction is still open, so false means the block
+   * holds it. The probe's own lock is transaction-scoped and its statement
+   * autocommits, so it is released at once.
+   */
+  async function lockFree(userId: string): Promise<boolean> {
+    const [row] = await ctx.su.prisma.$queryRawUnsafe<{ free: boolean }[]>(
+      `SELECT pg_try_advisory_xact_lock(hashtext($1)) AS free`,
+      userAuthLockKey(userId),
+    );
+    return row.free;
   }
 
   it("revokes every model's residue of a departed and a rowless user, and leaves active memberships' and userless rows live", async () => {
@@ -312,11 +358,13 @@ describe("migration: revoke credentials filed under a tenant their user has left
         departedInB: all("live"),
         memberInA: all("live"),
         userlessInA: { mcp_access_tokens: "live", mcp_refresh_tokens: "live", mcp_authorization_codes: "live" },
+        departedAsOperatorSubject: { operator_tokens: "live" },
+        departedAsOperatorCreator: { operator_tokens: "live" },
       });
       const sentinels = gucSentinels();
       await setGucs(client, sentinels);
 
-      await runBlock(client);
+      const report = await runBlock(client);
 
       expect(await readGucs(client)).toEqual(sentinels);
       expect(await snapshot(client, seeded)).toEqual({
@@ -325,16 +373,56 @@ describe("migration: revoke credentials filed under a tenant their user has left
         departedInB: all("live"),
         memberInA: all("live"),
         userlessInA: { mcp_access_tokens: "live", mcp_refresh_tokens: "live", mcp_authorization_codes: "live" },
+        departedAsOperatorSubject: { operator_tokens: "revoked" },
+        departedAsOperatorCreator: { operator_tokens: "live" },
       });
+      // Lower bounds: the block reaches every tenant, so other residue on the
+      // database adds to these. departed and rowless are the seeded residue
+      // users; each model has their two rows, operator tokens one more.
+      expect(report.users).toBeGreaterThanOrEqual(2);
+      for (const table of TABLES) {
+        expect(report[table], table).toBeGreaterThanOrEqual(table === "operator_tokens" ? 3 : 2);
+      }
+    });
+  });
+
+  it("holds the credential lock of every user with unexpired residue until its transaction ends", async () => {
+    await inRolledBackAppTransaction(async (client) => {
+      await seedScenario(client);
+      await setGucs(client, gucSentinels());
+      // Positive control: nothing holds the locks before the block runs.
+      expect({ departed: await lockFree(departed), rowless: await lockFree(rowless) }).toEqual({ departed: true, rowless: true });
+
+      await runBlock(client);
+
+      expect({
+        departed: await lockFree(departed),
+        rowless: await lockFree(rowless),
+        member: await lockFree(member),
+      }).toEqual({ departed: false, rowless: false, member: true });
     });
   });
 
   it("revokes an expired residue row too: expiry decides only whose lock is taken", async () => {
+    // Active nowhere, and holding only expired residue under A.
+    const expiredOnly = await ctx.createUser(tenantA);
+    await su(`DELETE FROM tenant_members WHERE user_id = $1::uuid`, expiredOnly);
     await inRolledBackAppTransaction(async (client) => {
       const seeded = await seedScenario(client);
       await setTestBypass(client, TABLES);
       await client.query(`UPDATE api_keys SET expires_at = now() - interval '1 day' WHERE id = $1::uuid`, [seeded.rowlessInA.api_keys]);
       await client.query(`UPDATE sessions SET expires = now() - interval '1 day' WHERE id = $1::uuid`, [seeded.rowlessInA.sessions]);
+      const expired = { sessions: randomUUID(), api_keys: randomUUID() };
+      await client.query(
+        `INSERT INTO sessions (id, session_token, user_id, tenant_id, expires, created_at, last_active_at)
+         VALUES ($1::uuid, $2, $3::uuid, $4::uuid, now() - interval '1 day', now() - interval '2 days', now() - interval '2 days')`,
+        [expired.sessions, hex(32), expiredOnly, tenantA],
+      );
+      await client.query(
+        `INSERT INTO api_keys (id, user_id, tenant_id, token_hash, prefix, name, scope, expires_at, created_at)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'api_XXXX', 'k', 'passwords:read', now() - interval '1 day', now() - interval '2 days')`,
+        [expired.api_keys, expiredOnly, tenantA, hex(32)],
+      );
       await setGucs(client, gucSentinels());
 
       await runBlock(client);
@@ -342,6 +430,13 @@ describe("migration: revoke credentials filed under a tenant their user has left
       expect(await states(client, { api_keys: seeded.rowlessInA.api_keys, sessions: seeded.rowlessInA.sessions })).toEqual({
         api_keys: "revoked",
         sessions: "revoked",
+      });
+      expect(await states(client, expired)).toEqual({ api_keys: "revoked", sessions: "revoked" });
+      // Expired rows cannot be a mint's proof: the user is revoked without being locked.
+      // Control: rowless, whose other residue is unexpired, is locked.
+      expect({ expiredOnly: await lockFree(expiredOnly), rowless: await lockFree(rowless) }).toEqual({
+        expiredOnly: true,
+        rowless: false,
       });
     });
   });

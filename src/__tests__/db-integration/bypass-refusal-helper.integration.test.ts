@@ -19,7 +19,10 @@ import { NIL_UUID } from "@/lib/constants/app";
 import { defineGrant, setBypassGucs } from "@/lib/tenant-rls-grants";
 import { BYPASS_PURPOSE } from "@/lib/tenant-rls-purpose";
 
-const SESSIONS_ONLY = defineGrant(BYPASS_PURPOSE.AUTH_FLOW, ["session"]);
+// Not `users`. Two tables, because (auth_flow, sessions) alone is
+// BYPASS_GRANT.AUTH_SESSION_LIFECYCLE's pair, and a test-local grant must not
+// credit a member with evidence (integration-test-grants-no-collision).
+const SESSIONS_AND_ACCOUNTS = defineGrant(BYPASS_PURPOSE.AUTH_FLOW, ["session", "account"]);
 const USERS_ONLY = defineGrant(BYPASS_PURPOSE.AUTH_FLOW, ["user"]);
 
 describe("expectBypassRefusal", () => {
@@ -45,7 +48,7 @@ describe("expectBypassRefusal", () => {
     });
 
   it("returns the reports and the table of a refused statement", async () => {
-    const { notices, refusals, table, error } = await expectBypassRefusal(() => readUsersUnder(SESSIONS_ONLY));
+    const { notices, refusals, table, error } = await expectBypassRefusal(() => readUsersUnder(SESSIONS_AND_ACCOUNTS));
     expect(table).toBe("users");
     expect(notices).toEqual([{ table: "users", purpose: "auth_flow" }]);
     expect(refusals).toEqual([{ table: "users", purpose: "auth_flow" }]);
@@ -124,7 +127,7 @@ describe("expectBypassRefusal", () => {
   });
 
   it("expectSwallowedBypassRefusal throws when the statement rejects", async () => {
-    await expect(expectSwallowedBypassRefusal(() => readUsersUnder(SESSIONS_ONLY))).rejects.toThrow(
+    await expect(expectSwallowedBypassRefusal(() => readUsersUnder(SESSIONS_AND_ACCOUNTS))).rejects.toThrow(
       /RLS_BYPASS_NOT_GRANTED: users/,
     );
   });

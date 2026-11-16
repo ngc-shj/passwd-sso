@@ -107,3 +107,41 @@ Verification:
 - eslint on the touched files: 0.
 - Rule-9 gate, check-bypass-rls, check-raw-sql-usage: 0.
 - `npm run test:integration -- session-revocation team-tenant-departure departed-member-operator-scripts team-key-version-guard user-auth-serialization directory-sync scim` (13 files, 290 passed): 0.
+
+### Round 2
+Reviewed commit 185541da7. Findings:
+- F5 (Functionality, Major) / S3 (Security, Major): credential residue from earlier departures is revived by any admission, not only a return. Fixed in 787a8f24c by migration C9 (`20261116200000_revoke_departed_member_credential_residue`). It revokes the ten models wherever the (user, tenant) pair has no active membership, under the same per-user credential lock, idempotently. Plan C9; deviation D9.
+- F6 (Minor): fixed. Sentry `extra` precedence now matches the log.
+- F7 (Minor) / S4 (Minor): fixed. The directory-sync log caps each id list at 100, with counts and `userIdsTruncated`.
+- T-1 (Minor, continuing): fixed. The SCIM `[id]` commit marker is on the outermost `withTenantRls`.
+- Bridge code stamped with `User.tenantId`: first recorded as no gap (D10), then fixed in round 3 (F3).
+
+Between rounds 2 and 3:
+- Merged origin/main (#1062) in 627963b21; conflicts resolved with both sides kept.
+- `TEAM_MEMBER_REMOVE` now commits inside the removal's transaction and is pinned in `check-critical-audit-atomic` (35e2d67e4, D11). This was a handoff from the #1062 session.
+
+### Round 3
+Reviewed 787a8f24c, the 627963b21 merge resolution and 35e2d67e4. Findings:
+- F1 (Security, Major) / F8 (Functionality, Major): during a rolling deploy, old-release instances create residue after the one-time migration has run. Fixed: `getSessionAndUser` binds a session to a tenant where its user holds an active membership, compared against the membership and never the `User.tenantId` column. A failed lookup propagates. This covers every `auth()`, including the route-handler-auth paths.
+  - Sessions are neutralised by the binding, reactivations by `returnToTenant` (D8), and tokens are already checked against their own tenant.
+  - One path remains: an old-release SCIM DELETE whose revocation fails during the rollout, followed by a later same-tenant re-creation. It is recorded with an Anti-Deferral entry in D12.
+  - The C9 over-claim is corrected.
+- F2 (Security, Minor): a session stamped before the credential lock with a just-departed tenant. Covered by the binding, which makes it dead (D12).
+- F3 (Security, Minor): fixed. The bridge code resolves the tenant of the active membership and uses it for every stamp. No membership → 401 with `no_active_membership`.
+- F9 (Functionality, Minor): fixed. A NOTICE gives the lock-set size, and the header states the lock-table bound.
+- Q-1, Q-2, Q-3 (Testing, Major) and Q-4, Q-5, Q-6 (Minor): fixed.
+  - Q-1: a second connection observes the migration's per-user locks.
+  - Q-2: a failing in-transaction `TEAM_MEMBER_REMOVE` audit fails the DELETE.
+  - Q-3: operator tokens are seeded with subject ≠ creator.
+  - Q-4: no-audit assertions now target `logAuditInTx`.
+  - Q-5: a misleading cell title is renamed.
+  - Q-6: lower bounds on the first-run report.
+- Each is red-proved; the red-proof table is in the deviation log.
+
+Verification:
+- `npx tsc --noEmit`: 0.
+- Full `npx vitest run` (24954 passed): 0.
+- `npx next build`: 0.
+- eslint: 0.
+- 36 static gates: 0.
+- `npm run test:integration` on the session and revocation suites (17 files, 218 passed) and the bypass-grant suites (29 passed): 0.

@@ -1158,7 +1158,7 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
     expect((await res.json()).error).toBe("TEAM_BUSY");
     expect(res.headers.get("Retry-After")).toBe("3");
     expect(mockPrismaTeamMember.deleteMany).not.toHaveBeenCalled();
-    expect(mockLogAudit).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 
   it("answers 404, removing nothing, when the row changed between the check and the team lock", async () => {
@@ -1277,6 +1277,22 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
     expect(mockTombstoneRevokedSessions).not.toHaveBeenCalled();
   });
 
+  it("propagates a failing in-transaction TEAM_MEMBER_REMOVE audit instead of answering 2xx", async () => {
+    mockPrismaTeamMember.findUnique.mockResolvedValue(removableTarget);
+    mockLogAuditInTx.mockRejectedValueOnce(new Error("audit write failed"));
+
+    await expect(
+      DELETE(
+        createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`),
+        createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
+      ),
+    ).rejects.toThrow("audit write failed");
+    // The removal's transaction is the last one opened, and it did not commit.
+    expect(mockLogAuditInTx).toHaveBeenCalledTimes(1);
+    expect(mockCommit).toHaveBeenCalledTimes(mockWithTeamTenantRls.mock.calls.length - 1);
+    expect(mockTombstoneRevokedSessions).not.toHaveBeenCalled();
+  });
+
   it("answers 409 CONFLICT when the member's credential lock is held past the wait", async () => {
     mockPrismaTeamMember.findUnique.mockResolvedValue(removableTarget);
     mockRevokeUserAuthArtifactsInTx.mockRejectedValueOnce(new UserAuthLockTimeoutError());
@@ -1380,7 +1396,7 @@ describe("DELETE: an acting member who left the tenant, judged against their adm
     expect(mockPrismaTeamMember.deleteMany).not.toHaveBeenCalled();
     expect(mockPrismaTeamMemberKey.deleteMany).not.toHaveBeenCalled();
     expect(mockRevokeUserAuthArtifactsInTx).not.toHaveBeenCalled();
-    expect(mockLogAudit).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 
   it("refuses (403) a departure known only by its record, removing nothing and writing no audit", async () => {
@@ -1389,7 +1405,7 @@ describe("DELETE: an acting member who left the tenant, judged against their adm
     expect((await remove()).status).toBe(403);
     expect(mockPrismaTeamMember.deleteMany).not.toHaveBeenCalled();
     expect(mockPrismaTeamMemberKey.deleteMany).not.toHaveBeenCalled();
-    expect(mockLogAudit).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 
   it("refuses (403) a departure at exactly the admission instant", async () => {
@@ -1408,8 +1424,11 @@ describe("DELETE: an acting member who left the tenant, judged against their adm
     ]) {
       setup();
       mockPrismaTeamMember.deleteMany.mockClear();
+      mockLogAuditInTx.mockClear();
       expect((await remove()).status).toBe(200);
       expect(mockPrismaTeamMember.deleteMany).toHaveBeenCalledTimes(1);
+      // Positive control for the refusal cells' "no audit": an allowed removal writes one.
+      expect(mockLogAuditInTx).toHaveBeenCalledTimes(1);
     }
   });
 });

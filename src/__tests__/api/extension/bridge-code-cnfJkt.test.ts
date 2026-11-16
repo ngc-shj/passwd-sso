@@ -20,11 +20,10 @@ const {
   mockRequireRecentCurrentAuthMethod,
   mockRateLimitCheck,
   mockWithBypassRls,
-  mockWithUserTenantRls,
+  mockResolveUserTenantId,
   mockBridgeCodeFindMany,
   mockBridgeCodeUpdateMany,
   mockBridgeCodeCreate,
-  mockUserFindUnique,
   mockLogAuditAsync,
   mockCheckIpRateLimit,
   mockCheckAccessRestrictionWithAudit,
@@ -35,11 +34,10 @@ const {
   mockRequireRecentCurrentAuthMethod: vi.fn(),
   mockRateLimitCheck: vi.fn(),
   mockWithBypassRls: vi.fn(),
-  mockWithUserTenantRls: vi.fn(),
+  mockResolveUserTenantId: vi.fn(),
   mockBridgeCodeFindMany: vi.fn(),
   mockBridgeCodeUpdateMany: vi.fn(),
   mockBridgeCodeCreate: vi.fn(),
-  mockUserFindUnique: vi.fn(),
   mockLogAuditAsync: vi.fn(),
   mockCheckIpRateLimit: vi.fn(),
   mockCheckAccessRestrictionWithAudit: vi.fn(),
@@ -77,7 +75,7 @@ vi.mock("@/lib/tenant-rls", () => ({
     client.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}::text))`,
 }));
 vi.mock("@/lib/tenant-context", () => ({
-  withUserTenantRls: mockWithUserTenantRls,
+  resolveUserTenantId: mockResolveUserTenantId,
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -86,7 +84,6 @@ vi.mock("@/lib/prisma", () => ({
       updateMany: mockBridgeCodeUpdateMany,
       create: mockBridgeCodeCreate,
     },
-    user: { findUnique: mockUserFindUnique },
   },
 }));
 vi.mock("@/lib/audit/audit", () => ({
@@ -150,10 +147,7 @@ describe("POST /api/extension/bridge-code — C4 rewrite", () => {
     mockRateLimitCheck.mockResolvedValue({ allowed: true });
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockRequireRecentCurrentAuthMethod.mockResolvedValue(null);
-    mockWithUserTenantRls.mockImplementation(
-      (_userId: string, fn: () => unknown) => fn(),
-    );
-    mockUserFindUnique.mockResolvedValue({ tenantId: "tenant-1" });
+    mockResolveUserTenantId.mockResolvedValue("tenant-1");
     mockCheckAccessRestrictionWithAudit.mockResolvedValue({ allowed: true });
     mockWithBypassRls.mockImplementation(
       (_prisma: unknown, fn: (tx: unknown) => unknown) =>

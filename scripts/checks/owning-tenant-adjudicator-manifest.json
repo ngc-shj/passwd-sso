@@ -8,9 +8,6 @@
   "src/app/api/auth/passkey/verify/route.ts": {
     "disposition": "adjudicator"
   },
-  "src/app/api/extension/bridge-code/route.ts": {
-    "disposition": "tenant-scoped"
-  },
   "src/app/api/mcp/authorize/consent/route.ts": {
     "disposition": "adjudicator"
   },
