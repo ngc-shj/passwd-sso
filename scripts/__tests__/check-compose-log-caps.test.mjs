@@ -25,8 +25,10 @@ import {
   findComposeFiles,
   findStaleFixtureEntries,
   findViolations,
+  isComposePath,
   isTestFixturePath,
   parseMaxSize,
+  walkComposeFiles,
   FIXTURE_ALLOW,
 } from "../checks/check-compose-log-caps.mjs";
 
@@ -622,5 +624,36 @@ describe("findAmbiguousDefaults groups by directory", () => {
   it("does not pair default names that live in different directories", () => {
     // Two stacks in two directories are two stacks, not an ambiguity.
     expect(findAmbiguousDefaults(["compose.yaml", "deploy/docker-compose.yml"])).toEqual([]);
+  });
+});
+
+describe("the tracked listing and the readdir walk share one member predicate", () => {
+  it("returns the same set from both on a git-init'd scratch tree", () => {
+    const root = mkdtempSync(join(tmpdir(), "compose-files-"));
+    try {
+      const fixture = FIXTURE_ALLOW[0].path;
+      const files = ["deploy/compose.yaml", "my-compose.yml", "deploy/compose/prod.yml", "notes.yml", "src/composer.json", fixture];
+      for (const f of files) {
+        mkdirSync(join(root, f, ".."), { recursive: true });
+        writeFileSync(join(root, f), "services: {}\n");
+      }
+      execFileSync("git", ["init", "-q"], { cwd: root });
+      execFileSync("git", ["add", "-A"], { cwd: root });
+      const rel = (paths) => paths.map((f) => f.slice(root.length + 1)).sort();
+      const tracked = rel(findComposeFiles(root));
+      const walked = rel(walkComposeFiles(root));
+      expect(tracked).toEqual(["deploy/compose.yaml", "deploy/compose/prod.yml", "my-compose.yml"]);
+      expect(walked).toEqual(tracked);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("names the pinned decisions: a `-compose` suffix and a compose directory are members, a fixture is not", () => {
+    expect(isComposePath("my-compose.yml")).toBe(true);
+    expect(isComposePath("deploy/compose/prod.yaml")).toBe(true);
+    expect(isComposePath("deploy/compose.yaml")).toBe(true);
+    expect(isComposePath("notes.yml")).toBe(false);
+    expect(isComposePath("compose.json")).toBe(false);
   });
 });

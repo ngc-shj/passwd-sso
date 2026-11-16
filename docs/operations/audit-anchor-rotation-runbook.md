@@ -51,7 +51,7 @@ destination, primary first:
 
 | Destination | Variables on the operator host |
 |---|---|
-| S3 | `AUDIT_ANCHOR_DESTINATION_S3_BUCKET`, `AUDIT_ANCHOR_DESTINATION_S3_PREFIX`, and AWS credentials (`AWS_PROFILE`, `AWS_REGION`) |
+| S3 | `AUDIT_ANCHOR_DESTINATION_S3_BUCKET`, `AUDIT_ANCHOR_DESTINATION_S3_PREFIX`, and AWS credentials (`AWS_PROFILE`, `AWS_REGION`); on a Compose host take them from the shell, not from `AUDIT_ANCHOR_AWS_*` in `.env`, which only the publisher container reads |
 | GitHub Releases | `AUDIT_ANCHOR_DESTINATION_GH_REPO`, and `AUDIT_ANCHOR_DESTINATION_GH_TOKEN` or `GITHUB_TOKEN` |
 | Filesystem | `AUDIT_ANCHOR_DESTINATION_FS_PATH` (the same mount the publisher writes) |
 
@@ -255,6 +255,8 @@ publisher task restarts:
 aws ecs update-service --cluster <cluster> --service <name_prefix>-audit-anchor-publisher \
   --force-new-deployment --region <region>
 ```
+
+On Compose, set it in `.env` and run `docker compose -f docker-compose.yml -f docker-compose.workers.yml up -d audit-anchor-publisher` (`restart` keeps the old environment). On Kubernetes, update the `signing-key` of Secret `audit-anchor-publisher`, then `kubectl -n <namespace> rollout restart deployment/audit-anchor-publisher`.
 
 The boot line's `key` is now `<new-kid>`. What the restarted publisher does **for the rest
 of that day** is not a publish: today's manifest exists under the old key, so every run for
@@ -548,7 +550,9 @@ signed statement there says where the old one ended.
    passed to another task"), revoke the role's active sessions, and only then continue —
    otherwise the new prefix can be wedged the same way.
 2. Stop the publisher (ECS: `aws ecs update-service --cluster <cluster> --service
-   <name_prefix>-audit-anchor-publisher --desired-count 0 --region <region>`).
+   <name_prefix>-audit-anchor-publisher --desired-count 0 --region <region>`; Compose:
+   `docker compose -f docker-compose.yml -f docker-compose.workers.yml stop audit-anchor-publisher`; Kubernetes:
+   `kubectl -n <namespace> scale deployment/audit-anchor-publisher --replicas=0`).
 3. **A new location.** On the Terraform stack, a new `audit_anchor_s3_prefix`: the bucket
    policy, the publisher's IAM policy and its task env are all built from it, so one
    `terraform apply` moves all three. The apply also sets the service's desired count back

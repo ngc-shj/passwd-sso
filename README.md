@@ -146,7 +146,7 @@ Audit Outbox Worker (separate process) ← drains audit_outbox → audit_logs
 SAML Jackson (Docker) ← SAML 2.0 IdP (HENNGE, Okta, Azure AD, etc.)
 ```
 
-**Docker services** — Six containers: `app` (Next.js), `db` (PostgreSQL 16), `jackson` (SAML Jackson), `redis` (Redis 7), `migrate` (one-shot Prisma migration), `audit-outbox-worker` (audit drain worker, dev override only — deploy separately in production).
+**Docker services** — Five core containers: `app` (Next.js), `db` (PostgreSQL 16), `jackson` (SAML Jackson), `redis` (Redis 7), `migrate` (one-shot Prisma migration). Workers: `audit-outbox-worker` and `retention-gc-worker` (dev override, or `docker-compose.workers.yml` in production); `docker-compose.workers.yml` also runs `audit-anchor-publisher` and `audit-chain-verify-worker`.
 
 **Personal vault** — All data is encrypted **client-side** before reaching the server. The server stores only ciphertext.
 
@@ -266,8 +266,9 @@ Key variables:
 | `PASSWD_APP_PASSWORD` | (Required for `docker compose`) Password for the `passwd_app` runtime DB role. docker-compose fails to start if unset. |
 | `PASSWD_OUTBOX_WORKER_PASSWORD` | (Required for `docker compose`) Password for the `passwd_outbox_worker` DB role. Used by initdb on first boot; for existing clusters use `scripts/set-outbox-worker-password.sh` |
 | `PASSWD_RETENTION_GC_WORKER_PASSWORD` | (Required for `docker compose`) Password for the `passwd_retention_gc_worker` DB role. Used by initdb on first boot; for existing clusters use `scripts/set-retention-gc-worker-password.sh` |
-| `PASSWD_ANCHOR_PUBLISHER_PASSWORD` | (Optional for `docker compose`) Password for the `passwd_anchor_publisher` DB role. Used by initdb on first boot; unset, the role is created `NOLOGIN`. For existing clusters use `scripts/set-audit-anchor-publisher-password.sh` |
-| `PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD` | (Optional for `docker compose`) Password for the `passwd_audit_chain_verifier` DB role (the audit-chain verify worker's read-only role). Used by initdb on first boot; unset, the role is created `NOLOGIN`. Must match `AUDIT_CHAIN_VERIFY_DATABASE_URL`. On an existing cluster the migration creates the role `NOLOGIN`: set the password with `scripts/set-audit-chain-verifier-password.sh`, then run `ALTER ROLE passwd_audit_chain_verifier WITH LOGIN` as the superuser |
+| `PASSWD_ANCHOR_PUBLISHER_PASSWORD` | (Required with `docker-compose.workers.yml`, otherwise optional) Password for the `passwd_anchor_publisher` DB role. Used by initdb on first boot; unset, the role is created `NOLOGIN`. For existing clusters use `scripts/set-audit-anchor-publisher-password.sh` |
+| `PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD` | (Required with `docker-compose.workers.yml`, otherwise optional) Password for the `passwd_audit_chain_verifier` DB role (the audit-chain verify worker's read-only role). Used by initdb on first boot; unset, the role is created `NOLOGIN`. On an existing cluster the migration creates the role `NOLOGIN`: set the password with `scripts/set-audit-chain-verifier-password.sh`, then run `ALTER ROLE passwd_audit_chain_verifier WITH LOGIN` as the superuser |
+| `AUDIT_ANCHOR_AWS_ACCESS_KEY_ID`, `AUDIT_ANCHOR_AWS_SECRET_ACCESS_KEY`, `AUDIT_ANCHOR_AWS_REGION` | (Optional, `docker-compose.workers.yml`) AWS credentials and region the audit-anchor publisher container uses for an S3 destination; no other container receives them. Without the keys the host's default credential chain applies; the region is required with an S3 bucket. See [Deployment](docs/operations/deployment.md) |
 | `OUTBOX_BATCH_SIZE`, `OUTBOX_*` | (Optional) Audit outbox worker tuning. See `.env.example` for all options |
 | `NEXT_DEV_ALLOWED_ORIGINS` | (Optional) Allowed origins for dev server (e.g., Tailscale hostname) |
 | `NEXT_PUBLIC_CHROME_STORE_URL` | (Optional) Chrome Web Store URL for extension distribution |

@@ -9,8 +9,8 @@
  *     OR every 24h while still in failed state.
  *
  * Process lifecycle: long-running (sleep TICK_INTERVAL_MS between rounds).
- * Run as `npm run worker:audit-chain-verify` (ECS runs the bundled worker; the
- * compose files define no service for it). Connects as passwd_audit_chain_verifier (#947), which
+ * Run as `npm run worker:audit-chain-verify` (ECS and Kubernetes run the bundled
+ * worker, docker-compose.workers.yml has a service for it). Connects as passwd_audit_chain_verifier (#947), which
  * holds column-level SELECT on the eleven columns these statements name and
  * nothing else: no table write, no other column or table. In production
  * AUDIT_CHAIN_VERIFY_DATABASE_URL is required with no DATABASE_URL fallback — a

@@ -45,6 +45,28 @@ services:
       # mirrors production, so a regression that reintroduces the app credential
       # is caught in dev.
       - DATABASE_URL=
+      # Withheld set, as in production. The .:/app bind mount keeps /app/.env
+      # readable, so this is env-shape parity, not isolation.
+      - AUDIT_ANCHOR_AWS_ACCESS_KEY_ID=
+      - AUDIT_ANCHOR_AWS_REGION=
+      - AUDIT_ANCHOR_AWS_SECRET_ACCESS_KEY=
+      - AUDIT_ANCHOR_DESTINATION_GH_TOKEN=
+      - AUDIT_ANCHOR_PUBLISHER_DATABASE_URL=
+      - AUDIT_ANCHOR_SIGNING_KEY=
+      - AUDIT_ANCHOR_TAG_SECRET=
+      - AUDIT_CHAIN_VERIFY_DATABASE_URL=
+      - GITHUB_TOKEN=
+      - JACKSON_API_KEY=
+      - MIGRATION_DATABASE_URL=
+      - PASSWD_ANCHOR_PUBLISHER_PASSWORD=
+      - PASSWD_APP_PASSWORD=
+      - PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD=
+      - PASSWD_JACKSON_PASSWORD=
+      - PASSWD_OUTBOX_WORKER_PASSWORD=
+      - PASSWD_RETENTION_GC_WORKER_PASSWORD=
+      - PASSWD_SUPERUSER_PASSWORD=
+      - RETENTION_GC_DATABASE_URL=
+      - SENTRY_AUTH_TOKEN=
     depends_on:
       db:
         condition: service_healthy
@@ -85,6 +107,28 @@ services:
       # mirrors production, so a regression that reintroduces the app credential
       # is caught in dev.
       - DATABASE_URL=
+      # Withheld set, as in production. The .:/app bind mount keeps /app/.env
+      # readable, so this is env-shape parity, not isolation.
+      - AUDIT_ANCHOR_AWS_ACCESS_KEY_ID=
+      - AUDIT_ANCHOR_AWS_REGION=
+      - AUDIT_ANCHOR_AWS_SECRET_ACCESS_KEY=
+      - AUDIT_ANCHOR_DESTINATION_GH_TOKEN=
+      - AUDIT_ANCHOR_PUBLISHER_DATABASE_URL=
+      - AUDIT_ANCHOR_SIGNING_KEY=
+      - AUDIT_ANCHOR_TAG_SECRET=
+      - AUDIT_CHAIN_VERIFY_DATABASE_URL=
+      - GITHUB_TOKEN=
+      - JACKSON_API_KEY=
+      - MIGRATION_DATABASE_URL=
+      - OUTBOX_WORKER_DATABASE_URL=
+      - PASSWD_ANCHOR_PUBLISHER_PASSWORD=
+      - PASSWD_APP_PASSWORD=
+      - PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD=
+      - PASSWD_JACKSON_PASSWORD=
+      - PASSWD_OUTBOX_WORKER_PASSWORD=
+      - PASSWD_RETENTION_GC_WORKER_PASSWORD=
+      - PASSWD_SUPERUSER_PASSWORD=
+      - SENTRY_AUTH_TOKEN=
     depends_on:
       db:
         condition: service_healthy

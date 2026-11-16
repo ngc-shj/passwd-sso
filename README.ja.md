@@ -145,7 +145,7 @@ Audit Outbox Worker（別プロセス）← audit_outbox を drain → audit_log
 SAML Jackson (Docker) ← SAML 2.0 IdP (HENNGE, Okta, Azure AD 等)
 ```
 
-**Docker サービス** — 6 コンテナ: `app`（Next.js）、`db`（PostgreSQL 16）、`jackson`（SAML Jackson）、`redis`（Redis 7）、`migrate`（ワンショット Prisma マイグレーション）、`audit-outbox-worker`（監査ドレインワーカー、dev override のみ — 本番環境では別途デプロイ）。
+**Docker サービス** — コア 5 コンテナ: `app`（Next.js）、`db`（PostgreSQL 16）、`jackson`（SAML Jackson）、`redis`（Redis 7）、`migrate`（ワンショット Prisma マイグレーション）。ワーカー: `audit-outbox-worker` と `retention-gc-worker`（dev override、本番は `docker-compose.workers.yml`）。`docker-compose.workers.yml` はさらに `audit-anchor-publisher` と `audit-chain-verify-worker` も起動します。
 
 **個人 Vault** — すべてのデータは**クライアントサイドで暗号化**されてからサーバーに送信されます。サーバーは暗号文のみを保存します。
 
@@ -265,8 +265,9 @@ npm run docker:down
 | `PASSWD_APP_PASSWORD` | （`docker compose` 必須）`passwd_app` ランタイムロールのパスワード。未設定だと docker-compose が起動失敗 |
 | `PASSWD_OUTBOX_WORKER_PASSWORD` | （`docker compose` 必須）`passwd_outbox_worker` DB ロールのパスワード。initdb 初回起動時に使用。既存クラスタでは `scripts/set-outbox-worker-password.sh` を使用 |
 | `PASSWD_RETENTION_GC_WORKER_PASSWORD` | （`docker compose` 必須）`passwd_retention_gc_worker` DB ロールのパスワード。initdb 初回起動時に使用。既存クラスタでは `scripts/set-retention-gc-worker-password.sh` を使用 |
-| `PASSWD_ANCHOR_PUBLISHER_PASSWORD` | （`docker compose` では任意）`passwd_anchor_publisher` DB ロールのパスワード。initdb 初回起動時に使用し、未設定ならロールは `NOLOGIN` で作成。既存クラスタでは `scripts/set-audit-anchor-publisher-password.sh` を使用 |
-| `PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD` | （`docker compose` では任意）`passwd_audit_chain_verifier` DB ロール（audit-chain verify worker の読み取り専用ロール）のパスワード。initdb 初回起動時に使用し、未設定ならロールは `NOLOGIN` で作成。`AUDIT_CHAIN_VERIFY_DATABASE_URL` と一致させる。既存クラスタではマイグレーションがロールを `NOLOGIN` で作成するため、`scripts/set-audit-chain-verifier-password.sh` でパスワードを設定した後、スーパーユーザーで `ALTER ROLE passwd_audit_chain_verifier WITH LOGIN` を実行 |
+| `PASSWD_ANCHOR_PUBLISHER_PASSWORD` | （`docker-compose.workers.yml` 使用時は必須、それ以外は任意）`passwd_anchor_publisher` DB ロールのパスワード。initdb 初回起動時に使用し、未設定ならロールは `NOLOGIN` で作成。既存クラスタでは `scripts/set-audit-anchor-publisher-password.sh` を使用 |
+| `PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD` | （`docker-compose.workers.yml` 使用時は必須、それ以外は任意）`passwd_audit_chain_verifier` DB ロール（audit-chain verify worker の読み取り専用ロール）のパスワード。initdb 初回起動時に使用し、未設定ならロールは `NOLOGIN` で作成。既存クラスタではマイグレーションがロールを `NOLOGIN` で作成するため、`scripts/set-audit-chain-verifier-password.sh` でパスワードを設定した後、スーパーユーザーで `ALTER ROLE passwd_audit_chain_verifier WITH LOGIN` を実行 |
+| `AUDIT_ANCHOR_AWS_ACCESS_KEY_ID`, `AUDIT_ANCHOR_AWS_SECRET_ACCESS_KEY`, `AUDIT_ANCHOR_AWS_REGION` | （任意、`docker-compose.workers.yml`）audit-anchor publisher コンテナが S3 の出力先に使う AWS 認証情報とリージョン。他のコンテナには渡されません。キー未設定ならホストのデフォルト認証情報チェーンを使用し、S3 バケット指定時はリージョンが必須。詳細は [Deployment](docs/operations/deployment.md) 参照 |
 | `OUTBOX_BATCH_SIZE`, `OUTBOX_*` | （任意）監査アウトボックスワーカーの調整。詳細は `.env.example` 参照 |
 | `NEXT_DEV_ALLOWED_ORIGINS` | （任意）dev サーバー向け許可オリジン（例: Tailscale ホスト名） |
 | `NEXT_PUBLIC_CHROME_STORE_URL` | （任意）ブラウザ拡張配布用 Chrome Web Store URL |
