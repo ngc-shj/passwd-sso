@@ -21,7 +21,12 @@
  *    update/updateMany/upsert-update naming `deactivatedAt`, or a raw write of
  *    `tenant_members` naming `deactivated_at`, fails. A create naming it (a row
  *    created deactivated) must follow the creation lock and be followed by
- *    `departCreatedMembership` in the same function.
+ *    `departCreatedMembership` in the same function. In team-departure.ts
+ *    itself such a write is a `departureWriters` site: covered when it clears
+ *    the column (raw `SET … deactivated_at = NULL`, Prisma `deactivatedAt:
+ *    null`) or a call of `endTeamMemberships` follows it in the same function
+ *    (a conditional call counts). In the other IMPLEMENTATIONS files it fails
+ *    like anywhere else.
  *
  * 3. ADMISSIONS lock the users' tenant rows first. `teamMember.create/
  *    createMany/upsert`, a nested `members: { create }`, `teamInvitation.
@@ -41,6 +46,15 @@
  * 6. `tenant_member_departures` is written only by `deactivateScimUser` and
  *    deleted by nothing (FK cascade aside): no Prisma write of
  *    `tenantMemberDeparture`, no raw write elsewhere, no raw DELETE.
+ *
+ *    Rules 2, 5 and 6, and the tenant-row delete class below, run for EVERY
+ *    scanned file, ahead of the IMPLEMENTATIONS skip: team-departure.ts and the
+ *    lock modules are held to them too. The delete class: `tenantMember.delete`
+ *    / `deleteMany` and a raw tagged-template `DELETE FROM tenant_members` are
+ *    `tenantRowDeletes` sites with no automatic cover (a deleted tenant row
+ *    leaves team memberships behind unless the caller ends them); each needs an
+ *    EXEMPTION. Pinned at two: the bootstrap migration in src/auth.ts, and
+ *    `deactivateScimUser`.
  *
  * 7. SCIM ADMISSION MARKER (docs/archive/review/scim-team-admission-approval-plan.md
  *    C2/C4, Forbidden patterns). In scim-group-service.ts: every `teamMember`
@@ -128,7 +142,7 @@
  *    literals cannot show, recipients checked by set, and unreadable payloads
  *    read by hand are EXEMPTIONS.
  *
- *    KNOWN LIMITS (rule 8):
+ *    KNOWN LIMITS (rule 8; owner: #1060, which weighs a database-enforced form):
  *    - Names. The tie is by variable name, one declaration deep; two names
  *      for one person are not followed, one name for two is not split. An
  *      `id` under a relation that is not the member's (`team: { id: teamId }`)
@@ -180,16 +194,22 @@
  *    - inside the IMPLEMENTATIONS files only, a Prisma write rule 2's
  *      classifyTenantStateWrite would classify whose payload names
  *      `deactivatedAt` with anything but `null` (a spread or an unreadable
- *      payload counts, as in mayName). Elsewhere rule 2 is the one
- *      adjudicator: no update may name it, and a create must be followed by
- *      `departCreatedMembership`, which revokes.
+ *      payload counts, as in mayName). Rule 2 runs there too, but in
+ *      team-departure.ts its cover is an `endTeamMemberships` call, not a
+ *      revocation. Elsewhere rule 2 is the one adjudicator: no update may name
+ *      it, and a create must be followed by `departCreatedMembership`, which
+ *      revokes.
  *    Each must be followed by a call of `revokeUsersAuthArtifactsInTx` or
  *    `revokeUserAuthArtifactsInTx` in its innermost enclosing function itself
  *    (not a nested callback; for a `$transaction(async (tx) => …)` callback,
  *    inside that callback). The sites are pinned by key in
  *    EXPECTED_MEMBERSHIP_ENDS: a missing one fails as loudly as an unexpected
  *    one. The bootstrap migration in src/auth.ts is exempted (it moves the
- *    sessions rather than revoking them).
+ *    sessions rather than revoking them). A `tenantMember.delete/deleteMany`
+ *    or raw `DELETE FROM tenant_members` is also a tenant-row delete site: it
+ *    needs that class's reviewed exemption (team memberships) AND this rule's
+ *    revocation (sessions/tokens); the two classes pin the same two Prisma
+ *    deletes under their own key prefixes.
  *
  *    KNOWN LIMITS (rule 9): a review tripwire over source order, with the
  *    pinned site set as its backstop, not a proof. "After" is source order:
@@ -199,6 +219,13 @@
  *    form, a composed `Prisma.sql` fragment, or `*Unsafe`); a membership end
  *    inside a database function or a trigger, and the model reached by
  *    element access or an alias, are not seen.
+ *
+ * Scanned: TARGETS, which include scripts/ (its `.ts` files; `__tests__` and
+ * `*.test.*` excluded by the walker). NOT seen by rules 2, 5, 6, 9 or the
+ * delete class: aliases of the model, element access, `*Unsafe` raw calls, migrations,
+ * and `.sh` / `.sql` files (scripts/manual-tests/run-pr-379-test-plan.sh deletes
+ * tenant rows in a manual test; the runbook's operator SQL writes them by hand).
+ * A database-enforced form of these rules, and of rule 8, is tracked in #1060.
  *
  * A `data` / `update` that is not an object literal (an identifier, a spread)
  * cannot be read, so it counts: the gate refuses rather than skips what it
@@ -233,7 +260,7 @@ import { TOKEN, WRITE_KIND, analyzeSql, nameOf, sqlInputFromNode } from "./lib/s
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = process.env.TEAM_ROTATION_INPUT_LOCK_ROOT ?? join(__dirname, "..", "..");
-const TARGETS = (process.env.TEAM_ROTATION_INPUT_LOCK_TARGETS ?? "src/app,src/lib,src/workers,src/auth.ts").split(",");
+const TARGETS = (process.env.TEAM_ROTATION_INPUT_LOCK_TARGETS ?? "src/app,src/lib,src/workers,src/auth.ts,scripts").split(",");
 
 /** The implementations: their raw SQL IS the lock, the departure and the return. */
 const IMPLEMENTATIONS = new Set([
@@ -241,6 +268,10 @@ const IMPLEMENTATIONS = new Set([
   "src/lib/team/team-departure.ts",
   "src/lib/team/tenant-row-lock.ts",
 ]);
+
+/** The one file where a tenant active-state write is allowed (a departureWriters site). */
+const DEPARTURE_FILE = "src/lib/team/team-departure.ts";
+const END_MEMBERSHIPS = new Set(["endTeamMemberships"]);
 
 const LOCK_HELPERS = new Set([
   "lockTeamKeyVersion",
@@ -265,12 +296,18 @@ const TRANSITIONS = new Set(["departFromTenant", "returnToTenant"]);
  * departed-member-leaked-authority (rule 8): grants 13 — 4 recipient-checked,
  * 9 exempted (3 of them `user` / `tenant` updates whose data cannot be read,
  * counted since the nested-relation arm covers those models).
+ * departed-member-followups: departureWriters 3 (the three tenant_members
+ * UPDATEs in departFromTenant, returnToTenant, departCreatedMembership); tenantRowDeletes 2 (both
+ * exempted); rules 2/5/6 now run for every file, with no change to the other
+ * counts.
  */
 const EXPECTED = {
   memberWrites: Number(process.env.TEAM_ROTATION_INPUT_LOCK_WRITES ?? 21),
   tenantStateWrites: Number(process.env.TEAM_ROTATION_INPUT_LOCK_TENANT_WRITES ?? 2),
   admissions: Number(process.env.TEAM_ROTATION_INPUT_LOCK_ADMISSIONS ?? 7),
   grants: Number(process.env.TEAM_ROTATION_INPUT_LOCK_GRANTS ?? 13),
+  departureWriters: Number(process.env.TEAM_ROTATION_INPUT_LOCK_DEPARTURE_WRITERS ?? 3),
+  tenantRowDeletes: Number(process.env.TEAM_ROTATION_INPUT_LOCK_TENANT_DELETES ?? 2),
 };
 
 /** Sites keyed `<rule>::<path>::<enclosing function>::<site>`, with the review's conclusion. */
@@ -290,6 +327,14 @@ const EXEMPTIONS = new Map([
   [
     "grant::src/lib/services/scim-group-service.ts::applyAddOperations::teamMember.updateManyAndReturn",
     "demotion only: toUpdateRoleByPreviousRole holds the rows whose group role ranks strictly below their current one (a raise goes to toHoldByPreviousRole, which deactivates)",
+  ],
+  [
+    "tenant-row-delete::src/auth.ts::<anonymous>::tenantMember.deleteMany",
+    "bootstrap migration: removes the user's bootstrap tenant row before the target's row is created (tenant_members_one_active_per_user); their team memberships are kept on purpose and the user reads as a guest of those teams (#1043 SC4)",
+  ],
+  [
+    "tenant-row-delete::src/lib/services/scim-user-service.ts::<anonymous>::tenantMember.delete",
+    "deactivateScimUser: deletes the user's team rows (under the teams' rotation locks, assertTeamsLocked) and writes the departure record in the same transaction, so the deleted tenant row leaves no membership active",
   ],
   [
     "grant::src/app/api/teams/[teamId]/rotate-key/route.ts::<anonymous>::teamMemberKey.createMany",
@@ -334,6 +379,9 @@ const EXPECTED_MEMBERSHIP_ENDS = [
 
 const RAW_MEMBER_WRITE = /\b(DELETE\s+FROM|UPDATE)\s+(?:"?\w+"?\.)?"?(team_members|team_member_keys)"?\b/i;
 const RAW_TENANT_STATE_WRITE = /\b(UPDATE|INSERT\s+INTO)\s+(?:"?\w+"?\.)?"?tenant_members"?\b[\s\S]*\bdeactivated_at\b/i;
+const RAW_TENANT_ROW_DELETE = /\bDELETE\s+FROM\s+(?:"?\w+"?\.)?"?tenant_members"?\b/i;
+/** A raw tenant-state write that clears the column (a return): the `IS NULL` of a WHERE does not match. */
+const RAW_SETS_DEACTIVATED_NULL = /\bSET\b[\s\S]*?\bdeactivated_at\s*=\s*NULL\b/i;
 const RAW_DEPARTURE_WRITE = /\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(?:"?\w+"?\.)?"?tenant_member_departures"?\b/i;
 const LOOPS = new Set([
   SyntaxKind.ForStatement,
@@ -423,6 +471,14 @@ function classifyTenantStateWrite(call, mm) {
     return mayName(argProp(call, "data"), ["deactivatedAt"]) ? { site, create: true } : null;
   }
   return null;
+}
+
+/** Whether a tenantMember write's `data` (an upsert's `update`) names `deactivatedAt: null`. */
+function namesNullDeactivatedAt(call) {
+  const method = modelAndMethod(call)?.method;
+  const literal = argProp(call, method === "upsert" ? "update" : "data");
+  const p = literal ? findProp(literal, "deactivatedAt") : undefined;
+  return p !== undefined && Node.isPropertyAssignment(p) && p.getInitializer()?.getText() === "null";
 }
 
 /** Whether a `data` literal clears `deactivatedAt` (a reactivation), or cannot be read. */
@@ -1358,12 +1414,78 @@ const keyOf = (rule, path, node, site) => `${rule}::${path}::${functionName(encl
 const lineOf = (path, node) => `${path}:${node.getStartLineNumber()}`;
 const TENANT_LOCK_OR_WRAPPER = new Set([...TENANT_LOCKS, ...TENANT_LOCK_WRAPPERS]);
 
+/**
+ * Rules 2, 5, 6 and the tenant-row delete class, for EVERY file before the
+ * IMPLEMENTATIONS skip: their claim is "only X writes Y", which the lock
+ * modules and team-departure.ts must keep too. In team-departure.ts a tenant
+ * active-state write is a departureWriters site, not a violation.
+ */
+function checkDepartureClasses(sourceFile, path) {
+  const inDeparture = path === DEPARTURE_FILE;
+  const tenantStateSite = (node, site, create, nulls) => {
+    const fn = enclosingFunction(node);
+    if (inDeparture) {
+      // A call in the function's own body: one nested in a callback it may never run does not count.
+      const ok = nulls || (fn !== null && callsIn(fn).some((c) => END_MEMBERSHIPS.has(calleeName(c)) && c.getStart() > node.getStart()));
+      sites.push({ rule: "departureWriters", key: keyOf("departure-writer", path, node, site), line: lineOf(path, node), ok });
+      return;
+    }
+    if (create === null) {
+      violations.push(`tenant-state  ${lineOf(path, node)}  raw write of tenant_members.deactivated_at outside team-departure.ts`);
+      return;
+    }
+    const ok = create && fn !== null
+      && callsBefore(fn, TENANT_LOCKS, node.getStart())
+      && callsAfter(fn, new Set(["departCreatedMembership"]), node.getStart());
+    sites.push({ rule: "tenantStateWrites", key: keyOf("tenant-state", path, node, site), line: lineOf(path, node), ok });
+  };
+
+  for (const call of sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    if (calleeName(call) === "deleteUser") {
+      violations.push(`delete-user  ${lineOf(path, call)}  calls deleteUser (its cascade skips the team lock and the departure)`);
+    }
+    const mm = modelAndMethod(call);
+    if (!mm) continue;
+
+    if (mm.model === "tenantMemberDeparture" && !/^(find|count|aggregate|groupBy)/.test(mm.method)) {
+      violations.push(`departure-record  ${lineOf(path, call)}  tenantMemberDeparture.${mm.method} (only deactivateScimUser writes the record, raw, with the database clock)`);
+    }
+
+    const tenantWrite = classifyTenantStateWrite(call, mm);
+    if (tenantWrite) tenantStateSite(call, tenantWrite.site, tenantWrite.create, namesNullDeactivatedAt(call));
+
+    if (mm.model === "tenantMember" && (mm.method === "delete" || mm.method === "deleteMany")) {
+      sites.push({ rule: "tenantRowDeletes", key: keyOf("tenant-row-delete", path, call, `tenantMember.${mm.method}`), line: lineOf(path, call), ok: false });
+    }
+  }
+
+  for (const raw of rawWrites(sourceFile)) {
+    const text = raw.getTemplate().getText();
+    if (RAW_TENANT_STATE_WRITE.test(text)) tenantStateSite(raw, "tenant_members.raw", null, RAW_SETS_DEACTIVATED_NULL.test(text));
+    if (RAW_TENANT_ROW_DELETE.test(text)) {
+      sites.push({ rule: "tenantRowDeletes", key: keyOf("tenant-row-delete", path, raw, "tenant_members.raw"), line: lineOf(path, raw), ok: false });
+    }
+    const departureRaw = RAW_DEPARTURE_WRITE.exec(text);
+    if (departureRaw) {
+      const fn = functionName(enclosingFunction(raw));
+      const inDeactivate = raw.getAncestors()
+        .some((a) => Node.isFunctionLikeDeclaration(a) && functionName(a) === "deactivateScimUser");
+      const isDelete = /^DELETE/i.test(departureRaw[1]);
+      if (isDelete || path !== "src/lib/services/scim-user-service.ts" || !inDeactivate) {
+        violations.push(`departure-record  ${lineOf(path, raw)}  ${departureRaw[1].toUpperCase()} tenant_member_departures in ${fn} (only deactivateScimUser writes it; nothing deletes it)`);
+      }
+    }
+  }
+}
+
 for (const { rel: path, sf: sourceFile } of sourceFilesFrom(project, TARGETS, REPO_ROOT)) {
   // Rule 7, bullet 2: repo-wide, runs for every file BEFORE the IMPLEMENTATIONS
   // skip below, so team-departure.ts and the lock modules stay covered.
   checkPendingMarkerRepoWide(sourceFile, path, violations);
   checkRawColumnNameRepoWide(sourceFile, path, violations);
   checkAdmissionModuleBoundary(sourceFile, path, violations);
+
+  checkDepartureClasses(sourceFile, path);
   // Rule 9, also before the skip: team-departure.ts holds two of its sites.
   for (const { node, site, detail } of membershipEnds(sourceFile, path)) {
     const key = keyOf("membership-end", path, node, site);
@@ -1374,31 +1496,13 @@ for (const { rel: path, sf: sourceFile } of sourceFilesFrom(project, TARGETS, RE
   const checkHelpers = recipientCheckHelpers(sourceFile);
 
   for (const call of sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
-    const name = calleeName(call);
-    if (name === "deleteUser") {
-      violations.push(`delete-user  ${lineOf(path, call)}  calls deleteUser (its cascade skips the team lock and the departure)`);
-    }
     const mm = modelAndMethod(call);
     if (!mm) continue;
-
-    if (mm.model === "tenantMemberDeparture" && !/^(find|count|aggregate|groupBy)/.test(mm.method)) {
-      violations.push(`departure-record  ${lineOf(path, call)}  tenantMemberDeparture.${mm.method} (only deactivateScimUser writes the record, raw, with the database clock)`);
-    }
 
     const memberWrite = classifyMemberWrite(call, mm);
     if (memberWrite) {
       const key = keyOf("member-write", path, call, memberWrite);
       sites.push({ rule: "memberWrites", key, line: lineOf(path, call), ok: covered(sourceFile, call, LOCK_HELPERS) });
-    }
-
-    const tenantWrite = classifyTenantStateWrite(call, mm);
-    if (tenantWrite) {
-      const key = keyOf("tenant-state", path, call, tenantWrite.site);
-      const fn = enclosingFunction(call);
-      const ok = tenantWrite.create && fn !== null
-        && callsBefore(fn, TENANT_LOCKS, call.getStart())
-        && callsAfter(fn, new Set(["departCreatedMembership"]), call.getStart());
-      sites.push({ rule: "tenantStateWrites", key, line: lineOf(path, call), ok });
     }
 
     const admission = classifyAdmission(call, mm);
@@ -1438,21 +1542,8 @@ for (const { rel: path, sf: sourceFile } of sourceFilesFrom(project, TARGETS, RE
       const key = keyOf("grant", path, raw, rawGrant);
       sites.push({ rule: "grants", key, line: lineOf(path, raw), ok: recipientChecked(sourceFile, raw, checkHelpers), detail: compact(raw.getTemplate()) });
     }
-    if (RAW_TENANT_STATE_WRITE.test(text)) {
-      violations.push(`tenant-state  ${lineOf(path, raw)}  raw write of tenant_members.deactivated_at outside team-departure.ts`);
-    }
     if (path === SCIM_GROUP_SERVICE_FILE && RAW_TEAM_MEMBERS_WRITE.test(text)) {
       violations.push(`admission-marker  ${lineOf(path, raw)}  raw write of team_members in scim-group-service.ts (the payload marker cannot be verified)`);
-    }
-    const departureRaw = RAW_DEPARTURE_WRITE.exec(text);
-    if (departureRaw) {
-      const fn = functionName(enclosingFunction(raw));
-      const inDeactivate = raw.getAncestors()
-        .some((a) => Node.isFunctionLikeDeclaration(a) && functionName(a) === "deactivateScimUser");
-      const isDelete = /^DELETE/i.test(departureRaw[1]);
-      if (isDelete || path !== "src/lib/services/scim-user-service.ts" || !inDeactivate) {
-        violations.push(`departure-record  ${lineOf(path, raw)}  ${departureRaw[1].toUpperCase()} tenant_member_departures in ${fn} (only deactivateScimUser writes it; nothing deletes it)`);
-      }
     }
   }
 
@@ -1520,7 +1611,8 @@ const uncovered = sites.filter((s) => !s.ok && !EXEMPTIONS.has(s.key) && s.rule 
 if (uncovered.length > 0) {
   problems.push(
     `sites without their lock (a member-set write needs a team lock before it; an admission a tenant-row lock; ` +
-      `a tenant active-state write belongs in team-departure.ts; a grant needs a recipient check before it):\n` +
+      `a tenant active-state write belongs in team-departure.ts and there needs its clearing or an endTeamMemberships call after it; ` +
+    `a tenant-row delete needs a reviewed exemption; a grant needs a recipient check before it):\n` +
       uncovered.map((s) => `  ${s.line}  ${s.key}`).join("\n"),
   );
 }

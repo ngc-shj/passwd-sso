@@ -3023,6 +3023,7 @@ const FUNCTION_RULE_ALLOWLIST = [
   { file: "src/__tests__/db-integration/departed-member-leaked-authority.integration.test.ts", routine: "c5_accept_rollback_probe", why: "C5 rollback cell: a trigger function that only raises, dropped in finally; sets no bypass setting" },
   { file: "src/__tests__/db-integration/session-revocation-atomic-departure.integration.test.ts", routine: "t1_revocation_fault", why: "T1/T2/T7 fault cells: a trigger function that only raises once the seeded session is gone, dropped in finally; sets no bypass setting" },
   { file: "src/__tests__/db-integration/session-revocation-lock-order.integration.test.ts", routine: "t6_lock_order_park", why: "T6 lock-order cell: a trigger function that waits on a test-held advisory key, dropped in finally; sets no bypass setting" },
+  { file: "src/__tests__/db-integration/departed-member-followups.integration.test.ts", routine: "c1_audit_outbox_raise_probe", why: "C1 atomicity cells: a trigger function that only raises, dropped in finally; sets no bypass setting" },
   { prefix: "scripts/__tests__/", why: "gate fixture strings: inputs for the gates that refuse these statements" },
 ];
 const functionAllowed = (file, routine) =>

@@ -51,8 +51,8 @@ describe("buildTeamMemberDisplayItems", () => {
     ]);
 
     const result = await buildTeamMemberDisplayItems([
-      { id: "m1", userId: "u1", role: "OWNER", createdAt: now },
-      { id: "m2", userId: "u2", role: "MEMBER", createdAt: now, departed: true },
+      { id: "m1", userId: "u1", role: "OWNER", createdAt: now, admittedAt: null },
+      { id: "m2", userId: "u2", role: "MEMBER", createdAt: now, admittedAt: null, departed: true },
     ]);
 
     expect(result).toEqual([
@@ -105,8 +105,8 @@ describe("buildTeamMemberDisplayItems", () => {
     ]);
 
     const result = await buildTeamMemberDisplayItems([
-      { id: "m1", userId: "u1", role: "OWNER", createdAt: now },
-      { id: "m2", userId: "u2", role: "MEMBER", createdAt: now },
+      { id: "m1", userId: "u1", role: "OWNER", createdAt: now, admittedAt: null },
+      { id: "m2", userId: "u2", role: "MEMBER", createdAt: now, admittedAt: null },
     ]);
 
     expect(result).toEqual([
@@ -142,9 +142,9 @@ describe("buildTeamMemberDisplayItems", () => {
 
     const result = await buildTeamMemberDisplayItems(
       [
-        { id: "m1", userId: "u1", role: "ADMIN", createdAt: now, pendingApproval: true },
-        { id: "m2", userId: "u2", role: "ADMIN", createdAt: now, pendingApproval: true },
-        { id: "m3", userId: "u3", role: "ADMIN", createdAt: now, pendingApproval: true },
+        { id: "m1", userId: "u1", role: "ADMIN", createdAt: now, admittedAt: null, pendingApproval: true },
+        { id: "m2", userId: "u2", role: "ADMIN", createdAt: now, admittedAt: null, pendingApproval: true },
+        { id: "m3", userId: "u3", role: "ADMIN", createdAt: now, admittedAt: null, pendingApproval: true },
       ],
       "team-tenant",
     );
@@ -163,7 +163,7 @@ describe("buildTeamMemberDisplayItems", () => {
     mockPrismaTenantMemberFindMany.mockResolvedValue([]);
 
     const result = await buildTeamMemberDisplayItems([
-      { id: "m1", userId: "u1", role: "MEMBER", createdAt: now },
+      { id: "m1", userId: "u1", role: "MEMBER", createdAt: now, admittedAt: null },
     ]);
 
     expect(result[0]?.pendingTenantInactive).toBe(false);
@@ -191,7 +191,7 @@ describe("buildTeamMemberDisplayItems", () => {
     mockPrismaTenantMemberFindMany.mockResolvedValue(userTenants);
 
     const result = await buildTeamMemberDisplayItems(
-      [{ id: "m1", userId: "u1", role: "ADMIN", createdAt: now, pendingApproval: true }],
+      [{ id: "m1", userId: "u1", role: "ADMIN", createdAt: now, admittedAt: null, pendingApproval: true }],
       "team-tenant",
     );
 
@@ -206,8 +206,35 @@ describe("buildTeamMemberDisplayItems", () => {
 
     await expect(
       buildTeamMemberDisplayItems([
-        { id: "m1", userId: "u1", role: "ADMIN", createdAt: now, pendingApproval: true },
+        { id: "m1", userId: "u1", role: "ADMIN", createdAt: now, admittedAt: null, pendingApproval: true },
       ]),
     ).rejects.toThrow("a pending row needs teamTenantId");
+  });
+
+  it("reports admittedAt as joinedAt when the member was re-admitted", async () => {
+    const admittedAt = new Date("2026-06-01T00:00:00.000Z");
+    mockPrismaUserFindMany.mockResolvedValue([
+      { id: "u1", name: "Back", email: "u1@test.com", image: null },
+    ]);
+    mockPrismaTenantMemberFindMany.mockResolvedValue([]);
+
+    const result = await buildTeamMemberDisplayItems([
+      { id: "m1", userId: "u1", role: "MEMBER", createdAt: now, admittedAt },
+    ]);
+
+    expect(result[0]?.joinedAt).toBe(admittedAt);
+  });
+
+  it("falls back to createdAt as joinedAt when admittedAt is null", async () => {
+    mockPrismaUserFindMany.mockResolvedValue([
+      { id: "u1", name: "Never re-admitted", email: "u1@test.com", image: null },
+    ]);
+    mockPrismaTenantMemberFindMany.mockResolvedValue([]);
+
+    const result = await buildTeamMemberDisplayItems([
+      { id: "m1", userId: "u1", role: "MEMBER", createdAt: now, admittedAt: null },
+    ]);
+
+    expect(result[0]?.joinedAt).toBe(now);
   });
 });

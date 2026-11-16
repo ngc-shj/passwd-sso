@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaTeamMember, mockPrismaTeamMemberKey, mockPrismaScimExternalMapping, mockTransaction, mockTeamLockQuery, mockRequireTeamPermission, mockIsRoleAbove, TeamAuthError, mockWithTeamTenantRls, mockRevokeUserAuthArtifactsInTx, mockTombstoneRevokedSessions, mockLogger, mockLogAudit, mockBuildTeamMemberDisplayItems, mockRequireRecentSession, mockTenantMemberFindMany, mockTenantMemberDepartureFindMany, mockExecuteRaw, mockCommit } = vi.hoisted(() => {
+const { mockAuth, mockPrismaTeamMember, mockPrismaTeamMemberKey, mockPrismaScimExternalMapping, mockTransaction, mockTeamLockQuery, mockRequireTeamPermission, mockIsRoleAbove, TeamAuthError, mockWithTeamTenantRls, mockRevokeUserAuthArtifactsInTx, mockTombstoneRevokedSessions, mockLogger, mockLogAudit, mockLogAuditInTx, txSentinel, mockBuildTeamMemberDisplayItems, mockRequireRecentSession, mockTenantMemberFindMany, mockTenantMemberDepartureFindMany, mockExecuteRaw, mockCommit } = vi.hoisted(() => {
+  const _txSentinel: { current: unknown } = { current: null };
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -40,9 +41,11 @@ const { mockAuth, mockPrismaTeamMember, mockPrismaTeamMemberKey, mockPrismaScimE
     mockRequireTeamPermission: vi.fn(),
     mockIsRoleAbove: vi.fn(),
     TeamAuthError: _TeamAuthError,
-    // The removal runs on the context's transaction client (fn's second argument).
+    // The change or removal runs on the context's transaction client (fn's
+    // second argument), kept in txSentinel so an audit written through it is
+    // told apart.
     mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: (tenantId: string, tx: unknown) => unknown) => {
-      const result = await fn("tenant-1", {
+      _txSentinel.current = {
         $queryRaw: mockTeamLockQuery,
         // set / restore lock_timeout around the team lock.
         $executeRaw: mockExecuteRaw,
@@ -50,7 +53,8 @@ const { mockAuth, mockPrismaTeamMember, mockPrismaTeamMemberKey, mockPrismaScimE
         teamMemberKey: mockPrismaTeamMemberKey,
         tenantMember: { findMany: mockTenantMemberFindMany },
         tenantMemberDeparture: { findMany: mockTenantMemberDepartureFindMany },
-      });
+      };
+      const result = await fn("tenant-1", _txSentinel.current);
       _commit();
       return result;
     }),
@@ -60,6 +64,8 @@ const { mockAuth, mockPrismaTeamMember, mockPrismaTeamMemberKey, mockPrismaScimE
     mockTombstoneRevokedSessions: vi.fn(),
     mockLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     mockLogAudit: vi.fn(),
+    mockLogAuditInTx: vi.fn(),
+    txSentinel: _txSentinel,
     mockBuildTeamMemberDisplayItems: vi.fn(),
     mockRequireRecentSession: vi.fn().mockResolvedValue(null),
     // The target's tenant row and departure record, read unlocked (readTenantRows).
@@ -98,6 +104,7 @@ vi.mock("@/lib/logger", () => ({
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
+  logAuditInTx: mockLogAuditInTx,
   extractRequestMeta: vi.fn().mockReturnValue({ ip: "127.0.0.1", userAgent: "test" }),
   teamAuditBase: vi.fn((_, userId, teamId) => ({ scope: "TEAM", userId, teamId })),
 }));
@@ -142,6 +149,7 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
     mockRequireTeamPermission.mockResolvedValue(ownerMembership);
     mockIsRoleAbove.mockReturnValue(true);
     mockTeamLockQuery.mockImplementation(teamLockQuery([{ id: TEAM_ID }]));
+    mockLogAuditInTx.mockResolvedValue(undefined);
     mockPrismaTeamMember.updateMany.mockResolvedValue({ count: 1 });
     mockPrismaTeamMember.findFirst.mockImplementation(memberReads(TEAM_ROLE.OWNER));
     mockTenantMemberFindMany.mockResolvedValue([]);
@@ -258,6 +266,7 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
       userId: "target-user",
       role: TEAM_ROLE.ADMIN,
       createdAt,
+      admittedAt: null,
     });
 
     const res = await PUT(
@@ -276,8 +285,52 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
         userId: "target-user",
         role: TEAM_ROLE.ADMIN,
         createdAt,
+        admittedAt: null,
       },
     ]);
+    expect(mockPrismaTeamMember.findUniqueOrThrow).toHaveBeenCalledWith(
+      expect.objectContaining({ select: expect.objectContaining({ admittedAt: true }) }),
+    );
+    expect(mockLogAuditInTx).toHaveBeenCalledTimes(1);
+    expect(mockLogAuditInTx).toHaveBeenCalledWith(
+      txSentinel.current,
+      "tenant-1",
+      expect.objectContaining({
+        action: "TEAM_ROLE_UPDATE",
+        targetType: "TeamMember",
+        targetId: MEMBER_ID,
+        metadata: { newRole: TEAM_ROLE.ADMIN, previousRole: TEAM_ROLE.MEMBER },
+      }),
+    );
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  it("propagates a failing in-transaction audit from a role change instead of mapping it to a 4xx", async () => {
+    mockPrismaTeamMember.findUnique.mockResolvedValue({
+      id: MEMBER_ID, teamId: TEAM_ID, userId: "target-user", role: TEAM_ROLE.MEMBER, deactivatedAt: null,
+    });
+    mockLogAuditInTx.mockRejectedValue(new Error("audit_outbox insert failed"));
+
+    await expect(
+      PUT(
+        createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`, { body: { role: TEAM_ROLE.ADMIN } }),
+        createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
+      ),
+    ).rejects.toThrow("audit_outbox insert failed");
+  });
+
+  it("propagates a failing in-transaction audit from an ownership transfer instead of mapping it to a 4xx", async () => {
+    mockPrismaTeamMember.findUnique.mockResolvedValue({
+      id: MEMBER_ID, teamId: TEAM_ID, userId: "target-user", role: TEAM_ROLE.ADMIN, deactivatedAt: null,
+    });
+    mockLogAuditInTx.mockRejectedValue(new Error("audit_outbox insert failed"));
+
+    await expect(
+      PUT(
+        createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`, { body: { role: TEAM_ROLE.OWNER } }),
+        createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
+      ),
+    ).rejects.toThrow("audit_outbox insert failed");
   });
 
   it("transfers ownership: promotes target to OWNER, demotes self to ADMIN", async () => {
@@ -294,6 +347,7 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
       userId: "target-user",
       role: TEAM_ROLE.OWNER,
       createdAt,
+      admittedAt: null,
     };
     mockBuildTeamMemberDisplayItems.mockResolvedValue([
       {
@@ -316,16 +370,32 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.role).toBe(TEAM_ROLE.OWNER);
+    expect(mockPrismaTeamMember.findUniqueOrThrow).toHaveBeenCalledWith(
+      expect.objectContaining({ select: expect.objectContaining({ admittedAt: true }) }),
+    );
     // Actor should be demoted to ADMIN, the target promoted — each only
     // while still an active member, under the team lock.
     expect(mockPrismaTeamMember.updateMany).toHaveBeenCalledWith({
       where: { id: ownerMembership.id, teamId: TEAM_ID, role: TEAM_ROLE.OWNER, deactivatedAt: null },
       data: { role: TEAM_ROLE.ADMIN },
     });
+    // Compared against the role the audit records, so a concurrent change fails the transfer.
     expect(mockPrismaTeamMember.updateMany).toHaveBeenCalledWith({
-      where: { id: MEMBER_ID, teamId: TEAM_ID, deactivatedAt: null },
+      where: { id: MEMBER_ID, teamId: TEAM_ID, role: TEAM_ROLE.ADMIN, deactivatedAt: null },
       data: { role: TEAM_ROLE.OWNER },
     });
+    expect(mockLogAuditInTx).toHaveBeenCalledTimes(1);
+    expect(mockLogAuditInTx).toHaveBeenCalledWith(
+      txSentinel.current,
+      "tenant-1",
+      expect.objectContaining({
+        action: "TEAM_ROLE_UPDATE",
+        targetType: "TeamMember",
+        targetId: MEMBER_ID,
+        metadata: { newRole: TEAM_ROLE.OWNER, previousRole: TEAM_ROLE.ADMIN, transfer: true },
+      }),
+    );
+    expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
   it("refuses the transfer, changing nothing, when the target left the tenant since the check", async () => {
@@ -342,7 +412,7 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
     );
 
     expect(res.status).toBe(404);
-    expect(mockLogAudit).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 
   it("refuses the transfer (403), changing nothing, when the acting OWNER was demoted since the check", async () => {
@@ -358,7 +428,7 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
 
     expect(res.status).toBe(403);
     expect(mockPrismaTeamMember.updateMany).not.toHaveBeenCalled();
-    expect(mockLogAudit).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 
   it("answers 409 CONFLICT without Retry-After, changing nothing, when the transferring OWNER's tenant row is held past the lock wait", async () => {
@@ -399,7 +469,7 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
     expect((await res.json()).error).toBe("TEAM_BUSY");
     expect(res.headers.get("Retry-After")).toBe("3");
     expect(mockPrismaTeamMember.updateMany).not.toHaveBeenCalled();
-    expect(mockLogAudit).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 
   it("refuses a role change when the acting member left the tenant since the permission check", async () => {
@@ -414,7 +484,7 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
     );
 
     expect(res.status).toBe(403);
-    expect(mockLogAudit).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 
   it("refuses (403) a role change when the acting member was demoted to the target's rank since the check", async () => {
@@ -437,7 +507,7 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
     mockPrismaTeamMember.findUnique.mockResolvedValue({
       id: MEMBER_ID, teamId: TEAM_ID, userId: "target-user", role: TEAM_ROLE.MEMBER, deactivatedAt: null,
     });
-    mockPrismaTeamMember.findUniqueOrThrow.mockResolvedValue({ id: MEMBER_ID, userId: "target-user", role: TEAM_ROLE.ADMIN, createdAt: new Date() });
+    mockPrismaTeamMember.findUniqueOrThrow.mockResolvedValue({ id: MEMBER_ID, userId: "target-user", role: TEAM_ROLE.ADMIN, createdAt: new Date(), admittedAt: null });
 
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`, { body: { role: TEAM_ROLE.ADMIN } }),
@@ -481,7 +551,7 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
       mockPrismaTeamMember.findUnique.mockResolvedValue({
         id: MEMBER_ID, teamId: TEAM_ID, userId: "target-user", role: fromRole, deactivatedAt: null,
       });
-      mockPrismaTeamMember.findUniqueOrThrow.mockResolvedValue({ id: MEMBER_ID, userId: "target-user", role: toRole, createdAt: new Date() });
+      mockPrismaTeamMember.findUniqueOrThrow.mockResolvedValue({ id: MEMBER_ID, userId: "target-user", role: toRole, createdAt: new Date(), admittedAt: null });
       return PUT(
         createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`, { body: { role: toRole } }),
         createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
@@ -491,7 +561,7 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
       expect(res.status).toBe(404);
       expect((await res.json()).error).toBe("MEMBER_NOT_FOUND");
       expect(mockPrismaTeamMember.updateMany).not.toHaveBeenCalled();
-      expect(mockLogAudit).not.toHaveBeenCalled();
+      expect(mockLogAuditInTx).not.toHaveBeenCalled();
     };
 
     beforeEach(async () => {
@@ -554,6 +624,9 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
         setup();
         mockPrismaTeamMember.findFirst.mockImplementation(memberReads(TEAM_ROLE.OWNER, target));
         expect((await change(TEAM_ROLE.MEMBER, TEAM_ROLE.ADMIN)).status).toBe(200);
+        // The same fixtures' refusals write no audit: this is their positive control.
+        expect(mockLogAuditInTx).toHaveBeenCalledTimes(1);
+        mockLogAuditInTx.mockClear();
       }
     });
 
@@ -567,6 +640,9 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
         setup();
         mockPrismaTeamMember.findFirst.mockImplementation(memberReads(TEAM_ROLE.OWNER, target));
         expect((await change(TEAM_ROLE.ADMIN, TEAM_ROLE.OWNER)).status).toBe(200);
+        // The same fixtures' refusals write no audit: this is their positive control.
+        expect(mockLogAuditInTx).toHaveBeenCalledTimes(1);
+        mockLogAuditInTx.mockClear();
       }
     });
   });
@@ -594,7 +670,7 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
       mockPrismaTeamMember.findUnique.mockResolvedValue({
         id: MEMBER_ID, teamId: TEAM_ID, userId: "target-user", role: TEAM_ROLE.MEMBER, deactivatedAt: null,
       });
-      mockPrismaTeamMember.findUniqueOrThrow.mockResolvedValue({ id: MEMBER_ID, userId: "target-user", role: TEAM_ROLE.ADMIN, createdAt: new Date() });
+      mockPrismaTeamMember.findUniqueOrThrow.mockResolvedValue({ id: MEMBER_ID, userId: "target-user", role: TEAM_ROLE.ADMIN, createdAt: new Date(), admittedAt: null });
     });
 
     it("refuses a role change (403), changing nothing", async () => {
@@ -602,7 +678,7 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
 
       expect((await change(TEAM_ROLE.ADMIN)).status).toBe(403);
       expect(mockPrismaTeamMember.updateMany).not.toHaveBeenCalled();
-      expect(mockLogAudit).not.toHaveBeenCalled();
+      expect(mockLogAuditInTx).not.toHaveBeenCalled();
     });
 
     it("refuses an ownership transfer (403), changing nothing", async () => {
@@ -613,7 +689,7 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
 
       expect((await change(TEAM_ROLE.OWNER)).status).toBe(403);
       expect(mockPrismaTeamMember.updateMany).not.toHaveBeenCalled();
-      expect(mockLogAudit).not.toHaveBeenCalled();
+      expect(mockLogAuditInTx).not.toHaveBeenCalled();
     });
 
     it("allows a guest OWNER, an active one, a re-admitted one and a re-provisioned one to change a role", async () => {
@@ -625,6 +701,9 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
       ]) {
         setup();
         expect((await change(TEAM_ROLE.ADMIN)).status).toBe(200);
+        // The same fixtures' refusals write no audit: this is their positive control.
+        expect(mockLogAuditInTx).toHaveBeenCalledTimes(1);
+        mockLogAuditInTx.mockClear();
       }
     });
 
@@ -633,9 +712,10 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
       mockPrismaTeamMember.findUnique.mockResolvedValue({
         id: MEMBER_ID, teamId: TEAM_ID, userId: "target-user", role: TEAM_ROLE.ADMIN, deactivatedAt: null,
       });
-      mockPrismaTeamMember.findUniqueOrThrow.mockResolvedValue({ id: MEMBER_ID, userId: "target-user", role: TEAM_ROLE.OWNER, createdAt: new Date() });
+      mockPrismaTeamMember.findUniqueOrThrow.mockResolvedValue({ id: MEMBER_ID, userId: "target-user", role: TEAM_ROLE.OWNER, createdAt: new Date(), admittedAt: null });
 
       expect((await change(TEAM_ROLE.OWNER)).status).toBe(200);
+      expect(mockLogAuditInTx).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -677,7 +757,7 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
     expect((await res.json()).error).toBe("TEAM_BUSY");
     expect(res.headers.get("Retry-After")).toBe("3");
     expect(mockPrismaTeamMember.updateMany).not.toHaveBeenCalled();
-    expect(mockLogAudit).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 
   it("keeps a cross-tenant guest visible in the role update response", async () => {
@@ -694,6 +774,7 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
       userId: "guest-user",
       role: TEAM_ROLE.ADMIN,
       createdAt,
+      admittedAt: null,
     });
     mockPrismaTeamMember.findFirst.mockImplementation(memberReads(TEAM_ROLE.OWNER, lockedTarget({ userId: "guest-user" })));
     mockBuildTeamMemberDisplayItems.mockResolvedValue([

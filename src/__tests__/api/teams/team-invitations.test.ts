@@ -13,6 +13,9 @@ const {
   mockTeamMemberFindUnique,
   mockWithTeamTenantRls,
   mockWithBypassRls,
+  mockLogAuditAsync,
+  mockLogAuditInTx,
+  txSentinel,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTeamPermission: vi.fn(),
@@ -22,9 +25,17 @@ const {
   mockPrismaTeam: { findUnique: vi.fn() },
   mockUserFindUnique: vi.fn(),
   mockTeamMemberFindUnique: vi.fn(),
-  // The issuing transaction runs as fn(tenantId, tx); tx is the prisma mock.
-  mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: (tenantId: string, tx: unknown) => unknown) =>
-    fn("tenant-1", (await import("@/lib/prisma")).prisma)),
+  // The issuing transaction runs as fn(tenantId, tx); tx delegates to the
+  // prisma mock but is a distinct object, so an audit written through the
+  // transaction is told apart from one written on the module client.
+  mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: (tenantId: string, tx: unknown) => unknown) => {
+    const prisma = (await import("@/lib/prisma")).prisma;
+    txSentinel.current = Object.create(prisma);
+    return fn("tenant-1", txSentinel.current);
+  }),
+  mockLogAuditAsync: vi.fn(),
+  mockLogAuditInTx: vi.fn(),
+  txSentinel: { current: null as unknown },
   mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
 }));
 
@@ -79,7 +90,8 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/audit/audit", () => ({
-  logAuditAsync: vi.fn(),
+  logAuditAsync: mockLogAuditAsync,
+  logAuditInTx: mockLogAuditInTx,
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "Test" }),
   teamAuditBase: vi.fn((_, userId, teamId) => ({ scope: "TEAM", userId, teamId })),
 }));
@@ -152,6 +164,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     mockTeamMemberFindMany.mockResolvedValue([]);
     mockInvitationFindMany.mockResolvedValue([]);
     mockLockTenantRows.mockResolvedValue(new Map());
+    mockLogAuditInTx.mockResolvedValue(undefined);
     // The inviter's membership, re-read under their tenant row: an active ADMIN.
     mockTeamMemberFindFirst.mockResolvedValue({ role: "ADMIN", admittedAt: ACTOR_ADMITTED_AT, createdAt: ACTOR_ADMITTED_AT });
   });
@@ -219,6 +232,8 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     const { status, json } = await parseResponse(res);
     expect(status).toBe(409);
     expect(json.error).toBe("INVITATION_ALREADY_SENT");
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
+    expect(mockLogAuditAsync).not.toHaveBeenCalled();
   });
 
   it("creates invitation successfully", async () => {
@@ -238,6 +253,29 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     const { status, json } = await parseResponse(res);
     expect(status).toBe(201);
     expect(json.email).toBe("new@test.com");
+    expect(mockLogAuditInTx).toHaveBeenCalledTimes(1);
+    expect(mockLogAuditInTx).toHaveBeenCalledWith(
+      txSentinel.current,
+      "tenant-1",
+      expect.objectContaining({
+        action: "TEAM_MEMBER_INVITE",
+        targetId: "inv-1",
+        metadata: { email: "new@test.com", role: "MEMBER" },
+      }),
+    );
+    expect(mockLogAuditAsync).not.toHaveBeenCalled();
+  });
+
+  it("propagates a failing in-transaction audit instead of mapping it to a 4xx", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockInvitationCreate.mockResolvedValue({
+      id: "inv-1", email: "new@test.com", role: "MEMBER", tokenHash: "a".repeat(64), expiresAt: new Date(), createdAt: new Date(),
+    });
+    mockLogAuditInTx.mockRejectedValue(new Error("audit_outbox insert failed"));
+    const req = createRequest("POST", undefined, { body: { email: "new@test.com", role: "MEMBER" } });
+
+    await expect(POST(req, createParams({ teamId: "o1" }))).rejects.toThrow("audit_outbox insert failed");
   });
 
   it("allows inviting user who exists but is not a member", async () => {
@@ -275,6 +313,8 @@ describe("POST /api/teams/[teamId]/invitations", () => {
       mockLockTenantRows.mockResolvedValue(actorRow(after(1)));
       expect(await invite()).toBe(403);
       expect(mockInvitationCreate).not.toHaveBeenCalled();
+      expect(mockLogAuditInTx).not.toHaveBeenCalled();
+      expect(mockLogAuditAsync).not.toHaveBeenCalled();
     });
 
     it("allows a guest inviter, an active one, a re-admitted one and a re-provisioned one", async () => {

@@ -37,6 +37,22 @@
  * `.map()` inside the array literal is refused the same way. `logAuditBulkAsync`
  * is a different helper (post-commit, best-effort) and does not count here.
  *
+ * IN_TX_ONLY_ACTIONS pins the EMITTERS of actions that have exactly one correct
+ * form, an in-transaction one (departed-member-followups C1): action -> the
+ * number of direct `logAuditInTx(...)` calls whose params `action:` is the
+ * literal `AUDIT_ACTION.<NAME>` (exact name equality: TEAM_MEMBER_INVITE is not
+ * TEAM_MEMBER_INVITE_CANCEL or _ACCEPT; the descriptor form and
+ * logAuditBulkInTx do not count). A count other than the pin FAILS, so deleting
+ * an emit fails, and any `AUDIT_ACTION.<listed NAME>` anywhere in the argument
+ * subtree of a logAuditAsync / logAuditBulkAsync / logAuditAsyncBothScopes call
+ * FAILS (a direct property, a ternary arm, a mapped bulk element), so reverting
+ * an emit to post-commit fails. Stated limits: an action held in a variable
+ * (`action: auditAction`) or built outside the call's argument is not
+ * attributable; the gate reads names and the action, not which client is
+ * passed; the pin is a count, not a site identity (swapping one emit for a
+ * duplicate of the other stays green). The route unit cells and the integration
+ * cells carry what it cannot see, as in check-emergency-activate-atomic.mjs.
+ *
  * Runs without a Program (in-memory project).
  */
 import { SyntaxKind } from "ts-morph";
@@ -100,7 +116,22 @@ const CRITICAL_ACTIONS = new Set([
   // team-key-rotation-rekey C2 (D2): a re-key replaces an entry's ItemKey and
   // rewrites its history and CEK wraps; its audit row commits with the rewrite.
   "TEAM_ENTRY_REKEY",
+  // departed-member-followups C1: each commits with the change to team
+  // membership authority it records. Pinned below (IN_TX_ONLY_ACTIONS).
+  "TEAM_MEMBER_ADD",
+  "TEAM_MEMBER_INVITE",
+  "TEAM_ROLE_UPDATE",
 ]);
+
+// Actions with a pinned number of direct logAuditInTx emitters and no
+// post-commit emitter at all (see the header).
+const IN_TX_ONLY_ACTIONS = new Map([
+  ["TEAM_MEMBER_ADD", 1],
+  ["TEAM_MEMBER_INVITE", 1],
+  ["TEAM_ROLE_UPDATE", 2],
+]);
+
+const ASYNC_AUDIT_HELPERS = new Set(["logAuditAsync", "logAuditBulkAsync", "logAuditAsyncBothScopes"]);
 
 const project = createAstProject();
 
@@ -130,6 +161,10 @@ function actionNameFromObject(objLiteral) {
 // a shared helper, so the `action:` literal lives at the CALLER, not the
 // logAuditInTx call.
 const seenInTxActions = new Set();
+// Direct logAuditInTx emits per IN_TX_ONLY action, and the post-commit sites
+// naming one.
+const directInTxCounts = new Map();
+const asyncEmitSites = [];
 
 // Extract action from a `params:` property (nested descriptor) of an object literal.
 function actionFromDescriptor(objLiteral) {
@@ -251,8 +286,23 @@ for (const { sf } of sourceFilesFrom(project, SEARCH_DIRS, REPO_ROOT)) {
       // (1) direct call — params is the last arg.
       const args = call.getArguments();
       const action = actionNameFromObject(args[args.length - 1]);
-      if (action) seenInTxActions.add(action);
+      if (action) {
+        seenInTxActions.add(action);
+        directInTxCounts.set(action, (directInTxCounts.get(action) ?? 0) + 1);
+      }
       continue;
+    }
+
+    if (ASYNC_AUDIT_HELPERS.has(name)) {
+      for (const access of call.getDescendantsOfKind(SyntaxKind.PropertyAccessExpression)) {
+        const recv = access.getExpression();
+        if (
+          recv.getKind() === SyntaxKind.Identifier && recv.getText() === "AUDIT_ACTION" &&
+          IN_TX_ONLY_ACTIONS.has(access.getName())
+        ) {
+          asyncEmitSites.push(`${siteOf(sf, access)}: AUDIT_ACTION.${access.getName()} in a ${name} call`);
+        }
+      }
     }
 
     if (name === "logAuditBulkInTx") {
@@ -291,7 +341,27 @@ if (refusedBulkSites.length > 0) {
   console.error(`FAIL: ${refusedBulkSites.length} logAuditBulkInTx call(s) have an unreadable, computed, or conditional action.`);
 }
 
-if (missing.length > 0 || refusedBulkSites.length > 0) {
+const pinMismatches = [...IN_TX_ONLY_ACTIONS].filter(([a, pinned]) => (directInTxCounts.get(a) ?? 0) !== pinned);
+
+for (const [a, pinned] of pinMismatches) {
+  console.error(
+    `ERROR: AUDIT_ACTION.${a} has ${directInTxCounts.get(a) ?? 0} direct logAuditInTx emitter(s), pinned at ${pinned} (an emit was deleted, duplicated, or moved to the descriptor form).`,
+  );
+}
+if (pinMismatches.length > 0) {
+  console.error("");
+  console.error(`FAIL: ${pinMismatches.length} in-transaction-only action(s) do not match their pinned emitter count.`);
+}
+
+for (const site of asyncEmitSites) {
+  console.error(`ERROR: ${site} (must be logAuditInTx inside the mutation transaction — C1).`);
+}
+if (asyncEmitSites.length > 0) {
+  console.error("");
+  console.error(`FAIL: ${asyncEmitSites.length} post-commit emit(s) of an in-transaction-only action.`);
+}
+
+if (missing.length > 0 || refusedBulkSites.length > 0 || pinMismatches.length > 0 || asyncEmitSites.length > 0) {
   process.exit(1);
 }
 

@@ -10,8 +10,9 @@ const SUBJECT = "src/lib/team/subject.ts";
 
 /**
  * The exempted sites, so a synthetic root keeps every exemption matched: 1
- * member write, and EXEMPT_ADMISSIONS admissions and EXEMPT_GRANTS grants that
- * run() adds to the counts a test passes.
+ * member write, and EXEMPT_ADMISSIONS admissions, EXEMPT_GRANTS grants and
+ * EXEMPT_TENANT_DELETES tenant-row deletes (seeded in MEMBERSHIP_END_FILES)
+ * that run() adds to the counts a test passes.
  */
 const EXEMPT_FILES = {
   "src/app/api/teams/[teamId]/rotate-key/route.ts": `
@@ -75,6 +76,9 @@ export async function applyVaultRotation(tx, userId, payload) {
 };
 const EXEMPT_ADMISSIONS = 1;
 const EXEMPT_GRANTS = 10;
+const EXEMPT_TENANT_DELETES = 2;
+/** departFromTenant's and departCreatedMembership's UPDATEs in the MEMBERSHIP_END_FILES seed. */
+const SEEDED_DEPARTURE_WRITERS = 2;
 
 const DEPARTURE = "src/lib/team/team-departure.ts";
 const SCIM_USER_SERVICE = "src/lib/services/scim-user-service.ts";
@@ -82,9 +86,11 @@ const AUTH = "src/auth.ts";
 
 /**
  * Rule 9's pinned membership ends (EXPECTED_MEMBERSHIP_ENDS), each revoking
- * after its write, and the exempted auth.ts migration shape. writeFile keeps
- * a seeded file's seed and adds to it, so a red cannot pass on a missing
- * pinned site.
+ * after its write, and the exempted auth.ts migration shape. The auth.ts and
+ * deactivateScimUser deletes are also the two exempted tenant-row deletes,
+ * and team-departure.ts's two UPDATEs the SEEDED_DEPARTURE_WRITERS, each with
+ * endTeamMemberships after it. writeFile keeps a seeded file's seed and adds
+ * to it, so a red cannot pass on a missing pinned site.
  */
 const MEMBERSHIP_END_FILES = {
   [DEPARTURE]: `
@@ -93,6 +99,7 @@ export async function departFromTenant(tx, tenantId, userIds, options) {
     UPDATE tenant_members SET deactivated_at = clock_timestamp(), updated_at = clock_timestamp()
      WHERE tenant_id = \${tenantId}::uuid AND user_id = ANY(\${[...userIds]}::uuid[]) AND deactivated_at IS NULL
     RETURNING user_id\`;
+  await endTeamMemberships(tx, tenantId, transitioned, options);
   const revocation = await revokeUsersAuthArtifactsInTx(tx, transitioned, { tenantFilter: { tenantId }, boundedLockWait: true });
   return { userIds: transitioned, revocation };
 }
@@ -100,6 +107,7 @@ export async function departCreatedMembership(tx, tenantId, userIds, options) {
   await tx.$executeRaw\`
     UPDATE tenant_members SET deactivated_at = clock_timestamp(), updated_at = clock_timestamp()
      WHERE tenant_id = \${tenantId}::uuid AND user_id = ANY(\${[...userIds]}::uuid[]) AND deactivated_at IS NOT NULL\`;
+  await endTeamMemberships(tx, tenantId, userIds, options);
   return revokeUsersAuthArtifactsInTx(tx, userIds, { tenantFilter: { tenantId }, boundedLockWait: true });
 }
 `,
@@ -123,7 +131,7 @@ export async function migrateBootstrapTenant(userId, existingTenantId, target) {
 
 let root;
 
-function run({ writes = 1, tenantWrites = 0, admissions = 0, grants = 0 } = {}) {
+function run({ writes = 1, tenantWrites = 0, admissions = 0, grants = 0, departureWriters = 0, tenantDeletes = 0 } = {}) {
   try {
     return {
       code: 0,
@@ -136,6 +144,8 @@ function run({ writes = 1, tenantWrites = 0, admissions = 0, grants = 0 } = {}) 
           TEAM_ROTATION_INPUT_LOCK_TENANT_WRITES: String(tenantWrites),
           TEAM_ROTATION_INPUT_LOCK_ADMISSIONS: String(admissions + EXEMPT_ADMISSIONS),
           TEAM_ROTATION_INPUT_LOCK_GRANTS: String(grants + EXEMPT_GRANTS),
+          TEAM_ROTATION_INPUT_LOCK_DEPARTURE_WRITERS: String(departureWriters + SEEDED_DEPARTURE_WRITERS),
+          TEAM_ROTATION_INPUT_LOCK_TENANT_DELETES: String(tenantDeletes + EXEMPT_TENANT_DELETES),
         },
         stdio: ["ignore", "pipe", "pipe"],
       }),
@@ -164,6 +174,7 @@ beforeEach(() => {
   write("src/app/layout.ts", "export {};\n");
   write("src/lib/util.ts", "export {};\n");
   write("src/workers/worker.ts", "export {};\n");
+  write("scripts/x.ts", "export {};\n");
   for (const [rel, body] of Object.entries(EXEMPT_FILES)) write(rel, body);
   for (const [rel, body] of Object.entries(MEMBERSHIP_END_FILES)) replaceFile(rel, body);
 });
@@ -413,6 +424,162 @@ export const rotate = withTenantRls(prisma, tenantId, async (tx) => {
     it("refuses the same INSERT anywhere else", () => {
       write(SUBJECT, "export async function rec(tx) { await tx.$executeRaw`INSERT INTO tenant_member_departures (tenant_id, user_id, departed_at) VALUES (${t}::uuid, ${u}::uuid, clock_timestamp())`; }");
       expectDenied(run(), /INSERT INTO tenant_member_departures in rec/);
+    });
+  });
+
+  describe("departure writers: team-departure.ts's own tenant active-state writes", () => {
+    const DEPARTURE = "src/lib/team/team-departure.ts";
+    const SITE = /departure-writer::src\/lib\/team\/team-departure\.ts::off::tenant_members\.raw/;
+    const rawOff = "await tx.$queryRaw`UPDATE tenant_members SET deactivated_at = clock_timestamp() WHERE id = ${id}::uuid`;";
+
+    it("refuses a deactivating UPDATE with no later endTeamMemberships", () => {
+      write(DEPARTURE, `export async function off(tx) { ${rawOff} }`);
+      expectDenied(run({ departureWriters: 1 }), SITE);
+    });
+
+    // A deactivating write is also a rule-9 membership end: it must revoke
+    // after it and be a pinned site, so the accepting cells put it in the
+    // pinned departFromTenant, in place of the seeded one.
+    const REVOKE_AFTER = "await revokeUsersAuthArtifactsInTx(tx, [u], { tenantFilter: { tenantId: t } });";
+    const asDepartFromTenant = (body) => MEMBERSHIP_END_FILES[DEPARTURE]
+      .replace(/export async function departFromTenant[\s\S]*?\n}\n/, `export async function departFromTenant(tx) { ${body} }\n`);
+
+    it("accepts the same UPDATE with endTeamMemberships after it", () => {
+      replaceFile(DEPARTURE, asDepartFromTenant(`${rawOff} await endTeamMemberships(tx, t, [u], options); ${REVOKE_AFTER}`));
+      expect(run().code).toBe(0);
+    });
+
+    it("refuses the departFromTenant UPDATE when endTeamMemberships is dropped (positive control)", () => {
+      replaceFile(DEPARTURE, asDepartFromTenant(`${rawOff} ${REVOKE_AFTER}`));
+      expectDenied(run(), /departure-writer::src\/lib\/team\/team-departure\.ts::departFromTenant::tenant_members\.raw/);
+    });
+
+    it("refuses an endTeamMemberships call that comes before the write", () => {
+      write(DEPARTURE, `export async function off(tx) { await endTeamMemberships(tx, t, [u], options); ${rawOff} }`);
+      expectDenied(run({ departureWriters: 1 }), SITE);
+    });
+
+    it("refuses an endTeamMemberships call in another function", () => {
+      write(DEPARTURE, `export async function off(tx) { ${rawOff} }
+export async function other(tx) { await endTeamMemberships(tx, t, [u], options); }`);
+      expectDenied(run({ departureWriters: 1 }), SITE);
+    });
+
+    it("refuses an endTeamMemberships call nested in a callback of the writer's function", () => {
+      write(DEPARTURE, `export async function off(tx) { ${rawOff} const later = async () => { await endTeamMemberships(tx, t, [u], options); }; }`);
+      expectDenied(run({ departureWriters: 1 }), SITE);
+    });
+
+    it("refuses a Prisma upsert whose create arm deactivates, with no later endTeamMemberships", () => {
+      write(DEPARTURE, `export async function off(tx) { await tx.tenantMember.upsert({ where, create: { deactivatedAt: new Date() }, update: {} }); }`);
+      expectDenied(run({ departureWriters: 1 }), /departure-writer::src\/lib\/team\/team-departure\.ts::off::tenantMember\.upsert/);
+    });
+
+    it("accepts a Prisma upsert whose update arm clears deactivatedAt without the call", () => {
+      write(DEPARTURE, `export async function back(tx) { await tx.tenantMember.upsert({ where, create: { role }, update: { deactivatedAt: null } }); }`);
+      expect(run({ departureWriters: 1 }).code).toBe(0);
+    });
+
+    it("refuses a Prisma deactivating write with no later endTeamMemberships", () => {
+      write(DEPARTURE, `export async function off(tx) { await tx.tenantMember.update({ where: { id }, data: { deactivatedAt: new Date() } }); }`);
+      expectDenied(run({ departureWriters: 1 }), /departure-writer::src\/lib\/team\/team-departure\.ts::off::tenantMember\.update/);
+    });
+
+    it("accepts a Prisma deactivating write with endTeamMemberships after it (rule 9 still pins it as a new membership end)", () => {
+      write(DEPARTURE, `export async function off(tx) { await tx.tenantMember.update({ where: { id }, data: { deactivatedAt: new Date() } }); await endTeamMemberships(tx, t, [u], options); ${REVOKE_AFTER} }`);
+      const r = run({ departureWriters: 1 });
+      expectDenied(r, /unexpected: membership-end::src\/lib\/team\/team-departure\.ts::off::tenantMember\.update/);
+      expect(r.out).not.toMatch(/departure-writer::/);
+      expect(r.out).not.toMatch(/ends a tenant membership/);
+    });
+
+    it("accepts a Prisma write that clears deactivatedAt without the call", () => {
+      write(DEPARTURE, `export async function back(tx) { await tx.tenantMember.updateMany({ where: { id }, data: { deactivatedAt: null } }); }`);
+      expect(run({ departureWriters: 1 }).code).toBe(0);
+    });
+
+    it("refuses a raw SET to the clock that only has IS NULL in its WHERE", () => {
+      write(DEPARTURE, `export async function off(tx) { ${rawOff.replace("WHERE id = ${id}::uuid", "WHERE deactivated_at IS NULL")} }`);
+      expectDenied(run({ departureWriters: 1 }), SITE);
+    });
+
+    it("accepts a raw SET deactivated_at = NULL without the call", () => {
+      write(DEPARTURE, "export async function off(tx) { await tx.$queryRaw`UPDATE tenant_members SET deactivated_at = NULL WHERE deactivated_at IS NOT NULL`; }");
+      expect(run({ departureWriters: 1 }).code).toBe(0);
+    });
+
+    const writer = (name) => `export async function ${name}(tx) { await tx.$queryRaw\`UPDATE tenant_members SET deactivated_at = NULL WHERE id = \${id}::uuid\`; }`;
+
+    it("accepts the pinned three writers", () => {
+      write(DEPARTURE, ["a", "b", "c"].map(writer).join("\n"));
+      expect(run({ departureWriters: 3 }).code).toBe(0);
+    });
+
+    it("refuses a fourth writer against the pinned three", () => {
+      write(DEPARTURE, ["a", "b", "c", "d"].map(writer).join("\n"));
+      expectDenied(run({ departureWriters: 3 }), /differ from the pinned/);
+    });
+  });
+
+  describe("rules 2, 5 and 6 reach the other implementation files", () => {
+    for (const file of ["src/lib/team/tenant-row-lock.ts", "src/lib/team/team-key-rotation-lock.ts"]) {
+      it(`refuses a tenant active-state write in ${file}`, () => {
+        write(file, "export async function off(tx) { await tx.$executeRaw`UPDATE tenant_members SET deactivated_at = now() WHERE id = ${id}::uuid`; }");
+        expectDenied(run(), /raw write of tenant_members\.deactivated_at/);
+      });
+
+      it(`refuses a Prisma tenant active-state write in ${file}`, () => {
+        write(file, "export async function off(tx) { await tx.tenantMember.update({ where: { id }, data: { deactivatedAt: new Date() } }); }");
+        expectDenied(run({ tenantWrites: 1 }), /tenant-state::[^\n]*tenantMember\.update/);
+      });
+
+      it(`refuses a departure-record write in ${file}`, () => {
+        write(file, "export async function rec(tx) { await tx.$executeRaw`INSERT INTO tenant_member_departures (tenant_id, user_id, departed_at) VALUES (${t}::uuid, ${u}::uuid, now())`; }");
+        expectDenied(run(), /INSERT INTO tenant_member_departures in rec/);
+      });
+
+      it(`refuses a call of deleteUser in ${file}`, () => {
+        write(file, "export async function purge() { await adapter.deleteUser(id); }");
+        expectDenied(run(), /calls deleteUser/);
+      });
+
+      it(`accepts ${file} without them`, () => {
+        write(file, "export async function lock(tx) { await tx.$executeRaw`SELECT 1 FROM tenant_members WHERE id = ${id}::uuid FOR UPDATE`; }");
+        expect(run().code).toBe(0);
+      });
+    }
+  });
+
+  describe("scripts/ is scanned", () => {
+    it("refuses a tenant active-state write in a scripts/ file", () => {
+      write("scripts/x.ts", "export async function off(tx) { await tx.$executeRaw`UPDATE tenant_members SET deactivated_at = now() WHERE id = ${id}::uuid`; }");
+      expectDenied(run(), /raw write of tenant_members\.deactivated_at/);
+    });
+
+    it("accepts a read of tenant_members in a scripts/ file", () => {
+      write("scripts/x.ts", "export async function list(tx) { return tx.$queryRaw`SELECT user_id FROM tenant_members WHERE deactivated_at IS NULL`; }");
+      expect(run().code).toBe(0);
+    });
+  });
+
+  describe("tenant-row deletes need a reviewed exemption", () => {
+    it("refuses a tenantMember.delete", () => {
+      write(SUBJECT, `export async function drop(tx) { await tx.tenantMember.delete({ where }); }`);
+      expectDenied(run({ tenantDeletes: 1 }), /tenant-row-delete::src\/lib\/team\/subject\.ts::drop::tenantMember\.delete/);
+    });
+
+    it("refuses a tenantMember.deleteMany", () => {
+      write(SUBJECT, `export async function drop(tx) { await tx.tenantMember.deleteMany({ where }); }`);
+      expectDenied(run({ tenantDeletes: 1 }), /tenant-row-delete::src\/lib\/team\/subject\.ts::drop::tenantMember\.deleteMany/);
+    });
+
+    it("refuses a raw DELETE FROM tenant_members, schema-qualified and quoted", () => {
+      write(SUBJECT, 'export async function drop(tx) { await tx.$executeRaw`DELETE FROM "public"."tenant_members" WHERE id = ${id}::uuid`; }');
+      expectDenied(run({ tenantDeletes: 1 }), /tenant-row-delete::src\/lib\/team\/subject\.ts::drop::tenant_members\.raw/);
+    });
+
+    it("accepts the two exempted deletes (src/auth.ts, deactivateScimUser)", () => {
+      expect(run().code).toBe(0);
     });
   });
 
@@ -1307,12 +1474,13 @@ export async function promote(tx, rows, target) {
        AND deactivated_at IS NOT NULL
     RETURNING user_id\`;
 }`);
-      expect(run().code).toBe(0);
+      // A departureWriters site (#1062), covered by its clearing.
+      expect(run({ departureWriters: 1 }).code).toBe(0);
     });
 
     it("allows a reactivation's deactivatedAt: null in an IMPLEMENTATIONS file", () => {
       write(DEPARTURE, "export async function back(tx, tenantId) { await tx.tenantMember.updateMany({ where: { tenantId }, data: { deactivatedAt: null } }); }");
-      expect(run().code).toBe(0);
+      expect(run({ departureWriters: 1 }).code).toBe(0);
     });
 
     const SCIM_POST = "src/app/api/scim/v2/Users/route.ts";

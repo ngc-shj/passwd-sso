@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createHash } from "node:crypto";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaTeamInvitation, mockPrismaUser, mockPrismaTeam, mockPrismaTeamMember, mockRequireTeamPermission, TeamAuthError, mockWithTeamTenantRls, mockWithBypassRls } = vi.hoisted(() => {
+const { mockAuth, mockPrismaTeamInvitation, mockPrismaUser, mockPrismaTeam, mockPrismaTeamMember, mockRequireTeamPermission, TeamAuthError, mockWithTeamTenantRls, mockWithBypassRls, mockLogAuditAsync, mockLogAuditInTx, txSentinel } = vi.hoisted(() => {
+  const _txSentinel: { current: unknown } = { current: null };
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -24,9 +25,17 @@ const { mockAuth, mockPrismaTeamInvitation, mockPrismaUser, mockPrismaTeam, mock
     mockPrismaTeamMember: { findUnique: vi.fn(), findMany: vi.fn(), findFirst: vi.fn() },
     mockRequireTeamPermission: vi.fn(),
     TeamAuthError: _TeamAuthError,
-    // The issuing transaction runs as fn(tenantId, tx); tx is the prisma mock.
-    mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: (tenantId: string, tx: unknown) => unknown) =>
-      fn("tenant-1", (await import("@/lib/prisma")).prisma)),
+    // The issuing transaction runs as fn(tenantId, tx); tx delegates to the
+    // prisma mock but is a distinct object, so an audit written through the
+    // transaction is told apart from one written on the module client.
+    mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: (tenantId: string, tx: unknown) => unknown) => {
+      const prisma = (await import("@/lib/prisma")).prisma;
+      _txSentinel.current = Object.create(prisma);
+      return fn("tenant-1", _txSentinel.current);
+    }),
+    mockLogAuditAsync: vi.fn(),
+    mockLogAuditInTx: vi.fn(),
+    txSentinel: _txSentinel,
     mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
   };
 });
@@ -59,6 +68,11 @@ vi.mock("@/lib/team/team-key-rotation-lock", async (importOriginal) => ({
 vi.mock("@/lib/team/tenant-row-lock", async (importOriginal) => ({
   ...(await importOriginal()) as Record<string, unknown>,
   lockTenantRows: mockLockTenantRows,
+}));
+vi.mock("@/lib/audit/audit", () => ({
+  logAuditAsync: mockLogAuditAsync,
+  logAuditInTx: mockLogAuditInTx,
+  teamAuditBase: vi.fn((_, userId, teamId) => ({ scope: "TEAM", userId, teamId })),
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withTeamTenantRls: mockWithTeamTenantRls,
@@ -176,6 +190,7 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     // The inviter's membership, re-read under their tenant row: an active ADMIN.
     mockPrismaTeamMember.findFirst.mockResolvedValue({ role: TEAM_ROLE.ADMIN, admittedAt: ACTOR_ADMITTED_AT, createdAt: ACTOR_ADMITTED_AT });
     mockLockTeamsAgainstRotation.mockResolvedValue(undefined);
+    mockLogAuditInTx.mockResolvedValue(undefined);
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -248,6 +263,8 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     expect(res.status).toBe(409);
     const json = await res.json();
     expect(json.error).toBe("INVITATION_ALREADY_SENT");
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
+    expect(mockLogAuditAsync).not.toHaveBeenCalled();
   });
 
   it("returns 409 TEAM_BUSY with Retry-After when the team row lock wait times out", async () => {
@@ -304,6 +321,39 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     expect(json.token).toMatch(/^[0-9a-f]{64}$/);
     expect(Object.keys(json).sort()).toEqual(["createdAt", "email", "expiresAt", "id", "role", "token"]);
     expect(res.headers.get("Cache-Control")).toBe("no-store");
+    expect(mockLogAuditInTx).toHaveBeenCalledTimes(1);
+    expect(mockLogAuditInTx).toHaveBeenCalledWith(
+      txSentinel.current,
+      "tenant-1",
+      expect.objectContaining({
+        action: "TEAM_MEMBER_INVITE",
+        targetType: "TeamInvitation",
+        targetId: "new-inv",
+        metadata: { email: "new@test.com", role: TEAM_ROLE.MEMBER },
+      }),
+    );
+    expect(mockLogAuditAsync).not.toHaveBeenCalled();
+  });
+
+  it("propagates a failing in-transaction audit instead of mapping it to a 4xx", async () => {
+    mockPrismaTeamInvitation.create.mockResolvedValue({
+      id: "new-inv",
+      email: "new@test.com",
+      role: TEAM_ROLE.MEMBER,
+      tokenHash: "a".repeat(64),
+      expiresAt: now,
+      createdAt: now,
+    });
+    mockLogAuditInTx.mockRejectedValue(new Error("audit_outbox insert failed"));
+
+    await expect(
+      POST(
+        createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/invitations`, {
+          body: { email: "new@test.com", role: TEAM_ROLE.MEMBER },
+        }),
+        createParams({ teamId: TEAM_ID }),
+      ),
+    ).rejects.toThrow("audit_outbox insert failed");
   });
 
   it("stores only the digest of the token it returns", async () => {
@@ -408,6 +458,8 @@ describe("POST /api/teams/[teamId]/invitations", () => {
 
       expect(res.status).toBe(403);
       expect(mockPrismaTeamInvitation.create).not.toHaveBeenCalled();
+      expect(mockLogAuditInTx).not.toHaveBeenCalled();
+      expect(mockLogAuditAsync).not.toHaveBeenCalled();
       expect(mockPrismaTeamMember.findFirst).toHaveBeenCalledWith({
         where: { teamId: TEAM_ID, userId: "test-user-id", deactivatedAt: null },
         select: { role: true, admittedAt: true, createdAt: true },
