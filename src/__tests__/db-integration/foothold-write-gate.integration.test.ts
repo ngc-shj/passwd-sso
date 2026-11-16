@@ -375,6 +375,16 @@ describe("foothold write gate — real-DB integration", () => {
       assertWritten: async (_e, s) => expect(await count("mcp_clients", "id = $1::uuid AND is_active = true", s.client)).toBe(1),
     },
     {
+      name: "MCP client scope widening (PUT allowedScopes)",
+      heldChange: "demotion",
+      okStatus: 200,
+      seed: async (env) => ({ client: await mcpClientRow(env.actorId, true) }),
+      invoke: (cookie, _env, s) =>
+        updateMcpClient(requestWithSession(cookie, `${BASE}/api/tenant/mcp-clients/${s.client}`, { method: "PUT", body: { allowedScopes: ["credentials:list", "credentials:use"] } }), idParams(s.client)),
+      assertNoWrite: async (_e, s) => expect(await count("mcp_clients", "id = $1::uuid AND allowed_scopes = 'credentials:list,credentials:use'", s.client)).toBe(0),
+      assertWritten: async (_e, s) => expect(await count("mcp_clients", "id = $1::uuid AND allowed_scopes = 'credentials:list,credentials:use'", s.client)).toBe(1),
+    },
+    {
       name: "DCR claim in the consent route",
       heldChange: "deactivation",
       okStatus: 302,
@@ -489,8 +499,6 @@ describe("foothold write gate — real-DB integration", () => {
       let res: Response;
       try {
         res = await (put as (c: string, id: string) => Promise<Response>)(cookie, id);
-        // It never waited on the held transaction: nothing is blocked by it now.
-        expect(await race.backendsBlockedBy(held.pid)).toEqual([]);
       } finally {
         await held.release();
       }

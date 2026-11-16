@@ -131,8 +131,8 @@ describe("GET /api/tenant/mcp-clients/[id]", () => {
 describe("PUT /api/tenant/mcp-clients/[id]", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  // Re-activation undoes a containment, so it takes the foothold write gate;
-  // deactivation (and a plain edit) stays ungated.
+  // Re-activation and scope/redirect changes take the foothold write gate;
+  // deactivation and display-only edits stay ungated.
   const arrangePut = () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
@@ -151,6 +151,15 @@ describe("PUT /api/tenant/mcp-clients/[id]", () => {
     arrange: arrangePut,
     call: () => putBody({ isActive: true }),
     assertNoWrite: () => expect(mockMcpClientUpdate).not.toHaveBeenCalled(),
+  });
+
+  it.each([
+    ["a scope change", { allowedScopes: ["credentials:list"] }],
+    ["a redirect URI change", { redirectUris: ["https://example.com/cb"] }],
+  ])("takes the foothold write gate for %s", async (_label, body) => {
+    arrangePut();
+    expect((await putBody(body)).status).toBe(200);
+    expect(mockLockFootholdWriter).toHaveBeenCalledTimes(1);
   });
 
   it.each([

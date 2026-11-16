@@ -26,5 +26,5 @@
   "inactiveWebhooks": "無効な Webhook ({count})",
   "noActiveWebhooks": "有効な Webhook がありません",
   "registeredWebhooks": "登録済み Webhook",
-  "creatorPaused": "一時停止中 — 作成者がこのテナントで Webhook の管理権限を失っています。権限が戻れば配信を再開します。戻らない場合は、現在の管理者が Webhook を作り直してください。停止中のイベントは送信されません。"
+  "creatorPaused": "一時停止中 — 作成者がこのテナントで Webhook の管理権限を失っています。メンバーのまま Webhook の管理権限が戻れば配信を再開します。そうでない場合は、現在の管理者が Webhook を作り直してください。停止中のイベントは送信されません。"
 }

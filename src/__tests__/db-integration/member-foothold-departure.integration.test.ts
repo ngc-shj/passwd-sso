@@ -8,6 +8,9 @@
  *
  * Production services run under the tenant's RLS context on passwd_app.
  *
+ * The departure-race and containment-fence cells are in
+ * foothold-write-gate.integration.test.ts.
+ *
  * Run: npm run test:integration -- member-foothold-departure
  */
 

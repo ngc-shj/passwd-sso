@@ -130,6 +130,7 @@ import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
 import { requestWithSession, seedSession } from "./session-request";
 import { createPool } from "@/lib/db/pool-factory";
 import { prisma } from "@/lib/prisma";
+import logger from "@/lib/logger";
 import {
   ACTOR_TYPE,
   AUDIT_ACTION,
@@ -1747,8 +1748,19 @@ describe("departed-member leaked authority — real-DB integration", () => {
       const id = await routeWebhook(creator.id);
       const control = await legacyWebhook();
       await loseAuthority(creator.id, how);
+      // The skip is logged in the read, before any delivery starts; the control
+      // delivers in parallel, so its timestamp cannot prove the skip.
+      const warn = vi.spyOn(logger, "warn");
 
-      await dispatchAndWait(control);
+      try {
+        await dispatchAndWait(control);
+        expect(warn).toHaveBeenCalledWith(
+          expect.objectContaining({ webhookId: id, _logType: "webhook_dispatch.creator_unauthorized" }),
+          "webhook_dispatch.creator_unauthorized",
+        );
+      } finally {
+        warn.mockRestore();
+      }
 
       expect(received).toEqual([`/hook/${control}`]);
       expect(await hook(id)).toMatchObject({ fail_count: 0, is_active: true, last_delivered_at: null });

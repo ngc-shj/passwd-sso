@@ -107,8 +107,9 @@ async function handlePUT(
   let updated;
   try {
     updated = await withTenantRls(prisma, actor.tenantId, async (tx) => {
-      // Re-activation undoes a containment; deactivating stays ungated.
-      if (data.isActive === true) {
+      // Re-activation and any scope or redirect change grant or widen access;
+      // deactivation and display-only edits stay ungated.
+      if (data.isActive === true || data.allowedScopes !== undefined || data.redirectUris !== undefined) {
         await lockFootholdWriter(tx, req, {
           tenantId: actor.tenantId,
           actorId: session.user.id,

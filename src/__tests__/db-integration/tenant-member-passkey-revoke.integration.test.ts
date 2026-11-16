@@ -60,6 +60,10 @@ import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { pgErrorCode } from "@/lib/prisma/prisma-error";
 import { MEMBER_CONTAINMENT_MAX_IDS } from "@/lib/validations/member-containment";
 import { requestWithSession, seedSession } from "./session-request";
+import { prisma } from "@/lib/prisma";
+import { withTenantRls } from "@/lib/tenant-rls";
+import { departFromTenant } from "@/lib/team/team-departure";
+import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
 
 describe("tenant admin revokes a member's passkey — real-DB integration", () => {
   let ctx: TestContext;
@@ -156,6 +160,11 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
   async function exists(table: "webauthn_credentials" | "sessions" | "tenant_webhooks", id: string): Promise<boolean> {
     const [row] = await sql<{ n: number }>(`SELECT count(*)::int AS n FROM ${table} WHERE id = $1::uuid`, id);
     return row.n === 1;
+  }
+
+  async function tokenRevokedAt(id: string): Promise<boolean> {
+    const [row] = await sql<{ revoked: boolean }>(`SELECT revoked_at IS NOT NULL AS revoked FROM service_account_tokens WHERE id = $1::uuid`, id);
+    return row.revoked;
   }
 
   async function tokenRevoked(id: string): Promise<boolean> {
@@ -902,6 +911,57 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
       scimTokens: 1, serviceAccounts: 0, serviceAccountTokens: 0, mcpClients: 0, breakglassGrants: 0,
       tenantWebhooks: 2, vaultResets: 1, emergencyAccessGrants: 0,
     });
+  });
+
+  it("remaining: counts a foothold created after the listing, which the request could not have named", async () => {
+    const owner = await memberWithRole("OWNER");
+    const target = await memberWithRole("ADMIN");
+    const listed = await tenantWebhook(target);
+
+    const listing = await listRaw(owner, target);
+    expect(listing.status).toBe(200);
+    expect(listing.text).toContain(listed);
+    const late = await tenantWebhook(target);
+    expect(listing.text).not.toContain(late);
+
+    const res = await containAs(owner, target, { revoke: { tenantWebhookIds: [listed] } });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.contained).toEqual({ tenantWebhooks: { revoked: 1, skipped: 0 } });
+    expect(body.remaining).toMatchObject({ tenantWebhooks: 1 });
+    expect(await exists("tenant_webhooks", late)).toBe(true);
+  });
+
+  // Not an ordering proof (the foothold-write-gate cells hold a transaction for
+  // that): the two writers take their locks in the order production does, and
+  // neither may be chosen as a deadlock victim.
+  it("containment and the member's departure run concurrently with no deadlock under the real order", async () => {
+    const owner = await memberWithRole("OWNER");
+    const target = await memberWithRole("ADMIN");
+    const sa = await serviceAccount(target);
+    const token = await saToken(sa, target);
+
+    const [contained, departed] = await Promise.allSettled([
+      containAs(owner, target, { revoke: { serviceAccountTokenIds: [token.id] } }),
+      withTenantRls(prisma, tenantId, (tx) =>
+        departFromTenant(tx, tenantId, [target], { actor: { userId: SYSTEM_ACTOR_ID, actorType: ACTOR_TYPE.SYSTEM } }),
+      ),
+    ]);
+
+    if (contained.status === "rejected") expect(pgErrorCode(contained.reason)).not.toBe("40P01");
+    else {
+      expect(contained.value.status).toBeLessThan(500);
+      expect(await contained.value.text()).not.toContain("40P01");
+    }
+    if (departed.status === "rejected") expect(pgErrorCode(departed.reason)).not.toBe("40P01");
+
+    const [member] = await sql<{ departed: boolean }>(
+      `SELECT deactivated_at IS NOT NULL AS departed FROM tenant_members WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, tenantId, target,
+    );
+    expect(member.departed).toBe(true);
+    expect(await tokenRevokedAt(token.id)).toBe(true);
+    const revokes = (await auditRows(tenantId)).filter((r) => r.action === "SERVICE_ACCOUNT_TOKEN_REVOKE" && r.targetId === token.id);
+    expect(revokes).toHaveLength(1);
   });
 
   it("remaining: an ADMIN actor's answer leaves out break-glass grants, which only an OWNER may contain", async () => {
