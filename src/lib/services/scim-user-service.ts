@@ -79,6 +79,9 @@ export interface DeactivateResult {
  */
 export const SCIM_USER_NOT_PROVISIONABLE_DETAIL = "User cannot be provisioned by this organization";
 
+/** The session-cache tombstone signal of a SCIM deprovisioning: one alert key for every SCIM route. */
+export const SCIM_DEPROVISION_TOMBSTONE = { reason: "scim_deprovision", operation: "SCIM user deprovisioning" } as const;
+
 // ── Error classes ─────────────────────────────────────────────
 
 export class ScimUserNotFoundError extends Error {

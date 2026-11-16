@@ -29,7 +29,7 @@ import { resolveExistingUsersForTenant } from "@/lib/tenant-context";
 import { isUniqueViolationOn, ONE_ACTIVE_MEMBERSHIP_INDEX } from "@/lib/prisma/prisma-error";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { REALIGNMENT_SOURCE, realignAfterActivation } from "@/lib/tenant/tenant-realignment";
-import { SCIM_USER_NOT_PROVISIONABLE_DETAIL, toScimUserResource } from "@/lib/services/scim-user-service";
+import { SCIM_DEPROVISION_TOMBSTONE, SCIM_USER_NOT_PROVISIONABLE_DETAIL, toScimUserResource } from "@/lib/services/scim-user-service";
 import { getLogger } from "@/lib/logger";
 import { errorLogFields } from "@/lib/logger/error-fields";
 import { scimParseBody } from "@/lib/scim/parse-body";
@@ -253,8 +253,7 @@ async function handlePOST(req: NextRequest) {
 
     if (created.revocation) {
       await tombstoneRevokedSessions(created.revocation.sessionTokens, {
-        reason: "scim_deprovision",
-        operation: "SCIM user deprovisioning",
+        ...SCIM_DEPROVISION_TOMBSTONE,
         userId: created.user.id,
       });
     }

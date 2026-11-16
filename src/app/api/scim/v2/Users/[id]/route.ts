@@ -25,6 +25,7 @@ import {
   replaceScimUser,
   patchScimUser,
   deactivateScimUser,
+  SCIM_DEPROVISION_TOMBSTONE,
   SCIM_USER_NOT_PROVISIONABLE_DETAIL,
   ScimUserNotFoundError,
   ScimOwnerProtectedError,
@@ -48,8 +49,7 @@ async function revocationAuditFields(
 ): Promise<Record<string, number>> {
   if (!revocation) return {};
   const cacheTombstoneFailures = await tombstoneRevokedSessions(revocation.sessionTokens, {
-    reason: "scim_deprovision",
-    operation: "SCIM user deprovisioning",
+    ...SCIM_DEPROVISION_TOMBSTONE,
     userId,
   });
   return { ...revocation.counts, cacheTombstoneFailures };
