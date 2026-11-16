@@ -198,10 +198,11 @@ exit 0`);
 }
 
 /** Run the script with an explicit environment allowlist. */
-function run(env = {}, { tocEntries, timeout = 8000 } = {}) {
+function run(env = {}, { tocEntries, timeout = 8000, killSignal } = {}) {
   return spawnSync("bash", [SCRIPT], {
     encoding: "utf8",
     timeout,
+    ...(killSignal === undefined ? {} : { killSignal }),
     cwd: REPO_ROOT,
     env: {
       PATH: `${binDir}:${process.env.PATH}`,
@@ -529,6 +530,9 @@ describe("C3/C4 dump set and atomic publication", () => {
     expect(err(r)).toBe("DUMP_FAILED");
     expect(generations()).toEqual([]);
     expect(readdirSync(backupDir).filter((n) => n.endsWith(".FAILED"))).toEqual([]);
+    // The trap's remove arm on an ordinary failure: the run's own .partial goes.
+    // The next run's orphan sweep would hide a leak here, so it is pinned now.
+    expect(readdirSync(backupDir).filter((n) => n.endsWith(".partial"))).toEqual([]);
   });
 
   it("fails when pg_dump exits 0 but writes an empty archive", () => {
@@ -1045,6 +1049,24 @@ describe("source-level contracts", () => {
       expect(control, "the pattern must match a plausible violation").toMatch(re);
     });
   }
+
+  it("takes ownership of the lock and the run directory only after creating them", () => {
+    // Order, not presence, so the forbidden list above cannot express it. The
+    // lock half has no behavioural test: a LOCK_DIR set before the claim is
+    // masked by the trap's own pid == $$ check, until a later edit relies on it.
+    const lines = src().split("\n");
+    const at = (name, re) => {
+      const i = lines.findIndex((l) => re.test(l));
+      expect(i, `${name} not found in the script`).toBeGreaterThan(-1);
+      return i;
+    };
+    const claim = at("the noclobber claim", /set -C; : > "\$LOCK_CANDIDATE\/pid"/);
+    const lockOwned = at("LOCK_DIR assignment", /^\s*LOCK_DIR="\$LOCK_CANDIDATE"/);
+    const partialMkdir = at("the .partial mkdir", /^\s*mkdir -- "\$BACKUP_ROOT\/\$STAMP\.partial"/);
+    const partialOwned = at("RUN_PARTIAL assignment", /^\s*RUN_PARTIAL="\$BACKUP_ROOT\//);
+    expect(lockOwned, "LOCK_DIR must be set only after the claim succeeded").toBeGreaterThan(claim);
+    expect(partialOwned, "RUN_PARTIAL must be set only after the mkdir created it").toBeGreaterThan(partialMkdir);
+  });
 
   it("validates every environment variable its usage header documents", () => {
     // Raw source: the documented member set lives in the usage comment block,
@@ -2026,7 +2048,10 @@ exit 0`);
     });
     let stderr = "";
     child.stderr.on("data", (d) => { stderr += d; });
-    const done = new Promise((res) => child.on("exit", res));
+    // "close", not "exit": "exit" can fire before the piped stderr has been read,
+    // and the assertion below reads it. (The stub's sleep holds the pipe until it
+    // ends, well inside the cell timeout.)
+    const done = new Promise((res) => child.on("close", res));
     return new Promise((resolve) => setTimeout(resolve, 700))
       .then(() => { child.kill("SIGHUP"); return done; })
       .then(() => {
@@ -2082,11 +2107,12 @@ describe("ignore-rule coverage", () => {
 
 
 describe("concurrency and destination ownership", () => {
-  it("lets exactly one of two runs reclaim the same stale lock", { timeout: 30000 }, async () => {
+  it("refuses to reclaim a stale lock; neither of two runs takes it", { timeout: 30000 }, async () => {
     // Two runs can judge the same lock stale simultaneously. rm-then-mkdir let
     // the later one delete the earlier one's FRESH lock, so both proceeded into
-    // one root and each swept the other's residue. The claim is a rename now,
-    // which exactly one can win.
+    // one root and each swept the other's residue. No automatic reclaim survived
+    // that race, so there is none: both runs fail closed and the operator
+    // removes the lock.
     mkdirSync(backupDir, { recursive: true, mode: 0o700 });
     chmodSync(backupDir, 0o700);
     const lock = join(backupDir, ".lock.d");
@@ -2094,26 +2120,18 @@ describe("concurrency and destination ownership", () => {
     writeFileSync(join(lock, "pid"), `${GONE_PID}\n`, "utf8");        // gone
     writeFileSync(join(lock, "host"), `${hostname()}\n`, "utf8");
 
-    // Slow the dump so the two runs genuinely overlap.
-    stub("docker", `
-[ "\${2:-}" = "config" ] && exit 0
-[ "\${2:-}" = "ps" ] && { echo c1; exit 0; }
-for a in "$@"; do
-  case "$a" in
-    pg_dump)    sleep 1; printf 'PGDMP'; exit 0 ;;
-    pg_dumpall) printf 'CREATE ROLE r;\\n-- PostgreSQL database cluster dump complete\\n'; exit 0 ;;
-    pg_restore) printf '; h\\n1; 1 TABLE t o\\n'; exit 0 ;;
-  esac
-done
-exit 0`);
-
+    // Both runs stop at the lock, before any dump, so their timing does not
+    // matter: whichever order they arrive in, neither may take it.
     const env = { PATH: `${binDir}:${process.env.PATH}`, HOME: homeDir, LANG: "C", BACKUP_DIR: backupDir };
     const both = await Promise.all([0, 1].map(() => new Promise((res) => {
       const c = spawn("bash", [SCRIPT], { env, stdio: ["ignore", "pipe", "pipe"] });
       let out = "";
       c.stdout.on("data", (d) => { out += d; });
       c.stderr.on("data", (d) => { out += d; });
-      c.on("exit", (code) => res({ code, out }));
+      // "close", not "exit": "exit" can fire before the pipes are drained, and a
+      // run's output read then is empty — measured under load as a LOCKED run
+      // whose `out` was "".
+      c.on("close", (code) => res({ code, out }));
     })));
 
     // Neither may take it: automatic reclaim is what raced. Both fail closed,
@@ -2121,45 +2139,6 @@ exit 0`);
     expect(both.filter((r) => r.code === 0), "no run may take a stale lock on its own").toHaveLength(0);
     for (const r of both) expect(r.out).toMatch(/BACKUP_ERR:LOCKED/);
     expect(generations()).toEqual([]);
-  });
-
-  it("lets exactly one of two runs take a FREE lock", { timeout: 30000 }, async () => {
-    // The case above pre-creates a stale lock, so both runs take the
-    // existing-lock branch and neither ever races for a free one — nothing
-    // observed the atomicity `mkdir` is chosen for. Replacing the acquire with
-    // a test-then-`mkdir -p` (two runs both see "absent", both proceed into one
-    // root) left the suite green.
-    mkdirSync(backupDir, { recursive: true, mode: 0o700 });
-    chmodSync(backupDir, 0o700);
-    stub("docker", `
-[ "\${2:-}" = "config" ] && exit 0
-[ "\${2:-}" = "ps" ] && { echo c1; exit 0; }
-for a in "$@"; do
-  case "$a" in
-    pg_dump)    sleep 2; printf 'PGDMP'; exit 0 ;;
-    pg_dumpall) printf 'CREATE ROLE r;\\n-- PostgreSQL database cluster dump complete\\n'; exit 0 ;;
-    pg_restore) printf '; h\\n1; 1 TABLE t o\\n'; exit 0 ;;
-  esac
-done
-exit 0`);
-    const env = { PATH: `${binDir}:${process.env.PATH}`, HOME: homeDir, LANG: "C", BACKUP_DIR: backupDir };
-    const both = await Promise.all([0, 1].map(() => new Promise((res) => {
-      const c = spawn(BASH, [SCRIPT], { env, stdio: ["ignore", "pipe", "pipe"] });
-      let out = "";
-      c.stdout.on("data", (d) => { out += d; });
-      c.stderr.on("data", (d) => { out += d; });
-      c.on("exit", (code) => res({ code, out }));
-    })));
-
-    const winners = both.filter((r) => r.code === 0);
-    // The runs' output is the only evidence of why a run lost (see the
-    // contention case below): without it a CI failure here is undiagnosable.
-    expect(winners, `exactly one run may hold the lock; runs: ${JSON.stringify(both)}`).toHaveLength(1);
-    const losers = both.filter((r) => r.code !== 0);
-    for (const r of losers) expect(r.out).toMatch(/BACKUP_ERR:LOCKED/);
-    // One writer means one generation and no residue from a second one.
-    expect(generations()).toHaveLength(1);
-    expect(readdirSync(backupDir).filter((n) => n.endsWith(".partial"))).toEqual([]);
   });
 
   it("aborts the prune when the root is no longer the audited object", () => {
@@ -2209,80 +2188,395 @@ exit 0`);
     }
   });
 
-  it("lets exactly one of two runs take a FREE lock, under real contention",
-    { timeout: 30000 }, async () => {
-    // The previous version of this case could not see the race it was written
-    // for: two spawn() calls land milliseconds apart while a test-then-create
-    // window is microseconds wide, so the second run always found the lock
-    // already there and took the ordinary LOCKED branch. `sleep` in the pg_dump
-    // stub widens the HOLD, not the ACQUIRE. A test-then-`mkdir -p` acquire
-    // survived it three times out of three.
-    //
-    // `mkdir` is an external binary, so the acquire window itself is stubbable:
-    // sleep before creating the lock directory, and any non-atomic acquire loses
-    // deterministically.
+  // Two runs racing for a free lock. The overlap is forced, not hoped for: a
+  // `sleep` in front of the lock's mkdir lined the runs up only when the
+  // scheduler started them together, and under CPU contention one run finished
+  // before the other arrived (both published, under consecutive stamps).
+  //
+  // The mkdir stub holds every call on the lock directory at a two-party
+  // barrier, runs the real mkdir, then holds both runs at a second barrier until
+  // both mkdirs have returned. The first makes the two creates race; the second
+  // keeps the winner from claiming, dumping and releasing before the loser's
+  // mkdir has even run, which would let both publish with every arrival check
+  // green. `falseSuccess` models uutils mkdir before 0.11 (uutils#13970): an
+  // existence pre-check that fails for a path that is already there, then a
+  // create whose EEXIST is reported as success when the path is a directory.
+  // The pre-check sits BEFORE the first barrier, so both runs pass it before
+  // either creates — the window the CI runner hit.
+  function contendedLockRun({ falseSuccess = false } = {}) {
     mkdirSync(backupDir, { recursive: true, mode: 0o700 });
     chmodSync(backupDir, 0o700);
-    //
-    // Both runs must also be in that window at once. On a loaded host the
-    // second spawn started after the first had released the lock, and both
-    // took it in turn. So each attempt is recorded and waits (bounded) until
-    // the other has arrived before it sleeps and creates.
+    // Per barrier: an arrivals directory, and beside it what each run saw when it
+    // left (kept apart so it cannot inflate the arrival count).
+    const barriers = ["barrier-acquire", "barrier-created"].map((name) => {
+      const dir = join(tmpDir, name);
+      mkdirSync(dir);
+      mkdirSync(`${dir}-left`);
+      return dir;
+    });
+    const falseSuccessFired = join(tmpDir, "false-success");
     const realMkdir = spawnSync("sh", ["-c", "command -v mkdir"], { encoding: "utf8" }).stdout.trim();
-    const attempts = join(tmpDir, "lock-attempts");
     stub("mkdir", `
+lock=""
 for a in "$@"; do
-  case "$a" in
-    */.lock.d)
-      echo x >> "${attempts}"
-      i=0
-      while [ "$(wc -l < "${attempts}")" -lt 2 ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
-      sleep 0.3 ;;
-  esac
+  case "$a" in */.lock.d) lock="$a" ;; esac
 done
-exec "${realMkdir}" "$@"`);
+[ -n "$lock" ] || exec "${realMkdir}" "$@"
+shopt -s nullglob
+barrier() {
+  : > "$1/$$"
+  while arrived=("$1"/*); [ "\${#arrived[@]}" -lt 2 ]; do
+    [ "$SECONDS" -ge 10 ] && { : > "$1.timeout"; break; }
+    sleep 0.01
+  done
+  printf '%s' "\${#arrived[@]}" > "$1-left/$$"
+}
+${falseSuccess ? `[ -e "$lock" ] && { printf 'mkdir: %s: File exists\\n' "$lock" >&2; exit 1; }` : ""}
+barrier "${barriers[0]}"
+${falseSuccess
+    ? `if "${realMkdir}" "$@" 2>/dev/null; then status=0
+elif [ -d "$lock" ]; then : > "${falseSuccessFired}"; status=0
+else status=1; fi`
+    : `"${realMkdir}" "$@"; status=$?`}
+barrier "${barriers[1]}"
+exit "$status"`);
     const env = { PATH: `${binDir}:${process.env.PATH}`, HOME: homeDir, LANG: "C", BACKUP_DIR: backupDir };
-    const both = await Promise.all([0, 1].map(() => new Promise((res) => {
+    const one = () => new Promise((res) => {
       const c = spawn(BASH, [SCRIPT], { env, stdio: ["ignore", "pipe", "pipe"] });
+      // Below the cell timeout, so a wedged run is reported, not leaked.
+      const kill = setTimeout(() => c.kill("SIGKILL"), 20000);
       let out = "";
       c.stdout.on("data", (d) => { out += d; });
       c.stderr.on("data", (d) => { out += d; });
-      c.on("exit", (code) => res({ code, out }));
-    })));
+      // "close": the output is only complete once the pipes are drained.
+      c.on("close", (code) => { clearTimeout(kill); res({ code, out }); });
+    });
+    return Promise.all([one(), one()]).then((runs) => ({
+      runs,
+      barriers: barriers.map((dir) => ({
+        name: dir.slice(tmpDir.length + 1),
+        arrivals: readdirSync(dir).length,
+        seenOnLeaving: readdirSync(`${dir}-left`).map((n) => readFileSync(join(`${dir}-left`, n), "utf8")),
+        timedOut: existsSync(`${dir}.timeout`),
+      })),
+      falseSuccessFired: existsSync(falseSuccessFired),
+    }));
+  }
 
+  // Checked before the outcome: a barrier that never engaged (a renamed lock
+  // path, a stub that no longer matches) would otherwise pass on scheduling.
+  function expectForcedOverlap(c) {
+    for (const b of c.barriers) {
+      expect(b.arrivals, `${b.name}: both runs must arrive; runs: ${JSON.stringify(c.runs)}`).toBe(2);
+      expect(b.timedOut, `${b.name} expired, so the runs did not overlap`).toBe(false);
+      // Arriving is not waiting: a loop that let a run through early would still
+      // leave two arrival files behind.
+      expect(b.seenOnLeaving, `${b.name}: each run must leave only once both arrived`).toEqual(["2", "2"]);
+    }
+  }
+
+  it("lets exactly one of two runs take a FREE lock, under real contention",
+    { timeout: 30000 }, async () => {
+    const c = await contendedLockRun();
+    expectForcedOverlap(c);
     // The runs' output is the only evidence of why a run lost; without it a CI
     // failure here is undiagnosable.
-    expect(both.filter((r) => r.code === 0),
-      `exactly one run may hold the lock; runs: ${JSON.stringify(both)}`).toHaveLength(1);
-    for (const r of both.filter((r) => r.code !== 0)) expect(r.out).toMatch(/BACKUP_ERR:LOCKED/);
+    expect(c.runs.filter((r) => r.code === 0),
+      `exactly one run may hold the lock; runs: ${JSON.stringify(c.runs)}`).toHaveLength(1);
+    for (const r of c.runs.filter((r) => r.code !== 0)) expect(r.out).toMatch(/BACKUP_ERR:LOCKED/);
     expect(generations()).toHaveLength(1);
     expect(readdirSync(backupDir).filter((n) => n.endsWith(".partial"))).toEqual([]);
   });
 
-  it("removes the lock it just took when it cannot record the holder", () => {
-    // The wedge the rollback exists to prevent: a lock no run can attribute, so
-    // every later run reports "exists but records no holder". Both the failure
-    // propagation and the rollback itself were unpinned.
+  it("keeps one holder when mkdir reports success for a lock another run created",
+    { timeout: 30000 }, async () => {
+    // The CI failure of #1050: on uutils mkdir both runs passed the acquire,
+    // picked one stamp, and the loser's trap deleted the winner's .partial.
+    const c = await contendedLockRun({ falseSuccess: true });
+    expectForcedOverlap(c);
+    expect(c.falseSuccessFired, "the emulated uutils branch must have run").toBe(true);
+    expect(c.runs.filter((r) => r.code === 0),
+      `exactly one run may hold the lock; runs: ${JSON.stringify(c.runs)}`).toHaveLength(1);
+    // The claim's own refusal, not the reader branch's: both mkdirs succeeded.
+    for (const r of c.runs.filter((r) => r.code !== 0)) {
+      expect(r.out).toMatch(/BACKUP_ERR:LOCKED another backup run claimed .* at the same moment/);
+    }
+    expect(generations()).toHaveLength(1);
+    expect(readdirSync(backupDir).filter((n) => n.endsWith(".partial"))).toEqual([]);
+  });
+
+  it("refuses, and leaves alone, a lock a concurrent run claimed first", () => {
+    // The single-run form of the race above: mkdir succeeds and the claim then
+    // finds a regular pid already there. Rolling back here would delete the
+    // other run's lock.
     mkdirSync(backupDir, { recursive: true, mode: 0o700 });
     chmodSync(backupDir, 0o700);
     const realMkdir = spawnSync("sh", ["-c", "command -v mkdir"], { encoding: "utf8" }).stdout.trim();
-    const lock = join(backupDir, ".lock.d");
-    // The lock's own mkdir also creates `pid` as a DIRECTORY, so the script's
-    // `printf … > "$LOCK_DIR/pid"` cannot succeed. Deterministic, and it leaves
-    // the acquire itself untouched.
     stub("mkdir", `
 "${realMkdir}" "$@" || exit $?
 for a in "$@"; do
   case "$a" in
-    */.lock.d) "${realMkdir}" -p -- "$a/pid" ;;
+    */.lock.d) : > "$a/pid" ;;
   esac
 done
 exit 0`);
     const r = run();
+    expect(err(r)).toBe("LOCKED");
+    expect(r.stderr).toMatch(/claimed .* at the same moment/);
+    expect(existsSync(join(backupDir, ".lock.d", "pid")), "the other run's claim must survive").toBe(true);
+    expect(generations()).toEqual([]);
+  });
+
+  // Shared by the cases below: the lock's mkdir succeeds, then the claim fails
+  // (EACCES) with the directory still empty. Root ignores the mode, hence their
+  // skip.
+  function unclaimableLockStub() {
+    const realMkdir = spawnSync("sh", ["-c", "command -v mkdir"], { encoding: "utf8" }).stdout.trim();
+    stub("mkdir", `
+"${realMkdir}" "$@" || exit $?
+for a in "$@"; do
+  case "$a" in
+    */.lock.d) chmod 0500 -- "$a" ;;
+  esac
+done
+exit 0`);
+  }
+
+  it.skipIf(process.getuid?.() === 0)(
+    "removes the lock it just created when it cannot claim it", () => {
+    // The wedge the rollback exists to prevent: a lock no run can attribute, so
+    // every later run reports "exists but records no holder". The claim fails
+    // with the directory still empty, which is what lets rmdir — and only rmdir —
+    // remove it.
+    mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+    chmodSync(backupDir, 0o700);
+    const lock = join(backupDir, ".lock.d");
+    unclaimableLockStub();
+    const r = run();
     expect(err(r)).toBe("INTERNAL");
-    expect(r.stderr).toMatch(/could not record the lock holder/);
+    // The claim's own error names the cause: a full disk and a permission
+    // problem are fixed differently.
+    expect(r.stderr).toMatch(/could not record the lock holder: .*Permission denied/);
     if (existsSync(lock)) chmodSync(lock, 0o700);
     expect(existsSync(lock), "a lock nobody can attribute must not survive").toBe(false);
+  });
+
+  it.skipIf(process.getuid?.() === 0)(
+    "keeps the claim's error on the BACKUP_ERR line under bash -x", () => {
+    // The error is captured from a subshell; with xtrace on, the subshell's own
+    // trace lines were captured with it, and the cause landed on a later line
+    // that no longer starts with BACKUP_ERR.
+    mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+    chmodSync(backupDir, 0o700);
+    unclaimableLockStub();
+    const r = spawnSync("bash", ["-x", SCRIPT], {
+      // The trace of the mount-table reader grows with the host's mounts; the
+      // default 1 MiB would truncate stderr before the line asserted here.
+      encoding: "utf8", timeout: 8000, cwd: REPO_ROOT, maxBuffer: 16 * 1024 * 1024,
+      env: { PATH: `${binDir}:${process.env.PATH}`, HOME: homeDir, LANG: "C", BACKUP_DIR: backupDir },
+    });
+    // Positive control: xtrace is live around the claim. The script turns it off
+    // around credentials; if that window ever covered the lock, the line below
+    // would carry the cause with or without the fix.
+    expect(r.stderr, "xtrace must be live at the claim").toMatch(/^\++ rmdir -- .*\.lock\.d$/m);
+    const errLine = r.stderr.split("\n").find((l) => l.startsWith("BACKUP_ERR:"));
+    expect(errLine).toMatch(/^BACKUP_ERR:INTERNAL could not record the lock holder: .*Permission denied$/);
+    const lock = join(backupDir, ".lock.d");
+    if (existsSync(lock)) chmodSync(lock, 0o700);
+  });
+
+  it.skipIf(process.getuid?.() === 0)(
+    "reports a lock it could neither claim nor remove as its own failure, not a race", () => {
+    // rmdir failing is read as contention only when there is contention to see:
+    // a racer's pid, or a lock already released. An empty lock still in place is
+    // this run's own leftover (EROFS, EIO), and every later run will refuse it.
+    mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+    chmodSync(backupDir, 0o700);
+    unclaimableLockStub();
+    stub("rmdir", "exit 1");
+    const r = run();
+    expect(err(r)).toBe("INTERNAL");
+    expect(r.stderr).toMatch(/could not record the lock holder \(.*Permission denied\), and could not remove the lock either/);
+    // rmdir, not rm -rf: the hint must refuse a lock somebody claimed since.
+    expect(r.stderr).toMatch(/then: rmdir .*\.lock\.d$/m);
+    const lock = join(backupDir, ".lock.d");
+    expect(existsSync(lock), "the empty lock is left for the operator, as the message says").toBe(true);
+    chmodSync(lock, 0o700);
+  });
+
+  it.skipIf(process.getuid?.() === 0)(
+    "reports a race, not its own failure, when the lock is gone by the time rmdir fails", () => {
+    // The paired side of the case above: the own-failure reading needs the empty
+    // lock to still be there. A lock that has disappeared was released by
+    // somebody else, and sending the operator after that path would aim them at
+    // whatever run holds it next.
+    mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+    chmodSync(backupDir, 0o700);
+    unclaimableLockStub();
+    const realRmdir = spawnSync("sh", ["-c", "command -v rmdir"], { encoding: "utf8" }).stdout.trim();
+    stub("rmdir", `"${realRmdir}" "$@"; exit 1`);
+    const r = run();
+    expect(err(r)).toBe("LOCKED");
+    expect(r.stderr).toMatch(/claimed .* at the same moment/);
+    expect(existsSync(join(backupDir, ".lock.d"))).toBe(false);
+  });
+
+  it("reports a race when the claim meets a dangling pid symlink", () => {
+    // O_EXCL refuses a dangling symlink (EEXIST), so it is somebody's pid, not
+    // this run's own failure — the directory is never empty to rmdir either.
+    mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+    chmodSync(backupDir, 0o700);
+    const realMkdir = spawnSync("sh", ["-c", "command -v mkdir"], { encoding: "utf8" }).stdout.trim();
+    stub("mkdir", `
+"${realMkdir}" "$@" || exit $?
+for a in "$@"; do
+  case "$a" in
+    */.lock.d) ln -s "$a/nowhere" "$a/pid" ;;
+  esac
+done
+exit 0`);
+    const r = run();
+    expect(err(r)).toBe("LOCKED");
+    expect(r.stderr).toMatch(/claimed .* at the same moment/);
+    expect(lstatSync(join(backupDir, ".lock.d", "pid")).isSymbolicLink()).toBe(true);
+  });
+
+  // The errno is read from bash's wording, which the script pins with LC_ALL=C.
+  // That pin is only observable under a locale in which bash really translates
+  // both messages: a locale can be listed by `locale -a` while bash's catalogue
+  // is not installed. The candidate is accepted only when bash, run under it,
+  // words neither error in English. Without one (the stock CI runner) the
+  // translated cases are reported as skipped, not silently left out.
+  const translatingLocale = (() => {
+    const probeDir = mkdtempSync(join(tmpdir(), "backup-db-locale-"));
+    try {
+      writeFileSync(join(probeDir, "existing"), "", "utf8");
+      const candidates = (spawnSync("locale", ["-a"], { encoding: "utf8" }).stdout ?? "")
+        .split("\n").filter((l) => /\.utf-?8$/i.test(l) && !/^(C|POSIX|en_)/i.test(l));
+      return candidates.find((loc) => {
+        const p = spawnSync("bash", ["-c", "set -C; : > existing; : > missing/x"], {
+          cwd: probeDir, encoding: "utf8", env: { PATH: process.env.PATH, LANG: loc, LC_ALL: loc },
+        });
+        return p.stderr.split("\n").filter(Boolean).length === 2
+          && !/cannot overwrite existing file|No such file or directory/.test(p.stderr);
+      });
+    } finally {
+      rmSync(probeDir, { recursive: true, force: true });
+    }
+  })();
+
+  // Two contention shapes that leave an empty-looking lock behind, so only the
+  // claim's errno tells them from this run's own failure:
+  //   EEXIST — a racer's pid, unlinked by the racer's own rm -rf before the
+  //            directory went, by the time this run's rmdir ran;
+  //   ENOENT — the lock was released before the claim, and a third run's fresh,
+  //            still-empty lock is there by the time this run looks.
+  // Absolute paths: both mkdir and rmdir are stubbed in these cases, and each
+  // stub must reach the real other one, not its sibling stub.
+  const realBin = (name) => spawnSync("sh", ["-c", `command -v ${name}`], { encoding: "utf8" }).stdout.trim();
+  const contentionShapes = [
+    { errno: "EEXIST", onLock: () => `: > "$a/pid"`, onRmdir: () => `rm -f -- "$last/pid"` },
+    { errno: "ENOENT", onLock: () => `"${realBin("rmdir")}" -- "$a"`, onRmdir: () => `"${realBin("mkdir")}" -- "$last"` },
+  ];
+  for (const { errno, onLock, onRmdir } of contentionShapes) {
+    for (const translated of [false, true]) {
+      const locale = translated ? translatingLocale : "C";
+      it.skipIf(translated && !translatingLocale)(
+        `still reports a race when the claim met ${errno} and the lock looks empty${translated ? " (translated locale)" : ""}`, () => {
+        mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+        chmodSync(backupDir, 0o700);
+        stub("mkdir", `
+"${realBin("mkdir")}" "$@" || exit $?
+for a in "$@"; do
+  case "$a" in
+    */.lock.d) ${onLock()} ;;
+  esac
+done
+exit 0`);
+        stub("rmdir", `
+for a in "$@"; do last="$a"; done
+${onRmdir()}
+exit 1`);
+        const r = run({ LANG: locale, LC_ALL: locale });
+        // The state the case is about, or it tests nothing: a lock still there,
+        // with no pid in it.
+        const lock = join(backupDir, ".lock.d");
+        expect(existsSync(lock), "the lock must look present").toBe(true);
+        expect(existsSync(join(lock, "pid")), "the lock must look unclaimed").toBe(false);
+        expect(err(r)).toBe("LOCKED");
+        expect(r.stderr).toMatch(/claimed .* at the same moment/);
+      });
+    }
+  }
+
+  it.skipIf(!existsSync("/dev/full"))(
+    "removes the lock it claimed when it cannot record the holder", () => {
+    // After a successful claim pid is empty, so the trap (which removes only a
+    // lock whose pid names this run) would leave it: the post-claim rollback is
+    // the only thing that does. pid as a symlink to /dev/full is opened by the
+    // claim (a non-regular file gets no O_EXCL) and then refuses the write with
+    // ENOSPC — the failure the rollback was written for.
+    mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+    chmodSync(backupDir, 0o700);
+    const realMkdir = spawnSync("sh", ["-c", "command -v mkdir"], { encoding: "utf8" }).stdout.trim();
+    const lock = join(backupDir, ".lock.d");
+    stub("mkdir", `
+"${realMkdir}" "$@" || exit $?
+for a in "$@"; do
+  case "$a" in
+    */.lock.d) ln -s /dev/full "$a/pid" ;;
+  esac
+done
+exit 0`);
+    // SIGKILL, not the default SIGTERM: without the rollback the EXIT trap reads
+    // pid, i.e. /dev/full, forever, and bash defers the TERM handler until that
+    // command substitution ends — spawnSync would never return.
+    const r = run({}, { killSignal: "SIGKILL" });
+    expect(err(r)).toBe("INTERNAL");
+    expect(r.stderr).toMatch(/could not record the lock holder/);
+    expect(existsSync(lock), "a lock nobody can attribute must not survive").toBe(false);
+  });
+
+  it("leaves a .partial it did not create", () => {
+    // The trap removes (or keeps as .FAILED) the run directory. A run whose own
+    // mkdir of it failed must not treat someone else's as its own: in #1050 the
+    // losing run deleted the winner's .partial out from under it.
+    mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+    chmodSync(backupDir, 0o700);
+    const realMkdir = spawnSync("sh", ["-c", "command -v mkdir"], { encoding: "utf8" }).stdout.trim();
+    stub("mkdir", `
+for a in "$@"; do
+  case "$a" in
+    *.partial) "${realMkdir}" -- "$a" && : > "$a/other-writer" ;;
+  esac
+done
+exec "${realMkdir}" "$@"`);
+    const r = run();
+    expect(err(r)).toBe("INTERNAL");
+    const partials = readdirSync(backupDir).filter((n) => n.endsWith(".partial"));
+    expect(partials).toHaveLength(1);
+    expect(existsSync(join(backupDir, partials[0], "other-writer")),
+      "another writer's run directory must survive this run's exit").toBe(true);
+  });
+
+  it("removes its own .partial when the run directory's mode check fails", () => {
+    // The ownership above is taken right after the mkdir, before the mode check:
+    // taken after it, a DEST_UNSAFE here would leave this run's directory behind.
+    mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+    chmodSync(backupDir, 0o700);
+    const realMkdir = spawnSync("sh", ["-c", "command -v mkdir"], { encoding: "utf8" }).stdout.trim();
+    stub("mkdir", `
+"${realMkdir}" "$@" || exit $?
+for a in "$@"; do
+  case "$a" in
+    *.partial) chmod 0755 -- "$a" ;;
+  esac
+done
+exit 0`);
+    const r = run();
+    expect(err(r)).toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/the run directory .* was created with mode/);
+    expect(readdirSync(backupDir).filter((n) => n.endsWith(".partial"))).toEqual([]);
   });
 
   it("refuses an ancestor owned by a third party", () => {

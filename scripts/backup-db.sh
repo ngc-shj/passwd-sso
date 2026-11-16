@@ -1475,11 +1475,16 @@ EOF
 
 # ─── Mutual exclusion ────────────────────────────────────────
 #
-# mkdir is atomic on every POSIX filesystem and needs no external binary.
 # flock(1) is util-linux and does not ship on macOS, the primary operator host.
+# The claim is bash's own noclobber open of .lock.d/pid, not mkdir(1)'s exit
+# status: uutils mkdir before 0.11 (uutils#13970, the coreutils of the Ubuntu
+# 26.04 CI runner) reports success when a concurrent mkdir created the
+# directory between its existence check and its create, so two runs both
+# "took" the lock and dumped into one root.
 LOCK_CANDIDATE="$BACKUP_ROOT/.lock.d"
 
-# mkdir is the atomic exclusion primitive: it fails when the directory exists.
+# mkdir creates the container and is the fast "already held" detector: it still
+# fails for a directory that existed before the call, on GNU and uutils alike.
 # (mv cannot serve here — moving onto an existing directory nests inside it and
 # reports success.) The window between taking the lock and recording the holder
 # is closed on the READER side: a lock with no pid is treated as held.
@@ -1517,6 +1522,44 @@ if ! mkdir -- "$LOCK_CANDIDATE" 2>/dev/null; then
   # otherwise break the command the operator is invited to paste.
   fail LOCKED "$LOCK_CANDIDATE is held by a process that is gone (pid $holder). Confirm no backup is running, then: rm -rf $(printf '%q' "$LOCK_CANDIDATE")"
 fi
+# The claim. Under set -C bash opens an absent target O_CREAT|O_EXCL, so of two
+# runs whose mkdir both reported success the kernel lets exactly one create pid.
+# O_EXCL applies only while pid is absent: a pre-existing non-regular pid is
+# opened without it, and only the owner of the audited 0700 root can plant one.
+# The claim's own error is kept for the INTERNAL arm: ENOSPC and EACCES need
+# different fixes, and the LOCKED arm does not print it. Tracing is switched off
+# inside the capture, or a `bash -x` run folds its trace lines into the one
+# BACKUP_ERR line. LC_ALL=C fixes the wording the case below reads the errno
+# from; bash re-reads the locale when the variable is assigned.
+if ! claim_err="$( ( { set +x; } 2>/dev/null; LC_ALL=C; set -C; : > "$LOCK_CANDIDATE/pid" ) 2>&1 )"; then
+  # rmdir decides, not a test of what pid is followed by a removal: it removes
+  # the directory only if it is empty, i.e. nobody has claimed the directory now
+  # at that path. A racer's pid (ENOTEMPTY) or a holder that already released
+  # (ENOENT) makes it fail, and this run then leaves that lock alone. A wrong
+  # exit status from rmdir(1) fails closed either way: rmdir(2) cannot remove a
+  # claimed directory. An empty directory left behind would read as "records no
+  # holder" to every later run — the wedge the rollback below exists to prevent.
+  assert_root_unchanged
+  if rmdir -- "$LOCK_CANDIDATE" 2>/dev/null; then
+    fail INTERNAL "could not record the lock holder: $claim_err"
+  fi
+  # rmdir failed. The claim's errno says whether that is contention: EEXIST is a
+  # racer's pid, ENOENT a lock already released — LOCKED, whatever the directory
+  # looks like by now (a racer part-way through its own rm -rf has no pid left).
+  # Any other errno with the directory still there and no pid is this run's own
+  # failure (EROFS, EIO): say so, with the cause, rather than report a race.
+  # Advisory only: nothing is removed on this reading, and the hint is rmdir,
+  # which refuses a lock somebody has claimed since.
+  case "$claim_err" in
+    *": cannot overwrite existing file"|*": No such file or directory") ;;
+    *)
+      if [ -d "$LOCK_CANDIDATE" ] && [ ! -e "$LOCK_CANDIDATE/pid" ] && [ ! -L "$LOCK_CANDIDATE/pid" ]; then
+        fail INTERNAL "could not record the lock holder ($claim_err), and could not remove the lock either. Confirm no backup is running, then: rmdir $(printf '%q' "$LOCK_CANDIDATE")"
+      fi
+      ;;
+  esac
+  fail LOCKED "another backup run claimed $LOCK_CANDIDATE at the same moment"
+fi
 LOCK_DIR="$LOCK_CANDIDATE"
 # Recorded immediately, and guarded: a lock we hold but cannot describe would
 # make the NEXT run unable to distinguish us from a dead holder.
@@ -1531,8 +1574,8 @@ if ! record_lock_metadata; then
   # removes a lock whose pid file names us, so a failed pid write (ENOSPC on the
   # very filesystem this run is about to fill) would otherwise leave a lock no
   # run can attribute — every later run reporting "exists but records no
-  # holder", a permanent wedge on the deployment's only backup path. mkdir had
-  # just succeeded, so nothing else holds it.
+  # holder", a permanent wedge on the deployment's only backup path. This run's
+  # noclobber claim created pid, so nothing else holds it.
   # The fourth main-flow removal, so it takes the same re-verification the
   # other three do. And the rm's own status is kept: discarding it left the
   # wedge this branch exists to prevent, on the very filesystem (ENOSPC) whose
@@ -1688,7 +1731,6 @@ done
 [ -n "$STAMP" ] || fail STAMP_TAKEN "every generation stamp in the last few seconds is taken under $BACKUP_ROOT — retry"
 unset _tries
 
-RUN_PARTIAL="$BACKUP_ROOT/$STAMP.partial"
 RUN_FINAL="$BACKUP_ROOT/$STAMP"
 
 
@@ -1698,7 +1740,11 @@ RUN_FINAL="$BACKUP_ROOT/$STAMP"
 # failing deployment, which is exactly when they accumulate.
 prune_failed
 
-mkdir -- "$RUN_PARTIAL" || fail INTERNAL "could not create $RUN_PARTIAL"
+# RUN_PARTIAL is what the EXIT trap removes or keeps as .FAILED, so it is set
+# only once this run's mkdir has created the directory. Set before the mkdir, a
+# run whose mkdir failed on someone else's .partial deleted it on the way out.
+mkdir -- "$BACKUP_ROOT/$STAMP.partial" || fail INTERNAL "could not create $BACKUP_ROOT/$STAMP.partial"
+RUN_PARTIAL="$BACKUP_ROOT/$STAMP.partial"
 assert_mode_private "$RUN_PARTIAL" "the run directory"
 
 # ─── Dump ────────────────────────────────────────────────────
@@ -1979,7 +2025,9 @@ printf 'member: globals.sql size=%s roles=%s structural_check_only=true\n' \
 # ─── Publish ─────────────────────────────────────────────────
 
 # `mv a b` where b is a directory moves a INTO b. INV-C4e's protection was the
-# bare mkdir of the .partial, which a collision at the PUBLISH step walks past:
+# bare mkdir of the .partial (whose exit status uutils mkdir before 0.11 does not
+# make exclusive either — the lock is what keeps a second same-host writer out),
+# which a collision at the PUBLISH step walks past:
 # the run nested itself inside the existing generation and reported success.
 [ -e "$RUN_FINAL" ] && fail INTERNAL "$RUN_FINAL already exists — refusing to publish over it"
 mv -- "$RUN_PARTIAL" "$RUN_FINAL" || fail INTERNAL "could not publish $RUN_FINAL"

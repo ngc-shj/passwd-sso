@@ -534,8 +534,10 @@ describe("audit-chain verify worker boots as the verifier role", () => {
     let stderr = "";
     child.stdout.on("data", (d) => (stdout += d));
     child.stderr.on("data", (d) => (stderr += d));
+    // "close", not "exit": "exit" can fire before stdout is drained, and the
+    // shutdown line asserted below is the last thing the worker writes.
     const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((res) =>
-      child.on("exit", (code, signal) => res({ code, signal })),
+      child.on("close", (code, signal) => res({ code, signal })),
     );
 
     try {
@@ -554,7 +556,7 @@ describe("audit-chain verify worker boots as the verifier role", () => {
           }
         };
         child.stdout.on("data", onData);
-        child.once("exit", () => rej(new Error(`worker exited before a heartbeat\nstdout: ${stdout}\nstderr: ${stderr}`)));
+        child.once("close", () => rej(new Error(`worker exited before a heartbeat\nstdout: ${stdout}\nstderr: ${stderr}`)));
       });
 
       expect(heartbeat.verifiedTenantCount, stderr).toBeGreaterThanOrEqual(1);

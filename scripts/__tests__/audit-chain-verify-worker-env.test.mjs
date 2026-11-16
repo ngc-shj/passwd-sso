@@ -164,7 +164,9 @@ describe("audit-chain-verify-worker shutdown", () => {
     let stdout = "";
     let stderr = "";
     child.stderr.on("data", (d) => (stderr += d));
-    const exited = new Promise((res) => child.on("exit", (code, signal) => res({ code, signal })));
+    // "close", not "exit": "exit" can fire before stdout is drained, and the
+    // shutdown line asserted below is the last thing the worker writes.
+    const exited = new Promise((res) => child.on("close", (code, signal) => res({ code, signal })));
 
     // The heartbeat is the last thing a tick does before the sleep.
     await new Promise((res, rej) => {
