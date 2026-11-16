@@ -15,6 +15,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { randomBytes, randomUUID } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
+import type { PoolClient } from "pg";
 import { NextRequest } from "next/server";
 
 const { nextAuthConfigs, mockFetchOktaUsers, scimTenant } = vi.hoisted(() => ({
@@ -63,9 +64,11 @@ import {
   createTestContext,
   raceTwoClients,
   setBypassRlsGucs,
+  setTestBypass,
   type PrismaWithPool,
   type TestContext,
 } from "./helpers";
+import { createRaceHelpers } from "./race-helpers";
 import {
   runToken,
   stubClaimProviderEnv,
@@ -1088,13 +1091,6 @@ describe("tenant claim binding (C3/C4/C5)", () => {
   });
 
   /**
-   * Rows 6 / 9a: a bootstrap member signing in with a claim moves to the
-   * claimed tenant — every row of theirs, and their one active membership.
-   * The migration deletes the bootstrap membership before creating the new
-   * one; the other order is refused by `tenant_members_one_active_per_user`,
-   * which unit tests with a mocked Prisma cannot see.
-   */
-  /**
    * Row 4 creates a membership row for a user who already exists. A user
    * removed from the claimed tenant by an old-release SCIM DELETE whose
    * revocation failed still holds credentials there, and the new active row
@@ -1192,8 +1188,107 @@ describe("tenant claim binding (C3/C4/C5)", () => {
         }
       },
     );
+
+    /** A tenant_members row of `userId` in `tenantId`, inserted on `client` (inside its open transaction). */
+    async function insertMembership(client: PoolClient, userId: string, tenantId: string, deactivated: boolean) {
+      await setTestBypass(client, ["tenant_members", "sessions"]);
+      await client.query(
+        `INSERT INTO tenant_members (id, tenant_id, user_id, role, deactivated_at, created_at, updated_at)
+         VALUES (gen_random_uuid(), $1::uuid, $2::uuid, 'MEMBER', CASE WHEN $3 THEN now() END, now(), now())`,
+        [tenantId, userId, deactivated],
+      );
+    }
+
+    // The race the insert-or-find primitive closes: two first sign-ins of one
+    // user. The winner's INSERT is uncommitted when the loser's arrives, so the
+    // loser waits on it; the winner commits its row and then creates its
+    // session. The loser's INSERT then conflicts and inserts nothing, so it
+    // revokes nothing, and the winner's session survives. Here a blocker
+    // transaction stands in for the winner, its session written before the
+    // commit so that a loser that revoked could not miss it.
+    it("the race loser of two first sign-ins revokes nothing: the winner's session survives", async () => {
+      stubModeEnv(CLAIM_BINDING_MODE.OFF);
+      const target = await attackerTenant(CLAIM_BINDING_MODE.OFF);
+      const race = createRaceHelpers(ctx.su.pool);
+      let victim: Victim | null = null;
+      try {
+        victim = await seedVictim(VICTIM_STATE.DEPARTED, OTHER_PROVIDER);
+        const own = await linkAccount(victim.userId, victim.home, SIGN_IN_PROVIDER);
+        const winner = randomUUID();
+        const winnerSessionId = randomUUID();
+        const blocker = await ctx.su.pool.connect();
+        let committed = false;
+        try {
+          await blocker.query("BEGIN");
+          await insertMembership(blocker, victim.userId, target.tenantId, false);
+          await blocker.query(
+            `INSERT INTO sessions (id, session_token, user_id, tenant_id, expires, created_at, last_active_at)
+             VALUES ($1::uuid, $2, $3::uuid, $4::uuid, now() + interval '1 day', now(), now())`,
+            [winnerSessionId, hashSessionToken(winner), victim.userId, target.tenantId],
+          );
+          const { rows: [{ pid }] } = await blocker.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+          const loser = capturedSignIn()(signInParams(victim.email, target.claim, SIGN_IN_PROVIDER, own));
+          loser.catch(() => {});
+          // The loser's INSERT parks on the winner's uncommitted row.
+          await race.waitForBackendBlockedBy(pid);
+          await blocker.query("COMMIT");
+          committed = true;
+          expect(await loser).toBe(true);
+        } finally {
+          if (!committed) await blocker.query("ROLLBACK").catch(() => {});
+          blocker.release();
+        }
+
+        expect(await ctx.su.prisma.tenantMember.count({
+          where: { userId: victim.userId, tenantId: target.tenantId },
+        })).toBe(1);
+        expect(await ctx.su.prisma.session.count({ where: { id: winnerSessionId } })).toBe(1);
+        expect(await createCustomAdapter().getSessionAndUser!(winner)).toMatchObject({ user: { id: victim.userId } });
+      } finally {
+        await teardown(victim, ...(victim ? [victim.home] : []), target.tenantId);
+      }
+    });
+
+    // The same boundary without the timing: a row the user already holds in the
+    // target when the INSERT runs is found, and nothing of theirs is revoked.
+    it("finds a row the user already holds in the target and revokes nothing there", async () => {
+      stubModeEnv(CLAIM_BINDING_MODE.OFF);
+      const target = await attackerTenant(CLAIM_BINDING_MODE.OFF);
+      let victim: Victim | null = null;
+      try {
+        victim = await seedVictim(VICTIM_STATE.DEPARTED, OTHER_PROVIDER);
+        const own = await linkAccount(victim.userId, victim.home, SIGN_IN_PROVIDER);
+        const client = await ctx.su.pool.connect();
+        try {
+          await client.query("BEGIN");
+          // Deactivated: an active row would make the user a member (row 5),
+          // where this one keeps them active nowhere and the sign-in on row 4.
+          await insertMembership(client, victim.userId, target.tenantId, true);
+          await client.query("COMMIT");
+        } finally {
+          client.release();
+        }
+        const residue = await seedResidue(victim.userId, target.tenantId);
+
+        expect(await capturedSignIn()(signInParams(victim.email, target.claim, SIGN_IN_PROVIDER, own))).toBe(true);
+
+        expect(await ctx.su.prisma.tenantMember.count({
+          where: { userId: victim.userId, tenantId: target.tenantId },
+        })).toBe(1);
+        expect(await residueState(residue)).toEqual(LIVE);
+      } finally {
+        await teardown(victim, ...(victim ? [victim.home] : []), target.tenantId);
+      }
+    });
   });
 
+  /**
+   * Rows 6 / 9a: a bootstrap member signing in with a claim moves to the
+   * claimed tenant — every row of theirs, and their one active membership.
+   * The migration deletes the bootstrap membership before creating the new
+   * one; the other order is refused by `tenant_members_one_active_per_user`,
+   * which unit tests with a mocked Prisma cannot see.
+   */
   describe("rows 6 / 9a: the bootstrap migration", () => {
     /** Where each of the member's rows is filed, per moved table, and their memberships. */
     async function placement(userId: string) {

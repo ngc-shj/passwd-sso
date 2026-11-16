@@ -13,8 +13,8 @@
  *
  * Why this must be integration, not unit (see the two `auth-adapter.test.ts`
  * / `auth.test.ts` docblocks): both mock `@/lib/prisma` wholesale, so a unit
- * case can only assert that the code CALLS `tx.user.create` /
- * `tx.tenantMember.upsert` in some order — it cannot show that PostgreSQL's
+ * case can only assert that the code CALLS `tx.user.create` / the membership
+ * INSERT in some order — it cannot show that PostgreSQL's
  * CHECK actually fires, on the actual write ordering, or that the error it
  * raises actually parses back to the constraint name the comment claims.
  *

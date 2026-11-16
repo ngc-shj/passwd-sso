@@ -79,7 +79,7 @@ src/app/api/v1/passwords/[id]/route.ts # row lock (FOR UPDATE) for atomic blob s
 src/app/api/tenant/teams/[teamId]/owner/route.ts # teams FOR NO KEY UPDATE under the bounded lock wait, serialising owner assignment with departures and admissions holding the team FOR SHARE
 src/app/s/[token]/download/route.ts # atomic view_count increment + revocation/expiry/creator-admission recheck on file download (TOCTOU close)
 src/app/s/[token]/page.tsx # atomic view_count increment + revocation/expiry/creator-admission recheck on share view (TOCTOU close)
-src/auth.ts # SECURITY DEFINER call to migrate audit_logs rows during tenant merge
+src/auth.ts # SECURITY DEFINER call to migrate audit_logs rows during tenant merge; sign-in membership insert-or-find (INSERT … ON CONFLICT DO NOTHING RETURNING id)
 src/lib/audit/audit-outbox.ts # tenant-existence check before enqueueing audit outbox rows (the bypass is set through setBypassGucs)
 src/lib/auth/policy/account-lockout.ts # row lock (FOR UPDATE) + lock_timeout for atomic failed-login counter update
 src/lib/auth/session/user-auth-serialization.ts # the batch credential lock: every user's user-auth pg_advisory_xact_lock in one statement, ordered by key, so two batch revocations cannot deadlock on their ordering

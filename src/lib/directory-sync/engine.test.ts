@@ -223,6 +223,7 @@ vi.mock("@/lib/logger", async (importOriginal) => ({
 
 import { runDirectorySync } from "./engine";
 import { MS_PER_HOUR } from "@/lib/constants/time";
+import { UserAuthLockTimeoutError } from "@/lib/auth/session/user-auth-serialization";
 
 // ─── Fixtures ────────────────────────────────────────────────
 
@@ -833,14 +834,15 @@ describe("runDirectorySync", () => {
       const result = await runDirectorySync({ ...BASE_OPTIONS, force: true });
 
       expect(result.success).toBe(true);
-      expect(mockTombstoneRevokedSessions).toHaveBeenCalledTimes(1);
-      const [tokens, context] = mockTombstoneRevokedSessions.mock.calls[0]!;
-      expect([...tokens].sort()).toEqual(["digest-of-user-a", "digest-of-user-b"]);
-      expect(context).toEqual({
-        reason: "directory_sync_deprovision",
-        operation: "directory sync",
+      // One signal per transition kind: the departures', the returns', the admissions'.
+      const contexts = mockTombstoneRevokedSessions.mock.calls.map(([, context]) => context);
+      expect(contexts).toEqual(["deprovision", "return", "admission"].map((kind) => ({
+        reason: `directory_sync_${kind}`,
+        operation: `directory sync ${kind}`,
         extra: { tenantId: TENANT_ID, configId: CONFIG_ID },
-      });
+      })));
+      const tokens = mockTombstoneRevokedSessions.mock.calls.map(([sessionTokens]) => [...sessionTokens].sort());
+      expect(tokens).toEqual([["digest-of-user-a", "digest-of-user-b"], [], []]);
       // After the commit of the transaction holding the last departure call.
       const lastDeparture = mockDepartCreatedMembership.mock.invocationCallOrder[0]!;
       const applyCommit = mockCommit.mock.invocationCallOrder.find((order) => order > lastDeparture);
@@ -1712,7 +1714,7 @@ describe("runDirectorySync", () => {
       // tombstoned after the commit and logged against the returned user.
       const returned = mockReturnToTenant.mock.invocationCallOrder[0]!;
       const applyCommit = mockCommit.mock.invocationCallOrder.find((order) => order > returned);
-      expect(mockTombstoneRevokedSessions).toHaveBeenCalledWith(["digest-of-user-1"], expect.anything());
+      expect(mockTombstoneRevokedSessions).toHaveBeenCalledWith(["digest-of-user-1"], expect.objectContaining({ reason: "directory_sync_return" }));
       expect(applyCommit!).toBeLessThan(mockTombstoneRevokedSessions.mock.invocationCallOrder[0]!);
       expect(mockLoggerInfo).toHaveBeenCalledWith(
         expect.objectContaining({ departedUserIds: [], returnedUserIds: ["user-1"], sessions: 1 }),
@@ -1940,7 +1942,7 @@ describe("runDirectorySync", () => {
       for (const transition of [mockDepartFromTenant, mockReturnToTenant, mockDepartCreatedMembership]) {
         expect(Math.max(...transition.mock.invocationCallOrder)).toBeLessThan(revokedAt);
       }
-      expect(mockTombstoneRevokedSessions).toHaveBeenCalledWith(["digest-of-user-5"], expect.anything());
+      expect(mockTombstoneRevokedSessions).toHaveBeenCalledWith(["digest-of-user-5"], expect.objectContaining({ reason: "directory_sync_admission" }));
       const applyCommit = mockCommit.mock.invocationCallOrder.find((order) => order > revokedAt);
       expect(applyCommit).toBeDefined();
       expect(applyCommit!).toBeLessThan(mockTombstoneRevokedSessions.mock.invocationCallOrder[0]!);
@@ -1981,7 +1983,7 @@ describe("runDirectorySync", () => {
       mockScimMapping.findMany.mockResolvedValue([]);
       mockTenantMember.findMany.mockResolvedValue([]);
       mockGuardUserFindMany.mockResolvedValue([ownershipRow("user-5", "Erin@Example.com", TENANT_ID)]);
-      mockRevokeUsersAuthArtifactsInTx.mockRejectedValueOnce(new Error("User sign-in state is being changed"));
+      mockRevokeUsersAuthArtifactsInTx.mockRejectedValueOnce(new UserAuthLockTimeoutError());
 
       const result = await runDirectorySync(BASE_OPTIONS);
 

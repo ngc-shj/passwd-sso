@@ -166,10 +166,14 @@ async function reportRevocations(
     for (const [model, count] of Object.entries(revocation.counts)) counts[model] = (counts[model] ?? 0) + count;
   }
   if (!Object.values(counts).some((count) => count > 0)) return;
-  const cacheTombstoneFailures = await tombstoneRevokedSessions(
-    transitions.flatMap((t) => t.revocation.sessionTokens),
-    { reason: "directory_sync_deprovision", operation: "directory sync", extra: { tenantId, configId } },
-  );
+  // One signal per transition kind, so an alert names which one left sessions cached.
+  let cacheTombstoneFailures = 0;
+  for (const [kind, list] of [["deprovision", departures], ["return", returns], ["admission", admissions]] as const) {
+    cacheTombstoneFailures += await tombstoneRevokedSessions(
+      list.flatMap((t) => t.revocation.sessionTokens),
+      { reason: `directory_sync_${kind}`, operation: `directory sync ${kind}`, extra: { tenantId, configId } },
+    );
+  }
   const departedUserIds = departures.flatMap((t) => t.userIds);
   const returnedUserIds = returns.flatMap((t) => t.userIds);
   const admittedUserIds = admissions.flatMap((t) => t.userIds);

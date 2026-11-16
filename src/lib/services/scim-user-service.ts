@@ -80,8 +80,15 @@ export interface DeactivateResult {
  */
 export const SCIM_USER_NOT_PROVISIONABLE_DETAIL = "User cannot be provisioned by this organization";
 
-/** The session-cache tombstone signal of a SCIM deprovisioning: one alert key for every SCIM route. */
+/** The session-cache tombstone signal of a SCIM deprovisioning: one alert key for the `Users/[id]` routes. */
 export const SCIM_DEPROVISION_TOMBSTONE = { reason: "scim_deprovision", operation: "SCIM user deprovisioning" } as const;
+
+/**
+ * The same signal for SCIM POST, which creates a membership: what it revokes is
+ * the residue of an earlier one (deviation D13), or, for a row created
+ * deactivated, the user's guest team memberships' tenant credentials.
+ */
+export const SCIM_CREATE_TOMBSTONE = { reason: "scim_membership_create", operation: "SCIM user creation" } as const;
 
 // ── Error classes ─────────────────────────────────────────────
 

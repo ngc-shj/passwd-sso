@@ -37,9 +37,10 @@ const {
 }));
 
 // The bypass seam: the POST guard's reads and the GET list both run through it.
-const { mockRealignAfterActivation, mockLoggerError } = vi.hoisted(() => ({
+const { mockRealignAfterActivation, mockLoggerError, mockLoggerInfo } = vi.hoisted(() => ({
   mockRealignAfterActivation: vi.fn(),
   mockLoggerError: vi.fn(),
+  mockLoggerInfo: vi.fn(),
 }));
 
 const { mockWithBypassRls } = vi.hoisted(() => ({
@@ -79,7 +80,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 }));
 vi.mock("@/lib/logger", async (importOriginal) => ({
   ...(await importOriginal()) as Record<string, unknown>,
-  getLogger: () => ({ error: mockLoggerError, warn: vi.fn(), info: vi.fn(), debug: vi.fn() }),
+  getLogger: () => ({ error: mockLoggerError, warn: vi.fn(), info: mockLoggerInfo, debug: vi.fn() }),
 }));
 vi.mock("@/lib/tenant/tenant-realignment", async (importOriginal) => ({
   ...(await importOriginal()) as Record<string, unknown>,
@@ -666,8 +667,8 @@ describe("POST /api/scim/v2/Users", () => {
     expect(create.mock.invocationCallOrder[0]).toBeLessThan(mockDepartCreatedMembership.mock.invocationCallOrder[0]);
     // What the departure revoked is tombstoned after the commit.
     expect(mockTombstoneRevokedSessions).toHaveBeenCalledWith(["digest-of-user-1"], {
-      reason: "scim_deprovision",
-      operation: "SCIM user deprovisioning",
+      reason: "scim_membership_create",
+      operation: "SCIM user creation",
       userId: "user-1",
     });
     expect(mockCommit.mock.invocationCallOrder.at(-1)).toBeLessThan(
@@ -735,11 +736,46 @@ describe("POST /api/scim/v2/Users", () => {
     expect(create.mock.invocationCallOrder[0]).toBeLessThan(revokedAt);
     expect(mappingCreate.mock.invocationCallOrder[0]).toBeLessThan(revokedAt);
     expect(mockTombstoneRevokedSessions).toHaveBeenCalledWith(["residue-of-user-1"], {
-      reason: "scim_deprovision",
-      operation: "SCIM user deprovisioning",
+      reason: "scim_membership_create",
+      operation: "SCIM user creation",
       userId: "user-1",
     });
     expect(mockCommit.mock.invocationCallOrder.at(-1)).toBeLessThan(mockTombstoneRevokedSessions.mock.invocationCallOrder[0]!);
+  });
+
+  it("logs the residue a creation revoked, in directory sync's credentials-revoked shape", async () => {
+    existingUsers = [ownedUser("user-1", "active@example.com")];
+    applyTxHolder.current = {
+      tenantMember: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockImplementation(({ data }) => ({ id: "tm1", deactivatedAt: data.deactivatedAt })),
+      },
+      scimExternalMapping: { findFirst: vi.fn().mockResolvedValue(null), deleteMany: vi.fn(), create: vi.fn() },
+    };
+    mockTombstoneRevokedSessions.mockResolvedValueOnce(1);
+
+    expect((await POST(postReq("active@example.com"))).status).toBe(201);
+
+    expect(mockLoggerInfo).toHaveBeenCalledWith(
+      { tenantId: "tenant-1", userId: "user-1", sessions: 1, cacheTombstoneFailures: 1 },
+      "scim.credentials-revoked",
+    );
+  });
+
+  it("logs no credentials-revoked line when the creation revoked nothing", async () => {
+    existingUsers = [ownedUser("user-1", "active@example.com")];
+    applyTxHolder.current = {
+      tenantMember: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockImplementation(({ data }) => ({ id: "tm1", deactivatedAt: data.deactivatedAt })),
+      },
+      scimExternalMapping: { findFirst: vi.fn().mockResolvedValue(null), deleteMany: vi.fn(), create: vi.fn() },
+    };
+    mockRevokeUsersAuthArtifactsInTx.mockResolvedValueOnce({ counts: { sessions: 0 }, sessionTokens: [] });
+
+    expect((await POST(postReq("active@example.com"))).status).toBe(201);
+
+    expect(mockLoggerInfo).not.toHaveBeenCalledWith(expect.anything(), "scim.credentials-revoked");
   });
 
   it("answers 409 and tombstones nothing when the existing user's credential lock is held past the bounded wait", async () => {
@@ -761,8 +797,25 @@ describe("POST /api/scim/v2/Users", () => {
     expect(mockTombstoneRevokedSessions).not.toHaveBeenCalled();
   });
 
-  it("revokes nothing for a member created deactivated beyond its departure, or for a user it created", async () => {
+  it("revokes nothing beyond its departure for an existing user's member created deactivated", async () => {
     existingUsers = [ownedUser("user-1", "inactive@example.com")];
+    applyTxHolder.current = {
+      tenantMember: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockImplementation(({ data }) => ({ id: "tm1", deactivatedAt: data.deactivatedAt })),
+      },
+      scimExternalMapping: { findFirst: vi.fn().mockResolvedValue(null), deleteMany: vi.fn(), create: vi.fn() },
+    };
+
+    expect((await POST(postReq("inactive@example.com", { active: false }))).status).toBe(201);
+
+    // The departure revoked it; a second revocation would only repeat it.
+    expect(mockDepartCreatedMembership).toHaveBeenCalledTimes(1);
+    expect(mockRevokeUsersAuthArtifactsInTx).not.toHaveBeenCalled();
+  });
+
+  it("revokes nothing for a user the request created", async () => {
+    existingUsers = [];
     applyTxHolder.current = {
       user: { create: vi.fn().mockResolvedValue({ id: "new-user" }) },
       tenantMember: {
@@ -772,12 +825,10 @@ describe("POST /api/scim/v2/Users", () => {
       scimExternalMapping: { findFirst: vi.fn().mockResolvedValue(null), deleteMany: vi.fn(), create: vi.fn() },
     };
 
-    expect((await POST(postReq("inactive@example.com", { active: false }))).status).toBe(201);
-    existingUsers = [];
     expect((await POST(postReq("new@example.com"))).status).toBe(201);
 
-    // The departure revoked the first; the second user holds nothing anywhere.
-    expect(mockDepartCreatedMembership).toHaveBeenCalledTimes(1);
+    // A user created by this request holds nothing anywhere.
+    expect(mockDepartCreatedMembership).not.toHaveBeenCalled();
     expect(mockRevokeUsersAuthArtifactsInTx).not.toHaveBeenCalled();
   });
 

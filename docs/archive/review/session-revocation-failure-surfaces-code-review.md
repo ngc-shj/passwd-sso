@@ -150,7 +150,7 @@ Verification:
 Reviewed 3851d2463. No Critical or Major findings.
 - S-R4-1 (Security, Minor): fixed. The path D12 had accepted is now closed.
   - Every creation of a tenant_members row for an existing user revokes that user's residue in the tenant, as the last step of the creating transaction. The three sites are SCIM POST attaching an existing user, directory-sync create, and sign-in row 4. The sessions are tombstoned after the commit.
-  - Pinned by gate rule 10 (`EXPECTED_MEMBERSHIP_CREATIONS`: 3 revoking sites, 3 exempted with reasons). D13.
+  - Pinned by gate rule 10 (`EXPECTED_MEMBERSHIP_CREATIONS`: 3 revoking sites, 3 exempted with reasons). D13. Corrected in round 5 (T-R5-1): for SCIM POST and directory sync the rule counted `departCreatedMembership` as their revocation, so their revocations were pinned by key only, not checked.
 - S-R4-2 (Security, Minor): fixed in D12. A throwing binding lookup is caught by Auth.js, which returns a null session; the proxy caches the negative result for 5 s. An adapter-throw cell pins this. (The round-3 entry above, "A failed lookup propagates", is superseded by this correction.)
 - F-R4-1 (Functionality, Minor): fixed. The operator signal is PostgreSQL's `out of shared memory` (53200) with its HINT. `prisma migrate deploy` was shown not to print server NOTICEs.
 - F-R4-2 (Functionality, Minor): not changed. Refused session rows are not deleted on read: a same-tenant re-creation now revokes them (S-R4-1), and a cross-tenant one stays dead under the binding. Recorded in D13.
@@ -166,3 +166,21 @@ Verification:
 - eslint: 0.
 - 11 static gates: 0.
 - `npm run test:integration` on the session, tenant-claim, scim, directory-sync and departure suites (17 files, 488 passed): 0.
+
+### Round 5
+Reviewed e00c5e8a3.
+- T-R5-1 (Testing, Major): fixed. Rule 10 counted `departCreatedMembership` as a revoker for creations that can be active, so removing the real SCIM POST or directory-sync revocation passed the gate. It now counts only for an unconditionally deactivated Prisma creation, and the self-test seeds have production's shape. On real-tree copies, removing each site's revocation reds the gate.
+- Security F1/F2, Functionality F3 (Minor): fixed. Sign-in rows 4 and 5 call one insert-or-find, `joinClaimedTenant`, and revoke only when their own INSERT created the row. A concurrent first sign-in therefore no longer revokes the other's new session (integration race cell), and row 5's exemption is gone.
+- Security F3 (Minor): fixed. The bootstrap-migration exemption reason is reworded.
+- Functionality F1 (Minor): fixed. Creations and directory-sync kinds get their own tombstone reasons.
+- Functionality F2 (Minor): fixed. Plan C1 counts five revocation calls for directory sync; the sign-in transaction has an explicit timeout.
+- Functionality F4 (Minor): fixed. SCIM POST and sign-in log non-zero residue revocations.
+- T-R5-2, T-R5-3, T-R5-4 (Minor): fixed.
+
+Verification:
+- `npx tsc --noEmit`: 0.
+- Full `npx vitest run` (24996 passed): 0.
+- `npx next build`: 0.
+- eslint: 0.
+- 10 static gates: 0.
+- `npm run test:integration` on 18 files (493 passed): 0.

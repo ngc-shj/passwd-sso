@@ -19,7 +19,11 @@ import {
 } from "@/lib/tenant/tenant-management";
 import type { ClaimRefusalDiagnosis } from "@/lib/tenant/claim-refusal";
 import { classifySentinelTenantConstraint } from "@/lib/tenant/sentinel-tenant-constraint";
-import { revokeUsersAuthArtifactsInTx, tombstoneRevokedSessions } from "@/lib/auth/session/user-session-invalidation";
+import {
+  revokeUsersAuthArtifactsInTx,
+  tombstoneRevokedSessions,
+  type UserAuthArtifactCounts,
+} from "@/lib/auth/session/user-session-invalidation";
 import { lockUserAuthArtifacts } from "@/lib/auth/session/user-auth-serialization";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
@@ -45,6 +49,7 @@ import {
 } from "@/lib/audit/auth-failure-mapping";
 import authConfig, { allowsDangerousEmailAccountLinking } from "./auth.config";
 import { TENANT_ROLE } from "@/lib/constants/auth/tenant-role";
+import { TEAM_MEMBERSHIP_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 import { errorLogFields } from "@/lib/logger/error-fields";
 import { passkeyEnforcementBlocks } from "@/lib/auth/policy/passkey-enforcement";
 
@@ -348,10 +353,10 @@ export async function ensureTenantMembershipForSignIn(
     );
   } catch (error) {
     // The claim resolved to SYSTEM_TENANT_ID and a CHECK refused the write
-    // (CF13). Two writers below can reach it: the `tenantMember.upsert` on the
-    // no-membership path and the `user.update` on the migration path, raising
-    // `tenant_members_not_system_tenant` and `users_not_system_tenant`
-    // respectively. Turned into a REFUSAL rather than emitted here, so the
+    // (CF13). Two writers below can reach it: joinClaimedTenant's membership
+    // INSERT on the no-membership path and the `user.update` on the migration
+    // path, raising `tenant_members_not_system_tenant` and
+    // `users_not_system_tenant` respectively. Turned into a REFUSAL rather than emitted here, so the
     // single emit at the signIn callback stays the only one — a second emit
     // site is what round 1 of #812 spent itself on.
     //
@@ -403,9 +408,13 @@ async function claimedTenantMembership(
   signInProvider: string,
   mode: ClaimBindingMode,
 ): Promise<SignInTenantResult> {
-  // The sessions row 4's join revoked, tombstoned after its transaction commits.
-  let joinRevokedSessionTokens: string[] = [];
+  // What the join revoked (rows 4 and 5), tombstoned and logged after its
+  // transaction commits.
+  let joinRevocation: JoinRevocation | null = null;
   let joinedTenantId: string | null = null;
+  // The join's credential lock may wait out its bounded wait after the claim
+  // resolution and the realignment, which Prisma's default 5 s timeout would
+  // not leave room for (session-revocation-failure-surfaces-plan.md C1).
   const result = await withBypassRls(prisma, async (tx): Promise<SignInTenantResult> => {
     // Both lookups run inside this single withBypassRls callback, in this
     // order, and neither may move. Resolving before creating is D2: the old
@@ -453,13 +462,6 @@ async function claimedTenantMembership(
         };
       }
 
-      const joined = await tx.tenantMember.upsert({
-        where: { tenantId_userId: { tenantId: target.id, userId } },
-        create: { tenantId: target.id, userId, role: TENANT_ROLE.MEMBER },
-        update: {},
-        select: { id: true },
-      });
-
       // This branch is the producer of the column/membership divergence the
       // adjudicator exists to survive: the membership moves and, until now, the
       // column did not. A user released by one tenant and signed in through
@@ -469,52 +471,27 @@ async function claimedTenantMembership(
       // vault setup returning unauthorized, and eleven more routes taking their
       // not-found arm.
       //
-      // The column follows the membership. The DATA does not, and that is the
-      // decision rather than an oversight: see `realignOwningTenantColumn`. The
-      // counts it records are what stop it being a silent one — a member arriving
-      // with rows stranded in a tenant they no longer belong to is a condition
-      // an operator can act on, and nobody can act on a state nothing reports.
-      await realignToMembershipInTx(tx, {
-        userId,
-        memberId: joined.id,
-        tenantId: target.id,
-        cause: realignmentBySignIn(userId),
-      });
-      // The user is active in no tenant, so whatever they still hold in the
-      // target is the residue of an earlier membership there (a SCIM DELETE
-      // whose revocation failed), and this join would revive it. Revoked in the
-      // join's transaction, last, so the credential lock is its last lock. The
-      // sign-in's own session is created after this commits (Auth.js calls
-      // createSession after the signIn callback), so it is not among them. A
-      // lock held past the bounded wait throws: the callback refuses the
-      // sign-in as `provider_error`, and nothing of the join commits.
-      const residue = await revokeUsersAuthArtifactsInTx(tx, [userId], {
-        tenantFilter: { tenantId: target.id },
-        boundedLockWait: true,
-      });
-      joinRevokedSessionTokens = residue.sessionTokens;
+      // The column follows the membership (joinClaimedTenant). The DATA does
+      // not, and that is the decision rather than an oversight: see
+      // `realignOwningTenantColumn`. The counts it records are what stop it
+      // being a silent one — a member arriving with rows stranded in a tenant
+      // they no longer belong to is a condition an operator can act on, and
+      // nobody can act on a state nothing reports.
+      joinRevocation = await joinClaimedTenant(tx, userId, target.id);
       joinedTenantId = target.id;
       return { ok: true };
     }
 
     if (lookup.kind === "tenant" && existingTenantId === lookup.id) {
-      // Row 5: already a member of the claimed tenant.
-      const member = await tx.tenantMember.upsert({
-        where: { tenantId_userId: { tenantId: lookup.id, userId } },
-        create: { tenantId: lookup.id, userId, role: TENANT_ROLE.MEMBER },
-        update: {},
-        select: { id: true },
-      });
-      // "Already a member" is answered from the active membership first, so the
-      // column can still name another tenant here — a user SCIM or directory sync
-      // reactivated before those producers moved it. Row 4's move, for the same
-      // reason; a no-op read when the column already agrees.
-      await realignToMembershipInTx(tx, {
-        userId,
-        memberId: member.id,
-        tenantId: lookup.id,
-        cause: realignmentBySignIn(userId),
-      });
+      // Row 5: already a member of the claimed tenant. "Already a member" is
+      // answered from the active membership first, so the column can still
+      // name another tenant here — a user SCIM or directory sync reactivated
+      // before those producers moved it; joinClaimedTenant moves it, a no-op
+      // read when the column already agrees. It finds the member's row and
+      // revokes nothing, unless a concurrent SCIM DELETE removed that row since
+      // the read above: then it inserts one, and revokes as row 4 does.
+      joinRevocation = await joinClaimedTenant(tx, userId, lookup.id);
+      joinedTenantId = lookup.id;
       return { ok: true };
     }
 
@@ -580,7 +557,7 @@ async function claimedTenantMembership(
     // A membership row the user already holds in the target can only be a
     // deactivated one: the bootstrap membership is their active one, and
     // `tenant_members_one_active_per_user` allows no second. A sign-in does not
-    // reactivate it: row 4 leaves such a row deactivated (`update: {}`), and
+    // reactivate it: row 4 finds such a row and leaves it deactivated, and
     // `tenant-domain realign` does too, because a row the tenant deactivated on
     // purpose (the IdP sent `active: false`, a later suspension) looks the same
     // as one created deactivated for any other reason. Migrating anyway would
@@ -809,15 +786,72 @@ async function claimedTenantMembership(
     });
 
     return { ok: true };
-  }, BYPASS_GRANT.AUTH_TENANT_CLAIM_MEMBERSHIP);
+  }, BYPASS_GRANT.AUTH_TENANT_CLAIM_MEMBERSHIP, { timeout: TEAM_MEMBERSHIP_TX_TIMEOUT_MS });
 
-  await tombstoneRevokedSessions(joinRevokedSessionTokens, {
+  if (joinRevocation) await reportJoinRevocation(userId, joinedTenantId, joinRevocation);
+  return result;
+}
+
+type JoinRevocation = { counts: UserAuthArtifactCounts; sessionTokens: string[] };
+
+/**
+ * Rows 4 and 5: join `tenantId`, inserting the user's membership row only when
+ * they hold none there, then move the column (realignToMembershipInTx).
+ *
+ * An inserted row is a membership created for a user who already exists, so
+ * what they still hold in that tenant is the residue of an earlier membership
+ * (a SCIM DELETE whose revocation failed) that the row would revive: revoked
+ * here, last, so the credential lock is the transaction's last lock
+ * (deviation D13). A row this statement did NOT insert is never revoked over:
+ * it is the user's own active membership (row 5), or a row a concurrent first
+ * sign-in of the same user has just committed, whose session revoking would
+ * delete; a deactivated row stays deactivated and its tenant's credentials
+ * stay dead under the session binding (D12).
+ *
+ * `ON CONFLICT DO NOTHING RETURNING id` is what tells the two apart: a
+ * conflicting statement waits for the other inserter to commit and returns no
+ * row, where an upsert returns the found row and the insert alike. The
+ * re-read is a new statement, so under READ COMMITTED it sees the row the
+ * conflict named. The sign-in's own session is created by Auth.js after the
+ * signIn callback returns, so it is never among the revoked. A credential lock
+ * held past the bounded wait throws: the callback refuses the sign-in as
+ * `provider_error`, and nothing of the join commits.
+ */
+async function joinClaimedTenant(tx: TxOrPrisma, userId: string, tenantId: string): Promise<JoinRevocation | null> {
+  const inserted = await tx.$queryRaw<{ id: string }[]>`
+    INSERT INTO tenant_members (id, tenant_id, user_id, role, created_at, updated_at)
+    VALUES (gen_random_uuid(), ${tenantId}::uuid, ${userId}::uuid, ${TENANT_ROLE.MEMBER}::"TenantRole",
+            clock_timestamp(), clock_timestamp())
+    ON CONFLICT (tenant_id, user_id) DO NOTHING
+    RETURNING id
+  `;
+  const memberId = inserted[0]?.id ?? (await tx.tenantMember.findUniqueOrThrow({
+    where: { tenantId_userId: { tenantId, userId } },
+    select: { id: true },
+  })).id;
+  await realignToMembershipInTx(tx, { userId, memberId, tenantId, cause: realignmentBySignIn(userId) });
+  if (inserted.length === 0) return null;
+  return revokeUsersAuthArtifactsInTx(tx, [userId], { tenantFilter: { tenantId }, boundedLockWait: true });
+}
+
+/**
+ * After the join commits: evict the revoked sessions from the session cache,
+ * and log what was revoked, in the shape `directory-sync.credentials-revoked`
+ * and `scim.credentials-revoked` use, so a revocation that reveals an earlier
+ * failed deprovision is visible on every creating path.
+ */
+async function reportJoinRevocation(userId: string, tenantId: string | null, revocation: JoinRevocation): Promise<void> {
+  const cacheTombstoneFailures = await tombstoneRevokedSessions(revocation.sessionTokens, {
     reason: "sign_in_membership_join",
     operation: "the sign-in membership join",
     userId,
-    extra: { tenantScope: joinedTenantId },
+    extra: { tenantScope: tenantId },
   });
-  return result;
+  if (!Object.values(revocation.counts).some((count) => count > 0)) return;
+  getLogger().info(
+    { tenantId, userId, ...revocation.counts, cacheTombstoneFailures },
+    "auth.signin.credentials-revoked",
+  );
 }
 
 // One instance, shared by NextAuth and the signIn callback's subject lookup

@@ -29,7 +29,7 @@ import { resolveExistingUsersForTenant } from "@/lib/tenant-context";
 import { isUniqueViolationOn, ONE_ACTIVE_MEMBERSHIP_INDEX } from "@/lib/prisma/prisma-error";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { REALIGNMENT_SOURCE, realignAfterActivation } from "@/lib/tenant/tenant-realignment";
-import { SCIM_DEPROVISION_TOMBSTONE, SCIM_USER_NOT_PROVISIONABLE_DETAIL, toScimUserResource } from "@/lib/services/scim-user-service";
+import { SCIM_CREATE_TOMBSTONE, SCIM_USER_NOT_PROVISIONABLE_DETAIL, toScimUserResource } from "@/lib/services/scim-user-service";
 import { getLogger } from "@/lib/logger";
 import { errorLogFields } from "@/lib/logger/error-fields";
 import { scimParseBody } from "@/lib/scim/parse-body";
@@ -262,10 +262,18 @@ async function handlePOST(req: NextRequest) {
     }, { timeout: TEAM_MEMBERSHIP_TX_TIMEOUT_MS });
 
     if (created.revocation) {
-      await tombstoneRevokedSessions(created.revocation.sessionTokens, {
-        ...SCIM_DEPROVISION_TOMBSTONE,
+      const cacheTombstoneFailures = await tombstoneRevokedSessions(created.revocation.sessionTokens, {
+        ...SCIM_CREATE_TOMBSTONE,
         userId: created.user.id,
       });
+      // In directory sync's `credentials-revoked` shape: a non-zero count on an
+      // active creation is the residue of an earlier failed deprovision.
+      if (Object.values(created.revocation.counts).some((count) => count > 0)) {
+        getLogger().info(
+          { tenantId, userId: created.user.id, ...created.revocation.counts, cacheTombstoneFailures },
+          "scim.credentials-revoked",
+        );
+      }
     }
 
     await logAuditAsync({
