@@ -10,11 +10,12 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { spawnSync } from "node:child_process";
-import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import {
   CANARY_TOKEN,
+  COMPOSE_PROJECT_NAME,
   RENDER_SETS,
   analyzeRender,
   buildSentinels,
@@ -34,6 +35,9 @@ import {
 } from "../checks/check-compose-render";
 import { findComposeFiles } from "../checks/lib/compose-files.mjs";
 import {
+  BUILD_KEY_ALLOWLIST,
+  FILE_CHANNEL_ALLOWLIST,
+  SERVICE_KEY_REFUSAL,
   derivePublisherOnlyEnv,
   deriveWithheldEnv,
   readSmokeMap,
@@ -62,6 +66,7 @@ const ctx: AnalysisContext = {
   binding: rolePasswordBinding(realRolePasswordInputs()),
   smoke: readSmokeMap(),
   projectRoot: "<stub>",
+  projectName: COMPOSE_PROJECT_NAME,
 };
 const baseline = (): ComposeRender => hydrateRecordedRender(structuredClone(recorded.render), sentinels);
 
@@ -273,21 +278,48 @@ describe("analyzeRender: a host file reaches a service only by FILE_CHANNEL_ALLO
     for (const [source, shown] of cases) expect(drift(onApp(bind(source))), source).toEqual(notAllowlisted(shown));
   });
 
-  it("allows the mounts the stack ships (initdb, fluent-bit, sentinel) and a tmpfs", () => {
-    expect(drift(onApp(bind("<stub>/infra/postgres/initdb"), bind("<stub>/infra/fluent-bit/fluent-bit.conf"), bind("<stub>/infra/fluent-bit/parsers.conf"), bind("<stub>/infra/redis/sentinel.conf"), { type: "tmpfs", target: "/tmp" }))).toEqual([]);
+  /** A bare service named `service` mounting `volumes` (the fluent-bit and sentinel services are not in this set's render). */
+  const mountedBy = (service: string, ...volumes: unknown[]) => (r: ComposeRender) => {
+    r.services[service] = { volumes };
+  };
+  const forService = (service: string, ...messages: string[]) => messages.map((m) => `[${SET}] ${service}: ${REFUSED}: ${m}`);
+
+  it("allows the mounts the stack ships (initdb, fluent-bit, sentinel) read-only by their own services, and a tmpfs", () => {
     expect(baseline().services.db.volumes).toContainEqual({ ...bind("<stub>/infra/postgres/initdb"), target: "/docker-entrypoint-initdb.d" });
+    for (const { path, services } of FILE_CHANNEL_ALLOWLIST) {
+      for (const service of services) {
+        expect(drift(mountedBy(service, bind(`<stub>/${path}`), { type: "tmpfs", target: "/tmp" })), `${service} ${path}`).toEqual([]);
+      }
+    }
+  });
+
+  it("names an allowlisted path mounted by a service the entry does not name", () => {
+    expect(drift(onApp(bind("<stub>/infra/postgres/initdb")))).toEqual(forService("app", 'a bind source "<root>/infra/postgres/initdb" is not allowlisted for this service'));
+    expect(drift(mountedBy("sentinel-1", bind("<stub>/infra/postgres/initdb")))).toEqual(
+      forService("sentinel-1", 'a bind source "<root>/infra/postgres/initdb" is not allowlisted for this service'),
+    );
+    expect(drift(mountedBy("sentinel-1", bind("<stub>/infra/redis/sentinel.conf")))).toEqual([]);
+  });
+
+  it("names a read-only allowlisted path mounted writable, and allows it read-only", () => {
+    const writable = forService("db", 'a bind source "<root>/infra/postgres/initdb" is allowlisted read-only and is mounted writable');
+    const initdb = { ...bind("<stub>/infra/postgres/initdb"), target: "/docker-entrypoint-initdb.d" };
+    const onDb = (volume: unknown) => (r: ComposeRender) => void (r.services.db.volumes = [volume]);
+    expect(drift(onDb({ ...initdb, read_only: false }))).toEqual(writable);
+    expect(drift(onDb({ type: "bind", source: "<stub>/infra/postgres/initdb", target: "/docker-entrypoint-initdb.d", bind: {} }))).toEqual(writable);
+    expect(drift(onDb({ ...initdb, read_only: true }))).toEqual([]);
   });
 
   it("names an ancestor of the project directory and a sibling, and allows an allowlisted path under another root", () => {
-    const withRoot = (source: string) => {
+    const withRoot = (source: string, service = "app") => {
       const r = JSON.parse(JSON.stringify(baseline()).split("<stub>").join("/srv/app")) as ComposeRender;
-      r.services.app.volumes = [bind(source)];
+      r.services[service].volumes = [bind(source)];
       return analyzeRender(SET, r, { ...ctx, projectRoot: "/srv/app" });
     };
     expect(withRoot("/srv")).toEqual(notAllowlisted("/srv"));
     expect(withRoot("/")).toEqual(notAllowlisted("/"));
     expect(withRoot("/srv/app-data")).toEqual(notAllowlisted("/srv/app-data"));
-    expect(withRoot("/srv/app/infra/redis/sentinel.conf")).toEqual([]);
+    expect(withRoot("/srv/app/infra/postgres/initdb", "db")).toEqual([]);
   });
 
   it("names every referenced secrets and configs entry, whatever it is filled from, and ignores one no service references", () => {
@@ -341,8 +373,17 @@ describe("analyzeRender: a host file reaches a service only by FILE_CHANNEL_ALLO
     expect(analyzeRender(SET, r, ctx)).toEqual([]);
   });
 
+  it("names an explicit name: that is not <project>_<key>, and allows the one compose adds", () => {
+    const renamed = (key: "postgres_data" | "redis_data", name: string) => (r: ComposeRender) => void (r.volumes = { ...r.volumes, [key]: { name } });
+    const named = (service: string, key: string) => [`[${SET}] ${service}: ${REFUSED}: named volume ${key} sets name (not ${COMPOSE_PROJECT_NAME}_${key})`];
+    expect(drift(renamed("redis_data", "redis_data"))).toEqual(named("redis", "redis_data"));
+    expect(drift(renamed("redis_data", "someone_elses_redis_data"))).toEqual(named("redis", "redis_data"));
+    expect(drift(renamed("postgres_data", "compose-render_redis_data"))).toEqual(named("db", "postgres_data"));
+    expect(baseline().volumes).toEqual({ postgres_data: { name: "compose-render_postgres_data" }, redis_data: { name: "compose-render_redis_data" } });
+  });
+
   it("names an external volume, and a named volume the render does not define", () => {
-    expect(drift((r) => void (r.volumes = { ...r.volumes, redis_data: { name: "redis_data", external: true } }))).toEqual([
+    expect(drift((r) => void (r.volumes = { ...r.volumes, redis_data: { name: "compose-render_redis_data", external: true } }))).toEqual([
       `[${SET}] (top level): ${REFUSED}: volumes entry redis_data is external`,
     ]);
     expect(drift(onApp({ type: "volume", source: "nowhere", target: "/x", volume: {} }))).toEqual([`[${SET}] app: ${REFUSED}: named volume nowhere is not defined by any compose file`]);
@@ -354,9 +395,54 @@ describe("analyzeRender: a host file reaches a service only by FILE_CHANNEL_ALLO
         r.secrets = { envf: { name: "compose-render_envf", file: "<stub>/.env" } };
         r.services.app.build = { ...(r.services.app.build as object), [key]: value };
       });
-      expect(found, key).toEqual([`[${SET}] app: ${REFUSED}: build.${key} is set`]);
+      expect(found, key).toEqual([`[${SET}] app: ${SERVICE_KEY_REFUSAL}: build.${key} is set`]);
     }
-    expect(Object.keys(baseline().services.app.build as object)).toEqual(["context", "dockerfile", "args"]);
+    expect(Object.keys(baseline().services.app.build as object)).toEqual(BUILD_KEY_ALLOWLIST);
+  });
+
+  it("names a service key outside SERVICE_KEY_ALLOWLIST, by name, and allows the keys the render has", () => {
+    const refusedKey = (what: string) => [`[${SET}] app: ${SERVICE_KEY_REFUSAL}: ${what}`];
+    const cases: Array<[string, unknown]> = [
+      ["privileged", true],
+      ["devices", ["/dev/sda:/dev/sda"]],
+      ["device_cgroup_rules", ["c 1:3 mr"]],
+      ["cap_add", ["SYS_ADMIN"]],
+      ["pid", "service:audit-anchor-publisher"],
+      ["pid", "host"],
+      ["ipc", "host"],
+      ["cgroup", "host"],
+      ["userns_mode", "host"],
+      ["volumes_from", ["audit-anchor-publisher"]],
+      ["network_mode", "host"],
+      ["x-anything", 1],
+      ["a_future_key", 1],
+    ];
+    for (const [key, value] of cases) expect(drift((r) => void (r.services.app[key] = value)), `${key}: ${JSON.stringify(value)}`).toEqual(refusedKey(key));
+    expect(Object.keys(baseline().services["audit-anchor-publisher"]).sort()).toContain("security_opt");
+    expect(analyzeRender(SET, baseline(), ctx)).toEqual([]);
+  });
+
+  it("names a security_opt that is not exactly no-new-privileges:true, and allows the publisher's and the verifier's", () => {
+    const notExact = [`[${SET}] app: ${SERVICE_KEY_REFUSAL}: security_opt is not exactly ["no-new-privileges:true"]`];
+    for (const value of [["seccomp=unconfined"], ["no-new-privileges:true", "apparmor=unconfined"], []]) {
+      expect(drift((r) => void (r.services.app.security_opt = value)), JSON.stringify(value)).toEqual(notExact);
+    }
+    for (const service of ["audit-anchor-publisher", "audit-chain-verify-worker"]) expect(baseline().services[service].security_opt).toEqual(["no-new-privileges:true"]);
+    expect(drift((r) => void (r.services.app.security_opt = ["no-new-privileges:true"]))).toEqual([]);
+  });
+
+  it("names a build whose context is not the project root, a dockerfile_inline, another dockerfile, and a build that is not a mapping", () => {
+    const refusedBuild = (what: string) => [`[${SET}] app: ${SERVICE_KEY_REFUSAL}: ${what}`];
+    const withBuild = (edit: Record<string, unknown>) => (r: ComposeRender) => void (r.services.app.build = { ...(r.services.app.build as object), ...edit });
+    expect(baseline().services.app.build).toMatchObject({ context: "<stub>", dockerfile: "Dockerfile" });
+    expect(drift(withBuild({ context: "<stub>/.." }))).toEqual(refusedBuild("build.context is not the project root"));
+    expect(drift(withBuild({ context: "/srv/other" }))).toEqual(refusedBuild("build.context is not the project root"));
+    expect(drift(withBuild({ context: "<stub>/infra" }))).toEqual(refusedBuild("build.context is not the project root"));
+    expect(drift(withBuild({ dockerfile_inline: "FROM scratch" }))).toEqual(refusedBuild("build.dockerfile_inline is set"));
+    expect(drift(withBuild({ dockerfile: "Dockerfile.dev" }))).toEqual(refusedBuild("build.dockerfile is not Dockerfile"));
+    expect(drift(withBuild({ target: "deps" }))).toEqual(refusedBuild("build.target is set"));
+    expect(drift((r) => void (r.services.app.build = "<stub>"))).toEqual(refusedBuild("build is not a mapping"));
+    expect(drift(withBuild({ args: { X: "y" } }))).toEqual([]);
   });
 
   it("names a shape it does not model instead of skipping it", () => {
@@ -373,9 +459,11 @@ describe("analyzeRender: a host file reaches a service only by FILE_CHANNEL_ALLO
   it("does not judge the dev set, whose workers mount the project directory", () => {
     const r = baseline();
     r.services.app.volumes = [bind("<stub>")];
-    r.volumes = { ...r.volumes, redis_data: { name: "redis_data", external: true } };
+    r.services.app.privileged = true;
+    r.volumes = { ...r.volumes, redis_data: { name: "compose-render_redis_data", external: true } };
     expect(analyzeRender("base+override", r, ctx)).toEqual([]);
     expect(analyzeRender("base+workers+logging", r, ctx)).toEqual([
+      `[base+workers+logging] app: ${SERVICE_KEY_REFUSAL}: privileged`,
       `[base+workers+logging] app: ${REFUSED}: a bind source "<root>" is not allowlisted`,
       `[base+workers+logging] (top level): ${REFUSED}: volumes entry redis_data is external`,
     ]);
@@ -653,11 +741,15 @@ describe("real docker compose", () => {
     for (const d of scratches.splice(0)) rmSync(d, { recursive: true, force: true });
   });
 
-  /** The compose files copied to a scratch dir, so a mutation never touches the tree. */
+  /** The compose files and the allowlisted files they mount, copied to a scratch dir, so a mutation never touches the tree. */
   function scratchCopy(): string {
     const dir = mkdtempSync(join(tmpdir(), "compose-render-test-"));
     scratches.push(dir);
     for (const f of readdirSync(REPO_ROOT).filter((n) => /^docker-compose.*\.yml$/.test(n))) cpSync(join(REPO_ROOT, f), join(dir, f));
+    for (const { path } of FILE_CHANNEL_ALLOWLIST) {
+      mkdirSync(dirname(join(dir, path)), { recursive: true });
+      cpSync(join(REPO_ROOT, path), join(dir, path), { recursive: true });
+    }
     return dir;
   }
 
@@ -697,18 +789,19 @@ describe("real docker compose", () => {
     expect(fresh).not.toEqual(recordedProjection(FIXTURE_PATH));
   }, 120_000);
 
-  it("finds the committed fixture stale against a scratch copy whose app gains an allowlisted bind", (t) => {
+  it("finds the committed fixture stale against a scratch copy whose db gains a second allowlisted bind", (t) => {
     if (!requireDocker(() => t.skip())) return;
     const dir = scratchCopy();
     const path = join(dir, "docker-compose.yml");
     const text = readFileSync(path, "utf8");
-    expect(text).toContain("services:\n  app:\n");
-    writeFileSync(path, text.replace("services:\n  app:\n", "services:\n  app:\n    volumes:\n      - ./infra/redis/sentinel.conf:/mnt/sentinel.conf:ro\n"));
+    const anchor = "      - ./infra/postgres/initdb:/docker-entrypoint-initdb.d:ro\n";
+    expect(text).toContain(anchor);
+    writeFileSync(path, text.replace(anchor, `${anchor}      - ./infra/postgres/initdb:/mnt/initdb:ro\n`));
     const record = join(dir, "record.json");
     expect(main(["--root", dir, "--record", record]), err.join("\n")).toBe(0);
     const fresh = recordedProjection(record);
-    expect(fresh.fileChannels.app.volumes).toEqual([{ type: "bind", source: "<stub>/infra/redis/sentinel.conf", target: "/mnt/sentinel.conf", read_only: true, bind: {} }]);
-    expect(recordedProjection(FIXTURE_PATH).fileChannels.app.volumes).toEqual([]);
+    expect(fresh.fileChannels.db.volumes).toContainEqual({ type: "bind", source: "<stub>/infra/postgres/initdb", target: "/mnt/initdb", read_only: true, bind: {} });
+    expect(recordedProjection(FIXTURE_PATH).fileChannels.db.volumes).not.toContainEqual(expect.objectContaining({ target: "/mnt/initdb" }));
     expect(fresh).not.toEqual(recordedProjection(FIXTURE_PATH));
   }, 120_000);
 
@@ -750,9 +843,46 @@ describe("real docker compose", () => {
     );
     expectChannelRefused(
       (x) => x.replace("  app:\n    build:\n      context: .\n", "  app:\n    build:\n      context: .\n      secrets:\n        - envf\n") + "\nsecrets:\n  envf:\n    file: ./.env\n",
-      `[base+workers] app: ${REFUSED}: build.secrets is set`,
+      `[base+workers] app: ${SERVICE_KEY_REFUSAL}: build.secrets is set`,
     );
     expectChannelRefused((x) => x.replace("  redis_data:\n", "  redis_data:\n    external: true\n"), `[base+workers] (top level): ${REFUSED}: volumes entry redis_data is external`);
+    expectChannelRefused(onApp("    volumes:\n      - ./infra/postgres/initdb:/mnt/x:ro\n"), `[base+workers] app: ${REFUSED}: a bind source "<root>/infra/postgres/initdb" is not allowlisted for this service`);
+    expectChannelRefused((x) => x.replace("./infra/postgres/initdb:/docker-entrypoint-initdb.d:ro", "./infra/postgres/initdb:/docker-entrypoint-initdb.d"), `[base+workers] db: ${REFUSED}: a bind source "<root>/infra/postgres/initdb" is allowlisted read-only and is mounted writable`);
+    expectChannelRefused((x) => x.replace("  redis_data:\n", "  redis_data:\n    name: postgres_data\n"), `[base+workers] redis: ${REFUSED}: named volume redis_data sets name (not compose-render_redis_data)`);
+  }, 600_000);
+
+  it("fails scratch copies of the tree whose app gains a service key outside SERVICE_KEY_ALLOWLIST", (t) => {
+    if (!requireDocker(() => t.skip())) return;
+    const refusedKey = (what: string) => `[base+workers] app: ${SERVICE_KEY_REFUSAL}: ${what}`;
+    expectChannelRefused(onApp("    privileged: true\n"), refusedKey("privileged"));
+    expectChannelRefused(onApp("    pid: service:audit-anchor-publisher\n"), refusedKey("pid"));
+    expectChannelRefused(onApp("    pid: host\n"), refusedKey("pid"));
+    expectChannelRefused(onApp("    volumes_from:\n      - redis\n"), refusedKey("volumes_from"));
+    expectChannelRefused(onApp("    cap_add:\n      - SYS_ADMIN\n"), refusedKey("cap_add"));
+    expectChannelRefused(onApp("    security_opt:\n      - seccomp=unconfined\n"), refusedKey('security_opt is not exactly ["no-new-privileges:true"]'));
+    expectChannelRefused((x) => x.replace("  app:\n    build:\n      context: .\n", "  app:\n    build:\n      context: ..\n"), refusedKey("build.context is not the project root"));
+    expectChannelRefused(
+      (x) => x.replace("  app:\n    build:\n      context: .\n      dockerfile: Dockerfile\n", "  app:\n    build:\n      context: .\n      dockerfile_inline: FROM scratch\n"),
+      refusedKey("build.dockerfile_inline is set"),
+    );
+  }, 600_000);
+
+  it("fails a scratch root whose allowlisted file is a symlink to .env, or is gone, and passes the intact copy", (t) => {
+    if (!requireDocker(() => t.skip())) return;
+    const fluent = "infra/fluent-bit/parsers.conf";
+    const linked = scratchCopy();
+    expect(main(["--root", linked]), err.join("\n")).toBe(0);
+    writeFileSync(join(linked, ".env"), "");
+    rmSync(join(linked, fluent));
+    symlinkSync(join(linked, ".env"), join(linked, fluent));
+    err.length = 0;
+    expect(main(["--root", linked])).toBe(1);
+    expect(err.join("\n")).toContain(`allowlist ${fluent}: is, or sits under, a symlink`);
+    const gone = scratchCopy();
+    rmSync(join(gone, fluent));
+    err.length = 0;
+    expect(main(["--root", gone])).toBe(1);
+    expect(err.join("\n")).toContain(`allowlist ${fluent}: does not exist`);
   }, 600_000);
 
   it("fails a scratch copy of the tree that stops blanking a withheld key in app", (t) => {

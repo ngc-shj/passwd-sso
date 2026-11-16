@@ -8,10 +8,15 @@
  *         env set W comes from scripts/checks/lib/withheld-env.ts, not from a list here);
  *   I2.x  k8s: command, probes, env names, hardening, rollout shape.
  *
- * No service outside the dev override gets a host file by anything but
- * default-deny (FILE_CHANNEL_ALLOWLIST in withheld-env.ts: a bind source only if
- * allowlisted, a named volume only if plain, never a referenced secrets/configs
- * entry, an `external` entry or build.secrets/ssh/additional_contexts); a volume
+ * No service outside the dev override carries a service key outside
+ * SERVICE_KEY_ALLOWLIST (withheld-env.ts: an exact list, so `privileged`,
+ * `devices`, `cap_add`, `pid`, `ipc`, `volumes_from`, `userns_mode` and any
+ * unknown key are refused), a `security_opt` other than
+ * `["no-new-privileges:true"]`, or a `build` other than context `.`, dockerfile
+ * `Dockerfile` and args; and none gets a host file by anything but default-deny
+ * (FILE_CHANNEL_ALLOWLIST: a bind source only if allowlisted for that service and
+ * read-only where the entry says so, a named volume only if plain and unnamed,
+ * never a referenced secrets/configs entry or an `external` entry); a volume
  * shape it does not model is reported.
  *
  * Every check is a pure function over parsed YAML plus a context read from
@@ -21,10 +26,10 @@
  * rather than being read as something else.
  */
 import { afterEach, describe, it, expect } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
-import { basename, dirname, isAbsolute, join, posix, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, posix, relative, resolve } from "node:path";
 import { CORE_SCHEMA, load, loadAll } from "js-yaml";
 import { ALLOWLIST } from "../../../scripts/env-allowlist";
 import { createComposeYamlLoader, findComposeFiles } from "../../../scripts/checks/check-compose-log-caps.mjs";
@@ -33,15 +38,20 @@ import { ROLES } from "../../../scripts/bootstrap-rds-roles.mjs";
 import { TerraformConfig, TERRAFORM_DIR, type HclExpr } from "../../../scripts/checks/lib/hcl-subset";
 import {
   SHARED_PUBLISHER_NAME,
-  BUILD_FILE_CHANNEL_KEYS,
+  BUILD_KEY_ALLOWLIST,
+  DEV_OVERRIDE_FILE,
   FILE_CHANNEL_ALLOWLIST,
   FILE_CHANNEL_REFUSAL,
+  type FileChannelEntry,
+  SERVICE_KEY_ALLOWLIST,
+  SERVICE_KEY_REFUSAL,
+  bindSourceProblem,
   deriveWithheldEnv,
   derivePublisherOnlyEnv,
   ecsContainerDefinitions,
   ecsSecretNames,
   externalEntryProblems,
-  isAllowlistedFileSource,
+  fileChannelAllowlistDrift,
   namedVolumeProblem,
   ownDatabaseUrlKey,
   ownRoleUser,
@@ -49,6 +59,8 @@ import {
   realWithheldInputs,
   rolePasswordBinding,
   roleUserFromComposeUrl,
+  serviceKeyProblems,
+  shortVolumeIsReadOnly,
   withheldHolders,
   workerServiceName,
   type SmokeMap,
@@ -62,8 +74,6 @@ const REPO_ROOT = resolve(__dirname, "../../..");
 const WORKERS_FILE = "docker-compose.workers.yml";
 const K8S_DIR = "infra/k8s";
 const IMAGE_PLACEHOLDER = "REPLACE_WITH_IMMUTABLE_IMAGE_REF";
-/** The one compose file whose `.:/app` mounts are the dev shape, not a file channel (C1). */
-const DEV_OVERRIDE_FILE = "docker-compose.override.yml";
 
 /** Compose services that carry the signing material or read the chain, and so load no `.env` (C1). */
 const ISOLATED_SERVICES = ["audit-anchor-publisher", "audit-chain-verify-worker"];
@@ -517,16 +527,19 @@ function composeDrift(model: ComposeModel, ctx: Ctx, workersText: string): strin
 const isNamedVolume = (source: string): boolean => /^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(source);
 
 /**
- * Every way a host file could reach a service outside the dev override, by
- * default-deny: a bind source only if, resolved against the project root, it is
- * exactly one of FILE_CHANNEL_ALLOWLIST (an absolute, `~` or variable source is
- * refused as written); a named volume only if plain and docker-managed; a
- * referenced top-level `secrets:`/`configs:` entry, any `external` entry,
- * `build.secrets`, `build.ssh` and `build.additional_contexts` never. A form the
- * model does not cover (a volume or secret shape it does not know) is reported
- * rather than skipped.
+ * Every way a service outside the dev override carries a key SERVICE_KEY_ALLOWLIST
+ * does not list (a `build.context` is judged against `.`, this tree's project
+ * root), and every way a host file could reach it, by default-deny: a bind source
+ * only if, resolved against the project root, it is exactly one of
+ * FILE_CHANNEL_ALLOWLIST (an absolute, `~` or variable source is refused as
+ * written), for a service that entry names, read-only where it says so; a named
+ * volume only if plain, docker-managed and with no explicit `name:` (the render
+ * check, which knows the project name, allows exactly `<project>_<key>`); a
+ * referenced top-level `secrets:`/`configs:` entry and any `external` entry
+ * never. A form the model does not cover (a volume or secret shape it does not
+ * know) is reported rather than skipped.
  */
-function fileChannelDrift(model: ComposeModel, allowlist: ReadonlyArray<{ path: string }> = FILE_CHANNEL_ALLOWLIST): string[] {
+function fileChannelDrift(model: ComposeModel, allowlist: ReadonlyArray<FileChannelEntry> = FILE_CHANNEL_ALLOWLIST): string[] {
   const drift: string[] = [];
   const docs = sortStrings(Object.keys(model)).map((file) => ({ file, doc: model[file] as Record<string, unknown> }));
   const topLevel = (kind: "volumes" | "secrets" | "configs"): Record<string, unknown> =>
@@ -541,14 +554,17 @@ function fileChannelDrift(model: ComposeModel, allowlist: ReadonlyArray<{ path: 
       if (!isRecord(spec)) continue;
       const at = (message: string) => drift.push(`${service}: ${file} ${message}`);
       const refuse = (what: string) => at(`${FILE_CHANNEL_REFUSAL}: ${what}`);
+      for (const problem of serviceKeyProblems(spec, (context) => context === ".")) at(problem);
       /** A bind source, as compose would resolve it against the project directory. */
-      const bind = (source: string) => {
-        if (source.includes("$") || source.startsWith("~") || isAbsolute(source) || !isAllowlistedFileSource(resolve(REPO_ROOT, source), REPO_ROOT, allowlist)) {
-          refuse(`a bind source "${source}" is not allowlisted`);
-        }
+      const bind = (source: string, isReadOnly: boolean) => {
+        const problem =
+          source.includes("$") || source.startsWith("~") || isAbsolute(source)
+            ? "is not allowlisted"
+            : bindSourceProblem(resolve(REPO_ROOT, source), REPO_ROOT, service, isReadOnly, allowlist);
+        if (problem !== null) refuse(`a bind source "${source}" ${problem}`);
       };
       const volume = (name: string) => {
-        const problem = namedVolumeProblem(named[name]);
+        const problem = namedVolumeProblem(named[name], null);
         if (problem !== null) refuse(`named volume ${name} ${problem}`);
       };
 
@@ -558,10 +574,10 @@ function fileChannelDrift(model: ComposeModel, allowlist: ReadonlyArray<{ path: 
           const source = v.split(":")[0];
           if (!v.includes(":")) continue; // an anonymous volume: a target only
           if (isNamedVolume(source)) volume(source);
-          else bind(source);
+          else bind(source, shortVolumeIsReadOnly(v));
         } else if (isRecord(v) && typeof v.type === "string") {
           if (v.type === "bind") {
-            if (typeof v.source === "string" && v.source !== "") bind(v.source);
+            if (typeof v.source === "string" && v.source !== "") bind(v.source, v.read_only === true);
             else at("has a bind volume without a source");
           } else if (v.type === "volume") {
             if (typeof v.source === "string") volume(v.source);
@@ -577,43 +593,7 @@ function fileChannelDrift(model: ComposeModel, allowlist: ReadonlyArray<{ path: 
           else refuse(`${kind} entry ${name} is referenced`);
         }
       }
-
-      if (isRecord(spec.build)) {
-        for (const key of BUILD_FILE_CHANNEL_KEYS) if (key in spec.build) refuse(`build.${key} is set`);
-      }
     }
-  }
-  return drift;
-}
-
-/**
- * Every way FILE_CHANNEL_ALLOWLIST itself falls short: an entry that is not a
- * plain repo-relative path, that is missing, that is or sits under a symlink (the
- * check is lexical, so a link would let an allowlisted name point at `.env`),
- * whose basename starts `.env`, or that no production compose file mounts
- * (a stale entry).
- */
-function allowlistDrift(model: ComposeModel, root: string, allowlist: ReadonlyArray<{ path: string }> = FILE_CHANNEL_ALLOWLIST): string[] {
-  const drift: string[] = [];
-  const mounted = new Set<string>();
-  for (const [file, doc] of Object.entries(model)) {
-    if (file === DEV_OVERRIDE_FILE || !isRecord(doc) || !isRecord(doc.services)) continue;
-    for (const spec of Object.values(doc.services)) {
-      if (!isRecord(spec) || !Array.isArray(spec.volumes)) continue;
-      for (const v of spec.volumes) {
-        const source = typeof v === "string" ? v.split(":")[0] : isRecord(v) && v.type === "bind" ? v.source : undefined;
-        if (typeof source === "string" && !isAbsolute(source)) mounted.add(resolve(root, source));
-      }
-    }
-  }
-  for (const { path } of allowlist) {
-    const at = (message: string) => drift.push(`allowlist ${path}: ${message}`);
-    const abs = resolve(root, path);
-    if (isAbsolute(path) || path.startsWith("..") || path !== relative(root, abs)) at("is not a normalised repo-relative path");
-    else if (!existsSync(abs)) at("does not exist");
-    else if (realpathSync(abs) !== join(realpathSync(root), path)) at("is, or sits under, a symlink");
-    if (basename(path).startsWith(".env")) at("has a .env* basename");
-    if (!mounted.has(abs)) at("is mounted by no production compose file");
   }
   return drift;
 }
@@ -1253,6 +1233,18 @@ describe("compose: a host file reaches no service outside the dev override excep
   const bindOn = (source: unknown) => (c: ComposeModel) => {
     svc(c, BASE, "app").volumes = [source];
   };
+  /** The production compose file that defines `service`, the base file first. */
+  const fileOf = (service: string): string => {
+    const files = [BASE, ...Object.keys(compose.model).filter((f) => f !== BASE && f !== DEV_OVERRIDE_FILE)];
+    const file = files.find((f) => service in ((compose.model[f] as { services?: object }).services ?? {}));
+    if (file === undefined) throw new Error(`no compose file defines ${service}`);
+    return file;
+  };
+  /** Replace `service`'s volumes with `volumes`, in the file that defines it, and report the drift. */
+  const mountedOn = (service: string, ...volumes: unknown[]) =>
+    flagged((c) => {
+      svc(c, fileOf(service), service).volumes = volumes;
+    });
   const notAllowlisted = (source: string) => [`app: ${BASE} ${REFUSED}: a bind source "${source}" is not allowlisted`];
 
   it("flags a bind source that is not exactly an allowlisted path, in short and long syntax", () => {
@@ -1279,13 +1271,55 @@ describe("compose: a host file reaches no service outside the dev override excep
       "./infra/fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro",
       "./infra/fluent-bit/parsers.conf:/fluent-bit/etc/parsers.conf:ro",
     ]);
+    expect(svc(compose.model, "docker-compose.ha.yml", "sentinel-1").volumes).toEqual(["./infra/redis/sentinel.conf:/etc/sentinel-template.conf:ro"]);
     expect(composeDrift(compose.model, ctx, compose.workersText)).toEqual([]);
-    for (const { path } of FILE_CHANNEL_ALLOWLIST) {
-      for (const spelling of [`./${path}`, `./${path}/`, `./infra/../${path}`]) {
-        expect(flagged(bindOn(`${spelling}:/x:ro`)), spelling).toEqual([]);
-        expect(flagged(bindOn({ type: "bind", source: spelling, target: "/x" })), spelling).toEqual([]);
+    for (const { path, services } of FILE_CHANNEL_ALLOWLIST) {
+      for (const service of services) {
+        for (const spelling of [`./${path}`, `./${path}/`, `./infra/../${path}`]) {
+          expect(mountedOn(service, `${spelling}:/x:ro`), `${service} ${spelling}`).toEqual([]);
+          expect(mountedOn(service, `${spelling}:/x:ro,z`), `${service} ${spelling}`).toEqual([]);
+          expect(mountedOn(service, { type: "bind", source: spelling, target: "/x", read_only: true }), `${service} ${spelling}`).toEqual([]);
+        }
       }
     }
+  });
+
+  it("flags an allowlisted path mounted by a service the entry does not name, and allows the named one", () => {
+    const initdb = "./infra/postgres/initdb";
+    expect(mountedOn("app", `${initdb}:/x:ro`)).toEqual([`app: ${BASE} ${REFUSED}: a bind source "${initdb}" is not allowlisted for this service`]);
+    expect(mountedOn("app", { type: "bind", source: initdb, target: "/x", read_only: true })).toEqual([
+      `app: ${BASE} ${REFUSED}: a bind source "${initdb}" is not allowlisted for this service`,
+    ]);
+    expect(mountedOn("redis", "./infra/fluent-bit/parsers.conf:/x:ro")).toEqual([
+      `redis: ${BASE} ${REFUSED}: a bind source "./infra/fluent-bit/parsers.conf" is not allowlisted for this service`,
+    ]);
+    expect(mountedOn("db", "./infra/redis/sentinel.conf:/x:ro")).toEqual([
+      `db: ${BASE} ${REFUSED}: a bind source "./infra/redis/sentinel.conf" is not allowlisted for this service`,
+    ]);
+    expect(mountedOn("db", `${initdb}:/docker-entrypoint-initdb.d:ro`)).toEqual([]);
+  });
+
+  it("flags a read-only allowlisted path mounted writable, in short and long syntax, and allows it read-only", () => {
+    const initdb = "./infra/postgres/initdb";
+    const writable = [`db: ${BASE} ${REFUSED}: a bind source "${initdb}" is allowlisted read-only and is mounted writable`];
+    expect(mountedOn("db", `${initdb}:/docker-entrypoint-initdb.d`)).toEqual(writable);
+    expect(mountedOn("db", `${initdb}:/docker-entrypoint-initdb.d:rw`)).toEqual(writable);
+    expect(mountedOn("db", { type: "bind", source: initdb, target: "/x" })).toEqual(writable);
+    expect(mountedOn("db", { type: "bind", source: initdb, target: "/x", read_only: false })).toEqual(writable);
+    expect(mountedOn("db", `${initdb}:/docker-entrypoint-initdb.d:ro`)).toEqual([]);
+    expect(mountedOn("db", { type: "bind", source: initdb, target: "/x", read_only: true })).toEqual([]);
+  });
+
+  it("does not require read-only of an entry that says readOnly: false, and still names its services", () => {
+    const writableEntry: FileChannelEntry = { path: "infra/postgres/initdb", services: ["db"], readOnly: false, reason: "test" };
+    const model = mutated(compose.model, (c) => {
+      svc(c, BASE, "db").volumes = ["./infra/postgres/initdb:/x"];
+    });
+    const others = FILE_CHANNEL_ALLOWLIST.filter((e) => e.path !== writableEntry.path);
+    expect(fileChannelDrift(model, [writableEntry, ...others])).toEqual([]);
+    expect(fileChannelDrift(model, [{ ...writableEntry, readOnly: true }, ...others])).toEqual([
+      `db: ${BASE} ${REFUSED}: a bind source "./infra/postgres/initdb" is allowlisted read-only and is mounted writable`,
+    ]);
   });
 
   it("allows the dev override's project mount, and flags the same mount anywhere else", () => {
@@ -1353,23 +1387,22 @@ describe("compose: a host file reaches no service outside the dev override excep
     expect(flagged(redefine({ external: true }))).toEqual([`(top level): ${BASE} ${REFUSED}: volumes entry redis_data is external`]);
     expect(flagged(redefine(5))).toEqual([`redis: ${BASE} ${REFUSED}: named volume redis_data has an unmodelled definition`]);
     expect(topLevel(compose.model, BASE).volumes).toEqual({ postgres_data: null, redis_data: null });
-    expect(flagged(redefine({ name: "redis_data" }))).toEqual([]);
+    expect(composeDrift(compose.model, ctx, compose.workersText)).toEqual([]);
+  });
+
+  it("flags an explicit name: on a named volume, which can alias a host-bound volume, and allows the unnamed ones the stack ships", () => {
+    const rename = (key: "postgres_data" | "redis_data", name: unknown) => (c: ComposeModel) => {
+      topLevel(c, BASE).volumes = { ...(topLevel(c, BASE).volumes as object), [key]: { name } };
+    };
+    expect(flagged(rename("redis_data", "redis_data"))).toEqual([`redis: ${BASE} ${REFUSED}: named volume redis_data sets name`]);
+    expect(flagged(rename("redis_data", "other"))).toEqual([`redis: ${BASE} ${REFUSED}: named volume redis_data sets name`]);
+    expect(flagged(rename("postgres_data", "compose_postgres_data"))).toEqual([`db: ${BASE} ${REFUSED}: named volume postgres_data sets name`]);
+    expect(topLevel(compose.model, BASE).volumes).toEqual({ postgres_data: null, redis_data: null });
     expect(composeDrift(compose.model, ctx, compose.workersText)).toEqual([]);
   });
 
   it("flags a named volume no compose file defines", () => {
     expect(flagged((c) => (svc(c, BASE, "app").volumes = ["nowhere:/x"]))).toEqual([`app: ${BASE} ${REFUSED}: named volume nowhere is not defined by any compose file`]);
-  });
-
-  it("flags build.secrets, build.ssh and build.additional_contexts, and allows a build without them", () => {
-    for (const key of BUILD_FILE_CHANNEL_KEYS) {
-      const m = mutated(compose.model, (c) => {
-        (svc(c, BASE, "app").build as Record<string, unknown>)[key] = key === "additional_contexts" ? { x: "." } : ["default"];
-      });
-      expect(composeDrift(m, ctx, compose.workersText), key).toEqual([`app: ${BASE} ${REFUSED}: build.${key} is set`]);
-    }
-    expect(Object.keys(svc(compose.model, BASE, "app").build as object)).toEqual(["context", "dockerfile", "args"]);
-    expect(composeDrift(compose.model, ctx, compose.workersText)).toEqual([]);
   });
 
   it("flags a volume or entry shape it does not model instead of skipping it", () => {
@@ -1385,6 +1418,87 @@ describe("compose: a host file reaches no service outside the dev override excep
   it("allows an anonymous volume, a named volume and a tmpfs", () => {
     expect(flagged(bindOn("/cache"))).toEqual([]);
     expect(flagged((c) => (svc(c, BASE, "app").volumes = ["/cache", "redis_data:/data", { type: "tmpfs", target: "/tmp" }]))).toEqual([]);
+  });
+});
+
+describe("compose: a service outside the dev override carries only SERVICE_KEY_ALLOWLIST keys", () => {
+  const BASE = "docker-compose.yml";
+  const REFUSED = SERVICE_KEY_REFUSAL;
+  const flagged = (edit: (c: ComposeModel) => void) => composeDrift(mutated(compose.model, edit), ctx, compose.workersText);
+  const onApp = (edit: (spec: ServiceSpec) => void) => (c: ComposeModel) => edit(svc(c, BASE, "app"));
+  const refusedOnApp = (what: string) => [`app: ${BASE} ${REFUSED}: ${what}`];
+  const buildOf = (c: ComposeModel) => svc(c, BASE, "app").build as Record<string, unknown>;
+
+  it("flags each key that lets a container reach another container, the host or the .env, by name", () => {
+    const cases: Array<[string, unknown]> = [
+      ["privileged", true],
+      ["devices", ["/dev/sda:/dev/sda"]],
+      ["device_cgroup_rules", ["c 1:3 mr"]],
+      ["cap_add", ["SYS_ADMIN"]],
+      ["pid", "service:audit-anchor-publisher"],
+      ["pid", "host"],
+      ["ipc", "host"],
+      ["ipc", "service:audit-anchor-publisher"],
+      ["cgroup", "host"],
+      ["userns_mode", "host"],
+      ["volumes_from", ["audit-anchor-publisher"]],
+      ["network_mode", "host"],
+      ["x-anything", 1],
+      ["a_future_key", 1],
+    ];
+    for (const [key, value] of cases) {
+      expect(flagged(onApp((spec) => void (spec[key] = value))), `${key}: ${JSON.stringify(value)}`).toEqual(refusedOnApp(key));
+    }
+  });
+
+  it("flags a security_opt that is not exactly no-new-privileges:true, and allows it", () => {
+    const notExact = refusedOnApp('security_opt is not exactly ["no-new-privileges:true"]');
+    for (const value of [["seccomp=unconfined"], ["no-new-privileges:true", "apparmor=unconfined"], ["no-new-privileges:false"], [], "no-new-privileges:true"]) {
+      expect(flagged(onApp((spec) => void (spec.security_opt = value))), JSON.stringify(value)).toEqual(notExact);
+    }
+    expect(flagged(onApp((spec) => void (spec.security_opt = ["no-new-privileges:true"])))).toEqual([]);
+    for (const service of ISOLATED_SERVICES) expect(svc(compose.model, WORKERS_FILE, service).security_opt).toEqual(["no-new-privileges:true"]);
+  });
+
+  it("flags a build that escapes the project root, the Dockerfile or .dockerignore, and allows the one the stack ships", () => {
+    expect(flagged((c) => void (buildOf(c).context = ".."))).toEqual(refusedOnApp("build.context is not the project root"));
+    expect(flagged((c) => void (buildOf(c).context = "./"))).toEqual(refusedOnApp("build.context is not the project root"));
+    expect(flagged((c) => void (buildOf(c).context = "./infra"))).toEqual(refusedOnApp("build.context is not the project root"));
+    expect(flagged((c) => void (buildOf(c).dockerfile = "Dockerfile.dev"))).toEqual(refusedOnApp("build.dockerfile is not Dockerfile"));
+    expect(flagged((c) => void (buildOf(c).dockerfile_inline = "FROM scratch\nCOPY .env /"))).toEqual(refusedOnApp("build.dockerfile_inline is set"));
+    expect(flagged(onApp((spec) => void (spec.build = ".")))).toEqual(refusedOnApp("build is not a mapping"));
+    for (const [key, value] of [["secrets", ["default"]], ["ssh", ["default"]], ["additional_contexts", { x: "." }], ["target", "deps"], ["network", "host"]] as const) {
+      expect(flagged((c) => void (buildOf(c)[key] = value)), key).toEqual(refusedOnApp(`build.${key} is set`));
+    }
+    expect(Object.keys(buildOf(compose.model))).toEqual(BUILD_KEY_ALLOWLIST);
+    expect(composeDrift(compose.model, ctx, compose.workersText)).toEqual([]);
+  });
+
+  it("flags a service whose definition is not a mapping", () => {
+    expect(serviceKeyProblems(null, () => true)).toEqual(["has an unmodelled service definition"]);
+    expect(serviceKeyProblems([], () => true)).toEqual(["has an unmodelled service definition"]);
+  });
+
+  it("does not judge the dev override, which keeps container_name, tmpfs and a build target", () => {
+    const m = mutated(compose.model, (c) => {
+      svc(c, DEV_OVERRIDE_FILE, "audit-outbox-worker").privileged = true;
+    });
+    expect(composeDrift(m, ctx, compose.workersText)).toEqual([]);
+    const prod = mutated(compose.model, (c) => {
+      svc(c, WORKERS_FILE, "audit-outbox-worker").privileged = true;
+    });
+    expect(composeDrift(prod, ctx, compose.workersText)).toEqual([`audit-outbox-worker: ${WORKERS_FILE} ${REFUSED}: privileged`]);
+  });
+
+  it("lists every key the production files write, so the real tree passes, and nothing else the render adds", () => {
+    const written = new Set<string>();
+    for (const [file, doc] of Object.entries(compose.model)) {
+      if (file === DEV_OVERRIDE_FILE) continue;
+      for (const spec of Object.values((doc as { services: Record<string, object> }).services)) for (const key of Object.keys(spec)) written.add(key);
+    }
+    for (const key of written) expect(SERVICE_KEY_ALLOWLIST, key).toContain(key);
+    expect(SERVICE_KEY_ALLOWLIST.filter((k) => !written.has(k)).sort()).toEqual(["configs", "secrets"]);
+    expect(composeDrift(compose.model, ctx, compose.workersText)).toEqual([]);
   });
 });
 
@@ -1414,7 +1528,7 @@ describe("compose: FILE_CHANNEL_ALLOWLIST itself", () => {
   });
 
   it("is clean for the real tree: every entry exists, is symlink-free, is not .env*, and is mounted", () => {
-    expect(allowlistDrift(compose.model, REPO_ROOT)).toEqual([]);
+    expect(fileChannelAllowlistDrift(compose.model, REPO_ROOT)).toEqual([]);
     expect(FILE_CHANNEL_ALLOWLIST.length).toBeGreaterThan(0);
     for (const { path, reason } of FILE_CHANNEL_ALLOWLIST) {
       expect(reason, path).not.toBe("");
@@ -1422,11 +1536,29 @@ describe("compose: FILE_CHANNEL_ALLOWLIST itself", () => {
     }
   });
 
+  it("is mounted by exactly the services each entry names, read-only where it says so", () => {
+    for (const { path, services, readOnly } of FILE_CHANNEL_ALLOWLIST) {
+      const mounts: Array<{ service: string; readOnly: boolean }> = [];
+      for (const [file, doc] of Object.entries(compose.model)) {
+        if (file === DEV_OVERRIDE_FILE) continue;
+        for (const [service, spec] of Object.entries((doc as { services: Record<string, { volumes?: unknown[] }> }).services)) {
+          for (const v of spec.volumes ?? []) {
+            const source = typeof v === "string" ? v.split(":")[0] : (v as { source?: string }).source;
+            if (typeof source !== "string" || posix.normalize(source) !== posix.normalize(`./${path}`)) continue;
+            mounts.push({ service, readOnly: typeof v === "string" ? shortVolumeIsReadOnly(v) : (v as { read_only?: unknown }).read_only === true });
+          }
+        }
+      }
+      expect(mounts.map((m) => m.service).sort(), path).toEqual([...services].sort());
+      if (readOnly) for (const m of mounts) expect(m.readOnly, `${path} on ${m.service}`).toBe(true);
+    }
+  });
+
   it("flags an allowlisted name that is a symlink to .env, though the lexical check allows the mount", () => {
     const root = scratchTree([], { "infra/x": "../.env" });
-    const allowlist = [{ path: "infra/x" }];
+    const allowlist: FileChannelEntry[] = [{ path: "infra/x", services: ["app"], readOnly: true, reason: "test" }];
     const model = mounting("./infra/x");
-    expect(allowlistDrift(model, root, allowlist)).toEqual(["allowlist infra/x: is, or sits under, a symlink"]);
+    expect(fileChannelAllowlistDrift(model, root, allowlist)).toEqual(["allowlist infra/x: is, or sits under, a symlink"]);
     expect(fileChannelDrift(model, allowlist)).toEqual([]);
   });
 
@@ -1435,29 +1567,29 @@ describe("compose: FILE_CHANNEL_ALLOWLIST itself", () => {
     const linked = scratchTree([], { "infra/dir": "../elsewhere" });
     mkdirSync(join(linked, "elsewhere"));
     writeFileSync(join(linked, "elsewhere/y"), "");
-    expect(allowlistDrift(mounting("./infra/dir/y"), linked, allowlist)).toEqual(["allowlist infra/dir/y: is, or sits under, a symlink"]);
+    expect(fileChannelAllowlistDrift(mounting("./infra/dir/y"), linked, allowlist)).toEqual(["allowlist infra/dir/y: is, or sits under, a symlink"]);
     const real = scratchTree(["infra/dir/y"], {});
-    expect(allowlistDrift(mounting("./infra/dir/y"), real, allowlist)).toEqual([]);
+    expect(fileChannelAllowlistDrift(mounting("./infra/dir/y"), real, allowlist)).toEqual([]);
   });
 
   it("flags a missing entry, a .env* basename, an unmounted entry and a path that is not normalised", () => {
     const root = scratchTree(["infra/a", "infra/.env.example"], {});
-    expect(allowlistDrift(mounting("./infra/a"), root, [{ path: "infra/gone" }, { path: "infra/a" }])).toEqual([
+    expect(fileChannelAllowlistDrift(mounting("./infra/a"), root, [{ path: "infra/gone" }, { path: "infra/a" }])).toEqual([
       "allowlist infra/gone: does not exist",
       "allowlist infra/gone: is mounted by no production compose file",
     ]);
-    expect(allowlistDrift(mounting("./infra/.env.example"), root, [{ path: "infra/.env.example" }])).toEqual(["allowlist infra/.env.example: has a .env* basename"]);
-    expect(allowlistDrift(mounting("./infra/a"), root, [{ path: "infra/a" }])).toEqual([]);
-    expect(allowlistDrift(mounting("./infra/a"), root, [{ path: "infra/b" }, { path: "infra/a" }]).filter((d) => d.startsWith("allowlist infra/a"))).toEqual([]);
+    expect(fileChannelAllowlistDrift(mounting("./infra/.env.example"), root, [{ path: "infra/.env.example" }])).toEqual(["allowlist infra/.env.example: has a .env* basename"]);
+    expect(fileChannelAllowlistDrift(mounting("./infra/a"), root, [{ path: "infra/a" }])).toEqual([]);
+    expect(fileChannelAllowlistDrift(mounting("./infra/a"), root, [{ path: "infra/b" }, { path: "infra/a" }]).filter((d) => d.startsWith("allowlist infra/a"))).toEqual([]);
     for (const path of ["./infra/a", "infra//a", "../infra/a", "infra/a/"]) {
-      expect(allowlistDrift(mounting("./infra/a"), root, [{ path }]), path).toContain(`allowlist ${path}: is not a normalised repo-relative path`);
+      expect(fileChannelAllowlistDrift(mounting("./infra/a"), root, [{ path }]), path).toContain(`allowlist ${path}: is not a normalised repo-relative path`);
     }
   });
 
   it("does not count the dev override's mounts as a production mount", () => {
     const root = scratchTree(["infra/a"], {});
     const model: ComposeModel = { [DEV_OVERRIDE_FILE]: { services: { app: { volumes: ["./infra/a:/x"] } } } };
-    expect(allowlistDrift(model, root, [{ path: "infra/a" }])).toEqual(["allowlist infra/a: is mounted by no production compose file"]);
+    expect(fileChannelAllowlistDrift(model, root, [{ path: "infra/a" }])).toEqual(["allowlist infra/a: is mounted by no production compose file"]);
   });
 });
 

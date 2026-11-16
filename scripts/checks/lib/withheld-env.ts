@@ -16,8 +16,8 @@
  * Everything below is pure: inputs in, values or drift lists out. The `real*`
  * readers are the only functions that touch the tree.
  */
-import { readFileSync } from "node:fs";
-import { join, posix, resolve } from "node:path";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { basename, isAbsolute, join, posix, relative, resolve } from "node:path";
 import { ALLOWLIST } from "../../env-allowlist";
 import { ROLES } from "../../bootstrap-rds-roles.mjs";
 import { envObject } from "@/lib/env-schema";
@@ -325,39 +325,135 @@ export function withheldHolders(
 
 // ─── File channels ──────────────────────────────────────────
 
+/** The one compose file whose `.:/app` mounts are the dev shape, not a file channel; every file-channel and service-key judgement skips it. */
+export const DEV_OVERRIDE_FILE = "docker-compose.override.yml";
+
+export type FileChannelEntry = {
+  path: string;
+  /** The only compose services that may bind this path. */
+  services: readonly string[];
+  /** True when the mount must be read-only. */
+  readOnly: boolean;
+  reason: string;
+};
+
 /**
  * The host paths a container may receive as a file outside the dev override,
- * repo-relative, each with why. A default-deny list: a source that is not
- * exactly one of these (resolved against the project root) is refused, whatever
- * it spells — a path, a `~`, an absolute path, a symlink, `.`. The parity test
- * requires each entry to exist, to be free of symlinks, to avoid a `.env*`
- * basename and to be referenced by a production compose file.
+ * repo-relative, each with the services that may mount it, whether the mount
+ * must be read-only, and why. A default-deny list: a source that is not exactly
+ * one of these (resolved against the project root) is refused, whatever it
+ * spells — a path, a `~`, an absolute path, a symlink, `.` — and so is a listed
+ * path from a service not named, or without `:ro` where `readOnly` is set.
+ * `fileChannelAllowlistDrift` requires each entry to exist, to be free of
+ * symlinks, to avoid a `.env*` basename and to be referenced by a production
+ * compose file.
+ *
+ * sentinel.conf is read-only because the sentinel services never write it:
+ * Redis Sentinel rewrites its config at runtime, so docker-compose.ha.yml's
+ * entrypoint copies the template to /tmp/sentinel.conf and runs on the copy.
  */
-export const FILE_CHANNEL_ALLOWLIST: ReadonlyArray<{ path: string; reason: string }> = [
-  { path: "infra/postgres/initdb", reason: "db runs these init scripts once, on an empty data directory" },
-  { path: "infra/fluent-bit/fluent-bit.conf", reason: "fluent-bit's main configuration (docker-compose.logging.yml)" },
-  { path: "infra/fluent-bit/parsers.conf", reason: "fluent-bit's parsers configuration (docker-compose.logging.yml)" },
-  { path: "infra/redis/sentinel.conf", reason: "the sentinel template the redis-sentinel services copy (docker-compose.ha.yml)" },
+export const FILE_CHANNEL_ALLOWLIST: ReadonlyArray<FileChannelEntry> = [
+  { path: "infra/postgres/initdb", services: ["db"], readOnly: true, reason: "db runs these init scripts once, on an empty data directory" },
+  { path: "infra/fluent-bit/fluent-bit.conf", services: ["fluent-bit"], readOnly: true, reason: "fluent-bit's main configuration (docker-compose.logging.yml)" },
+  { path: "infra/fluent-bit/parsers.conf", services: ["fluent-bit"], readOnly: true, reason: "fluent-bit's parsers configuration (docker-compose.logging.yml)" },
+  {
+    path: "infra/redis/sentinel.conf",
+    services: ["sentinel-1", "sentinel-2", "sentinel-3"],
+    readOnly: true,
+    reason: "the sentinel template the redis-sentinel services copy to /tmp before running on the copy (docker-compose.ha.yml), so the template is never written",
+  },
 ];
 
 const stripTrailingSlash = (p: string): string => (p.length > 1 ? p.replace(/\/+$/, "") : p);
 
 /**
- * Whether `source`, a host path as compose renders it (or as the caller
- * resolved it against the project root), is exactly `<projectRoot>/<an
- * allowlisted path>`, both in one form. A relative `source` is never resolved
- * here, so against a real (absolute) root it is refused: compose leaves a named
- * volume's `driver_opts.device` unresolved, so a relative spelling is the one
- * the render and the file disagree on.
+ * The allowlist entry `source`, a host path as compose renders it (or as the
+ * caller resolved it against the project root), is exactly `<projectRoot>/<its
+ * path>` of, both in one form. A relative `source` is never resolved here, so
+ * against a real (absolute) root it is refused rather than resolved: whether
+ * compose resolves a relative `driver_opts.device` has varied, and
+ * `driver_opts` is refused outright anyway.
  */
+export function allowlistedFileEntry<E extends { path: string }>(
+  source: string,
+  projectRoot: string,
+  allowlist: ReadonlyArray<E> = FILE_CHANNEL_ALLOWLIST as unknown as ReadonlyArray<E>,
+): E | undefined {
+  const s = stripTrailingSlash(posix.normalize(source));
+  const root = stripTrailingSlash(posix.normalize(projectRoot));
+  return allowlist.find((e) => s === posix.join(root, e.path));
+}
+
 export function isAllowlistedFileSource(
   source: string,
   projectRoot: string,
   allowlist: ReadonlyArray<{ path: string }> = FILE_CHANNEL_ALLOWLIST,
 ): boolean {
-  const s = stripTrailingSlash(posix.normalize(source));
-  const root = stripTrailingSlash(posix.normalize(projectRoot));
-  return allowlist.some((e) => s === posix.join(root, e.path));
+  return allowlistedFileEntry(source, projectRoot, allowlist) !== undefined;
+}
+
+/**
+ * Why `service` may not bind `source` (`isReadOnly`: the mount says so), or
+ * null: the path must be an allowlist entry, the service one that entry names,
+ * and the mount read-only where the entry requires it.
+ */
+export function bindSourceProblem(
+  source: string,
+  projectRoot: string,
+  service: string,
+  isReadOnly: boolean,
+  allowlist: ReadonlyArray<FileChannelEntry> = FILE_CHANNEL_ALLOWLIST,
+): string | null {
+  const entry = allowlistedFileEntry(source, projectRoot, allowlist);
+  if (entry === undefined) return "is not allowlisted";
+  if (!entry.services.includes(service)) return "is not allowlisted for this service";
+  if (entry.readOnly && !isReadOnly) return "is allowlisted read-only and is mounted writable";
+  return null;
+}
+
+/** Whether a short-syntax volume's mode (`src:target:ro`, `:ro,z`) says read-only. */
+export function shortVolumeIsReadOnly(volume: string): boolean {
+  return (volume.split(":")[2] ?? "").split(",").includes("ro");
+}
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
+/**
+ * Every way FILE_CHANNEL_ALLOWLIST itself falls short, against the compose
+ * files under `root` (`model`: file name → parsed document; the dev override is
+ * not a production file): an entry that is not a plain repo-relative path, that
+ * is missing, that is or sits under a symlink (the bind check is lexical, so a
+ * link would let an allowlisted name point at `.env`), whose basename starts
+ * `.env`, or that no production compose file mounts (a stale entry). Every
+ * failure is named; none is skipped.
+ */
+export function fileChannelAllowlistDrift(
+  model: Record<string, unknown>,
+  root: string,
+  allowlist: ReadonlyArray<{ path: string }> = FILE_CHANNEL_ALLOWLIST,
+): string[] {
+  const drift: string[] = [];
+  const mounted = new Set<string>();
+  for (const [file, doc] of Object.entries(model)) {
+    if (file === DEV_OVERRIDE_FILE || !isRecord(doc) || !isRecord(doc.services)) continue;
+    for (const spec of Object.values(doc.services)) {
+      if (!isRecord(spec) || !Array.isArray(spec.volumes)) continue;
+      for (const v of spec.volumes) {
+        const source = typeof v === "string" ? v.split(":")[0] : isRecord(v) && v.type === "bind" ? v.source : undefined;
+        if (typeof source === "string" && !isAbsolute(source)) mounted.add(resolve(root, source));
+      }
+    }
+  }
+  for (const { path } of allowlist) {
+    const at = (message: string) => drift.push(`allowlist ${path}: ${message}`);
+    const abs = resolve(root, path);
+    if (isAbsolute(path) || path.startsWith("..") || path !== relative(root, abs)) at("is not a normalised repo-relative path");
+    else if (!existsSync(abs)) at("does not exist");
+    else if (realpathSync(abs) !== join(realpathSync(root), path)) at("is, or sits under, a symlink");
+    if (basename(path).startsWith(".env")) at("has a .env* basename");
+    if (!mounted.has(abs)) at("is mounted by no production compose file");
+  }
+  return drift;
 }
 
 /** The top-level `volumes:` keys that make a named volume anything but plain and docker-managed (`external` is judged for every kind, below). */
@@ -365,19 +461,101 @@ const NAMED_VOLUME_REFUSED_KEYS = ["driver", "driver_opts"] as const;
 
 /**
  * Why a named volume is not plain docker-managed, or null: an entry with no
- * `driver` or `driver_opts` (`postgres_data:` as written, or with the `name`
- * compose adds). `undefined` is an entry no file defines.
+ * `driver` or `driver_opts`, and no `name` but `expectedName` (`postgres_data:`
+ * as written, or with the `name` compose adds, `<project>_<key>`). An explicit
+ * `name:` can alias a volume that already exists on the host, bound to a file,
+ * so a caller that cannot know the project name passes null and any `name` is
+ * refused. `undefined` is an entry no file defines.
  */
-export function namedVolumeProblem(entry: unknown): string | null {
+export function namedVolumeProblem(entry: unknown, expectedName: string | null): string | null {
   if (entry === undefined) return "is not defined by any compose file";
   if (entry === null) return null;
   if (typeof entry !== "object" || Array.isArray(entry)) return "has an unmodelled definition";
-  const keys = NAMED_VOLUME_REFUSED_KEYS.filter((k) => k in entry);
-  return keys.length === 0 ? null : `sets ${keys.join(", ")}`;
+  const sets: string[] = NAMED_VOLUME_REFUSED_KEYS.filter((k) => k in entry);
+  if ("name" in entry && (expectedName === null || (entry as { name?: unknown }).name !== expectedName)) {
+    sets.push(expectedName === null ? "name" : `name (not ${expectedName})`);
+  }
+  return sets.length === 0 ? null : `sets ${sets.join(", ")}`;
 }
 
-/** The `build:` keys that hand the builder a host file or an extra context. */
-export const BUILD_FILE_CHANNEL_KEYS = ["secrets", "ssh", "additional_contexts"] as const;
+/**
+ * Service keys outside the dev override are default-deny: a service may carry
+ * only these top-level keys. Derived from what docker-compose.yml,
+ * docker-compose.workers.yml, docker-compose.logging.yml and
+ * docker-compose.ha.yml write, plus what `docker compose config` adds itself
+ * (`entrypoint: null` on every service; `env_file` is folded into `environment`
+ * in the render). Every other key is refused by name, so a key compose adds
+ * later, or one this list never saw (`privileged`, `devices`, `cap_add`, `pid`,
+ * `ipc`, `userns_mode`, `cgroup`, `volumes_from`, `extends`, `network_mode`,
+ * `x-*`), is refused rather than skipped. `secrets` and `configs` are listed
+ * because the file-channel check refuses every reference to one by name, with a
+ * better message; an empty list is harmless. `tmpfs`, `container_name` and a
+ * build `target` are dev-override keys.
+ */
+export const SERVICE_KEY_ALLOWLIST: readonly string[] = [
+  "build",
+  "cap_drop",
+  "command",
+  "configs",
+  "depends_on",
+  "entrypoint",
+  "env_file",
+  "environment",
+  "healthcheck",
+  "image",
+  "logging",
+  "networks",
+  "ports",
+  "profiles",
+  "read_only",
+  "restart",
+  "secrets",
+  "security_opt",
+  "stop_grace_period",
+  "volumes",
+];
+
+/** The only keys a production `build:` may carry: neither the render nor any file adds another. */
+export const BUILD_KEY_ALLOWLIST: readonly string[] = ["context", "dockerfile", "args"];
+
+/** The one `security_opt` a production service may carry. */
+const SECURITY_OPT_ALLOWED = ["no-new-privileges:true"];
+
+/** The `build.dockerfile` every production build uses. */
+const BUILD_DOCKERFILE = "Dockerfile";
+
+/** The prefix both adjudicators put on a refused service key. */
+export const SERVICE_KEY_REFUSAL = "has a service key outside SERVICE_KEY_ALLOWLIST";
+
+/**
+ * Every way a production service definition carries a key SERVICE_KEY_ALLOWLIST
+ * does not list, or a listed key in a shape that reaches the host: a
+ * `security_opt` other than exactly `["no-new-privileges:true"]`, a `build` that
+ * is not a mapping of context/dockerfile/args, a `build.context` that
+ * `isProjectRoot` does not accept (an escape from .dockerignore) and a
+ * `build.dockerfile` other than `Dockerfile`. The render check accepts the stub
+ * path as the project root, the parity test `.`.
+ */
+export function serviceKeyProblems(service: unknown, isProjectRoot: (context: string) => boolean): string[] {
+  if (!isRecord(service)) return ["has an unmodelled service definition"];
+  const problems: string[] = [];
+  const refuse = (what: string) => problems.push(`${SERVICE_KEY_REFUSAL}: ${what}`);
+  for (const key of Object.keys(service)) if (!SERVICE_KEY_ALLOWLIST.includes(key)) refuse(key);
+  if ("security_opt" in service && JSON.stringify(service.security_opt) !== JSON.stringify(SECURITY_OPT_ALLOWED)) {
+    refuse(`security_opt is not exactly ${JSON.stringify(SECURITY_OPT_ALLOWED)}`);
+  }
+  if ("build" in service) {
+    const build = service.build;
+    if (!isRecord(build)) {
+      refuse("build is not a mapping");
+    } else {
+      for (const key of Object.keys(build)) if (!BUILD_KEY_ALLOWLIST.includes(key)) refuse(`build.${key} is set`);
+      if (typeof build.context !== "string" || !isProjectRoot(build.context)) refuse("build.context is not the project root");
+      if (build.dockerfile !== BUILD_DOCKERFILE) refuse(`build.dockerfile is not ${BUILD_DOCKERFILE}`);
+    }
+  }
+  return problems;
+}
 
 /** The prefix both adjudicators put on a refused file channel. */
 export const FILE_CHANNEL_REFUSAL = "has a file channel outside FILE_CHANNEL_ALLOWLIST";

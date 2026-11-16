@@ -32,9 +32,9 @@
 import { readFileSync, realpathSync } from "node:fs";
 import { relative } from "node:path";
 import { pathToFileURL } from "node:url";
-import { FIXTURE_ALLOW, GIT_PATHSPECS, findComposeFiles, isTestFixturePath, listTrackedComposePaths } from "./lib/compose-files.mjs";
+import { FIXTURE_ALLOW, findComposeFiles, isComposePath, isTestFixturePath, listTrackedComposePaths, walkComposeFiles } from "./lib/compose-files.mjs";
 
-export { FIXTURE_ALLOW, GIT_PATHSPECS, findComposeFiles, isTestFixturePath, listTrackedComposePaths };
+export { FIXTURE_ALLOW, findComposeFiles, isComposePath, isTestFixturePath, listTrackedComposePaths, walkComposeFiles };
 
 /**
  * Services that legitimately do NOT use json-file, with the reason. An entry is

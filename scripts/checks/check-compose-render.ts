@@ -14,12 +14,21 @@
  *     a role password where bound, a publisher-only key in the publisher,
  *     JACKSON_API_KEY in jackson, any other W key nowhere;
  *   - no service outside base+override (whose `.:/app` mount is the dev shape)
- *     gets a host file by anything but default-deny: a bind source only if it is
- *     <project>/<a FILE_CHANNEL_ALLOWLIST path> (withheld-env.ts); a named volume
- *     only if plain and docker-managed (no driver, driver_opts); a referenced
- *     top-level `secrets:`/`configs:` entry, any `external` entry,
- *     `build.secrets`, `build.ssh` and `build.additional_contexts` never; a
- *     volume type or key the check does not model fails instead of being skipped;
+ *     carries a service key outside SERVICE_KEY_ALLOWLIST (withheld-env.ts: an
+ *     exact list; `privileged`, `devices`, `cap_add`, `pid`, `ipc`, `volumes_from`,
+ *     `userns_mode` and any unknown key are refused by name), a `security_opt`
+ *     other than exactly `["no-new-privileges:true"]`, or a `build` with a key
+ *     outside context/dockerfile/args, a context other than the project root or
+ *     a dockerfile other than `Dockerfile`;
+ *   - and none gets a host file by anything but default-deny: a bind source only
+ *     if it is <project>/<a FILE_CHANNEL_ALLOWLIST path> from a service that entry
+ *     names, read-only where it says so; a named volume only if plain,
+ *     docker-managed and named <project>_<key> (no driver, driver_opts or other
+ *     `name`); a referenced top-level `secrets:`/`configs:` entry and any
+ *     `external` entry never; a volume type or key the check does not model fails
+ *     instead of being skipped;
+ *   - the allowlist itself holds on the tree under --root: each entry exists, is
+ *     symlink-free, has no `.env*` basename and is mounted by a production file;
  *   - an inline `configs:` content or `secrets:` entry a service references is
  *     scanned for withheld values as that service's own;
  *   - every compose file findComposeFiles discovers is in some render set (an
@@ -50,15 +59,16 @@ import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileS
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { CORE_SCHEMA, load, mergeTag } from "js-yaml";
 import { auditAnchorPublisherEnvSchema } from "@/lib/env-schema";
 import { buildDestinationsFromEnv } from "@/lib/audit/anchor-destinations/from-env";
 import {
   deriveWithheldEnv,
   derivePublisherOnlyEnv,
-  BUILD_FILE_CHANNEL_KEYS,
+  bindSourceProblem,
   externalEntryProblems,
   FILE_CHANNEL_REFUSAL,
-  isAllowlistedFileSource,
+  fileChannelAllowlistDrift,
   isDatabaseUrlKey,
   namedVolumeProblem,
   ownDatabaseUrlKey,
@@ -67,6 +77,7 @@ import {
   realRolePasswordInputs,
   realWithheldInputs,
   rolePasswordBinding,
+  serviceKeyProblems,
   SHARED_PUBLISHER_NAME,
   withheldHolders,
   workerServiceName,
@@ -75,6 +86,9 @@ import {
 import { findComposeFiles } from "./lib/compose-files.mjs";
 
 const REPO_ROOT = resolve(fileURLToPath(import.meta.url), "../../..");
+
+/** The `--project-name` every render runs under: compose names an unnamed volume `<this>_<key>`. */
+export const COMPOSE_PROJECT_NAME = "compose-render";
 
 const PUBLISHER = PUBLISHER_SERVICE;
 const VERIFY_WORKER = "audit-chain-verify-worker";
@@ -91,7 +105,7 @@ export const RENDER_SETS: ReadonlyArray<{ name: string; files: readonly string[]
 /** The set the DEPLOYMENT_ID shell-override case renders. */
 const WORKERS_SET = RENDER_SETS[1];
 
-/** The dev set: its workers bind-mount `.:/app`, so file channels are not judged there. */
+/** The dev set: its workers bind-mount `.:/app`, so file channels and service keys are not judged there. */
 const FILE_CHANNEL_EXEMPT_SET = RENDER_SETS[0].name;
 
 /**
@@ -217,6 +231,8 @@ export type AnalysisContext = {
   smoke: SmokeMap;
   /** The `--project-directory` the render ran in: where `.` in a compose file resolves. */
   projectRoot: string;
+  /** The `--project-name` the render ran under. */
+  projectName: string;
 };
 
 function envOf(service: ComposeService): Record<string, string | null | undefined> {
@@ -278,13 +294,14 @@ function referencedEntries(service: ComposeService, render: ComposeRender): Reco
 }
 
 /**
- * How a host file could reach `service`, by default-deny: a bind source only if
- * it is `<projectRoot>/<a FILE_CHANNEL_ALLOWLIST path>`; a named volume only if
- * plain and docker-managed; a referenced secrets/configs entry, `build.secrets`,
- * `build.ssh` and `build.additional_contexts` never; a tmpfs is fine. A shape
- * not modelled is reported, not skipped.
+ * How a host file could reach `service` (named `name`), by default-deny: a bind
+ * source only if it is `<projectRoot>/<a FILE_CHANNEL_ALLOWLIST path>`, from a
+ * service that entry names, read-only where it says so; a named volume only if
+ * plain, docker-managed and named `<project>_<key>`; a referenced secrets/configs
+ * entry never; a tmpfs is fine. A shape not modelled is reported, not skipped.
+ * (`build` keys are judged by serviceKeyProblems.)
  */
-function fileChannelProblems(service: ComposeService, render: ComposeRender, projectRoot: string): string[] {
+function fileChannelProblems(name: string, service: ComposeService, render: ComposeRender, projectRoot: string, projectName: string): string[] {
   const problems: string[] = [];
   const refuse = (what: string) => problems.push(`${FILE_CHANNEL_REFUSAL}: ${what}`);
   const shown = (path: string) => (path === projectRoot ? "<root>" : path.startsWith(`${projectRoot}/`) ? `<root>${path.slice(projectRoot.length)}` : path);
@@ -299,11 +316,15 @@ function fileChannelProblems(service: ComposeService, render: ComposeRender, pro
     }
     for (const key of Object.keys(entry)) if (!VOLUME_ENTRY_KEYS.includes(key)) problems.push(`has a volume with unmodelled key ${key}`);
     if (entry.type === "bind") {
-      if (typeof entry.source !== "string" || entry.source === "") problems.push("has a bind volume without a source");
-      else if (!isAllowlistedFileSource(entry.source, projectRoot)) refuse(`a bind source "${shown(entry.source)}" is not allowlisted`);
+      if (typeof entry.source !== "string" || entry.source === "") {
+        problems.push("has a bind volume without a source");
+      } else {
+        const problem = bindSourceProblem(entry.source, projectRoot, name, (entry as { read_only?: unknown }).read_only === true);
+        if (problem !== null) refuse(`a bind source "${shown(entry.source)}" ${problem}`);
+      }
     } else if (entry.type === "volume") {
       if (typeof entry.source === "string") {
-        const problem = namedVolumeProblem(render.volumes?.[entry.source]);
+        const problem = namedVolumeProblem(render.volumes?.[entry.source], `${projectName}_${entry.source}`);
         if (problem !== null) refuse(`named volume ${entry.source} ${problem}`);
       }
     } else if (entry.type !== "tmpfs") {
@@ -319,11 +340,6 @@ function fileChannelProblems(service: ComposeService, render: ComposeRender, pro
       if (typeof name !== "string") problems.push(`has an unmodelled ${kind} entry`);
       else refuse(`${kind} entry ${name} is referenced`);
     }
-  }
-
-  const build = service.build;
-  if (typeof build === "object" && build !== null) {
-    for (const key of BUILD_FILE_CHANNEL_KEYS) if (key in build) refuse(`build.${key} is set`);
   }
   return problems;
 }
@@ -362,7 +378,8 @@ export function analyzeRender(setName: string, render: ComposeRender, ctx: Analy
     if ((name === PUBLISHER || name === VERIFY_WORKER) && loadsEnv) at(name, "loads .env");
 
     if (setName !== FILE_CHANNEL_EXEMPT_SET) {
-      for (const problem of fileChannelProblems(service, render, ctx.projectRoot)) at(name, problem);
+      for (const problem of serviceKeyProblems(service, (context) => context === ctx.projectRoot)) at(name, problem);
+      for (const problem of fileChannelProblems(name, service, render, ctx.projectRoot, ctx.projectName)) at(name, problem);
     }
 
     // A referenced secrets/configs entry is part of what the service holds: its inline `content` is a value too.
@@ -441,7 +458,7 @@ function runCompose(docker: string, args: readonly string[], env: Record<string,
 function composeArgs(stub: string, root: string, files: readonly string[]): string[] {
   return [
     "--project-directory", stub,
-    "--project-name", "compose-render",
+    "--project-name", COMPOSE_PROJECT_NAME,
     "--env-file", join(stub, ".env"),
     "--profile", "migrate",
     ...files.flatMap((f) => ["-f", join(root, f)]),
@@ -518,6 +535,18 @@ export function runChecks(opts: RunOptions, log: (line: string) => void): string
   }
   if (failures.length > 0) return failures;
 
+  // The allowlist's own pins (no symlink, exists, no .env* basename, mounted), over the tree this run renders.
+  const composeSchema = CORE_SCHEMA.withTags(mergeTag);
+  const model: Record<string, unknown> = {};
+  for (const [f, text] of fileTexts) {
+    try {
+      model[f] = load(text, { schema: composeSchema });
+    } catch {
+      failures.push(`${f}: not parseable as YAML, so the file-channel allowlist cannot be checked against it`);
+    }
+  }
+  failures.push(...fileChannelAllowlistDrift(model, opts.root));
+
   // A compose file no set renders is a stack no check here has looked at.
   try {
     const found = findComposeFiles(opts.root).map((f) => relative(opts.root, f));
@@ -538,7 +567,7 @@ export function runChecks(opts: RunOptions, log: (line: string) => void): string
   const env = scrubbedEnv(opts.sourceEnv);
 
   const stub = mkdtempSync(join(tmpdir(), "compose-render-"));
-  const ctx: AnalysisContext = { withheld, publisherOnly, sentinels, binding, smoke, projectRoot: stub };
+  const ctx: AnalysisContext = { withheld, publisherOnly, sentinels, binding, smoke, projectRoot: stub, projectName: COMPOSE_PROJECT_NAME };
   try {
     writeFileSync(join(stub, ".env"), stubEnvText(sentinels), { mode: 0o600 });
 

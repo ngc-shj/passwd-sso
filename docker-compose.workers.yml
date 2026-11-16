@@ -47,15 +47,20 @@
 # still reaches every service that loads .env; jackson also receives AUTH_SECRET
 # as NEXTAUTH_SECRET.
 #
-# The same checks apply default-deny to host files. Outside the dev override
-# (docker-compose.override.yml, whose `.:/app` mount is the dev shape), a bind
-# source is allowed only if it is one of the repo-relative paths in
-# FILE_CHANNEL_ALLOWLIST (scripts/checks/lib/withheld-env.ts: the initdb
-# directory, the fluent-bit configs, sentinel.conf); a named volume only if it is
-# plain and docker-managed (no driver, driver_opts or external); a top-level
-# `secrets:` or `configs:` entry a service references, `external: true` and
-# build.secrets, build.ssh and build.additional_contexts never. A volume type or
-# key the checks do not model fails them rather than being skipped.
+# The same checks apply default-deny to what a service may carry. Outside the dev
+# override (docker-compose.override.yml, whose `.:/app` mount is the dev shape), a
+# service may hold only the top-level keys in SERVICE_KEY_ALLOWLIST
+# (scripts/checks/lib/withheld-env.ts, an exact list: privileged, devices, cap_add,
+# pid, ipc, volumes_from, userns_mode and any unknown key are refused by name);
+# security_opt only as exactly ["no-new-privileges:true"]; build only with
+# context (the project root), dockerfile (Dockerfile) and args. A bind source is
+# allowed only if it is one of the repo-relative paths in FILE_CHANNEL_ALLOWLIST
+# (the initdb directory for db, the fluent-bit configs for fluent-bit, sentinel.conf
+# for the sentinel services), mounted by a service its entry names and read-only
+# where it says so; a named volume only if it is plain and docker-managed (no
+# driver, driver_opts, external or explicit name:); a top-level `secrets:` or
+# `configs:` entry a service references, and `external: true`, never. A volume type
+# or key the checks do not model fails them rather than being skipped.
 #
 # Do NOT combine this with docker-compose.override.yml in production — the dev
 # override exposes DB/Jackson/Redis ports to the host and runs the tsx source.

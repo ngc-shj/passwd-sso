@@ -118,6 +118,9 @@
             "DATABASE_URL": "postgresql://build:build@localhost:5432/passwd_sso"
           }
         },
+        "cap_drop": [
+          "ALL"
+        ],
         "command": [
           "node",
           "dist/audit-anchor-publisher.js"
@@ -159,7 +162,11 @@
         "networks": {
           "internal": null
         },
+        "read_only": true,
         "restart": "unless-stopped",
+        "security_opt": [
+          "no-new-privileges:true"
+        ],
         "stop_grace_period": "2m0s"
       },
       "audit-chain-verify-worker": {
@@ -170,6 +177,9 @@
             "DATABASE_URL": "postgresql://build:build@localhost:5432/passwd_sso"
           }
         },
+        "cap_drop": [
+          "ALL"
+        ],
         "command": [
           "node",
           "dist/audit-chain-verify-worker.js"
@@ -199,7 +209,11 @@
         "networks": {
           "internal": null
         },
-        "restart": "unless-stopped"
+        "read_only": true,
+        "restart": "unless-stopped",
+        "security_opt": [
+          "no-new-privileges:true"
+        ]
       },
       "audit-outbox-worker": {
         "build": {

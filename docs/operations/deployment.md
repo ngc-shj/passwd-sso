@@ -834,8 +834,13 @@ Destination keys, in `.env`; set the destinations in use and leave the rest empt
   a named volume you add to the publisher service. The volume must be writable
   by uid 1001, the image's user: a new volume mounted at a path the image does
   not contain is created `root:root`, and the publisher (read-only, no
-  capabilities) cannot change that, so give it to uid 1001 once before `up -d`:
-  `docker run --rm -v <volume>:/anchors alpine chown 1001:1001 /anchors`.
+  capabilities) cannot change that, so give it to uid 1001 once before `up -d`.
+  Compose names the volume `<project>_<key>`; the checks refuse an explicit
+  `name:` on a named volume (it can alias an existing host-bound volume), so do
+  not set one. Create the volume first and chown the `<project>_<key>` name
+  compose created:
+  `docker compose -f docker-compose.yml -f docker-compose.workers.yml up --no-start audit-anchor-publisher`,
+  then `docker run --rm -v <name from docker volume ls>:/anchors alpine chown 1001:1001 /anchors`.
   Discouraged on the database
   host: an anchor on the disk an attacker can rewrite witnesses nothing.
 
@@ -846,15 +851,25 @@ publisher-only secrets and the remaining secret keys of the env allowlist. The
 signing key, tag secret and `AUDIT_ANCHOR_AWS_*` reach the publisher alone, by
 interpolation. The parity test and the compose render check verify that a withheld key
 reaches only its declared holders through env and command, and that `.env` reaches
-no container as a file by default-deny: outside the dev override, a host path a
-container receives as a file (a bind source) is allowed only if it is one of the
-repo-relative paths in `FILE_CHANNEL_ALLOWLIST`
-(`scripts/checks/lib/withheld-env.ts`: the initdb directory, the fluent-bit
-configs, `sentinel.conf`); a named volume only if it is plain docker-managed (no
-`driver`, `driver_opts` or `external`); a service-referenced top-level `secrets:`
-or `configs:` entry, `external: true`, and `build.secrets`, `build.ssh` and
-`build.additional_contexts` never; a volume type or key the checks do not model
-fails them. Every other secret in `.env` (for example `AUTH_SECRET`, `REDIS_PASSWORD`,
+no container as a file or a host capability by default-deny. Outside the dev
+override a service may carry only the top-level keys in `SERVICE_KEY_ALLOWLIST`
+(`scripts/checks/lib/withheld-env.ts`, an exact list derived from the keys the
+production compose files use and compose's render adds): any other key, such as
+`privileged`, `devices`, `device_cgroup_rules`, `cap_add`, `pid`, `ipc`, `cgroup`,
+`userns_mode`, `volumes_from`, `extends` or one not yet invented, is refused by
+name. `security_opt` is allowed only as exactly `["no-new-privileges:true"]`, and
+`build` only with `context`, `dockerfile` and `args`, the context being the
+project root and the dockerfile `Dockerfile` (another context or
+`dockerfile_inline` escapes `.dockerignore`). A host path a container receives as
+a file (a bind source) is allowed only if it is one of the repo-relative paths in
+`FILE_CHANNEL_ALLOWLIST` (the initdb directory for `db`, the
+fluent-bit configs for `fluent-bit`, `sentinel.conf` for the sentinel services),
+mounted by a service its entry names and read-only where it says so; a named
+volume only if it is plain docker-managed (no `driver`, `driver_opts`, `external`
+or explicit `name:`); a service-referenced top-level `secrets:` or `configs:`
+entry and `external: true` never. The render check also verifies that each
+allowlist entry exists, is not a symlink, is not an `.env*` file and is mounted by
+a production file. A volume type or key the checks do not model fails them. fails them. Every other secret in `.env` (for example `AUTH_SECRET`, `REDIS_PASSWORD`,
 `SHARE_MASTER_KEY_*`) is not in the set and still reaches every container that
 loads `.env`; jackson also receives `AUTH_SECRET`, by interpolation, as
 `NEXTAUTH_SECRET`. In the dev

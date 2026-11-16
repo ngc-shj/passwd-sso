@@ -15,10 +15,16 @@ import {
   appDatabaseUrlFromCompose,
   deriveWithheldEnv,
   derivePublisherOnlyEnv,
+  BUILD_KEY_ALLOWLIST,
   FILE_CHANNEL_ALLOWLIST,
+  SERVICE_KEY_ALLOWLIST,
+  SERVICE_KEY_REFUSAL,
+  bindSourceProblem,
   externalEntryProblems,
   isAllowlistedFileSource,
   namedVolumeProblem,
+  serviceKeyProblems,
+  shortVolumeIsReadOnly,
   ownDatabaseUrlKey,
   ownRoleUser,
   readSmokeMap,
@@ -168,35 +174,124 @@ describe("isAllowlistedFileSource", () => {
   });
 });
 
+describe("bindSourceProblem", () => {
+  const root = "/srv/app";
+  const initdb = "/srv/app/infra/postgres/initdb";
+
+  it("allows an allowlisted path for a service the entry names, read-only", () => {
+    expect(bindSourceProblem(initdb, root, "db", true)).toBeNull();
+    expect(bindSourceProblem("/srv/app/infra/redis/sentinel.conf", root, "sentinel-2", true)).toBeNull();
+  });
+
+  it("refuses a path that is not on the list, whatever the service and mode", () => {
+    expect(bindSourceProblem("/srv/app/.env", root, "db", true)).toBe("is not allowlisted");
+  });
+
+  it("refuses a listed path from a service the entry does not name", () => {
+    expect(bindSourceProblem(initdb, root, "app", true)).toBe("is not allowlisted for this service");
+    expect(bindSourceProblem(initdb, root, "sentinel-1", true)).toBe("is not allowlisted for this service");
+  });
+
+  it("refuses a writable mount of a read-only entry, and accepts a writable one for readOnly: false", () => {
+    expect(bindSourceProblem(initdb, root, "db", false)).toBe("is allowlisted read-only and is mounted writable");
+    const list = [{ path: "infra/postgres/initdb", services: ["db"], readOnly: false, reason: "test" }];
+    expect(bindSourceProblem(initdb, root, "db", false, list)).toBeNull();
+  });
+});
+
+describe("shortVolumeIsReadOnly", () => {
+  it("reads ro among the mode options, and nothing else as read-only", () => {
+    for (const v of ["./a:/b:ro", "./a:/b:ro,z", "./a:/b:z,ro"]) expect(shortVolumeIsReadOnly(v), v).toBe(true);
+    for (const v of ["./a:/b", "./a:/b:rw", "./a:/b:z", "./a:/b:rro", "./ro:/ro"]) expect(shortVolumeIsReadOnly(v), v).toBe(false);
+  });
+});
+
 describe("FILE_CHANNEL_ALLOWLIST", () => {
-  it("names each entry as a normalised repo-relative path with a reason, and none of them .env*", () => {
-    expect(FILE_CHANNEL_ALLOWLIST.map((e) => e.path)).toEqual([
-      "infra/postgres/initdb",
-      "infra/fluent-bit/fluent-bit.conf",
-      "infra/fluent-bit/parsers.conf",
-      "infra/redis/sentinel.conf",
+  it("names each entry as a normalised repo-relative path with services, a mode and a reason, and none of them .env*", () => {
+    expect(FILE_CHANNEL_ALLOWLIST.map((e) => [e.path, e.services, e.readOnly])).toEqual([
+      ["infra/postgres/initdb", ["db"], true],
+      ["infra/fluent-bit/fluent-bit.conf", ["fluent-bit"], true],
+      ["infra/fluent-bit/parsers.conf", ["fluent-bit"], true],
+      ["infra/redis/sentinel.conf", ["sentinel-1", "sentinel-2", "sentinel-3"], true],
     ]);
-    for (const { path, reason } of FILE_CHANNEL_ALLOWLIST) {
+    for (const { path, reason, services } of FILE_CHANNEL_ALLOWLIST) {
       expect(posix.normalize(path), path).toBe(path);
       expect(reason, path).not.toBe("");
+      expect(services.length, path).toBeGreaterThan(0);
       expect(posix.basename(path).startsWith(".env"), path).toBe(false);
     }
   });
 });
 
 describe("namedVolumeProblem", () => {
+  const expected = "compose-render_postgres_data";
+
   it("allows a plain docker-managed volume, as written or as compose renders it", () => {
-    expect(namedVolumeProblem(null)).toBeNull();
-    expect(namedVolumeProblem({})).toBeNull();
-    expect(namedVolumeProblem({ name: "compose-render_postgres_data" })).toBeNull();
+    expect(namedVolumeProblem(null, null)).toBeNull();
+    expect(namedVolumeProblem({}, null)).toBeNull();
+    expect(namedVolumeProblem(null, expected)).toBeNull();
+    expect(namedVolumeProblem({ name: expected }, expected)).toBeNull();
+  });
+
+  it("refuses any explicit name where the project name is unknown, and a differing one where it is known", () => {
+    expect(namedVolumeProblem({ name: expected }, null)).toBe("sets name");
+    expect(namedVolumeProblem({ name: "postgres_data" }, expected)).toBe(`sets name (not ${expected})`);
+    expect(namedVolumeProblem({ name: "other_postgres_data" }, expected)).toBe(`sets name (not ${expected})`);
+    expect(namedVolumeProblem({ name: 5 }, expected)).toBe(`sets name (not ${expected})`);
+    expect(namedVolumeProblem({ driver: "local", name: "x" }, expected)).toBe(`sets driver, name (not ${expected})`);
   });
 
   it("names a driver, driver_opts, an unmodelled definition and an undefined volume", () => {
-    expect(namedVolumeProblem({ driver: "local" })).toBe("sets driver");
-    expect(namedVolumeProblem({ driver_opts: { device: "." } })).toBe("sets driver_opts");
-    expect(namedVolumeProblem(5)).toBe("has an unmodelled definition");
-    expect(namedVolumeProblem([])).toBe("has an unmodelled definition");
-    expect(namedVolumeProblem(undefined)).toBe("is not defined by any compose file");
+    expect(namedVolumeProblem({ driver: "local" }, null)).toBe("sets driver");
+    expect(namedVolumeProblem({ driver_opts: { device: "." } }, null)).toBe("sets driver_opts");
+    expect(namedVolumeProblem(5, null)).toBe("has an unmodelled definition");
+    expect(namedVolumeProblem([], null)).toBe("has an unmodelled definition");
+    expect(namedVolumeProblem(undefined, null)).toBe("is not defined by any compose file");
+  });
+});
+
+describe("serviceKeyProblems", () => {
+  const isDot = (context: string) => context === ".";
+  const real = { build: { context: ".", dockerfile: "Dockerfile", args: { A: "b" } }, security_opt: ["no-new-privileges:true"], read_only: true, command: ["x"] };
+  const refused = (what: string) => [`${SERVICE_KEY_REFUSAL}: ${what}`];
+
+  it("allows a service of listed keys, and the build and security_opt the stack ships", () => {
+    expect(serviceKeyProblems(real, isDot)).toEqual([]);
+    expect(serviceKeyProblems({}, isDot)).toEqual([]);
+    expect(serviceKeyProblems({ build: { context: "/tmp/stub", dockerfile: "Dockerfile" } }, (c) => c === "/tmp/stub")).toEqual([]);
+  });
+
+  it("lists the keys the stack uses, and none that reaches another container or the host", () => {
+    for (const key of ["privileged", "devices", "device_cgroup_rules", "cap_add", "pid", "ipc", "cgroup", "userns_mode", "volumes_from", "extends", "network_mode", "tmpfs", "container_name"]) {
+      expect(SERVICE_KEY_ALLOWLIST, key).not.toContain(key);
+    }
+    expect(BUILD_KEY_ALLOWLIST).toEqual(["context", "dockerfile", "args"]);
+  });
+
+  it("refuses each key outside the list by name, in key order, and an unknown or future one", () => {
+    expect(serviceKeyProblems({ ...real, privileged: true, pid: "host", x_unknown: 1 }, isDot)).toEqual([
+      ...refused("privileged"),
+      ...refused("pid"),
+      ...refused("x_unknown"),
+    ]);
+  });
+
+  it("refuses a security_opt that is not exactly no-new-privileges:true", () => {
+    for (const value of [["seccomp=unconfined"], ["no-new-privileges:true", "seccomp=unconfined"], [], "no-new-privileges:true"]) {
+      expect(serviceKeyProblems({ ...real, security_opt: value }, isDot), JSON.stringify(value)).toEqual(refused('security_opt is not exactly ["no-new-privileges:true"]'));
+    }
+  });
+
+  it("refuses a build that is not a mapping, has an extra key, another context or another dockerfile", () => {
+    expect(serviceKeyProblems({ build: "." }, isDot)).toEqual(refused("build is not a mapping"));
+    expect(serviceKeyProblems({ build: { ...real.build, dockerfile_inline: "FROM x" } }, isDot)).toEqual(refused("build.dockerfile_inline is set"));
+    expect(serviceKeyProblems({ build: { ...real.build, context: ".." } }, isDot)).toEqual(refused("build.context is not the project root"));
+    expect(serviceKeyProblems({ build: { dockerfile: "Dockerfile" } }, isDot)).toEqual(refused("build.context is not the project root"));
+    expect(serviceKeyProblems({ build: { ...real.build, dockerfile: "Other" } }, isDot)).toEqual(refused("build.dockerfile is not Dockerfile"));
+  });
+
+  it("names a service that is not a mapping", () => {
+    expect(serviceKeyProblems(null, isDot)).toEqual(["has an unmodelled service definition"]);
   });
 });
 

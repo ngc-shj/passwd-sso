@@ -137,3 +137,37 @@ mounts/secrets/configs.
 - test-R3 — Fixed: projection includes per-service and top-level volumes/secrets/configs.
 - Verification: full suite 1193 files / 25045 tests pass; build pass; render, log-caps,
   image-pin, bypass-rls, meta-gate, doc-paths, lint, typecheck pass.
+
+### Round 3
+Findings: func-F-R3-1 [Major] systemd README advised `--exit-code-from app`, which implies
+`--abort-on-container-exit` (verified with `docker compose up --help`, v5.0.2);
+func-F-R3-2 [Minor] FS chown step used the unprefixed volume name; func-F-R3-3 [Minor]
+false compose rationale in a comment; sec-R1 [Major] default-deny covered only
+volume/secret/config/build-file keys (pid, privileged, devices, cap_add, volumes_from,
+build.context/dockerfile_inline, security_opt, ipc, userns_mode passed); sec-R2 [Minor]
+explicit `name:` aliased an existing volume; sec-R3 [Minor] allowlist not bound to
+service or read-only; test-R1 [Major] allowlist pins not reached by CI for PRs touching
+only infra/postgres|fluent-bit|redis; test-R2 [Minor] compose discovery pathspec vs walk
+mismatch.
+
+- R42 class "container reach to W / host .env": expanded a third time (service keys
+  beyond mounts). Closed by default-deny over the whole service schema:
+  `SERVICE_KEY_ALLOWLIST` (exact top-level keys production uses, plus the render-added
+  `entrypoint: null`), `BUILD_KEY_ALLOWLIST` (context = project root, dockerfile =
+  `Dockerfile`, args), `security_opt` exactly `no-new-privileges:true`; every other key
+  refused by name in both adjudicators. Red-proven by 7 predicate mutations (scratch
+  vitest alias) and per-key red cases in both gates. Wired: render check in
+  static-checks on every PR; parity test in app-test.
+- `FILE_CHANNEL_ALLOWLIST` entries now `{path, services, readOnly, reason}`: initdb→db,
+  fluent-bit confs→fluent-bit, sentinel.conf→sentinel-1..3 (all read-only; the ha
+  entrypoint copies sentinel.conf to /tmp before Sentinel rewrites it).
+- Allowlist pins (exists, no symlink, not `.env*`, mounted) moved into the render check
+  (`fileChannelAllowlistDrift` over `--root`), so they run on every PR; real-docker red
+  cases for a symlink-to-.env and a deleted entry.
+- Named volumes: rendered `name` must be `compose-render_<key>`; parity refuses `name:`.
+- Compose discovery: one predicate `isComposePath` for git and walk, pinned by a test.
+- func-F-R3-1..3 fixed (systemd README: drop the abort flag, do not substitute
+  `--exit-code-from`; FS step: create with `up --no-start`, chown the compose-created
+  name; comment reworded).
+- Render fixture re-recorded (it predated the round-1 hardening keys).
+- Verification: full suite 1193 files / 25077 tests pass; build pass; all gates pass.

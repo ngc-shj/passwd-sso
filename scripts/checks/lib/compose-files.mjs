@@ -7,22 +7,23 @@ import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 
 /**
- * All four filenames Compose accepts by default, plus their overlay variants.
- * `docker-compose*.yml` alone is NOT the member set: Compose reads
- * `compose.yaml` in PREFERENCE to `docker-compose.yml`, so a project could keep
- * a capped `docker-compose.yml` that Compose ignores entirely while an uncapped
- * `compose.yaml` is what actually runs — and a guard scoped to the first
- * spelling would pass having examined the file nobody uses.
+ * The one member predicate, on the repo-relative path: any `.yml`/`.yaml` whose
+ * path contains `compose`. Both discovery paths (the tracked listing and the
+ * readdir walk) apply this same function, so they cannot disagree on the member
+ * set. It is the wider of the two spellings the code used to keep: the git
+ * pathspec `*compose*.yml` also matched a file named `my-compose.yml` or one in
+ * a `deploy/compose/` directory, which the basename regex
+ * `(docker-)?compose*` did not. For a gate whose failure mode is an unexamined
+ * stack, an extra candidate is a loud, fixable false positive (the render check
+ * names a file no render set renders), and a missed one is a silent green.
+ * Compose reads `compose.yaml` in preference to `docker-compose.yml`, and `-f`
+ * takes any name, so the `docker-compose*.yml` spelling alone is not the set.
  */
-const COMPOSE_FILE_RE = /(^|\/)(docker-)?compose.*\.ya?ml$/;
-// Leading `*` so the pathspec is not anchored at the repo root — `deploy/
-// docker-compose.yml` is a tracked compose file and was invisible to the gate.
-export const GIT_PATHSPECS = [
-  "*docker-compose*.yml",
-  "*docker-compose*.yaml",
-  "*compose*.yml",
-  "*compose*.yaml",
-];
+const COMPOSE_PATH_RE = /compose.*\.ya?ml$/;
+
+export function isComposePath(relPath) {
+  return COMPOSE_PATH_RE.test(relPath);
+}
 
 /**
  * Tracked compose files. `git ls-files` keeps an untracked scratch copy out of
@@ -59,38 +60,36 @@ export function isTestFixturePath(relPath) {
 /** Tracked compose paths, repo-relative, BEFORE the fixture allowlist is applied. */
 export function listTrackedComposePaths(root = ".") {
   try {
-    return execFileSync("git", ["ls-files", "-z", ...GIT_PATHSPECS], {
+    // No pathspec: git's glob would be a second spelling of the predicate.
+    return execFileSync("git", ["ls-files", "-z"], {
       cwd: root,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
+      maxBuffer: 64 * 1024 * 1024,
     })
       .split("\0")
-      .filter(Boolean);
+      .filter((f) => f !== "" && isComposePath(f));
   } catch {
     return [];
   }
 }
 
 export function findComposeFiles(root = ".") {
-  try {
-    const tracked = execFileSync("git", ["ls-files", "-z", ...GIT_PATHSPECS], {
-      cwd: root,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    })
-      .split("\0")
-      .filter(Boolean);
-    if (tracked.length > 0) {
-      return [...new Set(tracked)]
-        .filter((f) => !isTestFixturePath(f))
-        .map((f) => join(root, f));
-    }
-  } catch {
-    // not a git checkout, or git is absent
+  const tracked = listTrackedComposePaths(root);
+  if (tracked.length > 0) {
+    return [...new Set(tracked)]
+      .filter((f) => !isTestFixturePath(f))
+      .map((f) => join(root, f));
   }
-  // Recursive, matching the git pathspec above. A top-level-only fallback would
-  // make the source-tarball path quietly weaker than the checkout path — and
-  // that asymmetry is invisible until it matters.
+  return walkComposeFiles(root);
+}
+
+/**
+ * The source-tarball path: every file under `root` that isComposePath accepts.
+ * Recursive like the tracked listing — a top-level-only walk would make the
+ * tarball path quietly weaker than the checkout path.
+ */
+export function walkComposeFiles(root = ".") {
   const out = [];
   const walk = (dir, rel) => {
     let entries;
@@ -106,7 +105,7 @@ export function findComposeFiles(root = ".") {
         if (!isTestFixturePath(childRel)) walk(join(dir, e.name), childRel);
         continue;
       }
-      if (e.isFile() && COMPOSE_FILE_RE.test(e.name) && !isTestFixturePath(childRel)) {
+      if (e.isFile() && isComposePath(childRel) && !isTestFixturePath(childRel)) {
         out.push(join(dir, e.name));
       }
     }

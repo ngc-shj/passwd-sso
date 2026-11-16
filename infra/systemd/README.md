@@ -25,12 +25,13 @@ set the variables the overlay requires in `.env` (see the "Audit anchor
 publisher on Compose and Kubernetes" section of
 `docs/operations/deployment.md`). `TimeoutStopSec` must then be at least 120 s
 plus margin for `docker compose down`, because the publisher's
-`stop_grace_period` is 120 s; the unit's 90 s would kill it mid-run. Also
-replace `--abort-on-container-exit` with `--exit-code-from app`: with the
-overlay, the former tears the whole stack down (the app included) whenever any
-worker exits — a publisher with no destination exits at boot by design — while
-the latter ties the unit to the app and leaves each worker to its own
-`restart: unless-stopped`.
+`stop_grace_period` is 120 s; the unit's 90 s would kill it mid-run. Also drop
+`--abort-on-container-exit` from `ExecStart` (do not substitute
+`--exit-code-from`, which implies it): with the overlay it tears the whole
+stack down, the app included, whenever any worker exits — and a publisher with
+no destination exits at boot by design. Without it, each container relies on
+its own `restart: unless-stopped`, and `Restart=on-failure` reacts only to
+compose itself failing (see "Restart semantics").
 
 ## Prerequisites
 
@@ -92,6 +93,9 @@ sudo systemctl restart passwd-sso
 foreground. When any container exits unexpectedly, compose exits non-zero and
 `Restart=on-failure` brings the whole stack back after `RestartSec=10`. On
 `systemctl stop`, `ExecStop` runs `docker compose down` for an orderly teardown.
+A unit extended with the workers overlay (above) runs `up` without the abort
+flag, so a container's crash is handled by its compose restart policy rather
+than by restarting the stack.
 
 ## Verification
 
