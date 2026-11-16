@@ -99,3 +99,44 @@ RT4 ok | RT7 T2-1, T2-3 | others ok
 - Modified file: src/__tests__/db-integration/foothold-write-gate.integration.test.ts
 ### F1-r2 Minor
 - Action: plan C5 table rows corrected.
+
+---
+
+# Code Review: member-foothold-containment
+Date: 2026-11-17
+Review round: 3
+
+## Changes from Previous Round
+Round-2 fixes (a76d5726d) verified: T2-1, T2-3, F1-r2 resolved; production unchanged in that commit.
+
+## Functionality / Security Findings
+No findings (plan row matches the MCP-client PUT gate; R43: no predicate changed).
+
+## Testing Findings
+- QA-R3-1 Minor — the concurrent cell's comment claimed a 409 mapping the containment route does not have; the assertions are sound.
+- QA-R3-2 Minor — the interleaving is probabilistic (the cell says it is not an ordering proof; rule 9 and the held-transaction cells are).
+- QA-R3-3 Minor — no recorded red-proof for the concurrent cell.
+
+## Recurring Issue Check
+### Functionality / Security expert
+R1-R57 ok | RS1-RS6 ok | R43 ok
+### Testing expert
+RT4 ok | RT7 QA-R3-3 | others ok
+
+## Tightening-only skip — Round 3
+Findings applied directly (no Round 4 review):
+- QA-R3-1 [Minor] comment wording — src/__tests__/db-integration/tenant-member-passkey-revoke.integration.test.ts — applied verbatim.
+Justification: within Round 2's fix range, comment-only, no security-boundary touch.
+
+### QA-R3-2 Minor — Accepted
+- **Anti-Deferral check**: acceptable risk.
+- **Justification**: worst case — an infrequent deadlock between containment and a departure is not caught by this cell; likelihood low — the lock order it would need to violate is pinned structurally by rule 9 of `check-team-rotation-input-lock.mjs` (ordered callee, red self-tests) and by the held-transaction cells; cost to force the interleave — a mid-transaction pause hook in production code, rejected in plan round 3 (T3-2).
+- **Orchestrator sign-off**: accept.
+
+### QA-R3-3 Minor — Accepted
+- **Anti-Deferral check**: acceptable risk.
+- **Justification**: worst case — the cell's deny side is unproven by mutation; likelihood of a vacuous pass is low — the assertions are positive (`fulfilled`, status in {200, 404}, exactly one audit row per pair) and any rejection or error status fails them; cost — a deterministic red-proof needs the reversed lock order AND a forced overlap, which is the same pause hook as QA-R3-2. The ordering itself is red-proved by the rule-9 self-test (wrong-order case).
+- **Orchestrator sign-off**: accept.
+
+## Termination
+Round 3: no Critical or Major from any expert; remaining Minors applied or accepted above. R42 class (foothold writers, delivery readers, departure writers): closed by mutation-verified guards — `src/__tests__/foothold-member-set.test.ts` (red-proven: gate call removed from a copy of the SCIM-token POST → unclassified write) and rule 9 of `scripts/checks/check-team-rotation-input-lock.mjs` (red self-tests: missing / out-of-order / foreign-exemption / branch), both run by `npx vitest run` in CI and `scripts/pre-pr.sh`.

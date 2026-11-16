@@ -934,8 +934,8 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
 
   // Not an ordering proof (the foothold-write-gate cells hold a transaction for
   // that): the two writers take their locks in the order production does, so
-  // neither may fail. A deadlock victim on the containment side surfaces as the
-  // route's lock-conflict 409, not as a 40P01 in the body, so the containment
+  // neither may fail. A deadlock victim on the containment side rejects or
+  // answers an error status, never a 40P01 in the body, so the containment
   // answer must be a decision: 200, or 404 when the departure committed first
   // (containment reaches active members only). Several pairs, so the
   // interleaving is exercised more than once.
