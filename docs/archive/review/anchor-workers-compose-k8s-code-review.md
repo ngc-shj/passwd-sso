@@ -249,3 +249,28 @@ precedes the compose-using step, and the duplicate-step case was untested.
   a scratch copy as the process requires.
 - Verification: full suite 1193 files / 25104 tests pass; lint and typecheck pass
   (test and docs only; no app code changed, so no rebuild).
+
+### Round 8
+Security: No findings. Functionality: No findings. Testing: J1 [Minor] the
+`useAt < 0` ("no step running compose") refusal in `composePinProblems` had no red
+case; removing it left the suite green.
+
+## Tightening-only skip — Round 8
+Findings applied directly (no Round 9 review):
+- J1 [Minor] red case added: the app-test `vitest run` step renamed → exactly
+  `["app-test has no step running vitest run"]`; the real ci.yml remains the allow
+  case. Red-proved on an rsync scratch copy of the tree (refusal neutralised →
+  1 failed, 6 passed; the real file untouched).
+Justification: the finding sits inside Round 7's fix scope (the pin-order check in the
+test file), adds a test case without changing any check, CI step, compose file or
+schema, and touches no security boundary (security and functionality returned No
+findings for this commit).
+
+## Termination
+All three experts returned No findings in Round 8 apart from J1, resolved above.
+- R42 class "container reach to W / host `.env`": member-set expanded in rounds 1–4;
+  closed by default-deny over the service schema, file channels, named volumes and
+  logging options, enforced in `scripts/checks/lib/withheld-env.ts` and applied by both
+  the parity test (app-test) and `scripts/checks/check-compose-render.ts`
+  (static-checks, `Static: compose-render`, CI=true). Red-proven by predicate mutations
+  in rounds 3–6 and per-channel real-compose red cases.

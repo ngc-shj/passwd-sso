@@ -1146,6 +1146,14 @@ describe("CI compose pin", () => {
     return dump(ci);
   };
 
+  it("is refused when a job has no step running compose to order the pin against", () => {
+    const renamed = withSteps((steps) => {
+      const use = steps.find((s) => (s.run ?? "").includes("vitest run"))!;
+      use.run = use.run!.replaceAll("vitest run", "vitest-renamed");
+    });
+    expect(composePinProblems(renamed, recorded.composeVersion)).toEqual(["app-test has no step running vitest run"]);
+  });
+
   it("is refused when the pin comes after the step that runs compose, or appears twice", () => {
     const moved = withSteps((steps) => {
       const pin = steps.findIndex((s) => s.name === COMPOSE_PIN_STEP);
