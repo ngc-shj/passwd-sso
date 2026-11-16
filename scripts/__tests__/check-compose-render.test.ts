@@ -13,7 +13,7 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
-import { load } from "js-yaml";
+import { dump, load } from "js-yaml";
 import {
   CANARY_TOKEN,
   COMPOSE_PROJECT_NAME,
@@ -1105,6 +1105,8 @@ describe("real docker compose", () => {
  * that version, per job, to the fixture's.
  */
 const COMPOSE_PIN_JOBS = ["static-checks", "app-test"];
+/** The first step of each job that runs docker compose; the pin must come before it. */
+const COMPOSE_USE_STEP: Record<string, string> = { "static-checks": "scripts/pre-pr.sh", "app-test": "vitest run" };
 const COMPOSE_PIN_STEP = "Install docker compose (pinned)";
 const realCiText = readFileSync(join(REPO_ROOT, ".github/workflows/ci.yml"), "utf8");
 
@@ -1114,11 +1116,15 @@ function composePinProblems(ciText: string, fixtureVersion: string | null): stri
   const problems: string[] = [];
   const pins: Record<string, { version: string; sha: string }> = {};
   for (const job of COMPOSE_PIN_JOBS) {
-    const steps = (jobs[job]?.steps ?? []).filter((s) => s.name === COMPOSE_PIN_STEP);
+    const all = jobs[job]?.steps ?? [];
+    const steps = all.filter((s) => s.name === COMPOSE_PIN_STEP);
     if (steps.length !== 1) {
       problems.push(`${job} has ${steps.length} "${COMPOSE_PIN_STEP}" steps, not 1`);
       continue;
     }
+    const useAt = all.findIndex((s) => (s.run ?? "").includes(COMPOSE_USE_STEP[job]));
+    if (useAt < 0) problems.push(`${job} has no step running ${COMPOSE_USE_STEP[job]}`);
+    else if (all.indexOf(steps[0]) > useAt) problems.push(`${job} installs the pinned compose after the step running ${COMPOSE_USE_STEP[job]}`);
     const version = /^\s*COMPOSE_VERSION=(\S+)$/m.exec(steps[0].run ?? "")?.[1];
     const sha = /^\s*COMPOSE_SHA256=([0-9a-f]{64})$/m.exec(steps[0].run ?? "")?.[1];
     if (!version || !sha) problems.push(`${job} does not set COMPOSE_VERSION and a 64-hex COMPOSE_SHA256`);
@@ -1133,6 +1139,28 @@ function composePinProblems(ciText: string, fixtureVersion: string | null): stri
 }
 
 describe("CI compose pin", () => {
+  type Ci = { jobs: Record<string, { steps: { name?: string; run?: string }[] }> };
+  const withSteps = (edit: (steps: { name?: string; run?: string }[]) => void) => {
+    const ci = load(realCiText) as Ci;
+    edit(ci.jobs["app-test"].steps);
+    return dump(ci);
+  };
+
+  it("is refused when the pin comes after the step that runs compose, or appears twice", () => {
+    const moved = withSteps((steps) => {
+      const pin = steps.findIndex((s) => s.name === COMPOSE_PIN_STEP);
+      const [step] = steps.splice(pin, 1);
+      steps.push(step);
+    });
+    expect(composePinProblems(moved, recorded.composeVersion)).toEqual([
+      'app-test installs the pinned compose after the step running vitest run',
+    ]);
+    const twice = withSteps((steps) => {
+      steps.push({ ...steps.find((s) => s.name === COMPOSE_PIN_STEP)! });
+    });
+    expect(composePinProblems(twice, recorded.composeVersion)).toEqual([`app-test has 2 "${COMPOSE_PIN_STEP}" steps, not 1`]);
+  });
+
   it("matches the fixture's composeVersion in both jobs, with one version and checksum", () => {
     expect(composePinProblems(realCiText, recorded.composeVersion)).toEqual([]);
   });

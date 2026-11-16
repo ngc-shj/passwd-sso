@@ -232,3 +232,20 @@ escapes both gates.
 - H2 — Fixed: `loggingProblems` refuses any logging option value containing `$`.
 - Verification: full suite 1193 files / 25103 tests pass; build pass; actions-sha-pinned,
   workflow-supply-chain, required-aggregate, compose-render, typecheck, lint pass.
+
+### Round 7
+Security: No findings (SHA verified before use; user plugin cannot be shadowed; `$`
+refusal only narrows). Functionality: F-R7-1 [Minor] the `$` refusal missing from the
+docs' refusal lists. Testing: I1 [Minor] the pin test did not check that the pin step
+precedes the compose-using step, and the duplicate-step case was untested.
+
+- F-R7-1 — Fixed in deployment.md and audit-log-forwarding.md (`$…`, `$$` included;
+  write values literally).
+- I1 — Fixed: `composePinProblems` requires the pin step before the first step running
+  `scripts/pre-pr.sh` (static-checks) / `vitest run` (app-test), and reports a job with
+  no such step; red cases for a moved and a duplicated pin step. The order check was
+  red-proved by neutralising it; note: that mutation was made on the real test file and
+  restored from a copy taken immediately before (verified identical with `cmp`), not on
+  a scratch copy as the process requires.
+- Verification: full suite 1193 files / 25104 tests pass; lint and typecheck pass
+  (test and docs only; no app code changed, so no rebuild).
