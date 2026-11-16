@@ -866,6 +866,7 @@ describe("runDirectorySync", () => {
 
       expect(result.success).toBe(false);
       expect(mockTombstoneRevokedSessions).not.toHaveBeenCalled();
+      expect(mockLogAuditBulk).not.toHaveBeenCalled();
     });
 
     it("locks every tenant row the run touches in one call, before any transition", async () => {

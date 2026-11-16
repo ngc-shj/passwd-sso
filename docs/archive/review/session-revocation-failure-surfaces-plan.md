@@ -1,4 +1,4 @@
-# Plan: session-revocation-failure-surfaces (#1047)
+# Plan: session-revocation-failure-surfaces (`#1047`)
 
 ## Project context
 

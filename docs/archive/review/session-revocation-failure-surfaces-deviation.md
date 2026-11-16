@@ -23,3 +23,17 @@ In `replaceScimUser`, the `scimExternalMapping` writes run after `departFromTena
 
 ## D7: comment-only updates in four token tests
 `extension-token.test.ts`, `api-key.test.ts`, `tenant-context.test.ts` and `mcp/oauth-server.test.ts` carried "L2" comments describing the old fail-open SCIM path (logged and answered 200). The comments now describe the atomic revocation. Test names and assertions are unchanged.
+
+## Red-proof record (Phase 2)
+Every mutation ran on a scratch copy, outside the repository, through a scratch vitest alias config. Production files were never mutated, and each unmutated control passed through the same config.
+
+| Cell | Mutation | Observed failure |
+|------|----------|------------------|
+| T1 (SCIM PATCH/PUT/DELETE, team DELETE) | All 11 changed modules aliased to their `HEAD~` (pre-change) source | 4/4 fail: `promise resolved "Response { status: 200 … }" instead of rejecting` (200/200/204/200). The log shows `session-invalidation-failed`: the fault fired after the commit and was swallowed. T2, T7 and T8 also fail on pre-change source (5/5). |
+| T6 lock identity | Key prefix in `lockUsersAuthArtifacts` changed to `user-auth-mutated:` | `expected 'settled' to be 'parked'`. The bounded-wait cells also fail (`expected 200 to be 409`). |
+| T6 lock order | `lockUsersAuthArtifacts` called before `endTeamMemberships` in `departFromTenant` | `syncError: "… Code: 40P01 … deadlock detected"` instead of both commit |
+| T6 fresh budget (unit) | Transition budget passed to the revocation lock | Only the fresh-budget cell fails, with `UserAuthLockTimeoutError` |
+| Revocation last (unit) | Revoke before `endTeamMemberships` | Only the "revokes, last" cell fails |
+| C8 rule 9 (gate self-test) | 22 single-clause mutations of the gate (m01–m22: each subject arm, the fail-closed cases, source order, innermost function, before-skip placement, missing/unexpected checks, the exemption) | Each reddens its own cells; listed per mutation in the C8 implementer's report |
+
+T1's "unseeded faulted table" red was not run as a separate mutation. `expectSeeded` (row counts before the snapshot) and the touch of the code row while the fault is armed, which proves the trigger passes while the session exists, cover the same failure.

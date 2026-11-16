@@ -1176,7 +1176,7 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
     expect(removal[2]).toEqual({ timeout: TEAM_MEMBERSHIP_TX_TIMEOUT_MS });
   });
 
-  it("removes nothing and answers no 2xx when the revocation fails inside the transaction", async () => {
+  it("answers no 2xx, records and tombstones nothing when the revocation fails inside the transaction", async () => {
     mockPrismaTeamMember.findUnique.mockResolvedValue(removableTarget);
     mockRevokeUserAuthArtifactsInTx.mockRejectedValueOnce(new Error("revocation failed"));
 
