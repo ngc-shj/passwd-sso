@@ -933,35 +933,38 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
   });
 
   // Not an ordering proof (the foothold-write-gate cells hold a transaction for
-  // that): the two writers take their locks in the order production does, and
-  // neither may be chosen as a deadlock victim.
+  // that): the two writers take their locks in the order production does, so
+  // neither may fail. A deadlock victim on the containment side surfaces as the
+  // route's lock-conflict 409, not as a 40P01 in the body, so the containment
+  // answer must be a decision: 200, or 404 when the departure committed first
+  // (containment reaches active members only). Several pairs, so the
+  // interleaving is exercised more than once.
   it("containment and the member's departure run concurrently with no deadlock under the real order", async () => {
     const owner = await memberWithRole("OWNER");
-    const target = await memberWithRole("ADMIN");
-    const sa = await serviceAccount(target);
-    const token = await saToken(sa, target);
+    for (let pair = 0; pair < 5; pair++) {
+      const target = await memberWithRole("ADMIN");
+      const sa = await serviceAccount(target);
+      const token = await saToken(sa, target);
 
-    const [contained, departed] = await Promise.allSettled([
-      containAs(owner, target, { revoke: { serviceAccountTokenIds: [token.id] } }),
-      withTenantRls(prisma, tenantId, (tx) =>
-        departFromTenant(tx, tenantId, [target], { actor: { userId: SYSTEM_ACTOR_ID, actorType: ACTOR_TYPE.SYSTEM } }),
-      ),
-    ]);
+      const [contained, departed] = await Promise.allSettled([
+        containAs(owner, target, { revoke: { serviceAccountTokenIds: [token.id] } }),
+        withTenantRls(prisma, tenantId, (tx) =>
+          departFromTenant(tx, tenantId, [target], { actor: { userId: SYSTEM_ACTOR_ID, actorType: ACTOR_TYPE.SYSTEM } }),
+        ),
+      ]);
 
-    if (contained.status === "rejected") expect(pgErrorCode(contained.reason)).not.toBe("40P01");
-    else {
-      expect(contained.value.status).toBeLessThan(500);
-      expect(await contained.value.text()).not.toContain("40P01");
+      expect(departed.status).toBe("fulfilled");
+      expect(contained.status).toBe("fulfilled");
+      if (contained.status === "fulfilled") expect([200, 404]).toContain(contained.value.status);
+
+      const [member] = await sql<{ departed: boolean }>(
+        `SELECT deactivated_at IS NOT NULL AS departed FROM tenant_members WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, tenantId, target,
+      );
+      expect(member.departed).toBe(true);
+      expect(await tokenRevokedAt(token.id)).toBe(true);
+      const revokes = (await auditRows(tenantId)).filter((r) => r.action === "SERVICE_ACCOUNT_TOKEN_REVOKE" && r.targetId === token.id);
+      expect(revokes).toHaveLength(1);
     }
-    if (departed.status === "rejected") expect(pgErrorCode(departed.reason)).not.toBe("40P01");
-
-    const [member] = await sql<{ departed: boolean }>(
-      `SELECT deactivated_at IS NOT NULL AS departed FROM tenant_members WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, tenantId, target,
-    );
-    expect(member.departed).toBe(true);
-    expect(await tokenRevokedAt(token.id)).toBe(true);
-    const revokes = (await auditRows(tenantId)).filter((r) => r.action === "SERVICE_ACCOUNT_TOKEN_REVOKE" && r.targetId === token.id);
-    expect(revokes).toHaveLength(1);
   });
 
   it("remaining: an ADMIN actor's answer leaves out break-glass grants, which only an OWNER may contain", async () => {

@@ -175,7 +175,8 @@ reuses `RESET_NOT_APPROVABLE` (409), not a cause-revealing code.
 | `POST /api/tenant/scim-tokens` | SCIM token | `SCIM_MANAGE` | none |
 | `POST /api/tenant/mcp-clients` | MCP client | `SERVICE_ACCOUNT_MANAGE` | none |
 | `POST /api/tenant/service-accounts` | service account | `SERVICE_ACCOUNT_MANAGE` | none |
-| `PUT /api/tenant/service-accounts/[id]`, `PUT /api/tenant/mcp-clients/[id]` | re-activation (undoes containment) | `SERVICE_ACCOUNT_MANAGE`, called in the write transaction when `data.isActive === true` | none |
+| `PUT /api/tenant/service-accounts/[id]` | re-activation (undoes containment) | `SERVICE_ACCOUNT_MANAGE`, in the write transaction when `data.isActive === true` | none |
+| `PUT /api/tenant/mcp-clients/[id]` | re-activation, scope or redirect-URI change | `SERVICE_ACCOUNT_MANAGE`, in the write transaction when `isActive === true` or `allowedScopes` / `redirectUris` is present (presence, not widening, triggers it); deactivate-only and display-only edits stay ungated (code review S1-2) | none |
 | `POST /api/mcp/authorize/consent` (DCR claim arm only: sets `tenantId`, `createdById`) | MCP client | `null`; tenant = `userTenantId` (the claim's own `resolveOwningTenantIdFromClient` id); gate inside the claim callback before its `advisoryXactLock(tx, userTenantId)`; `MCP_CLIENT_CONSENT` gains `tenantMember`, `tenantMemberDeparture`, `session` (it runs under bypass, not tenant RLS) | none |
 | `POST /api/tenant/breakglass` | break-glass grant | `BREAKGLASS_REQUEST` | none |
 | `POST /api/emergency-access` | emergency-access grant (already inside `withUserTenantRls`; the gate is that callback's first statement, on its `tenantId` — the id the grant is written under, by construction) | `null` | none |

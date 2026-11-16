@@ -60,3 +60,42 @@ N/A — no environment constraints declared in Phase 1. Integration suite: 161/1
 - **Justification**: worst case — the migration aborts and must be re-run after cleaning one outbox row; likelihood — nil in practice: HUMAN audit rows are written from `tenantAuditBase(req, session.user.id, …)`, always a uuid, and the merged `20261114000300_team_webhook_creator` uses the identical cast; cost to fix — editing a migration already applied in developer databases changes its checksum (Prisma drift).
 - **Orchestrator sign-off**: skip.
 ### S1-3 — No action (informational)
+
+---
+
+# Code Review: member-foothold-containment
+Date: 2026-11-17
+Review round: 2
+
+## Changes from Previous Round
+Round-1 fixes (commit 0ad5227bf): S1-2, T-1–T-4, F1, F2, S1-1 resolved; F3, F4 skipped with Anti-Deferral; S1-3 informational.
+
+## Functionality Findings
+- F1-r2 Minor (new) — plan row for the MCP-client PUT still states the re-activation-only gate. → plan C5 table split into the SA and MCP-client rows with the presence condition.
+- F2-r2 — service-account PUT comment accurate; no action.
+
+## Security Findings
+No findings (S1-2 fix verified as a narrowing per R43; pause text verified against `creatorVerdicts`).
+
+## Testing Findings
+- T2-1 Major (new) — the concurrent containment/departure cell accepted a containment-side deadlock victim (mapped to a 409 without "40P01" in the body). → both sides must fulfil; containment must answer 200 or 404; five pairs.
+- T2-2 Minor — `remaining` cell sound; creator filter covered by other cells. No action.
+- T2-3 Minor — "without blocking" cell had only a timeout as proof. → `settledOrBlocked` observed while the held change is open.
+
+## Recurring Issue Check
+### Functionality expert
+R43 ok (safe direction) | others ok
+### Security expert
+R1-R57 ok/N/A | RS1-RS6 ok | R43 ok
+### Testing expert
+RT4 ok | RT7 T2-1, T2-3 | others ok
+
+## Resolution Status (round 2)
+### T2-1 Major — concurrent cell blind to a containment-side deadlock
+- Action: requires both promises fulfilled, containment status in {200, 404}, five pairs.
+- Modified file: src/__tests__/db-integration/tenant-member-passkey-revoke.integration.test.ts
+### T2-3 Minor
+- Action: non-blocking observed with `settledOrBlocked` before release.
+- Modified file: src/__tests__/db-integration/foothold-write-gate.integration.test.ts
+### F1-r2 Minor
+- Action: plan C5 table rows corrected.

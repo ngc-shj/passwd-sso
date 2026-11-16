@@ -498,7 +498,11 @@ describe("foothold write gate — real-DB integration", () => {
       const held = await holdChange("demotion", actorId);
       let res: Response;
       try {
-        res = await (put as (c: string, id: string) => Promise<Response>)(cookie, id);
+        const work = (put as (c: string, id: string) => Promise<Response>)(cookie, id);
+        // Observed while the held change is still open: the request settles
+        // instead of waiting on it.
+        expect(await race.settledOrBlocked(work, held.pid, held.pid)).toBe("settled");
+        res = await work;
       } finally {
         await held.release();
       }
