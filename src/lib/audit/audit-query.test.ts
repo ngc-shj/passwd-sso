@@ -15,6 +15,7 @@ import {
   isValidCursorId,
 } from "./audit-query";
 import { AUDIT_ACTION, AUDIT_ACTION_VALUES } from "@/lib/constants";
+import { METADATA_MAX_BYTES } from "@/lib/validations/common.server";
 
 // Minimal action groups for unit testing without importing full constants
 const TEST_GROUPS: Record<string, AuditAction[]> = {
@@ -158,6 +159,23 @@ describe("auditDownloadFilterMetadata", () => {
 
   it("leaves no key for a filter that was not applied", () => {
     expect(auditDownloadFilterMetadata({ actions: [] })).toEqual({});
+  });
+
+  it("keeps the worst-case download row within METADATA_MAX_BYTES, so truncation never hides a filter", () => {
+    const longest = [...VALID_ACTIONS].sort((a, b) => b.length - a.length);
+    const metadata = {
+      format: "jsonl",
+      ...auditDownloadFilterMetadata({
+        from: new Date("2026-01-01T00:00:00Z"),
+        to: new Date("2026-03-31T00:00:00Z"),
+        actions: longest,
+        actorType: "SERVICE_ACCOUNT",
+      }),
+      actorUserId: "123e4567-e89b-42d3-a456-426614174000",
+      scope: "TEAM",
+      teamId: "123e4567-e89b-42d3-a456-426614174001",
+    };
+    expect(Buffer.byteLength(JSON.stringify(metadata))).toBeLessThanOrEqual(METADATA_MAX_BYTES);
   });
 
   it("lists at most 50 actions by name and counts the rest", () => {

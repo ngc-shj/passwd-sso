@@ -72,6 +72,7 @@ vi.mock("@/lib/http/with-request-log", () => ({
 }));
 
 import { GET } from "./route";
+import { parseLocalDate } from "@/lib/format/format-datetime";
 
 async function streamToString(response: Response): Promise<string> {
   const reader = response.body!.getReader();
@@ -182,7 +183,20 @@ describe("GET /api/tenant/audit-logs/download", () => {
     expect(json.details.range).toContain("90");
   });
 
-  it("accepts 90 local days across a DST fall-back (90 days + the largest 2 h shift), and not 1 ms more", async () => {
+  it("accepts the 90 local days a New York client sends across the November fall-back, and not one day more", async () => {
+    vi.stubEnv("TZ", "America/New_York");
+    const at = (fromDay: string) =>
+      GET(
+        createRequest("GET", "http://localhost:3000/api/tenant/audit-logs/download", {
+          searchParams: { from: parseLocalDate(fromDay)!.toISOString(), to: parseLocalDate("2026-11-02", true)!.toISOString() },
+        }),
+      );
+    // 2026-08-05 .. 2026-11-02 is 90 local days: 90 × 24 h + 1 h − 1 ms.
+    expect((await at("2026-08-05")).status).toBe(200);
+    expect((await at("2026-08-04")).status).toBe(400);
+  });
+
+  it("accepts a span of 90 days + the 2 h DST slack, and not 1 ms more", async () => {
     const at = (to: string) =>
       GET(createRequest("GET", "http://localhost:3000/api/tenant/audit-logs/download", { searchParams: { from: "2026-03-01T00:00:00.000Z", to } }));
     expect((await at("2026-05-30T02:00:00.000Z")).status).toBe(200);
@@ -283,6 +297,20 @@ describe("GET /api/tenant/audit-logs/download", () => {
 
   describe("actor, scope and team filters", () => {
     const MEMBER = "123e4567-e89b-42d3-a456-426614174000";
+
+    it("keeps the recorded filters when the actions list is padded with repeats", async () => {
+      const padded = Array.from({ length: 600 }, () => "AUDIT_LOG_DOWNLOAD").join(",");
+      const req = createRequest("GET", "http://localhost:3000/api/tenant/audit-logs/download", {
+        searchParams: { from: VALID_FROM, userId: MEMBER, actions: padded },
+      });
+      await streamToString(await GET(req));
+
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: { format: "jsonl", ...RANGE, actions: ["AUDIT_LOG_DOWNLOAD"], actorUserId: MEMBER },
+        }),
+      );
+    });
 
     it("narrows to userId and records actorUserId in the download audit row", async () => {
       const req = createRequest("GET", "http://localhost:3000/api/tenant/audit-logs/download", {

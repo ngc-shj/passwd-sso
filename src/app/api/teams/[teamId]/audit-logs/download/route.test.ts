@@ -181,7 +181,7 @@ describe("GET /api/teams/[teamId]/audit-logs/download", () => {
     expect(res.status).toBe(400);
   });
 
-  it("accepts 90 local days across a DST fall-back (90 days + the largest 2 h shift), and not 1 ms more", async () => {
+  it("accepts a span of 90 days + the 2 h DST slack, and not 1 ms more", async () => {
     const at = (to: string) =>
       GET(
         createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/audit-logs/download`, { searchParams: { from: "2026-03-01T00:00:00.000Z", to } }),

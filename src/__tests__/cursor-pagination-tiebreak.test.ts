@@ -78,7 +78,35 @@ function violations(sf: SourceFile, label: string): { sites: number; problems: s
     const isIdTiebreak = keys.length === 1 && Node.isPropertyAssignment(keys[0]) && keys[0].getName() === "id";
     if (!isIdTiebreak) problems.push(`${where}: orderBy must be an array literal ending in { id: ... }`);
   }
+
+  // Where the query consumes its arguments: they must be a literal this check
+  // can read, and so must every top-level spread (a literal, or a conditional
+  // of literals). A page object built anywhere else — a variable, a helper's
+  // return, an assignment — would carry a cursor past the orderBy check.
+  for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    const callee = call.getExpression();
+    if (!Node.isPropertyAccessExpression(callee) || !QUERY_METHODS.has(callee.getName())) continue;
+    const [arg] = call.getArguments();
+    if (!arg) continue;
+    const where = `${label}:${call.getStartLineNumber()}`;
+    if (!Node.isObjectLiteralExpression(arg)) {
+      problems.push(`${where}: ${callee.getName()} arguments are not an object literal`);
+      continue;
+    }
+    for (const spread of arg.getProperties().filter(Node.isSpreadAssignment)) {
+      if (!isLiteralSpread(spread.getExpression())) {
+        problems.push(`${where}: ${callee.getName()} spreads arguments that are not a literal`);
+      }
+    }
+  }
   return { sites, problems };
+}
+
+function isLiteralSpread(expr: Node): boolean {
+  const inner = Node.isParenthesizedExpression(expr) ? expr.getExpression() : expr;
+  if (Node.isObjectLiteralExpression(inner)) return true;
+  if (Node.isConditionalExpression(inner)) return isLiteralSpread(inner.getWhenTrue()) && isLiteralSpread(inner.getWhenFalse());
+  return false;
 }
 
 function scanFixture(code: string) {
@@ -117,7 +145,8 @@ describe("cursor pagination orders by a unique key last", () => {
   });
 
   it("refuses a cursor built outside the query's argument literal", () => {
-    expect(scanFixture(`const page = { cursor: { id: c }, skip: 1 }; tx.a.findMany({ orderBy: [{ id: "asc" }], ...page });`).problems).toHaveLength(1);
+    // Refused twice: the cursor is outside a query literal, and the query spreads a non-literal.
+    expect(scanFixture(`const page = { cursor: { id: c }, skip: 1 }; tx.a.findMany({ orderBy: [{ id: "asc" }], ...page });`).problems).toHaveLength(2);
   });
 
   it("refuses a shorthand cursor on a non-unique order, and accepts it with the tiebreak", () => {
@@ -128,9 +157,27 @@ describe("cursor pagination orders by a unique key last", () => {
     expect(scanFixture(`tx.a.findMany({ orderBy: [{ createdAt: "desc" }, { id: "desc" }], cursor });`)).toEqual({ sites: 1, problems: [] });
   });
 
+  it("refuses query arguments or spreads it cannot read, however the page object is built", () => {
+    for (const code of [
+      `tx.a.findMany(args);`,
+      `tx.a.findMany({ orderBy: { createdAt: "desc" }, ...(c ? page : {}) });`,
+      `tx.a.findMany({ orderBy: { createdAt: "desc" }, ...(page as const) });`,
+      `page = { cursor: cur }; tx.a.findMany({ orderBy: { createdAt: "desc" }, ...page });`,
+      `tx.a.findMany({ orderBy: { createdAt: "desc" }, ...pageOf(cur) });`,
+    ]) {
+      expect(scanFixture(code).problems, code).toHaveLength(1);
+    }
+    expect(scanFixture(`tx.a.findMany({ orderBy: [{ id: "asc" }], ...(c ? { where: { a } } : {}) });`).problems).toEqual([]);
+  });
+
   it("refuses a page object bound to a variable, whatever its cursor holds", () => {
-    expect(scanFixture(`const page = { cursor, skip: 1 }; tx.a.findMany({ orderBy: { createdAt: "desc" }, ...page });`).problems).toHaveLength(1);
-    expect(scanFixture(`const page = { cursor: cur, skip: 1 }; tx.a.findMany({ orderBy: { createdAt: "desc" }, ...page });`).problems).toHaveLength(1);
+    // Each also trips the spread rule; the bound-object rule is the one asserted here.
+    for (const code of [
+      `const page = { cursor, skip: 1 }; tx.a.findMany({ orderBy: { createdAt: "desc" }, ...page });`,
+      `const page = { cursor: cur, skip: 1 }; tx.a.findMany({ orderBy: { createdAt: "desc" }, ...page });`,
+    ]) {
+      expect(scanFixture(code).problems).toContain("fixture:1: cursor outside a findMany/findFirst argument literal");
+    }
   });
 
   it("does not count a shorthand cursor handed to a call that is not a query", () => {

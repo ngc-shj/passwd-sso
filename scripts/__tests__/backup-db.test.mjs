@@ -271,6 +271,9 @@ async function runRootSwap(scriptPath, outPath, rootPath, env, readyPattern) {
     } else {
       spawnSync("sleep", ["1"]);
     }
+    // Whether the swap lands on a live run: one that already exited (for any
+    // reason) proves nothing about a mid-run swap.
+    const aliveAtSwap = !done;
     renameSync(rootPath, `${rootPath}.moved`);
     mkdirSync(rootPath, { mode: 0o700 });
     chmodSync(rootPath, 0o700);
@@ -281,7 +284,7 @@ async function runRootSwap(scriptPath, outPath, rootPath, env, readyPattern) {
     // script's status out of the captured output, so it still has to land there.
     const status = result.error ? "spawn-error" : result.code ?? `signal:${result.signal}`;
     writeSync(out, `EXIT=${status}\n`);
-    return { ...result, ready };
+    return { ...result, ready, aliveAtSwap };
   } finally {
     closeSync(out);
   }
@@ -3910,19 +3913,14 @@ exit 0`);
     }
   });
 
-  it("never publishes into a root replaced mid-run", { timeout: 30000 }, async () => {
-    // What this pins is the outcome, not the branch: a swap can be caught by
-    // the redirect, by the publish, or by assert_root_unchanged depending on
-    // when it lands, and racing for one of them makes a flaky test. The
-    // property that matters either way is that the run does not succeed and
-    // leaves nothing in the substituted directory. The specific PRUNE_ABORTED
-    // branch is recorded as unpinned in the deviation log.
+  // The root-swap cell's setup: three old generations and dumps slow enough to
+  // swap the root underneath. Its positive control runs the same setup unswapped.
+  function slowDumpRun() {
     mkdirSync(backupDir, { recursive: true, mode: 0o700 });
     chmodSync(backupDir, 0o700);
     for (const n of ["20200101T000000Z", "20200102T000000Z", "20200103T000000Z"]) {
       mkdirSync(join(backupDir, n), { recursive: true, mode: 0o700 });
     }
-    // The dumps take long enough to swap the root underneath.
     stub("docker", `
 [ "\${2:-}" = "config" ] && exit 0
 [ "\${2:-}" = "ps" ] && { echo c1; exit 0; }
@@ -3934,15 +3932,31 @@ for a in "$@"; do
   esac
 done
 exit 0`);
+    return { PATH: `${binDir}:${process.env.PATH}`, HOME: homeDir, LANG: "C", BACKUP_DIR: backupDir, BACKUP_RETAIN: "1" };
+  }
+
+  it("publishes with the root-swap cell's setup when the root is left alone (its positive control)", { timeout: 30000 }, () => {
+    const env = slowDumpRun();
+    const r = spawnSync("bash", [SCRIPT], { encoding: "utf8", timeout: 25000, cwd: REPO_ROOT, env });
+    expect(r.status, r.stdout + r.stderr).toBe(0);
+    expect(generations()).toHaveLength(1);
+  });
+
+  it("never publishes into a root replaced mid-run", { timeout: 30000 }, async () => {
+    // What this pins is the outcome, not the branch: a swap can be caught by
+    // the redirect, by the publish, or by assert_root_unchanged depending on
+    // when it lands, and racing for one of them makes a flaky test. The
+    // property that matters either way is that the run does not succeed and
+    // leaves nothing in the substituted directory. The specific PRUNE_ABORTED
+    // branch is recorded as unpinned in the deviation log.
+    const env = slowDumpRun();
     // The harness performed the swap, so its own outcome says nothing about the
     // run. What the run did is in the captured output, which carries the
     // script's exit code as a line.
-    const swap = await runRootSwap(SCRIPT, join(tmpDir, "out"), backupDir, {
-      PATH: `${binDir}:${process.env.PATH}`, HOME: homeDir, LANG: "C",
-      BACKUP_DIR: backupDir, BACKUP_RETAIN: "1",
-    }, /\[backup-db\] dumping /);
+    const swap = await runRootSwap(SCRIPT, join(tmpDir, "out"), backupDir, env, /\[backup-db\] dumping /);
     expect(swap.error, "the swap harness itself must have run").toBeUndefined();
     expect(swap.ready, "the script must have reached its dumps before the swap").toBe(true);
+    expect(swap.aliveAtSwap, "the swap must land while the script runs").toBe(true);
     const out = readFileSync(join(tmpDir, "out"), "utf8");
     expect(out, "a replaced root must not yield a success").not.toMatch(/EXIT=0/);
     expect(generations(), "and must leave nothing published in the new root").toEqual([]);

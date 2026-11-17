@@ -329,3 +329,46 @@ neither bound stay unbounded (by `AUDIT_LOG_MAX_ROWS`), as before. Cells:
 resolver unit cases (to-only today and long ago, from-only, invalid, reversed,
 over-range) and personal / team route cells for an old to-only download (the
 previous code answered 400).
+
+## Testing Findings (round 3)
+Q2–Q4, S-R2-1 cells, N-1 constant cells and the autofill waits confirmed by
+mutation. New:
+- R3-Q1 [Minor] The cursor guard closed only the `const x = { cursor }` form;
+  conditional, parenthesised, `as const`, assignment and helper-return page
+  objects still passed.
+- R3-Q2 [Major] The root-swap cell passed when the script failed right after
+  its ready line, before the swap.
+- R3-Q3 [Minor] `parseLocalDate`'s end-of-day path for years below 100 and its
+  out-of-range refusal were unpinned.
+- R3-Q4 [Minor] Tenant test-tree drift (padded-repeats and boundary cells).
+- R3-Q5 [Minor] The "DST fall-back" boundary cells used UTC instants; the
+  client-to-server span was unpinned.
+- R3-Q6 [Minor] The 50-action cap was not tied to METADATA_MAX_BYTES.
+
+### R3-Q1 — fixed
+The guard also checks where a query consumes its arguments: a
+`findMany`/`findFirst` argument must be an object literal and every top-level
+spread a literal or a conditional of literals (the real tree has none other).
+One refused fixture per variant, plus the literal-conditional allow case.
+
+### R3-Q2 — fixed
+`runRootSwap` returns `aliveAtSwap` (the run had not exited when the root
+moved) and the cell asserts it; a positive control runs the same slow-dump
+setup unswapped and must publish exactly one generation. Red-proof with
+`BACKUP_DB_SCRIPT=<copy exiting right after "dumping">`: both cells fail
+("the swap must land while the script runs"; control status 7).
+
+### R3-Q3 — fixed
+Cells for `parseLocalDate("0050-03-01", true)` and a year past the Date range
+(`300000-01-01`, both paths).
+
+### R3-Q4 / R3-Q5 — fixed
+Padded-repeats, 90 days + 2 h boundary and a New York client-span cell in both
+tenant trees; the boundary cells are named for what they pin (the constant).
+The client-span cell sends `parseLocalDate("2026-08-05")` ..
+`parseLocalDate("2026-11-02", true)` under `TZ=America/New_York` (90 local
+days = 90 × 24 h + 1 h − 1 ms): 200; one day earlier: 400.
+
+### R3-Q6 — fixed
+A cell serialises the worst-case row (the 50 longest actions plus every other
+filter) and asserts it fits METADATA_MAX_BYTES.

@@ -158,6 +158,13 @@ describe("parseLocalDate", () => {
   it("reads years below 100 and above 9999 as written", () => {
     expect(parseLocalDate("0050-03-01")?.getFullYear()).toBe(50);
     expect(parseLocalDate("12345-03-01")?.getFullYear()).toBe(12345);
+    // The to-filter path too.
+    expect(parseLocalDate("0050-03-01", true)?.getFullYear()).toBe(50);
+  });
+
+  it("refuses a year past the Date range", () => {
+    expect(parseLocalDate("300000-01-01")).toBeUndefined();
+    expect(parseLocalDate("300000-01-01", true)).toBeUndefined();
   });
 
   it("refuses a malformed value and a day the month does not have", () => {

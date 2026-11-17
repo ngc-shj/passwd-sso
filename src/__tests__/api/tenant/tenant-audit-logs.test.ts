@@ -66,6 +66,7 @@ vi.mock("@/lib/constants/auth/tenant-permission", () => ({
 import { GET } from "@/app/api/tenant/audit-logs/route";
 import { GET as GET_DOWNLOAD } from "@/app/api/tenant/audit-logs/download/route";
 import { TenantAuthError } from "@/lib/auth/access/tenant-auth";
+import { parseLocalDate } from "@/lib/format/format-datetime";
 
 function makeLog(overrides: Record<string, unknown> = {}) {
   return {
@@ -361,6 +362,19 @@ describe("GET /api/tenant/audit-logs/download", () => {
       expect(mockLogAudit).toHaveBeenCalledWith(
         expect.objectContaining({ metadata: { format: "jsonl", ...RANGE } }),
       );
+    });
+
+    it("accepts the 90 local days a New York client sends across the November fall-back, and not one day more", async () => {
+      vi.stubEnv("TZ", "America/New_York");
+      const to = parseLocalDate("2026-11-02", true)!.toISOString();
+      // 2026-08-05 .. 2026-11-02 is 90 local days: 90 × 24 h + 1 h − 1 ms.
+      expect((await download({ from: parseLocalDate("2026-08-05")!.toISOString(), to })).status).toBe(200);
+      expect((await download({ from: parseLocalDate("2026-08-04")!.toISOString(), to })).status).toBe(400);
+    });
+
+    it("accepts a span of 90 days + the 2 h DST slack, and not 1 ms more", async () => {
+      expect((await download({ from: "2026-03-01T00:00:00.000Z", to: "2026-05-30T02:00:00.000Z" })).status).toBe(200);
+      expect((await download({ from: "2026-03-01T00:00:00.000Z", to: "2026-05-30T02:00:00.001Z" })).status).toBe(400);
     });
 
     it("records the exact to it applied", async () => {
