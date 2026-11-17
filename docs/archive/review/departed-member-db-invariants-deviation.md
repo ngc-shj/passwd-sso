@@ -132,3 +132,22 @@
   - VE3 (D5) ran the whole verify, exit 0, on a fresh, migrated, seeded database.
 - **What was not done, and why:** the migration was not applied to the shared dev database. Other sessions use it, and a feature-branch migration there would drift it from main.
 - **All 86 other pre-pr steps pass.**
+
+## D7 — Step 2-5 self-R-check: findings and dispositions
+
+- **R42 (functionality and security, Major):**
+  - **Gap:** the PARAMETER class reads only a per-role `session_replication_role` default. An `ALTER DATABASE … SET` or an `ALTER ROLE ALL SET` default (`setrole = 0`) reached every `passwd_app` session too. The audit reported it only as an unexpected `ROLESETTING:` key, which `--write` would have recorded as the baseline.
+  - **Fix:** `session_replication_role` joins `DENIED_SETTING_RE`.
+  - **Proof:**
+    - three unit cells, which go red with the name removed (scratch copy);
+    - a throwaway database made from the worktree template, with the database default set: the audit exits 1 with `DENIED_SETTING_HELD`, `--write` refuses, and the database is dropped.
+- **RT7/R50 (Major), the runner verdict:** PROVED ignored unexpected reds and the arm token.
+  - **Fix:** a row now proves only when every required cell's failure carries its token and nothing outside the listed cells goes red.
+  - **Collateral reds:** those the earlier runs observed are listed per row as `+` lines (allowed, not required).
+  - **Row 11:** its cell now compares the token on its own. Vitest truncated the expected object, so the token never reached the message.
+- **R44 (Minor), the runner:** `run_row` runs under `||`, so `set -e` was off inside it. Scratch creation, `setup.sql`, `patch` and the mutation's `pg_exec` now return explicitly.
+- **RT11 (Major), the re-admit cell:** an aborted runbook script would have returned its pooled connection still inside the transaction that holds `team_members`' lock. It now rolls back on error, as `runScript` does.
+- **RT7 (Minor):** the one-statement cell asserts 42601, not any error.
+- **R36 (Minor):** the row-11 fixture imports helpers through the `@/` alias, so `tsconfig.json` needs no exclude.
+- **RT3/R1 (Minor), not changed:** existing tests that build the advisory key by hand stay as written. They are an independent oracle for `advisoryKey`'s spelling.
+- **Full matrix re-run under the stricter verdict:** see D8.

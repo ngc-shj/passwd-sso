@@ -68,6 +68,7 @@ import { POST as acceptInvitation } from "@/app/api/teams/invitations/accept/rou
 import { POST as rotateKeyRoute } from "@/app/api/teams/[teamId]/rotate-key/route";
 import { createPool } from "@/lib/db/pool-factory";
 import { prisma } from "@/lib/prisma";
+import { SQLSTATE_CHECK_VIOLATION } from "@/lib/prisma/prisma-error";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { setTenantGucs } from "@/lib/tenant-rls-grants";
 import { BYPASS_PURPOSE } from "@/lib/tenant-rls-purpose";
@@ -126,7 +127,7 @@ function armOf(error: unknown): string | null {
 }
 
 function expectGuardError(error: unknown, arm: Arm): void {
-  expect({ code: sqlStateOf(error), arm: armOf(error) }).toEqual({ code: "23514", arm });
+  expect({ code: sqlStateOf(error), arm: armOf(error) }).toEqual({ code: SQLSTATE_CHECK_VIOLATION, arm });
 }
 
 /** Refused at `at`; at the statement, `index` names the statement that failed. */
@@ -861,6 +862,11 @@ describe("departed-member DB invariants — real-DB integration", () => {
       const client = await ctx.su.pool.connect();
       try {
         await client.query(script);
+      } catch (error) {
+        // An aborted script would return the connection inside its transaction,
+        // still holding team_members' ACCESS EXCLUSIVE lock from DISABLE TRIGGER.
+        await client.query("ROLLBACK").catch(() => {});
+        throw error;
       } finally {
         client.release();
       }
@@ -1778,7 +1784,8 @@ describe("departed-member DB invariants — real-DB integration", () => {
 
       it("refuses more than one statement", async () => {
         const error = await writeRefusedState(su1, `SELECT 1; SELECT 2`).then(() => null, (e: unknown) => e);
-        expect(error).toBeInstanceOf(Error);
+        // 42601: the extended protocol refuses a multi-command string.
+        expect(sqlStateOf(error)).toBe("42601");
         expect((await backend()).role).toBe("origin");
       });
     });

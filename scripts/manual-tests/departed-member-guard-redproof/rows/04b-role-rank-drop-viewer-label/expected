@@ -1,1 +1,13 @@
 unknown_role	departed-member DB invariants — real-DB integration T1: grants every pg_enum label of TeamRole is ranked: an UPDATE between each pair does not raise unknown_role
++-	departed-member DB invariants — real-DB integration T1: grants deny VIEWER→MEMBER on a leftover row (residue) via UPDATE
++-	departed-member DB invariants — real-DB integration T1: grants deny VIEWER→MEMBER on a leftover row (residue) via MERGE
++-	departed-member DB invariants — real-DB integration T1: grants deny VIEWER→MEMBER on a leftover row (containable = false (record, tenant row re-created)) via UPDATE
++-	departed-member DB invariants — real-DB integration T1: grants deny VIEWER→MEMBER on a leftover row (containable = false (record, tenant row re-created)) via ON CONFLICT DO UPDATE
++-	departed-member DB invariants — real-DB integration T1: grants deny VIEWER→MEMBER on a leftover row (containable = false (record, tenant row re-created)) via MERGE
++-	departed-member DB invariants — real-DB integration T1: grants deny VIEWER→MEMBER on a leftover row (containable = false (record, tenant row deleted)) via UPDATE
++-	departed-member DB invariants — real-DB integration T1: grants deny VIEWER→MEMBER on a leftover row (containable = false (record, tenant row deleted)) via ON CONFLICT DO UPDATE
++-	departed-member DB invariants — real-DB integration T1: grants deny VIEWER→MEMBER on a leftover row (containable = false (record, tenant row deleted)) via MERGE
++-	departed-member DB invariants — real-DB integration T1: grants deny VIEWER→MEMBER on a leftover row (departure equal to admission) via UPDATE
++-	departed-member DB invariants — real-DB integration T1: grants deny VIEWER→MEMBER on a leftover row (departure equal to admission) via ON CONFLICT DO UPDATE
++-	departed-member DB invariants — real-DB integration T1: grants deny VIEWER→MEMBER on a leftover row (departure equal to admission) via MERGE
++-	departed-member DB invariants — real-DB integration T1: grants allow: OWNER→VIEWER on residue

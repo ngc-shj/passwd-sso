@@ -46,3 +46,4 @@ grant_leftover	departed-member DB invariants — real-DB integration T1: grants 
 grant_leftover	departed-member DB invariants — real-DB integration T1: grants deny key_distributed false→true on a leftover row (departure equal to admission) via UPDATE
 grant_leftover	departed-member DB invariants — real-DB integration T1: grants deny key_distributed false→true on a leftover row (departure equal to admission) via ON CONFLICT DO UPDATE
 grant_leftover	departed-member DB invariants — real-DB integration T1: grants deny key_distributed false→true on a leftover row (departure equal to admission) via MERGE
++-	departed-member DB invariants — real-DB integration T6: bypass and seeds under a team_members-only bypass, a refused guarded write leaves the settings; tenant_members is still refused

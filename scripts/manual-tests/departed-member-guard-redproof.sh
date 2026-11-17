@@ -34,7 +34,9 @@
 #   function.patch | mutation.sql | source.patch   exactly one
 #   expected   one cell per line: "<arm token or ->\t<full cell name>"; a line
 #              starting "~" is a caveat cell the plan names but that the
-#              mutation cannot redden (reported, not judged)
+#              mutation cannot redden (reported, not judged); a line starting
+#              "+" is a collateral cell the mutation may also redden (allowed,
+#              not required)
 #   tests      optional; lines "<integration|unit> <path>"; default the C7 file
 #   setup.sql  optional; superuser SQL applied before the unmutated run
 #   add/       optional; files copied into the tree copy (forces source mode)
@@ -226,26 +228,31 @@ judge() {
     const [phase, json, expectedFile] = process.argv.slice(1);
     const run = JSON.parse(fs.readFileSync(json, "utf8"));
     const exp = fs.readFileSync(expectedFile, "utf8").split("\n").filter((l) => l.trim() && !l.startsWith("#"))
-      .map((l) => { const caveat = l.startsWith("~"); const [token, ...rest] = (caveat ? l.slice(1) : l).split("\t"); return { caveat, token, name: rest.join("\t") }; });
+      .map((l) => { const kind = l[0] === "~" ? "caveat" : l[0] === "+" ? "collateral" : "required";
+        const [token, ...rest] = (kind === "required" ? l : l.slice(1)).split("\t"); return { kind, token, name: rest.join("\t") }; });
     const byName = new Map();
     for (const r of run.results) byName.set(r.name, r);
     const failed = run.results.filter((r) => r.status === "failed");
-    const missing = exp.filter((e) => !byName.has(e.name)).map((e) => e.name);
+    const missing = exp.filter((e) => e.kind !== "collateral" && !byName.has(e.name)).map((e) => e.name);
     if (phase === "base") {
       const ok = run.exitCode === 0 && run.results.length > 0 && failed.length === 0 && missing.length === 0
-        && exp.every((e) => byName.get(e.name)?.status === "passed");
+        && exp.filter((e) => e.kind !== "collateral").every((e) => byName.get(e.name)?.status === "passed");
       console.log(JSON.stringify({ phase, ok, exitCode: run.exitCode, tests: run.results.length,
         failed: failed.map((f) => f.name), missingExpected: missing }));
       process.exit(ok ? 0 : 1);
     }
-    const judged = exp.filter((e) => !e.caveat);
+    const judged = exp.filter((e) => e.kind === "required");
     const notRed = judged.filter((e) => byName.get(e.name)?.status !== "failed").map((e) => e.name);
     const expectedNames = new Set(exp.map((e) => e.name));
     const extra = failed.filter((f) => !expectedNames.has(f.name)).map((f) => f.name);
     const token = judged.filter((e) => e.token !== "-" && byName.get(e.name)?.status === "failed")
       .map((e) => ({ name: e.name, token: e.token, inMessage: byName.get(e.name).message.includes(e.token) }));
-    const caveats = exp.filter((e) => e.caveat).map((e) => ({ name: e.name, status: byName.get(e.name)?.status ?? "missing" }));
-    const ok = run.exitCode !== 0 && notRed.length === 0 && missing.length === 0;
+    const caveats = exp.filter((e) => e.kind === "caveat").map((e) => ({ name: e.name, status: byName.get(e.name)?.status ?? "missing" }));
+    // Proved only when every required cell is red for its own reason (its arm
+    // token in the failure), and nothing outside the cells the row lists went
+    // red: a broken fixture or a dropped connection reddens cells nobody listed.
+    const ok = run.exitCode !== 0 && notRed.length === 0 && missing.length === 0
+      && extra.length === 0 && token.every((t) => t.inMessage);
     console.log(JSON.stringify({ phase, ok, exitCode: run.exitCode, tests: run.results.length,
       expectedRed: judged.length, red: failed.length, notRed, missingExpected: missing, extraRed: extra,
       tokenInMessage: token, caveats }));
@@ -266,7 +273,7 @@ run_row() {
   local db
   db="rp_dmg_$(printf '%s' "$row" | tr -c 'a-z0-9' '_' | cut -c1-30)_$$_$RANDOM"
   echo "== $row (scratch database $db)"
-  create_scratch "$db"
+  create_scratch "$db" || { cleanup; return 1; }
   local line
   while IFS='=' read -r k v; do export "$k=$v"; done < <(role_urls "$db")
 
@@ -278,7 +285,9 @@ run_row() {
     [[ -d "$dir/add" ]] && cp -R "$dir/add/." "$TREE/"
     workdir="$TREE"
   fi
-  [[ -f "$dir/setup.sql" ]] && pg_exec "$db" "$dir/setup.sql" >/dev/null
+  if [[ -f "$dir/setup.sql" ]]; then
+    pg_exec "$db" "$dir/setup.sql" >/dev/null || { cleanup; return 1; }
+  fi
 
   local rowout="$OUT/$row"; mkdir -p "$rowout"
   run_tests "$workdir" "$tests" "$rowout/base.json" "$rowout/base.log"
@@ -293,12 +302,13 @@ run_row() {
   if [[ -f "$dir/function.patch" ]]; then
     local fn="$rowout/function.sql"
     extract_function >"$rowout/function.orig.sql"
-    patch --quiet --fuzz=0 --no-backup-if-mismatch -o "$fn" "$rowout/function.orig.sql" <"$dir/function.patch"
-    pg_exec "$db" "$fn" >/dev/null
+    patch --quiet --fuzz=0 --no-backup-if-mismatch -o "$fn" "$rowout/function.orig.sql" <"$dir/function.patch" \
+      && pg_exec "$db" "$fn" >/dev/null || { echo "row $row: mutation did not apply" >&2; cleanup; return 1; }
   elif [[ -f "$dir/mutation.sql" ]]; then
-    pg_exec "$db" "$dir/mutation.sql" >/dev/null
+    pg_exec "$db" "$dir/mutation.sql" >/dev/null || { echo "row $row: mutation did not apply" >&2; cleanup; return 1; }
   else
-    patch --quiet --fuzz=0 --no-backup-if-mismatch -p1 -d "$TREE" <"$dir/source.patch"
+    patch --quiet --fuzz=0 --no-backup-if-mismatch -p1 -d "$TREE" <"$dir/source.patch" \
+      || { echo "row $row: mutation did not apply" >&2; cleanup; return 1; }
   fi
 
   run_tests "$workdir" "$tests" "$rowout/mutated.json" "$rowout/mutated.log"

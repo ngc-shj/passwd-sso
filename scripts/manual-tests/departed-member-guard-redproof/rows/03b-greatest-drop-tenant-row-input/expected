@@ -10,3 +10,7 @@ grant_leftover	departed-member DB invariants — real-DB integration T1: grants 
 grant_leftover	departed-member DB invariants — real-DB integration T1: grants deny key_distributed false→true on a leftover row (residue) via UPDATE
 ~grant_leftover	departed-member DB invariants — real-DB integration T1: grants deny key_distributed false→true on a leftover row (residue) via ON CONFLICT DO UPDATE
 grant_leftover	departed-member DB invariants — real-DB integration T1: grants deny key_distributed false→true on a leftover row (residue) via MERGE
++-	departed-member DB invariants — real-DB integration T2: keys deny: a key INSERT for a leftover recipient
++-	departed-member DB invariants — real-DB integration T2: keys deny: a key UPDATE for a leftover recipient
++-	departed-member DB invariants — real-DB integration T2: keys deny: a key ON CONFLICT DO UPDATE for a leftover recipient
++-	departed-member DB invariants — real-DB integration T6: bypass and seeds under a team_members-only bypass, a refused guarded write leaves the settings; tenant_members is still refused

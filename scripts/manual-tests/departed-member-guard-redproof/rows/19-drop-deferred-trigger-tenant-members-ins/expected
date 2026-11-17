@@ -1,1 +1,2 @@
 departure_active	departed-member DB invariants — real-DB integration T4: departure refused at COMMIT, not at the statement a tenant row created deactivated that leaves a guest an active row
++-	departed-member DB invariants — real-DB integration T3: activation the guard sorts after the same-event BEFORE triggers it depends on (pg_trigger name order)

@@ -439,12 +439,15 @@ async function readLiveGrants(client) {
  * Session defaults no role or database may carry, whatever their value: the
  * application's own context GUCs (`app.*`, so a role default cannot turn the
  * RLS bypass on for every connection), and the settings that silence or
- * redirect the RLS bypass reports or disable RLS. Refused live AND in the
- * manifest, and `--write` refuses to record one, as for a denied privilege.
+ * redirect the RLS bypass reports or disable RLS, and `session_replication_role`
+ * (`replica` skips every ordinary trigger, departed_member_guard among them; a
+ * role-`*` or database default reaches every role, which the per-role
+ * `PARAMETER:` class does not read). Refused live AND in the manifest, and
+ * `--write` refuses to record one, as for a denied privilege.
  */
-const DENIED_SETTING_RE = /^ROLESETTING:[^\t]+\t[^\t]+\t(?:app\.[^=]*|client_min_messages|log_min_messages|row_security)=/i;
+const DENIED_SETTING_RE = /^ROLESETTING:[^\t]+\t[^\t]+\t(?:app\.[^=]*|client_min_messages|log_min_messages|row_security|session_replication_role)=/i;
 
-function deniedSettings(keys) {
+export function deniedSettings(keys) {
   return keys.filter((k) => DENIED_SETTING_RE.test(k));
 }
 

@@ -22,3 +22,19 @@ grant_leftover	departed-member DB invariants — real-DB integration T1: grants 
 grant_leftover	departed-member DB invariants — real-DB integration T1: grants deny key_distributed false→true on a leftover row (containable = false (record, tenant row deleted)) via UPDATE
 grant_leftover	departed-member DB invariants — real-DB integration T1: grants deny key_distributed false→true on a leftover row (containable = false (record, tenant row deleted)) via ON CONFLICT DO UPDATE
 grant_leftover	departed-member DB invariants — real-DB integration T1: grants deny key_distributed false→true on a leftover row (containable = false (record, tenant row deleted)) via MERGE
++-	departed-member DB invariants — real-DB integration T1: grants deny VIEWER→MEMBER on a leftover row (departure equal to admission) via UPDATE
++-	departed-member DB invariants — real-DB integration T1: grants deny VIEWER→MEMBER on a leftover row (departure equal to admission) via ON CONFLICT DO UPDATE
++-	departed-member DB invariants — real-DB integration T1: grants deny VIEWER→MEMBER on a leftover row (departure equal to admission) via MERGE
++-	departed-member DB invariants — real-DB integration T1: grants deny MEMBER→ADMIN on a leftover row (departure equal to admission) via UPDATE
++-	departed-member DB invariants — real-DB integration T1: grants deny MEMBER→ADMIN on a leftover row (departure equal to admission) via ON CONFLICT DO UPDATE
++-	departed-member DB invariants — real-DB integration T1: grants deny MEMBER→ADMIN on a leftover row (departure equal to admission) via MERGE
++-	departed-member DB invariants — real-DB integration T1: grants deny ADMIN→OWNER on a leftover row (departure equal to admission) via UPDATE
++-	departed-member DB invariants — real-DB integration T1: grants deny ADMIN→OWNER on a leftover row (departure equal to admission) via ON CONFLICT DO UPDATE
++-	departed-member DB invariants — real-DB integration T1: grants deny ADMIN→OWNER on a leftover row (departure equal to admission) via MERGE
++-	departed-member DB invariants — real-DB integration T1: grants deny key_distributed false→true on a leftover row (departure equal to admission) via UPDATE
++-	departed-member DB invariants — real-DB integration T1: grants deny key_distributed false→true on a leftover row (departure equal to admission) via ON CONFLICT DO UPDATE
++-	departed-member DB invariants — real-DB integration T1: grants deny key_distributed false→true on a leftover row (departure equal to admission) via MERGE
++-	departed-member DB invariants — real-DB integration T3: activation deny: an INSERT born leftover, tenant_id given
++-	departed-member DB invariants — real-DB integration T3: activation deny: an INSERT born leftover, tenant_id omitted (derived by the tenant-context trigger)
++-	departed-member DB invariants — real-DB integration T4: departure refused at COMMIT, not at the statement a stamp and a return in one transaction, while a record later than the admission keeps the row leftover
++-	departed-member DB invariants — real-DB integration T4: departure refused at COMMIT, not at the statement a record with a re-created active tenant row, leaving a row admitted before the record

@@ -10,3 +10,4 @@ grant_leftover	departed-member DB invariants — real-DB integration T1: grants 
 grant_leftover	departed-member DB invariants — real-DB integration T1: grants deny ADMIN→OWNER on a leftover row (departure equal to admission) via UPDATE
 grant_leftover	departed-member DB invariants — real-DB integration T1: grants deny ADMIN→OWNER on a leftover row (departure equal to admission) via ON CONFLICT DO UPDATE
 grant_leftover	departed-member DB invariants — real-DB integration T1: grants deny ADMIN→OWNER on a leftover row (departure equal to admission) via MERGE
++-	departed-member DB invariants — real-DB integration T1: grants allow: scenario 3 — in one transaction, demote the leftover OWNER and promote a live member

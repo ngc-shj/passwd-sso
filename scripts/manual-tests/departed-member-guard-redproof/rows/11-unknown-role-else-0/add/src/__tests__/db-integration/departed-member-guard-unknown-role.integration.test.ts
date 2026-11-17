@@ -8,8 +8,9 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { randomUUID } from "node:crypto";
 import type pg from "pg";
 import type { Prisma } from "@prisma/client";
-import { appConnectionString, createTestContext, setBypassRlsGucs, sqlStateOf, type TestContext } from "./helpers";
+import { appConnectionString, createTestContext, setBypassRlsGucs, sqlStateOf, type TestContext } from "@/__tests__/db-integration/helpers";
 import { createPool } from "@/lib/db/pool-factory";
+import { SQLSTATE_CHECK_VIOLATION } from "@/lib/prisma/prisma-error";
 
 const LABEL = "RP_UNKNOWN_LABEL";
 
@@ -69,10 +70,9 @@ describe("departed-member guard — scratch-only unknown TeamRole label", () => 
       client.release();
     }
 
-    expect({ code: sqlStateOf(error), message: error instanceof Error ? error.message : String(error) }).toMatchObject({
-      code: "23514",
-      message: expect.stringContaining("DEPARTED_MEMBER_GUARD:unknown_role:"),
-    });
+    // The arm token is compared on its own so a failure names it in full.
+    expect(/DEPARTED_MEMBER_GUARD:([a-z_]+):/.exec(error instanceof Error ? error.message : "")?.[1] ?? null).toBe("unknown_role");
+    expect(sqlStateOf(error)).toBe(SQLSTATE_CHECK_VIOLATION);
     const [row] = await sql<{ role: string }>(`SELECT role::text AS role FROM team_members WHERE id = $1::uuid`, rowId);
     expect(row.role).toBe("MEMBER");
   });
