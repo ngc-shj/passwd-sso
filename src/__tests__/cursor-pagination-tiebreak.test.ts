@@ -8,20 +8,55 @@
  * same order twice, which it does not promise. A trailing `{ id: <dir> }` turns
  * the query into a keyset `(created_at, id)` comparison with a LIMIT.
  *
- * A site is any `cursor:` property in src/. Its query's argument object must
- * have an `orderBy` array literal whose last element is exactly `{ id: ... }`.
- * A cursor whose argument object cannot be found, or whose `orderBy` is not a
- * literal, is refused rather than guessed.
+ * A site is a `cursor` property (either spelling) in the arguments of a
+ * delegate call (`<client>.<model>.<method>(...)`, the finds and the writes
+ * that take `include` / `select`), top-level or a relation's. The arguments it
+ * pages must have an `orderBy` array literal ending in exactly `{ id: ... }`.
+ *
+ * What the check cannot read is refused rather than guessed: a find whose
+ * arguments are not a literal, a spread that is not a literal (readable spreads
+ * are read through), an `include` / `select` that is neither a literal nor a
+ * `const` bound to one, a relation value that is neither a boolean nor a
+ * literal, and a cursor in an object bound to a variable or not placeable in a
+ * call. A write's argument is read only when it is a literal (`map.delete(key)`
+ * has the same call shape); a `where` may spread shared filters.
  */
 import { describe, expect, it } from "vitest";
 import path from "node:path";
 import { readFileSync } from "node:fs";
-import { Node, SyntaxKind } from "ts-morph";
-import type { ObjectLiteralExpression, SourceFile } from "ts-morph";
+import { Node, SyntaxKind, VariableDeclarationKind } from "ts-morph";
+import type {
+  CallExpression,
+  ObjectLiteralExpression,
+  PropertyAccessExpression,
+  PropertyAssignment,
+  ShorthandPropertyAssignment,
+  SourceFile,
+} from "ts-morph";
 import { createAstProject, walkSourceFiles } from "../../scripts/checks/lib/ast-project.mjs";
 
 const REPO_ROOT = path.resolve(__dirname, "../..");
-const QUERY_METHODS: ReadonlySet<string> = new Set(["findMany", "findFirst", "findFirstOrThrow"]);
+// Every delegate method whose arguments can carry relation arguments (and so a
+// relation cursor under `include` / `select`), not only the paginating finds.
+const QUERY_METHODS: ReadonlySet<string> = new Set([
+  "findMany", "findFirst", "findFirstOrThrow", "findUnique", "findUniqueOrThrow",
+  "create", "createManyAndReturn", "update", "updateManyAndReturn", "upsert", "delete",
+]);
+
+const FIND_METHODS: ReadonlySet<string> = new Set(["findMany", "findFirst", "findFirstOrThrow", "findUnique", "findUniqueOrThrow"]);
+
+/** A property's name with string-literal quotes removed (`"cursor"` reads as cursor). */
+function unquotedName(prop: PropertyAssignment | ShorthandPropertyAssignment): string {
+  const nameNode = prop.getNameNode();
+  return Node.isStringLiteral(nameNode) ? nameNode.getLiteralValue() : prop.getName();
+}
+
+/** `<client>.<model>.<method>(...)`: a delegate call, not `map.delete(key)`. */
+function isDelegateCall(call: Node): call is CallExpression {
+  if (!Node.isCallExpression(call)) return false;
+  const callee = call.getExpression();
+  return Node.isPropertyAccessExpression(callee) && QUERY_METHODS.has(callee.getName()) && Node.isPropertyAccessExpression(callee.getExpression());
+}
 
 /** The cursor sites found; a drop below this means the scan stopped seeing them. */
 const MIN_SITES = 11;
@@ -32,7 +67,7 @@ function violations(sf: SourceFile, label: string): { sites: number; problems: s
   const cursorProps = [
     ...sf.getDescendantsOfKind(SyntaxKind.PropertyAssignment),
     ...sf.getDescendantsOfKind(SyntaxKind.ShorthandPropertyAssignment),
-  ].filter((prop) => prop.getName() === "cursor");
+  ].filter((prop) => unquotedName(prop) === "cursor");
   for (const prop of cursorProps) {
     const where = `${label}:${prop.getStartLineNumber()}`;
 
@@ -46,8 +81,7 @@ function violations(sf: SourceFile, label: string): { sites: number; problems: s
       const parent = n.getParent();
       if (!Node.isObjectLiteralExpression(n) || !parent) continue;
       if (Node.isCallExpression(parent)) {
-        const callee = parent.getExpression();
-        if (Node.isPropertyAccessExpression(callee) && QUERY_METHODS.has(callee.getName())) {
+        if (isDelegateCall(parent)) {
           args ??= n;
           inQuery = true;
         }
@@ -62,8 +96,7 @@ function violations(sf: SourceFile, label: string): { sites: number; problems: s
       // one we cannot place is, and so is any cursor in an object bound to a
       // variable — a page object spread into a query (`...page`) hides its
       // orderBy pairing from this check.
-      const holder = prop.getParent();
-      const inBoundObject = Node.isObjectLiteralExpression(holder) && Node.isVariableDeclaration(holder.getParent());
+      const inBoundObject = isInVariableBoundLiteral(prop);
       if (inBoundObject || (Node.isPropertyAssignment(prop) && Node.isObjectLiteralExpression(prop.getInitializer()))) {
         sites += 1;
         problems.push(`${where}: cursor outside a findMany/findFirst argument literal`);
@@ -84,13 +117,15 @@ function violations(sf: SourceFile, label: string): { sites: number; problems: s
   // of literals). A page object built anywhere else — a variable, a helper's
   // return, an assignment — would carry a cursor past the orderBy check.
   for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
-    const callee = call.getExpression();
-    if (!Node.isPropertyAccessExpression(callee) || !QUERY_METHODS.has(callee.getName())) continue;
+    if (!isDelegateCall(call)) continue;
+    const callee = call.getExpression() as PropertyAccessExpression;
     const [arg] = call.getArguments();
     if (!arg) continue;
     const where = `${label}:${call.getStartLineNumber()}`;
     if (!Node.isObjectLiteralExpression(arg)) {
-      problems.push(`${where}: ${callee.getName()} arguments are not an object literal`);
+      // A find's arguments must be readable. A write's argument is read only
+      // when it is a literal: `ref.current.delete(key)` has the same shape.
+      if (FIND_METHODS.has(callee.getName())) problems.push(`${where}: ${callee.getName()} arguments are not an object literal`);
       continue;
     }
     for (const problem of unreadableArgs(arg)) problems.push(`${where}: ${callee.getName()} ${problem}`);
@@ -107,20 +142,37 @@ function violations(sf: SourceFile, label: string): { sites: number; problems: s
  */
 function unreadableArgs(args: ObjectLiteralExpression): string[] {
   const problems: string[] = [];
+  // Argument keys are read by name: a quoted or computed one would be skipped.
+  for (const prop of args.getProperties()) {
+    if (Node.isPropertyAssignment(prop) && !Node.isIdentifier(prop.getNameNode())) {
+      problems.push(`has an argument key that is not a plain name (${prop.getNameNode().getText()})`);
+    }
+  }
   for (const spread of args.getProperties().filter(Node.isSpreadAssignment)) {
-    if (!isLiteralSpread(spread.getExpression())) problems.push("spreads arguments that are not a literal");
+    if (!isLiteralSpread(spread.getExpression())) {
+      problems.push("spreads arguments that are not a literal");
+      continue;
+    }
+    // A readable spread is still arguments: read what each of its literals holds.
+    for (const arm of literalArms(spread.getExpression())) problems.push(...unreadableArgs(arm));
   }
   for (const key of ["include", "select"]) {
     const prop = args.getProperty(key);
     if (!prop) continue;
-    const value = Node.isPropertyAssignment(prop) ? prop.getInitializer() : undefined;
+    const initializer = Node.isPropertyAssignment(prop) ? prop.getInitializer() : undefined;
+    const value = initializer && Node.isIdentifier(initializer) ? constLiteral(initializer) : initializer;
     if (!value || !Node.isObjectLiteralExpression(value)) {
       problems.push(`${key} is not an object literal`);
       continue;
     }
     for (const rel of value.getProperties()) {
       const relValue = Node.isPropertyAssignment(rel) ? rel.getInitializer() : undefined;
+      // A boolean selects a field (a computed field name included): no relation arguments.
       if (relValue && (Node.isTrueLiteral(relValue) || Node.isFalseLiteral(relValue))) continue;
+      if (Node.isPropertyAssignment(rel) && Node.isComputedPropertyName(rel.getNameNode())) {
+        problems.push(`${key} names a relation by a computed key`);
+        continue;
+      }
       if (relValue && Node.isObjectLiteralExpression(relValue)) {
         problems.push(...unreadableArgs(relValue));
         continue;
@@ -129,6 +181,56 @@ function unreadableArgs(args: ObjectLiteralExpression): string[] {
     }
   }
   return problems;
+}
+
+/**
+ * The object literal a `const` of this name in a lexically enclosing scope is
+ * bound to (`as const` unwrapped), or undefined. Followed only for an
+ * `include` / `select` value; anything else named stays unreadable.
+ */
+function constLiteral(id: Node): ObjectLiteralExpression | undefined {
+  const name = id.getText();
+  for (let scope: Node | undefined = id.getParent(); scope; scope = scope.getParent()) {
+    if (!Node.isBlock(scope) && !Node.isSourceFile(scope)) continue;
+    for (const statement of scope.getStatements()) {
+      if (!Node.isVariableStatement(statement) || statement.getDeclarationKind() !== VariableDeclarationKind.Const) continue;
+      const decl = statement.getDeclarations().find((d) => d.getName() === name);
+      if (!decl) continue;
+      let init = decl.getInitializer();
+      if (init && Node.isAsExpression(init)) init = init.getExpression();
+      return init && Node.isObjectLiteralExpression(init) ? init : undefined;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Whether the property sits in an object literal, at any nesting depth, that a
+ * variable is bound to. The walk stays inside the literal (object literals,
+ * their properties, parentheses, conditionals, `as`): a method body or a call
+ * ends it, so a value returned from inside `const store = { list() { ... } }`
+ * is not "bound".
+ */
+function isInVariableBoundLiteral(prop: Node): boolean {
+  for (let n: Node | undefined = prop.getParent(); n; n = n.getParent()) {
+    if (Node.isVariableDeclaration(n)) return true;
+    const isLiteralPart =
+      Node.isObjectLiteralExpression(n) ||
+      Node.isPropertyAssignment(n) ||
+      Node.isParenthesizedExpression(n) ||
+      Node.isConditionalExpression(n) ||
+      Node.isAsExpression(n);
+    if (!isLiteralPart) return false;
+  }
+  return false;
+}
+
+/** The object literals a readable spread can contribute (through parentheses and both conditional arms). */
+function literalArms(expr: Node): ObjectLiteralExpression[] {
+  const inner = Node.isParenthesizedExpression(expr) ? expr.getExpression() : expr;
+  if (Node.isObjectLiteralExpression(inner)) return [inner];
+  if (Node.isConditionalExpression(inner)) return [...literalArms(inner.getWhenTrue()), ...literalArms(inner.getWhenFalse())];
+  return [];
 }
 
 /** A literal, a parenthesised or conditional choice of literals, whose own spreads are literals too. */
@@ -201,9 +303,12 @@ describe("cursor pagination orders by a unique key last", () => {
       expect(scanFixture(code).problems, code).toHaveLength(1);
     }
     for (const code of [
-      `const rels = { rel: { orderBy: { createdAt: "asc" }, cursor, skip: 1 } }; tx.a.findMany({ include: { ...rels } });`,
       `tx.a.findMany({ include: rels });`,
       `tx.a.findMany({ include: { rel: relPage } });`,
+      `tx.a.findMany({ include: { rel } });`,
+      `tx.a.findMany({ "include": rels });`,
+      `tx.a.findMany({ ["include"]: rels });`,
+      `tx.a.findMany({ include: { ["rel"]: { cursor, orderBy: [{ id: "asc" }] } } });`,
       `tx.a.findMany({ include: { rel: { include: { sub: { orderBy: { createdAt: "asc" }, ...page } } } } });`,
       `tx.a.findMany({ select: { rel: { orderBy: { createdAt: "asc" }, ...page } } });`,
       `tx.a.findMany({ orderBy: { createdAt: "desc" }, ...({ ...page }) });`,
@@ -215,6 +320,38 @@ describe("cursor pagination orders by a unique key last", () => {
     expect(scanFixture(`tx.a.findMany({ orderBy: [{ id: "asc" }], ...(c ? { where: { a } } : {}) });`).problems).toEqual([]);
     // A where may spread a shared filter; it carries no cursor.
     expect(scanFixture(`tx.a.findMany({ where: { ...ACTIVE }, orderBy: [{ id: "asc" }] });`).problems).toEqual([]);
+    // Refused twice: the cursor sits in a variable-bound object, and the include spreads it.
+    expect(
+      scanFixture(`const rels = { rel: { orderBy: { createdAt: "asc" }, cursor, skip: 1 } }; tx.a.findMany({ include: { ...rels } });`).problems,
+    ).toHaveLength(2);
+    // Inside a readable spread's literals, and on any delegate method.
+    for (const code of [
+      `tx.a.findMany({ ...(c ? { include: { rel: page(cur) } } : {}) });`,
+      `tx.a.findMany({ ...{ include: rels } });`,
+      `tx.a.findMany({ include: { rel: { ...({ include: { sub: subPage } }) } } });`,
+      `tx.a.findUnique({ where: { id }, include: { posts: postsPage } });`,
+      `tx.a.update({ where: { id }, data: {}, include: { rel: page(cur) } });`,
+    ]) {
+      expect(scanFixture(code).problems, code).toHaveLength(1);
+    }
+    // A relation cursor under any delegate method is a site, judged by its own orderBy.
+    expect(scanFixture(`tx.a.findUnique({ include: { posts: { cursor, orderBy: { createdAt: "asc" }, skip: 1 } } });`).problems).toHaveLength(1);
+    expect(
+      scanFixture(`tx.a.findUnique({ include: { posts: { cursor, orderBy: [{ createdAt: "asc" }, { id: "asc" }], skip: 1 } } });`),
+    ).toEqual({ sites: 1, problems: [] });
+    // A const include is read; a cursor anywhere in a variable-bound object is refused.
+    expect(scanFixture(`const sel = { user: { select: { id: true } } } as const; tx.a.update({ where: { id }, data: {}, include: sel });`).problems).toEqual([]);
+    expect(scanFixture(`const sel = { posts: { cursor, orderBy: { createdAt: "asc" } } }; tx.a.findUnique({ include: sel });`).problems).toHaveLength(1);
+    // A quoted cursor key is still a site.
+    expect(scanFixture(`tx.a.findMany({ orderBy: { createdAt: "asc" }, "cursor": { id: c } });`).problems).toEqual([
+      "fixture:1: orderBy must be an array literal ending in { id: ... }",
+      'fixture:1: findMany has an argument key that is not a plain name ("cursor")',
+    ]);
+    // A computed field name selected with a boolean is readable (retention-gc sweep).
+    expect(scanFixture(`tx.a.findMany({ where: { [col]: { not: null } }, select: { id: true, [col]: true } });`).problems).toEqual([]);
+    // Not a delegate call: `map.delete(key)`.
+    expect(scanFixture(`timers.delete(key); ref.current.delete(key);`).problems).toEqual([]);
+    expect(scanFixture(`tx.a.findMany({ ...(c ? { include: { rel: { where: { a } } } } : {}) });`).problems).toEqual([]);
     // Readable relation arguments, at any depth and under select, pass.
     expect(
       scanFixture(`tx.a.findMany({ select: { id: true, rel: { select: { sub: { where: { ...F }, take: 1 } } } } });`).problems,

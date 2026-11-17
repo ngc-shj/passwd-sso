@@ -148,6 +148,31 @@ describe("ApiKeyManager", () => {
     expect(screen.getByDisplayValue("api-token-xyz")).toBeInTheDocument();
   });
 
+  it("sends an expiry of exactly the chosen elapsed days, across a DST fall-back", async () => {
+    // New York, mid-October: 90 days ahead crosses the November fall-back, so a
+    // local calendar step would land an hour past the server's elapsed bound.
+    vi.stubEnv("TZ", "America/New_York");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-15T12:00:00Z"));
+    try {
+      setupKeysList([]);
+      render(<ApiKeyManager />);
+      await waitFor(() => expect(screen.getByText("noKeys")).toBeInTheDocument());
+      fireEvent.click(screen.getByRole("button", { name: /createKey/ }));
+      fireEvent.change(screen.getByPlaceholderText("namePlaceholder"), { target: { value: "my-key" } });
+      const buttons = screen.getAllByRole("button", { name: /createKey/ });
+      fireEvent.click(buttons[buttons.length - 1]);
+      await waitFor(() => expect(screen.getByText("tokenReady")).toBeInTheDocument());
+
+      const post = mockFetch.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === "POST");
+      const body = JSON.parse(String((post?.[1] as RequestInit).body)) as { expiresAt: string };
+      // The default choice is 90 days.
+      expect(body.expiresAt).toBe(new Date(Date.parse("2026-10-15T12:00:00Z") + 90 * 86_400_000).toISOString());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("opens RecentSessionRequiredDialog when SESSION_STEP_UP_REQUIRED is returned", async () => {
     mockFetch.mockImplementation((url: string, init?: RequestInit) => {
       if (

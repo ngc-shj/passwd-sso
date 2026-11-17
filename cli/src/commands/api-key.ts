@@ -10,6 +10,7 @@
 import { apiRequest } from "../lib/api-client.js";
 import { readMainApiErrorBody } from "../lib/api-error-body.js";
 import * as output from "../lib/output.js";
+import { MS_PER_DAY } from "../lib/time.js";
 
 interface ApiKeyEntry {
   id: string;
@@ -86,8 +87,9 @@ interface CreateOptions {
 }
 
 export async function apiKeyCreateCommand(opts: CreateOptions): Promise<void> {
-  const expiresAt = new Date();
-  expiresAt.setDate(expiresAt.getDate() + opts.days);
+  // Elapsed days, as the server bounds it: a local calendar step would land an
+  // hour past the bound across a DST fall-back.
+  const expiresAt = new Date(Date.now() + opts.days * MS_PER_DAY);
 
   const res = await apiRequest<{
     id: string;

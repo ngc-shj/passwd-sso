@@ -463,3 +463,44 @@ security: the elapsed-time bound never exceeds the stated 365 days). New:
   identifier relation, nested include, select) plus a readable nested select
   that passes; the real tree has none of the refused shapes.
 - Q5-4: the Date-minimum pair is its own test.
+
+---
+
+# Round 6 (fixes b3750ad82..ccafaaa9d)
+
+## Changes from Previous Round
+All round-5 items resolved (testing confirmed each by mutation, including the
+card tests under clocks shifted to 2026-12-31, 2027-12-31 and leap-day edges;
+security: no widening past 365 × 24 h, no other token schema with a calendar
+step). New:
+
+## Findings
+- F-R6-1 / R6-S1 [Minor] The CLI still computed API key expiry with a local
+  `setDate` step against the elapsed-time server bound.
+- F-R6-2 [Major] The cursor guard did not read `include` / `select` inside an
+  accepted literal spread.
+- F-R6-3 [Minor] The guard scanned only the paginating finds; relation
+  pagination under `findUnique` / `create` / `update` / `upsert` was invisible.
+- Q6-1 [Major] The API key manager's elapsed-day expiry was untested.
+- Q6-2 [Minor] Quoted or computed `include` / `select` / `cursor` keys were
+  skipped unread.
+- Q6-3 [Minor] The shorthand relation refusal (`include: { rel }`) had no fixture.
+
+## Resolution Status (round 6)
+- F-R6-1: `passwd-sso api-key create` sends `now + days × MS_PER_DAY`; CLI unit
+  test under New York from 2026-03-09 (the year ahead crosses only the
+  November fall-back, where the previous step is one hour over).
+- F-R6-2 / F-R6-3 / Q6-2 / Q6-3 (guard mechanism, the class having expanded
+  over several rounds): the guard scans every delegate call
+  `<client>.<model>.<method>(...)` that takes relation arguments (finds and
+  writes; `map.delete(key)` is not one) and refuses what it cannot read rather
+  than matching shapes: readable spreads are read through, `include` /
+  `select` must be a literal or a `const` bound to one in an enclosing scope,
+  relation values a boolean or a literal, argument keys plain names (a quoted
+  `cursor` still counts as a site), computed relation keys only with a boolean
+  value (the retention-gc sweep selects a computed field this way), and a
+  cursor anywhere inside a variable-bound literal is refused. A fixture per
+  shape; the real tree is clean.
+- Q6-1: an API key manager cell under New York at 2026-10-15T12:00Z asserts the
+  default 90-day choice is sent as exactly now + 90 × 24 h (the previous
+  `setDate` step sends one hour more).
