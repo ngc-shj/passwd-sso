@@ -68,7 +68,7 @@ describe("GET /api/audit-logs", () => {
           scope: AUDIT_SCOPE.PERSONAL,
           OR: expect.any(Array),
         }),
-        orderBy: { createdAt: "desc" },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         take: 51, // default 50 + 1
       })
     );

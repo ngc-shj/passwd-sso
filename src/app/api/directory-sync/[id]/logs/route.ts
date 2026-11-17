@@ -63,7 +63,7 @@ async function handleGET(req: NextRequest, ctx: RouteContext) {
     logs = await withUserTenantRls(session.user.id, () =>
       prisma.directorySyncLog.findMany({
         where: { configId: id, tenantId },
-        orderBy: { startedAt: "desc" },
+        orderBy: [{ startedAt: "desc" }, { id: "desc" }],
         take: limit + 1, // fetch one extra to detect hasMore
         ...(cursor
           ? {

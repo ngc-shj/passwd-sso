@@ -47,7 +47,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
     logs = await withUserTenantRls(session.user.id, async () =>
       prisma.shareAccessLog.findMany({
         where: { shareId: id },
-        orderBy: { createdAt: "desc" },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         take: limit + 1,
         ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
         select: {

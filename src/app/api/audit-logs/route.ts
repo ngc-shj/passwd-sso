@@ -75,7 +75,7 @@ async function handleGET(req: NextRequest) {
     logs = await withUserTenantRls(session.user.id, async () =>
       prisma.auditLog.findMany({
         where,
-        orderBy: { createdAt: "desc" },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         take: limit + 1,
         ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
       }),
