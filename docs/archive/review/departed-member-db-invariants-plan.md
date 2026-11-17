@@ -168,6 +168,12 @@ database cannot tell either from a legitimate operation:
 - a return (`deactivated_at → NULL`), as `returnToTenant` does;
 - deleting the tenant row, as the bootstrap migration does.
 
+Re-keying a departed tenant row, or a departure record, onto another user or tenant also erases the
+departure, and nothing legitimate does it. Rule 2 matches only writes naming `deactivatedAt` and the
+AST pin only deletes, so neither would see it: the database refuses both at the statement
+(`tenant_row_rekeyed`, `record_rekeyed`; Phase 3 S-1 and round 2 S2-1), and a record's lowering
+(`record_lowered`). A cascaded primary-key change reaches a record the same way and is refused too.
+
 Each restores the user's authority by design, and each stays app-enforced: rule 2 confines tenant
 active-state writes to `team-departure.ts`, and `tenantRowDeletes` pins the deletes.
 
@@ -219,7 +225,7 @@ Not covered by the database:
 - undoing a departure: a return, or a tenant-row DELETE (Q3; rule 2 and the AST pin);
 - `TRUNCATE`;
 - a change of `teams.tenant_id` (re-homing a team; `trg_enforce_tenant_id_teams` admits it under a
-  bypass), which leaves its member rows keyed to the old tenant;
+  bypass), which leaves its member rows keyed to the old tenant: they can be ended, not granted;
 - key rows for an absent membership (SC3);
 - writers holding trigger-disabling privilege (C1).
 
@@ -243,6 +249,7 @@ Triggers:
 | `trg_team_members_departed_member_guard` | `team_members` | BEFORE INSERT OR UPDATE, row |
 | `trg_team_member_keys_departed_member_guard` | `team_member_keys` | BEFORE INSERT OR UPDATE, row |
 | `trg_tenant_member_departures_stamp_guard` | `tenant_member_departures` | BEFORE UPDATE, row |
+| `trg_tenant_members_departed_row_rekey_guard` | `tenant_members` | BEFORE UPDATE OF `tenant_id`, `user_id` WHEN the row is departed; refuses the re-key (`tenant_row_rekeyed`, Phase 3 round 2 S2-1). The `_upd` firing on those columns below stays as a second line it shadows |
 | `tenant_members_departure_ends_memberships_ins` | `tenant_members` | AFTER INSERT WHEN `NEW.deactivated_at IS NOT NULL`; constraint, DEFERRABLE INITIALLY DEFERRED |
 | `tenant_members_departure_ends_memberships_upd` | `tenant_members` | AFTER UPDATE OF `deactivated_at`, `tenant_id`, `user_id` WHEN the new stamp is non-NULL and the stamp, tenant or user differs from OLD (re-keying a departed row is a departure of the new key, round 4 R4-1); same |
 | `tenant_member_departures_ends_memberships` | `tenant_member_departures` | AFTER INSERT OR UPDATE; same |
@@ -267,8 +274,11 @@ Triggers:
 - the member row exists and is deactivated.
 
 No writer creates or re-wraps a key for an ended member: rotate-key, confirm-key and teams POST
-write keys only for active rows. Ended rows keep the keys they already hold, which are not
-rewritten (round 4 R4-2).
+write keys only for active rows. That must hold when the key is written, not only when the row is
+read: confirm-key writes the key before its CAS (lock order teams → users → team_members), so a
+recipient ended in between has the key refused (`key_inactive`), which the route answers as 404
+(Phase 3 F1, round 2 N1); rotate-key's team lock excludes the enders. Ended rows keep the keys they
+already hold, which are not rewritten (round 4 R4-2).
 
 **Record stamp guard.** Refuses lowering `departed_at`. Its one writer stamps `clock_timestamp()`
 (round 1 S3). The tenant-row stamp has no lowering guard: lowering a stamp is itself a departure
@@ -293,7 +303,7 @@ with the written row's own ids only. `<arm>` is a fixed token, one per refusal:
 
 | Token | Refusal |
 |---|---|
-| `tenant_mismatch` | the row's tenant is not the team's |
+| `tenant_mismatch` | the row's tenant is not the team's, on an activation, a grant or a key write (an ending passes: Phase 3 F2) |
 | `created_at` | `created_at` changed on UPDATE |
 | `unknown_role` | the role has no rank |
 | `activation_departed` | activation while the tenant row is departed |
@@ -302,6 +312,8 @@ with the written row's own ids only. `<arm>` is a fixed token, one per refusal:
 | `key_leftover` | key row for a leftover membership |
 | `key_inactive` | key row written for an ended membership |
 | `record_lowered` | `departed_at` lowered |
+| `record_rekeyed` | a record's `tenant_id` or `user_id` changed (Phase 3 S-1) |
+| `tenant_row_rekeyed` | a departed tenant row's `tenant_id` or `user_id` changed (Phase 3 round 2 S2-1) |
 | `isolation` | the transaction is not READ COMMITTED |
 | `departure_active` | departed now and still holding an active row |
 | `departure_leftover` | not departed now and still holding a leftover row |
@@ -686,7 +698,7 @@ status.
 
 | ID | Subject | Status |
 |----|---------|--------|
-| C1 | Guard function, six triggers, arm tokens, `(tenant_id, user_id)` index | locked |
+| C1 | Guard function, seven triggers, arm tokens, `(tenant_id, user_id)` index | locked |
 | C2 | Advisory-key serialisation, READ COMMITTED check, `advisoryKey` lowercases both ids | locked |
 | C3 | Firing set: departure transitions, firing (tenant, user) only | locked |
 | C4 | Bypass pattern, routine allowlist, purpose, parameter-privilege audit | locked |

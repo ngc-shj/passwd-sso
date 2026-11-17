@@ -1289,6 +1289,36 @@ describe("departed-member operator scripts — real-DB integration", () => {
         await expectReadmitted(l, label);
       });
 
+      it("the guard trigger is not in its enabled state (ENABLE ALWAYS): the script would otherwise restore it to a different state", async () => {
+        const l = await seedResidual(0);
+        const guardState = async () =>
+          (await sql<{ tgenabled: string }>(
+            `SELECT tgenabled::text AS tgenabled FROM pg_trigger WHERE tgrelid = 'team_members'::regclass AND tgname = 'trg_team_members_departed_member_guard'`,
+          ))[0].tgenabled;
+        // ALWAYS keeps the guard firing (also under replica), so this cell
+        // weakens nothing while it holds; the integration files run serially.
+        await ctx.su.pool.query(`ALTER TABLE team_members ENABLE ALWAYS TRIGGER trg_team_members_departed_member_guard`);
+        try {
+          await expectRefused(readmitWith({ triples: oneTriple(l), label }), { message: /is not in its enabled state; nothing was written/ });
+          expect(await guardState()).toBe("A");
+        } finally {
+          await ctx.su.pool.query(`ALTER TABLE team_members ENABLE TRIGGER trg_team_members_departed_member_guard`);
+        }
+        expect(await guardState()).toBe("O");
+      });
+
+      it("a role that does not own team_members (passwd_app) cannot disable the guard", async () => {
+        const l = await seedResidual(0);
+        const before = await snapshot();
+        const error = await runScript(readmitWith({ triples: oneTriple(l), label }), undefined, appPool).then(
+          () => null,
+          (e: unknown) => e as { message: string; code?: string },
+        );
+        expect(error?.code).toBe("42501");
+        expect(error?.message).toMatch(/must be owner of table team_members/);
+        expect(await snapshot()).toEqual(before);
+      });
+
       it("admitted_at is stamped (re-activated since the column exists)", async () => {
         const l = await seedResidual(0);
         await sql(`UPDATE team_members SET deactivated_at = $2::timestamptz WHERE id = $1::uuid`, l.rows[0].rowId, iso(l.stamp));

@@ -1,3 +1,1 @@
 departure_active	departed-member DB invariants — real-DB integration T4: departure refused at COMMIT, not at the statement a back-dated first stamp that leaves a row admitted after it
-+-	departed-member DB invariants — real-DB integration T4: departure refused at COMMIT, not at the statement re-keying a departed tenant row (superuser: the tenant-context trigger refuses it for the app) by user_id onto a user who holds an active row: refused
-+-	departed-member DB invariants — real-DB integration T4: departure refused at COMMIT, not at the statement re-keying a departed tenant row (superuser: the tenant-context trigger refuses it for the app) by tenant_id onto a tenant where the user holds an active row: refused

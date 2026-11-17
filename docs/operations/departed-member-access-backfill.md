@@ -707,13 +707,19 @@ stay leftover (refused as before), and the migration does not list them.
 It does not judge:
 
 - **undoing a departure.** A return (`deactivated_at` back to NULL) or deleting
-  the tenant row looks like a legitimate return or the bootstrap migration. The
+  the tenant row looks like a legitimate return or the bootstrap migration.
+  (Re-keying a departed tenant row or a departure record, which also erases a
+  departure, is refused, and so is lowering a record's `departed_at`.) The
   `check-team-rotation-input-lock` gate keeps those writes in
   `src/lib/team/team-departure.ts` and pins tenant-row deletes to two reviewed
   sites. It does not see `*Unsafe` raw SQL, aliases, migrations, `.sh` / `.sql`
   files or this runbook's SQL, so run the report after any hand-written
   tenant-row change;
-- `TRUNCATE`, FK cascades, and a change of `teams.tenant_id`;
+- `TRUNCATE`, FK cascade deletes (a cascaded change of a user's or tenant's
+  id is refused once it reaches a departure record or a departed tenant row),
+  and a change of `teams.tenant_id` (a membership
+  left with another tenant than its team's is refused any grant or
+  activation, but can still be ended);
 - a key row for a user with no membership row in that team;
 - a session that disables triggers: a superuser's
   `session_replication_role = replica`, or the table owner's

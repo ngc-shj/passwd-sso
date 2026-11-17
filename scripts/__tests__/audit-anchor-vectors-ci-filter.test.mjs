@@ -64,3 +64,23 @@ describe("ci-integration.yml path filter and what the anchor integration tests r
     expect(integration).toContain(`${INTEGRATION_DIR}/**`);
   });
 });
+
+// Two integration files extract the re-admit script from the departed-member
+// runbook and run it: a PR that changes only the runbook must run them.
+describe("ci-integration.yml path filter and the runbook the departed-member suites execute", () => {
+  const RUNBOOK = "docs/operations/departed-member-access-backfill.md";
+  const READERS = [
+    "src/__tests__/db-integration/departed-member-db-invariants.integration.test.ts",
+    "src/__tests__/db-integration/departed-member-operator-scripts.integration.test.ts",
+  ];
+
+  it.each(READERS)("%s still reads the runbook", (suite) => {
+    expect(readFileSync(join(ROOT, suite), "utf8")).toContain(RUNBOOK);
+  });
+
+  it("the integration filter lists the runbook by name, not through a docs wildcard", () => {
+    const { integration } = pathFilters("ci-integration.yml");
+    expect(integration).toContain(RUNBOOK);
+    expect(integration.filter((p) => p.startsWith("docs/") && p.includes("*"))).toEqual([]);
+  });
+});

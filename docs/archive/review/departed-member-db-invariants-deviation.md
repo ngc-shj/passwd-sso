@@ -142,7 +142,7 @@
     - three unit cells, which go red with the name removed (scratch copy);
     - a throwaway database made from the worktree template, with the database default set: the audit exits 1 with `DENIED_SETTING_HELD`, `--write` refuses, and the database is dropped.
 - **RT7/R50 (Major), the runner verdict:** PROVED ignored unexpected reds and the arm token.
-  - **Fix:** a row now proves only when every required cell's failure carries its token and nothing outside the listed cells goes red.
+  - **Fix:** a row now proves only when every required cell fails at its pinned assertion naming its arm token, and nothing outside the listed cells goes red. Since Phase 3 T4, a deny cell's failure also prints the actual outcome (`actual=<arm|committed>`). For a deny cell, the token alone does not prove the reason, because the expectation prints it too. Base-green plus no unlisted red is what rules out an unrelated cause.
   - **Collateral reds:** those the earlier runs observed are listed per row as `+` lines (allowed, not required).
   - **Row 11:** its cell now compares the token on its own. Vitest truncated the expected object, so the token never reached the message.
 - **R44 (Minor), the runner:** `run_row` runs under `||`, so `set -e` was off inside it. Scratch creation, `setup.sql`, `patch` and the mutation's `pg_exec` now return explicitly.
@@ -151,3 +151,47 @@
 - **R36 (Minor):** the row-11 fixture imports helpers through the `@/` alias, so `tsconfig.json` needs no exclude.
 - **RT3/R1 (Minor), not changed:** existing tests that build the advisory key by hand stay as written. They are an independent oracle for `advisoryKey`'s spelling.
 - **Full matrix re-run under the stricter verdict:** see D8.
+
+## D8 — Full red-proof matrix under the stricter verdict
+
+- **First full run after D7 (44 rows):** all 44 proved.
+  - The verdict requires each required cell to fail at its pinned assertion naming its token, and no unlisted cell to go red.
+  - The `+` collateral lines added in D7 came from the earlier runs' observed reds. None had to be widened.
+- **After the Phase 3 round-1 fixes (47 rows):** 46 proved on the first pass.
+  - New rows:
+    - R1y: the confirm-key CAS after the key write again;
+    - 15b: `tenant_mismatch` refuses endings again;
+    - 16b: no record re-key guard.
+  - Regenerated against the new function: rows 12, 15 and 16. Row 15 also requires the new raise-on-a-mismatched-row cell.
+  - Regenerated against the new route: row R1.
+  - **Row 31a:** it reddened one cell it did not list, the new superuser record re-key cell. Its seed helper's leaked `session_replication_role` turns the trigger off on the shared superuser connection, the same way it reddens the superuser re-key cells it already listed. That cell was added as a `+` line, and the row re-run proved.
+- **Result:** all 47 rows proved. Each run's `summary.tsv` is in the scratchpad (`run-all2`, `run-all3`, `r31a`).
+
+## D9 — Phase 3 round 2: changes the plan did not foresee
+
+- **confirm-key order (round 2 N1).**
+  - The round-1 F1 fix moved the CAS before the key write. That locks the member row before the recipient's users row, and the users lock is taken implicitly by the key insert's FK check. This breaks the documented order teams → users → team_members and deadlocks with a vault reset, which locks users FOR UPDATE and then the member rows.
+  - **Fix:** restore the original order. The guard's `key_inactive` refusal of the key write is answered as the 404 a CAS miss gets. It is read through `departedMemberGuardArm` (`src/lib/team/departed-member-guard.ts`), the same nestings `pgConstraintName` reads.
+  - **Pins:**
+    - a unit cell for the call order;
+    - a unit cell for `key_inactive` → 404, and one showing that any other guard arm is not mapped;
+    - the integration race cell (the ending commits while the key write is parked: 404, no key).
+  - **Red-proof rows:**
+    - R1y: the mapping removed;
+    - R1z: the CAS first again, which reddens the order cell and the race cell.
+- **Re-keying a departed tenant row (round 2 S2-1).**
+  - The docs called it app-enforced, but rule 2 reads only `deactivatedAt` writes and the AST pin reads only deletes.
+  - **Fix:** a new BEFORE UPDATE OF `tenant_id`, `user_id` trigger refuses it with `tenant_row_rekeyed`. This makes seven triggers.
+  - **Cells changed:** the two pairs that re-keyed a departed row (the commit-time judgement of the new key) are replaced. Both re-keys are now refused at the statement; the pair cell is an active row re-keyed by `user_id`, which commits.
+  - **Red-proof rows:**
+    - 09a and 09b (the `_upd` firing on `tenant_id` / `user_id`) are retired. The BEFORE arm refuses every write they reached, so no cell can redden them while it stands. The firing stays as a second line behind the arm.
+    - Row 09c removes the arm.
+- **SCIM user DELETE (round 2 N3).** This was the SC3 window: a key row left behind for an absent membership. Member rows are now deleted before keys, so a concurrent distribution either holds the member row, and its committed key is then deleted, or rolls back. Pinned by a race cell and red-proof row R6.
+- **`--write` on a parameter privilege alone (round 2 test N1):** T8e also runs `--write`. Red-proof: removing `parameters.length > 0` from the refusal condition reddens both T8e cells (scratch tree, scratch database).
+- **The two halves of `(v_activation OR v_grant)` (round 2 test N2):** rows 15c and 15d.
+- **The runbook's FK-cascade line (round 2 N2):** now says a cascaded id change is refused once it reaches a departure record or a departed tenant row.
+- **Matrix after round 2 (50 rows):**
+  - 49 proved on the first pass.
+  - Row 31a reddened the renamed superuser tenant-row re-key cells, the same collateral it already listed under their old names. They are listed under the new names, and the row re-run proved.
+  - Stale `+` lines naming the removed cells were dropped from rows 17 and 20.
+  - **Result:** all 50 rows proved.

@@ -1,8 +1,8 @@
 --- a/src/app/api/teams/[teamId]/members/[memberId]/confirm-key/route.ts
 +++ b/src/app/api/teams/[teamId]/members/[memberId]/confirm-key/route.ts
-@@ -138,7 +138,7 @@
-         // either reaches the member row first (the CAS below misses) or
-         // deactivates the membership after this commits.
+@@ -139,7 +139,7 @@
+         // either reaches the member row first (the key write is refused, or the
+         // CAS below misses) or deactivates the membership after this commits.
          const recipient = await readTenantRows(tx, tenantId, [targetMember.userId]);
 -        if (actorDepartedSinceAdmission(recipient.get(targetMember.userId), member.admittedAt ?? member.createdAt)) {
 +        if (false) {

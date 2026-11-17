@@ -1,15 +1,15 @@
 --- a/function.sql
 +++ b/function.sql
-@@ -78,7 +78,7 @@
+@@ -91,7 +91,7 @@
  
      IF TG_TABLE_NAME = 'team_members' THEN
        SELECT t.tenant_id INTO v_team_tenant FROM teams t WHERE t.id = NEW.team_id;
--      IF v_team_tenant IS DISTINCT FROM v_tenant THEN
+-      IF (v_activation OR v_grant) AND v_team_tenant IS DISTINCT FROM v_tenant THEN
 +      IF false THEN
          v_refusal := 'tenant_mismatch';
        ELSIF v_activation AND v_row_departed THEN
          v_refusal := 'activation_departed';
-@@ -90,7 +90,7 @@
+@@ -103,7 +103,7 @@
        SELECT t.tenant_id INTO v_team_tenant FROM teams t WHERE t.id = NEW.team_id;
        SELECT m.deactivated_at IS NOT NULL INTO v_member_ended
          FROM team_members m WHERE m.team_id = NEW.team_id AND m.user_id = v_user;

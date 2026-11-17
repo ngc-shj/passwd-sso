@@ -19,7 +19,12 @@ BEGIN;
 -- Not judged (docs/archive/review/departed-member-db-invariants-plan.md Q3, Q6):
 -- undoing a departure (a return, or deleting the tenant row: the bootstrap
 -- migration does both legitimately), TRUNCATE, re-homing a team, and a key row
--- for a user with no team_members row. Roles that can disable triggers bypass it.
+-- for a user with no team_members row. Re-keying a departure record or a
+-- departed tenant row is refused (it would erase the departure), and so is
+-- lowering a record's departed_at, a cascaded primary-key change included. A
+-- membership whose tenant differs from its team's is refused only where it
+-- would gain authority, so ending one stays possible. Roles that can disable
+-- triggers bypass it.
 --
 -- Serialisation: an activation and the departure check take the advisory key
 -- tenant-member:<tenant>:<user> (tenant-row-lock.ts advisoryKey), which every
@@ -59,7 +64,20 @@ DECLARE
   v_member_ended boolean;
   v_refusal text;
 BEGIN
+  IF TG_TABLE_NAME = 'tenant_members' AND TG_WHEN = 'BEFORE' THEN
+    IF OLD.deactivated_at IS NOT NULL
+       AND (NEW.tenant_id, NEW.user_id) IS DISTINCT FROM (OLD.tenant_id, OLD.user_id) THEN
+      RAISE EXCEPTION 'DEPARTED_MEMBER_GUARD:tenant_row_rekeyed: departed tenant row (tenant %, user %)', OLD.tenant_id, OLD.user_id
+        USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+  END IF;
+
   IF TG_TABLE_NAME = 'tenant_member_departures' AND TG_WHEN = 'BEFORE' THEN
+    IF (NEW.tenant_id, NEW.user_id) IS DISTINCT FROM (OLD.tenant_id, OLD.user_id) THEN
+      RAISE EXCEPTION 'DEPARTED_MEMBER_GUARD:record_rekeyed: departure record (tenant %, user %)', OLD.tenant_id, OLD.user_id
+        USING ERRCODE = 'check_violation';
+    END IF;
     IF NEW.departed_at < OLD.departed_at THEN
       RAISE EXCEPTION 'DEPARTED_MEMBER_GUARD:record_lowered: departure record (tenant %, user %)', NEW.tenant_id, NEW.user_id
         USING ERRCODE = 'check_violation';
@@ -115,7 +133,7 @@ BEGIN
 
     IF TG_TABLE_NAME = 'team_members' THEN
       SELECT t.tenant_id INTO v_team_tenant FROM teams t WHERE t.id = NEW.team_id;
-      IF v_team_tenant IS DISTINCT FROM v_tenant THEN
+      IF (v_activation OR v_grant) AND v_team_tenant IS DISTINCT FROM v_tenant THEN
         v_refusal := 'tenant_mismatch';
       ELSIF v_activation AND v_row_departed THEN
         v_refusal := 'activation_departed';
@@ -181,6 +199,11 @@ CREATE TRIGGER trg_team_member_keys_departed_member_guard
 CREATE TRIGGER trg_tenant_member_departures_stamp_guard
   BEFORE UPDATE ON "tenant_member_departures"
   FOR EACH ROW EXECUTE FUNCTION public.departed_member_guard();
+
+CREATE TRIGGER trg_tenant_members_departed_row_rekey_guard
+  BEFORE UPDATE OF tenant_id, user_id ON "tenant_members"
+  FOR EACH ROW WHEN (OLD.deactivated_at IS NOT NULL)
+  EXECUTE FUNCTION public.departed_member_guard();
 
 CREATE CONSTRAINT TRIGGER tenant_members_departure_ends_memberships_ins
   AFTER INSERT ON "tenant_members"

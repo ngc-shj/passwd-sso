@@ -99,6 +99,8 @@ const ARM = {
   KEY_LEFTOVER: "key_leftover",
   KEY_INACTIVE: "key_inactive",
   RECORD_LOWERED: "record_lowered",
+  RECORD_REKEYED: "record_rekeyed",
+  TENANT_ROW_REKEYED: "tenant_row_rekeyed",
   ISOLATION: "isolation",
   DEPARTURE_ACTIVE: "departure_active",
   DEPARTURE_LEFTOVER: "departure_leftover",
@@ -107,7 +109,7 @@ type Arm = (typeof ARM)[keyof typeof ARM];
 
 type Step = string | readonly [string, readonly unknown[]];
 type Outcome =
-  | { committed: true }
+  | { committed: true; rows: unknown[][] }
   | { committed: false; at: "statement" | "commit"; index: number; error: unknown };
 
 /** The arm token of a guard refusal, from a pg error or a Prisma error wrapping one. */
@@ -126,13 +128,16 @@ function armOf(error: unknown): string | null {
   return null;
 }
 
+// Failures name the actual outcome (`actual=`), not only the pinned arm, so a
+// red-proof can tell a refusal that went away from one that changed arms.
 function expectGuardError(error: unknown, arm: Arm): void {
-  expect({ code: sqlStateOf(error), arm: armOf(error) }).toEqual({ code: SQLSTATE_CHECK_VIOLATION, arm });
+  expect({ code: sqlStateOf(error), arm: armOf(error) }, `actual=${armOf(error) ?? sqlStateOf(error) ?? "none"}`)
+    .toEqual({ code: SQLSTATE_CHECK_VIOLATION, arm });
 }
 
 /** Refused at `at`; at the statement, `index` names the statement that failed. */
 function expectRefused(outcome: Outcome, at: "statement" | "commit", arm: Arm, index?: number): void {
-  if (outcome.committed) throw new Error(`expected a ${arm} refusal at ${at}, but the transaction committed`);
+  if (outcome.committed) throw new Error(`expected a ${arm} refusal at ${at}, but the transaction committed (actual=committed)`);
   expect(outcome.at).toBe(at);
   if (index !== undefined) expect(outcome.index).toBe(index);
   expectGuardError(outcome.error, arm);
@@ -199,11 +204,12 @@ describe("departed-member DB invariants — real-DB integration", () => {
     try {
       await client.query(opts.isolation ? `BEGIN ISOLATION LEVEL ${opts.isolation}` : "BEGIN");
       await setGucs(client);
+      const rows: unknown[][] = [];
       for (let index = 0; index < steps.length; index++) {
         const step = steps[index];
         const [text, params] = typeof step === "string" ? [step, []] : step;
         try {
-          await client.query(text, [...params]);
+          rows.push((await client.query(text, [...params])).rows);
         } catch (error) {
           await client.query("ROLLBACK").catch((e: unknown) => {
             broken = e instanceof Error ? e : new Error(String(e));
@@ -216,7 +222,7 @@ describe("departed-member DB invariants — real-DB integration", () => {
       } catch (error) {
         return { committed: false, at: "commit", index: steps.length, error };
       }
-      return { committed: true };
+      return { committed: true, rows };
     } finally {
       client.release(broken);
     }
@@ -613,6 +619,32 @@ describe("departed-member DB invariants — real-DB integration", () => {
       );
       expect(await sql(`SELECT 1 FROM team_members WHERE team_id = $1::uuid`, foreignTeam)).toEqual([]);
     });
+
+    describe("a membership already mismatched (a re-homed team, or a bypass write)", () => {
+      async function mismatched() {
+        const t = await tenant();
+        const other = await tenant();
+        const foreignTeam = await team(other);
+        const u = await member(t);
+        const rows = await writeRefusedState(ctx.su, `${insertRow({ tenantId: t })} RETURNING id`, [foreignTeam, u]);
+        expect(rows).toHaveLength(1);
+        return { t, u, foreignTeam, rowId: (rows[0] as { id: string }).id };
+      }
+
+      it("deny: a role raise on it", async () => {
+        const m = await mismatched();
+        expectRefused(
+          await asApp(m.t, [[`UPDATE team_members SET role = 'ADMIN' WHERE id = $1::uuid`, [m.rowId]]]),
+          "statement", ARM.TENANT_MISMATCH, 0,
+        );
+      });
+
+      it("allow (pair): ending it, so its user's departure is not wedged", async () => {
+        const m = await mismatched();
+        expectCommitted(await asApp(m.t, [[`UPDATE team_members SET deactivated_at = clock_timestamp() WHERE id = $1::uuid`, [m.rowId]]]));
+        expect((await memberRow(m.rowId))?.deactivated_at).not.toBeNull();
+      });
+    });
   });
 
   // ── T2: keys ──────────────────────────────────────────────────
@@ -904,6 +936,7 @@ describe("departed-member DB invariants — real-DB integration", () => {
         { tgname: "trg_team_member_keys_departed_member_guard", tgenabled: "O" },
         { tgname: GUARD, tgenabled: "O" },
         { tgname: "trg_tenant_member_departures_stamp_guard", tgenabled: "O" },
+        { tgname: "trg_tenant_members_departed_row_rekey_guard", tgenabled: "O" },
       ]);
     });
 
@@ -1098,55 +1131,32 @@ describe("departed-member DB invariants — real-DB integration", () => {
         expect(await sql(`SELECT 1 FROM tenant_member_departures WHERE tenant_id = $1::uuid`, r.t)).toEqual([]);
       });
 
-      describe("re-keying a departed tenant row (superuser: the tenant-context trigger refuses it for the app)", () => {
+      describe("re-keying a tenant row (superuser: the tenant-context trigger refuses a tenant_id change for the app)", () => {
+        // Re-keying a departed row would erase that user's departure: refused
+        // at the statement, whoever the new key names.
         it.each([
-          ["onto a user who holds an active row: refused", true],
-          ["(pair) onto a user who holds none: commits", false],
-        ] as const)("by user_id %s", async (_label, holdsRow) => {
+          ["user_id", "UPDATE tenant_members SET user_id = $3::uuid WHERE tenant_id = $1::uuid AND user_id = $2::uuid", "user"],
+          ["tenant_id", "UPDATE tenant_members SET tenant_id = $3::uuid WHERE tenant_id = $1::uuid AND user_id = $2::uuid", "tenant"],
+        ] as const)("a departed row by %s is refused", async (_label, text, onto) => {
           const t = await tenant();
-          const teamId = await team(t);
           const departed = await member(t);
           await stamp(t, departed, (await clock()) - HOUR);
-          const target = await guest(t);
-          if (holdsRow) await addRow(t, teamId, target);
+          const target = onto === "user" ? await guest(t) : await tenant();
 
-          const outcome = await asSuperuser([[
-            `UPDATE tenant_members SET user_id = $3::uuid WHERE tenant_id = $1::uuid AND user_id = $2::uuid`,
-            [t, departed, target],
-          ]]);
-
-          if (holdsRow) {
-            expectRefused(outcome, "commit", ARM.DEPARTURE_ACTIVE);
-            expect(await tenantRow(t, target)).toBeNull();
-          } else {
-            expectCommitted(outcome);
-            expect((await tenantRow(t, target))?.deactivated_at).not.toBeNull();
-          }
+          expectRefused(await asSuperuser([[text, [t, departed, target]]]), "statement", ARM.TENANT_ROW_REKEYED, 0);
+          expect((await tenantRow(t, departed))?.deactivated_at).not.toBeNull();
         });
 
-        it.each([
-          ["onto a tenant where the user holds an active row: refused", true],
-          ["(pair) onto a tenant where the user holds none: commits", false],
-        ] as const)("by tenant_id %s", async (_label, holdsRow) => {
+        it("(pair) an active row by user_id is not judged: there is no departure to erase", async () => {
           const t = await tenant();
-          const other = await tenant();
-          const departed = await member(t);
-          await stamp(t, departed, (await clock()) - HOUR);
-          const otherTeam = await team(other);
-          if (holdsRow) await addRow(other, otherTeam, departed);
+          const active = await member(t);
+          const target = await guest(t);
 
-          const outcome = await asSuperuser([[
-            `UPDATE tenant_members SET tenant_id = $3::uuid WHERE tenant_id = $1::uuid AND user_id = $2::uuid`,
-            [t, departed, other],
-          ]]);
-
-          if (holdsRow) {
-            expectRefused(outcome, "commit", ARM.DEPARTURE_ACTIVE);
-            expect(await tenantRow(other, departed)).toBeNull();
-          } else {
-            expectCommitted(outcome);
-            expect((await tenantRow(other, departed))?.deactivated_at).not.toBeNull();
-          }
+          expectCommitted(await asSuperuser([[
+            `UPDATE tenant_members SET user_id = $3::uuid WHERE tenant_id = $1::uuid AND user_id = $2::uuid`,
+            [t, active, target],
+          ]]));
+          expect(await tenantRow(t, target)).toEqual({ deactivated_at: null });
         });
       });
     });
@@ -1161,6 +1171,31 @@ describe("departed-member DB invariants — real-DB integration", () => {
         expectRefused(
           await asApp(t, [[`UPDATE tenant_member_departures SET departed_at = departed_at - interval '1 second' WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, [t, g]]]),
           "statement", ARM.RECORD_LOWERED, 0,
+        );
+      });
+
+      it("re-keying a record onto another user, which would erase this user's departure", async () => {
+        const t = await tenant();
+        const g = await guest(t);
+        const other = await guest(t);
+        await record(t, g, (await clock()) - HOUR);
+
+        expectRefused(
+          await asApp(t, [[`UPDATE tenant_member_departures SET user_id = $3::uuid WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, [t, g, other]]]),
+          "statement", ARM.RECORD_REKEYED, 0,
+        );
+        expect(await sql(`SELECT 1 FROM tenant_member_departures WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, t, g)).toHaveLength(1);
+      });
+
+      it("re-keying a record onto another tenant (superuser: the tenant context refuses it for the app)", async () => {
+        const t = await tenant();
+        const other = await tenant();
+        const g = await guest(t);
+        await record(t, g, (await clock()) - HOUR);
+
+        expectRefused(
+          await asSuperuser([[`UPDATE tenant_member_departures SET tenant_id = $3::uuid WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, [t, g, other]]]),
+          "statement", ARM.RECORD_REKEYED, 0,
         );
       });
 
@@ -1272,14 +1307,19 @@ describe("departed-member DB invariants — real-DB integration", () => {
         const g = await guest(t);
         const rowId = await addRow(t, teamId, g);
 
-        expectCommitted(await asApp(t, [
+        const outcome = await asApp(t, [
           [`INSERT INTO tenant_members (id, tenant_id, user_id, role, deactivated_at, created_at, updated_at)
-            VALUES (gen_random_uuid(), $1::uuid, $2::uuid, 'MEMBER', clock_timestamp() + interval '1 second', now(), now())`, [t, g]],
+            VALUES (gen_random_uuid(), $1::uuid, $2::uuid, 'MEMBER', clock_timestamp() + interval '1 second', now(), now())
+            RETURNING deactivated_at`, [t, g]],
           [STAMP_NOW, [t, g]],
           [endRows, [t, g]],
-        ]));
+        ]);
+        expectCommitted(outcome);
         expect((await memberRow(rowId))?.deactivated_at).not.toBeNull();
-        expect((await tenantRow(t, g))?.deactivated_at?.getTime()).toBeLessThan(Date.now() + SECOND);
+        // Both stamps come from clock_timestamp() in one transaction: the
+        // restamp is strictly below the placeholder the INSERT wrote.
+        const [placeholder] = (outcome as { rows: unknown[][] }).rows[0] as { deactivated_at: Date }[];
+        expect((await tenantRow(t, g))?.deactivated_at?.getTime()).toBeLessThan(placeholder.deactivated_at.getTime());
       });
 
       it("the integration teardown over a departed tenant row and its residue", async () => {
@@ -1541,11 +1581,13 @@ describe("departed-member DB invariants — real-DB integration", () => {
         tx.$executeRaw`UPDATE tenant_members SET deactivated_at = clock_timestamp() WHERE tenant_id = ${f.t}::uuid AND user_id = ${f.u}::uuid`);
       const { client } = await openRaceClient(f.t);
       try {
-        // A grant that took the key would wait on the held departure and hit this.
+        // The precondition: the held departure holds the advisory key (through
+        // lockTenantRows; its own trigger takes it only at commit), so a grant
+        // that took the key would wait on it and hit the lock_timeout below.
+        expect(await sql(`SELECT 1 FROM pg_locks WHERE pid = $1 AND locktype = 'advisory' AND granted`, held.pid)).toHaveLength(1);
         await client.query("SET LOCAL lock_timeout = '2s'");
         await client.query(`UPDATE team_members SET role = 'ADMIN' WHERE id = $1::uuid`, [f.rowId]);
         await client.query("COMMIT");
-        expect(await race.backendsBlockedBy(held.pid)).toEqual([]);
 
         const error = await held.release().then(() => null, (e: unknown) => e);
         expectGuardError(error, ARM.DEPARTURE_ACTIVE);

@@ -130,8 +130,11 @@ import { buildOutboxPayload } from "@/lib/audit/audit-payload";
 import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
 import { requestWithSession, seedSession } from "./session-request";
 import { createPool } from "@/lib/db/pool-factory";
+import { createRaceHelpers } from "./race-helpers";
 import { prisma } from "@/lib/prisma";
 import logger from "@/lib/logger";
+import { withTenantRls } from "@/lib/tenant-rls";
+import { deactivateScimUser } from "@/lib/services/scim-user-service";
 import {
   ACTOR_TYPE,
   AUDIT_ACTION,
@@ -849,6 +852,103 @@ describe("departed-member leaked authority — real-DB integration", () => {
       expect(await membership(teamId, target.id)).toMatchObject({ key_distributed: !departed });
       const keys = await sql(`SELECT 1 FROM team_member_keys WHERE team_id = $1::uuid AND user_id = $2::uuid`, teamId, target.id);
       expect(keys).toHaveLength(departed ? 0 : 1);
+    });
+
+    it("confirm-key against an ending of the target that commits after its member read: 404, no key", async () => {
+      // The route reads the member row unlocked and writes the key before its
+      // CAS (lock order teams → users → team_members). An ending that commits
+      // in between has the key refused by the database guard (key_inactive),
+      // which the route answers as the 404 a CAS miss gets, not a 500.
+      const { owner, teamId, target, targetRow } = await targetTeam("MEMBER", { keyDistributed: false, withKey: false });
+      await setEcdhKey(target.id);
+      const race = createRaceHelpers(ctx.su.pool);
+      const parkKey = `c1-confirm-key-park:${target.id}`;
+      // Fixed name: check-bypass-rls allowlists exactly this routine in this file.
+      const fn = "c1_confirm_key_park";
+      // Sorts before trg_team_member_keys_departed_member_guard: parks the key
+      // write before the guard reads the member row.
+      const trigger = `a_${fn}_trg`;
+      await sql(`DROP FUNCTION IF EXISTS public.${fn}() CASCADE`);
+      await sql(`CREATE FUNCTION c1_confirm_key_park() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_advisory_xact_lock(hashtext(TG_ARGV[0])); RETURN NEW; END $$`);
+      let ending: Promise<unknown> | undefined;
+      let where: string | undefined;
+      try {
+        await sql(
+          `CREATE TRIGGER ${trigger} BEFORE INSERT ON team_member_keys FOR EACH ROW
+             WHEN (NEW.user_id = '${target.id}'::uuid) EXECUTE FUNCTION public.${fn}('${parkKey}')`,
+        );
+        const outcome = await race.parkBehind(
+          `SELECT pg_advisory_xact_lock(hashtext($1::text))`,
+          [parkKey],
+          // A thrown guard refusal is kept as its token, so the failure names its arm.
+          () => confirmKey(teamId, targetRow, owner).then(
+            (r) => r.status,
+            (e: unknown) =>
+              /DEPARTED_MEMBER_GUARD:[a-z_]+/.exec(`${e instanceof Error ? e.message : ""} ${JSON.stringify((e as { meta?: unknown }).meta ?? null)}`)?.[0] ?? String(e),
+          ),
+          async (blocker, parkedPid) => {
+            // The ending, as endTeamMemberships writes it, in its own transaction.
+            ending = ctx.su.pool.query(`UPDATE team_members SET deactivated_at = clock_timestamp() WHERE id = $1::uuid`, [targetRow]);
+            ending.catch(() => {});
+            where = await race.settledOrBlocked(ending, parkedPid, await blocker.query<{ pid: number }>("SELECT pg_backend_pid() AS pid").then((r) => r.rows[0].pid));
+          },
+        );
+        await ending;
+
+        expect(outcome).toBe(404);
+        // The ending ran through while the key write was parked: nothing held its row.
+        expect(where).toBe("settled");
+      } finally {
+        await sql(`DROP TRIGGER IF EXISTS ${trigger} ON team_member_keys`);
+        await sql(`DROP FUNCTION IF EXISTS public.${fn}()`);
+      }
+      expect(await membership(teamId, target.id)).toMatchObject({ key_distributed: false });
+      const [row] = await sql<{ deactivated_at: Date | null }>(`SELECT deactivated_at FROM team_members WHERE id = $1::uuid`, targetRow);
+      expect(row.deactivated_at).not.toBeNull();
+      expect(await sql(`SELECT 1 FROM team_member_keys WHERE team_id = $1::uuid AND user_id = $2::uuid`, teamId, target.id)).toEqual([]);
+    });
+
+    it("confirm-key parked at its CAS (key written) against a SCIM user DELETE of the target: no key outlives the membership", async () => {
+      // The DELETE removes member rows before keys: it waits on the parked
+      // CAS's row lock, and its key delete then sees the committed key.
+      const { owner, teamId, target, targetRow } = await targetTeam("MEMBER", { keyDistributed: false, withKey: false });
+      await setEcdhKey(target.id);
+      const race = createRaceHelpers(ctx.su.pool);
+      const parkKey = `c1-scim-delete-park:${target.id}`;
+      // Fixed name: check-bypass-rls allowlists exactly this routine in this file.
+      const fn = "c1_confirm_key_park";
+      const trigger = `a_${fn}_cas_trg`;
+      await sql(`DROP FUNCTION IF EXISTS public.${fn}() CASCADE`);
+      await sql(`CREATE FUNCTION c1_confirm_key_park() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_advisory_xact_lock(hashtext(TG_ARGV[0])); RETURN NEW; END $$`);
+      let deleting: Promise<unknown> | undefined;
+      let where: string | undefined;
+      try {
+        // A BEFORE UPDATE row trigger runs with the row already locked.
+        await sql(
+          `CREATE TRIGGER ${trigger} BEFORE UPDATE ON team_members FOR EACH ROW
+             WHEN (NEW.user_id = '${target.id}'::uuid AND NEW.key_distributed AND NOT OLD.key_distributed)
+             EXECUTE FUNCTION public.${fn}('${parkKey}')`,
+        );
+        const outcome = await race.parkBehind(
+          `SELECT pg_advisory_xact_lock(hashtext($1::text))`,
+          [parkKey],
+          () => confirmKey(teamId, targetRow, owner).then((r) => r.status, (e: unknown) => String(e)),
+          async (blocker, parkedPid) => {
+            deleting = withTenantRls(prisma, tenantId, () => deactivateScimUser(tenantId, target.id), { timeout: 15_000 });
+            deleting.catch(() => {});
+            where = await race.settledOrBlocked(deleting, parkedPid, await blocker.query<{ pid: number }>("SELECT pg_backend_pid() AS pid").then((r) => r.rows[0].pid));
+          },
+        );
+        await deleting;
+
+        expect(outcome).toBe(200);
+        expect(where).toBe("blocked-on-parked");
+      } finally {
+        await sql(`DROP TRIGGER IF EXISTS ${trigger} ON team_members`);
+        await sql(`DROP FUNCTION IF EXISTS public.${fn}()`);
+      }
+      expect(await membership(teamId, target.id)).toBeNull();
+      expect(await sql(`SELECT 1 FROM team_member_keys WHERE team_id = $1::uuid AND user_id = $2::uuid`, teamId, target.id)).toEqual([]);
     });
 
     it.each([

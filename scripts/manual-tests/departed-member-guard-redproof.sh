@@ -132,7 +132,10 @@ cleanup() {
     TREE=""
   fi
 }
-trap cleanup EXIT INT TERM
+# INT/TERM exit, so cleanup runs once through EXIT and no further row starts.
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 create_scratch() {
   local name="$1"
@@ -248,9 +251,10 @@ judge() {
     const token = judged.filter((e) => e.token !== "-" && byName.get(e.name)?.status === "failed")
       .map((e) => ({ name: e.name, token: e.token, inMessage: byName.get(e.name).message.includes(e.token) }));
     const caveats = exp.filter((e) => e.kind === "caveat").map((e) => ({ name: e.name, status: byName.get(e.name)?.status ?? "missing" }));
-    // Proved only when every required cell is red for its own reason (its arm
-    // token in the failure), and nothing outside the cells the row lists went
-    // red: a broken fixture or a dropped connection reddens cells nobody listed.
+    // Proved only when every required cell is red at its pinned assertion (the
+    // failure names its arm token; a deny cell also prints actual=<outcome>),
+    // and nothing outside the cells the row lists went red: a broken fixture
+    // or a dropped connection reddens cells nobody listed.
     const ok = run.exitCode !== 0 && notRed.length === 0 && missing.length === 0
       && extra.length === 0 && token.every((t) => t.inMessage);
     console.log(JSON.stringify({ phase, ok, exitCode: run.exitCode, tests: run.results.length,
