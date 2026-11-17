@@ -15,10 +15,8 @@ import type { Prisma } from "@prisma/client";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, rateLimited, unauthorized, validationError } from "@/lib/http/api-response";
-import { auditDownloadFilterMetadata, parseActionsCsvParam, parseActorType } from "@/lib/audit/audit-query";
-import { AUDIT_LOG_MAX_RANGE_DAYS } from "@/lib/validations/common";
-import { AUDIT_LOG_MAX_RANGE_MS, RATE_WINDOW_MS } from "@/lib/validations/common.server";
-import { MS_PER_DAY } from "@/lib/constants/time";
+import { auditDownloadFilterMetadata, parseActionsCsvParam, parseActorType, resolveDownloadRange } from "@/lib/audit/audit-query";
+import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 import { buildAuditLogStream, buildAuditLogDownloadResponse } from "@/lib/audit/audit-log-stream";
 
 type Params = { params: Promise<{ teamId: string }> };
@@ -72,23 +70,9 @@ async function handleGET(req: NextRequest, { params }: Params) {
   }
 
   // Validate date range
-  if (from || to) {
-    const fromDate = from ? new Date(from) : undefined;
-    const toDate = to ? new Date(to) : undefined;
-    if ((fromDate && Number.isNaN(fromDate.getTime())) || (toDate && Number.isNaN(toDate.getTime()))) {
-      return validationError({ date: "Invalid date format" });
-    }
-    const now = new Date();
-    const resolvedFrom = fromDate ?? new Date(now.getTime() - AUDIT_LOG_MAX_RANGE_DAYS * MS_PER_DAY);
-    const resolvedTo = toDate ?? now;
-    const diffMs = resolvedTo.getTime() - resolvedFrom.getTime();
-    if (diffMs < 0) {
-      return validationError({ date: "'from' must be before 'to'" });
-    }
-    if (diffMs > AUDIT_LOG_MAX_RANGE_MS) {
-      return validationError({ range: `Maximum range is ${AUDIT_LOG_MAX_RANGE_DAYS} days` });
-    }
-  }
+  const resolved = resolveDownloadRange(from, to);
+  if ("error" in resolved) return validationError(resolved.error);
+  const { range } = resolved;
 
   const where: Prisma.AuditLogWhereInput = {
     teamId,
@@ -104,12 +88,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
     where.action = { in: parsedActions.actions };
   }
 
-  if (from || to) {
-    const createdAt: Record<string, Date> = {};
-    if (from) createdAt.gte = new Date(from);
-    if (to) createdAt.lte = new Date(to);
-    where.createdAt = createdAt;
-  }
+  if (range) where.createdAt = range;
 
   // Record the download itself
   await logAuditAsync({
@@ -118,8 +97,8 @@ async function handleGET(req: NextRequest, { params }: Params) {
     metadata: {
       format,
       ...auditDownloadFilterMetadata({
-        from: from ? new Date(from) : undefined,
-        to: to ? new Date(to) : undefined,
+        from: range?.gte,
+        to: range?.lte,
         actions: parsedActions.actions,
         actorType: validActorType,
       }),

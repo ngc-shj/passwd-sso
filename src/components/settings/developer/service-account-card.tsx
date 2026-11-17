@@ -40,7 +40,7 @@ import { Bot, ChevronDown, Loader2, Plus, Trash2, Pencil, KeyRound } from "lucid
 import { toast } from "sonner";
 import { Separator } from "@/components/ui/separator";
 import { apiPath } from "@/lib/constants";
-import { SA_TOKEN_SCOPES } from "@/lib/constants/auth/service-account";
+import { MAX_SA_TOKEN_EXPIRY_DAYS, SA_TOKEN_SCOPES } from "@/lib/constants/auth/service-account";
 import { formatDateTime } from "@/lib/format/format-datetime";
 import { ScopeBadges } from "@/components/settings/developer/scope-badges";
 import { fetchApi } from "@/lib/url-helpers";
@@ -121,6 +121,7 @@ export function ServiceAccountCard() {
   const [tokenSelectedScopes, setTokenSelectedScopes] = useState<Set<string>>(new Set());
   const [tokenExpiresAt, setTokenExpiresAt] = useState("");
   const [tokenMinExpiresAt, setTokenMinExpiresAt] = useState("");
+  const [tokenMaxExpiresAt, setTokenMaxExpiresAt] = useState("");
   const [tokenNameError, setTokenNameError] = useState("");
   const [tokenScopeError, setTokenScopeError] = useState("");
   const [newTokenSecret, setNewTokenSecret] = useState<string | null>(null);
@@ -318,6 +319,9 @@ export function ServiceAccountCard() {
     setTokenSelectedScopes(new Set());
     setTokenExpiresAt("");
     setTokenMinExpiresAt(new Date(Date.now() + MS_PER_DAY).toISOString().split("T")[0]);
+    // The last UTC day whose end (the expiry sent below) is still within the
+    // server's lifetime bound (saTokenCreateSchema).
+    setTokenMaxExpiresAt(new Date(Date.now() + (MAX_SA_TOKEN_EXPIRY_DAYS - 1) * MS_PER_DAY).toISOString().split("T")[0]);
     setTokenNameError("");
     setTokenScopeError("");
     setNewTokenSecret(null);
@@ -1040,6 +1044,7 @@ export function ServiceAccountCard() {
                     value={tokenExpiresAt}
                     onChange={(e) => setTokenExpiresAt(e.target.value)}
                     min={tokenMinExpiresAt}
+                    max={tokenMaxExpiresAt}
                   />
                 </div>
               </div>

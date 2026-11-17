@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { AuditAction } from "@prisma/client";
 import {
   auditDownloadFilterMetadata,
+  resolveDownloadRange,
   parseActionsCsvParam,
   VALID_ACTIONS,
   VALID_ACTOR_TYPES,
@@ -99,6 +100,42 @@ describe("parseActionsCsvParam", () => {
 
   it("refuses an unknown action", () => {
     expect(parseActionsCsvParam("AUDIT_LOG_DOWNLOAD,NOT_REAL")).toEqual({ invalid: ["NOT_REAL"] });
+  });
+});
+
+describe("resolveDownloadRange", () => {
+  const NOW = new Date("2026-11-17T12:00:00.000Z");
+  const DAYS_90 = 90 * 86_400_000;
+
+  it("is null when neither bound is given", () => {
+    expect(resolveDownloadRange(null, null, NOW)).toEqual({ range: null });
+  });
+
+  it("reads a to-only request as the 90 days ending at to, today or long ago", () => {
+    const today = "2026-11-17T14:59:59.999Z";
+    expect(resolveDownloadRange(null, today, NOW)).toEqual({
+      range: { gte: new Date(Date.parse(today) - DAYS_90), lte: new Date(today) },
+    });
+    const old = "2026-01-01T00:00:00.000Z";
+    expect(resolveDownloadRange(null, old, NOW)).toEqual({
+      range: { gte: new Date(Date.parse(old) - DAYS_90), lte: new Date(old) },
+    });
+  });
+
+  it("reads a from-only request as from until now", () => {
+    expect(resolveDownloadRange("2026-11-01T00:00:00.000Z", null, NOW)).toEqual({
+      range: { gte: new Date("2026-11-01T00:00:00.000Z"), lte: NOW },
+    });
+  });
+
+  it("refuses an unparsable bound, a reversed pair and a span over the bound", () => {
+    expect(resolveDownloadRange("nope", null, NOW)).toEqual({ error: { date: "Invalid date format" } });
+    expect(resolveDownloadRange("2026-11-10T00:00:00.000Z", "2026-11-01T00:00:00.000Z", NOW)).toEqual({
+      error: { date: "'from' must be before 'to'" },
+    });
+    expect(resolveDownloadRange("2026-01-01T00:00:00.000Z", "2026-04-01T02:00:00.001Z", NOW)).toEqual({
+      error: { range: "Maximum range is 90 days" },
+    });
   });
 });
 

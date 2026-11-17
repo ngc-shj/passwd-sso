@@ -4,6 +4,9 @@ import { AUDIT_ACTION_VALUES } from "@/lib/constants";
 import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { CURSOR_ID_RE } from "@/lib/validations/common";
 import { UUID_RE } from "@/lib/constants/app";
+import { MS_PER_DAY } from "@/lib/constants/time";
+import { AUDIT_LOG_MAX_RANGE_DAYS } from "@/lib/validations/common";
+import { AUDIT_LOG_MAX_RANGE_MS } from "@/lib/validations/common.server";
 import type { AuditAction } from "@prisma/client";
 
 /** Pre-built set of all valid audit action strings for O(1) membership checks. */
@@ -16,6 +19,33 @@ export const VALID_ACTOR_TYPES: (typeof ACTOR_TYPE)[keyof typeof ACTOR_TYPE][] =
 export function parseActorType(searchParams: URLSearchParams): (typeof ACTOR_TYPE)[keyof typeof ACTOR_TYPE] | undefined {
   const raw = searchParams.get("actorType");
   return VALID_ACTOR_TYPES.find((t) => t === raw);
+}
+
+/**
+ * The instant range an audit-log download covers, from its `from` / `to`
+ * parameters. A missing `from` means the AUDIT_LOG_MAX_RANGE_DAYS ending at `to`
+ * (or now); a missing `to` means now. Null when neither is given (the caller
+ * decides whether that is allowed). The error is the 400 body to answer with.
+ */
+export function resolveDownloadRange(
+  from: string | null,
+  to: string | null,
+  now: Date = new Date(),
+): { range: { gte: Date; lte: Date } | null } | { error: Record<string, string> } {
+  if (!from && !to) return { range: null };
+  const fromDate = from ? new Date(from) : undefined;
+  const toDate = to ? new Date(to) : undefined;
+  if ((fromDate && Number.isNaN(fromDate.getTime())) || (toDate && Number.isNaN(toDate.getTime()))) {
+    return { error: { date: "Invalid date format" } };
+  }
+  const lte = toDate ?? now;
+  const gte = fromDate ?? new Date(lte.getTime() - AUDIT_LOG_MAX_RANGE_DAYS * MS_PER_DAY);
+  const diffMs = lte.getTime() - gte.getTime();
+  if (diffMs < 0) return { error: { date: "'from' must be before 'to'" } };
+  if (diffMs > AUDIT_LOG_MAX_RANGE_MS) {
+    return { error: { range: `Maximum range is ${AUDIT_LOG_MAX_RANGE_DAYS} days` } };
+  }
+  return { range: { gte, lte } };
 }
 
 /** How many selected actions a download's audit row lists by name. */

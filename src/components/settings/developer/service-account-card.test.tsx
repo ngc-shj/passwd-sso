@@ -519,6 +519,32 @@ describe("ServiceAccountCard", () => {
     expect(tokenBtns[0]).toBeDisabled();
   });
 
+  it("bounds the token expiry input to the days the server accepts", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-17T12:00:00Z"));
+    try {
+      setupFetchAccounts([
+        { id: "sa-active", name: "active-sa", description: null, isActive: true, createdAt: "2025-01-01T00:00:00Z" },
+      ]);
+      await act(async () => {
+        render(<ServiceAccountCard />);
+      });
+      await waitFor(() => expect(screen.getByText("active-sa")).toBeInTheDocument());
+      await expandSa("active-sa");
+      const tokenBtn = screen.getAllByRole("button").find((b) => b.textContent?.includes("createToken"));
+      await act(async () => {
+        fireEvent.click(tokenBtn!);
+      });
+
+      const dateInput = document.querySelector('input[type="date"]');
+      // Tomorrow (UTC) up to the last UTC day whose 23:59:59Z is within 365 days.
+      expect(dateInput?.getAttribute("min")).toBe("2026-11-18");
+      expect(dateInput?.getAttribute("max")).toBe("2027-11-16");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("shows plaintext token once after creation, token gone after dialog close", async () => {
     setupFetchAccounts([
       {

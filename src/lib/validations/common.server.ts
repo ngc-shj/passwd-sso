@@ -23,8 +23,9 @@ export const KDF_ARGON2_PARALLELISM_MAX = 16;
 // AUDIT_LOG_MAX_RANGE_DAYS lives in common.ts (client-shared — rendered in UI).
 // The longest instant span a download accepts. The client sends local calendar
 // days (local midnight to local 23:59:59.999), and N local days that include a
-// DST fall-back day last N×24h + 1h, so the bound allows that one hour.
-export const AUDIT_LOG_MAX_RANGE_MS = AUDIT_LOG_MAX_RANGE_DAYS * MS_PER_DAY + MS_PER_HOUR;
+// DST fall-back day last N×24h plus that zone's shift. The slack is the largest
+// shift in tzdata (2 h, Antarctica/Troll); most zones shift 1 h.
+export const AUDIT_LOG_MAX_RANGE_MS = AUDIT_LOG_MAX_RANGE_DAYS * MS_PER_DAY + 2 * MS_PER_HOUR;
 export const AUDIT_LOG_BATCH_SIZE = 500;
 export const AUDIT_LOG_MAX_ROWS = 100_000;
 export const METADATA_MAX_BYTES = 10_240;      // 10 KB

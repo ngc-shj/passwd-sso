@@ -183,11 +183,11 @@ describe("GET /api/audit-logs/download", () => {
     expect(json.details.range).toContain("90");
   });
 
-  it("accepts 90 local days across a DST fall-back (90 days + 1 hour), and not 1 ms more", async () => {
+  it("accepts 90 local days across a DST fall-back (90 days + the largest 2 h shift), and not 1 ms more", async () => {
     const at = (to: string) =>
       GET(createRequest("GET", "http://localhost:3000/api/audit-logs/download", { searchParams: { from: "2026-03-01T00:00:00.000Z", to } }));
-    expect((await at("2026-05-30T01:00:00.000Z")).status).toBe(200);
-    expect((await at("2026-05-30T01:00:00.001Z")).status).toBe(400);
+    expect((await at("2026-05-30T02:00:00.000Z")).status).toBe(200);
+    expect((await at("2026-05-30T02:00:00.001Z")).status).toBe(400);
   });
 
   it("returns 400 for invalid date format", async () => {
@@ -337,6 +337,20 @@ describe("GET /api/audit-logs/download", () => {
         },
       }),
     );
+  });
+
+  it("reads a to-only download as the 90 days ending at to, even long ago", async () => {
+    const req = createRequest("GET", "http://localhost:3000/api/audit-logs/download", {
+      searchParams: { to: "2025-01-01T00:00:00.000Z" },
+    });
+    const res = await GET(req);
+    await parseStreamResponse(res);
+
+    expect(res.status).toBe(200);
+    expect(mockPrismaAuditLog.findMany.mock.calls[0][0].where.createdAt).toEqual({
+      gte: new Date("2024-10-03T00:00:00.000Z"),
+      lte: new Date("2025-01-01T00:00:00.000Z"),
+    });
   });
 
   it("filters by actorType when provided", async () => {

@@ -144,6 +144,12 @@ describe("parseLocalDate", () => {
     expect(parseLocalDate("2026-11-17", true)?.toISOString()).toBe("2026-11-18T04:59:59.999Z");
   });
 
+  it("ends a day whose 23:59 falls in a DST gap at the next day's start (America/Nuuk)", () => {
+    vi.stubEnv("TZ", "America/Nuuk");
+    expect(parseLocalDate("2026-03-28", true)?.toISOString()).toBe("2026-03-29T00:59:59.999Z");
+    expect(parseLocalDate("2026-03-29", true)?.toISOString()).toBe("2026-03-30T00:59:59.999Z");
+  });
+
   it("is the inverse of toISODateString", () => {
     const day = parseLocalDate("2026-02-28");
     expect(day && toISODateString(day)).toBe("2026-02-28");

@@ -243,13 +243,21 @@ test; on the previous bound the accepted case is 400.
 `setFullYear` (years below 100 kept), refusing a NaN date. Cells for year 50
 and 12345.
 
-### N-3 — left, with reason
-Both are deliberate UTC-day encodings outside this change: the entry expiration
-is a date-only value stored in the encrypted blob and read back with
-`slice(0, 10)` (a local instant would change the stored format and show a
-different day east of UTC); the service-account card states its UTC choice and
-its `min` uses the same UTC day. Changing either is a data-format decision for
-those features, not part of the audit-log filter fix.
+### N-3 — left, with reason (text corrected in round 3, F-R3-2)
+Both are UTC-day encodings outside this change, each consistent with itself:
+- Entry expiration is the plaintext `password_entries.expires_at` column,
+  written as `<day>T23:59:59.999Z` and read back as a date (`slice(0, 10)` /
+  `split("T")[0]`) against the local today; nothing compares it as an instant.
+  A local end-of-day instant would change that encoding, and its UTC date would
+  read as the next day west of UTC.
+- The service-account token expiry is UTC end of the chosen day; the choice is
+  a code comment, not shown to the user, and the expiry renders in local time
+  (a JST user picking day D sees D+1 08:59). Changing either encoding is a
+  decision for those features, not part of the audit-log filter fix.
+- The token input had a `min` but no `max`, so a day past the server's
+  lifetime bound answered 400; fixed in round 3: `max` is the last UTC day whose
+  23:59:59Z is within MAX_SA_TOKEN_EXPIRY_DAYS (cell pins min and max at a fixed
+  time).
 
 ### S-R2-1 — fixed
 `parseActionsCsvParam` deduplicates (first-seen order); the download row lists
@@ -280,3 +288,44 @@ parallel pre-PR run (`expected '' to be '4567890'`, 2.3 s): two cells asserted
 values written from their own tasks after a fixed 50 ms `settle()`. They now
 `vi.waitFor` the values; the cell asserting a value stays empty keeps its
 window.
+
+
+---
+
+# Round 3 (fixes 06ab97a84..10160d9b3)
+
+## Changes from Previous Round
+N-1, N-2, S-R2-1, Q1–Q6 resolved; security: no findings; testing: confirmed
+by mutation (round-3 testing review). New:
+
+## Functionality Findings
+- F-R3-1 [Minor] `parseLocalDate` dropped `to` on America/Nuuk's spring-forward
+  Saturday (23:59 falls in the 23:00 gap); the 1 h slack is below
+  Antarctica/Troll's 2 h shift.
+- F-R3-2 [Minor] The N-3 rationale misstated the entry expiration's storage
+  and the shift direction, and called the SA UTC choice user-visible.
+- F-R3-3 [Major, pre-existing] A to-only download defaulted `from` to now − 90
+  days: `to` = today 400'd as over-range, an old `to` 400'd as reversed, and
+  the personal/team query ignored the validated window.
+
+## Resolution Status (round 3)
+
+### F-R3-1 — fixed
+End of day is the instant before the next local day starts; the day's
+existence is validated on its start. `AUDIT_LOG_MAX_RANGE_MS` slack is 2 h (the
+largest tzdata shift). Cells: Nuuk 2026-03-28 ends 2026-03-29T00:59:59.999Z
+(the previous code returned undefined); the three route boundary pairs moved to
+90 days + 2 h.
+
+### F-R3-2 — fixed
+N-3 text corrected (above), and the token input's missing `max` fixed.
+
+### F-R3-3 — fixed
+`resolveDownloadRange(from, to)` in `src/lib/audit/audit-query.ts` is the one
+range rule for the three downloads: a missing `from` is the 90 days ending at
+`to` (or now), a missing `to` is now, and the resolved `{ gte, lte }` is both
+the query window and what the audit row records. Personal downloads with
+neither bound stay unbounded (by `AUDIT_LOG_MAX_ROWS`), as before. Cells:
+resolver unit cases (to-only today and long ago, from-only, invalid, reversed,
+over-range) and personal / team route cells for an old to-only download (the
+previous code answered 400).
