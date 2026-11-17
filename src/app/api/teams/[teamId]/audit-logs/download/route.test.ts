@@ -334,6 +334,35 @@ describe("GET /api/teams/[teamId]/audit-logs/download", () => {
     );
   });
 
+  it("records the date range, actions and actor type it applied", async () => {
+    mockPrismaAuditLog.findMany.mockResolvedValue([]);
+
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/audit-logs/download`, {
+        searchParams: {
+          from: "2025-06-01T00:00:00.000Z",
+          to: "2025-06-30T00:00:00.000Z",
+          actions: "AUDIT_LOG_DOWNLOAD",
+          actorType: "HUMAN",
+        },
+      }),
+      createParams({ teamId: TEAM_ID }),
+    );
+    await streamToString(res);
+
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: {
+          format: "jsonl",
+          from: "2025-06-01T00:00:00.000Z",
+          to: "2025-06-30T00:00:00.000Z",
+          actions: ["AUDIT_LOG_DOWNLOAD"],
+          actorType: "HUMAN",
+        },
+      }),
+    );
+  });
+
   it("returns 400 when neither from nor to is provided", async () => {
     const res = await GET(
       createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/audit-logs/download`),

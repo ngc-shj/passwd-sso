@@ -13,6 +13,7 @@ const {
   mockLogAudit,
   mockAuditDeliveryTargetFindFirst,
   mockAuditDeliveryTargetUpdate,
+  mockAuditDeliveryCount,
   mockRequireRecentSession,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
@@ -21,6 +22,7 @@ const {
   mockLogAudit: vi.fn(),
   mockAuditDeliveryTargetFindFirst: vi.fn(),
   mockAuditDeliveryTargetUpdate: vi.fn(),
+  mockAuditDeliveryCount: vi.fn().mockResolvedValue(0),
   mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
@@ -53,6 +55,7 @@ vi.mock("@/lib/prisma", () => ({
       findFirst: mockAuditDeliveryTargetFindFirst,
       update: mockAuditDeliveryTargetUpdate,
     },
+    auditDelivery: { count: mockAuditDeliveryCount },
   },
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
@@ -246,6 +249,7 @@ describe("PATCH /api/tenant/audit-delivery-targets/[id]", () => {
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     mockAuditDeliveryTargetFindFirst.mockResolvedValue(makeTarget({ isActive: true }));
     mockAuditDeliveryTargetUpdate.mockResolvedValue(makeTarget({ isActive: false }));
+    mockAuditDeliveryCount.mockResolvedValueOnce(4);
 
     const req = createRequest("PATCH", `http://localhost/api/tenant/audit-delivery-targets/${TARGET_ID}`, {
       body: { isActive: false },
@@ -268,8 +272,13 @@ describe("PATCH /api/tenant/audit-delivery-targets/[id]", () => {
         action: AUDIT_ACTION.AUDIT_DELIVERY_TARGET_DEACTIVATE,
         tenantId: "tenant-1",
         scope: "TENANT",
+        metadata: { targetId: TARGET_ID, kind: expect.any(String), pendingDeliveries: 4 },
       }),
     );
+    // The deliveries it parks: this tenant's, this target's, still PENDING.
+    expect(mockAuditDeliveryCount).toHaveBeenCalledWith({
+      where: { tenantId: "tenant-1", targetId: TARGET_ID, status: "PENDING" },
+    });
   });
 
   it("returns success without update when isActive is already the requested value", async () => {
@@ -287,6 +296,7 @@ describe("PATCH /api/tenant/audit-delivery-targets/[id]", () => {
     expect(status).toBe(200);
     expect(json.success).toBe(true);
     expect(mockAuditDeliveryTargetUpdate).not.toHaveBeenCalled();
+    expect(mockAuditDeliveryCount).not.toHaveBeenCalled();
     expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
@@ -295,6 +305,7 @@ describe("PATCH /api/tenant/audit-delivery-targets/[id]", () => {
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     mockAuditDeliveryTargetFindFirst.mockResolvedValue(makeTarget({ isActive: false }));
     mockAuditDeliveryTargetUpdate.mockResolvedValue(makeTarget({ isActive: true }));
+    mockAuditDeliveryCount.mockResolvedValueOnce(2);
 
     const req = createRequest("PATCH", `http://localhost/api/tenant/audit-delivery-targets/${TARGET_ID}`, {
       body: { isActive: true },
@@ -311,6 +322,7 @@ describe("PATCH /api/tenant/audit-delivery-targets/[id]", () => {
         action: AUDIT_ACTION.AUDIT_DELIVERY_TARGET_REACTIVATE,
         tenantId: "tenant-1",
         scope: "TENANT",
+        metadata: { targetId: TARGET_ID, kind: expect.any(String), pendingDeliveries: 2 },
       }),
     );
   });

@@ -1069,7 +1069,9 @@ describe("background message flow", () => {
       // CACHE_TTL_MS), so this is the cache-hit branch the mutation corrupts
       // — it records whatever version getCachedSnapshot reports.
       tabActivatedHandlers[0]({ tabId: 1, windowId: 1 });
-      await vi.waitFor(() => expect(chromeMock!.contextMenus.removeAll).toHaveBeenCalled());
+      // A condition wait, not a delay: the default 1s bound expired under the
+      // parallel pre-PR load (the debounced refresh chain took ~1.8s there).
+      await vi.waitFor(() => expect(chromeMock!.contextMenus.removeAll).toHaveBeenCalled(), { timeout: 5000 });
       chromeMock!.contextMenus.removeAll.mockClear();
 
       // Second same-host refresh within the TTL: nothing changed, so this

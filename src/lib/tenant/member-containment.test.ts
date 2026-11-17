@@ -53,6 +53,7 @@ function recordingTx(
             returns[model]?.(args.where) ??
             (args.where.id?.in ?? []).map((id) => ({ id, tenantId: TENANT, serviceAccountId: "sa", clientId: "c", targetUserId: "x", granteeId: null, url: "https://hooks.example.com/in?token=s" }));
           if (method === "count") return counts[model] ?? 0;
+          if (method === "groupBy") return returns[model]?.(args.where) ?? [];
           if (method === "findMany" || method === "updateManyAndReturn") return rows();
           if (method === "deleteMany") return { count: (args.where.id?.in ?? []).length };
           return { count: 1 };
@@ -64,6 +65,7 @@ function recordingTx(
           updateManyAndReturn: record("updateManyAndReturn"),
           deleteMany: record("deleteMany"),
           count: record("count"),
+          groupBy: record("groupBy"),
         };
       },
     },
@@ -461,22 +463,33 @@ describe("share links and audit delivery targets", () => {
     expect(result.contained.shareLinks).toEqual({ revoked: 3, skipped: 1 });
   });
 
-  it("deactivates targets and audits each with its kind and the member, without a url", async () => {
-    const writes = recordingTx({ auditDeliveryTarget: () => [{ id: "t-1", kind: "SIEM_HEC" }] });
+  it("deactivates targets and audits each with its kind, the member and the deliveries it parked, without a url", async () => {
+    const writes = recordingTx({
+      auditDeliveryTarget: () => [{ id: "t-1", kind: "SIEM_HEC" }, { id: "t-2", kind: "WEBHOOK" }],
+      auditDelivery: () => [{ targetId: "t-1", _count: { _all: 3 } }],
+    });
     const result = await containMemberInTx(
       writes.tx,
-      containArgs(toContainmentRequest({ revoke: { auditDeliveryTargetIds: ["t-1", "t-gone"] } })!),
+      containArgs(toContainmentRequest({ revoke: { auditDeliveryTargetIds: ["t-1", "t-2", "t-gone"] } })!),
     );
 
     expect(writes.updates.auditDeliveryTarget).toEqual([{ isActive: false }]);
+    // Counted in the tenant, for the deactivated targets only, PENDING only.
+    expect(writes.wheres.auditDelivery.groupBy).toEqual([
+      { tenantId: TENANT, targetId: { in: ["t-1", "t-2"] }, status: "PENDING" },
+    ]);
     const [, , rows] = vi.mocked(logAuditBulkInTx).mock.calls[0];
     expect(rows).toEqual([
       expect.objectContaining({
         action: "AUDIT_DELIVERY_TARGET_DEACTIVATE",
-        metadata: { targetId: "t-1", kind: "SIEM_HEC", targetUserId: TARGET },
+        metadata: { targetId: "t-1", kind: "SIEM_HEC", targetUserId: TARGET, pendingDeliveries: 3 },
+      }),
+      expect.objectContaining({
+        action: "AUDIT_DELIVERY_TARGET_DEACTIVATE",
+        metadata: { targetId: "t-2", kind: "WEBHOOK", targetUserId: TARGET, pendingDeliveries: 0 },
       }),
     ]);
-    expect(result.contained.auditDeliveryTargets).toEqual({ revoked: 1, skipped: 1 });
+    expect(result.contained.auditDeliveryTargets).toEqual({ revoked: 2, skipped: 1 });
   });
 
   it("counts both kinds in remaining", async () => {

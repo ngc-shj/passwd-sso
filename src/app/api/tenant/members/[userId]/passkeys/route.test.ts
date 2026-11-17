@@ -92,6 +92,8 @@ const tx = {
     fields: { maxViews: {} },
   },
   auditDeliveryTarget: containmentModel("auditDeliveryTarget", { kind: "WEBHOOK" }),
+  // Read only: the queued deliveries a deactivated target parks.
+  auditDelivery: { groupBy: vi.fn(async () => []) },
   emergencyAccessGrant: containmentModel("emergencyAccessGrant", { granteeId: "grantee-1" }),
 };
 

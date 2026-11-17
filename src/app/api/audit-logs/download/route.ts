@@ -11,7 +11,7 @@ import {
 import type { Prisma } from "@prisma/client";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { parseActionsCsvParam, parseActorType } from "@/lib/audit/audit-query";
+import { auditDownloadFilterMetadata, parseActionsCsvParam, parseActorType } from "@/lib/audit/audit-query";
 import { AUDIT_LOG_MAX_RANGE_DAYS } from "@/lib/validations/common";
 import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 import { MS_PER_DAY } from "@/lib/constants/time";
@@ -88,7 +88,15 @@ async function handleGET(req: NextRequest) {
   await logAuditAsync({
     ...personalAuditBase(req, session.user.id),
     action: AUDIT_ACTION.AUDIT_LOG_DOWNLOAD,
-    metadata: { format },
+    metadata: {
+      format,
+      ...auditDownloadFilterMetadata({
+        from: from ? new Date(from) : undefined,
+        to: to ? new Date(to) : undefined,
+        actions: parsedActions.actions,
+        actorType: validActorType,
+      }),
+    },
   });
 
   const userId = session.user.id;

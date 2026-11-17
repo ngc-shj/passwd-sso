@@ -34,7 +34,8 @@ vi.mock("@/lib/ui/download-blob", () => ({
   downloadBlob: vi.fn(() => Promise.resolve()),
 }));
 
-vi.mock("@/lib/format/format-datetime", () => ({
+vi.mock("@/lib/format/format-datetime", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/format/format-datetime")>()),
   formatDateTime: vi.fn((iso: string) => iso),
 }));
 
@@ -424,11 +425,13 @@ describe("useAuditLogs — formatDate", () => {
 });
 
 describe("useAuditLogs — initialDateFrom", () => {
+  // Off UTC, so a date input read as UTC midnight shows up in the instant.
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv("TZ", "Asia/Tokyo");
   });
 
-  it("seeds dateFrom and sends it as an ISO from param on the first fetch", async () => {
+  it("seeds dateFrom and sends the start of that local day as the from param", async () => {
     const { fetchApi } = await import("@/lib/url-helpers");
     const { result } = renderHook(() =>
       useAuditLogs(makeConfig({ initialDateFrom: "2026-05-01" })),
@@ -437,9 +440,21 @@ describe("useAuditLogs — initialDateFrom", () => {
 
     expect(result.current.dateFrom).toBe("2026-05-01");
     const url = String(vi.mocked(fetchApi).mock.calls[0][0]);
-    expect(new URLSearchParams(url.split("?")[1]).get("from")).toBe(
-      new Date("2026-05-01").toISOString(),
-    );
+    expect(new URLSearchParams(url.split("?")[1]).get("from")).toBe("2026-04-30T15:00:00.000Z");
+  });
+
+  it("sends the last millisecond of the local to-day, west of UTC too", async () => {
+    vi.stubEnv("TZ", "America/New_York");
+    const { fetchApi } = await import("@/lib/url-helpers");
+    const { result } = renderHook(() => useAuditLogs(makeConfig()));
+    await act(async () => {});
+    vi.mocked(fetchApi).mockClear();
+
+    act(() => result.current.setDateTo("2026-05-01"));
+    await act(async () => {});
+
+    const url = String(vi.mocked(fetchApi).mock.calls.at(-1)?.[0]);
+    expect(new URLSearchParams(url.split("?")[1]).get("to")).toBe("2026-05-02T03:59:59.999Z");
   });
 
   it("starts empty without initialDateFrom", async () => {

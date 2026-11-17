@@ -301,6 +301,37 @@ describe("GET /api/audit-logs/download", () => {
     );
   });
 
+  it("records format alone when no filter is applied", async () => {
+    await GET(createRequest("GET", "http://localhost:3000/api/audit-logs/download"));
+
+    expect(mockLogAudit).toHaveBeenCalledWith(expect.objectContaining({ metadata: { format: "jsonl" } }));
+  });
+
+  it("records the date range, actions and actor type it applied", async () => {
+    await GET(
+      createRequest("GET", "http://localhost:3000/api/audit-logs/download", {
+        searchParams: {
+          from: "2025-06-01T00:00:00.000Z",
+          to: "2025-06-30T00:00:00.000Z",
+          actions: "AUDIT_LOG_DOWNLOAD",
+          actorType: "HUMAN",
+        },
+      }),
+    );
+
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: {
+          format: "jsonl",
+          from: "2025-06-01T00:00:00.000Z",
+          to: "2025-06-30T00:00:00.000Z",
+          actions: ["AUDIT_LOG_DOWNLOAD"],
+          actorType: "HUMAN",
+        },
+      }),
+    );
+  });
+
   it("filters by actorType when provided", async () => {
     const req = createRequest("GET", "http://localhost:3000/api/audit-logs/download", {
       searchParams: { actorType: "SERVICE_ACCOUNT" },

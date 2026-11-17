@@ -934,6 +934,23 @@ describe("wrappers set the audit-write bypass before the seam statement", () => 
     // Own transaction: no purge statement shares it.
     expect(events.filter((e) => e.tx === expiry!.tx).some((e) => e.sql.includes("DELETE FROM"))).toBe(false);
   });
+
+  it("purgeRetention still runs every purge when the expiry tx fails, and logs the failure", async () => {
+    const events = recordTxEvents((sql) => {
+      if (sql.includes("target inactive")) throw new Error("expiry boom");
+      return [];
+    });
+    await expect(purgeRetention(new PrismaClient(), { limit: 5 })).resolves.toBeDefined();
+
+    expect(events.some((e) => e.sql.includes("DELETE FROM audit_outbox") && e.sql.includes("status = 'SENT'"))).toBe(true);
+    expect(events.some((e) => e.sql.includes("DELETE FROM audit_outbox") && e.sql.includes("status = 'FAILED'"))).toBe(true);
+    expect(events.some((e) => e.sql.includes(`DELETE FROM "audit_deliveries"`))).toBe(true);
+    expect(events.some((e) => e.sql.includes("DELETE FROM webhook_deliveries"))).toBe(true);
+    expect(mockLoggerError).toHaveBeenCalledWith(
+      expect.objectContaining({ _logType: "delivery.expire_inactive_target_failed" }),
+      "delivery.expire_inactive_target_failed",
+    );
+  });
 });
 
 describe("expireInactiveTargetDeliveriesInTx", () => {

@@ -151,7 +151,12 @@ describe("tenant audit-log actor filter — real-DB integration", () => {
     expect(new Set(seen).size).toBe(total);
   });
 
-  it("streams the download across batches without skip or duplicate when rows share one createdAt", async () => {
+  // The actor filter holding across a download batch boundary. It does not prove
+  // the download's { id } tiebreak: without it Prisma reads the cursor in memory
+  // and PostgreSQL happens to return the tied rows in a stable order here (see
+  // containment-followups-deviation D8). That is pinned by the route's orderBy
+  // unit cells and src/__tests__/cursor-pagination-tiebreak.test.ts.
+  it("streams every narrowed row across download batches when rows share one createdAt", async () => {
     const total = AUDIT_LOG_BATCH_SIZE + 20;
     await seedRows(tenantId, member, total, SHARED_AT);
 

@@ -1502,6 +1502,13 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
       (await deliveryTarget(null)).id,
     ];
     const before = Object.fromEntries(await Promise.all([...skipped, unselected.id].map(async (id) => [id, await rowText("audit_delivery_targets", id)] as const)));
+    // Two queued deliveries the deactivation parks, one already sent (not counted).
+    await sql(
+      `INSERT INTO audit_deliveries (id, outbox_id, target_id, tenant_id, status)
+       SELECT gen_random_uuid(), gen_random_uuid(), $1::uuid, $2::uuid, s::"AuditDeliveryStatus"
+         FROM unnest(ARRAY['PENDING', 'PENDING', 'SENT']) AS s`,
+      live.id, tenantId,
+    );
 
     const res = await containAs(owner, target, { revoke: { auditDeliveryTargetIds: [live.id, ...skipped] } });
     expect(res.status).toBe(200);
@@ -1514,7 +1521,7 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
 
     const rows = (await auditRows(tenantId)).filter((r) => r.action === "AUDIT_DELIVERY_TARGET_DEACTIVATE");
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ userId: owner, metadata: { targetId: live.id, kind: "SIEM_HEC", targetUserId: target } });
+    expect(rows[0]).toMatchObject({ userId: owner, metadata: { targetId: live.id, kind: "SIEM_HEC", targetUserId: target, pendingDeliveries: 2 } });
     expect(JSON.stringify(rows[0])).not.toContain("siem.example.com");
   });
 

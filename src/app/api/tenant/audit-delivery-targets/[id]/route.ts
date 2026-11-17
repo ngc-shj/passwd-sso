@@ -15,6 +15,7 @@ import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-curren
 import { lockFootholdWriter } from "@/lib/tenant/foothold-write-gate";
 import { footholdWriteErrorResponse } from "@/lib/http/lock-conflict-response";
 import { z } from "zod";
+import { AuditDeliveryStatus } from "@prisma/client";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -64,12 +65,18 @@ async function handlePATCH(req: NextRequest, { params }: Params) {
       });
       if (!target) return null;
       // No-op guard: skip update + audit log if isActive is already the requested value
-      if (target.isActive === data.isActive) return { target, changed: false };
+      if (target.isActive === data.isActive) return { target, pendingDeliveries: null };
       await tx.auditDeliveryTarget.update({
         where: { id, tenantId: actor.tenantId },
         data: { isActive: data.isActive },
       });
-      return { target, changed: true };
+      // The queued deliveries this toggle parks (deactivate) or releases
+      // (reactivate), recorded so the change of what reaches the destination
+      // is visible in the audit row.
+      const pendingDeliveries = await tx.auditDelivery.count({
+        where: { tenantId: actor.tenantId, targetId: id, status: AuditDeliveryStatus.PENDING },
+      });
+      return { target, pendingDeliveries };
     });
   } catch (e) {
     const footholdResponse = footholdWriteErrorResponse(e);
@@ -81,7 +88,8 @@ async function handlePATCH(req: NextRequest, { params }: Params) {
     return notFound();
   }
   const { kind } = outcome.target;
-  if (!outcome.changed) {
+  const { pendingDeliveries } = outcome;
+  if (pendingDeliveries === null) {
     return NextResponse.json({ success: true, target: { id, kind, isActive: outcome.target.isActive } });
   }
 
@@ -90,7 +98,7 @@ async function handlePATCH(req: NextRequest, { params }: Params) {
     action: data.isActive
       ? AUDIT_ACTION.AUDIT_DELIVERY_TARGET_REACTIVATE
       : AUDIT_ACTION.AUDIT_DELIVERY_TARGET_DEACTIVATE,
-    metadata: { targetId: id, kind },
+    metadata: { targetId: id, kind, pendingDeliveries },
   });
 
   return NextResponse.json({ success: true, target: { id, kind, isActive: data.isActive } });

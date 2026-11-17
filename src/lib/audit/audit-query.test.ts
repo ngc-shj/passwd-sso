@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AuditAction } from "@prisma/client";
 import {
+  auditDownloadFilterMetadata,
   VALID_ACTIONS,
   VALID_ACTOR_TYPES,
   parseAuditLogParams,
@@ -86,6 +87,28 @@ describe("parseActorUserId", () => {
       expect(parseActorUserId(new URLSearchParams({ userId: raw }))).toEqual({ invalid: true });
     },
   );
+});
+
+describe("auditDownloadFilterMetadata", () => {
+  it("records each applied filter, the dates as ISO instants", () => {
+    expect(
+      auditDownloadFilterMetadata({
+        from: new Date("2026-01-01T00:00:00Z"),
+        to: new Date("2026-01-31T00:00:00Z"),
+        actions: ["AUDIT_LOG_DOWNLOAD"],
+        actorType: "HUMAN",
+      }),
+    ).toEqual({
+      from: "2026-01-01T00:00:00.000Z",
+      to: "2026-01-31T00:00:00.000Z",
+      actions: ["AUDIT_LOG_DOWNLOAD"],
+      actorType: "HUMAN",
+    });
+  });
+
+  it("leaves no key for a filter that was not applied", () => {
+    expect(auditDownloadFilterMetadata({ actions: [] })).toEqual({});
+  });
 });
 
 describe("parseAuditLogParams", () => {

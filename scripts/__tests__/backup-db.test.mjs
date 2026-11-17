@@ -239,7 +239,7 @@ function run(env = {}, { tocEntries, timeout = 8000, killSignal } = {}) {
  * drives this same function, so interpolating a path back into shell text fails
  * there.
  */
-async function runRootSwap(scriptPath, outPath, rootPath, env) {
+async function runRootSwap(scriptPath, outPath, rootPath, env, readyPattern) {
   // Opened once, in append mode. The child writes through a duplicate of this
   // descriptor and the exit line goes through the same one, so the path is
   // resolved exactly once — re-opening it by path to append would be a
@@ -250,13 +250,25 @@ async function runRootSwap(scriptPath, outPath, rootPath, env) {
     const child = spawn(BASH, [scriptPath], { env, stdio: ["ignore", out, out] });
     const kill = setTimeout(() => child.kill("SIGKILL"), 20000);
     kill.unref();
+    let done = false;
     const exited = new Promise((resolve) => {
-      child.once("error", (error) => resolve({ error }));
-      child.once("exit", (code, signal) => resolve({ code, signal }));
+      child.once("error", (error) => { done = true; resolve({ error }); });
+      child.once("exit", (code, signal) => { done = true; resolve({ code, signal }); });
     });
 
-    // The swap has to land while the script is between its dumps.
-    spawnSync("sleep", ["1"]);
+    // The swap has to land while the script is between its dumps. With a
+    // readyPattern, wait until the script's own output says it got there: a
+    // fixed delay let a loaded machine (the full suite) swap before the script
+    // had taken its root, so the run legitimately succeeded in the new root.
+    if (readyPattern) {
+      const deadline = Date.now() + 15000;
+      const ready = () => existsSync(outPath) && readyPattern.test(readFileSync(outPath, "utf8"));
+      while (!done && Date.now() < deadline && !ready()) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+    } else {
+      spawnSync("sleep", ["1"]);
+    }
     renameSync(rootPath, `${rootPath}.moved`);
     mkdirSync(rootPath, { mode: 0o700 });
     chmodSync(rootPath, 0o700);
@@ -3926,7 +3938,7 @@ exit 0`);
     const swap = await runRootSwap(SCRIPT, join(tmpDir, "out"), backupDir, {
       PATH: `${binDir}:${process.env.PATH}`, HOME: homeDir, LANG: "C",
       BACKUP_DIR: backupDir, BACKUP_RETAIN: "1",
-    });
+    }, /\[backup-db\] dumping /);
     expect(swap.error, "the swap harness itself must have run").toBeUndefined();
     const out = readFileSync(join(tmpDir, "out"), "utf8");
     expect(out, "a replaced root must not yield a success").not.toMatch(/EXIT=0/);

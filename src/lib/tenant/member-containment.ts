@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import type { Prisma, TenantRole } from "@prisma/client";
+import { AuditDeliveryStatus, type Prisma, type TenantRole } from "@prisma/client";
 import { logAuditBulkInTx, tenantAuditBase } from "@/lib/audit/audit";
 import type { AuditLogParams } from "@/lib/audit/audit-payload";
 import { hasTenantPermission, type TenantPermission } from "@/lib/auth/access/tenant-permissions";
@@ -646,7 +646,9 @@ export async function containMemberInTx(
   }
 
   // Delivery targets: deactivated, not deleted (deliveries hold a Restrict FK).
-  // The queued backlog stops being claimed once the target is inactive.
+  // The queued backlog stops being claimed once the target is inactive; each
+  // row records how many queued deliveries that parked, so silencing a
+  // destination is visible when it happens.
   const targetIds = request.revoke.auditDeliveryTargets;
   if (targetIds.length > 0) {
     const deactivated = await tx.auditDeliveryTarget.updateManyAndReturn({
@@ -654,9 +656,15 @@ export async function containMemberInTx(
       data: { isActive: false },
       select: { id: true, kind: true },
     });
+    const parked = deactivated.length === 0 ? [] : await tx.auditDelivery.groupBy({
+      by: ["targetId"],
+      where: { tenantId, targetId: { in: deactivated.map((target) => target.id) }, status: AuditDeliveryStatus.PENDING },
+      _count: { _all: true },
+    });
+    const parkedByTarget = new Map(parked.map((row) => [row.targetId, row._count._all]));
     await audit(deactivated.map((target) => ({
       action: AUDIT_ACTION.AUDIT_DELIVERY_TARGET_DEACTIVATE,
-      metadata: { targetId: target.id, kind: target.kind, targetUserId },
+      metadata: { targetId: target.id, kind: target.kind, targetUserId, pendingDeliveries: parkedByTarget.get(target.id) ?? 0 },
     })));
     count(FOOTHOLD_KIND.AUDIT_DELIVERY_TARGETS, targetIds, deactivated.length);
   }

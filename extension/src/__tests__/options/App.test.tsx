@@ -209,6 +209,27 @@ describe("Options App", () => {
     expect(await screen.findByText(/saved!/i)).toBeInTheDocument();
   });
 
+  it("clears the pending saved-status reset when the page unmounts", async () => {
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+    const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
+    const { unmount } = render(<App />);
+    await screen.findByText("General");
+    fireEvent.change(screen.getByPlaceholderText("https://example.com"), {
+      target: { value: "https://demo.example.com" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    await screen.findByText(/saved!/i);
+    const resetIndex = setTimeoutSpy.mock.calls.map((call) => call[1]).lastIndexOf(2000);
+    const resetTimer = setTimeoutSpy.mock.results[resetIndex]?.value;
+    expect(resetTimer).toBeDefined();
+
+    unmount();
+
+    expect(clearTimeoutSpy).toHaveBeenCalledWith(resetTimer);
+    setTimeoutSpy.mockRestore();
+    clearTimeoutSpy.mockRestore();
+  });
+
   it("shows error when host permission is denied", async () => {
     mockEnsureHostPermission.mockResolvedValue(false);
     render(<App />);

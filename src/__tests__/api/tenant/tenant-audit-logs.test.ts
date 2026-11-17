@@ -322,6 +322,8 @@ describe("GET /api/tenant/audit-logs/download", () => {
   describe("filters shared with the list", () => {
     const MEMBER = "123e4567-e89b-42d3-a456-426614174000";
     const FROM = new Date(Date.now() - 7 * 86400000).toISOString();
+    // The tenant download always applies a date range (to defaults to now).
+    const RANGE = { from: FROM, to: expect.any(String) };
 
     async function download(searchParams: Record<string, string>) {
       mockAuth.mockResolvedValue(DEFAULT_SESSION);
@@ -348,16 +350,41 @@ describe("GET /api/tenant/audit-logs/download", () => {
       expect(mockLogAudit).toHaveBeenCalledWith(
         expect.objectContaining({
           action: "AUDIT_LOG_DOWNLOAD",
-          metadata: { format: "jsonl", actorUserId: MEMBER },
+          metadata: { format: "jsonl", ...RANGE, actorUserId: MEMBER },
         }),
       );
     });
 
-    it("records no filter keys when none are applied", async () => {
+    it("records only the date range when no other filter is applied", async () => {
       await download({ scope: "BOGUS" });
 
       expect(mockLogAudit).toHaveBeenCalledWith(
-        expect.objectContaining({ metadata: { format: "jsonl" } }),
+        expect.objectContaining({ metadata: { format: "jsonl", ...RANGE } }),
+      );
+    });
+
+    it("records the actions and actor type it applied", async () => {
+      await download({ actions: "AUDIT_LOG_DOWNLOAD,POLICY_UPDATE", actorType: "HUMAN" });
+
+      expect(mockAuditLogFindMany.mock.calls[0][0].where).toMatchObject({
+        action: { in: ["AUDIT_LOG_DOWNLOAD", "POLICY_UPDATE"] },
+        actorType: "HUMAN",
+      });
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: { format: "jsonl", ...RANGE, actions: ["AUDIT_LOG_DOWNLOAD", "POLICY_UPDATE"], actorType: "HUMAN" },
+        }),
+      );
+    });
+
+    it("records no teamId under TENANT scope, where the team is not applied", async () => {
+      mockTeamFindFirst.mockResolvedValue({ id: "team-1" });
+
+      await download({ scope: "TENANT", teamId: "team-1" });
+
+      expect(mockAuditLogFindMany.mock.calls[0][0].where.teamId).toBeUndefined();
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({ metadata: { format: "jsonl", ...RANGE, scope: "TENANT" } }),
       );
     });
 
@@ -385,7 +412,7 @@ describe("GET /api/tenant/audit-logs/download", () => {
       });
       expect(mockLogAudit).toHaveBeenCalledWith(
         expect.objectContaining({
-          metadata: { format: "jsonl", scope: "TEAM", teamId: "team-1" },
+          metadata: { format: "jsonl", ...RANGE, scope: "TEAM", teamId: "team-1" },
         }),
       );
     });

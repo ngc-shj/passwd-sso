@@ -29,26 +29,38 @@ const MIN_SITES = 11;
 function violations(sf: SourceFile, label: string): { sites: number; problems: string[] } {
   const problems: string[] = [];
   let sites = 0;
-  for (const prop of sf.getDescendantsOfKind(SyntaxKind.PropertyAssignment)) {
-    if (prop.getName() !== "cursor") continue;
+  const cursorProps = [
+    ...sf.getDescendantsOfKind(SyntaxKind.PropertyAssignment),
+    ...sf.getDescendantsOfKind(SyntaxKind.ShorthandPropertyAssignment),
+  ].filter((prop) => prop.getName() === "cursor");
+  for (const prop of cursorProps) {
     const where = `${label}:${prop.getStartLineNumber()}`;
 
-    // Climb to the object literal passed straight to a query method, through
+    // The arguments the cursor pages: the nearest object literal that is a
+    // relation's args (`include: { rel: { cursor, orderBy } }`) or, failing
+    // that, the literal passed straight to a query method — reached through
     // spreads and conditionals (`...(cursor ? { cursor, skip: 1 } : {})`).
     let args: Node | undefined;
+    let inQuery = false;
     for (let n: Node | undefined = prop.getParent(); n; n = n.getParent()) {
       const parent = n.getParent();
-      if (Node.isObjectLiteralExpression(n) && parent && Node.isCallExpression(parent)) {
+      if (!Node.isObjectLiteralExpression(n) || !parent) continue;
+      if (Node.isCallExpression(parent)) {
         const callee = parent.getExpression();
-        if (Node.isPropertyAccessExpression(callee) && QUERY_METHODS.has(callee.getName())) args = n;
+        if (Node.isPropertyAccessExpression(callee) && QUERY_METHODS.has(callee.getName())) {
+          args ??= n;
+          inQuery = true;
+        }
         break;
       }
+      if (Node.isPropertyAssignment(parent)) args ??= n;
     }
-    if (!args || !Node.isObjectLiteralExpression(args)) {
+    if (!inQuery || !args || !Node.isObjectLiteralExpression(args)) {
       // A Prisma cursor is a unique-where object literal (`{ id }`). Other
-      // `cursor` keys (a CSS cursor, a blob-store continuation token) hold a
-      // string and are not sites; an object-literal one we cannot place is.
-      if (Node.isObjectLiteralExpression(prop.getInitializer())) {
+      // `cursor` keys (a CSS cursor, a blob-store continuation token, a
+      // shorthand handed to a non-Prisma call) are not sites; an
+      // object-literal one we cannot place is.
+      if (Node.isPropertyAssignment(prop) && Node.isObjectLiteralExpression(prop.getInitializer())) {
         sites += 1;
         problems.push(`${where}: cursor outside a findMany/findFirst argument literal`);
       }
@@ -102,5 +114,26 @@ describe("cursor pagination orders by a unique key last", () => {
 
   it("refuses a cursor built outside the query's argument literal", () => {
     expect(scanFixture(`const page = { cursor: { id: c }, skip: 1 }; tx.a.findMany({ orderBy: [{ id: "asc" }], ...page });`).problems).toHaveLength(1);
+  });
+
+  it("refuses a shorthand cursor on a non-unique order, and accepts it with the tiebreak", () => {
+    expect(scanFixture(`tx.a.findMany({ orderBy: { createdAt: "desc" }, cursor, skip: 1 });`)).toEqual({
+      sites: 1,
+      problems: ["fixture:1: orderBy must be an array literal ending in { id: ... }"],
+    });
+    expect(scanFixture(`tx.a.findMany({ orderBy: [{ createdAt: "desc" }, { id: "desc" }], cursor });`)).toEqual({ sites: 1, problems: [] });
+  });
+
+  it("does not count a shorthand cursor handed to a call that is not a query", () => {
+    expect(scanFixture(`store.listObjects(prefix, { cursor, pageSize });`)).toEqual({ sites: 0, problems: [] });
+  });
+
+  it("judges a relation's cursor by the relation's own orderBy", () => {
+    expect(
+      scanFixture(`tx.a.findMany({ orderBy: [{ id: "asc" }], include: { rel: { cursor: { id: c }, orderBy: { createdAt: "asc" } } } });`).problems,
+    ).toHaveLength(1);
+    expect(
+      scanFixture(`tx.a.findMany({ orderBy: { createdAt: "asc" }, include: { rel: { cursor: { id: c }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] } } });`).problems,
+    ).toEqual([]);
   });
 });

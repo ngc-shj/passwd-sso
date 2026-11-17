@@ -19,6 +19,26 @@ export function parseActorType(searchParams: URLSearchParams): (typeof ACTOR_TYP
 }
 
 /**
+ * The filters an audit-log download applied, for its AUDIT_LOG_DOWNLOAD row: the
+ * date bounds the query used, the action list and the actor type. A filter not
+ * applied leaves no key, so two downloads of different coverage never record
+ * the same row.
+ */
+export function auditDownloadFilterMetadata(applied: {
+  from?: Date;
+  to?: Date;
+  actions: readonly string[];
+  actorType?: string;
+}): { from?: string; to?: string; actions?: string[]; actorType?: string } {
+  return {
+    ...(applied.from && { from: applied.from.toISOString() }),
+    ...(applied.to && { to: applied.to.toISOString() }),
+    ...(applied.actions.length > 0 && { actions: [...applied.actions] }),
+    ...(applied.actorType && { actorType: applied.actorType }),
+  };
+}
+
+/**
  * Parses the optional `userId` actor filter. Absent → no filter; anything but a
  * canonical uuid → `{ invalid: true }` (the caller answers 400).
  */

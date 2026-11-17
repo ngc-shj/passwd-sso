@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DEFAULT_SESSION } from "../../helpers/mock-auth";
 import { createMultipartRequest, parseResponse } from "../../helpers/request-builder";
 
-const { mockAuth, mockCreate, mockAggregate, mockUserFindUnique, mockCheck, mockLogAudit, mockFileTypeFromBuffer, mockWithUserTenantRls } =
+const { mockAuth, mockCreate, mockAggregate, mockUserFindUnique, mockCheck, mockLogAudit, mockFileTypeFromBuffer, mockTxExecuteRaw, mockWithUserTenantRls } =
   vi.hoisted(() => ({
     mockAuth: vi.fn(),
     mockCreate: vi.fn(),
@@ -11,9 +11,10 @@ const { mockAuth, mockCreate, mockAggregate, mockUserFindUnique, mockCheck, mock
     mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
     mockLogAudit: vi.fn(),
     mockFileTypeFromBuffer: vi.fn(),
+    mockTxExecuteRaw: vi.fn().mockResolvedValue(1),
     mockWithUserTenantRls: vi.fn(async (_userId: string, fn: (tenantId: string, tx: unknown) => unknown) =>
       // The callback's tx takes the per-user pg_advisory_xact_lock, then the aggregate+create.
-      fn("tenant-1", { passwordShare: { create: mockCreate, aggregate: mockAggregate }, $executeRaw: vi.fn().mockResolvedValue(1) }),
+      fn("tenant-1", { passwordShare: { create: mockCreate, aggregate: mockAggregate }, $executeRaw: mockTxExecuteRaw }),
     ),
   }));
 
@@ -121,11 +122,15 @@ describe("POST /api/sends/file", () => {
       order.push("aggregate");
       return { _sum: { sendSizeBytes: 0 } };
     });
+    mockTxExecuteRaw.mockImplementationOnce(async (sql: TemplateStringsArray) => {
+      if (sql.join("$").includes("pg_advisory_xact_lock")) order.push("lock");
+      return 1;
+    });
 
     const res = await POST((await createMultipartRequest("http://localhost/api/sends/file", createFormData())) as never);
 
     expect(res.status).toBe(201);
-    expect(order).toEqual(["gate", "aggregate"]);
+    expect(order).toEqual(["gate", "lock", "aggregate"]);
   });
 
   it("returns 401 when not authenticated", async () => {

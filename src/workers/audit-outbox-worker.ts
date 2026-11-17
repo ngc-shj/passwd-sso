@@ -1725,10 +1725,19 @@ export async function purgeRetention(
   // the outbox rows it pinned (purgeSentAgedInTx skips rows with a PENDING
   // delivery) are purgeable in this same pass. Own tx and grant: see
   // OUTBOX_DELIVERY_EXPIRY. Logs its own _logType; the count is not returned.
-  await prisma.$transaction(async (tx) => {
-    await setBypassGucs(tx, BYPASS_GRANT.OUTBOX_DELIVERY_EXPIRY);
-    return expireInactiveTargetDeliveriesInTx(tx, sentCutoff, limit);
-  });
+  // A failure here must not starve the purges below (the FAILED purge carries
+  // the PII retention policy): it is logged and the pass continues.
+  try {
+    await prisma.$transaction(async (tx) => {
+      await setBypassGucs(tx, BYPASS_GRANT.OUTBOX_DELIVERY_EXPIRY);
+      return expireInactiveTargetDeliveriesInTx(tx, sentCutoff, limit);
+    });
+  } catch (err) {
+    getLogger().error(
+      { error: errorLogFields(err), _logType: "delivery.expire_inactive_target_failed" },
+      "delivery.expire_inactive_target_failed",
+    );
+  }
 
   // Each branch's DELETE and its RETENTION_PURGED audit event commit
   // atomically in the SAME tx. A destructive delete must never succeed without

@@ -775,6 +775,16 @@ describe("foothold member set (positive controls)", () => {
     expect(run(source)).toEqual([]);
   });
 
+  it("exempts only `fields`: another non-method member of a foothold delegate is still an alias", () => {
+    const source = `export async function POST(tx: any) { await tx.scimToken.unknownWriter({ data: {} }); }`;
+    expect(run(source)).toEqual(["unclassified foothold write (alias): src/fixture.ts::POST::alias:scimToken"]);
+  });
+
+  it("still sees the ungated write around a field reference", () => {
+    const source = `export async function POST(tx: any) { await tx.scimToken.create({ data: { a: tx.scimToken.fields.b } }); }`;
+    expect(run(source)).toEqual(["unclassified foothold write (write): src/fixture.ts::POST::scimToken.create"]);
+  });
+
   it("fails an aliased delegate", () => {
     const source = `export async function POST(tx: any) { const d = tx.scimToken; await d.create({ data: {} }); }`;
     expect(run(source)).toEqual(["unclassified foothold write (alias): src/fixture.ts::POST::alias:scimToken"]);

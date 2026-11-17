@@ -117,6 +117,29 @@ describe("POST /api/sends/file", () => {
     assertNoWrite: () => expect(mockCreate).not.toHaveBeenCalled(),
   });
 
+  it("takes the gate before the per-user advisory lock and the quota read", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockCreate.mockResolvedValue({ id: "send-file-1", expiresAt: new Date(Date.now() + 86400_000) });
+    const order: string[] = [];
+    mockLockFootholdWriter.mockImplementationOnce(async () => {
+      order.push("gate");
+      return new Map();
+    });
+    mockExecuteRaw.mockImplementationOnce(async (sql: TemplateStringsArray) => {
+      if (sql.join("$").includes("pg_advisory_xact_lock")) order.push("lock");
+      return 1;
+    });
+    mockAggregate.mockImplementationOnce(async () => {
+      order.push("aggregate");
+      return { _sum: { sendSizeBytes: 0 } };
+    });
+
+    const res = await POST((await createMultipartRequest("http://localhost/api/sends/file", createFormData())) as never);
+
+    expect(res.status).toBe(201);
+    expect(order).toEqual(["gate", "lock", "aggregate"]);
+  });
+
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const req = await createMultipartRequest("http://localhost/api/sends/file", createFormData());

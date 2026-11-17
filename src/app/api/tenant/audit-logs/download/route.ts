@@ -9,7 +9,7 @@ import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { handleAuthError, rateLimited, unauthorized, validationError } from "@/lib/http/api-response";
 import { AUDIT_ACTION } from "@/lib/constants";
-import { parseActionsCsvParam, parseActorType, parseActorUserId } from "@/lib/audit/audit-query";
+import { auditDownloadFilterMetadata, parseActionsCsvParam, parseActorType, parseActorUserId } from "@/lib/audit/audit-query";
 import { appliedTenantAuditFilters, buildTenantAuditWhere, validateTenantAuditTeam } from "@/lib/audit/tenant-audit-filter";
 import { AUDIT_LOG_MAX_RANGE_DAYS } from "@/lib/validations/common";
 import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
@@ -113,6 +113,12 @@ async function handleGET(req: NextRequest) {
     action: AUDIT_ACTION.AUDIT_LOG_DOWNLOAD,
     metadata: {
       format,
+      ...auditDownloadFilterMetadata({
+        from: resolvedFrom,
+        to: resolvedTo,
+        actions: parsedActions.actions,
+        actorType: validActorType,
+      }),
       ...(actorUser.userId && { actorUserId: actorUser.userId }),
       ...appliedTenantAuditFilters(scopeParam, teamIdParam),
     },

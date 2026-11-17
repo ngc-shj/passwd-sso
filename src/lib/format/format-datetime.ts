@@ -22,6 +22,21 @@ export function toISODateString(date: Date = new Date()): string {
   return `${y}-${m}-${d}`;
 }
 
+/**
+ * Parses a "YYYY-MM-DD" `<input type="date">` value as that calendar day in the
+ * local timezone — the inverse of toISODateString. `new Date("YYYY-MM-DD")`
+ * reads it as UTC midnight instead. With `endOfDay`, the day's last millisecond.
+ * Undefined for anything that is not a real calendar date.
+ */
+export function parseLocalDate(value: string, endOfDay = false): Date | undefined {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return undefined;
+  const [y, m, d] = [Number(match[1]), Number(match[2]) - 1, Number(match[3])];
+  const date = endOfDay ? new Date(y, m, d, 23, 59, 59, 999) : new Date(y, m, d);
+  // Date rolls an out-of-range day over (2026-02-30 → March 2); refuse it instead.
+  return date.getFullYear() === y && date.getMonth() === m && date.getDate() === d ? date : undefined;
+}
+
 export function formatRelativeTime(value: string | Date, locale: string): string {
   const date = value instanceof Date ? value : new Date(value);
   const now = Date.now();

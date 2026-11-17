@@ -89,6 +89,8 @@ async function streamToString(response: Response): Promise<string> {
 // 7-day-ago ISO string — used to satisfy the route's "from or to required" guard
 // without coupling tests to a specific calendar date.
 const VALID_FROM = new Date(Date.now() - 7 * 86400000).toISOString();
+// The tenant download always applies a date range (to defaults to now).
+const RANGE = { from: VALID_FROM, to: expect.any(String) };
 
 const MOCK_LOGS = [
   {
@@ -287,7 +289,7 @@ describe("GET /api/tenant/audit-logs/download", () => {
         userId: MEMBER,
       });
       expect(mockLogAudit).toHaveBeenCalledWith(
-        expect.objectContaining({ metadata: { format: "jsonl", actorUserId: MEMBER } }),
+        expect.objectContaining({ metadata: { format: "jsonl", ...RANGE, actorUserId: MEMBER } }),
       );
     });
 
@@ -315,8 +317,20 @@ describe("GET /api/tenant/audit-logs/download", () => {
         teamId: "team-1",
       });
       expect(mockLogAudit).toHaveBeenCalledWith(
-        expect.objectContaining({ metadata: { format: "jsonl", scope: "TEAM", teamId: "team-1" } }),
+        expect.objectContaining({ metadata: { format: "jsonl", ...RANGE, scope: "TEAM", teamId: "team-1" } }),
       );
+    });
+
+    it("orders ascending by createdAt then id", async () => {
+      const req = createRequest("GET", "http://localhost:3000/api/tenant/audit-logs/download", {
+        searchParams: { from: VALID_FROM },
+      });
+      await streamToString(await GET(req));
+
+      expect(mockPrismaAuditLog.findMany.mock.calls[0][0].orderBy).toEqual([
+        { createdAt: "asc" },
+        { id: "asc" },
+      ]);
     });
 
     it("records no teamId under TENANT scope, where the team is not applied", async () => {
@@ -329,7 +343,7 @@ describe("GET /api/tenant/audit-logs/download", () => {
 
       expect(mockPrismaAuditLog.findMany.mock.calls[0][0].where.teamId).toBeUndefined();
       expect(mockLogAudit).toHaveBeenCalledWith(
-        expect.objectContaining({ metadata: { format: "jsonl", scope: "TENANT" } }),
+        expect.objectContaining({ metadata: { format: "jsonl", ...RANGE, scope: "TENANT" } }),
       );
     });
 

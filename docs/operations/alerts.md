@@ -412,6 +412,23 @@ exclude `delivery.expired_inactive_target`.
 
 Datadog: `{ _logType="delivery.expired_inactive_target" }`
 
+## `delivery.expire_inactive_target_failed`
+
+Emitted by `src/workers/audit-outbox-worker.ts`, at **error**, when the expiry
+above throws (a lock or statement timeout, a bypass grant refusing a table, a
+dead-letter insert failing). The retention pass logs it and goes on to the
+outbox and delivery purges, so the FAILED-payload retention is not starved; the
+parked deliveries stay `PENDING` and are retried on the next pass.
+
+**Severity**: high
+**Trigger**: any occurrence; repeated passes mean the backlog of deactivated
+targets is not being expired and keeps its outbox rows.
+**Recovery**: read `error` in the line; for a grant error, check
+`OUTBOX_DELIVERY_EXPIRY` in `src/lib/tenant-rls-grants.ts` against the tables
+the statement reads.
+
+Datadog: `{ _logType="delivery.expire_inactive_target_failed" }`
+
 ## `outbox.depth.alert`
 
 Emitted by `src/workers/audit-outbox-worker.ts` when the

@@ -32,6 +32,7 @@ import {
 import { fetchApi } from "@/lib/url-helpers";
 import { usePathname, useRouter } from "@/i18n/navigation";
 import { UUID_RE } from "@/lib/constants/app";
+import { parseLocalDate } from "@/lib/format/format-datetime";
 import { formatUserName } from "@/lib/format/format-user";
 import { useAuditLogs, type AuditLogItem } from "@/hooks/vault/use-audit-logs";
 import { AuditActionFilter } from "@/components/audit/audit-action-filter";
@@ -100,8 +101,6 @@ const GROUP_LABEL_MAP: Record<string, string> = {
   [AUDIT_ACTION_GROUP.AUDIT_DELIVERY_TARGET]: "groupAuditDeliveryTarget",
 };
 
-const DATE_PARAM_RE = /^\d{4}-\d{2}-\d{2}$/;
-
 interface TenantAuditLogCardProps {
   variant: "logs" | "breakglass";
 }
@@ -123,9 +122,7 @@ export function TenantAuditLogCard({ variant }: TenantAuditLogCardProps) {
   });
   const [initialDateFrom] = useState<string | undefined>(() => {
     const from = searchParams.get("from");
-    return from && DATE_PARAM_RE.test(from) && !Number.isNaN(new Date(from).getTime())
-      ? from
-      : undefined;
+    return from && parseLocalDate(from) ? from : undefined;
   });
 
   const actionGroups = useMemo(() => buildActionGroups(scopeFilter), [scopeFilter]);

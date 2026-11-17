@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { formatDate, formatDateTime, formatRelativeTime, toISODateString } from "@/lib/format/format-datetime";
+import { formatDate, formatDateTime, formatRelativeTime, parseLocalDate, toISODateString } from "@/lib/format/format-datetime";
 
 describe("formatDateTime", () => {
   it("passes locale to toLocaleString for Date input", () => {
@@ -130,5 +130,28 @@ describe("toISODateString", () => {
   it("returns a string in YYYY-MM-DD format", () => {
     const date = new Date(2024, 7, 20); // August 20, 2024 (local)
     expect(toISODateString(date)).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+});
+
+describe("parseLocalDate", () => {
+  it("reads the value as the start of that local day, not UTC midnight", () => {
+    vi.stubEnv("TZ", "Asia/Tokyo");
+    expect(parseLocalDate("2026-11-17")?.toISOString()).toBe("2026-11-16T15:00:00.000Z");
+  });
+
+  it("with endOfDay, returns the local day's last millisecond west of UTC", () => {
+    vi.stubEnv("TZ", "America/New_York");
+    expect(parseLocalDate("2026-11-17", true)?.toISOString()).toBe("2026-11-18T04:59:59.999Z");
+  });
+
+  it("is the inverse of toISODateString", () => {
+    const day = parseLocalDate("2026-02-28");
+    expect(day && toISODateString(day)).toBe("2026-02-28");
+  });
+
+  it("refuses a malformed value and a day the month does not have", () => {
+    expect(parseLocalDate("2026-5-1")).toBeUndefined();
+    expect(parseLocalDate("2026-02-30")).toBeUndefined();
+    expect(parseLocalDate("")).toBeUndefined();
   });
 });
