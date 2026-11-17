@@ -422,3 +422,44 @@ exports less than before). New findings:
   ~25 from another session on the host; both files passed 270/270 twice alone
   and the next full pre-PR run passed 96/96. Not attributed to this change
   (the failing cells are untouched by it).
+
+---
+
+# Round 5 (fixes 5f44700dc..b3750ad82)
+
+## Changes from Previous Round
+All round-4 items resolved (testing confirmed each by mutation; functionality
+probed the SA bound and card min/max across time zones and day edges;
+security: the elapsed-time bound never exceeds the stated 365 days). New:
+
+## Findings
+- S5-1 [Minor] `apiKeyCreateSchema` still bounded expiry with a server-local
+  `setDate` step (same class as F-R4-2, sibling token path).
+- F-R5-1 [Major] The card's new min check made three existing tests, which typed
+  a fixed `2026-12-31` against the real clock, fail from 2026-12-31.
+- F-R5-2 / Q5-2 [Minor / Major] The card's typed-date cell covered only the
+  past-max refusal; the min arm and the max-day allow side were unpinned.
+- Q5-1 [Major] The cursor guard still passed relation-level page objects (an
+  include spread, a non-literal include/select value or relation value).
+- Q5-3 [Minor] The guard's any-depth and `select` claims were unpinned.
+- Q5-4 [Minor] The Date-minimum allow assertion sat in a "refuses …" test.
+
+## Resolution Status (round 5)
+- S5-1: the API key bound is elapsed time on the server, and the API key
+  manager computes its expiry as elapsed days too (a local calendar step would
+  land an hour past the bound across a fall-back). Cell under New York at
+  2026-11-02T00:00:01Z: now + 365 days accepted, 1 ms more refused (the
+  previous schema refused the former).
+- F-R5-1: the three tests type the dialog's own `min`; the card file passes
+  16/16 with the clock shifted to 2026-12-31 and to 2027-06-30.
+- F-R5-2 / Q5-2: at a fixed clock the cell refuses a date past the max and
+  today (one below the min) with no POST, then sends the max day as
+  `2027-11-16T23:59:59.000Z`; the min day is sent by the three tests above.
+- Q5-1 / Q5-3: the guard refuses what it cannot read in a query's arguments
+  instead of matching shapes: a non-literal spread, an `include`/`select` that
+  is not a literal, a spread inside one, a relation value that is neither a
+  boolean nor a literal — relation arguments followed to any depth; `where`
+  spreads allowed. A fixture per shape (include spread, identifier include,
+  identifier relation, nested include, select) plus a readable nested select
+  that passes; the real tree has none of the refused shapes.
+- Q5-4: the Date-minimum pair is its own test.

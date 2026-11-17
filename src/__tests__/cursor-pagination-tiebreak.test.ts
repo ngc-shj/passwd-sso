@@ -93,18 +93,42 @@ function violations(sf: SourceFile, label: string): { sites: number; problems: s
       problems.push(`${where}: ${callee.getName()} arguments are not an object literal`);
       continue;
     }
-    // The query's own arguments and each relation's (`include` / `select`
-    // values); a `where` may spread shared filters, which carry no cursor.
-    const argLiterals = [arg, ...relationArgs(arg)];
-    for (const literal of argLiterals) {
-      for (const spread of literal.getProperties().filter(Node.isSpreadAssignment)) {
-        if (!isLiteralSpread(spread.getExpression())) {
-          problems.push(`${where}: ${callee.getName()} spreads arguments that are not a literal`);
-        }
-      }
-    }
+    for (const problem of unreadableArgs(arg)) problems.push(`${where}: ${callee.getName()} ${problem}`);
   }
   return { sites, problems };
+}
+
+/**
+ * What in a query's (or a relation's) argument literal this check cannot read:
+ * a spread that is not a literal, an `include` / `select` that is not a
+ * literal, a spread inside one, or a relation value that is neither a boolean
+ * nor a literal. Relation arguments are followed to any depth. A `where` may
+ * spread shared filters: it carries no cursor.
+ */
+function unreadableArgs(args: ObjectLiteralExpression): string[] {
+  const problems: string[] = [];
+  for (const spread of args.getProperties().filter(Node.isSpreadAssignment)) {
+    if (!isLiteralSpread(spread.getExpression())) problems.push("spreads arguments that are not a literal");
+  }
+  for (const key of ["include", "select"]) {
+    const prop = args.getProperty(key);
+    if (!prop) continue;
+    const value = Node.isPropertyAssignment(prop) ? prop.getInitializer() : undefined;
+    if (!value || !Node.isObjectLiteralExpression(value)) {
+      problems.push(`${key} is not an object literal`);
+      continue;
+    }
+    for (const rel of value.getProperties()) {
+      const relValue = Node.isPropertyAssignment(rel) ? rel.getInitializer() : undefined;
+      if (relValue && (Node.isTrueLiteral(relValue) || Node.isFalseLiteral(relValue))) continue;
+      if (relValue && Node.isObjectLiteralExpression(relValue)) {
+        problems.push(...unreadableArgs(relValue));
+        continue;
+      }
+      problems.push(`${key} holds a relation that is neither a boolean nor an object literal`);
+    }
+  }
+  return problems;
 }
 
 /** A literal, a parenthesised or conditional choice of literals, whose own spreads are literals too. */
@@ -117,20 +141,6 @@ function isLiteralSpread(expr: Node): boolean {
   return false;
 }
 
-/** The argument literals of the relations an `include` / `select` names, at any depth. */
-function relationArgs(args: ObjectLiteralExpression): ObjectLiteralExpression[] {
-  const found: ObjectLiteralExpression[] = [];
-  for (const key of ["include", "select"]) {
-    const prop = args.getProperty(key);
-    const value = prop && Node.isPropertyAssignment(prop) ? prop.getInitializer() : undefined;
-    if (!value || !Node.isObjectLiteralExpression(value)) continue;
-    for (const rel of value.getProperties()) {
-      const relValue = Node.isPropertyAssignment(rel) ? rel.getInitializer() : undefined;
-      if (relValue && Node.isObjectLiteralExpression(relValue)) found.push(relValue, ...relationArgs(relValue));
-    }
-  }
-  return found;
-}
 
 function scanFixture(code: string) {
   return violations(createAstProject().createSourceFile("fixture.ts", code), "fixture");
@@ -191,6 +201,11 @@ describe("cursor pagination orders by a unique key last", () => {
       expect(scanFixture(code).problems, code).toHaveLength(1);
     }
     for (const code of [
+      `const rels = { rel: { orderBy: { createdAt: "asc" }, cursor, skip: 1 } }; tx.a.findMany({ include: { ...rels } });`,
+      `tx.a.findMany({ include: rels });`,
+      `tx.a.findMany({ include: { rel: relPage } });`,
+      `tx.a.findMany({ include: { rel: { include: { sub: { orderBy: { createdAt: "asc" }, ...page } } } } });`,
+      `tx.a.findMany({ select: { rel: { orderBy: { createdAt: "asc" }, ...page } } });`,
       `tx.a.findMany({ orderBy: { createdAt: "desc" }, ...({ ...page }) });`,
       `tx.a.findMany({ orderBy: { createdAt: "desc" }, ...(c ? {} : page) });`,
       `tx.a.findMany({ include: { rel: { orderBy: { createdAt: "asc" }, ...page } } });`,
@@ -200,6 +215,10 @@ describe("cursor pagination orders by a unique key last", () => {
     expect(scanFixture(`tx.a.findMany({ orderBy: [{ id: "asc" }], ...(c ? { where: { a } } : {}) });`).problems).toEqual([]);
     // A where may spread a shared filter; it carries no cursor.
     expect(scanFixture(`tx.a.findMany({ where: { ...ACTIVE }, orderBy: [{ id: "asc" }] });`).problems).toEqual([]);
+    // Readable relation arguments, at any depth and under select, pass.
+    expect(
+      scanFixture(`tx.a.findMany({ select: { id: true, rel: { select: { sub: { where: { ...F }, take: 1 } } } } });`).problems,
+    ).toEqual([]);
   });
 
   it("refuses a page object bound to a variable, whatever its cursor holds", () => {
