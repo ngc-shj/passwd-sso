@@ -91,6 +91,7 @@ async function handleGET(_req: NextRequest, { params }: Params) {
     })),
     linkedAccounts: result.linkedAccounts,
     createdFootholds: result.createdFootholds,
+    moreFootholds: result.moreFootholds,
   });
 }
 

@@ -1265,6 +1265,15 @@ describe.concurrent("token-model delegate references", { timeout: 60_000 }, () =
     await expectFail(other(`  return tx.apiKey.fields.tokenHash;`), REF);
   });
 
+  it("FAILS on a delegate's fields object read whole or by element access", async () => {
+    await expectFail(other(`  return tx.apiKey.fields;`), REF);
+    await expectFail(other(`  return tx.apiKey.fields["userId"];`), REF);
+  });
+
+  it("passes on a non-digest column reference through fields", async () => {
+    await expectPass(other(`  return tx.apiKey.fields.userId;`));
+  });
+
   it("says how to comply: call a method, read a row field, or rename the property", async () => {
     await expectFail(other(`  return run(tx.apiKey);`), /read a row's relation field \(`x\.<handle>\.<field>`[^)]*\), or rename a non-Prisma property/);
   });

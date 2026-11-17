@@ -37,7 +37,12 @@ const {
   mockRequireRecentCurrentAuthMethod: vi.fn().mockResolvedValue(null),
 }));
 
+const { mockLockFootholdWriter } = vi.hoisted(() => ({
+  mockLockFootholdWriter: vi.fn(async () => new Map()),
+}));
+
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/tenant/foothold-write-gate", () => ({ lockFootholdWriter: mockLockFootholdWriter }));
 vi.mock("@/lib/auth/access/tenant-auth", () => {
   class TenantAuthError extends Error {
     status: number;
@@ -94,7 +99,8 @@ vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
 
 import { GET, POST } from "@/app/api/tenant/audit-delivery-targets/route";
 import { TenantAuthError } from "@/lib/auth/access/tenant-auth";
-import { AUDIT_ACTION } from "@/lib/constants";
+import { AUDIT_ACTION, TENANT_PERMISSION } from "@/lib/constants";
+import { footholdGateCells } from "@/__tests__/helpers/foothold-gate-cells";
 
 const ACTOR = { tenantId: "tenant-1", role: "ADMIN" };
 
@@ -234,6 +240,60 @@ describe("GET /api/tenant/audit-delivery-targets", () => {
 });
 
 describe("POST /api/tenant/audit-delivery-targets", () => {
+  footholdGateCells({
+    gate: mockLockFootholdWriter,
+    permission: TENANT_PERMISSION.AUDIT_DELIVERY_MANAGE,
+    actorId: DEFAULT_SESSION.user.id,
+    tenantId: ACTOR.tenantId,
+    okStatus: 201,
+    arrange: () => {
+      mockAuth.mockResolvedValue(DEFAULT_SESSION);
+      mockRequireTenantPermission.mockResolvedValue(ACTOR);
+      mockAuditDeliveryTargetCount.mockResolvedValue(0);
+      mockAuditDeliveryTargetCreate.mockResolvedValue({
+        id: "adt-new",
+        kind: "WEBHOOK",
+        isActive: true,
+        createdAt: new Date(),
+      });
+    },
+    call: () =>
+      POST(createRequest("POST", "http://localhost/api/tenant/audit-delivery-targets", {
+        body: { kind: "WEBHOOK", url: "https://example.com/hook", secret: "s3cr3t" },
+        headers: { origin: "http://localhost" },
+      })),
+    assertNoWrite: () => expect(mockAuditDeliveryTargetCreate).not.toHaveBeenCalled(),
+  });
+
+  it("takes the gate before the advisory lock and records the creator", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockAuditDeliveryTargetCount.mockResolvedValue(0);
+    mockAuditDeliveryTargetCreate.mockResolvedValue({ id: "adt-new", kind: "WEBHOOK", isActive: true, createdAt: new Date() });
+    const order: string[] = [];
+    mockLockFootholdWriter.mockImplementationOnce(async () => {
+      order.push("gate");
+      return new Map();
+    });
+    mockExecuteRaw.mockImplementationOnce(async () => {
+      order.push("lock");
+      return 1;
+    });
+
+    const res = await POST(createRequest("POST", "http://localhost/api/tenant/audit-delivery-targets", {
+      body: { kind: "WEBHOOK", url: "https://example.com/hook", secret: "s3cr3t" },
+      headers: { origin: "http://localhost" },
+    }));
+
+    expect(res.status).toBe(201);
+    expect(order).toEqual(["gate", "lock"]);
+    expect(mockAuditDeliveryTargetCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ createdById: DEFAULT_SESSION.user.id }),
+      }),
+    );
+  });
+
   beforeEach(() => vi.clearAllMocks());
 
   it("returns 401 when not authenticated", async () => {

@@ -738,11 +738,18 @@ function delegateTarget(call, file) {
 /**
  * Is this token-model delegate reference `<ref>.<method>(...)` with a literal method name?
  * `<ref>.<name>` for a name no delegate has (`row.apiKey.userId`) reads a row's relation
- * field, not a delegate, and is not a use of one.
+ * field, not a delegate, and is not a use of one. `<ref>.fields.<column>` names a column
+ * for a column-to-column comparison (`{ viewCount: { lt: tx.passwordShare.fields.maxViews } }`)
+ * and carries no where of its own; a digest column's is refused, so a digest cannot be
+ * compared that way.
  */
 function isDirectDelegateUse(ref) {
   const parent = ref.getParent();
   if (parent?.getKind() !== SyntaxKind.PropertyAccessExpression || parent.getExpression() !== ref) return false;
+  if (parent.getName() === "fields") {
+    const column = parent.getParent();
+    return column?.getKind() === SyntaxKind.PropertyAccessExpression && column.getExpression() === parent && !DIGEST_KEYS.has(column.getName());
+  }
   if (!DELEGATE_MEMBERS.has(parent.getName())) return true;
   const call = parent.getParent();
   return call?.getKind() === SyntaxKind.CallExpression && call.getExpression() === parent;

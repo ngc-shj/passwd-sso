@@ -8,8 +8,9 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { handleAuthError, rateLimited, unauthorized, validationError } from "@/lib/http/api-response";
-import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
-import { parseActionsCsvParam, parseActorType } from "@/lib/audit/audit-query";
+import { AUDIT_ACTION } from "@/lib/constants";
+import { parseActionsCsvParam, parseActorType, parseActorUserId } from "@/lib/audit/audit-query";
+import { appliedTenantAuditFilters, buildTenantAuditWhere, validateTenantAuditTeam } from "@/lib/audit/tenant-audit-filter";
 import { AUDIT_LOG_MAX_RANGE_DAYS } from "@/lib/validations/common";
 import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 import { MS_PER_DAY } from "@/lib/constants/time";
@@ -46,6 +47,12 @@ async function handleGET(req: NextRequest) {
   const from = searchParams.get("from");
   const to = searchParams.get("to");
   const validActorType = parseActorType(searchParams);
+  const scopeParam = searchParams.get("scope");
+  const teamIdParam = searchParams.get("teamId");
+  const actorUser = parseActorUserId(searchParams);
+  if ("invalid" in actorUser) {
+    return validationError({ userId: "Invalid user id" });
+  }
 
   // Require at least one date boundary
   if (!from && !to) {
@@ -69,12 +76,23 @@ async function handleGET(req: NextRequest) {
     return validationError({ range: `Maximum range is ${AUDIT_LOG_MAX_RANGE_DAYS} days` });
   }
 
-  const where: Record<string, unknown> = {
-    scope: { in: [AUDIT_SCOPE.TENANT, AUDIT_SCOPE.TEAM] },
-    tenantId: actor.tenantId,
-  };
+  // Validate teamId belongs to this tenant before any log query or download audit row
+  if (teamIdParam) {
+    const teamOk = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+      validateTenantAuditTeam(tx, actor.tenantId, teamIdParam),
+    );
+    if (!teamOk) {
+      return validationError({ teamId: "Team not found" });
+    }
+  }
 
-  if (validActorType) where.actorType = validActorType;
+  const where = buildTenantAuditWhere({
+    tenantId: actor.tenantId,
+    scope: scopeParam,
+    teamId: teamIdParam,
+    actorType: validActorType,
+    userId: actorUser.userId,
+  });
 
   const parsedActions = parseActionsCsvParam(actionsParam);
   if ("invalid" in parsedActions) {
@@ -93,7 +111,11 @@ async function handleGET(req: NextRequest) {
   await logAuditAsync({
     ...tenantAuditBase(req, session.user.id, actor.tenantId),
     action: AUDIT_ACTION.AUDIT_LOG_DOWNLOAD,
-    metadata: { format },
+    metadata: {
+      format,
+      ...(actorUser.userId && { actorUserId: actorUser.userId }),
+      ...appliedTenantAuditFilters(scopeParam, teamIdParam),
+    },
   });
 
   const tenantId = actor.tenantId;
@@ -104,7 +126,7 @@ async function handleGET(req: NextRequest) {
       withTenantRls(prisma, tenantId, async (tx) =>
         tx.auditLog.findMany({
           where,
-          orderBy: { createdAt: "asc" },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
           take,
           ...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {}),
         }),

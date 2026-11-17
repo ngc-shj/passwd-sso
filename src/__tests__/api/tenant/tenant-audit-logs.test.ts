@@ -6,6 +6,7 @@ const {
   mockAuth,
   mockRequireTenantPermission,
   mockAuditLogFindMany,
+  mockTeamFindFirst,
   mockWithTenantRls,
   mockLogAudit,
   mockRateLimiterCheck,
@@ -13,6 +14,7 @@ const {
   mockAuth: vi.fn(),
   mockRequireTenantPermission: vi.fn(),
   mockAuditLogFindMany: vi.fn(),
+  mockTeamFindFirst: vi.fn(),
   mockWithTenantRls: vi.fn(async (prisma: unknown, _tenantId: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
   mockLogAudit: vi.fn(),
   mockRateLimiterCheck: vi.fn().mockResolvedValue({ allowed: true }),
@@ -36,6 +38,7 @@ vi.mock("@/lib/auth/access/tenant-auth", () => {
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     auditLog: { findMany: mockAuditLogFindMany },
+    team: { findFirst: mockTeamFindFirst },
   },
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
@@ -183,6 +186,70 @@ describe("GET /api/tenant/audit-logs", () => {
       }),
     );
   });
+
+  describe("userId actor filter", () => {
+    const MEMBER = "123e4567-e89b-42d3-a456-426614174000";
+
+    it("narrows the query to the member's rows", async () => {
+      mockAuth.mockResolvedValue(DEFAULT_SESSION);
+      mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
+      mockAuditLogFindMany.mockResolvedValue([makeLog()]);
+
+      const res = await GET(
+        createRequest("GET", "http://localhost/api/tenant/audit-logs", {
+          searchParams: { userId: MEMBER },
+        }),
+      );
+      const { status, json } = await parseResponse(res);
+
+      expect(status).toBe(200);
+      expect(json.items).toHaveLength(1);
+      expect(mockAuditLogFindMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ tenantId: "tenant1", userId: MEMBER }),
+        }),
+      );
+    });
+
+    it("does not add a userId predicate when the param is absent", async () => {
+      mockAuth.mockResolvedValue(DEFAULT_SESSION);
+      mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
+      mockAuditLogFindMany.mockResolvedValue([]);
+
+      await GET(createRequest("GET", "http://localhost/api/tenant/audit-logs"));
+
+      expect(mockAuditLogFindMany.mock.calls[0][0].where).not.toHaveProperty("userId");
+    });
+
+    it("returns 400 for a non-uuid userId without querying", async () => {
+      mockAuth.mockResolvedValue(DEFAULT_SESSION);
+      mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
+
+      const res = await GET(
+        createRequest("GET", "http://localhost/api/tenant/audit-logs", {
+          searchParams: { userId: "not-a-uuid" },
+        }),
+      );
+      const { status, json } = await parseResponse(res);
+
+      expect(status).toBe(400);
+      expect(json.details).toHaveProperty("userId");
+      expect(mockAuditLogFindMany).not.toHaveBeenCalled();
+    });
+
+    it("orders by createdAt then id so equal timestamps page stably", async () => {
+      mockAuth.mockResolvedValue(DEFAULT_SESSION);
+      mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
+      mockAuditLogFindMany.mockResolvedValue([]);
+
+      await GET(createRequest("GET", "http://localhost/api/tenant/audit-logs"));
+
+      expect(mockAuditLogFindMany.mock.calls[0][0].orderBy).toEqual([
+        { createdAt: "desc" },
+        { id: "desc" },
+      ]);
+    });
+  });
 });
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -250,5 +317,96 @@ describe("GET /api/tenant/audit-logs/download", () => {
 
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Type")).toMatch(/application\/x-ndjson/);
+  });
+
+  describe("filters shared with the list", () => {
+    const MEMBER = "123e4567-e89b-42d3-a456-426614174000";
+    const FROM = new Date(Date.now() - 7 * 86400000).toISOString();
+
+    async function download(searchParams: Record<string, string>) {
+      mockAuth.mockResolvedValue(DEFAULT_SESSION);
+      mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
+      mockRateLimiterCheck.mockResolvedValue({ allowed: true });
+      mockAuditLogFindMany.mockResolvedValue([]);
+      const res = await GET_DOWNLOAD(
+        createRequest("GET", "http://localhost/api/tenant/audit-logs/download", {
+          searchParams: { from: FROM, ...searchParams },
+        }),
+      );
+      if (res.status === 200) await res.text();
+      return res;
+    }
+
+    it("narrows to the member and records actorUserId in the download audit row", async () => {
+      const res = await download({ userId: MEMBER });
+
+      expect(res.status).toBe(200);
+      expect(mockAuditLogFindMany.mock.calls[0][0].where).toMatchObject({
+        tenantId: "tenant1",
+        userId: MEMBER,
+      });
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "AUDIT_LOG_DOWNLOAD",
+          metadata: { format: "jsonl", actorUserId: MEMBER },
+        }),
+      );
+    });
+
+    it("records no filter keys when none are applied", async () => {
+      await download({ scope: "BOGUS" });
+
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({ metadata: { format: "jsonl" } }),
+      );
+    });
+
+    it("returns 400 for a non-uuid userId before any query or audit row", async () => {
+      const res = await download({ userId: "nope" });
+
+      expect(res.status).toBe(400);
+      expect(mockAuditLogFindMany).not.toHaveBeenCalled();
+      expect(mockLogAudit).not.toHaveBeenCalled();
+    });
+
+    it("honours scope and teamId and records them", async () => {
+      mockTeamFindFirst.mockResolvedValue({ id: "team-1" });
+
+      const res = await download({ scope: "TEAM", teamId: "team-1" });
+
+      expect(res.status).toBe(200);
+      expect(mockTeamFindFirst).toHaveBeenCalledWith({
+        where: { id: "team-1", tenantId: "tenant1" },
+        select: { id: true },
+      });
+      expect(mockAuditLogFindMany.mock.calls[0][0].where).toMatchObject({
+        scope: "TEAM",
+        teamId: "team-1",
+      });
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: { format: "jsonl", scope: "TEAM", teamId: "team-1" },
+        }),
+      );
+    });
+
+    it("returns 400 for a team outside the tenant with no log query and no audit row", async () => {
+      mockTeamFindFirst.mockResolvedValue(null);
+
+      const res = await download({ teamId: "foreign-team" });
+
+      expect(res.status).toBe(400);
+      expect(mockAuditLogFindMany).not.toHaveBeenCalled();
+      expect(mockLogAudit).not.toHaveBeenCalled();
+    });
+
+    it("orders ascending by createdAt then id", async () => {
+      await download({});
+
+      expect(mockAuditLogFindMany.mock.calls[0][0].orderBy).toEqual([
+        { createdAt: "asc" },
+        { id: "asc" },
+      ]);
+    });
   });
 });

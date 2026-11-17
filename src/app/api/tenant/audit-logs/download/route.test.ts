@@ -4,6 +4,7 @@ import { createRequest } from "@/__tests__/helpers/request-builder";
 const {
   mockAuth,
   mockPrismaAuditLog,
+  mockPrismaTeam,
   mockRequireTenantPermission,
   TenantAuthError,
   mockWithTenantRls,
@@ -21,6 +22,7 @@ const {
   return {
     mockAuth: vi.fn(),
     mockPrismaAuditLog: { findMany: vi.fn() },
+    mockPrismaTeam: { findFirst: vi.fn() },
     mockRequireTenantPermission: vi.fn(),
     TenantAuthError: _TenantAuthError,
     mockWithTenantRls: vi.fn(
@@ -33,7 +35,7 @@ const {
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: { auditLog: mockPrismaAuditLog },
+  prisma: { auditLog: mockPrismaAuditLog, team: mockPrismaTeam },
 }));
 vi.mock("@/lib/auth/access/tenant-auth", () => ({
   requireTenantPermission: mockRequireTenantPermission,
@@ -268,5 +270,79 @@ describe("GET /api/tenant/audit-logs/download", () => {
 
     const calledWith = mockPrismaAuditLog.findMany.mock.calls[0][0];
     expect(calledWith.where).not.toHaveProperty("actorType");
+  });
+
+  describe("actor, scope and team filters", () => {
+    const MEMBER = "123e4567-e89b-42d3-a456-426614174000";
+
+    it("narrows to userId and records actorUserId in the download audit row", async () => {
+      const req = createRequest("GET", "http://localhost:3000/api/tenant/audit-logs/download", {
+        searchParams: { from: VALID_FROM, userId: MEMBER },
+      });
+      const res = await GET(req);
+      await streamToString(res);
+
+      expect(mockPrismaAuditLog.findMany.mock.calls[0][0].where).toMatchObject({
+        tenantId: "tenant-1",
+        userId: MEMBER,
+      });
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({ metadata: { format: "jsonl", actorUserId: MEMBER } }),
+      );
+    });
+
+    it("returns 400 for an invalid userId with no query and no audit row", async () => {
+      const req = createRequest("GET", "http://localhost:3000/api/tenant/audit-logs/download", {
+        searchParams: { from: VALID_FROM, userId: "x" },
+      });
+      const res = await GET(req);
+
+      expect(res.status).toBe(400);
+      expect(mockPrismaAuditLog.findMany).not.toHaveBeenCalled();
+      expect(mockLogAudit).not.toHaveBeenCalled();
+    });
+
+    it("honours scope and a tenant-owned teamId", async () => {
+      mockPrismaTeam.findFirst.mockResolvedValue({ id: "team-1" });
+      const req = createRequest("GET", "http://localhost:3000/api/tenant/audit-logs/download", {
+        searchParams: { from: VALID_FROM, scope: "TEAM", teamId: "team-1" },
+      });
+      const res = await GET(req);
+      await streamToString(res);
+
+      expect(mockPrismaAuditLog.findMany.mock.calls[0][0].where).toMatchObject({
+        scope: "TEAM",
+        teamId: "team-1",
+      });
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({ metadata: { format: "jsonl", scope: "TEAM", teamId: "team-1" } }),
+      );
+    });
+
+    it("records no teamId under TENANT scope, where the team is not applied", async () => {
+      mockPrismaTeam.findFirst.mockResolvedValue({ id: "team-1" });
+      const req = createRequest("GET", "http://localhost:3000/api/tenant/audit-logs/download", {
+        searchParams: { from: VALID_FROM, scope: "TENANT", teamId: "team-1" },
+      });
+      const res = await GET(req);
+      await streamToString(res);
+
+      expect(mockPrismaAuditLog.findMany.mock.calls[0][0].where.teamId).toBeUndefined();
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({ metadata: { format: "jsonl", scope: "TENANT" } }),
+      );
+    });
+
+    it("returns 400 for another tenant's team with no query and no audit row", async () => {
+      mockPrismaTeam.findFirst.mockResolvedValue(null);
+      const req = createRequest("GET", "http://localhost:3000/api/tenant/audit-logs/download", {
+        searchParams: { from: VALID_FROM, teamId: "foreign" },
+      });
+      const res = await GET(req);
+
+      expect(res.status).toBe(400);
+      expect(mockPrismaAuditLog.findMany).not.toHaveBeenCalled();
+      expect(mockLogAudit).not.toHaveBeenCalled();
+    });
   });
 });

@@ -21,17 +21,22 @@ const {
   mockLogAudit: vi.fn(),
   mockFileTypeFromBuffer: vi.fn(),
   mockExecuteRaw: vi.fn().mockResolvedValue(1),
-  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: (tenantId: string, tx: unknown) => unknown) =>
+    // The callback's tx takes the per-user pg_advisory_xact_lock, then the aggregate+create.
+    fn("tenant-1", { passwordShare: { create: mockCreate, aggregate: mockAggregate }, $executeRaw: mockExecuteRaw }),
+  ),
+}));
+
+const { mockLockFootholdWriter } = vi.hoisted(() => ({
+  mockLockFootholdWriter: vi.fn(async () => new Map()),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/tenant/foothold-write-gate", () => ({ lockFootholdWriter: mockLockFootholdWriter }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordShare: { create: mockCreate, aggregate: mockAggregate },
     user: { findUnique: mockUserFindUnique },
-    // The aggregate+create run inside a withUserTenantRls callback that first
-    // acquires a pg_advisory_xact_lock via prisma.$executeRaw.
-    $executeRaw: mockExecuteRaw,
   },
 }));
 vi.mock("@/lib/crypto/crypto-server", () => ({
@@ -68,6 +73,7 @@ vi.mock("file-type", () => ({
 }));
 
 import { POST } from "./route";
+import { footholdGateCells } from "@/__tests__/helpers/foothold-gate-cells";
 
 function createFormData(overrides: Record<string, unknown> = {}): FormData {
   const fd = new FormData();
@@ -94,6 +100,21 @@ describe("POST /api/sends/file", () => {
     mockCheck.mockResolvedValue({ allowed: true });
     mockFileTypeFromBuffer.mockResolvedValue(undefined);
     mockAggregate.mockResolvedValue({ _sum: { sendSizeBytes: 0 } });
+  });
+
+  footholdGateCells({
+    gate: mockLockFootholdWriter,
+    permission: null,
+    actorId: DEFAULT_SESSION.user.id,
+    tenantId: "tenant-1",
+    okStatus: 201,
+    arrange: () => {
+      mockAuth.mockResolvedValue(DEFAULT_SESSION);
+      mockCreate.mockResolvedValue({ id: "send-file-1", expiresAt: new Date(Date.now() + 86400_000) });
+    },
+    call: async () =>
+      POST((await createMultipartRequest("http://localhost/api/sends/file", createFormData())) as never),
+    assertNoWrite: () => expect(mockCreate).not.toHaveBeenCalled(),
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -211,7 +232,7 @@ describe("POST /api/sends/file", () => {
     );
 
     // The aggregate-then-create byte-quota check runs under a per-user advisory
-    // lock (TOCTOU fix). Mutation-kill: removing the prisma.$executeRaw lock
+    // lock (TOCTOU fix). Mutation-kill: removing the tx.$executeRaw lock
     // line would leave $executeRaw uncalled with this SQL.
     expect(
       mockExecuteRaw.mock.calls.some((c) =>

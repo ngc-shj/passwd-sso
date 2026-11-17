@@ -22,6 +22,8 @@ import type { Prisma } from "@prisma/client";
 import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
 import { createRaceHelpers, holdPrismaWriter, type HeldWriter } from "./race-helpers";
 import { deleteSession, requestWithSession, seedSession } from "./session-request";
+import { createMultipartRequest } from "../helpers/request-builder";
+import { configuredSessionCookieName } from "@/lib/auth/session/cookie-name";
 
 const mockAuth = vi.fn();
 vi.mock("@/auth", () => ({ auth: (...args: unknown[]) => mockAuth(...args) }));
@@ -50,6 +52,11 @@ import { PUT as updateServiceAccount } from "@/app/api/tenant/service-accounts/[
 import { POST as consent } from "@/app/api/mcp/authorize/consent/route";
 import { POST as createBreakglassGrant } from "@/app/api/tenant/breakglass/route";
 import { POST as createEmergencyGrant } from "@/app/api/emergency-access/route";
+import { POST as createShareLink } from "@/app/api/share-links/route";
+import { POST as createSend } from "@/app/api/sends/route";
+import { POST as createFileSend } from "@/app/api/sends/file/route";
+import { POST as createDeliveryTarget } from "@/app/api/tenant/audit-delivery-targets/route";
+import { PATCH as patchDeliveryTarget } from "@/app/api/tenant/audit-delivery-targets/[id]/route";
 import { departFromTenant } from "@/lib/team/team-departure";
 import { revokeUsersAuthArtifactsInTx } from "@/lib/auth/session/user-session-invalidation";
 import { encryptResetToken } from "@/lib/vault/admin-reset-token-crypto";
@@ -217,6 +224,56 @@ describe("foothold write gate — real-DB integration", () => {
     );
     return id;
   }
+
+  async function personalEntry(userId: string): Promise<string> {
+    const id = randomUUID();
+    await sql(
+      `INSERT INTO password_entries (id, user_id, tenant_id, encrypted_blob, blob_iv, blob_auth_tag,
+         encrypted_overview, overview_iv, overview_auth_tag, key_version, aad_version, entry_type, created_at, updated_at)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, 1, 1, 'LOGIN', now(), now())`,
+      id, userId, tenantId, hex(32), hex(12), hex(16), hex(32), hex(12), hex(16),
+    );
+    return id;
+  }
+
+  /** A team entry the actor can read: they are a MEMBER of a team another user owns. */
+  async function teamEntryReadableBy(actorId: string): Promise<string> {
+    const owner = await member("OWNER");
+    const teamId = randomUUID();
+    await sql(
+      `INSERT INTO teams (id, tenant_id, name, slug, team_key_version, created_at, updated_at)
+       VALUES ($1::uuid, $2::uuid, $3, $3, 1, now(), now())`,
+      teamId, tenantId, `gate-team-${teamId.slice(0, 8)}`,
+    );
+    for (const [userId, role] of [[owner, "OWNER"], [actorId, "MEMBER"]]) {
+      await sql(
+        `INSERT INTO team_members (id, team_id, user_id, tenant_id, role, key_distributed, created_at, updated_at)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::"TeamRole", true, now(), now())`,
+        randomUUID(), teamId, userId, tenantId, role,
+      );
+    }
+    const entryId = randomUUID();
+    await sql(
+      `INSERT INTO team_password_entries (id, team_id, tenant_id, created_by_id, updated_by_id,
+         encrypted_blob, blob_iv, blob_auth_tag, encrypted_overview, overview_iv, overview_auth_tag,
+         aad_version, team_key_version, item_key_version, entry_type, created_at, updated_at)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $4::uuid, $5, $6, $7, $8, $9, $10, 1, 1, 0, 'LOGIN', now(), now())`,
+      entryId, teamId, tenantId, owner, hex(32), hex(12), hex(16), hex(32), hex(12), hex(16),
+    );
+    return entryId;
+  }
+
+  async function deliveryTargetRow(createdBy: string, isActive: boolean): Promise<string> {
+    const id = randomUUID();
+    await sql(
+      `INSERT INTO audit_delivery_targets (id, tenant_id, kind, config_encrypted, config_iv, config_auth_tag, master_key_version, is_active, created_by_id, created_at)
+       VALUES ($1::uuid, $2::uuid, 'WEBHOOK', $3, $4, $5, 1, $6, $7::uuid, now())`,
+      id, tenantId, hex(32), hex(12), hex(16), isActive, createdBy,
+    );
+    return id;
+  }
+
+  const sharesBy = (actorId: string) => count("password_shares", "created_by_id = $1::uuid", actorId);
 
   const consentForm = (clientId: string) =>
     new URLSearchParams({
@@ -429,6 +486,117 @@ describe("foothold write gate — real-DB integration", () => {
       assertNoWrite: async (e) => expect(await count("emergency_access_grants", "tenant_id = $1::uuid", e.tenantId)).toBe(0),
       assertWritten: async (e) =>
         expect(await count("emergency_access_grants", "tenant_id = $1::uuid AND owner_id = $2::uuid", e.tenantId, e.actorId)).toBe(1),
+    },
+    // A share or Send is a foothold the creator's departure must stop; a
+    // demotion changes nothing the gate reads (permission: null), so the held
+    // change is a deactivation, as for emergency-access grants.
+    {
+      name: "share link create (personal entry)",
+      heldChange: "deactivation",
+      okStatus: 201,
+      controlRejects: "TENANT_NOT_RESOLVED",
+      seed: async (env) => ({ entry: await personalEntry(env.actorId) }),
+      invoke: (cookie, _env, s) =>
+        createShareLink(
+          requestWithSession(cookie, `${BASE}/api/share-links`, {
+            body: { passwordEntryId: s.entry, data: { title: "t", password: "p" }, expiresIn: "1d" },
+          }),
+        ),
+      assertNoWrite: async (e) => expect(await sharesBy(e.actorId)).toBe(0),
+      assertWritten: async (e) => expect(await sharesBy(e.actorId)).toBe(1),
+    },
+    {
+      name: "share link create (team entry)",
+      heldChange: "deactivation",
+      okStatus: 201,
+      controlRejects: "TENANT_NOT_RESOLVED",
+      seed: async (env) => ({ entry: await teamEntryReadableBy(env.actorId) }),
+      invoke: (cookie, _env, s) =>
+        createShareLink(
+          requestWithSession(cookie, `${BASE}/api/share-links`, {
+            body: {
+              teamPasswordEntryId: s.entry,
+              encryptedShareData: { ciphertext: hex(32), iv: hex(12), authTag: hex(16) },
+              entryType: "LOGIN",
+              expiresIn: "1d",
+            },
+          }),
+        ),
+      assertNoWrite: async (e) => expect(await sharesBy(e.actorId)).toBe(0),
+      assertWritten: async (e) => expect(await sharesBy(e.actorId)).toBe(1),
+    },
+    {
+      name: "text Send create",
+      heldChange: "deactivation",
+      okStatus: 201,
+      controlRejects: "TENANT_NOT_RESOLVED",
+      seed: async () => ({}),
+      invoke: (cookie) =>
+        createSend(requestWithSession(cookie, `${BASE}/api/sends`, { body: { name: "gate", text: "hello", expiresIn: "1d" } })),
+      assertNoWrite: async (e) => expect(await sharesBy(e.actorId)).toBe(0),
+      assertWritten: async (e) => expect(await sharesBy(e.actorId)).toBe(1),
+    },
+    {
+      name: "file Send create",
+      heldChange: "deactivation",
+      okStatus: 201,
+      controlRejects: "TENANT_NOT_RESOLVED",
+      seed: async () => ({}),
+      invoke: async (cookie) => {
+        const form = new FormData();
+        form.append("name", "gate");
+        form.append("expiresIn", "1d");
+        form.append("file", new File(["hello world"], "gate.txt", { type: "text/plain" }));
+        return createFileSend(
+          await createMultipartRequest(`${BASE}/api/sends/file`, form, {
+            headers: { cookie: `${configuredSessionCookieName()}=${cookie}`, origin: BASE },
+          }),
+        );
+      },
+      assertNoWrite: async (e) => expect(await sharesBy(e.actorId)).toBe(0),
+      assertWritten: async (e) => expect(await sharesBy(e.actorId)).toBe(1),
+    },
+    {
+      name: "audit delivery target create",
+      heldChange: "demotion",
+      okStatus: 201,
+      seed: async () => ({}),
+      invoke: (cookie) =>
+        createDeliveryTarget(
+          requestWithSession(cookie, `${BASE}/api/tenant/audit-delivery-targets`, {
+            body: { kind: "WEBHOOK", url: "https://example.com/hook", secret: "gate-secret" },
+          }),
+        ),
+      assertNoWrite: async (e) => expect(await count("audit_delivery_targets", "tenant_id = $1::uuid", e.tenantId)).toBe(0),
+      assertWritten: async (e) =>
+        expect(await count("audit_delivery_targets", "tenant_id = $1::uuid AND created_by_id = $2::uuid", e.tenantId, e.actorId)).toBe(1),
+    },
+    {
+      name: "audit delivery target re-activation (PATCH isActive: true)",
+      heldChange: "demotion",
+      okStatus: 200,
+      seed: async (env) => ({ target: await deliveryTargetRow(env.actorId, false) }),
+      invoke: (cookie, _env, s) =>
+        patchDeliveryTarget(
+          requestWithSession(cookie, `${BASE}/api/tenant/audit-delivery-targets/${s.target}`, { method: "PATCH", body: { isActive: true } }),
+          idParams(s.target),
+        ),
+      assertNoWrite: async (_e, s) => expect(await count("audit_delivery_targets", "id = $1::uuid AND is_active = false", s.target)).toBe(1),
+      assertWritten: async (_e, s) => expect(await count("audit_delivery_targets", "id = $1::uuid AND is_active = true", s.target)).toBe(1),
+    },
+    {
+      // Deactivating a SIEM target removes visibility: not a pure narrowing, so gated too.
+      name: "audit delivery target deactivation (PATCH isActive: false)",
+      heldChange: "demotion",
+      okStatus: 200,
+      seed: async (env) => ({ target: await deliveryTargetRow(env.actorId, true) }),
+      invoke: (cookie, _env, s) =>
+        patchDeliveryTarget(
+          requestWithSession(cookie, `${BASE}/api/tenant/audit-delivery-targets/${s.target}`, { method: "PATCH", body: { isActive: false } }),
+          idParams(s.target),
+        ),
+      assertNoWrite: async (_e, s) => expect(await count("audit_delivery_targets", "id = $1::uuid AND is_active = true", s.target)).toBe(1),
+      assertWritten: async (_e, s) => expect(await count("audit_delivery_targets", "id = $1::uuid AND is_active = false", s.target)).toBe(1),
     },
   ];
 

@@ -147,6 +147,7 @@ import { buildWebhookSecretAAD, WEBHOOK_SECRET_AAD_VERSION_CURRENT } from "@/lib
 const hex = (n: number) => randomBytes(n).toString("hex");
 const WEBHOOK_CREATOR_DIR = "20261114000300_team_webhook_creator";
 const TENANT_WEBHOOK_CREATOR_DIR = "20261116300100_tenant_webhook_creator";
+const AUDIT_DELIVERY_TARGET_CREATOR_DIR = "20261117000000_audit_delivery_target_creator";
 /** A team-webhook-subscribable action the dispatcher does not suppress. */
 const EVENT = AUDIT_ACTION.ENTRY_CREATE;
 /** A tenant-webhook-subscribable action the dispatcher does not suppress. */
@@ -1881,6 +1882,119 @@ describe("departed-member leaked authority — real-DB integration", () => {
       );
       expect(Object.fromEntries(after.map((r) => [r.id, r.created_by_id]))).toEqual({
         [latestWins]: null, [systemOnly]: null, [otherTenantOnly]: null, [fromOutbox]: null, [nonNull]: kept.id, [none]: null,
+      });
+    });
+
+    it("backfill (audit delivery targets): as the NOBYPASSRLS app role, the latest HUMAN TENANT create row wins; other tenants, actors and scopes are ignored; a valid-uuid outbox row attributes, a non-uuid one leaves NULL without aborting; non-NULL is untouched, a second run is a no-op", async () => {
+      const [older, newer, outboxActor, kept, stranger] = await Promise.all([member(), member(), member(), member(), member()]);
+      const insertTarget = async (createdBy: string | null) => {
+        const id = randomUUID();
+        await sql(
+          `INSERT INTO audit_delivery_targets (id, tenant_id, kind, config_encrypted, config_iv, config_auth_tag, master_key_version,
+             is_active, created_by_id, created_at)
+           VALUES ($1::uuid, $2::uuid, 'WEBHOOK', $3, $4, $5, 1, true, $6::uuid, now())`,
+          id, tenantId, hex(16), hex(12), hex(16), createdBy,
+        );
+        return id;
+      };
+      const auditCreate = (o: { tenant: string; targetId: string; user: string; at: string; actorType?: string; scope?: string }) =>
+        sql(
+          `INSERT INTO audit_logs (id, tenant_id, scope, action, user_id, actor_type, metadata, outbox_id, created_at)
+           VALUES ($1::uuid, $2::uuid, $7::"AuditScope", 'AUDIT_DELIVERY_TARGET_CREATE', $3::uuid, $4::"ActorType", $5::jsonb, $6::uuid, ${o.at})`,
+          randomUUID(), o.tenant, o.user, o.actorType ?? "HUMAN", JSON.stringify({ targetId: o.targetId }), randomUUID(),
+          o.scope ?? "TENANT",
+        );
+      const outboxCreate = (targetId: string, userId: string) =>
+        ctx.su.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+          await setBypassRlsGucs(tx);
+          await enqueueAuditInTx(tx, tenantId, buildOutboxPayload({
+            scope: AUDIT_SCOPE.TENANT, action: AUDIT_ACTION.AUDIT_DELIVERY_TARGET_CREATE, userId,
+            metadata: { targetId, kind: "WEBHOOK" },
+          }));
+        });
+
+      const latestWins = await insertTarget(null);
+      await auditCreate({ tenant: tenantId, targetId: latestWins, user: older.id, at: "now() - interval '2 minutes'" });
+      await auditCreate({ tenant: tenantId, targetId: latestWins, user: newer.id, at: "now() - interval '1 minute'" });
+      // A newer non-human or non-TENANT row must not displace the human one.
+      await auditCreate({ tenant: tenantId, targetId: latestWins, user: stranger.id, at: "now()", actorType: "SYSTEM" });
+      await auditCreate({ tenant: tenantId, targetId: latestWins, user: stranger.id, at: "now()", scope: "PERSONAL" });
+      const systemOnly = await insertTarget(null);
+      await auditCreate({ tenant: tenantId, targetId: systemOnly, user: stranger.id, at: "now()", actorType: "SYSTEM" });
+      const otherTenantOnly = await insertTarget(null);
+      await auditCreate({ tenant: otherTenantId, targetId: otherTenantOnly, user: stranger.id, at: "now()" });
+      const fromOutbox = await insertTarget(null);
+      await outboxCreate(fromOutbox, outboxActor.id);
+      // A malformed userId in a not-yet-drained row must not abort the migration.
+      const badOutbox = await insertTarget(null);
+      await outboxCreate(badOutbox, "not-a-uuid");
+      const nonNull = await insertTarget(kept.id);
+      await auditCreate({ tenant: tenantId, targetId: nonNull, user: stranger.id, at: "now()" });
+      const none = await insertTarget(null);
+      const all = [latestWins, systemOnly, otherTenantOnly, fromOutbox, badOutbox, nonNull, none];
+      const expected = {
+        [latestWins]: newer.id, [systemOnly]: null, [otherTenantOnly]: null, [fromOutbox]: outboxActor.id, [badOutbox]: null,
+        [nonNull]: kept.id, [none]: null,
+      };
+
+      const block = readBackfillBlock(AUDIT_DELIVERY_TARGET_CREATOR_DIR, "audit-delivery-target-creator");
+      const pool = createPool({ connectionString: appConnectionString(), max: 1 });
+      try {
+        const client = await pool.connect();
+        try {
+          const [principal] = (await client.query<{ bypass: boolean; superuser: boolean }>(
+            `SELECT rolbypassrls AS bypass, rolsuper AS superuser FROM pg_roles WHERE rolname = current_user`,
+          )).rows;
+          expect(principal).toEqual({ bypass: false, superuser: false });
+          await client.query("BEGIN");
+          try {
+            const sentinels = gucSentinels();
+            await setGucs(client, sentinels);
+            // The subject: without the block's own bypass the rows are invisible to this role.
+            expect((await client.query(`SELECT id FROM audit_delivery_targets WHERE id = ANY($1::uuid[])`, [all])).rows).toEqual([]);
+
+            const read = async () => {
+              await setTestBypass(client, ["audit_delivery_targets"]);
+              const rows = (await client.query<{ id: string; created_by_id: string | null }>(
+                `SELECT id, created_by_id FROM audit_delivery_targets WHERE id = ANY($1::uuid[])`, [all],
+              )).rows;
+              await setGucs(client, sentinels);
+              return Object.fromEntries(rows.map((r) => [r.id, r.created_by_id]));
+            };
+
+            const first = collectNotices(client);
+            await client.query(block);
+            first.stop();
+            expect(await readGucs(client)).toEqual(sentinels);
+            expect(first.messages).toContain(
+              "audit-delivery-target-creator backfill: 1 target(s) attributed from audit_logs, 1 from audit_outbox",
+            );
+            expect(await read()).toEqual(expected);
+
+            const second = collectNotices(client);
+            await client.query(block);
+            second.stop();
+            expect(second.messages).toContain(
+              "audit-delivery-target-creator backfill: 0 target(s) attributed from audit_logs, 0 from audit_outbox",
+            );
+            expect(await readGucs(client)).toEqual(sentinels);
+            expect(await read()).toEqual(expected);
+          } finally {
+            await client.query("ROLLBACK");
+          }
+        } finally {
+          client.release();
+        }
+      } finally {
+        await pool.end();
+      }
+
+      // Nothing committed.
+      const after = await sql<{ id: string; created_by_id: string | null }>(
+        `SELECT id, created_by_id FROM audit_delivery_targets WHERE id = ANY($1::uuid[])`, all,
+      );
+      expect(Object.fromEntries(after.map((r) => [r.id, r.created_by_id]))).toEqual({
+        [latestWins]: null, [systemOnly]: null, [otherTenantOnly]: null, [fromOutbox]: null, [badOutbox]: null, [nonNull]: kept.id, [none]: null,
       });
     });
   });

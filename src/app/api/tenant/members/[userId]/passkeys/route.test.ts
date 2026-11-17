@@ -87,6 +87,11 @@ const tx = {
   personalLogAccessGrant: containmentModel("personalLogAccessGrant", { targetUserId: "someone" }),
   tenantWebhook: containmentModel("tenantWebhook", { url: "https://hooks.example.com/in" }),
   adminVaultReset: containmentModel("adminVaultReset", { targetUserId: "someone" }),
+  passwordShare: {
+    ...containmentModel("passwordShare", { shareType: "ENTRY_SHARE" }),
+    fields: { maxViews: {} },
+  },
+  auditDeliveryTarget: containmentModel("auditDeliveryTarget", { kind: "WEBHOOK" }),
   emergencyAccessGrant: containmentModel("emergencyAccessGrant", { granteeId: "grantee-1" }),
 };
 
@@ -408,12 +413,14 @@ describe("DELETE /api/tenant/members/[userId]/passkeys", () => {
         breakglassGrantIds: [uuid(6)],
         tenantWebhookIds: [uuid(8)],
         vaultResetIds: [uuid(9)],
+        shareLinkIds: [uuid(10)],
+        auditDeliveryTargetIds: [uuid(11)],
         emergencyAccessGrantIds: [uuid(7)],
       },
     };
     const CONTAINMENT_MODELS = [
       "account", "scimToken", "serviceAccount", "serviceAccountToken", "mcpClient",
-      "mcpAccessToken", "mcpRefreshToken", "personalLogAccessGrant", "tenantWebhook", "adminVaultReset", "emergencyAccessGrant",
+      "mcpAccessToken", "mcpRefreshToken", "personalLogAccessGrant", "tenantWebhook", "adminVaultReset", "passwordShare", "auditDeliveryTarget", "emergencyAccessGrant",
     ] as const;
 
     it.each([
@@ -449,6 +456,8 @@ describe("DELETE /api/tenant/members/[userId]/passkeys", () => {
       ["an unknown top-level key", { unlinkAccountIds: [], revokeAll: true }],
       ["an unknown kind", { revoke: { webhookIds: [uuid(1)] } }],
       ["a webhook id that is not a uuid", { revoke: { tenantWebhookIds: ["x"] } }],
+      ["101 share link ids", { revoke: { shareLinkIds: Array.from({ length: 101 }, (_, i) => uuid(i)) } }],
+      ["a delivery target id that is not a uuid", { revoke: { auditDeliveryTargetIds: ["x"] } }],
       ["a non-object", ["x"]],
     ])("refuses %s with 400 before the step-up, and revokes nothing", async (_label, body) => {
       const res = await revokeAll(body);
@@ -489,6 +498,8 @@ describe("DELETE /api/tenant/members/[userId]/passkeys", () => {
           breakglassGrants: one,
           tenantWebhooks: one,
           vaultResets: one,
+          shareLinks: one,
+          auditDeliveryTargets: one,
           emergencyAccessGrants: one,
         },
         remaining: {
@@ -499,6 +510,8 @@ describe("DELETE /api/tenant/members/[userId]/passkeys", () => {
           breakglassGrants: 0,
           tenantWebhooks: 0,
           vaultResets: 0,
+          shareLinks: 0,
+          auditDeliveryTargets: 0,
           emergencyAccessGrants: 0,
         },
       });
@@ -513,6 +526,8 @@ describe("DELETE /api/tenant/members/[userId]/passkeys", () => {
         "personalLogAccessGrant",
         "tenantWebhook",
         "adminVaultReset",
+        "passwordShare",
+        "auditDeliveryTarget",
         "emergencyAccessGrant",
       ]);
       // The revoke-all row comes after every containment write, carrying the counts.
@@ -540,6 +555,8 @@ describe("DELETE /api/tenant/members/[userId]/passkeys", () => {
         "PERSONAL_LOG_ACCESS_REVOKE",
         "TENANT_WEBHOOK_DELETE",
         "ADMIN_VAULT_RESET_REVOKE",
+        "SHARE_REVOKE",
+        "AUDIT_DELIVERY_TARGET_DEACTIVATE",
         "EMERGENCY_ACCESS_REVOKE",
         "TENANT_MEMBER_PASSKEY_REVOKE_ALL",
         "TENANT_MEMBER_PASSKEY_REVOKE_ALL",
@@ -585,6 +602,7 @@ describe("DELETE /api/tenant/members/[userId]/passkeys", () => {
       ["breakglassGrantIds", "tenant:breakglass:request"],
       ["tenantWebhookIds", "tenant:webhook:manage"],
       ["vaultResetIds", "tenant:member:vaultReset"],
+      ["auditDeliveryTargetIds", "tenant:auditDelivery:manage"],
     ])("%s: refused 403 before the step-up without %s, allowed with it", async (key, permission) => {
       mockHasTenantPermission.mockImplementation((_role: string, p: string) => p !== permission);
       const refused = await revokeAll({ revoke: { [key]: [uuid(9)] } });
@@ -633,6 +651,7 @@ describe("DELETE /api/tenant/members/[userId]/passkeys", () => {
       ["breakglassGrants", "tenant:breakglass:request"],
       ["tenantWebhooks", "tenant:webhook:manage"],
       ["vaultResets", "tenant:member:vaultReset"],
+      ["auditDeliveryTargets", "tenant:auditDelivery:manage"],
     ])("omits %s without %s, lists it with it", async (kind, permission) => {
       mockHasTenantPermission.mockImplementation((_role: string, p: string) => p !== permission);
       const without = await (await list()).json();
@@ -642,6 +661,22 @@ describe("DELETE /api/tenant/members/[userId]/passkeys", () => {
       mockHasTenantPermission.mockReturnValue(true);
       const withIt = await (await list()).json();
       expect(withIt.createdFootholds).toHaveProperty(kind);
+    });
+
+    it("lists share links and delivery targets, and carries moreFootholds in the response shape", async () => {
+      const body = await (await list()).json();
+      expect(body.createdFootholds).toHaveProperty("shareLinks");
+      expect(body.createdFootholds).toHaveProperty("auditDeliveryTargets");
+      expect(body.moreFootholds).toEqual({});
+    });
+
+    it("reports the live rows beyond the listing of a capped kind", async () => {
+      const full = Array.from({ length: 100 }, (_, i) => ({ id: uuid(i), tenantId: "tenant-1", shareType: "TEXT", teamPasswordEntryId: null }));
+      tx.passwordShare.findMany.mockResolvedValueOnce(full);
+      tx.passwordShare.count.mockResolvedValueOnce(101);
+      const body = await (await list()).json();
+      expect(body.createdFootholds.shareLinks).toHaveLength(100);
+      expect(body.moreFootholds).toEqual({ shareLinks: 1 });
     });
 
     it("omits break-glass grants for an ADMIN actor", async () => {

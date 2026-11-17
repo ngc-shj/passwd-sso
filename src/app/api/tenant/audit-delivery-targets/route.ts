@@ -13,7 +13,6 @@ import {
   getCurrentMasterKeyVersion,
   getMasterKeyByVersion,
   encryptServerData,
-  decryptServerData,
 } from "@/lib/crypto/crypto-server";
 import { AuditDeliveryTargetKind } from "@prisma/client";
 import { randomUUID } from "node:crypto";
@@ -30,8 +29,11 @@ import {
   AUDIT_DELIVERY_REGION_MAX,
   AUDIT_DELIVERY_AWS_CREDENTIAL_MAX,
 } from "@/lib/validations/common";
+import { deliveryTargetAad, deliveryTargetEndpoint } from "@/lib/audit/audit-delivery-target-endpoint";
+import { lockFootholdWriter } from "@/lib/tenant/foothold-write-gate";
+import { footholdWriteErrorResponse } from "@/lib/http/lock-conflict-response";
 
-import { isSsrfSafeWebhookUrl as ssrfSafeUrl, SSRF_URL_VALIDATION_MESSAGE as ssrfMessage, maskUrlForDisplay } from "@/lib/url/url-validation";
+import { isSsrfSafeWebhookUrl as ssrfSafeUrl, SSRF_URL_VALIDATION_MESSAGE as ssrfMessage } from "@/lib/url/url-validation";
 
 // Sentinel thrown inside the locked transaction when the re-checked audit
 // delivery target count is at the cap. Mapped to the MAX_AUDIT_DELIVERY_TARGETS
@@ -92,47 +94,17 @@ async function handleGET(_req: NextRequest) {
     }),
   );
 
-  // Extract endpoint URL from the encrypted config so the list view can show
-  // it. Secrets (webhook secret, HEC token, S3 access keys) are NEVER included
-  // in the response — only the URL/endpoint, which is destination metadata
-  // and was already user-supplied at create time.
-  const targets = rows.map((row) => {
-    let endpoint: string | null = null;
-    try {
-      const masterKey = getMasterKeyByVersion(row.masterKeyVersion);
-      const aad = Buffer.concat([
-        Buffer.from(row.id.replace(/-/g, ""), "hex"),
-        Buffer.from(actor.tenantId.replace(/-/g, ""), "hex"),
-      ]);
-      const configJson = decryptServerData(
-        {
-          ciphertext: row.configEncrypted,
-          iv: row.configIv,
-          authTag: row.configAuthTag,
-        },
-        masterKey,
-        aad,
-      );
-      const config = JSON.parse(configJson) as { url?: string; endpoint?: string };
-      const raw = config.url ?? config.endpoint ?? null;
-      endpoint = raw ? maskUrlForDisplay(raw) : null;
-    } catch {
-      // Decrypt failure (missing master key version, AAD mismatch, corruption)
-      // — keep the row visible without the endpoint rather than 500-ing the
-      // whole list. The worker will surface the same error via lastError.
-      endpoint = null;
-    }
-    return {
-      id: row.id,
-      kind: row.kind,
-      isActive: row.isActive,
-      failCount: row.failCount,
-      lastError: row.lastError,
-      lastDeliveredAt: row.lastDeliveredAt,
-      createdAt: row.createdAt,
-      endpoint,
-    };
-  });
+  // Only the masked endpoint is exposed, never the secrets in the config.
+  const targets = rows.map((row) => ({
+    id: row.id,
+    kind: row.kind,
+    isActive: row.isActive,
+    failCount: row.failCount,
+    lastError: row.lastError,
+    lastDeliveredAt: row.lastDeliveredAt,
+    createdAt: row.createdAt,
+    endpoint: deliveryTargetEndpoint(row, actor.tenantId),
+  }));
 
   return NextResponse.json({ targets });
 }
@@ -166,15 +138,10 @@ async function handlePOST(req: NextRequest) {
   const { kind: _kind, ...configFields } = data;
   const configJson = JSON.stringify(configFields);
 
-  // Encrypt with AAD = targetId + tenantId (must match worker decryption).
   // Crypto stays OUTSIDE the locked tx below.
   const version = getCurrentMasterKeyVersion();
   const masterKey = getMasterKeyByVersion(version);
-  const aad = Buffer.concat([
-    Buffer.from(targetId.replace(/-/g, ""), "hex"),
-    Buffer.from(actor.tenantId.replace(/-/g, ""), "hex"),
-  ]);
-  const encrypted = encryptServerData(configJson, masterKey, aad);
+  const encrypted = encryptServerData(configJson, masterKey, deliveryTargetAad(targetId, actor.tenantId));
 
   // Serialize the cap check with the create under a per-tenant advisory lock so
   // two concurrent POSTs cannot both read count < MAX and both create, blowing
@@ -183,6 +150,11 @@ async function handlePOST(req: NextRequest) {
   let target;
   try {
     target = await withTenantRls(prisma, actor.tenantId, async (tx) => {
+      await lockFootholdWriter(tx, req, {
+        tenantId: actor.tenantId,
+        actorId: session.user.id,
+        permission: TENANT_PERMISSION.AUDIT_DELIVERY_MANAGE,
+      });
       await advisoryXactLock(tx, actor.tenantId);
       const existingCount = await tx.auditDeliveryTarget.count({
         where: { tenantId: actor.tenantId },
@@ -199,6 +171,7 @@ async function handlePOST(req: NextRequest) {
           configIv: encrypted.iv,
           configAuthTag: encrypted.authTag,
           masterKeyVersion: version,
+          createdById: session.user.id,
         },
       });
     });
@@ -208,6 +181,8 @@ async function handlePOST(req: NextRequest) {
         limit: `Maximum ${MAX_AUDIT_DELIVERY_TARGETS} audit delivery targets per tenant`,
       });
     }
+    const footholdResponse = footholdWriteErrorResponse(e);
+    if (footholdResponse) return footholdResponse;
     throw e;
   }
 

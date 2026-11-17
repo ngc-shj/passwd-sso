@@ -13,10 +13,17 @@ const {
   mockCreate: vi.fn(),
   mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockLogAudit: vi.fn(),
-  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: (tenantId: string) => unknown) => fn("tenant-1")),
+  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: (tenantId: string, tx: unknown) => unknown) =>
+    fn("tenant-1", { passwordShare: { create: mockCreate } }),
+  ),
+}));
+
+const { mockLockFootholdWriter } = vi.hoisted(() => ({
+  mockLockFootholdWriter: vi.fn(async () => new Map()),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/tenant/foothold-write-gate", () => ({ lockFootholdWriter: mockLockFootholdWriter }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordShare: { create: mockCreate },
@@ -47,11 +54,29 @@ vi.mock("@/lib/tenant-context", () => ({
 }));
 
 import { POST } from "./route";
+import { footholdGateCells } from "@/__tests__/helpers/foothold-gate-cells";
 
 describe("POST /api/sends", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockCheck.mockResolvedValue({ allowed: true });
+  });
+
+  footholdGateCells({
+    gate: mockLockFootholdWriter,
+    permission: null,
+    actorId: DEFAULT_SESSION.user.id,
+    tenantId: "tenant-1",
+    okStatus: 201,
+    arrange: () => {
+      mockAuth.mockResolvedValue(DEFAULT_SESSION);
+      mockCreate.mockResolvedValue({ id: "send-1", expiresAt: new Date(Date.now() + 86400_000) });
+    },
+    call: () =>
+      POST(createRequest("POST", "http://localhost/api/sends", {
+        body: { name: "My Send", text: "secret text", expiresIn: "1d" },
+      })),
+    assertNoWrite: () => expect(mockCreate).not.toHaveBeenCalled(),
   });
 
   it("creates text send and returns 201 with Cache-Control: no-store", async () => {

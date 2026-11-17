@@ -4,16 +4,26 @@ import { createRequest, parseResponse } from "../../helpers/request-builder";
 import { ENTRY_TYPE } from "@/lib/constants";
 
 const { mockAuth, mockCreate, mockFindMany, mockFindUnique, mockWithUserTenantRls, mockWithBypassRls, mockLogAuditInTx } = vi.hoisted(
-  () => ({
+  () => {
+    const mockCreate = vi.fn();
+    return {
     mockAuth: vi.fn(),
-    mockCreate: vi.fn(),
+    mockCreate,
     mockFindMany: vi.fn(),
     mockFindUnique: vi.fn(),
-    mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+    mockWithUserTenantRls: vi.fn(async (_userId: string, fn: (tenantId: string, tx: unknown) => unknown) =>
+      fn("tenant-1", { passwordShare: { create: mockCreate } }),
+    ),
     mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: (tx: unknown) => unknown) => fn({})),
     mockLogAuditInTx: vi.fn(),
-  })
+    };
+  }
 );
+
+const { mockLockFootholdWriter } = vi.hoisted(() => ({
+  mockLockFootholdWriter: vi.fn(async () => new Map()),
+}));
+vi.mock("@/lib/tenant/foothold-write-gate", () => ({ lockFootholdWriter: mockLockFootholdWriter }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 // Creator admission (#990) at the module boundary: admitted unless a test says otherwise.
@@ -94,6 +104,7 @@ vi.mock("@/lib/quota/resource-quotas", () => ({
 }));
 
 import { POST, GET } from "@/app/api/share-links/route";
+import { footholdGateCells } from "../../helpers/foothold-gate-cells";
 
 // Valid UUID v4 for test (matches z.string().uuid() validation)
 vi.mock("@/lib/quota/resource-quotas", () => ({
@@ -178,6 +189,59 @@ describe("POST /api/share-links", () => {
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
     expect(json.error).toBe("VALIDATION_ERROR");
+  });
+
+  describe("foothold write gate (personal entry)", () => {
+    footholdGateCells({
+      gate: mockLockFootholdWriter,
+      permission: null,
+      actorId: DEFAULT_SESSION.user.id,
+      tenantId: "tenant-1",
+      okStatus: 201,
+      arrange: () => {
+        mockAuth.mockResolvedValue(DEFAULT_SESSION);
+        mockFindUnique.mockResolvedValue({
+          userId: DEFAULT_SESSION.user.id,
+          entryType: ENTRY_TYPE.LOGIN,
+          tenantId: "tenant-1",
+        });
+        mockCreate.mockResolvedValue({ id: "share-1", expiresAt: new Date(Date.now() + 86400000) });
+      },
+      call: () =>
+        POST(
+          createRequest("POST", "http://localhost/api/share-links", {
+            body: { passwordEntryId: VALID_ENTRY_ID, data: { title: "Test", password: "secret" }, expiresIn: "1d" },
+          }) as never,
+        ),
+      assertNoWrite: () => expect(mockCreate).not.toHaveBeenCalled(),
+    });
+  });
+
+  describe("foothold write gate (team entry)", () => {
+    footholdGateCells({
+      gate: mockLockFootholdWriter,
+      permission: null,
+      actorId: DEFAULT_SESSION.user.id,
+      tenantId: "tenant-1",
+      okStatus: 201,
+      arrange: () => {
+        mockAuth.mockResolvedValue(DEFAULT_SESSION);
+        mockFindUnique.mockResolvedValue({ teamId: "team-123", tenantId: "tenant-1" });
+        mockCreate.mockResolvedValue({ id: "share-e2e", expiresAt: new Date(Date.now() + 86400000) });
+      },
+      call: () =>
+        POST(
+          createRequest("POST", "http://localhost/api/share-links", {
+            body: {
+              teamPasswordEntryId: VALID_ENTRY_ID,
+              encryptedShareData: { ciphertext: "client-encrypted", iv: "c".repeat(24), authTag: "d".repeat(32) },
+              entryType: ENTRY_TYPE.LOGIN,
+              expiresIn: "1d",
+            },
+          }) as never,
+        ),
+      assertNoWrite: () => expect(mockCreate).not.toHaveBeenCalled(),
+    });
   });
 
   it("creates a personal share link successfully", async () => {

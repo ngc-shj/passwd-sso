@@ -26,6 +26,7 @@ import { decryptServerData, getMasterKeyByVersion } from "@/lib/crypto/crypto-se
 import { warmShareMasterKeys } from "@/lib/crypto/share-master-keys";
 import { sanitizeErrorForStorage, sanitizeForExternalDelivery } from "@/lib/http/external-http";
 import { buildChainInput, computeCanonicalBytes, computeEventHash } from "@/lib/audit/audit-chain";
+import { deliveryTargetAad } from "@/lib/audit/audit-delivery-target-endpoint";
 import { sqlTable, trustedSql, renderSql } from "@/lib/prisma/raw-sql";
 // NOTE: @/lib/webhook-dispatcher is imported LAZILY inside processOneWebhookDelivery
 // (not at module scope) — it transitively pulls in the @/lib/prisma singleton,
@@ -781,6 +782,10 @@ export async function claimDeliveriesInTx(
          SELECT "id" FROM "audit_deliveries"
          WHERE "status" = 'PENDING'
            AND "next_retry_at" <= now()
+           AND EXISTS (
+             SELECT 1 FROM "audit_delivery_targets" t
+             WHERE t."id" = "audit_deliveries"."target_id" AND t."is_active"
+           )
          ORDER BY "created_at" ASC
          LIMIT $1
          FOR UPDATE SKIP LOCKED
@@ -841,10 +846,7 @@ async function processOneDelivery(
     // recorded like any other delivery error.
     await warmShareMasterKeys([delivery.target.masterKeyVersion]);
     const masterKey = getMasterKeyByVersion(delivery.target.masterKeyVersion);
-    const aad = Buffer.concat([
-      Buffer.from(delivery.target.id.replace(/-/g, ""), "hex"),
-      Buffer.from(delivery.target.tenantId.replace(/-/g, ""), "hex"),
-    ]);
+    const aad = deliveryTargetAad(delivery.target.id, delivery.target.tenantId);
     const configJson = decryptServerData(
       {
         ciphertext: delivery.target.configEncrypted,
@@ -1719,6 +1721,15 @@ export async function purgeRetention(
   const sentCutoff = new Date(Date.now() - retentionHours * MS_PER_HOUR);
   const failedCutoff = new Date(Date.now() - failedRetentionDays * MS_PER_DAY);
 
+  // Expire the parked backlog of deactivated targets before the SENT purge, so
+  // the outbox rows it pinned (purgeSentAgedInTx skips rows with a PENDING
+  // delivery) are purgeable in this same pass. Own tx and grant: see
+  // OUTBOX_DELIVERY_EXPIRY. Logs its own _logType; the count is not returned.
+  await prisma.$transaction(async (tx) => {
+    await setBypassGucs(tx, BYPASS_GRANT.OUTBOX_DELIVERY_EXPIRY);
+    return expireInactiveTargetDeliveriesInTx(tx, sentCutoff, limit);
+  });
+
   // Each branch's DELETE and its RETENTION_PURGED audit event commit
   // atomically in the SAME tx. A destructive delete must never succeed without
   // a matching audit record: if the FAILED-branch tx later throws, the
@@ -1759,6 +1770,63 @@ export async function purgeRetention(
   // (the SENT and FAILED DELETEs each carry their own `LIMIT $2`); cap
   // regression tests read them to assert the bound on their own call.
   return { sentPurged, failedPurged };
+}
+
+/**
+ * Move PENDING deliveries of a deactivated target that are older than `cutoff`
+ * to FAILED, each with its dead-letter audit row in the same tx (the loss
+ * record). The claim never takes such rows, so this bounds how long a parked
+ * backlog (and the outbox payload it pins) lives. Rows are selected by a
+ * positive join on `is_active = false`: an unreadable target is never taken as
+ * inactive. `FOR SHARE OF t` orders the pass against a concurrent PATCH
+ * re-activation (which holds the target row); `FOR UPDATE ... SKIP LOCKED` on
+ * the deliveries keeps overlapping passes disjoint. The target's failCount is
+ * untouched.
+ */
+export async function expireInactiveTargetDeliveriesInTx(
+  tx: Prisma.TransactionClient,
+  cutoff: Date,
+  limit: number,
+): Promise<number> {
+  await assertAuditWriteBypass(tx);
+  const rows = await tx.$queryRawUnsafe<
+    Array<{ id: string; tenant_id: string; target_id: string }>
+  >(
+    `WITH picked AS MATERIALIZED (
+         SELECT d."id" FROM "audit_deliveries" d
+         JOIN "audit_delivery_targets" t
+           ON t."id" = d."target_id" AND t."is_active" = false
+         WHERE d."status" = 'PENDING'
+           AND d."created_at" < $1
+         ORDER BY d."created_at" ASC
+         LIMIT $2
+         FOR UPDATE OF d SKIP LOCKED
+         FOR SHARE OF t
+       )
+       UPDATE "audit_deliveries"
+       SET "status" = 'FAILED',
+           "last_error" = 'target inactive',
+           "processing_started_at" = NULL
+       WHERE "id" IN (SELECT "id" FROM picked)
+       AND "status" = 'PENDING'
+       RETURNING "id", "tenant_id", "target_id"`,
+    cutoff,
+    limit,
+  );
+  for (const row of rows) {
+    await writeDirectAuditLogInTx(tx, row.tenant_id, AUDIT_ACTION.AUDIT_DELIVERY_DEAD_LETTER, {
+      deliveryId: row.id,
+      targetId: row.target_id,
+      error: "target inactive",
+    });
+  }
+  if (rows.length > 0) {
+    getLogger().info(
+      { count: rows.length, _logType: "delivery.expired_inactive_target" },
+      "expired deliveries of inactive targets",
+    );
+  }
+  return rows.length;
 }
 
 /**

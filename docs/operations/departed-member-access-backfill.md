@@ -630,6 +630,44 @@ has approved. SCIM tokens and MCP clients whose creator left are flagged in thei
 lists, not revoked: review them there, and delete or deactivate what should not
 stay.
 
+Three more kinds are left to the admin rather than ended by a departure, and the
+member containment dialog (Members → passkeys → revoke all) lists them with the
+others:
+
+- The member's live share links and Sends in the tenant (personal and team-entry
+  links), revoked on request. A revoked link stops being served at once.
+- The audit delivery targets the member created, deactivated on request. A
+  departure never pauses them: they carry the tenant's security monitoring.
+  What was queued for a deactivated target is parked, not sent (next section).
+- A link to the tenant audit log filtered to the member's actions over the last
+  30 days, opened in a new tab; widen the date range there to look further back.
+  The tenant audit-log download honours the same filter.
+
+Delivery targets with no recorded creator (`created_by_id` NULL: created before
+the column and attributed by no audit row on upgrade) are not listed: find them
+in the audit delivery settings. A listing stops at 100
+rows per kind and says how many more there are; revoke, then reopen the dialog
+for the rest. Containment acts only in the admin's tenant.
+
+## Deactivated audit delivery targets: parked backlog and expiry
+
+The audit-outbox worker delivers only to active targets. When a target is
+deactivated (by an admin, or by a member's containment), its `PENDING`
+deliveries, including retry rows, stay in `audit_deliveries` unchanged and
+unsent; fan-out creates no new ones. Re-activating the target delivers what is
+still parked on the next claim.
+
+A parked row does not live forever. The worker's retention pass moves `PENDING`
+deliveries of an inactive target that are older than the outbox retention window
+(`OUTBOX_RETENTION_HOURS`) to `FAILED` with `last_error = 'target inactive'`, and
+writes one `AUDIT_DELIVERY_DEAD_LETTER` row per delivery in the same transaction
+(metadata `deliveryId`, `targetId`, `error: "target inactive"`). That row is the
+record of the loss: those events are not delivered to that target even if it is
+re-activated afterwards (only events from then on are). The target's `failCount`
+is not touched. The pass also logs one `_logType: "delivery.expired_inactive_target"`
+line with the count, at info level, so a deliberate deactivation does not page
+the `delivery.dead_lettered` alert (see `alerts.md`).
+
 ## What prevents a recurrence, and its limits
 
 Departures end memberships because every departure writer lives in

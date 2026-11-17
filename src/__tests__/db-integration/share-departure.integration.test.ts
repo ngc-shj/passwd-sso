@@ -94,6 +94,7 @@ import { ShareProtectedContent } from "@/components/share/share-protected-conten
 import { POST as verifyAccess } from "@/app/api/share-links/verify-access/route";
 import { GET as shareContent } from "@/app/api/share-links/[id]/content/route";
 import { GET as shareDownload } from "@/app/s/[token]/download/route";
+import { requestWithSession, seedSession } from "./session-request";
 import { POST as createShareLink, GET as listShareLinks } from "@/app/api/share-links/route";
 import { GET as listMine } from "@/app/api/share-links/mine/route";
 import { DELETE as revokeShareLink } from "@/app/api/share-links/[id]/route";
@@ -467,12 +468,16 @@ describe("share links across a creator's departure — real-DB integration", () 
     if (removed) await remove(t.teamId, t.owner, t.creatorRow);
     stalePermission.membership = { id: t.creatorRow, role: "MEMBER", teamId: t.teamId, userId: t.creator };
     mockAuth.mockResolvedValue({ user: { id: t.creator } });
+    // The foothold gate re-reads the request's own session row.
+    const cookie = await seedSession(ctx, t.creator, tenantId);
     const res = await createShareLink(
-      jsonRequest("http://localhost/api/share-links", "POST", {
-        teamPasswordEntryId: t.entryId,
-        encryptedShareData: { ciphertext: hex(32), iv: hex(12), authTag: hex(16) },
-        entryType: "LOGIN",
-        expiresIn: "1d",
+      requestWithSession(cookie, "http://localhost/api/share-links", {
+        body: {
+          teamPasswordEntryId: t.entryId,
+          encryptedShareData: { ciphertext: hex(32), iv: hex(12), authTag: hex(16) },
+          entryType: "LOGIN",
+          expiresIn: "1d",
+        },
       }),
     );
     expect(res.status).toBe(201);

@@ -5,6 +5,7 @@ import {
   VALID_ACTOR_TYPES,
   parseAuditLogParams,
   parseActorType,
+  parseActorUserId,
   buildAuditLogActionFilter,
   buildAuditLogDateFilter,
   paginateResult,
@@ -66,6 +67,25 @@ describe("parseActorType", () => {
   it("returns undefined for empty string", () => {
     expect(parseActorType(new URLSearchParams({ actorType: "" }))).toBeUndefined();
   });
+});
+
+describe("parseActorUserId", () => {
+  const ID = "123e4567-e89b-42d3-a456-426614174000";
+
+  it("returns the canonical uuid", () => {
+    expect(parseActorUserId(new URLSearchParams({ userId: ID }))).toEqual({ userId: ID });
+  });
+
+  it("returns no filter when absent", () => {
+    expect(parseActorUserId(new URLSearchParams())).toEqual({});
+  });
+
+  it.each(["", "not-a-uuid", `${ID}x`, ` ${ID}`, "123e4567e89b42d3a456426614174000"])(
+    "flags %j as invalid",
+    (raw) => {
+      expect(parseActorUserId(new URLSearchParams({ userId: raw }))).toEqual({ invalid: true });
+    },
+  );
 });
 
 describe("parseAuditLogParams", () => {

@@ -22,9 +22,16 @@
  *    table slot) are sites too: an undecidable spelling is refused, not guessed.
  *    scripts/ and prisma/ are OUT of the writer scope: they run with an
  *    operator's authority, not a member's session.
- * 3. Model set: every schema model with a tenantId and a relation to User
- *    other than its own subject `userId` is a FOOTHOLD_MODEL value or a keyed
- *    "not containable" entry with a reason.
+ * 3. Model set, name-agnostic: a schema model with a tenantId is in the class
+ *    when it has a relation to User other than its own subject `userId`, or a
+ *    scalar uuid column that no relation names (an FK-less column). Every such
+ *    column is keyed `Model.field` in FK_LESS_UUID as "creator" (its model must
+ *    then be a FOOTHOLD_MODEL value or a keyed "not containable" entry) or with
+ *    the reason it attributes no authority to a user. Unkeyed and stale keys fail.
+ *    Only `@db.Uuid` String scalars are candidates: every user reference in this
+ *    schema is a uuid column, and widening to any String would key names, URLs
+ *    and hashes. A creator column declared without `@db.Uuid` would escape —
+ *    accepted boundary.
  *
  * Verified without a Program (ts-morph in memory): names are read from syntax,
  * so a delegate reached through a type-erased alias the spelling rules cannot
@@ -162,6 +169,26 @@ const WRITER_EXEMPT: WriterExempt = {
     "C7 containment: revokes the contained member's break-glass grants",
   "src/lib/tenant/member-containment.ts::containMemberInTx::adminVaultReset.updateManyAndReturn":
     "C7 containment: revokes the contained member's pending vault resets",
+  "src/lib/tenant/member-containment.ts::containMemberInTx::passwordShare.updateManyAndReturn":
+    "containment: revokes the contained member's share links and Sends (sets revokedAt only)",
+  "src/lib/tenant/member-containment.ts::containMemberInTx::auditDeliveryTarget.updateManyAndReturn":
+    "containment: deactivates the contained member's audit delivery targets (isActive false only)",
+  "src/app/api/admin/rotate-master-key/[rotationId]/execute/route.ts::handlePOST::passwordShare.updateMany":
+    "operator master-key re-encryption of existing share ciphertext; creates no share, runs on an operator token",
+  "src/app/api/share-links/[id]/content/route.ts::handleGET::sql:UPDATE:password_shares":
+    "view counting on a share being read (view_count); creates and revokes nothing",
+  "src/app/s/[token]/download/route.ts::GET::sql:UPDATE:password_shares":
+    "view counting on a Send being downloaded (view_count); creates and revokes nothing",
+  "src/app/s/[token]/page.tsx::SharePage::sql:UPDATE:password_shares":
+    "view counting on a share being opened (view_count); creates and revokes nothing",
+  "src/app/api/share-links/[id]/route.ts::handleDELETE::passwordShare.updateMany":
+    "revocation: only sets revokedAt, which is what containment does too",
+  "src/auth.ts::claimedTenantMembership::passwordShare.updateMany":
+    "bootstrap tenantId move of the sole member's own shares into their new tenant; no share is created",
+  "src/workers/audit-outbox-worker.ts::processOneDelivery::auditDeliveryTarget.update":
+    "delivery health bookkeeping (lastDeliveredAt, failCount, isActive); creates no target",
+  "src/workers/audit-outbox-worker.ts::recordDeliveryError::auditDeliveryTarget.update":
+    "delivery health bookkeeping (failCount, lastError, isActive); creates no target",
   "src/lib/webhook-dispatcher.ts::dispatchTenantWebhook::tenantWebhook.update":
     "delivery health bookkeeping (lastDeliveredAt, failCount, isActive); creates no webhook",
   "src/workers/audit-outbox-worker.ts::onWebhookDeliverySuccess::tenantWebhook.update":
@@ -189,7 +216,36 @@ const NOT_CONTAINABLE: NotContainable = {
   Attachment: "encrypted entry attachment; content, not authority",
   AccessRequest: "the issued token goes to the approver, not the requester's creator relation",
   MasterKeyRotation: "operator-driven master-key rotation; not a member's foothold",
-  PasswordShare: "share links minted by members: follow-up SC2",
+  TeamWebhook: "team domain: paused at delivery once its creator lost team authority, #1043",
+};
+
+/**
+ * Every uuid scalar of a tenant model that no relation names, keyed
+ * `Model.field`: "creator" for a column recording who made the row (the model
+ * must then be classified above), otherwise the reason it attributes no
+ * authority to a user.
+ */
+const FK_LESS_UUID: Readonly<Record<string, string>> = {
+  "TenantWebhook.createdById": "creator",
+  "TeamWebhook.createdById": "creator",
+  "AuditDeliveryTarget.createdById": "creator",
+  "ExtensionToken.familyId": "rotation family id grouping one token's refresh chain; names no user",
+  "McpRefreshToken.familyId": "rotation family id grouping one token's refresh chain; names no user",
+  "TeamPasswordEntry.itemKeyId": "id of the item key that wraps the entry; a key reference, not a user",
+  "TeamPasswordEntryHistory.itemKeyId": "id of the item key that wraps the history row; a key reference, not a user",
+  "Attachment.cekItemKeyId": "id of the item key that wraps the attachment key; a key reference, not a user",
+  "AuditLog.userId": "the actor recorded for provenance; the row is a record, not a credential that acts",
+  "AuditLog.outboxId": "id of the outbox row the log was drained from; names no user",
+  "AuditDelivery.outboxId": "id of the outbox row being delivered; names no user",
+  "WebhookDelivery.outboxId": "id of the outbox row being delivered; names no user",
+  "WebhookDelivery.teamId": "destination team of a delivery record; names no user",
+  "AccessRequest.grantedTokenId": "id of the token issued on approval; names no user",
+  "McpAuthorizationCode.userId": "token subject: authenticates as that user and is revoked with their auth artifacts",
+  "McpAuthorizationCode.serviceAccountId": "token subject: authenticates as that service account, not a creator link",
+  "McpAccessToken.userId": "token subject: authenticates as that user and is revoked with their auth artifacts",
+  "McpAccessToken.serviceAccountId": "token subject: authenticates as that service account, not a creator link",
+  "McpRefreshToken.userId": "token subject: authenticates as that user and is revoked with their auth artifacts",
+  "McpRefreshToken.serviceAccountId": "token subject: authenticates as that service account, not a creator link",
 };
 
 // ─── Schema and model map ─────────────────────────────────
@@ -202,6 +258,8 @@ interface SchemaModel {
   otherUserRelations: string[];
   /** Fields typed as another model: field name -> model name. */
   fieldModels: Map<string, string>;
+  /** Uuid String scalars (other than id / tenantId) that no relation's `fields` names. */
+  fkLessUuids: string[];
 }
 
 function parseSchema(text: string): SchemaModel[] {
@@ -211,8 +269,10 @@ function parseSchema(text: string): SchemaModel[] {
   while ((m = re.exec(text))) {
     const lines = m[2].split("\n").map((l) => l.trim());
     const model: SchemaModel = {
-      name: m[1], table: null, hasTenantId: false, otherUserRelations: [], fieldModels: new Map(),
+      name: m[1], table: null, hasTenantId: false, otherUserRelations: [], fieldModels: new Map(), fkLessUuids: [],
     };
+    const relationFks = new Set<string>();
+    const uuidScalars: string[] = [];
     for (const line of lines) {
       const map = line.match(/^@@map\("([^"]+)"\)/);
       if (map) model.table = map[1];
@@ -220,11 +280,20 @@ function parseSchema(text: string): SchemaModel[] {
       const field = line.match(/^(\w+)\s+(\w+)(\[\]|\?)?\s*(.*)$/);
       if (!field) continue;
       model.fieldModels.set(field[1], field[2]);
+      const fks = field[4].match(/@relation\([^)]*fields:\s*\[([^\]]*)\]/);
+      if (fks) for (const fk of fks[1].split(",")) relationFks.add(fk.trim());
+      if (
+        field[2] === "String" && field[3] !== "[]" && /@db\.Uuid/.test(field[4]) && !/@id\b/.test(field[4]) &&
+        field[1] !== "id" && field[1] !== "tenantId"
+      ) {
+        uuidScalars.push(field[1]);
+      }
       if (field[2] === "User") {
         const fk = field[4].match(/fields:\s*\[(\w+)\]/);
         if (fk && fk[1] !== "userId") model.otherUserRelations.push(field[1]);
       }
     }
+    model.fkLessUuids = uuidScalars.filter((f) => !relationFks.has(f));
     models.push(model);
   }
   return models;
@@ -477,7 +546,9 @@ function analyze(files: ReadonlyMap<string, string>, ctx: FootholdContext, opts:
         const parent = access.getParent();
         const isCallee =
           Node.isPropertyAccessExpression(parent) && parent.getExpression() === access && DELEGATE_METHODS.has(parent.getName());
-        if (!isCallee) addWriter(access, `alias:${access.getName()}`, "alias");
+        // `tx.model.fields.<column>` is a field reference (a column compared to another): it cannot write.
+        const isFieldRef = Node.isPropertyAccessExpression(parent) && parent.getExpression() === access && parent.getName() === "fields";
+        if (!isCallee && !isFieldRef) addWriter(access, `alias:${access.getName()}`, "alias");
       }
       for (const el of file.getDescendantsOfKind(SyntaxKind.ElementAccessExpression)) {
         if (!CLIENT_RECEIVER.test(el.getExpression().getText())) continue;
@@ -565,17 +636,35 @@ function evaluateWriters(analysis: Analysis, exempt: WriterExempt): string[] {
   return problems;
 }
 
-function evaluateModelSet(schema: SchemaModel[], delegates: string[], notContainable: NotContainable): string[] {
-  const problems = checkReasons("not-containable entry", { ...notContainable });
+function evaluateModelSet(
+  schema: SchemaModel[],
+  delegates: string[],
+  notContainable: NotContainable,
+  fkLessUuid: Readonly<Record<string, string>> = {},
+): string[] {
+  const problems = [
+    ...checkReasons("not-containable entry", { ...notContainable }),
+    ...checkReasons("FK-less uuid key", Object.fromEntries(Object.entries(fkLessUuid).filter(([, v]) => v !== "creator"))),
+  ];
   const footholdModels = new Set(delegates.map(upperFirst));
-  const derived = new Set(schema.filter((m) => m.hasTenantId && m.otherUserRelations.length > 0).map((m) => m.name));
   const known = new Set(schema.map((m) => m.name));
+
+  const candidates = new Set(
+    schema.filter((m) => m.hasTenantId).flatMap((m) => m.fkLessUuids.map((f) => `${m.name}.${f}`)),
+  );
+  for (const key of candidates) if (!(key in fkLessUuid)) problems.push(`unkeyed FK-less uuid column: ${key}`);
+  for (const key of Object.keys(fkLessUuid)) if (!candidates.has(key)) problems.push(`stale FK-less uuid key: ${key}`);
+
+  const derived = new Set([
+    ...schema.filter((m) => m.hasTenantId && m.otherUserRelations.length > 0).map((m) => m.name),
+    ...Object.entries(fkLessUuid).filter(([key, v]) => v === "creator" && candidates.has(key)).map(([key]) => key.split(".")[0]),
+  ]);
   for (const name of derived) {
     if (!footholdModels.has(name) && !(name in notContainable)) problems.push(`schema model neither in FOOTHOLD_MODEL nor not-containable: ${name}`);
   }
   for (const name of footholdModels) if (!known.has(name)) problems.push(`FOOTHOLD_MODEL value is not a schema model: ${name}`);
   for (const name of Object.keys(notContainable)) {
-    if (!derived.has(name)) problems.push(`stale not-containable entry (no tenantId + non-subject User relation): ${name}`);
+    if (!derived.has(name)) problems.push(`stale not-containable entry (not a creator-bearing tenant model): ${name}`);
     if (footholdModels.has(name)) problems.push(`model is both in FOOTHOLD_MODEL and not-containable: ${name}`);
   }
   return problems;
@@ -613,7 +702,7 @@ describe("foothold member set (real tree)", () => {
   });
 
   it("covers every schema model with a tenantId and a non-subject User relation", () => {
-    expect(evaluateModelSet(schema, delegates, NOT_CONTAINABLE)).toEqual([]);
+    expect(evaluateModelSet(schema, delegates, NOT_CONTAINABLE, FK_LESS_UUID)).toEqual([]);
   });
 
   it("finds the sites it is meant to find", () => {
@@ -679,6 +768,11 @@ describe("foothold member set (positive controls)", () => {
   it("fails a destructured delegate", () => {
     const source = `export async function POST(tx: any) { const { scimToken } = tx; await scimToken.create({ data: {} }); }`;
     expect(run(source)).toEqual(["unclassified foothold write (destructure): src/fixture.ts::POST::destructure:scimToken"]);
+  });
+
+  it("does not take a field reference of a foothold delegate for an alias", () => {
+    const source = `export async function list(tx: any) { return tx.scimToken.findMany({ where: { a: tx.scimToken.fields.b } }); }`;
+    expect(run(source)).toEqual([]);
   });
 
   it("fails an aliased delegate", () => {
@@ -826,7 +920,70 @@ model Own {
   it("fails a not-containable entry without a reason and a stale one", () => {
     expect(evaluateModelSet(fixture, [], { Thing: "", Own: "subject-bound only, so stale here" })).toEqual([
       "not-containable entry without a reason: Thing",
-      "stale not-containable entry (no tenantId + non-subject User relation): Own",
+      "stale not-containable entry (not a creator-bearing tenant model): Own",
     ]);
+  });
+});
+
+describe("foothold member set (FK-less uuid positive controls)", () => {
+  const fkLess = parseSchema(`model Loose {
+  id String @id @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  createdById String? @map("created_by_id") @db.Uuid
+  keyId String @map("key_id") @db.Uuid
+  @@map("loose")
+}`);
+  const notCandidates = parseSchema(`model Linked {
+  id String @id @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  createdById String @map("created_by_id") @db.Uuid
+  createdBy User @relation(fields: [createdById], references: [id])
+}
+model Named {
+  id String @id @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  title String
+  slug String @unique
+}
+model Global {
+  id String @id @db.Uuid
+  createdById String @db.Uuid
+}`);
+
+  it("fails an FK-less uuid column no key names", () => {
+    expect(evaluateModelSet(fkLess, [], {}, {})).toEqual([
+      "unkeyed FK-less uuid column: Loose.createdById",
+      "unkeyed FK-less uuid column: Loose.keyId",
+    ]);
+  });
+
+  it("fails a creator key whose model is classified nowhere, passes it once listed or not containable", () => {
+    const keys = { "Loose.createdById": "creator", "Loose.keyId": "a key reference, names no user" };
+    expect(evaluateModelSet(fkLess, [], {}, keys)).toEqual(["schema model neither in FOOTHOLD_MODEL nor not-containable: Loose"]);
+    expect(evaluateModelSet(fkLess, ["loose"], {}, keys)).toEqual([]);
+    expect(evaluateModelSet(fkLess, [], { Loose: "a creator column on a content model" }, keys)).toEqual([]);
+  });
+
+  it("does not require a model to be classified for a column keyed with a non-creator reason", () => {
+    const keys = { "Loose.createdById": "recorded for provenance only", "Loose.keyId": "a key reference, names no user" };
+    expect(evaluateModelSet(fkLess, [], {}, keys)).toEqual([]);
+  });
+
+  it("fails a stale key and a key without a reason", () => {
+    const keys = { "Loose.createdById": "creator", "Loose.keyId": "", "Ghost.createdById": "creator" };
+    expect(evaluateModelSet(fkLess, ["loose"], {}, keys)).toEqual([
+      "FK-less uuid key without a reason: Loose.keyId",
+      "stale FK-less uuid key: Ghost.createdById",
+    ]);
+  });
+
+  it("takes neither an FK column, a non-uuid String, nor a model without a tenantId for a candidate", () => {
+    expect(notCandidates.map((m) => m.fkLessUuids)).toEqual([[], [], ["createdById"]]);
+    expect(evaluateModelSet(notCandidates, ["linked"], {}, {})).toEqual([]);
+  });
+
+  it("derives the real schema's candidates, and the K5/K7 creator columns are among them", () => {
+    const candidates = schema.filter((m) => m.hasTenantId).flatMap((m) => m.fkLessUuids.map((f) => `${m.name}.${f}`));
+    expect(candidates).toEqual(expect.arrayContaining(["TenantWebhook.createdById", "TeamWebhook.createdById", "AuditDeliveryTarget.createdById"]));
   });
 });

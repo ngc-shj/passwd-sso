@@ -422,3 +422,29 @@ describe("useAuditLogs — formatDate", () => {
     expect(result.current.formatDate("2024-01-01T00:00:00Z")).toBe("2024-01-01T00:00:00Z");
   });
 });
+
+describe("useAuditLogs — initialDateFrom", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("seeds dateFrom and sends it as an ISO from param on the first fetch", async () => {
+    const { fetchApi } = await import("@/lib/url-helpers");
+    const { result } = renderHook(() =>
+      useAuditLogs(makeConfig({ initialDateFrom: "2026-05-01" })),
+    );
+    await act(async () => {});
+
+    expect(result.current.dateFrom).toBe("2026-05-01");
+    const url = String(vi.mocked(fetchApi).mock.calls[0][0]);
+    expect(new URLSearchParams(url.split("?")[1]).get("from")).toBe(
+      new Date("2026-05-01").toISOString(),
+    );
+  });
+
+  it("starts empty without initialDateFrom", async () => {
+    const { result } = renderHook(() => useAuditLogs(makeConfig()));
+    await act(async () => {});
+    expect(result.current.dateFrom).toBe("");
+  });
+});

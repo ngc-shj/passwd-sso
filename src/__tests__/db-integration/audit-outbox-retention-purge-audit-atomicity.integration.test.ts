@@ -236,10 +236,11 @@ describe("audit-outbox retention purge — per-branch atomic audit emission (Fin
     const failedId = await insertFailedAgedRow();
 
     // Thin test-side proxy over the real Prisma client. purgeRetention issues
-    // its branch transactions as sequential $transaction calls: SENT first,
-    // FAILED second, then a delivery-purge tx third. We let the FIRST call
-    // (SENT branch) run against the real client so it commits normally, then
-    // reject the SECOND call (FAILED branch) so its tx never commits. This
+    // its branch transactions as sequential $transaction calls: the
+    // inactive-target expiry first, then SENT, FAILED, then a delivery-purge
+    // tx. We let the first two calls (expiry, SENT branch) run against the real
+    // client so they commit normally, then reject the THIRD call (FAILED
+    // branch) so its tx never commits. This
     // forces exactly the partial-failure scenario Finding 1 guards WITHOUT
     // touching any production code.
     let txCall = 0;
@@ -249,7 +250,7 @@ describe("audit-outbox retention purge — per-branch atomic audit emission (Fin
         if (prop === "$transaction") {
           return (...args: unknown[]) => {
             txCall += 1;
-            if (txCall === 2) {
+            if (txCall === 3) {
               // FAILED-branch tx — reject before it can DELETE/commit.
               return Promise.reject(failedBranchError);
             }

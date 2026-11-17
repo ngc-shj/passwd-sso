@@ -43,6 +43,8 @@ export interface UseAuditLogsConfig {
   downloadFilename: "audit-logs" | "team-audit-logs" | "tenant-audit-logs";
   actionGroups: readonly ActionGroupDef[];
   buildExtraParams?: () => URLSearchParams;
+  // Seeds the "from" date filter on first render (YYYY-MM-DD)
+  initialDateFrom?: string;
   resolveEntryNames?: (data: unknown) => Promise<Map<string, string>>;
   // Called on BOTH initial fetch AND handleLoadMore
   onDataReceived?: (data: unknown) => void;
@@ -100,7 +102,7 @@ export function useAuditLogs(config: UseAuditLogsConfig): UseAuditLogsReturn {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [selectedActions, setSelectedActions] = useState<Set<AuditActionValue>>(new Set());
   const [actionSearch, setActionSearch] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
+  const [dateFrom, setDateFrom] = useState(config.initialDateFrom ?? "");
   const [dateTo, setDateTo] = useState("");
   const [downloading, setDownloading] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);

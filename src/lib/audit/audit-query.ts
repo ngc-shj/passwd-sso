@@ -3,6 +3,7 @@
 import { AUDIT_ACTION_VALUES } from "@/lib/constants";
 import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { CURSOR_ID_RE } from "@/lib/validations/common";
+import { UUID_RE } from "@/lib/constants/app";
 import type { AuditAction } from "@prisma/client";
 
 /** Pre-built set of all valid audit action strings for O(1) membership checks. */
@@ -15,6 +16,19 @@ export const VALID_ACTOR_TYPES: (typeof ACTOR_TYPE)[keyof typeof ACTOR_TYPE][] =
 export function parseActorType(searchParams: URLSearchParams): (typeof ACTOR_TYPE)[keyof typeof ACTOR_TYPE] | undefined {
   const raw = searchParams.get("actorType");
   return VALID_ACTOR_TYPES.find((t) => t === raw);
+}
+
+/**
+ * Parses the optional `userId` actor filter. Absent → no filter; anything but a
+ * canonical uuid → `{ invalid: true }` (the caller answers 400).
+ */
+export function parseActorUserId(
+  searchParams: URLSearchParams,
+): { userId?: string } | { invalid: true } {
+  const raw = searchParams.get("userId");
+  if (raw === null) return {};
+  if (!UUID_RE.test(raw)) return { invalid: true };
+  return { userId: raw };
 }
 
 /**

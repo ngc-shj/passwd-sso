@@ -11,17 +11,22 @@ const { mockAuth, mockCreate, mockAggregate, mockUserFindUnique, mockCheck, mock
     mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
     mockLogAudit: vi.fn(),
     mockFileTypeFromBuffer: vi.fn(),
-    mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+    mockWithUserTenantRls: vi.fn(async (_userId: string, fn: (tenantId: string, tx: unknown) => unknown) =>
+      // The callback's tx takes the per-user pg_advisory_xact_lock, then the aggregate+create.
+      fn("tenant-1", { passwordShare: { create: mockCreate, aggregate: mockAggregate }, $executeRaw: vi.fn().mockResolvedValue(1) }),
+    ),
   }));
 
+const { mockLockFootholdWriter } = vi.hoisted(() => ({
+  mockLockFootholdWriter: vi.fn(async () => new Map()),
+}));
+
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/tenant/foothold-write-gate", () => ({ lockFootholdWriter: mockLockFootholdWriter }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordShare: { create: mockCreate, aggregate: mockAggregate },
     user: { findUnique: mockUserFindUnique },
-    // The aggregate+create run inside a withUserTenantRls callback that first
-    // acquires a pg_advisory_xact_lock via prisma.$executeRaw.
-    $executeRaw: vi.fn().mockResolvedValue(1),
   },
 }));
 vi.mock("@/lib/crypto/crypto-server", () => ({
@@ -58,6 +63,7 @@ vi.mock("file-type", () => ({
 }));
 
 import { POST } from "@/app/api/sends/file/route";
+import { footholdGateCells } from "../../helpers/foothold-gate-cells";
 
 function createFormData(overrides: Record<string, unknown> = {}): FormData {
   const fd = new FormData();
@@ -86,6 +92,40 @@ describe("POST /api/sends/file", () => {
     mockCheck.mockResolvedValue({ allowed: true });
     mockFileTypeFromBuffer.mockResolvedValue(undefined); // text files
     mockAggregate.mockResolvedValue({ _sum: { sendSizeBytes: 0 } });
+  });
+
+  footholdGateCells({
+    gate: mockLockFootholdWriter,
+    permission: null,
+    actorId: DEFAULT_SESSION.user.id,
+    tenantId: "tenant-1",
+    okStatus: 201,
+    arrange: () => {
+      mockAuth.mockResolvedValue(DEFAULT_SESSION);
+      mockCreate.mockResolvedValue({ id: "send-file-1", expiresAt: new Date(Date.now() + 86400_000) });
+    },
+    call: async () =>
+      POST((await createMultipartRequest("http://localhost/api/sends/file", createFormData())) as never),
+    assertNoWrite: () => expect(mockCreate).not.toHaveBeenCalled(),
+  });
+
+  it("takes the gate before the per-user advisory lock and the quota read", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockCreate.mockResolvedValue({ id: "send-file-1", expiresAt: new Date(Date.now() + 86400_000) });
+    const order: string[] = [];
+    mockLockFootholdWriter.mockImplementationOnce(async () => {
+      order.push("gate");
+      return new Map();
+    });
+    mockAggregate.mockImplementationOnce(async () => {
+      order.push("aggregate");
+      return { _sum: { sendSizeBytes: 0 } };
+    });
+
+    const res = await POST((await createMultipartRequest("http://localhost/api/sends/file", createFormData())) as never);
+
+    expect(res.status).toBe(201);
+    expect(order).toEqual(["gate", "aggregate"]);
   });
 
   it("returns 401 when not authenticated", async () => {

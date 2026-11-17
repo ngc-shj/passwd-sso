@@ -391,6 +391,27 @@ fix the destination, then requeue.
 
 Datadog: `{ _logType="delivery.dead_lettered" OR _logType="webhook_delivery.dead_lettered" }`
 
+## `delivery.expired_inactive_target`
+
+Emitted by `src/workers/audit-outbox-worker.ts`, at **info**, by the retention
+pass when it expires `PENDING` deliveries of a deactivated audit delivery target
+that are older than the outbox retention window: the rows move to `FAILED` with
+`last_error = 'target inactive'`, each with an `AUDIT_DELIVERY_DEAD_LETTER` row
+carrying `error: "target inactive"`. The line carries `count`. It is the
+expected outcome of a deliberate deactivation, so it is not a fault and is
+deliberately not `delivery.dead_lettered`.
+
+**Severity**: informational
+**Trigger**: none. Check it when events stopped reaching a destination.
+**Recovery**: none needed; re-activating the target delivers only events from
+then on, the expired ones are not replayed.
+
+The catch-all query above matches `delivery\..*` with no level filter, so it
+matches this line too. Filter on level (error and warn) in that rule, or
+exclude `delivery.expired_inactive_target`.
+
+Datadog: `{ _logType="delivery.expired_inactive_target" }`
+
 ## `outbox.depth.alert`
 
 Emitted by `src/workers/audit-outbox-worker.ts` when the

@@ -4,10 +4,11 @@ import { logAuditBulkInTx, tenantAuditBase } from "@/lib/audit/audit";
 import type { AuditLogParams } from "@/lib/audit/audit-payload";
 import { hasTenantPermission, type TenantPermission } from "@/lib/auth/access/tenant-permissions";
 import { transition } from "@/lib/emergency-access/emergency-access-state";
-import { AUDIT_ACTION, AUDIT_TARGET_TYPE, EA_ACTOR, EA_STATUS, TENANT_ROLE } from "@/lib/constants";
+import { AUDIT_ACTION, AUDIT_TARGET_TYPE, EA_ACTOR, EA_STATUS, SHARE_TYPE, TENANT_ROLE } from "@/lib/constants";
 import { maskUrlForDisplay } from "@/lib/url/url-validation";
+import { deliveryTargetEndpoint } from "@/lib/audit/audit-delivery-target-endpoint";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
-import type { MemberContainmentInput } from "@/lib/validations/member-containment";
+import { MEMBER_CONTAINMENT_MAX_IDS, type MemberContainmentInput } from "@/lib/validations/member-containment";
 
 /**
  * Containment of a member whose session may be compromised (#1016), beyond the
@@ -33,6 +34,8 @@ export const FOOTHOLD_KIND = {
   BREAKGLASS_GRANTS: "breakglassGrants",
   TENANT_WEBHOOKS: "tenantWebhooks",
   VAULT_RESETS: "vaultResets",
+  SHARE_LINKS: "shareLinks",
+  AUDIT_DELIVERY_TARGETS: "auditDeliveryTargets",
   EMERGENCY_ACCESS_GRANTS: "emergencyAccessGrants",
 } as const;
 
@@ -50,13 +53,15 @@ export const FOOTHOLD_MODEL: Record<FootholdKind, string> = {
   breakglassGrants: "personalLogAccessGrant",
   tenantWebhooks: "tenantWebhook",
   vaultResets: "adminVaultReset",
+  shareLinks: "passwordShare",
+  auditDeliveryTargets: "auditDeliveryTarget",
   emergencyAccessGrants: "emergencyAccessGrant",
 };
 
 // What managing each kind takes outside this flow. MEMBER_MANAGE (which the
 // route already requires) is the gate; these are defence in depth — OWNER and
-// ADMIN hold all of them today. An emergency-access grant is the member's own,
-// with no tenant permission of its own.
+// ADMIN hold all of them today. An emergency-access grant and a share link are
+// the member's own, with no tenant permission of their own.
 const KIND_PERMISSION: Record<FootholdKind, TenantPermission | null> = {
   scimTokens: TENANT_PERMISSION.SCIM_MANAGE,
   serviceAccounts: TENANT_PERMISSION.SERVICE_ACCOUNT_MANAGE,
@@ -65,6 +70,8 @@ const KIND_PERMISSION: Record<FootholdKind, TenantPermission | null> = {
   breakglassGrants: TENANT_PERMISSION.BREAKGLASS_REQUEST,
   tenantWebhooks: TENANT_PERMISSION.WEBHOOK_MANAGE,
   vaultResets: TENANT_PERMISSION.MEMBER_VAULT_RESET,
+  shareLinks: null,
+  auditDeliveryTargets: TENANT_PERMISSION.AUDIT_DELIVERY_MANAGE,
   emergencyAccessGrants: null,
 };
 
@@ -100,6 +107,8 @@ export function toContainmentRequest(input: MemberContainmentInput | null): Memb
       breakglassGrants: unique(revoke.breakglassGrantIds),
       tenantWebhooks: unique(revoke.tenantWebhookIds),
       vaultResets: unique(revoke.vaultResetIds),
+      shareLinks: unique(revoke.shareLinkIds),
+      auditDeliveryTargets: unique(revoke.auditDeliveryTargetIds),
       emergencyAccessGrants: unique(revoke.emergencyAccessGrantIds),
     },
   };
@@ -129,6 +138,11 @@ export function refusedContainmentKinds(role: TenantRole, request: MemberContain
 // - Tenant webhook: the admin's tenant, created by the member.
 // - Vault reset: the admin's tenant, initiated by the member, not yet
 //   approved, executed or revoked, not expired.
+// - Share link / Send: the admin's tenant, created by the member (personal
+//   and team links and Sends alike), not revoked, not expired, views not
+//   exhausted. The exhausted clause compares two columns, so it names the
+//   field through tx.passwordShare.fields.
+// - Audit delivery target: the admin's tenant, created by the member, active.
 // - Emergency-access grant: the member's own, in whichever tenant it was
 //   filed under, not revoked or rejected.
 
@@ -139,6 +153,12 @@ export interface MemberContainmentListing {
   linkedAccounts: { id: string; provider: string; linkedHere: boolean }[];
   /** Only the kinds the actor may contain. */
   createdFootholds: Partial<Record<FootholdKind, unknown[]>>;
+  /**
+   * Per kind the actor may contain whose listing is cut at
+   * MEMBER_CONTAINMENT_MAX_IDS: how many more live rows exist than are listed.
+   * A kind that fits has no key.
+   */
+  moreFootholds: Partial<Record<FootholdKind, number>>;
 }
 
 /** The member's linked accounts and the live footholds they created. */
@@ -153,6 +173,14 @@ export async function listMemberContainment(
   const breakglassLive = { tenantId, requesterId: targetUserId, revokedAt: null, expiresAt: { gt: now } };
   const webhookLive = { tenantId, createdById: targetUserId };
   const resetLive = { tenantId, initiatedById: targetUserId, approvedAt: null, executedAt: null, revokedAt: null, expiresAt: { gt: now } };
+  const shareLive = {
+    tenantId,
+    createdById: targetUserId,
+    revokedAt: null,
+    expiresAt: { gt: now },
+    OR: [{ maxViews: null }, { viewCount: { lt: tx.passwordShare.fields.maxViews } }],
+  };
+  const targetLive = { tenantId, createdById: targetUserId, isActive: true };
   const eaLive = { ownerId: targetUserId, status: { notIn: [EA_STATUS.REVOKED, EA_STATUS.REJECTED] } };
   const accounts = await tx.account.findMany({
     where: { userId: targetUserId },
@@ -166,12 +194,14 @@ export async function listMemberContainment(
         where: scimLive,
         select: { id: true, description: true, createdAt: true, expiresAt: true, lastUsedAt: true },
         orderBy: { createdAt: "asc" },
+        take: MEMBER_CONTAINMENT_MAX_IDS,
       }),
     serviceAccounts: () =>
       tx.serviceAccount.findMany({
         where: saLive,
         select: { id: true, name: true, createdAt: true },
         orderBy: { createdAt: "asc" },
+        take: MEMBER_CONTAINMENT_MAX_IDS,
       }),
     serviceAccountTokens: () =>
       tx.serviceAccountToken.findMany({
@@ -186,24 +216,28 @@ export async function listMemberContainment(
           expiresAt: true,
         },
         orderBy: { createdAt: "asc" },
+        take: MEMBER_CONTAINMENT_MAX_IDS,
       }),
     mcpClients: () =>
       tx.mcpClient.findMany({
         where: mcpLive,
         select: { id: true, name: true, clientId: true, createdAt: true },
         orderBy: { createdAt: "asc" },
+        take: MEMBER_CONTAINMENT_MAX_IDS,
       }),
     breakglassGrants: () =>
       tx.personalLogAccessGrant.findMany({
         where: breakglassLive,
         select: { id: true, targetUserId: true, reason: true, effectiveAt: true, expiresAt: true, createdAt: true },
         orderBy: { createdAt: "asc" },
+        take: MEMBER_CONTAINMENT_MAX_IDS,
       }),
     tenantWebhooks: () =>
       tx.tenantWebhook.findMany({
         where: webhookLive,
         select: { id: true, url: true, isActive: true, createdAt: true },
         orderBy: { createdAt: "asc" },
+        take: MEMBER_CONTAINMENT_MAX_IDS,
       }),
     vaultResets: () =>
       tx.adminVaultReset.findMany({
@@ -216,21 +250,76 @@ export async function listMemberContainment(
           expiresAt: true,
         },
         orderBy: { createdAt: "asc" },
+        take: MEMBER_CONTAINMENT_MAX_IDS,
       }),
+    shareLinks: async () => {
+      const shares = await tx.passwordShare.findMany({
+        where: shareLive,
+        select: { id: true, shareType: true, teamPasswordEntryId: true, createdAt: true, expiresAt: true },
+        orderBy: { createdAt: "asc" },
+        take: MEMBER_CONTAINMENT_MAX_IDS,
+      });
+      return shares.map(({ teamPasswordEntryId, ...share }) => ({ ...share, isTeam: teamPasswordEntryId !== null }));
+    },
+    auditDeliveryTargets: async () => {
+      const targets = await tx.auditDeliveryTarget.findMany({
+        where: targetLive,
+        select: {
+          id: true,
+          kind: true,
+          createdAt: true,
+          configEncrypted: true,
+          configIv: true,
+          configAuthTag: true,
+          masterKeyVersion: true,
+        },
+        orderBy: { createdAt: "asc" },
+        take: MEMBER_CONTAINMENT_MAX_IDS,
+      });
+      // The masked destination only, never the encrypted config.
+      return targets.map((target) => ({
+        id: target.id,
+        kind: target.kind,
+        endpoint: deliveryTargetEndpoint(target, tenantId),
+        createdAt: target.createdAt,
+      }));
+    },
     emergencyAccessGrants: async () => {
       const grants = await tx.emergencyAccessGrant.findMany({
         where: eaLive,
         select: { id: true, granteeEmail: true, status: true, encryptedSecretKey: true, createdAt: true },
         orderBy: { createdAt: "asc" },
+        take: MEMBER_CONTAINMENT_MAX_IDS,
       });
       // Whether the vault key is escrowed to the grantee, never the escrow.
       return grants.map(({ encryptedSecretKey, ...g }) => ({ ...g, hasEscrow: encryptedSecretKey !== null }));
     },
   };
 
+  // How many live rows each kind has: asked only of a kind whose listing
+  // reached the cut, to say how many it left out.
+  const counters: Record<FootholdKind, () => Promise<number>> = {
+    scimTokens: () => tx.scimToken.count({ where: scimLive }),
+    serviceAccounts: () => tx.serviceAccount.count({ where: saLive }),
+    serviceAccountTokens: () => tx.serviceAccountToken.count({ where: saTokenLive }),
+    mcpClients: () => tx.mcpClient.count({ where: mcpLive }),
+    breakglassGrants: () => tx.personalLogAccessGrant.count({ where: breakglassLive }),
+    tenantWebhooks: () => tx.tenantWebhook.count({ where: webhookLive }),
+    vaultResets: () => tx.adminVaultReset.count({ where: resetLive }),
+    shareLinks: () => tx.passwordShare.count({ where: shareLive }),
+    auditDeliveryTargets: () => tx.auditDeliveryTarget.count({ where: targetLive }),
+    emergencyAccessGrants: () => tx.emergencyAccessGrant.count({ where: eaLive }),
+  };
+
   const createdFootholds: Partial<Record<FootholdKind, unknown[]>> = {};
+  const moreFootholds: Partial<Record<FootholdKind, number>> = {};
   for (const kind of FOOTHOLD_KINDS) {
-    if (mayContainKind(role, kind)) createdFootholds[kind] = await listers[kind]();
+    if (!mayContainKind(role, kind)) continue;
+    const rows = await listers[kind]();
+    createdFootholds[kind] = rows;
+    if (rows.length < MEMBER_CONTAINMENT_MAX_IDS) continue;
+    const more = (await counters[kind]()) - rows.length;
+    if (more > 0) moreFootholds[kind] = more;
   }
   return {
     linkedAccounts: accounts.map(({ tenantId: linkedTenantId, ...a }) => ({
@@ -238,6 +327,7 @@ export async function listMemberContainment(
       linkedHere: linkedTenantId === tenantId,
     })),
     createdFootholds,
+    moreFootholds,
   };
 }
 
@@ -311,6 +401,14 @@ export async function containMemberInTx(
   const breakglassLive = { tenantId, requesterId: targetUserId, revokedAt: null, expiresAt: { gt: now } };
   const webhookLive = { tenantId, createdById: targetUserId };
   const resetLive = { tenantId, initiatedById: targetUserId, approvedAt: null, executedAt: null, revokedAt: null, expiresAt: { gt: now } };
+  const shareLive = {
+    tenantId,
+    createdById: targetUserId,
+    revokedAt: null,
+    expiresAt: { gt: now },
+    OR: [{ maxViews: null }, { viewCount: { lt: tx.passwordShare.fields.maxViews } }],
+  };
+  const targetLive = { tenantId, createdById: targetUserId, isActive: true };
   const eaLive = { ownerId: targetUserId, status: { notIn: [EA_STATUS.REVOKED, EA_STATUS.REJECTED] } };
   const base = tenantAuditBase(req, actorUserId, tenantId);
   const audit = (rows: (Required<Pick<AuditLogParams, "action" | "metadata">> & Pick<AuditLogParams, "targetType" | "targetId">)[]) =>
@@ -528,6 +626,41 @@ export async function containMemberInTx(
     count(FOOTHOLD_KIND.VAULT_RESETS, resetIds, revoked.length);
   }
 
+  // Share links and Sends: revoked (never deleted — the access logs and the
+  // revoke row name the share). One row per share, in the single revoke
+  // route's actions, here at TENANT scope with the admin as the revoker.
+  const shareIds = request.revoke.shareLinks;
+  if (shareIds.length > 0) {
+    const revoked = await tx.passwordShare.updateManyAndReturn({
+      where: { id: { in: [...shareIds] }, ...shareLive },
+      data: { revokedAt: now },
+      select: { id: true, shareType: true },
+    });
+    await audit(revoked.map((share) => ({
+      action: share.shareType === SHARE_TYPE.ENTRY_SHARE ? AUDIT_ACTION.SHARE_REVOKE : AUDIT_ACTION.SEND_REVOKE,
+      targetType: AUDIT_TARGET_TYPE.PASSWORD_SHARE,
+      targetId: share.id,
+      metadata: { targetUserId, revokedById: actorUserId },
+    })));
+    count(FOOTHOLD_KIND.SHARE_LINKS, shareIds, revoked.length);
+  }
+
+  // Delivery targets: deactivated, not deleted (deliveries hold a Restrict FK).
+  // The queued backlog stops being claimed once the target is inactive.
+  const targetIds = request.revoke.auditDeliveryTargets;
+  if (targetIds.length > 0) {
+    const deactivated = await tx.auditDeliveryTarget.updateManyAndReturn({
+      where: { id: { in: [...targetIds] }, ...targetLive },
+      data: { isActive: false },
+      select: { id: true, kind: true },
+    });
+    await audit(deactivated.map((target) => ({
+      action: AUDIT_ACTION.AUDIT_DELIVERY_TARGET_DEACTIVATE,
+      metadata: { targetId: target.id, kind: target.kind, targetUserId },
+    })));
+    count(FOOTHOLD_KIND.AUDIT_DELIVERY_TARGETS, targetIds, deactivated.length);
+  }
+
   // Last: the member's emergency-access grants, through the state machine's
   // single writer, clearing what the owner's permanent revoke clears — one by
   // one (at most MEMBER_CONTAINMENT_MAX_IDS), as transition() writes a single
@@ -580,6 +713,8 @@ export async function containMemberInTx(
     breakglassGrants: () => tx.personalLogAccessGrant.count({ where: breakglassLive }),
     tenantWebhooks: () => tx.tenantWebhook.count({ where: webhookLive }),
     vaultResets: () => tx.adminVaultReset.count({ where: resetLive }),
+    shareLinks: () => tx.passwordShare.count({ where: shareLive }),
+    auditDeliveryTargets: () => tx.auditDeliveryTarget.count({ where: targetLive }),
     emergencyAccessGrants: () => tx.emergencyAccessGrant.count({ where: eaLive }),
   };
   const remaining: Partial<Record<FootholdKind, number>> = {};

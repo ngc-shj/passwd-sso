@@ -24,7 +24,12 @@ const {
   mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
+const { mockLockFootholdWriter } = vi.hoisted(() => ({
+  mockLockFootholdWriter: vi.fn(async () => new Map()),
+}));
+
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/tenant/foothold-write-gate", () => ({ lockFootholdWriter: mockLockFootholdWriter }));
 vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
   requireRecentCurrentAuthMethod: mockRequireRecentSession,
 }));
@@ -70,7 +75,8 @@ vi.mock("@/lib/http/with-request-log", () => ({
 
 import { PATCH } from "@/app/api/tenant/audit-delivery-targets/[id]/route";
 import { TenantAuthError } from "@/lib/auth/access/tenant-auth";
-import { AUDIT_ACTION } from "@/lib/constants";
+import { AUDIT_ACTION, TENANT_PERMISSION } from "@/lib/constants";
+import { footholdGateCells } from "@/__tests__/helpers/foothold-gate-cells";
 
 const ACTOR = { tenantId: "tenant-1", role: "ADMIN" };
 const TARGET_ID = "adt-1";
@@ -85,6 +91,93 @@ const makeTarget = (overrides: Record<string, unknown> = {}) => ({
 
 describe("PATCH /api/tenant/audit-delivery-targets/[id]", () => {
   beforeEach(() => vi.clearAllMocks());
+
+  for (const isActive of [true, false]) {
+    describe(`gate for isActive: ${isActive}`, () => {
+      footholdGateCells({
+        gate: mockLockFootholdWriter,
+        permission: TENANT_PERMISSION.AUDIT_DELIVERY_MANAGE,
+        actorId: DEFAULT_SESSION.user.id,
+        tenantId: ACTOR.tenantId,
+        okStatus: 200,
+        arrange: () => {
+          mockAuth.mockResolvedValue(DEFAULT_SESSION);
+          mockRequireTenantPermission.mockResolvedValue(ACTOR);
+          mockAuditDeliveryTargetFindFirst.mockResolvedValue(makeTarget({ isActive: !isActive }));
+          mockAuditDeliveryTargetUpdate.mockResolvedValue(makeTarget({ isActive }));
+        },
+        call: () =>
+          PATCH(
+            createRequest("PATCH", `http://localhost/api/tenant/audit-delivery-targets/${TARGET_ID}`, {
+              body: { isActive },
+              headers: { origin: "http://localhost" },
+            }),
+            createParams({ id: TARGET_ID }),
+          ),
+        assertNoWrite: () => expect(mockAuditDeliveryTargetUpdate).not.toHaveBeenCalled(),
+        afterRefusal: () => expect(mockLogAudit).not.toHaveBeenCalled(),
+      });
+    });
+  }
+
+  it("answers a demoted actor 403 before the no-op answer, with the target untouched", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockAuditDeliveryTargetFindFirst.mockResolvedValue(makeTarget({ isActive: false }));
+    mockLockFootholdWriter.mockRejectedValueOnce(new TenantAuthError("FORBIDDEN", 403));
+
+    const res = await PATCH(
+      createRequest("PATCH", `http://localhost/api/tenant/audit-delivery-targets/${TARGET_ID}`, {
+        body: { isActive: false },
+        headers: { origin: "http://localhost" },
+      }),
+      createParams({ id: TARGET_ID }),
+    );
+
+    expect(res.status).toBe(403);
+    // The gate precedes the read, so nothing about the target is revealed.
+    expect(mockAuditDeliveryTargetFindFirst).not.toHaveBeenCalled();
+    expect(mockAuditDeliveryTargetUpdate).not.toHaveBeenCalled();
+  });
+
+  it("answers the step-up error, not 404, for an unknown id", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockAuditDeliveryTargetFindFirst.mockResolvedValue(null);
+    mockRequireRecentSession.mockResolvedValueOnce(
+      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+
+    const res = await PATCH(
+      createRequest("PATCH", `http://localhost/api/tenant/audit-delivery-targets/nonexistent`, {
+        body: { isActive: false },
+        headers: { origin: "http://localhost" },
+      }),
+      createParams({ id: "nonexistent" }),
+    );
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(403);
+    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockAuditDeliveryTargetFindFirst).not.toHaveBeenCalled();
+  });
+
+  it("answers 400, not 404, for an unparseable body and an unknown id", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockAuditDeliveryTargetFindFirst.mockResolvedValue(null);
+
+    const res = await PATCH(
+      createRequest("PATCH", `http://localhost/api/tenant/audit-delivery-targets/nonexistent`, {
+        body: { isActive: "yes" },
+        headers: { origin: "http://localhost" },
+      }),
+      createParams({ id: "nonexistent" }),
+    );
+
+    expect(res.status).toBe(400);
+    expect(mockAuditDeliveryTargetFindFirst).not.toHaveBeenCalled();
+  });
 
   it("returns 401 when not authenticated", async () => {
     mockAuth.mockResolvedValue(null);

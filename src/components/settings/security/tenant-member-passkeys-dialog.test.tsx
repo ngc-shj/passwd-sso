@@ -20,6 +20,14 @@ vi.mock("next-intl", () => ({
 
 vi.mock("sonner", () => ({ toast: mockToast }));
 
+vi.mock("@/i18n/navigation", () => ({
+  Link: ({ href, children, ...rest }: { href: string; children: React.ReactNode } & Record<string, unknown>) => (
+    <a href={href} {...rest}>
+      {children}
+    </a>
+  ),
+}));
+
 vi.mock("@/lib/url-helpers", () => ({
   fetchApi: (...args: unknown[]) => mockFetch(...args),
 }));
@@ -209,6 +217,14 @@ describe("TenantMemberPasskeysDialog", () => {
         breakglassGrants: [{ id: "bg-1", reason: "incident 42", expiresAt: "2026-02-01T00:00:00Z" }],
         tenantWebhooks: [{ id: "wh-1", url: "https://hooks.example.com/in", createdAt: "2026-01-02T00:00:00Z" }],
         vaultResets: [{ id: "vr-1", targetUser: { name: "Bob Target", email: "bob@example.com" }, expiresAt: "2026-02-02T00:00:00Z" }],
+        shareLinks: [
+          { id: "sl-1", shareType: "TEXT", isTeam: false, createdAt: "2026-01-03T00:00:00Z", expiresAt: "2026-02-03T00:00:00Z" },
+          { id: "sl-2", shareType: "ENTRY_SHARE", isTeam: true, createdAt: "2026-01-03T00:00:00Z", expiresAt: "2026-02-03T00:00:00Z" },
+        ],
+        auditDeliveryTargets: [
+          { id: "adt-1", kind: "SIEM_HEC", endpoint: "https://siem.example.com/hec", createdAt: "2026-01-04T00:00:00Z" },
+          { id: "adt-2", kind: "WEBHOOK", endpoint: null, createdAt: "2026-01-05T00:00:00Z" },
+        ],
         emergencyAccessGrants: [{ id: "ea-1", granteeEmail: "unknown@example.net", status: "ACCEPTED", hasEscrow: true }],
       },
     };
@@ -222,16 +238,84 @@ describe("TenantMemberPasskeysDialog", () => {
     it("lists linked accounts and every foothold kind with an unchecked checkbox each", async () => {
       open();
       expect(await screen.findByText("google")).toBeInTheDocument();
-      for (const label of ["saml-jackson", "Okta provisioning", "deploy-bot", "ci-token", "agent-client", "incident 42", "https://hooks.example.com/in", "Bob Target", "unknown@example.net"]) {
+      for (const label of ["saml-jackson", "Okta provisioning", "deploy-bot", "ci-token", "agent-client", "incident 42", "https://hooks.example.com/in", "Bob Target", "unknown@example.net", "https://siem.example.com/hec"]) {
         expect(screen.getByText(label)).toBeInTheDocument();
       }
+      // A share is named by its type, a target by its endpoint or, failing that, its kind.
+      expect(screen.getByText("containmentShareTypeText")).toBeInTheDocument();
+      expect(screen.getByText("containmentShareTypeTeamEntry")).toBeInTheDocument();
+      expect(screen.getByText("WEBHOOK")).toBeInTheDocument();
       expect(screen.getByText("containmentLinkedAccountOtherTenant")).toBeInTheDocument();
       expect(screen.getByText("containmentEscrowed")).toBeInTheDocument();
       const boxes = screen.getAllByRole("checkbox");
-      expect(boxes).toHaveLength(10);
+      expect(boxes).toHaveLength(14);
       for (const box of boxes) expect(box).not.toBeChecked();
       expect(screen.getByText("containmentDeactivateNote")).toBeInTheDocument();
       expect(screen.getByText("containmentScope")).toBeInTheDocument();
+    });
+
+    it("posts the ticked share links and delivery targets under their body keys", async () => {
+      open();
+      fireEvent.click(await screen.findByLabelText(/containmentShareTypeTeamEntry/));
+      fireEvent.click(screen.getByLabelText(/containmentShareTypeText/));
+      fireEvent.click(screen.getByLabelText(/siem\.example\.com/));
+      fireEvent.click(screen.getByRole("button", { name: "revokeAllPasskeys" }));
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ ok: true }) });
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => LISTING });
+      fireEvent.click(screen.getAllByRole("button", { name: "revokeAllPasskeys" }).at(-1)!);
+
+      await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(3));
+      expect(JSON.parse((mockFetch.mock.calls[1][1] as RequestInit).body as string)).toEqual({
+        revoke: { shareLinkIds: ["sl-1", "sl-2"], auditDeliveryTargetIds: ["adt-1"] },
+      });
+    });
+
+    it("names the kind with skipped rows for share links and delivery targets", async () => {
+      open();
+      fireEvent.click(await screen.findByLabelText(/containmentShareTypeText/));
+      fireEvent.click(screen.getByRole("button", { name: "revokeAllPasskeys" }));
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, contained: { shareLinks: { revoked: 0, skipped: 1 }, auditDeliveryTargets: { revoked: 0, skipped: 1 } } }),
+      });
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => LISTING });
+      fireEvent.click(screen.getAllByRole("button", { name: "revokeAllPasskeys" }).at(-1)!);
+
+      await waitFor(() => expect(mockToast.warning).toHaveBeenCalledTimes(1));
+      expect(mockToast.warning).toHaveBeenCalledWith(
+        'containmentSkipped:{"kinds":"containmentNameShareLinks and containmentNameAuditDeliveryTargets"}',
+        expect.anything(),
+      );
+    });
+
+    it("says how many live rows a capped kind has beyond the listing, only for that kind", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ ...LISTING, moreFootholds: { shareLinks: 3 } }),
+      });
+      render(<TenantMemberPasskeysDialog userId="u-1" memberName="Alice" />);
+      fireEvent.click(screen.getByRole("button"));
+
+      expect(await screen.findByText('containmentMore:{"count":3}')).toBeInTheDocument();
+      expect(screen.getAllByText(/^containmentMore/)).toHaveLength(1);
+    });
+
+    it("links to this member's tenant activity since the lookback, in a new tab, with no name or email in the URL", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date(2026, 10, 17, 12, 0, 0));
+      try {
+        open();
+        const link = await screen.findByRole("link", { name: "containmentActivityLink" });
+        expect(link).toHaveAttribute("href", "/admin/tenant/audit-logs?actor=u-1&from=2026-10-18");
+        expect(link).toHaveAttribute("target", "_blank");
+        expect(link).toHaveAttribute("rel", "noopener noreferrer");
+        expect(link.getAttribute("href")).not.toMatch(/Alice/);
+        expect(screen.getByText('containmentActivityNote:{"days":30}')).toBeInTheDocument();
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("sends no body when nothing is ticked, and the confirm lists nothing more", async () => {

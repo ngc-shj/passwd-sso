@@ -12,11 +12,13 @@ import {
   VALID_ACTIONS,
   parseAuditLogParams,
   parseActorType,
+  parseActorUserId,
   buildAuditLogDateFilter,
   buildAuditLogActionFilter,
   paginateResult,
   isValidCursorId,
 } from "@/lib/audit/audit-query";
+import { buildTenantAuditWhere, validateTenantAuditTeam } from "@/lib/audit/tenant-audit-filter";
 import { fetchAuditUserMap } from "@/lib/audit/audit-user-lookup";
 
 const MERGED_ACTION_GROUPS = mergeActionGroups(AUDIT_ACTION_GROUPS_TENANT, AUDIT_ACTION_GROUPS_TEAM);
@@ -43,34 +45,28 @@ async function handleGET(req: NextRequest) {
   const scopeParam = searchParams.get("scope");
   const teamIdParam = searchParams.get("teamId");
   const validActorType = parseActorType(searchParams);
-
-  const where: Record<string, unknown> = {
-    tenantId: actor.tenantId,
-  };
+  const actorUser = parseActorUserId(searchParams);
+  if ("invalid" in actorUser) {
+    return validationError({ userId: "Invalid user id" });
+  }
 
   // Validate teamId belongs to this tenant (prevent cross-tenant oracle)
   if (teamIdParam) {
-    const team = await withTenantRls(prisma, actor.tenantId, async (tx) =>
-      tx.team.findFirst({
-        where: { id: teamIdParam, tenantId: actor.tenantId },
-        select: { id: true },
-      }),
+    const teamOk = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+      validateTenantAuditTeam(tx, actor.tenantId, teamIdParam),
     );
-    if (!team) {
+    if (!teamOk) {
       return validationError({ teamId: "Team not found" });
     }
   }
 
-  // Scope filter: "TENANT" only, "TEAM" only (optionally with teamId), or both (default)
-  if (scopeParam === AUDIT_SCOPE.TENANT) {
-    where.scope = AUDIT_SCOPE.TENANT;
-  } else if (scopeParam === AUDIT_SCOPE.TEAM) {
-    where.scope = AUDIT_SCOPE.TEAM;
-    if (teamIdParam) where.teamId = teamIdParam;
-  } else {
-    where.scope = { in: [AUDIT_SCOPE.TENANT, AUDIT_SCOPE.TEAM] };
-    if (teamIdParam) where.teamId = teamIdParam;
-  }
+  const where = buildTenantAuditWhere({
+    tenantId: actor.tenantId,
+    scope: scopeParam,
+    teamId: teamIdParam,
+    actorType: validActorType,
+    userId: actorUser.userId,
+  });
 
   // Select action groups map based on scope
   const groupsMap =
@@ -94,8 +90,6 @@ async function handleGET(req: NextRequest) {
   const dateFilter = buildAuditLogDateFilter(from, to);
   if (dateFilter) where.createdAt = dateFilter;
 
-  if (validActorType) where.actorType = validActorType;
-
   let logs;
   try {
     logs = await withTenantRls(prisma, actor.tenantId, async (tx) =>
@@ -117,7 +111,7 @@ async function handleGET(req: NextRequest) {
           team: { select: { id: true, name: true } },
           serviceAccount: { select: { id: true, name: true } },
         },
-        orderBy: { createdAt: "desc" },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         take: limit + 1,
         ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
       }),
