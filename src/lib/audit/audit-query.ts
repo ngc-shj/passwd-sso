@@ -40,6 +40,8 @@ export function resolveDownloadRange(
   }
   const lte = toDate ?? now;
   const gte = fromDate ?? new Date(lte.getTime() - AUDIT_LOG_MAX_RANGE_DAYS * MS_PER_DAY);
+  // A `to` near the Date minimum puts the derived start out of range.
+  if (Number.isNaN(gte.getTime())) return { error: { date: "Invalid date format" } };
   const diffMs = lte.getTime() - gte.getTime();
   if (diffMs < 0) return { error: { date: "'from' must be before 'to'" } };
   if (diffMs > AUDIT_LOG_MAX_RANGE_MS) {

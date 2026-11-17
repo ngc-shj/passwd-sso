@@ -347,6 +347,13 @@ export function ServiceAccountCard() {
         setTokenCreating(false);
         return;
       }
+      // The picker honours min/max, a typed date does not; refuse it here
+      // rather than as the server's generic 400.
+      if (tokenExpiresAt < tokenMinExpiresAt || tokenExpiresAt > tokenMaxExpiresAt) {
+        setTokenNameError(t("tokenExpiresAtOutOfRange", { min: tokenMinExpiresAt, max: tokenMaxExpiresAt }));
+        setTokenCreating(false);
+        return;
+      }
       // Set expiry to end-of-day to avoid timezone issues with date-only input
       const expiryDate = new Date(tokenExpiresAt + "T23:59:59Z");
       const body = {

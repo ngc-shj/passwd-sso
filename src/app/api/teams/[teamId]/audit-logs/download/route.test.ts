@@ -388,6 +388,12 @@ describe("GET /api/teams/[teamId]/audit-logs/download", () => {
       gte: new Date("2024-10-03T00:00:00.000Z"),
       lte: new Date("2025-01-01T00:00:00.000Z"),
     });
+    // The audit row records the window queried, not the raw parameters.
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: { format: "jsonl", from: "2024-10-03T00:00:00.000Z", to: "2025-01-01T00:00:00.000Z" },
+      }),
+    );
   });
 
   it("returns 400 when neither from nor to is provided", async () => {

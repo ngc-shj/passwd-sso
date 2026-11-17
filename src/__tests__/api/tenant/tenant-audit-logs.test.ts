@@ -364,6 +364,29 @@ describe("GET /api/tenant/audit-logs/download", () => {
       );
     });
 
+    it("reads a to-only download as the 90 days ending at to, queried and recorded", async () => {
+      // Not through download(): it always adds a `from`.
+      mockAuth.mockResolvedValue(DEFAULT_SESSION);
+      mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
+      mockRateLimiterCheck.mockResolvedValue({ allowed: true });
+      mockAuditLogFindMany.mockResolvedValue([]);
+      const res = await GET_DOWNLOAD(
+        createRequest("GET", "http://localhost/api/tenant/audit-logs/download", { searchParams: { to: "2025-01-01T00:00:00.000Z" } }),
+      );
+      if (res.status === 200) await res.text();
+
+      expect(res.status).toBe(200);
+      expect(mockAuditLogFindMany.mock.calls[0][0].where.createdAt).toEqual({
+        gte: new Date("2024-10-03T00:00:00.000Z"),
+        lte: new Date("2025-01-01T00:00:00.000Z"),
+      });
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: { format: "jsonl", from: "2024-10-03T00:00:00.000Z", to: "2025-01-01T00:00:00.000Z" },
+        }),
+      );
+    });
+
     it("accepts the 90 local days a New York client sends across the November fall-back, and not one day more", async () => {
       vi.stubEnv("TZ", "America/New_York");
       const to = parseLocalDate("2026-11-02", true)!.toISOString();

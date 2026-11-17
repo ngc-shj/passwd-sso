@@ -372,3 +372,53 @@ days = 90 × 24 h + 1 h − 1 ms): 200; one day earlier: 400.
 ### R3-Q6 — fixed
 A cell serialises the worst-case row (the 50 longest actions plus every other
 filter) and asserts it fits METADATA_MAX_BYTES.
+
+---
+
+# Round 4 (fixes 10160d9b3..5f44700dc)
+
+## Changes from Previous Round
+F-R3-1..3 and R3-Q1..Q6 resolved (testing confirmed each by mutation;
+security: subject binding and permissions unchanged, a to-only request now
+exports less than before). New findings:
+
+## Findings
+- F-R4-1 / security F1 [Major / Minor] A `to` within 90 days of the Date
+  minimum made the derived start an Invalid Date: 500 (RangeError in the
+  metadata) instead of 400. Fails closed; no export.
+- F-R4-2 [Minor] `saTokenCreateSchema` bounded expiry by a server-local
+  calendar step (`setDate`), so under a DST server timezone the card's max day
+  could be refused.
+- F-R4-3 [Minor] The token expiry `min`/`max` bind the picker only; a typed
+  date outside them got the server's generic 400.
+- F-R4-4 [Minor] The tenant download checked "at least one bound" twice.
+- Q4-1 [Major] No tenant to-only download cell in either tree.
+- Q4-2 [Major] The personal/team audit row's recorded window was unpinned.
+- Q4-3 [Minor] The cursor guard's spread rule was top-level only (nested
+  literal spreads, relation args) and its whenFalse arm unexercised.
+- Q4-4 [Minor] `parseLocalDate`'s end-of-day rollover refusal and next-day NaN
+  guard were unpinned.
+
+## Resolution Status (round 4)
+- F-R4-1: `resolveDownloadRange` refuses an out-of-range derived start (400).
+  Cells: `to` = minimum + 90 days − 1 ms refused, exactly + 90 days accepted
+  with `gte` = the minimum; a personal route cell answers 400.
+- F-R4-2: the server bound is elapsed time (`now + MAX × MS_PER_DAY`). Cell
+  under `TZ=America/New_York` at 2026-11-02T00:00:01Z: the card's max day
+  accepted, the next refused (the previous schema refused the max day).
+- F-R4-3: the card refuses a typed date outside min/max with
+  `tokenExpiresAtOutOfRange` (en/ja) and sends no POST (cell).
+- F-R4-4: one check, through the resolver's null range.
+- Q4-1: tenant to-only cells in both trees pin the queried window and the
+  recorded `from`/`to`.
+- Q4-2: the personal and team to-only cells also pin the recorded window.
+- Q4-3: spreads are followed into nested literals and relation arguments
+  (`include` / `select` values, any depth); `where` spreads stay allowed.
+  Fixtures for each, including the whenFalse arm.
+- Q4-4: cells for `parseLocalDate("2026-02-30", true)` and, under New York,
+  `275760-09-12` (start defined, end undefined).
+- Verification note: one pre-PR run failed four script cells (backup-db exit
+  141 and two timeouts, check-public-contract hook timeout) at load average
+  ~25 from another session on the host; both files passed 270/270 twice alone
+  and the next full pre-PR run passed 96/96. Not attributed to this change
+  (the failing cells are untouched by it).

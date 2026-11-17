@@ -17,7 +17,7 @@ import { describe, expect, it } from "vitest";
 import path from "node:path";
 import { readFileSync } from "node:fs";
 import { Node, SyntaxKind } from "ts-morph";
-import type { SourceFile } from "ts-morph";
+import type { ObjectLiteralExpression, SourceFile } from "ts-morph";
 import { createAstProject, walkSourceFiles } from "../../scripts/checks/lib/ast-project.mjs";
 
 const REPO_ROOT = path.resolve(__dirname, "../..");
@@ -93,20 +93,43 @@ function violations(sf: SourceFile, label: string): { sites: number; problems: s
       problems.push(`${where}: ${callee.getName()} arguments are not an object literal`);
       continue;
     }
-    for (const spread of arg.getProperties().filter(Node.isSpreadAssignment)) {
-      if (!isLiteralSpread(spread.getExpression())) {
-        problems.push(`${where}: ${callee.getName()} spreads arguments that are not a literal`);
+    // The query's own arguments and each relation's (`include` / `select`
+    // values); a `where` may spread shared filters, which carry no cursor.
+    const argLiterals = [arg, ...relationArgs(arg)];
+    for (const literal of argLiterals) {
+      for (const spread of literal.getProperties().filter(Node.isSpreadAssignment)) {
+        if (!isLiteralSpread(spread.getExpression())) {
+          problems.push(`${where}: ${callee.getName()} spreads arguments that are not a literal`);
+        }
       }
     }
   }
   return { sites, problems };
 }
 
+/** A literal, a parenthesised or conditional choice of literals, whose own spreads are literals too. */
 function isLiteralSpread(expr: Node): boolean {
   const inner = Node.isParenthesizedExpression(expr) ? expr.getExpression() : expr;
-  if (Node.isObjectLiteralExpression(inner)) return true;
+  if (Node.isObjectLiteralExpression(inner)) {
+    return inner.getProperties().filter(Node.isSpreadAssignment).every((s) => isLiteralSpread(s.getExpression()));
+  }
   if (Node.isConditionalExpression(inner)) return isLiteralSpread(inner.getWhenTrue()) && isLiteralSpread(inner.getWhenFalse());
   return false;
+}
+
+/** The argument literals of the relations an `include` / `select` names, at any depth. */
+function relationArgs(args: ObjectLiteralExpression): ObjectLiteralExpression[] {
+  const found: ObjectLiteralExpression[] = [];
+  for (const key of ["include", "select"]) {
+    const prop = args.getProperty(key);
+    const value = prop && Node.isPropertyAssignment(prop) ? prop.getInitializer() : undefined;
+    if (!value || !Node.isObjectLiteralExpression(value)) continue;
+    for (const rel of value.getProperties()) {
+      const relValue = Node.isPropertyAssignment(rel) ? rel.getInitializer() : undefined;
+      if (relValue && Node.isObjectLiteralExpression(relValue)) found.push(relValue, ...relationArgs(relValue));
+    }
+  }
+  return found;
 }
 
 function scanFixture(code: string) {
@@ -167,7 +190,16 @@ describe("cursor pagination orders by a unique key last", () => {
     ]) {
       expect(scanFixture(code).problems, code).toHaveLength(1);
     }
+    for (const code of [
+      `tx.a.findMany({ orderBy: { createdAt: "desc" }, ...({ ...page }) });`,
+      `tx.a.findMany({ orderBy: { createdAt: "desc" }, ...(c ? {} : page) });`,
+      `tx.a.findMany({ include: { rel: { orderBy: { createdAt: "asc" }, ...page } } });`,
+    ]) {
+      expect(scanFixture(code).problems, code).toHaveLength(1);
+    }
     expect(scanFixture(`tx.a.findMany({ orderBy: [{ id: "asc" }], ...(c ? { where: { a } } : {}) });`).problems).toEqual([]);
+    // A where may spread a shared filter; it carries no cursor.
+    expect(scanFixture(`tx.a.findMany({ where: { ...ACTIVE }, orderBy: [{ id: "asc" }] });`).problems).toEqual([]);
   });
 
   it("refuses a page object bound to a variable, whatever its cursor holds", () => {

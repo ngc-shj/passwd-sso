@@ -131,6 +131,12 @@ describe("resolveDownloadRange", () => {
 
   it("refuses an unparsable bound, a reversed pair and a span over the bound", () => {
     expect(resolveDownloadRange("nope", null, NOW)).toEqual({ error: { date: "Invalid date format" } });
+    // A to near the Date minimum: its derived start is out of range up to the
+    // minimum + 90 days, and exactly at it the start is the minimum itself.
+    expect(resolveDownloadRange(null, "-271821-07-18T23:59:59.999Z", NOW)).toEqual({ error: { date: "Invalid date format" } });
+    expect(resolveDownloadRange(null, "-271821-07-19T00:00:00.000Z", NOW)).toEqual({
+      range: { gte: new Date(-8.64e15), lte: new Date("-271821-07-19T00:00:00.000Z") },
+    });
     expect(resolveDownloadRange("2026-11-10T00:00:00.000Z", "2026-11-01T00:00:00.000Z", NOW)).toEqual({
       error: { date: "'from' must be before 'to'" },
     });

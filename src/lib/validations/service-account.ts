@@ -4,6 +4,7 @@ import {
   MAX_SA_TOKEN_EXPIRY_DAYS,
 } from "@/lib/constants/auth/service-account";
 import { NAME_MAX_LENGTH } from "./common";
+import { MS_PER_DAY } from "@/lib/constants/time";
 
 // ─── Service Account ──────────────────────────────────────
 
@@ -26,10 +27,11 @@ export const saTokenCreateSchema = z.object({
   scope: z.array(z.enum(SA_TOKEN_SCOPES)).min(1)
     .transform((v) => [...new Set(v)]),
   expiresAt: z.coerce.date().refine(
+    // Elapsed time, not a server-local calendar step (setDate), so the bound
+    // does not move with the server's timezone or a DST change in the window.
     (d) => {
-      const maxDate = new Date();
-      maxDate.setDate(maxDate.getDate() + MAX_SA_TOKEN_EXPIRY_DAYS);
-      return d.getTime() > Date.now() && d.getTime() <= maxDate.getTime();
+      const now = Date.now();
+      return d.getTime() > now && d.getTime() <= now + MAX_SA_TOKEN_EXPIRY_DAYS * MS_PER_DAY;
     },
     {
       message: `Expiry must be in the future and within ${MAX_SA_TOKEN_EXPIRY_DAYS} days`,

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   serviceAccountCreateSchema,
   serviceAccountUpdateSchema,
@@ -243,6 +243,20 @@ describe("saTokenCreateSchema", () => {
       expiresAt: past,
     });
     expect(result.success).toBe(false);
+  });
+
+  it("bounds expiry by elapsed days whatever the server timezone (DST in the window)", () => {
+    vi.stubEnv("TZ", "America/New_York");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-02T00:00:01Z"));
+    try {
+      const base = { name: "t", scope: [SA_TOKEN_SCOPES[0]] };
+      // The card's max day (UTC 2027-11-01) ends inside 365 × 24 h; the next one does not.
+      expect(saTokenCreateSchema.safeParse({ ...base, expiresAt: "2027-11-01T23:59:59Z" }).success).toBe(true);
+      expect(saTokenCreateSchema.safeParse({ ...base, expiresAt: "2027-11-02T23:59:59Z" }).success).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it(`rejects expiresAt beyond max+1 days (${MAX_SA_TOKEN_EXPIRY_DAYS + 1})`, () => {

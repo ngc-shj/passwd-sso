@@ -52,12 +52,7 @@ async function handleGET(req: NextRequest) {
     return validationError({ userId: "Invalid user id" });
   }
 
-  // Require at least one date boundary
-  if (!from && !to) {
-    return validationError({ date: "At least 'from' or 'to' is required for download" });
-  }
-
-  // Validate date range (from || to is always true here due to early return above)
+  // Validate date range; a tenant download requires at least one bound.
   const resolved = resolveDownloadRange(from, to);
   if ("error" in resolved) return validationError(resolved.error);
   if (!resolved.range) return validationError({ date: "At least 'from' or 'to' is required for download" });

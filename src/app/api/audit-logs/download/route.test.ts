@@ -339,6 +339,15 @@ describe("GET /api/audit-logs/download", () => {
     );
   });
 
+  it("answers 400, not 500, for a to whose derived start is out of the Date range", async () => {
+    const res = await GET(
+      createRequest("GET", "http://localhost:3000/api/audit-logs/download", {
+        searchParams: { to: "-271821-04-20T00:00:00.000Z" },
+      }),
+    );
+    expect(res.status).toBe(400);
+  });
+
   it("reads a to-only download as the 90 days ending at to, even long ago", async () => {
     const req = createRequest("GET", "http://localhost:3000/api/audit-logs/download", {
       searchParams: { to: "2025-01-01T00:00:00.000Z" },
@@ -351,6 +360,12 @@ describe("GET /api/audit-logs/download", () => {
       gte: new Date("2024-10-03T00:00:00.000Z"),
       lte: new Date("2025-01-01T00:00:00.000Z"),
     });
+    // The audit row records the window queried, not the raw parameters.
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: { format: "jsonl", from: "2024-10-03T00:00:00.000Z", to: "2025-01-01T00:00:00.000Z" },
+      }),
+    );
   });
 
   it("filters by actorType when provided", async () => {

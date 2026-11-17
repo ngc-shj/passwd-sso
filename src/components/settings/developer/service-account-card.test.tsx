@@ -545,6 +545,40 @@ describe("ServiceAccountCard", () => {
     }
   });
 
+  it("refuses a typed expiry past the max with its own message, sending nothing", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-17T12:00:00Z"));
+    try {
+      setupFetchAccounts([
+        { id: "sa-active", name: "active-sa", description: null, isActive: true, createdAt: "2025-01-01T00:00:00Z" },
+      ]);
+      await act(async () => {
+        render(<ServiceAccountCard />);
+      });
+      await waitFor(() => expect(screen.getByText("active-sa")).toBeInTheDocument());
+      await expandSa("active-sa");
+      const tokenBtn = screen.getAllByRole("button").find((b) => b.textContent?.includes("createToken"));
+      await act(async () => {
+        fireEvent.click(tokenBtn!);
+      });
+      fireEvent.change(screen.getByPlaceholderText("tokenNamePlaceholder"), { target: { value: "my-token" } });
+      fireEvent.click(screen.getAllByTestId("checkbox")[0]);
+      fireEvent.change(document.querySelector('input[type="date"]')!, { target: { value: "2027-11-17" } });
+      const posts = () => mockFetch.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === "POST").length;
+      const before = posts();
+
+      const createTokenBtn = screen.getAllByRole("button").find((b) => b.textContent === "create" && !b.hasAttribute("disabled"));
+      await act(async () => {
+        fireEvent.click(createTokenBtn!);
+      });
+
+      expect(screen.getByText("tokenExpiresAtOutOfRange")).toBeInTheDocument();
+      expect(posts()).toBe(before);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("shows plaintext token once after creation, token gone after dialog close", async () => {
     setupFetchAccounts([
       {
