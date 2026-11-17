@@ -504,3 +504,39 @@ step). New:
 - Q6-1: an API key manager cell under New York at 2026-10-15T12:00Z asserts the
   default 90-day choice is sent as exactly now + 90 × 24 h (the previous
   `setDate` step sends one hour more).
+
+---
+
+# Round 7 (fixes ccafaaa9d..933244521)
+
+## Changes from Previous Round
+Round-6 items resolved (testing: CLI and manager expiry cells red on the
+previous step, CLI tests wired into the cli-ci job; every guard clause red on
+its own mutant except the receiver check). Security: no findings; whole-branch
+verdict acceptable, nothing unresolved. New (all in the test-only cursor guard):
+
+## Findings
+- F-R7-1 / Q7-1 [Major] The receiver rule meant to tell writes from
+  `map.delete` also hid aliased (`d.findMany`) and element-access
+  (`tx["m"].findMany`) reads that the previous guard counted; the rule itself
+  was unpinned.
+- F-R7-2 / Q7-2 [Major / Minor] `constLiteral` walked lexical scopes for a
+  `const` and so resolved past a shadowing parameter, `let` or loop binding.
+- F-R7-3 [Minor] The header overclaimed (unplaceable cursors) and the message
+  named only findMany/findFirst; `count` / `aggregate` were unstated.
+
+## Resolution Status (round 7)
+- F-R7-1 / Q7-1: reads (finds, `count`, `aggregate`) match on any receiver;
+  writes need `<client>.<model>` or `<client>["<model>"]`. Fixtures: aliased
+  read with a cursor and with variable arguments, element-access read and
+  write, `count` with a cursor (each refused), and an aliased write left unread
+  (the stated boundary). Red-proofs on scratch copies: removing the write
+  receiver check, or requiring `x.y` for reads, fails the fixture cell.
+- F-R7-2 / Q7-2: the name resolves through the binder
+  (`getSymbol().getDeclarations()`, one declaration, a `const` variable bound
+  to an object literal); fixtures for parameter, `let` and `for…of`
+  shadowing. The previous lexical walk fails the parameter fixture.
+- F-R7-3: header states what is refused and the boundaries (unplaceable
+  shorthand/named cursors, a write's non-literal arguments and aliased write
+  receivers, `groupBy` takes no cursor, `where` spreads); the message names a
+  delegate call.

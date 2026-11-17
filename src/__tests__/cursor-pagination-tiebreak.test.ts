@@ -9,17 +9,24 @@
  * the query into a keyset `(created_at, id)` comparison with a LIMIT.
  *
  * A site is a `cursor` property (either spelling) in the arguments of a
- * delegate call (`<client>.<model>.<method>(...)`, the finds and the writes
- * that take `include` / `select`), top-level or a relation's. The arguments it
+ * delegate call — the reads (finds, `count`, `aggregate`) and the writes that
+ * take `include` / `select` — top-level or a relation's. The arguments it
  * pages must have an `orderBy` array literal ending in exactly `{ id: ... }`.
  *
- * What the check cannot read is refused rather than guessed: a find whose
+ * What the check cannot read is refused rather than guessed: a read whose
  * arguments are not a literal, a spread that is not a literal (readable spreads
  * are read through), an `include` / `select` that is neither a literal nor a
- * `const` bound to one, a relation value that is neither a boolean nor a
- * literal, and a cursor in an object bound to a variable or not placeable in a
- * call. A write's argument is read only when it is a literal (`map.delete(key)`
- * has the same call shape); a `where` may spread shared filters.
+ * `const` bound to one (resolved through the binder), a relation value that is
+ * neither a boolean nor a literal, quoted or computed argument keys, an
+ * object-literal cursor no delegate call can be found for, and any cursor in
+ * an object bound to a variable.
+ *
+ * Boundaries, by design: a shorthand or named cursor that cannot be placed in a
+ * call is not a site (CSS cursors and blob-store tokens share the key); a
+ * write's arguments are read only when they are a literal and its receiver is
+ * `<client>.<model>` or `<client>["<model>"]` — `map.delete(key)` shares the
+ * shape, so a write on an aliased delegate is not read; `groupBy` takes no
+ * cursor; a `where` may spread shared filters.
  */
 import { describe, expect, it } from "vitest";
 import path from "node:path";
@@ -36,14 +43,15 @@ import type {
 import { createAstProject, walkSourceFiles } from "../../scripts/checks/lib/ast-project.mjs";
 
 const REPO_ROOT = path.resolve(__dirname, "../..");
-// Every delegate method whose arguments can carry relation arguments (and so a
-// relation cursor under `include` / `select`), not only the paginating finds.
-const QUERY_METHODS: ReadonlySet<string> = new Set([
-  "findMany", "findFirst", "findFirstOrThrow", "findUnique", "findUniqueOrThrow",
+// The reads that take a cursor (or relation arguments) and the writes that take
+// relation arguments: a cursor can sit at the top level of the first, under an
+// `include` / `select` relation in both.
+const FIND_METHODS: ReadonlySet<string> = new Set([
+  "findMany", "findFirst", "findFirstOrThrow", "findUnique", "findUniqueOrThrow", "count", "aggregate",
+]);
+const WRITE_METHODS: ReadonlySet<string> = new Set([
   "create", "createManyAndReturn", "update", "updateManyAndReturn", "upsert", "delete",
 ]);
-
-const FIND_METHODS: ReadonlySet<string> = new Set(["findMany", "findFirst", "findFirstOrThrow", "findUnique", "findUniqueOrThrow"]);
 
 /** A property's name with string-literal quotes removed (`"cursor"` reads as cursor). */
 function unquotedName(prop: PropertyAssignment | ShorthandPropertyAssignment): string {
@@ -51,11 +59,25 @@ function unquotedName(prop: PropertyAssignment | ShorthandPropertyAssignment): s
   return Node.isStringLiteral(nameNode) ? nameNode.getLiteralValue() : prop.getName();
 }
 
-/** `<client>.<model>.<method>(...)`: a delegate call, not `map.delete(key)`. */
+/**
+ * A delegate call. Any receiver for a read (`tx.a.findMany`, an aliased
+ * `d.findMany`, `tx["a"].findMany`): no Map or Set method shares those names.
+ * A write needs a delegate-shaped receiver, `<client>.<model>` or
+ * `<client>["<model>"]`, since `map.delete(key)` shares its name; a write on an
+ * aliased delegate (`d.update`) cannot be told apart from it and is not read.
+ */
 function isDelegateCall(call: Node): call is CallExpression {
   if (!Node.isCallExpression(call)) return false;
   const callee = call.getExpression();
-  return Node.isPropertyAccessExpression(callee) && QUERY_METHODS.has(callee.getName()) && Node.isPropertyAccessExpression(callee.getExpression());
+  if (!Node.isPropertyAccessExpression(callee)) return false;
+  const method = callee.getName();
+  if (FIND_METHODS.has(method)) return true;
+  if (!WRITE_METHODS.has(method)) return false;
+  const receiver = callee.getExpression();
+  return (
+    Node.isPropertyAccessExpression(receiver) ||
+    (Node.isElementAccessExpression(receiver) && Node.isStringLiteral(receiver.getArgumentExpression()))
+  );
 }
 
 /** The cursor sites found; a drop below this means the scan stopped seeing them. */
@@ -99,7 +121,7 @@ function violations(sf: SourceFile, label: string): { sites: number; problems: s
       const inBoundObject = isInVariableBoundLiteral(prop);
       if (inBoundObject || (Node.isPropertyAssignment(prop) && Node.isObjectLiteralExpression(prop.getInitializer()))) {
         sites += 1;
-        problems.push(`${where}: cursor outside a findMany/findFirst argument literal`);
+        problems.push(`${where}: cursor outside a delegate call's argument literal`);
       }
       continue;
     }
@@ -184,24 +206,22 @@ function unreadableArgs(args: ObjectLiteralExpression): string[] {
 }
 
 /**
- * The object literal a `const` of this name in a lexically enclosing scope is
- * bound to (`as const` unwrapped), or undefined. Followed only for an
+ * The object literal the `const` this identifier names is bound to (`as const`
+ * unwrapped), or undefined. Followed only for an
  * `include` / `select` value; anything else named stays unreadable.
  */
 function constLiteral(id: Node): ObjectLiteralExpression | undefined {
-  const name = id.getText();
-  for (let scope: Node | undefined = id.getParent(); scope; scope = scope.getParent()) {
-    if (!Node.isBlock(scope) && !Node.isSourceFile(scope)) continue;
-    for (const statement of scope.getStatements()) {
-      if (!Node.isVariableStatement(statement) || statement.getDeclarationKind() !== VariableDeclarationKind.Const) continue;
-      const decl = statement.getDeclarations().find((d) => d.getName() === name);
-      if (!decl) continue;
-      let init = decl.getInitializer();
-      if (init && Node.isAsExpression(init)) init = init.getExpression();
-      return init && Node.isObjectLiteralExpression(init) ? init : undefined;
-    }
-  }
-  return undefined;
+  // Through the binder: a parameter, `let`, loop or catch binding that shadows
+  // an outer `const` resolves to itself, not to the outer literal.
+  const declarations = id.getSymbol()?.getDeclarations() ?? [];
+  if (declarations.length !== 1) return undefined;
+  const [decl] = declarations;
+  if (!Node.isVariableDeclaration(decl)) return undefined;
+  const list = decl.getParent();
+  if (!Node.isVariableDeclarationList(list) || list.getDeclarationKind() !== VariableDeclarationKind.Const) return undefined;
+  let init = decl.getInitializer();
+  if (init && Node.isAsExpression(init)) init = init.getExpression();
+  return init && Node.isObjectLiteralExpression(init) ? init : undefined;
 }
 
 /**
@@ -349,6 +369,26 @@ describe("cursor pagination orders by a unique key last", () => {
     ]);
     // A computed field name selected with a boolean is readable (retention-gc sweep).
     expect(scanFixture(`tx.a.findMany({ where: { [col]: { not: null } }, select: { id: true, [col]: true } });`).problems).toEqual([]);
+    // Any receiver for a read; a string-keyed delegate for a write.
+    for (const code of [
+      `const d = tx.auditLog; d.findMany({ orderBy: { createdAt: "asc" }, cursor, skip: 1 });`,
+      `const d = tx.auditLog; d.findMany(args);`,
+      `tx["auditLog"].findMany({ orderBy: { createdAt: "asc" }, cursor, skip: 1 });`,
+      `tx["a"].update({ where: { id }, data: {}, include: { rel: { cursor, orderBy: { createdAt: "asc" } } } });`,
+      `tx.a.count({ orderBy: { createdAt: "asc" }, cursor, skip: 1 });`,
+    ]) {
+      expect(scanFixture(code).problems, code).toHaveLength(1);
+    }
+    // A name resolves to its own binding: a parameter or `let` shadowing an outer const is unread.
+    for (const code of [
+      `const sel = { id: true }; function f(sel) { return tx.a.findMany({ where: { id }, include: sel }); }`,
+      `const sel = { id: true }; { let sel = page; tx.a.findMany({ where: { id }, include: sel }); }`,
+      `const sel = { id: true }; for (const sel of xs) tx.a.findMany({ where: { id }, include: sel });`,
+    ]) {
+      expect(scanFixture(code).problems, code).toEqual(["fixture:1: findMany include is not an object literal"]);
+    }
+    // A write on an aliased delegate is not read (the stated boundary: `map.delete` shares the shape).
+    expect(scanFixture(`const d = tx.a; d.update({ where: { id }, data: {}, include: { rel: relPage } });`).problems).toEqual([]);
     // Not a delegate call: `map.delete(key)`.
     expect(scanFixture(`timers.delete(key); ref.current.delete(key);`).problems).toEqual([]);
     expect(scanFixture(`tx.a.findMany({ ...(c ? { include: { rel: { where: { a } } } } : {}) });`).problems).toEqual([]);
@@ -364,7 +404,7 @@ describe("cursor pagination orders by a unique key last", () => {
       `const page = { cursor, skip: 1 }; tx.a.findMany({ orderBy: { createdAt: "desc" }, ...page });`,
       `const page = { cursor: cur, skip: 1 }; tx.a.findMany({ orderBy: { createdAt: "desc" }, ...page });`,
     ]) {
-      expect(scanFixture(code).problems).toContain("fixture:1: cursor outside a findMany/findFirst argument literal");
+      expect(scanFixture(code).problems).toContain("fixture:1: cursor outside a delegate call's argument literal");
     }
   });
 
