@@ -58,9 +58,13 @@ function violations(sf: SourceFile, label: string): { sites: number; problems: s
     if (!inQuery || !args || !Node.isObjectLiteralExpression(args)) {
       // A Prisma cursor is a unique-where object literal (`{ id }`). Other
       // `cursor` keys (a CSS cursor, a blob-store continuation token, a
-      // shorthand handed to a non-Prisma call) are not sites; an
-      // object-literal one we cannot place is.
-      if (Node.isPropertyAssignment(prop) && Node.isObjectLiteralExpression(prop.getInitializer())) {
+      // shorthand handed to a non-Prisma call) are not sites; an object-literal
+      // one we cannot place is, and so is any cursor in an object bound to a
+      // variable — a page object spread into a query (`...page`) hides its
+      // orderBy pairing from this check.
+      const holder = prop.getParent();
+      const inBoundObject = Node.isObjectLiteralExpression(holder) && Node.isVariableDeclaration(holder.getParent());
+      if (inBoundObject || (Node.isPropertyAssignment(prop) && Node.isObjectLiteralExpression(prop.getInitializer()))) {
         sites += 1;
         problems.push(`${where}: cursor outside a findMany/findFirst argument literal`);
       }
@@ -122,6 +126,11 @@ describe("cursor pagination orders by a unique key last", () => {
       problems: ["fixture:1: orderBy must be an array literal ending in { id: ... }"],
     });
     expect(scanFixture(`tx.a.findMany({ orderBy: [{ createdAt: "desc" }, { id: "desc" }], cursor });`)).toEqual({ sites: 1, problems: [] });
+  });
+
+  it("refuses a page object bound to a variable, whatever its cursor holds", () => {
+    expect(scanFixture(`const page = { cursor, skip: 1 }; tx.a.findMany({ orderBy: { createdAt: "desc" }, ...page });`).problems).toHaveLength(1);
+    expect(scanFixture(`const page = { cursor: cur, skip: 1 }; tx.a.findMany({ orderBy: { createdAt: "desc" }, ...page });`).problems).toHaveLength(1);
   });
 
   it("does not count a shorthand cursor handed to a call that is not a query", () => {

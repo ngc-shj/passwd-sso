@@ -187,3 +187,96 @@ file collected, as CI does.
   generator). It is not a production defect — React ignores a state update
   after unmount and `window` exists in a browser; the failure above needs a
   torn-down test environment — and none of those files is touched here.
+
+---
+
+# Round 2 (fixes 9c555e316..06ab97a84)
+
+## Changes from Previous Round
+Round-1 findings F1, F2, S-1, S-2, T1–T4 resolved (verified by execution:
+mutants of each fix go red). T5 continuing (new drift from the S-1 fix);
+backup-db harness continuing. New findings below.
+
+## Functionality Findings
+- N-1 [Minor] An exact 90-day range across a DST fall-back day exceeds the
+  server's instant check now that the client sends local days.
+- N-2 [Minor] `parseLocalDate` mapped years 0–99 to 1900–1999 and refused
+  5+-digit years, so a value a date input can emit dropped the filter.
+- N-3 [Minor, pre-existing] The service-account token expiry and the entry
+  expiration read the date input as a UTC day.
+- A-1 [Minor][Adjacent] The backup-db harness swapped even when the ready line
+  never appeared (same as Q5).
+
+## Security Findings
+S-1, S-2 resolved; no boundary widened (`TENANT_MEMBER_PASSKEY_REVOKE` has one
+caller; its only `auditDelivery` access is the tenant-bound `groupBy`).
+- S-R2-1 [Minor] A downloader could pad `actions` with repeats past
+  METADATA_MAX_BYTES, so truncation replaced every recorded filter
+  (`from`/`to`/`actorUserId`/`scope`/`teamId`) with a marker.
+
+## Testing Findings
+- Q1 [Minor] The cursor guard missed a non-literal cursor in a page object
+  spread into a query.
+- Q2 [Minor] The tenant download row's `to` was matched by `expect.any(String)`.
+- Q3 [Minor] T5 continuing: the tenant actions/actor-type cell existed in one tree.
+- Q4 [Minor] The PATCH `pendingDeliveries` "same tx" claim was unpinned (the tx
+  mock was the client mock).
+- Q5 [Major] The root-swap cell passed vacuously when the script exited before
+  its dumps (no `ready` assertion).
+- Q6 [Major] The root-swap cell ran under the 10 s default timeout while its
+  harness bounds are 15 s / 20 s.
+
+## Recurring Issue Check
+Round-2 experts re-checked the touched rules: R43 (no widening), R44, R49, R57,
+RT7, RT9 as above; others unchanged from round 1.
+
+## Resolution Status (round 2)
+
+### N-1 — fixed
+`AUDIT_LOG_MAX_RANGE_MS` (`src/lib/validations/common.server.ts`) = 90 days +
+1 hour, used by the personal, team and tenant download range checks. Boundary:
+exactly 90 days + 1 hour is accepted, 1 ms more is 400 — a cell in each route
+test; on the previous bound the accepted case is 400.
+
+### N-2 — fixed
+`parseLocalDate` takes four or more year digits and builds the day with
+`setFullYear` (years below 100 kept), refusing a NaN date. Cells for year 50
+and 12345.
+
+### N-3 — left, with reason
+Both are deliberate UTC-day encodings outside this change: the entry expiration
+is a date-only value stored in the encrypted blob and read back with
+`slice(0, 10)` (a local instant would change the stored format and show a
+different day east of UTC); the service-account card states its UTC choice and
+its `min` uses the same UTC day. Changing either is a data-format decision for
+those features, not part of the audit-log filter fix.
+
+### S-R2-1 — fixed
+`parseActionsCsvParam` deduplicates (first-seen order); the download row lists
+at most 50 actions and counts the rest in `actionsOmitted`. Cells: parser
+dedupe, the helper's cap (53 → 50 + 3) and allow side (50 unchanged), and a
+tenant route cell with 600 repeats recording one action and every other filter.
+
+### Q1 — fixed
+A `cursor` in an object literal bound to a variable is refused (spread the
+page inline). Fixtures: shorthand and identifier-valued page objects.
+
+### Q2 / Q3 — fixed
+Exact-range cells in both tenant trees (`from` and `to` as ISO), plus the
+actions/actor-type cell mirrored into the app tree.
+
+### Q4 — fixed
+The PATCH test's tx carries its own `auditDelivery.count` spy; the client-level
+spy must not be called.
+
+### Q5 / A-1 / Q6 — fixed
+`runRootSwap` returns `ready` and the cell asserts it (an early-exiting script
+is now red, verified by the testing review against this edit); the cell has a
+30 s timeout, above the harness's 15 s ready deadline and 20 s kill timer.
+
+### Found during round-2 verification: extension autofill cells asserted after a fixed sleep (pre-existing) — fixed
+`extension/src/__tests__/content/autofill-react.test.tsx` failed once in the
+parallel pre-PR run (`expected '' to be '4567890'`, 2.3 s): two cells asserted
+values written from their own tasks after a fixed 50 ms `settle()`. They now
+`vi.waitFor` the values; the cell asserting a value stays empty keeps its
+window.

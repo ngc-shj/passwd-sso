@@ -363,6 +363,16 @@ describe("GET /api/tenant/audit-logs/download", () => {
       );
     });
 
+    it("records the exact to it applied", async () => {
+      await download({ to: "2026-03-31T00:00:00.000Z", from: "2026-03-01T00:00:00.000Z" });
+
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: { format: "jsonl", from: "2026-03-01T00:00:00.000Z", to: "2026-03-31T00:00:00.000Z" },
+        }),
+      );
+    });
+
     it("records the actions and actor type it applied", async () => {
       await download({ actions: "AUDIT_LOG_DOWNLOAD,POLICY_UPDATE", actorType: "HUMAN" });
 
@@ -373,6 +383,18 @@ describe("GET /api/tenant/audit-logs/download", () => {
       expect(mockLogAudit).toHaveBeenCalledWith(
         expect.objectContaining({
           metadata: { format: "jsonl", ...RANGE, actions: ["AUDIT_LOG_DOWNLOAD", "POLICY_UPDATE"], actorType: "HUMAN" },
+        }),
+      );
+    });
+
+    it("keeps the recorded filters when the actions list is padded with repeats", async () => {
+      const padded = Array.from({ length: 600 }, () => "AUDIT_LOG_DOWNLOAD").join(",");
+
+      await download({ userId: MEMBER, actions: padded });
+
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: { format: "jsonl", ...RANGE, actions: ["AUDIT_LOG_DOWNLOAD"], actorUserId: MEMBER },
         }),
       );
     });

@@ -182,6 +182,13 @@ describe("GET /api/tenant/audit-logs/download", () => {
     expect(json.details.range).toContain("90");
   });
 
+  it("accepts 90 local days across a DST fall-back (90 days + 1 hour), and not 1 ms more", async () => {
+    const at = (to: string) =>
+      GET(createRequest("GET", "http://localhost:3000/api/tenant/audit-logs/download", { searchParams: { from: "2026-03-01T00:00:00.000Z", to } }));
+    expect((await at("2026-05-30T01:00:00.000Z")).status).toBe(200);
+    expect((await at("2026-05-30T01:00:00.001Z")).status).toBe(400);
+  });
+
   it("returns 400 for invalid action filters", async () => {
     const req = createRequest("GET", "http://localhost:3000/api/tenant/audit-logs/download", {
       searchParams: { from: VALID_FROM, actions: "ENTRY_CREATE,NOT_REAL" },
@@ -318,6 +325,30 @@ describe("GET /api/tenant/audit-logs/download", () => {
       });
       expect(mockLogAudit).toHaveBeenCalledWith(
         expect.objectContaining({ metadata: { format: "jsonl", ...RANGE, scope: "TEAM", teamId: "team-1" } }),
+      );
+    });
+
+    it("records the exact range, actions and actor type it applied", async () => {
+      const req = createRequest("GET", "http://localhost:3000/api/tenant/audit-logs/download", {
+        searchParams: {
+          from: "2026-03-01T00:00:00.000Z",
+          to: "2026-03-31T00:00:00.000Z",
+          actions: "AUDIT_LOG_DOWNLOAD,POLICY_UPDATE",
+          actorType: "HUMAN",
+        },
+      });
+      await streamToString(await GET(req));
+
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: {
+            format: "jsonl",
+            from: "2026-03-01T00:00:00.000Z",
+            to: "2026-03-31T00:00:00.000Z",
+            actions: ["AUDIT_LOG_DOWNLOAD", "POLICY_UPDATE"],
+            actorType: "HUMAN",
+          },
+        }),
       );
     });
 

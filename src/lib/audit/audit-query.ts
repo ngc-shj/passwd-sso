@@ -18,22 +18,29 @@ export function parseActorType(searchParams: URLSearchParams): (typeof ACTOR_TYP
   return VALID_ACTOR_TYPES.find((t) => t === raw);
 }
 
+/** How many selected actions a download's audit row lists by name. */
+const AUDIT_DOWNLOAD_MAX_RECORDED_ACTIONS = 50;
+
 /**
  * The filters an audit-log download applied, for its AUDIT_LOG_DOWNLOAD row: the
  * date bounds the query used, the action list and the actor type. A filter not
  * applied leaves no key, so two downloads of different coverage never record
- * the same row.
+ * the same row. The action list is capped (the rest counted in
+ * `actionsOmitted`) so it can never push the row past METADATA_MAX_BYTES, which
+ * would replace every recorded filter with a truncation marker.
  */
 export function auditDownloadFilterMetadata(applied: {
   from?: Date;
   to?: Date;
   actions: readonly string[];
   actorType?: string;
-}): { from?: string; to?: string; actions?: string[]; actorType?: string } {
+}): { from?: string; to?: string; actions?: string[]; actionsOmitted?: number; actorType?: string } {
+  const omitted = applied.actions.length - AUDIT_DOWNLOAD_MAX_RECORDED_ACTIONS;
   return {
     ...(applied.from && { from: applied.from.toISOString() }),
     ...(applied.to && { to: applied.to.toISOString() }),
-    ...(applied.actions.length > 0 && { actions: [...applied.actions] }),
+    ...(applied.actions.length > 0 && { actions: applied.actions.slice(0, AUDIT_DOWNLOAD_MAX_RECORDED_ACTIONS) }),
+    ...(omitted > 0 && { actionsOmitted: omitted }),
     ...(applied.actorType && { actorType: applied.actorType }),
   };
 }
@@ -64,7 +71,9 @@ export function parseActionsCsvParam(
   const requested = actionsParam.split(",").map((a) => a.trim()).filter(Boolean);
   const invalid = requested.filter((a) => !validActions.has(a));
   if (invalid.length > 0) return { invalid };
-  return { actions: requested as AuditAction[] };
+  // Deduplicated: a repeated action selects nothing more, and the list is
+  // recorded in the download's audit row.
+  return { actions: [...new Set(requested)] as AuditAction[] };
 }
 
 export interface AuditLogParams {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { AuditAction } from "@prisma/client";
 import {
   auditDownloadFilterMetadata,
+  parseActionsCsvParam,
   VALID_ACTIONS,
   VALID_ACTOR_TYPES,
   parseAuditLogParams,
@@ -89,6 +90,18 @@ describe("parseActorUserId", () => {
   );
 });
 
+describe("parseActionsCsvParam", () => {
+  it("drops repeated actions, keeping first-seen order", () => {
+    expect(parseActionsCsvParam("AUDIT_LOG_DOWNLOAD,POLICY_UPDATE,AUDIT_LOG_DOWNLOAD")).toEqual({
+      actions: ["AUDIT_LOG_DOWNLOAD", "POLICY_UPDATE"],
+    });
+  });
+
+  it("refuses an unknown action", () => {
+    expect(parseActionsCsvParam("AUDIT_LOG_DOWNLOAD,NOT_REAL")).toEqual({ invalid: ["NOT_REAL"] });
+  });
+});
+
 describe("auditDownloadFilterMetadata", () => {
   it("records each applied filter, the dates as ISO instants", () => {
     expect(
@@ -108,6 +121,12 @@ describe("auditDownloadFilterMetadata", () => {
 
   it("leaves no key for a filter that was not applied", () => {
     expect(auditDownloadFilterMetadata({ actions: [] })).toEqual({});
+  });
+
+  it("lists at most 50 actions by name and counts the rest", () => {
+    const actions = Array.from({ length: 53 }, (_, i) => `A_${i}`);
+    expect(auditDownloadFilterMetadata({ actions })).toEqual({ actions: actions.slice(0, 50), actionsOmitted: 3 });
+    expect(auditDownloadFilterMetadata({ actions: actions.slice(0, 50) })).toEqual({ actions: actions.slice(0, 50) });
   });
 });
 

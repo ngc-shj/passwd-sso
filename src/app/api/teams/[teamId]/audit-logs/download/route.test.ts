@@ -181,6 +181,16 @@ describe("GET /api/teams/[teamId]/audit-logs/download", () => {
     expect(res.status).toBe(400);
   });
 
+  it("accepts 90 local days across a DST fall-back (90 days + 1 hour), and not 1 ms more", async () => {
+    const at = (to: string) =>
+      GET(
+        createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/audit-logs/download`, { searchParams: { from: "2026-03-01T00:00:00.000Z", to } }),
+        createParams({ teamId: TEAM_ID }),
+      );
+    expect((await at("2026-05-30T01:00:00.000Z")).status).toBe(200);
+    expect((await at("2026-05-30T01:00:00.001Z")).status).toBe(400);
+  });
+
   it("returns 400 for invalid date format", async () => {
     const res = await GET(
       createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/audit-logs/download`, {

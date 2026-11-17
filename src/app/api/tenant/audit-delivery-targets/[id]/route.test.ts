@@ -14,15 +14,21 @@ const {
   mockAuditDeliveryTargetFindFirst,
   mockAuditDeliveryTargetUpdate,
   mockAuditDeliveryCount,
+  mockPrismaAuditDeliveryCount,
   mockRequireRecentSession,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTenantPermission: vi.fn(),
-  mockWithTenantRls: vi.fn(async (prisma: unknown, _tenantId: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
+  // The tx carries the target delegate and its own delivery count spy, so a
+  // count made on the top-level client (outside the tx) is told apart.
+  mockWithTenantRls: vi.fn(async (prisma: { auditDeliveryTarget: unknown }, _tenantId: unknown, fn: (tx: unknown) => unknown) =>
+    fn({ auditDeliveryTarget: prisma.auditDeliveryTarget, auditDelivery: { count: mockAuditDeliveryCount } }),
+  ),
   mockLogAudit: vi.fn(),
   mockAuditDeliveryTargetFindFirst: vi.fn(),
   mockAuditDeliveryTargetUpdate: vi.fn(),
   mockAuditDeliveryCount: vi.fn().mockResolvedValue(0),
+  mockPrismaAuditDeliveryCount: vi.fn().mockResolvedValue(0),
   mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
@@ -55,7 +61,7 @@ vi.mock("@/lib/prisma", () => ({
       findFirst: mockAuditDeliveryTargetFindFirst,
       update: mockAuditDeliveryTargetUpdate,
     },
-    auditDelivery: { count: mockAuditDeliveryCount },
+    auditDelivery: { count: mockPrismaAuditDeliveryCount },
   },
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
@@ -279,6 +285,7 @@ describe("PATCH /api/tenant/audit-delivery-targets/[id]", () => {
     expect(mockAuditDeliveryCount).toHaveBeenCalledWith({
       where: { tenantId: "tenant-1", targetId: TARGET_ID, status: "PENDING" },
     });
+    expect(mockPrismaAuditDeliveryCount).not.toHaveBeenCalled();
   });
 
   it("returns success without update when isActive is already the requested value", async () => {

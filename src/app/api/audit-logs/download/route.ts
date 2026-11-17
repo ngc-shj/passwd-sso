@@ -13,7 +13,7 @@ import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { auditDownloadFilterMetadata, parseActionsCsvParam, parseActorType } from "@/lib/audit/audit-query";
 import { AUDIT_LOG_MAX_RANGE_DAYS } from "@/lib/validations/common";
-import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
+import { AUDIT_LOG_MAX_RANGE_MS, RATE_WINDOW_MS } from "@/lib/validations/common.server";
 import { MS_PER_DAY } from "@/lib/constants/time";
 import { buildAuditLogStream, buildAuditLogDownloadResponse } from "@/lib/audit/audit-log-stream";
 
@@ -56,7 +56,7 @@ async function handleGET(req: NextRequest) {
     if (diffMs < 0) {
       return validationError({ date: "'from' must be before 'to'" });
     }
-    if (diffMs > AUDIT_LOG_MAX_RANGE_DAYS * MS_PER_DAY) {
+    if (diffMs > AUDIT_LOG_MAX_RANGE_MS) {
       return validationError({ range: `Maximum range is ${AUDIT_LOG_MAX_RANGE_DAYS} days` });
     }
   }

@@ -260,12 +260,14 @@ async function runRootSwap(scriptPath, outPath, rootPath, env, readyPattern) {
     // readyPattern, wait until the script's own output says it got there: a
     // fixed delay let a loaded machine (the full suite) swap before the script
     // had taken its root, so the run legitimately succeeded in the new root.
+    let ready;
     if (readyPattern) {
       const deadline = Date.now() + 15000;
-      const ready = () => existsSync(outPath) && readyPattern.test(readFileSync(outPath, "utf8"));
-      while (!done && Date.now() < deadline && !ready()) {
+      const isReady = () => existsSync(outPath) && readyPattern.test(readFileSync(outPath, "utf8"));
+      while (!done && Date.now() < deadline && !isReady()) {
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
+      ready = isReady();
     } else {
       spawnSync("sleep", ["1"]);
     }
@@ -279,7 +281,7 @@ async function runRootSwap(scriptPath, outPath, rootPath, env, readyPattern) {
     // script's status out of the captured output, so it still has to land there.
     const status = result.error ? "spawn-error" : result.code ?? `signal:${result.signal}`;
     writeSync(out, `EXIT=${status}\n`);
-    return result;
+    return { ...result, ready };
   } finally {
     closeSync(out);
   }
@@ -3908,7 +3910,7 @@ exit 0`);
     }
   });
 
-  it("never publishes into a root replaced mid-run", async () => {
+  it("never publishes into a root replaced mid-run", { timeout: 30000 }, async () => {
     // What this pins is the outcome, not the branch: a swap can be caught by
     // the redirect, by the publish, or by assert_root_unchanged depending on
     // when it lands, and racing for one of them makes a flaky test. The
@@ -3940,6 +3942,7 @@ exit 0`);
       BACKUP_DIR: backupDir, BACKUP_RETAIN: "1",
     }, /\[backup-db\] dumping /);
     expect(swap.error, "the swap harness itself must have run").toBeUndefined();
+    expect(swap.ready, "the script must have reached its dumps before the swap").toBe(true);
     const out = readFileSync(join(tmpDir, "out"), "utf8");
     expect(out, "a replaced root must not yield a success").not.toMatch(/EXIT=0/);
     expect(generations(), "and must leave nothing published in the new root").toEqual([]);

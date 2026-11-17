@@ -149,6 +149,11 @@ describe("parseLocalDate", () => {
     expect(day && toISODateString(day)).toBe("2026-02-28");
   });
 
+  it("reads years below 100 and above 9999 as written", () => {
+    expect(parseLocalDate("0050-03-01")?.getFullYear()).toBe(50);
+    expect(parseLocalDate("12345-03-01")?.getFullYear()).toBe(12345);
+  });
+
   it("refuses a malformed value and a day the month does not have", () => {
     expect(parseLocalDate("2026-5-1")).toBeUndefined();
     expect(parseLocalDate("2026-02-30")).toBeUndefined();
