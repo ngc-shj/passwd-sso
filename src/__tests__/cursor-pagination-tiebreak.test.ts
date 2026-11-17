@@ -376,13 +376,15 @@ describe("cursor pagination orders by a unique key last", () => {
       `tx["auditLog"].findMany({ orderBy: { createdAt: "asc" }, cursor, skip: 1 });`,
       `tx["a"].update({ where: { id }, data: {}, include: { rel: { cursor, orderBy: { createdAt: "asc" } } } });`,
       `tx.a.count({ orderBy: { createdAt: "asc" }, cursor, skip: 1 });`,
+      `tx.a.aggregate({ orderBy: { createdAt: "asc" }, cursor, skip: 1, _count: true });`,
     ]) {
       expect(scanFixture(code).problems, code).toHaveLength(1);
     }
-    // A name resolves to its own binding: a parameter or `let` shadowing an outer const is unread.
+    // A name resolves to its own binding: a parameter or `let` shadowing an outer const is unread,
+    // and a `let` is unread even with a literal initializer (a reassignment can carry a cursor).
     for (const code of [
       `const sel = { id: true }; function f(sel) { return tx.a.findMany({ where: { id }, include: sel }); }`,
-      `const sel = { id: true }; { let sel = page; tx.a.findMany({ where: { id }, include: sel }); }`,
+      `const sel = { id: true }; { let sel = { rel: true }; tx.a.findMany({ where: { id }, include: sel }); }`,
       `const sel = { id: true }; for (const sel of xs) tx.a.findMany({ where: { id }, include: sel });`,
     ]) {
       expect(scanFixture(code).problems, code).toEqual(["fixture:1: findMany include is not an object literal"]);

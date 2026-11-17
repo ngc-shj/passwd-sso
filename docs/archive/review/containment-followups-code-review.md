@@ -540,3 +540,29 @@ verdict acceptable, nothing unresolved. New (all in the test-only cursor guard):
   shorthand/named cursors, a write's non-literal arguments and aliased write
   receivers, `groupBy` takes no cursor, `where` spreads); the message names a
   delegate call.
+
+---
+
+# Round 8 (fixes 933244521..12f90d061)
+
+## Changes from Previous Round
+Round-7 items resolved; functionality and security: no findings (real tree 11
+sites, 0 problems). Testing ran each guard clause against its own mutant:
+
+## Findings
+- Q8-1 [Minor] The `const`-only clause of `constLiteral` was unpinned: the
+  `let` shadowing fixture's non-literal initializer is refused with or without
+  it, while `let sel = { posts: true }` reassigned to a cursor include passes
+  without it.
+- Q8-2 [Minor] `aggregate` in the read set was unpinned (the tree has three
+  `aggregate` calls; Prisma accepts `cursor` on it).
+- Boundaries, no rule needed: the single-declaration rule only changes a
+  `const` merged with a same-name type (refused, erring safe); a computed key
+  on a write receiver only adds refusals.
+
+## Resolution Status (round 8)
+- Q8-1: the `let` fixture binds a literal (`let sel = { rel: true }`), so it
+  pins the shadowing and the `const`-only rule together.
+- Q8-2: an `aggregate` call with a cursor joins the refused-read fixtures.
+- Red-proofs on a scratch copy: dropping `aggregate` from the read set, or the
+  `const` check, each fails the suite (exit 1); the unmutated copy passes.
