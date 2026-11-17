@@ -195,3 +195,48 @@
   - Row 31a reddened the renamed superuser tenant-row re-key cells, the same collateral it already listed under their old names. They are listed under the new names, and the row re-run proved.
   - Stale `+` lines naming the removed cells were dropped from rows 17 and 20.
   - **Result:** all 50 rows proved.
+
+## D10 — Phase 3 round 3
+
+- **`_upd` firing (test F1):** `tenant_members_departure_ends_memberships_upd` now fires on `UPDATE OF deactivated_at` only.
+  - Its `tenant_id` / `user_id` columns could matter only for a departed row's re-key, which the round-2 BEFORE arm refuses first. That made them unprovable dead code.
+  - Row 22b's mutant is rewritten against the narrowed trigger.
+- **Cell placement and plan (test F2, F3):**
+  - The tenant-row re-key cells now sit under "refused at the statement". Their active-row pair sits under "allowed".
+  - Rows 09c and 31a name the new cells.
+  - The plan's C7 lists, trigger table and red-proof table describe the current cells and rows.
+- **Anti-Deferral: confirm-key wraps to a recipient key that a vault reset has retired (functionality round 3 F1, security round 4 S4-2, functionality round 4 R4-F1; [Adjacent], pre-existing on main).**
+  - **The defect:** the distributor's client wraps the team key to the recipient's `ecdhPublicKey`, which it fetched from `/api/teams/pending-key-distributions`. confirm-key checks only that some ECDH key exists, outside its transaction. Nothing ties the wrapped key to the recipient's current key.
+  - **The window:** it runs from that fetch to the commit. It includes a full reset followed by a re-setup, after which the recipient has a new, non-null key. The CAS still matches, because a reset sets `keyDistributed = false`.
+  - **What closes it:** binding the request to the key it wrapped to, with the client sending that public key or its fingerprint and the server comparing it with the recipient's current key under a lock. Two other designs would not close it:
+    - an in-transaction re-read of `users` under a lock only catches a reset that has not been followed by a re-setup;
+    - a post-commit compensating write has the same blind spot.
+  - **Why it is not fixed here:** the binding changes the distribution protocol (client, API and server comparison), and the server-side comparison needs the recipient's `users` row inside the team-tenant transaction. A cross-tenant guest's row is invisible there, routes have no sanctioned in-transaction bypass pattern, and the RLS-nesting guard refuses a nested `withBypassRls`. That is a protocol and RLS design decision outside the departed-member invariants.
+  - **Worst case:** the member holds `keyDistributed = true` with a key wrapped to their retired ECDH key, until a team key rotation or another vault reset of their own. Redistribution is blocked by `KEY_ALREADY_DISTRIBUTED`. A holder of the retired private key could also unwrap that team key version. That means the member themself, or whoever stole the old key when a compromise prompted the reset, and they would still need a fresh authenticated session as the member, since a reset revokes sessions.
+  - **Likelihood:** low. It needs a reset of the recipient between the distributor's fetch and the confirm-key commit.
+  - **Cost to fix:** the protocol change above, plus its gates and tests. That is larger than this PR's remaining scope, and the defect is unchanged from main.
+  - **Disposition:** reported in the PR description as a known pre-existing limitation, with the binding named as the fix.
+
+## D11 — Phase 3 round 4
+
+- **Active tenant-row re-key (security S4-1, pre-existing).**
+  - Re-keying an active tenant row away from a key that has a departure record leaves that key departed: no row, a record, and active memberships. Neither the database nor a gate saw it.
+  - **Fix:** the re-key guard now refuses every `tenant_id`/`user_id` change on `tenant_members`, since nothing legitimate does it. It is renamed `trg_tenant_members_rekey_guard`.
+  - **Cells:** the active-row pair cell became a deny cell, re-keying an active row away from a key with a record. The new pair is a non-key column change on an active row.
+  - **Red-proof rows:** 09c drops the arm; 09d limits it to departed rows again.
+- **D10's Anti-Deferral is restated** (security S4-2, functionality R4-F1): the window, what closes it, the worst case and the recovery path.
+- **Template check (functionality R4-F2):** before the matrix run, the template's live definitions were read back.
+  - `pg_get_triggerdef` lists the seven triggers as the migration defines them, including `_upd` on `UPDATE OF deactivated_at` only and `trg_tenant_members_rekey_guard` with no WHEN.
+  - `md5(prosrc)` equals the md5 of the migration's function body (`b9ed9e9d…`).
+- **Matrix after round 4:** all 51 rows proved, on a template whose definitions were read back as described above.
+
+## D12 — Phase 3 round 5 (documentation and test tightening)
+
+- **Runbook:** the refused list names `tenant_row_rekeyed` and `record_rekeyed`. The "does not judge" list now names the orphan-record class: deleting an active row whose user has a record, or a delete followed by an insert onto another key. The scope of the FK-cascade line is corrected.
+- **Orphan-record class:** stated the same way in the migration header, plan Q3 and the runbook.
+- **Cells:**
+  - The active re-key deny cell covers both with and without a departure record, so the "refuses any re-key" contract is pinned.
+  - The pair writes a key column with its own value plus a role change, and asserts the role changed. That fires the guard and pins its `IS DISTINCT FROM` predicate. Row 09e mutates that predicate to `true`.
+- **Wording:** the plan's round labels and the round-3 code-review resolution's impact wording are corrected.
+- **Red-proof:** rows 09c, 09d, 09e and 31a proved after these changes. The final full matrix is recorded below.
+- **Final full matrix:** all 52 rows proved (`run-all7`).

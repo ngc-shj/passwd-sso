@@ -161,3 +161,70 @@ Every round-1 finding was resolved. The round-1 fix for F1 introduced one new Ma
   - Rows 09a and 09b are retired, because no cell can redden them while the BEFORE arm stands. Row 09c removes the arm.
 - **Test N1:** T8e also runs `--write`. Removing the parameter arm from the refusal condition reddens both T8e cells.
 - **Test N2:** rows 15c and 15d.
+
+## Round 3
+Date: 2026-11-17
+
+### Findings
+- **Security:** no findings.
+- **Functionality:** F1 Major [Adjacent, pre-existing on main]. confirm-key does not re-check the recipient's ECDH key under the users lock, so a concurrent vault reset leaves a key wrapped to the retired key.
+- **Testing:**
+  - F1 Minor: the `_upd` firing on `tenant_id` / `user_id` was dead code, kept unprovable.
+  - F2 Minor: the plan still described the retired cells and rows.
+  - F3 Minor: the re-key cells sat under the wrong describe block.
+
+### Resolution Status
+- **Functionality F1:** recorded as an Anti-Deferral entry (deviation log D10, restated in round 4). The fix needs an RLS or protocol design decision outside this PR, and the defect is unchanged from main. It has low likelihood. Its impact is a stale distribution, plus exposure of that team key version to a holder of the retired key who has a fresh session. It is surfaced in the PR description.
+- **Testing F1:** `_upd` now fires on `UPDATE OF deactivated_at` only, and row 22b's mutant follows it.
+- **Testing F2:** the plan is updated.
+- **Testing F3:** the cells moved, and rows 09c and 31a are renamed to match.
+
+## Round 4
+Date: 2026-11-17
+
+### Findings
+- **Testing:** no findings.
+- **Security:**
+  - S4-1 Minor [Adjacent, pre-existing]. Re-keying an active tenant row away from a key that has a departure record departs that key, and nothing checks it.
+  - S4-2 Minor. D10's Anti-Deferral understates the window and the impact, and names fixes that would not close the defect.
+- **Functionality:**
+  - R4-F1 Minor. The same point as S4-2.
+  - R4-F2 Minor. No red-proof result was recorded, and nothing checked the template's trigger definitions.
+
+### Resolution Status
+- **S4-1:** every tenant-row re-key is now refused (`trg_tenant_members_rekey_guard`), with a deny cell and a pair cell. Red-proof rows: 09c and 09d.
+- **S4-2 / R4-F1:** D10 is restated. The binding to the wrapped-to key is named as the fix; the deferral stands.
+- **R4-F2:** the live definitions were read back from the template and recorded in D11. The matrix result is recorded in D11.
+
+## Round 5
+Date: 2026-11-17
+
+### Findings
+All findings are Minor, and none is Critical or Major.
+- **Functionality:**
+  - F1: the runbook's re-key scope.
+  - F2: the pair cell asserted only a precondition.
+- **Security:**
+  - R5-S1: the runbook's refused list.
+  - R5-S2: the orphan-record class was not documented.
+  - R5-S3: the round-3 resolution wording.
+- **Testing:**
+  - T5-1: the pair cell could not be reddened.
+  - T5-2: the deny cell's record was not load-bearing.
+  - T5-3: round labels.
+
+### Resolution Status
+Every finding was applied (deviation log D12). Row 09e is new; rows 09c, 09d, 09e and 31a proved.
+
+## Tightening-only skip — Round 5
+Findings applied directly (no Round 6 review):
+- F1 / R5-S1 [Minor] runbook re-key scope and refused list — `docs/operations/departed-member-access-backfill.md` — applied
+- R5-S2 [Minor] orphan-record class — migration header comment, plan Q3, runbook — applied (comment only; function and triggers unchanged)
+- R5-S3 / T5-3 [Minor] wording — code-review, plan — applied
+- F2 / T5-1 / T5-2 [Minor] cell tightening — `departed-member-db-invariants.integration.test.ts` — applied, red-proved by rows 09c, 09d and 09e
+
+Justification:
+- Every finding falls within the round-4 fix scope (the re-key guard and its documentation).
+- No product behaviour changed: the guard function and the trigger definitions are byte-identical to round 4, as `md5(prosrc)` and `pg_get_triggerdef` show on the template.
+- The test changes only tighten assertions, and each is red-proved.
+- No security-boundary predicate was edited.

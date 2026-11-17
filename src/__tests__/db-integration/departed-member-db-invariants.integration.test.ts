@@ -936,7 +936,7 @@ describe("departed-member DB invariants — real-DB integration", () => {
         { tgname: "trg_team_member_keys_departed_member_guard", tgenabled: "O" },
         { tgname: GUARD, tgenabled: "O" },
         { tgname: "trg_tenant_member_departures_stamp_guard", tgenabled: "O" },
-        { tgname: "trg_tenant_members_departed_row_rekey_guard", tgenabled: "O" },
+        { tgname: "trg_tenant_members_rekey_guard", tgenabled: "O" },
       ]);
     });
 
@@ -1130,38 +1130,42 @@ describe("departed-member DB invariants — real-DB integration", () => {
         );
         expect(await sql(`SELECT 1 FROM tenant_member_departures WHERE tenant_id = $1::uuid`, r.t)).toEqual([]);
       });
-
-      describe("re-keying a tenant row (superuser: the tenant-context trigger refuses a tenant_id change for the app)", () => {
-        // Re-keying a departed row would erase that user's departure: refused
-        // at the statement, whoever the new key names.
-        it.each([
-          ["user_id", "UPDATE tenant_members SET user_id = $3::uuid WHERE tenant_id = $1::uuid AND user_id = $2::uuid", "user"],
-          ["tenant_id", "UPDATE tenant_members SET tenant_id = $3::uuid WHERE tenant_id = $1::uuid AND user_id = $2::uuid", "tenant"],
-        ] as const)("a departed row by %s is refused", async (_label, text, onto) => {
-          const t = await tenant();
-          const departed = await member(t);
-          await stamp(t, departed, (await clock()) - HOUR);
-          const target = onto === "user" ? await guest(t) : await tenant();
-
-          expectRefused(await asSuperuser([[text, [t, departed, target]]]), "statement", ARM.TENANT_ROW_REKEYED, 0);
-          expect((await tenantRow(t, departed))?.deactivated_at).not.toBeNull();
-        });
-
-        it("(pair) an active row by user_id is not judged: there is no departure to erase", async () => {
-          const t = await tenant();
-          const active = await member(t);
-          const target = await guest(t);
-
-          expectCommitted(await asSuperuser([[
-            `UPDATE tenant_members SET user_id = $3::uuid WHERE tenant_id = $1::uuid AND user_id = $2::uuid`,
-            [t, active, target],
-          ]]));
-          expect(await tenantRow(t, target)).toEqual({ deactivated_at: null });
-        });
-      });
     });
 
     describe("refused at the statement", () => {
+      // Re-keying a departed row would erase that user's departure: refused
+      // at the statement, whoever the new key names. So is re-keying an active
+      // row: nothing legitimate does it, and it would leave the old key's
+      // departure record without its row (departed now, with its memberships).
+      it.each([
+        ["user_id", "UPDATE tenant_members SET user_id = $3::uuid WHERE tenant_id = $1::uuid AND user_id = $2::uuid", "user"],
+        ["tenant_id", "UPDATE tenant_members SET tenant_id = $3::uuid WHERE tenant_id = $1::uuid AND user_id = $2::uuid", "tenant"],
+      ] as const)("re-keying a departed tenant row by %s (superuser: the tenant-context trigger refuses a tenant_id change for the app)", async (_label, text, onto) => {
+        const t = await tenant();
+        const departed = await member(t);
+        await stamp(t, departed, (await clock()) - HOUR);
+        const target = onto === "user" ? await guest(t) : await tenant();
+
+        expectRefused(await asSuperuser([[text, [t, departed, target]]]), "statement", ARM.TENANT_ROW_REKEYED, 0);
+        expect((await tenantRow(t, departed))?.deactivated_at).not.toBeNull();
+      });
+
+      it.each([
+        ["with a departure record for its key (it would be left without its row)", true],
+        ["without one", false],
+      ] as const)("re-keying an active tenant row %s", async (_label, withRecord) => {
+        const r = await memberTeam();
+        // The user departed earlier and returned; the record stays.
+        if (withRecord) await record(r.t, r.u, r.admitted - HOUR);
+        const target = await guest(r.t);
+
+        expectRefused(
+          await asApp(r.t, [[`UPDATE tenant_members SET user_id = $3::uuid WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, [r.t, r.u, target]]]),
+          "statement", ARM.TENANT_ROW_REKEYED, 0,
+        );
+        expect(await tenantRow(r.t, r.u)).toEqual({ deactivated_at: null });
+      });
+
       it("lowering a record's departed_at", async () => {
         const t = await tenant();
         const g = await guest(t);
@@ -1211,6 +1215,17 @@ describe("departed-member DB invariants — real-DB integration", () => {
     });
 
     describe("allowed", () => {
+      it("(pair) a write naming a key column with its own value: the re-key guard fires and passes it", async () => {
+        const t = await tenant();
+        const active = await member(t);
+
+        expectCommitted(await asApp(t, [[
+          `UPDATE tenant_members SET user_id = user_id, role = 'ADMIN', updated_at = clock_timestamp() WHERE tenant_id = $1::uuid AND user_id = $2::uuid`,
+          [t, active],
+        ]]));
+        expect(await sql(`SELECT role::text AS role FROM tenant_members WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, t, active)).toEqual([{ role: "ADMIN" }]);
+      });
+
       it("a departure that ends its rows", async () => {
         const r = await memberTeam();
         expectCommitted(await asApp(r.t, [[STAMP_NOW, [r.t, r.u]], [endRows, [r.t, r.u]]]));

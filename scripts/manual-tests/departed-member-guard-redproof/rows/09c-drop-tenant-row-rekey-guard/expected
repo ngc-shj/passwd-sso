@@ -1,2 +1,4 @@
-tenant_row_rekeyed	departed-member DB invariants — real-DB integration T4: departure refused at COMMIT, not at the statement re-keying a tenant row (superuser: the tenant-context trigger refuses a tenant_id change for the app) a departed row by user_id is refused
-tenant_row_rekeyed	departed-member DB invariants — real-DB integration T4: departure refused at COMMIT, not at the statement re-keying a tenant row (superuser: the tenant-context trigger refuses a tenant_id change for the app) a departed row by tenant_id is refused
+tenant_row_rekeyed	departed-member DB invariants — real-DB integration T4: departure refused at the statement re-keying a departed tenant row by user_id (superuser: the tenant-context trigger refuses a tenant_id change for the app)
+tenant_row_rekeyed	departed-member DB invariants — real-DB integration T4: departure refused at the statement re-keying a departed tenant row by tenant_id (superuser: the tenant-context trigger refuses a tenant_id change for the app)
+tenant_row_rekeyed	departed-member DB invariants — real-DB integration T4: departure refused at the statement re-keying an active tenant row with a departure record for its key (it would be left without its row)
+tenant_row_rekeyed	departed-member DB invariants — real-DB integration T4: departure refused at the statement re-keying an active tenant row without one

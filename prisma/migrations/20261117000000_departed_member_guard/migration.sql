@@ -19,9 +19,13 @@ BEGIN;
 -- Not judged (docs/archive/review/departed-member-db-invariants-plan.md Q3, Q6):
 -- undoing a departure (a return, or deleting the tenant row: the bootstrap
 -- migration does both legitimately), TRUNCATE, re-homing a team, and a key row
--- for a user with no team_members row. Re-keying a departure record or a
--- departed tenant row is refused (it would erase the departure), and so is
--- lowering a record's departed_at, a cascaded primary-key change included. A
+-- for a user with no team_members row. Re-keying a tenant row or a departure
+-- record is refused: nothing legitimate does it, and it can erase a departure
+-- (a departed row's stamp, or an active row's, leaving the old key's record
+-- without its row). So is lowering a record's departed_at; a cascaded
+-- primary-key change is refused the same way. A DELETE of an active row whose
+-- user has a record (or a delete then an insert for another key) orphans the
+-- record the same way and is not judged: DELETE fires no check. A
 -- membership whose tenant differs from its team's is refused only where it
 -- would gain authority, so ending one stays possible. Roles that can disable
 -- triggers bypass it.
@@ -65,9 +69,8 @@ DECLARE
   v_refusal text;
 BEGIN
   IF TG_TABLE_NAME = 'tenant_members' AND TG_WHEN = 'BEFORE' THEN
-    IF OLD.deactivated_at IS NOT NULL
-       AND (NEW.tenant_id, NEW.user_id) IS DISTINCT FROM (OLD.tenant_id, OLD.user_id) THEN
-      RAISE EXCEPTION 'DEPARTED_MEMBER_GUARD:tenant_row_rekeyed: departed tenant row (tenant %, user %)', OLD.tenant_id, OLD.user_id
+    IF (NEW.tenant_id, NEW.user_id) IS DISTINCT FROM (OLD.tenant_id, OLD.user_id) THEN
+      RAISE EXCEPTION 'DEPARTED_MEMBER_GUARD:tenant_row_rekeyed: tenant row (tenant %, user %)', OLD.tenant_id, OLD.user_id
         USING ERRCODE = 'check_violation';
     END IF;
     RETURN NEW;
@@ -200,10 +203,9 @@ CREATE TRIGGER trg_tenant_member_departures_stamp_guard
   BEFORE UPDATE ON "tenant_member_departures"
   FOR EACH ROW EXECUTE FUNCTION public.departed_member_guard();
 
-CREATE TRIGGER trg_tenant_members_departed_row_rekey_guard
+CREATE TRIGGER trg_tenant_members_rekey_guard
   BEFORE UPDATE OF tenant_id, user_id ON "tenant_members"
-  FOR EACH ROW WHEN (OLD.deactivated_at IS NOT NULL)
-  EXECUTE FUNCTION public.departed_member_guard();
+  FOR EACH ROW EXECUTE FUNCTION public.departed_member_guard();
 
 CREATE CONSTRAINT TRIGGER tenant_members_departure_ends_memberships_ins
   AFTER INSERT ON "tenant_members"
@@ -211,11 +213,12 @@ CREATE CONSTRAINT TRIGGER tenant_members_departure_ends_memberships_ins
   FOR EACH ROW WHEN (NEW.deactivated_at IS NOT NULL)
   EXECUTE FUNCTION public.departed_member_guard();
 
+-- A tenant row cannot be re-keyed (trg_tenant_members_rekey_guard),
+-- so only a change of the stamp itself is a departure to judge.
 CREATE CONSTRAINT TRIGGER tenant_members_departure_ends_memberships_upd
-  AFTER UPDATE OF deactivated_at, tenant_id, user_id ON "tenant_members"
+  AFTER UPDATE OF deactivated_at ON "tenant_members"
   DEFERRABLE INITIALLY DEFERRED
-  FOR EACH ROW WHEN (NEW.deactivated_at IS NOT NULL
-                     AND (NEW.deactivated_at, NEW.tenant_id, NEW.user_id) IS DISTINCT FROM (OLD.deactivated_at, OLD.tenant_id, OLD.user_id))
+  FOR EACH ROW WHEN (NEW.deactivated_at IS NOT NULL AND NEW.deactivated_at IS DISTINCT FROM OLD.deactivated_at)
   EXECUTE FUNCTION public.departed_member_guard();
 
 CREATE CONSTRAINT TRIGGER tenant_member_departures_ends_memberships

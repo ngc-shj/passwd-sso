@@ -1,12 +1,11 @@
 --- a/function.sql
 +++ b/function.sql
-@@ -23,11 +23,6 @@
+@@ -23,10 +23,6 @@
    v_refusal text;
  BEGIN
    IF TG_TABLE_NAME = 'tenant_members' AND TG_WHEN = 'BEFORE' THEN
--    IF OLD.deactivated_at IS NOT NULL
--       AND (NEW.tenant_id, NEW.user_id) IS DISTINCT FROM (OLD.tenant_id, OLD.user_id) THEN
--      RAISE EXCEPTION 'DEPARTED_MEMBER_GUARD:tenant_row_rekeyed: departed tenant row (tenant %, user %)', OLD.tenant_id, OLD.user_id
+-    IF (NEW.tenant_id, NEW.user_id) IS DISTINCT FROM (OLD.tenant_id, OLD.user_id) THEN
+-      RAISE EXCEPTION 'DEPARTED_MEMBER_GUARD:tenant_row_rekeyed: tenant row (tenant %, user %)', OLD.tenant_id, OLD.user_id
 -        USING ERRCODE = 'check_violation';
 -    END IF;
      RETURN NEW;

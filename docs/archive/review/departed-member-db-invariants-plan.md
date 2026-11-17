@@ -168,8 +168,15 @@ database cannot tell either from a legitimate operation:
 - a return (`deactivated_at → NULL`), as `returnToTenant` does;
 - deleting the tenant row, as the bootstrap migration does.
 
-Re-keying a departed tenant row, or a departure record, onto another user or tenant also erases the
-departure, and nothing legitimate does it. Rule 2 matches only writes naming `deactivatedAt` and the
+A DELETE also orphans a record: deleting an active row whose user has a departure record (return
+then delete, or delete then insert for another key) leaves the record without its row, which the
+guard reads as departed now while the user still holds active memberships. DELETE fires no check,
+so this stays unjudged for the bootstrap reason above, under the `tenantRowDeletes` pin. The
+single-statement form, a re-key, is refused (Phase 3 round 4 S4-1).
+
+Re-keying a tenant row (departed, or active away from a key with a departure record) or a departure
+record onto another user or tenant also erases or orphans a departure, and nothing legitimate does
+it. Rule 2 matches only writes naming `deactivatedAt` and the
 AST pin only deletes, so neither would see it: the database refuses both at the statement
 (`tenant_row_rekeyed`, `record_rekeyed`; Phase 3 S-1 and round 2 S2-1), and a record's lowering
 (`record_lowered`). A cascaded primary-key change reaches a record the same way and is refused too.
@@ -249,9 +256,9 @@ Triggers:
 | `trg_team_members_departed_member_guard` | `team_members` | BEFORE INSERT OR UPDATE, row |
 | `trg_team_member_keys_departed_member_guard` | `team_member_keys` | BEFORE INSERT OR UPDATE, row |
 | `trg_tenant_member_departures_stamp_guard` | `tenant_member_departures` | BEFORE UPDATE, row |
-| `trg_tenant_members_departed_row_rekey_guard` | `tenant_members` | BEFORE UPDATE OF `tenant_id`, `user_id` WHEN the row is departed; refuses the re-key (`tenant_row_rekeyed`, Phase 3 round 2 S2-1). The `_upd` firing on those columns below stays as a second line it shadows |
+| `trg_tenant_members_rekey_guard` | `tenant_members` | BEFORE UPDATE OF `tenant_id`, `user_id`; refuses any re-key (`tenant_row_rekeyed`; Phase 3 round 2 S2-1 for a departed row, round 4 S4-1 for an active row, which would leave the old key's departure record without its row) |
 | `tenant_members_departure_ends_memberships_ins` | `tenant_members` | AFTER INSERT WHEN `NEW.deactivated_at IS NOT NULL`; constraint, DEFERRABLE INITIALLY DEFERRED |
-| `tenant_members_departure_ends_memberships_upd` | `tenant_members` | AFTER UPDATE OF `deactivated_at`, `tenant_id`, `user_id` WHEN the new stamp is non-NULL and the stamp, tenant or user differs from OLD (re-keying a departed row is a departure of the new key, round 4 R4-1); same |
+| `tenant_members_departure_ends_memberships_upd` | `tenant_members` | AFTER UPDATE OF `deactivated_at` WHEN the new stamp is non-NULL and differs from OLD; same. (plan review round 4 R4-1 also fired it on `tenant_id`/`user_id`; every tenant-row re-key is refused before it since Phase 3 round 2/4, so those columns were dropped in Phase 3 round 3, test F1) |
 | `tenant_member_departures_ends_memberships` | `tenant_member_departures` | AFTER INSERT OR UPDATE; same |
 
 **`team_members` (judged on NEW).**
@@ -313,7 +320,7 @@ with the written row's own ids only. `<arm>` is a fixed token, one per refusal:
 | `key_inactive` | key row written for an ended membership |
 | `record_lowered` | `departed_at` lowered |
 | `record_rekeyed` | a record's `tenant_id` or `user_id` changed (Phase 3 S-1) |
-| `tenant_row_rekeyed` | a departed tenant row's `tenant_id` or `user_id` changed (Phase 3 round 2 S2-1) |
+| `tenant_row_rekeyed` | a tenant row's `tenant_id` or `user_id` changed (Phase 3 round 2 S2-1, round 4 S4-1) |
 | `isolation` | the transaction is not READ COMMITTED |
 | `departure_active` | departed now and still holding an active row |
 | `departure_leftover` | not departed now and still holding a leftover row |
@@ -490,11 +497,12 @@ member whose key rows stay untouched.
   - a stamp and a return in one transaction, while the user has a departure record later than the
     row's admission, so the row stays leftover through the record (`departure_leftover`);
   - a record with a re-created active tenant row, leaving a row admitted before the record;
-  - re-keying a departed tenant row onto a user with an active row, once by `user_id` and once by
-    `tenant_id`;
-  - with pair cells: the same re-key onto a user with no active row commits, and a stamp and a
-    return with no later record commits.
+  - with a pair cell: a stamp and a return with no later record commits.
 - Deny at the statement:
+  - re-keying a departed tenant row, by `user_id` and by `tenant_id`, and an active one, with and
+    without a departure record for its key (`tenant_row_rekeyed`; pair: a write naming a key column
+    with its own value, plus a role change, commits, under Allow);
+  - re-keying a departure record, onto another user and onto another tenant (`record_rekeyed`);
   - lowering `departed_at`;
   - `SET CONSTRAINTS ALL IMMEDIATE` before the ending (documented).
 - Allow:
@@ -550,7 +558,11 @@ source mode applies them to a scratchpad copy of the tree, never the worktree.
 | grant leftover refusal | drop it | T1 residue raise cells (`grant_leftover`) |
 | key-row leftover check | drop it | T2 INSERT / UPDATE / `ON CONFLICT` deny (`key_leftover`) |
 | key-row ended-member check | drop it | T2 ended-member deny (`key_inactive`) |
-| tenant-row re-key firing | `UPDATE OF deactivated_at` only / drop `tenant_id` from the list | T4 re-key by `user_id` / by `tenant_id` |
+| tenant-row re-key refusal | drop it (row 09c; rows 09a/09b retired with the `_upd` columns they mutated) / departed rows only (09d) | T4 statement re-keys / T4 active row re-keyed away from a record |
+| `tenant_mismatch` halves | activation only / grant only (rows 15c, 15d); refusing endings again (15b) | T1 role raise on a mismatched row / T1 mismatched INSERT / T1 ending a mismatched row |
+| record re-key refusal | drop it (16b) | T4 record re-key onto a user / a tenant |
+| confirm-key | `key_inactive` unmapped (R1y) / CAS before the key write (R1z) | race cell 404, unit mapping cell / unit order cell, race cell |
+| SCIM user DELETE order | keys before member rows (R6) | race cell: no key outlives the membership |
 | activation leftover refusal | drop it | T3 born-leftover deny, both `tenant_id` spellings (`activation_leftover`) |
 | unknown-role raise | `ELSE 0` | T1 scratch unknown-label cell (`unknown_role`) |
 | S1 departed-now on activation | drop it | T3 INSERT while departed, re-activation while departed |
