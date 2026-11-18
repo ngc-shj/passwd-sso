@@ -135,6 +135,7 @@ import { prisma } from "@/lib/prisma";
 import logger from "@/lib/logger";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { deactivateScimUser } from "@/lib/services/scim-user-service";
+import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import {
   ACTOR_TYPE,
   AUDIT_ACTION,
@@ -934,7 +935,7 @@ describe("departed-member leaked authority — real-DB integration", () => {
           [parkKey],
           () => confirmKey(teamId, targetRow, owner).then((r) => r.status, (e: unknown) => String(e)),
           async (blocker, parkedPid) => {
-            deleting = withTenantRls(prisma, tenantId, () => deactivateScimUser(tenantId, target.id), { timeout: 15_000 });
+            deleting = withTenantRls(prisma, tenantId, () => deactivateScimUser(tenantId, target.id, { userId: SYSTEM_ACTOR_ID, actorType: ACTOR_TYPE.SYSTEM }), { timeout: 15_000 });
             deleting.catch(() => {});
             where = await race.settledOrBlocked(deleting, parkedPid, await blocker.query<{ pid: number }>("SELECT pg_backend_pid() AS pid").then((r) => r.rows[0].pid));
           },

@@ -240,3 +240,18 @@
 - **Wording:** the plan's round labels and the round-3 code-review resolution's impact wording are corrected.
 - **Red-proof:** rows 09c, 09d, 09e and 31a proved after these changes. The final full matrix is recorded below.
 - **Final full matrix:** all 52 rows proved (`run-all7`).
+
+## D13 — Rebase onto origin/main after #1070 (containment footholds)
+
+- **Conflicts:** one, an import list in `departed-member-leaked-authority.integration.test.ts`; both sides were kept.
+- **`deactivateScimUser` signature:** it now takes an audit actor. The three test calls added on this branch pass one.
+- **`foothold-write-gate.integration.test.ts` (#1070):** five cells returned 409 instead of 403/404. Their held "deactivation" was a raw `UPDATE tenant_members SET deactivated_at` holding only the row lock, so at COMMIT it deadlocked with the route under test:
+  - the guard's departure check takes the tenant-member key at commit;
+  - the route held that key (`lockTenantRows`) and was waiting on the row;
+  - 40P01 followed, which the route maps to 409.
+- **Fix:** the hold now takes the key first through `lockTenantRows`, as every application writer does, and all 66 cells pass. No production writer stamps a tenant row without the key.
+- **Sentinel runbook:** the contain step is a hand-written stamp, so it now takes the key first and says why. The SQL was run on the worktree database inside a rolled-back transaction.
+- **Verification after the rebase:**
+  - the full integration suite: every failure is one of the D4 environment cases (no MinIO; the retired role's CONNECT on this database), plus `foothold-write-gate`, now fixed;
+  - the red-proof rows whose subjects the rebase touched (R1, R1y, R1z, R6, 31a, 09c, 09d, 09e) were run, with the results below.
+  Result: all eight proved.

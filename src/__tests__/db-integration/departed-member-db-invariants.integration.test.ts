@@ -1387,7 +1387,7 @@ describe("departed-member DB invariants — real-DB integration", () => {
         await addKey(r.t, r.teamId, r.u);
         await residue(r.t, r.u, r.admitted + 30 * MINUTE);
 
-        await withTenantRls(prisma, r.t, () => deactivateScimUser(r.t, r.u), { timeout: 15_000 });
+        await withTenantRls(prisma, r.t, () => deactivateScimUser(r.t, r.u, ACTOR), { timeout: 15_000 });
 
         expect(await memberRow(r.rowId)).toBeNull();
         expect(await tenantRow(r.t, r.u)).toBeNull();
@@ -1640,7 +1640,7 @@ describe("departed-member DB invariants — real-DB integration", () => {
         await blocker.query(`SELECT 1 FROM teams WHERE id = $1::uuid FOR UPDATE`, [parkedTeam]);
         const { rows: [{ pid: blockerPid }] } = await blocker.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
 
-        departure = withTenantRls(prisma, t, () => deactivateScimUser(t, holder), { timeout: 15_000 });
+        departure = withTenantRls(prisma, t, () => deactivateScimUser(t, holder, ACTOR), { timeout: 15_000 });
         departure.catch(() => {});
         // Parked holding the holder's key and tenant row, its record written.
         const departurePid = await race.waitForBackendBlockedBy(blockerPid);

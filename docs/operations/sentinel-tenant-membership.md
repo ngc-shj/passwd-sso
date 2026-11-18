@@ -80,10 +80,20 @@ separate explanation.
 ### 3. Contain
 
 ```sql
+BEGIN;
+-- The tenant-member key every writer takes first (tenant-row-lock.ts); the
+-- database's departure check takes it again at COMMIT.
+SELECT pg_advisory_xact_lock(hashtext('tenant-member:' || tenant_id::text || ':' || user_id::text))
+  FROM tenant_members WHERE id = '<the id from step 1>';
 UPDATE tenant_members
 SET deactivated_at = now()
 WHERE id = '<the id from step 1>';
+COMMIT;
 ```
+
+Take the key before the stamp. A stamp that holds only the row lock deadlocks
+at COMMIT with a request that holds the key and waits on that row; PostgreSQL
+aborts one of the two.
 
 If the member holds active memberships of that tenant's teams, the database
 refuses this stamp at COMMIT (`DEPARTED_MEMBER_GUARD:departure_active`,
