@@ -1,14 +1,19 @@
 # Code Review: prod-audit-expiring-suppression
 Date: 2026-11-18
-Review round: 3
+Review round: 4
 
 ## Changes from Previous Round
+Round 4 reviewed the round-3 fixes (`fc5d96e22..22ea6f407`). Security and testing
+returned no findings, and every round-3 resolution was independently re-verified.
+Functionality raised one Minor wording finding (F9), applied under the tightening-only
+skip. See "Round 4" below.
+
 Round 3 reviewed the round-2 fixes (`a5184a840..fc5d96e22`). N1/S4, T4 and T5 were
 confirmed resolved. The T6 comment-line skip was found to fail open (S5, Major,
-converging with testing's A1) and was reverted rather than refined. Five further Minor
-findings were fixed: F7/S6, which converge; N-T7, raised as Major by testing and pinned
-as a regression; N-T8; and N-T9. F8 and A2 were accepted with justification. See
-"Round 3 findings" below.
+converging with testing's A1) and was reverted rather than refined. Four further
+findings were fixed: F7/S6 (converged, Minor), N-T7 (adjudicated Minor), N-T8 (Minor)
+and N-T9 (Minor). F8 and A2 were accepted with justification. See "Round 3 findings"
+below.
 
 Round 2 reviewed the round-1 fixes (`3fd811f5f..a5184a840`). Every round-1 finding was
 confirmed resolved. There were four new Minor findings: N1 and S4, which converge, plus
@@ -323,8 +328,10 @@ standalone-output claims were verified against `.next/standalone` from a local
 - **F8 Minor** — comment text still counts as a verifier line in three shapes: a
   trailing step comment, a comment on a block header, and a full-line shell comment
   inside a block. Each over-blocks, failing loudly.
-- **N-T7 (raised as Major)** — no deny case pinned that a masked step with a trailing
-  `# comment` is still flagged. The mutation `/#/` as the comment test survived.
+- **N-T7 (raised as Major, adjudicated Minor)** — no deny case pinned that a masked step
+  with a trailing `# comment` is still flagged. The mutation `/#/` as the comment test
+  survived. It is adjudicated Minor because the S5 revert removed the code that
+  mutation targets, so what remained was a missing regression pin, not a live gap.
 - **N-T8 Minor** — `devNodes` element and distinctness validation was unpinned.
 - **N-T9 Minor** — the production-run label in the node messages was pinned only by a
   prefix match.
@@ -395,3 +402,28 @@ standalone-output claims were verified against `.next/standalone` from a local
   - Likelihood: needs a comment ending in `\` directly above a masked verifier.
   - Cost to fix: low, but it changes the line attribution for every joined shell
     continuation, where the first line is the right anchor. Not worth the churn.
+
+## Round 4
+Findings:
+- **F9 Minor (R29)** — the round-3 summary counted F7 and S6 separately ("five") while
+  treating them as one item, and labelled N-T7 Minor while saying it was raised as
+  Major. N-T7's adjudicated severity was stated nowhere.
+- **A3 [Adjacent] informational** — fdir (production tree) resolves picomatch only from
+  the dev-only top-level copy, so under an `--omit=dev` install its glob is unavailable.
+  This is not reachable: `dynamicRequireTargets` is unset and the build installs dev
+  dependencies. It does not affect the suppression.
+
+Security and testing: No findings. Security's R43 table across `main...HEAD` lists one
+widening — the production audit becoming suppressible — which is owner-approved and
+bounded by the scope filter, the exact `nodes`/`devNodes` path sets, the expiry cap and
+the stale-entry check. The verifier-set widening is fail-closed only.
+
+## Tightening-only skip — Round 4
+Findings applied directly (no Round 5 review):
+- [F9] [Minor] round-3 summary miscount and N-T7 severity label — this document,
+  "Changes from Previous Round" and "Round 3 findings" — applied verbatim (N-T7
+  adjudicated Minor, with the reason stated).
+
+Justification: the finding is inside the round-3 fix scope (this review document), is
+an inline wording fix, and touches no security boundary. A3 is informational and needs
+no change.
