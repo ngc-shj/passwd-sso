@@ -23,6 +23,7 @@
     "pre-pr": "bash scripts/pre-pr.sh",
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
+    "db:check-drift": "prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code",
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
     "generate:icons": "bash scripts/generate-icons.sh",

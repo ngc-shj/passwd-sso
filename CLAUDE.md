@@ -10,6 +10,7 @@ npm run build            # Production build
 npm run lint             # ESLint (next/core-web-vitals + next/typescript)
 npm run db:migrate       # Prisma migrate dev (reads .env.local via prisma.config.ts)
 npm run db:push          # Push schema without migration
+npm run db:check-drift   # Exit 2 if schema.prisma differs from the migrated DB (CI runs it after migrate deploy)
 npm run db:seed          # Seed data (tsx prisma/seed.ts)
 npm run db:studio        # Prisma Studio GUI
 npm run generate:key     # Generate 256-bit hex master key
