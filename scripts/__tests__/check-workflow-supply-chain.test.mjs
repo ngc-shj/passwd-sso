@@ -1175,13 +1175,37 @@ describe("findMaskedVerifierViolations — vulnerability audits", () => {
     expect(findMaskedVerifierViolations(wf, "ci.yml")).toEqual([]);
   });
 
-  it("does NOT flag a comment line that mentions npm audit next to a pipe", () => {
+  it("flags a masked audit step that carries a trailing comment", () => {
+    const wf = ["    steps:", "      - run: npm audit --omit=dev --audit-level=high || true # advisory"].join("\n");
+    const v = findMaskedVerifierViolations(wf, "ci.yml");
+    expect(v.some((m) => /masked/.test(m))).toBe(true);
+  });
+
+  it("flags a comment naming npm audit beside a pipe (deliberate over-block)", () => {
+    // Comment lines are scanned on purpose: a line starting with `#` is
+    // executable inside a multi-line quoted scalar (cases below), and only a
+    // YAML parser could tell the two apart.
     const wf = [
       "    steps:",
       "      # `npm audit` output | head is advisory only",
       "      - run: npm audit --omit=dev --audit-level=high",
     ].join("\n");
-    expect(findMaskedVerifierViolations(wf, "ci.yml")).toEqual([]);
+    expect(findMaskedVerifierViolations(wf, "ci.yml").length).toBeGreaterThan(0);
+  });
+
+  it.each([
+    ["a double-quoted scalar", ['      - run: "echo \'', "          #' && npm audit --omit=dev || true\""]],
+    ["a single-quoted scalar", ["      - run: 'echo \"", "          #\" && npm audit --omit=dev || true'"]],
+    ["an anchored block scalar", ["      - run: &r |", '          echo "', '          #" && npm audit --omit=dev || true']],
+  ])("flags a masked audit on a #-led continuation line of %s", (_name, lines) => {
+    const v = findMaskedVerifierViolations(["    steps:", ...lines].join("\n"), "ci.yml");
+    expect(v.some((m) => /masked/.test(m))).toBe(true);
+  });
+
+  it("flags an unprotected pipe on a #-led continuation line of a quoted scalar", () => {
+    const wf = ["    steps:", '      - run: "echo \'', "          #' && npm audit --omit=dev | tee out\""].join("\n");
+    const v = findMaskedVerifierViolations(wf, "ci.yml");
+    expect(v.some((m) => /pipe/.test(m))).toBe(true);
   });
 
   it("still checks a step that a backslash-ended comment would join onto", () => {

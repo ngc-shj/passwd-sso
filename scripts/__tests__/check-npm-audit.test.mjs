@@ -150,6 +150,9 @@ describe("check-npm-audit.mjs", () => {
     ["a production scope with an empty-string node", { scope: "production", nodes: [""] }, 'must list the reviewed install paths in "nodes"'],
     ["a production scope with a non-string node", { scope: "production", nodes: [1] }, 'must list the reviewed install paths in "nodes"'],
     ["empty devNodes", { scope: "production", nodes: NODES, devNodes: [] }, '"devNodes", when present, must be a non-empty list'],
+    ["a duplicated devNodes path", { scope: "production", nodes: NODES, devNodes: [DEV_NODE, DEV_NODE] }, '"devNodes", when present, must be a non-empty list'],
+    ["an empty-string devNodes path", { scope: "production", nodes: NODES, devNodes: [""] }, '"devNodes", when present, must be a non-empty list'],
+    ["a non-string devNodes path", { scope: "production", nodes: NODES, devNodes: [1] }, '"devNodes", when present, must be a non-empty list'],
     ["a path in both nodes and devNodes", { scope: "production", nodes: NODES, devNodes: [NODES[0]] }, 'cannot be in both "nodes" and "devNodes"'],
     ["nodes on a dev entry", { nodes: NODES }, '"nodes" and "devNodes" apply only to production entries'],
     ["devNodes on a dev entry", { devNodes: [DEV_NODE] }, '"nodes" and "devNodes" apply only to production entries'],
@@ -231,7 +234,7 @@ describe("check-npm-audit.mjs", () => {
       const extra = "node_modules/next/node_modules/braces";
       const r = run({ audit: report([advisory()], {}, [...NODES, extra]), suppressions: [prodSuppression()], args: ["--omit-dev"] });
       expect(r.status).toBe(1);
-      expect(r.stderr).toContain(`${extra} is not among the reviewed "nodes"`);
+      expect(r.stderr).toContain(`${extra} is not among the reviewed "nodes" — review`);
     });
 
     it("fails a reviewed node that is no longer installed", () => {
@@ -243,7 +246,7 @@ describe("check-npm-audit.mjs", () => {
     it("fails closed when npm audit reports no nodes to compare", () => {
       const r = run({ audit: report([advisory()], {}, null), suppressions: [prodSuppression()], args: ["--omit-dev"] });
       expect(r.status).toBe(1);
-      expect(r.stderr).toContain("reported no install paths");
+      expect(r.stderr).toContain('reported no install paths to compare with the reviewed "nodes"\n');
     });
 
     it("still validates dev-scope entries it does not apply", () => {

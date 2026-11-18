@@ -1,8 +1,15 @@
 # Code Review: prod-audit-expiring-suppression
 Date: 2026-11-18
-Review round: 2
+Review round: 3
 
 ## Changes from Previous Round
+Round 3 reviewed the round-2 fixes (`a5184a840..fc5d96e22`). N1/S4, T4 and T5 were
+confirmed resolved. The T6 comment-line skip was found to fail open (S5, Major,
+converging with testing's A1) and was reverted rather than refined. Five further Minor
+findings were fixed: F7/S6, which converge; N-T7, raised as Major by testing and pinned
+as a regression; N-T8; and N-T9. F8 and A2 were accepted with justification. See
+"Round 3 findings" below.
+
 Round 2 reviewed the round-1 fixes (`3fd811f5f..a5184a840`). Every round-1 finding was
 confirmed resolved. There were four new Minor findings: N1 and S4, which converge, plus
 T4, T5 and T6. They are listed under "Round 2 findings" below.
@@ -262,8 +269,8 @@ standalone-output claims were verified against `.next/standalone` from a local
   equal `nodes` ∪ `devNodes`. `devNodes` must be a non-empty list of distinct paths,
   disjoint from `nodes`, and is refused on a `"dev"` entry. The production run ignores
   it. The picomatch entry lists the four whole-tree paths, and its reason now names fdir
-  (an optional peer of `@rollup/plugin-commonjs`, which globs only
-  `dynamicRequireTargets` from build config) beside micromatch. `vulnerability-triage.md`
+  (corrected in round 3: a dependency of `@rollup/plugin-commonjs` that
+  takes picomatch as an optional peer) beside micromatch. `vulnerability-triage.md`
   documents `devNodes`.
 - Modified files: `scripts/checks/check-npm-audit.mjs` (`nodeErrors`, validation in
   `loadSuppressions`, match in `main`), `scripts/checks/npm-audit-suppressions.json`,
@@ -289,7 +296,7 @@ standalone-output claims were verified against `.next/standalone` from a local
 - Action: added refusal rows for an empty-string node and a non-string node.
 - Red-proof: replacing the element check with `true` reddens both rows.
 
-### T6 — lone comment lines skipped in per-line checks
+### T6 — lone comment lines skipped in per-line checks (reverted in round 3, see S5)
 - Action: a logical line that is a single raw line starting with `#` is skipped by the
   mask and pipe rules. A comment ending in `\` that the joiner merged with the next line
   is NOT skipped, because YAML does not continue a comment, so that next line is a real
@@ -301,3 +308,90 @@ standalone-output claims were verified against `.next/standalone` from a local
 - Red-proof: removing the skip reddens the allow case; dropping the unjoined-only
   condition reddens the deny case.
 - The live run over every workflow passes.
+
+## Round 3 findings
+- **S5 Major (R43; testing A1 converges)** — the T6 skip decided "comment line" with a
+  regex (`/^\s*#/` on an unjoined line). A line starting with `#` is executable text on
+  a continuation line of a multi-line quoted scalar (`run: "echo '` / `#' && npm audit
+  || true"`) or of a block whose header `blockMatch` does not recognise (`run: &r |`).
+  `a5184a840` flagged those masks; `fc5d96e22` passed them.
+- **F7 / S6 Minor (R29; two experts)** — the reason called fdir "an optional peer of
+  @rollup/plugin-commonjs". In fact fdir is a regular dependency of
+  @rollup/plugin-commonjs (and of tinyglobby), and picomatch is fdir's optional peer
+  (`^3 || ^4`, unsatisfied). micromatch also arrives through fast-glob from
+  `@next/eslint-plugin-next`, at lint time.
+- **F8 Minor** — comment text still counts as a verifier line in three shapes: a
+  trailing step comment, a comment on a block header, and a full-line shell comment
+  inside a block. Each over-blocks, failing loudly.
+- **N-T7 (raised as Major)** — no deny case pinned that a masked step with a trailing
+  `# comment` is still flagged. The mutation `/#/` as the comment test survived.
+- **N-T8 Minor** — `devNodes` element and distinctness validation was unpinned.
+- **N-T9 Minor** — the production-run label in the node messages was pinned only by a
+  prefix match.
+- **A2 [Adjacent] Minor** — a backslash-joined comment-plus-step line reports the
+  comment's line number.
+
+## Round 3 Resolution Status
+### S5 — comment-line skip reverted
+- Action: removed the skip, so the per-line mask and pipe rules are back to their
+  `a5184a840` logic. The gate's comment now records why: comment text is scanned on
+  purpose; telling a YAML comment from a `#` inside a multi-line scalar needs a YAML
+  parser, and the regex skip exempted executable text. The resulting over-block (T6, F8)
+  fails loudly and is fixed by rewording the comment.
+- Alternatives searched (cross-perspective protocol): a parser-backed skip (js-yaml
+  deep-equality with the line removed) would keep both properties, but it grows this
+  spelling-rule gate a YAML-semantics layer — the accretion its own header warns
+  against — to remove a false positive no current workflow produces. Security keeps
+  precedence: the narrower, fail-closed behaviour stays.
+- Modified file: `scripts/checks/check-workflow-supply-chain.mjs` (logical-line
+  builder, per-line loop in `findMaskedVerifierViolations`, comment above
+  `verifierLineRe`).
+- Tests:
+  - deny: a masked audit on a `#`-led continuation line of a double-quoted scalar, of a
+    single-quoted scalar, and of an anchored block scalar; an unprotected pipe in the
+    quoted-scalar shape;
+  - over-block pinned: a comment naming `npm audit` beside a pipe is flagged;
+  - kept: the backslash-joined deny case.
+- Red-proof: against `fc5d96e22`'s gate, all five new cases red.
+
+### F7 / S6 — reason wording
+- Action: the reason now says fdir is a dependency of @rollup/plugin-commonjs and
+  tinyglobby that takes picomatch as an optional peer (`^3 || ^4`, unsatisfied) yet
+  requires it at load; plugin-commonjs globs through it only `dynamicRequireTargets`,
+  and tinyglobby passes it no patterns. micromatch arrives via patch-package and, at lint
+  time, fast-glob from `@next/eslint-plugin-next`. The round-2 resolution text above is
+  corrected to match.
+- Modified file: `scripts/checks/npm-audit-suppressions.json`.
+
+### F8 — remaining comment shapes over-block
+- Accepted, by the same decision as S5: removing them needs the parser the S5 resolution
+  declined.
+- Anti-Deferral check:
+  - Worst case: a future workflow comment that names `npm audit` beside `|` or
+    `|| true` reds the static-checks job, with a message naming the line.
+  - Likelihood: low — no current workflow does this.
+  - Cost to fix when it happens: reword one comment, as the gate comment says.
+  - The failure direction is closed, never open.
+
+### N-T7 — trailing-comment mask pinned
+- Action: added "flags a masked audit step that carries a trailing comment".
+- Red-proof: a `/#/` line skip reddens it (together with the S5 cases).
+
+### N-T8 — devNodes element/distinctness pinned
+- Action: added refusal rows for a duplicated, an empty-string and a non-string
+  `devNodes` path.
+- Red-proof: weakening the validator to "non-empty array" reddens all three.
+
+### N-T9 — production-run label pinned
+- Action: the production-run assertions now end-anchor the label (`… reviewed "nodes" —
+  review`, `… reviewed "nodes"\n`).
+- Red-proof: forcing the whole-tree label on both runs reddens both.
+
+### A2 — line number of a joined comment-plus-step line
+- Accepted. This predates the branch and comes from the backslash joiner, which reports
+  the first raw line of a logical line.
+- Anti-Deferral check:
+  - Worst case: the message points one line above the step it names.
+  - Likelihood: needs a comment ending in `\` directly above a masked verifier.
+  - Cost to fix: low, but it changes the line attribution for every joined shell
+    continuation, where the first line is the right anchor. Not worth the churn.

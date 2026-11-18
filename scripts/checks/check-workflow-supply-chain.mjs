@@ -137,11 +137,7 @@ export function findMaskedVerifierViolations(content, name) {
       joined = joined.replace(/\\\s*$/, " ") + rawLines[i + 1];
       i += 1;
     }
-    // A lone comment line runs nothing. Only an unjoined one: a YAML comment
-    // ending in `\` does not continue onto the next line, so a joined logical
-    // line may carry a real step after the comment.
-    const comment = i === start && /^\s*#/.test(joined);
-    logical.push({ text: joined, body: joined, line: start + 1, comment });
+    logical.push({ text: joined, body: joined, line: start + 1 });
   }
   // `dist\??\.attestations` tolerates optional chaining (`j?.dist?.attestations`
   // in the real release.yml assertion). `check-override-floor-staleness` names the
@@ -150,7 +146,12 @@ export function findMaskedVerifierViolations(content, name) {
   // reference on separate lines still mark the workflow as verifier-running.
   // `npm\s+audit\b` and `check-npm-audit` name the vulnerability audits: CI's
   // app audit runs through the suppression-aware gate, the extension and CLI
-  // jobs run plain `npm audit --omit=dev`.
+  // jobs run plain `npm audit --omit=dev`. Comment text is scanned too, so a
+  // comment naming a verifier beside a `|` or `|| true` reds the gate. That
+  // over-block is deliberate: telling a YAML comment from a `#` inside a
+  // multi-line quoted scalar or an unrecognised block header needs a YAML
+  // parser, and a regex skip of "comment" lines exempted executable text
+  // (`run: "echo '` / `#' && npm audit || true"`). Reword the comment instead.
   const verifierLineRe =
     /audit\s+signatures|dist\??\.attestations|check-override-floor-staleness|check-npm-audit|npm\s+audit\b/;
   // The `check-override-floor-staleness` alternative is bound to actual `run:`
@@ -192,8 +193,7 @@ export function findMaskedVerifierViolations(content, name) {
   // a second time by the allowlist: the spelling is the better diagnostic, and
   // reporting one construct twice reads as two defects.
   const spelled = new Set();
-  for (const { text, body, line, comment } of logical) {
-    if (comment) continue;
+  for (const { text, body, line } of logical) {
     if (verifierLineRe.test(text) && maskRe.test(text)) {
       spelled.add(line);
       violations.push(
