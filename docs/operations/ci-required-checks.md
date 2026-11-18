@@ -1,7 +1,6 @@
 # CI required checks
 
-Once the ruleset rule below is added, `main` accepts a pull request only when two checks
-have passed. Both must come from GitHub Actions (integration id 15368):
+`main` accepts a pull request only when two checks have passed. Both must come from GitHub Actions (integration id 15368):
 
 | Check | Job | Workflow |
 | --- | --- | --- |
@@ -23,8 +22,8 @@ into another branch (where the path filter compares against a different base) mu
 able to report the check for a pull request into `main`.
 
 The rule lives in the repository ruleset "Protect main", as a `required_status_checks` rule.
-It is added by a repository admin once the aggregate jobs are on `main`. Until then, neither
-check blocks a merge.
+A repository admin added it once the aggregate jobs were on `main`, and both checks now block
+a merge.
 Read it back with:
 
 ```bash

@@ -1240,7 +1240,10 @@ model AuditLog {
 model AuditChainAnchor {
   tenantId           String    @id @map("tenant_id") @db.Uuid
   chainSeq           BigInt    @default(0) @map("chain_seq")
-  prevHash           Bytes     @default(dbgenerated("'\\x00'::bytea")) @map("prev_hash")
+  // "AA==" is base64 for the single 0x00 genesis byte ('\x00'::bytea). Prisma
+  // reads the column default back in this form; dbgenerated("'\\x00'::bytea")
+  // never compares equal, and `prisma migrate dev` then asks for a migration.
+  prevHash           Bytes     @default("AA==") @map("prev_hash")
   updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
   epoch              Int?      @default(1) @map("epoch")
   publishPausedUntil DateTime? @map("publish_paused_until") @db.Timestamptz(3)

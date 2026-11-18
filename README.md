@@ -630,6 +630,7 @@ docs/                     # Documentation (architecture, security, operations, s
 | `npm run test:e2e` | Playwright E2E tests |
 | `npm run db:migrate` | Prisma migrate (dev) |
 | `npm run db:push` | Push schema without migration |
+| `npm run db:check-drift` | Fail if schema.prisma differs from the migrated DB (needs a running DB) |
 | `npm run db:seed` | Seed data |
 | `npm run db:studio` | Prisma Studio GUI |
 | `npm run generate:key` | Generate 256-bit hex key |

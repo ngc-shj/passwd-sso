@@ -230,6 +230,18 @@ jobs:
       - name: Apply database migrations
         run: npx prisma migrate deploy
 
+      # The part of the migrated database that Prisma models (tables, columns,
+      # defaults, indexes, foreign keys, enums) must match schema.prisma.
+      # Otherwise `prisma migrate dev` asks every developer for a new
+      # migration. The prev_hash bytea default once did this: Prisma reads it
+      # back in a different spelling, and eight migrations re-issued one no-op
+      # ALTER. The step also catches a schema edit committed without its
+      # migration. RLS policies, grants, functions, CHECK constraints and
+      # partial indexes are outside what migrate diff compares. Run the same
+      # check locally with `npm run db:check-drift`.
+      - name: Check schema.prisma matches the migrated database
+        run: npm run db:check-drift
+
       # GitHub Actions service containers do not mount initdb scripts, so the
       # `passwd_app` role (created by infra/postgres/initdb/02-create-app-role.sql
       # in dev) does not exist here. The `passwd_outbox_worker` role is created
