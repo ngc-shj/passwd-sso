@@ -12,7 +12,7 @@
 // Real timers: the React scheduler runs on MessageChannel, which fake timers do not
 // drive. Writes go through the real performAutofill, which dispatches raw native
 // events — no act(), no fireEvent.
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { flushSync } from "react-dom";
@@ -131,11 +131,12 @@ describe("performAutofill — React-controlled login (Sony Bank)", () => {
     $("brchNum").focus();
 
     await performAutofill(payload());
-    await settle();
-
-    expect($("brchNum").value).toBe("123");
-    expect($("accountNum").value).toBe("4567890");
-    expect($("loginPwd_inputPass").value).toBe("dummy-pw");
+    // Fields are written from their own tasks: wait for the values, not a fixed delay.
+    await vi.waitFor(() => {
+      expect($("brchNum").value).toBe("123");
+      expect($("accountNum").value).toBe("4567890");
+      expect($("loginPwd_inputPass").value).toBe("dummy-pw");
+    });
   });
 
   // A native listener on the password runs before React's root-delegated onChange,
@@ -158,9 +159,9 @@ describe("performAutofill — React-controlled login (Sony Bank)", () => {
     $("brchNum").focus();
 
     await performAutofill(payload());
-    await settle();
-
-    expect($("accountNum").value).toBe("4567890");
-    expect(password.value).toBe("dummy-pw");
+    await vi.waitFor(() => {
+      expect($("accountNum").value).toBe("4567890");
+      expect(password.value).toBe("dummy-pw");
+    });
   });
 });

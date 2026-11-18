@@ -399,3 +399,20 @@ describe("MASTER_KEY_ROTATION_* group membership (A04-4 C2.AC2)", () => {
     }
   });
 });
+
+describe("tenant audit action groups for containment rows", () => {
+  it("lists SHARE_REVOKE and SEND_REVOKE in the tenant SHARE and SEND groups", () => {
+    expect(AUDIT_ACTION_GROUPS_TENANT[AUDIT_ACTION_GROUP.SHARE]).toContain(AUDIT_ACTION.SHARE_REVOKE);
+    expect(AUDIT_ACTION_GROUPS_TENANT[AUDIT_ACTION_GROUP.SEND]).toContain(AUDIT_ACTION.SEND_REVOKE);
+  });
+
+  it("keeps the webhook subscribable list free of duplicates", () => {
+    expect(new Set(TENANT_WEBHOOK_SUBSCRIBABLE_ACTIONS).size).toBe(
+      TENANT_WEBHOOK_SUBSCRIBABLE_ACTIONS.length,
+    );
+  });
+
+  it("keeps SEND_REVOKE non-subscribable", () => {
+    expect(TENANT_WEBHOOK_SUBSCRIBABLE_ACTIONS).not.toContain(AUDIT_ACTION.SEND_REVOKE);
+  });
+});

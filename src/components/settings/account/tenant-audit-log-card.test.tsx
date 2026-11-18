@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
 if (typeof globalThis.ResizeObserver === "undefined") {
@@ -11,15 +11,28 @@ if (typeof globalThis.ResizeObserver === "undefined") {
   } as unknown as typeof ResizeObserver;
 }
 
-const { mockFetch, mockUseAuditLogs } = vi.hoisted(() => ({
+const { mockFetch, mockUseAuditLogs, mockSearchParams, mockReplace, mockPathname } = vi.hoisted(() => ({
   mockFetch: vi.fn(),
   mockUseAuditLogs: vi.fn(),
+  mockSearchParams: { current: new URLSearchParams() },
+  mockReplace: vi.fn(),
+  mockPathname: "/ja/admin/tenant/audit-logs",
+}));
+
+vi.mock("next/navigation", () => ({
+  useSearchParams: () => mockSearchParams.current,
+}));
+
+vi.mock("@/i18n/navigation", () => ({
+  useRouter: () => ({ replace: mockReplace }),
+  usePathname: () => mockPathname,
 }));
 
 vi.mock("next-intl", () => ({
   useTranslations: () =>
     (key: string, params?: Record<string, string | number>) =>
       params ? `${key}:${JSON.stringify(params)}` : key,
+  useLocale: () => "en",
 }));
 
 vi.mock("@/lib/url-helpers", () => ({
@@ -27,7 +40,7 @@ vi.mock("@/lib/url-helpers", () => ({
 }));
 
 vi.mock("@/hooks/vault/use-audit-logs", () => ({
-  useAuditLogs: () => mockUseAuditLogs(),
+  useAuditLogs: (cfg: unknown) => mockUseAuditLogs(cfg),
 }));
 
 vi.mock("@/components/audit/audit-action-icons", () => ({
@@ -44,8 +57,8 @@ vi.mock("@/components/audit/audit-date-filter", () => ({
 }));
 
 vi.mock("@/components/audit/audit-download-button", () => ({
-  AuditDownloadButton: () => (
-    <button type="button" data-testid="audit-download-button">
+  AuditDownloadButton: ({ onDownload }: { onDownload: (f: "jsonl" | "csv") => void }) => (
+    <button type="button" data-testid="audit-download-button" onClick={() => onDownload("jsonl")}>
       download
     </button>
   ),
@@ -119,6 +132,7 @@ const baseHookReturn = {
 describe("TenantAuditLogCard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockSearchParams.current = new URLSearchParams();
     mockFetch.mockResolvedValue({
       ok: true,
       status: 200,
@@ -152,6 +166,91 @@ describe("TenantAuditLogCard", () => {
       // Only scope label/actorType label should show. The team-scope select
       // requires teams.length > 0 AND scopeFilter !== TENANT.
       expect(screen.getByText("scopeLabel")).toBeInTheDocument();
+    });
+  });
+
+  describe("member activity deep link", () => {
+    const ACTOR = "123e4567-e89b-42d3-a456-426614174000";
+
+    function lastConfig() {
+      return mockUseAuditLogs.mock.calls.at(-1)![0] as {
+        buildExtraParams: () => URLSearchParams;
+        initialDateFrom?: string;
+      };
+    }
+
+    it("seeds the actor filter and from date from valid params", async () => {
+      mockSearchParams.current = new URLSearchParams({ actor: ACTOR, from: "2026-05-01" });
+      render(<TenantAuditLogCard variant="logs" />);
+
+      expect(lastConfig().buildExtraParams().get("userId")).toBe(ACTOR);
+      expect(lastConfig().initialDateFrom).toBe("2026-05-01");
+      expect(screen.getByText(/actorFilterChip/)).toBeInTheDocument();
+      expect(screen.getByText("actorFilterNote")).toBeInTheDocument();
+    });
+
+    it("sends userId on both the list fetch and the download", async () => {
+      const actual = await vi.importActual<typeof import("@/hooks/vault/use-audit-logs")>(
+        "@/hooks/vault/use-audit-logs",
+      );
+      mockUseAuditLogs.mockImplementation((cfg) => actual.useAuditLogs(cfg));
+      mockFetch.mockResolvedValue({
+        ok: true,
+        status: 200,
+        blob: () => Promise.resolve(new Blob([""])),
+        json: () => Promise.resolve({ items: [], nextCursor: null }),
+      });
+      mockSearchParams.current = new URLSearchParams({ actor: ACTOR, from: "2026-05-01" });
+      render(<TenantAuditLogCard variant="logs" />);
+
+      const urls = () => mockFetch.mock.calls.map((c) => String(c[0]));
+      await waitFor(() =>
+        expect(urls().some((u) => u.includes("/audit-logs?") && u.includes(`userId=${ACTOR}`))).toBe(true),
+      );
+      fireEvent.click(screen.getByTestId("audit-download-button"));
+      await waitFor(() =>
+        expect(urls().some((u) => u.includes("/download?") && u.includes(`userId=${ACTOR}`))).toBe(true),
+      );
+    });
+
+    it("ignores malformed actor and from params", () => {
+      mockSearchParams.current = new URLSearchParams({ actor: "not-a-uuid", from: "yesterday" });
+      render(<TenantAuditLogCard variant="logs" />);
+
+      expect(lastConfig().buildExtraParams().has("userId")).toBe(false);
+      expect(lastConfig().initialDateFrom).toBeUndefined();
+      expect(screen.queryByText(/actorFilterChip/)).not.toBeInTheDocument();
+    });
+
+    it("names the member from a loaded log", () => {
+      mockSearchParams.current = new URLSearchParams({ actor: ACTOR });
+      mockUseAuditLogs.mockReturnValue({
+        ...baseHookReturn,
+        logs: [{ id: "l1", user: { id: ACTOR, name: "Alice", email: "a@example.com" } }],
+      });
+      render(<TenantAuditLogCard variant="logs" />);
+
+      expect(screen.getByText(/"name":"Alice"/)).toBeInTheDocument();
+    });
+
+    it("clears the filter and the actor URL param, keeping other params", () => {
+      mockSearchParams.current = new URLSearchParams({ actor: ACTOR, from: "2026-05-01" });
+      render(<TenantAuditLogCard variant="logs" />);
+
+      fireEvent.click(screen.getByLabelText("actorFilterClear"));
+
+      expect(lastConfig().buildExtraParams().has("userId")).toBe(false);
+      expect(screen.queryByText(/actorFilterChip/)).not.toBeInTheDocument();
+      expect(mockReplace).toHaveBeenCalledWith(`${mockPathname}?from=2026-05-01`);
+    });
+
+    it("replaces with the bare path when actor was the only param", () => {
+      mockSearchParams.current = new URLSearchParams({ actor: ACTOR });
+      render(<TenantAuditLogCard variant="logs" />);
+
+      fireEvent.click(screen.getByLabelText("actorFilterClear"));
+
+      expect(mockReplace).toHaveBeenCalledWith(mockPathname);
     });
   });
 });

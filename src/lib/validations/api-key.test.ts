@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { apiKeyCreateSchema } from "@/lib/validations/api-key";
 import {
   API_KEY_SCOPES,
@@ -162,6 +162,22 @@ describe("apiKeyCreateSchema", () => {
     if (!result.success) {
       const issue = result.error.issues.find((i) => i.path[0] === "expiresAt");
       expect(issue).toBeDefined();
+    }
+  });
+
+  it("bounds expiry by elapsed days whatever the server timezone (DST in the window)", () => {
+    vi.stubEnv("TZ", "America/New_York");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    // The year ahead crosses the March spring-forward but not the November fall-back.
+    vi.setSystemTime(new Date("2026-11-02T00:00:01Z"));
+    try {
+      const maxMs = Date.now() + MAX_API_KEY_EXPIRY_DAYS * 86_400_000;
+      const at = (ms: number) => apiKeyCreateSchema.safeParse({ ...validInput(), expiresAt: new Date(ms).toISOString() }).success;
+      // What the API key manager sends for the longest choice is accepted; 1 ms more is not.
+      expect(at(maxMs)).toBe(true);
+      expect(at(maxMs + 1)).toBe(false);
+    } finally {
+      vi.useRealTimers();
     }
   });
 

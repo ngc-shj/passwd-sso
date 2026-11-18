@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import {
   Card,
@@ -18,7 +19,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ScrollText, ShieldAlert, Users } from "lucide-react";
+import { ScrollText, ShieldAlert, Users, X } from "lucide-react";
 import { ACTION_ICONS, DEFAULT_AUDIT_ICON } from "@/components/audit/audit-action-icons";
 import {
   AUDIT_ACTION_GROUP,
@@ -29,6 +30,9 @@ import {
   API_PATH,
 } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
+import { usePathname, useRouter } from "@/i18n/navigation";
+import { UUID_RE } from "@/lib/constants/app";
+import { parseLocalDate } from "@/lib/format/format-datetime";
 import { formatUserName } from "@/lib/format/format-user";
 import { useAuditLogs, type AuditLogItem } from "@/hooks/vault/use-audit-logs";
 import { AuditActionFilter } from "@/components/audit/audit-action-filter";
@@ -87,6 +91,7 @@ const GROUP_LABEL_MAP: Record<string, string> = {
   [AUDIT_ACTION_GROUP.HISTORY]: "groupHistory",
   [AUDIT_ACTION_GROUP.TEAM]: "groupTeam",
   [AUDIT_ACTION_GROUP.SHARE]: "groupShare",
+  [AUDIT_ACTION_GROUP.SEND]: "groupSend",
   [AUDIT_ACTION_GROUP.WEBHOOK]: "groupWebhook",
   [AUDIT_ACTION_GROUP.SERVICE_ACCOUNT]: "groupServiceAccount",
   [AUDIT_ACTION_GROUP.MCP_CLIENT]: "groupMcpClient",
@@ -107,6 +112,18 @@ export function TenantAuditLogCard({ variant }: TenantAuditLogCardProps) {
   const [scopeFilter, setScopeFilter] = useState<"ALL" | "TENANT" | "TEAM">("ALL");
   const [teamFilter, setTeamFilter] = useState<string>("");
   const [teams, setTeams] = useState<{ id: string; name: string }[]>([]);
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  // Deep-link params are read once; anything malformed is ignored.
+  const [actorUserId, setActorUserId] = useState<string | null>(() => {
+    const actor = searchParams.get("actor");
+    return actor && UUID_RE.test(actor) ? actor : null;
+  });
+  const [initialDateFrom] = useState<string | undefined>(() => {
+    const from = searchParams.get("from");
+    return from && parseLocalDate(from) ? from : undefined;
+  });
 
   const actionGroups = useMemo(() => buildActionGroups(scopeFilter), [scopeFilter]);
 
@@ -128,8 +145,17 @@ export function TenantAuditLogCard({ variant }: TenantAuditLogCardProps) {
     const params = new URLSearchParams();
     if (scopeFilter !== "ALL") params.set("scope", scopeFilter);
     if (teamFilter) params.set("teamId", teamFilter);
+    if (actorUserId) params.set("userId", actorUserId);
     return params;
-  }, [scopeFilter, teamFilter]);
+  }, [scopeFilter, teamFilter, actorUserId]);
+
+  const clearActorFilter = useCallback(() => {
+    setActorUserId(null);
+    const next = new URLSearchParams(searchParams.toString());
+    next.delete("actor");
+    const qs = next.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname);
+  }, [searchParams, router, pathname]);
 
   const {
     logs,
@@ -164,7 +190,13 @@ export function TenantAuditLogCard({ variant }: TenantAuditLogCardProps) {
     downloadFilename: "tenant-audit-logs",
     actionGroups,
     buildExtraParams,
+    initialDateFrom,
   });
+
+  const actorLabel = (() => {
+    const match = logs.find((l) => l.user?.id === actorUserId)?.user;
+    return match ? formatUserName(match) : null;
+  })();
 
   const renderItem = (log: AuditLogItem) => (
     <AuditLogItemRow
@@ -212,6 +244,29 @@ export function TenantAuditLogCard({ variant }: TenantAuditLogCardProps) {
       <Card>
         <SectionCardHeader icon={ScrollText} title={t("subTabTenantLogs")} description={t("tenantDescription")} />
         <CardContent className="space-y-4">
+          {actorUserId && (
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary" className="gap-1">
+                  {t("actorFilterChip", {
+                    name: actorLabel ?? t("actorFilterFallbackName"),
+                  })}
+                </Badge>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6"
+                  aria-label={t("actorFilterClear")}
+                  onClick={clearActorFilter}
+                >
+                  <X className="h-3 w-3" />
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">{t("actorFilterNote")}</p>
+            </div>
+          )}
+
           {/* Filters */}
           <div className="rounded-xl border bg-card/80 p-4">
             <div className="space-y-3">

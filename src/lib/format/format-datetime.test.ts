@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { formatDate, formatDateTime, formatRelativeTime, toISODateString } from "@/lib/format/format-datetime";
+import { formatDate, formatDateTime, formatRelativeTime, parseLocalDate, toISODateString } from "@/lib/format/format-datetime";
 
 describe("formatDateTime", () => {
   it("passes locale to toLocaleString for Date input", () => {
@@ -130,5 +130,54 @@ describe("toISODateString", () => {
   it("returns a string in YYYY-MM-DD format", () => {
     const date = new Date(2024, 7, 20); // August 20, 2024 (local)
     expect(toISODateString(date)).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+});
+
+describe("parseLocalDate", () => {
+  it("reads the value as the start of that local day, not UTC midnight", () => {
+    vi.stubEnv("TZ", "Asia/Tokyo");
+    expect(parseLocalDate("2026-11-17")?.toISOString()).toBe("2026-11-16T15:00:00.000Z");
+  });
+
+  it("with endOfDay, returns the local day's last millisecond west of UTC", () => {
+    vi.stubEnv("TZ", "America/New_York");
+    expect(parseLocalDate("2026-11-17", true)?.toISOString()).toBe("2026-11-18T04:59:59.999Z");
+  });
+
+  it("ends a day whose 23:59 falls in a DST gap at the next day's start (America/Nuuk)", () => {
+    vi.stubEnv("TZ", "America/Nuuk");
+    expect(parseLocalDate("2026-03-28", true)?.toISOString()).toBe("2026-03-29T00:59:59.999Z");
+    expect(parseLocalDate("2026-03-29", true)?.toISOString()).toBe("2026-03-30T00:59:59.999Z");
+  });
+
+  it("is the inverse of toISODateString", () => {
+    const day = parseLocalDate("2026-02-28");
+    expect(day && toISODateString(day)).toBe("2026-02-28");
+  });
+
+  it("reads years below 100 and above 9999 as written", () => {
+    expect(parseLocalDate("0050-03-01")?.getFullYear()).toBe(50);
+    expect(parseLocalDate("12345-03-01")?.getFullYear()).toBe(12345);
+    // The to-filter path too.
+    expect(parseLocalDate("0050-03-01", true)?.getFullYear()).toBe(50);
+  });
+
+  it("refuses, on the end-of-day path too, a day the month does not have and a day whose end is past the Date range", () => {
+    expect(parseLocalDate("2026-02-30", true)).toBeUndefined();
+    // West of UTC the last representable day starts in range but its next day does not.
+    vi.stubEnv("TZ", "America/New_York");
+    expect(parseLocalDate("275760-09-12")).toBeDefined();
+    expect(parseLocalDate("275760-09-12", true)).toBeUndefined();
+  });
+
+  it("refuses a year past the Date range", () => {
+    expect(parseLocalDate("300000-01-01")).toBeUndefined();
+    expect(parseLocalDate("300000-01-01", true)).toBeUndefined();
+  });
+
+  it("refuses a malformed value and a day the month does not have", () => {
+    expect(parseLocalDate("2026-5-1")).toBeUndefined();
+    expect(parseLocalDate("2026-02-30")).toBeUndefined();
+    expect(parseLocalDate("")).toBeUndefined();
   });
 });

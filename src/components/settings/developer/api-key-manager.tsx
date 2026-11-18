@@ -41,6 +41,7 @@ import { toast } from "sonner";
 import { fetchApi } from "@/lib/url-helpers";
 import { NAME_MAX_LENGTH } from "@/lib/validations";
 import { formatDate } from "@/lib/format/format-datetime";
+import { MS_PER_DAY } from "@/lib/constants/time";
 import { API_KEY_SCOPE, API_KEY_SCOPES, MAX_API_KEYS_PER_USER, type ApiKeyScope } from "@/lib/constants/auth/api-key";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
@@ -143,8 +144,9 @@ export function ApiKeyManager() {
 
     setCreating(true);
     try {
-      const expiresAt = new Date();
-      expiresAt.setDate(expiresAt.getDate() + parseInt(expiryDays, 10));
+      // Elapsed days, as the server bounds it: a local calendar step would land
+      // an hour past the bound across a DST fall-back.
+      const expiresAt = new Date(Date.now() + parseInt(expiryDays, 10) * MS_PER_DAY);
 
       // @stepup id:api-keys-post
       const res = await fetchApi("/api/api-keys", {

@@ -244,6 +244,7 @@ vi.mock("@/lib/webhook-dispatcher", () => ({
 import {
   createWorker,
   purgeRetention,
+  expireInactiveTargetDeliveriesInTx,
   onWebhookDeliveryFailure,
   processDeliveryBatch,
   processWebhookDeliveryBatch,
@@ -892,7 +893,18 @@ describe("wrappers set the audit-write bypass before the seam statement", () => 
     );
   });
 
-  it("purgeRetention sets the bypass before each of its four purge statements", async () => {
+  it("processDeliveryBatch claim takes only rows whose target is active", async () => {
+    const events = recordTxEvents();
+    await processDeliveryBatch(new PrismaClient(), 5);
+    const claim = events.find((e) => isDeliveryClaim(e.sql));
+    expect(claim).toBeDefined();
+    // The EXISTS sits inside the picked CTE, before its LIMIT.
+    expect(claim!.sql).toMatch(
+      /EXISTS \(\s*SELECT 1 FROM "audit_delivery_targets" t\s+WHERE t\."id" = "audit_deliveries"\."target_id" AND t\."is_active"\s*\)[\s\S]*LIMIT \$1/,
+    );
+  });
+
+  it("purgeRetention sets the bypass before each of its five purge statements", async () => {
     const events = recordTxEvents();
     await purgeRetention(new PrismaClient(), { limit: 5 });
     expectBypassSetBefore(
@@ -905,6 +917,121 @@ describe("wrappers set the audit-write bypass before the seam statement", () => 
     );
     expectBypassSetBefore(events, (sql) => sql.includes(`DELETE FROM "audit_deliveries"`));
     expectBypassSetBefore(events, (sql) => sql.includes("DELETE FROM webhook_deliveries"));
+    expectBypassSetBefore(
+      events,
+      (sql) => sql.includes(`UPDATE "audit_deliveries"`) && sql.includes("target inactive"),
+    );
+  });
+
+  it("purgeRetention runs the inactive-target expiry in its own tx, before the outbox SENT purge", async () => {
+    const events = recordTxEvents();
+    await purgeRetention(new PrismaClient(), { limit: 5 });
+    const expiry = events.find((e) => e.sql.includes("target inactive"));
+    const sentPurge = events.find((e) => e.sql.includes("DELETE FROM audit_outbox") && e.sql.includes("status = 'SENT'"));
+    expect(expiry).toBeDefined();
+    expect(sentPurge).toBeDefined();
+    expect(expiry!.tx).toBeLessThan(sentPurge!.tx);
+    // Own transaction: no purge statement shares it.
+    expect(events.filter((e) => e.tx === expiry!.tx).some((e) => e.sql.includes("DELETE FROM"))).toBe(false);
+  });
+
+  it("purgeRetention still runs every purge when the expiry tx fails, and logs the failure", async () => {
+    const events = recordTxEvents((sql) => {
+      if (sql.includes("target inactive")) throw new Error("expiry boom");
+      return [];
+    });
+    await expect(purgeRetention(new PrismaClient(), { limit: 5 })).resolves.toBeDefined();
+
+    expect(events.some((e) => e.sql.includes("DELETE FROM audit_outbox") && e.sql.includes("status = 'SENT'"))).toBe(true);
+    expect(events.some((e) => e.sql.includes("DELETE FROM audit_outbox") && e.sql.includes("status = 'FAILED'"))).toBe(true);
+    expect(events.some((e) => e.sql.includes(`DELETE FROM "audit_deliveries"`))).toBe(true);
+    expect(events.some((e) => e.sql.includes("DELETE FROM webhook_deliveries"))).toBe(true);
+    expect(mockLoggerError).toHaveBeenCalledWith(
+      expect.objectContaining({ _logType: "delivery.expire_inactive_target_failed" }),
+      "delivery.expire_inactive_target_failed",
+    );
+  });
+});
+
+describe("expireInactiveTargetDeliveriesInTx", () => {
+  beforeEach(resetMocks);
+
+  function runExpire(rows: Array<{ id: string; tenant_id: string; target_id: string }>, cutoff: Date, limit: number) {
+    const queries: Array<{ sql: string; args: unknown[] }> = [];
+    mockTransaction.mockImplementation(async function (fn: TxFn) {
+      return fn({
+        $executeRaw: mockExecuteRaw,
+        $queryRawUnsafe: vi.fn(async (sql: string, ...args: unknown[]) => {
+          queries.push({ sql, args });
+          return rows;
+        }),
+        $executeRawUnsafe: mockExecuteRawUnsafe,
+      } as unknown as MockTxClient);
+    });
+    return {
+      queries,
+      result: new PrismaClient().$transaction(async (tx) => {
+        const { setBypassGucs, BYPASS_GRANT } = await import("@/lib/tenant-rls-grants");
+        await setBypassGucs(tx as never, BYPASS_GRANT.OUTBOX_DELIVERY_EXPIRY);
+        return expireInactiveTargetDeliveriesInTx(tx as never, cutoff, limit);
+      }),
+    };
+  }
+
+  it("picks by positive inactive join with the injected cutoff and limit, and returns the row count", async () => {
+    const cutoff = new Date("2026-01-01T00:00:00Z");
+    const { queries, result } = runExpire(
+      [{ id: "d1", tenant_id: TENANT_ID, target_id: "t1" }],
+      cutoff,
+      7,
+    );
+    expect(await result).toBe(1);
+    const q = queries[0];
+    expect(q.sql).toContain(`t."is_active" = false`);
+    expect(q.sql).toContain(`FOR UPDATE OF d SKIP LOCKED`);
+    expect(q.sql).toContain(`FOR SHARE OF t`);
+    expect(q.sql).toContain(`"last_error" = 'target inactive'`);
+    expect(q.args).toEqual([cutoff, 7]);
+  });
+
+  it("writes one dead-letter audit row per expired delivery in the same tx and logs the expiry", async () => {
+    const { result } = runExpire(
+      [
+        { id: "d1", tenant_id: TENANT_ID, target_id: "t1" },
+        { id: "d2", tenant_id: TENANT_ID, target_id: "t1" },
+      ],
+      new Date(),
+      10,
+    );
+    expect(await result).toBe(2);
+    const inserts = mockExecuteRawUnsafe.mock.calls.filter(
+      (c) => typeof c[0] === "string" && c[0].includes("INSERT INTO audit_logs"),
+    );
+    expect(inserts).toHaveLength(2);
+    for (const [i, id] of ["d1", "d2"].entries()) {
+      expect(inserts[i][3]).toBe(AUDIT_ACTION.AUDIT_DELIVERY_DEAD_LETTER);
+      expect(JSON.parse(inserts[i][7] as string)).toEqual({
+        deliveryId: id,
+        targetId: "t1",
+        error: "target inactive",
+      });
+    }
+    expect(mockLoggerInfo).toHaveBeenCalledWith(
+      expect.objectContaining({ count: 2, _logType: "delivery.expired_inactive_target" }),
+      expect.any(String),
+    );
+  });
+
+  it("writes no audit row and no log line when nothing expired", async () => {
+    const { result } = runExpire([], new Date(), 10);
+    expect(await result).toBe(0);
+    expect(
+      mockExecuteRawUnsafe.mock.calls.some((c) => typeof c[0] === "string" && c[0].includes("INSERT INTO audit_logs")),
+    ).toBe(false);
+    expect(mockLoggerInfo).not.toHaveBeenCalledWith(
+      expect.objectContaining({ _logType: "delivery.expired_inactive_target" }),
+      expect.anything(),
+    );
   });
 });
 
@@ -1654,13 +1781,14 @@ describe("reaper — invoked on first loop tick", () => {
         //        (co-committed with the reap transition — no separate audit txs).
         // tx 5 = reapStuckDeliveries
         // tx 6 = reapStuckWebhookDeliveries
-        // tx 7 = purgeRetention SENT-branch DELETE CTE: returns 0 purged
-        // tx 8 = purgeRetention FAILED-branch DELETE CTE: returns 0 purged
-        // tx 9 = delivery retention purge
-        // tx 10 = webhook delivery retention purge
-        // tx 11 = next claimBatch iteration — stop here
+        // tx 7 = inactive-target delivery expiry
+        // tx 8 = purgeRetention SENT-branch DELETE CTE: returns 0 purged
+        // tx 9 = purgeRetention FAILED-branch DELETE CTE: returns 0 purged
+        // tx 10 = delivery retention purge
+        // tx 11 = webhook delivery retention purge
+        // tx 12 = next claimBatch iteration — stop here
 
-        if (txCallCount >= 11) {
+        if (txCallCount >= 12) {
           worker.stop();
           return [];
         }
@@ -1673,7 +1801,7 @@ describe("reaper — invoked on first loop tick", () => {
               { id: REAPED_ROW_2, tenant_id: TENANT_ID, attempt_count: 2, new_status: "PENDING" },
             ];
           }
-          if (txCallCount === 7 || txCallCount === 8) {
+          if (txCallCount === 8 || txCallCount === 9) {
             // purgeRetention SENT/FAILED branches — return 0 purged
             return [];
           }
@@ -1728,13 +1856,14 @@ describe("reaper — invoked on first loop tick", () => {
         // tx 4 = reapStuckRows: 0 reaped
         // tx 5 = reapStuckDeliveries
         // tx 6 = reapStuckWebhookDeliveries
-        // tx 7 = purgeRetention SENT-branch: 5 rows purged (+ inline writeDirectAuditLogInTx)
-        // tx 8 = purgeRetention FAILED-branch: 0 rows purged
-        // tx 9 = delivery retention purge
-        // tx 10 = webhook delivery retention purge
-        // tx 11 = next claimBatch — stop
+        // tx 7 = inactive-target delivery expiry: nothing expired
+        // tx 8 = purgeRetention SENT-branch: 5 rows purged (+ inline writeDirectAuditLogInTx)
+        // tx 9 = purgeRetention FAILED-branch: 0 rows purged
+        // tx 10 = delivery retention purge
+        // tx 11 = webhook delivery retention purge
+        // tx 12 = next claimBatch — stop
 
-        if (txCallCount >= 11) {
+        if (txCallCount >= 12) {
           worker.stop();
           return [];
         }
@@ -1744,12 +1873,12 @@ describe("reaper — invoked on first loop tick", () => {
             // reapStuckRows — 0 reaped
             return [];
           }
-          if (txCallCount === 7) {
+          if (txCallCount === 8) {
             // purgeRetention SENT-branch — 5 rows deleted for one tenant
             // (per-tenant GROUP BY result: one row per tenant).
             return [{ tenant_id: TENANT_ID, purged: BigInt(5) }];
           }
-          if (txCallCount === 8) {
+          if (txCallCount === 9) {
             // purgeRetention FAILED-branch — 0 rows deleted
             return [];
           }
@@ -1854,13 +1983,13 @@ describe("reaper — invoked on first loop tick", () => {
         if (txCallCount === 4) {
           throw new Error("reaper db error");
         }
-        if (txCallCount >= 11) {
+        if (txCallCount >= 12) {
           worker.stop();
           return [];
         }
 
         const txQueryRaw = vi.fn(async (sql: string, ...args: unknown[]) => {
-          if (txCallCount === 7 || txCallCount === 8) {
+          if (txCallCount === 8 || txCallCount === 9) {
             // purgeRetention SENT/FAILED branches — 0 purged (empty GROUP BY)
             return [];
           }
@@ -1920,14 +2049,15 @@ describe("recordError — sanitizes error message before persisting", () => {
         // tx 4 = reapStuckRows
         // tx 5 = reapStuckDeliveries
         // tx 6 = reapStuckWebhookDeliveries
-        // tx 7 = purgeRetention SENT-branch
-        // tx 8 = purgeRetention FAILED-branch
-        // tx 9 = delivery retention purge / tx 10 = webhook delivery retention purge
-        // tx 11 = next claimBatch — stop
+        // tx 7 = inactive-target delivery expiry
+        // tx 8 = purgeRetention SENT-branch
+        // tx 9 = purgeRetention FAILED-branch
+        // tx 10 = delivery retention purge / tx 11 = webhook delivery retention purge
+        // tx 12 = next claimBatch — stop
         if (txCallCount === 2) {
           throw new Error(RAW_MESSAGE);
         }
-        if (txCallCount === 11) {
+        if (txCallCount === 12) {
           worker.stop();
           return [];
         }
@@ -2000,14 +2130,15 @@ describe("recordError — AUDIT_OUTBOX_DEAD_LETTER written on dead-letter", () =
         // tx 4 = reapStuckRows
         // tx 5 = reapStuckDeliveries
         // tx 6 = reapStuckWebhookDeliveries
-        // tx 7 = purgeRetention SENT-branch
-        // tx 8 = purgeRetention FAILED-branch
-        // tx 9 = delivery retention purge / tx 10 = webhook delivery retention purge
-        // tx 11 = next claimBatch — stop
+        // tx 7 = inactive-target delivery expiry
+        // tx 8 = purgeRetention SENT-branch
+        // tx 9 = purgeRetention FAILED-branch
+        // tx 10 = delivery retention purge / tx 11 = webhook delivery retention purge
+        // tx 12 = next claimBatch — stop
         if (txCallCount === 2) {
           throw new Error("deliver failed");
         }
-        if (txCallCount === 11) {
+        if (txCallCount === 12) {
           worker.stop();
           return [];
         }
@@ -2050,14 +2181,15 @@ describe("recordError — AUDIT_OUTBOX_DEAD_LETTER written on dead-letter", () =
         // tx 4 = reapStuckRows
         // tx 5 = reapStuckDeliveries
         // tx 6 = reapStuckWebhookDeliveries
-        // tx 7 = purgeRetention SENT-branch
-        // tx 8 = purgeRetention FAILED-branch
-        // tx 9 = delivery retention purge / tx 10 = webhook delivery retention purge
-        // tx 11 = next claimBatch — stop
+        // tx 7 = inactive-target delivery expiry
+        // tx 8 = purgeRetention SENT-branch
+        // tx 9 = purgeRetention FAILED-branch
+        // tx 10 = delivery retention purge / tx 11 = webhook delivery retention purge
+        // tx 12 = next claimBatch — stop
         if (txCallCount === 2) {
           throw new Error("transient error");
         }
-        if (txCallCount === 11) {
+        if (txCallCount === 12) {
           worker.stop();
           return [];
         }

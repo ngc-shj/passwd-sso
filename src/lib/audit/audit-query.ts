@@ -3,6 +3,10 @@
 import { AUDIT_ACTION_VALUES } from "@/lib/constants";
 import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { CURSOR_ID_RE } from "@/lib/validations/common";
+import { UUID_RE } from "@/lib/constants/app";
+import { MS_PER_DAY } from "@/lib/constants/time";
+import { AUDIT_LOG_MAX_RANGE_DAYS } from "@/lib/validations/common";
+import { AUDIT_LOG_MAX_RANGE_MS } from "@/lib/validations/common.server";
 import type { AuditAction } from "@prisma/client";
 
 /** Pre-built set of all valid audit action strings for O(1) membership checks. */
@@ -18,6 +22,75 @@ export function parseActorType(searchParams: URLSearchParams): (typeof ACTOR_TYP
 }
 
 /**
+ * The instant range an audit-log download covers, from its `from` / `to`
+ * parameters. A missing `from` means the AUDIT_LOG_MAX_RANGE_DAYS ending at `to`
+ * (or now); a missing `to` means now. Null when neither is given (the caller
+ * decides whether that is allowed). The error is the 400 body to answer with.
+ */
+export function resolveDownloadRange(
+  from: string | null,
+  to: string | null,
+  now: Date = new Date(),
+): { range: { gte: Date; lte: Date } | null } | { error: Record<string, string> } {
+  if (!from && !to) return { range: null };
+  const fromDate = from ? new Date(from) : undefined;
+  const toDate = to ? new Date(to) : undefined;
+  if ((fromDate && Number.isNaN(fromDate.getTime())) || (toDate && Number.isNaN(toDate.getTime()))) {
+    return { error: { date: "Invalid date format" } };
+  }
+  const lte = toDate ?? now;
+  const gte = fromDate ?? new Date(lte.getTime() - AUDIT_LOG_MAX_RANGE_DAYS * MS_PER_DAY);
+  // A `to` near the Date minimum puts the derived start out of range.
+  if (Number.isNaN(gte.getTime())) return { error: { date: "Invalid date format" } };
+  const diffMs = lte.getTime() - gte.getTime();
+  if (diffMs < 0) return { error: { date: "'from' must be before 'to'" } };
+  if (diffMs > AUDIT_LOG_MAX_RANGE_MS) {
+    return { error: { range: `Maximum range is ${AUDIT_LOG_MAX_RANGE_DAYS} days` } };
+  }
+  return { range: { gte, lte } };
+}
+
+/** How many selected actions a download's audit row lists by name. */
+const AUDIT_DOWNLOAD_MAX_RECORDED_ACTIONS = 50;
+
+/**
+ * The filters an audit-log download applied, for its AUDIT_LOG_DOWNLOAD row: the
+ * date bounds the query used, the action list and the actor type. A filter not
+ * applied leaves no key, so two downloads of different coverage never record
+ * the same row. The action list is capped (the rest counted in
+ * `actionsOmitted`) so it can never push the row past METADATA_MAX_BYTES, which
+ * would replace every recorded filter with a truncation marker.
+ */
+export function auditDownloadFilterMetadata(applied: {
+  from?: Date;
+  to?: Date;
+  actions: readonly string[];
+  actorType?: string;
+}): { from?: string; to?: string; actions?: string[]; actionsOmitted?: number; actorType?: string } {
+  const omitted = applied.actions.length - AUDIT_DOWNLOAD_MAX_RECORDED_ACTIONS;
+  return {
+    ...(applied.from && { from: applied.from.toISOString() }),
+    ...(applied.to && { to: applied.to.toISOString() }),
+    ...(applied.actions.length > 0 && { actions: applied.actions.slice(0, AUDIT_DOWNLOAD_MAX_RECORDED_ACTIONS) }),
+    ...(omitted > 0 && { actionsOmitted: omitted }),
+    ...(applied.actorType && { actorType: applied.actorType }),
+  };
+}
+
+/**
+ * Parses the optional `userId` actor filter. Absent → no filter; anything but a
+ * canonical uuid → `{ invalid: true }` (the caller answers 400).
+ */
+export function parseActorUserId(
+  searchParams: URLSearchParams,
+): { userId?: string } | { invalid: true } {
+  const raw = searchParams.get("userId");
+  if (raw === null) return {};
+  if (!UUID_RE.test(raw)) return { invalid: true };
+  return { userId: raw };
+}
+
+/**
  * Parse a comma-separated `actions` query parameter into an AuditAction array.
  * Returns `{ invalid: [...] }` if any action is not in validActions.
  * Returns `{ actions: null }` when the param is empty (no filter).
@@ -30,7 +103,9 @@ export function parseActionsCsvParam(
   const requested = actionsParam.split(",").map((a) => a.trim()).filter(Boolean);
   const invalid = requested.filter((a) => !validActions.has(a));
   if (invalid.length > 0) return { invalid };
-  return { actions: requested as AuditAction[] };
+  // Deduplicated: a repeated action selects nothing more, and the list is
+  // recorded in the download's audit row.
+  return { actions: [...new Set(requested)] as AuditAction[] };
 }
 
 export interface AuditLogParams {

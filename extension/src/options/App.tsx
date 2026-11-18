@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getSettings, setSettings, Theme, TimeoutAction, type StorageSchema } from "../lib/storage";
 import { ensureHostPermission } from "../lib/api";
 import { t } from "../lib/i18n";
@@ -194,6 +194,13 @@ const SECTIONS: { id: SectionId; labelKey: string; icon: string }[] = [
 export function App() {
   const [theme, setTheme] = useTheme();
   const [activeSection, setActiveSection] = useState<SectionId>("general");
+  // Status resets scheduled after a save or reset; cleared on unmount so none
+  // sets state on a page that is gone.
+  const statusTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  useEffect(() => () => statusTimers.current.forEach((timer) => clearTimeout(timer)), []);
+  const resetLater = (reset: () => void) => {
+    statusTimers.current.push(setTimeout(reset, 2000));
+  };
 
   const [serverUrl, setServerUrl] = useState("");
   const [autoLockMinutes, setAutoLockMinutes] = useState(15);
@@ -313,7 +320,7 @@ export function App() {
     setServerUrl(validated.value);
     setSavedSnapshot(snapshot(validated.value));
     setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    resetLater(() => setSaved(false));
   };
 
   const handleResetConnection = async () => {
@@ -343,7 +350,7 @@ export function App() {
         await deleteIdbKey();
         chrome.runtime.sendMessage({ type: EXT_MSG.RESET_DPOP_KEY });
         setResetStatus("ok");
-        setTimeout(() => setResetStatus("idle"), 2000);
+        resetLater(() => setResetStatus("idle"));
         return;
       }
 
@@ -399,7 +406,7 @@ export function App() {
       // Ask background SW to clear its token state.
       chrome.runtime.sendMessage({ type: EXT_MSG.CLEAR_TOKEN });
       setResetStatus("ok");
-      setTimeout(() => setResetStatus("idle"), 2000);
+      resetLater(() => setResetStatus("idle"));
     } catch {
       setResetStatus("error");
     }

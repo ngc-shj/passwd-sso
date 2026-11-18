@@ -53,7 +53,7 @@ import { POST as approveAccessRequest } from "@/app/api/tenant/access-requests/[
 import { POST as requestEmergencyAccess } from "@/app/api/emergency-access/[id]/request/route";
 import { GET as readEmergencyVault } from "@/app/api/emergency-access/[id]/vault/route";
 import { hashSessionToken } from "@/lib/auth/session/session-cache";
-import { hashToken } from "@/lib/crypto/crypto-server";
+import { encryptServerData, getCurrentMasterKeyVersion, getMasterKeyByVersion, hashToken } from "@/lib/crypto/crypto-server";
 import { validateServiceAccountToken } from "@/lib/auth/tokens/service-account-token";
 import { validateMcpToken } from "@/lib/mcp/oauth-server";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
@@ -92,6 +92,7 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
     for (const table of [
       "mcp_refresh_tokens", "mcp_access_tokens", "mcp_clients", "service_account_tokens", "service_accounts",
       "personal_log_access_grants", "scim_tokens", "emergency_access_key_pairs", "emergency_access_grants", "accounts",
+      "password_shares", "team_password_entries", "teams",
     ]) {
       await sql(`DELETE FROM ${table} WHERE tenant_id = ANY($1::uuid[])`, [tenantId, otherTenantId]);
     }
@@ -552,6 +553,90 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
     return id;
   }
 
+  // Values seeded into the columns containment must never return.
+  const SENTINEL = {
+    sendName: "SENTINEL-send-name-7c1f",
+    encryptedData: "SENTINEL-encrypted-data-7c1f",
+    tokenHash: "SENTINEL-token-hash-7c1f",
+    accessPasswordHash: "SENTINEL-access-password-hash-7c1f",
+    sendFilename: "SENTINEL-filename-7c1f.txt",
+  };
+
+  type ShareKind = "personal" | "team" | "text" | "file";
+  type ShareState = "live" | "revoked" | "expired" | "exhausted" | "nearly-exhausted";
+
+  /** A team entry the share's team_password_entry_id can point at. */
+  async function teamEntryFor(creator: string, tenant = tenantId): Promise<string> {
+    const teamId = randomUUID();
+    await sql(
+      `INSERT INTO teams (id, tenant_id, name, slug, team_key_version, created_at, updated_at)
+       VALUES ($1::uuid, $2::uuid, $3, $3, 1, now(), now())`,
+      teamId, tenant, `team-${teamId.slice(0, 8)}`,
+    );
+    const id = randomUUID();
+    await sql(
+      `INSERT INTO team_password_entries (id, team_id, tenant_id, created_by_id, updated_by_id,
+         encrypted_blob, blob_iv, blob_auth_tag, encrypted_overview, overview_iv, overview_auth_tag,
+         aad_version, team_key_version, item_key_version, entry_type, created_at, updated_at)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $4::uuid, $5, $6, $7, $8, $9, $10, 1, 1, 0, 'LOGIN', now(), now())`,
+      id, teamId, tenant, creator, hex(), "a".repeat(24), "b".repeat(32), hex(), "c".repeat(24), "d".repeat(32),
+    );
+    return id;
+  }
+
+  /** A share link or Send; `state` picks the one column pair that makes it not live. */
+  async function share(
+    creator: string,
+    { kind = "personal", tenant = tenantId, state = "live", teamEntry = null }:
+      { kind?: ShareKind; tenant?: string; state?: ShareState; teamEntry?: string | null } = {},
+  ): Promise<string> {
+    const id = randomUUID();
+    const isSend = kind === "text" || kind === "file";
+    await sql(
+      `INSERT INTO password_shares (id, tenant_id, token_hash, share_type, entry_type, encrypted_data, data_iv, data_auth_tag,
+         expires_at, max_views, view_count, revoked_at, created_by_id, team_password_entry_id, master_key_version,
+         send_name, send_filename, send_content_type, send_size_bytes, access_password_hash, access_password_hash_version, created_at)
+       VALUES ($1::uuid, $2::uuid, $3, $4::"ShareType", $5::"EntryType", $6, $7, $8,
+               CASE WHEN $9 = 'expired' THEN now() ELSE now() + interval '1 day' END,
+               CASE WHEN $9 = 'exhausted' THEN 3 WHEN $9 = 'nearly-exhausted' THEN 3 ELSE NULL END,
+               CASE WHEN $9 = 'exhausted' THEN 3 WHEN $9 = 'nearly-exhausted' THEN 2 ELSE 0 END,
+               CASE WHEN $9 = 'revoked' THEN now() - interval '1 hour' ELSE NULL END,
+               $10::uuid, $11::uuid, CASE WHEN $11::uuid IS NULL THEN 1 ELSE 0 END, $12, $13, $14, $15, $16, 1, now())`,
+      id, tenant, `${SENTINEL.tokenHash}-${id}`,
+      kind === "text" ? "TEXT" : kind === "file" ? "FILE" : "ENTRY_SHARE",
+      isSend ? null : "LOGIN",
+      SENTINEL.encryptedData, "a".repeat(24), "b".repeat(32), state, creator, teamEntry,
+      isSend ? SENTINEL.sendName : null,
+      kind === "file" ? SENTINEL.sendFilename : null,
+      kind === "file" ? "text/plain" : null,
+      kind === "file" ? 11 : null,
+      SENTINEL.accessPasswordHash,
+    );
+    return id;
+  }
+
+  /** An audit delivery target whose config decrypts to `url` (null: undecryptable garbage). */
+  async function deliveryTarget(
+    creator: string | null,
+    { tenant = tenantId, active = true, url = null, kind = "WEBHOOK" }: { tenant?: string; active?: boolean; url?: string | null; kind?: string } = {},
+  ): Promise<{ id: string; ciphertext: string }> {
+    const id = randomUUID();
+    const version = getCurrentMasterKeyVersion();
+    const config = url
+      ? encryptServerData(
+          JSON.stringify({ url, secret: "SENTINEL-target-secret-7c1f" }),
+          getMasterKeyByVersion(version),
+          Buffer.concat([Buffer.from(id.replace(/-/g, ""), "hex"), Buffer.from(tenant.replace(/-/g, ""), "hex")]),
+        )
+      : { ciphertext: `SENTINEL-config-${hex()}`, iv: "not-an-iv", authTag: "not-a-tag" };
+    await sql(
+      `INSERT INTO audit_delivery_targets (id, tenant_id, kind, config_encrypted, config_iv, config_auth_tag, master_key_version, is_active, created_by_id, created_at)
+       VALUES ($1::uuid, $2::uuid, $3::"AuditDeliveryTargetKind", $4, $5, $6, $7, $8, $9::uuid, now())`,
+      id, tenant, kind, config.ciphertext, config.iv, config.authTag, version, active, creator,
+    );
+    return { id, ciphertext: config.ciphertext };
+  }
+
   /** The row as JSON text, to show a skipped row is byte-unchanged. */
   async function rowText(table: string, id: string): Promise<string> {
     const [row] = await sql<{ r: string }>(`SELECT row_to_json(t)::text AS r FROM ${table} t WHERE id = $1::uuid`, id);
@@ -909,7 +994,7 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
     expect(body.contained).toEqual({ tenantWebhooks: { revoked: 1, skipped: 0 } });
     expect(body.remaining).toEqual({
       scimTokens: 1, serviceAccounts: 0, serviceAccountTokens: 0, mcpClients: 0, breakglassGrants: 0,
-      tenantWebhooks: 2, vaultResets: 1, emergencyAccessGrants: 0,
+      tenantWebhooks: 2, vaultResets: 1, shareLinks: 0, auditDeliveryTargets: 0, emergencyAccessGrants: 0,
     });
   });
 
@@ -1288,6 +1373,180 @@ describe("tenant admin revokes a member's passkey — real-DB integration", () =
       requestId,
     );
     expect(row.created_by_id).toBe(approver);
+  });
+
+  // ─── Share links, Sends and audit delivery targets ────────
+
+  it("cell 2 (shares, targets): GET lists the member's live links, Sends and active targets, not the rest, and returns none of the forbidden columns", async () => {
+    const owner = await memberWithRole("OWNER");
+    const target = await memberWithRole("ADMIN");
+    const bystander = await memberWithRole("ADMIN");
+    await alsoMemberElsewhere(target);
+    const teamEntry = await teamEntryFor(target);
+
+    const live = {
+      personal: await share(target),
+      team: await share(target, { kind: "team", teamEntry }),
+      text: await share(target, { kind: "text" }),
+      file: await share(target, { kind: "file" }),
+      // Views remain: a limit is not exhaustion.
+      nearly: await share(target, { kind: "text", state: "nearly-exhausted" }),
+    };
+    const excluded = [
+      await share(bystander),
+      await share(target, { tenant: otherTenantId }),
+      await share(target, { state: "revoked" }),
+      await share(target, { state: "expired" }),
+      await share(target, { kind: "text", state: "exhausted" }),
+    ];
+    const liveTarget = await deliveryTarget(target, { url: "https://siem.example.com/hec?token=SENTINEL-url-query-7c1f" });
+    const undecryptable = await deliveryTarget(target);
+    const excludedTargets = [
+      await deliveryTarget(target, { active: false }),
+      await deliveryTarget(null),
+      await deliveryTarget(bystander),
+      await deliveryTarget(target, { tenant: otherTenantId }),
+    ];
+
+    const { status, text } = await listRaw(owner, target);
+    expect(status).toBe(200);
+    const body = JSON.parse(text);
+    const shares = body.createdFootholds.shareLinks as { id: string; shareType: string; isTeam: boolean; expiresAt: string; createdAt: string }[];
+    expect(shares.map((r) => r.id).sort()).toEqual(Object.values(live).sort());
+    expect(Object.fromEntries(shares.map((r) => [r.id, [r.shareType, r.isTeam]]))).toEqual({
+      [live.personal]: ["ENTRY_SHARE", false],
+      [live.team]: ["ENTRY_SHARE", true],
+      [live.text]: ["TEXT", false],
+      [live.file]: ["FILE", false],
+      [live.nearly]: ["TEXT", false],
+    });
+    for (const id of excluded) expect(text).not.toContain(id);
+
+    const targets = body.createdFootholds.auditDeliveryTargets as { id: string; kind: string; endpoint: string | null }[];
+    expect(targets.map((r) => r.id).sort()).toEqual([liveTarget.id, undecryptable.id].sort());
+    // The masked destination only; null when the config cannot be decrypted.
+    expect(targets.find((r) => r.id === liveTarget.id)).toMatchObject({ kind: "WEBHOOK", endpoint: "https://siem.example.com/hec" });
+    expect(targets.find((r) => r.id === undecryptable.id)?.endpoint).toBeNull();
+    for (const { id } of excludedTargets) expect(text).not.toContain(id);
+
+    // Nothing of the shares' or targets' content or credentials leaves the server.
+    for (const value of [
+      SENTINEL.sendName, SENTINEL.encryptedData, SENTINEL.tokenHash, SENTINEL.accessPasswordHash, SENTINEL.sendFilename,
+      "SENTINEL-target-secret", "SENTINEL-url-query", "SENTINEL-config", liveTarget.ciphertext,
+    ]) {
+      expect(text, value).not.toContain(value);
+    }
+    expect(body.moreFootholds).toEqual({});
+  });
+
+  it("cell 3 (shares): only the member's live links in this tenant are revoked, each audited by type; an unselected one stays live and is counted remaining", async () => {
+    const owner = await memberWithRole("OWNER");
+    const target = await memberWithRole("ADMIN");
+    const bystander = await memberWithRole("ADMIN");
+    const teamEntry = await teamEntryFor(target);
+    const selected = {
+      personal: await share(target),
+      team: await share(target, { kind: "team", teamEntry }),
+      text: await share(target, { kind: "text" }),
+      file: await share(target, { kind: "file" }),
+    };
+    const unselected = await share(target);
+    const notLive = {
+      bystander: await share(bystander),
+      otherTenant: await share(target, { tenant: otherTenantId }),
+      revoked: await share(target, { state: "revoked" }),
+      expired: await share(target, { state: "expired" }),
+      exhausted: await share(target, { state: "exhausted" }),
+    };
+    const skipped = Object.values(notLive);
+    const before = Object.fromEntries(await Promise.all([...skipped, unselected].map(async (id) => [id, await rowText("password_shares", id)] as const)));
+
+    const res = await containAs(owner, target, { revoke: { shareLinkIds: [...Object.values(selected), ...skipped] } });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.contained).toEqual({ shareLinks: { revoked: 4, skipped: skipped.length } });
+    expect(body.remaining.shareLinks).toBe(1);
+
+    for (const id of Object.values(selected)) {
+      const [row] = await sql<{ revoked: boolean }>(`SELECT revoked_at IS NOT NULL AS revoked FROM password_shares WHERE id = $1::uuid`, id);
+      expect(row.revoked).toBe(true);
+    }
+    for (const id of [...skipped, unselected]) expect(await rowText("password_shares", id)).toBe(before[id]);
+
+    const rows = (await auditRows(tenantId)).filter((r) => r.action === "SHARE_REVOKE" || r.action === "SEND_REVOKE");
+    expect(Object.fromEntries(rows.map((r) => [r.targetId, r.action]))).toEqual({
+      [selected.personal]: "SHARE_REVOKE",
+      [selected.team]: "SHARE_REVOKE",
+      [selected.text]: "SEND_REVOKE",
+      [selected.file]: "SEND_REVOKE",
+    });
+    for (const row of rows) {
+      expect(row).toMatchObject({ userId: owner, targetType: "PasswordShare", metadata: { targetUserId: target, revokedById: owner } });
+    }
+    // The skipped ids have no row at all.
+    expect(JSON.stringify(await auditRows(tenantId))).not.toContain(notLive.exhausted);
+    const revokeAll = (await auditRows(tenantId)).find((r) => r.action === "TENANT_MEMBER_PASSKEY_REVOKE_ALL");
+    expect(revokeAll?.metadata).toMatchObject({ shareLinksContained: 4, shareLinksSkipped: skipped.length });
+  });
+
+  it("cell 3 (auditDeliveryTargets): only the member's active targets in this tenant are deactivated and audited; the rest are byte-unchanged", async () => {
+    const owner = await memberWithRole("OWNER");
+    const target = await memberWithRole("ADMIN");
+    const bystander = await memberWithRole("ADMIN");
+    const live = await deliveryTarget(target, { url: "https://siem.example.com/hec", kind: "SIEM_HEC" });
+    const unselected = await deliveryTarget(target);
+    const skipped = [
+      (await deliveryTarget(bystander)).id,
+      (await deliveryTarget(target, { tenant: otherTenantId })).id,
+      (await deliveryTarget(target, { active: false })).id,
+      (await deliveryTarget(null)).id,
+    ];
+    const before = Object.fromEntries(await Promise.all([...skipped, unselected.id].map(async (id) => [id, await rowText("audit_delivery_targets", id)] as const)));
+    // Two queued deliveries the deactivation parks, one already sent (not counted).
+    await sql(
+      `INSERT INTO audit_deliveries (id, outbox_id, target_id, tenant_id, status)
+       SELECT gen_random_uuid(), gen_random_uuid(), $1::uuid, $2::uuid, s::"AuditDeliveryStatus"
+         FROM unnest(ARRAY['PENDING', 'PENDING', 'SENT']) AS s`,
+      live.id, tenantId,
+    );
+
+    const res = await containAs(owner, target, { revoke: { auditDeliveryTargetIds: [live.id, ...skipped] } });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.contained).toEqual({ auditDeliveryTargets: { revoked: 1, skipped: skipped.length } });
+    expect(body.remaining.auditDeliveryTargets).toBe(1);
+
+    expect((await sql<{ is_active: boolean }>(`SELECT is_active FROM audit_delivery_targets WHERE id = $1::uuid`, live.id))[0].is_active).toBe(false);
+    for (const id of [...skipped, unselected.id]) expect(await rowText("audit_delivery_targets", id)).toBe(before[id]);
+
+    const rows = (await auditRows(tenantId)).filter((r) => r.action === "AUDIT_DELIVERY_TARGET_DEACTIVATE");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ userId: owner, metadata: { targetId: live.id, kind: "SIEM_HEC", targetUserId: target, pendingDeliveries: 2 } });
+    expect(JSON.stringify(rows[0])).not.toContain("siem.example.com");
+  });
+
+  it("cell 3 (cap): 100 live links list whole with no moreFootholds; the 101st is counted in moreFootholds.shareLinks only", async () => {
+    const owner = await memberWithRole("OWNER");
+    const target = await memberWithRole("ADMIN");
+    const n = MEMBER_CONTAINMENT_MAX_IDS;
+    const insertLinks = (count: number) =>
+      sql(
+        `INSERT INTO password_shares (id, tenant_id, token_hash, share_type, entry_type, encrypted_data, data_iv, data_auth_tag, expires_at, created_by_id, master_key_version, created_at)
+         SELECT gen_random_uuid(), $1::uuid, 'cap-' || gen_random_uuid(), 'ENTRY_SHARE', 'LOGIN', 'x', repeat('a', 24), repeat('b', 32), now() + interval '1 day', $2::uuid, 1, now()
+           FROM generate_series(1, $3::int)`,
+        tenantId, target, count,
+      );
+    await insertLinks(n);
+
+    const exact = JSON.parse((await listRaw(owner, target)).text);
+    expect(exact.createdFootholds.shareLinks).toHaveLength(n);
+    expect(exact.moreFootholds).toEqual({});
+
+    await insertLinks(1);
+    const over = JSON.parse((await listRaw(owner, target)).text);
+    expect(over.createdFootholds.shareLinks).toHaveLength(n);
+    // The uncapped kinds in the same response carry no key.
+    expect(over.moreFootholds).toEqual({ shareLinks: 1 });
   });
 
   it("migration backfill: run as the NOBYPASSRLS application role, it attributes a JIT token to its approver and leaves a direct mint NULL", async () => {

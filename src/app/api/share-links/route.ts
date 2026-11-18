@@ -33,6 +33,8 @@ import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import { MS_PER_DAY, MS_PER_HOUR } from "@/lib/constants/time";
 import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 import { creatorAdmittedByShareId } from "@/lib/share/share-admission";
+import { lockFootholdWriter } from "@/lib/tenant/foothold-write-gate";
+import { footholdWriteErrorResponse } from "@/lib/http/lock-conflict-response";
 
 const shareLinkLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 20 });
 
@@ -187,27 +189,41 @@ async function handlePOST(req: NextRequest) {
 
   const expiresAt = new Date(Date.now() + EXPIRY_MAP[expiresIn]);
 
-  const share = await withUserTenantRls(session.user.id, async () =>
-    prisma.passwordShare.create({
-      data: {
-        tokenHash,
-        entryType,
-        encryptedData,
-        dataIv,
-        dataAuthTag,
-        masterKeyVersion,
-        expiresAt,
-        maxViews: maxViews ?? null,
-        createdById: session.user.id,
-        tenantId,
-        passwordEntryId: passwordEntryId ?? null,
-        teamPasswordEntryId: teamPasswordEntryId ?? null,
-        permissions: permissions ?? [],
-        accessPasswordHash,
-        accessPasswordHashVersion,
-      },
-    }),
-  );
+  // Both branches (personal and team entry) create here, so the gate covers
+  // both: a contained or departed creator mints no new link.
+  let share;
+  try {
+    share = await withUserTenantRls(session.user.id, async (rlsTenantId, tx) => {
+      await lockFootholdWriter(tx, req, {
+        tenantId: rlsTenantId,
+        actorId: session.user.id,
+        permission: null,
+      });
+      return tx.passwordShare.create({
+        data: {
+          tokenHash,
+          entryType,
+          encryptedData,
+          dataIv,
+          dataAuthTag,
+          masterKeyVersion,
+          expiresAt,
+          maxViews: maxViews ?? null,
+          createdById: session.user.id,
+          tenantId,
+          passwordEntryId: passwordEntryId ?? null,
+          teamPasswordEntryId: teamPasswordEntryId ?? null,
+          permissions: permissions ?? [],
+          accessPasswordHash,
+          accessPasswordHashVersion,
+        },
+      });
+    });
+  } catch (e) {
+    const footholdResponse = footholdWriteErrorResponse(e);
+    if (footholdResponse) return footholdResponse;
+    throw e;
+  }
 
   // Atomic audit: SHARE_CREATE
   await withBypassRls(prisma, async (tx) => {

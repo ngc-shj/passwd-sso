@@ -1,16 +1,21 @@
 import { describe, expect, it } from "vitest";
 import type { AuditAction } from "@prisma/client";
 import {
+  auditDownloadFilterMetadata,
+  resolveDownloadRange,
+  parseActionsCsvParam,
   VALID_ACTIONS,
   VALID_ACTOR_TYPES,
   parseAuditLogParams,
   parseActorType,
+  parseActorUserId,
   buildAuditLogActionFilter,
   buildAuditLogDateFilter,
   paginateResult,
   isValidCursorId,
 } from "./audit-query";
 import { AUDIT_ACTION, AUDIT_ACTION_VALUES } from "@/lib/constants";
+import { METADATA_MAX_BYTES } from "@/lib/validations/common.server";
 
 // Minimal action groups for unit testing without importing full constants
 const TEST_GROUPS: Record<string, AuditAction[]> = {
@@ -65,6 +70,126 @@ describe("parseActorType", () => {
 
   it("returns undefined for empty string", () => {
     expect(parseActorType(new URLSearchParams({ actorType: "" }))).toBeUndefined();
+  });
+});
+
+describe("parseActorUserId", () => {
+  const ID = "123e4567-e89b-42d3-a456-426614174000";
+
+  it("returns the canonical uuid", () => {
+    expect(parseActorUserId(new URLSearchParams({ userId: ID }))).toEqual({ userId: ID });
+  });
+
+  it("returns no filter when absent", () => {
+    expect(parseActorUserId(new URLSearchParams())).toEqual({});
+  });
+
+  it.each(["", "not-a-uuid", `${ID}x`, ` ${ID}`, "123e4567e89b42d3a456426614174000"])(
+    "flags %j as invalid",
+    (raw) => {
+      expect(parseActorUserId(new URLSearchParams({ userId: raw }))).toEqual({ invalid: true });
+    },
+  );
+});
+
+describe("parseActionsCsvParam", () => {
+  it("drops repeated actions, keeping first-seen order", () => {
+    expect(parseActionsCsvParam("AUDIT_LOG_DOWNLOAD,POLICY_UPDATE,AUDIT_LOG_DOWNLOAD")).toEqual({
+      actions: ["AUDIT_LOG_DOWNLOAD", "POLICY_UPDATE"],
+    });
+  });
+
+  it("refuses an unknown action", () => {
+    expect(parseActionsCsvParam("AUDIT_LOG_DOWNLOAD,NOT_REAL")).toEqual({ invalid: ["NOT_REAL"] });
+  });
+});
+
+describe("resolveDownloadRange", () => {
+  const NOW = new Date("2026-11-17T12:00:00.000Z");
+  const DAYS_90 = 90 * 86_400_000;
+
+  it("is null when neither bound is given", () => {
+    expect(resolveDownloadRange(null, null, NOW)).toEqual({ range: null });
+  });
+
+  it("reads a to-only request as the 90 days ending at to, today or long ago", () => {
+    const today = "2026-11-17T14:59:59.999Z";
+    expect(resolveDownloadRange(null, today, NOW)).toEqual({
+      range: { gte: new Date(Date.parse(today) - DAYS_90), lte: new Date(today) },
+    });
+    const old = "2026-01-01T00:00:00.000Z";
+    expect(resolveDownloadRange(null, old, NOW)).toEqual({
+      range: { gte: new Date(Date.parse(old) - DAYS_90), lte: new Date(old) },
+    });
+  });
+
+  it("reads a from-only request as from until now", () => {
+    expect(resolveDownloadRange("2026-11-01T00:00:00.000Z", null, NOW)).toEqual({
+      range: { gte: new Date("2026-11-01T00:00:00.000Z"), lte: NOW },
+    });
+  });
+
+  it("refuses an unparsable bound, a reversed pair and a span over the bound", () => {
+    expect(resolveDownloadRange("nope", null, NOW)).toEqual({ error: { date: "Invalid date format" } });
+
+    expect(resolveDownloadRange("2026-11-10T00:00:00.000Z", "2026-11-01T00:00:00.000Z", NOW)).toEqual({
+      error: { date: "'from' must be before 'to'" },
+    });
+    expect(resolveDownloadRange("2026-01-01T00:00:00.000Z", "2026-04-01T02:00:00.001Z", NOW)).toEqual({
+      error: { range: "Maximum range is 90 days" },
+    });
+  });
+
+  it("refuses a to whose derived start is before the Date minimum, and accepts it at exactly minimum + 90 days", () => {
+    expect(resolveDownloadRange(null, "-271821-07-18T23:59:59.999Z", NOW)).toEqual({ error: { date: "Invalid date format" } });
+    expect(resolveDownloadRange(null, "-271821-07-19T00:00:00.000Z", NOW)).toEqual({
+      range: { gte: new Date(-8.64e15), lte: new Date("-271821-07-19T00:00:00.000Z") },
+    });
+  });
+});
+
+describe("auditDownloadFilterMetadata", () => {
+  it("records each applied filter, the dates as ISO instants", () => {
+    expect(
+      auditDownloadFilterMetadata({
+        from: new Date("2026-01-01T00:00:00Z"),
+        to: new Date("2026-01-31T00:00:00Z"),
+        actions: ["AUDIT_LOG_DOWNLOAD"],
+        actorType: "HUMAN",
+      }),
+    ).toEqual({
+      from: "2026-01-01T00:00:00.000Z",
+      to: "2026-01-31T00:00:00.000Z",
+      actions: ["AUDIT_LOG_DOWNLOAD"],
+      actorType: "HUMAN",
+    });
+  });
+
+  it("leaves no key for a filter that was not applied", () => {
+    expect(auditDownloadFilterMetadata({ actions: [] })).toEqual({});
+  });
+
+  it("keeps the worst-case download row within METADATA_MAX_BYTES, so truncation never hides a filter", () => {
+    const longest = [...VALID_ACTIONS].sort((a, b) => b.length - a.length);
+    const metadata = {
+      format: "jsonl",
+      ...auditDownloadFilterMetadata({
+        from: new Date("2026-01-01T00:00:00Z"),
+        to: new Date("2026-03-31T00:00:00Z"),
+        actions: longest,
+        actorType: "SERVICE_ACCOUNT",
+      }),
+      actorUserId: "123e4567-e89b-42d3-a456-426614174000",
+      scope: "TEAM",
+      teamId: "123e4567-e89b-42d3-a456-426614174001",
+    };
+    expect(Buffer.byteLength(JSON.stringify(metadata))).toBeLessThanOrEqual(METADATA_MAX_BYTES);
+  });
+
+  it("lists at most 50 actions by name and counts the rest", () => {
+    const actions = Array.from({ length: 53 }, (_, i) => `A_${i}`);
+    expect(auditDownloadFilterMetadata({ actions })).toEqual({ actions: actions.slice(0, 50), actionsOmitted: 3 });
+    expect(auditDownloadFilterMetadata({ actions: actions.slice(0, 50) })).toEqual({ actions: actions.slice(0, 50) });
   });
 });
 

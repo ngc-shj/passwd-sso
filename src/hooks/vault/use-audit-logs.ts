@@ -7,7 +7,7 @@ import { normalizeAuditActionKey } from "@/lib/audit/audit-action-key";
 import { fetchApi } from "@/lib/url-helpers";
 import { readApiErrorBody, getApiErrorDetail } from "@/lib/http/read-api-error-body";
 import { downloadBlob } from "@/lib/ui/download-blob";
-import { formatDateTime } from "@/lib/format/format-datetime";
+import { formatDateTime, parseLocalDate } from "@/lib/format/format-datetime";
 import type { AuditActionValue } from "@/lib/constants";
 import { AUDIT_LOG_MAX_RANGE_DAYS } from "@/lib/validations/common";
 
@@ -43,6 +43,8 @@ export interface UseAuditLogsConfig {
   downloadFilename: "audit-logs" | "team-audit-logs" | "tenant-audit-logs";
   actionGroups: readonly ActionGroupDef[];
   buildExtraParams?: () => URLSearchParams;
+  // Seeds the "from" date filter on first render (YYYY-MM-DD)
+  initialDateFrom?: string;
   resolveEntryNames?: (data: unknown) => Promise<Map<string, string>>;
   // Called on BOTH initial fetch AND handleLoadMore
   onDataReceived?: (data: unknown) => void;
@@ -100,7 +102,7 @@ export function useAuditLogs(config: UseAuditLogsConfig): UseAuditLogsReturn {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [selectedActions, setSelectedActions] = useState<Set<AuditActionValue>>(new Set());
   const [actionSearch, setActionSearch] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
+  const [dateFrom, setDateFrom] = useState(config.initialDateFrom ?? "");
   const [dateTo, setDateTo] = useState("");
   const [downloading, setDownloading] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
@@ -120,12 +122,11 @@ export function useAuditLogs(config: UseAuditLogsConfig): UseAuditLogsReturn {
     if (selectedActions.size > 0) {
       params.set("actions", Array.from(selectedActions).join(","));
     }
-    if (dateFrom) params.set("from", new Date(dateFrom).toISOString());
-    if (dateTo) {
-      const endOfDay = new Date(dateTo);
-      endOfDay.setHours(23, 59, 59, 999);
-      params.set("to", endOfDay.toISOString());
-    }
+    // The date inputs name local calendar days; send the instants they span.
+    const fromInstant = dateFrom ? parseLocalDate(dateFrom) : undefined;
+    const toInstant = dateTo ? parseLocalDate(dateTo, true) : undefined;
+    if (fromInstant) params.set("from", fromInstant.toISOString());
+    if (toInstant) params.set("to", toInstant.toISOString());
     if (actorTypeFilter !== "ALL") params.set("actorType", actorTypeFilter);
     if (buildExtraParams) {
       const extra = buildExtraParams();

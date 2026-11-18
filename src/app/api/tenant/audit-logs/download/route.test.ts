@@ -4,6 +4,7 @@ import { createRequest } from "@/__tests__/helpers/request-builder";
 const {
   mockAuth,
   mockPrismaAuditLog,
+  mockPrismaTeam,
   mockRequireTenantPermission,
   TenantAuthError,
   mockWithTenantRls,
@@ -21,6 +22,7 @@ const {
   return {
     mockAuth: vi.fn(),
     mockPrismaAuditLog: { findMany: vi.fn() },
+    mockPrismaTeam: { findFirst: vi.fn() },
     mockRequireTenantPermission: vi.fn(),
     TenantAuthError: _TenantAuthError,
     mockWithTenantRls: vi.fn(
@@ -33,7 +35,7 @@ const {
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: { auditLog: mockPrismaAuditLog },
+  prisma: { auditLog: mockPrismaAuditLog, team: mockPrismaTeam },
 }));
 vi.mock("@/lib/auth/access/tenant-auth", () => ({
   requireTenantPermission: mockRequireTenantPermission,
@@ -70,6 +72,7 @@ vi.mock("@/lib/http/with-request-log", () => ({
 }));
 
 import { GET } from "./route";
+import { parseLocalDate } from "@/lib/format/format-datetime";
 
 async function streamToString(response: Response): Promise<string> {
   const reader = response.body!.getReader();
@@ -87,6 +90,8 @@ async function streamToString(response: Response): Promise<string> {
 // 7-day-ago ISO string — used to satisfy the route's "from or to required" guard
 // without coupling tests to a specific calendar date.
 const VALID_FROM = new Date(Date.now() - 7 * 86400000).toISOString();
+// The tenant download always applies a date range (to defaults to now).
+const RANGE = { from: VALID_FROM, to: expect.any(String) };
 
 const MOCK_LOGS = [
   {
@@ -176,6 +181,44 @@ describe("GET /api/tenant/audit-logs/download", () => {
     expect(res.status).toBe(400);
     const json = await res.json();
     expect(json.details.range).toContain("90");
+  });
+
+  it("reads a to-only download as the 90 days ending at to, queried and recorded", async () => {
+    const res = await GET(
+      createRequest("GET", "http://localhost:3000/api/tenant/audit-logs/download", { searchParams: { to: "2025-01-01T00:00:00.000Z" } }),
+    );
+    await streamToString(res);
+
+    expect(res.status).toBe(200);
+    expect(mockPrismaAuditLog.findMany.mock.calls[0][0].where.createdAt).toEqual({
+      gte: new Date("2024-10-03T00:00:00.000Z"),
+      lte: new Date("2025-01-01T00:00:00.000Z"),
+    });
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: { format: "jsonl", from: "2024-10-03T00:00:00.000Z", to: "2025-01-01T00:00:00.000Z" },
+      }),
+    );
+  });
+
+  it("accepts the 90 local days a New York client sends across the November fall-back, and not one day more", async () => {
+    vi.stubEnv("TZ", "America/New_York");
+    const at = (fromDay: string) =>
+      GET(
+        createRequest("GET", "http://localhost:3000/api/tenant/audit-logs/download", {
+          searchParams: { from: parseLocalDate(fromDay)!.toISOString(), to: parseLocalDate("2026-11-02", true)!.toISOString() },
+        }),
+      );
+    // 2026-08-05 .. 2026-11-02 is 90 local days: 90 × 24 h + 1 h − 1 ms.
+    expect((await at("2026-08-05")).status).toBe(200);
+    expect((await at("2026-08-04")).status).toBe(400);
+  });
+
+  it("accepts a span of 90 days + the 2 h DST slack, and not 1 ms more", async () => {
+    const at = (to: string) =>
+      GET(createRequest("GET", "http://localhost:3000/api/tenant/audit-logs/download", { searchParams: { from: "2026-03-01T00:00:00.000Z", to } }));
+    expect((await at("2026-05-30T02:00:00.000Z")).status).toBe(200);
+    expect((await at("2026-05-30T02:00:00.001Z")).status).toBe(400);
   });
 
   it("returns 400 for invalid action filters", async () => {
@@ -268,5 +311,129 @@ describe("GET /api/tenant/audit-logs/download", () => {
 
     const calledWith = mockPrismaAuditLog.findMany.mock.calls[0][0];
     expect(calledWith.where).not.toHaveProperty("actorType");
+  });
+
+  describe("actor, scope and team filters", () => {
+    const MEMBER = "123e4567-e89b-42d3-a456-426614174000";
+
+    it("keeps the recorded filters when the actions list is padded with repeats", async () => {
+      const padded = Array.from({ length: 600 }, () => "AUDIT_LOG_DOWNLOAD").join(",");
+      const req = createRequest("GET", "http://localhost:3000/api/tenant/audit-logs/download", {
+        searchParams: { from: VALID_FROM, userId: MEMBER, actions: padded },
+      });
+      await streamToString(await GET(req));
+
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: { format: "jsonl", ...RANGE, actions: ["AUDIT_LOG_DOWNLOAD"], actorUserId: MEMBER },
+        }),
+      );
+    });
+
+    it("narrows to userId and records actorUserId in the download audit row", async () => {
+      const req = createRequest("GET", "http://localhost:3000/api/tenant/audit-logs/download", {
+        searchParams: { from: VALID_FROM, userId: MEMBER },
+      });
+      const res = await GET(req);
+      await streamToString(res);
+
+      expect(mockPrismaAuditLog.findMany.mock.calls[0][0].where).toMatchObject({
+        tenantId: "tenant-1",
+        userId: MEMBER,
+      });
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({ metadata: { format: "jsonl", ...RANGE, actorUserId: MEMBER } }),
+      );
+    });
+
+    it("returns 400 for an invalid userId with no query and no audit row", async () => {
+      const req = createRequest("GET", "http://localhost:3000/api/tenant/audit-logs/download", {
+        searchParams: { from: VALID_FROM, userId: "x" },
+      });
+      const res = await GET(req);
+
+      expect(res.status).toBe(400);
+      expect(mockPrismaAuditLog.findMany).not.toHaveBeenCalled();
+      expect(mockLogAudit).not.toHaveBeenCalled();
+    });
+
+    it("honours scope and a tenant-owned teamId", async () => {
+      mockPrismaTeam.findFirst.mockResolvedValue({ id: "team-1" });
+      const req = createRequest("GET", "http://localhost:3000/api/tenant/audit-logs/download", {
+        searchParams: { from: VALID_FROM, scope: "TEAM", teamId: "team-1" },
+      });
+      const res = await GET(req);
+      await streamToString(res);
+
+      expect(mockPrismaAuditLog.findMany.mock.calls[0][0].where).toMatchObject({
+        scope: "TEAM",
+        teamId: "team-1",
+      });
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({ metadata: { format: "jsonl", ...RANGE, scope: "TEAM", teamId: "team-1" } }),
+      );
+    });
+
+    it("records the exact range, actions and actor type it applied", async () => {
+      const req = createRequest("GET", "http://localhost:3000/api/tenant/audit-logs/download", {
+        searchParams: {
+          from: "2026-03-01T00:00:00.000Z",
+          to: "2026-03-31T00:00:00.000Z",
+          actions: "AUDIT_LOG_DOWNLOAD,POLICY_UPDATE",
+          actorType: "HUMAN",
+        },
+      });
+      await streamToString(await GET(req));
+
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: {
+            format: "jsonl",
+            from: "2026-03-01T00:00:00.000Z",
+            to: "2026-03-31T00:00:00.000Z",
+            actions: ["AUDIT_LOG_DOWNLOAD", "POLICY_UPDATE"],
+            actorType: "HUMAN",
+          },
+        }),
+      );
+    });
+
+    it("orders ascending by createdAt then id", async () => {
+      const req = createRequest("GET", "http://localhost:3000/api/tenant/audit-logs/download", {
+        searchParams: { from: VALID_FROM },
+      });
+      await streamToString(await GET(req));
+
+      expect(mockPrismaAuditLog.findMany.mock.calls[0][0].orderBy).toEqual([
+        { createdAt: "asc" },
+        { id: "asc" },
+      ]);
+    });
+
+    it("records no teamId under TENANT scope, where the team is not applied", async () => {
+      mockPrismaTeam.findFirst.mockResolvedValue({ id: "team-1" });
+      const req = createRequest("GET", "http://localhost:3000/api/tenant/audit-logs/download", {
+        searchParams: { from: VALID_FROM, scope: "TENANT", teamId: "team-1" },
+      });
+      const res = await GET(req);
+      await streamToString(res);
+
+      expect(mockPrismaAuditLog.findMany.mock.calls[0][0].where.teamId).toBeUndefined();
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({ metadata: { format: "jsonl", ...RANGE, scope: "TENANT" } }),
+      );
+    });
+
+    it("returns 400 for another tenant's team with no query and no audit row", async () => {
+      mockPrismaTeam.findFirst.mockResolvedValue(null);
+      const req = createRequest("GET", "http://localhost:3000/api/tenant/audit-logs/download", {
+        searchParams: { from: VALID_FROM, teamId: "foreign" },
+      });
+      const res = await GET(req);
+
+      expect(res.status).toBe(400);
+      expect(mockPrismaAuditLog.findMany).not.toHaveBeenCalled();
+      expect(mockLogAudit).not.toHaveBeenCalled();
+    });
   });
 });

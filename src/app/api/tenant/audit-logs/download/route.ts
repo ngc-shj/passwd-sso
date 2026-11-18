@@ -8,11 +8,10 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { handleAuthError, rateLimited, unauthorized, validationError } from "@/lib/http/api-response";
-import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
-import { parseActionsCsvParam, parseActorType } from "@/lib/audit/audit-query";
-import { AUDIT_LOG_MAX_RANGE_DAYS } from "@/lib/validations/common";
+import { AUDIT_ACTION } from "@/lib/constants";
+import { auditDownloadFilterMetadata, parseActionsCsvParam, parseActorType, parseActorUserId, resolveDownloadRange } from "@/lib/audit/audit-query";
+import { appliedTenantAuditFilters, buildTenantAuditWhere, validateTenantAuditTeam } from "@/lib/audit/tenant-audit-filter";
 import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
-import { MS_PER_DAY } from "@/lib/constants/time";
 import { buildAuditLogStream, buildAuditLogDownloadResponse } from "@/lib/audit/audit-log-stream";
 
 const downloadLimiter = createRateLimiter({
@@ -46,35 +45,36 @@ async function handleGET(req: NextRequest) {
   const from = searchParams.get("from");
   const to = searchParams.get("to");
   const validActorType = parseActorType(searchParams);
-
-  // Require at least one date boundary
-  if (!from && !to) {
-    return validationError({ date: "At least 'from' or 'to' is required for download" });
+  const scopeParam = searchParams.get("scope");
+  const teamIdParam = searchParams.get("teamId");
+  const actorUser = parseActorUserId(searchParams);
+  if ("invalid" in actorUser) {
+    return validationError({ userId: "Invalid user id" });
   }
 
-  // Validate date range (from || to is always true here due to early return above)
-  const fromDate = from ? new Date(from) : undefined;
-  const toDate = to ? new Date(to) : undefined;
-  if ((fromDate && Number.isNaN(fromDate.getTime())) || (toDate && Number.isNaN(toDate.getTime()))) {
-    return validationError({ date: "Invalid date format" });
-  }
-  const now = new Date();
-  const resolvedFrom = fromDate ?? new Date(now.getTime() - AUDIT_LOG_MAX_RANGE_DAYS * MS_PER_DAY);
-  const resolvedTo = toDate ?? now;
-  const diffMs = resolvedTo.getTime() - resolvedFrom.getTime();
-  if (diffMs < 0) {
-    return validationError({ date: "'from' must be before 'to'" });
-  }
-  if (diffMs > AUDIT_LOG_MAX_RANGE_DAYS * MS_PER_DAY) {
-    return validationError({ range: `Maximum range is ${AUDIT_LOG_MAX_RANGE_DAYS} days` });
+  // Validate date range; a tenant download requires at least one bound.
+  const resolved = resolveDownloadRange(from, to);
+  if ("error" in resolved) return validationError(resolved.error);
+  if (!resolved.range) return validationError({ date: "At least 'from' or 'to' is required for download" });
+  const { gte: resolvedFrom, lte: resolvedTo } = resolved.range;
+
+  // Validate teamId belongs to this tenant before any log query or download audit row
+  if (teamIdParam) {
+    const teamOk = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+      validateTenantAuditTeam(tx, actor.tenantId, teamIdParam),
+    );
+    if (!teamOk) {
+      return validationError({ teamId: "Team not found" });
+    }
   }
 
-  const where: Record<string, unknown> = {
-    scope: { in: [AUDIT_SCOPE.TENANT, AUDIT_SCOPE.TEAM] },
+  const where = buildTenantAuditWhere({
     tenantId: actor.tenantId,
-  };
-
-  if (validActorType) where.actorType = validActorType;
+    scope: scopeParam,
+    teamId: teamIdParam,
+    actorType: validActorType,
+    userId: actorUser.userId,
+  });
 
   const parsedActions = parseActionsCsvParam(actionsParam);
   if ("invalid" in parsedActions) {
@@ -93,7 +93,17 @@ async function handleGET(req: NextRequest) {
   await logAuditAsync({
     ...tenantAuditBase(req, session.user.id, actor.tenantId),
     action: AUDIT_ACTION.AUDIT_LOG_DOWNLOAD,
-    metadata: { format },
+    metadata: {
+      format,
+      ...auditDownloadFilterMetadata({
+        from: resolvedFrom,
+        to: resolvedTo,
+        actions: parsedActions.actions,
+        actorType: validActorType,
+      }),
+      ...(actorUser.userId && { actorUserId: actorUser.userId }),
+      ...appliedTenantAuditFilters(scopeParam, teamIdParam),
+    },
   });
 
   const tenantId = actor.tenantId;
@@ -104,7 +114,7 @@ async function handleGET(req: NextRequest) {
       withTenantRls(prisma, tenantId, async (tx) =>
         tx.auditLog.findMany({
           where,
-          orderBy: { createdAt: "asc" },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
           take,
           ...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {}),
         }),

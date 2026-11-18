@@ -26,6 +26,8 @@ export const memberContainmentSchema = z
         breakglassGrantIds: containmentIds.optional(),
         tenantWebhookIds: containmentIds.optional(),
         vaultResetIds: containmentIds.optional(),
+        shareLinkIds: containmentIds.optional(),
+        auditDeliveryTargetIds: containmentIds.optional(),
         emergencyAccessGrantIds: containmentIds.optional(),
       })
       .strict()

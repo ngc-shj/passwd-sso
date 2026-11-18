@@ -32,6 +32,8 @@ import { rejectOversizedMultipart } from "@/lib/http/parse-body";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
+import { lockFootholdWriter } from "@/lib/tenant/foothold-write-gate";
+import { footholdWriteErrorResponse } from "@/lib/http/lock-conflict-response";
 
 const sendFileLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 5 });
 
@@ -209,11 +211,16 @@ async function handlePOST(req: NextRequest) {
   // across aggregate+create.
   let share: { id: string; expiresAt: Date };
   try {
-    share = await withUserTenantRls(session.user.id, async () => {
+    share = await withUserTenantRls(session.user.id, async (rlsTenantId, tx) => {
+      await lockFootholdWriter(tx, req, {
+        tenantId: rlsTenantId,
+        actorId: session.user.id,
+        permission: null,
+      });
       // Serialize concurrent file-send creation for this user (aggregate-then-create byte-quota race).
-      await advisoryXactLock(prisma, session.user.id);
+      await advisoryXactLock(tx, session.user.id);
 
-      const activeTotal = await prisma.passwordShare.aggregate({
+      const activeTotal = await tx.passwordShare.aggregate({
         where: {
           createdById: session.user.id,
           shareType: SHARE_TYPE.FILE,
@@ -228,7 +235,7 @@ async function handlePOST(req: NextRequest) {
         throw new SendStorageLimitError();
       }
 
-      return prisma.passwordShare.create({
+      return tx.passwordShare.create({
         data: {
           tokenHash,
           shareType: SHARE_TYPE.FILE,
@@ -258,6 +265,8 @@ async function handlePOST(req: NextRequest) {
     if (e instanceof SendStorageLimitError) {
       return errorResponse(API_ERROR.SEND_STORAGE_LIMIT_EXCEEDED);
     }
+    const footholdResponse = footholdWriteErrorResponse(e);
+    if (footholdResponse) return footholdResponse;
     throw e;
   }
 

@@ -17,12 +17,19 @@ const {
   mockPasswordShareCreate: vi.fn(),
   mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockLogAuditInTx: vi.fn(),
-  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: (tenantId: string) => unknown) => fn("tenant-1")),
+  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: (tenantId: string, tx: unknown) => unknown) =>
+    fn("tenant-1", { passwordShare: { create: mockPasswordShareCreate } }),
+  ),
   mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: (tx: unknown) => unknown) => fn({})),
   mockAssertQuotaAvailable: vi.fn().mockResolvedValue(undefined),
 }));
 
+const { mockLockFootholdWriter } = vi.hoisted(() => ({
+  mockLockFootholdWriter: vi.fn(async () => new Map()),
+}));
+
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/tenant/foothold-write-gate", () => ({ lockFootholdWriter: mockLockFootholdWriter }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordEntry: { findUnique: mockPasswordEntryFindUnique },
@@ -69,12 +76,42 @@ vi.mock("@/lib/quota/resource-quotas", () => ({
 }));
 
 import { POST } from "./route";
+import { footholdGateCells } from "@/__tests__/helpers/foothold-gate-cells";
 
 describe("POST /api/share-links", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockCheck.mockResolvedValue({ allowed: true });
     mockAssertQuotaAvailable.mockResolvedValue(undefined);
+  });
+
+  footholdGateCells({
+    gate: mockLockFootholdWriter,
+    permission: null,
+    actorId: DEFAULT_SESSION.user.id,
+    tenantId: "tenant-1",
+    okStatus: 201,
+    arrange: () => {
+      mockAuth.mockResolvedValue(DEFAULT_SESSION);
+      mockPasswordEntryFindUnique.mockResolvedValue({
+        userId: DEFAULT_SESSION.user.id,
+        entryType: "LOGIN",
+        tenantId: "tenant-1",
+      });
+      mockPasswordShareCreate.mockResolvedValue({ id: "share-1", expiresAt: new Date(Date.now() + 86400_000) });
+    },
+    call: () =>
+      POST(
+        createRequest("POST", "http://localhost/api/share-links", {
+          body: {
+            passwordEntryId: "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+            data: { title: "My Entry", username: "user", password: "pw" },
+            expiresIn: "1d",
+            permissions: [],
+          },
+        }),
+      ),
+    assertNoWrite: () => expect(mockPasswordShareCreate).not.toHaveBeenCalled(),
   });
 
   it("creates share link and returns 201 with Cache-Control: no-store", async () => {

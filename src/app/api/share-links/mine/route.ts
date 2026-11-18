@@ -84,7 +84,7 @@ async function handleGET(req: NextRequest) {
     shares = await withUserTenantRls(session.user.id, async () =>
       prisma.passwordShare.findMany({
         where,
-        orderBy: { createdAt: "desc" },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         take: limit + 1,
         ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
         // The creator is hydrated below, outside the tenant context. In the team

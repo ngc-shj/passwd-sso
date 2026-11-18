@@ -72,7 +72,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
     logs = await withTeamTenantRls(teamId, async () =>
       prisma.auditLog.findMany({
         where,
-        orderBy: { createdAt: "desc" },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         take: limit + 1,
         ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
       }),

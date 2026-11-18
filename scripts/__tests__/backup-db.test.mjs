@@ -239,7 +239,7 @@ function run(env = {}, { tocEntries, timeout = 8000, killSignal } = {}) {
  * drives this same function, so interpolating a path back into shell text fails
  * there.
  */
-async function runRootSwap(scriptPath, outPath, rootPath, env) {
+async function runRootSwap(scriptPath, outPath, rootPath, env, readyPattern) {
   // Opened once, in append mode. The child writes through a duplicate of this
   // descriptor and the exit line goes through the same one, so the path is
   // resolved exactly once — re-opening it by path to append would be a
@@ -250,13 +250,30 @@ async function runRootSwap(scriptPath, outPath, rootPath, env) {
     const child = spawn(BASH, [scriptPath], { env, stdio: ["ignore", out, out] });
     const kill = setTimeout(() => child.kill("SIGKILL"), 20000);
     kill.unref();
+    let done = false;
     const exited = new Promise((resolve) => {
-      child.once("error", (error) => resolve({ error }));
-      child.once("exit", (code, signal) => resolve({ code, signal }));
+      child.once("error", (error) => { done = true; resolve({ error }); });
+      child.once("exit", (code, signal) => { done = true; resolve({ code, signal }); });
     });
 
-    // The swap has to land while the script is between its dumps.
-    spawnSync("sleep", ["1"]);
+    // The swap has to land while the script is between its dumps. With a
+    // readyPattern, wait until the script's own output says it got there: a
+    // fixed delay let a loaded machine (the full suite) swap before the script
+    // had taken its root, so the run legitimately succeeded in the new root.
+    let ready;
+    if (readyPattern) {
+      const deadline = Date.now() + 15000;
+      const isReady = () => existsSync(outPath) && readyPattern.test(readFileSync(outPath, "utf8"));
+      while (!done && Date.now() < deadline && !isReady()) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      ready = isReady();
+    } else {
+      spawnSync("sleep", ["1"]);
+    }
+    // Whether the swap lands on a live run: one that already exited (for any
+    // reason) proves nothing about a mid-run swap.
+    const aliveAtSwap = !done;
     renameSync(rootPath, `${rootPath}.moved`);
     mkdirSync(rootPath, { mode: 0o700 });
     chmodSync(rootPath, 0o700);
@@ -267,7 +284,7 @@ async function runRootSwap(scriptPath, outPath, rootPath, env) {
     // script's status out of the captured output, so it still has to land there.
     const status = result.error ? "spawn-error" : result.code ?? `signal:${result.signal}`;
     writeSync(out, `EXIT=${status}\n`);
-    return result;
+    return { ...result, ready, aliveAtSwap };
   } finally {
     closeSync(out);
   }
@@ -2061,6 +2078,33 @@ exit 0`);
         expect(readdirSync(backupDir).filter((n) => n.endsWith(".partial"))).toEqual([]);
       });
   });
+
+  // bash runs a trap only once the foreground command returns, so a signal that
+  // lands while mkdir runs is handled after the directory exists and before the
+  // script has recorded it for the EXIT trap. The mkdir stub sends the signal
+  // itself, which pins that window instead of hoping a timer lands in it.
+  for (const { what, suffix, leftover } of [
+    { what: "the run directory", suffix: ".partial", leftover: (n) => n.endsWith(".partial") },
+    { what: "the lock", suffix: "/.lock.d", leftover: (n) => n === ".lock.d" },
+  ]) {
+    it(`removes ${what} when a signal lands while mkdir creates it`, () => {
+      mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+      chmodSync(backupDir, 0o700);
+      stub("docker", `
+[ "\${2:-}" = "config" ] && exit 0
+[ "\${2:-}" = "ps" ] && { echo c1; exit 0; }
+exit 0`);
+      const realMkdir = spawnSync("sh", ["-c", "command -v mkdir"], { encoding: "utf8" }).stdout.trim();
+      stub("mkdir", `
+for a in "$@"; do
+  case "$a" in *"${suffix}") kill -HUP "$PPID" ;; esac
+done
+exec "${realMkdir}" "$@"`);
+      const r = run();
+      expect(r.stderr).toMatch(/BACKUP_ERR:INTERRUPTED terminated by SIGHUP/);
+      expect(readdirSync(backupDir).filter(leftover)).toEqual([]);
+    });
+  }
 });
 
 describe("ignore-rule coverage", () => {
@@ -3896,19 +3940,14 @@ exit 0`);
     }
   });
 
-  it("never publishes into a root replaced mid-run", async () => {
-    // What this pins is the outcome, not the branch: a swap can be caught by
-    // the redirect, by the publish, or by assert_root_unchanged depending on
-    // when it lands, and racing for one of them makes a flaky test. The
-    // property that matters either way is that the run does not succeed and
-    // leaves nothing in the substituted directory. The specific PRUNE_ABORTED
-    // branch is recorded as unpinned in the deviation log.
+  // The root-swap cell's setup: three old generations and dumps slow enough to
+  // swap the root underneath. Its positive control runs the same setup unswapped.
+  function slowDumpRun() {
     mkdirSync(backupDir, { recursive: true, mode: 0o700 });
     chmodSync(backupDir, 0o700);
     for (const n of ["20200101T000000Z", "20200102T000000Z", "20200103T000000Z"]) {
       mkdirSync(join(backupDir, n), { recursive: true, mode: 0o700 });
     }
-    // The dumps take long enough to swap the root underneath.
     stub("docker", `
 [ "\${2:-}" = "config" ] && exit 0
 [ "\${2:-}" = "ps" ] && { echo c1; exit 0; }
@@ -3920,14 +3959,31 @@ for a in "$@"; do
   esac
 done
 exit 0`);
+    return { PATH: `${binDir}:${process.env.PATH}`, HOME: homeDir, LANG: "C", BACKUP_DIR: backupDir, BACKUP_RETAIN: "1" };
+  }
+
+  it("publishes with the root-swap cell's setup when the root is left alone (its positive control)", { timeout: 30000 }, () => {
+    const env = slowDumpRun();
+    const r = spawnSync("bash", [SCRIPT], { encoding: "utf8", timeout: 25000, cwd: REPO_ROOT, env });
+    expect(r.status, r.stdout + r.stderr).toBe(0);
+    expect(generations()).toHaveLength(1);
+  });
+
+  it("never publishes into a root replaced mid-run", { timeout: 30000 }, async () => {
+    // What this pins is the outcome, not the branch: a swap can be caught by
+    // the redirect, by the publish, or by assert_root_unchanged depending on
+    // when it lands, and racing for one of them makes a flaky test. The
+    // property that matters either way is that the run does not succeed and
+    // leaves nothing in the substituted directory. The specific PRUNE_ABORTED
+    // branch is recorded as unpinned in the deviation log.
+    const env = slowDumpRun();
     // The harness performed the swap, so its own outcome says nothing about the
     // run. What the run did is in the captured output, which carries the
     // script's exit code as a line.
-    const swap = await runRootSwap(SCRIPT, join(tmpDir, "out"), backupDir, {
-      PATH: `${binDir}:${process.env.PATH}`, HOME: homeDir, LANG: "C",
-      BACKUP_DIR: backupDir, BACKUP_RETAIN: "1",
-    });
+    const swap = await runRootSwap(SCRIPT, join(tmpDir, "out"), backupDir, env, /\[backup-db\] dumping /);
     expect(swap.error, "the swap harness itself must have run").toBeUndefined();
+    expect(swap.ready, "the script must have reached its dumps before the swap").toBe(true);
+    expect(swap.aliveAtSwap, "the swap must land while the script runs").toBe(true);
     const out = readFileSync(join(tmpDir, "out"), "utf8");
     expect(out, "a replaced root must not yield a success").not.toMatch(/EXIT=0/);
     expect(generations(), "and must leave nothing published in the new root").toEqual([]);

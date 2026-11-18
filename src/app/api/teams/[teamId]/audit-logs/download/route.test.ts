@@ -181,6 +181,16 @@ describe("GET /api/teams/[teamId]/audit-logs/download", () => {
     expect(res.status).toBe(400);
   });
 
+  it("accepts a span of 90 days + the 2 h DST slack, and not 1 ms more", async () => {
+    const at = (to: string) =>
+      GET(
+        createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/audit-logs/download`, { searchParams: { from: "2026-03-01T00:00:00.000Z", to } }),
+        createParams({ teamId: TEAM_ID }),
+      );
+    expect((await at("2026-05-30T02:00:00.000Z")).status).toBe(200);
+    expect((await at("2026-05-30T02:00:00.001Z")).status).toBe(400);
+  });
+
   it("returns 400 for invalid date format", async () => {
     const res = await GET(
       createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/audit-logs/download`, {
@@ -330,6 +340,58 @@ describe("GET /api/teams/[teamId]/audit-logs/download", () => {
       expect.objectContaining({
         action: "AUDIT_LOG_DOWNLOAD",
         teamId: TEAM_ID,
+      }),
+    );
+  });
+
+  it("records the date range, actions and actor type it applied", async () => {
+    mockPrismaAuditLog.findMany.mockResolvedValue([]);
+
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/audit-logs/download`, {
+        searchParams: {
+          from: "2025-06-01T00:00:00.000Z",
+          to: "2025-06-30T00:00:00.000Z",
+          actions: "AUDIT_LOG_DOWNLOAD",
+          actorType: "HUMAN",
+        },
+      }),
+      createParams({ teamId: TEAM_ID }),
+    );
+    await streamToString(res);
+
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: {
+          format: "jsonl",
+          from: "2025-06-01T00:00:00.000Z",
+          to: "2025-06-30T00:00:00.000Z",
+          actions: ["AUDIT_LOG_DOWNLOAD"],
+          actorType: "HUMAN",
+        },
+      }),
+    );
+  });
+
+  it("reads a to-only download as the 90 days ending at to, even long ago", async () => {
+    mockPrismaAuditLog.findMany.mockResolvedValue([]);
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/audit-logs/download`, {
+        searchParams: { to: "2025-01-01T00:00:00.000Z" },
+      }),
+      createParams({ teamId: TEAM_ID }),
+    );
+    await streamToString(res);
+
+    expect(res.status).toBe(200);
+    expect(mockPrismaAuditLog.findMany.mock.calls[0][0].where.createdAt).toEqual({
+      gte: new Date("2024-10-03T00:00:00.000Z"),
+      lte: new Date("2025-01-01T00:00:00.000Z"),
+    });
+    // The audit row records the window queried, not the raw parameters.
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: { format: "jsonl", from: "2024-10-03T00:00:00.000Z", to: "2025-01-01T00:00:00.000Z" },
       }),
     );
   });

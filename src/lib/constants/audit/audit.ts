@@ -863,6 +863,10 @@ export const AUDIT_ACTION_GROUPS_TENANT: Record<string, AuditAction[]> = {
     AUDIT_ACTION.AUDIT_DELIVERY_TARGET_DEACTIVATE,
     AUDIT_ACTION.AUDIT_DELIVERY_TARGET_REACTIVATE,
   ],
+  // Containment of a member revokes their share links and Sends with TENANT-scope
+  // rows (member-containment.ts); a member's own revoke stays PERSONAL.
+  [AUDIT_ACTION_GROUP.SHARE]: [AUDIT_ACTION.SHARE_REVOKE],
+  [AUDIT_ACTION_GROUP.SEND]: [AUDIT_ACTION.SEND_REVOKE],
 };
 
 /**

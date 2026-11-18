@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { prisma } from "@/lib/prisma";
 import { createSendTextSchema } from "@/lib/validations";
 import {
   generateShareToken,
@@ -24,6 +23,8 @@ import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
+import { lockFootholdWriter } from "@/lib/tenant/foothold-write-gate";
+import { footholdWriteErrorResponse } from "@/lib/http/lock-conflict-response";
 
 const sendTextLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 20 });
 
@@ -60,30 +61,42 @@ async function handlePOST(req: NextRequest) {
   const tokenHash = hashToken(token);
 
   const expiresAt = new Date(Date.now() + SEND_EXPIRY_MAP[expiresIn]);
-  const share = await withUserTenantRls(session.user.id, async (tenantId) => {
-    // Server-side encryption with master key (NOT E2E), AAD-bound to tenant.
-    // The server can decrypt this data. For E2E-encrypted sharing,
-    // use share links with client-side encryption (masterKeyVersion=0).
-    const encrypted = encryptShareData(JSON.stringify({ name, text }), tenantId);
-    return prisma.passwordShare.create({
-      data: {
-        tokenHash,
-        shareType: SHARE_TYPE.TEXT,
-        entryType: null,
-        sendName: name,
-        encryptedData: encrypted.ciphertext,
-        dataIv: encrypted.iv,
-        dataAuthTag: encrypted.authTag,
-        masterKeyVersion: encrypted.masterKeyVersion,
-        expiresAt,
-        maxViews: maxViews ?? null,
-        accessPasswordHash,
-        accessPasswordHashVersion,
-        createdById: session.user.id,
+  let share;
+  try {
+    share = await withUserTenantRls(session.user.id, async (tenantId, tx) => {
+      await lockFootholdWriter(tx, req, {
         tenantId,
-      },
+        actorId: session.user.id,
+        permission: null,
+      });
+      // Server-side encryption with master key (NOT E2E), AAD-bound to tenant.
+      // The server can decrypt this data. For E2E-encrypted sharing,
+      // use share links with client-side encryption (masterKeyVersion=0).
+      const encrypted = encryptShareData(JSON.stringify({ name, text }), tenantId);
+      return tx.passwordShare.create({
+        data: {
+          tokenHash,
+          shareType: SHARE_TYPE.TEXT,
+          entryType: null,
+          sendName: name,
+          encryptedData: encrypted.ciphertext,
+          dataIv: encrypted.iv,
+          dataAuthTag: encrypted.authTag,
+          masterKeyVersion: encrypted.masterKeyVersion,
+          expiresAt,
+          maxViews: maxViews ?? null,
+          accessPasswordHash,
+          accessPasswordHashVersion,
+          createdById: session.user.id,
+          tenantId,
+        },
+      });
     });
-  });
+  } catch (e) {
+    const footholdResponse = footholdWriteErrorResponse(e);
+    if (footholdResponse) return footholdResponse;
+    throw e;
+  }
 
   // Audit log
   await logAuditAsync({

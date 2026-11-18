@@ -26,7 +26,10 @@ import { Fingerprint, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { fetchApi } from "@/lib/url-helpers";
 import { apiPath } from "@/lib/constants";
-import { formatDateTime } from "@/lib/format/format-datetime";
+import { MEMBER_ACTIVITY_LOOKBACK_DAYS } from "@/lib/constants/audit/member-activity";
+import { MS_PER_DAY } from "@/lib/constants/time";
+import { Link } from "@/i18n/navigation";
+import { formatDateTime, toISODateString } from "@/lib/format/format-datetime";
 import { handleStepUpError } from "@/lib/http/handle-step-up-error";
 import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
 import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
@@ -58,6 +61,8 @@ interface CreatedFootholds {
   breakglassGrants?: { id: string; reason: string; expiresAt: string }[];
   tenantWebhooks?: { id: string; url: string; createdAt: string }[];
   vaultResets?: { id: string; targetUser: { name: string | null; email: string | null }; expiresAt: string }[];
+  shareLinks?: { id: string; shareType: "ENTRY_SHARE" | "TEXT" | "FILE"; isTeam: boolean; createdAt: string; expiresAt: string }[];
+  auditDeliveryTargets?: { id: string; kind: string; endpoint: string | null; createdAt: string }[];
   emergencyAccessGrants?: { id: string; granteeEmail: string; status: string; hasEscrow: boolean }[];
 }
 
@@ -72,6 +77,8 @@ const FOOTHOLD_KINDS = [
   ["breakglassGrants", "breakglassGrantIds", "containmentKindBreakglassGrants"],
   ["tenantWebhooks", "tenantWebhookIds", "containmentKindTenantWebhooks"],
   ["vaultResets", "vaultResetIds", "containmentKindVaultResets"],
+  ["shareLinks", "shareLinkIds", "containmentKindShareLinks"],
+  ["auditDeliveryTargets", "auditDeliveryTargetIds", "containmentKindAuditDeliveryTargets"],
   ["emergencyAccessGrants", "emergencyAccessGrantIds", "containmentKindEmergencyAccessGrants"],
 ] as const satisfies readonly (readonly [FootholdKind, string, string])[];
 
@@ -95,6 +102,8 @@ const CONTAINMENT_KIND_NAME = {
   breakglassGrants: "containmentNameBreakglassGrants",
   tenantWebhooks: "containmentNameTenantWebhooks",
   vaultResets: "containmentNameVaultResets",
+  shareLinks: "containmentNameShareLinks",
+  auditDeliveryTargets: "containmentNameAuditDeliveryTargets",
   emergencyAccessGrants: "containmentNameEmergencyAccessGrants",
 } as const satisfies Record<ContainmentItem["kind"], string>;
 
@@ -103,6 +112,22 @@ type ContainedCounts = Partial<Record<ContainmentItem["kind"], { revoked: number
 
 /** Per kind, the member's live rows left after the request (member-containment.ts). */
 type RemainingCounts = Partial<Record<FootholdKind, number>>;
+
+/** Per capped kind, how many live rows the listing left out (member-containment.ts). */
+type MoreCounts = Partial<Record<FootholdKind, number>>;
+
+// A share's type name, as the admin knows it from the sharing UI.
+const SHARE_TYPE_NAME = {
+  TEXT: "containmentShareTypeText",
+  FILE: "containmentShareTypeFile",
+  ENTRY_SHARE: "containmentShareTypeEntry",
+} as const;
+
+/** The audit-log page filtered to one member's activity since the lookback; no name or email in the URL. */
+function memberActivityHref(userId: string, now: Date = new Date()): string {
+  const from = new Date(now.getTime() - MEMBER_ACTIVITY_LOOKBACK_DAYS * MS_PER_DAY);
+  return `/admin/tenant/audit-logs?actor=${encodeURIComponent(userId)}&from=${toISODateString(from)}`;
+}
 
 interface TenantMemberPasskeysDialogProps {
   userId: string;
@@ -123,6 +148,7 @@ export function TenantMemberPasskeysDialog({ userId, memberName, disabled }: Ten
   const [passkeys, setPasskeys] = useState<MemberPasskey[] | null>(null);
   const [linkedAccounts, setLinkedAccounts] = useState<LinkedAccount[]>([]);
   const [footholds, setFootholds] = useState<CreatedFootholds>({});
+  const [moreFootholds, setMoreFootholds] = useState<MoreCounts>({});
   // Ticked rows, by itemKey: none by default.
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [loadFailed, setLoadFailed] = useState(false);
@@ -141,10 +167,12 @@ export function TenantMemberPasskeysDialog({ userId, memberName, disabled }: Ten
         passkeys: MemberPasskey[];
         linkedAccounts?: LinkedAccount[];
         createdFootholds?: CreatedFootholds;
+        moreFootholds?: MoreCounts;
       };
       setPasskeys(body.passkeys);
       setLinkedAccounts(body.linkedAccounts ?? []);
       setFootholds(body.createdFootholds ?? {});
+      setMoreFootholds(body.moreFootholds ?? {});
       const listed = new Set([
         ...(body.linkedAccounts ?? []).map((a) => itemKey({ kind: "accounts", id: a.id })),
         ...FOOTHOLD_KINDS.flatMap(([kind]) =>
@@ -219,6 +247,20 @@ export function TenantMemberPasskeysDialog({ userId, memberName, disabled }: Ten
           label: r.targetUser.name ?? r.targetUser.email ?? r.id,
           detail: t("containmentExpires", { date: formatDateTime(r.expiresAt, locale) }),
         }));
+      case "shareLinks":
+        return (footholds.shareLinks ?? []).map((r) => ({
+          kind,
+          id: r.id,
+          label: t(r.shareType === "ENTRY_SHARE" && r.isTeam ? "containmentShareTypeTeamEntry" : SHARE_TYPE_NAME[r.shareType]),
+          detail: t("containmentExpires", { date: formatDateTime(r.expiresAt, locale) }),
+        }));
+      case "auditDeliveryTargets":
+        return (footholds.auditDeliveryTargets ?? []).map((r) => ({
+          kind,
+          id: r.id,
+          label: r.endpoint ?? r.kind,
+          detail: t("containmentTargetDetail", { kind: r.kind, date: formatDateTime(r.createdAt, locale) }),
+        }));
       case "emergencyAccessGrants":
         return (footholds.emergencyAccessGrants ?? []).map((r) => ({
           kind,
@@ -228,9 +270,12 @@ export function TenantMemberPasskeysDialog({ userId, memberName, disabled }: Ten
         }));
     }
   };
-  const footholdSections = FOOTHOLD_KINDS.map(([kind, , heading]) => ({ kind, heading, items: footholdItems(kind) })).filter(
-    (section) => section.items.length > 0,
-  );
+  const footholdSections = FOOTHOLD_KINDS.map(([kind, , heading]) => ({
+    kind,
+    heading,
+    items: footholdItems(kind),
+    more: moreFootholds[kind] ?? 0,
+  })).filter((section) => section.items.length > 0);
   const chosen = [...accountItems, ...footholdSections.flatMap((section) => section.items)].filter((item) =>
     selected.has(itemKey(item)),
   );
@@ -369,12 +414,26 @@ export function TenantMemberPasskeysDialog({ userId, memberName, disabled }: Ten
                 key={section.kind}
                 heading={t(section.heading)}
                 items={section.items}
+                more={section.more > 0 ? t("containmentMore", { count: section.more }) : undefined}
                 selected={selected}
                 onToggle={toggle}
               />
             ))}
             <p className="text-xs text-muted-foreground">{t("containmentDeactivateNote")}</p>
             <p className="text-xs text-muted-foreground">{t("containmentScope")}</p>
+            <div className="space-y-1">
+              <Link
+                href={memberActivityHref(userId)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm font-medium underline underline-offset-2"
+              >
+                {t("containmentActivityLink")}
+              </Link>
+              <p className="text-xs text-muted-foreground">
+                {t("containmentActivityNote", { days: MEMBER_ACTIVITY_LOOKBACK_DAYS })}
+              </p>
+            </div>
             <div className="flex justify-end pt-2">
               <Button variant="destructive" size="sm" onClick={() => setTarget("all")}>
                 {t("revokeAllPasskeys")}
@@ -432,11 +491,14 @@ export function TenantMemberPasskeysDialog({ userId, memberName, disabled }: Ten
 function ContainmentSection({
   heading,
   items,
+  more,
   selected,
   onToggle,
 }: {
   heading: string;
   items: ContainmentItem[];
+  /** "and N more", for a kind whose listing was cut. */
+  more?: string;
   selected: ReadonlySet<string>;
   onToggle: (item: ContainmentItem, checked: boolean) => void;
 }) {
@@ -460,6 +522,7 @@ function ContainmentSection({
           </div>
         );
       })}
+      {more && <p className="text-xs text-muted-foreground">{more}</p>}
     </fieldset>
   );
 }

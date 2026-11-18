@@ -519,6 +519,78 @@ describe("ServiceAccountCard", () => {
     expect(tokenBtns[0]).toBeDisabled();
   });
 
+  it("bounds the token expiry input to the days the server accepts", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-17T12:00:00Z"));
+    try {
+      setupFetchAccounts([
+        { id: "sa-active", name: "active-sa", description: null, isActive: true, createdAt: "2025-01-01T00:00:00Z" },
+      ]);
+      await act(async () => {
+        render(<ServiceAccountCard />);
+      });
+      await waitFor(() => expect(screen.getByText("active-sa")).toBeInTheDocument());
+      await expandSa("active-sa");
+      const tokenBtn = screen.getAllByRole("button").find((b) => b.textContent?.includes("createToken"));
+      await act(async () => {
+        fireEvent.click(tokenBtn!);
+      });
+
+      const dateInput = document.querySelector('input[type="date"]');
+      // Tomorrow (UTC) up to the last UTC day whose 23:59:59Z is within 365 days.
+      expect(dateInput?.getAttribute("min")).toBe("2026-11-18");
+      expect(dateInput?.getAttribute("max")).toBe("2027-11-16");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("refuses a typed expiry outside min..max with its own message, sending nothing, and sends the max day", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-17T12:00:00Z"));
+    try {
+      setupFetchAccounts([
+        { id: "sa-active", name: "active-sa", description: null, isActive: true, createdAt: "2025-01-01T00:00:00Z" },
+      ]);
+      await act(async () => {
+        render(<ServiceAccountCard />);
+      });
+      await waitFor(() => expect(screen.getByText("active-sa")).toBeInTheDocument());
+      await expandSa("active-sa");
+      const tokenBtn = screen.getAllByRole("button").find((b) => b.textContent?.includes("createToken"));
+      await act(async () => {
+        fireEvent.click(tokenBtn!);
+      });
+      fireEvent.change(screen.getByPlaceholderText("tokenNamePlaceholder"), { target: { value: "my-token" } });
+      fireEvent.click(screen.getAllByTestId("checkbox")[0]);
+      const dateInput = document.querySelector('input[type="date"]')!;
+      const postBodies = () =>
+        mockFetch.mock.calls
+          .filter(([, init]) => (init as RequestInit | undefined)?.method === "POST")
+          .map(([, init]) => JSON.parse(String((init as RequestInit).body)) as { expiresAt: string });
+      const submit = async (day: string) => {
+        fireEvent.change(dateInput, { target: { value: day } });
+        const createTokenBtn = screen.getAllByRole("button").find((b) => b.textContent === "create" && !b.hasAttribute("disabled"));
+        await act(async () => {
+          fireEvent.click(createTokenBtn!);
+        });
+      };
+
+      // Past the max, and today (one day below the min): refused, nothing sent.
+      for (const day of ["2027-11-17", "2026-11-17"]) {
+        await submit(day);
+        expect(screen.getByText("tokenExpiresAtOutOfRange"), day).toBeInTheDocument();
+        expect(postBodies(), day).toEqual([]);
+      }
+      // The max day itself is sent, as its UTC end.
+      await submit("2027-11-16");
+      expect(screen.queryByText("tokenExpiresAtOutOfRange")).not.toBeInTheDocument();
+      expect(postBodies()).toEqual([expect.objectContaining({ expiresAt: "2027-11-16T23:59:59.000Z" })]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("shows plaintext token once after creation, token gone after dialog close", async () => {
     setupFetchAccounts([
       {
@@ -560,9 +632,9 @@ describe("ServiceAccountCard", () => {
     expect(scopeCheckboxes.length).toBeGreaterThan(0);
     fireEvent.click(scopeCheckboxes[0]);
 
-    // Set expiry date
+    // Set expiry date: the dialog's own earliest day, valid whatever today is
     const dateInput = screen.getByDisplayValue("");
-    fireEvent.change(dateInput, { target: { value: "2026-12-31" } });
+    fireEvent.change(dateInput, { target: { value: dateInput.getAttribute("min") } });
 
     // Submit token creation
     const createTokenBtn = screen
@@ -647,9 +719,8 @@ describe("ServiceAccountCard", () => {
       target: { value: "my-token" },
     });
     fireEvent.click(screen.getAllByTestId("checkbox")[0]);
-    fireEvent.change(screen.getByDisplayValue(""), {
-      target: { value: "2026-12-31" },
-    });
+    const dateInput = screen.getByDisplayValue("");
+    fireEvent.change(dateInput, { target: { value: dateInput.getAttribute("min") } });
 
     const createTokenBtn = screen
       .getAllByRole("button")
@@ -719,9 +790,8 @@ describe("ServiceAccountCard", () => {
       target: { value: "my-token" },
     });
     fireEvent.click(screen.getAllByTestId("checkbox")[0]);
-    fireEvent.change(screen.getByDisplayValue(""), {
-      target: { value: "2026-12-31" },
-    });
+    const dateInput = screen.getByDisplayValue("");
+    fireEvent.change(dateInput, { target: { value: dateInput.getAttribute("min") } });
 
     const createTokenBtn = screen
       .getAllByRole("button")

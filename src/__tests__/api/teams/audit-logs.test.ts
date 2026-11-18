@@ -140,7 +140,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
           teamId: TEAM_ID,
           scope: AUDIT_SCOPE.TEAM,
         },
-        orderBy: { createdAt: "desc" },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       })
     );
   });

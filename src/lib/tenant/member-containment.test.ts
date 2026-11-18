@@ -25,6 +25,10 @@ const NOW = new Date("2026-11-10T00:00:00Z");
 
 const MODEL_OF_KIND = FOOTHOLD_MODEL;
 
+// Stands for tx.passwordShare.fields.maxViews: both spellings of the share
+// predicate must carry the same reference, or they have drifted apart.
+const MAX_VIEWS_FIELD = { sentinel: "passwordShare.fields.maxViews" };
+
 /**
  * A fake transaction recording every call's `where` per model and method.
  * A bulk write returns one row per id it names, or the rows `returns` gives
@@ -49,16 +53,19 @@ function recordingTx(
             returns[model]?.(args.where) ??
             (args.where.id?.in ?? []).map((id) => ({ id, tenantId: TENANT, serviceAccountId: "sa", clientId: "c", targetUserId: "x", granteeId: null, url: "https://hooks.example.com/in?token=s" }));
           if (method === "count") return counts[model] ?? 0;
+          if (method === "groupBy") return returns[model]?.(args.where) ?? [];
           if (method === "findMany" || method === "updateManyAndReturn") return rows();
           if (method === "deleteMany") return { count: (args.where.id?.in ?? []).length };
           return { count: 1 };
         };
         return {
+          ...(model === "passwordShare" ? { fields: { maxViews: MAX_VIEWS_FIELD } } : {}),
           findMany: record("findMany"),
           updateMany: record("updateMany"),
           updateManyAndReturn: record("updateManyAndReturn"),
           deleteMany: record("deleteMany"),
           count: record("count"),
+          groupBy: record("groupBy"),
         };
       },
     },
@@ -75,6 +82,8 @@ const ALL_KINDS_INPUT = {
     breakglassGrantIds: ["id-5"],
     tenantWebhookIds: ["id-7"],
     vaultResetIds: ["id-8"],
+    shareLinkIds: ["id-9"],
+    auditDeliveryTargetIds: ["id-10"],
     emergencyAccessGrantIds: ["id-6"],
   },
 };
@@ -211,10 +220,26 @@ describe("member containment predicates", () => {
     await expect(containMemberInTx(tx as never, containArgs(request!))).rejects.toThrow(/1 of 2 accounts/);
   });
 
+  it("both spellings of the share predicate carry the max-views field reference", async () => {
+    const listing = recordingTx();
+    await listMemberContainment(listing.tx, { tenantId: TENANT, targetUserId: TARGET, role: "OWNER", now: NOW });
+    const writes = recordingTx();
+    await containMemberInTx(writes.tx, containArgs(toContainmentRequest(ALL_KINDS_INPUT)!));
+    const exhausted = { OR: [{ maxViews: null }, { viewCount: { lt: MAX_VIEWS_FIELD } }] };
+    expect(listing.wheres.passwordShare.findMany[0]).toMatchObject(exhausted);
+    expect(writes.wheres.passwordShare.updateManyAndReturn[0]).toMatchObject(exhausted);
+    expect(listing.wheres.passwordShare.findMany[0]).toMatchObject({
+      tenantId: TENANT,
+      createdById: TARGET,
+      revokedAt: null,
+      expiresAt: { gt: NOW },
+    });
+  });
+
   it("every tenant-owned kind names the admin's tenant; the user's kinds match on the user", async () => {
     const listing = recordingTx();
     await listMemberContainment(listing.tx, { tenantId: TENANT, targetUserId: TARGET, role: "OWNER", now: NOW });
-    for (const model of ["scimToken", "serviceAccount", "serviceAccountToken", "mcpClient", "personalLogAccessGrant"]) {
+    for (const model of ["scimToken", "serviceAccount", "serviceAccountToken", "mcpClient", "personalLogAccessGrant", "passwordShare", "auditDeliveryTarget"]) {
       expect(listing.wheres[model].findMany[0]).toMatchObject({ tenantId: TENANT });
     }
     expect(listing.wheres.emergencyAccessGrant.findMany[0]).toEqual({ ownerId: TARGET, status: { notIn: ["REVOKED", "REJECTED"] } });
@@ -352,9 +377,169 @@ describe("toContainmentRequest", () => {
         breakglassGrants: [],
         tenantWebhooks: [],
         vaultResets: [],
+        shareLinks: [],
+        auditDeliveryTargets: [],
         emergencyAccessGrants: [],
       },
     });
+  });
+});
+
+describe("share links and audit delivery targets", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("lists a share by type and team-ness only, never its content, name or token", async () => {
+    const listing = recordingTx({
+      passwordShare: () => [
+        { id: "s-personal", shareType: "ENTRY_SHARE", teamPasswordEntryId: null, createdAt: NOW, expiresAt: NOW },
+        { id: "s-team", shareType: "ENTRY_SHARE", teamPasswordEntryId: "tpe-1", createdAt: NOW, expiresAt: NOW },
+      ],
+    });
+    const result = await listMemberContainment(listing.tx, { tenantId: TENANT, targetUserId: TARGET, role: "OWNER", now: NOW });
+
+    expect(listing.selects.passwordShare[0]).toEqual({
+      id: true,
+      shareType: true,
+      teamPasswordEntryId: true,
+      createdAt: true,
+      expiresAt: true,
+    });
+    expect(result.createdFootholds.shareLinks).toEqual([
+      { id: "s-personal", shareType: "ENTRY_SHARE", isTeam: false, createdAt: NOW, expiresAt: NOW },
+      { id: "s-team", shareType: "ENTRY_SHARE", isTeam: true, createdAt: NOW, expiresAt: NOW },
+    ]);
+    for (const secret of ["sendName", "encryptedData", "tokenHash", "accessPasswordHash", "encryptedFile", "sendFilename"]) {
+      expect(JSON.stringify(listing.selects.passwordShare[0]), secret).not.toContain(secret);
+      expect(JSON.stringify(result.createdFootholds.shareLinks), secret).not.toContain(secret);
+    }
+  });
+
+  it("lists a delivery target with the masked endpoint, null when the config cannot be decrypted, and no config", async () => {
+    const listing = recordingTx({
+      auditDeliveryTarget: () => [
+        {
+          id: "t-1",
+          kind: "WEBHOOK",
+          createdAt: NOW,
+          configEncrypted: "not-hex",
+          configIv: "not-hex",
+          configAuthTag: "not-hex",
+          masterKeyVersion: 1,
+        },
+      ],
+    });
+    const result = await listMemberContainment(listing.tx, { tenantId: TENANT, targetUserId: TARGET, role: "OWNER", now: NOW });
+
+    expect(result.createdFootholds.auditDeliveryTargets).toEqual([
+      { id: "t-1", kind: "WEBHOOK", endpoint: null, createdAt: NOW },
+    ]);
+    expect(JSON.stringify(result.createdFootholds.auditDeliveryTargets)).not.toContain("configEncrypted");
+    expect(listing.wheres.auditDeliveryTarget.findMany[0]).toEqual({ tenantId: TENANT, createdById: TARGET, isActive: true });
+  });
+
+  it("revokes shares with an explicit select, one revoke row per share by type, naming member and admin", async () => {
+    const writes = recordingTx({
+      passwordShare: () => [
+        { id: "s-entry", shareType: "ENTRY_SHARE" },
+        { id: "s-text", shareType: "TEXT" },
+        { id: "s-file", shareType: "FILE" },
+      ],
+    });
+    const result = await containMemberInTx(
+      writes.tx,
+      containArgs(toContainmentRequest({ revoke: { shareLinkIds: ["s-entry", "s-text", "s-file", "s-gone"] } })!),
+    );
+
+    expect(writes.updates.passwordShare).toEqual([{ revokedAt: NOW }]);
+    const [, tenant, rows] = vi.mocked(logAuditBulkInTx).mock.calls[0];
+    expect(tenant).toBe(TENANT);
+    expect(rows.map((r) => [r.action, r.targetType, r.targetId, r.metadata])).toEqual([
+      ["SHARE_REVOKE", "PasswordShare", "s-entry", { targetUserId: TARGET, revokedById: "admin-1" }],
+      ["SEND_REVOKE", "PasswordShare", "s-text", { targetUserId: TARGET, revokedById: "admin-1" }],
+      ["SEND_REVOKE", "PasswordShare", "s-file", { targetUserId: TARGET, revokedById: "admin-1" }],
+    ]);
+    expect(result.contained.shareLinks).toEqual({ revoked: 3, skipped: 1 });
+  });
+
+  it("deactivates targets and audits each with its kind, the member and the deliveries it parked, without a url", async () => {
+    const writes = recordingTx({
+      auditDeliveryTarget: () => [{ id: "t-1", kind: "SIEM_HEC" }, { id: "t-2", kind: "WEBHOOK" }],
+      auditDelivery: () => [{ targetId: "t-1", _count: { _all: 3 } }],
+    });
+    const result = await containMemberInTx(
+      writes.tx,
+      containArgs(toContainmentRequest({ revoke: { auditDeliveryTargetIds: ["t-1", "t-2", "t-gone"] } })!),
+    );
+
+    expect(writes.updates.auditDeliveryTarget).toEqual([{ isActive: false }]);
+    // Counted in the tenant, for the deactivated targets only, PENDING only.
+    expect(writes.wheres.auditDelivery.groupBy).toEqual([
+      { tenantId: TENANT, targetId: { in: ["t-1", "t-2"] }, status: "PENDING" },
+    ]);
+    const [, , rows] = vi.mocked(logAuditBulkInTx).mock.calls[0];
+    expect(rows).toEqual([
+      expect.objectContaining({
+        action: "AUDIT_DELIVERY_TARGET_DEACTIVATE",
+        metadata: { targetId: "t-1", kind: "SIEM_HEC", targetUserId: TARGET, pendingDeliveries: 3 },
+      }),
+      expect.objectContaining({
+        action: "AUDIT_DELIVERY_TARGET_DEACTIVATE",
+        metadata: { targetId: "t-2", kind: "WEBHOOK", targetUserId: TARGET, pendingDeliveries: 0 },
+      }),
+    ]);
+    expect(result.contained.auditDeliveryTargets).toEqual({ revoked: 2, skipped: 1 });
+  });
+
+  it("counts both kinds in remaining", async () => {
+    const writes = recordingTx({}, { passwordShare: 3, auditDeliveryTarget: 1 });
+    const result = await containMemberInTx(writes.tx, containArgs(toContainmentRequest({ revoke: { scimTokenIds: ["s"] } })!));
+    expect(result.remaining).toMatchObject({ shareLinks: 3, auditDeliveryTargets: 1 });
+  });
+});
+
+describe("listing cap", () => {
+  const rows = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ id: `s-${i}`, shareType: "TEXT", teamPasswordEntryId: null, createdAt: NOW, expiresAt: NOW }));
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("takes at most MEMBER_CONTAINMENT_MAX_IDS rows of every kind", async () => {
+    const takes: Record<string, unknown> = {};
+    const tx = new Proxy({}, {
+      get: (_t, model: string) => ({
+        fields: { maxViews: MAX_VIEWS_FIELD },
+        findMany: async (args: { take?: number }) => {
+          takes[model] = args.take;
+          return [];
+        },
+        count: async () => 0,
+      }),
+    });
+    await listMemberContainment(tx as never, { tenantId: TENANT, targetUserId: TARGET, role: "OWNER", now: NOW });
+    for (const [kind, model] of Object.entries(FOOTHOLD_MODEL)) expect(takes[model], kind).toBe(100);
+  });
+
+  it("reports no moreFootholds key for a kind that fits exactly, and the surplus for one that does not", async () => {
+    const fits = recordingTx({ passwordShare: () => rows(100) }, { passwordShare: 100 });
+    const exact = await listMemberContainment(fits.tx, { tenantId: TENANT, targetUserId: TARGET, role: "OWNER", now: NOW });
+    expect(exact.createdFootholds.shareLinks).toHaveLength(100);
+    expect(exact.moreFootholds).toEqual({});
+
+    const over = recordingTx({ passwordShare: () => rows(100) }, { passwordShare: 101 });
+    const capped = await listMemberContainment(over.tx, { tenantId: TENANT, targetUserId: TARGET, role: "OWNER", now: NOW });
+    expect(capped.createdFootholds.shareLinks).toHaveLength(100);
+    expect(capped.moreFootholds).toEqual({ shareLinks: 1 });
+  });
+
+  it("does not count a kind the actor may not contain", async () => {
+    const over = recordingTx({ personalLogAccessGrant: () => Array.from({ length: 100 }, (_, i) => ({ id: `g-${i}` })) }, { personalLogAccessGrant: 150 });
+    const result = await listMemberContainment(over.tx, { tenantId: TENANT, targetUserId: TARGET, role: "ADMIN", now: NOW });
+    expect(result.createdFootholds).not.toHaveProperty("breakglassGrants");
+    expect(result.moreFootholds).toEqual({});
   });
 });
 

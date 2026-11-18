@@ -304,5 +304,9 @@
   "delegationSearchMeta": "Searched \"{query}\" — {entryCount} results",
   "delegationGetMeta": "Retrieved delegated credential",
   "delegationCreateMeta": "Delegated {entryCount} entries",
-  "delegationRevokeMeta": "Revoked {revokedCount, plural, one {# session} other {# sessions}} ({reason})"
+  "delegationRevokeMeta": "Revoked {revokedCount, plural, one {# session} other {# sessions}} ({reason})",
+  "actorFilterChip": "Actions by {name}",
+  "actorFilterFallbackName": "this member",
+  "actorFilterClear": "Clear member filter",
+  "actorFilterNote": "Showing tenant and team actions by this member, including agents acting as them. Personal vault events are not included."
 }

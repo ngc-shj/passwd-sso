@@ -22,6 +22,38 @@ export function toISODateString(date: Date = new Date()): string {
   return `${y}-${m}-${d}`;
 }
 
+/**
+ * Parses a "YYYY-MM-DD" `<input type="date">` value as that calendar day in the
+ * local timezone — the inverse of toISODateString. `new Date("YYYY-MM-DD")`
+ * reads it as UTC midnight instead. With `endOfDay`, the day's last millisecond.
+ * Undefined for anything that is not a real calendar date.
+ */
+export function parseLocalDate(value: string, endOfDay = false): Date | undefined {
+  // Four or more year digits: what a date input can emit (HTML valid date string).
+  const match = /^(\d{4,})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return undefined;
+  const [y, m, d] = [Number(match[1]), Number(match[2]) - 1, Number(match[3])];
+  const start = startOfLocalDay(y, m, d);
+  // Date rolls an out-of-range day over (2026-02-30 → March 2), and a year past
+  // the Date range is NaN; refuse both instead.
+  if (Number.isNaN(start.getTime()) || start.getFullYear() !== y || start.getMonth() !== m || start.getDate() !== d) {
+    return undefined;
+  }
+  if (!endOfDay) return start;
+  // The instant before the next day starts: 23:59:59.999 may not exist (a DST
+  // gap at 23:00, as in America/Nuuk), the next midnight's start always does.
+  const next = startOfLocalDay(y, m, d + 1);
+  return Number.isNaN(next.getTime()) ? undefined : new Date(next.getTime() - 1);
+}
+
+function startOfLocalDay(y: number, m: number, d: number): Date {
+  // setFullYear, not the Date(y, m, d) constructor, which maps years 0–99 to 1900–1999.
+  const date = new Date(0);
+  date.setFullYear(y, m, d);
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
 export function formatRelativeTime(value: string | Date, locale: string): string {
   const date = value instanceof Date ? value : new Date(value);
   const now = Date.now();
