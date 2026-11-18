@@ -597,3 +597,10 @@ sites, 0 problems). Testing ran each guard clause against its own mutant:
   tests have.
 - C-3: `getByLabelText("siem.example.com", { exact: false })`; no other
   host-shaped regex in the branch diff.
+
+After merging main (c77cd60ca), CI timed out a second case in the same file, the
+fixture case "refuses query arguments or spreads it cannot read", at 10 s. It
+takes 0.7 s locally. C-2 had widened only the case that failed first. The timeout
+now sits on the suite (`describe(..., { timeout: 60_000 })`), so it covers every
+case in the guard. A throwaway copy with the suite timeout set to 5 ms times out
+both heavy cases, which shows the suite option reaches them.

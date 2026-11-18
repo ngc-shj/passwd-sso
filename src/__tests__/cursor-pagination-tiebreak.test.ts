@@ -268,7 +268,10 @@ function scanFixture(code: string) {
   return violations(createAstProject().createSourceFile("fixture.ts", code), "fixture");
 }
 
-describe("cursor pagination orders by a unique key last", () => {
+// Each case parses with ts-morph, and the tree scan binds every file under src/.
+// Locally the slowest case takes about 2 s; a sharded CI runner has taken more than
+// 15 times that, past the 10 s default, so the whole suite gets a wider timeout.
+describe("cursor pagination orders by a unique key last", { timeout: 60_000 }, () => {
   it("every cursor query in src/ ends its orderBy with { id }", () => {
     const project = createAstProject();
     let sites = 0;
@@ -281,9 +284,7 @@ describe("cursor pagination orders by a unique key last", () => {
     }
     expect(problems).toEqual([]);
     expect(sites).toBeGreaterThanOrEqual(MIN_SITES);
-    // Parses and binds every file under src/: about 2 s locally, past the 10 s
-    // default on a sharded CI runner.
-  }, 60_000);
+  });
 
   it("accepts a spread cursor with an id tiebreak", () => {
     expect(scanFixture(`tx.a.findMany({ orderBy: [{ createdAt: "desc" }, { id: "desc" }], ...(c ? { cursor: { id: c }, skip: 1 } : {}) });`).problems).toEqual([]);
