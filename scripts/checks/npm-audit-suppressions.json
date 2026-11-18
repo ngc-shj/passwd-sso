@@ -1,4 +1,12 @@
 {
-  "_comment": "Read by scripts/checks/check-npm-audit.mjs for CI's dev-scope audit only; the production audit (--omit=dev) cannot be suppressed. Only for advisories with no fixed version to move to. Policy: docs/security/vulnerability-triage.md.",
-  "suppressions": []
+  "_comment": "Read by scripts/checks/check-npm-audit.mjs for both CI audit steps. The production step (--omit-dev) honours only entries with scope \"production\". Only for advisories with no fixed version to move to. Policy: docs/security/vulnerability-triage.md.",
+  "suppressions": [
+    {
+      "id": "GHSA-fc5q-39xc-vjpf",
+      "package": "picomatch",
+      "scope": "production",
+      "reason": "No fixed version: every release through 4.0.7 is affected. The production-tree copies arrive only through build-time plugins (@sentry/nextjs's webpack wrapping loader via @rollup/plugin-commonjs, and next-intl's catalog extractor via @parcel/watcher, which next.config.ts does not enable); the glob patterns they compile come from this repository's config, never from a request. The standalone server output installs no picomatch package; its only copy is next's vendored dist/compiled/picomatch, which next uses solely to match images.localPatterns/remotePatterns, and next.config.ts sets neither.",
+      "expires": "2026-12-18"
+    }
+  ]
 }
