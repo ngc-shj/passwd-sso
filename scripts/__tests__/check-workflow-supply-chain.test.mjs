@@ -1130,3 +1130,105 @@ jobs:
     expect(findUnsavedAuditSubjectViolations(content, "release.yml")).toEqual([]);
   });
 });
+
+// The vulnerability audits are verifiers too: the app audit runs through
+// check-npm-audit.mjs, the extension and CLI jobs run plain `npm audit`.
+describe("findMaskedVerifierViolations — vulnerability audits", () => {
+  it.each([
+    ["the app audit gate", "node scripts/checks/check-npm-audit.mjs --omit-dev"],
+    ["a plain production audit", "npm audit --omit=dev --audit-level=high"],
+  ])("flags || true on %s", (_name, cmd) => {
+    const wf = ["    steps:", `      - run: ${cmd} || true`].join("\n");
+    const v = findMaskedVerifierViolations(wf, "ci.yml");
+    expect(v.some((m) => /masked/.test(m))).toBe(true);
+  });
+
+  it.each([
+    ["the app audit gate", "node scripts/checks/check-npm-audit.mjs --omit-dev"],
+    ["a plain production audit", "npm audit --omit=dev --audit-level=high"],
+  ])("does NOT flag an unmasked run of %s", (_name, cmd) => {
+    const wf = ["    steps:", `      - run: ${cmd}`].join("\n");
+    expect(findMaskedVerifierViolations(wf, "ci.yml")).toEqual([]);
+  });
+
+  it("flags continue-on-error: true on a workflow whose only verifier is a plain npm audit", () => {
+    const wf = [
+      "jobs:",
+      "  audit-ext:",
+      "    steps:",
+      "      - run: npm audit --omit=dev --audit-level=high",
+      "        continue-on-error: true",
+    ].join("\n");
+    const v = findMaskedVerifierViolations(wf, "ci.yml");
+    expect(v.some((m) => /continue-on-error/.test(m))).toBe(true);
+  });
+
+  it("does NOT treat a comment that only mentions the audits as running a verifier", () => {
+    const wf = [
+      "jobs:",
+      "  build:",
+      "    # see scripts/checks/check-npm-audit.mjs and `npm audit`",
+      "    steps:",
+      "      - run: npm ci",
+      "        continue-on-error: true",
+    ].join("\n");
+    expect(findMaskedVerifierViolations(wf, "ci.yml")).toEqual([]);
+  });
+
+  it("flags a masked audit step that carries a trailing comment", () => {
+    const wf = ["    steps:", "      - run: npm audit --omit=dev --audit-level=high || true # advisory"].join("\n");
+    const v = findMaskedVerifierViolations(wf, "ci.yml");
+    expect(v.some((m) => /masked/.test(m))).toBe(true);
+  });
+
+  it("flags a comment naming npm audit beside a pipe (deliberate over-block)", () => {
+    // Comment lines are scanned on purpose: a line starting with `#` is
+    // executable inside a multi-line quoted scalar (cases below), and only a
+    // YAML parser could tell the two apart.
+    const wf = [
+      "    steps:",
+      "      # `npm audit` output | head is advisory only",
+      "      - run: npm audit --omit=dev --audit-level=high",
+    ].join("\n");
+    expect(findMaskedVerifierViolations(wf, "ci.yml").length).toBeGreaterThan(0);
+  });
+
+  it.each([
+    ["a double-quoted scalar", ['      - run: "echo \'', "          #' && npm audit --omit=dev || true\""]],
+    ["a single-quoted scalar", ["      - run: 'echo \"", "          #\" && npm audit --omit=dev || true'"]],
+    ["an anchored block scalar", ["      - run: &r |", '          echo "', '          #" && npm audit --omit=dev || true']],
+  ])("flags a masked audit on a #-led continuation line of %s", (_name, lines) => {
+    const v = findMaskedVerifierViolations(["    steps:", ...lines].join("\n"), "ci.yml");
+    expect(v.some((m) => /masked/.test(m))).toBe(true);
+  });
+
+  it("flags an unprotected pipe on a #-led continuation line of a quoted scalar", () => {
+    const wf = ["    steps:", '      - run: "echo \'', "          #' && npm audit --omit=dev | tee out\""].join("\n");
+    const v = findMaskedVerifierViolations(wf, "ci.yml");
+    expect(v.some((m) => /pipe/.test(m))).toBe(true);
+  });
+
+  it("still checks a step that a backslash-ended comment would join onto", () => {
+    // YAML does not continue a comment onto the next line, so the step below
+    // is real and its mask must be caught.
+    const wf = [
+      "    steps:",
+      "      # audit step \\",
+      "      - run: npm audit --omit=dev --audit-level=high || true",
+    ].join("\n");
+    const v = findMaskedVerifierViolations(wf, "ci.yml");
+    expect(v.some((m) => /masked/.test(m))).toBe(true);
+  });
+
+  it("flags continue-on-error: true on a workflow whose only verifier is the app audit gate", () => {
+    const wf = [
+      "jobs:",
+      "  audit-app:",
+      "    steps:",
+      "      - run: node scripts/checks/check-npm-audit.mjs",
+      "        continue-on-error: true",
+    ].join("\n");
+    const v = findMaskedVerifierViolations(wf, "ci.yml");
+    expect(v.some((m) => /continue-on-error/.test(m))).toBe(true);
+  });
+});

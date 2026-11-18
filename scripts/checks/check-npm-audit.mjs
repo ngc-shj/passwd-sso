@@ -1,12 +1,27 @@
 #!/usr/bin/env node
-// Gate: `npm audit --audit-level=high` over the whole tree, with a documented,
-// expiring suppression for advisories that have NO fixed version to move to.
+// Gate: `npm audit --audit-level=high`, with a documented, expiring
+// suppression for advisories that have NO fixed version to move to.
 //
-// Used only for CI's dev-scope audit step. The production step stays a plain
-// `npm audit --omit=dev --audit-level=high`, which nothing here can suppress.
+// CI runs it twice: with --omit-dev for the production tree, and without it
+// for the whole tree. Each suppression names the scope it was justified for;
+// the production run honours only "production" entries, so an entry argued
+// for a devDependency can never silence an advisory in what ships. The
+// whole-tree run honours every entry, since it sees both trees.
+//
+// A "production" entry also lists the install paths (as npm audit reports
+// them) its reason was argued for: `nodes` for the production tree, and
+// `devNodes` for the further copies only the whole tree has. npm reports every
+// copy of a package under one key, so the entry covers those dev-tree copies
+// too. On the production run the advisory's nodes must equal `nodes`; on the
+// whole-tree run they must equal `nodes` plus `devNodes`. A new path is a new
+// consumer whose reachability nobody has reviewed, and a vanished one means
+// the reason describes a tree that no longer exists.
 //
 // Suppressions live in scripts/checks/npm-audit-suppressions.json:
 //   { "suppressions": [ { "id": "GHSA-…", "package": "<name>",
+//                         "scope": "production" | "dev",
+//                         "nodes": ["node_modules/…"],      // "production" only
+//                         "devNodes": ["node_modules/…"],   // "production" only, optional
 //                         "reason": "…", "expires": "YYYY-MM-DD" } ] }
 //
 // Fails closed on:
@@ -32,6 +47,7 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const GHSA_URL_RE = /^https:\/\/github\.com\/advisories\/(GHSA-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4})$/;
 const GHSA_ID_RE = /^GHSA-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const SCOPES = new Set(["production", "dev"]);
 
 function fail(lines) {
   console.error("npm audit gate failed:");
@@ -52,7 +68,12 @@ function parseDate(s) {
 
 function parseArgs(argv) {
   let suppressions = DEFAULT_SUPPRESSIONS;
+  let omitDev = false;
   for (let i = 2; i < argv.length; i += 1) {
+    if (argv[i] === "--omit-dev") {
+      omitDev = true;
+      continue;
+    }
     if (argv[i] === "--suppressions" && argv[i + 1]) {
       suppressions = resolve(argv[i + 1]);
       i += 1;
@@ -60,17 +81,18 @@ function parseArgs(argv) {
     }
     fail([`unknown argument: ${argv[i]}`]);
   }
-  return { suppressions };
+  return { suppressions, omitDev };
 }
 
-function readAuditReport() {
+function readAuditReport(omitDev) {
   let raw;
   if (process.env.NPM_AUDIT_JSON) {
     raw = readFileSync(process.env.NPM_AUDIT_JSON, "utf8");
   } else {
     // npm audit exits non-zero whenever it finds anything, so the exit status
     // says nothing here; the report's shape is what is checked below.
-    const r = spawnSync("npm", ["audit", "--json"], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+    const args = omitDev ? ["audit", "--json", "--omit=dev"] : ["audit", "--json"];
+    const r = spawnSync("npm", args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
     if (r.error) fail([`could not run npm audit: ${r.error.message}`]);
     raw = r.stdout;
   }
@@ -85,6 +107,25 @@ function readAuditReport() {
     fail(["npm audit output is not an auditReportVersion 2 report"]);
   }
   return report;
+}
+
+function isNodeList(nodes) {
+  return Array.isArray(nodes) && nodes.length > 0 && nodes.every((n) => typeof n === "string" && n !== "")
+    && new Set(nodes).size === nodes.length;
+}
+
+/** Differences between the reviewed install paths and the reported ones. */
+function nodeErrors(s, reported, omitDev) {
+  const label = `${s.id} (${s.package})`;
+  const field = omitDev ? '"nodes"' : '"nodes" or "devNodes"';
+  if (!Array.isArray(reported)) return [`${label}: npm audit reported no install paths to compare with the reviewed ${field}`];
+  const expected = omitDev ? s.nodes : [...s.nodes, ...(s.devNodes ?? [])];
+  const reviewed = new Set(expected);
+  const current = new Set(reported);
+  return [
+    ...reported.filter((n) => !reviewed.has(n)).map((n) => `${label}: ${n} is not among the reviewed ${field} — review its reachability, then add it`),
+    ...expected.filter((n) => !current.has(n)).map((n) => `${label}: reviewed node ${n} is no longer installed — remove it and re-check the reason`),
+  ];
 }
 
 function loadSuppressions(path, todayMs) {
@@ -102,6 +143,11 @@ function loadSuppressions(path, todayMs) {
     const expiresMs = parseDate(s?.expires);
     if (!GHSA_ID_RE.test(s?.id ?? "")) errors.push(`${where}: id must be a GHSA id`);
     else if (typeof s.package !== "string" || s.package === "") errors.push(`${where}: package is required`);
+    else if (!SCOPES.has(s.scope)) errors.push(`${where}: scope must be "production" or "dev"`);
+    else if (s.scope === "production" && !isNodeList(s.nodes)) errors.push(`${where}: a production entry must list the reviewed install paths in "nodes"`);
+    else if (s.scope === "production" && s.devNodes !== undefined && !isNodeList(s.devNodes)) errors.push(`${where}: "devNodes", when present, must be a non-empty list of distinct install paths`);
+    else if (s.scope === "production" && (s.devNodes ?? []).some((n) => s.nodes.includes(n))) errors.push(`${where}: a path cannot be in both "nodes" and "devNodes"`);
+    else if (s.scope === "dev" && (s.nodes !== undefined || s.devNodes !== undefined)) errors.push(`${where}: "nodes" and "devNodes" apply only to production entries`);
     else if (typeof s.reason !== "string" || s.reason.trim().length < 20) errors.push(`${where}: reason must explain why the advisory does not apply`);
     else if (expiresMs === null) errors.push(`${where}: expires must be a YYYY-MM-DD date`);
     else if (expiresMs < todayMs) errors.push(`${s.id} (${s.package}): suppression expired on ${s.expires} — re-evaluate, then fix or renew`);
@@ -112,13 +158,15 @@ function loadSuppressions(path, todayMs) {
 }
 
 function main() {
-  const { suppressions } = parseArgs(process.argv);
+  const { suppressions, omitDev } = parseArgs(process.argv);
   const todayStr = process.env.CHECK_NPM_AUDIT_TODAY ?? new Date().toISOString().slice(0, 10);
   const todayMs = parseDate(todayStr);
   if (todayMs === null) fail([`invalid CHECK_NPM_AUDIT_TODAY: ${todayStr}`]);
 
-  const report = readAuditReport();
-  const { entries, errors } = loadSuppressions(suppressions, todayMs);
+  const report = readAuditReport(omitDev);
+  const loaded = loadSuppressions(suppressions, todayMs);
+  const errors = loaded.errors;
+  const entries = omitDev ? loaded.entries.filter((s) => s.scope === "production") : loaded.entries;
   const used = new Set();
   const suppressed = [];
 
@@ -135,6 +183,7 @@ function main() {
       }
       const match = entries.find((s) => s.id === id && s.package === via.name);
       if (match) {
+        if (match.scope === "production" && !used.has(match)) errors.push(...nodeErrors(match, vuln.nodes, omitDev));
         used.add(match);
         suppressed.push(`${id} (${via.name}) until ${match.expires}`);
       } else {
@@ -143,12 +192,15 @@ function main() {
     }
   }
   for (const s of entries) {
-    if (!used.has(s)) errors.push(`${s.id} (${s.package}): suppression matches no current advisory — delete it`);
+    if (used.has(s)) continue;
+    errors.push(omitDev
+      ? `${s.id} (${s.package}): suppression matches no advisory in the production tree — delete it, or change its scope to "dev" if the whole tree still has it`
+      : `${s.id} (${s.package}): suppression matches no current advisory — delete it`);
   }
 
   if (errors.length > 0) fail(errors);
   for (const s of new Set(suppressed)) console.log(`suppressed: ${s}`);
-  console.log("npm audit gate passed (no unsuppressed high/critical advisories).");
+  console.log(`npm audit gate passed (${omitDev ? "production" : "whole"} tree; no unsuppressed high/critical advisories).`);
 }
 
 main();

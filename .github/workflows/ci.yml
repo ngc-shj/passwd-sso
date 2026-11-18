@@ -1035,8 +1035,12 @@ jobs:
       # verifies it. Nothing is built after install here, so --ignore-scripts
       # is side-effect-free.
       - run: npm ci --ignore-scripts
-      - run: npm audit --omit=dev --audit-level=high
-      # Dev scope, separately, because the root `postinstall`
+      # Production tree: `npm audit --omit=dev --audit-level=high`, plus
+      # expiring suppressions for advisories with no fixed version — only
+      # entries justified for scope "production"
+      # (scripts/checks/npm-audit-suppressions.json).
+      - run: node scripts/checks/check-npm-audit.mjs --omit-dev
+      # Whole tree, separately, because the root `postinstall`
       # (`patch-package --error-on-fail`) now EXECUTES part of the dev tree on
       # every plain `npm ci` — including six CI jobs. A devDependency that only
       # ever ran under a developer's own `npm test` was a different risk from
@@ -1047,8 +1051,7 @@ jobs:
       # Measured clean (0 at every severity) when this was added.
       # Same threshold as `npm audit --audit-level=high`, plus expiring
       # suppressions for advisories with no fixed version
-      # (scripts/checks/npm-audit-suppressions.json). The production step
-      # above has no such escape.
+      # (scripts/checks/npm-audit-suppressions.json), of either scope.
       - run: node scripts/checks/check-npm-audit.mjs
       # Verify registry signatures/attestations of installed deps (and our own
       # published versions). Fails closed on tamper; do not mask its exit.

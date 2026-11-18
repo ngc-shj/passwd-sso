@@ -9,8 +9,9 @@
  *     no workflow may pair a `dependabot` context with an auto-merge command.
  *
  *  2. A supply-chain verifier (`npm audit signatures`, the post-publish
- *     provenance assertion `npm view … dist.attestations`, or an invocation of
- *     the override-floor staleness gate, `check-override-floor-staleness`)
+ *     provenance assertion `npm view … dist.attestations`, an invocation of
+ *     the override-floor staleness gate, `check-override-floor-staleness`, or
+ *     a vulnerability audit — `npm audit`, or `check-npm-audit`)
  *     must never be exit-masked. A verifier behind `|| true` / `; true` /
  *     `|| exit 0` / `continue-on-error` / `set +e` / an unprotected pipe is
  *     theater — a real tamper (or a stale floor) would be swallowed.
@@ -60,8 +61,9 @@ export function findAutoMergeViolation(content, name) {
 /**
  * Returns violation strings for any supply-chain verifier — `npm audit
  * signatures`, the post-publish provenance assertion (`npm view` reading
- * `dist.attestations`), or an invocation of `check-override-floor-staleness`
- * (the override-floor staleness gate) — whose exit status is masked, or a
+ * `dist.attestations`), an invocation of `check-override-floor-staleness`
+ * (the override-floor staleness gate), or a vulnerability audit (`npm audit`,
+ * `check-npm-audit`) — whose exit status is masked, or a
  * step-level `continue-on-error: true` anywhere in a workflow that runs such a
  * verifier.
  *
@@ -142,8 +144,16 @@ export function findMaskedVerifierViolations(content, name) {
   // new gate (C7 of stale-override-floors) as a verifier too. `runsVerifier` is a
   // WORKFLOW-level flag, not per-line, so a `npm view` and an `attestations`
   // reference on separate lines still mark the workflow as verifier-running.
+  // `npm\s+audit\b` and `check-npm-audit` name the vulnerability audits: CI's
+  // app audit runs through the suppression-aware gate, the extension and CLI
+  // jobs run plain `npm audit --omit=dev`. Comment text is scanned too, so a
+  // comment naming a verifier beside a `|` or `|| true` reds the gate. That
+  // over-block is deliberate: telling a YAML comment from a `#` inside a
+  // multi-line quoted scalar or an unrecognised block header needs a YAML
+  // parser, and a regex skip of "comment" lines exempted executable text
+  // (`run: "echo '` / `#' && npm audit || true"`). Reword the comment instead.
   const verifierLineRe =
-    /audit\s+signatures|dist\??\.attestations|check-override-floor-staleness/;
+    /audit\s+signatures|dist\??\.attestations|check-override-floor-staleness|check-npm-audit|npm\s+audit\b/;
   // The `check-override-floor-staleness` alternative is bound to actual `run:`
   // COMMAND text via extractRunCommands, not raw file content — a YAML comment
   // that merely mentions the gate must not flip this workflow-level flag, which
@@ -151,7 +161,7 @@ export function findMaskedVerifierViolations(content, name) {
   const runsVerifier =
     /audit\s+signatures/.test(content) ||
     (/npm\s+view/.test(content) && /attestations/.test(content)) ||
-    extractRunCommands(content).some((cmd) => /check-override-floor-staleness/.test(cmd));
+    extractRunCommands(content).some((cmd) => /check-override-floor-staleness|check-npm-audit|npm\s+audit\b/.test(cmd));
   // `:` needs a lookahead boundary (a trailing \b never matches after non-word `:`).
   // `set +e` disables errexit, so a verifier's non-zero exit stops aborting the
   // rest of the script. Both spellings count: the `+`-cleared flag cluster
