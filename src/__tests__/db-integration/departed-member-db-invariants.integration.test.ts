@@ -1713,6 +1713,16 @@ describe("departed-member DB invariants — real-DB integration", () => {
       );
     }
 
+    /**
+     * A departure record in another tenant, so a read of the table reaches the
+     * bypass check: the policy's rls_bypass_admits is an InitPlan, evaluated
+     * only when a row is filtered, so an empty table is never refused.
+     */
+    async function foreignRecord(): Promise<void> {
+      const other = await tenant();
+      await record(other, await guest(other), (await clock()) - HOUR);
+    }
+
     /** The read must be the transaction's last statement: the refusal aborts it. */
     async function expectRefusedRead(client: pg.PoolClient, table: string): Promise<void> {
       const { table: refused } = await expectBypassRefusal(() => client.query(`SELECT count(*) FROM ${table}`));
@@ -1749,6 +1759,7 @@ describe("departed-member DB invariants — real-DB integration", () => {
 
     it("the deferred check, passing, restores the settings; tenant_member_departures is still refused", async () => {
       const r = await memberTeam();
+      await foreignRecord();
       await withAppClient(async (client) => {
         const prior = PRIOR("tenant_members,team_members", r.t);
         await setPrior(client, prior);
@@ -1762,6 +1773,7 @@ describe("departed-member DB invariants — real-DB integration", () => {
 
     it("the deferred check, refusing, leaves the settings; tenant_member_departures is still refused", async () => {
       const r = await memberTeam();
+      await foreignRecord();
       await withAppClient(async (client) => {
         const prior = PRIOR("tenant_members,team_members", r.t);
         await setPrior(client, prior);

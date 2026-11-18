@@ -267,3 +267,12 @@
   - red-proof rows R1, R1y, R1z, R6, 31a, 09c, 09d, 09e, 01 and 20: all proved;
   - lint and build pass;
   - the unit suite passes. One cell, `route-policy-manifest`, failed only when run concurrently with the integration suite, and passed alone.
+
+## D15 — CI: two T6 cells passed only on a database that already had departure records
+
+- **Failure:** on CI's fresh database, "the deferred check … tenant_member_departures is still refused" (both cells) failed with "the statement succeeded".
+- **Cause:**
+  - `tenant_member_departures`' policy calls `rls_bypass_admits` as an InitPlan, which is evaluated only when a row reaches the filter, so a read of an empty table is never refused.
+  - The worktree database had records left by other suites, and so did every red-proof scratch database cloned from it, which is why neither caught it.
+- **Fix:** both cells seed a record in another tenant before the read.
+- **Proof:** on a scratch copy with `tenant_member_departures` emptied, the committed cells fail with the CI error, and the fixed cells pass.
