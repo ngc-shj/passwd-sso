@@ -13,10 +13,12 @@ import { tmpdir } from "node:os";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = resolve(__dirname, "..", "checks", "check-npm-audit.mjs");
 const REAL_SUPPRESSIONS = resolve(__dirname, "..", "checks", "npm-audit-suppressions.json");
+const CI_WORKFLOW = resolve(__dirname, "..", "..", ".github", "workflows", "ci.yml");
 
 const TODAY = "2026-10-05";
 const GHSA = "GHSA-vfj7-8cjw-p6xm";
 const REASON = "dev scope only; patterns come from this repository, never external input";
+const NODES = ["node_modules/braces", "node_modules/fast-glob/node_modules/braces"];
 
 const advisory = (overrides = {}) => ({
   source: 1,
@@ -29,10 +31,10 @@ const advisory = (overrides = {}) => ({
   ...overrides,
 });
 
-const report = (vias, extra = {}) => ({
+const report = (vias, extra = {}, nodes = NODES) => ({
   auditReportVersion: 2,
   vulnerabilities: {
-    braces: { name: "braces", severity: "high", via: vias },
+    braces: { name: "braces", severity: "high", via: vias, nodes },
     // A dependent: vulnerable only through the root above, named by string.
     micromatch: { name: "micromatch", severity: "high", via: ["braces"] },
     ...extra,
@@ -43,6 +45,7 @@ const report = (vias, extra = {}) => ({
 const suppression = (overrides = {}) => ({
   id: GHSA, package: "braces", scope: "dev", reason: REASON, expires: "2026-12-01", ...overrides,
 });
+const prodSuppression = (overrides = {}) => suppression({ scope: "production", nodes: NODES, ...overrides });
 
 let dir;
 beforeEach(() => {
@@ -140,10 +143,28 @@ describe("check-npm-audit.mjs", () => {
     ["an impossible date", { expires: "2026-02-30" }, "expires must be a YYYY-MM-DD date"],
     ["no scope", { scope: undefined }, 'scope must be "production" or "dev"'],
     ["an unknown scope", { scope: "prod" }, 'scope must be "production" or "dev"'],
+    ["a production scope without nodes", { scope: "production" }, 'must list the reviewed install paths in "nodes"'],
+    ["a production scope with empty nodes", { scope: "production", nodes: [] }, 'must list the reviewed install paths in "nodes"'],
+    ["a production scope with a duplicated node", { scope: "production", nodes: [NODES[0], NODES[0]] }, 'must list the reviewed install paths in "nodes"'],
+    ["nodes on a dev entry", { nodes: NODES }, '"nodes" applies only to production entries'],
   ])("refuses a suppression with %s", (_name, overrides, msg) => {
     const r = run({ audit: report([advisory()]), suppressions: [suppression(overrides)] });
     expect(r.status).toBe(1);
     expect(r.stderr).toContain(msg);
+  });
+
+  it("honours a production-scope suppression on the whole-tree run, without comparing nodes", () => {
+    // The whole tree reports dev-tree copies under the same package key.
+    const r = run({ audit: report([advisory()], {}, [...NODES, "node_modules/vite/node_modules/braces"]), suppressions: [prodSuppression()] });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toContain(`suppressed: ${GHSA} (braces)`);
+    expect(r.stdout).toContain("whole tree");
+  });
+
+  it("names the whole-tree remedy for a stale entry", () => {
+    const r = run({ audit: { auditReportVersion: 2, vulnerabilities: {}, metadata: {} }, suppressions: [prodSuppression()] });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("matches no current advisory — delete it");
   });
 
   describe("--omit-dev (production tree)", () => {
@@ -154,7 +175,7 @@ describe("check-npm-audit.mjs", () => {
     });
 
     it("passes an advisory covered by a production-scope suppression", () => {
-      const r = run({ audit: report([advisory()]), suppressions: [suppression({ scope: "production" })], args: ["--omit-dev"] });
+      const r = run({ audit: report([advisory()]), suppressions: [prodSuppression()], args: ["--omit-dev"] });
       expect(r.status, r.stderr).toBe(0);
       expect(r.stdout).toContain(`suppressed: ${GHSA} (braces) until 2026-12-01`);
       expect(r.stdout).toContain("production tree");
@@ -166,13 +187,37 @@ describe("check-npm-audit.mjs", () => {
     });
 
     it("fails a production-scope suppression that matches no current advisory", () => {
-      const r = run({ audit: { auditReportVersion: 2, vulnerabilities: {}, metadata: {} }, suppressions: [suppression({ scope: "production" })], args: ["--omit-dev"] });
+      const r = run({ audit: { auditReportVersion: 2, vulnerabilities: {}, metadata: {} }, suppressions: [prodSuppression()], args: ["--omit-dev"] });
       expect(r.status).toBe(1);
-      expect(r.stderr).toContain("matches no current advisory");
+      expect(r.stderr).toContain('matches no advisory in the production tree — delete it, or change its scope to "dev"');
+    });
+
+    it("passes when the reported nodes equal the reviewed nodes in any order", () => {
+      const r = run({ audit: report([advisory()], {}, [...NODES].reverse()), suppressions: [prodSuppression()], args: ["--omit-dev"] });
+      expect(r.status, r.stderr).toBe(0);
+    });
+
+    it("fails a reported node that was not reviewed", () => {
+      const extra = "node_modules/next/node_modules/braces";
+      const r = run({ audit: report([advisory()], {}, [...NODES, extra]), suppressions: [prodSuppression()], args: ["--omit-dev"] });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain(`${extra} is not among the reviewed "nodes"`);
+    });
+
+    it("fails a reviewed node that is no longer installed", () => {
+      const r = run({ audit: report([advisory()], {}, [NODES[0]]), suppressions: [prodSuppression()], args: ["--omit-dev"] });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain(`reviewed node ${NODES[1]} is no longer installed`);
+    });
+
+    it("fails closed when npm audit reports no nodes to compare", () => {
+      const r = run({ audit: report([advisory()], {}, null), suppressions: [prodSuppression()], args: ["--omit-dev"] });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain("reported no install paths");
     });
 
     it("still validates dev-scope entries it does not apply", () => {
-      const r = run({ audit: report([advisory()]), suppressions: [suppression({ scope: "production" }), suppression({ expires: "2026-10-04" })], args: ["--omit-dev"] });
+      const r = run({ audit: report([advisory()]), suppressions: [prodSuppression(), suppression({ expires: "2026-10-04" })], args: ["--omit-dev"] });
       expect(r.status).toBe(1);
       expect(r.stderr).toContain("suppression expired on 2026-10-04");
     });
@@ -225,14 +270,26 @@ process.stdout.write(JSON.stringify({ auditReportVersion: 2, vulnerabilities: {}
     // advisories that tree would show, so a malformed or over-long entry is
     // caught here rather than first in CI's audit job.
     const committed = JSON.parse(readFileSync(REAL_SUPPRESSIONS, "utf8")).suppressions;
-    const vias = committed.filter(inTree).map((s) => advisory({ name: s.package, url: `https://github.com/advisories/${s.id}` }));
+    const vulnerabilities = {};
+    for (const s of committed.filter(inTree)) {
+      const entry = (vulnerabilities[s.package] ??= { name: s.package, severity: "high", via: [], nodes: s.nodes ?? [] });
+      entry.via.push(advisory({ name: s.package, url: `https://github.com/advisories/${s.id}` }));
+    }
     const auditPath = join(dir, "audit.json");
-    writeFileSync(auditPath, JSON.stringify(report(vias)));
+    writeFileSync(auditPath, JSON.stringify({ auditReportVersion: 2, vulnerabilities, metadata: {} }));
     const r = spawnSync("node", [SCRIPT, ...args], {
       env: { PATH: process.env.PATH, NPM_AUDIT_JSON: auditPath },
       encoding: "utf8",
       timeout: 10_000,
     });
     expect(r.status, r.stderr).toBe(0);
+  });
+
+  it("is wired into CI's app audit job for both the production and the whole tree", () => {
+    // The production scope rests on one flag in ci.yml: without --omit-dev the
+    // production step would become a second whole-tree run honouring dev entries.
+    const lines = readFileSync(CI_WORKFLOW, "utf8").split("\n").map((l) => l.trim());
+    expect(lines).toContain("- run: node scripts/checks/check-npm-audit.mjs --omit-dev");
+    expect(lines).toContain("- run: node scripts/checks/check-npm-audit.mjs");
   });
 });

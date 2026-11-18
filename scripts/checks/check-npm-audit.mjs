@@ -8,9 +8,18 @@
 // for a devDependency can never silence an advisory in what ships. The
 // whole-tree run honours every entry, since it sees both trees.
 //
+// A "production" entry also lists the install paths (`nodes`, as npm audit
+// reports them) its reason was argued for. On the production run the
+// advisory's nodes must equal that list: a new path is a new consumer whose
+// reachability nobody has reviewed, and a vanished one means the reason
+// describes a tree that no longer exists. The whole-tree run does not check
+// nodes — npm reports every copy of a package under one key, so there the
+// entry covers the dev-tree copies too, and its reason must say why.
+//
 // Suppressions live in scripts/checks/npm-audit-suppressions.json:
 //   { "suppressions": [ { "id": "GHSA-…", "package": "<name>",
 //                         "scope": "production" | "dev",
+//                         "nodes": ["node_modules/…"],   // "production" only
 //                         "reason": "…", "expires": "YYYY-MM-DD" } ] }
 //
 // Fails closed on:
@@ -98,6 +107,23 @@ function readAuditReport(omitDev) {
   return report;
 }
 
+function isNodeList(nodes) {
+  return Array.isArray(nodes) && nodes.length > 0 && nodes.every((n) => typeof n === "string" && n !== "")
+    && new Set(nodes).size === nodes.length;
+}
+
+/** Differences between the reviewed install paths and the reported ones. */
+function nodeErrors(s, reported) {
+  const label = `${s.id} (${s.package})`;
+  if (!Array.isArray(reported)) return [`${label}: npm audit reported no install paths to compare with the reviewed "nodes"`];
+  const reviewed = new Set(s.nodes);
+  const current = new Set(reported);
+  return [
+    ...reported.filter((n) => !reviewed.has(n)).map((n) => `${label}: ${n} is not among the reviewed "nodes" — review its reachability, then add it`),
+    ...s.nodes.filter((n) => !current.has(n)).map((n) => `${label}: reviewed node ${n} is no longer installed — remove it and re-check the reason`),
+  ];
+}
+
 function loadSuppressions(path, todayMs) {
   let doc;
   try {
@@ -114,6 +140,8 @@ function loadSuppressions(path, todayMs) {
     if (!GHSA_ID_RE.test(s?.id ?? "")) errors.push(`${where}: id must be a GHSA id`);
     else if (typeof s.package !== "string" || s.package === "") errors.push(`${where}: package is required`);
     else if (!SCOPES.has(s.scope)) errors.push(`${where}: scope must be "production" or "dev"`);
+    else if (s.scope === "production" && !isNodeList(s.nodes)) errors.push(`${where}: a production entry must list the reviewed install paths in "nodes"`);
+    else if (s.scope === "dev" && s.nodes !== undefined) errors.push(`${where}: "nodes" applies only to production entries`);
     else if (typeof s.reason !== "string" || s.reason.trim().length < 20) errors.push(`${where}: reason must explain why the advisory does not apply`);
     else if (expiresMs === null) errors.push(`${where}: expires must be a YYYY-MM-DD date`);
     else if (expiresMs < todayMs) errors.push(`${s.id} (${s.package}): suppression expired on ${s.expires} — re-evaluate, then fix or renew`);
@@ -149,6 +177,7 @@ function main() {
       }
       const match = entries.find((s) => s.id === id && s.package === via.name);
       if (match) {
+        if (omitDev && !used.has(match)) errors.push(...nodeErrors(match, vuln.nodes));
         used.add(match);
         suppressed.push(`${id} (${via.name}) until ${match.expires}`);
       } else {
@@ -157,7 +186,10 @@ function main() {
     }
   }
   for (const s of entries) {
-    if (!used.has(s)) errors.push(`${s.id} (${s.package}): suppression matches no current advisory — delete it`);
+    if (used.has(s)) continue;
+    errors.push(omitDev
+      ? `${s.id} (${s.package}): suppression matches no advisory in the production tree — delete it, or change its scope to "dev" if the whole tree still has it`
+      : `${s.id} (${s.package}): suppression matches no current advisory — delete it`);
   }
 
   if (errors.length > 0) fail(errors);
