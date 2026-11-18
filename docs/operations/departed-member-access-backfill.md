@@ -496,7 +496,7 @@ BEGIN
   -- Two updates of the same row: the trigger stamps admitted_at on the
   -- re-activating one. The team keys are not touched. The member's tenant row
   -- is still departed, which the departed-member guard refuses to re-activate
-  -- (20261117000000), so the guard is disabled around the re-activation only,
+  -- (20261117000100), so the guard is disabled around the re-activation only,
   -- inside this transaction: no other session ever sees it disabled, and an
   -- error rolls the disable back with everything else. Only the table owner can
   -- do this. team_members writers wait for this transaction while it holds the
@@ -684,7 +684,7 @@ the `delivery.dead_lettered` alert (see `alerts.md`).
 ## What prevents a recurrence, and its limits
 
 The database holds the departed-member invariants
-(`20261117000000_departed_member_guard`, plan
+(`20261117000100_departed_member_guard`, plan
 `docs/archive/review/departed-member-db-invariants-plan.md`). Whatever writes
 them — the app, a script, this runbook's SQL — it refuses the following, with
 SQLSTATE `23514` and a message starting `DEPARTED_MEMBER_GUARD:<reason>`:

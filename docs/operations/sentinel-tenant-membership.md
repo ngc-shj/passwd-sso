@@ -97,7 +97,7 @@ aborts one of the two.
 
 If the member holds active memberships of that tenant's teams, the database
 refuses this stamp at COMMIT (`DEPARTED_MEMBER_GUARD:departure_active`,
-migration `20261117000000`). End those memberships in the same transaction, as
+migration `20261117000100`). End those memberships in the same transaction, as
 the departed-member runbook's contain script does
 ([departed-member-access-backfill.md](departed-member-access-backfill.md)).
 

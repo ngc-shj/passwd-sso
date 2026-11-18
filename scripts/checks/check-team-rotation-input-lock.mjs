@@ -87,7 +87,7 @@
  *
  * 8. RETIRED. The grant-recipient rule (departed-member-leaked-authority-
  *    deviation.md D8) is enforced by the database since migration
- *    20261117000000_departed_member_guard, which judges every spelling of a
+ *    20261117000100_departed_member_guard, which judges every spelling of a
  *    grant to a leftover membership (docs/archive/review/
  *    departed-member-db-invariants-plan.md Q6, C8). The number stays: other
  *    documents cite rules 9 and 10.
@@ -176,7 +176,7 @@
  * and `.sh` / `.sql` files (scripts/manual-tests/run-pr-379-test-plan.sh deletes
  * tenant rows in a manual test; the runbook's operator SQL writes them by hand).
  * The database now enforces I1/I2 where it can judge (migration
- * 20261117000000_departed_member_guard); it does not judge undoing a departure
+ * 20261117000100_departed_member_guard); it does not judge undoing a departure
  * (a return, a tenant-row DELETE), TRUNCATE, re-homing a team, or key rows for
  * an absent membership (plan Q3/Q6). Rules 2, 9 and 10, the departureWriters
  * class and the tenantRowDeletes class remain for those.

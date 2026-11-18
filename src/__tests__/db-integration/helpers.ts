@@ -838,7 +838,7 @@ export async function createTestContext(): Promise<TestContext> {
 
 /**
  * Write ONE statement that the departed-member guard (departed_member_guard,
- * migration 20261117000000) would refuse, and return its rows.
+ * migration 20261117000100) would refuse, and return its rows.
  *
  * It exists for fixtures whose subject is how the application answers such a
  * state: residue (a raw departure stamp that left team rows active), a

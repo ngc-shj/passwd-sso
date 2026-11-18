@@ -185,7 +185,7 @@ async function handlePOST(req: NextRequest) {
         // no longer a member entitled to invite (removed or demoted since).
         // An invitee whose tenant row is departed now is refused too, however
         // old the departure: the database refuses activating a membership of
-        // a departed user (departed_member_guard, 20261117000000).
+        // a departed user (departed_member_guard, 20261117000100).
         const inviter = await activeTeamAdmission(tx, invitation.teamId, invitation.invitedById);
         const invitee = rows.get(session.user.id);
         if (

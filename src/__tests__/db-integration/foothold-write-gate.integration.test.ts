@@ -151,6 +151,10 @@ describe("foothold write gate — real-DB integration", () => {
           // with a route that holds the key and waits on the row.
           await lockTenantRows(tx, tenantId, [userId], "update");
           await tx.$executeRaw`UPDATE tenant_members SET deactivated_at = now() WHERE tenant_id = ${tenantId}::uuid AND user_id = ${userId}::uuid`;
+          // A departure ends the user's team memberships in the same
+          // transaction (endTeamMemberships): the database refuses a stamp
+          // that leaves one active (departure_active).
+          await tx.$executeRaw`UPDATE team_members SET deactivated_at = now() WHERE tenant_id = ${tenantId}::uuid AND user_id = ${userId}::uuid AND deactivated_at IS NULL`;
         }
       },
       HELD_TX_TIMEOUT_MS,

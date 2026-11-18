@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # departed-member-guard-redproof.sh — the VE4 red-proof runner for the
-# departed-member guard (migration 20261117000000_departed_member_guard;
+# departed-member guard (migration 20261117000100_departed_member_guard;
 # docs/archive/review/departed-member-db-invariants-plan.md C7 "Red-proofs").
 #
 # A manual tool, not CI. Each row under departed-member-guard-redproof/rows/ is
@@ -57,7 +57,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DATA="$ROOT/scripts/manual-tests/departed-member-guard-redproof"
 DEFAULT_TEST="src/__tests__/db-integration/departed-member-db-invariants.integration.test.ts"
-MIGRATION="$ROOT/prisma/migrations/20261117000000_departed_member_guard/migration.sql"
+MIGRATION="$ROOT/prisma/migrations/20261117000100_departed_member_guard/migration.sql"
 OUT="${REDPROOF_OUT:-$(mktemp -d "${TMPDIR:-/tmp}/dmg-redproof.XXXXXX")}"
 mkdir -p "$OUT"
 cd "$ROOT"

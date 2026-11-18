@@ -1,6 +1,6 @@
 /**
  * Integration test (real DB): the departed-member guard (departed_member_guard,
- * migration 20261117000000) holds the two departed-member invariants in the
+ * migration 20261117000100) holds the two departed-member invariants in the
  * database (docs/archive/review/departed-member-db-invariants-plan.md C7).
  *
  * - I1: no grant reaches a leftover membership (an active team_members row

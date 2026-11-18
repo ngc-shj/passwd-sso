@@ -243,7 +243,7 @@ Kept: rules 1–7 and 9–10, `departureWriters` (it also keeps the per-team
 
 ### C1 — Guard function, triggers and index (migration)
 
-`prisma/migrations/20261117000000_departed_member_guard/migration.sql`, `BEGIN`/`COMMIT`, DDL only.
+`prisma/migrations/20261117000100_departed_member_guard/migration.sql`, `BEGIN`/`COMMIT`, DDL only.
 
 - `public.departed_member_guard() RETURNS trigger` is plpgsql, `VOLATILE SECURITY INVOKER SET
   search_path = public, pg_temp`, with `REVOKE EXECUTE … FROM PUBLIC`.

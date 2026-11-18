@@ -1,6 +1,6 @@
 /**
  * Reading a refusal of the database's departed-member guard
- * (`departed_member_guard()`, migration 20261117000000).
+ * (`departed_member_guard()`, migration 20261117000100).
  *
  * The guard raises `check_violation` with a message that starts
  * `DEPARTED_MEMBER_GUARD:<arm>:`. The arm token is the guard's own text, so

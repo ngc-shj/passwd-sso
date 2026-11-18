@@ -255,3 +255,15 @@
   - the full integration suite: every failure is one of the D4 environment cases (no MinIO; the retired role's CONNECT on this database), plus `foothold-write-gate`, now fixed;
   - the red-proof rows whose subjects the rebase touched (R1, R1y, R1z, R6, 31a, 09c, 09d, 09e) were run, with the results below.
   Result: all eight proved.
+
+## D14 — Second rebase (#1071 and dependency bumps); migration renamed
+
+- **Name clash:** the upstream migration `20261117000000_audit_delivery_target_creator` shares this branch's timestamp. The guard migration is renamed `20261117000100_departed_member_guard`, so it still sorts after it and every "migration 20261117000…" reference names one migration only.
+- **References:** all references in code, scripts and docs are rewritten. The worktree database's `_prisma_migrations` row is renamed to match, and `prisma migrate status` reports up to date.
+- **Gates:** `check-team-rotation-input-lock` and `check-bypass-rls` pass on the rebased tree.
+- **#1071's new `foothold-write-gate` site "share link create (team entry)":** its actor holds a team membership, so the held stamp was refused at COMMIT (`departure_active`), which is correct. The hold now ends the user's team memberships in the same transaction, as every production departure does through `endTeamMemberships`. All 94 cells pass.
+- **Verification after this rebase:**
+  - the full integration suite: every remaining failure is a D4 environment case;
+  - red-proof rows R1, R1y, R1z, R6, 31a, 09c, 09d, 09e, 01 and 20: all proved;
+  - lint and build pass;
+  - the unit suite passes. One cell, `route-policy-manifest`, failed only when run concurrently with the integration suite, and passed alone.

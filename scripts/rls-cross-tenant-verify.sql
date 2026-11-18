@@ -419,7 +419,7 @@ BEGIN
   --       password_shares, team_password_entries, team_members, team_policies,
   --       password_entries, tenant_members, tenant_member_departures for the call,
   --       saves and restores the caller's settings, EXECUTE to passwd_app only.
-  --   - departed_member_guard() (#1060, 20261117000000)
+  --   - departed_member_guard() (#1060, 20261117000100)
   --       Trigger function (not callable directly) on team_members,
   --       team_member_keys, tenant_members and tenant_member_departures. Reads
   --       only; grants itself exactly teams, team_members, tenant_members,

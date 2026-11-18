@@ -60,7 +60,7 @@ export async function readTenantRows(
  *
  * Mirrored in SQL as GREATEST(tm.deactivated_at, d.departed_at) by
  * share_creator_admitted (migrations 20261114000100, 20261115000300),
- * departed_member_guard (migration 20261117000000) and the
+ * departed_member_guard (migration 20261117000100) and the
  * departed-member-access-backfill runbook; change them together.
  */
 export function departedAt(row: LockedTenantRow | undefined): Date | null {
@@ -84,7 +84,7 @@ export function departedSince(row: LockedTenantRow | undefined, issuedAt: Date):
  *
  * Mirrored in SQL as GREATEST(tm.deactivated_at, d.departed_at) >=
  * COALESCE(m.admitted_at, m.created_at) by share_creator_admitted (migration
- * 20261115000300), departed_member_guard (migration 20261117000000) and the
+ * 20261115000300), departed_member_guard (migration 20261117000100) and the
  * runbook's leftover report; change them together.
  */
 export function actorDepartedSinceAdmission(row: LockedTenantRow | undefined, admittedAt: Date): boolean {

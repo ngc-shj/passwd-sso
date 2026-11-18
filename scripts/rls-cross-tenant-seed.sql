@@ -161,7 +161,7 @@ INSERT INTO tenant_members (id, tenant_id, user_id, role, updated_at) VALUES
   (gen_random_uuid(), '00000000-0000-0000-0000-0000000000B0', '00000000-0000-0000-0000-0000000000B1', 'OWNER', NOW());
 
 -- A day before the OWNER team rows below are created: the departed-member guard
--- (20261117000000) refuses a membership admitted at or before a departure, and
+-- (20261117000100) refuses a membership admitted at or before a departure, and
 -- autocommitted statements can share a TIMESTAMPTZ(3) millisecond.
 INSERT INTO tenant_member_departures (tenant_id, user_id, departed_at) VALUES
   ('00000000-0000-0000-0000-0000000000A0', '00000000-0000-0000-0000-0000000000A1', NOW() - interval '1 day'),
