@@ -1,23 +1,4 @@
 {
   "_comment": "Read by scripts/checks/check-npm-audit.mjs for both CI audit steps. The production step (--omit-dev) honours only entries with scope \"production\" and requires their \"nodes\" to equal the install paths npm audit reports; the whole-tree step requires \"nodes\" plus \"devNodes\". Only for advisories with no fixed version to move to. Policy: docs/security/vulnerability-triage.md.",
-  "suppressions": [
-    {
-      "id": "GHSA-fc5q-39xc-vjpf",
-      "package": "picomatch",
-      "scope": "production",
-      "nodes": [
-        "node_modules/@parcel/watcher/node_modules/picomatch",
-        "node_modules/@rollup/plugin-commonjs/node_modules/picomatch",
-        "node_modules/@rollup/pluginutils/node_modules/picomatch"
-      ],
-      "devNodes": [
-        "node_modules/picomatch",
-        "node_modules/tinyglobby/node_modules/picomatch",
-        "node_modules/vite/node_modules/picomatch",
-        "node_modules/vitest/node_modules/picomatch"
-      ],
-      "reason": "No fixed version: every release through 4.0.7 is affected, and the advisory needs an attacker-supplied glob PATTERN (e.g. +(*)). The production-tree copies arrive only through build-time plugins: @sentry/nextjs's webpack wrapping loader (via @rollup/plugin-commonjs and @rollup/pluginutils) and next-intl's catalog extractor (via @parcel/watcher), which next.config.ts does not enable; none is in the standalone server output. That output's only copy is next's vendored dist/compiled/picomatch, which compiles images.localPatterns/remotePatterns; next.config.ts sets neither, so the one pattern is Next's built-in default '**' (next/dist/server/config.js), and a request supplies only the string matched against it. The devNodes copies are loaded at build or test time only and compile globs from this repository's config, tests and package.json: vite, vitest and tinyglobby, plus the top-level 2.3.2, which micromatch (via patch-package, and fast-glob from @next/eslint-plugin-next at lint time) and fdir resolve. fdir is a dependency of @rollup/plugin-commonjs and tinyglobby that takes picomatch as an optional peer (^3 || ^4, unsatisfied) yet requires it at load; plugin-commonjs globs through it only its dynamicRequireTargets from build config, and tinyglobby passes it no patterns.",
-      "expires": "2026-12-18"
-    }
-  ]
+  "suppressions": []
 }
