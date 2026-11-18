@@ -442,6 +442,7 @@ Configured in proxy:
 | `npm run lint` | Run ESLint |
 | `npm run db:migrate` | Run Prisma migration (`migrate dev`) |
 | `npm run db:push` | Push schema without a migration file |
+| `npm run db:check-drift` | Fail if schema.prisma differs from the migrated DB (needs a running DB) |
 | `npm run db:seed` | Seed default data |
 | `npm run db:studio` | Open Prisma Studio (DB GUI) |
 | `npm run generate:key` | Generate random 256-bit key |

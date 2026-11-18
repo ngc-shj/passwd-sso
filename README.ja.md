@@ -606,6 +606,7 @@ docs/                     # ドキュメント（アーキテクチャ、セキ�
 | `npm run test:e2e` | Playwright E2E テスト |
 | `npm run db:migrate` | Prisma マイグレーション（dev） |
 | `npm run db:push` | マイグレーションなしでスキーマ反映 |
+| `npm run db:check-drift` | schema.prisma とマイグレーション適用済み DB の差分を検出（DB の起動が必要） |
 | `npm run db:seed` | シードデータ投入 |
 | `npm run db:studio` | Prisma Studio GUI |
 | `npm run generate:key` | 256 ビット hex キー生成 |

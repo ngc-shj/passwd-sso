@@ -1,7 +1,6 @@
 # CI required checks
 
-Once the ruleset rule below is added, `main` accepts a pull request only when two checks
-have passed. Both must come from GitHub Actions (integration id 15368):
+`main` accepts a pull request only when two checks have passed. Both must come from GitHub Actions (integration id 15368):
 
 | Check | Job | Workflow |
 | --- | --- | --- |

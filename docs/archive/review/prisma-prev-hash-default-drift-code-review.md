@@ -1,6 +1,6 @@
 # Code Review: prisma-prev-hash-default-drift
 Date: 2026-11-19
-Review round: 1
+Review round: 2
 
 Standalone Phase 3 (no plan or deviation log). The local LLM was unavailable,
 so there was no pre-screening and no seed. Each expert reviewed the full diff.
@@ -138,12 +138,51 @@ N/A — no environment constraints declared.
     check blocks the merge.
   - Likelihood: low. Only a schema or default edit without a migration causes
     it.
-  - Cost to fix: the pre-PR run would depend on a reachable, migrated local
-    database, so a check that is deterministic today would come to depend on
-    machine state.
+  - Cost to fix: pre-pr.sh already has DB steps that skip when no DB is
+    reachable, so needing a DB is not the obstacle. The obstacle is that
+    this check is valid only when the dev DB's migration history equals the
+    branch's. `prisma migrate status` cannot confirm that: it exits 0 when
+    the DB holds a migration that another branch applied and this branch
+    lacks. A red could then come from another branch's schema changes.
+    (Corrected in round 2, T-3: the round-1 reason claimed the pre-PR run is
+    independent of machine state, which it is not.)
 - Modified files: package.json, .github/workflows/ci-integration.yml, CLAUDE.md
 
 ### Adjacent: stale required-check sentence
 - Action: the sentence now states that a repository admin added the rule and
   that both checks block a merge.
 - Modified file: docs/operations/ci-required-checks.md
+
+## Round 2
+
+Reviewed the round-1 fixes (5eae2160b).
+
+- Security: no findings.
+  - Running the step through `npm run` adds no lifecycle hooks.
+  - It resolves the lockfile-pinned binary, with no registry fallback.
+  - Both workflow guards pass.
+- Functionality: F1, T-1 and T-2 resolved. `npm run` passes exit codes 1 and 2
+  through. New findings:
+  - N1 [Minor] The opening sentence of ci-required-checks.md still described
+    the ruleset rule as not yet added.
+  - N2 [Minor] The `db:*` script tables in README.md, README.ja.md and
+    docs/setup/docker/en.md lacked `db:check-drift`.
+  - N3 [Minor] `db:check-drift` and the static `check:migration-drift` have
+    similar names, and nothing said how they differ.
+- Testing: T-1 and T-2 resolved. Red-proven on a fresh database, through the
+  unmodified npm script:
+  - green: exit 0
+  - database-side default drift: exit 2
+  - missing database: exit 1
+  - CHECK constraints, partial indexes, functions and RLS policies are not
+    compared, as the comment states.
+  - New: T-3 [Minor] The recorded reason for leaving the check out of pre-pr.sh
+    was wrong.
+
+### Resolution (round 2)
+- N1: the sentence now reads in the present tense
+  (docs/operations/ci-required-checks.md).
+- N2: added a `db:check-drift` row to all three tables.
+- N3: the CLAUDE.md line now says the command needs a running database and
+  names `check:migration-drift` as its static, database-free counterpart.
+- T-3: rewrote the T-2 "Cost to fix" bullet above.
