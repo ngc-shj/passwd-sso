@@ -1,9 +1,13 @@
 # Code Review: prod-audit-expiring-suppression
 Date: 2026-11-18
-Review round: 1
+Review round: 2
 
 ## Changes from Previous Round
-Initial review. No plan or deviation log: the branch is a Phase-3-only review of an
+Round 2 reviewed the round-1 fixes (`3fd811f5f..a5184a840`). Every round-1 finding was
+confirmed resolved. There were four new Minor findings: N1 and S4, which converge, plus
+T4, T5 and T6. They are listed under "Round 2 findings" below.
+
+Round 1: initial review. No plan or deviation log: the branch is a Phase-3-only review of an
 owner-approved policy change. GHSA-fc5q-39xc-vjpf (picomatch ReDoS, every release
 through 4.0.7, no fixed version) reddened `Audit: App dependencies` — and with it the
 required `CI result` check — on every app PR, and the production audit step had no
@@ -235,3 +239,65 @@ standalone-output claims were verified against `.next/standalone` from a local
     or removed, with the cause printed in the assertion message.
   - Likelihood: certain if nobody acts before expiry, and that is the intent.
   - Cost to fix: none needed.
+
+## Round 2 findings
+- **N1 / S4 Minor (R29, R51 residual; flagged by two experts)** — `@rollup/plugin-commonjs`
+  → `fdir@6.5.0` resolves the dev-flagged top-level `node_modules/picomatch` (2.3.2, an
+  optional peer) and loads it at build time. The reason did not name fdir. The
+  production step cannot see that copy, and the whole-tree step silenced it without
+  comparing nodes, so the reason had already drifted from the tree unnoticed.
+- **T4 Minor (RT10)** — the widened workflow-level `runsVerifier` had no deny case for a
+  workflow whose only verifier is a plain `npm audit`, and no allow case for a
+  comment-only mention. Two mutations survived.
+- **T5 Minor** — the `nodes` element check (non-string or empty-string element) was
+  unpinned at `a5184a840`.
+- **T6 Minor [Adjacent]** — the per-line verifier checks scanned YAML comment lines. The
+  bare `npm\s+audit\b` alternative made a comment such as `` `npm audit` output | head ``
+  a false "unprotected pipe".
+
+## Round 2 Resolution Status
+### N1 / S4 — dev-tree copies reviewed by path too
+- Action: a `"production"` entry may list `devNodes`, the extra install paths only the
+  whole tree reports. On the whole-tree run, a production entry's reported nodes must now
+  equal `nodes` ∪ `devNodes`. `devNodes` must be a non-empty list of distinct paths,
+  disjoint from `nodes`, and is refused on a `"dev"` entry. The production run ignores
+  it. The picomatch entry lists the four whole-tree paths, and its reason now names fdir
+  (an optional peer of `@rollup/plugin-commonjs`, which globs only
+  `dynamicRequireTargets` from build config) beside micromatch. `vulnerability-triage.md`
+  documents `devNodes`.
+- Modified files: `scripts/checks/check-npm-audit.mjs` (`nodeErrors`, validation in
+  `loadSuppressions`, match in `main`), `scripts/checks/npm-audit-suppressions.json`,
+  `docs/security/vulnerability-triage.md`.
+- Red-proof: one mutation per clause, each reddening its own test:
+  - devNodes ignored → "passes when the reported nodes equal nodes plus devNodes";
+  - vanished half → "fails a reviewed devNodes path that is no longer installed";
+  - overlap rule → "a path in both nodes and devNodes";
+  - empty rule → "empty devNodes";
+  - dev-entry rule → "devNodes on a dev entry".
+- Allow side: "passes when the reported nodes equal nodes plus devNodes" (listed out of
+  order); "ignores devNodes on the production run"; "does not compare nodes for a
+  dev-scope suppression".
+
+### T4 — allow/deny pair for the widened workflow-level check
+- Action: added a deny case (plain `npm audit` with `continue-on-error: true` is flagged)
+  and an allow case (a comment that only mentions the audits, with `continue-on-error`
+  on an unrelated `npm ci`, gives `[]`).
+- Red-proof: dropping `npm\s+audit\b` from `runsVerifier` reddens the deny case;
+  matching against raw content instead of run commands reddens the allow case.
+
+### T5 — element check pinned
+- Action: added refusal rows for an empty-string node and a non-string node.
+- Red-proof: replacing the element check with `true` reddens both rows.
+
+### T6 — lone comment lines skipped in per-line checks
+- Action: a logical line that is a single raw line starting with `#` is skipped by the
+  mask and pipe rules. A comment ending in `\` that the joiner merged with the next line
+  is NOT skipped, because YAML does not continue a comment, so that next line is a real
+  step.
+- Modified file: `scripts/checks/check-workflow-supply-chain.mjs` (logical-line
+  builder, and the per-line loop in `findMaskedVerifierViolations`).
+- Tests: "does NOT flag a comment line that mentions npm audit next to a pipe" (allow);
+  "still checks a step that a backslash-ended comment would join onto" (deny).
+- Red-proof: removing the skip reddens the allow case; dropping the unjoined-only
+  condition reddens the deny case.
+- The live run over every workflow passes.

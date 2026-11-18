@@ -137,7 +137,11 @@ export function findMaskedVerifierViolations(content, name) {
       joined = joined.replace(/\\\s*$/, " ") + rawLines[i + 1];
       i += 1;
     }
-    logical.push({ text: joined, body: joined, line: start + 1 });
+    // A lone comment line runs nothing. Only an unjoined one: a YAML comment
+    // ending in `\` does not continue onto the next line, so a joined logical
+    // line may carry a real step after the comment.
+    const comment = i === start && /^\s*#/.test(joined);
+    logical.push({ text: joined, body: joined, line: start + 1, comment });
   }
   // `dist\??\.attestations` tolerates optional chaining (`j?.dist?.attestations`
   // in the real release.yml assertion). `check-override-floor-staleness` names the
@@ -188,7 +192,8 @@ export function findMaskedVerifierViolations(content, name) {
   // a second time by the allowlist: the spelling is the better diagnostic, and
   // reporting one construct twice reads as two defects.
   const spelled = new Set();
-  for (const { text, body, line } of logical) {
+  for (const { text, body, line, comment } of logical) {
+    if (comment) continue;
     if (verifierLineRe.test(text) && maskRe.test(text)) {
       spelled.add(line);
       violations.push(

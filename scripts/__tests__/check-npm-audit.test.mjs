@@ -19,6 +19,7 @@ const TODAY = "2026-10-05";
 const GHSA = "GHSA-vfj7-8cjw-p6xm";
 const REASON = "dev scope only; patterns come from this repository, never external input";
 const NODES = ["node_modules/braces", "node_modules/fast-glob/node_modules/braces"];
+const DEV_NODE = "node_modules/vite/node_modules/braces";
 
 const advisory = (overrides = {}) => ({
   source: 1,
@@ -146,19 +147,43 @@ describe("check-npm-audit.mjs", () => {
     ["a production scope without nodes", { scope: "production" }, 'must list the reviewed install paths in "nodes"'],
     ["a production scope with empty nodes", { scope: "production", nodes: [] }, 'must list the reviewed install paths in "nodes"'],
     ["a production scope with a duplicated node", { scope: "production", nodes: [NODES[0], NODES[0]] }, 'must list the reviewed install paths in "nodes"'],
-    ["nodes on a dev entry", { nodes: NODES }, '"nodes" applies only to production entries'],
+    ["a production scope with an empty-string node", { scope: "production", nodes: [""] }, 'must list the reviewed install paths in "nodes"'],
+    ["a production scope with a non-string node", { scope: "production", nodes: [1] }, 'must list the reviewed install paths in "nodes"'],
+    ["empty devNodes", { scope: "production", nodes: NODES, devNodes: [] }, '"devNodes", when present, must be a non-empty list'],
+    ["a path in both nodes and devNodes", { scope: "production", nodes: NODES, devNodes: [NODES[0]] }, 'cannot be in both "nodes" and "devNodes"'],
+    ["nodes on a dev entry", { nodes: NODES }, '"nodes" and "devNodes" apply only to production entries'],
+    ["devNodes on a dev entry", { devNodes: [DEV_NODE] }, '"nodes" and "devNodes" apply only to production entries'],
   ])("refuses a suppression with %s", (_name, overrides, msg) => {
     const r = run({ audit: report([advisory()]), suppressions: [suppression(overrides)] });
     expect(r.status).toBe(1);
     expect(r.stderr).toContain(msg);
   });
 
-  it("honours a production-scope suppression on the whole-tree run, without comparing nodes", () => {
+  describe("whole tree with a production-scope suppression", () => {
     // The whole tree reports dev-tree copies under the same package key.
-    const r = run({ audit: report([advisory()], {}, [...NODES, "node_modules/vite/node_modules/braces"]), suppressions: [prodSuppression()] });
-    expect(r.status, r.stderr).toBe(0);
-    expect(r.stdout).toContain(`suppressed: ${GHSA} (braces)`);
-    expect(r.stdout).toContain("whole tree");
+    it("passes when the reported nodes equal nodes plus devNodes", () => {
+      const r = run({ audit: report([advisory()], {}, [DEV_NODE, ...NODES]), suppressions: [prodSuppression({ devNodes: [DEV_NODE] })] });
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.stdout).toContain(`suppressed: ${GHSA} (braces)`);
+      expect(r.stdout).toContain("whole tree");
+    });
+
+    it("fails a dev-tree node that is not in devNodes", () => {
+      const r = run({ audit: report([advisory()], {}, [...NODES, DEV_NODE]), suppressions: [prodSuppression()] });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain(`${DEV_NODE} is not among the reviewed "nodes" or "devNodes"`);
+    });
+
+    it("fails a reviewed devNodes path that is no longer installed", () => {
+      const r = run({ audit: report([advisory()]), suppressions: [prodSuppression({ devNodes: [DEV_NODE] })] });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain(`reviewed node ${DEV_NODE} is no longer installed`);
+    });
+
+    it("does not compare nodes for a dev-scope suppression", () => {
+      const r = run({ audit: report([advisory()], {}, [DEV_NODE]), suppressions: [suppression()] });
+      expect(r.status, r.stderr).toBe(0);
+    });
   });
 
   it("names the whole-tree remedy for a stale entry", () => {
@@ -190,6 +215,11 @@ describe("check-npm-audit.mjs", () => {
       const r = run({ audit: { auditReportVersion: 2, vulnerabilities: {}, metadata: {} }, suppressions: [prodSuppression()], args: ["--omit-dev"] });
       expect(r.status).toBe(1);
       expect(r.stderr).toContain('matches no advisory in the production tree — delete it, or change its scope to "dev"');
+    });
+
+    it("ignores devNodes on the production run", () => {
+      const r = run({ audit: report([advisory()]), suppressions: [prodSuppression({ devNodes: [DEV_NODE] })], args: ["--omit-dev"] });
+      expect(r.status, r.stderr).toBe(0);
     });
 
     it("passes when the reported nodes equal the reviewed nodes in any order", () => {
@@ -272,7 +302,8 @@ process.stdout.write(JSON.stringify({ auditReportVersion: 2, vulnerabilities: {}
     const committed = JSON.parse(readFileSync(REAL_SUPPRESSIONS, "utf8")).suppressions;
     const vulnerabilities = {};
     for (const s of committed.filter(inTree)) {
-      const entry = (vulnerabilities[s.package] ??= { name: s.package, severity: "high", via: [], nodes: s.nodes ?? [] });
+      const nodes = args.includes("--omit-dev") ? s.nodes : [...(s.nodes ?? []), ...(s.devNodes ?? [])];
+      const entry = (vulnerabilities[s.package] ??= { name: s.package, severity: "high", via: [], nodes });
       entry.via.push(advisory({ name: s.package, url: `https://github.com/advisories/${s.id}` }));
     }
     const auditPath = join(dir, "audit.json");
