@@ -88,6 +88,8 @@ LOCK_DIR=""
 FAILED_CODE=""
 KEEP_PARTIAL_AS_FAILED=""
 SIGNAL_NAME=""
+DEFER_SIGNALS=""
+DEFERRED_STATUS=""
 PGPASS_FILE=""
 PGSSLROOTCERT_IN="${PGSSLROOTCERT:-}"
 ORIGINAL_CWD="$(pwd -P)"
@@ -151,7 +153,20 @@ cleanup() {
 }
 on_signal() {
   SIGNAL_NAME="$1"
+  # Between creating something and recording it for the EXIT trap, exit only
+  # once it is recorded. bash runs this handler as soon as the foreground mkdir
+  # returns, so exiting here left the new directory unknown to the trap: a
+  # stray .partial, or a lock with an empty pid file that every later run
+  # refuses until someone removes it by hand.
+  if [ -n "$DEFER_SIGNALS" ]; then
+    DEFERRED_STATUS=$((128 + $2))
+    return 0
+  fi
   exit $((128 + $2))
+}
+deliver_deferred_signal() {
+  DEFER_SIGNALS=""
+  [ -z "$DEFERRED_STATUS" ] || exit "$DEFERRED_STATUS"
 }
 trap cleanup EXIT
 # Every fatal signal an operator or a supervisor can realistically send. Without
@@ -1488,6 +1503,7 @@ LOCK_CANDIDATE="$BACKUP_ROOT/.lock.d"
 # (mv cannot serve here — moving onto an existing directory nests inside it and
 # reports success.) The window between taking the lock and recording the holder
 # is closed on the READER side: a lock with no pid is treated as held.
+DEFER_SIGNALS=1
 if ! mkdir -- "$LOCK_CANDIDATE" 2>/dev/null; then
   holder="$(cat -- "$LOCK_CANDIDATE/pid" 2>/dev/null || true)"
   # Reclaim a lock whose holder is gone. The pid was previously written and
@@ -1587,6 +1603,7 @@ if ! record_lock_metadata; then
   fi
   fail INTERNAL "could not record the lock holder, and could not remove the lock either. Confirm no backup is running, then: rm -rf $(printf '%q' "$LOCK_DIR")"
 fi
+deliver_deferred_signal
 
 # ─── Dry run (C6g) ───────────────────────────────────────────
 
@@ -1743,8 +1760,10 @@ prune_failed
 # RUN_PARTIAL is what the EXIT trap removes or keeps as .FAILED, so it is set
 # only once this run's mkdir has created the directory. Set before the mkdir, a
 # run whose mkdir failed on someone else's .partial deleted it on the way out.
+DEFER_SIGNALS=1
 mkdir -- "$BACKUP_ROOT/$STAMP.partial" || fail INTERNAL "could not create $BACKUP_ROOT/$STAMP.partial"
 RUN_PARTIAL="$BACKUP_ROOT/$STAMP.partial"
+deliver_deferred_signal
 assert_mode_private "$RUN_PARTIAL" "the run directory"
 
 # ─── Dump ────────────────────────────────────────────────────

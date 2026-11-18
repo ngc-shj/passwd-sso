@@ -2078,6 +2078,33 @@ exit 0`);
         expect(readdirSync(backupDir).filter((n) => n.endsWith(".partial"))).toEqual([]);
       });
   });
+
+  // bash runs a trap only once the foreground command returns, so a signal that
+  // lands while mkdir runs is handled after the directory exists and before the
+  // script has recorded it for the EXIT trap. The mkdir stub sends the signal
+  // itself, which pins that window instead of hoping a timer lands in it.
+  for (const { what, suffix, leftover } of [
+    { what: "the run directory", suffix: ".partial", leftover: (n) => n.endsWith(".partial") },
+    { what: "the lock", suffix: "/.lock.d", leftover: (n) => n === ".lock.d" },
+  ]) {
+    it(`removes ${what} when a signal lands while mkdir creates it`, () => {
+      mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+      chmodSync(backupDir, 0o700);
+      stub("docker", `
+[ "\${2:-}" = "config" ] && exit 0
+[ "\${2:-}" = "ps" ] && { echo c1; exit 0; }
+exit 0`);
+      const realMkdir = spawnSync("sh", ["-c", "command -v mkdir"], { encoding: "utf8" }).stdout.trim();
+      stub("mkdir", `
+for a in "$@"; do
+  case "$a" in *"${suffix}") kill -HUP "$PPID" ;; esac
+done
+exec "${realMkdir}" "$@"`);
+      const r = run();
+      expect(r.stderr).toMatch(/BACKUP_ERR:INTERRUPTED terminated by SIGHUP/);
+      expect(readdirSync(backupDir).filter(leftover)).toEqual([]);
+    });
+  }
 });
 
 describe("ignore-rule coverage", () => {

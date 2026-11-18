@@ -258,7 +258,7 @@ describe("TenantMemberPasskeysDialog", () => {
       open();
       fireEvent.click(await screen.findByLabelText(/containmentShareTypeTeamEntry/));
       fireEvent.click(screen.getByLabelText(/containmentShareTypeText/));
-      fireEvent.click(screen.getByLabelText(/siem\.example\.com/));
+      fireEvent.click(screen.getByLabelText("siem.example.com", { exact: false }));
       fireEvent.click(screen.getByRole("button", { name: "revokeAllPasskeys" }));
       mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ ok: true }) });
       mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => LISTING });

@@ -281,7 +281,9 @@ describe("cursor pagination orders by a unique key last", () => {
     }
     expect(problems).toEqual([]);
     expect(sites).toBeGreaterThanOrEqual(MIN_SITES);
-  });
+    // Parses and binds every file under src/: about 2 s locally, past the 10 s
+    // default on a sharded CI runner.
+  }, 60_000);
 
   it("accepts a spread cursor with an id tiebreak", () => {
     expect(scanFixture(`tx.a.findMany({ orderBy: [{ createdAt: "desc" }, { id: "desc" }], ...(c ? { cursor: { id: c }, skip: 1 } : {}) });`).problems).toEqual([]);

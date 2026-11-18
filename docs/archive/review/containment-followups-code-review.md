@@ -566,3 +566,34 @@ sites, 0 problems). Testing ran each guard clause against its own mutant:
 - Q8-2: an `aggregate` call with a cursor joins the refused-read fixtures.
 - Red-proofs on a scratch copy: dropping `aggregate` from the read set, or the
   `const` check, each fails the suite (exit 1); the unmutated copy passes.
+
+---
+
+# CI on the PR (fixes after 8545b6521)
+
+## Findings
+- C-1 [Major] `backup-db.sh`: a signal landing while `mkdir` creates the run
+  directory or the lock was handled after `mkdir` returned and before the
+  script recorded what it created, so the EXIT trap missed it. The run left a
+  stray `.partial`; the lock was left with an empty `pid` file, which every
+  later run refuses (`records no holder`) until someone removes it by hand. CI
+  hit the run-directory window through the existing SIGHUP cell's 700 ms timer.
+- C-2 [Minor] The cursor guard's tree scan (about 2 s locally) ran past the
+  10 s default on a sharded CI runner.
+- C-3 [Minor] CodeQL `js/regex/missing-regexp-anchor`: a host-shaped regex
+  (`/siem\.example\.com/`) in the containment dialog test.
+
+## Resolution Status
+- C-1: `on_signal` defers its exit while a create-then-record step runs
+  (`DEFER_SIGNALS`), and `deliver_deferred_signal` exits once the step has
+  recorded the directory, so the EXIT trap removes it. Two cells make the
+  `mkdir` stub signal its parent, one per window. Both fail on the unfixed
+  script, and removing either deferral on a scratch copy fails only that
+  window's cell. The other create sites need no deferral. The passfile
+  assignment `$(mktemp)` completes before bash runs the trap (checked with a
+  stubbed `mktemp`). The publish `mv` leaves a validated generation, and the
+  trap ignores the moved `.partial`.
+- C-2: explicit 60 s timeout on the tree-scan case, as the other whole-tree AST
+  tests have.
+- C-3: `getByLabelText("siem.example.com", { exact: false })`; no other
+  host-shaped regex in the branch diff.
