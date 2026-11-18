@@ -1240,7 +1240,7 @@ model AuditLog {
 model AuditChainAnchor {
   tenantId           String    @id @map("tenant_id") @db.Uuid
   chainSeq           BigInt    @default(0) @map("chain_seq")
-  prevHash           Bytes     @default(dbgenerated("'\\x00'::bytea")) @map("prev_hash")
+  prevHash           Bytes     @default("AA==") @map("prev_hash")
   updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
   epoch              Int?      @default(1) @map("epoch")
   publishPausedUntil DateTime? @map("publish_paused_until") @db.Timestamptz(3)

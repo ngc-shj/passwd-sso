@@ -230,6 +230,14 @@ jobs:
       - name: Apply database migrations
         run: npx prisma migrate deploy
 
+      # The migrated database must be exactly what schema.prisma describes.
+      # Otherwise `prisma migrate dev` asks every developer for a new
+      # migration. A default Prisma reads back in a different spelling (the
+      # prev_hash bytea default) made eight migrations re-issue one no-op ALTER.
+      # It also catches a schema edit committed without its migration.
+      - name: Check schema.prisma matches the migrated database
+        run: npx prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code
+
       # GitHub Actions service containers do not mount initdb scripts, so the
       # `passwd_app` role (created by infra/postgres/initdb/02-create-app-role.sql
       # in dev) does not exist here. The `passwd_outbox_worker` role is created
