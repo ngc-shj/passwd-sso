@@ -1,6 +1,6 @@
 # Code Review: prisma-prev-hash-default-drift
 Date: 2026-11-19
-Review round: 2
+Review round: 3
 
 Standalone Phase 3 (no plan or deviation log). The local LLM was unavailable,
 so there was no pre-screening and no seed. Each expert reviewed the full diff.
@@ -183,6 +183,31 @@ Reviewed the round-1 fixes (5eae2160b).
 - N1: the sentence now reads in the present tense
   (docs/operations/ci-required-checks.md).
 - N2: added a `db:check-drift` row to all three tables.
-- N3: the CLAUDE.md line now says the command needs a running database and
-  names `check:migration-drift` as its static, database-free counterpart.
+- N3: the CLAUDE.md line now says the command needs a running database. It
+  calls `check:migration-drift` a separate static check (RLS, enum values,
+  column presence) that is no substitute: it does not compare defaults, so it
+  would not have caught this drift. (Wording narrowed in round 3, F-1.)
 - T-3: rewrote the T-2 "Cost to fix" bullet above.
+
+## Round 3
+
+Reviewed the round-2 fixes (41919d669, docs only).
+
+- Security: no findings.
+- Testing: T-3 resolved, no new findings. The rewritten rationale matches
+  pre-pr.sh's probe-and-skip DB steps and the Prisma 7.10.1 CLI source
+  (`migrate status` exits 1 only when the database is behind, the histories
+  diverge, or a migration failed). `check-doc-paths.mjs` and
+  `readme-cause-table-parity.test.ts` pass.
+- Functionality: N1, N2, N3 and T-3 resolved. One new finding:
+  - F-1 [Minor] CLAUDE.md called `check:migration-drift` the "counterpart" of
+    `db:check-drift`. It checks only RLS, enum values and column presence, so
+    it is no substitute.
+
+## Tightening-only skip — Round 3
+Findings applied directly (no Round 4 review):
+- [F-1] [Minor] "counterpart" overstated the static check. Applied in CLAUDE.md
+  (the `db:check-drift` line) and in the N3 resolution bullet above.
+
+Justification: the finding lies within the round-2 fix range, is a wording
+change, and touches no security boundary.
