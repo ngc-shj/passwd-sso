@@ -17,6 +17,7 @@ import { membershipConflictResponse } from "@/lib/http/lock-conflict-response";
 import { TEAM_MEMBERSHIP_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 import { createLockBudget, lockTeamKeyVersion } from "@/lib/team/team-key-rotation-lock";
 import { departedMemberGuardArm } from "@/lib/team/departed-member-guard";
+import { isTeamKeyRecipientChanged } from "@/lib/team/team-key-recipient-guard";
 import {
   actorDepartedSinceAdmission,
   isMembershipLockConflict,
@@ -173,6 +174,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
             hkdfSalt: data.hkdfSalt,
             keyVersion: data.keyVersion,
             wrapVersion: data.wrapVersion,
+            recipientKeyFingerprint: data.recipientKeyFingerprint,
           },
           update: {
             encryptedTeamKey: data.encryptedTeamKey,
@@ -181,6 +183,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
             ephemeralPublicKey: data.ephemeralPublicKey,
             hkdfSalt: data.hkdfSalt,
             wrapVersion: data.wrapVersion,
+            recipientKeyFingerprint: data.recipientKeyFingerprint,
           },
         });
 
@@ -217,6 +220,9 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     if (e instanceof MemberChangedError || departedMemberGuardArm(e) === "key_inactive") {
       return errorResponse(API_ERROR.MEMBER_NOT_FOUND);
     }
+    // The recipient's vault was reset (or reset and set up again) since the
+    // client read the public key it wrapped to: the client refetches and re-wraps.
+    if (isTeamKeyRecipientChanged(e)) return errorResponse(API_ERROR.TEAM_KEY_RECIPIENT_CHANGED);
     // A rotation or a tenant-row writer held a lock past the budget: not a
     // version comparison, so the client is told to retry rather than to refetch.
     if (isMembershipLockConflict(e)) return membershipConflictResponse(e);

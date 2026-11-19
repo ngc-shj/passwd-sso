@@ -765,6 +765,7 @@ export function TeamVaultProvider({
                     hkdfSalt: escrow.hkdfSalt,
                     keyVersion: escrow.keyVersion,
                     wrapVersion: escrow.wrapVersion,
+                    recipientKeyFingerprint: escrow.recipientKeyFingerprint,
                   }),
                 }
               );

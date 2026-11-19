@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Prisma } from "@prisma/client";
 import { createRequest } from "@/__tests__/helpers/request-builder";
+import { teamKeyRecipientGuardError } from "@/__tests__/helpers/database-guard-error";
 
 const { mockAuth, mockCheckAuth, mockPrismaTeamMember, mockPrismaTenantMember, mockPrismaTenantMemberDeparture, mockPrismaTeam, mockWithUserTenantRls, mockWithBypassRls, mockResolveUserTenantIdFromClient, mockGetLogger, mockLoggerInfo, mockRequireTenantPermission, MockTenantAuthError } = vi.hoisted(() => {
   const loggerInfo = vi.fn();
@@ -349,6 +350,7 @@ describe("POST /api/teams (E2E-only)", () => {
         ephemeralPublicKey: '{"kty":"EC","crv":"P-256","x":"test","y":"test"}',
         hkdfSalt: "c".repeat(64),
         keyVersion: 1,
+        recipientKeyFingerprint: "d".repeat(64),
       },
     };
 
@@ -385,6 +387,7 @@ describe("POST /api/teams (E2E-only)", () => {
       ephemeralPublicKey: '{"kty":"EC","crv":"P-256","x":"test","y":"test"}',
       hkdfSalt: "c".repeat(64),
       keyVersion: 1,
+      recipientKeyFingerprint: "d".repeat(64),
     },
   };
 
@@ -493,6 +496,46 @@ describe("POST /api/teams (E2E-only)", () => {
     expect(json.error).toBe("SLUG_ALREADY_TAKEN");
   });
 
+  it("passes the recipient key fingerprint into the nested key row", async () => {
+    mockPrismaTeam.findUnique.mockResolvedValue(null);
+    mockPrismaTeam.create.mockResolvedValue({ id: "t", name: "n", slug: "s", description: null, createdAt: now });
+
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/teams", { body: validE2EBody }));
+
+    expect(res.status).toBe(201);
+    expect(mockPrismaTeam.create.mock.calls[0][0].data.memberKeys.create.recipientKeyFingerprint).toBe("d".repeat(64));
+  });
+
+  it("returns 400 when the fingerprint is missing", async () => {
+    const { recipientKeyFingerprint: _omitted, ...teamMemberKey } = validE2EBody.teamMemberKey;
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/teams", {
+      body: { ...validE2EBody, teamMemberKey },
+    }));
+    expect(res.status).toBe(400);
+    expect(mockPrismaTeam.create).not.toHaveBeenCalled();
+  });
+
+  describe("a TEAM_KEY_RECIPIENT_GUARD refusal of the creator's key", () => {
+    const post = () => POST(createRequest("POST", "http://localhost:3000/api/teams", { body: validE2EBody }));
+
+    it.each(["recipient_key_changed", "recipient_no_key"])("maps %s to 409 TEAM_KEY_RECIPIENT_CHANGED", async (arm) => {
+      mockPrismaTeam.findUnique.mockResolvedValue(null);
+      mockPrismaTeam.create.mockRejectedValue(teamKeyRecipientGuardError(arm));
+
+      const res = await post();
+
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toBe("TEAM_KEY_RECIPIENT_CHANGED");
+    });
+
+    it.each(["fingerprint_missing", "fingerprint_rebind"])("rethrows %s", async (arm) => {
+      mockPrismaTeam.findUnique.mockResolvedValue(null);
+      mockPrismaTeam.create.mockRejectedValue(teamKeyRecipientGuardError(arm));
+
+      await expect(post()).rejects.toThrow(/invocation/);
+    });
+  });
+
   it("creates E2E team with TeamMemberKey (201)", async () => {
     mockPrismaTeam.findUnique.mockResolvedValue(null);
     mockPrismaTeam.create.mockResolvedValue({
@@ -577,6 +620,7 @@ describe("POST /api/teams (E2E-only)", () => {
         ephemeralPublicKey: "pubkey",
         hkdfSalt: "c".repeat(64),
         keyVersion: 1,
+        recipientKeyFingerprint: "d".repeat(64),
       },
     };
 

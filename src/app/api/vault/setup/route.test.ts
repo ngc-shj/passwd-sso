@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
+import { teamKeyRecipientGuardError } from "@/__tests__/helpers/database-guard-error";
 
 const { mockAuth, mockPrismaUser, mockPrismaVaultKey, mockTransaction, mockRateLimiter, mockCreateRateLimiter, mockWithUserTenantRls } = vi.hoisted(() => {
   const mockRateLimiter = { check: vi.fn() };
@@ -128,6 +129,25 @@ describe("POST /api/vault/setup", () => {
       body: { ...validBody, secretKeyIv: "short" },
     }));
     expect(res.status).toBe(400);
+  });
+
+  it("returns 409 VAULT_ALREADY_SETUP when the database refuses overwriting the ECDH public key", async () => {
+    mockPrismaUser.findUnique.mockResolvedValue({ vaultSetupAt: null });
+    mockTransaction.mockRejectedValueOnce(teamKeyRecipientGuardError("ecdh_key_overwrite"));
+
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/vault/setup", { body: validBody }));
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("VAULT_ALREADY_SETUP");
+  });
+
+  it("rethrows another ECDH key guard refusal", async () => {
+    mockPrismaUser.findUnique.mockResolvedValue({ vaultSetupAt: null });
+    mockTransaction.mockRejectedValueOnce(teamKeyRecipientGuardError("ecdh_key_change_with_keys"));
+
+    await expect(
+      POST(createRequest("POST", "http://localhost:3000/api/vault/setup", { body: validBody })),
+    ).rejects.toThrow(/invocation/);
   });
 
   it("creates vault successfully (201)", async () => {

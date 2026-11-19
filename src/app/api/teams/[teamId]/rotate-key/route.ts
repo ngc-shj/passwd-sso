@@ -28,6 +28,7 @@ import {
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { heldTeamKeyVersions, normalizeTeamKeyVersion } from "@/lib/team/team-item-key";
 import { createLockBudget } from "@/lib/team/team-key-rotation-lock";
+import { isTeamKeyRecipientChanged } from "@/lib/team/team-key-recipient-guard";
 import {
   actorDepartedSinceAdmission,
   lockTenantRows,
@@ -359,6 +360,7 @@ async function rotateTeamKey(req: NextRequest, teamId: string, userId: string): 
             hkdfSalt: k.hkdfSalt,
             keyVersion: newTeamKeyVersion,
             wrapVersion: k.wrapVersion,
+            recipientKeyFingerprint: k.recipientKeyFingerprint,
           })),
         });
         if (createResult.count !== memberKeys.length) {
@@ -430,6 +432,12 @@ async function rotateTeamKey(req: NextRequest, teamId: string, userId: string): 
     }
     if (e instanceof Error && e.message === "ENTRY_COUNT_MISMATCH") {
       return errorResponse(API_ERROR.ENTRY_COUNT_MISMATCH);
+    }
+    // A member reset their vault, set it up again and was redistributed since
+    // rotate-key/data: their new key was wrapped to the old public key. The
+    // whole rotation is refused; a retry refetches the members' keys.
+    if (isTeamKeyRecipientChanged(e)) {
+      return errorResponse(API_ERROR.TEAM_KEY_RECIPIENT_CHANGED);
     }
     if (e instanceof TxValidationError) {
       return validationError(e.details);

@@ -173,6 +173,7 @@ export function TeamCreateDialog({ trigger, onCreated }: TeamCreateDialogProps) 
             ephemeralPublicKey: escrow.ephemeralPublicKey,
             hkdfSalt: escrow.hkdfSalt,
             keyVersion: escrow.keyVersion,
+            recipientKeyFingerprint: escrow.recipientKeyFingerprint,
           },
         }),
       });

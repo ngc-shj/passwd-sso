@@ -18,6 +18,7 @@ import { getLogger } from "@/lib/logger";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { TEAM_MEMBERSHIP_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 import { isMembershipLockConflict, lockTenantRows } from "@/lib/team/tenant-row-lock";
+import { isTeamKeyRecipientChanged } from "@/lib/team/team-key-recipient-guard";
 import { withoutLeftoverMemberships } from "@/lib/team/leftover-memberships";
 
 /** The creator's tenant membership ended after the permission check. */
@@ -153,6 +154,7 @@ async function handlePOST(req: NextRequest) {
                 hkdfSalt: teamMemberKey.hkdfSalt,
                 keyVersion: teamMemberKey.keyVersion,
                 wrapVersion: teamMemberKey.wrapVersion,
+                recipientKeyFingerprint: teamMemberKey.recipientKeyFingerprint,
               },
             },
           },
@@ -163,6 +165,8 @@ async function handlePOST(req: NextRequest) {
   } catch (e) {
     if (e instanceof CreatorDepartedError) return forbidden();
     if (isMembershipLockConflict(e)) return membershipConflictResponse(e);
+    // The creator's own vault was reset since their client read the key it wrapped to.
+    if (isTeamKeyRecipientChanged(e)) return errorResponse(API_ERROR.TEAM_KEY_RECIPIENT_CHANGED);
     if (
       e instanceof Error &&
       (e.message === "TENANT_NOT_RESOLVED" ||

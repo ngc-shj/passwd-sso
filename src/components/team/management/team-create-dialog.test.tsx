@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { createHash } from "node:crypto";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
 
@@ -29,7 +30,7 @@ const { mockFetch, mockToast, mockUseVault, generateTeamKeyMock, createEscrowMoc
         lastTeamKey.ref = buf;
         return buf;
       }),
-      createEscrowMock: vi.fn<typeof createTeamKeyEscrow>(async () => ({
+      createEscrowMock: vi.fn<typeof createTeamKeyEscrow>(async (_teamKey, memberJwk) => ({
         encryptedTeamKey: "ek",
         teamKeyIv: "iv",
         teamKeyAuthTag: "at",
@@ -37,6 +38,7 @@ const { mockFetch, mockToast, mockUseVault, generateTeamKeyMock, createEscrowMoc
         hkdfSalt: "salt",
         keyVersion: 1,
         wrapVersion: 1,
+        recipientKeyFingerprint: createHash("sha256").update(memberJwk, "utf8").digest("hex"),
       })),
       lastTeamKeySnapshot: lastTeamKey,
     };
@@ -91,17 +93,19 @@ if (!originalCrypto?.randomUUID) {
 
 import { TeamCreateDialog } from "./team-create-dialog";
 
+const ECDH_PUBLIC_KEY_JWK = '{"kty":"EC","crv":"P-256","x":"x-coord","y":"y-coord"}';
+
 function setupVault(opts: {
   status: (typeof VAULT_STATUS)[keyof typeof VAULT_STATUS];
   userId?: string;
-  ecdh?: Record<string, unknown> | null;
+  ecdh?: string | null;
   unlock?: (p: string) => Promise<boolean>;
 }) {
   mockUseVault.mockReturnValue({
     status: opts.status,
     userId: opts.userId ?? "user-1",
     unlock: opts.unlock ?? vi.fn(async () => true),
-    getEcdhPublicKeyJwk: () => opts.ecdh ?? { kty: "EC" },
+    getEcdhPublicKeyJwk: () => opts.ecdh ?? ECDH_PUBLIC_KEY_JWK,
   });
 }
 
@@ -187,6 +191,28 @@ describe("TeamCreateDialog", () => {
     const buf = lastTeamKeySnapshot.ref;
     expect(buf).not.toBeNull();
     expect(buf!.every((b) => b === 0)).toBe(true);
+  });
+
+  it("sends the fingerprint of the exact public key string it wrapped to", async () => {
+    setupVault({ status: VAULT_STATUS.UNLOCKED });
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ id: "team-uuid-1" }),
+    });
+
+    render(<TeamCreateDialog trigger={<button>Open</button>} onCreated={vi.fn()} />);
+    fireEvent.click(screen.getByText("Open"));
+    fireEvent.change(await screen.findByLabelText("teamName"), { target: { value: "demo" } });
+    await act(async () => {
+      fireEvent.click(screen.getByText("createButton").closest("button")!);
+    });
+
+    await waitFor(() => expect(mockFetch).toHaveBeenCalled());
+    const body = JSON.parse((mockFetch.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.teamMemberKey.recipientKeyFingerprint).toBe(
+      createHash("sha256").update(ECDH_PUBLIC_KEY_JWK, "utf8").digest("hex"),
+    );
   });
 
   // §Sec-1: zeroization MUST occur even on createTeamKeyEscrow failure
