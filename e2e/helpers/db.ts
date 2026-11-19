@@ -243,7 +243,7 @@ export async function seedUser(options: SeedUserOptions): Promise<void> {
 
   if (options.vaultFields) {
     const v = options.vaultFields;
-    await p.query(
+    const seeded = await p.query(
       `INSERT INTO users (
         id, email, name,
         tenant_id, email_verified, vault_setup_at, created_at, updated_at,
@@ -273,7 +273,8 @@ export async function seedUser(options: SeedUserOptions): Promise<void> {
         ecdh_public_key = EXCLUDED.ecdh_public_key,
         encrypted_ecdh_private_key = EXCLUDED.encrypted_ecdh_private_key,
         ecdh_private_key_iv = EXCLUDED.ecdh_private_key_iv,
-        ecdh_private_key_auth_tag = EXCLUDED.ecdh_private_key_auth_tag`,
+        ecdh_private_key_auth_tag = EXCLUDED.ecdh_private_key_auth_tag
+      WHERE users.ecdh_public_key IS NULL`,
       [
         options.id,
         options.email,
@@ -298,6 +299,14 @@ export async function seedUser(options: SeedUserOptions): Promise<void> {
         v.ecdhPrivateKeyAuthTag ?? null,
       ]
     );
+    // users_ecdh_key_guard refuses an ECDH key replaced by another, so a user
+    // that already holds one is not re-seeded: rewriting the private half
+    // alone would leave a public key that no longer matches it.
+    if (seeded.rowCount === 0) {
+      throw new Error(
+        `seedUser: user ${options.id} already has an ECDH public key; clean up the previous run before seeding it again`
+      );
+    }
   } else {
     // Reset all vault fields to NULL so a "fresh" user stays fresh
     // even if a previous test run set up their vault.

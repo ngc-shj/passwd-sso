@@ -42,7 +42,9 @@ import {
   createPrismaForRole,
   createTestContext,
   expectBypassRefusal,
+  guardArmOf,
   readGucs,
+  recipientKey,
   setBypassRlsGucs,
   sqlStateOf,
   writeRefusedState,
@@ -112,20 +114,8 @@ type Outcome =
   | { committed: true; rows: unknown[][] }
   | { committed: false; at: "statement" | "commit"; index: number; error: unknown };
 
-/** The arm token of a guard refusal, from a pg error or a Prisma error wrapping one. */
 function armOf(error: unknown): string | null {
-  const texts: string[] = [];
-  for (let e: unknown = error, depth = 0; e && depth < 6; depth++) {
-    if (e instanceof Error) texts.push(e.message);
-    const meta = (e as { meta?: { driverAdapterError?: { cause?: { message?: string } } } }).meta;
-    if (meta?.driverAdapterError?.cause?.message) texts.push(meta.driverAdapterError.cause.message);
-    e = (e as { cause?: unknown }).cause;
-  }
-  for (const text of texts) {
-    const m = /DEPARTED_MEMBER_GUARD:([a-z_]+):/.exec(text);
-    if (m) return m[1];
-  }
-  return null;
+  return guardArmOf(error, "DEPARTED_MEMBER_GUARD");
 }
 
 // Failures name the actual outcome (`actual=`), not only the pinned arm, so a
@@ -320,14 +310,15 @@ describe("departed-member DB invariants — real-DB integration", () => {
   }
 
   const KEY_COLUMNS = `id, team_id, tenant_id, user_id, encrypted_team_key, team_key_iv, team_key_auth_tag,
-    ephemeral_public_key, hkdf_salt, key_version, wrap_version, created_at, updated_at`;
+    ephemeral_public_key, hkdf_salt, key_version, wrap_version, recipient_key_fingerprint, created_at, updated_at`;
 
-  /** VALUES for a key row: $1 team, $2 tenant, $3 user, $4 key version. */
+  /** VALUES for a key row: $1 team, $2 tenant, $3 user, $4 key version, $5 recipient key fingerprint. */
   const KEY_VALUES = `(gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid, '${hex(32)}', '${hex(12)}', '${hex(16)}',
-    '${hex(32)}', '${hex(32)}', $4, 1, now(), now())`;
+    '${hex(32)}', '${hex(32)}', $4, 1, $5, now(), now())`;
 
   async function addKey(t: string, teamId: string, userId: string, version = 1): Promise<void> {
-    await sql(`INSERT INTO team_member_keys (${KEY_COLUMNS}) VALUES ${KEY_VALUES}`, teamId, t, userId, version);
+    const { fingerprint } = await recipientKey(ctx.su, userId);
+    await sql(`INSERT INTO team_member_keys (${KEY_COLUMNS}) VALUES ${KEY_VALUES}`, teamId, t, userId, version, fingerprint);
   }
 
   /** Stamp a tenant row departed; valid only while the user holds no active row in the tenant's teams. */
@@ -650,7 +641,9 @@ describe("departed-member DB invariants — real-DB integration", () => {
   // ── T2: keys ──────────────────────────────────────────────────
 
   describe("T2: keys", () => {
-    const keyInsert = (version: number): string => `INSERT INTO team_member_keys (${KEY_COLUMNS}) VALUES ${KEY_VALUES}`.replace("$4", String(version));
+    const keyInsert = (version: number): string =>
+      `INSERT INTO team_member_keys (${KEY_COLUMNS}) VALUES ${KEY_VALUES}`.replace("$4", String(version)).replace("$5", "$4");
+    const fingerprintOf = async (userId: string): Promise<string> => (await recipientKey(ctx.su, userId)).fingerprint;
     const keyUpsert = `INSERT INTO team_member_keys (${KEY_COLUMNS}) VALUES ${KEY_VALUES}
       ON CONFLICT (team_id, user_id, key_version) DO UPDATE SET encrypted_team_key = EXCLUDED.encrypted_team_key, updated_at = now()`;
     const keyUpdate = `UPDATE team_member_keys SET encrypted_team_key = '${hex(32)}', updated_at = now()
@@ -673,7 +666,7 @@ describe("departed-member DB invariants — real-DB integration", () => {
 
     it("deny: a key INSERT for a leftover recipient", async () => {
       const r = await leftoverHolder();
-      expectRefused(await asApp(r.t, [[keyInsert(2), [r.teamId, r.t, r.u]]]), "statement", ARM.KEY_LEFTOVER, 0);
+      expectRefused(await asApp(r.t, [[keyInsert(2), [r.teamId, r.t, r.u, await fingerprintOf(r.u)]]]), "statement", ARM.KEY_LEFTOVER, 0);
       expect((await keyRows(r.teamId, r.u)).map((k) => k.key_version)).toEqual([1]);
     });
 
@@ -687,13 +680,13 @@ describe("departed-member DB invariants — real-DB integration", () => {
     it("deny: a key ON CONFLICT DO UPDATE for a leftover recipient", async () => {
       const r = await leftoverHolder();
       const before = await keyRows(r.teamId, r.u);
-      expectRefused(await asApp(r.t, [[keyUpsert, [r.teamId, r.t, r.u, 1]]]), "statement", ARM.KEY_LEFTOVER, 0);
+      expectRefused(await asApp(r.t, [[keyUpsert, [r.teamId, r.t, r.u, 1, await fingerprintOf(r.u)]]]), "statement", ARM.KEY_LEFTOVER, 0);
       expect(await keyRows(r.teamId, r.u)).toEqual(before);
     });
 
     it("deny: a key INSERT for an ended, non-leftover member (key_inactive is the only refusal)", async () => {
       const r = await endedHolder();
-      expectRefused(await asApp(r.t, [[keyInsert(2), [r.teamId, r.t, r.u]]]), "statement", ARM.KEY_INACTIVE, 0);
+      expectRefused(await asApp(r.t, [[keyInsert(2), [r.teamId, r.t, r.u, await fingerprintOf(r.u)]]]), "statement", ARM.KEY_INACTIVE, 0);
       expect((await keyRows(r.teamId, r.u)).map((k) => k.key_version)).toEqual([1]);
     });
 
@@ -708,14 +701,14 @@ describe("departed-member DB invariants — real-DB integration", () => {
       const r = await memberTeam();
       const other = await tenant();
       const foreignTeam = await team(other);
-      expectRefused(await asApp(r.t, [[keyInsert(1), [foreignTeam, r.t, r.u]]]), "statement", ARM.TENANT_MISMATCH, 0);
+      expectRefused(await asApp(r.t, [[keyInsert(1), [foreignTeam, r.t, r.u, await fingerprintOf(r.u)]]]), "statement", ARM.TENANT_MISMATCH, 0);
       expect(await keyRows(foreignTeam, r.u)).toEqual([]);
     });
 
     it("allow: a key INSERT for an active, non-leftover member", async () => {
       const r = await memberTeam();
       await addKey(r.t, r.teamId, r.u);
-      expectCommitted(await asApp(r.t, [[keyInsert(2), [r.teamId, r.t, r.u]]]));
+      expectCommitted(await asApp(r.t, [[keyInsert(2), [r.teamId, r.t, r.u, await fingerprintOf(r.u)]]]));
       expect((await keyRows(r.teamId, r.u)).map((k) => k.key_version)).toEqual([1, 2]);
     });
 
@@ -924,7 +917,8 @@ describe("departed-member DB invariants — real-DB integration", () => {
       expect(members.at(-1)).toBe(GUARD);
       expect(members).toEqual(expect.arrayContaining(["team_members_set_admitted_at", "trg_enforce_tenant_id_team_members"]));
       const keys = await before("team_member_keys");
-      expect(keys.at(-1)).toBe("trg_team_member_keys_departed_member_guard");
+      // The recipient guard sorts after the departed-member guard: a departed recipient gets that guard's refusal first.
+      expect(keys.slice(-2)).toEqual(["trg_team_member_keys_departed_member_guard", "trg_team_member_keys_recipient_guard"]);
       expect(keys).toContain("trg_enforce_tenant_id_team_member_keys");
       const enabled = await sql<{ tgname: string; tgenabled: string }>(
         `SELECT tgname::text AS tgname, tgenabled::text AS tgenabled FROM pg_trigger WHERE tgfoid = 'public.departed_member_guard()'::regprocedure ORDER BY tgname`,
@@ -1647,6 +1641,7 @@ describe("departed-member DB invariants — real-DB integration", () => {
         expect(await race.waitingQueryOf(departurePid)).toMatch(/FROM teams .*FOR SHARE/s);
 
         mockAuth.mockResolvedValue({ user: { id: owner } });
+        const fingerprints = await Promise.all([owner, holder].map(async (userId) => (await recipientKey(ctx.su, userId)).fingerprint));
         const rotation = rotateKeyRoute(
           new NextRequest(`http://localhost/api/teams/${rotatedTeam}/rotate-key`, {
             method: "POST",
@@ -1654,10 +1649,11 @@ describe("departed-member DB invariants — real-DB integration", () => {
             body: JSON.stringify({
               newTeamKeyVersion: 2,
               entries: [],
-              memberKeys: [owner, holder].map((userId) => ({
+              memberKeys: [owner, holder].map((userId, i) => ({
                 userId,
                 encryptedTeamKey: hex(32), teamKeyIv: hex(12), teamKeyAuthTag: hex(16),
                 ephemeralPublicKey: hex(32), hkdfSalt: hex(32), keyVersion: 2, wrapVersion: 1,
+                recipientKeyFingerprint: fingerprints[i],
               })),
             }),
           }),

@@ -20,7 +20,7 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } 
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
 import type { Prisma } from "@prisma/client";
-import { assertRlsApplies, createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
+import { assertRlsApplies, createTestContext, recipientKey, setBypassRlsGucs, type TestContext } from "./helpers";
 
 const { scimTenant, mockFetchOktaUsers } = vi.hoisted(() => ({
   scimTenant: { id: "" },
@@ -177,11 +177,12 @@ describe("session revocation is atomic with the departure — real-DB integratio
        VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::"TeamRole", true, now(), now())`,
       rowId, teamId, userId, tenantId, role,
     );
+    const { fingerprint } = await recipientKey(ctx.su, userId);
     await sql(
       `INSERT INTO team_member_keys (id, team_id, tenant_id, user_id, encrypted_team_key, team_key_iv,
-         team_key_auth_tag, ephemeral_public_key, hkdf_salt, key_version, wrap_version, created_at, updated_at)
-       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, 1, 1, now(), now())`,
-      randomUUID(), teamId, tenantId, userId, hex(32), hex(12), hex(16), hex(32), hex(32),
+         team_key_auth_tag, ephemeral_public_key, hkdf_salt, key_version, wrap_version, recipient_key_fingerprint, created_at, updated_at)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, 1, 1, $10, now(), now())`,
+      randomUUID(), teamId, tenantId, userId, hex(32), hex(12), hex(16), hex(32), hex(32), fingerprint,
     );
     return rowId;
   }

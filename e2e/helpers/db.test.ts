@@ -211,6 +211,18 @@ describe("seedUser", () => {
       expect(sql).toMatch(/ON CONFLICT \(id\)/i);
       expect(sql).toMatch(/DO UPDATE SET/i);
     });
+
+    it("rewrites an existing user only while its ECDH public key is NULL", async () => {
+      await seedUser({ ...baseUser, vaultFields });
+      const [sql] = getCall(0);
+      expect(sql).toMatch(/WHERE users\.ecdh_public_key IS NULL/i);
+    });
+
+    it("throws, without seeding the tenant membership, when the user already holds an ECDH public key", async () => {
+      mockQuery.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+      await expect(seedUser({ ...baseUser, vaultFields })).rejects.toThrow(/already has an ECDH public key/);
+      expect(mockQuery).toHaveBeenCalledTimes(1);
+    });
   });
 });
 

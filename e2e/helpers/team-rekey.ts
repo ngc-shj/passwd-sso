@@ -8,6 +8,7 @@
  */
 import { randomBytes, randomUUID } from "node:crypto";
 import { E2E_TENANT, getPool } from "./db";
+import { recipientKeyFingerprint } from "../../src/lib/crypto/crypto-team";
 
 const hex = (bytes: number) => randomBytes(bytes).toString("hex");
 
@@ -48,13 +49,19 @@ export async function seedTeamKeyHolder(options: SeedTeamKeyHolderOptions): Prom
      VALUES ($1, $2, $3, $4, $5, true, now(), now())`,
     [randomUUID(), options.teamId, options.userId, tenantId, options.role],
   );
+  const { rows } = await p.query<{ ecdh_public_key: string | null }>(`SELECT ecdh_public_key FROM users WHERE id = $1`, [options.userId]);
+  const recipientKey = rows[0]?.ecdh_public_key;
+  if (!recipientKey) {
+    throw new Error(`seedTeamKeyHolder: user ${options.userId} has no ECDH public key to bind the member-key rows to`);
+  }
+  const fingerprint = await recipientKeyFingerprint(recipientKey);
   for (const keyVersion of options.keyVersions) {
     await p.query(
       `INSERT INTO team_member_keys (
          id, team_id, tenant_id, user_id, encrypted_team_key, team_key_iv, team_key_auth_tag,
-         ephemeral_public_key, hkdf_salt, key_version, wrap_version, created_at, updated_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 1, now(), now())`,
-      [randomUUID(), options.teamId, tenantId, options.userId, hex(32), hex(12), hex(16), hex(32), hex(32), keyVersion],
+         ephemeral_public_key, hkdf_salt, key_version, wrap_version, recipient_key_fingerprint, created_at, updated_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 1, $11, now(), now())`,
+      [randomUUID(), options.teamId, tenantId, options.userId, hex(32), hex(12), hex(16), hex(32), hex(32), keyVersion, fingerprint],
     );
   }
 }
