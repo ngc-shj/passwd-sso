@@ -118,6 +118,17 @@ loop enumerates it.
 - The migration directory is one exported const (`TEAM_KEY_RECIPIENT_BINDING_DIR`) used as the
   `BACKFILL_OVERRIDE_VARS` key and by the test.
 
+## D14 — Edits made during the self-R-check pass
+The self-R-check sub-agents were briefed read-only but left edits, kept after review:
+- `check-bypass-rls`: the runner's allowlist entry says `routine: null` explicitly, and the matcher
+  accepts a null entry only when the text match read no routine name (no implicit wildcard).
+- `rls-cross-tenant-verify.sql`: the pinned-`search_path` assertion also counts routines that grant
+  the bypass through `SET [LOCAL] app.bypass_*` or a `SET` clause in `proconfig`. Re-ran VE3 on a
+  fresh database: every step green, the 10b red-proof still fails.
+- Tests: `SQLSTATE_CHECK_VIOLATION` in place of the literal; `e2e/helpers/db.test.ts` gains the
+  positive control (the membership is seeded when the upsert wrote); the setup route test asserts the
+  audit is skipped on the 409 and written on success. The whitepaper's issue number is backticked.
+
 ## D13 — Step 2-5 self-R-check fixes
 - R49: `rls-cross-tenant-verify.sql`'s pinned-search_path ASSERT matched only `set_config('app.bypass_…`
   in a body; it now uses 10b's three forms (body `set_config`, body `SET`, the function's `SET`
