@@ -1,5 +1,77 @@
 # Changelog
 
+## [0.5.0](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.77...passwd-sso-v0.5.0) (2026-11-19)
+
+
+### ⚠ BREAKING CHANGES
+
+* docker-compose.workers.yml now requires PASSWD_ANCHOR_PUBLISHER_PASSWORD, PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD, DEPLOYMENT_ID, AUDIT_ANCHOR_SIGNING_KEY and AUDIT_ANCHOR_TAG_SECRET; see the upgrade order in docs/operations/deployment.md.
+* **db:** code or ad-hoc SQL that turns the bypass on without naming its tables in app.bypass_tables is refused. Deploys through deploy.sh need RLS_ENFORCE_ATTESTED; compose upgrades flip without it (see docs/operations/deployment.md).
+
+### Features
+
+* admin revocation of member passkeys and team share links, serialized against credential issuance ([#1017](https://github.com/ngc-shj/passwd-sso/issues/1017)) ([91f29cd](https://github.com/ngc-shj/passwd-sso/commit/91f29cd8c7430c338fa6d69751c720fa3520e673))
+* **audit:** verify the __system__ audit chain under a named bypass ([#944](https://github.com/ngc-shj/passwd-sso/issues/944)) ([3383b3f](https://github.com/ngc-shj/passwd-sso/commit/3383b3fcb02895a01d59da6b9f5689d802bb5f42))
+* **auth:** bind SSO tenant claims to the provider that presents them ([#957](https://github.com/ngc-shj/passwd-sso/issues/957)) ([dd83368](https://github.com/ngc-shj/passwd-sso/commit/dd83368fbda778d8077b846cd4c62acc03f64ef2))
+* **checks:** read conditional and typed spreads in the bypass relation walk ([#930](https://github.com/ngc-shj/passwd-sso/issues/930)) ([0f4d57c](https://github.com/ngc-shj/passwd-sso/commit/0f4d57ce1f72656dc2fec1fc6a4977fbda630b40))
+* **checks:** reject RLS context nesting, follow bypassed clients across modules, and state the gates as limited aids ([#913](https://github.com/ngc-shj/passwd-sso/issues/913)) ([e6f268e](https://github.com/ngc-shj/passwd-sso/commit/e6f268e5474ddbdde6df7b937613428f2b953d9b))
+* **db:** converge the anchor publisher role on RDS and retire the DCR worker role ([#942](https://github.com/ngc-shj/passwd-sso/issues/942)) ([ec689fb](https://github.com/ngc-shj/passwd-sso/commit/ec689fb851b08b8adec993b03362cc65268f0f7b))
+* **db:** count RLS bypass refusals independently of the WARNING ([#1059](https://github.com/ngc-shj/passwd-sso/issues/1059)) ([b82024c](https://github.com/ngc-shj/passwd-sso/commit/b82024ce63ab76e10ee36b5a988c0c0fabfa60cb))
+* **db:** make the SECURITY DEFINER audit functions check the caller's grant ([#931](https://github.com/ngc-shj/passwd-sso/issues/931)) ([a55dfbe](https://github.com/ngc-shj/passwd-sso/commit/a55dfbe9e232a21f26a0d7da74ce86e09c2efb22))
+* **db:** read-only role for the audit-chain verifier and RLS bypass enforcement ([#1051](https://github.com/ngc-shj/passwd-sso/issues/1051)) ([7805696](https://github.com/ngc-shj/passwd-sso/commit/780569623f3d57da44aa3b3824eb3dd12c65aa72))
+* **db:** send SCRAM verifiers instead of cleartext role passwords ([#945](https://github.com/ngc-shj/passwd-sso/issues/945)) ([022ca4e](https://github.com/ngc-shj/passwd-sso/commit/022ca4eac217234e8180e21894ab61f5acfba17d))
+* harden the audit-anchor publication protocol and ship the rotation scripts ([#1052](https://github.com/ngc-shj/passwd-sso/issues/1052)) ([8c3aab8](https://github.com/ngc-shj/passwd-sso/commit/8c3aab8a8050fb836f7b2c5cd5dbd08c30b537d2))
+* **rls:** name each bypass's tables and fail the outer transaction on refused nesting ([#928](https://github.com/ngc-shj/passwd-sso/issues/928)) ([54e5468](https://github.com/ngc-shj/passwd-sso/commit/54e5468c66740ca0fb872cbd4b706d1bcb55530a))
+* **rls:** put tenants under row level security ([#932](https://github.com/ngc-shj/passwd-sso/issues/932)) ([b7ad540](https://github.com/ngc-shj/passwd-sso/commit/b7ad5404cde7a2db5c8bba58a8905c7c1ec95813))
+* run the anchor publisher and chain verify worker on compose and k8s ([#1063](https://github.com/ngc-shj/passwd-sso/issues/1063)) ([0b1b9e8](https://github.com/ngc-shj/passwd-sso/commit/0b1b9e81f23dddc960b812710c245c9256200a87))
+* run the audit-anchor publisher and chain verifier on AWS ([#952](https://github.com/ngc-shj/passwd-sso/issues/952)) ([907f6fd](https://github.com/ngc-shj/passwd-sso/commit/907f6fdd4461e1af2421c889a41cbee2c26a29ce))
+* **teams:** bulk approve and reject for SCIM-pending memberships ([#1049](https://github.com/ngc-shj/passwd-sso/issues/1049)) ([4c296da](https://github.com/ngc-shj/passwd-sso/commit/4c296da4bdd0ff190fd40717a8efd1b7b6c3ed4f))
+* **teams:** enforce the departed-member invariants in the database ([#1074](https://github.com/ngc-shj/passwd-sso/issues/1074)) ([8403d9f](https://github.com/ngc-shj/passwd-sso/commit/8403d9f467a6b938be2baf66357e5c8fda791997))
+* **teams:** prune unreferenced team keys, sweep orphaned attachment objects, seal team entries through one strict AAD helper ([#1018](https://github.com/ngc-shj/passwd-sso/issues/1018)) ([b79df1a](https://github.com/ngc-shj/passwd-sso/commit/b79df1a636b8794d721b8221a052c76a4f7bf9c9))
+* **tenant-domain:** re-key legacy saml-jackson accounts onto per-connection providers ([#1058](https://github.com/ngc-shj/passwd-sso/issues/1058)) ([0a2d298](https://github.com/ngc-shj/passwd-sso/commit/0a2d298ca12d5711448263cacf185796931e68c4))
+* **tenant:** contain a member's audit delivery targets, share links and Sends; filter the tenant audit log by actor ([#1071](https://github.com/ngc-shj/passwd-sso/issues/1071)) ([53a54c2](https://github.com/ngc-shj/passwd-sso/commit/53a54c25b00aad45d44fcc2e280894e52a0b5415))
+* **tenant:** contain the footholds a departing or compromised member leaves ([#1070](https://github.com/ngc-shj/passwd-sso/issues/1070)) ([ced458d](https://github.com/ngc-shj/passwd-sso/commit/ced458d6677a7c906de21afaac839ca61b377275))
+
+
+### Bug Fixes
+
+* **audit:** write passkey-block audit rows in-process and tenant-scoped ([#977](https://github.com/ngc-shj/passwd-sso/issues/977)) ([6f19b66](https://github.com/ngc-shj/passwd-sso/commit/6f19b66f48bc28f37c114b231947688ad58b012c))
+* **auth:** clear both CHIPS variants of the session cookie on sign-in and sign-out ([#981](https://github.com/ngc-shj/passwd-sso/issues/981)) ([5c8c689](https://github.com/ngc-shj/passwd-sso/commit/5c8c6899f75c0e1273c940fdb29dfe1260f5da6c))
+* **auth:** enforce the tenant passkey requirement on every bearer use ([#965](https://github.com/ngc-shj/passwd-sso/issues/965)) ([11961e1](https://github.com/ngc-shj/passwd-sso/commit/11961e1174966668f3b0cb76a9d39f715d0f7ef1))
+* **auth:** enforce the tenant passkey requirement on session API calls ([#973](https://github.com/ngc-shj/passwd-sso/issues/973)) ([a1d8391](https://github.com/ngc-shj/passwd-sso/commit/a1d83915da540c8b932264eaf846a3f3a3775923))
+* **auth:** make every OAuth callback a fresh sign-in ([#967](https://github.com/ngc-shj/passwd-sso/issues/967)) ([d420e5b](https://github.com/ngc-shj/passwd-sso/commit/d420e5be296a3d645e1cf97e1300b6c4f203af0f))
+* **auth:** read the session cookie the way Auth.js reads it ([#961](https://github.com/ngc-shj/passwd-sso/issues/961)) ([153c8bd](https://github.com/ngc-shj/passwd-sso/commit/153c8bd47d958b33396f3686e4395191af5717ef))
+* **auth:** revoke credentials in the transaction that deprovisions the user ([#1064](https://github.com/ngc-shj/passwd-sso/issues/1064)) ([58c153b](https://github.com/ngc-shj/passwd-sso/commit/58c153b14b3404a1dcaddadd5dbbb481874798dd))
+* **checks:** widen the bearer passkey gate beyond readable Prisma filters ([#1053](https://github.com/ngc-shj/passwd-sso/issues/1053)) ([8d6345c](https://github.com/ngc-shj/passwd-sso/commit/8d6345c8d25ba9dbb579f7d0c3f6cd7666c7672c))
+* **clients:** surface PASSKEY_REQUIRED in the extension and the iOS app ([#982](https://github.com/ngc-shj/passwd-sso/issues/982)) ([188b47c](https://github.com/ngc-shj/passwd-sso/commit/188b47cfc0759185fa580de29468241ab3989189))
+* count request 5xx on _stream, audit role session defaults, model GC bypass state ([#929](https://github.com/ngc-shj/passwd-sso/issues/929)) ([36103cd](https://github.com/ngc-shj/passwd-sso/commit/36103cd48c6507cfa8fab47d90fbdca854e08db4))
+* **db:** revoke DELETE on tenants from the application role ([#939](https://github.com/ngc-shj/passwd-sso/issues/939)) ([0838997](https://github.com/ngc-shj/passwd-sso/commit/083899746436aeb90421633e8d291e1799a01c11))
+* **db:** run queries on one transaction client sequentially ([#978](https://github.com/ngc-shj/passwd-sso/issues/978)) ([80584be](https://github.com/ngc-shj/passwd-sso/commit/80584be3a8bdb3a0aa9f5fddc1db698d6184d123))
+* **deps:** raise the qs override floor past GHSA-6pq8-jhm2-2vcw ([#983](https://github.com/ngc-shj/passwd-sso/issues/983)) ([880cdec](https://github.com/ngc-shj/passwd-sso/commit/880cdec8505e4b0e7557ffd8fde5cd147dad4d3d))
+* enforce share policy at serve time and close five follow-ups ([#1015](https://github.com/ngc-shj/passwd-sso/issues/1015)) ([e7f3bfa](https://github.com/ngc-shj/passwd-sso/commit/e7f3bfa0c230bfe35c886ba0488001fc2d5a58b2))
+* **import:** isolate each bulk-import entry in a savepoint ([#980](https://github.com/ngc-shj/passwd-sso/issues/980)) ([ac9e04a](https://github.com/ngc-shj/passwd-sso/commit/ac9e04a7bcaabc893a25bce8fcaff61ccd5f1364))
+* **ios:** one team's failed entry fetch no longer fails the whole sync ([#993](https://github.com/ngc-shj/passwd-sso/issues/993)) ([c017f34](https://github.com/ngc-shj/passwd-sso/commit/c017f342b9db430b7e4af99d12b1159ab56feef7))
+* keep expired records visible for 30 days and bind client credentials to their issuer ([#1038](https://github.com/ngc-shj/passwd-sso/issues/1038)) ([3cd74d3](https://github.com/ngc-shj/passwd-sso/commit/3cd74d3f5bda98d30fcc0e540ac4a68ff4da9c9d))
+* **migrations:** re-run the departure and re-key backfills where RLS hid every row ([#1034](https://github.com/ngc-shj/passwd-sso/issues/1034)) ([2dd2e6e](https://github.com/ngc-shj/passwd-sso/commit/2dd2e6e98da9abac75c173dd88558511f1fa46f2))
+* patch minimatch globparts DoS and drop a dead SCIM audit default ([#1036](https://github.com/ngc-shj/passwd-sso/issues/1036)) ([fb06de4](https://github.com/ngc-shj/passwd-sso/commit/fb06de4553e1e1b0925625d59d1b4e243a719c0f))
+* **rls:** keep a logger failure from replacing an RLS guard's refusal ([#915](https://github.com/ngc-shj/passwd-sso/issues/915)) ([63808a8](https://github.com/ngc-shj/passwd-sso/commit/63808a812fe0dd9de39bcd900948bc678a929514))
+* **scim:** hold a SCIM role raise of an active team member for approval ([#1023](https://github.com/ngc-shj/passwd-sso/issues/1023)) ([33813d2](https://github.com/ngc-shj/passwd-sso/commit/33813d2dbc83f16d8ade0e568b38f2696a218235))
+* **scim:** require team approval before a SCIM-added member joins a team ([#1006](https://github.com/ngc-shj/passwd-sso/issues/1006)) ([29ade2c](https://github.com/ngc-shj/passwd-sso/commit/29ade2ca6146c3bb2565d96e2d22e413e4b4ffc1))
+* **scripts:** claim the backup lock with an exclusive create, not mkdir's exit status ([#1061](https://github.com/ngc-shj/passwd-sso/issues/1061)) ([8e42a9c](https://github.com/ngc-shj/passwd-sso/commit/8e42a9c35ee923359dc110d8155bf5ca97e4ef13))
+* **security:** close the open code-scanning and Dependabot alerts ([#985](https://github.com/ngc-shj/passwd-sso/issues/985)) ([737d793](https://github.com/ngc-shj/passwd-sso/commit/737d793588a5ad0e4bc8b7d2f2c5c221031fecd7))
+* **security:** drop the picomatch audit suppression after its advisory was withdrawn ([#1077](https://github.com/ngc-shj/passwd-sso/issues/1077)) ([57f0c4e](https://github.com/ngc-shj/passwd-sso/commit/57f0c4e0421576210295365eb954e61280a3d894))
+* **security:** let the production npm audit honour expiring, path-bound suppressions ([#1073](https://github.com/ngc-shj/passwd-sso/issues/1073)) ([5319603](https://github.com/ngc-shj/passwd-sso/commit/531960352065826e0ac61e9a49ec17467fda453a))
+* **share:** stop serving a team share link once its creator left the entry's team ([#994](https://github.com/ngc-shj/passwd-sso/issues/994)) ([4502ca3](https://github.com/ngc-shj/passwd-sso/commit/4502ca36288346e8971235fd87dcd2a90b884b1c))
+* **teams:** answer a timed-out team lock wait with TEAM_BUSY ([#1039](https://github.com/ngc-shj/passwd-sso/issues/1039)) ([af10c0f](https://github.com/ngc-shj/passwd-sso/commit/af10c0f5b5804560fea18305aec42ed794a2aabf))
+* **teams:** commit membership-authority audits with the change; pin departure writers ([#1062](https://github.com/ngc-shj/passwd-sso/issues/1062)) ([38686d8](https://github.com/ngc-shj/passwd-sso/commit/38686d83375d99c8b9e04ef3c9fe034b05c08a9e))
+* **teams:** end team memberships when a user leaves the tenant ([#987](https://github.com/ngc-shj/passwd-sso/issues/987)) ([f291c4b](https://github.com/ngc-shj/passwd-sso/commit/f291c4b5120f7c9a234c16477fc81cb5e766eb9b))
+* **teams:** re-key every entry after a team key rotation ([#1008](https://github.com/ngc-shj/passwd-sso/issues/1008)) ([5239054](https://github.com/ngc-shj/passwd-sso/commit/5239054ea774faa42bfa6814f847be75b5f55f77))
+* **teams:** refuse a departed member's leftover team membership ([#1057](https://github.com/ngc-shj/passwd-sso/issues/1057)) ([e2d1503](https://github.com/ngc-shj/passwd-sso/commit/e2d15032cd5b1f2b0571db7812657949f0ffb874))
+* **teams:** serialise team key rotation with the writes that change its inputs ([#986](https://github.com/ngc-shj/passwd-sso/issues/986)) ([9b56404](https://github.com/ngc-shj/passwd-sso/commit/9b564045c2fce8d349dc6a7c0493d87b345600ef))
+* **teams:** stop a departed member's leftover membership from holding or receiving authority ([#1043](https://github.com/ngc-shj/passwd-sso/issues/1043)) ([f798928](https://github.com/ngc-shj/passwd-sso/commit/f79892815911279d210b77559a23c7b1eb44c475))
+* **teams:** store team invitation tokens as a SHA-256 digest ([#1056](https://github.com/ngc-shj/passwd-sso/issues/1056)) ([27968fb](https://github.com/ngc-shj/passwd-sso/commit/27968fb283e79408b1417ee94be2c6197eff54ff))
+* **tenant:** correct the deactivated-row remedy, and move only the migrating user's rows in the bootstrap migration ([#1019](https://github.com/ngc-shj/passwd-sso/issues/1019)) ([f5261e0](https://github.com/ngc-shj/passwd-sso/commit/f5261e09363c4a82e04caac723b48d0df5597bf0))
+
 ## [0.4.77](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.76...passwd-sso-v0.4.77) (2026-10-16)
 
 
