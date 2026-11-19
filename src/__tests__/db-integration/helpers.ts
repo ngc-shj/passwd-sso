@@ -834,6 +834,59 @@ export async function createTestContext(): Promise<TestContext> {
   };
 }
 
+// ─── Seeding a state the database refuses ───────────────────────
+
+/**
+ * Write ONE statement that the departed-member guard (departed_member_guard,
+ * migration 20261117000100) would refuse, and return its rows.
+ *
+ * It exists for fixtures whose subject is how the application answers such a
+ * state: residue (a raw departure stamp that left team rows active), a
+ * departure record over an active membership, a membership born leftover.
+ * Databases migrated from before the guard hold these rows, and the
+ * application's own checks must still answer them; the guard only stops new
+ * ones being written, so a cell can no longer create them through a guarded
+ * write.
+ *
+ * The statement runs on its own superuser connection, in its own transaction,
+ * under `SET LOCAL session_replication_role = replica`, which skips every
+ * ordinary trigger for that transaction only: the guard's BEFORE and deferred
+ * constraint triggers, and also the tenant-context, `admitted_at` and
+ * foreign-key triggers, so the statement must write exactly the row it means.
+ * `SET LOCAL` and the ROLLBACK on error keep the setting from outliving the
+ * call: a session-level `replica` on a pooled connection would silently switch
+ * the guard off for every later statement that lands on it. One statement per
+ * call, so a seed cannot hide a second, unintended refused write.
+ */
+export async function writeRefusedState<T = Record<string, unknown>>(
+  su: Pick<PrismaWithPool, "pool">,
+  sql: string,
+  params: readonly unknown[] = [],
+): Promise<T[]> {
+  const client = await su.pool.connect();
+  let broken: Error | undefined;
+  try {
+    await client.query("BEGIN");
+    try {
+      await client.query("SET LOCAL session_replication_role = replica");
+      // The extended protocol, even without params, so the server refuses more
+      // than one statement (pg reads queryMode; @types/pg does not declare it).
+      const query: pg.QueryConfig & { queryMode: "extended" } = { text: sql, values: [...params], queryMode: "extended" };
+      const { rows } = await client.query(query);
+      await client.query("COMMIT");
+      return rows as T[];
+    } catch (e) {
+      await client.query("ROLLBACK").catch((rollbackError: unknown) => {
+        broken = rollbackError instanceof Error ? rollbackError : new Error(String(rollbackError));
+      });
+      throw e;
+    }
+  } finally {
+    // A connection whose ROLLBACK failed is destroyed, not returned to the pool.
+    client.release(broken);
+  }
+}
+
 // ─── Deferred barrier for concurrency tests ─────────────────────
 
 export class Deferred<T = void> {

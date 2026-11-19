@@ -1,0 +1,6 @@
+-	PUT /api/teams/[teamId]/members/[memberId] a target who left the tenant, judged against their admission to the team refuses (404 MEMBER_NOT_FOUND) promoting a target whose tenant row departed after their admission
+-	PUT /api/teams/[teamId]/members/[memberId] a target who left the tenant, judged against their admission to the team refuses promoting a target whose departure equals their admission
+-	PUT /api/teams/[teamId]/members/[memberId] a target who left the tenant, judged against their admission to the team refuses promoting a target whose departure record (row deleted) postdates their admission
+-	PUT /api/teams/[teamId]/members/[memberId] a target who left the tenant, judged against their admission to the team refuses when the row re-read under the locks is no longer the pre-checked user's
+-	departed-member leaked authority — real-DB integration C4 recipient: a target whose tenant row departed after their admission receives nothing member PUT promotion of the target (MEMBER to ADMIN): denied when the target's tenant row departed after admission (residue)
++-	PUT /api/teams/[teamId]/members/[memberId] re-reads the acting member's role after their tenant row and the team are locked (PUT)

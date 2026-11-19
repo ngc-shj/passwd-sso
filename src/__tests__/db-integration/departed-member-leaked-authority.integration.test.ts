@@ -50,6 +50,7 @@ import {
   setBypassRlsGucs,
   setGucs,
   setTestBypass,
+  writeRefusedState,
   type TestContext,
 } from "./helpers";
 
@@ -129,8 +130,12 @@ import { buildOutboxPayload } from "@/lib/audit/audit-payload";
 import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
 import { requestWithSession, seedSession } from "./session-request";
 import { createPool } from "@/lib/db/pool-factory";
+import { createRaceHelpers } from "./race-helpers";
 import { prisma } from "@/lib/prisma";
 import logger from "@/lib/logger";
+import { withTenantRls } from "@/lib/tenant-rls";
+import { deactivateScimUser } from "@/lib/services/scim-user-service";
+import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import {
   ACTOR_TYPE,
   AUDIT_ACTION,
@@ -241,13 +246,18 @@ describe("departed-member leaked authority — real-DB integration", () => {
     await sql(`UPDATE users SET ecdh_public_key = $2 WHERE id = $1::uuid`, userId, hex(32));
   }
 
-  async function seedKey(teamId: string, userId: string, tenant = tenantId) {
-    await sql(
-      `INSERT INTO team_member_keys (id, team_id, tenant_id, user_id, encrypted_team_key, team_key_iv,
+  /**
+   * A key row. For an ended member (`ended`) the database refuses writing one
+   * (departed_member_guard, key_inactive): such a member holds the keys written
+   * before the row ended, so that state is seeded through writeRefusedState.
+   */
+  async function seedKey(teamId: string, userId: string, tenant = tenantId, ended = false) {
+    const text = `INSERT INTO team_member_keys (id, team_id, tenant_id, user_id, encrypted_team_key, team_key_iv,
          team_key_auth_tag, ephemeral_public_key, hkdf_salt, key_version, wrap_version, created_at, updated_at)
-       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, 1, 1, now(), now())`,
-      randomUUID(), teamId, tenant, userId, hex(32), hex(12), hex(16), hex(32), hex(32),
-    );
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, 1, 1, now(), now())`;
+    const params = [randomUUID(), teamId, tenant, userId, hex(32), hex(12), hex(16), hex(32), hex(32)];
+    if (ended) await writeRefusedState(ctx.su, text, params);
+    else await sql(text, ...params);
   }
 
   type RowOpts = {
@@ -271,7 +281,7 @@ describe("departed-member leaked authority — real-DB integration", () => {
       rowId, teamId, userId, o.tenant ?? tenantId, role, o.scimManaged ?? o.pending ?? false, o.pending ?? false,
       o.keyDistributed ?? true,
     );
-    if (o.withKey ?? o.keyDistributed ?? true) await seedKey(teamId, userId, o.tenant);
+    if (o.withKey ?? o.keyDistributed ?? true) await seedKey(teamId, userId, o.tenant, Boolean(o.deactivated || o.pending));
     return rowId;
   }
 
@@ -300,14 +310,16 @@ describe("departed-member leaked authority — real-DB integration", () => {
 
   /**
    * The residue state: the user's tenant row departed by a raw UPDATE that
-   * bypasses endTeamMemberships, so their team rows stay active. Exactly one
-   * row must change.
+   * bypasses endTeamMemberships, so their team rows stay active. The database
+   * refuses writing it since departed_member_guard, so it is seeded through
+   * writeRefusedState (pre-guard databases hold it). Exactly one row must change.
    */
   async function residueDepart(userId: string) {
-    const changed = await sql(
+    const changed = await writeRefusedState(
+      ctx.su,
       `UPDATE tenant_members SET deactivated_at = clock_timestamp()
         WHERE tenant_id = $1::uuid AND user_id = $2::uuid RETURNING 1`,
-      tenantId, userId,
+      [tenantId, userId],
     );
     expect(changed).toHaveLength(1);
   }
@@ -317,13 +329,15 @@ describe("departed-member leaked authority — real-DB integration", () => {
    * SQL, says otherwise) while the user's tenant row stays active (SCIM DELETE,
    * then re-creation). Unlike residueDepart, the tenant row passes a route's
    * "active in this tenant" check, so only the leftover predicate refuses.
-   * Exactly one row must be written.
+   * Seeded through writeRefusedState, as residueDepart. Exactly one row must be
+   * written.
    */
   async function recreatedDepart(userId: string, departedAt = "clock_timestamp()") {
-    const written = await sql(
+    const written = await writeRefusedState(
+      ctx.su,
       `INSERT INTO tenant_member_departures (tenant_id, user_id, departed_at)
        VALUES ($1::uuid, $2::uuid, ${departedAt}) RETURNING 1`,
-      tenantId, userId,
+      [tenantId, userId],
     );
     expect(written).toHaveLength(1);
   }
@@ -461,13 +475,14 @@ describe("departed-member leaked authority — real-DB integration", () => {
       expect(await admittedAt(await addTeamMember(teamId, (await member()).id, "MEMBER"))).toBeNull();
     });
 
-    it("accept's upsert re-activating a departed member stamps it within the call", async () => {
+    it("accept's upsert re-activating a removed member stamps it within the call", async () => {
+      // Removed from the team, still in the tenant. A member departed from the
+      // tenant is no longer re-admitted by accept (C9: INVITATION_EXPIRED; the
+      // database refuses activating a departed user's membership).
       const owner = await ctx.createUser(tenantId);
       const leaver = await member();
       const teamId = await team(owner);
-      const rowId = await addTeamMember(teamId, leaver.id, "MEMBER", { createdAt: "now() - interval '1 hour'" });
-      expect((await scimActive(leaver.id, false)).status).toBe(200);
-      await moveAway(leaver.id);
+      const rowId = await addTeamMember(teamId, leaver.id, "MEMBER", { createdAt: "now() - interval '1 hour'", deactivated: true });
       const inv = await invite(teamId, owner, leaver.email);
       expect(inv.status).toBe(201);
 
@@ -771,7 +786,7 @@ describe("departed-member leaked authority — real-DB integration", () => {
       });
     });
 
-    it("a member re-admitted by accept after a SCIM departure (created_at < departure < admitted_at) invites successfully", async () => {
+    it("a member re-admitted after a SCIM departure (created_at < departure < admitted_at) invites successfully", async () => {
       const owner = await ctx.createUser(tenantId);
       const actor = await member();
       const teamId = await team(owner);
@@ -780,7 +795,21 @@ describe("departed-member leaked authority — real-DB integration", () => {
       await moveAway(actor.id);
       const inv = await invite(teamId, owner, actor.email, "ADMIN");
       expect(inv.status).toBe(201);
-      expect((await accept(actor, inv.token!)).status).toBe(200);
+      // Accept no longer re-admits a member whose tenant row is departed (C9),
+      // and the database refuses that activation; the state is the one accept
+      // wrote before the guard (and the runbook re-admit script writes), seeded
+      // as accept wrote it: admitted_at stamped by the re-activation.
+      const refused = await accept(actor, inv.token!);
+      expect(refused.status).toBe(410);
+      expect((await refused.json()).error).toBe("INVITATION_EXPIRED");
+      const readmitted = await writeRefusedState(
+        ctx.su,
+        `UPDATE team_members SET deactivated_at = NULL, deactivated_by_tenant = false, role = 'ADMIN',
+                admitted_at = clock_timestamp(), updated_at = clock_timestamp()
+          WHERE team_id = $1::uuid AND user_id = $2::uuid AND deactivated_at IS NOT NULL RETURNING 1`,
+        [teamId, actor.id],
+      );
+      expect(readmitted).toHaveLength(1);
 
       // The state the COALESCE must read: still departed, created before, admitted after.
       const row = await membership(teamId, actor.id);
@@ -824,6 +853,103 @@ describe("departed-member leaked authority — real-DB integration", () => {
       expect(await membership(teamId, target.id)).toMatchObject({ key_distributed: !departed });
       const keys = await sql(`SELECT 1 FROM team_member_keys WHERE team_id = $1::uuid AND user_id = $2::uuid`, teamId, target.id);
       expect(keys).toHaveLength(departed ? 0 : 1);
+    });
+
+    it("confirm-key against an ending of the target that commits after its member read: 404, no key", async () => {
+      // The route reads the member row unlocked and writes the key before its
+      // CAS (lock order teams → users → team_members). An ending that commits
+      // in between has the key refused by the database guard (key_inactive),
+      // which the route answers as the 404 a CAS miss gets, not a 500.
+      const { owner, teamId, target, targetRow } = await targetTeam("MEMBER", { keyDistributed: false, withKey: false });
+      await setEcdhKey(target.id);
+      const race = createRaceHelpers(ctx.su.pool);
+      const parkKey = `c1-confirm-key-park:${target.id}`;
+      // Fixed name: check-bypass-rls allowlists exactly this routine in this file.
+      const fn = "c1_confirm_key_park";
+      // Sorts before trg_team_member_keys_departed_member_guard: parks the key
+      // write before the guard reads the member row.
+      const trigger = `a_${fn}_trg`;
+      await sql(`DROP FUNCTION IF EXISTS public.${fn}() CASCADE`);
+      await sql(`CREATE FUNCTION c1_confirm_key_park() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_advisory_xact_lock(hashtext(TG_ARGV[0])); RETURN NEW; END $$`);
+      let ending: Promise<unknown> | undefined;
+      let where: string | undefined;
+      try {
+        await sql(
+          `CREATE TRIGGER ${trigger} BEFORE INSERT ON team_member_keys FOR EACH ROW
+             WHEN (NEW.user_id = '${target.id}'::uuid) EXECUTE FUNCTION public.${fn}('${parkKey}')`,
+        );
+        const outcome = await race.parkBehind(
+          `SELECT pg_advisory_xact_lock(hashtext($1::text))`,
+          [parkKey],
+          // A thrown guard refusal is kept as its token, so the failure names its arm.
+          () => confirmKey(teamId, targetRow, owner).then(
+            (r) => r.status,
+            (e: unknown) =>
+              /DEPARTED_MEMBER_GUARD:[a-z_]+/.exec(`${e instanceof Error ? e.message : ""} ${JSON.stringify((e as { meta?: unknown }).meta ?? null)}`)?.[0] ?? String(e),
+          ),
+          async (blocker, parkedPid) => {
+            // The ending, as endTeamMemberships writes it, in its own transaction.
+            ending = ctx.su.pool.query(`UPDATE team_members SET deactivated_at = clock_timestamp() WHERE id = $1::uuid`, [targetRow]);
+            ending.catch(() => {});
+            where = await race.settledOrBlocked(ending, parkedPid, await blocker.query<{ pid: number }>("SELECT pg_backend_pid() AS pid").then((r) => r.rows[0].pid));
+          },
+        );
+        await ending;
+
+        expect(outcome).toBe(404);
+        // The ending ran through while the key write was parked: nothing held its row.
+        expect(where).toBe("settled");
+      } finally {
+        await sql(`DROP TRIGGER IF EXISTS ${trigger} ON team_member_keys`);
+        await sql(`DROP FUNCTION IF EXISTS public.${fn}()`);
+      }
+      expect(await membership(teamId, target.id)).toMatchObject({ key_distributed: false });
+      const [row] = await sql<{ deactivated_at: Date | null }>(`SELECT deactivated_at FROM team_members WHERE id = $1::uuid`, targetRow);
+      expect(row.deactivated_at).not.toBeNull();
+      expect(await sql(`SELECT 1 FROM team_member_keys WHERE team_id = $1::uuid AND user_id = $2::uuid`, teamId, target.id)).toEqual([]);
+    });
+
+    it("confirm-key parked at its CAS (key written) against a SCIM user DELETE of the target: no key outlives the membership", async () => {
+      // The DELETE removes member rows before keys: it waits on the parked
+      // CAS's row lock, and its key delete then sees the committed key.
+      const { owner, teamId, target, targetRow } = await targetTeam("MEMBER", { keyDistributed: false, withKey: false });
+      await setEcdhKey(target.id);
+      const race = createRaceHelpers(ctx.su.pool);
+      const parkKey = `c1-scim-delete-park:${target.id}`;
+      // Fixed name: check-bypass-rls allowlists exactly this routine in this file.
+      const fn = "c1_confirm_key_park";
+      const trigger = `a_${fn}_cas_trg`;
+      await sql(`DROP FUNCTION IF EXISTS public.${fn}() CASCADE`);
+      await sql(`CREATE FUNCTION c1_confirm_key_park() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_advisory_xact_lock(hashtext(TG_ARGV[0])); RETURN NEW; END $$`);
+      let deleting: Promise<unknown> | undefined;
+      let where: string | undefined;
+      try {
+        // A BEFORE UPDATE row trigger runs with the row already locked.
+        await sql(
+          `CREATE TRIGGER ${trigger} BEFORE UPDATE ON team_members FOR EACH ROW
+             WHEN (NEW.user_id = '${target.id}'::uuid AND NEW.key_distributed AND NOT OLD.key_distributed)
+             EXECUTE FUNCTION public.${fn}('${parkKey}')`,
+        );
+        const outcome = await race.parkBehind(
+          `SELECT pg_advisory_xact_lock(hashtext($1::text))`,
+          [parkKey],
+          () => confirmKey(teamId, targetRow, owner).then((r) => r.status, (e: unknown) => String(e)),
+          async (blocker, parkedPid) => {
+            deleting = withTenantRls(prisma, tenantId, () => deactivateScimUser(tenantId, target.id, { userId: SYSTEM_ACTOR_ID, actorType: ACTOR_TYPE.SYSTEM }), { timeout: 15_000 });
+            deleting.catch(() => {});
+            where = await race.settledOrBlocked(deleting, parkedPid, await blocker.query<{ pid: number }>("SELECT pg_backend_pid() AS pid").then((r) => r.rows[0].pid));
+          },
+        );
+        await deleting;
+
+        expect(outcome).toBe(200);
+        expect(where).toBe("blocked-on-parked");
+      } finally {
+        await sql(`DROP TRIGGER IF EXISTS ${trigger} ON team_members`);
+        await sql(`DROP FUNCTION IF EXISTS public.${fn}()`);
+      }
+      expect(await membership(teamId, target.id)).toBeNull();
+      expect(await sql(`SELECT 1 FROM team_member_keys WHERE team_id = $1::uuid AND user_id = $2::uuid`, teamId, target.id)).toEqual([]);
     });
 
     it.each([
@@ -1101,12 +1227,11 @@ describe("departed-member leaked authority — real-DB integration", () => {
     });
 
     it("a re-activated membership writes one row with readmitted true", async () => {
+      // A member removed from the team (a departed one is refused, C9).
       const owner = await ctx.createUser(tenantId);
       const leaver = await member();
       const teamId = await team(owner);
-      await addTeamMember(teamId, leaver.id, "MEMBER");
-      expect((await scimActive(leaver.id, false)).status).toBe(200);
-      await moveAway(leaver.id);
+      await addTeamMember(teamId, leaver.id, "MEMBER", { deactivated: true });
       const inv = await invite(teamId, owner, leaver.email, "ADMIN");
 
       expect((await accept(leaver, inv.token!)).status).toBe(200);

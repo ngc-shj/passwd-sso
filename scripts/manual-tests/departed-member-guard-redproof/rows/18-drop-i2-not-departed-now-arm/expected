@@ -1,0 +1,2 @@
+departure_leftover	departed-member DB invariants — real-DB integration T4: departure refused at COMMIT, not at the statement a stamp and a return in one transaction, while a record later than the admission keeps the row leftover
+departure_leftover	departed-member DB invariants — real-DB integration T4: departure refused at COMMIT, not at the statement a record with a re-created active tenant row, leaving a row admitted before the record

@@ -1,0 +1,1 @@
+The route no longer answers the guard's key_inactive refusal as 404.

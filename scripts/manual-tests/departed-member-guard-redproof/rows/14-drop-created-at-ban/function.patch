@@ -1,0 +1,13 @@
+--- a/function.sql
++++ b/function.sql
+@@ -31,10 +31,6 @@
+   END IF;
+ 
+   IF TG_TABLE_NAME = 'team_members' THEN
+-    IF TG_OP = 'UPDATE' AND NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+-      RAISE EXCEPTION 'DEPARTED_MEMBER_GUARD:created_at: team membership % (tenant %, user %)', NEW.id, NEW.tenant_id, NEW.user_id
+-        USING ERRCODE = 'check_violation';
+-    END IF;
+     IF NEW.deactivated_at IS NULL THEN
+       IF TG_OP = 'INSERT' OR OLD.deactivated_at IS NOT NULL
+          OR (NEW.tenant_id, NEW.user_id, NEW.team_id) IS DISTINCT FROM (OLD.tenant_id, OLD.user_id, OLD.team_id) THEN

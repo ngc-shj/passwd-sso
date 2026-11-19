@@ -1,0 +1,11 @@
+--- a/src/lib/team/tenant-row-lock.ts
++++ b/src/lib/team/tenant-row-lock.ts
+@@ -47,7 +47,7 @@
+  * whatever case the caller passes.
+  */
+ export function advisoryKey(tenantId: string, userId: string): string {
+-  return `tenant-member:${tenantId.toLowerCase()}:${userId.toLowerCase()}`;
++  return `tenant-member:${tenantId}:${userId}`;
+ }
+ 
+ /**

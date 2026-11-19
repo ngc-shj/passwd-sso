@@ -1,0 +1,2 @@
+-	departed-member DB invariants — real-DB integration T5: races R3: a grant runs through a held departure (no lock); the departure is then refused at commit
+~-	departed-member DB invariants — real-DB integration T5: races scenario 5: rotate-key's transaction against deactivateScimUser of a key holder — both commit, no 40P01

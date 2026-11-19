@@ -1,0 +1,2 @@
+unit src/app/api/tenant/teams/[teamId]/owner/route.test.ts
+integration src/__tests__/db-integration/departed-member-leaked-authority.integration.test.ts

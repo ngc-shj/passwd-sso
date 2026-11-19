@@ -1,0 +1,10 @@
+--- a/function.sql
++++ b/function.sql
+@@ -72,7 +72,6 @@
+            EXISTS (SELECT 1 FROM tenant_members tm WHERE tm.tenant_id = v_tenant AND tm.user_id = v_user AND tm.deactivated_at IS NOT NULL),
+            EXISTS (SELECT 1 FROM tenant_member_departures d WHERE d.tenant_id = v_tenant AND d.user_id = v_user),
+            GREATEST(
+-             (SELECT tm.deactivated_at FROM tenant_members tm WHERE tm.tenant_id = v_tenant AND tm.user_id = v_user),
+              (SELECT d.departed_at FROM tenant_member_departures d WHERE d.tenant_id = v_tenant AND d.user_id = v_user))
+       INTO v_has_row, v_row_departed, v_has_record, v_departed_at;
+ 

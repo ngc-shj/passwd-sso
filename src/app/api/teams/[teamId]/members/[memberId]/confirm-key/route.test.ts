@@ -573,6 +573,46 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
     expect((await res.json()).error).toBe("MEMBER_NOT_FOUND");
     // CAS count 0 (C4): no TEAM_MEMBER_KEY_DISTRIBUTE.
     expect(mockLogAuditInTx).not.toHaveBeenCalled();
+    // The key write precedes the CAS: its FK check locks the recipient's users
+    // row before the member row (teams → users → team_members). The reverse
+    // deadlocks with a vault reset.
+    expect(mockPrismaTeamMemberKey.upsert.mock.invocationCallOrder[0]).toBeLessThan(
+      mockPrismaTeamMember.updateMany.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("returns 404 when the database guard refuses the key because the member was ended since the check", async () => {
+    mockPrismaTeamMember.findFirst.mockResolvedValueOnce(actorRow());
+    mockPrismaTeamMember.findUnique
+      .mockResolvedValueOnce({ id: "member-1", teamId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null })
+      .mockResolvedValueOnce(lockedTarget());
+    mockPrismaTeamMemberKey.upsert.mockRejectedValueOnce(
+      Object.assign(new Error("DEPARTED_MEMBER_GUARD:key_inactive: team_member_keys (tenant t, user u)"), { code: "23514" }),
+    );
+
+    const res = await POST(
+      createRequest("POST", URL, { body: validBody }),
+      { params: Promise.resolve({ teamId: "team-1", memberId: "member-1" }) },
+    );
+
+    expect(res.status).toBe(404);
+    expect((await res.json()).error).toBe("MEMBER_NOT_FOUND");
+    expect(mockPrismaTeamMember.updateMany).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
+  });
+
+  it("does not answer another guard refusal of the key write as 404", async () => {
+    mockPrismaTeamMember.findFirst.mockResolvedValueOnce(actorRow());
+    mockPrismaTeamMember.findUnique
+      .mockResolvedValueOnce({ id: "member-1", teamId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null })
+      .mockResolvedValueOnce(lockedTarget());
+    mockPrismaTeamMemberKey.upsert.mockRejectedValueOnce(
+      Object.assign(new Error("DEPARTED_MEMBER_GUARD:key_leftover: team_member_keys (tenant t, user u)"), { code: "23514" }),
+    );
+
+    await expect(
+      POST(createRequest("POST", URL, { body: validBody }), { params: Promise.resolve({ teamId: "team-1", memberId: "member-1" }) }),
+    ).rejects.toThrow(/key_leftover/);
   });
 
   it("returns 409 when key already distributed (TOCTOU race)", async () => {

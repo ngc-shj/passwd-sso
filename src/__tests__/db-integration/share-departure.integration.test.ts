@@ -31,6 +31,7 @@ import {
   setBypassRlsGucs,
   type TestContext,
   redProofOverride,
+  writeRefusedState,
 } from "./helpers";
 import { analyze } from "../../../scripts/checks/check-migration-transaction.mjs";
 
@@ -501,7 +502,7 @@ describe("share links across a creator's departure — real-DB integration", () 
     return row.email;
   }
 
-  it("C3: a creator departed by SCIM and re-admitted by accept on the same team row: the earlier share is refused, a later one served", async () => {
+  it("C3: a creator departed by SCIM and re-admitted on the same team row while departed: the earlier share is refused, a later one served", async () => {
     const t = await teamWithCreator();
     const earlier = await share({ creatorId: t.creator, teamEntryId: t.entryId, createdAt: "now() - interval '1 minute'" });
     expect(await page(earlier)).toBe("served");
@@ -521,7 +522,21 @@ describe("share links across a creator's departure — real-DB integration", () 
     expect(issued.status).toBe(201);
     const { token } = (await issued.json()) as { token: string };
     mockAuth.mockResolvedValue({ user: { id: t.creator, email } });
-    expect((await acceptInvitation(jsonRequest("http://localhost/api/teams/invitations/accept", "POST", { token }))).status).toBe(200);
+    // Accept no longer re-admits a member whose tenant row is departed (C9), and
+    // the database refuses that activation (departed_member_guard). The state is
+    // the one accept wrote before the guard (and the runbook re-admit script
+    // writes): seeded as the re-activation trigger stamps it.
+    const refused = await acceptInvitation(jsonRequest("http://localhost/api/teams/invitations/accept", "POST", { token }));
+    expect(refused.status).toBe(410);
+    expect((await refused.json()).error).toBe("INVITATION_EXPIRED");
+    const readmitted = await writeRefusedState(
+      ctx.su,
+      `UPDATE team_members SET deactivated_at = NULL, deactivated_by_tenant = false,
+              admitted_at = clock_timestamp(), updated_at = clock_timestamp()
+        WHERE id = $1::uuid AND deactivated_at IS NOT NULL RETURNING 1`,
+      [t.creatorRow],
+    );
+    expect(readmitted).toHaveLength(1);
     // The same row came back; the tenant row stays departed.
     const [row] = await sql<{ id: string; deactivated_at: Date | null }>(
       `SELECT id, deactivated_at FROM team_members WHERE team_id = $1::uuid AND user_id = $2::uuid`, t.teamId, t.creator,
@@ -550,29 +565,37 @@ describe("share links across a creator's departure — real-DB integration", () 
     const t = await teamWithCreator();
     const s = await share({ creatorId: t.creator, teamEntryId: t.entryId });
     await sql(`DELETE FROM tenant_members WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, tenantId, t.creator);
-    await sql(
+    // A record over an active team row: refused since departed_member_guard.
+    await writeRefusedState(
+      ctx.su,
       `INSERT INTO tenant_member_departures (tenant_id, user_id, departed_at) VALUES ($1::uuid, $2::uuid, ${departedAt})`,
-      tenantId, t.creator,
+      [tenantId, t.creator],
     );
     expect(await page(s)).toBe(want);
   });
 
   // ── SEC-F1: a share created by a leftover membership AFTER the departure ──
 
-  /** Seeds the leftover state: the tenant departure the team row missed. */
+  /**
+   * Seeds the leftover state: the tenant departure the team row missed. The
+   * database refuses writing it since departed_member_guard (pre-guard
+   * databases hold it), so it goes through writeRefusedState.
+   */
   async function leftoverSeed(kind: "residue" | "re-created", t: { creator: string }, at: string) {
     if (kind === "residue") {
       // The tenant row's departure alone, as a hand-written UPDATE leaves it.
-      const rows = await sql(
+      const rows = await writeRefusedState(
+        ctx.su,
         `UPDATE tenant_members SET deactivated_at = ${at} WHERE tenant_id = $1::uuid AND user_id = $2::uuid RETURNING 1 AS hit`,
-        tenantId, t.creator,
+        [tenantId, t.creator],
       );
       expect(rows).toHaveLength(1);
     } else {
       // A departure record with the tenant row active again.
-      await sql(
+      await writeRefusedState(
+        ctx.su,
         `INSERT INTO tenant_member_departures (tenant_id, user_id, departed_at) VALUES ($1::uuid, $2::uuid, ${at})`,
-        tenantId, t.creator,
+        [tenantId, t.creator],
       );
     }
   }
@@ -610,7 +633,14 @@ describe("share links across a creator's departure — real-DB integration", () 
 
       // The trigger stamps admitted_at when the row is re-activated.
       await sql(`UPDATE team_members SET deactivated_at = now() WHERE id = $1::uuid`, t.creatorRow);
-      await sql(`UPDATE team_members SET deactivated_at = NULL WHERE id = $1::uuid`, t.creatorRow);
+      if (kind === "residue") {
+        // Re-activating a member whose tenant row is departed is refused since
+        // departed_member_guard (only the runbook re-admit script does it, the
+        // guard disabled); written with the stamp the trigger gives it.
+        await writeRefusedState(ctx.su, `UPDATE team_members SET deactivated_at = NULL, admitted_at = clock_timestamp() WHERE id = $1::uuid`, [t.creatorRow]);
+      } else {
+        await sql(`UPDATE team_members SET deactivated_at = NULL WHERE id = $1::uuid`, t.creatorRow);
+      }
       expect(await page(s)).toBe("served");
     },
   );
@@ -619,10 +649,11 @@ describe("share links across a creator's departure — real-DB integration", () 
     const t = await teamWithCreator();
     const s = await share({ creatorId: t.creator, teamEntryId: t.entryId, createdAt: "now() + interval '1 minute'" });
     // admitted_at is trigger-owned and NULL here, so the admission is created_at.
-    await sql(`UPDATE team_members SET created_at = timestamptz '2026-06-01 00:00:00+00' WHERE id = $1::uuid`, t.creatorRow);
+    // The database refuses rewriting created_at (departed_member_guard).
+    await writeRefusedState(ctx.su, `UPDATE team_members SET created_at = timestamptz '2026-06-01 00:00:00+00' WHERE id = $1::uuid`, [t.creatorRow]);
     await leftoverSeed("re-created", t, "timestamptz '2026-06-01 00:00:00+00'");
     expect(await page(s)).toBe("error:revoked");
-    await sql(`UPDATE team_members SET created_at = timestamptz '2026-06-01 00:00:00.001+00' WHERE id = $1::uuid`, t.creatorRow);
+    await writeRefusedState(ctx.su, `UPDATE team_members SET created_at = timestamptz '2026-06-01 00:00:00.001+00' WHERE id = $1::uuid`, [t.creatorRow]);
     expect(await page(s)).toBe("served");
   });
 
@@ -950,23 +981,32 @@ describe("share links across a creator's departure — real-DB integration", () 
       // here so teardown removes their share with this tenant.
       if (o.guest) await sql(`UPDATE users SET tenant_id = $2::uuid WHERE id = $1::uuid`, user, tenantId);
       await addTeamMember(teamId, user, "MEMBER", `${base} - interval '2 hours'`);
+      // The departures leave the team row active, and a re-admission rewrites
+      // created_at: states the database refuses writing since
+      // departed_member_guard, seeded through writeRefusedState.
       if (o.deactivated) {
-        await sql(
+        await writeRefusedState(
+          ctx.su,
           `UPDATE tenant_members SET deactivated_at = ${base} + interval '${o.deactivated}' WHERE tenant_id = $1::uuid AND user_id = $2::uuid`,
-          tenantId, user,
+          [tenantId, user],
         );
       }
       if (o.restored) await sql(`UPDATE tenant_members SET deactivated_at = NULL WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, tenantId, user);
       if (o.record) {
-        await sql(
+        await writeRefusedState(
+          ctx.su,
           `INSERT INTO tenant_member_departures (tenant_id, user_id, departed_at) VALUES ($1::uuid, $2::uuid, ${base} + interval '${o.record}')`,
-          tenantId, user,
+          [tenantId, user],
         );
       }
       if (o.deleteRow) await sql(`DELETE FROM tenant_members WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, tenantId, user);
       if (o.readmitted) {
         // Re-admitted after that departure: a later membership.
-        await sql(`UPDATE team_members SET created_at = ${base} - interval '1 second' WHERE team_id = $1::uuid AND user_id = $2::uuid`, teamId, user);
+        await writeRefusedState(
+          ctx.su,
+          `UPDATE team_members SET created_at = ${base} - interval '1 second' WHERE team_id = $1::uuid AND user_id = $2::uuid`,
+          [teamId, user],
+        );
       }
       return (await share({ creatorId: user, teamEntryId: entryId, version: 0, createdAt: base })).id;
     }
@@ -1120,12 +1160,13 @@ describe("share links across a creator's departure — real-DB integration", () 
     // A creator who left the tenant after creating the share, their team row left active.
     const departed = await teamWithCreator();
     const departedShare = await share({ creatorId: departed.creator, teamEntryId: departed.entryId, createdAt: "now() - interval '1 minute'" });
-    await sql(`UPDATE tenant_members SET deactivated_at = now() WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, tenantId, departed.creator);
+    // Refused since departed_member_guard; seeded as pre-guard databases hold it.
+    await writeRefusedState(ctx.su, `UPDATE tenant_members SET deactivated_at = now() WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, [tenantId, departed.creator]);
     const departureRuleApplied = migrations.includes("20261114000100_share_creator_departed");
     // A creator who left the tenant before creating the share, their team row left active.
     const leftover = await teamWithCreator();
     const leftoverShare = await share({ creatorId: leftover.creator, teamEntryId: leftover.entryId });
-    await sql(`UPDATE tenant_members SET deactivated_at = now() - interval '30 minutes' WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, tenantId, leftover.creator);
+    await writeRefusedState(ctx.su, `UPDATE tenant_members SET deactivated_at = now() - interval '30 minutes' WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, [tenantId, leftover.creator]);
     const leftoverRuleApplied = migrations.includes("20261115000300_share_creator_leftover");
     const role = `probe_rds_${hex(4)}`;
     const client = await side.pool.connect();

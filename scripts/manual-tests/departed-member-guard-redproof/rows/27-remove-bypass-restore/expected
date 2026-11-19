@@ -1,0 +1,10 @@
+-	departed-member DB invariants — real-DB integration T6: bypass and seeds under a team_members-only bypass, a passing guarded write restores the settings; tenant_members is still refused
+~	departed-member DB invariants — real-DB integration T6: bypass and seeds under a team_members-only bypass, a refused guarded write leaves the settings; tenant_members is still refused
+-	departed-member DB invariants — real-DB integration T6: bypass and seeds the deferred check, passing, restores the settings; tenant_member_departures is still refused
+~	departed-member DB invariants — real-DB integration T6: bypass and seeds the deferred check, refusing, leaves the settings; tenant_member_departures is still refused
++-	departed-member DB invariants — real-DB integration T2: keys allow: a key INSERT for an active, non-leftover member
++-	departed-member DB invariants — real-DB integration T3: activation invitation accept (C9) (pair) an active invitee is admitted
++-	departed-member DB invariants — real-DB integration T4: departure production writers on passwd_app under withTenantRls departFromTenant over a residue user and a normal one
++-	departed-member DB invariants — real-DB integration T4: departure production writers on passwd_app under withTenantRls departCreatedMembership of a guest member
++-	departed-member DB invariants — real-DB integration T4: departure production writers on passwd_app under withTenantRls returnToTenant
++-	departed-member DB invariants — real-DB integration T5: races scenario 5: rotate-key's transaction against deactivateScimUser of a key holder — both commit, no 40P01

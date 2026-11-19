@@ -39,6 +39,7 @@ import {
   assertRlsApplies,
   createTestContext,
   setBypassRlsGucs,
+  writeRefusedState,
   type TestContext,
 } from "./helpers";
 
@@ -247,10 +248,12 @@ describe("leftover team actor authority — real-DB integration", () => {
 
   /** The residue state: the user's tenant row deactivated by a raw UPDATE; their team rows stay active. */
   async function residueDepart(userId: string, tenant = tenantId) {
-    const changed = await sql(
+    // Refused since departed_member_guard (pre-guard databases hold it).
+    const changed = await writeRefusedState(
+      ctx.su,
       `UPDATE tenant_members SET deactivated_at = clock_timestamp()
         WHERE tenant_id = $1::uuid AND user_id = $2::uuid RETURNING 1`,
-      tenant, userId,
+      [tenant, userId],
     );
     expect(changed).toHaveLength(1);
   }
@@ -260,10 +263,12 @@ describe("leftover team actor authority — real-DB integration", () => {
    * SQL, says otherwise) while the tenant row stays active. Exactly one row.
    */
   async function recreatedDepart(userId: string, departedAt = "clock_timestamp()", tenant = tenantId) {
-    const written = await sql(
+    // Refused since departed_member_guard, as residueDepart.
+    const written = await writeRefusedState(
+      ctx.su,
       `INSERT INTO tenant_member_departures (tenant_id, user_id, departed_at)
        VALUES ($1::uuid, $2::uuid, ${departedAt}) RETURNING 1`,
-      tenant, userId,
+      [tenant, userId],
     );
     expect(written).toHaveLength(1);
   }
@@ -274,14 +279,22 @@ describe("leftover team actor authority — real-DB integration", () => {
   ] as const;
 
   /**
-   * Re-admit an already-departed member the way accept does: the team row is
+   * Re-admit an already-departed member the way accept did: the team row is
    * deactivated and re-activated, and the trigger stamps admitted_at after the
-   * departure. Needs the departure first.
+   * departure. Needs the departure first. Over a departed tenant row (the
+   * residue seed) the departed-member guard refuses the re-activation, and
+   * accept no longer makes it (C9); pre-guard databases and the runbook
+   * re-admit script hold it, so the re-activation goes through
+   * writeRefusedState, with the admitted_at the trigger would stamp.
    */
   async function readmit(teamId: string, userId: string) {
     await sql(`SELECT pg_sleep(0.02)::text`);
     await sql(`UPDATE team_members SET deactivated_at = clock_timestamp() WHERE team_id = $1::uuid AND user_id = $2::uuid`, teamId, userId);
-    await sql(`UPDATE team_members SET deactivated_at = NULL WHERE team_id = $1::uuid AND user_id = $2::uuid`, teamId, userId);
+    await writeRefusedState(
+      ctx.su,
+      `UPDATE team_members SET deactivated_at = NULL, admitted_at = clock_timestamp() WHERE team_id = $1::uuid AND user_id = $2::uuid`,
+      [teamId, userId],
+    );
     const row = await membership(teamId, userId);
     expect(row!.admitted_at).not.toBeNull();
   }

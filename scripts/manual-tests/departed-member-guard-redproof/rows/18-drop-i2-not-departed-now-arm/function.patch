@@ -1,0 +1,14 @@
+--- a/function.sql
++++ b/function.sql
+@@ -109,11 +109,6 @@
+                     WHERE m.tenant_id = v_tenant AND m.user_id = v_user AND m.deactivated_at IS NULL) THEN
+           v_refusal := 'departure_active';
+         END IF;
+-      ELSIF EXISTS (
+-              SELECT 1 FROM team_members m
+-               WHERE m.tenant_id = v_tenant AND m.user_id = v_user AND m.deactivated_at IS NULL
+-                 AND (v_departed_at >= COALESCE(m.admitted_at, m.created_at)) IS TRUE) THEN
+-        v_refusal := 'departure_leftover';
+       END IF;
+     END IF;
+   EXCEPTION WHEN OTHERS THEN

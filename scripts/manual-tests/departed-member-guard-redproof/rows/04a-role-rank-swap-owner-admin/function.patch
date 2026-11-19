@@ -1,0 +1,13 @@
+--- a/function.sql
++++ b/function.sql
+@@ -40,8 +40,8 @@
+          OR (NEW.tenant_id, NEW.user_id, NEW.team_id) IS DISTINCT FROM (OLD.tenant_id, OLD.user_id, OLD.team_id) THEN
+         v_activation := true;
+       ELSE
+-        v_new_rank := CASE NEW.role WHEN 'OWNER' THEN 3 WHEN 'ADMIN' THEN 2 WHEN 'MEMBER' THEN 1 WHEN 'VIEWER' THEN 0 END;
+-        v_old_rank := CASE OLD.role WHEN 'OWNER' THEN 3 WHEN 'ADMIN' THEN 2 WHEN 'MEMBER' THEN 1 WHEN 'VIEWER' THEN 0 END;
++        v_new_rank := CASE NEW.role WHEN 'OWNER' THEN 2 WHEN 'ADMIN' THEN 3 WHEN 'MEMBER' THEN 1 WHEN 'VIEWER' THEN 0 END;
++        v_old_rank := CASE OLD.role WHEN 'OWNER' THEN 2 WHEN 'ADMIN' THEN 3 WHEN 'MEMBER' THEN 1 WHEN 'VIEWER' THEN 0 END;
+         IF v_new_rank IS NULL OR v_old_rank IS NULL THEN
+           RAISE EXCEPTION 'DEPARTED_MEMBER_GUARD:unknown_role: team membership % (tenant %, user %)', NEW.id, NEW.tenant_id, NEW.user_id
+             USING ERRCODE = 'check_violation';

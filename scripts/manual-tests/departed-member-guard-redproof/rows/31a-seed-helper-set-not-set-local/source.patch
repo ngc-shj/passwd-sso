@@ -1,0 +1,11 @@
+--- a/src/__tests__/db-integration/helpers.ts
++++ b/src/__tests__/db-integration/helpers.ts
+@@ -868,7 +868,7 @@
+   try {
+     await client.query("BEGIN");
+     try {
+-      await client.query("SET LOCAL session_replication_role = replica");
++      await client.query("SET session_replication_role = replica");
+       // The extended protocol, even without params, so the server refuses more
+       // than one statement (pg reads queryMode; @types/pg does not declare it).
+       const query: pg.QueryConfig & { queryMode: "extended" } = { text: sql, values: [...params], queryMode: "extended" };

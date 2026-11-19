@@ -1,0 +1,1 @@
+The T1 unknown-label cell needs ALTER TYPE ... ADD VALUE, so it lives here (add/) and runs only on the scratch database (setup.sql).

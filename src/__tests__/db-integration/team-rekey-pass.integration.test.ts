@@ -34,7 +34,7 @@ import {
   S3Client,
 } from "@aws-sdk/client-s3";
 import { NextRequest } from "next/server";
-import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
+import { createTestContext, setBypassRlsGucs, writeRefusedState, type TestContext } from "./helpers";
 import {
   deriveItemCekWrapKey,
   deriveItemEncryptionKey,
@@ -179,14 +179,19 @@ describe("team re-key pass — real-DB integration", () => {
     return { teamId, version, keys, members: new Map() };
   }
 
-  async function insertMemberKey(team: Team, userId: string, keyVersion: number) {
-    await sql(
-      `INSERT INTO team_member_keys (
+  /**
+   * A key row. For an ended member (`ended`) the database refuses writing one
+   * (departed_member_guard, key_inactive): an ended member holds the keys
+   * written before the row ended, so that state goes through writeRefusedState.
+   */
+  async function insertMemberKey(team: Team, userId: string, keyVersion: number, ended = false) {
+    const text = `INSERT INTO team_member_keys (
          id, team_id, tenant_id, user_id, encrypted_team_key, team_key_iv, team_key_auth_tag,
          ephemeral_public_key, hkdf_salt, key_version, wrap_version, created_at, updated_at
-       ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, $10, 1, now(), now())`,
-      randomUUID(), team.teamId, tenantId, userId, hex(32), hex(12), hex(16), hex(32), hex(32), keyVersion,
-    );
+       ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, $10, 1, now(), now())`;
+    const params = [randomUUID(), team.teamId, tenantId, userId, hex(32), hex(12), hex(16), hex(32), hex(32), keyVersion];
+    if (ended) await writeRefusedState(ctx.su, text, params);
+    else await sql(text, ...params);
   }
 
   async function seedMember(team: Team, role: Role, versions: number[], opts: { deactivated?: boolean } = {}): Promise<string> {
@@ -197,7 +202,7 @@ describe("team re-key pass — real-DB integration", () => {
       randomUUID(), team.teamId, userId, tenantId, role,
       opts.deactivated ? new Date().toISOString() : null, opts.deactivated === true,
     );
-    for (const v of versions) await insertMemberKey(team, userId, v);
+    for (const v of versions) await insertMemberKey(team, userId, v, opts.deactivated === true);
     team.members.set(userId, { role, held: new Set(versions), wrong: new Map(), invalid: new Set() });
     return userId;
   }

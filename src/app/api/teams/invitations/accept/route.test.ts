@@ -465,8 +465,20 @@ describe("POST /api/teams/invitations/accept", () => {
       expect(acceptTx.teamMember.upsert).not.toHaveBeenCalled();
     });
 
-    it("admits on an invitation issued after the departure", async () => {
+    it("refuses, and commits EXPIRED, an invitation issued after the departure while the invitee's tenant row is still departed", async () => {
       mockLockTenantRows.mockResolvedValue(lockedRows({ "test-user-id": { deactivatedAt: new Date(issuedAt.getTime() - 1) } }));
+
+      const res = await accept();
+
+      expect(res.status).toBe(410);
+      expect((await res.json()).error).toBe("INVITATION_EXPIRED");
+      expect(acceptTx.teamInvitation.update).toHaveBeenCalledWith({ where: { id: "inv-1" }, data: { status: INVITATION_STATUS.EXPIRED } });
+      expect(acceptTx.teamMember.upsert).not.toHaveBeenCalled();
+    });
+
+    it("admits on an invitation issued after a departure the invitee has since returned from", async () => {
+      // Returned: the tenant row is active again; the SCIM DELETE record predates the invitation.
+      mockLockTenantRows.mockResolvedValue(lockedRows({ "test-user-id": { deactivatedAt: null, departedAt: new Date(issuedAt.getTime() - 1) } }));
 
       expect((await accept()).status).toBe(200);
       expect(acceptTx.teamMember.upsert).toHaveBeenCalledOnce();

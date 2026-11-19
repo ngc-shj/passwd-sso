@@ -1,0 +1,1 @@
+tenant_row_rekeyed	departed-member DB invariants — real-DB integration T4: departure allowed (pair) a write naming a key column with its own value: the re-key guard fires and passes it

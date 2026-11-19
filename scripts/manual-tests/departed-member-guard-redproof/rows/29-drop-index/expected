@@ -1,0 +1,1 @@
+-	departed-member DB invariants — real-DB integration T4: departure catalog: team_members_tenant_id_user_id_idx exists on (tenant_id, user_id)

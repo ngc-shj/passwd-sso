@@ -1,0 +1,27 @@
+--- a/src/app/api/teams/[teamId]/members/[memberId]/confirm-key/route.ts
++++ b/src/app/api/teams/[teamId]/members/[memberId]/confirm-key/route.ts
+@@ -154,6 +154,12 @@
+         // deadlock with a vault reset (users FOR UPDATE, then member rows). A
+         // recipient ended since the read above has the key refused by the
+         // database guard (key_inactive), answered below as the CAS miss is.
++        const marked = await tx.teamMember.updateMany({
++          where: { id: memberId, teamId, deactivatedAt: null, keyDistributed: false },
++          data: { keyDistributed: true },
++        });
++        if (marked.count !== 1) throw new MemberChangedError();
++
+         await tx.teamMemberKey.upsert({
+           where: {
+             teamId_userId_keyVersion: {
+@@ -187,11 +193,6 @@
+         // The check above is a plain read: re-assert it in the write, so a
+         // deactivation or distribution committed since then is not
+         // overwritten. A miss rolls the key upsert back.
+-        const marked = await tx.teamMember.updateMany({
+-          where: { id: memberId, teamId, deactivatedAt: null, keyDistributed: false },
+-          data: { keyDistributed: true },
+-        });
+-        if (marked.count !== 1) throw new MemberChangedError();
+ 
+         // Only on a successful CAS — every refused branch above (actor,
+         // member, version mismatch) returns before this and emits nothing.

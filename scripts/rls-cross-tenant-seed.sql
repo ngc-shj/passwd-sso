@@ -160,9 +160,12 @@ INSERT INTO tenant_members (id, tenant_id, user_id, role, updated_at) VALUES
   (gen_random_uuid(), '00000000-0000-0000-0000-0000000000A0', '00000000-0000-0000-0000-0000000000A1', 'OWNER', NOW()),
   (gen_random_uuid(), '00000000-0000-0000-0000-0000000000B0', '00000000-0000-0000-0000-0000000000B1', 'OWNER', NOW());
 
+-- A day before the OWNER team rows below are created: the departed-member guard
+-- (20261117000100) refuses a membership admitted at or before a departure, and
+-- autocommitted statements can share a TIMESTAMPTZ(3) millisecond.
 INSERT INTO tenant_member_departures (tenant_id, user_id, departed_at) VALUES
-  ('00000000-0000-0000-0000-0000000000A0', '00000000-0000-0000-0000-0000000000A1', NOW()),
-  ('00000000-0000-0000-0000-0000000000B0', '00000000-0000-0000-0000-0000000000B1', NOW());
+  ('00000000-0000-0000-0000-0000000000A0', '00000000-0000-0000-0000-0000000000A1', NOW() - interval '1 day'),
+  ('00000000-0000-0000-0000-0000000000B0', '00000000-0000-0000-0000-0000000000B1', NOW() - interval '1 day');
 
 INSERT INTO tenant_webhooks (id, tenant_id, url, secret_encrypted, secret_iv, secret_auth_tag, updated_at) VALUES
   (gen_random_uuid(), '00000000-0000-0000-0000-0000000000A0', 'https://rls-x-a.test/hook', 'enc', 'aabbccddeeff00112233aabb', 'aabbccddeeff00112233aabbccddeeff', NOW()),

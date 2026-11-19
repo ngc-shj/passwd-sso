@@ -36,6 +36,7 @@ import {
   setBypassRlsGucs,
   setGucs,
   setTestBypass,
+  writeRefusedState,
   type TestContext,
 } from "./helpers";
 import { createRaceHelpers } from "./race-helpers";
@@ -211,18 +212,28 @@ describe("team membership across a tenant departure — real-DB integration", ()
     return id;
   }
 
-  async function addTeamMember(teamId: string, userId: string, role: string, tenant = tenantId): Promise<string> {
+  /**
+   * An active membership with a team key. `createdAt` (ISO) back-dates it.
+   * `refused`: a membership the departed-member guard refuses to create (over a
+   * departed tenant row, or admitted before a departure), which pre-guard
+   * databases hold; both rows are then written through writeRefusedState.
+   */
+  async function addTeamMember(
+    teamId: string, userId: string, role: string, tenant = tenantId, o: { refused?: boolean; createdAt?: string } = {},
+  ): Promise<string> {
     const rowId = randomUUID();
-    await sql(
+    const write = (text: string, params: unknown[]) =>
+      o.refused ? writeRefusedState(ctx.su, text, params) : sql(text, ...params);
+    await write(
       `INSERT INTO team_members (id, team_id, user_id, tenant_id, role, key_distributed, created_at, updated_at)
-       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::"TeamRole", true, now(), now())`,
-      rowId, teamId, userId, tenant, role,
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::"TeamRole", true, COALESCE($6::timestamptz, now()), now())`,
+      [rowId, teamId, userId, tenant, role, o.createdAt ?? null],
     );
-    await sql(
+    await write(
       `INSERT INTO team_member_keys (id, team_id, tenant_id, user_id, encrypted_team_key, team_key_iv,
          team_key_auth_tag, ephemeral_public_key, hkdf_salt, key_version, wrap_version, created_at, updated_at)
        VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, 1, 1, now(), now())`,
-      randomUUID(), teamId, tenant, userId, hex(32), hex(12), hex(16), hex(32), hex(32),
+      [randomUUID(), teamId, tenant, userId, hex(32), hex(12), hex(16), hex(32), hex(32)],
     );
     return rowId;
   }
@@ -507,7 +518,10 @@ describe("team membership across a tenant departure — real-DB integration", ()
       expect(await invitationStatus(inv.id!)).toBe("EXPIRED");
     });
 
-    it("admits on an invitation issued after the departure, resetting the membership", async () => {
+    it("refuses an invitation issued after the departure while the invitee's tenant row stays departed (C9), leaving the membership as the departure left it", async () => {
+      // Before C9 this admitted, resetting the membership; the database now
+      // refuses activating a membership of a user whose tenant row is departed
+      // (departed_member_guard), and accept answers that first.
       const owner = await ctx.createUser(tenantId);
       const leaver = await member();
       const teamId = await team(owner);
@@ -517,17 +531,16 @@ describe("team membership across a tenant departure — real-DB integration", ()
       await moveAway(leaver.id);
       const inv = await invite(teamId, owner, leaver.email);
       expect(inv.status).toBe(201);
+      const before = await membership(teamId, leaver.id);
+      expect(before).toMatchObject({ deactivated_by_tenant: true });
 
       const res = await accept(leaver, inv.token!);
 
-      expect(res.status).toBe(200);
-      expect(await membership(teamId, leaver.id)).toMatchObject({
-        deactivated_at: null,
-        deactivated_by_tenant: false,
-        key_distributed: false,
-        scim_managed: false,
-      });
-      expect(await keyCount(teamId, leaver.id)).toBe(0);
+      expect(res.status).toBe(410);
+      expect((await res.json()).error).toBe("INVITATION_EXPIRED");
+      expect(await invitationStatus(inv.id!)).toBe("EXPIRED");
+      expect(await membership(teamId, leaver.id)).toEqual(before);
+      expect(await keyCount(teamId, leaver.id)).toBe(1);
     });
 
     it("refuses a pre-deletion invitation after a SCIM DELETE and an SSO re-creation of the row", async () => {
@@ -574,7 +587,16 @@ describe("team membership across a tenant departure — real-DB integration", ()
       (await sql<{ t: string }>(`SELECT deactivated_at::text AS t FROM tenant_members WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, tenantId, leaver.id))[0].t;
     const stamp = await stampText();
     const inv = await invite(teamId, owner, leaver.email);
-    expect((await accept(leaver, inv.token!)).status).toBe(200);
+    // Accept no longer admits a member whose tenant row is departed (C9), and
+    // the database refuses that activation. The re-admitted membership is the
+    // one accept created before the guard (pre-guard databases hold it).
+    expect((await accept(leaver, inv.token!)).status).toBe(410);
+    await writeRefusedState(
+      ctx.su,
+      `INSERT INTO team_members (id, team_id, user_id, tenant_id, role, key_distributed, created_at, updated_at)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'MEMBER', false, clock_timestamp(), clock_timestamp())`,
+      [randomUUID(), teamId, leaver.id, tenantId],
+    );
     const otherTeam = await team(owner);
     const pendingAfter = await invite(otherTeam, owner, leaver.email);
     const auditsBefore = (await auditActions("TEAM_MEMBER_TENANT_DEACTIVATE")).length;
@@ -819,8 +841,10 @@ describe("team membership across a tenant departure — real-DB integration", ()
   it("A9: the backfill marks legacy departures, expires exactly the invitations accept would refuse, and is idempotent", async () => {
     const owner = await ctx.createUser(tenantId);
     const teamId = await team(owner);
+    // A legacy departure leaves the membership active: refused since
+    // departed_member_guard, seeded as pre-guard databases hold it.
     const deactivate = (userId: string) =>
-      sql(`UPDATE tenant_members SET deactivated_at = clock_timestamp() WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, tenantId, userId);
+      writeRefusedState(ctx.su, `UPDATE tenant_members SET deactivated_at = clock_timestamp() WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, [tenantId, userId]);
     const stampOf = async (userId: string) =>
       (await sql<{ t: string }>(`SELECT deactivated_at::text AS t FROM tenant_members WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, tenantId, userId))[0].t;
     const setCreatedAt = (invitationId: string, at: string) =>
@@ -848,7 +872,7 @@ describe("team membership across a tenant departure — real-DB integration", ()
     await deactivate(inviter.id);
     const later = await member();
     await deactivate(later.id);
-    await addTeamMember(teamId, later.id, "MEMBER");
+    await addTeamMember(teamId, later.id, "MEMBER", tenantId, { refused: true });
     await setCreatedAt(atStamp.id!, await stampOf(leaver.id));
     await sql(`UPDATE team_invitations SET created_at = (SELECT deactivated_at + interval '1 second' FROM tenant_members
       WHERE tenant_id = $2::uuid AND user_id = $3::uuid) WHERE id = $1::uuid`, after.id, tenantId, leaver.id);
@@ -1245,12 +1269,14 @@ describe("team membership across a tenant departure — real-DB integration", ()
     const teamId = await team(owner);
     const stale = await invite(teamId, owner, leaver.email.toLowerCase());
     await scimActive(leaver.id, false);
-    await moveAway(leaver.id);
 
     const fresh = await invite(teamId, owner, leaver.email.toUpperCase());
 
     expect(fresh.status).toBe(201);
     expect(await invitationStatus(stale.id!)).toBe("EXPIRED");
+    // Returned before accepting: a member whose tenant row is departed is
+    // refused however late the invitation (C9).
+    expect((await scimActive(leaver.id, true)).status).toBe(200);
     const mixed = leaver.email.charAt(0).toUpperCase() + leaver.email.slice(1);
     expect((await accept({ id: leaver.id, email: mixed }, fresh.token!)).status).toBe(200);
   });
@@ -1437,7 +1463,18 @@ describe("team membership across a tenant departure — real-DB integration", ()
         await standIn.release();
         await Promise.allSettled([departing, issuing]);
       }
-      await moveAway(leaver.id);
+      // Issued after the departure committed (what departedSince compares).
+      const issued = (await issuing!).id!;
+      const [order] = await sql<{ after: boolean; status: string }>(
+        `SELECT i.created_at > tm.deactivated_at AS after, i.status::text AS status
+           FROM team_invitations i, tenant_members tm
+          WHERE i.id = $1::uuid AND tm.tenant_id = $2::uuid AND tm.user_id = $3::uuid`,
+        issued, tenantId, leaver.id,
+      );
+      expect(order).toEqual({ after: true, status: "PENDING" });
+      // Accepted once the user returned: while their tenant row is departed,
+      // accept refuses however late the invitation (C9).
+      expect((await scimActive(leaver.id, true)).status).toBe(200);
       expect((await accept(leaver, (await issuing!).token!)).status).toBe(200);
     });
 
@@ -1603,9 +1640,9 @@ describe("team membership across a tenant departure — real-DB integration", ()
         );
         return u;
       }
+      /** Leftover memberships (refused since the departed-member guard), written as pre-guard databases hold them. */
       async function membershipAt(name: string, teamId: string, userId: string, createdAt: string, tenant = tenantId) {
-        const rowId = await addTeamMember(teamId, userId, "MEMBER", tenant);
-        await sql(`UPDATE team_members SET created_at = $2::timestamptz WHERE id = $1::uuid`, rowId, createdAt);
+        const rowId = await addTeamMember(teamId, userId, "MEMBER", tenant, { refused: true, createdAt });
         rows[name] = { rowId, userId };
       }
       /** A departed member with an active membership of team X created `offset` ms from the stamp. */
@@ -1651,14 +1688,27 @@ describe("team membership across a tenant departure — real-DB integration", ()
       const otherTeam = await team(otherOwner, otherTenantId);
       await membershipAt("leakElsewhere", otherTeam, leakUser, at(-SECOND), otherTenantId);
 
-      // Re-admission through the real routes: the app ended the membership at the departure
-      // (its record is the PENDING outbox row), the user returned elsewhere, and accept re-admitted them.
+      // Re-admission: the app ended the membership at the departure (its record
+      // is the PENDING outbox row), the user returned elsewhere, and accept
+      // re-admitted them. Accept no longer does that while the tenant row is
+      // departed (C9; the database refuses it), so the re-admission is the
+      // write accept made before the guard: its upsert, keys removed, the
+      // invitation ACCEPTED.
       const readmit = await member();
       await addTeamMember(teamX, readmit.id, "MEMBER");
       expect((await scimActive(readmit.id, false)).status).toBe(200);
       await moveAway(readmit.id);
       const reinvite = await invite(teamX, ownerId, readmit.email);
-      expect((await accept(readmit, reinvite.token!)).status).toBe(200);
+      expect(reinvite.status).toBe(201);
+      await sql(`DELETE FROM team_member_keys WHERE team_id = $1::uuid AND user_id = $2::uuid`, teamX, readmit.id);
+      await writeRefusedState(
+        ctx.su,
+        `UPDATE team_members SET role = 'MEMBER', key_distributed = false, deactivated_at = NULL, deactivated_by_tenant = false,
+                scim_managed = false, admitted_at = clock_timestamp(), updated_at = clock_timestamp()
+          WHERE team_id = $1::uuid AND user_id = $2::uuid`,
+        [teamX, readmit.id],
+      );
+      await sql(`UPDATE team_invitations SET status = 'ACCEPTED' WHERE id = $1::uuid`, reinvite.id);
       rows.readmitOutbox = { rowId: (await membership(teamX, readmit.id))!.id, userId: readmit.id };
 
       // Evidence arms, each with a membership created before the departure.
@@ -1700,8 +1750,7 @@ describe("team membership across a tenant departure — real-DB integration", ()
       // matching record excludes its member (adds 0), a one-field-off record does not (adds 1).
       const spareOf = async (name: string, adds: number, record: (targetId: string) => Promise<unknown>) => {
         const u = await departed();
-        const rowId = await addTeamMember(teamX, u.id, "MEMBER");
-        await sql(`UPDATE team_members SET created_at = $2::timestamptz WHERE id = $1::uuid`, rowId, at(SECOND));
+        const rowId = await addTeamMember(teamX, u.id, "MEMBER", tenantId, { refused: true, createdAt: at(SECOND) });
         await record(u.id);
         spares[name] = { rowId, adds };
       };
@@ -2120,8 +2169,13 @@ describe("team membership across a tenant departure — real-DB integration", ()
             // action, of another user, of another tenant.
             const spareRows = Object.values(fx.spares);
             expect(spareRows.reduce((n, s) => n + s.adds, 0)).toBe(6);
+            // created_at is immutable since the departed-member guard. This move is
+            // setup inside a transaction that rolls back, so the triggers are
+            // skipped for this one statement, as writeRefusedState does.
+            await client.query("SET LOCAL session_replication_role = replica");
             await client.query(`UPDATE team_members SET created_at = $2::timestamptz WHERE id = ANY($1::uuid[])`,
               [[fx.rows.late.rowId, fx.rows.spareRecorded.rowId, ...spareRows.map((s) => s.rowId)], fx.at(-SECOND)]);
+            await client.query("SET LOCAL session_replication_role = origin");
             await client.query(`SET LOCAL ROLE ${role}`);
             await client.query(rerunDeparture());
             expect(skipCount()).toBe(first + 1 + 6);

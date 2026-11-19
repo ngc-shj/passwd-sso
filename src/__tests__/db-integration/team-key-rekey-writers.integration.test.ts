@@ -34,6 +34,7 @@ import {
   setBypassRlsGucs,
   setGucs,
   setTestBypass,
+  writeRefusedState,
   type TestContext,
 } from "./helpers";
 import { createPool } from "@/lib/db/pool-factory";
@@ -144,13 +145,15 @@ describe("team entry key identity writers — real-DB integration", () => {
       randomUUID(), teamId, userId, tenantId, role, opts.deactivated ? new Date().toISOString() : null,
     );
     for (const keyVersion of keyVersions) {
-      await sql(
-        `INSERT INTO team_member_keys (
+      const text = `INSERT INTO team_member_keys (
            id, team_id, tenant_id, user_id, encrypted_team_key, team_key_iv, team_key_auth_tag,
            ephemeral_public_key, hkdf_salt, key_version, wrap_version, created_at, updated_at
-         ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, $10, 1, now(), now())`,
-        randomUUID(), teamId, tenantId, userId, hex(32), hex(12), hex(16), hex(32), hex(32), keyVersion,
-      );
+         ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, $10, 1, now(), now())`;
+      const params = [randomUUID(), teamId, tenantId, userId, hex(32), hex(12), hex(16), hex(32), hex(32), keyVersion];
+      // An ended member holds the keys written before the row ended; the
+      // database refuses writing one now (departed_member_guard, key_inactive).
+      if (opts.deactivated) await writeRefusedState(ctx.su, text, params);
+      else await sql(text, ...params);
     }
     return userId;
   }

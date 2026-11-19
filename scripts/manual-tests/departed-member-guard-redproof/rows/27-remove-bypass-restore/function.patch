@@ -1,0 +1,12 @@
+--- a/function.sql
++++ b/function.sql
+@@ -119,9 +119,6 @@
+   EXCEPTION WHEN OTHERS THEN
+     RAISE;
+   END;
+-  PERFORM set_config('app.bypass_rls', COALESCE(v_prev_rls, ''), true);
+-  PERFORM set_config('app.bypass_tables', COALESCE(v_prev_tables, ''), true);
+-  PERFORM set_config('app.bypass_purpose', COALESCE(v_prev_purpose, ''), true);
+ 
+   IF v_refusal IS NOT NULL THEN
+     RAISE EXCEPTION 'DEPARTED_MEMBER_GUARD:%: % (tenant %, user %)', v_refusal, TG_TABLE_NAME, v_tenant, v_user

@@ -13,7 +13,7 @@ import { randomUUID, randomBytes } from "node:crypto";
 import { hashToken } from "@/lib/crypto/crypto-server";
 import { NextRequest } from "next/server";
 import type { Prisma } from "@prisma/client";
-import { assertRlsApplies, createPrismaForRole, createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
+import { assertRlsApplies, createPrismaForRole, createTestContext, setBypassRlsGucs, writeRefusedState, type TestContext } from "./helpers";
 import { createRaceHelpers } from "./race-helpers";
 import { TEAM_KEY_LOCK_TIMEOUT_MS, TEAM_MEMBERSHIP_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 
@@ -194,11 +194,15 @@ describe("directory sync across a tenant departure — real-DB integration", () 
     const stamp = await stampText(user.id);
     expect(stamp).not.toBeNull();
     expect(await membership(teamId, user.id)).toMatchObject({ deactivated_by_tenant: true });
-    // Re-admitted on a post-departure invitation (as accept writes it).
-    await sql(
-      `UPDATE team_members SET deactivated_at = NULL, deactivated_by_tenant = false
+    // Re-admitted on a post-departure invitation, as accept wrote it before the
+    // departed-member guard (which now refuses activating a membership while
+    // the tenant row is departed; pre-guard databases hold such rows). Written
+    // with the admitted_at the re-activation trigger stamps.
+    await writeRefusedState(
+      ctx.su,
+      `UPDATE team_members SET deactivated_at = NULL, deactivated_by_tenant = false, admitted_at = clock_timestamp()
         WHERE team_id = $1::uuid AND user_id = $2::uuid`,
-      teamId, user.id,
+      [teamId, user.id],
     );
 
     mockFetchOktaUsers.mockResolvedValue([oktaUser(user.ext, user.email, "Renamed User", false)]);
@@ -287,7 +291,9 @@ describe("directory sync across a tenant departure — real-DB integration", () 
     const active = await mapped();
     const teamId = await team(owner);
     await addTeamMember(teamId, created.id, "MEMBER");
-    await sql(`UPDATE tenant_members SET deactivated_at = now() WHERE user_id = $1::uuid`, created.id);
+    // A created row, deactivated, over an active membership: the state the
+    // creator hands departCreatedMembership, refused at commit on its own.
+    await writeRefusedState(ctx.su, `UPDATE tenant_members SET deactivated_at = now() WHERE user_id = $1::uuid`, [created.id]);
     const before = await stampText(created.id);
 
     await expect(

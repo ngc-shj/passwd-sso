@@ -1,0 +1,11 @@
+--- a/function.sql
++++ b/function.sql
+@@ -55,7 +55,7 @@
+   v_user := NEW.user_id;
+ 
+   -- Activations and departures serialise on the application's tenant-member key.
+-  IF v_activation OR TG_WHEN = 'AFTER' THEN
++  IF v_activation OR TG_WHEN = 'AFTER' OR TG_TABLE_NAME = 'team_member_keys' THEN
+     IF current_setting('transaction_isolation') <> 'read committed' THEN
+       RAISE EXCEPTION 'DEPARTED_MEMBER_GUARD:isolation: % must run under READ COMMITTED (tenant %, user %)', TG_TABLE_NAME, v_tenant, v_user
+         USING ERRCODE = 'check_violation';

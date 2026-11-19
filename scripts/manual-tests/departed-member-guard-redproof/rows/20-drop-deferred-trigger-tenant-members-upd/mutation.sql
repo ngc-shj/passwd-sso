@@ -1,0 +1,1 @@
+DROP TRIGGER tenant_members_departure_ends_memberships_upd ON tenant_members;

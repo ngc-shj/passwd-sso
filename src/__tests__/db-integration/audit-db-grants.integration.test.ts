@@ -291,6 +291,55 @@ describe("audit-db-grants (real DB)", () => {
     }
   });
 
+  // session_replication_role = replica skips every ordinary trigger, the
+  // departed-member guard among them (#1060). passwd_outbox_worker stands in
+  // for every audited role; passwd_app is never touched.
+  it.each([
+    ["SET", "GRANT SET ON PARAMETER session_replication_role TO passwd_outbox_worker", "REVOKE SET ON PARAMETER session_replication_role FROM passwd_outbox_worker"],
+    ["ALTER SYSTEM", "GRANT ALTER SYSTEM ON PARAMETER session_replication_role TO passwd_outbox_worker", "REVOKE ALTER SYSTEM ON PARAMETER session_replication_role FROM passwd_outbox_worker"],
+  ] as const)("T8e: refuses an audited role's %s privilege on session_replication_role", async (privilege, grant, revoke) => {
+    try {
+      await su.query(grant);
+
+      const r = runAudit(manifestPath);
+
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain(`PARAMETER_PRIVILEGE_HELD: PARAMETER:passwd_outbox_worker session_replication_role ${privilege}`);
+
+      // The privilege alone (no denied setting) refuses --write.
+      const scratch = join(tmpDir, `parameter-${privilege.replace(" ", "-")}.json`);
+      const w = runAuditWrite(scratch);
+      expect(w.status).toBe(1);
+      expect(w.stderr).toContain("REFUSING to regenerate the manifest");
+      expect(w.stderr).toContain(`PARAMETER:passwd_outbox_worker session_replication_role ${privilege}`);
+      expect(existsSync(scratch)).toBe(false);
+    } finally {
+      await su.query(revoke);
+    }
+  });
+
+  it("T8f: refuses an audited role's session_replication_role default, and refuses to record it", async () => {
+    const { rows } = await su.query<{ db: string }>("SELECT current_database() AS db");
+    const db = rows[0].db;
+    // Scoped to this database: the dev worker connects as this role to another.
+    try {
+      await su.query(`ALTER ROLE passwd_outbox_worker IN DATABASE "${db}" SET session_replication_role = replica`);
+
+      const r = runAudit(manifestPath);
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain("PARAMETER_PRIVILEGE_HELD: PARAMETER:passwd_outbox_worker session_replication_role ROLE_DEFAULT");
+      expect(r.stderr).toContain(`DENIED_SETTING_HELD: ROLESETTING:passwd_outbox_worker ${db} session_replication_role=replica`);
+
+      const scratch = join(tmpDir, "replica-default.json");
+      const w = runAuditWrite(scratch);
+      expect(w.status).toBe(1);
+      expect(w.stderr).toContain("REFUSING to regenerate the manifest");
+      expect(existsSync(scratch)).toBe(false);
+    } finally {
+      await su.query(`ALTER ROLE passwd_outbox_worker IN DATABASE "${db}" RESET session_replication_role`);
+    }
+  });
+
   it("T8c: detects a session default set on this database for every role", async () => {
     const { rows } = await su.query<{ db: string }>("SELECT current_database() AS db");
     const db = rows[0].db;

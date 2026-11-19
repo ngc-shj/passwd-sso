@@ -16,6 +16,7 @@ import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-res
 import { membershipConflictResponse } from "@/lib/http/lock-conflict-response";
 import { TEAM_MEMBERSHIP_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 import { createLockBudget, lockTeamKeyVersion } from "@/lib/team/team-key-rotation-lock";
+import { departedMemberGuardArm } from "@/lib/team/departed-member-guard";
 import {
   actorDepartedSinceAdmission,
   isMembershipLockConflict,
@@ -135,8 +136,8 @@ async function handlePOST(req: NextRequest, { params }: Params) {
         // holds a leftover membership and is treated as deactivated. Read
         // unlocked: residue is old state, and locking the recipient's row would
         // serialise this with every SCIM write to them. A departure in flight
-        // either reaches the member row first (the CAS below misses) or
-        // deactivates the membership after this commits.
+        // either reaches the member row first (the key write is refused, or the
+        // CAS below misses) or deactivates the membership after this commits.
         const recipient = await readTenantRows(tx, tenantId, [targetMember.userId]);
         if (actorDepartedSinceAdmission(recipient.get(targetMember.userId), member.admittedAt ?? member.createdAt)) {
           return "member_not_found" as const;
@@ -147,6 +148,12 @@ async function handlePOST(req: NextRequest, { params }: Params) {
           return "version_mismatch" as const;
         }
 
+        // The key write precedes the member-row CAS: its FK check takes KEY
+        // SHARE on the recipient's users row first, keeping the order teams →
+        // users → team_members (team-key-rotation-lock.ts). The CAS first would
+        // deadlock with a vault reset (users FOR UPDATE, then member rows). A
+        // recipient ended since the read above has the key refused by the
+        // database guard (key_inactive), answered below as the CAS miss is.
         await tx.teamMemberKey.upsert({
           where: {
             teamId_userId_keyVersion: {
@@ -207,7 +214,9 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     );
   } catch (e) {
     // The member was deactivated, or received a key, since the check.
-    if (e instanceof MemberChangedError) return errorResponse(API_ERROR.MEMBER_NOT_FOUND);
+    if (e instanceof MemberChangedError || departedMemberGuardArm(e) === "key_inactive") {
+      return errorResponse(API_ERROR.MEMBER_NOT_FOUND);
+    }
     // A rotation or a tenant-row writer held a lock past the budget: not a
     // version comparison, so the client is told to retry rather than to refetch.
     if (isMembershipLockConflict(e)) return membershipConflictResponse(e);

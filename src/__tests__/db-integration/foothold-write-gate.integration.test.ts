@@ -58,6 +58,7 @@ import { POST as createFileSend } from "@/app/api/sends/file/route";
 import { POST as createDeliveryTarget } from "@/app/api/tenant/audit-delivery-targets/route";
 import { PATCH as patchDeliveryTarget } from "@/app/api/tenant/audit-delivery-targets/[id]/route";
 import { departFromTenant } from "@/lib/team/team-departure";
+import { lockTenantRows } from "@/lib/team/tenant-row-lock";
 import { revokeUsersAuthArtifactsInTx } from "@/lib/auth/session/user-session-invalidation";
 import { encryptResetToken } from "@/lib/vault/admin-reset-token-crypto";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
@@ -144,7 +145,16 @@ describe("foothold write gate — real-DB integration", () => {
         if (kind === "demotion") {
           await tx.$executeRaw`UPDATE tenant_members SET role = 'MEMBER' WHERE tenant_id = ${tenantId}::uuid AND user_id = ${userId}::uuid`;
         } else {
+          // A deactivation takes the tenant-member key first, as every writer
+          // does (lockTenantRows): the database's departure check takes it at
+          // COMMIT, and a stamp holding only the row lock would deadlock there
+          // with a route that holds the key and waits on the row.
+          await lockTenantRows(tx, tenantId, [userId], "update");
           await tx.$executeRaw`UPDATE tenant_members SET deactivated_at = now() WHERE tenant_id = ${tenantId}::uuid AND user_id = ${userId}::uuid`;
+          // A departure ends the user's team memberships in the same
+          // transaction (endTeamMemberships): the database refuses a stamp
+          // that leaves one active (departure_active).
+          await tx.$executeRaw`UPDATE team_members SET deactivated_at = now() WHERE tenant_id = ${tenantId}::uuid AND user_id = ${userId}::uuid AND deactivated_at IS NULL`;
         }
       },
       HELD_TX_TIMEOUT_MS,

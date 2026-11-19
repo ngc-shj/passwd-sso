@@ -1,0 +1,2 @@
+record_rekeyed	departed-member DB invariants — real-DB integration T4: departure refused at the statement re-keying a record onto another user, which would erase this user's departure
+record_rekeyed	departed-member DB invariants — real-DB integration T4: departure refused at the statement re-keying a record onto another tenant (superuser: the tenant context refuses it for the app)

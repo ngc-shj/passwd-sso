@@ -1,0 +1,7 @@
+-	departed-member DB invariants — real-DB integration T6: bypass and seeds writeRefusedState leaves its connection as it found it after a successful call: session_replication_role = origin, and the guard refuses a violating write
++-	departed-member DB invariants — real-DB integration T3: activation allow: the runbook re-admit script, as the table owner, re-admits a residual member; the guard is enabled after it
++-	departed-member DB invariants — real-DB integration T6: bypass and seeds writeRefusedState leaves its connection as it found it after a refused call (the statement fails): session_replication_role = origin, and the guard refuses a violating write
++-	departed-member DB invariants — real-DB integration T6: bypass and seeds writeRefusedState leaves its connection as it found it refuses more than one statement
++-	departed-member DB invariants — real-DB integration T4: departure refused at the statement re-keying a record onto another tenant (superuser: the tenant context refuses it for the app)
++-	departed-member DB invariants — real-DB integration T4: departure refused at the statement re-keying a departed tenant row by user_id (superuser: the tenant-context trigger refuses a tenant_id change for the app)
++-	departed-member DB invariants — real-DB integration T4: departure refused at the statement re-keying a departed tenant row by tenant_id (superuser: the tenant-context trigger refuses a tenant_id change for the app)

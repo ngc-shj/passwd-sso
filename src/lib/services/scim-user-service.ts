@@ -405,7 +405,6 @@ export async function deactivateScimUser(
         UPDATE team_invitations SET status = 'EXPIRED', updated_at = clock_timestamp()
          WHERE tenant_id = ${tenantId}::uuid AND invited_by_id = ${userId}::uuid AND status = 'PENDING'
       `;
-      await tx.teamMemberKey.deleteMany({ where: { tenantId, userId } });
       await tx.scimExternalMapping.deleteMany({
         where: { tenantId, internalId: userId, resourceType: "User" },
       });
@@ -416,6 +415,11 @@ export async function deactivateScimUser(
         RETURNING team_id
       `;
       assertTeamsLocked(lockedTeams, leftTeams.map((row) => row.team_id));
+      // Keys after the member rows: a distribution that wrote its key before
+      // the delete either holds the member row (the delete waits, then this
+      // sees its committed key) or misses its CAS and rolls the key back, so
+      // no key outlives its membership.
+      await tx.teamMemberKey.deleteMany({ where: { tenantId, userId } });
       await tx.tenantMember.delete({
         where: { tenantId_userId: { tenantId, userId } },
       });

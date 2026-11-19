@@ -1,0 +1,10 @@
+--- a/src/app/api/teams/invitations/accept/route.ts
++++ b/src/app/api/teams/invitations/accept/route.ts
+@@ -190,7 +190,6 @@
+         const invitee = rows.get(session.user.id);
+         if (
+           departedSince(invitee, invitation.createdAt) ||
+-          (invitee !== undefined && invitee.deactivatedAt !== null) ||
+           departedSince(rows.get(invitation.invitedById), invitation.createdAt) ||
+           !inviter ||
+           !hasTeamPermission(inviter.role, TEAM_PERMISSION.MEMBER_INVITE) ||

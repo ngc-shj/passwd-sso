@@ -1,0 +1,13 @@
+departure_active	departed-member DB invariants — real-DB integration T4: departure refused at COMMIT, not at the statement a stamp that leaves an active row
++-	departed-member DB invariants — real-DB integration T3: activation the guard sorts after the same-event BEFORE triggers it depends on (pg_trigger name order)
++-	departed-member DB invariants — real-DB integration T4: departure refused at COMMIT, not at the statement a back-dated first stamp that leaves a row admitted after it
++-	departed-member DB invariants — real-DB integration T4: departure refused at COMMIT, not at the statement a restamp while residue is active
++-	departed-member DB invariants — real-DB integration T4: departure refused at COMMIT, not at the statement a departure under REPEATABLE READ, even one that ends its rows
++-	departed-member DB invariants — real-DB integration T4: departure refused at COMMIT, not at the statement a stamp and a return in one transaction, while a record later than the admission keeps the row leftover
++-	departed-member DB invariants — real-DB integration T4: departure refused at the statement SET CONSTRAINTS ALL IMMEDIATE before the ending runs the departure check there
++-	departed-member DB invariants — real-DB integration T5: races R1: a re-activation against a raw stamp the re-activation holds the key: the stamp's COMMIT waits, then is refused
++-	departed-member DB invariants — real-DB integration T5: races R2: an INSERT against a departure the INSERT holds the key: the stamp's COMMIT waits, then is refused
++-	departed-member DB invariants — real-DB integration T5: races R3: a grant runs through a held departure (no lock); the departure is then refused at commit
++-	departed-member DB invariants — real-DB integration T6: bypass and seeds the deferred check, refusing, leaves the settings; tenant_member_departures is still refused
++-	departed-member DB invariants — real-DB integration T6: bypass and seeds writeRefusedState leaves its connection as it found it after a successful call: session_replication_role = origin, and the guard refuses a violating write
++-	departed-member DB invariants — real-DB integration T6: bypass and seeds writeRefusedState leaves its connection as it found it after a refused call (the statement fails): session_replication_role = origin, and the guard refuses a violating write

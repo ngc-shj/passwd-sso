@@ -1,0 +1,3 @@
+tenant_mismatch	departed-member DB invariants — real-DB integration T1: grants deny: a membership whose tenant_id is not its team's
+tenant_mismatch	departed-member DB invariants — real-DB integration T2: keys deny: a key whose tenant_id is not its team's
+tenant_mismatch	departed-member DB invariants — real-DB integration T1: grants a membership already mismatched (a re-homed team, or a bypass write) deny: a role raise on it
